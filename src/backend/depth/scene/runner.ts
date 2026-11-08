@@ -14,7 +14,7 @@
 
 import { adoptEvent, type AdoptData } from "../../../shared/author";
 import type { ArchiveQuery } from "../../../shared/archive";
-import { depthCall, DEPTH_ROLE_WORDS } from "../../../shared/depth-settings";
+import { depthCall, DEPTH_ROLE_WORDS, narratorOverrides } from "../../../shared/depth-settings";
 import type { ChatId, MessageId, UserId } from "../../../shared/ids";
 import type { GenerationKind, LedgerEvent, PendingTurn } from "../../../shared/ledger";
 import type { SamplingParams } from "../../../shared/settings";
@@ -28,15 +28,16 @@ import { depthOptedIn } from "../../bootstrap/service";
 import { depthPort } from "../../depth-model-host";
 import { foldAtBasisOf, type ArchiveView } from "../../ledger-io";
 import { LoopbackRefused, type DepthCommit, type DepthTurnCtx } from "../../loopback/bridge";
-import { samplingOf } from "../../loopback/compose";
+import { narratorSampling } from "../../loopback/compose";
 import type { Runtime } from "../../runtime";
 import type { ArchiveSource } from "../archive-tools";
-import { budgetFor, daySpendOf, recordedTokens } from "../budget";
+import { budgetFor, daySpendOf, onScreenAllowance, recordedTokens } from "../budget";
+import { SPEND_TYPES, spendsOn } from "../spend";
 import type { ModelPort } from "../port";
 import { DRAFT_TYPES } from "../offscreen/drafts";
 import type { AfterReply, DepthTurnInput, SceneAt, TurnSink } from "./contract";
 import { scenePlugs } from "./plugs";
-import { reporting } from "./reporting";
+import { chatLinesOf, reporting, type ChatLine } from "./reporting";
 import { runDepthTurn, type ScenePlugs } from "./turn";
 
 /** What the depth turn reads of the runtime. */
@@ -106,7 +107,9 @@ export class DepthTurns {
     // A depth scene's calls are the author's, the characters' and the narrator's own: the request's tools (a preset's, an extension's) aren't offered to any of them, and the thinking block says so (L46).
     const tools = Array.isArray(ctx.body.tools) ? ctx.body.tools.length : 0;
     if (tools > 0) ctx.sink.progress(`This request offered ${tools === 1 ? "a tool" : `${tools} tools`}; a depth scene doesn't use them: its author, characters and narrator call only their own.`);
-    const budget = await budgetFor(daySpendOf(this.rt.host), userId, settings.depth.budget);
+    // The on-screen allowance (W17): this story interval's turns with someone playing as their own agent, from the chain's live spends through the message the turn answers (read with its fold).
+    const onScreen = onScreenAllowance(settings.depth.budget, spendsOn(read.at.events).map((s) => s.data), read.at.state.clock);
+    const budget = await budgetFor(daySpendOf(this.rt.host), userId, settings.depth.budget, onScreen);
     const plan = bridge.planFor(turn.seed);
     const result = await runDepthTurn(
       {
@@ -127,7 +130,7 @@ export class DepthTurns {
         recent: "",
         frame: ctx.frame,
         settings,
-        model: this.port(userId, ctx.sink, samplingOf(ctx.body)),
+        model: this.port(userId, ctx.sink, narratorSampling(ctx.body, narratorOverrides(settings.depth)), chatLinesOf(ctx.prompt ?? [])),
         sink: ctx.sink,
         signal: ctx.signal,
         rt: { registry: this.rt.registry, blobs: this.rt.blobs, host: this.rt.host },
@@ -162,7 +165,7 @@ export class DepthTurns {
       const index = chain.findIndex((m) => m.id === answered.id);
       const basis = basisAt(chain, core.journal.tombstones, index);
       const message = chain[index];
-      const at = basis ? foldAtBasisOf(core, observed, basis, [STORY_TALK, STORY_SCENE, ...DRAFT_TYPES]) : null;
+      const at = basis ? foldAtBasisOf(core, observed, basis, [STORY_TALK, STORY_SCENE, ...DRAFT_TYPES, ...SPEND_TYPES]) : null;
       if (!basis || !message || !at) return;
       let source: TurnRead["source"];
       if (turn.renarrateOf) {
@@ -206,8 +209,8 @@ export class DepthTurns {
     };
   }
 
-  /** The turn's model calls: each role on its Settings → Depth row, in the foreground's line on its connection (the turn goes first, §6.2), the narrator's with the preset's sampling from the loopback's body (§3.13) over its own, reported to the turn as answered, and refused where that row is the loopback itself (the call would come straight back). */
-  private port(userId: UserId, sink: TurnSink, narrator: SamplingParams): ModelPort {
+  /** The turn's model calls: each role on its Settings → Depth row, in the foreground's line on its connection (the turn goes first, §6.2), the narrator's with the preset's sampling and answer room from the loopback's body (§3.13), the Narrator row's own over them (`narratorSampling`, as the narrator off a scene has them), reported to the turn as answered, and refused where that row is the loopback itself (the call would come straight back). A call's own room still goes first. */
+  private port(userId: UserId, sink: TurnSink, narrator: { params: SamplingParams; maxTokens: number | null }, chat: readonly ChatLine[]): ModelPort {
     const base = depthPort(this.rt.host, (u) => this.rt.settings.get(u), userId, { lane: "foreground" });
     const guarded: ModelPort = async (role, messages, opts) => {
       const route = depthCall(await this.rt.settings.get(userId), role);
@@ -220,8 +223,9 @@ export class DepthTurns {
             : `Settings → Depth → ${label} names the loopback connection, so its call would come straight back to LumiRPEngine: pick a real model there.`,
         );
       }
-      return base(role, messages, role === "narrator" && Object.keys(narrator).length > 0 ? { ...opts, params: { ...narrator, ...opts?.params } } : opts);
+      if (role !== "narrator") return base(role, messages, opts);
+      return base(role, messages, { ...opts, ...(Object.keys(narrator.params).length > 0 ? { params: { ...narrator.params, ...opts?.params } } : {}), ...(opts?.maxTokens === undefined && narrator.maxTokens !== null ? { maxTokens: narrator.maxTokens } : {}) });
     };
-    return reporting(guarded, sink);
+    return reporting(guarded, sink, Date.now, chat);
   }
 }

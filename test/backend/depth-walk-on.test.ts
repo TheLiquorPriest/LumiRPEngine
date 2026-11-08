@@ -16,7 +16,7 @@ import { scenePlugs } from "../../src/backend/depth/scene/plugs";
 import { runDepthTurn, type ScenePlugs } from "../../src/backend/depth/scene/turn";
 import { defaultSettings } from "../../src/backend/settings-store";
 import { AUTHOR_SPEND, authorData, type SpendData } from "../../src/shared/author";
-import { AUTHOR_DROP, draftEvent, draftOf, dropOf, heldIn, STORY_DRAFT, STORY_SETTLE, type DraftData } from "../../src/shared/episodes";
+import { AUTHOR_DROP, draftEvent, draftOf, draftTexts, dropOf, heldIn, STORY_DRAFT, STORY_SETTLE, type DraftData } from "../../src/shared/episodes";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { STORY_SCENE } from "../../src/shared/scene";
 import { STORY_BEAT, beatOf, type Beat, type StoryRef } from "../../src/shared/story";
@@ -70,7 +70,7 @@ function callDraft(o: { id?: string; at?: number; who?: string; touch?: StoryRef
   const at = o.at ?? NOW - 60;
   const who = o.who ?? "maya";
   const beat: Beat = { id: `${id}-b1`, at, order: 0, place: "cafe", actors: [], act: "happened", about: [{ entity: who }], what: put("Maya's sister calls: she is moving to Lisbon for good."), surface: put(CALL_SURFACE), exposure: [{ who, channel: "hearing", reach: "whole" }], by: { draft: id } };
-  return {
+  const d: DraftData = {
     id,
     episode: { id: `e-${id}`, span: [at, at + 20], places: [], people: [who], why: "Her sister's news changes what Maya wants.", parts: [{ subject: { who }, treatment: "written", rationale: "a phone call, a few lines" }] },
     at,
@@ -80,6 +80,9 @@ function callDraft(o: { id?: string; at?: number; who?: string; touch?: StoryRef
     touches: [{ ref: o.touch ?? { entity: who }, from: at }],
     summary: "Maya's sister calls to say she is moving to Lisbon.",
   };
+  // Its words ride in blobs, put as the writer puts them before its entry lands.
+  for (const t of draftTexts(d)) put(t);
+  return d;
 }
 const live = (event: LedgerEvent, layer: string): LiveEvent => ({ event, from: { layer, messageId: "m0" }, at: 0, index: 0 });
 

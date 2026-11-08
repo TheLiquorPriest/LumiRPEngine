@@ -91,7 +91,9 @@ function fakeModels(rig: Rig): Seen {
     if (all.includes('"chapter": {"ends"')) return JSON.stringify({ files: [], comments: [], chapter: { ends: false }, cast: [{ who: DANNY, mind: true, why: "He drives it." }, { who: PRIYA, mind: true, why: "She is always there." }], uncertain: [], reasoning: "" });
     if (all.includes('{"povs":')) {
       seen.pov.push(all);
-      return JSON.stringify({ povs: { [PRIYA]: "A voice across the yard: something about tomorrow." } });
+      // One point of view for each person asked (no rule writes a missing one): Priya's is the call across the yard.
+      const asked = [...(req.messages.at(-1)?.content ?? "").matchAll(/^### ([^:\n]+)/gm)].map((m) => m[1] as string);
+      return JSON.stringify({ povs: Object.fromEntries(asked.map((who) => [who, who === PRIYA ? "A voice across the yard: something about tomorrow." : "Someone there, as you saw and heard it."])) });
     }
     if (all.includes('"memories": [{"lived"')) {
       seen.catchUp.push({ name: /You are (.+?), a person in a story/.exec(req.messages[0]?.content ?? "")?.[1] ?? "", user });

@@ -17,7 +17,7 @@ import { LEDGER_NAMESPACE } from "../shared/ledger";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { foldLayerOf, inheritedBy, inheritedFirst, swipeKeyOf } from "../engine/ledger/layer";
 import type { HostMessage, HostPort } from "./host";
-import { carriedEntries, carriedMap, carryIn, copyMap } from "./layer-carry";
+import { carriedMap, carryIn, copyMap, putCarriedTexts } from "./layer-carry";
 
 /** A segment is closed past this many entries or characters, so a landing rewrites a bounded file. */
 export const LAYER_SEGMENT_ENTRIES = 64;
@@ -299,7 +299,8 @@ export class LayerStore {
  * the branch takes those landed by the end of the second the host made it in (`inheritedBy`), each
  * under its message's copy (`inheritMap`, on both chats' messages as `chainOf` decodes them). A chat
  * that wasn't branched but holds a layer carried in its metadata from another chat of the run (an
- * imported copy, `LAYER_CARRY_KEY`) takes the entries carried, each under the copy of its message.
+ * imported copy, `LAYER_CARRY_KEY`) takes the entries carried, each under the copy of its message,
+ * their texts put in the user's store first.
  * `opened`: the ancestor's layer, when its chat is open here. A read that fails answers null.
  */
 export async function ancestorOf(host: HostPort, chatId: ChatId, userId: UserId, runSeed: string, opened: (chatId: ChatId) => LayerStore | undefined, chainOf: (messages: readonly HostMessage[]) => ChainMessage[], depth = 0): Promise<Ancestry> {
@@ -308,7 +309,7 @@ export async function ancestorOf(host: HostPort, chatId: ChatId, userId: UserId,
     const meta = await host.chats.chatMetadata(chatId, userId);
     const from = meta.branched_from;
     const at = meta.branch_at_message;
-    if (typeof from !== "string" || typeof at !== "string" || from === chatId) return await carriedAncestry(meta, chatId, runSeed, async () => chainOf(await host.chats.messages(chatId, userId)));
+    if (typeof from !== "string" || typeof at !== "string" || from === chatId) return await carriedAncestry(host, userId, meta, chatId, runSeed, async () => chainOf(await host.chats.messages(chatId, userId)));
     const fromRun = (await host.chats.chatMetadata(from, userId))[LEDGER_NAMESPACE];
     if (!isRecord(fromRun) || fromRun.runSeed !== runSeed) return "none";
     const store = opened(from) ?? (await LayerStore.open(host, from, userId, () => ancestorOf(host, from, userId, runSeed, opened, chainOf, depth + 1), { readOnly: true }));
@@ -323,13 +324,12 @@ export async function ancestorOf(host: HostPort, chatId: ChatId, userId: UserId,
   }
 }
 
-/** What an imported copy takes of the layer carried in its metadata: every entry carried, under the copy of its message; "none" when it carries none of another chat of this run. */
-async function carriedAncestry(meta: Readonly<Record<string, unknown>>, chatId: ChatId, runSeed: string, chain: () => Promise<ChainMessage[]>): Promise<Ancestry> {
+/** What an imported copy takes of the layer carried in its metadata: every entry carried, under the copy of its message, the texts they name put in the user's store first (an import into another account has none of them); "none" when it carries none of another chat of this run. */
+async function carriedAncestry(host: Pick<HostPort, "storage">, userId: UserId, meta: Readonly<Record<string, unknown>>, chatId: ChatId, runSeed: string, chain: () => Promise<ChainMessage[]>): Promise<Ancestry> {
   const carry = carryIn(meta);
-  if (!carry || carry.chat === chatId || carry.runSeed !== runSeed || "over" in carry) return "none";
-  const entries = carriedEntries(carry);
-  if (!entries || entries.length === 0) return "none";
-  return { inherit: { from: carry.chat, before: carry.at, messages: carriedMap(carry, await chain()) }, entries };
+  if (!carry || carry.chat === chatId || carry.runSeed !== runSeed || carry.list.length === 0) return "none";
+  await putCarriedTexts(host, userId, carry);
+  return { inherit: { from: carry.chat, before: carry.at, messages: carriedMap(carry, await chain()) }, entries: carry.list };
 }
 
 /**

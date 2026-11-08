@@ -15,6 +15,7 @@ import type { JsonObject, JsonValue } from "../../shared/json";
 import { isRecord } from "../../shared/json";
 import type { LoopbackToolCall } from "../../shared/loopback";
 import type { SamplingParams } from "../../shared/settings";
+import type { DepthNarratorSampling } from "../../shared/depth-settings";
 import type { QuietMessage, QuietPart, QuietTool, QuietToolCall, WorldInfoCandidate } from "../host";
 import { sortEntries } from "../book";
 import { NARRATOR_OUTLET, outletOf } from "../preset-binding";
@@ -99,6 +100,18 @@ export function samplingOf(body: JsonObject): SamplingParams {
 export function maxTokensOf(body: JsonObject): number | null {
   const v = body.max_tokens ?? body.max_completion_tokens;
   return typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : null;
+}
+
+/**
+ * The narrator's sampling (DEPTH-PLAN §3.13): the preset's from the body, with each one the Narrator
+ * row sets (Settings → Depth → Narrator) over it; and its answer room, the row's own, else the
+ * body's, else null (the narrator's model's). One reading for a scene's narrator and one no scene plays.
+ */
+export function narratorSampling(body: JsonObject, own: Readonly<DepthNarratorSampling>): { params: SamplingParams; maxTokens: number | null } {
+  return {
+    params: { ...samplingOf(body), ...(own.temperature !== null ? { temperature: own.temperature } : {}), ...(own.topP !== null ? { top_p: own.topP } : {}) },
+    maxTokens: own.maxTokens ?? maxTokensOf(body),
+  };
 }
 
 /** The body's `tool_choice`, passed on only with tools to choose from. */

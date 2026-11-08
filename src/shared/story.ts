@@ -13,6 +13,7 @@ import type { EntityId, MessageId, PlaceId } from "./ids";
 import { isRecord, type JsonObject } from "./json";
 import { passageBlobs, STORY_PASSAGE } from "./passage";
 import { sceneBlobs, STORY_SCENE } from "./scene";
+import { recordBlobs, STORY_RECORD } from "./story-record";
 import { isBlobHash } from "./stores";
 
 /** The story minute: game minutes since the world's epoch (`WorldState.clock`). */
@@ -57,11 +58,18 @@ export interface Exposure {
   pending?: true;
 }
 
-/** Where a beat came from: the turn that decided it, a draft, the bootstrap's distillation, or an imported memory entry. */
+/** A quote's place in the chat: characters `from` to `to` of a message's text as the bootstrap spooled it (without reasoning). */
+export interface QuoteSpan {
+  message: MessageId;
+  from: number;
+  to: number;
+}
+
+/** Where a beat came from: the turn that decided it, a draft, the bootstrap's distillation (with the spans its quotes are, in the chat), or an imported memory entry. */
 export type BeatSource =
   | { turn: string; decided: BeatDecider }
   | { draft: string }
-  | { bootstrap: { message: MessageId; swipe: string; span?: [number, number] } }
+  | { bootstrap: { message: MessageId; swipe: string; span?: [number, number]; quotes?: QuoteSpan[] } }
   | { entry: string };
 
 /**
@@ -192,7 +200,9 @@ function sourceOk(v: unknown): v is BeatSource {
   if (!("bootstrap" in v) || !isRecord(v.bootstrap)) return false;
   const b = v.bootstrap;
   const span = b.span;
-  return isId(b.message) && isId(b.swipe) && (span === undefined || (Array.isArray(span) && span.length === 2 && span.every((n) => typeof n === "number" && Number.isInteger(n) && n >= 0)));
+  const spans = b.quotes;
+  const spanOk = (q: unknown): boolean => isRecord(q) && isId(q.message) && [q.from, q.to].every((n) => typeof n === "number" && Number.isInteger(n) && n >= 0) && (q.to as number) > (q.from as number);
+  return isId(b.message) && isId(b.swipe) && (span === undefined || (Array.isArray(span) && span.length === 2 && span.every((n) => typeof n === "number" && Number.isInteger(n) && n >= 0))) && (spans === undefined || (Array.isArray(spans) && spans.every(spanOk)));
 }
 
 /** Why `data` isn't a well-formed beat, or null. Structural only, so a beat never fails on a rebased view. */
@@ -306,7 +316,7 @@ export function beatBlobs(b: Beat): string[] {
   return [b.what, ...(b.deed ? [b.deed] : []), b.surface, ...(b.quotes ? [b.quotes] : []), ...(b.uncertain ? [b.uncertain] : []), ...b.exposure.flatMap((x) => (x.pov ? [x.pov] : []))];
 }
 
-/** The blobs a beat, staging, strike, passage (`shared/passage.ts`) or scene (`shared/scene.ts`) names (the sweep keeps them). */
+/** The blobs a beat, staging, strike, passage (`shared/passage.ts`), scene (`shared/scene.ts`) or imported record (`shared/story-record.ts`) names (the sweep keeps them). */
 export function storyBlobs(type: string, data: unknown): string[] {
   if (type === STORY_BEAT) {
     const b = beatOf(data);
@@ -322,5 +332,6 @@ export function storyBlobs(type: string, data: unknown): string[] {
   }
   if (type === STORY_PASSAGE) return passageBlobs(data);
   if (type === STORY_SCENE) return sceneBlobs(data);
+  if (type === STORY_RECORD) return recordBlobs(data);
   return [];
 }

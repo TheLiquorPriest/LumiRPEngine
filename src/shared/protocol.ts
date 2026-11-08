@@ -22,7 +22,7 @@ import type { GmThingExtras, GmThingsList, KeepResult, MadeInPlay, TidyRun } fro
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PackId, PanelId, PlaceId, RelationTypeId, RevisionId, SlotId, StageId, TableId, TierId, TrackId, WorldId } from "./ids";
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { BuiltLoreIndex, ChangeType, NarratorView, UserSettings } from "./settings";
-import type { BootstrapEstimate, BootstrapOp, BootstrapView } from "./bootstrap";
+import type { BootstrapEstimate, BootstrapOp, BootstrapView, LbActionEstimate, LbTree } from "./bootstrap";
 import type { DepthOp, DepthResult } from "./depth-views";
 import type { Activity, DiagRecord } from "./diagnostics";
 import type { LoopbackPage, LoopbackPush, LoopbackRequest, LoopbackResultBodies } from "./loopback";
@@ -1398,7 +1398,7 @@ export interface ResultBodies extends LoopbackResultBodies {
   /** The run started, cancelled or asked about; null when the chat has had none since the extension started. */
   /** `off`: why the classic minds run is off in this chat (a chat on depth, whose minds their own agents write); absent where it runs. */
   "lre.minds": { run: MindsRunView | null; off?: string };
-  "lre.bootstrap": { view: BootstrapView; estimate?: BootstrapEstimate };
+  "lre.bootstrap": { view: BootstrapView; estimate?: BootstrapEstimate; tree?: LbTree; lbEstimate?: LbActionEstimate };
   "lre.depth": DepthResult;
   /** `list`: the tools and the backend's build; `describe`: the one tool; `call`: its answer. */
   "lre.tools": { tools?: OutsideTool[]; build?: string; tool?: OutsideTool; result?: ToolResult };

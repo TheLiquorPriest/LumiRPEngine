@@ -3,8 +3,8 @@
 // chunk k−1 and runs ahead of the rest; the author's reading of chunk k waits for the historian's k
 // and its own k−1 (it decides chapter ends and who gets a mind); the points of view for chunk k's
 // partial reach follow, then chunk k's beats land at their own source messages; each character with
-// a mind catches up on its share of chunk k after its own k−1, characters in parallel; the GM's truth
-// link follows the chunk's catch-ups; at each chapter's end the characters reflect, the author
+// a mind catches up on its share of chunk k after its own k−1, characters in parallel; at each
+// chapter's end the GM's truth link reads the chapter's beats once, the characters reflect, the author
 // revises the notebook deeply, the GM reconciles the imported memory entries that cover it, and a
 // spot-check card is queued for the user. A beat the user marks wrong on a card is a directive
 // (§8.6): between chunks the author amends it at its own source message (a superseding beat, or a
@@ -46,11 +46,11 @@ import { hash32, hashParts } from "../../shared/hash";
 import { blobHash } from "../../shared/stores";
 import { layerEntryId } from "../../engine/ledger/layer";
 import { answerRead, type ModelPort, type PortAnswer } from "../depth/port";
-import { putText, readAnswer, sameName } from "../depth/common";
+import { DepthAnswerError, putText, readAnswer, sameName } from "../depth/common";
 import { cutShort } from "../agents/runtime";
 import { fellBackLine } from "../character-agent";
 import type { BootstrapFiles } from "./files";
-import { MANIFEST, isManifest, readChunk, survey } from "./spool";
+import { EDITS, MANIFEST, isEdits, isManifest, readChunk, survey } from "./spool";
 import type { ChunkInfo, SpoolManifest, SpoolRow, SurveyMessage } from "./spool";
 import { estimateRemaining } from "./estimate";
 import type { ImportedEntry } from "./import";
@@ -141,7 +141,7 @@ export interface BootstrapStages {
   beatEvents(beats: readonly Beat[], staging: readonly Staging[], blobs: Readonly<Record<string, string>>, rows: readonly SpoolRow[]): Record<MessageId, LedgerEvent[]>;
   authorRead(input: { chunk: SpoolRow[]; beats: Beat[]; blobs: Record<string, string>; chapter: { index: number; chunks: number[] }; cast: Person[]; basis: Basis }, model: ModelPort): Promise<AuthorOut>;
   authorChapter(input: { chapter: { index: number; chunks: number[]; title: string | null; through: MessageId }; beats: Beat[]; blobs: Record<string, string>; cast: Person[]; basis: Basis }, model: ModelPort): Promise<AuthorOut>;
-  /** A point of view for each of `who`; `fellBack`: those whose the render, asked again, still wrote naming someone who wasn't there (with the names) or didn't write (none), which got the plain one in its place. */
+  /** A point of view for each of `who` the render wrote or its GM's check set right; `fellBack`: those left without one, pending (the render, asked again, still wrote theirs naming someone who wasn't there, with the names, and the check couldn't set it right; or didn't write it, none). No rule writes one in its place. */
   pov(input: { beat: Beat; surface: string; quotes?: string; staging: Staging[]; blobs: Record<string, string>; who: EntityId[]; basis: Basis }, model: ModelPort): Promise<{ povs: Record<EntityId, string>; fellBack?: Record<EntityId, string[]>; reasoning?: string }>;
   /** A core for a character the author gave a mind: from its card, else the world's own description of it, else an imported entry, else the author's reading (D-17). Null when it has one the user or the play wrote, or nothing seeds one. */
   seedCore(input: { who: Person; author: string | null; entries: ImportedEntry[]; at: number; basis: Basis }): Promise<StageOut | null>;
@@ -198,6 +198,8 @@ export interface BootstrapEnv {
   model: ModelPort;
   /** The active path as the survey reads it, once per survey, up to depth's play: the first turn depth played or one in flight, or the first reply on depth nothing read (`Rec.unread`), and the player's messages it answered (`historyEnd`). */
   messages(): Promise<SurveyMessage[]>;
+  /** The messages the read skips because the chat's LumiBooks records stand for them (its hash of each still matches, or its shelf names it). Empty until the author's jumpstart pass reads those records (`JUMPSTART_SKIPS_COVERED`); absent or empty, every message is read. */
+  covered?(): Promise<ReadonlySet<MessageId>>;
   /** The world's people at the head and the player character (no agent, D-10). */
   people(): Promise<{ cast: Person[]; pov: EntityId }>;
   /** The import's read of World Info and the memory entries (§8.1 step 2). */
@@ -539,7 +541,9 @@ export class BootstrapRun {
   private async spool(knobs: BootstrapKnobs): Promise<{ manifest: SpoolManifest; spooled: MessageId[] }> {
     const handover = await this.env.files.read(HANDOVER, isHandover);
     const covered = handover ? new Set(handover.messages) : null;
-    const history = (await this.env.messages()).filter((m) => covered === null || covered.has(m.id));
+    // What LumiBooks covers, the env's `covered`, isn't spooled (Round 2 item 1); it is empty until the author's jumpstart pass reads the records (`JUMPSTART_SKIPS_COVERED`), so every message is read.
+    const lumibooks = (await this.env.covered?.()) ?? new Set<MessageId>();
+    const history = (await this.env.messages()).filter((m) => (covered === null || covered.has(m.id)) && !lumibooks.has(m.id));
     this.manifest = await survey(this.env.files, history, knobs.chunkTokens, this.env.now());
     return { manifest: this.manifest, spooled: history.map((m) => m.id) };
   }
@@ -700,6 +704,7 @@ export class BootstrapRun {
       const { manifest, spooled } = await this.spool(knobs);
       this.measure("survey");
       const from = this.rewind(manifest);
+      await this.editsAsFixes(from);
       // What it landed for the chunks it runs again: every stage reads the world without it, as it will be once what replaces it lands.
       this.stale = await this.landedFrom(from);
       this.env.ledger.replacing(new Set(this.stale.keys()));
@@ -776,6 +781,33 @@ export class BootstrapRun {
   }
 
   /**
+   * The messages edited since the run read them that kept their swipe's key (`EDITS`, an assistant
+   * edit): each is the author's fix (§8.4), so every beat that came from it is queued for amending
+   * beside the message as it now reads, as a beat marked wrong is, and the characters who lived it
+   * live the amended beat. A chunk that runs again reads its edits itself; an edited message no beat
+   * came from is noted.
+   */
+  private async editsAsFixes(from: number): Promise<void> {
+    const edits = await this.env.files.read(EDITS, isEdits);
+    if (!edits) return;
+    for (const e of edits) {
+      const chunk = this.manifest?.chunks[e.n];
+      if (e.n >= from || !chunk) continue;
+      const beats = ((await this.recordOf<HistorianOut>(`historian:${e.n}`))?.beats ?? []).filter((b) => sourceOf(b) === e.message);
+      if (beats.length === 0) this.note(`A message read in chunk ${e.n + 1} was edited since, but no beat came from it: nothing to amend.`);
+      const text = (await this.rows(chunk)).find((r) => r.id === e.message)?.text ?? "";
+      // The edit's own text keys the amendment: an edit made again is amended again.
+      const note = `He edited this message after its history was read: the message as it now reads is his fix (edit ${hashParts("edit", text).slice(0, 8)}).`;
+      for (const b of beats) {
+        this.state.amends = this.state.amends.filter((a) => !(a.beat === b.id && a.item === `edit:${e.message}`));
+        this.state.amends.push({ card: "", item: `edit:${e.message}`, beat: b.id, chunk: e.n, note, at: this.env.now() });
+      }
+    }
+    await this.env.files.remove(EDITS);
+    await this.save();
+  }
+
+  /**
    * What the run landed for chunks `from` on (§8.4), by entry, with its chunk: what every job record
    * of such a chunk names, past the chunk count too, and what each superseded. As the run reaches
    * them, a job asked again lands entries that take their place, one answered as it was lands them
@@ -812,7 +844,7 @@ export class BootstrapRun {
             const cast = [...people.cast, ...Object.entries(this.state.newcomers).map(([id, m]) => ({ id, name: m.name }))];
             // The places earlier chunks made, landed or not (the fold at this chunk lags the main lane): named by id, never made again.
             const made = Object.entries(this.state.places).map(([id, m]) => ({ id, name: m.name }));
-            const raw = await this.env.stages.historian({ chunk: rows, before, cast, places: made, pov: opening, basis: chunk.basis }, model);
+            const raw = await this.readStretch({ chunk: rows, before, cast, places: made, pov: opening, basis: chunk.basis }, model);
             // Newcomers and new places get ids of their own: the same for the same name however often they are met, however an answer spells it (`sameName`).
             const ids: Record<string, EntityId> = {};
             for (const c of raw.newcomers) {
@@ -858,6 +890,36 @@ export class BootstrapRun {
     }
     for (const out of outs) before = this.carry(before, out);
     return before;
+  }
+
+  /**
+   * The historian's reading of a stretch. An answer cut off at its room even when asked again at
+   * twice it is no reading: a stretch of two or more messages is then read as its two halves, the
+   * second after what the first established, and the two readings put together; a single message
+   * cut off so fails as before.
+   */
+  private async readStretch(input: Parameters<BootstrapStages["historian"]>[0], model: ModelPort): Promise<HistorianOut> {
+    try {
+      return await this.env.stages.historian(input, model);
+    } catch (error) {
+      if (!(error instanceof DepthAnswerError) || !error.cut || input.chunk.length < 2) throw error;
+      const half = Math.ceil(input.chunk.length / 2);
+      this.note(`The historian's answer for ${input.chunk.length} messages was cut off at its answer room twice: they are read as two halves instead.`);
+      const a = await this.readStretch({ ...input, chunk: input.chunk.slice(0, half) }, model);
+      const b = await this.readStretch({ ...input, chunk: input.chunk.slice(half), before: this.carry(input.before, a) }, model);
+      const reasoning = [a.reasoning, b.reasoning].filter((r) => r !== undefined && r !== "").join("\n\n");
+      return {
+        ...b,
+        events: [...a.events, ...b.events],
+        blobs: { ...a.blobs, ...b.blobs },
+        beats: [...a.beats, ...b.beats.map((x) => ({ ...x, order: x.order + a.beats.length }))],
+        newcomers: [...a.newcomers, ...b.newcomers.filter((c) => !a.newcomers.some((o) => o.ref === c.ref))],
+        newPlaces: [...(a.newPlaces ?? []), ...(b.newPlaces ?? []).filter((p) => !(a.newPlaces ?? []).some((o) => o.ref === p.ref))],
+        switches: [...(a.switches ?? []), ...(b.switches ?? [])],
+        uncertain: [...a.uncertain, ...b.uncertain],
+        ...(reasoning !== "" ? { reasoning } : {}),
+      };
+    }
   }
 
   private carry(before: { beats: Beat[]; staging: Staging[]; blobs: Record<string, string> }, out: HistorianOut): { beats: Beat[]; staging: Staging[]; blobs: Record<string, string> } {
@@ -957,14 +1019,10 @@ export class BootstrapRun {
         mindKeys.set(who, key);
       });
       await this.landBatch(caught.flatMap((w) => writes.get(w) ?? []));
-      // The GM links what the chunk established to what the characters now believe.
-      const linkSlot = `truthlink:${n}`;
-      const lKey = hashParts(linkSlot, bKey, linkKey, ...minded.map((w) => mindKeys.get(w) ?? ""));
-      const linked = await this.answer<StageOut>(linkSlot, lKey, "truthlink", (model) => this.env.stages.truthLink({ beats: hist.beats, blobs: hist.blobs, minds: caught, basis: chunk.basis }, model));
-      await this.landBatch(await this.draftOf(linkSlot, lKey, linked, chunk.basis, "truthlink"));
-      linkKey = lKey;
+      // The GM's truth link waits for the chapter's end: one call over the chapter, not one per chunk (`linkChapter`).
       if (author.chapterEnds && n < manifest.chunks.length - 1) {
         chapter.title = author.title ?? null;
+        linkKey = await this.linkChapter(chapter, chunk, mindKeys, linkKey);
         authorKey = await this.endChapter(chapter, chunk, knobs, mindKeys, linkKey, authorKey);
       }
       // What the run landed for this chunk before, that nothing landed now took the place of, is retired before the chunk counts as done.
@@ -977,9 +1035,29 @@ export class BootstrapRun {
     }
     // The last chapter closes where the history ends, and what the run landed before for the last chunk and any past the end is retired; then whatever was marked wrong meanwhile is amended.
     const last = manifest.chunks.at(-1);
-    if (last && chapter && !chapter.ended && chapter.from <= last.n) await this.endChapter(chapter, last, knobs, mindKeys, linkKey, authorKey);
+    if (last && chapter && !chapter.ended && chapter.from <= last.n) {
+      linkKey = await this.linkChapter(chapter, last, mindKeys, linkKey);
+      await this.endChapter(chapter, last, knobs, mindKeys, linkKey, authorKey);
+    }
     await this.retire(() => true);
     await this.amendQueued(manifest.chunks.length - 1, knobs, people.cast);
+  }
+
+  /**
+   * The GM's truth link for a chapter, once at its end: what its beats established, linked to what
+   * each character with a mind by then now believes, at the basis of its last chunk. The running
+   * link key after it.
+   */
+  private async linkChapter(chapter: ChapterState, chunk: ChunkInfo, mindKeys: Map<EntityId, string>, linkKey: string): Promise<string> {
+    const read = await this.chapterRead(chapter);
+    const minds = Object.entries(this.state.minds)
+      .filter(([id, m]) => m.since <= chunk.n && id !== this.firstPc)
+      .map(([id]) => id);
+    const slot = `truthlink:${chunk.n}`;
+    const key = hashParts(slot, ...range(chapter.from, chapter.to).map((k) => this.state.hist[k] ?? ""), linkKey, ...minds.map((w) => mindKeys.get(w) ?? ""));
+    const linked = await this.answer<StageOut>(slot, key, "truthlink", (model) => this.env.stages.truthLink({ beats: read.beats, blobs: read.blobs, minds, basis: chunk.basis }, model));
+    await this.landBatch(await this.draftOf(slot, key, linked, chunk.basis, "truthlink"));
+    return key;
   }
 
   private openChapter(n: number, from: number): ChapterState {
@@ -1077,7 +1155,7 @@ export class BootstrapRun {
     await this.env.files.write(jobFile(slot), { slot, key, at: this.env.now(), out, entries: [], supersedes, spent, ...(misread.length > 0 ? { misread } : {}), ...(capped.length > 0 ? { capped } : {}) } satisfies JobRecord);
     this.state.misread.push(...misread.map((m): SpotMisread => ({ stage, job: slot, call: m.call, fields: m.fields, count: m.count })));
     this.state.misread.splice(0, Math.max(0, this.state.misread.length - MISREAD_KEPT));
-    // A unit is a stage's chunk (its chapter for reconcile), counted once: the historian's lane runs ahead of the chunk the rest are on, and an amendment's jobs belong to no chunk.
+    // A unit is a stage's chunk (its chapter for reconcile and the truth link), counted once: the historian's lane runs ahead of the chunk the rest are on, and an amendment's jobs belong to no chunk.
     const unit = slot.split(":")[1] ?? "";
     if (/^\d+$/.test(unit) && !this.unitsSeen.has(`${stage}:${unit}`)) {
       this.unitsSeen.add(`${stage}:${unit}`);
@@ -1331,7 +1409,7 @@ export class BootstrapRun {
     return out;
   }
 
-  /** Says each point of view of beat `beat` the render fell back on: written naming someone who wasn't there, or not at all, even when asked again, so its person lives the beat as the plain one in its place has it. */
+  /** Says each point of view of beat `beat` left pending: written naming someone who wasn't there that the GM's check couldn't set right, or not written at all, even when asked again; its person doesn't live the beat without one. */
   private fellBackPovs(beat: string, fellBack: Readonly<Record<EntityId, string[]>> | undefined): void {
     for (const [who, names] of Object.entries(fellBack ?? {})) this.note(fellBackLine(this.state.minds[who]?.name ?? who, `beat ${beat}`, names));
   }

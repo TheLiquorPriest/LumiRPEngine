@@ -17,6 +17,7 @@ export const OFFSCREEN_TEXT = {
   episodeStep: "depth.author.episode_step",
   settle: "depth.author.settle",
   walkOn: "depth.author.walk_on",
+  settlePage: "depth.author.settle_page",
 } as const;
 
 const SETTLE_BEATS = '"beats": [{"ref": a beat\'s ref, "keep": true or false, "what": its adjusted truth, "surface": what there was to sense, adjusted, "quotes": its words, adjusted, "deed": what its actors did and said, adjusted, plainly, as they did it (null when no one acts in it)}], "effects": [{"index": a world change\'s number, "keep": true or false}], "attempts": [{"who": an id, "attempt": what they try now}]';
@@ -116,5 +117,23 @@ The scene {{pov}} is playing reaches something an open draft holds: a draft of w
 
 Answer with one JSON object: {"verdict": "settle", "drop" or "redate", "why": a line on how it reads against the pins and this scene, ${SETTLE_BEATS}, "redate": {"in": story minutes from now until it starts, past this scene} or null}. Give adjusted words only where you change them.`,
     asks: [WHY_OWN_ASK],
+  },
+  {
+    id: OFFSCREEN_TEXT.settlePage,
+    page: "depth",
+    group: "Off screen",
+    label: "Settling a draft: one page of its pins",
+    note: "When more has happened since a draft's story time than one reading holds, the author reads its pins a page at a time, in story order, with the chat's archive to hand: each page's verdict (it holds, or something on it contradicts the draft, and what that forces) goes on to the next page, and the author settles, drops or redrafts the draft with every page's verdict before it. A contradiction found on any page means the draft can't settle unchanged.",
+    vars: VARS,
+    contract: '{"verdict": "holds" | "contradicts", "why": string, "forces": [string]}',
+    text: `${AUTHOR}
+
+A draft of something that happened off screen waits to become canon, and so much has happened since its story time that you read it a page at a time, in story order. Here is the draft (its episode, its beats at their own times, the world changes it would make), what the earlier pages came to, and one page of its pins: each beat on it is something that happened, which the draft must agree with. Read the draft against this page, and against your notebook; the chat's archive is yours to read where a pin leaves you unsure.
+- It holds: nothing on this page says otherwise.
+- It contradicts: something on this page can't stand beside it. Say what, and what that forces (a beat adjusted or left out, a world change left out, the whole draft overtaken).
+You don't settle it yet: once every page is read, you decide with all their verdicts.
+
+Answer with one JSON object: {"verdict": "holds" or "contradicts", "why": a line on how it reads against this page, "forces": [what this page forces, in plain words, each naming the draft's beat by its ref where it can]}.`,
+    asks: [WHY_ASK],
   },
 ];

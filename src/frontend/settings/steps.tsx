@@ -214,7 +214,8 @@ export function stepUpdatePatch(purpose: StepPurpose, config: StepConfig): JsonO
   return { modelUse: { preset: "custom", steps: { [purpose]: out } } };
 }
 
-export type Connection = { id: string; name: string; model: string | null };
+/** A connection as Settings lists it; `provider` is the host's provider id (e.g. "deepseek") where known. */
+export type Connection = { id: string; name: string; model: string | null; provider?: string };
 
 export function useConnections(): Connection[] {
   const app = useApp();

@@ -1,7 +1,8 @@
 // The blob sweep (DESIGN §4.4): what nothing references any more is removed once its retention has
 // passed, counted from the first sweep that found it so, and never while a turn runs. Every swipe's
-// record in every chat, every learned index, the user's global workspace, Diagnostics' kept texts
-// and the work in flight keep what they name, so a Branch still resolves after its parent is pruned.
+// record in every chat, every chat's layer (its held drafts too), every learned index, the user's global
+// workspace, Diagnostics' kept texts and the work in flight keep what they name, so a Branch still
+// resolves after its parent is pruned.
 
 import { describe, expect, test } from "bun:test";
 import { BLOBS_DIR, BlobStore } from "../../src/backend/agents/blobs";
@@ -12,10 +13,19 @@ import { Diagnostics } from "../../src/backend/diagnostics";
 import { GLOBAL_INDEX_PATH, GlobalWorkspace } from "../../src/backend/global-workspace";
 import { decodeLedger } from "../../src/backend/ledger-io";
 import type { DiagAgentCall } from "../../src/shared/diagnostics";
-import type { ChatId, MessageId } from "../../src/shared/ids";
+import type { ChatId, MessageId, UserId } from "../../src/shared/ids";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { DAY_MS, HOUR_MS, RETENTION_DEFAULTS, type RetentionSettings } from "../../src/shared/stores";
 import { workspaceOf, wsWrite } from "../../src/engine/workspace";
+import { layerDir } from "../../src/backend/layer-store";
+import storyPack from "../../src/packs/story/core/index";
+import type { LayerDraft } from "../../src/shared/layer";
+import type { LedgerEvent } from "../../src/shared/ledger";
+import type { JsonObject } from "../../src/shared/json";
+import { beatEvent, beatId, type Beat } from "../../src/shared/story";
+import { MIND_TAKE } from "../../src/shared/character-engine";
+import { STORY_DRAFT } from "../../src/shared/episodes";
+import { POV } from "../support/test-pack";
 import type { Generation } from "../support/fake-host";
 import { Harness } from "../support/harness";
 
@@ -25,21 +35,28 @@ const CALL: Omit<DiagAgentCall, "text"> = { role: "gm", connection: "active", mo
 
 /** A world chat's ledger, the agent stores over its host, and the sweep, on a clock the test moves. */
 class Stores {
-  readonly h = new Harness();
-  readonly user = this.h.host.userId;
-  readonly blobs = new BlobStore(this.h.host);
-  readonly sessions = new Sessions(this.blobs, this.h.service);
-  readonly meta = new ChatAgentMeta(this.h.host);
+  readonly h: Harness;
+  readonly user: UserId;
+  readonly blobs: BlobStore;
+  readonly sessions: Sessions;
+  readonly meta: ChatAgentMeta;
   /** The user's global workspace; a test may swap in a fresh one, which reads its index from storage again. */
-  global = new GlobalWorkspace(this.h.host);
+  global: GlobalWorkspace;
   now = DAY0;
-  readonly diag = new Diagnostics(this.h.host, { blobs: this.blobs, now: () => this.now });
+  readonly diag: Diagnostics;
   /** Done once while the next sweep reads what references what: a put, or a turn starting. */
   during: (() => Promise<unknown>) | null = null;
   readonly retention: RetentionSettings;
   readonly sweep: Sweep;
 
-  constructor(retention: Partial<RetentionSettings> = {}) {
+  constructor(retention: Partial<RetentionSettings> = {}, h = new Harness()) {
+    this.h = h;
+    this.user = h.host.userId;
+    this.blobs = new BlobStore(h.host);
+    this.sessions = new Sessions(this.blobs, h.service);
+    this.meta = new ChatAgentMeta(h.host);
+    this.global = new GlobalWorkspace(h.host);
+    this.diag = new Diagnostics(h.host, { blobs: this.blobs, now: () => this.now });
     this.retention = { ...RETENTION_DEFAULTS, ...retention };
     this.sweep = new Sweep({
       host: this.h.host,
@@ -477,5 +494,91 @@ describe("the blob sweep", () => {
     t.at(5);
     expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored: 2, referenced: 2, found: 0 });
     await t.diag.settle();
+  });
+
+  test("a layer's entries and held drafts keep the blobs their beats, mind takes and reasoning name; a branch's own copy keeps them once its parent is gone, and once no layer names them they go a retention later", async () => {
+    const t = new Stores({}, new Harness("fresh", { packs: [storyPack] }));
+    const chat = await t.h.newChat();
+    await t.h.send(chat, "look around");
+    const head = t.h.host.head(chat);
+    if (!head) throw new Error("no reply");
+    const basis = await t.h.service.basisFor(chat, t.user, head.id);
+    if (!basis) throw new Error("no basis");
+    const put = (text: string): Promise<string> => t.blobs.put(t.user, text);
+    const beat = async (seed: string): Promise<Beat> => ({ id: beatId(seed), at: 0, order: 0, place: "home", actors: [POV], act: "said", about: [], what: await put(`What ${seed} was.`), surface: await put(`How ${seed} looked.`), exposure: [{ who: POV, channel: "hearing", reach: "whole" }], by: { turn: seed, decided: "player" } });
+    const rosa: LedgerEvent = { type: "spawn", entity: { id: "rosa", kind: "person", name: "Rosa Vance", tier: "background", fields: {}, relations: [] } };
+    const take = async (b: Beat, text: string): Promise<LedgerEvent> => ({ type: MIND_TAKE, data: { who: "rosa", at: 0, lived: [b.id], take: await put(text) } });
+    // Landed: a beat, a newcomer's take on it, and the author's reasoning.
+    const landedBeat = await beat("landed");
+    const landed = await t.h.service.landLayer(chat, t.user, { id: "e-landed", basis, kind: "story.beat", events: [beatEvent(landedBeat), rosa, await take(landedBeat, "Rosa thinks Sam is hiding something.")], reasoning: await put("Whether Rosa would notice.") });
+    expect(landed.status).toBe("landed");
+    await t.h.host.settle();
+    // Held, as the store keeps a draft while a turn is in flight: a draft's own beats and the changes it would make.
+    const heldBeat = await beat("held");
+    const effects = [await take(heldBeat, "Rosa means to ask the harbourmaster.")];
+    const draft: LayerDraft = { id: "d-held", basis, kind: STORY_DRAFT, events: [{ type: STORY_DRAFT, data: { beats: [heldBeat], effects } as unknown as JsonObject }], reasoning: await put("What the episode would do off screen.") };
+    await t.h.host.storage.write(`${layerDir(chat)}/held.json`, JSON.stringify([{ draft, waitFor: ["g-in-flight"] }]), t.user);
+    const junk = await put("Nothing names this.");
+    // A branch at the reply copies what its parent landed into its own layer; held drafts stay the parent's.
+    const branch = t.h.host.branch(chat, head.id);
+    await t.h.host.chats.mergeChatMetadata(branch, { branched_from: chat, branch_at_message: head.id }, t.user);
+    await t.h.service.open(branch, t.user);
+    await t.h.host.settle();
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored: 9, referenced: 8, found: 1, removed: 0 });
+    t.at(7);
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored: 9, referenced: 8, removed: 1 });
+    expect(await t.blobs.get(t.user, junk)).toBeNull();
+    // The parent goes, with its layer: the held draft's blobs are found unreferenced; the branch's copy keeps the landed entry's.
+    t.h.host.deleteChat(chat);
+    await t.h.host.settle();
+    t.at(8);
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored: 8, referenced: 4, found: 4, removed: 0 });
+    t.at(15);
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored: 8, referenced: 4, removed: 4 });
+    expect(await Promise.all([landedBeat.what, landedBeat.surface].map((hash) => t.blobs.get(t.user, hash)))).toEqual(["What landed was.", "How landed looked."]);
+    expect(await Promise.all([heldBeat.what, heldBeat.surface].map((hash) => t.blobs.get(t.user, hash)))).toEqual([null, null]);
+    // Then the branch goes too, and nothing names what its layer held.
+    t.h.host.deleteChat(branch);
+    await t.h.host.settle();
+    t.at(16);
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored: 4, referenced: 0, found: 4, removed: 0 });
+    t.at(23);
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored: 4, referenced: 0, removed: 4 });
+  });
+
+  test("a blob a single layer entry alone names (a beat, a mind write, a notebook revision, a held draft) survives the sweep; one nothing names goes after unreferencedDays", async () => {
+    const t = new Stores({}, new Harness("fresh", { packs: [storyPack] }));
+    const chat = await t.h.newChat();
+    await t.h.send(chat, "look around");
+    const head = t.h.host.head(chat);
+    if (!head) throw new Error("no reply");
+    const basis = await t.h.service.basisFor(chat, t.user, head.id);
+    if (!basis) throw new Error("no basis");
+    const before = (await t.sweep.run(t.user)) as { stored: number };
+    const put = (text: string): Promise<string> => t.blobs.put(t.user, text);
+    const surface = await put("A shared surface.");
+    const beat = async (seed: string): Promise<Beat> => ({ id: beatId(seed), at: 0, order: 0, place: "home", actors: [POV], act: "said", about: [], what: await put(`Only the ${seed} beat names this.`), surface, exposure: [{ who: POV, channel: "hearing", reach: "whole" }], by: { turn: seed, decided: "player" } });
+    const land = async (id: string, kind: string, events: LedgerEvent[]): Promise<void> => {
+      expect((await t.h.service.landLayer(chat, t.user, { id, basis, kind, events })).status).toBe("landed");
+      await t.h.host.settle();
+    };
+    const landedBeat = await beat("landed");
+    await land("e-beat", "story.beat", [beatEvent(landedBeat)]);
+    const rosa: LedgerEvent = { type: "spawn", entity: { id: "rosa", kind: "person", name: "Rosa Vance", tier: "background", fields: {}, relations: [] } };
+    const mind = await put("Only a mind write names this.");
+    await land("e-mind", "story.beat", [rosa, { type: MIND_TAKE, data: { who: "rosa", at: 0, lived: [landedBeat.id], take: mind } }]);
+    const page = await put("Only a notebook revision names this.");
+    await land("e-notebook", "story.beat", [wsWrite("notebook/arcs/rosa.md", page)]);
+    const heldBeat = await beat("held");
+    const draft: LayerDraft = { id: "d-held", basis, kind: STORY_DRAFT, events: [{ type: STORY_DRAFT, data: { beats: [heldBeat], effects: [] } as unknown as JsonObject }] };
+    await t.h.host.storage.write(`${layerDir(chat)}/held.json`, JSON.stringify([{ draft, waitFor: ["g-in-flight"] }]), t.user);
+    const junk = await put("Nothing names this.");
+    const kept = [landedBeat.what, surface, mind, page, heldBeat.what];
+    const stored = (before.stored ?? 0) + kept.length + 1;
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored, referenced: stored - 1, found: 1, removed: 0 });
+    t.at(t.retention.unreferencedDays);
+    expect(await t.sweep.run(t.user)).toMatchObject({ ran: true, stored, referenced: stored - 1, removed: 1 });
+    expect(await t.blobs.get(t.user, junk)).toBeNull();
+    expect(await Promise.all(kept.map((hash) => t.blobs.get(t.user, hash)))).toEqual(["Only the landed beat names this.", "A shared surface.", "Only a mind write names this.", "Only a notebook revision names this.", "Only the held beat names this."]);
   });
 });

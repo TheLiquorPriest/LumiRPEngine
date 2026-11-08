@@ -27,7 +27,8 @@ import { NOTEBOOK_DIR } from "../../../engine/notebook";
 import { own } from "../../../engine/pack-kit";
 import { answerWhy, DepthAnswerError, spoken, type BeatText, type StageCost } from "../common";
 import type { NotebookRead } from "../notebook";
-import { ask, beatText, draftBeats, draftText, exposureForOf, namesOf, nextOf, notebookText, playedText, stagingsOf, stagingText, tag, type AuthorCtx, type DraftBeat, type ExposureFor, type Names, type PlayedMind, type StagingDraft } from "../scene/author";
+import type { AgentTool } from "../../agents/runtime";
+import { ARCHIVE_ROUNDS, ask, askReading, beatText, draftBeats, draftText, exposureForOf, namesOf, nextOf, notebookText, playedText, stagingsOf, stagingText, tag, talkOf, toolsText, type AuthorCtx, type DraftBeat, type ExposureFor, type Names, type PlayedMind, type StagingDraft } from "../scene/author";
 
 const text = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
 const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
@@ -179,14 +180,69 @@ export interface SettleInput extends AuthorCtx {
   beats: readonly { ref: string; beat: BeatText }[];
   /** Its world changes, in order, in words. */
   effects: readonly string[];
-  /** Every live beat on the chain from its story time on, as the author reads them: its pins. */
+  /** Every live beat on the chain from its story time on, as the author reads them: its pins (with `pages`, none: what each page came to stands in for them). */
   pins: readonly { ref: string; beat: BeatText }[];
+  /** Its pins read a page at a time, in story order (W5): each page's verdict. With any page contradicting it, a settlement that changes nothing is refused. */
+  pages?: readonly PageVerdict[];
   /**
    * The player's scene reaches what it holds (a walk-on, §4.6's invariant): what of the scene it
    * holds and from when, in words, and the scene's minute. The author settles it, drops it, or
    * re-dates it past the scene (`redate`); never a redraft.
    */
   walkOn?: { reach: readonly string[]; now: number };
+}
+
+/** What the author's reading of one page of a draft's pins came to (W5). */
+export interface PageVerdict {
+  /** 1-based, of `of`, in story order. */
+  page: number;
+  of: number;
+  /** The story times the page runs over, in words. */
+  span: string;
+  verdict: "holds" | "contradicts";
+  why: string;
+  forces: string[];
+}
+
+/** The verdicts of the pages read so far, as the author reads them. */
+function pagesText(pages: readonly PageVerdict[]): string {
+  return pages.map((p) => `- Page ${p.page} of ${p.of} (${p.span}): ${p.verdict === "holds" ? "it holds" : "it contradicts the draft"}${p.why ? `: ${p.why}` : ""}${p.forces.map((f) => `\n  - forces: ${f}`).join("")}`).join("\n");
+}
+
+/** The draft as every settlement reading shows it: the notebook, its summary, its episode and time, its beats and its world changes. */
+function draftData(input: Omit<SettleInput, "pins" | "pages">, names: Names): string[] {
+  const cal = calendarOf(input.world);
+  const e = input.episode;
+  return [
+    notebookText(input.notebook),
+    `The draft: ${input.summary || "(no summary)"}`,
+    `Its episode [${e.id}]: ${e.why || "(no reason given)"}. It happens from ${formatClock(cal, e.span[0])} (its beats from ${formatClock(cal, input.at)}); it is now ${formatClock(cal, input.walkOn?.now ?? input.state.clock)}.`,
+    `Its beats:\n${input.beats.map((b) => beatText(input.world, names, b.ref, b.beat)).join("\n") || "- (none)"}`,
+    `The world changes it would make:\n${input.effects.map((w, i) => `${i + 1}. ${w}`).join("\n") || "- (none)"}`,
+  ];
+}
+
+/**
+ * The author reads one page of a draft's pins (W5), in story order, with what the earlier pages came
+ * to and the chat's archive to hand (`tools`, JSON rounds as the setup reads them): whether the draft
+ * holds against it, or what on it contradicts the draft and what that forces. An answer that names
+ * neither fails (`DepthAnswerError`).
+ */
+export async function settlePage(input: Omit<SettleInput, "pins" | "pages"> & { page: { index: number; of: number; span: string; pins: readonly { ref: string; beat: BeatText }[] }; before: readonly PageVerdict[]; tools: readonly AgentTool[] }): Promise<PageVerdict & { reads: string[] }> {
+  const names = namesOf(input.world, input.state);
+  const { page, tools } = input;
+  const data = [
+    ...draftData(input, names),
+    `What the earlier pages came to:\n${input.before.length > 0 ? pagesText(input.before) : "- (this is the first page)"}`,
+    `Page ${page.index} of ${page.of} of its pins (${page.span}), in story order:\n${page.pins.map((b) => beatText(input.world, names, b.ref, b.beat)).join("\n") || "- (none)"}`,
+    tools.length > 0
+      ? `The chat's archive, its own prose as it was written, is yours to read before you answer: answer {"archive": [{"tool": a tool's name, then its arguments}]} alone, and what each read found comes back; up to ${ARCHIVE_ROUNDS} rounds of reading, then you answer this page. Its tools:\n${toolsText(tools)}`
+      : "The chat's archive can't be read for this page.",
+  ].join("\n\n");
+  const { answer: a, reads } = await askReading(input, talkOf(input, OFFSCREEN_TEXT.settlePage, data), tools, "this page");
+  const verdict = a.verdict === "holds" || a.verdict === "contradicts" ? a.verdict : null;
+  if (verdict === null) throw new DepthAnswerError("author", JSON.stringify(a));
+  return { page: page.index, of: page.of, span: page.span, verdict, why: answerWhy(a), forces: list(a.forces).map(text).filter((f) => f !== ""), reads };
 }
 
 /** How the author settles a draft's beat: kept as it is, kept with adjusted words, or left out. */
@@ -222,17 +278,11 @@ export interface SettleAnswer extends StageCost {
 export async function settleRead(input: SettleInput): Promise<SettleAnswer> {
   const { world, state } = input;
   const names = namesOf(world, state);
-  const cal = calendarOf(world);
-  const e = input.episode;
   const walkOn = input.walkOn;
   const data = [
-    notebookText(input.notebook),
-    `The draft: ${input.summary || "(no summary)"}`,
-    `Its episode [${e.id}]: ${e.why || "(no reason given)"}. It happens from ${formatClock(cal, e.span[0])} (its beats from ${formatClock(cal, input.at)}); it is now ${formatClock(cal, walkOn?.now ?? state.clock)}.`,
-    `Its beats:\n${input.beats.map((b) => beatText(world, names, b.ref, b.beat)).join("\n") || "- (none)"}`,
-    `The world changes it would make:\n${input.effects.map((w, i) => `${i + 1}. ${w}`).join("\n") || "- (none)"}`,
+    ...draftData(input, names),
     ...(walkOn ? [`What of this scene it holds:\n${walkOn.reach.map((r) => `- ${r}`).join("\n") || "- (nothing)"}`] : []),
-    `Its pins, every beat since its story time:\n${input.pins.map((b) => beatText(world, names, b.ref, b.beat)).join("\n") || "- (none)"}`,
+    input.pages ? `Its pins, every beat since its story time, read a page at a time in story order; what each page came to:\n${pagesText(input.pages)}` : `Its pins, every beat since its story time:\n${input.pins.map((b) => beatText(world, names, b.ref, b.beat)).join("\n") || "- (none)"}`,
   ].join("\n\n");
   const asked = await ask(input, walkOn ? OFFSCREEN_TEXT.walkOn : OFFSCREEN_TEXT.settle, data);
   const a = asked.answer;
@@ -284,6 +334,12 @@ export async function settleRead(input: SettleInput): Promise<SettleAnswer> {
     throw new DepthAnswerError("author", JSON.stringify(a));
   }
   const redraft = later ? { in: minutes } : null;
+  // A page found the draft contradicted (W5): it can't settle exactly as drafted. Said back, and asked again.
+  const contradicted = (input.pages ?? []).filter((p) => p.verdict === "contradicts");
+  if (verdict === "settle" && contradicted.length > 0 && beats.size === 0 && [...effects.values()].every((k) => k) && attempts.length === 0) {
+    asked.read.drop("verdict", a.verdict, `a settlement that changes nothing, though page${contradicted.length === 1 ? "" : "s"} ${contradicted.map((p) => p.page).join(", ")} found the draft contradicted`);
+    throw new DepthAnswerError("author", JSON.stringify(a));
+  }
   return {
     verdict,
     why: text(a.why),

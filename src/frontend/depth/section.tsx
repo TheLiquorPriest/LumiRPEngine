@@ -30,34 +30,43 @@ export function draftFocus(draft: string): string {
   return `${DRAFT_FOCUS}${draft}`;
 }
 
-/** The drawer's pause for depth's work between turns: Settings → Depth → Work between turns, whose off stops the work under way too once what the next turn reads is in. */
+/** One background lane's pause in the drawer (DEPTH-PLAN §6.2): Work between turns (Settings → Depth → Work between turns, whose off stops the work under way too once what the next turn reads is in) and Work off screen (its off puts off each settlement and episode not yet started). */
+type Lane = "on" | "offscreen";
+
+const LANE_LABEL: Readonly<Record<Lane, string>> = { on: "Work between turns", offscreen: "Work off screen" };
+
 function BackgroundPause() {
   const app = useApp();
-  const [on, setOn] = useState<boolean | null>(null);
+  const [lanes, setLanes] = useState<Record<Lane, boolean> | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let live = true;
     void app.request({ type: "lre.settings.get" }).then((result) => {
-      if (live && result) setOn(result.settings.depth.background.on);
+      if (live && result) setLanes({ on: result.settings.depth.background.on, offscreen: result.settings.depth.background.offscreen });
     });
     return () => {
       live = false;
     };
   }, []);
-  if (on === null) return null;
+  if (lanes === null) return null;
   return (
-    <HostSwitch
-      label="Work between turns"
-      checked={on}
-      disabled={busy}
-      onChange={(next) => {
-        setBusy(true);
-        void app.request({ type: "lre.settings.set", patch: { depth: { background: { on: next } } } }).then((result) => {
-          if (result) setOn(result.settings.depth.background.on);
-          setBusy(false);
-        });
-      }}
-    />
+    <div class="lre-inline lre-depth-lanes">
+      {(["on", "offscreen"] as const).map((lane) => (
+        <HostSwitch
+          key={lane}
+          label={LANE_LABEL[lane]}
+          checked={lanes[lane]}
+          disabled={busy || (lane === "offscreen" && !lanes.on)}
+          onChange={(next) => {
+            setBusy(true);
+            void app.request({ type: "lre.settings.set", patch: { depth: { background: lane === "on" ? { on: next } : { offscreen: next } } } }).then((result) => {
+              if (result) setLanes({ on: result.settings.depth.background.on, offscreen: result.settings.depth.background.offscreen });
+              setBusy(false);
+            });
+          }}
+        />
+      ))}
+    </div>
   );
 }
 

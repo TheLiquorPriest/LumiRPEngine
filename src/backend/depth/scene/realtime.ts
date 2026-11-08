@@ -35,14 +35,13 @@ import type { WorldState } from "../../../engine/state";
 import { povRender, type LivedPov, type PovStaging } from "../../character-agent";
 import { mindInput, povRefs } from "../../character-engine";
 import { renderPrompt } from "../../prompts";
+import { onScreenOut, onScreenWords } from "../budget";
 import { answerWhy, beatLine, DepthAnswerError, nameKey, putText, readAnswer, twice, type BeatText, type Blobs, type StagingText } from "../common";
 import type { ModelPort, PortUsage } from "../port";
 import type { Moment, NarrationOutcome, RealtimeCtx, RealtimeOutcome, RenderBeat, SceneRt } from "./contract";
 import { actBeatTexts, play, sceneRecall, sceneSoFar, type PlayAct, type PlayOut, type SceneRead } from "./play";
 import { attemptSeed, resolveAttempt, type AttemptOut } from "./resolve";
 
-/** The latest beats of the conversation's scene the watch reads (a context bound, not a judgment: the author's notebook holds the long view). */
-export const WATCH_BEATS = 40;
 
 const CHANNELS: readonly ExposureChannel[] = ["hearing", "sight", "touch"];
 
@@ -84,6 +83,8 @@ export interface WatchAnswer {
   end: string | null;
   /** Whether the poll runs after this line or waits for the conversation's end. */
   poll: "now" | "later";
+  /** Why the character can't see the player character as he speaks, where the author excluded him from its view; null: face to face, it sees him (S12). */
+  unseen: string | null;
   reasoning?: string;
   /** What the answer named that the exchange can't hold (someone not here, a world beat with nothing to sense), for the thinking block. */
   notes: string[];
@@ -179,7 +180,7 @@ export function readWatch(answer: Record<string, unknown> | null, ctx: { world: 
   if (!answer) return null;
   const notes: string[] = [];
   const reasoning = nonBlank(answerWhy(answer));
-  const base = { others: [] as WatchPerceiver[], world: [] as WatchWorld[], end: nonBlank(answer.end), poll: answer.poll === "later" ? ("later" as const) : ("now" as const), ...(reasoning !== null ? { reasoning } : {}), notes };
+  const base = { others: [] as WatchPerceiver[], world: [] as WatchWorld[], end: nonBlank(answer.end), poll: answer.poll === "later" ? ("later" as const) : ("now" as const), unseen: nonBlank(answer.unseen), ...(reasoning !== null ? { reasoning } : {}), notes };
   const takeover = nonBlank(answer.takeover);
   if (takeover !== null) return { ...base, takeover, line: null };
   const rawLine = typeof answer.line === "object" && answer.line !== null ? (answer.line as Record<string, unknown>) : null;
@@ -381,6 +382,13 @@ export async function realtimeTurn(ctx: RealtimeCtx): Promise<RealtimeOutcome> {
     say(why);
     return { kind: "takeover", why, put: `${name}'s real-time line, played by the author in a scene rather than their own agent: ${bind.words}` };
   }
+  // The on-screen allowance spent (W17): no one plays as their own agent this story interval, so the line plays as a scene, where the author plays them.
+  if (ctx.onScreen && onScreenOut(ctx.onScreen)) {
+    const words = onScreenWords(ctx.onScreen);
+    const why = `${words} So ${name} doesn't answer this line as their own agent: the author plays them in a scene.`;
+    say(why);
+    return { kind: "takeover", why, put: `${name}'s real-time line, played by the author in a scene rather than their own agent: the on-screen allowance is spent` };
+  }
 
   sink.progress(renderPrompt(REALTIME_TEXT.lineHears, texts, { name }));
   const t0 = performance.now();
@@ -388,7 +396,8 @@ export async function realtimeTurn(ctx: RealtimeCtx): Promise<RealtimeOutcome> {
   // The conversation's scene: where everyone is, and its beats so far.
   const sceneStaging = stagingBefore(at.story, Number.MAX_SAFE_INTEGER, ctx.scene);
   const sceneBeats = at.story.beats.filter((p) => p.beat.scene === ctx.scene);
-  const recent = sceneBeats.slice(-WATCH_BEATS);
+  // The latest beats the watch reads: Settings → Depth's `reads.watchBeats` (a context bound, not a judgment: the author's notebook holds the long view).
+  const recent = sceneBeats.slice(-ctx.settings.depth.reads.watchBeats);
   const stored = await textsOf(ctx.rt, userId, [
     ...[...sceneStaging.values()].flatMap((s) => [s.where, s.doing, ...(s.occluded !== undefined ? [s.occluded] : [])]),
     ...recent.flatMap((p) => [p.beat.what, p.beat.surface, ...(p.beat.quotes !== undefined ? [p.beat.quotes] : [])]),
@@ -404,33 +413,42 @@ export async function realtimeTurn(ctx: RealtimeCtx): Promise<RealtimeOutcome> {
   const clock = state.clock;
   const order = sceneBeats.reduce((n, p) => Math.max(n, p.beat.order + 1), 0);
 
-  // What the character hears, verbatim, and what it can see of him.
+  // What the character hears, verbatim, and what it can see of him: face to face it sees him as he
+  // speaks, by default (S12), unless the world places the two apart (heard alone) or the author's
+  // watch excludes him from its view, when it hears only the words he says aloud.
   const lineId = beatId(ctx.turn, "talk", "line");
   const answerId = beatId(ctx.turn, "talk", "answer");
   const mind = await mindInput(ctx.rt, userId, at, who, ctx.settings);
   const pcAs = mind.known?.[pc] ?? "someone you don't know";
-  const heard: LivedPov = {
+  const [pcAt, withAt] = [placeOfEntity(state, pc), placeOfEntity(state, who)];
+  const apart = (pcAt !== null || withAt !== null) && !together(world, pcAt, withAt);
+  const lived = (how: "seen" | "heard" | "unseen", quotes: string): LivedPov => ({
     beat: lineId,
     at: clock,
     when: formatClock(calendarOf(world), clock),
     where: own(world.places, place)?.name ?? place,
-    channel: "hearing",
+    channel: how === "seen" ? "sight" : "hearing",
     whole: true,
     // His words and what he does as he says them come in the line itself; his staging is the author's, never the character's to read (§4.2).
-    text: `${pcAs} speaks to you.`,
-    quotes: ctx.line,
-  };
+    text: how === "seen" ? `${pcAs} speaks to you, face to face: you see him as well as hear him.` : how === "unseen" ? `${pcAs} speaks to you, out of your sight: you hear only his voice.` : `${pcAs} speaks to you.`,
+    quotes,
+  });
   const read: SceneRead = { world, state, story: at.story };
-  const so = await sceneSoFar(ctx.rt.blobs, userId, read, who);
+  const so = await sceneSoFar(ctx.rt.blobs, userId, read, who, { limit: ctx.settings.depth.reached });
 
   // The play and the watch at once. A takeover stops the play: its answer is dropped either way.
-  const playStop = new AbortController();
+  let playStop = new AbortController();
   const onStop = (): void => playStop.abort(ctx.signal.reason);
   ctx.signal.addEventListener("abort", onStop, { once: true });
-  const playStarted = performance.now();
-  const playing = play(realtimePort(ctx.model), { ...mind, beat: answerId, scene: so.scene, reached: [...so.reached, heard], recall: sceneRecall(ctx.rt.blobs, userId, read, who), signal: playStop.signal }).then((out) => ({ out, ms: performance.now() - playStarted }));
-  // Nothing awaits the play until the watch has answered; its failure is read then.
-  playing.catch(() => undefined);
+  const startPlay = (heard: LivedPov): Promise<{ out: PlayOut; ms: number }> => {
+    playStop = new AbortController();
+    const started = performance.now();
+    const p = play(realtimePort(ctx.model), { ...mind, beat: answerId, scene: so.scene, reached: [...so.reached, heard], recall: sceneRecall(ctx.rt.blobs, userId, read, who), signal: playStop.signal }).then((out) => ({ out, ms: performance.now() - started }));
+    // Nothing awaits the play until the watch has answered; its failure is read then.
+    p.catch(() => undefined);
+    return p;
+  };
+  let playing = startPlay(lived(apart ? "heard" : "seen", ctx.line));
   const watchStarted = performance.now();
   let watched: WatchResult;
   try {
@@ -451,6 +469,20 @@ export async function realtimeTurn(ctx: RealtimeCtx): Promise<RealtimeOutcome> {
     thought(w?.reasoning ?? "");
     say(renderPrompt(REALTIME_TEXT.lineTaken, texts, { name, why }));
     return { kind: "takeover", why };
+  }
+  // The author excluded him from the character's view: the answer it gave seeing him is dropped, and it answers again from his voice alone.
+  if (w.unseen !== null && !apart) {
+    playStop.abort(new Error("the author excluded him from view"));
+    const said = w.line?.said ?? null;
+    if (said === null) {
+      ctx.signal.removeEventListener("abort", onStop);
+      if (ctx.signal.aborted) return STOPPED;
+      const why = `${name} can't see him (${w.unseen}), and he says nothing aloud, so the author reads the line in a scene.`;
+      say(renderPrompt(REALTIME_TEXT.lineTaken, texts, { name, why }));
+      return { kind: "takeover", why };
+    }
+    thought(`${name} can't see ${nameOf(world, state, pc)} as he speaks: ${w.unseen}`);
+    playing = startPlay(lived("unseen", said));
   }
   let played: { out: PlayOut; ms: number };
   try {
@@ -542,7 +574,8 @@ async function exchange(ctx: RealtimeCtx, x: ExchangeInput): Promise<RealtimeOut
     surface: putText(blobs, ctx.line),
     ...(line.said !== null ? { quotes: putText(blobs, line.said) } : {}),
     addressed: [who],
-    exposure: [{ who: pc, channel: lineChannel, reach: "whole" }, { who, ...heard(line.said !== null), reach: "whole" }, ...exposures(w.others, world, state)],
+    // Excluded from its view by the author (S12), the character only hears his words.
+    exposure: [{ who: pc, channel: lineChannel, reach: "whole" }, { who, ...(w.unseen !== null ? { channel: "hearing" as const } : heard(line.said !== null)), reach: "whole" }, ...exposures(w.others, world, state)],
     by: { turn: ctx.turn, decided: "player" },
   };
   const answerTexts = actBeatTexts(act, name);
@@ -559,6 +592,7 @@ async function exchange(ctx: RealtimeCtx, x: ExchangeInput): Promise<RealtimeOut
     const started = performance.now();
     const out = await resolveAttempt(ctx.model, {
       registry: ctx.rt.registry,
+      quoteBounds: ctx.settings.depth.reads,
       world,
       state,
       act: { actor: who, surface: answerTexts.surface, ...(answerTexts.quotes !== undefined ? { quotes: answerTexts.quotes } : {}), attempt: act.attempt },
@@ -668,8 +702,7 @@ async function exchange(ctx: RealtimeCtx, x: ExchangeInput): Promise<RealtimeOut
     if (partial.length === 0) return;
     const quotes = beat.quotes !== undefined ? blobs[beat.quotes] : undefined;
     const refs = povRefs(ctx.rt, at, partial, [...presentAt(beat), ...povStaging.map((s) => s.who)]);
-    const deed = beat.deed !== undefined ? blobs[beat.deed] : undefined;
-    const r = await povRender(ctx.model, { beat: { id: beat.id, surface: blobs[beat.surface] ?? "", ...(deed !== undefined ? { deed } : {}), ...(quotes !== undefined ? { quotes } : {}), actors: beat.actors, exposure: beat.exposure }, staging: povStaging, who: partial, refs, texts, signal: ctx.signal });
+    const r = await povRender(ctx.model, { beat: { id: beat.id, surface: blobs[beat.surface] ?? "", ...(quotes !== undefined ? { quotes } : {}), actors: beat.actors, exposure: beat.exposure }, staging: povStaging, who: partial, refs, texts, signal: ctx.signal });
     beat.exposure = beat.exposure.map((e) => {
       const pov = partial.includes(e.who) ? r.povs[e.who] : undefined;
       return pov !== undefined ? { ...e, pov: putText(blobs, pov) } : e;

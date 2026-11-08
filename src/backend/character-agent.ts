@@ -23,7 +23,6 @@
 import { CHARACTER_TEXT } from "../shared/character-prompts";
 import {
   MEMORIES_DIR,
-  heardAlone,
   MIND_FILE_NAMES,
   PEOPLE_DIR,
   memoryName,
@@ -159,7 +158,7 @@ export interface PovStaging {
  * person there by the name it knows them by, or, for someone it doesn't know, by no name: only as
  * they appear. `absent`: the names it knows of people who weren't there, which its point of view may
  * not use (`unseenNames`). `strangers`: the names of those there it doesn't know, which never reach
- * the render and which a fallback tells as "someone" (`povFallback`). `world`: the names of the world,
+ * the render. `world`: the names of the world,
  * its places and its things. A word that is one of theirs or of anyone there's never counts alone as
  * naming someone who wasn't there.
  */
@@ -174,14 +173,14 @@ export interface PovRefs {
 }
 
 /**
- * The point-of-view render's input (§4.2): what was there to sense and the exact words, what its
- * actors did as they did it (`deed`, shown only to those whose own act it is), who acted and who it
- * reached (by what and how fully), where everyone was (each perceiver shown only what its senses
- * reached of it, `stagingFor`), and how each perceiver may name each person there. It has no place
- * for the beat's truth, a mind or a take, so the render can't leak what it never sees.
+ * The point-of-view render's input (§4.2): what was there to sense and the exact words, who acted
+ * and who it reached (by what and how fully), where everyone was (each perceiver shown only what its
+ * senses reached of it, `stagingFor`), and how each perceiver may name each person there. It has no
+ * place for the beat's truth (`what`), its deed, a mind or a take, so the render can't leak what it
+ * never sees: an actor lives its own deed through `reachOf`, never through a point of view.
  */
 export interface PovInput {
-  beat: { id: string; surface: string; deed?: string; quotes?: string; actors: readonly EntityId[]; exposure: readonly Pick<Exposure, "who" | "channel" | "also" | "reach">[] };
+  beat: { id: string; surface: string; quotes?: string; actors: readonly EntityId[]; exposure: readonly Pick<Exposure, "who" | "channel" | "also" | "reach">[] };
   staging: readonly PovStaging[];
   /** The people whose points of view to write. */
   who: readonly EntityId[];
@@ -192,10 +191,10 @@ export interface PovInput {
 }
 
 export interface PovOut {
-  /** A point of view for everyone asked: the render's, else the plain one it falls back to (`fellBack`). */
+  /** A point of view for everyone asked whose the render wrote, or the GM's check accepted or set right; anyone else is left out (`pending`). */
   povs: Record<EntityId, string>;
-  /** Those whose point of view the render, asked twice, wrote naming someone who wasn't there (`unseenNames`), with the names, or didn't write (no names): theirs is the fallback (`povFallback`), never left out. */
-  fellBack: Record<EntityId, string[]>;
+  /** Those left without a point of view, unwritten: the render, asked twice, wrote theirs naming someone who wasn't there (`unseenNames`, with the names) and the GM's check neither accepted nor set it right, or didn't write it (no names). No rule writes one in its place. */
+  pending: Record<EntityId, string[]>;
   reasoning?: string;
   usage: PortUsage;
 }
@@ -301,7 +300,7 @@ export function livedText(lived: readonly LivedPov[], o: { ids?: boolean; names?
 }
 
 /** The model's call, its text and its answer as an object (null when the answer holds none, which its keeper is told), with the `Reading` its fields are read through. */
-async function ask(model: ModelPort, role: "character" | "pov", messages: PortMessage[], signal: AbortSignal | undefined): Promise<{ answer: Record<string, unknown> | null; read: Reading; text: string; reasoning?: string; usage: PortUsage }> {
+async function ask(model: ModelPort, role: "character" | "pov" | "check", messages: PortMessage[], signal: AbortSignal | undefined): Promise<{ answer: Record<string, unknown> | null; read: Reading; text: string; reasoning?: string; usage: PortUsage }> {
   const r = await model(role, messages, { json: true, ...(signal ? { signal } : {}) });
   const { answer, read } = readAnswer(role, r);
   return { answer, read, text: r.text, ...(r.reasoning ? { reasoning: r.reasoning } : {}), usage: addUsage(NO_USAGE, r.usage) };
@@ -416,7 +415,7 @@ export class Writes {
   }
 
   /** Its people files from `field` of the answer: each by the id or the name it knows them by, its own words where it knows no id; never one of itself. */
-  people(field: string, raw: unknown, lived?: readonly string[]): void {
+  people(field: string, raw: unknown, lived?: readonly string[], citedBy?: (id: string) => { lived?: readonly string[] }): void {
     const files = this.read.record(field, raw);
     if (!files) return;
     for (const [key, value] of Object.entries(files)) {
@@ -429,7 +428,8 @@ export class Writes {
         continue;
       }
       const path = personPath(this.input.who, id);
-      this.file(path.slice(mindDir(this.input.who).length), path, text, { ...(lived ? { lived } : {}), about: [id] });
+      const cited = citedBy?.(id).lived ?? lived;
+      this.file(path.slice(mindDir(this.input.who).length), path, text, { ...(cited ? { lived: cited } : {}), about: [id] });
     }
   }
 
@@ -536,12 +536,25 @@ function keepAnswer(input: CatchUpInput, mode: MindMode, answer: Record<string, 
     const at = Math.min(...lived.map((id) => minute.get(id) ?? input.at));
     w.memory(text, lived, w.about(`${g}.about`, m.about), Number.isFinite(at) ? at : input.at);
   }
-  w.single("beliefs", "beliefs", answer.beliefs);
-  w.people("people", answer.people);
+  // Each other file cites the beats of the batch its answer says it draws on (`cites`, by the answer's field, a person by their id or name); one it names none for cites the whole batch.
+  const cites = read.record("cites", answer.cites ?? {}) ?? {};
+  const citedBy = (key: string): { lived?: string[] } => {
+    const raw = hasOwn(cites, key) ? cites[key] : Object.entries(cites).find(([k]) => k !== key && w.person(k) === key)?.[1];
+    if (raw === undefined) return {};
+    const out: string[] = [];
+    for (const [k, id] of read.list(`cites[${JSON.stringify(key)}]`, raw).entries()) {
+      const beat = read.text(`cites[${JSON.stringify(key)}][${k}]`, id);
+      if (minute.has(beat)) out.push(beat);
+      else read.drop(`cites[${JSON.stringify(key)}][${k}]`, beat, "no beat of its batch");
+    }
+    return out.length > 0 ? { lived: [...new Set(out)] } : {};
+  };
+  w.single("beliefs", "beliefs", answer.beliefs, citedBy("beliefs"));
+  w.people("people", answer.people, undefined, citedBy);
   const plans = w.plans("planned", answer.planned);
-  w.single("plans", "plans", w.plansText("plans", answer.plans, plans), { plans });
-  w.single("now", "now", answer.now);
-  w.single("mind", "on_my_mind", answer.on_my_mind);
+  w.single("plans", "plans", w.plansText("plans", answer.plans, plans), { plans, ...citedBy("plans") });
+  w.single("now", "now", answer.now, citedBy("now"));
+  w.single("mind", "on_my_mind", answer.on_my_mind, citedBy("on_my_mind"));
   return w;
 }
 
@@ -701,14 +714,13 @@ function stagingFor(input: PovInput, who: EntityId): string[] {
 
 /**
  * The render's request: what was there to sense and the exact words, and for each person to write,
- * how it reached them (and whether it was their own act, with what they did as they did it where the
- * beat says), what they could sense of where everyone was (`stagingFor`, by id), and how they may
- * name each person of the moment: themselves as "you", someone they know by that name, anyone else by
- * no name at all. No name reaches the render but those, and no one's staging but as far as each
- * perceiver's senses reached.
+ * how it reached them (and whether it was their own act), what they could sense of where everyone
+ * was (`stagingFor`, by id), and how they may name each person of the moment: themselves as "you",
+ * someone they know by that name, anyone else by no name at all. No name reaches the render but
+ * those, no one's staging but as far as each perceiver's senses reached, and never the beat's `what`
+ * or deed.
  */
 function povAsk(input: PovInput, texts: PromptTexts): string {
-  const deed = input.beat.deed?.trim() ?? "";
   const each = input.who.map((who) => {
     const x = input.beat.exposure.find((e) => e.who === who);
     const own = input.beat.actors.includes(who);
@@ -717,7 +729,6 @@ function povAsk(input: PovInput, texts: PromptTexts): string {
     const others = Object.entries(input.refs[who]?.present ?? {}).map(([id, name]) => `- ${id}: ${name ?? "no name (someone they don't know)"}`);
     return [
       `### ${who}${how.length > 0 ? `: ${how.join("; ")}` : ""}`,
-      ...(own && deed !== "" ? [`What they did and said, as they did it: ${deed}`] : []),
       ...(staged.length > 0 ? ["What they could sense of where everyone was as it began:", ...staged] : []),
       "Whom they may name, and how:",
       `- ${who}: you`,
@@ -800,52 +811,10 @@ function unseenIn(povs: Readonly<Record<EntityId, string>>, input: PovInput): Re
   return out;
 }
 
-/** How something reached someone, in a fallback's words. */
-const REACHED_WORDS: Readonly<Record<string, string>> = { sight: "by sight", hearing: "by hearing", touch: "by touch", told: "by word of mouth", message: "by message", rumor: "by rumor", record: "from a record" };
-
-/**
- * `text` with each person of `strangers` told as "someone" ("Someone" where a sentence starts),
- * outside the words it quotes, which keep the names said or written: their whole names, then each
- * word of them that is no word of a name in `keep` (anyone else's, or the world's), which may be
- * theirs.
- */
-function unnamed(text: string, strangers: readonly string[], keep: readonly string[]): string {
-  const kept = new Set(keep.flatMap(nameWords).map((w) => w.toLowerCase()));
-  const words = [...new Set(strangers.flatMap((name) => nameWords(name).filter((w, i) => i === 0 || !kept.has(w.toLowerCase()))))].sort((a, b) => b.length - a.length);
-  const trimmed = text.trim();
-  if (words.length === 0) return trimmed;
-  const pattern = new RegExp(words.map(wordPattern).join("|"), "gu");
-  let out = "";
-  for (const [i, part] of trimmed.split(/(“[^”]*”|"[^"]*")/u).entries()) {
-    out += i % 2 === 1 ? part : part.replace(pattern, (_m: string, at: number) => (/(?:^|[.!?…]["”’)]?)\s*$/u.test(out + part.slice(0, at)) ? "Someone" : "someone"));
-  }
-  return out;
-}
-
-/**
- * What reaches `who` of a beat when the render, asked twice, gave it no point of view it could keep
- * (§4.2): the beat is never lost to it, and no name it may not use reaches it. A message it received:
- * only that one came (in part where it was). Anything that reached it in part, its own act with no
- * deed included: only that something did, by what way. Its own act as its deed has it, or a whole
- * reach as what was there to sense: that text, with everyone there it doesn't know told as
- * "someone" (`unnamed`).
- */
-export function povFallback(input: Pick<PovInput, "beat" | "refs">, who: EntityId): string {
-  const x = input.beat.exposure.find((e) => e.who === who);
-  const own = input.beat.actors.includes(who);
-  const deed = own && input.beat.deed !== undefined && input.beat.deed.trim() !== "" ? input.beat.deed : undefined;
-  if (x?.channel === "message" && !own) return x.reach === "partial" ? "A message reached you, only in part." : "A message reached you.";
-  if (x?.reach === "partial" && deed === undefined) return `Something reached you ${exposureChannels(x).map((c) => REACHED_WORDS[c] ?? `by ${c}`).join(" and ")}, only in part.`;
-  // Heard alone, never what there was to see (LIVE3c L3c-4): its exact words, else only that something was heard.
-  if (x !== undefined && heardAlone(input.beat, who)) return input.beat.quotes && input.beat.quotes.trim() !== "" ? `You hear: “${input.beat.quotes.trim()}”` : "Something reached you by hearing.";
-  const refs = input.refs[who];
-  return unnamed(deed ?? input.beat.surface, refs?.strangers ?? [], refs ? [refs.self, ...Object.values(refs.present).filter((n): n is string => n !== null), ...refs.absent, ...refs.world] : []);
-}
-
-/** What a stage says of a point of view the render fell back on (`PovOut.fellBack`), for `who` of `beat` ("beat b3", "the amended beat b3"). */
+/** What a stage says of a point of view left pending (`PovOut.pending`), for `who` of `beat` ("beat b3", "the amended beat b3"). */
 export function fellBackLine(who: string, beat: string, names: readonly string[]): string {
-  const why = names.length > 0 ? `The point of view for ${who} of ${beat} named someone who wasn't there (${names.join(", ")}), and again when redrafted` : `No point of view was written for ${who} of ${beat}, asked twice`;
-  return `${why}: in its place ${who} gets a plain one that names no one they may not name.`;
+  const why = names.length > 0 ? `The point of view for ${who} of ${beat} named someone who wasn't there (${names.join(", ")}), again when redrafted, and the GM's check couldn't set it right` : `No point of view was written for ${who} of ${beat}, asked twice`;
+  return `${why}: it is left unwritten, and no rule writes one in its place.`;
 }
 
 /**
@@ -854,14 +823,16 @@ export function fellBackLine(who: string, beat: string, names: readonly string[]
  * in the order it reached their senses, without ranking what matters: their own act from the inside,
  * a message they received as its words. One call covers them all. Each is told exactly how they may
  * name each person of the moment (`refs`), and nobody's name reaches the render otherwise. A point of
- * view that names someone who wasn't there with a name its perceiver knows (`unseenNames`) is
- * redrafted once, told which names, and anyone the answer left out is asked for again in the same
- * call; one still naming them, or still missing, gets the plain fallback (`povFallback`, `fellBack`),
- * so everyone asked has one. Truth-blind by construction: its input holds only the surface, the exact
- * words, an actor's own deed, who acted and was reached, and what each could sense of the staging.
+ * view that names someone who wasn't there with a name its perceiver knows (`unseenNames`, only a
+ * trigger) is redrafted once, told which names, and anyone the answer left out is asked for again in
+ * the same call. One still naming them goes, with the names, to the GM's render check (`povCheck`),
+ * which accepts it, cuts the names or rewrites it; one the check doesn't return, or still missing,
+ * is left out, unwritten (`pending`): no rule writes a point of view. Truth-blind
+ * by construction: its input holds only the surface, the exact words, who acted and was reached, and
+ * what each could sense of the staging.
  */
 export async function povRender(model: ModelPort, input: PovInput): Promise<PovOut> {
-  if (input.who.length === 0) return { povs: {}, fellBack: {}, usage: NO_USAGE };
+  if (input.who.length === 0) return { povs: {}, pending: {}, usage: NO_USAGE };
   const texts = input.texts ?? TEXTS;
   const messages: PortMessage[] = [
     { role: "system", content: renderPrompt(CHARACTER_TEXT.pov, texts, {}) },
@@ -871,7 +842,7 @@ export async function povRender(model: ModelPort, input: PovInput): Promise<PovO
   const povs = povsIn(r.answer, input.who, r.read);
   const unseen = unseenIn(povs, input);
   const again = input.who.filter((who) => povs[who] === undefined || unseen[who] !== undefined);
-  if (again.length === 0) return { povs, fellBack: {}, ...(r.reasoning ? { reasoning: r.reasoning } : {}), usage: r.usage };
+  if (again.length === 0) return { povs, pending: {}, ...(r.reasoning ? { reasoning: r.reasoning } : {}), usage: r.usage };
   for (const who of again) delete povs[who];
   const named = again.filter((who) => unseen[who] !== undefined);
   const missing = again.filter((who) => unseen[who] === undefined);
@@ -883,17 +854,40 @@ export async function povRender(model: ModelPort, input: PovInput): Promise<PovO
   const r2 = await ask(model, "pov", [...messages, { role: "assistant", content: r.text }, { role: "user", content: redo.join("\n\n") }], input.signal);
   const second = povsIn(r2.answer, again, r2.read);
   const still = unseenIn(second, input);
-  const fellBack: Record<EntityId, string[]> = {};
+  for (const who of again) if (second[who] !== undefined && still[who] === undefined) povs[who] = second[who];
+  const flagged = again.filter((who) => second[who] !== undefined && still[who] !== undefined);
+  const checked = flagged.length > 0 ? await povCheck(model, input, texts, Object.fromEntries(flagged.map((who) => [who, { text: second[who] ?? "", names: still[who] ?? [] }]))) : undefined;
+  const pending: Record<EntityId, string[]> = {};
   for (const who of again) {
-    const text = second[who];
-    if (text !== undefined && still[who] === undefined) povs[who] = text;
-    else {
-      fellBack[who] = still[who] ?? [];
-      povs[who] = povFallback(input, who);
-    }
+    if (povs[who] !== undefined) continue;
+    const text = checked?.povs[who];
+    if (text !== undefined) povs[who] = text;
+    else pending[who] = still[who] ?? [];
   }
-  const reasoning = [r.reasoning, r2.reasoning].filter((s): s is string => s !== undefined && s !== "").join("\n\n");
-  return { povs, fellBack, ...(reasoning !== "" ? { reasoning } : {}), usage: addUsage(r.usage, r2.usage) };
+  const reasoning = [r.reasoning, r2.reasoning, checked?.reasoning].filter((s): s is string => s !== undefined && s !== "").join("\n\n");
+  return { povs, pending, ...(reasoning !== "" ? { reasoning } : {}), usage: addUsage(addUsage(r.usage, r2.usage), checked?.usage ?? NO_USAGE) };
+}
+
+/**
+ * The GM's render check of points of view the render, asked twice, still wrote naming someone who
+ * wasn't there (§4.2, §5.2): on the render check's model, out of world, it reads the render's own
+ * request (no truth, mind or take) and each point of view with the names flagged in it, and accepts
+ * it, cuts the names or rewrites it. One it leaves out, or a check that fails or doesn't read, sets
+ * nothing right: those are left unwritten.
+ */
+async function povCheck(model: ModelPort, input: PovInput, texts: PromptTexts, flagged: Readonly<Record<EntityId, { text: string; names: readonly string[] }>>): Promise<{ povs: Record<EntityId, string>; reasoning?: string; usage: PortUsage }> {
+  const who = Object.keys(flagged);
+  const each = who.map((id) => `### ${id}\nNames of people who weren't there: ${(flagged[id]?.names ?? []).join(", ")}\n${flagged[id]?.text ?? ""}`);
+  try {
+    const r = await ask(model, "check", [
+      { role: "system", content: renderPrompt(CHARACTER_TEXT.povCheck, texts, {}) },
+      { role: "user", content: `${povAsk(input, texts)}\n\n## The points of view to check\n${each.join("\n\n")}` },
+    ], input.signal);
+    return { povs: povsIn(r.answer, who, r.read), ...(r.reasoning ? { reasoning: r.reasoning } : {}), usage: r.usage };
+  } catch (e) {
+    if (input.signal?.aborted) throw e;
+    return { povs: {}, usage: NO_USAGE };
+  }
 }
 
 // ------------------------------------------------------------------ seeding the core (D-17)

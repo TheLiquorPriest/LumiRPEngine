@@ -33,7 +33,7 @@ import { giveWay } from "./give-way";
 import type { ContextHandlerInput, ContextVerdict, GenerationEndedEvent, GenerationStartedEvent, HostGenerationType, HostMessage, HostPort } from "./host";
 import { setAside } from "./stored-json";
 import { ancestorOf, LayerStore, type HeldDraft } from "./layer-store";
-import { carryOf, LAYER_CARRY_KEY } from "./layer-carry";
+import { carryOf, LAYER_CARRY_KEY, storedText } from "./layer-carry";
 import type { Diagnostics } from "./diagnostics";
 import { messageOf } from "./diagnostics";
 import { inTurn, outsideTurns, type TurnFrame } from "./turn-frame";
@@ -903,8 +903,6 @@ export class LedgerService {
   private readonly chats = new Map<ChatId, ChatSlot>();
   private readonly unsubscribe: (() => void)[] = [];
   private outstanding = 0;
-  /** Chats whose layer grew past what their metadata carries (`layer-carry.ts`): marked so once, then left. */
-  private readonly carriedOver = new Set<ChatId>();
   /** Chats that landed in their layer since it was last carried in their metadata. */
   private readonly carryDirty = new Set<ChatId>();
   /** Every operation failure, also logged to the host. */
@@ -1097,7 +1095,10 @@ export class LedgerService {
             const kind = pending?.kind ?? (halt ? KIND[halt.type] : "normal");
             const messageId = pending?.messageId ?? pending?.continueHead ?? undefined;
             if (scened && userId && messageId) {
-              const read = (): Promise<void> => this.commitReply(core, observed, e.chatId, userId, e.generationId, messageId, e.content);
+              // A Continue's stop names only what it added: its scene commits on the whole message, as its end does (DEPTH-PLAN §3.9).
+              const whole = kind === "continue" ? observed.find((m) => m.id === messageId) : undefined;
+              const content = whole ? (whole.swipes[whole.swipeId] ?? e.content) : e.content;
+              const read = (): Promise<void> => this.commitReply(core, observed, e.chatId, userId, e.generationId, messageId, content);
               await (taken ? inTurn(taken.frame, read) : read());
             } else core.stopped({ generationId: e.generationId, content: e.content }, observed);
             if (halt && userId) {
@@ -2728,16 +2729,19 @@ export class LedgerService {
 
   /**
    * Keeps the chat's layer carried in its metadata, so a Lumiverse export takes it along
-   * (`layer-carry.ts`): once a turn, and only when something landed since. A layer past the cap is
-   * marked so, carrying nothing, and left (entries only ever grow); the chat keeps the export warning.
+   * (`layer-carry.ts`), with the texts its entries name: once a turn, and only when something landed
+   * since. A layer past the cap carries its newest entries that fit; the chat keeps the export warning.
    */
   private async carry(chatId: ChatId, core: LedgerCore, observed: readonly ChainMessage[]): Promise<void> {
     const slot = this.chats.get(chatId);
     const runSeed = core.journal.run?.runSeed;
-    if (!slot || !runSeed || !this.carryDirty.delete(chatId) || this.carriedOver.has(chatId)) return;
-    const carry = carryOf(chatId, runSeed, slot.layer.foldEntries(), core.chain(observed));
-    if ("over" in carry) this.carriedOver.add(chatId);
-    await this.host.chats.mergeChatMetadata(chatId, { [LAYER_CARRY_KEY]: JSON.parse(JSON.stringify(carry)) as JsonValue }, slot.userId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${chatId}: its layer wasn't carried in its metadata (${error instanceof Error ? error.message : String(error)})`, slot.userId));
+    if (!slot || !runSeed || !this.carryDirty.delete(chatId)) return;
+    try {
+      const carry = await carryOf(chatId, runSeed, slot.layer.foldEntries(), core.chain(observed), (hash) => storedText(this.host, slot.userId, hash));
+      await this.host.chats.mergeChatMetadata(chatId, { [LAYER_CARRY_KEY]: JSON.parse(JSON.stringify(carry)) as JsonValue }, slot.userId);
+    } catch (error) {
+      this.host.log("warn", `[LumiRPEngine] chat ${chatId}: its layer wasn't carried in its metadata (${error instanceof Error ? error.message : String(error)})`, slot.userId);
+    }
   }
 
   /**

@@ -56,6 +56,12 @@ function sessionText(report: RelayReport, now: number): string {
   return left < 2 * 86_400_000 ? `Its Lumiverse session ends ${dateText(expiresAt)}; it renews daily while the relay runs.` : `Its Lumiverse session lasts until ${dateText(expiresAt)}, renewed daily while it runs.`;
 }
 
+/** Whether the relay's Lumiverse session ends within two days: the warning with its fix shows then. */
+function nearExpiry(report: RelayReport | null, now: number): boolean {
+  const expiresAt = report?.session.valid === true ? report.session.expiresAt : null;
+  return expiresAt !== null && Date.parse(expiresAt) - now < 2 * 86_400_000;
+}
+
 /** A line to copy: what it is for, the line, Copy, and a word on it. */
 function CopyLine(props: { id: string; label: string; text: string; help?: ComponentChildren; copy(text: string): void }) {
   return (
@@ -177,6 +183,14 @@ export function RelayRow(props: { relay: LoopbackRelayView; mine: boolean; build
           {r.lines.login !== null ? <CopyLine id={`login-${r.name}`} label="Sign in again" text={r.lines.login} copy={props.copy} /> : null}
         </div>
       ) : null}
+      {!r.signIn && nearExpiry(report, props.now) ? (
+        <div data-lre-loopback-expiring>
+          <Banner tone="warn" title="Its session ends soon">
+            Its Lumiverse session ends {report?.session.expiresAt ? dateText(report.session.expiresAt) : "soon"}. The relay renews it daily while it runs, so a session this close to its end means renewal hasn't happened: sign it in again before then on the machine it runs on{r.lines.login === null ? `: lumirpengine loopback login --name ${r.name}` : ":"}
+          </Banner>
+          {r.lines.login !== null ? <CopyLine id={`renew-${r.name}`} label="Sign in again" text={r.lines.login} copy={props.copy} /> : null}
+        </div>
+      ) : null}
       {r.update && r.lines.update !== null ? <CopyLine id={`update-${r.name}`} label="Update and restart" text={r.lines.update} help="Its copy is older than this LumiRPEngine: this line installs the new one and restarts it." copy={props.copy} /> : null}
       {fixable ? (
         <div data-lre-loopback-fix>
@@ -227,7 +241,7 @@ function ConnectionSection(props: { page: LoopbackPage; busy: boolean; act(act: 
           {names.length > 0 ? `LumiRPEngine treats ${names.join(", ")} as the loopback.` : "None of your connections is the loopback yet."} A world chat on it plays its turn inside the reply; the narrator writes on the model you name in Settings → Depth → Narrator, never on the loopback.
         </p>
         <p class="lre-set-note" data-lre-loopback-pin>
-          Opting a world chat into depth pins it to the loopback connection. Lumiverse's "always use the active connection" governs Edit and Send only, so the pin holds for replies, swipes, Continue and Impersonate. A reply generated on another connection runs no engine turn, and LumiRPEngine flags it under the message: switch the chat back to the loopback, or opt it out of depth in its Depth tab.
+          Opting a world chat into depth pins it to the loopback connection. Lumiverse's "always use the active connection" governs Edit and Send only, so the pin holds for replies, swipes, Continue and Impersonate. A reply generated on another connection runs no engine turn, and LumiRPEngine flags it under the message; a depth chat pinned elsewhere is flagged as you open it, on the chat and at the top of this page: switch the chat back to the loopback, or opt it out of depth in its Depth tab.
         </p>
         <div class="lre-set-row">
           <Disclosure summary="Make the loopback connection" defaultOpen={names.length === 0}>
@@ -298,6 +312,19 @@ function RelayDown(props: { page: LoopbackPage; copy(text: string): void }) {
   );
 }
 
+/** Your chats on depth found off the loopback as each was opened: the warning naming each, with its fix. */
+function OffChats(props: { page: LoopbackPage }) {
+  const off = props.page.offChats;
+  if (off.length === 0) return null;
+  return (
+    <div data-lre-loopback-off>
+      <Banner tone="warn" title={off.length === 1 ? "A chat on depth is off the loopback" : `${off.length} chats on depth are off the loopback`}>
+        {off.map((c) => `Chat ${c.chatId} generates on ${c.connection}.`).join(" ")} A reply there runs no engine turn and nothing reads it into the story. Fix: pick a loopback connection as that chat's connection (opting it out of depth and back in, in GM → This chat → Depth, pins it to one again), or opt it out of depth. Each chat is checked as you open it.
+      </Banner>
+    </div>
+  );
+}
+
 /** The page's body: everything above, hook-free. `now` is when the page is shown, for "last heard" and "last request". */
 export function LoopbackBody(props: { page: LoopbackPage; now: number; busy: boolean; act(act: LoopbackAct): void; copy(text: string): void }) {
   const { page, busy } = props;
@@ -306,6 +333,7 @@ export function LoopbackBody(props: { page: LoopbackPage; now: number; busy: boo
     <div class="lre-stack" data-lre-settings-page="loopback">
       <p class="lre-set-lead">The loopback lets a world chat play its turn inside the reply: give the chat the loopback connection, and LumiRPEngine runs the turn when Lumiverse asks for the reply, its thinking in the thinking block, then the narrator writes on your own model. It needs a small relay on the machine Lumiverse runs on, started once with the line below.</p>
       <RelayDown page={page} copy={props.copy} />
+      <OffChats page={page} />
       <LineSection page={page} copy={props.copy} />
       <KeySection page={page} busy={busy} act={props.act} copy={props.copy} />
       <Section

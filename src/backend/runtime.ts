@@ -140,10 +140,12 @@ import { talkChipOn } from "./depth/scene/talk";
 import { STORY_TALK } from "../shared/talk";
 import { DepthTurns } from "./depth/scene/runner";
 import { afterDepthReply } from "./depth/scene/after";
+import { chatArchive } from "./depth/archive-tools";
 import { headBasis } from "./character-engine";
-import { replyEdited } from "./depth/scene/edit";
+import { editUndone, replyEdited } from "./depth/scene/edit";
 import { ASK_TYPES, askChipsOn } from "./depth/offscreen/asks";
-import { DRAFT_TYPES, settledChipsOn } from "./depth/offscreen/drafts";
+import { DRAFT_TYPES, draftsOn, settledChipsOn } from "./depth/offscreen/drafts";
+import { rebaseCandidates } from "./depth/offscreen/jobs";
 import { Review } from "./agents/review";
 import { LiveFeeds } from "./agents/live";
 import { uncurated } from "./agents/roles/curator";
@@ -901,12 +903,16 @@ export class Runtime implements TurnHooks {
   readonly review: Review;
   /** GM → Live (DESIGN §4.6): each chat's latest agent run as its agents work it, pushed to the pages watching it. */
   readonly live: LiveFeeds;
+  /** The bootstrap's chips on a depth chat (DEPTH-PLAN §7 Chips): its progress while it runs, its spot checks waiting; set by the service that runs it (`Bootstraps.chipsOn`). */
+  bootstrapChips: ((chatId: ChatId, userId: UserId, at: MessageId) => Promise<StateView["chips"]>) | null = null;
   /** The agent turn loop (INC2-SPEC lane T1): a chat on agents plays each turn through its roles. */
   readonly orchestrator: Orchestrator;
   /** The loopback's bridge (DEPTH-PLAN §3): the relay's requests, the turn tagger, the turns run inside their provider calls, Settings → Loopback. */
   readonly loopback: LoopbackBridge;
   /** A2's depth turns (DEPTH-PLAN §2.3, §9.2 A2): the scene a loopback turn plays for a chat on depth, in place of today's narrator, and what runs after its reply. */
   readonly depth: DepthTurns;
+  /** The depth offer under a world chat's last message (`bootstrap/depth-offer.ts`), set by the dispatcher, which holds the chats' bootstraps; null until it is. */
+  depthOffer: ((chatId: ChatId, userId: UserId, messageId: MessageId) => Promise<StateView["chips"][number] | null>) | null = null;
   /** What follows depth replies and reads the player's edits of them, under way outside every turn (`depthSettled`). */
   private readonly depthWork = new Set<Promise<void>>();
   /** The same work by chat (DEPTH-PLAN §6.1-6.3): what a swipe or delete stops, what Work between turns off stops, and what a turn waits for. */
@@ -1054,7 +1060,7 @@ export class Runtime implements TurnHooks {
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets, loreEntry: (userId, id) => this.loreRouting.ids.entryOf(userId, id) };
     // Each user's chats fold on their own fold, its caches within their Settings → Agents → Budgets.
     this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), (userId) => this.foldOf(userId), (chatId) => this.messages.forget(chatId));
-    this.archive = new ArchiveIndex(this.ledger);
+    this.archive = new ArchiveIndex(this.ledger, this.host);
     this.sessions = new Sessions(this.blobs, this.ledger);
     this.chatAgents = new ChatAgentMeta(this.host, this.chatMeta);
     this.globalFiles = new GlobalWorkspace(this.host);
@@ -1086,7 +1092,11 @@ export class Runtime implements TurnHooks {
     // The host shifts a message's swipes down when one is deleted; the chips shown by swipe follow.
     this.host.on("MESSAGE_SWIPED", (e, userId) => {
       // Another swipe shows, or the shown one went: depth work that read through this message's swipe has lost its basis (DEPTH-PLAN §6.3).
-      if (e.action !== "updated") this.depthLeft(e.chatId, e.message.id, "a swipe took the reply it read off the chat");
+      if (e.action !== "updated") {
+        this.depthLeft(e.chatId, e.message.id, "a swipe took the reply it read off the chat");
+        // A new swipe's own reply runs the step after it; one navigated to or deleted writes nothing, so the poll is woken here.
+        if (userId && e.action !== "added") this.swipeWoke(e.chatId, userId, e.message.id, e.swipeId);
+      }
       if (e.action === "deleted" && userId) this.swipeDeleted(e.chatId, userId, e.message.id, e.swipeId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: chips didn't follow a deleted swipe (${error instanceof Error ? error.message : String(error)})`, userId));
     });
     this.host.on("MESSAGE_DELETED", (e) => this.depthLeft(e.chatId, e.messageId, "the message it read was deleted"));
@@ -3250,7 +3260,7 @@ export class Runtime implements TurnHooks {
   private afterDepth(input: TurnContext): void {
     const after = this.depth.after(input.generationId);
     const basis = after ? chainBases(input.core.chain(input.observed), input.core.journal.tombstones).find((b) => b.message === input.messageId) : undefined;
-    if (after && basis) this.depthWorking(input.chatId, input.userId, "the step after the reply", (job) => afterDepthReply(this, input.chatId, input.userId, basis, after, { signal: job.signal, ready: job.ready }).then(() => undefined), { reads: basis.message, between: true });
+    if (after && basis) this.depthWorking(input.chatId, input.userId, "the step after the reply", (job) => afterDepthReply(this, input.chatId, input.userId, basis, after, { signal: job.signal, ready: job.ready, archive: chatArchive(this, input.chatId, input.userId, basis.message) }).then(() => undefined), { reads: basis.message, between: true });
   }
 
   /**
@@ -3268,12 +3278,30 @@ export class Runtime implements TurnHooks {
       "the reading of your edit",
       () => (async () => {
         if (!(await this.depth.on(input.chatId, input.userId))) return;
-        const out = await replyEdited(this, input.chatId, input.userId, input.messageId, input.text);
+        const head = await headBasis(this, input.chatId, input.userId);
+        const out = await replyEdited(this, input.chatId, input.userId, input.messageId, input.text, head ? { archive: chatArchive(this, input.chatId, input.userId, head.message) } : {});
         this.host.log("info", `[LumiRPEngine] chat ${input.chatId}, your edit of ${input.isUser ? "your message" : "a reply"}: ${out.said}`, input.userId);
-        await this.chips.add(input.chatId, input.userId, [{ id: `edit_read:${input.messageId}:${input.swipeId}`, kind: "edit_read", messageId: input.messageId, swipeId: input.swipeId, label: "Your edit, as the author read it", detail: out.said, actions: [], expires: "next_send", payload: {} }]);
+        // An edit that amended or struck beats offers Undo (M-16): the reverse amendment, with its catch-ups (`editUndo`).
+        const undoable = out.cosmetic === false && out.amended.length + out.struck.length > 0;
+        await this.chips.add(input.chatId, input.userId, [{ id: `edit_read:${input.messageId}:${input.swipeId}`, kind: "edit_read", messageId: input.messageId, swipeId: input.swipeId, label: "Your edit, as the author read it", detail: out.said, actions: undoable ? [{ id: "undo", label: "Undo", style: "danger" }] : [], expires: "next_send", payload: undoable ? { amended: [...out.amended], struck: [...out.struck] } : {} }]);
         this.changed(input.chatId, input.userId);
       })(),
     );
+  }
+
+  /**
+   * Undo on an edit's chip (M-16; `editUndone`): what the edit replaced and struck stands again, as
+   * a reverse amendment landed at the message, with its catch-ups, in the background; the chip then
+   * says what became of it, with nothing more to press.
+   */
+  editUndo(chatId: ChatId, userId: UserId, messageId: MessageId, swipeId: number, undone: { amended: string[]; struck: string[] }): void {
+    this.depthWorking(chatId, userId, "the undoing of your edit", () => (async () => {
+      const head = await headBasis(this, chatId, userId);
+      const out = await editUndone(this, chatId, userId, messageId, undone, head ? { archive: chatArchive(this, chatId, userId, head.message) } : {});
+      this.host.log("info", `[LumiRPEngine] chat ${chatId}, undoing your edit: ${out.said}`, userId);
+      await this.chips.add(chatId, userId, [{ id: `edit_read:${messageId}:${swipeId}`, kind: "edit_read", messageId, swipeId, label: "Your edit, undone", detail: out.said, actions: [], expires: "next_send", payload: {} }]);
+      this.changed(chatId, userId);
+    })());
   }
 
   /**
@@ -3293,7 +3321,33 @@ export class Runtime implements TurnHooks {
         const basis = await headBasis(this, chatId, userId);
         if (basis === null) return;
         job.reads(basis.message);
-        await afterDepthReply(this, chatId, userId, basis, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { occasion: `clock:${moved.fix}`, woken: { minutes: moved.minutes, why: moved.why }, signal: job.signal, ready: job.ready });
+        await afterDepthReply(this, chatId, userId, basis, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { occasion: `clock:${moved.fix}`, woken: { minutes: moved.minutes, why: moved.why }, signal: job.signal, ready: job.ready, archive: chatArchive(this, chatId, userId, basis.message) });
+        this.changed(chatId, userId);
+      })(),
+      { between: true },
+    );
+  }
+
+  /**
+   * A swipe changed the chain (DEPTH-PLAN §6.3, Y25): when it took drafts off the chain only because
+   * a later reply was swiped, the author's poll is woken at the chat's head now, with them as its
+   * rebase candidates, rather than when it next runs. Nothing is woken when no draft lost its basis.
+   */
+  private swipeWoke(chatId: ChatId, userId: UserId, message: MessageId, swipe: number): void {
+    this.depthWorking(
+      chatId,
+      userId,
+      "the author's poll after a swipe",
+      (job) => (async () => {
+        if (!(await this.depth.on(chatId, userId))) return;
+        const basis = await headBasis(this, chatId, userId);
+        const at = basis ? await this.ledger.foldAtBasis(chatId, userId, basis, DRAFT_TYPES) : null;
+        if (!basis || !at) return;
+        job.reads(basis.message);
+        const rebase = await rebaseCandidates(this, chatId, userId, new Set(draftsOn(at.events).map((d) => d.draft.id)));
+        if (rebase.length === 0 || job.signal.aborted) return;
+        const why = `a swipe took draft${rebase.length === 1 ? "" : "s"} ${rebase.map((d) => d.id).join(", ")} off the chain`;
+        await afterDepthReply(this, chatId, userId, basis, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { occasion: `swipe:${message}:${swipe}`, woken: { minutes: 0, why }, signal: job.signal, ready: job.ready, archive: chatArchive(this, chatId, userId, basis.message) });
         this.changed(chatId, userId);
       })(),
       { between: true },
@@ -3793,6 +3847,47 @@ export class Runtime implements TurnHooks {
   /** Whether the chat is on depth as a generation starts on it: nothing reads that generation's reply into canon (DEPTH-PLAN §1.3). */
   depthOn(chatId: ChatId, userId: UserId): Promise<boolean> {
     return this.depth.on(chatId, userId);
+  }
+
+  /**
+   * Opening a chat (`lre.hello`, `lre.state.resync`) checks a chat on depth against the loopback
+   * (L15): the connection it generates on, its pin or else your active connection, read for this one
+   * chat, never by listing every chat. Off the loopback, a standing chip on its latest message and a
+   * line on Settings → Loopback say so with the fix before a reply runs no turn; back on it, or off
+   * depth, both go.
+   */
+  async openedDepth(chatId: ChatId, userId: UserId): Promise<void> {
+    const id = `needs_loopback:open:${chatId}`;
+    const depth = await this.depth.on(chatId, userId);
+    const pin = depth ? (await this.host.chats.chatMetadata(chatId, userId)).connection_profile_id : null;
+    const connectionId = typeof pin === "string" && pin.trim() !== "" ? pin : null;
+    if (!depth || (await this.loopback.isLoopback(connectionId, userId))) {
+      this.loopback.offChat(userId, chatId, null);
+      const had = (await this.chips.list(chatId, userId)).some((c) => c.id === id);
+      if (had) {
+        await this.chips.removeWhere(chatId, userId, (c) => c.id === id);
+        this.push.changed(chatId, userId);
+      }
+      return;
+    }
+    const name = (await this.host.connections.profile(connectionId, userId).catch(() => null))?.name ?? null;
+    const on = connectionId === null ? `your active connection${name ? `, ${name}` : ""}` : (name ?? "another connection");
+    this.loopback.offChat(userId, chatId, name ?? (connectionId === null ? "your active connection" : connectionId));
+    const latest = (await this.host.chats.messages(chatId, userId)).at(-1);
+    if (!latest) return;
+    await this.chips.add(chatId, userId, [
+      {
+        id,
+        kind: "needs_loopback",
+        messageId: latest.id,
+        label: "This chat is off the loopback",
+        detail: `This chat is on depth, which plays its turns through the loopback connection, but it generates on ${on}, so its next reply would run no engine turn and nothing would read it into the story. Fix: pick a loopback connection as this chat's connection (opting it out of depth and back in, in GM → This chat → Depth, pins it to one again), or opt it out of depth. Settings → Loopback names your loopback connections.`,
+        actions: [{ id: "loopback", label: "Settings → Loopback", input: { type: "settings", label: "Settings → Loopback", page: "loopback" } }],
+        expires: "never",
+        payload: {},
+      },
+    ]);
+    this.push.changed(chatId, userId);
   }
 
   /**
@@ -4697,6 +4792,11 @@ export class Runtime implements TurnHooks {
     // The offer to switch to agents (INC3 3a, D2): a classic chat that played and never chose, while new chats start on agents.
     const offer = engineOfferChip(knowledge.chat, () => playedOn(core, observed), settings, last?.id ?? null);
     if (offer) view.chips.push(offer);
+    // The offer to put a world chat that has played on depth, with the bootstrap's estimate (DEPTH-PLAN Round 2), until the chat chooses either way.
+    if (!depth && last && this.depthOffer && observed.some((m) => m.isUser)) {
+      const depthOffer = await this.depthOffer(chatId, userId, last.id);
+      if (depthOffer) view.chips.push(depthOffer);
+    }
     // The depth chips, from the chain's live talk, asks and answers read in one walk, and none on a
     // chain that holds none of them, as a chat never on depth (`liveEventsOn`): real-time dialogue's
     // (DEPTH-PLAN §2.5), whom the player is talking with, with Leave, or the author's offer, with
@@ -4706,7 +4806,9 @@ export class Runtime implements TurnHooks {
     const live = eventsOf(core, observed, [STORY_TALK, ...ASK_TYPES, ...DRAFT_TYPES]);
     const talk = talkChipOn(core, observed, settings.prompts.texts, live);
     if (talk) view.chips.push(talk);
-    view.chips.push(...askChipsOn(core, observed, live), ...settledChipsOn(core, observed, live));
+    view.chips.push(...askChipsOn(core, observed, live), ...(await settledChipsOn(core, observed, live, this.blobs, userId)));
+    // The bootstrap's progress while it runs and its spot checks waiting for the player (§7 Chips, §8), under the chat's last message.
+    if (depth && last && this.bootstrapChips) view.chips.push(...(await this.bootstrapChips(chatId, userId, last.id)));
     const staged = await this.staged.get(chatId, userId);
     view.staged = staged ? { action: staged.action, params: staged.request, source: staged.source, label: staged.label } : null;
     return view;

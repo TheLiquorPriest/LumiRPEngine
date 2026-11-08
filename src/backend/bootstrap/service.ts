@@ -8,18 +8,23 @@
 // once the run reaches the latest message, the advice to turn off the memory systems the bootstrap
 // replaced for this chat (D-18), and nothing more.
 
-import type { ChatId, UserId } from "../../shared/ids";
+import type { ChatId, MessageId, UserId } from "../../shared/ids";
 import type { JsonObject } from "../../shared/json";
 import { PROTOCOL_VERSION } from "../../shared/protocol";
 import type { BootstrapRequest } from "../../shared/protocol";
+import type { Chip } from "../../shared/state-view";
 import type { BootstrapAdvice, BootstrapCap, BootstrapEstimate, BootstrapView, ImportView } from "../../shared/bootstrap";
 import type { Runtime } from "../runtime";
 import { BootstrapFiles } from "./files";
-import { BootstrapRun } from "./run";
+import { BootstrapRun, type BootstrapEnv } from "./run";
 import { bootstrapEnv } from "./wiring";
+import { LumiBooksBootstrap } from "./lumibooks-service";
+import type { LbActionEstimate, LbTree } from "../../shared/bootstrap";
+import { bootstrapChips, type BootstrapChipFacts, chipFactsOf } from "./chips";
 import { chatNumbers } from "../depth/chat-numbers";
 import { historyCut, setHistoryCut } from "../depth/history-cut";
 import { chatAllowances, chatAllowancesOf, setChatAllowances } from "../depth/chat-allowances";
+import { chatAbsorption, chatAbsorptionOf, setChatAbsorption } from "../depth/chat-absorption";
 import { historyCutOf } from "../../shared/depth-history";
 
 export class BootstrapError extends Error {
@@ -101,17 +106,61 @@ export class Bootstraps {
   private readonly runs = new Map<string, BootstrapRun>();
   /** The status each run was last pushed with: the toast comes once, when a run first reaches the latest message. */
   private readonly told = new Map<string, string>();
+  /** What each chat's bootstrap chips last read of its run (`chipsOn`), by `user \0 chat`: each push refreshes it, and the chat's state view is sent again when the chips change. */
+  private readonly chipFacts = new Map<string, BootstrapChipFacts>();
+  /** Each chat's run environment, by `user \0 chat`: the LumiBooks tree reads its people, files and knobs. */
+  private readonly envs = new Map<string, BootstrapEnv>();
+  /** GM → Depth → Bootstrap's LumiBooks tree. */
+  private readonly lumi: LumiBooksBootstrap;
 
-  constructor(private readonly rt: Runtime) {}
+  constructor(private readonly rt: Runtime) {
+    this.lumi = new LumiBooksBootstrap(rt);
+    // A depth chat's state view asks here for the bootstrap's progress and its spot checks waiting.
+    rt.bootstrapChips = (chatId, userId, at) => this.chipsOn(chatId, userId, at);
+  }
+
+  /** The bootstrap's chips on its chat, under message `at` (`bootstrapChips`); the first ask after a start reads the run's view, every push after keeps it current. */
+  async chipsOn(chatId: ChatId, userId: UserId, at: MessageId): Promise<Chip[]> {
+    const key = `${userId}\u0000${chatId}`;
+    let facts = this.chipFacts.get(key);
+    if (!facts) {
+      try {
+        facts = chipFactsOf(await this.runOf(chatId, userId).view(true));
+      } catch (error) {
+        this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the bootstrap's chips weren't read (${error instanceof Error ? error.message : String(error)})`, userId);
+        facts = { status: "idle", chunks: { done: 0, total: 0 }, progress: [], waiting: 0 };
+      }
+      this.chipFacts.set(key, facts);
+    }
+    return bootstrapChips(chatId, facts, at);
+  }
+
+  /** Keeps the chips' facts from a view just pushed, and sends the chat's state view again when what its chips say has changed. */
+  private chipsMoved(chatId: ChatId, userId: UserId, view: BootstrapView): void {
+    const key = `${userId}\u0000${chatId}`;
+    const facts = chipFactsOf(view);
+    const before = this.chipFacts.get(key);
+    this.chipFacts.set(key, facts);
+    const said = (f: BootstrapChipFacts | undefined): string => JSON.stringify(f ? bootstrapChips(chatId, f, "" as MessageId).map((c) => [c.label, c.detail]) : []);
+    if (said(before) !== said(facts)) this.rt.changed(chatId, userId);
+  }
 
   private runOf(chatId: ChatId, userId: UserId): BootstrapRun {
     const key = `${userId}\u0000${chatId}`;
     let run = this.runs.get(key);
     if (!run) {
-      run = new BootstrapRun(bootstrapEnv(this.rt, chatId, userId, () => void this.push(chatId, userId)));
+      const env = bootstrapEnv(this.rt, chatId, userId, () => void this.push(chatId, userId));
+      this.envs.set(key, env);
+      run = new BootstrapRun(env);
       this.runs.set(key, run);
     }
     return run;
+  }
+
+  /** The chat's run environment, made with its run. */
+  private envOf(chatId: ChatId, userId: UserId): BootstrapEnv {
+    this.runOf(chatId, userId);
+    return this.envs.get(`${userId}\u0000${chatId}`) as BootstrapEnv;
   }
 
   private async worldChat(chatId: ChatId, userId: UserId): Promise<void> {
@@ -124,13 +173,15 @@ export class Bootstraps {
     // A spot-check beat names the message it came from by the number the chat shows it with (`chatNumbers`), not its place on the path the run spooled.
     const numbers = view.spot.some((card) => card.items.some((item) => item.kind === "beat")) ? await chatNumbers(this.rt.host, chatId, userId) : null;
     const spot = numbers ? view.spot.map((card) => ({ ...card, items: card.items.map((item) => (item.kind === "beat" ? { ...item, index: numbers.get(item.message) ?? item.index } : item)) })) : view.spot;
-    const budget = (await this.rt.settings.get(userId)).depth.budget;
+    const depth = (await this.rt.settings.get(userId)).depth;
+    const budget = depth.budget;
     const allowances = { own: await chatAllowances(this.rt.host, chatId, userId), yours: budget.allowances, interval: budget.interval };
-    return { ...view, spot, advice: view.status === "done" ? adviceOf(view.imported) : [], history: await historyCut(this.rt.host, chatId, userId), allowances };
+    const absorption = { own: await chatAbsorption(this.rt.host, chatId, userId), yours: depth.absorption };
+    return { ...view, spot, advice: view.status === "done" ? adviceOf(view.imported) : [], history: await historyCut(this.rt.host, chatId, userId), allowances, absorption };
   }
 
   /** Answers one `lre.bootstrap` request with the chat's view, and the estimate where it asked for one. */
-  async handle(r: BootstrapRequest, userId: UserId): Promise<{ view: BootstrapView; estimate?: BootstrapEstimate }> {
+  async handle(r: BootstrapRequest, userId: UserId): Promise<{ view: BootstrapView; estimate?: BootstrapEstimate; tree?: LbTree; lbEstimate?: LbActionEstimate }> {
     const { chatId } = r;
     const run = this.runOf(chatId, userId);
     switch (r.op) {
@@ -158,6 +209,12 @@ export class Bootstraps {
       case "resume": {
         await this.worldChat(chatId, userId);
         if (!(await depthOptedIn(this.rt, chatId, userId))) throw new BootstrapError("conflict", "Put this chat on depth first (GM → This chat → Depth): the bootstrap onboards a chat that opted in.");
+        // The chat's LumiBooks records land first, with no model call: the run starts from them.
+        const lumi = await this.lumi.land(chatId, userId).catch((error: unknown) => {
+          this.rt.host.log("warn", `[LumiRPEngine] the chat's LumiBooks records didn't land (${error instanceof Error ? error.message : String(error)})`, userId);
+          return null;
+        });
+        if (lumi && lumi.refused.length > 0) this.rt.host.log("warn", `[LumiRPEngine] ${lumi.refused.length} LumiBooks record(s) were refused: ${lumi.refused.slice(0, 3).join("; ")}`, userId);
         await run.start(await this.capOf(r.cap, userId));
         break;
       }
@@ -189,6 +246,31 @@ export class Bootstraps {
         if (allowances === null) throw new BootstrapError("bad_request", "Each allowance is a treatment's whole number of parts (0 or more), or no limit.");
         await setChatAllowances(this.rt.host, chatId, userId, allowances);
         break;
+      }
+      case "absorption": {
+        // GM → This chat → Depth → Your preset: the chat's own way of taking the preset, over the user's; null goes back to the user's.
+        const absorption = r.absorption === null ? null : chatAbsorptionOf(r.absorption);
+        if (absorption === null && r.absorption !== null) throw new BootstrapError("bad_request", "Keep it (keep), LRE's only (narrator), or yours (null).");
+        await setChatAbsorption(this.rt.host, chatId, userId, absorption);
+        break;
+      }
+      case "lb_tree":
+        await this.worldChat(chatId, userId);
+        return { view: await this.view(chatId, userId), tree: await this.lumi.tree(chatId, userId, this.envOf(chatId, userId)) };
+      case "lb_catchup":
+      case "lb_deep":
+      case "lb_fullmind": {
+        await this.worldChat(chatId, userId);
+        const env = this.envOf(chatId, userId);
+        const tree = await this.lumi.tree(chatId, userId, env);
+        const who = r.op === "lb_catchup" ? r.who : r.op === "lb_fullmind" ? [r.who] : [];
+        if (r.op !== "lb_deep" && (who.length === 0 || who.some((id) => !tree.cast.some((c) => c.id === id)))) throw new BootstrapError("bad_request", "name characters of the chat's cast");
+        const kind = r.op === "lb_catchup" ? "catchup" : r.op === "lb_deep" ? "deep" : "fullmind";
+        const lbEstimate = await this.lumi.estimate(chatId, userId, env, kind, r.node, who);
+        if (!lbEstimate) throw new BootstrapError("bad_request", tree.book === null ? "This chat has no LumiBooks book." : "no such node in the chat's LumiBooks book");
+        // Running a deepening from the tree needs the author's scoped pass, which this build doesn't have: the estimate stands, and nothing runs.
+        if (r.confirm === true) throw new BootstrapError("unavailable", "Running this from the LumiBooks tree isn't available yet; the bootstrap's own run reads every uncovered stretch.");
+        return { view: await this.view(chatId, userId), tree, lbEstimate };
       }
       default:
         throw new BootstrapError("bad_request", "no such bootstrap request");
@@ -244,6 +326,7 @@ export class Bootstraps {
     try {
       const view = await this.view(chatId, userId);
       this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.bootstrap.update", chatId, view }, userId);
+      this.chipsMoved(chatId, userId, view);
       const key = `${userId}\u0000${chatId}`;
       const before = this.told.get(key);
       this.told.set(key, view.status);

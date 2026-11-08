@@ -6,15 +6,15 @@
 // narrates through the loopback from its preset and its recent window alone.
 
 import { describe, expect, test } from "bun:test";
-import type { PromptMessage, QuietMessage } from "../../src/backend/host";
-import { markOf, turnEntries, withSections, type PlacedSection } from "../../src/backend/loopback/compose";
+import type { PromptMessage, QuietMessage, QuietRequest } from "../../src/backend/host";
+import { markOf, narratorSampling, turnEntries, withSections, type PlacedSection } from "../../src/backend/loopback/compose";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
-import { depthSettingsOf } from "../../src/shared/depth-settings";
-import { shortContext, type ShortContextInput } from "../../src/backend/loopback/short-context";
+import { depthSettingsOf, narratorOverrides } from "../../src/shared/depth-settings";
+import { absorptionOf, shortContext, type ShortContextInput } from "../../src/backend/loopback/short-context";
 import { LreError } from "../../src/cli/connection";
 import type { CallFields, CallRequestType, RelayLink } from "../../src/cli/loopback-relay";
 import { RELAY_DEFAULTS, Relay } from "../../src/cli/loopback-relay";
-import { isRecord } from "../../src/shared/json";
+import { isRecord, type JsonObject } from "../../src/shared/json";
 import type { LoopbackResultBodies } from "../../src/shared/loopback";
 import { LOOPBACK_MODEL } from "../../src/shared/loopback";
 import { coreStream } from "../cli/core-staging/llm/openai-stream";
@@ -180,19 +180,26 @@ function answer(text: string): string {
   return "{}";
 }
 
-/** A chat on depth with twelve messages of history before its player's message, its turn played through the loopback: the narrator's calls, and the thinking block. */
-async function depthTurn(absorption: "keep" | "narrator"): Promise<{ narrator: QuietMessage[][]; reasoning: string; earlier: string[] }> {
+/**
+ * A chat on depth with twelve messages of history before its player's message, its turn played through the loopback: the narrator's calls, and the thinking block.
+ * `o.chat`: the chat's own way of taking the preset (GM → This chat → Depth), and the view that answers it; `o.body`: the request's own fields (the preset's sampling); `o.depth`: more of Settings → Depth.
+ */
+async function depthTurn(absorption: "keep" | "narrator", o: { chat?: "keep" | "narrator"; body?: JsonObject; depth?: JsonObject } = {}): Promise<{ narrator: QuietMessage[][]; calls: QuietRequest[]; reasoning: string; earlier: string[]; view: unknown }> {
   const rig = new Rig({ shipped: true });
   const host = rig.host;
   host.connectionProfiles.push({ id: "conn-loop", name: "Loopback", models: [LOOPBACK_MODEL], provider: "custom", url: `http://127.0.0.1:${PORT}/v1` });
   host.contextConnectionId = "conn-loop";
   const narrator: QuietMessage[][] = [];
+  const calls: QuietRequest[] = [];
   host.quietReply = (req) => {
     const text = req.messages.map((m) => m.content).join("\n");
-    if (text.includes("## This moment")) narrator.push(req.messages);
+    if (text.includes("## This moment")) {
+      narrator.push(req.messages);
+      calls.push(req);
+    }
     return answer(text);
   };
-  rig.body(await rig.send({ type: "lre.settings.set", patch: { depth: { absorption } } }));
+  rig.body(await rig.send({ type: "lre.settings.set", patch: { depth: { absorption, ...o.depth } } }));
   const link = new BackendLink(rig);
   const registered = await link.send("lre.loopback.register", { name: "sam", mode: "user", build: "dev", host: "box", listen: "127.0.0.1", port: PORT });
   if (!isRecord(registered) || typeof registered.secret !== "string") throw new Error("the relay wasn't registered");
@@ -217,11 +224,12 @@ async function depthTurn(absorption: "keep" | "narrator"): Promise<{ narrator: Q
   earlier.forEach((text, i) => host.append(host.chat(chatId), { id: `old${i}`, isUser: i % 2 === 0, name: i % 2 === 0 ? "User" : "Narrator", swipes: [text], swipeId: 0, bag: {} }));
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
   rig.body(await rig.send({ type: "lre.bootstrap", chatId, op: "opt", on: true }));
+  const view = o.chat ? rig.body(await rig.send({ type: "lre.bootstrap", chatId, op: "absorption", absorption: o.chat })).view : undefined;
 
   host.sendUser(chatId, "I walk into the shop. Hello?");
   await host.settle();
   const g = await host.begin(chatId, { type: "normal" });
-  const res = await relay.fetch(new Request(`http://127.0.0.1:${PORT}/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${key}`, host: `127.0.0.1:${PORT}`, "content-type": "application/json" }, body: JSON.stringify({ model: LOOPBACK_MODEL, stream: true, messages: g.prompt ?? [], lre_turn: g.parameters?.lre_turn }) }));
+  const res = await relay.fetch(new Request(`http://127.0.0.1:${PORT}/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${key}`, host: `127.0.0.1:${PORT}`, "content-type": "application/json" }, body: JSON.stringify({ model: LOOPBACK_MODEL, stream: true, messages: g.prompt ?? [], lre_turn: g.parameters?.lre_turn, ...o.body }) }));
   let content = "";
   let reasoning = "";
   for await (const c of coreStream(res)) {
@@ -230,7 +238,7 @@ async function depthTurn(absorption: "keep" | "narrator"): Promise<{ narrator: Q
   }
   expect(content).toBe(PASSAGE);
   await host.finish(g, content);
-  return { narrator, reasoning, earlier };
+  return { narrator, calls, reasoning, earlier, view };
 }
 
 describe("a chat on depth with a long history, through the loopback", () => {
@@ -265,6 +273,45 @@ describe("a chat on depth with a long history, through the loopback", () => {
       expect(messages.at(-1)?.content).toContain("## This moment");
     }
     expect(reasoning).toContain("The narrator reads LumiRPEngine's own template instead of your preset");
+  });
+
+  test("the chat's own way of taking the preset goes over yours: LRE's only on this chat while yours is Keep it", async () => {
+    expect(absorptionOf(null, "keep")).toBe("keep");
+    expect(absorptionOf("narrator", "keep")).toBe("narrator");
+    const { narrator, reasoning, view } = await depthTurn("keep", { chat: "narrator" });
+    expect(view).toMatchObject({ absorption: { own: "narrator", yours: "keep" } });
+    expect(narrator.length).toBeGreaterThan(0);
+    for (const messages of narrator) expect(messages.map((m) => m.content)).not.toContain(SYSTEM_PROMPT);
+    expect(reasoning).toContain("The narrator reads LumiRPEngine's own template instead of your preset");
+  }, 30_000);
+
+  test("the preset's sampling and answer room in the body reach a scene's narrator; the Narrator row's own go over them", async () => {
+    const body = { temperature: 1.1, top_p: 0.8, top_k: 40, max_tokens: 2222 };
+    const preset = await depthTurn("keep", { body });
+    expect(preset.calls.length).toBeGreaterThan(0);
+    for (const req of preset.calls) {
+      expect(req.params).toMatchObject({ temperature: 1.1, top_p: 0.8, top_k: 40 });
+      expect(req.maxTokens).toBe(2222);
+    }
+    const own = await depthTurn("keep", { body, depth: { roles: { narrator: { uses: "own", own: { temperature: 0.3, topP: 0.5, maxTokens: 3000 } } } } });
+    expect(own.calls.length).toBeGreaterThan(0);
+    for (const req of own.calls) {
+      expect(req.params).toMatchObject({ temperature: 0.3, top_p: 0.5, top_k: 40 });
+      expect(req.maxTokens).toBe(3000);
+    }
+  }, 30_000);
+});
+
+describe("the narrator's sampling, in a scene and off it", () => {
+  test("the body's sampling and answer room, with each the Narrator row on a model of its own sets over them", () => {
+    const body = { temperature: 1.1, top_p: 0.8, top_k: 40, max_tokens: 2222 };
+    expect(narratorSampling(body, { temperature: null, topP: null, maxTokens: null })).toEqual({ params: { temperature: 1.1, top_p: 0.8, top_k: 40 }, maxTokens: 2222 });
+    expect(narratorSampling(body, { temperature: 0.3, topP: null, maxTokens: 3000 })).toEqual({ params: { temperature: 0.3, top_p: 0.8, top_k: 40 }, maxTokens: 3000 });
+    expect(narratorSampling({}, { temperature: null, topP: 0.5, maxTokens: null })).toEqual({ params: { top_p: 0.5 }, maxTokens: null });
+    // A narrator on Strong or Fast takes the preset's; on a model of its own, what that model sets, and its room where changed.
+    expect(narratorOverrides(depthSettingsOf({ roles: { narrator: { uses: "strong" } } }))).toEqual({ temperature: null, topP: null, maxTokens: null });
+    expect(narratorOverrides(depthSettingsOf({ roles: { narrator: { uses: "own", own: { temperature: 0.3, maxTokens: 3000 } } } }))).toEqual({ temperature: 0.3, topP: null, maxTokens: 3000 });
+    expect(narratorOverrides(depthSettingsOf({ roles: { narrator: { uses: "own" } } }))).toEqual({ temperature: null, topP: null, maxTokens: null });
   });
 });
 

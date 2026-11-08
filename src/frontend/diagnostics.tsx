@@ -5,8 +5,8 @@
 // banner, and the Diagnostics page in Settings: each turn's
 // steps with their model calls, agent calls with their text on request, the failures with their
 // reasons and fixes, filters, copy and download, and how many records a chat keeps. The records are
-// GM-level (a reason or an agent's text may name what the player hasn't met): the page asks for them
-// only once the player opens its curtain, and never keeps them in pushed state.
+// GM-level (a reason or an agent's text may name what the player hasn't met): the page labels them so,
+// reads them when it opens, and never keeps them in pushed state.
 
 import { useEffect, useState } from "preact/hooks";
 import { agentLabel } from "../shared/agent-settings";
@@ -267,8 +267,8 @@ function titleOf(r: DiagRecord): string {
 
 /**
  * An agent call's text (its messages and answer), on request: read once through `lre.diag`'s `text`
- * and shown in a scrolling block, or said to be gone once its retention has passed. It sits behind
- * the page's curtain with the record that names it.
+ * and shown in a scrolling block, or said to be gone once its retention has passed. It sits under
+ * the page's "GM detail" label with the record that names it.
  */
 function AgentText(props: { chatId: string; hash: string }) {
   const app = useApp();
@@ -435,7 +435,7 @@ export function LastTurnTime(props: { chatId: ChatId; turn?: string; since?: num
   );
 }
 
-/** How many records each chat keeps (Settings → Diagnostics): not GM-level, so outside the curtain. */
+/** How many records each chat keeps (Settings → Diagnostics): not GM-level, so shown even with no chat open. */
 function RecordsPerChat(props: { value: number; patch(patch: JsonObject): void; busy: boolean }) {
   const fallback = DIAGNOSTICS_DEFAULTS.recordsPerChat;
   return (
@@ -462,7 +462,7 @@ function RecordsPerChat(props: { value: number; patch(patch: JsonObject): void; 
 export function DiagnosticsPage(props: { diagnostics: DiagnosticsSettings; patch(patch: JsonObject): void; busy: boolean }) {
   const app = useApp();
   const chatId = useSelect(app.sync, (state) => state.chatId);
-  const [revealed, setRevealed] = useState(false);
+  // GM-level records: read when the page opens, again for another chat.
   const [records, setRecords] = useState<DiagRecord[] | null>(null);
   const [filter, setFilter] = useState<DiagFilter>("all");
   const [busy, run] = useBusy();
@@ -472,30 +472,16 @@ export function DiagnosticsPage(props: { diagnostics: DiagnosticsSettings; patch
       const result = await app.request({ type: "lre.diag", chatId, op: "get" });
       setRecords(result ? result.records : []);
     });
-  // Another chat's records are its own: the curtain closes and they are read again.
   useEffect(() => {
-    setRevealed(false);
     setRecords(null);
+    load();
   }, [chatId]);
-  useEffect(() => {
-    if (revealed) load();
-  }, [revealed]);
   const keep = <RecordsPerChat value={props.diagnostics.recordsPerChat} patch={props.patch} busy={props.busy} />;
   if (!chatId)
     return (
       <div class="lre-stack" data-lre-settings-page="diagnostics">
         {keep}
         <Empty icon="list">Open a chat to see what the engine did in it.</Empty>
-      </div>
-    );
-  if (!revealed)
-    return (
-      <div class="lre-stack" data-lre-settings-page="diagnostics">
-        <CannotStopNotice />
-        <Banner tone="gm" title="GM detail" actions={<Button icon="eye" onClick={() => setRevealed(true)}>Show diagnostics</Button>}>
-          Diagnostics show each step the engine ran for this chat, its model calls, its agents' calls with their text, and why one failed. A reason or a text can name someone or something your character hasn't met yet.
-        </Banner>
-        {keep}
       </div>
     );
   const shown = records ? filterRecords(records, filter) : [];
@@ -505,6 +491,9 @@ export function DiagnosticsPage(props: { diagnostics: DiagnosticsSettings; patch
   return (
     <div class="lre-stack lre-diag" data-lre-settings-page="diagnostics">
       <CannotStopNotice />
+      <Banner tone="gm" title="GM detail">
+        Diagnostics show each step the engine ran for this chat, its model calls, its agents' calls with their text, and why one failed. A reason or a text can name someone or something your character hasn't met yet.
+      </Banner>
       {keep}
       <div class="lre-diag-tools">
         <Seg<DiagFilter> label="Show" value={filter} options={FILTERS} onChange={setFilter} />

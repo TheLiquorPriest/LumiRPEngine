@@ -14,7 +14,7 @@ import { depthCall } from "../../shared/depth-settings";
 import { hashParts } from "../../shared/hash";
 import { blobHash } from "../../shared/stores";
 import { layerEntryId } from "../../engine/ledger/layer";
-import { land, readMind, type EngineRt } from "../character-engine";
+import { interviewMind, land, readMind, type EngineRt } from "../character-engine";
 import type { LedgerEvent, PackEvent } from "../../shared/ledger";
 import type { DepthBeliefLink } from "../../shared/depth-views";
 import { DEPTH_TEXT } from "../../shared/depth-prompts";
@@ -32,9 +32,12 @@ import { Working } from "../../engine/working";
 import { readKnowledge } from "../../packs/minds/core/state";
 import type { Runtime } from "../runtime";
 import { tokensOf } from "../book";
-import { askRole, bareId, beatLine, beatTexts, named, personNamed, placeNamed, twice, type BeatText, type Blobs, type StageCost } from "./common";
+import { askRole, bareId, beatLine, beatTexts, named, personNamed, placeNamed, twice, type Asked, type BeatText, type Blobs, type StageCost } from "./common";
+import type { ArchiveSource } from "./archive-tools";
+import { archiveOffer, askReading, talkOf } from "./scene/author";
 import { beatPeople, type Beat } from "../../shared/story";
-import { hasAgent, MIND_FILE_NAMES, mindPath, povOf } from "../../shared/character-engine";
+import { hasAgent, MIND_FILE_NAMES, MIND_INTERVIEW, mindInterviewOf, mindPath, povOf } from "../../shared/character-engine";
+import type { JsonObject } from "../../shared/json";
 import type { ModelPort } from "./port";
 
 export interface TruthLinkInput {
@@ -54,6 +57,10 @@ export interface TruthLinkInput {
   /** The GM's own answer room (Settings → Depth): the call's grows from it with what it reads (`truthLinkRoom`). Absent: the role's own. */
   room?: number;
   signal?: AbortSignal;
+  /** The chat's archive through the message the links answer, read before the GM answers (JSON rounds, `askReading`). */
+  archive?: ArchiveSource;
+  /** What the characters it interviewed answered since it last linked (§4.4, Interview), each in their voice. */
+  answers?: readonly { who: EntityId; question: string; answer: string }[];
 }
 
 export interface TruthLinkResult extends StageCost {
@@ -62,6 +69,8 @@ export interface TruthLinkResult extends StageCost {
   /** What of the answer couldn't be made, and why, for the turn's inspector and the spot checks. */
   refused: string[];
   blobs: Blobs;
+  /** The characters it interviews (§4.4): one question each, asked of their mind; the answers come back at its next link. */
+  interview: { who: EntityId; question: string }[];
 }
 
 /**
@@ -115,7 +124,20 @@ function truthData(input: TruthLinkInput, catalogue: ReadonlyMap<FactId, Knowled
     `The new beats (each opens with its id in brackets):\n${beats.join("\n") || "- (none)"}`,
     `What characters wrote as beliefs:\n\n${beliefs.join("\n\n") || "(no one wrote any)"}`,
     `Your links so far for these people:\n${links.join("\n") || "- (none)"}`,
+    ...((input.answers ?? []).length > 0 ? [`What the characters you interviewed answered:\n${(input.answers ?? []).map((x) => `- ${named(world, state, x.who)}, asked "${x.question}": ${x.answer}`).join("\n")}`] : []),
   ].join("\n\n");
+}
+
+/** The GM's answer for the links with the chat's archive to hand: the setup's JSON rounds (`askReading`) as the GM, each read said in its reasoning. */
+async function linkReading(input: TruthLinkInput, data: string, archive: ArchiveSource, room: (d: string) => { maxTokens?: number }, model: ModelPort): Promise<Asked> {
+  const ctx = { world: input.world, state: input.state, texts: input.texts, pov: povOf(input.world, input.state), model, ...(input.signal ? { signal: input.signal } : {}) };
+  const { tools, line } = archiveOffer(ctx, archive, "the links");
+  const full = line !== "" ? `${data}\n\n${line}` : data;
+  const talk = talkOf(ctx, DEPTH_TEXT.truthLink, full);
+  const { answer, reads } = await askReading(ctx, talk, tools, "the links", { role: "gm", ...room(full) });
+  if (!talk.read) throw new Error("the GM's links came back unread");
+  const reasoning = [...reads, ...talk.reasoning].join("\n\n");
+  return { answer, read: talk.read, ...(reasoning ? { reasoning } : {}), ...(talk.usage ? { usage: talk.usage } : {}) };
 }
 
 /** Links what characters believe, and what reached the player character, to the world's truth. */
@@ -124,7 +146,8 @@ export async function truthLink(input: TruthLinkInput, model: ModelPort): Promis
   const limits = input.limits ?? { claimChars: KNOWLEDGE_DEFAULTS.claimChars, factsPerChat: KNOWLEDGE_DEFAULTS.factsPerChat };
   const catalogue = truthCatalogue(world, state);
   const data = truthData(input, catalogue);
-  const asked = await askRole(model, "gm", DEPTH_TEXT.truthLink, { world, state, texts: input.texts, data, ...(input.room !== undefined ? { maxTokens: truthLinkRoom(input.room, tokensOf(data)) } : {}), ...(input.signal ? { signal: input.signal } : {}) });
+  const room = (d: string) => (input.room !== undefined ? { maxTokens: truthLinkRoom(input.room, tokensOf(d)) } : {});
+  const asked = input.archive ? await linkReading(input, data, input.archive, room, model) : await askRole(model, "gm", DEPTH_TEXT.truthLink, { world, state, texts: input.texts, data, ...room(data), ...(input.signal ? { signal: input.signal } : {}) });
   const { answer: a, read } = asked;
   const w = new Working(registry, world, state);
   const refused: string[] = [];
@@ -270,11 +293,23 @@ export async function truthLink(input: TruthLinkInput, model: ModelPort): Promis
     if (!file(fact)) continue;
     if (own(readKnowledge(w.state).facts, fact)?.truth !== truth) land({ type: MINDS_EVENTS.settle, data: { fact, truth } }, `settling [${fact}]`);
   }
-  return { events: w.events as PackEvent[], refused, blobs: {}, ...(asked.reasoning ? { reasoning: asked.reasoning } : {}), ...(asked.usage ? { usage: asked.usage } : {}) };
+  // Its interviews: one question to each character with a mind of its own, never the player character.
+  const interview: TruthLinkResult["interview"] = [];
+  for (const [i, raw] of read.list("interview", a.interview).entries()) {
+    const q = read.record(`interview[${i}]`, raw);
+    const who = q && typeof q.who === "string" ? personNamed(w.state, q.who) : null;
+    const question = q ? read.text(`interview[${i}].question`, q.question) : "";
+    if (!q || who === null || question === "" || !hasAgent(world, state, who) || interview.some((x) => x.who === who)) {
+      if (q) refused.push(`an interview of no one with a mind of their own, or with no question (${JSON.stringify(q).slice(0, 200)})`);
+      continue;
+    }
+    interview.push({ who, question });
+  }
+  return { events: w.events as PackEvent[], refused, blobs: {}, interview, ...(asked.reasoning ? { reasoning: asked.reasoning } : {}), ...(asked.usage ? { usage: asked.usage } : {}) };
 }
 
 /** What the truth link at a basis reads and lands through (`Runtime` is one). */
-export type LinkRt = Pick<EngineRt, "blobs" | "ledger" | "registry" | "settings">;
+export type LinkRt = Pick<EngineRt, "blobs" | "ledger" | "registry" | "settings" | "host">;
 
 /**
  * The GM's truth link at `basis`, landed there as one entry (§4.4: the GM links each belief a
@@ -286,7 +321,7 @@ export type LinkRt = Pick<EngineRt, "blobs" | "ledger" | "registry" | "settings"
  * names what it read, so a link of the same beliefs and beats lands once and a later one beside it.
  * Nothing to read asks nothing.
  */
-export async function linkTruths(rt: LinkRt, chatId: ChatId, userId: UserId, basis: Basis, o: { who: readonly EntityId[]; beats: readonly Beat[]; key?: readonly string[]; model: ModelPort; signal?: AbortSignal }): Promise<{ linked: boolean; refused: string[] }> {
+export async function linkTruths(rt: LinkRt, chatId: ChatId, userId: UserId, basis: Basis, o: { who: readonly EntityId[]; beats: readonly Beat[]; key?: readonly string[]; model: ModelPort; signal?: AbortSignal; archive?: ArchiveSource }): Promise<{ linked: boolean; refused: string[] }> {
   const at = await rt.ledger.foldAtBasis(chatId, userId, basis);
   if (!at) throw new Error("the reply it reads left the chat's chain");
   const settings = await rt.settings.get(userId);
@@ -299,12 +334,38 @@ export async function linkTruths(rt: LinkRt, chatId: ChatId, userId: UserId, bas
   }
   const beats = await beatTexts(rt, userId, o.beats);
   if (beats.length === 0 && beliefs.length === 0) return { linked: false, refused: [] };
+  const answers = await gmAnswers(rt, userId, (await rt.ledger.foldAtBasis(chatId, userId, basis, [MIND_INTERVIEW, ...GM_LINK_TYPES]))?.events ?? []);
   const { claimChars, factsPerChat } = settings.minds.knowledge;
-  const r = await twice(() => truthLink({ registry: rt.registry, world: at.world, state: at.state, texts: settings.prompts.texts, beats, beliefs, msg: basis.message, limits: { claimChars, factsPerChat }, room: depthCall(settings, "gm").maxTokens, ...(o.signal ? { signal: o.signal } : {}) }, o.model), o.signal);
-  if (r.events.length === 0) return { linked: false, refused: r.refused };
+  const r = await twice(() => truthLink({ registry: rt.registry, world: at.world, state: at.state, texts: settings.prompts.texts, beats, beliefs, msg: basis.message, limits: { claimChars, factsPerChat }, room: depthCall(settings, "gm").maxTokens, ...(o.signal ? { signal: o.signal } : {}), ...(o.archive ? { archive: o.archive } : {}), ...(answers.length > 0 ? { answers } : {}) }, o.model), o.signal);
   const read = o.key === undefined ? [] : [...o.key, hashParts(...beliefs.flatMap((b) => [b.who, b.hash]), ...beats.map((b) => b.beat.id))];
-  await land(rt, chatId, userId, basis, "truthlink", { events: r.events, blobs: r.blobs, ...(r.reasoning ? { reasoning: r.reasoning } : {}) }, layerEntryId("truthlink", chatId, basis.message, basis.swipe, ...read), "gm");
-  return { linked: true, refused: r.refused };
+  if (r.events.length > 0) await land(rt, chatId, userId, basis, "truthlink", { events: r.events, blobs: r.blobs, ...(r.reasoning ? { reasoning: r.reasoning } : {}) }, layerEntryId("truthlink", chatId, basis.message, basis.swipe, ...read), "gm");
+  // Its interviews, asked once it linked, each kept as the GM's probe (never folded into the mind); its next link reads what they answered.
+  const refused = [...r.refused];
+  for (const q of r.interview) {
+    try {
+      await interviewMind(rt, chatId, userId, q.who, q.question, false, o.model, { by: "gm", basis, ...(o.signal ? { signal: o.signal } : {}) });
+    } catch (error) {
+      refused.push(`the interview of ${named(at.world, at.state, q.who)}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return { linked: r.events.length > 0, refused };
+}
+
+/** The events a truth link lands: the GM's interviews since the last of them are what it hasn't read yet. */
+const GM_LINK_TYPES: readonly string[] = [TRUTH_EVENTS.link, TRUTH_EVENTS.unlink, MINDS_EVENTS.fact, MINDS_EVENTS.settle];
+
+/** The answers to the GM's interviews since its last link landed (any truth-link event), in fold order. */
+async function gmAnswers(rt: Pick<EngineRt, "blobs">, userId: UserId, events: readonly { event: PackEvent | LedgerEvent }[]): Promise<{ who: EntityId; question: string; answer: string }[]> {
+  const linkTypes = new Set<string>(GM_LINK_TYPES);
+  const last = events.reduce((n, e, i) => (linkTypes.has(e.event.type) ? i : n), -1);
+  const out: { who: EntityId; question: string; answer: string }[] = [];
+  for (const e of events.slice(last + 1)) {
+    if (e.event.type !== MIND_INTERVIEW || !("data" in e.event)) continue;
+    const d = mindInterviewOf(e.event.data as JsonObject);
+    if (typeof d === "string" || d.by !== "gm") continue;
+    out.push({ who: d.who, question: (await rt.blobs.get(userId, d.question)) ?? "", answer: (await rt.blobs.get(userId, d.answer)) ?? "" });
+  }
+  return out;
 }
 
 /** The GM's links for one character, as GM → Minds shows them beside the truth (§4.4): their words, the fact's, how they stand, and why. */

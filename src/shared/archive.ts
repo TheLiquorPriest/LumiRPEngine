@@ -6,7 +6,7 @@
 
 import type { EntityId, MessageId, PlaceId } from "./ids";
 import type { SwipeKey } from "./layer";
-import type { StoryTime } from "./story";
+import type { ExposureChannel, ExposureReach, StoryTime } from "./story";
 
 export interface ArchiveQuery {
   /** Words to find (lexical, ranked); absent: every message the other filters keep, newest first. */
@@ -47,12 +47,35 @@ export interface ArchiveHit {
   people: EntityId[];
   /** Ids of the live beats citing it. */
   beats: string[];
+  /** Who each live beat citing it reached, and how: the people there to see or hear it, as the beats record. */
+  exposure: ArchiveExposure[];
   /** Lexical score (0 without `text`). */
   score: number;
   /** The best-matching passage, about 400 characters. */
   snippet: string;
   /** The snippet's [start, end) in the message's text, for `archiveQuote`. */
   span: [number, number];
+}
+
+/** One person a live beat citing a message reached (`Beat.exposure`). */
+export interface ArchiveExposure {
+  who: EntityId;
+  /** The beat it is the exposure of. */
+  beat: string;
+  /** Every way it reached them, the most direct first. */
+  channels: ExposureChannel[];
+  reach: ExposureReach;
+}
+
+/** Whom a hit's beats reached, each person once with every way it reached them: "Dale (sight, hearing)". */
+export function reachedOf(exposure: readonly ArchiveExposure[], nameOf: (id: EntityId) => string): string[] {
+  const ways = new Map<EntityId, Set<ExposureChannel>>();
+  for (const x of exposure) {
+    const set = ways.get(x.who) ?? new Set<ExposureChannel>();
+    for (const c of x.channels) set.add(c);
+    ways.set(x.who, set);
+  }
+  return [...ways].map(([who, set]) => `${nameOf(who)} (${[...set].join(", ")})`);
 }
 
 export interface ArchiveQuoteRequest {

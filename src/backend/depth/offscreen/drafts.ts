@@ -11,6 +11,7 @@
 // becomes of each is the author's.
 
 import { AUTHOR_DROP, draftOf, dropOf, settleOf, STORY_DRAFT, STORY_SETTLE, type DraftData, type DraftTouch, type DropData, type SettleData } from "../../../shared/episodes";
+import { isBlobHash } from "../../../shared/stores";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { Chip } from "../../../shared/state-view";
 import type { StoryContainer } from "../../../shared/story";
@@ -65,6 +66,18 @@ export function openDrafts(events: readonly LiveEvent[]): DraftOn[] {
   return draftsOn(events).filter((d) => d.state === "open");
 }
 
+/** Where a draft's texts are read from: the user's blobs (`Runtime.blobs` is one). */
+export interface DraftBlobs {
+  get(userId: string, hash: string): Promise<string | null>;
+}
+
+/** Draft `d` with its words read (§4.6): its episode's reason, each part's rationale and its summary, each a blob's hash in its event; an old draft's inline words read as they are. */
+export async function draftWithTexts(blobs: DraftBlobs, userId: string, d: DraftData): Promise<DraftData> {
+  const read = async (s: string): Promise<string> => (isBlobHash(s) ? ((await blobs.get(userId, s)) ?? "") : s);
+  const parts = await Promise.all(d.episode.parts.map(async (p) => ({ ...p, rationale: await read(p.rationale) })));
+  return { ...d, episode: { ...d.episode, why: await read(d.episode.why), parts }, summary: await read(d.summary) };
+}
+
 /** The kind of the chip a settlement shows under the reply it landed at (§7 Chips): `settled:<reply>:<swipe>:<draft>`. */
 export const SETTLED_CHIP_KIND = "settled";
 /** The longest a settled draft's summary runs in its chip's label. */
@@ -78,13 +91,14 @@ const SETTLED_LABEL_MAX = 140;
  * depth chips' in one walk. Queue-free: for the view, which holds the chat's core; it folds the chain
  * only when a settlement stands there, for the calendar the day is named in.
  */
-export function settledChipsOn(core: LedgerCore, observed: readonly ChainMessage[], live: readonly LiveEvent[]): Chip[] {
+export async function settledChipsOn(core: LedgerCore, observed: readonly ChainMessage[], live: readonly LiveEvent[], blobs: DraftBlobs, userId: string): Promise<Chip[]> {
   const last = core.chain(observed).findLast((m) => !m.isUser);
   if (!last) return [];
-  const here = draftsOn(live).flatMap((d) => (d.settle?.from.messageId === last.id ? [{ draft: d.draft, settle: d.settle.data }] : []));
-  if (here.length === 0) return [];
+  const settledHere = draftsOn(live).flatMap((d) => (d.settle?.from.messageId === last.id ? [{ draft: d.draft, settle: d.settle.data }] : []));
+  if (settledHere.length === 0) return [];
   const state = core.fold(observed).state;
   const world = core.playedAt(state);
+  const here = await Promise.all(settledHere.map(async (s) => ({ draft: await draftWithTexts(blobs, userId, s.draft), settle: s.settle })));
   const cal = world ? calendarOf(world) : null;
   return here.map(({ draft, settle }): Chip => {
     const said = (draft.summary.split("\n").find((l) => l.trim() !== "") ?? draft.episode.why).trim();

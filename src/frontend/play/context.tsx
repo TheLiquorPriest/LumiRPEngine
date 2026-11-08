@@ -25,6 +25,8 @@ import { STEP_LABEL } from "../../shared/steps";
 import type { MindCallTrace } from "../../shared/minds";
 import { FIDELITIES, MIND_PURPOSES, MINDS_SLOT } from "../../shared/minds";
 import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
+import type { DepthResult } from "../../shared/depth-views";
+import { DryRunPanel } from "../depth/turn";
 
 const POLICY_LABEL: Record<LorePolicy, string> = { none: "lore off", prefetch: "prefetch", lookup: "lookups", "prefetch+lookup": "prefetch and lookups" };
 const TRANSPORT_LABEL: Record<LoreStepTrace["transport"], string> = { none: "", tools: "through tools", need: "through the ask form" };
@@ -134,6 +136,28 @@ function CallMeter(props: { meter: CallMeterView }) {
   );
 }
 
+/** The chat's last dry run on the loopback (Lumiverse's prompt preview), on any world chat, on depth or not: the narrator's prompt LumiRPEngine would send. Read when the inspector opens and on Read again; nothing shows before a dry run. */
+function DryRunRead(props: { chatId: PanelProps["chatId"] }) {
+  const app = useApp();
+  const [dryRun, setDryRun] = useState<DepthResult["dryRun"]>(null);
+  const [ask, setAsk] = useState(0);
+  useEffect(() => {
+    let live = true;
+    void app.request<"lre.depth">({ type: "lre.depth", chatId: props.chatId, op: "dry_run" }).then((result) => {
+      if (live) setDryRun(result?.dryRun ?? null);
+    });
+    return () => {
+      live = false;
+    };
+  }, [props.chatId, ask]);
+  if (!dryRun) return null;
+  return (
+    <Section title="Dry run" aside={<IconButton icon="refresh" label="Read again" onClick={() => setAsk((n) => n + 1)} />}>
+      <DryRunPanel dryRun={dryRun} />
+    </Section>
+  );
+}
+
 export function ContextPanel(props: PanelProps) {
   const view = decodeContextView(props.view);
   const [index, setIndex] = useState(0);
@@ -143,12 +167,14 @@ export function ContextPanel(props: PanelProps) {
     void app.request({ type: "lre.view.open", chatId: props.chatId, panel: "core.context", entity: null });
   }, [props.chatId]);
   const meter = props.state.meter ? <CallMeter meter={props.state.meter} /> : null;
+  const dryRun = <DryRunRead chatId={props.chatId} />;
   if (props.view === undefined || props.view === null) {
     return (
       <div class="lre-stack" data-lre-panel="core.context">
         <Empty icon="code" title="Nothing inspected yet">
           The inspector fills in after the first reply.
         </Empty>
+        {dryRun}
         {meter}
       </div>
     );
@@ -269,6 +295,7 @@ export function ContextPanel(props: PanelProps) {
           ) : null}
         </>
       )}
+      {dryRun}
       {meter}
     </div>
   );

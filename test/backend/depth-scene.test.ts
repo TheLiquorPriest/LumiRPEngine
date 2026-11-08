@@ -208,6 +208,24 @@ describe("a depth turn, beat by beat", () => {
     expect(result.after).toEqual({ scene: sceneOf(scene && "data" in scene ? scene.data : null)?.scene ?? "", ended: false, remember: ["maya"], poll: true, beats: beats.map((b) => b.id), signals: ["(OOC: keep it slow)"] });
   });
 
+  test("the author's setup streams its reasoning into the thinking block piece by piece as the provider writes it, and it isn't shown again whole; only the setup asks for it (S17)", async () => {
+    const base = scripted({ gm: [GM], author: [SETUP, STEP], character: [PLAY] });
+    const streamedTo: string[] = [];
+    const model: ModelPort = async (role, messages, opts) => {
+      const answer = await base(role, messages, opts);
+      if (role !== "author" || !opts?.onReasoning) return answer;
+      streamedTo.push(role);
+      for (const piece of ["Mulling ", "the cafe."]) opts.onReasoning(piece);
+      return { ...answer, reasoning: "Mulling the cafe." };
+    };
+    const log = sinkLog();
+    await runDepthTurn(turnInput(model, log.sink, new AbortController().signal), scenePlugs);
+    expect(streamedTo).toEqual(["author"]);
+    expect(log.lines).toContain("Mulling ");
+    expect(log.lines).toContain("the cafe.");
+    expect(log.lines).not.toContain("Mulling the cafe.");
+  });
+
   test("staging is what anyone there could see, never a motive or an act done unseen: the setup and each step are told so, as an episode's are, since points of view are written from it", () => {
     const text = (id: string): string => PROMPTS.find((d) => d.id === id)?.text ?? "";
     for (const id of [SCENE_TEXT.setup, SCENE_TEXT.step, OFFSCREEN_TEXT.episode, OFFSCREEN_TEXT.episodeStep]) expect({ id, onlooker: text(id).includes("what anyone there could see them doing, and what occupies their eyes and hands: never a motive, a thought or anything done unseen") }).toEqual({ id, onlooker: true });
@@ -285,7 +303,7 @@ describe("a depth turn, beat by beat", () => {
     const archive: ArchiveSource = {
       search: async (q) => {
         searched.push(q);
-        return { hits: [{ messageId: "m0", index: 0, isUser: false, swipeId: 0, swipe: "r0", storyTime: null, places: ["cafe"], people: ["maya"], beats: [], score: 2, snippet: EARLIER, span: [0, EARLIER.length] }], total: 1 };
+        return { hits: [{ messageId: "m0", index: 0, isUser: false, swipeId: 0, swipe: "r0", storyTime: null, places: ["cafe"], people: ["maya"], beats: [], exposure: [], score: 2, snippet: EARLIER, span: [0, EARLIER.length] }], total: 1 };
       },
       quote: async (r) => {
         if (r.messageId !== "m0") return null;
@@ -506,55 +524,69 @@ const sceneSpend = (pre: readonly LedgerEvent[]): SpendData | undefined => pre.f
 const scenesIn = (pre: readonly LedgerEvent[]) => pre.flatMap((e) => (e.type === STORY_SCENE && "data" in e ? [sceneOf(e.data)].filter((s) => s !== null) : []));
 
 describe("a depth turn under a ceiling that binds (§6.5)", () => {
-  test("bound from the start: the setup reads it, whoever it still cast as their own agent the author plays, and its steps play them as far as it judges; the scene never ends at moment 0", async () => {
+  test("bound from the start: the setup reads it and its cast is its call; one it still has due as their own agent would cross the ceiling, so the scene ends at the next beat, said", async () => {
     const model = scripted({ gm: [GM], author: [SETUP, ...SLID_STEPS], character: [PLAY] });
     const log = sinkLog();
     const result = await runDepthTurn(turnInput(model, log.sink, new AbortController().signal, { budget: budgetOf(() => true) }), scenePlugs);
     expect(result.stopped).toBe(false);
-    // No one played as their own agent: Maya was the author's, in both of its steps.
     expect(model.calls.some((c) => c.role === "character")).toBe(false);
     const authors = model.calls.filter((c) => c.role === "author");
-    expect(authors).toHaveLength(3);
+    expect(authors).toHaveLength(1);
     expect(authors[0]?.text).toContain(`The budget binds: ${SPENT_DAY.words}.`);
-    expect(authors[1]?.text).toContain("Due to act now, whom you play: Maya Chen [maya].");
-    expect(authors[1]?.text).toContain("The budget slid Maya Chen [maya] to you this turn");
-    expect(authors[2]?.text).toContain("Maya tells Alex his coffee is coming.");
-    const hers = beatsIn(result.pre).filter((b) => b.actors.includes("maya"));
-    expect(hers.map((b) => [by(b), result.blobs[b.what]])).toEqual([
-      ["author", "Maya tells Alex his coffee is coming."],
-      ["author", "Maya sets the coffee down in front of Alex."],
-    ]);
-    // The cast has her as the author's, with why; the scene's spend keeps the line; the thinking block says it.
-    expect(scenesIn(result.pre).map((s) => s.cast.find((c) => c.who === "maya"))).toEqual([{ who: "maya", effort: "author", why: "She serves him, as herself. The budget slid them to the author: today's ceiling binds." }]);
-    expect(sceneSpend(result.pre)?.put).toEqual([`Maya Chen played by the author rather than their own agents: ${SPENT_DAY.words}`]);
-    expect(log.lines.some((l) => l.includes(`The budget: ${SPENT_DAY.words}, so the author plays Maya Chen from here rather than their own agents`))).toBe(true);
-    expect(log.lines.some((l) => l.includes("The turn ends: The coffee is served"))).toBe(true);
-    // Three moments rendered: the opening, then each of the author's steps.
-    expect(passagesIn(result.read).map((p) => p.moment)).toEqual([0, 1, 2]);
+    // Nothing slid by rule: Maya stays as the setup cast her.
+    expect(scenesIn(result.pre).map((s) => s.cast.find((c) => c.who === "maya")?.effort)).toEqual(["agent"]);
+    const stop = `the scene ended at the next beat: Maya Chen would still have played as their own agents past the ceiling (${SPENT_DAY.words})`;
+    expect(sceneSpend(result.pre)?.put).toEqual([stop]);
+    expect(log.lines.some((l) => l.includes(`The budget: ${SPENT_DAY.words}, and the author's answer would still have Maya Chen play as their own agents past it: the scene ends at this beat`))).toBe(true);
     expect(() => fold(reg, world, state, result.pre)).not.toThrow();
   });
 
-  test("bound mid-scene: whoever still plays as their own agent slides to the author from that moment, recorded in the scene's cast, and the author's next step plays them", async () => {
-    const answered = { exposure: [{ beat: "d1", who: "you", channel: "hearing", reach: "whole" }], staging: [], beats: [], next: ["maya"], end: null };
-    const model = scripted({ gm: [GM], author: [SETUP, answered, SLID_STEPS[1]], character: [PLAY, PLAY] });
-    // The ceiling binds once the author has set the scene and taken one step.
-    const budget = budgetOf(() => model.calls.filter((c) => c.role === "author").length >= 2);
+  const answered = { exposure: [{ beat: "d1", who: "you", channel: "hearing", reach: "whole" }], staging: [], beats: [], next: ["maya"], end: null };
+  // The ceiling binds once the author has set the scene and taken one step.
+  const boundAfterOne = (model: { calls: readonly { role: string }[] }) => budgetOf(() => model.calls.filter((c) => c.role === "author").length >= 2);
+
+  test("bound mid-scene: the author is told what the turn has left and asked who slides before anyone due plays as their own agent; its slide to itself is applied, recorded in the scene's cast and spend, and its next step plays them", async () => {
+    const slides = { exposure: [], staging: [], beats: [], next: ["maya"], end: null, slide: [{ who: "maya", to: "author" }] };
+    const model = scripted({ gm: [GM], author: [SETUP, answered, slides, SLID_STEPS[1]], character: [PLAY, PLAY] });
     const log = sinkLog();
-    const result = await runDepthTurn(turnInput(model, log.sink, new AbortController().signal, { budget }), scenePlugs);
+    const result = await runDepthTurn(turnInput(model, log.sink, new AbortController().signal, { budget: boundAfterOne(model) }), scenePlugs);
     expect(model.calls.filter((c) => c.role === "character")).toHaveLength(1);
     const authors = model.calls.filter((c) => c.role === "author");
-    expect(authors).toHaveLength(3);
-    expect(authors[1]?.text).toContain("The budget: today's depth work has about 40K tokens left under its ceiling (Per day).");
-    expect(authors[2]?.text).toContain("Due to act now, whom you play: Maya Chen [maya].");
-    expect(authors[2]?.text).toContain(`The budget binds: ${SPENT_DAY.words}.`);
-    // Her first act her own agent's, her next the author's; the scene's cast changes at that moment.
+    expect(authors).toHaveLength(4);
+    expect(authors[1]?.text).not.toContain("The ceiling binds");
+    expect(authors[2]?.text).toContain(`The ceiling binds: ${SPENT_DAY.words}, so the turn has nothing left under it. Due to act now as their own agents, waiting on your answer: Maya Chen.`);
+    expect(authors[2]?.text).toContain('"slide"');
+    expect(authors[3]?.text).toContain("Due to act now, whom you play: Maya Chen [maya].");
+    expect(authors[3]?.text).toContain("You slid Maya Chen [maya] to yourself this turn");
     expect(beatsIn(result.pre).filter((b) => b.actors.includes("maya")).map(by)).toEqual(["character", "author"]);
-    expect(scenesIn(result.pre).map((s) => s.cast.find((c) => c.who === "maya")?.effort)).toEqual(["agent", "author"]);
-    expect(sceneSpend(result.pre)?.put).toEqual([`Maya Chen played by the author rather than their own agents: ${SPENT_DAY.words}`]);
-    // She played once as herself: she remembers the scene after the reply.
+    expect(scenesIn(result.pre).map((s) => s.cast.find((c) => c.who === "maya"))).toEqual([
+      { who: "maya", effort: "agent", why: "She serves him, as herself." },
+      { who: "maya", effort: "author", why: "She serves him, as herself. The author slid them down the ladder: today's ceiling binds." },
+    ]);
+    expect(sceneSpend(result.pre)?.put).toEqual([`Maya Chen played by the author rather than their own agents, the author's call: ${SPENT_DAY.words}`]);
+    expect(log.lines.some((l) => l.includes(`The budget: ${SPENT_DAY.words}, so the author slides Maya Chen played by the author from here`))).toBe(true);
     expect(result.after.remember).toEqual(["maya"]);
-    expect(passagesIn(result.read).map((p) => p.moment)).toEqual([0, 1, 2]);
     expect(() => fold(reg, world, state, result.pre)).not.toThrow();
+  });
+
+  test("bound mid-scene: the author may slide one further, to the world, and end there", async () => {
+    const slides = { exposure: [], staging: [], beats: [], next: [], end: "Maya steps into the back: the player answers.", slide: [{ who: "maya", to: "world" }] };
+    const model = scripted({ gm: [GM], author: [SETUP, answered, slides], character: [PLAY] });
+    const result = await runDepthTurn(turnInput(model, sinkLog().sink, new AbortController().signal, { budget: boundAfterOne(model) }), scenePlugs);
+    expect(scenesIn(result.pre).map((s) => s.cast.find((c) => c.who === "maya")?.effort)).toEqual(["agent", "world"]);
+    expect(sceneSpend(result.pre)?.put).toEqual([`Maya Chen handled as world rather than their own agents, the author's call: ${SPENT_DAY.words}`]);
+  });
+
+  test("bound mid-scene: an answer that still has someone due as their own agent would cross the ceiling, so the scene ends at the next beat, said and kept in the spend", async () => {
+    const keeps = { exposure: [], staging: [], beats: [], next: ["maya"], end: null };
+    const model = scripted({ gm: [GM], author: [SETUP, answered, keeps, SLID_STEPS[1]], character: [PLAY, PLAY] });
+    const log = sinkLog();
+    const result = await runDepthTurn(turnInput(model, log.sink, new AbortController().signal, { budget: boundAfterOne(model) }), scenePlugs);
+    expect(model.calls.filter((c) => c.role === "character")).toHaveLength(1);
+    expect(model.calls.filter((c) => c.role === "author")).toHaveLength(3);
+    expect(scenesIn(result.pre).map((s) => s.cast.find((c) => c.who === "maya")?.effort)).toEqual(["agent"]);
+    expect(sceneSpend(result.pre)?.put).toEqual([`the scene ended at the next beat: Maya Chen would still have played as their own agents past the ceiling (${SPENT_DAY.words})`]);
+    expect(log.lines.some((l) => l.includes("the scene ends at this beat, the player answers here, and the scene goes on next turn"))).toBe(true);
   });
 });
 
@@ -1018,14 +1050,15 @@ describe("real time needs the character playing as their own agent (LIVE3 lane 1
     expect(model.calls.filter((c) => c.role === "author")[2]?.text).toContain(`What your last answer couldn't keep:\n- ${refusal}`);
   });
 
-  test("one the budget slid to the author isn't talked with in real time either, and the author's next step hears why", async () => {
+  test("under a ceiling that binds, real time isn't entered, said, and one still due as their own agent ends the scene at the next beat", async () => {
     const model = scripted({ gm: [GM], author: [{ ...SETUP, realtime: { with: "maya", why: "A word with her." } }, ...SLID_STEPS] });
     const log = sinkLog();
     const result = await runDepthTurn(turnInput(model, log.sink, new AbortController().signal, { budget: budgetOf(() => true) }), scenePlugs);
-    const slid = "real-time dialogue with Maya Chen needs them playing as their own agent, and the budget slid them to the author; it wasn't entered";
+    const slid = "real-time dialogue with Maya Chen needs them playing as their own agent, past a ceiling that binds; it wasn't entered";
     expect(talks(result.pre)).toEqual([]);
     expect(log.lines).toContain(`The author's setup: ${slid}`);
-    expect(model.calls.filter((c) => c.role === "author")[1]?.text).toContain(`What your last answer couldn't keep:\n- ${slid}`);
+    // Maya, still due as her own agent, would cross the ceiling: the scene ends at the next beat.
+    expect(sceneSpend(result.pre)?.put).toEqual([`the scene ended at the next beat: Maya Chen would still have played as their own agents past the ceiling (${SPENT_DAY.words})`]);
   });
 });
 

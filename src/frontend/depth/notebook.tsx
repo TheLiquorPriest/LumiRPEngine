@@ -14,9 +14,15 @@ import { ActionRow, ActionRows, GmCard, GmPage } from "../gm/ui";
 import { markdown } from "../markdown";
 import type { GmSectionProps } from "../registry";
 
-export type NotebookTab = "files" | "revisions" | "poll" | "predictions";
+export type NotebookTab = "files" | "revisions" | "poll" | "predictions" | "drift";
 
-const TAB_LABEL: Readonly<Record<NotebookTab, string>> = { files: "Files", revisions: "Revisions", poll: "Poll", predictions: "Predictions" };
+const TAB_LABEL: Readonly<Record<NotebookTab, string>> = { files: "Files", revisions: "Revisions", poll: "Poll", predictions: "Predictions", drift: "Drift" };
+
+const DRIFT: Readonly<Record<DepthNotebookView["drift"][number]["drift"], { label: string; tone: "pos" | "neg" | "warn" | "neutral" }>> = {
+  none: { label: "On its arc", tone: "pos" },
+  some: { label: "Some drift", tone: "warn" },
+  strong: { label: "Strong drift", tone: "neg" },
+};
 
 const OUTCOME: Readonly<Record<DepthNotebookView["predictions"][number]["outcome"], { label: string; tone: "pos" | "neg" | "warn" | "neutral" }>> = {
   pending: { label: "Open", tone: "neutral" },
@@ -159,7 +165,7 @@ export function NotebookBody(props: { view: DepthNotebookView; c: NotebookContro
   return (
     <div class="lre-stack lre-depth-notebook" data-lre-depth-notebook>
       <p class="lre-small lre-muted lre-depth-note">The author's own notebook: what the story means and where it points, in its words. Characters never read it; you may read and edit all of it.</p>
-      <Seg<NotebookTab> label="Notebook" value={c.tab} options={(["files", "revisions", "poll", "predictions"] as const).map((t) => ({ value: t, label: TAB_LABEL[t] }))} onChange={c.onTab} />
+      <Seg<NotebookTab> label="Notebook" value={c.tab} options={(["files", "revisions", "poll", "predictions", "drift"] as const).map((t) => ({ value: t, label: TAB_LABEL[t] }))} onChange={c.onTab} />
       {c.tab === "files" ? (
         view.files.length === 0 ? (
           <Empty icon="book">The author hasn't written its notebook yet. The bootstrap builds it chapter by chapter; on a new chat, the first scenes start it.</Empty>
@@ -180,6 +186,18 @@ export function NotebookBody(props: { view: DepthNotebookView; c: NotebookContro
             {view.poll.map((p, i) => (
               <PollCard key={i} poll={p} />
             ))}
+          </div>
+        )
+      ) : c.tab === "drift" ? (
+        view.drift.length === 0 ? (
+          <Empty icon="list">No drift checks yet: at a scene's or a chapter's end the author checks each arc against who the character has become.</Empty>
+        ) : (
+          <div data-lre-depth-drift>
+            <ActionRows label="Drift checks">
+              {view.drift.map((d, i) => (
+                <ActionRow key={i} title={d.who} subtitle={[d.at, d.note].filter(Boolean).join(" · ")} value={<Badge tone={DRIFT[d.drift].tone}>{DRIFT[d.drift].label}</Badge>} />
+              ))}
+            </ActionRows>
           </div>
         )
       ) : view.predictions.length === 0 ? (

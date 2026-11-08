@@ -33,7 +33,9 @@ import { departsLine, type Passage, type PassageDraft, passageEvent, passagesIn,
 import { heardAlone, wordsAlone } from "../../../shared/character-engine";
 import { type Beat, beatOf, type Exposure, STORY_BEAT, STORY_STAGING, type Staging, stagingOf } from "../../../shared/story";
 import { type Blobs, putText, readAnswer, type StagingText } from "../common";
-import { addUsage, NO_USAGE, roomAgain, type PortMessage, type PortUsage } from "../port";
+import { tokensOf } from "../../book";
+import { addUsage, NO_USAGE, type PortMessage, type PortUsage } from "../port";
+import { DEPTH_ROOM_MOST } from "../../../shared/depth-settings";
 import type { Moment, NarrationDeps, NarrationFactory, NarrationInput, NarrationOutcome, NarrationPort, PassageOutcome, RenderBeat } from "./contract";
 
 /** How a beat of the moment reached the player character: his own (context), whole, in part with his point of view, or whole by hearing alone with his point of view (LIVE3c L3c-4: never what there was to see). */
@@ -58,8 +60,49 @@ export interface Verdict {
   reasoning?: string;
 }
 
-/** Checks of one draft before it counts as unchecked: the first, and one more when its answer doesn't read, with more room where the first was cut off at its room (`roomAgain`). */
+/** Checks of one draft, or of one part of it, before it counts as unchecked: the first, and one more when its answer doesn't read. An answer cut off at its room isn't asked again: the passage is checked in two parts instead (`CHECK_SPLITS`). */
 const CHECK_TRIES = 2;
+
+/**
+ * How many times a check cut off at its room splits what it reads in two (`halves`): the whole
+ * passage once, and a part cut off again once more, so one draft is checked in four parts at most
+ * and a turn's checks can't grow past that. A part cut off past it counts as unchecked, with a chip.
+ */
+const CHECK_SPLITS = 2;
+
+/** The least answer room a check asks for, in tokens: its JSON verdict (a few problems, each with the words at fault and the change) runs to some hundreds, and low-effort reasoning still needs room past it. */
+const CHECK_ROOM_FLOOR = 2_048;
+
+/** The check's room per token it reads: reasoning counts in the room, and a reasoning model weighs every beat against the passage, so its thinking grows with the input; twice it holds a low-effort read. */
+const CHECK_ROOM_PER_TOKEN = 2;
+
+/**
+ * A check's answer room for `messages` where the user set the check none of its own (Settings →
+ * Depth, `ownRoom`, which stands over this one): sized to what it reads rather than its role's
+ * model's (a reasoning model spent a role's 8,192, then 16,384, thinking over a 2,700-token check,
+ * LIVE GAPS): `CHECK_ROOM_FLOOR` plus `CHECK_ROOM_PER_TOKEN` per token of input (estimated as the
+ * port does, `tokensOf`), held to the most Settings → Depth lets a room be (`DEPTH_ROOM_MOST`).
+ */
+export function checkRoom(messages: readonly PortMessage[]): number {
+  const tokens = messages.reduce((sum, m) => sum + tokensOf(m.content), 0);
+  return Math.min(DEPTH_ROOM_MOST, CHECK_ROOM_FLOOR + CHECK_ROOM_PER_TOKEN * tokens);
+}
+
+/** Where a passage splits in two for its check: at the paragraph break nearest its middle, else at the sentence end nearest it; null where it is one sentence. */
+function halves(text: string): [string, string] | null {
+  const breaks = (re: RegExp): number[] => [...text.matchAll(re)].map((m) => (m.index ?? 0) + m[0].length).filter((at) => at > 0 && at < text.length && text.slice(0, at).trim() !== "" && text.slice(at).trim() !== "");
+  const at = [breaks(/\n\s*\n/g), breaks(/[.!?…]+["'”’»)\]]*\s+/g)].find((b) => b.length > 0);
+  if (!at) return null;
+  const middle = text.length / 2;
+  const cut = at.reduce((best, b) => (Math.abs(b - middle) < Math.abs(best - middle) ? b : best));
+  return [text.slice(0, cut).trim(), text.slice(cut).trim()];
+}
+
+/** The part of a passage a check reads, once its whole was cut off at its room: its label (`part 1 of 2`, `part 2 of 2 of part 1 of 2`) and how many splits made it. */
+interface CheckPart {
+  label: string;
+  splits: number;
+}
 
 /** An answer line asking for a detail (`depth.narrator.ask`). */
 const ASK_LINE = /^\s*ASK:\s*(.+?)\s*$/i;
@@ -411,28 +454,22 @@ export class Narration implements NarrationPort {
     this.deps.sink.progress(`The GM is checking passage ${n}`);
     const started = this.now();
     try {
-      // The room the next try asks for: the role's own at first; once an answer is cut off at it, more (`roomAgain`), within what the model takes (the port holds it to a limit its provider states).
-      let room: number | undefined;
-      for (let attempt = 1; ; attempt++) {
-        if (this.input.signal.aborted) throw new Stopped();
-        const r = await this.deps.model("check", this.checkMessages(making, draft), { json: true, ...(room !== undefined ? { maxTokens: room } : {}), signal: this.input.signal });
-        this.usage = addUsage(this.usage, r.usage);
-        const read = verdictOf(readAnswer("check", r).answer);
-        const thought = r.reasoning ? `\n${r.reasoning.trim()}` : "";
-        if (read) {
-          this.reasoning(read.faithful ? `GM's check of passage ${n}: faithful.${thought}` : `GM's check of passage ${n}: not faithful.\n${read.notes}${thought}`);
-          return { ...read, ...(r.reasoning ? { reasoning: r.reasoning } : {}) };
-        }
-        if (attempt >= CHECK_TRIES) {
-          this.reasoning(`GM's check of passage ${n} couldn't be read; the passage streams unchecked, with a chip.`);
-          return { faithful: null, notes: `The GM's check couldn't be read: ${r.text.trim().slice(0, 400)}`, ...(r.reasoning ? { reasoning: r.reasoning } : {}) };
-        }
-        const more = cutShort(r.finish) && r.capped === undefined && r.room !== undefined ? roomAgain(r.room) : null;
-        if (more !== null) {
-          room = more;
-          this.reasoning(`GM's check of passage ${n} was cut off at its answer room of ${(r.room ?? 0).toLocaleString("en-US")} tokens; asking again with room for ${more.toLocaleString("en-US")}.`);
-        }
+      const read = await this.checked(making, draft, n);
+      const whole = read.length === 1 ? read[0] : undefined;
+      if (whole && whole.part === undefined) return whole.verdict;
+      // Checked in parts: faithful only where every part is, unchecked where one couldn't be read, else what each unfaithful part says, labelled by part.
+      const thought = read.map((p) => p.verdict.reasoning?.trim() ?? "").filter((t) => t !== "").join("\n\n");
+      const reasoning = thought !== "" ? { reasoning: thought } : {};
+      const labelled = (p: { part?: CheckPart; verdict: Verdict }): string => `In ${p.part?.label ?? "the passage"}: ${p.verdict.notes}`;
+      const unread = read.find((p) => p.verdict.faithful === null);
+      if (unread) return { faithful: null, notes: labelled(unread), ...reasoning };
+      const failed = read.filter((p) => p.verdict.faithful === false);
+      if (failed.length === 0) {
+        this.reasoning(`GM's check of passage ${n}, in ${read.length} parts: faithful.`);
+        return { faithful: true, notes: "", ...reasoning };
       }
+      const departs = failed.find((p) => p.verdict.departs !== undefined)?.verdict.departs;
+      return { faithful: false, notes: failed.map(labelled).join("\n"), ...(departs !== undefined ? { departs } : {}), ...reasoning };
     } catch (error) {
       if (this.input.signal.aborted || error instanceof Stopped) throw error;
       const why = error instanceof Error ? error.message : String(error);
@@ -443,8 +480,56 @@ export class Narration implements NarrationPort {
     }
   }
 
-  /** The check's call: its rules, then the passage, every beat of its moment whole, where the player character was, and whom he knows. */
-  private checkMessages(making: Making, draft: string): PortMessage[] {
+  /**
+   * One check of `text`, the whole draft or a part of it (`part`), at a low effort and the room the
+   * user set the check in Settings → Depth (`settings.ownCheckRoom`), else one sized to what it reads
+   * (`checkRoom`): its verdict, or asked once more when its answer doesn't read. Cut off at its room,
+   * it isn't asked again at more: what it read is checked in its two `halves` instead, each within
+   * that same rule (the user's room, else its own size), against the same whole beats, up to
+   * `CHECK_SPLITS` splits; one that can't split counts as unchecked. Each part's verdict, in the
+   * passage's order; after one that couldn't be read, no later part is asked, since the draft can no
+   * longer count as checked.
+   */
+  private async checked(making: Making, text: string, n: number, part?: CheckPart): Promise<{ part?: CheckPart; verdict: Verdict }[]> {
+    const of = `passage ${n}${part ? `, ${part.label}` : ""}`;
+    const at = part ? { part } : {};
+    for (let attempt = 1; ; attempt++) {
+      if (this.input.signal.aborted) throw new Stopped();
+      const messages = this.checkMessages(making, text, part);
+      const r = await this.deps.model("check", messages, { json: true, effort: "low", maxTokens: this.input.settings.ownCheckRoom ?? checkRoom(messages), signal: this.input.signal });
+      this.usage = addUsage(this.usage, r.usage);
+      const read = verdictOf(readAnswer("check", r).answer);
+      const thought = r.reasoning ? `\n${r.reasoning.trim()}` : "";
+      const reasoning = r.reasoning ? { reasoning: r.reasoning } : {};
+      if (read) {
+        this.reasoning(read.faithful ? `GM's check of ${of}: faithful.${thought}` : `GM's check of ${of}: not faithful.\n${read.notes}${thought}`);
+        return [{ ...at, verdict: { ...read, ...reasoning } }];
+      }
+      if (cutShort(r.finish)) {
+        const cut = `GM's check of ${of} was cut off at its answer room of ${(r.room ?? 0).toLocaleString("en-US")} tokens`;
+        const split = (part?.splits ?? 0) < CHECK_SPLITS ? halves(text) : null;
+        if (!split) {
+          this.reasoning(`${cut}, and it can't be checked in smaller parts; the passage streams unchecked, with a chip.`);
+          return [{ ...at, verdict: { faithful: null, notes: "The GM's check was cut off at its answer room, and the passage couldn't be checked in smaller parts.", ...reasoning } }];
+        }
+        this.reasoning(`${cut}; checking it in two parts.`);
+        const parts: { part?: CheckPart; verdict: Verdict }[] = [];
+        for (const [i, half] of split.entries()) {
+          const label = `part ${i + 1} of 2${part ? ` of ${part.label}` : ""}`;
+          parts.push(...(await this.checked(making, half, n, { label, splits: (part?.splits ?? 0) + 1 })));
+          if (parts.some((p) => p.verdict.faithful === null)) break;
+        }
+        return parts;
+      }
+      if (attempt >= CHECK_TRIES) {
+        this.reasoning(`GM's check of ${of} couldn't be read; the passage streams unchecked, with a chip.`);
+        return [{ ...at, verdict: { faithful: null, notes: `The GM's check couldn't be read: ${r.text.trim().slice(0, 400)}`, ...reasoning } }];
+      }
+    }
+  }
+
+  /** The check's call: its rules, then the passage (or the part of it it reads, `part`), every beat of its moment whole, where the player character was, and whom he knows. */
+  private checkMessages(making: Making, draft: string, part?: CheckPart): PortMessage[] {
     const pov = this.povName;
     const beat = (b: RenderBeat, how: string): string => `- [${b.beat.id}] ${b.beat.act} by ${b.beat.actors.map((id) => `${nameOf(this.input.state, id)} [${id}]`).join(", ") || "no one"} (${decidedBy(b.beat)}). What happened: ${b.what.trim()}\n  What there was to sense: ${b.surface.trim()}${words(b, "  ")}\n  ${how}`;
     const beats = [
@@ -455,7 +540,14 @@ export class Narration implements NarrationPort {
     ];
     const knows = this.input.knows?.filter((id) => id !== this.input.pov).map((id) => nameOf(this.input.state, id));
     const data = [
-      section("The passage", draft),
+      // A part read alone, its whole too long to check at once: the beats its other parts render are no departure in it.
+      part
+        ? section(
+            "You read one part of the passage",
+            `The passage was too long to check whole: you read ${part.label}, and the other parts, checked on their own, render the rest of this moment. An act or word of these beats that this part doesn't depict is no departure here; judge rule 1 only for what this part depicts, and rules 2 to 4 for all of it.`,
+          )
+        : "",
+      section(part ? `The passage, ${part.label}` : "The passage", draft),
       section("The beats of its moment", beats.join("\n")),
       section(`Where ${pov} was`, stagingLine(making.moment.staging)),
       knows !== undefined ? section(`Whom ${pov} knows by name`, knows.length > 0 ? knows.join(", ") : "No one here.") : "",

@@ -192,7 +192,7 @@ Version 1 · realism domain none · requires none.
 
 ### Events
 
-Its own: `author.adopt`, `author.answer`, `author.ask`, `author.drift`, `author.drop`, `author.edit`, `author.poll`, `author.predict`, `author.score`, `author.spend`.
+Its own: `author.adopt`, `author.answer`, `author.ask`, `author.drift`, `author.drop`, `author.edit`, `author.poll`, `author.predict`, `author.score`, `author.spend`, `author.verdict`.
 
 ## Calendar & time pack (`calendar`)
 
@@ -994,7 +994,7 @@ Version 1 · realism domain none · requires none.
 
 ### Events
 
-Its own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.fact`, `minds.forget`, `minds.intent`, `minds.keep`, `minds.knowledge`, `minds.learn`, `minds.link`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.settle`, `minds.skip`, `minds.unlink`, `minds.v2.interview`, `minds.v2.lived`, `minds.v2.pov`, `minds.v2.take`, `minds.v2.write`.
+Its own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.fact`, `minds.forget`, `minds.intent`, `minds.keep`, `minds.knowledge`, `minds.learn`, `minds.link`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.settle`, `minds.skip`, `minds.unlink`, `minds.v2.ask`, `minds.v2.interview`, `minds.v2.lived`, `minds.v2.pov`, `minds.v2.take`, `minds.v2.write`.
 
 ### Proposals
 
@@ -1388,7 +1388,7 @@ Version 1 · realism domain none · requires none.
 
 ### Events
 
-Its own: `story.beat`, `story.draft`, `story.flag`, `story.passage`, `story.scene`, `story.settle`, `story.staging`, `story.strike`, `story.talk`, `story.unrendered`.
+Its own: `story.beat`, `story.draft`, `story.flag`, `story.passage`, `story.record`, `story.scene`, `story.settle`, `story.staging`, `story.strike`, `story.talk`, `story.unrendered`.
 
 ### Panels and slots
 

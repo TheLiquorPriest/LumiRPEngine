@@ -1,14 +1,23 @@
 // The layer carried in the chat's own metadata (DEPTH-PLAN §4.9, owner's ruling on exports): Lumiverse's
 // chat export and import copy a chat's metadata, so a copy of the layer kept there travels
 // with them. An imported chat takes it as a branch takes its ancestor's (`ancestorOf`): each entry onto
-// the copy of its basis message, matched by the identities the messages show (`copyMap`). A layer too
-// large to carry is marked so, and the chat keeps the warning that an export loses its depth.
+// the copy of its basis message, matched by the identities the messages show (`copyMap`). The texts the
+// entries name travel beside them, so an import into another account puts them in its own store. A
+// layer too large to carry whole carries its newest entries that fit, and says how many it holds.
 
-import type { ChatId, MessageId } from "../shared/ids";
+import type { ChatId, MessageId, UserId } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { LayerEntry } from "../shared/layer";
+import { blobHash, isBlobHash } from "../shared/stores";
+import { storyBlobs } from "../shared/story";
+import { mindBlobs } from "../shared/character-engine";
+import { authorBlobs } from "../shared/author";
+import { episodeBlobs, STORY_DRAFT } from "../shared/episodes";
+import { workspaceRefs } from "../engine/workspace";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { swipeKeyOf } from "../engine/ledger/layer";
+import { blobPath } from "./agents/blobs";
+import type { HostPort } from "./host";
 
 /** The top-level chat metadata key the carried layer sits under. */
 export const LAYER_CARRY_KEY = "lre_layer";
@@ -23,39 +32,107 @@ export interface CarriedMessage {
   keys: string[];
 }
 
-export type LayerCarry =
-  | { v: 1; chat: ChatId; runSeed: string; at: string; entries: number; messages: CarriedMessage[]; list: LayerEntry[] }
-  /** Too large to carry: an export of this chat starts without its depth. */
-  | { v: 1; chat: ChatId; runSeed: string; at: string; entries: number; over: true };
-
-/** The carry for `entries` (all the chat folds, in its own message ids) on `chain`: the basis messages in chain order and the entries; or marked over the cap. */
-export function carryOf(chatId: ChatId, runSeed: string, entries: readonly LayerEntry[], chain: readonly ChainMessage[]): LayerCarry {
-  const at = new Date().toISOString();
-  const head = { v: 1 as const, chat: chatId, runSeed, at, entries: entries.length };
-  const size = JSON.stringify(entries).length;
-  if (size > LAYER_CARRY_MAX) return { ...head, over: true };
-  const bases = new Set(entries.map((e) => e.basis.message));
-  const messages = chain.filter((m) => bases.has(m.id)).map((m): CarriedMessage => ({ id: m.id, user: m.isUser, keys: m.swipes.map((_, s) => swipeKeyOf({ ...m, swipeId: s }, [])) }));
-  if (size + JSON.stringify(messages).length > LAYER_CARRY_MAX) return { ...head, over: true };
-  return { ...head, messages, list: [...entries] };
+export interface LayerCarry {
+  v: 1;
+  chat: ChatId;
+  runSeed: string;
+  at: string;
+  /** How many entries the chat folds; `list` holds the newest of them that fit, so fewer says the rest stayed behind. */
+  entries: number;
+  messages: CarriedMessage[];
+  list: LayerEntry[];
+  /** The texts the carried entries name, by hash, as the carrying account stored them. */
+  texts: Record<string, string>;
 }
 
-/** The carry a chat's metadata holds, when it is one this build reads. */
+/** The blobs a list of events names: the workspace files it writes, the texts of its beats, staging, strikes, prose and scenes, its mind writes, the author's records' notes, and a draft's own beats and changes; anything that isn't such a list names nothing. */
+export function eventBlobs(events: unknown, into: Set<string>): void {
+  if (!Array.isArray(events)) return;
+  for (const hash of workspaceRefs(events)) into.add(hash);
+  for (const ev of events) if (isRecord(ev) && typeof ev.type === "string" && ev.type.startsWith("story.")) for (const hash of storyBlobs(ev.type, ev.data)) into.add(hash);
+  for (const ev of events) if (isRecord(ev) && typeof ev.type === "string" && ev.type.startsWith("minds.v2.")) for (const hash of mindBlobs(ev.type, ev.data)) into.add(hash);
+  for (const ev of events) if (isRecord(ev) && typeof ev.type === "string" && ev.type.startsWith("author.")) for (const hash of authorBlobs(ev.type, ev.data)) into.add(hash);
+  // A draft holds its beats and the changes it would make as its own data (DEPTH-PLAN §4.6).
+  for (const ev of events) {
+    if (!isRecord(ev) || ev.type !== STORY_DRAFT || !isRecord(ev.data)) continue;
+    for (const hash of episodeBlobs(ev.type, ev.data)) into.add(hash);
+    eventBlobs(ev.data.effects, into);
+  }
+}
+
+/** The blobs a layer entry (or a held draft) names: its events' and its reasoning. Lenient. */
+export function entryBlobs(entry: unknown, into: Set<string>): void {
+  if (!isRecord(entry)) return;
+  eventBlobs(entry.events, into);
+  if (isBlobHash(entry.reasoning)) into.add(entry.reasoning);
+}
+
+/** A blob's text as `userId`'s store holds it; null when it isn't there or doesn't hash to its address. */
+export async function storedText(host: Pick<HostPort, "storage">, userId: UserId, hash: string): Promise<string | null> {
+  if (!isBlobHash(hash)) return null;
+  const text = await host.storage.read(blobPath(hash), userId);
+  return text !== null && blobHash(text) === hash ? text : null;
+}
+
+/** Puts a carry's texts in `userId`'s store, each under its hash; one that doesn't hash to its address is left out. */
+export async function putCarriedTexts(host: Pick<HostPort, "storage">, userId: UserId, carry: LayerCarry): Promise<void> {
+  for (const [hash, text] of Object.entries(carry.texts)) {
+    if (!isBlobHash(hash) || typeof text !== "string" || blobHash(text) !== hash) continue;
+    const path = blobPath(hash);
+    await host.storage.write(`${path}.tmp`, text, userId);
+    await host.storage.move(`${path}.tmp`, path, userId);
+  }
+}
+
+/**
+ * The carry for `entries` (all the chat folds, in its own message ids, in landing order) on `chain`:
+ * the newest entries whose JSON, texts (`text` reads one) and basis messages fit the cap together,
+ * taken newest first and stopping at the first that doesn't, kept in landing order.
+ */
+export async function carryOf(chatId: ChatId, runSeed: string, entries: readonly LayerEntry[], chain: readonly ChainMessage[], text: (hash: string) => Promise<string | null>): Promise<LayerCarry> {
+  const head = { v: 1 as const, chat: chatId, runSeed, at: new Date().toISOString(), entries: entries.length };
+  const onChain = new Map(chain.map((m) => [m.id, m]));
+  const list: LayerEntry[] = [];
+  const texts: Record<string, string> = {};
+  const messages = new Map<MessageId, CarriedMessage>();
+  let size = JSON.stringify({ ...head, messages: [], list: [], texts: {} }).length;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (!e) continue;
+    let cost = JSON.stringify(e).length + 1;
+    const named = new Set<string>();
+    entryBlobs(e, named);
+    const own: Record<string, string> = {};
+    for (const hash of named) {
+      if (hash in texts) continue;
+      const t = await text(hash);
+      if (t === null) continue;
+      own[hash] = t;
+      cost += JSON.stringify(hash).length + JSON.stringify(t).length + 2;
+    }
+    const m = messages.has(e.basis.message) ? undefined : onChain.get(e.basis.message);
+    const message = m ? { id: m.id, user: m.isUser, keys: m.swipes.map((_, s) => swipeKeyOf({ ...m, swipeId: s }, [])) } : undefined;
+    if (message) cost += JSON.stringify(message).length + 1;
+    if (size + cost > LAYER_CARRY_MAX) break;
+    size += cost;
+    list.push(e);
+    Object.assign(texts, own);
+    if (message) messages.set(message.id, message);
+  }
+  list.reverse();
+  return { ...head, messages: chain.flatMap((m) => messages.get(m.id) ?? []), list, texts };
+}
+
+/** The carry a chat's metadata holds, when it is one this build reads: none for one an earlier build marked too large to carry anything. */
 export function carryIn(meta: Readonly<Record<string, unknown>>): LayerCarry | null {
   const c = meta[LAYER_CARRY_KEY];
   if (!isRecord(c) || c.v !== 1 || typeof c.chat !== "string" || typeof c.runSeed !== "string" || typeof c.at !== "string" || typeof c.entries !== "number") return null;
-  if (c.over === true) return c as unknown as LayerCarry;
   if (!Array.isArray(c.list) || !Array.isArray(c.messages)) return null;
-  return c as unknown as LayerCarry;
-}
-
-/** The entries a carry holds; null when it holds none (over the cap) or can't be read. */
-export function carriedEntries(carry: LayerCarry): LayerEntry[] | null {
-  return "over" in carry ? null : carry.list;
+  return { ...(c as unknown as LayerCarry), texts: isRecord(c.texts) ? (c.texts as Record<string, string>) : {} };
 }
 
 /** Which of `copy`'s messages shows each carried message's identity (`copyMap`), as a branch's copies are found. */
-export function carriedMap(carry: Extract<LayerCarry, { list: LayerEntry[] }>, copy: readonly ChainMessage[]): Record<MessageId, MessageId> {
+export function carriedMap(carry: LayerCarry, copy: readonly ChainMessage[]): Record<MessageId, MessageId> {
   return copyMap(
     carry.messages.map((m) => ({ id: m.id, user: m.user, keys: new Set(m.keys) })),
     copy.map((m) => ({ id: m.id, user: m.isUser, keys: new Set(m.swipes.map((_, s) => swipeKeyOf({ ...m, swipeId: s }, []))) })),

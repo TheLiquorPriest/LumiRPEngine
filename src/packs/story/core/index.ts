@@ -24,6 +24,7 @@ import { storyBeatEvent, storyStagingEvent, storyStrikeEvent } from "./beats";
 import { storyPassageEvent, storyUnrenderedEvent } from "./passage-events";
 import { storySceneEvent } from "./scene";
 import { storyTalkEvent } from "./talk";
+import { storyRecordEvent } from "./record";
 import { storyDraftEvent, storySettleEvent } from "./episodes";
 import { droppedHolds, heldIn, type DraftHold } from "../../../shared/episodes";
 
@@ -528,6 +529,7 @@ export const storyPack: PackDef = {
     r.event<PackEvent>(storyBeatEvent);
     r.event<PackEvent>(storyStagingEvent);
     r.event<PackEvent>(storyStrikeEvent);
+    r.event<PackEvent>(storyRecordEvent);
     // How a scene was rendered (§1.3): each moment's passage and its checks, and the moments the narrator couldn't render, in the record's read part.
     r.event<PackEvent>(storyPassageEvent);
     r.event<PackEvent>(storyUnrenderedEvent);

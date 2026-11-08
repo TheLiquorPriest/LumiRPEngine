@@ -1135,7 +1135,7 @@ export class LedgerCore {
     if (!p) return;
     try {
       if (p.kind === "continue") {
-        this.stopContinue(input.content, observed, p.depth === true);
+        this.stopContinue(p, input.content, observed);
         return;
       }
       if (p.kind === "impersonate" || input.content === "" || !p.messageId) return;
@@ -1470,6 +1470,8 @@ export class LedgerCore {
     const ledger = this.ledgerFor(messageId, m);
     const rec = ledger.swipes[String(m.swipeId)];
     const suffix = this.continueSuffix(p, m, rec, content);
+    // A Continue a scene carried on (`scene`): its beats and prose are the `cont` entry, in place of reading what it added (DEPTH-PLAN §3.9).
+    if (rec && suffix !== null && p.depth && p.sceneRead !== undefined) return this.continueScene(p, index, rec, content, observed);
     if (rec && suffix !== null && !p.depth) {
       // A head Continue reads only its suffix into a `cont` entry (DESIGN §5.1 step 5, L13).
       const parent = this.fold(observed).messages[index]?.parentPath ?? ROOT_PATH;
@@ -1484,7 +1486,22 @@ export class LedgerCore {
     this.accept(messageId, m, content, p.depth === true);
   }
 
-  private stopContinue(partial: string, observed: readonly ChainMessage[], depth: boolean): void {
+  /**
+   * A Continue's scene on a chat on depth (DEPTH-PLAN §3.9): its further beats and the prose the
+   * narrator rendered on from the reply's saved end land as one `cont` entry on the reply's record,
+   * each unit kept that validates on the head's fold, as a head Continue's read suffix does.
+   */
+  private continueScene(p: PendingTurn, index: number, rec: Rec, content: string, observed: readonly ChainMessage[]): void {
+    const parent = this.fold(observed).messages[index]?.parentPath ?? ROOT_PATH;
+    const head = this.fold(observed.slice(0, index + 1));
+    const world = this.env.worlds(head.state.revision);
+    const events = world && p.sceneRead ? applyValidUnits(this.env.types, p.sceneRead, structuredClone(head.state), (s) => this.env.types.context(world, s)) : [];
+    if (events.length > 0) rec.post.push({ seq: ++this.journal.seq, at: parent, kind: "cont", events });
+    rec.swipeHash = contentId(content);
+    delete rec.accepted;
+  }
+
+  private stopContinue(p: PendingTurn, partial: string, observed: readonly ChainMessage[]): void {
     // The target is found by content: the swipe that now ends with the partial suffix (DESIGN §5.1 step 6, L15).
     const candidates = observed.filter((m) => !m.isUser && partial !== "" && activeText(m).endsWith(partial));
     let target = candidates[0];
@@ -1497,7 +1514,10 @@ export class LedgerCore {
         }) ?? target;
     }
     if (!target) return;
-    this.accept(target.id, target, activeText(target), depth);
+    // Stopped after a scene's passage streamed: what streamed stands, with its beats (`continueScene`).
+    const rec = p.depth && p.sceneRead !== undefined ? this.ledgerFor(target.id, target).swipes[String(target.swipeId)] : undefined;
+    if (rec && this.continueSuffix(p, target, rec, activeText(target)) !== null) return this.continueScene(p, observed.indexOf(target), rec, activeText(target), observed);
+    this.accept(target.id, target, activeText(target), p.depth === true);
   }
 
   /** An assistant message's new content accepted without reading it (an assistant edit; L14, L38); `continued`: what a Continue added on a chat on depth (`Rec.unread`). */
@@ -1688,6 +1708,11 @@ export class LedgerCore {
    */
   scene(generationId: GenerationId, pre: readonly LedgerEvent[], read: readonly LedgerEvent[], observed: readonly ChainMessage[]): LedgerEvent[] {
     const p = this.journal.pending[generationId];
+    // A Continue's scene (DEPTH-PLAN §3.9): its beats and prose, kept whole until its commit lands them as a `cont` entry on the reply's record (`continueScene`).
+    if (p?.kind === "continue" && p.depth) {
+      p.sceneRead = [...pre, ...read];
+      return [];
+    }
     if (!p?.planned) return [];
     const planned = this.renderPlanned(observed, p, true);
     if (!planned?.start) return [];

@@ -58,6 +58,7 @@ import type { Registry } from "../engine/registry-impl";
 import { isGone, kindIs } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import type { WorldDoc } from "../shared/world";
+import type { InterviewAsker } from "../shared/character-engine";
 import { catchUp, formCore, interview, reflect, type LivedPov, type MindFiles, type MindInput, type MindRewrite, type PovRefs, type StageOut } from "./character-agent";
 import type { ModelPort } from "./depth/port";
 import { DRAFT_TYPES, draftsOn, heldFrom } from "./depth/offscreen/drafts";
@@ -74,8 +75,8 @@ export interface EngineRt {
   readonly settings: { get(userId: UserId): Promise<UserSettings> };
   readonly ledger: {
     basisFor(chatId: ChatId, userId: UserId, messageId?: MessageId): Promise<Basis | null>;
-    /** The fold at `basis` with its story, and the live events of `types` through it. */
-    foldAtBasis(chatId: ChatId, userId: UserId, basis: Basis, types?: readonly string[]): Promise<{ state: WorldState; world: WorldDoc; story: StoryRead; events?: readonly LiveEvent[] } | null>;
+    /** The fold at `basis` with its story, and the live events of `types` through it; `without`, layer entries read as superseded (an Undo past the head reads the file as it was before the edit). */
+    foldAtBasis(chatId: ChatId, userId: UserId, basis: Basis, types?: readonly string[], without?: ReadonlySet<string>): Promise<{ state: WorldState; world: WorldDoc; story: StoryRead; events?: readonly LiveEvent[] } | null>;
     /** With `wait`, a result a turn in flight holds answers only once its window closes, landed or refused. */
     landLayer(chatId: ChatId, userId: UserId, draft: LayerDraft, o?: { wait?: boolean }): Promise<LandResult>;
     /** Every live event of these types on the active chain, in fold order, with where it was read from and, for a layer entry, its reasoning blob. */
@@ -356,7 +357,7 @@ export async function mindView(rt: EngineRt, chatId: ChatId, userId: UserId, who
   const texts = await textsOf(rt.blobs, userId, hashes);
   const { replaced } = exposedBeats(story);
   const files: DepthMindFile[] = Object.entries(meta)
-    .map(([rel, m]) => ({ path: rel, text: texts[m.hash] ?? "", pinned: pinnedBy(m, rel), revisions: m.rev, at: formatClock(cal, m.at), ...(writtenFromGone(m, mind, replaced) ? { out: true as const } : {}), ...(m.review ? { review: true as const } : {}) }))
+    .map(([rel, m]) => ({ path: rel, text: texts[m.hash] ?? "", pinned: pinnedBy(m, rel), revisions: m.rev, at: formatClock(cal, m.at), ...(writtenFromGone(m, mind, replaced) ? { out: true as const, ...(m.mode === "reflect" ? { reflection: true as const } : {}) } : {}), ...(m.review ? { review: true as const } : {}) }))
     .sort((a, b) => mindFileOrder(a.path) - mindFileOrder(b.path) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const previous = new Map<string, string>();
   const written: DepthMindWrite[] = [];
@@ -399,13 +400,20 @@ export function mindEditChip(entry: string): string {
   return `${MIND_EDIT_CHIP}:${entry}`;
 }
 
-/** The player's own edit of a mind file that stands on the chain: its entry, whose mind and which file, the message it folds after, and whether its Undo still reaches it (it was made at the chat's head, as every Undo covers the latest reply, DESIGN §12). */
+/** The player's own edit of a mind file that stands on the chain: its entry, whose mind and which file, the message it folds after, and whether its Undo supersedes it in place (it was made at the chat's head, as every in-place Undo covers the latest reply, DESIGN §12; past it, `mindEditUndo` lands a restoring edit instead). */
 export interface PlayerMindEdit {
   entry: FoldLayerEntry;
   who: EntityId;
   path: string;
   messageId: MessageId;
   undoable: boolean;
+  /** Its Undo past the head has landed: the restoring edit (`mindRestoreId`) stands, so it has no Undo left. */
+  restored: boolean;
+}
+
+/** The id of the GM edit an Undo past the head lands to restore the file as it was before `entry` (whose own id names its chat): one per edit, so a second press finds it there. */
+function mindRestoreId(entry: string): string {
+  return layerEntryId("mind_restore", entry);
 }
 
 /** Every edit of the player's of a mind file standing on the chain, in fold order: the live layer entries holding a `minds.v2.write` in his mode; one an Undo superseded is gone. Read on the chat's queue. */
@@ -414,10 +422,11 @@ export function playerMindEdits(core: LedgerCore, observed: readonly ChainMessag
   const head = headBasisOf(core, observed);
   const live = liveLayer(chain, core.journal.tombstones, core.layerEntries());
   const out: PlayerMindEdit[] = [];
+  const standing = new Set([...live.at.values()].flatMap((entries) => entries.map((e) => e.id)));
   for (const m of chain) {
     for (const entry of live.at.get(m.id) ?? []) {
       const write = entry.events.map((e) => mindWriteEvent(e)).find((w) => w?.mode === "user");
-      if (write) out.push({ entry, who: write.who, path: write.path, messageId: m.id, undoable: head !== null && entry.basis.message === head.message && entry.basis.swipe === head.swipe });
+      if (write) out.push({ entry, who: write.who, path: write.path, messageId: m.id, undoable: head !== null && entry.basis.message === head.message && entry.basis.swipe === head.swipe, restored: standing.has(mindRestoreId(entry.id)) });
     }
   }
   return out;
@@ -432,6 +441,12 @@ export function playerMindEdits(core: LedgerCore, observed: readonly ChainMessag
  * under the mind's folder ("beliefs.md") or whole.
  */
 export async function mindEdit(rt: EngineRt, chatId: ChatId, userId: UserId, who: EntityId, path: string, text: string): Promise<{ undo: string | null; pending?: boolean }> {
+  const r = await landMindEdit(rt, chatId, userId, who, path, text);
+  return r.status === "held" ? { undo: null, pending: true } : { undo: r.status === "landed" ? mindEditChip(r.entry.id) : null };
+}
+
+/** The player's edit of a mind file landed at the head (`mindEdit`'s, and an Undo's past the head): what the ledger answered. */
+async function landMindEdit(rt: EngineRt, chatId: ChatId, userId: UserId, who: EntityId, path: string, text: string, id?: string): Promise<LandResult> {
   const at = await foldAt(rt, chatId, userId);
   personOf(rt, at.world, at.state, who);
   const full = path.startsWith(MINDS_DIR) ? path : `${mindDir(who)}${path}`;
@@ -442,23 +457,34 @@ export async function mindEdit(rt: EngineRt, chatId: ChatId, userId: UserId, who
     undos = core.layerEntries().filter((e) => e.kind === MIND_UNDO && e.basis.message === at.basis.message && e.basis.swipe === at.basis.swipe).length;
   });
   const w = mindFileWrite({ who, path: full, at: at.state.clock, mode: "user", lived: [], about: [] }, text);
-  const r = await land(rt, chatId, userId, at.basis, MIND_WRITE, w, layerEntryId("mind_edit", chatId, who, file.rel, blobHash(text), at.basis.message, at.basis.swipe, String(undos)), "user");
-  return r.status === "held" ? { undo: null, pending: true } : { undo: r.status === "landed" ? mindEditChip(r.entry.id) : null };
+  return land(rt, chatId, userId, at.basis, MIND_WRITE, w, id ?? layerEntryId("mind_edit", chatId, who, file.rel, blobHash(text), at.basis.message, at.basis.swipe, String(undos)), "user");
 }
 
 /**
- * Undo of the player's edit of a mind file (§7: every edit lands as a GM edit with Undo): an entry
- * holding nothing that supersedes the edit's lands at the edit's own basis, so wherever the edit
- * folds it no longer does, and the file reads (and is pinned or not) as it was before it. Only while
- * the edit stands at the chat's head; a second Undo finds it gone.
+ * Undo of the player's edit of a mind file (§7: every edit lands as a GM edit with Undo). While the
+ * edit stands at the chat's head, an entry holding nothing that supersedes the edit's lands at the
+ * edit's own basis, so wherever the edit folds it no longer does, and the file reads (and is pinned
+ * or not) as it was before it; a second Undo finds it gone. Once the chat has moved on past it, a
+ * new GM edit lands at the head instead, restoring the file's text as it was just before the edit
+ * (the fold at its basis without it; empty for a file it made), which supersedes it as the file's
+ * latest write and reaches the author as a directive as any edit of his does.
  */
-export async function mindEditUndo(rt: Pick<EngineRt, "ledger">, chatId: ChatId, userId: UserId, entry: string): Promise<LandResult> {
+export async function mindEditUndo(rt: EngineRt, chatId: ChatId, userId: UserId, entry: string): Promise<LandResult> {
   let edit: PlayerMindEdit | undefined;
   await rt.ledger.with(chatId, userId, (core, observed) => {
     edit = playerMindEdits(core, observed).find((e) => e.entry.id === entry);
   });
   if (!edit) throw new MindRefused("moved", "That edit no longer stands on this chat's chain.");
-  if (!edit.undoable) throw new MindRefused("moved", "Only the latest reply's edits can be undone, as in the chat.");
+  if (!edit.undoable) {
+    if (edit.restored) throw new MindRefused("moved", "That edit is already undone: the edit restoring the file as it was before it stands.");
+    const before = await rt.ledger.foldAtBasis(chatId, userId, edit.entry.basis, [], new Set([entry]));
+    const rel = mindFileOf(edit.path)?.rel ?? "";
+    const files = before ? mindV2At(before.state, edit.who).files : undefined;
+    const was = files && hasOwn(files, rel) ? files[rel]?.hash : undefined;
+    const r = await landMindEdit(rt, chatId, userId, edit.who, edit.path, was ? ((await rt.blobs.get(userId, was)) ?? "") : "", mindRestoreId(entry));
+    if (r.status === "refused") throw new MindRefused("refused", `LumiRPEngine couldn't undo it: ${r.reason}`);
+    return r;
+  }
   const r = await rt.ledger.landLayer(chatId, userId, { id: layerEntryId(MIND_UNDO, chatId, entry), basis: edit.entry.basis, kind: MIND_UNDO, events: [], supersedes: [entry], by: { role: "user" } });
   if (r.status === "refused") throw new MindRefused("refused", `LumiRPEngine couldn't undo it: ${r.reason}`);
   return r;
@@ -472,19 +498,19 @@ export async function mindEditUndo(rt: Pick<EngineRt, "ledger">, chatId: ChatId,
 export const PLAY_AS_OFF = "Play as isn't supported yet: you play one player character, the one this chat plays now.";
 
 /**
- * An interview (§4.4), asked from GM → Minds: the character answers in voice. The question and the
- * answer are kept apart from its mind as a probe; when marked neutral to the world (asked in its
- * world's terms, revealing nothing it hasn't lived), what answering changed in its story of itself
- * folds into the mind.
+ * An interview (§4.4): asked by the player from GM → Minds, or by the author from its poll; the
+ * character answers in voice. The question and the answer are kept apart from its mind as a probe;
+ * when marked neutral to the world (asked in its world's terms, revealing nothing it hasn't lived),
+ * what answering changed in its story of itself folds into the mind.
  */
-export async function interviewMind(rt: EngineRt, chatId: ChatId, userId: UserId, who: EntityId, question: string, neutral: boolean, model?: ModelPort): Promise<DepthInterview> {
-  const at = await foldAt(rt, chatId, userId);
+export async function interviewMind(rt: EngineRt, chatId: ChatId, userId: UserId, who: EntityId, question: string, neutral: boolean, model?: ModelPort, o: { by?: InterviewAsker; basis?: Basis; signal?: AbortSignal } = {}): Promise<DepthInterview> {
+  const at = await foldAt(rt, chatId, userId, o.basis);
   personOf(rt, at.world, at.state, who);
   if (!hasAgent(at.world, at.state, who)) throw new MindRefused("player_character", `${nameOf(at.world, at.state, who)} is the player character: the player drives him, and he has no agent to interview.`);
   if (question.trim() === "") throw new MindRefused("bad_path", "An interview needs a question.");
   const settings = await rt.settings.get(userId);
-  const r = await interview(model ?? portFor(rt, userId), { ...(await mindInput(rt, userId, at, who, settings)), question, by: "gm", neutral });
-  await land(rt, chatId, userId, at.basis, MIND_INTERVIEW, r.out, layerEntryId("interview", chatId, who, blobHash(question), at.basis.message, at.basis.swipe, String(Date.now())), "character");
+  const r = await interview(model ?? portFor(rt, userId), { ...(await mindInput(rt, userId, at, who, settings)), question, by: o.by ?? "player", neutral, ...(o.signal ? { signal: o.signal } : {}) });
+  await land(rt, chatId, userId, at.basis, MIND_INTERVIEW, r.out, layerEntryId("interview", chatId, who, blobHash(question), at.basis.message, at.basis.swipe, o.by === "author" || o.by === "gm" ? o.by : String(Date.now())), "character");
   return { answer: r.answer, folded: r.folded };
 }
 

@@ -44,12 +44,15 @@ const CHIP_ICON: Record<ChipKind, IconName> = {
   not_action: "message",
   swipe_option: "refresh",
   engine_offer: "sparkle",
+  depth_offer: "layers",
   talk: "message",
   unfaithful: "alert",
   needs_loopback: "route",
   allowance: "sliders",
   edit_read: "edit",
   settled: "book",
+  bootstrap: "hourglass",
+  spot_checks: "flag",
   overdue: "calendar",
   timelapse_offer: "fast-forward",
   continue_timelapse: "fast-forward",
@@ -268,7 +271,8 @@ interface ChipControls {
  * that picks an action again opens the Actions palette at it (the intent gate's Edit), or the
  * Timelapse sheet for a time skip, one that names an organization opens its page in Orgs (the
  * plan's Edit), one that names a Settings page opens it (Settings → Loopback), one that names a
- * draft opens it in GM → Depth → Drafts (Settled off screen's Read), and any other sends at once.
+ * draft opens it in GM → Depth → Drafts (Settled off screen's Read), one that names the bootstrap
+ * opens GM → Depth → Bootstrap (its progress chip, its spot checks), and any other sends at once.
  */
 function useChipControls(chip: Chip, chatId: ChatId): ChipControls {
   const app = useApp();
@@ -282,6 +286,7 @@ function useChipControls(chip: Chip, chatId: ChatId): ChipControls {
     else if (input?.type === "org") app.ui.update((ui) => openAt(ui, "orgs", orgRoute(input.org, input.tab)));
     else if (input?.type === "settings") app.ui.update((ui) => ({ ...ui, mode: "settings", settings: { page: input.page } }));
     else if (input?.type === "draft") app.ui.update((ui) => ({ ...gmOpen(ui, DEPTH_SECTION, draftFocus(input.draft)), mode: "gm" }));
+    else if (input?.type === "bootstrap") app.ui.update((ui) => ({ ...gmOpen(ui, DEPTH_SECTION, "bootstrap"), mode: "gm" }));
     else if (input) setAsking(asking === action.id ? null : action.id);
     else choose(action.id);
   };
@@ -295,7 +300,7 @@ function useChipControls(chip: Chip, chatId: ChatId): ChipControls {
 
 /** Whether an action's input opens a form in the chip; one that opens the palette or a page doesn't. */
 function opensForm(input: ChipInput): input is Extract<ChipInput, { type: "money" | "choice" | "text" }> {
-  return input.type !== "action" && input.type !== "org" && input.type !== "settings" && input.type !== "draft";
+  return input.type !== "action" && input.type !== "org" && input.type !== "settings" && input.type !== "draft" && input.type !== "bootstrap";
 }
 
 /** One chip action as a button; one that opens a form says whether it is open. */

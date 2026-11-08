@@ -345,8 +345,8 @@ describe("the loopback's bridge", () => {
     expect(relay.count).toBe(0);
   });
 
-  test("a key that isn't a loopback key, and a world chat's turn with streaming off, are refused", async () => {
-    const { host, relay, key, chatId } = await setup(() => "unused");
+  test("a key that isn't a loopback key, and a world chat's turn with streaming off, are refused; the chat says so under the player's message", async () => {
+    const { rig, host, relay, key, chatId } = await setup(() => "unused");
     const bad = await relay.fetch(new Request(`http://127.0.0.1:${PORT}/v1/models`, { headers: { authorization: "Bearer lre_lk_nope", host: `127.0.0.1:${PORT}` } }));
     expect(bad.status).toBe(401);
     const good = await relay.fetch(new Request(`http://127.0.0.1:${PORT}/v1/models`, { headers: { authorization: `Bearer ${key}`, host: `127.0.0.1:${PORT}` } }));
@@ -357,5 +357,10 @@ describe("the loopback's bridge", () => {
     const off = await generation(relay, key, g, { stream: false });
     expect(JSON.stringify(await off.json())).toContain("streaming off");
     await host.stop(g, "");
+    await host.settle();
+    const said = host.chat(chatId).messages.findLast((m) => m.isUser);
+    const chip = (await rig.rt.chips.list(chatId, host.userId)).find((c) => c.id === `needs_loopback:stream:${said?.id}`);
+    expect(chip).toMatchObject({ kind: "needs_loopback", messageId: said?.id, label: "This chat's preset has streaming off", expires: "next_send" });
+    expect(chip?.detail).toContain("turn Streaming on in the preset");
   });
 });

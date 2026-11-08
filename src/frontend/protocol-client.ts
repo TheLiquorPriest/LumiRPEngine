@@ -458,7 +458,7 @@ export class ProtocolClient {
         return;
       case "lre.generate":
         if (typeof payload.chatId === "string" && typeof payload.turn === "string" && (payload.as === "regenerate" || payload.as === "continue" || payload.as === "send")) {
-          const push: GeneratePush = { lre: PROTOCOL_VERSION, type: "lre.generate", chatId: payload.chatId, as: payload.as, turn: payload.turn };
+          const push: GeneratePush = { lre: PROTOCOL_VERSION, type: "lre.generate", chatId: payload.chatId, as: payload.as, turn: payload.turn, ...(payload.ask === true ? { ask: true as const } : {}) };
           for (const listener of this.generateListeners) listener(push);
         }
         return;

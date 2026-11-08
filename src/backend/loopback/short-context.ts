@@ -10,7 +10,7 @@
 // from before depth) is today's narrator's from the same context, under Keep it with every section
 // and no part, so raw history beyond the window never reaches it either (`bridge.ts`).
 //
-// Settings → Depth → Your preset (absorption):
+// Settings → Depth → Your preset (absorption), or the chat's own choice over it (GM → This chat → Depth, `absorptionOf`):
 // - **Keep it** (the default): every block outside the history stays where core put it (the system
 //   prompt, the card, the persona, World Info, other extensions' injections; after the history, the
 //   post-history instructions and a prefill, which follow the narrator's part as they followed the
@@ -41,6 +41,11 @@ import { fillMarks, type PlacedSection } from "./compose";
 export const BEATS_TELL: ReadonlySet<string> = new Set(["outcome", "montage", "outline", "stance", MINDS_SLOT, KNOWLEDGE_SLOT]);
 
 export type Absorption = "keep" | "narrator";
+
+/** The way a chat takes the preset (§3.13, per chat): its own choice in GM → This chat → Depth, else the user's in Settings → Depth (Keep it by default). */
+export function absorptionOf(chat: Absorption | null, yours: Absorption): Absorption {
+  return chat ?? yours;
+}
 
 export interface ShortContextInput {
   /** The assembled prompt as the turn tagger saw it: after every other interceptor, before core's post-processing. */

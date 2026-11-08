@@ -22,6 +22,7 @@
 // judgment of what matters, and never the archive at large. Pure.
 
 import type { DepthWriteMode } from "./depth-views";
+import { DEPTH_TAKES_KEPT } from "./depth-settings";
 import type { EntityId, PlaceId } from "./ids";
 import { hashParts } from "./hash";
 import { hasOwn, isRecord, type JsonObject, type JsonValue } from "./json";
@@ -164,14 +165,24 @@ export interface MindTakeData {
   take: string;
 }
 
+/** `minds.v2.ask`: a character asks, from its own play, to take stock (§4.4, Reflect "or when it asks"): its words why. The poll hears it until a reflection runs. */
+export interface MindAskData {
+  who: EntityId;
+  at: number;
+  why: string;
+}
+
 export const MIND_WRITE = "minds.v2.write";
 export const MIND_LIVED = "minds.v2.lived";
 export const MIND_INTERVIEW = "minds.v2.interview";
 export const MIND_POV = "minds.v2.pov";
 export const MIND_TAKE = "minds.v2.take";
+export const MIND_ASK = "minds.v2.ask";
+/** The longest reason a character's ask to reflect keeps, in characters. */
+export const MIND_ASK_WORDS_MAX = 400;
 
-/** The takes a mind holds unremembered that call for its remembering: once a character holds this many, the step after a reply remembers them, a talk still on or not (`afterDepthReply`). A count that calls a remember, never a cut: no take is let go unremembered. */
-export const TAKES_KEPT = 400;
+/** The shipped count of takes a mind holds unremembered that calls for its remembering: once a character holds Settings → Depth → Takes before remembering (`depth.takesKept`, this by default), the step after a reply remembers them, a talk still on or not (`afterDepthReply`). A count that calls a remember, never a cut: no take is let go unremembered. */
+export const TAKES_KEPT = DEPTH_TAKES_KEPT;
 
 /** The interviews a character's probes keep, newest last; older ones still stand in the ledger. */
 export const PROBES_KEPT = 50;
@@ -372,6 +383,21 @@ export function mindTakeEvent(d: { who: EntityId; at: number; lived: readonly st
   return { event: { type: MIND_TAKE, data: { who: d.who, at: d.at, lived: [...d.lived], ...(d.beat !== undefined ? { beat: d.beat } : {}), take } }, blobs: { [take]: d.take } };
 }
 
+/** A `minds.v2.ask`'s data as it reads, or why it doesn't. */
+export function mindAskOf(data: JsonObject): MindAskData | string {
+  const { who, at, why } = data;
+  if (!str(who)) return "an ask to reflect names whose it is";
+  if (!minute(at)) return "an ask to reflect says the story minute it was asked at";
+  if (!str(why)) return "an ask to reflect says why, in its words";
+  return { who, at, why };
+}
+
+/** A `minds.v2.ask` event: its reason bounded. */
+export function mindAskEvent(d: MindAskData): PackEvent {
+  const why = d.why.trim();
+  return { type: MIND_ASK, data: { who: d.who, at: d.at, why: why.length > MIND_ASK_WORDS_MAX ? `${why.slice(0, MIND_ASK_WORDS_MAX - 1)}…` : why } };
+}
+
 /** The blobs a Character Engine event names, for the blob sweep (`backend/agents/sweep.ts`): a write's body, an interview's question and answer, a take's text. Lenient: anything else names nothing. */
 export function mindBlobs(type: unknown, data: unknown): string[] {
   if (!isRecord(data)) return [];
@@ -444,6 +470,8 @@ export interface MindFileMeta {
   supersedes?: string;
   source?: CoreSource;
   review?: true;
+  /** On the player's own edit only: the file's body before it, by hash (absent when the file was new), so the author is told his edit as a diff. */
+  was?: string;
 }
 
 /** A take the character hasn't remembered yet: its working memory of the scene (`minds.v2.take`). */
@@ -463,6 +491,8 @@ export interface MindV2 {
   writes: number;
   last: number | null;
   takes?: MindTake[];
+  /** Its ask to reflect from its own play, its newest; a reflection's write answers it. */
+  asks?: { at: number; why: string };
 }
 
 /** An interview kept apart from the mind. */

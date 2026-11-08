@@ -190,6 +190,27 @@ describe("the bootstrap's history", () => {
     expect((await bootstrap(rig, chatId, { op: "estimate" })).view.chunks.total).toBe(3);
   }, 60_000);
 
+  test("an old reply edited after the run read it is the author's fix: each beat from it is amended beside it as it now reads, and its chunk isn't read again", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await historyChat(rig);
+    const { asked } = fakeModels(rig, MINDS);
+    await done(rig, chatId);
+    const by = await beatsBy(rig, chatId);
+    const reply = rig.host.chat(chatId).messages.find((m) => !m.isUser && (by[m.id] ?? 0) > 0);
+    if (!reply) throw new Error("no reply with beats");
+    rig.host.editMessage(chatId, reply.id, `Danny says the lamp was sold for scrap. ${PROSE}`);
+    await rig.host.settle();
+    await bootstrap(rig, chatId, { op: "start", cap: "none" });
+    const view = await finished(rig, chatId);
+    expect(view.status).toBe("done");
+    expect(asked.historian).toBe(3);
+    expect(asked.amend).toBe(by[reply.id]);
+    // Taken once: running again amends nothing more.
+    await bootstrap(rig, chatId, { op: "start", cap: "none" });
+    await finished(rig, chatId);
+    expect(asked.amend).toBe(by[reply.id]);
+  }, 60_000);
+
   test("the history ends before the first turn depth played and the player's messages it answered, or before a turn in flight", () => {
     const rec = (types: string[]) => ({ swipes: { "0": { events: types.map((type) => ({ type, data: {} })), post: [] } }, markers: [] }) as unknown as MessageLedger;
     const m = (id: string, isUser: boolean, ledger: MessageLedger | null = null, swipeId = 0): ChainMessage => ({ id, isUser, swipeId, swipes: ["x", "y"], ledger });

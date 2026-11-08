@@ -11,7 +11,8 @@
 import { AUTHOR_DROP, dropEvent, STORY_SETTLE, type DraftData } from "../../shared/episodes";
 import type { DepthAt, DepthDraft, DepthDraftsView } from "../../shared/depth-views";
 import { durationText } from "../../shared/depth-views";
-import type { ChatId, EntityId, MessageId, UserId } from "../../shared/ids";
+import { isRecord } from "../../shared/json";
+import { runDir, type ChatId, type EntityId, type MessageId, type UserId } from "../../shared/ids";
 import type { Basis, LandResult } from "../../shared/layer";
 import { isBlobHash } from "../../shared/stores";
 import type { StoryRef } from "../../shared/story";
@@ -25,8 +26,10 @@ import type { WorldState } from "../../engine/state";
 import { depthOptedIn } from "../bootstrap/service";
 import { headBasis } from "../character-engine";
 import type { BasisRead } from "../ledger-io";
+import type { HostPort } from "../host";
+import { readStoredJson } from "../stored-json";
 import type { Runtime } from "../runtime";
-import { DRAFT_TYPES, draftsOn, type DraftOn } from "./offscreen/drafts";
+import { DRAFT_TYPES, draftsOn, draftWithTexts, type DraftOn } from "./offscreen/drafts";
 import { changedInputs, draftEpisode, landEntry, type OffscreenRt } from "./offscreen/episode";
 import { offscreenJobs, type JobsRt } from "./offscreen/jobs";
 import type { EpisodeAsk } from "./scene/author";
@@ -64,7 +67,7 @@ async function draftOf(rt: Pick<OffscreenRt, "blobs" | "registry">, userId: User
   const name = (id: EntityId): string => own(state.entities, id)?.name ?? id;
   const text = async (hash: string | undefined): Promise<string> => (hash ? ((await rt.blobs.get(userId, hash)) ?? "") : "");
   const placeOf = (from: { messageId: MessageId }): DepthAt => ({ messageId: from.messageId, index: order.get(from.messageId) ?? 0 });
-  const draft: DraftData = d.draft;
+  const draft: DraftData = await draftWithTexts(rt.blobs, userId, d.draft);
   const inputs = changedInputs(state, draft);
   const changed = [...inputs.minds.map((who) => `${name(who)}'s mind`), ...inputs.notebook.map((path) => `the author's notebook (${path.slice(NOTEBOOK_DIR.length)})`)];
   const ctx = rt.registry.context(world, state);
@@ -108,20 +111,47 @@ async function draftOf(rt: Pick<OffscreenRt, "blobs" | "registry">, userId: User
   };
 }
 
-/** The player's Settle now and Re-draft presses, by user, chat and draft: what each came to, kept while the host runs for the draft's page (the newest `PRESSES_KEPT`). */
-const presses = new Map<string, NonNullable<DepthDraft["press"]>>();
-const PRESSES_KEPT = 500;
-const pressKey = (chatId: ChatId, userId: UserId, draft: string): string => `${userId}\u0000${chatId}\u0000${draft}`;
+/** The player's Settle now and Re-draft presses, by draft: what each came to, kept in the chat's run (`runs/<chatId>/presses.json`, removed with the chat) for the draft's page, so a restart keeps them (the newest `PRESSES_KEPT` per chat). */
+const PRESSES_KEPT = 200;
+const pressesPath = (chatId: ChatId): string => `${runDir(chatId)}presses.json`;
+type Press = NonNullable<DepthDraft["press"]>;
 
-/** Keeps what a Settle now or Re-draft on draft `draft` came to, for its page in the Drafts view. */
-export function notePress(chatId: ChatId, userId: UserId, draft: string, press: NonNullable<DepthDraft["press"]>): void {
-  const key = pressKey(chatId, userId, draft);
-  presses.delete(key);
-  presses.set(key, { op: press.op, state: press.state, lines: [...press.lines] });
-  for (const old of presses.keys()) {
-    if (presses.size <= PRESSES_KEPT) break;
-    presses.delete(old);
-  }
+function isPress(raw: unknown): raw is Press {
+  if (!isRecord(raw)) return false;
+  return (raw.op === "settle" || raw.op === "redraft") && (raw.state === "running" || raw.state === "done" || raw.state === "failed") && Array.isArray(raw.lines) && raw.lines.every((l) => typeof l === "string");
+}
+
+const isPresses = (raw: unknown): boolean => isRecord(raw) && raw.v === 1 && isRecord(raw.presses) && Object.values(raw.presses).every(isPress);
+
+/** The chat's kept presses, by draft id, in the order they were last written. */
+async function pressesOf(host: Pick<HostPort, "storage" | "log">, chatId: ChatId, userId: UserId): Promise<Map<string, Press>> {
+  const raw = await readStoredJson(host, pressesPath(chatId), userId, "Drafts' presses", isPresses);
+  return new Map(isRecord(raw) && isRecord(raw.presses) ? Object.entries(raw.presses as Record<string, Press>) : []);
+}
+
+/** One write at a time per chat and user, so a press's "running" never lands over its own outcome. */
+const writing = new Map<string, Promise<void>>();
+
+/** Keeps what a Settle now or Re-draft on draft `draft` came to, for its page in the Drafts view; a write that fails is logged, and the page says nothing of it. */
+export function notePress(host: Pick<HostPort, "storage" | "log">, chatId: ChatId, userId: UserId, draft: string, press: Press): Promise<void> {
+  const key = `${userId}\u0000${chatId}`;
+  const next = (writing.get(key) ?? Promise.resolve()).then(async () => {
+    const kept = await pressesOf(host, chatId, userId);
+    kept.delete(draft);
+    kept.set(draft, { op: press.op, state: press.state, lines: [...press.lines] });
+    for (const old of kept.keys()) {
+      if (kept.size <= PRESSES_KEPT) break;
+      kept.delete(old);
+    }
+    const path = pressesPath(chatId);
+    await host.storage.write(`${path}.tmp`, JSON.stringify({ v: 1, presses: Object.fromEntries(kept) }), userId);
+    await host.storage.move(`${path}.tmp`, path, userId);
+  }).catch((error: unknown) => host.log("warn", `[LumiRPEngine] chat ${chatId}, draft ${draft}: what the press came to wasn't kept (${error instanceof Error ? error.message : String(error)})`, userId));
+  writing.set(key, next);
+  void next.finally(() => {
+    if (writing.get(key) === next) writing.delete(key);
+  });
+  return next;
 }
 
 /** GM → Depth → Drafts: every draft on the chat's chain, newest first. */
@@ -133,7 +163,8 @@ export async function draftsView(rt: DraftsRt, chatId: ChatId, userId: UserId): 
   const drafts: DepthDraft[] = [];
   // Each message by the number the chat shows it with (`chainNumbers`).
   const order = await chainNumbers(rt.host, chatId, userId, (await rt.ledger.chainBases(chatId, userId)).map((b) => b.message));
-  for (const d of draftsOn(live)) drafts.push(await draftOf(rt, userId, head.at, order, live, d, presses.get(pressKey(chatId, userId, d.draft.id))));
+  const kept = await pressesOf(rt.host, chatId, userId);
+  for (const d of draftsOn(live)) drafts.push(await draftOf(rt, userId, head.at, order, live, d, kept.get(d.draft.id)));
   return { on: on || drafts.length > 0, drafts: drafts.reverse() };
 }
 
@@ -147,7 +178,7 @@ async function openAtHead(rt: DraftsRt, chatId: ChatId, userId: UserId, id: stri
   const found = draftsOn(head.at.events).find((d) => d.draft.id === id);
   if (!found) throw new DraftRefused("That draft isn't on this chat's chain any more.");
   if (found.state !== "open") throw new DraftRefused(`That draft is already ${found.state} here.`);
-  return { basis: head.basis, at: head.at, draft: found.draft };
+  return { basis: head.basis, at: head.at, draft: await draftWithTexts(rt.blobs, userId, found.draft) };
 }
 
 /** Drop: the player's own verdict that open draft `id` won't happen, landed at the chat's head beside the author's records. */
@@ -180,19 +211,20 @@ function redraftIndex(id: string): number {
 /**
  * Re-draft: open draft `id` dropped at the chat's head, and its episode drafted again there at its
  * treatments (the player's ask, past the allowances), at the same story time, from the world as it
- * now stands. What became of it, in words.
+ * now stands. `edit`: the player's edit of the draft (M-16), his words a directive the author drafts
+ * it again from, beside the episode's own reason. What became of it, in words.
  */
-export async function redraft(rt: DraftsRt, chatId: ChatId, userId: UserId, id: string): Promise<string[]> {
+export async function redraft(rt: DraftsRt, chatId: ChatId, userId: UserId, id: string, edit?: string): Promise<string[]> {
   const { basis, at, draft } = await openAtHead(rt, chatId, userId, id);
-  await dropDraft(rt, chatId, userId, id, "You asked for it to be redrafted (GM → Depth → Drafts).");
+  await dropDraft(rt, chatId, userId, id, edit ? "You edited it (GM → Depth → Drafts): it is drafted again from your words." : "You asked for it to be redrafted (GM → Depth → Drafts).");
   const [start, end] = draft.episode.span;
   const episode: EpisodeAsk = {
-    why: draft.episode.why,
+    why: edit ? `${draft.episode.why}\nThe player edited this episode; his words are a directive to draft it from: “${edit}”` : draft.episode.why,
     in: start - at.state.clock,
     minutes: Math.max(1, end - start),
     places: draft.episode.places,
     people: draft.episode.people,
-    parts: draft.episode.parts.map((p) => ({ subject: p.subject, treatment: p.treatment, rationale: `${p.rationale} (redrafted at your ask)`.trim() })),
+    parts: draft.episode.parts.map((p) => ({ subject: p.subject, treatment: p.treatment, rationale: `${p.rationale} (${edit ? "redrafted from your edit" : "redrafted at your ask"})`.trim() })),
   };
   const r = await draftEpisode(rt, chatId, userId, basis, episode, { index: redraftIndex(id) });
   const said = [...r.said];

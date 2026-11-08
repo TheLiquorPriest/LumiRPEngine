@@ -298,14 +298,22 @@ function quotedIn(q: readonly QuoteWord[], t: QuoteText, budget: number): { span
   return { span: first && last && first.from < last.to ? t.text.slice(first.from, last.to) : null, cells };
 }
 
-/** Holding an answer's quotes to the texts: how many more it may hold (QUOTES_PER_ANSWER_MOST), and the stop it honours. */
+/** What a reading's quotes are held to: words a quote, quotes a field, quotes an answer. Settings → Depth's `depth.reads` is one as it stands; the constants where none is given. */
+export interface QuoteBounds {
+  quoteWords: number;
+  quotesPerBeat: number;
+  quotesPerAnswer: number;
+}
+
+/** Holding an answer's quotes to the texts: how many more it may hold (its `quotesPerAnswer`), its bounds, and the stop it honours. */
 interface Holding {
   left: number;
+  bounds: QuoteBounds;
   signal?: AbortSignal;
 }
 
-function holdingFor(signal: AbortSignal | undefined): Holding {
-  return { left: QUOTES_PER_ANSWER_MOST, ...(signal ? { signal } : {}) };
+function holdingFor(signal: AbortSignal | undefined, bounds: QuoteBounds = { quoteWords: QUOTE_WORDS_MOST, quotesPerBeat: QUOTES_PER_BEAT_MOST, quotesPerAnswer: QUOTES_PER_ANSWER_MOST }): Holding {
+  return { left: bounds.quotesPerAnswer, bounds, ...(signal ? { signal } : {}) };
 }
 
 /**
@@ -327,7 +335,7 @@ async function heldTo(v: unknown, texts: () => readonly QuoteText[], whose: stri
   const past: string[] = [];
   for (const [k, q] of cited.entries()) {
     // Past the most a beat or the answer holds: refused unmatched, as an over-long quote is, said back by its first words.
-    if (k >= QUOTES_PER_BEAT_MOST || holding.left <= 0) {
+    if (k >= holding.bounds.quotesPerBeat || holding.left <= 0) {
       const first = q.split(/\s+/);
       past.push(`“${first.slice(0, 12).join(" ")}${first.length > 12 ? " …" : ""}”`);
       continue;
@@ -335,7 +343,7 @@ async function heldTo(v: unknown, texts: () => readonly QuoteText[], whose: stri
     holding.left -= 1;
     await giveWay();
     holding.signal?.throwIfAborted();
-    const words = quoteWords(q, QUOTE_WORDS_MOST);
+    const words = quoteWords(q, holding.bounds.quoteWords);
     if (words === null) {
       // Said back by its first words: it is longer than any act's.
       long.push(`“${q.split(/\s+/).slice(0, 12).join(" ")} …”`);
@@ -360,7 +368,7 @@ async function heldTo(v: unknown, texts: () => readonly QuoteText[], whose: stri
   }
   const why = [
     ...(long.length > 0 ? [`${long.join(" and ")} ${long.length === 1 ? "quotes" : "quote"} more than an act's own words`] : []),
-    ...(past.length > 0 ? [`${past.join(" and ")} ${past.length === 1 ? "is" : "are"} past the most quotes held (${QUOTES_PER_BEAT_MOST} a beat, ${QUOTES_PER_ANSWER_MOST} an answer)`] : []),
+    ...(past.length > 0 ? [`${past.join(" and ")} ${past.length === 1 ? "is" : "are"} past the most quotes held (${holding.bounds.quotesPerBeat} a beat, ${holding.bounds.quotesPerAnswer} an answer)`] : []),
     ...(often.length > 0 ? [`${often.join(" and ")} ${often.length === 1 ? "uses" : "use"} words that stand too often in ${whose} to be held to it`] : []),
     ...(missing.length > 0 ? [`${missing.join(" and ")} ${missing.length === 1 ? "isn't" : "aren't"} in ${whose}`] : []),
   ];
@@ -416,6 +424,8 @@ function engineOutcome(reg: Registry, world: WorldDoc, after: Readonly<WorldStat
 export interface PlayerBeatsInput {
   registry: Registry;
   world: WorldDoc;
+  /** What its quotes are held to (Settings → Depth); the constants where none is given. */
+  quoteBounds?: QuoteBounds;
   /** The state after the engine run's events: what the GM reads the resolutions against. */
   state: Readonly<WorldState>;
   /** The player character (`povOf`, D-10). */
@@ -509,7 +519,7 @@ export async function playerBeats(model: ModelPort, input: PlayerBeatsInput): Pr
   const refused: string[] = [];
   const told = new Set<number>();
   const message = quoteTexts([input.input]);
-  const holding = holdingFor(input.signal);
+  const holding = holdingFor(input.signal, input.quoteBounds);
   for (const [i, raw] of list(asked.answer.beats).entries()) {
     const b = record(raw);
     const what = text(b?.what);
@@ -572,6 +582,8 @@ export async function playerBeats(model: ModelPort, input: PlayerBeatsInput): Pr
 export interface AttemptInput {
   registry: Registry;
   world: WorldDoc;
+  /** What its quotes are held to (Settings → Depth); the constants where none is given. */
+  quoteBounds?: QuoteBounds;
   /** The scene's state at this moment: the turn's working state with every beat's events before this one applied. */
   state: Readonly<WorldState>;
   /** The act as decided: who, what there was to sense of it and its words, what they try (a character's `PlayAct.attempt`), and for the player character his own words for it (the words of his message it rests on: `PlayerBeat.words`), never the rest of his message. Each action the GM reads it as quotes these, the act's own words: his own where given, else its surface, words and attempt. */
@@ -688,7 +700,7 @@ export async function resolveAttempt(model: ModelPort, input: AttemptInput): Pro
   const known = new Set(catalog.entries.map((e) => e.id));
   // The act's own words, which each action it plays as quotes: the player character's own for it, else what there was to sense, its words and what they try.
   const acted = quoteTexts(act.input ? [act.input] : [act.surface, act.quotes ?? "", act.attempt ?? ""]);
-  const holding = holdingFor(input.signal);
+  const holding = holdingFor(input.signal, input.quoteBounds);
   const whose = act.input ? "your words" : `${possessive(name)} act`;
   const read: AttemptRead = { actions: [], dropped: [] };
   for (const [i, raw] of list(asked.answer.actions).slice(0, ACTION_QUEUE_LIMIT).entries()) {

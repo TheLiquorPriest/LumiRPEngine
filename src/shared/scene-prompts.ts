@@ -81,12 +81,12 @@ export const WHY_OWN_ASK: PromptAsk = {
 };
 
 /** The answer to the player's edit, a reply's or his own message's. */
-const EDIT_CONTRACT = '{"cosmetic": boolean, "amend": [{"replaces": [string], "ref", "by", "actors", "act", "what", "deed"?, "surface", "quotes"?, "addressed"?, "about"?, "exposure"}], "strike": [string], "why": string}';
+const EDIT_CONTRACT = '{"cosmetic": boolean, "amend": [{"replaces": [string], "ref", "by", "actors", "act", "what", "deed"?, "surface", "quotes"?, "addressed"?, "about"?, "exposure"}], "strike": [string], "catchup"?: [string], "why": string}';
 
 const EDIT_RULES = `- Cosmetic (a typo, a turn of phrase, a detail no one could later notice or act on): it amends nothing.
 - Otherwise it amends beats. For each beat he changed, write the beat as it now happened, naming the beats it replaces, with who perceived it. For each beat he took out with nothing in its place, name it to strike. Amend only what his edit says; keep everything else as it was.`;
 
-const EDIT_ANSWER = `Answer with one JSON object: {"cosmetic": true or false, "amend": [{"replaces": [ids of the beats it replaces], ${BEAT_SHAPE.slice(1)}], "strike": [ids of beats taken out], "why": a line on what his edit means}.`;
+const EDIT_ANSWER = `Answer with one JSON object: {"cosmetic": true or false, "amend": [{"replaces": [ids of the beats it replaces], ${BEAT_SHAPE.slice(1)}], "strike": [ids of beats taken out], "catchup": [the ids of those who lived them who catch up now, in the order they do; leave out anyone your poll may catch up later, or omit the field for everyone who lived them], "why": a line on what his edit means}.`;
 
 export const SCENE_PROMPTS: readonly PromptDef[] = [
   {
@@ -96,7 +96,7 @@ export const SCENE_PROMPTS: readonly PromptDef[] = [
     label: "Setting a scene",
     note: "Each turn starts here: the author reads what the player did and said, as the GM wrote it into his beats, and sets the scene: its staging, who plays as their own agent, whom the author plays and who is part of the world, who perceived the player's beats, and who acts first.",
     vars: VARS,
-    contract: '{"scene": {"continues": boolean, "place": string, "ends": boolean}, "staging": [{"who", "where", "doing", "occluded"?, "place"?, "remote"?}], "cast": [{"who", "effort", "why"}], "exposure": [{"beat", "who", "channel", "reach"}], "beats": [{"ref", "by", "actors", "act", "what", "deed"?, "surface", "quotes"?, "addressed"?, "about"?, "after"?, "exposure"}], "next": [string], "end": string | null, "realtime": {"with", "why"} | {"end"} | null, "excerpts": [string], "quotes"?: [{"message", "from"?, "to"?, "why"}], "note": string, "why": string}',
+    contract: '{"scene": {"continues": boolean, "place": string, "ends": boolean}, "newcomers"?: [{"ref", "name", "who", "mind": boolean}], "staging": [{"who", "where", "doing", "occluded"?, "place"?, "remote"?}], "cast": [{"who", "effort", "why"}], "exposure": [{"beat", "who", "channel", "reach"}], "beats": [{"ref", "by", "actors", "act", "what", "deed"?, "surface", "quotes"?, "addressed"?, "about"?, "after"?, "exposure"}], "next": [string], "end": string | null, "realtime": {"with", "why"} | {"end"} | null, "excerpts": [string], "quotes"?: [{"message", "from"?, "to"?, "why"}], "note": string, "why": string}',
     text: `${AUTHOR}
 
 ${DM_RULES}
@@ -105,6 +105,7 @@ The player has just written his turn, and the GM has read it into his own beats:
 - Does this carry on the scene that was playing, or open a new one? Where does it play? Does it end with this turn?
 - Stage it: everyone present, where they are and what they are doing, as anyone there could see it (the points of view of whoever a beat reaches in part are written from it), {{pov}} among them, and the id of the world's place each is at: whoever the world has elsewhere is moved to the place you give them. Give everyone you stage a place, or "remote": no place is guessed for anyone given neither, but {{pov}}, whom the scene plays from: given no place, he is at the scene's place. Someone the scene reaches only from afar (the far end of a phone call, a radio, a screen) is "remote", never at the scene's place: they stay where they are.
 - Decide each character's effort for this scene, and say why: "agent" plays as its own agent, beat by beat, as a player would (one call each time it acts; someone with no mind yet gets one, formed from their card or what the world knows of them, and keeps it from then on: do it for someone who will matter beyond this scene, never a passer-by); "author" you play them yourself, from their mind (several cost you one call); "world" you handle them as part of the world, like a walk-on. Spend effort where this scene needs it.
+- Someone the people listed don't include (a walk-in the player met, someone arriving) comes into the world through "newcomers": [{"ref": a short id you name them by everywhere in this answer, "name": their name as the story has it, "who": who they are as anyone there could tell (their work, their look, their manner), "mind": true to give them a mind of their own now, for someone who will matter beyond this scene, never a passer-by}]. Then stage them, cast them and write their acts by that ref, like anyone.
 - Write who perceived each of the player's beats, and how fully. {{pov}} perceives his own acts.
 - When the scene opens or someone arrives, write an opening beat of what was there to sense. Then any beat the world does now, and the acts of those you play or handle, in order.
 - Name who acts next among those playing as their own agents (several act at once when they would), or end the turn when the moment has come for the player to answer.
@@ -122,7 +123,7 @@ Answer with one JSON object: {"scene": {"continues": true or false, "place": the
     label: "Between beats",
     note: "After each beat a character decided (and any outcome the GM resolved), the author writes who perceived it and how fully, what the world does now and the acts of those it plays or handles, and who acts next; or it ends the turn where the player's answer is wanted.",
     vars: VARS,
-    contract: '{"exposure": [{"beat", "who", "channel", "reach"}], "staging": [{"who", "where", "doing", "occluded"?, "place"?, "remote"?}], "beats": [{"ref", "by", "actors", "act", "what", "deed"?, "surface", "quotes"?, "addressed"?, "about"?, "after"?, "exposure"}], "next": [string], "end": string | null, "sceneEnds": boolean, "why": string}',
+    contract: '{"newcomers"?: [{"ref", "name", "who", "mind": boolean}], "exposure": [{"beat", "who", "channel", "reach"}], "staging": [{"who", "where", "doing", "occluded"?, "place"?, "remote"?}], "beats": [{"ref", "by", "actors", "act", "what", "deed"?, "surface", "quotes"?, "addressed"?, "about"?, "after"?, "exposure"}], "next": [string], "end": string | null, "sceneEnds": boolean, "why": string}',
     text: `${AUTHOR}
 
 ${DM_RULES}
@@ -130,6 +131,8 @@ ${DM_RULES}
 Here is the scene so far and the beat just decided. Who perceived it, and how fully? Did it move anyone (their staging)? Does the world do anything now? Do those you play or handle act? Who acts next among those playing as their own agents, or do several act at once? Has the moment come for the player to answer? Keep the scene moving at the pace the story wants: end the turn when {{pov}} has something to answer, see or decide.
 
 A beat of the world itself, which no one acts in (rain starts, a door slams in the wind), takes no "deed". Write "exposure" entries only for the beats listed as just decided, waiting for who perceived them; a beat you write yourself carries its own "exposure".
+
+Someone the scene's people don't include who arrives now (a walk-in, a stranger at the door) comes into the world through "newcomers": [{"ref": a short id you name them by everywhere in this answer, "name": their name as the story has it, "who": who they are as anyone there could tell, "mind": true to give them a mind of their own now, for someone who will matter beyond this scene, never a passer-by}]. Then stage them and write their acts by that ref, like anyone you handle.
 
 Answer with one JSON object: {"exposure": [{"beat": the ref of a beat just decided, "who", "channel", "reach"}], "staging": [${SCENE_STAGING_SHAPE}, for each person this moved], "beats": [${BEAT_SHAPE}], "next": [ids of characters playing as their own agents who act now], "end": your reason the player answers now, or null, "sceneEnds": true when the scene itself ends with this turn, "why": one or two plain sentences explaining the choice}.`,
     asks: [STAGING_PLACE_ASK, WHY_ASK],
@@ -158,7 +161,7 @@ Answer with one JSON object: {"beats": [${BEAT_SHAPE}], "why": one or two plain 
     label: "The poll",
     note: "After each turn the author reads what changed and decides who catches up now and who can wait until they matter, who reflects, whether it reflects itself, how its open predictions scored, and what happens off screen: the episodes it opens with each part's treatment, and which drafts settle, drop or are rebased; it logs what it considered and didn't raise.",
     vars: VARS,
-    contract: '{"catchup": [{"who", "why"}], "reflect": [{"who", "why"}], "author": {"depth", "why"} | null, "scores": [{"prediction", "outcome", "note"}], "episodes": [{"why", "in", "minutes", "places", "people", "parts": [{"who"?, "event"?, "treatment", "rationale", "major"?}]}], "settle": [{"draft", "why"}], "drop": [{"draft", "why"}], "rebase": [{"draft", "why"}], "wake": {"minutes", "why"} | null, "considered": [{"what", "raised", "why"}], "why": string}',
+    contract: '{"catchup": [{"who", "why"}], "reflect": [{"who", "why"}], "interview": [{"who", "question", "why"}], "author": {"depth", "why"} | null, "scores": [{"prediction", "outcome", "note"}], "episodes": [{"why", "in", "minutes", "places", "people", "parts": [{"who"?, "event"?, "treatment", "rationale", "major"?}]}], "settle": [{"draft", "why"}], "drop": [{"draft", "why"}], "rebase": [{"draft", "why"}], "wake": {"minutes", "why"} | null, "considered": [{"what", "raised", "why"}], "why": string}',
     text: `${AUTHOR}
 
 A turn has just been played. Here is what changed: its beats, what characters wrote that will stay with them, the story time that passed, plans falling due, what reached each character that they haven't lived yet, and the player's own signals; and off screen, your open drafts and what has happened since each one's story time. You are the story's nervous system: you decide who thinks, and when, and how the world lives beyond {{pov}}'s view.
@@ -171,7 +174,7 @@ A turn has just been played. Here is what changed: its beats, what characters wr
 - Log what you considered and whether you raised it, with your reason, so the player can read your judgment. Raise nothing out of habit.
 - If something should be looked at again once enough story time has passed (a plan maturing, a wait running out), ask to be woken after that many story minutes; otherwise null.
 
-Answer with one JSON object: {"catchup": [{"who": an id, "why": your reason}], "reflect": [{"who": an id, "why": your reason}], "author": {"depth": "scene" or "chapter", "why": your reason} or null, "scores": [{"prediction": its id, "outcome": "hit", "miss" or "partly", "note": what happened}], "episodes": [{"why": why it matters, "in": story minutes from now until it starts (negative when it already began), "minutes": how long it runs, "places": [place ids], "people": [ids], "parts": [{"who": an id, or "event": the event in words, "treatment": "live", "campfire", "room" or "written", "rationale": your grade against the player's words, and why, "major": true when you judge the moment major}]}], "settle": [{"draft": its id, "why": your reason}], "drop": [{"draft": its id, "why": your reason}], "rebase": [{"draft": its id, "why": your reason}], "wake": {"minutes": story minutes from now, "why": your reason} or null, "considered": [{"what": what you considered, "raised": true or false, "why": your reason}], "why": one or two plain sentences explaining the choice}.`,
+Answer with one JSON object: {"catchup": [{"who": an id, "why": your reason}], "reflect": [{"who": an id, "why": your reason}], "interview": [{"who": an id, "question": what you ask them, in the world's own terms, "why": your reason}], "author": {"depth": "scene" or "chapter", "why": your reason} or null, "scores": [{"prediction": its id, "outcome": "hit", "miss" or "partly", "note": what happened}], "episodes": [{"why": why it matters, "in": story minutes from now until it starts (negative when it already began), "minutes": how long it runs, "places": [place ids], "people": [ids], "parts": [{"who": an id, or "event": the event in words, "treatment": "live", "campfire", "room" or "written", "rationale": your grade against the player's words, and why, "major": true when you judge the moment major}]}], "settle": [{"draft": its id, "why": your reason}], "drop": [{"draft": its id, "why": your reason}], "rebase": [{"draft": its id, "why": your reason}], "wake": {"minutes": story minutes from now, "why": your reason} or null, "considered": [{"what": what you considered, "raised": true or false, "why": your reason}], "why": one or two plain sentences explaining the choice}.`,
     asks: [WHY_ASK],
   },
   {

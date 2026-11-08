@@ -70,6 +70,22 @@ export function chunkFile(n: number): string {
   return `spool/${String(n).padStart(5, "0")}.json`;
 }
 
+/**
+ * The messages edited since their chunk was spooled that kept their swipe's key (an assistant
+ * edit keeps its record's): its key unchanged, the chunk isn't read again, so the run takes each to
+ * the author as a fix of the beats it holds (§8.4), and removes the file once it has.
+ */
+export const EDITS = "edits.json";
+
+export interface SpoolEdit {
+  n: number;
+  message: MessageId;
+}
+
+export function isEdits(raw: unknown): raw is SpoolEdit[] {
+  return Array.isArray(raw) && raw.every((e: unknown) => typeof e === "object" && e !== null && "n" in e && typeof e.n === "number" && "message" in e && typeof e.message === "string");
+}
+
 const WORD = /\S+/g;
 
 /** What a survey reads: the chain as the chat shows it, one entry per message in order. */
@@ -158,7 +174,15 @@ export async function survey(files: BootstrapFiles, messages: readonly SurveyMes
   for (const [n, chunk] of chunks.entries()) {
     const rowsOf = planned[n];
     if (!rowsOf) continue;
-    if (before.get(n) === chunk.key && (await files.read(chunkFile(n), isRows)) !== null) continue;
+    const spooled = before.get(n) === chunk.key ? await files.read(chunkFile(n), isRows) : null;
+    if (spooled !== null) {
+      // The same messages and swipes; a text that differs is an edit that kept its swipe's key.
+      const was = new Map(spooled.map((r) => [r.id, r.text]));
+      const edited = rowsOf.filter((r) => was.has(r.id) && was.get(r.id) !== r.text).map((r) => ({ n, message: r.id }));
+      if (edited.length === 0) continue;
+      const known = (await files.read(EDITS, isEdits)) ?? [];
+      await files.write(EDITS, [...known, ...edited.filter((e) => !known.some((k) => k.n === e.n && k.message === e.message))]);
+    }
     await files.write(chunkFile(n), rowsOf);
   }
   // A shorter path leaves no stale chunk file behind.

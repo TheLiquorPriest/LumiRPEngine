@@ -7,7 +7,7 @@
 // side, and makes every actor, the player character included, a perceiver of its own act.
 
 import { describe, expect, test } from "bun:test";
-import { catchUp, fellBackLine, povFallback, povRender, unseenNames } from "../../src/backend/character-agent";
+import { catchUp, fellBackLine, povRender, unseenNames } from "../../src/backend/character-agent";
 import { livedPovs, povRefs } from "../../src/backend/character-engine";
 import type { ModelPort, PortMessage } from "../../src/backend/depth/port";
 import { historian } from "../../src/backend/depth/historian";
@@ -65,7 +65,7 @@ describe("the point-of-view render names each person only as its perceiver may",
     expect(refs[PRIYA]).toMatchObject({ self: "Priya Nair", present: { [DALE]: null }, absent: ["Danny Okafor", "Jess Kowalczyk"], strangers: ["Dale Whitcomb"] });
     const model = port({ povs: { [PRIYA]: "A floorboard creaks behind the man at the counter; your eyes go from his face to the keys." } });
     const r = await povRender(model, { beat: moment, staging, who: [PRIYA], refs });
-    expect(r).toMatchObject({ povs: { [PRIYA]: "A floorboard creaks behind the man at the counter; your eyes go from his face to the keys." }, fellBack: {} });
+    expect(r).toMatchObject({ povs: { [PRIYA]: "A floorboard creaks behind the man at the counter; your eyes go from his face to the keys." }, pending: {} });
     expect(model.sent.length).toBe(1);
     const sent = asked(model, 0);
     expect(sent).toContain(`### ${PRIYA}: by sight; in part; their own act`);
@@ -78,7 +78,7 @@ describe("the point-of-view render names each person only as its perceiver may",
     const model = port({ povs: { [PRIYA]: "A floorboard creaks behind Jess; your eyes go from Jess's face to the keys." } }, { povs: { [PRIYA]: "A floorboard creaks behind the man at the counter; your eyes go from his face to the keys." } });
     const r = await povRender(model, { beat: moment, staging, who: [PRIYA], refs });
     expect(r.povs[PRIYA]).toBe("A floorboard creaks behind the man at the counter; your eyes go from his face to the keys.");
-    expect(r.fellBack).toEqual({});
+    expect(r.pending).toEqual({});
     // The redraft is asked with what it wrote and the name it can't use there.
     expect(model.sent.length).toBe(2);
     expect(model.sent[1]?.messages.at(-2)?.content).toContain("behind Jess");
@@ -88,44 +88,61 @@ describe("the point-of-view render names each person only as its perceiver may",
   test("a name inside the exact words stands", async () => {
     const said = { ...moment, quotes: "Tell Jess I'm coming." };
     const words = port({ povs: { [PRIYA]: "Half a sentence through the door: “Tell Jess…”" } });
-    expect(await povRender(words, { beat: said, staging, who: [PRIYA], refs })).toMatchObject({ povs: { [PRIYA]: "Half a sentence through the door: “Tell Jess…”" }, fellBack: {} });
+    expect(await povRender(words, { beat: said, staging, who: [PRIYA], refs })).toMatchObject({ povs: { [PRIYA]: "Half a sentence through the door: “Tell Jess…”" }, pending: {} });
     expect(words.sent.length).toBe(1);
   });
 });
 
-describe("a point of view is never lost: one refused or unwritten twice falls back to a plain one with no name it may not use (conformance finding 7)", () => {
+describe("a point of view the render still flags after its redraft goes to the GM's check; no rule writes one (M16, M31)", () => {
   const partial = { id: "b1", surface: "A floorboard creaks behind him; her eyes move from his face to the keys on the counter.", actors: [DALE, PRIYA], about: [], exposure: [{ who: PRIYA, channel: "sight" as const, reach: "partial" as const }] };
   const staging = [{ who: DALE, where: "behind the counter", doing: "counting keys" }];
   const refs = povRefs({ registry: reg }, { state, world }, [PRIYA], [...presentAt(partial), ...staging.map((s) => s.who)]);
 
-  test("still naming someone who wasn't there after its redraft, a reach in part gets only that something reached her, by what way, and is said", async () => {
-    const twice = port({ povs: { [PRIYA]: "Danny is behind the counter." } }, { povs: { [PRIYA]: "Danny Okafor is behind the counter." } });
-    const r = await povRender(twice, { beat: partial, staging, who: [PRIYA], refs });
-    expect(r.povs).toEqual({ [PRIYA]: "Something reached you by sight, only in part." });
-    expect(r.fellBack).toEqual({ [PRIYA]: ["Danny Okafor"] });
-    expect(twice.sent.length).toBe(2);
-    expect(fellBackLine("Priya", "beat b1", r.fellBack[PRIYA] ?? [])).toBe("The point of view for Priya of beat b1 named someone who wasn't there (Danny Okafor), and again when redrafted: in its place Priya gets a plain one that names no one they may not name.");
+  test("flagged twice, it goes to the check with the flagged names, and the check's rewrite lands", async () => {
+    const model = port({ povs: { [PRIYA]: "Danny is behind the counter." } }, { povs: { [PRIYA]: "Danny Okafor is behind the counter." } }, { povs: { [PRIYA]: "Someone is behind the counter; a floorboard creaks." } });
+    const r = await povRender(model, { beat: partial, staging, who: [PRIYA], refs });
+    expect(model.sent.map((s) => s.role)).toEqual(["pov", "pov", "check"]);
+    const check = asked(model, 2);
+    expect(check).toContain(`### ${PRIYA}\nNames of people who weren't there: Danny Okafor\nDanny Okafor is behind the counter.`);
+    expect(r.povs).toEqual({ [PRIYA]: "Someone is behind the counter; a floorboard creaks." });
+    expect(r.pending).toEqual({});
   });
 
-  test("one the answer left out is asked for again in the same call, and still missing, falls back", async () => {
+  test("the check accepting it as written lands it as written", async () => {
+    const model = port({ povs: { [PRIYA]: "Danny is behind the counter." } }, { povs: { [PRIYA]: "Danny Okafor is behind the counter." } }, { povs: { [PRIYA]: "Danny Okafor is behind the counter." } });
+    const r = await povRender(model, { beat: partial, staging, who: [PRIYA], refs });
+    expect(r.povs).toEqual({ [PRIYA]: "Danny Okafor is behind the counter." });
+    expect(r.pending).toEqual({});
+  });
+
+  test("a check that sets nothing right, or fails, leaves it pending with no rule-built point of view, said", async () => {
+    const left = port({ povs: { [PRIYA]: "Danny is behind the counter." } }, { povs: { [PRIYA]: "Danny Okafor is behind the counter." } }, { povs: {} });
+    const r = await povRender(left, { beat: partial, staging, who: [PRIYA], refs });
+    expect(r.povs).toEqual({});
+    expect(r.pending).toEqual({ [PRIYA]: ["Danny Okafor"] });
+    expect(fellBackLine("Priya", "beat b1", r.pending[PRIYA] ?? [])).toBe("The point of view for Priya of beat b1 named someone who wasn't there (Danny Okafor), again when redrafted, and the GM's check couldn't set it right: it is left unwritten, and no rule writes one in its place.");
+    let calls = 0;
+    const failing: ModelPort = async (role) => {
+      calls++;
+      if (role === "check") throw new Error("check down");
+      return { text: JSON.stringify({ povs: { [PRIYA]: "Danny Okafor is behind the counter." } }), usage: { tokensIn: 1, tokensOut: 1 } };
+    };
+    const f = await povRender(failing, { beat: partial, staging, who: [PRIYA], refs });
+    expect(calls).toBe(3);
+    expect(f.povs).toEqual({});
+    expect(f.pending).toEqual({ [PRIYA]: ["Danny Okafor"] });
+  });
+
+  test("one the answer left out is asked for again in the same call; still missing, it is left pending, unchecked", async () => {
     const none = port({ povs: {} }, { povs: {} });
     const r = await povRender(none, { beat: partial, staging, who: [PRIYA], refs });
-    expect(r.povs).toEqual({ [PRIYA]: "Something reached you by sight, only in part." });
-    expect(r.fellBack).toEqual({ [PRIYA]: [] });
+    expect(r.povs).toEqual({});
+    expect(r.pending).toEqual({ [PRIYA]: [] });
     expect(none.sent.length).toBe(2);
     expect(none.sent[1]?.messages.at(-1)?.content).toContain(`Your answer has no point of view for these people:\n- ${PRIYA}`);
     // Written the second time, it is hers.
     const late = port({ povs: {} }, { povs: { [PRIYA]: "A floorboard creaks; your eyes go to the keys." } });
-    expect(await povRender(late, { beat: partial, staging, who: [PRIYA], refs })).toMatchObject({ povs: { [PRIYA]: "A floorboard creaks; your eyes go to the keys." }, fellBack: {} });
-  });
-
-  test("a whole reach with a stranger in it falls back to what was there to sense with him told as someone, his name said aloud kept; a message, to only that one came", async () => {
-    const whole = { id: "b2", surface: "Dale Whitcomb sets the keys on the counter. “Dale's the name,” he says, and Whitcomb's grin widens.", actors: [DALE], about: [{ entity: DALE }], exposure: [{ who: PRIYA, channel: "sight" as const, reach: "whole" as const }] };
-    const twice = port({ povs: { [PRIYA]: "Danny sets the keys down." } }, { povs: { [PRIYA]: "Danny sets the keys down." } });
-    const r = await povRender(twice, { beat: whole, staging, who: [PRIYA], refs });
-    expect(r.povs[PRIYA]).toBe("Someone sets the keys on the counter. “Dale's the name,” he says, and someone's grin widens.");
-    const message = { id: "b3", surface: "A text lands on Priya's phone.", actors: [DALE], about: [], exposure: [{ who: PRIYA, channel: "message" as const, reach: "whole" as const }] };
-    expect(povFallback({ beat: message, refs }, PRIYA)).toBe("A message reached you.");
+    expect(await povRender(late, { beat: partial, staging, who: [PRIYA], refs })).toMatchObject({ povs: { [PRIYA]: "A floorboard creaks; your eyes go to the keys." }, pending: {} });
   });
 });
 
@@ -145,10 +162,11 @@ describe("the name filter counts only a name that can only be someone who wasn't
   });
 });
 
-describe("a point of view tells only its beat: what each perceiver could sense of the staging, never as acts, and an actor's own deed only to itself (LIVE3 L3a-7)", () => {
+describe("a point of view tells only its beat's surface, quotes and staging: what each perceiver could sense of the staging, never as acts, never the beat's what or deed (LIVE3 L3a-7, S21)", () => {
   const boots = {
     id: "b4",
     surface: "From under the front of the van, boots and shins stick out; a wrench clinks.",
+    what: "BOOTS-TRUTH: Jordan palms the spare key while loosening the axle nut.",
     deed: "You work the axle nut loose under the van.",
     actors: [JORDAN],
     about: [],
@@ -167,15 +185,16 @@ describe("a point of view tells only its beat: what each perceiver could sense o
   const who = [JORDAN, DANNY, JESS, PRIYA];
   const refs = povRefs({ registry: reg }, { state, world }, who, [...presentAt(boots), ...staging.map((s) => s.who)]);
 
-  test("each perceiver's part holds only what its senses reached of where everyone was, and the deed only the actor's", async () => {
+  test("each perceiver's part holds only what its senses reached of where everyone was, and no one's holds the beat's what or deed", async () => {
     const model = port({ povs: Object.fromEntries(who.map((w) => [w, "Boots under the van; a wrench clinks."])) });
     await povRender(model, { beat: boots, staging, who, refs });
     const sent = asked(model, 0);
     const part = (id: string): string => sent.split("\n### ").find((s) => s.startsWith(`${id}:`)) ?? "";
     // Where everyone was is no longer one list the whole call reads.
     expect(sent).not.toContain("## Where everyone was");
-    // The actor: its own act, as it did it, with everyone's place and doing.
-    expect(part(JORDAN)).toContain("What they did and said, as they did it: You work the axle nut loose under the van.");
+    // The actor: its own act, with everyone's place and doing; never the deed, which it lives through `reachOf`, nor the truth.
+    expect(part(JORDAN)).toContain(`- ${DANNY}: at the front door`);
+    for (const never of ["axle nut", "BOOTS-TRUTH", "palms the spare key", "What they did and said"]) expect(sent).not.toContain(never);
     // By sight: where each was and what they were doing, as the moment began.
     expect(part(DANNY)).toContain(`- ${JORDAN}: under the van; working on the axle`);
     expect(part(DANNY)).not.toContain("axle nut");
@@ -186,7 +205,6 @@ describe("a point of view tells only its beat: what each perceiver could sense o
     expect(part(JESS)).not.toContain("working on the axle");
     // By message, elsewhere: nothing of anyone's staging.
     expect(part(PRIYA)).not.toContain("What they could sense of where everyone was");
-    for (const id of [DANNY, JESS, PRIYA]) expect(part(id)).not.toContain("What they did and said");
     // The render is told staging is where things stood, never what anyone did.
     expect(model.sent[0]?.messages[0]?.content).toContain("never what anyone did: tell no act from it, theirs or anyone's");
   });

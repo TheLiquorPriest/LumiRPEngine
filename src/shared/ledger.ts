@@ -641,9 +641,9 @@ export interface PendingTurn {
   finalEdits?: FinalEdit[];
   /** Each part the turn's final review saw, as made (`Rec.finalParts`), recorded on its record at commit. */
   finalParts?: Record<string, string>;
-  /** A depth turn's read part (DEPTH-PLAN §1.3, §3.10): the narrator's `story.passage` events, which its commit records in place of reading the reply, whether the reply ended or was stopped (`LedgerCore.scene`). */
+  /** A depth turn's read part (DEPTH-PLAN §1.3, §3.10): the narrator's `story.passage` events, which its commit records in place of reading the reply, whether the reply ended or was stopped (`LedgerCore.scene`). A Continue's: its scene's further beats and prose together, which its commit lands as a `cont` entry on the reply's record (§3.9). */
   sceneRead?: LedgerEvent[];
-  /** Generated on a chat on depth (DEPTH-PLAN §1.3): its commit never reads its text. Its read part is its scene's (`sceneRead`), else nothing but a Re-narrate's source's; a Continue's text is accepted unread. */
+  /** Generated on a chat on depth (DEPTH-PLAN §1.3): its commit never reads its text. Its read part is its scene's (`sceneRead`), else nothing but a Re-narrate's source's; a Continue no scene carried on is accepted unread. */
   depth?: true;
 }
 

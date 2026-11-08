@@ -31,6 +31,11 @@ export interface DraftsControls {
   onDrop(id: string): void;
   /** The open draft dropped, and its episode drafted again from where the story is now. */
   onRedraft(id: string): void;
+  /** Your edit of the open draft under way (its words), or null; Edit opens it, Cancel closes it (M-16). */
+  edit?: { id: string; text: string } | null;
+  onEdit?(edit: { id: string; text: string } | null): void;
+  /** Your edit sent: the draft dropped and drafted again from your words, a directive. */
+  onEditSend?(id: string, text: string): void;
   onJump(messageId: MessageId): void;
 }
 
@@ -94,8 +99,26 @@ function DraftPage(props: { draft: DepthDraft; c: DraftsControls }) {
               <Button variant="ghost" icon="trash" disabled={c.busy} onClick={() => c.onDrop(d.id)}>
                 Drop
               </Button>
+              {c.onEdit && c.edit?.id !== d.id ? (
+                <Button variant="ghost" icon="edit" disabled={c.busy} onClick={() => c.onEdit?.({ id: d.id, text: "" })}>
+                  Edit
+                </Button>
+              ) : null}
             </div>
-            <p class="lre-small lre-muted lre-depth-note">{`Settle now: the author reads it against everything since its time (${d.pins} ${d.pins === 1 ? "beat" : "beats"} so far), as the poll does, and settles, drops or redrafts it. Re-draft: dropped, and drafted again from where the story is now. Drop: your verdict that it won't happen.`}</p>
+            {c.edit?.id === d.id ? (
+              <div class="lre-stack" data-lre-depth-draft-edit>
+                <textarea class="lre-input lre-depth-editor" rows={5} value={c.edit.text} disabled={c.busy} aria-label="Your edit of this draft" placeholder="What should happen instead, in your own words" onInput={(event) => c.onEdit?.({ id: d.id, text: event.currentTarget.value })} />
+                <div class="lre-inline">
+                  <Button variant="primary" icon="check" busy={c.busy} disabled={c.edit.text.trim() === ""} onClick={() => c.onEditSend?.(d.id, c.edit?.text ?? "")}>
+                    Draft it from my edit
+                  </Button>
+                  <Button variant="ghost" disabled={c.busy} onClick={() => c.onEdit?.(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+            <p class="lre-small lre-muted lre-depth-note">{`Settle now: the author reads it against everything since its time (${d.pins} ${d.pins === 1 ? "beat" : "beats"} so far), as the poll does, and settles, drops or redrafts it. Re-draft: dropped, and drafted again from where the story is now. Drop: your verdict that it won't happen. Edit: your words are a directive; it is dropped and drafted again from them.`}</p>
           </div>
         ) : null}
         {d.press ? (
@@ -244,6 +267,7 @@ export function DraftsView(props: { section: GmSectionProps; opening?: { draft: 
   }, [opening]);
   const [busy, run] = useBusy();
   const [nonce, setNonce] = useState(0);
+  const [edit, setEdit] = useState<{ id: string; text: string } | null>(null);
   useEffect(() => {
     let live = true;
     void app.request<"lre.depth">({ type: "lre.depth", chatId: section.chatId, op: "drafts" }).then((result) => {
@@ -256,8 +280,8 @@ export function DraftsView(props: { section: GmSectionProps; opening?: { draft: 
   if (view === undefined) return <Empty icon="hourglass">Reading the drafts…</Empty>;
   if (view === null) return <Empty icon="file">The drafts couldn't be read.</Empty>;
   /** One of the player's presses on an open draft: what it did, said, then the drafts read again. */
-  const press = async (op: "draft_settle" | "draft_drop" | "draft_redraft", draft: string): Promise<void> => {
-    const result = await app.request<"lre.depth">({ type: "lre.depth", chatId: section.chatId, op, draft });
+  const press = async (op: "draft_settle" | "draft_drop" | "draft_redraft", draft: string, text?: string): Promise<void> => {
+    const result = await app.request<"lre.depth">({ type: "lre.depth", chatId: section.chatId, op, draft, ...(text !== undefined ? { text } : {}) });
     if (!result) return;
     app.toast([...(result.said ?? []), ...(result.pending ? ["It lands once the reply being written is kept."] : [])].join(" ") || "Done.", "info");
     setNonce((k) => k + 1);
@@ -268,6 +292,13 @@ export function DraftsView(props: { section: GmSectionProps; opening?: { draft: 
     onOpen: setOpen,
     onSettle: (id) => run(() => press("draft_settle", id)),
     onRedraft: (id) => run(() => press("draft_redraft", id)),
+    edit,
+    onEdit: setEdit,
+    onEditSend: (id, text) =>
+      run(async () => {
+        await press("draft_redraft", id, text.trim());
+        setEdit(null);
+      }),
     onDrop: (id) =>
       run(async () => {
         if (await app.host.confirm("Drop this draft", "Your verdict that it won't happen: its beats never become canon, and the author reads your drop beside its own. A swipe of this reply takes it back.", "warning", "Drop")) await press("draft_drop", id);

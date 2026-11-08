@@ -66,6 +66,7 @@ export function ArchiveBody(props: {
               <div key={`${hit.messageId}:${hit.swipeId}`} data-lre-depth-hit={hit.messageId}>
                 <GmCard title={`Message ${hit.index}${hit.isUser ? " · yours" : ""}`} subtitle={[hit.at, hit.places.join(", "), hit.people.join(", ")].filter((s) => s !== null && s !== "").join(" · ")} badges={hit.beats > 0 ? <Badge>{`${hit.beats} ${hit.beats === 1 ? "beat" : "beats"}`}</Badge> : undefined}>
                   <p class="lre-depth-snippet">{hit.snippet}</p>
+                  {hit.reached.length > 0 ? <p class="lre-muted">{`Reached ${hit.reached.join(", ")}`}</p> : null}
                   <div class="lre-inline">
                     <Button size="sm" icon="external" onClick={() => props.onJump(hit.messageId)}>
                       Go to the message

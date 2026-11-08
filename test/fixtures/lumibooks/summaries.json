@@ -1,0 +1,119 @@
+{
+  "name": "LumiBooks summaries - c0ffee01",
+  "description": "LumiBooks summaries. Import in Books to restore message coverage or use as inherited memories.",
+  "entries": {
+    "0": {
+      "uid": 0,
+      "key": [
+        "Gull Point",
+        "ferry",
+        "customs shed",
+        "Mara Venn"
+      ],
+      "keysecondary": [],
+      "content": "1st Summary VOLUME Containing 1 Prior Arc and 4 Prior Turns\n\n# Fog at Gull Point\nThe traveler arrives by ferry at Gull Point and finds Mara Venn, the harbor master, at the customs shed. Asked about the lighthouse, Mara turns guarded.",
+      "comment": "Vol #1 - Fog at Gull Point (msgs 1-4)",
+      "constant": true,
+      "disable": false,
+      "position": 0,
+      "order": 0,
+      "displayIndex": 0,
+      "extensions": {
+        "lumibooks_summary": {
+          "tier": 3,
+          "messageIndices": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      }
+    },
+    "1": {
+      "uid": 1,
+      "key": [
+        "Oren Dace",
+        "lighthouse keeper",
+        "cliff path"
+      ],
+      "keysecondary": [],
+      "content": "Arc #2 Summary Containing 2 Prior Turns\n\n# The Keeper Gone\nMara tells the traveler that Oren Dace, the lighthouse keeper, vanished three nights ago. The traveler sets out up the cliff path.",
+      "comment": "Arc #2 - The Keeper Gone (msgs 5-6)",
+      "constant": true,
+      "disable": false,
+      "position": 0,
+      "order": 1,
+      "displayIndex": 1,
+      "extensions": {
+        "lumibooks_summary": {
+          "tier": 2,
+          "messageIndices": [
+            4,
+            5
+          ]
+        }
+      }
+    },
+    "2": {
+      "uid": 2,
+      "key": [
+        "lighthouse door",
+        "salt"
+      ],
+      "keysecondary": [],
+      "content": "5th Summary Chapter Containing 1 Prior Turn\n\nThe lighthouse door hangs open and salt crusts the stairs.",
+      "comment": "#5 - Open Door (msgs 7-7)",
+      "constant": true,
+      "disable": false,
+      "position": 0,
+      "order": 2,
+      "displayIndex": 2,
+      "extensions": {
+        "lumibooks_summary": {
+          "tier": 1,
+          "messageIndices": [
+            6
+          ]
+        }
+      }
+    }
+  },
+  "extensions": {
+    "lumibooks_summary": {
+      "version": 1,
+      "algorithm": "sha256-role-content-v1",
+      "contentHash": "33d48d333df3d5a7f068eacbdfaf8aeac07d47bf773a99bf2d1bb0ce4fde21e1",
+      "messages": [
+        {
+          "index": 0,
+          "hash": "e878ed08574c21b9bef28d46e5a3818e4c6be4bff06eabb293ba0181c3b3d2f0"
+        },
+        {
+          "index": 1,
+          "hash": "e2c6c44ac2297ac210ee35080dd9ed406fffe00dc7f49c1a390facaf22099357"
+        },
+        {
+          "index": 2,
+          "hash": "5c974bc024cc7857e274e70db907529461ce9fb88a74fe8b637e0fdc1b2df4be"
+        },
+        {
+          "index": 3,
+          "hash": "fb064fe847c9642fa86dd775029f0c125c495aa12ebc2e2e445102533e1da5ac"
+        },
+        {
+          "index": 4,
+          "hash": "927f7b4755d76157b44720c11f0ef82ccf5f7437ffa513543012e92323e41bf1"
+        },
+        {
+          "index": 5,
+          "hash": "716ba5d5bfee5401b3db3d7436bdd5642b1aad648b1e2e149e7bc5727f2bf6cf"
+        },
+        {
+          "index": 6,
+          "hash": "d0479ab3a62beae119d682ed0b25b7f3291e6a150904ee3e5866a8ba9034bd67"
+        }
+      ]
+    }
+  }
+}

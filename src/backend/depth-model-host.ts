@@ -22,8 +22,8 @@ import type { JsonObject } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { UserSettings } from "../shared/settings";
 import { depthCall } from "../shared/depth-settings";
-import type { HostPort, QuietResult } from "./host";
-import type { ModelPort, PortUsage } from "./depth/port";
+import type { HostPort, QuietRequest, QuietResult } from "./host";
+import type { ModelPort, PortCall, PortUsage } from "./depth/port";
 import { maxTokensLimit, requestRefused, TRANSIENT_RETRIES, transientFailure } from "./steps";
 import { tokensOf } from "./book";
 import { daySpendOf, type DaySpend } from "./depth/budget";
@@ -92,7 +92,7 @@ function usageOf(r: QuietResult, promptChars: number): PortUsage {
 export class ProviderRefusal extends Error {
   /** What the refused call spent, and where it ran: the turn's report counts it (`scene/reporting.ts`). */
   usage?: PortUsage;
-  call?: { connection: string; model: string };
+  call?: PortCall;
   constructor(
     readonly role: string,
     readonly category: string | null,
@@ -192,21 +192,21 @@ export function depthPort(host: Pick<HostPort, "models" | "log" | "storage"> & P
         const throttle = s.agents.throttles.find((t) => t.id === connection);
         const entry = await minuteRoom(minuteWindowOf(host, userId), connection, Math.ceil(promptChars / 3.2) + maxTokens, throttle, AbortSignal.any([signal, giving.signal]), clock, lane);
         sending = true;
-        const r = await host.models.quiet(
-          {
-            messages: cachedMessages(messages, cache),
-            maxTokens,
-            json: opts.json ?? false,
-            connectionId: call.connectionId,
-            model: call.model,
-            effort: call.effort,
-            params: opts.params ? { ...call.params, ...opts.params } : call.params,
-            usage: true,
-            stream: true,
-          },
-          userId,
-          AbortSignal.any([signal, giving.signal]),
-        );
+        const request: QuietRequest = {
+          messages: cachedMessages(messages, cache),
+          maxTokens,
+          json: opts.json ?? false,
+          connectionId: call.connectionId,
+          model: call.model,
+          effort: opts.effort ?? call.effort,
+          params: opts.params ? { ...call.params, ...opts.params } : call.params,
+          usage: true,
+          stream: true,
+        };
+        const sent = AbortSignal.any([signal, giving.signal]);
+        // A stage that shows the reasoning as it comes takes each piece the host streams (core passes them token by token).
+        const onReasoning = opts.onReasoning;
+        const r = onReasoning ? await host.models.stream(request, userId, sent, (piece) => piece.kind === "reasoning" && onReasoning(piece.text)) : await host.models.quiet(request, userId, sent);
         const answered = usageOf(r, promptChars);
         entry.tokens = answered.tokensIn + answered.tokensOut;
         day?.add(userId, answered.tokensIn + answered.tokensOut);
@@ -214,7 +214,8 @@ export function depthPort(host: Pick<HostPort, "models" | "log" | "storage"> & P
         if (refused) {
           // What it spent goes with it, so the turn's report counts the refused call too (review-last).
           refused.usage = answered;
-          refused.call = { connection: call.connectionId ?? "", model: r.model ?? call.model ?? "" };
+          const refusedId = requestIdOf(r.usage);
+          refused.call = { connection: call.connectionId ?? "", model: r.model ?? call.model ?? "", ...(refusedId ? { requestId: refusedId } : {}) };
           throw refused;
         }
         const usage = gaveWay > 0 ? { ...answered, tokensIn: answered.tokensIn + gaveWay } : answered;

@@ -58,6 +58,23 @@ export interface LexicalHit<K> {
   score: number;
 }
 
+/** A passage as indexed: where it is, its word count and each word's count, so a stored index loads without tokenizing again. */
+export interface IndexedPassage {
+  passage: Passage;
+  length: number;
+  words: [string, number][];
+}
+
+/** `text` cut into pieces (`passagesOf`) and each one tokenized, as `LexicalIndex.add` indexes it. */
+export function indexPieces(text: string, size?: number): IndexedPassage[] {
+  return passagesOf(text, size).map((passage) => {
+    const words = tokenize(text.slice(passage.start, passage.end));
+    const tf = new Map<string, number>();
+    for (const w of words) tf.set(w, (tf.get(w) ?? 0) + 1);
+    return { passage, length: words.length, words: [...tf] };
+  });
+}
+
 const K1 = 1.2;
 const B = 0.75;
 
@@ -82,17 +99,19 @@ export class LexicalIndex<K> {
 
   /** Indexes `text` under `key`, replacing what the key held. */
   add(key: K, text: string, size?: number): void {
+    this.addIndexed(key, indexPieces(text, size));
+  }
+
+  /** Indexes pieces already tokenized (`indexPieces`, or a stored copy of them) under `key`, replacing what the key held. */
+  addIndexed(key: K, pieces: readonly IndexedPassage[]): void {
     this.remove(key);
     const ids: number[] = [];
-    for (const passage of passagesOf(text, size)) {
-      const words = tokenize(text.slice(passage.start, passage.end));
+    for (const { passage, length, words } of pieces) {
       const id = this.entries.length;
-      this.entries.push({ key, passage, length: words.length, dead: false });
-      this.totalLength += words.length;
+      this.entries.push({ key, passage, length, dead: false });
+      this.totalLength += length;
       ids.push(id);
-      const tf = new Map<string, number>();
-      for (const w of words) tf.set(w, (tf.get(w) ?? 0) + 1);
-      for (const [w, n] of tf) {
+      for (const [w, n] of words) {
         const list = this.postings.get(w);
         if (list) list.push(id, n);
         else this.postings.set(w, [id, n]);

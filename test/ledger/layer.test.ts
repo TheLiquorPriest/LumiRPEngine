@@ -24,6 +24,8 @@ import { POV } from "../support/test-pack";
 import { ArchiveIndex } from "../../src/backend/archive-index";
 import { layerDir } from "../../src/backend/layer-store";
 import { carryOf } from "../../src/backend/layer-carry";
+import { blobPath } from "../../src/backend/agents/blobs";
+import { blobHash } from "../../src/shared/stores";
 import { randomBytes } from "node:crypto";
 
 const blob = (s: string): string => hashParts("test.blob", s);
@@ -279,23 +281,37 @@ describe("the basis-anchored layer", () => {
     expect(await files(h, chat)).toEqual(["a", "b", "c"]);
   });
 
-  test("a chat carries its layer in its own metadata, so an imported copy folds what it landed under its copies of the messages; a layer too large to carry is marked so", async () => {
+  test("a chat carries its layer and the texts it names in its own metadata, so an imported copy folds what it landed under its copies of the messages, with its texts, in an account that never held them; a layer too large to carry whole carries its newest entries", async () => {
     const { h, chat, ids } = await setup();
     const [, , a1, , a2] = ids as [MessageId, MessageId, MessageId, MessageId, MessageId];
-    await land(h, chat, draft("e1", await basisOf(h, chat, a1), [note("a")]));
-    await land(h, chat, draft("e2", await basisOf(h, chat, a2), [note("b")]));
+    const texts = { a: "The notebook's first page.", b: "The notebook's second page." };
+    const stored = (text: string) => `${h.host.userId}/${blobPath(blobHash(text))}`;
+    for (const text of Object.values(texts)) h.host.files.set(stored(text), text);
+    const page = (name: keyof typeof texts): LedgerEvent => wsWrite(`notebook/${name}.md`, blobHash(texts[name]));
+    await land(h, chat, draft("e1", await basisOf(h, chat, a1), [page("a")]));
+    await land(h, chat, draft("e2", await basisOf(h, chat, a2), [page("b")]));
     // Carried once a turn, when something landed since: the next turn's end writes it.
     expect(h.host.chat(chat).metadata.lre_layer).toBeUndefined();
     await h.send(chat, "On.", "Third reply.");
+    // Another account's store holds none of the texts.
+    for (const text of Object.values(texts)) h.host.files.delete(stored(text));
     const copy = h.host.importCopy(chat);
     await h.service.open(copy, h.host.userId);
     await h.host.settle();
     expect(await files(h, copy)).toEqual(["a", "b"]);
+    for (const text of Object.values(texts)) expect(h.host.files.get(stored(text))).toBe(text);
     await h.restart();
     expect(await files(h, copy)).toEqual(["a", "b"]);
-    // Past the cap, nothing is carried: the copy starts without it, and the chat keeps the export warning.
-    const big = Array.from({ length: 40 }, (_, i): LayerEntry => ({ id: `big${i}`, chat, basis: { message: a1, swipe: "c0", parentPath: "" }, kind: "test", events: [], reasoning: randomBytes(48_000).toString("base64"), landed: { seq: i, at: new Date(0).toISOString() } }));
-    expect("over" in carryOf(chat, "run", big, [])).toBe(true);
+    // Past the cap, the newest entries that fit are carried with their texts, and the count says the rest stayed behind.
+    const thoughts = Array.from({ length: 40 }, (_, i) => `${i} ${randomBytes(36_000).toString("base64")}`);
+    const big = thoughts.map((t, i): LayerEntry => ({ id: `big${i}`, chat, basis: { message: a1, swipe: "c0", parentPath: "" }, kind: "test", events: [], reasoning: blobHash(t), landed: { seq: i, at: new Date(0).toISOString() } }));
+    const carry = await carryOf(chat, "run", big, [], async (hash) => thoughts.find((t) => blobHash(t) === hash) ?? null);
+    expect(carry.entries).toBe(40);
+    expect(carry.list.length).toBeGreaterThan(0);
+    expect(carry.list.length).toBeLessThan(40);
+    expect(carry.list.map((e) => e.id)).toEqual(big.slice(40 - carry.list.length).map((e) => e.id));
+    expect(Object.keys(carry.texts).sort()).toEqual(carry.list.map((e) => e.reasoning ?? "").sort());
+    expect(JSON.stringify(carry).length).toBeLessThanOrEqual(1_000_000);
   });
 
   test("a branch holds what it inherited in its own layer: it keeps it once its parent chat is gone, across a restart", async () => {
@@ -446,6 +462,22 @@ describe("the basis-anchored layer", () => {
     expect((await h.service.layerSummaries(chat, h.host.userId)).map((s) => s.id)).toEqual(["job-1", "job-2"]);
     expect(await files(h, chat)).toEqual(["once", "twice"]);
   });
+
+  test("a chunk's landing costs the layer under 600 bytes a beat (measured at about 470): its texts ride as blobs, never in its segments", async () => {
+    const { h, chat, ids } = await setup();
+    // As the bootstrap lands a chunk: an entry a message, with that message's beats and the historian's reasoning.
+    const perMessage = 4;
+    for (const [i, id] of ids.entries()) {
+      const at = await basisOf(h, chat, id);
+      const beats = Array.from({ length: perMessage }, (_, k) => beatEvent(beat(`b-chunk-${i}-${k}`, 0, { quotes: blob(`quotes ${i} ${k}`), exposure: [{ who: POV, channel: "sight", reach: "whole", pov: blob(`pov ${i} ${k}`) }] })));
+      expect((await land(h, chat, draft(`chunk-${i}`, at, beats, { reasoning: blob(`reasoning ${i}`) }))).status).toBe("landed");
+    }
+    const segments = [...h.host.files.entries()].filter(([k]) => k.startsWith(`${h.host.userId}/${layerDir(chat)}/seg-`));
+    const bytes = segments.reduce((n, [, text]) => n + new TextEncoder().encode(String(text)).length, 0);
+    const beatsLanded = ids.length * perMessage;
+    expect(segments.length).toBeGreaterThan(0);
+    expect(bytes / beatsLanded).toBeLessThan(600);
+  });
 });
 
 describe("the narrative record", () => {
@@ -499,9 +531,9 @@ describe("the raw archive index", () => {
     await h.send(chat, "And Dale?", "Dale sold his truck on Tuesday and took the bus home.");
     const ids = (await h.chain(chat)).map((m) => m.id);
     const a2 = ids[4] as MessageId;
-    // A beat citing the second reply, with Dale on it.
-    await land(h, chat, draft("cite", await basisOf(h, chat, a2), [beatEvent(beat("b-dale", 0, { actors: ["dale"], place: "bus_stop" }))]));
-    const archive = new ArchiveIndex(h.service);
+    // A beat citing the second reply, with Dale on it, who saw and heard it.
+    await land(h, chat, draft("cite", await basisOf(h, chat, a2), [beatEvent(beat("b-dale", 0, { actors: ["dale"], place: "bus_stop", exposure: [{ who: "dale", channel: "sight", also: ["hearing"], reach: "whole" }] }))]));
+    const archive = new ArchiveIndex(h.service, h.host);
     const boats = await archive.search(chat, h.host.userId, { text: "boats marina" });
     expect(boats.hits[0]?.messageId).toBe(ids[2]);
     expect(boats.hits[0]?.snippet).toContain("marina");
@@ -509,6 +541,8 @@ describe("the raw archive index", () => {
     expect(dale.hits.map((x) => x.messageId)).toEqual([a2]);
     // The turn's own beat cites it too.
     expect(dale.hits[0]?.places).toEqual(["home", "bus_stop"]);
+    // Each hit carries who the beats citing it reached, and how.
+    expect(dale.hits[0]?.exposure).toContainEqual({ who: "dale", beat: "b-dale", channels: ["sight", "hearing"], reach: "whole" });
     expect((await archive.search(chat, h.host.userId, { text: "truck", upTo: ids[2] })).total).toBe(0);
     const quote = await archive.quote(chat, h.host.userId, { messageId: a2, span: [0, 4] });
     expect(quote?.text).toBe("Dale");
@@ -516,6 +550,15 @@ describe("the raw archive index", () => {
     await swipe(h, chat, "Dale kept his truck after all.");
     expect((await archive.search(chat, h.host.userId, { text: "bus" })).total).toBe(0);
     expect((await archive.search(chat, h.host.userId, { text: "kept truck" })).hits[0]?.messageId).toBe(a2);
+    // The index is in the user's storage: a fresh one (a restart, or the chat evicted) loads it and tokenizes nothing unchanged.
+    expect([...h.host.files.keys()].some((k) => k.startsWith(`${h.host.userId}/runs/${chat}/archive/shard-`))).toBe(true);
+    const reloaded = new ArchiveIndex(h.service, h.host);
+    expect(await reloaded.search(chat, h.host.userId, { text: "kept truck" })).toEqual(await archive.search(chat, h.host.userId, { text: "kept truck" }));
+    expect(reloaded.tokenized).toBe(0);
+    // A swipe after that tokenizes only the reply it changed.
+    await swipe(h, chat, "Dale sold the truck at last.");
+    expect((await reloaded.search(chat, h.host.userId, { text: "sold" })).hits.map((x) => x.messageId)).toEqual([a2]);
+    expect(reloaded.tokenized).toBe(1);
   });
 });
 

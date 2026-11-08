@@ -49,7 +49,7 @@ import type { WorldState } from "../../../engine/state";
 import type { LiveEvent } from "../../../engine/ledger/story";
 import type { CardHost } from "../../character-agent";
 import type { ArchiveSource } from "../archive-tools";
-import type { CeilingBind, TurnBudget } from "../budget";
+import type { CeilingBind, OnScreenAllowance, TurnBudget } from "../budget";
 import type { BeatText, Blobs, StagingText } from "../common";
 import type { ModelPort, PortMessage, PortUsage } from "../port";
 import type { TurnSink } from "../../loopback/sink";
@@ -197,7 +197,8 @@ export interface NarrationInput {
   pov: EntityId;
   /** The people the player character knows by name (`knowsFor`): the narrator names only them and describes anyone else as they appear. */
   knows?: EntityId[];
-  settings: { redrafts: number; thinking: "whole" | "progress" };
+  /** `ownCheckRoom`: the answer room the user set the check in Settings → Depth (`ownRoom`), which every check asks at, a part of a passage too, over the room sized to what it reads (`checkRoom`); absent or null where none is set. */
+  settings: { redrafts: number; thinking: "whole" | "progress"; ownCheckRoom?: number | null };
   /** The recent raw prose, for the voice and continuity. */
   before?: string;
   /** The notebook excerpts the author chose for the scene (the tone contract, a ripe setup). */
@@ -283,6 +284,8 @@ export interface RealtimeCtx {
   settings: UserSettings;
   /** The ceiling that binds now (§6.5), at what the turn has spent: a line while one binds plays as a scene, where the author plays its character (the cheaper rung). Absent, none binds. */
   binds?: () => CeilingBind | null;
+  /** The on-screen allowance this story interval (W17): spent, a line plays as a scene, where the author plays its character. Absent, none is set. */
+  onScreen?: OnScreenAllowance | null;
   /**
    * The narrator, bound to this turn (sink, ask, excerpts, recent prose, settings): A2d renders the
    * exchange in it, so the latency line times the whole line. `throughOf` counts A2d's own events

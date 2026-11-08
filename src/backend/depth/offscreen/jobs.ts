@@ -38,7 +38,7 @@ import { intervalAt, INTERVAL_MINUTES, spendData } from "../spend";
 import { namesOf, tag, type DraftLine, type EpisodeAsk, type OffscreenFacts } from "../scene/author";
 import { draftOf } from "../../../shared/episodes";
 import { askLine, openAsks } from "./asks";
-import { draftsOn, type DraftOn } from "./drafts";
+import { draftsOn, draftWithTexts, type DraftOn } from "./drafts";
 import { changedInputs, draftEpisode, episodeOf, landEntry, type DraftOut, type OffscreenPlugs, type OffscreenRt } from "./episode";
 import { settleDraft } from "./settle";
 
@@ -87,17 +87,13 @@ function draftLine(world: WorldDoc, state: Readonly<WorldState>, story: BasisRea
 }
 
 /**
- * What the poll reads of the world beyond view at `at` (the fold at the reply, its live events of the
- * draft types read with it): the open drafts, the rebase candidates, and what the allowances leave.
+ * The rebase candidates at the chain as it stands: the drafts the chat folds (a branch's inherited
+ * ones too) whose basis message shows another swipe under the same prefix, not on this chain under
+ * their id (`onChain`: the ids of the drafts the fold holds).
  */
-export async function offscreenFacts(rt: JobsRt, chatId: ChatId, userId: UserId, at: Pick<BasisRead, "world" | "state" | "story" | "events">, budget: DepthBudget): Promise<OffscreenFacts> {
-  const { world, state, story } = at;
-  const drafts = draftsOn(at.events);
-  const open = drafts.filter((d) => d.state === "open");
-  // Rebase candidates: the drafts the chat folds (a branch's inherited ones too) whose basis message shows another swipe under the same prefix, not on this chain under their id.
+export async function rebaseCandidates(rt: Pick<JobsRt, "ledger">, chatId: ChatId, userId: UserId, onChain: ReadonlySet<string>): Promise<DraftData[]> {
   const bases = await rt.ledger.chainBases(chatId, userId);
-  const here = new Set(drafts.map((d) => d.draft.id));
-  const rebase: DraftLine[] = [];
+  const out: DraftData[] = [];
   for (const s of await rt.ledger.layerSummaries(chatId, userId, { inherited: true })) {
     if (s.kind !== STORY_DRAFT) continue;
     const b = bases.find((x) => x.message === s.basis.message);
@@ -105,9 +101,22 @@ export async function offscreenFacts(rt: JobsRt, chatId: ChatId, userId: UserId,
     const entry = await rt.ledger.readLayerEntry(chatId, userId, s.id);
     const event = entry?.events.find((e) => e.type === STORY_DRAFT);
     const draft = event && "data" in event ? draftOf(event.data) : null;
-    if (!draft || here.has(draft.id) || rebase.some((r) => r.id === draft.id)) continue;
-    rebase.push(draftLine(world, state, story, draft));
+    if (!draft || onChain.has(draft.id) || out.some((r) => r.id === draft.id)) continue;
+    out.push(draft);
   }
+  return out;
+}
+
+/**
+ * What the poll reads of the world beyond view at `at` (the fold at the reply, its live events of the
+ * draft types read with it): the open drafts, the rebase candidates, and what the allowances leave.
+ */
+export async function offscreenFacts(rt: JobsRt, chatId: ChatId, userId: UserId, at: Pick<BasisRead, "world" | "state" | "story" | "events">, budget: DepthBudget): Promise<OffscreenFacts> {
+  const { world, state, story } = at;
+  const drafts = await Promise.all(draftsOn(at.events).map(async (d) => ({ ...d, draft: await draftWithTexts(rt.blobs, userId, d.draft) })));
+  const open = drafts.filter((d) => d.state === "open");
+  const candidates = await rebaseCandidates(rt, chatId, userId, new Set(drafts.map((d) => d.draft.id)));
+  const rebase = (await Promise.all(candidates.map((d) => draftWithTexts(rt.blobs, userId, d)))).map((d) => draftLine(world, state, story, d));
   const spent = spentIn(drafts, budget, state.clock);
   const allowances = DEPTH_TREATMENTS.map((t) => {
     const a = budget.allowances[t];
@@ -185,18 +194,21 @@ export interface OffscreenAsks {
  * Runs the poll's off-screen jobs at `basis` (the reply it read), in order: drops, rebases,
  * settlements (a redraft opens its episode again for later), then the episodes, each drafted, slid
  * down the ladder or held for the player as its allowances say. Once `o.binds` says a ceiling binds,
- * the settlements and episodes not yet started are put off, said. Never throws.
+ * or the off-screen lane is paused (GM → Depth's Work off screen, read before each job: X4), the
+ * settlements and episodes not yet started are put off, said. Never throws.
  */
 export async function offscreenJobs(rt: JobsRt, chatId: ChatId, userId: UserId, basis: Basis, asks: OffscreenAsks, o: { budget: DepthBudget; model?: ModelPort; signal?: AbortSignal; plugs?: OffscreenPlugs; binds?: () => CeilingBind | null; first?: number }): Promise<OffscreenOut> {
   const out: OffscreenOut = { dropped: [], rebased: [], settled: [], drafted: [], asked: [], put: [], said: [] };
   const fail = (what: string, error: unknown): void => {
     out.said.push(`${what}: ${error instanceof Error ? error.message : String(error)}`);
   };
-  // A ceiling that binds puts off what hasn't started, a line each.
-  const held = (what: string): boolean => {
+  // A ceiling that binds, or the lane's pause, puts off what hasn't started, a line each.
+  const held = async (what: string): Promise<boolean> => {
     const bind = o.binds?.() ?? null;
     if (bind) out.put.push(`${what}: ${bind.words}`);
-    return bind !== null;
+    else if (!(await rt.settings.get(userId)).depth.background.offscreen) out.put.push(`${what}: Work off screen is paused (GM → Depth)`);
+    else return false;
+    return true;
   };
   const common = { ...(o.model ? { model: o.model } : {}), ...(o.signal ? { signal: o.signal } : {}), ...(o.plugs ? { plugs: o.plugs } : {}) };
   for (const d of asks.drop) {
@@ -229,7 +241,7 @@ export async function offscreenJobs(rt: JobsRt, chatId: ChatId, userId: UserId, 
   }
   const episodes: EpisodeAsk[] = [...asks.episodes];
   for (const s of asks.settle) {
-    if (held(`Settling draft ${s.draft}`)) continue;
+    if (await held(`Settling draft ${s.draft}`)) continue;
     try {
       const r = await settleDraft(rt, chatId, userId, s.draft, { basis, why: s.why, ...common });
       out.said.push(...r.said.map((line) => `settling ${s.draft}: ${line}`));
@@ -238,7 +250,8 @@ export async function offscreenJobs(rt: JobsRt, chatId: ChatId, userId: UserId, 
       if (r.verdict === "drop" && r.landed?.status !== "refused" && r.landed) out.dropped.push(s.draft);
       if (r.redraft) {
         const at = await rt.ledger.foldAtBasis(chatId, userId, basis, [STORY_DRAFT]);
-        const was = at ? draftsOn(at.events).find((d) => d.draft.id === s.draft)?.draft : undefined;
+        const found = at ? draftsOn(at.events).find((d) => d.draft.id === s.draft)?.draft : undefined;
+        const was = found ? await draftWithTexts(rt.blobs, userId, found) : undefined;
         if (was) episodes.push({ why: was.episode.why, in: r.redraft.in, minutes: Math.max(1, was.episode.span[1] - was.episode.span[0]), places: was.episode.places, people: was.episode.people, parts: was.episode.parts });
       }
     } catch (error) {
@@ -252,7 +265,7 @@ export async function offscreenJobs(rt: JobsRt, chatId: ChatId, userId: UserId, 
       // Its place among the episodes polls opened at this reply: after any an earlier poll there opened (`first`).
       const index = (o.first ?? 0) + n;
       if (o.signal?.aborted) break;
-      if (held(`Episode ${index + 1} (${ask.why.trim() || "no reason given"})`)) continue;
+      if (await held(`Episode ${index + 1} (${ask.why.trim() || "no reason given"})`)) continue;
       // A major part past its allowance: held for the player's answer, its chip under this reply.
       const over = at ? overAllowance(ask, o.budget, spent) : [];
       if (at && over.length > 0) {

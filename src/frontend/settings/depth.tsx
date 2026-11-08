@@ -36,7 +36,7 @@ export function modelText(m: Readonly<DepthModel>, connections: readonly Connect
 
 /** Whether two models differ in anything the page sets. */
 function modelChanged(a: Readonly<DepthModel>, b: Readonly<DepthModel>): boolean {
-  return a.connectionId !== b.connectionId || a.model !== b.model || a.effort !== b.effort || a.maxTokens !== b.maxTokens;
+  return a.connectionId !== b.connectionId || a.model !== b.model || a.effort !== b.effort || a.maxTokens !== b.maxTokens || a.temperature !== b.temperature || a.topP !== b.topP;
 }
 
 /** How many of the page's settings differ from the shipped ones: Settings home's Changed count. */
@@ -56,7 +56,13 @@ export function depthSummary(depth: Readonly<DepthSettings>): string {
   return current === null ? "Your own mix of models" : `${DEPTH_PRESET_WORDS[current].label} preset`;
 }
 
-/** One model's rows: its connection and model, its reasoning, and the room an answer gets. `set` patches the model's own fields. */
+/** A model's own sampling rows: empty takes the helper model's value. */
+const SAMPLING: readonly { key: "temperature" | "topP"; label: string; max: number; step: number }[] = [
+  { key: "temperature", label: "Temperature", max: 2, step: 0.05 },
+  { key: "topP", label: "Top P", max: 1, step: 0.01 },
+];
+
+/** One model's rows: its connection and model, its reasoning, the room an answer gets, and its temperature and top P. `set` patches the model's own fields. */
 export function ModelRows(props: { id: string; owner: string; value: Readonly<DepthModel>; standard: Readonly<DepthModel>; connections: readonly Connection[]; busy: boolean; set(fields: JsonObject): void }) {
   const { value, standard, owner } = props;
   const connectionChanged = value.connectionId !== standard.connectionId || value.model !== standard.model;
@@ -89,6 +95,29 @@ export function ModelRows(props: { id: string; owner: string; value: Readonly<De
       <SettingRow id={`${props.id}.maxTokens`} label="Answer room" bare changed={value.maxTokens !== standard.maxTokens} help="The tokens an ordinary answer may take, reasoning included. Stages whose answers grow with what they read (the historian, the author's readings, catch-ups, reflections, truth links) ask for all the room the model takes instead, unless a role on its own model has its room set here; a few calls ask for a room of their own." reset={{ label: `Reset ${owner}'s answer room to its default, ${n(standard.maxTokens)} tokens`, to: `${n(standard.maxTokens)} tokens`, onClick: () => props.set({ maxTokens: standard.maxTokens }) }} busy={props.busy}>
         <NumberStepper label={`${owner}: answer room (tokens)`} value={value.maxTokens} min={256} max={1_000_000} step={1024} integer disabled={props.busy} onChange={(maxTokens) => props.set({ maxTokens })} />
       </SettingRow>
+      {SAMPLING.map((p) => (
+        <SettingRow key={p.key} id={`${props.id}.${p.key}`} label={p.label} bare changed={value[p.key] !== standard[p.key]} help={`From 0 to ${p.max}. Empty: the helper model's ${p.label.toLowerCase()} (Settings → Helper model).`} reset={{ label: `Reset ${owner}'s ${p.label.toLowerCase()} to its default, the helper model's`, to: "The helper model's", onClick: () => props.set({ [p.key]: null }) }} busy={props.busy}>
+          <label class="lre-field">
+            <span class="label">{`${owner}: ${p.label.toLowerCase()}`}</span>
+            <input
+              class="lre-input"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              max={p.max}
+              step={p.step}
+              placeholder="The helper model's"
+              value={value[p.key] ?? ""}
+              disabled={props.busy}
+              onChange={(event) => {
+                const text = event.currentTarget.value.trim();
+                const next = Number(text);
+                props.set({ [p.key]: text === "" || !Number.isFinite(next) ? null : Math.min(p.max, Math.max(0, next)) });
+              }}
+            />
+          </label>
+        </SettingRow>
+      ))}
     </div>
   );
 }
@@ -119,13 +148,14 @@ export function RoleRow(props: { role: DepthRole; depth: Readonly<DepthSettings>
 }
 
 /** What a limit in tokens or a count reads as on the page. */
-const LIMITS: Readonly<Record<"perTurn" | "perDay" | DepthTreatmentKey, AgentLimitDef>> = {
+const LIMITS: Readonly<Record<"perTurn" | "perDay" | "onScreen" | DepthTreatmentKey, AgentLimitDef>> = {
   perTurn: { label: "Per turn", limits: "All of depth's model work one turn may spend, on screen and off.", fires: "The author is told what the turn has left and spends by it. Once the ceiling binds, it plays itself the characters who had their own agents, and the scene goes on as far as it judges. A real-time line plays as a scene. The step after the reply puts off what it hasn't started. Each is said; nothing is skipped silently.", unit: "tokens", min: 1000, none: "a turn spends what its work takes" },
   perDay: { label: "Per day", limits: "All of depth's model work in one UTC day (midnight to midnight UTC, whatever your clock says), in every chat, the bootstrap apart.", fires: "As per turn, for every turn: the author spends less and says what it put off, until the day turns at midnight UTC.", unit: "tokens", min: 1000, none: "a day spends what its turns take" },
   live: { label: DEPTH_TREATMENT_LABEL.live, limits: "Events and characters played live off screen per story interval.", fires: "The author picks a cheaper treatment, or asks you when it judges the moment major.", unit: "count", min: 0, none: "as many as the author judges" },
   campfire: { label: DEPTH_TREATMENT_LABEL.campfire, limits: "Campfire treatments per story interval.", fires: "The author picks a cheaper treatment, or asks you.", unit: "count", min: 0, none: "as many as the author judges" },
   room: { label: DEPTH_TREATMENT_LABEL.room, limits: "Room treatments per story interval.", fires: "The author picks a cheaper treatment, or asks you.", unit: "count", min: 0, none: "as many as the author judges" },
   written: { label: DEPTH_TREATMENT_LABEL.written, limits: "Written treatments per story interval.", fires: "The author leaves the rest unwritten until it matters, and says so.", unit: "count", min: 0, none: "as many as the author judges" },
+  onScreen: { label: "On screen", limits: "Turns per story interval in which someone in your scene plays as their own agent (a call each time they act), real-time lines included.", fires: "The author is told what is left. Once it is spent, the author plays those characters itself, or handles them as part of the world, until the next story interval; it says so each turn.", unit: "count", min: 0, none: "as many as the author judges" },
 };
 type DepthTreatmentKey = (typeof DEPTH_TREATMENTS)[number];
 
@@ -222,6 +252,8 @@ export function DepthPage(props: { depth: Readonly<DepthSettings>; connections: 
   const sboot = SHIPPED.bootstrap;
   const cap = boot.cap === "none" ? null : boot.cap;
   const standardCap = sboot.cap === "none" ? null : sboot.cap;
+  // The first connection on DeepSeek's provider, offered for Fast (owner D-3: cheap roles on the cheap model; the defaults name no provider).
+  const deepseek = connections.find((c) => c.provider?.toLowerCase() === "deepseek");
   return (
     <div class="lre-stack lre-depth-settings" data-lre-settings-page="depth">
       <p class="lre-set-lead">Depth simulates each chat that opts in (GM → This chat → Depth): an author who runs each scene, characters who play from minds of their own, a GM who resolves and keeps the truth, and a narrator who renders what was decided. Every place it uses a model is yours to choose here.</p>
@@ -232,6 +264,11 @@ export function DepthPage(props: { depth: Readonly<DepthSettings>; connections: 
           <h4 class="lre-depth-subhead">Strong model</h4>
           <ModelRows id="strong" owner="Strong model" value={depth.strong} standard={SHIPPED.strong} connections={connections} busy={busy} set={(fields) => set({ strong: fields })} />
           <h4 class="lre-depth-subhead">Fast model</h4>
+          {deepseek && depth.fast.connectionId !== deepseek.id ? (
+            <Button size="sm" disabled={busy} onClick={() => set({ fast: { connectionId: deepseek.id, model: null } })}>
+              Use my DeepSeek connection for Fast
+            </Button>
+          ) : null}
           <ModelRows id="fast" owner="Fast model" value={depth.fast} standard={SHIPPED.fast} connections={connections} busy={busy} set={(fields) => set({ fast: fields })} />
         </div>
       </Section>
@@ -241,6 +278,8 @@ export function DepthPage(props: { depth: Readonly<DepthSettings>; connections: 
             <RoleRow key={role} role={role} depth={depth} connections={connections} busy={busy} patch={props.patch} />
           ))}
           <NumberRow id="catchUpBatch" label="Beats per catch-up" unit="" value={depth.catchUpBatch} standard={SHIPPED.catchUpBatch} min={1} max={1000} step={5} help="The most beats one catch-up call lives when a character lives what reached them, and the most new beats one remembering call adds to a scene's; more waiting are lived over several calls, in order." busy={busy} set={(catchUpBatch) => set({ catchUpBatch })} />
+          <NumberRow id="reached" label="Points of view per play" unit="" value={depth.reached} standard={SHIPPED.reached} min={1} max={1000} step={5} help="The most of what reached a character that one play lives, newest kept; the rest waits for their catch-up." busy={busy} set={(reached) => set({ reached })} />
+          <NumberRow id="takesKept" label="Takes before remembering" unit="" value={depth.takesKept} standard={SHIPPED.takesKept} min={20} max={10000} step={20} help="Once a character holds this many takes unremembered, the step after a reply remembers them, a talk still on or not; the author's poll hears it from three quarters of the way. Nothing is ever cut." busy={busy} set={(takesKept) => set({ takesKept })} />
         </div>
       </Section>
       <Section title="The author" flush>
@@ -248,6 +287,24 @@ export function DepthPage(props: { depth: Readonly<DepthSettings>; connections: 
           <ChoiceRow<DepthCadence> id="cadence" label="Notebook revisions" value={depth.cadence} standard={SHIPPED.cadence} options={(["turns", "scenes", "chapters"] as const).map((c) => ({ value: c, label: DEPTH_CADENCE_LABEL[c] }))} help="The lightest revision the author is offered: it still judges whether anything moved enough to revise." busy={busy} set={(cadence) => set({ cadence })} />
           <ChoiceRow<"judged" | "chip"> id="realtime" label="Real-time dialogue starts" value={depth.realtime} standard={SHIPPED.realtime} options={[{ value: "judged", label: "When the author judges" }, { value: "chip", label: "Only from the chip" }]} help="Talking with someone line by line: the author enters it when the moment is a conversation, or only when you tap the chip." busy={busy} set={(realtime) => set({ realtime })} />
           <NumberRow id="steps" label="Steps per turn" unit="" value={depth.steps} standard={SHIPPED.steps} min={1} max={100} step={1} help="The most steps the author takes between beats in one turn. It is told as the turn nears them, and past them you answer and the scene goes on next turn." busy={busy} set={(steps) => set({ steps })} />
+          <NumberRow id="episodeSteps" label="Steps per episode" unit="" value={depth.episodeSteps} standard={SHIPPED.episodeSteps} min={1} max={100} step={1} help="The most steps the author takes in an episode played live off screen. It is told how many are left, and past them the episode ends where it stands." busy={busy} set={(episodeSteps) => set({ episodeSteps })} />
+          <NumberRow id="rereadBeats" label="Beats a reflection reads" unit="" value={depth.rereadBeats} standard={SHIPPED.rereadBeats} min={10} max={10000} step={50} help="The most beats of the scene or chapter the author's reflection or re-read takes in one call; past it they're read a page at a time, oldest first, each page revising the notebook." busy={busy} set={(rereadBeats) => set({ rereadBeats })} />
+        </div>
+      </Section>
+      <Section title="What one call reads" flush>
+        <div class="lre-set-rows" data-lre-depth-group="reads">
+          <NumberRow id="reads.sceneBeats" label="Scene beats the author reads" unit="" value={depth.reads.sceneBeats} standard={SHIPPED.reads.sceneBeats} min={5} max={2000} step={10} help="The most of the scene's beats the author reads at its setup and each step, newest kept. The record keeps them all." busy={busy} set={(sceneBeats) => set({ reads: { sceneBeats } })} />
+          <NumberRow id="reads.others" label="People elsewhere at a setup" unit="" value={depth.reads.others} standard={SHIPPED.reads.others} min={0} max={500} step={4} help="The most people away from your character a scene's setup is told of: those the scene may reach only from afar or bring in." busy={busy} set={(others) => set({ reads: { others } })} />
+          <NumberRow id="reads.watchBeats" label="Beats the real-time watch reads" unit="" value={depth.reads.watchBeats} standard={SHIPPED.reads.watchBeats} min={5} max={2000} step={10} help="The most of the conversation's scene the author's watch reads at each line, newest kept. The notebook holds the long view." busy={busy} set={(watchBeats) => set({ reads: { watchBeats } })} />
+          <NumberRow id="reads.episodeBeats" label="Story beats an episode reads" unit="" value={depth.reads.episodeBeats} standard={SHIPPED.reads.episodeBeats} min={5} max={2000} step={10} help="The most of the story's newest beats the author reads beside an episode off screen." busy={busy} set={(episodeBeats) => set({ reads: { episodeBeats } })} />
+          <NumberRow id="reads.settleBeats" label="Beats a settlement reads at once" unit="" value={depth.reads.settleBeats} standard={SHIPPED.reads.settleBeats} min={10} max={10000} step={50} help="The most beats since a draft's story time that one settlement call reads; past it they're read a page at a time, in story order." busy={busy} set={(settleBeats) => set({ reads: { settleBeats } })} />
+          <NumberRow id="reads.pollBeats" label="Beats the poll reads" unit="" value={depth.reads.pollBeats} standard={SHIPPED.reads.pollBeats} min={10} max={10000} step={50} help="The most beats since it last looked that the author's poll reads after a reply, newest kept." busy={busy} set={(pollBeats) => set({ reads: { pollBeats } })} />
+          <NumberRow id="reads.due" label="Plans due the poll reads" unit="" value={depth.reads.due} standard={SHIPPED.reads.due} min={0} max={500} step={4} help="The most plans under way or falling due within a story day that the poll is told of, soonest first." busy={busy} set={(due) => set({ reads: { due } })} />
+          <NumberRow id="reads.places" label="Places a setup lists" unit="" value={depth.reads.places} standard={SHIPPED.reads.places} min={1} max={1000} step={10} help="The most of the world's places the author's setup reads, nearest your character first." busy={busy} set={(places) => set({ reads: { places } })} />
+          <NumberRow id="reads.narratorQuotes" label="Archive quotes for the narrator" unit="" value={depth.reads.narratorQuotes} standard={SHIPPED.reads.narratorQuotes} min={0} max={50} step={1} help="The most quotes from the chat's archive one setup passes to the narrator; the rest are said back as not reaching it." busy={busy} set={(narratorQuotes) => set({ reads: { narratorQuotes } })} />
+          <NumberRow id="reads.quoteWords" label="Words in one quote" unit="" value={depth.reads.quoteWords} standard={SHIPPED.reads.quoteWords} min={10} max={1000} step={10} help="The most words one quote in a reading may hold and still be matched to the words it cites; a longer one is refused, said back." busy={busy} set={(quoteWords) => set({ reads: { quoteWords } })} />
+          <NumberRow id="reads.quotesPerBeat" label="Quotes per beat" unit="" value={depth.reads.quotesPerBeat} standard={SHIPPED.reads.quotesPerBeat} min={1} max={100} step={1} help="The most quotes one beat or attempt of a reading may hold; past them a quote is refused unmatched, said back." busy={busy} set={(quotesPerBeat) => set({ reads: { quotesPerBeat } })} />
+          <NumberRow id="reads.quotesPerAnswer" label="Quotes per answer" unit="" value={depth.reads.quotesPerAnswer} standard={SHIPPED.reads.quotesPerAnswer} min={1} max={1000} step={4} help="The most quotes one GM reading may hold in all; past them a quote is refused unmatched, said back." busy={busy} set={(quotesPerAnswer) => set({ reads: { quotesPerAnswer } })} />
         </div>
       </Section>
       <Section title="Budget" flush>
@@ -267,6 +324,7 @@ export function DepthPage(props: { depth: Readonly<DepthSettings>; connections: 
           </SettingRow>
           <DepthLimitRow id="budget.perTurn" def={LIMITS.perTurn} value={b.perTurn} standard={sb.perTurn} busy={busy} set={(perTurn) => set({ budget: { perTurn } })} />
           <DepthLimitRow id="budget.perDay" def={LIMITS.perDay} value={b.perDay} standard={sb.perDay} busy={busy} set={(perDay) => set({ budget: { perDay } })} />
+          <DepthLimitRow id="budget.onScreen" def={LIMITS.onScreen} value={b.onScreen} standard={sb.onScreen} busy={busy} set={(onScreen) => set({ budget: { onScreen } })} />
         </div>
       </Section>
       <Section title="The narrator" flush>
@@ -283,13 +341,16 @@ export function DepthPage(props: { depth: Readonly<DepthSettings>; connections: 
           <SettingRow id="background.on" label="Background lanes" bare changed={depth.background.on !== SHIPPED.background.on} help="On, the author's poll runs after each reply, with the catch-ups, reflections, notebook revisions and work off screen it asks for. Off, only what the next turn reads runs after a reply: each character who played remembers it, and the GM's truth links. The rest waits until you turn this back on, and the next poll then reads every turn since the last one; meanwhile what reached each character waits to be lived (GM → Minds), and a scene that reaches an open draft still settles it first." reset={{ label: "Reset Background lanes to its default, on", to: "On", onClick: () => set({ background: { on: SHIPPED.background.on } }) }} busy={busy}>
             <HostSwitch label="Work between turns" checked={depth.background.on} disabled={busy} onChange={(on) => set({ background: { on } })} />
           </SettingRow>
+          <SettingRow id="background.offscreen" label="Work off screen" bare changed={depth.background.offscreen !== SHIPPED.background.offscreen} help="The off-screen lane's own pause. Off, each settlement and episode the author's poll asks for that hasn't started is put off, a line each in GM → Depth → Treatments; the poll, its catch-ups and reflections still run, and a scene that reaches an open draft still settles it first." reset={{ label: "Reset Work off screen to its default, on", to: "On", onClick: () => set({ background: { offscreen: SHIPPED.background.offscreen } }) }} busy={busy}>
+            <HostSwitch label="Work off screen" checked={depth.background.offscreen} disabled={busy || !depth.background.on} onChange={(offscreen) => set({ background: { offscreen } })} />
+          </SettingRow>
           <NumberRow id="background.atOnce" label="Background calls at once" unit="" value={depth.background.atOnce} standard={SHIPPED.background.atOnce} min={1} max={16} step={1} help="Depth's calls between turns (after a reply, off screen, your presses in GM → Minds and Depth) under way at once on one connection; more wait their turn. A turn's own calls never wait behind them: they go first, and where a connection's Calls at once (Settings → Agents → Throttles) is full, a background call gives its place to the turn's and is asked again after, its prompt counted as spent. The bootstrap keeps to its own at-once settings below, and gives way the same." busy={busy} set={(atOnce) => set({ background: { atOnce } })} />
         </div>
       </Section>
       <Section title="Bootstrap" flush>
         <div class="lre-set-rows" data-lre-depth-group="bootstrap">
           <p class="lre-small lre-muted lre-depth-note">Onboarding a chat with history (GM → This chat → Depth): canon beats from the prose, minds from each character's own experience, the author's notebook chapter by chapter.</p>
-          <NumberRow id="bootstrap.chunkTokens" label="Chunk size" unit="tokens" value={boot.chunkTokens} standard={sboot.chunkTokens} min={2000} max={200_000} step={1000} help="Whole messages up to this many tokens make one chunk of history. The historian asks for all the room its model takes (only what it uses is spent), or the Historian's own answer room where you set one, and an answer cut off at it is asked once more at twice it. A chunk the model can't finish within its output limit keeps being cut: make it smaller." busy={busy} set={(chunkTokens) => set({ bootstrap: { chunkTokens } })} />
+          <NumberRow id="bootstrap.chunkTokens" label="Chunk size" unit="tokens" value={boot.chunkTokens} standard={sboot.chunkTokens} min={2000} max={200_000} step={1000} help="Whole messages up to this many tokens make one chunk of history. The historian asks for all the room its model takes (only what it uses is spent), or the Historian's own answer room where you set one, and an answer cut off at it is asked once more at twice it. Cut off again, the chunk is read as two halves instead, down to a single message; a single message cut off again pauses the run: give the Historian a bigger answer room." busy={busy} set={(chunkTokens) => set({ bootstrap: { chunkTokens } })} />
           <NumberRow id="bootstrap.minds" label="Minds at once" unit="" value={boot.atOnce.minds} standard={sboot.atOnce.minds} min={1} max={16} step={1} help="Memory grows with the jobs in flight, not with the chat." busy={busy} set={(minds) => set({ bootstrap: { atOnce: { minds } } })} />
           <NumberRow id="bootstrap.mostMinds" label="Most characters with a mind" unit="" value={boot.mostMinds} standard={sboot.mostMinds} min={0} max={500} step={1} help="The run gives a mind to at most this many characters, in the order the author picks them; 0 for no limit. Minds are most of a run's cost: fewer cost less. Anyone without one is played by the author." busy={busy} set={(mostMinds) => set({ bootstrap: { mostMinds } })} />
           <SettingRow id="bootstrap.cap" label="The run's cap" changed={JSON.stringify(boot.cap) !== JSON.stringify(sboot.cap)} help="At the cap the run pauses and says how far it got and what the rest would cost. Each run's own cap is set before it starts." reset={{ label: "Reset the run's cap to its default", to: standardCap ? `${n(standardCap.value)} ${standardCap.unit === "money" ? "in money" : "tokens"}` : "No cap", onClick: () => set({ bootstrap: { cap: sboot.cap } }) }} busy={busy}>
@@ -303,6 +364,19 @@ export function DepthPage(props: { depth: Readonly<DepthSettings>; connections: 
           </SettingRow>
           <NumberRow id="bootstrap.sample" label="Spot checks per chapter" unit="" value={boot.sample} standard={sboot.sample} min={0} max={50} step={1} help="A random sample beside its source, plus everything the run flagged as uncertain." busy={busy} set={(sample) => set({ bootstrap: { sample } })} />
           <NumberRow id="bootstrap.pauseAfterWrong" label="Wrong marks that pause it" unit="" value={boot.pauseAfterWrong} standard={sboot.pauseAfterWrong} min={1} max={50} step={1} help="Marks in a row: the run pauses and offers Redo from that chapter with other models." busy={busy} set={(pauseAfterWrong) => set({ bootstrap: { pauseAfterWrong } })} />
+          <ChoiceRow<"auto" | "flag">
+            id="bootstrap.returning"
+            label="When a character returns before catch-up"
+            value={boot.returning}
+            standard={sboot.returning}
+            options={[
+              { value: "auto", label: "Catch them up" },
+              { value: "flag", label: "Flag them" },
+            ]}
+            help="A character back in the story whose time in the LumiBooks book hasn't been read into their mind yet. Catch them up: the author runs a catch-up on just what they missed first, and says so. Flag them: they're played from their core and the archive, and marked as not caught up. This build records the choice; nothing acts on it yet."
+            busy={busy}
+            set={(returning) => set({ bootstrap: { returning } })}
+          />
         </div>
       </Section>
     </div>

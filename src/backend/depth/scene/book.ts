@@ -202,8 +202,9 @@ export class SceneBook {
    * names a stranger to them; and each actor of a beat with no deed but the player character
    * (`ownActWithoutDeed`), as the one doing it, so none lives the surface as its own act. Each is told
    * how it may name each person of the moment, the beat's people and the scene's staged ones
-   * (`povRefs`), and what it could sense of the staging. Everyone asked gets one: where the render,
-   * asked again, still wrote none or named someone who wasn't there, the plain one it falls back to, said.
+   * (`povRefs`), and what it could sense of the staging. One the render, asked again, still wrote
+   * none of, or named someone who wasn't there in and its GM's check couldn't set right, is left
+   * without one, pending (said); no rule writes it.
    */
   async povs(beat: { id: string; surface: string; deed?: string; quotes?: string } & Pick<Beat, "actors" | "about"> & Partial<Pick<Beat, "addressed">>, exposure: Exposure[], model: ModelPort, texts: PromptTexts | undefined, signal: AbortSignal | undefined): Promise<void> {
     const at = { state: this.working.state, world: this.world };
@@ -212,13 +213,13 @@ export class SceneBook {
     if (need.length === 0) return;
     const staging: PovStaging[] = [...this.staging.values()].map((s) => ({ who: s.who, where: s.where, doing: s.doing, ...(s.occluded ? { occluded: s.occluded } : {}) }));
     const refs = povRefs({ registry: this.registry }, at, need, [...presentAt({ ...beat, exposure }), ...staging.map((s) => s.who)]);
-    const out = await povRender(model, { beat: { id: beat.id, surface: beat.surface, ...(beat.deed ? { deed: beat.deed } : {}), ...(beat.quotes ? { quotes: beat.quotes } : {}), actors: beat.actors, exposure }, staging, who: need, refs, ...(texts ? { texts } : {}), ...(signal ? { signal } : {}) });
+    const out = await povRender(model, { beat: { id: beat.id, surface: beat.surface, ...(beat.quotes ? { quotes: beat.quotes } : {}), actors: beat.actors, exposure }, staging, who: need, refs, ...(texts ? { texts } : {}), ...(signal ? { signal } : {}) });
     this.usage = { tokensIn: this.usage.tokensIn + out.usage.tokensIn, tokensOut: this.usage.tokensOut + out.usage.tokensOut };
     for (const x of exposure) {
       const pov = out.povs[x.who];
       if (x.pov === undefined && need.includes(x.who) && pov !== undefined) x.pov = putText(this.blobs, pov);
     }
-    for (const [who, names] of Object.entries(out.fellBack)) this.say(fellBackLine(who, `beat ${beat.id}`, names));
+    for (const [who, names] of Object.entries(out.pending)) this.say(fellBackLine(who, `beat ${beat.id}`, names));
   }
 
   /**

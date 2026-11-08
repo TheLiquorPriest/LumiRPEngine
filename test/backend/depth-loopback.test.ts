@@ -119,9 +119,9 @@ async function streamed(rig: Rig, at: { relay: Relay; key: string; chatId: strin
   return relayed(at, await host.begin(at.chatId, { type: "normal" }));
 }
 
-/** Generation `g` through the relay as core asks for it: what streamed, before the reply commits. */
-async function relayed(at: { relay: Relay; key: string }, g: Generation) {
-  const res = await at.relay.fetch(new Request(`http://127.0.0.1:${PORT}/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${at.key}`, host: `127.0.0.1:${PORT}`, "content-type": "application/json" }, body: JSON.stringify({ model: LOOPBACK_MODEL, stream: true, messages: g.prompt ?? [], lre_turn: g.parameters?.lre_turn }) }));
+/** Generation `g` through the relay as core asks for it, with `extra` the request's own fields (a preset's sampling): what streamed, before the reply commits. */
+async function relayed(at: { relay: Relay; key: string }, g: Generation, extra: Record<string, number> = {}) {
+  const res = await at.relay.fetch(new Request(`http://127.0.0.1:${PORT}/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${at.key}`, host: `127.0.0.1:${PORT}`, "content-type": "application/json" }, body: JSON.stringify({ model: LOOPBACK_MODEL, stream: true, messages: g.prompt ?? [], lre_turn: g.parameters?.lre_turn, ...extra }) }));
   let content = "";
   let reasoning = "";
   for await (const c of coreStream(res)) {
@@ -241,6 +241,45 @@ describe("a chat on depth, through the loopback", () => {
     expect(passagesIn(rec?.events.slice(rec.pre) ?? []).map((p) => p.moment)).toEqual([0]);
   });
 
+  // L39b: Ask what should change on each swipe rode only the restart push, and a loopback turn is
+  // never stopped and started again, so a loopback swipe never asked.
+  test("with Ask what should change on each swipe on, a loopback swipe asks its page before any model call and its telling takes the answer; off, it asks nothing", async () => {
+    const rig = new Rig({ shipped: true });
+    const host = rig.host;
+    const asked: string[] = [];
+    const at = await loopbackDepth(rig, asked, []);
+    const asks: { turn: string; calls: number; answered: Promise<unknown> }[] = [];
+    const send = host.frontend.send;
+    host.frontend.send = (message, userId, session) => {
+      send(message, userId, session);
+      if (message.type === "lre.generate" && message.ask) asks.push({ turn: message.turn, calls: asked.length, answered: rig.send({ type: "lre.restart", chatId: at.chatId, turn: message.turn, direction: "Let it be raining outside" }).then((r) => rig.body(r)) });
+    };
+    const first = await streamed(rig, at, "I walk into the shop. Hello?");
+    await host.finish(first.g, first.content);
+    await rig.rt.depthSettled();
+    const reply = host.head(at.chatId);
+    if (!reply) throw new Error("no reply");
+
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { swipeAsk: true } }));
+    const before = asked.length;
+    const swiped = await relayed(at, await host.begin(at.chatId, { type: "swipe", messageId: reply.id }));
+    expect(asks.map((a) => [a.turn, a.calls])).toEqual([[swiped.g.id, before]]);
+    expect(await asks[0]?.answered).toEqual({ start: false });
+    expect(swiped.reasoning).toContain("Asking you what should change on this swipe");
+    expect(swiped.content).toBe(PASSAGE);
+    expect(asked.slice(before).some((t) => t.includes("Let it be raining outside"))).toBe(true);
+    await host.finish(swiped.g, swiped.content);
+    await rig.rt.depthSettled();
+
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { swipeAsk: false } }));
+    const since = asked.length;
+    const plain = await relayed(at, await host.begin(at.chatId, { type: "swipe", messageId: reply.id }));
+    await host.finish(plain.g, plain.content);
+    expect(asks).toHaveLength(1);
+    expect(plain.reasoning).not.toContain("Asking you what should change");
+    expect(asked.slice(since).some((t) => t.includes("Let it be raining outside"))).toBe(false);
+  });
+
   // LIVE3's lane 1 (L3a-2): GM → Depth → Turn showed no model calls for any loopback turn. The bridge
   // filed them on the record by the engine run's id, which the generation's adoption had renamed to
   // the generation's; a kept turn's retry looked for the failed generation's.
@@ -291,6 +330,22 @@ describe("a chat on depth, through the loopback", () => {
     expect(reasoning).toContain("The narrator reads your preset as it is and the chat's last 4 messages");
     expect(reasoning).toContain("The 3 earlier messages stay out of its prompt.");
   });
+
+  // C6 (DEPTH-PLAN §3.13): the preset's sampling reaches the narrator off a scene as in one, the Narrator row's own over it.
+  test("a Continue's narrator takes the preset's sampling and answer room from the body, and the Narrator row's own over them", async () => {
+    const rig = new Rig({ shipped: true });
+    const host = rig.host;
+    const at = await loopbackDepth(rig, [], []);
+    const body = { temperature: 1.1, top_p: 0.8, top_k: 40, max_tokens: 2222 };
+    const before = host.quietCalls.length;
+    const first = await relayed(at, await host.begin(at.chatId, { type: "continue" }), body);
+    expect(host.quietCalls.slice(before).at(-1)).toMatchObject({ maxTokens: 2222, params: { temperature: 1.1, top_p: 0.8, top_k: 40 } });
+    await host.finish(first.g, first.content);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { depth: { roles: { narrator: { uses: "own", own: { temperature: 0.3, topP: 0.5, maxTokens: 3000 } } } } } }));
+    const next = host.quietCalls.length;
+    await relayed(at, await host.begin(at.chatId, { type: "continue" }), body);
+    expect(host.quietCalls.slice(next).at(-1)).toMatchObject({ maxTokens: 3000, params: { temperature: 0.3, top_p: 0.5, top_k: 40 } });
+  }, 30_000);
 
   // The owner's rule (C16, L18): a depth turn's request never carries the whole history. The chat's
   // cutoff (GM → This chat → Depth → History) takes every message before it out of what core sends,
@@ -576,5 +631,41 @@ describe("a chat on depth, through the loopback", () => {
     // An edit straight after that one: the reply as it was is that edit's text.
     expect(await read(`${EDITED} ${ADDED} ${MORE} He waves.`)).toBe(`${EDITED} ${ADDED} ${MORE} ${LAST} He waves.`);
     expect(asked.filter((t) => t.includes(EDIT))).toHaveLength(3);
+  });
+
+  test("opening a chat on depth off the loopback flags it on the chat and on Settings → Loopback, on the loopback it doesn't, and no chat or connection list is read", async () => {
+    const rig = new Rig({ shipped: true });
+    const host = rig.host;
+    const { chatId } = await loopbackDepth(rig, [], []);
+    host.connectionProfiles.push({ id: "conn-real", name: "Real model", models: ["gpt"] });
+    let listed = 0;
+    const chatList = host.chats.list;
+    host.chats.list = (userId) => (listed++, chatList(userId));
+    const connectionList = host.connections.list;
+    host.connections.list = (userId) => (listed++, connectionList(userId));
+    const open = async () => {
+      rig.body(await rig.send({ type: "lre.hello", chatId }, "browser"));
+      const chips = (await rig.rt.view(chatId, host.userId)).chips.filter((c) => c.id === `needs_loopback:open:${chatId}`);
+      const before = listed;
+      const page = rig.body(await rig.send({ type: "lre.loopback.page", op: "get" })).page as { offChats: unknown };
+      listed = before;
+      return { chips, off: page.offChats };
+    };
+
+    // Pinned to the loopback by the opt-in: no warning.
+    expect(await open()).toEqual({ chips: [], off: [] });
+    // Pinned elsewhere: the chip on its latest message and the line on Settings → Loopback, with the fix.
+    await host.chats.mergeChatMetadata(chatId, { connection_profile_id: "conn-real" }, host.userId);
+    const off = await open();
+    const latest = (await host.chats.messages(chatId, host.userId)).at(-1);
+    if (!latest) throw new Error("no message");
+    expect(off.chips.map((c): string[] => [c.kind, c.messageId, c.label])).toEqual([["needs_loopback", latest.id, "This chat is off the loopback"]]);
+    expect(off.chips[0]?.detail).toContain("generates on Real model");
+    expect(off.chips[0]?.detail).toContain("Fix: pick a loopback connection");
+    expect(off.off).toEqual([{ chatId, connection: "Real model" }]);
+    // Back on the loopback: both go.
+    await host.chats.mergeChatMetadata(chatId, { connection_profile_id: "conn-loop" }, host.userId);
+    expect(await open()).toEqual({ chips: [], off: [] });
+    expect(listed).toBe(0);
   });
 });

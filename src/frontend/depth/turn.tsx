@@ -125,6 +125,7 @@ export function TurnBody(props: { view: DepthSceneView; busy: boolean; onPick(me
           <ActionRows label="Model calls">
             {calls.map((c, i) => (
               <ActionRow key={i} title={c.role} subtitle={[c.connection || "your default connection", c.model, c.requestId ?? ""].filter((s) => s !== "").join(" · ")} value={[c.promptTokens !== undefined || c.completionTokens !== undefined ? `${tokensText((c.promptTokens ?? 0) + (c.completionTokens ?? 0))} tokens` : "", c.ms !== undefined ? durationText(c.ms) : ""].filter((s) => s !== "").join(" · ")} {...(c.misread ? { tone: "warn" as const } : {})}>
+                {c.history ? <p class="lre-small lre-muted" data-lre-depth-call-history={c.history.count}>{c.history.count === 0 ? "No chat messages" : c.history.count === 1 ? `Message #${c.history.first} (1)` : `Messages #${c.history.first}–#${c.history.last} (${c.history.count})`}</p> : null}
                 {c.capped ? <p class="lre-small lre-muted">{`Its answer room of ${tokensText(c.capped.asked)} tokens was over what the model takes, so it was asked again at ${tokensText(c.capped.limit)}.`}</p> : null}
                 {c.misread ? <MisreadFields fields={c.misread.fields} count={c.misread.count} raw={c.misread.raw} /> : null}
                 {c.reasoning ? <Disclosure summary="Its reasoning">{c.reasoning}</Disclosure> : null}
@@ -205,8 +206,8 @@ export function TurnView(props: { section: GmSectionProps }) {
   );
 }
 
-/** The chat's last dry run on the loopback: the narrator's prompt LumiRPEngine would send, each message in order. */
-function DryRunPanel(props: { dryRun: NonNullable<DepthResult["dryRun"]> }) {
+/** The chat's last dry run on the loopback: the narrator's prompt LumiRPEngine would send, each message in order. GM → Depth → Turn and GM → This chat → Inspector show it. */
+export function DryRunPanel(props: { dryRun: NonNullable<DepthResult["dryRun"]> }) {
   const { dryRun } = props;
   return (
     <details class="lre-depth-dry-run">

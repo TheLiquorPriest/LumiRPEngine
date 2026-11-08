@@ -17,7 +17,8 @@
 // drops or re-dates that one first.
 
 import { MIND_FILE_NAMES, mindDir, mindedAt, mindV2At, povOf } from "../../../shared/character-engine";
-import { draftEvent, draftId, episodeId, STORY_DRAFT, type DraftData, type DraftTouch, type EpisodePart, type StoryEpisode } from "../../../shared/episodes";
+import { draftEvent, draftId, draftTexts, episodeId, STORY_DRAFT, type DraftData, type DraftTouch, type EpisodePart, type StoryEpisode } from "../../../shared/episodes";
+import { blobHash } from "../../../shared/stores";
 import { spendEvent } from "../../../shared/author";
 import { DEPTH_TREATMENT_DEFS } from "../../../shared/depth-settings";
 import { hashParts } from "../../../shared/hash";
@@ -65,10 +66,6 @@ export interface OffscreenPlugs {
 
 export const OFFSCREEN_PLUGS: OffscreenPlugs = { play, sceneSoFar, actBeatTexts, resolveAttempt };
 
-/** The author's steps an episode takes at most while someone plays it live: a bound on its length, never a judgment of it. */
-export const EPISODE_STEPS_MOST = 8;
-/** The story's newest beats the author reads beside an episode (a prompt's bound). */
-const RECENT_BEATS = 40;
 
 export interface DraftOut {
   draft: DraftData | null;
@@ -207,8 +204,8 @@ export async function draftEpisode(rt: OffscreenRt, chatId: ChatId, userId: User
       played.push({ who, files: shown });
     }
   }
-  // The latest beats as the story tells them: a settled draft's backdated beats read in their place, not where they landed.
-  const recent = (await beatTexts(rt, userId, inStoryOrder(story.beats).slice(-RECENT_BEATS).map((p) => p.beat))).map((beat, i) => ({ ref: `r${i + 1}`, beat }));
+  // The latest beats as the story tells them, at most Settings → Depth's `reads.episodeBeats` (a prompt's bound): a settled draft's backdated beats read in their place, not where they landed.
+  const recent = (await beatTexts(rt, userId, inStoryOrder(story.beats).slice(-settings.depth.reads.episodeBeats).map((p) => p.beat))).map((beat, i) => ({ ref: `r${i + 1}`, beat }));
   const view: EpisodeView = { episode, live, played, recent };
   const notebook = await readNotebook(rt, userId, state);
 
@@ -226,7 +223,7 @@ export async function draftEpisode(rt: OffscreenRt, chatId: ChatId, userId: User
   const resolve = async (beat: BeatText, attempt: string, mark: number): Promise<void> => {
     const actor = beat.beat.actors[0];
     if (actor === undefined) return;
-    const r = await plugs.resolveAttempt(model, { registry: rt.registry, world, state: book.state, act: { actor, surface: beat.surface, ...(beat.quotes ? { quotes: beat.quotes } : {}), attempt }, seed: hashParts(id, "attempt", beat.beat.id), runSeed, scene: book.beats.map((b) => beatLine(world, book.state, b)), texts, ...signal });
+    const r = await plugs.resolveAttempt(model, { registry: rt.registry, quoteBounds: settings.depth.reads, world, state: book.state, act: { actor, surface: beat.surface, ...(beat.quotes ? { quotes: beat.quotes } : {}), attempt }, seed: hashParts(id, "attempt", beat.beat.id), runSeed, scene: book.beats.map((b) => beatLine(world, book.state, b)), texts, ...signal });
     if (r.reasoning) reasoning.push(`The GM: ${r.reasoning}`);
     const was = structuredClone({ entities: book.state.entities });
     effects.push(...book.apply(r.events, mark));
@@ -255,7 +252,8 @@ export async function draftEpisode(rt: OffscreenRt, chatId: ChatId, userId: User
   const opened = await twice(() => episodeOpen(ctx), o.signal);
   await authored(opened, 0);
   let next = opened.end === null ? opened.next : [];
-  for (let step = 1; next.length > 0 && step <= EPISODE_STEPS_MOST && !o.signal?.aborted; step++) {
+  const stepsMost = settings.depth.episodeSteps;
+  for (let step = 1; next.length > 0 && step <= stepsMost && !o.signal?.aborted; step++) {
     const read: SceneRead = { world, state: book.state, story, beats: book.beats.map((b) => b.beat) };
     const decided: { id: string; draft: DraftBeat; attempt?: string }[] = [];
     for (const who of next) {
@@ -265,7 +263,7 @@ export async function draftEpisode(rt: OffscreenRt, chatId: ChatId, userId: User
       try {
         const mind = await mindInput({ registry: rt.registry, blobs: book.reader }, userId, { state: book.state, world, story }, who, settings);
         shown = shownFiles(mind);
-        const so = await plugs.sceneSoFar(book.reader, userId, read, who);
+        const so = await plugs.sceneSoFar(book.reader, userId, read, who, { limit: settings.depth.reached });
         out = await plugs.play(model, { ...mind, beat: beatIdOf, scene: so.scene, reached: so.reached, ...signal });
       } catch (error) {
         if (!(error instanceof DepthAnswerError) || o.signal?.aborted) throw error;
@@ -284,7 +282,7 @@ export async function draftEpisode(rt: OffscreenRt, chatId: ChatId, userId: User
     }
     let answer: EpisodeAnswer | null = null;
     try {
-      const so = { staging: [...book.staging.values()], beats: book.beats.map((b, i) => ({ ref: `t${i + 1}`, beat: b })), decided: decided.map((d) => d.draft), left: EPISODE_STEPS_MOST - step };
+      const so = { staging: [...book.staging.values()], beats: book.beats.map((b, i) => ({ ref: `t${i + 1}`, beat: b })), decided: decided.map((d) => d.draft), left: stepsMost - step };
       answer = await twice(() => episodeStep({ ...ctx, state: book.state, so }), o.signal);
     } catch (error) {
       if (!(error instanceof DepthAnswerError) || o.signal?.aborted) throw error;
@@ -301,7 +299,7 @@ export async function draftEpisode(rt: OffscreenRt, chatId: ChatId, userId: User
     if (!answer) break;
     await authored(answer, step, last);
     next = answer.end === null ? answer.next : [];
-    if (next.length > 0 && step === EPISODE_STEPS_MOST) said.push(`The episode reached its ${EPISODE_STEPS_MOST} steps and ends there`);
+    if (next.length > 0 && step === stepsMost) said.push(`The episode reached its ${stepsMost} steps and ends there`);
   }
   if (o.signal?.aborted) return { draft: null, landed: null, said: [...said, "stopped before it was drafted"] };
   if (book.beats.length === 0) return { draft: null, landed: null, said: [...said, "the author wrote nothing of it, so nothing was drafted"] };
@@ -326,7 +324,9 @@ export async function draftEpisode(rt: OffscreenRt, chatId: ChatId, userId: User
   // What drafting it cost rides in its entry, counted at its treatment (its leading part's) in the story interval of its own time.
   const spend = spendData(meter.spent(), { treatment: leadingTreatment(episode.parts), interval: settings.depth.budget.interval, at: draft.at, for: id });
   const events = [draftEvent(draft), ...(spend ? [spendEvent(spend)] : [])];
-  const landed = await landEntry(rt, chatId, userId, { id: layerEntryId(STORY_DRAFT, chatId, id, basis.message, basis.swipe), basis, kind: STORY_DRAFT, events, by: { role: "author" } }, book.blobs, thinking);
+  // Its words ride in blobs, put before its entry lands (a swipe drafting the same words shares them).
+  const draftTextBlobs = Object.fromEntries(draftTexts(draft).map((t) => [blobHash(t), t]));
+  const landed = await landEntry(rt, chatId, userId, { id: layerEntryId(STORY_DRAFT, chatId, id, basis.message, basis.swipe), basis, kind: STORY_DRAFT, events, by: { role: "author" } }, { ...book.blobs, ...draftTextBlobs }, thinking);
   return { draft, landed, said };
 }
 

@@ -17,9 +17,9 @@
 
 import { mindedAt, povOf } from "../../../shared/character-engine";
 import { dropEvent, draftEvent, pinsOf, redatedDraft, settleEvent, STORY_SETTLE, AUTHOR_DROP, type DraftData } from "../../../shared/episodes";
-import { AUTHOR_SPEND, spendEvent } from "../../../shared/author";
+import { AUTHOR_SPEND, AUTHOR_VERDICT, spendEvent, verdictEvent } from "../../../shared/author";
 import { hashParts } from "../../../shared/hash";
-import type { ChatId, EntityId, UserId } from "../../../shared/ids";
+import type { ChatId, EntityId, MessageId, UserId } from "../../../shared/ids";
 import type { Basis, LandResult } from "../../../shared/layer";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { PromptTexts } from "../../../shared/prompts";
@@ -30,17 +30,21 @@ import { layerEntryId } from "../../../engine/ledger/layer";
 import type { Registry } from "../../../engine/registry-impl";
 import type { WorldState } from "../../../engine/state";
 import { catchUpNow, portFor } from "../../character-engine";
+import type { ArchiveIndex } from "../../archive-index";
+import { archiveTools, type ArchiveSource } from "../archive-tools";
 import { beatLine, beatTexts, putText, twice, type BeatText, type Blobs } from "../common";
 import { readNotebook, type NotebookRead } from "../notebook";
 import type { ModelPort } from "../port";
 import { linkTruths } from "../truth-link";
 import { SceneBook } from "../scene/book";
 import { leadingTreatment, metered, spendData, spentSince } from "../spend";
-import { DRAFT_TYPES, draftsOn } from "./drafts";
-import { settleRead, type SettleAnswer } from "./author";
+import { DRAFT_TYPES, draftsOn, draftWithTexts } from "./drafts";
+import { settlePage, settleRead, type PageVerdict, type SettleAnswer } from "./author";
+import { readPaged } from "../paging";
 import { landEntry, OFFSCREEN_PLUGS, type OffscreenPlugs, type OffscreenRt } from "./episode";
+import type { QuoteBounds } from "../scene/resolve";
 
-/** The pins a settlement reads in one call at most: past it the draft waits, said, for the author to drop or redraft it (a prompt's bound; it never filters what a pin is). */
+/** The pins a settlement reads in one call at most where the caller gives none (every caller gives Settings → Depth's `reads.settleBeats`): past it the author reads them a page at a time, in story order, with the archive to hand (W5; a prompt's bound, never a filter on what a pin is). */
 export const PINS_MOST = 200;
 
 export interface SettleOut {
@@ -63,6 +67,10 @@ function settledExposure(exposure: readonly Exposure[], minded: ReadonlySet<Enti
 export interface DraftReadInput {
   registry: Registry;
   world: WorldDoc;
+  /** The pins one call reads at most (Settings → Depth's `reads.settleBeats`; `PINS_MOST` where none is given). */
+  pinsMost?: number;
+  /** What an attempt's quotes are held to (Settings → Depth's `reads`); the constants where none is given. */
+  quoteBounds?: QuoteBounds;
   /** The state what it comes to lands on: the fold at the job's basis, or the turn's working state. */
   state: Readonly<WorldState>;
   userId: UserId;
@@ -84,6 +92,9 @@ export interface DraftReadInput {
   why?: string;
   /** The player's scene reaches what it holds: what of the scene, in words, and the scene's minute. */
   walkOn?: { reach: readonly string[]; now: number };
+  /** The chat's archive, through the reading's basis (`upTo`): its tools for reading pins a page at a time. */
+  archive?: ArchiveSource;
+  upTo?: MessageId;
 }
 
 /** What the author's reading of a draft comes to. */
@@ -103,6 +114,8 @@ export interface DraftRead {
   /** A redraft's start, in story minutes from now. */
   redraft: { in: number } | null;
   reasoning?: string;
+  /** Its pins' page verdicts, in story order, where it read them a page at a time (W5). */
+  pages?: PageVerdict[];
   said: string[];
 }
 
@@ -122,7 +135,6 @@ export async function readDraft(input: DraftReadInput): Promise<DraftRead> {
   const refs = draft.beats.map((b, i) => ({ ref: `d${i + 1}`, beat: b }));
   const beatsRead = (await beatTexts(reader, userId, draft.beats)).map((beat, i) => ({ ref: `d${i + 1}`, beat }));
   const pinned = input.pins.filter((b) => b.at >= draft.at);
-  const pins = (await beatTexts(reader, userId, pinned)).map((beat, i) => ({ ref: `p${i + 1}`, beat }));
   const ctx = registry.context(world, state);
   const effects = draft.effects.map((e) => {
     try {
@@ -131,9 +143,32 @@ export async function readDraft(input: DraftReadInput): Promise<DraftRead> {
       return e.type;
     }
   });
-  const answer = await twice(() => settleRead({ world, state, texts, pov, model, ...signal, notebook: input.notebook, episode: draft.episode, summary: draft.summary, at: draft.at, beats: beatsRead, effects, pins, ...(input.walkOn ? { walkOn: input.walkOn } : {}) }), input.signal);
+  const base = { world, state, texts, pov, model, ...signal, notebook: input.notebook, episode: draft.episode, summary: draft.summary, at: draft.at, beats: beatsRead, effects, ...(input.walkOn ? { walkOn: input.walkOn } : {}) };
+  // Past one reading's bound, its pins are read a page at a time in story order, the archive to hand, each page's verdict going on to the next (W5); the author then decides with them all.
+  const pinsMost = input.pinsMost ?? PINS_MOST;
+  const paged = pinned.length > pinsMost;
+  const ordered = paged ? [...pinned].sort((a, b) => a.at - b.at || a.order - b.order) : pinned;
+  const pins = (await beatTexts(reader, userId, ordered)).map((beat, i) => ({ ref: `p${i + 1}`, beat }));
+  let pages: PageVerdict[] | undefined;
+  if (paged) {
+    const tools = input.archive ? archiveTools({ texts, world, state, source: input.archive, ...(input.upTo ? { upTo: input.upTo } : {}) }) : [];
+    const cal = calendarOf(world);
+    pages = await readPaged(
+      pins,
+      pinsMost,
+      async (page, before) => {
+        const span = `${formatClock(cal, page.items[0]?.beat.beat.at ?? draft.at)} to ${formatClock(cal, page.items.at(-1)?.beat.beat.at ?? draft.at)}`;
+        const v = await twice(() => settlePage({ ...base, page: { index: page.index, of: page.of, span, pins: page.items }, before, tools }), input.signal);
+        said.push(...v.reads, `Page ${v.page} of ${v.of} of its pins: ${v.verdict === "holds" ? "it holds" : `it contradicts the draft: ${v.why}`}`);
+        const { reads: _, ...verdict } = v;
+        return verdict;
+      },
+      input.signal,
+    );
+  }
+  const answer = await twice(() => settleRead({ ...base, pins: pages ? [] : pins, ...(pages ? { pages } : {}) }), input.signal);
   for (const r of answer.refused) said.push(`The author: ${r}`);
-  const out = (events: LedgerEvent[], blobs: Blobs, beats: Beat[]): DraftRead => ({ verdict: answer.verdict, why: answer.why, events, blobs, beats, redraft: answer.verdict === "redraft" ? answer.redraft : null, ...(answer.reasoning ? { reasoning: answer.reasoning } : {}), said });
+  const out = (events: LedgerEvent[], blobs: Blobs, beats: Beat[]): DraftRead => ({ verdict: answer.verdict, why: answer.why, events, blobs, beats, redraft: answer.verdict === "redraft" ? answer.redraft : null, ...(answer.reasoning ? { reasoning: answer.reasoning } : {}), ...(pages ? { pages } : {}), said });
 
   if (answer.verdict === "drop" || answer.verdict === "redraft") {
     const why = answer.verdict === "redraft" ? `Redrafted for later: ${answer.why}` : answer.why;
@@ -180,7 +215,7 @@ export async function readDraft(input: DraftReadInput): Promise<DraftRead> {
   });
   const outcomes: BeatText[] = [];
   for (const [i, a] of answer.attempts.entries()) {
-    const r = await plugs.resolveAttempt(model, { registry, world, state: book.state, act: { actor: a.who, surface: a.attempt, attempt: a.attempt }, seed: hashParts(draft.id, "settle", input.seed, String(i)), runSeed: input.runSeed, scene: pins.map((p) => beatLine(world, state, p.beat)), texts, ...signal });
+    const r = await plugs.resolveAttempt(model, { registry, ...(input.quoteBounds ? { quoteBounds: input.quoteBounds } : {}), world, state: book.state, act: { actor: a.who, surface: a.attempt, attempt: a.attempt }, seed: hashParts(draft.id, "settle", input.seed, String(i)), runSeed: input.runSeed, scene: pins.slice(-pinsMost).map((p) => beatLine(world, state, p.beat)), texts, ...signal });
     kept.push(...book.apply(r.events, 0));
     if (!r.outcome) continue;
     const b = await book.write({ ref: `a${i + 1}`, decided: "gm", actors: [], act: "happened", what: r.outcome.what, surface: r.outcome.surface, ...(r.outcome.quotes ? { quotes: r.outcome.quotes } : {}), about: r.outcome.about, exposure: [{ who: a.who, channel: "sight", reach: "whole" }] }, "gm", 0, { model, texts, ...signal });
@@ -202,7 +237,7 @@ export async function readDraft(input: DraftReadInput): Promise<DraftRead> {
  * keyed by the draft; what those cost lands beside it). Throws only for what the caller must say (an
  * answer that can't be read twice).
  */
-export async function settleDraft(rt: OffscreenRt, chatId: ChatId, userId: UserId, id: string, o: { basis?: Basis; why?: string; model?: ModelPort; signal?: AbortSignal; plugs?: OffscreenPlugs } = {}): Promise<SettleOut> {
+export async function settleDraft(rt: OffscreenRt & { readonly archive?: Pick<ArchiveIndex, "search" | "quote"> }, chatId: ChatId, userId: UserId, id: string, o: { basis?: Basis; why?: string; model?: ModelPort; signal?: AbortSignal; plugs?: OffscreenPlugs } = {}): Promise<SettleOut> {
   const out: SettleOut = { verdict: null, landed: null, redraft: null, caughtUp: [], said: [] };
   const signal = o.signal ? { signal: o.signal } : {};
   const basis = o.basis ?? (await rt.ledger.basisFor(chatId, userId));
@@ -211,15 +246,17 @@ export async function settleDraft(rt: OffscreenRt, chatId: ChatId, userId: UserI
   const found = draftsOn(at.events).find((d) => d.draft.id === id);
   if (!found) return { ...out, said: [`there is no draft ${id} on this chain`] };
   if (found.state !== "open") return { ...out, said: [`the draft is already ${found.state} here`] };
-  const draft: DraftData = found.draft;
+  const draft: DraftData = await draftWithTexts(rt.blobs, userId, found.draft);
   const { world, state, story } = at;
   const settings = await rt.settings.get(userId);
   const pinned = story.beats.filter((p) => p.beat.at >= draft.at);
-  if (pinned.length > PINS_MOST) return { ...out, said: [`${pinned.length} beats have come since its story time, more than a settlement reads at once (${PINS_MOST}): drop it, or redraft it for later`] };
   const meter = metered(o.model ?? portFor(rt, userId));
   const runSeed = (await rt.ledger.core(chatId, userId))?.journal.run?.runSeed ?? chatId;
+  const archive = rt.archive;
   const read = await readDraft({
     registry: rt.registry,
+    pinsMost: settings.depth.reads.settleBeats,
+    quoteBounds: settings.depth.reads,
     world,
     state,
     userId,
@@ -234,10 +271,17 @@ export async function settleDraft(rt: OffscreenRt, chatId: ChatId, userId: UserI
     runSeed,
     seed: hashParts(basis.message, basis.swipe),
     ...(o.why ? { why: o.why } : {}),
+    // The chat's archive, through the basis it reads at, for a reading paged past its pins' bound (W5).
+    ...(archive ? { archive: { search: (q) => archive.search(chatId, userId, { ...q, upTo: basis.message }), quote: (r) => archive.quote(chatId, userId, r) } satisfies ArchiveSource, upTo: basis.message } : {}),
   });
   out.verdict = read.verdict;
   out.said.push(...read.said);
   out.redraft = read.redraft;
+  // The author's verdict on its pins lands as its record at the chain it read, so a branch from there reads the verdicts it inherited: each page's, or, read at once, the reading's own as page 1 of 1.
+  const cal = calendarOf(world);
+  const span = `${formatClock(cal, pinned[0]?.beat.at ?? draft.at)} to ${formatClock(cal, pinned.at(-1)?.beat.at ?? draft.at)}`;
+  const verdicts = read.pages && read.pages.length > 0 ? read.pages.map((p) => verdictEvent({ draft: id, page: p.page, of: p.of, span: p.span, verdict: p.verdict, why: p.why, forces: p.forces })) : [verdictEvent({ draft: id, page: 1, of: 1, span, verdict: read.verdict, why: read.why, forces: [] })];
+  await landEntry(rt, chatId, userId, { id: layerEntryId(AUTHOR_VERDICT, chatId, id, basis.message, basis.swipe), basis, kind: AUTHOR_VERDICT, events: verdicts, by: { role: "author" } }, {});
   if (read.events.length === 0) return out;
   // What reading it cost rides in its entry: the story interval it counts in is the draft's own.
   const spending = { treatment: leadingTreatment(draft.episode.parts), interval: settings.depth.budget.interval, at: draft.at, for: id } as const;

@@ -14,21 +14,23 @@
 // play someone else (D-10): from that message on, that person is the player character, with no
 // agent. Its answer is read through the shared `Reading`, so whatever of it isn't kept as written is
 // told to the call's keeper. Its answer room is the bootstrap port's (`BootstrapRun.metered`). It
-// never runs in a depth turn.
+// asks at low effort, and points a beat's quotes at the chat rather than copying them out
+// (`quoteSpan`), so they are the message's own words, with their spans on the beat. It never runs
+// in a depth turn.
 
 import type { EntityId, MessageId, PlaceId } from "../../shared/ids";
 import type { PackEvent } from "../../shared/ledger";
 import type { Basis } from "../../shared/layer";
 import type { PromptTexts } from "../../shared/prompts";
 import { DEPTH_TEXT } from "../../shared/depth-prompts";
-import { addExposure, BEAT_ACTS, beatEvent, beatId, EXPOSURE_CHANNELS, EXPOSURE_REACHES, stagingEvent, type Beat, type Exposure, type Staging, type StoryRef } from "../../shared/story";
+import { addExposure, BEAT_ACTS, beatEvent, beatId, EXPOSURE_CHANNELS, EXPOSURE_REACHES, stagingEvent, type Beat, type Exposure, type QuoteSpan, type Staging, type StoryRef } from "../../shared/story";
 import { povOf } from "../../shared/character-engine";
 import type { WorldDoc } from "../../shared/world";
 import { calendarOf, formatClock } from "../../engine/calendar";
 import { own } from "../../engine/pack-kit";
 import { placeOfEntity } from "../../engine/scope";
 import type { WorldState } from "../../engine/state";
-import { askRole, bareId, beatLine, named, nameKey, personNamed, putText, sameName, type BeatText, type Blobs, type StageCost, type StagingText } from "./common";
+import { askRole, bareId, beatLine, named, nameKey, personNamed, putText, sameName, type BeatText, type Blobs, type Reading, type StageCost, type StagingText } from "./common";
 import type { ModelPort } from "./port";
 
 /** One message of the stretch, as the bootstrap's spool holds it. */
@@ -129,6 +131,59 @@ export function historianEvents(beats: readonly BeatText[], staging: readonly St
   return out;
 }
 
+/** A pattern for words as the prose has them: any run of space between them, either case, and straight or curly quotes alike. */
+function wordsPattern(words: string): RegExp | null {
+  const parts = words.trim().split(/\s+/).filter((w) => w !== "");
+  if (parts.length === 0) return null;
+  return new RegExp(parts.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/["“”]/g, '["“”]').replace(/['‘’]/g, "['‘’]")).join("\\s+"), "giu");
+}
+
+/**
+ * Where a quote is in its message's text: from the start of its first words (`from`) to the end of
+ * its last (`to`, the first match at or after them; absent, the first words are the whole quote);
+ * whole character offsets are taken as they are, within the text. Null when the text doesn't hold them.
+ */
+export function quoteSpan(text: string, from: unknown, to: unknown): [number, number] | null {
+  if (typeof from === "number" && typeof to === "number" && Number.isInteger(from) && Number.isInteger(to)) {
+    const kept: [number, number] = [Math.max(0, from), Math.min(text.length, to)];
+    return kept[1] > kept[0] ? kept : null;
+  }
+  const start = typeof from === "string" ? wordsPattern(from) : null;
+  const first = start?.exec(text);
+  if (!start || !first) return null;
+  if (to === undefined || to === null || (typeof to === "string" && to.trim() === "")) return [first.index, first.index + first[0].length];
+  const end = typeof to === "string" ? wordsPattern(to) : null;
+  if (!end) return null;
+  end.lastIndex = first.index;
+  const last = end.exec(text);
+  return last ? [first.index, last.index + last[0].length] : null;
+}
+
+/**
+ * A beat's quotes as the answer gives them: spans into the chat (`{message?, from, to}`, the
+ * beat's own message where none is named), each resolved to the exact words the chat holds; or,
+ * from a text of the user's own that still asks for them, the words copied. A span the chat
+ * doesn't hold is dropped, and said so.
+ */
+function quotesOf(read: Reading, field: string, v: unknown, row: HistorianRow, rows: ReadonlyMap<MessageId, HistorianRow>): { text: string; spans: QuoteSpan[] } {
+  if (typeof v === "string" || (Array.isArray(v) && v.every((x) => typeof x === "string"))) return { text: read.words(field, v), spans: [] };
+  const spans: QuoteSpan[] = [];
+  const said: string[] = [];
+  for (const [i, raw] of read.list(field, v).entries()) {
+    const q = read.record(`${field}[${i}]`, raw);
+    if (!q) continue;
+    const at = typeof q.message === "string" ? (rows.get(bareId(q.message)) ?? null) : row;
+    const span = at ? quoteSpan(at.text, q.from, q.to) : null;
+    if (!at || !span) {
+      read.drop(`${field}[${i}]`, q, at ? "its words aren't in its message" : "it names no message of the stretch");
+      continue;
+    }
+    spans.push({ message: at.id, from: span[0], to: span[1] });
+    said.push(at.text.slice(span[0], span[1]));
+  }
+  return { text: said.join("\n"), spans };
+}
+
 /** Reads a stretch of the history into beats with exposure, staging at its end, the people and places it met for the first time, and the player's switches of character. */
 export async function historian(input: HistorianInput, model: ModelPort): Promise<HistorianResult> {
   const { world, state } = input;
@@ -136,7 +191,8 @@ export async function historian(input: HistorianInput, model: ModelPort): Promis
   // The places a beat may happen at: the world's, then those the run made from earlier stretches that the fold doesn't hold yet.
   const placesListed = [...Object.values(world.places).map((p) => ({ id: p.id, name: p.name })), ...(input.places ?? []).filter((p) => !own(world.places, p.id))];
   const asking = { world, state, texts: input.texts, data: historianData(input, pcStart, placesListed), pov: pcStart, ...(input.signal ? { signal: input.signal } : {}) };
-  const asked = await askRole(model, "historian", DEPTH_TEXT.historian, asking);
+  // Extraction is reading, not invention: it asks at low effort over the role's own.
+  const asked = await askRole((role, messages, opts) => model(role, messages, { ...opts, effort: "low" }), "historian", DEPTH_TEXT.historian, asking);
   const { answer: a, read } = asked;
   const usage = asked.usage;
   const blobs: Blobs = {};
@@ -300,8 +356,8 @@ export async function historian(input: HistorianInput, model: ModelPort): Promis
     const n = perMessage.get(row.id) ?? 0;
     perMessage.set(row.id, n + 1);
     const span = spanOf(`${g}.span`, b.span, row.text.length);
-    const said = read.words(`${g}.quotes`, b.quotes);
-    const quotes = said !== "" ? said : undefined;
+    const spoken = quotesOf(read, `${g}.quotes`, b.quotes, row, rows);
+    const quotes = spoken.text !== "" ? spoken.text : undefined;
     const sensed = read.text(`${g}.surface`, b.surface);
     const surface = sensed !== "" ? sensed : (quotes ?? "");
     if (surface === "") doubts.push("Nothing was said of what there was to sense.");
@@ -349,7 +405,7 @@ export async function historian(input: HistorianInput, model: ModelPort): Promis
       ...(quotes !== undefined ? { quotes: putText(blobs, quotes) } : {}),
       ...(addressed.length > 0 ? { addressed } : {}),
       exposure,
-      by: { bootstrap: { message: row.id, swipe: row.basis.swipe, ...(span ? { span } : {}) } },
+      by: { bootstrap: { message: row.id, swipe: row.basis.swipe, ...(span ? { span } : {}), ...(spoken.spans.length > 0 ? { quotes: spoken.spans } : {}) } },
       ...(doubts.length > 0 ? { uncertain: putText(blobs, doubts.join(" ")) } : {}),
     };
     beats.push({ beat, what, surface, ...(quotes !== undefined ? { quotes } : {}) });

@@ -116,6 +116,47 @@ test("up names the account by its username, not the register reply's user id", a
   expect(m.words()).not.toContain(USER_ID);
 });
 
+/** The host's connections and settings routes over `m`'s fake: the user's profiles (`profiles`), what was posted, and the Edit-and-Send setting. */
+function withConnections(m: { io: CliIO }, profiles: unknown[], preferActive: boolean | null) {
+  const posted: unknown[] = [];
+  const http = m.io.http;
+  m.io.http = (req) => {
+    const reply = (status: number, body: unknown): Promise<HttpReply> => Promise.resolve({ status, header: () => null, text: JSON.stringify(body) });
+    if (req.url.endsWith("/api/v1/connections?limit=200") && req.method === "GET") return reply(200, { data: profiles, total: profiles.length, limit: 200, offset: 0 });
+    if (req.url.endsWith("/api/v1/connections") && req.method === "POST") {
+      const body = JSON.parse(req.body ?? "{}") as Record<string, unknown>;
+      posted.push(body);
+      return reply(201, { id: "conn-9", ...body });
+    }
+    if (req.url.endsWith("/api/v1/settings/quickToolbarSettings")) return preferActive === null ? reply(404, { error: "Not found" }) : reply(200, { key: "quickToolbarSettings", value: { editAndSendAlwaysUseActiveConnection: preferActive } });
+    return http(req);
+  };
+  return posted;
+}
+
+test("up adds the loopback's Custom connection with the user's own session where they have none, without a key, and warns where Edit and Send prefers the active connection (L14, B1)", async () => {
+  const m = machine({ uid: 1000, bun: "/home/u/.bun/bin/bun", self: "/srv/lre/dist/lumirpengine.js", owners: { "/home/u/.bun/bin/bun": 1000, "/srv/lre/dist/lumirpengine.js": 1000 } });
+  const posted = withConnections(m, [{ id: "c1", name: "OpenRouter", provider: "openrouter", api_url: "", model: "x" }], true);
+  expect(await up(m.io, m.fake.base)).toBe(0);
+  expect(posted).toHaveLength(1);
+  expect(posted[0]).toMatchObject({ name: "LumiRPEngine loopback", provider: "custom", model: "lre-narrator" });
+  expect(String((posted[0] as Record<string, unknown>).api_url)).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/v1$/);
+  expect(posted[0]).not.toHaveProperty("api_key");
+  expect(m.words()).toContain(`Added the connection "LumiRPEngine loopback" to Lumiverse`);
+  expect(m.err.join("\n")).toContain(`"always use the active connection" on for Edit and Send`);
+});
+
+test("up adds no connection where the user has the loopback's already, and says nothing of Edit and Send where the setting is off or unset (L14, B1)", async () => {
+  for (const preferActive of [false, null]) {
+    const m = machine({ uid: 1000, bun: "/home/u/.bun/bin/bun", self: "/srv/lre/dist/lumirpengine.js", owners: { "/home/u/.bun/bin/bun": 1000, "/srv/lre/dist/lumirpengine.js": 1000 } });
+    const posted = withConnections(m, [{ id: "c2", name: "My loopback", provider: "custom", api_url: "http://127.0.0.1:1/v1", model: "lre-narrator" }], preferActive);
+    expect(await up(m.io, m.fake.base)).toBe(0);
+    expect(posted).toHaveLength(0);
+    expect(m.words()).toContain(`Your connection "My loopback" is the loopback`);
+    expect(m.words()).not.toContain("always use the active connection");
+  }
+});
+
 test("up run again waits for the running relay's calls under way before restarting it", async () => {
   const m = machine({ uid: 1000, bun: "/home/u/.bun/bin/bun", self: "/srv/lre/dist/lumirpengine.js", owners: { "/home/u/.bun/bin/bun": 1000, "/srv/lre/dist/lumirpengine.js": 1000 } });
   expect(await up(m.io, m.fake.base)).toBe(0);

@@ -11,7 +11,7 @@
 
 import { calendarOf, clockOfPhrase, clockOfStamp, formatClock } from "../engine/calendar";
 import { own } from "../engine/pack-kit";
-import type { ArchiveQuery } from "../shared/archive";
+import { reachedOf, type ArchiveQuery } from "../shared/archive";
 import type { DepthArchiveQuery, DepthArchiveResult, DepthResult } from "../shared/depth-views";
 import type { ChatId, EntityId, UserId } from "../shared/ids";
 import type { LandResult } from "../shared/layer";
@@ -23,6 +23,7 @@ import type { WorldState } from "../engine/state";
 import { catchUpNow, interviewMind, MindRefused, mindEdit, mindsView, mindView, PLAY_AS_OFF, portFor, reflectNow } from "./character-engine";
 import { notebookEditOps, notebookView } from "./depth/notebook";
 import { beliefLinks, linkTruths } from "./depth/truth-link";
+import { chatArchive } from "./depth/archive-tools";
 import { DraftRefused, draftsView, dropDraft, notePress, redraft, settleNow } from "./depth/drafts-view";
 import { chatNumbers } from "./depth/chat-numbers";
 import { sceneView } from "./depth/scene/scene-view";
@@ -91,7 +92,7 @@ async function archive(rt: Runtime, host: DepthHost, chatId: ChatId, userId: Use
   // Each hit by the number the chat shows it with (`chatNumbers`), else its place on the chain.
   const numbers = await chatNumbers(rt.host, chatId, userId);
   return {
-    hits: found.hits.map((h) => ({ messageId: h.messageId, index: numbers.get(h.messageId) ?? h.index, isUser: h.isUser, swipeId: h.swipeId, at: h.storyTime === null ? null : formatClock(cal, h.storyTime), places: h.places.map(nameOf), people: h.people.map(nameOf), snippet: h.snippet, beats: h.beats.length })),
+    hits: found.hits.map((h) => ({ messageId: h.messageId, index: numbers.get(h.messageId) ?? h.index, isUser: h.isUser, swipeId: h.swipeId, at: h.storyTime === null ? null : formatClock(cal, h.storyTime), places: h.places.map(nameOf), people: h.people.map(nameOf), reached: reachedOf(h.exposure, nameOf), snippet: h.snippet, beats: h.beats.length })),
     next: found.hits.length > 0 && seen < found.total ? seen : null,
     unread,
   };
@@ -109,7 +110,7 @@ async function linkWrote(rt: Runtime, chatId: ChatId, userId: UserId, who: Entit
   const entry = landed.flatMap((l) => (l.status === "landed" && l.existing !== true && l.entry.events.some((e) => mindWriteEvent(e)?.path === beliefs) ? [l.entry] : [])).at(-1);
   if (!entry) return;
   try {
-    const r = await linkTruths(rt, chatId, userId, entry.basis, { who: [who], beats: [], key: ["gm", press, who], model: portFor(rt, userId) });
+    const r = await linkTruths(rt, chatId, userId, entry.basis, { who: [who], beats: [], key: ["gm", press, who], model: portFor(rt, userId), archive: chatArchive(rt, chatId, userId, entry.basis.message) });
     for (const line of r.refused) rt.host.log("info", `[LumiRPEngine] chat ${chatId}, the GM's truth-link of ${who}'s ${press}: ${line}`, userId);
   } catch (error) {
     rt.host.log("warn", `[LumiRPEngine] chat ${chatId}, the GM's truth-link of ${who}'s ${press} didn't go through: ${error instanceof Error ? error.message : String(error)}`, userId);
@@ -164,6 +165,9 @@ export async function depthRequest(rt: Runtime, host: DepthHost, r: DepthRequest
         return { archive: await archive(rt, host, chatId, userId, r) };
       case "scene":
         return { scene: await sceneView(rt, await host.head(chatId, userId), chatId, userId, r.message), dryRun: rt.loopback.dryRunOf(chatId, userId) };
+      // The Inspector's: any world chat's last dry run, on depth or not; a chat off depth has no Turn view to show it.
+      case "dry_run":
+        return { dryRun: rt.loopback.dryRunOf(chatId, userId) };
       case "drafts":
         return { drafts: await draftsView(rt, chatId, userId) };
       case "draft_drop": {
@@ -174,20 +178,16 @@ export async function depthRequest(rt: Runtime, host: DepthHost, r: DepthRequest
       case "draft_redraft": {
         // The author's reading (and a redraft's episode) can run for minutes: it goes on in the background, and what became of it is kept for the draft's page, which the view reads again once it lands.
         const op = r.op === "draft_settle" ? "settle" : "redraft";
-        const doing = op === "settle" ? "The author is reading it against everything since its time" : "The author is drafting it again";
-        notePress(chatId, userId, r.draft, { op, state: "running", lines: [`${doing}.`] });
-        const job = op === "settle" ? settleNow(rt, chatId, userId, r.draft) : redraft(rt, chatId, userId, r.draft);
+        // A Re-draft with text is the player's edit of the draft (M-16): his words a directive the author drafts it again from.
+        const edit = r.op === "draft_redraft" && typeof r.text === "string" && r.text.trim() !== "" ? r.text.trim() : undefined;
+        const doing = op === "settle" ? "The author is reading it against everything since its time" : edit ? "The author is drafting it again from your edit" : "The author is drafting it again";
+        const running = notePress(rt.host, chatId, userId, r.draft, { op, state: "running", lines: [`${doing}.`] });
+        const job = op === "settle" ? settleNow(rt, chatId, userId, r.draft) : redraft(rt, chatId, userId, r.draft, edit);
         void job
-          .then((lines) => {
-            for (const line of lines) rt.host.log("info", `[LumiRPEngine] chat ${chatId}, draft ${r.draft}: ${line}`, userId);
-            notePress(chatId, userId, r.draft, { op, state: "done", lines: lines.length > 0 ? lines : ["Nothing changed: the author left it as it was."] });
-          })
-          .catch((error: unknown) => {
-            const why = error instanceof Error ? error.message : String(error);
-            rt.host.log("warn", `[LumiRPEngine] chat ${chatId}, draft ${r.draft}: ${why}`, userId);
-            notePress(chatId, userId, r.draft, { op, state: "failed", lines: [why] });
-          })
+          .then((lines) => notePress(rt.host, chatId, userId, r.draft, { op, state: "done", lines: lines.length > 0 ? lines : ["Nothing changed: the author left it as it was."] }))
+          .catch((error: unknown) => notePress(rt.host, chatId, userId, r.draft, { op, state: "failed", lines: [error instanceof Error ? error.message : String(error)] }))
           .finally(() => rt.push.changed(chatId, userId));
+        await running;
         return { said: [`${doing}; its page in GM → Depth → Drafts shows what became of it.`] };
       }
       case "treatments":

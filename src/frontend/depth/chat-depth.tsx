@@ -16,6 +16,7 @@ import { useApp } from "../app";
 import { Badge, Banner, Button, Empty, NumberStepper, Section, Seg, useBusy } from "../components";
 import { gmOpen } from "../gm/nav";
 import { CapControl, capText, EstimateView, EXPORT_NOTE, startCap, STATUS_LABEL, useBootstrap } from "./bootstrap";
+import { LumiBooksFirst, useLumiBooks } from "./lumibooks";
 
 /** The GM tab the depth views live in, and its Bootstrap tab (opened through GM mode's focus). */
 export const DEPTH_SECTION = "core.depth";
@@ -36,6 +37,8 @@ export interface DepthChatControls {
   onHistory(cut: HistoryCut): void;
   /** Sets the chat's own allowances (Allowances), over yours in Settings → Depth → Budget; none set goes back to yours. */
   onAllowances?(allowances: Partial<Record<DepthTreatment, DepthLimit>>): void;
+  /** Sets how this chat's narrator takes the preset (Your preset), over yours in Settings → Depth; null goes back to yours. */
+  onAbsorption?(absorption: "keep" | "narrator" | null): void;
 }
 
 /** History: which of the chat's messages a depth turn's request carries; the rest stay out of it, and the author and the GM search and quote them on demand. */
@@ -87,8 +90,32 @@ function AllowancesSection(props: { a: NonNullable<BootstrapView["allowances"]>;
   );
 }
 
-/** GM → This chat → Depth's body, hook-free. `unready`: why the opt-in was refused (no relay Running, no key, no loopback connection), shown with Settings → Loopback. */
-export function DepthChatBody(props: { view: BootstrapView; estimate: BootstrapEstimate | null; unready?: string | null; c: DepthChatControls }) {
+/** Your preset: how this chat's narrator takes the preset, its own choice or yours. */
+function PresetSection(props: { a: NonNullable<BootstrapView["absorption"]>; c: DepthChatControls }) {
+  const { a, c } = props;
+  const set = c.onAbsorption;
+  if (!set) return null;
+  const yours = a.yours === "keep" ? "Keep it" : "LRE's only";
+  return (
+    <Section title="Your preset">
+      <p class="lre-small lre-muted" data-lre-depth-absorption={a.own ?? "yours"}>{`How this chat's narrator takes your preset. Keep it: every block of your preset stays, the history replaced by depth's context. LRE's only: the narrator's own template. Yours, in Settings → Depth → Your preset, is ${yours}.`}</p>
+      <Seg<"yours" | "keep" | "narrator">
+        label="This chat's narrator takes"
+        value={a.own ?? "yours"}
+        disabled={c.busy}
+        options={[
+          { value: "yours", label: `Yours (${yours})` },
+          { value: "keep", label: "Keep it" },
+          { value: "narrator", label: "LRE's only" },
+        ]}
+        onChange={(v) => set(v === "yours" ? null : v)}
+      />
+    </Section>
+  );
+}
+
+/** GM → This chat → Depth's body, hook-free. `unready`: why the opt-in was refused (no relay Running, no key, no loopback connection), shown with Settings → Loopback. `book`: the chat's LumiBooks book by name, null when it has none, absent while unknown. */
+export function DepthChatBody(props: { view: BootstrapView; estimate: BootstrapEstimate | null; unready?: string | null; book?: string | null; c: DepthChatControls }) {
   const { view, c } = props;
   const estimate = props.estimate ?? view.remaining;
   if (view.optedIn) {
@@ -108,6 +135,7 @@ export function DepthChatBody(props: { view: BootstrapView; estimate: BootstrapE
         </div>
         <HistorySection cut={view.history ?? HISTORY_CUT_DEFAULT} c={c} />
         {view.allowances ? <AllowancesSection a={view.allowances} c={c} /> : null}
+        {view.absorption ? <PresetSection a={view.absorption} c={c} /> : null}
         <Section title="Turn depth off">
           <p class="lre-small lre-muted">The chat goes back to today's engine. Nothing depth wrote is deleted: turning it on again picks up where it was.</p>
           <Button variant="danger" icon="close" busy={c.busy} onClick={c.onOptOut}>
@@ -126,6 +154,7 @@ export function DepthChatBody(props: { view: BootstrapView; estimate: BootstrapE
       <Section title="The bootstrap">
         <div class="lre-stack">
           <p class="lre-small lre-muted">It reads this chat's history once, oldest first, in the background: canon beats from the prose, each character's mind from what they lived, the author's notebook chapter by chapter, your World Info and memory entries reconciled. You review spot checks as it goes; play goes on meanwhile.</p>
+          {props.book === null ? <LumiBooksFirst /> : props.book !== undefined ? <p class="lre-small lre-muted" data-lre-lb-book>{`This chat has a LumiBooks book, ${props.book}: the bootstrap imports its entries as records with no model call, for its tree in GM → Depth → Bootstrap. The full read of the history still runs.`}</p> : null}
           {estimate ? (
             <EstimateView estimate={estimate} />
           ) : (
@@ -173,6 +202,7 @@ export function DepthChatBody(props: { view: BootstrapView; estimate: BootstrapE
 export function DepthThisChat(props: { chatId: string }) {
   const app = useApp();
   const run = useBootstrap(props.chatId);
+  const lb = useLumiBooks(props.chatId);
   const [busy, go] = useBusy();
   const [cap, setCap] = useState<BootstrapCap | "none" | null>(null);
   if (run.view === undefined) return <Empty icon="hourglass">Reading this chat's depth…</Empty>;
@@ -197,6 +227,7 @@ export function DepthThisChat(props: { chatId: string }) {
     onOpenLoopback: () => app.ui.update((ui) => ({ ...ui, mode: "settings", settings: { page: "loopback" } })),
     onHistory: (cut) => go(() => run.ask({ op: "history", cut })),
     onAllowances: (allowances) => go(() => run.ask({ op: "allowances", allowances })),
+    onAbsorption: (absorption) => go(() => run.ask({ op: "absorption", absorption })),
   };
-  return <DepthChatBody view={view} estimate={run.estimate} unready={run.unready} c={c} />;
+  return <DepthChatBody view={view} estimate={run.estimate} unready={run.unready} book={lb.tree ? lb.tree.book : undefined} c={c} />;
 }

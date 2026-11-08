@@ -27,12 +27,8 @@ import { hashParts } from "../../shared/hash";
 import { isRecord, type JsonObject } from "../../shared/json";
 import { LEDGER_NAMESPACE, type Journal } from "../../shared/ledger";
 import { DAY_MS, HOUR_MS, isBlobHash, type RetentionSettings } from "../../shared/stores";
-import { workspaceRefs } from "../../engine/workspace";
-import { storyBlobs } from "../../shared/story";
-import { mindBlobs } from "../../shared/character-engine";
-import { authorBlobs } from "../../shared/author";
-import { episodeBlobs, STORY_DRAFT } from "../../shared/episodes";
 import { layerDir } from "../layer-store";
+import { entryBlobs, eventBlobs } from "../layer-carry";
 import { agentRefs } from "../chat-agent-meta";
 import { messageOf } from "../diagnostics";
 import type { HostMessage, HostPort } from "../host";
@@ -108,30 +104,15 @@ interface Found {
   bases: Set<string>;
 }
 
-/** The blobs a stored list of events names: the workspace files it writes, the texts of its beats, staging, strikes, prose and scenes, its mind writes, the author's records' notes, and a draft's own beats and changes; anything that isn't such a list names nothing. */
+/** The blobs a stored list of events names (`eventBlobs`). */
 function eventRefs(events: unknown, into: Found): void {
-  if (!Array.isArray(events)) return;
-  for (const hash of workspaceRefs(events)) into.blobs.add(hash);
-  for (const ev of events) if (isRecord(ev) && typeof ev.type === "string" && ev.type.startsWith("story.")) for (const hash of storyBlobs(ev.type, ev.data)) into.blobs.add(hash);
-  for (const ev of events) if (isRecord(ev) && typeof ev.type === "string" && ev.type.startsWith("minds.v2.")) for (const hash of mindBlobs(ev.type, ev.data)) into.blobs.add(hash);
-  for (const ev of events) if (isRecord(ev) && typeof ev.type === "string" && ev.type.startsWith("author.")) for (const hash of authorBlobs(ev.type, ev.data)) into.blobs.add(hash);
-  // A draft holds its beats and the changes it would make as its own data (DEPTH-PLAN §4.6).
-  for (const ev of events) {
-    if (!isRecord(ev) || ev.type !== STORY_DRAFT || !isRecord(ev.data)) continue;
-    for (const hash of episodeBlobs(ev.type, ev.data)) into.blobs.add(hash);
-    eventRefs(ev.data.effects, into);
-  }
+  eventBlobs(events, into.blobs);
 }
 
 /** What a stored layer file names (DEPTH-PLAN §4.9): a segment's entries or the held drafts, each with its events and its reasoning. Lenient. */
 function layerRefs(raw: unknown, into: Found): void {
   if (!Array.isArray(raw)) return;
-  for (const item of raw) {
-    const entry = isRecord(item) && isRecord(item.draft) ? item.draft : item;
-    if (!isRecord(entry)) continue;
-    eventRefs(entry.events, into);
-    if (isBlobHash(entry.reasoning)) into.blobs.add(entry.reasoning);
-  }
+  for (const item of raw) entryBlobs(isRecord(item) && isRecord(item.draft) ? item.draft : item, into.blobs);
 }
 
 /** Whether the user's retention keeps a record's transcript, written at `at` (unknown on a record kept before it was noted), on the reply the record is on. */

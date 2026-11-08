@@ -39,6 +39,7 @@ import { entriesAbout, readImports, reconcile } from "./import";
 import { amendBeat } from "./amend";
 import type { BootstrapEnv, BootstrapKnobs, BootstrapStages, HistorianOut, Lived, Person } from "./run";
 import type { SpoolRow, SurveyMessage } from "./spool";
+import { JUMPSTART_SKIPS_COVERED, LumiBooksBootstrap } from "./lumibooks-service";
 
 /** Each stage's role in Settings → Depth (§7): the survey and the import ask no model. */
 export const STAGE_ROLE: Readonly<Record<BootstrapStage, DepthRole | null>> = { survey: null, import: null, historian: "historian", author: "author", pov: "pov", minds: "character", truthlink: "gm", reconcile: "gm" };
@@ -228,9 +229,9 @@ export function bootstrapEnv(rt: Runtime, chatId: ChatId, userId: UserId, change
           const t = stagingText(s, i.blobs);
           return { who: s.who, where: t.where, doing: t.doing, ...(t.occluded !== undefined ? { occluded: t.occluded } : {}) };
         });
-      const deed = i.beat.deed !== undefined ? i.blobs[i.beat.deed] : undefined;
-      const r = await povRender(m, { beat: { id: i.beat.id, surface: i.surface, ...(deed !== undefined ? { deed } : {}), ...(i.quotes !== undefined ? { quotes: i.quotes } : {}), actors: i.beat.actors, exposure: i.beat.exposure }, staging, who: i.who, refs: povRefs(rt, at, i.who, present), texts: await texts() });
-      return { povs: r.povs, fellBack: r.fellBack, ...(r.reasoning ? { reasoning: r.reasoning } : {}) };
+      const r = await povRender(m, { beat: { id: i.beat.id, surface: i.surface, ...(i.quotes !== undefined ? { quotes: i.quotes } : {}), actors: i.beat.actors, exposure: i.beat.exposure }, staging, who: i.who, refs: povRefs(rt, at, i.who, present), texts: await texts() });
+      // Those the render and its check left pending get no point of view here; the run asks again for them later.
+      return { povs: r.povs, fellBack: r.pending, ...(r.reasoning ? { reasoning: r.reasoning } : {}) };
     },
     async seedCore(i) {
       const at = await fold(i.basis);
@@ -337,6 +338,10 @@ export function bootstrapEnv(rt: Runtime, chatId: ChatId, userId: UserId, change
       replacing(ids) {
         replacing = ids;
       },
+    },
+    async covered() {
+      // Off until the author's jumpstart pass reads LumiBooks' records (`JUMPSTART_SKIPS_COVERED`): the run and its estimate read every message.
+      return JUMPSTART_SKIPS_COVERED ? new LumiBooksBootstrap(rt).covered(chatId, userId) : new Set<MessageId>();
     },
     async messages(): Promise<SurveyMessage[]> {
       const kept = surveysOf(rt);

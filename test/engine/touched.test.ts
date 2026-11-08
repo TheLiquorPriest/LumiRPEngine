@@ -330,6 +330,8 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "story.unrendered", data: { moments: [{ moment: 1, beats: ["b1"], through: 3 }], pov: "you", why: "the narrator's connection timed out" } },
   { type: "story.scene", data: { scene: "s1", place: "taproom", at: 0, cast: [{ who: "dev", effort: "agent", why: "He runs the bar" }] } },
   { type: "story.talk", data: { with: "dev", state: "on", by: "player" } },
+  // An imported record (LumiBooks' chapter, arc or volume) validates structurally and changes no state.
+  { type: "story.record", data: { source: "lumibooks", entry: "e1", level: "chapter", title: "The taproom", range: [0, 3], from: "m0", to: "m3", text: blobHash("Dev ran the taproom that night."), keys: ["taproom"] } },
   // An off-screen draft holds its people for its span and a settlement marks it settled (DESIGN §30.12): the story slice's, never an entity's definition. A draft's world changes are its own data.
   { type: "story.draft", data: { id: "d1", episode: { id: "e1", span: [60, 120], places: ["home"], people: ["dev"], why: "Dev closes up", parts: [{ subject: { who: "dev" }, treatment: "written", rationale: "His routine" }] }, at: 60, inputs: {}, beats: [], effects: [{ type: "set", entity: "dev", field: "place", value: "home" }], touches: [{ ref: { entity: "dev" }, from: 60 }], summary: "Dev closes up and goes home." } },
   { type: "story.settle", data: { draft: "d1", at: 60, pins: { digest: "p0", count: 0 }, why: "Nothing seen since contradicts it", beats: [] } },
@@ -341,6 +343,7 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "minds.v2.write", data: { who: "dev", path: "minds/dev/now.md", hash: blobHash("Wiping the bar, watching the door."), at: 0, mode: "play", lived: ["b1"], about: ["you"] } },
   { type: "minds.v2.lived", data: { who: "dev", beats: ["b1"], at: 0, mode: "play" } },
   { type: "minds.v2.take", data: { who: "dev", at: 0, lived: ["b1"], take: blobHash("She's back.") } },
+  { type: "minds.v2.ask", data: { who: "dev", at: 0, why: "I keep lying to Sam." } },
   { type: "minds.v2.interview", data: { who: "dev", at: 0, by: "gm", question: blobHash("What do you want?"), answer: blobHash("A quiet night."), neutral: false } },
   // The author's records (DESIGN §30.7, §30.13) change no state; a drop marks its draft dropped in the author slice.
   { type: "author.poll", data: { through: null, considered: [{ what: "Dev's evening", raised: false, why: "Nothing falls due" }], jobs: [{ kind: "catchup", who: "dev", why: "He saw the fight" }] } },
@@ -353,6 +356,7 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "author.answer", data: { ask: "e2", spend: false } },
   { type: "author.drop", data: { draft: "d2", why: "It no longer fits" } },
   { type: "author.adopt", data: { waited: [{ what: "catchup dev", message: "m1" }], without: [], entries: [] } },
+  { type: "author.verdict", data: { draft: "d2", page: 1, of: 2, span: "8:00 to 9:00", verdict: "contradicts", why: "Dev was home all evening", forces: ["Beat b1 left out"] } },
   // The player's switch of character (D-10) is the minds slice's, never an entity's definition.
   { type: "minds.v2.pov", data: { who: "dev" } },
   // Whether the chat tracks knowledge at all is the slice's own switch.

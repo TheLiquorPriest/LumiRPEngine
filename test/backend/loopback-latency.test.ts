@@ -95,6 +95,27 @@ describe("a dry run in GM → Depth → Turn", () => {
   });
 });
 
+describe("a dry run in GM → This chat → Inspector", () => {
+  test("a world chat off depth: the Inspector's read carries the narrator's prompt its last dry run would send, and nothing before one", async () => {
+    const { rig, chatId, input } = await setup(7875);
+    expect(rig.body(await rig.send({ type: "lre.depth", chatId, op: "dry_run" })).dryRun).toBeNull();
+    await rig.rt.loopback.tag(input({ dryRun: true }));
+    const dryRun = rig.body(await rig.send({ type: "lre.depth", chatId, op: "dry_run" })).dryRun as { at: number; messages: { role: string; content: string }[] } | null;
+    expect(typeof dryRun?.at).toBe("number");
+    expect(dryRun?.messages.map((m) => [m.role, m.content])).toEqual([
+      ["system", "You are the narrator of this story."],
+      ["user", "I walk into the shop."],
+    ]);
+  });
+
+  test("an Impersonate's dry run keeps the prompt its narrator would write the player's next message from: the body as given", async () => {
+    const { rig, chatId, input } = await setup(7876);
+    await rig.rt.loopback.tag(input({ dryRun: true, generationType: "impersonate" }));
+    const dryRun = rig.body(await rig.send({ type: "lre.depth", chatId, op: "dry_run" })).dryRun as { messages: { role: string; content: string }[] } | null;
+    expect(dryRun?.messages.map((m) => m.content)).toEqual(["You are the narrator of this story.", "I walk into the shop."]);
+  });
+});
+
 describe("a world chat's generation with no relay running", () => {
   test("puts a flag on the chat saying why, with Settings → Loopback; a running relay puts none", async () => {
     const rig = new Rig();

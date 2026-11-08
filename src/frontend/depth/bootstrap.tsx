@@ -15,6 +15,7 @@ import { useApp } from "../app";
 import { Badge, Banner, Button, Disclosure, Empty, Field, HostSwitch, Meter, NumberStepper, Section, Seg, useBusy } from "../components";
 import { ActionRow, ActionRows, GmCard } from "../gm/ui";
 import type { GmSectionProps } from "../registry";
+import { LumiBooksPanel } from "./lumibooks";
 import { MisreadFields } from "./misread";
 
 export const STAGE_LABEL: Readonly<Record<BootstrapStage, string>> = {
@@ -279,8 +280,8 @@ export interface BootstrapControls {
   onJump(messageId: MessageId): void;
 }
 
-/** Said on every depth chat's Depth and Bootstrap views: an export carries the depth layer in the chat's metadata only while it fits (`layer-carry.ts`), and the bootstrap can't rebuild what live turns made. */
-export const EXPORT_NOTE = "An export of this chat carries its depth (minds, beats, notebook) as it stood at the end of the last turn, while that fits in 1 MB compressed. Past that, an imported copy starts without it: keep the original chat.";
+/** Said on every depth chat's Depth and Bootstrap views: an export carries the depth layer and its texts in the chat's metadata up to the cap, its newest entries first (`layer-carry.ts`), and the bootstrap can't rebuild what live turns made. */
+export const EXPORT_NOTE = "An export of this chat carries its depth (minds, beats, notebook, with their texts) as it stood at the end of the last turn, up to 1 MB. Past that, it carries the newest of it that fits, and an imported copy starts without the older rest: keep the original chat.";
 
 /** GM → Depth → Bootstrap's body, hook-free. */
 export function BootstrapBody(props: { view: BootstrapView; c: BootstrapControls }) {
@@ -529,5 +530,11 @@ export function BootstrapPanel(props: { section: GmSectionProps }) {
       if (!app.host.revealMessage(messageId)) app.toast("That message isn't on screen in this chat.", "info");
     },
   };
-  return <BootstrapBody view={run.view} c={c} />;
+  // The LumiBooks tree, with its deepenings, beside the run on a chat on depth.
+  return (
+    <div class="lre-stack">
+      <BootstrapBody view={run.view} c={c} />
+      {run.view.optedIn ? <LumiBooksPanel chatId={props.section.chatId} /> : null}
+    </div>
+  );
 }

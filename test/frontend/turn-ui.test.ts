@@ -16,6 +16,8 @@ import { followReview, type ReviewBody, ReviewCard, reviewHandlers, ReviewUnread
 import type { ActivityAgent } from "../../src/shared/diagnostics";
 import type { GenerateAs, ReviewCardView, SessionView } from "../../src/shared/protocol";
 import { press, propsOf, type Props } from "../support/tree";
+import { TurnBody } from "../../src/frontend/depth/turn";
+import type { DepthSceneView } from "../../src/shared/scene-view";
 
 const CHAT = "chat-port-alder";
 
@@ -325,5 +327,23 @@ describe("the Engine page across chats", () => {
     late();
     await pending.then(() => undefined);
     expect(state).toEqual({ engine: null, failed: false });
+  });
+});
+
+describe("GM → Depth → Turn: each call's chat messages", () => {
+  test("a call row says which chat messages its request carried, or that it carried none", () => {
+    const call = { connection: "conn-1", model: "deepseek-v4-flash", requestId: null };
+    const view: DepthSceneView = {
+      reply: { messageId: "m38", swipeId: 0, index: 38, at: "" },
+      replies: [{ messageId: "m38", swipeId: 0, index: 38, at: "" }],
+      pov: null,
+      staging: [],
+      beats: [],
+      told: [],
+      takes: [],
+      provenance: { calls: [{ ...call, role: "narrator", history: { first: 28, last: 37, count: 10 } }, { ...call, role: "gm", history: { first: 0, last: 0, count: 0 } }, { ...call, role: "check" }], turnMs: 1000, firstContentMs: null },
+    };
+    const rows = propsOf(TurnBody({ view, busy: false, onPick: () => {}, onJump: () => {} }), "p").filter((p) => p["data-lre-depth-call-history"] !== undefined);
+    expect(rows.map((p) => textOf(p.children))).toEqual(["Messages #28–#37 (10)", "No chat messages"]);
   });
 });

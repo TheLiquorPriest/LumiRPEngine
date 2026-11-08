@@ -3,7 +3,7 @@
 // (§8.6), the advice about the memory systems the bootstrap replaces (D-18) and the `lre.bootstrap`
 // request's operations. Every number here is bookkeeping; every judgment the run makes is an agent's.
 
-import type { DepthLimit, DepthTreatment } from "./depth-settings";
+import type { DepthLimit, DepthSettings, DepthTreatment } from "./depth-settings";
 import type { HistoryCut } from "./depth-history";
 import type { ChatId, EntityId, MessageId } from "./ids";
 import type { Misread } from "./misread";
@@ -170,6 +170,8 @@ export interface BootstrapView {
   history?: HistoryCut;
   /** The chat's own allowances (GM → This chat → Depth → Allowances), over `yours`, the user's in Settings → Depth → Budget, per story `interval`. Absent where it wasn't read. */
   allowances?: { own: Partial<Record<DepthTreatment, DepthLimit>>; yours: Record<DepthTreatment, DepthLimit>; interval: "day" | "week" | "month" };
+  /** How the chat's narrator takes the preset (GM → This chat → Depth → Your preset): the chat's own choice (null: none, it takes `yours`), over `yours`, the user's in Settings → Depth. Absent where it wasn't read. */
+  absorption?: { own: DepthSettings["absorption"] | null; yours: DepthSettings["absorption"] };
 }
 
 /** `lre.bootstrap`'s operations; every one answers with the chat's `BootstrapView`, `estimate` with a `BootstrapEstimate` too. */
@@ -183,6 +185,64 @@ export type BootstrapOp =
   | { op: "mark"; card: string; item: string; right: boolean; note?: string }
   | { op: "redo"; chapter: number }
   | { op: "history"; cut: HistoryCut }
-  | { op: "allowances"; allowances: Partial<Record<DepthTreatment, DepthLimit>> };
+  | { op: "allowances"; allowances: Partial<Record<DepthTreatment, DepthLimit>> }
+  /** `absorption` null: the chat goes back to the user's. */
+  | { op: "absorption"; absorption: DepthSettings["absorption"] | null }
+  /** The chat's LumiBooks tree; answers with `tree`. */
+  | { op: "lb_tree" }
+  /** Each deepening below answers with `tree` and its `lbEstimate` and runs nothing; with `confirm: true` it runs. */
+  | { op: "lb_catchup"; node: string; who: EntityId[]; confirm?: boolean }
+  | { op: "lb_deep"; node: string; confirm?: boolean }
+  /** `node` absent: the whole book. */
+  | { op: "lb_fullmind"; who: EntityId; node?: string; confirm?: boolean };
+
+/** A LumiBooks book entry's place in its tree. */
+export type LbLevel = "volume" | "arc" | "chapter";
+
+/**
+ * How a node's messages stand: `covered`, every message's LumiBooks hash matches the chat; `changed`,
+ * some no longer do; `uncovered`, no entry spans them; `read`, the author read them as it reads any
+ * chat; `deep`, exact beats replaced the imported record.
+ */
+export type LbCoverage = "covered" | "changed" | "uncovered" | "read" | "deep";
+
+export interface LbNode {
+  id: string;
+  level: LbLevel;
+  title: string;
+  /** The messages it spans, by index from 0, inclusive. */
+  range: [number, number];
+  coverage: LbCoverage;
+  /** How many of its messages' hashes no longer match. */
+  changed: number;
+  /** Who has caught up on it, and whose full mind is built from it. */
+  caughtUp: EntityId[];
+  fullMind: EntityId[];
+  children: LbNode[];
+}
+
+export interface LbCast {
+  id: EntityId;
+  name: string;
+}
+
+export interface LbTree {
+  chatId: ChatId;
+  /** The book's name; null when the chat has no LumiBooks book. */
+  book: string | null;
+  nodes: LbNode[];
+  cast: LbCast[];
+  /** Message ranges no entry spans, by index from 0, inclusive. */
+  uncovered: [number, number][];
+}
+
+/** What one deepening would take, before it runs. `cost` null where no connection reports a price. */
+export interface LbActionEstimate {
+  calls: number;
+  tokens: number;
+  cost: number | null;
+  ms: number;
+  notes: string[];
+}
 
 export const BOOTSTRAP_LOG_LINES = 40;

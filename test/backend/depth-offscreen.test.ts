@@ -14,10 +14,11 @@ import type { OffscreenPlugs } from "../../src/backend/depth/offscreen/episode";
 import { effectTouches, OFFSCREEN_PLUGS } from "../../src/backend/depth/offscreen/episode";
 import { DRAFT_TYPES, draftsOn, settledChipsOn } from "../../src/backend/depth/offscreen/drafts";
 import { eventsOf } from "../../src/backend/ledger-io";
-import { offscreenJobs, withinAllowances } from "../../src/backend/depth/offscreen/jobs";
+import { offscreenJobs, rebaseCandidates, withinAllowances } from "../../src/backend/depth/offscreen/jobs";
+import { redraft } from "../../src/backend/depth/drafts-view";
 import { seedCore } from "../../src/backend/character-agent";
 import { defaultSettings } from "../../src/backend/settings-store";
-import { AUTHOR_POLL, authorData, type PollData } from "../../src/shared/author";
+import { AUTHOR_POLL, AUTHOR_VERDICT, authorData, type PollData, type VerdictData } from "../../src/shared/author";
 import { mindV2At } from "../../src/shared/character-engine";
 import type { DepthRole } from "../../src/shared/depth-settings";
 import { STORY_DRAFT, STORY_SETTLE } from "../../src/shared/episodes";
@@ -84,10 +85,10 @@ async function head(h: Harness, chat: ChatId) {
 }
 
 /** The Settled off screen chips the view shows, read as the view reads them: the chain's live draft events. */
-async function settledChips(h: Harness, chat: ChatId): Promise<Chip[]> {
-  let chips: Chip[] = [];
+async function settledChips(h: Harness, chat: ChatId, rt: Pick<AfterRt, "blobs">): Promise<Chip[]> {
+  let chips: Promise<Chip[]> = Promise.resolve([]);
   await h.service.with(chat, h.host.userId, (core, observed) => {
-    chips = settledChipsOn(core, observed, eventsOf(core, observed, DRAFT_TYPES));
+    chips = settledChipsOn(core, observed, eventsOf(core, observed, DRAFT_TYPES), rt.blobs, h.host.userId);
   });
   return chips;
 }
@@ -144,7 +145,7 @@ describe("the world beyond view, off screen", () => {
     expect(objOf(sliceOf((await h.folds(chat)).reference.state, "story").flags)).toEqual({});
     expect(Object.keys(mindV2At((await h.folds(chat)).reference.state, "dev").files)).toEqual(["core.md"]);
     // Nothing settled yet: no chip says so.
-    expect(await settledChips(h, chat)).toEqual([]);
+    expect(await settledChips(h, chat, rt)).toEqual([]);
 
     // The next turn, and its poll: the draft is open with one beat since its time, and the author settles it.
     await h.send(chat, "Morning. I walk down to the marina.", "Sam walks to the marina.");
@@ -170,8 +171,11 @@ describe("the world beyond view, off screen", () => {
     expect(after2.offscreen).toMatchObject({ settled: [id], drafted: [], dropped: [] });
     drafts = draftsOn(await h.service.readEvents(chat, userId, DRAFT_TYPES));
     expect(drafts.map((d) => [d.draft.id, d.state])).toEqual([[id, "settled"]]);
+    // Its pins read at once: the author's verdict lands as page 1 of 1, with the reading's own verdict, at the chain it read.
+    const verdictsNow = async () => (await h.service.readEvents(chat, userId, [AUTHOR_VERDICT])).map((e) => authorData<VerdictData>(e.event, AUTHOR_VERDICT));
+    expect(await verdictsNow()).toMatchObject([{ draft: id, page: 1, of: 1, verdict: "settle", why: "Nothing Sam saw says otherwise.", forces: [] }]);
     // The reply it settled at says so, with the summary, the day its beats happened, the author's reading, and Read, which opens the draft.
-    const [chip, ...others] = await settledChips(h, chat);
+    const [chip, ...others] = await settledChips(h, chat, rt);
     expect(others).toEqual([]);
     expect(chip).toMatchObject({ id: `settled:${second.message}:0:${id}`, kind: "settled", messageId: second.message, swipeId: 0, detail: "Nothing Sam saw says otherwise.", actions: [{ id: "read", label: "Read", input: { type: "draft", label: "Read", draft: id } }], expires: "next_send" });
     expect(chip?.label).toBe("Settled off screen: Dev sold his boat to a buyer from the next town. (Friday)");
@@ -201,12 +205,14 @@ describe("the world beyond view, off screen", () => {
     await h.host.finish(await h.host.start(chat, { type: "swipe" }), "Sam stays home instead.");
     await h.host.settle();
     expect(draftsOn(await h.service.readEvents(chat, userId, DRAFT_TYPES)).map((d) => d.state)).toEqual(["open"]);
-    expect(await settledChips(h, chat)).toEqual([]);
+    expect(await verdictsNow()).toEqual([]);
+    expect(await settledChips(h, chat, rt)).toEqual([]);
     expect(objOf(sliceOf((await h.folds(chat)).reference.state, "story").flags)).toEqual({});
     h.host.navigate(chat, second.message, 0);
     await h.host.settle();
     expect(draftsOn(await h.service.readEvents(chat, userId, DRAFT_TYPES)).map((d) => d.state)).toEqual(["settled"]);
-    expect((await settledChips(h, chat)).map((c) => c.id)).toEqual([`settled:${second.message}:0:${id}`]);
+    expect((await verdictsNow()).map((v) => v?.verdict)).toEqual(["settle"]);
+    expect((await settledChips(h, chat, rt)).map((c) => c.id)).toEqual([`settled:${second.message}:0:${id}`]);
     expect((await h.service.layerSummaries(chat, userId)).map((s) => s.kind).filter((k) => k === STORY_DRAFT || k === STORY_SETTLE)).toEqual([STORY_DRAFT, STORY_SETTLE]);
   });
 
@@ -241,6 +247,8 @@ describe("the world beyond view, off screen", () => {
     const swiped = await head(h, chat);
     expect(swiped.message).toBe(first.message);
     expect(swiped.swipe).not.toBe(first.swipe);
+    // What a swipe's wake of the poll (Y25) looks for: the draft is a candidate now, before any poll ran; once rebased it is not.
+    expect((await rebaseCandidates(rt, chat, userId, new Set())).map((d) => d.id)).toEqual([id]);
     const rebase = port({ author: [{ rebase: [{ draft: id, why: "Nothing in this telling stops the sale." }] }] });
     const after2 = await afterDepthReply(rt, chat, userId, swiped, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { model: rebase, plugs });
     expect(after2.failed).toEqual([]);
@@ -248,6 +256,7 @@ describe("the world beyond view, off screen", () => {
     expect(rebase.sent.author?.[0]).toContain(`[${id}]`);
     expect(after2.offscreen).toMatchObject({ rebased: [id], said: [] });
     expect(draftsOn(await h.service.readEvents(chat, userId, DRAFT_TYPES)).map((d) => [d.draft.id, d.state])).toEqual([[id, "open"]]);
+    expect(await rebaseCandidates(rt, chat, userId, new Set([id]))).toEqual([]);
 
     // The settlement keeps its beats but refuses its world change: the boat isn't sold.
     await h.send(chat, "Morning. I walk down to the marina.", "Sam walks to the marina.");
@@ -301,6 +310,50 @@ describe("the world beyond view, off screen", () => {
     expect(out.put).toEqual(["Episode 1: the radio: this story week's allowances are spent down to written, so it is left unwritten until it matters"]);
     expect(out.said).toEqual([]);
     expect(out.drafted).toEqual([]);
+  });
+
+  test("the off-screen lane's pause (X4) puts off each settlement and episode not yet started, said in the treatment log, and calls no model", async () => {
+    const h = new Harness("fresh", { packs: [storyPack, authorPack], model });
+    const rt = rtOf(h);
+    const settings = await rt.settings.get(h.host.userId);
+    settings.depth.background = { ...settings.depth.background, offscreen: false };
+    const userId = h.host.userId;
+    const chat = await h.newChat();
+    await h.send(chat, "I head home for the night.", "Sam walks home.");
+    const first = await head(h, chat);
+    const ask = { why: "A storm rolls in.", in: 0, minutes: 30, places: ["home"], people: ["sam"], parts: [{ subject: { event: "the radio" }, treatment: "written" as const, rationale: "a forecast" }] };
+    const quiet = port({});
+    const out = await offscreenJobs(rt, chat, userId, first, { episodes: [ask], settle: [{ draft: "d-gone", why: "its time came" }], drop: [], rebase: [] }, { budget: settings.depth.budget, model: quiet });
+    expect(out.put).toEqual(["Settling draft d-gone: Work off screen is paused (GM → Depth)", "Episode 1 (A storm rolls in.): Work off screen is paused (GM → Depth)"]);
+    expect(out.drafted).toEqual([]);
+    expect(quiet.sent).toEqual({});
+  });
+
+  test("the player's edit of an open draft (M-16): it is dropped, and its episode drafted again with his words as a directive", async () => {
+    const h = new Harness("fresh", { packs: [storyPack, authorPack], model });
+    const rt = rtOf(h);
+    const userId = h.host.userId;
+    const chat = await h.newChat();
+    const greeting = await head(h, chat);
+    const core = seedCore({ who: "dev", at: 0, source: "card", text: "Dev runs the marina cafe and owes the bank." });
+    for (const text of Object.values(core.blobs)) await rt.blobs.put(userId, text);
+    expect((await h.service.landLayer(chat, userId, { id: "dev-core", basis: greeting, kind: "minds.v2.write", events: core.events })).status).toBe("landed");
+    await h.send(chat, "I head home for the night.", "Sam walks home.");
+    const first = await head(h, chat);
+    const one = port({
+      author: [
+        { episodes: [{ why: "The bank calls in Dev's loan on Friday.", in: 0, minutes: 45, places: ["home"], people: ["dev"], parts: [{ event: "the buyer", treatment: "written", rationale: "a walk-on" }] }] },
+        { staging: [], beats: [{ ref: "o1", by: "author", actors: [], act: "happened", what: "A buyer from the next town walks down the dock.", surface: "A stranger in a rain jacket walks down the dock.", exposure: [{ who: "dev", channel: "sight", reach: "whole" }] }], next: [], end: "The buyer arrives.", summary: "A buyer comes for Dev's boat." },
+      ],
+    });
+    const after1 = await afterDepthReply(rt, chat, userId, first, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { model: one, plugs });
+    const id = after1.offscreen?.drafted[0] ?? "";
+    expect(id).not.toBe("");
+    const asked: string[] = [];
+    h.host.quietReply = (request) => (asked.push(request.messages.map((m) => m.content).join("\n")), "{}");
+    await redraft({ ...rt, host: h.host } as never, chat, userId, id, "Dev refuses to sell; the buyer leaves angry.");
+    expect(draftsOn(await h.service.readEvents(chat, userId, DRAFT_TYPES)).find((d) => d.draft.id === id)?.state).toBe("dropped");
+    expect(asked.some((text) => text.includes("Dev refuses to sell; the buyer leaves angry.") && text.includes("The bank calls in Dev's loan on Friday."))).toBe(true);
   });
 
   test("what a draft's world changes write becomes its touches: the thing and the places it moved between, never the player character's", () => {

@@ -1,26 +1,87 @@
 // The raw archive index (DEPTH-PLAN §4.3): the chat's prose as the host stores it, on the active
 // chain, indexed per chat by message and swipe, story time, place, and the live beats citing each
-// message with the people on them. The author and the GM search and quote it (their archive tools);
-// a character never reads it. The lexical index is kept per open chat and brought up to date at each
-// search from the messages every ledger operation reads anyway (a message whose swipe or text
-// changed is indexed again, one gone is dropped): rebuilding it costs about what parsing a stored
-// copy would, so none is kept.
+// message with the people on them and who each beat reached (its exposure). The author and the GM
+// search and quote it (their archive tools); a character never reads it. I keep the lexical index in
+// the user's storage (`runs/<chatId>/archive/`, in shards by message id), so a chat reopened after
+// eviction or a restart loads its tokenized pieces instead of tokenizing the whole chat again, and
+// a few recently searched chats in memory. At each search it is brought up to date from the messages
+// every ledger operation reads anyway: a message whose swipe or text changed is indexed again, one
+// gone is dropped, and only the shards that changed are written back. A loaded message is checked
+// against its stored fingerprint once, at load; after that a search compares the text as it is.
 
-import type { ArchiveHit, ArchiveQuery, ArchiveQuote, ArchiveQuoteRequest, ArchiveResult } from "../shared/archive";
+import type { ArchiveExposure, ArchiveHit, ArchiveQuery, ArchiveQuote, ArchiveQuoteRequest, ArchiveResult } from "../shared/archive";
 import { ARCHIVE_QUOTE_MAX } from "../shared/archive";
+import { hash32, hashParts } from "../shared/hash";
 import type { ChatId, EntityId, MessageId, PlaceId, UserId } from "../shared/ids";
-import { beatPeople, type PlacedBeat, type StoryRead } from "../shared/story";
-import { LexicalIndex } from "../engine/lexical";
+import { isRecord } from "../shared/json";
+import { beatPeople, exposureChannels, type PlacedBeat, type StoryRead } from "../shared/story";
+import { indexPieces, LexicalIndex, type IndexedPassage } from "../engine/lexical";
+import type { HostPort } from "./host";
 import type { ArchiveMessage, ArchiveView, LedgerService } from "./ledger-io";
 
-/** Chats whose index is kept, the most recently searched last. */
+/** Chats whose index is kept in memory, the most recently searched last. */
 export const ARCHIVE_CHATS_KEPT = 3;
+/** Shards of a chat's stored index: a change rewrites only the shards of the messages it touched. */
+export const ARCHIVE_SHARDS = 16;
 const SNIPPET = 400;
+const STORED_VERSION = 1;
+
+export function archiveDir(chatId: ChatId): string {
+  return `runs/${chatId}/archive`;
+}
+
+/** One message as stored: the swipe and the fingerprint of the text it was indexed with, and its pieces as `[start, end, length, words, counts]`. */
+interface StoredMessage {
+  swipe: string;
+  h: string;
+  p: [number, number, number, string, number[]][];
+}
 
 interface ChatArchive {
   index: LexicalIndex<MessageId>;
   /** Per message, the swipe and text it was indexed with: compared as they are, so a search never hashes the chat. */
   seen: Map<MessageId, { swipe: string; text: string }>;
+  /** The stored index, by shard: what each shard file holds. */
+  shards: Map<MessageId, StoredMessage>[];
+  /** Shards changed since they were last written. */
+  dirty: Set<number>;
+  /** The writes under way, in order. */
+  writing: Promise<void>;
+}
+
+function shardOf(id: MessageId): number {
+  return hash32(id) % ARCHIVE_SHARDS;
+}
+
+/** A stored message's pieces as the index takes them; null for one that doesn't read as stored. */
+function piecesOfStored(s: StoredMessage): IndexedPassage[] | null {
+  const out: IndexedPassage[] = [];
+  for (const row of s.p) {
+    if (!Array.isArray(row) || row.length !== 5) return null;
+    const [start, end, length, words, counts] = row;
+    if (typeof start !== "number" || typeof end !== "number" || typeof length !== "number" || typeof words !== "string" || !Array.isArray(counts)) return null;
+    const list = words === "" ? [] : words.split(" ");
+    if (list.length !== counts.length || !counts.every((n) => typeof n === "number")) return null;
+    out.push({ passage: { start, end }, length, words: list.map((w, i) => [w, counts[i] as number]) });
+  }
+  return out;
+}
+
+/** A shard file's messages; an empty map for one missing or unreadable (its messages are indexed again). */
+function shardOfText(text: string | null): Map<MessageId, StoredMessage> {
+  const out = new Map<MessageId, StoredMessage>();
+  if (text === null) return out;
+  let v: unknown;
+  try {
+    v = JSON.parse(text);
+  } catch {
+    return out;
+  }
+  if (!isRecord(v) || v.v !== STORED_VERSION || !isRecord(v.messages)) return out;
+  for (const [id, m] of Object.entries(v.messages)) {
+    if (isRecord(m) && typeof m.swipe === "string" && typeof m.h === "string" && Array.isArray(m.p)) out.set(id as MessageId, m as unknown as StoredMessage);
+  }
+  return out;
 }
 
 /** What the live beats say of each message they cite. */
@@ -28,6 +89,7 @@ interface Cited {
   beats: string[];
   places: Set<PlaceId>;
   people: Set<EntityId>;
+  exposure: ArchiveExposure[];
   earliest: number | null;
 }
 
@@ -42,11 +104,12 @@ function citations(story: StoryRead, onChain: ReadonlySet<MessageId>): Map<Messa
   const out = new Map<MessageId, Cited>();
   for (const b of story.beats) {
     const id = citedBy(b, onChain);
-    const c = out.get(id) ?? { beats: [], places: new Set<PlaceId>(), people: new Set<EntityId>(), earliest: null };
+    const c = out.get(id) ?? { beats: [], places: new Set<PlaceId>(), people: new Set<EntityId>(), exposure: [], earliest: null };
     c.beats.push(b.beat.id);
     c.places.add(b.beat.place);
     for (const who of beatPeople(b.beat)) c.people.add(who);
     for (const ref of b.beat.about) if ("entity" in ref) c.people.add(ref.entity);
+    for (const x of b.beat.exposure) c.exposure.push({ who: x.who, beat: b.beat.id, channels: exposureChannels(x), reach: x.reach });
     c.earliest = c.earliest === null ? b.beat.at : Math.min(c.earliest, b.beat.at);
     out.set(id, c);
   }
@@ -65,30 +128,96 @@ function snippetOf(text: string, start: number, end: number): { snippet: string;
 
 export class ArchiveIndex {
   private readonly chats = new Map<string, ChatArchive>();
+  private readonly loading = new Map<string, Promise<ChatArchive>>();
+  /** Messages tokenized since this index started: a chat loaded from storage tokenizes only the messages that changed since it was written. */
+  tokenized = 0;
 
-  constructor(private readonly ledger: LedgerService) {}
+  constructor(
+    private readonly ledger: LedgerService,
+    private readonly host: Pick<HostPort, "storage" | "log">,
+  ) {}
 
-  /** The chat's index brought up to date with `messages`. */
-  private synced(chatId: ChatId, userId: UserId, messages: readonly ArchiveMessage[]): ChatArchive {
+  /** The chat's stored index, as its shard files hold it (a shard that can't be read holds nothing, so its messages are indexed again). */
+  private async load(chatId: ChatId, userId: UserId): Promise<ChatArchive> {
+    const dir = archiveDir(chatId);
+    const shards = await Promise.all(
+      Array.from({ length: ARCHIVE_SHARDS }, async (_, n) => shardOfText(await this.host.storage.read(`${dir}/shard-${n}.json`, userId).catch(() => null))),
+    );
+    return { index: new LexicalIndex<MessageId>(), seen: new Map(), shards, dirty: new Set(), writing: Promise.resolve() };
+  }
+
+  /** The chat's index, from memory or loaded once from storage; the most recently searched kept. */
+  private async archiveOf(chatId: ChatId, userId: UserId): Promise<ChatArchive> {
     const key = `${userId}\u0000${chatId}`;
-    const archive = this.chats.get(key) ?? { index: new LexicalIndex<MessageId>(), seen: new Map<MessageId, { swipe: string; text: string }>() };
+    let archive = this.chats.get(key);
+    if (!archive) {
+      let load = this.loading.get(key);
+      if (!load) {
+        load = this.load(chatId, userId).finally(() => this.loading.delete(key));
+        this.loading.set(key, load);
+      }
+      archive = await load;
+    }
     this.chats.delete(key);
     this.chats.set(key, archive);
     while (this.chats.size > ARCHIVE_CHATS_KEPT) this.chats.delete(this.chats.keys().next().value ?? "");
+    return archive;
+  }
+
+  /** The chat's index brought up to date with `messages`, and the shards that changed written back. */
+  private async synced(chatId: ChatId, userId: UserId, messages: readonly ArchiveMessage[]): Promise<ChatArchive> {
+    const archive = await this.archiveOf(chatId, userId);
     const now = new Set<MessageId>();
     for (const m of messages) {
       now.add(m.id);
       const was = archive.seen.get(m.id);
       if (was && was.swipe === m.swipe && was.text === m.text) continue;
-      archive.index.add(m.id, m.text);
+      const n = shardOf(m.id);
+      const shard = archive.shards[n] as Map<MessageId, StoredMessage>;
+      const h = hashParts(m.text);
+      const stored = shard.get(m.id);
+      let pieces = stored && stored.swipe === m.swipe && stored.h === h ? piecesOfStored(stored) : null;
+      if (!pieces) {
+        pieces = indexPieces(m.text);
+        this.tokenized++;
+        shard.set(m.id, { swipe: m.swipe, h, p: pieces.map((x) => [x.passage.start, x.passage.end, x.length, x.words.map(([w]) => w).join(" "), x.words.map(([, c]) => c)]) });
+        archive.dirty.add(n);
+      }
+      archive.index.addIndexed(m.id, pieces);
       archive.seen.set(m.id, { swipe: m.swipe, text: m.text });
     }
-    for (const id of [...archive.seen.keys()]) {
-      if (now.has(id)) continue;
-      archive.index.remove(id);
-      archive.seen.delete(id);
-    }
+    archive.shards.forEach((shard, n) => {
+      for (const id of shard.keys()) {
+        if (now.has(id)) continue;
+        archive.index.remove(id);
+        archive.seen.delete(id);
+        shard.delete(id);
+        archive.dirty.add(n);
+      }
+    });
+    await this.flush(chatId, userId, archive);
     return archive;
+  }
+
+  /** Writes the changed shards, as they are now, after the writes before them; a shard that fails stays changed, for the next search. */
+  private flush(chatId: ChatId, userId: UserId, archive: ChatArchive): Promise<void> {
+    if (archive.dirty.size === 0) return archive.writing;
+    const texts = [...archive.dirty].map((n) => [n, JSON.stringify({ v: STORED_VERSION, messages: Object.fromEntries(archive.shards[n] ?? []) })] as const);
+    archive.dirty.clear();
+    const dir = archiveDir(chatId);
+    archive.writing = archive.writing.then(async () => {
+      for (const [n, text] of texts) {
+        const path = `${dir}/shard-${n}.json`;
+        try {
+          await this.host.storage.write(`${path}.tmp`, text, userId);
+          await this.host.storage.move(`${path}.tmp`, path, userId);
+        } catch (error) {
+          archive.dirty.add(n);
+          this.host.log("warn", `The archive index of chat ${chatId} couldn't write ${path}: ${error instanceof Error ? error.message : String(error)}`, userId);
+        }
+      }
+    });
+    return archive.writing;
   }
 
   /** Searches the chat's prose (DEPTH-PLAN §4.3): ranked by the words when given, else newest first, filtered by person, place, story time and basis. */
@@ -98,8 +227,8 @@ export class ArchiveIndex {
   }
 
   /** `search` over a view a caller already holds (`archiveViewOf` on a turn's own core, which holds the chat's queue). */
-  searchView(chatId: ChatId, userId: UserId, view: ArchiveView, q: ArchiveQuery): ArchiveResult {
-    const archive = this.synced(chatId, userId, view.messages);
+  async searchView(chatId: ChatId, userId: UserId, view: ArchiveView, q: ArchiveQuery): Promise<ArchiveResult> {
+    const archive = await this.synced(chatId, userId, view.messages);
     const byId = new Map(view.messages.map((m) => [m.id, m]));
     const cited = citations(view.story, new Set(byId.keys()));
     const upTo = q.upTo === undefined ? Infinity : (byId.get(q.upTo)?.index ?? -1);
@@ -131,7 +260,7 @@ export class ArchiveIndex {
       if (!m) return [];
       const c = cited.get(r.id);
       const { snippet, span } = snippetOf(m.text, r.start, r.end);
-      return [{ messageId: m.id, index: m.index, isUser: m.isUser, swipeId: m.swipeId, swipe: m.swipe, storyTime: timeOf(m), places: [...(c?.places ?? [])], people: [...(c?.people ?? [])], beats: c?.beats ?? [], score: r.score, snippet, span }];
+      return [{ messageId: m.id, index: m.index, isUser: m.isUser, swipeId: m.swipeId, swipe: m.swipe, storyTime: timeOf(m), places: [...(c?.places ?? [])], people: [...(c?.people ?? [])], beats: c?.beats ?? [], exposure: c?.exposure ?? [], score: r.score, snippet, span }];
     });
     return { hits, total: ranked.length };
   }

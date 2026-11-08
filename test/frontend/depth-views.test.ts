@@ -157,6 +157,16 @@ describe("GM → Minds on a depth chat", () => {
     expect(edited.calls).toEqual([["save", { path: "minds/npc_rosie/beliefs.md", text: "- Sam lost the deposit: I'd swear to it." }]]);
   });
 
+  test("a file a correction put out of mind says so, and one a reflection wrote is flagged apart", () => {
+    const files = [
+      { path: "minds/npc_rosie/beliefs.md", text: "- Sam is hiding something.", pinned: false, revisions: 2, at: null, out: true as const },
+      { path: "minds/npc_rosie/self.md", text: "I see through people.", pinned: false, revisions: 1, at: null, out: true as const, reflection: true as const },
+    ];
+    const text = textOf(render(MindPage({ mind: { ...MIND, files }, c: mindControls(), panelId: "p" })));
+    expect(text).toContain("A reflection, out of mind");
+    expect(text.split("Out of mind").length - 1).toBe(1);
+  });
+
   test("every write shows its reasoning, the beats it lived with a jump to each, what it changed, and when an amended beat replaced it", () => {
     const c = mindControls({ tab: "writes" });
     const tree = render(MindPage({ mind: MIND, c, panelId: "p" }));
@@ -251,6 +261,7 @@ const NOTEBOOK: DepthNotebookView = {
     },
   ],
   predictions: [{ at: "after message 9", text: "Sam tells Rosie by Friday", outcome: "pending", note: "" }],
+  drift: [{ at: "after message 14", who: "Rosie Alvarez", drift: "some", note: "Warier of Sam than her arc says." }],
 };
 
 function notebookControls(over: Partial<NotebookControls> = {}): NotebookControls & { calls: unknown[][] } {
@@ -296,8 +307,17 @@ describe("GM → Depth → Notebook", () => {
     expect(poll).toContain("Sam heads to the marina next; Dale's sale has to be settled first.");
     expect(predictions).toContain("Sam tells Rosie by Friday");
     expect(predictions).toContain("Open");
-    const off = textOf(render(NotebookBody({ view: { on: false, files: [], revisions: [], poll: [], predictions: [] }, c: notebookControls() })));
+    const off = textOf(render(NotebookBody({ view: { on: false, files: [], revisions: [], poll: [], predictions: [], drift: [] }, c: notebookControls() })));
     expect(off).toContain("GM → This chat → Depth");
+  });
+
+  test("the drift checks have their own tab: whose arc, how far they drifted and the author's note", () => {
+    const drift = textOf(render(NotebookBody({ view: NOTEBOOK, c: notebookControls({ tab: "drift" }) })));
+    expect(drift).toContain("Rosie Alvarez");
+    expect(drift).toContain("Some drift");
+    expect(drift).toContain("Warier of Sam than her arc says.");
+    const none = textOf(render(NotebookBody({ view: { ...NOTEBOOK, drift: [] }, c: notebookControls({ tab: "drift" }) })));
+    expect(none).toContain("No drift checks yet");
   });
 });
 
@@ -306,7 +326,7 @@ describe("GM → Depth → Notebook", () => {
 const PEOPLE = [{ id: "npc_rosie", name: "Rosie Alvarez" }];
 const PLACES = [{ id: "bluebird", name: "Bluebird Coffee" }];
 const HITS: DepthArchiveResult = {
-  hits: [{ messageId: "m12", index: 12, isUser: false, swipeId: 0, at: "Tuesday 14 May, 08:40", places: ["Bluebird Coffee"], people: ["Rosie Alvarez", "Sam Reyes"], snippet: "Rosie set the mug down harder than she meant to.", beats: 3 }],
+  hits: [{ messageId: "m12", index: 12, isUser: false, swipeId: 0, at: "Tuesday 14 May, 08:40", places: ["Bluebird Coffee"], people: ["Rosie Alvarez", "Sam Reyes"], reached: ["Sam Reyes (sight, hearing)"], snippet: "Rosie set the mug down harder than she meant to.", beats: 3 }],
   next: 8,
   unread: ["the day after the storm"],
 };
@@ -330,6 +350,7 @@ describe("GM → Depth → Archive", () => {
     expect(text).toContain("Message 12");
     expect(text).toContain("Tuesday 14 May, 08:40 · Bluebird Coffee · Rosie Alvarez, Sam Reyes");
     expect(text).toContain("3 beats");
+    expect(text).toContain("Reached Sam Reyes (sight, hearing)");
     expect(text).toContain('couldn\'t read "the day after the storm"');
     tap(button(found, "Go to the message"));
     tap(button(found, "More"));

@@ -25,6 +25,16 @@ export function intervalAt(unit: DepthBudget["interval"], at: number): SpendData
   return { unit, from: Math.floor(at / len) * len };
 }
 
+/**
+ * The on-screen work the story interval holding minute `at` has spent (W17): its turns in which
+ * someone on screen played as their own agent, a scene's spend with character or real-time calls
+ * in it, counted over the interval as the treatments' allowances are. Bookkeeping only.
+ */
+export function onScreenSpent(spends: readonly SpendData[], unit: DepthBudget["interval"], at: number): number {
+  const from = intervalAt(unit, at).from;
+  return spends.filter((s) => s.treatment === "scene" && s.interval.unit === unit && s.interval.from === from && (s.roles.character?.calls ?? 0) + (s.roles.realtime?.calls ?? 0) > 0).length;
+}
+
 export const NO_COST: SpendCost = { calls: 0, tokensIn: 0, tokensOut: 0 };
 
 /** Two costs summed; an amount neither has stays absent. */

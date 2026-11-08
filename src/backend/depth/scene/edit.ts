@@ -23,7 +23,7 @@ import type { ChatId, EntityId, MessageId, UserId } from "../../../shared/ids";
 import { hasOwn } from "../../../shared/json";
 import type { PackEvent } from "../../../shared/ledger";
 import { passageOf, STORY_PASSAGE } from "../../../shared/passage";
-import { beatEvent, beatId, strikeEvent, type Beat, type Exposure, type PlacedBeat, type StoryRef } from "../../../shared/story";
+import { beatEvent, beatId, beatOf, STORY_BEAT, strikeEvent, type Beat, type Exposure, type PlacedBeat, type StoryRef } from "../../../shared/story";
 import { blobHash } from "../../../shared/stores";
 import { layerEntryId } from "../../../engine/ledger/layer";
 import { stagingBefore, type LiveEvent } from "../../../engine/ledger/story";
@@ -92,9 +92,9 @@ async function passagesText(rt: Pick<AfterRt, "blobs">, userId: UserId, events: 
  * The points of view an amended beat's perceivers get from the truth-blind render, as a scene's beat's
  * do (`SceneBook.povs`): everyone the shared reach rule says needs one, and each actor of a beat with no
  * deed but the player character (`pov`), as the one doing it, against the staging as it stood at the
- * beat it replaces, each told how it may name each person of the moment (`povRefs`); each gets one, the
- * plain fallback where the render, asked again, still wrote none or named someone who wasn't there,
- * which is said.
+ * beat it replaces, each told how it may name each person of the moment (`povRefs`). One the render,
+ * asked again, still wrote none of, or named someone who wasn't there in and its GM's check couldn't
+ * set right, is left without one, pending (said); no rule writes it.
  */
 async function povsOf(rt: AfterRt, userId: UserId, at: BasisRead, old: PlacedBeat, beat: Pick<Beat, "id" | "actors" | "about" | "addressed"> & { surface: string; deed?: string; quotes?: string }, exposure: Exposure[], blobs: Blobs, o: { pov: EntityId; model: ModelPort; texts: Readonly<Record<string, string>>; signal?: AbortSignal }): Promise<string[]> {
   const knows = knowsFor({ registry: rt.registry }, at, exposure.map((x) => x.who));
@@ -106,12 +106,12 @@ async function povsOf(rt: AfterRt, userId: UserId, at: BasisRead, old: PlacedBea
     staging.push({ who: s.who, where: (await rt.blobs.get(userId, s.where)) ?? "", doing: (await rt.blobs.get(userId, s.doing)) ?? "", ...(occluded ? { occluded } : {}) });
   }
   const refs = povRefs({ registry: rt.registry }, at, need, [...presentAt({ ...beat, exposure }), ...staging.map((s) => s.who)]);
-  const out = await povRender(o.model, { beat: { id: beat.id, surface: beat.surface, ...(beat.deed ? { deed: beat.deed } : {}), ...(beat.quotes ? { quotes: beat.quotes } : {}), actors: beat.actors, exposure }, staging, who: need, refs, texts: o.texts, ...(o.signal ? { signal: o.signal } : {}) });
+  const out = await povRender(o.model, { beat: { id: beat.id, surface: beat.surface, ...(beat.quotes ? { quotes: beat.quotes } : {}), actors: beat.actors, exposure }, staging, who: need, refs, texts: o.texts, ...(o.signal ? { signal: o.signal } : {}) });
   for (const x of exposure) {
     const pov = out.povs[x.who];
     if (x.pov === undefined && need.includes(x.who) && pov !== undefined) x.pov = putText(blobs, pov);
   }
-  return Object.entries(out.fellBack).map(([who, names]) => fellBackLine(who, `the amended beat ${beat.id}`, names));
+  return Object.entries(out.pending).map(([who, names]) => fellBackLine(who, `the amended beat ${beat.id}`, names));
 }
 
 async function edit(rt: AfterRt, chatId: ChatId, userId: UserId, messageId: MessageId, text: string, o: AfterOptions): Promise<EditOut> {
@@ -155,7 +155,9 @@ async function edit(rt: AfterRt, chatId: ChatId, userId: UserId, messageId: Mess
     const notebook = await readNotebook(rt, userId, at.state);
     let read: EditResult;
     try {
-      read = await twice(() => authorEdit({ world: at.world, state: at.state, texts, pov, model, ...signal, notebook, own: his, before: before === "" ? (his ? UNKEPT_OWN : UNKEPT) : before, after: text, beats }), o.signal);
+      // Whose minds lived a beat made from it: the author orders who of them catches up now (S9).
+      const livedAny = mindedAt(at.state).filter((who) => hasAgent(at.world, at.state, who) && placed.some((p) => hasOwn(mindV2At(at.state, who).lived, p.beat.id)));
+      read = await twice(() => authorEdit({ world: at.world, state: at.state, texts, pov, model, ...signal, notebook, own: his, before: before === "" ? (his ? UNKEPT_OWN : UNKEPT) : before, after: text, beats, lived: livedAny }), o.signal);
     } catch (error) {
       fail("the author's reading", error);
       return { ...out, said: "The author's reading of the edit couldn't be read: nothing was amended." };
@@ -201,26 +203,29 @@ async function edit(rt: AfterRt, chatId: ChatId, userId: UserId, messageId: Mess
     if (out.cosmetic) return { ...out, said: `The author read your edit as cosmetic: no beat changed.${read.why !== "" ? ` (${read.why})` : ""}` };
 
     // Whoever lived a beat it replaced lives what reached them now, the amendment included, and rewrites every file of its mind that drew on a replaced beat at its own path.
+    // The author orders who catches up now (S9): those it named, one after another in its order; those it left out wait for its poll, which hears what fell out of their mind. Naming no one in particular, everyone does.
     const gone = new Set([...replaced, ...out.struck]);
     const old = placed.filter((p) => gone.has(p.beat.id)).map((p) => p.beat);
-    const lived = mindedAt(at.state).filter((who) => hasAgent(at.world, at.state, who) && [...gone].some((b) => hasOwn(mindV2At(at.state, who).lived, b)));
-    const caught = await Promise.all(
-      lived.map(async (who) => {
-        try {
-          const r = await catchUpNow(rt, chatId, userId, who, { model, ...signal, gone: old });
-          return r.lived > 0 || r.rewritten > 0 ? [who] : [];
-        } catch (error) {
-          fail(`${own(at.state.entities, who)?.name ?? who}'s catch-up`, error);
-          return [];
-        }
-      }),
-    );
+    const livedGone = mindedAt(at.state).filter((who) => hasAgent(at.world, at.state, who) && [...gone].some((b) => hasOwn(mindV2At(at.state, who).lived, b)));
+    const lived = read.catchup === null ? livedGone : read.catchup.filter((who) => livedGone.includes(who));
+    const catchOne = async (who: EntityId): Promise<EntityId[]> => {
+      try {
+        const r = await catchUpNow(rt, chatId, userId, who, { model, ...signal, gone: old });
+        return r.lived > 0 || r.rewritten > 0 ? [who] : [];
+      } catch (error) {
+        fail(`${own(at.state.entities, who)?.name ?? who}'s catch-up`, error);
+        return [];
+      }
+    };
+    const caught: EntityId[][] = [];
+    if (read.catchup === null) caught.push(...(await Promise.all(lived.map(catchOne))));
+    else for (const who of lived) caught.push(await catchOne(who));
     out.caughtUp = caught.flat();
     // The GM links what the amendment made canon and what the catch-ups wrote (§4.4), where they landed (the chat's head): the facts its beats establish, and the beliefs written.
     const head = await headBasis(rt, chatId, userId);
     if (head) {
       try {
-        const r = await linkTruths(rt, chatId, userId, head, { who: out.caughtUp, beats: made, key: ["edit", entry], model, ...signal });
+        const r = await linkTruths(rt, chatId, userId, head, { who: out.caughtUp, beats: made, key: ["edit", entry], model, ...signal, ...(o.archive ? { archive: o.archive } : {}) });
         out.refused.push(...r.refused.map((line) => `the GM's truth-link: ${line}`));
       } catch (error) {
         fail("the GM's truth-link", error);
@@ -230,6 +235,109 @@ async function edit(rt: AfterRt, chatId: ChatId, userId: UserId, messageId: Mess
   } catch (error) {
     fail("reading the edit", error);
     return { ...out, said: "The edit couldn't be read: nothing was amended." };
+  }
+}
+
+/**
+ * Undo on an edit's chip (M-16): the reverse amendment. The beats the player's last edit of message
+ * `messageId` replaced or struck stand again, as copies at their own minutes that supersede what it
+ * wrote in their place (`undone`: the beats the chip offered to undo, amended and struck, so a chip
+ * a later edit replaced is refused), landed as one entry at the message, with the reading the edit
+ * kept; then whoever lived what the edit wrote, or perceives what stands again, catches up, and the
+ * GM links what is canon again. Runs in the message's line of edits. Never throws.
+ */
+export function editUndone(rt: AfterRt, chatId: ChatId, userId: UserId, messageId: MessageId, undone: { amended: readonly string[]; struck: readonly string[] }, o: AfterOptions = {}): Promise<EditOut> {
+  const key = `${chatId}\u0000${messageId}`;
+  const next = (editing.get(key) ?? Promise.resolve()).then(() => undo(rt, chatId, userId, messageId, undone, o));
+  editing.set(key, next);
+  void next.then(() => {
+    if (editing.get(key) === next) editing.delete(key);
+  });
+  return next;
+}
+
+async function undo(rt: AfterRt, chatId: ChatId, userId: UserId, messageId: MessageId, undone: { amended: readonly string[]; struck: readonly string[] }, o: AfterOptions): Promise<EditOut> {
+  const out: EditOut = { said: "", cosmetic: null, amended: [], struck: [], caughtUp: [], refused: [], failed: [] };
+  const fail = (what: string, error: unknown): void => {
+    const why = error instanceof Error ? error.message : String(error);
+    out.failed.push(`${what}: ${why}`);
+    rt.host.log("warn", `[LumiRPEngine] chat ${chatId}, undoing the player's edit: ${what} didn't go through: ${why}`, userId);
+  };
+  try {
+    const basis = await rt.ledger.basisFor(chatId, userId, messageId);
+    const at = basis ? await rt.ledger.foldAtBasis(chatId, userId, basis, [AUTHOR_EDIT, STORY_BEAT]) : null;
+    if (!basis || !at) return { ...out, said: "The edited message isn't on the chat's chain: nothing to undo." };
+    const last = at.events.flatMap((e) => {
+      const d = authorData<EditData>(e.event, AUTHOR_EDIT);
+      return d && d.message === messageId ? [d] : [];
+    }).at(-1);
+    const same = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((x) => b.includes(x));
+    if (!last || last.cosmetic || !same(last.amended, undone.amended) || !same(last.struck, undone.struck) || last.amended.length + last.struck.length === 0) return { ...out, said: "That edit is no longer the last one the author read of this message: nothing was undone." };
+    // Every beat the fold read at the message's basis, by id, the ones the edit replaced and struck among them.
+    const byId = new Map<string, Beat>();
+    for (const e of at.events) {
+      const b = e.event.type === STORY_BEAT && "data" in e.event ? beatOf(e.event.data) : null;
+      if (b) byId.set(b.id, b);
+    }
+    const live = new Set(at.story.beats.map((p) => p.beat.id));
+    const wrote = last.amended.flatMap((id) => (live.has(id) ? (byId.get(id) ?? []) : []));
+    if (wrote.length !== last.amended.length) return { ...out, said: "What the edit wrote has since been replaced: nothing was undone." };
+    const entry = layerEntryId("edit", chatId, basis.message, basis.swipe, "undo", blobHash(JSON.stringify([last.amended, last.struck])));
+    const pov = povOf(at.world, at.state);
+    const minded = new Set(mindedAt(at.state));
+    // A copy stands where the beat stood; whoever has an agent and perceived it lives it again.
+    const again = (old: Beat, supersedes: string[]): Beat => ({ ...old, id: beatId(entry, old.id), exposure: old.exposure.map((x) => (x.who !== pov && minded.has(x.who) ? { ...x, pending: true as const } : { ...x })), supersedes });
+    const restored: Beat[] = [];
+    for (const w of wrote)
+      for (const id of w.supersedes ?? []) {
+        const old = byId.get(id);
+        if (old && !restored.some((r) => r.id === beatId(entry, old.id))) restored.push(again(old, wrote.filter((x) => x.supersedes?.includes(id)).map((x) => x.id)));
+      }
+    for (const id of last.struck) {
+      const old = byId.get(id);
+      if (old) restored.push(again(old, []));
+    }
+    if (restored.length === 0) return { ...out, said: "The beats the edit replaced couldn't be read: nothing was undone." };
+    out.amended = restored.map((b) => b.id);
+    out.cosmetic = false;
+    const blobs: Blobs = {};
+    const events: PackEvent[] = [...restored.map(beatEvent), editEvent({ message: messageId, text: last.text, cosmetic: false, why: "You undid the author's amendment of this edit: the beats it replaced and struck stand again.", amended: out.amended, struck: [] })];
+    try {
+      await land(rt, chatId, userId, basis, "story.beat", { events, blobs }, entry, "author", { wait: true });
+    } catch (error) {
+      fail("keeping the undo", error);
+      return { ...out, said: "The undo couldn't be kept: the amendment stands." };
+    }
+    const model = o.model ?? portFor(rt, userId);
+    const signal = o.signal ? { signal: o.signal } : {};
+    const gone = new Set(last.amended);
+    const reached = new Set(restored.flatMap((b) => b.exposure.filter((x) => x.pending === true).map((x) => x.who)));
+    const due = mindedAt(at.state).filter((who) => hasAgent(at.world, at.state, who) && (reached.has(who) || [...gone].some((b) => hasOwn(mindV2At(at.state, who).lived, b))));
+    const caught = await Promise.all(
+      due.map(async (who) => {
+        try {
+          const r = await catchUpNow(rt, chatId, userId, who, { model, ...signal, gone: wrote });
+          return r.lived > 0 || r.rewritten > 0 ? [who] : [];
+        } catch (error) {
+          fail(`${own(at.state.entities, who)?.name ?? who}'s catch-up`, error);
+          return [];
+        }
+      }),
+    );
+    out.caughtUp = caught.flat();
+    const head = await headBasis(rt, chatId, userId);
+    if (head) {
+      try {
+        const r = await linkTruths(rt, chatId, userId, head, { who: out.caughtUp, beats: restored, key: ["edit", entry], model, ...signal, ...(o.archive ? { archive: o.archive } : {}) });
+        out.refused.push(...r.refused.map((line) => `the GM's truth-link: ${line}`));
+      } catch (error) {
+        fail("the GM's truth-link", error);
+      }
+    }
+    return { ...out, said: `Undone: ${restored.length} beat${restored.length === 1 ? "" : "s"} the edit replaced or struck stand${restored.length === 1 ? "s" : ""} again${out.caughtUp.length > 0 ? `, and ${out.caughtUp.length} caught up` : ""}.` };
+  } catch (error) {
+    fail("undoing the edit", error);
+    return { ...out, said: "The undo couldn't be read: the amendment stands." };
   }
 }
 

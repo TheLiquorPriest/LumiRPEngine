@@ -69,7 +69,7 @@ Under **Your loopback key**, press **Mint a key**. The key shows once, with **Co
 
 ## 3. Add the loopback connection
 
-LumiRPEngine can't make connections in Lumiverse, so this step is yours. In Lumiverse's **Connections**, add one:
+`loopback up` adds it for you with your own sign-in, since Spindle gives an extension no way to add a connection: where none of your connections is the loopback yet, it adds **LumiRPEngine loopback**, Custom (OpenAI-compatible), at the relay's address with the model `lre-narrator`, and says so. It adds it without a key, because your loopback key shows only once, on your own page: open the connection in **Connections** and put your key in as its API key. Where you already have the loopback's connection, it names it and adds nothing. It also warns you when Lumiverse's "always use the active connection" is on for Edit and Send, where a message sent that way goes on the active connection instead of a depth chat's pin. To add the connection yourself instead, in Lumiverse's **Connections**, add one:
 
 - **Provider:** Custom (OpenAI-compatible)
 - **Base URL:** the relay's address, `http://127.0.0.1:<port>/v1` (the page shows it, with **Copy**)
@@ -120,11 +120,11 @@ From top to bottom:
 
 ## What you see in a chat
 
-The thinking block streams the turn: the author's thinking, each beat as it is decided, each passage's check and the narrator's own reasoning, then the reply. A step that runs a minute with nothing else to show gets a progress line ("The author is setting the scene (2 min)"), only while LumiRPEngine is answering, so the block never claims work that isn't happening.
+The thinking block streams the turn: the author's thinking (the setup's reasoning piece by piece as the provider writes it, where the provider gives its reasoning), each beat as it is decided, each passage's check and the narrator's own reasoning, then the reply. A step that runs a minute with nothing else to show gets a progress line ("The author is setting the scene (2 min)"), only while LumiRPEngine is answering, so the block never claims work that isn't happening.
 
 **Stop** works as usual: the turn keeps the beats whose prose streamed, whichever reached LumiRPEngine first, the relay's word or Lumiverse's Stop. A send stopped before any text leaves no blank reply: LumiRPEngine deletes the empty message Lumiverse staged, and generating again is a new reply. A swipe stopped before any text leaves no blank swipe.
 
-**Swipes and Regenerate** follow your Settings → Swipes choices (Re-narrate or Re-run, the one-shot chip), and the thinking block says which one ran. **Ask what should change on each swipe** doesn't open on a loopback turn: that field opens only when LumiRPEngine stops a swipe and starts it again, which the loopback never does, so a plain swipe goes ahead as it is; **Swipe as…** under the reply takes a word for it. Regenerate in the input area, which deletes the reply first, plays as a Re-run; on a chat on depth it redoes the deleted reply as your swipe setting says, where the new reply answers the same message, unchanged (DEPTH.md).
+**Swipes and Regenerate** follow your Settings → Swipes choices (Re-narrate or Re-run, the one-shot chip), and the thinking block says which one ran. With **Ask what should change on each swipe** on, a plain swipe on the loopback opens the **What should change?** field before its narrator is called, and its reply waits for your answer; leave it empty, or give none within a minute, and the swipe goes ahead as it is. Regenerate in the input area, which deletes the reply first, plays as a Re-run; on a chat on depth it redoes the deleted reply as your swipe setting says, where the new reply answers the same message, unchanged (DEPTH.md).
 
 A failure reads in the chat as the provider's error, in words:
 

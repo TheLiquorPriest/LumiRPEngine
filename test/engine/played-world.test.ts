@@ -40,7 +40,7 @@ const ALLOWED: readonly { file: string; has: string; count: number; why: string 
   { file: "engine/ledger/journal.ts", has: "worlds: (r) => this.env.worlds(r),", count: 1, why: "the fold's input" },
   { file: "engine/ledger/journal.ts", has: "this.env.worlds(scratch.revision)", count: 1, why: "a carried fix, read through `types.context`" },
   { file: "engine/ledger/journal.ts", has: "const world = this.env.worlds(state.revision);", count: 2, why: "`prefixState`, which hands its world out played over its state, and the held writes, read through `types.context` and `resolveFix`" },
-  { file: "engine/ledger/journal.ts", has: "const world = this.env.worlds(head.state.revision);", count: 2, why: "a Continue's suffix, read through `types.context`" },
+  { file: "engine/ledger/journal.ts", has: "const world = this.env.worlds(head.state.revision);", count: 3, why: "a Continue's suffix, and a Continue's scene (`continueScene`), read through `types.context`" },
   { file: "engine/ledger/journal.ts", has: "const world = this.env.worlds(out.state.revision);", count: 1, why: "a layer entry's landing check (`layerVerdict`), read through `types.context`" },
   { file: "engine/ledger/layer.ts", has: "const world = worlds(state.revision);", count: 1, why: "the layer's entries folding after a message, read through `types.context`, as the fold's" },
   { file: "engine/ledger/layer.ts", has: "const world = worlds(scratch.revision);", count: 1, why: "a rebased view's unit tried on a copy, read through `types.context`" },

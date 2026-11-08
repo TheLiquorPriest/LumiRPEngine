@@ -134,7 +134,7 @@ function FilesTab(props: { mind: DepthMindView; c: MindControls }) {
                 f.pinned || f.out || f.review ? (
                   <>
                     {f.pinned ? <Badge tone="accent">Your edit, pinned</Badge> : null}
-                    {f.out ? <Badge tone="warn">Out of mind</Badge> : null}
+                    {f.out ? <Badge tone="warn">{f.reflection ? "A reflection, out of mind" : "Out of mind"}</Badge> : null}
                     {f.review ? <Badge tone="warn">To review</Badge> : null}
                   </>
                 ) : undefined

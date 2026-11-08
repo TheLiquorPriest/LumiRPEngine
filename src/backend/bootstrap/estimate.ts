@@ -39,10 +39,11 @@ function guess(stage: BootstrapStage, chunkTokens: number, minds: number): Rate 
     case "import":
       return null;
     case "historian":
-      return per(1, chunkTokens + 6000, chunkTokens * 0.3);
+      // Its quotes are spans into the chat, not words copied out, and it reads at low effort.
+      return per(1, chunkTokens + 6000, chunkTokens * 0.15);
     case "author":
-      // A light pass per chunk, and a chapter's deep revision spread over its chunks.
-      return per(1 + 1 / CHUNKS_PER_CHAPTER, chunkTokens * 1.3 + 8000 + (chunkTokens * 0.3 * CHUNKS_PER_CHAPTER) / CHUNKS_PER_CHAPTER, 2500 + 4000 / CHUNKS_PER_CHAPTER);
+      // A light pass per chunk, and a chapter's deep revision spread over its chunks; each writes its notebook's edits, never whole files again.
+      return per(1 + 1 / CHUNKS_PER_CHAPTER, chunkTokens * 1.3 + 8000 + (chunkTokens * 0.3 * CHUNKS_PER_CHAPTER) / CHUNKS_PER_CHAPTER, 1000 + 1500 / CHUNKS_PER_CHAPTER);
     case "pov": {
       const calls = Math.max(0, beats * PARTIAL * Math.min(1, minds));
       return per(calls, calls * 1500, calls * 350);
@@ -53,7 +54,8 @@ function guess(stage: BootstrapStage, chunkTokens: number, minds: number): Rate 
       return per(calls, calls * 9000, calls * 1800);
     }
     case "truthlink":
-      return per(1, chunkTokens * 0.3 + 4000 + minds * 800, 1200);
+      // Once a chapter, over its beats, beside every mind's beliefs: a unit is a chapter.
+      return per(1, chunkTokens * 0.3 * CHUNKS_PER_CHAPTER + 4000 + minds * 800, 2400);
     case "reconcile":
       return per(1, 12000 + chunkTokens * 0.3 * CHUNKS_PER_CHAPTER, 1500);
   }
@@ -92,7 +94,7 @@ export function estimateRemaining(i: EstimateInput): BootstrapEstimate {
   const stages: StageEstimate[] = [];
   const priced = new Map<BootstrapStage, number>();
   for (const stage of BOOTSTRAP_STAGES) {
-    const units = stage === "reconcile" ? leftChapters : left;
+    const units = stage === "reconcile" || stage === "truthlink" ? leftChapters : left;
     const m = measured(i.spent[stage], i.units[stage]);
     const g = guess(stage, avgTokens, i.minds);
     const rate = m ?? g;

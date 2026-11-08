@@ -10,7 +10,7 @@ import { livedPovs, mindInput } from "../../src/backend/character-engine";
 import type { ModelPort, PortMessage } from "../../src/backend/depth/port";
 import { actBeatTexts, play, sceneRecall, sceneSoFar, type SceneRead } from "../../src/backend/depth/scene/play";
 import { defaultSettings } from "../../src/backend/settings-store";
-import { MIND_TAKE, exposedBeats, mindFileWrite, mindFilesAt, mindLivedEvent, mindPath, mindTakeEvent, mindV2At, pendingFor, personPath, takesOf } from "../../src/shared/character-engine";
+import { MIND_ASK, MIND_TAKE, exposedBeats, mindFileWrite, mindFilesAt, mindLivedEvent, mindPath, mindTakeEvent, mindV2At, pendingFor, personPath, takesOf } from "../../src/shared/character-engine";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import type { Beat, PlacedBeat, StoryRead } from "../../src/shared/story";
 import { blobHash } from "../../src/shared/stores";
@@ -183,5 +183,18 @@ describe("a character at play", () => {
     expect(takesOf(after, "dev").at(-1)).toMatchObject({ lived: [] });
     expect(takesOf(after, "dev").at(-1)?.beat).toBeUndefined();
     expect(Object.keys(mindV2At(after, "dev").lived).sort()).toEqual(["devAct", "pier"]);
+  });
+
+  test("a character can ask, from its own play, to take stock: recorded for the poll until a reflection writes", async () => {
+    const input = { ...(await mindInput({ registry: reg, blobs }, userId, { state, world, story }, "dev", defaultSettings())), beat: "devAct4", scene: [], reached: [] };
+    const asked = await play(port({ do: null, say: null, take: "Twice now I've lied to Sam.", reflect: "I keep lying to Sam and I don't know who that makes me." }), input);
+    expect(asked.events.filter((e) => e.type === MIND_ASK)).toEqual([{ type: MIND_ASK, data: { who: "dev", at: input.at, why: "I keep lying to Sam and I don't know who that makes me." } }]);
+    const after = fold(reg, world, state, asked.events as LedgerEvent[]);
+    expect(mindV2At(after, "dev").asks).toEqual({ at: input.at, why: "I keep lying to Sam and I don't know who that makes me." });
+    const reflected = mindFileWrite({ who: "dev", path: mindPath("dev", "self"), at: input.at + 5, mode: "reflect", lived: [], about: [] }, "I am someone who lies to his friends, and I mean to stop.");
+    expect(mindV2At(fold(reg, world, after, reflected.events as LedgerEvent[]), "dev").asks).toBeUndefined();
+    // A play that doesn't ask records nothing.
+    const quiet = await play(port({ do: null, say: null, take: "Fine." }), input);
+    expect(quiet.events.some((e) => e.type === MIND_ASK)).toBe(false);
   });
 });

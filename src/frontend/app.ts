@@ -203,7 +203,7 @@ export interface HostBridge {
   components: SpindleComponentsHelper;
   confirm(title: string, message: string, variant: "info" | "warning" | "danger", confirmLabel: string): Promise<boolean>;
   worldBooks(): Promise<{ id: string; name: string }[]>;
-  connections(): Promise<{ id: string; name: string; model: string | null }[]>;
+  connections(): Promise<{ id: string; name: string; model: string | null; provider?: string }[]>;
   download(fileName: string, text: string): void;
   activeChat(): ChatId | null;
   /** Runs the host's Regenerate or Continue (`command:action-regenerate`, `action-continue`, gated by `generation`); false when unavailable. */

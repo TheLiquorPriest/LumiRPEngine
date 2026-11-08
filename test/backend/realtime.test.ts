@@ -195,7 +195,7 @@ interface Run {
 }
 
 /** One line through `realtimeTurn`, every model call answered by role (the watch's own answer, then `exposure`'s), the world given `actions` too, the narration faked to stream what it is given (or as `narration` says); Sam and Dev both at home, face to face, or `apart`: Sam at home and Dev at the shop, on the phone (`"unplaced"`: Dev given no place at all). */
-async function line(o: { watch: unknown; play?: unknown; exposure?: unknown[]; gm?: unknown[]; pov?: unknown; actions?: WorldDoc["actions"]; narration?: Partial<NarrationOutcome>; binds?: RealtimeCtx["binds"]; apart?: true | "unplaced" }): Promise<Run> {
+async function line(o: { watch: unknown; play?: unknown; plays?: unknown[]; exposure?: unknown[]; gm?: unknown[]; pov?: unknown; actions?: WorldDoc["actions"]; narration?: Partial<NarrationOutcome>; binds?: RealtimeCtx["binds"]; onScreen?: RealtimeCtx["onScreen"]; apart?: true | "unplaced" }): Promise<Run> {
   const { h, chat, at: folded, texts } = await office();
   const acted = o.actions ? { ...folded, world: { ...folded.world, actions: { ...folded.world.actions, ...o.actions } } } : folded;
   const placed = (id: string, fields: (typeof acted.state.entities)[string]["fields"]): typeof fields => {
@@ -209,7 +209,7 @@ async function line(o: { watch: unknown; play?: unknown; exposure?: unknown[]; g
     world: o.apart ? { ...acted.world, places: { ...acted.world.places, shop: { id: "shop", name: "Shop", fields: {} } } } : acted.world,
     state: { ...acted.state, entities: Object.fromEntries(Object.entries(acted.state.entities).map(([id, e]) => [id, id === POV || id === "dev" ? { ...e, fields: placed(id, e.fields) } : e])) },
   };
-  const answers: Record<string, unknown[]> = { watch: [o.watch, ...(o.exposure ?? [])], realtime: [o.play ?? PLAYED], gm: o.gm ?? [], pov: o.pov !== undefined ? [o.pov] : [] };
+  const answers: Record<string, unknown[]> = { watch: [o.watch, ...(o.exposure ?? [])], realtime: o.plays ?? [o.play ?? PLAYED], gm: o.gm ?? [], pov: o.pov !== undefined ? [o.pov] : [] };
   const calls: Run["calls"] = [];
   const model: ModelPort = async (role, messages) => {
     calls.push({ role, content: messages.map((m) => m.content).join("\n") });
@@ -236,6 +236,7 @@ async function line(o: { watch: unknown; play?: unknown; exposure?: unknown[]; g
     notebook: NOTEBOOK,
     settings: defaultSettings(),
     ...(o.binds ? { binds: o.binds } : {}),
+    ...(o.onScreen ? { onScreen: o.onScreen } : {}),
     narrate: () => {
       narrated++;
       return {
@@ -300,6 +301,35 @@ describe("one line of real-time dialogue", () => {
     expect(run.lines.some((l) => /^Dev answered in \d+\.\d s beside the author's watch \(\d+\.\d s\); the narrator rendered the exchange in 1\.2 s and the GM checked it in 0\.4 s\. The line took \d+\.\d s\.$/.test(l))).toBe(true);
   });
 
+  test("face to face the character sees him by default; the author may exclude him from its view, and it answers again from his spoken words alone (S12)", async () => {
+    const seen = await line({ watch: THROUGH });
+    expect(seen.calls.find((c) => c.role === "realtime")?.content).toContain("you see him as well as hear him");
+
+    const hidden = await line({ watch: { ...THROUGH, unseen: "The power is out; the office is dark." }, plays: [PLAYED, PLAYED] });
+    const played = hidden.calls.filter((c) => c.role === "realtime");
+    expect(played).toHaveLength(2);
+    expect(played[1]?.content).toContain("you hear only his voice");
+    expect(played[1]?.content).toContain("So, Dev. What did the auditor want?");
+    expect(played[1]?.content).not.toContain("leans on the doorframe");
+    if (hidden.outcome.kind !== "exchange") throw new Error(`a ${hidden.outcome.kind}`);
+    const [said] = beatsIn(hidden.outcome.events) as [Beat];
+    expect(said.exposure.find((x) => x.who === "dev")).toMatchObject({ channel: "hearing", reach: "whole" });
+    expect(said.exposure.find((x) => x.who === "dev")?.also).toBeUndefined();
+
+    // Excluded from view with nothing said aloud, there is nothing for it to answer: the author reads the line in a scene.
+    const silent = await line({ watch: { ...THROUGH, line: { what: "Sam waves.", said: null, did: "waves" }, unseen: "Dark." }, plays: [PLAYED, PLAYED] });
+    expect(silent.outcome.kind).toBe("takeover");
+  });
+
+  test("the on-screen allowance spent, a line plays as a scene where the author plays the character (W17)", async () => {
+    const run = await line({ watch: THROUGH, onScreen: { limit: 2, spent: 2, interval: "week" } });
+    expect(run.outcome.kind).toBe("takeover");
+    expect(run.calls).toEqual([]);
+    if (run.outcome.kind === "takeover") expect(run.outcome.put).toContain("on-screen allowance is spent");
+    const left = await line({ watch: THROUGH, onScreen: { limit: 2, spent: 1, interval: "week" } });
+    expect(left.outcome.kind).toBe("exchange");
+  });
+
   test("a line the watch takes into a scene writes nothing: the character's dropped answer never reaches its mind", async () => {
     const run = await line({ watch: { takeover: "He reaches across the desk for the ledger: the GM must resolve that.", line: null } });
     expect(run.outcome).toEqual({ kind: "takeover", why: "He reaches across the desk for the ledger: the GM must resolve that." });
@@ -322,8 +352,8 @@ describe("one line of real-time dialogue", () => {
     const ring = beats.at(-1) as Beat;
     expect(ring.by).toEqual({ turn: "turn-1", decided: "author" });
     // Dev is named back to his id, and hears it next line; someone not here is left out, and the thinking block says so.
-    // Each hears it alone, so each lives what could be heard of it, never what there was to see (LIVE3c L3c-4): here the plain fallback, the render unanswered.
-    const rang = { channel: "hearing", reach: "whole", pov: blobHash("Something reached you by hearing.") } as const;
+    // Each hears it alone, so each lives what could be heard of it, never what there was to see (LIVE3c L3c-4): the render unanswered, no rule writes their points of view; they are left unwritten.
+    const rang = { channel: "hearing", reach: "whole" } as const;
     expect(ring.exposure).toEqual([{ who: "sam", ...rang }, { who: "dev", ...rang, pending: true }]);
     expect(run.lines.some((l) => l.includes("“nobody”"))).toBe(true);
     expect(run.moments.map((m) => m.mark)).toEqual([0, 1]);
@@ -358,7 +388,7 @@ describe("one line of real-time dialogue", () => {
     const [silenced, truck] = beatsIn(run.outcome.events).slice(-2) as [Beat, Beat];
     expect(run.outcome.blobs[silenced.deed ?? ""]).toBe(deed);
     // Left out by the watch, Dev still perceives his own act, whole, pending for his next play, and lives it as he did it.
-    expect(silenced.exposure).toEqual([{ who: "sam", channel: "hearing", reach: "whole", pov: blobHash("Something reached you by hearing.") }, { who: "dev", channel: "sight", reach: "whole", pending: true }]);
+    expect(silenced.exposure).toEqual([{ who: "sam", channel: "hearing", reach: "whole" }, { who: "dev", channel: "sight", reach: "whole", pending: true }]);
     expect(reachOf(silenced, "dev")).toMatchObject({ as: "deed", whole: true, text: silenced.deed });
     // A deed for a beat no one acts in is left out, and said.
     expect(truck.deed).toBeUndefined();
@@ -397,7 +427,7 @@ describe("one line of real-time dialogue", () => {
     expect(asked).toContain("Nothing much. The usual.");
     const [, answered, turned] = beatsIn(run.outcome.events) as [Beat, Beat, Beat];
     // Dev perceives his own act whole (named again, he is left out); Sam only what the author says reached him: the words, never the hand under the desk.
-    expect(answered.exposure).toEqual([{ who: "dev", channel: "hearing", reach: "whole" }, { who: "sam", channel: "hearing", reach: "whole", pov: blobHash("You hear: “Nothing much. The usual.”") }]);
+    expect(answered.exposure).toEqual([{ who: "dev", channel: "hearing", reach: "whole" }, { who: "sam", channel: "hearing", reach: "whole" }]);
     expect(turned.by).toEqual({ turn: "turn-1", decided: "gm" });
     expect(turned.exposure).toEqual([{ who: "dev", channel: "touch", reach: "whole", pending: true }]);
     expect(run.lines.some((l) => /^The author wrote who perceived Dev's answer in \d+\.\d s\.$/.test(l))).toBe(true);
@@ -418,8 +448,8 @@ describe("one line of real-time dialogue", () => {
     expect(rendered?.quotes).toBe("Ring Ray now. Two bottles and the caliper.");
     // What he lives of it is his point of view, never what there was to see.
     expect(reachOf(answered, POV)).toMatchObject({ channel: "hearing", whole: true, text: blobHash(heard) });
-    // Dev hears his line alone too: the words, never him at the doorframe (here the plain fallback, the render answered once).
-    expect(said.exposure.find((x) => x.who === "dev")).toEqual({ who: "dev", channel: "hearing", reach: "whole", pov: blobHash("You hear: “So, Dev. What did the auditor want?”") });
+    // Dev hears his line alone too: the render answered once, so no rule writes his point of view; it is left unwritten.
+    expect(said.exposure.find((x) => x.who === "dev")).toEqual({ who: "dev", channel: "hearing", reach: "whole" });
   });
 
   test("a partner the state doesn't place is apart, never face to face: his phone answer reaches the player character by hearing alone (the last review, C-2)", async () => {

@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { seedCore } from "../../src/backend/character-agent";
 import type { ModelPort } from "../../src/backend/depth/port";
 import type { AfterRt } from "../../src/backend/depth/scene/after";
-import { replyEdited } from "../../src/backend/depth/scene/edit";
+import { editUndone, replyEdited } from "../../src/backend/depth/scene/edit";
 import { defaultSettings } from "../../src/backend/settings-store";
 import { AUTHOR_EDIT } from "../../src/shared/author";
 import { exposedBeats, livedCorpus, memoryPath, mindFileWrite, mindLivedEvent, mindPath, mindV2At, personPath } from "../../src/shared/character-engine";
@@ -135,6 +135,52 @@ describe("the player's edit of a depth reply", () => {
     expect(model.sent.author?.[1]).toContain(`The reply as it was:\n${EDITED}`);
     expect(model.sent.author?.[1]).toContain(NINE_WHAT);
     expect((await h.service.readEvents(chat, userId, [AUTHOR_EDIT])).map((e) => ("data" in e.event ? e.event.data.cosmetic : null))).toEqual([false, true]);
+  });
+
+  test("Undo on an amending edit (M-16): what it replaced and struck stands again as a reverse amendment, who lived the amendment catches up, and a second Undo is refused", async () => {
+    const h = new Harness("fresh", { packs: [storyPack, authorPack] });
+    const stored = new Map<string, string>([REPLY, EDITED, PIER, CUP].map((t) => [blobHash(t), t]));
+    const rt = rtOf(h, stored);
+    const userId = h.host.userId;
+    const chat = await h.newChat();
+    const greeting = await h.service.basisFor(chat, userId);
+    if (!greeting) throw new Error("no greeting");
+    const core = seedCore({ who: "dev", at: 0, source: "card", text: "Dev runs the cafe." });
+    for (const t of Object.values(core.blobs)) stored.set(blobHash(t), t);
+    expect((await h.service.landLayer(chat, userId, { id: "core", basis: greeting, kind: "minds.v2.write", events: core.events })).status).toBe("landed");
+    await h.send(chat, "The pier floods at eight, Dev.");
+    const basis = await h.service.basisFor(chat, userId);
+    if (!basis) throw new Error("no basis");
+    const passage = passageEvent({ moment: 0, index: 0, beats: ["pier", "cup"], pov: "sam", text: blobHash(REPLY), drafts: [{ text: blobHash(REPLY), faithful: true }] });
+    expect((await h.service.landLayer(chat, userId, { id: "turn", basis, kind: "story.beat", events: [beatEvent(beat("pier", "sam", PIER, "dev")), beatEvent(beat("cup", "dev", CUP, "sam")), passage, mindLivedEvent({ who: "dev", beats: ["pier", "cup"], at: 600, mode: "play" })] })).status).toBe("landed");
+    const amended = beatId(layerEntryId("edit", chat, basis.message, basis.swipe, "0", blobHash(EDITED)), "0");
+    const model = port({
+      author: [{ cosmetic: false, amend: [{ replaces: ["b1"], ref: "e1", by: "author", actors: ["sam"], act: "said", what: NINE_WHAT, deed: "Sam tells Dev the pier floods at nine.", surface: "Sam says the pier floods at nine.", quotes: "The pier floods at nine.", exposure: [{ who: "dev", channel: "hearing", reach: "partial" }] }], strike: ["b2"], why: "He moved the flood to nine." }],
+      pov: [{ povs: { dev: HEARD } }],
+      character: [{ memories: [{ lived: [amended], about: ["sam"], text: "Sam said something about the pier at nine." }] }, { memories: [{ lived: [], about: ["sam"], text: "Sam said the pier floods at eight after all." }] }],
+    });
+    expect(await replyEdited(rt, chat, userId, basis.message, EDITED, { model })).toMatchObject({ cosmetic: false, amended: [amended], struck: ["cup"] });
+
+    const out = await editUndone(rt, chat, userId, basis.message, { amended: [amended], struck: ["cup"] }, { model });
+    expect(out.failed).toEqual([]);
+    const undo = layerEntryId("edit", chat, basis.message, basis.swipe, "undo", blobHash(JSON.stringify([[amended], ["cup"]])));
+    const again = [beatId(undo, "pier"), beatId(undo, "cup")];
+    expect(out.amended).toEqual(again);
+    expect(out.caughtUp).toEqual(["dev"]);
+    const at = await h.service.foldAtBasis(chat, userId, basis);
+    if (!at) throw new Error("no fold");
+    // The amendment is replaced; the pier and the cup stand again at their own minute, as they were written.
+    const here = at.story.beats.filter((p) => p.from.messageId === basis.message).map((p) => p.beat);
+    expect(here.map((b) => b.id).sort()).toEqual([...again].sort());
+    expect(here.find((b) => b.id === again[0])).toMatchObject({ at: 600, what: blobHash(PIER), supersedes: [amended] });
+    expect(here.find((b) => b.id === again[1])).toMatchObject({ what: blobHash(CUP), supersedes: [] });
+    expect(at.story.replaced.map((r) => r.id)).toContain(amended);
+    // Dev, who lived the amendment, lives the pier again, told how the amendment had reached him.
+    expect(model.sent.character?.[1]).toContain(PIER);
+    expect(model.sent.character?.[1]).toContain(HEARD);
+    // The last edit is now the undo: the chip's Undo again is refused, and lands nothing.
+    expect((await editUndone(rt, chat, userId, basis.message, { amended: [amended], struck: ["cup"] }, { model })).said).toContain("nothing was undone");
+    expect((await h.service.readEvents(chat, userId, [AUTHOR_EDIT])).map((e) => ("data" in e.event ? e.event.data.amended : null))).toEqual([[amended], again]);
   });
 
   test("an edit held behind a swipe of the reply it amends waits for that swipe: refused as its window closes, it is said kept by no one, and no one catches up on it (the final correctness review, finding 3)", async () => {
@@ -420,5 +466,33 @@ describe("the player's edit of a depth reply", () => {
     const after = await h.core(chat);
     expect(after.journal.tombstones).toEqual([]);
     expect(after.journal.messages[reply.id]?.ledger.swipes[String(reply.swipeId)]?.seq).toBe(seq);
+  });
+
+  test("the author orders who catches up after an amendment (S9): one it leaves out waits for its poll, out of mind", async () => {
+    const h = new Harness("fresh", { packs: [storyPack, authorPack] });
+    const stored = new Map<string, string>([REPLY, EDITED, PIER, CUP].map((t) => [blobHash(t), t]));
+    const rt = rtOf(h, stored);
+    const userId = h.host.userId;
+    const chat = await h.newChat();
+    const greeting = await h.service.basisFor(chat, userId);
+    if (!greeting) throw new Error("no greeting");
+    const core = seedCore({ who: "dev", at: 0, source: "card", text: "Dev runs the cafe." });
+    for (const t of Object.values(core.blobs)) stored.set(blobHash(t), t);
+    expect((await h.service.landLayer(chat, userId, { id: "core", basis: greeting, kind: "minds.v2.write", events: core.events })).status).toBe("landed");
+    await h.send(chat, "The pier floods at eight, Dev.");
+    const basis = await h.service.basisFor(chat, userId);
+    if (!basis) throw new Error("no basis");
+    const passage = passageEvent({ moment: 0, index: 0, beats: ["pier", "cup"], pov: "sam", text: blobHash(REPLY), drafts: [{ text: blobHash(REPLY), faithful: true }] });
+    expect((await h.service.landLayer(chat, userId, { id: "turn", basis, kind: "story.beat", events: [beatEvent(beat("pier", "sam", PIER, "dev")), beatEvent(beat("cup", "dev", CUP, "sam")), passage, mindLivedEvent({ who: "dev", beats: ["pier", "cup"], at: 600, mode: "play" })] })).status).toBe("landed");
+    const model = port({
+      author: [{ cosmetic: false, amend: [], strike: ["b2"], catchup: [], why: "He took out the cup; Dev can catch up when the poll says so." }],
+      character: [{ memories: [{ lived: ["pier"], about: [], text: "Never asked." }] }],
+    });
+    const out = await replyEdited(rt, chat, userId, basis.message, EDITED, { model });
+    expect(out).toMatchObject({ cosmetic: false, struck: ["cup"], caughtUp: [], failed: [] });
+    // The author was told who lived the beats; no one it left out was asked anything.
+    expect(model.sent.author?.[0]).toContain("Who lived these beats with a mind of their own:");
+    expect(model.sent.author?.[0]).toContain("dev");
+    expect(model.sent.character).toBeUndefined();
   });
 });

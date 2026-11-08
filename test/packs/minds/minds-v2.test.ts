@@ -223,7 +223,7 @@ describe("the point-of-view render and the card", () => {
     const model = port({ povs: { dev: POV_B2, mira: "not asked" } });
     const r = await povRender(model, { beat: { id: "b2", surface: SURFACE.b2, quotes: QUOTES.b2, actors: [], exposure: [{ who: "dev", channel: "hearing", reach: "partial" }] }, staging: [{ who: "dev", where: "behind the counter", doing: "wiping cups", occluded: "the kitchen door" }], who: ["dev"], refs: { dev: { self: "Dev", present: {}, absent: [], strangers: [], world: [] } } });
     expect(r.povs).toEqual({ dev: POV_B2 });
-    expect(r.fellBack).toEqual({});
+    expect(r.pending).toEqual({});
     expect(model.asked[0]?.role).toBe("pov");
     const sent = model.asked[0]?.messages.map((m) => m.content).join("\n") ?? "";
     expect(sent).toContain(SURFACE.b2);

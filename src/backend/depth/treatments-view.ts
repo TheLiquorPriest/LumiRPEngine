@@ -35,7 +35,7 @@ import type { Runtime } from "../runtime";
 import { costTokens, dayOf, daySpendOf } from "./budget";
 import { chatBudget } from "./chat-allowances";
 import { ASK_TYPES, askChipsOn, asksOn, askWords } from "./offscreen/asks";
-import { DRAFT_TYPES, draftsOn } from "./offscreen/drafts";
+import { DRAFT_TYPES, draftsOn, draftWithTexts, type DraftBlobs } from "./offscreen/drafts";
 import { spentIn, type JobsRt } from "./offscreen/jobs";
 import { addCost, intervalAt, INTERVAL_MINUTES, NO_COST, SPEND_TYPES } from "./spend";
 import { chainNumbers } from "./chat-numbers";
@@ -43,6 +43,8 @@ import { chainNumbers } from "./chat-numbers";
 /** What the Treatments view reads of the runtime (`Runtime` is one): the chat's chain and fold, the asks' chips off the chat's core, the budget dial, and the host's day store. */
 export type TreatmentsRt = Pick<Runtime, "host"> & {
   readonly settings: { get(userId: UserId): Promise<UserSettings> };
+  /** Where its drafts' words are read from. */
+  readonly blobs: DraftBlobs;
   readonly ledger: Pick<JobsRt["ledger"], "basisFor" | "foldAtBasis" | "chainBases"> & {
     with(chatId: ChatId, userId: UserId, op: (core: LedgerCore, observed: ChainMessage[]) => void | Promise<void>): Promise<void>;
   };
@@ -159,7 +161,7 @@ export async function treatmentsView(rt: TreatmentsRt, chatId: ChatId, userId: U
       if (typeof id === "string" && !firstAt.has(id)) firstAt.set(id, e.index);
     }
   }
-  const drafts = draftsOn(at.events);
+  const drafts = await Promise.all(draftsOn(at.events).map(async (d) => ({ ...d, draft: await draftWithTexts(rt.blobs, userId, d.draft) })));
   const draftById = new Map(drafts.map((d) => [d.draft.id, d]));
   const log: (DepthLogEntry & { index: number })[] = [];
 

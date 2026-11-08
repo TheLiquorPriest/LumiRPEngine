@@ -12,11 +12,12 @@
 //
 // When a ceiling binds the work spends less and says what it put off, never skipping silently. A
 // turn's author reads what the ceilings leave it at its setup and each step (`budgetWords`) and
-// spends by it, the author's call (§4.4, §6.5): once one binds, whoever still plays as their own
-// agent is played by the author from then on, and the scene plays on as far as the author judges,
-// within the turn's steps; a real-time line plays as a scene. The step after the reply puts off
-// what it hasn't started, and off-screen work waits. What binds is arithmetic, and so is that slide
-// to the cheaper rung; what the scene does with what is left is the author's.
+// spends by it, the author's call (§4.4, §6.5): once one binds, the author is told what the turn has
+// left and asked who slides down the ladder and how far, or to end the scene at the next beat; anyone
+// its answer still has due as their own agent ends the scene at the next beat, the ceiling the hard
+// stop; a real-time line plays as a scene. The step after the reply puts off what it hasn't started,
+// and off-screen work waits. What binds is arithmetic; who slides, and what the scene does with what
+// is left, is the author's.
 
 import { AUTHOR_SPEND, authorData, type SpendCost, type SpendData } from "../../shared/author";
 import type { DepthBudget } from "../../shared/depth-settings";
@@ -25,6 +26,7 @@ import type { UserId } from "../../shared/ids";
 import { isRecord } from "../../shared/json";
 import type { LedgerEvent } from "../../shared/ledger";
 import type { HostPort } from "../host";
+import { onScreenSpent } from "./spend";
 
 /** Where a user's spend today is kept (their own storage). */
 export const DAY_SPEND_PATH = "depth/day-spend.json";
@@ -169,23 +171,52 @@ export function ceilingRoom(budget: Pick<DepthBudget, "perTurn" | "perDay">, tur
 export interface TurnBudget {
   binds(turnTokens: number): CeilingBind | null;
   left(turnTokens: number): CeilingRoom;
+  /** The on-screen allowance this story interval (W17), as the turn began; null or absent where none is set. */
+  onScreen?: OnScreenAllowance | null;
+}
+
+/** The on-screen allowance (W17): turns per story interval in which someone on screen plays as their own agent, and how many this interval has had. */
+export interface OnScreenAllowance {
+  limit: number;
+  spent: number;
+  interval: DepthBudget["interval"];
+}
+
+/** The on-screen allowance of the story interval holding minute `at`, counted from the chain's live spends (`spendsOn`); null where Settings → Depth → Budget → On screen sets none. */
+export function onScreenAllowance(budget: Pick<DepthBudget, "onScreen" | "interval">, spends: readonly SpendData[], at: number): OnScreenAllowance | null {
+  return budget.onScreen === "none" ? null : { limit: budget.onScreen, spent: onScreenSpent(spends, budget.interval, at), interval: budget.interval };
+}
+
+/** Whether the on-screen allowance is spent: the scene's author casts no one as their own agent (`authorSetup` honours it). */
+export function onScreenOut(allowance: OnScreenAllowance): boolean {
+  return allowance.spent >= allowance.limit;
+}
+
+/** The on-screen allowance in the author's words: what is left, or that it is spent and what the scene does about it. */
+export function onScreenWords(a: OnScreenAllowance): string {
+  return onScreenOut(a)
+    ? `The on-screen allowance is spent: this story ${a.interval} has had ${a.spent} turns with someone on screen playing as their own agent, its allowance of ${a.limit} (Settings → Depth → Budget → On screen). Cast no one as their own agent this turn: play them yourself, or handle them as part of the world.`
+    : `The on-screen allowance: ${a.limit - a.spent} of ${a.limit} turns with someone on screen playing as their own agent left this story ${a.interval} (Settings → Depth → Budget → On screen). Spend them where the story needs them.`;
 }
 
 /**
  * The budget as a turn's author reads it (§6.5), once the turn has spent `turnTokens`: what each
- * ceiling leaves, or the one that binds and what the turn does about it; null when neither ceiling
- * is set, so nothing would ever bind.
+ * ceiling leaves, or the one that binds and what the turn does about it, then the on-screen
+ * allowance; null when no ceiling and no allowance is set, so nothing would ever bind.
  */
 export function budgetWords(budget: TurnBudget, turnTokens: number): string | null {
+  const screen = budget.onScreen ? onScreenWords(budget.onScreen) : null;
   const bind = budget.binds(turnTokens);
-  if (bind) return `The budget binds: ${bind.words}. Spend less from here: anyone you would give their own agent (a call each time they act) you play yourself (one call for several) or handle as part of the world. Anyone still playing as their own agent you play from now on. How far the scene goes this turn is yours to judge.`;
+  if (bind) return [`The budget binds: ${bind.words}. Spend less from here: anyone you would give their own agent (a call each time they act) you play yourself (one call for several) or handle as part of the world. Who of those still playing as their own agent slides down the ladder, and how far, is yours to say; anyone still due as their own agent ends the scene at the next beat. How far the scene goes this turn is yours to judge.`, ...(screen ? [screen] : [])].join(" ");
   const left = budget.left(turnTokens);
   const parts = [...(left.turn !== null ? [`this turn has spent ${tokensText(turnTokens)} tokens, with about ${tokensText(left.turn)} left under its ceiling (Settings → Depth → Budget → Per turn)`] : []), ...(left.day !== null ? [`today's depth work has about ${tokensText(left.day)} tokens left under its ceiling (Per day)`] : [])];
-  return parts.length > 0 ? `The budget: ${parts.join("; ")}. Spend by it: once a ceiling binds, whoever still plays as their own agent is played by you.` : null;
+  const ceilings = parts.length > 0 ? `The budget: ${parts.join("; ")}. Spend by it: once a ceiling binds, you are asked who slides down the ladder.` : null;
+  const all = [...(ceilings ? [ceilings] : []), ...(screen ? [screen] : [])];
+  return all.length > 0 ? all.join(" ") : null;
 }
 
-/** The budget of one piece of work for `userId`: the ceilings as Settings → Depth sets them, against today's spend (read before it starts) and the work's own. */
-export async function budgetFor(day: DaySpend, userId: UserId, budget: Pick<DepthBudget, "perTurn" | "perDay">): Promise<TurnBudget> {
+/** The budget of one piece of work for `userId`: the ceilings as Settings → Depth sets them, against today's spend (read before it starts) and the work's own; and the on-screen allowance where the work is a turn (`onScreenAllowance`). */
+export async function budgetFor(day: DaySpend, userId: UserId, budget: Pick<DepthBudget, "perTurn" | "perDay">, onScreen?: OnScreenAllowance | null): Promise<TurnBudget> {
   await day.load(userId);
-  return { binds: (turnTokens) => ceilingBinds(budget, turnTokens, day.tokens(userId)), left: (turnTokens) => ceilingRoom(budget, turnTokens, day.tokens(userId)) };
+  return { binds: (turnTokens) => ceilingBinds(budget, turnTokens, day.tokens(userId)), left: (turnTokens) => ceilingRoom(budget, turnTokens, day.tokens(userId)), ...(onScreen ? { onScreen } : {}) };
 }

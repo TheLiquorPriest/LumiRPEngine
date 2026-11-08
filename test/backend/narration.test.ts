@@ -10,9 +10,9 @@ import { blobHash } from "../../src/shared/stores";
 import { type Beat, beatEvent, type BeatDecider, beatId, beatOf, type Exposure, stagingEvent, storyBlobs } from "../../src/shared/story";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
-import type { ModelPort, PortAnswer, PortMessage } from "../../src/backend/depth/port";
-import type { Moment, NarrationInput, RenderBeat, TurnSink } from "../../src/backend/depth/scene/contract";
-import { Narration, renarrateMoments } from "../../src/backend/depth/scene/narration";
+import type { ModelPort, PortMessage } from "../../src/backend/depth/port";
+import type { Moment, NarrationInput, NarrationOutcome, RenderBeat, TurnSink } from "../../src/backend/depth/scene/contract";
+import { checkRoom, Narration, renarrateMoments } from "../../src/backend/depth/scene/narration";
 import { depthPort } from "../../src/backend/depth-model-host";
 import type { QuietResult } from "../../src/backend/host";
 import { defaultSettings } from "../../src/backend/settings-store";
@@ -169,26 +169,66 @@ describe("the narrator's render", () => {
     expect(said(unread, "check").length).toBe(2);
   });
 
-  test("a check cut off at its answer room is asked again with more room, never at the same limit (LIVE3 L3a-9)", async () => {
-    const run = async (first: Partial<PortAnswer>): Promise<{ asked: (number | undefined)[]; faithful: boolean | null | undefined; log: { kind: string; text: string }[] }> => {
-      const asked: (number | undefined)[] = [];
-      const port = (async (role, _messages, opts) => {
-        if (role !== "check") return { text: "Maya turns away." };
-        asked.push(opts?.maxTokens);
-        return asked.length === 1 ? { text: '{"faithful": tr', finish: "length", ...first } : { text: JSON.stringify({ faithful: true }), ...(opts?.maxTokens !== undefined ? { room: opts.maxTokens } : {}) };
+  test("a check asks at low effort and a room sized to what it reads, and one cut off at its room is checked in two parts against the same beats (LIVE GAPS)", async () => {
+    const run = async (passage: string): Promise<{ calls: { messages: PortMessage[]; effort: unknown; maxTokens: number | undefined }[]; told: NarrationOutcome["told"]; log: { kind: string; text: string }[] }> => {
+      const calls: { messages: PortMessage[]; effort: unknown; maxTokens: number | undefined }[] = [];
+      const port = (async (role, messages, opts) => {
+        if (role !== "check") return { text: passage };
+        calls.push({ messages, effort: opts?.effort, maxTokens: opts?.maxTokens });
+        // As DeepSeek answered live: the first check spends its whole room reasoning and says nothing.
+        return calls.length === 1 ? { text: "", finish: "length", reasoning: "Weighing every beat…", ...(opts?.maxTokens !== undefined ? { room: opts.maxTokens } : {}) } : { text: JSON.stringify({ faithful: true }) };
       }) as ModelPort;
       const { sink, log } = sinkLog();
       const n = new Narration({ model: port, sink, throughOf: () => 0 }, input(new AbortController().signal));
-      n.add({ beats: [beat("b1", { exposure: WHOLE })], mark: 0 });
-      return { asked, faithful: (await n.drain()).told[0]?.faithful, log };
+      n.add({ beats: [beat("b1", { exposure: WHOLE }), beat("b2", { exposure: WHOLE, order: 1 })], mark: 0 });
+      return { calls, told: (await n.drain()).told, log };
     };
-    // Cut off at the role's own room (the Fast model's 8,192): asked again at twice it, and read.
-    const cut = await run({ room: 8192 });
-    expect(cut.asked).toEqual([undefined, 16384]);
-    expect(cut.faithful).toBe(true);
-    expect(cut.log.some((l) => l.text.includes("GM's check of passage 1 was cut off at its answer room of 8,192 tokens; asking again with room for 16,384."))).toBe(true);
-    // Held to a limit the provider stated, there is no more room to give it: asked again as it was.
-    expect((await run({ room: 4096, capped: { asked: 8192, limit: 4096 } })).asked).toEqual([undefined, undefined]);
+    const long = (s: string): string => Array.from({ length: 20 }, () => s).join(" ");
+    const { calls, told, log } = await run(`Maya turns away from the till. ${long("The rain runs down the glass behind her.")}\n\nShe wipes the counter, slow, and says nothing. ${long("The cloth squeaks on the old wood.")}`);
+    // Every call at low effort, its room sized to its own input: never the role's 8,192, never twice it.
+    expect(calls.length).toBe(3);
+    for (const c of calls) {
+      expect(c.effort).toBe("low");
+      expect(c.maxTokens).toBe(checkRoom(c.messages));
+      expect([8192, 16384]).not.toContain(c.maxTokens ?? 0);
+    }
+    // After the cut, two part-checks, each reading less than the whole and told which part it reads, against every beat.
+    const size = (c: { messages: PortMessage[] }): number => c.messages.reduce((s, m) => s + m.content.length, 0);
+    const [whole, first, second] = calls.map((c) => c.messages.map((m) => m.content).join("\n"));
+    expect(size(calls[1]!)).toBeLessThan(size(calls[0]!));
+    expect(size(calls[2]!)).toBeLessThan(size(calls[0]!));
+    expect(whole).toContain("She wipes the counter");
+    expect(first).toContain("you read part 1 of 2");
+    expect(first).not.toContain("She wipes the counter");
+    expect(second).toContain("you read part 2 of 2");
+    expect(second).not.toContain("Maya turns away");
+    for (const part of [first, second]) expect(part).toContain("b2: what happened");
+    // Faithful in both parts, the passage is faithful: no chip.
+    expect(told[0]?.faithful).toBe(true);
+    expect(told[0]?.departs).toBeUndefined();
+    expect(log.some((l) => l.text.includes(`GM's check of passage 1 was cut off at its answer room of ${(calls[0]!.maxTokens ?? 0).toLocaleString("en-US")} tokens; checking it in two parts.`))).toBe(true);
+    expect(log.some((l) => l.text.includes("GM's check of passage 1, part 2 of 2: faithful."))).toBe(true);
+    // One sentence can't split: cut off, it streams unchecked, with its chip, and isn't asked again.
+    const one = await run("Maya turns away.");
+    expect(one.calls.length).toBe(1);
+    expect(one.told[0]?.faithful).toBeNull();
+    expect(one.told[0]?.departs).toBe("This passage couldn't be checked against its beats.");
+  });
+
+  test("a room the user set the check in Settings → Depth stands over the one sized to what it reads, and a check cut off at it is checked in parts within it (LIVE3 L3a-9)", async () => {
+    const rooms: (number | undefined)[] = [];
+    const passage = "Maya turns away from the till. The rain runs down the glass.\n\nShe wipes the counter, slow, and says nothing.";
+    const port = (async (role, _messages, opts) => {
+      if (role !== "check") return { text: passage };
+      rooms.push(opts?.maxTokens);
+      return rooms.length === 1 ? { text: "", finish: "length", ...(opts?.maxTokens !== undefined ? { room: opts.maxTokens } : {}) } : { text: JSON.stringify({ faithful: true }) };
+    }) as ModelPort;
+    const n = new Narration({ model: port, sink: sinkLog().sink, throughOf: () => 0 }, input(new AbortController().signal, { settings: { redrafts: 2, thinking: "whole", ownCheckRoom: 3000 } }));
+    n.add({ beats: [beat("b1", { exposure: WHOLE })], mark: 0 });
+    const out = await n.drain();
+    // The whole at the user's room, then each part within it, never more.
+    expect(rooms).toEqual([3000, 3000, 3000]);
+    expect(out.told[0]?.faithful).toBe(true);
   });
 
   test("the port says the room each answer was made at: the role's own, else what the stage asked (LIVE3 L3a-9)", async () => {

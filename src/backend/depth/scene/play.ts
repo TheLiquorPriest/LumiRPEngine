@@ -19,7 +19,7 @@
 // decided this one.
 
 import { CHARACTER_TEXT } from "../../../shared/character-prompts";
-import { exposedBeats, livedCorpus, mindLivedEvent, mindTakeEvent, mindV2At, pendingFor, reachOf, recallSearch, takesOf, MIND_WRITE, type ExposedBeat, type Reach, type RecallDoc, type RecallHit } from "../../../shared/character-engine";
+import { exposedBeats, livedCorpus, mindAskEvent, mindLivedEvent, mindTakeEvent, mindV2At, pendingFor, reachOf, recallSearch, takesOf, MIND_WRITE, type ExposedBeat, type Reach, type RecallDoc, type RecallHit } from "../../../shared/character-engine";
 import type { EntityId, UserId } from "../../../shared/ids";
 import { hasOwn } from "../../../shared/json";
 import { blobHash } from "../../../shared/stores";
@@ -78,7 +78,7 @@ export interface PlayOut extends StageOut {
 const RECALLS = 2;
 /** The documents a recall gives back at most. */
 const RECALL_HITS = 5;
-/** What reached a character that a play lives at most, newest kept: the rest stays pending for its catch-up. */
+/** What reached a character that a play lives at most, newest kept, where no `limit` is given: the rest stays pending for its catch-up. Every play in a turn, a real-time line and an episode passes Settings → Depth → Points of view per play (`depth.reached`) instead. */
 const REACHED_MOST = 40;
 
 // ------------------------------------------------------------------ the scene as it lived it
@@ -256,6 +256,9 @@ export async function play(model: ModelPort, input: PlayInput): Promise<PlayOut>
   w.single("now", "now", answer.now);
   const keep = textIn(answer.keep);
   if (keep !== null) w.memory(keep, lived, addressed, input.at);
+  // Its own ask to take stock (§4.4, Reflect "or when it asks"), recorded for the poll, which decides.
+  const askReflect = textIn(answer.reflect);
+  if (askReflect !== null) w.events.push(mindAskEvent({ who: input.who, at: input.at, why: askReflect }));
   // Its writes ride the turn's record, which keeps no reasoning of its own: each carries the play's, so Minds → Writes shows why it wrote them.
   const why = reasoning.join("\n\n");
   const hash = why !== "" ? blobHash(why) : null;

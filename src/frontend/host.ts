@@ -52,7 +52,7 @@ export function createHost(ctx: SpindleFrontendContext): Host {
     async connections() {
       if (!ctx.connections) return [];
       const profiles = await ctx.connections.list();
-      return profiles.map((profile) => ({ id: profile.id, name: profile.name, model: profile.model || null }));
+      return profiles.map((profile) => ({ id: profile.id, name: profile.name, model: profile.model || null, provider: profile.provider }));
     },
     download(fileName, text) {
       const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));

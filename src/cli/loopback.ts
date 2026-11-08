@@ -30,7 +30,7 @@ import type { RelayMode } from "../shared/loopback";
 import { LOOPBACK_MODEL, RELAY_NAME, relayBase, relayUnitName, shellWord, SYSTEM_CONFIG_DIR, SYSTEM_RELAY_DIR } from "../shared/loopback";
 import { KIT_FILE } from "../shared/agents";
 import type { CliIO } from "./commands";
-import { HostConnection, LiveError, LreError, sessionOf, signIn } from "./connection";
+import { HostConnection, LiveError, LreError, addConnectionProfile, connectionProfiles, editAndSendPrefersActive, sessionOf, signIn } from "./connection";
 import type { StoredLogin } from "./credentials";
 import { inClear, normalizeBase } from "./credentials";
 import type { Owned } from "./follow";
@@ -692,7 +692,9 @@ async function up(a: LoopbackArgs, io: CliIO, lio: LoopbackIO): Promise<number> 
   if (registered.mode === "shared") io.out(`As the shared relay: each user who turns the local-inference scheduler on must add ${origins.join(" and ")} to their own Excluded origins (Settings → Inference scheduler); the relay can do it only for ${who}.`);
 
   const config: LoopbackConfig = { name, base, listen, port, mode: registered.mode, relay: registered.relay, secret: registered.secret, session, tuning: previous?.tuning ?? {} };
-  const connection = `In Lumiverse, the loopback is a Custom (OpenAI-compatible) connection: base URL ${relayBase(listen, port)}, model ${registered.model || LOOPBACK_MODEL}, and as its API key your loopback key (LumiRPEngine → Settings → Loopback).`;
+  const connection = await loopbackConnection(io, base, session.token, relayBase(listen, port), registered.model || LOOPBACK_MODEL);
+  // Core's "always use the active connection" acts on Edit and Send only: there it overrides an opted-in chat's pin to the loopback.
+  if ((await editAndSendPrefersActive(io.http, base, session.token)) === true) io.err(`${who} has "always use the active connection" on for Edit and Send: a message sent with Edit and Send goes on the active connection, not a depth chat's pin to the loopback, and runs no engine turn unless the active connection is the loopback.`);
 
   if (!systemd) {
     writeConfig(place.config, config, lio, null);
@@ -920,4 +922,22 @@ async function down(a: LoopbackArgs, io: CliIO, lio: LoopbackIO): Promise<number
   await must(lio, "systemctl", [...ctl.args, "daemon-reload"], ctl.env);
   io.out(`Stopped and removed ${place.unitName}. Its config, with the relay's session, stays in ${place.config}: delete it to forget the relay here.`);
   return 0;
+}
+
+/**
+ * The loopback's Custom connection (L14): the user's own where one is already (Custom, on the relay's
+ * address or the loopback's model), else added for them with their own session, since Spindle gives
+ * an extension no way to add one. It's added without a key: the loopback key is shown only once, on
+ * the user's own page, which an outside client can't read. The line says what to do next.
+ */
+async function loopbackConnection(io: CliIO, base: string, token: string, url: string, model: string): Promise<string> {
+  const want = url.replace(/\/+$/, "").toLowerCase();
+  try {
+    const found = (await connectionProfiles(io.http, base, token)).find((p) => p.provider === "custom" && (p.model === model || p.apiUrl.trim().replace(/\/+$/, "").toLowerCase() === want));
+    if (found) return `Your connection "${found.name}" is the loopback (${url}, model ${model}). Its API key is your loopback key (LumiRPEngine → Settings → Loopback).`;
+    const made = await addConnectionProfile(io.http, base, token, { name: "LumiRPEngine loopback", provider: "custom", apiUrl: url, model });
+    return `Added the connection "${made.name}" to Lumiverse: Custom (OpenAI-compatible), base URL ${url}, model ${model}. Put your loopback key in as its API key (Connections → ${made.name}); mint one in LumiRPEngine → Settings → Loopback if you have none.`;
+  } catch (error) {
+    return `Couldn't add the loopback's connection for you (${error instanceof Error ? error.message : String(error)}). In Lumiverse, the loopback is a Custom (OpenAI-compatible) connection: base URL ${url}, model ${model}, and as its API key your loopback key (LumiRPEngine → Settings → Loopback).`;
+  }
 }

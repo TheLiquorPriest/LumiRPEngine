@@ -1,7 +1,9 @@
 // Parity (INC3-SPEC U2, INC3-REEVAL §5): every chat and lore tool LumiRPEngine serves outside clients
 // answers, through the command line's tools and through `lre.tools call` alike, as the command line's
 // own implementation answered before the tools moved into the backend. parity.golden.json holds what
-// the old modules (src/cli/tools-play.ts, tools-lore.ts) answered the same script, run with them.
+// the old modules (src/cli/tools-play.ts, tools-lore.ts) answered the same script, run with them,
+// plus the depth offer (`backend/bootstrap/depth-offer.ts`), a chip added since: both paths read it
+// from the one backend view, under the script's played world chat that never chose depth.
 
 import { expect, setSystemTime, test } from "bun:test";
 import { readFileSync } from "node:fs";

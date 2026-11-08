@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import type { ModelPort, PortMessage } from "../../src/backend/depth/port";
 import { attemptSeed, playerBeats, QUOTE_WORDS_MOST, QUOTES_PER_ANSWER_MOST, QUOTES_PER_BEAT_MOST, resolveAttempt, type PlayerBeatsOut } from "../../src/backend/depth/scene/resolve";
 import type { WorldDoc } from "../../src/shared/world";
+import { defaultDepthSettings } from "../../src/shared/depth-settings";
 import { resolveOn } from "../../src/engine/resolve";
 import { createRng } from "../../src/engine/rng";
 import { baseWorld, fold, POV, registryOf, startState } from "../packs/support";
@@ -362,5 +363,13 @@ describe("the player's own beats", () => {
       return { text: JSON.stringify({ beats: [{ kind: "act", act: "did", what: "Sam acts.", surface: "Sam acts.", words: "w0", attempt: "act" }], signals: [] }), usage: { tokensIn: 2, tokensOut: 1 } };
     }) as ModelPort;
     await expect(playerBeats(stopping, { registry: reg, world, state, pov: POV, input, resolutions: [], signal: stop.signal })).rejects.toThrow();
+  });
+
+  test("Settings → Depth's quote bounds are what a reading's quotes are held to", async () => {
+    const world = cafe();
+    const state = startState(world);
+    const input = Array.from({ length: 60 }, (_, i) => `w${i}`).join(" ");
+    const one = await playerBeats(port({ beats: [{ kind: "act", act: "did", what: "Sam acts.", surface: "Sam acts.", words: ["w0", "w1"], attempt: "act" }], signals: [] }), { registry: reg, world, state, pov: POV, input, resolutions: [], quoteBounds: { ...defaultDepthSettings().reads, quotesPerBeat: 1, quotesPerAnswer: 5 } });
+    expect(one.refused).toEqual(["“Sam acts.” stands, but not what it attempts (“act”): “w1” is past the most quotes held (1 a beat, 5 an answer)"]);
   });
 });

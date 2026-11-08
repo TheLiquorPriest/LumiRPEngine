@@ -18,8 +18,9 @@ import type { LayerDraft } from "../../src/shared/layer";
 import { drewOn, mindMetaAt, mindV2At, MIND_POV, povOf, reachOf, type MindFileMeta, type RecallDoc } from "../../src/shared/character-engine";
 import { CHARACTER_TEXT, CORE_WORLD } from "../../src/shared/character-prompts";
 import { mindEdit, readMind, recallFor } from "../../src/backend/character-engine";
-import { readNotebook } from "../../src/backend/depth/notebook";
-import { historian } from "../../src/backend/depth/historian";
+import { authorRead, editNotebookFile, readNotebook } from "../../src/backend/depth/notebook";
+import { historian, quoteSpan } from "../../src/backend/depth/historian";
+import { beatProblem } from "../../src/shared/story";
 import { roomAgain, type ModelPort } from "../../src/backend/depth/port";
 import { DEPTH_ROOM_MOST, defaultDepthSettings, depthSettingsOf, ownRoom } from "../../src/shared/depth-settings";
 import { modernUsWorld } from "../packs/riverton";
@@ -180,6 +181,8 @@ describe("bootstrap", () => {
       [[2, 2], true],
     ]);
     expect(asked.historian).toBe(3);
+    // The GM's truth link runs once a chapter, at its end, never once a chunk.
+    expect(asked.truthlink).toBe(2);
     // Each beat landed at its own source message, the partial reach with its point of view; nothing twice.
     const story = await rig.rt.ledger.readStory(chatId, rig.host.userId);
     expect(story.duplicates).toEqual([]);
@@ -485,7 +488,7 @@ describe("bootstrap", () => {
     expect(stopped.reason).not.toContain("answer room");
   }, 90_000);
 
-  test("the historian asks at the room the user set it; an answer cut off at it is asked once more at twice it; cut off again it pauses the run saying what both spent, and Resume asks only that stretch again", async () => {
+  test("the historian asks at the room the user set it; an answer cut off at it is asked once more at twice it; cut off again, its stretch is read as two halves, each asked the same way, and the run goes on", async () => {
     expect(roomAgain(44925)).toBe(89850);
     // Twice is held to the most Settings → Depth lets a room be; at it, there is no more room to ask for.
     expect(roomAgain(DEPTH_ROOM_MOST - 10)).toBe(DEPTH_ROOM_MOST);
@@ -501,7 +504,7 @@ describe("bootstrap", () => {
     rig.host.quietReply = (req) => {
       if (text(req).includes('"beats": [{"message"')) {
         const ids = [...(req.messages.at(-1)?.content ?? "").matchAll(/^\[(h\d+|m\d+)\] /gm)].map((m) => m[1] as string);
-        // The stretch holding h3 is cut off mid-JSON, after reasoning, at its room and at twice it, then at its room again on Resume; asked at twice it, it answers.
+        // The stretch holding h3 is cut off mid-JSON, after reasoning, at its room and at twice it, then its half holding h3 at its room; asked at twice it, it answers.
         const call = ids.includes("h3") ? h3++ : 0;
         rooms.push({ want: call % 2 === 1 ? 2048 : 1024, got: req.maxTokens });
         if (ids.includes("h3") && call < 3) return { content: '{"beats": [{"message": "h3", "what": "Danny tells', finishReason: "length", reasoning: "Danny first.", usage: { completion_tokens_details: { reasoning_tokens: 600 } } };
@@ -510,30 +513,17 @@ describe("bootstrap", () => {
     };
     await bootstrap(rig, chatId, { op: "opt", on: true });
     await bootstrap(rig, chatId, { op: "start", cap: "none" });
-    const stopped = await finished(rig, chatId);
-    expect(stopped.status).toBe("paused");
-    expect(stopped.reason).toContain("the historian's answer was cut off at its answer room");
-    expect(stopped.reason).toContain("600 of them reasoning");
-    // Beside its record, the failed job keeps why, both calls and their answers as written: the audit's alone, never read by Resume.
-    expect(h3).toBe(2);
-    const jobs = await rig.host.storage.list(`runs/${chatId}/bootstrap/jobs/`, rig.host.userId);
-    const failed = jobs.filter((p) => p.endsWith(".failed.json"));
-    expect(failed.length).toBe(1);
-    const kept = JSON.parse((await rig.host.storage.read(failed[0] ?? "", rig.host.userId)) ?? "null") as { slot: string; why: string; spent: { calls: number }; misread: { call: number; fields: { field: string; said: string; why?: string }[]; count: number; raw: string }[] };
-    expect(kept.slot).toMatch(/^historian:/);
-    expect(kept.why).toContain("cut off at its answer room");
-    expect(kept.spent.calls).toBe(2);
-    const cutAnswer = '{"beats": [{"message": "h3", "what": "Danny tells';
-    expect(kept.misread).toEqual([0, 1].map((call) => ({ call, fields: [{ field: "(the answer)", said: JSON.stringify(cutAnswer), why: kept.why }], count: 1, raw: cutAnswer })));
-    await bootstrap(rig, chatId, { op: "resume" });
     const view = await finished(rig, chatId);
     expect(view.status).toBe("done");
-    // Asked again on Resume, the cut stretch answered at twice its room; the stretches recorded before it weren't asked again.
+    // The stretch holding h3 was cut off at its room and at twice it; then its half holding h3 at its room, which answered at twice it.
     expect(h3).toBe(4);
-    expect(asked.historian).toBe(3);
+    // Every stretch answered once, the cut one as its two halves.
+    expect(asked.historian).toBe(4);
     // Every first call's room was the user's, and each retry twice it.
-    expect(rooms.length).toBe(6);
     for (const r of rooms) expect(r.got).toBe(r.want);
+    // Nothing failed: the cut stretch's reading is its halves', put together.
+    const jobs = await rig.host.storage.list(`runs/${chatId}/bootstrap/jobs/`, rig.host.userId);
+    expect(jobs.filter((p) => p.endsWith(".failed.json"))).toEqual([]);
     const story = await rig.rt.ledger.readStory(chatId, rig.host.userId);
     expect(story.duplicates).toEqual([]);
     expect(story.beats.length).toBe(7);
@@ -721,6 +711,9 @@ describe("bootstrap", () => {
     expect(routes.some((r) => r.includes(strong))).toBe(false);
     expect(estimate.messages).toBe(1);
     expect(estimate.notes[0]).toStartWith("A first guess from the chat's 1 message (1 word) in 1 chunk, assuming ");
+    // The first guess at the new rates: the historian writes spans, not quotes copied out (0.15 of what it reads, was 0.3), and the author its notebook's edits (1,375 tokens a chunk, was 3,500).
+    expect(estimate.stages.find((s) => s.stage === "historian")?.tokensOut).toBe(Math.round(estimate.tokens * 0.15));
+    expect(estimate.stages.find((s) => s.stage === "author")?.tokensOut).toBe(1375);
   });
 
   test("the import reads the world's own lore beside the chat's World Info books, as lore: the starter's 26 entries, none of them reconciled as memory", async () => {
@@ -797,6 +790,56 @@ describe("bootstrap", () => {
     expect(mindMetaAt(at.state, DANNY)["core.md"]?.rev).toBe(1);
     expect((await readMind(rig.rt.blobs, rig.host.userId, at.state, PRIYA))["core.md"]).toBe("USER-CORE: Priya, as I see her.");
   }, 60_000);
+
+  test("the depth chat's chips: the stage the run is at with its count while it runs, the spot checks waiting by count, each gone once it stops being so (§7 Chips)", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await historyChat(rig);
+    fakeModels(rig);
+    // The second chunk's historian call waits, so the run stands mid-way.
+    const answer = rig.host.quietReply;
+    const held = Promise.withResolvers<void>();
+    const reached = Promise.withResolvers<void>();
+    let historians = 0;
+    rig.host.quietReply = async (req) => {
+      if (text(req).includes('"beats": [{"message"') && ++historians === 2) {
+        reached.resolve();
+        await held.promise;
+      }
+      return answer ? answer(req) : "{}";
+    };
+    const chips = async () => (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "bootstrap" || c.kind === "spot_checks");
+    await bootstrap(rig, chatId, { op: "opt", on: true });
+    expect(await chips()).toEqual([]);
+    await bootstrap(rig, chatId, { op: "start", cap: "none" });
+    await reached.promise;
+    const running = (await bootstrap(rig, chatId, { op: "status" })).view;
+    expect(running.status).toBe("running");
+    const at = running.progress.find((p) => p.done < p.total);
+    if (!at) throw new Error("no stage under way");
+    const [progress, ...rest] = await chips();
+    expect(rest).toEqual([]);
+    expect(progress?.kind).toBe("bootstrap");
+    expect(progress?.messageId).toBe("h6");
+    expect(progress?.label).toEndWith(`, ${at.done} of ${at.total}`);
+    expect(progress?.detail).toStartWith(`${running.chunks.done} of 3 chunks`);
+    expect(progress?.actions.map((a) => a.input?.type)).toEqual(["bootstrap"]);
+    held.resolve();
+    const done = await finished(rig, chatId);
+    expect(done.status).toBe("done");
+    // Done: the progress chip is gone; the spot checks wait, counted over every card.
+    const waiting = done.spot.flatMap((c) => c.items.filter((i) => i.mark === null));
+    expect(waiting.length).toBeGreaterThan(1);
+    const after = await chips();
+    expect(after.map((c) => [c.kind, c.label])).toEqual([["spot_checks", `${waiting.length} spot checks wait for you`]]);
+    // Each mark takes one off; the last takes the chip away.
+    const cards = done.spot.flatMap((c) => c.items.filter((i) => i.mark === null).map((i) => ({ card: c.id, item: i.id })));
+    const [first, ...others] = cards;
+    if (!first) throw new Error("no item");
+    await bootstrap(rig, chatId, { op: "mark", card: first.card, item: first.item, right: true });
+    expect((await chips()).map((c) => c.label)).toEqual([`${waiting.length - 1} spot check${waiting.length - 1 === 1 ? " waits" : "s wait"} for you`]);
+    for (const o of others) await bootstrap(rig, chatId, { op: "mark", card: o.card, item: o.item, right: true });
+    expect(await chips()).toEqual([]);
+  }, 60_000);
 });
 
 describe("the historian's answer", () => {
@@ -807,19 +850,34 @@ describe("the historian's answer", () => {
     { id: "m1", isUser: true, name: "Sam", text: "I follow Maya into the café.", clock: null, basis: { swipe: "c1" } },
     { id: "m2", isUser: false, name: "Narrator", text: 'Maya slides into the back booth. "Not a word, Sam. Not one."', clock: null, basis: { swipe: "c2" } },
   ];
-  /** A port answering once with `answer`, keeping the system text it was asked with. */
-  const port = (answer: unknown, sent: string[]): ModelPort => async (_role, messages) => {
+  /** A port answering once with `answer`, keeping the system text it was asked with and the effort it was asked at. */
+  const port = (answer: unknown, sent: string[], efforts: unknown[] = []): ModelPort => async (_role, messages, opts) => {
     sent.push(messages[0]?.content ?? "");
+    efforts.push(opts?.effort);
     return { text: JSON.stringify(answer), misread: () => undefined };
   };
 
-  test("is told that a beat of speech carries the exact words spoken in its quotes, and keeps them word for word", async () => {
+  test("points a beat of speech's quotes at the chat's own words, at low effort: a span the chat holds is read word for word from it, one it doesn't is dropped", async () => {
     const sent: string[] = [];
-    const words = "Not a word, Sam. Not one.";
-    const out = await historian({ world: w, state: s, texts: {}, chunk: rows, before: { beats: [], staging: [] }, cast }, port({ beats: [{ message: "m2", place: "cafe", actors: ["maya"], act: "said", what: "Maya tells Sam to keep quiet.", surface: "Maya in the back booth, warning Sam.", quotes: words, exposure: [{ who: "Sam", channel: "hearing", reach: "whole" }] }] }, sent));
-    expect(sent[0]).toContain('A beat of speech ("act": "said") carries the exact words spoken in its quotes, word for word as the prose has them, never summed up or reworded');
-    expect(sent[0]).toContain('"quotes": the exact words spoken or written, word for word as the prose has them (a "said" beat\'s always)');
-    expect(out.beats[0]?.quotes).toBe(words);
+    const efforts: unknown[] = [];
+    const said = { message: "m2", place: "cafe", actors: ["maya"], act: "said", what: "Maya tells Sam to keep quiet.", surface: "Maya in the back booth, warning Sam.", exposure: [{ who: "Sam", channel: "hearing", reach: "whole" }] };
+    const out = await historian(
+      { world: w, state: s, texts: {}, chunk: rows, before: { beats: [], staging: [] }, cast },
+      port({ beats: [{ ...said, quotes: [{ from: "not a  word,", to: "Not one." }] }, { ...said, quotes: [{ message: "m1", from: "Not a word" }] }] }, sent, efforts),
+    );
+    expect(sent[0]).toContain('A beat of speech ("act": "said") points its quotes at the exact words spoken, where the prose has them, so they are read word for word from the chat');
+    expect(sent[0]).toContain('"quotes": where the exact words spoken or written are in the prose, never the words copied out: [{"from": their first few words, "to": their last few words');
+    expect(efforts).toEqual(["low"]);
+    const [kept, dropped] = out.beats;
+    expect(kept?.quotes).toBe("Not a word, Sam. Not one.");
+    const at = (rows[1]?.text ?? "").indexOf('Not a word');
+    expect(kept?.beat.by).toEqual({ bootstrap: { message: "m2", swipe: "c2", quotes: [{ message: "m2", from: at, to: at + "Not a word, Sam. Not one.".length }] } });
+    expect(beatProblem(kept?.beat)).toBeNull();
+    // m1 doesn't hold those words: no quotes, and the beat's surface stands.
+    expect(dropped?.quotes).toBeUndefined();
+    expect(dropped?.beat.by).toEqual({ bootstrap: { message: "m2", swipe: "c2" } });
+    expect(quoteSpan("abc", 1, 9)).toEqual([1, 3]);
+    expect(quoteSpan("He said “go home” twice.", '"go', 'home"')).toEqual([8, 17]);
   });
 
   test("binds a new place listed under a listed place's name, and named by its new: ref, to the listed place", async () => {
@@ -845,5 +903,40 @@ describe("the historian's answer", () => {
     expect(out.newPlaces).toEqual([{ ref: "new:back_booth", name: "The back booth", note: "a booth at the back", parent: "cafe" }]);
     expect(booth?.place).toBe("new:back_booth");
     expect(told).toEqual(['newPlaces[0] as "cafe": a listed place has its name']);
+  });
+});
+
+describe("the author's notebook edits", () => {
+  const story = "# Story\n\n## Threads\n- The lamp.\n\n## Setups\n- The boat.\n";
+
+  test("add to a file's end or rewrite one section of it, its heading kept or carried; a section the file lacks is added at its end", () => {
+    expect(editNotebookFile(story, { edit: "append", text: "## Futures\n- A storm." })).toBe(`${story}\n## Futures\n- A storm.\n`);
+    expect(editNotebookFile(story, { edit: "section", section: "threads", text: "- The lamp, sold for scrap.\n- Priya's debt." })).toBe("# Story\n\n## Threads\n- The lamp, sold for scrap.\n- Priya's debt.\n\n## Setups\n- The boat.\n");
+    expect(editNotebookFile(story, { edit: "section", section: "## Setups", text: "## Setups\n- The boat, paid off." })).toBe("# Story\n\n## Threads\n- The lamp.\n\n## Setups\n- The boat, paid off.\n");
+    expect(editNotebookFile(story, { edit: "section", section: "Futures", text: "- A storm." })).toBe(`${story}\n## Futures\n- A storm.\n`);
+    expect(editNotebookFile("", { edit: "append", text: "- First note." })).toBe("- First note.\n");
+    expect(editNotebookFile(story, { edit: "whole", text: "All new." })).toBe("All new.");
+  });
+
+  test("an answer's edits apply in order, each to the file as the edit before left it; a file only rewritten whole where the answer says so", async () => {
+    const w = modernUsWorld("w", "R");
+    const model: ModelPort = async () => ({
+      text: JSON.stringify({
+        files: [
+          { path: "notebook/story.md", edit: "section", section: "Threads", text: "- The lamp, sold." },
+          { path: "notebook/story.md", edit: "append", text: "## Futures\n- A storm." },
+          { path: "notebook/player.md", edit: "whole", text: "He wants the boat." },
+          { path: "notebook/arcs/maya.md", edit: "section", text: "No heading named." },
+        ],
+        comments: [],
+        chapter: { ends: false },
+        cast: [],
+        uncertain: [],
+        why: "The lamp was sold.",
+      }),
+      misread: () => undefined,
+    });
+    const out = await authorRead({ world: w, state: startState(w), texts: {}, chunk: [], beats: [], notebook: { files: { "notebook/story.md": story }, pinned: [] }, chapter: { index: 0, stretches: 0 }, cast: [] }, model);
+    expect(Object.values(out.blobs).sort()).toEqual(["# Story\n\n## Threads\n- The lamp, sold.\n\n## Setups\n- The boat.\n\n## Futures\n- A storm.\n", "He wants the boat."]);
   });
 });

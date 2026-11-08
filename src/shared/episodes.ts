@@ -20,8 +20,9 @@
 //                  dropped in the author slice; a chain never both settles and drops one
 //
 // Whether a draft is open, settled or dropped is read per chat and chain, never stored on it: settled
-// where a live `story.settle` cites it, dropped where a live `author.drop` does (`draftsOn`). Texts a
-// reader shows are words, bounded; beats keep theirs in blobs. Pure.
+// where a live `story.settle` cites it, dropped where a live `author.drop` does (`draftsOn`). A draft's
+// own words (its episode's reason, its parts' rationales, its summary) and its beats' are blobs it
+// names; an older draft's inline words still read. A settlement's and a drop's are words, bounded. Pure.
 
 import type { DepthTreatment } from "./depth-settings";
 import { DEPTH_TREATMENTS } from "./depth-settings";
@@ -29,7 +30,8 @@ import { hashParts } from "./hash";
 import type { EntityId, PlaceId } from "./ids";
 import { hasOwn, isRecord, type JsonObject } from "./json";
 import type { LedgerEvent, PackEvent } from "./ledger";
-import { beatBlobs, beatId, beatOf, beatProblem, type Beat, type StoryRef, type StoryTime } from "./story";
+import { beatBlobs, beatId, beatOf, beatProblem, type Beat, type BlobRef, type StoryRef, type StoryTime } from "./story";
+import { blobHash, isBlobHash } from "./stores";
 
 export const STORY_DRAFT = "story.draft";
 export const STORY_SETTLE = "story.settle";
@@ -236,15 +238,23 @@ const bounded = (s: string): string => {
   return t.length > EPISODE_WORDS_MAX ? `${t.slice(0, EPISODE_WORDS_MAX - 1)}…` : t;
 };
 
+/** A draft's text as its event keeps it (§4.6: the record cap; swipes sharing a text share its blob): the hash of its words; one already a blob's hash stays. */
+const asBlob = (s: string): BlobRef => (isBlobHash(s as unknown) ? s : blobHash(s.trim()));
+
 function episodeData(e: StoryEpisode): JsonObject {
   return {
     id: e.id,
     span: [e.span[0], e.span[1]],
     places: [...e.places],
     people: [...e.people],
-    why: bounded(e.why),
-    parts: e.parts.map((p): JsonObject => ({ subject: "who" in p.subject ? { who: p.subject.who } : { event: bounded(p.subject.event) }, treatment: p.treatment, rationale: bounded(p.rationale) })),
+    why: asBlob(e.why),
+    parts: e.parts.map((p): JsonObject => ({ subject: "who" in p.subject ? { who: p.subject.who } : { event: bounded(p.subject.event) }, treatment: p.treatment, rationale: asBlob(p.rationale) })),
   };
+}
+
+/** The texts `draftEvent` keeps as blobs (its episode's reason, each part's rationale, its summary), trimmed as hashed, for the writer to put before its entry lands; none already a blob's hash. */
+export function draftTexts(d: DraftData): string[] {
+  return [d.episode.why, ...d.episode.parts.map((p) => p.rationale), d.summary].filter((s) => !isBlobHash(s as unknown)).map((s) => s.trim());
 }
 
 export function draftEvent(d: DraftData): PackEvent {
@@ -258,7 +268,7 @@ export function draftEvent(d: DraftData): PackEvent {
       beats: d.beats as unknown as JsonObject[],
       effects: d.effects as unknown as JsonObject[],
       touches: d.touches as unknown as JsonObject[],
-      summary: bounded(d.summary),
+      summary: asBlob(d.summary),
     },
   };
 }
@@ -271,13 +281,16 @@ export function dropEvent(d: DropData): PackEvent {
   return { type: AUTHOR_DROP, data: { draft: d.draft, why: bounded(d.why) } };
 }
 
-/** The blobs a draft names (the sweep keeps them): its beats'. A settlement and a drop keep their words inline. */
+/** The blobs a draft names (the sweep keeps them): its beats', its episode's reason, its parts' rationales and its summary (an old draft's inline words name none). A settlement and a drop keep their words inline. */
 export function episodeBlobs(type: unknown, data: unknown): string[] {
   if (type !== STORY_DRAFT || !isRecord(data) || !Array.isArray(data.beats)) return [];
-  return data.beats.flatMap((raw) => {
+  const beats = data.beats.flatMap((raw) => {
     const b = beatOf(raw);
     return b ? beatBlobs(b) : [];
   });
+  const ep = isRecord(data.episode) ? data.episode : {};
+  const texts = [ep.why, ...(Array.isArray(ep.parts) ? ep.parts.map((p) => (isRecord(p) ? p.rationale : undefined)) : []), data.summary].filter(isBlobHash);
+  return [...beats, ...texts];
 }
 
 // ---------------------------------------------------------------- the bookkeeping a chain folds

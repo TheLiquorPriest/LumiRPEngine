@@ -10,7 +10,7 @@
 // at its basis, it lands only where the turns after it still fold as made with it (`later`). The
 // notebook itself is the engine's workspace (`engine/notebook.ts`).
 
-import { AUTHOR_ADOPT, AUTHOR_ANSWER, AUTHOR_ASK, AUTHOR_DRIFT, AUTHOR_EDIT, AUTHOR_POLL, AUTHOR_PREDICT, AUTHOR_SCORE, AUTHOR_SPEND, authorData, authorProblem, type AdoptData, type AnswerData, type AskData, type DriftData, type EditData, type PollData, type PredictData, type ScoreData, type SpendData } from "../../../shared/author";
+import { AUTHOR_ADOPT, AUTHOR_ANSWER, AUTHOR_ASK, AUTHOR_DRIFT, AUTHOR_EDIT, AUTHOR_POLL, AUTHOR_PREDICT, AUTHOR_SCORE, AUTHOR_SPEND, AUTHOR_VERDICT, authorData, authorProblem, type AdoptData, type AnswerData, type AskData, type DriftData, type EditData, type PollData, type PredictData, type ScoreData, type SpendData, type VerdictData } from "../../../shared/author";
 import { AUTHOR_DROP, droppedIn, dropOf, dropProblem, settledIn } from "../../../shared/episodes";
 import type { PackEvent } from "../../../shared/ledger";
 import type { EventTypeDef, PackDef } from "../../../engine/registry";
@@ -85,6 +85,13 @@ export const authorPack: PackDef = {
       record(AUTHOR_ADOPT, (e) => {
         const d = authorData<AdoptData>(e, AUTHOR_ADOPT);
         return d ? `the turn waited for ${d.waited.length} piece(s) of work between turns, went on without ${d.without.length}` : "what the turn waited for";
+      }),
+    );
+    r.event<PackEvent>(
+      record(AUTHOR_VERDICT, (e) => {
+        const d = authorData<VerdictData>(e, AUTHOR_VERDICT);
+        const said = d?.verdict === "holds" ? "it holds" : d?.verdict === "contradicts" ? "it contradicts the draft" : d?.verdict;
+        return d ? `the author's verdict on page ${d.page} of ${d.of} of a draft's pins: ${said}` : "the author's verdict on a draft's pins";
       }),
     );
     r.event<PackEvent>({

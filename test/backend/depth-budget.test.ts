@@ -14,7 +14,7 @@
 import { describe, expect, test } from "bun:test";
 import { budgetWords, ceilingBinds, ceilingRoom, DAY_SPEND_PATH, DaySpend, dayOf, daySpendOf, recordedTokens, type TurnBudget } from "../../src/backend/depth/budget";
 import { askAnswer, askChipsOn } from "../../src/backend/depth/offscreen/asks";
-import { DRAFT_TYPES, draftsOn } from "../../src/backend/depth/offscreen/drafts";
+import { DRAFT_TYPES, draftsOn, draftWithTexts } from "../../src/backend/depth/offscreen/drafts";
 import { draftAnswered, offscreenJobs } from "../../src/backend/depth/offscreen/jobs";
 import type { ModelPort } from "../../src/backend/depth/port";
 import { afterDepthReply, type AfterRt } from "../../src/backend/depth/scene/after";
@@ -137,10 +137,10 @@ describe("the budget dial's ceilings", () => {
     const of = (budget: Pick<DepthBudget, "perTurn" | "perDay">, day: number): TurnBudget => ({ binds: (t) => ceilingBinds(budget, t, day), left: (t) => ceilingRoom(budget, t, day) });
     expect(ceilingRoom({ perTurn: 10_000, perDay: "none" }, 12_000, 0)).toEqual({ turn: 0, day: null });
     expect(budgetWords(of({ perTurn: 10_000, perDay: 50_000 }, 20_000), 4_000)).toBe(
-      "The budget: this turn has spent 4K tokens, with about 6K left under its ceiling (Settings → Depth → Budget → Per turn); today's depth work has about 30K tokens left under its ceiling (Per day). Spend by it: once a ceiling binds, whoever still plays as their own agent is played by you.",
+      "The budget: this turn has spent 4K tokens, with about 6K left under its ceiling (Settings → Depth → Budget → Per turn); today's depth work has about 30K tokens left under its ceiling (Per day). Spend by it: once a ceiling binds, you are asked who slides down the ladder.",
     );
     expect(budgetWords(of({ perTurn: 10_000, perDay: "none" }, 0), 10_000)).toBe(
-      "The budget binds: this turn has spent 10K tokens, at its ceiling of 10K (Settings → Depth → Budget → Per turn). Spend less from here: anyone you would give their own agent (a call each time they act) you play yourself (one call for several) or handle as part of the world. Anyone still playing as their own agent you play from now on. How far the scene goes this turn is yours to judge.",
+      "The budget binds: this turn has spent 10K tokens, at its ceiling of 10K (Settings → Depth → Budget → Per turn). Spend less from here: anyone you would give their own agent (a call each time they act) you play yourself (one call for several) or handle as part of the world. Who of those still playing as their own agent slides down the ladder, and how far, is yours to say; anyone still due as their own agent ends the scene at the next beat. How far the scene goes this turn is yours to judge.",
     );
     expect(budgetWords(of({ perTurn: "none", perDay: "none" }, 1e9), 1e9)).toBeNull();
   });
@@ -234,7 +234,7 @@ describe("the budget dial's ceilings", () => {
     expect(drafted.landed?.status).toBe("landed");
     expect(drafted.draft?.episode.parts).toEqual([{ subject: { event: "the storm" }, treatment: "room", rationale: "the town will talk of nothing else (you spent one more past this story week's room allowance)" }]);
     const drafts = draftsOn(await h.service.readEvents(chat, userId, DRAFT_TYPES));
-    expect(drafts.map((d) => [d.draft.summary, d.state])).toEqual([["A storm tears the cafe's awning off.", "open"]]);
+    expect(await Promise.all(drafts.map(async (d) => [(await draftWithTexts(rt.blobs, userId, d.draft)).summary, d.state]))).toEqual([["A storm tears the cafe's awning off.", "open"]]);
     // What drafting it cost counts at its treatment, for the draft.
     expect((await spends(h, chat)).map((s) => [s.treatment, s.for, s.cost.calls])).toEqual([
       ["after", basis.message, 1],
@@ -276,7 +276,7 @@ describe("the budget dial's ceilings", () => {
     await h.send(chat, "I close up and watch the sky.", "The wind picks up over the bay.");
     const basis = await h.service.basisFor(chat, userId);
     if (!basis) throw new Error("no basis");
-    const view = () => treatmentsView({ host: h.host, settings: rt.settings, ledger: h.service }, chat, userId);
+    const view = () => treatmentsView({ host: h.host, settings: rt.settings, ledger: h.service, blobs: rt.blobs }, chat, userId);
     const { state } = (await h.folds(chat)).reference;
     const dev = state.entities.dev?.name ?? "dev";
     // The turn's record: the author played Dev, and the scene's beats stopped at the per-turn ceiling; what it spent.

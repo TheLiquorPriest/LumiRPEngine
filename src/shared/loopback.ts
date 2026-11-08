@@ -268,6 +268,8 @@ export interface LoopbackModelCall {
   misread?: CallMisread;
   /** The model's own reasoning for this call, where its provider gave it (the turn inspector's "every call with its reasoning", PLAN:738): on the turn inspector's record only, never in the finish chunk's usage. */
   reasoning?: string;
+  /** The chat's messages its request carried, by the numbers the chat shows them by (`#N`): the first, the last and how many; `count` 0 where it carried none. On the turn inspector's record only, never in the finish chunk's usage. */
+  history?: { first: number; last: number; count: number };
 }
 
 /** The call's usage: the sums over its model calls, and each of them. */
@@ -438,6 +440,8 @@ export interface LoopbackPage {
   shared: { operator: boolean; enabled: boolean };
   /** The connections of yours LumiRPEngine treats as the loopback. */
   connections: { id: string; name: string }[];
+  /** Your chats on depth that generate off the loopback, as each was last opened (L15): the chat and the name of the connection it generates on. */
+  offChats: { chatId: string; connection: string }[];
 }
 
 /**

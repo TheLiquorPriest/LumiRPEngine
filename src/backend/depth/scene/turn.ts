@@ -19,9 +19,11 @@
 // place, the things there) plays as a scene, so the draft settles first. What the turn cost rides in
 // its record too (§4.7): each walk-on's own line, then the scene's.
 // The author reads what the budget dial leaves the turn at its setup and at each step, and spends by
-// it (§6.5): once a ceiling binds, whoever still plays as their own agent is played by the author
-// from that moment, said, and the scene plays on as far as the author judges, within the turn's
-// steps (Settings → Depth); a real-time line goes to a scene.
+// it (§6.5): once a ceiling binds, its next step is told what the turn has left and asked who slides
+// down the ladder and how far (own agent, played by the author, handled as world), or to end the
+// scene at the next beat; its answer is applied, said. The ceiling stays the hard stop: anyone its
+// answer still has due as their own agent ends the scene at the next beat, said. A real-time line
+// goes to a scene; the scene plays within the turn's steps (Settings → Depth).
 //
 // Every judgment here is an agent's; the loop only keeps its bookkeeping: ids, minutes, the order of
 // moments, exposure's pending marks, which drafts are due, the bounds of a turn, what it cost, and
@@ -30,6 +32,7 @@
 import { spendEvent } from "../../../shared/author";
 import { hasAgent, mindedAt, povOf, withPov, MIND_TAKE, type RecallHit } from "../../../shared/character-engine";
 import type { DepthEffort } from "../../../shared/depth-views";
+import { ownRoom } from "../../../shared/depth-settings";
 import { draftOf, dropEvent, STORY_DRAFT, type DraftData } from "../../../shared/episodes";
 import { hashParts } from "../../../shared/hash";
 import type { EntityId, PlaceId, UserId } from "../../../shared/ids";
@@ -40,12 +43,15 @@ import { STORY_BEAT, type Beat, type BeatDecider, type StoryRef } from "../../..
 import { talkNow } from "../../../shared/talk";
 import type { WorldDoc } from "../../../shared/world";
 import { listWords } from "../../../shared/words";
+import { spawnTierOf } from "../../../shared/tiers";
 import { calendarOf, formatClock } from "../../../engine/calendar";
+import { resolveEffect } from "../../../engine/effects";
 import { own } from "../../../engine/pack-kit";
 import type { Registry } from "../../../engine/registry-impl";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { together } from "../../../engine/presence";
 import { relocate } from "../../../engine/relocate";
+import { createRng } from "../../../engine/rng";
 import type { WorldState } from "../../../engine/state";
 import { Working } from "../../../engine/working";
 import { stagingBefore } from "../../../engine/ledger/story";
@@ -53,13 +59,13 @@ import { formCore, type LivedPov } from "../../character-agent";
 import { knowsFor, mindInput, readMind } from "../../character-engine";
 import { budgetWords, costTokens, type CeilingBind } from "../budget";
 import { beatLine, DepthAnswerError, named, type BeatText, type Blobs } from "../common";
-import type { NotebookRead } from "../notebook";
+import { mindEditsAt, type NotebookRead } from "../notebook";
 import { notebookFiles, notebookOf } from "../../../engine/notebook";
-import { draftsOn, dueDrafts, type DraftOn, type SceneReach } from "../offscreen/drafts";
+import { draftsOn, draftWithTexts, dueDrafts, type DraftOn, type SceneReach } from "../offscreen/drafts";
 import { readDraft } from "../offscreen/settle";
 import type { ModelPort } from "../port";
 import { addSpent, metered, NO_COST, spendData, spentSince, type Metered, type Spent } from "../spend";
-import { authorAsk, authorSetup, authorStep, notebookText, type DraftBeat, type PlayedMind, type Present, type SetupResult, type StagingDraft, type StepResult } from "./author";
+import { authorAsk, authorSetup, authorStep, notebookText, type DraftBeat, type NewcomerDraft, type PlayedMind, type Present, type SetupResult, type StagingDraft, type StepResult } from "./author";
 import { SceneBook } from "./book";
 import { reaches } from "./narration";
 import { talkWritten } from "./talk";
@@ -76,7 +82,7 @@ export interface ScenePlugs {
   playerBeats(model: ModelPort, input: PlayerBeatsInput): Promise<PlayerBeatsOut>;
   /** A character playing as its own agent (A2b). */
   play(model: ModelPort, input: PlayInput): Promise<PlayOut>;
-  sceneSoFar(blobs: BlobReader, userId: UserId, read: SceneRead, who: EntityId): Promise<{ scene: SceneMoment[]; reached: LivedPov[] }>;
+  sceneSoFar(blobs: BlobReader, userId: UserId, read: SceneRead, who: EntityId, o?: { limit?: number }): Promise<{ scene: SceneMoment[]; reached: LivedPov[] }>;
   sceneRecall(blobs: BlobReader, userId: UserId, read: SceneRead, who: EntityId): (cue: string) => Promise<RecallHit[]>;
   actBeatTexts(act: PlayAct, name: string): { what: string; surface: string; quotes?: string };
   /** An attempt in the scene (A2b): the engine's rules where they settle it, the GM's outcome beat where they decided something. */
@@ -88,7 +94,7 @@ export interface ScenePlugs {
   realtimeTurn(ctx: RealtimeCtx): Promise<RealtimeOutcome>;
 }
 
-/** The notebook at a state as the author reads it (`readNotebook`'s), through the turn's own blob reader: every file, and the player's edits it hasn't written over. */
+/** The notebook at a state as the author reads it (`readNotebook`'s), through the turn's own blob reader: every file, the player's edits it hasn't written over, and his edits of characters' minds (`mindEditsAt`), each a directive. */
 async function notebookAt(blobs: BlobReader, userId: UserId, state: Readonly<WorldState>): Promise<NotebookRead> {
   const { authored } = notebookOf(state);
   const out: NotebookRead = { files: {}, pinned: [] };
@@ -99,17 +105,17 @@ async function notebookAt(blobs: BlobReader, userId: UserId, state: Readonly<Wor
     const was = own(authored, f.path);
     out.pinned.push({ path: f.path, before: was ? ((await blobs.get(userId, was)) ?? "") : "", after: text });
   }
+  const minds = await mindEditsAt((hash) => blobs.get(userId, hash), state);
+  if (minds.length > 0) out.minds = minds;
   return out;
 }
 
 // ------------------------------------------------------------------ bounds and words
 
 // The author's steps a turn takes at most are Settings → Depth → Steps per turn (`depth.steps`): a
-// bound on a turn's length, never a judgment; the author is told as it nears.
-/** The scene's beats the author reads at most, newest kept (the record keeps them all; this bounds a prompt). */
-const SCENE_BEATS_READ = 60;
-/** Those elsewhere the setup is told of besides those with the player character, whom the scene may reach only from afar or bring in (a prompt's bound). */
-const OTHERS_READ = 24;
+// bound on a turn's length, never a judgment; the author is told as it nears. The scene's beats the
+// author reads and those elsewhere the setup is told of are Settings → Depth's prompt sizes
+// (`depth.reads.sceneBeats`, `depth.reads.others`): bounds on a prompt, the record keeps them all.
 
 /** The scene that is playing at a fold: the last `story.scene`, unless it ended there. */
 export function sceneNow(events: SceneAt["events"]): SceneData | null {
@@ -171,7 +177,7 @@ async function renarrate(input: DepthTurnInput, plugs: ScenePlugs): Promise<Dept
   const { moments, throughOf } = await plugs.renarrateMoments(source, pov, (hash) => input.rt.blobs.get(userId, hash));
   const narration = plugs.narration(
     { model: meter.port, sink: input.sink, throughOf, ...(input.frame ? { frame: input.frame } : {}) },
-    { world: at.world, state: at.state, texts: settings.prompts.texts, pov, knows: knowsFor({ registry: input.rt.registry }, at, [pov])[pov] ?? [], settings: { redrafts: settings.depth.redrafts, thinking: settings.depth.thinking }, ...(input.recent ? { before: input.recent } : {}), ...(input.direction ? { direction: input.direction } : {}), asks: false, signal: input.signal },
+    { world: at.world, state: at.state, texts: settings.prompts.texts, pov, knows: knowsFor({ registry: input.rt.registry }, at, [pov])[pov] ?? [], settings: { redrafts: settings.depth.redrafts, thinking: settings.depth.thinking, ownCheckRoom: ownRoom(settings.depth, "check") }, ...(input.recent ? { before: input.recent } : {}), ...(input.direction ? { direction: input.direction } : {}), asks: false, signal: input.signal },
   );
   for (const m of moments) narration.add(m);
   const out = await narration.drain();
@@ -188,6 +194,8 @@ class Turn {
   readonly pov: EntityId;
   readonly world: WorldDoc;
   readonly whole: boolean;
+  /** Whether the setup's reasoning reached the thinking block as the provider wrote it (DEPTH-PLAN §5.2), so it isn't shown again whole. */
+  private setupStreamed = false;
   readonly texts: Record<string, string>;
   /** Every model call of the turn, metered: what the scene and each walk-on cost. */
   readonly meter: Metered;
@@ -205,8 +213,12 @@ class Turn {
   signals: string[] = [];
   /** What a ceiling put off this turn, a line each: the scene's spend keeps them (§6.5). */
   readonly put: string[] = [];
-  /** Those the budget slid from their own agents to the author this turn (§6.5): the author plays them, and its steps may name them next. */
+  /** Those the author slid from their own agents to itself under a binding ceiling this turn (§6.5): it plays them, and its steps may name them next. */
   readonly slid = new Set<EntityId>();
+  /** The author was asked under a binding ceiling (its setup read it, or a step was told what the turn has left): from then on the ceiling is the hard stop. */
+  private asked = false;
+  /** Those due as their own agents when a ceiling first binds, held back for the author's answer on who slides. */
+  private waiting: EntityId[] = [];
   /** The drafts on the chain, as the turn found them and its walk-ons left them. */
   private drafts: DraftOn[];
   /** The beats the walk-ons made canon, dated when they happened: a play lives those that reached it. */
@@ -278,7 +290,7 @@ class Turn {
         texts: this.texts,
         pov: this.pov,
         knows: knowsFor({ registry: input.rt.registry }, { state: this.book.state, world: this.world }, [this.pov])[this.pov] ?? [],
-        settings: { redrafts: settings.depth.redrafts, thinking: settings.depth.thinking },
+        settings: { redrafts: settings.depth.redrafts, thinking: settings.depth.thinking, ownCheckRoom: ownRoom(settings.depth, "check") },
         ...(input.recent ? { before: input.recent } : {}),
         ...(this.excerpts.length > 0 ? { excerpts: this.excerpts } : {}),
         ...(this.quotes.length > 0 ? { quotes: this.quotes } : {}),
@@ -339,6 +351,7 @@ class Turn {
           notebook: notebookText(this.notebook),
           settings: input.settings,
           binds: () => this.binds(),
+          ...(input.budget?.onScreen ? { onScreen: input.budget.onScreen } : {}),
           narrate: (theirs) => this.narrate({ asks: false, throughOf: (k) => book.prefix.length + theirs(k) }),
         });
         if (outcome.kind === "exchange") return this.exchange(outcome);
@@ -389,16 +402,20 @@ class Turn {
     input.sink.progress("The author is setting the scene…");
     const setup = await this.setup(playerDrafts, this.signals, resolved, playing && earlier ? { id: playing.scene, place: playing.place, cast: playing.cast, ...earlier } : null, talk && talk.state === "on" ? { with: talk.with } : null, takeover);
     for (const r of setup.reads) this.think(r);
-    this.think(setup.reasoning);
+    if (this.setupStreamed) input.sink.reasoning("\n");
+    else this.think(setup.reasoning);
     if (setup.note) this.think(`The scene: ${setup.note}`);
     if (setup.redone.length > 0) this.say(`The author's setup couldn't all be kept: ${setup.redone.join("; ")}. Told why, it set the scene again.`);
     for (const r of setup.refused) this.say(`The author's setup: ${r}`);
     this.unkept = setup.refused;
 
     // The scene, its cast and staging, and moment 0: the player's beats, the opening, the world's.
-    // A ceiling that binds already (§6.5): whoever the setup still cast as their own agent the author plays instead, said.
+    // A ceiling that binds already (§6.5): the setup read it, so its cast is the author's call on who slides (a step's answer keeps the ceiling the hard stop).
     // Whoever it cast as their own agent with no mind yet gets one now, and plays as their own agent from this scene on.
-    const cast = await this.formMinds(this.slideOf(setup.cast));
+    // Whoever it brought into the world comes in first, at the scene's place, a mind formed for them where the author gave them one.
+    await this.bringIn(setup.newcomers, setup.place ?? (setup.continues && playing ? playing.place : null) ?? placeOfEntity(book.state, this.pov));
+    const cast = await this.formMinds([...setup.cast]);
+    if (this.binds()) this.asked = true;
     const pcPlace = placeOfEntity(book.state, this.pov);
     book.scene = setup.continues && playing ? playing.scene : sceneId(input.turn);
     book.place = setup.place ?? (setup.continues && playing ? playing.place : null) ?? pcPlace ?? Object.keys(this.world.places)[0] ?? "";
@@ -445,19 +462,29 @@ class Turn {
     }
     let mark = 0;
     let steps = 0;
+    let stopped = false;
     while (end === null && next.length > 0 && !input.signal.aborted && !this.stepFailed) {
       if (steps >= most) {
         this.say(`The turn reached its bound of ${most} step${most === 1 ? "" : "s"} between beats (Settings → Depth → Steps per turn): the player answers here, and the scene goes on next turn.`);
         break;
       }
+      // A ceiling that binds (§6.5): the author is asked who slides, and how far, before anyone it has due as their own agent plays; once it has answered, anyone still due as their own agent would cross the ceiling, so the scene ends at this beat, said.
+      const bind = this.binds();
+      if (bind && this.asked && next.some((who) => this.agents.has(who))) {
+        this.stopAt(bind, next.filter((who) => this.agents.has(who)));
+        stopped = true;
+        break;
+      }
+      this.waiting = bind && !this.asked ? next.filter((who) => this.agents.has(who)) : [];
+      if (this.waiting.length > 0) next = next.filter((who) => !this.agents.has(who));
       mark += 1;
       steps += 1;
       // As the scene's minute moves, what it holds that an open draft holds from before then comes first.
       await this.walkOns(this.reach(book.place, book.cast.map((c) => c.who)), mark);
-      // A ceiling that binds now slides whoever still plays as their own agent to the author, from this moment (§6.5): the scene goes on.
-      this.slide(mark);
       const step = await this.beat(next, mark, most - steps);
+      this.waiting = [];
       if (step === null) break;
+      this.slide(step.slide, mark);
       next = step.next;
       end = step.end;
       if (step.sceneEnds) this.sceneEnds = true;
@@ -466,13 +493,13 @@ class Turn {
     // end, the steps' bound, no one next) with nothing beyond his own beats reaching him, the author is
     // told exactly that and takes one more step, once, whoever was due to act acting first.
     let unreached = false;
-    if (!this.reached && !input.signal.aborted && !this.stepFailed) {
+    if (!this.reached && !stopped && !input.signal.aborted && !this.stepFailed) {
       this.say(`Nothing this turn has reached ${this.name(this.pov)} beyond the player's own beats: the author takes one more step for what reaches them.`);
       unreached = true;
       mark += 1;
       await this.walkOns(this.reach(book.place, book.cast.map((c) => c.who)), mark);
-      this.slide(mark);
-      const step = await this.beat(end === null ? next : [], mark, 0, true);
+      const step = await this.beat(end === null ? (this.binds() ? next.filter((who) => !this.agents.has(who)) : next) : [], mark, 0, true);
+      if (step) this.slide(step.slide, mark);
       next = step?.next ?? [];
       end = step?.end ?? null;
       if (step?.sceneEnds) this.sceneEnds = true;
@@ -499,50 +526,89 @@ class Turn {
     return (b ? budgetWords(b, costTokens(this.meter.spent().cost)) : null) ?? undefined;
   }
 
-  /**
-   * The budget's slide (§4.4, §6.5): once a ceiling binds, whoever in `cast` still plays as their own
-   * agent is played by the author instead, its reason kept with why, said and kept in the scene's
-   * spend. The user's ceiling binds, and the author's rung is the cheaper one (one call for several);
-   * how far the scene goes is still the author's. The same cast when nothing binds or no one moves.
-   */
-  private slideOf(cast: readonly SceneCast[]): SceneCast[] {
+  /** What a binding ceiling leaves the turn, the author's question (§6.5): asked at its step, with those due as their own agents waiting on its answer. */
+  private ceilingNow(): string | undefined {
     const bind = this.binds();
-    const moving = bind ? cast.filter((c) => c.effort === "agent") : [];
-    if (!bind || moving.length === 0) return [...cast];
-    const names = moving.map((c) => this.name(c.who)).join(", ");
-    this.say(`The budget: ${bind.words}, so the author plays ${names} from here rather than their own agents, as far as it judges the scene should go.`);
-    this.put.push(`${names} played by the author rather than their own agents: ${bind.words}`);
-    for (const c of moving) this.slid.add(c.who);
-    const why = `The budget slid them to the author: ${bind.which === "day" ? "today's" : "this turn's"} ceiling binds.`;
-    return cast.map((c) => (c.effort === "agent" ? { ...c, effort: "author" as const, why: c.why ? `${c.why} ${why}` : why } : c));
+    if (!bind) return undefined;
+    this.asked = true;
+    const waiting = this.waiting.length > 0 ? ` Due to act now as their own agents, waiting on your answer: ${this.waiting.map((who) => this.name(who)).join(", ")}.` : "";
+    return `The ceiling binds: ${bind.words}, so the turn has nothing left under it.${waiting}`;
   }
 
-  /** The slide under way (`slideOf`), from moment `mark`: the scene's cast changes, and a `story.scene` there records it. */
-  private slide(mark: number): void {
+  /**
+   * The author's slide (§4.4, §6.5), from moment `mark`: under a binding ceiling its step said who
+   * slides from their own agent and how far (played by it, or handled as world), its reason kept with
+   * why, said and kept in the scene's spend; the scene's cast changes, and a `story.scene` there records it.
+   */
+  private slide(slides: StepResult["slide"], mark: number): void {
     const { book } = this;
-    const cast = this.slideOf(book.cast);
-    if (cast.every((c, i) => c.effort === book.cast[i]?.effort)) return;
+    const to = new Map(slides.map((s) => [s.who, s.to] as const));
+    const moving = book.cast.filter((c) => c.effort === "agent" && to.has(c.who));
+    if (moving.length === 0) return;
+    const bind = this.binds();
+    const ceiling = bind ? `${bind.which === "day" ? "today's" : "this turn's"} ceiling binds` : "a ceiling bound";
+    const words = moving.map((c) => `${this.name(c.who)} ${to.get(c.who) === "world" ? "handled as world" : "played by the author"}`).join(", ");
+    this.say(`The budget: ${bind?.words ?? ceiling}, so the author slides ${words} from here rather than their own agents.`);
+    this.put.push(`${words} rather than their own agents, the author's call: ${bind?.words ?? ceiling}`);
+    for (const c of moving) if (to.get(c.who) === "author") this.slid.add(c.who);
+    const why = `The author slid them down the ladder: ${ceiling}.`;
+    const cast = book.cast.map((c) => {
+      const rung = c.effort === "agent" ? to.get(c.who) : undefined;
+      return rung ? { ...c, effort: rung, why: c.why ? `${c.why} ${why}` : why } : c;
+    });
     book.cast = cast;
     this.agents = new Set(cast.filter((c) => c.effort === "agent").map((c) => c.who));
     book.apply([sceneEvent({ scene: book.scene, place: book.place, at: book.minute, cast })], mark);
   }
 
+  /** The ceiling as the hard stop (§6.5): the author's answer still has `due` play as their own agents past it, so the scene ends at this beat, said and kept in the scene's spend; the player answers here, and the scene goes on next turn. */
+  private stopAt(bind: CeilingBind, due: readonly EntityId[]): void {
+    const names = due.map((who) => this.name(who)).join(", ");
+    this.say(`The budget: ${bind.words}, and the author's answer would still have ${names} play as their own agents past it: the scene ends at this beat, the player answers here, and the scene goes on next turn.`);
+    this.put.push(`the scene ended at the next beat: ${names} would still have played as their own agents past the ceiling (${bind.words})`);
+  }
+
   /**
    * A mind formed in play (D-17), for someone with no mind yet: someone first met after opt-in, a new
-   * person, anyone on a chat turned on without the bootstrap. Its core lands in moment 0, from their
-   * card, else from what the world knows of them (for the user's review), and the thinking block says
-   * so; from this scene on they may play as their own agent. False when nothing could form it.
+   * person, anyone on a chat turned on without the bootstrap. Its core lands in moment `mark` (0 at the
+   * setup), from their card, else from what the world knows of them (for the user's review), and the
+   * thinking block says so; from this scene on they may play as their own agent. False when nothing could form it.
    */
-  private async formMind(who: EntityId): Promise<boolean> {
+  private async formMind(who: EntityId, mark = 0): Promise<boolean> {
     const { input, book } = this;
     const entity = own(book.state.entities, who) ?? own(this.world.entities, who);
     const linked = own(this.world.entities, who)?.characterId;
     const formed = await formCore({ who, name: this.name(who), player: this.name(this.pov), at: book.state.clock, fields: entity?.fields ?? {}, ...(typeof linked === "string" && linked !== "" ? { characterId: linked } : {}), ...(input.rt.host ? { host: input.rt.host } : {}), chatId: input.chatId, userId: input.userId, texts: this.texts });
     if (!formed) return false;
-    book.apply(formed.events, 0);
+    book.apply(formed.events, mark);
     Object.assign(book.blobs, formed.blobs);
     this.think(`${this.name(who)} has a mind now, its core formed from ${formed.source === "card" ? "their card" : "what the world knows of them (Minds → Core to review)"}: they may play as their own agent from this scene on.`);
     return true;
+  }
+
+  /**
+   * Whoever the setup or a step brought into the world (`newcomers`; LIVEGAPS: a walk-in the player
+   * greeted by name had no person to cast, stage or give a mind) joins it in moment `mark` by the
+   * engine's own `spawn`, as a reply's newcomer does: a person at the world's spawn tier, at the
+   * scene's place (`place`), who they are as the author told it kept as their description. One the
+   * author gave a mind gets it now (`formMind`), whatever effort it casts them at; anyone else forms
+   * one as usual, once cast as their own agent. One the engine refuses is said, and the scene goes on without them.
+   */
+  private async bringIn(newcomers: readonly NewcomerDraft[], place: PlaceId | null, mark = 0): Promise<void> {
+    const { input, book } = this;
+    const kind = kindIs(input.rt.registry, this.world, "person", "person") ? "person" : (Object.keys(this.world.kinds).find((k) => kindIs(input.rt.registry, this.world, k, "person")) ?? "person");
+    for (const n of newcomers) {
+      const spawned = resolveEffect(input.rt.registry, book.working, { type: "spawn", args: { id: n.id, kind, name: n.name, tier: spawnTierOf(this.world), ...(place ? { place } : {}), fields: { spawned: "depth", ...(n.who !== "" ? { description: n.who } : {}) } } }, { bindings: {}, rng: createRng(hashParts(input.seed, "newcomer", n.id)), literal: true });
+      const kept = Array.isArray(spawned) ? book.apply(spawned, mark) : [];
+      if (!hasOwn(book.state.entities, n.id)) {
+        const why = `${n.name} couldn't be brought into the world${Array.isArray(spawned) ? "" : ` (${spawned.reason})`}, so no one plays them as a person of the world`;
+        this.say(`The author: ${why}.`);
+        this.unkept = [...this.unkept, why];
+        continue;
+      }
+      this.think(`${n.name} comes into the world${kept.length > 0 && n.who !== "" ? `: ${n.who}` : ""}.`);
+      if (n.mind && !(await this.formMind(n.id, mark))) this.say(`The author gave ${n.name} a mind, but there was nothing to form it from: you play them.`);
+    }
   }
 
   /**
@@ -646,12 +712,13 @@ class Turn {
       const now = this.now();
       const due = dueDrafts(this.drafts, reach, now, (a, b) => together(this.world, a, b))[0];
       if (!due) return;
-      const draft = due.draft.draft;
+      const draft = await draftWithTexts(book.reader, input.userId, due.draft.draft);
       const what = draft.summary || draft.episode.why || "something off screen";
       input.sink.progress("The author reads what this scene reaches of something off screen…");
       const before = this.meter.spent();
       const read = await readDraft({
         registry: input.rt.registry,
+        pinsMost: input.settings.depth.reads.settleBeats,
         world: this.world,
         state: book.state,
         userId: input.userId,
@@ -700,7 +767,7 @@ class Turn {
   private async gmReads(text: string, scene: PlayerBeatsInput["scene"]): Promise<PlayerBeatsOut> {
     const { input, book } = this;
     input.sink.progress("The GM is reading your turn…");
-    const ask = () => this.plugs.playerBeats(this.model, { registry: input.rt.registry, world: this.world, state: book.state, pov: this.pov, input: text, ...(scene ? { scene } : {}), resolutions: input.plan?.resolutions ?? [], ...(input.plan ? { minutes: input.plan.elapsedMinutes } : {}), texts: this.texts, signal: input.signal });
+    const ask = () => this.plugs.playerBeats(this.model, { registry: input.rt.registry, world: this.world, state: book.state, pov: this.pov, input: text, ...(scene ? { scene } : {}), resolutions: input.plan?.resolutions ?? [], ...(input.plan ? { minutes: input.plan.elapsedMinutes } : {}), texts: this.texts, quoteBounds: input.settings.depth.reads, signal: input.signal });
     let out: PlayerBeatsOut;
     try {
       out = await ask();
@@ -727,6 +794,7 @@ class Turn {
     input.sink.progress("The GM resolves what you attempt…");
     const r = await this.plugs.resolveAttempt(this.model, {
       registry: input.rt.registry,
+      quoteBounds: input.settings.depth.reads,
       world: this.world,
       state: book.state,
       act: { actor: this.pov, surface: b.surface, ...(b.quotes ? { quotes: b.quotes } : {}), attempt, input: words },
@@ -770,7 +838,7 @@ class Turn {
     }
     const others = far
       .sort((a, b) => rank(a) - rank(b))
-      .slice(0, OTHERS_READ)
+      .slice(0, this.input.settings.depth.reads.others)
       .map((id): Present => {
         const p = placeOfEntity(state, id);
         return { who: id, mind: minded.has(id), where: (p ? own(this.world.places, p)?.name : undefined) ?? "somewhere else" };
@@ -779,13 +847,25 @@ class Turn {
     const minds: PlayedMind[] = [];
     for (const p of present) if (p.mind && p.who !== this.pov) minds.push(await this.played(p.who, replaced, ["core", "now"]));
     const budget = this.budgetNow();
+    // The setup streams its reasoning into the thinking block as the provider writes it, where the block shows it whole (§5.2).
+    const model: ModelPort = this.whole
+      ? (role, messages, opts) =>
+          this.model(role, messages, {
+            ...opts,
+            onReasoning: (text) => {
+              if (!this.setupStreamed) input.sink.reasoning("\n");
+              this.setupStreamed = true;
+              input.sink.reasoning(text);
+            },
+          })
+      : this.model;
     const ask = () =>
       authorSetup({
         world: this.world,
         state,
         texts: this.texts,
         pov: this.pov,
-        model: this.model,
+        model,
         signal: input.signal,
         notebook: this.notebook,
         input: input.input?.text ?? null,
@@ -798,10 +878,13 @@ class Turn {
         ...(takeover ? { takeover } : {}),
         talk,
         realtime: input.settings.depth.realtime,
+        reads: input.settings.depth.reads,
         minds,
         ...(input.archive ? { archive: input.archive } : {}),
         ...(this.offscreen.length > 0 ? { offscreen: this.offscreen } : {}),
         ...(budget ? { budget } : {}),
+        // The on-screen allowance (W17): the author honours it as it casts.
+        ...(input.budget?.onScreen ? { onScreen: input.budget.onScreen } : {}),
       });
     try {
       return await ask();
@@ -840,7 +923,7 @@ class Turn {
 
   /** A scene's beats on the chain, newest kept, with their texts and refs. */
   private async sceneBeats(scene: string): Promise<{ ref: string; beat: BeatText }[]> {
-    const placed = this.input.at.story.beats.filter((p) => p.beat.scene === scene).slice(-SCENE_BEATS_READ);
+    const placed = this.input.at.story.beats.filter((p) => p.beat.scene === scene).slice(-this.input.settings.depth.reads.sceneBeats);
     const out: { ref: string; beat: BeatText }[] = [];
     for (const [i, p] of placed.entries()) {
       const what = await this.book.reader.get(this.input.userId, p.beat.what);
@@ -855,11 +938,12 @@ class Turn {
   /** The scene as the author reads it now: its beats on the chain (a continuing scene's) and this turn's, with refs. */
   private async sceneSoFar(): Promise<{ id: string; place: PlaceId; cast: SceneCast[]; staging: StagingDraft[]; beats: { ref: string; beat: BeatText }[] }> {
     const earlier = await this.sceneBeats(this.book.scene);
-    const now = this.book.beats.slice(-SCENE_BEATS_READ).map((b, i) => ({ ref: `t${i + 1}`, beat: b }));
-    return { id: this.book.scene, place: this.book.place, cast: this.book.cast, staging: [...this.book.staging.values()], beats: [...earlier, ...now].slice(-SCENE_BEATS_READ) };
+    const most = this.input.settings.depth.reads.sceneBeats;
+    const now = this.book.beats.slice(-most).map((b, i) => ({ ref: `t${i + 1}`, beat: b }));
+    return { id: this.book.scene, place: this.book.place, cast: this.book.cast, staging: [...this.book.staging.values()], beats: [...earlier, ...now].slice(-most) };
   }
 
-  /** Real time entered or ended by the setup (§2.5): a `story.talk` in moment 0, its line in the thinking block (`talkWritten`); an offer while it starts only from the chip, which says it. One refused (the budget slid them to the author) is said, and the author's next step hears it (LIVE3 L3b-3). The partner of real time it entered, or null. */
+  /** Real time entered or ended by the setup (§2.5): a `story.talk` in moment 0, its line in the thinking block (`talkWritten`); an offer while it starts only from the chip, which says it. One refused (not playing as their own agent, or a ceiling binds) is said, and the author's next step hears it (LIVE3 L3b-3). The partner of real time it entered, or null. */
   private realtime(setup: SetupResult): EntityId | null {
     const r = setup.realtime;
     if (r === null) return null;
@@ -870,8 +954,9 @@ class Turn {
       this.book.apply([talkWritten({ with: talk.with, state: "off", by: "author", why: r.end }, { ...say, name: this.name(talk.with) })], 0);
       return null;
     }
-    if (!this.agents.has(r.with) || !hasAgent(this.world, this.book.state, r.with)) {
-      const why = `real-time dialogue with ${this.name(r.with)} needs them playing as their own agent${this.slid.has(r.with) ? ", and the budget slid them to the author" : ""}; it wasn't entered`;
+    const bound = this.binds() !== null;
+    if (bound || !this.agents.has(r.with) || !hasAgent(this.world, this.book.state, r.with)) {
+      const why = `real-time dialogue with ${this.name(r.with)} needs them playing as their own agent${bound ? ", past a ceiling that binds" : ""}; it wasn't entered`;
       this.say(`The author's setup: ${why}`);
       this.unkept = [...this.unkept, why];
       return null;
@@ -897,7 +982,7 @@ class Turn {
     const id = book.nextId();
     try {
       const mind = await mindInput({ registry: input.rt.registry, blobs: book.reader }, input.userId, { state: book.state, world: this.world, story: input.at.story }, who, input.settings);
-      const so = await this.plugs.sceneSoFar(book.reader, input.userId, read, who);
+      const so = await this.plugs.sceneSoFar(book.reader, input.userId, read, who, { limit: input.settings.depth.reached });
       // What it perceives of the others is what the scene's beats brought it (§4.2): never the author's staging.
       const out = await this.plugs.play(this.model, { ...mind, beat: id, scene: so.scene, reached: so.reached, recall: this.plugs.sceneRecall(book.reader, input.userId, read, who), signal: input.signal });
       return { who, id, out };
@@ -919,7 +1004,7 @@ class Turn {
    */
   private async beat(next: readonly EntityId[], mark: number, left: number, unreached = false): Promise<StepResult | null> {
     const { input, book } = this;
-    // Those named whom the budget slid to the author are its step's to play.
+    // Those named whom the author slid to itself are its step's to play.
     const playing = next.filter((who) => this.agents.has(who));
     const handed = next.filter((who) => !this.agents.has(who));
     for (const who of playing) input.sink.progress(`${this.name(who)} decides what to do…`);
@@ -944,6 +1029,7 @@ class Turn {
       input.sink.progress(`The GM resolves what ${this.name(p.who)} attempts…`);
       const r = await this.plugs.resolveAttempt(this.model, {
         registry: input.rt.registry,
+        quoteBounds: input.settings.depth.reads,
         world: this.world,
         state: book.state,
         act: { actor: p.who, surface: t.surface, ...(t.quotes ? { quotes: t.quotes } : {}), attempt: act.attempt },
@@ -972,6 +1058,7 @@ class Turn {
       await this.moment(kept, mark);
       return null;
     }
+    for (const r of step.reads ?? []) this.think(r);
     this.think(step.reasoning);
     if (step.redone.length > 0) this.say(`The author's step couldn't all be kept: ${step.redone.join("; ")}. Told why, it took the step again.`);
     for (const r of step.refused) this.say(`The author's step: ${r}`);
@@ -982,7 +1069,8 @@ class Turn {
       const b = await book.write({ ...d.draft, exposure }, d.draft.decided, mark, { id: d.id, model: this.model, texts: this.texts, signal: input.signal });
       if (b) moment.push(b);
     }
-    // Whom it stages arriving the scene moves where it plays, and whom it places elsewhere there, as the setup's (LIVE3 L3b-1, LIVE3c L3c-2).
+    // Whom it brought into the world arrives first, then whom it stages arriving the scene moves where it plays, and whom it places elsewhere there, as the setup's (LIVE3 L3b-1, LIVE3c L3c-2).
+    await this.bringIn(step.newcomers, book.place, mark);
     this.placed(step.staging, mark);
     book.stage(step.staging, mark, moment.at(-1)?.beat.id);
     for (const d of step.beats) {
@@ -1001,7 +1089,8 @@ class Turn {
     const played: PlayedMind[] = [];
     for (const c of this.book.cast) if (c.effort === "author") played.push(await this.played(c.who, replaced, ["core", "self", "now", "mind"]));
     const budget = this.budgetNow();
-    const ask = () => authorStep({ world: this.world, state: this.book.state, texts: this.texts, pov: this.pov, model: this.model, signal: input.signal, notebook: this.notebook, scene, decided, played, left, ...(this.unkept.length > 0 ? { refusedBefore: this.unkept } : {}), ...(budget ? { budget } : {}), ...(this.slid.size > 0 ? { slid: [...this.slid] } : {}), ...(handed.length > 0 ? { handed } : {}), ...(unreached ? { unreached: true as const } : {}) });
+    const ceiling = this.ceilingNow();
+    const ask = () => authorStep({ world: this.world, state: this.book.state, texts: this.texts, pov: this.pov, model: this.model, signal: input.signal, notebook: this.notebook, scene, decided, played, left, ...(this.unkept.length > 0 ? { refusedBefore: this.unkept } : {}), ...(budget ? { budget } : {}), ...(ceiling ? { ceiling } : {}), ...(this.slid.size > 0 ? { slid: [...this.slid] } : {}), ...(handed.length > 0 ? { handed } : {}), ...(unreached ? { unreached: true as const } : {}), ...(input.archive ? { archive: input.archive } : {}) });
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         return await ask();

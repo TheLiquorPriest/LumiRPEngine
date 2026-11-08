@@ -81,6 +81,8 @@ export interface DepthMindFile {
   at: string | null;
   /** Out of its mind and recall (`writtenFromGone`): its latest write drew on a beat an amendment or a strike replaced, and no catch-up has kept or rewritten it since; one asked twice for a verdict stays so (§4.2, Retcons propagate). */
   out?: true;
+  /** With `out`: its latest write was a reflection's (§4.2, Retcons: reflections flagged apart), which the poll may rerun rather than a catch-up rewrite. */
+  reflection?: true;
   /** A seeded core waiting for your review (D-17): from the history, an imported entry, World Info, or what the world knew of someone met in play. Keeping it as it is, or your edit, clears it. */
   review?: true;
 }
@@ -188,12 +190,12 @@ export interface DepthRevision {
 
 /** One job a poll asked for (§6.4): its kind, whom or what (a character's name, the author's own reflection, an episode's or a draft's words) and why. */
 export interface DepthPollJob {
-  kind: "catchup" | "reflect" | "author.reflect" | "episode" | "settle" | "drop" | "rebase";
+  kind: "catchup" | "reflect" | "interview" | "author.reflect" | "episode" | "settle" | "drop" | "rebase";
   subject: string;
   why: string;
 }
 
-export const DEPTH_POLL_JOB_LABEL: Readonly<Record<DepthPollJob["kind"], string>> = Object.freeze({ catchup: "Catches up", reflect: "Reflects", "author.reflect": "The author reflects", episode: "Episode off screen", settle: "Settle", drop: "Drop", rebase: "Rebase" });
+export const DEPTH_POLL_JOB_LABEL: Readonly<Record<DepthPollJob["kind"], string>> = Object.freeze({ catchup: "Catches up", reflect: "Reflects", interview: "Interviewed", "author.reflect": "The author reflects", episode: "Episode off screen", settle: "Settle", drop: "Drop", rebase: "Rebase" });
 
 /** One poll after a turn (§6.4): what it considered and whether it raised it, the jobs it asked for, its account and the author's whole reasoning. */
 export interface DepthPoll {
@@ -214,6 +216,8 @@ export interface DepthNotebookView {
   /** Every poll on the chain, newest first. */
   poll: DepthPoll[];
   predictions: { at: string; text: string; outcome: "pending" | "hit" | "miss" | "partly"; note: string }[];
+  /** The author's drift checks (each character's arc against who they have become), newest first. */
+  drift: { at: string; who: string; drift: "none" | "some" | "strong"; note: string }[];
 }
 
 /** An archive search (§4.3): by text, person, place or story time (words the world's calendar reads: "3 May", "the 14th"); a page from `offset`. */
@@ -238,6 +242,8 @@ export interface DepthArchiveHit {
   places: string[];
   /** The people of the live beats citing it: actors, addressed and exposed, by name. */
   people: string[];
+  /** Whom the live beats citing it reached, each by name with the ways it reached them: "Dale (sight, hearing)". */
+  reached: string[];
   snippet: string;
   /** Live beats that cite this message. */
   beats: number;
@@ -308,7 +314,7 @@ export interface DepthDraft {
   settle?: DepthAt & { why: string; reasoning: string; beats: number };
   /** Its live drop: where, why, and the author's thinking. */
   drop?: DepthAt & { why: string; reasoning: string };
-  /** What the player's last Settle now or Re-draft on it came to while the host has run: under way, done (what became of it, a line each) or failed (why). */
+  /** What the player's last Settle now or Re-draft on it came to, kept in the chat's run: under way, done (what became of it, a line each) or failed (why). */
   press?: { op: "settle" | "redraft"; state: "running" | "done" | "failed"; lines: string[] };
 }
 
@@ -442,14 +448,16 @@ export type DepthOp =
   | ({ op: "archive" } & DepthArchiveQuery)
   /** The turn inspector's scene view (`shared/scene-view.ts`): one reply's scene, the newest with one by default. */
   | { op: "scene"; message?: MessageId }
+  /** GM → This chat → Inspector's read of the chat's last dry run on the loopback, on any world chat, on depth or not. */
+  | { op: "dry_run" }
   /** GM → Depth → Drafts (§4.6): every draft on this chain with its state there. */
   | { op: "drafts" }
   /** Settle now: the author reads the open draft against its pins now and settles it, drops it or redrafts it. */
   | { op: "draft_settle"; draft: string }
   /** Drop: the player's own verdict that the open draft won't happen. */
   | { op: "draft_drop"; draft: string }
-  /** Re-draft: the open draft dropped, and its episode drafted again at its treatments from where the story is now. */
-  | { op: "draft_redraft"; draft: string }
+  /** Re-draft: the open draft dropped, and its episode drafted again at its treatments from where the story is now; with `text`, the player's edit of it (M-16), his words a directive the author drafts it again from. */
+  | { op: "draft_redraft"; draft: string; text?: string }
   /** GM → Depth → Treatments (§6.5): the treatment log, the meter, the budget dial as it stands, and the asks waiting on the player. */
   | { op: "treatments" };
 
@@ -461,7 +469,7 @@ export interface DepthResult {
   notebook?: DepthNotebookView;
   archive?: DepthArchiveResult;
   scene?: DepthSceneView;
-  /** With `scene`: the chat's last dry run on the loopback, the narrator's prompt LumiRPEngine would send for it; null when none was kept. */
+  /** With `scene` and `dry_run`: the chat's last dry run on the loopback, the narrator's prompt LumiRPEngine would send for it; null when none was kept. */
   dryRun?: { at: number; messages: { role: string; content: string }[] } | null;
   drafts?: DepthDraftsView;
   treatments?: DepthTreatmentsView;

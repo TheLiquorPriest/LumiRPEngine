@@ -168,3 +168,84 @@ describe("minds form in play", () => {
     expect(none.lines.some((l) => l.includes("Jordan Price has no card and nothing the world knows of them to form a mind from"))).toBe(true);
   });
 });
+
+// LIVEGAPS (chat 33a736a8, DeepSeek): the player greeted a walk-in by name ("T. HALVORSEN"), the author
+// said "the woman needs a mind" and named her by a ref of its own, but no one by that name was in the
+// world, so her cast, staging and acts were refused and no mind formed.
+describe("a walk-in the author brings into the world", () => {
+  const WHO = "A Road Commission yard supervisor in hi-vis, businesslike, a purchase order in hand.";
+  const greet = { beats: [{ kind: "act", act: "said", actors: ["you"], about: [], what: "Alex greets the woman at the counter.", surface: "Alex wipes his hands and greets the woman in hi-vis.", words: "Morning. What can I do for you?", quotes: "Morning. What can I do for you?" }], signals: [] };
+  const setup = (effort: string, mind: boolean) => ({
+    scene: { place: "cafe" },
+    newcomers: [{ ref: "t_halvorsen", name: "T. Halvorsen", who: WHO, mind }],
+    cast: [{ who: "t_halvorsen", effort, why: "New here, and she'll matter: the county's fleet." }],
+    staging: [
+      { who: "you", where: "at the counter", doing: "greeting her", place: "cafe" },
+      { who: "t_halvorsen", where: "across the counter", doing: "holding a purchase order", place: "cafe" },
+    ],
+    exposure: [{ beat: "p1", who: "t_halvorsen", channel: "hearing", reach: "whole" }],
+    beats: effort === "agent" ? [] : [{ ref: "w1", by: "t_halvorsen", actors: ["t_halvorsen"], addressed: ["you"], act: "said", what: "Halvorsen says the yard's one-ton needs its brakes done.", surface: "The woman in hi-vis says the yard's one-ton needs its brakes.", quotes: "Morning. Halvorsen, Road Commission.", exposure: [{ who: "you", channel: "hearing", reach: "whole" }] }],
+    next: effort === "agent" ? ["t_halvorsen"] : [],
+    end: effort === "agent" ? null : "She has asked: the player answers.",
+    why: "A walk-in with business at the counter.",
+  });
+  const play = async (author: unknown[]) => {
+    const world = cafe({ lod1: false });
+    const store = new Map<string, string>();
+    const model = scripted({ gm: [greet], author, character: [{ do: "Halvorsen sets the purchase order down.", say: "Morning. Halvorsen, Road Commission.", to: ["Alex Rivera"], take: "A shop that looks busy.", now: "Booking the one-ton." }] });
+    const log = sink();
+    const state = startState(world, reg);
+    const input: DepthTurnInput = {
+      chatId: "chat-1",
+      userId: "u1",
+      turn: "gen-1",
+      kind: "normal",
+      at: { basis: { message: "m1", swipe: "s0", parentPath: "p0" }, state, world, story: { beats: [], staging: [], replaced: [], duplicates: [] }, events: [] },
+      plan: { events: [], elapsedMinutes: 0, resolutions: [], chips: [] },
+      runSeed: "run-1",
+      seed: "seed-1",
+      input: { messageId: "m1", text: "Morning. What can I do for you?" },
+      recent: "",
+      settings: defaultSettings(),
+      model,
+      sink: log.sink,
+      signal: new AbortController().signal,
+      rt: { registry: reg, blobs: { get: async (_u, hash) => store.get(hash) ?? null } },
+    };
+    const result = await runDepthTurn(input, scenePlugs);
+    for (const [hash, text] of Object.entries(result.blobs)) store.set(hash, text);
+    return { result, model, store, lines: log.lines, after: fold(reg, world, state, result.pre) };
+  };
+
+  test("cast for the author to play with a mind given, she joins the world at the scene's place, her mind forms from who she is, and her act is hers", async () => {
+    const { result, store, lines, after } = await play([setup("author", true)]);
+    expect(after.entities.t_halvorsen).toMatchObject({ kind: "person", name: "T. Halvorsen" });
+    expect(after.entities.t_halvorsen?.fields).toMatchObject({ spawned: "depth", description: WHO, place: "cafe" });
+    expect(result.pre.some((e) => e.type === "spawn")).toBe(true);
+    const [core] = cores(result.pre);
+    expect(core).toMatchObject({ who: "t_halvorsen", mode: "seed", source: "world", review: true });
+    expect(store.get(core?.hash ?? "")).toContain(WHO);
+    expect(mindedAt(after)).toEqual(["t_halvorsen"]);
+    expect(beats(result.pre).some((b) => b.actors.includes("t_halvorsen"))).toBe(true);
+    expect(lines.some((l) => l.includes("the cast named someone the chat doesn't have"))).toBe(false);
+    expect(lines.some((l) => l.includes("T. Halvorsen has a mind now"))).toBe(true);
+  });
+
+  test("cast as her own agent without one given, she forms her mind as anyone cast so does, and plays herself", async () => {
+    const { result, model, after } = await play([setup("agent", false), STEP]);
+    expect(cores(result.pre)).toMatchObject([{ who: "t_halvorsen", source: "world" }]);
+    expect(mindedAt(after)).toEqual(["t_halvorsen"]);
+    expect(model.calls.filter((c) => c.role === "character")).toHaveLength(1);
+  });
+
+  test("arriving mid-scene, a step brings her in at its moment, with the mind the author gave her, and her act is hers", async () => {
+    const arrives = { newcomers: [{ ref: "t_halvorsen", name: "T. Halvorsen", who: WHO, mind: true }], exposure: [{ beat: "d1", who: "you", channel: "hearing", reach: "whole" }], staging: [{ who: "t_halvorsen", where: "in the doorway", doing: "arriving", place: "cafe" }], beats: [{ ref: "s1", by: "t_halvorsen", actors: ["t_halvorsen"], act: "said", what: "Halvorsen asks who runs the place.", surface: "A woman in hi-vis in the doorway asks who runs the place.", quotes: "Who runs the place?", exposure: [{ who: "you", channel: "hearing", reach: "whole" }] }], next: [], end: "She has asked: the player answers." };
+    const { result, store, after } = await play([SETUP, arrives]);
+    expect(after.entities.t_halvorsen?.fields).toMatchObject({ spawned: "depth", description: WHO, place: "cafe" });
+    const core = cores(result.pre).find((c) => c?.who === "t_halvorsen");
+    expect(core).toMatchObject({ source: "world", review: true });
+    expect(store.get(core?.hash ?? "")).toContain(WHO);
+    expect(mindedAt(after)).toEqual(["jordan", "t_halvorsen"]);
+    expect(beats(result.pre).some((b) => b.actors.includes("t_halvorsen"))).toBe(true);
+  });
+});

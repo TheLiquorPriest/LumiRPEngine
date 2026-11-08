@@ -42,9 +42,10 @@ export const AUTHOR_SPEND = "author.spend";
 export const AUTHOR_ASK = "author.ask";
 export const AUTHOR_ANSWER = "author.answer";
 export const AUTHOR_ADOPT = "author.adopt";
+export const AUTHOR_VERDICT = "author.verdict";
 
 /** The author's record types, which change no world state. */
-export const AUTHOR_EVENTS: readonly string[] = [AUTHOR_POLL, AUTHOR_PREDICT, AUTHOR_SCORE, AUTHOR_DRIFT, AUTHOR_EDIT, AUTHOR_SPEND, AUTHOR_ASK, AUTHOR_ANSWER, AUTHOR_ADOPT];
+export const AUTHOR_EVENTS: readonly string[] = [AUTHOR_POLL, AUTHOR_PREDICT, AUTHOR_SCORE, AUTHOR_DRIFT, AUTHOR_EDIT, AUTHOR_SPEND, AUTHOR_ASK, AUTHOR_ANSWER, AUTHOR_ADOPT, AUTHOR_VERDICT];
 
 /** The longest words a record keeps in one field, in characters; the author's whole thinking rides with the entry's reasoning. */
 export const AUTHOR_WORDS_MAX = 2000;
@@ -57,11 +58,12 @@ export const AUTHOR_WORDS_MAX = 2000;
 export type PollJob =
   | { kind: "catchup"; who: EntityId; why: string }
   | { kind: "reflect"; who: EntityId; why: string }
+  | { kind: "interview"; who: EntityId; question: string; why: string }
   | { kind: "author.reflect"; depth: "scene" | "chapter"; why: string }
   | { kind: "episode"; episode: string; why: string }
   | { kind: "settle" | "drop" | "rebase"; draft: string; why: string };
 
-export const POLL_JOB_KINDS = ["catchup", "reflect", "author.reflect", "episode", "settle", "drop", "rebase"] as const;
+export const POLL_JOB_KINDS = ["catchup", "reflect", "interview", "author.reflect", "episode", "settle", "drop", "rebase"] as const;
 
 /** One thing the poll considered, raised or not, with its reason. */
 export interface PollConsidered {
@@ -164,6 +166,27 @@ export interface AdoptData {
   entries: string[];
 }
 
+/**
+ * `author.verdict`'s data (DEPTH-PLAN §4.6): the author's verdict on a draft's pins as it read them, a
+ * layer entry at the chain it read, so a branch from there reads the verdicts it inherited. Read a page
+ * at a time, each page's verdict (holds or contradicts); read at once, page 1 of 1 with the reading's
+ * own verdict (settle, drop, redraft or redate).
+ */
+export interface VerdictData {
+  draft: string;
+  /** 1-based, of `of`, in story order. */
+  page: number;
+  of: number;
+  /** The story times the page runs over, in words. */
+  span: string;
+  verdict: (typeof VERDICTS)[number];
+  why: string;
+  forces: string[];
+}
+
+/** A page's verdict, or a reading's own when its pins were read at once. */
+export const VERDICTS = ["holds", "contradicts", "settle", "drop", "redraft", "redate"] as const;
+
 /** `author.spend`'s data: what one piece of work cost, with what it bought and when. */
 export interface SpendData {
   treatment: SpendWork;
@@ -242,6 +265,7 @@ function jobProblem(j: unknown): string | null {
   if (j.kind === "author.reflect") return j.depth === "scene" || j.depth === "chapter" ? null : "the author reflects at a scene's end or a chapter's";
   if (j.kind === "episode") return nonBlank(j.episode) ? null : "an episode's job names its episode";
   if (j.kind === "settle" || j.kind === "drop" || j.kind === "rebase") return nonBlank(j.draft) ? null : "a draft's job names its draft";
+  if (j.kind === "interview" && !nonBlank(j.question)) return "an interview's job asks its question";
   return nonBlank(j.who) ? null : "a character's job names who";
 }
 
@@ -321,6 +345,13 @@ export function authorProblem(type: string, data: unknown): string | null {
       if (!Array.isArray(data.entries) || !data.entries.every(nonBlank)) return "an adoption lists the entries it landed, by id";
       return cited(data.waited) && cited(data.without) ? null : "an adoption names the work it waited for and went without, each with its message";
     }
+    case AUTHOR_VERDICT: {
+      if (!nonBlank(data.draft)) return "a verdict names its draft";
+      const count = (v: unknown): boolean => typeof v === "number" && Number.isInteger(v) && v >= 1;
+      if (!count(data.page) || !count(data.of) || (data.page as number) > (data.of as number)) return "a verdict is on page n of m";
+      if (!(VERDICTS as readonly unknown[]).includes(data.verdict)) return `a verdict is one of ${VERDICTS.join(", ")}`;
+      return words(data.span, true) && words(data.why, true) && Array.isArray(data.forces) && data.forces.every((f) => words(f)) ? null : "a verdict says its span, why, and what it forces, in words";
+    }
     default:
       return `${type} isn't an author's record`;
   }
@@ -339,6 +370,7 @@ export function pollEvent(d: PollData): PackEvent {
       if (j.kind === "author.reflect") return { kind: j.kind, depth: j.depth, why: bounded(j.why) };
       if (j.kind === "episode") return { kind: j.kind, episode: j.episode, why: bounded(j.why) };
       if ("draft" in j) return { kind: j.kind, draft: j.draft, why: bounded(j.why) };
+      if (j.kind === "interview") return { kind: j.kind, who: j.who, question: bounded(j.question), why: bounded(j.why) };
       return { kind: j.kind, who: j.who, why: bounded(j.why) };
     }),
   };
@@ -393,6 +425,10 @@ export function answerEvent(d: AnswerData): PackEvent {
 export function adoptEvent(d: AdoptData): PackEvent {
   const list = (l: AdoptData["waited"]): JsonObject[] => l.map((c) => ({ what: bounded(c.what), message: c.message }));
   return { type: AUTHOR_ADOPT, data: { waited: list(d.waited), without: list(d.without), entries: [...d.entries] } };
+}
+
+export function verdictEvent(d: VerdictData): PackEvent {
+  return { type: AUTHOR_VERDICT, data: { draft: d.draft, page: d.page, of: d.of, span: bounded(d.span), verdict: d.verdict, why: bounded(d.why), forces: d.forces.map(bounded) } };
 }
 
 /** The data of an author's record when `e` is a well-formed one of `type`. */

@@ -21,6 +21,7 @@ import { hasOwn } from "../../../shared/json";
 import type { PackEvent } from "../../../shared/ledger";
 import {
   AGENT_MODES,
+  MIND_ASK,
   MIND_FILE_NAMES,
   MIND_INTERVIEW,
   MIND_LIVED,
@@ -30,6 +31,7 @@ import {
   MINDS_V2_KEY,
   PROBES_KEPT,
   agentPlan,
+  mindAskOf,
   mindFileOf,
   mindInterviewOf,
   mindLivedOf,
@@ -115,10 +117,13 @@ const write: EventTypeDef<PackEvent> = {
       ...(d.supersedes !== undefined ? { supersedes: d.supersedes } : {}),
       ...(d.source !== undefined ? { source: d.source } : {}),
       ...(d.review ? { review: true as const } : {}),
+      ...(d.mode === "user" && before !== undefined ? { was: before.hash } : {}),
     };
     m.files[file.rel] = meta;
     if (d.supersedes !== undefined) m.superseded[d.supersedes] = true;
     m.writes += 1;
+    // A reflection's write answers the character's own ask to take stock.
+    if (d.mode === "reflect") delete m.asks;
     m.last = m.last === null ? d.at : Math.max(m.last, d.at);
     // Its plans with a time reach the Cast life planner, as the memory step's do; one held already stays as it is.
     if ((AGENT_MODES as readonly string[]).includes(d.mode)) {
@@ -184,6 +189,27 @@ const interview: EventTypeDef<PackEvent> = {
   },
 };
 
+/** `minds.v2.ask`: a character asks from its own play to take stock; the poll hears it until a reflection writes. */
+const ask: EventTypeDef<PackEvent> = {
+  type: MIND_ASK,
+  validate: (e, ctx) => {
+    const d = mindAskOf(e.data);
+    if (typeof d === "string") return { code: "bad_event", reason: d };
+    if (!known(ctx, d.who)) return { code: "missing_entity", reason: `no one with the id ${d.who}` };
+    return d.who === povOf(ctx.world, ctx.state) ? { code: "player_character", reason: NO_AGENT } : null;
+  },
+  apply: (e, state) => {
+    const d = mindAskOf(e.data);
+    if (typeof d === "string") return;
+    writeMind(state, d.who).asks = { at: d.at, why: d.why };
+  },
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined) return "";
+    const d = mindAskOf(e.data);
+    return typeof d === "string" ? "" : `${nameOf(ctx, d.who)} asks to reflect`;
+  },
+};
+
 /** `minds.v2.take`: a play's private take, kept as the character's working memory of the scene until it remembers the scene. */
 const take: EventTypeDef<PackEvent> = {
   type: MIND_TAKE,
@@ -234,7 +260,7 @@ const pov: EventTypeDef<PackEvent> = {
   describe: (e, ctx) => `The player now plays ${nameOf(ctx, String(e.data.who))}`,
 };
 
-export const MIND_V2_EVENT_DEFS: readonly EventTypeDef<PackEvent>[] = [write, lived, take, interview, pov];
+export const MIND_V2_EVENT_DEFS: readonly EventTypeDef<PackEvent>[] = [write, lived, take, ask, interview, pov];
 
 /** The mind file names, for readers that list a mind in its read order. */
 export { MIND_FILE_NAMES };

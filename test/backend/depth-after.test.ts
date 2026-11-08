@@ -270,6 +270,24 @@ describe("right after a depth reply", () => {
     expect((await afterDepthReply(rt, capped, userId, at, { scene: "s1", ended: false, remember: [], poll: false, beats: [] }, { model: long })).remembered).toEqual(["dev"]);
   });
 
+  test("Settings → Depth → Takes before remembering is the count a talk still on remembers at", async () => {
+    const h = new Harness("fresh", { packs: [storyPack, authorPack] });
+    const rt = rtOf(h);
+    const userId = h.host.userId;
+    const settings = await rt.settings.get(userId);
+    const chat = await h.newChat();
+    await h.send(chat, "Tell me everything, Dev.", "Where to start.");
+    const at = await h.service.basisFor(chat, userId);
+    if (!at) throw new Error("no basis");
+    const takes = Array.from({ length: 20 }, (_, i) => mindTakeEvent({ who: "dev", at: 600 + i, lived: ["pier"], take: TAKE }).event);
+    expect((await h.service.landLayer(chat, userId, { id: "talk", basis: at, kind: "story.beat", events: [talkEvent({ with: "dev", state: "on", by: "author", scene: "s1" }), beatEvent(beat("pier", 600, PIER_WHAT, PIER, false, "s1")), ...takes] })).status).toBe("landed");
+    const after = { scene: "s1", ended: false, remember: [], poll: false, beats: [] };
+    expect(settings.depth.takesKept).toBe(TAKES_KEPT);
+    expect((await afterDepthReply(rt, chat, userId, at, after, { model: port({}) })).remembered).toEqual([]);
+    settings.depth.takesKept = 20;
+    expect((await afterDepthReply(rt, chat, userId, at, after, { model: port({ character: [{ memories: [{ lived: ["pier"], about: ["sam"], text: MEMORY }] }] }) })).remembered).toEqual(["dev"]);
+  });
+
   test("with the background lanes off only remembering and the truth link run, said in one line; the next poll reads every beat since the last one that ran", async () => {
     const h = new Harness("fresh", { packs: [storyPack, authorPack] });
     const rt = rtOf(h);
@@ -294,6 +312,23 @@ describe("right after a depth reply", () => {
     await afterDepthReply(rt, chat, userId, second, { scene: null, ended: false, remember: [], poll: true, beats: ["boat"] }, { model: on });
     expect(on.sent.author?.[0]).toContain(PIER_WHAT);
     expect(on.sent.author?.[0]).toContain(BOAT);
+  });
+
+  test("Settings → Depth → Beats the poll reads bounds the beats the poll reads, newest kept", async () => {
+    const h = new Harness("fresh", { packs: [storyPack, authorPack] });
+    const rt = rtOf(h);
+    const userId = h.host.userId;
+    const settings = await rt.settings.get(userId);
+    const chat = await h.newChat();
+    await h.send(chat, "The pier floods at eight, Dev. Look, a boat.");
+    const at = await h.service.basisFor(chat, userId);
+    if (!at) throw new Error("no basis");
+    expect((await h.service.landLayer(chat, userId, { id: "turn1", basis: at, kind: "story.beat", events: [beatEvent(beat("pier", 600, PIER_WHAT, PIER, false)), beatEvent(beat("boat", 640, BOAT, BOAT, false))] })).status).toBe("landed");
+    settings.depth.reads.pollBeats = 1;
+    const model = port({ author: [{ considered: [] }] });
+    await afterDepthReply(rt, chat, userId, at, { scene: null, ended: false, remember: [], poll: true, beats: ["pier", "boat"] }, { model });
+    expect(model.sent.author?.[0]).toContain(BOAT);
+    expect(model.sent.author?.[0]).not.toContain(PIER_WHAT);
   });
 
   test("GM → Minds' Reflect and Catch up are linked once what they wrote of the beliefs lands, as the poll's jobs are (conformance finding 6)", async () => {
@@ -332,10 +367,12 @@ describe("right after a depth reply", () => {
     if (!greeting) throw new Error("no greeting");
     // Dev lived the warning and wrote his beliefs from it.
     const beliefs = mindFileWrite({ who: "dev", path: mindPath("dev", "beliefs"), at: 600, mode: "catch-up", lived: ["pier"], about: [] }, BELIEFS);
+    // And his reflection drew on it.
+    const self = mindFileWrite({ who: "dev", path: mindPath("dev", "self"), at: 605, mode: "reflect", lived: ["pier"], about: [] }, SELF);
     await rt.blobs.put(userId, BELIEFS);
     // He holds 300 takes unremembered, near the count that calls his remembering.
     const takes = Array.from({ length: 300 }, (_, i) => mindTakeEvent({ who: "dev", at: 600, lived: ["pier"], take: `Take ${i}.` }).event);
-    expect((await h.service.landLayer(chat, userId, { id: "lived", basis: greeting, kind: "story.beat", events: [beatEvent(beat("pier", 600, PIER_WHAT, PIER, false)), mindLivedEvent({ who: "dev", beats: ["pier"], at: 600, mode: "catch-up" }), ...beliefs.events, ...takes] })).status).toBe("landed");
+    expect((await h.service.landLayer(chat, userId, { id: "lived", basis: greeting, kind: "story.beat", events: [beatEvent(beat("pier", 600, PIER_WHAT, PIER, false)), mindLivedEvent({ who: "dev", beats: ["pier"], at: 600, mode: "catch-up" }), ...beliefs.events, ...self.events, ...takes] })).status).toBe("landed");
     await h.send(chat, "No, Sam said nine.");
     const basis = await h.service.basisFor(chat, userId);
     if (!basis) throw new Error("no basis");
@@ -343,7 +380,8 @@ describe("right after a depth reply", () => {
     expect((await h.service.landLayer(chat, userId, { id: "edit", basis, kind: "story.beat", events: [beatEvent({ ...beat("pier9", 600, "Sam warns Dev that the pier floods at nine.", "Sam says the pier floods at nine.", true), supersedes: ["pier"] })] })).status).toBe("landed");
     const model = port({ author: [{}] });
     await afterDepthReply(rt, chat, userId, basis, { scene: null, ended: false, remember: [], poll: true, beats: ["pier9"] }, { model });
-    expect(model.sent.author?.[0]).toContain("out of mind since a correction struck what they were written from: beliefs.md (a reflection rewrites them)");
+    // What a reflection wrote is flagged apart from the rest.
+    expect(model.sent.author?.[0]).toContain("out of mind since a correction struck what they were written from: beliefs.md, self.md (written by a reflection) (a reflection rewrites them)");
     // A mind near that count asks for a reflection: the poll hears it.
     expect(model.sent.author?.[0]).toContain("their working memory is nearly full (300 takes unremembered): they ask to reflect");
   });

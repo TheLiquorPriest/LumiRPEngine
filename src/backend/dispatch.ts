@@ -54,6 +54,9 @@ import type { LedgerCore } from "../engine/ledger/journal";
 import { activeRecord } from "../engine/ledger/path";
 import type { ChatEngine, EngineSource } from "../shared/agent-settings";
 import { ENGINE_OFFER_CHOICES, ENGINE_OFFER_KIND } from "../shared/engine-offer";
+import { DEPTH_OFFER_CHOICES, DEPTH_OFFER_KIND, isDepthOfferChoice } from "../shared/depth-offer";
+import type { BootstrapOp } from "../shared/bootstrap";
+import { depthChosen, depthOfferChip } from "./bootstrap/depth-offer";
 import { type ChatKnowledgeChange, type ChatKnowledgePrefs, engineOf, playedOn } from "./chat-knowledge-prefs";
 import type { StoredChip } from "./chips";
 import { toChain } from "./ledger-io";
@@ -175,6 +178,8 @@ export class Dispatcher {
     this.review = rt.review;
     // A read proposal on a card applies, or is turned down, as its own confirm chip's Apply and No do.
     this.review.readChip = async (chatId, userId, chipId, choice) => void (await this.chip(chatId, userId, chipId, choice));
+    // The depth offer is built from the chat's bootstrap, which the dispatcher holds; where the user's loopback isn't ready, Set up the loopback comes first.
+    rt.depthOffer = async (chatId, userId, messageId) => ((await depthChosen(rt.host, chatId, userId)) ? null : depthOfferChip(await this.bootstraps.view(chatId, userId), messageId, await rt.loopback.unready(userId)));
   }
 
   start(): void {
@@ -474,6 +479,8 @@ export class Dispatcher {
           // Restart recovery and the chat's sync wait for that step on the queue; a delta brings what they change.
           const chatId = r.chatId;
           if (run) void this.rt.ledger.open(chatId, userId).catch((error: unknown) => this.rt.diag.error({ chatId, userId, turn: null }, "ledger", error, "the chat wasn't opened"));
+          // A chat on depth opened off the loopback is flagged now, before a reply runs no turn (L15).
+          if (run) await this.rt.openedDepth(chatId, userId).catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: its loopback connection wasn't checked (${error instanceof Error ? error.message : String(error)})`, userId));
         }
         return;
       }
@@ -488,9 +495,12 @@ export class Dispatcher {
         // Cancel on the activity line (DESIGN §5.1): only the user whose chat it is can stop its turn.
         reply("lre.cancel", { cancelled: this.rt.ledger.cancel(r.chatId, userId) });
         return;
-      case "lre.restart":
-        reply("lre.restart", { start: this.rt.ledger.claimRestart(r.chatId, userId, session, r.turn, swipeDirectionOf(r.direction) ?? undefined) });
+      case "lre.restart": {
+        const direction = swipeDirectionOf(r.direction) ?? undefined;
+        // A loopback swipe's ask names its generation, under way already: the answer goes to it, and nothing is to start (`LoopbackBridge.askSwipe`).
+        reply("lre.restart", { start: !this.rt.loopback.swipeAnswer(r.chatId, userId, r.turn, direction) && this.rt.ledger.claimRestart(r.chatId, userId, session, r.turn, direction) });
         return;
+      }
       case "lre.action": {
         await this.requireWorldChat(r.chatId, userId);
         // Words typed with the action describe the player's approach (the judge rates them); without
@@ -1542,6 +1552,28 @@ export class Dispatcher {
       this.rt.push.changed(chatId, userId);
       return { applied: true, pending: false };
     }
+    if (kind === DEPTH_OFFER_KIND) {
+      // The depth offer (DEPTH-PLAN Round 2): Estimate surveys the chat with no model call; Turn on depth
+      // opts in as GM → This chat → Depth does (refused while the user can't play depth, said why) and
+      // starts the bootstrap under Settings → Depth's cap; Keep off records the chat's choice.
+      if (!isDepthOfferChoice(choice)) throw new RequestError("bad_request", `unknown choice ${choice}`);
+      const ask = async (op: BootstrapOp): Promise<void> => {
+        try {
+          await this.bootstraps.handle({ lre: PROTOCOL_VERSION, type: "lre.bootstrap", reqId: `depth_offer:${this.nextId()}`, chatId, ...op }, userId);
+        } catch (error) {
+          if (error instanceof BootstrapError) throw new RequestError(error.code, error.message);
+          throw error;
+        }
+      };
+      if (choice === DEPTH_OFFER_CHOICES.estimate) await ask({ op: "estimate" });
+      else if (choice === DEPTH_OFFER_CHOICES.off) await ask({ op: "opt", on: false });
+      else {
+        await ask({ op: "opt", on: true });
+        await ask({ op: "start" });
+      }
+      this.rt.push.changed(chatId, userId);
+      return { applied: true, pending: false };
+    }
     if (kind === "reply_failed") {
       // Re-run the engine (DESIGN §5.1): the kept turn goes, and the Regenerate that follows runs the
       // engine again. Retry the reply is the page's Regenerate alone, with nothing to send here.
@@ -1701,6 +1733,13 @@ export class Dispatcher {
       }
     };
     switch (chip.kind) {
+      case "edit_read": {
+        // Undo on an edit the author read as amending (M-16): the reverse amendment, with its catch-ups, runs in the background; the chip then says what became of it.
+        const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+        if (choice !== "undo" || chip.swipeId === undefined) throw new RequestError("bad_request", `unknown choice ${choice}`);
+        this.rt.editUndo(chatId, userId, chip.messageId, chip.swipeId, { amended: strings(chip.payload.amended), struck: strings(chip.payload.struck) });
+        return { applied: true, pending: false };
+      }
       case "confirm": {
         // Set price and Pick item price a purchase nothing priced, and Pay another way pays the first
         // other way that covers it (DESIGN §9.5): each applies it as Apply would, so each accepts it.
@@ -2006,7 +2045,7 @@ function chipValue(chip: StoredChip, choice: string, payload: JsonObject | undef
   const input = chip.actions.find((a) => a.id === choice)?.input;
   if (!input || !payload) return null;
   if (input.type === "money") return typeof payload.cents === "number" && Number.isSafeInteger(payload.cents) && payload.cents > 0 ? payload.cents : null;
-  if (input.type === "text" || input.type === "action" || input.type === "org" || input.type === "settings" || input.type === "draft") return null;
+  if (input.type === "text" || input.type === "action" || input.type === "org" || input.type === "settings" || input.type === "draft" || input.type === "bootstrap") return null;
   return typeof payload.value === "string" && input.options.some((o) => o.value === payload.value) ? payload.value : null;
 }
 

@@ -37,6 +37,7 @@ function page(over: Partial<LoopbackPage> = {}): LoopbackPage {
     enforced: true,
     shared: { operator: true, enabled: false },
     connections: [{ id: "conn-loop", name: "Loopback" }],
+    offChats: [],
     ...over,
   };
 }
@@ -226,5 +227,24 @@ describe("Settings → Loopback", () => {
     expect(none.copied).toEqual([page().line.command ?? ""]);
     const quiet = show(page({ relays: [relay({ signIn: true })] }));
     expect(quiet.words).toContain("Every relay of yours has gone quiet or needs signing in again");
+  });
+
+  test("a chat on depth opened off the loopback: a warning naming it and its connection, with the fix; none while every chat is on it", () => {
+    expect(show(page()).part("data-lre-loopback-off")).toEqual([]);
+    const off = show(page({ offChats: [{ chatId: "chat-1", connection: "Real model" }] }));
+    expect(off.part("data-lre-loopback-off")).toHaveLength(1);
+    expect(off.words).toContain("A chat on depth is off the loopback");
+    expect(off.words).toContain("Chat chat-1 generates on Real model.");
+    expect(off.words).toContain("Fix: pick a loopback connection as that chat's connection");
+  });
+
+  test("a relay's session near its end: a warning with the line that signs it in again; none further off", () => {
+    expect(show(page()).part("data-lre-loopback-expiring")).toEqual([]);
+    const login = "lumirpengine loopback login --name sam";
+    const near = show(page({ relays: [relay({ report: report({ session: { valid: true, expiresAt: "2026-11-09T06:00:00Z", checkedAt: NOW } }), lines: { update: null, login } })] }));
+    expect(near.part("data-lre-loopback-expiring")).toHaveLength(1);
+    expect(near.words).toContain("Its session ends soon");
+    near.click(near.button("Copy: Sign in again"));
+    expect(near.copied).toEqual([login]);
   });
 });

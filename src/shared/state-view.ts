@@ -161,6 +161,8 @@ export type ChipKind =
   | "reply_failed"
   /** The offer to a classic chat that played and never chose, while new chats start on agents (INC3 3a, D2): Switch to agents, or Keep classic, either the chat's own choice from then on. */
   | "engine_offer"
+  /** The offer to a world chat that has played and never chose depth (DEPTH-PLAN Round 2): Turn on depth and bootstrap, with the bootstrap's estimate; Estimate; or Keep this chat off depth, the chat's own choice from then on. */
+  | "depth_offer"
   /** A typed action uses a thing the world doesn't have and the turn waits, nothing generated, on Add or Not an action; either resumes it (DESIGN §9.4 player claims). */
   | "claim"
   /** A thing the player said they had, made real for their action ("Added: a coffee"), or their own thing brought along or fetched from elsewhere ("Brought along: phone", ITEMS-SPEC §4.5), with Undo (DESIGN §9.4 player claims). */
@@ -207,7 +209,11 @@ export type ChipKind =
    * made canon, under the reply it settled at, with the author's reading and Read, which opens the
    * draft in GM → Depth → Drafts.
    */
-  | "settled";
+  | "settled"
+  /** A bootstrap under way on this depth chat (DEPTH-PLAN §7 Chips, §8): the stage it's at and how far that stage is, with Open (GM → Depth → Bootstrap); gone once the run stops. */
+  | "bootstrap"
+  /** Spot-check items of the bootstrap waiting for the player's marks (§8.6): how many, with Review (GM → Depth → Bootstrap); gone once each is marked. */
+  | "spot_checks";
 
 /**
  * A value a chip action asks for before it's sent, in its `lre.chip` payload: an amount in the
@@ -216,10 +222,11 @@ export type ChipKind =
  * may be sent empty, as a swipe's "What should change?" is), or an action picked again in the
  * Actions palette, opened at `action` with `params` already picked (`{params}`). Or no value at all:
  * `org` opens an organization's page in Orgs, at its `tab` when named (the Plan's Edit, ORG-SPEC
- * §4.4), `settings` opens a page of Settings (Settings → Loopback), and `draft` opens a draft of
- * what happens off screen in GM → Depth → Drafts; none sends anything.
+ * §4.4), `settings` opens a page of Settings (Settings → Loopback), `draft` opens a draft of what
+ * happens off screen in GM → Depth → Drafts, and `bootstrap` opens GM → Depth → Bootstrap; none
+ * sends anything.
  */
-export type ChipInput = { type: "money"; label: string; value?: number } | { type: "choice"; label: string; options: { value: string; label: string }[] } | { type: "text"; label: string; value: string; optional?: true } | { type: "action"; label: string; action: string; params: JsonObject } | { type: "org"; label: string; org: string; tab?: string } | { type: "settings"; label: string; page: "loopback" } | { type: "draft"; label: string; draft: string };
+export type ChipInput = { type: "money"; label: string; value?: number } | { type: "choice"; label: string; options: { value: string; label: string }[] } | { type: "text"; label: string; value: string; optional?: true } | { type: "action"; label: string; action: string; params: JsonObject } | { type: "org"; label: string; org: string; tab?: string } | { type: "settings"; label: string; page: "loopback" } | { type: "draft"; label: string; draft: string } | { type: "bootstrap"; label: string };
 
 export interface ChipAction {
   id: string;

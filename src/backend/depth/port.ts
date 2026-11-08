@@ -4,7 +4,7 @@
 // to the connection, model and effort the user chose for it in Settings → Depth.
 
 import { DEPTH_ROOM_MOST, type DepthRole } from "../../shared/depth-settings";
-import type { SamplingParams } from "../../shared/settings";
+import type { ReasoningChoice, SamplingParams } from "../../shared/settings";
 import type { Misread } from "../../shared/misread";
 
 /** One message of a model call, as the host's quiet generation takes it. */
@@ -29,7 +29,11 @@ export interface PortOptions {
   maxTokens?: number;
   /** Sampling parameters for this call over the role's own: the narrator's, as the preset in the loopback's body set them (DEPTH-PLAN §3.13). */
   params?: SamplingParams;
+  /** The effort for this call over its role's own (Settings → Depth): a stage whose answer is a short reading asks less (the GM's check, low). */
+  effort?: ReasoningChoice;
   signal?: AbortSignal;
+  /** Each piece of the model's reasoning as the provider writes it, for a stage that shows it as it comes (the setup, §5.2); the answer still carries it whole. */
+  onReasoning?: (text: string) => void;
 }
 
 /** Which connection and model answered a call (DEPTH-PLAN §3.8, §9.0 provenance): the connection's id, or "" for the user's default; the model the host says answered, else the one asked for, else ""; the provider's own id for the request, where it gave one. */

@@ -6,7 +6,7 @@
 // at a message never reads a reply written after it.
 
 import type { ArchiveHit, ArchiveQuery, ArchiveQuote, ArchiveQuoteRequest, ArchiveResult } from "../../shared/archive";
-import { ARCHIVE_QUOTE_MAX } from "../../shared/archive";
+import { ARCHIVE_QUOTE_MAX, reachedOf } from "../../shared/archive";
 import { DEPTH_TOOL_TEXT } from "../../shared/depth-prompts";
 import type { MessageId } from "../../shared/ids";
 import type { JsonObject } from "../../shared/json";
@@ -18,11 +18,44 @@ import type { WorldState } from "../../engine/state";
 import { renderPrompt } from "../prompts";
 import type { AgentTool, ToolOutcome } from "../agents/runtime";
 import { bareId, personNamed, placeNamed } from "./common";
+import { quoteView } from "../archive-index";
+import type { ArchiveView } from "../ledger-io";
+import type { ChatId, UserId } from "../../shared/ids";
 
 /** The archive of one chat, as its index answers (`ArchiveIndex` bound to the chat and its user). */
 export interface ArchiveSource {
   search(q: ArchiveQuery): Promise<ArchiveResult>;
   quote(r: ArchiveQuoteRequest): Promise<ArchiveQuote | null>;
+}
+
+/**
+ * The chat's archive through `upTo` (the message a stage answers), so a stage never reads a reply
+ * written after it: read off the chat's queue at the first read, not before (a stage that reads
+ * nothing costs nothing).
+ */
+export function chatArchive(
+  rt: { readonly ledger: { archiveView(chatId: ChatId, userId: UserId): Promise<ArchiveView | null> }; readonly archive: { searchView(chatId: ChatId, userId: UserId, view: ArchiveView, q: ArchiveQuery): Promise<ArchiveResult> } },
+  chatId: ChatId,
+  userId: UserId,
+  upTo: MessageId,
+): ArchiveSource {
+  let view: Promise<{ view: ArchiveView; last: number } | null> | null = null;
+  const read = () =>
+    (view ??= rt.ledger.archiveView(chatId, userId).then((v) => {
+      const last = v?.messages.find((m) => m.id === upTo)?.index;
+      return v && last !== undefined ? { view: v, last } : null;
+    }));
+  return {
+    search: async (q) => {
+      const got = await read();
+      return got ? rt.archive.searchView(chatId, userId, got.view, { ...q, upTo }) : { hits: [], total: 0 };
+    },
+    quote: async (r) => {
+      const got = await read();
+      const at = got?.view.messages.find((m) => m.id === r.messageId);
+      return got && at && at.index <= got.last ? quoteView(got.view, r) : null;
+    },
+  };
 }
 
 export const ARCHIVE_TOOLS = { search: "archive_search", quote: "archive_quote" } as const;
@@ -50,7 +83,7 @@ export function archiveTools(input: { texts: PromptTexts; world: WorldDoc; state
   const timeOf = (v: unknown): number | null | undefined => (typeof v !== "string" || v.trim() === "" ? undefined : (clockOfStamp(cal, v.trim()) ?? clockOfPhrase(cal, state.clock, v.trim())));
   const nameOf = (id: string): string => own(state.entities, id)?.name ?? own(world.places, id)?.name ?? id;
   const hitLine = (h: ArchiveHit): string =>
-    `- message ${h.index + 1} [${h.messageId}] (${h.isUser ? "the player" : "a reply"}${h.storyTime !== null ? `, ${formatClock(cal, h.storyTime)}` : ""}${h.places.length > 0 ? `, at ${h.places.map(nameOf).join(", ")}` : ""}${h.people.length > 0 ? `; ${h.people.map(nameOf).join(", ")}` : ""}${h.beats.length > 0 ? `; ${h.beats.length} beat${h.beats.length === 1 ? "" : "s"}` : ""}) chars ${h.span[0]}–${h.span[1]}: ${h.snippet}`;
+    `- message ${h.index + 1} [${h.messageId}] (${h.isUser ? "the player" : "a reply"}${h.storyTime !== null ? `, ${formatClock(cal, h.storyTime)}` : ""}${h.places.length > 0 ? `, at ${h.places.map(nameOf).join(", ")}` : ""}${h.people.length > 0 ? `; ${h.people.map(nameOf).join(", ")}` : ""}${h.exposure.length > 0 ? `; reached ${reachedOf(h.exposure, nameOf).join(", ")}` : ""}${h.beats.length > 0 ? `; ${h.beats.length} beat${h.beats.length === 1 ? "" : "s"}` : ""}) chars ${h.span[0]}–${h.span[1]}: ${h.snippet}`;
   const search: AgentTool = {
     name: ARCHIVE_TOOLS.search,
     description: text(DEPTH_TOOL_TEXT.search),

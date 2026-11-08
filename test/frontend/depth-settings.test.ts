@@ -81,17 +81,37 @@ describe("Settings → Depth", () => {
     (select?.onChange as (event: { currentTarget: { value: string } }) => void)({ currentTarget: { value: "conn-gw" } });
     const reset = propsOf(rendered, Button).find((p) => p.label === "Reset Point-of-view render to its default, the Fast model");
     (reset?.onClick as () => void)();
-    expect(mine).toEqual([{ depth: { roles: { pov: { own: { connectionId: "conn-gw", model: null } } } } }, { depth: { roles: { pov: { uses: "fast", own: { connectionId: null, model: null, effort: "inherit", maxTokens: 8192 } } } } }]);
+    expect(mine).toEqual([{ depth: { roles: { pov: { own: { connectionId: "conn-gw", model: null } } } } }, { depth: { roles: { pov: { uses: "fast", own: { connectionId: null, model: null, effort: "inherit", maxTokens: 8192, temperature: null, topP: null } } } } }]);
   });
 
   test("Strong and Fast are each one model: a connection and its model, reasoning and answer room, each with its default", () => {
     const patches: JsonObject[] = [];
-    const strong = { connectionId: "conn-gw", model: "big-model", effort: "max" as const, maxTokens: 32768 };
+    const strong = { connectionId: "conn-gw", model: "big-model", effort: "max" as const, maxTokens: 32768, temperature: 0.4, topP: null };
     const rows = render(ModelRows({ id: "strong", owner: "Strong model", value: strong, standard: defaultDepthSettings().strong, connections: CONNECTIONS, busy: false, set: (f) => void patches.push(f) }));
     const changed = propsOf(rows, SettingRow).map((p) => [p.id, p.changed]);
-    expect(changed).toEqual([["strong.connection", true], ["strong.effort", true], ["strong.maxTokens", true]]);
+    expect(changed).toEqual([["strong.connection", true], ["strong.effort", true], ["strong.maxTokens", true], ["strong.temperature", true], ["strong.topP", false]]);
     (propsOf(rows, NumberStepper)[0]?.onChange as (v: number) => void)(16384);
-    expect(patches).toEqual([{ maxTokens: 16384 }]);
+    const [temperature, topP] = propsOf(rows, "input").filter((p) => p.type === "number");
+    expect(temperature?.value).toBe(0.4);
+    expect(topP?.value).toBe("");
+    (temperature?.onChange as (event: { currentTarget: { value: string } }) => void)({ currentTarget: { value: "" } });
+    (topP?.onChange as (event: { currentTarget: { value: string } }) => void)({ currentTarget: { value: "0.85" } });
+    expect(patches).toEqual([{ maxTokens: 16384 }, { temperature: null }, { topP: 0.85 }]);
+  });
+
+  test("a DeepSeek connection is offered for Fast, setting only Fast's connection", () => {
+    const offer = (connections: { id: string; name: string; model: string | null; provider?: string }[], depth = defaultDepthSettings()) => {
+      const patches: JsonObject[] = [];
+      const tree = render(DepthPage({ depth, connections, busy: false, picked: null, onPick: () => undefined, patch: (p) => void patches.push(p) }));
+      return { button: propsOf(tree, "button").find((p) => textOf(p.children) === "Use my DeepSeek connection for Fast"), patches };
+    };
+    const ds = [{ id: "conn-gw", name: "Gateway", model: null, provider: "openrouter" }, { id: "conn-ds", name: "Cheap", model: "deepseek-v4-flash", provider: "deepseek" }];
+    const { button, patches } = offer(ds);
+    (button?.onClick as () => void)();
+    expect(patches).toEqual([{ depth: { fast: { connectionId: "conn-ds", model: null } } }]);
+    expect(offer(CONNECTIONS).button).toBeUndefined();
+    const onIt = depthSettingsOf({ fast: { connectionId: "conn-ds" } });
+    expect(offer(ds, onIt).button).toBeUndefined();
   });
 
   test("a preset lists what it changes, from → to, before Apply, and Apply patches only those", () => {
@@ -170,10 +190,10 @@ describe("the stored Depth settings", () => {
       bootstrap: { cap: "none", atOnce: { minds: 4 } },
     });
     const shipped = defaultDepthSettings();
-    expect(read.strong).toEqual({ connectionId: "conn-gw", model: "big-model", effort: shipped.strong.effort, maxTokens: shipped.strong.maxTokens });
+    expect(read.strong).toEqual({ connectionId: "conn-gw", model: "big-model", effort: shipped.strong.effort, maxTokens: shipped.strong.maxTokens, temperature: null, topP: null });
     expect(read.fast).toEqual(shipped.fast);
     expect(read.roles.author.uses).toBe("strong");
-    expect(read.roles.check).toEqual({ uses: "own", own: { connectionId: null, model: null, effort: "inherit", maxTokens: 8192 } });
+    expect(read.roles.check).toEqual({ uses: "own", own: { connectionId: null, model: null, effort: "inherit", maxTokens: 8192, temperature: null, topP: null } });
     expect(read.cadence).toBe("turns");
     expect(read.budget.allowances).toEqual({ live: 2, campfire: 4, room: "none", written: "none" });
     expect(read.budget.perTurn).toBe(shipped.budget.perTurn);

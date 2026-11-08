@@ -63,11 +63,11 @@ const CHAT_PARTS: { [P in Exclude<GmPart, GmWorldPart>]: (head: GmHead) => GmVie
         const clock = clockFixLine(fix.events);
         edits.push({ messageId: m.id, seq: fix.seq, lines: [...(clock ? [clock] : []), ...authorLines(registry, render.world, render.state, fix.events, 12)], ...(fix.by ? { by: fix.by.label } : {}), undo: i === head ? fixChip(m.id, m.swipeId, fix.seq) : null });
       }
-      // The player's edits of a mind file fold after the message they were made at: their Undo, while one stands at the chat's head, supersedes the edit.
+      // The player's edits of a mind file fold after the message they were made at: their Undo supersedes the edit, in place while it stands at the chat's head, past it by a new edit restoring the earlier text (`mindEditUndo`); one whose restoring edit stands has no Undo left.
       for (const e of minds) {
         if (e.messageId !== m.id) continue;
         const name = hasOwn(render.state.entities, e.who) ? (render.state.entities[e.who]?.name ?? e.who) : e.who;
-        edits.push({ messageId: m.id, entry: e.entry.id, lines: [`${name}'s mind: ${e.path.slice(mindDir(e.who).length)}, as you wrote it`], undo: e.undoable ? mindEditChip(e.entry.id) : null });
+        edits.push({ messageId: m.id, entry: e.entry.id, lines: [`${name}'s mind: ${e.path.slice(mindDir(e.who).length)}, as you wrote it`], undo: e.restored ? null : mindEditChip(e.entry.id) });
       }
     });
     return edits.reverse().slice(0, GM_EDITS);
