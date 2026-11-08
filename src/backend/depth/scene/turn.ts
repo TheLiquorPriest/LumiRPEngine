@@ -415,6 +415,8 @@ class Turn {
     // Whoever it brought into the world comes in first, at the scene's place, a mind formed for them where the author gave them one.
     await this.bringIn(setup.newcomers, setup.place ?? (setup.continues && playing ? playing.place : null) ?? placeOfEntity(book.state, this.pov));
     const cast = await this.formMinds([...setup.cast]);
+    // Anyone cast whose time in the chat's LumiBooks book isn't in their mind yet: caught up, or flagged, as Settings → Depth → Bootstrap says.
+    if (input.returning) for (const line of await input.returning(cast.filter((c) => c.who !== this.pov).map((c) => c.who))) this.think(line);
     if (this.binds()) this.asked = true;
     const pcPlace = placeOfEntity(book.state, this.pov);
     book.scene = setup.continues && playing ? playing.scene : sceneId(input.turn);

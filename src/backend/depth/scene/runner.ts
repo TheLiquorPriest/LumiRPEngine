@@ -15,7 +15,7 @@
 import { adoptEvent, type AdoptData } from "../../../shared/author";
 import type { ArchiveQuery } from "../../../shared/archive";
 import { depthCall, DEPTH_ROLE_WORDS, narratorOverrides } from "../../../shared/depth-settings";
-import type { ChatId, MessageId, UserId } from "../../../shared/ids";
+import type { ChatId, EntityId, MessageId, UserId } from "../../../shared/ids";
 import type { GenerationKind, LedgerEvent, PendingTurn } from "../../../shared/ledger";
 import type { SamplingParams } from "../../../shared/settings";
 import { STORY_SCENE } from "../../../shared/scene";
@@ -41,7 +41,7 @@ import { chatLinesOf, reporting, type ChatLine } from "./reporting";
 import { runDepthTurn, type ScenePlugs } from "./turn";
 
 /** What the depth turn reads of the runtime. */
-export type DepthTurnsRt = Pick<Runtime, "host" | "registry" | "blobs" | "settings" | "ledger" | "archive" | "bridgeOf" | "loopback" | "depthNeeded">;
+export type DepthTurnsRt = Pick<Runtime, "host" | "registry" | "blobs" | "settings" | "ledger" | "archive" | "bridgeOf" | "loopback" | "depthNeeded"> & Partial<Pick<Runtime, "bootstrapReturning">>;
 
 /** The replies whose after-reply work is kept until their commit takes it; past this the oldest goes (a commit that never came). */
 const AFTERS_KEPT = 64;
@@ -136,6 +136,7 @@ export class DepthTurns {
         rt: { registry: this.rt.registry, blobs: this.rt.blobs, host: this.rt.host },
         archive: this.archive(chatId, userId, read.at.basis.message),
         budget,
+        ...(this.rt.bootstrapReturning ? { returning: ((hook) => (who: readonly EntityId[]) => hook(chatId, userId, who))(this.rt.bootstrapReturning) } : {}),
       },
       this.plugs,
     );

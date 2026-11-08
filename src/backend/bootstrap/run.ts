@@ -17,8 +17,8 @@
 // ids made from its key, landed idempotently. A call whose answer its stage's parse didn't keep whole
 // is recorded with the fields and the answer as written (the raw-against-saved audit), and listed on
 // the next spot-check card; an answer asked for as JSON that holds none and wasn't cut off is kept
-// so and asked once more. A stage of long answers asks by the room rule: the most room an answer
-// may have, or its role's own where the user set one, and once more at twice it after a cut. A job
+// so and asked once more. A stage of long answers asks by the room rule: a room sized from what it
+// reads, or its role's own where the user set one, and once more at twice it after a cut. A job
 // that fails, or that Pause or the cap stops holding such a call, keeps
 // those calls beside its record, with why it stopped, for the audit alone. A pause, a crash or a restart
 // resumes at the first chunk whose recorded progress no longer holds; a job whose answer was
@@ -57,6 +57,7 @@ import type { ImportedEntry } from "./import";
 import type { AmendOut } from "./amend";
 import { buildSpotCard, isCard } from "./spot";
 import { roomAgain, type PortOptions } from "../depth/port";
+import { tokensOf } from "../book";
 import { roomRefused } from "../steps";
 
 // ---------------------------------------------------------------- the stages it runs
@@ -198,14 +199,18 @@ export interface BootstrapEnv {
   model: ModelPort;
   /** The active path as the survey reads it, once per survey, up to depth's play: the first turn depth played or one in flight, or the first reply on depth nothing read (`Rec.unread`), and the player's messages it answered (`historyEnd`). */
   messages(): Promise<SurveyMessage[]>;
-  /** The messages the read skips because the chat's LumiBooks records stand for them (its hash of each still matches, or its shelf names it). Empty until the author's jumpstart pass reads those records (`JUMPSTART_SKIPS_COVERED`); absent or empty, every message is read. */
+  /** The messages the read skips because the chat's LumiBooks records stand for them (its hash of each still matches, or its shelf names it). Empty until the chat's jumpstart entry for its book as it stands landed; absent or empty, every message is read. */
   covered?(): Promise<ReadonlySet<MessageId>>;
+  /** The author's jumpstart pass over the chat's LumiBooks records, the run's first stage, asking through `model` (the run's metered author port: its calls count against the cap and the spend, and none starts at the cap): the calls it made, or null where there was nothing to read or it already ran. It throws where it failed, so the run pauses with the error and Resume asks again. */
+  jumpstart?(model: ModelPort): Promise<{ calls: number } | null>;
+  /** The jumpstart still to run for the chat's book as it stands, for the estimate: its calls and the records' tokens; null where none is to run. */
+  jumpstartPending?(): Promise<{ calls: number; tokens: number } | null>;
   /** The world's people at the head and the player character (no agent, D-10). */
   people(): Promise<{ cast: Person[]; pov: EntityId }>;
   /** The import's read of World Info and the memory entries (§8.1 step 2). */
   imports(): Promise<{ entries: ImportedEntry[]; views: ImportView[] }>;
   knobs(): Promise<BootstrapKnobs>;
-  /** The answer room the user set `role` in Settings → Depth (`ownRoom`); null where none, so a stage of long answers asks for the most a room may be. */
+  /** The answer room the user set `role` in Settings → Depth (`ownRoom`); null where none, so a stage of long answers asks for a room sized from what it reads (`roomFor`). */
   room(role: DepthRole): Promise<number | null>;
   /** Each stage's connection (by its name; its id when Lumiverse no longer has it) and model, as Settings → Depth sets them, for the estimate. */
   routes(): Promise<Record<BootstrapStage, { connection: string | null; model: string | null }>>;
@@ -407,10 +412,20 @@ const MISREAD_KEPT = 64;
  */
 const LONG_ANSWERS: Readonly<Partial<Record<BootstrapStage, true>>> = { historian: true, author: true, minds: true, truthlink: true };
 
-/** What a failure of a call the provider refused at the most a room may be says to do, where the refusal speaks of the room (`roomRefused`: never a key, an account's access or a missing model, which no room changes): set the role's own room, which the bootstrap asks first. */
-function roomAdvice(role: DepthRole): string {
+/** The least room a long answer sized from its input is asked for, its reasoning's room included, and the room each token it reads buys past that (§8.3). */
+export const ROOM_LEAST = 32_768;
+const ROOM_PER_INPUT = 2;
+
+/** The room a long answer is first asked for where the user set its role none: sized from what it reads (twice the input's tokens, at `CHARS_PER_TOKEN`), at least `ROOM_LEAST` and at most `DEPTH_ROOM_MOST`. Cut off there it is asked once more at twice it, and the historian then splits its stretch. */
+export function roomFor(messages: readonly { content: string }[]): number {
+  const input = messages.reduce((n, m) => n + tokensOf(m.content), 0);
+  return Math.min(DEPTH_ROOM_MOST, Math.max(ROOM_LEAST, Math.ceil(input * ROOM_PER_INPUT)));
+}
+
+/** What a failure of a call the provider refused at the room sized from its input says to do, where the refusal speaks of the room (`roomRefused`: never a key, an account's access or a missing model, which no room changes): set the role's own room, which the bootstrap asks first. */
+function roomAdvice(role: DepthRole, asked: number): string {
   const label = DEPTH_ROLE_WORDS[role].label;
-  return `With no answer room of its own set, the bootstrap asks for the most an answer may have (${DEPTH_ROOM_MOST.toLocaleString("en-US")} tokens), and its provider refused the call: set a room it takes in Settings → Depth → ${label}${label.endsWith("s") ? "'" : "'s"} answer room (run it on its own model), and the bootstrap asks for that instead`;
+  return `With no answer room of its own set, the bootstrap asks for a room sized from what the call reads (${asked.toLocaleString("en-US")} tokens here), and its provider refused the call: set a room it takes in Settings → Depth → ${label}${label.endsWith("s") ? "'" : "'s"} answer room (run it on its own model), and the bootstrap asks for that instead`;
 }
 
 export function totalOf(spent: Readonly<Record<BootstrapStage, StageCounts>>): StageCounts {
@@ -541,7 +556,7 @@ export class BootstrapRun {
   private async spool(knobs: BootstrapKnobs): Promise<{ manifest: SpoolManifest; spooled: MessageId[] }> {
     const handover = await this.env.files.read(HANDOVER, isHandover);
     const covered = handover ? new Set(handover.messages) : null;
-    // What LumiBooks covers, the env's `covered`, isn't spooled (Round 2 item 1); it is empty until the author's jumpstart pass reads the records (`JUMPSTART_SKIPS_COVERED`), so every message is read.
+    // What LumiBooks covers, the env's `covered`, isn't spooled (Round 2 item 1); it is empty until the jumpstart's entry landed, so a failed or missing jumpstart leaves every message read.
     const lumibooks = (await this.env.covered?.()) ?? new Set<MessageId>();
     const history = (await this.env.messages()).filter((m) => (covered === null || covered.has(m.id)) && !lumibooks.has(m.id));
     this.manifest = await survey(this.env.files, history, knobs.chunkTokens, this.env.now());
@@ -686,7 +701,7 @@ export class BootstrapRun {
       chapters,
       spent: totalOf(this.state.spent),
       cap: this.state.cap,
-      remaining: manifest ? estimateRemaining({ chatId: this.env.chatId, manifest, knobs, routes: await this.env.routes(), spent: this.state.spent, units: this.state.units, done, chapters: this.state.chapters.filter((c) => c.ended).length, minds: minds > 0 ? minds : Math.min((await this.env.people()).cast.length, knobs.mostMinds > 0 ? knobs.mostMinds : Infinity), rss: Math.max(0, ...Object.values(this.state.rss)) || null }) : null,
+      remaining: manifest ? estimateRemaining({ chatId: this.env.chatId, manifest, knobs, routes: await this.env.routes(), spent: this.state.spent, units: this.state.units, done, chapters: this.state.chapters.filter((c) => c.ended).length, minds: minds > 0 ? minds : Math.min((await this.env.people()).cast.length, knobs.mostMinds > 0 ? knobs.mostMinds : Infinity), rss: Math.max(0, ...Object.values(this.state.rss)) || null, jumpstart: (await this.env.jumpstartPending?.()) ?? null }) : null,
       imported: this.state.imported,
       spot,
       redoFrom: this.state.redoFrom,
@@ -701,6 +716,9 @@ export class BootstrapRun {
     this.laneStopped = false;
     try {
       const knobs = await this.env.knobs();
+      // The jumpstart first, through the author's metered port (the cap and the spend count its calls): once its entry landed, the survey skips what the book covers.
+      const jumped = await this.env.jumpstart?.(this.metered("author"));
+      if (jumped) this.note(`The author's jumpstart read the chat's LumiBooks records in ${jumped.calls} call${jumped.calls === 1 ? "" : "s"}: the cast's cores and knowledge and the notebook's seed, for review. The read skips the messages they cover.`);
       const { manifest, spooled } = await this.spool(knobs);
       this.measure("survey");
       const from = this.rewind(manifest);
@@ -781,8 +799,9 @@ export class BootstrapRun {
   }
 
   /**
-   * The messages edited since the run read them that kept their swipe's key (`EDITS`, an assistant
-   * edit): each is the author's fix (§8.4), so every beat that came from it is queued for amending
+   * The messages edited since the run read them that kept their swipe's key (`EDITS`: a reply's
+   * edit, and the player's own of a message beats were landed from, since the ledger keeps the
+   * identity of a message entries were made from): each is the author's fix (§8.4), so every beat that came from it is queued for amending
    * beside the message as it now reads, as a beat marked wrong is, and the characters who lived it
    * live the amended beat. A chunk that runs again reads its edits itself; an edited message no beat
    * came from is noted.
@@ -1055,9 +1074,28 @@ export class BootstrapRun {
       .map(([id]) => id);
     const slot = `truthlink:${chunk.n}`;
     const key = hashParts(slot, ...range(chapter.from, chapter.to).map((k) => this.state.hist[k] ?? ""), linkKey, ...minds.map((w) => mindKeys.get(w) ?? ""));
-    const linked = await this.answer<StageOut>(slot, key, "truthlink", (model) => this.env.stages.truthLink({ beats: read.beats, blobs: read.blobs, minds, basis: chunk.basis }, model));
+    const linked = await this.answer<StageOut>(slot, key, "truthlink", (model) => this.linkBeats({ beats: read.beats, blobs: read.blobs, minds, basis: chunk.basis }, model));
     await this.landBatch(await this.draftOf(slot, key, linked, chunk.basis, "truthlink"));
     return key;
+  }
+
+  /**
+   * The GM's truth link over a chapter's beats. An answer cut off at its room even when asked again
+   * at twice it is no link: two or more beats are then linked as their two halves, in story order,
+   * each beside the same minds, and the two answers put together; a single beat cut off so fails as before.
+   */
+  private async linkBeats(input: Parameters<BootstrapStages["truthLink"]>[0], model: ModelPort): Promise<StageOut> {
+    try {
+      return await this.env.stages.truthLink(input, model);
+    } catch (error) {
+      if (!(error instanceof DepthAnswerError) || !error.cut || input.beats.length < 2) throw error;
+      const half = Math.ceil(input.beats.length / 2);
+      this.note(`The truth link's answer for ${input.beats.length} beats was cut off at its answer room twice: they are linked as two halves instead.`);
+      const a = await this.linkBeats({ ...input, beats: input.beats.slice(0, half) }, model);
+      const b = await this.linkBeats({ ...input, beats: input.beats.slice(half) }, model);
+      const reasoning = [a.reasoning, b.reasoning].filter((r) => r !== undefined && r !== "").join("\n\n");
+      return { ...b, events: [...a.events, ...b.events], blobs: { ...a.blobs, ...b.blobs }, ...(reasoning !== "" ? { reasoning } : {}) };
+    }
   }
 
   private openChapter(n: number, from: number): ChapterState {
@@ -1518,21 +1556,22 @@ export class BootstrapRun {
   /**
    * The room rule over a stage's port (§8.3) where its answers grow with what it reads
    * (`LONG_ANSWERS`); any other stage's port as it is. Each call asks for the room its stage gives
-   * it, else the room the user set its role (`room`), else the most a room may be
-   * (`DEPTH_ROOM_MOST`): room left unused costs nothing. The depth port asks again at a limit its
+   * it, else the room the user set its role (`room`), which always wins, else a room sized from what
+   * it reads (`roomFor`). The depth port asks again at a limit its
    * provider states, keeping one that is the model's own for its connection and model, and once at
    * the role's own room on any other refusal (`depthPort`). An answer cut off at a room no provider
    * held is kept as misread and asked once more at twice it (`roomAgain`), the stage reading only the
-   * second; a call refused at the most a room may be fails saying where the role's own is set.
+   * second (the historian, cut off again, splits its stretch); a call refused at the sized room fails saying where the role's own is set.
    */
   private roomRule(stage: BootstrapStage, port: ModelPort): ModelPort {
     if (!LONG_ANSWERS[stage]) return port;
     return async (role, messages, opts) => {
       const own = await this.env.room(role);
-      const asking: PortOptions = { ...opts, maxTokens: opts?.maxTokens ?? own ?? DEPTH_ROOM_MOST };
+      const sized = roomFor(messages);
+      const asking: PortOptions = { ...opts, maxTokens: opts?.maxTokens ?? own ?? sized };
       const ask = (o: PortOptions): Promise<PortAnswer> =>
         port(role, messages, o).catch((error: unknown) => {
-          throw own === null && !(error instanceof Halt) && roomRefused(error) ? new Error(`${error instanceof Error ? error.message : String(error)}. ${roomAdvice(role)}`, { cause: error }) : error;
+          throw own === null && !(error instanceof Halt) && roomRefused(error) ? new Error(`${error instanceof Error ? error.message : String(error)}. ${roomAdvice(role, sized)}`, { cause: error }) : error;
         });
       const first = await ask(asking);
       const again = cutShort(first.finish) && first.capped === undefined && first.room !== undefined && !opts?.signal?.aborted ? roomAgain(first.room) : null;
@@ -1619,5 +1658,108 @@ export class BootstrapRun {
 
   private async save(): Promise<void> {
     await this.env.files.write(RUN, this.state);
+  }
+
+  /**
+   * A deepening of one stretch of the chat (DEPTH-PLAN Round 2 item 2), at the player's word from the
+   * LumiBooks tree, or as a returning character is cast. `range`: its messages, 0-based, inclusive.
+   * `deep` reads them through the run's own chunk read and lands their exact beats, superseding the
+   * entries `supersede` names (the book's record of that stretch). `catchup` runs `who`'s catch-ups
+   * on what the stretch's beats reached them, from its deep reading where it has one, else the run's.
+   * Every answer is metered under the run's cap and kept, so asking again spends nothing; `tokens`,
+   * what this deepening spent (sent and written), for whoever counts it against a ceiling.
+   */
+  async deepen(input: { range: readonly [number, number]; kind: "deep" | "catchup"; who: readonly EntityId[]; supersede: readonly string[] }): Promise<{ landed: number; refused: number; caught: EntityId[]; tokens: number }> {
+    await this.load();
+    if (this.running) throw new Error("Pause the run before a deepening.");
+    const knobs = await this.env.knobs();
+    const manifest = this.manifest ?? (await this.spool(knobs)).manifest;
+    const people = await this.env.people();
+    const pc = this.firstPc || people.pov;
+    const [from, to] = input.range;
+    const tag = `${from}-${to}`;
+    let supersede = [...input.supersede];
+    let landed = 0;
+    let refused = 0;
+    const caught = new Set<EntityId>();
+    const spentBefore = totalOf(this.state.spent);
+    for (const chunk of manifest.chunks.filter((c) => c.lastIndex >= from && c.firstIndex <= to)) {
+      const n = chunk.n;
+      const rows = (await this.rows(chunk)).filter((r) => r.index >= from && r.index <= to);
+      if (rows.length === 0) continue;
+      const end = (rows.at(-1) as SpoolRow).basis;
+      const deepSlot = `lb:deep:${tag}:${n}`;
+      if (input.kind === "deep") {
+        const key = hashParts(deepSlot, chunk.key, ...rows.map((r) => r.id));
+        const hist = await this.answer<HistorianOut>(deepSlot, key, "historian", async (model) => {
+          const cast = [...people.cast, ...Object.entries(this.state.newcomers).map(([id, m]) => ({ id, name: m.name }))];
+          const made = Object.entries(this.state.places).map(([id, m]) => ({ id, name: m.name }));
+          const raw = await this.readStretch({ chunk: rows, before: await this.beforeOf(n), cast, places: made, pov: pc, basis: end }, model);
+          const ids: Record<string, EntityId> = {};
+          for (const c of raw.newcomers) {
+            const name = c.name.trim();
+            ids[c.ref] = Object.entries(this.state.newcomers).find(([, m]) => sameName(name, m.name))?.[0] ?? `bs_${hashParts("bootstrap.newcomer", this.env.chatId, name.toLowerCase()).slice(0, 10)}`;
+          }
+          const places: Record<string, string> = {};
+          for (const p of raw.newPlaces ?? []) {
+            const name = p.name.trim();
+            places[p.ref] = Object.entries(this.state.places).find(([, m]) => sameName(name, m.name))?.[0] ?? `bsp_${hashParts("bootstrap.place", this.env.chatId, name.toLowerCase()).slice(0, 10)}`;
+          }
+          return this.env.stages.bindNewcomers(raw, ids, places);
+        });
+        const blobs: Record<string, string> = { ...hist.blobs };
+        const drafts: LayerDraft[] = [];
+        const by = { role: "historian", job: deepSlot };
+        const first = rows[0] as SpoolRow;
+        const born = hist.newcomers.filter((c) => !this.state.newcomers[c.ref]);
+        const newPlaces = (hist.newPlaces ?? []).filter((p) => !this.state.places[p.ref]);
+        if (born.length > 0 || newPlaces.length > 0) {
+          const spawned = await this.env.stages.spawn(
+            born.map((c) => ({ id: c.ref, name: c.name, note: c.note, knownBy: hist.beats.some((b) => (b.actors.includes(c.ref) || b.about.some((r) => "entity" in r && r.entity === c.ref)) && b.exposure.some((e) => e.who === pc)) ? pc : null })),
+            newPlaces.map((p) => ({ id: p.ref, name: p.name, note: p.note, parent: p.parent })),
+            first.basis,
+          );
+          if (spawned.people.length > 0) drafts.push({ id: layerEntryId("bootstrap", this.env.chatId, deepSlot, key, "spawn"), basis: first.basis, kind: "spawn", events: spawned.people, by });
+          if (spawned.places.length > 0) drafts.push({ id: layerEntryId("bootstrap", this.env.chatId, deepSlot, key, "places"), basis: first.basis, kind: "space.place", events: spawned.places, by });
+          for (const c of born) this.state.newcomers[c.ref] = { name: c.name.trim(), since: n };
+          for (const p of newPlaces) this.state.places[p.ref] = { name: p.name.trim(), since: n };
+        }
+        const byMessage = this.env.stages.beatEvents(hist.beats, hist.staging, blobs, rows);
+        const reasoning = hist.reasoning ? putText(blobs, hist.reasoning) : undefined;
+        for (const row of rows) {
+          const events = byMessage[row.id] ?? [];
+          if (events.length > 0) drafts.push({ id: layerEntryId("bootstrap", this.env.chatId, deepSlot, key, row.id), basis: row.basis, kind: STORY_BEAT, events, ...(reasoning ? { reasoning } : {}), by });
+        }
+        await this.env.ledger.putBlobs(blobs);
+        // The book's record of the stretch gives way to its exact beats, from at or before all of it, once.
+        const carried = await this.carried(drafts, supersede, { id: layerEntryId("bootstrap", this.env.chatId, deepSlot, key, "redone"), basis: first.basis, by });
+        supersede = [];
+        const out = await this.landBatch(carried);
+        landed += carried.filter((d) => !out.has(d.by?.job ?? d.id)).length;
+        refused += carried.length - carried.filter((d) => !out.has(d.by?.job ?? d.id)).length;
+        continue;
+      }
+      const hist = (await this.recordOf<HistorianOut>(deepSlot)) ?? (await this.recordOf<HistorianOut>(`historian:${n}`));
+      if (!hist) continue;
+      const povs = (await this.recordOf<Record<string, Record<EntityId, string>>>(`pov:${n}`)) ?? {};
+      const known = await this.env.stages.knows([...input.who], end);
+      const lived = this.livedOf(hist, povs, input.who, rows, pc, end, known);
+      const writes: LayerDraft[] = [];
+      await bounded([...lived.keys()], knobs.atOnce.minds, async (who) => {
+        const mine = lived.get(who) as { lived: Lived[]; basis: Basis };
+        const slot = `lb:catchup:${tag}:${n}:${who}`;
+        const key = hashParts(slot, chunk.key, ...mine.lived.map((l) => l.beat));
+        const out = await this.answer<StageOut>(slot, key, "minds", (model) => this.env.stages.catchUp({ who: { id: who, name: this.state.minds[who]?.name ?? people.cast.find((p) => p.id === who)?.name ?? who }, at: mine.lived.at(-1)?.at ?? 0, lived: mine.lived, basis: mine.basis }, model));
+        writes.push(...(await this.draftOf(slot, key, out, mine.basis, "minds")));
+        caught.add(who);
+      });
+      const out = await this.landBatch(writes);
+      const ok = writes.filter((d) => !out.has(d.by?.job ?? d.id)).length;
+      landed += ok;
+      refused += writes.length - ok;
+    }
+    await this.save();
+    const spentAfter = totalOf(this.state.spent);
+    return { landed, refused, caught: [...caught], tokens: spentAfter.tokensIn + spentAfter.tokensOut - spentBefore.tokensIn - spentBefore.tokensOut };
   }
 }

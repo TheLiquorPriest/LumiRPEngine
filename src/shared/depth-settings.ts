@@ -106,7 +106,7 @@ export interface DepthBootstrapSettings {
   sample: number;
   /** Wrong marks in a row that pause the run and offer a redo (§8.6). */
   pauseAfterWrong: number;
-  /** A character returning to the story before catching up on what LumiBooks held of their time away: `auto`, the author runs a scoped catch-up and says so; `flag`, they're played from their core and the archive, and flagged. */
+  /** A character returning to the story before catching up on what LumiBooks held of their time away: `flag` (the standard), they're played from their core and the archive, and flagged; `auto`, the author runs a catch-up scoped to the book's nodes that name them, counted against the day's ceiling, and says so. */
   returning: "auto" | "flag";
 }
 
@@ -226,7 +226,7 @@ export function defaultDepthSettings(): DepthSettings {
     reads: { sceneBeats: 60, others: 24, places: 60, watchBeats: 40, episodeBeats: 40, settleBeats: 200, pollBeats: 400, due: 24, narratorQuotes: 6, quoteWords: 120, quotesPerBeat: 8, quotesPerAnswer: 32 },
     realtime: "judged",
     background: { on: true, offscreen: true, atOnce: 2 },
-    bootstrap: { chunkTokens: 60_000, atOnce: { minds: 3 }, mostMinds: 0, cap: { unit: "tokens", value: 20_000_000 }, sample: 5, pauseAfterWrong: 3, returning: "auto" },
+    bootstrap: { chunkTokens: 60_000, atOnce: { minds: 3 }, mostMinds: 0, cap: { unit: "tokens", value: 20_000_000 }, sample: 5, pauseAfterWrong: 3, returning: "flag" },
   };
 }
 
@@ -353,7 +353,7 @@ export function depthModel(depth: Readonly<DepthSettings>, role: DepthRole): Dep
 /**
  * The answer room the user set a role (Settings → Depth → the role's row): its own model's, where it
  * runs on one and the user changed that room from its default. Null where none: the bootstrap's
- * long answers then ask for the most a room may be (`DEPTH_ROOM_MOST`, `BootstrapRun.metered`).
+ * long answers then ask for a room sized from what they read (`roomFor`, `BootstrapRun.roomRule`).
  */
 export function ownRoom(depth: Readonly<Pick<DepthSettings, "roles">>, role: DepthRole): number | null {
   const row = depth.roles[role];

@@ -905,6 +905,8 @@ export class Runtime implements TurnHooks {
   readonly live: LiveFeeds;
   /** The bootstrap's chips on a depth chat (DEPTH-PLAN §7 Chips): its progress while it runs, its spot checks waiting; set by the service that runs it (`Bootstraps.chipsOn`). */
   bootstrapChips: ((chatId: ChatId, userId: UserId, at: MessageId) => Promise<StateView["chips"]>) | null = null;
+  /** A character the scene cast before LumiBooks' time of theirs was read into their mind (Settings → Depth → Bootstrap → When a character returns): caught up first, or flagged; the lines said of it. Set by the bootstrap's service (`Bootstraps.returning`). */
+  bootstrapReturning: ((chatId: ChatId, userId: UserId, who: readonly EntityId[]) => Promise<string[]>) | null = null;
   /** The agent turn loop (INC2-SPEC lane T1): a chat on agents plays each turn through its roles. */
   readonly orchestrator: Orchestrator;
   /** The loopback's bridge (DEPTH-PLAN §3): the relay's requests, the turn tagger, the turns run inside their provider calls, Settings → Loopback. */

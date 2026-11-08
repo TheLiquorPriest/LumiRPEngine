@@ -81,6 +81,8 @@ export interface EstimateInput {
   minds: number;
   /** The largest resident memory the run measured so far, in bytes; null before it ran. */
   rss: number | null;
+  /** The author's jumpstart over the chat's LumiBooks records, still to run: its calls and the records' tokens; null or absent where none is to run. */
+  jumpstart?: { calls: number; tokens: number } | null;
 }
 
 /** What the rest of the run would take, per stage and in all (§8.1, §8.3). */
@@ -111,6 +113,22 @@ export function estimateRemaining(i: EstimateInput): BootstrapEstimate {
     // The minds and the points of view run several at once; the historian and the author one at a time.
     const parallel = stage === "minds" || stage === "pov" ? Math.max(1, knobs.atOnce.minds) : 1;
     stages.push({ stage, calls: Math.round(rate.calls * units), tokensIn, tokensOut, cost: perToken === null ? null : perToken * (tokensIn + tokensOut), ms: Math.round((rate.ms * units) / parallel), connection: route.connection, model: route.model, measured: m !== null });
+  }
+  // The jumpstart runs first, a call per volume reading its records whole; until its entry lands the read counts every message.
+  const jump = i.jumpstart;
+  if (jump && jump.calls > 0) {
+    const author = stages.find((s) => s.stage === "author");
+    if (author) {
+      const tokensIn = jump.tokens + 3000 * jump.calls;
+      const tokensOut = 3000 * jump.calls;
+      const perToken = priced.get("author");
+      author.calls += jump.calls;
+      author.tokensIn += tokensIn;
+      author.tokensOut += tokensOut;
+      author.cost = perToken !== undefined && author.cost !== null ? author.cost + perToken * (tokensIn + tokensOut) : null;
+      author.ms += 60000 * jump.calls;
+    }
+    notes.push(`First the author's jumpstart reads the chat's LumiBooks records (${jump.calls} call${jump.calls === 1 ? "" : "s"}); once it lands, the read skips the messages they cover, and until then every message is counted.`);
   }
   for (const s of stages) {
     if (s.cost !== null || s.calls === 0) continue;

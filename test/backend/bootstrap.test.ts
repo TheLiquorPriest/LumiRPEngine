@@ -22,6 +22,7 @@ import { authorRead, editNotebookFile, readNotebook } from "../../src/backend/de
 import { historian, quoteSpan } from "../../src/backend/depth/historian";
 import { beatProblem } from "../../src/shared/story";
 import { roomAgain, type ModelPort } from "../../src/backend/depth/port";
+import { ROOM_LEAST, roomFor } from "../../src/backend/bootstrap/run";
 import { DEPTH_ROOM_MOST, defaultDepthSettings, depthSettingsOf, ownRoom } from "../../src/shared/depth-settings";
 import { modernUsWorld } from "../packs/riverton";
 import { startState } from "../packs/support";
@@ -29,6 +30,11 @@ import { Rig } from "../support/rig";
 import { DANNY, PRIYA } from "../support/mind-chat";
 import { readyLoopback } from "../support/relay";
 import { depthOptedIn } from "../../src/backend/bootstrap/service";
+import { LumiBooksBootstrap } from "../../src/backend/bootstrap/lumibooks-service";
+import type { LbActionEstimate, LbTree } from "../../src/shared/bootstrap";
+import { STORY_BEAT } from "../../src/shared/story";
+import { STORY_RECORD } from "../../src/shared/story-record";
+import { daySpendOf } from "../../src/backend/depth/budget";
 
 const PROSE = "The kettle ticked on the stove while the rain worked at the window, and the shop smelled of solder and wet coats. ".repeat(30);
 
@@ -385,7 +391,7 @@ describe("bootstrap", () => {
     expect(h5.place).toBe(lighthouse?.id ?? "");
   }, 60_000);
 
-  test("every stage of long answers asks for the most room a room may be where the user set its role none, and the room he set otherwise; the point-of-view render asks its role's own", async () => {
+  test("every stage of long answers asks for a room sized from what it reads where the user set its role none, and the room he set otherwise; the point-of-view render asks its role's own", async () => {
     const shipped = defaultDepthSettings();
     expect(ownRoom(shipped, "historian")).toBeNull();
     // A model of its own whose room is still its default, or the strong model's, is no room the user set.
@@ -399,16 +405,26 @@ describe("bootstrap", () => {
     const asked = fakeModels(rig);
     const answer = rig.host.quietReply;
     const rooms: Record<string, (number | undefined)[]> = {};
+    const sized: Record<string, boolean[]> = {};
     const stageOf = (all: string): string => (all.includes('"beats": [{"message"') ? "historian" : all.includes('"chapter": {"ends"') ? "author" : all.includes('"drift": [{"who"') ? "chapter" : all.includes('"facts": [{"ref"') ? "truthlink" : all.includes('"memories": [{"lived"') ? "catchup" : all.includes('"on_my_mind"') ? "reflect" : all.includes('{"povs":') ? "pov" : "other");
     rig.host.quietReply = (req) => {
-      (rooms[stageOf(text(req))] ??= []).push(req.maxTokens);
+      const stage = stageOf(text(req));
+      (rooms[stage] ??= []).push(req.maxTokens);
+      (sized[stage] ??= []).push(req.maxTokens === roomFor(req.messages));
       return answer ? answer(req) : "{}";
     };
     await bootstrap(rig, chatId, { op: "opt", on: true });
     await bootstrap(rig, chatId, { op: "start", cap: "none" });
     expect((await finished(rig, chatId)).status).toBe("done");
     expect(rooms.historian?.length).toBe(3);
-    for (const stage of ["historian", "truthlink", "catchup", "reflect"]) expect([stage, new Set(rooms[stage] ?? [])]).toEqual([stage, new Set([DEPTH_ROOM_MOST])]);
+    // Sized from what each call reads: at least the least room, short of the most a room may be.
+    for (const stage of ["historian", "truthlink", "catchup", "reflect"]) {
+      expect([stage, new Set(sized[stage] ?? [])]).toEqual([stage, new Set([true])]);
+      for (const r of rooms[stage] ?? []) expect([stage, r !== undefined && r >= ROOM_LEAST && r < DEPTH_ROOM_MOST]).toEqual([stage, true]);
+    }
+    // More to read is more room, up to the most a room may be.
+    expect(roomFor([{ content: "x".repeat(320_000) }])).toBe(200_000);
+    expect(roomFor([{ content: "x".repeat(10_000_000) }])).toBe(DEPTH_ROOM_MOST);
     // The author's readings and its chapter revisions, at the room the user set it.
     expect(rooms.author?.length).toBe(asked.author);
     expect((rooms.chapter?.length ?? 0) > 0).toBe(true);
@@ -418,7 +434,7 @@ describe("bootstrap", () => {
     expect(new Set(rooms.pov)).toEqual(new Set([defaultDepthSettings().fast.maxTokens]));
   }, 60_000);
 
-  test("the historian's first room, refused in words no limit is read from, is asked again at its role's own room; refused there too, the run pauses naming Settings → Depth → Historian's answer room, which Resume then asks first", async () => {
+  test("the historian's first room, sized from its input and refused in words no limit is read from, is asked again at its role's own room; refused there too, the run pauses naming Settings → Depth → Historian's answer room, which Resume then asks first", async () => {
     const rig = new Rig({ shipped: true });
     const chatId = await historyChat(rig);
     fakeModels(rig);
@@ -426,9 +442,11 @@ describe("bootstrap", () => {
     const own = defaultDepthSettings().strong.maxTokens;
     let takes = own;
     const rooms: (number | undefined)[] = [];
+    const sizes: number[] = [];
     rig.host.quietReply = (req) => {
       if (text(req).includes('"beats": [{"message"')) {
         rooms.push(req.maxTokens);
+        sizes.push(roomFor(req.messages));
         if (req.maxTokens > takes) throw new Error("Custom stream failed (422): the request can't be processed as sent");
       }
       return answer ? answer(req) : "{}";
@@ -436,8 +454,9 @@ describe("bootstrap", () => {
     await bootstrap(rig, chatId, { op: "opt", on: true });
     await bootstrap(rig, chatId, { op: "start", cap: "none" });
     expect((await finished(rig, chatId)).status).toBe("done");
-    // Each stretch refused at the most room, and answered at the Historian's own (the Strong model's).
-    expect(rooms).toEqual([DEPTH_ROOM_MOST, own, DEPTH_ROOM_MOST, own, DEPTH_ROOM_MOST, own]);
+    // Each stretch refused at the room sized from it, more than the Historian's own (the Strong model's), and answered at its own.
+    expect(rooms).toEqual([sizes[0], own, sizes[2], own, sizes[4], own]);
+    for (const r of [sizes[0], sizes[2], sizes[4]]) expect((r ?? 0) > own).toBe(true);
     // A provider that takes less than the role's own room too: the run pauses saying where the room is set.
     const second = new Rig({ shipped: true });
     const chat2 = await historyChat(second);
@@ -445,9 +464,11 @@ describe("bootstrap", () => {
     const answer2 = second.host.quietReply;
     takes = 4096;
     rooms.length = 0;
+    sizes.length = 0;
     second.host.quietReply = (req) => {
       if (text(req).includes('"beats": [{"message"')) {
         rooms.push(req.maxTokens);
+        sizes.push(roomFor(req.messages));
         if (req.maxTokens > takes) throw new Error("Custom stream failed (422): the request can't be processed as sent");
       }
       return answer2 ? answer2(req) : "{}";
@@ -458,7 +479,7 @@ describe("bootstrap", () => {
     expect(stopped.status).toBe("paused");
     expect(stopped.reason).toContain("(422)");
     expect(stopped.reason).toContain("Settings → Depth → Historian's answer room");
-    expect(rooms).toEqual([DEPTH_ROOM_MOST, own]);
+    expect(rooms).toEqual([sizes[0], own]);
     // The room the user then sets is what the historian asks first.
     second.body(await second.send({ type: "lre.settings.set", patch: { depth: { roles: { historian: { uses: "own", own: { maxTokens: 4096 } } } } } }));
     await bootstrap(second, chat2, { op: "resume" });
@@ -472,9 +493,11 @@ describe("bootstrap", () => {
     fakeModels(rig);
     const answer = rig.host.quietReply;
     const rooms: (number | undefined)[] = [];
+    const sizes: number[] = [];
     rig.host.quietReply = (req) => {
       if (text(req).includes('"beats": [{"message"')) {
         rooms.push(req.maxTokens);
+        sizes.push(roomFor(req.messages));
         throw new Error("Custom stream failed (401): Invalid API key");
       }
       return answer ? answer(req) : "{}";
@@ -482,7 +505,7 @@ describe("bootstrap", () => {
     await bootstrap(rig, chatId, { op: "opt", on: true });
     await bootstrap(rig, chatId, { op: "start", cap: "none" });
     const stopped = await finished(rig, chatId);
-    expect(rooms).toEqual([DEPTH_ROOM_MOST, defaultDepthSettings().strong.maxTokens]);
+    expect(rooms).toEqual([sizes[0], defaultDepthSettings().strong.maxTokens]);
     expect(stopped.status).toBe("paused");
     expect(stopped.reason).toContain("(401): Invalid API key");
     expect(stopped.reason).not.toContain("answer room");
@@ -556,6 +579,38 @@ describe("bootstrap", () => {
     expect(rec.spent.calls).toBe(2);
     expect(rec.misread?.map((m) => [m.call, m.raw])).toEqual([[0, cut]]);
     expect(rec.misread?.[0]?.fields[0]?.why).toContain("the author's answer was cut off at its answer room");
+  }, 60_000);
+
+  test("a truth link cut off at its room and at twice it links the chapter's beats as two halves, each beside the same minds, and the run goes on", async () => {
+    const rig = new Rig({ shipped: true });
+    const chatId = await historyChat(rig);
+    fakeModels(rig);
+    const answer = rig.host.quietReply;
+    let whole = 0;
+    let cuts = 0;
+    let halves = 0;
+    rig.host.quietReply = (req) => {
+      const all = text(req);
+      if (all.includes('"facts": [{"ref"')) {
+        // The first link's read, whole, is cut off mid-JSON however often it is asked; anything shorter (its halves) answers.
+        whole ||= all.length;
+        if (all.length >= whole) {
+          cuts++;
+          return { content: '{"links": [{"who": "', finishReason: "length", reasoning: "Danny first." };
+        }
+        halves++;
+      }
+      return answer ? answer(req) : "{}";
+    };
+    await bootstrap(rig, chatId, { op: "opt", on: true });
+    await bootstrap(rig, chatId, { op: "start", cap: "none" });
+    const view = await finished(rig, chatId);
+    expect(view.status).toBe("done");
+    expect(cuts >= 2).toBe(true);
+    expect(halves >= 2).toBe(true);
+    expect(view.log.some((l) => l.includes("they are linked as two halves instead"))).toBe(true);
+    const jobs = await rig.host.storage.list(`runs/${chatId}/bootstrap/jobs/`, rig.host.userId);
+    expect(jobs.filter((p) => p.endsWith(".failed.json"))).toEqual([]);
   }, 60_000);
 
   test("an author's answer that wasn't JSON is asked once more; not JSON again, it pauses the run, and its failed job keeps both answers as written beside why and what both spent", async () => {
@@ -939,4 +994,107 @@ describe("the author's notebook edits", () => {
     const out = await authorRead({ world: w, state: startState(w), texts: {}, chunk: [], beats: [], notebook: { files: { "notebook/story.md": story }, pinned: [] }, chapter: { index: 0, stretches: 0 }, cast: [] }, model);
     expect(Object.values(out.blobs).sort()).toEqual(["# Story\n\n## Threads\n- The lamp, sold.\n\n## Setups\n- The boat.\n\n## Futures\n- A storm.\n", "He wants the boat."]);
   });
+});
+
+/** A finished bootstrap of the Port Alder chat, then a LumiBooks summaries book whose one chapter covers messages 1-4, its record landed; the node's id. */
+async function bookedChat(rig: Rig): Promise<{ chatId: string; asked: Record<string, number>; node: string }> {
+  const chatId = await historyChat(rig);
+  const asked = fakeModels(rig);
+  await bootstrap(rig, chatId, { op: "opt", on: true });
+  await bootstrap(rig, chatId, { op: "start", cap: "none" });
+  expect((await finished(rig, chatId)).status).toBe("done");
+  const userId = rig.host.userId;
+  const msgs = (await rig.rt.host.chats.messages(chatId, userId)).sort((a, b) => a.index - b.index);
+  // The chat's LumiBooks book (its shelf, which names the chat's own messages by id): one chapter over messages 1-4.
+  const book = String(rig.host.chat(chatId).metadata.lumibooks_book_id);
+  const node = await rig.host.books.createEntry(book, { comment: "Ch #1 - The dark lamp (msgs 2-5)", content: "Danny says the lamp went dark; a stranger comes in from the rain.", keys: ["lighthouse"], disabled: false, constant: true, extensions: { lumibooks_summary: { tier: 1, messageIndices: [1, 2, 3, 4] }, lumibooks: { msgIds: msgs.slice(1, 5).map((m) => m.id) } } }, userId);
+  await new LumiBooksBootstrap(rig.rt).land(chatId, userId);
+  const tree = rig.body(await rig.send({ type: "lre.bootstrap", op: "lb_tree", chatId })).tree as LbTree;
+  return { chatId, asked, node: tree.nodes[0]?.id ?? node };
+}
+
+describe("LumiBooks deepenings, confirmed after their estimate", () => {
+  test("lb_deep reads the node's messages through the run's chunk read, and its exact beats supersede the record", async () => {
+    const rig = new Rig({ shipped: true });
+    const { chatId, asked, node } = await bookedChat(rig);
+    const userId = rig.host.userId;
+    const record = (await rig.rt.ledger.layerSummaries(chatId, userId)).find((s) => s.kind === STORY_RECORD);
+    expect(record).toBeDefined();
+    const read = asked.historian ?? 0;
+    const out = rig.body(await rig.send({ type: "lre.bootstrap", op: "lb_deep", chatId, node, confirm: true })) as { tree: LbTree; lbEstimate: LbActionEstimate };
+    expect(out.lbEstimate.calls).toBeGreaterThan(0);
+    expect(asked.historian ?? 0).toBeGreaterThan(read);
+    const after = await rig.rt.ledger.layerSummaries(chatId, userId);
+    expect(after.some((s) => (s.supersedes ?? []).includes(record?.id ?? "?"))).toBe(true);
+    expect(after.some((s) => s.by?.job?.startsWith("lb:deep:1-4:") === true && s.kind === STORY_BEAT)).toBe(true);
+    // Asked again, every answer is kept: no call spent.
+    const again = asked.historian ?? 0;
+    rig.body(await rig.send({ type: "lre.bootstrap", op: "lb_deep", chatId, node, confirm: true }));
+    expect(asked.historian ?? 0).toBe(again);
+    await rig.host.idle?.();
+  }, 60_000);
+
+  test("lb_catchup runs the named characters' catch-ups scoped to the node, and marks them caught up on it", async () => {
+    const rig = new Rig({ shipped: true });
+    const { chatId, asked, node } = await bookedChat(rig);
+    const before = asked.catchup ?? 0;
+    const out = rig.body(await rig.send({ type: "lre.bootstrap", op: "lb_catchup", chatId, node, who: [DANNY], confirm: true })) as { tree: LbTree };
+    expect(asked.catchup ?? 0).toBeGreaterThan(before);
+    expect(out.tree.nodes[0]?.caughtUp).toEqual([DANNY]);
+    const jobs = (await rig.rt.ledger.layerSummaries(chatId, rig.host.userId)).map((s) => s.by?.job ?? "");
+    expect(jobs.some((j) => j.startsWith("lb:catchup:1-4:") && j.endsWith(`:${DANNY}`))).toBe(true);
+    await rig.host.idle?.();
+  }, 60_000);
+
+  test("lb_fullmind runs one character's catch-ups over the whole book, and marks the full mind built", async () => {
+    const rig = new Rig({ shipped: true });
+    const { chatId, asked } = await bookedChat(rig);
+    const before = asked.catchup ?? 0;
+    const out = rig.body(await rig.send({ type: "lre.bootstrap", op: "lb_fullmind", chatId, who: PRIYA, confirm: true })) as { tree: LbTree };
+    expect(asked.catchup ?? 0).toBeGreaterThan(before);
+    expect(out.tree.nodes[0]?.fullMind).toEqual([PRIYA]);
+    await rig.host.idle?.();
+  }, 60_000);
+
+  test("a character cast whom a node of the book names, not yet caught up on it: flagged with a chip by default, or caught up on just that node behind the turn, counted against the day's ceiling", async () => {
+    const rig = new Rig({ shipped: true });
+    const { chatId, asked, node } = await bookedChat(rig);
+    const userId = rig.host.userId;
+    const hook = rig.rt.bootstrapReturning;
+    const chipsOf = rig.rt.bootstrapChips;
+    if (!hook || !chipsOf) throw new Error("the bootstrap's service isn't wired");
+    expect(defaultDepthSettings().bootstrap.returning).toBe("flag");
+    const before = asked.catchup ?? 0;
+    // Flag is the standard: the line names the node, nothing runs, a chip says so.
+    const flagged = (await hook(chatId as never, userId, [DANNY]))[0] ?? "";
+    expect(flagged).toContain("Not caught up");
+    expect(flagged).toContain("The dark lamp");
+    expect(asked.catchup ?? 0).toBe(before);
+    expect((await chipsOf(chatId as never, userId, "h6" as never)).map((c) => c.id)).toContain(`not_caught_up:${chatId}`);
+    // No node names Priya: she owes nothing, so nothing is said of her.
+    expect(await hook(chatId as never, userId, [PRIYA])).toEqual([]);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { depth: { bootstrap: { returning: "auto" } } } }));
+    // Today's ceiling already met: the catch-up is put off, and they are flagged instead.
+    const day = daySpendOf(rig.rt.host);
+    await day.load(userId);
+    day.add(userId, 5000);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { depth: { budget: { perDay: 1000 } } } }));
+    expect((await hook(chatId as never, userId, [DANNY]))[0]).toContain("put off");
+    expect(asked.catchup ?? 0).toBe(before);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { depth: { budget: { perDay: "none" } } } }));
+    const spentBefore = day.tokens(userId);
+    const caught = (await hook(chatId as never, userId, [DANNY]))[0] ?? "";
+    expect(caught).toContain("Catching up first on just the LumiBooks nodes that name them");
+    expect(caught).toContain("The dark lamp");
+    await rig.dispatch.bootstraps.idle();
+    const tree = rig.body(await rig.send({ type: "lre.bootstrap", op: "lb_tree", chatId })).tree as LbTree;
+    expect(tree.nodes.find((n) => n.id === node)?.caughtUp).toEqual([DANNY]);
+    expect(tree.nodes.find((n) => n.id === node)?.fullMind).toEqual([]);
+    expect(asked.catchup ?? 0).toBeGreaterThan(before);
+    expect(day.tokens(userId)).toBeGreaterThan(spentBefore);
+    // Caught up, they are no longer behind: nothing more is said or run, and the chip goes.
+    expect(await hook(chatId as never, userId, [DANNY])).toEqual([]);
+    expect((await chipsOf(chatId as never, userId, "h6" as never)).map((c) => c.id)).not.toContain(`not_caught_up:${chatId}`);
+    await rig.host.idle?.();
+  }, 60_000);
 });

@@ -8,18 +8,19 @@
 // once the run reaches the latest message, the advice to turn off the memory systems the bootstrap
 // replaced for this chat (D-18), and nothing more.
 
-import type { ChatId, MessageId, UserId } from "../../shared/ids";
+import type { ChatId, EntityId, MessageId, UserId } from "../../shared/ids";
 import type { JsonObject } from "../../shared/json";
 import { PROTOCOL_VERSION } from "../../shared/protocol";
 import type { BootstrapRequest } from "../../shared/protocol";
 import type { Chip } from "../../shared/state-view";
 import type { BootstrapAdvice, BootstrapCap, BootstrapEstimate, BootstrapView, ImportView } from "../../shared/bootstrap";
 import type { Runtime } from "../runtime";
+import { ceilingBinds, daySpendOf } from "../depth/budget";
 import { BootstrapFiles } from "./files";
 import { BootstrapRun, type BootstrapEnv } from "./run";
 import { bootstrapEnv } from "./wiring";
 import { LumiBooksBootstrap } from "./lumibooks-service";
-import type { LbActionEstimate, LbTree } from "../../shared/bootstrap";
+import type { LbActionEstimate, LbNode, LbTree } from "../../shared/bootstrap";
 import { bootstrapChips, type BootstrapChipFacts, chipFactsOf } from "./chips";
 import { chatNumbers } from "../depth/chat-numbers";
 import { historyCut, setHistoryCut } from "../depth/history-cut";
@@ -112,11 +113,18 @@ export class Bootstraps {
   private readonly envs = new Map<string, BootstrapEnv>();
   /** GM → Depth → Bootstrap's LumiBooks tree. */
   private readonly lumi: LumiBooksBootstrap;
+  /** Each chat's characters flagged as not caught up on its LumiBooks book (`returning`, flag), by `user \0 chat`, by name. */
+  private readonly flagged = new Map<string, string[]>();
+  /** Each chat's characters whose returning catch-up is under way, by `user \0 chat`. */
+  private readonly catching = new Map<string, Set<EntityId>>();
+  /** The returning catch-ups under way behind their turns (`idle` waits for them). */
+  private readonly catchUps = new Set<Promise<void>>();
 
   constructor(private readonly rt: Runtime) {
     this.lumi = new LumiBooksBootstrap(rt);
     // A depth chat's state view asks here for the bootstrap's progress and its spot checks waiting.
     rt.bootstrapChips = (chatId, userId, at) => this.chipsOn(chatId, userId, at);
+    rt.bootstrapReturning = (chatId, userId, who) => this.returning(chatId, userId, who);
   }
 
   /** The bootstrap's chips on its chat, under message `at` (`bootstrapChips`); the first ask after a start reads the run's view, every push after keeps it current. */
@@ -132,7 +140,84 @@ export class Bootstraps {
       }
       this.chipFacts.set(key, facts);
     }
-    return bootstrapChips(chatId, facts, at);
+    return bootstrapChips(chatId, facts, at, this.flagged.get(key) ?? []);
+  }
+
+  /**
+   * Settings → Depth → Bootstrap → When a character returns: of `who`, those the scene cast whom a
+   * node of the chat's LumiBooks book names (`naming`: its keys, title or text, the narrowest) that
+   * they haven't caught up on. Catch them up: a catch-up scoped to just those nodes runs behind the
+   * turn, landing as it ends, counted against Settings → Depth → Budget → Per day like any depth
+   * work, and put off (flagged instead) once that ceiling binds. Flag them: a chip says they aren't
+   * caught up. The lines the scene's thinking says of it, naming the nodes.
+   */
+  private async returning(chatId: ChatId, userId: UserId, who: readonly EntityId[]): Promise<string[]> {
+    if (who.length === 0) return [];
+    const key = `${userId}\u0000${chatId}`;
+    const env = this.envOf(chatId, userId);
+    const tree = await this.lumi.tree(chatId, userId, env);
+    if (tree.book === null) return [];
+    const marked = new Map<string, Set<EntityId>>();
+    const walk = (nodes: readonly LbNode[]): void => {
+      for (const n of nodes) {
+        marked.set(n.id, new Set([...n.caughtUp, ...n.fullMind]));
+        walk(n.children);
+      }
+    };
+    walk(tree.nodes);
+    const naming = await this.lumi.naming(chatId, userId, tree.cast);
+    const owed = new Map<EntityId, { id: string; title: string }[]>();
+    for (const c of tree.cast) {
+      const left = (naming.get(c.id) ?? []).filter((n) => !marked.get(n.id)?.has(c.id));
+      if (left.length > 0) owed.set(c.id, left);
+    }
+    const nameOf = (id: EntityId): string => tree.cast.find((c) => c.id === id)?.name ?? id;
+    // Whoever was flagged and owes nothing now isn't behind any more: their chip's name goes.
+    const wasFlagged = this.flagged.get(key) ?? [];
+    const stillFlagged = wasFlagged.filter((n) => tree.cast.some((c) => c.name === n && owed.has(c.id)));
+    if (stillFlagged.length !== wasFlagged.length) {
+      this.flagged.set(key, stillFlagged);
+      this.rt.changed(chatId, userId);
+    }
+    const pending = this.catching.get(key) ?? new Set<EntityId>();
+    const behind = who.filter((id) => owed.has(id) && !pending.has(id));
+    if (behind.length === 0) return [];
+    const said = (id: EntityId): string => `${nameOf(id)} (${(owed.get(id) ?? []).map((n) => n.title).join("; ")})`;
+    const flag = (why: string): string[] => {
+      const flagged = this.flagged.get(key) ?? [];
+      const more = behind.map(nameOf).filter((n) => !flagged.includes(n));
+      if (more.length > 0) {
+        this.flagged.set(key, [...flagged, ...more]);
+        this.rt.changed(chatId, userId);
+      }
+      return [`Not caught up on the LumiBooks book${why}: ${behind.map(said).join(", ")}, played from their core and the archive.`];
+    };
+    const settings = await this.rt.settings.get(userId);
+    if (settings.depth.bootstrap.returning === "flag") return flag("");
+    const day = daySpendOf(this.rt.host);
+    await day.load(userId);
+    const binds = ceilingBinds(settings.depth.budget, 0, day.tokens(userId));
+    if (binds?.which === "day") return flag(` (the catch-up is put off: ${binds.words})`);
+    for (const id of behind) pending.add(id);
+    this.catching.set(key, pending);
+    const run = this.runOf(chatId, userId);
+    const catchUp = (async () => {
+      for (const id of behind) {
+        for (const node of owed.get(id) ?? []) {
+          // Each node's catch-up counts against today's ceiling as it is answered; once it binds, the rest waits for the next return.
+          if (ceilingBinds(settings.depth.budget, 0, day.tokens(userId))?.which === "day") return;
+          const out = await this.lumi.deepen(chatId, userId, env, run, "catchup", node.id, [id]);
+          if (out && out.tokens > 0) day.add(userId, out.tokens);
+        }
+      }
+    })()
+      .catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the returning catch-up for ${behind.map(nameOf).join(", ")} didn't run (${error instanceof Error ? error.message : String(error)})`, userId))
+      .finally(() => {
+        for (const id of behind) pending.delete(id);
+        this.catchUps.delete(catchUp);
+      });
+    this.catchUps.add(catchUp);
+    return [`Catching up first on just the LumiBooks nodes that name them: ${behind.map(said).join(", ")}. It lands as this turn ends.`];
   }
 
   /** Keeps the chips' facts from a view just pushed, and sends the chat's state view again when what its chips say has changed. */
@@ -268,9 +353,10 @@ export class Bootstraps {
         const kind = r.op === "lb_catchup" ? "catchup" : r.op === "lb_deep" ? "deep" : "fullmind";
         const lbEstimate = await this.lumi.estimate(chatId, userId, env, kind, r.node, who);
         if (!lbEstimate) throw new BootstrapError("bad_request", tree.book === null ? "This chat has no LumiBooks book." : "no such node in the chat's LumiBooks book");
-        // Running a deepening from the tree needs the author's scoped pass, which this build doesn't have: the estimate stands, and nothing runs.
-        if (r.confirm === true) throw new BootstrapError("unavailable", "Running this from the LumiBooks tree isn't available yet; the bootstrap's own run reads every uncovered stretch.");
-        return { view: await this.view(chatId, userId), tree, lbEstimate };
+        if (r.confirm !== true) return { view: await this.view(chatId, userId), tree, lbEstimate };
+        // Confirmed after its estimate: the deepening runs through the run's own chunk read, under the run's cap.
+        await this.lumi.deepen(chatId, userId, env, this.runOf(chatId, userId), kind, r.node, who);
+        return { view: await this.view(chatId, userId), tree: await this.lumi.tree(chatId, userId, env), lbEstimate };
       }
       default:
         throw new BootstrapError("bad_request", "no such bootstrap request");
@@ -341,6 +427,6 @@ export class Bootstraps {
 
   /** Waits for every run under way to stop (shutdown, tests). */
   async idle(): Promise<void> {
-    await Promise.all([...this.runs.values()].map((r) => r.settled()));
+    await Promise.all([...[...this.runs.values()].map((r) => r.settled()), ...this.catchUps]);
   }
 }

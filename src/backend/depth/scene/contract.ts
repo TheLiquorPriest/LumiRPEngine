@@ -115,6 +115,8 @@ export interface DepthTurnInput {
   archive?: ArchiveSource;
   /** The budget dial's ceilings (§6.5): what binds once the turn has spent so many tokens (its metered port's count), against today's spend too, and what each leaves; absent, nothing binds. The author reads what is left at its setup and each step; once a ceiling binds, whoever still plays as their own agent is played by the author, and the scene goes on as far as it judges. */
   budget?: TurnBudget;
+  /** Characters the scene casts whose LumiBooks time isn't in their mind yet (Settings → Depth → Bootstrap → When a character returns): caught up first, or flagged with a chip; the lines it says of them. Absent, none. */
+  returning?: (who: readonly EntityId[]) => Promise<string[]>;
 }
 
 /** What a depth turn gives back to commit. */

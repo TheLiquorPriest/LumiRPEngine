@@ -8,8 +8,13 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { HostBookEntryInput } from "../../src/backend/host";
 import { lbBookOfExport, lbCoverOf, lbDrafts, lbMessageHash, lbNodes, lbParents, lbProgressOf, lbRuns, type LbMessage } from "../../src/backend/bootstrap/lumibooks";
-import { JUMPSTART_SKIPS_COVERED, LumiBooksBootstrap } from "../../src/backend/bootstrap/lumibooks-service";
+import { LumiBooksBootstrap } from "../../src/backend/bootstrap/lumibooks-service";
+import type { ModelPort } from "../../src/backend/depth/port";
+import { readMind } from "../../src/backend/character-engine";
+import { readNotebook } from "../../src/backend/depth/notebook";
+import { mindMetaAt } from "../../src/shared/character-engine";
 import { bootstrapEnv } from "../../src/backend/bootstrap/wiring";
+import { BootstrapRun } from "../../src/backend/bootstrap/run";
 import type { BootstrapEstimate, LbActionEstimate, LbTree } from "../../src/shared/bootstrap";
 import { layerDraftProblem, type Basis, type LayerDraft, type LayerSummary } from "../../src/shared/layer";
 import { STORY_BEAT } from "../../src/shared/story";
@@ -191,7 +196,7 @@ describe("LumiBooks: records land with no model call", () => {
     await rig.host.idle?.();
   });
 
-  test("until the jumpstart pass exists, the run and its estimate read every message, the book's coverage only computed", async () => {
+  test("the jumpstart reads the records into cores, outline knowledge and the notebook; then the run skips what they cover", async () => {
     const rig = new Rig({ shipped: true });
     const worldId = await rig.newWorld("Gull Point", "modern_slice_of_life");
     const chatId = rig.host.createChat(TEXTS[0]?.[1] ?? "");
@@ -206,15 +211,99 @@ describe("LumiBooks: records land with no model call", () => {
     const lorebook = rig.host.userBook("LumiBooks summaries - gull", { metadata: { lumibooks_summary: { version: 1, algorithm: "sha256-role-content-v1", contentHash: "0".repeat(64), messages: hashes } } });
     await rig.host.books.createEntry(lorebook, { comment: "Vol #1 - Fog at Gull Point (msgs 1-5)", content: "The traveler lands at Gull Point and hears the keeper is gone.", keys: ["Gull Point"], disabled: false, constant: true, extensions: { lumibooks_summary: { tier: 3, messageIndices: [0, 1, 2, 3, 4] } } }, userId);
     const ids = (await rig.rt.host.chats.messages(chatId, userId)).sort((a, b) => a.index - b.index).map((m) => m.id);
-    // What the book covers: the four messages whose hash still matches, not the edited one or those past it.
-    expect([...(await new LumiBooksBootstrap(rig.rt).covered(chatId, userId))].sort()).toEqual([ids[0] ?? "", ids[1] ?? "", ids[3] ?? "", ids[4] ?? ""].sort());
-    // Nothing reads the records yet, so the run skips none of them: the skip waits on the jumpstart pass.
-    expect(JUMPSTART_SKIPS_COVERED).toBe(false);
-    expect([...((await bootstrapEnv(rig.rt, chatId, userId, () => undefined).covered?.()) ?? [])]).toEqual([]);
-    const read = rig.body(await rig.send({ type: "lre.bootstrap", op: "estimate", chatId })).estimate as BootstrapEstimate;
+    const lumi = new LumiBooksBootstrap(rig.rt);
+    const env = bootstrapEnv(rig.rt, chatId, userId, () => undefined);
+    // Before the jumpstart's entry lands nothing is skipped: the run and its estimate read every message.
+    expect([...(await lumi.covered(chatId, userId))]).toEqual([]);
+    expect([...((await env.covered?.()) ?? [])]).toEqual([]);
     expect(full.messages).toBe(7);
-    expect(read.messages).toBe(7);
-    expect(rig.host.quietCalls).toHaveLength(0);
+    await lumi.land(chatId, userId);
+    // The estimate counts the jumpstart still to run (one volume, one call) beside the full read.
+    const before = rig.body(await rig.send({ type: "lre.bootstrap", op: "estimate", chatId })).estimate as BootstrapEstimate;
+    expect(before.messages).toBe(7);
+    expect(before.notes.some((n) => n.includes("jumpstart") && n.includes("1 call"))).toBe(true);
+    // A fake author: a core and what each knows for every character the prompt lists, and a notebook seed; the prompt says LumiBooks is evidence only.
+    const asked: string[] = [];
+    const model: ModelPort = async (role, messages) => {
+      asked.push(role);
+      const system = messages[0]?.content ?? "";
+      const user = messages[1]?.content ?? "";
+      expect(system).toContain("evidence only");
+      expect(user).toContain("The traveler lands at Gull Point");
+      const names = [...user.matchAll(/^- (.+?)( \(no core yet\))?$/gm)].map((m) => m[1] ?? "");
+      return { text: JSON.stringify({ cast: names.map((name) => ({ name, core: `${name} is steady and wry.`, knows: "The keeper vanished three nights ago.", doesntKnow: "Where the keeper went." })), notebook: [{ path: "notebook/story.md", text: "The traveler reached Gull Point; the keeper is missing." }] }) };
+    };
+    const { cast, pov } = await env.people();
+    const people = cast.filter((p) => p.id !== pov);
+    expect(people.length).toBeGreaterThan(0);
+    // An answer that doesn't read fails the pass: nothing lands, the skip stays off, and the next try asks again.
+    const unread: ModelPort = async () => ({ text: "not json" });
+    await expect(lumi.jumpstart(chatId, userId, { model: unread, people: () => env.people(), imports: () => env.imports() })).rejects.toThrow("didn't read");
+    expect([...((await env.covered?.()) ?? [])]).toEqual([]);
+    expect(await env.jumpstartPending?.()).toEqual({ calls: 1, tokens: expect.any(Number) });
+    expect(await lumi.jumpstart(chatId, userId, { model, people: () => env.people(), imports: () => env.imports() })).toEqual({ calls: 1 });
+    expect(asked).toEqual(["author"]);
+    const head = await rig.rt.ledger.basisFor(chatId, userId);
+    const at = head ? await rig.rt.ledger.foldAtBasis(chatId, userId, head, [], new Set()) : null;
+    if (!at) throw new Error("no fold");
+    for (const p of people) {
+      const mind = await readMind(rig.rt.blobs, userId, at.state, p.id);
+      expect(mind["beliefs.md"]).toContain("## Imported from LumiBooks (for review)");
+      expect(mindMetaAt(at.state, p.id)["beliefs.md"]?.review).toBe(true);
+      expect(mind["core.md"]).toBeDefined();
+    }
+    expect((await readNotebook(rig.rt, userId, at.state)).files["notebook/story.md"]).toContain("the keeper is missing");
+    // Its entry landed, so the run reads only what the book doesn't cover: the edited message and those past it.
+    expect([...((await env.covered?.()) ?? [])].sort()).toEqual([ids[0] ?? "", ids[1] ?? "", ids[3] ?? "", ids[4] ?? ""].sort());
+    const read = rig.body(await rig.send({ type: "lre.bootstrap", op: "estimate", chatId })).estimate as BootstrapEstimate;
+    expect(read.messages).toBe(3);
+    expect(read.notes.some((n) => n.includes("jumpstart"))).toBe(false);
+    expect(read.total.calls).toBeLessThan(before.total.calls);
+    expect(read.total.tokensIn).toBeLessThan(before.total.tokensIn);
+    // Run again for the same book, it asks nothing.
+    expect(await lumi.jumpstart(chatId, userId, { model, people: () => env.people(), imports: () => env.imports() })).toBeNull();
+    expect(asked).toHaveLength(1);
+    await rig.host.idle?.();
+  });
+
+  test("the jumpstart asks through the run's metered author port: its call counts in the spend, and the cap stops the run after it", async () => {
+    const rig = new Rig({ shipped: true });
+    const worldId = await rig.newWorld("Gull Point", "modern_slice_of_life");
+    const chatId = rig.host.createChat(TEXTS[0]?.[1] ?? "");
+    const chat = rig.host.chat(chatId);
+    for (const [i, [isUser, text]] of TEXTS.slice(1, 7).entries()) rig.host.append(chat, { id: `g${i + 1}`, isUser, name: isUser ? "User" : "Narrator", swipes: [text], swipeId: 0, bag: {} });
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const userId = rig.host.userId;
+    const hashes: { index: number; hash: string }[] = [];
+    for (const [i, [isUser, text]] of TEXTS.slice(0, 5).entries()) hashes.push({ index: i, hash: await lbMessageHash(isUser, text) });
+    const lorebook = rig.host.userBook("LumiBooks summaries - gull", { metadata: { lumibooks_summary: { version: 1, algorithm: "sha256-role-content-v1", contentHash: "0".repeat(64), messages: hashes } } });
+    await rig.host.books.createEntry(lorebook, { comment: "Vol #1 - Fog at Gull Point (msgs 1-5)", content: "The traveler lands at Gull Point and hears the keeper is gone.", keys: ["Gull Point"], disabled: false, constant: true, extensions: { lumibooks_summary: { tier: 3, messageIndices: [0, 1, 2, 3, 4] } } }, userId);
+    await new LumiBooksBootstrap(rig.rt).land(chatId, userId);
+    let jumped = 0;
+    let others = 0;
+    rig.host.quietReply = (req) => {
+      // The jumpstart's answer, priced past the cap: nothing after it is asked.
+      if (req.messages.some((m) => m.content.includes("## LumiBooks summaries (evidence only)"))) {
+        jumped += 1;
+        return { content: JSON.stringify({ cast: [], notebook: [{ path: "notebook/story.md", text: "The traveler reached Gull Point." }] }), usage: { cost: 10 } };
+      }
+      others += 1;
+      return { content: "{}", usage: { cost: 0 } };
+    };
+    const run = new BootstrapRun(bootstrapEnv(rig.rt, chatId, userId, () => undefined));
+    await run.start({ unit: "money", value: 5 });
+    // The run goes on in the background and exposes no promise of its end; each turn of the event loop lets it move, with no wall-clock wait.
+    while (run.busy) {
+      const turn = Promise.withResolvers<void>();
+      setImmediate(turn.resolve);
+      await turn.promise;
+    }
+    const view = await run.view(true);
+    expect([jumped, others, view.status]).toEqual([1, 0, "paused"]);
+    expect(view.reason).toContain("The run reached its cap");
+    expect(view.spent.calls).toBe(1);
+    expect(view.spent.cost).toBe(10);
+    expect(view.progress.find((p) => p.stage === "author")?.spent.calls).toBe(1);
     await rig.host.idle?.();
   });
 });

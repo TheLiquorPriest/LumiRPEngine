@@ -40,9 +40,11 @@ export function chipFactsOf(view: Pick<BootstrapView, "status" | "chunks" | "pro
 /**
  * The bootstrap's chips under message `at`: "Bootstrap: reading canon beats, 12 of 40" while it runs
  * (or is finishing the calls under way after Pause), and "3 spot checks wait for you" while any item
- * waits, whatever the run's status. None once the run stops and every item is marked.
+ * waits, whatever the run's status. None once the run stops and every item is marked. `behind`: the
+ * characters a scene cast before their time in the chat's LumiBooks book was read into their mind,
+ * flagged (Settings → Depth → Bootstrap → When a character returns), by name.
  */
-export function bootstrapChips(chatId: ChatId, facts: BootstrapChipFacts, at: MessageId): Chip[] {
+export function bootstrapChips(chatId: ChatId, facts: BootstrapChipFacts, at: MessageId, behind: readonly string[] = []): Chip[] {
   const chips: Chip[] = [];
   const open = { id: "open", label: "Open", input: { type: "bootstrap" as const, label: "GM → Depth → Bootstrap" } };
   if (facts.status === "running" || facts.status === "pausing") {
@@ -55,6 +57,17 @@ export function bootstrapChips(chatId: ChatId, facts: BootstrapChipFacts, at: Me
       label: `Bootstrap${facts.status === "pausing" ? " pausing" : ""}: ${where}`,
       detail: `${facts.chunks.done} of ${facts.chunks.total} chunks of the chat read through every stage.`,
       actions: [open],
+      expires: "never",
+    });
+  }
+  if (behind.length > 0) {
+    chips.push({
+      id: `not_caught_up:${chatId}`,
+      kind: "bootstrap",
+      messageId: at,
+      label: `Not caught up: ${behind.join(", ")}`,
+      detail: "Back in the story before their time in the LumiBooks book was read into their mind: played from their core and the archive. Catch them up from GM → Depth → Bootstrap's LumiBooks tree.",
+      actions: [{ ...open, label: "Catch up" }],
       expires: "never",
     });
   }

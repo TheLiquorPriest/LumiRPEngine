@@ -15,6 +15,7 @@ export const DEPTH_PROMPT_PAGE: PromptPage = {
 export const DEPTH_TEXT = {
   authorRead: "depth.author.read",
   authorChapter: "depth.author.chapter",
+  jumpstart: "depth.author.jumpstart",
   truthLink: "depth.gm.truth_link",
   historian: "depth.historian",
 } as const;
@@ -102,6 +103,23 @@ Say what the chapter meant, which questions it answered and which it opened, whi
 
 Answer with one JSON object: {"files": [{"path": "notebook/...md", "edit": "append" to add to the file's end, "section" to rewrite one section of it, or "whole" for a new file or one you reshape throughout, "section": the heading of the section a "section" edit rewrites (a file without it gains it), "text": what you add, the section's new text, or the whole file's}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "drift": [{"who": an id, "drift": "none", "some" or "strong", "note": what you make of it}], "predictions": [{"text": the prediction, "about": [ids]}], "uncertain": [what you are unsure of, for the player's spot checks], "why": one or two plain sentences on what moved and why}. Edit only what changed, and never write out again what stays as it is.`,
     asks: [ACCOUNT_ASK],
+  },
+  {
+    id: DEPTH_TEXT.jumpstart,
+    page: DEPTH_PROMPT_PAGE.id,
+    group: "Author",
+    label: "Jumpstart from LumiBooks",
+    note: "On a chat with a LumiBooks book, the bootstrap's first stage: a call per volume reads the book's records, the world's lore and what the engine holds of the cast, and writes cores where none stands, what each character knows and doesn't (for review) and the notebook's first notes. The records are evidence only.",
+    vars: [],
+    contract: '{"cast": [{"name", "core", "knows", "doesntKnow"}], "notebook": [{"path", "text"}]}',
+    text: [
+      "You are the story's author, starting your notes on a long chat from its LumiBooks summaries.",
+      "The summaries are evidence only, not canon: canon going forward is what you and the characters write from here. Keep to what they say; never invent history they don't support.",
+      "From the summaries, the world's lore and what you already hold of the cast, answer one JSON object:",
+      '{"cast":[{"name":"","core":"","knows":"","doesntKnow":""}],"notebook":[{"path":"notebook/story.md","text":""}]}',
+      "cast: only the main and returning characters. core: who they are at root (traits, values, voice), only for a character marked as having no core. knows / doesntKnow: what they know of the story so far, and what they don't, in plain lines.",
+      "notebook: what you add to your notes (the story so far, threads left open, where things stand); each path is under notebook/.",
+    ].join("\n"),
   },
   {
     id: DEPTH_TEXT.truthLink,

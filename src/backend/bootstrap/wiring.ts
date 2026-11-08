@@ -39,7 +39,7 @@ import { entriesAbout, readImports, reconcile } from "./import";
 import { amendBeat } from "./amend";
 import type { BootstrapEnv, BootstrapKnobs, BootstrapStages, HistorianOut, Lived, Person } from "./run";
 import type { SpoolRow, SurveyMessage } from "./spool";
-import { JUMPSTART_SKIPS_COVERED, LumiBooksBootstrap } from "./lumibooks-service";
+import { LumiBooksBootstrap } from "./lumibooks-service";
 
 /** Each stage's role in Settings → Depth (§7): the survey and the import ask no model. */
 export const STAGE_ROLE: Readonly<Record<BootstrapStage, DepthRole | null>> = { survey: null, import: null, historian: "historian", author: "author", pov: "pov", minds: "character", truthlink: "gm", reconcile: "gm" };
@@ -340,8 +340,15 @@ export function bootstrapEnv(rt: Runtime, chatId: ChatId, userId: UserId, change
       },
     },
     async covered() {
-      // Off until the author's jumpstart pass reads LumiBooks' records (`JUMPSTART_SKIPS_COVERED`): the run and its estimate read every message.
-      return JUMPSTART_SKIPS_COVERED ? new LumiBooksBootstrap(rt).covered(chatId, userId) : new Set<MessageId>();
+      // Empty until the chat's jumpstart entry for its book as it stands landed: until then the run and its estimate read every message.
+      return new LumiBooksBootstrap(rt).covered(chatId, userId);
+    },
+    async jumpstart(port) {
+      // The run's metered author port, not the env's own: its calls count against the cap and the spend.
+      return new LumiBooksBootstrap(rt).jumpstart(chatId, userId, { model: port, people: () => this.people(), imports: () => this.imports() });
+    },
+    async jumpstartPending() {
+      return new LumiBooksBootstrap(rt).jumpstartPending(chatId, userId);
     },
     async messages(): Promise<SurveyMessage[]> {
       const kept = surveysOf(rt);

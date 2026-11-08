@@ -370,10 +370,10 @@ export function DepthPage(props: { depth: Readonly<DepthSettings>; connections: 
             value={boot.returning}
             standard={sboot.returning}
             options={[
-              { value: "auto", label: "Catch them up" },
               { value: "flag", label: "Flag them" },
+              { value: "auto", label: "Catch them up" },
             ]}
-            help="A character back in the story whose time in the LumiBooks book hasn't been read into their mind yet. Catch them up: the author runs a catch-up on just what they missed first, and says so. Flag them: they're played from their core and the archive, and marked as not caught up. This build records the choice; nothing acts on it yet."
+            help="A character back in the story whose time in the LumiBooks book hasn't been read into their mind yet. Flag them (the standard): they're played from their core and the archive, and marked as not caught up. Catch them up: the author runs a catch-up on just the book's parts that name them first, and says so; it counts against Settings → Depth → Budget → Per day."
             busy={busy}
             set={(returning) => set({ bootstrap: { returning } })}
           />
