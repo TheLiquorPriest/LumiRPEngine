@@ -1,5 +1,5 @@
 // The layer carried in the chat's own metadata (DEPTH-PLAN §4.9, owner's ruling on exports): Lumiverse's
-// chat export and import copy a chat's metadata, so a copy of the layer kept there, compressed, travels
+// chat export and import copy a chat's metadata, so a copy of the layer kept there travels
 // with them. An imported chat takes it as a branch takes its ancestor's (`ancestorOf`): each entry onto
 // the copy of its basis message, matched by the identities the messages show (`copyMap`). A layer too
 // large to carry is marked so, and the chat keeps the warning that an export loses its depth.
@@ -12,10 +12,8 @@ import { swipeKeyOf } from "../engine/ledger/layer";
 
 /** The top-level chat metadata key the carried layer sits under. */
 export const LAYER_CARRY_KEY = "lre_layer";
-/** The most characters the carried layer may take in the chat's metadata, compressed and encoded: under 1 MiB. */
+/** The most characters the carried layer may take in the chat's metadata, as JSON: under 1 MiB. */
 export const LAYER_CARRY_MAX = 1_000_000;
-/** A layer whose JSON passes this is marked too large without compressing it: it couldn't compress under the cap. */
-const LAYER_CARRY_RAW_MAX = 8_000_000;
 
 /** A basis message as the carrying chat showed it: what its copy is found by. */
 export interface CarriedMessage {
@@ -26,21 +24,20 @@ export interface CarriedMessage {
 }
 
 export type LayerCarry =
-  | { v: 1; chat: ChatId; runSeed: string; at: string; entries: number; messages: CarriedMessage[]; gz: string }
+  | { v: 1; chat: ChatId; runSeed: string; at: string; entries: number; messages: CarriedMessage[]; list: LayerEntry[] }
   /** Too large to carry: an export of this chat starts without its depth. */
   | { v: 1; chat: ChatId; runSeed: string; at: string; entries: number; over: true };
 
-/** The carry for `entries` (all the chat folds, in its own message ids) on `chain`: the basis messages in chain order, the entries compressed; or marked over the cap. */
+/** The carry for `entries` (all the chat folds, in its own message ids) on `chain`: the basis messages in chain order and the entries; or marked over the cap. */
 export function carryOf(chatId: ChatId, runSeed: string, entries: readonly LayerEntry[], chain: readonly ChainMessage[]): LayerCarry {
   const at = new Date().toISOString();
   const head = { v: 1 as const, chat: chatId, runSeed, at, entries: entries.length };
-  const json = JSON.stringify(entries);
-  if (json.length > LAYER_CARRY_RAW_MAX) return { ...head, over: true };
+  const size = JSON.stringify(entries).length;
+  if (size > LAYER_CARRY_MAX) return { ...head, over: true };
   const bases = new Set(entries.map((e) => e.basis.message));
   const messages = chain.filter((m) => bases.has(m.id)).map((m): CarriedMessage => ({ id: m.id, user: m.isUser, keys: m.swipes.map((_, s) => swipeKeyOf({ ...m, swipeId: s }, [])) }));
-  const gz = Buffer.from(Bun.gzipSync(json)).toString("base64");
-  if (gz.length + JSON.stringify(messages).length > LAYER_CARRY_MAX) return { ...head, over: true };
-  return { ...head, messages, gz };
+  if (size + JSON.stringify(messages).length > LAYER_CARRY_MAX) return { ...head, over: true };
+  return { ...head, messages, list: [...entries] };
 }
 
 /** The carry a chat's metadata holds, when it is one this build reads. */
@@ -48,23 +45,17 @@ export function carryIn(meta: Readonly<Record<string, unknown>>): LayerCarry | n
   const c = meta[LAYER_CARRY_KEY];
   if (!isRecord(c) || c.v !== 1 || typeof c.chat !== "string" || typeof c.runSeed !== "string" || typeof c.at !== "string" || typeof c.entries !== "number") return null;
   if (c.over === true) return c as unknown as LayerCarry;
-  if (typeof c.gz !== "string" || !Array.isArray(c.messages)) return null;
+  if (!Array.isArray(c.list) || !Array.isArray(c.messages)) return null;
   return c as unknown as LayerCarry;
 }
 
 /** The entries a carry holds; null when it holds none (over the cap) or can't be read. */
 export function carriedEntries(carry: LayerCarry): LayerEntry[] | null {
-  if ("over" in carry) return null;
-  try {
-    const list: unknown = JSON.parse(new TextDecoder().decode(Bun.gunzipSync(Uint8Array.from(atob(carry.gz), (ch) => ch.charCodeAt(0)))));
-    return Array.isArray(list) ? (list as LayerEntry[]) : null;
-  } catch {
-    return null;
-  }
+  return "over" in carry ? null : carry.list;
 }
 
 /** Which of `copy`'s messages shows each carried message's identity (`copyMap`), as a branch's copies are found. */
-export function carriedMap(carry: Extract<LayerCarry, { gz: string }>, copy: readonly ChainMessage[]): Record<MessageId, MessageId> {
+export function carriedMap(carry: Extract<LayerCarry, { list: LayerEntry[] }>, copy: readonly ChainMessage[]): Record<MessageId, MessageId> {
   return copyMap(
     carry.messages.map((m) => ({ id: m.id, user: m.user, keys: new Set(m.keys) })),
     copy.map((m) => ({ id: m.id, user: m.isUser, keys: new Set(m.swipes.map((_, s) => swipeKeyOf({ ...m, swipeId: s }, []))) })),

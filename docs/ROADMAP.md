@@ -321,4 +321,4 @@ Long chats outgrew a single prompt: a thousand messages in, the model writing th
 - Depth needs the relay running beside Lumiverse; message sessions can't yet complete a reply written passage by passage, so there is no in-process route yet.
 - Impersonate and Continue still use the classic narrator on a depth chat.
 - "Pick blocks" is removed: Spindle's prompt interceptor gives no preset block identity. Leave a block out per chat in Lumiverse's own preset. I plan to ask for block ids after the release.
-- A chat exported from Lumiverse carries its depth work in its metadata only while it fits in 1 MB compressed; past that, an imported copy starts with no depth work.
+- A chat exported from Lumiverse carries its depth work in its metadata only while it fits in 1 MB; past that, an imported copy starts with no depth work.
