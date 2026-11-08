@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 
 // src/cli/main.ts
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { chmodSync, chownSync, closeSync, copyFileSync, existsSync, ftruncateSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 
 // src/shared/agents.ts
-var KIT_API = 1;
+var KIT_API = 2;
 var KIT_FILE = "agent-kit.js";
 var NPM_INSTALL = "npm i -g github:TheLiquorPriest/LumiRPEngine";
 var LUMIVERSE_HARNESS = "lumiverse";
@@ -122,7 +124,7 @@ function kitOf(module) {
   if (kit.api !== KIT_API)
     return `it is kit API ${String(kit.api)}, and this lumirpengine reads kit API ${KIT_API}`;
   const versions = kit.versions;
-  if (typeof kit.build !== "string" || !isRecord(versions) || typeof versions.agentApi !== "number" || typeof kit.tools !== "function" || typeof kit.has !== "function" || typeof kit.call !== "function")
+  if (typeof kit.build !== "string" || !isRecord(versions) || typeof versions.agentApi !== "number" || typeof kit.own !== "function" || typeof kit.tools !== "function" || typeof kit.call !== "function")
     return "it isn't a whole kit";
   return kit;
 }
@@ -133,9 +135,28 @@ function bundledKitOf(module) {
   return "run" in kit && typeof kit.run === "function" ? kit : "it runs no command line";
 }
 
+// src/shared/keyed-queue.ts
+class KeyedQueue {
+  tails = new Map;
+  run(key, work) {
+    const result = (this.tails.get(key) ?? Promise.resolve()).then(work, work);
+    const tail = result.then(() => {
+      return;
+    }, () => {
+      return;
+    });
+    this.tails.set(key, tail);
+    tail.then(() => {
+      if (this.tails.get(key) === tail)
+        this.tails.delete(key);
+    });
+    return result;
+  }
+}
+
 // src/shared/protocol.ts
 var PROTOCOL_VERSION = 1;
-var AGENT_API = 2;
+var AGENT_API = 3;
 var ENGINE_EXTENSION = "lumi_rp_engine";
 
 // src/shared/minds.ts
@@ -780,6 +801,13 @@ class HostConnection {
       this.greeting?.reject(new LiveError("protocol", "Lumiverse refused the event socket's ticket."));
       return;
     }
+    const lifecycle = msg.event === "SPINDLE_EXTENSION_LOADED" ? "loaded" : msg.event === "SPINDLE_EXTENSION_UNLOADED" ? "unloaded" : msg.event === "SPINDLE_EXTENSION_ERROR" ? "error" : null;
+    if (lifecycle !== null) {
+      const id = this.opened?.extension.id ?? this.lastExtension?.id;
+      if (isRecord(msg.payload) && id !== undefined && msg.payload.extensionId === id)
+        this.options.onExtension?.(lifecycle, typeof msg.payload.error === "string" ? msg.payload.error : null);
+      return;
+    }
     if (msg.event !== "SPINDLE_FRONTEND_MSG" || !isRecord(msg.payload) || msg.payload.extensionId !== this.opened?.extension.id)
       return;
     const data = msg.payload.data;
@@ -996,7 +1024,7 @@ var DEFAULT_PLACE_CAPS = Object.freeze({ turn: 2, chat: 64 });
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "fabe287a";
+var BUILD = "a41679bd";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
@@ -1061,18 +1089,18 @@ class McpServer {
           return reply({});
         case "tools/list": {
           const kit = this.host.kit();
-          const tools = kit.tools(this.host.readOnly).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: t.annotations }));
-          this.host.listed?.(kit.build);
+          const listed = await kit.tools(this.host.context);
+          const tools = listed.tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: t.annotations }));
+          this.host.listed?.(kit.build, listed.backend);
           return reply({ tools });
         }
         case "tools/call": {
           if (typeof params.name !== "string")
             return fail(id, -32602, "Invalid params: tools/call needs the tool's name");
           await this.host.ready();
-          const kit = this.host.kit();
-          if (!kit.has(params.name))
+          const result = await this.host.kit().call(params.name, params.arguments, this.host.context);
+          if (result === null)
             return fail(id, -32602, `Unknown tool: ${params.name}`);
-          const result = await kit.call(params.name, params.arguments, this.host.context);
           return reply({ content: [{ type: "text", text: result.text }], ...result.isError ? { isError: true } : {} });
         }
       }
@@ -1148,24 +1176,6 @@ var REAL_CLOCK = {
   }
 };
 
-class Queue {
-  tails = new Map;
-  run(key, work) {
-    const result = (this.tails.get(key) ?? Promise.resolve()).then(work, work);
-    const tail = result.then(() => {
-      return;
-    }, () => {
-      return;
-    });
-    this.tails.set(key, tail);
-    tail.then(() => {
-      if (this.tails.get(key) === tail)
-        this.tails.delete(key);
-    });
-    return result;
-  }
-}
-
 class McpSession {
   options;
   readOnly;
@@ -1184,6 +1194,8 @@ class McpSession {
   harness = null;
   initializedOnce = false;
   listedBuild = null;
+  listedBackend = null;
+  backendBuild = null;
   leaving = false;
   looked = Number.NEGATIVE_INFINITY;
   work = Promise.resolve();
@@ -1197,7 +1209,7 @@ class McpSession {
     this.readOnly = options.mcp.readOnly;
     this.clock = options.clock ?? REAL_CLOCK;
     this.follower = new KitFollower(options.bundled, { pin: options.mcp.pin, cannotLoad: options.cannotLoad ?? null, identifier: ENGINE_EXTENSION, files: options.files, where: () => this.conn?.base ?? "your Lumiverse" });
-    const queue = new Queue;
+    const queue = new KeyedQueue;
     this.context = { readFile: (path) => options.io.readFile(path), readOnly: this.readOnly, connection: () => this.connection(), serialize: (key, work) => queue.run(key, work), sandboxBudgetMs: options.mcp.sandboxBudgetMs };
     this.said = stanceOf(this.checkIn());
   }
@@ -1206,7 +1218,7 @@ class McpSession {
   }
   checkIn() {
     const { follows, why } = this.follower.state;
-    return { serves: "mcp", core: BUILD, kit: this.follower.kit.build, follows, why, host: this.options.host, harness: this.harness, listed: this.listedBuild };
+    return { serves: "mcp", core: BUILD, kit: this.follower.kit.build, follows, why, host: this.options.host, harness: this.harness, listed: this.listedBuild, listedBackend: this.listedBackend };
   }
   start() {
     this.stopTimer = this.clock.every(EVERY_MS, () => {
@@ -1225,10 +1237,11 @@ class McpSession {
       } catch {}
     })();
   }
-  listed(build) {
-    if (this.listedBuild === build)
+  listed(build, backend) {
+    if (this.listedBuild === build && this.listedBackend === backend)
       return;
     this.listedBuild = build;
+    this.listedBackend = backend;
     this.after(() => this.tell());
   }
   async ready() {
@@ -1266,12 +1279,19 @@ class McpSession {
       onHello: (answer, sent) => {
         if (typeof answer.client === "string")
           this.agent = answer.client;
+        if (typeof answer.build === "string") {
+          if (this.listedBackend !== null && answer.build !== this.listedBackend)
+            this.toolsChanged();
+          this.backendBuild = answer.build;
+        }
         if (sent !== null)
           this.said = stanceOf(sent);
         this.looked = this.clock.now();
         this.after(() => this.take(answer));
       },
       onPush: (push) => {
+        if (push.type === "lre.tools.changed")
+          return this.toolsChanged();
         if (this.agent === null || !("client" in push) || push.client !== this.agent)
           return;
         if (push.type === "lre.kit.reload")
@@ -1285,10 +1305,12 @@ class McpSession {
   }
   reconnect() {
     const serving = this.follower.kit.build;
-    if (this.leaving || this.harness !== LUMIVERSE_HARNESS || this.listedBuild === null || this.listedBuild === serving)
+    const kitStale = this.listedBuild !== null && this.listedBuild !== serving;
+    const servedStale = this.listedBackend !== null && this.backendBuild !== null && this.listedBackend !== this.backendBuild;
+    if (this.leaving || this.harness !== LUMIVERSE_HARNESS || !kitStale && !servedStale)
       return;
     this.leaving = true;
-    this.options.log(`lumirpengine: exiting, as LumiRPEngine's Reconnect in Lumiverse asked, once the calls in flight are answered: Lumiverse's MCP client holds build ${this.listedBuild}'s tools until it connects again, and on connecting it lists build ${serving}'s`);
+    this.options.log(`lumirpengine: exiting, as LumiRPEngine's Reconnect in Lumiverse asked, once the calls in flight are answered: Lumiverse's MCP client holds ${kitStale ? `build ${this.listedBuild ?? ""}'s tools` : `LumiRPEngine build ${this.listedBackend ?? ""}'s served tools`} until it connects again, and on connecting it lists build ${kitStale ? serving : this.backendBuild ?? ""}'s`);
     this.leave();
   }
   after(step) {
@@ -1333,7 +1355,7 @@ class McpSession {
   }
 }
 function stanceOf(c) {
-  return `${c.kit}\x00${String(c.follows)}\x00${c.why?.code ?? ""}\x00${c.listed ?? ""}`;
+  return `${c.kit}\x00${String(c.follows)}\x00${c.why?.code ?? ""}\x00${c.listed ?? ""}\x00${c.listedBackend ?? ""}`;
 }
 function serveMcp(session, write, exit = () => {
   return;
@@ -1434,6 +1456,76 @@ function ask(question, hidden) {
   input.on("data", key);
   return promise;
 }
+var loopbackIO = {
+  serve: process.versions.bun === undefined ? null : (options) => {
+    const server = Bun.serve({ hostname: options.hostname, port: options.port, idleTimeout: 0, fetch: options.fetch });
+    return { stop: () => void server.stop(true) };
+  },
+  stopped() {
+    const { promise, resolve } = Promise.withResolvers();
+    process.once("SIGTERM", () => resolve("SIGTERM"));
+    process.once("SIGINT", () => resolve("SIGINT"));
+    return promise;
+  },
+  bun: process.versions.bun === undefined ? null : process.execPath,
+  self: fileURLToPath(import.meta.url),
+  uid: process.getuid?.() ?? null,
+  cwd: process.cwd(),
+  hostname: hostname(),
+  platform: process.platform,
+  home: homedir(),
+  files: {
+    read: (path) => files.read(path),
+    write(path, text, mode, dirMode) {
+      mkdirSync(dirname(path), { recursive: true, mode: dirMode });
+      const temp = `${path}.${process.pid}.tmp`;
+      writeFileSync(temp, text, { mode });
+      chmodSync(temp, mode);
+      renameSync(temp, path);
+    },
+    rewrite(path, text) {
+      const fd = openSync(path, "r+");
+      try {
+        ftruncateSync(fd, 0);
+        writeSync(fd, text, 0);
+      } finally {
+        closeSync(fd);
+      }
+    },
+    copy(from, to, mode) {
+      mkdirSync(dirname(to), { recursive: true, mode: 493 });
+      const temp = `${to}.${process.pid}.tmp`;
+      copyFileSync(from, temp);
+      chmodSync(temp, mode);
+      renameSync(temp, to);
+    },
+    exists: (path) => existsSync(path),
+    list(dir) {
+      try {
+        return readdirSync(dir);
+      } catch {
+        return [];
+      }
+    },
+    remove: (path) => rmSync(path, { force: true }),
+    stat(path) {
+      if (process.platform === "win32")
+        return null;
+      const entry = statSync(path);
+      return { uid: entry.uid, gid: entry.gid, mode: entry.mode };
+    },
+    real: (path) => realpathSync(path),
+    chown: (path, uid, gid) => chownSync(path, uid, gid)
+  },
+  run(command, args, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    execFile(command, [...args], { encoding: "utf8", ...env !== undefined ? { env: { ...process.env, ...env } } : {} }, (error, out, err) => {
+      const code = error === null ? 0 : typeof error.code === "number" ? error.code : 127;
+      resolve({ code, out, err: err || (error !== null && typeof error.code !== "number" ? error.message : "") });
+    });
+    return promise;
+  }
+};
 var io = {
   out: (text) => process.stdout.write(text.endsWith(`
 `) ? text : `${text}
@@ -1448,7 +1540,8 @@ var io = {
   ask,
   credentials: new CredentialStore(files, credentialsPath(process.env, process.platform, homedir())),
   http,
-  openSocket
+  openSocket,
+  loopback: loopbackIO
 };
 var kitFiles = {
   realpath: (path) => realpath(path),
