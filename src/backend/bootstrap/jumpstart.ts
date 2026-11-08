@@ -13,7 +13,10 @@ import { isRecord } from "../../shared/json";
 import { wsWrite } from "../../engine/workspace";
 import { NOTEBOOK_DIR, notebookEvent } from "../../engine/notebook";
 import { seedCore } from "../character-agent";
-import type { ModelPort, PortMessage } from "../depth/port";
+import { answerRead, type ModelPort, type PortMessage } from "../depth/port";
+import { DepthAnswerError } from "../depth/common";
+import { cutShort } from "../agents/runtime";
+import { roomFor } from "./run";
 
 export interface JumpstartRecord {
   id: string;
@@ -77,6 +80,30 @@ function messagesOf(group: readonly JumpstartRecord[], input: JumpstartInput): P
 
 const text = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
 
+/**
+ * One group's reading: asked at a room sized from what it reads (`roomFor`), read as the other bootstrap
+ * answers are (`answerRead`: fences, a stray tail and tool tags around the object are read past). An
+ * answer cut off at its room is asked again at twice it; one still cut off, or not an object at all,
+ * splits the group in halves, each read beside the same cast and notebook. A single record that still
+ * won't read fails the pass with what the model said, so the run pauses and Resume asks again.
+ */
+async function readGroup(model: ModelPort, group: readonly JumpstartRecord[], input: JumpstartInput, signal: AbortSignal | undefined, asked: { calls: number }): Promise<Record<string, unknown>[]> {
+  const messages = messagesOf(group, input);
+  const ask = async (maxTokens: number) => {
+    asked.calls++;
+    return model("author", messages, { json: true, maxTokens, ...(signal ? { signal } : {}) });
+  };
+  let answer = await ask(roomFor(messages));
+  if (cutShort(answer.finish)) answer = await ask(roomFor(messages) * 2);
+  const read = cutShort(answer.finish) ? null : answerRead(answer.text);
+  if (read) return [read.answer];
+  if (group.length > 1) {
+    const half = Math.ceil(group.length / 2);
+    return [...(await readGroup(model, group.slice(0, half), input, signal, asked)), ...(await readGroup(model, group.slice(half), input, signal, asked))];
+  }
+  throw new DepthAnswerError("author", answer.text, { ...(answer.finish !== undefined ? { finish: answer.finish } : {}), ...(answer.usage ? { usage: answer.usage } : {}) });
+}
+
 /** The jumpstart pass: a few author calls, and what they write, as events for one layer entry. */
 export async function jumpstart(model: ModelPort, input: JumpstartInput, signal?: AbortSignal): Promise<JumpstartOut> {
   const byName = new Map(input.cast.map((c) => [c.name.trim().toLowerCase(), c]));
@@ -84,16 +111,8 @@ export async function jumpstart(model: ModelPort, input: JumpstartInput, signal?
   const knowledge = new Map<EntityId, string[]>();
   const notebook = new Map<string, string[]>();
   const groups = jumpstartGroups(input.records);
-  for (const group of groups) {
-    const answer = await model("author", messagesOf(group, input), { json: true, ...(signal ? { signal } : {}) });
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(answer.text);
-    } catch {
-      parsed = null;
-    }
-    // An answer that doesn't read fails the pass, so nothing marks it done: the run pauses with the error, and Resume asks again.
-    if (!isRecord(parsed)) throw new Error("the author's jumpstart answer didn't read as one JSON object");
+  const asked = { calls: 0 };
+  for (const group of groups) for (const parsed of await readGroup(model, group, input, signal, asked)) {
     for (const raw of Array.isArray(parsed.cast) ? parsed.cast : []) {
       if (!isRecord(raw)) continue;
       const who = byName.get(text(raw.name).toLowerCase());
@@ -137,5 +156,5 @@ export async function jumpstart(model: ModelPort, input: JumpstartInput, signal?
     events.push(wsWrite(path, hash));
   }
   if (Object.keys(files).length > 0) events.push(notebookEvent({ kind: "light", files, through: input.through, reason: "Seeded from the chat's LumiBooks records, which are evidence only." }));
-  return { events, blobs, calls: groups.length };
+  return { events, blobs, calls: asked.calls };
 }

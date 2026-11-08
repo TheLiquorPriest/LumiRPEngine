@@ -231,14 +231,15 @@ describe("LumiBooks: records land with no model call", () => {
       expect(system).toContain("evidence only");
       expect(user).toContain("The traveler lands at Gull Point");
       const names = [...user.matchAll(/^- (.+?)( \(no core yet\))?$/gm)].map((m) => m[1] ?? "");
-      return { text: JSON.stringify({ cast: names.map((name) => ({ name, core: `${name} is steady and wry.`, knows: "The keeper vanished three nights ago.", doesntKnow: "Where the keeper went." })), notebook: [{ path: "notebook/story.md", text: "The traveler reached Gull Point; the keeper is missing." }] }) };
+      // As DeepSeek answers in JSON mode at times: fenced, with a stray tail after the object.
+      return { text: "```json\n" + JSON.stringify({ cast: names.map((name) => ({ name, core: `${name} is steady and wry.`, knows: "The keeper vanished three nights ago.", doesntKnow: "Where the keeper went." })), notebook: [{ path: "notebook/story.md", text: "The traveler reached Gull Point; the keeper is missing." }] }) + "\n```\n</br>" };
     };
     const { cast, pov } = await env.people();
     const people = cast.filter((p) => p.id !== pov);
     expect(people.length).toBeGreaterThan(0);
     // An answer that doesn't read fails the pass: nothing lands, the skip stays off, and the next try asks again.
     const unread: ModelPort = async () => ({ text: "not json" });
-    await expect(lumi.jumpstart(chatId, userId, { model: unread, people: () => env.people(), imports: () => env.imports() })).rejects.toThrow("didn't read");
+    await expect(lumi.jumpstart(chatId, userId, { model: unread, people: () => env.people(), imports: () => env.imports() })).rejects.toThrow("wasn't the JSON object");
     expect([...((await env.covered?.()) ?? [])]).toEqual([]);
     expect(await env.jumpstartPending?.()).toEqual({ calls: 1, tokens: expect.any(Number) });
     expect(await lumi.jumpstart(chatId, userId, { model, people: () => env.people(), imports: () => env.imports() })).toEqual({ calls: 1 });
