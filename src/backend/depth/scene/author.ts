@@ -660,7 +660,7 @@ export interface NewcomerDraft {
 }
 
 /**
- * The newcomers an answer brings in (LIVEGAPS: a walk-in the player greeted by name had no person to
+ * The newcomers an answer brings in (seen live: a walk-in the player greeted by name had no person to
  * cast, stage or form a mind for), each under an id of its own (its ref where that is free, else one
  * made from its name), and `names` knowing them by that id, their ref or their name. One the world has
  * already is no newcomer: its ref names that person. One with no name is refused, said.

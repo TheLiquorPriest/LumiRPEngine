@@ -587,7 +587,7 @@ class Turn {
   }
 
   /**
-   * Whoever the setup or a step brought into the world (`newcomers`; LIVEGAPS: a walk-in the player
+   * Whoever the setup or a step brought into the world (`newcomers`; seen live: a walk-in the player
    * greeted by name had no person to cast, stage or give a mind) joins it in moment `mark` by the
    * engine's own `spawn`, as a reply's newcomer does: a person at the world's spawn tier, at the
    * scene's place (`place`), who they are as the author told it kept as their description. One the
