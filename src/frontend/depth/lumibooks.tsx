@@ -146,7 +146,7 @@ export function LumiBooksBody(props: { tree: LbTree; c: LumiBooksControls }) {
             const subtitle = [rangeText(node.range), node.changed > 0 ? `${node.changed} ${node.changed === 1 ? "message" : "messages"} changed since` : null, node.caughtUp.length > 0 ? `Caught up: ${named(node.caughtUp)}` : null, node.fullMind.length > 0 ? `Full mind: ${named(node.fullMind)}` : null].filter((s) => s !== null).join(" · ");
             const open = pendingOn(node.id);
             return (
-              <div key={node.id} class="lre-lb-node" data-lre-lb-node={node.id} data-lre-lb-level={node.level} style={{ marginInlineStart: `${depth * 16}px` }}>
+              <div key={node.id} class="lre-lb-node" data-lre-lb-node={node.id} data-lre-lb-level={node.level} style={{ "--lre-lb-depth": depth }}>
                 <ActionRow
                   title={title}
                   subtitle={subtitle}

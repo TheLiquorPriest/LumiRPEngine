@@ -1,7 +1,10 @@
 // The depth views (DEPTH-PLAN §7): GM → Minds on a depth chat, GM → Depth (Notebook, Drafts,
 // Treatments, Archive, Bootstrap), GM → This chat → Depth and Settings → Depth. Mobile first at 390
 // px: one column, every control at least a tap high, long texts wrapping; the spot checks' made/source
-// pairs stack and go side by side only where there is room.
+// pairs stack and go side by side only where there is room. The Bootstrap view, its LumiBooks tree and
+// the opt-in page measure their own width (a container, as the workspace does): narrow (up to 420 px,
+// a phone or the drawer), a row's value and buttons wrap under its title, each tree level indents
+// half as far, and the cap's stepper takes the row so its number shows whole.
 
 export const DEPTH_CSS = `
 .lre .lre-depth-note{margin:0;overflow-wrap:anywhere}
@@ -28,6 +31,8 @@ export const DEPTH_CSS = `
 .lre .lre-depth-span{display:grid;grid-template-columns:1fr 1fr;gap:var(--lre-s2)}
 .lre .lre-depth-span .lre-input{width:100%;min-width:0}
 .lre .lre-depth-cap{gap:var(--lre-s2)}
+.lre .lre-depth-cap .lre-stepper{width:100%;margin-left:0}
+.lre .lre-depth-cap .lre-stepper>.lre-input{flex:1 1 auto;width:auto}
 .lre .lre-depth-notes{margin:0;padding-left:1.2em;font-size:var(--lre-fs-sm);color:var(--lre-muted)}
 .lre .lre-depth-log{margin:0;padding-left:1.6em;font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
 .lre .lre-depth-spot-item{display:flex;flex-direction:column;gap:var(--lre-s2);padding:var(--lre-s2) 0;border-top:1px solid var(--lre-border)}
@@ -49,4 +54,15 @@ export const DEPTH_CSS = `
 .lre .lre-depth-ceiling,.lre .lre-depth-allowance{gap:var(--lre-s1);min-width:0}
 .lre .lre-depth-ceiling-label{font-weight:600;overflow-wrap:anywhere}
 @media (min-width:640px){.lre .lre-depth-spot-pair{grid-template-columns:1fr 1fr}}
+.lre .lre-depth-bootstrap,.lre .lre-lb,.lre .lre-depth-chat{container:lre-depth/inline-size}
+.lre .lre-lb-node{margin-inline-start:calc(var(--lre-lb-depth,0) * var(--lre-s4))}
+@container lre-depth (max-width:420px){
+.lre .lre-gm-row-main{flex-wrap:wrap;row-gap:var(--lre-s1)}
+.lre .lre-gm-row-text{flex:1 1 10rem}
+.lre .lre-gm-row-value{max-width:100%;margin-left:auto}
+.lre .lre-gm-row-actions{flex:1 1 100%;flex-wrap:wrap;gap:var(--lre-s1);margin-right:0}
+.lre .lre-gm-row-actions>.lre-btn{flex:1 1 auto}
+.lre .lre-lb-node{margin-inline-start:calc(var(--lre-lb-depth,0) * var(--lre-s2))}
+.lre .lre-lb-node[data-lre-lb-level=arc],.lre .lre-lb-node[data-lre-lb-level=chapter]{padding-inline-start:var(--lre-s2);border-inline-start:2px solid var(--lre-hairline)}
+}
 `;

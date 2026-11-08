@@ -85,10 +85,11 @@ describe("GM → Depth → Bootstrap's LumiBooks tree", () => {
   test("shows each node in reading order with its range, coverage and who has caught up, and the ranges no entry spans", () => {
     const tree = render(LumiBooksBody({ tree: TREE, c: controls() }));
     const text = textOf(tree);
-    expect(propsOf(tree, "div").filter((p) => typeof p["data-lre-lb-node"] === "string").map((p) => [p["data-lre-lb-node"], p["data-lre-lb-level"]])).toEqual([
-      ["v1", "volume"],
-      ["a1", "arc"],
-      ["c1", "chapter"],
+    // Each node says how deep it sits; the depth CSS indents by it, half as far on a narrow screen.
+    expect(propsOf(tree, "div").filter((p) => typeof p["data-lre-lb-node"] === "string").map((p) => [p["data-lre-lb-node"], p["data-lre-lb-level"], (p.style as Record<string, unknown>)["--lre-lb-depth"]])).toEqual([
+      ["v1", "volume", 0],
+      ["a1", "arc", 1],
+      ["c1", "chapter", 2],
     ]);
     for (const part of ["LumiBooks: The Long Winter", "Volume: Snowed in", "Messages 1–100", "Imported", "Arc: The diner", "3 messages changed since", "Changed since", "Chapter: First night", "Messages 1–20", "Read deeply", "Caught up: Rosie Alvarez", "Full mind: Dev Patel", "Not in the book", "Messages 101–120"]) expect(text).toContain(part);
     // Read deeply is offered until the node was read deeply.
