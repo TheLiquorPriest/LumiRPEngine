@@ -56,7 +56,7 @@ export function carryIn(meta: Readonly<Record<string, unknown>>): LayerCarry | n
 export function carriedEntries(carry: LayerCarry): LayerEntry[] | null {
   if ("over" in carry) return null;
   try {
-    const list: unknown = JSON.parse(new TextDecoder().decode(Bun.gunzipSync(Buffer.from(carry.gz, "base64"))));
+    const list: unknown = JSON.parse(new TextDecoder().decode(Bun.gunzipSync(Uint8Array.from(atob(carry.gz), (ch) => ch.charCodeAt(0)))));
     return Array.isArray(list) ? (list as LayerEntry[]) : null;
   } catch {
     return null;
