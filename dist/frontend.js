@@ -19039,6 +19039,108 @@ function DiagnosticsPage(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/shared/depth-history.ts
+var HISTORY_KEEP_DEFAULT = 40;
+var HISTORY_CUT_DEFAULT = Object.freeze({ keep: "last", count: HISTORY_KEEP_DEFAULT });
+var HISTORY_KEEP_MOST = 1e4;
+function historyCutWords(cut) {
+  return cut.keep === "last" ? `only the latest ${cut.count} message${cut.count === 1 ? "" : "s"}` : `every message from #${cut.index} on`;
+}
+
+// src/shared/depth-settings.ts
+var DEPTH_ROLES = ["author", "character", "gm", "check", "pov", "narrator", "historian", "realtime", "watch"];
+var DEPTH_ROLE_WORDS = Object.freeze({
+  author: { label: "Author", help: "Runs each scene like a DM, keeps the notebook, polls who catches up, and reads the history in chapters." },
+  character: { label: "Character agents", help: "Each character plays, remembers, catches up, reflects and answers interviews from its own mind." },
+  gm: { label: "GM", help: "Resolves attempts by the rules, links beliefs to the world's truth, and reconciles imported memory." },
+  check: { label: "Render check", help: "Checks each passage against its beat's canon before it streams." },
+  pov: { label: "Point-of-view render", help: "Writes a character's own view of a beat that reached them only in part." },
+  narrator: { label: "Narrator", help: "Renders the decided beats as the reply, passage by passage." },
+  historian: { label: "Historian", help: "Distils canon beats from the history written before depth (the bootstrap only)." },
+  realtime: { label: "Real-time: the character", help: "The character's answer to each line while you talk with them in real time: what they say and do, from their own mind." },
+  watch: { label: "Real-time: the author's watch", help: "The author reading each of your lines beside the character in real time: whether it can simply be answered or needs a full scene, and whether the world does anything." }
+});
+var DEPTH_USES_LABEL = Object.freeze({ strong: "Strong model", fast: "Fast model", own: "Its own" });
+var DEPTH_CADENCE_LABEL = Object.freeze({ turns: "After any turn", scenes: "At a scene's end", chapters: "At a chapter's end" });
+var DEPTH_TREATMENT_DEFS = Object.freeze({
+  live: { label: "Live", plays: "agent" },
+  campfire: { label: "Campfire", plays: "mind" },
+  room: { label: "Room", plays: "author" },
+  written: { label: "Written", plays: "author" }
+});
+var DEPTH_TREATMENTS = Object.freeze(Object.keys(DEPTH_TREATMENT_DEFS));
+var DEPTH_TREATMENT_LABEL = Object.freeze(Object.fromEntries(DEPTH_TREATMENTS.map((t3) => [t3, DEPTH_TREATMENT_DEFS[t3].label])));
+var model = (effort, maxTokens) => Object.freeze({ connectionId: null, model: null, effort, maxTokens });
+var STRONG_DEFAULT = model("high", 16384);
+var FAST_DEFAULT = model("low", 8192);
+var OWN_DEFAULT = model("inherit", 8192);
+var PRESET_USES = Object.freeze({
+  deepest: { author: "strong", character: "strong", gm: "strong", check: "strong", pov: "strong", narrator: "strong", historian: "strong", realtime: "strong", watch: "strong" },
+  balanced: { author: "strong", character: "strong", gm: "strong", check: "fast", pov: "fast", narrator: "strong", historian: "strong", realtime: "strong", watch: "strong" },
+  lean: { author: "strong", character: "strong", gm: "fast", check: "fast", pov: "fast", narrator: "fast", historian: "fast", realtime: "fast", watch: "fast" }
+});
+var PRESET_CADENCE = Object.freeze({ deepest: "turns", balanced: "turns", lean: "scenes" });
+var DEPTH_PRESETS = ["deepest", "balanced", "lean"];
+var DEPTH_PRESET_WORDS = Object.freeze({
+  deepest: { label: "Deepest", summary: "Every role on the Strong model; the author may revise its notebook after any turn." },
+  balanced: { label: "Balanced", summary: "The render check and the points of view on the Fast model; the rest on Strong." },
+  lean: { label: "Lean", summary: "Only the author and the characters on Strong; the author revises at a scene's end at most." }
+});
+function defaultDepthSettings() {
+  return {
+    strong: { ...STRONG_DEFAULT },
+    fast: { ...FAST_DEFAULT },
+    roles: Object.fromEntries(DEPTH_ROLES.map((r3) => [r3, { uses: PRESET_USES.balanced[r3], own: { ...OWN_DEFAULT } }])),
+    cadence: PRESET_CADENCE.balanced,
+    budget: {
+      interval: "week",
+      allowances: { live: 2, campfire: 4, room: 8, written: "none" },
+      ask: true,
+      threshold: DEPTH_THRESHOLD_DEFAULT,
+      level: "balanced",
+      perTurn: 600000,
+      perDay: 30000000
+    },
+    window: { messages: 4, tokens: 8000 },
+    thinking: "whole",
+    absorption: "keep",
+    redrafts: 2,
+    steps: 12,
+    catchUpBatch: 40,
+    realtime: "judged",
+    background: { on: true, atOnce: 2 },
+    bootstrap: { chunkTokens: 30000, atOnce: { minds: 3 }, mostMinds: 0, cap: { unit: "tokens", value: 20000000 }, sample: 5, pauseAfterWrong: 3 }
+  };
+}
+var DEPTH_THRESHOLD_DEFAULT = "More than written when it could change what someone the player knows wants, believes or does, or when the player is likely to meet it soon.";
+var DEPTH_THRESHOLD_LEVELS = ["sparing", "balanced", "generous"];
+var DEPTH_THRESHOLD_LEVEL_WORDS = Object.freeze({
+  sparing: { label: "Sparing", guidance: "Raise a part above written only when it clearly meets the words." },
+  balanced: { label: "Balanced", guidance: "Raise a part above written when it fairly meets the words." },
+  generous: { label: "Generous", guidance: "Raise a part above written whenever it plausibly meets the words." }
+});
+var DEPTH_REASONING = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
+function depthPresetChanges(depth, id) {
+  const changes = [];
+  const patch = { roles: {} };
+  for (const role of DEPTH_ROLES) {
+    const to = PRESET_USES[id][role];
+    const from = depth.roles[role].uses;
+    if (from === to)
+      continue;
+    changes.push({ key: role, label: DEPTH_ROLE_WORDS[role].label, from: DEPTH_USES_LABEL[from], to: DEPTH_USES_LABEL[to] });
+    patch.roles[role] = { uses: to };
+  }
+  if (depth.cadence !== PRESET_CADENCE[id]) {
+    changes.push({ key: "cadence", label: "Notebook revisions", from: DEPTH_CADENCE_LABEL[depth.cadence], to: DEPTH_CADENCE_LABEL[PRESET_CADENCE[id]] });
+    patch.cadence = PRESET_CADENCE[id];
+  }
+  return { changes, patch };
+}
+function currentDepthPreset(depth) {
+  return DEPTH_PRESETS.find((id) => depthPresetChanges(depth, id).changes.length === 0) ?? null;
+}
+
 // src/shared/bootstrap.ts
 var BOOTSTRAP_STAGES = ["survey", "import", "historian", "author", "pov", "minds", "truthlink", "reconcile"];
 
@@ -19197,8 +19299,17 @@ function capUsed(view) {
 function mbText(bytes) {
   return `${Math.round(bytes / 1048576).toLocaleString("en-US")} MB`;
 }
+function capPassed(cap, estimate) {
+  if (cap === "none" || !estimate)
+    return false;
+  if (cap.unit === "tokens")
+    return estimate.total.tokensIn + estimate.total.tokensOut > cap.value;
+  return estimate.total.cost !== null && estimate.total.cost > cap.value;
+}
 function CapControl(props) {
   const cap = props.cap === "none" ? null : props.cap;
+  const priced = props.estimate !== null && props.estimate.total.cost !== null;
+  const units = priced || cap?.unit === "money" ? [{ value: "tokens", label: "Tokens" }, { value: "money", label: "Money" }] : [{ value: "tokens", label: "Tokens" }];
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack lre-depth-cap",
     "data-lre-depth-cap": true,
@@ -19214,7 +19325,7 @@ function CapControl(props) {
           /* @__PURE__ */ u3(Seg, {
             label: "Cap in",
             value: cap.unit,
-            options: [{ value: "tokens", label: "Tokens" }, { value: "money", label: "Money" }],
+            options: units,
             disabled: props.busy,
             onChange: (unit) => props.onCap({ unit, value: unit === cap.unit ? cap.value : unit === "money" ? 20 : 20000000 })
           }, undefined, false, undefined, this),
@@ -19226,9 +19337,19 @@ function CapControl(props) {
             integer: cap.unit === "tokens",
             disabled: props.busy,
             onChange: (value) => props.onCap({ unit: cap.unit, value })
-          }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          !priced ? /* @__PURE__ */ u3("p", {
+            class: "lre-small lre-muted",
+            "data-lre-depth-cap-unpriced": "",
+            children: cap.unit === "money" ? "A money cap can't bind here: a connection the run uses reports no price, so the run stops at its first such call. Cap it in tokens." : "The cap is in tokens: a connection the run uses reports no price, so a money cap couldn't bind."
+          }, undefined, false, undefined, this) : null
         ]
-      }, undefined, true, undefined, this) : null
+      }, undefined, true, undefined, this) : null,
+      capPassed(props.cap, props.estimate) ? /* @__PURE__ */ u3(Banner, {
+        tone: "warn",
+        title: "The estimate passes the cap",
+        children: `The run would pause at its cap (${capText(props.cap)}) before it is done. Raise the cap, give fewer characters a mind, or pick cheaper models in Settings → Depth.`
+      }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
 }
@@ -19375,8 +19496,13 @@ function SpotItemBody(props) {
               class: "lre-small lre-muted",
               children: "It cites"
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("p", {
-              children: item2.cites.length > 0 ? item2.cites.join(", ") : "Nothing"
+            item2.cites.length > 0 ? /* @__PURE__ */ u3("ul", {
+              class: "lre-small",
+              children: item2.cites.map((c3) => /* @__PURE__ */ u3("li", {
+                children: c3.what || c3.beat
+              }, c3.beat, false, undefined, this))
+            }, undefined, false, undefined, this) : /* @__PURE__ */ u3("p", {
+              children: "Nothing"
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this)
@@ -19493,6 +19619,22 @@ function SpotCard(props) {
               ]
             }, item2.id, true, undefined, this);
           }),
+          card.uncertain && card.uncertain.length > 0 ? /* @__PURE__ */ u3("div", {
+            class: "lre-stack",
+            "data-lre-depth-spot-uncertain": card.uncertain.length,
+            children: [
+              /* @__PURE__ */ u3(Badge, {
+                tone: "warn",
+                children: "Flagged as uncertain, naming no beat"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("ul", {
+                class: "lre-small",
+                children: card.uncertain.map((u4, i3) => /* @__PURE__ */ u3("li", {
+                  children: u4
+                }, i3, false, undefined, this))
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : null,
           card.misread && card.misread.length > 0 ? /* @__PURE__ */ u3(Disclosure, {
             summary: `Answers the parser didn't keep whole (${card.misread.length})`,
             children: /* @__PURE__ */ u3("div", {
@@ -19524,7 +19666,7 @@ function SpotCard(props) {
     }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
 }
-var EXPORT_NOTE = "An export of this chat doesn't carry its depth (minds, beats, notebook). Keep the original chat.";
+var EXPORT_NOTE = "An export of this chat carries its depth (minds, beats, notebook) as it stood at the end of the last turn, while that fits in 1 MB compressed. Past that, an imported copy starts without it: keep the original chat.";
 function BootstrapBody(props) {
   const { view, c: c3 } = props;
   const status = STATUS_LABEL[view.status];
@@ -19581,8 +19723,9 @@ function BootstrapBody(props) {
         children: /* @__PURE__ */ u3("div", {
           class: "lre-stack",
           children: [
-            startable || resumable ? /* @__PURE__ */ u3(CapControl, {
+            startable || resumable || view.status === "done" ? /* @__PURE__ */ u3(CapControl, {
               cap: c3.cap,
+              estimate: view.remaining,
               busy: c3.busy,
               onCap: c3.onCap
             }, undefined, false, undefined, this) : /* @__PURE__ */ u3("p", {
@@ -19611,6 +19754,12 @@ function BootstrapBody(props) {
                   busy: c3.busy,
                   onClick: c3.onPause,
                   children: "Pause"
+                }, undefined, false, undefined, this) : null,
+                view.status === "done" ? /* @__PURE__ */ u3(Button, {
+                  icon: "refresh",
+                  busy: c3.busy,
+                  onClick: c3.onResume,
+                  children: "Run again"
                 }, undefined, false, undefined, this) : null,
                 resumable ? /* @__PURE__ */ u3(Button, {
                   variant: "primary",
@@ -19676,6 +19825,13 @@ function BootstrapBody(props) {
             }, undefined, false, undefined, this) : ch.spot === "reviewed" ? /* @__PURE__ */ u3(Badge, {
               tone: "pos",
               children: "Reviewed"
+            }, undefined, false, undefined, this) : undefined,
+            actions: ch.ended && view.status !== "running" && view.status !== "pausing" ? /* @__PURE__ */ u3(Button, {
+              size: "sm",
+              variant: "secondary",
+              busy: c3.busy,
+              onClick: () => c3.onRedo(ch.n),
+              children: `Redo from chapter ${ch.n + 1}`
             }, undefined, false, undefined, this) : undefined
           }, ch.n, false, undefined, this))
         }, undefined, false, undefined, this)
@@ -19838,6 +19994,82 @@ function BootstrapPanel(props) {
 
 // src/frontend/depth/chat-depth.tsx
 var DEPTH_SECTION = "core.depth";
+function HistorySection(props) {
+  const { cut, c: c3 } = props;
+  return /* @__PURE__ */ u3(Section, {
+    title: "History",
+    children: [
+      /* @__PURE__ */ u3("p", {
+        class: "lre-small lre-muted",
+        "data-lre-depth-history": "",
+        children: `A turn's request carries ${historyCutWords(cut)} of this chat; every message before that stays out of it. The author and the GM search and quote the whole chat whenever a turn needs something older.`
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Seg, {
+        label: "Hide messages before",
+        value: cut.keep,
+        disabled: c3.busy,
+        options: [
+          { value: "last", label: "Keep the latest" },
+          { value: "from", label: "From a message on" }
+        ],
+        onChange: (keep) => c3.onHistory(keep === "last" ? { keep, count: cut.keep === "last" ? cut.count : HISTORY_KEEP_DEFAULT } : { keep, index: cut.keep === "from" ? cut.index : 0 })
+      }, undefined, false, undefined, this),
+      cut.keep === "last" ? /* @__PURE__ */ u3(NumberStepper, {
+        label: "Messages kept",
+        value: cut.count,
+        min: 1,
+        max: HISTORY_KEEP_MOST,
+        integer: true,
+        disabled: c3.busy,
+        onChange: (count) => c3.onHistory({ keep: "last", count })
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(NumberStepper, {
+        label: "Hide messages before #",
+        value: cut.index,
+        min: 0,
+        integer: true,
+        disabled: c3.busy,
+        onChange: (index) => c3.onHistory({ keep: "from", index })
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function AllowancesSection(props) {
+  const { a: a3, c: c3 } = props;
+  const set = c3.onAllowances;
+  if (!set)
+    return null;
+  const own = Object.keys(a3.own).length > 0;
+  const words2 = (l3) => l3 === "none" ? "no limit" : String(l3);
+  return /* @__PURE__ */ u3(Section, {
+    title: "Allowances",
+    children: [
+      /* @__PURE__ */ u3("p", {
+        class: "lre-small lre-muted",
+        "data-lre-depth-allowances": "",
+        children: `How many parts of each treatment the world beyond view may spend per story ${a3.interval} in this chat. A treatment this chat doesn't set keeps yours (Settings → Depth → Budget); the ceilings stay yours.`
+      }, undefined, false, undefined, this),
+      DEPTH_TREATMENTS.map((t3) => {
+        const mine = a3.own[t3];
+        const shown = mine ?? a3.yours[t3];
+        return /* @__PURE__ */ u3(NumberStepper, {
+          label: `${DEPTH_TREATMENT_LABEL[t3]} (${mine === undefined ? "yours" : `this chat; yours: ${words2(a3.yours[t3])}`})`,
+          value: shown === "none" ? 0 : shown,
+          min: 0,
+          max: 1000,
+          integer: true,
+          disabled: c3.busy,
+          onChange: (n3) => set({ ...a3.own, [t3]: n3 })
+        }, t3, false, undefined, this);
+      }),
+      own ? /* @__PURE__ */ u3(Button, {
+        icon: "close",
+        busy: c3.busy,
+        onClick: () => set({}),
+        children: "Use your allowances"
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
 function DepthChatBody(props) {
   const { view, c: c3 } = props;
   const estimate = props.estimate ?? view.remaining;
@@ -19878,6 +20110,14 @@ function DepthChatBody(props) {
             children: "Open the bootstrap"
           }, undefined, false, undefined, this)
         }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3(HistorySection, {
+          cut: view.history ?? HISTORY_CUT_DEFAULT,
+          c: c3
+        }, undefined, false, undefined, this),
+        view.allowances ? /* @__PURE__ */ u3(AllowancesSection, {
+          a: view.allowances,
+          c: c3
+        }, undefined, false, undefined, this) : null,
         /* @__PURE__ */ u3(Section, {
           title: "Turn depth off",
           children: [
@@ -19935,6 +20175,7 @@ function DepthChatBody(props) {
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(CapControl, {
               cap: c3.cap,
+              estimate,
               busy: c3.busy,
               onCap: c3.onCap
             }, undefined, false, undefined, this),
@@ -20023,7 +20264,9 @@ function DepthThisChat(props) {
         await run.ask({ op: "opt", on: false });
     }),
     onOpenBootstrap: () => app.ui.update((ui) => gmOpen(ui, DEPTH_SECTION, "bootstrap")),
-    onOpenLoopback: () => app.ui.update((ui) => ({ ...ui, mode: "settings", settings: { page: "loopback" } }))
+    onOpenLoopback: () => app.ui.update((ui) => ({ ...ui, mode: "settings", settings: { page: "loopback" } })),
+    onHistory: (cut) => go2(() => run.ask({ op: "history", cut })),
+    onAllowances: (allowances) => go2(() => run.ask({ op: "allowances", allowances }))
   };
   return /* @__PURE__ */ u3(DepthChatBody, {
     view,
@@ -20193,87 +20436,6 @@ function ArchiveView(props) {
   }, undefined, false, undefined, this);
 }
 
-// src/shared/depth-settings.ts
-var DEPTH_ROLES = ["author", "character", "gm", "check", "pov", "narrator", "historian", "realtime", "watch"];
-var DEPTH_ROLE_WORDS = Object.freeze({
-  author: { label: "Author", help: "Runs each scene like a DM, keeps the notebook, polls who catches up, and reads the history in chapters." },
-  character: { label: "Character agents", help: "Each character plays, remembers, catches up, reflects and answers interviews from its own mind." },
-  gm: { label: "GM", help: "Resolves attempts by the rules, links beliefs to the world's truth, and reconciles imported memory." },
-  check: { label: "Render check", help: "Checks each passage against its beat's canon before it streams." },
-  pov: { label: "Point-of-view render", help: "Writes a character's own view of a beat that reached them only in part." },
-  narrator: { label: "Narrator", help: "Renders the decided beats as the reply, passage by passage." },
-  historian: { label: "Historian", help: "Distils canon beats from the history written before depth (the bootstrap only)." },
-  realtime: { label: "Real-time: the character", help: "The character's answer to each line while you talk with them in real time: what they say and do, from their own mind." },
-  watch: { label: "Real-time: the author's watch", help: "The author reading each of your lines beside the character in real time: whether it can simply be answered or needs a full scene, and whether the world does anything." }
-});
-var DEPTH_USES_LABEL = Object.freeze({ strong: "Strong model", fast: "Fast model", own: "Its own" });
-var DEPTH_CADENCE_LABEL = Object.freeze({ turns: "After any turn", scenes: "At a scene's end", chapters: "At a chapter's end" });
-var DEPTH_TREATMENTS = ["live", "campfire", "room", "written"];
-var DEPTH_TREATMENT_LABEL = Object.freeze({ live: "Live", campfire: "Campfire", room: "Room", written: "Written" });
-var model = (effort, maxTokens) => Object.freeze({ connectionId: null, model: null, effort, maxTokens });
-var STRONG_DEFAULT = model("high", 16384);
-var FAST_DEFAULT = model("low", 8192);
-var OWN_DEFAULT = model("inherit", 8192);
-var PRESET_USES = Object.freeze({
-  deepest: { author: "strong", character: "strong", gm: "strong", check: "strong", pov: "strong", narrator: "strong", historian: "strong", realtime: "strong", watch: "strong" },
-  balanced: { author: "strong", character: "strong", gm: "strong", check: "fast", pov: "fast", narrator: "strong", historian: "strong", realtime: "strong", watch: "strong" },
-  lean: { author: "strong", character: "strong", gm: "fast", check: "fast", pov: "fast", narrator: "fast", historian: "fast", realtime: "fast", watch: "fast" }
-});
-var PRESET_CADENCE = Object.freeze({ deepest: "turns", balanced: "turns", lean: "scenes" });
-var DEPTH_PRESETS = ["deepest", "balanced", "lean"];
-var DEPTH_PRESET_WORDS = Object.freeze({
-  deepest: { label: "Deepest", summary: "Every role on the Strong model; the author may revise its notebook after any turn." },
-  balanced: { label: "Balanced", summary: "The render check and the points of view on the Fast model; the rest on Strong." },
-  lean: { label: "Lean", summary: "Only the author and the characters on Strong; the author revises at a scene's end at most." }
-});
-function defaultDepthSettings() {
-  return {
-    strong: { ...STRONG_DEFAULT },
-    fast: { ...FAST_DEFAULT },
-    roles: Object.fromEntries(DEPTH_ROLES.map((r3) => [r3, { uses: PRESET_USES.balanced[r3], own: { ...OWN_DEFAULT } }])),
-    cadence: PRESET_CADENCE.balanced,
-    budget: {
-      interval: "week",
-      allowances: { live: 2, campfire: 4, room: 8, written: "none" },
-      ask: true,
-      threshold: DEPTH_THRESHOLD_DEFAULT,
-      perTurn: 600000,
-      perDay: 30000000
-    },
-    window: { messages: 4, tokens: 8000 },
-    thinking: "whole",
-    absorption: "keep",
-    redrafts: 2,
-    steps: 12,
-    catchUpBatch: 40,
-    realtime: "judged",
-    background: { on: true, atOnce: 2 },
-    bootstrap: { chunkTokens: 30000, atOnce: { historian: 1, minds: 3, author: 1 }, cap: { unit: "tokens", value: 20000000 }, sample: 5, pauseAfterWrong: 3 }
-  };
-}
-var DEPTH_THRESHOLD_DEFAULT = "More than written when it could change what someone the player knows wants, believes or does, or when the player is likely to meet it soon.";
-var DEPTH_REASONING = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
-function depthPresetChanges(depth, id) {
-  const changes = [];
-  const patch = { roles: {} };
-  for (const role of DEPTH_ROLES) {
-    const to = PRESET_USES[id][role];
-    const from = depth.roles[role].uses;
-    if (from === to)
-      continue;
-    changes.push({ key: role, label: DEPTH_ROLE_WORDS[role].label, from: DEPTH_USES_LABEL[from], to: DEPTH_USES_LABEL[to] });
-    patch.roles[role] = { uses: to };
-  }
-  if (depth.cadence !== PRESET_CADENCE[id]) {
-    changes.push({ key: "cadence", label: "Notebook revisions", from: DEPTH_CADENCE_LABEL[depth.cadence], to: DEPTH_CADENCE_LABEL[PRESET_CADENCE[id]] });
-    patch.cadence = PRESET_CADENCE[id];
-  }
-  return { changes, patch };
-}
-function currentDepthPreset(depth) {
-  return DEPTH_PRESETS.find((id) => depthPresetChanges(depth, id).changes.length === 0) ?? null;
-}
-
 // src/frontend/depth/drafts.tsx
 var STATE_TONE = { open: "accent", settled: "pos", dropped: "neutral" };
 function StateBadges(props) {
@@ -20384,6 +20546,17 @@ function DraftPage(props) {
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this) : null,
+        d3.press ? /* @__PURE__ */ u3("div", {
+          "data-lre-depth-draft-press": true,
+          "data-state": d3.press.state,
+          children: /* @__PURE__ */ u3(GmCard, {
+            title: `${d3.press.op === "settle" ? "Settle now" : "Re-draft"}: ${d3.press.state === "running" ? "under way" : d3.press.state === "done" ? "what became of it" : "it failed"}`,
+            children: d3.press.lines.map((line, i3) => /* @__PURE__ */ u3("p", {
+              class: "lre-depth-reasoning",
+              children: line
+            }, i3, false, undefined, this))
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this) : null,
         d3.settle ? /* @__PURE__ */ u3("div", {
           "data-lre-depth-draft-settle": true,
           children: /* @__PURE__ */ u3(GmCard, {
@@ -21334,7 +21507,22 @@ function MeterTab(props) {
                   subtitle: costText(r3.cost)
                 }, r3.role, false, undefined, this))
               }, undefined, false, undefined, this)
-            }, undefined, false, undefined, this) : null
+            }, undefined, false, undefined, this) : null,
+            m2.grades.length > 0 ? /* @__PURE__ */ u3(M, {
+              children: [
+                /* @__PURE__ */ u3("h4", {
+                  class: "lre-depth-subhead",
+                  children: "The author's grades"
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3(ActionRows, {
+                  label: `${m2.label}, grades`,
+                  children: m2.grades.map((g2, i3) => /* @__PURE__ */ u3(ActionRow, {
+                    title: `${g2.subject}: ${g2.depth}`,
+                    subtitle: g2.why.trim() === "" ? g2.episode : `${g2.episode}. ${g2.why}`
+                  }, `${g2.episode}:${g2.subject}:${i3}`, false, undefined, this))
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this) : null
           ]
         }, undefined, true, undefined, this)
       }, m2.label, false, undefined, this))
@@ -21431,11 +21619,11 @@ function BudgetTab(props) {
           children: [
             /* @__PURE__ */ u3("p", {
               class: "lre-depth-reasoning",
-              children: view.threshold.trim() === "" ? "No words given." : view.threshold
+              children: `${DEPTH_THRESHOLD_LEVEL_WORDS[view.level].label}: ${view.threshold.trim() === "" ? "no words given." : view.threshold}`
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("p", {
               class: "lre-small lre-muted lre-depth-note",
-              children: "Your words, which the author grades each candidate against; every grade shows in the log with its reason. Settings → Depth → Budget sets these."
+              children: "Your level and words, which the author grades each candidate against; every grade shows in the log and on the Meter with its reason. Settings → Depth → Budget sets these."
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this)
@@ -21783,6 +21971,10 @@ function TurnBody(props) {
                   fields: c3.misread.fields,
                   count: c3.misread.count,
                   raw: c3.misread.raw
+                }, undefined, false, undefined, this) : null,
+                c3.reasoning ? /* @__PURE__ */ u3(Disclosure, {
+                  summary: "Its reasoning",
+                  children: c3.reasoning
                 }, undefined, false, undefined, this) : null
               ]
             }, i3, true, undefined, this))
@@ -21857,6 +22049,7 @@ function TurnView(props) {
   const [view, setView] = d2(undefined);
   const [message, setMessage] = d2(undefined);
   const [busy, setBusy] = d2(false);
+  const [dryRun, setDryRun] = d2(null);
   A(() => {
     let live = true;
     setBusy(true);
@@ -21864,6 +22057,7 @@ function TurnView(props) {
       if (!live)
         return;
       setView(result?.scene ?? null);
+      setDryRun(result?.dryRun ?? null);
       setBusy(false);
     });
     return () => {
@@ -21880,15 +22074,49 @@ function TurnView(props) {
       icon: "layers",
       children: "The scene couldn't be read."
     }, undefined, false, undefined, this);
-  return /* @__PURE__ */ u3(TurnBody, {
-    view,
-    busy,
-    onPick: setMessage,
-    onJump: (messageId) => {
-      if (!app.host.revealMessage(messageId))
-        app.toast("That message isn't on screen in this chat.", "info");
-    }
-  }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(TurnBody, {
+        view,
+        busy,
+        onPick: setMessage,
+        onJump: (messageId) => {
+          if (!app.host.revealMessage(messageId))
+            app.toast("That message isn't on screen in this chat.", "info");
+        }
+      }, undefined, false, undefined, this),
+      dryRun ? /* @__PURE__ */ u3(DryRunPanel, {
+        dryRun
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function DryRunPanel(props) {
+  const { dryRun } = props;
+  return /* @__PURE__ */ u3("details", {
+    class: "lre-depth-dry-run",
+    children: [
+      /* @__PURE__ */ u3("summary", {
+        children: `Dry run: the narrator prompt LumiRPEngine would send (${dryRun.messages.length} messages, ${new Date(dryRun.at).toLocaleTimeString()})`
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("p", {
+        class: "lre-small lre-muted",
+        children: "Without the sections a turn's engine run writes: a dry run runs no engine."
+      }, undefined, false, undefined, this),
+      dryRun.messages.map((m2, i3) => /* @__PURE__ */ u3("div", {
+        class: "lre-small",
+        children: [
+          /* @__PURE__ */ u3("strong", {
+            children: m2.role
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("pre", {
+            class: "lre-section-text",
+            children: m2.content
+          }, undefined, false, undefined, this)
+        ]
+      }, i3, true, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
 }
 
 // src/frontend/depth/section.tsx
@@ -21897,6 +22125,36 @@ var DEPTH_TAB_LABEL = { notebook: "Notebook", drafts: "Drafts", treatments: "Tre
 var DRAFT_FOCUS = "drafts:";
 function draftFocus(draft) {
   return `${DRAFT_FOCUS}${draft}`;
+}
+function BackgroundPause() {
+  const app = useApp();
+  const [on, setOn] = d2(null);
+  const [busy, setBusy] = d2(false);
+  A(() => {
+    let live = true;
+    app.request({ type: "lre.settings.get" }).then((result) => {
+      if (live && result)
+        setOn(result.settings.depth.background.on);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (on === null)
+    return null;
+  return /* @__PURE__ */ u3(HostSwitch, {
+    label: "Work between turns",
+    checked: on,
+    disabled: busy,
+    onChange: (next) => {
+      setBusy(true);
+      app.request({ type: "lre.settings.set", patch: { depth: { background: { on: next } } } }).then((result) => {
+        if (result)
+          setOn(result.settings.depth.background.on);
+        setBusy(false);
+      });
+    }
+  }, undefined, false, undefined, this);
 }
 function DepthSection(props) {
   const [tab, setTab] = d2("notebook");
@@ -21913,6 +22171,7 @@ function DepthSection(props) {
     class: "lre-stack lre-depth",
     "data-lre-depth-section": tab,
     children: [
+      /* @__PURE__ */ u3(BackgroundPause, {}, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Tabs, {
         label: "Depth",
         panelId,
@@ -36483,7 +36742,12 @@ var WORLD_VARS = [
   { name: "world", text: "The world's name." },
   { name: "pov", text: "The player character's name." }
 ];
-var NOTEBOOK_RULES = "Your notebook is your own, in your own words, about what the story means and where it points. Start from this outline and reshape it as the story asks: questions open and answered, threads with their stakes and how ripe they are, setups awaiting payoff, each character's arc as you intend it, the tone and genre contract, the futures you weigh, and what the player wants across the story. Keep each in its own file under notebook/ (notebook/player.md for the player, notebook/arcs/<id>.md for a character's arc). Arcs live here and never in a character's mind; characters never read this notebook. A file the player edited is pinned: say what you make of it in a comment if you like, but never rewrite it. Infer what the player wants from what he wrote, the replies he kept and his out-of-character lines, and defer to him wherever he was explicit.";
+var ACCOUNT_ASK = {
+  says: [],
+  outdated: ['"reasoning":'],
+  message: 'it still asks for "reasoning", which the shipped text no longer asks for: a provider may refuse an answer asked to write out its thinking. Reset it, or ask for "why" in your own words (the shipped text asks for one or two plain sentences explaining the choice)'
+};
+var NOTEBOOK_RULES = `Your notebook is your own, in your own words, about what the story means and where it points. Start from this outline and reshape it as the story asks: questions open and answered, threads with their stakes and how ripe they are, setups awaiting payoff, each character's arc as you intend it, the tone and genre contract, the futures you weigh, and what the player wants across the story. Keep each in its own file under notebook/ (notebook/player.md for the player, notebook/arcs/<id>.md for a character's arc). Where a note rests on beats, cite each by its id in brackets as the beats are listed ("[b…]"), and name a beat's id the same way in what you are unsure of, so the player can check them. Arcs live here and never in a character's mind; characters never read this notebook. A file the player edited is pinned: say what you make of it in a comment if you like, but never rewrite it. Infer what the player wants from what he wrote, the replies he kept and his out-of-character lines, and defer to him wherever he was explicit.`;
 var DEPTH_PROMPTS = [
   {
     id: DEPTH_TEXT.authorRead,
@@ -36492,14 +36756,15 @@ var DEPTH_PROMPTS = [
     label: "Reading the history",
     note: "The author reads a chat's history in order, a stretch at a time, with the beats the historian distilled from it: a light revision of its notebook, whether the stretch ends a chapter, and who gets a mind.",
     vars: WORLD_VARS,
-    contract: '{"files": [{"path", "text"}], "comments": [{"path", "text"}], "chapter": {"ends": boolean, "title"?: string}, "cast": [{"who", "mind": boolean, "why", "core"?: string}], "uncertain": [string], "reasoning": string}',
+    contract: '{"files": [{"path", "text"}], "comments": [{"path", "text"}], "chapter": {"ends": boolean, "title"?: string}, "cast": [{"who", "mind": boolean, "why", "core"?: string}], "uncertain": [string], "why": string}',
     text: `You are the author of the roleplay world {{world}}: the story's DM, who understands what it means and where it points. {{pov}} is the player character. You are reading the story's history in order, one stretch at a time, beside the beats the historian distilled from it, to build your notebook before you run the story yourself.
 
 ${NOTEBOOK_RULES}
 
 After this stretch: revise your notebook lightly where the stretch moved it. Decide whether the stretch ends a chapter of the story, and if it does, give the chapter a title. Decide who among the people in it gets a mind of their own: a character who recurs or matters does; a walk-on may not. For someone who gets a mind and has no character card, write who they are at root as the story shows them (traits, values, history, voice), for the player to review; never for the player character, who is the player's own.
 
-Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the file's whole new text}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "chapter": {"ends": true or false, "title": its title when it ends}, "cast": [{"who": their id, "mind": true or false, "why": your reason, "core": who they are at root, only for someone without a card}], "uncertain": [what you are unsure of, for the player's spot checks], "reasoning": a short account of what moved and why}. Write only the files that changed.`
+Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the file's whole new text}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "chapter": {"ends": true or false, "title": its title when it ends}, "cast": [{"who": their id, "mind": true or false, "why": your reason, "core": who they are at root, only for someone without a card}], "uncertain": [what you are unsure of, for the player's spot checks], "why": one or two plain sentences on what moved and why}. Write only the files that changed.`,
+    asks: [ACCOUNT_ASK]
   },
   {
     id: DEPTH_TEXT.authorChapter,
@@ -36508,14 +36773,15 @@ Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the f
     label: "A chapter's re-read",
     note: "At a chapter's end the author re-reads the chapter whole and revises its notebook deeply, checks each character's arc against who they have become (drift), and ends with predictions of what the player and the key characters will do next, which the poll scores once the story goes on.",
     vars: WORLD_VARS,
-    contract: '{"files": [{"path", "text"}], "comments": [{"path", "text"}], "drift": [{"who", "drift", "note"}], "predictions": [{"text", "about"}], "uncertain": [string], "reasoning": string}',
+    contract: '{"files": [{"path", "text"}], "comments": [{"path", "text"}], "drift": [{"who", "drift", "note"}], "predictions": [{"text", "about"}], "uncertain": [string], "why": string}',
     text: `You are the author of the roleplay world {{world}}: the story's DM, who understands what it means and where it points. {{pov}} is the player character. A chapter of the story has ended. Re-read it whole, its beats in order, and revise your notebook deeply.
 
 ${NOTEBOOK_RULES}
 
 Say what the chapter meant, which questions it answered and which it opened, which threads ripened, which setups paid off and which wait. Check each character's arc against who they have become in it: "none", "some" or "strong" drift, with what you make of it. Drift may be the story finding its way; where it isn't, say how you will steer, only through the world, since a character's mind is its own. End with your predictions: what the player and the key characters will do next, each a sentence that can later be told true or false.
 
-Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the file's whole new text}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "drift": [{"who": an id, "drift": "none", "some" or "strong", "note": what you make of it}], "predictions": [{"text": the prediction, "about": [ids]}], "uncertain": [what you are unsure of, for the player's spot checks], "reasoning": a short account of what moved and why}. Write only the files that changed.`
+Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the file's whole new text}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "drift": [{"who": an id, "drift": "none", "some" or "strong", "note": what you make of it}], "predictions": [{"text": the prediction, "about": [ids]}], "uncertain": [what you are unsure of, for the player's spot checks], "why": one or two plain sentences on what moved and why}. Write only the files that changed.`,
+    asks: [ACCOUNT_ASK]
   },
   {
     id: DEPTH_TEXT.truthLink,
@@ -36632,13 +36898,18 @@ var STAGING_SHAPE = '{"who": an id, "where": their position and facing, as anyon
 var SCENE_STAGING_SHAPE = `${STAGING_SHAPE.slice(0, -1)}, "place": the id of the world's place where they are, as listed: the scene's own place for everyone there in person, "remote": true instead, with no place, for someone elsewhere whom the scene reaches only from afar (the far end of a phone call, a radio, a screen)}`;
 var STAGING_PLACE_ASK = {
   says: ['"place"', '"remote"'],
-  message: `it doesn't ask where each person staged is ("place", by the id of one of the world's places, or "remote" for someone the scene reaches only from afar): written before the staging said so, its answer leaves everyone but the player character where they were, and the author is asked once more each time. Reset it, or ask for both in your own words`
+  message: `it doesn't ask where each person staged is ("place", by the id of one of the world's places, or "remote" for someone the scene reaches only from afar): written before the staging said so, its answer leaves everyone but the player character where they were, and the author is asked once more each time. Reset it, or ask for both in your own words, naming the keys "place" and "remote" as they are`
 };
 var OLD_WHY_FIELD = '"reasoning": your thinking';
 var WHY_ASK = {
   says: [],
   outdated: [OLD_WHY_FIELD],
-  message: `it still asks for ${OLD_WHY_FIELD}, which the shipped text no longer asks for: a provider may refuse an answer asked to write out its thinking. Reset it, or take that field out in your own words (the shipped text asks for "why": one or two plain sentences explaining the choice)`
+  message: `it still asks for ${OLD_WHY_FIELD}, which the shipped text no longer asks for: a provider may refuse an answer asked to write out its thinking. Reset it, or ask for "why" in its place in your own words (the shipped text asks for one or two plain sentences explaining the choice)`
+};
+var WHY_OWN_ASK = {
+  says: [],
+  outdated: [OLD_WHY_FIELD],
+  message: `it still asks for ${OLD_WHY_FIELD}, which the shipped text no longer asks for: a provider may refuse an answer asked to write out its thinking, and the answer's own "why" already gives its account. Reset it, or take that field out`
 };
 var EDIT_CONTRACT = '{"cosmetic": boolean, "amend": [{"replaces": [string], "ref", "by", "actors", "act", "what", "deed"?, "surface", "quotes"?, "addressed"?, "about"?, "exposure"}], "strike": [string], "why": string}';
 var EDIT_RULES = `- Cosmetic (a typo, a turn of phrase, a detail no one could later notice or act on): it amends nothing.
@@ -36660,7 +36931,7 @@ ${DM_RULES}
 The player has just written his turn, and the GM has read it into his own beats: what he did and said, and how the rules resolved what he tried. Infer what he wants from this moment, from his words and your notebook's player section, and set the scene that answers it:
 - Does this carry on the scene that was playing, or open a new one? Where does it play? Does it end with this turn?
 - Stage it: everyone present, where they are and what they are doing, as anyone there could see it (the points of view of whoever a beat reaches in part are written from it), {{pov}} among them, and the id of the world's place each is at: whoever the world has elsewhere is moved to the place you give them. Give everyone you stage a place, or "remote": no place is guessed for anyone given neither, but {{pov}}, whom the scene plays from: given no place, he is at the scene's place. Someone the scene reaches only from afar (the far end of a phone call, a radio, a screen) is "remote", never at the scene's place: they stay where they are.
-- Decide each character's effort for this scene, and say why: "agent" plays as its own agent, beat by beat, as a player would (only someone with a mind; one call each time it acts); "author" you play them yourself, from their mind (several cost you one call); "world" you handle them as part of the world, like a walk-on. Spend effort where this scene needs it.
+- Decide each character's effort for this scene, and say why: "agent" plays as its own agent, beat by beat, as a player would (one call each time it acts; someone with no mind yet gets one, formed from their card or what the world knows of them, and keeps it from then on: do it for someone who will matter beyond this scene, never a passer-by); "author" you play them yourself, from their mind (several cost you one call); "world" you handle them as part of the world, like a walk-on. Spend effort where this scene needs it.
 - Write who perceived each of the player's beats, and how fully. {{pov}} perceives his own acts.
 - When the scene opens or someone arrives, write an opening beat of what was there to sense. Then any beat the world does now, and the acts of those you play or handle, in order.
 - Name who acts next among those playing as their own agents (several act at once when they would), or end the turn when the moment has come for the player to answer.
@@ -36684,6 +36955,8 @@ Answer with one JSON object: {"scene": {"continues": true or false, "place": the
 ${DM_RULES}
 
 Here is the scene so far and the beat just decided. Who perceived it, and how fully? Did it move anyone (their staging)? Does the world do anything now? Do those you play or handle act? Who acts next among those playing as their own agents, or do several act at once? Has the moment come for the player to answer? Keep the scene moving at the pace the story wants: end the turn when {{pov}} has something to answer, see or decide.
+
+A beat of the world itself, which no one acts in (rain starts, a door slams in the wind), takes no "deed". Write "exposure" entries only for the beats listed as just decided, waiting for who perceived them; a beat you write yourself carries its own "exposure".
 
 Answer with one JSON object: {"exposure": [{"beat": the ref of a beat just decided, "who", "channel", "reach"}], "staging": [${SCENE_STAGING_SHAPE}, for each person this moved], "beats": [${BEAT_SHAPE}], "next": [ids of characters playing as their own agents who act now], "end": your reason the player answers now, or null, "sceneEnds": true when the scene itself ends with this turn, "why": one or two plain sentences explaining the choice}.`,
     asks: [STAGING_PLACE_ASK, WHY_ASK]
@@ -36712,7 +36985,7 @@ Answer with one JSON object: {"beats": [${BEAT_SHAPE}], "why": one or two plain 
     label: "The poll",
     note: "After each turn the author reads what changed and decides who catches up now and who can wait until they matter, who reflects, whether it reflects itself, how its open predictions scored, and what happens off screen: the episodes it opens with each part's treatment, and which drafts settle, drop or are rebased; it logs what it considered and didn't raise.",
     vars: VARS,
-    contract: '{"catchup": [{"who", "why"}], "reflect": [{"who", "why"}], "author": {"depth", "why"} | null, "scores": [{"prediction", "outcome", "note"}], "episodes": [{"why", "in", "minutes", "places", "people", "parts": [{"who"?, "event"?, "treatment", "rationale", "major"?}]}], "settle": [{"draft", "why"}], "drop": [{"draft", "why"}], "rebase": [{"draft", "why"}], "considered": [{"what", "raised", "why"}], "why": string}',
+    contract: '{"catchup": [{"who", "why"}], "reflect": [{"who", "why"}], "author": {"depth", "why"} | null, "scores": [{"prediction", "outcome", "note"}], "episodes": [{"why", "in", "minutes", "places", "people", "parts": [{"who"?, "event"?, "treatment", "rationale", "major"?}]}], "settle": [{"draft", "why"}], "drop": [{"draft", "why"}], "rebase": [{"draft", "why"}], "wake": {"minutes", "why"} | null, "considered": [{"what", "raised", "why"}], "why": string}',
     text: `${AUTHOR}
 
 A turn has just been played. Here is what changed: its beats, what characters wrote that will stay with them, the story time that passed, plans falling due, what reached each character that they haven't lived yet, and the player's own signals; and off screen, your open drafts and what has happened since each one's story time. You are the story's nervous system: you decide who thinks, and when, and how the world lives beyond {{pov}}'s view.
@@ -36723,8 +36996,9 @@ A turn has just been played. Here is what changed: its beats, what characters wr
 - What should happen off screen, and at what depth? Open an episode where the world must move beyond {{pov}}'s view because it will matter (a plan falling due, a consequence, someone's life going on): when it happens, where, who is in it, why it matters, and each person's and each event's treatment, graded against the player's own words on what deserves more than written and kept within what this interval's allowances leave: "live" (they play as their own agents, the costliest), "campfire" (you play them from their minds), "room" (you and the GM decide what happens to them), "written" (a few plain beats). Where nothing is at stake, open nothing. Where you judge a moment major, mark its part "major": if its treatment's allowance is spent, the player is asked whether to spend one more instead of it sliding down to a cheaper treatment. Mark only what truly is.
 - Your open drafts: settle one now when the story will soon reach what it holds (someone or something in it is about to enter a scene past its time), drop one the story has overtaken, and leave the rest until they matter. A draft a swipe took off the chain is a rebase candidate: rebase it (it stands where the story now is, and its pins are read when it settles), or drop it.
 - Log what you considered and whether you raised it, with your reason, so the player can read your judgment. Raise nothing out of habit.
+- If something should be looked at again once enough story time has passed (a plan maturing, a wait running out), ask to be woken after that many story minutes; otherwise null.
 
-Answer with one JSON object: {"catchup": [{"who": an id, "why": your reason}], "reflect": [{"who": an id, "why": your reason}], "author": {"depth": "scene" or "chapter", "why": your reason} or null, "scores": [{"prediction": its id, "outcome": "hit", "miss" or "partly", "note": what happened}], "episodes": [{"why": why it matters, "in": story minutes from now until it starts (negative when it already began), "minutes": how long it runs, "places": [place ids], "people": [ids], "parts": [{"who": an id, or "event": the event in words, "treatment": "live", "campfire", "room" or "written", "rationale": your grade against the player's words, and why, "major": true when you judge the moment major}]}], "settle": [{"draft": its id, "why": your reason}], "drop": [{"draft": its id, "why": your reason}], "rebase": [{"draft": its id, "why": your reason}], "considered": [{"what": what you considered, "raised": true or false, "why": your reason}], "why": one or two plain sentences explaining the choice}.`,
+Answer with one JSON object: {"catchup": [{"who": an id, "why": your reason}], "reflect": [{"who": an id, "why": your reason}], "author": {"depth": "scene" or "chapter", "why": your reason} or null, "scores": [{"prediction": its id, "outcome": "hit", "miss" or "partly", "note": what happened}], "episodes": [{"why": why it matters, "in": story minutes from now until it starts (negative when it already began), "minutes": how long it runs, "places": [place ids], "people": [ids], "parts": [{"who": an id, or "event": the event in words, "treatment": "live", "campfire", "room" or "written", "rationale": your grade against the player's words, and why, "major": true when you judge the moment major}]}], "settle": [{"draft": its id, "why": your reason}], "drop": [{"draft": its id, "why": your reason}], "rebase": [{"draft": its id, "why": your reason}], "wake": {"minutes": story minutes from now, "why": your reason} or null, "considered": [{"what": what you considered, "raised": true or false, "why": your reason}], "why": one or two plain sentences explaining the choice}.`,
     asks: [WHY_ASK]
   },
   {
@@ -36758,7 +37032,7 @@ The player edited a reply. The reply renders beats that were canon; his edit is 
 ${EDIT_RULES}
 
 ${EDIT_ANSWER}`,
-    asks: [WHY_ASK]
+    asks: [WHY_OWN_ASK]
   },
   {
     id: SCENE_TEXT.editOwn,
@@ -36774,7 +37048,7 @@ The player edited his own message, from which the beats of what {{pov}} did and 
 ${EDIT_RULES}
 
 ${EDIT_ANSWER}`,
-    asks: [WHY_ASK]
+    asks: [WHY_OWN_ASK]
   }
 ];
 
@@ -36785,7 +37059,7 @@ var OFFSCREEN_TEXT = {
   settle: "depth.author.settle",
   walkOn: "depth.author.walk_on"
 };
-var SETTLE_BEATS = `"beats": [{"ref": a beat's ref, "keep": true or false, "what": its adjusted truth, "surface": what there was to sense, adjusted, "quotes": its words, adjusted}], "effects": [{"index": a world change's number, "keep": true or false}], "attempts": [{"who": an id, "attempt": what they try now}]`;
+var SETTLE_BEATS = `"beats": [{"ref": a beat's ref, "keep": true or false, "what": its adjusted truth, "surface": what there was to sense, adjusted, "quotes": its words, adjusted, "deed": what its actors did and said, adjusted, plainly, as they did it (null when no one acts in it)}], "effects": [{"index": a world change's number, "keep": true or false}], "attempts": [{"who": an id, "attempt": what they try now}]`;
 var EPISODE_BEAT = `${BEAT_SHAPE.slice(0, -1)}, "attempt": what its actor tries that the world's rules decide (a sale, a theft, a fight), if anything}`;
 var TOUCH_SHAPE = '{"who": an id, or "place": a place id, or "thing": what it is in words, "after": story minutes after the episode starts from which it holds them}';
 var TREATMENTS = `Each person's and each event's treatment is how much of the story's effort it gets:
@@ -36846,7 +37120,7 @@ Answer with one JSON object: {"exposure": [{"beat": the ref of a beat just decid
     label: "Settling a draft",
     note: "A draft settles against every beat since its story time: the author keeps it, adjusts what something seen since contradicts, drops it when the story overtook it, or redrafts it for a later time. What it settles becomes canon now, its narrative dated when it happened, and those in it catch up on what reached them.",
     vars: VARS,
-    contract: '{"verdict": "settle" | "drop" | "redraft", "why": string, "beats": [{"ref", "keep", "what"?, "surface"?, "quotes"?}], "effects": [{"index", "keep"}], "attempts": [{"who", "attempt"}], "redraft": {"in"} | null}',
+    contract: '{"verdict": "settle" | "drop" | "redraft", "why": string, "beats": [{"ref", "keep", "what"?, "surface"?, "quotes"?, "deed"?}], "effects": [{"index", "keep"}], "attempts": [{"who", "attempt"}], "redraft": {"in"} | null}',
     text: `${AUTHOR}
 
 A draft of something that happened off screen waits to become canon. Here it is: its episode, its beats at their own times, and the world changes it would make. Here too is everything that has happened in the story since its story time, every beat whoever decided it: each one is a pin the draft must agree with. Read the draft against them, and against your notebook:
@@ -36857,7 +37131,7 @@ A draft of something that happened off screen waits to become canon. Here it is:
 - Redraft it when it no longer fits but something like it should still happen, and say when.
 
 Answer with one JSON object: {"verdict": "settle", "drop" or "redraft", "why": a line on how it reads against the pins, ${SETTLE_BEATS}, "redraft": {"in": story minutes from now until it starts} or null}. Give adjusted words only where you change them.`,
-    asks: [WHY_ASK]
+    asks: [WHY_OWN_ASK]
   },
   {
     id: OFFSCREEN_TEXT.walkOn,
@@ -36866,7 +37140,7 @@ Answer with one JSON object: {"verdict": "settle", "drop" or "redraft", "why": a
     label: "A scene reaches a draft",
     note: "Before the player's scene plays past what an open draft holds (its people, its places, the things it changes), the author settles the draft now, drops it, or re-dates it to after the scene: no one plays from what isn't canon. A settlement here is a walk-on, its own line in the turn's budget.",
     vars: VARS,
-    contract: '{"verdict": "settle" | "drop" | "redate", "why": string, "beats": [{"ref", "keep", "what"?, "surface"?, "quotes"?}], "effects": [{"index", "keep"}], "attempts": [{"who", "attempt"}], "redate": {"in"} | null}',
+    contract: '{"verdict": "settle" | "drop" | "redate", "why": string, "beats": [{"ref", "keep", "what"?, "surface"?, "quotes"?, "deed"?}], "effects": [{"index", "keep"}], "attempts": [{"who", "attempt"}], "redate": {"in"} | null}',
     text: `${AUTHOR}
 
 The scene {{pov}} is playing reaches something an open draft holds: a draft of what happens off screen, not canon yet, holding people, places or things this scene has, from before the scene's time. No one plays past it while it is open, and you never play around it: settle it now, drop it, or re-date it to after this scene. Here is the draft (its episode, its beats at their own times, the world changes it would make), what of this scene it holds, and everything that has happened since its story time, every beat whoever decided it, this scene's so far included: each one is a pin the draft must agree with. Read it against them, and against your notebook:
@@ -36877,7 +37151,7 @@ The scene {{pov}} is playing reaches something an open draft holds: a draft of w
 - Re-date it when it hasn't happened yet after all: it happens as drafted, later, after this scene. Say when it starts.
 
 Answer with one JSON object: {"verdict": "settle", "drop" or "redate", "why": a line on how it reads against the pins and this scene, ${SETTLE_BEATS}, "redate": {"in": story minutes from now until it starts, past this scene} or null}. Give adjusted words only where you change them.`,
-    asks: [WHY_ASK]
+    asks: [WHY_OWN_ASK]
   }
 ];
 
@@ -37007,7 +37281,7 @@ var REALTIME_WATCH_ANSWER = `Answer with one JSON object and nothing else:
  "world": [{"what": "what happens, in plain words", "surface": "what there is to sense of it, as anyone there could sense it, from no one's side", "said": "exact words someone says aloud in it, or null", "by": ["the ids of anyone who acts in it"], "deed": "what they did and said, plainly, as they did it, never as anyone saw or heard it: each lives it as their own act; null when no one acts in it", "perceived": [{"who": "an id", "channel": "hearing", "sight" or "touch", "reach": "whole" or "partial"}]}],
  "end": null, or why real-time dialogue ends after this line,
  "poll": "now" or "later",
- "reasoning": "a short account of your reading"}
+ "why": "one or two plain sentences explaining your reading"}
 With a takeover, the rest may be null.`;
 var REALTIME_EXPOSURE = `You are the author of this story, running it like a game master while the player talks with {{name}} in real time. {{name}} has just answered his line from their own mind, and their answer is more than words said back to him: something they did, words meant for someone else, or something they tried to bring about, which the GM has resolved. As for every beat, you write who was placed to perceive it, through what, and how fully, grounded in where everyone is:
 ` + `1. Who perceived {{name}}'s answer, besides {{name}}: by sight, hearing or touch, whole or only in part (a glance from across the room, a hand half hidden by the desk). The player character too, only where he could: an act meant to go unseen reaches only those placed to catch it, and what doesn't reach him, the narration never shows him.
@@ -37016,13 +37290,13 @@ var REALTIME_EXPOSURE = `You are the author of this story, running it like a gam
 var REALTIME_EXPOSURE_ANSWER = `Answer with one JSON object and nothing else:
 {"answer": [{"who": "the id of someone who perceived the answer, the player character included where he did", "channel": "hearing", "sight" or "touch", "reach": "whole" or "partial"}],
  "outcome": [{"who": "the id of someone who perceived how the attempt turned out", "channel": "hearing", "sight" or "touch", "reach": "whole" or "partial"}], or [] when nothing was attempted,
- "reasoning": "a short account of your reading"}
+ "why": "one or two plain sentences explaining your reading"}
 An empty "answer": no one perceived it but the one who did it.`;
 var REALTIME_PROMPTS = [
   { id: REALTIME_TEXT.watch, page: page5, group, label: "The author's watch", note: "Read beside each line the player speaks in real time, while the character answers it: whether the character can simply hear and answer it or the author takes it into a full scene, the player's line as a beat, who else perceives the exchange, whether the world does anything, whether the conversation ends, and whether the poll waits for its end.", text: REALTIME_WATCH, vars: [NAME2] },
-  { id: REALTIME_TEXT.watchAnswer, page: page5, group, label: "The watch's answer", note: "The answer's shape, which the backend reads: a takeover or the player's line, who else perceives the exchange, the world's beats, the end, and the poll.", text: REALTIME_WATCH_ANSWER, vars: [] },
+  { id: REALTIME_TEXT.watchAnswer, page: page5, group, label: "The watch's answer", note: "The answer's shape, which the backend reads: a takeover or the player's line, who else perceives the exchange, the world's beats, the end, and the poll.", text: REALTIME_WATCH_ANSWER, vars: [], asks: [ACCOUNT_ASK] },
   { id: REALTIME_TEXT.exposure, page: page5, group, label: "Who perceived an answer", note: "Asked once the character has answered, when the answer is more than words said back to the player character (something they did, words meant for someone else, an attempt the GM resolved): who perceived it, and how the attempt turned out, as for every beat.", text: REALTIME_EXPOSURE, vars: [NAME2] },
-  { id: REALTIME_TEXT.exposureAnswer, page: page5, group, label: "Who perceived an answer: the answer", note: "The answer's shape, which the backend reads: who perceived the answer and its outcome, by what and how fully.", text: REALTIME_EXPOSURE_ANSWER, vars: [] },
+  { id: REALTIME_TEXT.exposureAnswer, page: page5, group, label: "Who perceived an answer: the answer", note: "The answer's shape, which the backend reads: who perceived the answer and its outcome, by what and how fully.", text: REALTIME_EXPOSURE_ANSWER, vars: [], asks: [ACCOUNT_ASK] },
   { id: REALTIME_TEXT.chipOn, page: page5, group, label: "Chip: talking with someone", note: "The chip under the last reply while real-time dialogue runs.", text: "Talking with {{name}}", vars: [NAME2] },
   { id: REALTIME_TEXT.chipOnDetail, page: page5, group, label: "Chip: what real time does", note: "The line under the chip while real-time dialogue runs.", text: "Your lines go straight to {{name}}, who answers from their own mind. The author reads each line beside them and takes it into a full scene when it needs one.", vars: [NAME2] },
   { id: REALTIME_TEXT.chipLeave, page: page5, group, label: "Chip: Leave", note: "The button that ends real-time dialogue; your next line plays as a scene.", text: "Leave", vars: [] },
@@ -51316,7 +51590,7 @@ function SwipesPage(props) {
               label: "Ask what should change on each swipe",
               bare: true,
               changed: props.ask !== d3.swipeAsk,
-              help: props.ask ? "Each swipe first asks what should change, in a word or two, before its reply starts; leave it empty and the swipe goes ahead as it is. Only the narrator reads it, for that telling alone." : "A swipe starts its reply at once. The Swipe as… chip still takes a word on what should change.",
+              help: props.ask ? "Each swipe first asks what should change, in a word or two, before its reply starts; leave it empty and the swipe goes ahead as it is. Only the narrator reads it, for that telling alone. A depth chat's swipe on the loopback doesn't ask: use the Swipe as… chip there." : "A swipe starts its reply at once. The Swipe as… chip still takes a word on what should change.",
               reset: { label: `Reset asking on each swipe to its default, ${d3.swipeAsk ? "on" : "off"}`, to: d3.swipeAsk ? "on" : "off", onClick: () => props.patch({ swipeAsk: null }) },
               busy: props.busy,
               children: /* @__PURE__ */ u3(HostSwitch, {
@@ -56856,7 +57130,7 @@ function ModelRows(props) {
         label: "Answer room",
         bare: true,
         changed: value.maxTokens !== standard.maxTokens,
-        help: "The most tokens one answer may take, reasoning included.",
+        help: "The tokens an ordinary answer may take, reasoning included. Stages whose answers grow with what they read (the historian, the author's readings, catch-ups, reflections, truth links) ask for all the room the model takes instead, unless a role on its own model has its room set here; a few calls ask for a room of their own.",
         reset: { label: `Reset ${owner}'s answer room to its default, ${n5(standard.maxTokens)} tokens`, to: `${n5(standard.maxTokens)} tokens`, onClick: () => props.set({ maxTokens: standard.maxTokens }) },
         busy: props.busy,
         children: /* @__PURE__ */ u3(NumberStepper, {
@@ -57151,7 +57425,7 @@ function DepthPage(props) {
               min: 1,
               max: 1000,
               step: 5,
-              help: "The most beats one catch-up call lives when a character lives what reached them; more waiting are lived over several calls, in order.",
+              help: "The most beats one catch-up call lives when a character lives what reached them, and the most new beats one remembering call adds to a scene's; more waiting are lived over several calls, in order.",
               busy,
               set: (catchUpBatch) => set({ catchUpBatch })
             }, undefined, false, undefined, this)
@@ -57240,6 +57514,16 @@ function DepthPage(props) {
                 disabled: busy,
                 onChange: (ask) => set({ budget: { ask } })
               }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(ChoiceRow2, {
+              id: "budget.level",
+              label: "Threshold level",
+              value: b3.level,
+              standard: sb.level,
+              options: DEPTH_THRESHOLD_LEVELS.map((l3) => ({ value: l3, label: DEPTH_THRESHOLD_LEVEL_WORDS[l3].label })),
+              help: "How readily the author raises a part above written, read beside your words below.",
+              busy,
+              set: (level) => set({ budget: { level } })
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(SettingRow, {
               id: "budget.threshold",
@@ -57410,18 +57694,6 @@ function DepthPage(props) {
               set: (chunkTokens) => set({ bootstrap: { chunkTokens } })
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(NumberRow, {
-              id: "bootstrap.historian",
-              label: "Historian chunks at once",
-              unit: "",
-              value: boot.atOnce.historian,
-              standard: sboot.atOnce.historian,
-              min: 1,
-              max: 8,
-              step: 1,
-              busy,
-              set: (historian) => set({ bootstrap: { atOnce: { historian } } })
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3(NumberRow, {
               id: "bootstrap.minds",
               label: "Minds at once",
               unit: "",
@@ -57435,16 +57707,17 @@ function DepthPage(props) {
               set: (minds) => set({ bootstrap: { atOnce: { minds } } })
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(NumberRow, {
-              id: "bootstrap.author",
-              label: "Author chunks at once",
+              id: "bootstrap.mostMinds",
+              label: "Most characters with a mind",
               unit: "",
-              value: boot.atOnce.author,
-              standard: sboot.atOnce.author,
-              min: 1,
-              max: 4,
+              value: boot.mostMinds,
+              standard: sboot.mostMinds,
+              min: 0,
+              max: 500,
               step: 1,
+              help: "The run gives a mind to at most this many characters, in the order the author picks them; 0 for no limit. Minds are most of a run's cost: fewer cost less. Anyone without one is played by the author.",
               busy,
-              set: (author) => set({ bootstrap: { atOnce: { author } } })
+              set: (mostMinds) => set({ bootstrap: { mostMinds } })
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(SettingRow, {
               id: "bootstrap.cap",
@@ -57716,6 +57989,7 @@ function RelayRow(props) {
   const r3 = props.relay;
   const report = r3.report;
   const heard = r3.seenAt === null ? `Not heard from since LumiRPEngine started (registered ${dateText2(r3.registeredAt)}).` : `Last heard ${agoText(props.now - r3.seenAt, r3.seenAt)}.`;
+  const requested = r3.requestAt === null ? "No request carried since LumiRPEngine started." : `Last request ${agoText(props.now - r3.requestAt, r3.requestAt)}.`;
   const fixable = props.mine && report !== null && (report.scheduler === "missing" || report.scheduler === "unknown");
   return /* @__PURE__ */ u3("div", {
     class: "lre-set-row",
@@ -57752,6 +58026,9 @@ function RelayRow(props) {
       /* @__PURE__ */ u3("ul", {
         class: "lre-loopback-facts",
         children: [
+          /* @__PURE__ */ u3("li", {
+            children: requested
+          }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("li", {
             children: heard
           }, undefined, false, undefined, this),
@@ -57839,15 +58116,29 @@ function RelayRow(props) {
   }, undefined, true, undefined, this);
 }
 function ConnectionSection(props) {
-  const { connections, relays, shared } = props.page;
+  const { connections, relays, shared, test } = props.page;
   const relay = relays.find((r3) => r3.mode === "user") ?? relays[0];
   const names = connections.map((c3) => c3.name);
   return /* @__PURE__ */ u3(Section, {
     title: "The loopback connection",
+    aside: /* @__PURE__ */ u3(Button, {
+      size: "sm",
+      variant: "secondary",
+      disabled: props.busy,
+      onClick: () => props.act({ op: "test" }),
+      children: "Test"
+    }, undefined, false, undefined, this),
     children: /* @__PURE__ */ u3("div", {
       class: "lre-set-rows",
       "data-lre-loopback-group": "connection",
       children: [
+        test ? /* @__PURE__ */ u3("div", {
+          "data-lre-loopback-test": test.ok ? "ok" : "failed",
+          children: /* @__PURE__ */ u3(Banner, {
+            tone: test.ok ? "info" : "warn",
+            children: test.text
+          }, undefined, false, undefined, this)
+        }, undefined, false, undefined, this) : null,
         /* @__PURE__ */ u3("p", {
           class: "lre-set-note",
           "data-lre-loopback-connections": true,
@@ -57856,6 +58147,11 @@ function ConnectionSection(props) {
             " A world chat on it plays its turn inside the reply; the narrator writes on the model you name in Settings → Depth → Narrator, never on the loopback."
           ]
         }, undefined, true, undefined, this),
+        /* @__PURE__ */ u3("p", {
+          class: "lre-set-note",
+          "data-lre-loopback-pin": true,
+          children: `Opting a world chat into depth pins it to the loopback connection. Lumiverse's "always use the active connection" governs Edit and Send only, so the pin holds for replies, swipes, Continue and Impersonate. A reply generated on another connection runs no engine turn, and LumiRPEngine flags it under the message: switch the chat back to the loopback, or opt it out of depth in its Depth tab.`
+        }, undefined, false, undefined, this),
         /* @__PURE__ */ u3("div", {
           class: "lre-set-row",
           children: /* @__PURE__ */ u3(Disclosure, {
@@ -57911,6 +58207,81 @@ function ConnectionSection(props) {
     }, undefined, true, undefined, this)
   }, undefined, false, undefined, this);
 }
+function DockerSection(props) {
+  const { line: line2 } = props.page;
+  const bun = line2.bun ?? "<bun>";
+  const script = line2.script ?? "<LumiRPEngine's folder>/dist/lumirpengine.js";
+  const inside = `${shellWord(bun)} --cwd / ${shellWord(script)} loopback up --url ${line2.url ?? "<the address you open Lumiverse at>"}`;
+  const compose = [
+    "lumirpengine-loopback:",
+    "  image: <Lumiverse's image>",
+    '  network_mode: "service:lumiverse"',
+    "  volumes: [<Lumiverse's data volume, mounted where it is in Lumiverse's service>]",
+    `  command: ["${bun}", "${script}", "loopback", "serve", "--config", "<the config path loopback up printed>"]`,
+    "  restart: always"
+  ].join(`
+`);
+  return /* @__PURE__ */ u3(Section, {
+    title: "Lumiverse in Docker",
+    flush: true,
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-set-rows",
+      "data-lre-loopback-group": "docker",
+      children: /* @__PURE__ */ u3("div", {
+        class: "lre-set-row",
+        children: /* @__PURE__ */ u3(Disclosure, {
+          summary: "Run the relay with Lumiverse in a container",
+          children: [
+            /* @__PURE__ */ u3("p", {
+              class: "lre-set-note",
+              children: "In a container there is no systemd, and Lumiverse's 127.0.0.1 is the container's own. Run the relay one of two ways; loopback up prints this too when it sees it is in a container."
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(CopyLine, {
+              id: "docker-inside",
+              label: "Inside Lumiverse's container, as a second process",
+              text: inside,
+              help: "Run it in Lumiverse's container, without --systemd.",
+              copy: props.copy
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(CopyLine, {
+              id: "docker-compose",
+              label: "As a compose service sharing Lumiverse's network",
+              text: compose,
+              help: "127.0.0.1 is then the same for both. Run loopback up once inside the container first, so its config exists, and put the config path it printed in the command.",
+              copy: props.copy
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function RelayDown(props) {
+  const { page: page10 } = props;
+  const usable = page10.relays.filter((r3) => r3.mode !== "shared" || page10.shared.enabled);
+  if (usable.some((r3) => !r3.signIn))
+    return null;
+  return /* @__PURE__ */ u3("div", {
+    "data-lre-loopback-down": true,
+    children: [
+      /* @__PURE__ */ u3(Banner, {
+        tone: "warn",
+        title: "No relay is running",
+        children: [
+          usable.length === 0 ? "No relay of yours has registered, so a world chat on the loopback gets no reply." : "Every relay of yours has gone quiet or needs signing in again, so a world chat on the loopback gets no reply.",
+          " Start one on the machine Lumiverse runs on",
+          page10.line.command !== null ? " with this line:" : " with the line under Start the relay."
+        ]
+      }, undefined, true, undefined, this),
+      page10.line.command !== null ? /* @__PURE__ */ u3(CopyLine, {
+        id: "down-up",
+        label: "Start the relay",
+        text: page10.line.command,
+        copy: props.copy
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
 function LoopbackBody(props) {
   const { page: page10, busy } = props;
   const { shared } = page10;
@@ -57921,6 +58292,10 @@ function LoopbackBody(props) {
       /* @__PURE__ */ u3("p", {
         class: "lre-set-lead",
         children: "The loopback lets a world chat play its turn inside the reply: give the chat the loopback connection, and LumiRPEngine runs the turn when Lumiverse asks for the reply, its thinking in the thinking block, then the narrator writes on your own model. It needs a small relay on the machine Lumiverse runs on, started once with the line below."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(RelayDown, {
+        page: page10,
+        copy: props.copy
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(LineSection, {
         page: page10,
@@ -57961,6 +58336,12 @@ function LoopbackBody(props) {
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(ConnectionSection, {
+        page: page10,
+        busy,
+        act: props.act,
+        copy: props.copy
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(DockerSection, {
         page: page10,
         copy: props.copy
       }, undefined, false, undefined, this),
@@ -58047,7 +58428,7 @@ function LoopbackSettingsPage() {
   const ask = async (act) => {
     const result = await app.request({ type: "lre.loopback.page", origin: location.origin, ...act });
     if (result)
-      setPage(result.page);
+      setPage((prev) => act.op === "get" && result.page.test === undefined && prev?.test !== undefined ? { ...result.page, test: prev.test } : result.page);
     else
       setFailed(true);
   };
@@ -78276,13 +78657,16 @@ function useMindsRun(chatId, send, reload) {
   const [run, setRun] = d2(null);
   const [error, setError] = d2(null);
   const [undone, setUndone] = d2(false);
+  const [off, setOff] = d2(null);
   A(() => {
     let live = true;
     send({ type: "lre.minds", op: "status", chatId }).then((m2) => {
-      if (live && m2.type === "lre.result" && m2.request === "lre.minds")
-        setRun(m2.body.run);
+      if (!live || m2.type !== "lre.result" || m2.request !== "lre.minds")
+        return;
+      setRun(m2.body.run);
+      setOff(m2.body.off ?? null);
     });
-    const off = app.client.onMindsRun((u4) => {
+    const off2 = app.client.onMindsRun((u4) => {
       if (u4.chatId !== chatId)
         return;
       setRun(u4.run);
@@ -78291,7 +78675,7 @@ function useMindsRun(chatId, send, reload) {
     });
     return () => {
       live = false;
-      off();
+      off2();
     };
   }, [chatId]);
   const act = async (body) => {
@@ -78309,6 +78693,7 @@ function useMindsRun(chatId, send, reload) {
     run,
     error,
     undone,
+    off,
     start: (who) => {
       setUndone(false);
       return act({ type: "lre.minds", op: "run", chatId, ...who ? { who } : {} });
@@ -78662,7 +79047,14 @@ function GmMindsSection(props) {
             minds,
             busy: props.busy
           }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(RunEveryone, {
+          minds.off !== null ? /* @__PURE__ */ u3(Section, {
+            title: "Run minds now",
+            children: /* @__PURE__ */ u3("p", {
+              class: "lre-gm-note",
+              "data-lre-minds-off": "",
+              children: minds.off
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3(RunEveryone, {
             count: liveNear,
             disabled: props.busy || running,
             picking: picking.on,
@@ -78858,9 +79250,9 @@ function CharacterPages2(props) {
                   children: /* @__PURE__ */ u3(ListRow, {
                     icon: "sparkle",
                     title: "Run their mind now",
-                    subtitle: "From the chat so far and their lore, as a turn would; recorded as one edit you can undo",
+                    subtitle: ctx.minds.off ?? "From the chat so far and their lore, as a turn would; recorded as one edit you can undo",
                     chevron: true,
-                    disabled: ctx.busy || ctx.minds.run?.status === "running",
+                    disabled: ctx.busy || ctx.minds.off !== null || ctx.minds.run?.status === "running",
                     onClick: () => void ctx.minds.start([c3.entity])
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this)
@@ -78871,7 +79263,7 @@ function CharacterPages2(props) {
               }, undefined, false, undefined, this) : null,
               /* @__PURE__ */ u3(Ladder, {
                 c: c3,
-                busy: ctx.busy,
+                busy: ctx.busy || ctx.minds.off !== null,
                 open: changes.open
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3(Intent, {
@@ -80418,20 +80810,11 @@ function MindsList(props) {
     children: [
       /* @__PURE__ */ u3(Section, {
         title: "Your point of view",
-        children: [
-          /* @__PURE__ */ u3("p", {
-            class: "lre-small lre-muted lre-depth-note",
-            children: view.pov ? `You play ${view.pov.name}. The player character has no agent: you drive him, and what reached him is what his scenes exposed him to.` : "No one is the player character yet."
-          }, undefined, false, undefined, this),
-          view.povChoices.length > 0 ? /* @__PURE__ */ u3(HostSelect, {
-            label: "Play as",
-            value: view.pov?.id ?? "",
-            options: view.povChoices.map((c3) => ({ value: c3.id, label: c3.name })),
-            disabled: props.busy,
-            onChange: (id) => id && id !== view.pov?.id ? props.onPov(id) : undefined
-          }, undefined, false, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this),
+        children: /* @__PURE__ */ u3("p", {
+          class: "lre-small lre-muted lre-depth-note",
+          children: view.pov ? `You play ${view.pov.name}. The player character has no agent: you drive him, and what reached him is what his scenes exposed him to.` : "No one is the player character yet."
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Section, {
         title: `Minds (${view.characters.length})`,
         flush: true,
@@ -80504,7 +80887,7 @@ function FilesTab(props) {
         children: /* @__PURE__ */ u3(GmCard, {
           title: mindFileLabel(f3.path),
           subtitle: [f3.at ? `Written ${f3.at}` : null, `${f3.revisions} ${f3.revisions === 1 ? "revision" : "revisions"}`].filter(Boolean).join(" · "),
-          badges: f3.pinned || f3.out ? /* @__PURE__ */ u3(M, {
+          badges: f3.pinned || f3.out || f3.review ? /* @__PURE__ */ u3(M, {
             children: [
               f3.pinned ? /* @__PURE__ */ u3(Badge, {
                 tone: "accent",
@@ -80513,6 +80896,10 @@ function FilesTab(props) {
               f3.out ? /* @__PURE__ */ u3(Badge, {
                 tone: "warn",
                 children: "Out of mind"
+              }, undefined, false, undefined, this) : null,
+              f3.review ? /* @__PURE__ */ u3(Badge, {
+                tone: "warn",
+                children: "To review"
               }, undefined, false, undefined, this) : null
             ]
           }, undefined, true, undefined, this) : undefined,
@@ -80572,14 +80959,24 @@ function FilesTab(props) {
                 }, undefined, false, undefined, this) : markdown(f3.text, "lre-depth-md"),
                 /* @__PURE__ */ u3("div", {
                   class: "lre-inline",
-                  children: /* @__PURE__ */ u3(Button, {
-                    size: "sm",
-                    icon: "edit",
-                    disabled: c3.busy || c3.draft !== null,
-                    onClick: () => c3.onDraft({ path: f3.path, text: f3.text }),
-                    children: "Edit"
-                  }, undefined, false, undefined, this)
-                }, undefined, false, undefined, this)
+                  children: [
+                    /* @__PURE__ */ u3(Button, {
+                      size: "sm",
+                      icon: "edit",
+                      disabled: c3.busy || c3.draft !== null,
+                      onClick: () => c3.onDraft({ path: f3.path, text: f3.text }),
+                      children: "Edit"
+                    }, undefined, false, undefined, this),
+                    f3.review ? /* @__PURE__ */ u3(Button, {
+                      size: "sm",
+                      variant: "ghost",
+                      icon: "check",
+                      disabled: c3.busy || c3.draft !== null,
+                      onClick: () => c3.onSave({ path: f3.path, text: f3.text }),
+                      children: "Keep as it is"
+                    }, undefined, false, undefined, this) : null
+                  ]
+                }, undefined, true, undefined, this)
               ]
             }, undefined, true, undefined, this)
           ]
@@ -81008,13 +81405,7 @@ function MindsV2(props) {
     }, undefined, false, undefined, this);
   return /* @__PURE__ */ u3(MindsList, {
     view: props.view,
-    busy,
-    onOpen: setOpen,
-    onPov: (id) => run(async () => {
-      const result = await app.request({ type: "lre.depth", chatId, op: "pov", who: id });
-      if (result)
-        props.reload();
-    })
+    onOpen: setOpen
   }, undefined, false, undefined, this);
 }
 function MindsSection2(props) {

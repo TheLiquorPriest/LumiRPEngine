@@ -48308,8 +48308,14 @@ var DEPTH_ROLE_WORDS = Object.freeze({
 });
 var DEPTH_USES_LABEL = Object.freeze({ strong: "Strong model", fast: "Fast model", own: "Its own" });
 var DEPTH_CADENCE_LABEL = Object.freeze({ turns: "After any turn", scenes: "At a scene's end", chapters: "At a chapter's end" });
-var DEPTH_TREATMENTS = ["live", "campfire", "room", "written"];
-var DEPTH_TREATMENT_LABEL = Object.freeze({ live: "Live", campfire: "Campfire", room: "Room", written: "Written" });
+var DEPTH_TREATMENT_DEFS = Object.freeze({
+  live: { label: "Live", plays: "agent" },
+  campfire: { label: "Campfire", plays: "mind" },
+  room: { label: "Room", plays: "author" },
+  written: { label: "Written", plays: "author" }
+});
+var DEPTH_TREATMENTS = Object.freeze(Object.keys(DEPTH_TREATMENT_DEFS));
+var DEPTH_TREATMENT_LABEL = Object.freeze(Object.fromEntries(DEPTH_TREATMENTS.map((t) => [t, DEPTH_TREATMENT_DEFS[t].label])));
 var model = (effort, maxTokens) => Object.freeze({ connectionId: null, model: null, effort, maxTokens });
 var STRONG_DEFAULT = model("high", 16384);
 var FAST_DEFAULT = model("low", 8192);
@@ -48324,6 +48330,11 @@ var DEPTH_PRESET_WORDS = Object.freeze({
   deepest: { label: "Deepest", summary: "Every role on the Strong model; the author may revise its notebook after any turn." },
   balanced: { label: "Balanced", summary: "The render check and the points of view on the Fast model; the rest on Strong." },
   lean: { label: "Lean", summary: "Only the author and the characters on Strong; the author revises at a scene's end at most." }
+});
+var DEPTH_THRESHOLD_LEVEL_WORDS = Object.freeze({
+  sparing: { label: "Sparing", guidance: "Raise a part above written only when it clearly meets the words." },
+  balanced: { label: "Balanced", guidance: "Raise a part above written when it fairly meets the words." },
+  generous: { label: "Generous", guidance: "Raise a part above written whenever it plausibly meets the words." }
 });
 
 // src/shared/episodes.ts
@@ -51788,6 +51799,8 @@ function mindWriteOf(data) {
     return `a seeded core's source is one of ${CORE_SOURCES.join(", ")}`;
   if (data.review !== undefined && data.review !== true)
     return "review is true or absent";
+  if (data.reasoning !== undefined && !isBlobHash(data.reasoning))
+    return "a mind write's reasoning is a blob's hash";
   return {
     who,
     path: path2,
@@ -51799,7 +51812,8 @@ function mindWriteOf(data) {
     ...data.plans !== undefined ? { plans } : {},
     ...data.supersedes !== undefined ? { supersedes: data.supersedes } : {},
     ...data.source !== undefined ? { source: data.source } : {},
-    ...data.review === true ? { review: true } : {}
+    ...data.review === true ? { review: true } : {},
+    ...isBlobHash(data.reasoning) ? { reasoning: data.reasoning } : {}
   };
 }
 function mindLivedOf(data) {
@@ -57445,6 +57459,7 @@ var AUTHOR_EDIT = "author.edit";
 var AUTHOR_SPEND = "author.spend";
 var AUTHOR_ASK = "author.ask";
 var AUTHOR_ANSWER = "author.answer";
+var AUTHOR_ADOPT = "author.adopt";
 var AUTHOR_WORDS_MAX = 2000;
 var POLL_JOB_KINDS = ["catchup", "reflect", "author.reflect", "episode", "settle", "drop", "rebase"];
 var SCORE_OUTCOMES = ["hit", "miss", "partly"];
@@ -57501,6 +57516,8 @@ function authorProblem(type, data) {
         if (p)
           return p;
       }
+      if (data.wake !== undefined && !(isRecord(data.wake) && typeof data.wake.at === "number" && Number.isFinite(data.wake.at) && words7(data.wake.why, true)))
+        return "a poll's wake is a story time and why";
       return data.note === undefined || isBlobHash(data.note) ? null : "a poll's note is a stored text";
     }
     case AUTHOR_PREDICT:
@@ -57588,6 +57605,12 @@ function authorProblem(type, data) {
       if (!nonBlank3(data.ask))
         return "an answer names its ask";
       return typeof data.spend === "boolean" ? null : "an answer spends or doesn't";
+    case AUTHOR_ADOPT: {
+      const cited = (list) => Array.isArray(list) && list.every((c) => isRecord(c) && nonBlank3(c.what) && nonBlank3(c.message));
+      if (!Array.isArray(data.entries) || !data.entries.every(nonBlank3))
+        return "an adoption lists the entries it landed, by id";
+      return cited(data.waited) && cited(data.without) ? null : "an adoption names the work it waited for and went without, each with its message";
+    }
     default:
       return `${type} isn't an author's record`;
   }
@@ -57648,6 +57671,10 @@ var authorPack = {
     r.event(record3(AUTHOR_ANSWER, (e) => {
       const d = authorData(e, AUTHOR_ANSWER);
       return d ? d.spend ? "the player spends past the allowance" : "the player keeps to the allowance" : "the player's answer";
+    }));
+    r.event(record3(AUTHOR_ADOPT, (e) => {
+      const d = authorData(e, AUTHOR_ADOPT);
+      return d ? `the turn waited for ${d.waited.length} piece(s) of work between turns, went on without ${d.without.length}` : "what the turn waited for";
     }));
     r.event({
       type: AUTHOR_DROP,

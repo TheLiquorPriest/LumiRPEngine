@@ -50451,8 +50451,14 @@ var DEPTH_ROLE_WORDS = Object.freeze({
 });
 var DEPTH_USES_LABEL = Object.freeze({ strong: "Strong model", fast: "Fast model", own: "Its own" });
 var DEPTH_CADENCE_LABEL = Object.freeze({ turns: "After any turn", scenes: "At a scene's end", chapters: "At a chapter's end" });
-var DEPTH_TREATMENTS = ["live", "campfire", "room", "written"];
-var DEPTH_TREATMENT_LABEL = Object.freeze({ live: "Live", campfire: "Campfire", room: "Room", written: "Written" });
+var DEPTH_TREATMENT_DEFS = Object.freeze({
+  live: { label: "Live", plays: "agent" },
+  campfire: { label: "Campfire", plays: "mind" },
+  room: { label: "Room", plays: "author" },
+  written: { label: "Written", plays: "author" }
+});
+var DEPTH_TREATMENTS = Object.freeze(Object.keys(DEPTH_TREATMENT_DEFS));
+var DEPTH_TREATMENT_LABEL = Object.freeze(Object.fromEntries(DEPTH_TREATMENTS.map((t) => [t, DEPTH_TREATMENT_DEFS[t].label])));
 var DEPTH_ROOM_MOST = 1e6;
 var model = (effort, maxTokens) => Object.freeze({ connectionId: null, model: null, effort, maxTokens });
 var STRONG_DEFAULT = model("high", 16384);
@@ -50480,6 +50486,7 @@ function defaultDepthSettings() {
       allowances: { live: 2, campfire: 4, room: 8, written: "none" },
       ask: true,
       threshold: DEPTH_THRESHOLD_DEFAULT,
+      level: "balanced",
       perTurn: 600000,
       perDay: 30000000
     },
@@ -50491,10 +50498,19 @@ function defaultDepthSettings() {
     catchUpBatch: 40,
     realtime: "judged",
     background: { on: true, atOnce: 2 },
-    bootstrap: { chunkTokens: 30000, atOnce: { historian: 1, minds: 3, author: 1 }, cap: { unit: "tokens", value: 20000000 }, sample: 5, pauseAfterWrong: 3 }
+    bootstrap: { chunkTokens: 30000, atOnce: { minds: 3 }, mostMinds: 0, cap: { unit: "tokens", value: 20000000 }, sample: 5, pauseAfterWrong: 3 }
   };
 }
 var DEPTH_THRESHOLD_DEFAULT = "More than written when it could change what someone the player knows wants, believes or does, or when the player is likely to meet it soon.";
+var DEPTH_THRESHOLD_LEVELS = ["sparing", "balanced", "generous"];
+var DEPTH_THRESHOLD_LEVEL_WORDS = Object.freeze({
+  sparing: { label: "Sparing", guidance: "Raise a part above written only when it clearly meets the words." },
+  balanced: { label: "Balanced", guidance: "Raise a part above written when it fairly meets the words." },
+  generous: { label: "Generous", guidance: "Raise a part above written whenever it plausibly meets the words." }
+});
+function thresholdGuidance(budget) {
+  return `${DEPTH_THRESHOLD_LEVEL_WORDS[budget.level].guidance} ${budget.threshold.trim() || "(no words given)"}`;
+}
 var DEPTH_REASONING = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
 var int = (raw, min, max, base) => typeof raw === "number" && Number.isInteger(raw) && raw >= min && raw <= max ? raw : base;
 var limit = (raw, min, base) => raw === "none" ? "none" : typeof raw === "number" && Number.isInteger(raw) && raw >= min ? raw : base;
@@ -50536,6 +50552,7 @@ function depthSettingsOf(raw, base = defaultDepthSettings()) {
       allowances: Object.fromEntries(DEPTH_TREATMENTS.map((t) => [t, limit(a[t], 0, base.budget.allowances[t])])),
       ask: typeof b.ask === "boolean" ? b.ask : base.budget.ask,
       threshold: typeof b.threshold === "string" ? b.threshold : base.budget.threshold,
+      level: pick2(b.level, DEPTH_THRESHOLD_LEVELS, base.budget.level),
       perTurn: limit(b.perTurn, 1000, base.budget.perTurn),
       perDay: limit(b.perDay, 1000, base.budget.perDay)
     },
@@ -50549,7 +50566,8 @@ function depthSettingsOf(raw, base = defaultDepthSettings()) {
     background: { on: typeof bg.on === "boolean" ? bg.on : base.background.on, atOnce: int(bg.atOnce, 1, 16, base.background.atOnce) },
     bootstrap: {
       chunkTokens: int(boot.chunkTokens, 2000, 200000, base.bootstrap.chunkTokens),
-      atOnce: { historian: int(at2.historian, 1, 8, base.bootstrap.atOnce.historian), minds: int(at2.minds, 1, 16, base.bootstrap.atOnce.minds), author: int(at2.author, 1, 4, base.bootstrap.atOnce.author) },
+      atOnce: { minds: int(at2.minds, 1, 16, base.bootstrap.atOnce.minds) },
+      mostMinds: int(boot.mostMinds, 0, 500, base.bootstrap.mostMinds),
       cap,
       sample: int(boot.sample, 0, 50, base.bootstrap.sample),
       pauseAfterWrong: int(boot.pauseAfterWrong, 1, 50, base.bootstrap.pauseAfterWrong)
@@ -54383,6 +54401,8 @@ function mindWriteOf(data) {
     return `a seeded core's source is one of ${CORE_SOURCES.join(", ")}`;
   if (data.review !== undefined && data.review !== true)
     return "review is true or absent";
+  if (data.reasoning !== undefined && !isBlobHash(data.reasoning))
+    return "a mind write's reasoning is a blob's hash";
   return {
     who,
     path: path2,
@@ -54394,7 +54414,8 @@ function mindWriteOf(data) {
     ...data.plans !== undefined ? { plans } : {},
     ...data.supersedes !== undefined ? { supersedes: data.supersedes } : {},
     ...data.source !== undefined ? { source: data.source } : {},
-    ...data.review === true ? { review: true } : {}
+    ...data.review === true ? { review: true } : {},
+    ...isBlobHash(data.reasoning) ? { reasoning: data.reasoning } : {}
   };
 }
 function mindWriteEvent(e) {
@@ -54462,9 +54483,6 @@ function mindFileWrite(meta, text5) {
 }
 function mindLivedEvent(data) {
   return { type: MIND_LIVED, data: { who: data.who, beats: [...data.beats], at: data.at, mode: data.mode } };
-}
-function mindPovEvent(who) {
-  return { type: MIND_POV, data: { who } };
 }
 function mindTakeEvent(d) {
   const take = blobHash(d.take);
@@ -60625,6 +60643,7 @@ var AUTHOR_EDIT = "author.edit";
 var AUTHOR_SPEND = "author.spend";
 var AUTHOR_ASK = "author.ask";
 var AUTHOR_ANSWER = "author.answer";
+var AUTHOR_ADOPT = "author.adopt";
 var AUTHOR_WORDS_MAX = 2000;
 var POLL_JOB_KINDS = ["catchup", "reflect", "author.reflect", "episode", "settle", "drop", "rebase"];
 var SCORE_OUTCOMES = ["hit", "miss", "partly"];
@@ -60681,6 +60700,8 @@ function authorProblem(type, data) {
         if (p)
           return p;
       }
+      if (data.wake !== undefined && !(isRecord(data.wake) && typeof data.wake.at === "number" && Number.isFinite(data.wake.at) && words7(data.wake.why, true)))
+        return "a poll's wake is a story time and why";
       return data.note === undefined || isBlobHash(data.note) ? null : "a poll's note is a stored text";
     }
     case AUTHOR_PREDICT:
@@ -60768,6 +60789,12 @@ function authorProblem(type, data) {
       if (!nonBlank3(data.ask))
         return "an answer names its ask";
       return typeof data.spend === "boolean" ? null : "an answer spends or doesn't";
+    case AUTHOR_ADOPT: {
+      const cited = (list2) => Array.isArray(list2) && list2.every((c) => isRecord(c) && nonBlank3(c.what) && nonBlank3(c.message));
+      if (!Array.isArray(data.entries) || !data.entries.every(nonBlank3))
+        return "an adoption lists the entries it landed, by id";
+      return cited(data.waited) && cited(data.without) ? null : "an adoption names the work it waited for and went without, each with its message";
+    }
     default:
       return `${type} isn't an author's record`;
   }
@@ -60792,6 +60819,8 @@ function pollEvent(d) {
   };
   if (d.note !== undefined)
     data.note = d.note;
+  if (d.wake !== undefined)
+    data.wake = { at: d.wake.at, why: bounded2(d.wake.why) };
   return { type: AUTHOR_POLL, data };
 }
 function predictionId(...parts) {
@@ -60827,6 +60856,10 @@ function askEvent(d) {
 }
 function answerEvent(d) {
   return { type: AUTHOR_ANSWER, data: { ask: d.ask, spend: d.spend } };
+}
+function adoptEvent(d) {
+  const list2 = (l) => l.map((c) => ({ what: bounded2(c.what), message: c.message }));
+  return { type: AUTHOR_ADOPT, data: { waited: list2(d.waited), without: list2(d.without), entries: [...d.entries] } };
 }
 function authorData(e, type) {
   return e.type === type && authorProblem(type, e.data) === null ? e.data : null;
@@ -60891,6 +60924,10 @@ var authorPack = {
     r.event(record3(AUTHOR_ANSWER, (e) => {
       const d = authorData(e, AUTHOR_ANSWER);
       return d ? d.spend ? "the player spends past the allowance" : "the player keeps to the allowance" : "the player's answer";
+    }));
+    r.event(record3(AUTHOR_ADOPT, (e) => {
+      const d = authorData(e, AUTHOR_ADOPT);
+      return d ? `the turn waited for ${d.waited.length} piece(s) of work between turns, went on without ${d.without.length}` : "what the turn waited for";
     }));
     r.event({
       type: AUTHOR_DROP,
@@ -94426,7 +94463,12 @@ var WORLD_VARS = [
   { name: "world", text: "The world's name." },
   { name: "pov", text: "The player character's name." }
 ];
-var NOTEBOOK_RULES = "Your notebook is your own, in your own words, about what the story means and where it points. Start from this outline and reshape it as the story asks: questions open and answered, threads with their stakes and how ripe they are, setups awaiting payoff, each character's arc as you intend it, the tone and genre contract, the futures you weigh, and what the player wants across the story. Keep each in its own file under notebook/ (notebook/player.md for the player, notebook/arcs/<id>.md for a character's arc). Arcs live here and never in a character's mind; characters never read this notebook. A file the player edited is pinned: say what you make of it in a comment if you like, but never rewrite it. Infer what the player wants from what he wrote, the replies he kept and his out-of-character lines, and defer to him wherever he was explicit.";
+var ACCOUNT_ASK = {
+  says: [],
+  outdated: ['"reasoning":'],
+  message: 'it still asks for "reasoning", which the shipped text no longer asks for: a provider may refuse an answer asked to write out its thinking. Reset it, or ask for "why" in your own words (the shipped text asks for one or two plain sentences explaining the choice)'
+};
+var NOTEBOOK_RULES = `Your notebook is your own, in your own words, about what the story means and where it points. Start from this outline and reshape it as the story asks: questions open and answered, threads with their stakes and how ripe they are, setups awaiting payoff, each character's arc as you intend it, the tone and genre contract, the futures you weigh, and what the player wants across the story. Keep each in its own file under notebook/ (notebook/player.md for the player, notebook/arcs/<id>.md for a character's arc). Where a note rests on beats, cite each by its id in brackets as the beats are listed ("[b\u2026]"), and name a beat's id the same way in what you are unsure of, so the player can check them. Arcs live here and never in a character's mind; characters never read this notebook. A file the player edited is pinned: say what you make of it in a comment if you like, but never rewrite it. Infer what the player wants from what he wrote, the replies he kept and his out-of-character lines, and defer to him wherever he was explicit.`;
 var DEPTH_PROMPTS = [
   {
     id: DEPTH_TEXT.authorRead,
@@ -94435,14 +94477,15 @@ var DEPTH_PROMPTS = [
     label: "Reading the history",
     note: "The author reads a chat's history in order, a stretch at a time, with the beats the historian distilled from it: a light revision of its notebook, whether the stretch ends a chapter, and who gets a mind.",
     vars: WORLD_VARS,
-    contract: '{"files": [{"path", "text"}], "comments": [{"path", "text"}], "chapter": {"ends": boolean, "title"?: string}, "cast": [{"who", "mind": boolean, "why", "core"?: string}], "uncertain": [string], "reasoning": string}',
+    contract: '{"files": [{"path", "text"}], "comments": [{"path", "text"}], "chapter": {"ends": boolean, "title"?: string}, "cast": [{"who", "mind": boolean, "why", "core"?: string}], "uncertain": [string], "why": string}',
     text: `You are the author of the roleplay world {{world}}: the story's DM, who understands what it means and where it points. {{pov}} is the player character. You are reading the story's history in order, one stretch at a time, beside the beats the historian distilled from it, to build your notebook before you run the story yourself.
 
 ${NOTEBOOK_RULES}
 
 After this stretch: revise your notebook lightly where the stretch moved it. Decide whether the stretch ends a chapter of the story, and if it does, give the chapter a title. Decide who among the people in it gets a mind of their own: a character who recurs or matters does; a walk-on may not. For someone who gets a mind and has no character card, write who they are at root as the story shows them (traits, values, history, voice), for the player to review; never for the player character, who is the player's own.
 
-Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the file's whole new text}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "chapter": {"ends": true or false, "title": its title when it ends}, "cast": [{"who": their id, "mind": true or false, "why": your reason, "core": who they are at root, only for someone without a card}], "uncertain": [what you are unsure of, for the player's spot checks], "reasoning": a short account of what moved and why}. Write only the files that changed.`
+Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the file's whole new text}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "chapter": {"ends": true or false, "title": its title when it ends}, "cast": [{"who": their id, "mind": true or false, "why": your reason, "core": who they are at root, only for someone without a card}], "uncertain": [what you are unsure of, for the player's spot checks], "why": one or two plain sentences on what moved and why}. Write only the files that changed.`,
+    asks: [ACCOUNT_ASK]
   },
   {
     id: DEPTH_TEXT.authorChapter,
@@ -94451,14 +94494,15 @@ Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the f
     label: "A chapter's re-read",
     note: "At a chapter's end the author re-reads the chapter whole and revises its notebook deeply, checks each character's arc against who they have become (drift), and ends with predictions of what the player and the key characters will do next, which the poll scores once the story goes on.",
     vars: WORLD_VARS,
-    contract: '{"files": [{"path", "text"}], "comments": [{"path", "text"}], "drift": [{"who", "drift", "note"}], "predictions": [{"text", "about"}], "uncertain": [string], "reasoning": string}',
+    contract: '{"files": [{"path", "text"}], "comments": [{"path", "text"}], "drift": [{"who", "drift", "note"}], "predictions": [{"text", "about"}], "uncertain": [string], "why": string}',
     text: `You are the author of the roleplay world {{world}}: the story's DM, who understands what it means and where it points. {{pov}} is the player character. A chapter of the story has ended. Re-read it whole, its beats in order, and revise your notebook deeply.
 
 ${NOTEBOOK_RULES}
 
 Say what the chapter meant, which questions it answered and which it opened, which threads ripened, which setups paid off and which wait. Check each character's arc against who they have become in it: "none", "some" or "strong" drift, with what you make of it. Drift may be the story finding its way; where it isn't, say how you will steer, only through the world, since a character's mind is its own. End with your predictions: what the player and the key characters will do next, each a sentence that can later be told true or false.
 
-Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the file's whole new text}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "drift": [{"who": an id, "drift": "none", "some" or "strong", "note": what you make of it}], "predictions": [{"text": the prediction, "about": [ids]}], "uncertain": [what you are unsure of, for the player's spot checks], "reasoning": a short account of what moved and why}. Write only the files that changed.`
+Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the file's whole new text}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "drift": [{"who": an id, "drift": "none", "some" or "strong", "note": what you make of it}], "predictions": [{"text": the prediction, "about": [ids]}], "uncertain": [what you are unsure of, for the player's spot checks], "why": one or two plain sentences on what moved and why}. Write only the files that changed.`,
+    asks: [ACCOUNT_ASK]
   },
   {
     id: DEPTH_TEXT.truthLink,
@@ -94575,13 +94619,18 @@ var STAGING_SHAPE = '{"who": an id, "where": their position and facing, as anyon
 var SCENE_STAGING_SHAPE = `${STAGING_SHAPE.slice(0, -1)}, "place": the id of the world's place where they are, as listed: the scene's own place for everyone there in person, "remote": true instead, with no place, for someone elsewhere whom the scene reaches only from afar (the far end of a phone call, a radio, a screen)}`;
 var STAGING_PLACE_ASK = {
   says: ['"place"', '"remote"'],
-  message: `it doesn't ask where each person staged is ("place", by the id of one of the world's places, or "remote" for someone the scene reaches only from afar): written before the staging said so, its answer leaves everyone but the player character where they were, and the author is asked once more each time. Reset it, or ask for both in your own words`
+  message: `it doesn't ask where each person staged is ("place", by the id of one of the world's places, or "remote" for someone the scene reaches only from afar): written before the staging said so, its answer leaves everyone but the player character where they were, and the author is asked once more each time. Reset it, or ask for both in your own words, naming the keys "place" and "remote" as they are`
 };
 var OLD_WHY_FIELD = '"reasoning": your thinking';
 var WHY_ASK = {
   says: [],
   outdated: [OLD_WHY_FIELD],
-  message: `it still asks for ${OLD_WHY_FIELD}, which the shipped text no longer asks for: a provider may refuse an answer asked to write out its thinking. Reset it, or take that field out in your own words (the shipped text asks for "why": one or two plain sentences explaining the choice)`
+  message: `it still asks for ${OLD_WHY_FIELD}, which the shipped text no longer asks for: a provider may refuse an answer asked to write out its thinking. Reset it, or ask for "why" in its place in your own words (the shipped text asks for one or two plain sentences explaining the choice)`
+};
+var WHY_OWN_ASK = {
+  says: [],
+  outdated: [OLD_WHY_FIELD],
+  message: `it still asks for ${OLD_WHY_FIELD}, which the shipped text no longer asks for: a provider may refuse an answer asked to write out its thinking, and the answer's own "why" already gives its account. Reset it, or take that field out`
 };
 var EDIT_CONTRACT = '{"cosmetic": boolean, "amend": [{"replaces": [string], "ref", "by", "actors", "act", "what", "deed"?, "surface", "quotes"?, "addressed"?, "about"?, "exposure"}], "strike": [string], "why": string}';
 var EDIT_RULES = `- Cosmetic (a typo, a turn of phrase, a detail no one could later notice or act on): it amends nothing.
@@ -94603,7 +94652,7 @@ ${DM_RULES}
 The player has just written his turn, and the GM has read it into his own beats: what he did and said, and how the rules resolved what he tried. Infer what he wants from this moment, from his words and your notebook's player section, and set the scene that answers it:
 - Does this carry on the scene that was playing, or open a new one? Where does it play? Does it end with this turn?
 - Stage it: everyone present, where they are and what they are doing, as anyone there could see it (the points of view of whoever a beat reaches in part are written from it), {{pov}} among them, and the id of the world's place each is at: whoever the world has elsewhere is moved to the place you give them. Give everyone you stage a place, or "remote": no place is guessed for anyone given neither, but {{pov}}, whom the scene plays from: given no place, he is at the scene's place. Someone the scene reaches only from afar (the far end of a phone call, a radio, a screen) is "remote", never at the scene's place: they stay where they are.
-- Decide each character's effort for this scene, and say why: "agent" plays as its own agent, beat by beat, as a player would (only someone with a mind; one call each time it acts); "author" you play them yourself, from their mind (several cost you one call); "world" you handle them as part of the world, like a walk-on. Spend effort where this scene needs it.
+- Decide each character's effort for this scene, and say why: "agent" plays as its own agent, beat by beat, as a player would (one call each time it acts; someone with no mind yet gets one, formed from their card or what the world knows of them, and keeps it from then on: do it for someone who will matter beyond this scene, never a passer-by); "author" you play them yourself, from their mind (several cost you one call); "world" you handle them as part of the world, like a walk-on. Spend effort where this scene needs it.
 - Write who perceived each of the player's beats, and how fully. {{pov}} perceives his own acts.
 - When the scene opens or someone arrives, write an opening beat of what was there to sense. Then any beat the world does now, and the acts of those you play or handle, in order.
 - Name who acts next among those playing as their own agents (several act at once when they would), or end the turn when the moment has come for the player to answer.
@@ -94627,6 +94676,8 @@ Answer with one JSON object: {"scene": {"continues": true or false, "place": the
 ${DM_RULES}
 
 Here is the scene so far and the beat just decided. Who perceived it, and how fully? Did it move anyone (their staging)? Does the world do anything now? Do those you play or handle act? Who acts next among those playing as their own agents, or do several act at once? Has the moment come for the player to answer? Keep the scene moving at the pace the story wants: end the turn when {{pov}} has something to answer, see or decide.
+
+A beat of the world itself, which no one acts in (rain starts, a door slams in the wind), takes no "deed". Write "exposure" entries only for the beats listed as just decided, waiting for who perceived them; a beat you write yourself carries its own "exposure".
 
 Answer with one JSON object: {"exposure": [{"beat": the ref of a beat just decided, "who", "channel", "reach"}], "staging": [${SCENE_STAGING_SHAPE}, for each person this moved], "beats": [${BEAT_SHAPE}], "next": [ids of characters playing as their own agents who act now], "end": your reason the player answers now, or null, "sceneEnds": true when the scene itself ends with this turn, "why": one or two plain sentences explaining the choice}.`,
     asks: [STAGING_PLACE_ASK, WHY_ASK]
@@ -94655,7 +94706,7 @@ Answer with one JSON object: {"beats": [${BEAT_SHAPE}], "why": one or two plain 
     label: "The poll",
     note: "After each turn the author reads what changed and decides who catches up now and who can wait until they matter, who reflects, whether it reflects itself, how its open predictions scored, and what happens off screen: the episodes it opens with each part's treatment, and which drafts settle, drop or are rebased; it logs what it considered and didn't raise.",
     vars: VARS,
-    contract: '{"catchup": [{"who", "why"}], "reflect": [{"who", "why"}], "author": {"depth", "why"} | null, "scores": [{"prediction", "outcome", "note"}], "episodes": [{"why", "in", "minutes", "places", "people", "parts": [{"who"?, "event"?, "treatment", "rationale", "major"?}]}], "settle": [{"draft", "why"}], "drop": [{"draft", "why"}], "rebase": [{"draft", "why"}], "considered": [{"what", "raised", "why"}], "why": string}',
+    contract: '{"catchup": [{"who", "why"}], "reflect": [{"who", "why"}], "author": {"depth", "why"} | null, "scores": [{"prediction", "outcome", "note"}], "episodes": [{"why", "in", "minutes", "places", "people", "parts": [{"who"?, "event"?, "treatment", "rationale", "major"?}]}], "settle": [{"draft", "why"}], "drop": [{"draft", "why"}], "rebase": [{"draft", "why"}], "wake": {"minutes", "why"} | null, "considered": [{"what", "raised", "why"}], "why": string}',
     text: `${AUTHOR}
 
 A turn has just been played. Here is what changed: its beats, what characters wrote that will stay with them, the story time that passed, plans falling due, what reached each character that they haven't lived yet, and the player's own signals; and off screen, your open drafts and what has happened since each one's story time. You are the story's nervous system: you decide who thinks, and when, and how the world lives beyond {{pov}}'s view.
@@ -94666,8 +94717,9 @@ A turn has just been played. Here is what changed: its beats, what characters wr
 - What should happen off screen, and at what depth? Open an episode where the world must move beyond {{pov}}'s view because it will matter (a plan falling due, a consequence, someone's life going on): when it happens, where, who is in it, why it matters, and each person's and each event's treatment, graded against the player's own words on what deserves more than written and kept within what this interval's allowances leave: "live" (they play as their own agents, the costliest), "campfire" (you play them from their minds), "room" (you and the GM decide what happens to them), "written" (a few plain beats). Where nothing is at stake, open nothing. Where you judge a moment major, mark its part "major": if its treatment's allowance is spent, the player is asked whether to spend one more instead of it sliding down to a cheaper treatment. Mark only what truly is.
 - Your open drafts: settle one now when the story will soon reach what it holds (someone or something in it is about to enter a scene past its time), drop one the story has overtaken, and leave the rest until they matter. A draft a swipe took off the chain is a rebase candidate: rebase it (it stands where the story now is, and its pins are read when it settles), or drop it.
 - Log what you considered and whether you raised it, with your reason, so the player can read your judgment. Raise nothing out of habit.
+- If something should be looked at again once enough story time has passed (a plan maturing, a wait running out), ask to be woken after that many story minutes; otherwise null.
 
-Answer with one JSON object: {"catchup": [{"who": an id, "why": your reason}], "reflect": [{"who": an id, "why": your reason}], "author": {"depth": "scene" or "chapter", "why": your reason} or null, "scores": [{"prediction": its id, "outcome": "hit", "miss" or "partly", "note": what happened}], "episodes": [{"why": why it matters, "in": story minutes from now until it starts (negative when it already began), "minutes": how long it runs, "places": [place ids], "people": [ids], "parts": [{"who": an id, or "event": the event in words, "treatment": "live", "campfire", "room" or "written", "rationale": your grade against the player's words, and why, "major": true when you judge the moment major}]}], "settle": [{"draft": its id, "why": your reason}], "drop": [{"draft": its id, "why": your reason}], "rebase": [{"draft": its id, "why": your reason}], "considered": [{"what": what you considered, "raised": true or false, "why": your reason}], "why": one or two plain sentences explaining the choice}.`,
+Answer with one JSON object: {"catchup": [{"who": an id, "why": your reason}], "reflect": [{"who": an id, "why": your reason}], "author": {"depth": "scene" or "chapter", "why": your reason} or null, "scores": [{"prediction": its id, "outcome": "hit", "miss" or "partly", "note": what happened}], "episodes": [{"why": why it matters, "in": story minutes from now until it starts (negative when it already began), "minutes": how long it runs, "places": [place ids], "people": [ids], "parts": [{"who": an id, or "event": the event in words, "treatment": "live", "campfire", "room" or "written", "rationale": your grade against the player's words, and why, "major": true when you judge the moment major}]}], "settle": [{"draft": its id, "why": your reason}], "drop": [{"draft": its id, "why": your reason}], "rebase": [{"draft": its id, "why": your reason}], "wake": {"minutes": story minutes from now, "why": your reason} or null, "considered": [{"what": what you considered, "raised": true or false, "why": your reason}], "why": one or two plain sentences explaining the choice}.`,
     asks: [WHY_ASK]
   },
   {
@@ -94701,7 +94753,7 @@ The player edited a reply. The reply renders beats that were canon; his edit is 
 ${EDIT_RULES}
 
 ${EDIT_ANSWER}`,
-    asks: [WHY_ASK]
+    asks: [WHY_OWN_ASK]
   },
   {
     id: SCENE_TEXT.editOwn,
@@ -94717,7 +94769,7 @@ The player edited his own message, from which the beats of what {{pov}} did and 
 ${EDIT_RULES}
 
 ${EDIT_ANSWER}`,
-    asks: [WHY_ASK]
+    asks: [WHY_OWN_ASK]
   }
 ];
 
@@ -94728,7 +94780,7 @@ var OFFSCREEN_TEXT = {
   settle: "depth.author.settle",
   walkOn: "depth.author.walk_on"
 };
-var SETTLE_BEATS = `"beats": [{"ref": a beat's ref, "keep": true or false, "what": its adjusted truth, "surface": what there was to sense, adjusted, "quotes": its words, adjusted}], "effects": [{"index": a world change's number, "keep": true or false}], "attempts": [{"who": an id, "attempt": what they try now}]`;
+var SETTLE_BEATS = `"beats": [{"ref": a beat's ref, "keep": true or false, "what": its adjusted truth, "surface": what there was to sense, adjusted, "quotes": its words, adjusted, "deed": what its actors did and said, adjusted, plainly, as they did it (null when no one acts in it)}], "effects": [{"index": a world change's number, "keep": true or false}], "attempts": [{"who": an id, "attempt": what they try now}]`;
 var EPISODE_BEAT = `${BEAT_SHAPE.slice(0, -1)}, "attempt": what its actor tries that the world's rules decide (a sale, a theft, a fight), if anything}`;
 var TOUCH_SHAPE = '{"who": an id, or "place": a place id, or "thing": what it is in words, "after": story minutes after the episode starts from which it holds them}';
 var TREATMENTS = `Each person's and each event's treatment is how much of the story's effort it gets:
@@ -94789,7 +94841,7 @@ Answer with one JSON object: {"exposure": [{"beat": the ref of a beat just decid
     label: "Settling a draft",
     note: "A draft settles against every beat since its story time: the author keeps it, adjusts what something seen since contradicts, drops it when the story overtook it, or redrafts it for a later time. What it settles becomes canon now, its narrative dated when it happened, and those in it catch up on what reached them.",
     vars: VARS,
-    contract: '{"verdict": "settle" | "drop" | "redraft", "why": string, "beats": [{"ref", "keep", "what"?, "surface"?, "quotes"?}], "effects": [{"index", "keep"}], "attempts": [{"who", "attempt"}], "redraft": {"in"} | null}',
+    contract: '{"verdict": "settle" | "drop" | "redraft", "why": string, "beats": [{"ref", "keep", "what"?, "surface"?, "quotes"?, "deed"?}], "effects": [{"index", "keep"}], "attempts": [{"who", "attempt"}], "redraft": {"in"} | null}',
     text: `${AUTHOR}
 
 A draft of something that happened off screen waits to become canon. Here it is: its episode, its beats at their own times, and the world changes it would make. Here too is everything that has happened in the story since its story time, every beat whoever decided it: each one is a pin the draft must agree with. Read the draft against them, and against your notebook:
@@ -94800,7 +94852,7 @@ A draft of something that happened off screen waits to become canon. Here it is:
 - Redraft it when it no longer fits but something like it should still happen, and say when.
 
 Answer with one JSON object: {"verdict": "settle", "drop" or "redraft", "why": a line on how it reads against the pins, ${SETTLE_BEATS}, "redraft": {"in": story minutes from now until it starts} or null}. Give adjusted words only where you change them.`,
-    asks: [WHY_ASK]
+    asks: [WHY_OWN_ASK]
   },
   {
     id: OFFSCREEN_TEXT.walkOn,
@@ -94809,7 +94861,7 @@ Answer with one JSON object: {"verdict": "settle", "drop" or "redraft", "why": a
     label: "A scene reaches a draft",
     note: "Before the player's scene plays past what an open draft holds (its people, its places, the things it changes), the author settles the draft now, drops it, or re-dates it to after the scene: no one plays from what isn't canon. A settlement here is a walk-on, its own line in the turn's budget.",
     vars: VARS,
-    contract: '{"verdict": "settle" | "drop" | "redate", "why": string, "beats": [{"ref", "keep", "what"?, "surface"?, "quotes"?}], "effects": [{"index", "keep"}], "attempts": [{"who", "attempt"}], "redate": {"in"} | null}',
+    contract: '{"verdict": "settle" | "drop" | "redate", "why": string, "beats": [{"ref", "keep", "what"?, "surface"?, "quotes"?, "deed"?}], "effects": [{"index", "keep"}], "attempts": [{"who", "attempt"}], "redate": {"in"} | null}',
     text: `${AUTHOR}
 
 The scene {{pov}} is playing reaches something an open draft holds: a draft of what happens off screen, not canon yet, holding people, places or things this scene has, from before the scene's time. No one plays past it while it is open, and you never play around it: settle it now, drop it, or re-date it to after this scene. Here is the draft (its episode, its beats at their own times, the world changes it would make), what of this scene it holds, and everything that has happened since its story time, every beat whoever decided it, this scene's so far included: each one is a pin the draft must agree with. Read it against them, and against your notebook:
@@ -94820,7 +94872,7 @@ The scene {{pov}} is playing reaches something an open draft holds: a draft of w
 - Re-date it when it hasn't happened yet after all: it happens as drafted, later, after this scene. Say when it starts.
 
 Answer with one JSON object: {"verdict": "settle", "drop" or "redate", "why": a line on how it reads against the pins and this scene, ${SETTLE_BEATS}, "redate": {"in": story minutes from now until it starts, past this scene} or null}. Give adjusted words only where you change them.`,
-    asks: [WHY_ASK]
+    asks: [WHY_OWN_ASK]
   }
 ];
 
@@ -94950,7 +95002,7 @@ var REALTIME_WATCH_ANSWER = `Answer with one JSON object and nothing else:
  "world": [{"what": "what happens, in plain words", "surface": "what there is to sense of it, as anyone there could sense it, from no one's side", "said": "exact words someone says aloud in it, or null", "by": ["the ids of anyone who acts in it"], "deed": "what they did and said, plainly, as they did it, never as anyone saw or heard it: each lives it as their own act; null when no one acts in it", "perceived": [{"who": "an id", "channel": "hearing", "sight" or "touch", "reach": "whole" or "partial"}]}],
  "end": null, or why real-time dialogue ends after this line,
  "poll": "now" or "later",
- "reasoning": "a short account of your reading"}
+ "why": "one or two plain sentences explaining your reading"}
 With a takeover, the rest may be null.`;
 var REALTIME_EXPOSURE = `You are the author of this story, running it like a game master while the player talks with {{name}} in real time. {{name}} has just answered his line from their own mind, and their answer is more than words said back to him: something they did, words meant for someone else, or something they tried to bring about, which the GM has resolved. As for every beat, you write who was placed to perceive it, through what, and how fully, grounded in where everyone is:
 ` + `1. Who perceived {{name}}'s answer, besides {{name}}: by sight, hearing or touch, whole or only in part (a glance from across the room, a hand half hidden by the desk). The player character too, only where he could: an act meant to go unseen reaches only those placed to catch it, and what doesn't reach him, the narration never shows him.
@@ -94959,13 +95011,13 @@ var REALTIME_EXPOSURE = `You are the author of this story, running it like a gam
 var REALTIME_EXPOSURE_ANSWER = `Answer with one JSON object and nothing else:
 {"answer": [{"who": "the id of someone who perceived the answer, the player character included where he did", "channel": "hearing", "sight" or "touch", "reach": "whole" or "partial"}],
  "outcome": [{"who": "the id of someone who perceived how the attempt turned out", "channel": "hearing", "sight" or "touch", "reach": "whole" or "partial"}], or [] when nothing was attempted,
- "reasoning": "a short account of your reading"}
+ "why": "one or two plain sentences explaining your reading"}
 An empty "answer": no one perceived it but the one who did it.`;
 var REALTIME_PROMPTS = [
   { id: REALTIME_TEXT.watch, page: page5, group, label: "The author's watch", note: "Read beside each line the player speaks in real time, while the character answers it: whether the character can simply hear and answer it or the author takes it into a full scene, the player's line as a beat, who else perceives the exchange, whether the world does anything, whether the conversation ends, and whether the poll waits for its end.", text: REALTIME_WATCH, vars: [NAME2] },
-  { id: REALTIME_TEXT.watchAnswer, page: page5, group, label: "The watch's answer", note: "The answer's shape, which the backend reads: a takeover or the player's line, who else perceives the exchange, the world's beats, the end, and the poll.", text: REALTIME_WATCH_ANSWER, vars: [] },
+  { id: REALTIME_TEXT.watchAnswer, page: page5, group, label: "The watch's answer", note: "The answer's shape, which the backend reads: a takeover or the player's line, who else perceives the exchange, the world's beats, the end, and the poll.", text: REALTIME_WATCH_ANSWER, vars: [], asks: [ACCOUNT_ASK] },
   { id: REALTIME_TEXT.exposure, page: page5, group, label: "Who perceived an answer", note: "Asked once the character has answered, when the answer is more than words said back to the player character (something they did, words meant for someone else, an attempt the GM resolved): who perceived it, and how the attempt turned out, as for every beat.", text: REALTIME_EXPOSURE, vars: [NAME2] },
-  { id: REALTIME_TEXT.exposureAnswer, page: page5, group, label: "Who perceived an answer: the answer", note: "The answer's shape, which the backend reads: who perceived the answer and its outcome, by what and how fully.", text: REALTIME_EXPOSURE_ANSWER, vars: [] },
+  { id: REALTIME_TEXT.exposureAnswer, page: page5, group, label: "Who perceived an answer: the answer", note: "The answer's shape, which the backend reads: who perceived the answer and its outcome, by what and how fully.", text: REALTIME_EXPOSURE_ANSWER, vars: [], asks: [ACCOUNT_ASK] },
   { id: REALTIME_TEXT.chipOn, page: page5, group, label: "Chip: talking with someone", note: "The chip under the last reply while real-time dialogue runs.", text: "Talking with {{name}}", vars: [NAME2] },
   { id: REALTIME_TEXT.chipOnDetail, page: page5, group, label: "Chip: what real time does", note: "The line under the chip while real-time dialogue runs.", text: "Your lines go straight to {{name}}, who answers from their own mind. The author reads each line beside them and takes it into a full scene when it needs one.", vars: [NAME2] },
   { id: REALTIME_TEXT.chipLeave, page: page5, group, label: "Chip: Leave", note: "The button that ends real-time dialogue; your next line plays as a scene.", text: "Leave", vars: [] },
@@ -98362,6 +98414,9 @@ function settle5(all2, staging, strikes) {
     duplicates
   };
 }
+function inStoryOrder(beats) {
+  return [...beats].sort((a, b) => a.beat.at - b.beat.at || a.beat.order - b.beat.order || a.index - b.index);
+}
 function stagingBefore(read, index, scene) {
   const out = new Map;
   for (const s of read.staging) {
@@ -101553,6 +101608,59 @@ function connectionPlace(host, userId, connection, throttles, signal2, fallback 
   }
   return gate.take(most, signal2, o);
 }
+var WINDOWS = new WeakMap;
+var FORE_WAITING = new WeakMap;
+function minuteWindowOf(host, userId) {
+  let users = WINDOWS.get(host);
+  if (!users) {
+    users = new Map;
+    WINDOWS.set(host, users);
+  }
+  let w = users.get(userId);
+  if (!w) {
+    w = new Map;
+    users.set(userId, w);
+  }
+  return w;
+}
+async function minuteRoom(window, connection, tokens3, throttle, signal2, clock = SYSTEM_CLOCK, lane = "foreground") {
+  if (!throttle)
+    return { at: clock.now(), tokens: tokens3 };
+  const requests = limitOf(throttle.requestsPerMinute);
+  const perMinute = limitOf(throttle.tokensPerMinute);
+  if (tokens3 > perMinute)
+    throw new AgentStop("throttle", { id: STOP_TEXT.throttle, vars: { tokens: counted(tokens3, "token", "tokens"), limit: String(perMinute) } });
+  let fore = FORE_WAITING.get(window);
+  if (!fore) {
+    fore = new Map;
+    FORE_WAITING.set(window, fore);
+  }
+  let waiting = false;
+  try {
+    for (;; ) {
+      const now = clock.now();
+      const recent = (window.get(connection) ?? []).filter((e) => e.at > now - MINUTE_MS);
+      window.set(connection, recent);
+      const used = recent.reduce((n, e) => n + e.tokens, 0);
+      const oldest = recent[0];
+      const room = !oldest || recent.length < requests && used + tokens3 <= perMinute;
+      const ahead = lane === "foreground" ? 0 : fore.get(connection) ?? 0;
+      if (room && ahead === 0) {
+        const entry = { at: now, tokens: tokens3 };
+        recent.push(entry);
+        return entry;
+      }
+      if (lane === "foreground" && !waiting) {
+        waiting = true;
+        fore.set(connection, (fore.get(connection) ?? 0) + 1);
+      }
+      await clock.sleep(room || !oldest ? 1 : oldest.at + MINUTE_MS - now + (lane === "foreground" ? 0 : 1), signal2);
+    }
+  } finally {
+    if (waiting)
+      fore.set(connection, (fore.get(connection) ?? 1) - 1);
+  }
+}
 var emptySpend = () => ({ tokensIn: 0, cachedIn: 0, tokensOut: 0, calls: 0, refused: 0, estimated: false });
 function spendOf2(raw) {
   if (!isRecord(raw))
@@ -101605,7 +101713,7 @@ class AgentAccounts {
       let damaged = false;
       const raw = await readStoredJson(this.host, ACCEPTANCE_PATH, userId, "acceptance runs", (r) => isRecord(r) && r.v === 1, () => damaged = true);
       const file = isRecord(raw) ? raw : {};
-      const u = { run: runOf2(file.run), last: runOf2(file.last), guard: Array.isArray(file.connections) ? acceptanceConnectionsOf(file.connections) : undefined, lost: damaged || file.lost === true, setAside: damaged, held: new Map, window: new Map, calibration: new Map, refusesTools: new Set, writing: Promise.resolve(), unread: null, warned: new Set };
+      const u = { run: runOf2(file.run), last: runOf2(file.last), guard: Array.isArray(file.connections) ? acceptanceConnectionsOf(file.connections) : undefined, lost: damaged || file.lost === true, setAside: damaged, held: new Map, window: minuteWindowOf(this.host, userId), calibration: new Map, refusesTools: new Set, writing: Promise.resolve(), unread: null, warned: new Set };
       this.users.set(userId, u);
       if (damaged)
         this.save(userId, u);
@@ -101654,7 +101762,7 @@ class AgentAccounts {
       const known2 = this.unread.get(userId);
       if (known2)
         return known2;
-      const u = { run: null, last: null, guard: undefined, lost: false, setAside: false, held: new Map, window: new Map, calibration: new Map, refusesTools: new Set, writing: Promise.resolve(), unread: error instanceof Error ? error.message : String(error), warned: new Set };
+      const u = { run: null, last: null, guard: undefined, lost: false, setAside: false, held: new Map, window: minuteWindowOf(this.host, userId), calibration: new Map, refusesTools: new Set, writing: Promise.resolve(), unread: error instanceof Error ? error.message : String(error), warned: new Set };
       this.unread.set(userId, u);
       return u;
     }
@@ -101712,24 +101820,6 @@ class AgentAccounts {
     u.refusesTools.add(connection);
     this.host.log("info", `[LumiRPEngine] connection ${connection} refused native tools (${reason2.slice(0, 200)}); its agents are offered them as text from now on`, userId);
   }
-  async throttle(u, connection, tokens3, throttle, signal2) {
-    if (!throttle)
-      return;
-    const requests = limitOf(throttle.requestsPerMinute);
-    const perMinute = limitOf(throttle.tokensPerMinute);
-    if (tokens3 > perMinute)
-      throw new AgentStop("throttle", { id: STOP_TEXT.throttle, vars: { tokens: counted(tokens3, "token", "tokens"), limit: String(perMinute) } });
-    for (;; ) {
-      const now = this.clock.now();
-      const recent = (u.window.get(connection) ?? []).filter((e) => e.at > now - MINUTE_MS);
-      u.window.set(connection, recent);
-      const used = recent.reduce((n, e) => n + e.tokens, 0);
-      const oldest = recent[0];
-      if (!oldest || recent.length < requests && used + tokens3 <= perMinute)
-        return;
-      await this.clock.sleep(oldest.at + MINUTE_MS - now, signal2);
-    }
-  }
   async reserve(input) {
     const { userId, settings } = input;
     const u = await this.forCall(userId);
@@ -101758,8 +101848,9 @@ class AgentAccounts {
     const release = await this.atOnce(userId, connection, settings.throttles, input.signal, settings.callsAtOnce);
     let tokensIn;
     const run = u.run;
+    let entryAt = null;
     try {
-      await this.throttle(u, connection, input.tokensIn + input.tokensOut, throttle, input.signal);
+      entryAt = await minuteRoom(u.window, connection, input.tokensIn + input.tokensOut, throttle, input.signal, this.clock);
       const factor2 = u.calibration.get(`${connection}\x00${input.model}`) ?? settings.acceptance.estimateFactor;
       tokensIn = Math.ceil(input.tokensIn * factor2);
       if (run && entry) {
@@ -101776,14 +101867,14 @@ class AgentAccounts {
         }
       }
     } catch (error) {
+      const kept3 = u.window.get(connection);
+      if (entryAt && kept3)
+        u.window.set(connection, kept3.filter((e) => e !== entryAt));
       release();
       throw error;
     }
     const held3 = u.held.get(connection) ?? { tokensIn: 0, tokensOut: 0 };
     u.held.set(connection, { tokensIn: held3.tokensIn + tokensIn, tokensOut: held3.tokensOut + input.tokensOut });
-    const entryAt = { at: this.clock.now(), tokens: input.tokensIn + input.tokensOut };
-    if (throttle)
-      u.window.set(connection, [...u.window.get(connection) ?? [], entryAt]);
     if (run)
       this.changed(userId);
     return { userId, connection, model: input.model, estimate: input.tokensIn, tokensIn, tokensOut: input.tokensOut, run, entry: entryAt, accounts: u, release };
@@ -103108,6 +103199,26 @@ async function readCard(host, characterId, userId) {
     return null;
   }
 }
+async function formCore(input) {
+  const host = input.host;
+  const texts2 = input.texts ? { texts: input.texts } : {};
+  let card = null;
+  if (host?.characters) {
+    if (input.characterId)
+      card = await readCard(host, input.characterId, input.userId);
+    else {
+      const own2 = await host.characters.ofChat(input.chatId, input.userId).catch(() => null);
+      const chats = own2 ? await readCard(host, own2, input.userId) : null;
+      if (chats && sameName2(chats.name, input.name))
+        card = chats;
+    }
+  }
+  const fromCard = card ? cardCoreText(card, { name: input.name, player: input.player, ...texts2 }) : "";
+  if (fromCard !== "")
+    return { ...seedCore({ who: input.who, at: input.at, source: "card", text: fromCard }), source: "card" };
+  const fromWorld = worldCoreText({ name: input.name, fields: input.fields, lore: [], player: input.player, ...texts2 });
+  return fromWorld !== "" ? { ...seedCore({ who: input.who, at: input.at, source: "world", text: fromWorld, review: true }), source: "world" } : null;
+}
 
 // src/backend/depth/offscreen/drafts.ts
 var DRAFT_TYPES = [STORY_DRAFT, STORY_SETTLE, AUTHOR_DROP];
@@ -103307,6 +103418,14 @@ async function budgetFor(day2, userId, budget) {
 }
 
 // src/backend/depth-model-host.ts
+function cachedMessages(messages, cache2) {
+  const out2 = messages.map((m) => ({ role: m.role, content: m.content }));
+  const first = out2[0];
+  if (!cache2 || cache2.limit - ownBreakpoints(cache2, 0) < 1 || !first || first.role !== "system" || first.content === "" || out2.length < 2)
+    return out2;
+  out2[0] = { ...first, parts: [{ type: "text", text: first.content, cache: true }] };
+  return out2;
+}
 var RETRY_WAIT_MS = 2000;
 function reportedCost(usage2) {
   if (!usage2)
@@ -103349,6 +103468,8 @@ class ProviderRefusal extends Error {
   role;
   category;
   explanation;
+  usage;
+  call;
   constructor(role, category, explanation) {
     super(`the ${role}'s call was refused by its provider (stop reason refusal${category ? `, category ${category}` : ""})${explanation ? `: ${explanation}` : ", with no reason given"}`);
     this.role = role;
@@ -103377,12 +103498,14 @@ function depthPort(host, settings, userId, o = {}) {
   const day2 = o.day === undefined ? daySpendOf(host) : o.day;
   const lane = o.lane ?? "background";
   const rooms = o.rooms ?? LEARNED_ROOMS;
+  const clock = o.clock ?? SYSTEM_CLOCK;
   return async (role, messages, opts = {}) => {
     const s = await settings(userId);
     const call = depthCall(s, role);
     const signal2 = opts.signal ?? new AbortController().signal;
     const promptChars = messages.reduce((n, m) => n + m.content.length, 0);
     const connection = call.connectionId ?? (await host.connections?.active(userId).catch(() => null))?.id ?? "";
+    const cache2 = (await host.connections?.profile?.(call.connectionId ?? null, userId).catch(() => null))?.cache;
     const room = `${connection}
 ${call.model ?? ""}`;
     const asked2 = opts.maxTokens ?? call.maxTokens;
@@ -103398,10 +103521,14 @@ ${call.model ?? ""}`;
         return;
       };
       let pause2 = 0;
+      let sending = false;
       try {
         release = await connectionPlace(host, userId, connection, s.agents.throttles, signal2, s.agents.callsAtOnce, lane === "foreground" ? {} : { lane, ...lane === "background" ? { background: s.depth.background.atOnce } : {}, giveWay: () => giving.abort(new Error("it gave its place on its connection to a turn's call")) });
+        const throttle = s.agents.throttles.find((t) => t.id === connection);
+        const entry = await minuteRoom(minuteWindowOf(host, userId), connection, Math.ceil(promptChars / 3.2) + maxTokens, throttle, AbortSignal.any([signal2, giving.signal]), clock, lane);
+        sending = true;
         const r = await host.models.quiet({
-          messages: messages.map((m) => ({ role: m.role, content: m.content })),
+          messages: cachedMessages(messages, cache2),
           maxTokens,
           json: opts.json ?? false,
           connectionId: call.connectionId,
@@ -103412,10 +103539,14 @@ ${call.model ?? ""}`;
           stream: true
         }, userId, AbortSignal.any([signal2, giving.signal]));
         const answered = usageOf(r, promptChars);
+        entry.tokens = answered.tokensIn + answered.tokensOut;
         day2?.add(userId, answered.tokensIn + answered.tokensOut);
         const refused2 = refusalOf2(role, r);
-        if (refused2)
+        if (refused2) {
+          refused2.usage = answered;
+          refused2.call = { connection: call.connectionId ?? "", model: r.model ?? call.model ?? "" };
           throw refused2;
+        }
         const usage2 = gaveWay > 0 ? { ...answered, tokensIn: answered.tokensIn + gaveWay } : answered;
         const requestId = requestIdOf(r.usage);
         return { text: r.content, ...r.reasoning ? { reasoning: r.reasoning } : {}, usage: usage2, ...r.finishReason ? { finish: r.finishReason } : {}, call: { connection: call.connectionId ?? "", model: r.model ?? call.model ?? "", ...requestId ? { requestId } : {} }, ...capped ? { capped } : {}, room: maxTokens };
@@ -103423,7 +103554,7 @@ ${call.model ?? ""}`;
         if (error instanceof ProviderRefusal)
           throw error;
         if (giving.signal.aborted && !signal2.aborted) {
-          const sent = Math.ceil(promptChars / 3.2);
+          const sent = sending ? Math.ceil(promptChars / 3.2) : 0;
           gaveWay += sent;
           day2?.add(userId, sent);
           host.log("info", `[LumiRPEngine] depth ${role} call gave its place on its connection to a turn's call; it waits in line again, its prompt (about ${sent} tokens) counted as spent`, userId);
@@ -103609,7 +103740,7 @@ async function mindsView(rt, chatId, userId) {
   const basis = await rt.ledger.basisFor(chatId, userId);
   const at2 = basis ? await rt.ledger.foldAtBasis(chatId, userId, basis) : null;
   if (!basis || !at2)
-    return { on: false, pov: null, povChoices: [], characters: [] };
+    return { on: false, pov: null, characters: [] };
   const { state: state2, world, story } = at2;
   const cal = calendarOf(world);
   const pov2 = povOf(world, state2);
@@ -103637,7 +103768,6 @@ async function mindsView(rt, chatId, userId) {
   return {
     on: characters.length > 0 || beats.length > 0,
     pov: people.includes(pov2) ? { id: pov2, name: nameOf11(world, state2, pov2) } : null,
-    povChoices: people.filter((id2) => id2 !== pov2).map((id2) => ({ id: id2, name: nameOf11(world, state2, id2) })),
     characters: characters.sort((a, b) => a.name.localeCompare(b.name))
   };
 }
@@ -103650,7 +103780,7 @@ async function mindView(rt, chatId, userId, who) {
   const reaching = story.beats.filter((p) => p.beat.exposure.some((x) => x.who === who));
   const byId = new Map(story.beats.map((p) => [p.beat.id, p]));
   const numbers4 = await chatNumbers(rt.host, chatId, userId);
-  const writes = (await rt.ledger.readEvents(chatId, userId, [MIND_WRITE])).map((e) => ({ data: mindWriteEvent(e.event), reasoning: e.reasoning })).filter((w) => w.data?.who === who);
+  const writes = (await rt.ledger.readEvents(chatId, userId, [MIND_WRITE])).map((e) => ({ data: mindWriteEvent(e.event), reasoning: e.reasoning })).filter((w) => w.data?.who === who).map((w) => ({ ...w, reasoning: w.reasoning ?? w.data?.reasoning }));
   const takes2 = takesOf(state2, who);
   const interviews = (await rt.ledger.readEvents(chatId, userId, [MIND_INTERVIEW])).flatMap((e) => {
     const d = "data" in e.event ? mindInterviewOf(e.event.data) : null;
@@ -103676,7 +103806,7 @@ async function mindView(rt, chatId, userId, who) {
   ];
   const texts2 = await textsOf(rt.blobs, userId, hashes);
   const { replaced } = exposedBeats(story);
-  const files = Object.entries(meta).map(([rel, m]) => ({ path: rel, text: texts2[m.hash] ?? "", pinned: pinnedBy(m, rel), revisions: m.rev, at: formatClock(cal, m.at), ...writtenFromGone(m, mind2, replaced) ? { out: true } : {} })).sort((a, b) => mindFileOrder(a.path) - mindFileOrder(b.path) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const files = Object.entries(meta).map(([rel, m]) => ({ path: rel, text: texts2[m.hash] ?? "", pinned: pinnedBy(m, rel), revisions: m.rev, at: formatClock(cal, m.at), ...writtenFromGone(m, mind2, replaced) ? { out: true } : {}, ...m.review ? { review: true } : {} })).sort((a, b) => mindFileOrder(a.path) - mindFileOrder(b.path) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const previous = new Map;
   const written2 = [];
   for (const [i, w] of writes.entries()) {
@@ -103754,13 +103884,7 @@ async function mindEditUndo(rt, chatId, userId, entry) {
     throw new MindRefused("refused", `LumiRPEngine couldn't undo it: ${r.reason}`);
   return r;
 }
-async function povSwitch(rt, chatId, userId, who) {
-  const at2 = await foldAt(rt, chatId, userId);
-  personOf2(rt, at2.world, at2.state, who);
-  if (povOf(at2.world, at2.state) === who)
-    return;
-  await land(rt, chatId, userId, at2.basis, MIND_POV, { events: [mindPovEvent(who)], blobs: {} }, layerEntryId("pov", chatId, who, at2.basis.message, at2.basis.swipe, String(Date.now())), "user");
-}
+var PLAY_AS_OFF = "Play as isn't supported yet: you play one player character, the one this chat plays now.";
 async function interviewMind(rt, chatId, userId, who, question, neutral, model2) {
   const at2 = await foldAt(rt, chatId, userId);
   personOf2(rt, at2.world, at2.state, who);
@@ -103799,6 +103923,14 @@ async function catchUpNow(rt, chatId, userId, who, o = {}) {
   let gone = o.gone && o.gone.length > 0 ? storyOrder(o.gone) : null;
   const settings = await rt.settings.get(userId);
   const model2 = o.model ?? portFor(rt, userId);
+  const first = await foldAt(rt, chatId, userId, o.basis, DRAFT_TYPES);
+  if (Object.keys(mindMetaAt(first.state, who)).length === 0 && hasAgent(first.world, first.state, who)) {
+    const linked = own(first.world.entities, who)?.characterId;
+    const fields = (own(first.state.entities, who) ?? own(first.world.entities, who))?.fields ?? {};
+    const formed = await formCore({ who, name: nameOf11(first.world, first.state, who), player: nameOf11(first.world, first.state, povOf(first.world, first.state)), at: first.state.clock, fields, ...typeof linked === "string" && linked !== "" ? { characterId: linked } : {}, host: rt.host, chatId, userId, texts: settings.prompts.texts });
+    if (formed)
+      entries2.push(await land(rt, chatId, userId, first.basis, MIND_WRITE, formed, layerEntryId("mind-form", chatId, who, first.basis.message, first.basis.swipe), "character"));
+  }
   for (;; ) {
     const at2 = await foldAt(rt, chatId, userId, o.basis, DRAFT_TYPES);
     personOf2(rt, at2.world, at2.state, who);
@@ -108544,6 +108676,83 @@ function giveWay() {
   return promise;
 }
 
+// src/backend/layer-carry.ts
+var LAYER_CARRY_KEY = "lre_layer";
+var LAYER_CARRY_MAX = 1e6;
+var LAYER_CARRY_RAW_MAX = 8000000;
+function carryOf(chatId, runSeed, entries2, chain) {
+  const at2 = new Date().toISOString();
+  const head = { v: 1, chat: chatId, runSeed, at: at2, entries: entries2.length };
+  const json = JSON.stringify(entries2);
+  if (json.length > LAYER_CARRY_RAW_MAX)
+    return { ...head, over: true };
+  const bases = new Set(entries2.map((e) => e.basis.message));
+  const messages = chain.filter((m) => bases.has(m.id)).map((m) => ({ id: m.id, user: m.isUser, keys: m.swipes.map((_, s) => swipeKeyOf({ ...m, swipeId: s }, [])) }));
+  const gz = Buffer.from(Bun.gzipSync(json)).toString("base64");
+  if (gz.length + JSON.stringify(messages).length > LAYER_CARRY_MAX)
+    return { ...head, over: true };
+  return { ...head, messages, gz };
+}
+function carryIn(meta) {
+  const c = meta[LAYER_CARRY_KEY];
+  if (!isRecord(c) || c.v !== 1 || typeof c.chat !== "string" || typeof c.runSeed !== "string" || typeof c.at !== "string" || typeof c.entries !== "number")
+    return null;
+  if (c.over === true)
+    return c;
+  if (typeof c.gz !== "string" || !Array.isArray(c.messages))
+    return null;
+  return c;
+}
+function carriedEntries(carry) {
+  if ("over" in carry)
+    return null;
+  try {
+    const list2 = JSON.parse(new TextDecoder().decode(Bun.gunzipSync(Buffer.from(carry.gz, "base64"))));
+    return Array.isArray(list2) ? list2 : null;
+  } catch {
+    return null;
+  }
+}
+function carriedMap(carry, copy) {
+  return copyMap(carry.messages.map((m) => ({ id: m.id, user: m.user, keys: new Set(m.keys) })), copy.map((m) => ({ id: m.id, user: m.isUser, keys: new Set(m.swipes.map((_, s) => swipeKeyOf({ ...m, swipeId: s }, []))) })));
+}
+function copyMap(originals, copies) {
+  const places2 = new Map;
+  for (const [j, m] of copies.entries()) {
+    for (const key of m.keys) {
+      const list2 = places2.get(key);
+      if (list2)
+        list2.push(j);
+      else
+        places2.set(key, [j]);
+    }
+  }
+  const ends2 = [];
+  for (const [i, m] of originals.entries()) {
+    const found = new Set;
+    for (const key of m.keys)
+      for (const j of places2.get(key) ?? [])
+        if (copies[j].user === m.user)
+          found.add(j);
+    for (const j of [...found].sort((x, y) => y - x)) {
+      let lo = 0;
+      let hi = ends2.length;
+      while (lo < hi) {
+        const mid = lo + hi >> 1;
+        if (ends2[mid].j < j)
+          lo = mid + 1;
+        else
+          hi = mid;
+      }
+      ends2[lo] = { i, j, prev: ends2[lo - 1] ?? null };
+    }
+  }
+  const out2 = {};
+  for (let p = ends2.at(-1) ?? null;p !== null; p = p.prev)
+    out2[originals[p.i].id] = copies[p.j].id;
+  return out2;
+}
+
 // src/backend/layer-store.ts
 var LAYER_SEGMENT_ENTRIES = 64;
 var LAYER_SEGMENT_CHARS = 128 * 1024;
@@ -108745,6 +108954,14 @@ class LayerStore {
     await this.writeHeld();
     return ready;
   }
+  async adoptHeld(which) {
+    const taken = this.held.filter(which);
+    if (taken.length === 0)
+      return [];
+    this.held = this.held.filter((h) => !taken.includes(h));
+    await this.writeHeld();
+    return taken;
+  }
   async writeHeld() {
     const dir = layerDir(this.chatId);
     if (this.held.length === 0) {
@@ -108771,7 +108988,7 @@ async function ancestorOf(host, chatId, userId, runSeed, opened2, chainOf3, dept
     const from = meta.branched_from;
     const at2 = meta.branch_at_message;
     if (typeof from !== "string" || typeof at2 !== "string" || from === chatId)
-      return "none";
+      return await carriedAncestry(meta, chatId, runSeed, async () => chainOf3(await host.chats.messages(chatId, userId)));
     const fromRun = (await host.chats.chatMetadata(from, userId))[LEDGER_NAMESPACE];
     if (!isRecord(fromRun) || fromRun.runSeed !== runSeed)
       return "none";
@@ -108788,46 +109005,21 @@ async function ancestorOf(host, chatId, userId, runSeed, opened2, chainOf3, dept
     return null;
   }
 }
+async function carriedAncestry(meta, chatId, runSeed, chain) {
+  const carry = carryIn(meta);
+  if (!carry || carry.chat === chatId || carry.runSeed !== runSeed || "over" in carry)
+    return "none";
+  const entries2 = carriedEntries(carry);
+  if (!entries2 || entries2.length === 0)
+    return "none";
+  return { inherit: { from: carry.chat, before: carry.at, messages: carriedMap(carry, await chain()) }, entries: entries2 };
+}
 function inheritMap(ancestor, branchAt, branch) {
   const point = ancestor.findIndex((m) => m.id === branchAt);
   if (point < 0)
     return null;
-  const shared = ancestor.slice(0, point + 1);
-  const [mine, theirs] = [shared, branch].map((list2) => list2.map((m) => new Set(m.swipes.map((_, s) => swipeKeyOf({ ...m, swipeId: s }, [])))));
-  const places2 = new Map;
-  for (const [j, keys] of theirs.entries()) {
-    for (const key of keys) {
-      const list2 = places2.get(key);
-      if (list2)
-        list2.push(j);
-      else
-        places2.set(key, [j]);
-    }
-  }
-  const ends2 = [];
-  for (const [i, keys] of mine.entries()) {
-    const copies = new Set;
-    for (const key of keys)
-      for (const j of places2.get(key) ?? [])
-        if (branch[j].isUser === shared[i].isUser)
-          copies.add(j);
-    for (const j of [...copies].sort((x, y) => y - x)) {
-      let lo = 0;
-      let hi = ends2.length;
-      while (lo < hi) {
-        const mid = lo + hi >> 1;
-        if (ends2[mid].j < j)
-          lo = mid + 1;
-        else
-          hi = mid;
-      }
-      ends2[lo] = { i, j, prev: ends2[lo - 1] ?? null };
-    }
-  }
-  const out2 = {};
-  for (let p = ends2.at(-1) ?? null;p !== null; p = p.prev)
-    out2[shared[p.i].id] = branch[p.j].id;
-  return out2;
+  const [mine, theirs] = [ancestor.slice(0, point + 1), branch].map((list2) => list2.map((m) => ({ id: m.id, user: m.isUser, keys: new Set(m.swipes.map((_, s) => swipeKeyOf({ ...m, swipeId: s }, []))) })));
+  return copyMap(mine, theirs);
 }
 
 // src/shared/diagnostics.ts
@@ -109844,6 +110036,8 @@ class LedgerService {
   chats = new Map;
   unsubscribe = [];
   outstanding = 0;
+  carriedOver = new Set;
+  carryDirty = new Set;
   errors = [];
   hooks = null;
   diag = null;
@@ -109894,8 +110088,12 @@ class LedgerService {
       this.shown.get(e.chatId)?.delete(e.messageId);
       this.unmirror(e.chatId, e.messageId);
       this.onMessage(e.chatId, userId, e.messageId, "deleted");
-    }), h.on("CHAT_DELETED", (e) => {
-      this.shown.delete(e.chatId);
+    }), h.on("CHAT_DELETED", (e, userId) => {
+      this.forget(e.chatId);
+      if (!userId)
+        return;
+      this.outstanding++;
+      this.removeRun(e.chatId, userId).catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: its run files weren't removed (${error instanceof Error ? error.message : String(error)})`, userId)).finally(() => this.outstanding--);
     }), h.on("GENERATION_STARTED", (e, userId) => {
       this.generating.add(e.generationId);
       this.started.delete(e.chatId);
@@ -109926,6 +110124,7 @@ class LedgerService {
         this.diag?.end({ chatId: e.chatId, userId, turn: halt.id }, { status: "failed", reason: `Lumiverse ended the stopped generation instead of stopping it${e.error ? ` (${e.error.slice(0, 200)})` : ""}, so the engine didn't run; generate again` });
       const commit = () => this.run(e.chatId, userId, async (core, observed) => {
         core.sync(observed);
+        await this.carry(e.chatId, core, observed);
         if (e.error)
           this.host.log("warn", `[LumiRPEngine] generation ${e.generationId.slice(0, 8)} ended with an error${cut ? ", its scene cut where its last passage streamed" : ""}: ${e.error.slice(0, 200)}`, userId ?? undefined, e.generationId);
         if (e.error && !cut) {
@@ -110918,6 +111117,12 @@ class LedgerService {
       this.gone(chatId, gate.userId, p, "dropped");
     }
   }
+  async removeRun(chatId, userId) {
+    const dir = runDir(chatId);
+    for (const path2 of await this.host.storage.list(dir, userId))
+      if (path2.startsWith(dir))
+        await this.host.storage.remove(path2, userId);
+  }
   busy(chatId) {
     const slot = this.chats.get(chatId);
     const gate = this.gates.get(chatId);
@@ -111211,6 +111416,8 @@ class LedgerService {
         }
       }
       const made = new Map((await slot.layer.append(accepted)).map((e) => [e.id, e]));
+      if (made.size > 0)
+        this.carryDirty.add(slot.layer.chatId);
       return results.map((r, i) => {
         if (r)
           return r;
@@ -111220,6 +111427,16 @@ class LedgerService {
     } finally {
       slot.landing.length = 0;
     }
+  }
+  async carry(chatId, core, observed) {
+    const slot = this.chats.get(chatId);
+    const runSeed = core.journal.run?.runSeed;
+    if (!slot || !runSeed || !this.carryDirty.delete(chatId) || this.carriedOver.has(chatId))
+      return;
+    const carry = carryOf(chatId, runSeed, slot.layer.foldEntries(), core.chain(observed));
+    if ("over" in carry)
+      this.carriedOver.add(chatId);
+    await this.host.chats.mergeChatMetadata(chatId, { [LAYER_CARRY_KEY]: JSON.parse(JSON.stringify(carry)) }, slot.userId).catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${chatId}: its layer wasn't carried in its metadata (${error instanceof Error ? error.message : String(error)})`, slot.userId));
   }
   async drainLayer(chatId, slot, observed) {
     const open = new Set([...slot.core.journal.windows, ...slot.core.journal.prereply ?? []]);
@@ -111242,6 +111459,31 @@ class LedgerService {
       if (own2 || basisIndex(chain, slot.core.journal.tombstones, d.basis) >= 0)
         this.host.toast(`${own2 ? "Your change" : "Work"} made while the reply was written wasn't kept: ${r.reason}`, slot.userId);
     });
+  }
+  async adoptHeld(chatId, userId, on) {
+    const landed = [];
+    await this.run(chatId, userId, async (core, observed) => {
+      const slot = this.chats.get(chatId);
+      if (!slot)
+        return;
+      const taken = await slot.layer.adoptHeld((h) => on.has(h.draft.basis.message));
+      if (taken.length === 0)
+        return;
+      const results = await this.landNow(slot, core, observed, taken, false);
+      results.forEach((r, i) => {
+        const d = taken[i]?.draft;
+        if (!d)
+          return;
+        const key = `${chatId}\x00${d.id}`;
+        this.heldWaits.get(key)?.resolve(r);
+        this.heldWaits.delete(key);
+        if (r.status === "landed")
+          landed.push(r.entry.id);
+        else
+          this.host.log("info", `[LumiRPEngine] chat ${chatId}: a ${d.kind} result (${d.id}) the turn waited for didn't land: ${r.status === "refused" ? r.reason : r.status}`, userId);
+      });
+    });
+    return landed;
   }
   async layerSummaries(chatId, userId, o = {}) {
     let out2 = [];
@@ -117520,6 +117762,7 @@ function mindsRunConfig(settings, role) {
   const route = { ...base, provider: "helper", ...connection, ...role.effort !== "inherit" ? { effort: effortChoice(role.effort) } : {} };
   return { ...step, enabled: true, route };
 }
+var CLASSIC_MINDS_OFF = "This chat plays at depth: each character's mind is written by their own agent from what they lived, so running minds and their ladder here are off. GM \u2192 Depth \u2192 Minds shows their minds.";
 
 class RunError extends Error {
   code;
@@ -117540,6 +117783,9 @@ class MindsRuns {
   status(chatId, userId) {
     return this.runs.get(`${userId}\x00${chatId}`)?.view ?? null;
   }
+  async off(chatId, userId) {
+    return await this.rt.depthOn(chatId, userId) ? CLASSIC_MINDS_OFF : null;
+  }
   cancel(chatId, userId, runId) {
     const run2 = this.runs.get(`${userId}\x00${chatId}`);
     if (!run2 || run2.view.runId !== runId || run2.view.status !== "running")
@@ -117555,6 +117801,9 @@ class MindsRuns {
     const core = await this.rt.ledger.core(chatId, userId);
     if (!core || !await this.rt.runOf(chatId, userId))
       throw new RunError("not_world_chat", "this chat is not attached to a world");
+    const off = await this.off(chatId, userId);
+    if (off !== null)
+      throw new RunError("bad_request", off);
     const settings = await this.rt.settings.get(userId);
     const config3 = mindsRunConfig(settings, settings.agents.roles.minds);
     if (!config3)
@@ -117930,13 +118179,18 @@ function memoriesOf(who, out2) {
 }
 function buildSpotCard(i) {
   const rnd = random(i.seed);
+  const beatWhat = (id2) => {
+    const b = i.beats.find((x) => x.id === id2);
+    return b ? i.blobs[b.what] ?? "" : "";
+  };
   const items = [];
-  const flagged2 = new Set(i.beats.filter((b) => b.uncertain !== undefined || i.uncertain.includes(b.id) || i.uncertain.some((u) => u.includes(b.id))).map((b) => b.id));
+  const flagged2 = new Set(i.beats.filter((b) => b.uncertain !== undefined || i.uncertain.some((u) => u.includes(b.id))).map((b) => b.id));
+  const unplaced = [...new Set(i.uncertain.map((u) => u.trim()).filter((u) => u !== "" && !i.beats.some((b) => u.includes(b.id))))];
   const pool = i.beats.filter((b) => !flagged2.has(b.id) && ("bootstrap" in b.by));
   const picked2 = new Set;
   while (picked2.size < Math.min(i.sample, pool.length))
     picked2.add(pool[Math.floor(rnd() * pool.length)].id);
-  for (const b of i.beats) {
+  for (const b of [...i.beats.filter((x) => flagged2.has(x.id)), ...i.beats.filter((x) => !flagged2.has(x.id))]) {
     if (!picked2.has(b.id) && !flagged2.has(b.id))
       continue;
     const src = "bootstrap" in b.by ? b.by.bootstrap.message : null;
@@ -117983,14 +118237,16 @@ function buildSpotCard(i) {
     const hash = typeof note2.data.blob === "string" ? note2.data.blob : typeof note2.data.hash === "string" ? note2.data.hash : "";
     const body = i.notebook?.blobs[hash] ?? "";
     if (body !== "")
-      items.push({ id: `notebook:${path2}`, kind: "notebook", mark: null, flagged: false, path: path2, excerpt: body.length > 1600 ? `${body.slice(0, 1600)}\u2026` : body, cites: [...new Set(body.match(/\bb_[0-9a-z]+\b/g) ?? [])].slice(0, 12) });
+      items.push({ id: `notebook:${path2}`, kind: "notebook", mark: null, flagged: false, path: path2, excerpt: body.length > 1600 ? `${body.slice(0, 1600)}\u2026` : body, cites: [...new Set(body.match(/\bb[0-9a-f]{31}\b/g) ?? [])].slice(0, 12).map((id2) => ({ beat: id2, what: beatWhat(id2) })) });
   }
   const entries2 = new Map(i.entries.map((e) => [e.id, e]));
   for (const c of i.contradictions) {
     const e = entries2.get(c.entry);
-    items.push({ id: `contradiction:${c.entry}:${c.against}`, kind: "contradiction", mark: null, flagged: true, entry: c.entry, source: e?.source ?? "world_info", title: e?.title ?? c.entry, text: e?.text ?? "", against: c.against, why: c.why });
+    const what = beatWhat(c.against);
+    items.push({ id: `contradiction:${c.entry}:${c.against}`, kind: "contradiction", mark: null, flagged: true, entry: c.entry, source: e?.source ?? "world_info", title: e?.title ?? c.entry, text: e?.text ?? "", against: what === "" ? c.against : what, why: c.why });
   }
-  return { id: i.id, chapter: i.chapter, createdAt: i.now, items, ...i.misread && i.misread.length > 0 ? { misread: [...i.misread] } : {} };
+  items.sort((a, b) => Number(b.flagged) - Number(a.flagged));
+  return { id: i.id, chapter: i.chapter, createdAt: i.now, items, ...unplaced.length > 0 ? { uncertain: unplaced } : {}, ...i.misread && i.misread.length > 0 ? { misread: [...i.misread] } : {} };
 }
 
 // src/backend/bootstrap/run.ts
@@ -118114,7 +118370,7 @@ class BootstrapRun {
   laneStopped = false;
   runningSince = null;
   loaded = false;
-  asked = new Set;
+  unitsSeen = new Set;
   firstPc = "";
   stale = new Map;
   stop = Promise.withResolvers();
@@ -118216,11 +118472,20 @@ class BootstrapRun {
     this.state.wrongInRow = right ? 0 : this.state.wrongInRow + 1;
     if (!right)
       this.note(`Marked wrong on chapter ${card.chapter + 1}'s card (${item2.kind}): ${note2 || "no note"}`);
-    const chunk = !right && item2.kind === "beat" ? this.manifest?.chunks.find((c) => item2.index >= c.firstIndex && item2.index <= c.lastIndex)?.n : undefined;
-    if (item2.kind === "beat")
-      this.state.amends = this.state.amends.filter((a) => a.beat !== item2.beat);
-    if (chunk !== undefined && item2.kind === "beat") {
-      this.state.amends.push({ card: cardId, item: itemId, beat: item2.beat, chunk, note: item2.mark.note, at: item2.mark.at });
+    let chunk = !right && item2.kind === "beat" ? this.manifest?.chunks.find((c) => item2.index >= c.firstIndex && item2.index <= c.lastIndex)?.n : undefined;
+    const contradicted = item2.kind === "contradiction" ? item2.id.split(":").at(-1) ?? "" : "";
+    if (!right && item2.kind === "contradiction") {
+      const chapter = this.state.chapters.find((c) => c.n === card.chapter);
+      for (const n of chapter ? range(chapter.from, chapter.to) : [])
+        if (chunk === undefined && (await this.recordOf(`historian:${n}`))?.beats.some((b) => b.id === contradicted))
+          chunk = n;
+    }
+    const beat = item2.kind === "beat" ? item2.beat : contradicted;
+    if (beat !== "")
+      this.state.amends = this.state.amends.filter((a) => a.beat !== beat);
+    if (chunk !== undefined && beat !== "") {
+      const why2 = item2.kind === "contradiction" ? `${item2.mark.note} (The ${item2.title} entry says: ${item2.text.slice(0, 1500)}; the import found: ${item2.why})` : item2.mark.note;
+      this.state.amends.push({ card: cardId, item: itemId, beat, chunk, note: why2, at: item2.mark.at });
       this.note(`The author amends that beat before the run's next chunk, and the characters who lived it live the corrected beat.`);
     }
     const knobs = await this.env.knobs();
@@ -118281,7 +118546,7 @@ class BootstrapRun {
       chapters,
       spent: totalOf2(this.state.spent),
       cap: this.state.cap,
-      remaining: manifest ? estimateRemaining({ chatId: this.env.chatId, manifest, knobs, routes: await this.env.routes(), spent: this.state.spent, units: this.state.units, done, chapters: this.state.chapters.filter((c) => c.ended).length, minds: minds > 0 ? minds : (await this.env.people()).cast.length, rss: Math.max(0, ...Object.values(this.state.rss)) || null }) : null,
+      remaining: manifest ? estimateRemaining({ chatId: this.env.chatId, manifest, knobs, routes: await this.env.routes(), spent: this.state.spent, units: this.state.units, done, chapters: this.state.chapters.filter((c) => c.ended).length, minds: minds > 0 ? minds : Math.min((await this.env.people()).cast.length, knobs.mostMinds > 0 ? knobs.mostMinds : Infinity), rss: Math.max(0, ...Object.values(this.state.rss)) || null }) : null,
       imported: this.state.imported,
       spot,
       redoFrom: this.state.redoFrom,
@@ -118395,7 +118660,7 @@ class BootstrapRun {
     const done = (async () => {
       let prev = from > 0 ? this.state.hist[from - 1] ?? "start" : "start";
       let before = await this.beforeOf(from);
-      let pc = await this.pcBefore(from);
+      const pc = this.firstPc;
       try {
         for (let n = from;n < manifest.chunks.length; n++) {
           const chunk = manifest.chunks[n];
@@ -118424,7 +118689,8 @@ class BootstrapRun {
             this.state.newcomers[c.ref] ??= { name: c.name.trim(), since: n };
           for (const p of out2.newPlaces ?? [])
             this.state.places[p.ref] ??= { name: p.name.trim(), since: n };
-          pc = out2.switches?.at(-1)?.who ?? pc;
+          for (const s of out2.switches ?? [])
+            this.note(`The history has the player play ${people.cast.find((p) => p.id === s.who)?.name ?? this.state.newcomers[s.who]?.name ?? s.who} from message ${s.message} on. Switching isn't supported yet, so ${people.cast.find((p) => p.id === pc)?.name ?? pc} stays the player character.`);
           this.state.pcs[n] = pc;
           this.state.hist[n] = key;
           prev = key;
@@ -118479,7 +118745,6 @@ class BootstrapRun {
     for (let n = from;n < manifest.chunks.length; n++) {
       this.halt();
       await this.amendQueued(n - 1, knobs, people.cast);
-      this.asked.clear();
       const chunk = manifest.chunks[n];
       if (!chapter || chapter.ended)
         chapter = this.openChapter((chapter?.n ?? -1) + 1, n);
@@ -118490,22 +118755,29 @@ class BootstrapRun {
       chapter.to = n;
       const rows = await this.rows(chunk);
       const cast = this.castOf(people.cast);
-      const pcAt = this.pcAt(rows, hist, await this.pcBefore(n));
+      const pc = this.firstPc;
       const authorSlot = `author:${n}`;
       const aKey = hashParts(authorSlot, histKey, authorKey);
       const ch = chapter;
       const author = await this.answer(authorSlot, aKey, "author", (model2) => this.env.stages.authorRead({ chunk: rows, beats: hist.beats, blobs: hist.blobs, chapter: { index: ch.n, chunks: range(ch.from, n) }, cast, basis: chunk.basis }, model2));
       authorKey = aKey;
+      const passed = [];
       for (const pick3 of author.cast) {
-        if (!pick3.mind || this.state.minds[pick3.who] || rows.every((r) => pcAt(r.id) === pick3.who))
+        if (pick3.mind && !this.state.minds[pick3.who] && knobs.mostMinds > 0 && Object.keys(this.state.minds).length >= knobs.mostMinds) {
+          passed.push(cast.find((p) => p.id === pick3.who)?.name ?? this.state.newcomers[pick3.who]?.name ?? pick3.who);
+          continue;
+        }
+        if (!pick3.mind || this.state.minds[pick3.who] || pick3.who === pc)
           continue;
         const name = cast.find((p) => p.id === pick3.who)?.name ?? this.state.newcomers[pick3.who]?.name;
         if (name !== undefined)
           this.state.minds[pick3.who] = { name, since: n };
       }
+      if (passed.length > 0)
+        this.note(`Chunk ${n + 1}: ${passed.join(", ")} got no mind: the run is at its most minds (${knobs.mostMinds}, Settings \u2192 Depth \u2192 Bootstrap).`);
       const minded2 = Object.keys(this.state.minds);
       const known2 = await this.env.stages.knows(minded2, chunk.basis);
-      const partOf2 = (beat) => beat.exposure.filter((e) => minded2.includes(e.who) && e.who !== pcAt(sourceOf4(beat)) && needsPov(beat, e.who, known2[e.who] ?? [])).map((e) => e.who);
+      const partOf2 = (beat) => beat.exposure.filter((e) => minded2.includes(e.who) && e.who !== pc && needsPov(beat, e.who, known2[e.who] ?? [])).map((e) => e.who);
       const povSlot = `pov:${n}`;
       const pKey = hashParts(povSlot, histKey, aKey);
       const povs = await this.answer(povSlot, pKey, "pov", async (model2) => {
@@ -118519,7 +118791,7 @@ class BootstrapRun {
         return out2;
       });
       const bKey = hashParts(`beats:${n}`, histKey, pKey);
-      const first = [...await this.beatDrafts(n, bKey, rows, hist, povs, pcAt), ...await this.draftOf(authorSlot, aKey, author, chunk.basis, "author")];
+      const first = [...await this.beatDrafts(n, bKey, rows, hist, povs, pc), ...await this.draftOf(authorSlot, aKey, author, chunk.basis, "author")];
       for (const who of minded2) {
         if (this.state.minds[who]?.since !== n)
           continue;
@@ -118531,7 +118803,7 @@ class BootstrapRun {
         mindKeys.set(who, hashParts(mindKeys.get(who) ?? "start", sKey));
       }
       await this.landBatch(first);
-      const lived2 = this.livedOf(hist, povs, minded2, rows, pcAt, chunk.basis, known2);
+      const lived2 = this.livedOf(hist, povs, minded2, rows, pc, chunk.basis, known2);
       const caught = minded2.filter((w) => lived2.has(w));
       const writes = new Map;
       await bounded3(caught, knobs.atOnce.minds, async (who) => {
@@ -118552,8 +118824,6 @@ class BootstrapRun {
         chapter.title = author.title ?? null;
         authorKey = await this.endChapter(chapter, chunk, knobs, mindKeys, linkKey, authorKey);
       }
-      for (const s of this.asked)
-        this.state.units[s] += 1;
       if (n < manifest.chunks.length - 1)
         await this.retire((k) => k === n);
       this.note(`Chunk ${n + 1} of ${manifest.chunks.length} done (resident memory ${Math.round(this.env.rss() / 1048576)} MB).`);
@@ -118577,7 +118847,7 @@ class BootstrapRun {
     const rows = await this.rows(chunk);
     const at2 = lastClock(rows);
     const minded2 = Object.keys(this.state.minds);
-    const pcEnd = await this.pcBefore(chunk.n + 1);
+    const pcEnd = this.firstPc;
     const reflecting = minded2.filter((w) => w !== pcEnd);
     const reflections = new Map;
     await bounded3(reflecting, knobs.atOnce.minds, async (who) => {
@@ -118615,11 +118885,13 @@ class BootstrapRun {
           if (out2)
             minds.push({ who, name: this.state.minds[who]?.name ?? who, out: out2 });
         }
-      const card = buildSpotCard({ id: cardId, chapter: chapter.n, now: this.env.now(), sample: knobs.sample, seed: hash32(cardId), beats: read.beats, blobs: read.blobs, uncertain: read.uncertain, prose: read.prose, minds, povs: read.povs, notebook: revised, contradictions, entries: this.entries, misread: this.state.misread });
+      const noted2 = [...read.uncertain, ...revised.uncertain];
+      for (const n of range(chapter.from, chapter.to))
+        noted2.push(...(await this.recordOf(`author:${n}`))?.uncertain ?? []);
+      const card = buildSpotCard({ id: cardId, chapter: chapter.n, now: this.env.now(), sample: knobs.sample, seed: hash32(cardId), beats: read.beats, blobs: read.blobs, uncertain: noted2, prose: read.prose, minds, povs: read.povs, notebook: revised, contradictions, entries: this.entries, misread: this.state.misread });
       await this.env.files.write(`spot/${cardId}.json`, card);
       this.state.misread = [];
     }
-    this.state.units.reconcile += this.asked.has("reconcile") ? 1 : 0;
     this.note(`Chapter ${chapter.n + 1} (chunks ${chapter.from + 1}\u2013${chapter.to + 1}) is done; its spot-check card is waiting.`);
     await this.save();
     this.env.changed();
@@ -118649,7 +118921,11 @@ class BootstrapRun {
     await this.env.files.write(jobFile(slot), { slot, key, at: this.env.now(), out: out2, entries: [], supersedes, spent, ...misread.length > 0 ? { misread } : {}, ...capped.length > 0 ? { capped } : {} });
     this.state.misread.push(...misread.map((m) => ({ stage, job: slot, call: m.call, fields: m.fields, count: m.count })));
     this.state.misread.splice(0, Math.max(0, this.state.misread.length - MISREAD_KEPT));
-    this.asked.add(stage);
+    const unit3 = slot.split(":")[1] ?? "";
+    if (/^\d+$/.test(unit3) && !this.unitsSeen.has(`${stage}:${unit3}`)) {
+      this.unitsSeen.add(`${stage}:${unit3}`);
+      this.state.units[stage] += 1;
+    }
     return out2;
   }
   async draftOf(slot, key, out2, basis, stage) {
@@ -118688,7 +118964,7 @@ class BootstrapRun {
         best = e.basis;
     return best;
   }
-  async beatDrafts(n, key, rows, hist, povs, pcAt) {
+  async beatDrafts(n, key, rows, hist, povs, pc) {
     const slot = `beats:${n}`;
     const blobs = { ...hist.blobs };
     const beats = hist.beats.map((b) => {
@@ -118701,8 +118977,8 @@ class BootstrapRun {
     const places2 = (hist.newPlaces ?? []).filter((p) => this.state.places[p.ref]?.since === n);
     if (first && (born.length > 0 || places2.length > 0)) {
       const metBy2 = (id2) => {
-        const b = beats.find((x) => (x.actors.includes(id2) || x.about.some((r) => ("entity" in r) && r.entity === id2)) && x.exposure.some((e) => e.who === pcAt(sourceOf4(x))));
-        return b ? pcAt(sourceOf4(b)) : null;
+        const b = beats.find((x) => (x.actors.includes(id2) || x.about.some((r) => ("entity" in r) && r.entity === id2)) && x.exposure.some((e) => e.who === pc));
+        return b ? pc : null;
       };
       const made2 = await this.env.stages.spawn(born.map((c) => ({ id: c.ref, name: c.name, note: c.note, knownBy: metBy2(c.ref) })), places2.map((p) => ({ id: p.ref, name: p.name, note: p.note, parent: p.parent })), first.basis);
       if (made2.people.length > 0)
@@ -118711,13 +118987,11 @@ class BootstrapRun {
         drafts.push({ id: layerEntryId("bootstrap", this.env.chatId, slot, key, "places"), basis: first.basis, kind: "space.place", events: made2.places, by: { role: "historian", job: slot } });
     }
     const byMessage = this.env.stages.beatEvents(beats, hist.staging, blobs, rows);
+    const reasoning = hist.reasoning ? putText(blobs, hist.reasoning) : undefined;
     for (const row of rows) {
       const events3 = byMessage[row.id] ?? [];
       if (events3.length > 0)
-        drafts.push({ id: layerEntryId("bootstrap", this.env.chatId, slot, key, row.id), basis: row.basis, kind: STORY_BEAT, events: events3, by: { role: "historian", job: slot } });
-      const to = hist.switches?.find((s) => s.message === row.id)?.who;
-      if (to !== undefined)
-        drafts.push({ id: layerEntryId("bootstrap", this.env.chatId, slot, key, "pov", row.id), basis: row.basis, kind: MIND_POV, events: [mindPovEvent(to)], by: { role: "historian", job: slot } });
+        drafts.push({ id: layerEntryId("bootstrap", this.env.chatId, slot, key, row.id), basis: row.basis, kind: STORY_BEAT, events: events3, ...reasoning ? { reasoning } : {}, by: { role: "historian", job: slot } });
     }
     const rec = await this.env.files.read(jobFile(slot), isJob);
     const made = drafts.map((d) => d.id);
@@ -118833,11 +119107,11 @@ class BootstrapRun {
     }
     return { beats, blobs, uncertain, povs, prose };
   }
-  livedOf(hist, povs, minded2, rows, pcAt, end, known2) {
+  livedOf(hist, povs, minded2, rows, pc, end, known2) {
     const out2 = new Map;
     const ordered = [...hist.beats].sort((a, b) => a.at - b.at || a.order - b.order);
     for (const who of minded2) {
-      const last = rows.findLastIndex((r) => pcAt(r.id) !== who);
+      const last = who === pc ? -1 : rows.length - 1;
       if (last < 0)
         continue;
       const upTo = new Set(rows.slice(0, last + 1).map((r) => r.id));
@@ -118866,23 +119140,6 @@ class BootstrapRun {
     for (const [who, names2] of Object.entries(fellBack ?? {}))
       this.note(fellBackLine(this.state.minds[who]?.name ?? who, `beat ${beat}`, names2));
   }
-  async pcBefore(n) {
-    for (let k = n - 1;k >= 0; k--) {
-      const pc = this.state.pcs[k] ?? (await this.recordOf(`historian:${k}`))?.switches?.at(-1)?.who;
-      if (pc !== undefined)
-        return pc;
-    }
-    return this.firstPc;
-  }
-  pcAt(rows, hist, opening) {
-    const after = new Map;
-    let pc = opening;
-    for (const r of rows) {
-      pc = hist.switches?.find((s) => s.message === r.id)?.who ?? pc;
-      after.set(r.id, pc);
-    }
-    return (message) => after.get(message) ?? opening;
-  }
   async amendQueued(frontier, knobs, world) {
     const front = frontier >= 0 ? this.manifest?.chunks[frontier] : undefined;
     while (front && this.state.amends.length > 0) {
@@ -118904,10 +119161,10 @@ class BootstrapRun {
   }
   async amendOne(a, at2, knobs, world) {
     const { chunk, front, hist, old, rows, row } = at2;
-    const pcAt = this.pcAt(rows, hist, await this.pcBefore(chunk.n));
+    const pc = this.firstPc;
     const slot = `amend:${old.id}`;
     const key = hashParts(slot, this.state.hist[chunk.n] ?? "", a.note);
-    const amended = await this.answer(slot, key, "author", (model2) => this.env.stages.amend({ beat: old, blobs: hist.blobs, message: row, note: a.note, cast: this.castOf(world), pov: pcAt(row.id), key, basis: chunk.basis }, model2));
+    const amended = await this.answer(slot, key, "author", (model2) => this.env.stages.amend({ beat: old, blobs: hist.blobs, message: row, note: a.note, cast: this.castOf(world), pov: pc, key, basis: chunk.basis }, model2));
     const blobs = { ...amended.blobs };
     const all2 = { ...hist.blobs, ...blobs };
     const minded2 = Object.entries(this.state.minds).filter(([, m]) => m.since <= chunk.n).map(([id2]) => id2);
@@ -118916,7 +119173,7 @@ class BootstrapRun {
     let povs = {};
     if (beat) {
       const b2 = beat;
-      const who = b2.exposure.filter((e) => minded2.includes(e.who) && e.who !== pcAt(row.id) && needsPov(b2, e.who, known2[e.who] ?? [])).map((e) => e.who);
+      const who = b2.exposure.filter((e) => minded2.includes(e.who) && e.who !== pc && needsPov(b2, e.who, known2[e.who] ?? [])).map((e) => e.who);
       const quotes = b2.quotes !== undefined ? all2[b2.quotes] : undefined;
       if (who.length > 0) {
         povs = await this.answer(`${slot}:pov`, hashParts(`${slot}:pov`, key), "pov", async (model2) => {
@@ -118931,12 +119188,11 @@ class BootstrapRun {
     const events3 = beat ? [beatEvent(beat)] : [strikeEvent({ beats: [old.id], ...why2 !== "" ? { why: putText(blobs, why2) } : {} })];
     const landed = await this.draftOf(slot, key, { events: events3, blobs, kind: beat ? STORY_BEAT : STORY_STRIKE, ...amended.reasoning ? { reasoning: amended.reasoning } : {} }, row.basis, "author");
     await this.landBatch(landed);
-    const pcFront = await this.pcBefore(front.n + 1);
-    const minds = minded2.filter((w) => w !== pcFront);
+    const minds = minded2.filter((w) => w !== pc);
     const oldPovs = await this.recordOf(`pov:${chunk.n}`) ?? {};
-    const was = this.livedOf({ beats: [old], blobs: hist.blobs }, oldPovs, minds, rows, pcAt, chunk.basis, known2);
+    const was = this.livedOf({ beats: [old], blobs: hist.blobs }, oldPovs, minds, rows, pc, chunk.basis, known2);
     const b = beat;
-    const reach2 = b ? this.livedOf({ beats: [b], blobs: { ...all2, ...blobs } }, { [b.id]: povs }, minds, rows, pcAt, chunk.basis, known2) : new Map;
+    const reach2 = b ? this.livedOf({ beats: [b], blobs: { ...all2, ...blobs } }, { [b.id]: povs }, minds, rows, pc, chunk.basis, known2) : new Map;
     const relive = [...new Set([...reach2.keys(), ...was.keys()])];
     const writes = new Map;
     await bounded3(relive, knobs.atOnce.minds, async (who) => {
@@ -119037,11 +119293,13 @@ class BootstrapRun {
     if (!cap)
       return;
     const total = totalOf2(this.state.spent);
+    if (cap.unit === "money" && Object.values(this.state.spent).some((s) => s.calls > 0 && s.cost === null))
+      throw new Halt("A money cap can't bind on this run: a stage's connection reports no price for its calls, so what the run spends can't be measured in money. Set the cap in tokens (or no cap), then Resume.");
     const used = cap.unit === "tokens" ? total.tokensIn + total.tokensOut : total.cost ?? 0;
     if (used < cap.value)
       return;
     const what = cap.unit === "tokens" ? `${used.toLocaleString("en-US")} of ${cap.value.toLocaleString("en-US")} tokens` : `${used.toFixed(2)} of ${cap.value.toFixed(2)}`;
-    throw new Halt(`The run reached its cap (${what}) after ${this.state.progress.length} of ${this.manifest?.chunks.length ?? 0} chunks and paused; the rest is estimated below. Raise the cap, give fewer characters a mind, or pick cheaper models for the historian and the point-of-view render, then Resume.`);
+    throw new Halt(`The run reached its cap (${what}) after ${this.state.progress.length} of ${this.manifest?.chunks.length ?? 0} chunks and paused; the rest is estimated below. Raise the cap, give fewer characters a mind (Settings \u2192 Depth \u2192 Bootstrap \u2192 Most characters with a mind), or pick cheaper models for the historian and the point-of-view render, then Resume.`);
   }
   redoEpoch(n) {
     return this.state.redos.filter((r) => r.from <= n).map((r) => `${r.from}@${r.at}`).join(",");
@@ -119469,7 +119727,7 @@ function revision(answer, read, notebook, kind, through, chapter) {
     else
       read.drop(`comments[${i}]`, c);
   }
-  const reason2 = read.text("reasoning", answer.reasoning);
+  const reason2 = answerWhy(answer);
   if (events3.length > 0 || Object.keys(comments).length > 0 || chapter) {
     const data = { kind, files, through, ...chapter ? { chapter } : {}, ...reason2 !== "" ? { reason: reason2 } : {}, ...Object.keys(comments).length > 0 ? { comments } : {} };
     events3.push(notebookEvent(data));
@@ -120000,10 +120258,10 @@ async function readImports(deps, chatId, userId) {
   else {
     try {
       for (const e of await cortex.entities(chatId, userId)) {
-        const facts = e.facts.filter((f) => f.trim() !== "");
-        if (facts.length === 0 && e.description.trim() === "")
+        const facts2 = e.facts.filter((f) => f.trim() !== "");
+        if (facts2.length === 0 && e.description.trim() === "")
           continue;
-        entries2.push(entry("cortex", `entity:${e.id}`, "memory", e.name, [e.description, ...facts.map((f) => `- ${f}`)].filter((s) => s.trim() !== "").join(`
+        entries2.push(entry("cortex", `entity:${e.id}`, "memory", e.name, [e.description, ...facts2.map((f) => `- ${f}`)].filter((s) => s.trim() !== "").join(`
 `), [e.name, ...e.aliases].slice(0, 6)));
       }
       for (const c of await cortex.consolidations(chatId, userId)) {
@@ -120017,22 +120275,29 @@ async function readImports(deps, chatId, userId) {
       count4("cortex", `couldn't read Memory Cortex (${error instanceof Error ? error.message : String(error)})`);
     }
   }
-  const chars = deps.minds && isRecord(deps.minds.chars) ? deps.minds.chars : null;
-  if (chars) {
-    for (const [id2, raw] of Object.entries(chars)) {
-      if (!isRecord(raw))
-        continue;
-      const name = deps.names.get(id2) ?? id2;
-      const lines2 = [
-        ...typeof raw.summary === "string" && raw.summary.trim() !== "" ? [`Summary: ${raw.summary.trim()}`] : [],
-        ...Array.isArray(raw.notes) ? raw.notes.flatMap((n) => isRecord(n) && typeof n.text === "string" ? [`Note: ${n.text}`] : []) : [],
-        ...Array.isArray(raw.commitments) ? raw.commitments.flatMap((c) => isRecord(c) && typeof c.text === "string" ? [`Commitment: ${c.text}`] : []) : [],
-        ...Array.isArray(raw.plans) ? raw.plans.flatMap((p) => isRecord(p) && typeof p.what === "string" ? [`Plan: ${p.what}`] : []) : []
-      ];
-      if (lines2.length > 0)
-        entries2.push(entry("lre_minds", id2, "memory", `${name}'s earlier mind`, lines2.join(`
+  const chars = deps.minds && isRecord(deps.minds.chars) ? deps.minds.chars : {};
+  const knowledge = deps.minds && isRecord(deps.minds.knowledge) ? deps.minds.knowledge : {};
+  const facts = isRecord(knowledge.facts) ? knowledge.facts : {};
+  const holdings = isRecord(knowledge.holdings) ? knowledge.holdings : {};
+  for (const id2 of new Set([...Object.keys(chars), ...Object.keys(holdings)])) {
+    const raw = isRecord(chars[id2]) ? chars[id2] : {};
+    const held3 = isRecord(holdings[id2]) ? holdings[id2] : {};
+    const name = deps.names.get(id2) ?? id2;
+    const lines2 = [
+      ...typeof raw.summary === "string" && raw.summary.trim() !== "" ? [`Summary: ${raw.summary.trim()}`] : [],
+      ...Array.isArray(raw.notes) ? raw.notes.flatMap((n) => isRecord(n) && typeof n.text === "string" ? [`Note: ${n.text}`] : []) : [],
+      ...Array.isArray(raw.commitments) ? raw.commitments.flatMap((c) => isRecord(c) && typeof c.text === "string" ? [`Commitment: ${c.text}`] : []) : [],
+      ...Array.isArray(raw.plans) ? raw.plans.flatMap((p) => isRecord(p) && typeof p.what === "string" ? [`Plan: ${p.what}`] : []) : [],
+      ...Object.entries(held3).flatMap(([fact, h]) => {
+        const f = facts[fact];
+        if (!isRecord(h) || !isRecord(f) || typeof f.claim !== "string")
+          return [];
+        return [`Held: ${f.claim} (takes it as ${typeof h.belief === "string" ? h.belief : "uncertain"}${typeof h.confidence === "number" ? `, ${Math.round(h.confidence * 100)}% sure` : ""}${typeof h.how === "string" ? `, ${h.how}` : ""})`];
+      })
+    ];
+    if (lines2.length > 0)
+      entries2.push(entry("lre_minds", id2, "memory", `${name}'s earlier mind`, lines2.join(`
 `), [name]));
-    }
   }
   count4("lre_minds", null);
   return { entries: entries2, views };
@@ -120059,7 +120324,9 @@ async function reconcile(model2, i) {
     if (people.has(t))
       return t;
     const named2 = i.minds.filter((p) => sameName2(t, p.name));
-    return named2.length === 1 ? named2[0]?.id ?? t : t;
+    if (named2.length === 1)
+      return named2[0]?.id ?? t;
+    return (i.state ? personNamed3(i.state, t) : null) ?? t;
   };
   const lines2 = i.beats.map((b) => `- ${b.id} (${b.act}; ${b.actors.join(", ") || "no one"}${b.place ? ` at ${b.place}` : ""}): ${i.blobs[b.what] ?? ""}${b.quotes && i.blobs[b.quotes] ? ` "${i.blobs[b.quotes]}"` : ""}`);
   const recordable = i.final ? "at the history's end, any entry may, if no chapter holds its event." : "in this chapter, only an entry whose span lies inside it may; leave the rest for later chapters.";
@@ -120123,7 +120390,20 @@ ${e.text}`).join(`
     if (made.length > 0)
       recorded.push({ entry: from, beats: made });
   }
-  return { events: events3, blobs, agree, recorded, contradictions, ...answer.reasoning ? { reasoning: answer.reasoning } : {} };
+  const whyOf2 = (entry2, key) => {
+    const found = (Array.isArray(o[key]) ? o[key] : []).find((x) => isRecord(x) && text5(x.entry) === entry2);
+    return isRecord(found) && text5(found.why) !== "" ? `: ${text5(found.why)}` : ".";
+  };
+  const account2 = [
+    ...agree.map((a) => `${a.entry} agrees with ${a.beats.join(", ") || "the chapter"}${whyOf2(a.entry, "agree")}`),
+    ...recorded.map((r) => `${r.entry} records what the history no longer holds, now ${r.beats.join(", ")}${whyOf2(r.entry, "recorded")}`),
+    ...contradictions.map((c) => `${c.entry} contradicts ${c.against || "the chapter"}: ${c.why}`)
+  ].join(`
+`);
+  const reasoning = [answer.reasoning ?? "", account2].filter((s) => s !== "").join(`
+
+`);
+  return { events: events3, blobs, agree, recorded, contradictions, ...reasoning !== "" ? { reasoning } : {} };
 }
 
 // src/backend/bootstrap/amend.ts
@@ -120250,8 +120530,26 @@ function historyEnd(chain, making, opening) {
     end--;
   return end;
 }
+var SURVEYS_KEPT = 2;
+var surveys = new WeakMap;
+function surveysOf(rt) {
+  const known2 = surveys.get(rt);
+  if (known2)
+    return known2;
+  const kept4 = new Map;
+  const drop2 = (chatId) => {
+    for (const key of [...kept4.keys()])
+      if (key.endsWith(`\x00${chatId}`))
+        kept4.delete(key);
+  };
+  for (const event of ["MESSAGE_SENT", "MESSAGE_EDITED", "MESSAGE_SWIPED", "MESSAGE_DELETED", "CHAT_CHANGED", "CHAT_DELETED", "GENERATION_STARTED", "GENERATION_ENDED"])
+    rt.host.on(event, (e) => drop2(e.chatId));
+  surveys.set(rt, kept4);
+  return kept4;
+}
 function bootstrapEnv(rt, chatId, userId, changed) {
   const files = new BootstrapFiles(rt.host, chatId, userId);
+  const surveyKey = `${userId}\x00${chatId}`;
   const model2 = depthPort(rt.host, (u) => rt.settings.get(u), userId, { day: null, lane: "idle" });
   const settings = () => rt.settings.get(userId);
   let replacing = new Set;
@@ -120290,7 +120588,11 @@ function bootstrapEnv(rt, chatId, userId, changed) {
     const withCards = await cardsOf(world, state2);
     return cast.map((p) => ({ id: p.id, name: p.name, card: withCards.has(p.id), mind: mindMetaAt(state2, p.id)["core.md"] !== undefined }));
   };
-  const signalsOf = (rows) => rows.flatMap((r) => r.swipes !== undefined && r.swipes > 1 ? [`Message ${r.index + 1} (${r.name}): ${r.swipes} swipes; the player kept number ${(r.swipe ?? 0) + 1}.`] : []);
+  const OOC = /\(\([^)]*\)\)|^\s*[([]\s*ooc\b.*$|^\s*ooc\s*:.*$/gim;
+  const signalsOf = (rows) => rows.flatMap((r) => [
+    ...r.swipes !== undefined && r.swipes > 1 ? [`Message ${r.index + 1} (${r.name}): ${r.swipes} swipes; the player kept number ${(r.swipe ?? 0) + 1}.`] : [],
+    ...r.isUser ? (r.text.match(OOC) ?? []).map((line2) => `Message ${r.index + 1}, the player out of character: ${line2.trim()}`) : []
+  ]);
   const stages = {
     async historian(i, m) {
       const first = i.chunk[0];
@@ -120414,7 +120716,8 @@ function bootstrapEnv(rt, chatId, userId, changed) {
       return { events: r.events, blobs: r.blobs, kind: "truthlink", ...r.reasoning ? { reasoning: r.reasoning } : {} };
     },
     async reconcile(i, m) {
-      return { ...await reconcile(m, { chatId, chapter: i.chapter, final: i.final, span: i.span, entries: i.entries, beats: i.beats, blobs: i.blobs, minds: i.minds, basis: i.basis, at: i.at, texts: await texts2() }), kind: "story.beat" };
+      const folded = await fold(i.basis);
+      return { ...await reconcile(m, { chatId, chapter: i.chapter, final: i.final, span: i.span, entries: i.entries, beats: i.beats, blobs: i.blobs, minds: i.minds, state: folded.state, basis: i.basis, at: i.at, texts: await texts2() }), kind: "story.beat" };
     },
     async amend(i, m) {
       const at2 = await fold(i.basis);
@@ -120430,7 +120733,10 @@ function bootstrapEnv(rt, chatId, userId, changed) {
     model: model2,
     stages,
     ledger: {
-      landAll: (drafts, without) => rt.ledger.landLayers(chatId, userId, drafts, { without, wait: true }),
+      landAll: (drafts, without) => {
+        surveysOf(rt).delete(surveyKey);
+        return rt.ledger.landLayers(chatId, userId, drafts, { without, wait: true });
+      },
       async putBlobs(texts3) {
         for (const text6 of Object.values(texts3))
           await rt.blobs.put(userId, text6);
@@ -120445,6 +120751,10 @@ function bootstrapEnv(rt, chatId, userId, changed) {
       }
     },
     async messages() {
+      const kept4 = surveysOf(rt);
+      const cached = kept4.get(surveyKey);
+      if (cached)
+        return [...cached];
       const messages = await rt.host.chats.messages(chatId, userId);
       const bases = new Map((await rt.ledger.chainBases(chatId, userId)).map((b) => [b.message, b]));
       const core = await rt.ledger.core(chatId, userId);
@@ -120455,10 +120765,15 @@ function bootstrapEnv(rt, chatId, userId, changed) {
           clocks.set(r.id, r.clock);
       const making = new Set(Object.values(core?.journal.pending ?? {}).flatMap((p) => p.messageId !== null ? [p.messageId] : []));
       const end = historyEnd(core ? core.chain(observed) : observed, making, (core?.journal.prereply ?? []).length > 0);
-      return messages.slice(0, end).flatMap((m) => {
+      const read = messages.slice(0, end).flatMap((m) => {
         const basis = bases.get(m.id);
         return basis ? [{ id: m.id, isUser: m.isUser, name: m.name, text: m.swipes[m.swipeId] ?? m.content, basis, clock: clocks.get(m.id) ?? null, swipes: m.swipes.length, swipe: m.swipeId }] : [];
       });
+      kept4.delete(surveyKey);
+      kept4.set(surveyKey, read);
+      for (const key of [...kept4.keys()].slice(0, Math.max(0, kept4.size - SURVEYS_KEPT)))
+        kept4.delete(key);
+      return [...read];
     },
     async people() {
       const { state: state2, world } = await head();
@@ -120476,7 +120791,7 @@ function bootstrapEnv(rt, chatId, userId, changed) {
     },
     async knobs() {
       const b = (await settings()).depth.bootstrap;
-      return { chunkTokens: b.chunkTokens, atOnce: { ...b.atOnce }, sample: b.sample, pauseAfterWrong: b.pauseAfterWrong };
+      return { chunkTokens: b.chunkTokens, atOnce: { ...b.atOnce }, mostMinds: b.mostMinds, sample: b.sample, pauseAfterWrong: b.pauseAfterWrong };
     },
     async room(role) {
       return ownRoom((await settings()).depth, role);
@@ -120498,6 +120813,71 @@ function bootstrapEnv(rt, chatId, userId, changed) {
     log: (line2) => rt.host.log("warn", `[LumiRPEngine] ${line2}`, userId),
     changed
   };
+}
+
+// src/shared/depth-history.ts
+var HISTORY_KEEP_DEFAULT = 40;
+var HISTORY_CUT_DEFAULT = Object.freeze({ keep: "last", count: HISTORY_KEEP_DEFAULT });
+var HISTORY_KEEP_MOST = 1e4;
+function historyCutOf(raw) {
+  if (typeof raw !== "object" || raw === null || !("keep" in raw))
+    return null;
+  if (raw.keep === "last" && "count" in raw && Number.isSafeInteger(raw.count) && raw.count >= 1 && raw.count <= HISTORY_KEEP_MOST)
+    return { keep: "last", count: raw.count };
+  if (raw.keep === "from" && "index" in raw && Number.isSafeInteger(raw.index) && raw.index >= 0)
+    return { keep: "from", index: raw.index };
+  return null;
+}
+function hiddenByCut(messages, cut) {
+  const history = messages.flatMap((m, i) => m.history ? [i] : []);
+  if (cut.keep === "last")
+    return history.slice(0, Math.max(0, history.length - cut.count));
+  return history.slice(0, -1).filter((i) => {
+    const at2 = messages[i]?.sourceIndex;
+    return at2 !== undefined && at2 < cut.index;
+  });
+}
+
+// src/backend/depth/history-cut.ts
+var FILE = "history.json";
+var isCut = (raw) => historyCutOf(raw) !== null;
+async function historyCut(host, chatId, userId) {
+  return await new BootstrapFiles(host, chatId, userId).read(FILE, isCut) ?? { ...HISTORY_CUT_DEFAULT };
+}
+async function setHistoryCut(host, chatId, userId, cut) {
+  await new BootstrapFiles(host, chatId, userId).write(FILE, cut);
+}
+
+// src/backend/depth/chat-allowances.ts
+var FILE2 = "allowances.json";
+var CHAT_ALLOWANCE_MOST = 1000;
+function chatAllowancesOf(raw) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw))
+    return null;
+  const out2 = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!DEPTH_TREATMENTS.includes(key))
+      return null;
+    if (value !== "none" && (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > CHAT_ALLOWANCE_MOST))
+      return null;
+    out2[key] = value;
+  }
+  return out2;
+}
+var isAllowances = (raw) => chatAllowancesOf(raw) !== null;
+async function chatAllowances(host, chatId, userId) {
+  return await new BootstrapFiles(host, chatId, userId).read(FILE2, isAllowances) ?? {};
+}
+async function setChatAllowances(host, chatId, userId, allowances) {
+  const files = new BootstrapFiles(host, chatId, userId);
+  if (Object.keys(allowances).length === 0)
+    await files.remove(FILE2);
+  else
+    await files.write(FILE2, allowances);
+}
+async function chatBudget(host, chatId, userId, budget) {
+  const own2 = await chatAllowances(host, chatId, userId);
+  return Object.keys(own2).length === 0 ? budget : { ...budget, allowances: { ...budget.allowances, ...own2 } };
 }
 
 // src/backend/bootstrap/service.ts
@@ -120526,8 +120906,19 @@ function pinOf(meta) {
   const read = (v4) => typeof v4 === "string" && v4.trim() !== "" ? v4 : null;
   return { connection_profile_id: read(meta.connection_profile_id), connection_model: read(meta.connection_model) };
 }
-async function depthOptedIn(rt, chatId, userId) {
-  return (await new BootstrapFiles(rt.host, chatId, userId).read(OPT, isOpt))?.on === true;
+async function depthOptedIn(rt, chatId, userId, hops = 0) {
+  const own2 = await new BootstrapFiles(rt.host, chatId, userId).read(OPT, isOpt);
+  if (own2)
+    return own2.on;
+  if (hops > 4)
+    return false;
+  let from;
+  try {
+    from = (await rt.host.chats.chatMetadata(chatId, userId)).branched_from;
+  } catch {
+    return false;
+  }
+  return typeof from === "string" && from !== chatId ? depthOptedIn(rt, from, userId, hops + 1) : false;
 }
 function adviceOf(imported) {
   const found = (source) => imported.some((v4) => v4.source === source && (v4.entries > 0 || v4.marked === true));
@@ -120564,7 +120955,9 @@ class Bootstraps {
     const view = await run2.view(await depthOptedIn(this.rt, chatId, userId));
     const numbers4 = view.spot.some((card) => card.items.some((item2) => item2.kind === "beat")) ? await chatNumbers(this.rt.host, chatId, userId) : null;
     const spot = numbers4 ? view.spot.map((card) => ({ ...card, items: card.items.map((item2) => item2.kind === "beat" ? { ...item2, index: numbers4.get(item2.message) ?? item2.index } : item2) })) : view.spot;
-    return { ...view, spot, advice: view.status === "done" ? adviceOf(view.imported) : [] };
+    const budget = (await this.rt.settings.get(userId)).depth.budget;
+    const allowances = { own: await chatAllowances(this.rt.host, chatId, userId), yours: budget.allowances, interval: budget.interval };
+    return { ...view, spot, advice: view.status === "done" ? adviceOf(view.imported) : [], history: await historyCut(this.rt.host, chatId, userId), allowances };
   }
   async handle(r, userId) {
     const { chatId } = r;
@@ -120618,6 +121011,20 @@ class Bootstraps {
           throw new BootstrapError(run2.busy ? "conflict" : "bad_request", error instanceof Error ? error.message : String(error));
         });
         break;
+      case "history": {
+        const cut = historyCutOf(r.cut);
+        if (cut === null)
+          throw new BootstrapError("bad_request", "Keep the latest messages (at least one) or every message from a message's number on.");
+        await setHistoryCut(this.rt.host, chatId, userId, cut);
+        break;
+      }
+      case "allowances": {
+        const allowances = chatAllowancesOf(r.allowances);
+        if (allowances === null)
+          throw new BootstrapError("bad_request", "Each allowance is a treatment's whole number of parts (0 or more), or no limit.");
+        await setChatAllowances(this.rt.host, chatId, userId, allowances);
+        break;
+      }
       default:
         throw new BootstrapError("bad_request", "no such bootstrap request");
     }
@@ -128684,9 +129091,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path3 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "d1cd23161506b3be760d8d4c8e510f93b9f2f0d70daca836a4e5f3c8ef638db2";
+  const sha256 = "3aa2c0672119658fc622a9ac0c26eb5de838fdf7e758948fde1c817dfd076705";
   const tools = ["4408800e42056eef2a7fc9f5cdf99aca", "66c7161bb4f87be1dbc8e68504ddcba8"].filter((f) => f !== undefined);
-  return { id: "a41679bd", kit: sha256 !== undefined && path3 !== null && core !== null ? { path: path3, core, sha256, api: KIT_API } : null, tools };
+  return { id: "bd8a6365", kit: sha256 !== undefined && path3 !== null && core !== null ? { path: path3, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -130280,11 +130687,11 @@ class ArchiveIndex {
     const now = new Set;
     for (const m of messages) {
       now.add(m.id);
-      const stamp = `${m.swipe}\x00${contentId(m.text).hash}`;
-      if (archive.seen.get(m.id) === stamp)
+      const was = archive.seen.get(m.id);
+      if (was && was.swipe === m.swipe && was.text === m.text)
         continue;
       archive.index.add(m.id, m.text);
-      archive.seen.set(m.id, stamp);
+      archive.seen.set(m.id, { swipe: m.swipe, text: m.text });
     }
     for (const id2 of [...archive.seen.keys()]) {
       if (now.has(id2))
@@ -135791,7 +136198,7 @@ function loopbackUnready(page10) {
   const relays = page10.relays.filter((r) => r.mode !== "shared" || page10.shared.enabled);
   if (relays.length === 0)
     return "No relay carries your replies yet: start one with the line in Settings \u2192 Loopback.";
-  if (!relays.some((r) => !r.signIn && !r.update)) {
+  if (!relays.some((r) => !r.signIn && (!r.update || r.seenAt !== null))) {
     const quiet = relays.filter((r) => r.signIn);
     return quiet.length > 0 ? `No relay of yours is running: ${quiet.map((r) => r.name).join(", ")} has gone quiet or its Lumiverse session ended; sign it in again with its line in Settings \u2192 Loopback.` : `No relay of yours is running this build: update ${relays.map((r) => r.name).join(", ")} with its line in Settings \u2192 Loopback.`;
   }
@@ -136047,8 +136454,8 @@ function shortContext(input) {
 }
 
 // src/backend/loopback/store.ts
-var FILE = "loopback/registry.json";
-var UNREADABLE_FILE = `${FILE}.bad`;
+var FILE3 = "loopback/registry.json";
+var UNREADABLE_FILE = `${FILE3}.bad`;
 var RELAYS_PER_USER = 8;
 var TEXT_MAX = 255;
 var PATH_MAX = 4096;
@@ -136133,7 +136540,7 @@ class LoopbackStore {
     this.host = host;
   }
   read() {
-    this.loaded ??= this.host.extensionStorage.read(FILE).then((text8) => {
+    this.loaded ??= this.host.extensionStorage.read(FILE3).then((text8) => {
       if (text8 === null)
         return empty();
       let registry = null;
@@ -136161,7 +136568,7 @@ class LoopbackStore {
         await this.host.extensionStorage.write(UNREADABLE_FILE, unreadable2);
         this.unreadable = null;
       }
-      await this.host.extensionStorage.write(FILE, text8);
+      await this.host.extensionStorage.write(FILE3, text8);
     }).catch((error) => this.host.log("warn", `[LumiRPEngine] the loopback's registry wasn't saved (${error instanceof Error ? error.message : String(error)})`));
     await this.writing;
     return out2;
@@ -136270,6 +136677,7 @@ class LoopbackBridge {
   watchers = new Map;
   lastScene = new Map;
   redos = new Map;
+  dryRuns = new Map;
   working = new Map;
   passthroughs = new Map;
   sweep = null;
@@ -136384,8 +136792,12 @@ ${entry2.reasoning.trim()}
     return connectionId === null ? "Your default connection is the loopback, so LumiRPEngine has no real model to send the narrator's call to: pick one in Settings \u2192 Depth \u2192 Narrator (or set the helper model's connection in Settings \u2192 Model use)." : "Settings \u2192 Depth \u2192 Narrator names the loopback connection, so the narrator's call would come straight back to LumiRPEngine: pick a real model there.";
   }
   async tag(input) {
-    if (input.dryRun || input.generationType === "other")
+    if (input.generationType === "other")
       return {};
+    if (input.dryRun) {
+      await this.dryRunPrompt(input);
+      return {};
+    }
     const loop = this.rt.ledger.loopOf(input.chatId, input.userId);
     if (!loop) {
       if (await this.isLoopback(input.connectionId, input.userId) && await this.rt.worldOf(input.chatId, input.userId) !== null) {
@@ -136394,16 +136806,20 @@ ${entry2.reasoning.trim()}
       }
       return {};
     }
-    const history = input.messages.flatMap((m, i) => m.history ? [i] : []);
+    const omit = await this.hiddenOf(input);
+    const gone = new Set(omit);
+    const messages = gone.size > 0 ? input.messages.filter((_, i) => !gone.has(i)) : input.messages;
+    const history = messages.flatMap((m, i) => m.history ? [i] : []);
     const first = history[0];
     const last = history.at(-1);
     const token = randomHex(128);
-    const entry2 = { token, userId: input.userId, chatId: input.chatId, generationId: loop.generationId, type: loop.type, at: Date.now(), shape: { count: input.messages.length, history, first: first !== undefined ? input.messages[first]?.content ?? null : null, last: last !== undefined ? input.messages[last]?.content ?? null : null }, prompt: input.messages, turn: null, ended: false };
+    const entry2 = { token, userId: input.userId, chatId: input.chatId, generationId: loop.generationId, type: loop.type, at: Date.now(), shape: { count: messages.length, history, first: first !== undefined ? messages[first]?.content ?? null : null, last: last !== undefined ? messages[last]?.content ?? null : null }, prompt: messages, turn: null, ended: false };
     const before = this.byGeneration.get(loop.generationId);
     if (before)
       this.tokens.delete(before.token);
     this.tokens.set(token, entry2);
     this.byGeneration.set(loop.generationId, entry2);
+    this.relayCheck(input.chatId, input.userId, loop.target);
     for (const [t, e] of this.tokens) {
       if (this.tokens.size <= 256 && Date.now() - e.at < TOKEN_MS)
         break;
@@ -136411,7 +136827,41 @@ ${entry2.reasoning.trim()}
       if (this.byGeneration.get(e.generationId) === e)
         this.byGeneration.delete(e.generationId);
     }
-    return { parameters: { [TURN_PARAM]: token } };
+    return { parameters: { [TURN_PARAM]: token }, ...omit.length > 0 ? { omit } : {} };
+  }
+  async relayCheck(chatId, userId, target) {
+    try {
+      const why3 = await this.unready(userId);
+      if (why3 !== null)
+        await this.rt.relayDown({ chatId, userId, target, why: why3 });
+    } catch (error) {
+      this.rt.host.log("warn", `[LumiRPEngine] the chat wasn't told its relay isn't running: ${messageOf2(error)}`, userId);
+    }
+  }
+  async hiddenOf(input) {
+    return await this.rt.depth.on(input.chatId, input.userId) ? hiddenByCut(input.messages, await historyCut(this.rt.host, input.chatId, input.userId)) : [];
+  }
+  async dryRunPrompt(input) {
+    try {
+      if (!await this.isLoopback(input.connectionId, input.userId) || await this.rt.worldOf(input.chatId, input.userId) === null)
+        return;
+      const gone = new Set(await this.hiddenOf(input));
+      const prompt = gone.size > 0 ? input.messages.filter((_, i) => !gone.has(i)) : input.messages;
+      const body = quietMessages(prompt);
+      const settings = await this.rt.settings.get(input.userId);
+      const messages = await this.rt.depth.on(input.chatId, input.userId) ? shortContext({ prompt, body, sections: [], window: settings.depth.window, absorption: "keep" }).frame() : body;
+      this.dryRuns.set(input.chatId, { userId: input.userId, at: Date.now(), messages });
+      if (this.dryRuns.size > 512)
+        this.dryRuns.delete(this.dryRuns.keys().next().value ?? "");
+      const chars = messages.reduce((n, m) => n + m.content.length, 0);
+      this.rt.host.log("info", `[LumiRPEngine] a dry run of this world chat: the narrator's prompt LumiRPEngine would send holds ${messages.length} messages, ${chars} characters (without the sections a turn's engine run writes)`, input.userId);
+    } catch (error) {
+      this.rt.host.log("warn", `[LumiRPEngine] this dry run's narrator prompt couldn't be composed: ${messageOf2(error)}`, input.userId);
+    }
+  }
+  dryRunOf(chatId, userId) {
+    const kept4 = this.dryRuns.get(chatId);
+    return kept4 && kept4.userId === userId ? { at: kept4.at, messages: kept4.messages } : null;
   }
   async marked(input, verdict2) {
     const loop = this.rt.ledger.loopOf(input.chatId, input.userId);
@@ -136638,6 +137088,9 @@ ${entry2.reasoning.trim()}
   open(id2, relay, userId, generationId, chatId) {
     const call = { id: id2, relay, userId, generationId, chatId, turn: null, held: new Map, last: 0, done: false, doneAt: null, over: false, startedAt: Date.now(), abort: new AbortController, buffer: null, timer: null, models: [] };
     this.calls.set(id2, call);
+    const live = this.live.get(relay);
+    if (live)
+      live.requestAt = call.startedAt;
     if (generationId !== null) {
       const w = this.working.get(generationId) ?? { calls: 0, done: Promise.withResolvers() };
       w.calls++;
@@ -136719,7 +137172,7 @@ ${entry2.reasoning.trim()}
     this.flush(call);
     const promptTokens2 = call.models.reduce((n, c) => n + (c.promptTokens ?? 0), 0);
     const completionTokens = call.models.reduce((n, c) => n + (c.completionTokens ?? 0), 0);
-    this.send(call, { kind: "finish", finish: finish3, usage: { promptTokens: promptTokens2, completionTokens, totalTokens: promptTokens2 + completionTokens, calls: [...call.models] } });
+    this.send(call, { kind: "finish", finish: finish3, usage: { promptTokens: promptTokens2, completionTokens, totalTokens: promptTokens2 + completionTokens, calls: call.models.map(({ reasoning: _, ...c }) => c) } });
     this.ended(call);
   }
   fail(call, message, code) {
@@ -136870,10 +137323,14 @@ ${entry2.reasoning.trim()}
           if (!round2)
             sink.progress(unreadWords(run2.as, run2.turn !== null));
           const unscened = this.shortFrame(token, messages.slice(0, state2.opened), placed2, settings, sink, false, !round2);
-          return await this.narrate(call, token.userId, sink, [...unscened(), ...messages.slice(state2.opened)], body, whole5);
+          return await this.narrate(call, token.userId, sink, [...unscened(), ...messages.slice(state2.opened)], body, whole5, !round2);
         }
       }
-      await this.narrate(call, token.userId, sink, withSections(messages, token.shape, placed2), body, whole5);
+      if (token.type === "impersonate" && await this.rt.depth.on(token.chatId, token.userId)) {
+        const own2 = this.shortFrame(token, messages.slice(0, state2.opened), placed2, settings, sink, false, !round2);
+        return await this.narrate(call, token.userId, sink, [...own2(), ...messages.slice(state2.opened)], body, whole5, !round2);
+      }
+      await this.narrate(call, token.userId, sink, withSections(messages, token.shape, placed2), body, whole5, !round2);
     } catch (error) {
       if (call.abort.signal.aborted)
         return this.close(call);
@@ -136901,18 +137358,18 @@ ${contextWords(made.read, absorption, scene2)}
   modelCall(role, connectionId, model2, result, ms) {
     return { role, connection: connectionId ?? "default", model: result.model ?? model2 ?? "default", requestId: requestIdOf(result.usage), ...result.tokensIn !== undefined ? { promptTokens: result.tokensIn } : {}, ...result.tokensOut !== undefined ? { completionTokens: result.tokensOut } : {}, ms };
   }
-  async request(userId, messages, body) {
+  async request(userId, messages, body, offer = true) {
     const route = depthCall(await this.rt.settings.get(userId), "narrator");
     const refusal5 = await this.loopRefusal(route.connectionId, userId);
     if (refusal5)
       throw new LoopbackRefused("validation", refusal5);
-    const tools = quietTools(body.tools);
-    const toolChoice = toolChoiceOf(body);
+    const tools = offer ? quietTools(body.tools) : [];
+    const toolChoice = offer ? toolChoiceOf(body) : undefined;
     const request = { messages, maxTokens: maxTokensOf(body) ?? route.maxTokens, json: false, connectionId: route.connectionId, model: route.model, effort: route.effort, params: { ...route.params, ...samplingOf(body) }, usage: true, ...tools.length > 0 ? { tools } : {}, ...toolChoice !== undefined ? { toolChoice } : {} };
     return { request, connectionId: route.connectionId, model: route.model };
   }
-  async narrate(call, userId, sink, messages, body, whole5) {
-    const { request, connectionId, model: model2 } = await this.request(userId, messages, body);
+  async narrate(call, userId, sink, messages, body, whole5, offer) {
+    const { request, connectionId, model: model2 } = await this.request(userId, messages, body, offer);
     sink.progress("The narrator is writing the reply");
     const started = Date.now();
     const result = await this.rt.host.models.stream(request, userId, call.abort.signal, (piece) => {
@@ -136956,6 +137413,7 @@ ${contextWords(made.read, absorption, scene2)}
     let minted;
     switch (r.op) {
       case "get":
+      case "test":
         break;
       case "mint": {
         const key = `lre_lk_${randomHex(256)}`;
@@ -137000,9 +137458,22 @@ ${contextWords(made.read, absorption, scene2)}
         break;
       }
       default:
-        throw new LoopbackRefused("bad_request", "op must be get, mint, shared, fix or forget");
+        throw new LoopbackRefused("bad_request", "op must be get, mint, shared, fix, forget or test");
     }
-    return this.view(userId, originOf2(r.origin), minted);
+    const page10 = await this.view(userId, originOf2(r.origin), minted);
+    return r.op === "test" ? { ...page10, test: await this.test(page10, userId) } : page10;
+  }
+  async test(page10, userId) {
+    const unready = loopbackUnready(page10);
+    if (unready !== null)
+      return { ok: false, text: `Test failed. ${unready}` };
+    const narrator = await this.loopRefusal(depthCall(await this.rt.settings.get(userId), "narrator").connectionId, userId);
+    if (narrator !== null)
+      return { ok: false, text: `Test failed. ${narrator}` };
+    const running = page10.relays.filter((r) => (r.mode !== "shared" || page10.shared.enabled) && !r.signIn);
+    const heard = running.map((r) => r.seenAt).filter((t) => t !== null);
+    const ago = heard.length > 0 ? `, last heard ${Math.max(0, Math.round((Date.now() - Math.max(...heard)) / 1000))} s ago` : "";
+    return { ok: true, text: `Test passed: ${running.map((r) => r.name).join(", ")} is running${ago}; your key is set; ${page10.connections.map((c) => c.name).join(", ")} is the loopback; the narrator writes on a real model.` };
   }
   async unready(userId) {
     return loopbackUnready(await this.view(userId, null, undefined));
@@ -137054,6 +137525,7 @@ ${contextWords(made.read, absorption, scene2)}
         port: x.port,
         registeredAt: x.registeredAt,
         seenAt,
+        requestAt: live?.requestAt ?? null,
         report,
         signIn: report?.session.valid === false || silent,
         update: x.build !== build,
@@ -137456,7 +137928,7 @@ ${parts.join(`
 
 `);
 }
-function castOf(raw, names3, ctx, minded2, refused3) {
+function castOf(raw, names3, ctx, refused3) {
   const out2 = [];
   for (const r of list3(raw)) {
     const c = record4(r);
@@ -137471,11 +137943,7 @@ function castOf(raw, names3, ctx, minded2, refused3) {
       continue;
     if (out2.some((o) => o.who === who))
       continue;
-    let effort = SCENE_EFFORTS.includes(text8(c.effort)) ? text8(c.effort) : "world";
-    if (effort === "agent" && !minded2.has(who)) {
-      refused3.push(`${tag(names3, who)} has no mind yet, so no agent of their own to play them; you play them`);
-      effort = "author";
-    }
+    const effort = SCENE_EFFORTS.includes(text8(c.effort)) ? text8(c.effort) : "world";
     out2.push({ who, effort, why: text8(c.why) });
   }
   return out2;
@@ -137483,7 +137951,6 @@ function castOf(raw, names3, ctx, minded2, refused3) {
 async function authorSetup(input) {
   const { world, state: state2 } = input;
   const names3 = namesOf6(world, state2);
-  const minded2 = new Set(input.present.filter((p) => p.mind).map((p) => p.who));
   const tools = input.archive ? archiveTools({ texts: input.texts, world, state: state2, source: input.archive }) : [];
   const others = input.present.filter((p) => p.who !== input.pov);
   const here = others.filter((p) => p.where === undefined);
@@ -137546,7 +138013,7 @@ To hand the narrator words from it for a callback, name them in "quotes" (at mos
     const refused4 = [];
     const taken = [];
     const sc2 = record4(a2.scene);
-    const cast = castOf(a2.cast, names3, input, minded2, refused4);
+    const cast = castOf(a2.cast, names3, input, refused4);
     const agents = new Set(cast.filter((c) => c.effort === "agent").map((c) => c.who));
     const rt = record4(a2.realtime);
     let realtime = null;
@@ -137560,8 +138027,8 @@ To hand the narrator words from it for a callback, name them in "quotes" (at mos
           realtime = { with: withWho, why: text8(rt.why) };
         else {
           const effort = cast.find((c) => c.who === withWho)?.effort;
-          unplayed = minded2.has(withWho);
-          refused4.push(`real-time dialogue with ${tag(names3, withWho)} needs them playing as their own agent ("effort": "agent")${!minded2.has(withWho) ? ", and they have no mind yet" : effort === "author" ? ", and you cast them as yours to play" : effort === "world" ? ", and you cast them as part of the world" : ", and you didn't cast them"}; it wasn't entered`);
+          unplayed = true;
+          refused4.push(`real-time dialogue with ${tag(names3, withWho)} needs them playing as their own agent ("effort": "agent")${effort === "author" ? ", and you cast them as yours to play" : effort === "world" ? ", and you cast them as part of the world" : ", and you didn't cast them"}; it wasn't entered`);
         }
       } else if (rt.with !== undefined)
         refused4.push(`real-time dialogue needs someone with an agent of their own to talk with (${text8(rt.with) || "no one"})`);
@@ -137728,10 +138195,11 @@ ${input.questions.map((q) => `- ${q}`).join(`
 `);
   const asked2 = await ask3(input, SCENE_TEXT.ask, data);
   const refused3 = [];
+  const account2 = answerWhy(asked2.answer);
   return {
     beats: draftBeats(asked2.answer.beats, names3, input, { agents, onScreen: true }, refused3, "a"),
     refused: refused3,
-    ...asked2.reasoning ? { reasoning: asked2.reasoning } : {},
+    ...asked2.reasoning ? { reasoning: asked2.reasoning } : account2 !== "" ? { reasoning: account2 } : {},
     ...asked2.usage ? { usage: asked2.usage } : {}
   };
 }
@@ -137813,7 +138281,7 @@ ${input.kept.map((k) => `- ${tag(names3, k.who)}: ${k.text}`).join(`
 ${input.due.map((d) => `- ${d}`).join(`
 `) || "- (none)"}`,
     `What waits to be lived:
-${input.pending.map((p) => `- ${tag(names3, p.who)}: ${p.pending} point${p.pending === 1 ? "" : "s"} of view waiting${p.latest ? `, the newest ${p.latest}` : ""}${p.played ? " (played this turn as their own agent)" : ""}`).join(`
+${input.pending.map((p) => `- ${tag(names3, p.who)}: ${p.pending} point${p.pending === 1 ? "" : "s"} of view waiting${p.latest ? `, the newest ${p.latest}` : ""}${p.played ? " (played this turn as their own agent)" : ""}${p.unminded ? " (no mind yet: a catch-up forms one, from their card or what the world knows of them, then lives these)" : ""}${p.gone && p.gone.length > 0 ? `; out of mind since a correction struck what they were written from: ${p.gone.join(", ")} (a reflection rewrites them)` : ""}${p.takes !== undefined ? `; their working memory is nearly full (${p.takes} takes unremembered): they ask to reflect` : ""}`).join(`
 `) || "- (no one)"}`,
     `Your open predictions:
 ${input.predictions.map((p) => `- [${p.id}] ${p.text}`).join(`
@@ -137827,7 +138295,7 @@ ${input.signals.map((s) => `- ${s}`).join(`
 ${draftLines(input.offscreen.drafts) || "- (none)"}`,
       `Drafts a swipe took off the chain:
 ${draftLines(input.offscreen.rebase) || "- (none)"}`,
-      `What this interval's allowances leave: ${input.offscreen.allowances.join("; ") || "no limits"}. The player's words on what deserves more than written: ${input.offscreen.threshold.trim() || "(none given)"}. ${input.offscreen.ask ? "Where you judge a moment major, mark its part major: once its treatment's allowance is spent, the player is asked whether to spend one more rather than it sliding down." : "The player asked not to be asked: a part past its treatment's allowance slides down the ladder."}`,
+      `What this interval's allowances leave: ${input.offscreen.allowances.join("; ") || "no limits"}. The player's threshold for what deserves more than written: ${input.offscreen.threshold.trim() || "(none given)"}. ${input.offscreen.ask ? "Where you judge a moment major, mark its part major: once its treatment's allowance is spent, the player is asked whether to spend one more rather than it sliding down." : "The player asked not to be asked: a part past its treatment's allowance slides down the ladder."}`,
       `Episodes waiting on the player's answer past an allowance (don't open them again):
 ${(input.offscreen.asked ?? []).map((a2) => `- ${a2}`).join(`
 `) || "- (none)"}`
@@ -137856,6 +138324,8 @@ ${(input.offscreen.asked ?? []).map((a2) => `- ${a2}`).join(`
   };
   const au = record4(a.author);
   const depth2 = au && (au.depth === "scene" || au.depth === "chapter") ? au.depth : null;
+  const wk = record4(a.wake);
+  const wake = wk && typeof wk.minutes === "number" && Number.isFinite(wk.minutes) && wk.minutes > 0 ? { minutes: Math.round(wk.minutes), why: text8(wk.why) } : null;
   const known2 = new Set(input.predictions.map((p) => p.id));
   const scores = [];
   for (const r of list3(a.scores)) {
@@ -137888,6 +138358,7 @@ ${(input.offscreen.asked ?? []).map((a2) => `- ${a2}`).join(`
     rebase: verdictsOf(a.rebase, swiped, refused3, "rebase"),
     considered,
     refused: refused3,
+    wake,
     ...asked2.reasoning ? { reasoning: asked2.reasoning } : account2 !== "" ? { reasoning: account2 } : {},
     ...asked2.usage ? { usage: asked2.usage } : {}
   };
@@ -137945,7 +138416,10 @@ ${b.mind}`].filter(Boolean).join(`
 
 `) || "(nothing written yet)"}`).join(`
 
-`) || "(no one has a mind yet)"}`
+`) || "(no one has a mind yet)"}`,
+    `The player's signals beyond his words (what he swiped, regenerated or edited, his out-of-character lines), the evidence for what he wants (player.md):
+${input.signals.map((s) => `- ${s}`).join(`
+`) || "- (none)"}`
   ].join(`
 
 `);
@@ -138199,10 +138673,17 @@ function metered(port) {
   const roles = {};
   return {
     port: async (role, messages, opts) => {
-      const answer2 = await port(role, messages, opts);
-      const c = callCost(answer2.usage);
-      cost = addCost(cost, c);
-      roles[role] = addCost(roles[role] ?? NO_COST, c);
+      const count5 = (usage2) => {
+        const c = callCost(usage2);
+        cost = addCost(cost, c);
+        roles[role] = addCost(roles[role] ?? NO_COST, c);
+      };
+      const answer2 = await port(role, messages, opts).catch((error) => {
+        if (error instanceof Error && error.name === "ProviderRefusal" && "usage" in error && error.usage)
+          count5(error.usage);
+        throw error;
+      });
+      count5(answer2.usage);
       return answer2;
     },
     spent: () => ({ cost, roles: { ...roles } })
@@ -138571,9 +139052,12 @@ ${hitsText(hits)}` });
   const keep2 = textIn(answer2.keep);
   if (keep2 !== null)
     w.memory(keep2, lived2, addressed, input.at);
-  return { events: w.events, blobs: w.blobs, ...reasoning.length > 0 ? { reasoning: reasoning.join(`
+  const why3 = reasoning.join(`
 
-`) } : {}, usage: usage2, act: act2, take: take2, recalls };
+`);
+  const hash = why3 !== "" ? blobHash(why3) : null;
+  const events3 = hash === null ? w.events : w.events.map((e) => e.type === MIND_WRITE ? { ...e, data: { ...e.data, reasoning: hash } } : e);
+  return { events: events3, blobs: hash === null ? w.blobs : { ...w.blobs, [hash]: why3 }, ...why3 !== "" ? { reasoning: why3 } : {}, usage: usage2, act: act2, take: take2, recalls };
 }
 function actBeatTexts(act2, _name) {
   return { what: act2.surface, surface: act2.surface, ...act2.quotes !== undefined ? { quotes: act2.quotes } : {} };
@@ -139277,7 +139761,8 @@ ${input.pins.map((b) => beatText2(world, names3, b.ref, b.beat)).join(`
     const what = text10(b.what);
     const surface = text10(b.surface);
     const quotes = spoken(b.quotes);
-    beats.set(ref, { keep: b.keep !== false, ...what !== "" ? { what } : {}, ...surface !== "" ? { surface } : {}, ...quotes !== "" ? { quotes } : {} });
+    const deed = text10(b.deed);
+    beats.set(ref, { keep: b.keep !== false, ...what !== "" ? { what } : {}, ...surface !== "" ? { surface } : {}, ...quotes !== "" ? { quotes } : {}, ...deed !== "" ? { deed } : {} });
   }
   const effects = new Map;
   for (const r of list5(a.effects)) {
@@ -139372,6 +139857,20 @@ function touchesOf2(episode, beats, named3, pov2) {
     add2(t.ref, start + t.after);
   return [...out2.values()];
 }
+function effectTouches(was, now, pov2) {
+  const ids2 = new Set([...Object.keys(was.entities), ...Object.keys(now.entities)]);
+  const changed = [...ids2].filter((id2) => id2 !== pov2 && JSON.stringify(own(was.entities, id2) ?? null) !== JSON.stringify(own(now.entities, id2) ?? null));
+  const refs = changed.map((entity2) => ({ entity: entity2 }));
+  const pc = new Set([placeOfEntity(was, pov2), placeOfEntity(now, pov2)]);
+  const places2 = new Set;
+  for (const id2 of changed)
+    for (const p of [placeOfEntity(was, id2), placeOfEntity(now, id2)])
+      if (p !== null && !pc.has(p))
+        places2.add(p);
+  for (const place2 of places2)
+    refs.push({ place: place2 });
+  return refs;
+}
 async function draftEpisode(rt, chatId, userId, basis, ask4, o) {
   const said2 = [];
   const plugs = o.plugs ?? OFFSCREEN_PLUGS;
@@ -139414,14 +139913,15 @@ async function draftEpisode(rt, chatId, userId, basis, ask4, o) {
     if (!("who" in p.subject))
       continue;
     const who = p.subject.who;
-    if (p.treatment === "live" && who !== pov2 && minded2.has(who)) {
+    const plays = DEPTH_TREATMENT_DEFS[p.treatment].plays;
+    if (plays === "agent" && who !== pov2 && minded2.has(who)) {
       if (!live.includes(who))
         live.push(who);
       continue;
     }
-    if (p.treatment === "live")
+    if (plays === "agent")
       said2.push(`${who} has no mind to play live: the author plays them from what it knows`);
-    if (p.treatment === "live" || p.treatment === "campfire") {
+    if (plays !== "author") {
       const files = await readMind(rt.blobs, userId, state2, who, replaced2);
       const shown5 = {};
       for (const kind of PLAYED_FILES) {
@@ -139434,7 +139934,7 @@ async function draftEpisode(rt, chatId, userId, basis, ask4, o) {
       played.push({ who, files: shown5 });
     }
   }
-  const recent = (await beatTexts(rt, userId, story.beats.slice(-RECENT_BEATS).map((p) => p.beat))).map((beat, i) => ({ ref: `r${i + 1}`, beat }));
+  const recent = (await beatTexts(rt, userId, inStoryOrder(story.beats).slice(-RECENT_BEATS).map((p) => p.beat))).map((beat, i) => ({ ref: `r${i + 1}`, beat }));
   const view = { episode, live, played, recent };
   const notebook = await readNotebook(rt, userId, state2);
   const book = new SceneBook({ registry: rt.registry, world, state: state2, prefix: [], turn: id2, userId, blobs: rt.blobs, pov: pov2, say: (line2) => said2.push(line2) });
@@ -139453,7 +139953,10 @@ async function draftEpisode(rt, chatId, userId, basis, ask4, o) {
     const r = await plugs.resolveAttempt(model2, { registry: rt.registry, world, state: book.state, act: { actor: actor2, surface: beat.surface, ...beat.quotes ? { quotes: beat.quotes } : {}, attempt }, seed: hashParts(id2, "attempt", beat.beat.id), runSeed, scene: book.beats.map((b) => beatLine(world, book.state, b)), texts: texts2, ...signal2 });
     if (r.reasoning)
       reasoning.push(`The GM: ${r.reasoning}`);
+    const was = structuredClone({ entities: book.state.entities });
     effects.push(...book.apply(r.events, mark2));
+    for (const ref of effectTouches(was, book.state, pov2))
+      named3.push({ ref, after: Math.max(0, book.minute - episode.span[0]) });
     book.minute += Math.max(0, r.minutes);
     if (!r.outcome)
       return;
@@ -139617,7 +140120,7 @@ async function readDraft(input) {
     const v4 = answer2.beats.get(ref);
     if (v4 && !v4.keep)
       continue;
-    const adjusted = v4 !== undefined && (v4.what !== undefined || v4.surface !== undefined || v4.quotes !== undefined);
+    const adjusted = v4 !== undefined && (v4.what !== undefined || v4.surface !== undefined || v4.quotes !== undefined || v4.deed !== undefined);
     if (!adjusted) {
       beats.push({ ...beat, exposure: settledExposure(beat.exposure, minded2, pov2, true) });
       continue;
@@ -139628,8 +140131,9 @@ async function readDraft(input) {
     const exposure = settledExposure(beat.exposure, minded2, pov2, false);
     const newId3 = beatId(draft.id, "settled", ref);
     const { deed: _drafted, ...settled2 } = beat;
-    await book.povs({ id: newId3, surface, ...quotes ? { quotes } : {}, actors: beat.actors, about: beat.about, ...beat.addressed ? { addressed: beat.addressed } : {} }, exposure, model2, texts2, input.signal);
-    beats.push({ ...settled2, id: newId3, what: putText(book.blobs, v4.what ?? read?.what ?? ""), surface: putText(book.blobs, surface), ...quotes ? { quotes: putText(book.blobs, quotes) } : {}, exposure });
+    const deed = beat.actors.length > 0 ? v4.deed : undefined;
+    await book.povs({ id: newId3, surface, ...quotes ? { quotes } : {}, ...deed ? { deed } : {}, actors: beat.actors, about: beat.about, ...beat.addressed ? { addressed: beat.addressed } : {} }, exposure, model2, texts2, input.signal);
+    beats.push({ ...settled2, id: newId3, what: putText(book.blobs, v4.what ?? read?.what ?? ""), surface: putText(book.blobs, surface), ...quotes ? { quotes: putText(book.blobs, quotes) } : {}, ...deed ? { deed: putText(book.blobs, deed) } : {}, exposure });
   }
   const kept4 = [];
   draft.effects.forEach((e, i) => {
@@ -139731,7 +140235,7 @@ async function settleDraft(rt, chatId, userId, id2, o = {}) {
 }
 
 // src/backend/depth/offscreen/jobs.ts
-var CHEAPER = { live: "campfire", campfire: "room", room: "written", written: null };
+var CHEAPER = Object.fromEntries(DEPTH_TREATMENTS.map((t, i) => [t, DEPTH_TREATMENTS[i + 1] ?? null]));
 function spentIn(drafts, budget, clock) {
   const len = INTERVAL_MINUTES[budget.interval];
   const from = intervalAt(budget.interval, clock).from;
@@ -139787,7 +140291,7 @@ async function offscreenFacts(rt, chatId, userId, at3, budget) {
   });
   const names3 = namesOf6(world, state2);
   const asked2 = openAsks(at3.events).map((a) => askLine(a.ask, (id2) => tag(names3, id2)));
-  return { drafts: open.map((d) => draftLine(world, state2, story, d.draft)), rebase, allowances, threshold: budget.threshold, asked: asked2, ask: budget.ask };
+  return { drafts: open.map((d) => draftLine(world, state2, story, d.draft)), rebase, allowances, threshold: thresholdGuidance(budget), asked: asked2, ask: budget.ask };
 }
 function overAllowance(ask4, budget, spent) {
   if (!budget.ask)
@@ -139805,7 +140309,7 @@ function overAllowance(ask4, budget, spent) {
   });
   return over;
 }
-function withinAllowances(ask4, budget, spent, said2) {
+function withinAllowances(ask4, budget, spent, put2) {
   const parts = [];
   for (const p of ask4.parts) {
     let t = p.treatment;
@@ -139817,7 +140321,7 @@ function withinAllowances(ask4, budget, spent, said2) {
     }
     const subject = "who" in p.subject ? p.subject.who : p.subject.event;
     if (t === null) {
-      said2.push(`${subject}: this story ${budget.interval}'s allowances are spent down to written, so it is left unwritten until it matters`);
+      put2.push(`${subject}: this story ${budget.interval}'s allowances are spent down to written, so it is left unwritten until it matters`);
       continue;
     }
     spent[t]++;
@@ -139919,9 +140423,9 @@ async function offscreenJobs(rt, chatId, userId, basis, asks, o) {
         }
         continue;
       }
-      const said2 = [];
-      const within7 = withinAllowances(ask4, o.budget, spent, said2);
-      out2.said.push(...said2.map((line2) => `episode ${index + 1}: ${line2}`));
+      const left = [];
+      const within7 = withinAllowances(ask4, o.budget, spent, left);
+      out2.put.push(...left.map((line2) => `Episode ${index + 1}: ${line2}`));
       if (within7.parts.length === 0)
         continue;
       try {
@@ -139950,6 +140454,9 @@ async function draftAnswered(rt, chatId, userId, answered2, o) {
     const at3 = await rt.ledger.foldAtBasis(chatId, userId, basis, [STORY_DRAFT]);
     const spent = at3 ? spentIn(draftsOn(at3.events), o.budget, at3.state.clock) : Object.fromEntries(DEPTH_TREATMENTS.map((t) => [t, 0]));
     episode = withinAllowances(wanted, o.budget, spent, said2);
+    const put2 = spendData({ cost: { calls: 0, tokensIn: 0, tokensOut: 0 }, roles: {} }, { treatment: "written", interval: o.budget.interval, at: at3?.state.clock ?? 0, for: ask4.id, put: said2 });
+    if (put2)
+      await landEntry(rt, chatId, userId, { id: layerEntryId(AUTHOR_SPEND, chatId, ask4.id, "unwritten", basis.message, basis.swipe), basis, kind: AUTHOR_SPEND, events: [spendEvent(put2)], by: { role: "author" } }, {});
     if (episode.parts.length === 0)
       return { draft: null, landed: null, said: said2 };
   }
@@ -140034,17 +140541,29 @@ function dueOf(world, state2, names3) {
 }
 async function pendingOf(rt, userId, at3, played) {
   const { beats } = exposedBeats(at3.story);
+  const replaced2 = new Set(at3.story.replaced.map((r) => r.id));
   const out2 = [];
   for (const who of mindedAt(at3.state)) {
     if (!hasAgent(at3.world, at3.state, who))
       continue;
-    const waiting = pendingFor(beats, mindV2At(at3.state, who), who);
+    const mind2 = mindV2At(at3.state, who);
+    const waiting = pendingFor(beats, mind2, who);
+    const gone = Object.entries(mind2.files).flatMap(([path3, m]) => writtenFromGone(m, mind2, replaced2) ? [path3] : []);
+    const takes3 = takesOf(at3.state, who).length;
+    const near = takes3 >= Math.floor(TAKES_KEPT * 3 / 4);
     const newest = waiting[waiting.length - 1];
-    if (!newest)
+    if (!newest && gone.length === 0 && !near)
       continue;
-    const reach2 = reachOf2(newest, who);
+    const reach2 = newest ? reachOf2(newest, who) : null;
     const latest = reach2 ? (await rt.blobs.get(userId, reach2.text))?.trim() ?? "" : "";
-    out2.push({ who, pending: waiting.length, ...latest !== "" ? { latest: clip4(latest, LATEST_CHARS) } : {}, played: played.includes(who) });
+    out2.push({ who, pending: waiting.length, ...latest !== "" ? { latest: clip4(latest, LATEST_CHARS) } : {}, played: played.includes(who), ...gone.length > 0 ? { gone } : {}, ...near ? { takes: takes3 } : {} });
+  }
+  const minded2 = new Set(mindedAt(at3.state));
+  const unminded = [...new Set(beats.flatMap((b) => b.exposure.map((x) => x.who)))].filter((who) => !minded2.has(who) && hasOwn(at3.state.entities, who) && hasAgent(at3.world, at3.state, who));
+  for (const who of unminded) {
+    const waiting = pendingFor(beats, mindV2At(at3.state, who), who);
+    if (waiting.length > 0)
+      out2.push({ who, pending: waiting.length, played: false, unminded: true });
   }
   return out2;
 }
@@ -140100,7 +140619,7 @@ async function afterDepthReply(rt, chatId, userId, basis, after, o = {}) {
     const talking = talk && talk.state === "on" ? talk.with : null;
     const rememberers = takersAt(start.state).filter((who) => hasAgent(start.world, start.state, who) && (who !== talking || takesOf(start.state, who).length >= TAKES_KEPT));
     let kept4 = [];
-    if (rememberers.length > 0 && !held3(`Remembering the scene (${rememberers.map((id2) => namesOf6(start.world, start.state).name(id2)).join(", ")})`)) {
+    if (!o.wakeRound && rememberers.length > 0 && !held3(`Remembering the scene (${rememberers.map((id2) => namesOf6(start.world, start.state).name(id2)).join(", ")})`)) {
       try {
         const r = await rememberAfterReply(rt, chatId, userId, { basis, model: model2, who: rememberers, ...signal2 });
         out2.remembered = r.remembered;
@@ -140119,7 +140638,7 @@ async function afterDepthReply(rt, chatId, userId, basis, after, o = {}) {
     const names3 = namesOf6(at3.world, at3.state);
     const turnIds = new Set(after.beats);
     const turnBeats = at3.story.beats.filter((p) => turnIds.has(p.beat.id)).map((p) => p.beat);
-    if ((turnBeats.length > 0 || out2.remembered.length > 0) && !held3("The GM's truth-link of the turn's beats")) {
+    if (!o.wakeRound && (turnBeats.length > 0 || out2.remembered.length > 0) && !held3("The GM's truth-link of the turn's beats")) {
       try {
         const r = await linkTruths(rt, chatId, userId, basis, { who: out2.remembered, beats: turnBeats, ...o.occasion !== undefined ? { key: occasion2 } : {}, model: model2, ...signal2 });
         said2("the GM's truth-link", r.refused);
@@ -140134,7 +140653,9 @@ async function afterDepthReply(rt, chatId, userId, basis, after, o = {}) {
     }
     const bases = await rt.ledger.chainBases(chatId, userId);
     const since = sinceLastPoll(at3, bases, basis);
-    const woken = o.woken !== undefined || at3.events.some((e) => e.event.type === "timelapse" && e.from.messageId === basis.message);
+    const lastPoll = at3.events.flatMap((e) => authorData(e.event, AUTHOR_POLL) ?? []).at(-1);
+    const asked2 = lastPoll?.wake && at3.state.clock >= lastPoll.wake.at ? lastPoll.wake : null;
+    const woken = o.woken !== undefined || asked2 !== null || at3.events.some((e) => e.event.type === "timelapse" && e.from.messageId === basis.message);
     if (!after.poll && !woken || held3("The author's poll: who catches up and reflects, and what happens off screen"))
       return out2;
     const pov2 = povOf(at3.world, at3.state);
@@ -140147,7 +140668,7 @@ async function afterDepthReply(rt, chatId, userId, basis, after, o = {}) {
     const lastChapter = chapters[chapters.length - 1];
     let offscreen;
     try {
-      offscreen = await offscreenFacts(rt, chatId, userId, at3, settings.depth.budget);
+      offscreen = await offscreenFacts(rt, chatId, userId, at3, await chatBudget(rt.host, chatId, userId, settings.depth.budget));
     } catch (error) {
       fail("reading the drafts off screen", error);
     }
@@ -140165,7 +140686,7 @@ async function afterDepthReply(rt, chatId, userId, basis, after, o = {}) {
         beats: (await beatTexts(rt, userId, since.beats)).map((beat, i) => ({ ref: `b${i + 1}`, beat })),
         kept: kept4,
         minutes: since.minutes + (o.woken && !since.readsBasis ? o.woken.minutes : 0),
-        spans: [...since.spans, ...o.woken ? [o.woken.why] : []],
+        spans: [...since.spans, ...o.woken ? [o.woken.why] : [], ...asked2 ? [`reaching ${formatClock(calendarOf(at3.world), asked2.at)}, when you asked to be woken${asked2.why !== "" ? ` (${asked2.why})` : ""}`] : []],
         due: dueOf(at3.world, at3.state, names3),
         pending: await pendingOf(rt, userId, at3, after.remember),
         predictions,
@@ -140200,7 +140721,7 @@ async function afterDepthReply(rt, chatId, userId, basis, after, o = {}) {
         considered.push({ what: poll.author.depth === "chapter" ? "My own re-read of the chapter" : "My own reflection on the scene", raised: false, why: [poll.author.why, `Held back: ${held4}`].filter((s) => s !== "").join(" ") });
     }
     try {
-      const events3 = [pollEvent({ through: basis.message, considered, jobs }), ...poll.scores.map((s) => scoreEvent(s))];
+      const events3 = [pollEvent({ through: basis.message, considered, jobs, ...poll.wake ? { wake: { at: at3.state.clock + poll.wake.minutes, why: poll.wake.why } } : {} }), ...poll.scores.map((s) => scoreEvent(s))];
       await land(rt, chatId, userId, basis, AUTHOR_POLL, { events: events3, blobs: {}, ...poll.reasoning ? { reasoning: poll.reasoning } : {} }, layerEntryId(AUTHOR_POLL, chatId, basis.message, basis.swipe, ...occasion2), "author");
     } catch (error) {
       fail("keeping the author's poll", error);
@@ -140222,6 +140743,7 @@ async function afterDepthReply(rt, chatId, userId, basis, after, o = {}) {
         return r.lived > 0;
       });
     }
+    o.ready?.();
     if (poll.reflect.length > 0 && !held3(`Reflections (${poll.reflect.map((c) => names3.name(c.who)).join(", ")})`))
       out2.reflected = await ran2(poll.reflect, "reflection", async (who) => await reflectNow(rt, chatId, userId, who, { basis, model: model2, ...signal2 }) !== null);
     const wrote = [...new Set([...out2.caughtUp, ...out2.reflected])];
@@ -140235,12 +140757,25 @@ async function afterDepthReply(rt, chatId, userId, basis, after, o = {}) {
     }
     if (offscreen && poll.drop.length + poll.rebase.length + poll.settle.length + poll.episodes.length > 0) {
       try {
-        out2.offscreen = await offscreenJobs(rt, chatId, userId, basis, poll, { budget: settings.depth.budget, model: offMeter.port, ...signal2, ...o.plugs ? { plugs: o.plugs } : {}, binds, first });
+        out2.offscreen = await offscreenJobs(rt, chatId, userId, basis, poll, { budget: await chatBudget(rt.host, chatId, userId, settings.depth.budget), model: offMeter.port, ...signal2, ...o.plugs ? { plugs: o.plugs } : {}, binds, first });
         out2.put.push(...out2.offscreen.put);
         said2("off screen", out2.offscreen.said);
       } catch (error) {
         fail("the work off screen", error);
       }
+    }
+    const settled2 = out2.offscreen?.settled ?? [];
+    if (settled2.length > 0 && !o.wakeRound) {
+      const { ready: _ready, ...rest } = o;
+      const round2 = await afterDepthReply(rt, chatId, userId, basis, { ...after, poll: false, beats: [], spent: (after.spent ?? 0) + costTokens(mine.spent().cost) + costTokens(offMeter.spent().cost) }, { ...rest, occasion: [...occasion2, "settled"].join("."), woken: { minutes: 0, why: `the settling of draft${settled2.length === 1 ? "" : "s"} ${settled2.join(", ")} into canon off screen` }, wakeRound: true });
+      out2.jobs = [...out2.jobs ?? [], ...round2.jobs ?? []];
+      out2.caughtUp.push(...round2.caughtUp);
+      out2.reflected.push(...round2.reflected);
+      out2.failed.push(...round2.failed.map((f) => `after the settlement: ${f}`));
+      out2.authorReflected ??= round2.authorReflected;
+      if (round2.offscreen && out2.offscreen)
+        for (const k of ["dropped", "rebased", "settled", "drafted", "asked", "said"])
+          out2.offscreen[k].push(...round2.offscreen[k]);
     }
     if (!reflection || held3(reflection.depth === "chapter" ? "The author's re-read of the chapter" : "The author's reflection on the scene"))
       return out2;
@@ -140264,7 +140799,8 @@ async function afterDepthReply(rt, chatId, userId, basis, after, o = {}) {
       }
       const notebook = await readNotebook(rt, userId, now.state);
       const beats = (await beatTexts(rt, userId, stretch)).map((beat, i) => ({ ref: `b${i + 1}`, beat }));
-      const r = await twice(() => authorReflect({ world: now.world, state: now.state, texts: texts2, pov: povOf(now.world, now.state), model: model2, ...signal2, notebook, depth: depth2, beats, becoming, chapter: notebookOf(now.state).chapters.length, through: basis.message }), o.signal);
+      const amended = stretch.flatMap((b, i) => b.supersedes && b.supersedes.length > 0 ? [`b${i + 1} stands in for an earlier beat (his edit of a reply, or a correction)`] : []);
+      const r = await twice(() => authorReflect({ world: now.world, state: now.state, texts: texts2, pov: povOf(now.world, now.state), model: model2, ...signal2, notebook, depth: depth2, beats, becoming, chapter: notebookOf(now.state).chapters.length, through: basis.message, signals: [...after.signals ?? [], ...amended] }), o.signal);
       said2("the author's reflection", r.refused);
       const events3 = [...r.events, ...r.drift.map((d) => driftEvent(d)), ...r.predictions.map((p, i) => predictEvent({ id: predictionId(chatId, basis.message, basis.swipe, ...occasion2, String(i)), text: p.text, about: p.about, from: depth2 }))];
       if (events3.length > 0) {
@@ -140342,7 +140878,7 @@ async function talkTap(rt, chatId, userId, chipId, choice) {
   return { applied: true, pending: r.status === "held", ...left ? { left: { with: t.with, ...t.scene !== undefined ? { scene: t.scene } : {}, basis, entry: id2 } } : {} };
 }
 function talkLeft(rt, chatId, userId, left, o = {}) {
-  return afterDepthReply(rt, chatId, userId, left.basis, { scene: left.scene ?? null, ended: false, remember: [left.with], poll: false, beats: [] }, { ...o, occasion: left.entry });
+  return afterDepthReply(rt, chatId, userId, left.basis, { scene: left.scene ?? null, ended: false, remember: [left.with], poll: true, beats: [] }, { ...o, occasion: left.entry });
 }
 function talkWritten(t, o) {
   const why3 = t.why?.trim() ?? "";
@@ -140737,6 +141273,9 @@ ${read.notes}${thought}`);
 `)),
       section2(`Where ${pov2} was`, stagingLine(making.moment.staging)),
       knows2 !== undefined ? section2(`Whom ${pov2} knows by name`, knows2.length > 0 ? knows2.join(", ") : "No one here.") : "",
+      section2("From the author's notebook, for this scene (the narrator was asked to carry these; they add no facts)", (this.input.excerpts ?? []).map((e) => e.trim()).filter((e) => e !== "").join(`
+
+`) || undefined),
       section2("What the player asked this telling to change", this.input.direction?.trim() ? `${this.input.direction.trim()}
 The texture he asked for (phrasing, rhythm, colour, tone, what the passage dwells on) is allowed and is no departure from the beats; an act, a word, an outcome or a detail anyone could later notice still has to be in them.` : undefined)
     ].filter((p) => p !== "").join(`
@@ -140901,7 +141440,7 @@ function readWatch(answer2, ctx) {
   if (!answer2)
     return null;
   const notes = [];
-  const reasoning = nonBlank4(answer2.reasoning);
+  const reasoning = nonBlank4(answerWhy(answer2));
   const base = { others: [], world: [], end: nonBlank4(answer2.end), poll: answer2.poll === "later" ? "later" : "now", ...reasoning !== null ? { reasoning } : {}, notes };
   const takeover = nonBlank4(answer2.takeover);
   if (takeover !== null)
@@ -140977,7 +141516,7 @@ function readExposure(answer2, ctx) {
     return null;
   const notes = [];
   const resolve2 = resolverOf(ctx.world, ctx.state, ctx.present);
-  const reasoning = nonBlank4(answer2.reasoning);
+  const reasoning = nonBlank4(answerWhy(answer2));
   return { answer: perceiversOf(answer2.answer, resolve2, notes, new Set([ctx.with])), outcome: perceiversOf(answer2.outcome, resolve2, notes, new Set), ...reasoning !== null ? { reasoning } : {}, notes };
 }
 function exposureData(input) {
@@ -141350,7 +141889,11 @@ async function exchange(ctx, x) {
   narration.add({ beats: exchanged.map(renderBeat), ...staged ? { staging: staged } : {}, mark: 0 });
   if (worldBeats.length > 0)
     narration.add({ beats: worldBeats.map(renderBeat), ...staged ? { staging: staged } : {}, mark: 1 });
-  const [narrated] = await Promise.all([narration.drain(), ...beats.filter((b) => !pcInPart(b)).map(renderPov)]);
+  const [settled2, ...povs] = await Promise.allSettled([narration.drain(), ...beats.filter((b) => !pcInPart(b)).map(renderPov)]);
+  for (const p of [...povs, settled2])
+    if (p.status === "rejected")
+      throw p.reason;
+  const narrated = settled2.value;
   const kept4 = !narrated.stopped ? [...first, ...then] : narrated.streamedThrough === null ? [] : narrated.streamedThrough === 0 ? first : [...first, ...then];
   const ended2 = end !== null && kept4.includes(end);
   if (ended2)
@@ -141380,7 +141923,11 @@ var scenePlugs = { playerBeats, play, sceneSoFar, sceneRecall, actBeatTexts, res
 function reporting(port, sink, now = Date.now) {
   return async (role, messages, opts) => {
     const started = now();
-    const answer2 = await port(role, messages, opts);
+    const answer2 = await port(role, messages, opts).catch((error) => {
+      if (error instanceof ProviderRefusal && error.usage)
+        sink.call({ role, connection: error.call?.connection ?? "", model: error.call?.model ?? "", requestId: null, promptTokens: error.usage.tokensIn, completionTokens: error.usage.tokensOut, ms: Math.max(0, now() - started) });
+      throw error;
+    });
     const call = {
       role,
       connection: answer2.call?.connection ?? "",
@@ -141388,7 +141935,8 @@ function reporting(port, sink, now = Date.now) {
       requestId: answer2.call?.requestId ?? null,
       ...answer2.usage ? { promptTokens: answer2.usage.tokensIn, completionTokens: answer2.usage.tokensOut } : {},
       ms: Math.max(0, now() - started),
-      ...answer2.capped ? { capped: answer2.capped } : {}
+      ...answer2.capped ? { capped: answer2.capped } : {},
+      ...answer2.reasoning ? { reasoning: answer2.reasoning } : {}
     };
     sink.call(call);
     let kept4 = null;
@@ -141657,7 +142205,7 @@ class Turn {
     for (const r of setup.refused)
       this.say(`The author's setup: ${r}`);
     this.unkept = setup.refused;
-    const cast = this.slideOf(setup.cast);
+    const cast = await this.formMinds(this.slideOf(setup.cast));
     const pcPlace = placeOfEntity(book.state, this.pov);
     book.scene = setup.continues && playing ? playing.scene : sceneId(input.turn);
     book.place = setup.place ?? (setup.continues && playing ? playing.place : null) ?? pcPlace ?? Object.keys(this.world.places)[0] ?? "";
@@ -141771,6 +142319,46 @@ class Turn {
     book.cast = cast;
     this.agents = new Set(cast.filter((c) => c.effort === "agent").map((c) => c.who));
     book.apply([sceneEvent({ scene: book.scene, place: book.place, at: book.minute, cast })], mark2);
+  }
+  async formMind(who) {
+    const { input, book } = this;
+    const entity2 = own(book.state.entities, who) ?? own(this.world.entities, who);
+    const linked = own(this.world.entities, who)?.characterId;
+    const formed = await formCore({ who, name: this.name(who), player: this.name(this.pov), at: book.state.clock, fields: entity2?.fields ?? {}, ...typeof linked === "string" && linked !== "" ? { characterId: linked } : {}, ...input.rt.host ? { host: input.rt.host } : {}, chatId: input.chatId, userId: input.userId, texts: this.texts });
+    if (!formed)
+      return false;
+    book.apply(formed.events, 0);
+    Object.assign(book.blobs, formed.blobs);
+    this.think(`${this.name(who)} has a mind now, its core formed from ${formed.source === "card" ? "their card" : "what the world knows of them (Minds \u2192 Core to review)"}: they may play as their own agent from this scene on.`);
+    return true;
+  }
+  async formHere(here) {
+    const { input, book } = this;
+    const minded2 = new Set(mindedAt(book.state));
+    for (const [id2, e] of Object.entries(book.state.entities)) {
+      if (minded2.has(id2) || !hasAgent(this.world, book.state, id2) || isGone(book.state, id2) || !kindIs(input.rt.registry, this.world, e.kind, "person"))
+        continue;
+      if (!together(this.world, here, placeOfEntity(book.state, id2)))
+        continue;
+      const card = own(this.world.entities, id2)?.characterId;
+      if (e.agent === true || typeof card === "string" && card !== "")
+        await this.formMind(id2);
+    }
+  }
+  async formMinds(cast) {
+    const minded2 = new Set(mindedAt(this.book.state));
+    const out2 = [];
+    for (const c of cast) {
+      if (c.effort !== "agent" || minded2.has(c.who) || !hasAgent(this.world, this.book.state, c.who) || await this.formMind(c.who)) {
+        out2.push(c);
+        continue;
+      }
+      const why3 = `${this.name(c.who)} has no card and nothing the world knows of them to form a mind from, so you play them`;
+      this.say(`The author's setup: ${why3}.`);
+      this.unkept = [...this.unkept, why3];
+      out2.push({ ...c, effort: "author", why: c.why ? `${c.why} (No mind could be formed for them: no card, and nothing the world knows of them.)` : "No mind could be formed for them: no card, and nothing the world knows of them." });
+    }
+    return out2;
   }
   placed(staging, mark2, opening = false) {
     const { book, input } = this;
@@ -141909,6 +142497,7 @@ class Turn {
   async setup(playerBeats2, signals, resolved2, scene2, talk, takeover) {
     const { input, book } = this;
     const at3 = input.at;
+    await this.formHere(placeOfEntity(book.state, this.pov));
     const state2 = book.state;
     const here = placeOfEntity(state2, this.pov);
     const minded2 = new Set(mindedAt(state2));
@@ -142292,13 +142881,26 @@ class DepthTurns {
     const bridge = this.rt.bridgeOf(chatId);
     if (!bridge || !await this.on(chatId, userId))
       return null;
-    const read = await this.read(chatId, userId, ctx.generationId, turn, ctx.kind, ctx.direction);
+    const first = await this.read(chatId, userId, ctx.generationId, turn, ctx.kind, ctx.direction);
+    if (first === null)
+      return null;
+    const upTo = turn.chain.findIndex((m) => m.id === first.at.basis.message);
+    const on = new Set(turn.chain.slice(0, upTo + 1).map((m) => m.id));
+    const needed = await this.rt.depthNeeded(chatId, on, ctx.signal);
+    if (needed.waited.length + needed.without.length > 0)
+      ctx.sink.progress(`Waited for the work between turns this turn reads${needed.without.length > 0 ? `; going on without ${needed.without.map((j) => j.what).join(", ")}, which lands after` : ""}`);
+    const adopted = needed.waited.length > 0 ? await this.rt.ledger.adoptHeld(chatId, userId, on) : [];
+    const read = needed.waited.length > 0 ? await this.read(chatId, userId, ctx.generationId, turn, ctx.kind, ctx.direction) : first;
     if (read === null)
       return null;
+    const adoption = needed.waited.length + needed.without.length > 0 ? { waited: needed.waited, without: needed.without, entries: adopted } : null;
     const settings = await this.rt.settings.get(userId);
     const again = ctx.redo && settings.swipeDefault === "renarrate" && ctx.redo.pre.some((e) => e.type === STORY_BEAT) ? ctx.redo : null;
     if (ctx.redo)
       ctx.sink.progress(again ? "Redoing the reply you deleted, as your swipe setting says: the same beats, told afresh" : "Redoing the reply you deleted: the scene plays again from your message");
+    const tools = Array.isArray(ctx.body.tools) ? ctx.body.tools.length : 0;
+    if (tools > 0)
+      ctx.sink.progress(`This request offered ${tools === 1 ? "a tool" : `${tools} tools`}; a depth scene doesn't use them: its author, characters and narrator call only their own.`);
     const budget = await budgetFor(daySpendOf(this.rt.host), userId, settings.depth.budget);
     const plan2 = bridge.planFor(turn.seed);
     const result = await runDepthTurn({
@@ -142320,7 +142922,7 @@ class DepthTurns {
       model: this.port(userId, ctx.sink, samplingOf(ctx.body)),
       sink: ctx.sink,
       signal: ctx.signal,
-      rt: { registry: this.rt.registry, blobs: this.rt.blobs },
+      rt: { registry: this.rt.registry, blobs: this.rt.blobs, host: this.rt.host },
       archive: this.archive(chatId, userId, read.at.basis.message),
       budget
     }, this.plugs);
@@ -142328,7 +142930,7 @@ class DepthTurns {
     this.afters.set(ctx.generationId, { ...result.after, turn: ctx.generationId, ...spent > 0 ? { spent } : {} });
     if (this.afters.size > AFTERS_KEPT)
       this.afters.delete(this.afters.keys().next().value ?? "");
-    return { pre: result.pre, read: result.read, blobs: result.blobs, ...result.error !== undefined ? { error: result.error } : {} };
+    return { pre: adoption ? [...result.pre, adoptEvent(adoption)] : result.pre, read: result.read, blobs: result.blobs, ...result.error !== undefined ? { error: result.error } : {} };
   };
   after(generationId) {
     const after = this.afters.get(generationId) ?? null;
@@ -143666,6 +144268,7 @@ class ScenePersistence {
 var ACTIVE_CONNECTION = "active";
 var MINDS_POST_CALLS = ["memory", "consolidate", "knowledge"];
 var OFF_LOOPBACK_WHY = "Generated off the loopback: no scene and no read of the reply.";
+var NEEDED_WAIT_MS = 120000;
 var ALREADY_SO2 = new Set(["already_known", "already"]);
 var REF_ROLES = {
   location: { entity: "person", place: "place" },
@@ -144097,6 +144700,7 @@ class Runtime {
   loopback;
   depth;
   depthWork = new Set;
+  depthJobs = new Map;
   persistence;
   chatAgents;
   globalFiles;
@@ -144206,9 +144810,12 @@ class Runtime {
       this.takeStaged(e.chatId, userId, e.message.id);
     });
     this.host.on("MESSAGE_SWIPED", (e, userId) => {
+      if (e.action !== "updated")
+        this.depthLeft(e.chatId, e.message.id, "a swipe took the reply it read off the chat");
       if (e.action === "deleted" && userId)
         this.swipeDeleted(e.chatId, userId, e.message.id, e.swipeId).catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: chips didn't follow a deleted swipe (${error instanceof Error ? error.message : String(error)})`, userId));
     });
+    this.host.on("MESSAGE_DELETED", (e) => this.depthLeft(e.chatId, e.messageId, "the message it read was deleted"));
     this.host.on("WORLD_INFO_ACTIVATED", (e) => this.onActivated(e.chatId, e.entries.map((x) => x.id)));
     const gate3 = this.worldInfoGate();
     this.host.registerWorldInfoInterceptor(async (input) => this.loopback.marked(input, await worldInfoVerdict(gate3, input)));
@@ -144272,7 +144879,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "a41679bd", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "bd8a6365", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;
@@ -145768,12 +146375,12 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     const after = this.depth.after(input.generationId);
     const basis = after ? chainBases(input.core.chain(input.observed), input.core.journal.tombstones).find((b) => b.message === input.messageId) : undefined;
     if (after && basis)
-      this.depthWorking(input.chatId, input.userId, "the step after the reply", afterDepthReply(this, input.chatId, input.userId, basis, after).then(() => {
+      this.depthWorking(input.chatId, input.userId, "the step after the reply", (job) => afterDepthReply(this, input.chatId, input.userId, basis, after, { signal: job.signal, ready: job.ready }).then(() => {
         return;
-      }));
+      }), { reads: basis.message, between: true });
   }
   assistantEdited(input) {
-    this.depthWorking(input.chatId, input.userId, "the reading of your edit", (async () => {
+    this.depthWorking(input.chatId, input.userId, "the reading of your edit", () => (async () => {
       if (!await this.depth.on(input.chatId, input.userId))
         return;
       const out2 = await replyEdited(this, input.chatId, input.userId, input.messageId, input.text);
@@ -145783,19 +146390,60 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     })());
   }
   clockMovedOn(chatId, userId, moved2) {
-    this.depthWorking(chatId, userId, "the author's poll after the clock moved on", (async () => {
+    this.depthWorking(chatId, userId, "the author's poll after the clock moved on", (job) => (async () => {
       if (!await this.depth.on(chatId, userId))
         return;
       const basis = await headBasis(this, chatId, userId);
       if (basis === null)
         return;
-      await afterDepthReply(this, chatId, userId, basis, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { occasion: `clock:${moved2.fix}`, woken: { minutes: moved2.minutes, why: moved2.why } });
+      job.reads(basis.message);
+      await afterDepthReply(this, chatId, userId, basis, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { occasion: `clock:${moved2.fix}`, woken: { minutes: moved2.minutes, why: moved2.why }, signal: job.signal, ready: job.ready });
       this.changed(chatId, userId);
-    })());
+    })(), { between: true });
   }
-  depthWorking(chatId, userId, what, work) {
-    const tracked = work.catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${chatId}: ${what} didn't go through: ${error instanceof Error ? error.message : String(error)}`, userId)).finally(() => this.depthWork.delete(tracked));
+  depthWorking(chatId, userId, what, run2, o = {}) {
+    const ready = Promise.withResolvers();
+    const job = { what, userId, message: o.reads ?? null, between: o.between === true, stop: new AbortController, ready: ready.promise, isReady: false };
+    const markReady = () => {
+      job.isReady = true;
+      ready.resolve();
+    };
+    const jobs = this.depthJobs.get(chatId) ?? new Set;
+    this.depthJobs.set(chatId, jobs.add(job));
+    const tracked = run2({ signal: job.stop.signal, ready: markReady, reads: (message) => job.message = message }).catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${chatId}: ${what} didn't go through: ${error instanceof Error ? error.message : String(error)}`, userId)).finally(() => {
+      markReady();
+      jobs.delete(job);
+      if (jobs.size === 0 && this.depthJobs.get(chatId) === jobs)
+        this.depthJobs.delete(chatId);
+      this.depthWork.delete(tracked);
+    });
     this.depthWork.add(tracked);
+  }
+  depthLeft(chatId, message, why3) {
+    for (const job of this.depthJobs.get(chatId) ?? []) {
+      if (job.message !== message || job.stop.signal.aborted)
+        continue;
+      job.stop.abort(new Error(why3));
+      this.host.log("info", `[LumiRPEngine] chat ${chatId}: ${job.what} stopped: ${why3}`, job.userId);
+    }
+  }
+  depthPaused(userId) {
+    for (const jobs of this.depthJobs.values())
+      for (const job of jobs)
+        if (job.userId === userId && job.between)
+          job.ready.then(() => job.stop.abort(new Error("Work between turns was turned off")));
+  }
+  async depthNeeded(chatId, on, signal2) {
+    const jobs = [...this.depthJobs.get(chatId) ?? []].filter((j) => j.message !== null && on.has(j.message) && !j.isReady && !j.stop.signal.aborted);
+    if (jobs.length === 0)
+      return { waited: [], without: [] };
+    const late = Promise.withResolvers();
+    const timer = setTimeout(late.resolve, NEEDED_WAIT_MS);
+    signal2?.addEventListener("abort", () => late.resolve(), { once: true });
+    await Promise.race([Promise.all(jobs.map((j) => j.ready)), late.promise]);
+    clearTimeout(timer);
+    const cite = (j) => ({ what: j.what, message: j.message ?? "" });
+    return { waited: jobs.filter((j) => j.isReady && !j.stop.signal.aborted).map(cite), without: jobs.filter((j) => !j.isReady || j.stop.signal.aborted).map(cite) };
   }
   async depthSettled() {
     while (this.depthWork.size > 0)
@@ -146108,6 +146756,25 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     const live = this.live.start({ chatId: input.chatId, userId: input.userId, turn: input.generationId, kind: "turn", pipeline: settings.agents.pipeline.mode === "main" ? "main" : "fixed", text: said2 ? said2.swipes[said2.swipeId] ?? "" : "" });
     live.add({ kind: "plan", rows: ROLE_IDS.map((role) => ({ role, status: "none", why: OFF_LOOPBACK_WHY })) });
     live.end("done", "Generated off the loopback, so the engine didn't run.");
+  }
+  async relayDown(input) {
+    const messages = await this.host.chats.messages(input.chatId, input.userId);
+    const at3 = input.target === null ? -1 : messages.findIndex((m) => m.id === input.target);
+    const told = ownMessage(at3 < 0 ? messages : messages.slice(0, at3))?.id ?? input.target;
+    if (!told)
+      return;
+    await this.chips.add(input.chatId, input.userId, [
+      {
+        id: `needs_loopback:relay:${told}`,
+        kind: "needs_loopback",
+        messageId: told,
+        label: "The loopback relay isn't running",
+        detail: `This chat generates through the loopback, so its reply reaches LumiRPEngine only through a running relay. ${input.why}`,
+        actions: [{ id: "loopback", label: "Settings \u2192 Loopback", input: { type: "settings", label: "Settings \u2192 Loopback", page: "loopback" } }],
+        expires: "next_send",
+        payload: {}
+      }
+    ]);
   }
   async loopbackSections(userId, delivered) {
     const fills = directedFills(delivered);
@@ -148811,7 +149478,7 @@ async function thinkingOf(rt, userId, e) {
     return "";
   return isBlobHash(r) ? await rt.blobs.get(userId, r) ?? "" : r;
 }
-async function draftOf2(rt, userId, at3, order, live, d) {
+async function draftOf2(rt, userId, at3, order, live, d, press) {
   const { world, state: state2, story } = at3;
   const cal = calendarOf(world);
   const name = (id2) => own(state2.entities, id2)?.name ?? id2;
@@ -148855,8 +149522,22 @@ async function draftOf2(rt, userId, at3, order, live, d) {
     reasoning: await thinkingOf(rt, userId, drafted),
     pins: d.settle ? d.settle.data.pins.count : story.beats.filter((p) => p.beat.at >= draft.at).length,
     ...d.settle ? { settle: { ...placeOf6(d.settle.from), why: d.settle.data.why, reasoning: await thinkingOf(rt, userId, settled2), beats: d.settle.data.beats.length } } : {},
-    ...d.drop ? { drop: { ...placeOf6(d.drop.from), why: d.drop.data.why, reasoning: await thinkingOf(rt, userId, dropped) } } : {}
+    ...d.drop ? { drop: { ...placeOf6(d.drop.from), why: d.drop.data.why, reasoning: await thinkingOf(rt, userId, dropped) } } : {},
+    ...press ? { press } : {}
   };
+}
+var presses = new Map;
+var PRESSES_KEPT = 500;
+var pressKey = (chatId, userId, draft) => `${userId}\x00${chatId}\x00${draft}`;
+function notePress(chatId, userId, draft, press) {
+  const key = pressKey(chatId, userId, draft);
+  presses.delete(key);
+  presses.set(key, { op: press.op, state: press.state, lines: [...press.lines] });
+  for (const old of presses.keys()) {
+    if (presses.size <= PRESSES_KEPT)
+      break;
+    presses.delete(old);
+  }
 }
 async function draftsView(rt, chatId, userId) {
   const head = await headRead(rt, chatId, userId);
@@ -148867,7 +149548,7 @@ async function draftsView(rt, chatId, userId) {
   const drafts = [];
   const order = await chainNumbers(rt.host, chatId, userId, (await rt.ledger.chainBases(chatId, userId)).map((b) => b.message));
   for (const d of draftsOn(live))
-    drafts.push(await draftOf2(rt, userId, head.at, order, live, d));
+    drafts.push(await draftOf2(rt, userId, head.at, order, live, d, presses.get(pressKey(chatId, userId, d.draft.id))));
   return { on: on || drafts.length > 0, drafts: drafts.reverse() };
 }
 
@@ -149098,14 +149779,14 @@ function ceilingsOf(budget, turn, today6) {
   ];
 }
 async function treatmentsView(rt, chatId, userId) {
-  const budget = (await rt.settings.get(userId)).depth.budget;
+  const budget = await chatBudget(rt.host, chatId, userId, (await rt.settings.get(userId)).depth.budget);
   const day2 = daySpendOf(rt.host);
   await day2.load(userId);
   const today6 = day2.tokens(userId);
   const optedIn = await depthOptedIn(rt, chatId, userId);
   const basis = await rt.ledger.basisFor(chatId, userId);
   const at3 = basis ? await rt.ledger.foldAtBasis(chatId, userId, basis, TREATMENT_TYPES) : null;
-  const dial = { ask: budget.ask, threshold: budget.threshold };
+  const dial = { ask: budget.ask, threshold: budget.threshold, level: budget.level };
   if (!at3) {
     return { on: optedIn, asks: [], log: [], meter: [], interval: `This story ${budget.interval}`, allowances: allowancesOf(budget, spentIn([], budget, 0)), ceilings: ceilingsOf(budget, { spent: 0, of: "No turn on this chat has spent anything yet" }, today6), ...dial };
   }
@@ -149230,7 +149911,8 @@ async function treatmentsView(rt, chatId, userId) {
     roles: DEPTH_ROLES.flatMap((role) => {
       const of = g.spends.flatMap((s) => s.roles[role] ?? []);
       return of.length > 0 ? [{ role, cost: summed(of) }] : [];
-    })
+    }),
+    grades: drafts.filter((d) => intervalAt(g.unit, d.draft.at).from === g.from).flatMap((d) => d.draft.episode.parts.map((p) => ({ episode: d.draft.summary.trim() || d.draft.episode.why, subject: "who" in p.subject ? name(p.subject.who) : p.subject.event, depth: DEPTH_TREATMENT_LABEL[p.treatment], why: p.rationale })))
   }));
   const latest = spends.findLast((s) => laneOf(s.data.treatment) !== "offscreen");
   const turn = latest ? { spent: spends.filter((s) => s.from.messageId === latest.from.messageId).reduce((n, s) => n + costTokens(s.data.cost), 0), of: `The latest turn, at message ${placeOf6(latest.from.messageId).index}: its scene, the step after its reply and the work off screen that step started` } : { spent: 0, of: "No turn on this chat has spent anything yet" };
@@ -149335,8 +150017,7 @@ async function depthRequest(rt, host, r, userId) {
           throw new DepthRefused("bad_request", "Ask a question.");
         return { interview: await interviewMind(rt, chatId, userId, r.who, r.question.trim(), r.neutral === true) };
       case "pov":
-        await povSwitch(rt, chatId, userId, r.who);
-        return {};
+        throw new DepthRefused("validation", PLAY_AS_OFF);
       case "catch_up": {
         const caught = await catchUpNow(rt, chatId, userId, r.who);
         await linkWrote(rt, chatId, userId, r.who, "catch_up", caught.entries);
@@ -149362,7 +150043,7 @@ async function depthRequest(rt, host, r, userId) {
       case "archive":
         return { archive: await archive(rt, host, chatId, userId, r) };
       case "scene":
-        return { scene: await sceneView(rt, await host.head(chatId, userId), chatId, userId, r.message) };
+        return { scene: await sceneView(rt, await host.head(chatId, userId), chatId, userId, r.message), dryRun: rt.loopback.dryRunOf(chatId, userId) };
       case "drafts":
         return { drafts: await draftsView(rt, chatId, userId) };
       case "draft_drop": {
@@ -149371,14 +150052,20 @@ async function depthRequest(rt, host, r, userId) {
       }
       case "draft_settle":
       case "draft_redraft": {
-        const job = r.op === "draft_settle" ? settleNow(rt, chatId, userId, r.draft) : redraft(rt, chatId, userId, r.draft);
-        const doing = r.op === "draft_settle" ? "The author is reading it against everything since its time" : "The author is drafting it again";
+        const op = r.op === "draft_settle" ? "settle" : "redraft";
+        const doing = op === "settle" ? "The author is reading it against everything since its time" : "The author is drafting it again";
+        notePress(chatId, userId, r.draft, { op, state: "running", lines: [`${doing}.`] });
+        const job = op === "settle" ? settleNow(rt, chatId, userId, r.draft) : redraft(rt, chatId, userId, r.draft);
         job.then((lines3) => {
           for (const line2 of lines3)
             rt.host.log("info", `[LumiRPEngine] chat ${chatId}, draft ${r.draft}: ${line2}`, userId);
-          rt.push.changed(chatId, userId);
-        }).catch((error) => rt.host.log("warn", `[LumiRPEngine] chat ${chatId}, draft ${r.draft}: ${error instanceof Error ? error.message : String(error)}`, userId));
-        return { said: [`${doing}; GM \u2192 Depth \u2192 Drafts shows what became of it.`] };
+          notePress(chatId, userId, r.draft, { op, state: "done", lines: lines3.length > 0 ? lines3 : ["Nothing changed: the author left it as it was."] });
+        }).catch((error) => {
+          const why3 = error instanceof Error ? error.message : String(error);
+          rt.host.log("warn", `[LumiRPEngine] chat ${chatId}, draft ${r.draft}: ${why3}`, userId);
+          notePress(chatId, userId, r.draft, { op, state: "failed", lines: [why3] });
+        }).finally(() => rt.push.changed(chatId, userId));
+        return { said: [`${doing}; its page in GM \u2192 Depth \u2192 Drafts shows what became of it.`] };
       }
       case "treatments":
         return { treatments: await treatmentsView(rt, chatId, userId) };
@@ -150051,6 +150738,8 @@ class Dispatcher {
           const after = await this.rt.settings.set(userId, r.patch, guard);
           if (after.hideJsonBlocks !== before.hideJsonBlocks)
             await this.rt.hidingChanged(userId, after.hideJsonBlocks);
+          if (before.depth.background.on && !after.depth.background.on)
+            this.rt.depthPaused(userId);
           const listed5 = (texts2) => JSON.stringify(Object.entries(texts2).filter(([id2]) => listsText(id2)));
           if (listed5(after.prompts.texts) !== listed5(before.prompts.texts))
             this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.tools.changed" }, userId);
@@ -150226,7 +150915,8 @@ class Dispatcher {
       case "lre.minds": {
         try {
           const run2 = r.op === "run" ? await this.minds.start(r.chatId, userId, session, Array.isArray(r.who) ? r.who.filter((id2) => typeof id2 === "string") : undefined) : r.op === "cancel" ? this.minds.cancel(r.chatId, userId, r.runId) : this.minds.status(r.chatId, userId);
-          reply("lre.minds", { run: run2 });
+          const off = r.op === "status" ? await this.minds.off(r.chatId, userId) : null;
+          reply("lre.minds", { run: run2, ...off !== null ? { off } : {} });
         } catch (error) {
           if (error instanceof RunError)
             throw new RequestError(error.code, error.message);
@@ -150726,7 +151416,7 @@ class Dispatcher {
       const tap = await askAnswer(this.rt, chatId, userId, id2, choice);
       if ("lapsed" in tap)
         throw new RequestError("not_found", tap.lapsed);
-      const budget = (await this.rt.settings.get(userId)).depth.budget;
+      const budget = await chatBudget(this.rt.host, chatId, userId, (await this.rt.settings.get(userId)).depth.budget);
       draftAnswered(this.rt, chatId, userId, tap, { budget }).then((r) => {
         for (const line2 of r.said)
           this.rt.host.log("info", `[LumiRPEngine] chat ${chatId}, the episode you answered for: ${line2}`, userId);
@@ -151828,28 +152518,39 @@ function createSpindleHost() {
       }, 100);
     },
     registerPromptInterceptor(handler, options) {
-      spindle.registerInterceptor(async (messages, context2) => {
-        const read = messages.map(promptMessageOf);
-        const clean = read.map((r) => r.clean);
-        const ctx = context2;
-        const chatId = str32(ctx, "chatId");
-        const userId = str32(ctx, "userId");
-        if (!chatId || !userId)
-          return clean;
-        const session = str32(ctx, "frontendSessionId");
-        const input = {
-          chatId,
-          userId,
-          generationType: contextType(ctx),
-          dryRun: isRecord(ctx) && (ctx.dryRun === true || ctx.isDryRun === true),
-          connectionId: str32(ctx, "connectionId") ?? null,
-          presetId: str32(ctx, "presetId") ?? null,
-          ...session ? { frontendSessionId: session } : {},
-          messages: read.map((r) => r.message)
-        };
-        const verdict2 = await handler(input);
-        return verdict2.parameters ? { messages: clean, parameters: verdict2.parameters } : clean;
-      }, { priority: options.priority, match: { generationTypes: [...options.generationTypes] }, required: options.required });
+      let dispose = null;
+      const register = () => {
+        dispose?.();
+        dispose = spindle.registerInterceptor(async (messages, context2) => {
+          const read = messages.map(promptMessageOf);
+          const clean = read.map((r) => r.clean);
+          const ctx = context2;
+          const chatId = str32(ctx, "chatId");
+          const userId = str32(ctx, "userId");
+          if (!chatId || !userId)
+            return clean;
+          const session = str32(ctx, "frontendSessionId");
+          const input = {
+            chatId,
+            userId,
+            generationType: contextType(ctx),
+            dryRun: isRecord(ctx) && (ctx.dryRun === true || ctx.isDryRun === true),
+            connectionId: str32(ctx, "connectionId") ?? null,
+            presetId: str32(ctx, "presetId") ?? null,
+            ...session ? { frontendSessionId: session } : {},
+            messages: read.map((r) => r.message)
+          };
+          const verdict2 = await handler(input);
+          const omit = new Set(verdict2.omit ?? []);
+          const sent2 = omit.size > 0 ? clean.filter((_, i) => !omit.has(i)) : clean;
+          return verdict2.parameters ? { messages: sent2, parameters: verdict2.parameters } : sent2;
+        }, { priority: options.priority, match: { generationTypes: [...options.generationTypes] }, required: options.required });
+      };
+      register();
+      spindle.on("PERMISSION_CHANGED", (detail) => {
+        if (detail.permission === "interceptor" && detail.granted)
+          register();
+      });
     },
     models: {
       quiet: (request, userId, signal2) => quietCall(request, userId, signal2),
