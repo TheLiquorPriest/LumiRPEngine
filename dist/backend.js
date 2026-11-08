@@ -119263,7 +119263,7 @@ class BootstrapRun {
     this.laneStopped = false;
     try {
       const knobs = await this.env.knobs();
-      const jumped = await this.env.jumpstart?.(this.metered("author"));
+      const jumped = await this.env.jumpstart?.(this.roomRule("author", this.metered("author")));
       if (jumped)
         this.note(`The author's jumpstart read the chat's LumiBooks records in ${jumped.calls} call${jumped.calls === 1 ? "" : "s"}: the cast's cores and knowledge and the notebook's seed, for review. The read skips the messages they cover.`);
       const { manifest, spooled } = await this.spool(knobs);
@@ -123525,13 +123525,8 @@ ${notebook}` }
 var text7 = (v4) => typeof v4 === "string" ? v4.trim() : "";
 async function readGroup(model2, group4, input, signal2, asked2) {
   const messages = messagesOf(group4, input);
-  const ask4 = async (maxTokens) => {
-    asked2.calls++;
-    return model2("author", messages, { json: true, maxTokens, ...signal2 ? { signal: signal2 } : {} });
-  };
-  let answer = await ask4(roomFor(messages));
-  if (cutShort(answer.finish))
-    answer = await ask4(roomFor(messages) * 2);
+  asked2.calls++;
+  const answer = await model2("author", messages, { json: true, ...signal2 ? { signal: signal2 } : {} });
   const read = cutShort(answer.finish) ? null : answerRead(answer.text);
   if (read)
     return [read.answer];
@@ -132601,9 +132596,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path3 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "15a4af81127f189ab413dfe933f578e92a8c2a692c4355ce4ac72d2bce5a77f5";
+  const sha256 = "7c6afaac76e07aa3a6204dab04cfe32726b3d9dcf0dedc1e1ff85d4fba6afdd8";
   const tools = ["4408800e42056eef2a7fc9f5cdf99aca", "66c7161bb4f87be1dbc8e68504ddcba8"].filter((f) => f !== undefined);
-  return { id: "a6a79c4e", kit: sha256 !== undefined && path3 !== null && core !== null ? { path: path3, core, sha256, api: KIT_API } : null, tools };
+  return { id: "a13b53ad", kit: sha256 !== undefined && path3 !== null && core !== null ? { path: path3, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -147250,7 +147245,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "a6a79c4e", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "a13b53ad", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;
