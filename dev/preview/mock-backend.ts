@@ -21,7 +21,7 @@ import { AGENT_API } from "../../src/shared/protocol";
 import { loreBooksSettingOf, loreIndexSettingsOf, type UserSettings } from "../../src/shared/settings";
 import { LORE_INDEX_TEXT } from "../../src/shared/lore-routing";
 import { renderIndex } from "../../src/backend/lore-routing";
-import { agentSettingsOf, type AcceptanceState } from "../../src/shared/agent-settings";
+import { agentSettingsOf, type AcceptanceState, type ChatEngine } from "../../src/shared/agent-settings";
 import { blobHash, isFilePath, isKeptPath, isLearnedPath } from "../../src/shared/stores";
 import type { GmView, StateView } from "../../src/shared/state-view";
 import type { ThingType } from "../../src/shared/thing-view";
@@ -205,6 +205,8 @@ export class MockBackend {
     e2: "The harbor opens at dawn and closes at dusk. {{// Secret (known to npc_dev): Dev keeps a spare key to the bait shop under the third crate.}}",
   };
   private view: StateView | null = null;
+  /** The chat's engine as GM → This chat → Engine shows it: on agents from its first turn, the default for new chats, until the switch makes it its own. */
+  private engine: { engine: ChatEngine; chosen: boolean } = { engine: "agents", chosen: false };
   private rev = 0;
   private settings: UserSettings = settingsFixture();
   /** Acceptance runs (`lre.acceptance`): the open one and the last closed. */
@@ -667,7 +669,8 @@ export class MockBackend {
         const tracking = message.knowledge !== undefined ? message.knowledge : knowledge.tracking.chat;
         const narrator = message.narrator !== undefined ? message.narrator : knowledge.narrator.chat;
         const tidy = message.tidy !== undefined ? message.tidy : controls.things.tidy.chat;
-        this.result(reqId, "lre.chat.knowledge", { knowledge: tracking, narrator, ...(tidy !== null ? { tidy } : {}) });
+        if (message.engine !== undefined) this.engine = message.engine === null ? { engine: "agents", chosen: false } : { engine: message.engine, chosen: true };
+        this.result(reqId, "lre.chat.knowledge", { knowledge: tracking, narrator, engine: this.engine.engine, engineFrom: this.engine.chosen ? "chosen" : "default", ...(tidy !== null ? { tidy } : {}) });
         this.mutate((view) => {
           const c = view.controls;
           if (!c) return;

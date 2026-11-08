@@ -12,10 +12,14 @@ const ROLES: readonly [ChipKind, ChipRole][] = [
   ["reread", "decision"],
   ["overdue", "decision"],
   ["refused", "decision"],
+  ["needs_loopback", "decision"],
+  ["allowance", "decision"],
   ["timelapse_offer", "offer"],
   ["continue_timelapse", "offer"],
   ["choice", "offer"],
   ["swipe_option", "offer"],
+  ["talk", "offer"],
+  ["unfaithful", "offer"],
   ["change", "done"],
   ["elapsed", "done"],
   ["roll", "done"],
@@ -24,6 +28,8 @@ const ROLES: readonly [ChipKind, ChipRole][] = [
   ["not_action", "done"],
   ["mode_change", "done"],
   ["fix", "done"],
+  ["edit_read", "done"],
+  ["settled", "done"],
   ["pending", "done"],
   ["degraded", "done"],
   ["untracked", "done"],
@@ -35,11 +41,11 @@ describe("chip roles", () => {
     for (const [kind, role] of ROLES) expect([kind, chipRole({ kind })]).toEqual([kind, role]);
   });
 
-  test("tones: declines, failed reads and refusals are negative; degraded, pending, overdue and confirm warn; the rest are neutral", () => {
+  test("tones: declines, failed reads and refusals are negative; degraded, pending, overdue, confirm, an unfaithful passage and a depth chat off the loopback warn; the rest are neutral", () => {
     const kinds: ChipKind[] = ROLES.map(([kind]) => kind);
     const of = (tone: string) => kinds.filter((kind) => chipTone({ kind }) === tone).sort();
     expect(of("neg")).toEqual(["decline", "read_failed", "refused"]);
-    expect(of("warn")).toEqual(["confirm", "degraded", "overdue", "pending"]);
-    expect(of("neutral")).toHaveLength(kinds.length - 7);
+    expect(of("warn")).toEqual(["confirm", "degraded", "needs_loopback", "overdue", "pending", "unfaithful"]);
+    expect(of("neutral")).toHaveLength(kinds.length - 9);
   });
 });

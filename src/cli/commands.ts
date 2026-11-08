@@ -1,21 +1,25 @@
 // The command line. Each command mirrors a tool (the same code, the same answers), beside sign-in,
-// the MCP server and the versions. `run` takes its I/O as arguments, so the tests run it in
-// process; main.ts wires it to Node.
+// the MCP server and the versions; the commands of the tools LumiRPEngine serves (DESIGN §23) are
+// built from the mirror each one is listed with. `run` takes its I/O as arguments, so the tests run
+// it in process; main.ts wires it to Node.
 
 import type { JsonValue } from "../shared/json";
+import { KeyedQueue } from "../shared/keyed-queue";
+import type { CliMirror } from "../shared/outside-tools";
 import { hasOwn, isRecord } from "../shared/json";
-import type { Args } from "./args";
+import type { Args } from "../shared/tool-args";
 import type { CredentialStore } from "./credentials";
 import { inClear, normalizeBase } from "./credentials";
 import type { Http, OpenSocket, SignOutResult } from "./connection";
 import { HostConnection, LiveError, sessionOf, signIn, signOut } from "./connection";
 import type { McpOptions } from "./kit-api";
 import { Live, resolveRevision } from "./live";
+import type { LoopbackIO } from "./loopback";
+import { LOOPBACK_USAGE, loopback } from "./loopback";
 import { templateFile } from "./offline";
 import { SANDBOX_BUDGET_MS } from "./sandbox";
-import type { ToolModule } from "./tool-module";
 import type { ToolContext } from "./tools";
-import { callTool, findTool, KeyedQueue, MODULE_TOOLS } from "./tools";
+import { callTool, findTool, MODULE_TOOLS, servedTools } from "./tools";
 import { CLI_NAME, CLI_VERSION, VERSION_LINE } from "./version";
 
 export interface CliIO {
@@ -31,6 +35,8 @@ export interface CliIO {
   credentials: CredentialStore;
   http: Http;
   openSocket: OpenSocket;
+  /** The machine as `loopback` needs it (main.ts); absent where the relay can't run. */
+  loopback?: LoopbackIO;
 }
 
 export const USAGE = `${CLI_NAME}: manage your LumiRPEngine worlds on Lumiverse from a shell or an agent
@@ -45,7 +51,7 @@ Sign-in
 Offline (no sign-in)
   guide [<topic>]                             The agent guide, or its part about a topic
   docs <words…> [--doc <name>]                Look up LumiRPEngine's docs (reference, expressions, recipes, design,
-                                              user-guide, presets)
+                                              user-guide, presets, depth, loopback, agent-guide, mcp)
   schema [<pointer>] [--map] [--offset <n>]   The world (or map) JSON Schema at a JSON Pointer
   templates                                   The starter worlds
   template <id> [--out <file>] [--pointer <p>] [--offset <n>]
@@ -79,12 +85,16 @@ Your worlds on Lumiverse
   attach <worldId> <chatId>                   A chat plays the world
   upgrade <chatId> [--to <revision>] [--preview] [--spoilers]
 
-${moduleUsage()}  mcp [--read-only] [--pin] [--sandbox-budget <seconds|none>]
+${usageOf(MODULE_TOOLS.map((t) => t.cli))}Playing a chat on Lumiverse, and Lore
+  The commands of the tools LumiRPEngine serves (chat, gm, fix, act, lore-books…): help lists them
+  with their usage once you are signed in.
+
+  mcp [--read-only] [--pin] [--sandbox-budget <seconds|none>]
                                               All of it as an MCP server on stdio, following LumiRPEngine's own
                                               tools (--pin, or LRE_PIN_KIT=1: keep these). A sandbox advance stops
                                               with a cursor to go on from once a call has run --sandbox-budget
                                               seconds (or LRE_SANDBOX_BUDGET; ${SANDBOX_BUDGET_MS / 1000} by default, none for no limit)
-  version, --version                          ${CLI_NAME}, engine, world format and agent API versions
+${LOOPBACK_USAGE}  version, --version                          ${CLI_NAME}, engine, world format and agent API versions
 
   <s> is draft, head or a revision. Everywhere: --url <base> (or LUMIVERSE_URL) picks the Lumiverse when you
   are signed in to several; --read-only (or LRE_READ_ONLY=1) refuses every change; --timeout <seconds|none>
@@ -99,10 +109,13 @@ interface Parsed {
   flags: Record<string, true>;
 }
 
-/** The switches the tools kept in files of their own take, beside the ones the commands here take. */
-const MODULE_FLAGS: Record<string, true> = Object.fromEntries(MODULE_TOOLS.flatMap((t) => Object.entries(t.cli.options ?? {}).flatMap(([option, o]) => (o.as === "flag" ? [[option, true] as const] : []))));
+/** The switches a tool's mirror takes: its options that are flags. */
+function flagsOf(mirrors: readonly CliMirror[]): Record<string, true> {
+  return Object.fromEntries(mirrors.flatMap((cli) => Object.entries(cli.options ?? {}).flatMap(([option, o]) => (o.as === "flag" ? [[option, true] as const] : []))));
+}
 
-const BOOLEAN_FLAGS: Record<string, true> = { "--read-only": true, "--allow-http": true, "--preview": true, "--spoilers": true, "--map": true, "--help": true, "--version": true, "--pin": true, ...MODULE_FLAGS };
+/** The switches this client's commands take, the tools kept in files of their own included. */
+const BOOLEAN_FLAGS: Record<string, true> = { "--read-only": true, "--allow-http": true, "--preview": true, "--spoilers": true, "--map": true, "--help": true, "--version": true, "--pin": true, "--systemd": true, "--shared": true, ...flagsOf(MODULE_TOOLS.map((t) => t.cli)) };
 
 /** What `LRE_READ_ONLY` and `LRE_PIN_KIT` may say. Anything else stops the run: a value meant as "on" must never serve the write tools, or follow a kit it was meant to keep. */
 const READ_ONLY_VALUES: Record<string, boolean> = { "": false, "0": false, false: false, no: false, off: false, "1": true, true: true, yes: true, on: true };
@@ -130,7 +143,8 @@ function onlyOptions(command: string, p: Parsed, options: readonly string[], usa
   if (!positionals && p.positionals.length > 0) throw new UsageError(`${command} takes no ${p.positionals.length === 1 ? "argument" : "arguments"} (${p.positionals.join(" ")}). Usage: ${CLI_NAME} ${usage}`);
 }
 
-function parse(argv: readonly string[]): Parsed {
+/** `argv` read, each of `flags` as a switch that takes no value. */
+function parse(argv: readonly string[], flags: Readonly<Record<string, true>> = BOOLEAN_FLAGS): Parsed {
   const out: Parsed = { command: undefined, positionals: [], values: {}, flags: {} };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i] ?? "";
@@ -141,7 +155,7 @@ function parse(argv: readonly string[]): Parsed {
     if (arg.startsWith("--") && arg.length > 2) {
       const eq = arg.indexOf("=");
       const name = eq > 0 ? arg.slice(0, eq) : arg;
-      if (hasOwn(BOOLEAN_FLAGS, name)) {
+      if (hasOwn(flags, name)) {
         // `--spoilers=false` would read as on: a switch takes no value.
         if (eq > 0) throw new UsageError(`${name} is a switch and takes no value: leave out "=${arg.slice(eq + 1)}".`);
         out.flags[name] = true;
@@ -224,10 +238,10 @@ const MIRRORS: Readonly<Record<string, Mirror>> = {
   upgrade: { tool: "lre_upgrade", options: ["--to", "--preview", "--spoilers"], needs: 1, usage: "upgrade <chatId> [--to <revision>] [--preview] [--spoilers]", args: (p) => ({ chatId: pos(p, 0), ...(one(p, "--to") !== undefined ? { to: one(p, "--to") } : {}), ...(p.flags["--preview"] ? { preview: true } : {}), ...(p.flags["--spoilers"] ? { spoilers: true } : {}) }) },
 };
 
-/** The usage text of the tools kept in files of their own, under their headings, in the order they are registered. Called while USAGE is made, so it reads nothing declared below. */
-function moduleUsage(): string {
+/** The usage text of commands built from their tools' mirrors, under their headings, in the order given. Called while USAGE is made, so it reads nothing declared below. */
+function usageOf(mirrors: readonly CliMirror[]): string {
   const sections = new Map<string, string[]>();
-  for (const { cli } of MODULE_TOOLS) {
+  for (const cli of mirrors) {
     const line = cli.usage.length <= 42 ? `  ${cli.usage.padEnd(44)}${cli.summary}` : `  ${cli.usage}\n${" ".repeat(46)}${cli.summary}`;
     sections.set(cli.section, [...(sections.get(cli.section) ?? []), line]);
   }
@@ -244,13 +258,12 @@ function jsonFrom(option: string, given: string, io: CliIO): JsonValue {
   }
 }
 
-/** A tool module's command, read from its mirror: each positional and option fills the argument it names. */
-function moduleMirror(tool: ToolModule): Mirror {
-  const { cli } = tool;
+/** A command read from its tool's mirror: each positional and option fills the argument it names. */
+function mirrorOf(tool: string, cli: CliMirror): Mirror {
   const options = cli.options ?? {};
   const names = cli.positionals ?? [];
   return {
-    tool: tool.name,
+    tool,
     options: Object.keys(options),
     needs: cli.needs ?? 0,
     usage: cli.usage,
@@ -275,7 +288,10 @@ function moduleMirror(tool: ToolModule): Mirror {
   };
 }
 
-const MODULE_MIRRORS: ReadonlyMap<string, Mirror> = new Map(MODULE_TOOLS.map((t) => [t.cli.command, moduleMirror(t)]));
+const MODULE_MIRRORS: ReadonlyMap<string, Mirror> = new Map(MODULE_TOOLS.map((t) => [t.cli.command, mirrorOf(t.name, t.cli)]));
+
+/** How long `help` waits on LumiRPEngine for the commands of the tools it serves, so a host that is down never holds the usage text up. */
+const HELP_WAIT_MS = 10_000;
 
 function pointerAndOffset(p: Parsed): Args {
   const offset = number(p, "--offset");
@@ -343,11 +359,10 @@ interface Session {
   close(): void;
 }
 
-/** The tools' context for one run: the host is reached only when a live tool first needs it. */
-function sessionFor(p: Parsed, io: CliIO, readOnly: boolean): Session {
+/** The tools' context for one run: the host is reached only when a live tool first needs it, each request waiting `timeoutMs` at most (the run's own limit when not given). */
+function sessionFor(p: Parsed, io: CliIO, readOnly: boolean, timeoutMs: number | null | undefined = timeoutOf(p, io.env)): Session {
   let live: Live | null = null;
   const queue = new KeyedQueue();
-  const timeoutMs = timeoutOf(p, io.env);
   const ctx: ToolContext = {
     readFile: (path) => io.readFile(path),
     readOnly,
@@ -465,7 +480,14 @@ export async function run(argv: readonly string[], io: CliIO): Promise<RunResult
     return { code: 0 };
   }
   if (command === undefined || command === "help" || p.flags["--help"]) {
-    io.out(USAGE);
+    // The commands of the tools LumiRPEngine serves, when this client is signed in and it answers.
+    const help = sessionFor(p, io, false, HELP_WAIT_MS);
+    try {
+      const served = await servedTools(help.ctx).catch(() => null);
+      io.out(served === null ? USAGE : `${USAGE}\n\n${usageOf(served.tools.flatMap((t) => (t.cli !== undefined ? [t.cli] : []))).trimEnd()}`);
+    } finally {
+      help.close();
+    }
     return { code: 0 };
   }
   let session: Session | null = null;
@@ -476,6 +498,8 @@ export async function run(argv: readonly string[], io: CliIO): Promise<RunResult
       onlyOptions("mcp", p, ["--url", "--read-only", "--timeout", "--pin", "--sandbox-budget"], "mcp [--read-only] [--pin] [--url <base>] [--timeout <seconds|none>] [--sandbox-budget <seconds|none>]", false);
       return { mcp: { readOnly, pin: pinOf(p, io.env), base: () => chooseBase(p, io), timeoutMs: timeoutOf(p, io.env), sandboxBudgetMs: limitOf(p, io.env, "--sandbox-budget", "LRE_SANDBOX_BUDGET") } };
     }
+    // The loopback relay (DEPTH-PLAN §3.3) checks its own options: it serves, installs and signs in by itself.
+    if (command === "loopback") return { code: await loopback({ positionals: p.positionals, values: p.values, flags: p.flags }, io) };
     session = sessionFor(p, io, readOnly);
     if (command === "login") {
       if (p.values["--password"] !== undefined) throw new UsageError(`${CLI_NAME} never takes a password as an argument: it would stay in your shell history and show in the process list. Type it at the prompt, or set LUMIVERSE_PASSWORD.`);
@@ -486,8 +510,18 @@ export async function run(argv: readonly string[], io: CliIO): Promise<RunResult
       onlyOptions("logout", p, ["--url"], "logout [--url <base>]", false);
       return { code: await logout(p, io) };
     }
-    const mirror = hasOwn(MIRRORS, command) ? MIRRORS[command] : MODULE_MIRRORS.get(command);
-    if (mirror === undefined || findTool(mirror.tool) === undefined) {
+    let mirror = hasOwn(MIRRORS, command) ? MIRRORS[command] : MODULE_MIRRORS.get(command);
+    if (mirror !== undefined && findTool(mirror.tool) === undefined) mirror = undefined;
+    if (mirror === undefined) {
+      // A command of a tool LumiRPEngine serves: built from its listed mirror, argv read again with its own switches. A write
+      // is found read-only too, so its call is forwarded and LumiRPEngine refuses it as read-only, rather than "no command".
+      const served = (await servedTools({ ...session.ctx, readOnly: false }))?.tools.find((t) => t.cli?.command === command);
+      if (served?.cli !== undefined) {
+        p = parse(argv, { ...BOOLEAN_FLAGS, ...flagsOf([served.cli]) });
+        mirror = mirrorOf(served.name, served.cli);
+      }
+    }
+    if (mirror === undefined) {
       io.err(`There is no command ${command}.\n\n${USAGE}`);
       return { code: 2 };
     }

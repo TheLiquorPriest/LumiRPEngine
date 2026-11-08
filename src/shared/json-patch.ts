@@ -4,7 +4,7 @@
 // Pure, like the rest of shared/: the backend checks what the patched document may change.
 
 import { hasOwn, isRecord } from "./json";
-import type { JsonValue } from "./json";
+import type { JsonObject, JsonValue } from "./json";
 import type { JsonPatchOp } from "./protocol";
 
 export class PatchError extends Error {
@@ -108,6 +108,29 @@ export function mergeAdjusted(patch: JsonValue, after: JsonValue): MergeAdjustme
     // A null deletes in a merge patch, but a reader may keep it as null (a step's "use the helper's" connection): both are what was sent.
     return (value === null ? now === undefined || now === null : jsonEqual(now, value)) ? [] : [{ pointer: pointerOf(tokens), sent: value, now }];
   });
+}
+
+/**
+ * Two merge patches as one that does what `first` and then `then` do, or null where no one patch
+ * can: where `first` sets a key to anything but an object (null, which deletes, included) and `then`
+ * merges an object into it, `then` merges into what `first` left there, which a patch over the
+ * stored value can't say. A key `then` sets outright wins; objects both merge into combine.
+ */
+export function composeMergePatches(first: JsonObject, then: JsonObject): JsonObject | null {
+  const out: JsonObject = { ...first };
+  for (const [key, value] of Object.entries(then)) {
+    if (isPrototypeKey(key)) return null;
+    const before = hasOwn(out, key) ? out[key] : undefined;
+    if (!isRecord(value) || before === undefined) {
+      out[key] = value;
+      continue;
+    }
+    if (!isRecord(before)) return null;
+    const both = composeMergePatches(before as JsonObject, value as JsonObject);
+    if (both === null) return null;
+    out[key] = both;
+  }
+  return out;
 }
 
 function insert(doc: JsonValue, tokens: readonly string[], value: JsonValue, replace: boolean): JsonValue {

@@ -100,7 +100,7 @@ function propertyAt(schema: JsonObject, path: string): JsonObject | null {
 }
 
 /** `schema` with each argument's description, in the user's words where they wrote one; a tool whose texts name an argument its schema lacks is a bug, and says so. */
-function described(def: ToolDefinition, schema: JsonObject, texts: PromptTexts): JsonObject {
+export function described(def: ToolDefinition, schema: JsonObject, texts: PromptTexts): JsonObject {
   const out = structuredClone(schema);
   for (const arg of toolText(def.name)?.args ?? []) {
     const property = propertyAt(out, arg.path);

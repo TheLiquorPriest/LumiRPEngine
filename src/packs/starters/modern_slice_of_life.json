@@ -180,7 +180,8 @@
     "story": {"version": 1, "config": {"flags": {"shop_open": true, "ferry_running": true}}},
     "combat": {"version": 1, "config": {}},
     "minds": {"version": 1, "config": {}},
-    "orgs": {"version": 1, "config": {}}
+    "orgs": {"version": 1, "config": {}},
+    "author": {"version": 1, "config": {}}
   },
   "pins": {
     "generators": {"money": 2, "gear": 2, "vehicles": 1},

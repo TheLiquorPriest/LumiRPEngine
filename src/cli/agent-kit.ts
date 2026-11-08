@@ -1,15 +1,17 @@
 // The agent kit (dist/agent-kit.js, DESIGN §23): every tool, with the guide, the docs, the schema,
 // the starters and the engine they serve, and the command line, behind the core's contract
-// (kit-api.ts). The core loads its own copy at start; an MCP server swaps in the copy the extension
-// it is connected to ships whenever that is another build.
+// (kit-api.ts). Its own tools are listed beside those LumiRPEngine serves (`lre.tools`), which it
+// forwards. The core loads its own copy at start; an MCP server swaps in the copy the extension it
+// is connected to ships whenever that is another build.
 
 import { KIT_API } from "../shared/agents";
+import { annotationsOf } from "../shared/outside-tools";
 import { run } from "./commands";
 import type { Connection } from "./connection";
-import type { BundledKit, KitContext } from "./kit-api";
+import type { BundledKit, KitContext, KitTool } from "./kit-api";
 import { Live } from "./live";
 import type { ToolContext } from "./tools";
-import { annotationsOf, callTool, findTool, toolsFor } from "./tools";
+import { runTool, servedTools, toolsFor } from "./tools";
 import { BUILD, VERSIONS } from "./version";
 
 /** Each session's tool context, made once; each connection's Live, which keeps the revisions read. */
@@ -35,12 +37,17 @@ function toolContext(ctx: KitContext): ToolContext {
   return context;
 }
 
+const own = (readOnly: boolean): KitTool[] => toolsFor(readOnly).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: annotationsOf(t.write) }));
+
 export const kit: BundledKit = {
   api: KIT_API,
   build: BUILD,
   versions: VERSIONS,
-  tools: (readOnly) => toolsFor(readOnly).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: annotationsOf(t) })),
-  has: (name) => findTool(name) !== undefined,
-  call: (name, args, ctx) => callTool(name, args, toolContext(ctx)),
+  own,
+  async tools(ctx) {
+    const served = await servedTools(toolContext(ctx));
+    return { tools: [...own(ctx.readOnly), ...(served?.tools ?? []).map((t): KitTool => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: t.annotations }))], backend: served?.build ?? null };
+  },
+  call: (name, args, ctx) => runTool(name, args, toolContext(ctx)),
   run,
 };

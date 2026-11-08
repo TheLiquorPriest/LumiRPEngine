@@ -18,7 +18,7 @@ import type { ModelUsePresetId } from "../../shared/ids";
 import { PROSE_STEPS } from "../../shared/lore";
 import { isMindPurpose, MIND_PROMPT_DEFAULTS } from "../../shared/minds";
 import type { ComponentChildren } from "preact";
-import type { GateSettings, HelperDefault, JobSettings, LorePolicy, LoreTransport, ModelUseSettings, ReasoningChoice, SamplingParams, StepConfig, StepRoute } from "../../shared/settings";
+import type { GateSettings, HelperDefault, JobModel, JobSettings, LorePolicy, LoreTransport, ModelUseSettings, ReasoningChoice, SamplingParams, StepConfig, StepRoute } from "../../shared/settings";
 import { DEFAULT_RECENT, helperCallOf, JOB_SETTINGS_DEFAULTS, REASONING_CHOICES, recentOf, SAMPLING_PARAMS, stepConfigOf, stepLoreOf } from "../../shared/settings";
 import { LimitField, MindPromptEditor } from "./minds";
 import type { MindsSettings } from "../../shared/minds";
@@ -28,7 +28,7 @@ import { PromptEditor } from "./prompt-editor";
 import type { CallMeterView } from "../../shared/state-view";
 import type { StepPurpose } from "../../shared/world";
 import { useApp } from "../app";
-import { Badge, Disclosure, Empty, Field, HostModelPicker, HostSwitch, List, ListRow, NumberStepper, Section, Seg } from "../components";
+import { Badge, Button, Disclosure, Empty, Field, HostModelPicker, HostSwitch, List, ListRow, NumberStepper, Section, Seg } from "../components";
 import { Icon } from "../icons";
 
 const PRESETS: { value: ModelUsePresetId; label: string }[] = [
@@ -371,8 +371,9 @@ export function StepsSection(props: { modelUse: ModelUseSettings; helper: Helper
           <StepPrompts purpose={purpose} config={stepConfigOf(props.modelUse.steps, purpose)} prompts={props.prompts} busy={props.busy} patch={props.patch} />
         </StepCard>
       ))}
-      {/* Build's jobs take the brief step's connection and max tokens above; what they read is set here, apart from the presets. */}
+      {/* Build's jobs: the model every job that calls one runs on, and what they read, apart from the presets. */}
       <Section title="Build jobs">
+        <JobModelCard model={props.jobs.model} helper={props.helper} connections={connections} busy={props.busy} patch={props.patch} />
         <LimitField
           label="Lore each person or group reads (tokens)"
           noneLabel="all of it"
@@ -387,6 +388,41 @@ export function StepsSection(props: { modelUse: ModelUseSettings; helper: Helper
           Propose routines from lore gives the AI each person's and group's lore in whole entries, the most about them first, up to this many tokens. What doesn't fit is left out, and the job says whose. People whose lore fills it get a call of their own.
         </p>
       </Section>
+    </div>
+  );
+}
+
+/** The jobs' own model as a settings patch: null puts every job back on the helper model; what a model leaves to the helper (effort, max tokens, each parameter) is deleted. */
+export function jobModelPatch(model: JobModel | null): JsonObject {
+  if (!model) return { jobs: { model: null } };
+  const route = model.route;
+  const params: JsonObject = {};
+  for (const p of SAMPLING_PARAMS) params[p.key] = route?.params?.[p.key] ?? null;
+  return { jobs: { model: { route: route ? { provider: "helper", connectionId: route.connectionId, model: route.model, effort: route.effort ?? null, params } : null, maxTokens: model.maxTokens ?? null } } };
+}
+
+/** Where Build's model jobs run (`jobs.model`): a connection, model, effort and max tokens, each the helper model's until set; Reset puts them all back on it. */
+function JobModelCard(props: { model: JobModel | null; helper: HelperDefault; connections: readonly Connection[]; busy: boolean; patch(patch: JsonObject): void }) {
+  const own: JobModel = props.model ?? {};
+  const route: StepRoute = own.route ?? { provider: "helper", connectionId: null, model: null };
+  const call = helperCallOf({ ...own, route }, props.helper);
+  const update = (next: JobModel | null) => props.patch(jobModelPatch(next));
+  return (
+    <div class="lre-stack" data-lre-jobs-model={props.model === null ? "helper" : "own"}>
+      <p class="lre-small lre-muted" style={{ margin: 0 }}>
+        Import, Index this text, Refine, Describe a map and Propose routines run on {props.model === null ? "the helper model" : "this model"}: {placeOf(call, props.connections)} · {paramsSummary(call)}. Each job's call takes at least the room a long answer needs, whatever its max tokens.
+      </p>
+      <ConnectionSelect value={route.connectionId} connections={props.connections} firstLabel={`Use helper default (${placeOf(props.helper, props.connections)})`} disabled={props.busy} onChange={(connectionId) => update({ ...own, route: { ...route, connectionId, model: null } })} />
+      {route.connectionId ? <HostModelPicker connectionId={route.connectionId} value={route.model ?? ""} label="Model" onChange={(model) => update({ ...own, route: { ...route, model: model || null } })} /> : null}
+      <EffortSelect label="Reasoning effort" value={route.effort ?? ""} inheritLabel={`Use helper default (${EFFORT_LABEL[props.helper.effort]})`} disabled={props.busy} onChange={(effort) => update({ ...own, route: { ...route, effort: effort === "" ? undefined : effort } })} />
+      <OptionalNumber label="Max tokens" otherLabel={`use helper default (${props.helper.maxTokens.toLocaleString("en-US")})`} value={own.maxTokens} min={64} step={512} integer fallback={props.helper.maxTokens} disabled={props.busy} onChange={(maxTokens) => update({ ...own, maxTokens })} />
+      {props.model !== null ? (
+        <span>
+          <Button size="sm" variant="ghost" icon="undo" label="Reset the jobs' model to the helper model" disabled={props.busy} onClick={() => update(null)}>
+            Reset to the helper model
+          </Button>
+        </span>
+      ) : null}
     </div>
   );
 }

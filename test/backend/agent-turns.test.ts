@@ -243,7 +243,7 @@ describe("the Engine switch", () => {
     expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId: branch })).engine).toBe("agents");
     const next = await played(rig, branch, "I yawn.", "You yawn.");
     expect(outputsOf(next.rec.events)).not.toBeNull();
-    expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId: branch, engine: null }))).toEqual({ knowledge: null, narrator: null });
+    expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId: branch, engine: null }))).toEqual({ knowledge: null, narrator: null, engine: "classic", engineFrom: "played" });
     const classic = await played(rig, branch, "I sit.", "You sit.");
     expect(outputsOf(classic.rec.events)).toBeNull();
     expect((await rig.send({ type: "lre.chat.knowledge", chatId: branch, engine: "fast" })).type).toBe("lre.error");
@@ -570,7 +570,7 @@ describe("what the engine keeps in memory (Settings → Agents → Budgets)", ()
     const core = await rig.rt.ledger.core(agents, rig.host.userId);
     if (!core) throw new Error("no ledger");
     const observed = toChain(await rig.host.chats.messages(agents, rig.host.userId));
-    const begin = (generationId: string): Promise<boolean> => rig.rt.orchestrator.begin({ chatId: agents, userId: rig.host.userId, generationId, core, observed, text: "I wait by the pier." });
+    const begin = (generationId: string): Promise<boolean> => rig.rt.orchestrator.begin({ chatId: agents, userId: rig.host.userId, generationId, core, observed, text: "I wait by the pier.", scene: false });
     expect(await begin("gen-a")).toBe(true);
     expect(await begin("gen-b")).toBe(true);
     expect([rig.rt.orchestrator.isAgent("gen-a"), rig.rt.orchestrator.isAgent("gen-b")]).toEqual([false, true]);
@@ -635,6 +635,6 @@ describe("a classic chat", () => {
     expect(rec.memoryNext).toBeUndefined();
     expect(rec.session).toBeUndefined();
     expect(await cards(rig, classic)).toEqual([]);
-    expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId: classic }))).toEqual({ knowledge: null, narrator: null });
+    expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId: classic }))).toEqual({ knowledge: null, narrator: null, engine: "classic", engineFrom: "default" });
   });
 });

@@ -319,9 +319,10 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
       // clock, whatever its action took, so no day plan or schedule runs mid-fight (the combat pack also
       // holds its participants in place). The turn whose action starts one keeps that action's time (a
       // long stalk that ends in an ambush); nothing speeds through while one is under way. Each action
-      // takes its own time, so durations add up; the scene tick stands in only when none ran.
+      // takes its own time, so durations add up; the scene tick stands in only when none ran, and never
+      // for a depth scene's turn (`scene`), whose own clock moves the time once it has played.
       const fighting = fightHoldsClock(w.ctx);
-      const elapsed = (inFight && fighting) || (i > 0 && !resolution?.ok) ? null : turnElapsed(w.world, w.state, resolution?.ok ? resolution.duration : null);
+      const elapsed = (inFight && fighting) || (i > 0 && !resolution?.ok) || (input.scene === true && !resolution?.ok) ? null : turnElapsed(w.world, w.state, resolution?.ok ? resolution.duration : null);
       const began = w.state.clock;
       if (elapsed && elapsed.minutes > 0) advance(reg, w, w.state.clock + elapsed.minutes, { runSeed: input.runSeed, mode: "turn", cause: elapsed.source === "action" ? "action" : "tick" });
       const act = resolution?.activity;

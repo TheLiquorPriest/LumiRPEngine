@@ -201,10 +201,10 @@ export function EditsLog(props: { gm: GmView; busy: boolean; onUndo(chip: string
               return (
                 // The player's own bookkeeping (a trade, a transfer) or a hint they opened is their action, not a correction.
                 <ActionRow
-                  key={`${e.messageId}:${e.seq}`}
+                  key={`${e.messageId}:${e.seq ?? e.entry}`}
                   title={e.by ?? (e.lines.join(" · ") || "Bookkeeping")}
                   subtitle={e.by ? (e.lines.length > 0 ? `The player's action: ${e.lines.join(" · ")}` : "The player's action") : undefined}
-                  id={`${e.messageId} · ${e.seq}`}
+                  id={`${e.messageId} · ${e.seq ?? e.entry}`}
                   actions={
                     undo === null ? undefined : (
                       <Button size="sm" variant="ghost" icon="undo" disabled={props.busy} onClick={() => props.onUndo(undo)}>

@@ -577,7 +577,7 @@ describe("Who knows what, a fact at a time, as the chat's own narrator knowledge
     const rig = new Rig({ shipped: true, minds: true });
     const { chatId, debt } = await tapedChat(rig);
     const told = async (narrator: NarratorView): Promise<string[]> => {
-      expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, narrator }))).toEqual({ knowledge: null, narrator });
+      expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, narrator }))).toMatchObject({ knowledge: null, narrator });
       await atShop(rig, chatId, { [PRIYA]: SHOP });
       await rig.turn(chatId, "What now?", "They get on with the morning.");
       return bullets(rig.host.section("Who knows what"));

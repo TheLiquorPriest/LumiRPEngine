@@ -1,37 +1,30 @@
 // The tools an agent manages LumiRPEngine worlds with (`lre_*`), shared by the MCP server and the
-// command line, which mirrors them. Every answer is text, JSON for data, of at most ANSWER_LIMIT
-// characters; a refusal is an error result whose message says what to do instead. Pure: files,
-// the host and the clock come through the ToolContext.
+// command line, which mirrors them: this client's own, and those LumiRPEngine serves outside clients
+// (`lre.tools`: the chat and lore tools and the agent families, DESIGN §23), listed beside them and
+// forwarded. Every answer is text, JSON for data, of at most ANSWER_LIMIT characters; a refusal is an
+// error result whose message says what to do instead. Pure: files, the host and the clock come
+// through the ToolContext.
 
 import type { JsonObject } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
-import type { Args } from "./args";
-import { intArg, onlyArgs, textArg, textsArg, ToolError } from "./args";
+import { type OutsideTool, readOnlyRefusal, readsOnly, type WriteHints } from "../shared/outside-tools";
+import type { Args } from "../shared/tool-args";
+import { intArg, onlyArgs, textArg, textsArg, ToolError } from "../shared/tool-args";
 import { LiveError, LreError } from "./connection";
 import type { Live, Serialize } from "./live";
 import { attachTool, chatsTool, commitTool, createTool, deleteTool, diffTool, discardTool, draftTool, editTool, exportTool, historyTool, importTool, restoreTool, searchTool, upgradeTool, worldsTool, worldTool } from "./live";
 import { checkTool, docsTool, guideTool, loadWorld, runWorld, schemaTool, templatesTool, templateTool, worldInput } from "./offline";
 import type { Loaded, RunKind } from "./offline";
-import { ANSWER_LIMIT, clip } from "./read";
-import type { ToolResult } from "./report";
-import { json, lintSummary } from "./report";
+import { ANSWER_LIMIT, clip } from "../shared/tool-read";
+import type { ToolResult } from "../shared/tool-answer";
+import { failedText, json, lintSummary, refusedText } from "../shared/tool-answer";
 import { DOCS } from "./texts";
 import { VERSIONS } from "./version";
 import type { ToolModule } from "./tool-module";
 import { BUILD_TOOLS } from "./tools-build";
 import { CONFIG_TOOLS } from "./tools-config";
 import { JOB_TOOLS } from "./tools-jobs";
-import { LORE_TOOLS } from "./tools-lore";
-import { PLAY_TOOLS } from "./tools-play";
 import { SANDBOX_TOOLS } from "./tools-sandbox";
-
-/** How a write tool changes things, for MCP's tool annotations (a client may ask the user before a destructive call). */
-export interface WriteHints {
-  /** It can delete or overwrite what is there: a draft, a world, a chat's state. */
-  destructive: boolean;
-  /** Calling it again with the same arguments changes nothing more. */
-  idempotent: boolean;
-}
 
 export interface ToolDef {
   name: string;
@@ -39,12 +32,6 @@ export interface ToolDef {
   inputSchema: JsonObject;
   /** Changes worlds or chats on the host (hidden and refused in read-only mode), and how; false for a tool that only reads. */
   write: false | WriteHints;
-}
-
-/** A tool's MCP annotations. None reaches past the user's own Lumiverse and files, so none is open-world. */
-export function annotationsOf(def: ToolDef): JsonObject {
-  if (def.write === false) return { readOnlyHint: true, openWorldHint: false };
-  return { readOnlyHint: false, destructiveHint: def.write.destructive, idempotentHint: def.write.idempotent, openWorldHint: false };
 }
 
 export interface ToolContext {
@@ -62,24 +49,6 @@ export interface ToolContext {
   sandboxBudgetMs?: number | null;
 }
 
-/** Runs work by key one after another, keys side by side. */
-export class KeyedQueue {
-  private readonly tails = new Map<string, Promise<unknown>>();
-
-  run<T>(key: string, work: () => Promise<T>): Promise<T> {
-    const result = (this.tails.get(key) ?? Promise.resolve()).then(work, work);
-    const tail = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.tails.set(key, tail);
-    void tail.then(() => {
-      if (this.tails.get(key) === tail) this.tails.delete(key);
-    });
-    return result;
-  }
-}
-
 const object = (properties: JsonObject, required: string[] = []): JsonObject => ({ type: "object", properties, ...(required.length > 0 ? { required } : {}), additionalProperties: false });
 
 const WORLD_ID: JsonObject = { type: "string", description: "The world's id (w_…), from lre_worlds." };
@@ -92,7 +61,7 @@ const RUN_FROM = { path: PATH, world: WORLD, worldId: { type: "string", descript
 const EXPECT_VERSION: JsonObject = { type: "integer", minimum: 0, description: "The draft version you last read (lre_world, lre_draft and lre_worlds say it, stored or not): refused if the draft has moved on since, so a change you haven't seen is never overwritten, committed or thrown away." };
 
 /** The tools kept in files of their own (tool-module.ts), each with its implementation and command, after the ones below. */
-export const MODULE_TOOLS: readonly ToolModule[] = [...CONFIG_TOOLS, ...LORE_TOOLS, ...JOB_TOOLS, ...BUILD_TOOLS, ...PLAY_TOOLS, ...SANDBOX_TOOLS];
+export const MODULE_TOOLS: readonly ToolModule[] = [...CONFIG_TOOLS, ...JOB_TOOLS, ...BUILD_TOOLS, ...SANDBOX_TOOLS];
 
 export const TOOLS: readonly ToolDef[] = [
   {
@@ -103,7 +72,7 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_docs",
-    description: "Look things up in LumiRPEngine's docs, best-matching sections first (ranked by BM25: headings count most, stopwords such as \"the\" and \"how\" are left out, \"bills\", \"billing\" and \"billed\" are one word, and an id such as due_day is matched whole): the reference (every kind and field, relation type, effect, formula function, action, event and lint code), the expression language, the recipes, the design, the user guide, presets, the agent guide (lre_guide's) and the command line and MCP tools.",
+    description: "Look things up in LumiRPEngine's docs, best-matching sections first (ranked by BM25: headings count most, stopwords such as \"the\" and \"how\" are left out, \"bills\", \"billing\" and \"billed\" are one word, and an id such as due_day is matched whole): the reference (every kind and field, relation type, effect, formula function, action, event and lint code), the expression language, the recipes, the design, the user guide, presets, the depth guide, the loopback's setup, the agent guide (lre_guide's) and the command line and MCP tools.",
     inputSchema: object({ query: { type: "string", description: 'A few words: a kind, field, effect, function or lint code, or a question ("account opening", "when does a loan bill").' }, doc: { type: "string", enum: Object.keys(DOCS), description: "Only this doc." } }, ["query"]),
     write: false,
   },
@@ -282,13 +251,29 @@ export const TOOLS: readonly ToolDef[] = [
 
 const BY_NAME: Readonly<Record<string, ToolDef>> = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
 
-/** The tools a session offers: without the write tools when it is read-only. */
+/** This client's own tools a session offers: without the write tools when it is read-only. */
 export function toolsFor(readOnly: boolean): readonly ToolDef[] {
   return readOnly ? TOOLS.filter((t) => !t.write) : TOOLS;
 }
 
 export function findTool(name: string): ToolDef | undefined {
   return hasOwn(BY_NAME, name) ? BY_NAME[name] : undefined;
+}
+
+/**
+ * The tools LumiRPEngine serves outside clients (DESIGN §23), as it lists them now (without the write
+ * tools when the session is read-only), and its build; null when this client can't ask it: not signed
+ * in, LumiRPEngine unreachable, or a build too old to serve any.
+ */
+export async function servedTools(ctx: ToolContext): Promise<{ tools: OutsideTool[]; build: string | null } | null> {
+  try {
+    const answer = await ctx.live().conn.request("lre.tools", { op: "list" });
+    const tools = answer.tools ?? [];
+    return { tools: ctx.readOnly ? tools.filter(readsOnly) : tools, build: answer.build ?? null };
+  } catch (error) {
+    if (error instanceof LiveError || error instanceof LreError) return null;
+    throw error;
+  }
 }
 
 async function statusTool(ctx: ToolContext): Promise<ToolResult> {
@@ -316,7 +301,7 @@ async function statusTool(ctx: ToolContext): Promise<ToolResult> {
 }
 
 /** Playtest and Check world: on a file, an inline world, or a world on the host read as `source` says. */
-async function runTool(kind: RunKind, args: Args, ctx: ToolContext): Promise<ToolResult> {
+async function playWorld(kind: RunKind, args: Args, ctx: ToolContext): Promise<ToolResult> {
   const turns = kind === "playtest" ? textsArg(args, "turns") : [];
   if (turns === undefined || (kind === "playtest" && turns.length === 0)) throw new ToolError('Give turns: what the player types, one entry per turn (["look around", "walk to the market"]).');
   if (turns.length > 50) throw new ToolError(`That is ${turns.length} turns; play at most 50 at once.`);
@@ -353,9 +338,9 @@ async function dispatch(def: ToolDef, args: Args, ctx: ToolContext): Promise<Too
     case "lre_check":
       return checkTool(args, ctx);
     case "lre_playtest":
-      return runTool("playtest", args, ctx);
+      return playWorld("playtest", args, ctx);
     case "lre_check_world":
-      return runTool("check_world", args, ctx);
+      return playWorld("check_world", args, ctx);
     case "lre_status":
       return statusTool(ctx);
     case "lre_worlds":
@@ -401,29 +386,38 @@ async function dispatch(def: ToolDef, args: Args, ctx: ToolContext): Promise<Too
 /** What a failed call answers: the refusal's own words, with the lint behind a refused write. */
 function failure(error: unknown): ToolResult {
   if (error instanceof ToolError || error instanceof LiveError) return { text: error.message, isError: true };
-  if (error instanceof LreError) {
-    const lint = error.lint.length > 0 ? `\n${json(lintSummary(error.lint, 30))}` : "";
-    return { text: `LumiRPEngine refused it (${error.code}): ${error.message}${lint}`, isError: true };
-  }
-  return { text: `The tool failed: ${error instanceof Error ? error.message : String(error)}`, isError: true };
+  if (error instanceof LreError) return { text: refusedText(error.code, error.message, error.lint), isError: true };
+  return { text: failedText(error), isError: true };
 }
 
 /**
- * Runs one tool. Never throws: a refusal or a failure is an error result. A write tool is refused
- * in read-only mode before anything is read or sent.
+ * Runs one tool, this client's own or one LumiRPEngine serves (forwarded as `lre.tools call`, which
+ * refuses a write from a read-only session). Never throws: a refusal or a failure is an error result.
+ * Null for a name neither has. An own write tool is refused in read-only mode before anything is
+ * read or sent.
  */
-export async function callTool(name: string, rawArgs: unknown, ctx: ToolContext): Promise<ToolResult> {
+export async function runTool(name: string, rawArgs: unknown, ctx: ToolContext): Promise<ToolResult | null> {
   const def = findTool(name);
-  if (!def) return { text: `There is no tool ${name}.`, isError: true };
-  if (def.write && ctx.readOnly) return { text: `${name} changes your worlds or chats, and this client runs read-only (--read-only or LRE_READ_ONLY=1): nothing was done.`, isError: true };
+  if (def && def.write && ctx.readOnly) return { text: readOnlyRefusal(name), isError: true };
   if (rawArgs !== undefined && rawArgs !== null && !isRecord(rawArgs)) return { text: "The arguments must be an object.", isError: true };
   const args: Args = isRecord(rawArgs) ? rawArgs : {};
   try {
+    if (!def) {
+      const answer = await ctx.live().conn.request("lre.tools", { op: "call", name, args: args as JsonObject, readOnly: ctx.readOnly });
+      return answer.result ?? { text: `LumiRPEngine didn't answer ${name}.`, isError: true };
+    }
     onlyArgs(args, def.inputSchema);
     const result = await dispatch(def, args, ctx);
     // A tool keeps itself within the limit; this is the backstop, so no answer is cut by the client unannounced.
     return result.text.length > ANSWER_LIMIT ? { ...result, text: `${clip(result.text, ANSWER_LIMIT - 200)}\n(Cut to fit one answer: narrow the request with pointer, offset or limit.)` } : result;
   } catch (error) {
+    // LumiRPEngine serves no tool of that name either.
+    if (!def && error instanceof LreError && error.code === "not_found") return null;
     return failure(error);
   }
+}
+
+/** Runs one tool as `runTool` does; a name no tool has is an error result. */
+export async function callTool(name: string, rawArgs: unknown, ctx: ToolContext): Promise<ToolResult> {
+  return (await runTool(name, rawArgs, ctx)) ?? { text: `There is no tool ${name}.`, isError: true };
 }

@@ -416,7 +416,7 @@ export type BlockOrigin =
   | { type: "schedule"; schedule: ScheduleId; owner: OwnerRef; source: SourceView }
   | { type: "appointment" }
   | { type: "trip" }
-  | { type: "plan"; plan: string; source: "memory" | "gm" | "mind"; made: number }
+  | { type: "plan"; plan: string; source: "memory" | "gm" | "mind" | "agent"; made: number }
   | { type: "agenda"; track: string }
   | { type: "invitation"; host: EntityId; block: RoutineBlockId }
   | { type: "free" };

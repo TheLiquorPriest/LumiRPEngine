@@ -7,7 +7,7 @@
 
 import type { JsonObject, JsonValue } from "./json";
 import type { AgentsView, HelloClient, KitReport } from "./agents";
-import type { AcceptanceState } from "./agent-settings";
+import type { AcceptanceState, ChatEngine, EngineSource } from "./agent-settings";
 import type { ClaimsPolicy } from "./claims";
 import type { InferredChecks, SheetSkill } from "./inferred";
 import type { BookFieldsEdit, BookLoreFields, LoreIndexAddition } from "./lore";
@@ -22,20 +22,25 @@ import type { GmThingExtras, GmThingsList, KeepResult, MadeInPlay, TidyRun } fro
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PackId, PanelId, PlaceId, RelationTypeId, RevisionId, SlotId, StageId, TableId, TierId, TrackId, WorldId } from "./ids";
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { BuiltLoreIndex, ChangeType, NarratorView, UserSettings } from "./settings";
+import type { BootstrapEstimate, BootstrapOp, BootstrapView } from "./bootstrap";
+import type { DepthOp, DepthResult } from "./depth-views";
 import type { Activity, DiagRecord } from "./diagnostics";
+import type { LoopbackPage, LoopbackPush, LoopbackRequest, LoopbackResultBodies } from "./loopback";
 import type { LiveChange, LiveView } from "./live";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
 import type { AdjudicationDef, FacetId, FacetValueId, FeedScope, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, SectionFeed, StepPurpose, WorldDoc, WorldIndex } from "./world";
 import type { GM_OUTLINE, GmPartReply, GmReadPart, QueuedOn } from "./gm-parts";
+import type { OutsideTool } from "./outside-tools";
+import type { ToolResult } from "./tool-answer";
 
 export const PROTOCOL_VERSION = 1;
 
 /**
  * The level of the requests outside clients rely on (DESIGN §23). 1: editor `version`, `patch` and
- * `restore`, commit notes and history, `templates`, `chats` and `lre.draft.changed`; 2: `lre.state.get`.
- * `lre.hello` answers with it; a build without them answers without it.
+ * `restore`, commit notes and history, `templates`, `chats` and `lre.draft.changed`; 2: `lre.state.get`;
+ * 3: `lre.tools` and `lre.tools.changed`. `lre.hello` answers with it; a build without them answers without it.
  */
-export const AGENT_API = 2;
+export const AGENT_API = 3;
 
 /** The engine's extension identifier in Lumiverse (`spindle.json`), by which the command line finds it. */
 export const ENGINE_EXTENSION = "lumi_rp_engine";
@@ -472,8 +477,8 @@ export interface ChatKnowledgeRequest extends Request<"lre.chat.knowledge"> {
   chatId: ChatId;
   knowledge?: boolean | null;
   narrator?: NarratorView | null;
-  /** Which engine plays the chat's turns (GM → This chat, INC2-SPEC C12): its classic steps, or the agent loop; null returns it to classic. A change drops a turn the engine prepared for it. */
-  engine?: "classic" | "agents" | null;
+  /** Which engine plays the chat's turns (GM → This chat, INC2-SPEC C12, INC3 3a): its classic steps, or the agent loop, stored as the chat's own choice; null returns it to what a chat with no choice plays (`engineFrom`). A change is refused while the chat's turn waits at a gate, and drops a turn the engine prepared for it. */
+  engine?: ChatEngine | null;
   /** Whether this chat's impossible holds are tidied automatically, its one-time Things tidied fix (GM → This chat → Things, ITEMS-SPEC §9, §11); null returns it to the world's (`tidy.auto`). */
   tidy?: boolean | null;
 }
@@ -937,6 +942,28 @@ export interface SecrecyBookPlan {
  */
 export type MindsRequest = Request<"lre.minds"> & { chatId: ChatId } & ({ op: "run"; who?: EntityId[] } | { op: "cancel"; runId: string } | { op: "status" });
 
+/** The bootstrap (DEPTH-PLAN §8): GM → This chat → Depth's opt-in and the Bootstrap view. */
+export type BootstrapRequest = Request<"lre.bootstrap"> & { chatId: ChatId } & BootstrapOp;
+
+/** The depth views (DEPTH-PLAN §7): GM → Minds, Notebook and Archive, read and edited; open to the player like every GM page (D-9). */
+export type DepthRequest = Request<"lre.depth"> & { chatId: ChatId } & DepthOp;
+
+/**
+ * The tools LumiRPEngine serves outside clients (DESIGN §23; INC3-SPEC D4), asked by a session that
+ * said hello as one: the list (world-agnostic schemas, descriptions in the user's words); one tool
+ * with a chat's world filled into its schema; or a call, checked against that schema, refused when it
+ * writes and the client is read-only, and answered as the tool answers.
+ */
+export type ToolsRequest = Request<"lre.tools"> & ({ op: "list" } | { op: "describe"; name: string; chatId: ChatId } | { op: "call"; name: string; args?: JsonObject; readOnly?: boolean });
+
+/**
+ * Settings → Loopback (DEPTH-PLAN §3.3, §3.7, §3.11): the page; the loopback key minted or rotated
+ * (shown once); the shared relay (the operator's choice); a relay's Fix (it puts its address back in
+ * the scheduler's exclusions) or forgetting it. `origin` is the page's own address, which the one
+ * line names.
+ */
+export type LoopbackPageRequest = Request<"lre.loopback.page"> & { origin?: string } & ({ op: "get" } | { op: "mint" } | { op: "shared"; enabled: boolean } | { op: "fix"; relay: string } | { op: "forget"; relay: string });
+
 /** Cancel on the activity line (DESIGN §5.1): stop the chat's engine run or reply read under way. A cancelled turn ends with no failure, and can be sent again. */
 export interface CancelTurnRequest extends Request<"lre.cancel"> {
   chatId: ChatId;
@@ -1259,7 +1286,17 @@ export type FrontendToBackend =
   | WorkspaceRequest
   | ReviewRequest
   | PromptsRequest
-  | LiveRequest;
+  | LiveRequest
+  | BootstrapRequest
+  | DepthRequest
+  | ToolsRequest
+  | LoopbackPageRequest
+  | LoopbackRequest;
+
+export type RequestType = FrontendToBackend["type"];
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+/** A request's own fields: the envelope (`lre`, `type`, `reqId`) is the sender's. */
+export type RequestFields<T extends RequestType> = DistributiveOmit<Extract<FrontendToBackend, { type: T }>, "lre" | "type" | "reqId">;
 
 // ---------------------------------------------------------------- responses (backend → frontend)
 
@@ -1296,7 +1333,7 @@ export interface SettingsResult {
 }
 
 /** Results per request type. */
-export interface ResultBodies {
+export interface ResultBodies extends LoopbackResultBodies {
   /**
    * `agentApi`: the outside-client level this build speaks (`AGENT_API`). `requestMs`: how long the
    * frontend waits for each answer, the user's Engine requests timeout (Settings → Timeouts).
@@ -1344,8 +1381,8 @@ export interface ResultBodies {
   "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; skills?: SheetSkill[]; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean; updates?: TableUpdate[] };
   "lre.ui": { done: true };
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
-  /** The chat's own knowledge choices after the request, null where it follows; `engine` when the chat plays the agent loop (absent: classic, which a chat with no choice plays); `tidy`, its own Tidy up switch (absent: the world's). */
-  "lre.chat.knowledge": { knowledge: boolean | null; narrator: NarratorView | null; engine?: "agents"; tidy?: boolean };
+  /** The chat's own knowledge choices after the request, null where it follows; `engine`, the engine its next turn plays, and `engineFrom`, where that comes from (its own choice, the default its first turn recorded, the default its first turn will record, or classic for a chat that played before it chose); `tidy`, its own Tidy up switch (absent: the world's). */
+  "lre.chat.knowledge": { knowledge: boolean | null; narrator: NarratorView | null; engine: ChatEngine; engineFrom: EngineSource; tidy?: boolean };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
   "lre.job": { jobId?: string; jobs?: JobSummary[] };
   /**
@@ -1360,6 +1397,11 @@ export interface ResultBodies {
   "lre.diag": { records: DiagRecord[]; activity: Activity | null; text?: string | null };
   /** The run started, cancelled or asked about; null when the chat has had none since the extension started. */
   "lre.minds": { run: MindsRunView | null };
+  "lre.bootstrap": { view: BootstrapView; estimate?: BootstrapEstimate };
+  "lre.depth": DepthResult;
+  /** `list`: the tools and the backend's build; `describe`: the one tool; `call`: its answer. */
+  "lre.tools": { tools?: OutsideTool[]; build?: string; tool?: OutsideTool; result?: ToolResult };
+  "lre.loopback.page": { page: LoopbackPage };
   /** Whether a run or read was under way to stop. */
   "lre.cancel": { cancelled: boolean };
   "lre.routine": RoutineReadResult;
@@ -1441,6 +1483,12 @@ export interface MindsRunUpdate extends Envelope<"lre.minds.update"> {
   run: MindsRunView;
 }
 
+/** The Bootstrap view's progress, pushed to every page of the user's as the run moves (DEPTH-PLAN §8.3). */
+export interface BootstrapUpdate extends Envelope<"lre.bootstrap.update"> {
+  chatId: ChatId;
+  view: BootstrapView;
+}
+
 /**
  * How the frontend starts a generation the guard stopped, once the engine prepared it (DESIGN §5.1):
  * `regenerate` and `continue` run Lumiverse's own commands; a new reply after a reply only the
@@ -1504,4 +1552,7 @@ export interface KitReconnect extends Envelope<"lre.kit.reconnect"> {
   client: string;
 }
 
-export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate | GeneratePush | AgentsChanged | AcceptanceChanged | AssistantUpdate | ReviewUpdate | LiveUpdate | KitReload | KitReconnect;
+/** The tools LumiRPEngine serves outside clients changed (a tool's text was edited): sent to every session of the user; an MCP server tells its client the list changed. */
+export interface ToolsChanged extends Envelope<"lre.tools.changed"> {}
+
+export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate | GeneratePush | AgentsChanged | AcceptanceChanged | AssistantUpdate | ReviewUpdate | LiveUpdate | KitReload | KitReconnect | ToolsChanged | BootstrapUpdate | LoopbackPush;

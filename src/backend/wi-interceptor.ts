@@ -61,7 +61,7 @@ function usersOwn(entries: readonly WorldInfoCandidate[]): WorldInfoCandidate[] 
  */
 function blind(entries: readonly WorldInfoCandidate[]): WorldInfoVerdict {
   const texts = secretTexts({ entries });
-  const out: Required<WorldInfoVerdict> = { disabled: [], enabled: [], mutated: [] };
+  const out: Required<WorldInfoVerdict> = { disabled: [], enabled: [], forced: [], mutated: [] };
   for (const e of entries) {
     if (hasSecretMarks(e.content) || unreadableMarks(e.content).length > 0) {
       if (wholeEntrySecret(e.content)) out.disabled.push(e.id);
@@ -82,7 +82,7 @@ export async function worldInfoVerdict(gate: WorldInfoGate, input: WorldInfoInpu
 }
 
 async function verdict(gate: WorldInfoGate, input: WorldInfoInput): Promise<WorldInfoVerdict> {
-  const out: Required<WorldInfoVerdict> = { disabled: [], enabled: [], mutated: [] };
+  const out: Required<WorldInfoVerdict> = { disabled: [], enabled: [], forced: [], mutated: [] };
   if (!gate.playsWorld(input.chatMetadata)) return out;
   const entries = usersOwn(input.entries);
   if (entries.length === 0) return out;

@@ -10,7 +10,7 @@
 import { TOOL_GUIDE_TEXTS, toolGuideId } from "./agent-tools";
 import type { PromptDef, PromptPage } from "./prompts";
 
-export const RUNTIME_PROMPT_PAGE: PromptPage = { id: "runtime", label: "Every agent", note: "What any agent's model is told besides its role's own prompts: the scratch_read tool, the notes on tool results, tools offered as text, and how the workspace's system files (AGENTS.md, roles/<role>.md) are framed; then every tool's description and its arguments', the notes the tools answer with, and the lore index, which the GM assistant, the main agent and each turn role are all sent." };
+export const RUNTIME_PROMPT_PAGE: PromptPage = { id: "runtime", label: "Every agent", note: "What any agent's model is told besides its role's own prompts: the scratch_read tool, the notes on tool results, tools offered as text, and how the workspace's system files (AGENTS.md, roles/<role>.md) are framed; then every tool's description and its arguments', the notes the tools answer with, and the lore index, which the GM assistant, the main agent and each turn role are all sent; the offer to switch a classic chat to agents; and the tools LumiRPEngine serves an outside agent through MCP, as its client lists them." };
 
 /** The runtime's text ids, so code names them once. */
 export const RUNTIME_TEXT = {

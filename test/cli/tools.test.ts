@@ -2,7 +2,7 @@
 // requests, exactly), what it answers the agent, and the offline tools on the starter worlds.
 
 import { describe, expect, test } from "bun:test";
-import { BODY_LIMIT } from "../../src/cli/read";
+import { BODY_LIMIT } from "../../src/shared/tool-read";
 import { callTool } from "../../src/cli/tools";
 import type { ToolContext } from "../../src/cli/tools";
 import { templateFile } from "../../src/cli/offline";

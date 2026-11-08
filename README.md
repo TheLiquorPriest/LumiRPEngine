@@ -20,14 +20,16 @@ You choose how deep it goes. On the lowest setting it is a light layer that trac
 - **Safe with swipes, edits and branches.** Every reply carries its own record of what happened. Swiping, editing or branching never corrupts the world, and when an earlier change affects later turns you get a report and a choice.
 - **Made for small screens too.** A drawer tab, a status pill, chips for what changed, an action palette in the input bar, and a fullscreen map.
 - **Portable worlds.** Worlds export to a published, versioned file format with their own lore inside, and a world you import lists any macros in its lore and templates for your review.
+- **Depth, when you want it.** Put a chat on depth and the story is decided before the reply is written: an author runs each scene like a DM, every character with a mind plays as its own agent from what it has lived, the GM resolves what anyone tries by the rules, and the narrator renders only what reached your character, checked before each passage streams. A chat with a long history is read in once by the bootstrap, and the world keeps going off screen. See the [depth guide](docs/DEPTH.md).
 
 The full walkthrough is in the [user guide](docs/USER-GUIDE.md).
 
 ## Documentation
 
 - **[User guide](docs/USER-GUIDE.md):** playing, tuning and building, every button explained.
+- **[Depth](docs/DEPTH.md)** and **[the loopback](docs/LOOPBACK.md):** a chat whose story is decided before the reply is written: turning it on, the bootstrap, minds, the notebook, drafts and real-time dialogue; and setting up the relay depth replies through.
 - **[Presets and RPEngine](docs/PRESETS.md):** for preset authors: the section outlets, placement precedence, guidance blocks for the engine's helpers and the narrator, with examples.
-- **[GM guide](docs/GM-GUIDE.md):** running a chat: who sees what, the GM view and its edits, fixes and Undo, checks, realism and time in one chat, Upgrade, and the Context inspector.
+- **[GM guide](docs/GM-GUIDE.md):** running a chat: who sees what, the GM view and its edits, fixes and Undo, checks, realism and time in one chat, Upgrade, the Context inspector, and running a depth chat.
 - **[Recipes](docs/RECIPES.md):** small worlds that each show one thing working, from XP and levels to a family's schedule, every one checked by a test.
 - **[Expressions](docs/EXPRESSIONS.md):** the formula language for requirements, checks, derived fields and rules.
 - **[Reference](docs/REFERENCE.md):** every kind, field, effect, formula function, action, event and lint code the engine and its packs register, generated from the code (`bun run reference`).
@@ -44,20 +46,24 @@ LumiRPEngine requires **Lumiverse's `staging` branch from 16 October 2026 (commi
 
 ## Permissions
 
-LumiRPEngine asks for ten permissions. Here is why each one is there:
+LumiRPEngine asks for fourteen permissions. Here is why each one is there:
 
 - `generation`: to follow each reply from start to finish, to stop a reply the engine hasn't prepared yet so the engine can run first, and to make its own small helper calls.
-- `context_handler`: to check, just before each reply, that the engine has prepared it (the turn's plan, and the world's sections in the prompt), and stop it when it hasn't.
+- `context_handler`: to check, just before each reply, that the engine has prepared it (the turn's plan, and the world's sections in the prompt), and stop it when it hasn't. On a depth chat whose connection is the loopback, it lets the reply go on, since the turn runs inside it.
+- `interceptor`: for the loopback's turn tagger, LumiRPEngine's one prompt interceptor. It runs after every other extension's and tags a world chat's reply on the loopback connection with a single-use token, so LumiRPEngine can run that turn inside the reply. Every other prompt goes on untouched. LumiRPEngine raises its interceptor timeout to 30 seconds: the tagger answers at once, but a busy worker (a bootstrap running) must not make Lumiverse stop a reply.
+- `generation_parameters`: so the tag reaches the loopback inside the reply's request.
 - `chats`: to read and update a chat's metadata, where a world chat records the world it plays and lists the world's lore book (attaching a world writes both), and to know which chat is open.
-- `chat_mutation`: to read each chat's messages and swipes, so the world stays in step with every swipe, edit and branch; to save the world's record on each reply; and to add your palette, chip and map actions to the chat as messages.
+- `characters`: to read your character cards, so a character with a card starts depth knowing who it is at root (its core). LumiRPEngine never changes a card, and nothing outside depth reads one.
+- `chat_mutation`: to read each chat's messages and swipes, so the world stays in step with every swipe, edit and branch; to save the world's record on each reply; to add your palette, chip and map actions to the chat as messages; and to remove the blank reply a loopback send leaves when it is stopped before any text, and a stopped swipe's blank swipe.
 - `world_books`: to create and maintain the world's own lore book, which holds its sections, and attach it to the chat; to read your World Info books as lore, live, and the ones you pick for **Import from lore**; and to write into one of your books only when you press for it in **Build → Lore** (a secret line or an entry's own fields, or **Build an index entry**, which it then keeps in sync until you stop it in **Settings → Lore**).
 - `presets`: to read your active preset, so it can check where the world's sections will land in the prompt, warn you about settings that cause trouble, place sections where the preset's `{{outlet::lre_…}}` macros ask and pass its RPEngine blocks to the engine's helpers; and, when you ask in **Settings → Preset**, to add those blocks to it.
 - `regex_scripts`: to keep the JSON blocks some presets ask replies to carry out of World Info scanning and hide them in world chats, with two regex scripts in each world chat and two global ones that take the engine's wrapper off again before your own scripts read a reply. **Settings → Preset** turns the hiding off.
 - `decisions`: to use Lumiverse's Decisions API for the probability questions the engine asks, such as what an NPC does on a close call.
 - `ui_panels`: for the status pill, the map and the action palette with its Timelapse tab, which float over the chat. The drawer tab needs no permission.
 - `mcp_servers` (optional; only an owner or admin can switch it on): if Lumiverse runs LumiRPEngine's MCP server itself, to check that Lumiverse's own MCP client has the new tools after an update, for **Reconnect in Lumiverse**. It reads which of your Lumiverse MCP servers hold LumiRPEngine's tools and nothing else of them, and never adds, changes, connects or disconnects one. Without it, Reconnect in Lumiverse still works and goes by what the server says.
+- `memories`: so the depth bootstrap can read a chat's Memory Cortex memories and reconcile them with the story it reads. It never writes one. Without it, the bootstrap reads the rest and leaves Memory Cortex out.
 
-LumiRPEngine deliberately does **not** request the `characters` permission. Character cards stay out of its reach. To know whether the world's sections really reached a reply's prompt, it reads which of its entries Lumiverse activated for that reply, and a section whose entry didn't activate shows as "not delivered".
+To know whether the world's sections really reached a reply's prompt, LumiRPEngine reads which of its entries Lumiverse activated for that reply, and a section whose entry didn't activate shows as "not delivered".
 
 ## Quick start
 
@@ -86,6 +92,8 @@ These are the known limits of this release. Most of them need a change in Lumive
 - **Other extensions that write message metadata.** Lumiverse replaces a message's whole metadata when something saves it, so another extension can overwrite LumiRPEngine's records and LumiRPEngine can overwrite theirs. LumiRPEngine keeps a second copy of its records and restores them, but I cannot promise the other extension does the same.
 - **Other extensions' World Info interceptors** can switch the world's sections off for a reply; the Context panel then shows them as not delivered. Everything they do to your own lore books works as usual.
 - **If the engine stalls or one of its steps fails,** nothing is generated: the chat says which step failed and why, with a **Retry**.
+- **Depth needs a process beside Lumiverse.** A depth chat replies through the loopback, a relay you start once on the machine Lumiverse runs on ([the loopback guide](docs/LOOPBACK.md)). On a hosted Lumiverse where you can't run one, depth isn't available yet: Lumiverse's message sessions can't yet complete a reply an extension writes passage by passage.
+- **On a depth chat,** Impersonate and Continue are still written by the classic narrator, and leaving one preset block out of the narrator's prompt is done in Lumiverse's own preset, per chat. On any connection but the loopback, LumiRPEngine doesn't run for a depth chat: its replies are your preset's alone, and none of them is canon.
 - **Replies for an earlier message.** Lumiverse can start only the last reply again, so in a world chat an in-place **Edit and Send** on an earlier message, or a swipe of an older reply asked through Lumiverse's API, is stopped with a card that says so, and nothing is written. Edit and Send as a branch works.
 - **Delivery is checked, not traced.** The engine confirms that its sections were activated for the reply, but not where in the prompt each one landed.
 - **Text and world can disagree after some edits and Continues.** When you edit a reply, or continue one in a way the engine cannot read as part of a turn (a continue on an older message, a stopped continue, or a continue where Lumiverse rewrote the earlier text), the world stays as it was simulated until you use **Re-read edit**.

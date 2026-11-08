@@ -28,6 +28,8 @@ import { gmThingExtras, gmThingsList, keepPlaces, keepThings, madePlaceViews, ma
 import { tidyFindings, tidyRun } from "../engine/thing-tidy";
 import { findThingIds, personThings, thingPage, thingPicks, thingsList, thingTypes } from "../engine/thing-view";
 import { appliedEvents, clockFixLine, fixChip } from "./view";
+import { mindEditChip, playerMindEdits } from "./character-engine";
+import { mindDir } from "../shared/character-engine";
 
 /** How many edits the GM view lists, newest first. */
 const GM_EDITS = 40;
@@ -53,13 +55,19 @@ const CHAT_PARTS: { [P in Exclude<GmPart, GmWorldPart>]: (head: GmHead) => GmVie
     const edits: GmView["edits"] = [];
     // Undo covers the latest reply (DESIGN §12): its edits carry the chat's chip for them.
     const head = chain.findLastIndex((m) => !m.isUser);
+    const minds = playerMindEdits(core, observed);
     chain.forEach((m, i) => {
       const rec = m.isUser ? null : activeRecord(m, core.journal.tombstones);
-      if (!rec) return;
       // A fix of the time leads with how it moved the clock, which no event line words.
-      for (const fix of appliedEvents(rec, fold, i).fixes) {
+      for (const fix of rec ? appliedEvents(rec, fold, i).fixes : []) {
         const clock = clockFixLine(fix.events);
         edits.push({ messageId: m.id, seq: fix.seq, lines: [...(clock ? [clock] : []), ...authorLines(registry, render.world, render.state, fix.events, 12)], ...(fix.by ? { by: fix.by.label } : {}), undo: i === head ? fixChip(m.id, m.swipeId, fix.seq) : null });
+      }
+      // The player's edits of a mind file fold after the message they were made at: their Undo, while one stands at the chat's head, supersedes the edit.
+      for (const e of minds) {
+        if (e.messageId !== m.id) continue;
+        const name = hasOwn(render.state.entities, e.who) ? (render.state.entities[e.who]?.name ?? e.who) : e.who;
+        edits.push({ messageId: m.id, entry: e.entry.id, lines: [`${name}'s mind: ${e.path.slice(mindDir(e.who).length)}, as you wrote it`], undo: e.undoable ? mindEditChip(e.entry.id) : null });
       }
     });
     return edits.reverse().slice(0, GM_EDITS);

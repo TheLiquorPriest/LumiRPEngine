@@ -10,6 +10,7 @@ import { hashParts } from "./hash";
 import { hasOwn, isRecord, safeKey } from "./json";
 import type { EntityId, FieldId, MessageId, PlaceId, StageId, TrackId } from "./ids";
 import type { Selector, StepPurpose, StepTemplateDef, WorldDoc } from "./world";
+import type { TruthLink } from "./truth-links";
 
 // ---------------------------------------------------------------- fidelity
 
@@ -833,8 +834,9 @@ export type PlanStatus = "open" | "done" | "dropped";
 export const PLAN_PRIORITY = { min: 1, max: 5, normal: 3 } as const;
 
 /**
- * Something a character means to do later (DESIGN §24.8): from the memory step or the GM. Times are
- * absolute game minutes. The castlife planner lays open plans in force (`planInForce`) into the
+ * Something a character means to do later (DESIGN §24.8): from the memory step, the GM, or, on a
+ * depth chat, the character's own agent, from the plans it wrote (`agent`, DEPTH-PLAN §4.4). Times
+ * are absolute game minutes. The castlife planner lays open plans in force (`planInForce`) into the
  * character's day and marks them `done` or `dropped` with `minds.plan`.
  */
 export type MindPlan = {
@@ -849,7 +851,7 @@ export type MindPlan = {
   status: PlanStatus;
   /** When it was made, and what made it. */
   made: number;
-  source: "mind" | "memory" | "gm";
+  source: "mind" | "memory" | "gm" | "agent";
   /** When it closed and why (a planner reason, a GM note); null while open. */
   closed: number | null;
   reason: string | null;
@@ -895,10 +897,11 @@ export function sharedPlanId(people: readonly EntityId[], from: number): string 
 
 /**
  * Whether a plan drives anything: schedules, money, skip beats, fidelity and what a mind is told it
- * plans. Only plans the turn stated (the memory step's) and the GM's do. A mind's own (`source:
- * "mind"`), made in chats from before minds stopped proposing plans, were its guesses at a day the
- * story never set up, so they stay as thoughts the GM view shows and nothing acts on. Every consumer
- * reads plans through `keptPlans`, which keeps only these, so none can drift from another.
+ * plans. Plans the turn stated (the memory step's), the GM's, and those a depth character's own
+ * agent wrote with a time (`agent`) do. A classic mind's own (`source: "mind"`), made in chats from
+ * before minds stopped proposing plans, were its guesses at a day the story never set up, so they
+ * stay as thoughts the GM view shows and nothing acts on. Every consumer reads plans through
+ * `keptPlans`, which keeps only these, so none can drift from another.
  */
 export function planInForce(p: Pick<MindPlan, "source">): boolean {
   return p.source !== "mind";
@@ -1157,6 +1160,8 @@ export type MindsKnowledge = {
   off?: true;
   /** The user's threshold as the chat's turns last recorded it (`minds.knowledge`), when it isn't the default: how sure a holding must be to reveal its fact (`revealsFact`). */
   threshold?: number;
+  /** The GM's truth links (DEPTH-PLAN §4.4, `shared/truth-links.ts`), by holder and fact: what each holding the GM projected was read from, and why; absent in a chat the GM never linked. */
+  links?: Record<EntityId, Record<FactId, TruthLink>>;
 };
 
 /**

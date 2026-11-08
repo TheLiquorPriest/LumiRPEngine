@@ -4,11 +4,12 @@
 
 What the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.
 
-Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1, `orgs` 1.
+Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1, `orgs` 1, `author` 1.
 
 ## Contents
 
 - [Engine built-ins](#engine-built-ins)
+- [Author pack](#author-pack-author)
 - [Calendar & time pack](#calendar--time-pack-calendar)
 - [Cast life pack](#cast-life-pack-castlife)
 - [Combat pack](#combat-pack-combat)
@@ -93,7 +94,7 @@ Taxonomy and life states:
 
 Core: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.
 
-Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.life`, `engine.note`, `engine.observed`, `engine.out.lines`, `engine.out.scene`, `engine.pause`, `engine.rename`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`, `engine.ws.delete`, `engine.ws.pin`, `engine.ws.readers`, `engine.ws.write`.
+Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.life`, `engine.note`, `engine.notebook`, `engine.observed`, `engine.out.lines`, `engine.out.scene`, `engine.pause`, `engine.rename`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`, `engine.ws.delete`, `engine.ws.pin`, `engine.ws.readers`, `engine.ws.write`.
 
 ### Relation types
 
@@ -184,6 +185,14 @@ The world's `lorePins` part: `characters`, `places` and `steps`, each a map from
 | `closeBy` | `2` | `2` | `2` |
 | `retry` | `"changed"` | `"changed"` | `"free"` |
 | `retryAfter` | `60` | `60` | `60` |
+
+## Author pack (`author`)
+
+Version 1 · realism domain none · requires none.
+
+### Events
+
+Its own: `author.answer`, `author.ask`, `author.drift`, `author.drop`, `author.edit`, `author.poll`, `author.predict`, `author.score`, `author.spend`.
 
 ## Calendar & time pack (`calendar`)
 
@@ -985,7 +994,7 @@ Version 1 · realism domain none · requires none.
 
 ### Events
 
-Its own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.fact`, `minds.forget`, `minds.intent`, `minds.keep`, `minds.knowledge`, `minds.learn`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.settle`, `minds.skip`.
+Its own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.fact`, `minds.forget`, `minds.intent`, `minds.keep`, `minds.knowledge`, `minds.learn`, `minds.link`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.settle`, `minds.skip`, `minds.unlink`, `minds.v2.interview`, `minds.v2.lived`, `minds.v2.pov`, `minds.v2.take`, `minds.v2.write`.
 
 ### Proposals
 
@@ -1379,7 +1388,7 @@ Version 1 · realism domain none · requires none.
 
 ### Events
 
-Its own: `story.flag`.
+Its own: `story.beat`, `story.draft`, `story.flag`, `story.passage`, `story.scene`, `story.settle`, `story.staging`, `story.strike`, `story.talk`, `story.unrendered`.
 
 ### Panels and slots
 

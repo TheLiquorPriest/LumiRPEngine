@@ -1326,7 +1326,7 @@ describe("the settings", () => {
     expect((await set({ stream: false })).stream).toBe(false);
     expect((await set({ stream: null })).stream).toBe(true);
     // A new user's file holds none of it until they change one, and reads as the defaults.
-    const fresh = new Rig();
+    const fresh = new Rig({ newChats: "agents" });
     expect(settingsOf(fresh.body(await fresh.send({ type: "lre.settings.get" }))).agents).toEqual(defaultAgentSettings());
   });
 });

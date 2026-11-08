@@ -5,8 +5,10 @@
 
 import type { ActionId, EntityId } from "../shared/ids";
 import { hashParts } from "../shared/hash";
+import { withPov } from "../shared/character-engine";
 import type { JsonObject } from "../shared/json";
 import { hasOwn } from "../shared/json";
+import type { WorldDoc } from "../shared/world";
 import type { GenerationKind, LedgerEvent, PathHash, TimelapseTarget } from "../shared/ledger";
 import { applyEffects } from "../engine/effects";
 import { materializeAll } from "../engine/materialize";
@@ -272,6 +274,8 @@ export class TurnBridge implements TurnModel {
   private readonly tidied = new Map<string, LedgerEvent[]>();
   /** An agent turn's commit of what its roles staged before the plan, keyed like `intents`: applied after the plan's events (INC2-SPEC C10), once. */
   private readonly commits = new Map<string, TurnCommit>();
+  /** Typed messages whose turn a depth scene plays (DEPTH-PLAN §1.3), keyed like `intents`: the scene's own clock moves that turn's time, so its plan passes no scene tick. */
+  private readonly scenes = new Set<string>();
   /**
    * The words whose turn an agent turn's review gate let through (INC2-SPEC C13): the next run of
    * them replays the plan the gate held, as one let through the outline gate does, until the turn
@@ -308,7 +312,7 @@ export class TurnBridge implements TurnModel {
    * next time it plays rather than coming back to the card the player cancelled.
    */
   forget(userText: string): void {
-    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.skipPlans, this.held, this.routineAsks, this.planReads, this.ownPlans, this.outlines, this.memories, this.tidied, this.commits]) kept.delete(userText);
+    for (const kept of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.skipPlans, this.held, this.routineAsks, this.planReads, this.ownPlans, this.outlines, this.memories, this.tidied, this.commits, this.scenes]) kept.delete(userText);
     if (this.replay === userText) this.replay = null;
     this.interpreted.delete(userText);
     this.intentsPassed.delete(userText);
@@ -539,6 +543,16 @@ export class TurnBridge implements TurnModel {
     trim(this.skips);
   }
 
+  /** Whether a depth scene plays the turn whose last user text is `userText`: its plan then passes no scene tick (`TurnPlanInput.scene`). */
+  setScene(userText: string, scene: boolean): void {
+    if (!scene) {
+      this.scenes.delete(userText);
+      return;
+    }
+    this.scenes.add(userText);
+    if (this.scenes.size > 64) this.scenes.delete(this.scenes.values().next().value ?? "");
+  }
+
   /**
    * A span offered rather than run (longer than a skip runs without asking, or after the actions):
    * what the player's message fills it with, in their words (`fill`), and whether it holds the POV
@@ -596,6 +610,8 @@ export class TurnBridge implements TurnModel {
   }
 
   plan(input: { state: WorldState; ctx: ReadContext; seed: string; kind: GenerationKind; userTexts: string[]; parentPath: PathHash }): LedgerEvent[] {
+    // The player's action is his player character's: the one he last switched to (D-10), else the world's.
+    const world = withPov(input.ctx.world, input.state);
     const last = input.userTexts.at(-1) ?? "";
     // Only what this turn's own pre phase kept: the same words read at another path are another turn's.
     const own = this.readAt.get(last) === input.parentPath;
@@ -614,10 +630,10 @@ export class TurnBridge implements TurnModel {
       }
       const events = structuredClone(shown.events);
       // What the review gate let through lands after the plan it held, re-validated against it (INC2-SPEC C13).
-      return [...events, ...this.committed(commit, input, events)];
+      return [...events, ...this.committed(commit, world, input.state, events)];
     }
     // Decisions and minds first: the plan then follows the choices they record (DESIGN §5.2 npc.choose, §24).
-    const w = new Working(this.registry, input.ctx.world, input.state);
+    const w = new Working(this.registry, world, input.state);
     w.applyAll(own ? this.prePlan(last) : []);
     // The plan the message gives lands ahead of what the turn plays (assess-party §6.2): its actions
     // and its reply are told it, and a Re-read of the reply keeps it.
@@ -628,7 +644,7 @@ export class TurnBridge implements TurnModel {
     }
     const result = this.pipeline.plan({
       registry: this.registry,
-      world: input.ctx.world,
+      world,
       state: w.state,
       runSeed: this.runSeed,
       seed: input.seed,
@@ -636,12 +652,13 @@ export class TurnBridge implements TurnModel {
       userTexts: input.userTexts,
       intent: own ? (this.intents.get(last) ?? null) : null,
       skip: own ? (this.skips.get(last) ?? null) : null,
+      ...(own && this.scenes.has(last) ? { scene: true } : {}),
     });
     this.plans.set(input.seed, result);
     trim(this.plans);
     const planned = [...w.events, ...result.events];
     // What an agent turn's roles staged before the plan lands after the plan's events (INC2-SPEC C10).
-    const committed = this.committed(commit, input, planned);
+    const committed = this.committed(commit, world, input.state, planned);
     const events = committed.length > 0 ? [...planned, ...committed] : planned;
     // Kept by reference (a reuse clones it), so a turn that never meets the outline gate pays nothing for it.
     if (own) {
@@ -652,9 +669,9 @@ export class TurnBridge implements TurnModel {
   }
 
   /** The events an agent turn's commit (`commit`) adds after `events`, the plan's, each operation re-validated on the state they leave; none without a commit. */
-  private committed(commit: TurnCommit | undefined, input: { state: WorldState; ctx: ReadContext }, events: readonly LedgerEvent[]): LedgerEvent[] {
+  private committed(commit: TurnCommit | undefined, world: WorldDoc, state: WorldState, events: readonly LedgerEvent[]): LedgerEvent[] {
     if (!commit) return [];
-    const w = new Working(this.registry, input.ctx.world, input.state);
+    const w = new Working(this.registry, world, state);
     w.applyAll(events);
     const from = w.events.length;
     commit(w);
@@ -718,12 +735,14 @@ export class TurnBridge implements TurnModel {
   read(input: { state: WorldState; ctx: ReadContext; seed: string; text: string }): LedgerEvent[] {
     const key = hashParts("lre.read", input.text);
     const prepared = this.reads.get(key);
-    const w = new Working(this.registry, input.ctx.world, input.state);
+    // What the reply tells of "you" is the player character's: the one the player last switched to (D-10).
+    const world = withPov(input.ctx.world, input.state);
+    const w = new Working(this.registry, world, input.state);
     const chips = prepared ? applyRead(this.registry, w, prepared, input.seed, this.runSeed) : [];
     if (prepared?.post !== false) {
       const base = input.seed.split(":")[0] ?? input.seed;
       const applied = (this.plans.get(base)?.elapsedMinutes ?? 0) + clockMinutes(w.events);
-      w.applyAll(this.pipeline.post({ registry: this.registry, world: input.ctx.world, state: w.state, runSeed: this.runSeed, seed: input.seed, appliedMinutes: applied, extracted: [...w.events] }));
+      w.applyAll(this.pipeline.post({ registry: this.registry, world, state: w.state, runSeed: this.runSeed, seed: input.seed, appliedMinutes: applied, extracted: [...w.events] }));
     }
     // An agent turn's commit of what its roles staged after the reply, ahead of the minds (INC2-SPEC C10): applied once, and not kept.
     if (prepared?.commit) {

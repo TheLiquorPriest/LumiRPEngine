@@ -29,15 +29,20 @@ import type {
   CarryDrop,
 } from "../../shared/ledger";
 import { REC_SESSION_PARTS, ROOT_PATH } from "../../shared/ledger";
-import { isBlobHash } from "../../shared/stores";
+import { STORY_PASSAGE } from "../../shared/passage";
+import { blobHash, isBlobHash } from "../../shared/stores";
+import { STORY_BEAT } from "../../shared/story";
 import type { WorldDoc } from "../../shared/world";
+import { foldEntryOf, type FoldLayerEntry, type SwipeKey } from "../../shared/layer";
 import { applyEvent, applyMarker, applyValidUnits, validateEvent, validMarkerBody } from "../events";
 import { playedWorld } from "../places-in-play";
 import type { ReadContext } from "../registry";
 import type { WorldState } from "../state";
 import type { ChainMessage, FoldInput, FoldOutput, SnapshotStore } from "./chain";
 import type { FoldKeys, LedgerFold } from "./fold";
+import { basisIndex, foldsState, liveLayer } from "./layer";
 import { activeRecord, activeText, contentId, isLive, isTombstoned, nextPath, sameContent, stepPath, storedRecordHash, turnPath } from "./path";
+import { storyOn } from "./story";
 import type { FoldTypes } from "./reference";
 
 /** What the core needs to plan a turn and read a reply. Supplied by the engine (and by test packs). */
@@ -70,6 +75,11 @@ export interface LedgerEnv {
    * references); the core calls it before folds that may need a newly referenced one.
    */
   pin?(revisions: ReadonlySet<RevisionId>): Promise<void>;
+  /**
+   * The chat's basis-anchored layer as its folds read it (DEPTH-PLAN §4.9): its ancestors' entries
+   * first, renamed for it, then its own, in landing order (`foldLayerOf`). Absent: none.
+   */
+  layer?(): readonly FoldLayerEntry[];
 }
 
 export interface StartedInput {
@@ -77,6 +87,8 @@ export interface StartedInput {
   kind: GenerationKind;
   targetMessageId: MessageId | null;
   targetSwipeId: number | null;
+  /** The chat is on depth (DEPTH-PLAN §1.3): nothing reads this generation's text (`PendingTurn.depth`). */
+  depth?: boolean;
 }
 
 export interface WriteResult {
@@ -190,8 +202,15 @@ export class LedgerCore {
     return observed.map((m) => ({ ...m, ledger: this.journal.messages[m.id]?.ledger ?? m.ledger }));
   }
 
-  fold(observed: readonly ChainMessage[]): FoldOutput {
-    return this.folder.fold({ ...this.foldInput(observed), ...(this.env.snapshots ? { snapshots: this.env.snapshots } : {}) });
+  /**
+   * The fold of `observed`. With `without`, the entries it names fold as superseded (a check of an
+   * entry before it lands, a redo's reads of the world it is replacing): stored snapshots are read,
+   * never added to, so none is kept of a fold that may never stand.
+   */
+  fold(observed: readonly ChainMessage[], o: { without?: ReadonlySet<string> } = {}): FoldOutput {
+    const without = o.without && o.without.size > 0 ? o.without : undefined;
+    const snapshots = this.env.snapshots && (without ? readOnly(this.env.snapshots) : this.env.snapshots);
+    return this.folder.fold({ ...this.foldInput(observed, without), ...(snapshots ? { snapshots } : {}) });
   }
 
   /** The keys a fold of `observed` ends on (`LedgerFold.keys`), read without folding: what is made from the fold can be kept under them. */
@@ -199,16 +218,114 @@ export class LedgerCore {
     return this.folder.keys(this.foldInput(observed));
   }
 
-  /** What a fold of `observed` reads (`fold`, and the reference fold the ledger gate holds it to); stored snapshots aside. */
-  foldInput(observed: readonly ChainMessage[]): FoldInput {
+  /** What a fold of `observed` reads (`fold`, and the reference fold the ledger gate holds it to), the entries `without` names folding as superseded; stored snapshots aside. */
+  foldInput(observed: readonly ChainMessage[], without?: ReadonlySet<string>): FoldInput {
+    // Entries of neutral events alone (beats, the author's records) change no state: the narrative record reads them, the world-state folds don't.
+    const layer = (without && without.size > 0 ? this.layerWithout(observed, without) : this.env.layer?.())?.filter((e) => foldsState(e, this.env.types));
     return {
       worlds: (r) => this.env.worlds(r),
       revision: this.env.run.revision,
       chain: this.chain(observed),
       pauses: this.journal.pauses,
       tombstones: this.journal.tombstones,
+      ...(layer && layer.length > 0 ? { layer } : {}),
       resolveFix: (world, state, entry) => this.env.resolveFix(world, state, entry),
     };
+  }
+
+  /**
+   * The chat's whole layer, in landing order: what the narrative record reads (`foldInput` leaves out
+   * entries of beats alone). With `without`, as `fold` reads it on `observed` with those entries
+   * folding as superseded.
+   */
+  layerEntries(o?: { observed: readonly ChainMessage[]; without: ReadonlySet<string> }): readonly FoldLayerEntry[] {
+    return o && o.without.size > 0 ? this.layerWithout(o.observed, o.without) : (this.env.layer?.() ?? []);
+  }
+
+  /**
+   * The chat's layer with the entries `without` names folding as superseded on `observed`: every
+   * entry live there stops what it supersedes first (so what one of them stopped stays stopped), then
+   * they and every entry stopped are left out, and the rest folds as the whole layer would.
+   */
+  private layerWithout(observed: readonly ChainMessage[], without: ReadonlySet<string>): FoldLayerEntry[] {
+    const all = this.env.layer?.() ?? [];
+    const gone = new Set([...liveLayer(this.chain(observed), this.journal.tombstones, all).superseded, ...without]);
+    return all.filter((e) => !gone.has(e.id));
+  }
+
+  /**
+   * Whether a layer entry may land now (DEPTH-PLAN §4.9), checked inside the landing itself: its
+   * basis message must be on the chain showing its swipe, not past a pause, and every event must fit
+   * the fold at its basis as it will be with the entry landed: the entries already there included,
+   * in order, and those it supersedes gone (a redo's spawn of whom the entry it replaces brought in
+   * fits). An entry decided at its basis before turns that may follow it there (an event declaring
+   * `later`: a settlement, a drop), or one that takes others' place, is checked against them too
+   * (`laterVerdict`). `without`: entries the check folds as superseded on both sides, the old run's
+   * that a redo has yet to replace, whose own failures never count. The fold there, or why not.
+   */
+  layerVerdict(entry: FoldLayerEntry, observed: readonly ChainMessage[], without: ReadonlySet<string> = NO_IDS): { index: number; out: FoldOutput } | { reason: string } {
+    const chain = this.chain(observed);
+    const index = basisIndex(chain, this.journal.tombstones, entry.basis);
+    if (index < 0) return { reason: chain.some((m) => m.id === entry.basis.message) ? "the message it was made from shows another swipe now" : "the message it was made from is no longer in the chat" };
+    const out = this.fold(observed.slice(0, index + 1), { without: new Set([...(entry.supersedes ?? []), ...without]) });
+    const at = out.messages[index];
+    if (!at || at.fold === "paused") return { reason: "the chat is paused at an edit before it (Keep or Discard first)" };
+    const world = this.env.worlds(out.state.revision);
+    if (!world) return { reason: `unknown revision ${out.state.revision}` };
+    const state = structuredClone(out.state);
+    for (const [i, ev] of entry.events.entries()) {
+      const ctx = this.env.types.context(world, state);
+      const failure = validateEvent(this.env.types, ev, ctx);
+      if (failure) return { reason: `event ${i} (${ev.type}): ${failure.reason}` };
+      applyEvent(this.env.types, ev, state, ctx);
+    }
+    const later = this.laterVerdict(entry, observed, index, without);
+    return later === null ? { index, out } : { reason: later };
+  }
+
+  /**
+   * An entry folds right after its basis message even when later records were planned without it
+   * (A1a's warning), so one whose events declare `later` (decided at its basis: a settlement's world
+   * changes, a draft's drop) lands only where what follows still stands with it (DEPTH-PLAN §4.6):
+   * the story it read, where it names its pins (`later.pins`: the live beats from its story time on,
+   * through the chain's end, are the ones it read), and every turn and entry after its basis still
+   * folds as made with it in place: none of their events fails re-validation, no unit of theirs drops.
+   * So does one that supersedes others (a redo, an amendment), on every message: what it takes away
+   * may be what a turn or an entry before its own basis stands on. `without` folds as superseded on
+   * both sides. Why not, or null. Any other entry, or one with no such event at the chain's last
+   * message, has nothing to meet.
+   */
+  private laterVerdict(entry: FoldLayerEntry, observed: readonly ChainMessage[], index: number, without: ReadonlySet<string>): string | null {
+    const declared = entry.events.flatMap((ev) => {
+      const later = this.env.types.get(ev.type)?.later;
+      return later ? [{ ev, later }] : [];
+    });
+    const replaces = (entry.supersedes?.length ?? 0) > 0;
+    if (declared.length === 0 && !replaces) return null;
+    const read = without.size > 0 ? { observed, without } : undefined;
+    if (declared.some((d) => d.later.pins)) {
+      const story = storyOn({ chain: this.chain(observed), tombstones: this.journal.tombstones, pauses: this.journal.pauses, layer: this.layerEntries(read) });
+      for (const { ev, later } of declared) {
+        const moved = later.pins?.(ev, story) ?? null;
+        if (moved !== null) return moved;
+      }
+    }
+    const from = replaces ? 0 : index + 1;
+    if (from >= observed.length) return null;
+    const after = new Set(this.chain(observed.slice(from)).map((m) => m.id));
+    const before = laterProblems(this.fold(observed, { without }), after);
+    // The fold as it would be once landed: the entry is the newest, so it folds last after its basis.
+    // No stored snapshots: a refused landing leaves none keyed by a fold that never was.
+    const layer = [...this.layerEntries(read), foldEntryOf(entry)].filter((e) => foldsState(e, this.env.types));
+    const trial = laterProblems(this.folder.fold({ ...this.foldInput(observed), layer }), after);
+    const known = new Map<string, number>();
+    for (const p of before) known.set(p, (known.get(p) ?? 0) + 1);
+    for (const p of trial) {
+      const n = known.get(p) ?? 0;
+      if (n === 0) return `a later turn no longer folds with it (${p})`;
+      known.set(p, n - 1);
+    }
+    return null;
   }
 
   /** Messages whose metadata mirror differs from the journal (unflushed, or clobbered by another writer). */
@@ -287,11 +404,13 @@ export class LedgerCore {
   }
 
   /**
-   * Content changes against the snapshot. A user edit pauses (L39); an assistant edit is accepted (L38).
-   * In-flight targets and, during a Continue, every assistant message with a record keep their
-   * snapshot entry, so they are classified when the turn closes (the Continue's own save is settled
-   * then); their paths chain the record's swipeHash, so the fold doesn't move meanwhile. A message
-   * without a record chains its text, so its edit is accepted at once (a bare record).
+   * Content changes against the snapshot. A user edit keeps what was made from the message as it was
+   * (`keepIdentity`) and pauses (L39), unless beats were made from it: that edit is the player's
+   * directive (DEPTH-PLAN §8.4); an assistant edit is accepted (L38). In-flight targets and,
+   * during a Continue, every assistant message with a record keep their snapshot entry, so they are
+   * classified when the turn closes (the Continue's own save is settled then); their paths chain the
+   * record's swipeHash, so the fold doesn't move meanwhile. A message without a record chains its
+   * text, so its edit is accepted at once (a bare record).
    */
   private classify(observed: readonly ChainMessage[]): void {
     const before = new Map(this.journal.chain.map((e) => [e.id, e]));
@@ -304,7 +423,7 @@ export class LedgerCore {
       if (!prev) continue;
       const content = contentId(activeText(m));
       if (m.isUser) {
-        if (prev.swipeId === m.swipeId && !sameContent(prev.content, content)) this.userEdit(m, content, observed, index);
+        if (prev.swipeId === m.swipeId && !sameContent(prev.content, content)) this.userEdit(m, prev, content, observed, index);
         continue;
       }
       const overlaid = chain[index];
@@ -494,7 +613,7 @@ export class LedgerCore {
     return owned;
   }
 
-  private userEdit(m: ChainMessage, content: ContentId, observed: readonly ChainMessage[], index: number): void {
+  private userEdit(m: ChainMessage, prev: ChainEntry, content: ContentId, observed: readonly ChainMessage[], index: number): void {
     // P4: the host's re-render of a turn's own user messages (the run just before its reply), after
     // the reply was saved and before it ends. An unplanned turn (under a pause) has them too.
     for (const p of Object.values(this.journal.pending)) {
@@ -506,6 +625,12 @@ export class LedgerCore {
         return;
       }
     }
+    // His own message the beats of what he did and said were made from (the bootstrap's, from
+    // history) keeps them as they were made (`keepIdentity`), and his edit is his directive, which the
+    // author reads and amends them by (DEPTH-PLAN §8.4): no later record read his new text, so
+    // nothing pauses, as for an assistant edit (L38), and nothing is offered to discard.
+    const kept = this.keepIdentity(m, prev, content);
+    if (kept !== null && this.layerEntries().some((e) => e.basis.message === m.id && e.basis.swipe === kept && e.events.some((ev) => ev.type === STORY_BEAT))) return;
     const later = this.chain(observed.slice(index + 1)).some((o) => !o.isUser && activeRecord(o, this.journal.tombstones) !== null);
     // An edit before an in-flight turn's target puts that turn under the pause too, planned or not.
     // (A Continue reads only when its head has a record, which `later` already covers.)
@@ -519,16 +644,45 @@ export class LedgerCore {
     this.journal.pauses.push({ messageId: m.id, content });
   }
 
-  /** Assistant edits keep the world: the new content becomes the record's `accepted` identity (L38). */
+  /**
+   * The player's edit of his own message keeps what was made from it as it showed (DEPTH-PLAN §4.9),
+   * as an assistant edit keeps a reply's: where layer entries were made from it then, it takes a bare
+   * record holding that identity (`swipeKeyOf`), the new text its accepted one, and the record it
+   * holds takes each later text so. One nothing was made from keeps none: a chat off depth is as it was.
+   * The identity it keeps, or null.
+   */
+  private keepIdentity(m: ChainMessage, prev: ChainEntry, content: ContentId): SwipeKey | null {
+    const key = String(m.swipeId);
+    const rec = (this.journal.messages[m.id]?.ledger ?? m.ledger)?.swipes[key];
+    if (!rec) {
+      const made = `c${prev.content.hash}`;
+      if (!this.layerEntries().some((e) => e.basis.message === m.id && e.basis.swipe === made)) return null;
+      this.ledgerFor(m.id, m).swipes[key] = this.bareRecord(prev.content, content);
+      return made;
+    }
+    const kept = `c${rec.swipeHash.hash}`;
+    if (sameContent(rec.accepted ?? rec.swipeHash, content)) return kept;
+    const own = this.ledgerFor(m.id, m).swipes[key];
+    if (!own) return kept;
+    if (sameContent(own.swipeHash, content)) delete own.accepted;
+    else own.accepted = content;
+    return kept;
+  }
+
+  /** Assistant edits keep the world: the new content becomes the record's `accepted` identity (L38). Text back as the record holds it is no longer a Continue's unread addition. */
   private verifyAssistant(m: ChainMessage, prev: ChainEntry, content: ContentId): void {
     const swipeChanged = prev.swipeId !== m.swipeId || prev.swipeCount !== m.swipes.length;
     const jm = this.journal.messages[m.id];
     const rec = (jm?.ledger ?? m.ledger)?.swipes[String(m.swipeId)];
     if (rec) {
       if (sameContent(rec.swipeHash, content)) {
-        if (rec.accepted) {
-          const ledger = this.ledgerFor(m.id, m);
-          delete ledger.swipes[String(m.swipeId)]?.accepted;
+        if (rec.accepted || rec.unread === "continue") {
+          const own = this.ledgerFor(m.id, m).swipes[String(m.swipeId)];
+          delete own?.accepted;
+          if (own?.unread === "continue") {
+            delete own.unread;
+            delete own.shown;
+          }
         }
         return;
       }
@@ -572,6 +726,7 @@ export class LedgerCore {
       events: [],
       startMarkers: [],
     };
+    if (input.depth) pending.depth = true;
     if (input.kind === "continue") {
       const head = [...observed].reverse().find((m) => !m.isUser);
       if (head) {
@@ -980,7 +1135,7 @@ export class LedgerCore {
     if (!p) return;
     try {
       if (p.kind === "continue") {
-        this.stopContinue(input.content, observed);
+        this.stopContinue(input.content, observed, p.depth === true);
         return;
       }
       if (p.kind === "impersonate" || input.content === "" || !p.messageId) return;
@@ -1200,6 +1355,28 @@ export class LedgerCore {
     return applyValidUnits(this.env.types, proposals, state, (s) => this.env.types.context(world, s));
   }
 
+  /**
+   * A turn's read part on `state`, each unit kept that validates in sequence: a depth turn's prose
+   * (`scene`); on a chat on depth with no scene, nothing but a Re-narrate's source's (`sourceRead`:
+   * the same outcome, told afresh), since nothing reads a reply into canon there (DEPTH-PLAN §1.3);
+   * else its reply read.
+   */
+  private readOf(p: PendingTurn, target: ChainMessage | undefined, state: WorldState, world: WorldDoc, seed: string, text: string): LedgerEvent[] {
+    const kept = p.sceneRead ?? (p.depth ? this.sourceRead(p, target) : undefined);
+    if (kept === undefined) return this.read(state, world, seed, text);
+    return applyValidUnits(this.env.types, kept, state, (s) => this.env.types.context(world, s));
+  }
+
+  /** A Re-narrate's source's read part as its record holds it, its Continues' reads after it, each event it undid left out; nothing for any other turn. */
+  private sourceRead(p: PendingTurn, target: ChainMessage | undefined): LedgerEvent[] {
+    const source = p.copies && p.renarrateOf && target?.id === p.renarrateOf.messageId ? target.ledger?.swipes[String(p.renarrateOf.swipeId)] : undefined;
+    if (!source) return [];
+    const off = (ref: EventRef): boolean => source.undone.some((u) => (u.in === "events" && ref.in === "events" ? u.index === ref.index : u.in === "post" && ref.in === "post" && u.seq === ref.seq && u.index === ref.index));
+    const read = source.events.flatMap((e, index) => (index >= source.pre && !off({ in: "events", index }) ? [e] : []));
+    const conts = source.post.filter((e) => e.kind === "cont").flatMap((e) => e.events.filter((_, index) => !off({ in: "post", seq: e.seq, index })));
+    return [...read, ...conts];
+  }
+
   /** Whether an unresolved pause sits on one of these messages (everything after it is paused). */
   private pausedWithin(messages: readonly ChainMessage[]): boolean {
     return this.journal.pauses.some((pa) => messages.some((m) => m.id === pa.messageId));
@@ -1214,7 +1391,8 @@ export class LedgerCore {
     // A pause that arrived while the reply streamed: the plan stands (it was made on its path), the
     // reply goes unread (there is no state to read it against) and the record is degraded.
     const paused = this.pausedWithin(observed.slice(0, index));
-    const read = readReply && content !== "" && !paused;
+    // A depth turn's read part is its scene's prose (`scene`): kept whether its reply ended or was stopped.
+    const read = (readReply || p.sceneRead !== undefined) && content !== "" && !paused;
     // A Re-run (a Re-narrate that couldn't copy its source is one, P3) reads its reply on its fold
     // prefix, then carries its source's fixes after it; a Re-narrate carries its copies the same way.
     // Under a pause neither carries anything.
@@ -1247,6 +1425,8 @@ export class LedgerCore {
     if (p.agents && p.agents.length > 0) rec.agents = structuredClone(p.agents);
     if (p.finalEdits && p.finalEdits.length > 0) rec.finalEdits = structuredClone(p.finalEdits);
     if (p.finalParts) rec.finalParts = { ...p.finalParts };
+    // On a chat on depth with no scene, nothing read the reply's text (`Rec.unread`).
+    if (p.depth && p.sceneRead === undefined && content !== "") rec.unread = "reply";
     if (p.copies) {
       // P3: the new reply is read on the same fold prefix as its source's was (its `pre` after the
       // source's markers), and the copies, keeping their seqs and undos, are carried after that read:
@@ -1256,7 +1436,7 @@ export class LedgerCore {
       if (p.dropped && p.dropped.length > 0) rec.dropped = structuredClone(p.dropped);
       const prefix = at && carries ? this.prefixState(at.out, target, rec, start) : null;
       if (prefix) {
-        if (read) rec.events.push(...this.read(prefix.state, prefix.world, readSeed(p.seed, true), content));
+        if (read) rec.events.push(...this.readOf(p, target, prefix.state, prefix.world, readSeed(p.seed, true), content));
         this.carryOnto(rec, target, p.copies, p.undone ?? [], prefix);
       } else if (paused) {
         const left = pausedDrops(p.copies, p.undone ?? []);
@@ -1264,7 +1444,7 @@ export class LedgerCore {
       }
     } else if (at && (read || carries)) {
       const prefix = this.prefixState(at.out, target, rec, start);
-      if (prefix && read) rec.events.push(...this.read(prefix.state, prefix.world, readSeed(p.seed), content));
+      if (prefix && read) rec.events.push(...this.readOf(p, target, prefix.state, prefix.world, readSeed(p.seed), content));
       // Starting markers land only on a record that holds events: one left with none folds its carried fixes without them.
       if (prefix && carries) this.carryFixes(rec, target, p.rerunOf, swipeId, start.length > 0 && rec.events.length === 0 ? (this.prefixState(at.out, target, rec) ?? prefix) : prefix);
     } else if (rerun && paused) {
@@ -1290,7 +1470,7 @@ export class LedgerCore {
     const ledger = this.ledgerFor(messageId, m);
     const rec = ledger.swipes[String(m.swipeId)];
     const suffix = this.continueSuffix(p, m, rec, content);
-    if (rec && suffix !== null) {
+    if (rec && suffix !== null && !p.depth) {
       // A head Continue reads only its suffix into a `cont` entry (DESIGN §5.1 step 5, L13).
       const parent = this.fold(observed).messages[index]?.parentPath ?? ROOT_PATH;
       const head = this.fold(observed.slice(0, index + 1));
@@ -1301,10 +1481,10 @@ export class LedgerCore {
       delete rec.accepted;
       return;
     }
-    this.accept(messageId, m, content);
+    this.accept(messageId, m, content, p.depth === true);
   }
 
-  private stopContinue(partial: string, observed: readonly ChainMessage[]): void {
+  private stopContinue(partial: string, observed: readonly ChainMessage[], depth: boolean): void {
     // The target is found by content: the swipe that now ends with the partial suffix (DESIGN §5.1 step 6, L15).
     const candidates = observed.filter((m) => !m.isUser && partial !== "" && activeText(m).endsWith(partial));
     let target = candidates[0];
@@ -1317,22 +1497,42 @@ export class LedgerCore {
         }) ?? target;
     }
     if (!target) return;
-    this.accept(target.id, target, activeText(target));
+    this.accept(target.id, target, activeText(target), depth);
   }
 
-  /** An assistant message's new content accepted without reading it (an assistant edit; L14, L38). */
-  private accept(messageId: MessageId, m: ChainMessage, content: string): void {
+  /** An assistant message's new content accepted without reading it (an assistant edit; L14, L38); `continued`: what a Continue added on a chat on depth (`Rec.unread`). */
+  private accept(messageId: MessageId, m: ChainMessage, content: string, continued = false): void {
     const ledger = this.ledgerFor(messageId, m);
     const key = String(m.swipeId);
-    const rec = ledger.swipes[key];
+    const had = ledger.swipes[key];
     const id = contentId(content);
-    if (rec) {
-      if (sameContent(rec.swipeHash, id)) delete rec.accepted;
-      else rec.accepted = id;
-      return;
+    if (had) {
+      if (sameContent(had.swipeHash, id)) delete had.accepted;
+      else had.accepted = id;
+    } else {
+      const prev = this.journal.chain.find((e) => e.id === messageId);
+      ledger.swipes[key] = this.bareRecord(prev?.content ?? id, id);
     }
-    const prev = this.journal.chain.find((e) => e.id === messageId);
-    ledger.swipes[key] = this.bareRecord(prev?.content ?? id, id);
+    const rec = ledger.swipes[key];
+    // The whole text the reply shows now, after each Continue: the backend keeps it as a blob (`Runtime.beforeCommit`), which the author reads the player's next edit against.
+    if (continued && rec?.accepted && rec.unread !== "reply") {
+      rec.unread = "continue";
+      rec.shown = blobHash(activeText(m));
+    }
+  }
+
+  /**
+   * The author read the player's edit of reply `messageId` (`scene/edit.ts`): its record `seq`, a
+   * reply a Continue carried on, shows his text now (`text`, a blob), which his next edit is read
+   * against (`Rec.shown`). A Continue since the edit was read, or his edit back to what the scene
+   * streamed, changed `shown` from `was`, what the edit read as the reply was: that stands.
+   */
+  editRead(messageId: MessageId, seq: number, was: string, text: string, observed: readonly ChainMessage[]): void {
+    const m = this.chain(observed).find((x) => x.id === messageId);
+    const key = Object.entries(m?.ledger?.swipes ?? {}).find(([, r]) => r.seq === seq)?.[0];
+    if (!m || key === undefined || m.ledger?.swipes[key]?.shown !== was) return;
+    const own = this.ledgerFor(messageId, m).swipes[key];
+    if (own) own.shown = text;
   }
 
   private close(generationId: GenerationId, observed: readonly ChainMessage[]): void {
@@ -1477,6 +1677,23 @@ export class LedgerCore {
     const kept = applyValidUnits(this.env.types, events, structuredClone(planned.state), (s) => this.env.types.context(planned.world, s));
     p.events.push(...kept);
     return kept;
+  }
+
+  /**
+   * A depth turn's scene (DEPTH-PLAN §1.3, §3.10): its planned (`pre`) events become the scene's (the
+   * engine run's, then the scene's moment by moment, cut where a Stop's last passage streamed), each
+   * unit validated on the state the turn started from as the plan's own were; and its read part, the
+   * narrator's prose, is what its commit records in place of reading the reply, ended or stopped.
+   * The kept planned events are returned; none when the turn isn't planned.
+   */
+  scene(generationId: GenerationId, pre: readonly LedgerEvent[], read: readonly LedgerEvent[], observed: readonly ChainMessage[]): LedgerEvent[] {
+    const p = this.journal.pending[generationId];
+    if (!p?.planned) return [];
+    const planned = this.renderPlanned(observed, p, true);
+    if (!planned?.start) return [];
+    p.events = applyValidUnits(this.env.types, pre, structuredClone(planned.start), (s) => this.env.types.context(planned.world, s));
+    p.sceneRead = [...read];
+    return p.events;
   }
 
   // ------------------------------------------------------------------ user writes
@@ -1667,6 +1884,8 @@ export class LedgerCore {
           rec.status = "ok";
           rec.swipeHash = contentId(text);
           delete rec.accepted;
+          delete rec.unread;
+          delete rec.shown;
           // A read of the reply remembers in it, whatever memory placement says, so the reply owes the next turn none.
           delete rec.memoryNext;
           return undefined;
@@ -1693,6 +1912,8 @@ export class LedgerCore {
         }
         rec.swipeHash = contentId(text);
         delete rec.accepted;
+        delete rec.unread;
+        delete rec.shown;
         // As above: the read remembers in it, so the reply owes the next turn none.
         delete rec.memoryNext;
         return undefined;
@@ -1736,6 +1957,8 @@ export class LedgerCore {
     if (!m || m.swipeId !== w.swipeId) return "not the active swipe";
     const rec = this.journal.messages[m.id]?.ledger.swipes[String(w.swipeId)] ?? m.ledger?.swipes[String(w.swipeId)];
     if (!rec) return "nothing to read";
+    // A depth scene's record keeps each passage, the rendering its beats were checked against: a read would put prose read back in its place (DEPTH-PLAN §1.3).
+    if (keepsPassages(rec)) return "A depth reply's beats are what happened, and its prose stays as it streamed: nothing reads its text again. Edit it to tell the author what should change, or swipe to Re-run the scene.";
     // A read writes path-bound events, so it runs only where the record folds as stored: on its
     // path (never, for one read elsewhere), or on a bare record, which the read anchors here (it
     // becomes this turn's record).
@@ -1750,6 +1973,31 @@ export class LedgerCore {
     }
     return null;
   }
+}
+
+/** Whether a record holds a depth scene's prose (DEPTH-PLAN §1.3), in its read part or a Continue's: no Re-read edit or Retry read replaces it. */
+export function keepsPassages(rec: Pick<Rec, "events" | "pre" | "post">): boolean {
+  return rec.events.some((e, i) => i >= rec.pre && e.type === STORY_PASSAGE) || rec.post.some((p) => p.kind === "cont" && p.events.some((e) => e.type === STORY_PASSAGE));
+}
+
+/** No entry ids: a check that leaves nothing out. */
+const NO_IDS: ReadonlySet<string> = new Set();
+
+/** `store` read but never added to: a fold of what may never stand (a check, a redo's reads) keeps no snapshot of it. */
+function readOnly(store: SnapshotStore): SnapshotStore {
+  return { get: (key) => store.get(key), put: () => undefined };
+}
+
+/** What a fold reports against the messages of `after` (`LedgerCore.laterVerdict`): events failing re-validation, units a rebased view dropped, layer units dropped. */
+function laterProblems(out: FoldOutput, after: ReadonlySet<MessageId>): string[] {
+  const list: string[] = [];
+  for (const v of out.violations) {
+    const cut = v.indexOf(": ");
+    if (cut > 0 && after.has(v.slice(0, cut))) list.push(v);
+  }
+  for (const n of out.notes) if (n.kind === "dropped" && after.has(n.messageId)) list.push(`${n.messageId}: ${JSON.stringify(n.ref)} dropped (${n.text})`);
+  for (const d of out.layerDrops) if (after.has(d.messageId)) list.push(`${d.messageId}: layer entry ${d.entry} event ${d.index} dropped (${d.text})`);
+  return list;
 }
 
 /** A record's undos that still point at something it holds: its planned events and its remaining post entries (a read just replaced the rest). */

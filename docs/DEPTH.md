@@ -1,0 +1,343 @@
+# Depth
+
+Depth is a second way to play a world chat. On a chat that is on depth, the story is decided before a word of the reply is written: an **author** sets each scene and runs it beat by beat, like a DM; each **character** with a mind plays as its own agent, from what it has lived and nothing else; the **GM** resolves what anyone tries by the world's rules and keeps the truth; and the **narrator** only renders what was decided, passage by passage, as the reply streams. The chat's memory is no longer its history: it is the canon beats of the story, each character's own mind, and the author's notebook.
+
+I built it because a long chat outgrows any one prompt. A thousand messages in, the model writing the reply can't hold who knows what, who was in the room, or what someone promised in chapter two, and summaries flatten all of it into one voice. Depth keeps each of those where it belongs, and the reply reads only what reached your character.
+
+Depth is opt-in, per chat. A chat that never turns it on plays exactly as before. Everything depth does is yours to read in GM mode, with the reasoning behind it.
+
+- [What you need](#what-you-need)
+- [Turning depth on](#turning-depth-on)
+- [The bootstrap: reading a chat that already has a history](#the-bootstrap-reading-a-chat-that-already-has-a-history)
+- [Turn off Lumibooks, Summary and Memory Cortex](#turn-off-lumibooks-summary-and-memory-cortex)
+- [A turn on depth](#a-turn-on-depth)
+- [Right after each reply](#right-after-each-reply)
+- [Real-time dialogue](#real-time-dialogue)
+- [The world beyond view: drafts and treatments](#the-world-beyond-view-drafts-and-treatments)
+- [Minds](#minds)
+- [Playing someone else](#playing-someone-else)
+- [GM → Depth: Notebook, Drafts, Treatments, Turn, Archive, Bootstrap](#gm--depth-notebook-drafts-treatments-turn-archive-bootstrap)
+- [Settings → Depth](#settings--depth)
+- [The texts you can edit](#the-texts-you-can-edit)
+- [Turning depth off](#turning-depth-off)
+- [Known limits](#known-limits)
+
+## What you need
+
+- **A world chat.** Depth runs on chats attached to a world.
+- **The loopback.** A depth turn runs inside Lumiverse's own call for the reply, through a small relay on the machine Lumiverse runs on. Setting it up is one line in a terminal and one connection in Lumiverse: see [the loopback guide](LOOPBACK.md). GM → This chat → Depth won't turn on until you have a relay running, a loopback key and a loopback connection, and it says which is missing, with a button to **Settings → Loopback**.
+- **A preset that streams.** LumiRPEngine refuses a depth turn with streaming off and says which setting to change. It never changes your preset.
+- **Models for each role.** **Settings → Depth** names a Strong and a Fast model, and each role runs on one of them or a model of its own. Until you pick, every role runs on the helper model. See [Settings → Depth](#settings--depth).
+
+## Turning depth on
+
+**GM → This chat → Depth** says what depth does and what the bootstrap would cost for this chat. Two buttons:
+
+- **Turn on depth and start the bootstrap**: the bootstrap reads the chat's history once, in the background, and builds the beats, the minds and the notebook from it (below). Use this for a chat that already has a story.
+- **Turn on depth without the bootstrap**: the history isn't read. The minds and the notebook start empty, from the next scene on. Use this for a new chat.
+
+Once a chat is on depth, the same page shows how the bootstrap stands, **Open the bootstrap**, and **Turn depth off**.
+
+Turning depth on pins the chat to your loopback connection, on that connection's own model: the loopback the chat is pinned to already, else your first. **Turn depth off** pins the chat back to what it was pinned to before, unless you've pinned it to something else since.
+
+## The bootstrap: reading a chat that already has a history
+
+The bootstrap onboards an existing chat. It reads the history oldest first, in chunks of whole messages (**Settings → Depth → Bootstrap → Chunk size**, 30,000 tokens by default), and turns it into what a depth chat remembers with. The history is what was written before depth: it ends before the first reply depth made and the message of yours it answered, and a reply on depth that nothing read (one made with no scene, off the loopback or paused, or a reply a Continue on depth added to: **Not canon**) ends it as a played one does, its text never read as history.
+
+### The estimate
+
+Before anything runs, **Survey and estimate** reads the chat once and shows the estimate: the messages, words and chunks, and for each stage (the historian, the author, points of view, minds, the GM's truth links, the reconciliation of imported memory) the calls, tokens, money (where your connection reports a price) and time it would take, on the models Settings → Depth gives each role. Nothing runs until you press **Start**. After the first chunks the estimate learns from this chat's own rates.
+
+### What it does, chunk by chunk
+
+1. **The historian** distils each chunk into canon beats: who said or did what, where, to whom, the exact words that will matter, and who was placed to perceive it, how fully and by every way it reached them (seen, and heard too). For each beat it writes two things in the same answer: what its actors did and said as they did it, which each of them lives as their own act, and what anyone there could sense, written from no one's side (your character's included), which is what reaches everyone else. So Danny lives his own call down the stairs as his call, never as "his voice carries up through the old building", and someone who texts from across town lives sending the text, never the phone buzzing on your nightstand; whoever the text was sent to lives only its words. Each beat is anchored at the message it came from. Someone the world doesn't have joins it as a person, and a place it doesn't have is made where the historian says it is (else beside where the story was). If you started playing another character partway through, the historian notices: from that message on, that character is the player character, and the one you played before may get a mind.
+2. **The author** reads each chunk with its beats, decides who gets a mind (a recurring character does; a walk-on may not), keeps its notebook, and decides where chapters end. At each chapter's end it re-reads the chapter, revises the notebook deeply, checks each character's arc for drift and writes predictions.
+3. **Points of view:** for a beat that reached a character with a mind only in part, the point-of-view render writes what reached them, from where they were. A character's own act needs none: it lives what it did, words and all.
+4. **Minds** form from each character's own experience: each one's agent catches up on what reached it in the chunk, in order, and writes its own memories, beliefs, people and plans. At each chapter's end each character reflects. A character's core comes from its Lumiverse card, else the world's own description of it (its role, age, description and traits, and the lore about it: the world's own entries, then your World Info), else an imported memory entry about it, else the author's reading of the history. A core with a World Info entry, a memory entry or the author's reading in it is marked for your review. A Redo seeds again a core the bootstrap seeded; one you wrote stands. The player character gets no agent.
+5. **The GM** links what the beats established to what the characters now believe, so What you know and secret gating follow.
+6. **Imported memory** is reconciled at each chapter's end: Lumibooks' books (found by Lumibooks' own marks, whether or not they are attached to the chat), the chat's summary, Memory Cortex (with the Memories permission), and an earlier LumiRPEngine mind's notes and commitments. An entry that agrees cites the beats. One recording an event the history no longer holds becomes beats sourced from it, marked for review. One that contradicts the beats or a character's mind goes to your spot checks. The world's own lore (where a starter keeps all of its own, in no book) and World Info are read too, as lore: they seed cores, are never reconciled, and keep doing their job. GM → Depth → Bootstrap counts each source's entries ("The world's lore", "World Info", …).
+
+### The run: GM → Depth → Bootstrap
+
+The Bootstrap tab shows the run: its state and why, progress by stage and by chapter, time, spend against your cap, peak memory per stage, what the rest would take, what the import read, the spot-check cards and the run's log.
+
+- **Pause** finishes the calls under way and keeps them. It stops both of the run's lanes: the historian reads ahead of the rest, finishes its call and stops too.
+- **Resume** carries on. A restart, a crash or a closed tab loses nothing: the run resumes at the first job not done, and nothing lands twice.
+- **The cap** (tokens or money, set before Start; 20M tokens by default) pauses the run when it is reached, saying how far it got and what the rest would cost. Raise the cap, give fewer characters a mind, or pick cheaper models for the historian and the point-of-view render, then Resume.
+- **A cut-off answer.** The stages whose answers grow with what they read (the historian, the author's readings and chapter re-reads, the characters' catch-ups and reflections, the GM's truth links) ask for all the answer room they can, reasoning included: 1,000,000 tokens, held to what the model takes where its provider says so; only the tokens written are spent. Where you set the role's own answer room (Settings → Depth, the role on its own model), it asks for that instead, and an answer cut off at it is asked once more at twice the room. A provider that refuses the 1,000,000 tokens without saying what it takes is asked again at the role's own room; refused there too, the run pauses, and where the refusal speaks of the room (a 413 or a 422, or its tokens, credits, length or context) the reason names the answer room to set (Settings → Depth → Historian's answer room, for the historian). A refusal of the key, the account's access or the model (a 401, 403 or 404) only says what the provider said: no room fixes it. A reasoning model spends about half its answer thinking before it writes, so a chunk too big for the model's output limit keeps being cut. An answer cut off again pauses the run, and the reason says how many tokens it took, how many were reasoning and how far its text ran. Resume asks that job again; a smaller chunk, or a bigger answer room where you set the role's own, fixes one that keeps being cut.
+
+### Spot checks
+
+After each chapter a card waits: a random sample of beats beside the prose they came from (with the message), everything flagged as uncertain, one character's new memories beside what it lived, a notebook excerpt, and every contradiction the import found. Mark each **Right** or **Wrong**, with a word on what's wrong. The card also lists each model answer since the card before that the run didn't keep as the model wrote it: every field it dropped or read as something else, or the whole answer when it wasn't JSON, with why. The answer itself is kept with its job, a failed job's too.
+
+A beat marked wrong is amended before the run's next chunk (a finished run starts again for it; a paused one when you Resume). The author reads the beat beside its message and your word, and rewrites it as the message has it, or strikes it if the message holds no such beat. Each character who lived it then lives the corrected beat, if it reaches them, and gives a verdict on every file of their mind that drew on the old beat: **keep** it word for word, or **rewrite** it at the same path without the old beat. A struck beat has nothing new to live, so they only give verdicts.
+
+Several wrong marks in a row (**Settings → Depth → Bootstrap → Wrong marks that pause it**, 3 by default) pause the run and offer **Redo from chapter N**, perhaps with other models: everything from that chapter on runs again, and the new work replaces the old. A redone chunk whose new beats can't replace the old ones (play since stands on what the old ones brought in, such as someone a later turn names) pauses the run saying why and offers Redo from its chapter again: Resume would land the same reading and meet the same refusal.
+
+### After it
+
+When the run reaches the latest message, the chat's memory is its beats, its characters' minds and the author's notebook, and a toast says so. A swipe or edit of a message the bootstrap already read reruns it from that chunk on, at the next Start or Resume. Messages sent after the run are read by running it again: only the new chunks run.
+
+## Turn off Lumibooks, Summary and Memory Cortex
+
+On a depth chat, turn off the other memory systems for that chat: **Lumibooks** (its memory books in World Info), Lumiverse's **Summary** (the Summary panel) and **Memory Cortex** (the Memory Cortex panel). Each of them hands the narrator its own, older version of the story, and depth already gives the narrator what reached your character, from canon. Two versions of the past in one prompt is how a reply contradicts itself.
+
+The bootstrap reads all three as evidence and reconciles them against the beats, so nothing they knew is lost. When the run is done, the Bootstrap tab says which of them this chat used, under **After the hand-over**, and the toast lists them. LumiRPEngine never turns them off itself, and their data stays as it is: turning one back on later finds everything where it was.
+
+Your own World Info is different: it is your lore, and it keeps working as usual.
+
+## A turn on depth
+
+On a chat on depth whose connection is the loopback, the reply is the live scene:
+
+1. **The engine runs first, with no model.** It plays an action you picked from the palette or a chip by the rules, puts right what play can't have (Things tidied), and steps the world forward: the time your action takes, people's routines, the world's rules and tracks. It reads none of your words: the scene does (below, "What still runs before the scene"). It passes no fixed time for the turn either: the scene's own clock moves the time once it has played (its beats and what its attempts take), people's routines following it, so a spoken line takes only its own moment. Whoever is in the scene with your character stays in it while that time passes, whatever their day or schedule says, after **Play as** too.
+2. **The GM writes your beats:** your acts and words as you wrote them, and your inner life as a beat no one but you perceives, read against the scene so far (its beats and where everyone in it is), so "the stairs after Danny" goes the way Danny went. Each beat quotes the words of your message it rests on. Where an act of yours attempts something the world decides (buying, taking, going somewhere, forcing, winning someone over), the GM reads it against what the rules let you do now, as Interpret and Judge did, from the scene so far and that act's own words alone, rating your approach where a check is rolled. A beat is yours whatever it quotes: one whose words aren't in your message (a model tidying your spelling, say), or that can't be held to it within the work a quote is allowed (words that stand all through a very long message, or more than 8 quotes for a beat or 32 for a reply), still plays, but nothing it attempts is resolved, and the thinking block says so. Each action it reads quotes the words of yours it plays, and one whose words aren't that act's (your door read as getting up, from "roll out of bed" earlier in your message) is dropped as a misread, and the thinking block names it. A quote still counts in another case or other quote marks, without its final stop, with a pronoun for yours ("his door" for "my door") or another form of a word, and with one word in four different. The engine resolves the rest (requirements, the check under the chat's adjudication, effects, time), and its outcome is a beat of its own, right after your act. A palette or chip action's outcome is told the same way. Your out-of-character lines are signals to the author, never beats.
+3. **The author sets the scene.** It reads its notebook, your words, your beats, the scene that is playing, everyone the scene may reach and the world's places. Everyone comes with their id: your character always, wherever you are, everyone with you, and those elsewhere the scene may reach only from afar (the far end of a phone call) or bring in: first the character you played before **Play as** (who has no mind) and whoever your beats, the scene playing or a talk names, then whoever your character knows, then anyone with a mind. It decides whether this carries on that scene or opens a new one, where it plays (one of the world's places, by its id) and whether it ends; a place the world doesn't have is said back to it and the scene set again, and named wrongly again, the scene plays where your character is, said. It stages everyone present (where they are, what they're doing, what blocks their senses), decides who perceived each of your beats, and decides each character's **effort** for the scene, with its reason: **its own agent** (a character with a mind plays from its own mind), **played by the author** (from the character's core and how they are now), or **handled as world**. It may hand the narrator excerpts from the chat's own earlier prose for a callback (below).
+4. **The scene plays beat by beat.** The characters the author names act at once, from the same moment, each from its own mind. Whatever someone tries that the world decides goes to the GM, which reads it from their act's own words (an action quoting none of them is dropped, and the thinking block names it), and whose outcome is its own beat. The author then writes who perceived each beat and how fully, what the world does, and the acts of those it plays, and names who acts next, or ends the turn where your answer is wanted. A turn takes at most **Steps per turn** steps (12; Settings → Depth → The author). The author reads what the budget's ceilings leave the turn at its setup and at each step, and spends by it: once one binds, whoever still plays as their own agent is played by the author from that moment, said, and the scene goes on as far as the author judges.
+5. **The narrator renders each moment as it is decided**, while the scene goes on to the next. Before a passage streams, the GM checks it against its beats.
+
+Whoever decides a beat writes it: the author can't write an act for a character playing as its own agent, nor one for your character. Such a beat alone is refused: the author is told why and sets the scene, or takes the step, again, once. Whoever it still writes an act for who plays as their own agent then acts as their own agent in its place, so the turn never ends before they have. Your character listed among a beat's actors beside others, where the author's answer also names him as the one they addressed, is the one they spoke to or acted on, and being addressed is not acting: the beat is kept as theirs, your character as the one addressed, perceiving it, and the author hears why at its next step. Anywhere else among a beat's actors, alone or beside others it doesn't say addressed him, he acts in it, so the beat is refused as his, with how to write him as the one addressed: a joint act ("Jordan and Marcus lift the crate") is never kept as the others'. Whatever else an answer of the author's couldn't keep, it hears at its next step, and the thinking block says each. Every beat records who decided it (you, the character, the GM or the author). As the historian's do, the author's beats, the GM's beats for your acts and real time's world beats each say what their actors did and said as they did it, which each of them lives as their own act, beside what anyone there could sense of it, written from no one's side: no one lives their own act as it sounded from across the stairwell. A scene's beat that says none has the point-of-view render tell each of its actors but your character their own act from the inside.
+
+No turn ends with nothing for your character. Where a turn would end (the author ends it, it reaches **Steps per turn**, or no one acts next) with nothing beyond your own beats reaching your character, the author is told exactly that and takes one more step, once, whoever was due to act acting first, and the thinking block says so. If still nothing reaches you, the reply is a short, honest passage of where your character is and what they're doing as the moment leaves them, showing no one else and adding nothing anyone could notice later, checked by the GM like any passage, with a chip, **Nothing reached** (your character's name), so the reply is never empty. A stage that failed still fails the turn, as below.
+
+Where the author stages each person moves them: its staging says, for each person, the world's place they are at, or that they are elsewhere and the scene reaches them only from afar (the far end of a phone call, a radio, a screen). Everyone it places where the scene plays is moved there with the scene, wherever the world had them, as the author's decision (a move the rules resolved of what you attempted already took you there), so the top bar, Play → Here and the next turn's reading agree with the scene. Your character is among them whenever it gives you no place, staged or not, since the scene plays from where you are. Someone it places elsewhere is moved to that place only if the world has them somewhere else, and someone it reaches from afar, your character included, is never moved: the person at the other end of your call stays where they are. Anyone else it stages with neither a place nor from afar is said back to the author, which sets the scene, or takes the step, again, once; given none again, or given a place the world lacks (which it hears back), they aren't moved at all: no place is guessed. Someone the author stages arriving mid-scene is moved the same way. The thinking block says who moved.
+
+Under the reply, **What this turn did** lists each beat that reached your character, by what reached you (what there was to sense with the words said, or your own point of view where only part of it reached you), beside what the turn changed in the world, and counts every line it lists. A beat that didn't reach you isn't there, and no beat is listed by its id.
+
+Where a beat reached someone only in part, or reached them whole with someone in it they don't know, the point-of-view render writes what reached them from where they were. It reads what was there to sense, the exact words and, for their own act, what they did, with only what their senses reached of where everyone was as the moment began: by sight, where the others were and what they were doing; by hearing alone, only where they were; by a message, nothing of anyone there. It never tells where anyone was as something they did. It names people only as that person knows them. A point of view that names someone who wasn't there, or one the render left out, is asked for once more; one that still does, or is still missing, gets a plain one in its place, said in the thinking block: "A message reached you.", "Something reached you by hearing, only in part.", or what was there to sense with everyone they don't know told as someone. No one is left without what reached them.
+
+Someone who only hears a beat (the far end of a phone call, a voice through a wall) never lives what there was to see of it, nor what was done, however fully it reached them: a beat with more than its words gets their own point of view from the render, the exact words and what could be heard ("You hear: …" where the render gives none), and a beat that is its words alone reaches them as the words. Your character too: the narrator tells a phone call as what you heard, and the GM's check holds the passage to that, never to the hand on the far end's truck. In real time the two of you see as well as hear each other face to face; where the world places you apart, each only hears the other.
+
+### What the narrator reads
+
+For each beat it renders, the narrator reads only what reached your character: what was there to sense and the exact words where the beat reached you whole, and your own point of view where it reached you only in part. It never reads a beat's truth, anyone's mind, or a beat that didn't reach you. It knows by name only the people you know, and describes everyone else as they appear.
+
+It no longer reads the chat's whole history either. Its prompt is your preset as Lumiverse assembled it, with the history replaced by:
+
+- **the recent window**: the chat's latest messages, up to **Recent messages** (4) and **Recent window** (8,000 tokens), for voice and continuity;
+- **the scene**: the beats it renders, the prose of this reply so far, where your character is, and the notebook excerpts the author chose;
+- **the state**: the engine's state sections (Scene, People, Money, Gear, Vehicles, Quest, Place, Property, and your world's own). The sections that told the old narrator what the turn did and how people behave (Outcome, Montage, Outline, Stance, Minds, Who knows what) stay out: on depth, the beats tell that.
+
+**Your preset** (Settings → Depth → The narrator):
+
+- **Keep it** (the default): every block of your preset stays where Lumiverse put it. A block placed inside the history at a depth (an author's note, World Info at depth) keeps that depth within the recent window; one deeper than the window goes at its start. Blocks after the history (post-history instructions, a prefill) stay after the narrator's part.
+- **LRE's only**: none of your preset's blocks; the narrator's own instructions, the recent window and the state.
+
+To leave one block of your preset out of the narrator's prompt, switch it off for the chat in Lumiverse's own preset. A section your preset places with `{{outlet::lre_<slot>}}` lands exactly there; one at a chat depth at that depth. Your preset's prompt post-processing (merging same-role messages, or one system message) and its sampling settings (temperature, top-p, top-k, penalties) apply to the narrator too. See [PRESETS.md](PRESETS.md).
+
+### Callbacks from the archive
+
+When the author sets a scene, it may search the chat's own earlier prose (every message as it was written, up to the reply being made) and hand the narrator excerpts of it: a promise coming due, a line someone said long ago. The narrator gets each passage exactly as it was written, with the message it is from, its story time where known, and why the author pulled it. A quote the archive doesn't hold is refused, and the thinking block says so. A Re-narrate renders without them.
+
+### Redrafts and the chip
+
+The GM's check reads each passage against the whole beats of its moment, out of world: everything that reached your character is there, as far as it reached you; quotes are exact; nothing you couldn't perceive is shown (no beat you weren't placed to perceive, no thoughts beyond what people show, no name you don't know); and nothing is added that anyone could later notice or act on. Phrasing, rhythm and colour are the narrator's; taste isn't the check's to judge. A check whose answer can't be read is asked once more, with twice the answer room where the first ran out of it (held to what the model takes); one that still can't be read lets the passage stream unchecked, with a chip.
+
+A passage that fails goes back to the narrator with the GM's notes, up to **Redrafts per passage** (2). One that still fails streams with a chip, **A passage departs from its beats**, whose detail lists each passage with the GM's line ("Passage 2: The passage has Mira smiling; the beat has her turned away") and whose button is **Re-narrate**. The beats stay canon either way.
+
+When the narrator itself fails (its call fails, or it writes no passage after its redrafts), it renders nothing more that turn; what streamed stands, and the scene goes on deciding its moments, which stay canon. The record names each moment it didn't render and why, and the same chip says so ("2 moments weren't rendered", with the reason in its detail), with **Re-narrate**, which renders every moment of the turn, those that never streamed included.
+
+When a moment can't be rendered without something canon lacks (the weather, a passer-by), the narrator asks the author, who decides it as a beat of that moment. One round of asks per passage; a Re-narrate never asks.
+
+### The thinking block
+
+**Settings → Depth → The thinking block shows**:
+
+- **Everything** (the default): the author's thinking, the cast and their efforts, each beat as it is decided with who perceived it, each check's verdict and what it said to change, each redraft and ask, the narrator's own reasoning, and what the narrator reads ("The narrator reads your preset as it is, the chat's last 4 messages (about 1,900 tokens), and this scene's beats. The 38 earlier messages stay out of its prompt."), with each archive read the author makes.
+- **Progress**: the stage lines alone ("The author is setting the scene", "The GM is checking passage 2", "The narrator is redrafting passage 2 (1 of 2)").
+
+Refusals and limits always show. A step that runs a minute with nothing else to show gets a progress line with its running time ("The author is setting the scene (2 min)").
+
+### Stop
+
+Stop lands anywhere in the turn. The reply keeps the prose that streamed, and the record keeps exactly the beats behind it, together with every beat decided before the last of them, private ones included. Nothing decided after that stays: you stopped the scene there. A passage still being rendered or checked when you stop never streams, and no streamed word is rewritten. Stopped before any passage streamed, nothing of the scene is kept, and no blank reply or swipe is left behind.
+
+A stage that fails part-way through the scene (a provider error, say) ends the turn the same way once a passage has streamed: what streamed stands with its beats, nothing after them is decided, the thinking block and a chip under the reply (**The scene stopped part-way**) say why, and the chat shows the error. Your next message plays on from there, or **Swipe as… → Re-run the scene** plays it again. A stage that fails before any passage streamed fails the turn, as any failed reply does.
+
+### Swipes, Regenerate, Re-narrate and Re-run
+
+Your **Settings → Swipes** choices govern depth turns too, and the thinking block says which one ran.
+
+- **Re-narrate** (the default) copies the turn exactly: the same beats with the same ids, texts and exposure, and everything decided with them. The narrator renders them afresh and the GM checks each passage again. Nothing is decided: no model re-decides a beat, and the narrator asks the author nothing.
+- **Re-run** plays the scene again from the start.
+- Either may take a word on what should change (**Swipe as…**). The narrator reads it, and so does the author, among your signals: on a Re-run he sets the scene by it. How many times you swiped a reply, and which telling of the last reply you kept, reach him too. The GM's check reads your word as well: the texture you asked for (phrasing, rhythm, colour, tone, what a passage dwells on) is no departure from the beats, while an act, a word, an outcome or a detail anyone could later notice still has to be in them.
+- **Regenerate in the input area** deletes the reply first, then asks a new one: when the reply it deleted was the chat's last depth reply, the new one redoes the telling it showed as your swipe setting says (Re-narrate: its beats told afresh, where it holds any; else the scene plays again), and the thinking block says which. A redo answers only the message the deleted reply answered, as it was: delete that message too, or edit it, and the new reply is a turn of its own. Deleting any other message, or sending a message of your own first, makes no redo.
+
+Everything that ran after a reply (memories, the poll, catch-ups, drafts) is anchored at that reply. A swipe takes all of it away with the reply, and switching back brings it back.
+
+### Editing a reply
+
+Your edit of a depth reply is your directive about what happened. The author reads the reply as you last saw it (as it streamed, or as the latest Continue or your previous edit left it) beside your edit and the beats the reply rendered, and decides what the edit means:
+
+- **Cosmetic** (a typo, a turn of phrase, a detail no one could later notice): it amends nothing.
+- **An amendment.** For each beat you changed, the author writes the beat as it now happened, in the old beat's place (same time, scene and place), with who perceived it. Beats you took out with nothing in their place are struck. The old beats stop being read: they stop driving minds and the narrator.
+
+Everyone with a mind who had lived a replaced or struck beat catches up at once: they live what reached them of the amendment, and they see the old beat as it had reached them beside every file of their mind that drew on it. For each file they **keep** it word for word (nothing in it came from the old beat) or **rewrite** it whole without the old beat. A rewrite is not a memory of being corrected. A file that gets no verdict after a second ask stays out of the character's mind and recall, flagged **Out of mind** in GM → Minds, where it stays readable and your own edit brings it back.
+
+An edit that leaves the text as it was asks no one. The reply's own save never counts as an edit. The author's reading of each edit is kept beside the reply (GM → Depth → Notebook), and a swipe of the reply leaves both inert.
+
+Your edit of an old message of your own that the bootstrap made beats from (what your character did and said in the history before depth) is your directive too. The author reads what you now say your character did or said beside the beats made from that message (the first time against those beats alone, since LumiRPEngine doesn't keep the message as it was; after that, as your previous edit left it), amends or strikes them at the message as above, and whoever lived them catches up. It doesn't pause the chat, however much you have played since: no reply after it read your new words, so there is nothing to keep or discard, and every later reply keeps what it holds. Its text is **The player's edit of his own message**. An edit of a message nothing was made from isn't read, and pauses the chat as on today's engine.
+
+### What still runs before the scene
+
+A depth turn on the loopback makes no model call of today's engine, on either engine (GM → This chat → Engine). Every model call of the turn is the scene's: the GM, the author, the characters, the point-of-view render, the narrator and its check, each on its Settings → Depth row. The engine run before the scene is deterministic:
+
+- **What still runs:** the action you picked from the palette or a chip, played by the rules (its outcome is the GM's beat); a Timelapse you started there, on the engine alone; Things tidied; the time your action takes (no fixed time per turn: the scene's own clock moves it); people's routines and the world's rules and tracks; the state sections the narrator reads.
+- **What is off, because the scene does its work:**
+  - reading your message (Interpret), judging your approach (Judge) and judging a puzzle's answer: the GM reads and rates what you attempt as the scene resolves it;
+  - the intent gate and the outline gate: there is no read or outline to show;
+  - choices for the people with you (`npc.choose`): they play themselves;
+  - the Brief and the Outline: the beats tell the narrator what the turn did;
+  - the time skip's plan for a Timelapse: the author plays the world beyond your view;
+  - on a chat whose Engine is Agents, the whole agent pipeline: every role, the main agent and its final review of the narrator's prompt;
+  - the classic character steps: no mind call before the plan, no minds at a timelapse's beats, and no read of the reply after it (no Extract changes, memory, knowledge or choices step). Its characters live the scene as their own agents, and the GM files what the beats establish.
+
+### What still runs the old way
+
+- **Impersonate** and **Continue** are written by today's narrator: a scene doesn't carry on a reply yet. On a chat whose Engine is Agents, with the final review on, the main agent still reviews a Continue's prompt.
+- A turn made while the chat is paused, and a Re-narrate of a reply written before the chat went on depth (which keeps that reply's outcome), are written by today's narrator too. Each of these is written from the narrator's short context all the same: your preset as it is (whatever **Your preset** says, since LumiRPEngine's own template renders beats), the state sections in their places and the recent window, never the history before it.
+- **A depth chat on another connection** runs no engine at all, on either engine: no scene, no reading of your message, no step, agent role or main agent before the reply, no character's mind, memory or knowledge, and no model call of LumiRPEngine's. The reply is your preset's alone, with none of LumiRPEngine's sections in its prompt. A chip under your message says **Depth needs the loopback connection**, with **Settings → Loopback**, and on a chat whose Engine is Agents, GM → Live lists every role as none: *Generated off the loopback: no scene and no read of the reply.* Keep a depth chat on the loopback connection.
+- **Nothing reads any of these replies into the story**: no Extract, choices, Curator, off-screen choice or mind step. Through the loopback the thinking block says so, and a chip under every one of them does: **Not canon**, or for a Continue **What Continue added isn't canon**. Re-read edit and Retry read aren't offered on a chat on depth, and are refused there: your edit of a reply is the author's to read (Editing a reply, above), and **Swipe as… → Re-run the scene** plays a turn again. A depth scene's reply is never read again on any chat: its prose stays as it streamed.
+
+## Right after each reply
+
+Once a depth reply is committed, everything that reads it runs in the background and lands at that reply:
+
+1. **Remember.** Every character holding scene takes at the reply writes what it keeps of them, in its own voice: each character who played the turn as its own agent, a talk's partner once the talk ended, and anyone whose remembering failed before. A character you are still talking with in real time keeps the scene in its working memory until the talk ends, or until it holds 400 takes.
+2. **Truth links.** Out of world, the GM files the facts the turn's beats establish and links what those who just remembered now believe. Your character's knowledge comes from the beats that reached you. Its answer room is the GM's own, or four times what it reads where that is more.
+3. **The author's poll.** It reads what changed since it last looked: every beat since the last poll that ran (only this turn's when none did), the memories characters wrote, the story time that passed with each timelapse you ran, plans falling due in the next story day, what waits to be lived by whom, its open drafts and predictions, and your signals (how the turn came, your out-of-character lines). It decides who catches up now and who reflects, whether it reflects itself, what happens off screen, and how its open predictions scored. It logs what it considered and whether it raised it. A conversation may put the poll off until it ends; a timelapse in the reply runs it anyway.
+4. **Its jobs.** The catch-ups run first, then the reflections, then the GM's truth links of what they wrote, then the author's own: its notebook revised, each character's arc checked for drift, and predictions made.
+
+The GM links what a mind or the story gains between turns as well: after a draft settles off screen, the facts its beats establish (a letter or a rumor that reveals a secret to your character opens it for you) and what the catch-ups it ran wrote; after your edit of a reply, the amended beats and what the catch-ups wrote; and after **Catch up** or **Reflect** in GM → Minds writes a character's beliefs. An interview never changes what a character believes, so it has nothing for the GM to link.
+
+Moving the clock on with ✎ between turns runs these steps too, at the chat's last message, with the poll on: it reads the time you moved it on and how, beside whatever else passed since it last looked. Setting the clock back passes no time and runs nothing.
+
+If one step fails, the others still run; a failed step is logged.
+
+**Settings → Depth → Background lanes → Work between turns** off runs only steps 1 and 2, what the next turn reads. The poll and everything it would ask for wait, with a line in GM → Depth → Treatments' log, until you turn it back on; the next poll then reads every turn since the last poll that ran, not only its own. Meanwhile what reached each character waits to be lived (GM → Minds shows it), and a scene that reaches an open draft still settles it first. **Background calls at once** (2) is how many of depth's calls between turns run at once on one connection. A turn's own calls never wait behind them: they go first, and where a connection's **Calls at once** (Settings → Agents → Throttles, or Settings → Speed → Calls) is full, a call between turns gives its place to the turn's and is asked again after, its prompt counted as spent. The bootstrap keeps to its own at-once settings and gives way the same.
+
+## Real-time dialogue
+
+When the moment is two people talking, a full scene per line is the wrong tool. The author enters **real-time dialogue** when it judges the moment a conversation, or, with **Real-time dialogue starts** set to **Only from the chip**, offers it with a chip ("Talk with Dev in real time?", **Talk**). While it runs, a chip under the last reply says whom you're talking with ("Talking with Dev"), with **Leave**.
+
+Real time is with a character playing as their own agent. The author's setup is told so: asked for real time with someone it plays itself or handles as part of the world, it hears why it wasn't entered and sets the scene again, and may cast them as their own agent. One the budget slid to the author isn't talked with in real time either; the author's next step hears why. Real time the setup enters starts with that character's own answer: their own agent plays in that turn, answering your line, before the turn can end, said in the thinking block, and the author's next step hears it.
+
+- **Your line goes straight through.** Each message you send is what the character hears, verbatim, with what it can see of you. There is no scene setup. The character's own agent answers from its own mind.
+- **The author watches beside it.** At the same time, the author reads your line in a short call. If the line holds more than the character can simply hear and answer (an attempt that needs an outcome, your character's thoughts, an out-of-character note, a move elsewhere, time passing), the author takes the turn into a full scene: the character's answer is dropped unrecorded, and the thinking block says why. Otherwise the author writes your line as a beat, says who else could perceive the exchange, and may add a world beat between lines (the phone rings).
+- **Who saw what they did.** An answer that is more than words said back to you (something the character does, words meant for someone else, or something they try, which the GM resolves) gets a short call of the author's once it's decided: who perceived it and how it turned out, through what, and how fully. A key slipped into a pocket under the desk reaches only those placed to see it, and what doesn't reach your character never shows in the reply. Words said to you reach you as they are. The thinking block says how long the call took ("The author wrote who perceived Dev's answer in 0.9 s.").
+- **Then the render.** The narrator renders the exchange with the character's words verbatim, the GM checks it, and it streams. Where nothing of the exchange beyond your own line reached your character, the reply is the short passage of where they are and what they're doing, with its chip **Nothing reached**, as for a scene. The thinking block ends each line with its latency ("Dev answered in 2.1 s beside the author's watch (1.4 s); the narrator rendered the exchange in 1.2 s and the GM checked it in 0.4 s. The line took 3.9 s.").
+- **Leaving.** Tap **Leave**: your next line plays as a scene, and the talk ends at once: the character remembers the conversation and the GM links what it then believes. A tap while a reply is being written lands with that reply. The author may also end the talk; the character then remembers it right after that turn's reply.
+- **Swipes.** Real time lives with the turn that entered it: a swipe of that turn leaves it, a switch back brings it back, a Re-narrate keeps it.
+
+Two Settings → Depth rows choose its models: **Real-time: the character** and **Real-time: the author's watch** (which also runs the author's call on who perceived an answer). Pick fast models there if you want lines to come back quickly.
+
+## The world beyond view: drafts and treatments
+
+The world doesn't stop where your character can't see. After each turn the author's poll may open an **episode** off screen: a span of story time, its places and people, and why it matters. Each person's and event's part gets a **treatment**, the effort it is simulated at:
+
+- **Live**: someone with a mind plays as their own agent, beat by beat;
+- **Campfire**: the author plays them from their mind;
+- **Room** and **Written**: the author writes what happens.
+
+Simulating an episode gives a **draft**: its beats, dated when they happen in the story, and the world changes it would make. **A draft isn't canon.** No mind, no reader of the story and no fold meets it until it is settled.
+
+- **Settling** happens when the story reaches it. The author reads the draft against every beat since its story time, with no filter, and keeps it, adjusts what those beats contradict, drops it, or re-dates it for later. A settled draft's beats are dated when they happened, and the people they reached catch up on them, in their own voice. A beat the author adjusts loses what the draft said its actors did as they did it, which told the beat as drafted: they live it as anyone there could sense it. A chip under the reply it settled at says so, for example "Settled off screen: Dale sold the boat (Thursday)", with the author's reading of it and **Read**, which opens the draft in GM → Depth → Drafts. The chip shows while that reply is the latest.
+- **No one plays past an open draft.** Before your scene plays past something an open draft holds from before the scene's minute (a person in it, its place, a thing there), the author settles it, drops it or re-dates it past the scene, at the scene's start, after its setup, and before each beat as the minute moves. The thinking block says each one ("Off screen: Settled, canon now: …", "Dropped, it didn't happen: …", "Re-dated past this scene, to …"). A line of real-time dialogue plays as a scene when a draft holds anything the line reaches (the character, you, your place, the things there), so the draft settles first.
+- **A draft holds its people.** For its episode's span, the Cast life planner puts none of them on a routine block, a plan or a schedule. A dropped draft lets them go.
+- **Swipes.** A draft is anchored at the reply its poll read: a swipe of that reply takes it away, and a switch back brings it back. A branch reads the drafts its parent had when it was made, and nothing settled in one reaches the other.
+
+### Allowances and Ask me
+
+**Settings → Depth → Budget** sets allowances per story day, week or month for each treatment (2 Live, 4 Campfire, 8 Room and any number of Written a story week, to start). A part whose treatment's allowance is spent slides down the ladder (live, campfire, room, written) and says so; past written it is left unwritten until it matters. **What deserves more than written** is guidance in your words that the author grades each part against, and every grade shows.
+
+With **Ask me** on (the default), a part the author judges major isn't slid down: it waits for you as a chip under the reply the poll read, for example "Dale's sale of the boat wants a live treatment; this story week's 2 are spent. Spend one more?", with **Spend one more** and **Keep to the allowance**. Either tap starts the episode in the background, at the treatments the author wanted or a step down the ladder. The chip stays until you answer, or until a swipe takes the reply away.
+
+## Minds
+
+**GM → Minds** on a depth chat lists your point of view (below), then every character with a mind: how many files it has, its latest write, the points of view waiting for it ("N to live"), the effort it played its latest scene at, and "Core to review" where its core waits for you. A chat not on depth shows the classic Minds.
+
+A character's mind is its own workspace, written by itself in its own words. Its agent never sees the truth, the author's notebook or another mind.
+
+| File | What it holds |
+|---|---|
+| `core.md` | who they are at root: traits, values, history, voice. Seeded from their card, the world's description of them, an imported entry or the history; only you rewrite it |
+| `self.md` | their story of themselves: who they are becoming, what they want and fear |
+| `now.md` | how they are this minute: mood, what's on their mind, what they're doing |
+| `on-my-mind.md` | what they keep in mind, read whole on every call |
+| `memories/` | one file per stretch they lived, in their own words |
+| `beliefs.md` | what they hold true, how sure, and why |
+| `people/<id>.md` | each person they know: what they make of them, and what they think that person knows, wants and feels |
+| `plans.md` | what they mean to do, when, where and with whom; promises made and taken |
+
+A character's page:
+
+- **Files**, core first, each with how often it was written. **Edit** any file: your words are a directive. The file is pinned: the character may remark on it but never rewrites it (`now.md` aside, which is how they are this minute). The notice after an edit has **Undo**, and GM → This chat lists the edit among the edits in force with its Undo while no reply has been kept since; Undo puts the file back as it was before your edit. A file flagged **Out of mind** was written from a beat that was later corrected and got no verdict; it stays readable, and your edit brings it back.
+- **Writes**, newest first: the mode (play, remember, catch up, reflect, interview), the reasoning, the beats it lived with a jump to each message, and the text it replaced.
+- **Working memory**: each private take from its plays that it hasn't remembered yet, in the order it played them, with the beat it played (or that it let the moment pass) and what it had just lived, each with a jump to its message. Its next plays read these as the scene so far; remembering the scene takes them up into a memory.
+- **Beliefs** beside the truth: the GM links each belief that concerns a fact to that fact, reads how sure the character is from its own words ("I'd swear to it", "a hunch"), and shows whether the belief matches the truth (true, false, partly) with the GM's reason.
+- **Seen**: every point of view it received, whole or in part, waiting ones first.
+- **Effort**: every scene it was in, newest first, with where and when it played, the effort and the author's reason.
+- **Interview**: ask the character a question and it answers in its own voice. Tick **Neutral to the world** when the question is asked in its world's terms and reveals nothing it hasn't lived: the answer then folds into its mind. Otherwise it stays a probe, kept in the record and never in the mind. **Every interview** lists them all, newest first, with when and who asked, the answer, and whether it joined the mind.
+- **Catch up (N)** and **Reflect now** run those at once.
+
+What you do here while a reply is being written (an edit, an interview, Catch up, Reflect now, Play as) is made from your message before that reply and lands once the reply is kept, checked against it. Whatever can no longer stand then isn't kept, and a notice says why.
+
+What a character recalls is only what it lived: its own files, and the beats that reached it, as they reached it. A cue in its own voice is answered by a word search over that, never over the chat at large. A beat still waiting to be lived isn't recallable until the character lives it.
+
+The GM also links what reached you: when a beat you perceived reveals one of the world's secrets, that secret opens for you (What you know, the narrator, the lore you're shown) exactly as if you had learned it.
+
+**Cores from cards.** A character with a Lumiverse card (its world entity names the card, or its name matches the chat's own card) gets its core from the card's description, personality and example messages. That is why LumiRPEngine asks for the `characters` permission; it never changes a card.
+
+**Plans reach the world.** A plan a character writes with a time (when, where, with whom, an amount for a payment) becomes one of their plans: the Cast life planner lays it into their day, the economy pays it, and a plan with your character in it asks you along. A plan with no time read stays a thought in `plans.md`. GM → Minds and the routine views show it as "their own".
+
+## Playing someone else
+
+**GM → Minds → Play as** switches whom you play. The one you played gets their own agent back and catches up on what reached them while you played them; their mind is kept. The one you now play has no agent: you drive them. A switch made while a reply is being written lands once that reply is kept, unless the reply played them as their own agent: then a notice says it wasn't kept, and you switch again once the reply is in.
+
+From the switch on, the engine plays your actions as that character, Play (the HUD, the panels, the palette) reads from their standing, and the narrator is told what they know as your character's own: a secret only they hold is yours once you play them, never before. Earlier turns keep who was played then, and a swipe or branch from before the switch plays the character it played then.
+
+## GM → Depth: Notebook, Drafts, Treatments, Turn, Archive, Bootstrap
+
+GM mode has no spoiler gate any more: every page is yours to read, and surprise is your choice not to look. On a depth chat, **GM → Depth** holds:
+
+- **Notebook**: the author's own files under `notebook/` (questions open and answered, threads and how ripe they are, setups waiting to pay off, each character's arc, tone and genre, the futures it weighs, and what you seem to want), each with its text, **Edit** and its revisions; every revision, newest first, with the author's account of what moved and the text before and after. Your edit pins the file as a directive: the author is shown it, may comment, and never rewrites it. **Poll** shows every poll after a turn, newest first: the jobs it asked for by name (who catches up or reflects and why, its own reflection, each episode it opened and each draft it settled, dropped or rebased, by the draft's words), what it considered, whether it raised it and why, and the author's thinking; a reflection Notebook revisions held back shows as not raised, with the setting named. **Predictions** shows every prediction, "Open" until a later poll scores it (came true, missed or partly). Characters never read the notebook.
+- **Drafts**: every off-screen draft on this chat's chain, newest first, one row each: what it is, when and who, and a badge, **Open**, **Settled** or **Dropped**, with **Stale** on an open draft whose reads have changed since: a file of someone's mind that its plays, or the author playing them, read, or a notebook file the author said the episode draws on (a revision elsewhere in the notebook, or a write to a mind it never read, doesn't count). A draft's page shows its episode (when, how long, where, who, why), each part's treatment with the author's grade, its beats dated with who perceived them, the world changes it would make, whom it holds, "Drafted at message N" with **Go to the message**, its pins, the author's thinking, and its settlement or drop with the author's reasons. On an open draft, **Settle now** has the author read it against everything since its time and settle, drop or redraft it, as the poll's settlement does; **Drop** (it asks first) is your own verdict that it won't happen; **Re-draft** drops it and drafts its episode again from where the story is now. Settle now and Re-draft run in the background: a toast says so, and the tab reads the draft again once the work lands. A press made while a reply is being written lands once that reply is kept, checked against it; one that can't stand then isn't kept, and a notice says why.
+- **Treatments**: **Waiting on you** at the top, each open Ask me question in the chip's own words with **Spend one more** and **Keep to the allowance**. Then **Log**, **Meter** and **Budget**. **Log**, newest first: each turn's scene (each character at **Its own agent**, **Played by the author** or **Handled as world**, with the author's reason), each step after a reply, each episode off screen (each part at Live, Campfire, Room or Written, with the author's grade), and each ask with how you answered; each with its cost (calls, tokens, and money where priced) and every line a ceiling put off. **Meter**, per story interval, newest first: the total, on screen, after the reply and off screen, per treatment and per role. **Budget**: the latest turn's spend against **Per turn**, today's against **Per day**, this story interval's allowances ("Live 1 of 2"), Ask me and the threshold.
+- **Turn**: the newest depth reply's scene (**Reply** picks another of the chain's last 20, **Go to the message** scrolls to it). Every model call the turn made with its role, connection, model, the provider's own request id where it gave one, tokens and time (a call whose answer wasn't kept as the model wrote it shows each field dropped or read as something else, or the whole answer when it wasn't JSON, with why, and the answer itself), the total and the time to the first passage; where everyone was; the beats in the order they were decided, each with who decided it, what happened, what there was to sense, the exact words and who perceived it (whole or in part, with their point of view, and whether they have lived it yet); each play's take, the private working memory of the moment its character kept, with the beat it played; and each passage with its verdict, its drafts with the GM's notes, the narrator's asks and where it departs.
+  - Each reply is numbered as the chat numbers it ("Message 8" is the chat's #8), and each call names its connection as Settings does (its id only once Lumiverse no longer has it).
+- **Archive**: search the chat's own prose by words, person, place and story time ("3 May", "yesterday morning"). Each hit gives its message number, story time, places, people and beats, with **Go to the message** and **More**. The author and the GM search it; characters never can.
+- **Bootstrap**: the run (above).
+
+Every page here, and **GM → Minds** and the bootstrap's spot check, names a message by the chat's own number for it, the same as Turn: "message 8" is the chat's #8, which a message deleted before it never renumbers.
+
+## Settings → Depth
+
+One page, every row with **Changed**, its default and **Default**.
+
+- **Presets**: **Deepest** (every role on Strong; the author may revise its notebook after any turn), **Balanced** (the shipped one: the render check and the points of view on Fast, the rest on Strong) and **Lean** (only the author and the characters on Strong; the author revises at a scene's end at most). Picking one lists each change, from → to, before **Apply**. Every preset simulates everything: they differ in models and in how often the author revises, never in what is simulated.
+- **Models**: a **Strong** model (reasoning high, 16,384 tokens of answer room to start) and a **Fast** one (low, 8,192), each a connection, model, reasoning and answer room. None picked is the helper model's.
+- **Roles**: Author, Character agents, GM, Render check, Point-of-view render, Narrator, Historian, Real-time: the character, Real-time: the author's watch, each on the **Strong model**, the **Fast model** or **Its own**. **Beats per catch-up** (40) bounds one catch-up call. A row whose connection is the loopback itself is refused, since its call would come straight back.
+- **The author**: **Notebook revisions** (After any turn, At a scene's end, At a chapter's end) bounds how often the author reflects; **Real-time dialogue starts** (When the author judges, Only from the chip); **Steps per turn** (12) bounds the author's steps between beats in one turn: it is told as the turn nears them, and past them you answer and the scene goes on next turn.
+- **Budget**: **Allowances per** story day, week or month, and an allowance for each treatment; **Ask me**; **What deserves more than written**; **Per turn** (600,000 tokens: everything one turn's depth work spends, the scene and the work after its reply) and **Per day** (30M tokens: everything depth spent for you today, a UTC day, across every chat, the bootstrap apart). The author reads what the ceilings leave the turn as it sets the scene and at each step. When one binds, the author plays the characters who had their own agents itself and the scene goes on as far as it judges; a real-time line plays as a scene; the step after the reply puts off what it hasn't started, a line each. Your own presses always run, and count: Spend one more, Keep to the allowance, Settle now, Re-draft, Catch up, Interview.
+- **The narrator**: **Recent messages** (4), **Recent window** (8,000 tokens), **Redrafts per passage** (2), **Your preset** (Keep it, LRE's only), **The thinking block shows** (Everything, Progress).
+- **Background lanes**: **Work between turns** (on; off, only remembering and the truth links run after a reply, and the rest waits: see [Right after each reply](#right-after-each-reply)) and **Background calls at once** (2: depth's calls between turns under way at once on one connection; a turn's own go first).
+- **Bootstrap**: **Chunk size** (30,000 tokens), **Historian chunks at once** (1), **Minds at once** (3), **Author chunks at once** (1), **The run's cap** (20M tokens, money, or no cap), **Spot checks per chapter** (5), **Wrong marks that pause it** (3).
+
+## The texts you can edit
+
+Everything depth sends a model is on **Settings → Agents → Prompts**, each text with Reset. The answers' shapes are fixed. A Historian text, an amendment's answer, or an author's scene text (Setting a scene, Between beats, The narrator's question, an episode's), the GM's The player's beats or real time's watch answer that you edited before beats had deeds asks for none: Reset it, or ask for each beat's `deed` in your own words. Without one, the point-of-view render tells a character in a scene, an episode or an amendment its own act from the inside, at a call's cost; in real time's world beats and the historian's beats it lives it as anyone there could sense it, and the historian's beat is flagged on your spot checks. Setting a scene or Between beats that you edited before the staging said where each person is asks for neither a `place` nor `remote`: the page marks it **Needs a fix**, and it is still sent, but every staging it answers places no one but your character, and the author is asked once more each time. Reset it, or ask for both in your own words. The author's texts end their answer with `"why": one or two plain sentences explaining the choice` (where a text's `"why"` is already its own, as the player's edits' and a draft's settling, with nothing more); one you edited before still asks for `"reasoning": your thinking`, which a provider may refuse to write out: the page marks it **Needs a fix**, and it is still sent. Reset it, or take that field out in your own words. A call its provider refuses (stop reason `refusal`) fails in the provider's own words, as the turn inspector shows it, and isn't asked again.
+
+- **Character agents**: the system prompt, Play, Thinking back, Catch up, Rewrite after a correction, Remember, Reflect, Interview, their answers, the point-of-view render's texts, Core from a card and Core from the world.
+- **Depth**: the author (Reading the history, A chapter's re-read, Setting a scene, Between beats, The narrator's question, The poll, Reflection, The player's edit of a reply, The player's edit of his own message), off screen (Running an episode, An episode's steps, Settling a draft, A scene reaches a draft), the GM (Truth-link, The player's beats, Resolving an attempt, An attempt's outcome), the historian, the narrator and the render check, real-time dialogue (the watch, who perceived an answer, the chips and the thinking-block lines), and the archive tools.
+- **Bootstrap**: the GM's reconciliation of imported memory, and the author's amendment of a beat marked wrong.
+
+## Turning depth off
+
+**GM → This chat → Depth → Turn depth off** puts the chat back on today's engine. Nothing depth wrote is deleted: turning it on again picks up where it was.
+
+## Known limits
+
+- **Impersonate and Continue** use today's narrator on a depth chat.
+- **A depth chat must stay on the loopback connection.** On another connection LumiRPEngine doesn't run for it: its replies are your preset's alone, and none of them is canon.
+- **Leaving out one preset block** is done in Lumiverse's own preset, per chat. A per-block choice inside LumiRPEngine needs block ids from Lumiverse's prompt interceptor, which I plan to ask for.
+- **An export of a depth chat doesn't carry its depth.** Lumiverse's chat export and import don't include LumiRPEngine's depth layer: an imported copy loses the beats of the turns played live, the minds as they grew in play, your edits, interviews and drafts. Running the bootstrap on the copy can't bring them back, since it never reads depth replies. Keep the original chat. GM → This chat → Depth and the Bootstrap view say so on every depth chat.

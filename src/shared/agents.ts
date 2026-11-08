@@ -5,8 +5,8 @@
 
 import { hashJson } from "./hash";
 
-/** The level of the contract between the CLI's core and an agent kit: a kit of another level is refused, not loaded. */
-export const KIT_API = 1;
+/** The level of the contract between the CLI's core and an agent kit: a kit of another level is refused, not loaded. 2: the kit lists and forwards the tools LumiRPEngine serves (`lre.tools`). */
+export const KIT_API = 2;
 
 /** The kit and the core as `bun run build` names them, beside dist/backend.js. */
 export const KIT_FILE = "agent-kit.js";
@@ -75,6 +75,12 @@ export interface AgentCheckIn {
    * lists only on connecting, so a Lumiverse-run server listed another build holds an old list.
    */
   listed: string | null;
+  /**
+   * The LumiRPEngine build whose served tools (`lre.tools list`) that `tools/list` answer held, null
+   * before the client asked or when none were listed; a core from before served tools doesn't send it.
+   * A Lumiverse-run server whose client listed another build's holds an old list of them.
+   */
+  listedBackend?: string | null;
 }
 
 /** A hello's `client`: every outside client names itself; an MCP server from this build on checks in as well. */

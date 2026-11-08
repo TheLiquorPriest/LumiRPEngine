@@ -1,12 +1,12 @@
 // GM → This chat: this chat's rules (its engine, Realism and Checks for this chat, the time
-// controls, the sections' feed, its knowledge choices, its things choices, its money rules, Pins and upgrade), the Edits log behind the gate, and the Inspector with the call meter;
-// a grouped list where each opens as a page. The rules and the Inspector show nothing the player
-// mayn't see, so they don't wait behind the gate; Edits is the truth's (the `core.gm` panel).
+// controls, the sections' feed, its knowledge choices, its things choices, its money rules, Pins and upgrade), the Edits log, and the Inspector with the call meter;
+// a grouped list where each opens as a page. Edits is the truth's (the `core.gm` panel); nothing
+// here waits behind a gate (DEPTH-PLAN §1.4, D-9).
 
 import type { StateView } from "../../shared/state-view";
 import { INFER_MODE_LABEL } from "../../shared/inferred";
 import { ADJUDICATION_PRESET_LABEL } from "../../shared/adjudication";
-import { useApp, useUi } from "../app";
+import { useApp } from "../app";
 import { Empty, List, ListRow, Section, useBusy } from "../components";
 import { humanize } from "../format";
 import type { PanelDef } from "../registry";
@@ -22,9 +22,10 @@ import { thingsSummary, ThingsThisChat } from "./chat-things";
 import { cashSummary, MoneyThisChat } from "./chat-money";
 import { toastQueued } from "../queued";
 import { EngineThisChat } from "./engine";
+import { DepthThisChat } from "../depth/chat-depth";
 import { GmPage, usePages } from "./ui";
 
-type ChatPage = "engine" | "realism" | "checks" | "time" | "sections" | "knowledge" | "things" | "money" | "pins" | "edits" | { panel: PanelDef };
+type ChatPage = "depth" | "engine" | "realism" | "checks" | "time" | "sections" | "knowledge" | "things" | "money" | "pins" | "edits" | { panel: PanelDef };
 
 /** This chat's time controls as `time` markers on the running chat (moved here from Play → Calendar). */
 function TimeThisChat(props: { view: StateView }) {
@@ -51,13 +52,12 @@ function TimeThisChat(props: { view: StateView }) {
 
 /**
  * This chat's list and the page open over it. `truth` is the GM view (`core.gm`), which shows the
- * Edits log for this section once the gate is open; `panels` are the other GM panels (the
- * Inspector, `core.context`, first), each a page of its own.
+ * Edits log for this section; `panels` are the other GM panels (the Inspector, `core.context`,
+ * first), each a page of its own.
  */
 export function ThisChat(props: { view: StateView; truth: PanelDef | undefined; panels: readonly PanelDef[] }) {
   const { view } = props;
   const app = useApp();
-  const revealed = useUi((ui) => ui.gm.revealed);
   const pages = usePages<ChatPage>();
   const page = pages.page;
   const controls = view.controls;
@@ -68,6 +68,7 @@ export function ThisChat(props: { view: StateView; truth: PanelDef | undefined; 
       <div class="lre-stack lre-gm-list" hidden={page !== null}>
         <Section title="Rules" flush>
           <List>
+            <ListRow icon="layers" title="Depth" subtitle="Whether this chat runs on depth, and its bootstrap" chevron onClick={() => pages.open("depth")} />
             <ListRow icon="function" title="Engine" subtitle="Classic steps or agents, for this chat's turns" chevron onClick={() => pages.open("engine")} />
             <ListRow icon="sliders" title="Realism" subtitle={controls ? `${humanize(controls.realism.preset)} · how deeply each part of the world is simulated` : "How deeply each part of the world is simulated"} chevron onClick={() => pages.open("realism")} />
             <ListRow icon="dice" title="Checks" subtitle={controls ? `${ADJUDICATION_PRESET_LABEL[controls.adjudication.preset]} · inferred checks: ${INFER_MODE_LABEL[controls.inferred.mode].toLowerCase()}` : "How checks are decided"} chevron onClick={() => pages.open("checks")} />
@@ -80,9 +81,9 @@ export function ThisChat(props: { view: StateView; truth: PanelDef | undefined; 
           </List>
         </Section>
         {props.truth ? (
-          <Section title="Behind the curtain" flush>
+          <Section title="Corrections" flush>
             <List>
-              <ListRow icon={revealed ? "edit" : "eye-off"} title="Edits" subtitle={revealed ? "Corrections in force on this chat's path" : "Corrections in force, behind the gate"} chevron onClick={() => pages.open("edits")} />
+              <ListRow icon="edit" title="Edits" subtitle="Corrections in force on this chat's path" chevron onClick={() => pages.open("edits")} />
             </List>
           </Section>
         ) : null}
@@ -128,6 +129,10 @@ export function ThisChat(props: { view: StateView; truth: PanelDef | undefined; 
       ) : page === "money" ? (
         <GmPage name="money" title="Money" subtitle="This chat" backLabel="This chat" onBack={pages.back}>
           <MoneyThisChat chatId={view.chatId} controls={controls} />
+        </GmPage>
+      ) : page === "depth" ? (
+        <GmPage name="depth" title="Depth" subtitle="This chat" backLabel="This chat" onBack={pages.back}>
+          <DepthThisChat chatId={view.chatId} />
         </GmPage>
       ) : page === "pins" ? (
         <GmPage name="pins" title="Pins and upgrade" subtitle="This chat" backLabel="This chat" onBack={pages.back}>

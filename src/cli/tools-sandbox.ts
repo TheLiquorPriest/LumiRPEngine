@@ -6,18 +6,18 @@
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { ChatExport } from "../shared/protocol";
-import type { Args } from "./args";
-import { intArg, neededText, textArg, textsArg, ToolError } from "./args";
+import type { Args } from "../shared/tool-args";
+import { intArg, neededText, textArg, textsArg, ToolError } from "../shared/tool-args";
 import { LreError } from "./connection";
 import { fitTurn } from "./offline";
-import { BODY_LIMIT } from "./read";
-import type { ToolResult } from "./report";
-import { json } from "./report";
+import { BODY_LIMIT } from "../shared/tool-read";
+import type { ToolResult } from "../shared/tool-answer";
+import { json } from "../shared/tool-answer";
 import { ADVANCE_MAX_DAYS, advance, closeSandbox, cutDigest, goOn, openList, openSandbox, playTurns, SANDBOX_BUDGET_MS, SANDBOX_MAX, SANDBOX_PARTS, sandboxGm, sandboxOf, TURNS_MAX, type Advance, type Sandbox, type SandboxTurn } from "./sandbox";
 import type { ToolModule } from "./tool-module";
 import { object } from "./tool-module";
 import type { ToolContext } from "./tools";
-import { gate, GM_ALL, GM_PICK_OPTIONS, GM_PICKS, gmRead, PAGING_USAGE, readOut, SPOILERS } from "./tools-play";
+import { gate, GM_ALL, GM_PICK_OPTIONS, GM_PICKS, gmRead, PAGING_USAGE, readOut, SPOILERS } from "../shared/chat-reads";
 
 const SECTION = "A sandbox: a scratch copy of a chat";
 /** `lre_sandbox_read`'s part that reads what the sandbox did: its turns and advances, every month's digest whole. */

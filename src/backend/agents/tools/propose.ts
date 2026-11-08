@@ -3,8 +3,9 @@
 // proposals (its `env.writer` keeps each dry run's operation) and applies them on the game master's
 // Apply, or at once where Settings lets it. Working a turn, the turn's writer stages it at once
 // (`ToolWriter.stage`): it lands when the turn commits, or waits for the GM's Apply on the review
-// card. A tool answers as JSON: what the change does in plain words, its change type and mode (and, in
-// a turn, where it stands), or the code and reason it can't be made.
+// card. Called by an outside client (DESIGN §23), its writer applies it at once as the GM's own edit
+// (`ToolWriter.write`). A tool answers as JSON: what the change does in plain words, its change type
+// and mode (in a turn, where it stands; applied, its Undo chip), or the code and reason it can't be made.
 
 import { TOOL_NOTE, toolArgTextId } from "../../../shared/agent-tools";
 import { WRITE_NOTE } from "../../../shared/agent-tools-write";
@@ -56,9 +57,18 @@ export function refusedAnswer(out: OpRefusal): ToolOutcome {
   return { text: JSON.stringify({ refused: { code: out.code, reason: out.reason, ...(out.exists !== undefined ? { exists: out.exists } : {}) } }), error: true };
 }
 
-/** What `op` comes to, as a write tool answers it: staged into the turn by a turn's writer, else its dry run; an agent with no writer reads only. */
+/**
+ * What `op` comes to, as a write tool answers it: applied at once by an outside client's writer (its
+ * Undo chip, and whether it waits for a turn under way), staged into the turn by a turn's writer, else
+ * its dry run; an agent with no writer reads only.
+ */
 export async function propose(view: ToolReadView, writer: ToolWriter | null, op: AgentOp): Promise<ToolOutcome> {
   if (!writer) return view.refuse(WRITE_NOTE.noWriter);
+  if (writer.write) {
+    const out = await writer.write(op);
+    if ("refused" in out) return refusedAnswer(out);
+    return view.answer({ applied: { key: out.preview.key, changeType: out.preview.changeType, lines: out.preview.lines, undo: out.applied.chipId, pending: out.applied.pending } });
+  }
   const out = writer.stage ? await writer.stage(op) : await writer.dryRun(op);
   if ("refused" in out) return refusedAnswer(out);
   const change = { key: out.key, changeType: out.changeType, mode: out.mode, lines: out.lines };

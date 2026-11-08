@@ -21,6 +21,7 @@ import type { AgentsRequest, ResultBodies } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import { timerMs } from "../shared/timeouts";
 import type { HostPort } from "./host";
+import { SERVED_NAMES } from "./agents/tools/outside";
 import { holdsBuild, lreProfiles } from "./lumiverse-mcp";
 import { readStoredJson } from "./stored-json";
 
@@ -82,6 +83,8 @@ interface StoredClient {
   seen: number;
   /** The build whose tools its client last listed (null: not yet); absent from a core from before Reconnect in Lumiverse. */
   listed?: string | null;
+  /** The LumiRPEngine build whose served tools (`lre.tools`) its client last listed (null: not yet, or none); absent from a core from before served tools. */
+  listedBackend?: string | null;
 }
 
 /** Reconnect in Lumiverse under way for one server (DESIGN §23, G13). */
@@ -135,7 +138,7 @@ function checkInOf(client: unknown, seen: number): StoredClient | null {
   const text = (value: unknown, max: number): string | null => (typeof value === "string" && shown(value, max) !== "" ? shown(value, max) : null);
   const follows = client.follows === true;
   const why = !follows && isRecord(client.why) && typeof client.why.text === "string" ? { code: typeof client.why.code === "string" && hasOwn(FOLLOW_CODES, client.why.code) ? (client.why.code as FollowCode) : ("other" as const), text: shown(client.why.text, 400) } : null;
-  return { name: shown(client.name, 80), version: shown(client.version, 40), host: text(client.host, 80), harness: text(client.harness, 80), core: text(client.core, 40), kit: text(client.kit, 40), follows, why, seen, ...(hasOwn(client, "listed") ? { listed: text(client.listed, 40) } : {}) };
+  return { name: shown(client.name, 80), version: shown(client.version, 40), host: text(client.host, 80), harness: text(client.harness, 80), core: text(client.core, 40), kit: text(client.kit, 40), follows, why, seen, ...(hasOwn(client, "listed") ? { listed: text(client.listed, 40) } : {}), ...(hasOwn(client, "listedBackend") ? { listedBackend: text(client.listedBackend, 40) } : {}) };
 }
 
 /**
@@ -157,9 +160,12 @@ function stateOf(client: StoredClient, build: string): AgentState {
   return client.follows ? "behind" : "cannot";
 }
 
-/** A process whose Lumiverse client holds another build's tools than it serves, and which exits when asked so Lumiverse connects it again. */
-function isStale(client: StoredClient): boolean {
-  return client.harness === LUMIVERSE_HARNESS && typeof client.listed === "string" && client.listed !== client.kit;
+/**
+ * A process whose Lumiverse client holds another build's tools than it serves (its kit's, or this
+ * build's served ones, `build`), and which exits when asked so Lumiverse connects it again.
+ */
+function isStale(client: StoredClient, build: string): boolean {
+  return client.harness === LUMIVERSE_HARNESS && ((typeof client.listed === "string" && client.listed !== client.kit) || (typeof client.listedBackend === "string" && client.listedBackend !== build));
 }
 
 /** Of a server's processes, the one furthest behind this build (the latest check-in of any level with it); null for none. */
@@ -358,14 +364,14 @@ export class Agents {
     for (const [key, heard] of this.sessions) {
       if (!key.startsWith(prefix) || heard.id !== id) continue;
       before.add(key.slice(prefix.length));
-      if (isStale(heard.client)) asked.add(key.slice(prefix.length));
+      if (isStale(heard.client, this.build.id)) asked.add(key.slice(prefix.length));
     }
     // None holds an old list now (it is back, or its processes went): the view says how it stands.
     if (asked.size === 0) return;
     let profiles: string[] | null = null;
     if (this.host.mcp.granted()) {
       try {
-        profiles = (await lreProfiles(this.host.mcp, userId, this.build.tools)).filter((p) => !p.current).map((p) => p.id);
+        profiles = (await lreProfiles(this.host.mcp, userId, this.build.tools, SERVED_NAMES)).filter((p) => !p.current).map((p) => p.id);
       } catch (error) {
         this.host.log("warn", `[LumiRPEngine] Lumiverse's MCP server profiles couldn't be read (${errorText(error)}); Reconnect in Lumiverse checks only the server's own processes`, userId);
       }
@@ -403,7 +409,7 @@ export class Agents {
     if (r.profiles !== null) {
       try {
         const statuses = await Promise.all(r.profiles.map((p) => this.host.mcp.status(p, userId)));
-        return statuses.every((s) => s.connected && holdsBuild(s.tools, this.build.tools));
+        return statuses.every((s) => s.connected && holdsBuild(s.tools, this.build.tools, SERVED_NAMES));
       } catch (error) {
         // A profile mid-reconnect, gone, or the permission taken back: not back yet, and the wait still runs.
         this.host.log("debug", `[LumiRPEngine] Reconnect in Lumiverse: Spindle couldn't say whether Lumiverse has this build's tools (${errorText(error)})`, userId);
@@ -416,7 +422,7 @@ export class Agents {
       if (!key.startsWith(prefix) || heard.id !== id) continue;
       const session = key.slice(prefix.length);
       if (r.asked.has(session)) return false;
-      if (!r.before.has(session) && heard.client.listed === this.build.id && heard.client.kit === this.build.id) returned++;
+      if (!r.before.has(session) && heard.client.listed === this.build.id && heard.client.kit === this.build.id && (heard.client.listedBackend === undefined || heard.client.listedBackend === this.build.id)) returned++;
     }
     return returned >= r.asked.size;
   }
@@ -447,7 +453,7 @@ export class Agents {
     for (const [key, heard] of this.sessions) {
       if (!key.startsWith(prefix)) continue;
       connected.add(heard.id);
-      if (isStale(heard.client)) stale.set(heard.id, (stale.get(heard.id) ?? 0) + 1);
+      if (isStale(heard.client, this.build.id)) stale.set(heard.id, (stale.get(heard.id) ?? 0) + 1);
       if (now - heard.seen > LIVE_MS) continue;
       const same = live.get(heard.id);
       if (same) same.push(heard);
@@ -472,7 +478,7 @@ export class Agents {
         .map(([id, stored]): AgentClientView => {
           const heard = live.get(id) ?? [];
           // None heard lately (after a restart, or all quiet): the last check-in says how it stands.
-          const { listed: _listed, ...client } = worstOf(heard, build)?.client ?? stored;
+          const { listed: _listed, listedBackend: _listedBackend, ...client } = worstOf(heard, build)?.client ?? stored;
           const r = this.reconnecting.get(`${prefix}${id}`);
           const reconnect: ReconnectView | null = r === undefined ? null : { state: this.overdue(r) ? "late" : "waiting", waitMs: r.wait === "none" ? null : r.wait, through: r.profiles !== null ? "lumiverse" : "server" };
           const lumiverse = client.harness === LUMIVERSE_HARNESS ? { stale: stale.get(id) ?? 0, unknown: heard.filter((h) => h.client.listed === undefined).length, profiles, reconnect } : null;
@@ -485,7 +491,7 @@ export class Agents {
   private async profilesOf(userId: UserId): Promise<LumiverseProfileView[] | null> {
     if (!this.host.mcp.granted()) return null;
     try {
-      return (await lreProfiles(this.host.mcp, userId, this.build.tools)).map((p) => ({ name: p.name, current: p.current }));
+      return (await lreProfiles(this.host.mcp, userId, this.build.tools, SERVED_NAMES)).map((p) => ({ name: p.name, current: p.current }));
     } catch (error) {
       this.host.log("warn", `[LumiRPEngine] Lumiverse's MCP server profiles couldn't be read (${errorText(error)}); the MCP servers' lines say only what the servers do`, userId);
       return null;

@@ -41,6 +41,9 @@ export const FAILED_TEXT = {
   choices: "main.failed.choices",
 } as const;
 
+/** GM → Minds → Run minds now's refusal (INC3 3a): the Minds role names no connection of its own, and the mind step it follows is switched off. */
+export const MINDS_RUN_OFF_TEXT = "main.failed.minds_run_off";
+
 const page = MAIN_AGENT_PAGE.id;
 const STOPS = "Why an agent stopped";
 const FAILURES = "Why a role failed";
@@ -74,4 +77,13 @@ export const AGENT_FAILURE_PROMPTS: readonly PromptDef[] = [
   failed(FAILED_TEXT.contract, "Not its task's form", "A role's agent answered JSON that isn't its task's output contract, which classic's own check refuses.", "the answer doesn't keep the task's form"),
   failed(FAILED_TEXT.interpret, "The read of your message failed", "The intent role run prompt-only, when its classic call that reads the player's message failed.", "the call that reads the player's message failed"),
   failed(FAILED_TEXT.choices, "A person's choices unanswered", "The director's choices under Stop the turn, when one of the people a decision asks about got no odds the engine takes from their agent.", "a person's choices got no answer the engine takes"),
+  {
+    id: MINDS_RUN_OFF_TEXT,
+    page,
+    group: FAILURES,
+    label: "Run minds now with nowhere to run",
+    note: "What GM → Minds → Run minds now says when the Minds role names no connection of its own (Settings → Agents → Roles → Minds) and the mind step it then follows is switched off (Settings → Steps and connections).",
+    text: "The Minds role names no connection of its own, and the mind step it follows is switched off: give the role a connection in Settings → Agents → Roles → Minds, or switch the mind step on in Settings → Steps and connections, to run minds.",
+    vars: [],
+  },
 ];

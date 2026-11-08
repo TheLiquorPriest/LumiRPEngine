@@ -601,6 +601,10 @@ Model jobs spend the user's helper model calls: start one when the user asked fo
 
 The chat tools reach a chat that plays a world as the user's Play does; `lre_chats` gives the chat ids. They see what the player sees, unless you pass `spoilers: true`, and change the chat the way Play's own controls do. The chat is the user's game: change it when they ask, and say what you changed.
 
+The chat tools, the lore tools and the engine's own agent tools are LumiRPEngine's: your tool list holds the ones the LumiRPEngine you are connected to serves, in its words, and it can change while you work (your client is told). The agent tools (`people_find`, `places_route`, `items_at`, `workspace_read`, `gm_set_field`…) read and write a chat as the GM does, so each needs `chatId` and `spoilers: true`, and their schemas name no world: `lre_tool_describe {name, chatId}` gives one with the chat's kinds, places and actions filled in. Their arguments are checked against that chat when called. A write applies at once as the GM's own edit, with one Undo chip that names you: tell the user what you changed, and that the chip takes it back.
+
+**A chat on depth** ([DEPTH.md](DEPTH.md)) plays its turns through the loopback, with an author, characters with minds of their own and a narrator that renders decided beats. Its minds, notebook, drafts and bootstrap are read in the user's GM → Minds and GM → Depth; no tool of yours sends those views. The author and the GM search and quote the chat's own prose with `archive_search {text?, who?, place?, from?, to?, offset?}` and `archive_quote {message, from?, to?}` (story times as the archive words them, or a phrase such as "yesterday morning"); characters never can.
+
 A session goes like this:
 1. `lre_chats` for the chat's id, then `lre_chat_state` with pointer `""` for an outline of what Play shows, and the parts you need from there.
 2. Before a turn, read what it can be: `/palette/entries/<i>` for an action's options and their `params`, `/palette/timelapse` for the skips on offer and what interrupts them.

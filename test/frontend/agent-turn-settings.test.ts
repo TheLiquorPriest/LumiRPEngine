@@ -609,7 +609,8 @@ describe("Settings → Agents → Main agent", () => {
 
 describe("the agents' settings in the settings store", () => {
   test("what the pages send reads back, and every Default and Reset reads back the shipped defaults", async () => {
-    const rig = new Rig();
+    // The shipped default for new chats, which the rig otherwise sets to classic for the turns other tests play.
+    const rig = new Rig({ newChats: "agents" });
     const read = async (): Promise<AgentSettings> => (await rig.rt.settings.get(rig.host.userId)).agents;
     const save = async (): Promise<AgentSettings> => {
       rig.body(await rig.send({ type: "lre.settings.set", patch: take() }));

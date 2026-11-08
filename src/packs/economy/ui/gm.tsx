@@ -11,7 +11,7 @@ import type { FinanceView } from "../../../shared/finance";
 import { useApp, useView } from "../../../frontend/app";
 import { Disclosure, Empty, HostSelect, JsonView } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
-import { gmOpen } from "../../../frontend/gm/gate";
+import { gmOpen } from "../../../frontend/gm/nav";
 import { useGmFocus } from "../../../frontend/gm/ui";
 import { Icon } from "../../../frontend/icons";
 import type { GmSectionProps } from "../../../frontend/registry";

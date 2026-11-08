@@ -23,7 +23,7 @@ import { formatMoney } from "../../shared/world";
 import type { BulkEditor } from "./editor";
 import { nameOf } from "./editor";
 import { Classification, FieldRow, Life, PartyField, Relations, Simulation } from "./entity";
-import { gmOpen } from "./gate";
+import { gmOpen } from "./nav";
 import { ActionRow, ActionRows, GmPage } from "./ui";
 import { GmPersonThings } from "./things";
 

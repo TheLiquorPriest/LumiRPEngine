@@ -75,7 +75,8 @@ class LeakRig {
     // As the main rig (test/support/rig.ts): a failed step stops the turn, so the helper answers with
     // nothing unless a test scripts it, and minds, which fail on nothing, stay off.
     this.host.quietReply = () => "{}";
-    this.host.files.set(`${this.host.userId}/settings.json`, JSON.stringify({ v: 1, minds: { enabled: false } }));
+    // Its chats play classic, as one made before agents were the default for new chats (INC3 3a).
+    this.host.files.set(`${this.host.userId}/settings.json`, JSON.stringify({ v: 1, minds: { enabled: false }, agents: { newChats: "classic" } }));
     this.rt = new Runtime({ host: this.host, packs, pipeline: { plan: planTurn, post: postTurn }, templates: { leak: template } });
     this.jobs = new JobRunner(this.host, this.rt.worlds, this.rt.steps, this.rt.settings, this.rt.registry);
     this.dispatch = new Dispatcher(this.rt, this.jobs);

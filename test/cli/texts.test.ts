@@ -1,6 +1,7 @@
 // The docs lookup (`lre_docs`, `lre_guide`'s fallback): BM25 over sections, headings counting three
-// times their words, stopwords left out, words lightly stemmed and ids whole; the agent guide and
-// the MCP doc are in the corpus; and the loan query finds "When a loan bills" first.
+// times their words, stopwords left out, words lightly stemmed and ids whole; the agent guide, the
+// MCP doc, the depth guide and the loopback's are in the corpus; and the loan query finds "When a
+// loan bills" first.
 
 import { describe, expect, test } from "bun:test";
 import { DOCS, docs, lookup, stem, termsOf, type Section } from "../../src/cli/texts";
@@ -36,10 +37,15 @@ describe("the docs lookup", () => {
     expect(titles(lookup(ids, "due_day"))).toEqual(["Fields"]);
   });
 
-  test("the agent guide and the MCP doc are searched too", () => {
-    expect(Object.keys(DOCS)).toEqual(expect.arrayContaining(["agent-guide", "mcp"]));
+  test("the agent guide, the MCP doc, the depth guide and the loopback's are searched too", () => {
+    expect(Object.keys(DOCS)).toEqual(expect.arrayContaining(["agent-guide", "mcp", "depth", "loopback"]));
     expect(titles(docs("lre_orgs", "mcp"))[0]).toStartWith("MCP.md ›");
     expect(titles(docs("world model", "agent-guide"))[0]).toStartWith("AGENT-GUIDE.md ›");
+    expect(titles(docs("bootstrap estimate", "depth"))[0]).toStartWith("DEPTH.md ›");
+    expect(titles(docs("mint loopback key", "loopback"))[0]).toStartWith("LOOPBACK.md ›");
+    // In the whole corpus too, not only when named.
+    expect(titles(docs("turn off lumibooks summary memory cortex"))[0]).toStartWith("DEPTH.md ›");
+    expect(titles(docs("relay docker"))[0]).toStartWith("LOOPBACK.md ›");
   });
 
   test("the loan query finds the section on when a loan bills first", () => {

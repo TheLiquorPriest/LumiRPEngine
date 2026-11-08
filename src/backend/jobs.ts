@@ -15,7 +15,7 @@ import { loreSourceOf } from "../shared/lore";
 import { publicText } from "../shared/secret-marks";
 import type { ErrorCode, JobKind, JobProposal, JobResult, JobSummary, JobUpdate, LintIssue, WorldCollection } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
-import type { LoreBooks, StepConfig } from "../shared/settings";
+import type { JobModel, LoreBooks, StepConfig } from "../shared/settings";
 import type { Limit } from "../shared/minds";
 import { firedTimeout, formatMs, HOST_LIMITS, hostBound, timeoutSignal, TIMEOUTS } from "../shared/timeouts";
 import type { Registry } from "../engine/registry-impl";
@@ -43,6 +43,11 @@ export const JOBS_KEPT = 8;
 const JOB_KINDS: Record<JobKind, true> = { import_lore: true, refine: true, describe_map: true, propose_routines: true, playtest: true, check_world: true, index_text: true };
 const JOB_STATUSES: Record<JobSummary["status"], true> = { running: true, done: true, failed: true, cancelled: true, interrupted: true };
 const SEVERITIES: Record<LintIssue["severity"], true> = { error: true, warning: true, info: true };
+
+/** A model job's call: the jobs' own model (each part it leaves out, the helper model's), with room for a full answer (`PROPOSAL_MAX_TOKENS`). */
+function roomyCall(model: JobModel | null): StepConfig {
+  return { enabled: true, signals: [], ...model, maxTokens: Math.max(model?.maxTokens ?? 0, PROPOSAL_MAX_TOKENS) };
+}
 
 /** Bounds on a job's input, as it is kept and run: ids, books an import reads, Refine's request, playtest turns. */
 const ID_MAX = 200;
@@ -374,8 +379,8 @@ export class JobRunner {
    * so it ends at the same deadline, and a call that timed out or was cancelled is not asked again.
    * Each call's outcome and time go to the user's diagnostics. Returns the reply and the calls made.
    */
-  private async proposalReply(name: string, reader: ReplyReader, label: string, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal, retry: boolean): Promise<{ reply: JsonValue | null; calls: number }> {
-    const roomy: StepConfig = { ...(config ?? { enabled: true, signals: [] }), maxTokens: Math.max(config?.maxTokens ?? 0, PROPOSAL_MAX_TOKENS) };
+  private async proposalReply(name: string, reader: ReplyReader, label: string, system: string, user: string, config: JobModel | null, userId: UserId, signal: AbortSignal, retry: boolean): Promise<{ reply: JsonValue | null; calls: number }> {
+    const roomy = roomyCall(config);
     const ask = async (text: string, attempt: string): Promise<JsonValue | null> => {
       const t0 = performance.now();
       const reply = await this.steps.helperJson("brief", system, text, roomy, userId, signal);
@@ -403,7 +408,7 @@ export class JobRunner {
    * out says where the next one starts (`next`). The proposals so far are kept with the job after
    * each call, so a restart loses none of them.
    */
-  private async proposeRoutines(job: Job, worldId: WorldId, input: JsonObject, config: StepConfig | null, loreTokens: Limit, loreBooks: LoreBooks, callSignal: () => AbortSignal): Promise<void> {
+  private async proposeRoutines(job: Job, worldId: WorldId, input: JsonObject, config: JobModel | null, loreTokens: Limit, loreBooks: LoreBooks, callSignal: () => AbortSignal): Promise<void> {
     // On the draft, where the author is working: what an earlier pass proposed and was applied counts as the world's.
     const draft = await liveLore(this.host, await this.worlds.working(worldId, job.userId), null, job.userId, loreBooks);
     const scope = routineScope(this.registry, draft);
@@ -414,7 +419,7 @@ export class JobRunner {
     if (pass.batches.length === 0) throw new Error(loreCutMessage(scope, pass.cut, loreTokens) ?? "no one has a sheet field or a lore entry to go on: write about their days in the lore or their sheets first");
     const signal = job.controller.signal;
     const system = routineSystem(scope);
-    const roomy: StepConfig = { ...(config ?? { enabled: true, signals: [] }), maxTokens: Math.max(config?.maxTokens ?? 0, PROPOSAL_MAX_TOKENS) };
+    const roomy = roomyCall(config);
     // Each call has its own deadline (Settings → Timeouts), and says why when it answers nothing usable.
     const ask = async (user: string, label: string): Promise<{ reply: JsonValue | null; failed: string | null }> => {
       const t0 = performance.now();
@@ -485,7 +490,8 @@ export class JobRunner {
     const { world, revision } = await this.worlds.get(worldId, job.userId);
     this.update(job, { status: "running", progress: 0 });
     const settings = await this.settings.get(job.userId);
-    const config = settings.modelUse.steps.brief ?? settings.modelUse.steps.interpret ?? null;
+    // Every job that calls a model runs on the jobs' own model (Settings → Steps and connections → Build jobs).
+    const config = settings.jobs.model;
     const signal = job.controller.signal;
     // A call ends at its own deadline or when the job is cancelled, whichever comes first.
     const callSignal = (): AbortSignal => {
@@ -568,7 +574,7 @@ export class JobRunner {
       const request = readMapRequest(draft, input);
       const system = mapSystem();
       const text = mapRequestText(draft, request);
-      const roomy: StepConfig = { ...(config ?? { enabled: true, signals: [] }), maxTokens: Math.max(config?.maxTokens ?? 0, PROPOSAL_MAX_TOKENS) };
+      const roomy = roomyCall(config);
       const ask = async (user: string, attempt: string) => {
         const t0 = performance.now();
         const call = callSignal();

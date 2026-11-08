@@ -18,23 +18,27 @@ export interface LreProfile {
   current: boolean;
 }
 
-/** Whether Lumiverse's client holds one of this build's tool lists. */
-export function holdsBuild(tools: readonly ListedTool[], fingerprints: readonly string[]): boolean {
-  return fingerprints.includes(toolsFingerprint(tools));
+/**
+ * Whether Lumiverse's client holds one of this build's tool lists: the fingerprint of the agent kit's
+ * own part of it, the tools LumiRPEngine serves (`served`) left out, since their texts are the user's
+ * and the build they came from is the check-in's (`listedBackend`).
+ */
+export function holdsBuild(tools: readonly ListedTool[], fingerprints: readonly string[], served: ReadonlySet<string>): boolean {
+  return fingerprints.includes(toolsFingerprint(tools.filter((t) => !served.has(t.name))));
 }
 
 /**
  * The user's profiles that run lumirpengine. A profile Lumiverse isn't connected to holds no tools,
  * so it can't be told apart from any other and isn't one of them. Throws without `mcp_servers`.
  */
-export async function lreProfiles(mcp: HostPort["mcp"], userId: UserId, fingerprints: readonly string[]): Promise<LreProfile[]> {
+export async function lreProfiles(mcp: HostPort["mcp"], userId: UserId, fingerprints: readonly string[], served: ReadonlySet<string>): Promise<LreProfile[]> {
   const profiles = await mcp.stdioProfiles(userId);
   const statuses = await Promise.all(profiles.map((p) => mcp.status(p.id, userId)));
   const out: LreProfile[] = [];
   profiles.forEach((p, i) => {
     const s = statuses[i];
     if (s === undefined || !s.connected || !KIT_MARKS.every((mark) => s.tools.some((t) => t.name === mark))) return;
-    out.push({ id: p.id, name: p.name, current: holdsBuild(s.tools, fingerprints) });
+    out.push({ id: p.id, name: p.name, current: holdsBuild(s.tools, fingerprints, served) });
   });
   return out;
 }

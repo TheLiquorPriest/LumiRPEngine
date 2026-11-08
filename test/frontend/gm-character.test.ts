@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { initialUi } from "../../src/frontend/app";
 import { bedOp, gmPageFor, homeOp, moveOp, relationRows, routineStanding } from "../../src/frontend/gm/character-ops";
-import { focusTaken, gmOpen, revealTruth } from "../../src/frontend/gm/gate";
+import { focusTaken, gmOpen } from "../../src/frontend/gm/nav";
 import type { PlaceRef, ThingRef } from "../../src/shared/character";
 import { partyOf } from "../../src/frontend/requests";
 import { PARTY_RELATION } from "../../src/shared/party";
@@ -52,10 +52,10 @@ describe("the GM character sheet", () => {
     expect(partyOf(before, { entities: [pov, before] })?.tier).toBe("core");
   });
 
-  test("a link to a character's mind opens Minds on them once, the gate left as it is", () => {
-    const linked = gmOpen(revealTruth(initialUi(false)), "minds.gm", "rosie");
-    expect(linked.gm).toEqual({ revealed: true, section: "minds.gm", focus: "rosie" });
-    expect(focusTaken(linked).gm).toEqual({ revealed: true, section: "minds.gm" });
+  test("a link to a character's mind opens Minds on them once", () => {
+    const linked = gmOpen(initialUi(false), "minds.gm", "rosie");
+    expect(linked.gm).toEqual({ section: "minds.gm", focus: "rosie" });
+    expect(focusTaken(linked).gm).toEqual({ section: "minds.gm" });
   });
 
   test("the Routine section says why their routine and what they're doing differ", () => {

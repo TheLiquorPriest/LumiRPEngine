@@ -1,6 +1,6 @@
 # LumiRPEngine GM guide
 
-This guide is for whoever runs the game: you, playing your own world as its GM, or a friend running one for you. The player's side of LumiRPEngine shows only what the point-of-view character knows or can see. The GM side sees everything, secrets included, and can change anything in a running chat. Here is how to use it without breaking the story: what the player sees and why, the GM view and its edits, fixes and Undo, the rules for checks, realism and time in one chat, moving a chat to a new revision of its world, and reading the Context inspector.
+This guide is for whoever runs the game: you, playing your own world as its GM, or a friend running one for you. The player's side of LumiRPEngine shows only what the point-of-view character knows or can see. The GM side sees everything, secrets included, and can change anything in a running chat. Here is how to use it without breaking the story: what the player sees and why, the GM view and its edits, fixes and Undo, the rules for checks, realism and time in one chat, moving a chat to a new revision of its world, reading the Context inspector, and running a depth chat.
 
 Every button is described in the [user guide](USER-GUIDE.md); this guide is about using them well. Authors who build the secrets in the first place will want [RECIPES.md](RECIPES.md) and the [reference](REFERENCE.md).
 
@@ -27,7 +27,7 @@ People, places, tracks and single fields of a kind each take one. A value the en
 
 ## The GM view
 
-Open **Play → GM view** and tap **Show the GM view** past its spoiler gate. Its data is fetched only while it is open and never travels with what Play shows, so a player glancing at the screen with it closed sees nothing. Looking never changes the chat.
+Open **GM** mode: it opens straight onto the truth, with no spoiler gate. Every GM page is yours to read; nothing is hidden from the player, and surprise is your choice not to look. Looking never changes the chat. Play's suggestion and outline chips that carry a secret stay collapsed until tapped, and your own agent's MCP tools still need `spoilers: true`.
 
 - **Entities:** every person, thing, vehicle, group and account, including the ones spawned in this chat and the ones removed, with badges for **You**, **Removed**, **Spawned**, **Agent** and anything that isn't public. A person opens their character sheet and a thing its thing page (see [GM → Things](#gm--things)); anything else opens a form: its fields as its kind defines them, its designed sheet, where it is, its relations, its simulation detail (tier, whether it lives off-screen, and each domain's level), and its classification and tags.
 - **Places:** every place with its visibility. With the Organizations pack, a place opens whose it is (12 Birch Lane is Marcus Delgado's), who may enter it and now, its hours, its keys and who carries one, and the latest entries without leave; **Change entry** sets who may enter (Owner only, Members only, Staff only, Customers, Anyone, or as the world has it) and its keys (item ids or item types, between commas) for this chat, one edit with its **Undo**. An organization's own places also show under **GM → Orgs → Property**.
@@ -165,3 +165,15 @@ The Upgrade takes effect from the next turn and is recorded like any other chang
 - **Warnings** say when the world's book wasn't attached to the chat or some of its section entries were missing (both are put right for the next turn), when your preset has a setting that causes trouble, and when a damaged journal was set aside, with where the old file is.
 
 Your own World Books work as they do anywhere in Lumiverse, so the inspector doesn't list them.
+
+## Running a depth chat
+
+On a [depth](DEPTH.md) chat the author runs each scene, characters with minds play as their own agents, and the GM keeps the truth. You steer it differently from a classic chat:
+
+- **A character's agent never sees the truth,** the author's notebook or another mind. To shape a character, edit its core in **GM → Minds** (who it is at root), edit another file (a directive the agent keeps and never rewrites), or interview it. Its `now.md` is how it is this minute and stays its own to change.
+- **The author steers through the world,** as a DM does with players: the scene, what happens and what reaches a character. An arc lives in the author's notebook, never in a mind. Edit a notebook file in **GM → Depth → Notebook** to give the author a directive: the file is pinned, and the author may comment on it but never rewrites it.
+- **Edit a reply to change what happened.** The author reads your edit and amends or strikes the beats it changes; a cosmetic edit amends nothing. Everyone who lived a replaced beat catches up on the new one and keeps or rewrites each file of their mind that drew on the old one. A file that ends up with no verdict is flagged **Out of mind**: it stays readable, and your own edit brings it back.
+- **Beliefs beside the truth.** **GM → Minds → Beliefs** shows each character's beliefs linked to the facts they concern, true, false or partly, with the GM's reason. A beat the player character perceived that reveals a secret opens that secret for him, as if he had learned it; a link the GM takes back closes it again.
+- **Off screen.** **GM → Depth → Drafts** lists what the author simulated off screen. A draft isn't canon until it settles; **Settle now**, **Drop** and **Re-draft** are yours. **GM → Depth → Treatments** shows what got which effort and what it cost, with the Ask me questions waiting on you.
+- **Read a turn.** **GM → Depth → Turn** shows every model call a reply made, where everyone was, each beat with who decided it and who perceived it, and each passage with the GM's check. Start there when a reply reads wrong: a passage that departs from its beats has a chip, and Re-narrate renders the same beats again.
+- **The bootstrap's spot checks** are the one place your marks change canon in bulk: a beat marked wrong is amended before the next chunk. Mark honestly and briefly; a run of wrong marks pauses the run and offers a redo from that chapter.

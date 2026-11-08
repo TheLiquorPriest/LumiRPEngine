@@ -8,13 +8,14 @@
 
 import type { AgentCheckIn, HelloClient } from "../shared/agents";
 import { isRecord } from "../shared/json";
-import type { ErrorCode, FrontendToBackend, LintIssue, ResultBodies } from "../shared/protocol";
+import type { ErrorCode, LintIssue, RequestFields, RequestType, ResultBodies } from "../shared/protocol";
 import { AGENT_API, ENGINE_EXTENSION, PROTOCOL_VERSION } from "../shared/protocol";
 import { formatMs } from "../shared/timeouts";
 import { inClear } from "./credentials";
 
 export interface HttpRequest {
-  method: "GET" | "POST";
+  /** PUT: the loopback's scheduler exclusion (loopback-link.ts). */
+  method: "GET" | "POST" | "PUT";
   url: string;
   headers: Record<string, string>;
   body?: string;
@@ -84,11 +85,6 @@ export class LreError extends Error {
     Object.defineProperty(this, LRE_ERROR, { value: true });
   }
 }
-
-type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
-export type RequestType = FrontendToBackend["type"];
-/** A request's own fields: the envelope (`lre`, `type`, `reqId`) is the connection's. */
-export type RequestFields<T extends RequestType> = DistributiveOmit<Extract<FrontendToBackend, { type: T }>, "lre" | "type" | "reqId">;
 
 export interface ExtensionInfo {
   /** Its database id, which frames are addressed by. */
@@ -284,6 +280,12 @@ export interface ConnectionOptions {
   onHello?(answer: Record<string, unknown>, sent: AgentCheckIn | null): void;
   /** What LumiRPEngine sends unasked (no reqId of ours): an MCP server is asked to reload there. */
   onPush?(push: Record<string, unknown>): void;
+  /**
+   * Lumiverse started, stopped or reported an error in the extension (`SPINDLE_EXTENSION_LOADED`,
+   * `_UNLOADED`, `_ERROR`, which it sends every socket; `detail` is the error's words): the loopback
+   * relay ends its calls at once rather than wait for silence (D0a check 4).
+   */
+  onExtension?(change: "loaded" | "unloaded" | "error", detail: string | null): void;
   /** Null: no limit. */
   timeoutMs?: number | null;
   pingMs?: number;
@@ -507,6 +509,13 @@ export class HostConnection implements Connection {
     }
     if (msg.event === "AUTH_ERROR") {
       this.greeting?.reject(new LiveError("protocol", "Lumiverse refused the event socket's ticket."));
+      return;
+    }
+    const lifecycle = msg.event === "SPINDLE_EXTENSION_LOADED" ? "loaded" : msg.event === "SPINDLE_EXTENSION_UNLOADED" ? "unloaded" : msg.event === "SPINDLE_EXTENSION_ERROR" ? "error" : null;
+    if (lifecycle !== null) {
+      // Every extension's lifecycle reaches every socket: only this one's counts.
+      const id = this.opened?.extension.id ?? this.lastExtension?.id;
+      if (isRecord(msg.payload) && id !== undefined && msg.payload.extensionId === id) this.options.onExtension?.(lifecycle, typeof msg.payload.error === "string" ? msg.payload.error : null);
       return;
     }
     if (msg.event !== "SPINDLE_FRONTEND_MSG" || !isRecord(msg.payload) || msg.payload.extensionId !== this.opened?.extension.id) return;

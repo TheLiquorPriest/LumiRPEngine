@@ -19,12 +19,13 @@ import { currentSignals } from "../shared/steps";
 import type { Limit } from "../shared/minds";
 import { defaultMindsSettings, isMindPurpose, KNOWLEDGE_DEFAULTS, migrateMindReads, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
 import { defaultTimeouts, migrateTimeouts, TIMEOUTS, timeoutsOf } from "../shared/timeouts";
-import { JOB_SETTINGS_DEFAULTS, jobSettingsOf, GM_PAGE_DEFAULTS, gmPageSettingsOf, LORE_INDEX_DEFAULTS, loreBooksSettingOf, loreIndexSettingsOf, PERF_DEFAULTS, perfSettingsOf, stepConfigOf, SWIPE_DEFAULTS } from "../shared/settings";
+import { JOB_SETTINGS_DEFAULTS, jobModelFrom, jobSettingsOf, type JobModel, GM_PAGE_DEFAULTS, gmPageSettingsOf, LORE_INDEX_DEFAULTS, loreBooksSettingOf, loreIndexSettingsOf, PERF_DEFAULTS, perfSettingsOf, stepConfigOf, SWIPE_DEFAULTS } from "../shared/settings";
 import { type AcceptanceConnection, agentSettingsOf, defaultAgentSettings } from "../shared/agent-settings";
 import { MARK_TEXT_IDS, PROMPT_SETTINGS_DEFAULTS, promptSettingsOf, promptsWritten, SWIPE_TEXTS } from "../shared/prompts";
 import { DIAGNOSTICS_DEFAULTS, diagnosticsSettingsOf } from "../shared/diagnostics";
 import { RETENTION_DEFAULTS, retentionOf } from "../shared/stores";
 import { OFFSTAGE_DEFAULTS, offstageSettingsOf } from "../shared/offstage";
+import { defaultDepthSettings, depthSettingsOf } from "../shared/depth-settings";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
 import { turnFrame } from "./turn-frame";
@@ -301,6 +302,8 @@ export function defaultSettings(): UserSettings {
     gm: { ...GM_PAGE_DEFAULTS },
     // A view built for a ledger head is shared by every request at that head.
     perf: { ...PERF_DEFAULTS },
+    // Settings → Depth: Balanced, every model the helper model's until you pick Strong's and Fast's.
+    depth: defaultDepthSettings(),
   };
 }
 
@@ -392,7 +395,13 @@ function normalize(raw: unknown): UserSettings {
       if (isRecord(s) && isRecord(s.route) && isRecord(step)) step.route = s.route;
     }
   }
-  return isRecord(merged) && merged.v === 1 ? conform(merged, fill) : defaultSettings();
+  if (!isRecord(merged) || merged.v !== 1) return defaultSettings();
+  const settings = conform(merged, fill);
+  // Revision 10 (INC3 3a): the jobs' own model, copied once from the brief step's, else interpret's,
+  // which the jobs read until then; none stays none, and a file that has one of its own keeps it.
+  const rev = typeof raw.defaults === "number" ? raw.defaults : 0;
+  if (rev < 10 && !(isRecord(raw.jobs) && hasOwn(raw.jobs, "model"))) settings.jobs.model = jobModelFrom(settings.modelUse.steps.brief ?? settings.modelUse.steps.interpret);
+  return settings;
 }
 
 // ---------------------------------------------------------------- the settings schema
@@ -454,6 +463,16 @@ function routeOf(v: unknown): StepRoute | undefined {
   const effort = oneOf(v.effort, REASONING_CHOICES);
   const params = paramsOf(v.params);
   return { provider, connectionId: text(v.connectionId), model: text(v.model), ...(effort ? { effort } : {}), ...(Object.keys(params).length > 0 ? { params } : {}) };
+}
+
+/** The jobs' own model as stored: null, or a route and max tokens, each checked (one that isn't is left to the helper model); absent, `base`. */
+function jobModelOf(jobs: unknown, base: JobModel | null): JobModel | null {
+  if (!isRecord(jobs) || !hasOwn(jobs, "model")) return base ? structuredClone(base) : null;
+  const v = jobs.model;
+  if (!isRecord(v)) return null;
+  const route = routeOf(v.route);
+  const maxTokens = atLeast(v.maxTokens, 1);
+  return { ...(route ? { route } : {}), ...(maxTokens !== undefined ? { maxTokens } : {}) };
 }
 
 function helperOf(v: unknown, d: Readonly<HelperDefault>): HelperDefault {
@@ -629,7 +648,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     hideJsonBlocks: typeof v.hideJsonBlocks === "boolean" ? v.hideJsonBlocks : d.hideJsonBlocks,
     minds: mindsSettingsOf(v.minds, d.minds),
     timeouts: timeoutsOf(v.timeouts, d.timeouts),
-    jobs: jobSettingsOf(v.jobs, d.jobs),
+    jobs: { ...jobSettingsOf(v.jobs, d.jobs), model: jobModelOf(v.jobs, d.jobs.model) },
     loreBooks: loreBooksSettingOf(v.loreBooks),
     loreIndex: loreIndexSettingsOf(v.loreIndex, d.loreIndex),
     gates: gatesOf(v.gates, d.gates),
@@ -643,6 +662,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     tidy: tidySettingsOf(v.tidy, d.tidy),
     gm: gmPageSettingsOf(v.gm, d.gm),
     perf: perfSettingsOf(v.perf, d.perf),
+    depth: depthSettingsOf(v.depth, d.depth),
   };
 }
 

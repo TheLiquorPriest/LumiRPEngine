@@ -79,6 +79,8 @@ const server = Bun.serve({
         if (isRecord(payload.client)) lre.checkIns.push(payload.client);
         reply({ accepted: true, agentApi: AGENT_API, build: lre.build, kit: lre.kit, client: "c0ffee0000000002" });
       } else if (payload.type === "lre.agents" && payload.op === "kit") reply({ build: lre.build, kit: lre.kit, known: true });
+      // A LumiRPEngine that serves no tools, as one older than lre.tools refuses the request: the server lists its own.
+      else if (payload.type === "lre.tools") ws.send(JSON.stringify({ event: "SPINDLE_FRONTEND_MSG", payload: { extensionId: "ext1", data: { lre: 1, type: "lre.error", reqId: payload.reqId, code: "bad_request", message: "unknown request type lre.tools" } } }));
     },
   },
 });

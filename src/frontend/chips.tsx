@@ -21,6 +21,9 @@ import { type App, openAt, orgRoute, useApp, useView } from "./app";
 import { chipRole, chipTone } from "./chip-roles";
 import { Badge, Button, Field, useBusy } from "./components";
 import { openDiagnostics } from "./diagnostics";
+import { DEPTH_SECTION } from "./depth/chat-depth";
+import { draftFocus } from "./depth/section";
+import { gmOpen } from "./gm/nav";
 import type { IconName } from "./icons";
 import { Icon } from "./icons";
 import { MoneyInput } from "./money-input";
@@ -40,6 +43,13 @@ const CHIP_ICON: Record<ChipKind, IconName> = {
   retry_read: "refresh",
   not_action: "message",
   swipe_option: "refresh",
+  engine_offer: "sparkle",
+  talk: "message",
+  unfaithful: "alert",
+  needs_loopback: "route",
+  allowance: "sliders",
+  edit_read: "edit",
+  settled: "book",
   overdue: "calendar",
   timelapse_offer: "fast-forward",
   continue_timelapse: "fast-forward",
@@ -74,7 +84,7 @@ const ACTION_ICON: Partial<Record<string, IconName>> = { undo: "undo", regenerat
  * The receipt's order: what went wrong first, so it never hides behind "n more";
  * then time, money, the roll, the changes, how the message was read, and what the engine didn't track.
  */
-const RECEIPT_ORDER: readonly ChipKind[] = ["decline", "degraded", "pending", "elapsed", "price", "undo", "roll", "change", "not_action", "fix", "mode_change", "untracked"];
+const RECEIPT_ORDER: readonly ChipKind[] = ["decline", "degraded", "pending", "elapsed", "price", "undo", "roll", "change", "not_action", "fix", "edit_read", "settled", "mode_change", "untracked"];
 
 /** Segments the receipt line shows before "n more". */
 const RECEIPT_SEGMENTS = 3;
@@ -257,7 +267,8 @@ interface ChipControls {
  * A chip's actions as the player presses them: one that asks for a value opens its form first, one
  * that picks an action again opens the Actions palette at it (the intent gate's Edit), or the
  * Timelapse sheet for a time skip, one that names an organization opens its page in Orgs (the
- * plan's Edit), and any other sends at once.
+ * plan's Edit), one that names a Settings page opens it (Settings → Loopback), one that names a
+ * draft opens it in GM → Depth → Drafts (Settled off screen's Read), and any other sends at once.
  */
 function useChipControls(chip: Chip, chatId: ChatId): ChipControls {
   const app = useApp();
@@ -269,6 +280,8 @@ function useChipControls(chip: Chip, chatId: ChatId): ChipControls {
     const input = action.input;
     if (input?.type === "action") void app.overlays.openPalette(input.action === view?.palette?.timelapse?.action ? "timelapse" : "actions", { chatId, chip, action: input.action, params: input.params });
     else if (input?.type === "org") app.ui.update((ui) => openAt(ui, "orgs", orgRoute(input.org, input.tab)));
+    else if (input?.type === "settings") app.ui.update((ui) => ({ ...ui, mode: "settings", settings: { page: input.page } }));
+    else if (input?.type === "draft") app.ui.update((ui) => ({ ...gmOpen(ui, DEPTH_SECTION, draftFocus(input.draft)), mode: "gm" }));
     else if (input) setAsking(asking === action.id ? null : action.id);
     else choose(action.id);
   };
@@ -276,8 +289,13 @@ function useChipControls(chip: Chip, chatId: ChatId): ChipControls {
     busy,
     asking,
     press,
-    form: open?.input && open.input.type !== "action" && open.input.type !== "org" ? <ChipInputForm key={open.id} action={open} input={open.input} currency={view?.currency ?? DEFAULT_CURRENCY} busy={busy} onSend={(payload) => choose(open.id, payload)} onCancel={() => setAsking(null)} /> : null,
+    form: open?.input && opensForm(open.input) ? <ChipInputForm key={open.id} action={open} input={open.input} currency={view?.currency ?? DEFAULT_CURRENCY} busy={busy} onSend={(payload) => choose(open.id, payload)} onCancel={() => setAsking(null)} /> : null,
   };
+}
+
+/** Whether an action's input opens a form in the chip; one that opens the palette or a page doesn't. */
+function opensForm(input: ChipInput): input is Extract<ChipInput, { type: "money" | "choice" | "text" }> {
+  return input.type !== "action" && input.type !== "org" && input.type !== "settings" && input.type !== "draft";
 }
 
 /** One chip action as a button; one that opens a form says whether it is open. */
@@ -286,7 +304,7 @@ function ActionButton(props: { action: ChipAction; controls: ChipControls; pill?
   const icon = ACTION_ICON[action.id];
   const style = action.style === "primary" ? " primary" : action.style === "danger" ? " danger" : "";
   return (
-    <button type="button" class={props.pill ? `lre-chat-pill${style}` : `lre-btn small${style}`} disabled={controls.busy} aria-expanded={action.input && action.input.type !== "action" && action.input.type !== "org" ? controls.asking === action.id : undefined} onClick={() => controls.press(action)}>
+    <button type="button" class={props.pill ? `lre-chat-pill${style}` : `lre-btn small${style}`} disabled={controls.busy} aria-expanded={action.input && opensForm(action.input) ? controls.asking === action.id : undefined} onClick={() => controls.press(action)}>
       {icon ? <Icon name={icon} size={16} /> : null}
       {action.label}
     </button>
@@ -298,7 +316,7 @@ function ActionButton(props: { action: ChipAction; controls: ChipControls; pill?
  * options, or text to edit, which an `optional` input may send empty (a swipe's "What should
  * change?"); Apply sends it as the chip's payload.
  */
-function ChipInputForm(props: { action: ChipAction; input: Exclude<ChipInput, { type: "action" } | { type: "org" }>; currency: WorldCurrency; busy: boolean; onSend(payload: JsonObject): void; onCancel(): void }) {
+function ChipInputForm(props: { action: ChipAction; input: Extract<ChipInput, { type: "money" | "choice" | "text" }>; currency: WorldCurrency; busy: boolean; onSend(payload: JsonObject): void; onCancel(): void }) {
   const { input } = props;
   const [text, setText] = useState(() => (input.type === "money" && input.value !== undefined ? formatMoneyInput(input.value, props.currency) : input.type === "text" ? input.value : ""));
   const [picked, setPicked] = useState(() => (input.type === "choice" ? (input.options[0]?.value ?? "") : ""));

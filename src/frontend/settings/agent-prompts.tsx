@@ -4,7 +4,9 @@
 // `FOLD_OVER` folded. One text's editor is open at a time (the step prompts' editor: its placeholders,
 // Compare with shipped, its shipped text and Reset), and a text left unsaved keeps what was written
 // while another is open. A text with a placeholder it doesn't have, or without one it must keep, is
-// flagged as it is typed and can't be saved; the backend refuses it too. A role's text has Test while
+// flagged as it is typed and can't be saved; the backend refuses it too. A text of the user's own that
+// doesn't ask what its shipped text now asks its answer for (`staleAsks`: a scene's staging's place) is
+// flagged too, and still saved and sent. A role's text has Test while
 // a chat is open (`lre.prompts test`): the role runs once on that chat's latest exchange with the text
 // as written, one model call, and the page says whether its answer kept the role's contract or, in
 // words, how it didn't, and what of its task the chat couldn't give (`PromptTestRow`). Another page
@@ -19,7 +21,7 @@ import type { JsonObject } from "../../shared/json";
 import { hasOwn } from "../../shared/json";
 import { MAIN_AGENT_PAGE } from "../../shared/main-agent-prompts";
 import type { PromptDef, PromptPage, PromptSettings } from "../../shared/prompts";
-import { FINAL_OUTPUT_PAGE, GM_AGENT_PAGE, PROMPT_PAGES, PROMPTS, promptProblems } from "../../shared/prompts";
+import { FINAL_OUTPUT_PAGE, GM_AGENT_PAGE, PROMPT_PAGES, PROMPTS, promptProblems, staleAsks } from "../../shared/prompts";
 import type { PromptTestView } from "../../shared/protocol";
 import { ROLE_PROMPT_PAGES, rolePageId } from "../../shared/role-prompts";
 import { Chip } from "../build/form-kit";
@@ -101,10 +103,13 @@ export function ownTextCount(prompts: PromptSettings): number {
 /**
  * What is wrong with the user's own text for `def` as saved, in words (`promptProblems`, against the
  * length limit in force): a placeholder the text no longer has, or more than the limit since it was
- * lowered. None for a text that is the shipped one.
+ * lowered; and what it doesn't ask that the shipped text now does (`staleAsks`), written before it
+ * was asked. None for a text that is the shipped one.
  */
 export function savedProblems(def: PromptDef, prompts: PromptSettings): string[] {
-  return hasOwn(prompts.texts, def.id) ? promptProblems(def, prompts.texts[def.id], prompts.maxChars).map((p) => p.message) : [];
+  if (!hasOwn(prompts.texts, def.id)) return [];
+  const text = prompts.texts[def.id];
+  return [...promptProblems(def, text, prompts.maxChars).map((p) => p.message), ...staleAsks(def, text)];
 }
 
 /** How many of the user's own texts need a fix (`savedProblems`), for the Needs a fix chip and Settings' rows. */
@@ -306,7 +311,7 @@ function textEntry(def: PromptDef, where: boolean, props: PromptsViewProps): Com
   const { saved, text } = shownText(def, prompts, props.drafts);
   const note = where && def.group !== undefined ? `${def.group} · ${def.note}` : def.note;
   if (def.id !== props.openId) return <PromptRow key={def.id} id={def.id} label={def.label} note={note} own={hasOwn(prompts.texts, def.id)} fix={savedProblems(def, prompts).length > 0} unsaved={text !== saved} onOpen={() => props.onEditor(def.id, true)} />;
-  const problems = (t: string) => promptProblems(def, t).map((p) => p.message);
+  const problems = (t: string) => [...promptProblems(def, t).map((p) => p.message), ...staleAsks(def, t)];
   return (
     <PromptEditor
       key={def.id}

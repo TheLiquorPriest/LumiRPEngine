@@ -269,7 +269,7 @@ describe("every other change from the tab while the engine runs a turn", () => {
     const { g, answer } = await playWhile(rig, chatId, "I wave at the window.", () => rig.send({ type: "lre.chat.knowledge", chatId, engine: "agents", knowledge: false }));
     expect(g.halted).toBeUndefined();
     // GM → This chat shows the new choices at once.
-    expect(rig.body(answer)).toEqual({ knowledge: false, narrator: null, engine: "agents" });
+    expect(rig.body(answer)).toEqual({ knowledge: false, narrator: null, engine: "agents", engineFrom: "chosen" });
     await rig.host.finish(g, "Someone waves back.");
     expect(await flagged(rig, chatId)).toBeNull();
     // A classic turn's record keeps no session; an agent turn's does.

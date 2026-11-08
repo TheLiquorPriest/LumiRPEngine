@@ -156,6 +156,11 @@ export interface ToolWriter {
    * GM's Apply on the turn's review card. A writer without it only proposes (`propose`).
    */
   stage?(op: AgentOp): Promise<OpPreview | OpRefusal>;
+  /**
+   * An outside client's writer only (`clientWriter`, DESIGN §23): checks one operation and, when it
+   * passes, applies it at once, as the write tool asks: what it does, and the edit it landed as.
+   */
+  write?(op: AgentOp): Promise<{ preview: OpPreview; applied: ApplyResult } | OpRefusal>;
 }
 
 /**
@@ -165,7 +170,7 @@ export interface ToolWriter {
  * merges no thing the world document defines, removes none, and moves a Built-in thing only once the
  * game master applies it.
  */
-export type WriterEnv = Omit<ToolEnv, "writer"> & { connectionId?: string | null; gm?: boolean };
+export type WriterEnv = Omit<ToolEnv, "writer"> & { connectionId?: string | null; gm?: boolean; client?: string };
 
 /** The role of the GM's own writes through the writer (GM → Workspace): no agent's, so no mode or cap applies. */
 export const GM_ROLE = "gm";
@@ -179,6 +184,25 @@ export function outsideWriter(rt: Runtime, env: WriterEnv): ToolWriter {
   return {
     dryRun: (op) => dryRun(rt, env, op),
     apply: (ops, label) => serialized(rt, env, () => apply(rt, env, ops, label)),
+  };
+}
+
+/**
+ * The writer of the agent tools an outside client calls (DESIGN §23; INC3-REEVAL decision 4): each
+ * write tool applies its operation at once, as the GM's own edit (`GM_ROLE`: no mode or cap) with
+ * one Undo chip, its entry naming the client (`client`); held while a turn runs, as every write is.
+ */
+export function clientWriter(rt: Runtime, env: WriterEnv & { client: string }): ToolWriter {
+  const writer = outsideWriter(rt, { ...env, agent: { ...env.agent, role: GM_ROLE } });
+  return {
+    ...writer,
+    async write(op) {
+      const preview = await writer.dryRun(op);
+      if (isRefusal(preview)) return preview;
+      const applied = await writer.apply([op], `${env.client}: ${preview.lines[0] ?? changeLabel(preview.changeType)}`);
+      if (applied.applied.includes(preview.key)) return { preview, applied };
+      return applied.refused.find((r) => r.key === preview.key) ?? applied.refused[0] ?? refusal("no_change", "The change wasn't applied.", preview.key);
+    },
   };
 }
 
@@ -844,7 +868,7 @@ async function apply(rt: Runtime, env: WriterEnv, ops: readonly AgentOp[], label
       if ("rejection" in group) refuseEdits((p) => refused(rt, ctx, env.knowledge, group.rejection, p.key));
       else if (group.events.length === 0) refuseEdits((p) => refusal("no_change", ctx.view.text(WRITE_NOTE.noChange), p.key));
       else {
-        const agent: NonNullable<PostEntry["agent"]> = { role: env.agent.role, key, applied: edits.map((p) => p.key), label, ...(env.agent.role !== GM_ROLE ? { knowledge: env.knowledge } : {}) };
+        const agent: NonNullable<PostEntry["agent"]> = { role: env.agent.role, key, applied: edits.map((p) => p.key), label, ...(env.agent.role !== GM_ROLE ? { knowledge: env.knowledge } : {}), ...(env.client !== undefined ? { client: env.client } : {}) };
         const result = await rt.ledger.write(env.chatId, env.userId, { kind: "post", id: `a${Date.now().toString(36)}${(++writes).toString(36)}`, target: "head", entry: { kind: "fix", gm: true, events: group.events, edit: { ops: asked }, agent } });
         if (result.reason === "paused") refuseEdits((p) => refusal("paused", ctx.view.text(WRITE_NOTE.paused), p.key));
         // The chat changed between the check and the write (a turn landed): the ledger's reason is the GM's.

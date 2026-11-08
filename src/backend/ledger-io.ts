@@ -12,7 +12,7 @@ import type { ChatId, MessageId, UserId, WorldId } from "../shared/ids";
 import { runDir } from "../shared/ids";
 import type { SecretMarkWording } from "../shared/secret-marks";
 import type { NarratorView } from "../shared/settings";
-import type { ChatRun, GenerationKind, HeldWrite, Journal, Marker, MarkerBody, MessageLedger, PendingTurn, PostKind, Rec, RecSession, RecStatus, RefusedWrite } from "../shared/ledger";
+import type { ChatRun, ContentId, GenerationKind, HeldWrite, Journal, LedgerEvent, Marker, MarkerBody, MessageLedger, PendingTurn, PostKind, Rec, RecSession, RecStatus, RefusedWrite } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { PROTOCOL_VERSION, type GenerateAs, type GeneratePush } from "../shared/protocol";
 import type { Limit } from "../shared/minds";
@@ -20,14 +20,19 @@ import { HOST_LIMITS, hostBound } from "../shared/timeouts";
 import { validMarkerBody } from "../engine/events";
 import type { ChainMessage, FoldSnapshot, SnapshotStore } from "../engine/ledger/chain";
 import { emptyJournal, LedgerCore, type LedgerEnv, type WriteResult } from "../engine/ledger/journal";
+import { basisIndex, chainBases } from "../engine/ledger/layer";
+import { liveEventsOn, storyAndEventsOn, storyOn, type LiveEvent } from "../engine/ledger/story";
+import { foldEntryOf, layerDraftProblem, type Basis, type FoldLayerEntry, type LandResult, type LayerDraft, type LayerEntry, type LayerSummary } from "../shared/layer";
+import type { StoryRead } from "../shared/story";
 import type { QueuedOn } from "../shared/gm-parts";
 import type { WorldState } from "../engine/state";
 import type { WorldDoc } from "../shared/world";
 import type { LedgerFold } from "../engine/ledger/fold";
-import { activeText, contentId } from "../engine/ledger/path";
+import { activeRecord, activeText, contentId, sameContent } from "../engine/ledger/path";
 import { giveWay } from "./give-way";
 import type { ContextHandlerInput, ContextVerdict, GenerationEndedEvent, GenerationStartedEvent, HostGenerationType, HostMessage, HostPort } from "./host";
 import { setAside } from "./stored-json";
+import { ancestorOf, LayerStore, type HeldDraft } from "./layer-store";
 import type { Diagnostics } from "./diagnostics";
 import { messageOf } from "./diagnostics";
 import { inTurn, outsideTurns, type TurnFrame } from "./turn-frame";
@@ -184,6 +189,10 @@ interface ChatSlot {
   /** Operations queued or running on this chat; a slot with none (and no turn in flight) may be evicted. */
   ops: number;
   snapshots: ChatSnapshots;
+  /** The chat's basis-anchored layer (DEPTH-PLAN §4.9), its ancestor's inherited entries included. */
+  layer: LayerStore;
+  /** Drafts accepted in the landing under way, not yet stored: later drafts of the same landing are checked after them. */
+  landing: FoldLayerEntry[];
   /** Per message, the ledger last re-asserted after a clobber (as written) and how many times in a row. */
   reasserts: Map<MessageId, { text: string; count: number }>;
   /**
@@ -288,7 +297,7 @@ function isRec(rec: unknown): rec is Rec {
   if (rec.keep !== undefined && !(isRecord(rec.keep) && Object.values(rec.keep).every((k) => isRecord(k) && isRefs(k.convert)))) return false;
   if (rec.dropped !== undefined && !(Array.isArray(rec.dropped) && rec.dropped.every((d) => isRecord(d) && isInt(d.seq) && POST_KINDS.includes(d.kind) && typeof d.reason === "string"))) return false;
   if (rec.agents !== undefined && !(Array.isArray(rec.agents) && rec.agents.every(isRecAgent))) return false;
-  return (rec.accepted === undefined || isContent(rec.accepted)) && (rec.diag === undefined || typeof rec.diag === "string") && (rec.prompts === undefined || typeof rec.prompts === "string") && (rec.readElsewhere === undefined || rec.readElsewhere === true);
+  return (rec.accepted === undefined || isContent(rec.accepted)) && (rec.unread === undefined || rec.unread === "reply" || rec.unread === "continue") && (rec.shown === undefined || typeof rec.shown === "string") && (rec.diag === undefined || typeof rec.diag === "string") && (rec.prompts === undefined || typeof rec.prompts === "string") && (rec.readElsewhere === undefined || rec.readElsewhere === true);
 }
 
 const isChainEntry = (v: unknown): boolean => isRecord(v) && typeof v.id === "string" && typeof v.isUser === "boolean" && isInt(v.swipeId) && isInt(v.swipeCount) && isContent(v.content) && typeof v.parentPath === "string";
@@ -324,6 +333,8 @@ function isPendingTurn(p: unknown): boolean {
   for (const source of [p.renarrateOf, p.rerunOf]) if (source !== undefined && !(isRecord(source) && typeof source.messageId === "string" && isInt(source.swipeId))) return false;
   if (p.undone !== undefined && !isRefs(p.undone)) return false;
   if (p.prompts !== undefined && typeof p.prompts !== "string") return false;
+  if (p.sceneRead !== undefined && !(Array.isArray(p.sceneRead) && p.sceneRead.every(isRecord))) return false;
+  if (p.depth !== undefined && p.depth !== true) return false;
   return [p.copies, p.dropped].every((list) => list === undefined || (Array.isArray(list) && list.every(isRecord)));
 }
 
@@ -372,6 +383,87 @@ export function decodeJournal(text: string | null, chatId: ChatId, run: Pick<Cha
 
 type Op = (core: LedgerCore, observed: ChainMessage[]) => void | Promise<void>;
 
+/** One message as the archive index reads it (`LedgerService.archiveView`). */
+export interface ArchiveMessage {
+  id: MessageId;
+  index: number;
+  isUser: boolean;
+  swipeId: number;
+  swipe: string;
+  text: string;
+  /** The clock after its turn, for a reply holding a turn record; else null. */
+  clock: number | null;
+}
+
+/** What a job reads at its basis (`foldAtBasisOf`). */
+export interface BasisRead {
+  state: WorldState;
+  world: WorldDoc;
+  story: StoryRead;
+  /** The live events of the types the reader asked for, through the basis, in fold order (none asked: empty). */
+  events: LiveEvent[];
+  index: number;
+}
+
+/** What the archive index reads of a chat (`archiveViewOf`). */
+export interface ArchiveView {
+  messages: ArchiveMessage[];
+  story: StoryRead;
+}
+
+// The depth reads from a core and its observed chain, for code that already holds them (a turn, which
+// holds the chat's queue); the `LedgerService` methods of the same names run them on the queue.
+
+function storyInput(core: LedgerCore, observed: readonly ChainMessage[], without?: ReadonlySet<string>): { chain: ChainMessage[]; tombstones: Journal["tombstones"]; pauses: Journal["pauses"]; layer: readonly FoldLayerEntry[] } {
+  return { chain: core.chain(observed), tombstones: core.journal.tombstones, pauses: core.journal.pauses, layer: core.layerEntries(without && without.size > 0 ? { observed, without } : undefined) };
+}
+
+/** The narrative record on the chain (through `upTo` when given). */
+export function storyOf(core: LedgerCore, observed: readonly ChainMessage[], upTo?: MessageId): StoryRead {
+  return storyOn({ ...storyInput(core, observed), ...(upTo !== undefined ? { upTo } : {}) });
+}
+
+/** The live events of `types` on the chain (through `upTo` when given), in fold order (`liveEventsOn`). */
+export function eventsOf(core: LedgerCore, observed: readonly ChainMessage[], types: readonly string[], upTo?: MessageId): LiveEvent[] {
+  return liveEventsOn({ ...storyInput(core, observed), ...(upTo !== undefined ? { upTo } : {}) }, new Set(types));
+}
+
+/**
+ * The fold, world and narrative record through `basis` (DEPTH-PLAN §4.9), with the live events of
+ * `types` read in the same walk (real-time dialogue's `story.talk`): a Re-run reads them at its basis,
+ * never on the swipe it replaces. `without`: layer entries read as superseded, the ones a redo is
+ * replacing (§8.4), so its jobs read the world as it will be once what replaces them lands. Null
+ * when the basis isn't on the chain or is past a pause.
+ */
+export function foldAtBasisOf(core: LedgerCore, observed: readonly ChainMessage[], basis: Pick<Basis, "message" | "swipe">, types: readonly string[] = [], without?: ReadonlySet<string>): BasisRead | null {
+  const chain = core.chain(observed);
+  const index = basisIndex(chain, core.journal.tombstones, basis);
+  if (index < 0) return null;
+  const through = observed.slice(0, index + 1);
+  const folded = core.fold(through, without ? { without } : {});
+  if (folded.messages[index]?.fold === "paused") return null;
+  const world = core.playedAt(folded.state);
+  if (!world) return null;
+  const { story, events } = storyAndEventsOn(storyInput(core, through, without), new Set(types));
+  return { state: folded.state, world, story, events, index };
+}
+
+/**
+ * What the archive index reads of the chat in one pass (DEPTH-PLAN §4.3): each message on the active
+ * chain with its shown text, swipe identity and, for a turn, the clock after it, and the narrative
+ * record on the chain.
+ */
+export function archiveViewOf(core: LedgerCore, observed: readonly ChainMessage[]): ArchiveView {
+  const chain = core.chain(observed);
+  const bases = chainBases(chain, core.journal.tombstones);
+  const folded = core.fold(observed);
+  const messages = chain.map((m, index): ArchiveMessage => {
+    const turn = !m.isUser && (bases[index]?.swipe.startsWith("r") ?? false);
+    return { id: m.id, index, isUser: m.isUser, swipeId: m.swipeId, swipe: bases[index]?.swipe ?? "", text: activeText(m), clock: turn ? (folded.messages[index]?.clock ?? null) : null };
+  });
+  return { messages, story: storyOf(core, observed) };
+}
+
 /** Of the writes held before an operation, those it landed: no longer held, and not refused (P2). */
 function heldLanded(before: readonly HeldWrite[], journal: Journal): HeldWrite[] {
   const still = new Set(journal.held.map((h) => h.write.id));
@@ -400,6 +492,16 @@ export interface TurnContext {
   content: string;
   /** The reply read's signal: Cancel on the activity line aborts it, and the reads still waiting are skipped. */
   signal: AbortSignal;
+  /** A loopback turn A2's scene played (`LedgerService.sceneCommit`): its record's pre and read part, which commit in place of reading the reply. */
+  scene?: SceneCommit;
+}
+
+/** What A2's depth turn hands the commit (DEPTH-PLAN §1.3): the record's planned events, its read part (the narrator's prose) and every text they name, by hash; and when a stage failed once a passage streamed, why (the scene is cut there, as a Stop cuts it). */
+export interface SceneCommit {
+  pre: LedgerEvent[];
+  read: LedgerEvent[];
+  blobs: Record<string, string>;
+  error?: string;
 }
 
 /** What the pre phase leaves the engine run: nothing to say, or a question the chat now asks, on which the run waits (a claim under Ask first, DESIGN §9.4). */
@@ -466,9 +568,11 @@ export interface TurnHooks {
    * What a turn runs on from its engine run's start to its reply's commit (DESIGN §5.1): the user's
    * settings and the chat's own choices as they stand now. The run, the guard's write of its
    * sections and its reply's read each run in it (`inTurn`), so a change made meanwhile applies
-   * from the chat's next turn and never keeps this one's reply from starting.
+   * from the chat's next turn and never keeps this one's reply from starting. `at` is the chain the
+   * run starts on: a chat with no engine of its own and no LRE turn on it records New chats start
+   * on as its engine first (INC3 3a, `ChatKnowledge.forTurn`).
    */
-  frame(chatId: ChatId, userId: UserId): Promise<TurnFrame>;
+  frame(chatId: ChatId, userId: UserId, at?: { core: LedgerCore; observed: readonly ChainMessage[] }): Promise<TurnFrame>;
   beforeCommit(input: TurnContext): Promise<void>;
   afterCommit(input: TurnContext): Promise<void>;
   /**
@@ -500,6 +604,35 @@ export interface TurnHooks {
    * that took it, if one did; `how` says how it ended.
    */
   turnGone?(input: { chatId: ChatId; userId: UserId; turn: string; generationId: string | null; how: TurnGone }): void;
+  /**
+   * Whether a generation on this connection goes through the loopback (DEPTH-PLAN §3.4, §3.12): the
+   * guard lets a world chat's generation straight on, and its turn runs inside its provider call
+   * (`loopbackRun`). Absent: none does.
+   */
+  isLoopback?(connectionId: string | null, userId: UserId): Promise<boolean>;
+  /** Resolves once the loopback's work for the generation is over (its turn streamed, stopped or failed), so its end commits what that work left; null when none is under way. */
+  loopSettled?(generationId: string): Promise<void> | null;
+  /**
+   * Whether the chat is on depth (DEPTH-PLAN §1.3), asked as each of its generations starts: nothing
+   * reads that generation's text into canon, however it ends (`PendingTurn.depth`), and off the
+   * loopback the guard lets it on with no engine run. Absent: none is.
+   */
+  depthOn?(chatId: ChatId, userId: UserId): Promise<boolean>;
+  /**
+   * A generation of a chat on depth goes on off the loopback with no engine run (DEPTH-PLAN §3.4):
+   * the chat says depth needs the loopback, under the message the reply answers (`target` is the
+   * reply as the generation's start named it: a swipe's, or a new reply's own), and on an agents chat
+   * GM → Live says why no role ran.
+   */
+  offLoopback?(input: { chatId: ChatId; userId: UserId; generationId: string | null; target: MessageId | null }): Promise<void>;
+  /**
+   * The player edited message `messageId`'s text (on its swipe `swipeId`), and the ledger keeps what
+   * was made of it as it was: a reply's after its turn committed (an assistant edit, L38), or his own
+   * message's (`isUser`) where layer entries were made from it (`LedgerCore.keepIdentity`). Never a
+   * generation's save of its own reply, nor a write that leaves its text as it was. Told once the
+   * edit's operation is done, outside the chat's queue.
+   */
+  assistantEdited?(input: { chatId: ChatId; userId: UserId; messageId: MessageId } & PlayerEdit): void;
 }
 
 /** How an engine run ended (`TurnHooks.ran`). */
@@ -507,6 +640,39 @@ export type RunOutcome = "prepared" | "waiting" | "cancelled" | "failed";
 
 /** How a turn the ledger let go without a commit ended (`TurnHooks.turnGone`). */
 export type TurnGone = "cancelled" | "failed" | "dropped";
+
+/**
+ * A loopback turn's engine run (`LedgerService.loopbackRun`): the turn its generation took, with the
+ * sections made for its prompt and the kind it plays as (a swipe's, as the swipe setting says;
+ * DEPTH-PLAN §3.9), whether or not it planned anything; a generation the engine plays no part in (an
+ * Impersonate's); a run that failed, was cancelled, or now waits on the player, each with what the
+ * thinking block says. What the run recorded, its inspector record included, goes by the
+ * generation's id once it is delivered (`TurnHooks.adopted`), a kept turn's retry's too.
+ */
+export type LoopRun =
+  | { kind: "delivered"; turn: PendingTurn | null; delivered: Delivered; as: GenerationKind }
+  | { kind: "plain" }
+  | { kind: "failed"; step: string; reason: string }
+  | { kind: "cancelled" }
+  | { kind: "waiting"; reason: string };
+
+/** A world chat's generation the guard let straight on because it goes through the loopback (DEPTH-PLAN §3.12). */
+interface LoopGen {
+  generationId: string;
+  type: HostGenerationType;
+  /** The message its reply goes on and the swipe, as its `GENERATION_STARTED` named them. */
+  target: MessageId | null;
+  swipe: number | null;
+  connectionId: string | null;
+  session?: string;
+  at: number;
+}
+
+/** A loopback engine run's ending (`LedgerService.engine`): how it ended, and the turn its generation takes when it prepared one. */
+interface LoopTake {
+  generationId: string;
+  done(run: LoopRun, taken: Prepared | null): void;
+}
 
 /**
  * What the engine run made for a turn's prompt (DESIGN §6.4): each entry of the world's book and the
@@ -551,6 +717,35 @@ export function mirrorOf(observed: readonly ChainMessage[]): Mirrored[] {
 }
 
 const isSwipe = (type: HostGenerationType): boolean => type === "regenerate" || type === "swipe";
+
+/** The player's edit of a message, as `acceptedEdit` answers it: the text and swipe it shows, and whether it is his own message. */
+export interface PlayerEdit {
+  text: string;
+  swipeId: number;
+  isUser: boolean;
+}
+
+/**
+ * Runs `sync` and answers the text message `messageId` shows, on the swipe it shows, when the sync
+ * took it as the player's edit that the ledger keeps what was made of it through: a reply's (an
+ * assistant edit, L38) or his own message's that layer entries were made from (a bare record keeps
+ * its identity, `LedgerCore.keepIdentity`). Its active record's accepted identity changed, to a new
+ * text or back to the one it was made with. Null for anything else: a generation's save of its own
+ * reply (its turn's target waits for the commit), a write that leaves the text as it was, or the
+ * edit of a player's message nothing was made from.
+ */
+function acceptedEdit(core: LedgerCore, observed: readonly ChainMessage[], messageId: MessageId, sync: () => void): PlayerEdit | null {
+  const accepted = (): ContentId | undefined => {
+    const m = core.chain(observed).find((x) => x.id === messageId);
+    return m ? activeRecord(m, core.journal.tombstones)?.accepted : undefined;
+  };
+  const before = accepted();
+  sync();
+  const after = accepted();
+  if ((before === undefined && after === undefined) || sameContent(before, after)) return null;
+  const m = observed.find((x) => x.id === messageId);
+  return m ? { text: activeText(m), swipeId: m.swipeId, isUser: m.isUser } : null;
+}
 
 /**
  * The chain a turn of `type` is planned on, as one hash: what comes before a regenerate's or a
@@ -656,19 +851,22 @@ interface Gate {
    * swipe before the read runs is kept again on it.
    */
   reading: string | null;
+  /** The generation the guard let straight on because it goes through the loopback (DEPTH-PLAN §3.12), with its engine run's id while that runs. */
+  loop: (LoopGen & { run: string | null }) | null;
 }
 
 /**
  * Who a world's book belongs to now (DESIGN §6.4), in memory only. A `turn`: an engine run writing
  * its sections, the turn it prepared and the generation that took it, until they are emptied (`owner`
- * is the run's id, which its turn keeps). An `impersonate`: an Impersonate's prompt, held empty
- * (`owner` is its generation's id). A `look`: a dry run emptying what an earlier turn left. `moved`
- * settles when the owner lets go or its turn's state changes, so a claim waiting on it looks again.
+ * is the run's id, which its turn keeps). A `plain`: the prompt of a generation without the engine
+ * (`plain`), held empty (`owner` is its generation's id). A `look`: a dry run emptying what an
+ * earlier turn left. `moved` settles when the owner lets go or its turn's state changes, so a claim
+ * waiting on it looks again.
  */
 interface Lease {
   chatId: ChatId;
   owner: string;
-  kind: "turn" | "impersonate" | "look";
+  kind: "turn" | "plain" | "look";
   moved: PromiseWithResolvers<void>;
 }
 
@@ -741,6 +939,8 @@ export class LedgerService {
    * stale then, so their landing does (DESIGN §5.1). Every other held write did as it was made.
    */
   private readonly unbumped = new Set<string>();
+  /** Each held layer draft a landing waits on (`landLayers`'s `wait`), by chat and id: settled by the drain that lands or refuses it. */
+  private readonly heldWaits = new Map<string, PromiseWithResolvers<LandResult>>();
   private guarding = 0;
   /**
    * Each reply's shown swipe as the chat's events told it, in their order, by chat and then message.
@@ -753,6 +953,10 @@ export class LedgerService {
    * chat's syncs last saw (`LedgerCore.noteAdded`).
    */
   private readonly shown = new Map<ChatId, Map<MessageId, number>>();
+  /** What A2's depth turns made, by generation, until their commit takes it (`sceneCommit`). */
+  private readonly scenes = new Map<string, SceneCommit>();
+  /** The blank replies LumiRPEngine deleted itself (a loopback send stopped before any text): no deletion of the player's. */
+  private readonly ownDeletes = new Set<MessageId>();
 
   constructor(
     private readonly host: HostPort,
@@ -802,12 +1006,13 @@ export class LedgerService {
         return this.run(e.chatId, userId, async (core, observed) => {
           core.sync(observed);
           const kind = this.hooks && userId ? await this.hooks.kindOf({ chatId: e.chatId, userId, kind: KIND[e.generationType], generationId: e.generationId, target: e.targetMessageId }) : KIND[e.generationType];
-          core.started({ generationId: e.generationId, kind, targetMessageId: e.targetMessageId, targetSwipeId: e.targetSwipeId }, observed);
+          const depth = userId ? (await this.hooks?.depthOn?.(e.chatId, userId)) === true : false;
+          core.started({ generationId: e.generationId, kind, targetMessageId: e.targetMessageId, targetSwipeId: e.targetSwipeId, depth }, observed);
         });
       }),
       h.on("GENERATION_IN_PROGRESS", (e, userId) => {
         this.unguarded(e.chatId, userId, e.generationId);
-        // Its prompt is assembled: the sections it held go, and so does an Impersonate's hold.
+        // Its prompt is assembled: the sections it held go, and so does a generation's hold without the engine.
         this.release(e.chatId, e.generationId);
       }),
       h.on("GENERATION_ENDED", (e, userId) => {
@@ -816,55 +1021,102 @@ export class LedgerService {
         const taken = this.gates.get(e.chatId)?.taken;
         const ours = taken?.generationId === e.generationId ? taken : null;
         const frame = ours ? ours.frame : null;
+        // A depth scene a stage failed in once a passage streamed was handed over cut where the last
+        // one streamed, as a Stop's is (DEPTH-PLAN §3.10, §3.14): its reply commits that, so its
+        // turn isn't kept for a retry.
+        const cut = e.error !== undefined && e.content !== "" && this.scenes.has(e.generationId);
         // Kept at once, so a retry pressed the moment the reply failed finds its turn.
-        const failed = this.afterReply(e.chatId, e.generationId, e);
+        const failed = this.afterReply(e.chatId, e.generationId, cut ? { generationId: e.generationId, chatId: e.chatId, content: e.content, generationType: e.generationType } : e);
         const at = userId ? { chatId: e.chatId, userId, turn: e.generationId } : null;
         // The reply's part of the turn's time: from the turn being ready (or taken, when only the player starts it) to its end.
         if (at && ours) this.diag?.phase(at, { name: "reply", ms: Date.now() - ours.readyAt, ...(failed ? { cause: failed === "empty" ? "it came back empty" : "it failed" } : {}) });
         const halt = this.haltOf(e.chatId, e.generationId, false);
         // The host ended a generation the guard stopped instead of stopping it: no engine run follows.
         if (halt && userId) this.diag?.end({ chatId: e.chatId, userId, turn: halt.id }, { status: "failed", reason: `Lumiverse ended the stopped generation instead of stopping it${e.error ? ` (${e.error.slice(0, 200)})` : ""}, so the engine didn't run; generate again` });
-        return this.run(e.chatId, userId, async (core, observed) => {
-          core.sync(observed);
-          // A generation that ended in error commits as stopped: no auto-read, no
-          // extraction; the reply's Retry read chip covers whatever text was saved.
-          if (e.error) {
-            this.host.log("warn", `[LumiRPEngine] generation ${e.generationId.slice(0, 8)} ended with an error: ${e.error.slice(0, 200)}`, userId ?? undefined, e.generationId);
-            core.stopped({ generationId: e.generationId, content: e.content }, observed);
-            if (at) this.diag?.end(at, { status: "failed", reason: `the reply's generation failed: ${e.error.slice(0, 300)}` });
-            return;
-          }
-          // An empty reply to a prepared turn failed as well: none of the turn is committed, so the
-          // retry that takes it plays it once.
-          if (failed === "empty") {
-            core.stopped({ generationId: e.generationId, content: "" }, observed);
-            if (at) this.diag?.end(at, { status: "failed", reason: "the narrator returned an empty reply" });
-            return;
-          }
-          const read = (): Promise<void> => this.commitReply(core, observed, e.chatId, userId, e.generationId, e.messageId, e.content);
-          await (frame ? inTurn(frame, read) : read());
-        });
+        const commit = (): Promise<void> =>
+          this.run(e.chatId, userId, async (core, observed) => {
+            core.sync(observed);
+            if (e.error) this.host.log("warn", `[LumiRPEngine] generation ${e.generationId.slice(0, 8)} ended with an error${cut ? ", its scene cut where its last passage streamed" : ""}: ${e.error.slice(0, 200)}`, userId ?? undefined, e.generationId);
+            // A generation that ended in error commits as stopped: no auto-read, no extraction; the
+            // reply's Retry read chip covers whatever text was saved. A cut scene commits as below.
+            if (e.error && !cut) {
+              core.stopped({ generationId: e.generationId, content: e.content }, observed);
+              if (at) this.diag?.end(at, { status: "failed", reason: `the reply's generation failed: ${e.error.slice(0, 300)}` });
+              return;
+            }
+            // An empty reply to a prepared turn failed as well: none of the turn is committed, so the
+            // retry that takes it plays it once.
+            if (failed === "empty") {
+              core.stopped({ generationId: e.generationId, content: "" }, observed);
+              if (at) this.diag?.end(at, { status: "failed", reason: "the narrator returned an empty reply" });
+              return;
+            }
+            // Lumiverse may name no message for a reply that failed: the turn's own is the one it saved.
+            const messageId = e.messageId ?? core.journal.pending[e.generationId]?.messageId ?? undefined;
+            const read = (): Promise<void> => this.commitReply(core, observed, e.chatId, userId, e.generationId, messageId, e.content);
+            await (frame ? inTurn(frame, read) : read());
+          });
+        // A loopback turn's end commits what its work left, once that work is over (never from inside the chat's queue).
+        const settled = this.hooks?.loopSettled?.(e.generationId);
+        return settled ? settled.then(commit) : commit();
       }),
       h.on("GENERATION_STOPPED", (e, userId) => {
+        const gate = this.gates.get(e.chatId);
+        const loop = gate?.loop?.generationId === e.generationId ? gate.loop : null;
+        // A loopback turn's engine run stops with its generation, whether or not the relay's word of it comes (DEPTH-PLAN §3.10).
+        if (loop?.run && gate?.running === loop.run) this.inFlight.get(e.chatId)?.abort(new TurnCancelled());
         this.generationOver(e.chatId, e.generationId);
-        // A stop is the player's: the turn it took goes, as it always has.
-        this.afterReply(e.chatId, e.generationId, null);
-        const halt = this.haltOf(e.chatId, e.generationId, userId !== null);
-        if (userId && !halt) this.diag?.end({ chatId: e.chatId, userId, turn: e.generationId }, { status: "skipped", reason: "the reply was stopped" });
-        let started = false;
-        return this.run(e.chatId, userId, (core, observed) => {
-          core.sync(observed);
-          // The kind the stopped generation started as (a one-shot Re-narrate's) is the engine run's.
-          const kind = core.journal.pending[e.generationId]?.kind ?? (halt ? KIND[halt.type] : "normal");
-          core.stopped({ generationId: e.generationId, content: e.content }, observed);
-          if (halt && userId) {
-            started = true;
-            void this.engine(e.chatId, userId, halt, kind);
-          }
-        }).finally(() => {
-          // A stop whose run never started (the chat is no longer open as a world chat) leaves its gate free.
-          if (halt && !started) this.ran(e.chatId, halt.id);
-        });
+        // What follows waits for a loopback turn's work to settle: a depth turn's scene, cut where its last passage streamed, is handed over by then.
+        const after = (): Promise<void> => {
+          // A depth turn stopped once a passage streamed ends as its scene was cut: it commits as an ended
+          // reply does, its pre and read part the scene's (A2, DEPTH-PLAN §3.10). With nothing streamed, nothing commits.
+          const scened = this.scenes.has(e.generationId) && e.content !== "";
+          const taken = gate?.taken?.generationId === e.generationId ? gate.taken : null;
+          // A stop is the player's: the turn it took goes, as it always has; a cut scene's ends as an ended reply's does.
+          this.afterReply(e.chatId, e.generationId, scened ? { generationId: e.generationId, chatId: e.chatId, content: e.content, generationType: loop?.type ?? "normal" } : null);
+          const halt = this.haltOf(e.chatId, e.generationId, userId !== null);
+          if (userId && !halt && !scened) this.diag?.end({ chatId: e.chatId, userId, turn: e.generationId }, { status: "skipped", reason: "the reply was stopped" });
+          let started = false;
+          return this.run(e.chatId, userId, async (core, observed) => {
+            core.sync(observed);
+            // The kind the stopped generation started as (a one-shot Re-narrate's) is the engine run's.
+            const pending = core.journal.pending[e.generationId];
+            const kind = pending?.kind ?? (halt ? KIND[halt.type] : "normal");
+            const messageId = pending?.messageId ?? pending?.continueHead ?? undefined;
+            if (scened && userId && messageId) {
+              const read = (): Promise<void> => this.commitReply(core, observed, e.chatId, userId, e.generationId, messageId, e.content);
+              await (taken ? inTurn(taken.frame, read) : read());
+            } else core.stopped({ generationId: e.generationId, content: e.content }, observed);
+            if (halt && userId) {
+              started = true;
+              void this.engine(e.chatId, userId, halt, kind);
+            }
+            // A loopback swipe stopped before any text leaves the blank swipe it added: LumiRPEngine
+            // removes it, by the target its GENERATION_STARTED named (DEPTH-PLAN §3.10).
+            if (loop && userId && e.content === "" && isSwipe(loop.type) && loop.target !== null) {
+              const target = observed.find((m) => m.id === loop.target);
+              if (target && target.swipes.length > 1 && target.swipes.at(-1) === "" && loop.swipe === target.swipes.length - 1) {
+                const shown = core.addedSwipeFrom(target.id, target.swipes.length - 1) ?? Math.min(target.swipeId, target.swipes.length - 2);
+                await this.host.chats.setSwipes(e.chatId, target.id, target.swipes.slice(0, -1), shown, userId).catch((error: unknown) => this.diag?.error({ chatId: e.chatId, userId, turn: e.generationId }, "stop", error, "the stopped swipe's empty swipe stays"));
+              }
+            }
+            // A loopback send stopped before any text leaves the blank reply core staged for it (D0a
+            // check 3): LumiRPEngine deletes it, by the target its GENERATION_STARTED named.
+            if (loop && userId && e.content === "" && loop.type === "normal" && loop.target !== null) {
+              const blank = observed.find((m) => m.id === loop.target);
+              if (blank && !blank.isUser && blank.swipes.length === 1 && blank.swipes[0] === "") {
+                this.ownDeletes.add(blank.id);
+                if (this.ownDeletes.size > 64) this.ownDeletes.delete(this.ownDeletes.values().next().value ?? "");
+                await this.host.chats.deleteMessage(e.chatId, blank.id, userId).catch((error: unknown) => this.diag?.error({ chatId: e.chatId, userId, turn: e.generationId }, "stop", error, "the stopped reply's empty message stays"));
+              }
+            }
+          }).finally(() => {
+            // A stop whose run never started (the chat is no longer open as a world chat) leaves its gate free.
+            if (halt && !started) this.ran(e.chatId, halt.id);
+          });
+        };
+        const settled = this.hooks?.loopSettled?.(e.generationId);
+        return settled ? settled.then(after) : after();
       }),
     );
     this.registerGuard();
@@ -911,10 +1163,11 @@ export class LedgerService {
   /**
    * The guard, the one context handler: it looks, in memory, whether the engine prepared this
    * generation. A chat without a world goes on as it is. A dry run and a type the engine doesn't play
-   * go on as they are, with nothing an earlier turn left in the book; Impersonate goes on from a book
-   * that holds no engine section. Any other generation goes on only when the engine prepared it, for
-   * its type, on the chain it stands on and the journal as it is; else the guard stops it, and its
-   * stop starts the engine run, which starts it again when done.
+   * go on as they are, with nothing an earlier turn left in the book; Impersonate, and any generation
+   * of a chat on depth off the loopback, go on with no engine run, from a book that holds no engine
+   * section. Any other generation goes on only when the engine prepared it, for its type, on the
+   * chain it stands on and the journal as it is; else the guard stops it, and its stop starts the
+   * engine run, which starts it again when done.
    */
   private async guard(input: ContextHandlerInput, signal: AbortSignal): Promise<ContextVerdict> {
     if (input.dryRun || input.generationType === "other") return this.look(input);
@@ -926,7 +1179,17 @@ export class LedgerService {
       this.answered.add(started.generationId);
       if (this.answered.size > 1024) this.answered.delete(this.answered.values().next().value ?? "");
     }
-    if (type === "impersonate") return this.impersonate(input.chatId, gate, started, signal);
+    // A world chat on the loopback goes straight on: its turn runs inside its provider call.
+    if (this.hooks?.isLoopback && (await this.hooks.isLoopback(input.connectionId, input.userId))) return this.loopGuard(input, gate, started);
+    if (type === "impersonate") return this.plain(input.chatId, gate, started, signal);
+    // A chat on depth plays its turns through the loopback (DEPTH-PLAN §3.4): on another connection no
+    // scene plays its reply and nothing reads it into the story, so it goes on with no engine run and
+    // no model call, and the player is told (`offLoopback`).
+    if (this.hooks?.depthOn && (await this.hooks.depthOn(input.chatId, input.userId))) {
+      const turn = started?.generationId ?? null;
+      await this.hooks.offLoopback?.({ chatId: input.chatId, userId: input.userId, generationId: turn, target: started?.targetMessageId ?? null }).catch((error: unknown) => this.diag?.error({ chatId: input.chatId, userId: input.userId, turn }, "guard", error, "the chat wasn't told depth needs the loopback"));
+      return this.plain(input.chatId, gate, started, signal);
+    }
     if (!this.host.capabilities.cancel) {
       this.diag?.failed({ chatId: input.chatId, userId: input.userId, turn: started?.generationId ?? null }, "pre", "guard", CANNOT_STOP);
       return "go";
@@ -967,12 +1230,13 @@ export class LedgerService {
    * changes (DESIGN §5.1): its entries are emptied, and the next generation runs the engine again.
    * Age alone never makes it stale. One kept from a failed reply goes quietly: nothing asked for its
    * reply again, so nothing says that reply didn't start, and the chat just loses its retry card.
-   * Either way its run ends without a reply, so what its pre-reply window held lands (P2).
+   * Either way its run ends without a reply, so what its pre-reply window held lands (P2). `why`
+   * says what changed when the caller knows (the engine switched), else the chat is checked.
    */
-  private dropIfStale(chatId: ChatId): void {
+  private dropIfStale(chatId: ChatId, why?: string): void {
     const gate = this.gates.get(chatId);
     const p = gate?.prepared;
-    const changed = gate && p && p.generationId === null ? this.changedSince(gate, p) : null;
+    const changed = gate && p && p.generationId === null ? (why ?? this.changedSince(gate, p)) : null;
     if (!gate || !p || changed === null) return;
     gate.prepared = null;
     if (p.kept === null) this.notStarted(chatId, gate.userId, p, `${changed} after the engine ran and before the reply started`);
@@ -980,6 +1244,16 @@ export class LedgerService {
     this.drop(chatId, gate.userId, p);
     this.gone(chatId, gate.userId, p, "dropped");
     this.endRun(chatId, gate.userId, p);
+  }
+
+  /**
+   * The chat's engine was switched (GM → This chat → Engine, the offer's buttons; INC3 3a): a turn
+   * the engine prepared for the next reply that no generation took is dropped, and the next
+   * generation works it out on the engine switched to. A turn under way finishes on the one it
+   * started on (`TurnFrame`).
+   */
+  engineSwitched(chatId: ChatId): void {
+    this.dropIfStale(chatId, "the chat's engine was switched");
   }
 
   /**
@@ -1079,8 +1353,9 @@ export class LedgerService {
         return;
       }
       this.diag?.begin(at, STEP_LABEL.read);
+      const depth = (await this.hooks?.depthOn?.(chatId, userId)) === true;
       // Begun before the chat is synced, so the text is this turn's save, not an edit of the message.
-      core.started({ generationId, kind: p.turn?.kind ?? KIND[p.type], targetMessageId: message.id, targetSwipeId: swipe }, observed);
+      core.started({ generationId, kind: p.turn?.kind ?? KIND[p.type], targetMessageId: message.id, targetSwipeId: swipe, depth }, observed);
       if (p.turn && !core.adopt(generationId, p.turn)) this.diag?.failed(at, "plan", "plan", "the reply's text couldn't take the prepared plan, so this turn commits without it");
       core.saved(generationId);
       core.sync(observed);
@@ -1107,7 +1382,9 @@ export class LedgerService {
     const p = core.journal.pending[generationId];
     const swipeId = p?.swipeId ?? observed.find((m) => m.id === messageId)?.swipeId ?? 0;
     const flight = this.flight(chatId);
-    const turn = p && messageId && userId ? { chatId, userId, core, observed, generationId, messageId, swipeId, kind: p.kind, signal: flight.signal } : null;
+    const scene = this.scenes.get(generationId);
+    this.scenes.delete(generationId);
+    const turn = p && messageId && userId ? { chatId, userId, core, observed, generationId, messageId, swipeId, kind: p.kind, signal: flight.signal, ...(scene ? { scene } : {}) } : null;
     const diag = at && turn ? this.diag : null;
     if (at && diag) diag.begin(at, STEP_LABEL.read);
     // What the reply's read reads: a Continue only what it added (L13), else the whole reply.
@@ -1293,12 +1570,12 @@ export class LedgerService {
     if (!worldId) return null;
     const raced = this.gates.get(chatId);
     if (raced) return raced.userId === userId ? raced : null;
-    const gate: Gate = { userId, worldId, mirror: null, epoch: ++this.epochs, halt: null, prepared: null, taken: null, running: null, reading: null };
+    const gate: Gate = { userId, worldId, mirror: null, epoch: ++this.epochs, halt: null, prepared: null, taken: null, running: null, reading: null, loop: null };
     this.gates.set(chatId, gate);
     for (const [id, g] of this.gates) {
       if (this.gates.size <= OPEN_CHATS_CAP * 8) break;
-      // A gate holding a stopped generation, its engine run, a prepared turn, a taken one or a late reply's read stays: those live only here.
-      if (id !== chatId && !g.prepared && !g.halt && !g.taken && g.running === null && g.reading === null) this.gates.delete(id);
+      // A gate holding a stopped generation, its engine run, a prepared turn, a taken one, a late reply's read or a loopback generation under way stays: those live only here.
+      if (id !== chatId && !g.prepared && !g.halt && !g.taken && g.running === null && g.reading === null && !(g.loop && this.generating.has(g.loop.generationId))) this.gates.delete(id);
     }
     return gate;
   }
@@ -1319,16 +1596,115 @@ export class LedgerService {
     if (gate?.running === turn) gate.running = null;
   }
 
+  // ------------------------------------------------------------------ the loopback (DEPTH-PLAN §3.12)
+
   /**
-   * Impersonate writes the player's next message: it runs without the engine, from a book that holds
-   * no engine section, so no mind or secret and nothing of another turn reaches it (DESIGN §5.1). It
-   * takes the world's book for its prompt (`claim`), then empties whatever an earlier turn left there
-   * (a restart, a clear the host refused), and gives the book back once its prompt is assembled.
-   * Sections that can't be emptied stop it, and the chat says why.
+   * A world chat's generation that goes through the loopback: it goes straight on, and its turn runs
+   * inside its provider call (`loopbackRun`), named by the target its GENERATION_STARTED gave. The
+   * book holds none of the engine's sections then, so what an earlier turn left there is emptied
+   * first, as for a dry run.
    */
-  private async impersonate(chatId: ChatId, gate: Gate, started: GenerationStartedEvent | null, signal: AbortSignal): Promise<ContextVerdict> {
-    const owner = started?.generationId ?? `impersonate-${crypto.randomUUID()}`;
-    if (!(await this.claim(gate.worldId, chatId, owner, "impersonate", { chatId, userId: gate.userId }, signal))) return "cancel";
+  private loopGuard(input: ContextHandlerInput, gate: Gate, started: GenerationStartedEvent | null): Promise<ContextVerdict> {
+    // Its start unheard, or an earlier generation's: no turn can be tied to it, and nothing of a world chat goes out untracked (DEPTH-PLAN §3.14). A host that can't cancel lets it on, and the tagger stops it (`required`).
+    if ((started === null || !this.generating.has(started.generationId)) && this.host.capabilities.cancel) {
+      const reason = "LumiRPEngine didn't hear this reply start, so it stopped it rather than let your world chat's reply out untracked: generate again";
+      gate.loop = null;
+      this.diag?.failed({ chatId: input.chatId, userId: input.userId, turn: null }, "pre", "guard", reason);
+      void this.hooks?.failed({ chatId: input.chatId, userId: input.userId, turn: `unheard-${crypto.randomUUID()}`, step: "stale", reason }).catch((e: unknown) => this.diag?.error({ chatId: input.chatId, userId: input.userId, turn: null }, "guard", e, "the flag wasn't shown"));
+      return Promise.resolve("cancel");
+    }
+    gate.loop = started ? { generationId: started.generationId, type: started.generationType, target: started.targetMessageId, swipe: started.targetSwipeId, connectionId: input.connectionId, ...(input.frontendSessionId !== undefined ? { session: input.frontendSessionId } : {}), at: Date.now(), run: null } : null;
+    return this.look(input);
+  }
+
+  /** The loopback generation under way in the chat, while it is `userId`'s and the chat's latest: what the turn tagger tags (DEPTH-PLAN §3.5). */
+  loopOf(chatId: ChatId, userId: UserId): Readonly<LoopGen> | null {
+    const gate = this.gates.get(chatId);
+    const loop = gate?.loop;
+    if (!gate || gate.userId !== userId || !loop || !this.generating.has(loop.generationId) || this.started.get(chatId)?.generationId !== loop.generationId) return null;
+    return loop;
+  }
+
+  /** Whether `userId` has a world chat's generation under way on the loopback: on a host without required interceptors, an untagged request then can't be told from it (DEPTH-PLAN §3.14). */
+  loopBusy(userId: UserId): boolean {
+    for (const gate of this.gates.values()) if (gate.userId === userId && gate.loop && this.generating.has(gate.loop.generationId)) return true;
+    return false;
+  }
+
+  /** Stops a loopback generation's engine run while it runs (the relay gave its call up, DEPTH-PLAN §3.10): never another turn's run or a reply's read. */
+  cancelLoop(chatId: ChatId, userId: UserId, generationId: string): boolean {
+    const gate = this.gates.get(chatId);
+    const loop = gate?.loop;
+    if (!gate || gate.userId !== userId || loop?.generationId !== generationId || loop.run === null || gate.running !== loop.run) return false;
+    return this.cancel(chatId, userId);
+  }
+
+  /**
+   * A loopback turn's engine run (DEPTH-PLAN §3.12, B1 until A2): today's run for the generation the
+   * guard let on, inside its provider call. Nothing stops or restarts: the turn it prepares is the
+   * generation's at once, and its sections come back for the narrator's prompt instead of going into
+   * the book. A turn kept from a failed reply is taken again with no run, as a retry takes it; an
+   * Impersonate has no run at all. Never called from inside the chat's queue.
+   */
+  async loopbackRun(chatId: ChatId, userId: UserId, generationId: string): Promise<LoopRun> {
+    const gate = this.gates.get(chatId);
+    const loop = gate?.loop;
+    if (!gate || gate.userId !== userId || !loop || loop.generationId !== generationId) return { kind: "failed", step: "loopback", reason: "LumiRPEngine has no record of this reply's generation (it may have restarted since the reply began); generate again" };
+    if (loop.type === "impersonate") return { kind: "plain" };
+    const started = this.started.get(chatId);
+    const kept = gate.prepared;
+    if (kept && kept.kept !== null && started?.generationId === generationId && this.fresh(gate, kept, loop.type, started)) {
+      gate.prepared = null;
+      kept.generationId = generationId;
+      kept.readyAt = Date.now();
+      gate.taken = kept;
+      await this.adopt(chatId, userId, kept, generationId);
+      return { kind: "delivered", turn: kept.turn, delivered: kept.delivered, as: kept.turn?.kind ?? KIND[loop.type] };
+    }
+    if (gate.running !== null) return { kind: "failed", step: "loopback", reason: "another engine run of this chat is still under way; generate again in a moment" };
+    const halt: Halt = { id: `engine-${crypto.randomUUID()}`, generationId, type: loop.type, target: isSwipe(loop.type) ? loop.target : null, connectionId: loop.connectionId, ...(loop.session !== undefined ? { session: loop.session } : {}), stoppedAt: loop.at };
+    gate.running = halt.id;
+    loop.run = halt.id;
+    this.diag?.begin({ chatId, userId, turn: halt.id }, STEP_LABEL.engine);
+    const out: { run: LoopRun; taken: Prepared | null } = { run: { kind: "failed", step: "engine", reason: "the engine run ended without a turn; generate again" }, taken: null };
+    try {
+      await this.engine(chatId, userId, halt, null, {
+        generationId,
+        done: (run, taken) => {
+          out.run = run;
+          out.taken = taken;
+        },
+      });
+    } finally {
+      loop.run = null;
+    }
+    // What the run recorded follows the generation, and so does its pre-reply window (P2).
+    if (out.run.kind === "delivered" && out.taken) await this.adopt(chatId, userId, out.taken, generationId);
+    return out.run;
+  }
+
+  /** What A2's depth turn made for a loopback generation (DEPTH-PLAN §1.3): its commit records `pre` and the read part `read` in place of reading the reply. */
+  sceneCommit(generationId: string, scene: SceneCommit): void {
+    this.scenes.set(generationId, scene);
+    if (this.scenes.size > 64) this.scenes.delete(this.scenes.keys().next().value ?? "");
+  }
+
+  /** Whether LumiRPEngine deleted this message itself: a loopback send's blank reply, stopped before any text. */
+  deletedByEngine(messageId: MessageId): boolean {
+    return this.ownDeletes.has(messageId);
+  }
+
+  /**
+   * A generation that runs without the engine (DESIGN §5.1): Impersonate, which writes the player's
+   * next message, and any generation of a chat on depth off the loopback (DEPTH-PLAN §3.4). It goes
+   * on from a book that holds no engine section, so no mind or secret and nothing of another turn
+   * reaches it: it takes the world's book for its prompt (`claim`), then empties whatever an earlier
+   * turn left there (a restart, a clear the host refused), and gives the book back once its prompt is
+   * assembled. Sections that can't be emptied stop it, and the chat says why.
+   */
+  private async plain(chatId: ChatId, gate: Gate, started: GenerationStartedEvent | null, signal: AbortSignal): Promise<ContextVerdict> {
+    const owner = started?.generationId ?? `plain-${crypto.randomUUID()}`;
+    if (!(await this.claim(gate.worldId, chatId, owner, "plain", { chatId, userId: gate.userId }, signal))) return "cancel";
     try {
       await this.hooks?.vacate(chatId, gate.userId);
     } catch (error) {
@@ -1397,9 +1773,9 @@ export class LedgerService {
   }
 
   /**
-   * A generation's prompt is assembled, or it ended or stopped: an Impersonate gives the book back,
-   * and the turn a reply took gives it back with its entries emptied (DESIGN §6.4). That turn is
-   * held as taken until its reply's end says whether it is kept for a retry (`afterReply`).
+   * A generation's prompt is assembled, or it ended or stopped: one without the engine gives the
+   * book back, and the turn a reply took gives it back with its entries emptied (DESIGN §6.4). That
+   * turn is held as taken until its reply's end says whether it is kept for a retry (`afterReply`).
    */
   private release(chatId: ChatId, generationId: string): void {
     this.answered.delete(generationId);
@@ -1412,7 +1788,7 @@ export class LedgerService {
     this.drop(chatId, gate.userId, p);
   }
 
-  /** The book an Impersonate held for its prompt goes back, found by its generation (its chat's guard state may be gone). */
+  /** The book a generation without the engine held for its prompt goes back, found by its generation (its chat's guard state may be gone). */
   private giveBack(generationId: string): void {
     for (const [worldId, lease] of this.leases) if (lease.owner === generationId) this.letGo(worldId, generationId);
   }
@@ -1494,11 +1870,11 @@ export class LedgerService {
   /**
    * The world's book for `owner` (DESIGN §6.4): it holds one owner's sections at a time, and only
    * while a prompt is assembled from it, so every hold is short. This chat's own earlier generation,
-   * a reply or an Impersonate, gives way: Lumiverse runs one generation per chat at a time, so a newer
-   * one here means it is over, though its end was never heard. Anything else holding the book (a
-   * reply's guard writing it, another chat's prompt being assembled, an engine run placing its
-   * entries, entries being emptied) is waited for, never taken over. False when the host stopped
-   * waiting for the guard meanwhile.
+   * a reply or one without the engine (`plain`), gives way: Lumiverse runs one generation per chat at
+   * a time, so a newer one here means it is over, though its end was never heard. Anything else
+   * holding the book (a reply's guard writing it, another chat's prompt being assembled, an engine
+   * run placing its entries, entries being emptied) is waited for, never taken over. False when the
+   * host stopped waiting for the guard meanwhile.
    */
   private async claim(worldId: WorldId, chatId: ChatId, owner: string, kind: Lease["kind"], at: { chatId: ChatId; userId: UserId }, signal?: AbortSignal): Promise<boolean> {
     const gaveUp = signal ? new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true })) : null;
@@ -1515,7 +1891,7 @@ export class LedgerService {
         this.gone(lease.chatId, holder.userId, p, "dropped");
         continue;
       }
-      if (lease.kind === "impersonate" && lease.chatId === chatId) {
+      if (lease.kind === "plain" && lease.chatId === chatId) {
         this.letGo(worldId, lease.owner);
         continue;
       }
@@ -1542,7 +1918,7 @@ export class LedgerService {
    * with a Retry. The run is the turn's work, on what the turn runs on (`TurnHooks.frame`), taken as
    * it starts; when that can't be taken, the run fails at its start as a failed step does.
    */
-  private engine(chatId: ChatId, userId: UserId, halt: Halt, kind: GenerationKind): Promise<void> {
+  private engine(chatId: ChatId, userId: UserId, halt: Halt, kind: GenerationKind | null, loop?: LoopTake): Promise<void> {
     const at = { chatId, userId, turn: halt.id };
     // How the run ends, for what the runtime kept for it alone (`TurnHooks.ran`).
     let ending: RunOutcome = "failed";
@@ -1552,9 +1928,12 @@ export class LedgerService {
       // Only the gate that stopped the generation, still the chat's: a run never prepares a turn on another.
       if (!gate || gate.running !== halt.id || !hooks || frame === null) {
         this.diag?.end(at, { status: "failed", reason: "the engine lost track of the stopped reply, so nothing was generated; generate again" });
+        loop?.done({ kind: "failed", step: "engine", reason: "the engine lost track of this reply; generate again" }, null);
         return;
       }
       core.sync(observed);
+      // The kind the generation started as (a swipe's is the user's swipe setting's, DEPTH-PLAN §3.9), as its GENERATION_STARTED journaled it.
+      const turnKind = kind ?? core.journal.pending[loop?.generationId ?? ""]?.kind ?? KIND[halt.type];
       // The chain and journal the plan reads; a change to either before the restart makes it stale.
       gate.mirror = mirrorOf(observed);
       const epoch = gate.epoch;
@@ -1572,13 +1951,14 @@ export class LedgerService {
       // that showed as it was added shows again: the turn is made from it (P3, L43), and the
       // restart adds its swipe from it as the Regenerate did.
       const blank = target !== undefined && target.swipes.length > 1 && target.swipes.at(-1) === "";
-      if (target && blank) {
+      // A loopback generation goes on, so its blank swipe is the one its reply goes into (DEPTH-PLAN §3.12).
+      if (target && blank && !loop) {
         const shown = core.addedSwipeFrom(target.id, target.swipes.length - 1) ?? Math.min(target.swipeId, target.swipes.length - 2);
         await this.host.chats.setSwipes(chatId, target.id, target.swipes.slice(0, -1), shown, userId).catch((error: unknown) => this.diag?.error(at, "restart", error, "the stopped Regenerate's empty swipe stays"));
       }
       const head = observed.findLast((m) => !m.isUser);
       const swipeId = target ? target.swipes.length - (blank ? 1 : 0) : halt.type === "continue" ? (head?.swipeId ?? null) : 0;
-      core.prepare({ generationId: halt.id, kind, targetMessageId: target?.id ?? null, targetSwipeId: swipeId }, observed);
+      core.prepare({ generationId: halt.id, kind: turnKind, targetMessageId: target?.id ?? null, targetSwipeId: swipeId }, observed);
       // Wherever the run stops short of a turn that waits for its reply, it ends without one (P2),
       // and its pre-reply window closes. Nothing made during the run has reached the journal (writes
       // wait on this queue), so it closes here at once and they land after it in the order they were
@@ -1617,6 +1997,7 @@ export class LedgerService {
           core.take(halt.id);
           ended();
           this.diag?.end(at, { status: "skipped", reason: outcome.waiting });
+          loop?.done({ kind: "waiting", reason: outcome.waiting }, null);
         };
         // An agent turn its roles stopped goes no further: it plans nothing, no gate hides the stop,
         // and nothing it staged lands. A classic turn has no such stop (`stoppedRun`).
@@ -1656,16 +2037,37 @@ export class LedgerService {
         if (signal.aborted) {
           ending = "cancelled";
           this.diag?.end(at, { status: "skipped", reason: "you cancelled the turn; nothing was generated" });
+          loop?.done({ kind: "cancelled" }, null);
           return;
         }
         const failure = error instanceof EngineFailure ? error : new EngineFailure("engine", messageOf(error));
         this.diag?.end(at, { status: "failed", reason: `${failure.step}: ${failure.message}` });
         await hooks.failed({ chatId, userId, turn: halt.id, step: failure.step, reason: failure.message, as }).catch((e: unknown) => this.diag?.error(at, "engine", e, "the failure flag wasn't shown"));
+        loop?.done({ kind: "failed", step: failure.step, reason: failure.message }, null);
         return;
       } finally {
         this.landed(chatId, flight);
       }
       const turn = core.take(halt.id);
+      if (loop) {
+        // A loopback generation takes its turn at once (DEPTH-PLAN §3.12): no page restarts it, and the
+        // sections go into the narrator's prompt instead of the book. A change to the chat while the
+        // engine ran makes the turn stale, as it does a prepared one: nothing is written for it.
+        const taken: Prepared = { id: halt.id, type: halt.type, target: target?.id ?? null, turn: turn?.planned ? turn : null, stamp, epoch, frame, worldId: gate.worldId, delivered, writing: null, as, holder: null, generationId: loop.generationId, kept: null, failedSwipe: null, readyAt: Date.now() };
+        const changed = this.changedSince(gate, taken);
+        if (changed !== null) {
+          ended();
+          const reason = `${changed} while the engine ran, so this reply wasn't written; generate again`;
+          this.diag?.end(at, { status: "failed", reason });
+          loop.done({ kind: "failed", step: "stale", reason }, null);
+          return;
+        }
+        gate.taken = taken;
+        ending = "prepared";
+        // The kind the plan settled on, as a kept turn's retry has it: a Re-narrate with nothing to tell again plays as a Re-run.
+        loop.done({ kind: "delivered", turn: taken.turn, delivered, as: taken.turn?.kind ?? turnKind }, taken);
+        return;
+      }
       // The page to start it: the one the stopped generation ran for when it shows the chat, unless it
       // never said so and another page did; else the page that last said it shows the chat; with none,
       // the first page to show the chat claims it (`askAgain`).
@@ -1692,7 +2094,7 @@ export class LedgerService {
       // What the turn runs on, as its run starts: the settings and the chat's own choices as they
       // stand. A read of them that fails fails the run as a failed step does (its Diagnostics record,
       // the engine-failed card and its Retry), never silently; that run has no frame to run in.
-      const frame = this.hooks ? await this.hooks.frame(chatId, userId).catch((error: unknown) => new EngineFailure("engine", `${FRAME_UNREAD} (${messageOf(error)})`)) : null;
+      const frame = this.hooks ? await this.hooks.frame(chatId, userId, { core, observed }).catch((error: unknown) => new EngineFailure("engine", `${FRAME_UNREAD} (${messageOf(error)})`)) : null;
       await (frame === null || frame instanceof EngineFailure ? plan(core, observed, frame) : inTurn(frame, () => plan(core, observed, frame)));
     }).finally(() => {
       this.ran(chatId, halt.id);
@@ -2054,19 +2456,31 @@ export class LedgerService {
   }
 
   private onMessage(chatId: ChatId, userId: UserId | null, messageId: MessageId, kind: "sent" | "edited" | "deleted"): void {
+    let edited: PlayerEdit | null = null;
     void this.run(chatId, userId, (core, observed) => {
       if (kind !== "deleted") this.markSaved(core, observed, messageId, kind);
-      core.sync(observed);
-    });
+      if (kind === "edited") edited = acceptedEdit(core, observed, messageId, () => core.sync(observed));
+      else core.sync(observed);
+    }).then(() => this.edited(chatId, userId, messageId, edited));
   }
 
   /** `from`: on `added`, the swipe that showed as it was added, as the events told it (`shown`); undefined when none had told it since the backend started. */
   private onSwiped(chatId: ChatId, userId: UserId | null, messageId: MessageId, action: string, swipeId: number, from?: number): void {
+    let edited: PlayerEdit | null = null;
     void this.run(chatId, userId, (core, observed) => {
-      if (action === "updated") this.markSaved(core, observed, messageId, "edited");
-      core.sync(observed, action === "deleted" ? { messageId, swipeId } : undefined);
-      if (action === "added" && from !== undefined) core.swipeAdded(messageId, swipeId, from);
-    });
+      if (action !== "updated") {
+        core.sync(observed, action === "deleted" ? { messageId, swipeId } : undefined);
+        if (action === "added" && from !== undefined) core.swipeAdded(messageId, swipeId, from);
+        return;
+      }
+      this.markSaved(core, observed, messageId, "edited");
+      edited = acceptedEdit(core, observed, messageId, () => core.sync(observed));
+    }).then(() => this.edited(chatId, userId, messageId, edited));
+  }
+
+  /** Tells the hooks the player's edit of a message (`TurnHooks.assistantEdited`), once its operation is done. */
+  private edited(chatId: ChatId, userId: UserId | null, messageId: MessageId, edit: PlayerEdit | null): void {
+    if (edit !== null && userId !== null) this.hooks?.assistantEdited?.({ chatId, userId, messageId, ...edit });
   }
 
   /** A turn's reply save opens its P4 window: the target's edit, or a reply created at the end. */
@@ -2123,18 +2537,26 @@ export class LedgerService {
       // Snapshots are a shortcut: a missing or unreadable file only means a full fold.
       const stored = await this.host.storage.read(snapshotsPath(chatId), userId).catch(() => null);
       const snapshots = ChatSnapshots.parse(stored);
+      // The chat's layer; a branch copies in what it inherits of its ancestor's at its first open (DEPTH-PLAN §4.9).
+      const opened = (id: ChatId): LayerStore | undefined => {
+        const open = this.chats.get(id);
+        return open?.userId === userId ? open.layer : undefined;
+      };
+      const layer = await LayerStore.open(this.host, chatId, userId, () => ancestorOf(this.host, chatId, userId, env.run.runSeed, opened, toChain));
+      const landing: FoldLayerEntry[] = [];
+      const folds = (): readonly FoldLayerEntry[] => (landing.length > 0 ? [...layer.fold, ...landing] : layer.fold);
       // A stamped journal differs from the stored text, so the next persist writes it.
-      const slot: ChatSlot = { core: new LedgerCore(journal, { ...env, snapshots }, this.folder(userId)), userId, queue: Promise.resolve(), written: reset || raw === null ? null : journalHash(raw), ops: 0, snapshots, reasserts: new Map(), leftOpen: new Set([...journal.windows, ...(journal.prereply ?? []), ...Object.keys(journal.pending)]), chars: { journal: raw?.length ?? 0, snapshots: stored?.length ?? 0 }, viewed: null };
+      const slot: ChatSlot = { core: new LedgerCore(journal, { ...env, snapshots, layer: folds }, this.folder(userId)), userId, queue: Promise.resolve(), written: reset || raw === null ? null : journalHash(raw), ops: 0, snapshots, layer, landing, reasserts: new Map(), leftOpen: new Set([...journal.windows, ...(journal.prereply ?? []), ...Object.keys(journal.pending)]), chars: { journal: raw?.length ?? 0, snapshots: stored?.length ?? 0 }, viewed: null };
       // The revisions its folds will ask for are loaded before anyone folds it.
       await slot.core.prepareWorlds(this.observe(chatId, userId, await this.host.chats.messages(chatId, userId)));
       this.chats.set(chatId, slot);
       let chars = 0;
-      for (const s of this.chats.values()) chars += s.chars.journal + s.chars.snapshots;
+      for (const s of this.chats.values()) chars += s.chars.journal + s.chars.snapshots + s.layer.chars;
       for (const [id, s] of this.chats) {
         if (this.chats.size <= OPEN_CHATS_CAP && chars <= OPEN_CHATS_CHARS) break;
         if (id === chatId || this.busy(id)) continue;
         this.unload(id);
-        chars -= s.chars.journal + s.chars.snapshots;
+        chars -= s.chars.journal + s.chars.snapshots + s.layer.chars;
       }
       return slot;
     })();
@@ -2175,6 +2597,8 @@ export class LedgerService {
             if (landed.filter((w) => this.unbumped.delete(w.id)).length > 0) this.wrote(chatId);
             await this.hooks?.writesLanded({ chatId, userId: slot.userId, core: slot.core, observed, writes: landed, refused });
           }
+          // Layer results held through a turn land, checked again, once every window they wait for has closed (DEPTH-PLAN §4.9).
+          if (slot.layer.held.length > 0) await this.drainLayer(chatId, slot, observed);
           await this.persist(chatId, slot);
           // What the flush marked as written is persisted with it, so the journal stands as this op left it.
           if (await this.flush(chatId, slot)) await this.persist(chatId, slot);
@@ -2196,6 +2620,195 @@ export class LedgerService {
     } finally {
       this.outstanding--;
     }
+  }
+
+  // ------------------------------------------------------------------ the basis-anchored layer (DEPTH-PLAN §4.9)
+
+  /**
+   * Lands a job's result in the chat's layer: on the chat's queue, its basis checked inside the
+   * landing. An id already landed returns that entry and changes nothing (a job rerun after a crash
+   * never lands twice); a turn in flight holds it until its window closes, when it is checked again
+   * (with `wait`, it answers only then: landed or refused, as `landLayers`'s).
+   * It runs on the chat's queue, so it is never awaited from inside an operation on that queue (a
+   * hook the commit runs): there it would wait on itself. Land from the job's own task instead.
+   */
+  async landLayer(chatId: ChatId, userId: UserId, draft: LayerDraft, o: { wait?: boolean } = {}): Promise<LandResult> {
+    const [out] = await this.landLayers(chatId, userId, [draft], o);
+    return out ?? { status: "refused", reason: "nothing to land" };
+  }
+
+  /**
+   * Lands several results in order, written together; each is checked after the ones before it. With
+   * `wait`, one held while a turn is in flight answers once it has landed or been refused as its
+   * windows close (`drainLayer`): a job whose next job reads what it landed waits for it (§8.2).
+   * `without`: entries every check folds as superseded on both sides (`LedgerCore.layerVerdict`), the
+   * old run's that a redo has yet to replace; a held result keeps them for its check as it lands.
+   */
+  async landLayers(chatId: ChatId, userId: UserId, drafts: readonly LayerDraft[], o: { wait?: boolean; without?: ReadonlySet<string> } = {}): Promise<LandResult[]> {
+    let out: LandResult[] = drafts.map(() => ({ status: "refused", reason: "this chat has no world ledger" }));
+    const waits: { i: number; outcome: Promise<LandResult> }[] = [];
+    const without = o.without && o.without.size > 0 ? { without: [...o.without] } : {};
+    await this.run(chatId, userId, async (core, observed) => {
+      const slot = this.chats.get(chatId);
+      if (!slot) return;
+      out = await this.landNow(slot, core, observed, drafts.map((draft) => ({ draft, ...without })), true);
+      // Asked for on the queue, as it holds them: no drain can come before.
+      if (o.wait) for (const [i, r] of out.entries()) if (r.status === "held") waits.push({ i, outcome: this.heldOutcome(chatId, drafts[i]?.id ?? "") });
+    });
+    for (const w of waits) out[w.i] = await w.outcome;
+    return out;
+  }
+
+  /** How held draft `id` went, once the drain that lands or refuses it has run. */
+  private heldOutcome(chatId: ChatId, id: string): Promise<LandResult> {
+    const key = `${chatId}\u0000${id}`;
+    let wait = this.heldWaits.get(key);
+    if (!wait) {
+      wait = Promise.withResolvers<LandResult>();
+      this.heldWaits.set(key, wait);
+    }
+    return wait.promise;
+  }
+
+  private async landNow(slot: ChatSlot, core: LedgerCore, observed: readonly ChainMessage[], items: readonly Pick<HeldDraft, "draft" | "without">[], hold: boolean): Promise<LandResult[]> {
+    const open = [...core.journal.windows, ...(core.journal.prereply ?? [])];
+    // Each draft's outcome, or `null` for one accepted here, which the store's write lands.
+    const results: (LandResult | null)[] = [];
+    const accepted: LayerDraft[] = [];
+    try {
+      for (const { draft: d, without } of items) {
+        const landed = slot.layer.get(d.id);
+        const problem = landed ? null : layerDraftProblem(d);
+        if (landed) results.push({ status: "landed", entry: landed, existing: true });
+        else if (problem) results.push({ status: "refused", reason: problem });
+        else if (accepted.some((a) => a.id === d.id)) results.push({ status: "refused", reason: `the id ${d.id} comes twice in one landing` });
+        else if (hold && open.length > 0) {
+          await slot.layer.hold(d, open, without);
+          results.push({ status: "held", waitFor: open });
+        } else {
+          const verdict = core.layerVerdict(d, observed, without ? new Set(without) : undefined);
+          if ("reason" in verdict) results.push({ status: "refused", reason: verdict.reason });
+          else {
+            accepted.push(d);
+            slot.landing.push(foldEntryOf(d));
+            results.push(null);
+          }
+        }
+      }
+      const made = new Map((await slot.layer.append(accepted)).map((e) => [e.id, e]));
+      return results.map((r, i): LandResult => {
+        if (r) return r;
+        const entry = made.get(items[i]?.draft.id ?? "");
+        return entry ? { status: "landed", entry } : { status: "refused", reason: "it could not be stored" };
+      });
+    } finally {
+      slot.landing.length = 0;
+    }
+  }
+
+  /**
+   * Lands the held results whose windows have closed, each checked again (DEPTH-PLAN §4.9). One
+   * refused then is logged, and the player reads why (a toast): his own (an edit, a switch, a drop,
+   * an answer, a tap), which he was told lands once the reply is kept, and any other whose message
+   * still stands, which the reply left no room for. Work whose message the turn swiped or deleted
+   * away went with it, unsaid.
+   */
+  private async drainLayer(chatId: ChatId, slot: ChatSlot, observed: readonly ChainMessage[]): Promise<void> {
+    const open = new Set([...slot.core.journal.windows, ...(slot.core.journal.prereply ?? [])]);
+    const ready = await slot.layer.release(open);
+    if (ready.length === 0) return;
+    const results = await this.landNow(slot, slot.core, observed, ready, false);
+    const chain = slot.core.chain(observed);
+    results.forEach((r, i) => {
+      const d = ready[i]?.draft;
+      if (!d) return;
+      const key = `${chatId}\u0000${d.id}`;
+      this.heldWaits.get(key)?.resolve(r);
+      this.heldWaits.delete(key);
+      if (r.status !== "refused") return;
+      this.host.log("info", `[LumiRPEngine] chat ${chatId}: a held ${d.kind} result (${d.id}) didn't land: ${r.reason}`, slot.userId);
+      const own = d.by?.role === "user" || d.by?.role === "player";
+      if (own || basisIndex(chain, slot.core.journal.tombstones, d.basis) >= 0) this.host.toast(`${own ? "Your change" : "Work"} made while the reply was written wasn't kept: ${r.reason}`, slot.userId);
+    });
+  }
+
+  /** The chat's own landed entries, without their events: for resuming and listing; with `inherited`, also the entries it inherits as a branch, in its own message ids. */
+  async layerSummaries(chatId: ChatId, userId: UserId, o: { inherited?: boolean } = {}): Promise<LayerSummary[]> {
+    let out: LayerSummary[] = [];
+    await this.run(chatId, userId, () => {
+      out = this.chats.get(chatId)?.layer.summaries(o) ?? [];
+    });
+    return out;
+  }
+
+  /** One landed entry by id, the chat's own or one it inherited as a branch; null when there is none. */
+  async readLayerEntry(chatId: ChatId, userId: UserId, id: string): Promise<LayerEntry | null> {
+    let out: LayerEntry | null = null;
+    await this.run(chatId, userId, () => {
+      out = this.chats.get(chatId)?.layer.get(id) ?? null;
+    });
+    return out;
+  }
+
+  /** The basis a job reading through `messageId` records (the chain's last message by default); null when it isn't on the chain. */
+  async basisFor(chatId: ChatId, userId: UserId, messageId?: MessageId): Promise<Basis | null> {
+    const bases = await this.chainBases(chatId, userId);
+    return (messageId === undefined ? bases.at(-1) : bases.find((b) => b.message === messageId)) ?? null;
+  }
+
+  /** Every message's basis on the active chain, in order. */
+  async chainBases(chatId: ChatId, userId: UserId): Promise<Basis[]> {
+    let out: Basis[] = [];
+    await this.run(chatId, userId, (core, observed) => {
+      out = chainBases(core.chain(observed), core.journal.tombstones);
+    });
+    return out;
+  }
+
+  /**
+   * What a job reads at its basis (DEPTH-PLAN §4.9): the fold through the basis message, the layer
+   * entries landed there included (those `without` names read as superseded: a redo's), the world as
+   * that state plays it, and the narrative record up to it. Null when the basis isn't on the active
+   * chain, or it is past a pause. In a turn, which holds the chat's queue, `foldAtBasisOf` reads the
+   * same from the turn's own core.
+   */
+  async foldAtBasis(chatId: ChatId, userId: UserId, basis: Pick<Basis, "message" | "swipe">, types: readonly string[] = [], without?: ReadonlySet<string>): Promise<BasisRead | null> {
+    let out: BasisRead | null = null;
+    await this.run(chatId, userId, (core, observed) => {
+      out = foldAtBasisOf(core, observed, basis, types, without);
+    });
+    return out;
+  }
+
+  /** The narrative record on the active chain (through `upTo` when given): live beats and staging, in fold order (`storyOf` in a turn). */
+  async readStory(chatId: ChatId, userId: UserId, upTo?: MessageId): Promise<StoryRead> {
+    let out: StoryRead = { beats: [], staging: [], replaced: [], duplicates: [] };
+    await this.run(chatId, userId, (core, observed) => {
+      out = storyOf(core, observed, upTo);
+    });
+    return out;
+  }
+
+  /**
+   * The live events of `types` on the active chain (through `upTo` when given), in fold order, each
+   * with its container and, from the layer, its entry's reasoning: mind writes, notebook revisions,
+   * truth links (`liveEventsOn`).
+   */
+  async readEvents(chatId: ChatId, userId: UserId, types: readonly string[], upTo?: MessageId): Promise<LiveEvent[]> {
+    let out: LiveEvent[] = [];
+    await this.run(chatId, userId, (core, observed) => {
+      out = eventsOf(core, observed, types, upTo);
+    });
+    return out;
+  }
+
+  /** What the archive index reads of the chat in one pass (`archiveViewOf`); null for a chat with no world ledger. */
+  async archiveView(chatId: ChatId, userId: UserId): Promise<ArchiveView | null> {
+    let out: ArchiveView | null = null;
+    await this.run(chatId, userId, (core, observed) => {
+      out = archiveViewOf(core, observed);
+    });
+    return out;
   }
 
   /** Resolves once every queued ledger operation has finished. */

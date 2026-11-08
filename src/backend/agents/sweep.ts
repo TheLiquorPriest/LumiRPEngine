@@ -28,6 +28,11 @@ import { isRecord, type JsonObject } from "../../shared/json";
 import { LEDGER_NAMESPACE, type Journal } from "../../shared/ledger";
 import { DAY_MS, HOUR_MS, isBlobHash, type RetentionSettings } from "../../shared/stores";
 import { workspaceRefs } from "../../engine/workspace";
+import { storyBlobs } from "../../shared/story";
+import { mindBlobs } from "../../shared/character-engine";
+import { authorBlobs } from "../../shared/author";
+import { episodeBlobs, STORY_DRAFT } from "../../shared/episodes";
+import { layerDir } from "../layer-store";
 import { agentRefs } from "../chat-agent-meta";
 import { messageOf } from "../diagnostics";
 import type { HostMessage, HostPort } from "../host";
@@ -103,15 +108,36 @@ interface Found {
   bases: Set<string>;
 }
 
-/** The workspace files a stored list of events writes; anything that isn't such a list names nothing. */
+/** The blobs a stored list of events names: the workspace files it writes, the texts of its beats, staging, strikes, prose and scenes, its mind writes, the author's records' notes, and a draft's own beats and changes; anything that isn't such a list names nothing. */
 function eventRefs(events: unknown, into: Found): void {
-  if (Array.isArray(events)) for (const hash of workspaceRefs(events)) into.blobs.add(hash);
+  if (!Array.isArray(events)) return;
+  for (const hash of workspaceRefs(events)) into.blobs.add(hash);
+  for (const ev of events) if (isRecord(ev) && typeof ev.type === "string" && ev.type.startsWith("story.")) for (const hash of storyBlobs(ev.type, ev.data)) into.blobs.add(hash);
+  for (const ev of events) if (isRecord(ev) && typeof ev.type === "string" && ev.type.startsWith("minds.v2.")) for (const hash of mindBlobs(ev.type, ev.data)) into.blobs.add(hash);
+  for (const ev of events) if (isRecord(ev) && typeof ev.type === "string" && ev.type.startsWith("author.")) for (const hash of authorBlobs(ev.type, ev.data)) into.blobs.add(hash);
+  // A draft holds its beats and the changes it would make as its own data (DEPTH-PLAN §4.6).
+  for (const ev of events) {
+    if (!isRecord(ev) || ev.type !== STORY_DRAFT || !isRecord(ev.data)) continue;
+    for (const hash of episodeBlobs(ev.type, ev.data)) into.blobs.add(hash);
+    eventRefs(ev.data.effects, into);
+  }
+}
+
+/** What a stored layer file names (DEPTH-PLAN §4.9): a segment's entries or the held drafts, each with its events and its reasoning. Lenient. */
+function layerRefs(raw: unknown, into: Found): void {
+  if (!Array.isArray(raw)) return;
+  for (const item of raw) {
+    const entry = isRecord(item) && isRecord(item.draft) ? item.draft : item;
+    if (!isRecord(entry)) continue;
+    eventRefs(entry.events, into);
+    if (isBlobHash(entry.reasoning)) into.blobs.add(entry.reasoning);
+  }
 }
 
 /** Whether the user's retention keeps a record's transcript, written at `at` (unknown on a record kept before it was noted), on the reply the record is on. */
 type KeepsTranscript = (at: number | undefined) => boolean;
 
-/** What a stored record names, read leniently (records come from any metadata writer): its session's parts (its transcript while `transcript` keeps it), and the files its events and post entries write. */
+/** What a stored record names, read leniently (records come from any metadata writer): its session's parts (its transcript while `transcript` keeps it), the files its events and post entries write, and the text an unread Continue left it showing (`shown`). */
 function recordRefs(rec: unknown, into: Found, transcript: KeepsTranscript): void {
   for (const hash of sessionRefsOf(rec, transcript)) into.blobs.add(hash);
   const { summary, archived } = recordSessionOf(rec);
@@ -119,6 +145,7 @@ function recordRefs(rec: unknown, into: Found, transcript: KeepsTranscript): voi
   if (!isRecord(rec)) return;
   eventRefs(rec.events, into);
   if (Array.isArray(rec.post)) for (const entry of rec.post) if (isRecord(entry)) eventRefs(entry.events, into);
+  if (isBlobHash(rec.shown)) into.blobs.add(rec.shown);
 }
 
 /**
@@ -399,6 +426,14 @@ export class Sweep {
         const text = await host.storage.read(journalPath(chat.id), userId);
         // One that doesn't parse names nothing: the chat puts a fresh one in its place when it opens.
         if (text !== null) journalRefs(parsed(text), found, (id) => keeps(chat.id, id));
+      }
+      // Each chat's layer files (DEPTH-PLAN §4.9), from one listing of the run files.
+      reading = "the chats' layers";
+      const layers = new Set(chats.map((c) => `${layerDir(c.id)}/`));
+      for (const path of await host.storage.list("runs/", userId)) {
+        if (!path.endsWith(".json") || !layers.has(path.slice(0, path.lastIndexOf("/") + 1))) continue;
+        reading = `the layer file ${path}`;
+        layerRefs(parsed((await host.storage.read(path, userId)) ?? ""), found);
       }
       for (const chat of chats) {
         reading = `chat ${chat.id}'s diagnostics`;

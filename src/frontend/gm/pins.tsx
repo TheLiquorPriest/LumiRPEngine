@@ -2,8 +2,7 @@
 // this chat plays, whether a newer one exists, the Upgrade with its review, and the generator
 // versions and table revisions the revision pins, each table this build ships newer marked, with
 // the way to Build → World → Data updates while the world hasn't taken them. Moved here from
-// Settings. Not behind the GM gate: the Upgrade review keeps its own spoiler gate for changes that
-// would give a secret away.
+// Settings. The Upgrade review shows every change, one that would give a secret away marked Secret.
 
 import { useEffect, useState } from "preact/hooks";
 import type { TableUpdate, UpgradePreview } from "../../shared/protocol";

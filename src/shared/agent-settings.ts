@@ -65,13 +65,13 @@ export interface TurnBudget {
   wallMs: Limit;
 }
 
-/** A connection's throttle: requests sent and tokens sent and written, per minute, and its calls under way at once, agent and prompt-only calls alike. "none" is off. */
+/** A connection's throttle: requests sent and tokens sent and written, per minute, and its calls under way at once, agent, prompt-only and depth calls alike. "none" is off. */
 export interface ConnectionThrottle {
   /** The connection's id. */
   id: string;
   requestsPerMinute: Limit;
   tokensPerMinute: Limit;
-  /** Its agent turns' calls under way at once, agents' and prompt-only roles' through one gate; a call past it waits for one to end. */
+  /** Its calls under way at once: agent turns' (agents' and prompt-only roles') and depth's, through one gate, a turn's first; a call past it waits for one to end. */
   atOnce: Limit;
 }
 
@@ -297,6 +297,13 @@ export interface AgentSettings {
   acceptance: { connections: AcceptanceConnection[]; estimateFactor: number };
   /** The GM assistant (Settings → Agents → Assistant). */
   assistant: AssistantSettings;
+  /**
+   * New chats start on (Settings → Agents → Pipeline; INC3 3a): the engine a chat takes when it has
+   * no choice of its own and no LRE turn on its path. Its first turn records it as the chat's
+   * (`lumi_rp_engine.prefs.engine`, from the default), so a later change here moves no chat that
+   * has played; a chat that played before it existed and never chose plays classic.
+   */
+  newChats: ChatEngine;
   /** How an agent turn is run, and where its memory goes (Settings → Agents → Pipeline). */
   pipeline: PipelineSettings;
   /** Each role of an agent turn (Settings → Agents → Roles). */
@@ -348,6 +355,7 @@ export function defaultAgentSettings(): AgentSettings {
     // The assistant reads everything, outside the story, and its changes wait for your Apply.
     assistant: { connectionId: null, model: null, effort: "inherit", apply: "ask", historyTokens: 20_000, budget: {} },
     pipeline: { mode: "fixed", memory: "after_reply", curator: true, curatorGate: "shadow" },
+    newChats: "agents",
     roles: defaultRoleSettings(),
     // The main agent reads the workspace, everything secrets marked as every turn agent does; its digest and pins, 2,000 tokens each (§15). Past turns stay as receipts, each answer's first 600 characters.
     main: { connectionId: null, model: null, effort: "inherit", families: ["workspace"], budget: {}, digestTokens: 2000, pinsTokens: 2000, stages: defaultStages(), sessionKeeps: "receipts", receiptChars: 600 },
@@ -520,6 +528,19 @@ export const SYSTEM_TOKENS_DEF: AgentLimitDef = { label: "System instructions", 
 export const PIPELINE_MODE_LABELS: Readonly<Record<PipelineMode, string>> = { fixed: "A fixed pipeline", main: "A main agent decides" };
 export const MEMORY_PLACEMENT_LABELS: Readonly<Record<MemoryPlacement, string>> = { after_reply: "After the reply", before_next: "Before the next turn" };
 
+/** Which engine plays a chat's turns (GM → This chat → Engine): its classic steps, or the agent loop. */
+export type ChatEngine = "classic" | "agents";
+export const CHAT_ENGINES: readonly ChatEngine[] = ["classic", "agents"];
+export const CHAT_ENGINE_LABELS: Readonly<Record<ChatEngine, string>> = { classic: "Classic steps", agents: "Agents" };
+
+/**
+ * Where a chat's engine comes from (GM → This chat → Engine): its own choice (the switch, or the
+ * offer's buttons); the default for new chats, recorded at its first turn; the default it will
+ * record at its first turn, having played none yet; or classic, for a chat that played before it
+ * chose.
+ */
+export type EngineSource = "chosen" | "default" | "new" | "played";
+
 /** Settings → Agents → Review card's words for where an agent turn's changes that ask first wait. */
 export const REVIEW_PLACEMENT_LABELS: Readonly<Record<ReviewPlacement, string>> = { chips: "On the review card after the reply", gate: "On the review card before the reply" };
 
@@ -536,7 +557,7 @@ export const PERSIST_DEFS: Readonly<Record<"turns" | "minutes", AgentLimitDef>> 
 };
 
 /** Settings → Agents → Throttles: a connection's calls under way at once. */
-export const AT_ONCE_DEF: AgentLimitDef = { label: "Calls at once", limits: "How many of an agent turn's calls may be under way on this connection at once: every agent's and every prompt-only role's, through one gate.", fires: "A call past it waits until one under way ends; nothing is refused.", unit: "count", min: 1, none: null };
+export const AT_ONCE_DEF: AgentLimitDef = { label: "Calls at once", limits: "How many calls may be under way on this connection at once: an agent turn's (every agent's and every prompt-only role's) and depth's, through one gate.", fires: "A call past it waits until one under way ends, a turn's calls first: depth's work between turns gives its place to a turn's call and is asked again after. Nothing is refused.", unit: "count", min: 1, none: null };
 
 // ---------------------------------------------------------------- reading stored settings
 
@@ -732,6 +753,7 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
     },
     assistant: assistantOf(a.assistant, d.assistant),
     pipeline: { mode: oneOf(pipeline.mode, PIPELINE_MODES, d.pipeline.mode), memory: oneOf(pipeline.memory, MEMORY_PLACEMENTS, d.pipeline.memory), curator: typeof pipeline.curator === "boolean" ? pipeline.curator : d.pipeline.curator, curatorGate: oneOf(pipeline.curatorGate, CURATOR_GATES, d.pipeline.curatorGate) },
+    newChats: oneOf(a.newChats, CHAT_ENGINES, d.newChats),
     roles: rolesOf(a.roles, d.roles),
     main: mainOf(a.main, d.main),
     context: contextSettingsOf(a.context, d.context),

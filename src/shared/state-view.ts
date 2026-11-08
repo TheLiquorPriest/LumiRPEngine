@@ -5,6 +5,7 @@
 import type { ClaimsPolicy } from "./claims";
 import type { InferredChecks, SheetSkill } from "./inferred";
 import type { JsonObject, JsonValue } from "./json";
+import type { LoopbackModelCall } from "./loopback";
 import type { MindCallTrace, MindsGmView } from "./minds";
 import type { GenerateAs } from "./protocol";
 import type { GmHeldWrite } from "./gm-parts";
@@ -158,6 +159,8 @@ export type ChipKind =
   | "engine_failed"
   /** The reply failed (an error, or it came back empty) and its turn is kept: Retry the reply writes it again from that same turn, Re-run the engine runs the engine first (DESIGN §5.1). */
   | "reply_failed"
+  /** The offer to a classic chat that played and never chose, while new chats start on agents (INC3 3a, D2): Switch to agents, or Keep classic, either the chat's own choice from then on. */
+  | "engine_offer"
   /** A typed action uses a thing the world doesn't have and the turn waits, nothing generated, on Add or Not an action; either resumes it (DESIGN §9.4 player claims). */
   | "claim"
   /** A thing the player said they had, made real for their action ("Added: a coffee"), or their own thing brought along or fetched from elsewhere ("Brought along: phone", ITEMS-SPEC §4.5), with Undo (DESIGN §9.4 player claims). */
@@ -179,7 +182,32 @@ export type ChipKind =
   /** The outline gate (DESIGN §5.1 preview gates): the turn's outline waits, no reply written, on Play, Edit (its lines) or Cancel; Play and Edit resume the turn with that outline. */
   | "outline_gate"
   /** An agent turn's review card (INC2-SPEC C13): its changes that ask first, with Apply all and No (a pick through `lre.review`); at a gate the turn waits on it. */
-  | "review";
+  | "review"
+  /**
+   * Real-time dialogue (DEPTH-PLAN §2.5): "Talking with Mira" while it runs, with Leave; or the
+   * author's offer of it ("Talk with Mira in real time?"), with Talk, while Settings → Depth starts
+   * it only from the chip. Either tap sets how the player's next line plays; neither starts a reply.
+   */
+  | "talk"
+  /** A passage of the reply streamed though the GM's check found it unfaithful to its beats, or no check could be read (DEPTH-PLAN §1.3): where it departs, with Re-narrate. */
+  | "unfaithful"
+  /** The player's edit of a depth reply, as the author read it (DEPTH-PLAN §1.3, §4.2; `EditOut.said`): cosmetic, or the beats it amended and struck, or why nothing was amended. */
+  | "edit_read"
+  /** A chat on depth generated through a connection other than the loopback (DEPTH-PLAN §3.4), so the engine didn't run for its turn and nothing reads its reply: with Settings → Loopback. */
+  | "needs_loopback"
+  /**
+   * "Ask me" (DEPTH-PLAN §6.5, D-7): an episode off screen wants a treatment this story interval's
+   * allowance has spent, on a part the author judged major ("Dale's sale of the boat wants a live
+   * treatment; this story week's 2 are spent. Spend one more?"), under the reply its poll read: Spend
+   * one more, or Keep to the allowance (it drafts a step down the ladder). Neither starts a reply.
+   */
+  | "allowance"
+  /**
+   * "Settled off screen: Dale sold the boat (Thursday)" (DEPTH-PLAN §7 Chips): a draft a settlement
+   * made canon, under the reply it settled at, with the author's reading and Read, which opens the
+   * draft in GM → Depth → Drafts.
+   */
+  | "settled";
 
 /**
  * A value a chip action asks for before it's sent, in its `lre.chip` payload: an amount in the
@@ -188,9 +216,10 @@ export type ChipKind =
  * may be sent empty, as a swipe's "What should change?" is), or an action picked again in the
  * Actions palette, opened at `action` with `params` already picked (`{params}`). Or no value at all:
  * `org` opens an organization's page in Orgs, at its `tab` when named (the Plan's Edit, ORG-SPEC
- * §4.4), and sends nothing.
+ * §4.4), `settings` opens a page of Settings (Settings → Loopback), and `draft` opens a draft of
+ * what happens off screen in GM → Depth → Drafts; none sends anything.
  */
-export type ChipInput = { type: "money"; label: string; value?: number } | { type: "choice"; label: string; options: { value: string; label: string }[] } | { type: "text"; label: string; value: string; optional?: true } | { type: "action"; label: string; action: string; params: JsonObject } | { type: "org"; label: string; org: string; tab?: string };
+export type ChipInput = { type: "money"; label: string; value?: number } | { type: "choice"; label: string; options: { value: string; label: string }[] } | { type: "text"; label: string; value: string; optional?: true } | { type: "action"; label: string; action: string; params: JsonObject } | { type: "org"; label: string; org: string; tab?: string } | { type: "settings"; label: string; page: "loopback" } | { type: "draft"; label: string; draft: string };
 
 export interface ChipAction {
   id: string;
@@ -232,7 +261,7 @@ export interface Chip {
 export function chipStarts(chip: Pick<Chip, "kind" | "as">, choice: string): GenerateAs | null {
   if (choice === "regenerate" || choice === "continue") return choice;
   const kind = chip.kind;
-  const starts = (kind === "reply_failed" && choice === "rerun") || (kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (kind === "read_failed" && choice === "rerun") || (kind === "claim" && (choice === "add" || choice === "drop")) || (kind === "check" && (choice === "roll" || choice === "drop")) || ((kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit")) || (kind === "review" && chip.as !== undefined && (choice === "apply" || choice === "reject"));
+  const starts = (kind === "reply_failed" && choice === "rerun") || (kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (kind === "unfaithful" && choice === "renarrate") || (kind === "read_failed" && choice === "rerun") || (kind === "claim" && (choice === "add" || choice === "drop")) || (kind === "check" && (choice === "roll" || choice === "drop")) || ((kind === "intent_gate" || kind === "outline_gate") && (choice === "play" || choice === "edit")) || (kind === "review" && chip.as !== undefined && (choice === "apply" || choice === "reject"));
   return starts ? (chip.as ?? "regenerate") : null;
 }
 
@@ -565,8 +594,9 @@ export interface GmView {
   /**
    * The ✎ fixes and GM edits in force on this chat's path, newest first, worded in full; `by`: a mechanical action of the player's, by how it reads,
    * rather than a correction (DESIGN §11); `undo`: the chat's chip that undoes it, for one on the latest reply (Undo covers the latest reply), else null.
+   * Each is the reply's record's entry `seq`, or the chat layer's `entry` (the player's edit of a mind file, GM → Minds, which folds after that message).
    */
-  edits: { messageId: string; seq: number; lines: string[]; by?: string; undo: string | null }[];
+  edits: { messageId: string; seq?: number; entry?: string; lines: string[]; by?: string; undo: string | null }[];
   /** Writes held during a reply that didn't apply when it finished, with the validator's reason. */
   refused: { id: string; reason: string }[];
   /** Writes made while a turn was under way and waiting for it (DESIGN §5.1, P2), oldest first: what each does, worded, and what it waits on. */
@@ -614,6 +644,12 @@ export interface ContextGeneration {
   lore?: LoreStepTrace[];
   /** The turn's minds calls (DESIGN §24.5), with no text (absent: none ran). */
   minds?: MindCallTrace[];
+  /**
+   * A loopback turn's provenance (DEPTH-PLAN §3.8, §9.0): behind the loopback the chat's connection
+   * is `lre-narrator`, so every model call the turn made is listed with its role, connection, model,
+   * upstream request id, tokens and time; and the turn's time, and its time to the first text.
+   */
+  provenance?: { calls: LoopbackModelCall[]; turnMs: number; firstContentMs: number | null; reply?: { messageId: string; swipeId: number } };
 }
 
 /** The `core.context` panel: the last ten engine runs' sections, newest first, and standing warnings (book attachment and slot repair, preset caveats, journal notices). */

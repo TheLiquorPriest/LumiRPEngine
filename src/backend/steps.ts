@@ -221,8 +221,76 @@ const TOOL_REFUSALS: readonly RegExp[] = [
 
 /** Whether a failed call's error is its provider refusing native tools (`TOOL_REFUSALS`), in its message or its cause's. */
 export function isToolRefusal(error: unknown): boolean {
-  const texts = [error instanceof Error ? error.message : String(error), error instanceof Error && error.cause !== undefined ? (error.cause instanceof Error ? error.cause.message : String(error.cause)) : ""];
-  return texts.some((text) => TOOL_REFUSALS.some((pattern) => pattern.test(text)));
+  return errorTexts(error).some((text) => TOOL_REFUSALS.some((pattern) => pattern.test(text)));
+}
+
+/**
+ * How providers refuse an answer room (`max_tokens`) over what the model takes, and the limit each
+ * states: OpenAI's ("max_tokens is too large: 32768. This model supports at most 16384 completion
+ * tokens"), Anthropic's ("max_tokens: 32768 > 16384, which is the maximum allowed number of output
+ * tokens"), DeepSeek's ("the valid range of max_tokens is [1, 393216]"), Groq's ("`max_tokens` must be
+ * less than or equal to `8192`"), Gemini's ("…maxOutputTokens… the supported range is from 1
+ * (inclusive) to 65537 (exclusive)"), each the model's own (`fixed`); and a context window's, vLLM's
+ * and OpenRouter's ("maximum context length is 32768 tokens. However, you requested 40000 tokens
+ * (8000 in the messages, …)", "(20000 of text input, …)", "…and your request has 8000 input tokens"):
+ * the window less the input, so that call's alone.
+ */
+const MAX_TOKENS_LIMITS: readonly { pattern: RegExp; limit: (m: RegExpMatchArray) => number; fixed: boolean }[] = [
+  { pattern: /\bsupports at most (\d+) (?:completion|output) tokens\b/i, limit: (m) => Number(m[1]), fixed: true },
+  { pattern: /\bmax_tokens\W{0,3}\d+\s*>\s*(\d+)\b/i, limit: (m) => Number(m[1]), fixed: true },
+  { pattern: /\bvalid range of max_tokens is \[\s*\d+\s*,\s*(\d+)\s*\]/i, limit: (m) => Number(m[1]), fixed: true },
+  { pattern: /\bmax_tokens`? must be less than or equal to `?(\d+)\b/i, limit: (m) => Number(m[1]), fixed: true },
+  { pattern: /\bmax_?output_?tokens\b.*?\bsupported range is from \d+ \(inclusive\) to (\d+) \(exclusive\)/i, limit: (m) => Number(m[1]) - 1, fixed: true },
+  { pattern: /\bmaximum context length is (\d+) tokens\b.*?\b(\d+) (?:in the messages|of text input)\b/i, limit: (m) => Number(m[1]) - Number(m[2]), fixed: false },
+  { pattern: /\bmaximum context length is (\d+) tokens and your request has (\d+) input tokens\b/i, limit: (m) => Number(m[1]) - Number(m[2]), fixed: false },
+];
+
+/** A failed call's message and its cause's, where the provider's words may be. */
+function errorTexts(error: unknown): string[] {
+  return [error instanceof Error ? error.message : String(error), error instanceof Error && error.cause !== undefined ? (error.cause instanceof Error ? error.cause.message : String(error.cause)) : ""];
+}
+
+/**
+ * The answer room a failed call's provider says the model takes (`MAX_TOKENS_LIMITS`), in its message
+ * or its cause's, and whether it is the model's own (`fixed`) or what a context window leaves that
+ * call's input; null when the error says nothing of it, or leaves no room.
+ */
+export function maxTokensLimit(error: unknown): { limit: number; fixed: boolean } | null {
+  for (const text of errorTexts(error))
+    for (const { pattern, limit, fixed } of MAX_TOKENS_LIMITS) {
+      const m = text.match(pattern);
+      const n = m ? limit(m) : Number.NaN;
+      if (Number.isInteger(n) && n > 0) return { limit: n, fixed };
+    }
+  return null;
+}
+
+/**
+ * Whether a failed call is its provider refusing the request itself: a 4xx (the host words these as
+ * "… failed (413): …") other than 429, which is busy (`transientFailure`). A call that asked more
+ * room than its role's own may be refused for that room in words `maxTokensLimit` reads no limit
+ * from, under any such status: OpenRouter's 402 ("This request requires more credits, or fewer
+ * max_tokens. You requested up to 1000000 tokens, but can only afford 9671"), a 413, a 422.
+ */
+export function requestRefused(error: unknown): boolean {
+  return refusedStatuses(error).length > 0;
+}
+
+/** The 4xx statuses but 429 a failed call's message or its cause's states (`requestRefused`). */
+function refusedStatuses(error: unknown): string[] {
+  return [...errorTexts(error).join("\n").matchAll(/\((4\d\d)\)|\b(?:status|HTTP)\s*:?\s*(4\d\d)\b/gi)].map((m) => m[1] ?? m[2] ?? "").filter((s) => s !== "429");
+}
+
+/**
+ * Whether a refused request (`requestRefused`) speaks of its answer room, so setting a room may help
+ * (the final correctness review, finding 2): a 413 or a 422, or words of tokens, credits, a length or
+ * a context, as OpenRouter's 402 has. Never a 401, a 403 or a 404 (a key, an account's access, a
+ * model the provider hasn't), which no room changes.
+ */
+export function roomRefused(error: unknown): boolean {
+  const statuses = refusedStatuses(error);
+  if (statuses.length === 0 || statuses.some((s) => s === "401" || s === "403" || s === "404")) return false;
+  return statuses.some((s) => s === "413" || s === "422") || /max[_ ]?(?:completion[_ ]?|output[_ ]?)?tokens|\btokens\b|\bcredits?\b|\blength\b|\bcontext\b/i.test(errorTexts(error).join("\n"));
 }
 
 /** How many times a call that failed transiently is made again, the first after `RETRY_PAUSE_MS`, each later one after twice the wait before it. */

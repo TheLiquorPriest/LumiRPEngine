@@ -6,6 +6,7 @@ import { isRecord } from "../../src/shared/json";
 import type { WorldDoc } from "../../src/shared/world";
 import type { BackendToFrontend, FrontendToBackend } from "../../src/shared/protocol";
 import { PROTOCOL_VERSION } from "../../src/shared/protocol";
+import { SETTINGS_DEFAULTS_REV } from "../../src/shared/settings";
 import { enginePack } from "../../src/engine/engine-pack";
 import { planTurn, postTurn } from "../../src/engine/turn";
 import { Dispatcher } from "../../src/backend/dispatch";
@@ -28,6 +29,12 @@ export interface RigOptions {
   build?: BuildInfo;
   /** More templates by id beside the starter worlds (with `shipped`): the large world the memory measurements play. */
   templates?: Record<string, (id: string, name: string) => WorldDoc>;
+  /**
+   * Which engine a chat the test makes starts on (Settings → Agents → Pipeline → New chats start on;
+   * INC3 3a): classic unless the test asks for the shipped default, agents, so a test of classic's
+   * turns plays them as a chat made before agents were the default does.
+   */
+  newChats?: "agents" | "classic";
   /** The port the backend talks to the host through (default: the fake host itself); the memory measurements copy what crosses it, as Spindle's IPC does. */
   port?: (host: FakeHost) => HostPort;
 }
@@ -52,7 +59,8 @@ export class Rig {
     // nothing to do. Minds stay off unless the test asks for them, since a mind that says nothing fails.
     this.host.quietReply ??= () => "{}";
     const settingsFile = `${this.host.userId}/settings.json`;
-    if (!options.minds && !this.host.files.has(settingsFile)) this.host.files.set(settingsFile, JSON.stringify({ v: 1, minds: { enabled: false } }));
+    const newChats = { agents: { newChats: options.newChats ?? "classic" } };
+    if (!this.host.files.has(settingsFile)) this.host.files.set(settingsFile, JSON.stringify(options.minds ? { v: 1, defaults: SETTINGS_DEFAULTS_REV, ...newChats } : { v: 1, minds: { enabled: false }, ...newChats }));
     const port = options.port ? options.port(this.host) : this.host;
     this.rt = options.shipped
       ? new Runtime({ host: port, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: { ...STARTER_WORLDS, ...options.templates }, templateInfo: STARTER_INFO, starterTables: STARTER_TABLES, ...(options.build ? { build: options.build } : {}) })
@@ -65,6 +73,7 @@ export class Rig {
     this.host.idle = async () => {
       await this.jobs.idle();
       await this.rt.ledger.idle();
+      await this.rt.depthSettled();
       await this.rt.push.settle();
       await this.rt.presetChecked();
       await this.rt.inspector.settle();

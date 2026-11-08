@@ -2,12 +2,15 @@
 // signed-in client: what a tool sends is checked against what LumiRPEngine actually answers.
 
 import { expect } from "bun:test";
-import type { Connection, HostDescription, RequestFields, RequestType } from "../../src/cli/connection";
+import type { Connection, HostDescription } from "../../src/cli/connection";
+import type { RequestFields, RequestType } from "../../src/shared/protocol";
 import { LreError } from "../../src/cli/connection";
 import { Live } from "../../src/cli/live";
-import type { ToolResult } from "../../src/cli/report";
+import type { ToolResult } from "../../src/shared/tool-answer";
+import { isRecord } from "../../src/shared/json";
 import type { ToolContext } from "../../src/cli/tools";
-import { callTool, KeyedQueue } from "../../src/cli/tools";
+import { callTool } from "../../src/cli/tools";
+import { KeyedQueue } from "../../src/shared/keyed-queue";
 import type { FrontendToBackend, ResultBodies } from "../../src/shared/protocol";
 import { PROTOCOL_VERSION } from "../../src/shared/protocol";
 import type { RigOptions } from "./rig";
@@ -21,7 +24,7 @@ export class RigConnection implements Connection {
   private async send(request: Record<string, unknown>): Promise<unknown> {
     const reqId = `cli${++this.seq}`;
     const before = this.rig.host.sent.length;
-    await this.rig.dispatch.handle({ lre: PROTOCOL_VERSION, reqId, ...request } as unknown as FrontendToBackend, this.rig.host.userId, "s_cli");
+    await this.rig.dispatch.handle({ lre: PROTOCOL_VERSION, reqId, ...request } as unknown as FrontendToBackend, this.rig.host.userId, CLI_SESSION);
     await this.rig.host.settle();
     const reply = this.rig.host.sent.slice(before).find((m) => (m.type === "lre.result" || m.type === "lre.error") && m.reqId === reqId);
     if (!reply) throw new Error(`no reply to ${String(request.type)}`);
@@ -44,10 +47,18 @@ export class RigConnection implements Connection {
   close(): void {}
 }
 
+/** The frontend session the client's requests come from. */
+export const CLI_SESSION = "s_cli";
+
 export interface CliRig {
   rig: Rig;
   conn: RigConnection;
   ctx: ToolContext;
+  /**
+   * The request types LumiRPEngine was asked as the client's session, in order: those the client sent
+   * and those a served tool sent in process for it (DESIGN §23), never `lre.tools` itself.
+   */
+  asked: string[];
   /** A tool's answer as data; a tool error fails the test with its text. */
   call(name: string, args?: Record<string, unknown>): Promise<Record<string, unknown>>;
   /** A tool's answer as it comes, error or not. */
@@ -57,6 +68,12 @@ export interface CliRig {
 /** The live tools over a fresh Rig, as one signed-in client. */
 export async function cliRig(options: RigOptions = {}): Promise<CliRig> {
   const rig = new Rig(options);
+  const asked: string[] = [];
+  const serve = rig.dispatch.serve.bind(rig.dispatch);
+  rig.dispatch.serve = (raw, userId, session, send) => {
+    if (session === CLI_SESSION && isRecord(raw) && typeof raw.type === "string" && raw.type !== "lre.tools") asked.push(raw.type);
+    return serve(raw, userId, session, send);
+  };
   const conn = new RigConnection(rig);
   expect(await conn.hello()).toMatchObject({ accepted: true });
   const live = new Live(conn);
@@ -68,5 +85,5 @@ export async function cliRig(options: RigOptions = {}): Promise<CliRig> {
     if (result.isError) throw new Error(`${name}: ${result.text}`);
     return JSON.parse(result.text) as Record<string, unknown>;
   };
-  return { rig, conn, ctx, call, raw };
+  return { rig, conn, ctx, asked, call, raw };
 }

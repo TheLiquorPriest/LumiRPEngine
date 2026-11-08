@@ -298,8 +298,8 @@ describe("the old pins", () => {
 
   test("a give pinned to Confirm before the change types makes a handover ask", async () => {
     const host = new FakeHost();
-    // Saved before the change types, with minds off as a test chat keeps them.
-    await host.storage.write("settings.json", JSON.stringify({ v: 1, minds: { enabled: false }, extraction: { give: { mode: "confirm" } } }), host.userId);
+    // Saved before the change types, with minds off and new chats on classic, as the rig's own file keeps a test chat (INC3 3a).
+    await host.storage.write("settings.json", JSON.stringify({ v: 1, minds: { enabled: false }, agents: { newChats: "classic" }, extraction: { give: { mode: "confirm" } } }), host.userId);
     const { rig, chatId } = await chat([["entities", TRUCK_KEYS]], host);
     expect((rig.body(await rig.send({ type: "lre.settings.get" })).extraction as JsonObject).item_hand).toMatchObject({ mode: "confirm", source: "pinned" });
     read(rig, [TOSSED]);

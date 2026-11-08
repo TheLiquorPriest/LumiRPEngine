@@ -53,6 +53,7 @@ import { listWorkspace, readWorkspaceFile } from "./tools/workspace";
 import { type AgentOp, batchKey, GM_ROLE, isKeptOp, type OpPreview, outsideWriter, type ToolWriter } from "./tools/writer";
 import { recordAgentCalls } from "./transcripts";
 import { emptyUsage } from "./usage";
+import { archiveTools } from "../depth/archive-tools";
 
 /** The assistant's role: its id in `AGENT_ROLES`, its budget's and caching's key, and its Diagnostics records' role. */
 export const ASSISTANT_ROLE = "assistant";
@@ -465,7 +466,9 @@ export class Assistant {
         throw new Error("the GM assistant's changes land from its proposals, on your Apply, never from its tools");
       },
     };
-    const tools = toolsFor({ world, tiers: TIERS, texts, env: { ...base, writer } }).map((tool) => this.watched(t, run, tool));
+    // The archive tools read the chat's own prose, as the GM reads it (DEPTH-PLAN §4.3).
+    const archive = archiveTools({ texts, world, state, source: { search: (q) => this.rt.archive.search(chatId, userId, q), quote: (r) => this.rt.archive.quote(chatId, userId, r) } });
+    const tools = [...toolsFor({ world, tiers: TIERS, texts, env: { ...base, writer } }), ...archive].map((tool) => this.watched(t, run, tool));
     const system = withInstructions([prompt, toolsGuide(tools, texts)].filter((s) => s.trim() !== "").join("\n\n"), instructions);
     const handle = startAgent({ role: ASSISTANT_ROLE, connectionId: own.connectionId, model: own.model, effort: own.effort, system, prefix: [], tools, budget: assistantBudget(agents), history }, { host: this.rt.host, userId, settings: agents, texts, accounts: this.rt.agentAccounts, turn: null });
     run.handle = handle;

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { initialUi } from "../../src/frontend/app";
 import { claimedThings, findEntities } from "../../src/frontend/gm/editor";
-import { gmAt, hideTruth, revealTruth } from "../../src/frontend/gm/gate";
+import { gmAt } from "../../src/frontend/gm/nav";
 import { placesInOrder } from "../../src/frontend/gm/sections";
 import { buildGmWorld } from "../../src/engine/gm-view";
 import { createRegistry } from "../../src/engine/registry-impl";
@@ -12,20 +12,18 @@ import type { WorldDoc } from "../../src/shared/world";
 import { modernUsWorld } from "../packs/riverton";
 import { startState } from "../packs/support";
 
-describe("the GM gate", () => {
-  test("Show the truth opens it, moving between sections keeps it, and Hide closes it where it was", () => {
-    const shown = gmAt(revealTruth(initialUi(false)), "economy.money");
-    expect(shown.gm).toEqual({ revealed: true, section: "economy.money" });
-    expect(gmAt(shown, "story").gm).toEqual({ revealed: true, section: "story" });
-    expect(hideTruth(shown).gm).toEqual({ revealed: false, section: "economy.money" });
+describe("GM mode's sections", () => {
+  test("nothing waits behind a gate (D-9): GM mode starts on World, and moving between sections only moves", () => {
+    const ui = initialUi(false);
+    expect(ui.gm).toEqual({ section: "world" });
+    const money = gmAt(ui, "economy.money");
+    expect(money.gm).toEqual({ section: "economy.money" });
+    expect(gmAt(money, "story").gm).toEqual({ section: "story" });
   });
 
   test("a transition that changes nothing keeps the same state, so nothing re-renders for it", () => {
     const ui = initialUi(false);
-    expect(hideTruth(ui)).toBe(ui);
     expect(gmAt(ui, "world")).toBe(ui);
-    const shown = revealTruth(ui);
-    expect(revealTruth(shown)).toBe(shown);
   });
 });
 

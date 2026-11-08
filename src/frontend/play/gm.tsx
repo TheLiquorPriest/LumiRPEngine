@@ -2,9 +2,9 @@
 // and removed entities included, with the editor. GM mode renders it for World, Places, Things
 // (ITEMS-SPEC §10.2) and Story, for each pack's tab (`UiRegistry.gm`: everyone's money is the
 // economy pack's, the characters' minds the minds pack's, the GM assistant and the workspace the
-// core pack's), and for This chat's Edits. Behind the gate in UI state (`ui.gm.revealed`): its data
-// is asked for only while the gate is open and dropped when it closes, so it never travels with the
-// player's state and nothing of it is drawn behind the gate. Each tab reads only its parts of the
+// core pack's), and for This chat's Edits. Nothing is hidden from the player (DEPTH-PLAN §1.4,
+// D-9): it shows as soon as GM mode opens. Its data is asked for only while it shows, so it never
+// travels with the player's state. Each tab reads only its parts of the
 // view (`lre.gm.part`, `use-gm-parts`), again when the chat moves on (`StateView.gmKey`); while a
 // turn runs the page may hold them as they were, with Refresh. Every change is one `lre.edit`:
 // checked against what it touches, all or none, one fix with its own Undo chip. Once one applies,
@@ -18,10 +18,8 @@ import { DEFAULT_CURRENCY } from "../../shared/world";
 import { useApp, useUi } from "../app";
 import { sendInChunks } from "../batch";
 import { Banner, Button, Empty, useBusy } from "../components";
-import { Gate, TruthBar } from "../gm/curtain";
 import type { BulkEditor, EditNotice } from "../gm/editor";
 import { editNotice, noticeStands, sendEdits } from "../gm/editor";
-import { hideTruth, revealTruth } from "../gm/gate";
 import { partsOf } from "../gm/parts";
 import { EditsLog, PlacesSection, StorySection } from "../gm/sections";
 import { ThingsSection } from "../gm/things";
@@ -44,18 +42,14 @@ export function gmReloadKey(state: Pick<StateView, "status" | "chips" | "journal
 
 export function GmPanel(props: PanelProps) {
   const app = useApp();
-  const revealed = useUi((ui) => ui.gm.revealed);
   const section = useUi((ui) => ui.gm.section);
   const [notice, setNotice] = useState<EditNotice | null>(null);
   const [busy, run] = useBusy();
   const pack = app.catalog.gmSections.find((def) => def.id === section);
-  // The open tab's parts, loaded when the gate opens and again when the chat moves on (a turn, an
-  // edit, an undo), or held while a turn runs; forgotten when it closes.
-  const page = useGmParts(app, props.chatId, revealed, partsOf(section, pack), props.state.gmKey ?? gmReloadKey(props.state), props.state.status);
-  useEffect(() => {
-    if (!revealed) setNotice(null);
-  }, [revealed, props.chatId]);
-  if (!revealed) return <Gate onReveal={() => app.ui.update(revealTruth)} />;
+  // The open tab's parts, loaded when it opens and again when the chat moves on (a turn, an edit,
+  // an undo), or held while a turn runs.
+  const page = useGmParts(app, props.chatId, partsOf(section, pack), props.state.gmKey ?? gmReloadKey(props.state), props.state.status);
+  useEffect(() => setNotice(null), [props.chatId]);
   /**
    * Sends edits through `sendAll`, each one `lre.edit`, and once any applied, reloads and says what
    * they did (`done`, from how many operations applied) with the Undo that takes back the edits
@@ -110,7 +104,6 @@ export function GmPanel(props: PanelProps) {
   const shown = gm && notice && noticeStands(notice, gm) ? notice : null;
   return (
     <div class="lre-stack lre-gm-truth-view" data-lre-panel="core.gm">
-      <TruthBar onHide={() => app.ui.update(hideTruth)} />
       {page.held ? (
         <div data-lre-gm-held="">
           <Banner

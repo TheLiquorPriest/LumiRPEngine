@@ -529,7 +529,7 @@ function Plans(props: { ctx: Ctx; c: MindsGmCharacter; open(change: Change): voi
                   {p.cents !== undefined ? <> · {formatMoney(p.cents, ctx.currency)}</> : null} · {p.fromText} · <span class="lre-gm-minds-keep">{formatMinutes(p.when.to - p.when.from)}</span>
                 </span>
                 <span>
-                  {[p.where ? `at ${nameIn(ctx.places, p.where)}` : null, p.with.length > 0 ? `with ${p.with.map((w) => nameIn(ctx.people, w)).join(", ")}` : null, `priority ${p.priority}`, p.source === "gm" ? "from you" : p.source === "mind" ? "a thought from their mind, which drives nothing" : `from their ${p.source}`, p.reason]
+                  {[p.where ? `at ${nameIn(ctx.places, p.where)}` : null, p.with.length > 0 ? `with ${p.with.map((w) => nameIn(ctx.people, w)).join(", ")}` : null, `priority ${p.priority}`, p.source === "gm" ? "from you" : p.source === "mind" ? "a thought from their mind, which drives nothing" : p.source === "agent" ? "their own, from what they wrote" : `from their ${p.source}`, p.reason]
                     .filter((part) => part !== null && part !== "")
                     .join(" · ")}
                 </span>

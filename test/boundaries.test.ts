@@ -166,9 +166,10 @@ describe("module boundaries", () => {
           } else if (!allowedLocal(from, to, edge.typeOnly, targetRel)) violations.push(`${rel} (${from.kind}) → ${targetRel} (${to.kind})${edge.typeOnly ? " [type]" : ""}`);
         } else if (edge.spec.startsWith("node:") || edge.spec.startsWith("bun:")) {
           // The CLI's entry is the one file that touches the disk, the terminal and the process; the
-          // backend's turn frame is the one that carries a turn's settings across its async work.
+          // backend's turn frame is the one that carries a turn's settings across its async work, and
+          // its host adapter the one that names the account Lumiverse runs as (`HostPort.account`).
           const spec = rel.split("\\").join("/");
-          if (!(spec === "cli/main.ts" && edge.spec.startsWith("node:")) && !(spec === "backend/turn-frame.ts" && edge.spec === "node:async_hooks")) violations.push(`${rel}: runtime module ${edge.spec} (only backend I/O may use host storage through HostPort, and only the CLI's entry may use node:, but for the turn frame's node:async_hooks)`);
+          if (!(spec === "cli/main.ts" && edge.spec.startsWith("node:")) && !(spec === "backend/turn-frame.ts" && edge.spec === "node:async_hooks") && !(spec === "backend/spindle-host.ts" && edge.spec === "node:os")) violations.push(`${rel}: runtime module ${edge.spec} (only backend I/O may use host storage through HostPort, and only the CLI's entry may use node:, but for the turn frame's node:async_hooks and the host adapter's node:os)`);
         } else {
           const rule = PACKAGES[from.kind][edge.spec];
           if (!rule) violations.push(`${rel} (${from.kind}): package ${edge.spec} not allowed`);

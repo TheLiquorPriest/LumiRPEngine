@@ -36,6 +36,8 @@ export class LiveFeeds {
   private readonly feeds = new Map<ChatId, Feed>();
   /** The pages watching each chat's live view, by `user \0 chat`, the chat asked about longest ago first. */
   private readonly watchers = new Map<string, Set<string>>();
+  /** Who hears each entry as it joins a chat's feed (the loopback's bridge: an agent's thinking streams into a loopback turn's thinking block, D-5). */
+  observer: ((chatId: ChatId, entry: LiveEntryBody) => void) | null = null;
 
   constructor(
     private readonly host: LiveHost,
@@ -90,6 +92,7 @@ export class LiveFeeds {
   /** An entry joins the feed, sent to the watching pages with the others made before the work yields. */
   add(feed: Feed, body: LiveEntryBody): void {
     feed.unsent.push({ ...body, seq: feed.view.entries.length + feed.unsent.length + 1, at: this.now() } as LiveEntry);
+    this.observer?.(feed.chatId, body);
     this.schedule(feed);
   }
 

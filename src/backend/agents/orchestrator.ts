@@ -255,13 +255,14 @@ export class Orchestrator {
    * turn that waited at a gate takes the run it left (`park`), when it is the same turn: the same
    * words on the same chain. A Re-run or a Retry of the same generation starts afresh, nothing of the
    * earlier run's draft kept. With the pipeline set to a main agent, the turn's main agent starts
-   * too, from the chain before the turn.
+   * too, from the chain before the turn. A depth scene's turn (`scene`) is never an agent turn: the
+   * scene does every role's and the main agent's work, its final review's included (DEPTH.md).
    */
-  async begin(input: { chatId: ChatId; userId: UserId; generationId: string; core: LedgerCore; observed: ChainMessage[]; text: string }): Promise<boolean> {
+  async begin(input: { chatId: ChatId; userId: UserId; generationId: string; core: LedgerCore; observed: ChainMessage[]; text: string; scene: boolean }): Promise<boolean> {
     this.drop(input.generationId);
     const parked = this.waiting.get(input.chatId);
     this.waiting.delete(input.chatId);
-    if ((await this.rt.chatKnowledge.engine(input.chatId, input.userId)) !== "agents") {
+    if (input.scene || (await this.rt.chatKnowledge.engine(input.chatId, input.userId)) !== "agents") {
       if (parked) this.release(parked);
       return false;
     }

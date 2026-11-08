@@ -3,8 +3,8 @@
 // knowledge can't see reads exactly as one that doesn't exist: "No such person here", never a hidden
 // name. What a model may write, tried in order, the first that names exactly one winning:
 // 1. its id, then its id in any case;
-// 2. its whole name in any case, spaces aside (a place's also as `placeKey` reads it: no article,
-//    no punctuation);
+// 2. its whole name as an answer may write it (`sameName`: case, spaces, underscores and hyphens
+//    aside; a place's also as `placeKey` reads it: no article, no punctuation);
 // 3. its whole name followed by a mark or a note, as an answer under `everyone` writes it
 //    ("Vex Morrow [secret; kept from everyone]");
 // 4. words that are all words of one name only ("Danny", "Marcus Delgado's").
@@ -24,6 +24,7 @@ import { holdsOf, isThing } from "../../../engine/things";
 import { TOOL_NOTE } from "../../../shared/agent-tools";
 import type { ToolOutcome } from "../runtime";
 import type { ToolReadView } from "./read-view";
+import { sameName } from "../../depth/common";
 
 /** A name resolved to the id it names, or the note the model is answered with. */
 export type Resolved = { id: string } | { refused: ToolOutcome };
@@ -49,7 +50,7 @@ function matches(said: string, candidates: readonly Candidate[], place: boolean,
   const rules: ((c: Candidate) => boolean)[] = [
     (c) => c.ids.includes(trimmed),
     (c) => c.ids.some((id) => id.toLowerCase() === lower),
-    (c) => c.names.some((n) => spaced(n) === spaced(trimmed) || (place && placeKey(n) !== "" && placeKey(n) === placeKey(trimmed))),
+    (c) => c.names.some((n) => sameName(trimmed, n) || (place && placeKey(n) !== "" && placeKey(n) === placeKey(trimmed))),
     (c) => c.names.some((n) => spaced(n) !== "" && spaced(trimmed).startsWith(spaced(n)) && /^[\s[({:;,·—-]/.test(spaced(trimmed).slice(spaced(n).length))),
     (c) => {
       const said = wordsOf(trimmed);
