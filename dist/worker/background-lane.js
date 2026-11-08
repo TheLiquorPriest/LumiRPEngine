@@ -48026,6 +48026,37 @@ function sceneOf(data) {
   return sceneProblem(data) === null ? data : null;
 }
 
+// src/shared/story-record.ts
+var STORY_RECORD = "story.record";
+var LEVELS2 = { volume: true, arc: true, chapter: true };
+function recordProblem(data) {
+  if (!isRecord(data))
+    return "a record must be an object";
+  if (data.source !== "lumibooks")
+    return "a record names the system it was imported from";
+  if (typeof data.entry !== "string" || data.entry === "")
+    return "a record names its entry";
+  if (typeof data.level !== "string" || !hasOwn(LEVELS2, data.level))
+    return "a record is a volume, an arc or a chapter";
+  if (typeof data.title !== "string")
+    return "a record has a title";
+  const r = data.range;
+  if (!Array.isArray(r) || r.length !== 2 || !r.every((n) => typeof n === "number" && Number.isInteger(n) && n >= 0) || r[0] > r[1])
+    return "a record spans messages, first to last";
+  if (typeof data.from !== "string" || data.from === "" || typeof data.to !== "string" || data.to === "")
+    return "a record names its first and last messages";
+  if (!isBlobHash(data.text))
+    return "a record's text must be a blob";
+  if (!Array.isArray(data.keys) || data.keys.some((k) => typeof k !== "string"))
+    return "a record's keys must be words";
+  if (data.parent !== undefined && (typeof data.parent !== "string" || data.parent === ""))
+    return "a record's parent is an entry";
+  return null;
+}
+function recordOf(data) {
+  return recordProblem(data) === null ? data : null;
+}
+
 // src/shared/story.ts
 var STORY_BEAT = "story.beat";
 var STORY_STAGING = "story.staging";
@@ -48073,7 +48104,9 @@ function sourceOk(v) {
     return false;
   const b = v.bootstrap;
   const span = b.span;
-  return isId2(b.message) && isId2(b.swipe) && (span === undefined || Array.isArray(span) && span.length === 2 && span.every((n) => typeof n === "number" && Number.isInteger(n) && n >= 0));
+  const spans = b.quotes;
+  const spanOk = (q) => isRecord(q) && isId2(q.message) && [q.from, q.to].every((n) => typeof n === "number" && Number.isInteger(n) && n >= 0) && q.to > q.from;
+  return isId2(b.message) && isId2(b.swipe) && (span === undefined || Array.isArray(span) && span.length === 2 && span.every((n) => typeof n === "number" && Number.isInteger(n) && n >= 0)) && (spans === undefined || Array.isArray(spans) && spans.every(spanOk));
 }
 function beatProblem(data) {
   if (!isRecord(data))
@@ -48293,6 +48326,25 @@ var storyTalkEvent = {
   }
 };
 
+// src/packs/story/core/record.ts
+var storyRecordEvent = {
+  type: STORY_RECORD,
+  neutral: true,
+  validate: (e) => {
+    if (e.group !== undefined || e.tiedTo !== undefined)
+      return { code: "story_grouped", reason: "a story event stands alone (no group)" };
+    const problem = recordProblem(e.data);
+    return problem === null ? null : { code: "bad_story_event", reason: problem };
+  },
+  apply: () => {},
+  describe: (e, _ctx, viewer) => {
+    if (viewer !== undefined)
+      return "";
+    const r = recordOf(e.data);
+    return r ? `imported ${r.level}: ${r.title} (messages ${r.range[0] + 1}\u2013${r.range[1] + 1})` : "an imported record";
+  }
+};
+
 // src/shared/depth-settings.ts
 var DEPTH_ROLES = ["author", "character", "gm", "check", "pov", "narrator", "historian", "realtime", "watch"];
 var DEPTH_ROLE_WORDS = Object.freeze({
@@ -48301,7 +48353,7 @@ var DEPTH_ROLE_WORDS = Object.freeze({
   gm: { label: "GM", help: "Resolves attempts by the rules, links beliefs to the world's truth, and reconciles imported memory." },
   check: { label: "Render check", help: "Checks each passage against its beat's canon before it streams." },
   pov: { label: "Point-of-view render", help: "Writes a character's own view of a beat that reached them only in part." },
-  narrator: { label: "Narrator", help: "Renders the decided beats as the reply, passage by passage." },
+  narrator: { label: "Narrator", help: "Renders the decided beats as the reply, passage by passage, with your preset's sampling; on a model of its own, the temperature, top P and answer room you set here go over your preset's." },
   historian: { label: "Historian", help: "Distils canon beats from the history written before depth (the bootstrap only)." },
   realtime: { label: "Real-time: the character", help: "The character's answer to each line while you talk with them in real time: what they say and do, from their own mind." },
   watch: { label: "Real-time: the author's watch", help: "The author reading each of your lines beside the character in real time: whether it can simply be answered or needs a full scene, and whether the world does anything." }
@@ -48316,7 +48368,7 @@ var DEPTH_TREATMENT_DEFS = Object.freeze({
 });
 var DEPTH_TREATMENTS = Object.freeze(Object.keys(DEPTH_TREATMENT_DEFS));
 var DEPTH_TREATMENT_LABEL = Object.freeze(Object.fromEntries(DEPTH_TREATMENTS.map((t) => [t, DEPTH_TREATMENT_DEFS[t].label])));
-var model = (effort, maxTokens) => Object.freeze({ connectionId: null, model: null, effort, maxTokens });
+var model = (effort, maxTokens) => Object.freeze({ connectionId: null, model: null, effort, maxTokens, temperature: null, topP: null });
 var STRONG_DEFAULT = model("high", 16384);
 var FAST_DEFAULT = model("low", 8192);
 var OWN_DEFAULT = model("inherit", 8192);
@@ -48811,6 +48863,7 @@ var storyPack = {
     r.event(storyBeatEvent);
     r.event(storyStagingEvent);
     r.event(storyStrikeEvent);
+    r.event(storyRecordEvent);
     r.event(storyPassageEvent);
     r.event(storyUnrenderedEvent);
     r.event(storySceneEvent);
@@ -51712,6 +51765,7 @@ var MIND_LIVED = "minds.v2.lived";
 var MIND_INTERVIEW = "minds.v2.interview";
 var MIND_POV = "minds.v2.pov";
 var MIND_TAKE = "minds.v2.take";
+var MIND_ASK = "minds.v2.ask";
 var PROBES_KEPT = 50;
 function pathName(id) {
   const name = id.replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^-+|-+$/g, "");
@@ -51856,6 +51910,16 @@ function mindTakeOf(data) {
     return "a take's text is a blob's hash";
   return { who, at: at2, lived: [...lived], ...beat !== undefined ? { beat } : {}, take };
 }
+function mindAskOf(data) {
+  const { who, at: at2, why: why2 } = data;
+  if (!str20(who))
+    return "an ask to reflect names whose it is";
+  if (!minute(at2))
+    return "an ask to reflect says the story minute it was asked at";
+  if (!str20(why2))
+    return "an ask to reflect says why, in its words";
+  return { who, at: at2, why: why2 };
+}
 var PLAN_MINUTES = 60;
 function agentPlan(who, at2, ref) {
   if (typeof ref.when !== "number" || !Number.isFinite(ref.when))
@@ -51977,12 +52041,15 @@ var write = {
       ...d.plans !== undefined ? { plans: d.plans } : {},
       ...d.supersedes !== undefined ? { supersedes: d.supersedes } : {},
       ...d.source !== undefined ? { source: d.source } : {},
-      ...d.review ? { review: true } : {}
+      ...d.review ? { review: true } : {},
+      ...d.mode === "user" && before !== undefined ? { was: before.hash } : {}
     };
     m.files[file.rel] = meta;
     if (d.supersedes !== undefined)
       m.superseded[d.supersedes] = true;
     m.writes += 1;
+    if (d.mode === "reflect")
+      delete m.asks;
     m.last = m.last === null ? d.at : Math.max(m.last, d.at);
     if (AGENT_MODES.includes(d.mode)) {
       const pov = povOf(ctx.world, state2);
@@ -52052,6 +52119,29 @@ var interview = {
     return typeof d === "string" ? "" : `${nameOf7(ctx, d.who)} interviewed by the ${d.by}${d.neutral ? ", folded into the mind" : ", kept as a probe"}`;
   }
 };
+var ask = {
+  type: MIND_ASK,
+  validate: (e, ctx) => {
+    const d = mindAskOf(e.data);
+    if (typeof d === "string")
+      return { code: "bad_event", reason: d };
+    if (!known(ctx, d.who))
+      return { code: "missing_entity", reason: `no one with the id ${d.who}` };
+    return d.who === povOf(ctx.world, ctx.state) ? { code: "player_character", reason: NO_AGENT } : null;
+  },
+  apply: (e, state2) => {
+    const d = mindAskOf(e.data);
+    if (typeof d === "string")
+      return;
+    writeMind(state2, d.who).asks = { at: d.at, why: d.why };
+  },
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined)
+      return "";
+    const d = mindAskOf(e.data);
+    return typeof d === "string" ? "" : `${nameOf7(ctx, d.who)} asks to reflect`;
+  }
+};
 var take = {
   type: MIND_TAKE,
   validate: (e, ctx) => {
@@ -52102,7 +52192,7 @@ var pov = {
   },
   describe: (e, ctx) => `The player now plays ${nameOf7(ctx, String(e.data.who))}`
 };
-var MIND_V2_EVENT_DEFS = [write, lived, take, interview, pov];
+var MIND_V2_EVENT_DEFS = [write, lived, take, ask, interview, pov];
 
 // src/packs/minds/core/index.ts
 var mindsPack = {
@@ -53114,13 +53204,13 @@ function settle4(ctx, rng, org, m, final) {
     return ended(ctx, org, m, "failed", `couldn't be carried out: ${carried.reason}`, s.tally);
   return [...ended(ctx, org, m, "passed", s.why, s.tally), ...carried];
 }
-function putToVote(ctx, ask) {
+function putToVote(ctx, ask2) {
   const e = ctx;
   if (e.params?.vote !== true)
     return null;
   if (!e.effect || !e.rng)
-    return refuse3("votes", `${ask.why}, and it can't be put to a vote from here`);
-  return openMotion(ctx, e.rng, { ...ask, what: e.effect });
+    return refuse3("votes", `${ask2.why}, and it can't be put to a vote from here`);
+  return openMotion(ctx, e.rng, { ...ask2, what: e.effect });
 }
 function openMotion(ctx, rng, o) {
   const { org } = o;
@@ -54797,14 +54887,14 @@ function orgsWithRequests(state2) {
 function requestState(ctx, r) {
   return r.status === "asked" && ctx.state.clock > r.until ? "lapsed" : r.status;
 }
-function chainOf(ctx, org, ask) {
+function chainOf(ctx, org, ask2) {
   const near = [];
-  const grant2 = orgPower(ctx, ask.by, org, ask.power);
+  const grant2 = orgPower(ctx, ask2.by, org, ask2.power);
   if (grant2?.basis === "delegate" && grant2.id !== undefined)
     near.push(grant2.id);
   const positions = positionsOf(ctx, org);
   const people = [...new Set(directMembers(ctx, org).map((r) => r.who))].sort();
-  const held3 = heldPositions(ctx, ask.by, org).map((h) => h.position.id);
+  const held3 = heldPositions(ctx, ask2.by, org).map((h) => h.position.id);
   const starts = grant2?.basis === "position" && grant2.id !== undefined ? [grant2.id, ...held3.filter((p) => p !== grant2.id)] : held3;
   for (const start of starts) {
     const seen = new Set([start]);
@@ -54817,15 +54907,15 @@ function chainOf(ctx, org, ask) {
   const governors = people.filter((p) => ["owner", "position"].includes(orgPower(ctx, p, org, "org.govern")?.basis ?? ""));
   const owners = ownersIn(own(ctx.state.entities, org)?.fields ?? {});
   const trustees = orgTypeOf(ctx, org) === "trust" ? owners.filter((o) => o.role === "trustee" && orgTypeOf(ctx, o.party) !== null).map((o) => o.party) : [];
-  const trusteeOf = (p) => controlPathOf(ctx, p, org, ask.power)?.steps.at(-1)?.holder ?? "";
-  const asker = trustees.length === 0 ? "" : trusteeOf(ask.by);
+  const trusteeOf = (p) => controlPathOf(ctx, p, org, ask2.power)?.steps.at(-1)?.holder ?? "";
+  const asker = trustees.length === 0 ? "" : trusteeOf(ask2.by);
   const through = trustees.length === 0 ? [] : Object.keys(ctx.state.entities).filter((p) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, p)?.kind ?? "", "person") && trustees.includes(trusteeOf(p)) && trusteeOf(p) !== asker);
   const top = [...new Set([...governors, ...owners.map((o) => o.party), ...through])].sort();
-  return [...new Set([...near, ...top])].filter((c) => c !== ask.by);
+  return [...new Set([...near, ...top])].filter((c) => c !== ask2.by);
 }
-function approversOf(ctx, org, ask) {
-  const limits = { ...ask.cents !== undefined ? { amount: ask.cents } : {}, ...ask.account !== undefined ? { account: ask.account } : {}, ...ask.target !== undefined ? { target: ask.target } : {}, approving: true };
-  return chainOf(ctx, org, ask).filter((c) => !isGone(ctx.state, c) && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, c)?.kind ?? "", "person") && acts(ctx.world, ctx.state, c) && mayAct(ctx, c, org, ask.power, limits).ok);
+function approversOf(ctx, org, ask2) {
+  const limits = { ...ask2.cents !== undefined ? { amount: ask2.cents } : {}, ...ask2.account !== undefined ? { account: ask2.account } : {}, ...ask2.target !== undefined ? { target: ask2.target } : {}, approving: true };
+  return chainOf(ctx, org, ask2).filter((c) => !isGone(ctx.state, c) && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, c)?.kind ?? "", "person") && acts(ctx.world, ctx.state, c) && mayAct(ctx, c, org, ask2.power, limits).ok);
 }
 function notApprover(ctx, org, r, who) {
   if (who === r.by)
@@ -54845,37 +54935,37 @@ function povIn2(ctx, r, answerer) {
   const pov2 = ctx.world.pov;
   return r.by === pov2 || r.approvers.includes(pov2) || answerer === pov2;
 }
-function askApproval(ctx, ask) {
+function askApproval(ctx, ask2) {
   const what = ctx.effect;
   if (!what)
-    return refuse6("not_allowed", `${ask.why}, and it can't be put up for approval from here`);
-  const approvers = approversOf(ctx, ask.org, ask);
+    return refuse6("not_allowed", `${ask2.why}, and it can't be put up for approval from here`);
+  const approvers = approversOf(ctx, ask2.org, ask2);
   if (approvers.length === 0)
-    return refuse6("not_allowed", `${ask.why}, and no one above you may approve it`);
-  const all2 = requestsOf(ctx.state, ask.org);
+    return refuse6("not_allowed", `${ask2.why}, and no one above you may approve it`);
+  const all2 = requestsOf(ctx.state, ask2.org);
   if (all2.filter((r2) => requestState(ctx, r2) === "asked").length >= ASKS_KEPT.open)
-    return refuse6("too_many", `${labelOf(ctx, ask.org)} has ${ASKS_KEPT.open} requests waiting already`);
+    return refuse6("too_many", `${labelOf(ctx, ask2.org)} has ${ASKS_KEPT.open} requests waiting already`);
   const at2 = ctx.state.clock;
-  const id = `r_${hashParts("orgs.ask", ask.org, ask.by, ask.text, String(at2), String(all2.length)).slice(0, 10)}`;
+  const id = `r_${hashParts("orgs.ask", ask2.org, ask2.by, ask2.text, String(at2), String(all2.length)).slice(0, 10)}`;
   const r = {
     id,
-    by: ask.by,
-    power: ask.power,
-    ...ask.cents !== undefined ? { cents: Math.round(ask.cents) } : {},
-    ...ask.account !== undefined ? { account: ask.account } : {},
-    ...ask.target !== undefined ? { target: ask.target } : {},
-    text: ask.text,
-    why: ask.why,
+    by: ask2.by,
+    power: ask2.power,
+    ...ask2.cents !== undefined ? { cents: Math.round(ask2.cents) } : {},
+    ...ask2.account !== undefined ? { account: ask2.account } : {},
+    ...ask2.target !== undefined ? { target: ask2.target } : {},
+    text: ask2.text,
+    why: ask2.why,
     what: { type: what.type, args: { ...what.args } },
     approvers,
     at: at2,
-    until: at2 + rulesOf2(ctx, ask.org).approvalDays * DAY4,
+    until: at2 + rulesOf2(ctx, ask2.org).approvalDays * DAY4,
     status: "asked"
   };
   const first = approvers[0] ?? "";
   return [
-    { type: ORGS_ASK, data: { org: ask.org, request: JSON.parse(JSON.stringify(r)), visibility: povIn2(ctx, r) ? "public" : "secret" } },
-    orgLog(ctx, ask.org, `${labelOf(ctx, ask.by)} asked ${labelOf(ctx, first)} to approve: ${ask.text} (${ask.why})`, { by: ask.by, names: [ask.by, first, ...ask.target !== undefined ? [ask.target] : [], ...actNames(ctx, what)], power: ask.power })
+    { type: ORGS_ASK, data: { org: ask2.org, request: JSON.parse(JSON.stringify(r)), visibility: povIn2(ctx, r) ? "public" : "secret" } },
+    orgLog(ctx, ask2.org, `${labelOf(ctx, ask2.by)} asked ${labelOf(ctx, first)} to approve: ${ask2.text} (${ask2.why})`, { by: ask2.by, names: [ask2.by, first, ...ask2.target !== undefined ? [ask2.target] : [], ...actNames(ctx, what)], power: ask2.power })
   ];
 }
 function answerEvents(ctx, a) {
@@ -57460,12 +57550,14 @@ var AUTHOR_SPEND = "author.spend";
 var AUTHOR_ASK = "author.ask";
 var AUTHOR_ANSWER = "author.answer";
 var AUTHOR_ADOPT = "author.adopt";
+var AUTHOR_VERDICT = "author.verdict";
 var AUTHOR_WORDS_MAX = 2000;
-var POLL_JOB_KINDS = ["catchup", "reflect", "author.reflect", "episode", "settle", "drop", "rebase"];
+var POLL_JOB_KINDS = ["catchup", "reflect", "interview", "author.reflect", "episode", "settle", "drop", "rebase"];
 var SCORE_OUTCOMES = ["hit", "miss", "partly"];
 var DRIFT_LEVELS = ["none", "some", "strong"];
 var SPEND_WORK = ["scene", "walk-on", "after", ...DEPTH_TREATMENTS];
 var SPEND_INTERVALS = ["day", "week", "month"];
+var VERDICTS = ["holds", "contradicts", "settle", "drop", "redraft", "redate"];
 var words7 = (v, empty = false) => typeof v === "string" && (empty || v.trim() !== "") && v.length <= AUTHOR_WORDS_MAX;
 var nonBlank3 = (v) => typeof v === "string" && v.trim() !== "";
 var count = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0;
@@ -57498,6 +57590,8 @@ function jobProblem(j) {
     return nonBlank3(j.episode) ? null : "an episode's job names its episode";
   if (j.kind === "settle" || j.kind === "drop" || j.kind === "rebase")
     return nonBlank3(j.draft) ? null : "a draft's job names its draft";
+  if (j.kind === "interview" && !nonBlank3(j.question))
+    return "an interview's job asks its question";
   return nonBlank3(j.who) ? null : "a character's job names who";
 }
 function authorProblem(type, data) {
@@ -57611,6 +57705,16 @@ function authorProblem(type, data) {
         return "an adoption lists the entries it landed, by id";
       return cited(data.waited) && cited(data.without) ? null : "an adoption names the work it waited for and went without, each with its message";
     }
+    case AUTHOR_VERDICT: {
+      if (!nonBlank3(data.draft))
+        return "a verdict names its draft";
+      const count2 = (v) => typeof v === "number" && Number.isInteger(v) && v >= 1;
+      if (!count2(data.page) || !count2(data.of) || data.page > data.of)
+        return "a verdict is on page n of m";
+      if (!VERDICTS.includes(data.verdict))
+        return `a verdict is one of ${VERDICTS.join(", ")}`;
+      return words7(data.span, true) && words7(data.why, true) && Array.isArray(data.forces) && data.forces.every((f) => words7(f)) ? null : "a verdict says its span, why, and what it forces, in words";
+    }
     default:
       return `${type} isn't an author's record`;
   }
@@ -57675,6 +57779,11 @@ var authorPack = {
     r.event(record3(AUTHOR_ADOPT, (e) => {
       const d = authorData(e, AUTHOR_ADOPT);
       return d ? `the turn waited for ${d.waited.length} piece(s) of work between turns, went on without ${d.without.length}` : "what the turn waited for";
+    }));
+    r.event(record3(AUTHOR_VERDICT, (e) => {
+      const d = authorData(e, AUTHOR_VERDICT);
+      const said2 = d?.verdict === "holds" ? "it holds" : d?.verdict === "contradicts" ? "it contradicts the draft" : d?.verdict;
+      return d ? `the author's verdict on page ${d.page} of ${d.of} of a draft's pins: ${said2}` : "the author's verdict on a draft's pins";
     }));
     r.event({
       type: AUTHOR_DROP,

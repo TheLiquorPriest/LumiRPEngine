@@ -50091,6 +50091,44 @@ function sceneBlobs(data) {
   return isRecord(data) && isBlobHash(data.note) ? [data.note] : [];
 }
 
+// src/shared/story-record.ts
+var STORY_RECORD = "story.record";
+var LEVELS2 = { volume: true, arc: true, chapter: true };
+function recordProblem(data) {
+  if (!isRecord(data))
+    return "a record must be an object";
+  if (data.source !== "lumibooks")
+    return "a record names the system it was imported from";
+  if (typeof data.entry !== "string" || data.entry === "")
+    return "a record names its entry";
+  if (typeof data.level !== "string" || !hasOwn(LEVELS2, data.level))
+    return "a record is a volume, an arc or a chapter";
+  if (typeof data.title !== "string")
+    return "a record has a title";
+  const r = data.range;
+  if (!Array.isArray(r) || r.length !== 2 || !r.every((n) => typeof n === "number" && Number.isInteger(n) && n >= 0) || r[0] > r[1])
+    return "a record spans messages, first to last";
+  if (typeof data.from !== "string" || data.from === "" || typeof data.to !== "string" || data.to === "")
+    return "a record names its first and last messages";
+  if (!isBlobHash(data.text))
+    return "a record's text must be a blob";
+  if (!Array.isArray(data.keys) || data.keys.some((k) => typeof k !== "string"))
+    return "a record's keys must be words";
+  if (data.parent !== undefined && (typeof data.parent !== "string" || data.parent === ""))
+    return "a record's parent is an entry";
+  return null;
+}
+function recordOf(data) {
+  return recordProblem(data) === null ? data : null;
+}
+function recordEvent(record2) {
+  return { type: STORY_RECORD, data: record2 };
+}
+function recordBlobs(data) {
+  const r = recordOf(data);
+  return r ? [r.text] : [];
+}
+
 // src/shared/story.ts
 var STORY_BEAT = "story.beat";
 var STORY_STAGING = "story.staging";
@@ -50141,7 +50179,9 @@ function sourceOk(v) {
     return false;
   const b = v.bootstrap;
   const span = b.span;
-  return isId2(b.message) && isId2(b.swipe) && (span === undefined || Array.isArray(span) && span.length === 2 && span.every((n) => typeof n === "number" && Number.isInteger(n) && n >= 0));
+  const spans = b.quotes;
+  const spanOk = (q) => isRecord(q) && isId2(q.message) && [q.from, q.to].every((n) => typeof n === "number" && Number.isInteger(n) && n >= 0) && q.to > q.from;
+  return isId2(b.message) && isId2(b.swipe) && (span === undefined || Array.isArray(span) && span.length === 2 && span.every((n) => typeof n === "number" && Number.isInteger(n) && n >= 0)) && (spans === undefined || Array.isArray(spans) && spans.every(spanOk));
 }
 function beatProblem(data) {
   if (!isRecord(data))
@@ -50274,6 +50314,8 @@ function storyBlobs(type, data) {
     return passageBlobs(data);
   if (type === STORY_SCENE)
     return sceneBlobs(data);
+  if (type === STORY_RECORD)
+    return recordBlobs(data);
   return [];
 }
 
@@ -50436,6 +50478,25 @@ var storyTalkEvent = {
   }
 };
 
+// src/packs/story/core/record.ts
+var storyRecordEvent = {
+  type: STORY_RECORD,
+  neutral: true,
+  validate: (e) => {
+    if (e.group !== undefined || e.tiedTo !== undefined)
+      return { code: "story_grouped", reason: "a story event stands alone (no group)" };
+    const problem = recordProblem(e.data);
+    return problem === null ? null : { code: "bad_story_event", reason: problem };
+  },
+  apply: () => {},
+  describe: (e, _ctx, viewer) => {
+    if (viewer !== undefined)
+      return "";
+    const r = recordOf(e.data);
+    return r ? `imported ${r.level}: ${r.title} (messages ${r.range[0] + 1}\u2013${r.range[1] + 1})` : "an imported record";
+  }
+};
+
 // src/shared/depth-settings.ts
 var DEPTH_ROLES = ["author", "character", "gm", "check", "pov", "narrator", "historian", "realtime", "watch"];
 var DEPTH_ROLE_WORDS = Object.freeze({
@@ -50444,7 +50505,7 @@ var DEPTH_ROLE_WORDS = Object.freeze({
   gm: { label: "GM", help: "Resolves attempts by the rules, links beliefs to the world's truth, and reconciles imported memory." },
   check: { label: "Render check", help: "Checks each passage against its beat's canon before it streams." },
   pov: { label: "Point-of-view render", help: "Writes a character's own view of a beat that reached them only in part." },
-  narrator: { label: "Narrator", help: "Renders the decided beats as the reply, passage by passage." },
+  narrator: { label: "Narrator", help: "Renders the decided beats as the reply, passage by passage, with your preset's sampling; on a model of its own, the temperature, top P and answer room you set here go over your preset's." },
   historian: { label: "Historian", help: "Distils canon beats from the history written before depth (the bootstrap only)." },
   realtime: { label: "Real-time: the character", help: "The character's answer to each line while you talk with them in real time: what they say and do, from their own mind." },
   watch: { label: "Real-time: the author's watch", help: "The author reading each of your lines beside the character in real time: whether it can simply be answered or needs a full scene, and whether the world does anything." }
@@ -50459,8 +50520,14 @@ var DEPTH_TREATMENT_DEFS = Object.freeze({
 });
 var DEPTH_TREATMENTS = Object.freeze(Object.keys(DEPTH_TREATMENT_DEFS));
 var DEPTH_TREATMENT_LABEL = Object.freeze(Object.fromEntries(DEPTH_TREATMENTS.map((t) => [t, DEPTH_TREATMENT_DEFS[t].label])));
+function narratorOverrides(depth2) {
+  const row = depth2.roles.narrator;
+  const own2 = row.own;
+  return row.uses === "own" ? { temperature: own2.temperature ?? null, topP: own2.topP ?? null, maxTokens: ownRoom(depth2, "narrator") } : { temperature: null, topP: null, maxTokens: null };
+}
+var DEPTH_TAKES_KEPT = 400;
 var DEPTH_ROOM_MOST = 1e6;
-var model = (effort, maxTokens) => Object.freeze({ connectionId: null, model: null, effort, maxTokens });
+var model = (effort, maxTokens) => Object.freeze({ connectionId: null, model: null, effort, maxTokens, temperature: null, topP: null });
 var STRONG_DEFAULT = model("high", 16384);
 var FAST_DEFAULT = model("low", 8192);
 var OWN_DEFAULT = model("inherit", 8192);
@@ -50488,7 +50555,8 @@ function defaultDepthSettings() {
       threshold: DEPTH_THRESHOLD_DEFAULT,
       level: "balanced",
       perTurn: 600000,
-      perDay: 30000000
+      perDay: 30000000,
+      onScreen: 100
     },
     window: { messages: 4, tokens: 8000 },
     thinking: "whole",
@@ -50496,9 +50564,14 @@ function defaultDepthSettings() {
     redrafts: 2,
     steps: 12,
     catchUpBatch: 40,
+    reached: 40,
+    episodeSteps: 8,
+    rereadBeats: 400,
+    takesKept: DEPTH_TAKES_KEPT,
+    reads: { sceneBeats: 60, others: 24, places: 60, watchBeats: 40, episodeBeats: 40, settleBeats: 200, pollBeats: 400, due: 24, narratorQuotes: 6, quoteWords: 120, quotesPerBeat: 8, quotesPerAnswer: 32 },
     realtime: "judged",
-    background: { on: true, atOnce: 2 },
-    bootstrap: { chunkTokens: 30000, atOnce: { minds: 3 }, mostMinds: 0, cap: { unit: "tokens", value: 20000000 }, sample: 5, pauseAfterWrong: 3 }
+    background: { on: true, offscreen: true, atOnce: 2 },
+    bootstrap: { chunkTokens: 60000, atOnce: { minds: 3 }, mostMinds: 0, cap: { unit: "tokens", value: 20000000 }, sample: 5, pauseAfterWrong: 3, returning: "auto" }
   };
 }
 var DEPTH_THRESHOLD_DEFAULT = "More than written when it could change what someone the player knows wants, believes or does, or when the player is likely to meet it soon.";
@@ -50515,6 +50588,7 @@ var DEPTH_REASONING = ["inherit", "off", "auto", "minimal", "low", "medium", "hi
 var int = (raw, min, max, base) => typeof raw === "number" && Number.isInteger(raw) && raw >= min && raw <= max ? raw : base;
 var limit = (raw, min, base) => raw === "none" ? "none" : typeof raw === "number" && Number.isInteger(raw) && raw >= min ? raw : base;
 var pick2 = (raw, options, base) => typeof raw === "string" && options.includes(raw) ? raw : base;
+var sampling = (raw, max, base) => raw === null ? null : typeof raw === "number" && Number.isFinite(raw) && raw >= 0 && raw <= max ? raw : base;
 function modelOf(raw, base) {
   if (!isRecord(raw))
     return { ...base };
@@ -50524,7 +50598,9 @@ function modelOf(raw, base) {
     connectionId,
     model: connectionId === null ? null : named ?? (raw.model === undefined && connectionId === base.connectionId ? base.model : null),
     effort: pick2(raw.effort, DEPTH_REASONING, base.effort),
-    maxTokens: int(raw.maxTokens, 256, DEPTH_ROOM_MOST, base.maxTokens)
+    maxTokens: int(raw.maxTokens, 256, DEPTH_ROOM_MOST, base.maxTokens),
+    temperature: sampling(raw.temperature, 2, base.temperature),
+    topP: sampling(raw.topP, 1, base.topP)
   };
 }
 function depthSettingsOf(raw, base = defaultDepthSettings()) {
@@ -50534,6 +50610,7 @@ function depthSettingsOf(raw, base = defaultDepthSettings()) {
   const a = isRecord(b.allowances) ? b.allowances : {};
   const w = isRecord(v.window) ? v.window : {};
   const bg = isRecord(v.background) ? v.background : {};
+  const rd = isRecord(v.reads) ? v.reads : {};
   const boot = isRecord(v.bootstrap) ? v.bootstrap : {};
   const at2 = isRecord(boot.atOnce) ? boot.atOnce : {};
   const rawCap = isRecord(boot.cap) ? boot.cap : {};
@@ -50554,7 +50631,8 @@ function depthSettingsOf(raw, base = defaultDepthSettings()) {
       threshold: typeof b.threshold === "string" ? b.threshold : base.budget.threshold,
       level: pick2(b.level, DEPTH_THRESHOLD_LEVELS, base.budget.level),
       perTurn: limit(b.perTurn, 1000, base.budget.perTurn),
-      perDay: limit(b.perDay, 1000, base.budget.perDay)
+      perDay: limit(b.perDay, 1000, base.budget.perDay),
+      onScreen: limit(b.onScreen, 0, base.budget.onScreen)
     },
     window: { messages: int(w.messages, 0, 200, base.window.messages), tokens: int(w.tokens, 0, 1e6, base.window.tokens) },
     thinking: pick2(v.thinking, ["whole", "progress"], base.thinking),
@@ -50562,15 +50640,34 @@ function depthSettingsOf(raw, base = defaultDepthSettings()) {
     redrafts: int(v.redrafts, 0, 10, base.redrafts),
     steps: int(v.steps, 1, 100, base.steps),
     catchUpBatch: int(v.catchUpBatch, 1, 1000, base.catchUpBatch),
+    reached: int(v.reached, 1, 1000, base.reached),
+    episodeSteps: int(v.episodeSteps, 1, 100, base.episodeSteps),
+    rereadBeats: int(v.rereadBeats, 10, 1e4, base.rereadBeats),
+    takesKept: int(v.takesKept, 20, 1e4, base.takesKept),
+    reads: {
+      sceneBeats: int(rd.sceneBeats, 5, 2000, base.reads.sceneBeats),
+      others: int(rd.others, 0, 500, base.reads.others),
+      watchBeats: int(rd.watchBeats, 5, 2000, base.reads.watchBeats),
+      episodeBeats: int(rd.episodeBeats, 5, 2000, base.reads.episodeBeats),
+      settleBeats: int(rd.settleBeats, 10, 1e4, base.reads.settleBeats),
+      pollBeats: int(rd.pollBeats, 10, 1e4, base.reads.pollBeats),
+      due: int(rd.due, 0, 500, base.reads.due),
+      places: int(rd.places, 1, 1000, base.reads.places),
+      narratorQuotes: int(rd.narratorQuotes, 0, 50, base.reads.narratorQuotes),
+      quoteWords: int(rd.quoteWords, 10, 1000, base.reads.quoteWords),
+      quotesPerBeat: int(rd.quotesPerBeat, 1, 100, base.reads.quotesPerBeat),
+      quotesPerAnswer: int(rd.quotesPerAnswer, 1, 1000, base.reads.quotesPerAnswer)
+    },
     realtime: pick2(v.realtime, ["judged", "chip"], base.realtime),
-    background: { on: typeof bg.on === "boolean" ? bg.on : base.background.on, atOnce: int(bg.atOnce, 1, 16, base.background.atOnce) },
+    background: { on: typeof bg.on === "boolean" ? bg.on : base.background.on, offscreen: typeof bg.offscreen === "boolean" ? bg.offscreen : base.background.offscreen, atOnce: int(bg.atOnce, 1, 16, base.background.atOnce) },
     bootstrap: {
       chunkTokens: int(boot.chunkTokens, 2000, 200000, base.bootstrap.chunkTokens),
       atOnce: { minds: int(at2.minds, 1, 16, base.bootstrap.atOnce.minds) },
       mostMinds: int(boot.mostMinds, 0, 500, base.bootstrap.mostMinds),
       cap,
       sample: int(boot.sample, 0, 50, base.bootstrap.sample),
-      pauseAfterWrong: int(boot.pauseAfterWrong, 1, 50, base.bootstrap.pauseAfterWrong)
+      pauseAfterWrong: int(boot.pauseAfterWrong, 1, 50, base.bootstrap.pauseAfterWrong),
+      returning: pick2(boot.returning, ["auto", "flag"], base.bootstrap.returning)
     }
   };
 }
@@ -50590,7 +50687,7 @@ function depthCall(settings, role) {
     model: own2 !== null ? m.model : settings.helper.model,
     effort: m.effort,
     maxTokens: m.maxTokens,
-    params: { ...settings.helper.params }
+    params: { ...settings.helper.params, ...m.temperature !== null ? { temperature: m.temperature } : {}, ...m.topP !== null ? { top_p: m.topP } : {} }
   };
 }
 
@@ -50724,15 +50821,19 @@ var bounded = (s) => {
   const t = s.trim();
   return t.length > EPISODE_WORDS_MAX ? `${t.slice(0, EPISODE_WORDS_MAX - 1)}\u2026` : t;
 };
+var asBlob = (s) => isBlobHash(s) ? s : blobHash(s.trim());
 function episodeData(e) {
   return {
     id: e.id,
     span: [e.span[0], e.span[1]],
     places: [...e.places],
     people: [...e.people],
-    why: bounded(e.why),
-    parts: e.parts.map((p) => ({ subject: "who" in p.subject ? { who: p.subject.who } : { event: bounded(p.subject.event) }, treatment: p.treatment, rationale: bounded(p.rationale) }))
+    why: asBlob(e.why),
+    parts: e.parts.map((p) => ({ subject: "who" in p.subject ? { who: p.subject.who } : { event: bounded(p.subject.event) }, treatment: p.treatment, rationale: asBlob(p.rationale) }))
   };
+}
+function draftTexts(d) {
+  return [d.episode.why, ...d.episode.parts.map((p) => p.rationale), d.summary].filter((s) => !isBlobHash(s)).map((s) => s.trim());
 }
 function draftEvent(d) {
   return {
@@ -50745,7 +50846,7 @@ function draftEvent(d) {
       beats: d.beats,
       effects: d.effects,
       touches: d.touches,
-      summary: bounded(d.summary)
+      summary: asBlob(d.summary)
     }
   };
 }
@@ -50758,10 +50859,13 @@ function dropEvent(d) {
 function episodeBlobs(type, data) {
   if (type !== STORY_DRAFT || !isRecord(data) || !Array.isArray(data.beats))
     return [];
-  return data.beats.flatMap((raw) => {
+  const beats = data.beats.flatMap((raw) => {
     const b = beatOf(raw);
     return b ? beatBlobs(b) : [];
   });
+  const ep = isRecord(data.episode) ? data.episode : {};
+  const texts = [ep.why, ...Array.isArray(ep.parts) ? ep.parts.map((p) => isRecord(p) ? p.rationale : undefined) : [], data.summary].filter(isBlobHash);
+  return [...beats, ...texts];
 }
 function settledIn(storySlice, id2) {
   return isRecord(storySlice) && isRecord(storySlice.settled) && hasOwn(storySlice.settled, id2);
@@ -51245,6 +51349,7 @@ var storyPack = {
     r.event(storyBeatEvent);
     r.event(storyStagingEvent);
     r.event(storyStrikeEvent);
+    r.event(storyRecordEvent);
     r.event(storyPassageEvent);
     r.event(storyUnrenderedEvent);
     r.event(storySceneEvent);
@@ -54296,7 +54401,8 @@ var MIND_LIVED = "minds.v2.lived";
 var MIND_INTERVIEW = "minds.v2.interview";
 var MIND_POV = "minds.v2.pov";
 var MIND_TAKE = "minds.v2.take";
-var TAKES_KEPT = 400;
+var MIND_ASK = "minds.v2.ask";
+var MIND_ASK_WORDS_MAX = 400;
 var PROBES_KEPT = 50;
 function pathName(id2) {
   const name = id2.replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^-+|-+$/g, "");
@@ -54487,6 +54593,20 @@ function mindLivedEvent(data) {
 function mindTakeEvent(d) {
   const take = blobHash(d.take);
   return { event: { type: MIND_TAKE, data: { who: d.who, at: d.at, lived: [...d.lived], ...d.beat !== undefined ? { beat: d.beat } : {}, take } }, blobs: { [take]: d.take } };
+}
+function mindAskOf(data) {
+  const { who, at: at2, why: why2 } = data;
+  if (!str20(who))
+    return "an ask to reflect names whose it is";
+  if (!minute(at2))
+    return "an ask to reflect says the story minute it was asked at";
+  if (!str20(why2))
+    return "an ask to reflect says why, in its words";
+  return { who, at: at2, why: why2 };
+}
+function mindAskEvent(d) {
+  const why2 = d.why.trim();
+  return { type: MIND_ASK, data: { who: d.who, at: d.at, why: why2.length > MIND_ASK_WORDS_MAX ? `${why2.slice(0, MIND_ASK_WORDS_MAX - 1)}\u2026` : why2 } };
 }
 function mindBlobs(type, data) {
   if (!isRecord(data))
@@ -54773,12 +54893,15 @@ var write = {
       ...d.plans !== undefined ? { plans: d.plans } : {},
       ...d.supersedes !== undefined ? { supersedes: d.supersedes } : {},
       ...d.source !== undefined ? { source: d.source } : {},
-      ...d.review ? { review: true } : {}
+      ...d.review ? { review: true } : {},
+      ...d.mode === "user" && before !== undefined ? { was: before.hash } : {}
     };
     m.files[file.rel] = meta;
     if (d.supersedes !== undefined)
       m.superseded[d.supersedes] = true;
     m.writes += 1;
+    if (d.mode === "reflect")
+      delete m.asks;
     m.last = m.last === null ? d.at : Math.max(m.last, d.at);
     if (AGENT_MODES.includes(d.mode)) {
       const pov = povOf(ctx.world, state2);
@@ -54848,6 +54971,29 @@ var interview = {
     return typeof d === "string" ? "" : `${nameOf8(ctx, d.who)} interviewed by the ${d.by}${d.neutral ? ", folded into the mind" : ", kept as a probe"}`;
   }
 };
+var ask = {
+  type: MIND_ASK,
+  validate: (e, ctx) => {
+    const d = mindAskOf(e.data);
+    if (typeof d === "string")
+      return { code: "bad_event", reason: d };
+    if (!known(ctx, d.who))
+      return { code: "missing_entity", reason: `no one with the id ${d.who}` };
+    return d.who === povOf(ctx.world, ctx.state) ? { code: "player_character", reason: NO_AGENT } : null;
+  },
+  apply: (e, state2) => {
+    const d = mindAskOf(e.data);
+    if (typeof d === "string")
+      return;
+    writeMind(state2, d.who).asks = { at: d.at, why: d.why };
+  },
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined)
+      return "";
+    const d = mindAskOf(e.data);
+    return typeof d === "string" ? "" : `${nameOf8(ctx, d.who)} asks to reflect`;
+  }
+};
 var take = {
   type: MIND_TAKE,
   validate: (e, ctx) => {
@@ -54898,7 +55044,7 @@ var pov = {
   },
   describe: (e, ctx) => `The player now plays ${nameOf8(ctx, String(e.data.who))}`
 };
-var MIND_V2_EVENT_DEFS = [write, lived, take, interview, pov];
+var MIND_V2_EVENT_DEFS = [write, lived, take, ask, interview, pov];
 
 // src/packs/minds/core/index.ts
 var mindsPack = {
@@ -56026,13 +56172,13 @@ function settle4(ctx, rng, org, m, final) {
     return ended(ctx, org, m, "failed", `couldn't be carried out: ${carried.reason}`, s.tally);
   return [...ended(ctx, org, m, "passed", s.why, s.tally), ...carried];
 }
-function putToVote(ctx, ask) {
+function putToVote(ctx, ask2) {
   const e = ctx;
   if (e.params?.vote !== true)
     return null;
   if (!e.effect || !e.rng)
-    return refuse3("votes", `${ask.why}, and it can't be put to a vote from here`);
-  return openMotion(ctx, e.rng, { ...ask, what: e.effect });
+    return refuse3("votes", `${ask2.why}, and it can't be put to a vote from here`);
+  return openMotion(ctx, e.rng, { ...ask2, what: e.effect });
 }
 function openMotion(ctx, rng, o) {
   const { org } = o;
@@ -57709,14 +57855,14 @@ function orgsWithRequests(state2) {
 function requestState(ctx, r) {
   return r.status === "asked" && ctx.state.clock > r.until ? "lapsed" : r.status;
 }
-function chainOf(ctx, org, ask) {
+function chainOf(ctx, org, ask2) {
   const near = [];
-  const grant2 = orgPower(ctx, ask.by, org, ask.power);
+  const grant2 = orgPower(ctx, ask2.by, org, ask2.power);
   if (grant2?.basis === "delegate" && grant2.id !== undefined)
     near.push(grant2.id);
   const positions = positionsOf(ctx, org);
   const people = [...new Set(directMembers(ctx, org).map((r) => r.who))].sort();
-  const held3 = heldPositions(ctx, ask.by, org).map((h) => h.position.id);
+  const held3 = heldPositions(ctx, ask2.by, org).map((h) => h.position.id);
   const starts = grant2?.basis === "position" && grant2.id !== undefined ? [grant2.id, ...held3.filter((p) => p !== grant2.id)] : held3;
   for (const start of starts) {
     const seen = new Set([start]);
@@ -57729,15 +57875,15 @@ function chainOf(ctx, org, ask) {
   const governors = people.filter((p) => ["owner", "position"].includes(orgPower(ctx, p, org, "org.govern")?.basis ?? ""));
   const owners = ownersIn(own(ctx.state.entities, org)?.fields ?? {});
   const trustees = orgTypeOf(ctx, org) === "trust" ? owners.filter((o) => o.role === "trustee" && orgTypeOf(ctx, o.party) !== null).map((o) => o.party) : [];
-  const trusteeOf = (p) => controlPathOf(ctx, p, org, ask.power)?.steps.at(-1)?.holder ?? "";
-  const asker = trustees.length === 0 ? "" : trusteeOf(ask.by);
+  const trusteeOf = (p) => controlPathOf(ctx, p, org, ask2.power)?.steps.at(-1)?.holder ?? "";
+  const asker = trustees.length === 0 ? "" : trusteeOf(ask2.by);
   const through = trustees.length === 0 ? [] : Object.keys(ctx.state.entities).filter((p) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, p)?.kind ?? "", "person") && trustees.includes(trusteeOf(p)) && trusteeOf(p) !== asker);
   const top = [...new Set([...governors, ...owners.map((o) => o.party), ...through])].sort();
-  return [...new Set([...near, ...top])].filter((c) => c !== ask.by);
+  return [...new Set([...near, ...top])].filter((c) => c !== ask2.by);
 }
-function approversOf(ctx, org, ask) {
-  const limits = { ...ask.cents !== undefined ? { amount: ask.cents } : {}, ...ask.account !== undefined ? { account: ask.account } : {}, ...ask.target !== undefined ? { target: ask.target } : {}, approving: true };
-  return chainOf(ctx, org, ask).filter((c) => !isGone(ctx.state, c) && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, c)?.kind ?? "", "person") && acts(ctx.world, ctx.state, c) && mayAct(ctx, c, org, ask.power, limits).ok);
+function approversOf(ctx, org, ask2) {
+  const limits = { ...ask2.cents !== undefined ? { amount: ask2.cents } : {}, ...ask2.account !== undefined ? { account: ask2.account } : {}, ...ask2.target !== undefined ? { target: ask2.target } : {}, approving: true };
+  return chainOf(ctx, org, ask2).filter((c) => !isGone(ctx.state, c) && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, c)?.kind ?? "", "person") && acts(ctx.world, ctx.state, c) && mayAct(ctx, c, org, ask2.power, limits).ok);
 }
 function notApprover(ctx, org, r, who) {
   if (who === r.by)
@@ -57757,37 +57903,37 @@ function povIn2(ctx, r, answerer) {
   const pov2 = ctx.world.pov;
   return r.by === pov2 || r.approvers.includes(pov2) || answerer === pov2;
 }
-function askApproval(ctx, ask) {
+function askApproval(ctx, ask2) {
   const what = ctx.effect;
   if (!what)
-    return refuse6("not_allowed", `${ask.why}, and it can't be put up for approval from here`);
-  const approvers = approversOf(ctx, ask.org, ask);
+    return refuse6("not_allowed", `${ask2.why}, and it can't be put up for approval from here`);
+  const approvers = approversOf(ctx, ask2.org, ask2);
   if (approvers.length === 0)
-    return refuse6("not_allowed", `${ask.why}, and no one above you may approve it`);
-  const all2 = requestsOf(ctx.state, ask.org);
+    return refuse6("not_allowed", `${ask2.why}, and no one above you may approve it`);
+  const all2 = requestsOf(ctx.state, ask2.org);
   if (all2.filter((r2) => requestState(ctx, r2) === "asked").length >= ASKS_KEPT.open)
-    return refuse6("too_many", `${labelOf(ctx, ask.org)} has ${ASKS_KEPT.open} requests waiting already`);
+    return refuse6("too_many", `${labelOf(ctx, ask2.org)} has ${ASKS_KEPT.open} requests waiting already`);
   const at2 = ctx.state.clock;
-  const id2 = `r_${hashParts("orgs.ask", ask.org, ask.by, ask.text, String(at2), String(all2.length)).slice(0, 10)}`;
+  const id2 = `r_${hashParts("orgs.ask", ask2.org, ask2.by, ask2.text, String(at2), String(all2.length)).slice(0, 10)}`;
   const r = {
     id: id2,
-    by: ask.by,
-    power: ask.power,
-    ...ask.cents !== undefined ? { cents: Math.round(ask.cents) } : {},
-    ...ask.account !== undefined ? { account: ask.account } : {},
-    ...ask.target !== undefined ? { target: ask.target } : {},
-    text: ask.text,
-    why: ask.why,
+    by: ask2.by,
+    power: ask2.power,
+    ...ask2.cents !== undefined ? { cents: Math.round(ask2.cents) } : {},
+    ...ask2.account !== undefined ? { account: ask2.account } : {},
+    ...ask2.target !== undefined ? { target: ask2.target } : {},
+    text: ask2.text,
+    why: ask2.why,
     what: { type: what.type, args: { ...what.args } },
     approvers,
     at: at2,
-    until: at2 + rulesOf2(ctx, ask.org).approvalDays * DAY4,
+    until: at2 + rulesOf2(ctx, ask2.org).approvalDays * DAY4,
     status: "asked"
   };
   const first = approvers[0] ?? "";
   return [
-    { type: ORGS_ASK, data: { org: ask.org, request: JSON.parse(JSON.stringify(r)), visibility: povIn2(ctx, r) ? "public" : "secret" } },
-    orgLog(ctx, ask.org, `${labelOf(ctx, ask.by)} asked ${labelOf(ctx, first)} to approve: ${ask.text} (${ask.why})`, { by: ask.by, names: [ask.by, first, ...ask.target !== undefined ? [ask.target] : [], ...actNames(ctx, what)], power: ask.power })
+    { type: ORGS_ASK, data: { org: ask2.org, request: JSON.parse(JSON.stringify(r)), visibility: povIn2(ctx, r) ? "public" : "secret" } },
+    orgLog(ctx, ask2.org, `${labelOf(ctx, ask2.by)} asked ${labelOf(ctx, first)} to approve: ${ask2.text} (${ask2.why})`, { by: ask2.by, names: [ask2.by, first, ...ask2.target !== undefined ? [ask2.target] : [], ...actNames(ctx, what)], power: ask2.power })
   ];
 }
 function answerEvents(ctx, a) {
@@ -60644,12 +60790,14 @@ var AUTHOR_SPEND = "author.spend";
 var AUTHOR_ASK = "author.ask";
 var AUTHOR_ANSWER = "author.answer";
 var AUTHOR_ADOPT = "author.adopt";
+var AUTHOR_VERDICT = "author.verdict";
 var AUTHOR_WORDS_MAX = 2000;
-var POLL_JOB_KINDS = ["catchup", "reflect", "author.reflect", "episode", "settle", "drop", "rebase"];
+var POLL_JOB_KINDS = ["catchup", "reflect", "interview", "author.reflect", "episode", "settle", "drop", "rebase"];
 var SCORE_OUTCOMES = ["hit", "miss", "partly"];
 var DRIFT_LEVELS = ["none", "some", "strong"];
 var SPEND_WORK = ["scene", "walk-on", "after", ...DEPTH_TREATMENTS];
 var SPEND_INTERVALS = ["day", "week", "month"];
+var VERDICTS = ["holds", "contradicts", "settle", "drop", "redraft", "redate"];
 var words7 = (v, empty = false) => typeof v === "string" && (empty || v.trim() !== "") && v.length <= AUTHOR_WORDS_MAX;
 var nonBlank3 = (v) => typeof v === "string" && v.trim() !== "";
 var count = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0;
@@ -60682,6 +60830,8 @@ function jobProblem(j) {
     return nonBlank3(j.episode) ? null : "an episode's job names its episode";
   if (j.kind === "settle" || j.kind === "drop" || j.kind === "rebase")
     return nonBlank3(j.draft) ? null : "a draft's job names its draft";
+  if (j.kind === "interview" && !nonBlank3(j.question))
+    return "an interview's job asks its question";
   return nonBlank3(j.who) ? null : "a character's job names who";
 }
 function authorProblem(type, data) {
@@ -60795,6 +60945,16 @@ function authorProblem(type, data) {
         return "an adoption lists the entries it landed, by id";
       return cited(data.waited) && cited(data.without) ? null : "an adoption names the work it waited for and went without, each with its message";
     }
+    case AUTHOR_VERDICT: {
+      if (!nonBlank3(data.draft))
+        return "a verdict names its draft";
+      const count2 = (v) => typeof v === "number" && Number.isInteger(v) && v >= 1;
+      if (!count2(data.page) || !count2(data.of) || data.page > data.of)
+        return "a verdict is on page n of m";
+      if (!VERDICTS.includes(data.verdict))
+        return `a verdict is one of ${VERDICTS.join(", ")}`;
+      return words7(data.span, true) && words7(data.why, true) && Array.isArray(data.forces) && data.forces.every((f) => words7(f)) ? null : "a verdict says its span, why, and what it forces, in words";
+    }
     default:
       return `${type} isn't an author's record`;
   }
@@ -60814,6 +60974,8 @@ function pollEvent(d) {
         return { kind: j.kind, episode: j.episode, why: bounded2(j.why) };
       if ("draft" in j)
         return { kind: j.kind, draft: j.draft, why: bounded2(j.why) };
+      if (j.kind === "interview")
+        return { kind: j.kind, who: j.who, question: bounded2(j.question), why: bounded2(j.why) };
       return { kind: j.kind, who: j.who, why: bounded2(j.why) };
     })
   };
@@ -60860,6 +61022,9 @@ function answerEvent(d) {
 function adoptEvent(d) {
   const list2 = (l) => l.map((c) => ({ what: bounded2(c.what), message: c.message }));
   return { type: AUTHOR_ADOPT, data: { waited: list2(d.waited), without: list2(d.without), entries: [...d.entries] } };
+}
+function verdictEvent(d) {
+  return { type: AUTHOR_VERDICT, data: { draft: d.draft, page: d.page, of: d.of, span: bounded2(d.span), verdict: d.verdict, why: bounded2(d.why), forces: d.forces.map(bounded2) } };
 }
 function authorData(e, type) {
   return e.type === type && authorProblem(type, e.data) === null ? e.data : null;
@@ -60928,6 +61093,11 @@ var authorPack = {
     r.event(record3(AUTHOR_ADOPT, (e) => {
       const d = authorData(e, AUTHOR_ADOPT);
       return d ? `the turn waited for ${d.waited.length} piece(s) of work between turns, went on without ${d.without.length}` : "what the turn waited for";
+    }));
+    r.event(record3(AUTHOR_VERDICT, (e) => {
+      const d = authorData(e, AUTHOR_VERDICT);
+      const said2 = d?.verdict === "holds" ? "it holds" : d?.verdict === "contradicts" ? "it contradicts the draft" : d?.verdict;
+      return d ? `the author's verdict on page ${d.page} of ${d.of} of a draft's pins: ${said2}` : "the author's verdict on a draft's pins";
     }));
     r.event({
       type: AUTHOR_DROP,
@@ -94295,6 +94465,7 @@ var CHARACTER_TEXT = {
   povAgain: "character.pov.again",
   povMissing: "character.pov.missing",
   povAgainAnswer: "character.pov.again_answer",
+  povCheck: "character.pov.check",
   coreCard: "character.core.card",
   coreWorld: "character.core.world"
 };
@@ -94319,7 +94490,8 @@ var PLAY_ANSWER = `Answer with one JSON object and nothing else:
  "attempt": "what you try to bring about, in a few plain words, when it could fail or needs the world's answer (\\"pick the lock\\", \\"talk the guard into letting me pass\\"); never why; else null",
  "take": "your own take, in the first person, which no one else ever reads: what you noticed, what you make of it, how it lands with you",
  "now": "how you are right now, rewritten whole: your mood and how stirred up you are, what's on your mind this minute, what you're doing and watching; or null to leave it",
- "keep": "a memory you keep right now, in your own words, because this will stay with you; else null"}`;
+ "keep": "a memory you keep right now, in your own words, because this will stay with you; else null",
+ "reflect": "when you need to stop and take stock of who you are becoming, a few words on why, in your own voice; else null"}`;
 var PLANNED = '{"what": "a plan in a few words", "kind": "errand, meet, visit, work, rest, leisure, pay, lend or other", "when": "when it starts, as YYYY-MM-DD HH:MM, or your words", "until": "when it ends, as YYYY-MM-DD HH:MM, if you know", "where": "a place id, or leave it out", "with": ["the ids of who it is with"], "amount": "what it hands over, for a payment or a loan"}';
 var KEEP_ANSWER = `Answer with one JSON object and nothing else:
 {"memories": [{"lived": ["the ids of the beats this memory draws on, from those above"], "about": ["the ids of the people and places it is about"], "text": "the memory in your own words: what happened as you lived it, what you noticed, what you made of it, how it felt, and whether it will stay with you"}],
@@ -94328,11 +94500,12 @@ var KEEP_ANSWER = `Answer with one JSON object and nothing else:
  "plans": "your whole plans, rewritten: what you mean to do, when, where and with whom, and the promises you made and took; or null",
  "planned": [${PLANNED}],
  "now": "how you are right now: your mood and how stirred up you are, what's on your mind this minute, what you're doing and watching; or null",
- "on_my_mind": "what you keep in mind now, whole: the memories, beliefs, people and plans that matter to you now; or null"}
+ "on_my_mind": "what you keep in mind now, whole: the memories, beliefs, people and plans that matter to you now; or null",
+ "cites": {"<a file you rewrote: beliefs, plans, now, on_my_mind, or a person's id>": ["the ids of the beats above that file draws on"]}}
 Use [], {} or null for whatever you leave as it is. Files you don't write stay as they are. List in "planned" each plan with a time that you make now; the ones you made before still stand until they are done.`;
-var VERDICTS = `"rewrites": {"<a file's path, as listed under What you wrote from it>": {"verdict": "keep"} to keep the file as it is, or {"verdict": "rewrite", "text": "the file rewritten whole"}}, one for each file listed`;
-var REWRITE_ANSWER = `Add to that object ${VERDICTS}.`;
-var REWRITE_AGAIN = `Your answer gave no verdict on the files under What you wrote from it. Answer with one JSON object and nothing else: {${VERDICTS}}. A file you leave without a verdict again stays out of your mind.`;
+var VERDICTS2 = `"rewrites": {"<a file's path, as listed under What you wrote from it>": {"verdict": "keep"} to keep the file as it is, or {"verdict": "rewrite", "text": "the file rewritten whole"}}, one for each file listed`;
+var REWRITE_ANSWER = `Add to that object ${VERDICTS2}.`;
+var REWRITE_AGAIN = `Your answer gave no verdict on the files under What you wrote from it. Answer with one JSON object and nothing else: {${VERDICTS2}}. A file you leave without a verdict again stays out of your mind.`;
 var REFLECT_ANSWER = `Answer with one JSON object and nothing else:
 {"self": "your story of yourself, rewritten: who you are becoming, what you want and what you fear; or null",
  "on_my_mind": "what you keep in mind now, whole; or null",
@@ -94345,9 +94518,9 @@ Use [], {} or null for whatever you leave as it is.`;
 var INTERVIEW_ANSWER = 'Answer with one JSON object and nothing else: {"answer": "what you say, in your own voice", "self": "your story of yourself rewritten, if answering changed how you see yourself; else null"}';
 var POV_SYSTEM = `You write points of view. You are given what was there to sense at one moment of a story (what could be seen and heard, the exact words said or written, if any) and, for each person, what they could sense of where everyone was as that moment began: their own position, what they were doing and what blocked their view or hearing, and as far as their senses reached, where the others were and, where they could see them, what they were doing. You are never told what happened in truth, and you never guess it.
 ` + `For each person listed, write only what reached them from where they were, in the order it reached their senses, in plain words, to them as "you". Don't say what matters or what it means: noticing is theirs. Partial where it was partial (a muffled voice, a glimpse, half a sentence), never false, and never anything they could not have sensed from where they were. Exact words only where they could make them out.
-` + `What happened at that moment is only what was there to sense, and for someone's own act what they did, where their part says it. Where everyone was tells you where things stood as it began, never what anyone did: tell no act from it, theirs or anyone's, and nothing from before or after that moment.
+` + `What happened at that moment is only what was there to sense. Where everyone was tells you where things stood as it began, never what anyone did: tell no act from it, theirs or anyone's, and nothing from before or after that moment.
 ` + `Each person comes with the people of that moment and how they may name each: by the name given, the one they know that person by; with no name, someone they don't know, whom you tell only as that person appears to them (a woman in a rain jacket, a voice behind the door). Name no one in any other way: not anyone else they know, not by an id, and not by a name you read in what was there to sense or where everyone was. A name inside the exact words stays as it was said or written.
-` + `Where it is their own act, tell it from the inside, as the one doing it: what they did and said, and what reached them as they did it; never how they looked to anyone there. What someone did, as they did it, reaches no one else beyond what was there to sense.
+` + `Where it is their own act, tell it from the inside, as the one doing it: what they did and said, as far as what was there to sense shows it, and what reached them as they did it; never how they looked to anyone there.
 ` + "Where it reached them by message and isn't their own act, it is a message they received: write only what it said, as much of it as reached them, and that it came to them; nothing of where it was sent from or of anyone there.";
 var POV_ANSWER = `Answer with one JSON object and nothing else: {"povs": {"<a person's id>": "what reached them"}}, one entry for each person listed.`;
 var POV_AGAIN = `These points of view named someone who wasn't there, by a name the person knows:
@@ -94357,6 +94530,8 @@ var POV_MISSING = `Your answer has no point of view for these people:
 {{who}}
 Write one for each, from what reached them.`;
 var POV_AGAIN_ANSWER = `Answer with one JSON object and nothing else: {"povs": {"<a person's id>": "what reached them"}}, one entry for each person named here.`;
+var POV_CHECK = `You are the GM, checking the point-of-view render's work out of world. Each point of view below, asked for twice, still names someone who wasn't there by a name its person knows (the names follow it). Judge each against what was there to sense, the exact words and whom its person may name: accept it as written where those names are rightly used (someone there speaks of them, or the person thinks of them), cut what names them, or rewrite it so it names no one but as listed for its person and tells nothing they couldn't sense.
+` + `Answer with one JSON object and nothing else: {"povs": {"<a person's id>": "the point of view as it should stand: as written where you accept it, else cut or rewritten"}}, one entry for each person named here; leave out anyone whose point of view you can neither accept nor set right.`;
 var CORE_CARD = `# {{name}}
 
 {{description}}
@@ -94396,11 +94571,12 @@ var CHARACTER_PROMPTS = [
   { id: CHARACTER_TEXT.rewriteAgain, page: CHARACTER_PROMPT_PAGE.id, group: "Answers", label: "Rewrite after a correction: asked again", note: "Asked once more, alone, when the catch-up's answer gave no verdict on some of the files it was handed. A file still without one stays out of the character's mind and its recall, flagged in GM \u2192 Minds.", text: REWRITE_AGAIN, vars: [] },
   { id: CHARACTER_TEXT.reflectAnswer, page: CHARACTER_PROMPT_PAGE.id, group: "Answers", label: "Reflect: the answer", note: "The answer's shape for a reflection: the files the character rewrites.", text: REFLECT_ANSWER, vars: [] },
   { id: CHARACTER_TEXT.interviewAnswer, page: CHARACTER_PROMPT_PAGE.id, group: "Answers", label: "Interview: the answer", note: "The answer's shape for an interview: what it says, and its story of itself if that changed.", text: INTERVIEW_ANSWER, vars: [] },
-  { id: CHARACTER_TEXT.pov, page: CHARACTER_PROMPT_PAGE.id, group: "Point-of-view render", label: "System prompt", note: "The truth-blind render that writes what reached each person a beat reached in part, or whole but with someone they don't know: their own act from the inside, a message they received as its words, everyone named only as that person may name them. It reads only what was there to sense, the exact words, what an actor did for its own act, who acted and was reached, and what each person could sense of where everyone was (by sight where each was and what they were doing, by hearing alone where each was, nothing of anyone else by message, word or record), which it never tells as an act.", text: POV_SYSTEM, vars: [] },
+  { id: CHARACTER_TEXT.pov, page: CHARACTER_PROMPT_PAGE.id, group: "Point-of-view render", label: "System prompt", note: "The truth-blind render that writes what reached each person a beat reached in part, or whole but with someone they don't know: their own act from the inside, a message they received as its words, everyone named only as that person may name them. It reads only what was there to sense, the exact words, who acted and was reached, and what each person could sense of where everyone was (by sight where each was and what they were doing, by hearing alone where each was, nothing of anyone else by message, word or record), which it never tells as an act.", text: POV_SYSTEM, vars: [] },
   { id: CHARACTER_TEXT.povAnswer, page: CHARACTER_PROMPT_PAGE.id, group: "Point-of-view render", label: "The answer", note: "The render's answer: one point of view per person.", text: POV_ANSWER, vars: [] },
-  { id: CHARACTER_TEXT.povAgain, page: CHARACTER_PROMPT_PAGE.id, group: "Point-of-view render", label: "Named someone who wasn't there", note: "Asked once, after the render's answer, when a point of view used a name its person knows for someone who wasn't there (the names a person may use are listed for them). A point of view that still does gets a plain one in its place: what reached that person with no name they may not use, or only that something reached them where it was in part or a message.", text: POV_AGAIN, vars: [{ name: "names", text: "Each person whose point of view is refused, and the names it used.", required: true }] },
-  { id: CHARACTER_TEXT.povMissing, page: CHARACTER_PROMPT_PAGE.id, group: "Point-of-view render", label: "Left someone out", note: "Asked in the same call, when the render's answer had no point of view for someone it was asked about. One still missing gets the plain one in its place.", text: POV_MISSING, vars: [{ name: "who", text: "Each person the answer left out, by id.", required: true }] },
+  { id: CHARACTER_TEXT.povAgain, page: CHARACTER_PROMPT_PAGE.id, group: "Point-of-view render", label: "Named someone who wasn't there", note: "Asked once, after the render's answer, when a point of view used a name its person knows for someone who wasn't there (the names a person may use are listed for them). One that still does goes to the GM's check with the names.", text: POV_AGAIN, vars: [{ name: "names", text: "Each person whose point of view is refused, and the names it used.", required: true }] },
+  { id: CHARACTER_TEXT.povMissing, page: CHARACTER_PROMPT_PAGE.id, group: "Point-of-view render", label: "Left someone out", note: "Asked in the same call, when the render's answer had no point of view for someone it was asked about. One still missing is left unwritten.", text: POV_MISSING, vars: [{ name: "who", text: "Each person the answer left out, by id.", required: true }] },
   { id: CHARACTER_TEXT.povAgainAnswer, page: CHARACTER_PROMPT_PAGE.id, group: "Point-of-view render", label: "Asked again: the answer", note: "The answer's shape when the render is asked again: one point of view for each person named.", text: POV_AGAIN_ANSWER, vars: [] },
+  { id: CHARACTER_TEXT.povCheck, page: CHARACTER_PROMPT_PAGE.id, group: "Point-of-view render", label: "The GM's check", note: "Sent on the render check's model, out of world, with the render's request and each point of view that still named someone who wasn't there after the render was asked again, with the names: the GM accepts it, cuts the names or rewrites it. One it can't set right is left unwritten; no rule writes a point of view.", text: POV_CHECK, vars: [] },
   {
     id: CHARACTER_TEXT.coreCard,
     page: CHARACTER_PROMPT_PAGE.id,
@@ -94477,14 +94653,14 @@ var DEPTH_PROMPTS = [
     label: "Reading the history",
     note: "The author reads a chat's history in order, a stretch at a time, with the beats the historian distilled from it: a light revision of its notebook, whether the stretch ends a chapter, and who gets a mind.",
     vars: WORLD_VARS,
-    contract: '{"files": [{"path", "text"}], "comments": [{"path", "text"}], "chapter": {"ends": boolean, "title"?: string}, "cast": [{"who", "mind": boolean, "why", "core"?: string}], "uncertain": [string], "why": string}',
+    contract: '{"files": [{"path", "edit", "section"?, "text"}], "comments": [{"path", "text"}], "chapter": {"ends": boolean, "title"?: string}, "cast": [{"who", "mind": boolean, "why", "core"?: string}], "uncertain": [string], "why": string}',
     text: `You are the author of the roleplay world {{world}}: the story's DM, who understands what it means and where it points. {{pov}} is the player character. You are reading the story's history in order, one stretch at a time, beside the beats the historian distilled from it, to build your notebook before you run the story yourself.
 
 ${NOTEBOOK_RULES}
 
 After this stretch: revise your notebook lightly where the stretch moved it. Decide whether the stretch ends a chapter of the story, and if it does, give the chapter a title. Decide who among the people in it gets a mind of their own: a character who recurs or matters does; a walk-on may not. For someone who gets a mind and has no character card, write who they are at root as the story shows them (traits, values, history, voice), for the player to review; never for the player character, who is the player's own.
 
-Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the file's whole new text}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "chapter": {"ends": true or false, "title": its title when it ends}, "cast": [{"who": their id, "mind": true or false, "why": your reason, "core": who they are at root, only for someone without a card}], "uncertain": [what you are unsure of, for the player's spot checks], "why": one or two plain sentences on what moved and why}. Write only the files that changed.`,
+Answer with one JSON object: {"files": [{"path": "notebook/...md", "edit": "append" to add to the file's end, "section" to rewrite one section of it, or "whole" for a new file or one you reshape throughout, "section": the heading of the section a "section" edit rewrites (a file without it gains it), "text": what you add, the section's new text, or the whole file's}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "chapter": {"ends": true or false, "title": its title when it ends}, "cast": [{"who": their id, "mind": true or false, "why": your reason, "core": who they are at root, only for someone without a card}], "uncertain": [what you are unsure of, for the player's spot checks], "why": one or two plain sentences on what moved and why}. Edit only what changed, and never write out again what stays as it is.`,
     asks: [ACCOUNT_ASK]
   },
   {
@@ -94494,14 +94670,14 @@ Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the f
     label: "A chapter's re-read",
     note: "At a chapter's end the author re-reads the chapter whole and revises its notebook deeply, checks each character's arc against who they have become (drift), and ends with predictions of what the player and the key characters will do next, which the poll scores once the story goes on.",
     vars: WORLD_VARS,
-    contract: '{"files": [{"path", "text"}], "comments": [{"path", "text"}], "drift": [{"who", "drift", "note"}], "predictions": [{"text", "about"}], "uncertain": [string], "why": string}',
+    contract: '{"files": [{"path", "edit", "section"?, "text"}], "comments": [{"path", "text"}], "drift": [{"who", "drift", "note"}], "predictions": [{"text", "about"}], "uncertain": [string], "why": string}',
     text: `You are the author of the roleplay world {{world}}: the story's DM, who understands what it means and where it points. {{pov}} is the player character. A chapter of the story has ended. Re-read it whole, its beats in order, and revise your notebook deeply.
 
 ${NOTEBOOK_RULES}
 
 Say what the chapter meant, which questions it answered and which it opened, which threads ripened, which setups paid off and which wait. Check each character's arc against who they have become in it: "none", "some" or "strong" drift, with what you make of it. Drift may be the story finding its way; where it isn't, say how you will steer, only through the world, since a character's mind is its own. End with your predictions: what the player and the key characters will do next, each a sentence that can later be told true or false.
 
-Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the file's whole new text}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "drift": [{"who": an id, "drift": "none", "some" or "strong", "note": what you make of it}], "predictions": [{"text": the prediction, "about": [ids]}], "uncertain": [what you are unsure of, for the player's spot checks], "why": one or two plain sentences on what moved and why}. Write only the files that changed.`,
+Answer with one JSON object: {"files": [{"path": "notebook/...md", "edit": "append" to add to the file's end, "section" to rewrite one section of it, or "whole" for a new file or one you reshape throughout, "section": the heading of the section a "section" edit rewrites (a file without it gains it), "text": what you add, the section's new text, or the whole file's}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "drift": [{"who": an id, "drift": "none", "some" or "strong", "note": what you make of it}], "predictions": [{"text": the prediction, "about": [ids]}], "uncertain": [what you are unsure of, for the player's spot checks], "why": one or two plain sentences on what moved and why}. Edit only what changed, and never write out again what stays as it is.`,
     asks: [ACCOUNT_ASK]
   },
   {
@@ -94511,12 +94687,12 @@ Answer with one JSON object: {"files": [{"path": "notebook/...md", "text": the f
     label: "Truth-link",
     note: "Out of world, the GM files the world-truth facts new beats establish, links each belief a character wrote to the fact it concerns, and writes the player character's holdings from what reached him. Shown in Minds as the GM's links.",
     vars: WORLD_VARS,
-    contract: '{"facts": [{"ref", "claim", "about", "truth", "matters"}], "links": [{"who", "fact", "from": {"mind"} | {"beat"}, "words", "belief", "confidence", "how", "by"?, "keptFrom"?, "why"}], "unlinks": [{"who", "fact", "why"}], "settle": [{"fact", "truth", "why"}]}',
+    contract: '{"facts": [{"ref", "claim", "about", "truth", "matters"}], "links": [{"who", "fact", "from": {"mind"} | {"beat"}, "words", "belief", "confidence", "how", "by"?, "keptFrom"?, "why"}], "unlinks": [{"who", "fact", "why"}], "settle": [{"fact", "truth", "why"}], "interview"?: [{"who", "question"}]}',
     text: `You are the GM of the roleplay world {{world}}, working out of world; {{pov}} is the player character. Each character's mind is its own: it wrote its beliefs in its own words from what it lived, and it never sees the truth. You keep the truth beside them, so that secrets, and what each person can let slip, stay right.
 
 Here are new beats and what characters wrote as beliefs. File the world-truth facts the beats establish: what someone could later know, tell or be wrong about, not every detail. Link each belief that concerns a fact the chat knows (the world's secrets included), with your reason: what the character takes the fact to be (true, false or uncertain) and how sure it is, as a number from 0 to 1 you derive from its own words ("I'd swear to it" is near 1, "a hunch" is low); how it came by it (witnessed, told, inferred or guessed) and from whom. Write the player character's holdings from what reached him: for each fact a beat he perceived established or revealed, link his exposure to it, as far as it reached him. Take back a link whose belief no longer concerns its fact, and settle a fact's truth when a beat settles it. Never decide what anyone noticed or made of something: read it from their own words and from who was placed to perceive each beat.
 
-Answer with one JSON object: {"facts": [{"ref": a short ref of yours, "claim": the fact in plain words, "about": [ids], "truth": "true", "false" or "open", "matters": why it matters and to whom}], "links": [{"who": an id, "fact": a fact id or one of your refs, "from": {"mind": the beliefs file you read} or {"beat": the beat's id}, "words": the words of theirs you read, or what reached them, "belief": "true", "false" or "uncertain", "confidence": 0 to 1, "how": "witnessed", "told", "inferred" or "guessed", "by": the teller's id for one told, else null, "keptFrom": [ids] or "everyone" when they keep it from others, "why": your reason}], "unlinks": [{"who", "fact", "why"}], "settle": [{"fact", "truth", "why"}]}.`
+Answer with one JSON object: {"facts": [{"ref": a short ref of yours, "claim": the fact in plain words, "about": [ids], "truth": "true", "false" or "open", "matters": why it matters and to whom}], "links": [{"who": an id, "fact": a fact id or one of your refs, "from": {"mind": the beliefs file you read} or {"beat": the beat's id}, "words": the words of theirs you read, or what reached them, "belief": "true", "false" or "uncertain", "confidence": 0 to 1, "how": "witnessed", "told", "inferred" or "guessed", "by": the teller's id for one told, else null, "keptFrom": [ids] or "everyone" when they keep it from others, "why": your reason}], "unlinks": [{"who", "fact", "why"}], "settle": [{"fact", "truth", "why"}], "interview": [{"who": an id of a character with a mind of their own, "question": what you ask them, to check what they believe}]}. Ask only where their beliefs leave a link unsure; their answers come back at your next link.`
   },
   {
     id: DEPTH_TEXT.historian,
@@ -94528,9 +94704,9 @@ Answer with one JSON object: {"facts": [{"ref": a short ref of yours, "claim": t
     contract: '{"beats": [{"message", "span"?, "after"?, "when"?, "place", "actors", "act", "about", "what", "deed"?, "surface", "quotes"?, "addressed"?, "exposure": [{"who", "channel", "reach"}], "uncertain"?}], "staging": [{"who", "where", "doing", "occluded"?}], "newcomers": [{"ref", "name", "note"}], "newPlaces": [{"ref", "name", "in"?, "note"}], "switches": [{"message", "who"}], "uncertain": [string]}',
     text: `You are the historian of the roleplay world {{world}}; {{pov}} is the player character. This story was written before the engine kept it beat by beat. You record what happened in it, so that each character can live it from where they stood and the author can understand it.
 
-Here is a stretch of the story as it was written, and where things stood before it. Record what happened, beat by beat, as plain events, in order: who said or did what, where, to whom, what it concerns, the words that will matter later, what was there to sense, and who was placed to perceive it and how fully (whole, or only in part: a voice through a wall, a glance from across the room). Leave out out-of-character lines. A beat reaches everyone placed to perceive it, and whoever acts in it perceives their own act. Each of its actors lives it as its deed: what they did and said, plainly, as they did it, never as anyone saw or heard it ("he calls down the stairs to her", never "his voice carries up the stairwell"). Everyone else lives what reached them of its surface, so write the surface as anyone there could sense it, from no one's side, the player character's included, never as it reached one person there ("a woman answers from behind her door", never "a muffled voice through the floor"): how far it reached each person is their exposure's reach. A message from elsewhere (a text, a call, a letter) reaches whoever it was sent to by message, wherever they are, and they live only its words; its sender lives sending it, as its deed has it. The player character's acts and words are beats like anyone's: whoever is there sees what he does and hears what he says aloud. Only his inner life, what he thinks or feels without showing it, is his alone: a beat no one else perceives. A character's private thoughts are not beats; record what they did and said. A beat of speech ("act": "said") carries the exact words spoken in its quotes, word for word as the prose has them, never summed up or reworded: its what, deed and surface may say what the words came to, its quotes never do. Never add what the prose doesn't hold; where it is unclear, say what you are unsure of. A beat happens at the listed place that holds it, the smallest one that does: a room, a yard, a spot or a corner of a listed place is that place. A new place is only somewhere the story goes that no listed place holds: name it by a "new:" ref, list it once, and never give a listed place a second name. The player's messages are headed with the player character as the stretch opens; if the player starts playing someone else (his messages now speak and act as another person of the story), say so in switches, at the first message he plays them in, and from there on he is that person.
+Here is a stretch of the story as it was written, and where things stood before it. Record what happened, beat by beat, as plain events, in order: who said or did what, where, to whom, what it concerns, the words that will matter later, what was there to sense, and who was placed to perceive it and how fully (whole, or only in part: a voice through a wall, a glance from across the room). Leave out out-of-character lines. A beat reaches everyone placed to perceive it, and whoever acts in it perceives their own act. Each of its actors lives it as its deed: what they did and said, plainly, as they did it, never as anyone saw or heard it ("he calls down the stairs to her", never "his voice carries up the stairwell"). Everyone else lives what reached them of its surface, so write the surface as anyone there could sense it, from no one's side, the player character's included, never as it reached one person there ("a woman answers from behind her door", never "a muffled voice through the floor"): how far it reached each person is their exposure's reach. A message from elsewhere (a text, a call, a letter) reaches whoever it was sent to by message, wherever they are, and they live only its words; its sender lives sending it, as its deed has it. The player character's acts and words are beats like anyone's: whoever is there sees what he does and hears what he says aloud. Only his inner life, what he thinks or feels without showing it, is his alone: a beat no one else perceives. A character's private thoughts are not beats; record what they did and said. A beat of speech ("act": "said") points its quotes at the exact words spoken, where the prose has them, so they are read word for word from the chat: its what, deed and surface may say what the words came to, its quotes never sum them up. Never add what the prose doesn't hold; where it is unclear, say what you are unsure of. A beat happens at the listed place that holds it, the smallest one that does: a room, a yard, a spot or a corner of a listed place is that place. A new place is only somewhere the story goes that no listed place holds: name it by a "new:" ref, list it once, and never give a listed place a second name. The player's messages are headed with the player character as the stretch opens; if the player starts playing someone else (his messages now speak and act as another person of the story), say so in switches, at the first message he plays them in, and from there on he is that person.
 
-Answer with one JSON object: {"beats": [{"message": the id of the message it comes from, "span": [start, end] characters of that message it rests on, if you can, "after": minutes since the beat before it, when the message has no clock and the prose says or implies time passing, "when": the prose's words for when, if any ("the next morning"), "place": the id of the listed place it happens at, or the "new:" ref of a new place, "actors": [ids], "act": "said", "did" or "happened", "about": [ids of the people and places it concerns], "what": plain words, truth-aware: who did what to whom and how it came out, "deed": what its actors did and said, plainly, as they did it, never as anyone saw or heard it, and nothing of how it came out that they couldn't know (null when no one acts in it), "surface": what anyone there could sense, from no one's side: sights, sounds, words said aloud, with no motive and nothing hidden, "quotes": the exact words spoken or written, word for word as the prose has them (a "said" beat's always), "addressed": [ids], "exposure": [one for each person placed to perceive it, its actors among them, and whoever a message reached, by message: {"who": an id, "channel": "sight", "hearing", "touch", "told", "message", "rumor" or "record", "reach": "whole" or "partial"}], "uncertain": what you are unsure of, if anything}], "staging": [one per person present at the stretch's end: {"who", "where": position and facing, "doing": their activity and what occupies their eyes and hands, "occluded": what blocks their view or hearing, if anything}], "newcomers": [{"ref": "new:" and a short name, "name", "note": who they seem to be}], "newPlaces": [{"ref": "new:" and a short name, "name", "in": the id of the listed place it is in, "note": what kind of place it is}], "switches": [{"message": the id of the first message in which the player plays someone else, "who": their id, or a "new:" ref}], "uncertain": [anything else you are unsure of]}. Name each person by their id; someone not among the people listed, by a "new:" ref, listed once in newcomers. Use [] for newPlaces and switches when there are none.`
+Answer with one JSON object: {"beats": [{"message": the id of the message it comes from, "span": [start, end] characters of that message it rests on, if you can, "after": minutes since the beat before it, when the message has no clock and the prose says or implies time passing, "when": the prose's words for when, if any ("the next morning"), "place": the id of the listed place it happens at, or the "new:" ref of a new place, "actors": [ids], "act": "said", "did" or "happened", "about": [ids of the people and places it concerns], "what": plain words, truth-aware: who did what to whom and how it came out, "deed": what its actors did and said, plainly, as they did it, never as anyone saw or heard it, and nothing of how it came out that they couldn't know (null when no one acts in it), "surface": what anyone there could sense, from no one's side: sights, sounds, words said aloud, with no motive and nothing hidden, "quotes": where the exact words spoken or written are in the prose, never the words copied out: [{"from": their first few words, "to": their last few words, each exactly as the prose has them, "message": the id of the message that holds them, only when it isn't the beat's}] (a "said" beat's always), "addressed": [ids], "exposure": [one for each person placed to perceive it, its actors among them, and whoever a message reached, by message: {"who": an id, "channel": "sight", "hearing", "touch", "told", "message", "rumor" or "record", "reach": "whole" or "partial"}], "uncertain": what you are unsure of, if anything}], "staging": [one per person present at the stretch's end: {"who", "where": position and facing, "doing": their activity and what occupies their eyes and hands, "occluded": what blocks their view or hearing, if anything}], "newcomers": [{"ref": "new:" and a short name, "name", "note": who they seem to be}], "newPlaces": [{"ref": "new:" and a short name, "name", "in": the id of the listed place it is in, "note": what kind of place it is}], "switches": [{"message": the id of the first message in which the player plays someone else, "who": their id, or a "new:" ref}], "uncertain": [anything else you are unsure of]}. Name each person by their id; someone not among the people listed, by a "new:" ref, listed once in newcomers. Use [] for newPlaces and switches when there are none.`
   },
   ...TOOL_TEXTS2.map(([id2, label2, text5]) => ({ id: id2, page: DEPTH_PROMPT_PAGE.id, group: "Archive tools", label: label2, note: "What the author and the GM are told of the archive tools.", text: text5, vars: [] }))
 ];
@@ -94632,10 +94808,10 @@ var WHY_OWN_ASK = {
   outdated: [OLD_WHY_FIELD],
   message: `it still asks for ${OLD_WHY_FIELD}, which the shipped text no longer asks for: a provider may refuse an answer asked to write out its thinking, and the answer's own "why" already gives its account. Reset it, or take that field out`
 };
-var EDIT_CONTRACT = '{"cosmetic": boolean, "amend": [{"replaces": [string], "ref", "by", "actors", "act", "what", "deed"?, "surface", "quotes"?, "addressed"?, "about"?, "exposure"}], "strike": [string], "why": string}';
+var EDIT_CONTRACT = '{"cosmetic": boolean, "amend": [{"replaces": [string], "ref", "by", "actors", "act", "what", "deed"?, "surface", "quotes"?, "addressed"?, "about"?, "exposure"}], "strike": [string], "catchup"?: [string], "why": string}';
 var EDIT_RULES = `- Cosmetic (a typo, a turn of phrase, a detail no one could later notice or act on): it amends nothing.
 - Otherwise it amends beats. For each beat he changed, write the beat as it now happened, naming the beats it replaces, with who perceived it. For each beat he took out with nothing in its place, name it to strike. Amend only what his edit says; keep everything else as it was.`;
-var EDIT_ANSWER = `Answer with one JSON object: {"cosmetic": true or false, "amend": [{"replaces": [ids of the beats it replaces], ${BEAT_SHAPE.slice(1)}], "strike": [ids of beats taken out], "why": a line on what his edit means}.`;
+var EDIT_ANSWER = `Answer with one JSON object: {"cosmetic": true or false, "amend": [{"replaces": [ids of the beats it replaces], ${BEAT_SHAPE.slice(1)}], "strike": [ids of beats taken out], "catchup": [the ids of those who lived them who catch up now, in the order they do; leave out anyone your poll may catch up later, or omit the field for everyone who lived them], "why": a line on what his edit means}.`;
 var SCENE_PROMPTS = [
   {
     id: SCENE_TEXT.setup,
@@ -94644,7 +94820,7 @@ var SCENE_PROMPTS = [
     label: "Setting a scene",
     note: "Each turn starts here: the author reads what the player did and said, as the GM wrote it into his beats, and sets the scene: its staging, who plays as their own agent, whom the author plays and who is part of the world, who perceived the player's beats, and who acts first.",
     vars: VARS,
-    contract: '{"scene": {"continues": boolean, "place": string, "ends": boolean}, "staging": [{"who", "where", "doing", "occluded"?, "place"?, "remote"?}], "cast": [{"who", "effort", "why"}], "exposure": [{"beat", "who", "channel", "reach"}], "beats": [{"ref", "by", "actors", "act", "what", "deed"?, "surface", "quotes"?, "addressed"?, "about"?, "after"?, "exposure"}], "next": [string], "end": string | null, "realtime": {"with", "why"} | {"end"} | null, "excerpts": [string], "quotes"?: [{"message", "from"?, "to"?, "why"}], "note": string, "why": string}',
+    contract: '{"scene": {"continues": boolean, "place": string, "ends": boolean}, "newcomers"?: [{"ref", "name", "who", "mind": boolean}], "staging": [{"who", "where", "doing", "occluded"?, "place"?, "remote"?}], "cast": [{"who", "effort", "why"}], "exposure": [{"beat", "who", "channel", "reach"}], "beats": [{"ref", "by", "actors", "act", "what", "deed"?, "surface", "quotes"?, "addressed"?, "about"?, "after"?, "exposure"}], "next": [string], "end": string | null, "realtime": {"with", "why"} | {"end"} | null, "excerpts": [string], "quotes"?: [{"message", "from"?, "to"?, "why"}], "note": string, "why": string}',
     text: `${AUTHOR}
 
 ${DM_RULES}
@@ -94653,6 +94829,7 @@ The player has just written his turn, and the GM has read it into his own beats:
 - Does this carry on the scene that was playing, or open a new one? Where does it play? Does it end with this turn?
 - Stage it: everyone present, where they are and what they are doing, as anyone there could see it (the points of view of whoever a beat reaches in part are written from it), {{pov}} among them, and the id of the world's place each is at: whoever the world has elsewhere is moved to the place you give them. Give everyone you stage a place, or "remote": no place is guessed for anyone given neither, but {{pov}}, whom the scene plays from: given no place, he is at the scene's place. Someone the scene reaches only from afar (the far end of a phone call, a radio, a screen) is "remote", never at the scene's place: they stay where they are.
 - Decide each character's effort for this scene, and say why: "agent" plays as its own agent, beat by beat, as a player would (one call each time it acts; someone with no mind yet gets one, formed from their card or what the world knows of them, and keeps it from then on: do it for someone who will matter beyond this scene, never a passer-by); "author" you play them yourself, from their mind (several cost you one call); "world" you handle them as part of the world, like a walk-on. Spend effort where this scene needs it.
+- Someone the people listed don't include (a walk-in the player met, someone arriving) comes into the world through "newcomers": [{"ref": a short id you name them by everywhere in this answer, "name": their name as the story has it, "who": who they are as anyone there could tell (their work, their look, their manner), "mind": true to give them a mind of their own now, for someone who will matter beyond this scene, never a passer-by}]. Then stage them, cast them and write their acts by that ref, like anyone.
 - Write who perceived each of the player's beats, and how fully. {{pov}} perceives his own acts.
 - When the scene opens or someone arrives, write an opening beat of what was there to sense. Then any beat the world does now, and the acts of those you play or handle, in order.
 - Name who acts next among those playing as their own agents (several act at once when they would), or end the turn when the moment has come for the player to answer.
@@ -94670,7 +94847,7 @@ Answer with one JSON object: {"scene": {"continues": true or false, "place": the
     label: "Between beats",
     note: "After each beat a character decided (and any outcome the GM resolved), the author writes who perceived it and how fully, what the world does now and the acts of those it plays or handles, and who acts next; or it ends the turn where the player's answer is wanted.",
     vars: VARS,
-    contract: '{"exposure": [{"beat", "who", "channel", "reach"}], "staging": [{"who", "where", "doing", "occluded"?, "place"?, "remote"?}], "beats": [{"ref", "by", "actors", "act", "what", "deed"?, "surface", "quotes"?, "addressed"?, "about"?, "after"?, "exposure"}], "next": [string], "end": string | null, "sceneEnds": boolean, "why": string}',
+    contract: '{"newcomers"?: [{"ref", "name", "who", "mind": boolean}], "exposure": [{"beat", "who", "channel", "reach"}], "staging": [{"who", "where", "doing", "occluded"?, "place"?, "remote"?}], "beats": [{"ref", "by", "actors", "act", "what", "deed"?, "surface", "quotes"?, "addressed"?, "about"?, "after"?, "exposure"}], "next": [string], "end": string | null, "sceneEnds": boolean, "why": string}',
     text: `${AUTHOR}
 
 ${DM_RULES}
@@ -94678,6 +94855,8 @@ ${DM_RULES}
 Here is the scene so far and the beat just decided. Who perceived it, and how fully? Did it move anyone (their staging)? Does the world do anything now? Do those you play or handle act? Who acts next among those playing as their own agents, or do several act at once? Has the moment come for the player to answer? Keep the scene moving at the pace the story wants: end the turn when {{pov}} has something to answer, see or decide.
 
 A beat of the world itself, which no one acts in (rain starts, a door slams in the wind), takes no "deed". Write "exposure" entries only for the beats listed as just decided, waiting for who perceived them; a beat you write yourself carries its own "exposure".
+
+Someone the scene's people don't include who arrives now (a walk-in, a stranger at the door) comes into the world through "newcomers": [{"ref": a short id you name them by everywhere in this answer, "name": their name as the story has it, "who": who they are as anyone there could tell, "mind": true to give them a mind of their own now, for someone who will matter beyond this scene, never a passer-by}]. Then stage them and write their acts by that ref, like anyone you handle.
 
 Answer with one JSON object: {"exposure": [{"beat": the ref of a beat just decided, "who", "channel", "reach"}], "staging": [${SCENE_STAGING_SHAPE}, for each person this moved], "beats": [${BEAT_SHAPE}], "next": [ids of characters playing as their own agents who act now], "end": your reason the player answers now, or null, "sceneEnds": true when the scene itself ends with this turn, "why": one or two plain sentences explaining the choice}.`,
     asks: [STAGING_PLACE_ASK, WHY_ASK]
@@ -94706,7 +94885,7 @@ Answer with one JSON object: {"beats": [${BEAT_SHAPE}], "why": one or two plain 
     label: "The poll",
     note: "After each turn the author reads what changed and decides who catches up now and who can wait until they matter, who reflects, whether it reflects itself, how its open predictions scored, and what happens off screen: the episodes it opens with each part's treatment, and which drafts settle, drop or are rebased; it logs what it considered and didn't raise.",
     vars: VARS,
-    contract: '{"catchup": [{"who", "why"}], "reflect": [{"who", "why"}], "author": {"depth", "why"} | null, "scores": [{"prediction", "outcome", "note"}], "episodes": [{"why", "in", "minutes", "places", "people", "parts": [{"who"?, "event"?, "treatment", "rationale", "major"?}]}], "settle": [{"draft", "why"}], "drop": [{"draft", "why"}], "rebase": [{"draft", "why"}], "wake": {"minutes", "why"} | null, "considered": [{"what", "raised", "why"}], "why": string}',
+    contract: '{"catchup": [{"who", "why"}], "reflect": [{"who", "why"}], "interview": [{"who", "question", "why"}], "author": {"depth", "why"} | null, "scores": [{"prediction", "outcome", "note"}], "episodes": [{"why", "in", "minutes", "places", "people", "parts": [{"who"?, "event"?, "treatment", "rationale", "major"?}]}], "settle": [{"draft", "why"}], "drop": [{"draft", "why"}], "rebase": [{"draft", "why"}], "wake": {"minutes", "why"} | null, "considered": [{"what", "raised", "why"}], "why": string}',
     text: `${AUTHOR}
 
 A turn has just been played. Here is what changed: its beats, what characters wrote that will stay with them, the story time that passed, plans falling due, what reached each character that they haven't lived yet, and the player's own signals; and off screen, your open drafts and what has happened since each one's story time. You are the story's nervous system: you decide who thinks, and when, and how the world lives beyond {{pov}}'s view.
@@ -94719,7 +94898,7 @@ A turn has just been played. Here is what changed: its beats, what characters wr
 - Log what you considered and whether you raised it, with your reason, so the player can read your judgment. Raise nothing out of habit.
 - If something should be looked at again once enough story time has passed (a plan maturing, a wait running out), ask to be woken after that many story minutes; otherwise null.
 
-Answer with one JSON object: {"catchup": [{"who": an id, "why": your reason}], "reflect": [{"who": an id, "why": your reason}], "author": {"depth": "scene" or "chapter", "why": your reason} or null, "scores": [{"prediction": its id, "outcome": "hit", "miss" or "partly", "note": what happened}], "episodes": [{"why": why it matters, "in": story minutes from now until it starts (negative when it already began), "minutes": how long it runs, "places": [place ids], "people": [ids], "parts": [{"who": an id, or "event": the event in words, "treatment": "live", "campfire", "room" or "written", "rationale": your grade against the player's words, and why, "major": true when you judge the moment major}]}], "settle": [{"draft": its id, "why": your reason}], "drop": [{"draft": its id, "why": your reason}], "rebase": [{"draft": its id, "why": your reason}], "wake": {"minutes": story minutes from now, "why": your reason} or null, "considered": [{"what": what you considered, "raised": true or false, "why": your reason}], "why": one or two plain sentences explaining the choice}.`,
+Answer with one JSON object: {"catchup": [{"who": an id, "why": your reason}], "reflect": [{"who": an id, "why": your reason}], "interview": [{"who": an id, "question": what you ask them, in the world's own terms, "why": your reason}], "author": {"depth": "scene" or "chapter", "why": your reason} or null, "scores": [{"prediction": its id, "outcome": "hit", "miss" or "partly", "note": what happened}], "episodes": [{"why": why it matters, "in": story minutes from now until it starts (negative when it already began), "minutes": how long it runs, "places": [place ids], "people": [ids], "parts": [{"who": an id, or "event": the event in words, "treatment": "live", "campfire", "room" or "written", "rationale": your grade against the player's words, and why, "major": true when you judge the moment major}]}], "settle": [{"draft": its id, "why": your reason}], "drop": [{"draft": its id, "why": your reason}], "rebase": [{"draft": its id, "why": your reason}], "wake": {"minutes": story minutes from now, "why": your reason} or null, "considered": [{"what": what you considered, "raised": true or false, "why": your reason}], "why": one or two plain sentences explaining the choice}.`,
     asks: [WHY_ASK]
   },
   {
@@ -94778,7 +94957,8 @@ var OFFSCREEN_TEXT = {
   episode: "depth.author.episode",
   episodeStep: "depth.author.episode_step",
   settle: "depth.author.settle",
-  walkOn: "depth.author.walk_on"
+  walkOn: "depth.author.walk_on",
+  settlePage: "depth.author.settle_page"
 };
 var SETTLE_BEATS = `"beats": [{"ref": a beat's ref, "keep": true or false, "what": its adjusted truth, "surface": what there was to sense, adjusted, "quotes": its words, adjusted, "deed": what its actors did and said, adjusted, plainly, as they did it (null when no one acts in it)}], "effects": [{"index": a world change's number, "keep": true or false}], "attempts": [{"who": an id, "attempt": what they try now}]`;
 var EPISODE_BEAT = `${BEAT_SHAPE.slice(0, -1)}, "attempt": what its actor tries that the world's rules decide (a sale, a theft, a fight), if anything}`;
@@ -94873,6 +95053,24 @@ The scene {{pov}} is playing reaches something an open draft holds: a draft of w
 
 Answer with one JSON object: {"verdict": "settle", "drop" or "redate", "why": a line on how it reads against the pins and this scene, ${SETTLE_BEATS}, "redate": {"in": story minutes from now until it starts, past this scene} or null}. Give adjusted words only where you change them.`,
     asks: [WHY_OWN_ASK]
+  },
+  {
+    id: OFFSCREEN_TEXT.settlePage,
+    page: "depth",
+    group: "Off screen",
+    label: "Settling a draft: one page of its pins",
+    note: "When more has happened since a draft's story time than one reading holds, the author reads its pins a page at a time, in story order, with the chat's archive to hand: each page's verdict (it holds, or something on it contradicts the draft, and what that forces) goes on to the next page, and the author settles, drops or redrafts the draft with every page's verdict before it. A contradiction found on any page means the draft can't settle unchanged.",
+    vars: VARS,
+    contract: '{"verdict": "holds" | "contradicts", "why": string, "forces": [string]}',
+    text: `${AUTHOR}
+
+A draft of something that happened off screen waits to become canon, and so much has happened since its story time that you read it a page at a time, in story order. Here is the draft (its episode, its beats at their own times, the world changes it would make), what the earlier pages came to, and one page of its pins: each beat on it is something that happened, which the draft must agree with. Read the draft against this page, and against your notebook; the chat's archive is yours to read where a pin leaves you unsure.
+- It holds: nothing on this page says otherwise.
+- It contradicts: something on this page can't stand beside it. Say what, and what that forces (a beat adjusted or left out, a world change left out, the whole draft overtaken).
+You don't settle it yet: once every page is read, you decide with all their verdicts.
+
+Answer with one JSON object: {"verdict": "holds" or "contradicts", "why": a line on how it reads against this page, "forces": [what this page forces, in plain words, each naming the draft's beat by its ref where it can]}.`,
+    asks: [WHY_ASK]
   }
 ];
 
@@ -94990,7 +95188,7 @@ var SECONDS = (name, text5) => ({ name, text: text5, required: true });
 var REALTIME_WATCH = `You are the author of this story, running it like a game master while the player talks with {{name}} in real time. His message goes straight to {{name}}, who is answering it from their own mind right now. You read it beside them, never in front of them: you don't see their answer, and nothing you decide changes what they heard.
 ` + `Decide, briefly:
 ` + `1. Can {{name}} simply hear this message and answer it? Not when it holds more than words said aloud and small visible acts that need no outcome: an attempt the rules or the world must resolve, the player character's inner thoughts or feelings, an out-of-character note, a move elsewhere, time passing, or anything else that needs you as the game master. Then take the line, and say why: the turn becomes a full scene you set, and {{name}}'s answer is dropped unrecorded, so nothing they read reaches their mind.
-` + `2. When you don't take it, write the player's line as the beat it is, from his message: what he says and does in plain words, and his exact spoken words. Say who else, if anyone, is placed to perceive this exchange from where everyone is, and how fully. Should {{name}}'s answer be more than words said back to him, you write who perceived it once they have answered.
+` + `2. When you don't take it, write the player's line as the beat it is, from his message: what he says and does in plain words, and his exact spoken words. Say who else, if anyone, is placed to perceive this exchange from where everyone is, and how fully. Should {{name}}'s answer be more than words said back to him, you write who perceived it once they have answered. Face to face, {{name}} sees him as well as hears him; only when the scene calls for it (the dark, a screen or a wall between them, his back turned) exclude him from {{name}}'s view and say why: {{name}} then answers from his spoken words alone.
 ` + `3. Does the world do anything now, between this line and the next (the phone rings, someone knocks)? Only what the story and the world call for; most lines, nothing. Say who is placed to perceive what you add, {{name}} and the player character included where they are; the narration renders what reaches him.
 ` + `4. Has the conversation ended, or does the world intrude enough to need a scene? Then end real-time dialogue after this line.
 ` + `5. Should your poll of the wider world run after this line as after any turn, or wait for the conversation's end?
@@ -95002,6 +95200,7 @@ var REALTIME_WATCH_ANSWER = `Answer with one JSON object and nothing else:
  "world": [{"what": "what happens, in plain words", "surface": "what there is to sense of it, as anyone there could sense it, from no one's side", "said": "exact words someone says aloud in it, or null", "by": ["the ids of anyone who acts in it"], "deed": "what they did and said, plainly, as they did it, never as anyone saw or heard it: each lives it as their own act; null when no one acts in it", "perceived": [{"who": "an id", "channel": "hearing", "sight" or "touch", "reach": "whole" or "partial"}]}],
  "end": null, or why real-time dialogue ends after this line,
  "poll": "now" or "later",
+ "unseen": null (face to face, the character sees him), or why the character can't see the player character as he speaks, in a sentence,
  "why": "one or two plain sentences explaining your reading"}
 With a takeover, the rest may be null.`;
 var REALTIME_EXPOSURE = `You are the author of this story, running it like a game master while the player talks with {{name}} in real time. {{name}} has just answered his line from their own mind, and their answer is more than words said back to him: something they did, words meant for someone else, or something they tried to bring about, which the GM has resolved. As for every beat, you write who was placed to perceive it, through what, and how fully, grounded in where everyone is:
@@ -97030,19 +97229,19 @@ ${options.recent.join(`
     const opening = () => [{ role: "system", content: [system, guidance, lore2?.block() ?? "", offer && lore2 ? lore2.instructions(offer) : ""].filter((s) => s !== "").join(`
 
 `) }, { role: "user", content: asked2 }];
-    const ask = async (messages2, tools, o) => {
+    const ask2 = async (messages2, tools, o) => {
       const r = await this.quiet(purpose, { ...base, messages: messages2, json: !tools, ...tools && lore2 ? { tools: [...lore2.tools] } : {} }, userId, signal2, { ...o, spared: options.spared === true });
       if (options.usage && !(r instanceof Error))
         options.usage.tokens += r.tokens;
       return r;
     };
     let messages = opening();
-    let reply = await ask(messages, offer === "tools", { lookup: false });
+    let reply = await ask2(messages, offer === "tools", { lookup: false });
     if (reply instanceof Error && offer === "tools" && lore2 && !signal2.aborted && !transientFailure(reply)) {
       const refusal4 = isToolRefusal(reply) ? reply.message : null;
       offer = lore2.refuseTools(refusal4 !== null);
       messages = opening();
-      reply = await ask(messages, false, { lookup: false });
+      reply = await ask2(messages, false, { lookup: false });
       if (!(reply instanceof Error) && refusal4 !== null)
         lore2.keepRefusal(refusal4);
     }
@@ -97061,7 +97260,7 @@ ${options.recent.join(`
 
 ${end}` }];
       offer = next;
-      reply = await ask(messages, next === "tools", { lookup: true });
+      reply = await ask2(messages, next === "tools", { lookup: true });
     }
     if (lore2 && offer)
       lore2.release();
@@ -97078,7 +97277,7 @@ ${end}` }];
     try {
       return parseJsonReply(first);
     } catch {
-      const fixed = await ask([
+      const fixed = await ask2([
         { role: "system", content: "Rewrite the text as valid JSON with the same meaning. Output JSON only." },
         { role: "user", content: first }
       ], false, { lookup: false });
@@ -97097,7 +97296,7 @@ ${end}` }];
       return;
     lore2.spend();
     const helper = helperCallOf(null, await this.helperOf(userId));
-    const ask = (transport) => {
+    const ask2 = (transport) => {
       const contract = transport === "need" ? 'Output JSON only: {"need": ["a short query", \u2026]}, or {"need": []} when the notes given are enough.' : 'Call the lore tools for what you need; when the notes given are enough, reply "none".';
       const system = ["You get a decision ready. Read the state and the questions and say what world lore would help answer them; don't answer them.", lore2.block(), lore2.instructions(transport), contract].filter((s) => s !== "").join(`
 
@@ -97111,11 +97310,11 @@ ${questionLines(questions).join(`
       ];
       return this.quiet(purpose, { messages, json: transport === "need", ...helper, ...transport === "tools" ? { tools: [...lore2.tools] } : {} }, userId, signal2, { lookup: true });
     };
-    let reply = await ask(offer);
+    let reply = await ask2(offer);
     if (reply instanceof Error && offer === "tools" && !signal2.aborted && !transientFailure(reply)) {
       const refusal4 = isToolRefusal(reply) ? reply.message : null;
       offer = lore2.refuseTools(refusal4 !== null);
-      reply = await ask(offer);
+      reply = await ask2(offer);
       if (!(reply instanceof Error) && refusal4 !== null)
         lore2.keepRefusal(refusal4);
     }
@@ -99275,7 +99474,7 @@ class LedgerCore {
       return;
     try {
       if (p.kind === "continue") {
-        this.stopContinue(input.content, observed, p.depth === true);
+        this.stopContinue(p, input.content, observed);
         return;
       }
       if (p.kind === "impersonate" || input.content === "" || !p.messageId)
@@ -99524,6 +99723,8 @@ class LedgerCore {
     const ledger = this.ledgerFor(messageId, m);
     const rec = ledger.swipes[String(m.swipeId)];
     const suffix = this.continueSuffix(p, m, rec, content);
+    if (rec && suffix !== null && p.depth && p.sceneRead !== undefined)
+      return this.continueScene(p, index, rec, content, observed);
     if (rec && suffix !== null && !p.depth) {
       const parent = this.fold(observed).messages[index]?.parentPath ?? ROOT_PATH;
       const head = this.fold(observed.slice(0, index + 1));
@@ -99537,7 +99738,17 @@ class LedgerCore {
     }
     this.accept(messageId, m, content, p.depth === true);
   }
-  stopContinue(partial, observed, depth2) {
+  continueScene(p, index, rec, content, observed) {
+    const parent = this.fold(observed).messages[index]?.parentPath ?? ROOT_PATH;
+    const head = this.fold(observed.slice(0, index + 1));
+    const world = this.env.worlds(head.state.revision);
+    const events3 = world && p.sceneRead ? applyValidUnits(this.env.types, p.sceneRead, structuredClone(head.state), (s) => this.env.types.context(world, s)) : [];
+    if (events3.length > 0)
+      rec.post.push({ seq: ++this.journal.seq, at: parent, kind: "cont", events: events3 });
+    rec.swipeHash = contentId(content);
+    delete rec.accepted;
+  }
+  stopContinue(p, partial, observed) {
     const candidates = observed.filter((m) => !m.isUser && partial !== "" && activeText(m).endsWith(partial));
     let target = candidates[0];
     if (candidates.length > 1) {
@@ -99549,7 +99760,10 @@ class LedgerCore {
     }
     if (!target)
       return;
-    this.accept(target.id, target, activeText(target), depth2);
+    const rec = p.depth && p.sceneRead !== undefined ? this.ledgerFor(target.id, target).swipes[String(target.swipeId)] : undefined;
+    if (rec && this.continueSuffix(p, target, rec, activeText(target)) !== null)
+      return this.continueScene(p, observed.indexOf(target), rec, activeText(target), observed);
+    this.accept(target.id, target, activeText(target), p.depth === true);
   }
   accept(messageId, m, content, continued = false) {
     const ledger = this.ledgerFor(messageId, m);
@@ -99704,6 +99918,10 @@ class LedgerCore {
   }
   scene(generationId, pre, read, observed) {
     const p = this.journal.pending[generationId];
+    if (p?.kind === "continue" && p.depth) {
+      p.sceneRead = [...pre, ...read];
+      return [];
+    }
     if (!p?.planned)
       return [];
     const planned2 = this.renderPlanned(observed, p, true);
@@ -100633,11 +100851,14 @@ var DEPTH_REVISION_LABEL = Object.freeze({
   chapter: "Chapter re-read",
   user: "Your edit"
 });
-var DEPTH_POLL_JOB_LABEL = Object.freeze({ catchup: "Catches up", reflect: "Reflects", "author.reflect": "The author reflects", episode: "Episode off screen", settle: "Settle", drop: "Drop", rebase: "Rebase" });
+var DEPTH_POLL_JOB_LABEL = Object.freeze({ catchup: "Catches up", reflect: "Reflects", interview: "Interviewed", "author.reflect": "The author reflects", episode: "Episode off screen", settle: "Settle", drop: "Drop", rebase: "Rebase" });
 var DEPTH_DRAFT_STATE_LABEL = Object.freeze({ open: "Open", settled: "Settled", dropped: "Dropped" });
 var DEPTH_LANE_LABEL = Object.freeze({ scene: "On screen", after: "After the reply", offscreen: "Off screen" });
 var DEPTH_LOG_KIND_LABEL = Object.freeze({ scene: DEPTH_LANE_LABEL.scene, after: DEPTH_LANE_LABEL.after, episode: DEPTH_LANE_LABEL.offscreen, ask: "Ask me" });
 var DEPTH_LOG_STATE_LABEL = Object.freeze({ ...DEPTH_DRAFT_STATE_LABEL, waiting: "Waiting on you", spent: "You spent one more", kept: "Kept to the allowance" });
+function moneyText(money6) {
+  return money6 === null ? "price unknown" : `$${money6.toFixed(2)}`;
+}
 function durationText(ms) {
   const s = Math.round(ms / 1000);
   if (s < 60)
@@ -100655,6 +100876,9 @@ function tokensText(tokens3) {
   if (tokens3 < 1e6)
     return `${Math.round(tokens3 / 1000)}K`;
   return `${(tokens3 / 1e6).toFixed(1).replace(/\.0$/, "")}M`;
+}
+function countsText(counts2) {
+  return [`${counts2.calls.toLocaleString("en-US")} ${counts2.calls === 1 ? "call" : "calls"}`, `${tokensText(counts2.tokensIn + counts2.tokensOut)} tokens`, moneyText(counts2.cost), durationText(counts2.ms)].join(" \xB7 ");
 }
 function mindFileOrder(path2) {
   const base = path2.replace(/^minds\/[^/]+\//, "");
@@ -102522,13 +102746,13 @@ function beatLine(world, state2, b) {
   const quotes = b.quotes ? ` Words: \u201C${b.quotes}\u201D` : "";
   return `- [${beat.id}] ${formatClock(calendarOf(world), beat.at)}${beat.approx ? " (approx.)" : ""}, ${named(world, state2, beat.place)}; ${beat.act} by ${beat.actors.map((a) => named(world, state2, a)).join(", ") || "no one"}: ${b.what}${quotes} Perceived by: ${exposure || "no one"}.`;
 }
-async function twice(ask, signal2) {
+async function twice(ask2, signal2) {
   try {
-    return await ask();
+    return await ask2();
   } catch (error) {
     if (!(error instanceof DepthAnswerError) || signal2?.aborted)
       throw error;
-    return ask();
+    return ask2();
   }
 }
 async function beatTexts(rt, userId, beats) {
@@ -102625,7 +102849,7 @@ ${p.text.trim()}${words8}`;
 
 `);
 }
-async function ask(model2, role, messages, signal2) {
+async function ask2(model2, role, messages, signal2) {
   const r = await model2(role, messages, { json: true, ...signal2 ? { signal: signal2 } : {} });
   const { answer, read } = readAnswer(role, r);
   return { answer, read, text: r.text, ...r.reasoning ? { reasoning: r.reasoning } : {}, usage: addUsage(NO_USAGE, r.usage) };
@@ -102724,7 +102948,7 @@ class Writes {
     if (text5 !== "")
       this.file(MIND_FILE_NAMES[kind], mindPath(this.input.who, kind), text5, extra);
   }
-  people(field2, raw, lived2) {
+  people(field2, raw, lived2, citedBy) {
     const files = this.read.record(field2, raw);
     if (!files)
       return;
@@ -102739,7 +102963,8 @@ class Writes {
         continue;
       }
       const path2 = personPath(this.input.who, id2);
-      this.file(path2.slice(mindDir(this.input.who).length), path2, text5, { ...lived2 ? { lived: lived2 } : {}, about: [id2] });
+      const cited = citedBy?.(id2).lived ?? lived2;
+      this.file(path2.slice(mindDir(this.input.who).length), path2, text5, { ...cited ? { lived: cited } : {}, about: [id2] });
     }
   }
   plans(field2, raw) {
@@ -102843,12 +103068,27 @@ function keepAnswer(input, mode, answer, read) {
     const at2 = Math.min(...lived2.map((id2) => minute2.get(id2) ?? input.at));
     w.memory(text5, lived2, w.about(`${g}.about`, m.about), Number.isFinite(at2) ? at2 : input.at);
   }
-  w.single("beliefs", "beliefs", answer.beliefs);
-  w.people("people", answer.people);
+  const cites = read.record("cites", answer.cites ?? {}) ?? {};
+  const citedBy = (key) => {
+    const raw = hasOwn(cites, key) ? cites[key] : Object.entries(cites).find(([k]) => k !== key && w.person(k) === key)?.[1];
+    if (raw === undefined)
+      return {};
+    const out = [];
+    for (const [k, id2] of read.list(`cites[${JSON.stringify(key)}]`, raw).entries()) {
+      const beat = read.text(`cites[${JSON.stringify(key)}][${k}]`, id2);
+      if (minute2.has(beat))
+        out.push(beat);
+      else
+        read.drop(`cites[${JSON.stringify(key)}][${k}]`, beat, "no beat of its batch");
+    }
+    return out.length > 0 ? { lived: [...new Set(out)] } : {};
+  };
+  w.single("beliefs", "beliefs", answer.beliefs, citedBy("beliefs"));
+  w.people("people", answer.people, undefined, citedBy);
   const plans = w.plans("planned", answer.planned);
-  w.single("plans", "plans", w.plansText("plans", answer.plans, plans), { plans });
-  w.single("now", "now", answer.now);
-  w.single("mind", "on_my_mind", answer.on_my_mind);
+  w.single("plans", "plans", w.plansText("plans", answer.plans, plans), { plans, ...citedBy("plans") });
+  w.single("now", "now", answer.now, citedBy("now"));
+  w.single("mind", "on_my_mind", answer.on_my_mind, citedBy("on_my_mind"));
   return w;
 }
 function out(w, r) {
@@ -102882,7 +103122,7 @@ ${livedText(input.lived, { names })}` : "";
   ].filter((p) => p !== "").join(`
 
 `);
-  const r = await ask(model2, "character", [systemOf(input), { role: "user", content: user }], input.signal);
+  const r = await ask2(model2, "character", [systemOf(input), { role: "user", content: user }], input.signal);
   const w = keepAnswer(input, "catch-up", r.answer, r.read);
   const left = () => rw ? Object.keys(rw.files).filter((rel) => !w.verdicts.has(rel) && !w.written.has(rel)) : [];
   const omitted = r.answer ? left() : [];
@@ -102891,7 +103131,7 @@ ${livedText(input.lived, { names })}` : "";
   const again = [mindContext(input), reached, ...rewriteSections(rw, omitted, names), renderPrompt(CHARACTER_TEXT.rewrite, texts2, { name: input.name }), renderPrompt(CHARACTER_TEXT.rewriteAgain, texts2, {})].filter((p) => p !== "").join(`
 
 `);
-  const r2 = await ask(model2, "character", [systemOf(input), { role: "user", content: again }], input.signal);
+  const r2 = await ask2(model2, "character", [systemOf(input), { role: "user", content: again }], input.signal);
   w.rewrites({ ...rw, files: Object.fromEntries(omitted.map((rel) => [rel, rw.files[rel] ?? ""])) }, r2.answer?.rewrites, r2.read);
   const inert = left();
   const reasoning = [r.reasoning, r2.reasoning].filter((s) => s !== undefined && s !== "").join(`
@@ -102914,7 +103154,7 @@ ${takes2.map((t) => `- ${t.trim()}`).join(`
   ].filter((p) => p !== "").join(`
 
 `);
-  const r = await ask(model2, "character", [systemOf(input), { role: "user", content: user }], input.signal);
+  const r = await ask2(model2, "character", [systemOf(input), { role: "user", content: user }], input.signal);
   return out(keepAnswer(input, "remember", r.answer, r.read), r);
 }
 function sinceLastStock(input) {
@@ -102939,7 +103179,7 @@ Nothing new.`,
   ].join(`
 
 `);
-  const r = await ask(model2, "character", [systemOf(input), { role: "user", content: user }], input.signal);
+  const r = await ask2(model2, "character", [systemOf(input), { role: "user", content: user }], input.signal);
   const w = new Writes(input, "reflect", lived2, r.read);
   if (r.answer) {
     w.single("self", "self", r.answer.self);
@@ -102957,7 +103197,7 @@ async function interview2(model2, input) {
   const user = [mindContext(input), renderPrompt(CHARACTER_TEXT.interview, texts2, { name: input.name, question: input.question.trim() }), renderPrompt(CHARACTER_TEXT.interviewAnswer, texts2, {})].filter((p) => p !== "").join(`
 
 `);
-  const r = await ask(model2, "character", [systemOf(input), { role: "user", content: user }], input.signal);
+  const r = await ask2(model2, "character", [systemOf(input), { role: "user", content: user }], input.signal);
   const answer = r.read.text("answer", r.answer?.answer);
   const w = new Writes(input, "interview", [], r.read);
   const neutral = input.neutral && answer !== "";
@@ -102980,7 +103220,6 @@ function stagingFor(input, who) {
   return [...own2, ...others];
 }
 function povAsk(input, texts2) {
-  const deed = input.beat.deed?.trim() ?? "";
   const each = input.who.map((who) => {
     const x = input.beat.exposure.find((e) => e.who === who);
     const own2 = input.beat.actors.includes(who);
@@ -102989,7 +103228,6 @@ function povAsk(input, texts2) {
     const others = Object.entries(input.refs[who]?.present ?? {}).map(([id2, name]) => `- ${id2}: ${name ?? "no name (someone they don't know)"}`);
     return [
       `### ${who}${how.length > 0 ? `: ${how.join("; ")}` : ""}`,
-      ...own2 && deed !== "" ? [`What they did and said, as they did it: ${deed}`] : [],
       ...staged.length > 0 ? ["What they could sense of where everyone was as it began:", ...staged] : [],
       "Whom they may name, and how:",
       `- ${who}: you`,
@@ -103058,51 +103296,24 @@ function unseenIn(povs, input) {
   }
   return out2;
 }
-var REACHED_WORDS = { sight: "by sight", hearing: "by hearing", touch: "by touch", told: "by word of mouth", message: "by message", rumor: "by rumor", record: "from a record" };
-function unnamed(text5, strangers, keep) {
-  const kept3 = new Set(keep.flatMap(nameWords2).map((w) => w.toLowerCase()));
-  const words8 = [...new Set(strangers.flatMap((name) => nameWords2(name).filter((w, i) => i === 0 || !kept3.has(w.toLowerCase()))))].sort((a, b) => b.length - a.length);
-  const trimmed2 = text5.trim();
-  if (words8.length === 0)
-    return trimmed2;
-  const pattern = new RegExp(words8.map(wordPattern2).join("|"), "gu");
-  let out2 = "";
-  for (const [i, part] of trimmed2.split(/(\u201C[^\u201D]*\u201D|"[^"]*")/u).entries()) {
-    out2 += i % 2 === 1 ? part : part.replace(pattern, (_m, at2) => /(?:^|[.!?\u2026]["\u201D\u2019)]?)\s*$/u.test(out2 + part.slice(0, at2)) ? "Someone" : "someone");
-  }
-  return out2;
-}
-function povFallback(input, who) {
-  const x = input.beat.exposure.find((e) => e.who === who);
-  const own2 = input.beat.actors.includes(who);
-  const deed = own2 && input.beat.deed !== undefined && input.beat.deed.trim() !== "" ? input.beat.deed : undefined;
-  if (x?.channel === "message" && !own2)
-    return x.reach === "partial" ? "A message reached you, only in part." : "A message reached you.";
-  if (x?.reach === "partial" && deed === undefined)
-    return `Something reached you ${exposureChannels(x).map((c) => REACHED_WORDS[c] ?? `by ${c}`).join(" and ")}, only in part.`;
-  if (x !== undefined && heardAlone(input.beat, who))
-    return input.beat.quotes && input.beat.quotes.trim() !== "" ? `You hear: \u201C${input.beat.quotes.trim()}\u201D` : "Something reached you by hearing.";
-  const refs = input.refs[who];
-  return unnamed(deed ?? input.beat.surface, refs?.strangers ?? [], refs ? [refs.self, ...Object.values(refs.present).filter((n) => n !== null), ...refs.absent, ...refs.world] : []);
-}
 function fellBackLine(who, beat, names) {
-  const why2 = names.length > 0 ? `The point of view for ${who} of ${beat} named someone who wasn't there (${names.join(", ")}), and again when redrafted` : `No point of view was written for ${who} of ${beat}, asked twice`;
-  return `${why2}: in its place ${who} gets a plain one that names no one they may not name.`;
+  const why2 = names.length > 0 ? `The point of view for ${who} of ${beat} named someone who wasn't there (${names.join(", ")}), again when redrafted, and the GM's check couldn't set it right` : `No point of view was written for ${who} of ${beat}, asked twice`;
+  return `${why2}: it is left unwritten, and no rule writes one in its place.`;
 }
 async function povRender(model2, input) {
   if (input.who.length === 0)
-    return { povs: {}, fellBack: {}, usage: NO_USAGE };
+    return { povs: {}, pending: {}, usage: NO_USAGE };
   const texts2 = input.texts ?? TEXTS;
   const messages = [
     { role: "system", content: renderPrompt(CHARACTER_TEXT.pov, texts2, {}) },
     { role: "user", content: povAsk(input, texts2) }
   ];
-  const r = await ask(model2, "pov", messages, input.signal);
+  const r = await ask2(model2, "pov", messages, input.signal);
   const povs = povsIn(r.answer, input.who, r.read);
   const unseen = unseenIn(povs, input);
   const again = input.who.filter((who) => povs[who] === undefined || unseen[who] !== undefined);
   if (again.length === 0)
-    return { povs, fellBack: {}, ...r.reasoning ? { reasoning: r.reasoning } : {}, usage: r.usage };
+    return { povs, pending: {}, ...r.reasoning ? { reasoning: r.reasoning } : {}, usage: r.usage };
   for (const who of again)
     delete povs[who];
   const named2 = again.filter((who) => unseen[who] !== undefined);
@@ -103114,25 +103325,52 @@ async function povRender(model2, input) {
 `) }) : "",
     renderPrompt(CHARACTER_TEXT.povAgainAnswer, texts2, {})
   ].filter((p) => p !== "");
-  const r2 = await ask(model2, "pov", [...messages, { role: "assistant", content: r.text }, { role: "user", content: redo.join(`
+  const r2 = await ask2(model2, "pov", [...messages, { role: "assistant", content: r.text }, { role: "user", content: redo.join(`
 
 `) }], input.signal);
   const second = povsIn(r2.answer, again, r2.read);
   const still = unseenIn(second, input);
-  const fellBack = {};
+  for (const who of again)
+    if (second[who] !== undefined && still[who] === undefined)
+      povs[who] = second[who];
+  const flagged2 = again.filter((who) => second[who] !== undefined && still[who] !== undefined);
+  const checked = flagged2.length > 0 ? await povCheck(model2, input, texts2, Object.fromEntries(flagged2.map((who) => [who, { text: second[who] ?? "", names: still[who] ?? [] }]))) : undefined;
+  const pending = {};
   for (const who of again) {
-    const text5 = second[who];
-    if (text5 !== undefined && still[who] === undefined)
+    if (povs[who] !== undefined)
+      continue;
+    const text5 = checked?.povs[who];
+    if (text5 !== undefined)
       povs[who] = text5;
-    else {
-      fellBack[who] = still[who] ?? [];
-      povs[who] = povFallback(input, who);
-    }
+    else
+      pending[who] = still[who] ?? [];
   }
-  const reasoning = [r.reasoning, r2.reasoning].filter((s) => s !== undefined && s !== "").join(`
+  const reasoning = [r.reasoning, r2.reasoning, checked?.reasoning].filter((s) => s !== undefined && s !== "").join(`
 
 `);
-  return { povs, fellBack, ...reasoning !== "" ? { reasoning } : {}, usage: addUsage(r.usage, r2.usage) };
+  return { povs, pending, ...reasoning !== "" ? { reasoning } : {}, usage: addUsage(addUsage(r.usage, r2.usage), checked?.usage ?? NO_USAGE) };
+}
+async function povCheck(model2, input, texts2, flagged2) {
+  const who = Object.keys(flagged2);
+  const each = who.map((id2) => `### ${id2}
+Names of people who weren't there: ${(flagged2[id2]?.names ?? []).join(", ")}
+${flagged2[id2]?.text ?? ""}`);
+  try {
+    const r = await ask2(model2, "check", [
+      { role: "system", content: renderPrompt(CHARACTER_TEXT.povCheck, texts2, {}) },
+      { role: "user", content: `${povAsk(input, texts2)}
+
+## The points of view to check
+${each.join(`
+
+`)}` }
+    ], input.signal);
+    return { povs: povsIn(r.answer, who, r.read), ...r.reasoning ? { reasoning: r.reasoning } : {}, usage: r.usage };
+  } catch (e) {
+    if (input.signal?.aborted)
+      throw e;
+    return { povs: {}, usage: NO_USAGE };
+  }
 }
 function seedCore(input) {
   const review = input.review ?? (input.source !== "card" && input.source !== "world");
@@ -103249,17 +103487,23 @@ function draftsOn(events3) {
     return { draft, from, state: settle6 ? "settled" : drop2 ? "dropped" : "open", ...settle6 ? { settle: settle6 } : {}, ...drop2 ? { drop: drop2 } : {} };
   });
 }
+async function draftWithTexts(blobs, userId, d) {
+  const read = async (s) => isBlobHash(s) ? await blobs.get(userId, s) ?? "" : s;
+  const parts = await Promise.all(d.episode.parts.map(async (p) => ({ ...p, rationale: await read(p.rationale) })));
+  return { ...d, episode: { ...d.episode, why: await read(d.episode.why), parts }, summary: await read(d.summary) };
+}
 var SETTLED_CHIP_KIND = "settled";
 var SETTLED_LABEL_MAX = 140;
-function settledChipsOn(core, observed, live) {
+async function settledChipsOn(core, observed, live, blobs, userId) {
   const last = core.chain(observed).findLast((m) => !m.isUser);
   if (!last)
     return [];
-  const here = draftsOn(live).flatMap((d) => d.settle?.from.messageId === last.id ? [{ draft: d.draft, settle: d.settle.data }] : []);
-  if (here.length === 0)
+  const settledHere = draftsOn(live).flatMap((d) => d.settle?.from.messageId === last.id ? [{ draft: d.draft, settle: d.settle.data }] : []);
+  if (settledHere.length === 0)
     return [];
   const state2 = core.fold(observed).state;
   const world = core.playedAt(state2);
+  const here = await Promise.all(settledHere.map(async (s) => ({ draft: await draftWithTexts(blobs, userId, s.draft), settle: s.settle })));
   const cal = world ? calendarOf(world) : null;
   return here.map(({ draft, settle: settle6 }) => {
     const said2 = (draft.summary.split(`
@@ -103312,6 +103556,86 @@ function heldFrom(drafts, who) {
     from = Math.min(from, ...mine.map((t) => t.from));
   }
   return holding.length > 0 ? { from, drafts: holding } : null;
+}
+
+// src/backend/depth/spend.ts
+var SPEND_TYPES = [AUTHOR_SPEND];
+var INTERVAL_MINUTES = { day: 24 * 60, week: 7 * 24 * 60, month: 30 * 24 * 60 };
+function intervalAt(unit3, at2) {
+  const len = INTERVAL_MINUTES[unit3];
+  return { unit: unit3, from: Math.floor(at2 / len) * len };
+}
+function onScreenSpent(spends, unit3, at2) {
+  const from = intervalAt(unit3, at2).from;
+  return spends.filter((s) => s.treatment === "scene" && s.interval.unit === unit3 && s.interval.from === from && (s.roles.character?.calls ?? 0) + (s.roles.realtime?.calls ?? 0) > 0).length;
+}
+var NO_COST = { calls: 0, tokensIn: 0, tokensOut: 0 };
+function addCost(a, b) {
+  const reasoningOut = a.reasoningOut === undefined && b.reasoningOut === undefined ? undefined : (a.reasoningOut ?? 0) + (b.reasoningOut ?? 0);
+  const money6 = a.money === undefined && b.money === undefined ? undefined : (a.money ?? 0) + (b.money ?? 0);
+  return { calls: a.calls + b.calls, tokensIn: a.tokensIn + b.tokensIn, tokensOut: a.tokensOut + b.tokensOut, ...reasoningOut === undefined ? {} : { reasoningOut }, ...money6 === undefined ? {} : { money: money6 } };
+}
+function callCost(usage2) {
+  return { calls: 1, tokensIn: usage2?.tokensIn ?? 0, tokensOut: usage2?.tokensOut ?? 0, ...usage2?.reasoningOut !== undefined ? { reasoningOut: usage2.reasoningOut } : {}, ...usage2?.cost !== undefined ? { money: usage2.cost } : {} };
+}
+function metered(port) {
+  let cost = NO_COST;
+  const roles = {};
+  return {
+    port: async (role, messages, opts) => {
+      const count4 = (usage2) => {
+        const c = callCost(usage2);
+        cost = addCost(cost, c);
+        roles[role] = addCost(roles[role] ?? NO_COST, c);
+      };
+      const answer = await port(role, messages, opts).catch((error) => {
+        if (error instanceof Error && error.name === "ProviderRefusal" && "usage" in error && error.usage)
+          count4(error.usage);
+        throw error;
+      });
+      count4(answer.usage);
+      return answer;
+    },
+    spent: () => ({ cost, roles: { ...roles } })
+  };
+}
+function addSpent(a, b) {
+  const roles = { ...a.roles };
+  for (const [role, c] of Object.entries(b.roles))
+    roles[role] = addCost(roles[role] ?? NO_COST, c);
+  return { cost: addCost(a.cost, b.cost), roles };
+}
+function spentSince(a, b) {
+  const less = (x, y) => {
+    const reasoningOut = y.reasoningOut === undefined ? undefined : y.reasoningOut - (x.reasoningOut ?? 0);
+    const money6 = y.money === undefined ? undefined : y.money - (x.money ?? 0);
+    return { calls: y.calls - x.calls, tokensIn: y.tokensIn - x.tokensIn, tokensOut: y.tokensOut - x.tokensOut, ...reasoningOut === undefined ? {} : { reasoningOut }, ...money6 === undefined ? {} : { money: money6 } };
+  };
+  const roles = {};
+  for (const [role, c] of Object.entries(b.roles)) {
+    const d = less(a.roles[role] ?? NO_COST, c);
+    if (d.calls > 0)
+      roles[role] = d;
+  }
+  return { cost: less(a.cost, b.cost), roles };
+}
+function leadingTreatment(parts) {
+  return DEPTH_TREATMENTS.find((t) => parts.some((p) => p.treatment === t)) ?? "written";
+}
+function spendData(spent, o) {
+  const put2 = (o.put ?? []).filter((p) => p.trim() !== "");
+  if (spent.cost.calls <= 0 && put2.length === 0 || !SPEND_WORK.includes(o.treatment))
+    return null;
+  return { treatment: o.treatment, interval: intervalAt(o.interval, o.at), cost: spent.cost, roles: spent.roles, day: (o.now ?? new Date).toISOString().slice(0, 10), for: o.for, ...put2.length > 0 ? { put: put2 } : {} };
+}
+function spendsOn(events3) {
+  const out2 = [];
+  for (const e of events3) {
+    const d = authorData(e.event, AUTHOR_SPEND);
+    if (d)
+      out2.push({ data: d, from: e.from });
+  }
+  return out2;
 }
 
 // src/backend/depth/budget.ts
@@ -103404,17 +103728,29 @@ function daySpendOf(host) {
 function ceilingRoom(budget, turn, day2) {
   return { turn: budget.perTurn === "none" ? null : Math.max(0, budget.perTurn - turn), day: budget.perDay === "none" ? null : Math.max(0, budget.perDay - day2) };
 }
+function onScreenAllowance(budget, spends, at2) {
+  return budget.onScreen === "none" ? null : { limit: budget.onScreen, spent: onScreenSpent(spends, budget.interval, at2), interval: budget.interval };
+}
+function onScreenOut(allowance) {
+  return allowance.spent >= allowance.limit;
+}
+function onScreenWords(a) {
+  return onScreenOut(a) ? `The on-screen allowance is spent: this story ${a.interval} has had ${a.spent} turns with someone on screen playing as their own agent, its allowance of ${a.limit} (Settings \u2192 Depth \u2192 Budget \u2192 On screen). Cast no one as their own agent this turn: play them yourself, or handle them as part of the world.` : `The on-screen allowance: ${a.limit - a.spent} of ${a.limit} turns with someone on screen playing as their own agent left this story ${a.interval} (Settings \u2192 Depth \u2192 Budget \u2192 On screen). Spend them where the story needs them.`;
+}
 function budgetWords(budget, turnTokens) {
+  const screen = budget.onScreen ? onScreenWords(budget.onScreen) : null;
   const bind = budget.binds(turnTokens);
   if (bind)
-    return `The budget binds: ${bind.words}. Spend less from here: anyone you would give their own agent (a call each time they act) you play yourself (one call for several) or handle as part of the world. Anyone still playing as their own agent you play from now on. How far the scene goes this turn is yours to judge.`;
+    return [`The budget binds: ${bind.words}. Spend less from here: anyone you would give their own agent (a call each time they act) you play yourself (one call for several) or handle as part of the world. Who of those still playing as their own agent slides down the ladder, and how far, is yours to say; anyone still due as their own agent ends the scene at the next beat. How far the scene goes this turn is yours to judge.`, ...screen ? [screen] : []].join(" ");
   const left = budget.left(turnTokens);
   const parts = [...left.turn !== null ? [`this turn has spent ${tokensText(turnTokens)} tokens, with about ${tokensText(left.turn)} left under its ceiling (Settings \u2192 Depth \u2192 Budget \u2192 Per turn)`] : [], ...left.day !== null ? [`today's depth work has about ${tokensText(left.day)} tokens left under its ceiling (Per day)`] : []];
-  return parts.length > 0 ? `The budget: ${parts.join("; ")}. Spend by it: once a ceiling binds, whoever still plays as their own agent is played by you.` : null;
+  const ceilings = parts.length > 0 ? `The budget: ${parts.join("; ")}. Spend by it: once a ceiling binds, you are asked who slides down the ladder.` : null;
+  const all2 = [...ceilings ? [ceilings] : [], ...screen ? [screen] : []];
+  return all2.length > 0 ? all2.join(" ") : null;
 }
-async function budgetFor(day2, userId, budget) {
+async function budgetFor(day2, userId, budget, onScreen2) {
   await day2.load(userId);
-  return { binds: (turnTokens) => ceilingBinds(budget, turnTokens, day2.tokens(userId)), left: (turnTokens) => ceilingRoom(budget, turnTokens, day2.tokens(userId)) };
+  return { binds: (turnTokens) => ceilingBinds(budget, turnTokens, day2.tokens(userId)), left: (turnTokens) => ceilingRoom(budget, turnTokens, day2.tokens(userId)), ...onScreen2 ? { onScreen: onScreen2 } : {} };
 }
 
 // src/backend/depth-model-host.ts
@@ -103527,24 +103863,28 @@ ${call.model ?? ""}`;
         const throttle = s.agents.throttles.find((t) => t.id === connection);
         const entry = await minuteRoom(minuteWindowOf(host, userId), connection, Math.ceil(promptChars / 3.2) + maxTokens, throttle, AbortSignal.any([signal2, giving.signal]), clock, lane);
         sending = true;
-        const r = await host.models.quiet({
+        const request = {
           messages: cachedMessages(messages, cache2),
           maxTokens,
           json: opts.json ?? false,
           connectionId: call.connectionId,
           model: call.model,
-          effort: call.effort,
+          effort: opts.effort ?? call.effort,
           params: opts.params ? { ...call.params, ...opts.params } : call.params,
           usage: true,
           stream: true
-        }, userId, AbortSignal.any([signal2, giving.signal]));
+        };
+        const sent = AbortSignal.any([signal2, giving.signal]);
+        const onReasoning = opts.onReasoning;
+        const r = onReasoning ? await host.models.stream(request, userId, sent, (piece) => piece.kind === "reasoning" && onReasoning(piece.text)) : await host.models.quiet(request, userId, sent);
         const answered = usageOf(r, promptChars);
         entry.tokens = answered.tokensIn + answered.tokensOut;
         day2?.add(userId, answered.tokensIn + answered.tokensOut);
         const refused2 = refusalOf2(role, r);
         if (refused2) {
           refused2.usage = answered;
-          refused2.call = { connection: call.connectionId ?? "", model: r.model ?? call.model ?? "" };
+          const refusedId = requestIdOf(r.usage);
+          refused2.call = { connection: call.connectionId ?? "", model: r.model ?? call.model ?? "", ...refusedId ? { requestId: refusedId } : {} };
           throw refused2;
         }
         const usage2 = gaveWay > 0 ? { ...answered, tokensIn: answered.tokensIn + gaveWay } : answered;
@@ -103806,7 +104146,7 @@ async function mindView(rt, chatId, userId, who) {
   ];
   const texts2 = await textsOf(rt.blobs, userId, hashes);
   const { replaced } = exposedBeats(story);
-  const files = Object.entries(meta).map(([rel, m]) => ({ path: rel, text: texts2[m.hash] ?? "", pinned: pinnedBy(m, rel), revisions: m.rev, at: formatClock(cal, m.at), ...writtenFromGone(m, mind2, replaced) ? { out: true } : {}, ...m.review ? { review: true } : {} })).sort((a, b) => mindFileOrder(a.path) - mindFileOrder(b.path) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const files = Object.entries(meta).map(([rel, m]) => ({ path: rel, text: texts2[m.hash] ?? "", pinned: pinnedBy(m, rel), revisions: m.rev, at: formatClock(cal, m.at), ...writtenFromGone(m, mind2, replaced) ? { out: true, ...m.mode === "reflect" ? { reflection: true } : {} } : {}, ...m.review ? { review: true } : {} })).sort((a, b) => mindFileOrder(a.path) - mindFileOrder(b.path) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const previous = new Map;
   const written2 = [];
   for (const [i, w] of writes.entries()) {
@@ -103841,21 +104181,29 @@ var MIND_UNDO = "minds.v2.undo";
 function mindEditChip(entry) {
   return `${MIND_EDIT_CHIP}:${entry}`;
 }
+function mindRestoreId(entry) {
+  return layerEntryId("mind_restore", entry);
+}
 function playerMindEdits(core, observed) {
   const chain = core.chain(observed);
   const head = headBasisOf(core, observed);
   const live = liveLayer(chain, core.journal.tombstones, core.layerEntries());
   const out2 = [];
+  const standing2 = new Set([...live.at.values()].flatMap((entries2) => entries2.map((e) => e.id)));
   for (const m of chain) {
     for (const entry of live.at.get(m.id) ?? []) {
       const write2 = entry.events.map((e) => mindWriteEvent(e)).find((w) => w?.mode === "user");
       if (write2)
-        out2.push({ entry, who: write2.who, path: write2.path, messageId: m.id, undoable: head !== null && entry.basis.message === head.message && entry.basis.swipe === head.swipe });
+        out2.push({ entry, who: write2.who, path: write2.path, messageId: m.id, undoable: head !== null && entry.basis.message === head.message && entry.basis.swipe === head.swipe, restored: standing2.has(mindRestoreId(entry.id)) });
     }
   }
   return out2;
 }
 async function mindEdit2(rt, chatId, userId, who, path2, text5) {
+  const r = await landMindEdit(rt, chatId, userId, who, path2, text5);
+  return r.status === "held" ? { undo: null, pending: true } : { undo: r.status === "landed" ? mindEditChip(r.entry.id) : null };
+}
+async function landMindEdit(rt, chatId, userId, who, path2, text5, id2) {
   const at2 = await foldAt(rt, chatId, userId);
   personOf2(rt, at2.world, at2.state, who);
   const full = path2.startsWith(MINDS_DIR) ? path2 : `${mindDir(who)}${path2}`;
@@ -103867,8 +104215,7 @@ async function mindEdit2(rt, chatId, userId, who, path2, text5) {
     undos = core.layerEntries().filter((e) => e.kind === MIND_UNDO && e.basis.message === at2.basis.message && e.basis.swipe === at2.basis.swipe).length;
   });
   const w = mindFileWrite({ who, path: full, at: at2.state.clock, mode: "user", lived: [], about: [] }, text5);
-  const r = await land(rt, chatId, userId, at2.basis, MIND_WRITE, w, layerEntryId("mind_edit", chatId, who, file.rel, blobHash(text5), at2.basis.message, at2.basis.swipe, String(undos)), "user");
-  return r.status === "held" ? { undo: null, pending: true } : { undo: r.status === "landed" ? mindEditChip(r.entry.id) : null };
+  return land(rt, chatId, userId, at2.basis, MIND_WRITE, w, id2 ?? layerEntryId("mind_edit", chatId, who, file.rel, blobHash(text5), at2.basis.message, at2.basis.swipe, String(undos)), "user");
 }
 async function mindEditUndo(rt, chatId, userId, entry) {
   let edit;
@@ -103877,24 +104224,34 @@ async function mindEditUndo(rt, chatId, userId, entry) {
   });
   if (!edit)
     throw new MindRefused("moved", "That edit no longer stands on this chat's chain.");
-  if (!edit.undoable)
-    throw new MindRefused("moved", "Only the latest reply's edits can be undone, as in the chat.");
+  if (!edit.undoable) {
+    if (edit.restored)
+      throw new MindRefused("moved", "That edit is already undone: the edit restoring the file as it was before it stands.");
+    const before = await rt.ledger.foldAtBasis(chatId, userId, edit.entry.basis, [], new Set([entry]));
+    const rel = mindFileOf(edit.path)?.rel ?? "";
+    const files = before ? mindV2At(before.state, edit.who).files : undefined;
+    const was = files && hasOwn(files, rel) ? files[rel]?.hash : undefined;
+    const r2 = await landMindEdit(rt, chatId, userId, edit.who, edit.path, was ? await rt.blobs.get(userId, was) ?? "" : "", mindRestoreId(entry));
+    if (r2.status === "refused")
+      throw new MindRefused("refused", `LumiRPEngine couldn't undo it: ${r2.reason}`);
+    return r2;
+  }
   const r = await rt.ledger.landLayer(chatId, userId, { id: layerEntryId(MIND_UNDO, chatId, entry), basis: edit.entry.basis, kind: MIND_UNDO, events: [], supersedes: [entry], by: { role: "user" } });
   if (r.status === "refused")
     throw new MindRefused("refused", `LumiRPEngine couldn't undo it: ${r.reason}`);
   return r;
 }
 var PLAY_AS_OFF = "Play as isn't supported yet: you play one player character, the one this chat plays now.";
-async function interviewMind(rt, chatId, userId, who, question, neutral, model2) {
-  const at2 = await foldAt(rt, chatId, userId);
+async function interviewMind(rt, chatId, userId, who, question, neutral, model2, o = {}) {
+  const at2 = await foldAt(rt, chatId, userId, o.basis);
   personOf2(rt, at2.world, at2.state, who);
   if (!hasAgent(at2.world, at2.state, who))
     throw new MindRefused("player_character", `${nameOf11(at2.world, at2.state, who)} is the player character: the player drives him, and he has no agent to interview.`);
   if (question.trim() === "")
     throw new MindRefused("bad_path", "An interview needs a question.");
   const settings = await rt.settings.get(userId);
-  const r = await interview2(model2 ?? portFor(rt, userId), { ...await mindInput(rt, userId, at2, who, settings), question, by: "gm", neutral });
-  await land(rt, chatId, userId, at2.basis, MIND_INTERVIEW, r.out, layerEntryId("interview", chatId, who, blobHash(question), at2.basis.message, at2.basis.swipe, String(Date.now())), "character");
+  const r = await interview2(model2 ?? portFor(rt, userId), { ...await mindInput(rt, userId, at2, who, settings), question, by: o.by ?? "player", neutral, ...o.signal ? { signal: o.signal } : {} });
+  await land(rt, chatId, userId, at2.basis, MIND_INTERVIEW, r.out, layerEntryId("interview", chatId, who, blobHash(question), at2.basis.message, at2.basis.swipe, o.by === "author" || o.by === "gm" ? o.by : String(Date.now())), "character");
   return { answer: r.answer, folded: r.folded };
 }
 async function livedPovs(blobs, userId, world, beats, who) {
@@ -104003,7 +104360,7 @@ var CHAT_PARTS = {
         if (e.messageId !== m.id)
           continue;
         const name = hasOwn(render.state.entities, e.who) ? render.state.entities[e.who]?.name ?? e.who : e.who;
-        edits.push({ messageId: m.id, entry: e.entry.id, lines: [`${name}'s mind: ${e.path.slice(mindDir(e.who).length)}, as you wrote it`], undo: e.undoable ? mindEditChip(e.entry.id) : null });
+        edits.push({ messageId: m.id, entry: e.entry.id, lines: [`${name}'s mind: ${e.path.slice(mindDir(e.who).length)}, as you wrote it`], undo: e.restored ? null : mindEditChip(e.entry.id) });
       }
     });
     return edits.reverse().slice(0, GM_EDITS);
@@ -104022,29 +104379,29 @@ function buildGmView(core, observed, registry, minds, waitsOn) {
   const head = { core, observed, registry, render, minds, waitsOn };
   return readPass(() => ({ ...buildGmWorld(registry, render.world, render.state), edits: CHAT_PARTS.edits(head), refused: CHAT_PARTS.refused(head), held: CHAT_PARTS.held(head), minds: CHAT_PARTS.minds(head) }));
 }
-function gmPartProblem(ask2) {
-  if (typeof ask2.part !== "string" || ask2.id !== undefined && typeof ask2.id !== "string" || ask2.kind !== undefined && typeof ask2.kind !== "string")
+function gmPartProblem(ask3) {
+  if (typeof ask3.part !== "string" || ask3.id !== undefined && typeof ask3.id !== "string" || ask3.kind !== undefined && typeof ask3.kind !== "string")
     return "part, id and kind are text";
-  if (ask2.ids !== undefined && (!Array.isArray(ask2.ids) || ask2.ids.some((x) => typeof x !== "string")))
+  if (ask3.ids !== undefined && (!Array.isArray(ask3.ids) || ask3.ids.some((x) => typeof x !== "string")))
     return "ids is a list of ids";
-  if (ask2.bytes !== undefined && typeof ask2.bytes !== "boolean")
+  if (ask3.bytes !== undefined && typeof ask3.bytes !== "boolean")
     return "bytes is true or false";
-  if (ask2.part === GM_OUTLINE)
-    return ask2.id !== undefined || ask2.ids !== undefined || ask2.kind !== undefined ? `the outline is read whole; only ${GM_KEYED_PARTS.join(", ")} take an id` : null;
-  const asked2 = readPart(ask2.part);
+  if (ask3.part === GM_OUTLINE)
+    return ask3.id !== undefined || ask3.ids !== undefined || ask3.kind !== undefined ? `the outline is read whole; only ${GM_KEYED_PARTS.join(", ")} take an id` : null;
+  const asked2 = readPart(ask3.part);
   if (asked2 === undefined)
-    return `part is one of ${[...GM_PARTS, GM_ROSTER].join(", ")} or ${GM_OUTLINE}, not ${JSON.stringify(ask2.part)}`;
-  if (ask2.bytes !== undefined)
+    return `part is one of ${[...GM_PARTS, GM_ROSTER].join(", ")} or ${GM_OUTLINE}, not ${JSON.stringify(ask3.part)}`;
+  if (ask3.bytes !== undefined)
     return "only the outline tells each part's bytes";
-  if (ask2.id !== undefined && !GM_KEYED_PARTS.some((p) => p === asked2))
+  if (ask3.id !== undefined && !GM_KEYED_PARTS.some((p) => p === asked2))
     return `only ${GM_KEYED_PARTS.join(", ")} take an id; ${asked2} is read whole`;
-  if (ask2.id !== undefined && (ask2.ids !== undefined || ask2.kind !== undefined))
+  if (ask3.id !== undefined && (ask3.ids !== undefined || ask3.kind !== undefined))
     return "name one by its id, or several by ids, not both";
-  if (ask2.ids !== undefined && !GM_IDS_PARTS.includes(asked2))
+  if (ask3.ids !== undefined && !GM_IDS_PARTS.includes(asked2))
     return `only ${GM_IDS_PARTS.join(", ")} take ids; ${asked2} is read whole`;
-  if (ask2.ids !== undefined && ask2.ids.length > GM_IDS_MAX)
+  if (ask3.ids !== undefined && ask3.ids.length > GM_IDS_MAX)
     return `at most ${GM_IDS_MAX} ids at once`;
-  if (ask2.kind !== undefined && !GM_KIND_PARTS.includes(asked2))
+  if (ask3.kind !== undefined && !GM_KIND_PARTS.includes(asked2))
     return `only ${GM_KIND_PARTS.join(", ")} take a kind; ${asked2} is read whole`;
   return null;
 }
@@ -104059,24 +104416,24 @@ function once(parts, key, make2, built) {
   parts?.set(key, value);
   return value;
 }
-function buildGmPart(head, ask2, parts = null, built) {
-  const problem = gmPartProblem(ask2);
+function buildGmPart(head, ask3, parts = null, built) {
+  const problem = gmPartProblem(ask3);
   if (problem !== null)
     return { refused: problem };
   const { registry } = head;
   const { world, state: state2 } = head.render;
   const whole5 = (part) => once(parts, part, () => part === GM_ROSTER ? buildGmRoster(registry, world, state2) : hasOwnPart(CHAT_PARTS, part) ? CHAT_PARTS[part](head) : buildGmWorldPart(registry, world, state2, part), built);
   return readPass(() => {
-    if (ask2.part === GM_OUTLINE) {
+    if (ask3.part === GM_OUTLINE) {
       const outline2 = [GM_PARTS[0], GM_ROSTER, ...GM_PARTS.slice(1)].map((p) => {
         const count4 = p === GM_ROSTER || p === "entities" ? Object.keys(state2.entities).length : p === "refused" ? (head.core.journal.refused ?? []).length : p === "held" ? head.core.journal.held.length : hasOwn(COUNTED, p) ? gmWorldPartCount(registry, world, state2, p) : countOf(p, whole5(p));
-        return { part: p, count: count4, ...ask2.bytes ? { bytes: Buffer.byteLength(JSON.stringify(whole5(p)), "utf8") } : {} };
+        return { part: p, count: count4, ...ask3.bytes ? { bytes: Buffer.byteLength(JSON.stringify(whole5(p)), "utf8") } : {} };
       });
       return { part: GM_OUTLINE, id: null, value: outline2 };
     }
-    const asked2 = readPart(ask2.part);
-    const pick3 = { ...ask2.ids ? { ids: ask2.ids } : {}, ...ask2.kind !== undefined ? { kind: ask2.kind } : {} };
-    if (ask2.id === undefined) {
+    const asked2 = readPart(ask3.part);
+    const pick3 = { ...ask3.ids ? { ids: ask3.ids } : {}, ...ask3.kind !== undefined ? { kind: ask3.kind } : {} };
+    if (ask3.id === undefined) {
       if (pick3.ids === undefined && pick3.kind === undefined)
         return { part: asked2, id: null, value: whole5(asked2) };
       const key2 = `${asked2}\x00${JSON.stringify(pick3)}`;
@@ -104086,7 +104443,7 @@ function buildGmPart(head, ask2, parts = null, built) {
     const keyed = GM_KEYED_PARTS.find((p) => p === asked2);
     if (keyed === undefined)
       return { refused: `only ${GM_KEYED_PARTS.join(", ")} take an id; ${asked2} is read whole` };
-    const id2 = ask2.id;
+    const id2 = ask3.id;
     const key = `${keyed}\x00${JSON.stringify({ id: id2 })}`;
     return once(parts, key, () => {
       if (keyed === "orgs") {
@@ -104195,13 +104552,13 @@ function gmAnswerKey(gmKey, minds, waitsOn) {
   return hashParts("lre.gm.answer", gmKey, hashJson(minds), waitsOn ?? "");
 }
 var heads = new WeakMap;
-function readGmPart(read, ask2, steps) {
-  const problem = gmPartProblem(ask2);
+function readGmPart(read, ask3, steps) {
+  const problem = gmPartProblem(ask3);
   if (problem !== null)
     return { refused: problem };
   const key = gmAnswerKey(gmKeyOf(read.core, read.observed), read.minds, read.waitsOn);
-  if (ask2.since === key)
-    return { part: ask2.part, id: ask2.id ?? null, key, same: true };
+  if (ask3.since === key)
+    return { part: ask3.part, id: ask3.id ?? null, key, same: true };
   let head = read.reuse ? heads.get(read.core) : undefined;
   if (!head || head.key !== key) {
     head = { key, parts: new Map };
@@ -104216,7 +104573,7 @@ function readGmPart(read, ask2, steps) {
   const render = head.render;
   if (!render)
     return null;
-  const answer = buildGmPart({ core: read.core, observed: read.observed, registry: read.registry, render, minds: read.minds, waitsOn: read.waitsOn }, ask2, read.reuse ? head.parts : null, steps ? (part) => steps.built.push(part) : undefined);
+  const answer = buildGmPart({ core: read.core, observed: read.observed, registry: read.registry, render, minds: read.minds, waitsOn: read.waitsOn }, ask3, read.reuse ? head.parts : null, steps ? (part) => steps.built.push(part) : undefined);
   if (steps)
     steps.build += performance.now() - t1;
   return "refused" in answer ? answer : { ...answer, key };
@@ -104687,11 +105044,11 @@ function keepSummary(lines2) {
   return { count: rows.size, detail: [...rows.values()].map((r) => r.n > 1 ? `${r.text} (${r.n} linked changes)` : r.text).join(`
 `) };
 }
-function playerDrops(registry, world, state2, recordOf, notes, keep) {
+function playerDrops(registry, world, state2, recordOf2, notes, keep) {
   const eventAt = (messageId, ref) => {
     if (!ref || "marker" in ref)
       return;
-    const rec = recordOf(messageId);
+    const rec = recordOf2(messageId);
     if (!rec)
       return;
     return ref.in === "events" ? rec.events[ref.index] : rec.post.find((p) => p.seq === ref.seq)?.events[ref.index];
@@ -104792,9 +105149,9 @@ function derivedChips(chain, fold, keepReport, core, registry, world, depth2, te
     if (minutes2 > 0)
       chips.push({ id: `elapsed:${m.id}:${m.swipeId}`, kind: "elapsed", messageId: m.id, label: minutes2 >= 60 ? `+${Math.floor(minutes2 / 60)} h ${minutes2 % 60} min` : `+${minutes2} min`, actions: [], expires: "next_send" });
     if (rec.seed !== "" && rec.path !== "") {
-      const ask2 = { type: "text", label: "What should change?", value: "", optional: true };
+      const ask3 = { type: "text", label: "What should change?", value: "", optional: true };
       const detail = depth2 ? "Re-narrate tells this turn again: the same beats, new prose. Re-run plays the scene again from the same moment. Either may take a word on what should change: the narrator reads it, and so does the author, who on a Re-run sets the scene by it." : "Re-narrate tells this turn again: the same outcome, new prose. Re-run the turn with the engine plays it again, with a fresh roll. Either may take a word on what should change, which only the narrator reads.";
-      chips.push({ id: `swipe_option:${m.id}:${m.swipeId}`, kind: "swipe_option", messageId: m.id, label: "Swipe as\u2026", detail, actions: [{ id: "renarrate", label: "Re-narrate\u2026", input: ask2 }, { id: "rerun", label: depth2 ? "Re-run the scene" : "Re-run the turn with the engine", input: ask2 }], expires: "next_send" });
+      chips.push({ id: `swipe_option:${m.id}:${m.swipeId}`, kind: "swipe_option", messageId: m.id, label: "Swipe as\u2026", detail, actions: [{ id: "renarrate", label: "Re-narrate\u2026", input: ask3 }, { id: "rerun", label: depth2 ? "Re-run the scene" : "Re-run the turn with the engine", input: ask3 }], expires: "next_send" });
     }
     const unfaithful = unfaithfulChip(m.id, m.swipeId, [...rec.events, ...rec.post.filter((e) => e.kind === "cont").flatMap((e) => e.events)]);
     if (unfaithful)
@@ -104935,11 +105292,11 @@ function buildView(input) {
       const chain = core.chain(observed);
       const last = chain.findLast((m) => !m.isUser);
       const lastRec = last ? activeRecord(last, journal.tombstones) : null;
-      const recordOf = (messageId) => {
+      const recordOf2 = (messageId) => {
         const m = chain.find((x) => x.id === messageId);
         return m ? activeRecord(m, journal.tombstones) : null;
       };
-      const drops = timedPart(input.parts, "drops", () => playerDrops(registry, world, state2, recordOf, out2.notes, out2.keepReport));
+      const drops = timedPart(input.parts, "drops", () => playerDrops(registry, world, state2, recordOf2, out2.notes, out2.keepReport));
       read = memo.chain = {
         key: chainKey,
         scene: kept3(timedPart(input.parts, "scene", () => scene(world, state2, lastRec ? clockMinutes(lastRec.events) : 0, registry))),
@@ -106091,22 +106448,22 @@ async function puzzleAnswer(steps, run, question, accepted, answer, userId, sign
   const a = result?.answers.correct;
   return a && a.type === "noul" ? a.noul : null;
 }
-async function judge(steps, run, ask2, userId, signal2, lore2 = null) {
-  const scale = `0 (no particular approach, or one that works against them) to ${ask2.max} (a clever, prepared approach that fits the situation)`;
-  const choices = ask2.odds ? Object.keys(ask2.odds) : [];
-  const guidance = judgeOdds(ask2);
+async function judge(steps, run, ask3, userId, signal2, lore2 = null) {
+  const scale = `0 (no particular approach, or one that works against them) to ${ask3.max} (a clever, prepared approach that fits the situation)`;
+  const choices = ask3.odds ? Object.keys(ask3.odds) : [];
+  const guidance = judgeOdds(ask3);
   const lead = run.template?.template ?? DECISION_PROMPTS.judge;
   if (run.config.route?.provider === "decision") {
-    const questions = { rating: { type: "score", instructions: `${lead} Rate it from ${scale}.`, criteria: Array.from({ length: ask2.max + 1 }, (_, i) => String(i)) } };
+    const questions = { rating: { type: "score", instructions: `${lead} Rate it from ${scale}.`, criteria: Array.from({ length: ask3.max + 1 }, (_, i) => String(i)) } };
     if (guidance)
       questions.outcome = { type: "choice", instructions: "How does it turn out? The dice's exact odds are guidance: a strong approach moves them toward success, a weak one away.", criteria: guidance };
-    const answer = await steps.decide("judge", { action: ask2.action, player: ask2.text.slice(0, 2000), scene: ask2.scene }, questions, run.config, userId, signal2, lore2, run.guidance, run.recent);
+    const answer = await steps.decide("judge", { action: ask3.action, player: ask3.text.slice(0, 2000), scene: ask3.scene }, questions, run.config, userId, signal2, lore2, run.guidance, run.recent);
     const rating = answer?.answers.rating;
     if (!rating || rating.type !== "score")
       return null;
     const outcome = answer?.answers.outcome;
     const outcomes = outcome?.type === "choice" ? judgeOutcomes(outcome.probabilities, choices) : undefined;
-    return { rating: Math.min(ask2.max, Math.max(0, rating.score)), reason: "", ...outcomes ? { outcomes } : {} };
+    return { rating: Math.min(ask3.max, Math.max(0, rating.score)), reason: "", ...outcomes ? { outcomes } : {} };
   }
   const system = [
     `${lead} Rate the approach from ${scale}, and give a one-line reason in plain words.`,
@@ -106114,14 +106471,14 @@ async function judge(steps, run, ask2, userId, signal2, lore2 = null) {
     `Output JSON only: {"rating": number, "reason": string${guidance ? `, "outcomes": {${choices.map((o) => `"${o}": number`).join(", ")}}` : ""}}.`
   ].filter((line2) => line2 !== "").join(`
 `);
-  const user = `Action: ${ask2.action}
-The player wrote: ${ask2.text.slice(0, 2000)}
-Scene: ${JSON.stringify(ask2.scene)}${guidance ? `
+  const user = `Action: ${ask3.action}
+The player wrote: ${ask3.text.slice(0, 2000)}
+Scene: ${JSON.stringify(ask3.scene)}${guidance ? `
 Outcomes with the dice's exact odds: ${JSON.stringify(guidance)}` : ""}`;
-  return judgeAnswer(await steps.helperJson("judge", system, user, run.config, userId, signal2, { lore: lore2, guidance: run.guidance, recent: run.recent }), ask2);
+  return judgeAnswer(await steps.helperJson("judge", system, user, run.config, userId, signal2, { lore: lore2, guidance: run.guidance, recent: run.recent }), ask3);
 }
-function judgeOdds(ask2) {
-  return ask2.odds ? Object.fromEntries(Object.entries(ask2.odds).map(([o, p]) => [o, `${Math.round(p * 100)}%`])) : null;
+function judgeOdds(ask3) {
+  return ask3.odds ? Object.fromEntries(Object.entries(ask3.odds).map(([o, p]) => [o, `${Math.round(p * 100)}%`])) : null;
 }
 function judgeOutcomes(raw, choices) {
   if (!isRecord(raw))
@@ -106132,12 +106489,12 @@ function judgeOutcomes(raw, choices) {
       out2[o] = raw[o];
   return Object.keys(out2).length > 0 ? out2 : undefined;
 }
-function judgeAnswer(raw, ask2) {
+function judgeAnswer(raw, ask3) {
   if (!isRecord(raw) || typeof raw.rating !== "number" || !Number.isFinite(raw.rating))
     return null;
   const reason2 = typeof raw.reason === "string" ? raw.reason.replace(/\s+/g, " ").trim().slice(0, 240) : "";
-  const outcomes = judgeOutcomes(raw.outcomes, ask2.odds ? Object.keys(ask2.odds) : []);
-  return { rating: Math.min(ask2.max, Math.max(0, Math.round(raw.rating))), reason: reason2, ...outcomes ? { outcomes } : {} };
+  const outcomes = judgeOutcomes(raw.outcomes, ask3.odds ? Object.keys(ask3.odds) : []);
+  return { rating: Math.min(ask3.max, Math.max(0, Math.round(raw.rating))), reason: reason2, ...outcomes ? { outcomes } : {} };
 }
 
 // src/backend/claims.ts
@@ -108513,6 +108870,101 @@ function shippedVersion(world, tables, starters, id2) {
   return (starter2 ? starters.find((s) => s.table.id === id2 && s.starter.id === starter2.id)?.table : undefined) ?? tables.get(id2)?.defaults ?? null;
 }
 
+// src/shared/depth-offer.ts
+var DEPTH_OFFER_KIND = "depth_offer";
+var DEPTH_OFFER_CHOICES = { on: "on", estimate: "estimate", off: "off" };
+var DEPTH_OFFER_LOOPBACK = "loopback";
+function isDepthOfferChoice(choice) {
+  return choice === DEPTH_OFFER_CHOICES.on || choice === DEPTH_OFFER_CHOICES.estimate || choice === DEPTH_OFFER_CHOICES.off;
+}
+var DEPTH_OFFER_TEXT = {
+  label: "This chat could run on depth.",
+  detail: "An author runs each scene and keeps a notebook, characters play and remember from minds of their own, and a GM keeps the truth. The bootstrap reads this chat's history first, in the background.",
+  on: "Turn on depth and bootstrap",
+  loopback: "Set up the loopback",
+  estimate: "Estimate the bootstrap",
+  off: "Keep this chat off depth"
+};
+
+// src/backend/bootstrap/files.ts
+function bootstrapDir(chatId) {
+  return `runs/${chatId}/bootstrap/`;
+}
+
+class BootstrapFiles {
+  host;
+  chatId;
+  userId;
+  constructor(host, chatId, userId) {
+    this.host = host;
+    this.chatId = chatId;
+    this.userId = userId;
+  }
+  path(rel) {
+    return `${bootstrapDir(this.chatId)}${rel}`;
+  }
+  async read(rel, valid) {
+    const text5 = await this.host.storage.read(this.path(rel), this.userId);
+    if (text5 === null)
+      return null;
+    try {
+      const raw = JSON.parse(text5);
+      if (valid(raw))
+        return raw;
+    } catch {}
+    this.host.log("warn", `[LumiRPEngine] bootstrap file ${this.path(rel)} didn't read; it is made again`, this.userId);
+    return null;
+  }
+  async write(rel, value) {
+    await this.host.storage.write(this.path(rel), JSON.stringify(value), this.userId);
+  }
+  async remove(rel) {
+    await this.host.storage.remove(this.path(rel), this.userId).catch(() => {
+      return;
+    });
+  }
+  async list(rel) {
+    const base = bootstrapDir(this.chatId);
+    return (await this.host.storage.list(this.path(rel), this.userId).catch(() => [])).map((p) => p.startsWith(base) ? p.slice(base.length) : p);
+  }
+}
+
+// src/backend/bootstrap/depth-offer.ts
+var isRecordFile = (raw) => typeof raw === "object" && raw !== null;
+async function depthChosen(host, chatId, userId, hops = 0) {
+  if (await new BootstrapFiles(host, chatId, userId).read("depth.json", isRecordFile) !== null)
+    return true;
+  if (hops > 4)
+    return false;
+  let from;
+  try {
+    from = (await host.chats.chatMetadata(chatId, userId)).branched_from;
+  } catch {
+    return false;
+  }
+  return typeof from === "string" && from !== chatId ? depthChosen(host, from, userId, hops + 1) : false;
+}
+function depthOfferChip(view, messageId, unready) {
+  if (view.optedIn)
+    return null;
+  const est = view.remaining;
+  const off = { id: DEPTH_OFFER_CHOICES.off, label: DEPTH_OFFER_TEXT.off };
+  return {
+    id: `${DEPTH_OFFER_KIND}:${messageId}`,
+    kind: DEPTH_OFFER_KIND,
+    messageId,
+    label: DEPTH_OFFER_TEXT.label,
+    detail: [DEPTH_OFFER_TEXT.detail, unready, est ? `The bootstrap: ${est.messages.toLocaleString("en-US")} messages in ${est.chunks.toLocaleString("en-US")} chunks, ${est.minds} ${est.minds === 1 ? "mind" : "minds"} \xB7 ${countsText(est.total)}.` : "Estimate it first: the survey reads the chat once, with no model call."].filter((line2) => line2 !== null).join(`
+`),
+    actions: [
+      ...unready !== null ? [{ id: DEPTH_OFFER_LOOPBACK, label: DEPTH_OFFER_TEXT.loopback, style: "primary", input: { type: "settings", label: DEPTH_OFFER_TEXT.loopback, page: "loopback" } }] : [],
+      ...est ? [{ id: DEPTH_OFFER_CHOICES.on, label: DEPTH_OFFER_TEXT.on, ...unready === null ? { style: "primary" } : {} }, { id: DEPTH_OFFER_CHOICES.estimate, label: DEPTH_OFFER_TEXT.estimate }] : [{ id: DEPTH_OFFER_CHOICES.estimate, label: DEPTH_OFFER_TEXT.estimate, ...unready === null ? { style: "primary" } : {} }],
+      off
+    ],
+    expires: "never"
+  };
+}
+
 // src/backend/chat-knowledge-prefs.ts
 var PREFS_KEY = "prefs";
 var KEPT2 = 512;
@@ -108676,33 +109128,285 @@ function giveWay() {
   return promise;
 }
 
+// src/backend/agents/blobs.ts
+var BLOBS_DIR = "agents/blobs/";
+function blobPath(hash) {
+  if (!isBlobHash(hash))
+    throw new Error("not a blob hash");
+  return `${BLOBS_DIR}${hash}`;
+}
+
+class BlobStore {
+  host;
+  keep;
+  writing = new Map;
+  removing = new Map;
+  holds = new Map;
+  lengths = new Map;
+  onPut = null;
+  texts = new Map;
+  constructor(host, keep = () => defaultAgentSettings().kept.texts) {
+    this.host = host;
+    this.keep = keep;
+  }
+  async put(userId, text5, holder) {
+    const hash = blobHash(text5);
+    if (holder !== undefined)
+      this.hold(userId, holder, hash);
+    this.onPut?.(userId, hash);
+    const key = `${userId}\x00${hash}`;
+    this.lengths.set(key, text5.length);
+    const under2 = this.writing.get(key);
+    if (under2) {
+      await under2;
+      return hash;
+    }
+    const path2 = blobPath(hash);
+    const write2 = (async () => {
+      await this.removing.get(key)?.catch(() => {
+        return;
+      });
+      await this.host.storage.write(`${path2}.tmp`, text5, userId);
+      await this.host.storage.move(`${path2}.tmp`, path2, userId);
+    })();
+    this.writing.set(key, write2);
+    try {
+      await write2;
+    } finally {
+      this.writing.delete(key);
+    }
+    return hash;
+  }
+  putJson(userId, value, holder) {
+    return this.put(userId, JSON.stringify(value), holder);
+  }
+  async get(userId, hash) {
+    if (!isBlobHash(hash))
+      return null;
+    const kept4 = this.recall(userId, hash);
+    if (kept4 !== null)
+      return kept4;
+    await this.writing.get(`${userId}\x00${hash}`);
+    const text5 = await this.host.storage.read(blobPath(hash), userId);
+    if (text5 === null)
+      return null;
+    if (blobHash(text5) === hash) {
+      this.lengths.set(`${userId}\x00${hash}`, text5.length);
+      this.remember(userId, hash, text5);
+      return text5;
+    }
+    this.host.log("warn", `[LumiRPEngine] the stored blob ${hash} doesn't match its hash, so it is read as missing`, userId);
+    return null;
+  }
+  async size(userId, hash) {
+    const known2 = this.lengths.get(`${userId}\x00${hash}`);
+    if (known2 !== undefined)
+      return known2;
+    return (await this.get(userId, hash))?.length ?? null;
+  }
+  async getJson(userId, hash) {
+    const text5 = await this.get(userId, hash);
+    if (text5 === null)
+      return null;
+    try {
+      return JSON.parse(text5);
+    } catch {
+      this.host.log("warn", `[LumiRPEngine] the stored blob ${hash} isn't the JSON it was written as, so it is read as missing`, userId);
+      return null;
+    }
+  }
+  async list(userId) {
+    const out2 = [];
+    for (const path2 of await this.host.storage.list(BLOBS_DIR, userId)) {
+      const name = path2.startsWith(BLOBS_DIR) ? path2.slice(BLOBS_DIR.length) : "";
+      if (isBlobHash(name))
+        out2.push(name);
+    }
+    return out2;
+  }
+  async remove(userId, hash) {
+    const key = `${userId}\x00${hash}`;
+    this.forget(userId, hash);
+    const removal = this.host.storage.remove(blobPath(hash), userId);
+    this.removing.set(key, removal);
+    try {
+      await removal;
+      this.lengths.delete(key);
+    } finally {
+      if (this.removing.get(key) === removal)
+        this.removing.delete(key);
+    }
+  }
+  recall(userId, hash) {
+    const own2 = this.texts.get(userId);
+    const text5 = own2?.byHash.get(hash);
+    if (own2 === undefined || text5 === undefined)
+      return null;
+    own2.byHash.delete(hash);
+    own2.byHash.set(hash, text5);
+    this.fit(own2, this.keep(userId));
+    return text5;
+  }
+  remember(userId, hash, text5) {
+    const limit4 = this.keep(userId);
+    if (text5.length > limit4)
+      return;
+    const own2 = this.texts.get(userId) ?? { byHash: new Map, chars: 0 };
+    this.texts.set(userId, own2);
+    const before = own2.byHash.get(hash);
+    if (before !== undefined)
+      own2.chars -= before.length;
+    own2.byHash.delete(hash);
+    own2.byHash.set(hash, text5);
+    own2.chars += text5.length;
+    this.fit(own2, limit4);
+  }
+  fit(own2, limit4) {
+    for (const [old, kept4] of own2.byHash) {
+      if (own2.chars <= limit4)
+        break;
+      own2.byHash.delete(old);
+      own2.chars -= kept4.length;
+    }
+  }
+  forget(userId, hash) {
+    const own2 = this.texts.get(userId);
+    const text5 = own2?.byHash.get(hash);
+    if (own2 === undefined || text5 === undefined)
+      return;
+    own2.byHash.delete(hash);
+    own2.chars -= text5.length;
+  }
+  trim() {
+    let gone = 0;
+    for (const own2 of this.texts.values())
+      gone += own2.byHash.size;
+    this.texts.clear();
+    this.lengths.clear();
+    return gone;
+  }
+  hold(userId, holder, hash) {
+    if (!isBlobHash(hash))
+      return;
+    const byHolder = this.holds.get(userId) ?? new Map;
+    this.holds.set(userId, byHolder);
+    const held3 = byHolder.get(holder) ?? new Set;
+    byHolder.set(holder, held3);
+    held3.add(hash);
+  }
+  release(userId, holder) {
+    const byHolder = this.holds.get(userId);
+    if (!byHolder)
+      return;
+    byHolder.delete(holder);
+    if (byHolder.size === 0)
+      this.holds.delete(userId);
+  }
+  held(userId) {
+    const out2 = new Set;
+    for (const hashes of this.holds.get(userId)?.values() ?? [])
+      for (const h of hashes)
+        out2.add(h);
+    return out2;
+  }
+}
+
 // src/backend/layer-carry.ts
 var LAYER_CARRY_KEY = "lre_layer";
 var LAYER_CARRY_MAX = 1e6;
-function carryOf(chatId, runSeed, entries2, chain) {
-  const at2 = new Date().toISOString();
-  const head = { v: 1, chat: chatId, runSeed, at: at2, entries: entries2.length };
-  const size = JSON.stringify(entries2).length;
-  if (size > LAYER_CARRY_MAX)
-    return { ...head, over: true };
-  const bases = new Set(entries2.map((e) => e.basis.message));
-  const messages = chain.filter((m) => bases.has(m.id)).map((m) => ({ id: m.id, user: m.isUser, keys: m.swipes.map((_, s) => swipeKeyOf({ ...m, swipeId: s }, [])) }));
-  if (size + JSON.stringify(messages).length > LAYER_CARRY_MAX)
-    return { ...head, over: true };
-  return { ...head, messages, list: [...entries2] };
+function eventBlobs(events3, into2) {
+  if (!Array.isArray(events3))
+    return;
+  for (const hash of workspaceRefs(events3))
+    into2.add(hash);
+  for (const ev of events3)
+    if (isRecord(ev) && typeof ev.type === "string" && ev.type.startsWith("story."))
+      for (const hash of storyBlobs(ev.type, ev.data))
+        into2.add(hash);
+  for (const ev of events3)
+    if (isRecord(ev) && typeof ev.type === "string" && ev.type.startsWith("minds.v2."))
+      for (const hash of mindBlobs(ev.type, ev.data))
+        into2.add(hash);
+  for (const ev of events3)
+    if (isRecord(ev) && typeof ev.type === "string" && ev.type.startsWith("author."))
+      for (const hash of authorBlobs(ev.type, ev.data))
+        into2.add(hash);
+  for (const ev of events3) {
+    if (!isRecord(ev) || ev.type !== STORY_DRAFT || !isRecord(ev.data))
+      continue;
+    for (const hash of episodeBlobs(ev.type, ev.data))
+      into2.add(hash);
+    eventBlobs(ev.data.effects, into2);
+  }
+}
+function entryBlobs(entry, into2) {
+  if (!isRecord(entry))
+    return;
+  eventBlobs(entry.events, into2);
+  if (isBlobHash(entry.reasoning))
+    into2.add(entry.reasoning);
+}
+async function storedText(host, userId, hash) {
+  if (!isBlobHash(hash))
+    return null;
+  const text5 = await host.storage.read(blobPath(hash), userId);
+  return text5 !== null && blobHash(text5) === hash ? text5 : null;
+}
+async function putCarriedTexts(host, userId, carry) {
+  for (const [hash, text5] of Object.entries(carry.texts)) {
+    if (!isBlobHash(hash) || typeof text5 !== "string" || blobHash(text5) !== hash)
+      continue;
+    const path2 = blobPath(hash);
+    await host.storage.write(`${path2}.tmp`, text5, userId);
+    await host.storage.move(`${path2}.tmp`, path2, userId);
+  }
+}
+async function carryOf(chatId, runSeed, entries2, chain, text5) {
+  const head = { v: 1, chat: chatId, runSeed, at: new Date().toISOString(), entries: entries2.length };
+  const onChain = new Map(chain.map((m) => [m.id, m]));
+  const list2 = [];
+  const texts2 = {};
+  const messages = new Map;
+  let size = JSON.stringify({ ...head, messages: [], list: [], texts: {} }).length;
+  for (let i = entries2.length - 1;i >= 0; i--) {
+    const e = entries2[i];
+    if (!e)
+      continue;
+    let cost = JSON.stringify(e).length + 1;
+    const named2 = new Set;
+    entryBlobs(e, named2);
+    const own2 = {};
+    for (const hash of named2) {
+      if (hash in texts2)
+        continue;
+      const t = await text5(hash);
+      if (t === null)
+        continue;
+      own2[hash] = t;
+      cost += JSON.stringify(hash).length + JSON.stringify(t).length + 2;
+    }
+    const m = messages.has(e.basis.message) ? undefined : onChain.get(e.basis.message);
+    const message = m ? { id: m.id, user: m.isUser, keys: m.swipes.map((_, s) => swipeKeyOf({ ...m, swipeId: s }, [])) } : undefined;
+    if (message)
+      cost += JSON.stringify(message).length + 1;
+    if (size + cost > LAYER_CARRY_MAX)
+      break;
+    size += cost;
+    list2.push(e);
+    Object.assign(texts2, own2);
+    if (message)
+      messages.set(message.id, message);
+  }
+  list2.reverse();
+  return { ...head, messages: chain.flatMap((m) => messages.get(m.id) ?? []), list: list2, texts: texts2 };
 }
 function carryIn(meta) {
   const c = meta[LAYER_CARRY_KEY];
   if (!isRecord(c) || c.v !== 1 || typeof c.chat !== "string" || typeof c.runSeed !== "string" || typeof c.at !== "string" || typeof c.entries !== "number")
     return null;
-  if (c.over === true)
-    return c;
   if (!Array.isArray(c.list) || !Array.isArray(c.messages))
     return null;
-  return c;
-}
-function carriedEntries(carry) {
-  return "over" in carry ? null : carry.list;
+  return { ...c, texts: isRecord(c.texts) ? c.texts : {} };
 }
 function carriedMap(carry, copy) {
   return copyMap(carry.messages.map((m) => ({ id: m.id, user: m.user, keys: new Set(m.keys) })), copy.map((m) => ({ id: m.id, user: m.isUser, keys: new Set(m.swipes.map((_, s) => swipeKeyOf({ ...m, swipeId: s }, []))) })));
@@ -108979,7 +109683,7 @@ async function ancestorOf(host, chatId, userId, runSeed, opened2, chainOf3, dept
     const from = meta.branched_from;
     const at2 = meta.branch_at_message;
     if (typeof from !== "string" || typeof at2 !== "string" || from === chatId)
-      return await carriedAncestry(meta, chatId, runSeed, async () => chainOf3(await host.chats.messages(chatId, userId)));
+      return await carriedAncestry(host, userId, meta, chatId, runSeed, async () => chainOf3(await host.chats.messages(chatId, userId)));
     const fromRun = (await host.chats.chatMetadata(from, userId))[LEDGER_NAMESPACE];
     if (!isRecord(fromRun) || fromRun.runSeed !== runSeed)
       return "none";
@@ -108996,14 +109700,12 @@ async function ancestorOf(host, chatId, userId, runSeed, opened2, chainOf3, dept
     return null;
   }
 }
-async function carriedAncestry(meta, chatId, runSeed, chain) {
+async function carriedAncestry(host, userId, meta, chatId, runSeed, chain) {
   const carry = carryIn(meta);
-  if (!carry || carry.chat === chatId || carry.runSeed !== runSeed || "over" in carry)
+  if (!carry || carry.chat === chatId || carry.runSeed !== runSeed || carry.list.length === 0)
     return "none";
-  const entries2 = carriedEntries(carry);
-  if (!entries2 || entries2.length === 0)
-    return "none";
-  return { inherit: { from: carry.chat, before: carry.at, messages: carriedMap(carry, await chain()) }, entries: entries2 };
+  await putCarriedTexts(host, userId, carry);
+  return { inherit: { from: carry.chat, before: carry.at, messages: carriedMap(carry, await chain()) }, entries: carry.list };
 }
 function inheritMap(ancestor, branchAt, branch) {
   const point = ancestor.findIndex((m) => m.id === branchAt);
@@ -109106,12 +109808,12 @@ function suggestFix(reason2, call) {
 // src/backend/diagnostics.ts
 var FORMAT = 1;
 var STATUSES = ["ok", "skipped", "failed"];
-var LEVELS2 = ["debug", "info", "warn", "error"];
+var LEVELS3 = ["debug", "info", "warn", "error"];
 var KINDS = ["step", "error", "sections", "slow", "turn", "agent", "phase"];
 function isDiagRecord(raw) {
   if (!isRecord(raw))
     return false;
-  return typeof raw.seq === "number" && KINDS.some((k) => k === raw.kind) && LEVELS2.some((l) => l === raw.level) && STATUSES.some((s) => s === raw.status) && (raw.turn === null || typeof raw.turn === "string") && (raw.phase === null || DIAG_PHASES.some((p) => p === raw.phase)) && typeof raw.step === "string" && typeof raw.start === "number" && typeof raw.end === "number" && typeof raw.ms === "number";
+  return typeof raw.seq === "number" && KINDS.some((k) => k === raw.kind) && LEVELS3.some((l) => l === raw.level) && STATUSES.some((s) => s === raw.status) && (raw.turn === null || typeof raw.turn === "string") && (raw.phase === null || DIAG_PHASES.some((p) => p === raw.phase)) && typeof raw.step === "string" && typeof raw.start === "number" && typeof raw.end === "number" && typeof raw.ms === "number";
 }
 var isCount2 = (v4) => typeof v4 === "number" && Number.isFinite(v4) && v4 >= 0;
 function usageOf2(raw) {
@@ -110027,7 +110729,6 @@ class LedgerService {
   chats = new Map;
   unsubscribe = [];
   outstanding = 0;
-  carriedOver = new Set;
   carryDirty = new Set;
   errors = [];
   hooks = null;
@@ -110156,7 +110857,9 @@ class LedgerService {
           const kind = pending?.kind ?? (halt ? KIND[halt.type] : "normal");
           const messageId = pending?.messageId ?? pending?.continueHead ?? undefined;
           if (scened && userId && messageId) {
-            const read = () => this.commitReply(core, observed, e.chatId, userId, e.generationId, messageId, e.content);
+            const whole5 = kind === "continue" ? observed.find((m) => m.id === messageId) : undefined;
+            const content = whole5 ? whole5.swipes[whole5.swipeId] ?? e.content : e.content;
+            const read = () => this.commitReply(core, observed, e.chatId, userId, e.generationId, messageId, content);
             await (taken ? inTurn(taken.frame, read) : read());
           } else
             core.stopped({ generationId: e.generationId, content: e.content }, observed);
@@ -111422,12 +112125,14 @@ class LedgerService {
   async carry(chatId, core, observed) {
     const slot = this.chats.get(chatId);
     const runSeed = core.journal.run?.runSeed;
-    if (!slot || !runSeed || !this.carryDirty.delete(chatId) || this.carriedOver.has(chatId))
+    if (!slot || !runSeed || !this.carryDirty.delete(chatId))
       return;
-    const carry = carryOf(chatId, runSeed, slot.layer.foldEntries(), core.chain(observed));
-    if ("over" in carry)
-      this.carriedOver.add(chatId);
-    await this.host.chats.mergeChatMetadata(chatId, { [LAYER_CARRY_KEY]: JSON.parse(JSON.stringify(carry)) }, slot.userId).catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${chatId}: its layer wasn't carried in its metadata (${error instanceof Error ? error.message : String(error)})`, slot.userId));
+    try {
+      const carry = await carryOf(chatId, runSeed, slot.layer.foldEntries(), core.chain(observed), (hash) => storedText(this.host, slot.userId, hash));
+      await this.host.chats.mergeChatMetadata(chatId, { [LAYER_CARRY_KEY]: JSON.parse(JSON.stringify(carry)) }, slot.userId);
+    } catch (error) {
+      this.host.log("warn", `[LumiRPEngine] chat ${chatId}: its layer wasn't carried in its metadata (${error instanceof Error ? error.message : String(error)})`, slot.userId);
+    }
   }
   async drainLayer(chatId, slot, observed) {
     const open = new Set([...slot.core.journal.windows, ...slot.core.journal.prereply ?? []]);
@@ -115237,17 +115942,17 @@ class JobRunner {
   }
   async proposalReply(name, reader, label2, system, user, config3, userId, signal2, retry) {
     const roomy = roomyCall(config3);
-    const ask2 = async (text5, attempt) => {
+    const ask3 = async (text5, attempt) => {
       const t0 = performance.now();
       const reply2 = await this.steps.helperJson("brief", system, text5, roomy, userId, signal2);
       const fired = firedTimeout(signal2);
       this.host.log(fired ? "warn" : "info", `[LumiRPEngine] ${name} ${label2} ${attempt}: ${fired ? fired.message : reader.problem(reply2) ?? `${reader.count(reply2)} proposal(s)`} in ${Math.round(performance.now() - t0)} ms`, userId);
       return reply2;
     };
-    const reply = await ask2(user, "call");
+    const reply = await ask3(user, "call");
     if (reader.problem(reply) === null || !retry || signal2.aborted)
       return { reply, calls: 1 };
-    return { reply: await ask2(`${user}
+    return { reply: await ask3(`${user}
 
 ${reader.retry}`, "retry"), calls: 2 };
   }
@@ -115267,7 +115972,7 @@ ${reader.retry}`, "retry"), calls: 2 };
     const signal2 = job.controller.signal;
     const system = routineSystem(scope);
     const roomy = roomyCall(config3);
-    const ask2 = async (user, label2) => {
+    const ask3 = async (user, label2) => {
       const t0 = performance.now();
       const call = callSignal();
       const failure = { reason: "" };
@@ -115290,14 +115995,14 @@ ${reader.retry}`, "retry"), calls: 2 };
         break;
       const label2 = `batch ${i + 1} of ${pass.batches.length}`;
       const text5 = routineCallText(scope, batch);
-      const first = await ask2(text5, `${label2} call`);
+      const first = await ask3(text5, `${label2} call`);
       calls++;
       if (signal2.aborted)
         return;
       let check2 = checkRoutineReply(scope, batch, first.reply);
       if (first.failed === null && (check2.problem !== null || check2.fixable.length > 0)) {
         this.update(job, { status: "running", progress: Math.min(0.99, read / pass.batches.length), message: "Fixing the proposals' problems\u2026" }, { proposals: finishRoutines(scope, candidates) });
-        const second = await ask2(routineRepairText(text5, first.reply, check2), `${label2} repair`);
+        const second = await ask3(routineRepairText(text5, first.reply, check2), `${label2} repair`);
         calls++;
         if (signal2.aborted)
           return;
@@ -115424,7 +116129,7 @@ ${reader.retry}`, "retry"), calls: 2 };
       const system = mapSystem();
       const text5 = mapRequestText(draft, request);
       const roomy = roomyCall(config3);
-      const ask2 = async (user, attempt) => {
+      const ask3 = async (user, attempt) => {
         const t0 = performance.now();
         const call = callSignal();
         const answer2 = readMapAnswer(draft, request, await this.steps.helperJson("brief", system, user, roomy, job.userId, call));
@@ -115433,13 +116138,13 @@ ${reader.retry}`, "retry"), calls: 2 };
         this.host.log(fired ? "warn" : "info", `[LumiRPEngine] describe_map ${request.mapId} ${attempt}: ${fired ? fired.message : answer2.map ? `${errors2} error(s), ${answer2.problems.length - errors2} warning(s)` : "no map"} in ${Math.round(performance.now() - t0)} ms`, job.userId);
         return answer2;
       };
-      const first = await ask2(text5, "call");
+      const first = await ask3(text5, "call");
       if (signal2.aborted)
         return;
       const wrong = first.map === null || first.problems.some((p) => p.severity === "error");
       if (wrong)
         this.update(job, { status: "running", progress: 0.5, message: "Fixing the map's problems\u2026" });
-      const answer = wrong ? await ask2(mapRepairText(text5, first), "repair") : first;
+      const answer = wrong ? await ask3(mapRepairText(text5, first), "repair") : first;
       if (signal2.aborted)
         return;
       if (answer.map === null)
@@ -116859,12 +117564,12 @@ ${turn.reply}`;
       return id2 === null ? [] : [id2];
     });
     const missedNames = namesOf5(l.missed);
-    const unnamed2 = (v4) => v4 !== undefined && v4 !== null && typeof v4 !== "string" && !Array.isArray(v4);
-    if (how === "witnessed" && unnamed2(l.who)) {
+    const unnamed = (v4) => v4 !== undefined && v4 !== null && typeof v4 !== "string" && !Array.isArray(v4);
+    if (how === "witnessed" && unnamed(l.who)) {
       refuse10("witnesses", `a witnessing whose witnesses aren't names: "${claim2}"`);
       continue;
     }
-    if (how === "witnessed" && (unnamed2(l.missed) || missedNames.some((n) => who(n) === null))) {
+    if (how === "witnessed" && (unnamed(l.missed) || missedNames.some((n) => who(n) === null))) {
       refuse10("missed", `a witnessing that says someone missed it whom the world doesn't have, or more than one person goes by: "${claim2}"`);
       continue;
     }
@@ -117007,8 +117712,8 @@ ${turn.reply}`;
 }
 
 // src/backend/mind-ask.ts
-function askMind(ask2, call) {
-  return ask2 ? ask2(call) : call.classic();
+function askMind(ask3, call) {
+  return ask3 ? ask3(call) : call.classic();
 }
 
 // src/backend/minds.ts
@@ -117439,9 +118144,9 @@ async function loreRefs(deps, world, userId, raw) {
   }
   return out2;
 }
-async function knowledgeCalls(deps, settings, config3, turn, batches, ask2) {
+async function knowledgeCalls(deps, settings, config3, turn, batches, ask3) {
   const { reg, world, state: state2 } = turn;
-  const { userId, signal: signal2, guidance } = ask2;
+  const { userId, signal: signal2, guidance } = ask3;
   const scene2 = settings.minds.knowledge.batch === "scene";
   const w = new Working(reg, world, state2);
   const { factsPerTurn, factsPerChat, learningsPerTurn, callsAtOnce } = settings.minds.knowledge;
@@ -117493,7 +118198,7 @@ async function knowledgeCalls(deps, settings, config3, turn, batches, ask2) {
       if (cut !== null)
         deps.host.log("info", `[LumiRPEngine] knowledge ${turn.messageId.slice(0, 8)}: ${cut}`, userId);
       if (scene2 || traced(reg, world, state2, batch[0] ?? ""))
-        out2.traces.push({ purpose: "knowledge", phase: ask2.phase, who, level: null, outcome: checked ? "recorded" : "failed", ms, tokens: usage2.tokens, prompt: prompt.source, ...cut !== null ? { notes: [cut] } : {} });
+        out2.traces.push({ purpose: "knowledge", phase: ask3.phase, who, level: null, outcome: checked ? "recorded" : "failed", ms, tokens: usage2.tokens, prompt: prompt.source, ...cut !== null ? { notes: [cut] } : {} });
     });
     await checks;
   };
@@ -117870,49 +118575,6 @@ class MindsRuns {
   }
 }
 
-// src/backend/bootstrap/files.ts
-function bootstrapDir(chatId) {
-  return `runs/${chatId}/bootstrap/`;
-}
-
-class BootstrapFiles {
-  host;
-  chatId;
-  userId;
-  constructor(host, chatId, userId) {
-    this.host = host;
-    this.chatId = chatId;
-    this.userId = userId;
-  }
-  path(rel) {
-    return `${bootstrapDir(this.chatId)}${rel}`;
-  }
-  async read(rel, valid) {
-    const text5 = await this.host.storage.read(this.path(rel), this.userId);
-    if (text5 === null)
-      return null;
-    try {
-      const raw = JSON.parse(text5);
-      if (valid(raw))
-        return raw;
-    } catch {}
-    this.host.log("warn", `[LumiRPEngine] bootstrap file ${this.path(rel)} didn't read; it is made again`, this.userId);
-    return null;
-  }
-  async write(rel, value) {
-    await this.host.storage.write(this.path(rel), JSON.stringify(value), this.userId);
-  }
-  async remove(rel) {
-    await this.host.storage.remove(this.path(rel), this.userId).catch(() => {
-      return;
-    });
-  }
-  async list(rel) {
-    const base = bootstrapDir(this.chatId);
-    return (await this.host.storage.list(this.path(rel), this.userId).catch(() => [])).map((p) => p.startsWith(base) ? p.slice(base.length) : p);
-  }
-}
-
 // src/shared/bootstrap.ts
 var BOOTSTRAP_STAGES = ["survey", "import", "historian", "author", "pov", "minds", "truthlink", "reconcile"];
 var NO_COUNTS = { calls: 0, tokensIn: 0, tokensOut: 0, cost: null, ms: 0 };
@@ -117928,6 +118590,10 @@ function isRows(raw) {
 var MANIFEST = "manifest.json";
 function chunkFile(n) {
   return `spool/${String(n).padStart(5, "0")}.json`;
+}
+var EDITS = "edits.json";
+function isEdits(raw) {
+  return Array.isArray(raw) && raw.every((e) => typeof e === "object" && e !== null && ("n" in e) && typeof e.n === "number" && ("message" in e) && typeof e.message === "string");
 }
 var WORD = /\S+/g;
 function cutChunks(rows, bound) {
@@ -117990,8 +118656,15 @@ async function survey(files, messages, bound, now) {
     const rowsOf = planned2[n];
     if (!rowsOf)
       continue;
-    if (before.get(n) === chunk.key && await files.read(chunkFile(n), isRows) !== null)
-      continue;
+    const spooled = before.get(n) === chunk.key ? await files.read(chunkFile(n), isRows) : null;
+    if (spooled !== null) {
+      const was = new Map(spooled.map((r) => [r.id, r.text]));
+      const edited = rowsOf.filter((r) => was.has(r.id) && was.get(r.id) !== r.text).map((r) => ({ n, message: r.id }));
+      if (edited.length === 0)
+        continue;
+      const known2 = await files.read(EDITS, isEdits) ?? [];
+      await files.write(EDITS, [...known2, ...edited.filter((e) => !known2.some((k) => k.n === e.n && k.message === e.message))]);
+    }
     await files.write(chunkFile(n), rowsOf);
   }
   for (let n = chunks.length;n < (previous?.chunks.length ?? 0); n++)
@@ -118031,9 +118704,9 @@ function guess(stage, chunkTokens, minds) {
     case "import":
       return null;
     case "historian":
-      return per(1, chunkTokens + 6000, chunkTokens * 0.3);
+      return per(1, chunkTokens + 6000, chunkTokens * 0.15);
     case "author":
-      return per(1 + 1 / CHUNKS_PER_CHAPTER, chunkTokens * 1.3 + 8000 + chunkTokens * 0.3 * CHUNKS_PER_CHAPTER / CHUNKS_PER_CHAPTER, 2500 + 4000 / CHUNKS_PER_CHAPTER);
+      return per(1 + 1 / CHUNKS_PER_CHAPTER, chunkTokens * 1.3 + 8000 + chunkTokens * 0.3 * CHUNKS_PER_CHAPTER / CHUNKS_PER_CHAPTER, 1000 + 1500 / CHUNKS_PER_CHAPTER);
     case "pov": {
       const calls = Math.max(0, beats * PARTIAL * Math.min(1, minds));
       return per(calls, calls * 1500, calls * 350);
@@ -118043,7 +118716,7 @@ function guess(stage, chunkTokens, minds) {
       return per(calls, calls * 9000, calls * 1800);
     }
     case "truthlink":
-      return per(1, chunkTokens * 0.3 + 4000 + minds * 800, 1200);
+      return per(1, chunkTokens * 0.3 * CHUNKS_PER_CHAPTER + 4000 + minds * 800, 2400);
     case "reconcile":
       return per(1, 12000 + chunkTokens * 0.3 * CHUNKS_PER_CHAPTER, 1500);
   }
@@ -118064,7 +118737,7 @@ function estimateRemaining(i) {
   const stages = [];
   const priced2 = new Map;
   for (const stage of BOOTSTRAP_STAGES) {
-    const units = stage === "reconcile" ? leftChapters : left;
+    const units = stage === "reconcile" || stage === "truthlink" ? leftChapters : left;
     const m = measured(i.spent[stage], i.units[stage]);
     const g = guess(stage, avgTokens, i.minds);
     const rate = m ?? g;
@@ -118397,7 +119070,8 @@ class BootstrapRun {
   async spool(knobs) {
     const handover = await this.env.files.read(HANDOVER, isHandover);
     const covered = handover ? new Set(handover.messages) : null;
-    const history = (await this.env.messages()).filter((m) => covered === null || covered.has(m.id));
+    const lumibooks = await this.env.covered?.() ?? new Set;
+    const history = (await this.env.messages()).filter((m) => (covered === null || covered.has(m.id)) && !lumibooks.has(m.id));
     this.manifest = await survey(this.env.files, history, knobs.chunkTokens, this.env.now());
     return { manifest: this.manifest, spooled: history.map((m) => m.id) };
   }
@@ -118552,6 +119226,7 @@ class BootstrapRun {
       const { manifest, spooled } = await this.spool(knobs);
       this.measure("survey");
       const from = this.rewind(manifest);
+      await this.editsAsFixes(from);
       this.stale = await this.landedFrom(from);
       this.env.ledger.replacing(new Set(this.stale.keys()));
       const imported = await this.env.imports();
@@ -118628,6 +119303,27 @@ class BootstrapRun {
     this.state.amends = this.state.amends.filter((a) => a.chunk < n);
     return n;
   }
+  async editsAsFixes(from) {
+    const edits = await this.env.files.read(EDITS, isEdits);
+    if (!edits)
+      return;
+    for (const e of edits) {
+      const chunk = this.manifest?.chunks[e.n];
+      if (e.n >= from || !chunk)
+        continue;
+      const beats = ((await this.recordOf(`historian:${e.n}`))?.beats ?? []).filter((b) => sourceOf4(b) === e.message);
+      if (beats.length === 0)
+        this.note(`A message read in chunk ${e.n + 1} was edited since, but no beat came from it: nothing to amend.`);
+      const text5 = (await this.rows(chunk)).find((r) => r.id === e.message)?.text ?? "";
+      const note2 = `He edited this message after its history was read: the message as it now reads is his fix (edit ${hashParts("edit", text5).slice(0, 8)}).`;
+      for (const b of beats) {
+        this.state.amends = this.state.amends.filter((a) => !(a.beat === b.id && a.item === `edit:${e.message}`));
+        this.state.amends.push({ card: "", item: `edit:${e.message}`, beat: b.id, chunk: e.n, note: note2, at: this.env.now() });
+      }
+    }
+    await this.env.files.remove(EDITS);
+    await this.save();
+  }
   async landedFrom(from) {
     const out2 = new Map;
     for (const file of await this.env.files.list("jobs/")) {
@@ -118661,7 +119357,7 @@ class BootstrapRun {
             const rows = await this.rows(chunk);
             const cast = [...people.cast, ...Object.entries(this.state.newcomers).map(([id2, m]) => ({ id: id2, name: m.name }))];
             const made = Object.entries(this.state.places).map(([id2, m]) => ({ id: id2, name: m.name }));
-            const raw = await this.env.stages.historian({ chunk: rows, before, cast, places: made, pov: opening, basis: chunk.basis }, model2);
+            const raw = await this.readStretch({ chunk: rows, before, cast, places: made, pov: opening, basis: chunk.basis }, model2);
             const ids2 = {};
             for (const c of raw.newcomers) {
               const name = c.name.trim();
@@ -118710,6 +119406,32 @@ class BootstrapRun {
     for (const out2 of outs)
       before = this.carry(before, out2);
     return before;
+  }
+  async readStretch(input, model2) {
+    try {
+      return await this.env.stages.historian(input, model2);
+    } catch (error) {
+      if (!(error instanceof DepthAnswerError) || !error.cut || input.chunk.length < 2)
+        throw error;
+      const half = Math.ceil(input.chunk.length / 2);
+      this.note(`The historian's answer for ${input.chunk.length} messages was cut off at its answer room twice: they are read as two halves instead.`);
+      const a = await this.readStretch({ ...input, chunk: input.chunk.slice(0, half) }, model2);
+      const b = await this.readStretch({ ...input, chunk: input.chunk.slice(half), before: this.carry(input.before, a) }, model2);
+      const reasoning = [a.reasoning, b.reasoning].filter((r) => r !== undefined && r !== "").join(`
+
+`);
+      return {
+        ...b,
+        events: [...a.events, ...b.events],
+        blobs: { ...a.blobs, ...b.blobs },
+        beats: [...a.beats, ...b.beats.map((x) => ({ ...x, order: x.order + a.beats.length }))],
+        newcomers: [...a.newcomers, ...b.newcomers.filter((c) => !a.newcomers.some((o) => o.ref === c.ref))],
+        newPlaces: [...a.newPlaces ?? [], ...(b.newPlaces ?? []).filter((p) => !(a.newPlaces ?? []).some((o) => o.ref === p.ref))],
+        switches: [...a.switches ?? [], ...b.switches ?? []],
+        uncertain: [...a.uncertain, ...b.uncertain],
+        ...reasoning !== "" ? { reasoning } : {}
+      };
+    }
   }
   carry(before, out2) {
     const beats = [...before.beats, ...out2.beats].slice(-BEFORE_BEATS);
@@ -118806,13 +119528,9 @@ class BootstrapRun {
         mindKeys.set(who, key);
       });
       await this.landBatch(caught.flatMap((w) => writes.get(w) ?? []));
-      const linkSlot = `truthlink:${n}`;
-      const lKey = hashParts(linkSlot, bKey, linkKey, ...minded2.map((w) => mindKeys.get(w) ?? ""));
-      const linked = await this.answer(linkSlot, lKey, "truthlink", (model2) => this.env.stages.truthLink({ beats: hist.beats, blobs: hist.blobs, minds: caught, basis: chunk.basis }, model2));
-      await this.landBatch(await this.draftOf(linkSlot, lKey, linked, chunk.basis, "truthlink"));
-      linkKey = lKey;
       if (author.chapterEnds && n < manifest.chunks.length - 1) {
         chapter.title = author.title ?? null;
+        linkKey = await this.linkChapter(chapter, chunk, mindKeys, linkKey);
         authorKey = await this.endChapter(chapter, chunk, knobs, mindKeys, linkKey, authorKey);
       }
       if (n < manifest.chunks.length - 1)
@@ -118824,10 +119542,21 @@ class BootstrapRun {
       await this.env.giveWay();
     }
     const last = manifest.chunks.at(-1);
-    if (last && chapter && !chapter.ended && chapter.from <= last.n)
+    if (last && chapter && !chapter.ended && chapter.from <= last.n) {
+      linkKey = await this.linkChapter(chapter, last, mindKeys, linkKey);
       await this.endChapter(chapter, last, knobs, mindKeys, linkKey, authorKey);
+    }
     await this.retire(() => true);
     await this.amendQueued(manifest.chunks.length - 1, knobs, people.cast);
+  }
+  async linkChapter(chapter, chunk, mindKeys, linkKey) {
+    const read = await this.chapterRead(chapter);
+    const minds = Object.entries(this.state.minds).filter(([id2, m]) => m.since <= chunk.n && id2 !== this.firstPc).map(([id2]) => id2);
+    const slot = `truthlink:${chunk.n}`;
+    const key = hashParts(slot, ...range(chapter.from, chapter.to).map((k) => this.state.hist[k] ?? ""), linkKey, ...minds.map((w) => mindKeys.get(w) ?? ""));
+    const linked = await this.answer(slot, key, "truthlink", (model2) => this.env.stages.truthLink({ beats: read.beats, blobs: read.blobs, minds, basis: chunk.basis }, model2));
+    await this.landBatch(await this.draftOf(slot, key, linked, chunk.basis, "truthlink"));
+    return key;
   }
   openChapter(n, from) {
     const c = { n, from, to: from, ended: false };
@@ -118888,13 +119617,13 @@ class BootstrapRun {
     this.env.changed();
     return hashParts(authorKey, rKey);
   }
-  async answer(slot, key, stage, ask2) {
+  async answer(slot, key, stage, ask3) {
     const recorded = await this.env.files.read(jobFile(slot), isJob);
     if (recorded && recorded.key === key)
       return recorded.out;
     this.halt();
     const job = { spent: { ...NO_COUNTS, reasoningOut: 0 }, misread: [], capped: [] };
-    const out2 = await ask2(this.roomRule(stage, this.metered(stage, job))).catch(async (error) => {
+    const out2 = await ask3(this.roomRule(stage, this.metered(stage, job))).catch(async (error) => {
       const halted = error instanceof Halt;
       const { spent: spent2, misread: misread2, capped: capped2 } = job;
       if (!halted || misread2.length > 0) {
@@ -119221,15 +119950,15 @@ class BootstrapRun {
     return async (role, messages, opts) => {
       const own2 = await this.env.room(role);
       const asking = { ...opts, maxTokens: opts?.maxTokens ?? own2 ?? DEPTH_ROOM_MOST };
-      const ask2 = (o) => port(role, messages, o).catch((error) => {
+      const ask3 = (o) => port(role, messages, o).catch((error) => {
         throw own2 === null && !(error instanceof Halt) && roomRefused(error) ? new Error(`${error instanceof Error ? error.message : String(error)}. ${roomAdvice(role)}`, { cause: error }) : error;
       });
-      const first = await ask2(asking);
+      const first = await ask3(asking);
       const again = cutShort(first.finish) && first.capped === undefined && first.room !== undefined && !opts?.signal?.aborted ? roomAgain(first.room) : null;
       if (again === null)
         return first;
       readAnswer(role, first);
-      return ask2({ ...asking, maxTokens: again });
+      return ask3({ ...asking, maxTokens: again });
     };
   }
   metered(stage, job) {
@@ -119355,12 +120084,57 @@ function historianEvents(beats, staging, chunk) {
       out2[last.id]?.push(stagingEvent(s.staging));
   return out2;
 }
+function wordsPattern(words10) {
+  const parts = words10.trim().split(/\s+/).filter((w) => w !== "");
+  if (parts.length === 0)
+    return null;
+  return new RegExp(parts.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/["\u201C\u201D]/g, '["\u201C\u201D]').replace(/['\u2018\u2019]/g, "['\u2018\u2019]")).join("\\s+"), "giu");
+}
+function quoteSpan(text5, from, to) {
+  if (typeof from === "number" && typeof to === "number" && Number.isInteger(from) && Number.isInteger(to)) {
+    const kept4 = [Math.max(0, from), Math.min(text5.length, to)];
+    return kept4[1] > kept4[0] ? kept4 : null;
+  }
+  const start = typeof from === "string" ? wordsPattern(from) : null;
+  const first = start?.exec(text5);
+  if (!start || !first)
+    return null;
+  if (to === undefined || to === null || typeof to === "string" && to.trim() === "")
+    return [first.index, first.index + first[0].length];
+  const end = typeof to === "string" ? wordsPattern(to) : null;
+  if (!end)
+    return null;
+  end.lastIndex = first.index;
+  const last = end.exec(text5);
+  return last ? [first.index, last.index + last[0].length] : null;
+}
+function quotesOf(read, field2, v4, row, rows) {
+  if (typeof v4 === "string" || Array.isArray(v4) && v4.every((x) => typeof x === "string"))
+    return { text: read.words(field2, v4), spans: [] };
+  const spans = [];
+  const said2 = [];
+  for (const [i, raw] of read.list(field2, v4).entries()) {
+    const q = read.record(`${field2}[${i}]`, raw);
+    if (!q)
+      continue;
+    const at2 = typeof q.message === "string" ? rows.get(bareId(q.message)) ?? null : row;
+    const span2 = at2 ? quoteSpan(at2.text, q.from, q.to) : null;
+    if (!at2 || !span2) {
+      read.drop(`${field2}[${i}]`, q, at2 ? "its words aren't in its message" : "it names no message of the stretch");
+      continue;
+    }
+    spans.push({ message: at2.id, from: span2[0], to: span2[1] });
+    said2.push(at2.text.slice(span2[0], span2[1]));
+  }
+  return { text: said2.join(`
+`), spans };
+}
 async function historian(input, model2) {
   const { world, state: state2 } = input;
   const pcStart = input.pov ?? povOf(world, state2);
   const placesListed = [...Object.values(world.places).map((p) => ({ id: p.id, name: p.name })), ...(input.places ?? []).filter((p) => !own(world.places, p.id))];
   const asking = { world, state: state2, texts: input.texts, data: historianData(input, pcStart, placesListed), pov: pcStart, ...input.signal ? { signal: input.signal } : {} };
-  const asked2 = await askRole(model2, "historian", DEPTH_TEXT.historian, asking);
+  const asked2 = await askRole((role, messages, opts) => model2(role, messages, { ...opts, effort: "low" }), "historian", DEPTH_TEXT.historian, asking);
   const { answer: a, read } = asked2;
   const usage2 = asked2.usage;
   const blobs = {};
@@ -119538,8 +120312,8 @@ async function historian(input, model2) {
     const n = perMessage.get(row.id) ?? 0;
     perMessage.set(row.id, n + 1);
     const span2 = spanOf(`${g}.span`, b.span, row.text.length);
-    const said2 = read.words(`${g}.quotes`, b.quotes);
-    const quotes = said2 !== "" ? said2 : undefined;
+    const spoken2 = quotesOf(read, `${g}.quotes`, b.quotes, row, rows);
+    const quotes = spoken2.text !== "" ? spoken2.text : undefined;
     const sensed = read.text(`${g}.surface`, b.surface);
     const surface = sensed !== "" ? sensed : quotes ?? "";
     if (surface === "")
@@ -119593,7 +120367,7 @@ async function historian(input, model2) {
       ...quotes !== undefined ? { quotes: putText(blobs, quotes) } : {},
       ...addressed.length > 0 ? { addressed } : {},
       exposure,
-      by: { bootstrap: { message: row.id, swipe: row.basis.swipe, ...span2 ? { span: span2 } : {} } },
+      by: { bootstrap: { message: row.id, swipe: row.basis.swipe, ...span2 ? { span: span2 } : {}, ...spoken2.spans.length > 0 ? { quotes: spoken2.spans } : {} } },
       ...doubts.length > 0 ? { uncertain: putText(blobs, doubts.join(" ")) } : {}
     };
     beats.push({ beat, what, surface, ...quotes !== undefined ? { quotes } : {} });
@@ -119651,6 +120425,81 @@ function bindPlaces(result, ids2, chunk) {
   return { ...result, beats, newPlaces: result.newPlaces.filter((p) => !Object.prototype.hasOwnProperty.call(ids2, p.ref)), byMessage: historianEvents(beats, result.staging, chunk) };
 }
 
+// src/shared/text-diff.ts
+var TABLE_CELLS = 1e6;
+function linesOf3(text5) {
+  return text5 === "" ? [] : text5.split(`
+`);
+}
+var kept4 = (text5) => ({ kind: "same", text: text5 });
+var taken = (text5) => ({ kind: "del", text: text5 });
+var added = (text5) => ({ kind: "add", text: text5 });
+function middle(a, b) {
+  const n = a.length;
+  const m = b.length;
+  if (n === 0 || m === 0 || (n + 1) * (m + 1) > TABLE_CELLS)
+    return [...a.map(taken), ...b.map(added)];
+  const ids2 = new Map;
+  const code = (line2) => {
+    const found = ids2.get(line2);
+    if (found !== undefined)
+      return found;
+    ids2.set(line2, ids2.size);
+    return ids2.size - 1;
+  };
+  const x = a.map(code);
+  const y = b.map(code);
+  const w = m + 1;
+  const lcs = new Uint32Array((n + 1) * w);
+  for (let i2 = n - 1;i2 >= 0; i2--) {
+    for (let j2 = m - 1;j2 >= 0; j2--)
+      lcs[i2 * w + j2] = x[i2] === y[j2] ? lcs[(i2 + 1) * w + j2 + 1] + 1 : Math.max(lcs[(i2 + 1) * w + j2], lcs[i2 * w + j2 + 1]);
+  }
+  const out2 = [];
+  let dels = [];
+  let adds = [];
+  const flush = () => {
+    for (const line2 of dels)
+      out2.push(line2);
+    for (const line2 of adds)
+      out2.push(line2);
+    dels = [];
+    adds = [];
+  };
+  let i = 0;
+  let j = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && x[i] === y[j]) {
+      flush();
+      out2.push(kept4(a[i]));
+      i++;
+      j++;
+    } else if (j >= m || i < n && lcs[(i + 1) * w + j] >= lcs[i * w + j + 1]) {
+      dels.push(taken(a[i]));
+      i++;
+    } else {
+      adds.push(added(b[j]));
+      j++;
+    }
+  }
+  flush();
+  return out2;
+}
+function lineDiff(before, after) {
+  const a = linesOf3(before);
+  const b = linesOf3(after);
+  let start = 0;
+  while (start < a.length && start < b.length && a[start] === b[start])
+    start++;
+  let endA = a.length;
+  let endB = b.length;
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
+    endA--;
+    endB--;
+  }
+  return [...a.slice(0, start).map(kept4), ...middle(a.slice(start, endA), b.slice(start, endB)), ...a.slice(endA).map(kept4)];
+}
+
 // src/backend/depth/notebook.ts
 function notebookData(notebook) {
   const pinned = new Set(notebook.pinned.map((p) => p.path));
@@ -119669,14 +120518,76 @@ ${files.join(`
 
 ${edits.join(`
 
-`)}`] : []].join(`
+`)}`] : [], ...mindEditsText(notebook)].join(`
 
 `);
+}
+async function mindEditsAt(get, state2) {
+  const out2 = [];
+  const byKey2 = (a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0;
+  for (const [who, mind2] of Object.entries(mindsV2Of(state2).minds).sort(byKey2)) {
+    for (const [path2, m] of Object.entries(mind2.files).sort(byKey2)) {
+      if (m.mode !== "user")
+        continue;
+      out2.push({ who, path: path2, before: m.was ? await get(m.was) ?? "" : "", after: await get(m.hash) ?? "" });
+    }
+  }
+  return out2;
+}
+var MIND_DIFF_LINES = 24;
+function mindEditsText(notebook) {
+  const edits = (notebook.minds ?? []).map((e) => {
+    const changed = lineDiff(e.before, e.after).filter((l) => l.kind !== "same");
+    const lines2 = changed.slice(0, MIND_DIFF_LINES).map((l) => `${l.kind === "del" ? "-" : "+"} ${l.text}`);
+    if (changed.length > MIND_DIFF_LINES)
+      lines2.push(`(${changed.length - MIND_DIFF_LINES} more changed lines)`);
+    return `### ${e.who}: ${e.path}${e.before === "" ? " (new: he wrote this file)" : ""}
+${lines2.join(`
+`) || "(no change)"}`;
+  });
+  return edits.length > 0 ? [`The player edited characters' minds (each a directive):
+
+${edits.join(`
+
+`)}`] : [];
 }
 function castData(world, state2, cast) {
   const pov2 = povOf(world, state2);
   return cast.map((c) => `- ${c.name} [${c.id}]${c.id === pov2 ? " (the player character: the player's own, never given a mind while he plays him)" : `${c.mind ? ", has a mind" : ""}${c.card ? ", has a card" : ", no card"}`}`).join(`
 `) || `- ${named(world, state2, pov2)}`;
+}
+var NOTEBOOK_EDITS = ["append", "section", "whole"];
+function headingOf(line2) {
+  const m = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line2);
+  return m ? { depth: m[1].length, title: m[2].trim().toLowerCase() } : null;
+}
+function editNotebookFile(current2, edit) {
+  if (edit.edit === "whole")
+    return edit.text;
+  const text5 = edit.text.trim();
+  if (edit.edit === "append")
+    return current2.trim() === "" ? `${text5}
+` : `${current2.trimEnd()}
+
+${text5}
+`;
+  const title = (edit.section ?? "").trim();
+  const heading = title.startsWith("#") ? title : `## ${title}`;
+  const want = headingOf(heading)?.title;
+  const textLines = text5.split(`
+`);
+  const carries = headingOf(textLines[0] ?? "")?.title === want;
+  const lines2 = current2.split(`
+`);
+  const at2 = lines2.findIndex((l) => headingOf(l)?.title === want);
+  if (at2 < 0)
+    return editNotebookFile(current2, { edit: "append", text: carries ? text5 : `${heading}
+${text5}` });
+  const depth2 = headingOf(lines2[at2])?.depth ?? 2;
+  const next = lines2.findIndex((l, k) => k > at2 && (headingOf(l)?.depth ?? 7) <= depth2);
+  const after = next < 0 ? [] : lines2.slice(next);
+  return [...lines2.slice(0, at2), ...carries ? textLines : [lines2[at2], ...textLines], "", ...after].join(`
+`);
 }
 function revision(answer, read, notebook, kind, through, chapter) {
   const blobs = {};
@@ -119684,11 +120595,12 @@ function revision(answer, read, notebook, kind, through, chapter) {
   const pinned = new Set(notebook.pinned.map((p) => p.path));
   const files = {};
   const events3 = [];
+  const texts2 = new Map;
   for (const [i, raw] of read.list("files", answer.files).entries()) {
     const f = read.record(`files[${i}]`, raw);
     if (!f)
       continue;
-    if (typeof f.path !== "string" || f.path.trim() === "" || typeof f.text !== "string" || f.text.trim() === "" || own(files, f.path.trim()) !== undefined) {
+    if (typeof f.path !== "string" || f.path.trim() === "" || typeof f.text !== "string" || f.text.trim() === "") {
       read.drop(`files[${i}]`, f);
       continue;
     }
@@ -119701,9 +120613,20 @@ function revision(answer, read, notebook, kind, through, chapter) {
       refused2.push(`${path2} is pinned (the player's edit): it may be commented on, never rewritten`);
       continue;
     }
-    if (own(notebook.files, path2) === f.text)
+    const how = typeof f.edit === "string" && NOTEBOOK_EDITS.includes(f.edit) ? f.edit : "whole";
+    if (f.edit !== undefined && how !== f.edit)
+      read.change(`files[${i}].edit`, f.edit, how, "it isn't an edit the notebook takes");
+    const section2 = typeof f.section === "string" ? f.section : "";
+    if (how === "section" && section2.trim() === "") {
+      read.drop(`files[${i}]`, f, "a section's edit names no section");
       continue;
-    files[path2] = putText(blobs, f.text);
+    }
+    texts2.set(path2, editNotebookFile(texts2.get(path2) ?? own(notebook.files, path2) ?? "", { edit: how, section: section2, text: f.text }));
+  }
+  for (const [path2, text5] of texts2) {
+    if (own(notebook.files, path2) === text5)
+      continue;
+    files[path2] = putText(blobs, text5);
     events3.push(wsWrite(path2, files[path2]));
   }
   const comments = {};
@@ -119732,9 +120655,9 @@ ${m.text}`).join(`
 
 `);
   const data = [
-    notebookData(input.notebook),
     `The people the story has met:
 ${castData(world, state2, input.cast)}`,
+    notebookData(input.notebook),
     `This stretch is ${input.chapter.stretches === 0 ? "the first" : `number ${input.chapter.stretches + 1}`} of chapter ${input.chapter.index + 1}.`,
     ...input.signals && input.signals.length > 0 ? [`What the player did beyond his words:
 ${input.signals.map((s) => `- ${s}`).join(`
@@ -119781,9 +120704,9 @@ ${prose}`
 async function authorChapter(input, model2) {
   const { world, state: state2 } = input;
   const data = [
-    notebookData(input.notebook),
     `The people the story has met:
 ${castData(world, state2, input.cast)}`,
+    notebookData(input.notebook),
     `Chapter ${input.chapter.index + 1}, \u201C${input.chapter.title}\u201D, has ended. Its beats, in order:
 ${input.beats.map((b) => beatLine(world, state2, b)).join(`
 `) || "- (none)"}`
@@ -119839,17 +120762,18 @@ async function readNotebook(rt, userId, state2) {
     const was = own(authored3, f.path);
     out2.pinned.push({ path: f.path, before: was ? await rt.blobs.get(userId, was) ?? "" : "", after: text5 });
   }
-  return out2;
+  const minds = await mindEditsAt((hash) => rt.blobs.get(userId, hash), state2);
+  return minds.length > 0 ? { ...out2, minds } : out2;
 }
 async function notebookView(rt, chatId, userId) {
   const optedIn = await depthOptedIn(rt, chatId, userId);
   const basis = await rt.ledger.basisFor(chatId, userId);
   const head = basis ? await rt.ledger.foldAtBasis(chatId, userId, basis) : null;
   if (!head)
-    return { on: optedIn, files: [], revisions: [], poll: [], predictions: [] };
+    return { on: optedIn, files: [], revisions: [], poll: [], predictions: [], drift: [] };
   const text5 = async (hash) => hash ? await rt.blobs.get(userId, hash) ?? "" : "";
   const order = await chainNumbers(rt.host, chatId, userId, (await rt.ledger.chainBases(chatId, userId)).map((b) => b.message));
-  const live = await rt.ledger.readEvents(chatId, userId, [WS_WRITE, NOTEBOOK_REVISE, AUTHOR_POLL, AUTHOR_PREDICT, AUTHOR_SCORE, STORY_DRAFT]);
+  const live = await rt.ledger.readEvents(chatId, userId, [WS_WRITE, NOTEBOOK_REVISE, AUTHOR_POLL, AUTHOR_PREDICT, AUTHOR_SCORE, AUTHOR_DRIFT, STORY_DRAFT]);
   const containerOf = (from) => ("layer" in from) ? `l:${from.layer}` : ("post" in from) ? `p:${from.post}` : `r:${from.rec}`;
   const authored3 = new Set;
   for (const l of live)
@@ -119861,11 +120785,14 @@ async function notebookView(rt, chatId, userId) {
   const drafted = new Map;
   for (const l of live) {
     const d = l.event.type === STORY_DRAFT && "data" in l.event ? draftOf(l.event.data) : null;
-    if (d)
-      drafted.set(d.id, d.summary).set(d.episode.id, d.summary);
+    if (!d)
+      continue;
+    const summary = isBlobHash(d.summary) ? await text5(d.summary) : d.summary;
+    drafted.set(d.id, summary).set(d.episode.id, summary);
   }
   const nameOf14 = (who) => own(head.state.entities, who)?.name ?? who;
   const predictions = new Map;
+  const drift = [];
   const last = {};
   const counts2 = {};
   for (const l of live) {
@@ -119876,7 +120803,7 @@ async function notebookView(rt, chatId, userId) {
     const poll = authorData(e, AUTHOR_POLL);
     if (poll) {
       const reasoning = l.reasoning === undefined ? "" : isBlobHash(l.reasoning) ? await text5(l.reasoning) : l.reasoning;
-      const jobs = poll.jobs.map((j) => ({ kind: j.kind, why: j.why, subject: "who" in j ? nameOf14(j.who) : ("depth" in j) ? j.depth === "chapter" ? "Its re-read of the chapter" : "Its reflection on the scene" : ("episode" in j) ? drafted.get(j.episode) ?? "An episode not drafted yet" : drafted.get(j.draft) ?? "A draft no longer on the chain" }));
+      const jobs = poll.jobs.map((j) => ({ kind: j.kind, why: j.kind === "interview" ? [`Asked: ${j.question}`, j.why].filter((s) => s !== "").join(" \xB7 ") : j.why, subject: "who" in j ? nameOf14(j.who) : ("depth" in j) ? j.depth === "chapter" ? "Its re-read of the chapter" : "Its reflection on the scene" : ("episode" in j) ? drafted.get(j.episode) ?? "An episode not drafted yet" : drafted.get(j.draft) ?? "A draft no longer on the chain" }));
       polls.push({ at: at2, considered: poll.considered.map((c) => ({ what: c.what, raised: c.raised, why: c.why })), jobs, note: await text5(poll.note), reasoning });
       continue;
     }
@@ -119890,6 +120817,11 @@ async function notebookView(rt, chatId, userId) {
       const p = predictions.get(score.prediction);
       if (p)
         Object.assign(p, { outcome: score.outcome, note: score.note });
+      continue;
+    }
+    const checked = authorData(e, AUTHOR_DRIFT);
+    if (checked) {
+      drift.push({ at: at2, who: nameOf14(checked.who), drift: checked.drift, note: checked.note });
       continue;
     }
     if (e.type === NOTEBOOK_REVISE) {
@@ -119915,12 +120847,1618 @@ async function notebookView(rt, chatId, userId) {
   const files = [];
   for (const f of notebookFiles(head.state))
     files.push({ path: f.path, text: await text5(f.hash), pinned: f.pinned, revisions: counts2[f.path] ?? 0 });
-  return { on: optedIn || files.length > 0 || revisions.length > 0 || polls.length > 0 || predictions.size > 0, files, revisions: revisions.reverse(), poll: polls.reverse(), predictions: [...predictions.values()].reverse() };
+  return { on: optedIn || files.length > 0 || revisions.length > 0 || polls.length > 0 || predictions.size > 0 || drift.length > 0, files, revisions: revisions.reverse(), poll: polls.reverse(), predictions: [...predictions.values()].reverse(), drift: drift.reverse() };
 }
 async function notebookEditOps(rt, userId, path2, text5) {
   if (!isNotebookPath(path2))
     throw new Error(`not a notebook file: ${path2}`);
   return [{ op: "ws_write", path: path2, hash: await rt.blobs.put(userId, text5) }];
+}
+
+// src/shared/archive.ts
+function reachedOf(exposure, nameOf14) {
+  const ways = new Map;
+  for (const x of exposure) {
+    const set = ways.get(x.who) ?? new Set;
+    for (const c of x.channels)
+      set.add(c);
+    ways.set(x.who, set);
+  }
+  return [...ways].map(([who, set]) => `${nameOf14(who)} (${[...set].join(", ")})`);
+}
+var ARCHIVE_QUOTE_MAX = 6000;
+
+// src/engine/lexical.ts
+var STOP3 = new Set("a an and are as at be been but by for from had has have he her hers him his i if in into is it its me my of on or our she so than that the their them then there they this to too was we were what when where which who whom why will with you your".split(" "));
+function stem2(word) {
+  if (word.length > 5 && word.endsWith("ing"))
+    return word.slice(0, -3);
+  if (word.length > 4 && word.endsWith("ed"))
+    return word.slice(0, -2);
+  if (word.length > 4 && word.endsWith("es"))
+    return word.slice(0, -2);
+  if (word.length > 3 && word.endsWith("s") && !word.endsWith("ss"))
+    return word.slice(0, -1);
+  return word;
+}
+function tokenize2(text5) {
+  const out2 = [];
+  for (const m of text5.toLowerCase().matchAll(/[\p{L}\p{N}]+(?:'[\p{L}]+)?/gu)) {
+    const word = m[0].replace(/'s$/u, "");
+    if (word.length < 2 || STOP3.has(word))
+      continue;
+    out2.push(stem2(word));
+  }
+  return out2;
+}
+function passagesOf(text5, size = 600) {
+  const out2 = [];
+  let start = 0;
+  while (start < text5.length) {
+    let end = Math.min(text5.length, start + size);
+    if (end < text5.length) {
+      const para = text5.lastIndexOf(`
+`, end);
+      const sentence4 = Math.max(text5.lastIndexOf(". ", end), text5.lastIndexOf("! ", end), text5.lastIndexOf("? ", end));
+      if (para > start + size / 3)
+        end = para + 1;
+      else if (sentence4 > start + size / 3)
+        end = sentence4 + 2;
+    }
+    out2.push({ start, end });
+    start = end;
+  }
+  return out2;
+}
+function indexPieces(text5, size) {
+  return passagesOf(text5, size).map((passage) => {
+    const words10 = tokenize2(text5.slice(passage.start, passage.end));
+    const tf = new Map;
+    for (const w of words10)
+      tf.set(w, (tf.get(w) ?? 0) + 1);
+    return { passage, length: words10.length, words: [...tf] };
+  });
+}
+var K1 = 1.2;
+var B = 0.75;
+
+class LexicalIndex {
+  entries = [];
+  postings = new Map;
+  byKey = new Map;
+  dead = 0;
+  totalLength = 0;
+  get size() {
+    return this.entries.length - this.dead;
+  }
+  has(key) {
+    return this.byKey.has(key);
+  }
+  add(key, text5, size) {
+    this.addIndexed(key, indexPieces(text5, size));
+  }
+  addIndexed(key, pieces) {
+    this.remove(key);
+    const ids2 = [];
+    for (const { passage, length, words: words10 } of pieces) {
+      const id2 = this.entries.length;
+      this.entries.push({ key, passage, length, dead: false });
+      this.totalLength += length;
+      ids2.push(id2);
+      for (const [w, n] of words10) {
+        const list3 = this.postings.get(w);
+        if (list3)
+          list3.push(id2, n);
+        else
+          this.postings.set(w, [id2, n]);
+      }
+    }
+    this.byKey.set(key, ids2);
+  }
+  remove(key) {
+    const ids2 = this.byKey.get(key);
+    if (!ids2)
+      return;
+    for (const id2 of ids2) {
+      const p = this.entries[id2];
+      if (p && !p.dead) {
+        p.dead = true;
+        this.dead++;
+        this.totalLength -= p.length;
+      }
+    }
+    this.byKey.delete(key);
+    if (this.dead > 64 && this.dead * 4 > this.entries.length)
+      this.compact();
+  }
+  search(query, keep = () => true) {
+    const words10 = [...new Set(tokenize2(query))];
+    const live = this.size;
+    if (words10.length === 0 || live === 0)
+      return [];
+    const avg = this.totalLength / live || 1;
+    const scores = new Map;
+    for (const w of words10) {
+      const list3 = this.postings.get(w);
+      if (!list3)
+        continue;
+      let df = 0;
+      for (let i = 0;i < list3.length; i += 2)
+        if (!this.entries[list3[i]]?.dead)
+          df++;
+      if (df === 0)
+        continue;
+      const idf = Math.log(1 + (live - df + 0.5) / (df + 0.5));
+      for (let i = 0;i < list3.length; i += 2) {
+        const id2 = list3[i];
+        const p = this.entries[id2];
+        if (!p || p.dead)
+          continue;
+        const tf = list3[i + 1];
+        const score = idf * tf * (K1 + 1) / (tf + K1 * (1 - B + B * p.length / avg));
+        scores.set(id2, (scores.get(id2) ?? 0) + score);
+      }
+    }
+    const best = new Map;
+    for (const [id2, score] of scores) {
+      const p = this.entries[id2];
+      if (!p || !keep(p.key))
+        continue;
+      const known2 = best.get(p.key);
+      if (!known2 || score > known2.score)
+        best.set(p.key, { key: p.key, passage: p.passage, score });
+    }
+    return [...best.values()].sort((a, b) => b.score - a.score);
+  }
+  compact() {
+    const old = this.entries;
+    this.entries = [];
+    this.dead = 0;
+    const remap = new Map;
+    old.forEach((p, i) => {
+      if (p.dead)
+        return;
+      remap.set(i, this.entries.length);
+      this.entries.push(p);
+    });
+    for (const [key, ids2] of this.byKey)
+      this.byKey.set(key, ids2.flatMap((i) => remap.has(i) ? [remap.get(i)] : []));
+    for (const [w, list3] of this.postings) {
+      const kept5 = [];
+      for (let i = 0;i < list3.length; i += 2) {
+        const id2 = remap.get(list3[i]);
+        if (id2 !== undefined)
+          kept5.push(id2, list3[i + 1]);
+      }
+      if (kept5.length > 0)
+        this.postings.set(w, kept5);
+      else
+        this.postings.delete(w);
+    }
+  }
+}
+
+// src/backend/archive-index.ts
+var ARCHIVE_CHATS_KEPT = 3;
+var ARCHIVE_SHARDS = 16;
+var SNIPPET = 400;
+var STORED_VERSION = 1;
+function archiveDir(chatId) {
+  return `runs/${chatId}/archive`;
+}
+function shardOf(id2) {
+  return hash32(id2) % ARCHIVE_SHARDS;
+}
+function piecesOfStored(s) {
+  const out2 = [];
+  for (const row of s.p) {
+    if (!Array.isArray(row) || row.length !== 5)
+      return null;
+    const [start, end, length, words10, counts2] = row;
+    if (typeof start !== "number" || typeof end !== "number" || typeof length !== "number" || typeof words10 !== "string" || !Array.isArray(counts2))
+      return null;
+    const list3 = words10 === "" ? [] : words10.split(" ");
+    if (list3.length !== counts2.length || !counts2.every((n) => typeof n === "number"))
+      return null;
+    out2.push({ passage: { start, end }, length, words: list3.map((w, i) => [w, counts2[i]]) });
+  }
+  return out2;
+}
+function shardOfText(text5) {
+  const out2 = new Map;
+  if (text5 === null)
+    return out2;
+  let v4;
+  try {
+    v4 = JSON.parse(text5);
+  } catch {
+    return out2;
+  }
+  if (!isRecord(v4) || v4.v !== STORED_VERSION || !isRecord(v4.messages))
+    return out2;
+  for (const [id2, m] of Object.entries(v4.messages)) {
+    if (isRecord(m) && typeof m.swipe === "string" && typeof m.h === "string" && Array.isArray(m.p))
+      out2.set(id2, m);
+  }
+  return out2;
+}
+function citedBy(b, onChain) {
+  const by = b.beat.by;
+  if ("bootstrap" in by && onChain.has(by.bootstrap.message))
+    return by.bootstrap.message;
+  return b.from.messageId;
+}
+function citations(story, onChain) {
+  const out2 = new Map;
+  for (const b of story.beats) {
+    const id2 = citedBy(b, onChain);
+    const c = out2.get(id2) ?? { beats: [], places: new Set, people: new Set, exposure: [], earliest: null };
+    c.beats.push(b.beat.id);
+    c.places.add(b.beat.place);
+    for (const who of beatPeople(b.beat))
+      c.people.add(who);
+    for (const ref of b.beat.about)
+      if ("entity" in ref)
+        c.people.add(ref.entity);
+    for (const x of b.beat.exposure)
+      c.exposure.push({ who: x.who, beat: b.beat.id, channels: exposureChannels(x), reach: x.reach });
+    c.earliest = c.earliest === null ? b.beat.at : Math.min(c.earliest, b.beat.at);
+    out2.set(id2, c);
+  }
+  return out2;
+}
+function snippetOf(text5, start, end) {
+  let stop2 = Math.min(end, start + SNIPPET);
+  if (stop2 < end) {
+    const space = text5.lastIndexOf(" ", stop2);
+    if (space > start + SNIPPET / 2)
+      stop2 = space;
+  }
+  return { snippet: text5.slice(start, stop2).trim(), span: [start, stop2] };
+}
+
+class ArchiveIndex {
+  ledger;
+  host;
+  chats = new Map;
+  loading = new Map;
+  tokenized = 0;
+  constructor(ledger, host) {
+    this.ledger = ledger;
+    this.host = host;
+  }
+  async load(chatId, userId) {
+    const dir = archiveDir(chatId);
+    const shards = await Promise.all(Array.from({ length: ARCHIVE_SHARDS }, async (_, n) => shardOfText(await this.host.storage.read(`${dir}/shard-${n}.json`, userId).catch(() => null))));
+    return { index: new LexicalIndex, seen: new Map, shards, dirty: new Set, writing: Promise.resolve() };
+  }
+  async archiveOf(chatId, userId) {
+    const key = `${userId}\x00${chatId}`;
+    let archive = this.chats.get(key);
+    if (!archive) {
+      let load = this.loading.get(key);
+      if (!load) {
+        load = this.load(chatId, userId).finally(() => this.loading.delete(key));
+        this.loading.set(key, load);
+      }
+      archive = await load;
+    }
+    this.chats.delete(key);
+    this.chats.set(key, archive);
+    while (this.chats.size > ARCHIVE_CHATS_KEPT)
+      this.chats.delete(this.chats.keys().next().value ?? "");
+    return archive;
+  }
+  async synced(chatId, userId, messages) {
+    const archive = await this.archiveOf(chatId, userId);
+    const now = new Set;
+    for (const m of messages) {
+      now.add(m.id);
+      const was = archive.seen.get(m.id);
+      if (was && was.swipe === m.swipe && was.text === m.text)
+        continue;
+      const n = shardOf(m.id);
+      const shard = archive.shards[n];
+      const h = hashParts(m.text);
+      const stored = shard.get(m.id);
+      let pieces = stored && stored.swipe === m.swipe && stored.h === h ? piecesOfStored(stored) : null;
+      if (!pieces) {
+        pieces = indexPieces(m.text);
+        this.tokenized++;
+        shard.set(m.id, { swipe: m.swipe, h, p: pieces.map((x) => [x.passage.start, x.passage.end, x.length, x.words.map(([w]) => w).join(" "), x.words.map(([, c]) => c)]) });
+        archive.dirty.add(n);
+      }
+      archive.index.addIndexed(m.id, pieces);
+      archive.seen.set(m.id, { swipe: m.swipe, text: m.text });
+    }
+    archive.shards.forEach((shard, n) => {
+      for (const id2 of shard.keys()) {
+        if (now.has(id2))
+          continue;
+        archive.index.remove(id2);
+        archive.seen.delete(id2);
+        shard.delete(id2);
+        archive.dirty.add(n);
+      }
+    });
+    await this.flush(chatId, userId, archive);
+    return archive;
+  }
+  flush(chatId, userId, archive) {
+    if (archive.dirty.size === 0)
+      return archive.writing;
+    const texts2 = [...archive.dirty].map((n) => [n, JSON.stringify({ v: STORED_VERSION, messages: Object.fromEntries(archive.shards[n] ?? []) })]);
+    archive.dirty.clear();
+    const dir = archiveDir(chatId);
+    archive.writing = archive.writing.then(async () => {
+      for (const [n, text5] of texts2) {
+        const path2 = `${dir}/shard-${n}.json`;
+        try {
+          await this.host.storage.write(`${path2}.tmp`, text5, userId);
+          await this.host.storage.move(`${path2}.tmp`, path2, userId);
+        } catch (error) {
+          archive.dirty.add(n);
+          this.host.log("warn", `The archive index of chat ${chatId} couldn't write ${path2}: ${error instanceof Error ? error.message : String(error)}`, userId);
+        }
+      }
+    });
+    return archive.writing;
+  }
+  async search(chatId, userId, q) {
+    const view = await this.ledger.archiveView(chatId, userId);
+    return view ? this.searchView(chatId, userId, view, q) : { hits: [], total: 0 };
+  }
+  async searchView(chatId, userId, view, q) {
+    const archive = await this.synced(chatId, userId, view.messages);
+    const byId = new Map(view.messages.map((m) => [m.id, m]));
+    const cited = citations(view.story, new Set(byId.keys()));
+    const upTo = q.upTo === undefined ? Infinity : byId.get(q.upTo)?.index ?? -1;
+    const timeOf = (m) => m.clock ?? cited.get(m.id)?.earliest ?? null;
+    const keep = (id2) => {
+      const m = byId.get(id2);
+      if (!m || m.index > upTo)
+        return false;
+      const c = cited.get(id2);
+      if (q.who !== undefined && !c?.people.has(q.who))
+        return false;
+      if (q.place !== undefined && !c?.places.has(q.place))
+        return false;
+      if (q.from !== undefined || q.to !== undefined) {
+        const t = timeOf(m);
+        if (t === null || q.from !== undefined && t < q.from || q.to !== undefined && t > q.to)
+          return false;
+      }
+      return true;
+    };
+    const text5 = q.text?.trim() ?? "";
+    const ranked = text5 !== "" ? archive.index.search(text5, keep).map((h) => ({ id: h.key, score: h.score, start: h.passage.start, end: h.passage.end })) : view.messages.filter((m) => keep(m.id)).reverse().map((m) => ({ id: m.id, score: 0, start: 0, end: m.text.length }));
+    const limit4 = Math.max(1, Math.min(50, q.limit ?? 8));
+    const offset = Math.max(0, q.offset ?? 0);
+    const hits = ranked.slice(offset, offset + limit4).flatMap((r) => {
+      const m = byId.get(r.id);
+      if (!m)
+        return [];
+      const c = cited.get(r.id);
+      const { snippet, span: span2 } = snippetOf(m.text, r.start, r.end);
+      return [{ messageId: m.id, index: m.index, isUser: m.isUser, swipeId: m.swipeId, swipe: m.swipe, storyTime: timeOf(m), places: [...c?.places ?? []], people: [...c?.people ?? []], beats: c?.beats ?? [], exposure: c?.exposure ?? [], score: r.score, snippet, span: span2 }];
+    });
+    return { hits, total: ranked.length };
+  }
+  async quote(chatId, userId, req) {
+    const view = await this.ledger.archiveView(chatId, userId);
+    return view ? quoteView(view, req) : null;
+  }
+}
+function quoteView(view, req) {
+  const m = view.messages.find((x) => x.id === req.messageId);
+  if (!m)
+    return null;
+  const start = Math.max(0, Math.min(m.text.length, req.span?.[0] ?? 0));
+  const end = Math.max(start, Math.min(m.text.length, req.span?.[1] ?? m.text.length));
+  const stop2 = Math.min(end, start + ARCHIVE_QUOTE_MAX);
+  const cited = citations(view.story, new Set(view.messages.map((x) => x.id))).get(m.id);
+  return { messageId: m.id, index: m.index, isUser: m.isUser, swipeId: m.swipeId, swipe: m.swipe, storyTime: m.clock ?? cited?.earliest ?? null, span: [start, stop2], text: m.text.slice(start, stop2), truncated: stop2 < end };
+}
+
+// src/backend/depth/archive-tools.ts
+function chatArchive(rt, chatId, userId, upTo) {
+  let view = null;
+  const read = () => view ??= rt.ledger.archiveView(chatId, userId).then((v4) => {
+    const last = v4?.messages.find((m) => m.id === upTo)?.index;
+    return v4 && last !== undefined ? { view: v4, last } : null;
+  });
+  return {
+    search: async (q) => {
+      const got = await read();
+      return got ? rt.archive.searchView(chatId, userId, got.view, { ...q, upTo }) : { hits: [], total: 0 };
+    },
+    quote: async (r) => {
+      const got = await read();
+      const at2 = got?.view.messages.find((m) => m.id === r.messageId);
+      return got && at2 && at2.index <= got.last ? quoteView(got.view, r) : null;
+    }
+  };
+}
+var ARCHIVE_TOOLS = { search: "archive_search", quote: "archive_quote" };
+function wholeArg(v4) {
+  const n = typeof v4 === "string" && v4.trim() !== "" ? Number(v4) : v4;
+  return typeof n === "number" && Number.isSafeInteger(n) ? n : null;
+}
+function archiveTools(input) {
+  const { world, state: state2, texts: texts2 } = input;
+  const cal = calendarOf(world);
+  const text5 = (id2) => renderPrompt(id2, texts2, {});
+  const idOf = (v4, kind) => {
+    if (typeof v4 !== "string" || v4.trim() === "")
+      return;
+    return kind === "person" ? personNamed3(state2, v4) : placeNamed2(world, v4);
+  };
+  const timeOf = (v4) => typeof v4 !== "string" || v4.trim() === "" ? undefined : clockOfStamp(cal, v4.trim()) ?? clockOfPhrase(cal, state2.clock, v4.trim());
+  const nameOf14 = (id2) => own(state2.entities, id2)?.name ?? own(world.places, id2)?.name ?? id2;
+  const hitLine = (h) => `- message ${h.index + 1} [${h.messageId}] (${h.isUser ? "the player" : "a reply"}${h.storyTime !== null ? `, ${formatClock(cal, h.storyTime)}` : ""}${h.places.length > 0 ? `, at ${h.places.map(nameOf14).join(", ")}` : ""}${h.people.length > 0 ? `; ${h.people.map(nameOf14).join(", ")}` : ""}${h.exposure.length > 0 ? `; reached ${reachedOf(h.exposure, nameOf14).join(", ")}` : ""}${h.beats.length > 0 ? `; ${h.beats.length} beat${h.beats.length === 1 ? "" : "s"}` : ""}) chars ${h.span[0]}\u2013${h.span[1]}: ${h.snippet}`;
+  const search2 = {
+    name: ARCHIVE_TOOLS.search,
+    description: text5(DEPTH_TOOL_TEXT.search),
+    parameters: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: text5(DEPTH_TOOL_TEXT.searchText) },
+        who: { type: "string", description: text5(DEPTH_TOOL_TEXT.searchWho) },
+        place: { type: "string", description: text5(DEPTH_TOOL_TEXT.searchPlace) },
+        from: { type: "string", description: text5(DEPTH_TOOL_TEXT.searchFrom) },
+        to: { type: "string", description: text5(DEPTH_TOOL_TEXT.searchTo) },
+        offset: { type: "integer", description: text5(DEPTH_TOOL_TEXT.searchOffset) }
+      }
+    },
+    async run(args) {
+      const who = idOf(args.who, "person");
+      const place2 = idOf(args.place, "place");
+      const from = timeOf(args.from);
+      const to = timeOf(args.to);
+      if (who === null || place2 === null)
+        return { text: `No ${who === null ? `person called "${String(args.who)}"` : `place called "${String(args.place)}"`} in this world.`, error: true };
+      if (from === null || to === null)
+        return { text: `"${String(from === null ? args.from : args.to)}" isn't a story time this tool reads: give one as the archive words them ("${formatClock(cal, state2.clock)}"), or a phrase like "yesterday morning".`, error: true };
+      const offset = Math.max(0, wholeArg(args.offset) ?? 0);
+      const q = {
+        ...typeof args.text === "string" && args.text.trim() !== "" ? { text: args.text.trim() } : {},
+        ...who ? { who } : {},
+        ...place2 ? { place: place2 } : {},
+        ...from !== undefined ? { from } : {},
+        ...to !== undefined ? { to } : {},
+        ...input.upTo ? { upTo: input.upTo } : {},
+        offset
+      };
+      const found = await input.source.search(q);
+      if (found.hits.length === 0)
+        return { text: offset > 0 ? `No more: ${found.total} found in all.` : "Nothing in the chat matches." };
+      const next = offset + found.hits.length < found.total ? ` More with offset ${offset + found.hits.length}.` : "";
+      return { text: `${found.total} found; ${offset + 1}\u2013${offset + found.hits.length}:
+${found.hits.map(hitLine).join(`
+`)}
+${next}`.trim() };
+    }
+  };
+  const quote2 = {
+    name: ARCHIVE_TOOLS.quote,
+    description: text5(DEPTH_TOOL_TEXT.quote),
+    parameters: {
+      type: "object",
+      properties: {
+        message: { type: "string", description: text5(DEPTH_TOOL_TEXT.quoteMessage) },
+        from: { type: "integer", description: text5(DEPTH_TOOL_TEXT.quoteFrom) },
+        to: { type: "integer", description: text5(DEPTH_TOOL_TEXT.quoteTo) }
+      },
+      required: ["message"]
+    },
+    async run(args) {
+      const messageId = typeof args.message === "string" ? bareId(args.message) : "";
+      if (messageId === "")
+        return { text: "Name the message to quote by its id, as archive_search gives it.", error: true };
+      const start = wholeArg(args.from);
+      const end = wholeArg(args.to);
+      const got = await input.source.quote({ messageId, ...start !== null && end !== null && end > start ? { span: [Math.max(0, start), end] } : {} });
+      if (!got)
+        return { text: `No message ${messageId} on this chat's story.`, error: true };
+      const cut = got.truncated ? ` (cut at ${ARCHIVE_QUOTE_MAX} characters; quote from ${got.span[1]} for more)` : "";
+      return { text: `Message ${got.index + 1} [${got.messageId}] (${got.isUser ? "the player" : "a reply"}${got.storyTime !== null ? `, ${formatClock(cal, got.storyTime)}` : ""}), chars ${got.span[0]}\u2013${got.span[1]}${cut}:
+${got.text}` };
+    }
+  };
+  return [search2, quote2];
+}
+
+// src/backend/depth/scene/author.ts
+var str30 = (v4) => typeof v4 === "string" && v4.trim() !== "";
+var text5 = (v4) => typeof v4 === "string" ? v4.trim() : "";
+var list3 = (v4) => Array.isArray(v4) ? v4 : [];
+var record4 = (v4) => typeof v4 === "object" && v4 !== null && !Array.isArray(v4) ? v4 : null;
+function namesOf5(world, state2) {
+  const byName = new Map;
+  for (const [id2, e] of Object.entries(state2.entities))
+    if (e && !isGone(state2, id2) && e.name)
+      byName.set(nameKey2(e.name), id2);
+  const places2 = new Map;
+  for (const [id2, p] of Object.entries(world.places))
+    places2.set(nameKey2(p.name), id2);
+  const bare2 = (raw) => typeof raw === "string" ? raw.trim().replace(/^\[([^[\]]+)\]$/, "$1") : "";
+  const person5 = (raw) => {
+    const id2 = bare2(raw);
+    if (id2 === "")
+      return null;
+    if (hasOwn(state2.entities, id2) && !isGone(state2, id2))
+      return id2;
+    return byName.get(nameKey2(id2)) ?? null;
+  };
+  const place2 = (raw) => {
+    const id2 = bare2(raw);
+    if (id2 === "")
+      return null;
+    return hasOwn(world.places, id2) ? id2 : places2.get(nameKey2(id2)) ?? null;
+  };
+  return {
+    person: person5,
+    place: place2,
+    ref: (raw) => {
+      const p = person5(raw);
+      if (p)
+        return { entity: p };
+      const pl = place2(raw);
+      return pl ? { place: pl } : null;
+    },
+    name: (id2) => own(state2.entities, id2)?.name ?? own(world.entities, id2)?.name ?? id2
+  };
+}
+function tag(names2, id2) {
+  const n = names2.name(id2);
+  return n !== id2 ? `${n} [${id2}]` : `[${id2}]`;
+}
+async function ask3(ctx, id2, data) {
+  const system = renderPrompt(id2, ctx.texts, { world: ctx.world.name, pov: own(ctx.state.entities, ctx.pov)?.name ?? ctx.pov });
+  const reply = await ctx.model("author", [{ role: "system", content: system }, { role: "user", content: data }], { json: true, ...ctx.signal ? { signal: ctx.signal } : {} });
+  const { answer, read } = readAnswer("author", reply);
+  if (!answer)
+    throw new DepthAnswerError("author", reply.text, reply);
+  return { answer, read, ...reply.reasoning ? { reasoning: reply.reasoning } : {}, ...reply.usage ? { usage: reply.usage } : {} };
+}
+function talkOf2(ctx, id2, data) {
+  const system = renderPrompt(id2, ctx.texts, { world: ctx.world.name, pov: own(ctx.state.entities, ctx.pov)?.name ?? ctx.pov });
+  return { messages: [{ role: "system", content: system }, { role: "user", content: data }], reasoning: [] };
+}
+async function answerIn(ctx, talk, call = { role: "author" }) {
+  const reply = await ctx.model(call.role, talk.messages, { json: true, ...call.maxTokens !== undefined ? { maxTokens: call.maxTokens } : {}, ...ctx.signal ? { signal: ctx.signal } : {} });
+  if (reply.usage)
+    talk.usage = addUsage(talk.usage ?? NO_USAGE, reply.usage);
+  if (reply.reasoning)
+    talk.reasoning.push(reply.reasoning);
+  const { answer, read } = readAnswer(call.role, reply);
+  if (!answer)
+    throw new DepthAnswerError(call.role, reply.text, reply);
+  talk.read = read;
+  talk.messages.push({ role: "assistant", content: reply.text });
+  return answer;
+}
+var ARCHIVE_ROUNDS = 3;
+var READS_PER_ROUND = 6;
+var QUOTES_MOST = 6;
+function toolsText(tools) {
+  return tools.map((t) => {
+    const props = record4(t.parameters.properties) ?? {};
+    const args = Object.entries(props).map(([name, p]) => `${name} (${text5(record4(p)?.description)})`);
+    return `- ${t.name}: ${t.description}${args.length > 0 ? ` Arguments: ${args.join("; ")}.` : ""}`;
+  }).join(`
+`);
+}
+async function askReading(ctx, talk, tools, answering = "the scene", call) {
+  const signal2 = ctx.signal ?? new AbortController().signal;
+  const reads = [];
+  for (let round2 = 0;; round2++) {
+    const answer = await answerIn(ctx, talk, call);
+    const wanted = tools.length === 0 ? [] : list3(answer.archive).map(record4).filter((r) => r !== null);
+    if (wanted.length === 0 || round2 >= ARCHIVE_ROUNDS)
+      return { answer, reads };
+    const found = [];
+    for (const [i, w] of wanted.slice(0, READS_PER_ROUND).entries()) {
+      const { tool: name, ...args } = w;
+      const tool = tools.find((t) => t.name === name);
+      const asked2 = `${typeof name === "string" ? name : "?"} ${JSON.stringify(args)}`;
+      const out2 = tool ? await tool.run(args, { signal: signal2, agentId: "author", role: "author", callId: `setup.${round2}.${i}` }) : { text: `No tool "${String(name)}": the archive's are ${tools.map((t) => t.name).join(" and ")}.`, error: true };
+      reads.push(`The ${call?.role === "gm" ? "GM" : "author"} reads the archive: ${asked2}${out2.error ? ` (${out2.text})` : ""}`);
+      found.push(`### ${asked2}
+${out2.text}`);
+    }
+    if (wanted.length > READS_PER_ROUND)
+      found.push(`(Only the first ${READS_PER_ROUND} reads of a round are made; the other ${wanted.length - READS_PER_ROUND} weren't.)`);
+    const left = ARCHIVE_ROUNDS - round2 - 1;
+    talk.messages.push({ role: "user", content: `What the archive gave:
+
+${found.join(`
+
+`)}
+
+${left > 0 ? `Read more (${left} ${left === 1 ? "round" : "rounds"} left), or answer ${answering}.` : `That was your last read: answer ${answering} now.`}` });
+  }
+}
+function archiveOffer(ctx, archive, answering) {
+  const tools = archive ? archiveTools({ texts: ctx.texts, world: ctx.world, state: ctx.state, source: archive }) : [];
+  const line2 = tools.length > 0 ? `The chat's archive, its own prose as it was written, is yours to read before you answer: answer {"archive": [{"tool": a tool's name, then its arguments}]} alone, and what each read found comes back; up to ${ARCHIVE_ROUNDS} rounds of reading (${READS_PER_ROUND} reads each), then you answer ${answering}. Its tools:
+${toolsText(tools)}` : "";
+  return { tools, line: line2 };
+}
+async function askArchive(ctx, id2, data, archive, answering) {
+  const { tools, line: line2 } = archiveOffer(ctx, archive, answering);
+  const talk = talkOf2(ctx, id2, line2 !== "" ? `${data}
+
+${line2}` : data);
+  const { answer, reads } = await askReading(ctx, talk, tools, answering);
+  return { answer, reads, ...talk.reasoning.length > 0 ? { reasoning: talk.reasoning.join(`
+
+`) } : {}, ...talk.usage ? { usage: talk.usage } : {} };
+}
+async function quotesOf2(raw, archive, world, refused2, most = QUOTES_MOST) {
+  const asked2 = list3(raw).map(record4).filter((r) => r !== null);
+  if (asked2.length === 0)
+    return [];
+  if (!archive) {
+    refused2.push("the archive can't be read this turn, so no quote reaches the narrator");
+    return [];
+  }
+  if (asked2.length > most)
+    refused2.push(`only the first ${most} quotes reach the narrator; the other ${asked2.length - most} don't`);
+  const cal = calendarOf(world);
+  const out2 = [];
+  for (const q of asked2.slice(0, most)) {
+    const messageId = typeof q.message === "string" ? bareId(q.message) : "";
+    if (messageId === "") {
+      refused2.push("a quote named no message");
+      continue;
+    }
+    const from = wholeArg(q.from);
+    const to = wholeArg(q.to);
+    const got = await archive.quote({ messageId, ...from !== null && to !== null && to > from ? { span: [Math.max(0, from), to] } : {} });
+    if (!got) {
+      refused2.push(`a quote named ${messageId}, which isn't a message of this chat's story before this turn`);
+      continue;
+    }
+    if (got.text.trim() === "") {
+      refused2.push(`a quote of ${messageId} held no words`);
+      continue;
+    }
+    out2.push({ messageId: got.messageId, index: got.index, when: got.storyTime !== null ? formatClock(cal, got.storyTime) : null, text: got.text, truncated: got.truncated, why: text5(q.why) });
+  }
+  return out2;
+}
+function exposureOf(raw, names2, refused2, what) {
+  const x = record4(raw);
+  if (!x)
+    return null;
+  const who = names2.person(x.who);
+  if (!who) {
+    refused2.push(`${what}: an exposure named someone the chat doesn't have (${text5(x.who) || "no one"})`);
+    return null;
+  }
+  const channel2 = EXPOSURE_CHANNELS.includes(text5(x.channel)) ? text5(x.channel) : "sight";
+  return { who, channel: channel2, reach: x.reach === "partial" ? "partial" : "whole" };
+}
+function exposuresOf(raw, names2, refused2, what) {
+  const out2 = [];
+  for (const r of list3(raw)) {
+    const x = exposureOf(r, names2, refused2, what);
+    if (x && !out2.some((o) => o.who === x.who))
+      out2.push(x);
+  }
+  return out2;
+}
+function draftBeats(raw, names2, ctx, who, refused2, prefix, taken2) {
+  const out2 = [];
+  list3(raw).forEach((r, i) => {
+    const b = record4(r);
+    if (!b)
+      return;
+    const ref = str30(b.ref) ? b.ref.trim() : `${prefix}${i + 1}`;
+    const what = text5(b.what);
+    const surface = text5(b.surface);
+    if (what === "" || surface === "") {
+      refused2.push(`beat ${ref}: a beat needs what happened and what was there to sense`);
+      return;
+    }
+    const named2 = [...new Set(list3(b.actors).map((a) => names2.person(a)).filter((a) => a !== null))];
+    const addressedNamed = list3(b.addressed).map((a) => names2.person(a)).filter((a) => a !== null);
+    const addressedPc = named2.length > 1 && named2.includes(ctx.pov) && addressedNamed.includes(ctx.pov);
+    const actors = addressedPc ? named2.filter((a) => a !== ctx.pov) : named2;
+    const notTheirs = [...actors.filter((a) => a === ctx.pov), ...actors.filter((a) => a !== ctx.pov && who.agents.has(a))];
+    if (notTheirs.length > 0) {
+      const agents = notTheirs.length - (notTheirs.includes(ctx.pov) ? 1 : 0);
+      const why2 = !notTheirs.includes(ctx.pov) ? `playing as their own ${agents === 1 ? "agent" : "agents"}` : agents === 0 ? "the player character is the player's" : `the player character is the player's, and ${agents === 1 ? "the other plays as their own agent" : "the others play as their own agents"}`;
+      const beside = notTheirs.includes(ctx.pov) && named2.length > 1 ? `; where the others only spoke to him or acted on him, name ${tag(names2, ctx.pov)} in its "addressed" and its exposure, never its actors` : "";
+      refused2.push(`beat ${ref}: ${notTheirs.map((a) => tag(names2, a)).join(", ")} ${notTheirs.length === 1 ? "decides" : "decide"} their own acts (${why2}); the beat wasn't kept${beside}`);
+      taken2?.push({ beat: ref, who: notTheirs });
+      return;
+    }
+    if (addressedPc)
+      refused2.push(`beat ${ref}: ${tag(names2, ctx.pov)} isn't one of its actors: being addressed is not acting, and his acts are the player's. It was kept as the act of ${actors.map((a) => tag(names2, a)).join(", ")}, with him as the one addressed; put him in a beat's exposure, never its actors`);
+    const act2 = BEAT_ACTS.includes(text5(b.act)) ? text5(b.act) : actors.length > 0 ? "did" : "happened";
+    const quotes = spoken(b.quotes);
+    const addressed = [...new Set(addressedNamed)];
+    const about2 = list3(b.about).map((a) => names2.ref(a)).filter((a) => a !== null);
+    const after = typeof b.after === "number" && Number.isFinite(b.after) && b.after > 0 ? Math.round(b.after) : undefined;
+    const attempt = text5(b.attempt);
+    const deed = text5(b.deed);
+    if (deed !== "" && actors.length === 0)
+      refused2.push(`beat ${ref}: no one acts in it, so its deed wasn't kept`);
+    const exposure = exposuresOf(b.exposure, names2, refused2, `beat ${ref}`);
+    if (addressedPc && who.onScreen && !exposure.some((x) => x.who === ctx.pov))
+      exposure.push({ who: ctx.pov, channel: "sight", reach: "whole" });
+    out2.push({
+      ref,
+      decided: "author",
+      actors,
+      act: act2,
+      what,
+      ...deed !== "" && actors.length > 0 ? { deed } : {},
+      surface,
+      ...quotes !== "" ? { quotes } : {},
+      ...addressed.length > 0 ? { addressed } : {},
+      about: about2,
+      ...after !== undefined ? { after } : {},
+      exposure,
+      ...attempt !== "" && actors.length > 0 ? { attempt } : {}
+    });
+  });
+  return out2;
+}
+function stagingsOf(raw, names2, refused2, placing) {
+  const out2 = [];
+  for (const r of list3(raw)) {
+    const s = record4(r);
+    if (!s)
+      continue;
+    const who = names2.person(s.who);
+    if (!who) {
+      refused2.push(`a staging named someone the chat doesn't have (${text5(s.who) || "no one"})`);
+      continue;
+    }
+    const where = text5(s.where);
+    const doing = text5(s.doing);
+    if (where === "" || doing === "")
+      continue;
+    const occluded = text5(s.occluded);
+    const remote = s.remote === true;
+    const said2 = remote ? "" : text5(s.place);
+    const place2 = said2 !== "" ? names2.place(said2) : null;
+    if (said2 !== "" && place2 === null)
+      refused2.push(`the staging placed ${tag(names2, who)} at "${said2}", which isn't one of the world's places, so they stay where they were`);
+    else if (placing && !remote && said2 === "" && who !== placing.pov) {
+      refused2.push(`the staging gave ${tag(names2, who)} neither the place they are at nor "remote", so they stay where they were: no place is guessed`);
+      if (!placing.who.includes(who))
+        placing.who.push(who);
+    }
+    out2.push({ who, where, doing, ...occluded !== "" ? { occluded } : {}, ...remote ? { remote: true } : place2 !== null ? { place: place2 } : {} });
+  }
+  return out2;
+}
+function exposureForOf(raw, names2, refs, refused2) {
+  const out2 = [];
+  for (const r of list3(raw)) {
+    const x = record4(r);
+    if (!x)
+      continue;
+    const beat = text5(x.beat);
+    if (!refs.has(beat)) {
+      refused2.push(`an exposure named a beat that isn't waiting for one (${beat || "none"})`);
+      continue;
+    }
+    const e = exposureOf(x, names2, refused2, `beat ${beat}`);
+    if (e && !out2.some((o) => o.beat === beat && o.who === e.who))
+      out2.push({ beat, ...e });
+  }
+  return out2;
+}
+function nextOf2(raw, names2, agents, refused2, pov2) {
+  const out2 = [];
+  for (const r of list3(raw)) {
+    const who = names2.person(r);
+    if (!who)
+      continue;
+    if (who === pov2) {
+      refused2.push(`${tag(names2, who)} is the player character: what he does next is the player's, so end the turn where his answer is wanted`);
+      continue;
+    }
+    if (!agents.has(who)) {
+      refused2.push(`${tag(names2, who)} doesn't play as their own agent this scene, so they don't act next on their own; write their acts yourself`);
+      continue;
+    }
+    if (!out2.includes(who))
+      out2.push(who);
+  }
+  return out2;
+}
+async function askAgain(ctx, talk, names2, unkept, what, wrote) {
+  const notes = [
+    ...wrote.theirs ? [`${tag(names2, ctx.pov)} is the player's: never write an act of his; where the moment turns to him, end the turn for his answer. Whoever plays as their own agent decides their own acts: name them in "next", and their own agent plays them now.`] : [],
+    ...wrote.place ? ["Name the scene's place by the id of one of the world's places, as listed."] : [],
+    ...wrote.realtime ? ['Real-time dialogue is with someone playing as their own agent: to enter it, cast them "agent" and name them in "realtime"; else give no "realtime".'] : [],
+    ...wrote.staged ? [`Give each person you stage "place": the id of the world's place where they are, as listed (the scene's own place for everyone there in person), or "remote": true, with no place, for someone elsewhere whom the scene reaches only from afar (the far end of a phone call, a radio, a screen).`] : [],
+    ...wrote.screen ? ['The on-screen allowance is spent: cast no one "agent" this turn. Play whom you would have given their own agent yourself ("author"), or handle them as part of the world ("world"); real-time dialogue waits for the allowance.'] : []
+  ];
+  talk.messages.push({ role: "user", content: `Not all of your answer could be kept:
+${unkept.map((r) => `- ${r}`).join(`
+`)}
+
+Answer ${what} again, whole, as one JSON object of the same shape: it replaces your answer above. ${notes.join(" ")}` });
+  try {
+    return await answerIn(ctx, talk);
+  } catch (error) {
+    if (!(error instanceof DepthAnswerError) || ctx.signal?.aborted)
+      throw error;
+    return null;
+  }
+}
+function theirsNow(taken2, agents, names2, read, refused2) {
+  const due = [...new Set(taken2.flatMap((t) => t.who))].filter((who) => agents.has(who));
+  if (due.length === 0)
+    return { next: read.next, end: read.end };
+  const one = due.length === 1;
+  refused2.push(`${due.map((who) => tag(names2, who)).join(", ")} ${one ? "plays as their own agent: their own agent acts" : "play as their own agents: their own agents act"} now in place of the ${one ? "act" : "acts"} written for them${read.end !== null ? `, and the turn goes on to ${one ? "it" : "them"} rather than ending` : ""}`);
+  return { next: [...new Set([...read.next, ...due])], end: null };
+}
+function notebookText(notebook) {
+  const pinned = new Set(notebook.pinned.map((p) => p.path));
+  const files = Object.entries(notebook.files).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([path2, body]) => `### ${path2}${pinned.has(path2) ? " (pinned: the player's own words)" : ""}
+${body}`);
+  const edits = notebook.pinned.map((p) => `### ${p.path}
+You last wrote:
+${p.before || "(nothing: he wrote this file)"}
+He made it:
+${p.after}`);
+  return [`Your notebook:
+
+${files.join(`
+
+`) || "(empty: this is its start)"}`, ...edits.length > 0 ? [`The player edited your notebook (each a directive):
+
+${edits.join(`
+
+`)}`] : [], ...mindEditsText(notebook)].join(`
+
+`);
+}
+function beatText(world, names2, ref, b) {
+  const { beat } = b;
+  const exposure = beat.exposure.map((x) => `${tag(names2, x.who)} by ${exposureChannels(x).join(" and ")}${x.reach === "partial" ? ", in part" : ""}`).join("; ");
+  const place2 = own(world.places, beat.place)?.name ?? beat.place;
+  const by = "turn" in beat.by ? beat.by.decided : ("draft" in beat.by) ? "a draft" : "history";
+  return `- (${ref}) ${formatClock(calendarOf(world), beat.at)}, ${place2}; ${beat.act} by ${beat.actors.map((a) => tag(names2, a)).join(", ") || "no one"} (decided by ${by}): ${b.what}${b.quotes ? ` Words: \u201C${b.quotes}\u201D` : ""} Perceived by: ${exposure || "no one yet"}.`;
+}
+function draftText(names2, d) {
+  return `- (${d.ref}) ${d.act} by ${d.actors.map((a) => tag(names2, a)).join(", ") || "no one"} (decided by ${d.decided})${d.inner ? " (his inner life: no one but him perceives it)" : ""}: ${d.what}${d.quotes ? ` Words: \u201C${d.quotes}\u201D` : ""} What was there to sense: ${d.surface}`;
+}
+function stagingText(names2, s) {
+  return `- ${tag(names2, s.who)}: ${s.where}; ${s.doing}${s.occluded ? `; blocked: ${s.occluded}` : ""}${s.remote ? " (remote: reached from afar)" : s.place ? ` (at [${s.place}])` : ""}`;
+}
+var PLACES_READ = 60;
+function placesText2(world, here, most = PLACES_READ) {
+  const all2 = Object.entries(world.places);
+  const shown3 = all2.sort(([a, x], [b, y]) => (here !== null ? placeDistance(world, here, a) - placeDistance(world, here, b) : 0) || x.name.localeCompare(y.name)).slice(0, most);
+  const lines2 = shown3.map(([id2, p]) => {
+    const parent = p.parent !== undefined ? own(world.places, p.parent) : undefined;
+    return `- ${p.name} [${id2}]${parent ? `, in ${parent.name}` : ""}`;
+  });
+  const more = all2.length - shown3.length;
+  return `The world's places, each by its id (a scene plays at one of them):
+${lines2.join(`
+`) || "- (none)"}${more > 0 ? `
+(and ${more} more, farther off: name one by its id or name)` : ""}`;
+}
+function playedText(names2, played) {
+  return played.map((p) => {
+    const parts = [p.files.core && `Who they are at root:
+${p.files.core}`, p.files.self && `Their story of themselves:
+${p.files.self}`, p.files.now && `How they are now:
+${p.files.now}`, p.files.mind && `What they keep in mind:
+${p.files.mind}`].filter((x) => typeof x === "string" && x !== "");
+    return `### ${tag(names2, p.who)}
+${parts.join(`
+
+`) || "(no mind written yet)"}`;
+  }).join(`
+
+`);
+}
+function newcomersOf(raw, names2, state2, refused2) {
+  const newcomers = [];
+  const known2 = new Map;
+  for (const r of list3(raw)) {
+    const c = record4(r);
+    if (!c)
+      continue;
+    const name = text5(c.name);
+    const ref = bareId(text5(c.ref));
+    if (name === "") {
+      refused2.push(`a newcomer needs a name (${ref || "no ref"}); they weren't brought in`);
+      continue;
+    }
+    const there = names2.person(name) ?? (ref !== "" ? names2.person(ref) : null) ?? known2.get(nameKey2(name)) ?? null;
+    if (there) {
+      if (ref !== "")
+        known2.set(ref, there);
+      continue;
+    }
+    const base = (ref !== "" ? ref : name).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "newcomer";
+    let id2 = base;
+    for (let i = 2;hasOwn(state2.entities, id2) || newcomers.some((n) => n.id === id2); i++)
+      id2 = `${base}_${i}`;
+    newcomers.push({ id: id2, name, who: text5(c.who), mind: c.mind === true });
+    for (const k of [id2, ref, nameKey2(name)])
+      if (k !== "")
+        known2.set(k, id2);
+  }
+  if (known2.size === 0)
+    return { newcomers, names: names2 };
+  const fresh = (raw2) => {
+    const id2 = typeof raw2 === "string" ? raw2.trim().replace(/^\[([^[\]]+)\]$/, "$1") : "";
+    return id2 === "" ? null : known2.get(id2) ?? known2.get(nameKey2(id2)) ?? null;
+  };
+  return {
+    newcomers,
+    names: {
+      person: (raw2) => names2.person(raw2) ?? fresh(raw2),
+      place: (raw2) => names2.place(raw2),
+      ref: (raw2) => {
+        const p = fresh(raw2);
+        return names2.person(raw2) === null && p !== null ? { entity: p } : names2.ref(raw2);
+      },
+      name: (id2) => newcomers.find((n) => n.id === id2)?.name ?? names2.name(id2)
+    }
+  };
+}
+function castOf(raw, names2, ctx, refused2) {
+  const out2 = [];
+  for (const r of list3(raw)) {
+    const c = record4(r);
+    if (!c)
+      continue;
+    const who = names2.person(c.who);
+    if (!who) {
+      refused2.push(`the cast named someone the chat doesn't have (${text5(c.who) || "no one"}): someone new comes into the world through "newcomers" first`);
+      continue;
+    }
+    if (who === ctx.pov)
+      continue;
+    if (out2.some((o) => o.who === who))
+      continue;
+    const effort = SCENE_EFFORTS.includes(text5(c.effort)) ? text5(c.effort) : "world";
+    out2.push({ who, effort, why: text5(c.why) });
+  }
+  return out2;
+}
+async function authorSetup(input) {
+  const { world, state: state2 } = input;
+  const names2 = namesOf5(world, state2);
+  const tools = input.archive ? archiveTools({ texts: input.texts, world, state: state2, source: input.archive }) : [];
+  const others = input.present.filter((p) => p.who !== input.pov);
+  const here = others.filter((p) => p.where === undefined);
+  const elsewhere = others.filter((p) => p.where !== undefined);
+  const presentLine = (p) => `- ${tag(names2, p.who)}${p.mind ? ", has a mind" : ", no mind yet"}${p.where ? `, at ${p.where}` : ""}`;
+  const data = [
+    notebookText(input.notebook),
+    input.scene ? [
+      `The scene that is playing (${input.scene.id}), at ${own(world.places, input.scene.place)?.name ?? input.scene.place}. Its cast last turn: ${input.scene.cast.map((c) => `${tag(names2, c.who)} as ${c.effort}`).join("; ") || "no one"}.`,
+      `Its staging:
+${input.scene.staging.map((s) => stagingText(names2, s)).join(`
+`) || "- (none)"}`,
+      `Its beats so far:
+${input.scene.beats.map((b) => beatText(world, names2, b.ref, b.beat)).join(`
+`) || "- (none)"}`
+    ].join(`
+
+`) : "No scene is playing: this turn opens one.",
+    `${tag(names2, input.pov)} is ${input.place ? `at ${own(world.places, input.place)?.name ?? input.place} [${input.place}]` : "nowhere the world places"}. It is ${formatClock(calendarOf(world), state2.clock)}.`,
+    placesText2(world, input.place, input.reads?.places),
+    `The people the scene may reach, each by their id:
+- ${tag(names2, input.pov)} (the player character)${input.place ? `, at ${own(world.places, input.place)?.name ?? input.place}` : ", nowhere the world places"}`,
+    `With him:
+${here.map(presentLine).join(`
+`) || "- no one"}`,
+    ...elsewhere.length > 0 ? [`Elsewhere, whom the scene reaches only from afar (the far end of a phone call, a radio, a screen) unless it brings them there:
+${elsewhere.map(presentLine).join(`
+`)}`] : [],
+    ...input.offscreen && input.offscreen.length > 0 ? [`Off screen, just now, before this scene (what you settled is canon now):
+${input.offscreen.map((l) => `- ${l}`).join(`
+`)}`] : [],
+    ...input.minds && input.minds.length > 0 ? [`The minds of those present who have one (read them if you play someone):
+
+${playedText(names2, input.minds)}`] : [],
+    input.input === null ? "The player sent no new message: he asks the story to go on from here." : `The player's message, verbatim:
+${input.input}`,
+    `His beats, as the GM wrote them:
+${input.playerBeats.map((b) => draftText(names2, b)).join(`
+`) || "- (none: he wrote nothing that happens)"}`,
+    ...input.resolved.length > 0 ? [`What the rules resolved:
+${input.resolved.map((r) => `- ${r}`).join(`
+`)}`] : [],
+    ...input.signals.length > 0 ? [`His signals beyond the story (out-of-character lines and the like):
+${input.signals.map((s) => `- ${s}`).join(`
+`)}`] : [],
+    ...input.talk ? [`Real-time dialogue with ${tag(names2, input.talk.with)} is running.`] : [],
+    ...input.takeover ? [`Your watch took his line out of real-time dialogue: ${input.takeover}`] : [],
+    input.realtime === "chip" ? "Real-time dialogue starts only from the player's chip: if you judge the moment a conversation, entering it offers it to him." : "Real-time dialogue starts on your judgment.",
+    ...input.budget ? [input.budget] : [],
+    tools.length > 0 ? `The chat's archive, its own prose as it was written, is yours to read before you answer: answer {"archive": [{"tool": a tool's name, then its arguments}]} alone, and what each read found comes back; up to ${ARCHIVE_ROUNDS} rounds of reading (${READS_PER_ROUND} reads each), then you answer the scene. Its tools:
+${toolsText(tools)}
+To hand the narrator words from it for a callback, name them in "quotes" (at most ${QUOTES_MOST}): he gets each exactly as it was written.` : "The chat's archive can't be read this turn: give no quotes."
+  ].join(`
+
+`);
+  const talk = talkOf2(input, SCENE_TEXT.setup, data);
+  const asked2 = await askReading(input, talk, tools);
+  const playerRefs = new Set(input.playerBeats.map((b) => b.ref));
+  const read = (a2, slide = false) => {
+    const refused3 = [];
+    const taken2 = [];
+    const fresh = newcomersOf(a2.newcomers, namesOf5(world, state2), state2, refused3);
+    const names3 = fresh.names;
+    const sc2 = record4(a2.scene);
+    const castAsked = castOf(a2.cast, names3, input, refused3);
+    const screen = input.onScreen;
+    const spent = screen !== null && screen !== undefined && onScreenOut(screen);
+    const overScreen = spent ? castAsked.filter((c) => c.effort === "agent").map((c) => c.who) : [];
+    if (spent && overScreen.length > 0)
+      refused3.push(`the on-screen allowance is spent (${screen.spent} of ${screen.limit} turns this story ${screen.interval}), so no one plays as their own agent this turn: ${overScreen.map((w) => tag(names3, w)).join(", ")} ${slide ? "you play yourself" : `can't be cast "agent"`}`);
+    const cast = slide && overScreen.length > 0 ? castAsked.map((c) => c.effort === "agent" ? { ...c, effort: "author" } : c) : castAsked;
+    const agents = new Set(cast.filter((c) => c.effort === "agent").map((c) => c.who));
+    const rt = record4(a2.realtime);
+    let realtime = null;
+    let unplayed = false;
+    if (rt && str30(rt.end))
+      realtime = { end: rt.end.trim() };
+    else if (rt) {
+      const withWho = names3.person(rt.with);
+      if (withWho && withWho !== input.pov) {
+        if (agents.has(withWho))
+          realtime = { with: withWho, why: text5(rt.why) };
+        else {
+          const effort = cast.find((c) => c.who === withWho)?.effort;
+          unplayed = true;
+          refused3.push(`real-time dialogue with ${tag(names3, withWho)} needs them playing as their own agent ("effort": "agent")${effort === "author" ? ", and you cast them as yours to play" : effort === "world" ? ", and you cast them as part of the world" : ", and you didn't cast them"}; it wasn't entered`);
+        }
+      } else if (rt.with !== undefined)
+        refused3.push(`real-time dialogue needs someone with an agent of their own to talk with (${text5(rt.with) || "no one"})`);
+    }
+    const said2 = text5(sc2?.place);
+    const place2 = names3.place(sc2?.place);
+    const strayed = said2 !== "" && place2 === null;
+    if (strayed)
+      refused3.push(`the scene's place "${said2}" isn't one of the world's places, so it plays ${input.place ? `where ${tag(names3, input.pov)} is, at ${own(world.places, input.place)?.name ?? input.place} [${input.place}]` : "where the scene stands"}`);
+    const placing = { pov: input.pov, who: [] };
+    return {
+      a: a2,
+      refused: refused3,
+      taken: taken2,
+      strayed,
+      unplayed,
+      overScreen: !slide && overScreen.length > 0,
+      placing,
+      agents,
+      continues: sc2?.continues === true && input.scene !== null,
+      place: place2 ?? input.place,
+      ends: sc2?.ends === true,
+      staging: stagingsOf(a2.staging, names3, refused3, placing),
+      cast,
+      exposure: exposureForOf(a2.exposure, names3, playerRefs, refused3),
+      beats: draftBeats(a2.beats, names3, input, { agents, onScreen: true }, refused3, "w", taken2),
+      next: nextOf2(a2.next, names3, agents, refused3, input.pov),
+      end: str30(a2.end) ? a2.end.trim() : null,
+      realtime,
+      newcomers: fresh.newcomers
+    };
+  };
+  let got = read(asked2.answer);
+  let redone = [];
+  if (got.taken.length > 0 || got.strayed || got.unplayed || got.placing.who.length > 0 || got.overScreen) {
+    const again = await askAgain(input, talk, names2, got.refused, "the scene's setup", { theirs: got.taken.length > 0, place: got.strayed, realtime: got.unplayed, staged: got.placing.who.length > 0, screen: got.overScreen });
+    if (again) {
+      redone = got.refused;
+      got = read(again, true);
+    } else {
+      if (got.overScreen)
+        got = read(asked2.answer, true);
+      got.refused.push("its answer, once told why, couldn't be read, so the first stands without what couldn't be kept");
+    }
+  }
+  const { a, refused: refused2 } = got;
+  const { next, end } = theirsNow(got.taken, got.agents, names2, got, refused2);
+  const account2 = answerWhy(a);
+  return {
+    continues: got.continues,
+    place: got.place,
+    ends: got.ends,
+    staging: got.staging,
+    cast: got.cast,
+    exposure: got.exposure,
+    beats: got.beats,
+    next,
+    end,
+    realtime: got.realtime,
+    excerpts: list3(a.excerpts).filter(str30).map((e) => e.trim()),
+    quotes: await quotesOf2(a.quotes, input.archive, world, refused2, input.reads?.narratorQuotes),
+    reads: asked2.reads,
+    note: text5(a.note),
+    refused: refused2,
+    redone,
+    newcomers: got.newcomers,
+    ...talk.reasoning.length > 0 ? { reasoning: talk.reasoning.join(`
+
+`) } : account2 !== "" ? { reasoning: account2 } : {},
+    ...talk.usage ? { usage: talk.usage } : {}
+  };
+}
+async function authorStep(input) {
+  const { world, state: state2 } = input;
+  const names2 = namesOf5(world, state2);
+  const agents = new Set(input.scene.cast.filter((c) => c.effort === "agent").map((c) => c.who));
+  const slid = input.slid ?? [];
+  const handed = input.handed ?? [];
+  const offer = archiveOffer(input, input.archive, "this step");
+  const data = [
+    notebookText(input.notebook),
+    `The scene (${input.scene.id}) at ${own(world.places, input.scene.place)?.name ?? input.scene.place}. It is ${formatClock(calendarOf(world), state2.clock)}.`,
+    `Its cast: ${input.scene.cast.map((c) => `${tag(names2, c.who)} ${c.effort === "agent" ? "plays as their own agent" : c.effort === "author" ? "is played by you" : "is part of the world"}`).join("; ") || "no one"}. ${tag(names2, input.pov)} is the player's.`,
+    `Its staging:
+${input.scene.staging.map((s) => stagingText(names2, s)).join(`
+`) || "- (none)"}`,
+    `The scene so far:
+${input.scene.beats.map((b) => beatText(world, names2, b.ref, b.beat)).join(`
+`) || "- (nothing yet)"}`,
+    ...input.played.length > 0 ? [`The minds of those you play:
+
+${playedText(names2, input.played)}`] : [],
+    `Just decided, waiting for who perceived it:
+${input.decided.map((d) => draftText(names2, d)).join(`
+`) || (handed.length > 0 ? "- (nothing yet: those due now are yours to play)" : input.unreached ? "- (nothing: no one was due to act)" : "- (nothing: the characters playing as their own agents passed)")}`,
+    ...input.refusedBefore && input.refusedBefore.length > 0 ? [`What your last answer couldn't keep:
+${input.refusedBefore.map((r) => `- ${r}`).join(`
+`)}`] : [],
+    ...input.unreached ? [`Nothing this turn has reached ${tag(names2, input.pov)} beyond the player's own beats: no beat anyone else decided reached him, so the reply would have nothing to tell him. The turn would end here, so you are given this one more step: write what reaches him now (what someone you play or handle does or says, or what the world does, with him in its exposure as far as he perceives it), or give his exposure to what was just decided where he perceives it. If nothing would reach him, end the turn as it is.`] : [],
+    ...handed.length > 0 ? [`Due to act now, whom you play: ${handed.map((id2) => tag(names2, id2)).join(", ")}. Write what they do and say now among your beats, from their minds.`] : [],
+    ...slid.length > 0 ? [`You slid ${slid.map((id2) => tag(names2, id2)).join(", ")} to yourself this turn under the budget: you play them from their minds. Name any of them in "next" to write their next acts in your next step, as far as the scene should go.`] : [],
+    ...input.budget ? [input.budget] : [],
+    ...input.ceiling ? [`${input.ceiling} Who slides down the ladder, and how far, is yours to say: add "slide": [{"who": an id of someone playing as their own agent, "to": "author" (you play them, one call for several) or "world" (handled as part of the world)}] to your answer, or end the scene at the next beat ("end"). The ceiling stays the hard stop: if anyone you name in "next" still plays as their own agent, the scene ends at the next beat.`] : [],
+    input.left === 0 ? "This is your last step before this turn ends whatever happens: bring the moment to where the player answers." : input.left <= 2 ? `Only ${input.left} step${input.left === 1 ? "" : "s"} remain${input.left === 1 ? "s" : ""} after this one before this turn ends whatever happens: bring the moment to where the player answers.` : "",
+    offer.line
+  ].filter((p) => p !== "").join(`
+
+`);
+  const talk = talkOf2(input, SCENE_TEXT.step, data);
+  const decided2 = new Set(input.decided.map((d) => d.ref));
+  const read = (a) => {
+    const refused2 = [];
+    const taken2 = [];
+    const placing = { pov: input.pov, who: [] };
+    const fresh = newcomersOf(a.newcomers, namesOf5(world, state2), state2, refused2);
+    const names3 = fresh.names;
+    return {
+      a,
+      refused: refused2,
+      taken: taken2,
+      placing,
+      exposure: exposureForOf(a.exposure, names3, decided2, refused2),
+      staging: stagingsOf(a.staging, names3, refused2, placing),
+      beats: draftBeats(a.beats, names3, input, { agents, onScreen: true }, refused2, "s", taken2),
+      next: nextOf2(a.next, names3, new Set([...agents, ...slid]), refused2, input.pov),
+      end: str30(a.end) ? a.end.trim() : null,
+      sceneEnds: a.sceneEnds === true,
+      slide: input.ceiling ? slidesOf(a.slide, names3, agents, refused2) : [],
+      newcomers: fresh.newcomers
+    };
+  };
+  const first = await askReading(input, talk, offer.tools, "this step");
+  let got = read(first.answer);
+  let redone = [];
+  if (got.taken.length > 0 || got.placing.who.length > 0) {
+    const again = await askAgain(input, talk, names2, got.refused, "this step", { theirs: got.taken.length > 0, staged: got.placing.who.length > 0 });
+    if (again) {
+      redone = got.refused;
+      got = read(again);
+    } else
+      got.refused.push("its answer, once told why, couldn't be read, so the first stands without what couldn't be kept");
+  }
+  const { next, end } = theirsNow(got.taken, agents, names2, got, got.refused);
+  const account2 = answerWhy(got.a);
+  return {
+    exposure: got.exposure,
+    staging: got.staging,
+    beats: got.beats,
+    next,
+    end,
+    sceneEnds: got.sceneEnds,
+    slide: got.slide,
+    refused: got.refused,
+    redone,
+    newcomers: got.newcomers,
+    ...first.reads.length > 0 ? { reads: first.reads } : {},
+    ...talk.reasoning.length > 0 ? { reasoning: talk.reasoning.join(`
+
+`) } : account2 !== "" ? { reasoning: account2 } : {},
+    ...talk.usage ? { usage: talk.usage } : {}
+  };
+}
+function slidesOf(raw, names2, agents, refused2) {
+  const out2 = [];
+  for (const x of list3(raw)) {
+    const r = record4(x);
+    const who = r ? names2.person(r.who) : null;
+    const to = r?.to === "author" || r?.to === "world" ? r.to : null;
+    if (who === null || to === null || !agents.has(who)) {
+      refused2.push(`a slide (${JSON.stringify(x)}) names no one playing as their own agent, or no rung ("author" or "world"): it wasn't kept`);
+      continue;
+    }
+    if (!out2.some((s) => s.who === who))
+      out2.push({ who, to });
+  }
+  return out2;
+}
+async function authorAsk(input) {
+  const { world, state: state2 } = input;
+  const names2 = namesOf5(world, state2);
+  const agents = new Set(input.scene.cast.filter((c) => c.effort === "agent").map((c) => c.who));
+  const data = [
+    notebookText(input.notebook),
+    `The scene (${input.scene.id}) at ${own(world.places, input.scene.place)?.name ?? input.scene.place}.`,
+    `Its staging:
+${input.scene.staging.map((s) => stagingText(names2, s)).join(`
+`) || "- (none)"}`,
+    `The scene so far:
+${input.scene.beats.map((b) => beatText(world, names2, b.ref, b.beat)).join(`
+`) || "- (nothing yet)"}`,
+    `The narrator is rendering the moment of ${input.moment.map((r) => `(${r})`).join(", ")}, and asks:
+${input.questions.map((q) => `- ${q}`).join(`
+`)}`
+  ].join(`
+
+`);
+  const asked2 = await ask3(input, SCENE_TEXT.ask, data);
+  const refused2 = [];
+  const account2 = answerWhy(asked2.answer);
+  return {
+    beats: draftBeats(asked2.answer.beats, names2, input, { agents, onScreen: true }, refused2, "a"),
+    refused: refused2,
+    ...asked2.reasoning ? { reasoning: asked2.reasoning } : account2 !== "" ? { reasoning: account2 } : {},
+    ...asked2.usage ? { usage: asked2.usage } : {}
+  };
+}
+function draftLines(lines2) {
+  return lines2.map((d) => `- [${d.id}] ${d.when}: ${d.summary} (${d.treatments}). It holds ${d.holds}. ${d.since} beat${d.since === 1 ? "" : "s"} since its time.${d.changed.length > 0 ? ` Changed since it was drafted: ${d.changed.join("; ")}.` : ""}`).join(`
+`);
+}
+function episodesOf(raw, names2, pov2, refused2) {
+  const out2 = [];
+  list3(raw).forEach((r, i) => {
+    const e = record4(r);
+    if (!e)
+      return;
+    const what = `episode ${i + 1}`;
+    const people = [...new Set(list3(e.people).map((p) => names2.person(p)).filter((p) => p !== null))];
+    if (people.includes(pov2))
+      refused2.push(`${what}: ${tag(names2, pov2)} is on screen, the player's own; an episode off screen goes on without him`);
+    const cast = people.filter((p) => p !== pov2);
+    const places2 = [...new Set(list3(e.places).map((p) => names2.place(p)).filter((p) => p !== null))];
+    const parts = [];
+    for (const raw2 of list3(e.parts)) {
+      const p = record4(raw2);
+      if (!p)
+        continue;
+      const treatment = text5(p.treatment);
+      if (!DEPTH_TREATMENTS.includes(treatment)) {
+        refused2.push(`${what}: a part's treatment is one of ${DEPTH_TREATMENTS.join(", ")} (not "${treatment}")`);
+        continue;
+      }
+      const who = p.who !== undefined ? names2.person(p.who) : null;
+      const event = text5(p.event);
+      if (who !== null && !cast.includes(who)) {
+        refused2.push(`${what}: ${tag(names2, who)} has a part but isn't among its people`);
+        continue;
+      }
+      if (who === null && event === "")
+        continue;
+      parts.push({ subject: who !== null ? { who } : { event }, treatment, rationale: text5(p.rationale), ...p.major === true ? { major: true } : {} });
+    }
+    const minutes2 = typeof e.minutes === "number" && Number.isFinite(e.minutes) && e.minutes > 0 ? Math.round(e.minutes) : 60;
+    const at2 = typeof e.in === "number" && Number.isFinite(e.in) ? Math.round(e.in) : 0;
+    if (cast.length === 0 || parts.length === 0) {
+      refused2.push(`${what}: an episode needs someone in it and a part with its treatment; it wasn't opened`);
+      return;
+    }
+    out2.push({ why: text5(e.why), in: at2, minutes: minutes2, places: places2, people: cast, parts });
+  });
+  return out2;
+}
+function verdictsOf(raw, known2, refused2, what) {
+  const out2 = [];
+  for (const r of list3(raw)) {
+    const v4 = record4(r);
+    const id2 = v4 ? text5(v4.draft).replace(/^\[([^[\]]+)\]$/, "$1") : "";
+    if (!v4 || id2 === "")
+      continue;
+    if (!known2.has(id2)) {
+      refused2.push(`${what}: there is no such draft here (${id2})`);
+      continue;
+    }
+    if (!out2.some((o) => o.draft === id2))
+      out2.push({ draft: id2, why: text5(v4.why) });
+  }
+  return out2;
+}
+function interviewsOf(raw, names2, pov2, refused2) {
+  const out2 = [];
+  for (const r of list3(raw)) {
+    const c = record4(r);
+    const id2 = c ? names2.person(c.who) : null;
+    const question = c ? text5(c.question) : "";
+    if (!c || !id2 || question === "")
+      continue;
+    if (id2 === pov2) {
+      refused2.push(`${tag(names2, id2)} is the player character, who has no agent to interview`);
+      continue;
+    }
+    if (!out2.some((o) => o.who === id2))
+      out2.push({ who: id2, question, why: text5(c.why) });
+  }
+  return out2;
+}
+async function authorPoll(input) {
+  const { world, state: state2 } = input;
+  const names2 = namesOf5(world, state2);
+  const data = [
+    notebookText(input.notebook),
+    `It is ${formatClock(calendarOf(world), state2.clock)}; since you last looked, ${input.minutes} story minute${input.minutes === 1 ? "" : "s"} passed${(input.spans ?? []).length > 0 ? `, by ${(input.spans ?? []).join("; ")}` : ""}.`,
+    `The beats since you last looked:
+${input.beats.map((b) => beatText(world, names2, b.ref, b.beat)).join(`
+`) || "- (none)"}`,
+    `What characters wrote that will stay with them:
+${input.kept.map((k) => `- ${tag(names2, k.who)}: ${k.text}`).join(`
+`) || "- (nothing yet)"}`,
+    `Plans falling due:
+${input.due.map((d) => `- ${d}`).join(`
+`) || "- (none)"}`,
+    `What waits to be lived:
+${input.pending.map((p) => `- ${tag(names2, p.who)}: ${p.pending} point${p.pending === 1 ? "" : "s"} of view waiting${p.latest ? `, the newest ${p.latest}` : ""}${p.played ? " (played this turn as their own agent)" : ""}${p.unminded ? " (no mind yet: a catch-up forms one, from their card or what the world knows of them, then lives these)" : ""}${p.gone && p.gone.length > 0 ? `; out of mind since a correction struck what they were written from: ${p.gone.join(", ")} (a reflection rewrites them)` : ""}${p.takes !== undefined ? `; their working memory is nearly full (${p.takes} takes unremembered): they ask to reflect` : ""}${p.asks !== undefined ? `; they ask to reflect, in their words: ${p.asks}` : ""}`).join(`
+`) || "- (no one)"}`,
+    `What the characters you interviewed answered:
+${(input.answers ?? []).map((x) => `- ${tag(names2, x.who)}, asked "${x.question}": ${x.answer}`).join(`
+`) || "- (no interview since you last looked)"}`,
+    `Your open predictions:
+${input.predictions.map((p) => `- [${p.id}] ${p.text}`).join(`
+`) || "- (none)"}`,
+    `The player's signals:
+${input.signals.map((s) => `- ${s}`).join(`
+`) || "- (none)"}`,
+    `${input.sceneEnded ? "The scene ended with this turn." : "The scene goes on."} ${input.sinceChapter} turn${input.sinceChapter === 1 ? "" : "s"} since you last re-read a chapter. Your cadence: ${input.cadence === "turns" ? "you may revise lightly after any turn" : input.cadence === "scenes" ? "you reflect at a scene's end at the soonest" : "you reflect only at a chapter's end"}.`,
+    ...input.offscreen ? [
+      `Your open drafts (off screen, not canon yet):
+${draftLines(input.offscreen.drafts) || "- (none)"}`,
+      `Drafts a swipe took off the chain:
+${draftLines(input.offscreen.rebase) || "- (none)"}`,
+      `What this interval's allowances leave: ${input.offscreen.allowances.join("; ") || "no limits"}. The player's threshold for what deserves more than written: ${input.offscreen.threshold.trim() || "(none given)"}. ${input.offscreen.ask ? "Where you judge a moment major, mark its part major: once its treatment's allowance is spent, the player is asked whether to spend one more rather than it sliding down." : "The player asked not to be asked: a part past its treatment's allowance slides down the ladder."}`,
+      `Episodes waiting on the player's answer past an allowance (don't open them again):
+${(input.offscreen.asked ?? []).map((a2) => `- ${a2}`).join(`
+`) || "- (none)"}`
+    ] : []
+  ].join(`
+
+`);
+  const asked2 = await askArchive(input, SCENE_TEXT.poll, data, input.archive, "the poll");
+  const a = asked2.answer;
+  const refused2 = [];
+  const who = (key) => {
+    const out2 = [];
+    for (const r of list3(a[key])) {
+      const c = record4(r);
+      const id2 = c ? names2.person(c.who) : null;
+      if (!c || !id2)
+        continue;
+      if (id2 === input.pov) {
+        refused2.push(`${tag(names2, id2)} is the player character, who has no agent to ${key === "catchup" ? "catch up" : "reflect"}`);
+        continue;
+      }
+      if (!out2.some((o) => o.who === id2))
+        out2.push({ who: id2, why: text5(c.why) });
+    }
+    return out2;
+  };
+  const au = record4(a.author);
+  const depth2 = au && (au.depth === "scene" || au.depth === "chapter") ? au.depth : null;
+  const wk = record4(a.wake);
+  const wake = wk && typeof wk.minutes === "number" && Number.isFinite(wk.minutes) && wk.minutes > 0 ? { minutes: Math.round(wk.minutes), why: text5(wk.why) } : null;
+  const known2 = new Set(input.predictions.map((p) => p.id));
+  const scores = [];
+  for (const r of list3(a.scores)) {
+    const s = record4(r);
+    const id2 = s ? text5(s.prediction) : "";
+    if (!s || !known2.has(id2))
+      continue;
+    if (!SCORE_OUTCOMES.includes(text5(s.outcome)))
+      continue;
+    if (!scores.some((x) => x.prediction === id2))
+      scores.push({ prediction: id2, outcome: text5(s.outcome), note: text5(s.note) });
+  }
+  const considered = [];
+  for (const r of list3(a.considered)) {
+    const c = record4(r);
+    if (c && str30(c.what))
+      considered.push({ what: c.what.trim(), raised: c.raised === true, why: text5(c.why) });
+  }
+  const drafts = new Set((input.offscreen?.drafts ?? []).map((d) => d.id));
+  const swiped = new Set((input.offscreen?.rebase ?? []).map((d) => d.id));
+  const account2 = answerWhy(a);
+  return {
+    catchup: who("catchup"),
+    reflect: who("reflect"),
+    interview: interviewsOf(a.interview, names2, input.pov, refused2),
+    author: depth2 ? { depth: depth2, why: text5(au?.why) } : null,
+    scores,
+    episodes: input.offscreen ? episodesOf(a.episodes, names2, input.pov, refused2) : [],
+    settle: verdictsOf(a.settle, drafts, refused2, "settle"),
+    drop: verdictsOf(a.drop, new Set([...drafts, ...swiped]), refused2, "drop"),
+    rebase: verdictsOf(a.rebase, swiped, refused2, "rebase"),
+    considered,
+    refused: refused2,
+    wake,
+    ...asked2.reasoning ? { reasoning: asked2.reasoning } : account2 !== "" ? { reasoning: account2 } : {},
+    ...asked2.usage ? { usage: asked2.usage } : {},
+    ...asked2.reads.length > 0 ? { reads: asked2.reads } : {}
+  };
+}
+function notebookRevision(answer, notebook, kind, through, chapter, reason2) {
+  const blobs = {};
+  const refused2 = [];
+  const pinned = new Set(notebook.pinned.map((p) => p.path));
+  const files = {};
+  const events3 = [];
+  for (const raw of list3(answer.files)) {
+    const f = record4(raw);
+    if (!f || !str30(f.path) || !str30(f.text))
+      continue;
+    const path2 = f.path.trim();
+    if (!isNotebookPath(path2)) {
+      refused2.push(`a file outside the notebook: ${path2}`);
+      continue;
+    }
+    if (pinned.has(path2)) {
+      refused2.push(`${path2} is pinned (the player's edit): it may be commented on, never rewritten`);
+      continue;
+    }
+    if (own(notebook.files, path2) === f.text || own(files, path2) !== undefined)
+      continue;
+    files[path2] = putText(blobs, f.text);
+    events3.push(wsWrite(path2, files[path2]));
+  }
+  const comments = {};
+  for (const raw of list3(answer.comments)) {
+    const c = record4(raw);
+    if (c && str30(c.path) && pinned.has(c.path.trim()) && str30(c.text))
+      comments[c.path.trim()] = c.text.trim();
+  }
+  if (events3.length > 0 || Object.keys(comments).length > 0 || chapter) {
+    const data = { kind, files, through, ...chapter ? { chapter } : {}, ...reason2 ? { reason: reason2 } : {}, ...Object.keys(comments).length > 0 ? { comments } : {} };
+    events3.push(notebookEvent(data));
+  }
+  return { events: events3, blobs, refused: refused2 };
+}
+async function authorReflect(input) {
+  const { world, state: state2 } = input;
+  const names2 = namesOf5(world, state2);
+  const data = [
+    notebookText(input.notebook),
+    (input.depth === "chapter" ? `Re-read the chapter: it would be chapter ${input.chapter + 1}.` : "Take stock at the scene's end.") + (input.page ? ` Its beats come a page at a time, oldest first: this is page ${input.page.index} of ${input.page.of}, and the notebook above is as the pages before it left it. Answer this page with edits of the files it changes (a file you leave out stands as it is), not a rewrite of the notebook.${input.page.index < input.page.of && input.depth === "chapter" ? " Pages follow, so the chapter can't end on this one." : ""} This page's beats, in order:` : " Its beats, in order:"),
+    input.beats.map((b) => beatText(world, names2, b.ref, b.beat)).join(`
+`) || "- (none)",
+    `Who the characters have become, in their own words:
+
+${input.becoming.map((b) => `### ${tag(names2, b.who)}
+${[b.self && `Their story of themselves:
+${b.self}`, b.mind && `What they keep in mind:
+${b.mind}`].filter(Boolean).join(`
+
+`) || "(nothing written yet)"}`).join(`
+
+`) || "(no one has a mind yet)"}`,
+    `The player's signals beyond his words (what he swiped, regenerated or edited, his out-of-character lines), the evidence for what he wants (player.md):
+${input.signals.map((s) => `- ${s}`).join(`
+`) || "- (none)"}`
+  ].join(`
+
+`);
+  const asked2 = await askArchive(input, SCENE_TEXT.reflect, data, input.archive, "the reflection");
+  const a = asked2.answer;
+  const ch = record4(a.chapter);
+  const ends2 = input.depth === "chapter" && ch?.ends === true && (!input.page || input.page.index === input.page.of);
+  const title = ends2 ? str30(ch?.title) ? ch.title.trim() : `Chapter ${input.chapter + 1}` : null;
+  const reason2 = answerWhy(a).slice(0, 2000) || undefined;
+  const rev = notebookRevision(a, input.notebook, input.depth === "chapter" ? "chapter" : "scene", input.through, ends2 && title ? { index: input.chapter, title } : null, reason2);
+  const drift = [];
+  for (const r of list3(a.drift)) {
+    const d = record4(r);
+    const who = d ? names2.person(d.who) : null;
+    if (!d || !who || who === input.pov || drift.some((x) => x.who === who))
+      continue;
+    const level = DRIFT_LEVELS.includes(text5(d.drift)) ? text5(d.drift) : null;
+    if (level)
+      drift.push({ who, drift: level, note: text5(d.note) });
+  }
+  const predictions = [];
+  for (const r of list3(a.predictions)) {
+    const p = record4(r);
+    if (!p || !str30(p.text))
+      continue;
+    predictions.push({ text: p.text.trim(), about: [...new Set(list3(p.about).map((x) => names2.person(x)).filter((x) => x !== null))] });
+  }
+  return {
+    events: rev.events,
+    blobs: rev.blobs,
+    drift,
+    predictions,
+    chapter: { ends: ends2, title },
+    refused: rev.refused,
+    ...asked2.reasoning ? { reasoning: asked2.reasoning } : reason2 ? { reasoning: reason2 } : {},
+    ...asked2.usage ? { usage: asked2.usage } : {},
+    ...asked2.reads.length > 0 ? { reads: asked2.reads } : {}
+  };
+}
+async function authorEdit(input) {
+  const { world, state: state2 } = input;
+  const names2 = namesOf5(world, state2);
+  const refs = new Set(input.beats.map((b) => b.ref));
+  const of = input.own ? "his message" : "the reply";
+  const beats = input.beats.map((b) => beatText(world, names2, b.ref, b.beat)).join(`
+`) || "- (none)";
+  const data = [
+    notebookText(input.notebook),
+    input.own ? `The beats made from his message:
+${beats}` : `The beats the reply rendered:
+${beats}`,
+    input.own ? `His message as it was:
+${input.before}` : `The reply as it was:
+${input.before}`,
+    input.own ? `His message as he now made it, what he now says he did or said:
+${input.after}` : `The reply as the player made it:
+${input.after}`,
+    `Who lived these beats with a mind of their own: ${(input.lived ?? []).map((id2) => tag(names2, id2)).join(", ") || "(no one)"}. Those you name in "catchup" catch up now, in that order; anyone you leave out waits for your poll, which hears what fell out of their mind.`
+  ].join(`
+
+`);
+  const asked2 = await ask3(input, input.own ? SCENE_TEXT.editOwn : SCENE_TEXT.edit, data);
+  const a = asked2.answer;
+  const refused2 = [];
+  const drafts = draftBeats(a.amend, names2, { ...input, pov: "" }, { agents: new Set }, refused2, "e");
+  const amend = [];
+  list3(a.amend).forEach((raw, i) => {
+    const r = record4(raw);
+    const ref = r && str30(r.ref) ? r.ref.trim() : `e${i + 1}`;
+    const d = drafts.find((x) => x.ref === ref);
+    if (!r || !d)
+      return;
+    const replaces = list3(r.replaces).map(text5).filter((x) => refs.has(x));
+    if (replaces.length === 0) {
+      refused2.push(`amendment ${ref} names no beat of ${of} it replaces`);
+      return;
+    }
+    amend.push({ ...d, replaces });
+  });
+  const strike = [...new Set(list3(a.strike).map(text5).filter((x) => refs.has(x)))];
+  const lived2 = new Set(input.lived ?? []);
+  const catchup = Array.isArray(a.catchup) ? [...new Set(list3(a.catchup).flatMap((c) => names2.person(c) ?? []))].filter((id2) => lived2.has(id2) || (refused2.push(`${tag(names2, id2)} lived no beat of ${of}: no catch-up`), false)) : null;
+  const cosmetic = a.cosmetic === true && amend.length === 0 && strike.length === 0;
+  return {
+    cosmetic,
+    amend,
+    strike,
+    why: text5(a.why),
+    refused: refused2,
+    catchup,
+    ...asked2.reasoning ? { reasoning: asked2.reasoning } : str30(a.reasoning) ? { reasoning: a.reasoning.trim() } : {},
+    ...asked2.usage ? { usage: asked2.usage } : {}
+  };
 }
 
 // src/backend/depth/truth-link.ts
@@ -119973,17 +122511,36 @@ ${beliefs.join(`
 `) || "(no one wrote any)"}`,
     `Your links so far for these people:
 ${links.join(`
-`) || "- (none)"}`
+`) || "- (none)"}`,
+    ...(input.answers ?? []).length > 0 ? [`What the characters you interviewed answered:
+${(input.answers ?? []).map((x) => `- ${named(world, state2, x.who)}, asked "${x.question}": ${x.answer}`).join(`
+`)}`] : []
   ].join(`
 
 `);
+}
+async function linkReading(input, data, archive, room, model2) {
+  const ctx = { world: input.world, state: input.state, texts: input.texts, pov: povOf(input.world, input.state), model: model2, ...input.signal ? { signal: input.signal } : {} };
+  const { tools, line: line2 } = archiveOffer(ctx, archive, "the links");
+  const full = line2 !== "" ? `${data}
+
+${line2}` : data;
+  const talk = talkOf2(ctx, DEPTH_TEXT.truthLink, full);
+  const { answer, reads } = await askReading(ctx, talk, tools, "the links", { role: "gm", ...room(full) });
+  if (!talk.read)
+    throw new Error("the GM's links came back unread");
+  const reasoning = [...reads, ...talk.reasoning].join(`
+
+`);
+  return { answer, read: talk.read, ...reasoning ? { reasoning } : {}, ...talk.usage ? { usage: talk.usage } : {} };
 }
 async function truthLink(input, model2) {
   const { registry, world, state: state2 } = input;
   const limits = input.limits ?? { claimChars: KNOWLEDGE_DEFAULTS.claimChars, factsPerChat: KNOWLEDGE_DEFAULTS.factsPerChat };
   const catalogue = truthCatalogue(world, state2);
   const data = truthData(input, catalogue);
-  const asked2 = await askRole(model2, "gm", DEPTH_TEXT.truthLink, { world, state: state2, texts: input.texts, data, ...input.room !== undefined ? { maxTokens: truthLinkRoom(input.room, tokensOf(data)) } : {}, ...input.signal ? { signal: input.signal } : {} });
+  const room = (d) => input.room !== undefined ? { maxTokens: truthLinkRoom(input.room, tokensOf(d)) } : {};
+  const asked2 = input.archive ? await linkReading(input, data, input.archive, room, model2) : await askRole(model2, "gm", DEPTH_TEXT.truthLink, { world, state: state2, texts: input.texts, data, ...room(data), ...input.signal ? { signal: input.signal } : {} });
   const { answer: a, read } = asked2;
   const w = new Working(registry, world, state2);
   const refused2 = [];
@@ -120104,8 +122661,8 @@ async function truthLink(input, model2) {
     const by = teller !== null && teller !== who ? teller : null;
     if (how === "told" && by === null && l.how === "told")
       read.change(`${g}.how`, l.how, "inferred");
-    const kept4 = l.keptFrom === "everyone" ? "everyone" : read.list(`${g}.keptFrom`, l.keptFrom).flatMap((x, k) => person5(`${g}.keptFrom[${k}]`, x) ?? []).filter((x) => x !== who);
-    const keptFrom = kept4 === "everyone" ? "everyone" : kept4.length > 0 ? [...new Set(kept4)] : undefined;
+    const kept5 = l.keptFrom === "everyone" ? "everyone" : read.list(`${g}.keptFrom`, l.keptFrom).flatMap((x, k) => person5(`${g}.keptFrom[${k}]`, x) ?? []).filter((x) => x !== who);
+    const keptFrom = kept5 === "everyone" ? "everyone" : kept5.length > 0 ? [...new Set(kept5)] : undefined;
     if (!file(fact))
       continue;
     const data2 = { who, fact, from, words: read.words(`${g}.words`, l.words), why: why2, how: how === "told" && by === null ? "inferred" : how, by: how === "told" ? by : null, evidence: [], belief, confidence, ...keptFrom ? { keptFrom } : {}, msg: input.msg, at: at2 };
@@ -120143,7 +122700,19 @@ async function truthLink(input, model2) {
     if (own(readKnowledge(w.state).facts, fact)?.truth !== truth)
       land2({ type: MINDS_EVENTS.settle, data: { fact, truth } }, `settling [${fact}]`);
   }
-  return { events: w.events, refused: refused2, blobs: {}, ...asked2.reasoning ? { reasoning: asked2.reasoning } : {}, ...asked2.usage ? { usage: asked2.usage } : {} };
+  const interview3 = [];
+  for (const [i, raw] of read.list("interview", a.interview).entries()) {
+    const q = read.record(`interview[${i}]`, raw);
+    const who = q && typeof q.who === "string" ? personNamed3(w.state, q.who) : null;
+    const question = q ? read.text(`interview[${i}].question`, q.question) : "";
+    if (!q || who === null || question === "" || !hasAgent(world, state2, who) || interview3.some((x) => x.who === who)) {
+      if (q)
+        refused2.push(`an interview of no one with a mind of their own, or with no question (${JSON.stringify(q).slice(0, 200)})`);
+      continue;
+    }
+    interview3.push({ who, question });
+  }
+  return { events: w.events, refused: refused2, blobs: {}, interview: interview3, ...asked2.reasoning ? { reasoning: asked2.reasoning } : {}, ...asked2.usage ? { usage: asked2.usage } : {} };
 }
 async function linkTruths(rt, chatId, userId, basis, o) {
   const at2 = await rt.ledger.foldAtBasis(chatId, userId, basis);
@@ -120155,20 +122724,43 @@ async function linkTruths(rt, chatId, userId, basis, o) {
   for (const who of new Set(o.who)) {
     if (!hasAgent(at2.world, at2.state, who))
       continue;
-    const text5 = (await readMind(rt.blobs, userId, at2.state, who, replaced))[MIND_FILE_NAMES.beliefs];
-    if (text5 !== undefined && text5.trim() !== "")
-      beliefs.push({ who, path: mindPath(who, "beliefs"), text: text5, hash: blobHash(text5) });
+    const text6 = (await readMind(rt.blobs, userId, at2.state, who, replaced))[MIND_FILE_NAMES.beliefs];
+    if (text6 !== undefined && text6.trim() !== "")
+      beliefs.push({ who, path: mindPath(who, "beliefs"), text: text6, hash: blobHash(text6) });
   }
   const beats = await beatTexts(rt, userId, o.beats);
   if (beats.length === 0 && beliefs.length === 0)
     return { linked: false, refused: [] };
+  const answers = await gmAnswers(rt, userId, (await rt.ledger.foldAtBasis(chatId, userId, basis, [MIND_INTERVIEW, ...GM_LINK_TYPES]))?.events ?? []);
   const { claimChars, factsPerChat } = settings.minds.knowledge;
-  const r = await twice(() => truthLink({ registry: rt.registry, world: at2.world, state: at2.state, texts: settings.prompts.texts, beats, beliefs, msg: basis.message, limits: { claimChars, factsPerChat }, room: depthCall(settings, "gm").maxTokens, ...o.signal ? { signal: o.signal } : {} }, o.model), o.signal);
-  if (r.events.length === 0)
-    return { linked: false, refused: r.refused };
+  const r = await twice(() => truthLink({ registry: rt.registry, world: at2.world, state: at2.state, texts: settings.prompts.texts, beats, beliefs, msg: basis.message, limits: { claimChars, factsPerChat }, room: depthCall(settings, "gm").maxTokens, ...o.signal ? { signal: o.signal } : {}, ...o.archive ? { archive: o.archive } : {}, ...answers.length > 0 ? { answers } : {} }, o.model), o.signal);
   const read = o.key === undefined ? [] : [...o.key, hashParts(...beliefs.flatMap((b) => [b.who, b.hash]), ...beats.map((b) => b.beat.id))];
-  await land(rt, chatId, userId, basis, "truthlink", { events: r.events, blobs: r.blobs, ...r.reasoning ? { reasoning: r.reasoning } : {} }, layerEntryId("truthlink", chatId, basis.message, basis.swipe, ...read), "gm");
-  return { linked: true, refused: r.refused };
+  if (r.events.length > 0)
+    await land(rt, chatId, userId, basis, "truthlink", { events: r.events, blobs: r.blobs, ...r.reasoning ? { reasoning: r.reasoning } : {} }, layerEntryId("truthlink", chatId, basis.message, basis.swipe, ...read), "gm");
+  const refused2 = [...r.refused];
+  for (const q of r.interview) {
+    try {
+      await interviewMind(rt, chatId, userId, q.who, q.question, false, o.model, { by: "gm", basis, ...o.signal ? { signal: o.signal } : {} });
+    } catch (error) {
+      refused2.push(`the interview of ${named(at2.world, at2.state, q.who)}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return { linked: r.events.length > 0, refused: refused2 };
+}
+var GM_LINK_TYPES = [TRUTH_EVENTS.link, TRUTH_EVENTS.unlink, MINDS_EVENTS.fact, MINDS_EVENTS.settle];
+async function gmAnswers(rt, userId, events3) {
+  const linkTypes = new Set(GM_LINK_TYPES);
+  const last = events3.reduce((n, e, i) => linkTypes.has(e.event.type) ? i : n, -1);
+  const out2 = [];
+  for (const e of events3.slice(last + 1)) {
+    if (e.event.type !== MIND_INTERVIEW || !("data" in e.event))
+      continue;
+    const d = mindInterviewOf(e.event.data);
+    if (typeof d === "string" || d.by !== "gm")
+      continue;
+    out2.push({ who: d.who, question: await rt.blobs.get(userId, d.question) ?? "", answer: await rt.blobs.get(userId, d.answer) ?? "" });
+  }
+  return out2;
 }
 function beliefLinksAt(state2, who) {
   const facts = readKnowledge(state2).facts;
@@ -120185,8 +122777,8 @@ async function beliefLinks(rt, chatId, userId, who) {
 
 // src/backend/bootstrap/import.ts
 var ENTRY_CHARS = 6000;
-function entry(source, sourceId, role, title, text5, about2 = [], span2, links) {
-  const body = text5.trim();
+function entry(source, sourceId, role, title, text6, about2 = [], span2, links) {
+  const body = text6.trim();
   return { id: `${source}:${sourceId}`, source, role, title: title.trim() || "(untitled)", text: body.length > ENTRY_CHARS ? `${body.slice(0, ENTRY_CHARS)}\u2026` : body, about: about2, ...links && links.length > 0 ? { links } : {}, ...span2 ? { span: span2 } : {}, digest: hashParts("bootstrap.entry", body) };
 }
 function lumibooksOf(book, chatId, chat) {
@@ -120201,11 +122793,11 @@ async function readImports(deps, chatId, userId) {
   for (const [id2, l] of Object.entries(deps.world.lore)) {
     if (loreSourceOf(l.source).kind === "book" || loreIsSecret(l) || l.visibility !== undefined && l.visibility !== "public" && l.visibility !== "known_by")
       continue;
-    const text5 = publicText(l.content);
-    if (text5.trim() === "")
+    const text6 = publicText(l.content);
+    if (text6.trim() === "")
       continue;
     const people = l.links.filter((link) => deps.names.has(link));
-    entries2.push(entry("world_lore", id2, "lore", l.title, text5, [...people.map((p) => deps.names.get(p) ?? p), ...l.aliases ?? []].slice(0, 6), undefined, people));
+    entries2.push(entry("world_lore", id2, "lore", l.title, text6, [...people.map((p) => deps.names.get(p) ?? p), ...l.aliases ?? []].slice(0, 6), undefined, people));
   }
   count4("world_lore", null);
   let marked3 = false;
@@ -120219,9 +122811,9 @@ async function readImports(deps, chatId, userId) {
       const book = books.get(id2);
       if (!book)
         continue;
-      const list3 = (await deps.host.books.entries(id2, userId)).filter((e) => !e.disabled && e.content.trim() !== "");
+      const list4 = (await deps.host.books.entries(id2, userId)).filter((e) => !e.disabled && e.content.trim() !== "");
       const memory2 = lumibooksOf(book, chatId, chat).lumibooks;
-      for (const e of list3)
+      for (const e of list4)
         entries2.push(entry(memory2 ? "lumibooks" : "world_info", e.id, memory2 ? "memory" : "lore", e.comment || e.keys.join(", "), e.content, e.keys.slice(0, 4)));
     }
     count4("world_info", null);
@@ -120300,7 +122892,7 @@ function entriesAbout(entries2, who) {
 function strings5(raw) {
   return Array.isArray(raw) ? raw.filter((s) => typeof s === "string" && s.trim() !== "") : [];
 }
-function text5(raw) {
+function text6(raw) {
   return typeof raw === "string" ? raw.trim() : "";
 }
 async function reconcile(model2, i) {
@@ -120342,34 +122934,34 @@ ${e.text}`).join(`
   const o = readAnswer("gm", answer).answer;
   if (!o)
     throw new DepthAnswerError("gm", answer.text, answer);
-  const agree = (Array.isArray(o.agree) ? o.agree : []).flatMap((a) => isRecord(a) && ids2.has(text5(a.entry)) ? [{ entry: text5(a.entry), beats: strings5(a.beats).filter((b) => beatIds.has(b)) }] : []);
-  const contradictions = (Array.isArray(o.contradictions) ? o.contradictions : []).flatMap((c) => isRecord(c) && ids2.has(text5(c.entry)) && text5(c.why) !== "" ? [{ entry: text5(c.entry), against: text5(c.against), why: text5(c.why) }] : []);
+  const agree = (Array.isArray(o.agree) ? o.agree : []).flatMap((a) => isRecord(a) && ids2.has(text6(a.entry)) ? [{ entry: text6(a.entry), beats: strings5(a.beats).filter((b) => beatIds.has(b)) }] : []);
+  const contradictions = (Array.isArray(o.contradictions) ? o.contradictions : []).flatMap((c) => isRecord(c) && ids2.has(text6(c.entry)) && text6(c.why) !== "" ? [{ entry: text6(c.entry), against: text6(c.against), why: text6(c.why) }] : []);
   const blobs = {};
   const events3 = [];
   const recorded = [];
   for (const r of Array.isArray(o.recorded) ? o.recorded : []) {
-    if (!isRecord(r) || !ids2.has(text5(r.entry)))
+    if (!isRecord(r) || !ids2.has(text6(r.entry)))
       continue;
-    const from = text5(r.entry);
+    const from = text6(r.entry);
     const made = [];
     for (const [k, b] of (Array.isArray(r.beats) ? r.beats : []).entries()) {
-      if (!isRecord(b) || text5(b.what) === "")
+      if (!isRecord(b) || text6(b.what) === "")
         continue;
-      const id2 = `bse_${hashParts("bootstrap.entry.beat", i.chatId, from, k, text5(b.what)).slice(0, 12)}`;
+      const id2 = `bse_${hashParts("bootstrap.entry.beat", i.chatId, from, k, text6(b.what)).slice(0, 12)}`;
       const quotes = spoken(b.quotes);
       const actors = [...new Set(strings5(b.actors).map(personOf3))];
-      const when3 = text5(b.when);
+      const when3 = text6(b.when);
       const beat = {
         id: id2,
         at: i.at,
         approx: true,
         order: k,
-        place: text5(b.place),
+        place: text6(b.place),
         actors,
         act: quotes !== "" ? "said" : "did",
         about: actors.map((entity2) => ({ entity: entity2 })),
-        what: putText(blobs, text5(b.what)),
-        surface: putText(blobs, text5(b.surface) || text5(b.what)),
+        what: putText(blobs, text6(b.what)),
+        surface: putText(blobs, text6(b.surface) || text6(b.what)),
         ...quotes !== "" ? { quotes: putText(blobs, quotes) } : {},
         exposure: [...new Set(strings5(b.knew).map(personOf3))].map((who) => ({ who, channel: "record", reach: "whole", ...people.has(who) ? { pending: true } : {} })),
         by: { entry: from },
@@ -120382,8 +122974,8 @@ ${e.text}`).join(`
       recorded.push({ entry: from, beats: made });
   }
   const whyOf2 = (entry2, key) => {
-    const found = (Array.isArray(o[key]) ? o[key] : []).find((x) => isRecord(x) && text5(x.entry) === entry2);
-    return isRecord(found) && text5(found.why) !== "" ? `: ${text5(found.why)}` : ".";
+    const found = (Array.isArray(o[key]) ? o[key] : []).find((x) => isRecord(x) && text6(x.entry) === entry2);
+    return isRecord(found) && text6(found.why) !== "" ? `: ${text6(found.why)}` : ".";
   };
   const account2 = [
     ...agree.map((a) => `${a.entry} agrees with ${a.beats.join(", ") || "the chapter"}${whyOf2(a.entry, "agree")}`),
@@ -120481,13 +123073,325 @@ ${i.message.text}`
   return { beat, why: why2, blobs, ...reasoning };
 }
 
+// src/backend/bootstrap/lumibooks.ts
+var ALGORITHM = "sha256-role-content-v1";
+var RANK = { chapter: 1, arc: 2, volume: 3 };
+var MSGS = /\bmsgs?\s+(\d+)\s*[-\u2013]\s*(\d+)/i;
+var SHA256 = /^[0-9a-f]{64}$/;
+var MOST_KEYS = 30;
+function str31(v4) {
+  return typeof v4 === "string" ? v4 : "";
+}
+function words10(v4) {
+  return Array.isArray(v4) ? v4.filter((k) => typeof k === "string" && k.trim() !== "") : [];
+}
+function index(v4) {
+  return typeof v4 === "number" && Number.isInteger(v4) && v4 >= 0 ? v4 : null;
+}
+function levelOf2(tier, comment) {
+  if (typeof tier === "number" && Number.isInteger(tier) && tier >= 1)
+    return tier >= 3 ? "volume" : tier === 2 ? "arc" : "chapter";
+  if (/^vol/i.test(comment))
+    return "volume";
+  if (/^arc\b/i.test(comment))
+    return "arc";
+  return /^#\d/.test(comment) ? "chapter" : null;
+}
+function rangeOf(ext, comment) {
+  const summary = isRecord(ext.lumibooks_summary) ? ext.lumibooks_summary : {};
+  const indices = Array.isArray(summary.messageIndices) ? summary.messageIndices.flatMap((n) => index(n) === null ? [] : [n]) : [];
+  if (indices.length > 0)
+    return [indices.reduce((a2, b2) => Math.min(a2, b2)), indices.reduce((a2, b2) => Math.max(a2, b2))];
+  const own2 = isRecord(ext.lumibooks) ? ext.lumibooks : {};
+  const first = index(own2.firstMsgIdx);
+  const last = index(own2.lastMsgIdx);
+  if (first !== null && last !== null && first <= last)
+    return [first, last];
+  const m = MSGS.exec(comment);
+  if (!m)
+    return null;
+  const a = Number(m[1]) - 1;
+  const b = Number(m[2]) - 1;
+  return a >= 0 && a <= b ? [a, b] : null;
+}
+function lbRecordOf(raw, fallbackId) {
+  if (!isRecord(raw))
+    return null;
+  const ext = isRecord(raw.extensions) ? raw.extensions : {};
+  const comment = str31(raw.comment).trim();
+  const text7 = str31(raw.content).trim();
+  if (text7 === "")
+    return null;
+  const own2 = isRecord(ext.lumibooks) ? ext.lumibooks : {};
+  const summary = isRecord(ext.lumibooks_summary) ? ext.lumibooks_summary : {};
+  const level = levelOf2(summary.tier ?? own2.tier, comment);
+  const range2 = rangeOf(ext, comment);
+  if (level === null || range2 === null)
+    return null;
+  const id2 = typeof raw.id === "string" && raw.id !== "" ? raw.id : typeof raw.uid === "string" || typeof raw.uid === "number" ? String(raw.uid) : fallbackId;
+  return { id: id2, level, title: comment || str31(own2.title).trim() || "(untitled)", range: range2, text: text7, keys: words10(raw.keys ?? raw.key).slice(0, MOST_KEYS), superseded: str31(own2.supersededByEntryId) !== "", msgIds: words10(own2.msgIds) };
+}
+function lbHashesOf(meta) {
+  if (!isRecord(meta))
+    return [];
+  const s = isRecord(meta.lumibooks_summary) ? meta.lumibooks_summary : isRecord(meta.extensions) && isRecord(meta.extensions.lumibooks_summary) ? meta.extensions.lumibooks_summary : null;
+  if (!s || s.algorithm !== ALGORITHM || !Array.isArray(s.messages))
+    return [];
+  return s.messages.flatMap((m) => isRecord(m) && index(m.index) !== null && typeof m.hash === "string" && SHA256.test(m.hash) ? [{ index: m.index, hash: m.hash }] : []);
+}
+async function lbMessageHash(isUser, content) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify([isUser ? "user" : "assistant", content])));
+  let hex = "";
+  for (const b of new Uint8Array(digest))
+    hex += b.toString(16).padStart(2, "0");
+  return hex;
+}
+async function lbCoverOf(book, messages) {
+  const hashed = new Map(book.hashes.map((h) => [h.index, h.hash]));
+  const named2 = new Set(book.records.flatMap((r) => r.msgIds));
+  const spanned = (i) => book.records.some((r) => r.range[0] <= i && i <= r.range[1]);
+  const out2 = [];
+  for (const [i, m] of messages.entries()) {
+    const want = hashed.get(i);
+    if (want !== undefined)
+      out2.push(await lbMessageHash(m.isUser, m.content) === want ? "covered" : "changed");
+    else if (named2.has(m.id))
+      out2.push("covered");
+    else
+      out2.push(hashed.size === 0 && named2.size === 0 && spanned(i) ? "covered" : "uncovered");
+  }
+  return out2;
+}
+function lbRuns(cover, which) {
+  const runs = [];
+  for (const [i, c] of cover.entries()) {
+    if (!which.has(c))
+      continue;
+    const last = runs.at(-1);
+    if (last && last[1] === i - 1)
+      last[1] = i;
+    else
+      runs.push([i, i]);
+  }
+  return runs;
+}
+function lbParents(records) {
+  const parents = new Map;
+  for (const r of records) {
+    let best = null;
+    for (const q of records) {
+      if (RANK[q.level] <= RANK[r.level] || q.range[0] > r.range[0] || q.range[1] < r.range[1])
+        continue;
+      if (!best || q.range[1] - q.range[0] < best.range[1] - best.range[0] || q.range[1] - q.range[0] === best.range[1] - best.range[0] && RANK[q.level] < RANK[best.level])
+        best = q;
+    }
+    if (best)
+      parents.set(r.id, best.id);
+  }
+  return parents;
+}
+function isLbMarks(raw) {
+  const lists = (v4) => isRecord(v4) && Object.values(v4).every((l) => Array.isArray(l) && l.every((s) => typeof s === "string"));
+  return isRecord(raw) && lists(raw.caughtUp) && lists(raw.fullMind);
+}
+function lbNodes(records, cover, marks, progress) {
+  const parents = lbParents(records);
+  const nodes = new Map;
+  const ordered = [...records].sort((a, b) => a.range[0] - b.range[0] || RANK[b.level] - RANK[a.level] || a.range[1] - b.range[1]);
+  for (const r of ordered) {
+    let changed = 0;
+    let uncovered = 0;
+    for (let i = r.range[0];i <= r.range[1]; i++) {
+      const c = i < cover.length ? cover[i] : "changed";
+      if (c === "changed")
+        changed++;
+      else if (c === "uncovered")
+        uncovered++;
+    }
+    const coverage = progress.deep.has(r.id) ? "deep" : progress.readThrough >= r.range[1] ? "read" : changed > 0 ? "changed" : uncovered > 0 ? "uncovered" : "covered";
+    nodes.set(r.id, { id: r.id, level: r.level, title: r.title, range: [...r.range], coverage, changed, caughtUp: [...marks.caughtUp[r.id] ?? []], fullMind: [...marks.fullMind[r.id] ?? []], children: [] });
+  }
+  const roots = [];
+  for (const r of ordered) {
+    const node = nodes.get(r.id);
+    const parent = parents.get(r.id);
+    const holder = parent === undefined ? undefined : nodes.get(parent);
+    if (holder)
+      holder.children.push(node);
+    else
+      roots.push(node);
+  }
+  return roots;
+}
+function lbJob(entry2) {
+  return `lumibooks:${entry2}`;
+}
+function lbDrafts(chatId, book, chain, landed) {
+  const blobs = {};
+  const drafts = [];
+  const parents = lbParents(book.records);
+  const superseded = new Set(landed.flatMap((s) => s.supersedes ?? []));
+  const live = landed.filter((s) => s.kind === STORY_RECORD && !superseded.has(s.id) && typeof s.by?.job === "string" && s.by.job.startsWith("lumibooks:"));
+  const kept5 = new Set;
+  for (const r of book.records) {
+    const last = Math.min(r.range[1], chain.length - 1);
+    if (r.range[0] > last)
+      continue;
+    const from = chain[r.range[0]];
+    const to = chain[last];
+    const text7 = blobHash(r.text);
+    blobs[text7] = r.text;
+    const parent = parents.get(r.id);
+    const record5 = { source: "lumibooks", entry: r.id, level: r.level, title: r.title, range: [r.range[0], last], from: from.message, to: to.message, text: text7, keys: r.keys, ...parent ? { parent } : {} };
+    const id2 = layerEntryId("bootstrap", chatId, "lumibooks", r.id, hashParts("lumibooks.record", r.level, r.title, text7, String(r.range[0]), String(last), from.message, to.message, parent ?? "", ...r.keys));
+    const job = lbJob(r.id);
+    kept5.add(job);
+    const before = live.filter((s) => s.by?.job === job && s.id !== id2).map((s) => s.id);
+    drafts.push({ id: id2, basis: to, kind: STORY_RECORD, events: [recordEvent(record5)], ...before.length > 0 ? { supersedes: before } : {}, by: { role: "import", job } });
+  }
+  const gone = live.filter((s) => !kept5.has(s.by?.job ?? "")).map((s) => s.id);
+  const end = chain.at(-1);
+  if (gone.length > 0 && end)
+    drafts.push({ id: layerEntryId("bootstrap", chatId, "lumibooks", "gone", ...gone), basis: end, kind: STORY_RECORD, events: [], supersedes: gone, by: { role: "import", job: "lumibooks" } });
+  return { drafts, blobs };
+}
+function lbProgressOf(landed, chain) {
+  const at2 = new Map(chain.map((b, i) => [b.message, i]));
+  const records = new Map(landed.filter((s) => s.kind === STORY_RECORD && typeof s.by?.job === "string" && s.by.job.startsWith("lumibooks:")).map((s) => [s.id, (s.by?.job ?? "").slice("lumibooks:".length)]));
+  const deep = new Set;
+  let readThrough = -1;
+  for (const s of landed) {
+    if (s.kind !== STORY_BEAT)
+      continue;
+    for (const id2 of s.supersedes ?? []) {
+      const entry2 = records.get(id2);
+      if (entry2 !== undefined)
+        deep.add(entry2);
+    }
+    if (s.by?.role === "historian")
+      readThrough = Math.max(readThrough, at2.get(s.basis.message) ?? -1);
+  }
+  return { deep, readThrough };
+}
+function shelfFor(book, chatId, chat) {
+  return book.metadata.lumibooks_chat_id === chatId || book.id === chat.lumibooks_book_id;
+}
+async function findLumiBooks(host, chatId, userId, messages) {
+  const chat = await host.chats.chatMetadata(chatId, userId);
+  const all2 = await host.books.list(userId);
+  const shelf = all2.find((b) => shelfFor(b, chatId, chat));
+  let lorebook = null;
+  let best = 0;
+  for (const b of all2) {
+    const hashes = lbHashesOf(b.metadata);
+    if (hashes.length === 0 || b.id === shelf?.id)
+      continue;
+    const covered = (await lbCoverOf({ records: [], hashes }, messages)).filter((c) => c === "covered").length;
+    if (covered <= best)
+      continue;
+    best = covered;
+    lorebook = { id: b.id, name: b.name, records: [], hashes };
+  }
+  const recordsOf = async (id2) => (await host.books.entries(id2, userId)).flatMap((e) => lbRecordOf(e, e.id) ?? []);
+  if (shelf)
+    return { id: shelf.id, name: shelf.name, records: await recordsOf(shelf.id), hashes: lorebook?.hashes ?? lbHashesOf(shelf.metadata) };
+  return lorebook ? { ...lorebook, records: await recordsOf(lorebook.id) } : null;
+}
+function lbTreeOf(chatId, book, cover, cast, marks, progress) {
+  if (!book)
+    return { chatId, book: null, nodes: [], cast: [...cast], uncovered: lbRuns(cover, new Set(["uncovered"])) };
+  return { chatId, book: book.name, nodes: lbNodes(book.records, cover, marks, progress), cast: [...cast], uncovered: lbRuns(cover, new Set(["uncovered"])) };
+}
+var READ_TPS2 = 4000;
+var WRITE_TPS2 = 60;
+var CATCHUP_IN = 9000;
+var CATCHUP_OUT = 1800;
+function tokensOf2(text7) {
+  return Math.ceil(text7.length / 4);
+}
+function estimate(calls, tokensIn, tokensOut, notes) {
+  return { calls, tokens: Math.round(tokensIn + tokensOut), cost: null, ms: Math.round((tokensIn / READ_TPS2 + tokensOut / WRITE_TPS2) * 1000), notes: [...notes, "Money isn't shown until this chat's own runs have priced the connection; the token counts stand."] };
+}
+function lbEstimate(kind, range2, messages, recordText, who, chunkTokens) {
+  const stretch = messages.slice(range2[0], range2[1] + 1).reduce((n, m) => n + tokensOf2(m.content), 0);
+  const chunks = Math.max(1, Math.ceil(stretch / Math.max(1, chunkTokens)));
+  const span2 = `messages ${range2[0] + 1}\u2013${range2[1] + 1}`;
+  switch (kind) {
+    case "catchup":
+      return estimate(who, who * (tokensOf2(recordText) + CATCHUP_IN), who * CATCHUP_OUT, [`One catch-up per character from the record of ${span2}.`]);
+    case "deep":
+      return estimate(chunks * 2, stretch * 2.3 + chunks * 14000, stretch * 0.15 + chunks * 1000, [`A full read of ${span2} in ${chunks} chunk${chunks === 1 ? "" : "s"}; its beats replace the record.`]);
+    case "fullmind":
+      return estimate(chunks, stretch + chunks * CATCHUP_IN, chunks * CATCHUP_OUT, [`The character lives ${span2} chunk by chunk (${chunks}).`]);
+  }
+}
+
+// src/backend/bootstrap/lumibooks-service.ts
+var MARKS2 = "lumibooks.json";
+var JUMPSTART_SKIPS_COVERED = false;
+
+class LumiBooksBootstrap {
+  rt;
+  constructor(rt) {
+    this.rt = rt;
+  }
+  async read(chatId, userId) {
+    const messages = (await this.rt.host.chats.messages(chatId, userId)).sort((a, b) => a.index - b.index).map((m) => ({ id: m.id, isUser: m.isUser, content: m.content }));
+    const bases = new Map((await this.rt.ledger.chainBases(chatId, userId)).map((b) => [b.message, b]));
+    const chain = [];
+    for (const m of messages) {
+      const b = bases.get(m.id);
+      if (!b)
+        break;
+      chain.push(b);
+    }
+    const book = await findLumiBooks(this.rt.host, chatId, userId, messages);
+    return { book, messages, cover: book ? await lbCoverOf(book, messages) : messages.map(() => "uncovered"), chain };
+  }
+  async covered(chatId, userId) {
+    const { book, messages, cover } = await this.read(chatId, userId);
+    if (!book)
+      return new Set;
+    return new Set(messages.filter((_, i) => cover[i] === "covered" && book.records.some((r) => r.range[0] <= i && i <= r.range[1])).map((m) => m.id));
+  }
+  async tree(chatId, userId, env) {
+    const { book, cover, chain } = await this.read(chatId, userId);
+    const { cast, pov: pov2 } = await env.people();
+    const marks = await env.files.read(MARKS2, isLbMarks) ?? { caughtUp: {}, fullMind: {} };
+    const progress = lbProgressOf(await this.rt.ledger.layerSummaries(chatId, userId), chain);
+    return lbTreeOf(chatId, book, cover, cast.filter((p) => p.id !== pov2), marks, progress);
+  }
+  async land(chatId, userId) {
+    const { book, chain } = await this.read(chatId, userId);
+    if (!book || book.records.length === 0)
+      return null;
+    const { drafts, blobs } = lbDrafts(chatId, book, chain, await this.rt.ledger.layerSummaries(chatId, userId));
+    if (drafts.length === 0)
+      return { landed: 0, refused: [] };
+    for (const text7 of Object.values(blobs))
+      await this.rt.blobs.put(userId, text7);
+    const results = await this.rt.ledger.landLayers(chatId, userId, drafts, { without: new Set, wait: true });
+    return { landed: results.filter((r) => r.status === "landed").length, refused: results.flatMap((r) => r.status === "refused" ? [r.reason] : []) };
+  }
+  async estimate(chatId, userId, env, kind, entry2, who) {
+    const { book, messages } = await this.read(chatId, userId);
+    if (!book || book.records.length === 0)
+      return null;
+    const record5 = entry2 === undefined ? null : book.records.find((r) => r.id === entry2);
+    if (entry2 !== undefined && !record5)
+      return null;
+    const range2 = record5 ? record5.range : [Math.min(...book.records.map((r) => r.range[0])), Math.max(...book.records.map((r) => r.range[1]))];
+    return lbEstimate(kind, range2, messages, record5?.text ?? "", who.length, (await env.knobs()).chunkTokens);
+  }
+}
+
 // src/backend/bootstrap/wiring.ts
 var STAGE_ROLE = { survey: null, import: null, historian: "historian", author: "author", pov: "pov", minds: "character", truthlink: "gm", reconcile: "gm" };
-function beatText(b, blobs) {
+function beatText2(b, blobs) {
   const quotes = b.quotes !== undefined ? blobs[b.quotes] : undefined;
   return { beat: b, what: blobs[b.what] ?? "", surface: blobs[b.surface] ?? "", ...quotes !== undefined ? { quotes } : {} };
 }
-function stagingText(s, blobs) {
+function stagingText2(s, blobs) {
   const occluded = s.occluded !== undefined ? blobs[s.occluded] : undefined;
   return { staging: s, where: blobs[s.where] ?? "", doing: blobs[s.doing] ?? "", ...occluded !== undefined ? { occluded } : {} };
 }
@@ -120495,7 +123399,7 @@ function asOut(r) {
   return { events: [], blobs: r.blobs, beats: r.beats.map((t) => t.beat), staging: r.staging.map((t) => t.staging), newcomers: r.newcomers, newPlaces: r.newPlaces, switches: r.switches, uncertain: r.uncertain, ...r.reasoning ? { reasoning: r.reasoning } : {} };
 }
 function asResult(out2) {
-  return { beats: out2.beats.map((b) => beatText(b, out2.blobs)), staging: out2.staging.map((s) => stagingText(s, out2.blobs)), newcomers: out2.newcomers, newPlaces: out2.newPlaces ?? [], switches: out2.switches ?? [], uncertain: out2.uncertain, byMessage: {}, blobs: out2.blobs };
+  return { beats: out2.beats.map((b) => beatText2(b, out2.blobs)), staging: out2.staging.map((s) => stagingText2(s, out2.blobs)), newcomers: out2.newcomers, newPlaces: out2.newPlaces ?? [], switches: out2.switches ?? [], uncertain: out2.uncertain, byMessage: {}, blobs: out2.blobs };
 }
 function nameOf14(world, state2, id2) {
   return (hasOwn(state2.entities, id2) ? state2.entities[id2]?.name : undefined) ?? (hasOwn(world.entities, id2) ? world.entities[id2]?.name : undefined) ?? id2;
@@ -120527,16 +123431,16 @@ function surveysOf(rt) {
   const known2 = surveys.get(rt);
   if (known2)
     return known2;
-  const kept4 = new Map;
+  const kept5 = new Map;
   const drop2 = (chatId) => {
-    for (const key of [...kept4.keys()])
+    for (const key of [...kept5.keys()])
       if (key.endsWith(`\x00${chatId}`))
-        kept4.delete(key);
+        kept5.delete(key);
   };
   for (const event of ["MESSAGE_SENT", "MESSAGE_EDITED", "MESSAGE_SWIPED", "MESSAGE_DELETED", "CHAT_CHANGED", "CHAT_DELETED", "GENERATION_STARTED", "GENERATION_ENDED"])
     rt.host.on(event, (e) => drop2(e.chatId));
-  surveys.set(rt, kept4);
-  return kept4;
+  surveys.set(rt, kept5);
+  return kept5;
 }
 function bootstrapEnv(rt, chatId, userId, changed) {
   const files = new BootstrapFiles(rt.host, chatId, userId);
@@ -120590,7 +123494,7 @@ function bootstrapEnv(rt, chatId, userId, changed) {
       if (!first)
         throw new Error("an empty chunk");
       const at2 = await fold(first.basis);
-      return asOut(await historian({ world: at2.world, state: at2.state, texts: await texts2(), chunk: i.chunk, before: { beats: i.before.beats.map((b) => beatText(b, i.before.blobs)), staging: i.before.staging.map((s) => stagingText(s, i.before.blobs)) }, cast: i.cast, places: i.places, pov: i.pov }, m));
+      return asOut(await historian({ world: at2.world, state: at2.state, texts: await texts2(), chunk: i.chunk, before: { beats: i.before.beats.map((b) => beatText2(b, i.before.blobs)), staging: i.before.staging.map((s) => stagingText2(s, i.before.blobs)) }, cast: i.cast, places: i.places, pov: i.pov }, m));
     },
     bindNewcomers(out2, ids2, places2) {
       const messages = [...new Set(out2.beats.flatMap((b) => ("bootstrap" in b.by) ? [b.by.bootstrap.message] : []))].map((id2) => ({ id: id2 }));
@@ -120599,7 +123503,7 @@ function bootstrapEnv(rt, chatId, userId, changed) {
       return { ...asOut(bindPlaces(bindNewcomers(asResult(out2), ids2, messages), places2, messages)), newcomers, newPlaces, ...out2.reasoning ? { reasoning: out2.reasoning } : {} };
     },
     beatEvents(beats, staging, blobs, rows) {
-      return historianEvents(beats.map((b) => beatText(b, blobs)), staging.map((s) => stagingText(s, blobs)), rows);
+      return historianEvents(beats.map((b) => beatText2(b, blobs)), staging.map((s) => stagingText2(s, blobs)), rows);
     },
     async spawn(people, places2, basis) {
       const at2 = await fold(basis);
@@ -120627,24 +123531,23 @@ function bootstrapEnv(rt, chatId, userId, changed) {
     },
     async authorRead(i, m) {
       const at2 = await fold(i.basis);
-      const r = await authorRead({ world: at2.world, state: at2.state, texts: await texts2(), chunk: i.chunk, beats: i.beats.map((b) => beatText(b, i.blobs)), notebook: await readNotebook(rt, userId, at2.state), chapter: { index: i.chapter.index, stretches: Math.max(0, i.chapter.chunks.length - 1) }, cast: await castMembers(i.cast, at2.world, at2.state), signals: signalsOf(i.chunk) }, m);
+      const r = await authorRead({ world: at2.world, state: at2.state, texts: await texts2(), chunk: i.chunk, beats: i.beats.map((b) => beatText2(b, i.blobs)), notebook: await readNotebook(rt, userId, at2.state), chapter: { index: i.chapter.index, stretches: Math.max(0, i.chapter.chunks.length - 1) }, cast: await castMembers(i.cast, at2.world, at2.state), signals: signalsOf(i.chunk) }, m);
       return { events: r.events, blobs: r.blobs, kind: "notebook", chapterEnds: r.chapter.ends, title: r.chapter.title, cast: r.cast, uncertain: r.uncertain, ...r.reasoning ? { reasoning: r.reasoning } : {} };
     },
     async authorChapter(i, m) {
       const at2 = await fold(i.basis);
-      const r = await authorChapter({ world: at2.world, state: at2.state, texts: await texts2(), chapter: { index: i.chapter.index, title: i.chapter.title ?? `Chapter ${i.chapter.index + 1}`, through: i.chapter.through }, beats: i.beats.map((b) => beatText(b, i.blobs)), notebook: await readNotebook(rt, userId, at2.state), cast: await castMembers(i.cast, at2.world, at2.state) }, m);
+      const r = await authorChapter({ world: at2.world, state: at2.state, texts: await texts2(), chapter: { index: i.chapter.index, title: i.chapter.title ?? `Chapter ${i.chapter.index + 1}`, through: i.chapter.through }, beats: i.beats.map((b) => beatText2(b, i.blobs)), notebook: await readNotebook(rt, userId, at2.state), cast: await castMembers(i.cast, at2.world, at2.state) }, m);
       return { events: r.events, blobs: r.blobs, kind: "notebook", chapterEnds: true, cast: [], uncertain: r.uncertain, ...r.reasoning ? { reasoning: r.reasoning } : {} };
     },
     async pov(i, m) {
       const at2 = await fold(i.basis);
       const present2 = presentAt(i.beat);
       const staging = i.staging.filter((s) => present2.includes(s.who)).map((s) => {
-        const t = stagingText(s, i.blobs);
+        const t = stagingText2(s, i.blobs);
         return { who: s.who, where: t.where, doing: t.doing, ...t.occluded !== undefined ? { occluded: t.occluded } : {} };
       });
-      const deed = i.beat.deed !== undefined ? i.blobs[i.beat.deed] : undefined;
-      const r = await povRender(m, { beat: { id: i.beat.id, surface: i.surface, ...deed !== undefined ? { deed } : {}, ...i.quotes !== undefined ? { quotes: i.quotes } : {}, actors: i.beat.actors, exposure: i.beat.exposure }, staging, who: i.who, refs: povRefs(rt, at2, i.who, present2), texts: await texts2() });
-      return { povs: r.povs, fellBack: r.fellBack, ...r.reasoning ? { reasoning: r.reasoning } : {} };
+      const r = await povRender(m, { beat: { id: i.beat.id, surface: i.surface, ...i.quotes !== undefined ? { quotes: i.quotes } : {}, actors: i.beat.actors, exposure: i.beat.exposure }, staging, who: i.who, refs: povRefs(rt, at2, i.who, present2), texts: await texts2() });
+      return { povs: r.povs, fellBack: r.pending, ...r.reasoning ? { reasoning: r.reasoning } : {} };
     },
     async seedCore(i) {
       const at2 = await fold(i.basis);
@@ -120696,14 +123599,14 @@ function bootstrapEnv(rt, chatId, userId, changed) {
       const at2 = await fold(i.basis);
       const beliefs = [];
       for (const who of i.minds) {
-        const text6 = (await readMind(rt.blobs, userId, at2.state, who))["beliefs.md"];
-        if (text6 !== undefined && text6.trim() !== "")
-          beliefs.push({ who, path: mindPath(who, "beliefs"), text: text6 });
+        const text7 = (await readMind(rt.blobs, userId, at2.state, who))["beliefs.md"];
+        if (text7 !== undefined && text7.trim() !== "")
+          beliefs.push({ who, path: mindPath(who, "beliefs"), text: text7 });
       }
       const s = await settings();
       const knowledge = s.minds.knowledge;
       const room = ownRoom(s.depth, "gm");
-      const r = await truthLink({ registry: rt.registry, world: at2.world, state: at2.state, texts: await texts2(), beats: i.beats.map((b) => beatText(b, i.blobs)), beliefs, msg: i.basis.message, limits: { claimChars: knowledge.claimChars, factsPerChat: knowledge.factsPerChat }, ...room !== null ? { room } : {} }, m);
+      const r = await truthLink({ registry: rt.registry, world: at2.world, state: at2.state, texts: await texts2(), beats: i.beats.map((b) => beatText2(b, i.blobs)), beliefs, msg: i.basis.message, limits: { claimChars: knowledge.claimChars, factsPerChat: knowledge.factsPerChat }, ...room !== null ? { room } : {} }, m);
       return { events: r.events, blobs: r.blobs, kind: "truthlink", ...r.reasoning ? { reasoning: r.reasoning } : {} };
     },
     async reconcile(i, m) {
@@ -120729,8 +123632,8 @@ function bootstrapEnv(rt, chatId, userId, changed) {
         return rt.ledger.landLayers(chatId, userId, drafts, { without, wait: true });
       },
       async putBlobs(texts3) {
-        for (const text6 of Object.values(texts3))
-          await rt.blobs.put(userId, text6);
+        for (const text7 of Object.values(texts3))
+          await rt.blobs.put(userId, text7);
       },
       async moved(basis) {
         return !(await rt.ledger.chainBases(chatId, userId)).some((b) => b.message === basis.message && b.swipe === basis.swipe);
@@ -120741,9 +123644,12 @@ function bootstrapEnv(rt, chatId, userId, changed) {
         replacing = ids2;
       }
     },
+    async covered() {
+      return JUMPSTART_SKIPS_COVERED ? new LumiBooksBootstrap(rt).covered(chatId, userId) : new Set;
+    },
     async messages() {
-      const kept4 = surveysOf(rt);
-      const cached = kept4.get(surveyKey);
+      const kept5 = surveysOf(rt);
+      const cached = kept5.get(surveyKey);
       if (cached)
         return [...cached];
       const messages = await rt.host.chats.messages(chatId, userId);
@@ -120760,10 +123666,10 @@ function bootstrapEnv(rt, chatId, userId, changed) {
         const basis = bases.get(m.id);
         return basis ? [{ id: m.id, isUser: m.isUser, name: m.name, text: m.swipes[m.swipeId] ?? m.content, basis, clock: clocks.get(m.id) ?? null, swipes: m.swipes.length, swipe: m.swipeId }] : [];
       });
-      kept4.delete(surveyKey);
-      kept4.set(surveyKey, read);
-      for (const key of [...kept4.keys()].slice(0, Math.max(0, kept4.size - SURVEYS_KEPT)))
-        kept4.delete(key);
+      kept5.delete(surveyKey);
+      kept5.set(surveyKey, read);
+      for (const key of [...kept5.keys()].slice(0, Math.max(0, kept5.size - SURVEYS_KEPT)))
+        kept5.delete(key);
       return [...read];
     },
     async people() {
@@ -120804,6 +123710,59 @@ function bootstrapEnv(rt, chatId, userId, changed) {
     log: (line2) => rt.host.log("warn", `[LumiRPEngine] ${line2}`, userId),
     changed
   };
+}
+
+// src/backend/bootstrap/chips.ts
+var STAGE_WORDS3 = {
+  survey: "surveying the chat",
+  import: "importing the chat's memory",
+  historian: "reading canon beats",
+  author: "the author's chapters",
+  pov: "points of view",
+  minds: "forming minds",
+  truthlink: "linking truths",
+  reconcile: "reconciling chapters"
+};
+function stageAt(progress) {
+  for (const stage of BOOTSTRAP_STAGES) {
+    const p = progress.find((x) => x.stage === stage);
+    if (p && p.done < p.total)
+      return p;
+  }
+  return null;
+}
+function chipFactsOf(view) {
+  return { status: view.status, chunks: view.chunks, progress: view.progress, waiting: view.spot.reduce((n, card) => n + card.items.filter((i) => i.mark === null).length, 0) };
+}
+function bootstrapChips(chatId, facts, at2) {
+  const chips = [];
+  const open = { id: "open", label: "Open", input: { type: "bootstrap", label: "GM \u2192 Depth \u2192 Bootstrap" } };
+  if (facts.status === "running" || facts.status === "pausing") {
+    const p = stageAt(facts.progress);
+    const where = p ? `${STAGE_WORDS3[p.stage]}, ${p.done} of ${p.total}` : "finishing";
+    chips.push({
+      id: `bootstrap:${chatId}`,
+      kind: "bootstrap",
+      messageId: at2,
+      label: `Bootstrap${facts.status === "pausing" ? " pausing" : ""}: ${where}`,
+      detail: `${facts.chunks.done} of ${facts.chunks.total} chunks of the chat read through every stage.`,
+      actions: [open],
+      expires: "never"
+    });
+  }
+  const waiting = facts.waiting;
+  if (waiting > 0) {
+    chips.push({
+      id: `spot_checks:${chatId}`,
+      kind: "spot_checks",
+      messageId: at2,
+      label: `${waiting} spot check${waiting === 1 ? "" : "s"} ${waiting === 1 ? "waits" : "wait"} for you`,
+      detail: "The bootstrap's spot-check cards hold what it read for you to mark right or wrong. A wrong mark is a directive it amends from.",
+      actions: [{ ...open, id: "review", label: "Review", style: "primary" }],
+      expires: "never"
+    });
+  }
+  return chips;
 }
 
 // src/shared/depth-history.ts
@@ -120871,6 +123830,23 @@ async function chatBudget(host, chatId, userId, budget) {
   return Object.keys(own2).length === 0 ? budget : { ...budget, allowances: { ...budget.allowances, ...own2 } };
 }
 
+// src/backend/depth/chat-absorption.ts
+var FILE3 = "absorption.json";
+function chatAbsorptionOf(raw) {
+  return raw === "keep" || raw === "narrator" ? raw : null;
+}
+var isChosen = (raw) => typeof raw === "object" && raw !== null && ("absorption" in raw) && chatAbsorptionOf(raw.absorption) !== null;
+async function chatAbsorption(host, chatId, userId) {
+  return (await new BootstrapFiles(host, chatId, userId).read(FILE3, isChosen))?.absorption ?? null;
+}
+async function setChatAbsorption(host, chatId, userId, absorption) {
+  const files = new BootstrapFiles(host, chatId, userId);
+  if (absorption === null)
+    await files.remove(FILE3);
+  else
+    await files.write(FILE3, { absorption });
+}
+
 // src/backend/bootstrap/service.ts
 class BootstrapError extends Error {
   code;
@@ -120925,17 +123901,51 @@ class Bootstraps {
   rt;
   runs = new Map;
   told = new Map;
+  chipFacts = new Map;
+  envs = new Map;
+  lumi;
   constructor(rt) {
     this.rt = rt;
+    this.lumi = new LumiBooksBootstrap(rt);
+    rt.bootstrapChips = (chatId, userId, at2) => this.chipsOn(chatId, userId, at2);
+  }
+  async chipsOn(chatId, userId, at2) {
+    const key = `${userId}\x00${chatId}`;
+    let facts = this.chipFacts.get(key);
+    if (!facts) {
+      try {
+        facts = chipFactsOf(await this.runOf(chatId, userId).view(true));
+      } catch (error) {
+        this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the bootstrap's chips weren't read (${error instanceof Error ? error.message : String(error)})`, userId);
+        facts = { status: "idle", chunks: { done: 0, total: 0 }, progress: [], waiting: 0 };
+      }
+      this.chipFacts.set(key, facts);
+    }
+    return bootstrapChips(chatId, facts, at2);
+  }
+  chipsMoved(chatId, userId, view) {
+    const key = `${userId}\x00${chatId}`;
+    const facts = chipFactsOf(view);
+    const before = this.chipFacts.get(key);
+    this.chipFacts.set(key, facts);
+    const said2 = (f) => JSON.stringify(f ? bootstrapChips(chatId, f, "").map((c) => [c.label, c.detail]) : []);
+    if (said2(before) !== said2(facts))
+      this.rt.changed(chatId, userId);
   }
   runOf(chatId, userId) {
     const key = `${userId}\x00${chatId}`;
     let run2 = this.runs.get(key);
     if (!run2) {
-      run2 = new BootstrapRun(bootstrapEnv(this.rt, chatId, userId, () => void this.push(chatId, userId)));
+      const env = bootstrapEnv(this.rt, chatId, userId, () => void this.push(chatId, userId));
+      this.envs.set(key, env);
+      run2 = new BootstrapRun(env);
       this.runs.set(key, run2);
     }
     return run2;
+  }
+  envOf(chatId, userId) {
+    this.runOf(chatId, userId);
+    return this.envs.get(`${userId}\x00${chatId}`);
   }
   async worldChat(chatId, userId) {
     if (!await this.rt.ledger.core(chatId, userId) || !await this.rt.runOf(chatId, userId))
@@ -120946,9 +123956,11 @@ class Bootstraps {
     const view = await run2.view(await depthOptedIn(this.rt, chatId, userId));
     const numbers4 = view.spot.some((card) => card.items.some((item2) => item2.kind === "beat")) ? await chatNumbers(this.rt.host, chatId, userId) : null;
     const spot = numbers4 ? view.spot.map((card) => ({ ...card, items: card.items.map((item2) => item2.kind === "beat" ? { ...item2, index: numbers4.get(item2.message) ?? item2.index } : item2) })) : view.spot;
-    const budget = (await this.rt.settings.get(userId)).depth.budget;
+    const depth2 = (await this.rt.settings.get(userId)).depth;
+    const budget = depth2.budget;
     const allowances = { own: await chatAllowances(this.rt.host, chatId, userId), yours: budget.allowances, interval: budget.interval };
-    return { ...view, spot, advice: view.status === "done" ? adviceOf(view.imported) : [], history: await historyCut(this.rt.host, chatId, userId), allowances };
+    const absorption = { own: await chatAbsorption(this.rt.host, chatId, userId), yours: depth2.absorption };
+    return { ...view, spot, advice: view.status === "done" ? adviceOf(view.imported) : [], history: await historyCut(this.rt.host, chatId, userId), allowances, absorption };
   }
   async handle(r, userId) {
     const { chatId } = r;
@@ -120982,6 +123994,12 @@ class Bootstraps {
         await this.worldChat(chatId, userId);
         if (!await depthOptedIn(this.rt, chatId, userId))
           throw new BootstrapError("conflict", "Put this chat on depth first (GM \u2192 This chat \u2192 Depth): the bootstrap onboards a chat that opted in.");
+        const lumi = await this.lumi.land(chatId, userId).catch((error) => {
+          this.rt.host.log("warn", `[LumiRPEngine] the chat's LumiBooks records didn't land (${error instanceof Error ? error.message : String(error)})`, userId);
+          return null;
+        });
+        if (lumi && lumi.refused.length > 0)
+          this.rt.host.log("warn", `[LumiRPEngine] ${lumi.refused.length} LumiBooks record(s) were refused: ${lumi.refused.slice(0, 3).join("; ")}`, userId);
         await run2.start(await this.capOf(r.cap, userId));
         break;
       }
@@ -121015,6 +124033,33 @@ class Bootstraps {
           throw new BootstrapError("bad_request", "Each allowance is a treatment's whole number of parts (0 or more), or no limit.");
         await setChatAllowances(this.rt.host, chatId, userId, allowances);
         break;
+      }
+      case "absorption": {
+        const absorption = r.absorption === null ? null : chatAbsorptionOf(r.absorption);
+        if (absorption === null && r.absorption !== null)
+          throw new BootstrapError("bad_request", "Keep it (keep), LRE's only (narrator), or yours (null).");
+        await setChatAbsorption(this.rt.host, chatId, userId, absorption);
+        break;
+      }
+      case "lb_tree":
+        await this.worldChat(chatId, userId);
+        return { view: await this.view(chatId, userId), tree: await this.lumi.tree(chatId, userId, this.envOf(chatId, userId)) };
+      case "lb_catchup":
+      case "lb_deep":
+      case "lb_fullmind": {
+        await this.worldChat(chatId, userId);
+        const env = this.envOf(chatId, userId);
+        const tree = await this.lumi.tree(chatId, userId, env);
+        const who = r.op === "lb_catchup" ? r.who : r.op === "lb_fullmind" ? [r.who] : [];
+        if (r.op !== "lb_deep" && (who.length === 0 || who.some((id2) => !tree.cast.some((c) => c.id === id2))))
+          throw new BootstrapError("bad_request", "name characters of the chat's cast");
+        const kind = r.op === "lb_catchup" ? "catchup" : r.op === "lb_deep" ? "deep" : "fullmind";
+        const lbEstimate2 = await this.lumi.estimate(chatId, userId, env, kind, r.node, who);
+        if (!lbEstimate2)
+          throw new BootstrapError("bad_request", tree.book === null ? "This chat has no LumiBooks book." : "no such node in the chat's LumiBooks book");
+        if (r.confirm === true)
+          throw new BootstrapError("unavailable", "Running this from the LumiBooks tree isn't available yet; the bootstrap's own run reads every uncovered stretch.");
+        return { view: await this.view(chatId, userId), tree, lbEstimate: lbEstimate2 };
       }
       default:
         throw new BootstrapError("bad_request", "no such bootstrap request");
@@ -121060,6 +124105,7 @@ class Bootstraps {
     try {
       const view = await this.view(chatId, userId);
       this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.bootstrap.update", chatId, view }, userId);
+      this.chipsMoved(chatId, userId, view);
       const key = `${userId}\x00${chatId}`;
       const before = this.told.get(key);
       this.told.set(key, view.status);
@@ -121077,7 +124123,7 @@ class Bootstraps {
 }
 
 // src/backend/skip.ts
-var RANK = { plan: 1, invitation: 2, appointment: 3, story: 4, money: 5, model: 6 };
+var RANK2 = { plan: 1, invitation: 2, appointment: 3, story: 4, money: 5, model: 6 };
 function scanBeats(reg, world, state2, intent2, runSeed) {
   const { target, opts } = timelapseOptions(intent2, runSeed);
   const w = new Working(reg, world, state2);
@@ -121100,7 +124146,7 @@ function scanBeats(reg, world, state2, intent2, runSeed) {
   const appointments = own(state2.entities, pov2)?.fields.appointments;
   for (const raw of Array.isArray(appointments) ? appointments : []) {
     if (isRecord(raw) && typeof raw.at === "number")
-      add2(raw.at, `the player character's appointment${typeof raw.label === "string" ? `: ${raw.label}` : ""}`, RANK.appointment, []);
+      add2(raw.at, `the player character's appointment${typeof raw.label === "string" ? `: ${raw.label}` : ""}`, RANK2.appointment, []);
   }
   const tier = optionalQuery(ctx, "minds.tier");
   const plans = optionalQuery(ctx, "minds.plans");
@@ -121114,7 +124160,7 @@ function scanBeats(reg, world, state2, intent2, runSeed) {
       for (const b of laid(ctx, id2, run2.from, end)) {
         const p = withPov3.find((x) => x.id === b.plan);
         if (p)
-          add2(b.start, `${nameOf15(id2)}'s plan with the player character: ${p.what}`, RANK.plan, [id2, ...p.with.filter(person5)]);
+          add2(b.start, `${nameOf15(id2)}'s plan with the player character: ${p.what}`, RANK2.plan, [id2, ...p.with.filter(person5)]);
       }
     }
   }
@@ -121126,15 +124172,15 @@ function scanBeats(reg, world, state2, intent2, runSeed) {
     else if (e.type === "stage") {
       const track2 = own(world.tracks, e.track);
       const owner2 = track2 ? trackOwner(track2) : undefined;
-      add2(clock, `a story moment: ${track2?.label ?? e.track}`, RANK.story, owner2 && person5(owner2) ? [owner2] : []);
+      add2(clock, `a story moment: ${track2?.label ?? e.track}`, RANK2.story, owner2 && person5(owner2) ? [owner2] : []);
     } else if (e.type === "castlife.invitation" && "data" in e && typeof e.data.agent === "string")
-      add2(clock, `${nameOf15(e.data.agent)}'s invitation`, RANK.invitation, [e.data.agent]);
+      add2(clock, `${nameOf15(e.data.agent)}'s invitation`, RANK2.invitation, [e.data.agent]);
     else if (e.type === ENGINE_EVENTS.fired && "data" in e) {
       const rule2 = rules.find((r) => r.id === e.data.rule);
       if (rule2 && (("at" in rule2.on) || rule2.interrupt === true || rule2.beat !== undefined))
-        add2(clock, `the rule ${rule2.id}`, RANK.story, []);
+        add2(clock, `the rule ${rule2.id}`, RANK2.story, []);
     } else if (e.type === ENGINE_EVENTS.signal && "data" in e && e.data.entity === pov2 && (e.data.class === "bill" || e.data.class === "decline"))
-      add2(typeof e.data.at === "number" ? e.data.at : clock, `the player character's money: ${String(e.data.text ?? e.data.class)}`, RANK.money, []);
+      add2(typeof e.data.at === "number" ? e.data.at : clock, `the player character's money: ${String(e.data.text ?? e.data.class)}`, RANK2.money, []);
   }
   return { from: run2.from, to: run2.to, after, beats };
 }
@@ -121148,8 +124194,8 @@ function capBeats(beats, max) {
       byMinute.set(b.at, { ...b.rank < same3.rank ? b : same3, source: same3.source === "scan" || b.source === "scan" ? "scan" : "model", who: [...new Set([...same3.who, ...b.who])] });
   }
   const merged2 = [...byMinute.values()];
-  const kept4 = Number.isFinite(max) ? [...merged2].sort((a, b) => a.rank - b.rank || a.at - b.at).slice(0, Math.max(0, max)) : merged2;
-  return kept4.sort((a, b) => a.at - b.at);
+  const kept5 = Number.isFinite(max) ? [...merged2].sort((a, b) => a.rank - b.rank || a.at - b.at).slice(0, Math.max(0, max)) : merged2;
+  return kept5.sort((a, b) => a.at - b.at);
 }
 async function proposedBeats(deps, input, state2, scanned, traces) {
   const config3 = mindsStepConfig(input.settings.modelUse, "skip");
@@ -121203,7 +124249,7 @@ ${chat.join(`
       continue;
     const at2 = localTime(input.world, scanned.from, b.at);
     if (at2 !== null && at2 > scanned.after && at2 <= scanned.to)
-      out2.push({ at: at2, reason: capCounted(b.reason, input.settings.minds.lengths.reason, cuts, "reason"), source: "model", who: [], rank: RANK.model });
+      out2.push({ at: at2, reason: capCounted(b.reason, input.settings.minds.lengths.reason, cuts, "reason"), source: "model", who: [], rank: RANK2.model });
   }
   const cut = cutsNote(cuts, input.settings.minds);
   if (cut !== null)
@@ -121259,32 +124305,32 @@ async function runSkip(deps, input) {
   const traces = [];
   const beats = capBeats([...scanned.beats, ...await proposedBeats(deps, input, w.state, scanned, traces)], limitOf(input.settings.minds.skip.maxBeats));
   const perBeat = limitOf(input.settings.minds.skip.maxMindsPerBeat);
-  const record4 = { beats: [{ at: run2.from, events: run2.apply([{ type: MINDS_EVENTS.skip, data: { from: run2.from, to: run2.to, beats: beats.map((b) => ({ at: b.at, reason: b.reason, source: b.source })) } }]) }], stop: null };
+  const record5 = { beats: [{ at: run2.from, events: run2.apply([{ type: MINDS_EVENTS.skip, data: { from: run2.from, to: run2.to, beats: beats.map((b) => ({ at: b.at, reason: b.reason, source: b.source })) } }]) }], stop: null };
   for (const beat of beats) {
     run2.advanceTo(beat.at);
     if (run2.clock !== beat.at)
       break;
     const minds = input.signal.aborted ? [] : await mindsAt(deps, input, w, "beat", beat.who, perBeat, `Time skips ahead; it is now ${formatClock(cal, beat.at)}.`, traces);
     const applied2 = run2.apply(stopperOnly(minds, interrupter(w, minds)));
-    record4.beats.push({ at: beat.at, events: applied2 });
+    record5.beats.push({ at: beat.at, events: applied2 });
     const stopper = interrupter(w, applied2);
     if (stopper) {
-      record4.stop = { by: "mind", at: beat.at, entity: stopper };
-      return { record: record4, traces };
+      record5.stop = { by: "mind", at: beat.at, entity: stopper };
+      return { record: record5, traces };
     }
     if (input.signal.aborted) {
-      record4.stop = { by: "clock", at: beat.at };
-      return { record: record4, traces };
+      record5.stop = { by: "clock", at: beat.at };
+      return { record: record5, traces };
     }
   }
   run2.advanceTo(run2.to);
-  record4.beats = record4.beats.filter((b) => b.at <= run2.clock);
+  record5.beats = record5.beats.filter((b) => b.at <= run2.clock);
   if (!input.signal.aborted) {
     const end = run2.apply(await mindsAt(deps, input, w, "turn", [], limitOf(input.settings.minds.liveLimit), `The time skip ends; it is now ${formatClock(cal, run2.clock)}.`, traces));
     if (end.length > 0)
-      record4.beats.push({ at: run2.clock, events: end });
+      record5.beats.push({ at: run2.clock, events: end });
   }
-  return { record: record4, traces };
+  return { record: record5, traces };
 }
 
 // src/packs/castlife/core/skip-plan.ts
@@ -121483,27 +124529,27 @@ ${chat.join(`
     const fired = firedTimeout(signal2);
     return { people: group4.length, checked: null, why: fired ? fired.message : failure.reason || "the call didn't answer" };
   }));
-  const record4 = (plan2) => ({ type: ROUTINE_EVENTS.skipPlan, data: JSON.parse(JSON.stringify(plan2)) });
+  const record5 = (plan2) => ({ type: ROUTINE_EVENTS.skipPlan, data: JSON.parse(JSON.stringify(plan2)) });
   const dropped = answers.flatMap((a) => a.checked?.dropped ?? []);
   if (dropped.length > 0)
     deps.log(`skip plan dropped ${dropped.length} block(s): ${dropped.join("; ")}`);
   const plans = answers.flatMap((a) => a.checked?.plans ?? []);
   const failed2 = answers.filter((a) => a.why !== null);
   if (failed2.length === 0)
-    return record4({ from, to, plans });
+    return record5({ from, to, plans });
   const why2 = failed2[0]?.why ?? "the call didn't answer";
   const missed = failed2.reduce((n, a) => n + a.people, 0);
   deps.log(`skip plan for ${missed} of ${people.length} people failed: ${why2}`);
   const note2 = missed === people.length ? `The skip plan wasn't made (${why2}), so everyone it would have planned keeps to their basic needs.` : `The skip plan wasn't made for ${missed} of ${people.length} people (${why2}), so they keep to their basic needs.`;
-  return record4({ from, to, plans, note: note2 });
+  return record5({ from, to, plans, note: note2 });
 }
 
 // src/engine/bounds.ts
-var RANK2 = { auto: 0, confirm: 1, never: 2 };
+var RANK3 = { auto: 0, confirm: 1, never: 2 };
 function strictest(...modes) {
   let out2 = "auto";
   for (const m of modes)
-    if (m && RANK2[m] > RANK2[out2])
+    if (m && RANK3[m] > RANK3[out2])
       out2 = m;
   return out2;
 }
@@ -121564,12 +124610,12 @@ function shapeAfter(prev, f) {
 var TAILS_KEPT = 8;
 var CHECKPOINTS_KEPT = 16;
 var KEPT_LIMIT = { checkpoint: CHECKPOINTS_KEPT, tail: TAILS_KEPT };
-function digestOf(kept4, owner2, text6, make2) {
-  const known2 = kept4.get(owner2);
-  if (known2?.text === text6)
+function digestOf(kept5, owner2, text7, make2) {
+  const known2 = kept5.get(owner2);
+  if (known2?.text === text7)
     return known2.digest;
   const digest = make2();
-  kept4.set(owner2, { text: text6, digest });
+  kept5.set(owner2, { text: text7, digest });
   return digest;
 }
 function pausedAfter(m, paused, pausesHere) {
@@ -121764,13 +124810,13 @@ class LedgerFold {
       }
       const step = this.step(input, m, f, shared ?? state2, shape);
       const checkpoint = (i + 1) % this.every === 0;
-      const kept4 = this.remember(key, step, checkpoint ? "checkpoint" : i === n - 1 ? "tail" : null, shared !== null);
+      const kept5 = this.remember(key, step, checkpoint ? "checkpoint" : i === n - 1 ? "tail" : null, shared !== null);
       steps.push(step);
       keys.push(key);
       parent = step.result.path;
       paused = step.paused;
-      if (kept4 && checkpoint && input.snapshots && input.pauses.length === 0)
-        input.snapshots.put(this.snapshotOf(hashParts(context, parent, shape), steps, kept4));
+      if (kept5 && checkpoint && input.snapshots && input.pauses.length === 0)
+        input.snapshots.put(this.snapshotOf(hashParts(context, parent, shape), steps, kept5));
     }
     const out2 = { state: shared ? input.share ? shared : structuredClone(shared) : state2, notes: [], keepReport: [], messages: [], resolved: [], violations: [], layerDrops: [] };
     for (const s of steps) {
@@ -121806,14 +124852,14 @@ class LedgerFold {
     });
     return snap;
   }
-  remember(key, step, kept4, shared) {
-    const state2 = kept4 && step.state ? shared ? step.state : structuredClone(step.state) : null;
+  remember(key, step, kept5, shared) {
+    const state2 = kept5 && step.state ? shared ? step.state : structuredClone(step.state) : null;
     this.cache.delete(key);
     this.cache.set(key, { ...step, state: state2 });
     this.kept.checkpoint.delete(key);
     this.kept.tail.delete(key);
-    if (kept4 && state2)
-      this.keep(kept4, key);
+    if (kept5 && state2)
+      this.keep(kept5, key);
     const limit4 = Math.max(1, this.limit());
     for (const oldest of this.cache.keys()) {
       if (this.cache.size <= limit4)
@@ -121825,14 +124871,14 @@ class LedgerFold {
     return state2;
   }
   keep(kind, key) {
-    const kept4 = this.kept[kind];
-    kept4.delete(key);
-    kept4.set(key, true);
-    while (kept4.size > KEPT_LIMIT[kind]) {
-      const oldest = kept4.keys().next().value;
+    const kept5 = this.kept[kind];
+    kept5.delete(key);
+    kept5.set(key, true);
+    while (kept5.size > KEPT_LIMIT[kind]) {
+      const oldest = kept5.keys().next().value;
       if (oldest === undefined)
         break;
-      kept4.delete(oldest);
+      kept5.delete(oldest);
       const entry2 = this.cache.get(oldest);
       if (entry2)
         entry2.state = null;
@@ -121860,8 +124906,8 @@ class LedgerFold {
     const marker = (mk) => {
       if (mk.kind === "migrate" && !input.worlds(mk.to))
         throw new FoldError(`unknown revision ${mk.to}`);
-      for (const text6 of applyMarker(state2, mk, env))
-        notes.push({ kind: "note", messageId: m.id, ref: { marker: mk.seq }, text: text6 });
+      for (const text7 of applyMarker(state2, mk, env))
+        notes.push({ kind: "note", messageId: m.id, ref: { marker: mk.seq }, text: text7 });
     };
     const { rec, recPath, liveMarkers, livePost } = f;
     const parent = f.result.parentPath;
@@ -121880,10 +124926,10 @@ class LedgerFold {
         converged = asOnPath && original !== undefined && original === hashJson(state2);
       }
       const converted = rec.keep?.[parent]?.convert ?? [];
-      const record4 = rec;
+      const record5 = rec;
       const fell = new Set;
       const event = (ev, ref) => {
-        if (record4.undone.some((u) => refEq(u, ref)))
+        if (record5.undone.some((u) => refEq(u, ref)))
           return false;
         if (converged) {
           applyEvent(types, ev, state2, ctx());
@@ -121906,18 +124952,18 @@ class LedgerFold {
         applyEvent(types, ev, state2, ctx());
         return false;
       };
-      const run2 = (list3, refOf) => {
+      const run2 = (list4, refOf) => {
         const unitAt = (i) => {
-          const group4 = list3[i]?.group;
+          const group4 = list4[i]?.group;
           let end = i + 1;
           if (group4 !== undefined)
-            while (end < list3.length && list3[end]?.group === group4)
+            while (end < list4.length && list4[end]?.group === group4)
               end++;
           const unit3 = [];
           for (let k = i;k < end; k++) {
-            const ev = list3[k];
+            const ev = list4[k];
             const ref = refOf(k);
-            if (ev && !record4.undone.some((u) => refEq(u, ref)))
+            if (ev && !record5.undone.some((u) => refEq(u, ref)))
               unit3.push({ ev, ref });
           }
           return { end, unit: unit3 };
@@ -121946,10 +124992,10 @@ class LedgerFold {
             fell.add(group4);
         };
         const isConverted = (unit3) => unit3.some((u) => converted.some((c) => refEq(c, u.ref)));
-        for (let i = 0;i < list3.length; ) {
+        for (let i = 0;i < list4.length; ) {
           const { end, unit: unit3 } = unitAt(i);
-          const group4 = list3[i]?.group;
-          const host = view && !converged ? apartHost(list3, [i, end]) : null;
+          const group4 = list4[i]?.group;
+          const host = view && !converged ? apartHost(list4, [i, end]) : null;
           const hosted = host ? unitAt(host[0]).unit : [];
           if (host && !isConverted(unit3) && !isConverted(hosted)) {
             i = host[1];
@@ -121965,7 +125011,7 @@ class LedgerFold {
               for (const u of hosted)
                 applyEvent(types, u.ev, state2, ctx());
             else
-              drop2(hosted, alone2.reason, list3[host[0]]?.group);
+              drop2(hosted, alone2.reason, list4[host[0]]?.group);
             continue;
           }
           i = end;
@@ -121995,9 +125041,9 @@ class LedgerFold {
         }
       };
       const post = (p) => {
-        const refOf = (index) => ({ in: "post", seq: p.seq, index });
+        const refOf = (index2) => ({ in: "post", seq: p.seq, index: index2 });
         const own2 = (u) => u.in === "post" && u.seq === p.seq;
-        const asked2 = view && p.kind === "fix" && p.edit !== undefined && !record4.undone.some(own2) && !converted.some(own2);
+        const asked2 = view && p.kind === "fix" && p.edit !== undefined && !record5.undone.some(own2) && !converted.some(own2);
         const world = asked2 ? input.worlds(state2.revision) : undefined;
         if (asked2 && !world)
           throw new FoldError(`unknown revision ${state2.revision}`);
@@ -122018,11 +125064,11 @@ class LedgerFold {
           applyEvent(types, ev, state2, ctx());
       };
       for (const mk of liveMarkers)
-        if (mk.seq <= record4.markersApplied)
+        if (mk.seq <= record5.markersApplied)
           marker(mk);
-      run2(record4.events, (index) => ({ in: "events", index }));
+      run2(record5.events, (index2) => ({ in: "events", index: index2 }));
       const later = [
-        ...liveMarkers.filter((mk) => mk.seq > record4.markersApplied).map((mk) => ({ seq: mk.seq, marker: mk })),
+        ...liveMarkers.filter((mk) => mk.seq > record5.markersApplied).map((mk) => ({ seq: mk.seq, marker: mk })),
         ...livePost.map((p) => ({ seq: p.seq, post: p }))
       ].sort((a, b) => a.seq - b.seq);
       for (const item2 of later) {
@@ -122163,12 +125209,12 @@ function pathOfFileUrl(url) {
     return `\\\\${parsed.hostname}${path2.replaceAll("/", "\\")}`;
   return /^\/[A-Za-z]:\//.test(path2) ? path2.slice(1).replaceAll("/", "\\") : path2;
 }
-function shellWord(text6) {
-  if (/^[\w./:\\@%+=,-]+$/.test(text6))
-    return text6;
-  if (!/["$`]/.test(text6))
-    return `"${text6}"`;
-  return `'${text6.replaceAll("'", "'\\''")}'`;
+function shellWord(text7) {
+  if (/^[\w./:\\@%+=,-]+$/.test(text7))
+    return text7;
+  if (!/["$`]/.test(text7))
+    return `"${text7}"`;
+  return `'${text7.replaceAll("'", "'\\''")}'`;
 }
 var RUNTIMES = [
   { runtime: "bun", needs: "Bun 1.4 or newer" },
@@ -122236,15 +125282,15 @@ var BODY_LIMIT = 20000;
 function count4(n, one, many = `${one}s`) {
   return `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 }
-function cutAt2(text6, end) {
-  const code = text6.charCodeAt(end - 1);
-  return end > 0 && end < text6.length && code >= 55296 && code <= 56319 ? end - 1 : end;
+function cutAt2(text7, end) {
+  const code = text7.charCodeAt(end - 1);
+  return end > 0 && end < text7.length && code >= 55296 && code <= 56319 ? end - 1 : end;
 }
-function clip2(text6, max) {
-  if (text6.length <= max)
-    return text6;
-  const end = cutAt2(text6, max);
-  return `${text6.slice(0, end)}\u2026[${count4(text6.length - end, "more character")}]`;
+function clip2(text7, max) {
+  if (text7.length <= max)
+    return text7;
+  const end = cutAt2(text7, max);
+  return `${text7.slice(0, end)}\u2026[${count4(text7.length - end, "more character")}]`;
 }
 function jsonText(value, compact = false) {
   return (compact ? JSON.stringify(value) : JSON.stringify(value, null, 1)) ?? "null";
@@ -122286,12 +125332,12 @@ function outlineLine(label3, value) {
     return `- ${label3}: ${clip2(JSON.stringify(value), 200)}`;
   return `- ${label3}: ${JSON.stringify(value) ?? "null"}`;
 }
-function itemLine(index, item2) {
+function itemLine(index2, item2) {
   const name = nameOf15(item2);
   const id2 = isRecord(item2) && typeof item2.id === "string" ? item2.id : null;
   if (name !== null || id2 !== null)
-    return `- [${index}] ${[id2, name].filter((x) => x !== null).join(": ")} (${count4(jsonText(item2).length, "character")})`;
-  return `- [${index}] ${clip2(JSON.stringify(item2) ?? "null", 160)}`;
+    return `- [${index2}] ${[id2, name].filter((x) => x !== null).join(": ")} (${count4(jsonText(item2).length, "character")})`;
+  return `- [${index2}] ${clip2(JSON.stringify(item2) ?? "null", 160)}`;
 }
 function outline2(value, pointer, from = 0) {
   const lines2 = [];
@@ -122369,37 +125415,37 @@ function readAt(root, options) {
   }
   if (options.from !== undefined || options.limit !== undefined)
     return entriesOf(value, where, indexed, options.from ?? 0, options.limit);
-  const text6 = jsonText(value, options.compact);
+  const text7 = jsonText(value, options.compact);
   if (options.offset !== undefined) {
     let offset = Math.floor(options.offset);
-    if (!(offset >= 0) || offset >= text6.length)
-      return { ok: false, text: `offset ${options.offset} is outside ${where}: its JSON text has ${count4(text6.length, "character")} (offsets 0\u2013${text6.length - 1}).` };
-    if (offset > 0 && cutAt2(text6, offset) < offset)
+    if (!(offset >= 0) || offset >= text7.length)
+      return { ok: false, text: `offset ${options.offset} is outside ${where}: its JSON text has ${count4(text7.length, "character")} (offsets 0\u2013${text7.length - 1}).` };
+    if (offset > 0 && cutAt2(text7, offset) < offset)
       offset -= 1;
-    const end = cutAt2(text6, Math.min(text6.length, offset + BODY_LIMIT));
-    const next = end < text6.length ? `
+    const end = cutAt2(text7, Math.min(text7.length, offset + BODY_LIMIT));
+    const next = end < text7.length ? `
 
 (Continues: read on with offset ${end}.)` : `
 
 (That is the end.)`;
-    return { ok: true, text: `${where}, characters ${offset}\u2013${end} of ${text6.length}:
+    return { ok: true, text: `${where}, characters ${offset}\u2013${end} of ${text7.length}:
 
-${text6.slice(offset, end)}${next}` };
+${text7.slice(offset, end)}${next}` };
   }
-  if (text6.length <= BODY_LIMIT)
+  if (text7.length <= BODY_LIMIT)
     return { ok: true, text: `${where}, ${kindOf3(value)}:
 
-${text6}` };
+${text7}` };
   if (!isRecord(value) && !Array.isArray(value)) {
-    const end = cutAt2(text6, BODY_LIMIT);
-    return { ok: true, text: `${where}, ${kindOf3(value)}, characters 0\u2013${end} of ${text6.length}:
+    const end = cutAt2(text7, BODY_LIMIT);
+    return { ok: true, text: `${where}, ${kindOf3(value)}, characters 0\u2013${end} of ${text7.length}:
 
-${text6.slice(0, end)}
+${text7.slice(0, end)}
 
 (Continues: read on with offset ${end}.)` };
   }
   const deeper = Array.isArray(value) ? `${indexed}/0` : `${indexed}/<key>`;
-  return { ok: true, text: `${where} is ${kindOf3(value)}, ${count4(text6.length, "character")} as JSON: too big for one answer, so here is its outline. Read a part with pointer "${deeper}", page through its entries with from, or through its JSON with offset 0.
+  return { ok: true, text: `${where} is ${kindOf3(value)}, ${count4(text7.length, "character")} as JSON: too big for one answer, so here is its outline. Read a part with pointer "${deeper}", page through its entries with from, or through its JSON with offset 0.
 
 ${outline2(value, indexed)}` };
 }
@@ -122412,12 +125458,12 @@ function entriesOf(value, where, pointer, from, limit4) {
     return { ok: false, text: `from ${from} is outside ${where}: it has ${count4(entries2.length, "entry", "entries")} (from 0\u2013${Math.max(0, entries2.length - 1)}).` };
   const end = Math.min(entries2.length, limit4 === undefined ? entries2.length : start + Math.max(1, Math.floor(limit4)));
   const page10 = Array.isArray(value) ? value.slice(start, end) : Object.fromEntries(entries2.slice(start, end));
-  const text6 = jsonText(page10);
+  const text7 = jsonText(page10);
   const next = (at2) => at2 < entries2.length ? `(Continues: read on with from ${at2}.)` : "(That is the end.)";
-  if (text6.length <= BODY_LIMIT)
+  if (text7.length <= BODY_LIMIT)
     return { ok: true, text: `${where}, entries ${start}\u2013${Math.max(start, end - 1)} of ${entries2.length}${Array.isArray(value) ? " (by index)" : ""}:
 
-${text6}
+${text7}
 
 ${next(end)}` };
   return { ok: true, text: `${where}, entries from ${start} of ${entries2.length}, too big for one answer as JSON, so here is their outline:
@@ -122583,7 +125629,7 @@ class KeyedQueue {
 function json(value) {
   return JSON.stringify(value, null, 2) ?? "null";
 }
-var RANK3 = { error: 0, warning: 1, info: 2 };
+var RANK4 = { error: 0, warning: 1, info: 2 };
 function lintSummary(issues, shown3 = 12) {
   const sorted = ranked(issues);
   return {
@@ -122595,7 +125641,7 @@ function lintSummary(issues, shown3 = 12) {
   };
 }
 function ranked(issues, first) {
-  return [...issues].sort((a, b) => Number(first?.has(b) === true) - Number(first?.has(a) === true) || RANK3[a.severity] - RANK3[b.severity]);
+  return [...issues].sort((a, b) => Number(first?.has(b) === true) - Number(first?.has(a) === true) || RANK4[a.severity] - RANK4[b.severity]);
 }
 function refusedText(code, message, lint) {
   return `LumiRPEngine refused it (${code}): ${message}${lint.length > 0 ? `
@@ -122612,7 +125658,7 @@ function schemaWorld(world, registry) {
 function objectSchema(properties, required = []) {
   return { type: "object", properties: { ...properties }, ...required.length > 0 ? { required: [...required] } : {}, additionalProperties: false };
 }
-function text6(values = []) {
+function text7(values = []) {
   return values.length > 0 ? { type: "string", enum: [...values] } : { type: "string" };
 }
 function integer(bounds = {}) {
@@ -122662,9 +125708,9 @@ function intArg2(args, key) {
   const n = typeof v4 === "string" && v4.trim() !== "" ? Number(v4) : v4;
   return typeof n === "number" && Number.isInteger(n) ? n : null;
 }
-function jsonTextOf(text7) {
+function jsonTextOf(text8) {
   try {
-    return JSON.parse(text7);
+    return JSON.parse(text8);
   } catch {
     return;
   }
@@ -122705,8 +125751,8 @@ async function pinsRead2(args, ctx) {
 }
 async function saveTool(args, ctx) {
   const chatId = neededText(args, "chatId", "the chat's id (lre_chats lists them)");
-  const text7 = textArg(args, "text");
-  const saved = await ctx.request("lre.lore", text7 === undefined ? { op: "save", chatId } : { op: "save", chatId, text: text7 });
+  const text8 = textArg(args, "text");
+  const saved = await ctx.request("lre.lore", text8 === undefined ? { op: "save", chatId } : { op: "save", chatId, text: text8 });
   if (saved.worldId === undefined || saved.id === undefined)
     throw new ToolError("LumiRPEngine saved the entry but didn't say where; lre_draft of the chat's world shows it.");
   const draft = await ctx.request("lre.editor", { op: "get", worldId: saved.worldId, base: null });
@@ -122805,7 +125851,7 @@ var QUEUED = {
 };
 var queuedOf = (body) => body.pending ? { queued: body.queued ?? "reply", waits: QUEUED[body.queued ?? "reply"] } : {};
 var chatIdOf = (args) => neededText(args, "chatId", "the chat's id (lre_chats lists the chats that play a world)");
-async function ask2(ctx, chatId, type, fields) {
+async function ask4(ctx, chatId, type, fields) {
   try {
     return await ctx.request(type, fields);
   } catch (error) {
@@ -122835,7 +125881,7 @@ function chipOut(chip) {
     expires: chip.expires
   };
 }
-var stateOf2 = async (ctx, chatId) => ask2(ctx, chatId, "lre.state.get", { chatId });
+var stateOf2 = async (ctx, chatId) => ask4(ctx, chatId, "lre.state.get", { chatId });
 async function chatState(args, ctx) {
   const chatId = chatIdOf(args);
   const { view, activity } = await stateOf2(ctx, chatId);
@@ -122864,14 +125910,14 @@ function chatGm(ctx, chatId) {
     what: `the GM view of chat ${chatId}`,
     parts: [GM_PARTS[0], GM_ROSTER, ...GM_PARTS.slice(1)],
     part: async (part, pick3 = {}) => {
-      const read = await ask2(ctx, chatId, "lre.gm.part", { chatId, part, ...pick3 });
+      const read = await ask4(ctx, chatId, "lre.gm.part", { chatId, part, ...pick3 });
       return read.same ? { id: read.id, value: null, key: read.key, same: true } : { id: read.id, value: read.value, key: read.key };
     },
     outline: async () => {
-      const read = await ask2(ctx, chatId, "lre.gm.part", { chatId, part: GM_OUTLINE });
+      const read = await ask4(ctx, chatId, "lre.gm.part", { chatId, part: GM_OUTLINE });
       return read.same || read.part !== GM_OUTLINE ? [] : read.value;
     },
-    whole: () => ask2(ctx, chatId, "lre.gm", { chatId }),
+    whole: () => ask4(ctx, chatId, "lre.gm", { chatId }),
     noneNamed: (part, said2) => noneNamed(part, said2, `chat ${chatId}`)
   };
 }
@@ -122882,12 +125928,12 @@ async function gmView(args, ctx) {
 async function sections(args, ctx) {
   gate(args, "lre_sections", "shows what the narrator would be told, facts the player character doesn't know included where a section's scope adds them");
   const chatId = chatIdOf(args);
-  return readOut(await ask2(ctx, chatId, "lre.sections", { chatId }), `the sections the narrator would get in chat ${chatId}'s next turn, in prompt order`, args);
+  return readOut(await ask4(ctx, chatId, "lre.sections", { chatId }), `the sections the narrator would get in chat ${chatId}'s next turn, in prompt order`, args);
 }
 async function minds(args, ctx) {
   gate(args, "lre_minds", "shows characters' private minds, plans and notes");
   const chatId = chatIdOf(args);
-  const [gm, status] = await Promise.all([ask2(ctx, chatId, "lre.gm.part", { chatId, part: "minds" }), ask2(ctx, chatId, "lre.minds", { chatId, op: "status" })]);
+  const [gm, status] = await Promise.all([ask4(ctx, chatId, "lre.gm.part", { chatId, part: "minds" }), ask4(ctx, chatId, "lre.minds", { chatId, op: "status" })]);
   return readOut({ ...builtPart(gm).value, run: status.run }, `the character minds of chat ${chatId} (secrets included), with the latest Run minds now`, args);
 }
 function builtPart(read) {
@@ -122912,14 +125958,14 @@ function foundThing(row) {
 async function itemsFind(args, ctx) {
   gate(args, "lre_items_find", "reads the chat's things as the GM does, hidden and secret ones included");
   const chatId = chatIdOf(args);
-  const words10 = neededText(args, "words", `the words that name the thing, as the story says them ("Danny's truck keys", "the wallet")`);
-  const [{ found = [] }, { list: list3 }] = await Promise.all([ask2(ctx, chatId, "lre.things", { scope: "gm", chatId, op: "find", words: words10 }), ask2(ctx, chatId, "lre.things", { scope: "gm", chatId, op: "list" })]);
-  const rows = new Map((list3?.rows ?? []).map((r) => [r.id, r]));
+  const words11 = neededText(args, "words", `the words that name the thing, as the story says them ("Danny's truck keys", "the wallet")`);
+  const [{ found = [] }, { list: list4 }] = await Promise.all([ask4(ctx, chatId, "lre.things", { scope: "gm", chatId, op: "find", words: words11 }), ask4(ctx, chatId, "lre.things", { scope: "gm", chatId, op: "list" })]);
+  const rows = new Map((list4?.rows ?? []).map((r) => [r.id, r]));
   const things2 = found.map((id2) => {
     const row = rows.get(id2);
     return row ? foundThing(row) : { id: id2 };
   });
-  return { text: json({ chatId, words: words10, things: things2, ...things2.length === 0 ? { note: "Nothing in the chat goes by those words: try fewer of them, or read lre_gm's /entities." } : {} }) };
+  return { text: json({ chatId, words: words11, things: things2, ...things2.length === 0 ? { note: "Nothing in the chat goes by those words: try fewer of them, or read lre_gm's /entities." } : {} }) };
 }
 var PARTY_WORDS = { party: true, "your party": true, "the party": true };
 function orgFound(pages, said2) {
@@ -122944,8 +125990,8 @@ async function orgsRead(args, ctx) {
     throw new ToolError("account cuts an organization's money to one account: give org with it (and part money, or no part).");
   const answer2 = (root, what) => {
     const paged = ["pointer", "offset", "from", "limit"].some((a) => args[a] !== undefined);
-    const text7 = json(root);
-    return paged || text7.length > BODY_LIMIT ? readOut(root, what, args) : { text: text7 };
+    const text8 = json(root);
+    return paged || text8.length > BODY_LIMIT ? readOut(root, what, args) : { text: text8 };
   };
   const shown3 = (page11, more = {}) => {
     const plain4 = JSON.parse(JSON.stringify(page11));
@@ -122960,7 +126006,7 @@ async function orgsRead(args, ctx) {
   };
   if (boolArg(args, "spoilers")) {
     const byWords = said2 !== undefined && hasOwn(PARTY_WORDS, said2.trim().toLowerCase());
-    const { value } = builtPart(await ask2(ctx, chatId, "lre.gm.part", { chatId, part: "orgs", ...said2 !== undefined && !byWords ? { id: said2 } : {} }));
+    const { value } = builtPart(await ask4(ctx, chatId, "lre.gm.part", { chatId, part: "orgs", ...said2 !== undefined && !byWords ? { id: said2 } : {} }));
     const orgs = value;
     if (said2 === undefined)
       return answer2({ chatId, organizations: orgs.map((o) => ({ id: o.page.id, name: o.page.name, type: o.page.type, badge: o.page.badge, runBy: o.page.runBy.map((r) => r.name), people: o.page.people.length })), about: "Read one with lre_orgs {chatId, org, part?, spoilers: true}; change one with lre_gm_edit's org op." }, `GM \u2192 Orgs of chat ${chatId}`);
@@ -122995,7 +126041,7 @@ function fixTool(args, ctx) {
     throw new ToolError("Give value: what the field should hold. Or time, to set the clock.");
   return ctx.serialize(`chat:${chatId}`, async () => {
     if (time !== undefined) {
-      const body2 = await ask2(ctx, chatId, "lre.fix", { chatId, time });
+      const body2 = await ask4(ctx, chatId, "lre.fix", { chatId, time });
       return written2(chatId, { fixed: { time } }, body2);
     }
     let target = { entity: entity2 ?? "", field: field2 ?? "" };
@@ -123010,7 +126056,7 @@ function fixTool(args, ctx) {
     } else if (entity2 === undefined || field2 === undefined)
       throw new ToolError("Give entity and field (the field to fix), or fix (place, weather, cash or scene), or time.");
     const value = args.value;
-    const body = await ask2(ctx, chatId, "lre.fix", { chatId, entity: target.entity, field: target.field, value });
+    const body = await ask4(ctx, chatId, "lre.fix", { chatId, entity: target.entity, field: target.field, value });
     return written2(chatId, { fixed: { ...target, value } }, body);
   });
 }
@@ -123033,7 +126079,7 @@ function gmEdit(args, ctx, name, only) {
   const chatId = chatIdOf(args);
   const ops = editOps(args, only);
   return ctx.serialize(`chat:${chatId}`, async () => {
-    const body = await ask2(ctx, chatId, "lre.edit", { chatId, ops });
+    const body = await ask4(ctx, chatId, "lre.edit", { chatId, ops });
     return written2(chatId, { applied: ops.length, note: "One GM edit, all or nothing, with an Undo chip (lre_chips)." }, body);
   });
 }
@@ -123073,7 +126119,7 @@ function marker(args, ctx) {
   return ctx.serialize(`chat:${chatId}`, async () => {
     let body;
     try {
-      body = await ask2(ctx, chatId, "lre.marker", fields);
+      body = await ask4(ctx, chatId, "lre.marker", fields);
     } catch (error) {
       if (error instanceof Refusal && error.code === "bad_request")
         throw new ToolError(`LumiRPEngine can't read that marker (${error.message}). Check its values against what lre_chat_state shows at /controls, which is what each kind sets, and the shapes this tool's schema describes.`);
@@ -123099,7 +126145,7 @@ function chipTool(args, ctx) {
       throw new ToolError(`The chip ${id2} has no action ${choice}; its actions: ${chip.actions.map((a) => `${a.id} (${a.label})`).join(", ")}.`);
     if (choice === "regenerate" || choice === "continue")
       throw new ToolError(`${chip.label}: ${choice} only ${choice === "continue" ? "continues" : "regenerates"} the reply, which Lumiverse does, not this client: ask the user to press ${START_PRESS[choice]} in the chat.`);
-    const body = await ask2(ctx, chatId, "lre.chip", { chatId, chip: id2, choice, ...isRecord(payload) ? { payload } : {} });
+    const body = await ask4(ctx, chatId, "lre.chip", { chatId, chip: id2, choice, ...isRecord(payload) ? { payload } : {} });
     const sends = chip.kind === "choice" && choice === "send";
     const start = chipStarts(chip, choice);
     return {
@@ -123133,7 +126179,7 @@ function keep(args, ctx) {
       fields = { chatId, choice, messageId, parentPath, refs };
     } else
       fields = { chatId, choice, messageId };
-    const body = await ask2(ctx, chatId, "lre.keep", fields);
+    const body = await ask4(ctx, chatId, "lre.keep", fields);
     return written2(chatId, { choice, messageId }, body);
   });
 }
@@ -123142,7 +126188,7 @@ function viewOpen(args, ctx) {
   const panel = neededText(args, "panel", `the panel's id, a key of /panels in lre_chat_state ("money.hub", "core.context"\u2026)`);
   const entity2 = textArg(args, "entity") ?? null;
   return ctx.serialize(`chat:${chatId}`, async () => {
-    const body = await ask2(ctx, chatId, "lre.view.open", { chatId, panel, entity: entity2 });
+    const body = await ask4(ctx, chatId, "lre.view.open", { chatId, panel, entity: entity2 });
     const note2 = panel === "core.context" ? "The inspector checks the active preset on a dry run of the prompt after this: read lre_inspector (its warnings) again in a moment." : body.materialized ? "Opening it settled detail the chat hadn't decided yet: lre_chat_state shows it now." : "Nothing needed settling: the panel reads as it was.";
     return written2(chatId, { panel, entity: entity2, materialized: body.materialized, note: note2 }, body);
   });
@@ -123153,10 +126199,10 @@ function action(args, ctx) {
   const params = args.params ?? {};
   if (!isRecord(params))
     throw new ToolError("params is an object: the picked option's params, as /palette/entries/<i>/options/<j>/params shows them.");
-  const text7 = textArg(args, "text");
+  const text8 = textArg(args, "text");
   return ctx.serialize(`chat:${chatId}`, async () => {
-    const words10 = text7 !== undefined && text7.trim() !== "" ? text7 : undefined;
-    const body = await ask2(ctx, chatId, "lre.action", { chatId, action: id2, params, source: "palette", ...atOnceByDefault(id2) && words10 === undefined ? {} : { now: true }, ...words10 !== undefined ? { text: words10 } : {} });
+    const words11 = text8 !== undefined && text8.trim() !== "" ? text8 : undefined;
+    const body = await ask4(ctx, chatId, "lre.action", { chatId, action: id2, params, source: "palette", ...atOnceByDefault(id2) && words11 === undefined ? {} : { now: true }, ...words11 !== undefined ? { text: words11 } : {} });
     return { text: json("messageId" in body ? { chatId, action: id2, messageId: body.messageId, reply: REPLY } : ("pending" in body) ? { chatId, action: id2, applied: true, pending: body.pending, ...queuedOf(body), ...body.undo ? { undo: body.undo } : {} } : { chatId, action: id2, applied: true, pending: false }) };
   });
 }
@@ -123168,7 +126214,7 @@ function timelapse(args, ctx) {
   const overrides = args.overrides ?? {};
   if (!isRecord(overrides))
     throw new ToolError(`overrides is an object of interrupt classes (${INTERRUPT_CLASSES.join(", ")}) to stop, note or ignore.`);
-  const text7 = textArg(args, "text");
+  const text8 = textArg(args, "text");
   return ctx.serialize(`chat:${chatId}`, async () => {
     const offered = (await stateOf2(ctx, chatId)).view.palette?.timelapse ?? null;
     if (offered === null)
@@ -123176,7 +126222,7 @@ function timelapse(args, ctx) {
     if (offered.blocked !== null)
       throw new ToolError(`Chat ${chatId} can't timelapse now: ${offered.blocked}`);
     const params = { target, overrides };
-    const body = await ask2(ctx, chatId, "lre.action", { chatId, action: offered.action, params, source: "palette", now: true, ...text7 !== undefined && text7.trim() !== "" ? { text: text7 } : {} });
+    const body = await ask4(ctx, chatId, "lre.action", { chatId, action: offered.action, params, source: "palette", now: true, ...text8 !== undefined && text8.trim() !== "" ? { text: text8 } : {} });
     return { text: json({ chatId, action: offered.action, target, messageId: "messageId" in body ? body.messageId : null, reply: REPLY }) };
   });
 }
@@ -123185,7 +126231,7 @@ function mindsRun(args, ctx) {
   const chatId = chatIdOf(args);
   const who = textsArg(args, "who");
   return ctx.serialize(`chat:${chatId}`, async () => {
-    const body = await ask2(ctx, chatId, "lre.minds", { chatId, op: "run", ...who !== undefined ? { who } : {} });
+    const body = await ask4(ctx, chatId, "lre.minds", { chatId, op: "run", ...who !== undefined ? { who } : {} });
     return { text: json({ chatId, run: body.run, note: "It runs in the background, with model calls on the user's connection, and records the minds as one GM edit with an Undo chip. lre_minds shows its progress at /run; lre_minds_cancel stops it." }) };
   });
 }
@@ -123193,7 +126239,7 @@ function mindsCancel(args, ctx) {
   const chatId = chatIdOf(args);
   const runId = neededText(args, "runId", "the run's id (lre_minds shows it at /run/runId)");
   return ctx.serialize(`chat:${chatId}`, async () => {
-    const run2 = (await ask2(ctx, chatId, "lre.minds", { chatId, op: "cancel", runId })).run;
+    const run2 = (await ask4(ctx, chatId, "lre.minds", { chatId, op: "cancel", runId })).run;
     if (run2 === null || run2.runId !== runId)
       throw new ToolError(`Chat ${chatId} has no run ${runId}${run2 === null ? "" : ` (its latest is ${run2.runId}, ${run2.status})`}: lre_minds shows the latest at /run.`);
     if (run2.status !== "running")
@@ -123378,7 +126424,7 @@ var OUTSIDE_PLAY_TOOLS = [
     run: async (args, ctx) => {
       gate(args, "lre_routine_changes", "shows the GM's changes to people's routines");
       const chatId = chatIdOf(args);
-      return { text: json(await ask2(ctx, chatId, "lre.routine", { chatId, op: "changed" })) };
+      return { text: json(await ask4(ctx, chatId, "lre.routine", { chatId, op: "changed" })) };
     },
     cli: { command: "routine-changes", section: SECTION, usage: "routine-changes <chatId> --spoilers", summary: "Whose routines a chat changed", positionals: ["chatId"], needs: 1, options: { "--spoilers": { arg: "spoilers", as: "flag" } } }
   },
@@ -123397,7 +126443,7 @@ async function routineDay2(args, ctx) {
   if (view === "gm")
     gate(args, "lre_day", "shows a character's whole routine, secrets and the GM's changes included");
   const day2 = intArg(args, "day", Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
-  const body = await ask2(ctx, chatId, "lre.routine", { chatId, op: "day", entity: entity2, view, ...day2 !== undefined && view === "gm" ? { day: day2 } : {} });
+  const body = await ask4(ctx, chatId, "lre.routine", { chatId, op: "day", entity: entity2, view, ...day2 !== undefined && view === "gm" ? { day: day2 } : {} });
   return { text: json(body) };
 }
 
@@ -123406,12 +126452,12 @@ var BOOLEAN = { type: "boolean" };
 var NUMBER2 = { type: "number" };
 var TEXT_LIST = { type: "array", items: { type: "string" } };
 var JSON_VALUE = { type: "string" };
-function jsonArg(args, key, text7 = false) {
+function jsonArg(args, key, text8 = false) {
   const v4 = args[key];
   if (typeof v4 !== "string")
     return v4;
   const parsed = jsonTextOf(v4);
-  return parsed === undefined || text7 && typeof parsed !== "string" ? v4 : parsed;
+  return parsed === undefined || text8 && typeof parsed !== "string" ? v4 : parsed;
 }
 function fieldValueArg(view, args, key, entity2, field2) {
   const kind = own(view.state.entities, entity2)?.kind;
@@ -123575,15 +126621,15 @@ class Sessions {
     const cached = this.read.get(userId);
     const read = await Promise.all(hashes.map(async (hash) => cached?.get(hash) ?? segmentOf(await this.blobs.getJson(userId, hash))));
     const segments = [];
-    const kept4 = new Map;
+    const kept5 = new Map;
     hashes.forEach((hash, i) => {
       const messages = read[i];
       if (!messages)
         return missing2.push(hash);
       segments.push({ hash, messages });
-      kept4.set(hash, messages);
+      kept5.set(hash, messages);
     });
-    this.read.set(userId, kept4);
+    this.read.set(userId, kept5);
     return { summary: base?.summary ?? null, restored: base?.restored === true, segments, missing: missing2 };
   }
   segment(userId, holder, messages) {
@@ -123591,8 +126637,8 @@ class Sessions {
   }
   async compact(userId, holder, at2, summary, keep2) {
     const current2 = await this.expanded(userId, at2);
-    const kept4 = keep2 > 0 ? current2.segments.slice(-keep2) : [];
-    return this.rebase(userId, holder, current2, { summary, segments: kept4 });
+    const kept5 = keep2 > 0 ? current2.segments.slice(-keep2) : [];
+    return this.rebase(userId, holder, current2, { summary, segments: kept5 });
   }
   async rollback(userId, holder, at2, archived) {
     const span2 = baseOf(await this.blobs.getJson(userId, archived));
@@ -123711,7 +126757,7 @@ async function keptFiles(rt, chatId, userId) {
   const [{ learned }, global] = await Promise.all([rt.chatAgents.get(chatId, userId), rt.globalFiles.get(userId)]);
   return { ...learned, ...global };
 }
-function filesOf(head, kept4, keep2, staged = new Map) {
+function filesOf(head, kept5, keep2, staged = new Map) {
   const out2 = new Map;
   const sources = fileSources(head);
   const pins = workspacePins(head.state);
@@ -123720,7 +126766,7 @@ function filesOf(head, kept4, keep2, staged = new Map) {
     const source = by ? { ...by, turn: null } : sources.get(path2);
     out2.set(path2, { path: path2, hash, pinned: own(pins, path2) === true, learned: false, provenance: { ...source?.role !== undefined ? { role: source.role } : {}, ...source?.key !== undefined ? { key: source.key } : {}, turn: source?.turn ?? null } });
   }
-  for (const [path2, file] of Object.entries(kept4)) {
+  for (const [path2, file] of Object.entries(kept5)) {
     out2.set(path2, { path: path2, hash: file.hash, pinned: file.pinned === true, learned: isLearnedPath(path2), provenance: { ...file.role !== undefined ? { role: file.role } : {}, turn: null } });
   }
   for (const file of transcriptFiles(head, keep2))
@@ -123755,7 +126801,7 @@ var WORKSPACE_TOOLS = [
     name: "workspace_list",
     family: "workspace",
     tier: "read",
-    parameters: () => objectSchema({ under: text6() }),
+    parameters: () => objectSchema({ under: text7() }),
     async run(args, env) {
       const view = await env.reader.view();
       const under2 = textArg2(args, "under");
@@ -123768,7 +126814,7 @@ var WORKSPACE_TOOLS = [
     name: "workspace_read",
     family: "workspace",
     tier: "read",
-    parameters: () => objectSchema({ path: text6() }, ["path"]),
+    parameters: () => objectSchema({ path: text7() }, ["path"]),
     async run(args, env) {
       const view = await env.reader.view();
       const path2 = needText(view, "workspace_read", args, "path");
@@ -123782,7 +126828,7 @@ var WORKSPACE_TOOLS = [
     name: "workspace_grep",
     family: "workspace",
     tier: "read",
-    parameters: () => objectSchema({ text: text6(), under: text6() }, ["text"]),
+    parameters: () => objectSchema({ text: text7(), under: text7() }, ["text"]),
     async run(args, env) {
       const view = await env.reader.view();
       const needle = needText(view, "workspace_grep", args, "text");
@@ -123811,7 +126857,7 @@ var WORKSPACE_TOOLS = [
     name: "workspace_write",
     family: "workspace",
     tier: "gm",
-    parameters: () => objectSchema({ path: text6(), text: text6() }, ["path", "text"]),
+    parameters: () => objectSchema({ path: text7(), text: text7() }, ["path", "text"]),
     async run(args, env) {
       const view = await env.reader.view();
       const path2 = needText(view, "workspace_write", args, "path");
@@ -123826,7 +126872,7 @@ var WORKSPACE_TOOLS = [
     name: "workspace_edit",
     family: "workspace",
     tier: "gm",
-    parameters: () => objectSchema({ path: text6(), find: text6(), replace: text6(), all: BOOLEAN }, ["path", "find", "replace"]),
+    parameters: () => objectSchema({ path: text7(), find: text7(), replace: text7(), all: BOOLEAN }, ["path", "find", "replace"]),
     async run(args, env) {
       const view = await env.reader.view();
       const path2 = needText(view, "workspace_edit", args, "path");
@@ -123856,7 +126902,7 @@ var WORKSPACE_TOOLS = [
     name: "workspace_move",
     family: "workspace",
     tier: "gm",
-    parameters: () => objectSchema({ from: text6(), to: text6() }, ["from", "to"]),
+    parameters: () => objectSchema({ from: text7(), to: text7() }, ["from", "to"]),
     async run(args, env) {
       const view = await env.reader.view();
       const from = needText(view, "workspace_move", args, "from");
@@ -123872,7 +126918,7 @@ var WORKSPACE_TOOLS = [
     name: "workspace_delete",
     family: "workspace",
     tier: "gm",
-    parameters: () => objectSchema({ path: text6() }, ["path"]),
+    parameters: () => objectSchema({ path: text7() }, ["path"]),
     async run(args, env) {
       const view = await env.reader.view();
       const path2 = needText(view, "workspace_delete", args, "path");
@@ -123885,7 +126931,7 @@ var WORKSPACE_TOOLS = [
     name: "workspace_pin",
     family: "workspace",
     tier: "gm",
-    parameters: () => objectSchema({ path: text6(), pinned: BOOLEAN }, ["path", "pinned"]),
+    parameters: () => objectSchema({ path: text7(), pinned: BOOLEAN }, ["path", "pinned"]),
     async run(args, env) {
       const view = await env.reader.view();
       const path2 = needText(view, "workspace_pin", args, "path");
@@ -124036,11 +127082,11 @@ class ToolReadView {
       return null;
     return { known: v4 === "known_by" ? this.knowers(null, (who) => loreReadable(this.registry, this.world, this.state, entry2, NARRATOR_READS2, false, this.gate(), who)) : [], kept: "everyone" };
   }
-  mark(text7, secrecy) {
-    return this.marked && secrecy ? secretMarkText(text7, secrecy.known, secrecy.kept, this.wording) : text7;
+  mark(text8, secrecy) {
+    return this.marked && secrecy ? secretMarkText(text8, secrecy.known, secrecy.kept, this.wording) : text8;
   }
-  entryText(text7) {
-    return applyMarks(text7, { world: this.world, state: this.state, wording: this.wording }, "marked");
+  entryText(text8) {
+    return applyMarks(text8, { world: this.world, state: this.state, wording: this.wording }, "marked");
   }
   name(id2) {
     return labelOf(this.ctx, id2);
@@ -124082,16 +127128,16 @@ class ToolReadView {
   }
   loreEntry(entry2) {
     const title = typeof entry2.title === "string" && entry2.title.trim() !== "" ? entry2.title : entry2.id;
-    const text7 = this.entryText(typeof entry2.content === "string" ? entry2.content : "");
+    const text8 = this.entryText(typeof entry2.content === "string" ? entry2.content : "");
     const source = loreSourceOf(entry2.source);
     if (this.knowledge === "gm") {
       const secrecy = this.loreSecrecy(entry2);
       const visibility = entry2.visibility;
-      return { id: entry2.id, title, text: this.mark(text7, secrecy), ...loreIsSecret(entry2) ? { secret: true } : {}, ...secrecy && secrecy.known.length > 0 ? { holders: [...secrecy.known] } : {}, ...typeof visibility === "string" && visibility !== "public" ? { visibility } : {}, ...source.kind === "ai" && source.status === "pending" ? { visibility: "pending review" } : {} };
+      return { id: entry2.id, title, text: this.mark(text8, secrecy), ...loreIsSecret(entry2) ? { secret: true } : {}, ...secrecy && secrecy.known.length > 0 ? { holders: [...secrecy.known] } : {}, ...typeof visibility === "string" && visibility !== "public" ? { visibility } : {}, ...source.kind === "ai" && source.status === "pending" ? { visibility: "pending review" } : {} };
     }
     if (source.kind === "ai" && source.status === "pending")
       return null;
-    return { id: entry2.id, title, text: this.mark(text7, this.loreSecrecy(entry2)) };
+    return { id: entry2.id, title, text: this.mark(text8, this.loreSecrecy(entry2)) };
   }
   blob(hash) {
     return this.readBlob(hash);
@@ -124172,8 +127218,8 @@ async function readableLore2(view) {
   }));
 }
 async function shownIds(view) {
-  const index = await view.loreIndex();
-  const short = new Map((index?.books ?? []).flatMap((b) => b.entries.map((e) => [e.lore, e.id])));
+  const index2 = await view.loreIndex();
+  const short = new Map((index2?.books ?? []).flatMap((b) => b.entries.map((e) => [e.lore, e.id])));
   return (loreId) => {
     const hash = loreId.indexOf("#");
     const base = hash < 0 ? loreId : loreId.slice(0, hash);
@@ -124217,16 +127263,16 @@ async function loreIndexText(view, opts = {}) {
       return written3;
     const lines2 = written3.split(`
 `);
-    const cut = (kept5) => [...lines2.slice(0, kept5), view.text(LORE_INDEX_TEXT.cut, { count: String(lines2.length - kept5), what: nounFor(lines2.length - kept5, "line", "lines") })].join(`
+    const cut = (kept6) => [...lines2.slice(0, kept6), view.text(LORE_INDEX_TEXT.cut, { count: String(lines2.length - kept6), what: nounFor(lines2.length - kept6, "line", "lines") })].join(`
 `);
-    let kept4 = lines2.length - 1;
-    while (kept4 > 0 && tokensOf(cut(kept4)) > tokens3)
-      kept4--;
-    return cut(kept4);
+    let kept5 = lines2.length - 1;
+    while (kept5 > 0 && tokensOf(cut(kept5)) > tokens3)
+      kept5--;
+    return cut(kept5);
   }
-  const index = await view.loreIndex();
+  const index2 = await view.loreIndex();
   const corpus = new Map((await readableLore2(view)).map((r) => [r.entry.id, r]));
-  let books = index?.books ?? [];
+  let books = index2?.books ?? [];
   const wanted = opts.book?.trim();
   if (wanted !== undefined && wanted !== "") {
     books = books.filter((b) => b.bookId === wanted || b.name.trim().toLowerCase() === wanted.toLowerCase());
@@ -124250,19 +127296,19 @@ var LORE_TOOLS2 = [
     name: "lore_index",
     family: "lore",
     tier: "read",
-    parameters: () => objectSchema({ book: text6() }, []),
+    parameters: () => objectSchema({ book: text7() }, []),
     async run(args, env) {
       const view = await env.reader.view();
       const book = textArg2(args, "book");
-      const index = await loreIndexText(view, book !== null ? { book } : {});
-      return typeof index === "string" ? view.answer({ index }) : index;
+      const index2 = await loreIndexText(view, book !== null ? { book } : {});
+      return typeof index2 === "string" ? view.answer({ index: index2 }) : index2;
     }
   },
   {
     name: "lore_search",
     family: "lore",
     tier: "read",
-    parameters: () => objectSchema({ query: text6() }, ["query"]),
+    parameters: () => objectSchema({ query: text7() }, ["query"]),
     async run(args, env) {
       const view = await env.reader.view();
       const query = needText(view, "lore_search", args, "query");
@@ -124284,7 +127330,7 @@ var LORE_TOOLS2 = [
     name: "lore_grep",
     family: "lore",
     tier: "read",
-    parameters: () => objectSchema({ text: text6() }, ["text"]),
+    parameters: () => objectSchema({ text: text7() }, ["text"]),
     async run(args, env) {
       const view = await env.reader.view();
       const needle = needText(view, "lore_grep", args, "text");
@@ -124308,7 +127354,7 @@ var LORE_TOOLS2 = [
     name: "lore_read",
     family: "lore",
     tier: "read",
-    parameters: () => objectSchema({ id: text6() }, ["id"]),
+    parameters: () => objectSchema({ id: text7() }, ["id"]),
     async run(args, env) {
       const view = await env.reader.view();
       const found = await namedLore(view, "lore_read", args);
@@ -124320,7 +127366,7 @@ var LORE_TOOLS2 = [
     family: "lore",
     tier: "read",
     turn: true,
-    parameters: () => objectSchema({ id: text6() }, ["id"]),
+    parameters: () => objectSchema({ id: text7() }, ["id"]),
     async run(args, env) {
       const view = await env.reader.view();
       const found = await namedLore(view, "lore_load", args);
@@ -124335,7 +127381,7 @@ var LORE_TOOLS2 = [
     name: "lore_save",
     family: "lore",
     tier: "gm",
-    parameters: () => objectSchema({ id: text6(), path: text6() }, ["id"]),
+    parameters: () => objectSchema({ id: text7(), path: text7() }, ["id"]),
     async run(args, env) {
       const view = await env.reader.view();
       const found = await namedLore(view, "lore_save", args);
@@ -124349,7 +127395,7 @@ var LORE_TOOLS2 = [
     name: "lore_draft",
     family: "lore",
     tier: "gm",
-    parameters: () => objectSchema({ id: text6(), text: text6(), path: text6() }, ["id", "text"]),
+    parameters: () => objectSchema({ id: text7(), text: text7(), path: text7() }, ["id", "text"]),
     async run(args, env) {
       const view = await env.reader.view();
       const ref = needText(view, "lore_draft", args, "id");
@@ -124403,7 +127449,7 @@ var CONDENSE_TOOLS = [
     family: "workspace",
     tier: "gm",
     summarizes: true,
-    parameters: () => objectSchema({ source: text6(), note: text6(), focus: text6() }, ["source"]),
+    parameters: () => objectSchema({ source: text7(), note: text7(), focus: text7() }, ["source"]),
     async run(args, env) {
       const view = await env.reader.view();
       const ref = needText(view, CONDENSE, args, "source");
@@ -124423,7 +127469,7 @@ var CONDENSE_TOOLS = [
 // src/backend/agents/tools/resolve.ts
 var spaced = (s) => s.trim().replace(/\s+/g, " ").toLowerCase();
 var wordsOf7 = (s) => spaced(s).replace(/['\u2019]s\b/g, "").split(/[^\p{L}\p{N}]+/u).filter((w) => w !== "");
-function matches2(said2, candidates, place2, words10 = true) {
+function matches2(said2, candidates, place2, words11 = true) {
   const trimmed2 = said2.trim();
   const lower2 = trimmed2.toLowerCase();
   const rules = [
@@ -124439,7 +127485,7 @@ function matches2(said2, candidates, place2, words10 = true) {
       });
     }
   ];
-  for (const rule2 of words10 ? rules : rules.slice(0, -1)) {
+  for (const rule2 of words11 ? rules : rules.slice(0, -1)) {
     const found = candidates.filter(rule2);
     if (found.length > 0)
       return found;
@@ -124481,10 +127527,10 @@ function resolveNamedThing(view, said2, holder = false) {
   const [one] = exact;
   if (one && exact.length === 1)
     return { id: one.id };
-  const words10 = resolveThing(view.ctx, said2.trim(), { actor: view.pov, viewer: view.pov, ...holder ? { need: "holder" } : {} });
-  if ("id" in words10 && fits3(words10.id))
-    return { id: words10.id };
-  const several = "ambiguous" in words10 ? words10.ambiguous.map((id2) => `${view.entity(id2)?.name ?? id2} (${id2})`) : exact.map((c) => c.shown);
+  const words11 = resolveThing(view.ctx, said2.trim(), { actor: view.pov, viewer: view.pov, ...holder ? { need: "holder" } : {} });
+  if ("id" in words11 && fits3(words11.id))
+    return { id: words11.id };
+  const several = "ambiguous" in words11 ? words11.ambiguous.map((id2) => `${view.entity(id2)?.name ?? id2} (${id2})`) : exact.map((c) => c.shown);
   if (several.length > 1)
     return { refused: view.refuse(TOOL_NOTE.ambiguous, { name: said2, matches: several.join("; ") }) };
   return { refused: view.refuse(TOOL_NOTE.noThing, { name: said2 }) };
@@ -124585,7 +127631,7 @@ var CHECKS_TOOLS = [
     name: ODDS,
     family: "checks",
     tier: "read",
-    parameters: (world) => objectSchema({ action: text6(actionEnum(world)), actor: text6(), params: jsonObject() }, ["action"]),
+    parameters: (world) => objectSchema({ action: text7(actionEnum(world)), actor: text7(), params: jsonObject() }, ["action"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = needText(view, ODDS, args, "action");
@@ -124645,8 +127691,8 @@ function doingNow(view, id2) {
   const activity = own(view.state.entities, id2)?.fields.activity;
   if (typeof activity !== "string" || activity === "")
     return;
-  const kept4 = id2 !== view.pov && shownActivity(view.ctx, id2, activity) !== activity ? { known: [view.name(id2)], kept: "everyone" } : view.fieldSecrecy(id2, "activity");
-  return view.mark(activity, kept4);
+  const kept5 = id2 !== view.pov && shownActivity(view.ctx, id2, activity) !== activity ? { known: [view.name(id2)], kept: "everyone" } : view.fieldSecrecy(id2, "activity");
+  return view.mark(activity, kept5);
 }
 function whereabouts(view, id2) {
   const now = placeOfEntity(view.state, id2);
@@ -124668,19 +127714,19 @@ async function loreAbout2(view, subjects, secrecy) {
     const shown3 = view.loreEntry(entry2);
     if (!shown3)
       return [];
-    const kept4 = view.marked && view.loreSecrecy(entry2) === null ? secrecy(subject) : null;
-    return [kept4 ? { ...shown3, text: view.mark(shown3.text, kept4) } : shown3];
+    const kept5 = view.marked && view.loreSecrecy(entry2) === null ? secrecy(subject) : null;
+    return [kept5 ? { ...shown3, text: view.mark(shown3.text, kept5) } : shown3];
   }));
 }
 function fieldValue2(view, id2, f) {
-  const kept4 = view.marked ? view.fieldSecrecy(id2, f.id) : null;
+  const kept5 = view.marked ? view.fieldSecrecy(id2, f.id) : null;
   const value = f.value;
   if (f.type === "ref" && typeof value === "string") {
     const ref = hasOwn(view.state.entities, value) ? view.entity(value) : view.place(value);
     if (ref)
-      return kept4 ? { ...ref, name: view.mark(view.name(value), kept4) } : ref;
+      return kept5 ? { ...ref, name: view.mark(view.name(value), kept5) } : ref;
   }
-  return kept4 ? view.mark(typeof value === "string" ? value : JSON.stringify(value), kept4) : value;
+  return kept5 ? view.mark(typeof value === "string" ? value : JSON.stringify(value), kept5) : value;
 }
 function sheetRelations(view, id2, relations) {
   const out2 = [];
@@ -124688,8 +127734,8 @@ function sheetRelations(view, id2, relations) {
     const to = hasOwn(view.state.entities, r.to.id) ? view.entity(r.to.id) : view.place(r.to.id);
     if (!to)
       continue;
-    const words10 = r.words;
-    out2.push({ type: r.type, to, ...words10 !== "" ? { words: words10 } : {} });
+    const words11 = r.words;
+    out2.push({ type: r.type, to, ...words11 !== "" ? { words: words11 } : {} });
   }
   return out2;
 }
@@ -124735,7 +127781,7 @@ var PEOPLE_TOOLS = [
     name: FIND,
     family: "people",
     tier: "read",
-    parameters: (world) => objectSchema({ name: text6(), kind: text6(kindEnum(world, "person")), place: text6(placeEnum(world)) }),
+    parameters: (world) => objectSchema({ name: text7(), kind: text7(kindEnum(world, "person")), place: text7(placeEnum(world)) }),
     run: async (args, env) => {
       const view = await env.reader.view();
       const name = textArg2(args, "name")?.toLowerCase() ?? null;
@@ -124776,7 +127822,7 @@ var PEOPLE_TOOLS = [
     name: SHEET,
     family: "people",
     tier: "read",
-    parameters: () => objectSchema({ person: text6() }, ["person"]),
+    parameters: () => objectSchema({ person: text7() }, ["person"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = needText(view, SHEET, args, "person");
@@ -124799,7 +127845,7 @@ var PEOPLE_TOOLS = [
     name: WHERE2,
     family: "people",
     tier: "read",
-    parameters: () => objectSchema({ person: text6() }, ["person"]),
+    parameters: () => objectSchema({ person: text7() }, ["person"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = needText(view, WHERE2, args, "person");
@@ -124823,7 +127869,7 @@ var PEOPLE_TOOLS = [
     name: REGARD,
     family: "people",
     tier: "read",
-    parameters: () => objectSchema({ person: text6(), toward: text6() }, ["person"]),
+    parameters: () => objectSchema({ person: text7(), toward: text7() }, ["person"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = needText(view, REGARD, args, "person");
@@ -124893,8 +127939,8 @@ function dayAnswer(view, who, offset) {
   }
   const secrecy = blockSecrecy(view, who, day2);
   const blocks = dayPlan(view.ctx, who, day2).blocks.map((b) => {
-    const kept4 = secrecy(b.option);
-    return { from: formatTimeOfDay(dateAt(cal, b.start).minuteOfDay), to: formatTimeOfDay(dateAt(cal, b.end).minuteOfDay), label: view.mark(b.label, kept4), activity: view.mark(b.activity, kept4), place: b.place === null ? null : view.place(b.place) };
+    const kept5 = secrecy(b.option);
+    return { from: formatTimeOfDay(dateAt(cal, b.start).minuteOfDay), to: formatTimeOfDay(dateAt(cal, b.end).minuteOfDay), label: view.mark(b.label, kept5), activity: view.mark(b.activity, kept5), place: b.place === null ? null : view.place(b.place) };
   });
   return { person: person5, day: date, blocks };
 }
@@ -124903,7 +127949,7 @@ var TIME_TOOLS = [
     name: CLOCK,
     family: "time",
     tier: "read",
-    parameters: (world) => objectSchema({ place: text6(placeEnum(world)) }),
+    parameters: (world) => objectSchema({ place: text7(placeEnum(world)) }),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = textArg2(args, "place");
@@ -124919,7 +127965,7 @@ var TIME_TOOLS = [
     name: DAY6,
     family: "time",
     tier: "read",
-    parameters: () => objectSchema({ person: text6(), day: integer() }, ["person"]),
+    parameters: () => objectSchema({ person: text7(), day: integer() }, ["person"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = needText(view, DAY6, args, "person");
@@ -125085,7 +128131,7 @@ var ITEMS_TOOLS = [
     name: INVENTORY,
     family: "items",
     tier: "read",
-    parameters: () => objectSchema({ person: text6() }, ["person"]),
+    parameters: () => objectSchema({ person: text7() }, ["person"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = needText(view, INVENTORY, args, "person");
@@ -125106,7 +128152,7 @@ var ITEMS_TOOLS = [
     name: HOLDER,
     family: "items",
     tier: "read",
-    parameters: () => objectSchema({ thing: text6() }, ["thing"]),
+    parameters: () => objectSchema({ thing: text7() }, ["thing"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = needText(view, HOLDER, args, "thing");
@@ -125125,7 +128171,7 @@ var ITEMS_TOOLS = [
     name: CONDITION,
     family: "items",
     tier: "read",
-    parameters: () => objectSchema({ thing: text6() }, ["thing"]),
+    parameters: () => objectSchema({ thing: text7() }, ["thing"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = needText(view, CONDITION, args, "thing");
@@ -125144,12 +128190,12 @@ var ITEMS_TOOLS = [
     name: "items_find",
     family: "items",
     tier: "read",
-    parameters: () => objectSchema({ words: text6(), near: text6(), owner: text6(), need: text6(["holder"]) }, ["words"]),
+    parameters: () => objectSchema({ words: text7(), near: text7(), owner: text7(), need: text7(["holder"]) }, ["words"]),
     run: async (args, env) => {
       const view = await env.reader.view();
-      const words10 = needText(view, "items_find", args, "words");
-      if (typeof words10 !== "string")
-        return words10;
+      const words11 = needText(view, "items_find", args, "words");
+      if (typeof words11 !== "string")
+        return words11;
       const near = argGiven(args, "near") ? resolvePerson(view, textArg2(args, "near") ?? "") : { id: view.pov };
       if ("refused" in near)
         return near.refused;
@@ -125158,7 +128204,7 @@ var ITEMS_TOOLS = [
         return owner2.refused;
       return view.read(() => {
         const scope = "all";
-        const found = findThings(view.ctx, words10, { actor: near.id, viewer: view.pov, scope, ...owner2 ? { owner: owner2.id } : {}, ...textArg2(args, "need") === "holder" ? { need: "holder" } : {} });
+        const found = findThings(view.ctx, words11, { actor: near.id, viewer: view.pov, scope, ...owner2 ? { owner: owner2.id } : {}, ...textArg2(args, "need") === "holder" ? { need: "holder" } : {} });
         const candidates = found.slice(0, FIND_MAX).map((c) => ({ ...shown3(view, thingRow(view.ctx, c.id)), rank: c.rank, matched: c.by, all: c.full || undefined }));
         const best = found.filter((c) => c.rank === found[0]?.rank && c.full === found[0]?.full);
         return view.answer({ found: found.length === 0 ? "none" : best.length === 1 ? "one" : "several", candidates });
@@ -125169,22 +128215,22 @@ var ITEMS_TOOLS = [
     name: "items_at",
     family: "items",
     tier: "read",
-    parameters: () => objectSchema({ place: text6(), holder: text6(), depth: integer({ minimum: 1, maximum: AT_DEPTH }) }),
+    parameters: () => objectSchema({ place: text7(), holder: text7(), depth: integer({ minimum: 1, maximum: AT_DEPTH }) }),
     run: async (args, env) => {
       const view = await env.reader.view();
       const depth2 = Math.min(AT_DEPTH, Math.max(1, intArg2(args, "depth") ?? 2));
       return view.read(() => {
-        const index = thingIndex(view.ctx);
+        const index2 = thingIndex(view.ctx);
         const tree = (ids2, left) => ids2.filter((id2) => isThing(view.ctx, id2) && !isGone(view.state, id2)).map((id2) => {
           const row = shown3(view, thingRow(view.ctx, id2));
-          const inside2 = index.contents.get(id2) ?? [];
+          const inside2 = index2.contents.get(id2) ?? [];
           return left > 1 && inside2.length > 0 ? { ...row, contents: tree(inside2, left - 1) } : row;
         });
         if (argGiven(args, "holder")) {
           const r2 = resolveEntity(view, textArg2(args, "holder") ?? "");
           if ("refused" in r2)
             return r2.refused;
-          return view.answer({ holder: view.entity(r2.id), contents: tree(index.contents.get(r2.id) ?? [], depth2) });
+          return view.answer({ holder: view.entity(r2.id), contents: tree(index2.contents.get(r2.id) ?? [], depth2) });
         }
         const said2 = textArg2(args, "place");
         if (said2 === null)
@@ -125192,7 +128238,7 @@ var ITEMS_TOOLS = [
         const r = resolvePlace(view, said2);
         if ("refused" in r)
           return r.refused;
-        return view.answer({ place: view.place(r.id), contents: tree(index.loose.get(r.id) ?? [], depth2) });
+        return view.answer({ place: view.place(r.id), contents: tree(index2.loose.get(r.id) ?? [], depth2) });
       });
     }
   },
@@ -125200,7 +128246,7 @@ var ITEMS_TOOLS = [
     name: "items_of",
     family: "items",
     tier: "read",
-    parameters: () => objectSchema({ person: text6() }, ["person"]),
+    parameters: () => objectSchema({ person: text7() }, ["person"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = needText(view, "items_of", args, "person");
@@ -125213,7 +128259,7 @@ var ITEMS_TOOLS = [
         const groups = personThings(view.ctx, r.id);
         if (!groups)
           return view.refuse(TOOL_NOTE.noPerson, { name: said2 });
-        const rows = (list3) => list3.filter((t) => !own(view.state.entities, t.id)?.fields.lost).map((t) => shown3(view, t));
+        const rows = (list4) => list4.filter((t) => !own(view.state.entities, t.id)?.fields.lost).map((t) => shown3(view, t));
         const lost = thingIndex(view.ctx).owned.get(r.id)?.filter((id2) => own(view.state.entities, id2)?.fields.lost === true && !isGone(view.state, id2)) ?? [];
         const person5 = own(view.state.entities, r.id);
         const borrowed = (person5?.relations ?? []).filter((rel) => rel.type === "uses" && isThing(view.ctx, rel.to) && !isGone(view.state, rel.to)).map((rel) => ({ ...shown3(view, thingRow(view.ctx, rel.to)), basis: typeof rel.fields?.basis === "string" ? rel.fields.basis : undefined, until: rel.until === undefined ? undefined : clockWords(view, rel.until) }));
@@ -125225,7 +128271,7 @@ var ITEMS_TOOLS = [
     name: "items_read",
     family: "items",
     tier: "read",
-    parameters: () => objectSchema({ item: text6() }, ["item"]),
+    parameters: () => objectSchema({ item: text7() }, ["item"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = needText(view, "items_read", args, "item");
@@ -125268,7 +128314,7 @@ var ITEMS_TOOLS = [
     name: "items_access",
     family: "items",
     tier: "read",
-    parameters: () => objectSchema({ who: text6(), item: text6() }, ["who", "item"]),
+    parameters: () => objectSchema({ who: text7(), item: text7() }, ["who", "item"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const who = needText(view, "items_access", args, "who");
@@ -125294,7 +128340,7 @@ var ITEMS_TOOLS = [
     name: "vehicles_classes",
     family: "items",
     tier: "read",
-    parameters: () => objectSchema({ domain: text6([...VEHICLE_DOMAINS]), search: text6() }, []),
+    parameters: () => objectSchema({ domain: text7([...VEHICLE_DOMAINS]), search: text7() }, []),
     run: async (args, env) => {
       const view = await env.reader.view();
       const domain = textArg2(args, "domain");
@@ -125387,10 +128433,10 @@ function matching(view, about2, facts, entry2) {
   if (parseFactId(about2) !== null)
     return facts.filter((f) => f.id === about2);
   const named2 = namedBy2(view, about2);
-  const words10 = [...new Set(wordsOf(about2))];
+  const words11 = [...new Set(wordsOf(about2))];
   return facts.map((fact) => {
     const claim2 = new Set(wordsOf(fact.claim));
-    return { fact, names: aboutIds(fact).some((id2) => named2.has(id2)) ? 1 : 0, words: words10.filter((w) => claim2.has(w)).length };
+    return { fact, names: aboutIds(fact).some((id2) => named2.has(id2)) ? 1 : 0, words: words11.filter((w) => claim2.has(w)).length };
   }).filter((m) => m.names + m.words > 0).sort((a, b) => b.names - a.names || b.words - a.words).map((m) => m.fact);
 }
 async function entryNamed(view, about2) {
@@ -125401,12 +128447,12 @@ async function entryNamed(view, about2) {
 }
 function factSecrecy(view, holders) {
   const sure = holders.filter(({ holding }) => !holding.suspicion);
-  const kept4 = sure.map(({ holding }) => holding.keptFromNames).filter((names2) => names2 === "everyone" || names2.length > 0);
-  if (kept4.length === 0)
+  const kept5 = sure.map(({ holding }) => holding.keptFromNames).filter((names2) => names2 === "everyone" || names2.length > 0);
+  if (kept5.length === 0)
     return null;
   return {
     known: sure.map(({ who }) => view.name(who.id)),
-    kept: kept4.includes("everyone") ? "everyone" : [...new Set(kept4.flatMap((names2) => names2 === "everyone" ? [] : names2))]
+    kept: kept5.includes("everyone") ? "everyone" : [...new Set(kept5.flatMap((names2) => names2 === "everyone" ? [] : names2))]
   };
 }
 function factPart(view, fact, secrecy) {
@@ -125415,7 +128461,7 @@ function factPart(view, fact, secrecy) {
   return { fact: fact.id, claim: view.marked ? view.mark(fact.claim, secrecy()) : fact.claim, kind: fact.kind, truth: fact.truth, about: fact.about.map((id2) => view.entity(id2) ?? view.place(id2) ?? view.track(id2) ?? { id: id2, name: view.name(id2) }) };
 }
 function holdingPart(view, h) {
-  const kept4 = h.keptFrom === "everyone" ? "everyone" : (h.keptFrom ?? []).flatMap((id2) => view.entity(id2)?.name ?? []);
+  const kept5 = h.keptFrom === "everyone" ? "everyone" : (h.keptFrom ?? []).flatMap((id2) => view.entity(id2)?.name ?? []);
   return {
     how: h.how,
     by: h.by === null ? null : view.entity(h.by),
@@ -125423,7 +128469,7 @@ function holdingPart(view, h) {
     belief: h.belief,
     confidence: h.confidence,
     suspicion: h.suspicion,
-    keptFrom: kept4 === "everyone" || kept4.length > 0 ? kept4 : undefined,
+    keptFrom: kept5 === "everyone" || kept5.length > 0 ? kept5 : undefined,
     evidence: view.knowledge === "gm" && h.evidenceShown.length > 0 ? h.evidenceShown.map((e) => e.text) : undefined
   };
 }
@@ -125432,7 +128478,7 @@ var KNOWLEDGE_TOOLS = [
     name: "knowledge_who_knows",
     family: "knowledge",
     tier: "read",
-    parameters: () => objectSchema({ about: text6() }, ["about"]),
+    parameters: () => objectSchema({ about: text7() }, ["about"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const about2 = needText(view, "knowledge_who_knows", args, "about");
@@ -125453,7 +128499,7 @@ var KNOWLEDGE_TOOLS = [
     name: "knowledge_what_knows",
     family: "knowledge",
     tier: "read",
-    parameters: () => objectSchema({ person: text6(), about: text6() }, ["person"]),
+    parameters: () => objectSchema({ person: text7(), about: text7() }, ["person"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = needText(view, "knowledge_what_knows", args, "person");
@@ -125486,11 +128532,11 @@ function narratorLine(view, id2) {
 }
 function mindMarker(view, name) {
   if (!view.marked)
-    return (text7) => text7;
+    return (text8) => text8;
   const secrets = unrevealedSecrets(view.registry, view.world, view.state);
   const hidden = hiddenNameCheck(view.registry, view.world, view.state, view.pov);
-  const kept4 = { known: [name], kept: [view.name(view.pov)] };
-  return (text7) => view.mark(text7, findLeaks(text7, secrets).length > 0 || hidden(text7) ? kept4 : null);
+  const kept5 = { known: [name], kept: [view.name(view.pov)] };
+  return (text8) => view.mark(text8, findLeaks(text8, secrets).length > 0 || hidden(text8) ? kept5 : null);
 }
 function gmMind(view, who, c) {
   const person5 = (id2) => view.entity(id2) ?? { id: id2, name: view.name(id2) };
@@ -125515,7 +128561,7 @@ var MINDS_TOOLS = [
     name: "minds_read",
     family: "minds",
     tier: "read",
-    parameters: () => objectSchema({ person: text6() }, ["person"]),
+    parameters: () => objectSchema({ person: text7() }, ["person"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = needText(view, "minds_read", args, "person");
@@ -125640,7 +128686,7 @@ var MONEY_TOOLS = [
     name: BALANCES,
     family: "money",
     tier: "read",
-    parameters: () => objectSchema({ person: text6() }),
+    parameters: () => objectSchema({ person: text7() }),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = textArg2(args, "person");
@@ -125659,7 +128705,7 @@ var MONEY_TOOLS = [
     name: PRICES,
     family: "money",
     tier: "read",
-    parameters: (world) => objectSchema({ item: text6(), place: text6(placeEnum(world)) }),
+    parameters: (world) => objectSchema({ item: text7(), place: text7(placeEnum(world)) }),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = textArg2(args, "place");
@@ -125749,8 +128795,8 @@ function named2(view, value) {
     if (place2.name !== "" && !shown4.has(place2.name) && view.placeSecrecy(id2) !== null)
       shown4.set(place2.name, nameOf16(id2) ?? place2.name);
   const names2 = [...shown4.keys()].sort((a, b) => b.length - a.length).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const words10 = names2.length > 0 ? new RegExp(`(?<![\\p{L}\\p{N}])(?:${names2.join("|")})(?![\\p{L}\\p{N}])`, "gu") : null;
-  const mark2 = (text7) => words10 ? text7.replace(words10, (name) => shown4.get(name) ?? name) : text7;
+  const words11 = names2.length > 0 ? new RegExp(`(?<![\\p{L}\\p{N}])(?:${names2.join("|")})(?![\\p{L}\\p{N}])`, "gu") : null;
+  const mark2 = (text8) => words11 ? text8.replace(words11, (name) => shown4.get(name) ?? name) : text8;
   const walk2 = (v4) => {
     if (typeof v4 === "string")
       return mark2(v4);
@@ -125817,7 +128863,7 @@ var ORGS_TOOLS = [
     name: LIST,
     family: "orgs",
     tier: "read",
-    parameters: () => objectSchema({ who: text6() }),
+    parameters: () => objectSchema({ who: text7() }),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = textArg2(args, "who");
@@ -125849,7 +128895,7 @@ var ORGS_TOOLS = [
     name: READ3,
     family: "orgs",
     tier: "read",
-    parameters: () => objectSchema({ org: text6(), part: text6([...ORG_PARTS]) }, ["org"]),
+    parameters: () => objectSchema({ org: text7(), part: text7([...ORG_PARTS]) }, ["org"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       return view.read(() => {
@@ -125874,7 +128920,7 @@ var ORGS_TOOLS = [
     name: WHO_MAY,
     family: "orgs",
     tier: "read",
-    parameters: () => objectSchema({ org: text6(), power: text6([...ORG_POWERS]), who: text6() }, ["org", "power"]),
+    parameters: () => objectSchema({ org: text7(), power: text7([...ORG_POWERS]), who: text7() }, ["org", "power"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       return view.read(() => {
@@ -125929,7 +128975,7 @@ function placeRead(view, place2, lore2) {
   const fields = own(view.world.places, id2)?.fields ?? {};
   const description = typeof fields.description === "string" ? fields.description.trim() : "";
   const rest = Object.fromEntries(Object.entries(fields).filter(([field2]) => field2 !== "description"));
-  const kept4 = view.placeSecrecy(id2);
+  const kept5 = view.placeSecrecy(id2);
   const inside2 = [...placeChildren(view.world).get(id2) ?? []].sort(byName(view)).flatMap((p) => {
     const ref = view.place(p);
     return ref ? [ref] : [];
@@ -125944,11 +128990,11 @@ function placeRead(view, place2, lore2) {
   return {
     place: place2,
     path: pathOf(view, id2),
-    ...description !== "" ? { description: view.mark(description, kept4) } : {},
+    ...description !== "" ? { description: view.mark(description, kept5) } : {},
     ...Object.keys(rest).length > 0 ? { fields: rest } : {},
     inside: inside2,
     waysOut: ways,
-    ...view.knowledge === "gm" && kept4 ? { knownTo: [...kept4.known] } : {},
+    ...view.knowledge === "gm" && kept5 ? { knownTo: [...kept5.known] } : {},
     lore: lore2
   };
 }
@@ -125989,7 +129035,7 @@ var PLACES_TOOLS = [
     name: READ4,
     family: "places",
     tier: "read",
-    parameters: (world) => objectSchema({ place: text6(placeEnum(world)) }, ["place"]),
+    parameters: (world) => objectSchema({ place: text7(placeEnum(world)) }, ["place"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = needText(view, READ4, args, "place");
@@ -126011,7 +129057,7 @@ var PLACES_TOOLS = [
     name: CONTENTS,
     family: "places",
     tier: "read",
-    parameters: (world) => objectSchema({ place: text6(placeEnum(world)) }, ["place"]),
+    parameters: (world) => objectSchema({ place: text7(placeEnum(world)) }, ["place"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = needText(view, CONTENTS, args, "place");
@@ -126033,7 +129079,7 @@ var PLACES_TOOLS = [
     name: ROUTE,
     family: "places",
     tier: "read",
-    parameters: (world) => objectSchema({ to: text6(placeEnum(world)), from: text6(placeEnum(world)), mode: text6(TRAVEL_MODES) }, ["to"]),
+    parameters: (world) => objectSchema({ to: text7(placeEnum(world)), from: text7(placeEnum(world)), mode: text7(TRAVEL_MODES) }, ["to"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const toSaid = needText(view, ROUTE, args, "to");
@@ -126070,12 +129116,12 @@ var PLACES_TOOLS = [
     name: "places_find",
     family: "places",
     tier: "read",
-    parameters: () => objectSchema({ words: text6(), near: text6(), parent: text6() }, ["words"]),
+    parameters: () => objectSchema({ words: text7(), near: text7(), parent: text7() }, ["words"]),
     run: async (args, env) => {
       const view = await env.reader.view();
-      const words10 = needText(view, "places_find", args, "words");
-      if (typeof words10 !== "string")
-        return words10;
+      const words11 = needText(view, "places_find", args, "words");
+      if (typeof words11 !== "string")
+        return words11;
       const near = textArg2(args, "near") === null ? null : resolvePlace(view, textArg2(args, "near") ?? "");
       if (near && "refused" in near)
         return near.refused;
@@ -126084,7 +129130,7 @@ var PLACES_TOOLS = [
         return parent.refused;
       return view.read(() => {
         const at2 = near?.id ?? placeOfEntity(view.state, view.pov) ?? undefined;
-        const hits = findPlaces(view.ctx, words10, { ...parent ? { parent: parent.id } : {}, ...at2 !== undefined ? { near: at2 } : {} }).filter((h) => view.seesPlace(h.id));
+        const hits = findPlaces(view.ctx, words11, { ...parent ? { parent: parent.id } : {}, ...at2 !== undefined ? { near: at2 } : {} }).filter((h) => view.seesPlace(h.id));
         return view.answer({ places: hits.map((h) => ({ ...placeShown(view, h.id), parent: h.parent === null ? undefined : placeShown(view, h.parent), made: h.made || undefined, matched: h.matched })) });
       });
     }
@@ -126109,7 +129155,7 @@ function standing3(view, id2, t) {
     since: own(view.state.tracks, id2)?.since ?? null,
     status: isTerminal(t, stage) ? Object.values(t.stages).some((s) => s.fail?.to === stage) ? "failed" : "done" : "active",
     revealed: own(readEngineSlice(view.state).revealed, id2) ?? [],
-    words: (text7) => view.mark(text7, secrecy)
+    words: (text8) => view.mark(text8, secrecy)
   };
 }
 function objectivesOf(view, t, def2) {
@@ -126157,16 +129203,16 @@ function stageAnswer(view, id2) {
   };
   const stages = Object.entries(t.stages);
   if (view.knowledge === "everyone") {
-    const kept5 = view.trackSecrecy(id2) ?? KEPT3;
-    return { ...answer2, secrets: stages.flatMap(([sid, s]) => s.truth && !at2.revealed.includes(sid) ? [{ stage: at2.words(s.label), truth: view.mark(s.truth, kept5), current: sid === at2.stage || undefined }] : []) };
+    const kept6 = view.trackSecrecy(id2) ?? KEPT3;
+    return { ...answer2, secrets: stages.flatMap(([sid, s]) => s.truth && !at2.revealed.includes(sid) ? [{ stage: at2.words(s.label), truth: view.mark(s.truth, kept6), current: sid === at2.stage || undefined }] : []) };
   }
-  const kept4 = view.marked ? view.trackSecrecy(id2) ?? KEPT3 : null;
+  const kept5 = view.marked ? view.trackSecrecy(id2) ?? KEPT3 : null;
   return {
     ...answer2,
     stageId: at2.stage,
     visibility: at2.ref.visibility,
     owner: ownerRef(view, t),
-    stages: stages.map(([sid, s]) => ({ id: sid, label: at2.words(s.label), truth: s.truth === undefined || at2.revealed.includes(sid) ? s.truth : view.mark(s.truth, kept4), revealed: s.truth === undefined ? undefined : at2.revealed.includes(sid), current: sid === at2.stage || undefined }))
+    stages: stages.map(([sid, s]) => ({ id: sid, label: at2.words(s.label), truth: s.truth === undefined || at2.revealed.includes(sid) ? s.truth : view.mark(s.truth, kept5), revealed: s.truth === undefined ? undefined : at2.revealed.includes(sid), current: sid === at2.stage || undefined }))
   };
 }
 function movesAnswer(view, id2) {
@@ -126195,7 +129241,7 @@ function trackTool(name, read) {
     name,
     family: "quests",
     tier: "read",
-    parameters: () => objectSchema({ track: text6() }, ["track"]),
+    parameters: () => objectSchema({ track: text7() }, ["track"]),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = needText(view, name, args, "track");
@@ -126214,7 +129260,7 @@ var QUESTS_TOOLS = [
     name: TRACKS,
     family: "quests",
     tier: "read",
-    parameters: () => objectSchema({ kind: text6(TRACK_KINDS) }),
+    parameters: () => objectSchema({ kind: text7(TRACK_KINDS) }),
     run: async (args, env) => {
       const view = await env.reader.view();
       const said2 = textArg2(args, "kind");
@@ -126233,7 +129279,7 @@ var READ_TOOLS = [...PEOPLE_TOOLS, ...PLACES_TOOLS, ...ITEMS_TOOLS, ...MONEY_TOO
 
 // src/backend/agents/tools/write/items.ts
 var DRY = { dry: BOOLEAN };
-var SPOT = { in: text6(), at: text6() };
+var SPOT = { in: text7(), at: text7() };
 function spotOf3(view, tool, args, optional2 = false) {
   const into2 = argGiven(args, "in");
   const at2 = argGiven(args, "at");
@@ -126292,9 +129338,9 @@ async function checkOrPropose(view, env, change2, dry2) {
 var thing2 = (view, tool, args, key = "item") => needId(view, tool, args, key, resolveNamedThing);
 var party = (view, tool, args, key) => needId(view, tool, args, key, resolveEntity);
 var why2 = (view, tool, args) => needText(view, tool, args, "why");
-var SPECS = { type: "array", items: objectSchema({ label: text6(), value: text6() }, ["label", "value"]) };
+var SPECS = { type: "array", items: objectSchema({ label: text7(), value: text7() }, ["label", "value"]) };
 var ITEMS_WRITES = [
-  itemTool("item_make", "story", { name: text6(), type: text6(), class: text6(), details: objectSchema({ make: text6(), model: text6(), year: integer(), colour: text6(), plate: text6(), specs: SPECS }), size: text6([...SIZES]), ...SPOT, owner: text6(), home: text6(), qty: integer({ minimum: 1 }), aliases: TEXT_LIST, hidden: BOOLEAN, why: text6() }, ["name", "why"], (view, args) => {
+  itemTool("item_make", "story", { name: text7(), type: text7(), class: text7(), details: objectSchema({ make: text7(), model: text7(), year: integer(), colour: text7(), plate: text7(), specs: SPECS }), size: text7([...SIZES]), ...SPOT, owner: text7(), home: text7(), qty: integer({ minimum: 1 }), aliases: TEXT_LIST, hidden: BOOLEAN, why: text7() }, ["name", "why"], (view, args) => {
     const name = needText(view, "item_make", args, "name");
     if (isNote2(name))
       return name;
@@ -126334,7 +129380,7 @@ var ITEMS_WRITES = [
       ...boolArg2(args, "hidden") === true ? { hidden: true } : {}
     };
   }),
-  itemTool("item_move", "story", { item: text6(), ...SPOT, why: text6() }, ["item", "why"], (view, args) => {
+  itemTool("item_move", "story", { item: text7(), ...SPOT, why: text7() }, ["item", "why"], (view, args) => {
     const item2 = thing2(view, "item_move", args);
     if (isNote2(item2))
       return item2;
@@ -126344,7 +129390,7 @@ var ITEMS_WRITES = [
     const reason2 = why2(view, "item_move", args);
     return isNote2(reason2) ? reason2 : { do: "move", item: item2, to, why: reason2 };
   }),
-  itemTool("item_hand", "story", { item: text6(), to: text6(), basis: text6([...HANDOVER_BASES]), until: text6(), why: text6() }, ["item", "to", "basis", "why"], (view, args) => {
+  itemTool("item_hand", "story", { item: text7(), to: text7(), basis: text7([...HANDOVER_BASES]), until: text7(), why: text7() }, ["item", "to", "basis", "why"], (view, args) => {
     const item2 = thing2(view, "item_hand", args);
     if (isNote2(item2))
       return item2;
@@ -126362,7 +129408,7 @@ var ITEMS_WRITES = [
     const reason2 = why2(view, "item_hand", args);
     return isNote2(reason2) ? reason2 : { do: "hand", item: item2, to, basis, why: reason2, ...until2 !== undefined ? { until: until2 } : {} };
   }),
-  itemTool("item_own", "story", { item: text6(), owner: text6(), why: text6() }, ["item", "owner", "why"], (view, args) => {
+  itemTool("item_own", "story", { item: text7(), owner: text7(), why: text7() }, ["item", "owner", "why"], (view, args) => {
     const item2 = thing2(view, "item_own", args);
     if (isNote2(item2))
       return item2;
@@ -126375,11 +129421,11 @@ var ITEMS_WRITES = [
     const reason2 = why2(view, "item_own", args);
     return isNote2(reason2) ? reason2 : { do: "own", item: item2, owner: owner2, why: reason2 };
   }),
-  itemTool("item_grant", "story", { item: text6(), who: text6(), basis: text6([...GRANT_BASES]), until: text6(), by: text6() }, ["item", "who"], (view, args) => grantOf2(view, "item_grant", args)),
-  itemTool("item_revoke", "story", { item: text6(), who: text6() }, ["item", "who"], (view, args) => grantOf2(view, "item_revoke", args)),
-  itemTool("item_permit", "story", { from: text6(), to: text6(), scope: text6([...PERMIT_SCOPES]), until: text6(), by: text6() }, ["from", "to"], (view, args) => permitOf2(view, "item_permit", args)),
-  itemTool("item_unpermit", "story", { from: text6(), to: text6() }, ["from", "to"], (view, args) => permitOf2(view, "item_unpermit", args)),
-  itemTool("item_home", "story", { item: text6(), ...SPOT, owner: BOOLEAN, clear: BOOLEAN }, ["item"], (view, args) => {
+  itemTool("item_grant", "story", { item: text7(), who: text7(), basis: text7([...GRANT_BASES]), until: text7(), by: text7() }, ["item", "who"], (view, args) => grantOf2(view, "item_grant", args)),
+  itemTool("item_revoke", "story", { item: text7(), who: text7() }, ["item", "who"], (view, args) => grantOf2(view, "item_revoke", args)),
+  itemTool("item_permit", "story", { from: text7(), to: text7(), scope: text7([...PERMIT_SCOPES]), until: text7(), by: text7() }, ["from", "to"], (view, args) => permitOf2(view, "item_permit", args)),
+  itemTool("item_unpermit", "story", { from: text7(), to: text7() }, ["from", "to"], (view, args) => permitOf2(view, "item_unpermit", args)),
+  itemTool("item_home", "story", { item: text7(), ...SPOT, owner: BOOLEAN, clear: BOOLEAN }, ["item"], (view, args) => {
     const item2 = thing2(view, "item_home", args);
     if (isNote2(item2))
       return item2;
@@ -126392,14 +129438,14 @@ var ITEMS_WRITES = [
       return view.refuse(WRITE_NOTE.oneHome, { tool: "item_home" });
     return { do: "home", item: item2, home: clear ? null : onOwner ? "owner" : spot };
   }),
-  itemTool("item_use", "story", { item: text6(), qty: integer({ minimum: 1 }) }, ["item"], (view, args) => {
+  itemTool("item_use", "story", { item: text7(), qty: integer({ minimum: 1 }) }, ["item"], (view, args) => {
     const item2 = thing2(view, "item_use", args);
     if (isNote2(item2))
       return item2;
     const qty = intArg2(args, "qty");
     return { do: "use", item: item2, ...qty !== null ? { qty } : {} };
   }),
-  itemTool("item_wear", "story", { item: text6(), who: text6(), off: BOOLEAN, slot: text6() }, ["item", "who"], (view, args) => {
+  itemTool("item_wear", "story", { item: text7(), who: text7(), off: BOOLEAN, slot: text7() }, ["item", "who"], (view, args) => {
     const item2 = thing2(view, "item_wear", args);
     if (isNote2(item2))
       return item2;
@@ -126410,14 +129456,14 @@ var ITEMS_WRITES = [
     const slot = said2 === "ready" || said2 === "hand" || said2 === "in_hand" ? "hand_held" : said2;
     return { do: "wear", item: item2, who, ...boolArg2(args, "off") === true ? { off: true } : {}, ...slot !== undefined && slot !== "" ? { slot } : {} };
   }),
-  itemTool("item_condition", "story", { item: text6(), delta: integer() }, ["item", "delta"], (view, args) => {
+  itemTool("item_condition", "story", { item: text7(), delta: integer() }, ["item", "delta"], (view, args) => {
     const item2 = thing2(view, "item_condition", args);
     if (isNote2(item2))
       return item2;
     const delta = intArg2(args, "delta");
     return delta === null ? missing(view, "item_condition", "delta") : { do: "condition", item: item2, delta };
   }),
-  itemTool("item_lose", "story", { item: text6(), by: text6() }, ["item"], (view, args) => {
+  itemTool("item_lose", "story", { item: text7(), by: text7() }, ["item"], (view, args) => {
     const item2 = thing2(view, "item_lose", args);
     if (isNote2(item2))
       return item2;
@@ -126426,7 +129472,7 @@ var ITEMS_WRITES = [
       return by;
     return { do: "lose", item: item2, ...by !== undefined ? { by } : {} };
   }),
-  itemTool("item_label", "story", { item: text6(), name: text6(), aliases: TEXT_LIST, description: text6(), size: text6([...SIZES]), specs: SPECS }, ["item"], (view, args) => {
+  itemTool("item_label", "story", { item: text7(), name: text7(), aliases: TEXT_LIST, description: text7(), size: text7([...SIZES]), specs: SPECS }, ["item"], (view, args) => {
     const item2 = thing2(view, "item_label", args);
     if (isNote2(item2))
       return item2;
@@ -126439,21 +129485,21 @@ var ITEMS_WRITES = [
     const specs = vehicleSpecsOf(args.specs);
     return { do: "label", item: item2, ...name !== null ? { name } : {}, ...aliases !== null ? { aliases } : {}, ...description !== null ? { description } : {}, ...size !== undefined ? { size } : {}, ...specs !== null ? { specs } : {} };
   }),
-  itemTool("item_merge", "story", { keep: text6(), drop: text6() }, ["keep", "drop"], (view, args) => {
+  itemTool("item_merge", "story", { keep: text7(), drop: text7() }, ["keep", "drop"], (view, args) => {
     const keep2 = thing2(view, "item_merge", args, "keep");
     if (isNote2(keep2))
       return keep2;
     const drop2 = thing2(view, "item_merge", args, "drop");
     return isNote2(drop2) ? drop2 : { do: "merge", keep: keep2, drop: drop2 };
   }),
-  itemTool("item_remove", "gm", { item: text6(), why: text6() }, ["item", "why"], (view, args) => {
+  itemTool("item_remove", "gm", { item: text7(), why: text7() }, ["item", "why"], (view, args) => {
     const item2 = thing2(view, "item_remove", args);
     if (isNote2(item2))
       return item2;
     const reason2 = why2(view, "item_remove", args);
     return isNote2(reason2) ? reason2 : { do: "remove", item: item2, why: reason2 };
   }),
-  itemTool("set_save", "story", { who: text6(), name: text6(), kind: text6([...SET_KINDS]), pieces: TEXT_LIST }, ["who", "name", "kind"], (view, args) => {
+  itemTool("set_save", "story", { who: text7(), name: text7(), kind: text7([...SET_KINDS]), pieces: TEXT_LIST }, ["who", "name", "kind"], (view, args) => {
     const who = needId(view, "set_save", args, "who", resolvePerson);
     if (isNote2(who))
       return who;
@@ -126474,7 +129520,7 @@ var ITEMS_WRITES = [
     }
     return { do: "set_save", who, name, kind, ...pieces.length > 0 ? { pieces } : {} };
   }),
-  itemTool("set_apply", "story", { who: text6(), set: text6() }, ["who", "set"], (view, args) => {
+  itemTool("set_apply", "story", { who: text7(), set: text7() }, ["who", "set"], (view, args) => {
     const who = needId(view, "set_apply", args, "who", resolvePerson);
     if (isNote2(who))
       return who;
@@ -126546,7 +129592,7 @@ var KNOWLEDGE_WRITES = [
     name: "gm_feed",
     family: "knowledge",
     tier: "gm",
-    parameters: (world) => objectSchema({ section: text6(sectionsOf2(world).map((s) => s.id)), settings: jsonObject() }, ["section"]),
+    parameters: (world) => objectSchema({ section: text7(sectionsOf2(world).map((s) => s.id)), settings: jsonObject() }, ["section"]),
     async run(args, env) {
       const view = await env.reader.view();
       const section2 = needText(view, "gm_feed", args, "section");
@@ -126567,14 +129613,14 @@ var KNOWLEDGE_WRITES = [
 var OPS2 = ["mind_pin", "mind_refresh", "mind_memory", "mind_intent", "mind_knowledge"];
 var PARTS3 = ["note", "commitment", "plan"];
 var NONE3 = "none";
-var LEVELS3 = [...FIDELITIES, NONE3];
+var LEVELS4 = [...FIDELITIES, NONE3];
 var APPROACHES = [...MIND_APPROACHES, NONE3];
 var MINDS_WRITES = [
   {
     name: "gm_mind_edit",
     family: "minds",
     tier: "gm",
-    parameters: () => objectSchema({ op: text6(OPS2), person: text6(), level: text6(LEVELS3), part: text6(PARTS3), id: text6(), value: jsonObject(), text: text6(), approach: text6(APPROACHES), fact: text6(), holding: jsonObject() }, ["op", "person"]),
+    parameters: () => objectSchema({ op: text7(OPS2), person: text7(), level: text7(LEVELS4), part: text7(PARTS3), id: text7(), value: jsonObject(), text: text7(), approach: text7(APPROACHES), fact: text7(), holding: jsonObject() }, ["op", "person"]),
     async run(args, env) {
       const view = await env.reader.view();
       const op = needText(view, "gm_mind_edit", args, "op");
@@ -126591,8 +129637,8 @@ var MINDS_WRITES = [
           const level = needText(view, "gm_mind_edit", args, "level");
           if (typeof level !== "string")
             return level;
-          if (!LEVELS3.includes(level))
-            return badValue(view, "gm_mind_edit", "level", level, LEVELS3);
+          if (!LEVELS4.includes(level))
+            return badValue(view, "gm_mind_edit", "level", level, LEVELS4);
           edit = { op, entity: entity2, level: level === NONE3 ? null : level };
           break;
         }
@@ -126643,7 +129689,7 @@ var MONEY_WRITES = [
     name: "gm_adjust_money",
     family: "money",
     tier: "gm",
-    parameters: () => objectSchema({ account: text6(), cents: integer() }, ["account", "cents"]),
+    parameters: () => objectSchema({ account: text7(), cents: integer() }, ["account", "cents"]),
     async run(args, env) {
       const view = await env.reader.view();
       const account2 = needId(view, "gm_adjust_money", args, "account", resolveEntity);
@@ -126659,7 +129705,7 @@ var MONEY_WRITES = [
     name: "gm_effect",
     family: "money",
     tier: "gm",
-    parameters: () => objectSchema({ effect: text6(), args: jsonObject() }, ["effect"]),
+    parameters: () => objectSchema({ effect: text7(), args: jsonObject() }, ["effect"]),
     async run(args, env) {
       const view = await env.reader.view();
       const effect = needText(view, "gm_effect", args, "effect");
@@ -126676,7 +129722,7 @@ var MONEY_WRITES = [
     family: "money",
     tier: "story",
     notes: true,
-    parameters: () => objectSchema({ item: text6(), category: text6(), payer: text6(), qty: integer({ minimum: 1 }), price: NUMBER2, method: text6(), seller: text6(), size: text6([...SIZES]), at: text6(), class: text6(), details: jsonObject(), finance: jsonObject(), property: text6(), live: { type: "boolean" } }, ["item", "category"]),
+    parameters: () => objectSchema({ item: text7(), category: text7(), payer: text7(), qty: integer({ minimum: 1 }), price: NUMBER2, method: text7(), seller: text7(), size: text7([...SIZES]), at: text7(), class: text7(), details: jsonObject(), finance: jsonObject(), property: text7(), live: { type: "boolean" } }, ["item", "category"]),
     async run(args, env) {
       const view = await env.reader.view();
       const item2 = needText(view, "purchase", args, "item");
@@ -126827,9 +129873,9 @@ var ORGS_WRITES = [
 function tierIds(world) {
   return tiersInOrder(world).map(([id2]) => id2);
 }
-var LEVELS4 = Object.keys(LEVEL_LABEL).map(Number).sort((a, b) => a - b);
-var FOLLOW_TIER = (LEVELS4[0] ?? 0) - 1;
-var LEVEL = { type: "integer", minimum: FOLLOW_TIER, maximum: LEVELS4.at(-1) ?? 0 };
+var LEVELS5 = Object.keys(LEVEL_LABEL).map(Number).sort((a, b) => a - b);
+var FOLLOW_TIER = (LEVELS5[0] ?? 0) - 1;
+var LEVEL = { type: "integer", minimum: FOLLOW_TIER, maximum: LEVELS5.at(-1) ?? 0 };
 function relationEnd(view, said2) {
   const entity2 = resolveEntity(view, said2);
   if (!("refused" in entity2))
@@ -126842,7 +129888,7 @@ var PEOPLE_WRITES = [
     name: "gm_set_field",
     family: "people",
     tier: "gm",
-    parameters: (world) => objectSchema({ entity: text6(), field: text6(fieldEnum(world)), value: JSON_VALUE }, ["entity", "field", "value"]),
+    parameters: (world) => objectSchema({ entity: text7(), field: text7(fieldEnum(world)), value: JSON_VALUE }, ["entity", "field", "value"]),
     async run(args, env) {
       const view = await env.reader.view();
       const entity2 = needId(view, "gm_set_field", args, "entity", resolveEntity);
@@ -126861,7 +129907,7 @@ var PEOPLE_WRITES = [
     name: "gm_add_to_field",
     family: "people",
     tier: "gm",
-    parameters: (world) => objectSchema({ entity: text6(), field: text6(fieldEnum(world)), delta: NUMBER2 }, ["entity", "field", "delta"]),
+    parameters: (world) => objectSchema({ entity: text7(), field: text7(fieldEnum(world)), delta: NUMBER2 }, ["entity", "field", "delta"]),
     async run(args, env) {
       const view = await env.reader.view();
       const entity2 = needId(view, "gm_add_to_field", args, "entity", resolveEntity);
@@ -126880,7 +129926,7 @@ var PEOPLE_WRITES = [
     name: "gm_set_entity",
     family: "people",
     tier: "gm",
-    parameters: (world) => objectSchema({ entity: text6(), tier: text6(tierIds(world)), agent: BOOLEAN, levels: objectSchema(Object.fromEntries(DOMAINS.map((d) => [d, LEVEL]))) }, ["entity"]),
+    parameters: (world) => objectSchema({ entity: text7(), tier: text7(tierIds(world)), agent: BOOLEAN, levels: objectSchema(Object.fromEntries(DOMAINS.map((d) => [d, LEVEL]))) }, ["entity"]),
     async run(args, env) {
       const view = await env.reader.view();
       const entity2 = needId(view, "gm_set_entity", args, "entity", resolveEntity);
@@ -126902,7 +129948,7 @@ var PEOPLE_WRITES = [
     name: "gm_classify",
     family: "people",
     tier: "gm",
-    parameters: () => objectSchema({ entity: text6(), class: jsonObject(), tags: TEXT_LIST }, ["entity", "class", "tags"]),
+    parameters: () => objectSchema({ entity: text7(), class: jsonObject(), tags: TEXT_LIST }, ["entity", "class", "tags"]),
     async run(args, env) {
       const view = await env.reader.view();
       const entity2 = needId(view, "gm_classify", args, "entity", resolveEntity);
@@ -126921,7 +129967,7 @@ var PEOPLE_WRITES = [
     name: "gm_set_life",
     family: "people",
     tier: "gm",
-    parameters: (world) => objectSchema({ person: text6(), state: text6(lifeStatesOf(world).map(([id2]) => id2)), tell: TEXT_LIST }, ["person"]),
+    parameters: (world) => objectSchema({ person: text7(), state: text7(lifeStatesOf(world).map(([id2]) => id2)), tell: TEXT_LIST }, ["person"]),
     async run(args, env) {
       const view = await env.reader.view();
       const entity2 = needId(view, "gm_set_life", args, "person", resolvePerson);
@@ -126953,7 +129999,7 @@ var PEOPLE_WRITES = [
     name: "gm_spawn",
     family: "people",
     tier: "gm",
-    parameters: (world) => objectSchema({ kind: text6(kindEnum(world)), name: text6(), id: text6(), tier: text6(tierIds(world)), place: text6(), agent: BOOLEAN }, ["kind", "name"]),
+    parameters: (world) => objectSchema({ kind: text7(kindEnum(world)), name: text7(), id: text7(), tier: text7(tierIds(world)), place: text7(), agent: BOOLEAN }, ["kind", "name"]),
     async run(args, env) {
       const view = await env.reader.view();
       const kind = needText(view, "gm_spawn", args, "kind");
@@ -126985,7 +130031,7 @@ var PEOPLE_WRITES = [
     name: "gm_despawn",
     family: "people",
     tier: "gm",
-    parameters: () => objectSchema({ entity: text6() }, ["entity"]),
+    parameters: () => objectSchema({ entity: text7() }, ["entity"]),
     async run(args, env) {
       const view = await env.reader.view();
       const entity2 = needId(view, "gm_despawn", args, "entity", resolveEntity);
@@ -126998,7 +130044,7 @@ var PEOPLE_WRITES = [
     name: "gm_restore",
     family: "people",
     tier: "gm",
-    parameters: () => objectSchema({ entity: text6() }, ["entity"]),
+    parameters: () => objectSchema({ entity: text7() }, ["entity"]),
     async run(args, env) {
       const view = await env.reader.view();
       const entity2 = needId(view, "gm_restore", args, "entity", resolveEntity);
@@ -127011,7 +130057,7 @@ var PEOPLE_WRITES = [
     name: "gm_link",
     family: "people",
     tier: "gm",
-    parameters: () => objectSchema({ relation: text6(), from: text6(), to: text6(), fields: jsonObject(), until: NUMBER2 }, ["relation", "from", "to"]),
+    parameters: () => objectSchema({ relation: text7(), from: text7(), to: text7(), fields: jsonObject(), until: NUMBER2 }, ["relation", "from", "to"]),
     async run(args, env) {
       const view = await env.reader.view();
       const rel = needText(view, "gm_link", args, "relation");
@@ -127034,7 +130080,7 @@ var PEOPLE_WRITES = [
     name: "gm_unlink",
     family: "people",
     tier: "gm",
-    parameters: () => objectSchema({ relation: text6(), from: text6(), to: text6() }, ["relation", "from", "to"]),
+    parameters: () => objectSchema({ relation: text7(), from: text7(), to: text7() }, ["relation", "from", "to"]),
     async run(args, env) {
       const view = await env.reader.view();
       const rel = needText(view, "gm_unlink", args, "relation");
@@ -127054,7 +130100,7 @@ var PEOPLE_WRITES = [
     family: "people",
     tier: "story",
     notes: true,
-    parameters: (world) => objectSchema({ name: text6(), kind: text6(kindEnum(world, "person")), place: text6(), role: text6() }, ["name"]),
+    parameters: (world) => objectSchema({ name: text7(), kind: text7(kindEnum(world, "person")), place: text7(), role: text7() }, ["name"]),
     async run(args, env) {
       const view = await env.reader.view();
       const name = needText(view, "person_add", args, "name");
@@ -127080,7 +130126,7 @@ var PLACES_WRITES = [
     name: "gm_move",
     family: "places",
     tier: "gm",
-    parameters: () => objectSchema({ entity: text6(), to: text6() }, ["entity", "to"]),
+    parameters: () => objectSchema({ entity: text7(), to: text7() }, ["entity", "to"]),
     async run(args, env) {
       const view = await env.reader.view();
       const entity2 = needId(view, "gm_move", args, "entity", resolveEntity);
@@ -127096,7 +130142,7 @@ var PLACES_WRITES = [
     name: "place_make",
     family: "places",
     tier: "story",
-    parameters: () => objectSchema({ name: text6(), parent: text6(), as: text6([...PLACE_KINDS]), aliases: TEXT_LIST, description: text6(), entry: text6([...AUDIENCES]), entity: text6(), why: text6(), dry: BOOLEAN }, ["name", "parent", "as", "why"]),
+    parameters: () => objectSchema({ name: text7(), parent: text7(), as: text7([...PLACE_KINDS]), aliases: TEXT_LIST, description: text7(), entry: text7([...AUDIENCES]), entity: text7(), why: text7(), dry: BOOLEAN }, ["name", "parent", "as", "why"]),
     async run(args, env) {
       const view = await env.reader.view();
       const name = needText(view, "place_make", args, "name");
@@ -127134,7 +130180,7 @@ var PLACES_WRITES = [
     name: "place_label",
     family: "places",
     tier: "story",
-    parameters: () => objectSchema({ place: text6(), name: text6(), aliases: TEXT_LIST, description: text6(), dry: BOOLEAN }, ["place"]),
+    parameters: () => objectSchema({ place: text7(), name: text7(), aliases: TEXT_LIST, description: text7(), dry: BOOLEAN }, ["place"]),
     async run(args, env) {
       const view = await env.reader.view();
       const place2 = needId(view, "place_label", args, "place", resolvePlace);
@@ -127221,7 +130267,7 @@ var PROJECTS_WRITES = [
     name: TOOL2,
     family: "orgs",
     tier: "gm",
-    parameters: () => objectSchema({ act: text6([...ACTS]), org: text6(), template: text6(), project: text6(), name: text6(), account: text6(), step: text6(), days: integer({ minimum: 0 }), cents: integer({ minimum: 0 }), why: text6(), dry: BOOLEAN }, ["act"]),
+    parameters: () => objectSchema({ act: text7([...ACTS]), org: text7(), template: text7(), project: text7(), name: text7(), account: text7(), step: text7(), days: integer({ minimum: 0 }), cents: integer({ minimum: 0 }), why: text7(), dry: BOOLEAN }, ["act"]),
     async run(args, env) {
       const view = await env.reader.view();
       const change2 = view.read(() => changeOf(view, args));
@@ -127241,7 +130287,7 @@ var PROJECTS_WRITES = [
     family: "orgs",
     tier: "story",
     notes: true,
-    parameters: () => objectSchema({ project: text6(), step: text6(), days: integer({ minimum: 1, maximum: 30 }), amount: NUMBER2, why: text6() }, ["project", "why"]),
+    parameters: () => objectSchema({ project: text7(), step: text7(), days: integer({ minimum: 1, maximum: 30 }), amount: NUMBER2, why: text7() }, ["project", "why"]),
     async run(args, env) {
       const view = await env.reader.view();
       const project = needId(view, PROJECT_NOTE, args, "project", resolveProject);
@@ -127270,7 +130316,7 @@ var QUESTS_WRITES = [
     name: "gm_set_stage",
     family: "quests",
     tier: "gm",
-    parameters: () => objectSchema({ track: text6(), stage: text6() }, ["track", "stage"]),
+    parameters: () => objectSchema({ track: text7(), stage: text7() }, ["track", "stage"]),
     async run(args, env) {
       const view = await env.reader.view();
       const track2 = needId(view, "gm_set_stage", args, "track", resolveTrack);
@@ -127310,7 +130356,7 @@ var REVENUE_WRITES = [
     name: GM_TOOL,
     family: "money",
     tier: "gm",
-    parameters: () => objectSchema({ stream: text6(), factor: NUMBER2, cents: integer(), days: integer({ minimum: 1, maximum: 31 }), reason: text6(), dry: BOOLEAN }, ["stream", "reason"]),
+    parameters: () => objectSchema({ stream: text7(), factor: NUMBER2, cents: integer(), days: integer({ minimum: 1, maximum: 31 }), reason: text7(), dry: BOOLEAN }, ["stream", "reason"]),
     async run(args, env) {
       const view = await env.reader.view();
       const stream = needId(view, GM_TOOL, args, "stream", resolveEntity);
@@ -127333,7 +130379,7 @@ var REVENUE_WRITES = [
     family: "money",
     tier: "story",
     notes: true,
-    parameters: () => objectSchema({ stream: text6(), factor: NUMBER2, cents: integer(), days: integer({ minimum: 1, maximum: 31 }), said: text6() }, ["stream", "said"]),
+    parameters: () => objectSchema({ stream: text7(), factor: NUMBER2, cents: integer(), days: integer({ minimum: 1, maximum: 31 }), said: text7() }, ["stream", "said"]),
     async run(args, env) {
       const view = await env.reader.view();
       const stream = needId(view, STORY_TOOL, args, "stream", resolveEntity);
@@ -127361,7 +130407,7 @@ var TIME_WRITES = [
     name: "gm_routine_edit",
     family: "time",
     tier: "gm",
-    parameters: () => objectSchema({ op: text6(OPS3), person: text6(), ...Object.fromEntries(FOLLOW.map(([part, values]) => [part, text6(values)])), block: text6(), schedule: text6(), value: jsonObject() }, ["op", "person"]),
+    parameters: () => objectSchema({ op: text7(OPS3), person: text7(), ...Object.fromEntries(FOLLOW.map(([part, values]) => [part, text7(values)])), block: text7(), schedule: text7(), value: jsonObject() }, ["op", "person"]),
     async run(args, env) {
       const view = await env.reader.view();
       const op = needText(view, "gm_routine_edit", args, "op");
@@ -127404,7 +130450,7 @@ var TIME_WRITES = [
     name: "gm_fix",
     family: "time",
     tier: "gm",
-    parameters: (world) => objectSchema({ time: text6(), entity: text6(), field: text6(fieldEnum(world)), value: JSON_VALUE }),
+    parameters: (world) => objectSchema({ time: text7(), entity: text7(), field: text7(fieldEnum(world)), value: JSON_VALUE }),
     async run(args, env) {
       const view = await env.reader.view();
       const time = textArg2(args, "time");
@@ -127717,9 +130763,9 @@ function migrateMarkWording(raw) {
   const texts2 = isRecord(prompts.texts) ? { ...prompts.texts } : {};
   if (isRecord(marks)) {
     for (const [part, id2] of Object.entries(MARK_TEXT_IDS)) {
-      const text7 = marks[part];
-      if (typeof text7 === "string" && typeof texts2[id2] !== "string")
-        texts2[id2] = text7;
+      const text8 = marks[part];
+      if (typeof text8 === "string" && typeof texts2[id2] !== "string")
+        texts2[id2] = text8;
     }
   }
   return { ...raw, narrator, prompts: { ...prompts, texts: texts2 } };
@@ -127727,9 +130773,9 @@ function migrateMarkWording(raw) {
 function storedForm(settings) {
   const marks = {};
   for (const [part, id2] of Object.entries(MARK_TEXT_IDS)) {
-    const text7 = settings.prompts.texts[id2];
-    if (text7 !== undefined)
-      marks[part] = text7;
+    const text8 = settings.prompts.texts[id2];
+    if (text8 !== undefined)
+      marks[part] = text8;
   }
   return Object.keys(marks).length === 0 ? settings : { ...settings, narrator: { ...settings.narrator, marks } };
 }
@@ -127774,8 +130820,8 @@ function askBeyondOf(v4) {
   return minutes2 === undefined ? undefined : Math.min(TIMELAPSE_REACH_MINUTES, Math.round(minutes2));
 }
 var oneOf5 = (v4, values) => values.find((x) => x === v4);
-var LEVELS5 = [0, 1, 2, 3, 4];
-var level = (v4) => LEVELS5.find((l) => l === v4);
+var LEVELS6 = [0, 1, 2, 3, 4];
+var level = (v4) => LEVELS6.find((l) => l === v4);
 function speedOf(x) {
   if (!isRecord(x))
     return;
@@ -127797,7 +130843,7 @@ function entries2(v4, max, entry2) {
   }
   return out2;
 }
-var text7 = (x) => typeof x === "string" && x !== "" ? x.slice(0, 200) : null;
+var text8 = (x) => typeof x === "string" && x !== "" ? x.slice(0, 200) : null;
 function paramsOf(v4) {
   const out2 = {};
   if (!isRecord(v4))
@@ -127817,7 +130863,7 @@ function routeOf2(v4) {
     return;
   const effort = oneOf5(v4.effort, REASONING_CHOICES);
   const params = paramsOf(v4.params);
-  return { provider, connectionId: text7(v4.connectionId), model: text7(v4.model), ...effort ? { effort } : {}, ...Object.keys(params).length > 0 ? { params } : {} };
+  return { provider, connectionId: text8(v4.connectionId), model: text8(v4.model), ...effort ? { effort } : {}, ...Object.keys(params).length > 0 ? { params } : {} };
 }
 function jobModelOf(jobs, base) {
   if (!isRecord(jobs) || !hasOwn(jobs, "model"))
@@ -127832,7 +130878,7 @@ function jobModelOf(jobs, base) {
 function helperOf(v4, d) {
   if (!isRecord(v4))
     return { ...d, params: { ...d.params } };
-  return { connectionId: text7(v4.connectionId), model: text7(v4.model), effort: oneOf5(v4.effort, REASONING_CHOICES) ?? d.effort, maxTokens: atLeast2(v4.maxTokens, 1) ?? d.maxTokens, params: paramsOf(v4.params) };
+  return { connectionId: text8(v4.connectionId), model: text8(v4.model), effort: oneOf5(v4.effort, REASONING_CHOICES) ?? d.effort, maxTokens: atLeast2(v4.maxTokens, 1) ?? d.maxTokens, params: paramsOf(v4.params) };
 }
 function loreOf(v4) {
   if (!isRecord(v4))
@@ -128074,13 +131120,13 @@ function learningFrom(raw) {
   for (const [connectionId, byType] of Object.entries(isRecord(raw.connections) ? raw.connections : {})) {
     if (!safeKey(connectionId) || !isRecord(byType))
       continue;
-    const kept4 = {};
+    const kept5 = {};
     for (const type of EXTRACTION_TYPES) {
       const stats = statsOf2(byType, type);
       if (stats)
-        kept4[type] = stats;
+        kept5[type] = stats;
     }
-    connections[connectionId] = kept4;
+    connections[connectionId] = kept5;
   }
   if (!isRecord(raw.roles))
     return { v: 1, connections };
@@ -128092,13 +131138,13 @@ function learningFrom(raw) {
     for (const [connectionId, byType] of Object.entries(byConnection)) {
       if (!safeKey(connectionId) || !isRecord(byType))
         continue;
-      const kept4 = {};
+      const kept5 = {};
       for (const type of CHANGE_TYPES) {
         const stats = statsOf2(byType, type);
         if (stats)
-          kept4[type] = stats;
+          kept5[type] = stats;
       }
-      keptConnections[connectionId] = kept4;
+      keptConnections[connectionId] = kept5;
     }
     roles[role] = keptConnections;
   }
@@ -128123,9 +131169,9 @@ function recordOutcome(settings, learning2, connectionId, type, outcome, now, ro
   if (role === undefined) {
     if (isAgentChangeType(type))
       return null;
-    const kept4 = hasOwn(learning2.connections, connectionId) ? learning2.connections[connectionId] ?? {} : {};
-    learning2.connections[connectionId] = kept4;
-    byType = kept4;
+    const kept5 = hasOwn(learning2.connections, connectionId) ? learning2.connections[connectionId] ?? {} : {};
+    learning2.connections[connectionId] = kept5;
+    byType = kept5;
   } else {
     if (!safeKey(role))
       return null;
@@ -128206,11 +131252,11 @@ class SettingsStore {
       return { settings: known2, kept: true };
     const raw = await readStoredJson(this.host, SETTINGS_PATH, userId, "settings", (r) => isRecord(r) && r.v === 1);
     const settings = normalize(migrateMarkWording(raw ?? null));
-    const kept4 = await this.withGuard(userId, settings, hasGuardCopy(raw));
-    if (kept4)
+    const kept5 = await this.withGuard(userId, settings, hasGuardCopy(raw));
+    if (kept5)
       this.settings.set(userId, settings);
     this.loaded(userId, settings);
-    return { settings, kept: kept4 };
+    return { settings, kept: kept5 };
   }
   async withGuard(userId, settings, copy) {
     if (!this.guards)
@@ -128233,7 +131279,7 @@ class SettingsStore {
     return true;
   }
   async set(userId, patch, check2) {
-    const { settings: current2, kept: kept4 } = await this.read(userId);
+    const { settings: current2, kept: kept5 } = await this.read(userId);
     const merged2 = normalize(mergePatch(JSON.parse(JSON.stringify(current2)), patch));
     const next = expandPresets(merged2, patch);
     next.prompts = promptsWritten(current2.prompts, next.prompts);
@@ -128243,7 +131289,7 @@ class SettingsStore {
       await this.guards.set(userId, next.agents.acceptance.connections);
     await this.host.storage.write(`${SETTINGS_PATH}.tmp`, JSON.stringify(storedForm(next)), userId);
     await this.host.storage.move(`${SETTINGS_PATH}.tmp`, SETTINGS_PATH, userId);
-    if (kept4 || guard)
+    if (kept5 || guard)
       this.settings.set(userId, next);
     this.revisions.set(userId, (this.revisions.get(userId) ?? 0) + 1);
     this.loaded(userId, next);
@@ -128363,7 +131409,7 @@ function prepareFix(rt, ctx, state2, key, op) {
 function keptIn(path3) {
   return isGlobalPath(path3) ? "global" : isLearnedPath(path3) ? "learned" : "story";
 }
-function prepareFile(ctx, env, kept4, key, op) {
+function prepareFile(ctx, env, kept5, key, op) {
   const bad4 = (path3) => !isFilePath(path3) ? refusal4("bad_path", ctx.view.text(WRITE_NOTE.badPath, { path: String(path3) }), key) : isTranscriptPath(path3) ? refusal4("transcript", ctx.view.text(WRITE_NOTE.transcriptReadOnly, { path: path3 }), key) : null;
   const none = (path3) => refusal4("no_file", ctx.view.text(WRITE_NOTE.noFile, { path: path3 }), key);
   const badOp = () => refusal4("bad_op", ctx.view.text(WRITE_NOTE.badOp), key);
@@ -128380,7 +131426,7 @@ function prepareFile(ctx, env, kept4, key, op) {
       const body = { text: op.text, hash };
       if (!isKeptPath(op.path))
         return { key, op, ops: [{ op: "ws_write", path: op.path, hash }], body };
-      const now = own(kept4, op.path);
+      const now = own(kept5, op.path);
       if (now?.hash === hash)
         return same3();
       return keep2({ [op.path]: { hash, ...now?.pinned ? { pinned: true } : {}, role: env.agent.role } }, [wsWrite(op.path, hash)], body);
@@ -128391,7 +131437,7 @@ function prepareFile(ctx, env, kept4, key, op) {
         return wrong;
       if (!isKeptPath(op.path))
         return { key, op, ops: [{ op: "ws_delete", path: op.path }] };
-      return own(kept4, op.path) ? keep2({ [op.path]: null }, [wsDelete(op.path)]) : none(op.path);
+      return own(kept5, op.path) ? keep2({ [op.path]: null }, [wsDelete(op.path)]) : none(op.path);
     }
     case "ws_move": {
       const wrong = bad4(op.from) ?? bad4(op.to);
@@ -128401,12 +131447,12 @@ function prepareFile(ctx, env, kept4, key, op) {
         return refusal4("learned_move", ctx.view.text(WRITE_NOTE.learnedMove, { path: op.from, to: op.to }), key);
       if (!isKeptPath(op.from))
         return { key, op, ops: [{ op: "ws_move", from: op.from, to: op.to }] };
-      const file = own(kept4, op.from);
+      const file = own(kept5, op.from);
       if (!file)
         return none(op.from);
       if (op.to === op.from)
         return same3();
-      if (own(kept4, op.to))
+      if (own(kept5, op.to))
         return refusal4("file_exists", ctx.view.text(WRITE_NOTE.fileExists, { to: op.to }), key);
       return keep2({ [op.from]: null, [op.to]: file }, [wsWrite(op.to, file.hash), wsDelete(op.from), ...file.pinned ? [wsPin(op.to, true)] : []]);
     }
@@ -128418,7 +131464,7 @@ function prepareFile(ctx, env, kept4, key, op) {
         return badOp();
       if (!isKeptPath(op.path))
         return { key, op, ops: [{ op: "ws_pin", path: op.path, pinned: op.pinned }] };
-      const file = own(kept4, op.path);
+      const file = own(kept5, op.path);
       if (!file)
         return none(op.path);
       if (file.pinned === true === op.pinned)
@@ -128428,7 +131474,7 @@ function prepareFile(ctx, env, kept4, key, op) {
     }
   }
 }
-function prepare2(rt, ctx, env, state2, kept4, op) {
+function prepare2(rt, ctx, env, state2, kept5, op) {
   const bad4 = (key2) => refusal4("bad_op", ctx.view.text(WRITE_NOTE.badOp), key2);
   if (!isRecord(op))
     return bad4();
@@ -128462,7 +131508,7 @@ function prepare2(rt, ctx, env, state2, kept4, op) {
     case "ws_delete":
     case "ws_move":
     case "ws_pin":
-      return prepareFile(ctx, env, kept4, key, op);
+      return prepareFile(ctx, env, kept5, key, op);
     default:
       return bad4(key);
   }
@@ -128731,8 +131777,8 @@ function asksFirst(rt, ctx, state2, p, events3) {
 function marker2(rt, ctx, state2) {
   const { world } = ctx.head;
   const secrets = unrevealedSecrets(rt.registry, world, state2);
-  const kept4 = [own(state2.entities, world.pov)?.name ?? world.pov];
-  return (text8) => findLeaks(text8, secrets).length > 0 ? ctx.view.mark(text8, { known: [], kept: kept4 }) : text8;
+  const kept5 = [own(state2.entities, world.pov)?.name ?? world.pov];
+  return (text9) => findLeaks(text9, secrets).length > 0 ? ctx.view.mark(text9, { known: [], kept: kept5 }) : text9;
 }
 function refused2(rt, ctx, view, rejection, key) {
   const reason2 = rejection.gm ?? rejection.reason;
@@ -128761,12 +131807,12 @@ async function context(rt, env) {
     return refusal4("no_world", renderPrompt(WRITE_NOTE.noWorld, settings.prompts.texts, {}));
   return contextOf(rt, env, head, settings, await rt.settings.learningOf(env.userId), await keptFiles(rt, env.chatId, env.userId), await rt.activeConnectionId(env.userId));
 }
-function contextOf(rt, env, head, settings, learning2, kept4, active) {
+function contextOf(rt, env, head, settings, learning2, kept5, active) {
   const view = readView({ knowledge: env.knowledge, registry: rt.registry, world: head.world, state: head.state, texts: settings.prompts.texts, wording: markWording(settings.prompts.texts), threshold: settings.minds.knowledge.threshold });
-  return { head, view, settings, learning: learning2, kept: kept4, active };
+  return { head, view, settings, learning: learning2, kept: kept5, active };
 }
-function checkOp(rt, ctx, env, state2, kept4, op) {
-  const p = prepare2(rt, ctx, env, state2, kept4, op);
+function checkOp(rt, ctx, env, state2, kept5, op) {
+  const p = prepare2(rt, ctx, env, state2, kept5, op);
   if (isRefusal(p))
     return p;
   const hidden = unseen(ctx, state2, p.ops) ?? (env.knowledge !== "gm" ? unseenValues(rt, ctx, state2, p.ops) : null);
@@ -128810,12 +131856,12 @@ function written3(ctx, role, key) {
     return agent?.key === key ? { chipId: null, pending: true, applied: agent.applied ?? [] } : null;
   }
   const chain = core.chain(observed);
-  const index = chain.findLastIndex((m2) => !m2.isUser);
-  const m = chain[index];
+  const index2 = chain.findLastIndex((m2) => !m2.isUser);
+  const m = chain[index2];
   const rec = m ? activeRecord(m, core.journal.tombstones) : null;
   if (!m || !rec)
     return null;
-  const latest = appliedEvents(rec, core.fold(observed), index).agents.findLast((a) => a.agent.role === role);
+  const latest = appliedEvents(rec, core.fold(observed), index2).agents.findLast((a) => a.agent.role === role);
   return latest && latest.agent.key === key ? { chipId: latest.events.length > 0 ? fixChip(m.id, m.swipeId, latest.seq) : null, pending: false, applied: latest.agent.applied ?? [] } : null;
 }
 function batchKey(role, ops) {
@@ -128840,19 +131886,19 @@ async function apply(rt, env, ops, label3) {
   const key = batchKey(env.agent.role, ops);
   const already3 = written3(ctx, env.agent.role, key);
   if (already3)
-    return { applied: already3.applied, refused: asks.flatMap((ask3) => ask3 && already3.applied.includes(ask3) ? [] : [refusal4("no_change", ctx.view.text(WRITE_NOTE.noChange), ask3 ?? undefined)]), chipId: already3.chipId, pending: already3.pending };
+    return { applied: already3.applied, refused: asks.flatMap((ask5) => ask5 && already3.applied.includes(ask5) ? [] : [refusal4("no_change", ctx.view.text(WRITE_NOTE.noChange), ask5 ?? undefined)]), chipId: already3.chipId, pending: already3.pending };
   const { world, run: run2 } = ctx.head;
   const running = new Working(rt.registry, world, ctx.head.state);
-  let kept4 = { ...ctx.kept };
+  let kept5 = { ...ctx.kept };
   const verdicts = [];
   for (const op of ops) {
-    const checked = checkOp(rt, ctx, env, running.state, kept4, op);
+    const checked = checkOp(rt, ctx, env, running.state, kept5, op);
     if (isRefusal(checked)) {
       verdicts.push(checked);
       continue;
     }
     if (checked.p.kept)
-      kept4 = withKept(kept4, checked.p.kept.changes);
+      kept5 = withKept(kept5, checked.p.kept.changes);
     else
       running.applyAll(checked.events);
     verdicts.push(checked.p);
@@ -128910,8 +131956,8 @@ async function apply(rt, env, ops, label3) {
   });
   return { applied: applied2, refused: refusals, chipId, pending };
 }
-function withKept(kept4, changes) {
-  const out2 = { ...kept4 };
+function withKept(kept5, changes) {
+  const out2 = { ...kept5 };
   for (const [path3, file] of Object.entries(changes)) {
     if (file === null)
       delete out2[path3];
@@ -129082,9 +132128,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path3 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "d0a904175624c6b904841dd5c88a75f9bc988605620c5c8cdb7bdcbf0a7e9e35";
+  const sha256 = "437a342fe4302ed98dff5a8ff457865f18d6279382949693690534363c958eac";
   const tools = ["4408800e42056eef2a7fc9f5cdf99aca", "66c7161bb4f87be1dbc8e68504ddcba8"].filter((f) => f !== undefined);
-  return { id: "4c708ac9", kit: sha256 !== undefined && path3 !== null && core !== null ? { path: path3, core, sha256, api: KIT_API } : null, tools };
+  return { id: "7f8b680e", kit: sha256 !== undefined && path3 !== null && core !== null ? { path: path3, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -129092,19 +132138,19 @@ var CLIENTS_KEPT = 32;
 var SESSIONS_KEPT = 256;
 var LIVE_MS = 120000;
 var RECONNECT_POLL_MS = 1000;
-var RANK4 = { old: 0, cannot: 1, behind: 2, updated: 3 };
+var RANK5 = { old: 0, cannot: 1, behind: 2, updated: 3 };
 var FOLLOW_CODES = { pinned: true, runtime: true, unsupported: true, no_kit: true, kit_api: true, refused: true, unsafe: true, elsewhere: true, unreadable: true, mismatch: true, broken: true };
 var errorText = (error) => error instanceof Error ? error.message : String(error);
-function shown4(text8, max) {
-  return text8.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max);
+function shown4(text9, max) {
+  return text9.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max);
 }
 function checkInOf(client, seen) {
   if (!isRecord(client) || typeof client.name !== "string" || typeof client.version !== "string" || client.serves === "command")
     return null;
-  const text8 = (value, max) => typeof value === "string" && shown4(value, max) !== "" ? shown4(value, max) : null;
+  const text9 = (value, max) => typeof value === "string" && shown4(value, max) !== "" ? shown4(value, max) : null;
   const follows = client.follows === true;
   const why3 = !follows && isRecord(client.why) && typeof client.why.text === "string" ? { code: typeof client.why.code === "string" && hasOwn(FOLLOW_CODES, client.why.code) ? client.why.code : "other", text: shown4(client.why.text, 400) } : null;
-  return { name: shown4(client.name, 80), version: shown4(client.version, 40), host: text8(client.host, 80), harness: text8(client.harness, 80), core: text8(client.core, 40), kit: text8(client.kit, 40), follows, why: why3, seen, ...hasOwn(client, "listed") ? { listed: text8(client.listed, 40) } : {}, ...hasOwn(client, "listedBackend") ? { listedBackend: text8(client.listedBackend, 40) } : {} };
+  return { name: shown4(client.name, 80), version: shown4(client.version, 40), host: text9(client.host, 80), harness: text9(client.harness, 80), core: text9(client.core, 40), kit: text9(client.kit, 40), follows, why: why3, seen, ...hasOwn(client, "listed") ? { listed: text9(client.listed, 40) } : {}, ...hasOwn(client, "listedBackend") ? { listedBackend: text9(client.listedBackend, 40) } : {} };
 }
 function idOf(client) {
   if (client.kit === null)
@@ -129125,7 +132171,7 @@ function isStale(client, build) {
 function worstOf(heard, build) {
   let worst = null;
   for (const h of heard) {
-    const by = worst === null ? -1 : RANK4[stateOf3(h.client, build)] - RANK4[stateOf3(worst.client, build)];
+    const by = worst === null ? -1 : RANK5[stateOf3(h.client, build)] - RANK5[stateOf3(worst.client, build)];
     if (by < 0 || by === 0 && worst !== null && h.client.seen > worst.client.seen)
       worst = h;
   }
@@ -129176,16 +132222,16 @@ class Agents {
   }
   async compare() {
     const fresh = { build: this.build.id, previous: null, at: this.now() };
-    let text8;
+    let text9;
     try {
-      text8 = await this.host.extensionStorage.read(BUILD_FILE);
+      text9 = await this.host.extensionStorage.read(BUILD_FILE);
     } catch (error) {
       this.host.log("warn", `[LumiRPEngine] the build the extension last ran as couldn't be read (${errorText(error)}); this start shows no update notice`);
       return fresh;
     }
     let last = null;
     try {
-      const raw = JSON.parse(text8 ?? "null");
+      const raw = JSON.parse(text9 ?? "null");
       if (isRecord(raw) && typeof raw.build === "string" && (typeof raw.previous === "string" || raw.previous === null) && typeof raw.at === "number")
         last = { build: raw.build, previous: raw.previous, at: raw.at };
     } catch {}
@@ -129720,189 +132766,6 @@ class GlobalWorkspace {
   }
 }
 
-// src/backend/agents/blobs.ts
-var BLOBS_DIR = "agents/blobs/";
-function blobPath(hash) {
-  if (!isBlobHash(hash))
-    throw new Error("not a blob hash");
-  return `${BLOBS_DIR}${hash}`;
-}
-
-class BlobStore {
-  host;
-  keep;
-  writing = new Map;
-  removing = new Map;
-  holds = new Map;
-  lengths = new Map;
-  onPut = null;
-  texts = new Map;
-  constructor(host, keep2 = () => defaultAgentSettings().kept.texts) {
-    this.host = host;
-    this.keep = keep2;
-  }
-  async put(userId, text8, holder) {
-    const hash = blobHash(text8);
-    if (holder !== undefined)
-      this.hold(userId, holder, hash);
-    this.onPut?.(userId, hash);
-    const key = `${userId}\x00${hash}`;
-    this.lengths.set(key, text8.length);
-    const under2 = this.writing.get(key);
-    if (under2) {
-      await under2;
-      return hash;
-    }
-    const path3 = blobPath(hash);
-    const write2 = (async () => {
-      await this.removing.get(key)?.catch(() => {
-        return;
-      });
-      await this.host.storage.write(`${path3}.tmp`, text8, userId);
-      await this.host.storage.move(`${path3}.tmp`, path3, userId);
-    })();
-    this.writing.set(key, write2);
-    try {
-      await write2;
-    } finally {
-      this.writing.delete(key);
-    }
-    return hash;
-  }
-  putJson(userId, value, holder) {
-    return this.put(userId, JSON.stringify(value), holder);
-  }
-  async get(userId, hash) {
-    if (!isBlobHash(hash))
-      return null;
-    const kept4 = this.recall(userId, hash);
-    if (kept4 !== null)
-      return kept4;
-    await this.writing.get(`${userId}\x00${hash}`);
-    const text8 = await this.host.storage.read(blobPath(hash), userId);
-    if (text8 === null)
-      return null;
-    if (blobHash(text8) === hash) {
-      this.lengths.set(`${userId}\x00${hash}`, text8.length);
-      this.remember(userId, hash, text8);
-      return text8;
-    }
-    this.host.log("warn", `[LumiRPEngine] the stored blob ${hash} doesn't match its hash, so it is read as missing`, userId);
-    return null;
-  }
-  async size(userId, hash) {
-    const known2 = this.lengths.get(`${userId}\x00${hash}`);
-    if (known2 !== undefined)
-      return known2;
-    return (await this.get(userId, hash))?.length ?? null;
-  }
-  async getJson(userId, hash) {
-    const text8 = await this.get(userId, hash);
-    if (text8 === null)
-      return null;
-    try {
-      return JSON.parse(text8);
-    } catch {
-      this.host.log("warn", `[LumiRPEngine] the stored blob ${hash} isn't the JSON it was written as, so it is read as missing`, userId);
-      return null;
-    }
-  }
-  async list(userId) {
-    const out2 = [];
-    for (const path3 of await this.host.storage.list(BLOBS_DIR, userId)) {
-      const name = path3.startsWith(BLOBS_DIR) ? path3.slice(BLOBS_DIR.length) : "";
-      if (isBlobHash(name))
-        out2.push(name);
-    }
-    return out2;
-  }
-  async remove(userId, hash) {
-    const key = `${userId}\x00${hash}`;
-    this.forget(userId, hash);
-    const removal = this.host.storage.remove(blobPath(hash), userId);
-    this.removing.set(key, removal);
-    try {
-      await removal;
-      this.lengths.delete(key);
-    } finally {
-      if (this.removing.get(key) === removal)
-        this.removing.delete(key);
-    }
-  }
-  recall(userId, hash) {
-    const own2 = this.texts.get(userId);
-    const text8 = own2?.byHash.get(hash);
-    if (own2 === undefined || text8 === undefined)
-      return null;
-    own2.byHash.delete(hash);
-    own2.byHash.set(hash, text8);
-    this.fit(own2, this.keep(userId));
-    return text8;
-  }
-  remember(userId, hash, text8) {
-    const limit4 = this.keep(userId);
-    if (text8.length > limit4)
-      return;
-    const own2 = this.texts.get(userId) ?? { byHash: new Map, chars: 0 };
-    this.texts.set(userId, own2);
-    const before = own2.byHash.get(hash);
-    if (before !== undefined)
-      own2.chars -= before.length;
-    own2.byHash.delete(hash);
-    own2.byHash.set(hash, text8);
-    own2.chars += text8.length;
-    this.fit(own2, limit4);
-  }
-  fit(own2, limit4) {
-    for (const [old, kept4] of own2.byHash) {
-      if (own2.chars <= limit4)
-        break;
-      own2.byHash.delete(old);
-      own2.chars -= kept4.length;
-    }
-  }
-  forget(userId, hash) {
-    const own2 = this.texts.get(userId);
-    const text8 = own2?.byHash.get(hash);
-    if (own2 === undefined || text8 === undefined)
-      return;
-    own2.byHash.delete(hash);
-    own2.chars -= text8.length;
-  }
-  trim() {
-    let gone = 0;
-    for (const own2 of this.texts.values())
-      gone += own2.byHash.size;
-    this.texts.clear();
-    this.lengths.clear();
-    return gone;
-  }
-  hold(userId, holder, hash) {
-    if (!isBlobHash(hash))
-      return;
-    const byHolder = this.holds.get(userId) ?? new Map;
-    this.holds.set(userId, byHolder);
-    const held3 = byHolder.get(holder) ?? new Set;
-    byHolder.set(holder, held3);
-    held3.add(hash);
-  }
-  release(userId, holder) {
-    const byHolder = this.holds.get(userId);
-    if (!byHolder)
-      return;
-    byHolder.delete(holder);
-    if (byHolder.size === 0)
-      this.holds.delete(userId);
-  }
-  held(userId) {
-    const out2 = new Set;
-    for (const hashes of this.holds.get(userId)?.values() ?? [])
-      for (const h of hashes)
-        out2.add(h);
-    return out2;
-  }
-}
-
 // src/backend/agents/compaction-memo.ts
 function foldKey(f) {
   return hashParts("lre.fold", f.userId, f.route.connectionId ?? "", f.route.model ?? "", f.route.effort, String(f.route.callTokensOut), f.system, f.message);
@@ -129955,41 +132818,13 @@ function isSweepFile(raw) {
   return isRecord(raw) && raw.v === 1 && isTime4(raw.last) && isRecord(raw.unreferenced) && Object.entries(raw.unreferenced).every(([hash, at2]) => isBlobHash(hash) && isTime4(at2));
 }
 function eventRefs(events3, into2) {
-  if (!Array.isArray(events3))
-    return;
-  for (const hash of workspaceRefs(events3))
-    into2.blobs.add(hash);
-  for (const ev of events3)
-    if (isRecord(ev) && typeof ev.type === "string" && ev.type.startsWith("story."))
-      for (const hash of storyBlobs(ev.type, ev.data))
-        into2.blobs.add(hash);
-  for (const ev of events3)
-    if (isRecord(ev) && typeof ev.type === "string" && ev.type.startsWith("minds.v2."))
-      for (const hash of mindBlobs(ev.type, ev.data))
-        into2.blobs.add(hash);
-  for (const ev of events3)
-    if (isRecord(ev) && typeof ev.type === "string" && ev.type.startsWith("author."))
-      for (const hash of authorBlobs(ev.type, ev.data))
-        into2.blobs.add(hash);
-  for (const ev of events3) {
-    if (!isRecord(ev) || ev.type !== STORY_DRAFT || !isRecord(ev.data))
-      continue;
-    for (const hash of episodeBlobs(ev.type, ev.data))
-      into2.blobs.add(hash);
-    eventRefs(ev.data.effects, into2);
-  }
+  eventBlobs(events3, into2.blobs);
 }
 function layerRefs(raw, into2) {
   if (!Array.isArray(raw))
     return;
-  for (const item2 of raw) {
-    const entry2 = isRecord(item2) && isRecord(item2.draft) ? item2.draft : item2;
-    if (!isRecord(entry2))
-      continue;
-    eventRefs(entry2.events, into2);
-    if (isBlobHash(entry2.reasoning))
-      into2.blobs.add(entry2.reasoning);
-  }
+  for (const item2 of raw)
+    entryBlobs(isRecord(item2) && isRecord(item2.draft) ? item2.draft : item2, into2.blobs);
 }
 function recordRefs(rec, into2, transcript) {
   for (const hash of sessionRefsOf(rec, transcript))
@@ -130014,17 +132849,17 @@ function ledgerRefs(bag, into2, transcript) {
   if (isRecord(raw) && typeof raw.chunks === "number" && typeof raw.hash === "string") {
     if (!Number.isInteger(raw.chunks) || raw.chunks < 1)
       return false;
-    let text8 = "";
+    let text9 = "";
     for (let i = 0;i < raw.chunks; i++) {
       const part = bag[`${CHUNK_PREFIX2}${i}`];
       if (typeof part !== "string")
         return false;
-      text8 += part;
+      text9 += part;
     }
-    if (hashParts("lre.chunks", text8) !== raw.hash)
+    if (hashParts("lre.chunks", text9) !== raw.hash)
       return false;
     try {
-      raw = JSON.parse(text8);
+      raw = JSON.parse(text9);
     } catch {
       return false;
     }
@@ -130066,9 +132901,9 @@ function journalRefs(journal, into2, transcript) {
     }
   }
 }
-function parsed(text8) {
+function parsed(text9) {
   try {
-    return JSON.parse(text8);
+    return JSON.parse(text9);
   } catch {
     return;
   }
@@ -130256,9 +133091,9 @@ class Sweep {
         if (open.has(chat.id))
           continue;
         reading = `chat ${chat.id}'s journal`;
-        const text8 = await host.storage.read(journalPath(chat.id), userId);
-        if (text8 !== null)
-          journalRefs(parsed(text8), found, (id2) => keeps2(chat.id, id2));
+        const text9 = await host.storage.read(journalPath(chat.id), userId);
+        if (text9 !== null)
+          journalRefs(parsed(text9), found, (id2) => keeps2(chat.id, id2));
       }
       reading = "the chats' layers";
       const layers = new Set(chats.map((c) => `${layerDir(c.id)}/`));
@@ -130343,13 +133178,13 @@ class ChipStore {
     await this.sweep(userId);
     const raw = await readStoredJson(this.host, this.path(chatId), userId, "chips", Array.isArray);
     const valid = Array.isArray(raw) ? raw.filter(isStoredChip) : [];
-    const list3 = valid.filter((c) => !retiredChip(c));
-    this.chips.set(this.key(chatId, userId), list3);
+    const list4 = valid.filter((c) => !retiredChip(c));
+    this.chips.set(this.key(chatId, userId), list4);
     if (this.chips.size > 256)
       this.chips.delete(this.chips.keys().next().value ?? "");
-    if (list3.length < valid.length)
+    if (list4.length < valid.length)
       await this.save(chatId, userId);
-    return list3;
+    return list4;
   }
   async sweep(userId) {
     if (this.swept.has(userId))
@@ -130371,36 +133206,36 @@ class ChipStore {
   async add(chatId, userId, chips2) {
     if (chips2.length === 0)
       return;
-    const list3 = await this.list(chatId, userId);
+    const list4 = await this.list(chatId, userId);
     for (const chip of chips2) {
-      const at2 = list3.findIndex((c) => c.id === chip.id);
+      const at2 = list4.findIndex((c) => c.id === chip.id);
       if (at2 >= 0)
-        list3[at2] = chip;
+        list4[at2] = chip;
       else
-        list3.push(chip);
+        list4.push(chip);
     }
     await this.save(chatId, userId);
   }
   async take(chatId, userId, id2) {
-    const list3 = await this.list(chatId, userId);
-    const index = list3.findIndex((c) => c.id === id2);
-    if (index < 0)
+    const list4 = await this.list(chatId, userId);
+    const index2 = list4.findIndex((c) => c.id === id2);
+    if (index2 < 0)
       return null;
-    const [chip] = list3.splice(index, 1);
+    const [chip] = list4.splice(index2, 1);
     await this.save(chatId, userId);
     return chip ?? null;
   }
   async removeWhere(chatId, userId, drop2) {
-    const list3 = await this.list(chatId, userId);
-    const kept4 = list3.filter((c) => !drop2(c));
-    if (kept4.length === list3.length)
+    const list4 = await this.list(chatId, userId);
+    const kept5 = list4.filter((c) => !drop2(c));
+    if (kept5.length === list4.length)
       return;
-    this.chips.set(this.key(chatId, userId), kept4);
+    this.chips.set(this.key(chatId, userId), kept5);
     await this.save(chatId, userId);
   }
   async lapse(chatId, userId) {
-    const list3 = await this.list(chatId, userId);
-    const gone = list3.filter((c) => c.expires === "next_send");
+    const list4 = await this.list(chatId, userId);
+    const gone = list4.filter((c) => c.expires === "next_send");
     if (gone.length === 0)
       return [];
     const key = this.key(chatId, userId);
@@ -130408,7 +133243,7 @@ class ChipStore {
     this.lapsed.set(key, gone);
     if (this.lapsed.size > 256)
       this.lapsed.delete(this.lapsed.keys().next().value ?? "");
-    this.chips.set(key, list3.filter((c) => c.expires !== "next_send"));
+    this.chips.set(key, list4.filter((c) => c.expires !== "next_send"));
     await this.save(chatId, userId);
     return gone;
   }
@@ -130417,25 +133252,25 @@ class ChipStore {
     return stored ?? this.lapsed.get(this.key(chatId, userId))?.find((c) => c.id === id2) ?? null;
   }
   async prune(chatId, userId, alive) {
-    const list3 = await this.list(chatId, userId);
-    const kept4 = list3.filter((c) => alive.has(c.messageId));
-    if (kept4.length === list3.length)
+    const list4 = await this.list(chatId, userId);
+    const kept5 = list4.filter((c) => alive.has(c.messageId));
+    if (kept5.length === list4.length)
       return;
-    this.chips.set(this.key(chatId, userId), kept4);
+    this.chips.set(this.key(chatId, userId), kept5);
     await this.save(chatId, userId);
   }
   async shiftSwipes(chatId, userId, messageId, deleted) {
-    const list3 = await this.list(chatId, userId);
+    const list4 = await this.list(chatId, userId);
     let changed = false;
-    for (let i = list3.length - 1;i >= 0; i--) {
-      const c = list3[i];
+    for (let i = list4.length - 1;i >= 0; i--) {
+      const c = list4[i];
       if (!c || c.messageId !== messageId || c.swipeId === undefined || c.swipeId < deleted)
         continue;
       changed = true;
       if (c.swipeId === deleted)
-        list3.splice(i, 1);
+        list4.splice(i, 1);
       else
-        list3[i] = { ...c, id: idAfterSwipeDelete(c.id, messageId, deleted) ?? c.id, swipeId: c.swipeId - 1 };
+        list4[i] = { ...c, id: idAfterSwipeDelete(c.id, messageId, deleted) ?? c.id, swipeId: c.swipeId - 1 };
     }
     const key = this.key(chatId, userId);
     const lapsed = this.lapsed.get(key);
@@ -130461,293 +133296,6 @@ function idAfterSwipeDelete(id2, messageId, deleted) {
   return id2;
 }
 
-// src/shared/archive.ts
-var ARCHIVE_QUOTE_MAX = 6000;
-
-// src/engine/lexical.ts
-var STOP3 = new Set("a an and are as at be been but by for from had has have he her hers him his i if in into is it its me my of on or our she so than that the their them then there they this to too was we were what when where which who whom why will with you your".split(" "));
-function stem2(word) {
-  if (word.length > 5 && word.endsWith("ing"))
-    return word.slice(0, -3);
-  if (word.length > 4 && word.endsWith("ed"))
-    return word.slice(0, -2);
-  if (word.length > 4 && word.endsWith("es"))
-    return word.slice(0, -2);
-  if (word.length > 3 && word.endsWith("s") && !word.endsWith("ss"))
-    return word.slice(0, -1);
-  return word;
-}
-function tokenize2(text8) {
-  const out2 = [];
-  for (const m of text8.toLowerCase().matchAll(/[\p{L}\p{N}]+(?:'[\p{L}]+)?/gu)) {
-    const word = m[0].replace(/'s$/u, "");
-    if (word.length < 2 || STOP3.has(word))
-      continue;
-    out2.push(stem2(word));
-  }
-  return out2;
-}
-function passagesOf(text8, size = 600) {
-  const out2 = [];
-  let start = 0;
-  while (start < text8.length) {
-    let end = Math.min(text8.length, start + size);
-    if (end < text8.length) {
-      const para = text8.lastIndexOf(`
-`, end);
-      const sentence4 = Math.max(text8.lastIndexOf(". ", end), text8.lastIndexOf("! ", end), text8.lastIndexOf("? ", end));
-      if (para > start + size / 3)
-        end = para + 1;
-      else if (sentence4 > start + size / 3)
-        end = sentence4 + 2;
-    }
-    out2.push({ start, end });
-    start = end;
-  }
-  return out2;
-}
-var K1 = 1.2;
-var B = 0.75;
-
-class LexicalIndex {
-  entries = [];
-  postings = new Map;
-  byKey = new Map;
-  dead = 0;
-  totalLength = 0;
-  get size() {
-    return this.entries.length - this.dead;
-  }
-  has(key) {
-    return this.byKey.has(key);
-  }
-  add(key, text8, size) {
-    this.remove(key);
-    const ids2 = [];
-    for (const passage of passagesOf(text8, size)) {
-      const words10 = tokenize2(text8.slice(passage.start, passage.end));
-      const id2 = this.entries.length;
-      this.entries.push({ key, passage, length: words10.length, dead: false });
-      this.totalLength += words10.length;
-      ids2.push(id2);
-      const tf = new Map;
-      for (const w of words10)
-        tf.set(w, (tf.get(w) ?? 0) + 1);
-      for (const [w, n] of tf) {
-        const list3 = this.postings.get(w);
-        if (list3)
-          list3.push(id2, n);
-        else
-          this.postings.set(w, [id2, n]);
-      }
-    }
-    this.byKey.set(key, ids2);
-  }
-  remove(key) {
-    const ids2 = this.byKey.get(key);
-    if (!ids2)
-      return;
-    for (const id2 of ids2) {
-      const p = this.entries[id2];
-      if (p && !p.dead) {
-        p.dead = true;
-        this.dead++;
-        this.totalLength -= p.length;
-      }
-    }
-    this.byKey.delete(key);
-    if (this.dead > 64 && this.dead * 4 > this.entries.length)
-      this.compact();
-  }
-  search(query, keep2 = () => true) {
-    const words10 = [...new Set(tokenize2(query))];
-    const live = this.size;
-    if (words10.length === 0 || live === 0)
-      return [];
-    const avg = this.totalLength / live || 1;
-    const scores = new Map;
-    for (const w of words10) {
-      const list3 = this.postings.get(w);
-      if (!list3)
-        continue;
-      let df = 0;
-      for (let i = 0;i < list3.length; i += 2)
-        if (!this.entries[list3[i]]?.dead)
-          df++;
-      if (df === 0)
-        continue;
-      const idf = Math.log(1 + (live - df + 0.5) / (df + 0.5));
-      for (let i = 0;i < list3.length; i += 2) {
-        const id2 = list3[i];
-        const p = this.entries[id2];
-        if (!p || p.dead)
-          continue;
-        const tf = list3[i + 1];
-        const score = idf * tf * (K1 + 1) / (tf + K1 * (1 - B + B * p.length / avg));
-        scores.set(id2, (scores.get(id2) ?? 0) + score);
-      }
-    }
-    const best = new Map;
-    for (const [id2, score] of scores) {
-      const p = this.entries[id2];
-      if (!p || !keep2(p.key))
-        continue;
-      const known2 = best.get(p.key);
-      if (!known2 || score > known2.score)
-        best.set(p.key, { key: p.key, passage: p.passage, score });
-    }
-    return [...best.values()].sort((a, b) => b.score - a.score);
-  }
-  compact() {
-    const old = this.entries;
-    this.entries = [];
-    this.dead = 0;
-    const remap = new Map;
-    old.forEach((p, i) => {
-      if (p.dead)
-        return;
-      remap.set(i, this.entries.length);
-      this.entries.push(p);
-    });
-    for (const [key, ids2] of this.byKey)
-      this.byKey.set(key, ids2.flatMap((i) => remap.has(i) ? [remap.get(i)] : []));
-    for (const [w, list3] of this.postings) {
-      const kept4 = [];
-      for (let i = 0;i < list3.length; i += 2) {
-        const id2 = remap.get(list3[i]);
-        if (id2 !== undefined)
-          kept4.push(id2, list3[i + 1]);
-      }
-      if (kept4.length > 0)
-        this.postings.set(w, kept4);
-      else
-        this.postings.delete(w);
-    }
-  }
-}
-
-// src/backend/archive-index.ts
-var ARCHIVE_CHATS_KEPT = 3;
-var SNIPPET = 400;
-function citedBy(b, onChain) {
-  const by = b.beat.by;
-  if ("bootstrap" in by && onChain.has(by.bootstrap.message))
-    return by.bootstrap.message;
-  return b.from.messageId;
-}
-function citations(story, onChain) {
-  const out2 = new Map;
-  for (const b of story.beats) {
-    const id2 = citedBy(b, onChain);
-    const c = out2.get(id2) ?? { beats: [], places: new Set, people: new Set, earliest: null };
-    c.beats.push(b.beat.id);
-    c.places.add(b.beat.place);
-    for (const who of beatPeople(b.beat))
-      c.people.add(who);
-    for (const ref of b.beat.about)
-      if ("entity" in ref)
-        c.people.add(ref.entity);
-    c.earliest = c.earliest === null ? b.beat.at : Math.min(c.earliest, b.beat.at);
-    out2.set(id2, c);
-  }
-  return out2;
-}
-function snippetOf(text8, start, end) {
-  let stop2 = Math.min(end, start + SNIPPET);
-  if (stop2 < end) {
-    const space = text8.lastIndexOf(" ", stop2);
-    if (space > start + SNIPPET / 2)
-      stop2 = space;
-  }
-  return { snippet: text8.slice(start, stop2).trim(), span: [start, stop2] };
-}
-
-class ArchiveIndex {
-  ledger;
-  chats = new Map;
-  constructor(ledger) {
-    this.ledger = ledger;
-  }
-  synced(chatId, userId, messages) {
-    const key = `${userId}\x00${chatId}`;
-    const archive = this.chats.get(key) ?? { index: new LexicalIndex, seen: new Map };
-    this.chats.delete(key);
-    this.chats.set(key, archive);
-    while (this.chats.size > ARCHIVE_CHATS_KEPT)
-      this.chats.delete(this.chats.keys().next().value ?? "");
-    const now = new Set;
-    for (const m of messages) {
-      now.add(m.id);
-      const was = archive.seen.get(m.id);
-      if (was && was.swipe === m.swipe && was.text === m.text)
-        continue;
-      archive.index.add(m.id, m.text);
-      archive.seen.set(m.id, { swipe: m.swipe, text: m.text });
-    }
-    for (const id2 of [...archive.seen.keys()]) {
-      if (now.has(id2))
-        continue;
-      archive.index.remove(id2);
-      archive.seen.delete(id2);
-    }
-    return archive;
-  }
-  async search(chatId, userId, q) {
-    const view = await this.ledger.archiveView(chatId, userId);
-    return view ? this.searchView(chatId, userId, view, q) : { hits: [], total: 0 };
-  }
-  searchView(chatId, userId, view, q) {
-    const archive = this.synced(chatId, userId, view.messages);
-    const byId = new Map(view.messages.map((m) => [m.id, m]));
-    const cited = citations(view.story, new Set(byId.keys()));
-    const upTo = q.upTo === undefined ? Infinity : byId.get(q.upTo)?.index ?? -1;
-    const timeOf = (m) => m.clock ?? cited.get(m.id)?.earliest ?? null;
-    const keep2 = (id2) => {
-      const m = byId.get(id2);
-      if (!m || m.index > upTo)
-        return false;
-      const c = cited.get(id2);
-      if (q.who !== undefined && !c?.people.has(q.who))
-        return false;
-      if (q.place !== undefined && !c?.places.has(q.place))
-        return false;
-      if (q.from !== undefined || q.to !== undefined) {
-        const t = timeOf(m);
-        if (t === null || q.from !== undefined && t < q.from || q.to !== undefined && t > q.to)
-          return false;
-      }
-      return true;
-    };
-    const text8 = q.text?.trim() ?? "";
-    const ranked2 = text8 !== "" ? archive.index.search(text8, keep2).map((h) => ({ id: h.key, score: h.score, start: h.passage.start, end: h.passage.end })) : view.messages.filter((m) => keep2(m.id)).reverse().map((m) => ({ id: m.id, score: 0, start: 0, end: m.text.length }));
-    const limit4 = Math.max(1, Math.min(50, q.limit ?? 8));
-    const offset = Math.max(0, q.offset ?? 0);
-    const hits = ranked2.slice(offset, offset + limit4).flatMap((r) => {
-      const m = byId.get(r.id);
-      if (!m)
-        return [];
-      const c = cited.get(r.id);
-      const { snippet, span: span2 } = snippetOf(m.text, r.start, r.end);
-      return [{ messageId: m.id, index: m.index, isUser: m.isUser, swipeId: m.swipeId, swipe: m.swipe, storyTime: timeOf(m), places: [...c?.places ?? []], people: [...c?.people ?? []], beats: c?.beats ?? [], score: r.score, snippet, span: span2 }];
-    });
-    return { hits, total: ranked2.length };
-  }
-  async quote(chatId, userId, req) {
-    const view = await this.ledger.archiveView(chatId, userId);
-    return view ? quoteView(view, req) : null;
-  }
-}
-function quoteView(view, req) {
-  const m = view.messages.find((x) => x.id === req.messageId);
-  if (!m)
-    return null;
-  const start = Math.max(0, Math.min(m.text.length, req.span?.[0] ?? 0));
-  const end = Math.max(start, Math.min(m.text.length, req.span?.[1] ?? m.text.length));
-  const stop2 = Math.min(end, start + ARCHIVE_QUOTE_MAX);
-  const cited = citations(view.story, new Set(view.messages.map((x) => x.id))).get(m.id);
-  return { messageId: m.id, index: m.index, isUser: m.isUser, swipeId: m.swipeId, swipe: m.swipe, storyTime: m.clock ?? cited?.earliest ?? null, span: [start, stop2], text: m.text.slice(start, stop2), truncated: stop2 < end };
-}
-
 // src/backend/message-cache.ts
 var CHATS_KEPT = 8;
 
@@ -130759,14 +133307,14 @@ class MessageCache {
   onRead = null;
   constructor(inner) {
     this.inner = inner;
-    inner.on("MESSAGE_SENT", (e) => this.change(e.chatId, (list3) => sent(list3, e.message)));
-    inner.on("MESSAGE_EDITED", (e) => this.change(e.chatId, (list3) => replaced(list3, e.message)));
-    inner.on("MESSAGE_SWIPED", (e) => this.change(e.chatId, (list3) => replaced(list3, e.message)));
-    inner.on("MESSAGE_DELETED", (e) => this.change(e.chatId, (list3) => deleted(list3, e.messageId)));
+    inner.on("MESSAGE_SENT", (e) => this.change(e.chatId, (list4) => sent(list4, e.message)));
+    inner.on("MESSAGE_EDITED", (e) => this.change(e.chatId, (list4) => replaced(list4, e.message)));
+    inner.on("MESSAGE_SWIPED", (e) => this.change(e.chatId, (list4) => replaced(list4, e.message)));
+    inner.on("MESSAGE_DELETED", (e) => this.change(e.chatId, (list4) => deleted(list4, e.messageId)));
     inner.on("GENERATION_ENDED", (e) => {
       const saved = e.messageId;
       if (saved !== undefined)
-        this.change(e.chatId, (list3) => list3.some((m) => m.id === saved));
+        this.change(e.chatId, (list4) => list4.some((m) => m.id === saved));
     });
     inner.on("CHAT_DELETED", (e) => this.change(e.chatId, () => false));
     inner.on("CHAT_CHANGED", (e) => {
@@ -130814,13 +133362,13 @@ class MessageCache {
     reading.messages = this.inner.chats.messages(chatId, userId).then((read) => {
       if (this.reading.get(key) === reading)
         this.reading.delete(key);
-      const list3 = [...read];
-      const whole5 = !reading.forgotten && reading.changes.every((change2) => change2(list3));
+      const list4 = [...read];
+      const whole5 = !reading.forgotten && reading.changes.every((change2) => change2(list4));
       reading.changes.length = 0;
       if (whole5)
-        this.keep(key, { chatId, userId, messages: list3 });
+        this.keep(key, { chatId, userId, messages: list4 });
       this.onRead?.(chatId);
-      return whole5 ? list3 : read;
+      return whole5 ? list4 : read;
     }, (error) => {
       if (this.reading.get(key) === reading)
         this.reading.delete(key);
@@ -130836,12 +133384,12 @@ class MessageCache {
       this.forget(chatId);
       throw error;
     }
-    this.change(chatId, (list3) => {
-      const at2 = list3.findIndex((m) => m.id === messageId);
-      const now = list3[at2];
+    this.change(chatId, (list4) => {
+      const at2 = list4.findIndex((m) => m.id === messageId);
+      const now = list4[at2];
       if (!now)
         return false;
-      list3[at2] = { ...now, metadata: structuredClone(bag) };
+      list4[at2] = { ...now, metadata: structuredClone(bag) };
       return true;
     });
   }
@@ -130890,26 +133438,26 @@ class MessageCache {
     }
   }
 }
-function sent(list3, message) {
-  if (replaced(list3, message))
+function sent(list4, message) {
+  if (replaced(list4, message))
     return true;
-  const last = list3.at(-1);
+  const last = list4.at(-1);
   if (last && message.index <= last.index)
     return false;
-  list3.push(message);
+  list4.push(message);
   return true;
 }
-function replaced(list3, message) {
-  const at2 = list3.findIndex((m) => m.id === message.id);
+function replaced(list4, message) {
+  const at2 = list4.findIndex((m) => m.id === message.id);
   if (at2 < 0)
     return false;
-  list3[at2] = message;
+  list4[at2] = message;
   return true;
 }
-function deleted(list3, messageId) {
-  const at2 = list3.findIndex((m) => m.id === messageId);
+function deleted(list4, messageId) {
+  const at2 = list4.findIndex((m) => m.id === messageId);
   if (at2 >= 0)
-    list3.splice(at2, 1);
+    list4.splice(at2, 1);
   return true;
 }
 
@@ -131079,13 +133627,13 @@ class StatePush {
 }
 
 // src/backend/start-markers.ts
-var LEVELS6 = [0, 1, 2, 3, 4];
+var LEVELS7 = [0, 1, 2, 3, 4];
 function at2(map, key) {
   return isRecord(map) && hasOwn(map, key) ? map[key] : undefined;
 }
 function levelAt(map, key) {
   const v4 = at2(map, key);
-  return LEVELS6.find((l) => l === v4);
+  return LEVELS7.find((l) => l === v4);
 }
 function worldFirstTime(user, world) {
   const w = world.time;
@@ -131211,11 +133759,11 @@ async function verdict(gate3, input) {
     return keptFromPov && leavesOut ? "" : renderMark(mark2, told, nameOf16, "marked", wording);
   };
   const asMark = (e, at3) => {
-    const text8 = shown5(at3);
-    if (text8 === "")
+    const text9 = shown5(at3);
+    if (text9 === "")
       out2.disabled.push(e.id);
     else
-      out2.mutated.push({ id: e.id, content: text8 });
+      out2.mutated.push({ id: e.id, content: text9 });
   };
   for (const e of entries3) {
     const held3 = bookSecrecy(e, texts2);
@@ -131376,9 +133924,9 @@ function missingSections(sections2, rank, filled, minds2) {
   }
   return out2;
 }
-function names2(text8, label3) {
+function names2(text9, label3) {
   const l = label3.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`\\bthe ${l}\\b`).test(text8) || new RegExp(`\\b${l} section\\b`, "i").test(text8);
+  return new RegExp(`\\bthe ${l}\\b`).test(text9) || new RegExp(`\\b${l} section\\b`, "i").test(text9);
 }
 function withoutMissing(lines2, missing2) {
   const out2 = [];
@@ -131388,7 +133936,7 @@ function withoutMissing(lines2, missing2) {
       continue;
     }
     const sentences = line2.trim().split(/(?<=[.!?])\s+(?=[A-Z"\u201C'\u2018([])/u);
-    const kept4 = sentences.flatMap((sentence4) => {
+    const kept5 = sentences.flatMap((sentence4) => {
       const clauses = sentence4.split(/\s*;\s*/);
       const left = clauses.filter((c) => !missing2.some((label3) => names2(c, label3)));
       if (left.length === clauses.length)
@@ -131399,8 +133947,8 @@ function withoutMissing(lines2, missing2) {
       const ended2 = /[.!?]$/.test(joined3) ? joined3 : `${joined3}.`;
       return [ended2.charAt(0).toUpperCase() + ended2.slice(1)];
     });
-    if (kept4.length > 0)
-      out2.push(kept4.join(" "));
+    if (kept5.length > 0)
+      out2.push(kept5.join(" "));
   }
   return out2;
 }
@@ -131409,13 +133957,13 @@ function withoutMissing(lines2, missing2) {
 function unitsOf3(lines2) {
   const units = [];
   const facts = new Map;
-  for (const { text: text8, group: group4 } of lines2) {
+  for (const { text: text9, group: group4 } of lines2) {
     const known2 = group4 === undefined ? undefined : facts.get(group4);
     if (known2) {
-      known2.lines.push(text8);
+      known2.lines.push(text9);
       continue;
     }
-    const unit3 = { group: group4, lines: [text8] };
+    const unit3 = { group: group4, lines: [text9] };
     units.push(unit3);
     if (group4 !== undefined)
       facts.set(group4, unit3);
@@ -131438,7 +133986,7 @@ function withinLines(units, max) {
 }
 function buildSections(input) {
   const { registry, world, state: state2, secrets } = input;
-  const record4 = [];
+  const record5 = [];
   const outcomes = new Map;
   const fills = [];
   const recorded = [];
@@ -131446,9 +133994,9 @@ function buildSections(input) {
   let budget = input.budget;
   const mindsBudget = input.mindsBudget;
   const marking = input.narrator.view.secrets === "marked";
-  const carries = (text8) => findLeaks(text8, secrets).length > 0 || holdsSecretMark(text8, input.wording);
+  const carries = (text9) => findLeaks(text9, secrets).length > 0 || holdsSecretMark(text9, input.wording);
   const pov2 = state2.entities[world.pov]?.name ?? world.entities[world.pov]?.name ?? world.pov;
-  const secret = (text8) => holdsSecretMark(text8, input.wording) ? text8 : secretMarkText(text8, [], [pov2], input.wording);
+  const secret = (text9) => holdsSecretMark(text9, input.wording) ? text9 : secretMarkText(text9, [], [pov2], input.wording);
   const hinted = [];
   const outcome = (section2, feed, scope, status, more = {}) => {
     outcomes.set(section2.id, { slot: section2.id, label: section2.label, rank: section2.rank, feed, scope, status, content: null, tokens: null, cut: 0, marked: 0, hints: 0, ...more });
@@ -131464,7 +134012,7 @@ function buildSections(input) {
     const allMinds = mindsOn3 ? mindLines(read).map(told).flatMap((l) => !carries(l.line) && !hidden(l.line) ? [l] : marking ? [{ ...l, line: secretMarkText(l.line, [l.name], [pov2], input.wording) }] : []) : [];
     const ladder = (optionalQuery(read, "minds.fidelity")?.(read, { user: input.said, reply: "" }) ?? []).map((s) => s.entity);
     const mindsCap = Math.min(mindsBudget, mindsFeed?.maxTokens ?? Number.POSITIVE_INFINITY);
-    const mindsFit = mindsSection && mindsOn3 ? fitMindLines(allMinds, ladder, mindsCap, (kept4) => input.cost(renderSection(mindsSection.label, mindsSection.template, kept4.map((l) => l.line)))).slice(0, mindsFeed?.maxLines ?? Number.POSITIVE_INFINITY) : [];
+    const mindsFit = mindsSection && mindsOn3 ? fitMindLines(allMinds, ladder, mindsCap, (kept5) => input.cost(renderSection(mindsSection.label, mindsSection.template, kept5.map((l) => l.line)))).slice(0, mindsFeed?.maxLines ?? Number.POSITIVE_INFINITY) : [];
     const ctx = registry.context(world, state2, { "minds.minded": () => mindsFit.map((l) => l.entity), ...input.knowledge ? { "minds.knowing": () => input.knowledge } : {} });
     const nameOf16 = (id2) => state2.entities[id2]?.name ?? world.entities[id2]?.name ?? id2;
     const filled = new Set;
@@ -131497,9 +134045,9 @@ function buildSections(input) {
             if (l.secret) {
               if (scope === "player")
                 continue;
-              const text8 = secretLineText(l, input.narrator.view.secrets, input.wording, nameOf16);
-              if (text8 !== null)
-                beyond2.push({ text: text8, group: group4 });
+              const text9 = secretLineText(l, input.narrator.view.secrets, input.wording, nameOf16);
+              if (text9 !== null)
+                beyond2.push({ text: text9, group: group4 });
               else if (group4 !== undefined)
                 lost.add(group4);
               continue;
@@ -131522,23 +134070,23 @@ function buildSections(input) {
         }
       }
       if (section2.id === "outline")
-        lines2.push(...withoutMissing(input.outline, missingSections(sections2, section2.rank, filled, mindsFit.length > 0 && mindsSection !== undefined && input.hasEntry(mindsSection))).map((text8) => ({ text: text8 })));
+        lines2.push(...withoutMissing(input.outline, missingSections(sections2, section2.rank, filled, mindsFit.length > 0 && mindsSection !== undefined && input.hasEntry(mindsSection))).map((text9) => ({ text: text9 })));
       if (section2.id === "scene") {
-        lines2.push(...(input.planned.scene ?? []).map((text8) => ({ text: text8 })));
-        for (const text8 of input.planned.notes ?? []) {
-          if (!carries(text8) && !hidden(text8))
-            lines2.push({ text: text8 });
+        lines2.push(...(input.planned.scene ?? []).map((text9) => ({ text: text9 })));
+        for (const text9 of input.planned.notes ?? []) {
+          if (!carries(text9) && !hidden(text9))
+            lines2.push({ text: text9 });
           else if (marking)
-            beyond2.push({ text: secret(text8) });
+            beyond2.push({ text: secret(text9) });
         }
       }
       const elapsed = section2.id === "scene" && input.elapsed !== null ? turnTimeLine(read, input.elapsed, input.texts) : "";
       if (elapsed.trim() !== "")
         lines2.push({ text: elapsed });
       if (section2.id === "outcome")
-        lines2.unshift(...input.planned.outcome.map((text8) => ({ text: text8 })));
+        lines2.unshift(...input.planned.outcome.map((text9) => ({ text: text9 })));
       if (section2.id === "montage")
-        lines2.push(...input.planned.montage.map((text8) => ({ text: text8 })));
+        lines2.push(...input.planned.montage.map((text9) => ({ text: text9 })));
       const units = unitsOf3(lines2);
       const carrying = new Set(minds2 ? [] : units.filter((u) => u.lines.some(carries)));
       if (!marking) {
@@ -131547,7 +134095,7 @@ function buildSections(input) {
             lost.add(u.group);
       }
       const plain4 = units.filter((u) => !carrying.has(u));
-      const moved2 = marking ? [...carrying].flatMap((u) => u.lines.map((text8) => ({ text: carries(text8) ? secret(text8) : text8, group: u.group }))) : [];
+      const moved2 = marking ? [...carrying].flatMap((u) => u.lines.map((text9) => ({ text: carries(text9) ? secret(text9) : text9, group: u.group }))) : [];
       const marked3 = unitsOf3([...moved2, ...beyond2]).filter((u) => u.group === undefined || !lost.has(u.group));
       const capped2 = withinLines(plain4, feed.maxLines);
       const markedRoom = feed.maxLines !== undefined ? Math.max(0, feed.maxLines - linesIn(capped2).length) : undefined;
@@ -131556,17 +134104,17 @@ function buildSections(input) {
       if (maxTokens !== undefined)
         while (capped2.length > 0 && costOf4(capped2) > maxTokens)
           capped2.pop();
-      const kept4 = [...capped2];
+      const kept5 = [...capped2];
       if (!minds2 && section2.rank > 0)
-        while (kept4.length > 1 && costOf4(kept4) > budget)
-          kept4.pop();
-      const cutFacts = new Set(plain4.flatMap((u) => u.group !== undefined && !kept4.includes(u) ? [u.group] : []));
+        while (kept5.length > 1 && costOf4(kept5) > budget)
+          kept5.pop();
+      const cutFacts = new Set(plain4.flatMap((u) => u.group !== undefined && !kept5.includes(u) ? [u.group] : []));
       const facts = withinLines(marked3.filter((u) => u.group === undefined || !cutFacts.has(u.group)), markedRoom);
       const safeHints = marking ? hints.map((l) => carries(l) ? secret(l) : l) : hints.filter((l) => !carries(l));
-      const cut = (minds2 ? allMinds.length - mindsFit.length : 0) + (linesIn(plain4).length - linesIn(kept4).length);
-      if (kept4.length === 0) {
+      const cut = (minds2 ? allMinds.length - mindsFit.length : 0) + (linesIn(plain4).length - linesIn(kept5).length);
+      if (kept5.length === 0) {
         if (minds2 && allMinds.length > 0) {
-          record4.push({ slot: section2.id, label: section2.label, tokens: input.cost(renderSection(section2.label, section2.template, allMinds.map((l) => l.line))), clipped: true, cut: allMinds.length, delivery: "unchecked" });
+          record5.push({ slot: section2.id, label: section2.label, tokens: input.cost(renderSection(section2.label, section2.template, allMinds.map((l) => l.line))), clipped: true, cut: allMinds.length, delivery: "unchecked" });
           outcome(section2, feed, scope, "clipped", { cut: allMinds.length });
         } else
           outcome(section2, feed, scope, "empty", { cut });
@@ -131574,17 +134122,17 @@ function buildSections(input) {
           hinted.push({ fill: null, slot: section2.id, label: section2.label, template: section2.template, lines: [], marked: facts, hints: safeHints, cost: 0, maxTokens, maxLines: feed.maxLines });
         continue;
       }
-      const content = renderSection(section2.label, section2.template, linesIn(kept4));
+      const content = renderSection(section2.label, section2.template, linesIn(kept5));
       input.seen(content);
       const cost = input.cost(content);
       if (minds2 ? cost > mindsBudget : section2.rank > 0 && cost > budget) {
         const whole5 = minds2 ? cost : costOf4(capped2);
-        const capsCut = cut - (linesIn(capped2).length - linesIn(kept4).length);
-        record4.push({ slot: section2.id, label: section2.label, tokens: whole5, clipped: true, ...capsCut > 0 ? { cut: capsCut } : {}, delivery: "unchecked" });
+        const capsCut = cut - (linesIn(capped2).length - linesIn(kept5).length);
+        record5.push({ slot: section2.id, label: section2.label, tokens: whole5, clipped: true, ...capsCut > 0 ? { cut: capsCut } : {}, delivery: "unchecked" });
         outcome(section2, feed, scope, "clipped", { tokens: whole5, cut: capsCut });
         continue;
       }
-      record4.push({ slot: section2.id, label: section2.label, tokens: cost, clipped: false, ...cut > 0 ? { cut } : {}, delivery: "unchecked" });
+      record5.push({ slot: section2.id, label: section2.label, tokens: cost, clipped: false, ...cut > 0 ? { cut } : {}, delivery: "unchecked" });
       if (!minds2)
         budget -= cost;
       const fill = { slot: section2.id, content };
@@ -131593,7 +134141,7 @@ function buildSections(input) {
       recorded.push(section2.id);
       outcome(section2, feed, scope, "sent", { content, tokens: cost, cut });
       if (safeHints.length > 0 || facts.length > 0)
-        hinted.push({ fill, slot: section2.id, label: section2.label, template: section2.template, lines: linesIn(kept4), marked: facts, hints: safeHints, cost, maxTokens, maxLines: feed.maxLines });
+        hinted.push({ fill, slot: section2.id, label: section2.label, template: section2.template, lines: linesIn(kept5), marked: facts, hints: safeHints, cost, maxTokens, maxLines: feed.maxLines });
     }
   });
   const used = input.budget - budget;
@@ -131636,45 +134184,45 @@ function buildSections(input) {
     if (was)
       outcomes.set(h.slot, { ...was, status: "sent", content, tokens: input.cost(content), marked: facts, hints });
   }
-  return { sections: sections2.flatMap((s) => outcomes.get(s.id) ?? []), record: record4, fills, recorded, used };
+  return { sections: sections2.flatMap((s) => outcomes.get(s.id) ?? []), record: record5, fills, recorded, used };
 }
 
 // src/backend/routine-ask.ts
 var SAID_BY_PLAYER = "player";
-function statedIn2(text8, said2) {
-  const all2 = text8.replace(/[^\S\n]+/g, " ").toLowerCase();
-  const words10 = said2.replace(/\s+/g, " ").trim().toLowerCase().replace(/[.!?\u2026]+$/, "");
-  const at3 = words10 === "" ? -1 : all2.indexOf(words10);
+function statedIn2(text9, said2) {
+  const all2 = text9.replace(/[^\S\n]+/g, " ").toLowerCase();
+  const words11 = said2.replace(/\s+/g, " ").trim().toLowerCase().replace(/[.!?\u2026]+$/, "");
+  const at3 = words11 === "" ? -1 : all2.indexOf(words11);
   if (at3 < 0)
     return false;
-  const end = all2.slice(at3 + words10.length).search(/[.!?\n]/);
-  return end < 0 || all2.charAt(at3 + words10.length + end) !== "?";
+  const end = all2.slice(at3 + words11.length).search(/[.!?\n]/);
+  return end < 0 || all2.charAt(at3 + words11.length + end) !== "?";
 }
-function str30(v4) {
+function str32(v4) {
   return typeof v4 === "string" ? v4.trim() : "";
 }
 function plainly(p, world, state2) {
-  const who = str30(p.entity);
+  const who = str32(p.entity);
   const you = who === world.pov;
   const name = state2.entities[who]?.name ?? who;
   const placeName2 = (v4) => {
-    const id2 = str30(v4);
+    const id2 = str32(v4);
     return hasOwn(world.places, id2) ? world.places[id2]?.name ?? id2 : id2;
   };
   const whose = you ? "your routine" : `${name}'s routine`;
   const subject = you ? "You" : name;
-  const change2 = str30(p.change).toLowerCase();
+  const change2 = str32(p.change).toLowerCase();
   if (change2 === "move")
     return { whose, detail: `${subject}: a new home at ${placeName2(p.place)}.` };
-  const label3 = str30(p.label) || placeName2(p.place);
+  const label3 = str32(p.label) || placeName2(p.place);
   if (change2 === "stop")
     return { whose, detail: `${subject}: no more ${label3}.` };
-  const days = Array.isArray(p.days) ? p.days.filter((d) => typeof d === "string").join(", ") : str30(p.days);
-  const start = str30(p.start);
-  const end = str30(p.end);
+  const days = Array.isArray(p.days) ? p.days.filter((d) => typeof d === "string").join(", ") : str32(p.days);
+  const start = str32(p.start);
+  const end = str32(p.end);
   const time = start === "" ? "" : end === "" ? start : `${start}\u2013${end}`;
   const said2 = label3.toLowerCase();
-  const place2 = str30(p.place) === "" ? "" : placeName2(p.place);
+  const place2 = str32(p.place) === "" ? "" : placeName2(p.place);
   const where = place2 === "" || said2.includes(place2.toLowerCase()) ? "" : `at ${place2}`;
   const company2 = (Array.isArray(p.with) ? p.with : []).flatMap((id2) => typeof id2 === "string" && state2.entities[id2] ? [state2.entities[id2]?.name ?? id2] : []).filter((n) => !said2.includes(n.toLowerCase()));
   const parts = [label3, days, time, where, company2.length > 0 ? `with ${company2.join(" and ")}` : ""].filter((s) => s !== "");
@@ -131690,32 +134238,32 @@ function placesFor(registry, world, state2, said2) {
   const exact = known2.filter((id2) => id2 === said2 || own(world.places, id2)?.name.toLowerCase() === said2.toLowerCase());
   if (exact.length > 0)
     return exact.slice(0, 1);
-  const words10 = wordsIn(said2);
-  if (words10.length === 0)
+  const words11 = wordsIn(said2);
+  if (words11.length === 0)
     return [];
   return known2.filter((id2) => {
     const name = wordsIn(own(world.places, id2)?.name ?? "");
-    return words10.every((w) => name.some((n) => n.startsWith(w)));
+    return words11.every((w) => name.some((n) => n.startsWith(w)));
   });
 }
-function routineAsks(registry, world, state2, said2, text8, secrets, known2) {
+function routineAsks(registry, world, state2, said2, text9, secrets, known2) {
   const ctx = registry.context(world, state2);
   const asks = [];
   for (const r of said2) {
-    if (!statedIn2(text8, r.said))
+    if (!statedIn2(text9, r.said))
       continue;
     const proposal = { type: ROUTINE_CHANNEL };
     for (const k of FIELDS)
       if (r[k] !== undefined)
         proposal[k] = r[k];
     proposal.by = SAID_BY_PLAYER;
-    const who = str30(proposal.entity);
-    if (who !== world.pov && !namedInText(state2.entities[who]?.name ?? "", text8))
+    const who = str32(proposal.entity);
+    if (who !== world.pov && !namedInText(state2.entities[who]?.name ?? "", text9))
       continue;
     if (!known2(proposal) || findLeaks(proposal, secrets).length > 0)
       continue;
-    const placeWords2 = str30(proposal.place);
-    const open = placeWords2 !== "" && placeWords2.toLowerCase() !== "home" && placeWords2.toLowerCase() !== "work" && str30(proposal.change).toLowerCase() === "start";
+    const placeWords2 = str32(proposal.place);
+    const open = placeWords2 !== "" && placeWords2.toLowerCase() !== "home" && placeWords2.toLowerCase() !== "work" && str32(proposal.change).toLowerCase() === "start";
     const fits3 = open ? placesFor(registry, world, state2, placeWords2) : [];
     const { place: _place, ...placeless } = proposal;
     const variants = !open ? [proposal] : fits3.length === 0 ? [placeless] : fits3.map((id2) => ({ ...proposal, place: id2 }));
@@ -131729,11 +134277,11 @@ function routineAsks(registry, world, state2, said2, text8, secrets, known2) {
     const base = { question: `Would you like to add this to ${whose}?`, added: `Added to ${whose}` };
     if (holding.length > 1) {
       const { detail: detail2 } = plainly(placeless, world, state2);
-      asks.push({ ...base, proposal: first, detail: `${detail2} Which place?`, places: holding.map((v4) => ({ label: `At ${own(world.places, str30(v4.place))?.name ?? str30(v4.place)}`, proposal: v4 })) });
+      asks.push({ ...base, proposal: first, detail: `${detail2} Which place?`, places: holding.map((v4) => ({ label: `At ${own(world.places, str32(v4.place))?.name ?? str32(v4.place)}`, proposal: v4 })) });
       continue;
     }
     const { detail } = plainly(first, world, state2);
-    const quoted3 = text8.toLowerCase().includes(placeWords2.toLowerCase()) ? `"${placeWords2}"` : "the place you named";
+    const quoted3 = text9.toLowerCase().includes(placeWords2.toLowerCase()) ? `"${placeWords2}"` : "the place you named";
     asks.push({ ...base, proposal: first, detail: open && fits3.length === 0 ? `${detail} No place you know of fits ${quoted3}, so it would have no set place.` : detail });
   }
   return asks;
@@ -131937,9 +134485,9 @@ class InspectorLog {
   records(chatId) {
     return this.logs.get(chatId)?.records;
   }
-  async add(chatId, userId, record4) {
+  async add(chatId, userId, record5) {
     const log = await this.load(chatId, userId);
-    log.records.push(record4);
+    log.records.push(record5);
     if (log.records.length > INSPECTOR_RUNS)
       log.records.splice(0, log.records.length - INSPECTOR_RUNS);
     this.save(chatId);
@@ -132101,8 +134649,8 @@ class TurnBridge {
     trim(this.readAt);
   }
   forget(userText) {
-    for (const kept4 of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.skipPlans, this.held, this.routineAsks, this.planReads, this.ownPlans, this.outlines, this.memories, this.tidied, this.commits, this.scenes])
-      kept4.delete(userText);
+    for (const kept5 of [this.intents, this.unfit, this.nexts, this.decisions, this.minds, this.offers, this.skips, this.skipPlans, this.held, this.routineAsks, this.planReads, this.ownPlans, this.outlines, this.memories, this.tidied, this.commits, this.scenes])
+      kept5.delete(userText);
     if (this.replay === userText)
       this.replay = null;
     this.interpreted.delete(userText);
@@ -132174,15 +134722,15 @@ class TurnBridge {
   }
   askOf(userText) {
     const steps = this.held.get(userText)?.steps ?? [];
-    const index = steps.findIndex((s) => s.ask);
-    const ask3 = steps[index]?.ask;
-    return ask3 ? { index, ...ask3 } : null;
+    const index2 = steps.findIndex((s) => s.ask);
+    const ask5 = steps[index2]?.ask;
+    return ask5 ? { index: index2, ...ask5 } : null;
   }
-  answerAsk(userText, index, keep2) {
+  answerAsk(userText, index2, keep2) {
     const read = this.held.get(userText);
-    if (!read?.steps[index]?.ask)
+    if (!read?.steps[index2]?.ask)
       return false;
-    const steps = keep2 ? read.steps.map((s, i) => i === index ? { action: s.action, params: s.params, text: s.text, ...s.claim ? { claim: s.claim } : {}, ...s.needs ? { needs: s.needs } : {}, ...s.said ? { said: s.said } : {}, ...s.picked ? { picked: true } : {} } : s) : read.steps.filter((_, i) => i !== index);
+    const steps = keep2 ? read.steps.map((s, i) => i === index2 ? { action: s.action, params: s.params, text: s.text, ...s.claim ? { claim: s.claim } : {}, ...s.needs ? { needs: s.needs } : {}, ...s.said ? { said: s.said } : {}, ...s.picked ? { picked: true } : {} } : s) : read.steps.filter((_, i) => i !== index2);
     this.setRead(userText, { ...read, steps });
     return true;
   }
@@ -132282,9 +134830,9 @@ class TurnBridge {
   hasSkipPlan(userText) {
     return this.skipPlans.has(userText);
   }
-  setSkip(userText, record4) {
-    if (record4)
-      this.skips.set(userText, record4);
+  setSkip(userText, record5) {
+    if (record5)
+      this.skips.set(userText, record5);
     else
       this.skips.delete(userText);
     trim(this.skips);
@@ -132329,15 +134877,15 @@ class TurnBridge {
   proseFor(seed) {
     return this.prose.get(seed);
   }
-  prepareRead(text8, read) {
-    this.reads.set(hashParts("lre.read", text8), read);
+  prepareRead(text9, read) {
+    this.reads.set(hashParts("lre.read", text9), read);
     trim(this.reads);
   }
   planFor(seed) {
     return this.plans.get(seed);
   }
-  chipsFor(text8) {
-    return this.readChips.get(hashParts("lre.read", text8)) ?? [];
+  chipsFor(text9) {
+    return this.readChips.get(hashParts("lre.read", text9)) ?? [];
   }
   plan(input) {
     const world = withPov2(input.ctx.world, input.state);
@@ -132358,9 +134906,9 @@ class TurnBridge {
     }
     const w = new Working(this.registry, world, input.state);
     w.applyAll(own2 ? this.prePlan(last) : []);
-    const added = own2 ? this.planRead(w, last) : null;
-    if (added) {
-      this.planned.set(input.seed, added);
+    const added2 = own2 ? this.planRead(w, last) : null;
+    if (added2) {
+      this.planned.set(input.seed, added2);
       trim(this.planned);
     }
     const result = this.pipeline.plan({
@@ -132381,7 +134929,7 @@ class TurnBridge {
     const committed = this.committed(commit, world, input.state, planned2);
     const events3 = committed.length > 0 ? [...planned2, ...committed] : planned2;
     if (own2) {
-      this.ownPlans.set(last, { parentPath: input.parentPath, events: events3, result, ...added ? { planned: added } : {} });
+      this.ownPlans.set(last, { parentPath: input.parentPath, events: events3, result, ...added2 ? { planned: added2 } : {} });
       trim(this.ownPlans);
     }
     return events3;
@@ -132401,8 +134949,8 @@ class TurnBridge {
       return false;
     if (params) {
       const { claim: claim2, said: _read, ...rest } = intent2;
-      const kept4 = claim2 !== undefined && JSON.stringify(params[claim2.param] ?? null) === JSON.stringify(intent2.params[claim2.param] ?? null);
-      this.intents.set(userText, { ...rest, params, ...claim2 && kept4 ? { claim: claim2 } : {}, ...Object.keys(said2).length > 0 ? { said: said2 } : {} });
+      const kept5 = claim2 !== undefined && JSON.stringify(params[claim2.param] ?? null) === JSON.stringify(intent2.params[claim2.param] ?? null);
+      this.intents.set(userText, { ...rest, params, ...claim2 && kept5 ? { claim: claim2 } : {}, ...Object.keys(said2).length > 0 ? { said: said2 } : {} });
     }
     this.intentsPassed.add(userText);
     if (this.intentsPassed.size > 64)
@@ -132491,14 +135039,14 @@ function sessionTokens(session) {
 }
 function historyOf2(session, texts2) {
   const out2 = [];
-  const push2 = (role, text8) => {
+  const push2 = (role, text9) => {
     const last = out2.at(-1);
     if (last?.role === role)
       last.text = `${last.text}
 
-${text8}`;
+${text9}`;
     else
-      out2.push({ role, text: text8 });
+      out2.push({ role, text: text9 });
   };
   if (session.summary !== null)
     push2("user", renderPrompt(MAIN_TEXT.summary, texts2, { summary: session.summary }));
@@ -132590,7 +135138,7 @@ function messageView(m) {
   if (m.role !== "user" && m.role !== "assistant" || typeof m.content !== "string")
     return [];
   const engine = isRecord(m.engine) ? m.engine : null;
-  const list3 = (part) => {
+  const list4 = (part) => {
     const value = engine?.[part];
     return Array.isArray(value) ? value.filter((v4) => isRecord(v4)) : [];
   };
@@ -132599,7 +135147,7 @@ function messageView(m) {
       role: m.role,
       text: m.content,
       main: isMainMessage(m),
-      ...engine ? { engine: { roles: list3("roles").map((r) => ({ role: String(r.role ?? ""), via: String(r.via ?? ""), ok: r.ok === true })), committed: list3("committed").map((c) => ({ role: String(c.role ?? ""), key: String(c.key ?? ""), type: String(c.type ?? "") })) } } : {}
+      ...engine ? { engine: { roles: list4("roles").map((r) => ({ role: String(r.role ?? ""), via: String(r.via ?? ""), ok: r.ok === true })), committed: list4("committed").map((c) => ({ role: String(c.role ?? ""), key: String(c.key ?? ""), type: String(c.type ?? "") })) } } : {}
     }
   ];
 }
@@ -132638,12 +135186,12 @@ async function askRollback(rt, chatId, userId) {
 // src/backend/agents/turn-task.ts
 var MAIN_PINS = "main";
 var MAIN_PINS_TEXTS = { pins: MAIN_TEXT.pins, file: MAIN_TEXT.pinsFile, headings: MAIN_TEXT.pinsHeadings, none: MAIN_TEXT.none };
-function pinsManifestOf(text8) {
-  if (text8 === null)
+function pinsManifestOf(text9) {
+  if (text9 === null)
     return {};
   let raw;
   try {
-    raw = JSON.parse(text8);
+    raw = JSON.parse(text9);
   } catch {
     return {};
   }
@@ -132675,16 +135223,16 @@ async function pinnedFiles(view, input) {
   const parts = [];
   for (const path3 of paths) {
     const file = byPath.get(path3);
-    const text8 = file ? await view.blob(file.hash) : null;
-    if (text8 === null)
+    const text9 = file ? await view.blob(file.hash) : null;
+    if (text9 === null)
       continue;
-    const whole5 = renderPrompt(framing.file, texts2, { path: path3, text: text8 });
+    const whole5 = renderPrompt(framing.file, texts2, { path: path3, text: text9 });
     if (tokensOf(whole5) <= left) {
       parts.push(whole5);
       left -= tokensOf(whole5);
       continue;
     }
-    const headings = text8.split(`
+    const headings = text9.split(`
 `).filter((line2) => HEADING.test(line2)).join(`
 `);
     const shown5 = renderPrompt(framing.headings, texts2, { path: path3, headings: headings === "" ? renderPrompt(framing.none, texts2, {}) : headings });
@@ -132695,19 +135243,19 @@ async function pinnedFiles(view, input) {
 
 `) });
 }
-function cutTo(text8, tokens3) {
-  if (tokensOf(text8) <= tokens3)
-    return text8;
+function cutTo(text9, tokens3) {
+  if (tokensOf(text9) <= tokens3)
+    return text9;
   let lo = 0;
-  let hi = text8.length;
+  let hi = text9.length;
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
-    if (tokensOf(`${text8.slice(0, mid)}\u2026`) <= tokens3)
+    if (tokensOf(`${text9.slice(0, mid)}\u2026`) <= tokens3)
       lo = mid;
     else
       hi = mid - 1;
   }
-  return `${text8.slice(0, lo)}\u2026`;
+  return `${text9.slice(0, lo)}\u2026`;
 }
 function upgradeShape(e, def2) {
   return e ? { ...e, class: e.class ?? def2?.class ?? {}, tags: e.tags ?? def2?.tags ?? [] } : null;
@@ -132740,8 +135288,8 @@ function upgradeLines(d, chain) {
         const knew = d.core.playedAt(before);
         for (const p of plan2.entities) {
           const held3 = own(before.entities, p.id);
-          const taken = own(after.entities, p.id);
-          if (!taken)
+          const taken2 = own(after.entities, p.id);
+          if (!taken2)
             continue;
           let how;
           if (!held3)
@@ -132749,7 +135297,7 @@ function upgradeLines(d, chain) {
           else if (p.status === "removed")
             how = isGone(after, p.id) && !isGone(before, p.id) ? "removed" : null;
           else
-            how = hashJson(upgradeShape(held3, was ? own(was.entities, p.id) : undefined)) !== hashJson(upgradeShape(taken, now ? own(now.entities, p.id) : undefined)) ? "changed" : null;
+            how = hashJson(upgradeShape(held3, was ? own(was.entities, p.id) : undefined)) !== hashJson(upgradeShape(taken2, now ? own(now.entities, p.id) : undefined)) ? "changed" : null;
           if (how === null)
             continue;
           const seen = how === "removed" ? knew !== undefined && canSeeEntity(d.registry, knew, before, pov2, p.id) : canSeeEntity(d.registry, head.world, head.state, pov2, p.id);
@@ -132757,8 +135305,8 @@ function upgradeLines(d, chain) {
             unseen2++;
             continue;
           }
-          const kind = d.registry.kinds.get(taken.kind) ?? own(head.world.kinds, taken.kind);
-          rows.push({ money: kind?.pack === "economy", text: `${taken.name} (${(kind?.label ?? taken.kind).toLowerCase()}, ${how})` });
+          const kind = d.registry.kinds.get(taken2.kind) ?? own(head.world.kinds, taken2.kind);
+          rows.push({ money: kind?.pack === "economy", text: `${taken2.name} (${(kind?.label ?? taken2.kind).toLowerCase()}, ${how})` });
         }
         rows.sort((a, b) => Number(b.money) - Number(a.money));
         const parts = [...rows.map((r) => r.text), ...unseen2 > 0 ? [`${unseen2} ${nounFor(unseen2, "change", "changes")} the player character doesn't know of`] : []];
@@ -132817,29 +135365,29 @@ function digestOf2(d) {
     shownHeads.push(head);
     left -= tokensOf(head);
   }
-  const kept4 = [];
+  const kept5 = [];
   let next = entries3.length - 1;
   while (next >= 0) {
     const entry2 = entries3[next] ?? "";
     if (tokensOf(entry2) <= left) {
-      kept4.unshift(entry2);
+      kept5.unshift(entry2);
       left -= tokensOf(entry2);
       next--;
       continue;
     }
-    if (kept4.length === 0 && left > 0) {
-      kept4.unshift(cutTo(entry2, left));
+    if (kept5.length === 0 && left > 0) {
+      kept5.unshift(cutTo(entry2, left));
       next--;
     }
     break;
   }
   const leftOut = next + 1;
-  return renderPrompt(framing, texts2, { turns: [...leftOut > 0 ? [renderPrompt(MAIN_TEXT.digestLeftOut, texts2, { count: String(leftOut), replies: nounFor(leftOut, "reply", "replies") })] : [], ...shownHeads, ...kept4].join(`
+  return renderPrompt(framing, texts2, { turns: [...leftOut > 0 ? [renderPrompt(MAIN_TEXT.digestLeftOut, texts2, { count: String(leftOut), replies: nounFor(leftOut, "reply", "replies") })] : [], ...shownHeads, ...kept5].join(`
 
 `) });
 }
-function tidy3(text8) {
-  return text8.replace(/\n{3,}/g, `
+function tidy3(text9) {
+  return text9.replace(/\n{3,}/g, `
 
 `).trim();
 }
@@ -132851,7 +135399,7 @@ function turnTask(texts2, parts) {
 function numbered(texts2, part, from, to) {
   if (part.lines.length === 0)
     return renderPrompt(REVIEW_TEXT.empty, texts2, {});
-  return part.lines.slice(from, to).map((text8, i) => renderPrompt(REVIEW_TEXT.line, texts2, { n: String(from + i + 1), text: text8 })).join(`
+  return part.lines.slice(from, to).map((text9, i) => renderPrompt(REVIEW_TEXT.line, texts2, { n: String(from + i + 1), text: text9 })).join(`
 `);
 }
 function partShown(texts2, part) {
@@ -132874,26 +135422,26 @@ function toArg(args) {
   return args.to === undefined || args.to === null ? lineArg(args.line) : lineArg(args.to);
 }
 function reviewTools(texts2, work) {
-  const text8 = (id2, vars = {}) => renderPrompt(id2, texts2, vars);
-  const describe = (name, arg) => text8(REVIEW_TEXT.toolArg(name, arg));
-  const str31 = (args, key) => typeof args[key] === "string" ? args[key] : "";
+  const text9 = (id2, vars = {}) => renderPrompt(id2, texts2, vars);
+  const describe = (name, arg) => text9(REVIEW_TEXT.toolArg(name, arg));
+  const str33 = (args, key) => typeof args[key] === "string" ? args[key] : "";
   const refused3 = (draft2, got, part) => {
     if (got.refused === "part")
-      return { text: text8(REVIEW_TEXT.refusedPart, { part, parts: draft2.parts.map((p) => p.id).join(", ") }), error: true };
+      return { text: text9(REVIEW_TEXT.refusedPart, { part, parts: draft2.parts.map((p) => p.id).join(", ") }), error: true };
     if (got.refused === "line")
-      return { text: text8(REVIEW_TEXT.refusedLine, { part, line: String(got.line), count: String(got.part.lines.length), lines: nounFor(got.part.lines.length, "line", "lines") }), error: true };
-    return { text: text8(REVIEW_TEXT.refusedText), error: true };
+      return { text: text9(REVIEW_TEXT.refusedLine, { part, line: String(got.line), count: String(got.part.lines.length), lines: nounFor(got.part.lines.length, "line", "lines") }), error: true };
+    return { text: text9(REVIEW_TEXT.refusedText), error: true };
   };
   const changed = (draft2, answer2, got, part) => {
     if ("refused" in got)
       return refused3(draft2, got, part);
     const n = got.part.lines.length;
-    return { text: text8(answer2, { part: got.part.id, count: String(n), lines: nounFor(n, "line", "lines"), excerpt: aroundEdit(texts2, got) }) };
+    return { text: text9(answer2, { part: got.part.id, count: String(n), lines: nounFor(n, "line", "lines"), excerpt: aroundEdit(texts2, got) }) };
   };
   const open = (name, run2) => (args) => {
     if (work === null)
-      return Promise.resolve({ text: text8(REVIEW_TEXT.refusedStage, { tool: name }), error: true });
-    return Promise.resolve(work.done.committed ? { text: text8(MAIN_TEXT.refusedCommitted), error: true } : run2(work.draft, args));
+      return Promise.resolve({ text: text9(REVIEW_TEXT.refusedStage, { tool: name }), error: true });
+    return Promise.resolve(work.done.committed ? { text: text9(MAIN_TEXT.refusedCommitted), error: true } : run2(work.draft, args));
   };
   const draft = work?.draft;
   const state2 = draft ? { state: () => draft.edits.length } : {};
@@ -132904,31 +135452,31 @@ function reviewTools(texts2, work) {
   return [
     {
       name: REVIEW_TOOLS.replace,
-      description: text8(REVIEW_TEXT.tool(REVIEW_TOOLS.replace)),
+      description: text9(REVIEW_TEXT.tool(REVIEW_TOOLS.replace)),
       parameters: { type: "object", properties: { part: partProp(REVIEW_TOOLS.replace), line: lineProp(REVIEW_TOOLS.replace), to: toProp(REVIEW_TOOLS.replace), text: textProp(REVIEW_TOOLS.replace) }, required: ["part", "line", "text"] },
       ...state2,
-      run: open(REVIEW_TOOLS.replace, (d, args) => changed(d, REVIEW_TEXT.edited, d.replace(str31(args, "part"), lineArg(args.line), str31(args, "text"), toArg(args)), str31(args, "part")))
+      run: open(REVIEW_TOOLS.replace, (d, args) => changed(d, REVIEW_TEXT.edited, d.replace(str33(args, "part"), lineArg(args.line), str33(args, "text"), toArg(args)), str33(args, "part")))
     },
     {
       name: REVIEW_TOOLS.append,
-      description: text8(REVIEW_TEXT.tool(REVIEW_TOOLS.append)),
+      description: text9(REVIEW_TEXT.tool(REVIEW_TOOLS.append)),
       parameters: { type: "object", properties: { part: partProp(REVIEW_TOOLS.append), text: textProp(REVIEW_TOOLS.append) }, required: ["part", "text"] },
-      run: open(REVIEW_TOOLS.append, (d, args) => changed(d, REVIEW_TEXT.edited, d.append(str31(args, "part"), str31(args, "text")), str31(args, "part")))
+      run: open(REVIEW_TOOLS.append, (d, args) => changed(d, REVIEW_TEXT.edited, d.append(str33(args, "part"), str33(args, "text")), str33(args, "part")))
     },
     {
       name: REVIEW_TOOLS.drop,
-      description: text8(REVIEW_TEXT.tool(REVIEW_TOOLS.drop)),
+      description: text9(REVIEW_TEXT.tool(REVIEW_TOOLS.drop)),
       parameters: { type: "object", properties: { part: partProp(REVIEW_TOOLS.drop), line: lineProp(REVIEW_TOOLS.drop), to: toProp(REVIEW_TOOLS.drop) }, required: ["part", "line"] },
       ...state2,
-      run: open(REVIEW_TOOLS.drop, (d, args) => changed(d, REVIEW_TEXT.dropped, d.drop(str31(args, "part"), lineArg(args.line), toArg(args)), str31(args, "part")))
+      run: open(REVIEW_TOOLS.drop, (d, args) => changed(d, REVIEW_TEXT.dropped, d.drop(str33(args, "part"), lineArg(args.line), toArg(args)), str33(args, "part")))
     },
     {
       name: REVIEW_TOOLS.read,
-      description: text8(REVIEW_TEXT.tool(REVIEW_TOOLS.read)),
+      description: text9(REVIEW_TEXT.tool(REVIEW_TOOLS.read)),
       parameters: { type: "object", properties: { part: partProp(REVIEW_TOOLS.read) }, required: ["part"] },
       run: open(REVIEW_TOOLS.read, (d, args) => {
-        const part = d.part(str31(args, "part"));
-        return part ? { text: partShown(texts2, part) } : refused3(d, { refused: "part" }, str31(args, "part"));
+        const part = d.part(str33(args, "part"));
+        return part ? { text: partShown(texts2, part) } : refused3(d, { refused: "part" }, str33(args, "part"));
       })
     }
   ];
@@ -132948,21 +135496,21 @@ function liveEdits(draft) {
 }
 
 // src/backend/agents/receipts.ts
-function receiptHash(text8) {
-  return hashParts("lre.receipt", text8).slice(0, 8);
+function receiptHash(text9) {
+  return hashParts("lre.receipt", text9).slice(0, 8);
 }
-function cutAt3(text8, at3) {
-  const unit3 = text8.charCodeAt(at3 - 1);
-  return at3 > 0 && at3 < text8.length && unit3 >= 55296 && unit3 <= 56319 ? at3 - 1 : at3;
+function cutAt3(text9, at3) {
+  const unit3 = text9.charCodeAt(at3 - 1);
+  return at3 > 0 && at3 < text9.length && unit3 >= 55296 && unit3 <= 56319 ? at3 - 1 : at3;
 }
-function clip3(text8, max) {
-  return text8.length <= max ? text8 : `${text8.slice(0, cutAt3(text8, max))}\u2026`;
+function clip3(text9, max) {
+  return text9.length <= max ? text9 : `${text9.slice(0, cutAt3(text9, max))}\u2026`;
 }
-function receiptOf(text8, input) {
-  if (text8.length <= input.chars)
-    return text8;
-  return renderPrompt(MAIN_TEXT.receiptResult, input.texts, { text: text8.slice(0, cutAt3(text8, input.chars)), chars: String(text8.length), lines: String(text8.split(`
-`).length), hash: receiptHash(text8), reply: String(input.reply) });
+function receiptOf(text9, input) {
+  if (text9.length <= input.chars)
+    return text9;
+  return renderPrompt(MAIN_TEXT.receiptResult, input.texts, { text: text9.slice(0, cutAt3(text9, input.chars)), chars: String(text9.length), lines: String(text9.split(`
+`).length), hash: receiptHash(text9), reply: String(input.reply) });
 }
 function editLine(edit) {
   if (edit.op === "append")
@@ -132996,7 +135544,7 @@ function reviewCounts(names3, texts2) {
 var GREP_TURNS = 40;
 var GREP_LINES = 40;
 var LINE_CHARS = 300;
-function wholeArg(v4) {
+function wholeArg2(v4) {
   const n = typeof v4 === "string" && v4.trim() !== "" ? Number(v4) : v4;
   return typeof n === "number" && Number.isSafeInteger(n) ? n : null;
 }
@@ -133008,9 +135556,9 @@ function around(line2, at3, length) {
 }
 function pastTurnTool(input) {
   const { texts: texts2 } = input;
-  const text8 = (id2, vars = {}) => renderPrompt(id2, texts2, vars);
-  const describe = (arg) => text8(MAIN_TEXT.toolArg(MAIN_TOOLS.pastTurn, arg));
-  const refuse10 = (id2, vars) => ({ text: text8(id2, vars), error: true });
+  const text9 = (id2, vars = {}) => renderPrompt(id2, texts2, vars);
+  const describe = (arg) => text9(MAIN_TEXT.toolArg(MAIN_TOOLS.pastTurn, arg));
+  const refuse10 = (id2, vars) => ({ text: text9(id2, vars), error: true });
   const mine = async (source, replies) => {
     const read = await source.read(replies.map((r) => r.segment));
     return replies.flatMap((r, i) => {
@@ -133018,17 +135566,17 @@ function pastTurnTool(input) {
       return messages.length > 0 ? [{ reply: r.reply, messages }] : [];
     });
   };
-  const none = text8(MAIN_TEXT.none);
+  const none = text9(MAIN_TEXT.none);
   return {
     name: MAIN_TOOLS.pastTurn,
-    description: text8(MAIN_TEXT.tool(MAIN_TOOLS.pastTurn)),
+    description: text9(MAIN_TEXT.tool(MAIN_TOOLS.pastTurn)),
     parameters: {
       type: "object",
       properties: { reply: { type: "integer", description: describe("reply") }, message: { type: "integer", description: describe("message") }, grep: { type: "string", description: describe("grep") }, offset: { type: "integer", description: describe("offset") } }
     },
     async run(args) {
       const source = input.source();
-      const reply = wholeArg(args.reply);
+      const reply = wholeArg2(args.reply);
       const grep = typeof args.grep === "string" ? args.grep.trim() : "";
       const latest = source.replies.slice(-GREP_TURNS);
       const named3 = reply === null ? null : source.replies.find((r) => r.reply === reply);
@@ -133050,14 +135598,14 @@ function pastTurnTool(input) {
                 return;
               count5++;
               if (found.length < GREP_LINES)
-                found.push(text8(MAIN_TEXT.pastTurnMatch, { reply: String(turn2.reply), n: String(i + 1), line: String(at3 + 1), text: around(line2, hit, needle.length) }));
+                found.push(text9(MAIN_TEXT.pastTurnMatch, { reply: String(turn2.reply), n: String(i + 1), line: String(at3 + 1), text: around(line2, hit, needle.length) }));
             });
           });
         }
         const where = reply !== null ? `reply ${reply}` : `your latest ${turns.length} ${turns.length === 1 ? "turn" : "turns"}`;
         if (count5 === 0)
-          return { text: text8(MAIN_TEXT.pastTurnNoMatch, { where, grep }) };
-        return { text: text8(MAIN_TEXT.pastTurnFound, { count: String(count5), lines: count5 === 1 ? "line" : "lines", grep, where, more: count5 > found.length ? ` (the first ${found.length} shown)` : "", found: found.join(`
+          return { text: text9(MAIN_TEXT.pastTurnNoMatch, { where, grep }) };
+        return { text: text9(MAIN_TEXT.pastTurnFound, { count: String(count5), lines: count5 === 1 ? "line" : "lines", grep, where, more: count5 > found.length ? ` (the first ${found.length} shown)` : "", found: found.join(`
 `) }) };
       }
       if (reply === null) {
@@ -133067,27 +135615,27 @@ function pastTurnTool(input) {
       const turn = turns[0];
       if (!turn)
         return refuse10(MAIN_TEXT.pastTurnNone, { reply: String(reply), replies: none });
-      const n = wholeArg(args.message);
+      const n = wholeArg2(args.message);
       const role = (m2) => m2.role === "user" ? "the engine" : "you";
       if (n === null) {
         const lines3 = turn.messages.map((m2, i) => {
           const whole6 = wholeText(m2);
           const first = (whole6.split(`
 `).find((l) => l.trim() !== "") ?? "").trim();
-          return text8(MAIN_TEXT.pastTurnEntry, { n: String(i + 1), role: role(m2), chars: String(whole6.length), receipt: typeof m2.whole === "string" ? ", kept as a receipt" : "", first: first.length > 160 ? `${first.slice(0, 160)}\u2026` : first });
+          return text9(MAIN_TEXT.pastTurnEntry, { n: String(i + 1), role: role(m2), chars: String(whole6.length), receipt: typeof m2.whole === "string" ? ", kept as a receipt" : "", first: first.length > 160 ? `${first.slice(0, 160)}\u2026` : first });
         });
-        return { text: text8(MAIN_TEXT.pastTurnList, { reply: String(reply), count: String(turn.messages.length), messages: lines3.join(`
+        return { text: text9(MAIN_TEXT.pastTurnList, { reply: String(reply), count: String(turn.messages.length), messages: lines3.join(`
 `) }) };
       }
       const m = turn.messages[n - 1];
       if (!m || n < 1)
         return refuse10(MAIN_TEXT.pastTurnNoMessage, { reply: String(reply), count: String(turn.messages.length) });
       const whole5 = wholeText(m);
-      const from = Math.min(Math.max(0, wholeArg(args.offset) ?? 0), whole5.length);
+      const from = Math.min(Math.max(0, wholeArg2(args.offset) ?? 0), whole5.length);
       const to = Math.min(whole5.length, from + Math.max(1, input.page));
-      const page10 = text8(MAIN_TEXT.pastTurnRead, { reply: String(reply), n: String(n), role: role(m), from: String(from), to: String(to), chars: String(whole5.length), text: whole5.slice(from, to) });
+      const page10 = text9(MAIN_TEXT.pastTurnRead, { reply: String(reply), n: String(n), role: role(m), from: String(from), to: String(to), chars: String(whole5.length), text: whole5.slice(from, to) });
       return { text: to < whole5.length ? `${page10}
-${text8(MAIN_TEXT.pastTurnMore, { next: String(to) })}` : page10 };
+${text9(MAIN_TEXT.pastTurnMore, { next: String(to) })}` : page10 };
     }
   };
 }
@@ -133152,28 +135700,28 @@ async function systemInstructions(source, input) {
   const read = [];
   for (const path3 of systemPaths(input.role)) {
     const file = listed5.get(path3);
-    const text8 = file ? (await source.blob(file.hash) ?? "").trim() : "";
-    if (text8 !== "")
-      read.push({ path: path3, text: text8 });
+    const text9 = file ? (await source.blob(file.hash) ?? "").trim() : "";
+    if (text9 !== "")
+      read.push({ path: path3, text: text9 });
   }
   if (read.length === 0)
     return "";
-  const framed = (path3, text8) => renderPrompt(RUNTIME_TEXT.systemFile, texts2, { path: path3, text: text8 });
+  const framed = (path3, text9) => renderPrompt(RUNTIME_TEXT.systemFile, texts2, { path: path3, text: text9 });
   const parts = [];
   const cut = [];
   let left = input.tokens;
-  for (const { path: path3, text: text8 } of read) {
+  for (const { path: path3, text: text9 } of read) {
     if (cut.length > 0) {
       cut.push(path3);
       continue;
     }
-    const whole5 = framed(path3, text8);
+    const whole5 = framed(path3, text9);
     if (tokensOf(whole5) <= left) {
       parts.push(whole5);
       left -= tokensOf(whole5);
       continue;
     }
-    const lines3 = text8.split(`
+    const lines3 = text9.split(`
 `);
     let lo = 0;
     let hi = lines3.length - 1;
@@ -133218,11 +135766,11 @@ function runYield(texts2, kind, out2, writes3) {
   return { writes: parts.length > 0 ? say(YIELD_TEXT.writes, { writes: parts.join("; ") }) : "", lost: lost.length > 0 ? say(YIELD_TEXT.lost, { lost: lost.join("; ") }) : "" };
 }
 function recordYield(rt, at3, phase, role, y) {
-  const words10 = [y.writes, y.lost].filter((t) => t !== "").join(" ");
-  if (words10 === "")
+  const words11 = [y.writes, y.lost].filter((t) => t !== "").join(" ");
+  if (words11 === "")
     return;
-  rt.diag.yielded(at3, phase, ROLE_LABEL2[role], words10, y.lost !== "");
-  rt.host.log("info", `[LumiRPEngine] turn ${(at3.turn ?? "").slice(0, 8)}: the ${ROLE_LABEL2[role]} role's run: ${words10}`, at3.userId);
+  rt.diag.yielded(at3, phase, ROLE_LABEL2[role], words11, y.lost !== "");
+  rt.host.log("info", `[LumiRPEngine] turn ${(at3.turn ?? "").slice(0, 8)}: the ${ROLE_LABEL2[role]} role's run: ${words11}`, at3.userId);
 }
 var COMMIT_PHASE = { pre: "plan", plan: "prose", post: "read" };
 function recordCommit(rt, at3, texts2, out2) {
@@ -133319,96 +135867,6 @@ function knowledgeAnswer(out2) {
     for (const f of p.facts)
       facts.set(f.id, f.claim);
   return { facts: [...facts].map(([id2, claim2]) => ({ id: id2, claim: claim2 })), learnings, yours: k.proposals.map((p) => ({ fact: p.learn.fact, type: p.type })) };
-}
-
-// src/backend/depth/archive-tools.ts
-var ARCHIVE_TOOLS = { search: "archive_search", quote: "archive_quote" };
-function wholeArg2(v4) {
-  const n = typeof v4 === "string" && v4.trim() !== "" ? Number(v4) : v4;
-  return typeof n === "number" && Number.isSafeInteger(n) ? n : null;
-}
-function archiveTools(input) {
-  const { world, state: state2, texts: texts2 } = input;
-  const cal = calendarOf(world);
-  const text8 = (id2) => renderPrompt(id2, texts2, {});
-  const idOf2 = (v4, kind) => {
-    if (typeof v4 !== "string" || v4.trim() === "")
-      return;
-    return kind === "person" ? personNamed3(state2, v4) : placeNamed2(world, v4);
-  };
-  const timeOf = (v4) => typeof v4 !== "string" || v4.trim() === "" ? undefined : clockOfStamp(cal, v4.trim()) ?? clockOfPhrase(cal, state2.clock, v4.trim());
-  const nameOf16 = (id2) => own(state2.entities, id2)?.name ?? own(world.places, id2)?.name ?? id2;
-  const hitLine = (h) => `- message ${h.index + 1} [${h.messageId}] (${h.isUser ? "the player" : "a reply"}${h.storyTime !== null ? `, ${formatClock(cal, h.storyTime)}` : ""}${h.places.length > 0 ? `, at ${h.places.map(nameOf16).join(", ")}` : ""}${h.people.length > 0 ? `; ${h.people.map(nameOf16).join(", ")}` : ""}${h.beats.length > 0 ? `; ${h.beats.length} beat${h.beats.length === 1 ? "" : "s"}` : ""}) chars ${h.span[0]}\u2013${h.span[1]}: ${h.snippet}`;
-  const search2 = {
-    name: ARCHIVE_TOOLS.search,
-    description: text8(DEPTH_TOOL_TEXT.search),
-    parameters: {
-      type: "object",
-      properties: {
-        text: { type: "string", description: text8(DEPTH_TOOL_TEXT.searchText) },
-        who: { type: "string", description: text8(DEPTH_TOOL_TEXT.searchWho) },
-        place: { type: "string", description: text8(DEPTH_TOOL_TEXT.searchPlace) },
-        from: { type: "string", description: text8(DEPTH_TOOL_TEXT.searchFrom) },
-        to: { type: "string", description: text8(DEPTH_TOOL_TEXT.searchTo) },
-        offset: { type: "integer", description: text8(DEPTH_TOOL_TEXT.searchOffset) }
-      }
-    },
-    async run(args) {
-      const who = idOf2(args.who, "person");
-      const place2 = idOf2(args.place, "place");
-      const from = timeOf(args.from);
-      const to = timeOf(args.to);
-      if (who === null || place2 === null)
-        return { text: `No ${who === null ? `person called "${String(args.who)}"` : `place called "${String(args.place)}"`} in this world.`, error: true };
-      if (from === null || to === null)
-        return { text: `"${String(from === null ? args.from : args.to)}" isn't a story time this tool reads: give one as the archive words them ("${formatClock(cal, state2.clock)}"), or a phrase like "yesterday morning".`, error: true };
-      const offset = Math.max(0, wholeArg2(args.offset) ?? 0);
-      const q = {
-        ...typeof args.text === "string" && args.text.trim() !== "" ? { text: args.text.trim() } : {},
-        ...who ? { who } : {},
-        ...place2 ? { place: place2 } : {},
-        ...from !== undefined ? { from } : {},
-        ...to !== undefined ? { to } : {},
-        ...input.upTo ? { upTo: input.upTo } : {},
-        offset
-      };
-      const found = await input.source.search(q);
-      if (found.hits.length === 0)
-        return { text: offset > 0 ? `No more: ${found.total} found in all.` : "Nothing in the chat matches." };
-      const next = offset + found.hits.length < found.total ? ` More with offset ${offset + found.hits.length}.` : "";
-      return { text: `${found.total} found; ${offset + 1}\u2013${offset + found.hits.length}:
-${found.hits.map(hitLine).join(`
-`)}
-${next}`.trim() };
-    }
-  };
-  const quote2 = {
-    name: ARCHIVE_TOOLS.quote,
-    description: text8(DEPTH_TOOL_TEXT.quote),
-    parameters: {
-      type: "object",
-      properties: {
-        message: { type: "string", description: text8(DEPTH_TOOL_TEXT.quoteMessage) },
-        from: { type: "integer", description: text8(DEPTH_TOOL_TEXT.quoteFrom) },
-        to: { type: "integer", description: text8(DEPTH_TOOL_TEXT.quoteTo) }
-      },
-      required: ["message"]
-    },
-    async run(args) {
-      const messageId = typeof args.message === "string" ? bareId(args.message) : "";
-      if (messageId === "")
-        return { text: "Name the message to quote by its id, as archive_search gives it.", error: true };
-      const start = wholeArg2(args.from);
-      const end = wholeArg2(args.to);
-      const got = await input.source.quote({ messageId, ...start !== null && end !== null && end > start ? { span: [Math.max(0, start), end] } : {} });
-      if (!got)
-        return { text: `No message ${messageId} on this chat's story.`, error: true };
-      const cut = got.truncated ? ` (cut at ${ARCHIVE_QUOTE_MAX} characters; quote from ${got.span[1]} for more)` : "";
-      return { text: `Message ${got.index + 1} [${got.messageId}] (${got.isUser ? "the player" : "a reply"}${got.storyTime !== null ? `, ${formatClock(cal, got.storyTime)}` : ""}), chars ${got.span[0]}\u2013${got.span[1]}${cut}:
-${got.text}` };
-    }
-  };
-  return [search2, quote2];
 }
 
 // src/backend/agents/main-agent.ts
@@ -133810,7 +136268,7 @@ ${m.text}`;
   contextGuidance() {
     const { agents } = this.host.settings;
     const none = this.text(MAIN_TEXT.none);
-    const named3 = (list3) => list3.length > 0 ? list3.map(sourceLabel).join(", ") : none;
+    const named3 = (list4) => list4.length > 0 ? list4.map(sourceLabel).join(", ") : none;
     const roles = ROLE_IDS.map((role) => {
       const c = agents.context.roles[role];
       const families = agents.roles[role].families;
@@ -133819,14 +136277,14 @@ ${m.text}`;
     return this.text(MAIN_TEXT.context, { roles: roles.join(`
 `) });
   }
-  async send(agent, text8, signal2, phase, opts = {}) {
+  async send(agent, text9, signal2, phase, opts = {}) {
     const { rt, chatId, userId } = this.host;
     const label3 = opts.label === undefined ? STEP_LABEL2[MAIN_AGENT_ROLE] ?? MAIN_LABEL : opts.label;
     if (label3 !== null)
       rt.diag.agentWorking(chatId, userId, agent.id, label3);
     let reply;
     try {
-      reply = await agent.send(text8, signal2);
+      reply = await agent.send(text9, signal2);
     } catch (error) {
       reply = { status: "failed", text: "", code: "failed", reason: error instanceof Error ? error.message : String(error), usage: emptyUsage() };
     } finally {
@@ -133850,13 +136308,13 @@ ${m.text}`;
     const t = agent.transcript();
     const args = new Map;
     const did = [];
-    const kept4 = [];
+    const kept5 = [];
     const reviewed = [];
     for (const e of t.entries) {
       if (e.kind === "answer") {
         if (e.text.trim() !== "") {
           did.push(e.text.trim());
-          kept4.push(e.text.trim());
+          kept5.push(e.text.trim());
         }
         for (const c of e.calls)
           args.set(c.id, c.args);
@@ -133866,12 +136324,12 @@ ${m.text}`;
         if (receipts && isReviewTool(e.name))
           reviewed.push(e.name);
         else
-          kept4.push(this.text(MAIN_TEXT.historyCall, { ...call, result: receipts ? receiptOf(e.text, { chars: main.receiptChars, reply: this.reply, texts: this.texts }) : e.text }));
+          kept5.push(this.text(MAIN_TEXT.historyCall, { ...call, result: receipts ? receiptOf(e.text, { chars: main.receiptChars, reply: this.reply, texts: this.texts }) : e.text }));
       }
     }
     const counts2 = reviewCounts(reviewed, this.texts);
     if (counts2 !== "")
-      kept4.push(counts2);
+      kept5.push(counts2);
     const done = did.join(`
 
 `);
@@ -133879,7 +136337,7 @@ ${m.text}`;
     const asked2 = receipt === null ? stored : review?.before ? `${review.before}
 
 ${receipt}` : receipt;
-    const answered = kept4.join(`
+    const answered = kept5.join(`
 
 `);
     const message = (role, content, whole5) => ({ role, content, by: MAIN_BY, ...content !== whole5 ? { whole: whole5 } : {} });
@@ -134087,10 +136545,10 @@ ${message}`;
       note: note2,
       focus: typeof args.focus === "string" ? args.focus : "",
       signal: round2.controller.signal,
-      summarize: async (instructions, text8, signal2) => {
+      summarize: async (instructions, text9, signal2) => {
         const reply = await this.summarizer(this.text(RUNTIME_TEXT.condenseSystem), `${instructions}
 
-${text8}`, AbortSignal.any([round2.controller.signal, signal2]));
+${text9}`, AbortSignal.any([round2.controller.signal, signal2]));
         return reply.status === "answered" && reply.text.trim() !== "" ? { text: reply.text.trim() } : { failed: reply.reason ?? this.text(MAIN_TEXT.none) };
       }
     });
@@ -134319,11 +136777,11 @@ class TurnDraft {
     this.watch?.refused({ role: at3.role, agentId: at3.agentId, phase: at3.phase, ...refusal5.key !== undefined ? { key: refusal5.key } : {}, code: refusal5.code, reason: refusal5.reason });
   }
   take(phase) {
-    const taken = commitOrder(this.ops.filter((o) => o.phase === phase));
+    const taken2 = commitOrder(this.ops.filter((o) => o.phase === phase));
     for (let i = this.ops.length - 1;i >= 0; i--)
       if (this.ops[i]?.phase === phase)
         this.ops.splice(i, 1);
-    return taken;
+    return taken2;
   }
   clear() {
     const dropped = this.ops.splice(0);
@@ -134361,12 +136819,12 @@ function opTier(op, role) {
 function makes2(op, what) {
   return op.kind === "gm_edit" && isRecord(op.op) && op.op.op === what && op.op.change.do === "make";
 }
-function stagedWorkspace(rt, draft, head, kept4) {
+function stagedWorkspace(rt, draft, head, kept5) {
   const ops = commitOrder(draft.pending()).filter((o) => o.mode === "auto" && o.op.kind.startsWith("ws_"));
   if (ops.length === 0)
-    return { head, kept: kept4, staged: new Map };
+    return { head, kept: kept5, staged: new Map };
   const w = new Working(rt.registry, head.world, head.state);
-  let area = kept4;
+  let area = kept5;
   const staged = new Map;
   for (const o of ops) {
     const by = { role: o.role, key: o.key };
@@ -134462,8 +136920,8 @@ function turnWriter(rt, draft, env) {
         return refusalOf3("place_cap", c.ctx.view.text(WRITE_NOTE.placeCap, { count: String(places2) }), key);
     }
     const writer = { userId: env.userId, chatId: env.chatId, knowledge: "everyone", reader: env.reader, agent: { role: env.role, id: env.agentId }, signal: env.signal, connectionId: env.connectionId, gm: env.tier === "gm" };
-    const kept4 = draft.own(env.agentId, env.phase).reduce((files, o) => o.kept ? withKept(files, o.kept) : files, c.ctx.kept);
-    return checkOp(rt, c.ctx, writer, state2, kept4, op);
+    const kept5 = draft.own(env.agentId, env.phase).reduce((files, o) => o.kept ? withKept(files, o.kept) : files, c.ctx.kept);
+    return checkOp(rt, c.ctx, writer, state2, kept5, op);
   };
   const unstaged = (c, op) => {
     const key = keyOf4(op);
@@ -134578,8 +137036,8 @@ function commitStaged(rt, commit, ops, w) {
     }
     const mark2 = w.mark();
     const from = w.events.length;
-    const kept4 = w.applyAll(checked.events);
-    if (kept4.length < checked.events.length) {
+    const kept5 = w.applyAll(checked.events);
+    if (kept5.length < checked.events.length) {
       w.restore(mark2);
       out2.refused.push({ op, refusal: refusalOf3("write_refused", ctx.view.text(WRITE_NOTE.stale), op.key) });
       continue;
@@ -134592,12 +137050,12 @@ function commitStaged(rt, commit, ops, w) {
 }
 
 // src/backend/agents/turn-ctx.ts
-function startRoleAgent(rt, ctx, spec, tag = {}) {
+function startRoleAgent(rt, ctx, spec, tag2 = {}) {
   const settings = rt.settings.known(ctx.userId);
   if (!settings)
     throw new Error("the user's settings aren't read yet");
   const agents = settings.agents;
-  return startAgent({ ...spec, role: ctx.role, connectionId: ctx.settings.connectionId, model: ctx.settings.model, effort: ctx.settings.effort, budget: roleBudget(agents, ctx.role) }, { host: rt.host, userId: ctx.userId, settings: agents, texts: settings.prompts.texts, accounts: rt.agentAccounts, turn: ctx.turn, trace: { ...tag, run: ctx.agentId } });
+  return startAgent({ ...spec, role: ctx.role, connectionId: ctx.settings.connectionId, model: ctx.settings.model, effort: ctx.settings.effort, budget: roleBudget(agents, ctx.role) }, { host: rt.host, userId: ctx.userId, settings: agents, texts: settings.prompts.texts, accounts: rt.agentAccounts, turn: ctx.turn, trace: { ...tag2, run: ctx.agentId } });
 }
 
 // src/backend/agents/roles/agent.ts
@@ -134622,70 +137080,70 @@ function guidanceOf(rt, ctx, texts2, names3) {
   const guidance = rt.presets.last(ctx.userId).guidance;
   const steps = GUIDANCE_TARGETS.filter((t) => ROLE_GUIDANCE[ctx.role].includes(t));
   const blocks = steps.flatMap((step2) => {
-    const text8 = guidance[step2]?.trim() ?? "";
-    return text8 === "" ? [] : [renderPrompt(ROLES_TEXT.guidanceBlock, texts2, { step: `${GUIDANCE_PREFIX}${step2}`, text: text8 })];
+    const text9 = guidance[step2]?.trim() ?? "";
+    return text9 === "" ? [] : [renderPrompt(ROLES_TEXT.guidanceBlock, texts2, { step: `${GUIDANCE_PREFIX}${step2}`, text: text9 })];
   });
   return blocks.length > 0 ? renderPrompt(ROLES_TEXT.guidance, texts2, { ...names3, blocks: blocks.join(`
 
 `) }) : "";
 }
 var ROLE_PINS_TEXTS = { pins: ROLES_TEXT.pins, file: ROLES_TEXT.pinsFile, headings: ROLES_TEXT.pinsHeadings, none: ROLES_TEXT.pinsNoHeadings };
-async function runRoleAgent(rt, ctx, ask3) {
+async function runRoleAgent(rt, ctx, ask5) {
   const settings = await rt.settings.get(ctx.userId);
   const own2 = ctx.texts ?? settings.prompts.texts;
   const role = ctx.role;
   const context2 = settings.agents.context.roles[role];
-  const task = ROLE_TASK_ROUTES[role].find((t) => t.task === ask3.sub);
+  const task = ROLE_TASK_ROUTES[role].find((t) => t.task === ask5.sub);
   if (!task)
-    throw new Error(`the ${ROLE_LABEL2[role]} role has no task "${ask3.sub}"`);
+    throw new Error(`the ${ROLE_LABEL2[role]} role has no task "${ask5.sub}"`);
   const route = taskRoute(settings, role, ctx.settings, task);
   const at3 = { ...ctx, settings: { ...ctx.settings, connectionId: route.connectionId, model: route.model } };
-  const perspective = renderPrompt(ROLES_TEXT.sees[context2.perspective], own2, ask3.names);
-  const system = renderPrompt(roleTextId(role, "system"), own2, { ...ask3.names, knowledge: perspective });
+  const perspective = renderPrompt(ROLES_TEXT.sees[context2.perspective], own2, ask5.names);
+  const system = renderPrompt(roleTextId(role, "system"), own2, { ...ask5.names, knowledge: perspective });
   const view = await ctx.reader.view().catch(() => null);
   const instructions = view ? await systemInstructions(view, { role, tokens: settings.agents.systemTokens, texts: own2 }) : "";
   const pins = view ? await pinnedFiles(view, { role, tokens: settings.agents.main.pinsTokens, pinned: true, texts: own2, framing: ROLE_PINS_TEXTS, config: context2.pins }) : "";
   const indexed = view && context2.start.includes(LORE_INDEX_SOURCE) ? await loreIndexText(view, { tokens: settings.loreIndex.promptTokens }) : "";
-  const index = typeof indexed === "string" ? indexed : "";
-  const prefix = [renderPrompt(roleTextId(role, "instructions"), own2, ask3.names), guidanceOf(rt, ctx, own2, ask3.names), pins, index].filter((t) => t.trim() !== "");
+  const index2 = typeof indexed === "string" ? indexed : "";
+  const prefix = [renderPrompt(roleTextId(role, "instructions"), own2, ask5.names), guidanceOf(rt, ctx, own2, ask5.names), pins, index2].filter((t) => t.trim() !== "");
   const sections2 = await ctx.sections(context2.start.filter((s) => s !== LORE_INDEX_SOURCE));
-  const answer2 = ask3.answer?.part ?? "answer";
+  const answer2 = ask5.answer?.part ?? "answer";
   const message = [
-    renderPrompt(roleTaskTextId(role, ask3.sub, "task"), own2, { ...ask3.names, ...ask3.vars }, ask3.own),
-    ask3.data ?? "",
-    sections2 === "" ? "" : renderPrompt(ROLES_TEXT.context, own2, { ...ask3.names, sections: sections2 }),
-    [renderPrompt(roleTaskTextId(role, ask3.sub, answer2), own2, { ...ask3.names, ...ask3.answer?.vars ?? {} }), ask3.answer?.tail ?? ""].filter((t) => t.trim() !== "").join(`
+    renderPrompt(roleTaskTextId(role, ask5.sub, "task"), own2, { ...ask5.names, ...ask5.vars }, ask5.own),
+    ask5.data ?? "",
+    sections2 === "" ? "" : renderPrompt(ROLES_TEXT.context, own2, { ...ask5.names, sections: sections2 }),
+    [renderPrompt(roleTaskTextId(role, ask5.sub, answer2), own2, { ...ask5.names, ...ask5.answer?.vars ?? {} }), ask5.answer?.tail ?? ""].filter((t) => t.trim() !== "").join(`
 `),
     ctx.brief ?? ""
   ].filter((t) => t.trim() !== "").join(`
 
 `);
   const condenseSystem = withInstructions(renderPrompt(RUNTIME_TEXT.condenseSystem, own2, {}), instructions);
-  const summarize = async (asked2, text8, signal2) => {
-    const condenser = startRoleAgent(rt, at3, { system: condenseSystem, prefix: [], tools: [] }, { phase: ask3.phase, task: "condense" });
+  const summarize = async (asked2, text9, signal2) => {
+    const condenser = startRoleAgent(rt, at3, { system: condenseSystem, prefix: [], tools: [] }, { phase: ask5.phase, task: "condense" });
     try {
       const reply2 = await condenser.send(`${asked2}
 
-${text8}`, AbortSignal.any([ctx.signal, signal2]));
+${text9}`, AbortSignal.any([ctx.signal, signal2]));
       return reply2.status === "answered" && reply2.text.trim() !== "" ? { text: reply2.text.trim() } : { failed: reply2.reason ?? renderPrompt(FAILED_TEXT.noAnswer, own2, {}) };
     } finally {
-      await recordAgentCalls(rt.diag, { at: { chatId: ctx.chatId, userId: ctx.userId, turn: ctx.generationId }, phase: ask3.phase, role, connection: at3.settings.connectionId ?? "active", model: at3.settings.model, transcript: condenser.transcript() }).catch(() => {
+      await recordAgentCalls(rt.diag, { at: { chatId: ctx.chatId, userId: ctx.userId, turn: ctx.generationId }, phase: ask5.phase, role, connection: at3.settings.connectionId ?? "active", model: at3.settings.model, transcript: condenser.transcript() }).catch(() => {
         return;
       });
     }
   };
-  const tools = ask3.tools ? roleTools(ctx, ask3.tools, own2, summarize, ask3.notes) : [];
+  const tools = ask5.tools ? roleTools(ctx, ask5.tools, own2, summarize, ask5.notes) : [];
   const guide = toolsGuide(tools, own2);
   const handle = startRoleAgent(rt, at3, { system: withInstructions(guide === "" ? system : `${system}
 
-${guide}`, instructions), prefix, tools }, { phase: ask3.phase, task: ask3.sub });
+${guide}`, instructions), prefix, tools }, { phase: ask5.phase, task: ask5.sub });
   rt.diag.agentWorking(ctx.chatId, ctx.userId, handle.id, ROLE_LABEL2[role]);
   let reply;
   try {
     reply = await handle.send(message, ctx.signal);
   } finally {
     rt.diag.agentDone(ctx.chatId, ctx.userId, handle.id);
-    await recordAgentCalls(rt.diag, { at: { chatId: ctx.chatId, userId: ctx.userId, turn: ctx.generationId }, phase: ask3.phase, role, connection: at3.settings.connectionId ?? "active", model: at3.settings.model, transcript: handle.transcript() }).catch((error) => rt.host.log("warn", `[LumiRPEngine] turn ${ctx.generationId.slice(0, 8)}: the ${ROLE_LABEL2[role]} role's calls weren't all recorded (${error instanceof Error ? error.message : String(error)})`, ctx.userId));
+    await recordAgentCalls(rt.diag, { at: { chatId: ctx.chatId, userId: ctx.userId, turn: ctx.generationId }, phase: ask5.phase, role, connection: at3.settings.connectionId ?? "active", model: at3.settings.model, transcript: handle.transcript() }).catch((error) => rt.host.log("warn", `[LumiRPEngine] turn ${ctx.generationId.slice(0, 8)}: the ${ROLE_LABEL2[role]} role's calls weren't all recorded (${error instanceof Error ? error.message : String(error)})`, ctx.userId));
   }
   const usage2 = handle.usage();
   if (ctx.signal.aborted) {
@@ -134702,7 +137160,7 @@ ${guide}`, instructions), prefix, tools }, { phase: ask3.phase, task: ask3.sub }
   } catch {
     return { ok: false, code: "no_json", reason: renderPrompt(FAILED_TEXT.noJson, own2, {}), usage: usage2, via: "agent", text: reply.text };
   }
-  const out2 = ask3.check(raw);
+  const out2 = ask5.check(raw);
   return out2 === null ? { ok: false, code: "contract", reason: renderPrompt(FAILED_TEXT.contract, own2, {}), usage: usage2, via: "agent", text: reply.text } : { ok: true, out: out2, usage: usage2, via: "agent", text: reply.text };
 }
 async function roleCtx(rt, ctx, role) {
@@ -134711,7 +137169,7 @@ async function roleCtx(rt, ctx, role) {
   const settings = await rt.settings.get(ctx.userId);
   return { ...ctx, role, agentId: `${ctx.agentId}>${role}`, settings: settings.agents.roles[role], brief: null };
 }
-function namesOf5(world, state2) {
+function namesOf6(world, state2) {
   return { world: world.name, pov: state2.entities[world.pov]?.name ?? world.pov };
 }
 
@@ -134777,8 +137235,8 @@ async function curateRun(rt, task, ctx) {
 function namedKey(p) {
   const type = String(p.type);
   const name = hasOwn(NAMED_BY, type) ? p[NAMED_BY[type] ?? ""] : undefined;
-  const words10 = typeof name === "string" ? nameTokens(name) : [];
-  return words10.length > 0 ? `${type}:${words10.join(" ")}` : null;
+  const words11 = typeof name === "string" ? nameTokens(name) : [];
+  return words11.length > 0 ? `${type}:${words11.join(" ")}` : null;
 }
 function uncurated(registry, world, state2, held3, curator) {
   if (held3.length === 0)
@@ -134899,10 +137357,10 @@ var HAND_VERBS = ["hands", "hands over", "gives", "passes", "slides", "tosses"];
 var LIE_VERBS = ["lies", "lie", "sits", "sit", "rests", "rest", "waits", "hangs", "is lying", "is sitting", "is resting", "is waiting", "is hanging", "are lying", "are sitting"];
 var LIE_SURFACES = ["table", "counter", "bar", "desk", "floor", "shelf", "bench", "workbench", "seat", "dashboard", "ground", "bed", "chair", "stool", "sill", "windowsill", "hood", "step", "steps", "porch", "dock", "deck", "tray", "hook", "nightstand", "dresser"];
 var FILLER4 = { mr: true, mrs: true, ms: true, miss: true, dr: true, sir: true, lady: true, lord: true, dame: true, the: true, of: true, de: true, van: true, von: true, la: true, le: true, old: true, young: true, captain: true, constable: true, father: true, mother: true, sister: true, brother: true, aunt: true, uncle: true };
-function plain4(text8) {
-  return plainLetters(text8.normalize("NFC").toLowerCase()).replace(/[\u2019\u2018]/g, "'").replace(/\s+/g, " ").trim();
+function plain4(text9) {
+  return plainLetters(text9.normalize("NFC").toLowerCase()).replace(/[\u2019\u2018]/g, "'").replace(/\s+/g, " ").trim();
 }
-function words10(name) {
+function words11(name) {
   return plain4(name).match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 function phrase(ws) {
@@ -134915,7 +137373,7 @@ function proseClashes(reg, world, start, end) {
   const pov2 = world.pov;
   const moment = (state2) => {
     const here = placeOfEntity(state2, pov2);
-    const apart = Object.entries(world.places).filter(([id2]) => !together(world, here, id2) && !(here !== null && placeWithin(world, here, id2))).map(([, p]) => phrase(words10(p.name))).filter((p) => p !== "");
+    const apart = Object.entries(world.places).filter(([id2]) => !together(world, here, id2) && !(here !== null && placeWithin(world, here, id2))).map(([, p]) => phrase(words11(p.name))).filter((p) => p !== "");
     return {
       state: state2,
       here,
@@ -134929,10 +137387,10 @@ function proseClashes(reg, world, start, end) {
   const people = visible2.filter((id2) => kindIs(reg, world, entity2(id2)?.kind ?? "", "person"));
   const holders = {};
   for (const id2 of people)
-    for (const w of new Set(words10(entity2(id2)?.name ?? "")))
+    for (const w of new Set(words11(entity2(id2)?.name ?? "")))
       holders[w] = (holders[w] ?? 0) + 1;
   const named3 = people.flatMap((id2) => {
-    const ws = words10(entity2(id2)?.name ?? "");
+    const ws = words11(entity2(id2)?.name ?? "");
     const single2 = ws.filter((w) => w.length >= 3 && FILLER4[w] !== true && holders[w] === 1);
     return ws.length === 0 ? [] : [{ id: id2, names: alt([phrase(ws), ...single2]) }];
   });
@@ -134941,13 +137399,13 @@ function proseClashes(reg, world, start, end) {
     const e = entity2(id2);
     if (!e || !kindIs(reg, world, e.kind, "item") || kindIs(reg, world, e.kind, "vehicle") || e.kind === "account" || e.kind === "card" || e.fields.fixed === true)
       continue;
-    const key = words10(e.name).join(" ");
+    const key = words11(e.name).join(" ");
     if (key !== "")
       byName2[key] = [...byName2[key] ?? [], id2];
   }
   const things2 = alt(Object.keys(byName2).map((k) => phrase(k.split(" "))));
   const thingOf = (said2) => {
-    const ids2 = said2 === undefined ? [] : byName2[words10(said2).join(" ")] ?? [];
+    const ids2 = said2 === undefined ? [] : byName2[words11(said2).join(" ")] ?? [];
     return ids2.length === 1 ? ids2[0] ?? null : null;
   };
   const definite = `(?:the|${W}+(?:'s|'))\\s+`;
@@ -134981,24 +137439,24 @@ function proseClashes(reg, world, start, end) {
     return false;
   };
   return (line2, before) => {
-    const text8 = plain4(line2);
-    if (text8 === "")
+    const text9 = plain4(line2);
+    if (text9 === "")
       return null;
-    const away = remote.test(text8) || before !== undefined && channel2.test(plain4(before));
+    const away = remote.test(text9) || before !== undefined && channel2.test(plain4(before));
     for (const c of checks) {
       if (c.id === pov2)
         continue;
-      if (!away && c.here.test(text8) && moments.every((m) => m.sees.has(c.id) && acts(world, m.state, c.id) && !together(world, m.here, placeOfEntity(m.state, c.id)) && !(m.apart?.test(text8) ?? false)))
+      if (!away && c.here.test(text9) && moments.every((m) => m.sees.has(c.id) && acts(world, m.state, c.id) && !together(world, m.here, placeOfEntity(m.state, c.id)) && !(m.apart?.test(text9) ?? false)))
         return "here";
-      if (c.gone.test(text8) && moments.every((m) => m.sees.has(c.id) && acts(world, m.state, c.id) && together(world, m.here, placeOfEntity(m.state, c.id))))
+      if (c.gone.test(text9) && moments.every((m) => m.sees.has(c.id) && acts(world, m.state, c.id) && together(world, m.here, placeOfEntity(m.state, c.id))))
         return "gone";
     }
     for (const c of checks) {
-      const held3 = thingOf(c.holds?.exec(text8)?.[1]);
+      const held3 = thingOf(c.holds?.exec(text9)?.[1]);
       if (held3 !== null && moments.every((m) => m.sees.has(c.id) && m.sees.has(held3) && !isInside(m.state, held3, c.id)))
         return "holds";
     }
-    const lying = thingOf(lies?.exec(text8)?.[1]);
+    const lying = thingOf(lies?.exec(text9)?.[1]);
     return lying !== null && moments.every((m) => m.sees.has(lying) && (onPerson(m.state, lying) || !together(world, m.here, placeOfEntity(m.state, lying)))) ? "lies" : null;
   };
 }
@@ -135011,8 +137469,8 @@ async function learnFirst(rt, task, ctx, choosers) {
   if (!task.heard || !task.knowing)
     return task.state;
   const knowing3 = await roleCtx(rt, ctx, "knowledge");
-  const ask3 = knowing3.settings.promptOnly ? undefined : mindAsk(rt, knowing3, "pre");
-  const learned = await preKnowledge({ ...rt.minds, ...ask3 ? { ask: ask3 } : {} }, { chatId: ctx.chatId, userId: ctx.userId, world: task.world, state: task.state, messageId: task.heard.messageId, user: task.heard.text, who: choosers, signal: ctx.signal });
+  const ask5 = knowing3.settings.promptOnly ? undefined : mindAsk(rt, knowing3, "pre");
+  const learned = await preKnowledge({ ...rt.minds, ...ask5 ? { ask: ask5 } : {} }, { chatId: ctx.chatId, userId: ctx.userId, world: task.world, state: task.state, messageId: task.heard.messageId, user: task.heard.text, who: choosers, signal: ctx.signal });
   if (learned.events.length === 0)
     return task.state;
   const settings = await rt.settings.get(ctx.userId);
@@ -135032,7 +137490,7 @@ async function decideRun(rt, task, ctx) {
   const state2 = await learnFirst(rt, task, ctx, choosers);
   const questionId = roleTaskTextId("director", "decisions", "question");
   const question = renderPrompt(questionId, ownTexts, {}, task.template !== null ? { [questionId]: task.template } : null);
-  const names3 = namesOf5(task.world, task.state);
+  const names3 = namesOf6(task.world, task.state);
   const cal = calendarOf(task.world);
   const asked2 = await Promise.all(choosers.map(async (who) => {
     const ties = task.ties.filter((t) => t.agent === who);
@@ -135090,15 +137548,15 @@ async function proseRun(rt, task, ctx) {
   if (!brief && !outline3)
     return { ok: true, out: { prose: { brief: null, outline: [] } }, usage: emptyUsage(), via: "agent", text: "" };
   const ownTexts = ctx.texts ?? (await rt.settings.get(ctx.userId)).prompts.texts;
-  const rule2 = (part, ask3) => {
+  const rule2 = (part, ask5) => {
     const id2 = roleTaskTextId("director", "prose", part);
-    return renderPrompt(id2, ownTexts, ask3.vars, ask3.template !== null ? { [id2]: ask3.template } : null);
+    return renderPrompt(id2, ownTexts, ask5.vars, ask5.template !== null ? { [id2]: ask5.template } : null);
   };
   const vars = (outline3 ?? brief)?.vars ?? {};
   const r = await runRoleAgent(rt, ctx, {
     sub: "prose",
     phase: "prose",
-    names: namesOf5(task.world, task.state),
+    names: namesOf6(task.world, task.state),
     vars: { ...vars, ...proseData(vars), asks: [brief ? rule2("brief", brief) : "", outline3 ? rule2("outline", outline3) : ""].filter((t) => t !== "").join(`
 
 `), sections: outline3?.vars.sections ?? "" },
@@ -135182,7 +137640,7 @@ async function judgeRun(rt, task, ctx) {
   return runRoleAgent(rt, ctx, {
     sub: "judge",
     phase: "pre",
-    names: namesOf5(task.world, task.state),
+    names: namesOf6(task.world, task.state),
     vars: {
       question: renderPrompt(question, own2, {}, task.template !== null ? { [question]: task.template } : null),
       max: String(task.ask.max),
@@ -135202,7 +137660,7 @@ async function puzzleRun(rt, task, ctx) {
   return runRoleAgent(rt, ctx, {
     sub: "puzzle",
     phase: "pre",
-    names: namesOf5(task.world, task.state),
+    names: namesOf6(task.world, task.state),
     vars: { question: renderPrompt(question, own2, {}, task.template !== null ? { [question]: task.template } : null), puzzle: task.question, accepted: JSON.stringify(task.accepted), answer: task.answer },
     tools: null,
     check: (raw) => {
@@ -135238,7 +137696,7 @@ async function skipRun(rt, task, ctx) {
 async function extractRun(rt, task, ctx) {
   const i = task.input;
   const ownTexts = ctx.texts ?? (await rt.settings.get(ctx.userId)).prompts.texts;
-  const text8 = (part, vars = {}) => renderPrompt(roleTaskTextId("read", "extract", part), ownTexts, vars);
+  const text9 = (part, vars = {}) => renderPrompt(roleTaskTextId("read", "extract", part), ownTexts, vars);
   const moves = i.channels.length === 0 || i.channels.includes("location");
   const routines = moves && i.usual.length > 0;
   const lists = worldLists(i.world, i.places);
@@ -135253,7 +137711,7 @@ async function extractRun(rt, task, ctx) {
       instructions: i.instructions ?? "",
       entities: lists.entities,
       places: lists.places,
-      types: text8("types", {
+      types: text9("types", {
         axes: axesOf({ world: i.world }).map((a) => `${a.id} (${a.min}..${a.max})`).join("|"),
         kinds: i.personKinds.length > 0 ? `; kind: ${i.personKinds.join("|")}` : "",
         life: lifeStatesOf(i.world).map(([id2]) => id2).join("|"),
@@ -135261,20 +137719,20 @@ async function extractRun(rt, task, ctx) {
         items: renderPrompt(EXTRACT_ITEM_TEXT.facts, ownTexts, {}),
         orgs: orgFacts ? ` \xB7 ${renderPrompt(EXTRACT_ORG_TEXT.facts, ownTexts, {})}` : ""
       }),
-      enabled: i.channels.length > 0 ? text8("enabled", { types: i.channels.join(", ") }) : "",
+      enabled: i.channels.length > 0 ? text9("enabled", { types: i.channels.join(", ") }) : "",
       currency: i.world.currency.code,
       symbol: i.world.currency.symbol,
       item_rules: renderPrompt(EXTRACT_ITEM_TEXT.rules, ownTexts, {}),
       org_rules: orgFacts ? renderPrompt(EXTRACT_ORG_TEXT.rules, ownTexts, {}) : "",
-      where: moves ? text8("where") : "",
-      usual_rule: routines ? text8("usual_rule") : "",
+      where: moves ? text9("where") : "",
+      usual_rule: routines ? text9("usual_rule") : "",
       state: JSON.stringify(i.prefix),
-      clock: text8("clock", { start: i.clock.start, now: i.clock.now, took: i.appliedMinutes > 0 ? spanText(i.appliedMinutes) : "no time" }),
-      usual: routines ? text8("usual", { lines: i.usual.join(`
+      clock: text9("clock", { start: i.clock.start, now: i.clock.now, took: i.appliedMinutes > 0 ? spanText(i.appliedMinutes) : "no time" }),
+      usual: routines ? text9("usual", { lines: i.usual.join(`
 `) }) : "",
       plan: i.plan.length > 0 ? renderPrompt(EXTRACT_ORG_TEXT.plan, ownTexts, { lines: i.plan.join(`
 `) }) : "",
-      message: said2 !== "" ? text8("message", { text: said2 }) : "",
+      message: said2 !== "" ? text9("message", { text: said2 }) : "",
       reply: task.reply
     },
     tools: task.world,
@@ -135312,7 +137770,7 @@ async function sceneRun(rt, task, ctx) {
   const answer2 = await runRoleAgent(rt, ctx, {
     sub: "scene",
     phase: "pre",
-    names: namesOf5(task.world, task.state),
+    names: namesOf6(task.world, task.state),
     vars: { text: task.text, place: povPlace(rt.registry, task.world, task.state)?.name ?? "", present: presentNames(rt.registry, task.world, task.state).join(", ") },
     tools: task.world,
     check: (raw) => sceneAnswer(raw)
@@ -135459,8 +137917,8 @@ class Orchestrator {
     const s = await this.newRun({ chatId: input.chatId, userId: input.userId, key: input.generationId, phase: "pre", head, text: input.text, parentPath, retry: false, kind: "turn", mainable: true, cancelRead: (why3) => void this.rt.ledger.cancel(input.chatId, input.userId, why3) });
     if (s.settings.agents.pipeline.mode === "main") {
       const target = input.core.journal.pending[input.generationId]?.messageId;
-      const index = target ? input.observed.findIndex((m) => m.id === target) : -1;
-      s.main = new MainTurn(this.mainHost(s), { text: input.text, core: input.core, observed: index < 0 ? input.observed : input.observed.slice(0, index) });
+      const index2 = target ? input.observed.findIndex((m) => m.id === target) : -1;
+      s.main = new MainTurn(this.mainHost(s), { text: input.text, core: input.core, observed: index2 < 0 ? input.observed : input.observed.slice(0, index2) });
     }
     return true;
   }
@@ -135488,8 +137946,8 @@ class Orchestrator {
     if (await this.rt.chatKnowledge.engine(input.chatId, input.userId) !== "agents")
       return null;
     const run2 = await this.rt.runOf(input.chatId, input.userId);
-    const index = input.observed.findIndex((m) => m.id === input.messageId);
-    const said2 = ownMessage(input.observed.slice(0, Math.max(index, 0)));
+    const index2 = input.observed.findIndex((m) => m.id === input.messageId);
+    const said2 = ownMessage(input.observed.slice(0, Math.max(index2, 0)));
     const stopped = new AbortController;
     const head = run2 ? { run: run2, core: input.core, observed: input.observed, world: input.world, state: input.state } : null;
     await this.newRun({ chatId: input.chatId, userId: input.userId, key: input.key, phase: "post", head, text: said2 ? said2.swipes[said2.swipeId] ?? "" : "", parentPath: "", retry: true, kind: "read", mainable: false, cancelRead: (why3) => stopped.abort(new Error(why3)) });
@@ -135500,14 +137958,14 @@ class Orchestrator {
     if (await this.rt.chatKnowledge.engine(input.chatId, input.userId) !== "agents")
       return false;
     const run2 = await this.rt.runOf(input.chatId, input.userId);
-    const index = input.observed.findIndex((m) => m.id === input.messageId);
-    const before = index < 0 ? input.observed : input.observed.slice(0, index);
+    const index2 = input.observed.findIndex((m) => m.id === input.messageId);
+    const before = index2 < 0 ? input.observed : input.observed.slice(0, index2);
     const said2 = ownMessage(before);
-    const text8 = said2 ? said2.swipes[said2.swipeId] ?? "" : "";
+    const text9 = said2 ? said2.swipes[said2.swipeId] ?? "" : "";
     const head = run2 ? { run: run2, core: input.core, observed: input.observed, world: input.world, state: input.state } : null;
-    const s = await this.newRun({ chatId: input.chatId, userId: input.userId, key: input.generationId, phase: "post", head, text: text8, parentPath: "", retry: false, kind: "reply", mainable: input.kind !== "continue", cancelRead: (why3) => void this.rt.ledger.cancel(input.chatId, input.userId, why3) });
+    const s = await this.newRun({ chatId: input.chatId, userId: input.userId, key: input.generationId, phase: "post", head, text: text9, parentPath: "", retry: false, kind: "reply", mainable: input.kind !== "continue", cancelRead: (why3) => void this.rt.ledger.cancel(input.chatId, input.userId, why3) });
     if (input.kind !== "continue" && s.settings.agents.pipeline.mode === "main")
-      s.main = new MainTurn(this.mainHost(s), { text: text8, core: input.core, observed: before, renarrate: true });
+      s.main = new MainTurn(this.mainHost(s), { text: text9, core: input.core, observed: before, renarrate: true });
     return true;
   }
   async beginContinue(input) {
@@ -135529,7 +137987,7 @@ class Orchestrator {
     const settings = await this.rt.settings.get(input.userId);
     const learning2 = await this.rt.settings.learningOf(input.userId);
     const active = await this.rt.activeConnectionId(input.userId);
-    const kept4 = await keptFiles(this.rt, input.chatId, input.userId);
+    const kept5 = await keptFiles(this.rt, input.chatId, input.userId);
     const at3 = { chatId: input.chatId, userId: input.userId, turn: input.key };
     this.rt.diag.agentTurn(at3);
     const own2 = [...this.runs.values()].filter((r) => r.userId === input.userId);
@@ -135544,7 +138002,7 @@ class Orchestrator {
       settings,
       learning: learning2,
       active,
-      kept: kept4,
+      kept: kept5,
       landing: {},
       turn: new AgentTurn(settings.agents.turn, undefined, (agent, spent) => this.rt.diag.agentAtWork(input.chatId, input.userId, agent, spent), live),
       draft: new TurnDraft(input.key),
@@ -135609,23 +138067,23 @@ class Orchestrator {
   memoryOwed(core, reply) {
     return reply !== undefined && activeRecord(reply, core.journal.tombstones)?.memoryNext === true;
   }
-  async scene(generationId, task, signal2, kept4 = null) {
+  async scene(generationId, task, signal2, kept5 = null) {
     const s = this.runs.get(generationId);
     if (!s)
       return;
-    if (kept4) {
-      s.scene = { lore: [...kept4.lore], notes: [...kept4.notes] };
+    if (kept5) {
+      s.scene = { lore: [...kept5.lore], notes: [...kept5.notes] };
       s.sceneKept = true;
       return;
     }
     const out2 = await this.call(s, "scene", "scene", "pre", this.roles.scene, task, signal2);
     s.scene = out2.ok && (out2.out.lore.length > 0 || out2.out.notes.length > 0) ? out2.out : null;
   }
-  async resume(generationId, text8) {
+  async resume(generationId, text9) {
     const s = this.runs.get(generationId);
     if (!s)
       return;
-    const gated = await this.review.gated(s.chatId, s.userId, text8);
+    const gated = await this.review.gated(s.chatId, s.userId, text9);
     s.approved = (gated?.approved ?? []).flatMap((item2, i) => item2.op ? [{ seq: -1000 + i, phase: "pre", role: roleOf3(item2.role), agentId: item2.agentId ?? item2.role, key: item2.key, op: item2.op, changeType: item2.changeType, mode: "auto", tier: opTier(item2.op, roleOf3(item2.role)), gm: true, connectionId: item2.connection ?? null, lines: item2.lines, events: [], approved: true }] : []);
   }
   preCommit(generationId) {
@@ -135666,11 +138124,11 @@ class Orchestrator {
   outputs(s, lines3) {
     const limit4 = s.settings.agents.recording.outputChars;
     let cut = 0;
-    const fit = (text8) => {
-      if (text8.length <= limit4)
-        return text8;
+    const fit = (text9) => {
+      if (text9.length <= limit4)
+        return text9;
       cut++;
-      return `${text8.slice(0, Math.max(0, limit4 - 1))}\u2026`;
+      return `${text9.slice(0, Math.max(0, limit4 - 1))}\u2026`;
     };
     const events3 = [];
     for (const kind of ["outcome", "montage", "outline"])
@@ -135706,8 +138164,8 @@ class Orchestrator {
     const draft = new ReviewDraft(input.parts, s.settings.agents.recording.outputChars);
     const signal2 = within6(AbortSignal.any([input.signal, s.stop.signal]), "finalReviewMs", s.settings.timeouts.finalReviewMs);
     const target = input.core.journal.pending[input.generationId]?.messageId;
-    const index = target ? input.observed.findIndex((m) => m.id === target) : -1;
-    const reviewer = s.main ?? new MainTurn(this.mainHost(s), { text: s.text, core: input.core, observed: index < 0 ? input.observed : input.observed.slice(0, index), alone: true });
+    const index2 = target ? input.observed.findIndex((m) => m.id === target) : -1;
+    const reviewer = s.main ?? new MainTurn(this.mainHost(s), { text: s.text, core: input.core, observed: index2 < 0 ? input.observed : input.observed.slice(0, index2), alone: true });
     const got = await reviewer.review(draft, signal2);
     if (got.ok) {
       s.live.add({ kind: "review", outcome: draft.edits.length > 0 ? "revised" : "unchanged", edits: liveEdits(draft) });
@@ -135824,8 +138282,8 @@ class Orchestrator {
         parts = { segment: await this.rt.sessions.segment(s.userId, holder, await this.continued(s, at3, content, digest)) };
       else {
         const chain = at3.core.chain(at3.observed);
-        const index = chain.findIndex((m) => m.id === at3.messageId);
-        const rebase = s.main ? await s.main.rebased() : await rolledBack(this.rt, { chatId: s.chatId, userId: s.userId, holder: s.holder, at: sessionAt(index < 0 ? chain : chain.slice(0, index), at3.core.journal.tombstones) });
+        const index2 = chain.findIndex((m) => m.id === at3.messageId);
+        const rebase = s.main ? await s.main.rebased() : await rolledBack(this.rt, { chatId: s.chatId, userId: s.userId, holder: s.holder, at: sessionAt(index2 < 0 ? chain : chain.slice(0, index2), at3.core.journal.tombstones) });
         const segment = await this.rt.sessions.segment(s.userId, holder, s.main?.segment(content) ?? digest);
         parts = { segment, ...rebase ? { summary: rebase.summary, archived: rebase.archived } : {} };
       }
@@ -135838,11 +138296,11 @@ class Orchestrator {
   }
   async transcript(s, at3, holder) {
     const reply = at3.core.chain(at3.observed).find((m) => m.id === at3.messageId);
-    const kept4 = reply ? recordSessionOf(activeRecord(reply, at3.core.journal.tombstones)).transcript : undefined;
-    const before = kept4 ? await this.rt.blobs.get(s.userId, kept4) : null;
-    const text8 = before ? `${before}
+    const kept5 = reply ? recordSessionOf(activeRecord(reply, at3.core.journal.tombstones)).transcript : undefined;
+    const before = kept5 ? await this.rt.blobs.get(s.userId, kept5) : null;
+    const text9 = before ? `${before}
 ${s.live.transcript()}` : s.live.transcript();
-    return { transcript: await this.rt.blobs.put(s.userId, text8, holder), transcriptChars: text8.length, transcriptAt: Date.now() };
+    return { transcript: await this.rt.blobs.put(s.userId, text9, holder), transcriptChars: text9.length, transcriptAt: Date.now() };
   }
   async keepTranscript(s, at3, key) {
     const holder = `session:${key}`;
@@ -135857,25 +138315,25 @@ ${s.live.transcript()}` : s.live.transcript();
   async continued(s, at3, content, digest) {
     const reply = at3.core.chain(at3.observed).find((m) => m.id === at3.messageId);
     const hash = reply ? recordSessionOf(activeRecord(reply, at3.core.journal.tombstones)).segment : undefined;
-    const kept4 = hash ? segmentOf(await this.rt.blobs.getJson(s.userId, hash)) : null;
-    if (!kept4)
+    const kept5 = hash ? segmentOf(await this.rt.blobs.getJson(s.userId, hash)) : null;
+    if (!kept5)
       return digest;
-    if (kept4.some(isMainMessage)) {
+    if (kept5.some(isMainMessage)) {
       const note2 = renderPrompt(MAIN_TEXT.engineReply, s.settings.prompts.texts, { reply: content });
-      const last = kept4.at(-1);
-      return last && isMainMessage(last) && last.role === "user" ? [...kept4.slice(0, -1), { ...last, content: note2 }] : [...kept4, { role: "user", content: note2, by: MAIN_BY }];
+      const last = kept5.at(-1);
+      return last && isMainMessage(last) && last.role === "user" ? [...kept5.slice(0, -1), { ...last, content: note2 }] : [...kept5, { role: "user", content: note2, by: MAIN_BY }];
     }
-    const answer2 = kept4.findLastIndex((m) => m.role === "assistant");
-    const was = kept4[answer2];
+    const answer2 = kept5.findLastIndex((m) => m.role === "assistant");
+    const was = kept5[answer2];
     if (!was)
       return digest;
     const done = (m, part) => {
       const engine = m?.engine;
-      const list3 = isRecord(engine) ? engine[part] : undefined;
-      return Array.isArray(list3) ? list3 : [];
+      const list4 = isRecord(engine) ? engine[part] : undefined;
+      return Array.isArray(list4) ? list4 : [];
     };
     const now = digest.at(-1);
-    return kept4.map((m, i) => i === answer2 ? { ...m, content, engine: { roles: [...done(was, "roles"), ...done(now, "roles")], committed: [...done(was, "committed"), ...done(now, "committed")] } } : m);
+    return kept5.map((m, i) => i === answer2 ? { ...m, content, engine: { roles: [...done(was, "roles"), ...done(now, "roles")], committed: [...done(was, "committed"), ...done(now, "committed")] } } : m);
   }
   async ran(input) {
     if (input.outcome === "prepared")
@@ -136115,8 +138573,8 @@ ${s.live.transcript()}` : s.live.transcript();
     const head = s.head;
     if (ops.length === 0 || !head)
       return;
-    const kept4 = withKept(s.kept, s.landing);
-    const commit = { ctx: () => contextOf(this.rt, { knowledge: "everyone" }, head, s.settings, s.learning, kept4, s.active), reader: turnReader(this.rt, () => head, { userId: s.userId, chatId: s.chatId, knowledge: "gm" }), userId: s.userId, chatId: s.chatId, signal: s.stop.signal };
+    const kept5 = withKept(s.kept, s.landing);
+    const commit = { ctx: () => contextOf(this.rt, { knowledge: "everyone" }, head, s.settings, s.learning, kept5, s.active), reader: turnReader(this.rt, () => head, { userId: s.userId, chatId: s.chatId, knowledge: "gm" }), userId: s.userId, chatId: s.chatId, signal: s.stop.signal };
     const out2 = commitStaged(this.rt, commit, ops, w);
     s.live.committed(out2);
     s.draft.landed([...out2.committed.map((c) => c.op), ...out2.confirm].filter((op) => op.tier === "gm").length);
@@ -136143,7 +138601,7 @@ function roleOf3(name) {
 function itemOf2(op) {
   return { key: op.key, source: "agent", role: op.role, changeType: op.changeType, lines: op.cardLines ?? [], status: "open", op: op.op, agentId: op.agentId, connection: op.connectionId };
 }
-function rangeOf(events3, slice2) {
+function rangeOf2(events3, slice2) {
   if (slice2.length === 0)
     return null;
   const want = slice2.map((e) => JSON.stringify(e));
@@ -136153,13 +138611,13 @@ function rangeOf(events3, slice2) {
   return null;
 }
 function placeOf5(rec, events3) {
-  const from = rangeOf(rec.events, events3);
+  const from = rangeOf2(rec.events, events3);
   if (from !== null)
     return { from, to: from + events3.length };
   for (const entry2 of [...rec.post].reverse()) {
     if (entry2.kind !== "cont" && entry2.kind !== "narr")
       continue;
-    const at3 = rangeOf(entry2.events, events3);
+    const at3 = rangeOf2(entry2.events, events3);
     if (at3 !== null)
       return { seq: entry2.seq, from: at3, to: at3 + events3.length };
   }
@@ -136225,16 +138683,16 @@ function quietMessages(raw) {
   for (const m of Array.isArray(raw) ? raw : []) {
     if (!isRecord(m))
       continue;
-    const text8 = textOf3(m.content);
+    const text9 = textOf3(m.content);
     if (m.role === "tool") {
-      const part = { type: "tool_result", toolUseId: typeof m.tool_call_id === "string" ? m.tool_call_id : "", content: text8 };
+      const part = { type: "tool_result", toolUseId: typeof m.tool_call_id === "string" ? m.tool_call_id : "", content: text9 };
       const last = out2.at(-1);
       if (last?.role === "user" && last.parts !== undefined && last.parts.every((p) => p.type === "tool_result")) {
         last.parts.push(part);
         last.content = `${last.content}
-${text8}`;
+${text9}`;
       } else
-        out2.push({ role: "user", content: text8, parts: [part] });
+        out2.push({ role: "user", content: text9, parts: [part] });
       continue;
     }
     if (m.role === "assistant") {
@@ -136244,10 +138702,10 @@ ${text8}`;
         const fn = isRecord(c.function) ? c.function : {};
         return { type: "tool_use", id: typeof c.id === "string" ? c.id : `call_${i}`, name: typeof fn.name === "string" ? fn.name : "", input: argsOf(fn.arguments) };
       });
-      out2.push({ role: "assistant", content: text8, ...parts.length > 0 ? { parts: [...text8 !== "" ? [{ type: "text", text: text8 }] : [], ...parts] } : {}, ...reasoning ? { reasoning } : {} });
+      out2.push({ role: "assistant", content: text9, ...parts.length > 0 ? { parts: [...text9 !== "" ? [{ type: "text", text: text9 }] : [], ...parts] } : {}, ...reasoning ? { reasoning } : {} });
       continue;
     }
-    out2.push({ role: m.role === "system" || m.role === "developer" ? "system" : "user", content: text8 });
+    out2.push({ role: m.role === "system" || m.role === "developer" ? "system" : "user", content: text9 });
   }
   return out2;
 }
@@ -136275,11 +138733,17 @@ function maxTokensOf(body) {
   const v4 = body.max_tokens ?? body.max_completion_tokens;
   return typeof v4 === "number" && Number.isSafeInteger(v4) && v4 > 0 ? v4 : null;
 }
+function narratorSampling(body, own2) {
+  return {
+    params: { ...samplingOf(body), ...own2.temperature !== null ? { temperature: own2.temperature } : {}, ...own2.topP !== null ? { top_p: own2.topP } : {} },
+    maxTokens: own2.maxTokens ?? maxTokensOf(body)
+  };
+}
 function toolChoiceOf(body) {
   return Array.isArray(body.tools) && body.tools.length > 0 && body.tool_choice !== undefined ? body.tool_choice : undefined;
 }
 function toolCallChunks(calls) {
-  return calls.map((c, index) => ({ index, id: c.callId, name: c.name, arguments: JSON.stringify(c.args) }));
+  return calls.map((c, index2) => ({ index: index2, id: c.callId, name: c.name, arguments: JSON.stringify(c.args) }));
 }
 function historySpan(messages, shape) {
   if (shape && shape.history.length > 0 && shape.count === messages.length)
@@ -136321,10 +138785,10 @@ function fillMarks(messages, sections2) {
     let emptied = false;
     let content = m.content.replace(MARK2, (_whole, entry2) => {
       found.add(entry2);
-      const text8 = texts2.get(entry2);
-      if (text8 === undefined)
+      const text9 = texts2.get(entry2);
+      if (text9 === undefined)
         emptied = true;
-      return text8 ?? "";
+      return text9 ?? "";
     });
     if (emptied)
       content = content.replace(/\n{3,}/g, `
@@ -136356,6 +138820,9 @@ function withSections(messages, shape, sections2) {
 
 // src/backend/loopback/short-context.ts
 var BEATS_TELL = new Set(["outcome", "montage", "outline", "stance", MINDS_SLOT, KNOWLEDGE_SLOT]);
+function absorptionOf(chat, yours) {
+  return chat ?? yours;
+}
 function joinedAs(prompt, body) {
   if (prompt.length > 1 && body.length === 1 && body[0]?.role === "system")
     return "single";
@@ -136408,8 +138875,8 @@ function shortContext(input) {
     end++;
   const span2 = view.slice(start, end);
   const history = span2.filter((m) => m.history);
-  const { kept: kept4, tokens: tokens3 } = recentOf2(history, input.window);
-  const k = kept4.length;
+  const { kept: kept5, tokens: tokens3 } = recentOf2(history, input.window);
+  const k = kept5.length;
   const slots = Array.from({ length: k + 1 }, () => []);
   let after = history.length;
   let blocks = 0;
@@ -136432,7 +138899,7 @@ function shortContext(input) {
 `) }] : [];
   for (let j = 0;j <= k; j++) {
     region.push(...slots[j] ?? []);
-    const m = kept4[j];
+    const m = kept5[j];
     if (m)
       region.push(asQuiet(m));
   }
@@ -136445,8 +138912,8 @@ function shortContext(input) {
 }
 
 // src/backend/loopback/store.ts
-var FILE3 = "loopback/registry.json";
-var UNREADABLE_FILE = `${FILE3}.bad`;
+var FILE4 = "loopback/registry.json";
+var UNREADABLE_FILE = `${FILE4}.bad`;
 var RELAYS_PER_USER = 8;
 var TEXT_MAX = 255;
 var PATH_MAX = 4096;
@@ -136480,8 +138947,8 @@ function relayReportOf(raw) {
     return null;
   return { name, build, runtime: { bun, script, unit: ran2 }, host, listen, port, scheduler, session: { valid, expiresAt, checkedAt }, calls };
 }
-async function sha256(text8) {
-  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text8)));
+async function sha256(text9) {
+  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text9)));
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 function randomHex(bits) {
@@ -136498,7 +138965,7 @@ function registryOf(raw) {
         r.keys[user] = { hash: k.hash, print: k.print, at: k.at };
   }
   if (isRecord(raw.relays)) {
-    const kept4 = [];
+    const kept5 = [];
     for (const [id2, x] of Object.entries(raw.relays)) {
       if (!isRecord(x) || typeof x.user !== "string" || typeof x.name !== "string" || x.name.length > TEXT_MAX || x.mode !== "user" && x.mode !== "shared" || typeof x.secret !== "string" || !portOf(x.port))
         continue;
@@ -136507,10 +138974,10 @@ function registryOf(raw) {
       const listen = typeof x.listen === "string" ? x.listen : "127.0.0.1";
       if (build.length > TEXT_MAX || host.length > TEXT_MAX || listen.length > TEXT_MAX)
         continue;
-      kept4.push({ id: id2, user: x.user, name: x.name, mode: x.mode, secret: x.secret, build, host, listen, port: x.port, registeredAt: typeof x.registeredAt === "number" ? x.registeredAt : 0, report: relayReportOf(x.report) });
+      kept5.push({ id: id2, user: x.user, name: x.name, mode: x.mode, secret: x.secret, build, host, listen, port: x.port, registeredAt: typeof x.registeredAt === "number" ? x.registeredAt : 0, report: relayReportOf(x.report) });
     }
     const counted4 = new Map;
-    for (const x of kept4.sort((a, b) => b.registeredAt - a.registeredAt)) {
+    for (const x of kept5.sort((a, b) => b.registeredAt - a.registeredAt)) {
       const n = (counted4.get(x.user) ?? 0) + 1;
       counted4.set(x.user, n);
       if (n <= RELAYS_PER_USER)
@@ -136531,16 +138998,16 @@ class LoopbackStore {
     this.host = host;
   }
   read() {
-    this.loaded ??= this.host.extensionStorage.read(FILE3).then((text8) => {
-      if (text8 === null)
+    this.loaded ??= this.host.extensionStorage.read(FILE4).then((text9) => {
+      if (text9 === null)
         return empty();
       let registry = null;
       try {
-        registry = registryOf(JSON.parse(text8));
+        registry = registryOf(JSON.parse(text9));
       } catch {}
       if (registry !== null)
         return registry;
-      this.unreadable = text8;
+      this.unreadable = text9;
       this.host.log("warn", `[LumiRPEngine] the loopback's registry couldn't be read: every relay registers again, and each user mints a new key (the file is kept as ${UNREADABLE_FILE})`);
       return empty();
     }, (error) => {
@@ -136552,14 +139019,14 @@ class LoopbackStore {
   async change(fn) {
     const r = await this.read();
     const out2 = fn(r);
-    const text8 = JSON.stringify(r);
+    const text9 = JSON.stringify(r);
     this.writing = this.writing.then(async () => {
       const unreadable2 = this.unreadable;
       if (unreadable2 !== null) {
         await this.host.extensionStorage.write(UNREADABLE_FILE, unreadable2);
         this.unreadable = null;
       }
-      await this.host.extensionStorage.write(FILE3, text8);
+      await this.host.extensionStorage.write(FILE4, text9);
     }).catch((error) => this.host.log("warn", `[LumiRPEngine] the loopback's registry wasn't saved (${error instanceof Error ? error.message : String(error)})`));
     await this.writing;
     return out2;
@@ -136595,6 +139062,7 @@ var SWEEP_MS = 60000;
 var FORGET_MS = 10 * 60000;
 var CONNECTION_MS = 30000;
 var SETTLE_MS = 30000;
+var SWIPE_ASK_MS = 60000;
 var CALL_ID = /^[0-9a-f]{32}$/;
 var STREAM_OFF = "This world chat's preset has streaming off, and a LumiRPEngine turn streams its thinking and its reply as it goes: turn Streaming on in the preset (its completion settings), or give this chat a preset that streams. LumiRPEngine never changes your preset.";
 var UNTAGGED = "LumiRPEngine can't tell this untagged request from your world chat's reply under way, because this Lumiverse doesn't stop a reply its tagger missed: it refuses it rather than let a world chat's reply out unrecorded. Wait for the reply, then try again.";
@@ -136665,10 +139133,12 @@ class LoopbackBridge {
   byGeneration = new Map;
   early = new Set;
   checked = new Map;
+  offChats = new Map;
   watchers = new Map;
   lastScene = new Map;
   redos = new Map;
   dryRuns = new Map;
+  swipeAsks = new Map;
   working = new Map;
   passthroughs = new Map;
   sweep = null;
@@ -136712,9 +139182,9 @@ class LoopbackBridge {
       if (last?.messageId === e.message.id) {
         if (e.action === "deleted") {
           const swipes = new Map;
-          for (const [s, kept4] of last.swipes)
+          for (const [s, kept5] of last.swipes)
             if (s !== e.swipeId)
-              swipes.set(s > e.swipeId ? s - 1 : s, kept4);
+              swipes.set(s > e.swipeId ? s - 1 : s, kept5);
           last.swipes = swipes;
         }
         last.shown = e.message.swipeId;
@@ -136829,6 +139299,19 @@ ${entry2.reasoning.trim()}
       this.rt.host.log("warn", `[LumiRPEngine] the chat wasn't told its relay isn't running: ${messageOf2(error)}`, userId);
     }
   }
+  async streamOff(chatId, userId, target) {
+    try {
+      const messages = await this.rt.host.chats.messages(chatId, userId);
+      const at3 = target === null ? -1 : messages.findIndex((m) => m.id === target);
+      const told = ownMessage(at3 < 0 ? messages : messages.slice(0, at3))?.id ?? target;
+      if (!told)
+        return;
+      await this.rt.chips.add(chatId, userId, [{ id: `needs_loopback:stream:${told}`, kind: "needs_loopback", messageId: told, label: "This chat's preset has streaming off", detail: STREAM_OFF, actions: [], expires: "next_send", payload: {} }]);
+      this.rt.changed(chatId, userId);
+    } catch (error) {
+      this.rt.host.log("warn", `[LumiRPEngine] the chat wasn't told its preset has streaming off: ${messageOf2(error)}`, userId);
+    }
+  }
   async hiddenOf(input) {
     return await this.rt.depth.on(input.chatId, input.userId) ? hiddenByCut(input.messages, await historyCut(this.rt.host, input.chatId, input.userId)) : [];
   }
@@ -136851,8 +139334,15 @@ ${entry2.reasoning.trim()}
     }
   }
   dryRunOf(chatId, userId) {
-    const kept4 = this.dryRuns.get(chatId);
-    return kept4 && kept4.userId === userId ? { at: kept4.at, messages: kept4.messages } : null;
+    const kept5 = this.dryRuns.get(chatId);
+    return kept5 && kept5.userId === userId ? { at: kept5.at, messages: kept5.messages } : null;
+  }
+  swipeAnswer(chatId, userId, generationId, direction) {
+    const ask5 = this.swipeAsks.get(generationId);
+    if (!ask5 || ask5.chatId !== chatId || ask5.userId !== userId)
+      return false;
+    ask5.settle(direction ?? "");
+    return true;
   }
   async marked(input, verdict2) {
     const loop = this.rt.ledger.loopOf(input.chatId, input.userId);
@@ -136988,8 +139478,10 @@ ${entry2.reasoning.trim()}
       throw new LoopbackRefused("conflict", `${unmatched}: its generation is over or another one started. Generate again.`);
     if (Date.now() - token.at > TOKEN_MS)
       throw new LoopbackRefused("conflict", `${unmatched}: its tag expired. Generate again.`);
-    if (!isRecord(r.body) || r.body.stream !== true)
+    if (!isRecord(r.body) || r.body.stream !== true) {
+      this.streamOff(token.chatId, token.userId, this.rt.ledger.loopOf(token.chatId, token.userId)?.target ?? null);
       throw new LoopbackRefused("validation", STREAM_OFF);
+    }
     const call = this.open(r.call, rec.id, token.userId, token.generationId, token.chatId);
     if (this.early.delete(r.call))
       this.close(call);
@@ -137113,15 +139605,15 @@ ${entry2.reasoning.trim()}
     }
     this.deliver(call, seq, chunk);
   }
-  text(call, kind, text8) {
-    if (call.done || text8 === "")
+  text(call, kind, text9) {
+    if (call.done || text9 === "")
       return;
     if (call.buffer && call.buffer.kind !== kind)
       this.flush(call);
     if (call.buffer)
-      call.buffer.text += text8;
+      call.buffer.text += text9;
     else
-      call.buffer = { kind, text: text8 };
+      call.buffer = { kind, text: text9 };
     call.timer ??= setTimeout(() => {
       call.timer = null;
       this.flush(call);
@@ -137138,17 +139630,17 @@ ${entry2.reasoning.trim()}
   }
   sinkOf(call) {
     return {
-      progress: (text8) => {
-        if (call.done || text8.trim() === "")
+      progress: (text9) => {
+        if (call.done || text9.trim() === "")
           return;
         this.flush(call);
-        this.send(call, { kind: "progress", text: text8.trim() });
+        this.send(call, { kind: "progress", text: text9.trim() });
       },
-      reasoning: (text8) => this.text(call, "reasoning", text8),
-      content: (text8) => {
-        if (call.turn && call.turn.firstContentAt === null && text8 !== "")
+      reasoning: (text9) => this.text(call, "reasoning", text9),
+      content: (text9) => {
+        if (call.turn && call.turn.firstContentAt === null && text9 !== "")
           call.turn.firstContentAt = Date.now();
-        this.text(call, "content", text8);
+        this.text(call, "content", text9);
       },
       call: (c) => {
         call.models.push(c);
@@ -137163,7 +139655,7 @@ ${entry2.reasoning.trim()}
     this.flush(call);
     const promptTokens2 = call.models.reduce((n, c) => n + (c.promptTokens ?? 0), 0);
     const completionTokens = call.models.reduce((n, c) => n + (c.completionTokens ?? 0), 0);
-    this.send(call, { kind: "finish", finish: finish3, usage: { promptTokens: promptTokens2, completionTokens, totalTokens: promptTokens2 + completionTokens, calls: call.models.map(({ reasoning: _, ...c }) => c) } });
+    this.send(call, { kind: "finish", finish: finish3, usage: { promptTokens: promptTokens2, completionTokens, totalTokens: promptTokens2 + completionTokens, calls: call.models.map(({ reasoning: _, history: _history, ...c }) => c) } });
     this.ended(call);
   }
   fail(call, message, code) {
@@ -137206,14 +139698,14 @@ ${entry2.reasoning.trim()}
     return Promise.race([w.done.promise, new Promise((resolve2) => setTimeout(resolve2, SETTLE_MS))]);
   }
   provenance(chatId, userId, turn) {
-    const record4 = turn.record !== null ? this.rt.inspector.records(chatId)?.find((r) => r.id === turn.record) : undefined;
-    if (!record4)
+    const record5 = turn.record !== null ? this.rt.inspector.records(chatId)?.find((r) => r.id === turn.record) : undefined;
+    if (!record5)
       return;
     const calls = turn.calls.map((c) => {
       const misread = turn.misread.get(c);
       return misread ? { ...c, misread } : { ...c };
     });
-    record4.provenance = { calls, turnMs: Date.now() - turn.startedAt, firstContentMs: turn.firstContentAt === null ? null : turn.firstContentAt - turn.startedAt, ...turn.reply ? { reply: turn.reply } : {} };
+    record5.provenance = { calls, turnMs: Date.now() - turn.startedAt, firstContentMs: turn.firstContentAt === null ? null : turn.firstContentAt - turn.startedAt, ...turn.reply ? { reply: turn.reply } : {} };
     this.rt.inspector.save(chatId);
     this.rt.push.changed(chatId, userId);
   }
@@ -137238,31 +139730,55 @@ ${entry2.reasoning.trim()}
       this.lastScene.delete(this.lastScene.keys().next().value ?? "");
   }
   redoFor(chatId, turn, reply) {
-    const kept4 = this.redos.get(chatId);
-    const answered2 = kept4 && turn ? answeredOf(turn, reply) : undefined;
-    return kept4 && answered2?.id === kept4.answered.id && sameContent(answered2.content, kept4.answered.content) ? kept4.redo : undefined;
+    const kept5 = this.redos.get(chatId);
+    const answered2 = kept5 && turn ? answeredOf(turn, reply) : undefined;
+    return kept5 && answered2?.id === kept5.answered.id && sameContent(answered2.content, kept5.answered.content) ? kept5.redo : undefined;
   }
   retexted(chatId, message) {
     const redo = this.redos.get(chatId);
     if (redo?.answered.id === message.id && !sameContent(contentId(message.swipes[message.swipeId] ?? ""), redo.answered.content))
       this.redos.delete(chatId);
   }
-  async engineRun(token, sink, whole5) {
+  async engineRun(token, sink, whole5, signal2) {
     if (token.type === "impersonate") {
       sink.progress("Writing your character's next message");
       return { kind: "plain" };
     }
     sink.progress("LumiRPEngine is working out the turn");
-    const off = this.watch(token.chatId, { progress: (label3) => sink.progress(label3), reasoning: whole5 ? (text8) => sink.reasoning(text8) : null, call: (c) => sink.call(c) });
+    const off = this.watch(token.chatId, { progress: (label3) => sink.progress(label3), reasoning: whole5 ? (text9) => sink.reasoning(text9) : null, call: (c) => sink.call(c) });
     try {
       const run2 = await this.rt.ledger.loopbackRun(token.chatId, token.userId, token.generationId);
-      const words11 = run2.kind === "delivered" ? kindWords2(run2.as) : null;
-      if (words11)
-        sink.progress(words11);
-      return run2;
+      const words12 = run2.kind === "delivered" ? kindWords2(run2.as) : null;
+      if (words12)
+        sink.progress(words12);
+      return run2.kind === "delivered" ? await this.askSwipe(token, run2, sink, signal2) : run2;
     } finally {
       off();
     }
+  }
+  async askSwipe(token, run2, sink, signal2) {
+    const swipe = run2.delivered.swipe;
+    if (!swipe?.ask || swipe.direction !== undefined || signal2.aborted)
+      return run2;
+    const answer2 = Promise.withResolvers();
+    this.swipeAsks.set(token.generationId, { chatId: token.chatId, userId: token.userId, settle: answer2.resolve });
+    const timer = setTimeout(() => answer2.resolve(null), SWIPE_ASK_MS);
+    const stop2 = () => answer2.resolve("");
+    signal2.addEventListener("abort", stop2, { once: true });
+    sink.progress("Asking you what should change on this swipe");
+    const session = this.rt.ledger.loopOf(token.chatId, token.userId)?.session;
+    this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.generate", chatId: token.chatId, as: "regenerate", turn: token.generationId, ask: true }, token.userId, session);
+    let direction;
+    try {
+      direction = await answer2.promise;
+    } finally {
+      clearTimeout(timer);
+      signal2.removeEventListener("abort", stop2);
+      this.swipeAsks.delete(token.generationId);
+    }
+    if (direction === null)
+      sink.progress("No answer on what should change within a minute: the swipe goes ahead as it is, as your swipe setting says");
+    return direction ? { ...run2, delivered: { ...run2.delivered, swipe: { ...swipe, direction } } } : run2;
   }
   async turn(call, token, body) {
     const sink = this.sinkOf(call);
@@ -137271,7 +139787,7 @@ ${entry2.reasoning.trim()}
       const whole5 = settings.depth.thinking === "whole";
       const round2 = token.turn !== null;
       const messages = quietMessages(body.messages);
-      token.turn ??= { run: this.engineRun(token, sink, whole5), record: null, opened: messages.length, startedAt: Date.now(), firstContentAt: null, calls: [], misread: new Map, reply: null };
+      token.turn ??= { run: this.engineRun(token, sink, whole5, call.abort.signal), record: null, opened: messages.length, startedAt: Date.now(), firstContentAt: null, calls: [], misread: new Map, reply: null };
       const state2 = token.turn;
       call.turn = state2;
       if (round2)
@@ -137294,11 +139810,11 @@ ${entry2.reasoning.trim()}
       const placed2 = run2.kind === "delivered" ? await this.rt.loopbackSections(token.userId, run2.delivered) : [];
       if (this.depth && run2.kind === "delivered") {
         const told = new Set(run2.delivered.parts.flatMap((p) => BEATS_TELL.has(p.id) ? [p.entry] : []));
-        const frame = this.shortFrame(token, messages, placed2.filter((s) => !told.has(s.entry)), settings, sink, true);
+        const frame = this.shortFrame(token, messages, placed2.filter((s) => !told.has(s.entry)), settings, sink, absorptionOf(await chatAbsorption(this.rt.host, token.chatId, token.userId), settings.depth.absorption));
         const direction = run2.delivered.swipe?.direction;
         const redo = token.type === "normal" ? this.redoFor(token.chatId, run2.turn, state2.reply?.messageId) : undefined;
         this.redos.delete(token.chatId);
-        const scene2 = await this.depth({ chatId: token.chatId, userId: token.userId, generationId: token.generationId, token: token.token, kind: run2.as, turn: run2.turn, ...direction !== undefined ? { direction } : {}, ...redo ? { redo } : {}, frame, body, sink, signal: call.abort.signal });
+        const scene2 = await this.depth({ chatId: token.chatId, userId: token.userId, generationId: token.generationId, token: token.token, kind: run2.as, turn: run2.turn, ...direction !== undefined ? { direction } : {}, ...redo ? { redo } : {}, frame, prompt: token.prompt ?? [], body, sink, signal: call.abort.signal });
         if (scene2) {
           this.rt.ledger.sceneCommit(token.generationId, scene2);
           if (state2.reply && run2.turn)
@@ -137333,14 +139849,14 @@ ${entry2.reasoning.trim()}
   }
   shortFrame(token, body, sections2, settings, sink, scene2, say = true) {
     const prompt = token.prompt ?? [];
-    const absorption = scene2 ? settings.depth.absorption : "keep";
+    const absorption = scene2 === false ? "keep" : scene2;
     let made = null;
     return (part) => {
       if (!made) {
         made = shortContext({ prompt, body, sections: sections2, window: settings.depth.window, absorption });
         if (say && settings.depth.thinking === "whole")
           sink.reasoning(`
-${contextWords(made.read, absorption, scene2)}
+${contextWords(made.read, absorption, scene2 !== false)}
 `);
       }
       return made.frame(part);
@@ -137349,14 +139865,16 @@ ${contextWords(made.read, absorption, scene2)}
   modelCall(role, connectionId, model2, result, ms) {
     return { role, connection: connectionId ?? "default", model: result.model ?? model2 ?? "default", requestId: requestIdOf(result.usage), ...result.tokensIn !== undefined ? { promptTokens: result.tokensIn } : {}, ...result.tokensOut !== undefined ? { completionTokens: result.tokensOut } : {}, ms };
   }
-  async request(userId, messages, body, offer = true) {
-    const route = depthCall(await this.rt.settings.get(userId), "narrator");
+  async request(userId, messages, body, offer = true, narrator = true) {
+    const settings = await this.rt.settings.get(userId);
+    const route = depthCall(settings, "narrator");
     const refusal5 = await this.loopRefusal(route.connectionId, userId);
     if (refusal5)
       throw new LoopbackRefused("validation", refusal5);
     const tools = offer ? quietTools(body.tools) : [];
     const toolChoice = offer ? toolChoiceOf(body) : undefined;
-    const request = { messages, maxTokens: maxTokensOf(body) ?? route.maxTokens, json: false, connectionId: route.connectionId, model: route.model, effort: route.effort, params: { ...route.params, ...samplingOf(body) }, usage: true, ...tools.length > 0 ? { tools } : {}, ...toolChoice !== undefined ? { toolChoice } : {} };
+    const sampling2 = narrator ? narratorSampling(body, narratorOverrides(settings.depth)) : { params: samplingOf(body), maxTokens: maxTokensOf(body) };
+    const request = { messages, maxTokens: sampling2.maxTokens ?? route.maxTokens, json: false, connectionId: route.connectionId, model: route.model, effort: route.effort, params: { ...route.params, ...sampling2.params }, usage: true, ...tools.length > 0 ? { tools } : {}, ...toolChoice !== undefined ? { toolChoice } : {} };
     return { request, connectionId: route.connectionId, model: route.model };
   }
   async narrate(call, userId, sink, messages, body, whole5, offer) {
@@ -137382,7 +139900,7 @@ ${contextWords(made.read, absorption, scene2)}
   async passthroughRun(call, body) {
     const sink = this.sinkOf(call);
     try {
-      const { request, connectionId, model: model2 } = await this.request(call.userId, quietMessages(body.messages), body);
+      const { request, connectionId, model: model2 } = await this.request(call.userId, quietMessages(body.messages), body, true, false);
       const started = Date.now();
       const result = await this.rt.host.models.stream(request, call.userId, call.abort.signal, (piece) => piece.kind === "content" ? sink.content(piece.text) : sink.reasoning(piece.text));
       sink.call(this.modelCall("passthrough", connectionId, model2, result, Date.now() - started));
@@ -137476,6 +139994,17 @@ ${contextWords(made.read, absorption, scene2)}
         loopback.push(c);
     return loopback;
   }
+  offChat(userId, chatId, connection) {
+    const own2 = this.offChats.get(userId) ?? new Map;
+    if (connection === null)
+      own2.delete(chatId);
+    else
+      own2.set(chatId, connection);
+    if (own2.size === 0)
+      this.offChats.delete(userId);
+    else
+      this.offChats.set(userId, own2);
+  }
   async view(userId, url, minted) {
     const host = this.rt.host;
     const reg = await this.store.read();
@@ -137483,20 +140012,20 @@ ${contextWords(made.read, absorption, scene2)}
     const build = this.rt.agents.build.id;
     const bun = host.bunPath;
     const script = this.rt.agents.build.kit?.core ?? null;
-    const words11 = (parts) => parts.map(shellWord2).join(" ");
+    const words12 = (parts) => parts.map(shellWord2).join(" ");
     const account2 = host.account !== null && host.account !== "root" ? host.account : null;
-    const lre = (rest) => bun !== null && script !== null ? words11([...account2 !== null ? ["sudo", "-u", account2] : [], bun, "--cwd", "/", script, "loopback", ...rest]) : null;
+    const lre = (rest) => bun !== null && script !== null ? words12([...account2 !== null ? ["sudo", "-u", account2] : [], bun, "--cwd", "/", script, "loopback", ...rest]) : null;
     const line2 = (rest) => url !== null ? lre(["up", "--url", url, ...rest]) : null;
     const dir = script === null ? null : script.slice(0, script.lastIndexOf("/"));
     const systemLines = (name) => {
       if (account2 === null || script === null || dir === null)
         return { update: null, login: null };
       const copy = `${SYSTEM_RELAY_DIR}/${script.slice(dir.length + 1)}`;
-      const restart = words11(["sudo", "systemctl", "restart", relayUnitName(name)]);
+      const restart = words12(["sudo", "systemctl", "restart", relayUnitName(name)]);
       const files = [[script, copy], [`${dir}/${KIT_FILE}`, `${SYSTEM_RELAY_DIR}/${KIT_FILE}`]];
       const read = (to) => `"$t"/${shellWord2(to.slice(to.lastIndexOf("/") + 1))}`;
-      const update = ["t=$(mktemp -d /tmp/lumirpengine.XXXXXX)", ...files.map(([from, to]) => `${words11(["sudo", "-u", account2, "cat", from])} >${read(to)}`), ...files.map(([, to]) => `test -s ${read(to)}`), ...files.map(([, to]) => `sudo install -m 0644 ${read(to)} ${shellWord2(to)}`), 'rm -r "$t"', restart];
-      return { update: update.join(" && "), login: `${words11(["sudo", "-u", account2, `${SYSTEM_RELAY_DIR}/bun`, "--cwd", "/", copy, "loopback", "login", "--config", `${SYSTEM_CONFIG_DIR}/loopback-${name}.json`])} && ${restart}` };
+      const update = ["t=$(mktemp -d /tmp/lumirpengine.XXXXXX)", ...files.map(([from, to]) => `${words12(["sudo", "-u", account2, "cat", from])} >${read(to)}`), ...files.map(([, to]) => `test -s ${read(to)}`), ...files.map(([, to]) => `sudo install -m 0644 ${read(to)} ${shellWord2(to)}`), 'rm -r "$t"', restart];
+      return { update: update.join(" && "), login: `${words12(["sudo", "-u", account2, `${SYSTEM_RELAY_DIR}/bun`, "--cwd", "/", copy, "loopback", "login", "--config", `${SYSTEM_CONFIG_DIR}/loopback-${name}.json`])} && ${restart}` };
     };
     const now = Date.now();
     const relays = Object.values(reg.relays).filter((x) => x.user === userId || x.mode === "shared").map((x) => {
@@ -137535,970 +140064,25 @@ ${contextWords(made.read, absorption, scene2)}
       sessions: host.capabilities.messageSessions,
       enforced: host.capabilities.interceptors,
       shared: { operator, enabled: reg.shared.enabled },
-      connections
+      connections,
+      offChats: [...this.offChats.get(userId) ?? []].map(([chatId, connection]) => ({ chatId, connection }))
     };
   }
 }
 
-// src/backend/depth/scene/author.ts
-var str31 = (v4) => typeof v4 === "string" && v4.trim() !== "";
-var text8 = (v4) => typeof v4 === "string" ? v4.trim() : "";
-var list3 = (v4) => Array.isArray(v4) ? v4 : [];
-var record4 = (v4) => typeof v4 === "object" && v4 !== null && !Array.isArray(v4) ? v4 : null;
-function namesOf6(world, state2) {
-  const byName2 = new Map;
-  for (const [id2, e] of Object.entries(state2.entities))
-    if (e && !isGone(state2, id2) && e.name)
-      byName2.set(nameKey2(e.name), id2);
-  const places2 = new Map;
-  for (const [id2, p] of Object.entries(world.places))
-    places2.set(nameKey2(p.name), id2);
-  const bare2 = (raw) => typeof raw === "string" ? raw.trim().replace(/^\[([^[\]]+)\]$/, "$1") : "";
-  const person5 = (raw) => {
-    const id2 = bare2(raw);
-    if (id2 === "")
-      return null;
-    if (hasOwn(state2.entities, id2) && !isGone(state2, id2))
-      return id2;
-    return byName2.get(nameKey2(id2)) ?? null;
-  };
-  const place2 = (raw) => {
-    const id2 = bare2(raw);
-    if (id2 === "")
-      return null;
-    return hasOwn(world.places, id2) ? id2 : places2.get(nameKey2(id2)) ?? null;
-  };
-  return {
-    person: person5,
-    place: place2,
-    ref: (raw) => {
-      const p = person5(raw);
-      if (p)
-        return { entity: p };
-      const pl = place2(raw);
-      return pl ? { place: pl } : null;
-    },
-    name: (id2) => own(state2.entities, id2)?.name ?? own(world.entities, id2)?.name ?? id2
-  };
+// src/backend/depth/paging.ts
+function pagesOf(items, size) {
+  const per = Math.max(1, Math.floor(size));
+  const of = Math.max(1, Math.ceil(items.length / per));
+  return Array.from({ length: of }, (_, i) => ({ index: i + 1, of, items: items.slice(i * per, (i + 1) * per) }));
 }
-function tag(names3, id2) {
-  const n = names3.name(id2);
-  return n !== id2 ? `${n} [${id2}]` : `[${id2}]`;
-}
-async function ask3(ctx, id2, data) {
-  const system = renderPrompt(id2, ctx.texts, { world: ctx.world.name, pov: own(ctx.state.entities, ctx.pov)?.name ?? ctx.pov });
-  const reply = await ctx.model("author", [{ role: "system", content: system }, { role: "user", content: data }], { json: true, ...ctx.signal ? { signal: ctx.signal } : {} });
-  const { answer: answer2, read } = readAnswer("author", reply);
-  if (!answer2)
-    throw new DepthAnswerError("author", reply.text, reply);
-  return { answer: answer2, read, ...reply.reasoning ? { reasoning: reply.reasoning } : {}, ...reply.usage ? { usage: reply.usage } : {} };
-}
-function talkOf2(ctx, id2, data) {
-  const system = renderPrompt(id2, ctx.texts, { world: ctx.world.name, pov: own(ctx.state.entities, ctx.pov)?.name ?? ctx.pov });
-  return { messages: [{ role: "system", content: system }, { role: "user", content: data }], reasoning: [] };
-}
-async function answerIn(ctx, talk) {
-  const reply = await ctx.model("author", talk.messages, { json: true, ...ctx.signal ? { signal: ctx.signal } : {} });
-  if (reply.usage)
-    talk.usage = addUsage(talk.usage ?? NO_USAGE, reply.usage);
-  if (reply.reasoning)
-    talk.reasoning.push(reply.reasoning);
-  const { answer: answer2 } = readAnswer("author", reply);
-  if (!answer2)
-    throw new DepthAnswerError("author", reply.text, reply);
-  talk.messages.push({ role: "assistant", content: reply.text });
-  return answer2;
-}
-var ARCHIVE_ROUNDS = 3;
-var READS_PER_ROUND = 6;
-var QUOTES_MOST = 6;
-function toolsText(tools) {
-  return tools.map((t) => {
-    const props = record4(t.parameters.properties) ?? {};
-    const args = Object.entries(props).map(([name, p]) => `${name} (${text8(record4(p)?.description)})`);
-    return `- ${t.name}: ${t.description}${args.length > 0 ? ` Arguments: ${args.join("; ")}.` : ""}`;
-  }).join(`
-`);
-}
-async function askReading(ctx, talk, tools) {
-  const signal2 = ctx.signal ?? new AbortController().signal;
-  const reads = [];
-  for (let round2 = 0;; round2++) {
-    const answer2 = await answerIn(ctx, talk);
-    const wanted = tools.length === 0 ? [] : list3(answer2.archive).map(record4).filter((r) => r !== null);
-    if (wanted.length === 0 || round2 >= ARCHIVE_ROUNDS)
-      return { answer: answer2, reads };
-    const found = [];
-    for (const [i, w] of wanted.slice(0, READS_PER_ROUND).entries()) {
-      const { tool: name, ...args } = w;
-      const tool = tools.find((t) => t.name === name);
-      const asked2 = `${typeof name === "string" ? name : "?"} ${JSON.stringify(args)}`;
-      const out2 = tool ? await tool.run(args, { signal: signal2, agentId: "author", role: "author", callId: `setup.${round2}.${i}` }) : { text: `No tool "${String(name)}": the archive's are ${tools.map((t) => t.name).join(" and ")}.`, error: true };
-      reads.push(`The author reads the archive: ${asked2}${out2.error ? ` (${out2.text})` : ""}`);
-      found.push(`### ${asked2}
-${out2.text}`);
-    }
-    if (wanted.length > READS_PER_ROUND)
-      found.push(`(Only the first ${READS_PER_ROUND} reads of a round are made; the other ${wanted.length - READS_PER_ROUND} weren't.)`);
-    const left = ARCHIVE_ROUNDS - round2 - 1;
-    talk.messages.push({ role: "user", content: `What the archive gave:
-
-${found.join(`
-
-`)}
-
-${left > 0 ? `Read more (${left} ${left === 1 ? "round" : "rounds"} left), or answer the scene.` : "That was your last read: answer the scene now."}` });
+async function readPaged(items, size, read, signal2) {
+  const verdicts = [];
+  for (const page10 of pagesOf(items, size)) {
+    signal2?.throwIfAborted();
+    verdicts.push(await read(page10, verdicts.slice()));
   }
-}
-async function quotesOf(raw, archive, world, refused3) {
-  const asked2 = list3(raw).map(record4).filter((r) => r !== null);
-  if (asked2.length === 0)
-    return [];
-  if (!archive) {
-    refused3.push("the archive can't be read this turn, so no quote reaches the narrator");
-    return [];
-  }
-  if (asked2.length > QUOTES_MOST)
-    refused3.push(`only the first ${QUOTES_MOST} quotes reach the narrator; the other ${asked2.length - QUOTES_MOST} don't`);
-  const cal = calendarOf(world);
-  const out2 = [];
-  for (const q of asked2.slice(0, QUOTES_MOST)) {
-    const messageId = typeof q.message === "string" ? bareId(q.message) : "";
-    if (messageId === "") {
-      refused3.push("a quote named no message");
-      continue;
-    }
-    const from = wholeArg2(q.from);
-    const to = wholeArg2(q.to);
-    const got = await archive.quote({ messageId, ...from !== null && to !== null && to > from ? { span: [Math.max(0, from), to] } : {} });
-    if (!got) {
-      refused3.push(`a quote named ${messageId}, which isn't a message of this chat's story before this turn`);
-      continue;
-    }
-    if (got.text.trim() === "") {
-      refused3.push(`a quote of ${messageId} held no words`);
-      continue;
-    }
-    out2.push({ messageId: got.messageId, index: got.index, when: got.storyTime !== null ? formatClock(cal, got.storyTime) : null, text: got.text, truncated: got.truncated, why: text8(q.why) });
-  }
-  return out2;
-}
-function exposureOf(raw, names3, refused3, what) {
-  const x = record4(raw);
-  if (!x)
-    return null;
-  const who = names3.person(x.who);
-  if (!who) {
-    refused3.push(`${what}: an exposure named someone the chat doesn't have (${text8(x.who) || "no one"})`);
-    return null;
-  }
-  const channel2 = EXPOSURE_CHANNELS.includes(text8(x.channel)) ? text8(x.channel) : "sight";
-  return { who, channel: channel2, reach: x.reach === "partial" ? "partial" : "whole" };
-}
-function exposuresOf(raw, names3, refused3, what) {
-  const out2 = [];
-  for (const r of list3(raw)) {
-    const x = exposureOf(r, names3, refused3, what);
-    if (x && !out2.some((o) => o.who === x.who))
-      out2.push(x);
-  }
-  return out2;
-}
-function draftBeats(raw, names3, ctx, who, refused3, prefix, taken) {
-  const out2 = [];
-  list3(raw).forEach((r, i) => {
-    const b = record4(r);
-    if (!b)
-      return;
-    const ref = str31(b.ref) ? b.ref.trim() : `${prefix}${i + 1}`;
-    const what = text8(b.what);
-    const surface = text8(b.surface);
-    if (what === "" || surface === "") {
-      refused3.push(`beat ${ref}: a beat needs what happened and what was there to sense`);
-      return;
-    }
-    const named3 = [...new Set(list3(b.actors).map((a) => names3.person(a)).filter((a) => a !== null))];
-    const addressedNamed = list3(b.addressed).map((a) => names3.person(a)).filter((a) => a !== null);
-    const addressedPc = named3.length > 1 && named3.includes(ctx.pov) && addressedNamed.includes(ctx.pov);
-    const actors = addressedPc ? named3.filter((a) => a !== ctx.pov) : named3;
-    const notTheirs = [...actors.filter((a) => a === ctx.pov), ...actors.filter((a) => a !== ctx.pov && who.agents.has(a))];
-    if (notTheirs.length > 0) {
-      const agents = notTheirs.length - (notTheirs.includes(ctx.pov) ? 1 : 0);
-      const why3 = !notTheirs.includes(ctx.pov) ? `playing as their own ${agents === 1 ? "agent" : "agents"}` : agents === 0 ? "the player character is the player's" : `the player character is the player's, and ${agents === 1 ? "the other plays as their own agent" : "the others play as their own agents"}`;
-      const beside = notTheirs.includes(ctx.pov) && named3.length > 1 ? `; where the others only spoke to him or acted on him, name ${tag(names3, ctx.pov)} in its "addressed" and its exposure, never its actors` : "";
-      refused3.push(`beat ${ref}: ${notTheirs.map((a) => tag(names3, a)).join(", ")} ${notTheirs.length === 1 ? "decides" : "decide"} their own acts (${why3}); the beat wasn't kept${beside}`);
-      taken?.push({ beat: ref, who: notTheirs });
-      return;
-    }
-    if (addressedPc)
-      refused3.push(`beat ${ref}: ${tag(names3, ctx.pov)} isn't one of its actors: being addressed is not acting, and his acts are the player's. It was kept as the act of ${actors.map((a) => tag(names3, a)).join(", ")}, with him as the one addressed; put him in a beat's exposure, never its actors`);
-    const act2 = BEAT_ACTS.includes(text8(b.act)) ? text8(b.act) : actors.length > 0 ? "did" : "happened";
-    const quotes = spoken(b.quotes);
-    const addressed = [...new Set(addressedNamed)];
-    const about2 = list3(b.about).map((a) => names3.ref(a)).filter((a) => a !== null);
-    const after = typeof b.after === "number" && Number.isFinite(b.after) && b.after > 0 ? Math.round(b.after) : undefined;
-    const attempt = text8(b.attempt);
-    const deed = text8(b.deed);
-    if (deed !== "" && actors.length === 0)
-      refused3.push(`beat ${ref}: no one acts in it, so its deed wasn't kept`);
-    const exposure = exposuresOf(b.exposure, names3, refused3, `beat ${ref}`);
-    if (addressedPc && who.onScreen && !exposure.some((x) => x.who === ctx.pov))
-      exposure.push({ who: ctx.pov, channel: "sight", reach: "whole" });
-    out2.push({
-      ref,
-      decided: "author",
-      actors,
-      act: act2,
-      what,
-      ...deed !== "" && actors.length > 0 ? { deed } : {},
-      surface,
-      ...quotes !== "" ? { quotes } : {},
-      ...addressed.length > 0 ? { addressed } : {},
-      about: about2,
-      ...after !== undefined ? { after } : {},
-      exposure,
-      ...attempt !== "" && actors.length > 0 ? { attempt } : {}
-    });
-  });
-  return out2;
-}
-function stagingsOf(raw, names3, refused3, placing) {
-  const out2 = [];
-  for (const r of list3(raw)) {
-    const s = record4(r);
-    if (!s)
-      continue;
-    const who = names3.person(s.who);
-    if (!who) {
-      refused3.push(`a staging named someone the chat doesn't have (${text8(s.who) || "no one"})`);
-      continue;
-    }
-    const where = text8(s.where);
-    const doing = text8(s.doing);
-    if (where === "" || doing === "")
-      continue;
-    const occluded = text8(s.occluded);
-    const remote = s.remote === true;
-    const said2 = remote ? "" : text8(s.place);
-    const place2 = said2 !== "" ? names3.place(said2) : null;
-    if (said2 !== "" && place2 === null)
-      refused3.push(`the staging placed ${tag(names3, who)} at "${said2}", which isn't one of the world's places, so they stay where they were`);
-    else if (placing && !remote && said2 === "" && who !== placing.pov) {
-      refused3.push(`the staging gave ${tag(names3, who)} neither the place they are at nor "remote", so they stay where they were: no place is guessed`);
-      if (!placing.who.includes(who))
-        placing.who.push(who);
-    }
-    out2.push({ who, where, doing, ...occluded !== "" ? { occluded } : {}, ...remote ? { remote: true } : place2 !== null ? { place: place2 } : {} });
-  }
-  return out2;
-}
-function exposureForOf(raw, names3, refs, refused3) {
-  const out2 = [];
-  for (const r of list3(raw)) {
-    const x = record4(r);
-    if (!x)
-      continue;
-    const beat = text8(x.beat);
-    if (!refs.has(beat)) {
-      refused3.push(`an exposure named a beat that isn't waiting for one (${beat || "none"})`);
-      continue;
-    }
-    const e = exposureOf(x, names3, refused3, `beat ${beat}`);
-    if (e && !out2.some((o) => o.beat === beat && o.who === e.who))
-      out2.push({ beat, ...e });
-  }
-  return out2;
-}
-function nextOf2(raw, names3, agents, refused3, pov2) {
-  const out2 = [];
-  for (const r of list3(raw)) {
-    const who = names3.person(r);
-    if (!who)
-      continue;
-    if (who === pov2) {
-      refused3.push(`${tag(names3, who)} is the player character: what he does next is the player's, so end the turn where his answer is wanted`);
-      continue;
-    }
-    if (!agents.has(who)) {
-      refused3.push(`${tag(names3, who)} doesn't play as their own agent this scene, so they don't act next on their own; write their acts yourself`);
-      continue;
-    }
-    if (!out2.includes(who))
-      out2.push(who);
-  }
-  return out2;
-}
-async function askAgain(ctx, talk, names3, unkept, what, wrote) {
-  const notes = [
-    ...wrote.theirs ? [`${tag(names3, ctx.pov)} is the player's: never write an act of his; where the moment turns to him, end the turn for his answer. Whoever plays as their own agent decides their own acts: name them in "next", and their own agent plays them now.`] : [],
-    ...wrote.place ? ["Name the scene's place by the id of one of the world's places, as listed."] : [],
-    ...wrote.realtime ? ['Real-time dialogue is with someone playing as their own agent: to enter it, cast them "agent" and name them in "realtime"; else give no "realtime".'] : [],
-    ...wrote.staged ? [`Give each person you stage "place": the id of the world's place where they are, as listed (the scene's own place for everyone there in person), or "remote": true, with no place, for someone elsewhere whom the scene reaches only from afar (the far end of a phone call, a radio, a screen).`] : []
-  ];
-  talk.messages.push({ role: "user", content: `Not all of your answer could be kept:
-${unkept.map((r) => `- ${r}`).join(`
-`)}
-
-Answer ${what} again, whole, as one JSON object of the same shape: it replaces your answer above. ${notes.join(" ")}` });
-  try {
-    return await answerIn(ctx, talk);
-  } catch (error) {
-    if (!(error instanceof DepthAnswerError) || ctx.signal?.aborted)
-      throw error;
-    return null;
-  }
-}
-function theirsNow(taken, agents, names3, read, refused3) {
-  const due = [...new Set(taken.flatMap((t) => t.who))].filter((who) => agents.has(who));
-  if (due.length === 0)
-    return { next: read.next, end: read.end };
-  const one = due.length === 1;
-  refused3.push(`${due.map((who) => tag(names3, who)).join(", ")} ${one ? "plays as their own agent: their own agent acts" : "play as their own agents: their own agents act"} now in place of the ${one ? "act" : "acts"} written for them${read.end !== null ? `, and the turn goes on to ${one ? "it" : "them"} rather than ending` : ""}`);
-  return { next: [...new Set([...read.next, ...due])], end: null };
-}
-function notebookText(notebook) {
-  const pinned = new Set(notebook.pinned.map((p) => p.path));
-  const files = Object.entries(notebook.files).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([path3, body]) => `### ${path3}${pinned.has(path3) ? " (pinned: the player's own words)" : ""}
-${body}`);
-  const edits = notebook.pinned.map((p) => `### ${p.path}
-You last wrote:
-${p.before || "(nothing: he wrote this file)"}
-He made it:
-${p.after}`);
-  return [`Your notebook:
-
-${files.join(`
-
-`) || "(empty: this is its start)"}`, ...edits.length > 0 ? [`The player edited your notebook (each a directive):
-
-${edits.join(`
-
-`)}`] : []].join(`
-
-`);
-}
-function beatText2(world, names3, ref, b) {
-  const { beat } = b;
-  const exposure = beat.exposure.map((x) => `${tag(names3, x.who)} by ${exposureChannels(x).join(" and ")}${x.reach === "partial" ? ", in part" : ""}`).join("; ");
-  const place2 = own(world.places, beat.place)?.name ?? beat.place;
-  const by = "turn" in beat.by ? beat.by.decided : ("draft" in beat.by) ? "a draft" : "history";
-  return `- (${ref}) ${formatClock(calendarOf(world), beat.at)}, ${place2}; ${beat.act} by ${beat.actors.map((a) => tag(names3, a)).join(", ") || "no one"} (decided by ${by}): ${b.what}${b.quotes ? ` Words: \u201C${b.quotes}\u201D` : ""} Perceived by: ${exposure || "no one yet"}.`;
-}
-function draftText(names3, d) {
-  return `- (${d.ref}) ${d.act} by ${d.actors.map((a) => tag(names3, a)).join(", ") || "no one"} (decided by ${d.decided})${d.inner ? " (his inner life: no one but him perceives it)" : ""}: ${d.what}${d.quotes ? ` Words: \u201C${d.quotes}\u201D` : ""} What was there to sense: ${d.surface}`;
-}
-function stagingText2(names3, s) {
-  return `- ${tag(names3, s.who)}: ${s.where}; ${s.doing}${s.occluded ? `; blocked: ${s.occluded}` : ""}${s.remote ? " (remote: reached from afar)" : s.place ? ` (at [${s.place}])` : ""}`;
-}
-var PLACES_READ = 60;
-function placesText2(world, here) {
-  const all2 = Object.entries(world.places);
-  const shown5 = all2.sort(([a, x], [b, y]) => (here !== null ? placeDistance(world, here, a) - placeDistance(world, here, b) : 0) || x.name.localeCompare(y.name)).slice(0, PLACES_READ);
-  const lines3 = shown5.map(([id2, p]) => {
-    const parent = p.parent !== undefined ? own(world.places, p.parent) : undefined;
-    return `- ${p.name} [${id2}]${parent ? `, in ${parent.name}` : ""}`;
-  });
-  const more = all2.length - shown5.length;
-  return `The world's places, each by its id (a scene plays at one of them):
-${lines3.join(`
-`) || "- (none)"}${more > 0 ? `
-(and ${more} more, farther off: name one by its id or name)` : ""}`;
-}
-function playedText(names3, played) {
-  return played.map((p) => {
-    const parts = [p.files.core && `Who they are at root:
-${p.files.core}`, p.files.self && `Their story of themselves:
-${p.files.self}`, p.files.now && `How they are now:
-${p.files.now}`, p.files.mind && `What they keep in mind:
-${p.files.mind}`].filter((x) => typeof x === "string" && x !== "");
-    return `### ${tag(names3, p.who)}
-${parts.join(`
-
-`) || "(no mind written yet)"}`;
-  }).join(`
-
-`);
-}
-function castOf(raw, names3, ctx, refused3) {
-  const out2 = [];
-  for (const r of list3(raw)) {
-    const c = record4(r);
-    if (!c)
-      continue;
-    const who = names3.person(c.who);
-    if (!who) {
-      refused3.push(`the cast named someone the chat doesn't have (${text8(c.who) || "no one"})`);
-      continue;
-    }
-    if (who === ctx.pov)
-      continue;
-    if (out2.some((o) => o.who === who))
-      continue;
-    const effort = SCENE_EFFORTS.includes(text8(c.effort)) ? text8(c.effort) : "world";
-    out2.push({ who, effort, why: text8(c.why) });
-  }
-  return out2;
-}
-async function authorSetup(input) {
-  const { world, state: state2 } = input;
-  const names3 = namesOf6(world, state2);
-  const tools = input.archive ? archiveTools({ texts: input.texts, world, state: state2, source: input.archive }) : [];
-  const others = input.present.filter((p) => p.who !== input.pov);
-  const here = others.filter((p) => p.where === undefined);
-  const elsewhere = others.filter((p) => p.where !== undefined);
-  const presentLine = (p) => `- ${tag(names3, p.who)}${p.mind ? ", has a mind" : ", no mind yet"}${p.where ? `, at ${p.where}` : ""}`;
-  const data = [
-    notebookText(input.notebook),
-    input.scene ? [
-      `The scene that is playing (${input.scene.id}), at ${own(world.places, input.scene.place)?.name ?? input.scene.place}. Its cast last turn: ${input.scene.cast.map((c) => `${tag(names3, c.who)} as ${c.effort}`).join("; ") || "no one"}.`,
-      `Its staging:
-${input.scene.staging.map((s) => stagingText2(names3, s)).join(`
-`) || "- (none)"}`,
-      `Its beats so far:
-${input.scene.beats.map((b) => beatText2(world, names3, b.ref, b.beat)).join(`
-`) || "- (none)"}`
-    ].join(`
-
-`) : "No scene is playing: this turn opens one.",
-    `${tag(names3, input.pov)} is ${input.place ? `at ${own(world.places, input.place)?.name ?? input.place} [${input.place}]` : "nowhere the world places"}. It is ${formatClock(calendarOf(world), state2.clock)}.`,
-    placesText2(world, input.place),
-    `The people the scene may reach, each by their id:
-- ${tag(names3, input.pov)} (the player character)${input.place ? `, at ${own(world.places, input.place)?.name ?? input.place}` : ", nowhere the world places"}`,
-    `With him:
-${here.map(presentLine).join(`
-`) || "- no one"}`,
-    ...elsewhere.length > 0 ? [`Elsewhere, whom the scene reaches only from afar (the far end of a phone call, a radio, a screen) unless it brings them there:
-${elsewhere.map(presentLine).join(`
-`)}`] : [],
-    ...input.offscreen && input.offscreen.length > 0 ? [`Off screen, just now, before this scene (what you settled is canon now):
-${input.offscreen.map((l) => `- ${l}`).join(`
-`)}`] : [],
-    ...input.minds && input.minds.length > 0 ? [`The minds of those present who have one (read them if you play someone):
-
-${playedText(names3, input.minds)}`] : [],
-    input.input === null ? "The player sent no new message: he asks the story to go on from here." : `The player's message, verbatim:
-${input.input}`,
-    `His beats, as the GM wrote them:
-${input.playerBeats.map((b) => draftText(names3, b)).join(`
-`) || "- (none: he wrote nothing that happens)"}`,
-    ...input.resolved.length > 0 ? [`What the rules resolved:
-${input.resolved.map((r) => `- ${r}`).join(`
-`)}`] : [],
-    ...input.signals.length > 0 ? [`His signals beyond the story (out-of-character lines and the like):
-${input.signals.map((s) => `- ${s}`).join(`
-`)}`] : [],
-    ...input.talk ? [`Real-time dialogue with ${tag(names3, input.talk.with)} is running.`] : [],
-    ...input.takeover ? [`Your watch took his line out of real-time dialogue: ${input.takeover}`] : [],
-    input.realtime === "chip" ? "Real-time dialogue starts only from the player's chip: if you judge the moment a conversation, entering it offers it to him." : "Real-time dialogue starts on your judgment.",
-    ...input.budget ? [input.budget] : [],
-    tools.length > 0 ? `The chat's archive, its own prose as it was written, is yours to read before you answer: answer {"archive": [{"tool": a tool's name, then its arguments}]} alone, and what each read found comes back; up to ${ARCHIVE_ROUNDS} rounds of reading (${READS_PER_ROUND} reads each), then you answer the scene. Its tools:
-${toolsText(tools)}
-To hand the narrator words from it for a callback, name them in "quotes" (at most ${QUOTES_MOST}): he gets each exactly as it was written.` : "The chat's archive can't be read this turn: give no quotes."
-  ].join(`
-
-`);
-  const talk = talkOf2(input, SCENE_TEXT.setup, data);
-  const asked2 = await askReading(input, talk, tools);
-  const playerRefs = new Set(input.playerBeats.map((b) => b.ref));
-  const read = (a2) => {
-    const refused4 = [];
-    const taken = [];
-    const sc2 = record4(a2.scene);
-    const cast = castOf(a2.cast, names3, input, refused4);
-    const agents = new Set(cast.filter((c) => c.effort === "agent").map((c) => c.who));
-    const rt = record4(a2.realtime);
-    let realtime = null;
-    let unplayed = false;
-    if (rt && str31(rt.end))
-      realtime = { end: rt.end.trim() };
-    else if (rt) {
-      const withWho = names3.person(rt.with);
-      if (withWho && withWho !== input.pov) {
-        if (agents.has(withWho))
-          realtime = { with: withWho, why: text8(rt.why) };
-        else {
-          const effort = cast.find((c) => c.who === withWho)?.effort;
-          unplayed = true;
-          refused4.push(`real-time dialogue with ${tag(names3, withWho)} needs them playing as their own agent ("effort": "agent")${effort === "author" ? ", and you cast them as yours to play" : effort === "world" ? ", and you cast them as part of the world" : ", and you didn't cast them"}; it wasn't entered`);
-        }
-      } else if (rt.with !== undefined)
-        refused4.push(`real-time dialogue needs someone with an agent of their own to talk with (${text8(rt.with) || "no one"})`);
-    }
-    const said2 = text8(sc2?.place);
-    const place2 = names3.place(sc2?.place);
-    const strayed = said2 !== "" && place2 === null;
-    if (strayed)
-      refused4.push(`the scene's place "${said2}" isn't one of the world's places, so it plays ${input.place ? `where ${tag(names3, input.pov)} is, at ${own(world.places, input.place)?.name ?? input.place} [${input.place}]` : "where the scene stands"}`);
-    const placing = { pov: input.pov, who: [] };
-    return {
-      a: a2,
-      refused: refused4,
-      taken,
-      strayed,
-      unplayed,
-      placing,
-      agents,
-      continues: sc2?.continues === true && input.scene !== null,
-      place: place2 ?? input.place,
-      ends: sc2?.ends === true,
-      staging: stagingsOf(a2.staging, names3, refused4, placing),
-      cast,
-      exposure: exposureForOf(a2.exposure, names3, playerRefs, refused4),
-      beats: draftBeats(a2.beats, names3, input, { agents, onScreen: true }, refused4, "w", taken),
-      next: nextOf2(a2.next, names3, agents, refused4, input.pov),
-      end: str31(a2.end) ? a2.end.trim() : null,
-      realtime
-    };
-  };
-  let got = read(asked2.answer);
-  let redone = [];
-  if (got.taken.length > 0 || got.strayed || got.unplayed || got.placing.who.length > 0) {
-    const again = await askAgain(input, talk, names3, got.refused, "the scene's setup", { theirs: got.taken.length > 0, place: got.strayed, realtime: got.unplayed, staged: got.placing.who.length > 0 });
-    if (again) {
-      redone = got.refused;
-      got = read(again);
-    } else
-      got.refused.push("its answer, once told why, couldn't be read, so the first stands without what couldn't be kept");
-  }
-  const { a, refused: refused3 } = got;
-  const { next, end } = theirsNow(got.taken, got.agents, names3, got, refused3);
-  const account2 = answerWhy(a);
-  return {
-    continues: got.continues,
-    place: got.place,
-    ends: got.ends,
-    staging: got.staging,
-    cast: got.cast,
-    exposure: got.exposure,
-    beats: got.beats,
-    next,
-    end,
-    realtime: got.realtime,
-    excerpts: list3(a.excerpts).filter(str31).map((e) => e.trim()),
-    quotes: await quotesOf(a.quotes, input.archive, world, refused3),
-    reads: asked2.reads,
-    note: text8(a.note),
-    refused: refused3,
-    redone,
-    ...talk.reasoning.length > 0 ? { reasoning: talk.reasoning.join(`
-
-`) } : account2 !== "" ? { reasoning: account2 } : {},
-    ...talk.usage ? { usage: talk.usage } : {}
-  };
-}
-async function authorStep(input) {
-  const { world, state: state2 } = input;
-  const names3 = namesOf6(world, state2);
-  const agents = new Set(input.scene.cast.filter((c) => c.effort === "agent").map((c) => c.who));
-  const slid = input.slid ?? [];
-  const handed = input.handed ?? [];
-  const data = [
-    notebookText(input.notebook),
-    `The scene (${input.scene.id}) at ${own(world.places, input.scene.place)?.name ?? input.scene.place}. It is ${formatClock(calendarOf(world), state2.clock)}.`,
-    `Its cast: ${input.scene.cast.map((c) => `${tag(names3, c.who)} ${c.effort === "agent" ? "plays as their own agent" : c.effort === "author" ? "is played by you" : "is part of the world"}`).join("; ") || "no one"}. ${tag(names3, input.pov)} is the player's.`,
-    `Its staging:
-${input.scene.staging.map((s) => stagingText2(names3, s)).join(`
-`) || "- (none)"}`,
-    `The scene so far:
-${input.scene.beats.map((b) => beatText2(world, names3, b.ref, b.beat)).join(`
-`) || "- (nothing yet)"}`,
-    ...input.played.length > 0 ? [`The minds of those you play:
-
-${playedText(names3, input.played)}`] : [],
-    `Just decided, waiting for who perceived it:
-${input.decided.map((d) => draftText(names3, d)).join(`
-`) || (handed.length > 0 ? "- (nothing yet: those due now are yours to play)" : input.unreached ? "- (nothing: no one was due to act)" : "- (nothing: the characters playing as their own agents passed)")}`,
-    ...input.refusedBefore && input.refusedBefore.length > 0 ? [`What your last answer couldn't keep:
-${input.refusedBefore.map((r) => `- ${r}`).join(`
-`)}`] : [],
-    ...input.unreached ? [`Nothing this turn has reached ${tag(names3, input.pov)} beyond the player's own beats: no beat anyone else decided reached him, so the reply would have nothing to tell him. The turn would end here, so you are given this one more step: write what reaches him now (what someone you play or handle does or says, or what the world does, with him in its exposure as far as he perceives it), or give his exposure to what was just decided where he perceives it. If nothing would reach him, end the turn as it is.`] : [],
-    ...handed.length > 0 ? [`Due to act now, whom you play: ${handed.map((id2) => tag(names3, id2)).join(", ")}. Write what they do and say now among your beats, from their minds.`] : [],
-    ...slid.length > 0 ? [`The budget slid ${slid.map((id2) => tag(names3, id2)).join(", ")} to you this turn: you play them from their minds. Name any of them in "next" to write their next acts in your next step, as far as the scene should go.`] : [],
-    ...input.budget ? [input.budget] : [],
-    input.left === 0 ? "This is your last step before this turn ends whatever happens: bring the moment to where the player answers." : input.left <= 2 ? `Only ${input.left} step${input.left === 1 ? "" : "s"} remain${input.left === 1 ? "s" : ""} after this one before this turn ends whatever happens: bring the moment to where the player answers.` : ""
-  ].filter((p) => p !== "").join(`
-
-`);
-  const talk = talkOf2(input, SCENE_TEXT.step, data);
-  const decided2 = new Set(input.decided.map((d) => d.ref));
-  const read = (a) => {
-    const refused3 = [];
-    const taken = [];
-    const placing = { pov: input.pov, who: [] };
-    return {
-      a,
-      refused: refused3,
-      taken,
-      placing,
-      exposure: exposureForOf(a.exposure, names3, decided2, refused3),
-      staging: stagingsOf(a.staging, names3, refused3, placing),
-      beats: draftBeats(a.beats, names3, input, { agents, onScreen: true }, refused3, "s", taken),
-      next: nextOf2(a.next, names3, new Set([...agents, ...slid]), refused3, input.pov),
-      end: str31(a.end) ? a.end.trim() : null,
-      sceneEnds: a.sceneEnds === true
-    };
-  };
-  let got = read(await answerIn(input, talk));
-  let redone = [];
-  if (got.taken.length > 0 || got.placing.who.length > 0) {
-    const again = await askAgain(input, talk, names3, got.refused, "this step", { theirs: got.taken.length > 0, staged: got.placing.who.length > 0 });
-    if (again) {
-      redone = got.refused;
-      got = read(again);
-    } else
-      got.refused.push("its answer, once told why, couldn't be read, so the first stands without what couldn't be kept");
-  }
-  const { next, end } = theirsNow(got.taken, agents, names3, got, got.refused);
-  const account2 = answerWhy(got.a);
-  return {
-    exposure: got.exposure,
-    staging: got.staging,
-    beats: got.beats,
-    next,
-    end,
-    sceneEnds: got.sceneEnds,
-    refused: got.refused,
-    redone,
-    ...talk.reasoning.length > 0 ? { reasoning: talk.reasoning.join(`
-
-`) } : account2 !== "" ? { reasoning: account2 } : {},
-    ...talk.usage ? { usage: talk.usage } : {}
-  };
-}
-async function authorAsk(input) {
-  const { world, state: state2 } = input;
-  const names3 = namesOf6(world, state2);
-  const agents = new Set(input.scene.cast.filter((c) => c.effort === "agent").map((c) => c.who));
-  const data = [
-    notebookText(input.notebook),
-    `The scene (${input.scene.id}) at ${own(world.places, input.scene.place)?.name ?? input.scene.place}.`,
-    `Its staging:
-${input.scene.staging.map((s) => stagingText2(names3, s)).join(`
-`) || "- (none)"}`,
-    `The scene so far:
-${input.scene.beats.map((b) => beatText2(world, names3, b.ref, b.beat)).join(`
-`) || "- (nothing yet)"}`,
-    `The narrator is rendering the moment of ${input.moment.map((r) => `(${r})`).join(", ")}, and asks:
-${input.questions.map((q) => `- ${q}`).join(`
-`)}`
-  ].join(`
-
-`);
-  const asked2 = await ask3(input, SCENE_TEXT.ask, data);
-  const refused3 = [];
-  const account2 = answerWhy(asked2.answer);
-  return {
-    beats: draftBeats(asked2.answer.beats, names3, input, { agents, onScreen: true }, refused3, "a"),
-    refused: refused3,
-    ...asked2.reasoning ? { reasoning: asked2.reasoning } : account2 !== "" ? { reasoning: account2 } : {},
-    ...asked2.usage ? { usage: asked2.usage } : {}
-  };
-}
-function draftLines(lines3) {
-  return lines3.map((d) => `- [${d.id}] ${d.when}: ${d.summary} (${d.treatments}). It holds ${d.holds}. ${d.since} beat${d.since === 1 ? "" : "s"} since its time.${d.changed.length > 0 ? ` Changed since it was drafted: ${d.changed.join("; ")}.` : ""}`).join(`
-`);
-}
-function episodesOf(raw, names3, pov2, refused3) {
-  const out2 = [];
-  list3(raw).forEach((r, i) => {
-    const e = record4(r);
-    if (!e)
-      return;
-    const what = `episode ${i + 1}`;
-    const people = [...new Set(list3(e.people).map((p) => names3.person(p)).filter((p) => p !== null))];
-    if (people.includes(pov2))
-      refused3.push(`${what}: ${tag(names3, pov2)} is on screen, the player's own; an episode off screen goes on without him`);
-    const cast = people.filter((p) => p !== pov2);
-    const places2 = [...new Set(list3(e.places).map((p) => names3.place(p)).filter((p) => p !== null))];
-    const parts = [];
-    for (const raw2 of list3(e.parts)) {
-      const p = record4(raw2);
-      if (!p)
-        continue;
-      const treatment = text8(p.treatment);
-      if (!DEPTH_TREATMENTS.includes(treatment)) {
-        refused3.push(`${what}: a part's treatment is one of ${DEPTH_TREATMENTS.join(", ")} (not "${treatment}")`);
-        continue;
-      }
-      const who = p.who !== undefined ? names3.person(p.who) : null;
-      const event = text8(p.event);
-      if (who !== null && !cast.includes(who)) {
-        refused3.push(`${what}: ${tag(names3, who)} has a part but isn't among its people`);
-        continue;
-      }
-      if (who === null && event === "")
-        continue;
-      parts.push({ subject: who !== null ? { who } : { event }, treatment, rationale: text8(p.rationale), ...p.major === true ? { major: true } : {} });
-    }
-    const minutes2 = typeof e.minutes === "number" && Number.isFinite(e.minutes) && e.minutes > 0 ? Math.round(e.minutes) : 60;
-    const at3 = typeof e.in === "number" && Number.isFinite(e.in) ? Math.round(e.in) : 0;
-    if (cast.length === 0 || parts.length === 0) {
-      refused3.push(`${what}: an episode needs someone in it and a part with its treatment; it wasn't opened`);
-      return;
-    }
-    out2.push({ why: text8(e.why), in: at3, minutes: minutes2, places: places2, people: cast, parts });
-  });
-  return out2;
-}
-function verdictsOf(raw, known2, refused3, what) {
-  const out2 = [];
-  for (const r of list3(raw)) {
-    const v4 = record4(r);
-    const id2 = v4 ? text8(v4.draft).replace(/^\[([^[\]]+)\]$/, "$1") : "";
-    if (!v4 || id2 === "")
-      continue;
-    if (!known2.has(id2)) {
-      refused3.push(`${what}: there is no such draft here (${id2})`);
-      continue;
-    }
-    if (!out2.some((o) => o.draft === id2))
-      out2.push({ draft: id2, why: text8(v4.why) });
-  }
-  return out2;
-}
-async function authorPoll(input) {
-  const { world, state: state2 } = input;
-  const names3 = namesOf6(world, state2);
-  const data = [
-    notebookText(input.notebook),
-    `It is ${formatClock(calendarOf(world), state2.clock)}; since you last looked, ${input.minutes} story minute${input.minutes === 1 ? "" : "s"} passed${(input.spans ?? []).length > 0 ? `, by ${(input.spans ?? []).join("; ")}` : ""}.`,
-    `The beats since you last looked:
-${input.beats.map((b) => beatText2(world, names3, b.ref, b.beat)).join(`
-`) || "- (none)"}`,
-    `What characters wrote that will stay with them:
-${input.kept.map((k) => `- ${tag(names3, k.who)}: ${k.text}`).join(`
-`) || "- (nothing yet)"}`,
-    `Plans falling due:
-${input.due.map((d) => `- ${d}`).join(`
-`) || "- (none)"}`,
-    `What waits to be lived:
-${input.pending.map((p) => `- ${tag(names3, p.who)}: ${p.pending} point${p.pending === 1 ? "" : "s"} of view waiting${p.latest ? `, the newest ${p.latest}` : ""}${p.played ? " (played this turn as their own agent)" : ""}${p.unminded ? " (no mind yet: a catch-up forms one, from their card or what the world knows of them, then lives these)" : ""}${p.gone && p.gone.length > 0 ? `; out of mind since a correction struck what they were written from: ${p.gone.join(", ")} (a reflection rewrites them)` : ""}${p.takes !== undefined ? `; their working memory is nearly full (${p.takes} takes unremembered): they ask to reflect` : ""}`).join(`
-`) || "- (no one)"}`,
-    `Your open predictions:
-${input.predictions.map((p) => `- [${p.id}] ${p.text}`).join(`
-`) || "- (none)"}`,
-    `The player's signals:
-${input.signals.map((s) => `- ${s}`).join(`
-`) || "- (none)"}`,
-    `${input.sceneEnded ? "The scene ended with this turn." : "The scene goes on."} ${input.sinceChapter} turn${input.sinceChapter === 1 ? "" : "s"} since you last re-read a chapter. Your cadence: ${input.cadence === "turns" ? "you may revise lightly after any turn" : input.cadence === "scenes" ? "you reflect at a scene's end at the soonest" : "you reflect only at a chapter's end"}.`,
-    ...input.offscreen ? [
-      `Your open drafts (off screen, not canon yet):
-${draftLines(input.offscreen.drafts) || "- (none)"}`,
-      `Drafts a swipe took off the chain:
-${draftLines(input.offscreen.rebase) || "- (none)"}`,
-      `What this interval's allowances leave: ${input.offscreen.allowances.join("; ") || "no limits"}. The player's threshold for what deserves more than written: ${input.offscreen.threshold.trim() || "(none given)"}. ${input.offscreen.ask ? "Where you judge a moment major, mark its part major: once its treatment's allowance is spent, the player is asked whether to spend one more rather than it sliding down." : "The player asked not to be asked: a part past its treatment's allowance slides down the ladder."}`,
-      `Episodes waiting on the player's answer past an allowance (don't open them again):
-${(input.offscreen.asked ?? []).map((a2) => `- ${a2}`).join(`
-`) || "- (none)"}`
-    ] : []
-  ].join(`
-
-`);
-  const asked2 = await ask3(input, SCENE_TEXT.poll, data);
-  const a = asked2.answer;
-  const refused3 = [];
-  const who = (key) => {
-    const out2 = [];
-    for (const r of list3(a[key])) {
-      const c = record4(r);
-      const id2 = c ? names3.person(c.who) : null;
-      if (!c || !id2)
-        continue;
-      if (id2 === input.pov) {
-        refused3.push(`${tag(names3, id2)} is the player character, who has no agent to ${key === "catchup" ? "catch up" : "reflect"}`);
-        continue;
-      }
-      if (!out2.some((o) => o.who === id2))
-        out2.push({ who: id2, why: text8(c.why) });
-    }
-    return out2;
-  };
-  const au = record4(a.author);
-  const depth2 = au && (au.depth === "scene" || au.depth === "chapter") ? au.depth : null;
-  const wk = record4(a.wake);
-  const wake = wk && typeof wk.minutes === "number" && Number.isFinite(wk.minutes) && wk.minutes > 0 ? { minutes: Math.round(wk.minutes), why: text8(wk.why) } : null;
-  const known2 = new Set(input.predictions.map((p) => p.id));
-  const scores = [];
-  for (const r of list3(a.scores)) {
-    const s = record4(r);
-    const id2 = s ? text8(s.prediction) : "";
-    if (!s || !known2.has(id2))
-      continue;
-    if (!SCORE_OUTCOMES.includes(text8(s.outcome)))
-      continue;
-    if (!scores.some((x) => x.prediction === id2))
-      scores.push({ prediction: id2, outcome: text8(s.outcome), note: text8(s.note) });
-  }
-  const considered = [];
-  for (const r of list3(a.considered)) {
-    const c = record4(r);
-    if (c && str31(c.what))
-      considered.push({ what: c.what.trim(), raised: c.raised === true, why: text8(c.why) });
-  }
-  const drafts = new Set((input.offscreen?.drafts ?? []).map((d) => d.id));
-  const swiped = new Set((input.offscreen?.rebase ?? []).map((d) => d.id));
-  const account2 = answerWhy(a);
-  return {
-    catchup: who("catchup"),
-    reflect: who("reflect"),
-    author: depth2 ? { depth: depth2, why: text8(au?.why) } : null,
-    scores,
-    episodes: input.offscreen ? episodesOf(a.episodes, names3, input.pov, refused3) : [],
-    settle: verdictsOf(a.settle, drafts, refused3, "settle"),
-    drop: verdictsOf(a.drop, new Set([...drafts, ...swiped]), refused3, "drop"),
-    rebase: verdictsOf(a.rebase, swiped, refused3, "rebase"),
-    considered,
-    refused: refused3,
-    wake,
-    ...asked2.reasoning ? { reasoning: asked2.reasoning } : account2 !== "" ? { reasoning: account2 } : {},
-    ...asked2.usage ? { usage: asked2.usage } : {}
-  };
-}
-function notebookRevision(answer2, notebook, kind, through, chapter, reason2) {
-  const blobs = {};
-  const refused3 = [];
-  const pinned = new Set(notebook.pinned.map((p) => p.path));
-  const files = {};
-  const events3 = [];
-  for (const raw of list3(answer2.files)) {
-    const f = record4(raw);
-    if (!f || !str31(f.path) || !str31(f.text))
-      continue;
-    const path3 = f.path.trim();
-    if (!isNotebookPath(path3)) {
-      refused3.push(`a file outside the notebook: ${path3}`);
-      continue;
-    }
-    if (pinned.has(path3)) {
-      refused3.push(`${path3} is pinned (the player's edit): it may be commented on, never rewritten`);
-      continue;
-    }
-    if (own(notebook.files, path3) === f.text || own(files, path3) !== undefined)
-      continue;
-    files[path3] = putText(blobs, f.text);
-    events3.push(wsWrite(path3, files[path3]));
-  }
-  const comments = {};
-  for (const raw of list3(answer2.comments)) {
-    const c = record4(raw);
-    if (c && str31(c.path) && pinned.has(c.path.trim()) && str31(c.text))
-      comments[c.path.trim()] = c.text.trim();
-  }
-  if (events3.length > 0 || Object.keys(comments).length > 0 || chapter) {
-    const data = { kind, files, through, ...chapter ? { chapter } : {}, ...reason2 ? { reason: reason2 } : {}, ...Object.keys(comments).length > 0 ? { comments } : {} };
-    events3.push(notebookEvent(data));
-  }
-  return { events: events3, blobs, refused: refused3 };
-}
-async function authorReflect(input) {
-  const { world, state: state2 } = input;
-  const names3 = namesOf6(world, state2);
-  const data = [
-    notebookText(input.notebook),
-    input.depth === "chapter" ? `Re-read the chapter: it would be chapter ${input.chapter + 1}. Its beats, in order:` : "Take stock at the scene's end. Its beats, in order:",
-    input.beats.map((b) => beatText2(world, names3, b.ref, b.beat)).join(`
-`) || "- (none)",
-    `Who the characters have become, in their own words:
-
-${input.becoming.map((b) => `### ${tag(names3, b.who)}
-${[b.self && `Their story of themselves:
-${b.self}`, b.mind && `What they keep in mind:
-${b.mind}`].filter(Boolean).join(`
-
-`) || "(nothing written yet)"}`).join(`
-
-`) || "(no one has a mind yet)"}`,
-    `The player's signals beyond his words (what he swiped, regenerated or edited, his out-of-character lines), the evidence for what he wants (player.md):
-${input.signals.map((s) => `- ${s}`).join(`
-`) || "- (none)"}`
-  ].join(`
-
-`);
-  const asked2 = await ask3(input, SCENE_TEXT.reflect, data);
-  const a = asked2.answer;
-  const ch = record4(a.chapter);
-  const ends2 = input.depth === "chapter" && ch?.ends === true;
-  const title = ends2 ? str31(ch?.title) ? ch.title.trim() : `Chapter ${input.chapter + 1}` : null;
-  const reason2 = answerWhy(a).slice(0, 2000) || undefined;
-  const rev = notebookRevision(a, input.notebook, input.depth === "chapter" ? "chapter" : "scene", input.through, ends2 && title ? { index: input.chapter, title } : null, reason2);
-  const drift = [];
-  for (const r of list3(a.drift)) {
-    const d = record4(r);
-    const who = d ? names3.person(d.who) : null;
-    if (!d || !who || who === input.pov || drift.some((x) => x.who === who))
-      continue;
-    const level2 = DRIFT_LEVELS.includes(text8(d.drift)) ? text8(d.drift) : null;
-    if (level2)
-      drift.push({ who, drift: level2, note: text8(d.note) });
-  }
-  const predictions = [];
-  for (const r of list3(a.predictions)) {
-    const p = record4(r);
-    if (!p || !str31(p.text))
-      continue;
-    predictions.push({ text: p.text.trim(), about: [...new Set(list3(p.about).map((x) => names3.person(x)).filter((x) => x !== null))] });
-  }
-  return {
-    events: rev.events,
-    blobs: rev.blobs,
-    drift,
-    predictions,
-    chapter: { ends: ends2, title },
-    refused: rev.refused,
-    ...asked2.reasoning ? { reasoning: asked2.reasoning } : reason2 ? { reasoning: reason2 } : {},
-    ...asked2.usage ? { usage: asked2.usage } : {}
-  };
-}
-async function authorEdit(input) {
-  const { world, state: state2 } = input;
-  const names3 = namesOf6(world, state2);
-  const refs = new Set(input.beats.map((b) => b.ref));
-  const of = input.own ? "his message" : "the reply";
-  const beats = input.beats.map((b) => beatText2(world, names3, b.ref, b.beat)).join(`
-`) || "- (none)";
-  const data = [
-    notebookText(input.notebook),
-    input.own ? `The beats made from his message:
-${beats}` : `The beats the reply rendered:
-${beats}`,
-    input.own ? `His message as it was:
-${input.before}` : `The reply as it was:
-${input.before}`,
-    input.own ? `His message as he now made it, what he now says he did or said:
-${input.after}` : `The reply as the player made it:
-${input.after}`
-  ].join(`
-
-`);
-  const asked2 = await ask3(input, input.own ? SCENE_TEXT.editOwn : SCENE_TEXT.edit, data);
-  const a = asked2.answer;
-  const refused3 = [];
-  const drafts = draftBeats(a.amend, names3, { ...input, pov: "" }, { agents: new Set }, refused3, "e");
-  const amend = [];
-  list3(a.amend).forEach((raw, i) => {
-    const r = record4(raw);
-    const ref = r && str31(r.ref) ? r.ref.trim() : `e${i + 1}`;
-    const d = drafts.find((x) => x.ref === ref);
-    if (!r || !d)
-      return;
-    const replaces = list3(r.replaces).map(text8).filter((x) => refs.has(x));
-    if (replaces.length === 0) {
-      refused3.push(`amendment ${ref} names no beat of ${of} it replaces`);
-      return;
-    }
-    amend.push({ ...d, replaces });
-  });
-  const strike = [...new Set(list3(a.strike).map(text8).filter((x) => refs.has(x)))];
-  const cosmetic = a.cosmetic === true && amend.length === 0 && strike.length === 0;
-  return {
-    cosmetic,
-    amend,
-    strike,
-    why: text8(a.why),
-    refused: refused3,
-    ...asked2.reasoning ? { reasoning: asked2.reasoning } : str31(a.reasoning) ? { reasoning: a.reasoning.trim() } : {},
-    ...asked2.usage ? { usage: asked2.usage } : {}
-  };
+  return verdicts;
 }
 
 // src/backend/depth/scene/remember.ts
@@ -138570,7 +140154,7 @@ function asksOn(events3) {
     if (r && !answers.has(r.ask))
       answers.set(r.ask, r);
   }
-  return [...asks.values()].map(({ ask: ask4, from }) => ({ ask: ask4, from, answer: answers.get(ask4.id) ?? null }));
+  return [...asks.values()].map(({ ask: ask5, from }) => ({ ask: ask5, from, answer: answers.get(ask5.id) ?? null }));
 }
 function openAsks(events3) {
   return asksOn(events3).filter((a) => a.answer === null);
@@ -138581,21 +140165,21 @@ function subjectWords(part, name) {
   const e = part.subject.event.trim();
   return e.charAt(0).toUpperCase() + e.slice(1);
 }
-function askWords(ask4, name) {
-  const over = ask4.over.flatMap((o) => {
-    const part = ask4.parts[o.part];
+function askWords(ask5, name) {
+  const over = ask5.over.flatMap((o) => {
+    const part = ask5.parts[o.part];
     return part ? [{ part, allowance: o.allowance, spent: o.spent }] : [];
   });
   const first = over[0];
   const more = over.length;
   const spend = more === 1 ? "Spend one more" : `Spend ${more} more`;
-  const what = more === 1 && first ? `${subjectWords(first.part, name)} wants a ${DEPTH_TREATMENT_LABEL[first.part.treatment].toLowerCase()} treatment; this story ${ask4.interval}'s ${first.allowance === 0 ? "allowance is none" : `${first.allowance} ${first.allowance === 1 ? "is" : "are"} spent`}.` : `${over.map((o) => `${subjectWords(o.part, name)} (${DEPTH_TREATMENT_LABEL[o.part.treatment].toLowerCase()})`).join(", ")} want more than this story ${ask4.interval}'s allowances leave.`;
+  const what = more === 1 && first ? `${subjectWords(first.part, name)} wants a ${DEPTH_TREATMENT_LABEL[first.part.treatment].toLowerCase()} treatment; this story ${ask5.interval}'s ${first.allowance === 0 ? "allowance is none" : `${first.allowance} ${first.allowance === 1 ? "is" : "are"} spent`}.` : `${over.map((o) => `${subjectWords(o.part, name)} (${DEPTH_TREATMENT_LABEL[o.part.treatment].toLowerCase()})`).join(", ")} want more than this story ${ask5.interval}'s allowances leave.`;
   const reasons = over.map((o) => `${subjectWords(o.part, name)}: ${o.part.rationale.trim() || "no reason given"}`);
-  const detail = [ask4.why.trim(), ...reasons, "Keep to the allowance drafts it a step down the ladder."].filter((s) => s !== "").join(" \xB7 ");
+  const detail = [ask5.why.trim(), ...reasons, "Keep to the allowance drafts it a step down the ladder."].filter((s) => s !== "").join(" \xB7 ");
   return { what, label: `${what} ${spend}?`, detail, spend };
 }
-function askLine(ask4, name) {
-  return `${askWords(ask4, name).what} (with ${ask4.people.map(name).join(", ") || "no one named"}: ${ask4.why.trim() || "no reason given"})`;
+function askLine(ask5, name) {
+  return `${askWords(ask5, name).what} (with ${ask5.people.map(name).join(", ") || "no one named"}: ${ask5.why.trim() || "no reason given"})`;
 }
 function askChipsOn(core, observed, live) {
   const open = openAsks(live ?? eventsOf(core, observed, ASK_TYPES));
@@ -138605,20 +140189,20 @@ function askChipsOn(core, observed, live) {
   const state2 = core.fold(observed).state;
   const name = (id2) => own(state2.entities, id2)?.name ?? id2;
   const out2 = [];
-  for (const { ask: ask4, from } of open) {
+  for (const { ask: ask5, from } of open) {
     const message = chain.find((m) => m.id === from.messageId);
     if (!message)
       continue;
-    const words11 = askWords(ask4, name);
+    const words12 = askWords(ask5, name);
     out2.push({
-      id: `${ASK_CHIP_KIND}:${message.id}:${message.swipeId}:${ask4.id}`,
+      id: `${ASK_CHIP_KIND}:${message.id}:${message.swipeId}:${ask5.id}`,
       kind: ASK_CHIP_KIND,
       messageId: message.id,
       swipeId: message.swipeId,
-      label: words11.label,
-      detail: words11.detail,
+      label: words12.label,
+      detail: words12.detail,
       actions: [
-        { id: ASK_CHOICES.spend, label: words11.spend, style: "primary" },
+        { id: ASK_CHOICES.spend, label: words12.spend, style: "primary" },
         { id: ASK_CHOICES.keep, label: "Keep to the allowance" }
       ],
       expires: "never"
@@ -138641,73 +140225,6 @@ async function askAnswer(rt, chatId, userId, chipId, choice) {
   if (r.status === "refused")
     return { lapsed: `LumiRPEngine couldn't keep this: ${r.reason}` };
   return { applied: true, pending: r.status === "held", ask: found.ask, basis, spend };
-}
-
-// src/backend/depth/spend.ts
-var SPEND_TYPES = [AUTHOR_SPEND];
-var INTERVAL_MINUTES = { day: 24 * 60, week: 7 * 24 * 60, month: 30 * 24 * 60 };
-function intervalAt(unit3, at3) {
-  const len = INTERVAL_MINUTES[unit3];
-  return { unit: unit3, from: Math.floor(at3 / len) * len };
-}
-var NO_COST = { calls: 0, tokensIn: 0, tokensOut: 0 };
-function addCost(a, b) {
-  const reasoningOut = a.reasoningOut === undefined && b.reasoningOut === undefined ? undefined : (a.reasoningOut ?? 0) + (b.reasoningOut ?? 0);
-  const money6 = a.money === undefined && b.money === undefined ? undefined : (a.money ?? 0) + (b.money ?? 0);
-  return { calls: a.calls + b.calls, tokensIn: a.tokensIn + b.tokensIn, tokensOut: a.tokensOut + b.tokensOut, ...reasoningOut === undefined ? {} : { reasoningOut }, ...money6 === undefined ? {} : { money: money6 } };
-}
-function callCost(usage2) {
-  return { calls: 1, tokensIn: usage2?.tokensIn ?? 0, tokensOut: usage2?.tokensOut ?? 0, ...usage2?.reasoningOut !== undefined ? { reasoningOut: usage2.reasoningOut } : {}, ...usage2?.cost !== undefined ? { money: usage2.cost } : {} };
-}
-function metered(port) {
-  let cost = NO_COST;
-  const roles = {};
-  return {
-    port: async (role, messages, opts) => {
-      const count5 = (usage2) => {
-        const c = callCost(usage2);
-        cost = addCost(cost, c);
-        roles[role] = addCost(roles[role] ?? NO_COST, c);
-      };
-      const answer2 = await port(role, messages, opts).catch((error) => {
-        if (error instanceof Error && error.name === "ProviderRefusal" && "usage" in error && error.usage)
-          count5(error.usage);
-        throw error;
-      });
-      count5(answer2.usage);
-      return answer2;
-    },
-    spent: () => ({ cost, roles: { ...roles } })
-  };
-}
-function addSpent(a, b) {
-  const roles = { ...a.roles };
-  for (const [role, c] of Object.entries(b.roles))
-    roles[role] = addCost(roles[role] ?? NO_COST, c);
-  return { cost: addCost(a.cost, b.cost), roles };
-}
-function spentSince(a, b) {
-  const less = (x, y) => {
-    const reasoningOut = y.reasoningOut === undefined ? undefined : y.reasoningOut - (x.reasoningOut ?? 0);
-    const money6 = y.money === undefined ? undefined : y.money - (x.money ?? 0);
-    return { calls: y.calls - x.calls, tokensIn: y.tokensIn - x.tokensIn, tokensOut: y.tokensOut - x.tokensOut, ...reasoningOut === undefined ? {} : { reasoningOut }, ...money6 === undefined ? {} : { money: money6 } };
-  };
-  const roles = {};
-  for (const [role, c] of Object.entries(b.roles)) {
-    const d = less(a.roles[role] ?? NO_COST, c);
-    if (d.calls > 0)
-      roles[role] = d;
-  }
-  return { cost: less(a.cost, b.cost), roles };
-}
-function leadingTreatment(parts) {
-  return DEPTH_TREATMENTS.find((t) => parts.some((p) => p.treatment === t)) ?? "written";
-}
-function spendData(spent, o) {
-  const put2 = (o.put ?? []).filter((p) => p.trim() !== "");
-  if (spent.cost.calls <= 0 && put2.length === 0 || !SPEND_WORK.includes(o.treatment))
-    return null;
-  return { treatment: o.treatment, interval: intervalAt(o.interval, o.at), cost: spent.cost, roles: spent.roles, day: (o.now ?? new Date).toISOString().slice(0, 10), for: o.for, ...put2.length > 0 ? { put: put2 } : {} };
 }
 
 // src/backend/depth/scene/book.ts
@@ -138767,7 +140284,7 @@ class SceneBook {
     while (this.buckets.length <= mark2)
       this.buckets.push([]);
     const bucket = this.buckets[mark2];
-    const kept4 = [];
+    const kept5 = [];
     for (const e of events3) {
       const r = this.working.apply(e);
       if (r) {
@@ -138775,9 +140292,9 @@ class SceneBook {
         continue;
       }
       bucket.push(e);
-      kept4.push(e);
+      kept5.push(e);
     }
-    return kept4;
+    return kept5;
   }
   throughOf(mark2) {
     let n = this.prefix.length;
@@ -138832,14 +140349,14 @@ class SceneBook {
       return;
     const staging = [...this.staging.values()].map((s) => ({ who: s.who, where: s.where, doing: s.doing, ...s.occluded ? { occluded: s.occluded } : {} }));
     const refs = povRefs({ registry: this.registry }, at3, need2, [...presentAt({ ...beat, exposure }), ...staging.map((s) => s.who)]);
-    const out2 = await povRender(model2, { beat: { id: beat.id, surface: beat.surface, ...beat.deed ? { deed: beat.deed } : {}, ...beat.quotes ? { quotes: beat.quotes } : {}, actors: beat.actors, exposure }, staging, who: need2, refs, ...texts2 ? { texts: texts2 } : {}, ...signal2 ? { signal: signal2 } : {} });
+    const out2 = await povRender(model2, { beat: { id: beat.id, surface: beat.surface, ...beat.quotes ? { quotes: beat.quotes } : {}, actors: beat.actors, exposure }, staging, who: need2, refs, ...texts2 ? { texts: texts2 } : {}, ...signal2 ? { signal: signal2 } : {} });
     this.usage = { tokensIn: this.usage.tokensIn + out2.usage.tokensIn, tokensOut: this.usage.tokensOut + out2.usage.tokensOut };
     for (const x of exposure) {
       const pov2 = out2.povs[x.who];
       if (x.pov === undefined && need2.includes(x.who) && pov2 !== undefined)
         x.pov = putText(this.blobs, pov2);
     }
-    for (const [who, names3] of Object.entries(out2.fellBack))
+    for (const [who, names3] of Object.entries(out2.pending))
       this.say(fellBackLine(who, `beat ${beat.id}`, names3));
   }
   async write(draft, decided2, mark2, o) {
@@ -138947,8 +140464,8 @@ function sceneRecall(blobs, userId, read, who, o = {}) {
   };
   return async (cue) => recallSearch(await (corpus ??= build()), cue, o.limit ?? RECALL_HITS);
 }
-function bare2(words11) {
-  return words11.replace(/^["\u201C\u201D'\u2018\u2019]+|["\u201C\u201D'\u2018\u2019]+$/g, "").trim();
+function bare2(words12) {
+  return words12.replace(/^["\u201C\u201D'\u2018\u2019]+|["\u201C\u201D'\u2018\u2019]+$/g, "").trim();
 }
 function playedText2(p) {
   const head = p.beat !== undefined ? `[you, beat ${p.beat}]` : "[you]";
@@ -138974,8 +140491,8 @@ ${doc.text.trim()}`;
 `);
 }
 function surfaceOf(name, did, said2) {
-  const words11 = said2 !== null ? `${name} says, \u201C${said2}\u201D` : null;
-  return [did, words11].filter((p) => p !== null && p !== "").join(" ");
+  const words12 = said2 !== null ? `${name} says, \u201C${said2}\u201D` : null;
+  return [did, words12].filter((p) => p !== null && p !== "").join(" ");
 }
 async function play(model2, input) {
   const texts2 = input.texts ?? {};
@@ -139043,6 +140560,9 @@ ${hitsText(hits)}` });
   const keep2 = textIn(answer2.keep);
   if (keep2 !== null)
     w.memory(keep2, lived2, addressed, input.at);
+  const askReflect = textIn(answer2.reflect);
+  if (askReflect !== null)
+    w.events.push(mindAskEvent({ who: input.who, at: input.at, why: askReflect }));
   const why3 = reasoning.join(`
 
 `);
@@ -139124,12 +140644,12 @@ function quoteWords(text10, most = Infinity) {
   return out2;
 }
 function quoteText(text10) {
-  const words11 = quoteWords(text10) ?? [];
-  const stems2 = new Int32Array(words11.length);
-  const pronoun = new Uint8Array(words11.length);
+  const words12 = quoteWords(text10) ?? [];
+  const stems2 = new Int32Array(words12.length);
+  const pronoun = new Uint8Array(words12.length);
   const at3 = new Map;
   const pronouns = [];
-  for (const [j, w] of words11.entries()) {
+  for (const [j, w] of words12.entries()) {
     let stem3 = at3.get(w.stem);
     if (!stem3)
       at3.set(w.stem, stem3 = { id: at3.size, at: [] });
@@ -139140,7 +140660,7 @@ function quoteText(text10) {
       pronouns.push(j);
     }
   }
-  return { text: text10, words: words11, stems: stems2, pronoun, at: at3, pronouns };
+  return { text: text10, words: words12, stems: stems2, pronoun, at: at3, pronouns };
 }
 function quoteTexts(texts2) {
   let read = null;
@@ -139197,17 +140717,17 @@ function quotedIn(q, t, budget) {
       for (let k = 1;k <= span2; k++) {
         const x = from + k - 1;
         const same3 = t.stems[x] === id2 || w.pronoun && t.pronoun[x] === 1;
-        const kept4 = (cost[k - 1] ?? 0) + (same3 ? 0 : 1);
+        const kept5 = (cost[k - 1] ?? 0) + (same3 ? 0 : 1);
         const missing2 = (cost[k] ?? 0) + 1;
-        const added = (c[k - 1] ?? 0) + 1;
-        if (kept4 <= missing2 && kept4 <= added) {
-          c[k] = kept4;
+        const added2 = (c[k - 1] ?? 0) + 1;
+        if (kept5 <= missing2 && kept5 <= added2) {
+          c[k] = kept5;
           s[k] = start[k - 1] ?? 0;
-        } else if (missing2 <= added) {
+        } else if (missing2 <= added2) {
           c[k] = missing2;
           s[k] = start[k] ?? 0;
         } else {
-          c[k] = added;
+          c[k] = added2;
           s[k] = s[k - 1] ?? 0;
         }
       }
@@ -139229,8 +140749,8 @@ function quotedIn(q, t, budget) {
   const last = end > 0 ? t.words[end - 1] : undefined;
   return { span: first && last && first.from < last.to ? t.text.slice(first.from, last.to) : null, cells };
 }
-function holdingFor(signal2) {
-  return { left: QUOTES_PER_ANSWER_MOST, ...signal2 ? { signal: signal2 } : {} };
+function holdingFor(signal2, bounds = { quoteWords: QUOTE_WORDS_MOST, quotesPerBeat: QUOTES_PER_BEAT_MOST, quotesPerAnswer: QUOTES_PER_ANSWER_MOST }) {
+  return { left: bounds.quotesPerAnswer, bounds, ...signal2 ? { signal: signal2 } : {} };
 }
 async function heldTo3(v4, texts2, whose, holding) {
   const cited = (Array.isArray(v4) ? v4 : [v4]).flatMap((x) => text9(x) ?? []);
@@ -139242,7 +140762,7 @@ async function heldTo3(v4, texts2, whose, holding) {
   const often = [];
   const past = [];
   for (const [k, q] of cited.entries()) {
-    if (k >= QUOTES_PER_BEAT_MOST || holding.left <= 0) {
+    if (k >= holding.bounds.quotesPerBeat || holding.left <= 0) {
       const first = q.split(/\s+/);
       past.push(`\u201C${first.slice(0, 12).join(" ")}${first.length > 12 ? " \u2026" : ""}\u201D`);
       continue;
@@ -139250,8 +140770,8 @@ async function heldTo3(v4, texts2, whose, holding) {
     holding.left -= 1;
     await giveWay();
     holding.signal?.throwIfAborted();
-    const words11 = quoteWords(q, QUOTE_WORDS_MOST);
-    if (words11 === null) {
+    const words12 = quoteWords(q, holding.bounds.quoteWords);
+    if (words12 === null) {
       long.push(`\u201C${q.split(/\s+/).slice(0, 12).join(" ")} \u2026\u201D`);
       continue;
     }
@@ -139259,7 +140779,7 @@ async function heldTo3(v4, texts2, whose, holding) {
     let span2 = null;
     let common3 = false;
     for (const t of texts2()) {
-      const held3 = quotedIn(words11, t, budget);
+      const held3 = quotedIn(words12, t, budget);
       if (held3 === null) {
         common3 = true;
         break;
@@ -139277,7 +140797,7 @@ async function heldTo3(v4, texts2, whose, holding) {
   }
   const why3 = [
     ...long.length > 0 ? [`${long.join(" and ")} ${long.length === 1 ? "quotes" : "quote"} more than an act's own words`] : [],
-    ...past.length > 0 ? [`${past.join(" and ")} ${past.length === 1 ? "is" : "are"} past the most quotes held (${QUOTES_PER_BEAT_MOST} a beat, ${QUOTES_PER_ANSWER_MOST} an answer)`] : [],
+    ...past.length > 0 ? [`${past.join(" and ")} ${past.length === 1 ? "is" : "are"} past the most quotes held (${holding.bounds.quotesPerBeat} a beat, ${holding.bounds.quotesPerAnswer} an answer)`] : [],
     ...often.length > 0 ? [`${often.join(" and ")} ${often.length === 1 ? "uses" : "use"} words that stand too often in ${whose} to be held to it`] : [],
     ...missing2.length > 0 ? [`${missing2.join(" and ")} ${missing2.length === 1 ? "isn't" : "aren't"} in ${whose}`] : []
   ];
@@ -139368,7 +140888,7 @@ ${people.map((id2) => `- ${named(world, state2, id2)}${id2 === pov2 ? ": the pla
   const refused3 = [];
   const told = new Set;
   const message = quoteTexts([input.input]);
-  const holding = holdingFor(input.signal);
+  const holding = holdingFor(input.signal, input.quoteBounds);
   for (const [i, raw] of list4(asked2.answer.beats).entries()) {
     const b = record5(raw);
     const what = text9(b?.what);
@@ -139490,7 +141010,7 @@ ${catalog.places.join(`
   const reasoning = asked2.reasoning ? [asked2.reasoning] : [];
   const known2 = new Set(catalog.entries.map((e) => e.id));
   const acted4 = quoteTexts(act2.input ? [act2.input] : [act2.surface, act2.quotes ?? "", act2.attempt ?? ""]);
-  const holding = holdingFor(input.signal);
+  const holding = holdingFor(input.signal, input.quoteBounds);
   const whose = act2.input ? "your words" : `${possessive(name)} act`;
   const read = { actions: [], dropped: [] };
   for (const [i, raw] of list4(asked2.answer.actions).slice(0, ACTION_QUEUE_LIMIT).entries()) {
@@ -139508,8 +141028,8 @@ ${catalog.places.join(`
       asked2.read.drop(`actions[${i}]`, raw, held3.why);
       continue;
     }
-    const words11 = text9(a.text);
-    read.actions.push({ action: id2, params: record5(a.params) ?? {}, ...words11 !== null ? { text: words11 } : {} });
+    const words12 = text9(a.text);
+    read.actions.push({ action: id2, params: record5(a.params) ?? {}, ...words12 !== null ? { text: words12 } : {} });
   }
   const j = record5(asked2.answer.judgement);
   if (j && typeof j.rating === "number" && Number.isFinite(j.rating)) {
@@ -139628,7 +141148,7 @@ ${parts}`,
     ...view.played.length > 0 ? [`Those you play, from their minds:
 ${playedText(names3, view.played)}`] : [],
     `The story's newest beats, on screen and off:
-${view.recent.map((b) => beatText2(world, names3, b.ref, b.beat)).join(`
+${view.recent.map((b) => beatText(world, names3, b.ref, b.beat)).join(`
 `) || "- (none)"}`
   ].join(`
 
@@ -139684,20 +141204,20 @@ function episodeAnswer(a, input, names3, refused3, prefix, cost) {
   };
 }
 async function episodeOpen(input) {
-  const names3 = namesOf6(input.world, input.state);
+  const names3 = namesOf5(input.world, input.state);
   const asked2 = await ask3(input, OFFSCREEN_TEXT.episode, episodeText(input, names3));
   return episodeAnswer(asked2.answer, input, names3, [], "o", asked2);
 }
 async function episodeStep(input) {
-  const names3 = namesOf6(input.world, input.state);
+  const names3 = namesOf5(input.world, input.state);
   const so = input.so;
   const data = [
     episodeText(input, names3),
     `The episode's staging:
-${so.staging.map((s) => stagingText2(names3, s)).join(`
+${so.staging.map((s) => stagingText(names3, s)).join(`
 `) || "- (none)"}`,
     `The episode so far:
-${so.beats.map((b) => beatText2(input.world, names3, b.ref, b.beat)).join(`
+${so.beats.map((b) => beatText(input.world, names3, b.ref, b.beat)).join(`
 `) || "- (none)"}`,
     `Just decided, waiting for who perceived them:
 ${so.decided.map((d) => draftText(names3, d)).join(`
@@ -139709,27 +141229,59 @@ ${so.decided.map((d) => draftText(names3, d)).join(`
   const asked2 = await ask3(input, OFFSCREEN_TEXT.episodeStep, data);
   return episodeAnswer(asked2.answer, input, names3, [], `s${so.left}-`, asked2);
 }
-async function settleRead(input) {
-  const { world, state: state2 } = input;
-  const names3 = namesOf6(world, state2);
-  const cal = calendarOf(world);
+function pagesText(pages) {
+  return pages.map((p) => `- Page ${p.page} of ${p.of} (${p.span}): ${p.verdict === "holds" ? "it holds" : "it contradicts the draft"}${p.why ? `: ${p.why}` : ""}${p.forces.map((f) => `
+  - forces: ${f}`).join("")}`).join(`
+`);
+}
+function draftData(input, names3) {
+  const cal = calendarOf(input.world);
   const e = input.episode;
-  const walkOn = input.walkOn;
-  const data = [
+  return [
     notebookText(input.notebook),
     `The draft: ${input.summary || "(no summary)"}`,
-    `Its episode [${e.id}]: ${e.why || "(no reason given)"}. It happens from ${formatClock(cal, e.span[0])} (its beats from ${formatClock(cal, input.at)}); it is now ${formatClock(cal, walkOn?.now ?? state2.clock)}.`,
+    `Its episode [${e.id}]: ${e.why || "(no reason given)"}. It happens from ${formatClock(cal, e.span[0])} (its beats from ${formatClock(cal, input.at)}); it is now ${formatClock(cal, input.walkOn?.now ?? input.state.clock)}.`,
     `Its beats:
-${input.beats.map((b) => beatText2(world, names3, b.ref, b.beat)).join(`
+${input.beats.map((b) => beatText(input.world, names3, b.ref, b.beat)).join(`
 `) || "- (none)"}`,
     `The world changes it would make:
 ${input.effects.map((w, i) => `${i + 1}. ${w}`).join(`
+`) || "- (none)"}`
+  ];
+}
+async function settlePage(input) {
+  const names3 = namesOf5(input.world, input.state);
+  const { page: page10, tools } = input;
+  const data = [
+    ...draftData(input, names3),
+    `What the earlier pages came to:
+${input.before.length > 0 ? pagesText(input.before) : "- (this is the first page)"}`,
+    `Page ${page10.index} of ${page10.of} of its pins (${page10.span}), in story order:
+${page10.pins.map((b) => beatText(input.world, names3, b.ref, b.beat)).join(`
 `) || "- (none)"}`,
+    tools.length > 0 ? `The chat's archive, its own prose as it was written, is yours to read before you answer: answer {"archive": [{"tool": a tool's name, then its arguments}]} alone, and what each read found comes back; up to ${ARCHIVE_ROUNDS} rounds of reading, then you answer this page. Its tools:
+${toolsText(tools)}` : "The chat's archive can't be read for this page."
+  ].join(`
+
+`);
+  const { answer: a, reads } = await askReading(input, talkOf2(input, OFFSCREEN_TEXT.settlePage, data), tools, "this page");
+  const verdict2 = a.verdict === "holds" || a.verdict === "contradicts" ? a.verdict : null;
+  if (verdict2 === null)
+    throw new DepthAnswerError("author", JSON.stringify(a));
+  return { page: page10.index, of: page10.of, span: page10.span, verdict: verdict2, why: answerWhy(a), forces: list5(a.forces).map(text10).filter((f) => f !== ""), reads };
+}
+async function settleRead(input) {
+  const { world, state: state2 } = input;
+  const names3 = namesOf5(world, state2);
+  const walkOn = input.walkOn;
+  const data = [
+    ...draftData(input, names3),
     ...walkOn ? [`What of this scene it holds:
 ${walkOn.reach.map((r) => `- ${r}`).join(`
 `) || "- (nothing)"}`] : [],
-    `Its pins, every beat since its story time:
-${input.pins.map((b) => beatText2(world, names3, b.ref, b.beat)).join(`
+    input.pages ? `Its pins, every beat since its story time, read a page at a time in story order; what each page came to:
+${pagesText(input.pages)}` : `Its pins, every beat since its story time:
+${input.pins.map((b) => beatText(world, names3, b.ref, b.beat)).join(`
 `) || "- (none)"}`
   ].join(`
 
@@ -139758,10 +141310,10 @@ ${input.pins.map((b) => beatText2(world, names3, b.ref, b.beat)).join(`
   const effects = new Map;
   for (const r of list5(a.effects)) {
     const x = record6(r);
-    const index = x && typeof x.index === "number" && Number.isInteger(x.index) ? x.index : 0;
-    if (!x || index < 1 || index > input.effects.length)
+    const index2 = x && typeof x.index === "number" && Number.isInteger(x.index) ? x.index : 0;
+    if (!x || index2 < 1 || index2 > input.effects.length)
       continue;
-    effects.set(index, x.keep !== false);
+    effects.set(index2, x.keep !== false);
   }
   const attempts = [];
   for (const r of list5(a.attempts)) {
@@ -139787,6 +141339,11 @@ ${input.pins.map((b) => beatText2(world, names3, b.ref, b.beat)).join(`
     throw new DepthAnswerError("author", JSON.stringify(a));
   }
   const redraft = later ? { in: minutes2 } : null;
+  const contradicted = (input.pages ?? []).filter((p) => p.verdict === "contradicts");
+  if (verdict2 === "settle" && contradicted.length > 0 && beats.size === 0 && [...effects.values()].every((k) => k) && attempts.length === 0) {
+    asked2.read.drop("verdict", a.verdict, `a settlement that changes nothing, though page${contradicted.length === 1 ? "" : "s"} ${contradicted.map((p) => p.page).join(", ")} found the draft contradicted`);
+    throw new DepthAnswerError("author", JSON.stringify(a));
+  }
   return {
     verdict: verdict2,
     why: text10(a.why),
@@ -139802,8 +141359,6 @@ ${input.pins.map((b) => beatText2(world, names3, b.ref, b.beat)).join(`
 
 // src/backend/depth/offscreen/episode.ts
 var OFFSCREEN_PLUGS = { play, sceneSoFar, actBeatTexts, resolveAttempt };
-var EPISODE_STEPS_MOST = 8;
-var RECENT_BEATS = 40;
 var PLAYED_FILES = ["core", "self", "now", "mind"];
 function changedInputs(state2, draft) {
   const people = [...new Set([...draft.episode.people, ...draft.episode.parts.flatMap((p) => ("who" in p.subject) ? [p.subject.who] : [])])];
@@ -139823,9 +141378,9 @@ function changedInputs(state2, draft) {
   }
   return out2;
 }
-function episodeOf(chatId, basis, index, ask4, now) {
-  const start = now + ask4.in;
-  return { id: episodeId(chatId, basis.message, basis.swipe, String(index)), span: [start, start + Math.max(1, ask4.minutes)], places: [...ask4.places], people: [...ask4.people], why: ask4.why, parts: ask4.parts.map((p) => ({ subject: p.subject, treatment: p.treatment, rationale: p.rationale })) };
+function episodeOf(chatId, basis, index2, ask5, now) {
+  const start = now + ask5.in;
+  return { id: episodeId(chatId, basis.message, basis.swipe, String(index2)), span: [start, start + Math.max(1, ask5.minutes)], places: [...ask5.places], people: [...ask5.people], why: ask5.why, parts: ask5.parts.map((p) => ({ subject: p.subject, treatment: p.treatment, rationale: p.rationale })) };
 }
 function touchesOf2(episode, beats, named3, pov2) {
   const out2 = new Map;
@@ -139862,7 +141417,7 @@ function effectTouches(was, now, pov2) {
     refs.push({ place: place2 });
   return refs;
 }
-async function draftEpisode(rt, chatId, userId, basis, ask4, o) {
+async function draftEpisode(rt, chatId, userId, basis, ask5, o) {
   const said2 = [];
   const plugs = o.plugs ?? OFFSCREEN_PLUGS;
   const meter = metered(o.model ?? portFor(rt, userId));
@@ -139875,7 +141430,7 @@ async function draftEpisode(rt, chatId, userId, basis, ask4, o) {
     return { draft: null, landed: null, said: ["the reply it was opened at left the chat's chain"] };
   const { world, state: state2, story } = at3;
   const pov2 = povOf(world, state2);
-  const episode = episodeOf(chatId, basis, o.index, ask4, state2.clock);
+  const episode = episodeOf(chatId, basis, o.index, ask5, state2.clock);
   const id2 = draftId(chatId, episode.id);
   const name = (who) => state2.entities[who]?.name ?? who;
   const open = draftsOn(at3.events);
@@ -139925,7 +141480,7 @@ async function draftEpisode(rt, chatId, userId, basis, ask4, o) {
       played.push({ who, files: shown5 });
     }
   }
-  const recent = (await beatTexts(rt, userId, inStoryOrder(story.beats).slice(-RECENT_BEATS).map((p) => p.beat))).map((beat, i) => ({ ref: `r${i + 1}`, beat }));
+  const recent = (await beatTexts(rt, userId, inStoryOrder(story.beats).slice(-settings.depth.reads.episodeBeats).map((p) => p.beat))).map((beat, i) => ({ ref: `r${i + 1}`, beat }));
   const view = { episode, live, played, recent };
   const notebook = await readNotebook(rt, userId, state2);
   const book = new SceneBook({ registry: rt.registry, world, state: state2, prefix: [], turn: id2, userId, blobs: rt.blobs, pov: pov2, say: (line2) => said2.push(line2) });
@@ -139941,7 +141496,7 @@ async function draftEpisode(rt, chatId, userId, basis, ask4, o) {
     const actor2 = beat.beat.actors[0];
     if (actor2 === undefined)
       return;
-    const r = await plugs.resolveAttempt(model2, { registry: rt.registry, world, state: book.state, act: { actor: actor2, surface: beat.surface, ...beat.quotes ? { quotes: beat.quotes } : {}, attempt }, seed: hashParts(id2, "attempt", beat.beat.id), runSeed, scene: book.beats.map((b) => beatLine(world, book.state, b)), texts: texts2, ...signal2 });
+    const r = await plugs.resolveAttempt(model2, { registry: rt.registry, quoteBounds: settings.depth.reads, world, state: book.state, act: { actor: actor2, surface: beat.surface, ...beat.quotes ? { quotes: beat.quotes } : {}, attempt }, seed: hashParts(id2, "attempt", beat.beat.id), runSeed, scene: book.beats.map((b) => beatLine(world, book.state, b)), texts: texts2, ...signal2 });
     if (r.reasoning)
       reasoning.push(`The GM: ${r.reasoning}`);
     const was = structuredClone({ entities: book.state.entities });
@@ -139974,7 +141529,8 @@ async function draftEpisode(rt, chatId, userId, basis, ask4, o) {
   const opened2 = await twice(() => episodeOpen(ctx), o.signal);
   await authored3(opened2, 0);
   let next = opened2.end === null ? opened2.next : [];
-  for (let step2 = 1;next.length > 0 && step2 <= EPISODE_STEPS_MOST && !o.signal?.aborted; step2++) {
+  const stepsMost = settings.depth.episodeSteps;
+  for (let step2 = 1;next.length > 0 && step2 <= stepsMost && !o.signal?.aborted; step2++) {
     const read = { world, state: book.state, story, beats: book.beats.map((b) => b.beat) };
     const decided3 = [];
     for (const who of next) {
@@ -139984,7 +141540,7 @@ async function draftEpisode(rt, chatId, userId, basis, ask4, o) {
       try {
         const mind2 = await mindInput({ registry: rt.registry, blobs: book.reader }, userId, { state: book.state, world, story }, who, settings);
         shown5 = shownFiles(mind2);
-        const so = await plugs.sceneSoFar(book.reader, userId, read, who);
+        const so = await plugs.sceneSoFar(book.reader, userId, read, who, { limit: settings.depth.reached });
         out2 = await plugs.play(model2, { ...mind2, beat: beatIdOf, scene: so.scene, reached: so.reached, ...signal2 });
       } catch (error) {
         if (!(error instanceof DepthAnswerError) || o.signal?.aborted)
@@ -140004,7 +141560,7 @@ async function draftEpisode(rt, chatId, userId, basis, ask4, o) {
     }
     let answer2 = null;
     try {
-      const so = { staging: [...book.staging.values()], beats: book.beats.map((b, i) => ({ ref: `t${i + 1}`, beat: b })), decided: decided3.map((d) => d.draft), left: EPISODE_STEPS_MOST - step2 };
+      const so = { staging: [...book.staging.values()], beats: book.beats.map((b, i) => ({ ref: `t${i + 1}`, beat: b })), decided: decided3.map((d) => d.draft), left: stepsMost - step2 };
       answer2 = await twice(() => episodeStep({ ...ctx, state: book.state, so }), o.signal);
     } catch (error) {
       if (!(error instanceof DepthAnswerError) || o.signal?.aborted)
@@ -140025,8 +141581,8 @@ async function draftEpisode(rt, chatId, userId, basis, ask4, o) {
       break;
     await authored3(answer2, step2, last);
     next = answer2.end === null ? answer2.next : [];
-    if (next.length > 0 && step2 === EPISODE_STEPS_MOST)
-      said2.push(`The episode reached its ${EPISODE_STEPS_MOST} steps and ends there`);
+    if (next.length > 0 && step2 === stepsMost)
+      said2.push(`The episode reached its ${stepsMost} steps and ends there`);
   }
   if (o.signal?.aborted)
     return { draft: null, landed: null, said: [...said2, "stopped before it was drafted"] };
@@ -140054,7 +141610,8 @@ async function draftEpisode(rt, chatId, userId, basis, ask4, o) {
 `);
   const spend = spendData(meter.spent(), { treatment: leadingTreatment(episode.parts), interval: settings.depth.budget.interval, at: draft.at, for: id2 });
   const events3 = [draftEvent(draft), ...spend ? [spendEvent(spend)] : []];
-  const landed = await landEntry(rt, chatId, userId, { id: layerEntryId(STORY_DRAFT, chatId, id2, basis.message, basis.swipe), basis, kind: STORY_DRAFT, events: events3, by: { role: "author" } }, book.blobs, thinking);
+  const draftTextBlobs = Object.fromEntries(draftTexts(draft).map((t) => [blobHash(t), t]));
+  const landed = await landEntry(rt, chatId, userId, { id: layerEntryId(STORY_DRAFT, chatId, id2, basis.message, basis.swipe), basis, kind: STORY_DRAFT, events: events3, by: { role: "author" } }, { ...book.blobs, ...draftTextBlobs }, thinking);
   return { draft, landed, said: said2 };
 }
 async function landEntry(rt, chatId, userId, draft, blobs, thinking) {
@@ -140078,7 +141635,6 @@ async function readDraft(input) {
   const refs = draft.beats.map((b, i) => ({ ref: `d${i + 1}`, beat: b }));
   const beatsRead = (await beatTexts(reader, userId, draft.beats)).map((beat, i) => ({ ref: `d${i + 1}`, beat }));
   const pinned = input.pins.filter((b) => b.at >= draft.at);
-  const pins = (await beatTexts(reader, userId, pinned)).map((beat, i) => ({ ref: `p${i + 1}`, beat }));
   const ctx = registry.context(world, state2);
   const effects = draft.effects.map((e) => {
     try {
@@ -140087,10 +141643,27 @@ async function readDraft(input) {
       return e.type;
     }
   });
-  const answer2 = await twice(() => settleRead({ world, state: state2, texts: texts2, pov: pov2, model: model2, ...signal2, notebook: input.notebook, episode: draft.episode, summary: draft.summary, at: draft.at, beats: beatsRead, effects, pins, ...input.walkOn ? { walkOn: input.walkOn } : {} }), input.signal);
+  const base = { world, state: state2, texts: texts2, pov: pov2, model: model2, ...signal2, notebook: input.notebook, episode: draft.episode, summary: draft.summary, at: draft.at, beats: beatsRead, effects, ...input.walkOn ? { walkOn: input.walkOn } : {} };
+  const pinsMost = input.pinsMost ?? PINS_MOST;
+  const paged = pinned.length > pinsMost;
+  const ordered = paged ? [...pinned].sort((a, b) => a.at - b.at || a.order - b.order) : pinned;
+  const pins = (await beatTexts(reader, userId, ordered)).map((beat, i) => ({ ref: `p${i + 1}`, beat }));
+  let pages;
+  if (paged) {
+    const tools = input.archive ? archiveTools({ texts: texts2, world, state: state2, source: input.archive, ...input.upTo ? { upTo: input.upTo } : {} }) : [];
+    const cal = calendarOf(world);
+    pages = await readPaged(pins, pinsMost, async (page10, before) => {
+      const span2 = `${formatClock(cal, page10.items[0]?.beat.beat.at ?? draft.at)} to ${formatClock(cal, page10.items.at(-1)?.beat.beat.at ?? draft.at)}`;
+      const v4 = await twice(() => settlePage({ ...base, page: { index: page10.index, of: page10.of, span: span2, pins: page10.items }, before, tools }), input.signal);
+      said2.push(...v4.reads, `Page ${v4.page} of ${v4.of} of its pins: ${v4.verdict === "holds" ? "it holds" : `it contradicts the draft: ${v4.why}`}`);
+      const { reads: _, ...verdict2 } = v4;
+      return verdict2;
+    }, input.signal);
+  }
+  const answer2 = await twice(() => settleRead({ ...base, pins: pages ? [] : pins, ...pages ? { pages } : {} }), input.signal);
   for (const r of answer2.refused)
     said2.push(`The author: ${r}`);
-  const out2 = (events3, blobs, beats2) => ({ verdict: answer2.verdict, why: answer2.why, events: events3, blobs, beats: beats2, redraft: answer2.verdict === "redraft" ? answer2.redraft : null, ...answer2.reasoning ? { reasoning: answer2.reasoning } : {}, said: said2 });
+  const out2 = (events3, blobs, beats2) => ({ verdict: answer2.verdict, why: answer2.why, events: events3, blobs, beats: beats2, redraft: answer2.verdict === "redraft" ? answer2.redraft : null, ...answer2.reasoning ? { reasoning: answer2.reasoning } : {}, ...pages ? { pages } : {}, said: said2 });
   if (answer2.verdict === "drop" || answer2.verdict === "redraft") {
     const why3 = answer2.verdict === "redraft" ? `Redrafted for later: ${answer2.why}` : answer2.why;
     return out2([dropEvent({ draft: draft.id, why: why3 || "The story overtook it." })], {}, []);
@@ -140126,16 +141699,16 @@ async function readDraft(input) {
     await book.povs({ id: newId3, surface, ...quotes ? { quotes } : {}, ...deed ? { deed } : {}, actors: beat.actors, about: beat.about, ...beat.addressed ? { addressed: beat.addressed } : {} }, exposure, model2, texts2, input.signal);
     beats.push({ ...settled2, id: newId3, what: putText(book.blobs, v4.what ?? read?.what ?? ""), surface: putText(book.blobs, surface), ...quotes ? { quotes: putText(book.blobs, quotes) } : {}, ...deed ? { deed: putText(book.blobs, deed) } : {}, exposure });
   }
-  const kept4 = [];
+  const kept5 = [];
   draft.effects.forEach((e, i) => {
     if (answer2.effects.get(i + 1) === false)
       return;
-    kept4.push(...book.apply([e], 0));
+    kept5.push(...book.apply([e], 0));
   });
   const outcomes = [];
   for (const [i, a] of answer2.attempts.entries()) {
-    const r = await plugs.resolveAttempt(model2, { registry, world, state: book.state, act: { actor: a.who, surface: a.attempt, attempt: a.attempt }, seed: hashParts(draft.id, "settle", input.seed, String(i)), runSeed: input.runSeed, scene: pins.map((p) => beatLine(world, state2, p.beat)), texts: texts2, ...signal2 });
-    kept4.push(...book.apply(r.events, 0));
+    const r = await plugs.resolveAttempt(model2, { registry, ...input.quoteBounds ? { quoteBounds: input.quoteBounds } : {}, world, state: book.state, act: { actor: a.who, surface: a.attempt, attempt: a.attempt }, seed: hashParts(draft.id, "settle", input.seed, String(i)), runSeed: input.runSeed, scene: pins.slice(-pinsMost).map((p) => beatLine(world, state2, p.beat)), texts: texts2, ...signal2 });
+    kept5.push(...book.apply(r.events, 0));
     if (!r.outcome)
       continue;
     const b = await book.write({ ref: `a${i + 1}`, decided: "gm", actors: [], act: "happened", what: r.outcome.what, surface: r.outcome.surface, ...r.outcome.quotes ? { quotes: r.outcome.quotes } : {}, about: r.outcome.about, exposure: [{ who: a.who, channel: "sight", reach: "whole" }] }, "gm", 0, { model: model2, texts: texts2, ...signal2 });
@@ -140149,7 +141722,7 @@ async function readDraft(input) {
     return out2([], {}, []);
   }
   const settle6 = settleEvent({ draft: draft.id, at: draft.at, pins: pinsOf({ beats: pinned.map((beat) => ({ beat })) }, draft.at), why: answer2.why || input.why || "Nothing seen since says otherwise.", beats: beats.map((b) => b.id) });
-  return out2([settle6, ...beats.map((b) => beatEvent(b)), ...kept4], book.blobs, beats);
+  return out2([settle6, ...beats.map((b) => beatEvent(b)), ...kept5], book.blobs, beats);
 }
 async function settleDraft(rt, chatId, userId, id2, o = {}) {
   const out2 = { verdict: null, landed: null, redraft: null, caughtUp: [], said: [] };
@@ -140163,16 +141736,17 @@ async function settleDraft(rt, chatId, userId, id2, o = {}) {
     return { ...out2, said: [`there is no draft ${id2} on this chain`] };
   if (found.state !== "open")
     return { ...out2, said: [`the draft is already ${found.state} here`] };
-  const draft = found.draft;
+  const draft = await draftWithTexts(rt.blobs, userId, found.draft);
   const { world, state: state2, story } = at3;
   const settings = await rt.settings.get(userId);
   const pinned = story.beats.filter((p) => p.beat.at >= draft.at);
-  if (pinned.length > PINS_MOST)
-    return { ...out2, said: [`${pinned.length} beats have come since its story time, more than a settlement reads at once (${PINS_MOST}): drop it, or redraft it for later`] };
   const meter = metered(o.model ?? portFor(rt, userId));
   const runSeed = (await rt.ledger.core(chatId, userId))?.journal.run?.runSeed ?? chatId;
+  const archive = rt.archive;
   const read = await readDraft({
     registry: rt.registry,
+    pinsMost: settings.depth.reads.settleBeats,
+    quoteBounds: settings.depth.reads,
     world,
     state: state2,
     userId,
@@ -140186,11 +141760,16 @@ async function settleDraft(rt, chatId, userId, id2, o = {}) {
     plugs: o.plugs ?? OFFSCREEN_PLUGS,
     runSeed,
     seed: hashParts(basis.message, basis.swipe),
-    ...o.why ? { why: o.why } : {}
+    ...o.why ? { why: o.why } : {},
+    ...archive ? { archive: { search: (q) => archive.search(chatId, userId, { ...q, upTo: basis.message }), quote: (r) => archive.quote(chatId, userId, r) }, upTo: basis.message } : {}
   });
   out2.verdict = read.verdict;
   out2.said.push(...read.said);
   out2.redraft = read.redraft;
+  const cal = calendarOf(world);
+  const span2 = `${formatClock(cal, pinned[0]?.beat.at ?? draft.at)} to ${formatClock(cal, pinned.at(-1)?.beat.at ?? draft.at)}`;
+  const verdicts = read.pages && read.pages.length > 0 ? read.pages.map((p) => verdictEvent({ draft: id2, page: p.page, of: p.of, span: p.span, verdict: p.verdict, why: p.why, forces: p.forces })) : [verdictEvent({ draft: id2, page: 1, of: 1, span: span2, verdict: read.verdict, why: read.why, forces: [] })];
+  await landEntry(rt, chatId, userId, { id: layerEntryId(AUTHOR_VERDICT, chatId, id2, basis.message, basis.swipe), basis, kind: AUTHOR_VERDICT, events: verdicts, by: { role: "author" } }, {});
   if (read.events.length === 0)
     return out2;
   const spending2 = { treatment: leadingTreatment(draft.episode.parts), interval: settings.depth.budget.interval, at: draft.at, for: id2 };
@@ -140240,7 +141819,7 @@ function spentIn(drafts, budget, clock) {
   return out2;
 }
 function draftLine(world, state2, story, draft) {
-  const names3 = namesOf6(world, state2);
+  const names3 = namesOf5(world, state2);
   const cal = calendarOf(world);
   const inputs = changedInputs(state2, draft);
   const changed = [...inputs.minds.map((who) => `${tag(names3, who)}'s mind`), ...inputs.notebook.map((path3) => `your notebook's ${path3.slice(NOTEBOOK_DIR.length)}`)];
@@ -140255,13 +141834,9 @@ function draftLine(world, state2, story, draft) {
     changed
   };
 }
-async function offscreenFacts(rt, chatId, userId, at3, budget) {
-  const { world, state: state2, story } = at3;
-  const drafts = draftsOn(at3.events);
-  const open = drafts.filter((d) => d.state === "open");
+async function rebaseCandidates(rt, chatId, userId, onChain) {
   const bases = await rt.ledger.chainBases(chatId, userId);
-  const here = new Set(drafts.map((d) => d.draft.id));
-  const rebase = [];
+  const out2 = [];
   for (const s of await rt.ledger.layerSummaries(chatId, userId, { inherited: true })) {
     if (s.kind !== STORY_DRAFT)
       continue;
@@ -140271,25 +141846,33 @@ async function offscreenFacts(rt, chatId, userId, at3, budget) {
     const entry2 = await rt.ledger.readLayerEntry(chatId, userId, s.id);
     const event = entry2?.events.find((e) => e.type === STORY_DRAFT);
     const draft = event && "data" in event ? draftOf(event.data) : null;
-    if (!draft || here.has(draft.id) || rebase.some((r) => r.id === draft.id))
+    if (!draft || onChain.has(draft.id) || out2.some((r) => r.id === draft.id))
       continue;
-    rebase.push(draftLine(world, state2, story, draft));
+    out2.push(draft);
   }
+  return out2;
+}
+async function offscreenFacts(rt, chatId, userId, at3, budget) {
+  const { world, state: state2, story } = at3;
+  const drafts = await Promise.all(draftsOn(at3.events).map(async (d) => ({ ...d, draft: await draftWithTexts(rt.blobs, userId, d.draft) })));
+  const open = drafts.filter((d) => d.state === "open");
+  const candidates = await rebaseCandidates(rt, chatId, userId, new Set(drafts.map((d) => d.draft.id)));
+  const rebase = (await Promise.all(candidates.map((d) => draftWithTexts(rt.blobs, userId, d)))).map((d) => draftLine(world, state2, story, d));
   const spent = spentIn(drafts, budget, state2.clock);
   const allowances = DEPTH_TREATMENTS.map((t) => {
     const a = budget.allowances[t];
     return a === "none" ? `${DEPTH_TREATMENT_LABEL[t]}: no limit` : `${DEPTH_TREATMENT_LABEL[t]}: ${Math.max(0, a - spent[t])} of ${a} left this story ${budget.interval}`;
   });
-  const names3 = namesOf6(world, state2);
+  const names3 = namesOf5(world, state2);
   const asked2 = openAsks(at3.events).map((a) => askLine(a.ask, (id2) => tag(names3, id2)));
   return { drafts: open.map((d) => draftLine(world, state2, story, d.draft)), rebase, allowances, threshold: thresholdGuidance(budget), asked: asked2, ask: budget.ask };
 }
-function overAllowance(ask4, budget, spent) {
+function overAllowance(ask5, budget, spent) {
   if (!budget.ask)
     return [];
   const counted4 = { ...spent };
   const over = [];
-  ask4.parts.forEach((p, part) => {
+  ask5.parts.forEach((p, part) => {
     const a = budget.allowances[p.treatment];
     if (a === "none" || counted4[p.treatment] < a) {
       counted4[p.treatment]++;
@@ -140300,9 +141883,9 @@ function overAllowance(ask4, budget, spent) {
   });
   return over;
 }
-function withinAllowances(ask4, budget, spent, put2) {
+function withinAllowances(ask5, budget, spent, put2) {
   const parts = [];
-  for (const p of ask4.parts) {
+  for (const p of ask5.parts) {
     let t = p.treatment;
     while (t !== null) {
       const a = budget.allowances[t];
@@ -140318,18 +141901,22 @@ function withinAllowances(ask4, budget, spent, put2) {
     spent[t]++;
     parts.push(t === p.treatment ? p : { ...p, treatment: t, rationale: `${p.rationale} (this story ${budget.interval}'s ${DEPTH_TREATMENT_LABEL[p.treatment].toLowerCase()} allowance is spent: ${DEPTH_TREATMENT_LABEL[t].toLowerCase()} instead)`.trim() });
   }
-  return { ...ask4, parts };
+  return { ...ask5, parts };
 }
 async function offscreenJobs(rt, chatId, userId, basis, asks, o) {
   const out2 = { dropped: [], rebased: [], settled: [], drafted: [], asked: [], put: [], said: [] };
   const fail = (what, error) => {
     out2.said.push(`${what}: ${error instanceof Error ? error.message : String(error)}`);
   };
-  const held3 = (what) => {
+  const held3 = async (what) => {
     const bind = o.binds?.() ?? null;
     if (bind)
       out2.put.push(`${what}: ${bind.words}`);
-    return bind !== null;
+    else if (!(await rt.settings.get(userId)).depth.background.offscreen)
+      out2.put.push(`${what}: Work off screen is paused (GM \u2192 Depth)`);
+    else
+      return false;
+    return true;
   };
   const common3 = { ...o.model ? { model: o.model } : {}, ...o.signal ? { signal: o.signal } : {}, ...o.plugs ? { plugs: o.plugs } : {} };
   for (const d of asks.drop) {
@@ -140369,7 +141956,7 @@ async function offscreenJobs(rt, chatId, userId, basis, asks, o) {
   }
   const episodes = [...asks.episodes];
   for (const s of asks.settle) {
-    if (held3(`Settling draft ${s.draft}`))
+    if (await held3(`Settling draft ${s.draft}`))
       continue;
     try {
       const r = await settleDraft(rt, chatId, userId, s.draft, { basis, why: s.why, ...common3 });
@@ -140382,7 +141969,8 @@ async function offscreenJobs(rt, chatId, userId, basis, asks, o) {
         out2.dropped.push(s.draft);
       if (r.redraft) {
         const at3 = await rt.ledger.foldAtBasis(chatId, userId, basis, [STORY_DRAFT]);
-        const was = at3 ? draftsOn(at3.events).find((d) => d.draft.id === s.draft)?.draft : undefined;
+        const found = at3 ? draftsOn(at3.events).find((d) => d.draft.id === s.draft)?.draft : undefined;
+        const was = found ? await draftWithTexts(rt.blobs, userId, found) : undefined;
         if (was)
           episodes.push({ why: was.episode.why, in: r.redraft.in, minutes: Math.max(1, was.episode.span[1] - was.episode.span[0]), places: was.episode.places, people: was.episode.people, parts: was.episode.parts });
       }
@@ -140393,84 +141981,81 @@ async function offscreenJobs(rt, chatId, userId, basis, asks, o) {
   if (episodes.length > 0) {
     const at3 = await rt.ledger.foldAtBasis(chatId, userId, basis, [STORY_DRAFT]);
     const spent = at3 ? spentIn(draftsOn(at3.events), o.budget, at3.state.clock) : Object.fromEntries(DEPTH_TREATMENTS.map((t) => [t, 0]));
-    for (const [n, ask4] of episodes.entries()) {
-      const index = (o.first ?? 0) + n;
+    for (const [n, ask5] of episodes.entries()) {
+      const index2 = (o.first ?? 0) + n;
       if (o.signal?.aborted)
         break;
-      if (held3(`Episode ${index + 1} (${ask4.why.trim() || "no reason given"})`))
+      if (await held3(`Episode ${index2 + 1} (${ask5.why.trim() || "no reason given"})`))
         continue;
-      const over = at3 ? overAllowance(ask4, o.budget, spent) : [];
+      const over = at3 ? overAllowance(ask5, o.budget, spent) : [];
       if (at3 && over.length > 0) {
-        const id2 = episodeOf(chatId, basis, index, ask4, at3.state.clock).id;
-        const data = { id: id2, index, why: ask4.why, in: ask4.in, minutes: ask4.minutes, places: ask4.places, people: ask4.people, parts: ask4.parts, over, interval: o.budget.interval };
+        const id2 = episodeOf(chatId, basis, index2, ask5, at3.state.clock).id;
+        const data = { id: id2, index: index2, why: ask5.why, in: ask5.in, minutes: ask5.minutes, places: ask5.places, people: ask5.people, parts: ask5.parts, over, interval: o.budget.interval };
         try {
           const r = await landEntry(rt, chatId, userId, { id: layerEntryId(AUTHOR_ASK, chatId, id2, basis.message, basis.swipe), basis, kind: AUTHOR_ASK, events: [askEvent(data)], by: { role: "author" } }, {});
           if (r.status === "refused")
-            out2.said.push(`episode ${index + 1}: asking the player: ${r.reason}`);
+            out2.said.push(`episode ${index2 + 1}: asking the player: ${r.reason}`);
           else
             out2.asked.push(id2);
         } catch (error) {
-          fail(`episode ${index + 1}: asking the player`, error);
+          fail(`episode ${index2 + 1}: asking the player`, error);
         }
         continue;
       }
       const left = [];
-      const within7 = withinAllowances(ask4, o.budget, spent, left);
-      out2.put.push(...left.map((line2) => `Episode ${index + 1}: ${line2}`));
+      const within7 = withinAllowances(ask5, o.budget, spent, left);
+      out2.put.push(...left.map((line2) => `Episode ${index2 + 1}: ${line2}`));
       if (within7.parts.length === 0)
         continue;
       try {
-        const r = await draftEpisode(rt, chatId, userId, basis, within7, { index, ...common3 });
-        out2.said.push(...r.said.map((line2) => `episode ${index + 1}: ${line2}`));
+        const r = await draftEpisode(rt, chatId, userId, basis, within7, { index: index2, ...common3 });
+        out2.said.push(...r.said.map((line2) => `episode ${index2 + 1}: ${line2}`));
         if (r.landed?.status === "refused")
-          out2.said.push(`episode ${index + 1}: ${r.landed.reason}`);
+          out2.said.push(`episode ${index2 + 1}: ${r.landed.reason}`);
         else if (r.draft && r.landed)
           out2.drafted.push(r.draft.id);
       } catch (error) {
-        fail(`episode ${index + 1}`, error);
+        fail(`episode ${index2 + 1}`, error);
       }
     }
   }
   return out2;
 }
 async function draftAnswered(rt, chatId, userId, answered2, o) {
-  const { ask: ask4, basis } = answered2;
-  const over = new Set(ask4.over.map((x) => x.part));
-  const wanted = { why: ask4.why, in: ask4.in, minutes: ask4.minutes, places: ask4.places, people: ask4.people, parts: ask4.parts.map((p) => ({ subject: p.subject, treatment: p.treatment, rationale: p.rationale })) };
+  const { ask: ask5, basis } = answered2;
+  const over = new Set(ask5.over.map((x) => x.part));
+  const wanted = { why: ask5.why, in: ask5.in, minutes: ask5.minutes, places: ask5.places, people: ask5.people, parts: ask5.parts.map((p) => ({ subject: p.subject, treatment: p.treatment, rationale: p.rationale })) };
   let episode;
   const said2 = [];
   if (answered2.spend) {
-    episode = { ...wanted, parts: wanted.parts.map((p, i) => over.has(i) ? { ...p, rationale: `${p.rationale} (you spent one more past this story ${ask4.interval}'s ${DEPTH_TREATMENT_LABEL[p.treatment].toLowerCase()} allowance)`.trim() } : p) };
+    episode = { ...wanted, parts: wanted.parts.map((p, i) => over.has(i) ? { ...p, rationale: `${p.rationale} (you spent one more past this story ${ask5.interval}'s ${DEPTH_TREATMENT_LABEL[p.treatment].toLowerCase()} allowance)`.trim() } : p) };
   } else {
     const at3 = await rt.ledger.foldAtBasis(chatId, userId, basis, [STORY_DRAFT]);
     const spent = at3 ? spentIn(draftsOn(at3.events), o.budget, at3.state.clock) : Object.fromEntries(DEPTH_TREATMENTS.map((t) => [t, 0]));
     episode = withinAllowances(wanted, o.budget, spent, said2);
-    const put2 = spendData({ cost: { calls: 0, tokensIn: 0, tokensOut: 0 }, roles: {} }, { treatment: "written", interval: o.budget.interval, at: at3?.state.clock ?? 0, for: ask4.id, put: said2 });
+    const put2 = spendData({ cost: { calls: 0, tokensIn: 0, tokensOut: 0 }, roles: {} }, { treatment: "written", interval: o.budget.interval, at: at3?.state.clock ?? 0, for: ask5.id, put: said2 });
     if (put2)
-      await landEntry(rt, chatId, userId, { id: layerEntryId(AUTHOR_SPEND, chatId, ask4.id, "unwritten", basis.message, basis.swipe), basis, kind: AUTHOR_SPEND, events: [spendEvent(put2)], by: { role: "author" } }, {});
+      await landEntry(rt, chatId, userId, { id: layerEntryId(AUTHOR_SPEND, chatId, ask5.id, "unwritten", basis.message, basis.swipe), basis, kind: AUTHOR_SPEND, events: [spendEvent(put2)], by: { role: "author" } }, {});
     if (episode.parts.length === 0)
       return { draft: null, landed: null, said: said2 };
   }
-  const r = await draftEpisode(rt, chatId, userId, basis, episode, { index: ask4.index, ...o.model ? { model: o.model } : {}, ...o.signal ? { signal: o.signal } : {}, ...o.plugs ? { plugs: o.plugs } : {} });
+  const r = await draftEpisode(rt, chatId, userId, basis, episode, { index: ask5.index, ...o.model ? { model: o.model } : {}, ...o.signal ? { signal: o.signal } : {}, ...o.plugs ? { plugs: o.plugs } : {} });
   return { ...r, said: [...said2, ...r.said] };
 }
 
 // src/backend/depth/scene/after.ts
 var DUE_WITHIN = 24 * 60;
-var DUE_MOST = 24;
 var KEPT_CHARS = 1500;
 var LATEST_CHARS = 240;
-var REFLECT_BEATS_MOST = 400;
-var POLL_BEATS_MOST = 400;
 var BACKGROUND_OFF = "The author's poll, with the catch-ups, reflections, the world off screen and the notebook it asks for: Background lanes are off (Settings \u2192 Depth \u2192 Background lanes)";
 var clip4 = (s, n) => s.length > n ? `${s.slice(0, n - 1).trimEnd()}\u2026` : s;
-function sinceLastPoll(at3, bases, basis) {
+function sinceLastPoll(at3, bases, basis, most) {
   const order = new Map(bases.map((b, i) => [b.message, i]));
   const place2 = (m) => order.get(m) ?? -1;
   const through = at3.events?.flatMap((e) => authorData(e.event, AUTHOR_POLL)?.through ?? []).at(-1);
   const decided3 = at3.story.beats.find((p) => ("turn" in p.beat.by))?.from.messageId;
   const from = through !== undefined && order.has(through) ? place2(through) + 1 : decided3 !== undefined ? place2(decided3) : place2(basis.message);
-  const beats = at3.story.beats.filter((p) => place2(p.from.messageId) >= from && !("bootstrap" in p.beat.by) && !("entry" in p.beat.by)).slice(-POLL_BEATS_MOST).map((p) => p.beat);
+  const beats = at3.story.beats.filter((p) => place2(p.from.messageId) >= from && !("bootstrap" in p.beat.by) && !("entry" in p.beat.by)).slice(-most).map((p) => p.beat);
   const cal = calendarOf(at3.world);
   let minutes2 = 0;
   const spans = [];
@@ -140512,7 +142097,7 @@ async function keptOf(rt, userId, entries3) {
   }
   return out2;
 }
-function dueOf(world, state2, names3) {
+function dueOf(world, state2, names3, most) {
   const cal = calendarOf(world);
   const seen = new Set;
   const due = [];
@@ -140528,9 +142113,9 @@ function dueOf(world, state2, names3) {
       due.push({ at: p.when.from, text: `${tag(names3, who)}: ${planWords(p, who)}, ${formatClock(cal, p.when.from)}${where}${others.length > 0 ? `, with ${others.map((x) => tag(names3, x)).join(", ")}` : ""}` });
     }
   }
-  return due.sort((a, b) => a.at - b.at).slice(0, DUE_MOST).map((d) => d.text);
+  return due.sort((a, b) => a.at - b.at).slice(0, most).map((d) => d.text);
 }
-async function pendingOf(rt, userId, at3, played) {
+async function pendingOf(rt, userId, at3, played, takesKept) {
   const { beats } = exposedBeats(at3.story);
   const replaced2 = new Set(at3.story.replaced.map((r) => r.id));
   const out2 = [];
@@ -140539,15 +142124,16 @@ async function pendingOf(rt, userId, at3, played) {
       continue;
     const mind2 = mindV2At(at3.state, who);
     const waiting = pendingFor(beats, mind2, who);
-    const gone = Object.entries(mind2.files).flatMap(([path3, m]) => writtenFromGone(m, mind2, replaced2) ? [path3] : []);
+    const gone = Object.entries(mind2.files).flatMap(([path3, m]) => writtenFromGone(m, mind2, replaced2) ? [m.mode === "reflect" ? `${path3} (written by a reflection)` : path3] : []);
     const takes3 = takesOf(at3.state, who).length;
-    const near = takes3 >= Math.floor(TAKES_KEPT * 3 / 4);
+    const near = takes3 >= Math.floor(takesKept * 3 / 4);
     const newest = waiting[waiting.length - 1];
-    if (!newest && gone.length === 0 && !near)
+    const asks = mind2.asks?.why;
+    if (!newest && gone.length === 0 && !near && asks === undefined)
       continue;
     const reach2 = newest ? reachOf2(newest, who) : null;
     const latest = reach2 ? (await rt.blobs.get(userId, reach2.text))?.trim() ?? "" : "";
-    out2.push({ who, pending: waiting.length, ...latest !== "" ? { latest: clip4(latest, LATEST_CHARS) } : {}, played: played.includes(who), ...gone.length > 0 ? { gone } : {}, ...near ? { takes: takes3 } : {} });
+    out2.push({ who, pending: waiting.length, ...latest !== "" ? { latest: clip4(latest, LATEST_CHARS) } : {}, played: played.includes(who), ...gone.length > 0 ? { gone } : {}, ...near ? { takes: takes3 } : {}, ...asks !== undefined ? { asks } : {} });
   }
   const minded2 = new Set(mindedAt(at3.state));
   const unminded = [...new Set(beats.flatMap((b) => b.exposure.map((x) => x.who)))].filter((who) => !minded2.has(who) && hasOwn(at3.state.entities, who) && hasAgent(at3.world, at3.state, who));
@@ -140555,6 +142141,20 @@ async function pendingOf(rt, userId, at3, played) {
     const waiting = pendingFor(beats, mindV2At(at3.state, who), who);
     if (waiting.length > 0)
       out2.push({ who, pending: waiting.length, played: false, unminded: true });
+  }
+  return out2;
+}
+async function answersSince(rt, userId, at3) {
+  const events3 = at3.events ?? [];
+  const last = events3.reduce((n, e, i) => authorData(e.event, AUTHOR_POLL) ? i : n, -1);
+  const out2 = [];
+  for (const e of events3.slice(last + 1)) {
+    if (e.event.type !== MIND_INTERVIEW || !("data" in e.event))
+      continue;
+    const d = mindInterviewOf(e.event.data);
+    if (typeof d === "string" || d.by !== "author")
+      continue;
+    out2.push({ who: d.who, question: clip4(await rt.blobs.get(userId, d.question) ?? "", LATEST_CHARS), answer: clip4(await rt.blobs.get(userId, d.answer) ?? "", LATEST_CHARS) });
   }
   return out2;
 }
@@ -140608,30 +142208,30 @@ async function afterDepthReply(rt, chatId, userId, basis, after, o = {}) {
     };
     const talk = talkNow(start.events, null);
     const talking = talk && talk.state === "on" ? talk.with : null;
-    const rememberers = takersAt(start.state).filter((who) => hasAgent(start.world, start.state, who) && (who !== talking || takesOf(start.state, who).length >= TAKES_KEPT));
-    let kept4 = [];
-    if (!o.wakeRound && rememberers.length > 0 && !held3(`Remembering the scene (${rememberers.map((id2) => namesOf6(start.world, start.state).name(id2)).join(", ")})`)) {
+    const rememberers = takersAt(start.state).filter((who) => hasAgent(start.world, start.state, who) && (who !== talking || takesOf(start.state, who).length >= settings.depth.takesKept));
+    let kept5 = [];
+    if (!o.wakeRound && rememberers.length > 0 && !held3(`Remembering the scene (${rememberers.map((id2) => namesOf5(start.world, start.state).name(id2)).join(", ")})`)) {
       try {
         const r = await rememberAfterReply(rt, chatId, userId, { basis, model: model2, who: rememberers, ...signal2 });
         out2.remembered = r.remembered;
         for (const f of r.failed)
-          fail(`${namesOf6(start.world, start.state).name(f.who)}'s remembering`, f.why);
-        kept4 = await keptOf(rt, userId, r.entries);
+          fail(`${namesOf5(start.world, start.state).name(f.who)}'s remembering`, f.why);
+        kept5 = await keptOf(rt, userId, r.entries);
       } catch (error) {
         fail("remembering", error);
       }
     }
-    const at3 = await rt.ledger.foldAtBasis(chatId, userId, basis, [AUTHOR_POLL, AUTHOR_PREDICT, AUTHOR_SCORE, "clock", "timelapse", ...DRAFT_TYPES, ...ASK_TYPES]);
+    const at3 = await rt.ledger.foldAtBasis(chatId, userId, basis, [AUTHOR_POLL, AUTHOR_PREDICT, AUTHOR_SCORE, MIND_INTERVIEW, "clock", "timelapse", ...DRAFT_TYPES, ...ASK_TYPES]);
     if (!at3) {
       out2.failed.push("the reply left the chat's chain");
       return out2;
     }
-    const names3 = namesOf6(at3.world, at3.state);
+    const names3 = namesOf5(at3.world, at3.state);
     const turnIds = new Set(after.beats);
     const turnBeats = at3.story.beats.filter((p) => turnIds.has(p.beat.id)).map((p) => p.beat);
     if (!o.wakeRound && (turnBeats.length > 0 || out2.remembered.length > 0) && !held3("The GM's truth-link of the turn's beats")) {
       try {
-        const r = await linkTruths(rt, chatId, userId, basis, { who: out2.remembered, beats: turnBeats, ...o.occasion !== undefined ? { key: occasion2 } : {}, model: model2, ...signal2 });
+        const r = await linkTruths(rt, chatId, userId, basis, { who: out2.remembered, beats: turnBeats, ...o.occasion !== undefined ? { key: occasion2 } : {}, model: model2, ...signal2, ...o.archive ? { archive: o.archive } : {} });
         said2("the GM's truth-link", r.refused);
         out2.linked = r.linked;
       } catch (error) {
@@ -140643,7 +142243,7 @@ async function afterDepthReply(rt, chatId, userId, basis, after, o = {}) {
       return out2;
     }
     const bases = await rt.ledger.chainBases(chatId, userId);
-    const since = sinceLastPoll(at3, bases, basis);
+    const since = sinceLastPoll(at3, bases, basis, settings.depth.reads.pollBeats);
     const lastPoll = at3.events.flatMap((e) => authorData(e.event, AUTHOR_POLL) ?? []).at(-1);
     const asked2 = lastPoll?.wake && at3.state.clock >= lastPoll.wake.at ? lastPoll.wake : null;
     const woken = o.woken !== undefined || asked2 !== null || at3.events.some((e) => e.event.type === "timelapse" && e.from.messageId === basis.message);
@@ -140675,17 +142275,19 @@ async function afterDepthReply(rt, chatId, userId, basis, after, o = {}) {
         ...signal2,
         notebook: await readNotebook(rt, userId, at3.state),
         beats: (await beatTexts(rt, userId, since.beats)).map((beat, i) => ({ ref: `b${i + 1}`, beat })),
-        kept: kept4,
+        kept: kept5,
         minutes: since.minutes + (o.woken && !since.readsBasis ? o.woken.minutes : 0),
         spans: [...since.spans, ...o.woken ? [o.woken.why] : [], ...asked2 ? [`reaching ${formatClock(calendarOf(at3.world), asked2.at)}, when you asked to be woken${asked2.why !== "" ? ` (${asked2.why})` : ""}`] : []],
-        due: dueOf(at3.world, at3.state, names3),
-        pending: await pendingOf(rt, userId, at3, after.remember),
+        due: dueOf(at3.world, at3.state, names3, settings.depth.reads.due),
+        pending: await pendingOf(rt, userId, at3, after.remember, settings.depth.takesKept),
+        answers: await answersSince(rt, userId, at3),
         predictions,
         signals: after.signals ?? [],
         sceneEnded: after.ended,
         sinceChapter: turnsSince(bases, basis, lastChapter?.through ?? null),
         cadence: settings.depth.cadence,
-        ...offscreen ? { offscreen } : {}
+        ...offscreen ? { offscreen } : {},
+        ...o.archive ? { archive: o.archive } : {}
       };
       poll = await twice(() => authorPoll(input), o.signal);
     } catch (error) {
@@ -140696,6 +142298,7 @@ async function afterDepthReply(rt, chatId, userId, basis, after, o = {}) {
     const jobs = [
       ...poll.catchup.map((c) => ({ kind: "catchup", ...c })),
       ...poll.reflect.map((c) => ({ kind: "reflect", ...c })),
+      ...poll.interview.map((c) => ({ kind: "interview", ...c })),
       ...poll.drop.map((d) => ({ kind: "drop", ...d })),
       ...poll.rebase.map((d) => ({ kind: "rebase", ...d })),
       ...poll.settle.map((d) => ({ kind: "settle", ...d })),
@@ -140713,7 +142316,10 @@ async function afterDepthReply(rt, chatId, userId, basis, after, o = {}) {
     }
     try {
       const events3 = [pollEvent({ through: basis.message, considered, jobs, ...poll.wake ? { wake: { at: at3.state.clock + poll.wake.minutes, why: poll.wake.why } } : {} }), ...poll.scores.map((s) => scoreEvent(s))];
-      await land(rt, chatId, userId, basis, AUTHOR_POLL, { events: events3, blobs: {}, ...poll.reasoning ? { reasoning: poll.reasoning } : {} }, layerEntryId(AUTHOR_POLL, chatId, basis.message, basis.swipe, ...occasion2), "author");
+      const thought = [...poll.reads ?? [], ...poll.reasoning ? [poll.reasoning] : []].join(`
+
+`);
+      await land(rt, chatId, userId, basis, AUTHOR_POLL, { events: events3, blobs: {}, ...thought ? { reasoning: thought } : {} }, layerEntryId(AUTHOR_POLL, chatId, basis.message, basis.swipe, ...occasion2), "author");
     } catch (error) {
       fail("keeping the author's poll", error);
     }
@@ -140737,10 +142343,16 @@ async function afterDepthReply(rt, chatId, userId, basis, after, o = {}) {
     o.ready?.();
     if (poll.reflect.length > 0 && !held3(`Reflections (${poll.reflect.map((c) => names3.name(c.who)).join(", ")})`))
       out2.reflected = await ran2(poll.reflect, "reflection", async (who) => await reflectNow(rt, chatId, userId, who, { basis, model: model2, ...signal2 }) !== null);
+    if (poll.interview.length > 0 && !held3(`Interviews (${poll.interview.map((c) => names3.name(c.who)).join(", ")})`)) {
+      await ran2(poll.interview, "interview", async (who) => {
+        const q = poll.interview.find((c) => c.who === who);
+        return q ? (await interviewMind(rt, chatId, userId, who, q.question, false, model2, { by: "author", basis, ...signal2 })).answer !== "" : false;
+      });
+    }
     const wrote = [...new Set([...out2.caughtUp, ...out2.reflected])];
     if (wrote.length > 0 && !held3(`The GM's truth-link of what ${wrote.map((id2) => names3.name(id2)).join(", ")} wrote`)) {
       try {
-        const r = await linkTruths(rt, chatId, userId, basis, { who: wrote, beats: [], key: ["jobs", ...occasion2], model: model2, ...signal2 });
+        const r = await linkTruths(rt, chatId, userId, basis, { who: wrote, beats: [], key: ["jobs", ...occasion2], model: model2, ...signal2, ...o.archive ? { archive: o.archive } : {} });
         said2("the GM's truth-link of the poll's jobs", r.refused);
       } catch (error) {
         fail("the GM's truth-link of the poll's jobs", error);
@@ -140777,27 +142389,39 @@ async function afterDepthReply(rt, chatId, userId, basis, after, o = {}) {
       const depth2 = reflection.depth;
       const order = new Map(bases.map((b, i) => [b.message, i]));
       const closed = lastChapter?.through ? order.get(lastChapter.through) ?? -1 : -1;
-      const stretch = now.story.beats.filter((p) => depth2 === "scene" ? after.scene !== null ? p.beat.scene === after.scene : turnIds.has(p.beat.id) : (order.get(p.from.messageId) ?? -1) > closed).slice(-REFLECT_BEATS_MOST).map((p) => p.beat);
+      const stretch = now.story.beats.filter((p) => depth2 === "scene" ? after.scene !== null ? p.beat.scene === after.scene : turnIds.has(p.beat.id) : (order.get(p.from.messageId) ?? -1) > closed).map((p) => p.beat);
       const involved2 = new Set(stretch.flatMap(beatPeople));
       const becoming = [];
       for (const who of mindedAt(now.state)) {
         if (!involved2.has(who) || !hasAgent(now.world, now.state, who))
           continue;
-        const files = await readMind(rt.blobs, userId, now.state, who, new Set(now.story.replaced.map((r2) => r2.id)));
+        const files = await readMind(rt.blobs, userId, now.state, who, new Set(now.story.replaced.map((r) => r.id)));
         const self = files[MIND_FILE_NAMES.self];
         const mind2 = files[MIND_FILE_NAMES.mind];
         becoming.push({ who, ...self ? { self } : {}, ...mind2 ? { mind: mind2 } : {} });
       }
-      const notebook = await readNotebook(rt, userId, now.state);
-      const beats = (await beatTexts(rt, userId, stretch)).map((beat, i) => ({ ref: `b${i + 1}`, beat }));
-      const amended = stretch.flatMap((b, i) => b.supersedes && b.supersedes.length > 0 ? [`b${i + 1} stands in for an earlier beat (his edit of a reply, or a correction)`] : []);
-      const r = await twice(() => authorReflect({ world: now.world, state: now.state, texts: texts2, pov: povOf(now.world, now.state), model: model2, ...signal2, notebook, depth: depth2, beats, becoming, chapter: notebookOf(now.state).chapters.length, through: basis.message, signals: [...after.signals ?? [], ...amended] }), o.signal);
-      said2("the author's reflection", r.refused);
-      const events3 = [...r.events, ...r.drift.map((d) => driftEvent(d)), ...r.predictions.map((p, i) => predictEvent({ id: predictionId(chatId, basis.message, basis.swipe, ...occasion2, String(i)), text: p.text, about: p.about, from: depth2 }))];
-      if (events3.length > 0) {
-        await land(rt, chatId, userId, basis, "notebook", { events: events3, blobs: r.blobs, ...r.reasoning ? { reasoning: r.reasoning } : {} }, layerEntryId("author.reflect", chatId, basis.message, basis.swipe, ...occasion2), "author");
+      const chapter = notebookOf(now.state).chapters.length;
+      const refs = (await beatTexts(rt, userId, stretch)).map((beat, i) => ({ b: beat.beat, ref: `b${i + 1}`, beat }));
+      let state2 = now.state;
+      await readPaged(refs, settings.depth.rereadBeats, async (page10) => {
+        const notebook = await readNotebook(rt, userId, state2);
+        const beats = page10.items.map(({ ref, beat }) => ({ ref, beat }));
+        const amended = page10.items.flatMap(({ b, ref }) => b.supersedes && b.supersedes.length > 0 ? [`${ref} stands in for an earlier beat (his edit of a reply, or a correction)`] : []);
+        const paged = page10.of > 1 ? { index: page10.index, of: page10.of } : undefined;
+        const tail2 = paged && page10.index > 1 ? [`p${page10.index}`] : [];
+        const r = await twice(() => authorReflect({ world: now.world, state: state2, texts: texts2, pov: povOf(now.world, state2), model: model2, ...signal2, notebook, depth: depth2, beats, becoming, chapter, through: basis.message, signals: [...after.signals ?? [], ...amended], ...paged ? { page: paged } : {}, ...o.archive ? { archive: o.archive } : {} }), o.signal);
+        said2(paged ? `the author's reflection (page ${page10.index} of ${page10.of})` : "the author's reflection", r.refused);
+        const events3 = [...r.events, ...r.drift.map((d) => driftEvent(d)), ...r.predictions.map((p, i) => predictEvent({ id: predictionId(chatId, basis.message, basis.swipe, ...occasion2, ...tail2, String(i)), text: p.text, about: p.about, from: depth2 }))];
+        if (events3.length === 0)
+          return;
+        const thought = [...r.reads ?? [], ...r.reasoning ? [r.reasoning] : []].join(`
+
+`);
+        await land(rt, chatId, userId, basis, "notebook", { events: events3, blobs: r.blobs, ...thought ? { reasoning: thought } : {} }, layerEntryId("author.reflect", chatId, basis.message, basis.swipe, ...occasion2, ...tail2), "author");
         out2.authorReflected = depth2;
-      }
+        if (page10.index < page10.of)
+          state2 = (await rt.ledger.foldAtBasis(chatId, userId, basis))?.state ?? state2;
+      }, o.signal);
     } catch (error) {
       fail("the author's reflection", error);
     }
@@ -140889,6 +142513,22 @@ ${line2.trim()}
 
 // src/backend/depth/scene/narration.ts
 var CHECK_TRIES = 2;
+var CHECK_SPLITS = 2;
+var CHECK_ROOM_FLOOR = 2048;
+var CHECK_ROOM_PER_TOKEN = 2;
+function checkRoom(messages) {
+  const tokens3 = messages.reduce((sum2, m) => sum2 + tokensOf(m.content), 0);
+  return Math.min(DEPTH_ROOM_MOST, CHECK_ROOM_FLOOR + CHECK_ROOM_PER_TOKEN * tokens3);
+}
+function halves(text11) {
+  const breaks = (re) => [...text11.matchAll(re)].map((m) => (m.index ?? 0) + m[0].length).filter((at4) => at4 > 0 && at4 < text11.length && text11.slice(0, at4).trim() !== "" && text11.slice(at4).trim() !== "");
+  const at3 = [breaks(/\n\s*\n/g), breaks(/[.!?\u2026]+["'\u201D\u2019\u00BB)\]]*\s+/g)].find((b) => b.length > 0);
+  if (!at3)
+    return null;
+  const middle2 = text11.length / 2;
+  const cut = at3.reduce((best, b) => Math.abs(b - middle2) < Math.abs(best - middle2) ? b : best);
+  return [text11.slice(0, cut).trim(), text11.slice(cut).trim()];
+}
 var ASK_LINE = /^\s*ASK:\s*(.+?)\s*$/i;
 
 class Stopped extends Error {
@@ -140925,7 +142565,7 @@ function stagingLine(s) {
   const occluded = s.occluded?.trim();
   return [s.where.trim(), s.doing.trim(), occluded ? `what blocks their view or hearing: ${occluded}` : ""].filter((p) => p !== "").join("; ");
 }
-function words11(b, indent = "") {
+function words12(b, indent = "") {
   return b.quotes && b.quotes.trim() !== "" ? `
 ${indent}Exact words: \u201C${b.quotes.trim()}\u201D` : "";
 }
@@ -141083,8 +142723,8 @@ ${text11.trim()}
     const sorted = sortBeats(given.beats, this.input.pov);
     if (!quiet && !sorted.seen.some((s) => s.kind !== "context"))
       return;
-    const index = this.streamed.length;
-    const n = index + 1;
+    const index2 = this.streamed.length;
+    const n = index2 + 1;
     const making = { moment: { ...given, beats: [...given.beats] }, sorted, drafts: [], asked: [], ms: { render: 0, check: 0 }, started: this.now(), ...quiet ? { quiet: true } : {} };
     this.making = making;
     const asks = !quiet && this.input.asks && this.deps.ask !== undefined;
@@ -141093,10 +142733,10 @@ ${text11.trim()}
     if (rendered.kind === "ask") {
       this.reasoning(`The narrator asks, for passage ${n}: ${rendered.questions.join("; ")}`);
       this.deps.sink.progress("The author is deciding what the narrator asked for");
-      const added = await this.deps.ask?.({ questions: rendered.questions, moment: making.moment }) ?? [];
+      const added2 = await this.deps.ask?.({ questions: rendered.questions, moment: making.moment }) ?? [];
       if (this.input.signal.aborted)
         throw new Stopped;
-      const fresh = added.filter((b) => !making.moment.beats.some((x) => x.beat.id === b.beat.id));
+      const fresh = added2.filter((b) => !making.moment.beats.some((x) => x.beat.id === b.beat.id));
       making.moment.beats.push(...fresh);
       making.sorted = sortBeats(making.moment.beats, this.input.pov);
       making.asked.push({ questions: rendered.questions, beats: fresh.map((b) => b.beat.id) });
@@ -141118,13 +142758,13 @@ ${text11.trim()}
       this.reasoning(`Passage ${n} streams with a chip: ${departs}`);
     if (this.input.signal.aborted)
       throw new Stopped;
-    this.deps.sink.content(`${index > 0 ? `
+    this.deps.sink.content(`${index2 > 0 ? `
 
 ` : ""}${draft}`);
     this.streamed.push({
       making,
       outcome: {
-        index,
+        index: index2,
         mark: given.mark,
         beats: making.moment.beats.map((b) => b.beat.id),
         text: draft,
@@ -141144,13 +142784,13 @@ ${text11.trim()}
     const seen = making.sorted.seen.map((s, i) => {
       if (s.kind === "context")
         return `${i + 1}. ${this.povName}'s own, as the player wrote it (already in the player's message):
-${s.b.what.trim()}${words11(s.b)}`;
+${s.b.what.trim()}${words12(s.b)}`;
       if (s.kind === "whole")
         return `${i + 1}. It reached ${this.povName} whole, by ${s.via.channel}:
-${s.b.surface.trim()}${words11(s.b)}`;
+${s.b.surface.trim()}${words12(s.b)}`;
       if (s.kind === "heard")
         return `${i + 1}. It reached ${this.povName} by hearing alone: only what could be heard of it, nothing of what there was to see. What reached them:
-${s.pov}${words11(s.b)}`;
+${s.pov}${words12(s.b)}`;
       return `${i + 1}. It reached ${this.povName} only in part, by ${s.via.channel}. What reached them:
 ${s.pov}`;
     }).join(`
@@ -141200,10 +142840,10 @@ ${q.text}`).join(`
     return { kind: "passage", text: text11 };
   }
   async check(making, draft, n) {
-    const kept4 = making.drafts.at(-1);
+    const kept5 = making.drafts.at(-1);
     const verdict2 = await this.verdict(making, draft, n);
-    if (kept4)
-      kept4.verdict = verdict2;
+    if (kept5)
+      kept5.verdict = verdict2;
     return verdict2;
   }
   async verdict(making, draft, n) {
@@ -141214,30 +142854,26 @@ ${q.text}`).join(`
     this.deps.sink.progress(`The GM is checking passage ${n}`);
     const started = this.now();
     try {
-      let room;
-      for (let attempt = 1;; attempt++) {
-        if (this.input.signal.aborted)
-          throw new Stopped;
-        const r = await this.deps.model("check", this.checkMessages(making, draft), { json: true, ...room !== undefined ? { maxTokens: room } : {}, signal: this.input.signal });
-        this.usage = addUsage(this.usage, r.usage);
-        const read = verdictOf2(readAnswer("check", r).answer);
-        const thought = r.reasoning ? `
-${r.reasoning.trim()}` : "";
-        if (read) {
-          this.reasoning(read.faithful ? `GM's check of passage ${n}: faithful.${thought}` : `GM's check of passage ${n}: not faithful.
-${read.notes}${thought}`);
-          return { ...read, ...r.reasoning ? { reasoning: r.reasoning } : {} };
-        }
-        if (attempt >= CHECK_TRIES) {
-          this.reasoning(`GM's check of passage ${n} couldn't be read; the passage streams unchecked, with a chip.`);
-          return { faithful: null, notes: `The GM's check couldn't be read: ${r.text.trim().slice(0, 400)}`, ...r.reasoning ? { reasoning: r.reasoning } : {} };
-        }
-        const more = cutShort(r.finish) && r.capped === undefined && r.room !== undefined ? roomAgain(r.room) : null;
-        if (more !== null) {
-          room = more;
-          this.reasoning(`GM's check of passage ${n} was cut off at its answer room of ${(r.room ?? 0).toLocaleString("en-US")} tokens; asking again with room for ${more.toLocaleString("en-US")}.`);
-        }
+      const read = await this.checked(making, draft, n);
+      const whole5 = read.length === 1 ? read[0] : undefined;
+      if (whole5 && whole5.part === undefined)
+        return whole5.verdict;
+      const thought = read.map((p) => p.verdict.reasoning?.trim() ?? "").filter((t) => t !== "").join(`
+
+`);
+      const reasoning = thought !== "" ? { reasoning: thought } : {};
+      const labelled = (p) => `In ${p.part?.label ?? "the passage"}: ${p.verdict.notes}`;
+      const unread = read.find((p) => p.verdict.faithful === null);
+      if (unread)
+        return { faithful: null, notes: labelled(unread), ...reasoning };
+      const failed2 = read.filter((p) => p.verdict.faithful === false);
+      if (failed2.length === 0) {
+        this.reasoning(`GM's check of passage ${n}, in ${read.length} parts: faithful.`);
+        return { faithful: true, notes: "", ...reasoning };
       }
+      const departs = failed2.find((p) => p.verdict.departs !== undefined)?.verdict.departs;
+      return { faithful: false, notes: failed2.map(labelled).join(`
+`), ...departs !== undefined ? { departs } : {}, ...reasoning };
     } catch (error) {
       if (this.input.signal.aborted || error instanceof Stopped)
         throw error;
@@ -141248,10 +142884,51 @@ ${read.notes}${thought}`);
       making.ms.check += this.now() - started;
     }
   }
-  checkMessages(making, draft) {
+  async checked(making, text11, n, part) {
+    const of = `passage ${n}${part ? `, ${part.label}` : ""}`;
+    const at3 = part ? { part } : {};
+    for (let attempt = 1;; attempt++) {
+      if (this.input.signal.aborted)
+        throw new Stopped;
+      const messages = this.checkMessages(making, text11, part);
+      const r = await this.deps.model("check", messages, { json: true, effort: "low", maxTokens: this.input.settings.ownCheckRoom ?? checkRoom(messages), signal: this.input.signal });
+      this.usage = addUsage(this.usage, r.usage);
+      const read = verdictOf2(readAnswer("check", r).answer);
+      const thought = r.reasoning ? `
+${r.reasoning.trim()}` : "";
+      const reasoning = r.reasoning ? { reasoning: r.reasoning } : {};
+      if (read) {
+        this.reasoning(read.faithful ? `GM's check of ${of}: faithful.${thought}` : `GM's check of ${of}: not faithful.
+${read.notes}${thought}`);
+        return [{ ...at3, verdict: { ...read, ...reasoning } }];
+      }
+      if (cutShort(r.finish)) {
+        const cut = `GM's check of ${of} was cut off at its answer room of ${(r.room ?? 0).toLocaleString("en-US")} tokens`;
+        const split = (part?.splits ?? 0) < CHECK_SPLITS ? halves(text11) : null;
+        if (!split) {
+          this.reasoning(`${cut}, and it can't be checked in smaller parts; the passage streams unchecked, with a chip.`);
+          return [{ ...at3, verdict: { faithful: null, notes: "The GM's check was cut off at its answer room, and the passage couldn't be checked in smaller parts.", ...reasoning } }];
+        }
+        this.reasoning(`${cut}; checking it in two parts.`);
+        const parts = [];
+        for (const [i, half] of split.entries()) {
+          const label3 = `part ${i + 1} of 2${part ? ` of ${part.label}` : ""}`;
+          parts.push(...await this.checked(making, half, n, { label: label3, splits: (part?.splits ?? 0) + 1 }));
+          if (parts.some((p) => p.verdict.faithful === null))
+            break;
+        }
+        return parts;
+      }
+      if (attempt >= CHECK_TRIES) {
+        this.reasoning(`GM's check of ${of} couldn't be read; the passage streams unchecked, with a chip.`);
+        return [{ ...at3, verdict: { faithful: null, notes: `The GM's check couldn't be read: ${r.text.trim().slice(0, 400)}`, ...reasoning } }];
+      }
+    }
+  }
+  checkMessages(making, draft, part) {
     const pov2 = this.povName;
     const beat = (b, how) => `- [${b.beat.id}] ${b.beat.act} by ${b.beat.actors.map((id2) => `${nameOf16(this.input.state, id2)} [${id2}]`).join(", ") || "no one"} (${decidedBy(b.beat)}). What happened: ${b.what.trim()}
-  What there was to sense: ${b.surface.trim()}${words11(b, "  ")}
+  What there was to sense: ${b.surface.trim()}${words12(b, "  ")}
   ${how}`;
     const beats = [
       ...making.sorted.seen.map((s) => beat(s.b, s.kind === "context" ? `${pov2}'s own, which the player's message already tells: it need not be told again, but nothing may contradict it.` : s.kind === "whole" ? `It reached ${pov2} whole, by ${s.via.channel}.` : s.kind === "heard" ? `It reached ${pov2} by hearing alone: the passage may show only what could be heard of it, never what there was to see. What reached them: ${s.pov}` : `It reached ${pov2} only in part, by ${s.via.channel}. What reached them: ${s.pov}`)),
@@ -141259,7 +142936,8 @@ ${read.notes}${thought}`);
     ];
     const knows2 = this.input.knows?.filter((id2) => id2 !== this.input.pov).map((id2) => nameOf16(this.input.state, id2));
     const data = [
-      section2("The passage", draft),
+      part ? section2("You read one part of the passage", `The passage was too long to check whole: you read ${part.label}, and the other parts, checked on their own, render the rest of this moment. An act or word of these beats that this part doesn't depict is no departure here; judge rule 1 only for what this part depicts, and rules 2 to 4 for all of it.`) : "",
+      section2(part ? `The passage, ${part.label}` : "The passage", draft),
       section2("The beats of its moment", beats.join(`
 `)),
       section2(`Where ${pov2} was`, stagingLine(making.moment.staging)),
@@ -141379,7 +143057,6 @@ async function renarrateMoments(source, pov2, text11) {
 }
 
 // src/backend/depth/scene/realtime.ts
-var WATCH_BEATS = 40;
 var CHANNELS = ["hearing", "sight", "touch"];
 var nonBlank4 = (v4) => typeof v4 === "string" && v4.trim() !== "" ? v4.trim() : null;
 function nameOf17(world, state2, id2) {
@@ -141432,7 +143109,7 @@ function readWatch(answer2, ctx) {
     return null;
   const notes = [];
   const reasoning = nonBlank4(answerWhy(answer2));
-  const base = { others: [], world: [], end: nonBlank4(answer2.end), poll: answer2.poll === "later" ? "later" : "now", ...reasoning !== null ? { reasoning } : {}, notes };
+  const base = { others: [], world: [], end: nonBlank4(answer2.end), poll: answer2.poll === "later" ? "later" : "now", unseen: nonBlank4(answer2.unseen), ...reasoning !== null ? { reasoning } : {}, notes };
   const takeover = nonBlank4(answer2.takeover);
   if (takeover !== null)
     return { ...base, takeover, line: null };
@@ -141612,11 +143289,17 @@ ${text11.trim()}
     say(why3);
     return { kind: "takeover", why: why3, put: `${name}'s real-time line, played by the author in a scene rather than their own agent: ${bind.words}` };
   }
+  if (ctx.onScreen && onScreenOut(ctx.onScreen)) {
+    const words13 = onScreenWords(ctx.onScreen);
+    const why3 = `${words13} So ${name} doesn't answer this line as their own agent: the author plays them in a scene.`;
+    say(why3);
+    return { kind: "takeover", why: why3, put: `${name}'s real-time line, played by the author in a scene rather than their own agent: the on-screen allowance is spent` };
+  }
   sink.progress(renderPrompt(REALTIME_TEXT.lineHears, texts2, { name }));
   const t0 = performance.now();
   const sceneStaging = stagingBefore(at3.story, Number.MAX_SAFE_INTEGER, ctx.scene);
   const sceneBeats = at3.story.beats.filter((p) => p.beat.scene === ctx.scene);
-  const recent = sceneBeats.slice(-WATCH_BEATS);
+  const recent = sceneBeats.slice(-ctx.settings.depth.reads.watchBeats);
   const stored = await textsOf2(ctx.rt, userId, [
     ...[...sceneStaging.values()].flatMap((s) => [s.where, s.doing, ...s.occluded !== undefined ? [s.occluded] : []]),
     ...recent.flatMap((p) => [p.beat.what, p.beat.surface, ...p.beat.quotes !== undefined ? [p.beat.quotes] : []])
@@ -141637,26 +143320,33 @@ ${text11.trim()}
   const answerId = beatId(ctx.turn, "talk", "answer");
   const mind2 = await mindInput(ctx.rt, userId, at3, who, ctx.settings);
   const pcAs = mind2.known?.[pc] ?? "someone you don't know";
-  const heard = {
+  const [pcAt, withAt] = [placeOfEntity(state2, pc), placeOfEntity(state2, who)];
+  const apart = (pcAt !== null || withAt !== null) && !together(world, pcAt, withAt);
+  const lived2 = (how, quotes) => ({
     beat: lineId,
     at: clock,
     when: formatClock(calendarOf(world), clock),
     where: own(world.places, place2)?.name ?? place2,
-    channel: "hearing",
+    channel: how === "seen" ? "sight" : "hearing",
     whole: true,
-    text: `${pcAs} speaks to you.`,
-    quotes: ctx.line
-  };
+    text: how === "seen" ? `${pcAs} speaks to you, face to face: you see him as well as hear him.` : how === "unseen" ? `${pcAs} speaks to you, out of your sight: you hear only his voice.` : `${pcAs} speaks to you.`,
+    quotes
+  });
   const read = { world, state: state2, story: at3.story };
-  const so = await sceneSoFar(ctx.rt.blobs, userId, read, who);
-  const playStop = new AbortController;
+  const so = await sceneSoFar(ctx.rt.blobs, userId, read, who, { limit: ctx.settings.depth.reached });
+  let playStop = new AbortController;
   const onStop = () => playStop.abort(ctx.signal.reason);
   ctx.signal.addEventListener("abort", onStop, { once: true });
-  const playStarted = performance.now();
-  const playing = play(realtimePort(ctx.model), { ...mind2, beat: answerId, scene: so.scene, reached: [...so.reached, heard], recall: sceneRecall(ctx.rt.blobs, userId, read, who), signal: playStop.signal }).then((out2) => ({ out: out2, ms: performance.now() - playStarted }));
-  playing.catch(() => {
-    return;
-  });
+  const startPlay = (heard) => {
+    playStop = new AbortController;
+    const started = performance.now();
+    const p = play(realtimePort(ctx.model), { ...mind2, beat: answerId, scene: so.scene, reached: [...so.reached, heard], recall: sceneRecall(ctx.rt.blobs, userId, read, who), signal: playStop.signal }).then((out2) => ({ out: out2, ms: performance.now() - started }));
+    p.catch(() => {
+      return;
+    });
+    return p;
+  };
+  let playing = startPlay(lived2(apart ? "heard" : "seen", ctx.line));
   const watchStarted = performance.now();
   let watched;
   try {
@@ -141679,6 +143369,20 @@ ${text11.trim()}
     thought(w?.reasoning ?? "");
     say(renderPrompt(REALTIME_TEXT.lineTaken, texts2, { name, why: why3 }));
     return { kind: "takeover", why: why3 };
+  }
+  if (w.unseen !== null && !apart) {
+    playStop.abort(new Error("the author excluded him from view"));
+    const said2 = w.line?.said ?? null;
+    if (said2 === null) {
+      ctx.signal.removeEventListener("abort", onStop);
+      if (ctx.signal.aborted)
+        return STOPPED;
+      const why3 = `${name} can't see him (${w.unseen}), and he says nothing aloud, so the author reads the line in a scene.`;
+      say(renderPrompt(REALTIME_TEXT.lineTaken, texts2, { name, why: why3 }));
+      return { kind: "takeover", why: why3 };
+    }
+    thought(`${name} can't see ${nameOf17(world, state2, pc)} as he speaks: ${w.unseen}`);
+    playing = startPlay(lived2("unseen", said2));
   }
   let played;
   try {
@@ -141738,7 +143442,7 @@ async function exchange(ctx, x) {
     surface: putText(blobs, ctx.line),
     ...line2.said !== null ? { quotes: putText(blobs, line2.said) } : {},
     addressed: [who],
-    exposure: [{ who: pc, channel: lineChannel, reach: "whole" }, { who, ...heard(line2.said !== null), reach: "whole" }, ...exposures(w.others, world, state2)],
+    exposure: [{ who: pc, channel: lineChannel, reach: "whole" }, { who, ...w.unseen !== null ? { channel: "hearing" } : heard(line2.said !== null), reach: "whole" }, ...exposures(w.others, world, state2)],
     by: { turn: ctx.turn, decided: "player" }
   };
   const answerTexts = actBeatTexts(act2, name);
@@ -141753,6 +143457,7 @@ async function exchange(ctx, x) {
     const started = performance.now();
     const out2 = await resolveAttempt(ctx.model, {
       registry: ctx.rt.registry,
+      quoteBounds: ctx.settings.depth.reads,
       world,
       state: state2,
       act: { actor: who, surface: answerTexts.surface, ...answerTexts.quotes !== undefined ? { quotes: answerTexts.quotes } : {}, attempt: act2.attempt },
@@ -141853,8 +143558,7 @@ async function exchange(ctx, x) {
       return;
     const quotes = beat.quotes !== undefined ? blobs[beat.quotes] : undefined;
     const refs = povRefs(ctx.rt, at3, partial, [...presentAt(beat), ...povStaging.map((s) => s.who)]);
-    const deed = beat.deed !== undefined ? blobs[beat.deed] : undefined;
-    const r = await povRender(ctx.model, { beat: { id: beat.id, surface: blobs[beat.surface] ?? "", ...deed !== undefined ? { deed } : {}, ...quotes !== undefined ? { quotes } : {}, actors: beat.actors, exposure: beat.exposure }, staging: povStaging, who: partial, refs, texts: texts2, signal: ctx.signal });
+    const r = await povRender(ctx.model, { beat: { id: beat.id, surface: blobs[beat.surface] ?? "", ...quotes !== undefined ? { quotes } : {}, actors: beat.actors, exposure: beat.exposure }, staging: povStaging, who: partial, refs, texts: texts2, signal: ctx.signal });
     beat.exposure = beat.exposure.map((e) => {
       const pov2 = partial.includes(e.who) ? r.povs[e.who] : undefined;
       return pov2 !== undefined ? { ...e, pov: putText(blobs, pov2) } : e;
@@ -141885,8 +143589,8 @@ async function exchange(ctx, x) {
     if (p.status === "rejected")
       throw p.reason;
   const narrated = settled2.value;
-  const kept4 = !narrated.stopped ? [...first, ...then] : narrated.streamedThrough === null ? [] : narrated.streamedThrough === 0 ? first : [...first, ...then];
-  const ended2 = end !== null && kept4.includes(end);
+  const kept5 = !narrated.stopped ? [...first, ...then] : narrated.streamedThrough === null ? [] : narrated.streamedThrough === 0 ? first : [...first, ...then];
+  const ended2 = end !== null && kept5.includes(end);
   if (ended2)
     x.say(renderPrompt(REALTIME_TEXT.lineEnded, texts2, { name, why: w.end ?? "" }));
   if (!narrated.stopped) {
@@ -141899,8 +143603,8 @@ async function exchange(ctx, x) {
   }
   return {
     kind: "exchange",
-    events: kept4,
-    blobs: kept4.length > 0 ? blobs : {},
+    events: kept5,
+    blobs: kept5.length > 0 ? blobs : {},
     narration: narrated,
     ...w.poll === "later" && !ended2 ? { pollDeferred: true } : {},
     ...ended2 ? { ended: true } : {}
@@ -141911,12 +143615,20 @@ async function exchange(ctx, x) {
 var scenePlugs = { playerBeats, play, sceneSoFar, sceneRecall, actBeatTexts, resolveAttempt, attemptSeed, narration: narrationOf, renarrateMoments, realtimeTurn };
 
 // src/backend/depth/scene/reporting.ts
-function reporting(port, sink, now = Date.now) {
+function chatLinesOf(prompt) {
+  return prompt.flatMap((m) => m.history && m.sourceIndex !== undefined && m.content.trim() !== "" ? [{ index: m.sourceIndex, text: m.content.trim() }] : []);
+}
+function historyOf3(chat, messages) {
+  const held3 = chat.filter((c) => messages.some((m) => m.content.includes(c.text))).map((c) => c.index);
+  return held3.length > 0 ? { first: Math.min(...held3), last: Math.max(...held3), count: held3.length } : { first: 0, last: 0, count: 0 };
+}
+function reporting(port, sink, now = Date.now, chat) {
   return async (role, messages, opts) => {
     const started = now();
+    const history = chat ? { history: historyOf3(chat, messages) } : {};
     const answer2 = await port(role, messages, opts).catch((error) => {
       if (error instanceof ProviderRefusal && error.usage)
-        sink.call({ role, connection: error.call?.connection ?? "", model: error.call?.model ?? "", requestId: null, promptTokens: error.usage.tokensIn, completionTokens: error.usage.tokensOut, ms: Math.max(0, now() - started) });
+        sink.call({ role, connection: error.call?.connection ?? "", model: error.call?.model ?? "", requestId: error.call?.requestId ?? null, promptTokens: error.usage.tokensIn, completionTokens: error.usage.tokensOut, ms: Math.max(0, now() - started), ...history });
       throw error;
     });
     const call = {
@@ -141927,20 +143639,21 @@ function reporting(port, sink, now = Date.now) {
       ...answer2.usage ? { promptTokens: answer2.usage.tokensIn, completionTokens: answer2.usage.tokensOut } : {},
       ms: Math.max(0, now() - started),
       ...answer2.capped ? { capped: answer2.capped } : {},
-      ...answer2.reasoning ? { reasoning: answer2.reasoning } : {}
+      ...answer2.reasoning ? { reasoning: answer2.reasoning } : {},
+      ...history
     };
     sink.call(call);
-    let kept4 = null;
+    let kept5 = null;
     const inner = answer2.misread;
     return {
       ...answer2,
       misread: (fields) => {
         inner?.(fields);
-        if (!kept4) {
-          kept4 = { fields: [], count: 0, raw: answer2.text };
-          sink.misread?.(call, kept4);
+        if (!kept5) {
+          kept5 = { fields: [], count: 0, raw: answer2.text };
+          sink.misread?.(call, kept5);
         }
-        noteMisread(kept4, fields);
+        noteMisread(kept5, fields);
       }
     };
   };
@@ -141958,10 +143671,11 @@ async function notebookAt(blobs, userId, state2) {
     const was = own(authored3, f.path);
     out2.pinned.push({ path: f.path, before: was ? await blobs.get(userId, was) ?? "" : "", after: text11 });
   }
+  const minds2 = await mindEditsAt((hash) => blobs.get(userId, hash), state2);
+  if (minds2.length > 0)
+    out2.minds = minds2;
   return out2;
 }
-var SCENE_BEATS_READ = 60;
-var OTHERS_READ = 24;
 function sceneNow(events3) {
   for (let i = events3.length - 1;i >= 0; i--) {
     const e = events3[i];
@@ -142012,7 +143726,7 @@ async function renarrate(input, plugs) {
   const meter = metered(input.model);
   input.sink.progress("The narrator renders the same beats afresh\u2026");
   const { moments, throughOf } = await plugs.renarrateMoments(source, pov2, (hash) => input.rt.blobs.get(userId, hash));
-  const narration = plugs.narration({ model: meter.port, sink: input.sink, throughOf, ...input.frame ? { frame: input.frame } : {} }, { world: at3.world, state: at3.state, texts: settings.prompts.texts, pov: pov2, knows: knowsFor({ registry: input.rt.registry }, at3, [pov2])[pov2] ?? [], settings: { redrafts: settings.depth.redrafts, thinking: settings.depth.thinking }, ...input.recent ? { before: input.recent } : {}, ...input.direction ? { direction: input.direction } : {}, asks: false, signal: input.signal });
+  const narration = plugs.narration({ model: meter.port, sink: input.sink, throughOf, ...input.frame ? { frame: input.frame } : {} }, { world: at3.world, state: at3.state, texts: settings.prompts.texts, pov: pov2, knows: knowsFor({ registry: input.rt.registry }, at3, [pov2])[pov2] ?? [], settings: { redrafts: settings.depth.redrafts, thinking: settings.depth.thinking, ownCheckRoom: ownRoom(settings.depth, "check") }, ...input.recent ? { before: input.recent } : {}, ...input.direction ? { direction: input.direction } : {}, asks: false, signal: input.signal });
   for (const m of moments)
     narration.add(m);
   const out2 = await narration.drain();
@@ -142028,6 +143742,7 @@ class Turn {
   pov;
   world;
   whole;
+  setupStreamed = false;
   texts;
   meter;
   notebook = { files: {}, pinned: [] };
@@ -142039,6 +143754,8 @@ class Turn {
   signals = [];
   put = [];
   slid = new Set;
+  asked = false;
+  waiting = [];
   drafts;
   settled = [];
   offscreen = [];
@@ -142091,7 +143808,7 @@ class Turn {
       texts: this.texts,
       pov: this.pov,
       knows: knowsFor({ registry: input.rt.registry }, { state: this.book.state, world: this.world }, [this.pov])[this.pov] ?? [],
-      settings: { redrafts: settings.depth.redrafts, thinking: settings.depth.thinking },
+      settings: { redrafts: settings.depth.redrafts, thinking: settings.depth.thinking, ownCheckRoom: ownRoom(settings.depth, "check") },
       ...input.recent ? { before: input.recent } : {},
       ...this.excerpts.length > 0 ? { excerpts: this.excerpts } : {},
       ...this.quotes.length > 0 ? { quotes: this.quotes } : {},
@@ -142141,6 +143858,7 @@ class Turn {
           notebook: notebookText(this.notebook),
           settings: input.settings,
           binds: () => this.binds(),
+          ...input.budget?.onScreen ? { onScreen: input.budget.onScreen } : {},
           narrate: (theirs) => this.narrate({ asks: false, throughOf: (k) => book.prefix.length + theirs(k) })
         });
         if (outcome.kind === "exchange")
@@ -142188,7 +143906,11 @@ class Turn {
     const setup = await this.setup(playerDrafts, this.signals, resolved2, playing && earlier ? { id: playing.scene, place: playing.place, cast: playing.cast, ...earlier } : null, talk && talk.state === "on" ? { with: talk.with } : null, takeover);
     for (const r of setup.reads)
       this.think(r);
-    this.think(setup.reasoning);
+    if (this.setupStreamed)
+      input.sink.reasoning(`
+`);
+    else
+      this.think(setup.reasoning);
     if (setup.note)
       this.think(`The scene: ${setup.note}`);
     if (setup.redone.length > 0)
@@ -142196,7 +143918,10 @@ class Turn {
     for (const r of setup.refused)
       this.say(`The author's setup: ${r}`);
     this.unkept = setup.refused;
-    const cast = await this.formMinds(this.slideOf(setup.cast));
+    await this.bringIn(setup.newcomers, setup.place ?? (setup.continues && playing ? playing.place : null) ?? placeOfEntity(book.state, this.pov));
+    const cast = await this.formMinds([...setup.cast]);
+    if (this.binds())
+      this.asked = true;
     const pcPlace = placeOfEntity(book.state, this.pov);
     book.scene = setup.continues && playing ? playing.scene : sceneId(input.turn);
     book.place = setup.place ?? (setup.continues && playing ? playing.place : null) ?? pcPlace ?? Object.keys(this.world.places)[0] ?? "";
@@ -142241,31 +143966,43 @@ class Turn {
     }
     let mark2 = 0;
     let steps = 0;
+    let stopped = false;
     while (end === null && next.length > 0 && !input.signal.aborted && !this.stepFailed) {
       if (steps >= most) {
         this.say(`The turn reached its bound of ${most} step${most === 1 ? "" : "s"} between beats (Settings \u2192 Depth \u2192 Steps per turn): the player answers here, and the scene goes on next turn.`);
         break;
       }
+      const bind = this.binds();
+      if (bind && this.asked && next.some((who) => this.agents.has(who))) {
+        this.stopAt(bind, next.filter((who) => this.agents.has(who)));
+        stopped = true;
+        break;
+      }
+      this.waiting = bind && !this.asked ? next.filter((who) => this.agents.has(who)) : [];
+      if (this.waiting.length > 0)
+        next = next.filter((who) => !this.agents.has(who));
       mark2 += 1;
       steps += 1;
       await this.walkOns(this.reach(book.place, book.cast.map((c) => c.who)), mark2);
-      this.slide(mark2);
       const step2 = await this.beat(next, mark2, most - steps);
+      this.waiting = [];
       if (step2 === null)
         break;
+      this.slide(step2.slide, mark2);
       next = step2.next;
       end = step2.end;
       if (step2.sceneEnds)
         this.sceneEnds = true;
     }
     let unreached = false;
-    if (!this.reached && !input.signal.aborted && !this.stepFailed) {
+    if (!this.reached && !stopped && !input.signal.aborted && !this.stepFailed) {
       this.say(`Nothing this turn has reached ${this.name(this.pov)} beyond the player's own beats: the author takes one more step for what reaches them.`);
       unreached = true;
       mark2 += 1;
       await this.walkOns(this.reach(book.place, book.cast.map((c) => c.who)), mark2);
-      this.slide(mark2);
-      const step2 = await this.beat(end === null ? next : [], mark2, 0, true);
+      const step2 = await this.beat(end === null ? this.binds() ? next.filter((who) => !this.agents.has(who)) : next : [], mark2, 0, true);
+      if (step2)
+        this.slide(step2.slide, mark2);
       next = step2?.next ?? [];
       end = step2?.end ?? null;
       if (step2?.sceneEnds)
@@ -142289,39 +144026,70 @@ class Turn {
     const b = this.input.budget;
     return (b ? budgetWords(b, costTokens(this.meter.spent().cost)) : null) ?? undefined;
   }
-  slideOf(cast) {
+  ceilingNow() {
     const bind = this.binds();
-    const moving = bind ? cast.filter((c) => c.effort === "agent") : [];
-    if (!bind || moving.length === 0)
-      return [...cast];
-    const names3 = moving.map((c) => this.name(c.who)).join(", ");
-    this.say(`The budget: ${bind.words}, so the author plays ${names3} from here rather than their own agents, as far as it judges the scene should go.`);
-    this.put.push(`${names3} played by the author rather than their own agents: ${bind.words}`);
-    for (const c of moving)
-      this.slid.add(c.who);
-    const why3 = `The budget slid them to the author: ${bind.which === "day" ? "today's" : "this turn's"} ceiling binds.`;
-    return cast.map((c) => c.effort === "agent" ? { ...c, effort: "author", why: c.why ? `${c.why} ${why3}` : why3 } : c);
-  }
-  slide(mark2) {
-    const { book } = this;
-    const cast = this.slideOf(book.cast);
-    if (cast.every((c, i) => c.effort === book.cast[i]?.effort))
+    if (!bind)
       return;
+    this.asked = true;
+    const waiting = this.waiting.length > 0 ? ` Due to act now as their own agents, waiting on your answer: ${this.waiting.map((who) => this.name(who)).join(", ")}.` : "";
+    return `The ceiling binds: ${bind.words}, so the turn has nothing left under it.${waiting}`;
+  }
+  slide(slides, mark2) {
+    const { book } = this;
+    const to = new Map(slides.map((s) => [s.who, s.to]));
+    const moving = book.cast.filter((c) => c.effort === "agent" && to.has(c.who));
+    if (moving.length === 0)
+      return;
+    const bind = this.binds();
+    const ceiling = bind ? `${bind.which === "day" ? "today's" : "this turn's"} ceiling binds` : "a ceiling bound";
+    const words13 = moving.map((c) => `${this.name(c.who)} ${to.get(c.who) === "world" ? "handled as world" : "played by the author"}`).join(", ");
+    this.say(`The budget: ${bind?.words ?? ceiling}, so the author slides ${words13} from here rather than their own agents.`);
+    this.put.push(`${words13} rather than their own agents, the author's call: ${bind?.words ?? ceiling}`);
+    for (const c of moving)
+      if (to.get(c.who) === "author")
+        this.slid.add(c.who);
+    const why3 = `The author slid them down the ladder: ${ceiling}.`;
+    const cast = book.cast.map((c) => {
+      const rung = c.effort === "agent" ? to.get(c.who) : undefined;
+      return rung ? { ...c, effort: rung, why: c.why ? `${c.why} ${why3}` : why3 } : c;
+    });
     book.cast = cast;
     this.agents = new Set(cast.filter((c) => c.effort === "agent").map((c) => c.who));
     book.apply([sceneEvent({ scene: book.scene, place: book.place, at: book.minute, cast })], mark2);
   }
-  async formMind(who) {
+  stopAt(bind, due) {
+    const names3 = due.map((who) => this.name(who)).join(", ");
+    this.say(`The budget: ${bind.words}, and the author's answer would still have ${names3} play as their own agents past it: the scene ends at this beat, the player answers here, and the scene goes on next turn.`);
+    this.put.push(`the scene ended at the next beat: ${names3} would still have played as their own agents past the ceiling (${bind.words})`);
+  }
+  async formMind(who, mark2 = 0) {
     const { input, book } = this;
     const entity2 = own(book.state.entities, who) ?? own(this.world.entities, who);
     const linked = own(this.world.entities, who)?.characterId;
     const formed = await formCore({ who, name: this.name(who), player: this.name(this.pov), at: book.state.clock, fields: entity2?.fields ?? {}, ...typeof linked === "string" && linked !== "" ? { characterId: linked } : {}, ...input.rt.host ? { host: input.rt.host } : {}, chatId: input.chatId, userId: input.userId, texts: this.texts });
     if (!formed)
       return false;
-    book.apply(formed.events, 0);
+    book.apply(formed.events, mark2);
     Object.assign(book.blobs, formed.blobs);
     this.think(`${this.name(who)} has a mind now, its core formed from ${formed.source === "card" ? "their card" : "what the world knows of them (Minds \u2192 Core to review)"}: they may play as their own agent from this scene on.`);
     return true;
+  }
+  async bringIn(newcomers, place2, mark2 = 0) {
+    const { input, book } = this;
+    const kind = kindIs(input.rt.registry, this.world, "person", "person") ? "person" : Object.keys(this.world.kinds).find((k) => kindIs(input.rt.registry, this.world, k, "person")) ?? "person";
+    for (const n of newcomers) {
+      const spawned = resolveEffect(input.rt.registry, book.working, { type: "spawn", args: { id: n.id, kind, name: n.name, tier: spawnTierOf(this.world), ...place2 ? { place: place2 } : {}, fields: { spawned: "depth", ...n.who !== "" ? { description: n.who } : {} } } }, { bindings: {}, rng: createRng(hashParts(input.seed, "newcomer", n.id)), literal: true });
+      const kept5 = Array.isArray(spawned) ? book.apply(spawned, mark2) : [];
+      if (!hasOwn(book.state.entities, n.id)) {
+        const why3 = `${n.name} couldn't be brought into the world${Array.isArray(spawned) ? "" : ` (${spawned.reason})`}, so no one plays them as a person of the world`;
+        this.say(`The author: ${why3}.`);
+        this.unkept = [...this.unkept, why3];
+        continue;
+      }
+      this.think(`${n.name} comes into the world${kept5.length > 0 && n.who !== "" ? `: ${n.who}` : ""}.`);
+      if (n.mind && !await this.formMind(n.id, mark2))
+        this.say(`The author gave ${n.name} a mind, but there was nothing to form it from: you play them.`);
+    }
   }
   async formHere(here) {
     const { input, book } = this;
@@ -142399,12 +144167,13 @@ class Turn {
       const due = dueDrafts(this.drafts, reach2, now, (a, b) => together(this.world, a, b))[0];
       if (!due)
         return;
-      const draft = due.draft.draft;
+      const draft = await draftWithTexts(book.reader, input.userId, due.draft.draft);
       const what = draft.summary || draft.episode.why || "something off screen";
       input.sink.progress("The author reads what this scene reaches of something off screen\u2026");
       const before = this.meter.spent();
       const read = await readDraft({
         registry: input.rt.registry,
+        pinsMost: input.settings.depth.reads.settleBeats,
         world: this.world,
         state: book.state,
         userId: input.userId,
@@ -142450,29 +144219,30 @@ class Turn {
   async gmReads(text11, scene2) {
     const { input, book } = this;
     input.sink.progress("The GM is reading your turn\u2026");
-    const ask4 = () => this.plugs.playerBeats(this.model, { registry: input.rt.registry, world: this.world, state: book.state, pov: this.pov, input: text11, ...scene2 ? { scene: scene2 } : {}, resolutions: input.plan?.resolutions ?? [], ...input.plan ? { minutes: input.plan.elapsedMinutes } : {}, texts: this.texts, signal: input.signal });
+    const ask5 = () => this.plugs.playerBeats(this.model, { registry: input.rt.registry, world: this.world, state: book.state, pov: this.pov, input: text11, ...scene2 ? { scene: scene2 } : {}, resolutions: input.plan?.resolutions ?? [], ...input.plan ? { minutes: input.plan.elapsedMinutes } : {}, texts: this.texts, quoteBounds: input.settings.depth.reads, signal: input.signal });
     let out2;
     try {
-      out2 = await ask4();
+      out2 = await ask5();
     } catch (error) {
       if (!(error instanceof DepthAnswerError) || input.signal.aborted)
         throw error;
       this.say("The GM's reading of your turn didn't come back in a form that could be read; asking again.");
-      out2 = await ask4();
+      out2 = await ask5();
     }
     this.think(out2.reasoning);
     for (const r of out2.refused)
       this.say(`The GM's reading of your turn: ${r}.`);
     return out2;
   }
-  async playerAttempt(b, attempt, ref, words12, scene2) {
+  async playerAttempt(b, attempt, ref, words13, scene2) {
     const { input, book } = this;
     input.sink.progress("The GM resolves what you attempt\u2026");
     const r = await this.plugs.resolveAttempt(this.model, {
       registry: input.rt.registry,
+      quoteBounds: input.settings.depth.reads,
       world: this.world,
       state: book.state,
-      act: { actor: this.pov, surface: b.surface, ...b.quotes ? { quotes: b.quotes } : {}, attempt, input: words12 },
+      act: { actor: this.pov, surface: b.surface, ...b.quotes ? { quotes: b.quotes } : {}, attempt, input: words13 },
       seed: this.plugs.attemptSeed(input.seed, ref),
       runSeed: input.runSeed,
       scene: scene2,
@@ -142507,7 +144277,7 @@ class Turn {
       else if (rank(id2) < 3)
         far.push(id2);
     }
-    const others = far.sort((a, b) => rank(a) - rank(b)).slice(0, OTHERS_READ).map((id2) => {
+    const others = far.sort((a, b) => rank(a) - rank(b)).slice(0, this.input.settings.depth.reads.others).map((id2) => {
       const p = placeOfEntity(state2, id2);
       return { who: id2, mind: minded2.has(id2), where: (p ? own(this.world.places, p)?.name : undefined) ?? "somewhere else" };
     });
@@ -142517,12 +144287,22 @@ class Turn {
       if (p.mind && p.who !== this.pov)
         minds2.push(await this.played(p.who, replaced2, ["core", "now"]));
     const budget = this.budgetNow();
-    const ask4 = () => authorSetup({
+    const model2 = this.whole ? (role, messages, opts) => this.model(role, messages, {
+      ...opts,
+      onReasoning: (text11) => {
+        if (!this.setupStreamed)
+          input.sink.reasoning(`
+`);
+        this.setupStreamed = true;
+        input.sink.reasoning(text11);
+      }
+    }) : this.model;
+    const ask5 = () => authorSetup({
       world: this.world,
       state: state2,
       texts: this.texts,
       pov: this.pov,
-      model: this.model,
+      model: model2,
       signal: input.signal,
       notebook: this.notebook,
       input: input.input?.text ?? null,
@@ -142535,18 +144315,20 @@ class Turn {
       ...takeover ? { takeover } : {},
       talk,
       realtime: input.settings.depth.realtime,
+      reads: input.settings.depth.reads,
       minds: minds2,
       ...input.archive ? { archive: input.archive } : {},
       ...this.offscreen.length > 0 ? { offscreen: this.offscreen } : {},
-      ...budget ? { budget } : {}
+      ...budget ? { budget } : {},
+      ...input.budget?.onScreen ? { onScreen: input.budget.onScreen } : {}
     });
     try {
-      return await ask4();
+      return await ask5();
     } catch (error) {
       if (!(error instanceof DepthAnswerError) || input.signal.aborted)
         throw error;
       this.say("The author's setup didn't come back in a form that could be read; asking again.");
-      return ask4();
+      return ask5();
     }
   }
   async played(who, replaced2, kinds) {
@@ -142574,7 +144356,7 @@ class Turn {
       this.book.staging.set(s.who, s);
   }
   async sceneBeats(scene2) {
-    const placed2 = this.input.at.story.beats.filter((p) => p.beat.scene === scene2).slice(-SCENE_BEATS_READ);
+    const placed2 = this.input.at.story.beats.filter((p) => p.beat.scene === scene2).slice(-this.input.settings.depth.reads.sceneBeats);
     const out2 = [];
     for (const [i, p] of placed2.entries()) {
       const what = await this.book.reader.get(this.input.userId, p.beat.what);
@@ -142588,8 +144370,9 @@ class Turn {
   }
   async sceneSoFar() {
     const earlier = await this.sceneBeats(this.book.scene);
-    const now = this.book.beats.slice(-SCENE_BEATS_READ).map((b, i) => ({ ref: `t${i + 1}`, beat: b }));
-    return { id: this.book.scene, place: this.book.place, cast: this.book.cast, staging: [...this.book.staging.values()], beats: [...earlier, ...now].slice(-SCENE_BEATS_READ) };
+    const most = this.input.settings.depth.reads.sceneBeats;
+    const now = this.book.beats.slice(-most).map((b, i) => ({ ref: `t${i + 1}`, beat: b }));
+    return { id: this.book.scene, place: this.book.place, cast: this.book.cast, staging: [...this.book.staging.values()], beats: [...earlier, ...now].slice(-most) };
   }
   realtime(setup) {
     const r = setup.realtime;
@@ -142603,8 +144386,9 @@ class Turn {
       this.book.apply([talkWritten({ with: talk.with, state: "off", by: "author", why: r.end }, { ...say, name: this.name(talk.with) })], 0);
       return null;
     }
-    if (!this.agents.has(r.with) || !hasAgent(this.world, this.book.state, r.with)) {
-      const why3 = `real-time dialogue with ${this.name(r.with)} needs them playing as their own agent${this.slid.has(r.with) ? ", and the budget slid them to the author" : ""}; it wasn't entered`;
+    const bound = this.binds() !== null;
+    if (bound || !this.agents.has(r.with) || !hasAgent(this.world, this.book.state, r.with)) {
+      const why3 = `real-time dialogue with ${this.name(r.with)} needs them playing as their own agent${bound ? ", past a ceiling that binds" : ""}; it wasn't entered`;
       this.say(`The author's setup: ${why3}`);
       this.unkept = [...this.unkept, why3];
       return null;
@@ -142629,7 +144413,7 @@ class Turn {
     const id2 = book.nextId();
     try {
       const mind2 = await mindInput({ registry: input.rt.registry, blobs: book.reader }, input.userId, { state: book.state, world: this.world, story: input.at.story }, who, input.settings);
-      const so = await this.plugs.sceneSoFar(book.reader, input.userId, read, who);
+      const so = await this.plugs.sceneSoFar(book.reader, input.userId, read, who, { limit: input.settings.depth.reached });
       const out2 = await this.plugs.play(this.model, { ...mind2, beat: id2, scene: so.scene, reached: so.reached, recall: this.plugs.sceneRecall(book.reader, input.userId, read, who), signal: input.signal });
       return { who, id: id2, out: out2 };
     } catch (error) {
@@ -142669,6 +144453,7 @@ class Turn {
       input.sink.progress(`The GM resolves what ${this.name(p.who)} attempts\u2026`);
       const r = await this.plugs.resolveAttempt(this.model, {
         registry: input.rt.registry,
+        quoteBounds: input.settings.depth.reads,
         world: this.world,
         state: book.state,
         act: { actor: p.who, surface: t.surface, ...t.quotes ? { quotes: t.quotes } : {}, attempt: act2.attempt },
@@ -142691,15 +144476,17 @@ class Turn {
     input.sink.progress("The author reads the moment\u2026");
     const step2 = await this.step(decided3.map((d) => d.draft), left, handed, unreached);
     if (step2 === null) {
-      const kept4 = [];
+      const kept5 = [];
       for (const d of decided3) {
         const b = await book.write(d.draft, d.draft.decided, mark2, { id: d.id, model: this.model, texts: this.texts, signal: input.signal });
         if (b)
-          kept4.push(b);
+          kept5.push(b);
       }
-      await this.moment(kept4, mark2);
+      await this.moment(kept5, mark2);
       return null;
     }
+    for (const r of step2.reads ?? [])
+      this.think(r);
     this.think(step2.reasoning);
     if (step2.redone.length > 0)
       this.say(`The author's step couldn't all be kept: ${step2.redone.join("; ")}. Told why, it took the step again.`);
@@ -142713,6 +144500,7 @@ class Turn {
       if (b)
         moment.push(b);
     }
+    await this.bringIn(step2.newcomers, book.place, mark2);
     this.placed(step2.staging, mark2);
     book.stage(step2.staging, mark2, moment.at(-1)?.beat.id);
     for (const d of step2.beats) {
@@ -142732,10 +144520,11 @@ class Turn {
       if (c.effort === "author")
         played.push(await this.played(c.who, replaced2, ["core", "self", "now", "mind"]));
     const budget = this.budgetNow();
-    const ask4 = () => authorStep({ world: this.world, state: this.book.state, texts: this.texts, pov: this.pov, model: this.model, signal: input.signal, notebook: this.notebook, scene: scene2, decided: decided3, played, left, ...this.unkept.length > 0 ? { refusedBefore: this.unkept } : {}, ...budget ? { budget } : {}, ...this.slid.size > 0 ? { slid: [...this.slid] } : {}, ...handed.length > 0 ? { handed } : {}, ...unreached ? { unreached: true } : {} });
+    const ceiling = this.ceilingNow();
+    const ask5 = () => authorStep({ world: this.world, state: this.book.state, texts: this.texts, pov: this.pov, model: this.model, signal: input.signal, notebook: this.notebook, scene: scene2, decided: decided3, played, left, ...this.unkept.length > 0 ? { refusedBefore: this.unkept } : {}, ...budget ? { budget } : {}, ...ceiling ? { ceiling } : {}, ...this.slid.size > 0 ? { slid: [...this.slid] } : {}, ...handed.length > 0 ? { handed } : {}, ...unreached ? { unreached: true } : {}, ...input.archive ? { archive: input.archive } : {} });
     for (let attempt = 0;attempt < 2; attempt++) {
       try {
-        return await ask4();
+        return await ask5();
       } catch (error) {
         if (input.signal.aborted)
           return null;
@@ -142892,7 +144681,8 @@ class DepthTurns {
     const tools = Array.isArray(ctx.body.tools) ? ctx.body.tools.length : 0;
     if (tools > 0)
       ctx.sink.progress(`This request offered ${tools === 1 ? "a tool" : `${tools} tools`}; a depth scene doesn't use them: its author, characters and narrator call only their own.`);
-    const budget = await budgetFor(daySpendOf(this.rt.host), userId, settings.depth.budget);
+    const onScreen2 = onScreenAllowance(settings.depth.budget, spendsOn(read.at.events).map((s) => s.data), read.at.state.clock);
+    const budget = await budgetFor(daySpendOf(this.rt.host), userId, settings.depth.budget, onScreen2);
     const plan2 = bridge.planFor(turn.seed);
     const result = await runDepthTurn({
       chatId,
@@ -142910,7 +144700,7 @@ class DepthTurns {
       recent: "",
       frame: ctx.frame,
       settings,
-      model: this.port(userId, ctx.sink, samplingOf(ctx.body)),
+      model: this.port(userId, ctx.sink, narratorSampling(ctx.body, narratorOverrides(settings.depth)), chatLinesOf(ctx.prompt ?? [])),
       sink: ctx.sink,
       signal: ctx.signal,
       rt: { registry: this.rt.registry, blobs: this.rt.blobs, host: this.rt.host },
@@ -142936,10 +144726,10 @@ class DepthTurns {
       if (!answered2)
         return;
       const chain = core.chain(observed);
-      const index = chain.findIndex((m) => m.id === answered2.id);
-      const basis = basisAt(chain, core.journal.tombstones, index);
-      const message = chain[index];
-      const at3 = basis ? foldAtBasisOf(core, observed, basis, [STORY_TALK, STORY_SCENE, ...DRAFT_TYPES]) : null;
+      const index2 = chain.findIndex((m) => m.id === answered2.id);
+      const basis = basisAt(chain, core.journal.tombstones, index2);
+      const message = chain[index2];
+      const at3 = basis ? foldAtBasisOf(core, observed, basis, [STORY_TALK, STORY_SCENE, ...DRAFT_TYPES, ...SPEND_TYPES]) : null;
       if (!basis || !message || !at3)
         return;
       let source;
@@ -142954,7 +144744,7 @@ class DepthTurns {
         at: { basis, state: at3.state, world: at3.world, story: at3.story, events: at3.events },
         input: message.isUser ? { messageId: message.id, text: message.swipes[message.swipeId] ?? "" } : null,
         ...source ? { source } : {},
-        signals: swipeSignals(kind, chain.find((m) => m.id === reply), chain.slice(0, index).findLast((m) => !m.isUser), direction)
+        signals: swipeSignals(kind, chain.find((m) => m.id === reply), chain.slice(0, index2).findLast((m) => !m.isUser), direction)
       };
     });
     return out2;
@@ -142977,7 +144767,7 @@ class DepthTurns {
       }
     };
   }
-  port(userId, sink, narrator) {
+  port(userId, sink, narrator, chat) {
     const base = depthPort(this.rt.host, (u) => this.rt.settings.get(u), userId, { lane: "foreground" });
     const guarded = async (role, messages, opts) => {
       const route = depthCall(await this.rt.settings.get(userId), role);
@@ -142985,9 +144775,11 @@ class DepthTurns {
         const label3 = DEPTH_ROLE_WORDS[role].label;
         throw new LoopbackRefused("validation", route.connectionId === null ? `Your default connection is the loopback, so LumiRPEngine has no real model to send the ${label3} call to: pick one in Settings \u2192 Depth \u2192 ${label3} (or set the helper model's connection in Settings \u2192 Model use).` : `Settings \u2192 Depth \u2192 ${label3} names the loopback connection, so its call would come straight back to LumiRPEngine: pick a real model there.`);
       }
-      return base(role, messages, role === "narrator" && Object.keys(narrator).length > 0 ? { ...opts, params: { ...narrator, ...opts?.params } } : opts);
+      if (role !== "narrator")
+        return base(role, messages, opts);
+      return base(role, messages, { ...opts, ...Object.keys(narrator.params).length > 0 ? { params: { ...narrator.params, ...opts?.params } } : {}, ...opts?.maxTokens === undefined && narrator.maxTokens !== null ? { maxTokens: narrator.maxTokens } : {} });
     };
-    return reporting(guarded, sink);
+    return reporting(guarded, sink, Date.now, chat);
   }
 }
 
@@ -143030,13 +144822,13 @@ async function povsOf(rt, userId, at3, old, beat, exposure, blobs, o) {
     staging.push({ who: s.who, where: await rt.blobs.get(userId, s.where) ?? "", doing: await rt.blobs.get(userId, s.doing) ?? "", ...occluded ? { occluded } : {} });
   }
   const refs = povRefs({ registry: rt.registry }, at3, need2, [...presentAt({ ...beat, exposure }), ...staging.map((s) => s.who)]);
-  const out2 = await povRender(o.model, { beat: { id: beat.id, surface: beat.surface, ...beat.deed ? { deed: beat.deed } : {}, ...beat.quotes ? { quotes: beat.quotes } : {}, actors: beat.actors, exposure }, staging, who: need2, refs, texts: o.texts, ...o.signal ? { signal: o.signal } : {} });
+  const out2 = await povRender(o.model, { beat: { id: beat.id, surface: beat.surface, ...beat.quotes ? { quotes: beat.quotes } : {}, actors: beat.actors, exposure }, staging, who: need2, refs, texts: o.texts, ...o.signal ? { signal: o.signal } : {} });
   for (const x of exposure) {
     const pov2 = out2.povs[x.who];
     if (x.pov === undefined && need2.includes(x.who) && pov2 !== undefined)
       x.pov = putText(blobs, pov2);
   }
-  return Object.entries(out2.fellBack).map(([who, names3]) => fellBackLine(who, `the amended beat ${beat.id}`, names3));
+  return Object.entries(out2.pending).map(([who, names3]) => fellBackLine(who, `the amended beat ${beat.id}`, names3));
 }
 async function edit(rt, chatId, userId, messageId, text11, o) {
   const out2 = { said: "", cosmetic: null, amended: [], struck: [], caughtUp: [], refused: [], failed: [] };
@@ -143067,8 +144859,8 @@ async function edit(rt, chatId, userId, messageId, text11, o) {
       return d && d.message === messageId ? [d] : [];
     });
     const last = edits[edits.length - 1];
-    const kept4 = shown5 ? await rt.blobs.get(userId, shown5.text) : null;
-    const before = kept4 ?? (last ? await rt.blobs.get(userId, last.text) ?? "" : await passagesText(rt, userId, at3.events, messageId));
+    const kept5 = shown5 ? await rt.blobs.get(userId, shown5.text) : null;
+    const before = kept5 ?? (last ? await rt.blobs.get(userId, last.text) ?? "" : await passagesText(rt, userId, at3.events, messageId));
     if (before.replace(/\s+/g, " ").trim() === text11.replace(/\s+/g, " ").trim())
       return { ...out2, said: his ? "Your message reads as it did: nothing to amend." : "The reply reads as it did: nothing to amend." };
     const model2 = o.model ?? portFor(rt, userId);
@@ -143080,7 +144872,8 @@ async function edit(rt, chatId, userId, messageId, text11, o) {
     const notebook = await readNotebook(rt, userId, at3.state);
     let read;
     try {
-      read = await twice(() => authorEdit({ world: at3.world, state: at3.state, texts: texts2, pov: pov2, model: model2, ...signal2, notebook, own: his, before: before === "" ? his ? UNKEPT_OWN : UNKEPT : before, after: text11, beats }), o.signal);
+      const livedAny = mindedAt(at3.state).filter((who) => hasAgent(at3.world, at3.state, who) && placed2.some((p) => hasOwn(mindV2At(at3.state, who).lived, p.beat.id)));
+      read = await twice(() => authorEdit({ world: at3.world, state: at3.state, texts: texts2, pov: pov2, model: model2, ...signal2, notebook, own: his, before: before === "" ? his ? UNKEPT_OWN : UNKEPT : before, after: text11, beats, lived: livedAny }), o.signal);
     } catch (error) {
       fail("the author's reading", error);
       return { ...out2, said: "The author's reading of the edit couldn't be read: nothing was amended." };
@@ -143127,10 +144920,114 @@ async function edit(rt, chatId, userId, messageId, text11, o) {
       return { ...out2, said: `The author read your edit as cosmetic: no beat changed.${read.why !== "" ? ` (${read.why})` : ""}` };
     const gone = new Set([...replaced2, ...out2.struck]);
     const old = placed2.filter((p) => gone.has(p.beat.id)).map((p) => p.beat);
-    const lived2 = mindedAt(at3.state).filter((who) => hasAgent(at3.world, at3.state, who) && [...gone].some((b) => hasOwn(mindV2At(at3.state, who).lived, b)));
-    const caught = await Promise.all(lived2.map(async (who) => {
+    const livedGone = mindedAt(at3.state).filter((who) => hasAgent(at3.world, at3.state, who) && [...gone].some((b) => hasOwn(mindV2At(at3.state, who).lived, b)));
+    const lived2 = read.catchup === null ? livedGone : read.catchup.filter((who) => livedGone.includes(who));
+    const catchOne = async (who) => {
       try {
         const r = await catchUpNow(rt, chatId, userId, who, { model: model2, ...signal2, gone: old });
+        return r.lived > 0 || r.rewritten > 0 ? [who] : [];
+      } catch (error) {
+        fail(`${own(at3.state.entities, who)?.name ?? who}'s catch-up`, error);
+        return [];
+      }
+    };
+    const caught = [];
+    if (read.catchup === null)
+      caught.push(...await Promise.all(lived2.map(catchOne)));
+    else
+      for (const who of lived2)
+        caught.push(await catchOne(who));
+    out2.caughtUp = caught.flat();
+    const head = await headBasis(rt, chatId, userId);
+    if (head) {
+      try {
+        const r = await linkTruths(rt, chatId, userId, head, { who: out2.caughtUp, beats: made, key: ["edit", entry2], model: model2, ...signal2, ...o.archive ? { archive: o.archive } : {} });
+        out2.refused.push(...r.refused.map((line2) => `the GM's truth-link: ${line2}`));
+      } catch (error) {
+        fail("the GM's truth-link", error);
+      }
+    }
+    return { ...out2, said: `The author amended ${out2.amended.length} beat${out2.amended.length === 1 ? "" : "s"} and struck ${out2.struck.length} from your edit${read.why !== "" ? `: ${read.why}` : "."}` };
+  } catch (error) {
+    fail("reading the edit", error);
+    return { ...out2, said: "The edit couldn't be read: nothing was amended." };
+  }
+}
+function editUndone(rt, chatId, userId, messageId, undone, o = {}) {
+  const key = `${chatId}\x00${messageId}`;
+  const next = (editing.get(key) ?? Promise.resolve()).then(() => undo(rt, chatId, userId, messageId, undone, o));
+  editing.set(key, next);
+  next.then(() => {
+    if (editing.get(key) === next)
+      editing.delete(key);
+  });
+  return next;
+}
+async function undo(rt, chatId, userId, messageId, undone, o) {
+  const out2 = { said: "", cosmetic: null, amended: [], struck: [], caughtUp: [], refused: [], failed: [] };
+  const fail = (what, error) => {
+    const why3 = error instanceof Error ? error.message : String(error);
+    out2.failed.push(`${what}: ${why3}`);
+    rt.host.log("warn", `[LumiRPEngine] chat ${chatId}, undoing the player's edit: ${what} didn't go through: ${why3}`, userId);
+  };
+  try {
+    const basis = await rt.ledger.basisFor(chatId, userId, messageId);
+    const at3 = basis ? await rt.ledger.foldAtBasis(chatId, userId, basis, [AUTHOR_EDIT, STORY_BEAT]) : null;
+    if (!basis || !at3)
+      return { ...out2, said: "The edited message isn't on the chat's chain: nothing to undo." };
+    const last = at3.events.flatMap((e) => {
+      const d = authorData(e.event, AUTHOR_EDIT);
+      return d && d.message === messageId ? [d] : [];
+    }).at(-1);
+    const same3 = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
+    if (!last || last.cosmetic || !same3(last.amended, undone.amended) || !same3(last.struck, undone.struck) || last.amended.length + last.struck.length === 0)
+      return { ...out2, said: "That edit is no longer the last one the author read of this message: nothing was undone." };
+    const byId = new Map;
+    for (const e of at3.events) {
+      const b = e.event.type === STORY_BEAT && "data" in e.event ? beatOf(e.event.data) : null;
+      if (b)
+        byId.set(b.id, b);
+    }
+    const live = new Set(at3.story.beats.map((p) => p.beat.id));
+    const wrote = last.amended.flatMap((id2) => live.has(id2) ? byId.get(id2) ?? [] : []);
+    if (wrote.length !== last.amended.length)
+      return { ...out2, said: "What the edit wrote has since been replaced: nothing was undone." };
+    const entry2 = layerEntryId("edit", chatId, basis.message, basis.swipe, "undo", blobHash(JSON.stringify([last.amended, last.struck])));
+    const pov2 = povOf(at3.world, at3.state);
+    const minded2 = new Set(mindedAt(at3.state));
+    const again = (old, supersedes) => ({ ...old, id: beatId(entry2, old.id), exposure: old.exposure.map((x) => x.who !== pov2 && minded2.has(x.who) ? { ...x, pending: true } : { ...x }), supersedes });
+    const restored = [];
+    for (const w of wrote)
+      for (const id2 of w.supersedes ?? []) {
+        const old = byId.get(id2);
+        if (old && !restored.some((r) => r.id === beatId(entry2, old.id)))
+          restored.push(again(old, wrote.filter((x) => x.supersedes?.includes(id2)).map((x) => x.id)));
+      }
+    for (const id2 of last.struck) {
+      const old = byId.get(id2);
+      if (old)
+        restored.push(again(old, []));
+    }
+    if (restored.length === 0)
+      return { ...out2, said: "The beats the edit replaced couldn't be read: nothing was undone." };
+    out2.amended = restored.map((b) => b.id);
+    out2.cosmetic = false;
+    const blobs = {};
+    const events3 = [...restored.map(beatEvent), editEvent({ message: messageId, text: last.text, cosmetic: false, why: "You undid the author's amendment of this edit: the beats it replaced and struck stand again.", amended: out2.amended, struck: [] })];
+    try {
+      await land(rt, chatId, userId, basis, "story.beat", { events: events3, blobs }, entry2, "author", { wait: true });
+    } catch (error) {
+      fail("keeping the undo", error);
+      return { ...out2, said: "The undo couldn't be kept: the amendment stands." };
+    }
+    const model2 = o.model ?? portFor(rt, userId);
+    const signal2 = o.signal ? { signal: o.signal } : {};
+    const gone = new Set(last.amended);
+    const reached = new Set(restored.flatMap((b) => b.exposure.filter((x) => x.pending === true).map((x) => x.who)));
+    const due = mindedAt(at3.state).filter((who) => hasAgent(at3.world, at3.state, who) && (reached.has(who) || [...gone].some((b) => hasOwn(mindV2At(at3.state, who).lived, b))));
+    const caught = await Promise.all(due.map(async (who) => {
+      try {
+        const r = await catchUpNow(rt, chatId, userId, who, { model: model2, ...signal2, gone: wrote });
         return r.lived > 0 || r.rewritten > 0 ? [who] : [];
       } catch (error) {
         fail(`${own(at3.state.entities, who)?.name ?? who}'s catch-up`, error);
@@ -143141,16 +145038,16 @@ async function edit(rt, chatId, userId, messageId, text11, o) {
     const head = await headBasis(rt, chatId, userId);
     if (head) {
       try {
-        const r = await linkTruths(rt, chatId, userId, head, { who: out2.caughtUp, beats: made, key: ["edit", entry2], model: model2, ...signal2 });
+        const r = await linkTruths(rt, chatId, userId, head, { who: out2.caughtUp, beats: restored, key: ["edit", entry2], model: model2, ...signal2, ...o.archive ? { archive: o.archive } : {} });
         out2.refused.push(...r.refused.map((line2) => `the GM's truth-link: ${line2}`));
       } catch (error) {
         fail("the GM's truth-link", error);
       }
     }
-    return { ...out2, said: `The author amended ${out2.amended.length} beat${out2.amended.length === 1 ? "" : "s"} and struck ${out2.struck.length} from your edit${read.why !== "" ? `: ${read.why}` : "."}` };
+    return { ...out2, said: `Undone: ${restored.length} beat${restored.length === 1 ? "" : "s"} the edit replaced or struck stand${restored.length === 1 ? "s" : ""} again${out2.caughtUp.length > 0 ? `, and ${out2.caughtUp.length} caught up` : ""}.` };
   } catch (error) {
-    fail("reading the edit", error);
-    return { ...out2, said: "The edit couldn't be read: nothing was amended." };
+    fail("undoing the edit", error);
+    return { ...out2, said: "The undo couldn't be read: the amendment stands." };
   }
 }
 async function written4(rt, userId, at3, first, d, o) {
@@ -143232,9 +145129,9 @@ class Review {
       sessions.add(session);
       this.watchers.delete(key);
       this.watchers.set(key, sessions);
-      const kept4 = (await this.rt.settings.get(userId)).agents.kept.watchers;
+      const kept5 = (await this.rt.settings.get(userId)).agents.kept.watchers;
       const own2 = [...this.watchers.keys()].filter((k) => k.startsWith(`${userId}\x00`));
-      for (const k of own2.slice(0, Math.max(0, own2.length - kept4)))
+      for (const k of own2.slice(0, Math.max(0, own2.length - kept5)))
         this.watchers.delete(k);
     }
     return (await this.rt.chips.list(chatId, userId)).flatMap((chip) => {
@@ -143423,9 +145320,9 @@ class Review {
             item2.refused = { code: "write_refused", reason: NO_LONGER };
             continue;
           }
-          const undo = chips2.get(batch);
-          if (undo)
-            item2.chipId = undo;
+          const undo2 = chips2.get(batch);
+          if (undo2)
+            item2.chipId = undo2;
           counted4.push(item2);
         }
         await this.save(input.chatId, input.userId, chip, card);
@@ -143689,9 +145586,9 @@ class LiveFeeds {
   feeds = new Map;
   watchers = new Map;
   observer = null;
-  constructor(host, kept4, now = () => Date.now()) {
+  constructor(host, kept5, now = () => Date.now()) {
     this.host = host;
-    this.kept = kept4;
+    this.kept = kept5;
     this.now = now;
     host.on("FRONTEND_SESSION_CLOSED", (e) => {
       for (const [key, sessions] of this.watchers) {
@@ -143848,7 +145745,7 @@ class LiveRun {
 var ACTS2 = [
   {
     act: "a hand-over",
-    words: words12([
+    words: words13([
       "give",
       "gives",
       "gave",
@@ -143876,7 +145773,7 @@ var ACTS2 = [
   },
   {
     act: "a placement",
-    words: words12([
+    words: words13([
       "put",
       "puts",
       "putting",
@@ -143901,12 +145798,12 @@ var ACTS2 = [
   },
   {
     act: "a purchase",
-    words: words12(["buy(?:s|ing)?", "bought", "purchas(?:e|es|ed|ing)", "pay(?:s|ing)?", "paid", "sell(?:s|ing)?", "sold", "rent(?:s|ed|ing)?", "tipp(?:ed|ing)", "order(?:s|ed|ing)", "order (?:a|an|the|some|two|three|another|one|more)", "costs?", "pric(?:ed|es)", "charg(?:e|es|ed|ing)", "refund(?:s|ed|ing)?"])
+    words: words13(["buy(?:s|ing)?", "bought", "purchas(?:e|es|ed|ing)", "pay(?:s|ing)?", "paid", "sell(?:s|ing)?", "sold", "rent(?:s|ed|ing)?", "tipp(?:ed|ing)", "order(?:s|ed|ing)", "order (?:a|an|the|some|two|three|another|one|more)", "costs?", "pric(?:ed|es)", "charg(?:e|es|ed|ing)", "refund(?:s|ed|ing)?"])
   },
   { act: "a purchase", words: /[$\u20AC\u00A3\u00A5]\s?\d|\b\d+(?:[.,]\d+)?\s?(?:dollars?|bucks|cents?|euros?|pounds?|quid)\b/u },
   {
     act: "something worn",
-    words: words12([
+    words: words13([
       "wear(?:s|ing)?",
       "wore",
       "worn",
@@ -143926,7 +145823,7 @@ var ACTS2 = [
   },
   {
     act: "something used",
-    words: words12([
+    words: words13([
       "use",
       "uses",
       "using",
@@ -143969,7 +145866,7 @@ var ACTS2 = [
     ])
   }
 ];
-function words12(list6) {
+function words13(list6) {
   return new RegExp(`\\b(?:${list6.join("|")})\\b`, "u");
 }
 function lookup(...lists) {
@@ -144061,13 +145958,13 @@ function aliasesOf(fields) {
 }
 function gateWords(registry, world, state2) {
   const ctx = registry.context(world, state2);
-  const index = thingIndex(ctx);
+  const index2 = thingIndex(ctx);
   const here = placeOfEntity(state2, world.pov);
   const things2 = new Set;
-  for (const id2 of index.things) {
+  for (const id2 of index2.things) {
     if (isGone(state2, id2) || !(here !== null && placeOfEntity(state2, id2) === here || holdersOf2(state2, id2).includes(world.pov)))
       continue;
-    for (const name of index.names.get(id2) ?? [])
+    for (const name of index2.names.get(id2) ?? [])
       for (const head of name.heads)
         things2.add(head);
   }
@@ -144151,15 +146048,15 @@ function lastSceneOf(raw) {
   if (!isRecord(raw) || !isRecord(raw.reply) || !isRecord(raw.basis))
     return null;
   const { messageId, swipeId } = raw.reply;
-  const { freshAt, kept: kept4 } = raw;
+  const { freshAt, kept: kept5 } = raw;
   const basis = raw.basis;
   if (typeof messageId !== "string" || messageId === "" || typeof swipeId !== "number" || !Number.isInteger(swipeId) || swipeId < 0)
     return null;
-  if (typeof freshAt !== "number" || !Number.isFinite(freshAt) || typeof kept4 !== "number" || !Number.isInteger(kept4) || kept4 < 0)
+  if (typeof freshAt !== "number" || !Number.isFinite(freshAt) || typeof kept5 !== "number" || !Number.isInteger(kept5) || kept5 < 0)
     return null;
   if (!BASIS_SIGNALS.every((s) => typeof basis[s] === "string"))
     return null;
-  return { reply: { messageId, swipeId }, basis: Object.fromEntries(BASIS_SIGNALS.map((s) => [s, String(basis[s])])), freshAt, kept: kept4 };
+  return { reply: { messageId, swipeId }, basis: Object.fromEntries(BASIS_SIGNALS.map((s) => [s, String(basis[s])])), freshAt, kept: kept5 };
 }
 var KIND_WHY = {
   regenerate: "A Re-run asks every role again.",
@@ -144197,22 +146094,22 @@ class ScenePersistence {
     while (this.chats.size > this.cap)
       this.chats.delete(this.chats.keys().next().value);
   }
-  async hold(chatId, ask4, userId = null) {
-    if (!ask4.settings.on)
+  async hold(chatId, ask5, userId = null) {
+    if (!ask5.settings.on)
       return { holds: false, why: "Smart persistence is off." };
-    const kind = KIND_WHY[ask4.kind];
+    const kind = KIND_WHY[ask5.kind];
     if (kind)
       return { holds: false, why: kind };
     const last = await this.last(chatId, userId);
-    if (!last || !ask4.after || last.reply.messageId !== ask4.after.messageId || last.reply.swipeId !== ask4.after.swipeId)
+    if (!last || !ask5.after || last.reply.messageId !== ask5.after.messageId || last.reply.swipeId !== ask5.after.swipeId)
       return { holds: false, why: "The last turn's scene isn't known: its roles ran on another reply." };
-    const changed = basisChanged(last.basis, ask4.basis);
+    const changed = basisChanged(last.basis, ask5.basis);
     if (changed.length > 0)
       return { holds: false, why: `The scene changed: ${changed.map((s) => BASIS_WORDS2[s]).join(", ")}.` };
-    if (last.kept >= ask4.settings.turns)
+    if (last.kept >= ask5.settings.turns)
       return { holds: false, why: `It was kept ${last.kept === 1 ? "1 turn" : `${last.kept} turns`} in a row, the most Smart persistence keeps.` };
-    const minutes2 = ask4.clock - last.freshAt;
-    if (minutes2 > ask4.settings.minutes)
+    const minutes2 = ask5.clock - last.freshAt;
+    if (minutes2 > ask5.settings.minutes)
       return { holds: false, why: `${minutes2} world minutes passed since its roles last ran, more than Smart persistence keeps.` };
     return { holds: true };
   }
@@ -144313,10 +146210,10 @@ var PREFIX_PEOPLE = 30;
 function prefixEntities(reg, world, state2, opts) {
   const ctx = reg.context(world, state2);
   const here = placeOfEntity(state2, world.pov);
-  const index = thingIndex(ctx);
-  const things2 = new Set(index.things);
-  const words13 = new Set(opts.said.flatMap((t) => nameTokens(t)).map(stem));
-  const said2 = (id2) => (index.names.get(id2) ?? []).some((n) => n.by !== "type" && n.heads.some((h) => words13.has(h)));
+  const index2 = thingIndex(ctx);
+  const things2 = new Set(index2.things);
+  const words14 = new Set(opts.said.flatMap((t) => nameTokens(t)).map(stem));
+  const said2 = (id2) => (index2.names.get(id2) ?? []).some((n) => n.by !== "type" && n.heads.some((h) => words14.has(h)));
   const scene2 = (id2) => here !== null && placeOfEntity(state2, id2) === here;
   const thingRank = (id2) => {
     if (said2(id2))
@@ -144467,7 +146364,7 @@ var CONTRAST = Object.fromEntries([
   ["small", "medium", "large", "big", "little", "tiny", "huge", "tall", "grande", "venti", "regular", "mini", "jumbo"],
   ["hot", "iced", "cold", "warm"],
   ["single", "double", "triple"]
-].flatMap((words13, cls) => words13.map((w) => [stem(w), cls])));
+].flatMap((words14, cls) => words14.map((w) => [stem(w), cls])));
 function povPays(p, world, state2) {
   const payer = typeof p.payer === "string" ? p.payer.trim() : "";
   return payer === "" || payer === world.pov || !hasOwn(state2.entities, payer) || heldBy(state2.entities, payer, world.pov);
@@ -144484,18 +146381,18 @@ function buysIn(pre) {
   }
   return out2;
 }
-function forSomeone(words13, ctx) {
+function forSomeone(words14, ctx) {
   const { world, state: state2 } = ctx;
-  return words13.some((w) => FOR_SOMEONE[w] === true || Object.entries(state2.entities).some(([id2, e]) => id2 !== world.pov && kindIs(ctx.registry, world, e.kind, "person") && e.name.toLowerCase().split(/[^a-z0-9]+/).some((part) => part.length > 1 && stem(part) === w)));
+  return words14.some((w) => FOR_SOMEONE[w] === true || Object.entries(state2.entities).some(([id2, e]) => id2 !== world.pov && kindIs(ctx.registry, world, e.kind, "person") && e.name.toLowerCase().split(/[^a-z0-9]+/).some((part) => part.length > 1 && stem(part) === w)));
 }
 function toldAsAnother(narration, head, ctx) {
-  const words13 = narration.toLowerCase().replace(/['\u2019]/g, "").match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) ?? [];
-  return words13.some((w, i) => {
+  const words14 = narration.toLowerCase().replace(/['\u2019]/g, "").match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) ?? [];
+  return words14.some((w, i) => {
     if (stem(w) !== head)
       return false;
-    if (ANOTHER.test(words13.slice(Math.max(0, i - 3), i).join(" ")))
+    if (ANOTHER.test(words14.slice(Math.max(0, i - 3), i).join(" ")))
       return true;
-    return words13[i + 1] === "for" && forSomeone(words13.slice(i + 2, i + 4).map(stem), ctx);
+    return words14[i + 1] === "for" && forSomeone(words14.slice(i + 2, i + 4).map(stem), ctx);
   });
 }
 function rowAt(ctx, item2, category) {
@@ -144529,11 +146426,11 @@ function boughtAlong(p, pre, ctx, typed = [], narration = "", items = []) {
     if (typeof p.qty === "number" && p.qty !== buy.qty)
       continue;
     const typedOwn = typedNames.filter((n) => n.head === bought.head);
-    const words13 = new Set([...bought.words, ...typedOwn.flatMap((n) => [...n.words])]);
-    const contrast = [...said2.words].some((w) => CONTRAST[w] !== undefined && !words13.has(w) && [...words13].some((b) => b !== w && CONTRAST[b] === CONTRAST[w]));
+    const words14 = new Set([...bought.words, ...typedOwn.flatMap((n) => [...n.words])]);
+    const contrast = [...said2.words].some((w) => CONTRAST[w] !== undefined && !words14.has(w) && [...words14].some((b) => b !== w && CONTRAST[b] === CONTRAST[w]));
     if (contrast)
       continue;
-    const holds4 = [...said2.words].every((w) => words13.has(w)) || [...bought.words].every((w) => said2.words.has(w)) || typedOwn.some((n) => [...n.words].every((w) => said2.words.has(w))) || rowDef !== undefined && rowDef.name === buy.name;
+    const holds4 = [...said2.words].every((w) => words14.has(w)) || [...bought.words].every((w) => said2.words.has(w)) || typedOwn.some((n) => [...n.words].every((w) => said2.words.has(w))) || rowDef !== undefined && rowDef.name === buy.name;
     const inBand = () => {
       const band2 = stated === null ? null : optionalQuery(ctx, "economy.bought_band")?.(ctx, buy.name, buy.qty, world.pov);
       return !!band2 && stated !== null && stated >= 0.75 * band2.min && stated <= 1.25 * band2.max;
@@ -144568,8 +146465,8 @@ function splitAlongBuy(p, pre, ctx, items = []) {
       if (!b || b.head !== n.head)
         return false;
       const typedOwn = typedNames.filter((t) => t.head === b.head);
-      const words13 = new Set([...b.words, ...typedOwn.flatMap((t) => [...t.words])]);
-      return [...n.words].every((w) => words13.has(w)) || [...b.words].every((w) => n.words.has(w)) || typedOwn.some((t) => [...t.words].every((w) => n.words.has(w))) || rowName2 === buy.name;
+      const words14 = new Set([...b.words, ...typedOwn.flatMap((t) => [...t.words])]);
+      return [...n.words].every((w) => words14.has(w)) || [...b.words].every((w) => n.words.has(w)) || typedOwn.some((t) => [...t.words].every((w) => n.words.has(w))) || rowName2 === buy.name;
     });
   };
   if (parts.length < 2 || !parts.some(isBuy))
@@ -144687,9 +146584,11 @@ class Runtime {
   compactions = new CompactionMemo;
   review;
   live;
+  bootstrapChips = null;
   orchestrator;
   loopback;
   depth;
+  depthOffer = null;
   depthWork = new Set;
   depthJobs = new Map;
   persistence;
@@ -144724,10 +146623,10 @@ class Runtime {
   keptMinds = new Map;
   runLines = new Map;
   minds;
-  beatMinds = async (input, ask4) => {
+  beatMinds = async (input, ask5) => {
     const settings = await this.settings.get(input.userId);
     const knowing3 = knowledgeOn(await this.chatKnowledge.get(input.chatId, input.userId), input.world, settings);
-    return runMinds(ask4 ? { ...this.minds, ask: ask4 } : this.minds, knowing3 ? { ...input, knowledge: settings.minds.knowledge } : input);
+    return runMinds(ask5 ? { ...this.minds, ask: ask5 } : this.minds, knowing3 ? { ...input, knowledge: settings.minds.knowledge } : input);
   };
   constructor(options) {
     this.messages = new MessageCache(options.host);
@@ -144772,7 +146671,7 @@ class Runtime {
     this.loreRouting = new LoreRouting(this.host, this.settings, this.worlds, this.bookReads);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets, loreEntry: (userId, id2) => this.loreRouting.ids.entryOf(userId, id2) };
     this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), (userId) => this.foldOf(userId), (chatId) => this.messages.forget(chatId));
-    this.archive = new ArchiveIndex(this.ledger);
+    this.archive = new ArchiveIndex(this.ledger, this.host);
     this.sessions = new Sessions(this.blobs, this.ledger);
     this.chatAgents = new ChatAgentMeta(this.host, this.chatMeta);
     this.globalFiles = new GlobalWorkspace(this.host);
@@ -144801,8 +146700,11 @@ class Runtime {
       this.takeStaged(e.chatId, userId, e.message.id);
     });
     this.host.on("MESSAGE_SWIPED", (e, userId) => {
-      if (e.action !== "updated")
+      if (e.action !== "updated") {
         this.depthLeft(e.chatId, e.message.id, "a swipe took the reply it read off the chat");
+        if (userId && e.action !== "added")
+          this.swipeWoke(e.chatId, userId, e.message.id, e.swipeId);
+      }
       if (e.action === "deleted" && userId)
         this.swipeDeleted(e.chatId, userId, e.message.id, e.swipeId).catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: chips didn't follow a deleted swipe (${error instanceof Error ? error.message : String(error)})`, userId));
     });
@@ -144870,7 +146772,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "4c708ac9", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "7f8b680e", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;
@@ -145009,11 +146911,11 @@ class Runtime {
       bridge.setTidied(text11, []);
     const knowing3 = !depth2 && knowledgeOn(await this.chatKnowledge.get(input.chatId, input.userId), render.world, settings);
     const mindsKey = [input.runKey, render.state.revision, text11, hashParts("lre.kept-minds", JSON.stringify({ minds: settings.minds, knowing: knowing3, step: mindsStepConfig(settings.modelUse, "mind"), guidance: preset.guidance.mind ?? "" }))].join("\x00");
-    const kept4 = this.keptMinds.get(input.chatId);
+    const kept5 = this.keptMinds.get(input.chatId);
     this.keptMinds.delete(input.chatId);
-    if (kept4 && kept4.key !== mindsKey)
-      kept4.stop?.abort(new NotNeeded("the turn they were thinking for changed"));
-    const same3 = kept4?.key === mindsKey ? kept4 : undefined;
+    if (kept5 && kept5.key !== mindsKey)
+      kept5.stop?.abort(new NotNeeded("the turn they were thinking for changed"));
+    const same3 = kept5?.key === mindsKey ? kept5 : undefined;
     const basis = agent ? sceneBasis(this.registry, render.world, folded.state, chainMarks(input.core, before)) : null;
     const persist = basis ? await this.persistence.hold(input.chatId, { settings: settings.agents.persist, kind: p.kind, after: lastReply ? { messageId: lastReply.id, swipeId: lastReply.swipeId } : null, basis, clock: folded.state.clock }, input.userId) : null;
     const keepScene = persist?.holds === true && settings.agents.roles.scene.run === "smart" && lastReply ? this.keptScene(input.core, lastReply) : null;
@@ -145050,7 +146952,7 @@ class Runtime {
     const routine = lastUser ? bridge.takeRoutineAsks(text11) : [];
     if (lastUser && routine.length > 0) {
       const turnOf2 = (proposal) => ({ ...proposal, turn: lastUser.id });
-      await this.chips.add(input.chatId, input.userId, routine.map((ask4, i) => ({ id: `routine_ask:${lastUser.id}:${i}`, kind: "routine_ask", messageId: lastUser.id, label: ask4.question, detail: ask4.detail, actions: [...ask4.places ? ask4.places.map((p2, n) => ({ id: `at:${n}`, label: p2.label, ...n === 0 ? { style: "primary" } : {} })) : [{ id: "yes", label: "Yes", style: "primary" }], { id: "no", label: "No" }], expires: "next_send", payload: { proposal: turnOf2(ask4.proposal), added: ask4.added, ...ask4.places ? { places: ask4.places.map((p2) => turnOf2(p2.proposal)) } : {} } })));
+      await this.chips.add(input.chatId, input.userId, routine.map((ask5, i) => ({ id: `routine_ask:${lastUser.id}:${i}`, kind: "routine_ask", messageId: lastUser.id, label: ask5.question, detail: ask5.detail, actions: [...ask5.places ? ask5.places.map((p2, n) => ({ id: `at:${n}`, label: p2.label, ...n === 0 ? { style: "primary" } : {} })) : [{ id: "yes", label: "Yes", style: "primary" }], { id: "no", label: "No" }], expires: "next_send", payload: { proposal: turnOf2(ask5.proposal), added: ask5.added, ...ask5.places ? { places: ask5.places.map((p2) => turnOf2(p2.proposal)) } : {} } })));
       this.push.changed(input.chatId, input.userId);
     }
     const waiting = await this.previewGates({ chatId: input.chatId, userId: input.userId, bridge, text: text11, lastUser, settings, render, typed, shown: shown5, mindsKey, thinking, scene: depth2 });
@@ -145120,8 +147022,8 @@ class Runtime {
       const start = new Working(this.registry, base.world, base.state);
       start.applyAll(bridge.prePlan(text11));
       const beats = [];
-      const beatMinds = async (i, ask4) => {
-        const ran2 = await this.beatMinds(i, ask4);
+      const beatMinds = async (i, ask5) => {
+        const ran2 = await this.beatMinds(i, ask5);
         beats.push(ran2);
         return ran2;
       };
@@ -145181,12 +147083,12 @@ class Runtime {
     const out2 = rec ? outputsOf(rec.events.slice(0, rec.pre)) : null;
     return out2 ? { lore: out2.scene.lore, notes: out2.scene.notes } : null;
   }
-  thinkMinds(asking, timelapse2, signal2, kept4, calls) {
+  thinkMinds(asking, timelapse2, signal2, kept5, calls) {
     const stop2 = new AbortController;
     if (timelapse2)
-      kept4?.stop?.abort(new NotNeeded("the message plays a timelapse, whose minds think at its beats"));
+      kept5?.stop?.abort(new NotNeeded("the message plays a timelapse, whose minds think at its beats"));
     const task = (async () => {
-      const input = { ...asking, timelapse: timelapse2, ...kept4 && !timelapse2 ? { kept: await kept4.minds } : {} };
+      const input = { ...asking, timelapse: timelapse2, ...kept5 && !timelapse2 ? { kept: await kept5.minds } : {} };
       return calls.minds({ input, classic: (s) => preMinds(this.minds, { ...input, signal: s }) }, AbortSignal.any([signal2, stop2.signal]));
     })();
     task.catch(() => {
@@ -145424,7 +147326,7 @@ class Runtime {
 `), beats: input.lines.beats.join(`
 `), elapsed }, input.secrets);
     let left = input.calls ?? Number.POSITIVE_INFINITY;
-    const ask4 = (runs, stepVars) => {
+    const ask5 = (runs, stepVars) => {
       const going = runs.slice(0, Math.max(0, left));
       left -= going.length;
       if (going.length === 0)
@@ -145436,7 +147338,7 @@ class Runtime {
 
 `) : null, vars: stepVars, mark: this.proseMark(render, input.secrets, heard, input.texts) };
     };
-    return { brief: ask4(input.briefRuns, vars), outline: ask4(input.outlineRuns, input.outlineRuns.length > 0 ? { ...vars, sections: this.narratorSections(world, state2, input.plan).join(", ") } : vars) };
+    return { brief: ask5(input.briefRuns, vars), outline: ask5(input.outlineRuns, input.outlineRuns.length > 0 ? { ...vars, sections: this.narratorSections(world, state2, input.plan).join(", ") } : vars) };
   }
   proseMark(render, secrets, heard, texts2) {
     const { world, state: state2 } = render;
@@ -145470,8 +147372,8 @@ class Runtime {
         if (typeof v4 === "string")
           overrides[k] = v4;
       const typed = recorded.staged === true && text11.trim() !== "" ? quotedWords(this.registry, render.world, render.state, text11, unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !text11.toLowerCase().includes(s.toLowerCase())), text11) : null;
-      const words13 = typeof recorded.text === "string" && recorded.text.trim() !== "" ? recorded.text : typed;
-      const fill = recorded.action === TIMELAPSE_ACTION2 && words13 ? { text: words13 } : {};
+      const words14 = typeof recorded.text === "string" && recorded.text.trim() !== "" ? recorded.text : typed;
+      const fill = recorded.action === TIMELAPSE_ACTION2 && words14 ? { text: words14 } : {};
       bridge.setIntent(text11, recorded.action === TIMELAPSE_ACTION2 ? target ? { ...timelapseIntent(target, overrides, 1, params2.povRoutine !== false), ...fill } : null : { action: recorded.action, params: params2, probabilities: { [recorded.action]: 1 }, picked: true });
       return;
     }
@@ -145544,7 +147446,7 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
     }
     const saysAnswer = answerReader(this.registry, render.world, render.state, mayKnow);
     const unsaidAnswers = expectedAnswers(render).filter((a) => saysAnswer(a, text11) === null);
-    const givesUnsaid = (words13) => unsaidAnswers.some((a) => saysAnswer(a, words13) !== null);
+    const givesUnsaid = (words14) => unsaidAnswers.some((a) => saysAnswer(a, words14) !== null);
     const chipText = (piece) => givesUnsaid(piece) ? "" : offeredNext(this.registry, render.world, render.state, piece, text11, secrets) ?? "";
     let next = (result.next ?? []).map(chipText);
     const lead = givesUnsaid(result.text ?? "") ? "" : quotedWords(this.registry, render.world, render.state, result.text ?? "", secrets, text11) ?? "";
@@ -145599,7 +147501,7 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
     const policy = claimsOf(render.world, render.state);
     const steps = [];
     let rolls = false;
-    const take2 = (def2, read, words13, thing3, said2, picked2 = false) => {
+    const take2 = (def2, read, words14, thing3, said2, picked2 = false) => {
       const answered2 = picked2 ? read : ownAnswers(def2, read);
       if (typeof answered2 === "string") {
         dropAnswer(def2, answered2);
@@ -145611,19 +147513,19 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
       const pick3 = picked2 ? { picked: true } : {};
       const ref = unfitRef(this.registry, def2, given, render.world, render.state, mayKnow) ?? outOfHand(def2, given, render.world, render.state, mayKnow);
       if (!ref) {
-        steps.push({ action: def2.id, params: given, text: words13, ...forWords, ...pick3 });
+        steps.push({ action: def2.id, params: given, text: words14, ...forWords, ...pick3 });
         rolls ||= checkOf(render.world, def2.check) !== null;
         return;
       }
       const verdict2 = claimFor({ registry: this.registry, world: render.world, state: render.state, action: def2, params: answered2, unfit: ref, said: said2, thing: thing3, policy, mayKnow });
       if (verdict2?.kind === "known")
-        return take2(def2, verdict2.params, words13, undefined, said2, picked2);
+        return take2(def2, verdict2.params, words14, undefined, said2, picked2);
       if (verdict2?.kind === "real")
-        steps.push({ action: def2.id, params: given, text: words13, claim: verdict2.claim, ...forWords, ...pick3 });
+        steps.push({ action: def2.id, params: given, text: words14, claim: verdict2.claim, ...forWords, ...pick3 });
       else if (verdict2?.kind === "play")
-        steps.push({ ...verdict2.play, text: words13, ...pick3 });
+        steps.push({ ...verdict2.play, text: words14, ...pick3 });
       else if (verdict2?.kind === "ask")
-        steps.push({ ...verdict2.play ?? { action: def2.id, params: given, ...forWords }, text: words13, claim: verdict2.claim, ask: { kind: "claim", question: verdict2.question, detail: verdict2.detail }, ...pick3 });
+        steps.push({ ...verdict2.play ?? { action: def2.id, params: given, ...forWords }, text: words14, claim: verdict2.claim, ask: { kind: "claim", question: verdict2.question, detail: verdict2.detail }, ...pick3 });
       else {
         this.host.log("info", `[LumiRPEngine] interpret: ${def2.id} names nothing in the world (${JSON.stringify(given)}); dropped`, userId);
         dropped.push({ label: def2.label, reason: unfitReason(this.registry, render.world, render.state, ref, text11, secrets, mayKnow) });
@@ -145631,14 +147533,14 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
       }
       rolls ||= checkOf(render.world, def2.check) !== null;
     };
-    const takeTry = (given, words13) => {
+    const takeTry = (given, words14) => {
       const verdict2 = rolls ? { ok: false, why: "an action before it rolls its own check" } : inferredRead(this.registry, render.world, render.state, given);
       if (!verdict2.ok) {
         this.host.log("info", `[LumiRPEngine] interpret: Try something isn't a check here (${verdict2.why}); the message plays without it`, userId);
         return;
       }
       const asked2 = verdict2.policy.mode === "suggest" ? checkQuestion(verdict2, namesHiddenOrSecretLore(this.registry, render.world, render.state, verdict2.read.attempt, text11) ? "" : verdict2.read.attempt, (id2) => render.state.entities[id2]?.name ?? id2) : null;
-      steps.push({ action: TRY_ACTION, params: verdict2.params, text: words13, ...asked2 ? { ask: { kind: "check", ...asked2 } } : {} });
+      steps.push({ action: TRY_ACTION, params: verdict2.params, text: words14, ...asked2 ? { ask: { kind: "check", ...asked2 } } : {} });
     };
     if (chosen)
       take2(chosen, params, lead, result.thing, [text11], staged !== null);
@@ -145696,8 +147598,8 @@ ${answer2}`, links: owner2 ? [owner2] : [] })) }, budget.signal);
     if (!intent2?.action || intent2.action === TIMELAPSE_ACTION2)
       return null;
     const steps = [{ action: intent2.action, params: intent2.params, judgement: intent2.judgement }, ...intent2.queue ?? []];
-    const index = steps.findIndex((s) => s.action === TRY_ACTION || checkOf(render.world, findAction(this.registry, render.world, s.action)?.check) !== null);
-    const step2 = steps[index];
+    const index2 = steps.findIndex((s) => s.action === TRY_ACTION || checkOf(render.world, findAction(this.registry, render.world, s.action)?.check) !== null);
+    const step2 = steps[index2];
     const tried = step2?.action === TRY_ACTION ? tryJudged(this.registry, render.world, render.state, step2.params) : null;
     const action2 = tried?.action ?? (step2 ? findAction(this.registry, render.world, step2.action) : undefined);
     if (!step2 || !action2 || step2.judgement)
@@ -145706,14 +147608,14 @@ ${answer2}`, links: owner2 ? [owner2] : [] })) }, budget.signal);
     const policy = policyFor(render.world, render.state, action2, render.world.pov);
     if (!shown5.available || !shown5.verdict || !shown5.odds || !needsJudge(policy, shown5.verdict))
       return null;
-    return { intent: intent2, index, action: action2, params: tried?.params ?? step2.params, verdict: shown5.verdict, odds: shown5.odds, policy };
+    return { intent: intent2, index: index2, action: action2, params: tried?.params ?? step2.params, verdict: shown5.verdict, odds: shown5.odds, policy };
   }
   async judgeApproach(bridge, text11, render, settings, facts, budget, at3, calls) {
     const userId = at3.userId;
     const target = this.judgeTarget(bridge.intentOf(text11), render);
     if (!target)
       return;
-    const { intent: intent2, index, action: action2, params, verdict: verdict2, odds, policy } = target;
+    const { intent: intent2, index: index2, action: action2, params, verdict: verdict2, odds, policy } = target;
     const run2 = runsOf(settings.modelUse, render.world, "judge", facts, { guidance: at3.guidance })[0];
     if (!run2 || !budget.take())
       return;
@@ -145724,8 +147626,8 @@ ${answer2}`, links: owner2 ? [owner2] : [] })) }, budget.signal);
     const names3 = targets.map((id2) => render.state.entities[id2]?.name ?? render.world.places[id2]?.name ?? id2);
     const lore3 = this.stepLore(run2, at3, { text: [action2.label, text11, placeName2 ?? "", ...names3].join(`
 `), links: [...new Set([...this.sceneLinks(render.world, render.state), ...targets])] });
-    const ask4 = { action: action2.label, text: text11, max: policy.description.max, odds: story, scene: scene2 };
-    const judgement = await calls.judge({ text: text11, action: action2.id, world: render.world, state: render.state, ask: ask4, template: run2.template?.template ?? null, classic: (signal2) => judge(this.steps, run2, ask4, userId, signal2, lore3) }, budget.signal);
+    const ask5 = { action: action2.label, text: text11, max: policy.description.max, odds: story, scene: scene2 };
+    const judgement = await calls.judge({ text: text11, action: action2.id, world: render.world, state: render.state, ask: ask5, template: run2.template?.template ?? null, classic: (signal2) => judge(this.steps, run2, ask5, userId, signal2, lore3) }, budget.signal);
     if (!judgement) {
       this.host.log("warn", `[LumiRPEngine] judge: no judgement for ${action2.id}; ${story ? "the dice decide" : "the roll stands as shown"}`, userId);
       return;
@@ -145736,7 +147638,7 @@ ${answer2}`, links: owner2 ? [owner2] : [] })) }, budget.signal);
     if (leaks)
       this.host.log("info", `[LumiRPEngine] judge: the reason for ${action2.id} carried an unrevealed secret or a hidden name; it isn't shown`, userId);
     const judged = leaks ? { ...judgement, reason: "" } : judgement;
-    bridge.amendIntent(text11, index === 0 ? { ...intent2, judgement: judged } : { ...intent2, queue: (intent2.queue ?? []).map((q, i) => i === index - 1 ? { ...q, judgement: judged } : q) });
+    bridge.amendIntent(text11, index2 === 0 ? { ...intent2, judgement: judged } : { ...intent2, queue: (intent2.queue ?? []).map((q, i) => i === index2 - 1 ? { ...q, judgement: judged } : q) });
   }
   describeTie(t, world, state2) {
     const e = state2.entities[t.agent];
@@ -145856,9 +147758,9 @@ ${answer2}`, links: owner2 ? [owner2] : [] })) }, budget.signal);
         await this.blobs.put(input.userId, shown5.swipes[shown5.swipeId] ?? "");
       return;
     }
-    const index = input.observed.findIndex((m) => m.id === input.messageId);
-    const recent = recentLines(input.core, input.observed, index < 0 ? input.observed.length : index, this.registry);
-    const full = input.kind === "continue" ? input.observed[index]?.swipes[input.swipeId] ?? "" : "";
+    const index2 = input.observed.findIndex((m) => m.id === input.messageId);
+    const recent = recentLines(input.core, input.observed, index2 < 0 ? input.observed.length : index2, this.registry);
+    const full = input.kind === "continue" ? input.observed[index2]?.swipes[input.swipeId] ?? "" : "";
     let context2;
     if (input.kind === "continue") {
       const at3 = input.core.continueContext(input.generationId, input.messageId, full, input.observed);
@@ -145988,12 +147890,12 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     const unleaked = deduped.filter((p) => findLeaks(p, secrets).length === 0);
     if (unleaked.length < deduped.length)
       this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${deduped.length - unleaked.length} proposal(s) carrying an unrevealed secret`, userId);
-    const unnamed2 = [];
+    const unnamed = [];
     const named3 = [];
     const placing = placed2.working.ctx;
     for (const p of unleaked)
-      (namesUnknown(placing, p) ? unnamed2 : named3).push(p);
-    const unseen2 = unnamed2.filter((p) => !proposalKnown(p, this.registry, placing.world, placing.state)).length;
+      (namesUnknown(placing, p) ? unnamed : named3).push(p);
+    const unseen2 = unnamed.filter((p) => !proposalKnown(p, this.registry, placing.world, placing.state)).length;
     if (unseen2 > 0)
       this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${unseen2} proposal(s) naming what the player hasn't seen, each a receipt that doesn't name it`, userId);
     const known2 = named3.filter((p) => proposalKnown(p, this.registry, placing.world, placing.state));
@@ -146079,8 +147981,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
         this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${describeProposal(p)} (a timelapse turn's time passed as its timelapse)`, userId);
         continue;
       }
-      const ask4 = asks.get(p);
-      const asking = ask4 === "builtin" || ask4 === "make" && source !== "pinned" || type === "agenda" && agendaAsks(p);
+      const ask5 = asks.get(p);
+      const asking = ask5 === "builtin" || ask5 === "make" && source !== "pinned" || type === "agenda" && agendaAsks(p);
       const fitted2 = bounded5.delta !== undefined ? { ...p, delta: bounded5.delta } : p;
       if (unsure.has(p))
         unsure.add(fitted2);
@@ -146114,7 +148016,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     const outcomes = [];
     applyRead(this.registry, w, reading, context2.read, bridge.runSeed, (o) => outcomes.push({ ...o, paid: optionalQuery(w.ctx, "economy.paid_from")?.(w.ctx, o.events, context2.world.pov) ?? null }));
     const stored = [];
-    const unknownTo = unnamed2.filter((p) => {
+    const unknownTo = unnamed.filter((p) => {
       const type = factChange(p) ?? EXTRACTION_TYPES.find((t) => t === p.type);
       return type !== undefined && effectiveMode(settings, learning2, connection, type).mode !== "never";
     });
@@ -146259,9 +148161,9 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     choices.flat().forEach((choice, i) => {
       stored.push({ id: `choice:${messageId}:${key}:${i}`, kind: "choice", messageId, swipeId, label: choice, ...spoiler(choice) ? { spoiler: true } : {}, actions: [{ id: "send", label: "Send" }], expires: "next_send", payload: { text: choice } });
     });
-    const kept4 = this.orchestrator.readConfirm(key, stored);
-    await this.chips.add(input.chatId, input.userId, kept4);
-    this.readStored.set(key, kept4.map((c) => c.id));
+    const kept5 = this.orchestrator.readConfirm(key, stored);
+    await this.chips.add(input.chatId, input.userId, kept5);
+    this.readStored.set(key, kept5.map((c) => c.id));
     if (this.readStored.size > 64)
       this.readStored.delete(this.readStored.keys().next().value ?? "");
   }
@@ -146366,7 +148268,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     const after = this.depth.after(input.generationId);
     const basis = after ? chainBases(input.core.chain(input.observed), input.core.journal.tombstones).find((b) => b.message === input.messageId) : undefined;
     if (after && basis)
-      this.depthWorking(input.chatId, input.userId, "the step after the reply", (job) => afterDepthReply(this, input.chatId, input.userId, basis, after, { signal: job.signal, ready: job.ready }).then(() => {
+      this.depthWorking(input.chatId, input.userId, "the step after the reply", (job) => afterDepthReply(this, input.chatId, input.userId, basis, after, { signal: job.signal, ready: job.ready, archive: chatArchive(this, input.chatId, input.userId, basis.message) }).then(() => {
         return;
       }), { reads: basis.message, between: true });
   }
@@ -146374,10 +148276,21 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     this.depthWorking(input.chatId, input.userId, "the reading of your edit", () => (async () => {
       if (!await this.depth.on(input.chatId, input.userId))
         return;
-      const out2 = await replyEdited(this, input.chatId, input.userId, input.messageId, input.text);
+      const head = await headBasis(this, input.chatId, input.userId);
+      const out2 = await replyEdited(this, input.chatId, input.userId, input.messageId, input.text, head ? { archive: chatArchive(this, input.chatId, input.userId, head.message) } : {});
       this.host.log("info", `[LumiRPEngine] chat ${input.chatId}, your edit of ${input.isUser ? "your message" : "a reply"}: ${out2.said}`, input.userId);
-      await this.chips.add(input.chatId, input.userId, [{ id: `edit_read:${input.messageId}:${input.swipeId}`, kind: "edit_read", messageId: input.messageId, swipeId: input.swipeId, label: "Your edit, as the author read it", detail: out2.said, actions: [], expires: "next_send", payload: {} }]);
+      const undoable2 = out2.cosmetic === false && out2.amended.length + out2.struck.length > 0;
+      await this.chips.add(input.chatId, input.userId, [{ id: `edit_read:${input.messageId}:${input.swipeId}`, kind: "edit_read", messageId: input.messageId, swipeId: input.swipeId, label: "Your edit, as the author read it", detail: out2.said, actions: undoable2 ? [{ id: "undo", label: "Undo", style: "danger" }] : [], expires: "next_send", payload: undoable2 ? { amended: [...out2.amended], struck: [...out2.struck] } : {} }]);
       this.changed(input.chatId, input.userId);
+    })());
+  }
+  editUndo(chatId, userId, messageId, swipeId, undone) {
+    this.depthWorking(chatId, userId, "the undoing of your edit", () => (async () => {
+      const head = await headBasis(this, chatId, userId);
+      const out2 = await editUndone(this, chatId, userId, messageId, undone, head ? { archive: chatArchive(this, chatId, userId, head.message) } : {});
+      this.host.log("info", `[LumiRPEngine] chat ${chatId}, undoing your edit: ${out2.said}`, userId);
+      await this.chips.add(chatId, userId, [{ id: `edit_read:${messageId}:${swipeId}`, kind: "edit_read", messageId, swipeId, label: "Your edit, undone", detail: out2.said, actions: [], expires: "next_send", payload: {} }]);
+      this.changed(chatId, userId);
     })());
   }
   clockMovedOn(chatId, userId, moved2) {
@@ -146388,7 +148301,24 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
       if (basis === null)
         return;
       job.reads(basis.message);
-      await afterDepthReply(this, chatId, userId, basis, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { occasion: `clock:${moved2.fix}`, woken: { minutes: moved2.minutes, why: moved2.why }, signal: job.signal, ready: job.ready });
+      await afterDepthReply(this, chatId, userId, basis, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { occasion: `clock:${moved2.fix}`, woken: { minutes: moved2.minutes, why: moved2.why }, signal: job.signal, ready: job.ready, archive: chatArchive(this, chatId, userId, basis.message) });
+      this.changed(chatId, userId);
+    })(), { between: true });
+  }
+  swipeWoke(chatId, userId, message, swipe) {
+    this.depthWorking(chatId, userId, "the author's poll after a swipe", (job) => (async () => {
+      if (!await this.depth.on(chatId, userId))
+        return;
+      const basis = await headBasis(this, chatId, userId);
+      const at3 = basis ? await this.ledger.foldAtBasis(chatId, userId, basis, DRAFT_TYPES) : null;
+      if (!basis || !at3)
+        return;
+      job.reads(basis.message);
+      const rebase = await rebaseCandidates(this, chatId, userId, new Set(draftsOn(at3.events).map((d) => d.draft.id)));
+      if (rebase.length === 0 || job.signal.aborted)
+        return;
+      const why3 = `a swipe took draft${rebase.length === 1 ? "" : "s"} ${rebase.map((d) => d.id).join(", ")} off the chain`;
+      await afterDepthReply(this, chatId, userId, basis, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { occasion: `swipe:${message}:${swipe}`, woken: { minutes: 0, why: why3 }, signal: job.signal, ready: job.ready, archive: chatArchive(this, chatId, userId, basis.message) });
       this.changed(chatId, userId);
     })(), { between: true });
   }
@@ -146469,8 +148399,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
   }
   readStored = new Map;
   async readStopped(input) {
-    const index = input.observed.findIndex((m) => m.id === input.messageId);
-    const user = ownMessage(input.observed.slice(0, index < 0 ? input.observed.length : index));
+    const index2 = input.observed.findIndex((m) => m.id === input.messageId);
+    const user = ownMessage(input.observed.slice(0, index2 < 0 ? input.observed.length : index2));
     this.bridges.get(input.chatId)?.turnCommitted(user ? user.swipes[user.swipeId] ?? "" : "");
     await this.readDropped(input.chatId, input.userId, input.generationId);
   }
@@ -146573,8 +148503,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     if (mode === "rerun")
       this.ledger.discardKept(chatId);
   }
-  answerAsk(chatId, text11, index, keep2) {
-    return this.bridges.get(chatId)?.answerAsk(text11, index, keep2) ?? false;
+  answerAsk(chatId, text11, index2, keep2) {
+    return this.bridges.get(chatId)?.answerAsk(text11, index2, keep2) ?? false;
   }
   passIntent(chatId, text11, params, said2) {
     return this.bridges.get(chatId)?.passIntent(text11, params, said2) ?? false;
@@ -146585,15 +148515,15 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     return unfit ? `${action2.label}: ${unfitReason(this.registry, world, state2, unfit, "", unrevealedSecrets(this.registry, world, state2), mayKnow)}` : null;
   }
   editRefusal(world, state2, action2, params, read, claim2) {
-    const kept4 = (name) => JSON.stringify(params[name] ?? null) === JSON.stringify(read[name] ?? null);
-    const refused3 = this.requestRefusal(world, state2, action2, params, "read", claim2 !== undefined && kept4(claim2) ? claim2 : undefined);
+    const kept5 = (name) => JSON.stringify(params[name] ?? null) === JSON.stringify(read[name] ?? null);
+    const refused3 = this.requestRefusal(world, state2, action2, params, "read", claim2 !== undefined && kept5(claim2) ? claim2 : undefined);
     if (refused3)
       return refused3;
     const mayKnow = (id2) => povMayKnow(this.registry, world, state2, id2);
     const why3 = (param, def2, value) => `${action2.label}: ${unfitReason(this.registry, world, state2, { param, def: def2, value }, "", unrevealedSecrets(this.registry, world, state2), mayKnow)}`;
     for (const [name, def2] of Object.entries(action2.params)) {
       const value = params[name];
-      if (value === undefined || value === null || value === "" || kept4(name))
+      if (value === undefined || value === null || value === "" || kept5(name))
         continue;
       if (def2.type === "ref" && payeeOf(this.registry, action2, params, def2, value, world, state2, mayKnow) !== null)
         continue;
@@ -146622,8 +148552,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
   editedPaid(world, state2, action2, params, read, text11) {
     const mayKnow = (id2) => povMayKnow(this.registry, world, state2, id2);
     const paid = paidOutside(this.registry, action2, params, world, state2, mayKnow, text11);
-    const kept4 = Object.fromEntries(Object.entries(read.said ?? {}).filter(([name]) => JSON.stringify(params[name] ?? null) === JSON.stringify(read.params[name] ?? null)));
-    return { params: handedCash(this.registry, action2, { ...params, ...kept4 }, paid.params, world, state2, mayKnow), said: { ...kept4, ...paid.said } };
+    const kept5 = Object.fromEntries(Object.entries(read.said ?? {}).filter(([name]) => JSON.stringify(params[name] ?? null) === JSON.stringify(read.params[name] ?? null)));
+    return { params: handedCash(this.registry, action2, { ...params, ...kept5 }, paid.params, world, state2, mayKnow), said: { ...kept5, ...paid.said } };
   }
   intentEdit(world, state2, action2, params, typed) {
     if (!palette(world, state2, this.registry).entries.some((e) => e.action === action2.id))
@@ -146707,8 +148637,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     if (offer.type === "duration" && offer.minutes > settings.time.askBeyondMinutes)
       return null;
     const typed = said2.toLowerCase();
-    const words13 = typeof intent2.then?.span === "string" ? quotedWords(this.registry, world, state2, intent2.then.span, secrets.filter((s) => !typed.includes(s.toLowerCase())), said2) : null;
-    return `After those actions, the player's message lets time pass: ${skipWords(this.registry, world, state2, offer, false)}${words13 ? ` (\u201C${words13}\u201D)` : ""}. Tell that time in this reply, after them.`;
+    const words14 = typeof intent2.then?.span === "string" ? quotedWords(this.registry, world, state2, intent2.then.span, secrets.filter((s) => !typed.includes(s.toLowerCase())), said2) : null;
+    return `After those actions, the player's message lets time pass: ${skipWords(this.registry, world, state2, offer, false)}${words14 ? ` (\u201C${words14}\u201D)` : ""}. Tell that time in this reply, after them.`;
   }
   passOutline(chatId, text11, lines3) {
     return this.bridges.get(chatId)?.passOutline(text11, lines3) ?? false;
@@ -146721,6 +148651,40 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
   }
   depthOn(chatId, userId) {
     return this.depth.on(chatId, userId);
+  }
+  async openedDepth(chatId, userId) {
+    const id2 = `needs_loopback:open:${chatId}`;
+    const depth2 = await this.depth.on(chatId, userId);
+    const pin2 = depth2 ? (await this.host.chats.chatMetadata(chatId, userId)).connection_profile_id : null;
+    const connectionId = typeof pin2 === "string" && pin2.trim() !== "" ? pin2 : null;
+    if (!depth2 || await this.loopback.isLoopback(connectionId, userId)) {
+      this.loopback.offChat(userId, chatId, null);
+      const had = (await this.chips.list(chatId, userId)).some((c) => c.id === id2);
+      if (had) {
+        await this.chips.removeWhere(chatId, userId, (c) => c.id === id2);
+        this.push.changed(chatId, userId);
+      }
+      return;
+    }
+    const name = (await this.host.connections.profile(connectionId, userId).catch(() => null))?.name ?? null;
+    const on = connectionId === null ? `your active connection${name ? `, ${name}` : ""}` : name ?? "another connection";
+    this.loopback.offChat(userId, chatId, name ?? (connectionId === null ? "your active connection" : connectionId));
+    const latest = (await this.host.chats.messages(chatId, userId)).at(-1);
+    if (!latest)
+      return;
+    await this.chips.add(chatId, userId, [
+      {
+        id: id2,
+        kind: "needs_loopback",
+        messageId: latest.id,
+        label: "This chat is off the loopback",
+        detail: `This chat is on depth, which plays its turns through the loopback connection, but it generates on ${on}, so its next reply would run no engine turn and nothing would read it into the story. Fix: pick a loopback connection as this chat's connection (opting it out of depth and back in, in GM \u2192 This chat \u2192 Depth, pins it to one again), or opt it out of depth. Settings \u2192 Loopback names your loopback connections.`,
+        actions: [{ id: "loopback", label: "Settings \u2192 Loopback", input: { type: "settings", label: "Settings \u2192 Loopback", page: "loopback" } }],
+        expires: "never",
+        payload: {}
+      }
+    ]);
+    this.push.changed(chatId, userId);
   }
   async offLoopback(input) {
     const messages = await this.host.chats.messages(input.chatId, input.userId);
@@ -146888,10 +148852,10 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
       throw new Error("the chat's world revision isn't loaded");
     const { world: folded, state: state2 } = render;
     const world = await this.liveWorld(input.generationId, input.chatId, input.userId, folded, state2);
-    const index = await this.worlds.index(run2.worldId, input.userId);
-    if (!index)
+    const index2 = await this.worlds.index(run2.worldId, input.userId);
+    if (!index2)
       throw new Error("the chat's world is gone");
-    const bookId = await this.book.ensure(world, index, input.userId);
+    const bookId = await this.book.ensure(world, index2, input.userId);
     await this.keepBookAttached(input.chatId, bookId, input.userId);
     const entries3 = await this.book.entriesOf(bookId, input.userId);
     const settings = await this.settings.get(input.userId);
@@ -146904,10 +148868,10 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     const recorded = plan2 ? outputsOf(plan2.events) : null;
     const own2 = plan2 && !renarrated && !recorded ? this.runLines.get(input.generationId) : undefined;
     const turnPlan2 = plan2 && !renarrated && !own2 && !recorded ? this.bridges.get(input.chatId)?.planFor(plan2.seed) : undefined;
-    const kept4 = plan2 && renarrated && !recorded ? await this.planNotes.get(input.chatId, input.userId, plan2.seed) : null;
+    const kept5 = plan2 && renarrated && !recorded ? await this.planNotes.get(input.chatId, input.userId, plan2.seed) : null;
     const reply = plan2?.messageId == null ? -1 : input.observed.findIndex((m) => m.id === plan2.messageId);
     const fresh = turnPlan2 ? planLines2(turnPlan2, world, state2, this.registry) : null;
-    const turnLines2 = recorded ?? own2?.lines ?? (turnPlan2 && fresh ? { outcome: [...offstageLines(input.core, input.observed, reply < 0 ? input.observed.length : reply, texts2), ...fresh.outcome], montage: fresh.montage, outline: planOutline(turnPlan2, undefined) } : kept4);
+    const turnLines2 = recorded ?? own2?.lines ?? (turnPlan2 && fresh ? { outcome: [...offstageLines(input.core, input.observed, reply < 0 ? input.observed.length : reply, texts2), ...fresh.outcome], montage: fresh.montage, outline: planOutline(turnPlan2, undefined) } : kept5);
     const outline3 = turnLines2?.outline ?? [];
     const scene2 = recorded ? [...new Set(recorded.scene.lore.map((id2) => recordedLoreId(folded, id2)))].flatMap((id2) => {
       const entry2 = world.lore[id2];
@@ -147027,8 +148991,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     const seen = (all2) => {
       if (!pending)
         return;
-      const kept4 = new Set((scoped?.kept ?? []).map((p) => p.id));
-      const saw = all2 ? parts : parts.filter((p) => kept4.has(p.id));
+      const kept5 = new Set((scoped?.kept ?? []).map((p) => p.id));
+      const saw = all2 ? parts : parts.filter((p) => kept5.has(p.id));
       if (saw.length > 0)
         pending.finalParts = Object.fromEntries(saw.map((p) => [p.id, partHash(p)]));
       else
@@ -147128,11 +149092,11 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
       await this.book.vacate(bookId, userId);
   }
   keptEarlier(chatId, earlier) {
-    let kept4 = [];
+    let kept5 = [];
     for (const pre of this.prePhase.values())
       if (pre.chatId === chatId)
-        kept4 = pre.facts.earlier.messages;
-    const known2 = new Map(kept4.map((m) => [m.id, m]));
+        kept5 = pre.facts.earlier.messages;
+    const known2 = new Map(kept5.map((m) => [m.id, m]));
     return earlier.map((m) => {
       const text11 = m.swipes[m.swipeId] ?? "";
       const was = known2.get(m.id);
@@ -147144,9 +149108,9 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
   }
   async liveWorld(key, chatId, userId, folded, state2) {
     const world = withPov2(folded, state2);
-    const kept4 = this.liveLores.get(key);
-    if (kept4)
-      return kept4 === world.lore ? world : { ...world, lore: kept4 };
+    const kept5 = this.liveLores.get(key);
+    if (kept5)
+      return kept5 === world.lore ? world : { ...world, lore: kept5 };
     const live = await this.readLore(chatId, userId, world);
     lruSet(this.liveLores, key, live.lore, LIVE_LORES_KEPT);
     await this.loreRouting.sync(userId, world.id);
@@ -147419,18 +149383,25 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     for (const p of parts)
       this.diag.slow(userId, chatId, `state view/${p.name}`, p.ms);
     view.panels["core.context"] = this.inspectorView(chatId, userId);
-    const kept4 = this.ledger.keptOf(chatId);
+    const kept5 = this.ledger.keptOf(chatId);
     const last = observed.at(-1);
-    if (kept4 && last)
-      view.chips.push(replyFailedChip(kept4.turn, kept4.failed, kept4.as, last.id));
+    if (kept5 && last)
+      view.chips.push(replyFailedChip(kept5.turn, kept5.failed, kept5.as, last.id));
     const offer = engineOfferChip(knowledge.chat, () => playedOn(core, observed), settings, last?.id ?? null);
     if (offer)
       view.chips.push(offer);
+    if (!depth2 && last && this.depthOffer && observed.some((m) => m.isUser)) {
+      const depthOffer = await this.depthOffer(chatId, userId, last.id);
+      if (depthOffer)
+        view.chips.push(depthOffer);
+    }
     const live = eventsOf(core, observed, [STORY_TALK, ...ASK_TYPES, ...DRAFT_TYPES]);
     const talk = talkChipOn(core, observed, settings.prompts.texts, live);
     if (talk)
       view.chips.push(talk);
-    view.chips.push(...askChipsOn(core, observed, live), ...settledChipsOn(core, observed, live));
+    view.chips.push(...askChipsOn(core, observed, live), ...await settledChipsOn(core, observed, live, this.blobs, userId));
+    if (depth2 && last && this.bootstrapChips)
+      view.chips.push(...await this.bootstrapChips(chatId, userId, last.id));
     const staged = await this.staged.get(chatId, userId);
     view.staged = staged ? { action: staged.action, params: staged.request, source: staged.source, label: staged.label } : null;
     return view;
@@ -147450,8 +149421,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
       const own2 = m.metadata[LEDGER_NAMESPACE];
       if (isRecord(own2) && typeof own2.action === "string")
         return;
-      const words13 = (m.swipes[m.swipeId] ?? m.content).trim() !== "";
-      const intent2 = { action: staged.action, params: staged.params, source: staged.source, staged: true, ...words13 ? { described: true } : {} };
+      const words14 = (m.swipes[m.swipeId] ?? m.content).trim() !== "";
+      const intent2 = { action: staged.action, params: staged.params, source: staged.source, staged: true, ...words14 ? { described: true } : {} };
       await this.host.chats.writeMetadata(chatId, messageId, { ...m.metadata, [LEDGER_NAMESPACE]: { ...isRecord(own2) ? own2 : {}, ...intent2 } }, userId);
       await this.staged.set(chatId, userId, null);
       this.push.changed(chatId, userId);
@@ -147467,11 +149438,11 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     const wanted = events3.map((e) => JSON.stringify(e));
     let from = start;
     for (const w of wanted) {
-      const index = rec.events.findIndex((e, i) => i >= from && JSON.stringify(e) === w);
-      if (index < 0)
+      const index2 = rec.events.findIndex((e, i) => i >= from && JSON.stringify(e) === w);
+      if (index2 < 0)
         continue;
-      refs.push({ in: "events", index });
-      from = index + 1;
+      refs.push({ in: "events", index: index2 });
+      from = index2 + 1;
     }
     return refs;
   }
@@ -147536,8 +149507,8 @@ function interpretedTarget(params, world, state2, text11, reg) {
     const idx = cal.dayParts.findIndex((d) => d.id.toLowerCase() === until2 || d.label.toLowerCase() === until2);
     const part = cal.dayParts[idx];
     if (part) {
-      const words13 = [until2, part.label.toLowerCase()].map((w) => w.replace(/[^a-z0-9 ]/g, "")).filter((w) => w !== "");
-      if (next || /\btomorrow\b/i.test(text11) || new RegExp(`\\bnext\\s+(${words13.join("|")})\\b`, "i").test(text11))
+      const words14 = [until2, part.label.toLowerCase()].map((w) => w.replace(/[^a-z0-9 ]/g, "")).filter((w) => w !== "");
+      if (next || /\btomorrow\b/i.test(text11) || new RegExp(`\\bnext\\s+(${words14.join("|")})\\b`, "i").test(text11))
         return nextDayPart(cal, now, idx);
       return { type: "day_part", dayPart: part.id };
     }
@@ -147563,8 +149534,8 @@ function planAnchors(reg, world, state2) {
     return blocks.find((b, i) => b.activity === "sleep" && b.end > state2.clock && !(blocks[i + 1]?.activity === "sleep" && blocks[i + 1]?.start === b.end))?.end ?? null;
   };
 }
-function unfitId(messageId, swipeId, index) {
-  return index === 0 ? `unfit:${messageId}:${swipeId}` : `unfit:${messageId}:${swipeId}:${index}`;
+function unfitId(messageId, swipeId, index2) {
+  return index2 === 0 ? `unfit:${messageId}:${swipeId}` : `unfit:${messageId}:${swipeId}:${index2}`;
 }
 var READ_CHIP_PREFIXES = ["undo:", "confirm:", "untracked:", "choice:", "unpriced:", "adv:"];
 function isReadChip(id2) {
@@ -147578,9 +149549,9 @@ function restChipId(messageId, swipeId) {
 }
 var NO_VALUE = { "": true, none: true, null: true, nil: true, na: true, "n a": true, nothing: true, no: true, undefined: true, empty: true };
 function offeredNext(reg, world, state2, next, text11, secrets) {
-  const words13 = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/^(?:i|we)\s+/, "");
-  const said2 = words13(next);
-  if (hasOwn(NO_VALUE, said2) || words13(text11).startsWith(said2))
+  const words14 = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/^(?:i|we)\s+/, "");
+  const said2 = words14(next);
+  if (hasOwn(NO_VALUE, said2) || words14(text11).startsWith(said2))
     return null;
   return findLeaks(next, secrets).length > 0 || namesHiddenOrSecretLore(reg, world, state2, next, text11) ? null : next;
 }
@@ -147592,8 +149563,8 @@ function quotedWords(reg, world, state2, piece, secrets, heard) {
 }
 function planSaid(reg, world, state2, agenda, text11, secrets) {
   const fits3 = (item2) => {
-    const words13 = Object.values(item2).flatMap((v4) => v4 === undefined ? [] : typeof v4 === "string" ? [v4] : [...v4]);
-    return findLeaks(words13, secrets).length === 0 && !namesHiddenOrSecretLore(reg, world, state2, words13.join(" \xB7 "), text11);
+    const words14 = Object.values(item2).flatMap((v4) => v4 === undefined ? [] : typeof v4 === "string" ? [v4] : [...v4]);
+    return findLeaks(words14, secrets).length === 0 && !namesHiddenOrSecretLore(reg, world, state2, words14.join(" \xB7 "), text11);
   };
   const goals = (agenda?.goals ?? []).filter(fits3);
   const orders = (agenda?.orders ?? []).filter(fits3);
@@ -148105,11 +150076,11 @@ function describeProposal(p, view) {
       const was = who === "You" ? "were" : "was";
       const org = named3("org") ? s("org") : "";
       const at3 = org !== "" ? ` at ${org}` : "";
-      const words13 = (k) => typeof p[k] === "string" ? p[k].trim() : "";
+      const words14 = (k) => typeof p[k] === "string" ? p[k].trim() : "";
       const known2 = view && named3("org") ? knownRef(view, "person", String(p.org)) : null;
-      const said2 = words13("position");
+      const said2 = words14("position");
       const position = (known2 && view ? positionsOf(view, known2.id).find((x) => x.id === said2 || x.title.toLowerCase() === said2.toLowerCase())?.title : undefined) ?? said2.replace(/_/g, " ");
-      const as = words13("title") || position;
+      const as = words14("title") || position;
       if (p.type === "membership") {
         if (p.change === "join")
           return `${who} joined ${org || "an organization"}${as !== "" ? ` as ${as}` : ""}`;
@@ -148117,7 +150088,7 @@ function describeProposal(p, view) {
           return `${who} left ${org || "an organization"}`;
         if (p.change === "appoint")
           return `${who} ${be(who)} now ${position || "appointed"}${at3}`;
-        return `${who} now ${who === "You" ? "go" : "goes"} by ${words13("title") || "a title"}${at3}`;
+        return `${who} now ${who === "You" ? "go" : "goes"} by ${words14("title") || "a title"}${at3}`;
       }
       const rate = typeof p.rate === "number" && Number.isFinite(p.rate) ? world ? formatMoney(p.rate, world.currency) : String(p.rate) : "";
       switch (p.change) {
@@ -148546,10 +150517,10 @@ class SecrecyMoves {
     return look;
   }
   async books(userId) {
-    const kept4 = new Set(await this.host.storage.list(DIR, userId));
+    const kept5 = new Set(await this.host.storage.list(DIR, userId));
     const out2 = [];
     for (const book of await pinBooks(this.host, null, userId)) {
-      const { last, state: state2 } = standing4(kept4.has(fileOf(book.id)) ? (await this.read(book.id, userId)).file : null);
+      const { last, state: state2 } = standing4(kept5.has(fileOf(book.id)) ? (await this.read(book.id, userId)).file : null);
       out2.push({ ...book, state: state2, applied: last?.applied ?? null, restored: last?.restored ?? null });
     }
     return out2;
@@ -148668,22 +150639,22 @@ class AssistantError extends Error {
   }
 }
 var newId3 = (prefix) => `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
-function historyOf3(messages, tokens3) {
+function historyOf4(messages, tokens3) {
   const exchanges = [];
   for (const [at3, m] of messages.entries()) {
     const next = messages[at3 + 1];
     if (m.role === "user" && next?.role === "assistant" && next.text.trim() !== "")
       exchanges.push({ user: m.text, answer: next.text });
   }
-  const kept4 = [];
+  const kept5 = [];
   let used = 0;
   for (const e of exchanges.toReversed()) {
     used += tokensOf(e.user) + tokensOf(e.answer);
     if (used > tokens3)
       break;
-    kept4.unshift(e);
+    kept5.unshift(e);
   }
-  return { history: kept4.flatMap((e) => [{ role: "user", text: e.user }, { role: "assistant", text: e.answer }]), left: messages.length - kept4.length * 2 };
+  return { history: kept5.flatMap((e) => [{ role: "user", text: e.user }, { role: "assistant", text: e.answer }]), left: messages.length - kept5.length * 2 };
 }
 function traceOf(t) {
   const args = new Map;
@@ -148906,7 +150877,7 @@ class Assistant {
 
 `);
     const instructions = await systemInstructions(await reader.view(), { role: ASSISTANT_ROLE, tokens: agents.systemTokens, texts: texts2 });
-    const { history, left } = historyOf3(t.messages.map((m) => m.value), own2.historyTokens);
+    const { history, left } = historyOf4(t.messages.map((m) => m.value), own2.historyTokens);
     const note2 = left > 0 ? renderPrompt(GM_TEXT.historyNote, texts2, { ...vars, count: String(left), messages: nounFor(left, "message", "messages") }).trim() : "";
     const first = history[0];
     if (note2 !== "" && first)
@@ -148962,21 +150933,21 @@ ${text11}` : text11;
       }
     };
   }
-  answer(t, run2, ask4) {
+  answer(t, run2, ask5) {
     const { chatId, userId } = t;
     const done = (async () => {
       this.rt.diag.agentWorking(chatId, userId, run2.id, run2.label);
       this.push(t);
       let reply;
       try {
-        reply = await ask4.handle.send(ask4.text, run2.controller.signal);
+        reply = await ask5.handle.send(ask5.text, run2.controller.signal);
       } catch (error) {
         reply = { status: "failed", text: "", code: "failed", reason: messageOf(error), usage: emptyUsage() };
       } finally {
         this.rt.diag.agentDone(chatId, userId, run2.id);
       }
-      const transcript = ask4.handle.transcript();
-      await recordAgentCalls(this.rt.diag, { at: { chatId, userId, turn: null }, phase: null, role: ASSISTANT_ROLE, connection: ask4.connection, model: ask4.model ?? null, transcript }).catch((error) => this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the GM assistant's calls weren't all recorded (${messageOf(error)})`, userId));
+      const transcript = ask5.handle.transcript();
+      await recordAgentCalls(this.rt.diag, { at: { chatId, userId, turn: null }, phase: null, role: ASSISTANT_ROLE, connection: ask5.connection, model: ask5.model ?? null, transcript }).catch((error) => this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the GM assistant's calls weren't all recorded (${messageOf(error)})`, userId));
       const atOnce = await this.withThread(chatId, userId, async (u) => {
         try {
           const trace = traceOf(transcript);
@@ -148991,10 +150962,10 @@ ${text11}` : text11;
             status: reply.status,
             ...reply.status !== "answered" && reply.reason ? { reason: reply.reason } : {}
           };
-          const ops = [...ask4.collected.values()].map(({ op, preview }) => ({ key: preview.key, changeType: preview.changeType, lines: [...preview.lines], mode: preview.mode, op }));
-          const proposal = reply.status !== "cancelled" && ops.length > 0 ? { v: 1, id: newId3("p"), messageId: answer2.id, agentId: run2.agentId, status: "open", ops, connection: ask4.modes } : null;
+          const ops = [...ask5.collected.values()].map(({ op, preview }) => ({ key: preview.key, changeType: preview.changeType, lines: [...preview.lines], mode: preview.mode, op }));
+          const proposal = reply.status !== "cancelled" && ops.length > 0 ? { v: 1, id: newId3("p"), messageId: answer2.id, agentId: run2.agentId, status: "open", ops, connection: ask5.modes } : null;
           await this.save(u, { messages: [answer2], proposals: proposal ? [proposal] : [] });
-          return proposal && ask4.apply === "at_once" && reply.status === "answered" && ops.every((o) => o.mode !== "confirm") ? proposal.id : null;
+          return proposal && ask5.apply === "at_once" && reply.status === "answered" && ops.every((o) => o.mode !== "confirm") ? proposal.id : null;
         } finally {
           u.run = null;
         }
@@ -149233,11 +151204,11 @@ async function momentOf(rt, chatId, userId, settings) {
   if (!head)
     throw new Error("this chat's world isn't loaded");
   const { core, observed } = head;
-  const index = observed.findLastIndex((m) => !m.isUser);
-  const last = observed[index];
-  const said2 = ownMessage(observed.slice(0, Math.max(index, 0)));
+  const index2 = observed.findLastIndex((m) => !m.isUser);
+  const last = observed[index2];
+  const said2 = ownMessage(observed.slice(0, Math.max(index2, 0)));
   const record7 = last ? core.readContext(last.id, observed) : null;
-  const recent = index < 0 ? [] : recentLines(core, observed, index, rt.registry);
+  const recent = index2 < 0 ? [] : recentLines(core, observed, index2, rt.registry);
   const left = [];
   if (!last)
     left.push("the reply: the chat has none yet");
@@ -149256,7 +151227,7 @@ async function momentOf(rt, chatId, userId, settings) {
     world: await rt.readLore(chatId, userId, at3.world),
     reply: last ? { id: last.id, text: readableReply(last.swipes[last.swipeId] ?? "", settings.hideJsonBlocks) } : null,
     user: said2 ? said2.swipes[said2.swipeId] ?? "" : "",
-    earlier: observed.slice(0, said2 ? observed.indexOf(said2) : Math.max(index, 0)),
+    earlier: observed.slice(0, said2 ? observed.indexOf(said2) : Math.max(index2, 0)),
     knowing: knowledgeOn(await rt.chatKnowledge.get(chatId, userId), at3.world, settings),
     left
   };
@@ -149292,7 +151263,7 @@ function memoryTask(kind) {
       return { run: null, left: [] };
     const input = postInput(m, reply);
     const opening = await postOpening(rt.minds, input);
-    const call = opening ? await firstCall(kind, (ask4) => postMemory({ ...rt.minds, ask: ask4 }, { ...input, signal: signal2 }, opening)) : null;
+    const call = opening ? await firstCall(kind, (ask5) => postMemory({ ...rt.minds, ask: ask5 }, { ...input, signal: signal2 }, opening)) : null;
     if (!call)
       return { run: null, left: [kind === "memory" ? "a memory: no one heard the latest exchange at a level that remembers it, or the minds are off" : "a consolidation: no one's notes are due to fold, or the minds are off"] };
     const knowing3 = def2.id === roleTaskTextId("memory", "memory", "answer_knowing") || def2.id !== roleTaskTextId("memory", "memory", "answer") && call.knowing === true;
@@ -149313,7 +151284,7 @@ var GROUNDED = {
   [roleContractId("scene", "scene")]: async (rt, m) => ({ run: (ctx) => sceneRun(rt, { text: m.user, world: m.world, state: m.at.start, classic: noClassic }, ctx), left: [] }),
   [roleContractId("minds", "mind")]: async (rt, m, _def, signal2) => {
     const before = m.earlier.findLast((x) => !x.isUser);
-    const call = await firstCall("mind", (ask4) => preMinds({ ...rt.minds, ask: ask4 }, { chatId: m.chatId, userId: m.userId, world: m.world, state: m.at.start, user: m.user, reply: before ? before.swipes[before.swipeId] ?? "" : "", timelapse: false, signal: signal2, guidance: m.guidance.mind ?? "", knowledge: m.knowing }));
+    const call = await firstCall("mind", (ask5) => preMinds({ ...rt.minds, ask: ask5 }, { chatId: m.chatId, userId: m.userId, world: m.world, state: m.at.start, user: m.user, reply: before ? before.swipes[before.swipeId] ?? "" : "", timelapse: false, signal: signal2, guidance: m.guidance.mind ?? "", knowledge: m.knowing }));
     return call ? { run: (ctx) => mindRun(rt, ctx, call, "pre"), left: [] } : { run: null, left: ["a mind: no one thinks at the turn's start (no one is with the player character, or the minds are off)"] };
   },
   [roleContractId("knowledge", "knowledge")]: async (rt, m, _def, signal2) => {
@@ -149324,7 +151295,7 @@ var GROUNDED = {
       return { run: null, left: ["the knowledge step: this chat doesn't track knowledge"] };
     const input = postInput(m, reply);
     const opening = await postOpening(rt.minds, input);
-    const call = opening ? await firstCall("knowledge", (ask4) => postKnowledge({ ...rt.minds, ask: ask4 }, { ...input, signal: signal2, read: Promise.resolve([]) }, opening)) : null;
+    const call = opening ? await firstCall("knowledge", (ask5) => postKnowledge({ ...rt.minds, ask: ask5 }, { ...input, signal: signal2, read: Promise.resolve([]) }, opening)) : null;
     return call ? { run: (ctx) => mindRun(rt, ctx, call, "read"), left: ["what the read found: Test doesn't read the reply first"] } : { run: null, left: ["the knowledge step: no one was there to learn from the latest exchange"] };
   },
   [roleContractId("read", "extract")]: async (rt, m) => {
@@ -149405,7 +151376,7 @@ var ALONE = "the rest of its task: it ran on the role's texts alone, named for t
 function textsAlone(rt, ctx, m, def2, contract) {
   const sub2 = contract.slice(roleContractId(ctx.role, "").length);
   const part = def2.id.startsWith(`${contract}.answer`) ? def2.id.slice(contract.length + 1) : "answer";
-  return runRoleAgent(rt, ctx, { sub: sub2, phase: "pre", names: namesOf5(m.head.world, m.head.state), vars: {}, answer: { part }, tools: null, check: (raw) => raw });
+  return runRoleAgent(rt, ctx, { sub: sub2, phase: "pre", names: namesOf6(m.head.world, m.head.state), vars: {}, answer: { part }, tools: null, check: (raw) => raw });
 }
 async function roleTextTest(rt, input) {
   const { userId, chatId, def: def2, role, signal: signal2 } = input;
@@ -149475,7 +151446,7 @@ async function draftOf2(rt, userId, at3, order, live, d, press) {
   const name = (id2) => own(state2.entities, id2)?.name ?? id2;
   const text11 = async (hash) => hash ? await rt.blobs.get(userId, hash) ?? "" : "";
   const placeOf6 = (from) => ({ messageId: from.messageId, index: order.get(from.messageId) ?? 0 });
-  const draft = d.draft;
+  const draft = await draftWithTexts(rt.blobs, userId, d.draft);
   const inputs = changedInputs(state2, draft);
   const changed = [...inputs.minds.map((who) => `${name(who)}'s mind`), ...inputs.notebook.map((path3) => `the author's notebook (${path3.slice(NOTEBOOK_DIR.length)})`)];
   const ctx = rt.registry.context(world, state2);
@@ -149517,18 +151488,40 @@ async function draftOf2(rt, userId, at3, order, live, d, press) {
     ...press ? { press } : {}
   };
 }
-var presses = new Map;
-var PRESSES_KEPT = 500;
-var pressKey = (chatId, userId, draft) => `${userId}\x00${chatId}\x00${draft}`;
-function notePress(chatId, userId, draft, press) {
-  const key = pressKey(chatId, userId, draft);
-  presses.delete(key);
-  presses.set(key, { op: press.op, state: press.state, lines: [...press.lines] });
-  for (const old of presses.keys()) {
-    if (presses.size <= PRESSES_KEPT)
-      break;
-    presses.delete(old);
-  }
+var PRESSES_KEPT = 200;
+var pressesPath = (chatId) => `${runDir(chatId)}presses.json`;
+function isPress(raw) {
+  if (!isRecord(raw))
+    return false;
+  return (raw.op === "settle" || raw.op === "redraft") && (raw.state === "running" || raw.state === "done" || raw.state === "failed") && Array.isArray(raw.lines) && raw.lines.every((l) => typeof l === "string");
+}
+var isPresses = (raw) => isRecord(raw) && raw.v === 1 && isRecord(raw.presses) && Object.values(raw.presses).every(isPress);
+async function pressesOf(host, chatId, userId) {
+  const raw = await readStoredJson(host, pressesPath(chatId), userId, "Drafts' presses", isPresses);
+  return new Map(isRecord(raw) && isRecord(raw.presses) ? Object.entries(raw.presses) : []);
+}
+var writing = new Map;
+function notePress(host, chatId, userId, draft, press) {
+  const key = `${userId}\x00${chatId}`;
+  const next = (writing.get(key) ?? Promise.resolve()).then(async () => {
+    const kept5 = await pressesOf(host, chatId, userId);
+    kept5.delete(draft);
+    kept5.set(draft, { op: press.op, state: press.state, lines: [...press.lines] });
+    for (const old of kept5.keys()) {
+      if (kept5.size <= PRESSES_KEPT)
+        break;
+      kept5.delete(old);
+    }
+    const path3 = pressesPath(chatId);
+    await host.storage.write(`${path3}.tmp`, JSON.stringify({ v: 1, presses: Object.fromEntries(kept5) }), userId);
+    await host.storage.move(`${path3}.tmp`, path3, userId);
+  }).catch((error) => host.log("warn", `[LumiRPEngine] chat ${chatId}, draft ${draft}: what the press came to wasn't kept (${error instanceof Error ? error.message : String(error)})`, userId));
+  writing.set(key, next);
+  next.finally(() => {
+    if (writing.get(key) === next)
+      writing.delete(key);
+  });
+  return next;
 }
 async function draftsView(rt, chatId, userId) {
   const head = await headRead(rt, chatId, userId);
@@ -149538,8 +151531,9 @@ async function draftsView(rt, chatId, userId) {
   const live = head.at.events;
   const drafts = [];
   const order = await chainNumbers(rt.host, chatId, userId, (await rt.ledger.chainBases(chatId, userId)).map((b) => b.message));
+  const kept5 = await pressesOf(rt.host, chatId, userId);
   for (const d of draftsOn(live))
-    drafts.push(await draftOf2(rt, userId, head.at, order, live, d, presses.get(pressKey(chatId, userId, d.draft.id))));
+    drafts.push(await draftOf2(rt, userId, head.at, order, live, d, kept5.get(d.draft.id)));
   return { on: on || drafts.length > 0, drafts: drafts.reverse() };
 }
 
@@ -149554,7 +151548,7 @@ async function openAtHead(rt, chatId, userId, id2) {
     throw new DraftRefused("That draft isn't on this chat's chain any more.");
   if (found.state !== "open")
     throw new DraftRefused(`That draft is already ${found.state} here.`);
-  return { basis: head.basis, at: head.at, draft: found.draft };
+  return { basis: head.basis, at: head.at, draft: await draftWithTexts(rt.blobs, userId, found.draft) };
 }
 async function dropDraft(rt, chatId, userId, id2, why3 = "You dropped it from GM \u2192 Depth \u2192 Drafts.") {
   const { basis } = await openAtHead(rt, chatId, userId, id2);
@@ -149577,17 +151571,18 @@ async function settleNow(rt, chatId, userId, id2) {
 function redraftIndex(id2) {
   return 268435456 + Number.parseInt(id2.slice(1, 8), 16);
 }
-async function redraft(rt, chatId, userId, id2) {
+async function redraft(rt, chatId, userId, id2, edit2) {
   const { basis, at: at3, draft } = await openAtHead(rt, chatId, userId, id2);
-  await dropDraft(rt, chatId, userId, id2, "You asked for it to be redrafted (GM \u2192 Depth \u2192 Drafts).");
+  await dropDraft(rt, chatId, userId, id2, edit2 ? "You edited it (GM \u2192 Depth \u2192 Drafts): it is drafted again from your words." : "You asked for it to be redrafted (GM \u2192 Depth \u2192 Drafts).");
   const [start, end] = draft.episode.span;
   const episode = {
-    why: draft.episode.why,
+    why: edit2 ? `${draft.episode.why}
+The player edited this episode; his words are a directive to draft it from: \u201C${edit2}\u201D` : draft.episode.why,
     in: start - at3.state.clock,
     minutes: Math.max(1, end - start),
     places: draft.episode.places,
     people: draft.episode.people,
-    parts: draft.episode.parts.map((p) => ({ subject: p.subject, treatment: p.treatment, rationale: `${p.rationale} (redrafted at your ask)`.trim() }))
+    parts: draft.episode.parts.map((p) => ({ subject: p.subject, treatment: p.treatment, rationale: `${p.rationale} (${edit2 ? "redrafted from your edit" : "redrafted at your ask"})`.trim() }))
   };
   const r = await draftEpisode(rt, chatId, userId, basis, episode, { index: redraftIndex(id2) });
   const said2 = [...r.said];
@@ -149787,12 +151782,12 @@ async function treatmentsView(rt, chatId, userId) {
   const order = await chainNumbers(rt.host, chatId, userId, (await rt.ledger.chainBases(chatId, userId)).map((b) => b.message));
   const placeOf6 = (messageId) => ({ messageId, index: order.get(messageId) ?? 0 });
   const turns = new Map;
-  const turnAt = (from, index) => {
+  const turnAt = (from, index2) => {
     const key = containerKey(from);
     const had = turns.get(key);
     if (had)
       return had;
-    const made = { from, index, spends: [] };
+    const made = { from, index: index2, spends: [] };
     turns.set(key, made);
     return made;
   };
@@ -149829,7 +151824,7 @@ async function treatmentsView(rt, chatId, userId) {
         firstAt.set(id2, e.index);
     }
   }
-  const drafts = draftsOn(at3.events);
+  const drafts = await Promise.all(draftsOn(at3.events).map(async (d) => ({ ...d, draft: await draftWithTexts(rt.blobs, userId, d.draft) })));
   const draftById = new Map(drafts.map((d) => [d.draft.id, d]));
   const log = [];
   for (const [key, turn2] of turns) {
@@ -149971,7 +151966,7 @@ async function archive(rt, host, chatId, userId, q) {
   const seen = offset + found.hits.length;
   const numbers4 = await chatNumbers(rt.host, chatId, userId);
   return {
-    hits: found.hits.map((h) => ({ messageId: h.messageId, index: numbers4.get(h.messageId) ?? h.index, isUser: h.isUser, swipeId: h.swipeId, at: h.storyTime === null ? null : formatClock(cal, h.storyTime), places: h.places.map(nameOf18), people: h.people.map(nameOf18), snippet: h.snippet, beats: h.beats.length })),
+    hits: found.hits.map((h) => ({ messageId: h.messageId, index: numbers4.get(h.messageId) ?? h.index, isUser: h.isUser, swipeId: h.swipeId, at: h.storyTime === null ? null : formatClock(cal, h.storyTime), places: h.places.map(nameOf18), people: h.people.map(nameOf18), reached: reachedOf(h.exposure, nameOf18), snippet: h.snippet, beats: h.beats.length })),
     next: found.hits.length > 0 && seen < found.total ? seen : null,
     unread
   };
@@ -149982,7 +151977,7 @@ async function linkWrote(rt, chatId, userId, who, press, landed) {
   if (!entry2)
     return;
   try {
-    const r = await linkTruths(rt, chatId, userId, entry2.basis, { who: [who], beats: [], key: ["gm", press, who], model: portFor(rt, userId) });
+    const r = await linkTruths(rt, chatId, userId, entry2.basis, { who: [who], beats: [], key: ["gm", press, who], model: portFor(rt, userId), archive: chatArchive(rt, chatId, userId, entry2.basis.message) });
     for (const line2 of r.refused)
       rt.host.log("info", `[LumiRPEngine] chat ${chatId}, the GM's truth-link of ${who}'s ${press}: ${line2}`, userId);
   } catch (error) {
@@ -150035,6 +152030,8 @@ async function depthRequest(rt, host, r, userId) {
         return { archive: await archive(rt, host, chatId, userId, r) };
       case "scene":
         return { scene: await sceneView(rt, await host.head(chatId, userId), chatId, userId, r.message), dryRun: rt.loopback.dryRunOf(chatId, userId) };
+      case "dry_run":
+        return { dryRun: rt.loopback.dryRunOf(chatId, userId) };
       case "drafts":
         return { drafts: await draftsView(rt, chatId, userId) };
       case "draft_drop": {
@@ -150044,18 +152041,12 @@ async function depthRequest(rt, host, r, userId) {
       case "draft_settle":
       case "draft_redraft": {
         const op = r.op === "draft_settle" ? "settle" : "redraft";
-        const doing = op === "settle" ? "The author is reading it against everything since its time" : "The author is drafting it again";
-        notePress(chatId, userId, r.draft, { op, state: "running", lines: [`${doing}.`] });
-        const job = op === "settle" ? settleNow(rt, chatId, userId, r.draft) : redraft(rt, chatId, userId, r.draft);
-        job.then((lines3) => {
-          for (const line2 of lines3)
-            rt.host.log("info", `[LumiRPEngine] chat ${chatId}, draft ${r.draft}: ${line2}`, userId);
-          notePress(chatId, userId, r.draft, { op, state: "done", lines: lines3.length > 0 ? lines3 : ["Nothing changed: the author left it as it was."] });
-        }).catch((error) => {
-          const why3 = error instanceof Error ? error.message : String(error);
-          rt.host.log("warn", `[LumiRPEngine] chat ${chatId}, draft ${r.draft}: ${why3}`, userId);
-          notePress(chatId, userId, r.draft, { op, state: "failed", lines: [why3] });
-        }).finally(() => rt.push.changed(chatId, userId));
+        const edit2 = r.op === "draft_redraft" && typeof r.text === "string" && r.text.trim() !== "" ? r.text.trim() : undefined;
+        const doing = op === "settle" ? "The author is reading it against everything since its time" : edit2 ? "The author is drafting it again from your edit" : "The author is drafting it again";
+        const running = notePress(rt.host, chatId, userId, r.draft, { op, state: "running", lines: [`${doing}.`] });
+        const job = op === "settle" ? settleNow(rt, chatId, userId, r.draft) : redraft(rt, chatId, userId, r.draft, edit2);
+        job.then((lines3) => notePress(rt.host, chatId, userId, r.draft, { op, state: "done", lines: lines3.length > 0 ? lines3 : ["Nothing changed: the author left it as it was."] })).catch((error) => notePress(rt.host, chatId, userId, r.draft, { op, state: "failed", lines: [error instanceof Error ? error.message : String(error)] })).finally(() => rt.push.changed(chatId, userId));
+        await running;
         return { said: [`${doing}; its page in GM \u2192 Depth \u2192 Drafts shows what became of it.`] };
       }
       case "treatments":
@@ -150116,6 +152107,7 @@ class Dispatcher {
     this.assistant = new Assistant(rt);
     this.review = rt.review;
     this.review.readChip = async (chatId, userId, chipId, choice) => void await this.chip(chatId, userId, chipId, choice);
+    rt.depthOffer = async (chatId, userId, messageId) => await depthChosen(rt.host, chatId, userId) ? null : depthOfferChip(await this.bootstraps.view(chatId, userId), messageId, await rt.loopback.unready(userId));
   }
   start() {
     this.rt.host.frontend.onMessage((message2, userId, session) => {
@@ -150236,13 +152228,13 @@ class Dispatcher {
       if (!ids2(r.things) || !ids2(r.places) || r.things.length + r.places.length === 0)
         throw new RequestError("bad_request", "say which things and places to keep");
       const { things: things2, places: places2 } = r;
-      let kept4 = null;
+      let kept5 = null;
       await this.rt.worlds.editFrom(run2.worldId, userId, (draft) => {
         const keep2 = keepInWorld(head.ctx, draft, things2, places2);
-        kept4 = keep2.result;
+        kept5 = keep2.result;
         return { lre: PROTOCOL_VERSION, type: "lre.editor", reqId: "", worldId: run2.worldId, base: null, op: "patch", ops: keep2.ops };
       }, noted2);
-      return { ...kept4 !== null ? { kept: kept4 } : {}, made: madeInPlay(head.ctx, await this.rt.worlds.working(run2.worldId, userId)) };
+      return { ...kept5 !== null ? { kept: kept5 } : {}, made: madeInPlay(head.ctx, await this.rt.worlds.working(run2.worldId, userId)) };
     }
     if (r.op === "leave") {
       if (typeof r.key !== "string" || r.key === "" || typeof r.left !== "boolean")
@@ -150323,11 +152315,11 @@ class Dispatcher {
         continue;
       const refs = Runtime.refsOf({ events: cont.events, pre: 0 }, events3);
       if (refs.length === events3.length)
-        return refs.map(({ index }) => ({ in: "post", seq: cont.seq, index }));
+        return refs.map(({ index: index2 }) => ({ in: "post", seq: cont.seq, index: index2 }));
     }
     const wanted = JSON.stringify(events3);
     const entry2 = rec.post.findLast((p) => p.kind === "confirm" && JSON.stringify(p.events) === wanted);
-    return entry2 ? entry2.events.flatMap((_, index) => rec.undone.some((u) => u.in === "post" && u.seq === entry2.seq && u.index === index) ? [] : [{ in: "post", seq: entry2.seq, index }]) : [];
+    return entry2 ? entry2.events.flatMap((_, index2) => rec.undone.some((u) => u.in === "post" && u.seq === entry2.seq && u.index === index2) ? [] : [{ in: "post", seq: entry2.seq, index: index2 }]) : [];
   }
   static folded(core, observed, messageId, rec, events3, refs) {
     const key = (r) => r.in === "events" ? `e:${r.index}` : `p:${r.seq}:${r.index}`;
@@ -150366,6 +152358,8 @@ class Dispatcher {
           const chatId = r.chatId;
           if (run2)
             this.rt.ledger.open(chatId, userId).catch((error) => this.rt.diag.error({ chatId, userId, turn: null }, "ledger", error, "the chat wasn't opened"));
+          if (run2)
+            await this.rt.openedDepth(chatId, userId).catch((error) => this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: its loopback connection wasn't checked (${error instanceof Error ? error.message : String(error)})`, userId));
         }
         return;
       }
@@ -150381,9 +152375,11 @@ class Dispatcher {
       case "lre.cancel":
         reply("lre.cancel", { cancelled: this.rt.ledger.cancel(r.chatId, userId) });
         return;
-      case "lre.restart":
-        reply("lre.restart", { start: this.rt.ledger.claimRestart(r.chatId, userId, session, r.turn, swipeDirectionOf(r.direction) ?? undefined) });
+      case "lre.restart": {
+        const direction = swipeDirectionOf(r.direction) ?? undefined;
+        reply("lre.restart", { start: !this.rt.loopback.swipeAnswer(r.chatId, userId, r.turn, direction) && this.rt.ledger.claimRestart(r.chatId, userId, session, r.turn, direction) });
         return;
+      }
       case "lre.action": {
         await this.requireWorldChat(r.chatId, userId);
         const said2 = r.text?.trim() ?? "";
@@ -150568,8 +152564,8 @@ class Dispatcher {
         const observed = reuse ? cachedChain(messages) : toChain(messages);
         const t2 = performance.now();
         const timed = { render: 0, build: 0, built: [] };
-        const ask4 = { part: r.part, ...r.id !== undefined ? { id: r.id } : {}, ...r.ids !== undefined ? { ids: r.ids } : {}, ...r.kind !== undefined ? { kind: r.kind } : {}, ...r.since !== undefined ? { since: r.since } : {}, ...r.bytes !== undefined ? { bytes: r.bytes } : {} };
-        const part = readGmPart({ core, observed, registry: this.rt.registry, minds: settings.minds, waitsOn: this.rt.ledger.queuedOn(r.chatId), reuse }, ask4, timed);
+        const ask5 = { part: r.part, ...r.id !== undefined ? { id: r.id } : {}, ...r.ids !== undefined ? { ids: r.ids } : {}, ...r.kind !== undefined ? { kind: r.kind } : {}, ...r.since !== undefined ? { since: r.since } : {}, ...r.bytes !== undefined ? { bytes: r.bytes } : {} };
+        const part = readGmPart({ core, observed, registry: this.rt.registry, minds: settings.minds, waitsOn: this.rt.ledger.queuedOn(r.chatId), reuse }, ask5, timed);
         if (!part)
           throw new RequestError("unavailable", "the chat's world revision is not loaded");
         if ("refused" in part)
@@ -151144,17 +153140,17 @@ class Dispatcher {
       }
       case "attach": {
         const { world, revision: revision2 } = await store.get(r.worldId, userId);
-        const index = await store.index(r.worldId, userId);
-        if (!index)
+        const index2 = await store.index(r.worldId, userId);
+        if (!index2)
           throw new RequestError("not_found", `world ${r.worldId} not found`);
         const existing = await this.rt.runOf(r.chatId, userId);
         if (existing && existing.worldId !== r.worldId)
           throw new RequestError("conflict", "This chat already plays another world. Start a new chat for this one.");
         if (existing)
-          await this.rt.book.attach(r.chatId, await this.rt.book.ensure(world, index, userId), userId);
+          await this.rt.book.attach(r.chatId, await this.rt.book.ensure(world, index2, userId), userId);
         else {
           await this.rt.chatMeta.run(r.chatId, userId, () => this.rt.host.chats.mergeChatMetadata(r.chatId, { [LEDGER_NAMESPACE]: JSON.parse(JSON.stringify(newChatRun(r.worldId, revision2))) }, userId));
-          const bookId = await this.rt.book.ensure(world, index, userId);
+          const bookId = await this.rt.book.ensure(world, index2, userId);
           await this.rt.book.attach(r.chatId, bookId, userId);
           this.rt.forgetChat(r.chatId);
           await this.rt.ledger.open(r.chatId, userId);
@@ -151186,7 +153182,7 @@ class Dispatcher {
       case "templates":
         return { templates: this.rt.templateInfo.filter((t) => hasOwn(this.rt.templates, t.id)) };
       case "chats": {
-        const worlds = new Map((await store.list(userId)).map((index) => [index.id, index]));
+        const worlds = new Map((await store.list(userId)).map((index2) => [index2.id, index2]));
         if (r.worldId !== undefined && !worlds.has(r.worldId))
           throw new RequestError("not_found", `world ${r.worldId} not found`);
         const chats = [];
@@ -151194,11 +153190,11 @@ class Dispatcher {
           if (r.chatId !== undefined && chat.id !== r.chatId)
             continue;
           const run2 = readRun(chat.metadata);
-          const index = run2 && (r.worldId === undefined || run2.worldId === r.worldId) ? worlds.get(run2.worldId) : undefined;
-          if (!run2 || !index)
+          const index2 = run2 && (r.worldId === undefined || run2.worldId === r.worldId) ? worlds.get(run2.worldId) : undefined;
+          if (!run2 || !index2)
             continue;
           const played = await this.rt.revisionInPlay(chat.id, userId, run2);
-          chats.push(played.revision === null ? { chatId: chat.id, name: chat.name, worldId: run2.worldId, revision: null, behind: false, reason: played.reason } : { chatId: chat.id, name: chat.name, worldId: run2.worldId, revision: played.revision, behind: played.revision !== index.head });
+          chats.push(played.revision === null ? { chatId: chat.id, name: chat.name, worldId: run2.worldId, revision: null, behind: false, reason: played.reason } : { chatId: chat.id, name: chat.name, worldId: run2.worldId, revision: played.revision, behind: played.revision !== index2.head });
         }
         return { chats };
       }
@@ -151246,11 +153242,11 @@ class Dispatcher {
     return this.client(userId, session) !== undefined;
   }
   async syncBook(worldId, userId) {
-    const index = await this.rt.worlds.index(worldId, userId);
-    if (!index)
+    const index2 = await this.rt.worlds.index(worldId, userId);
+    if (!index2)
       return;
     const { world } = await this.rt.worlds.get(worldId, userId);
-    await this.rt.book.ensure(world, index, userId);
+    await this.rt.book.ensure(world, index2, userId);
   }
   async preview(chatId, userId, body) {
     const { state: state2, world } = await this.head(chatId, userId);
@@ -151426,6 +153422,29 @@ class Dispatcher {
       this.rt.push.changed(chatId, userId);
       return { applied: true, pending: false };
     }
+    if (kind === DEPTH_OFFER_KIND) {
+      if (!isDepthOfferChoice(choice))
+        throw new RequestError("bad_request", `unknown choice ${choice}`);
+      const ask5 = async (op) => {
+        try {
+          await this.bootstraps.handle({ lre: PROTOCOL_VERSION, type: "lre.bootstrap", reqId: `depth_offer:${this.nextId()}`, chatId, ...op }, userId);
+        } catch (error) {
+          if (error instanceof BootstrapError)
+            throw new RequestError(error.code, error.message);
+          throw error;
+        }
+      };
+      if (choice === DEPTH_OFFER_CHOICES.estimate)
+        await ask5({ op: "estimate" });
+      else if (choice === DEPTH_OFFER_CHOICES.off)
+        await ask5({ op: "opt", on: false });
+      else {
+        await ask5({ op: "opt", on: true });
+        await ask5({ op: "start" });
+      }
+      this.rt.push.changed(chatId, userId);
+      return { applied: true, pending: false };
+    }
     if (kind === "reply_failed") {
       if (choice !== "rerun")
         return { applied: false, pending: false };
@@ -151462,7 +153481,7 @@ class Dispatcher {
       const entry2 = rec?.post.find((p) => p.seq === seq && p.kind === "fix");
       if (!m || !rec || !entry2 || String(m.swipeId) !== swipe)
         throw new RequestError("not_found", "the correction is gone");
-      if (entry2.events.length > 0 && entry2.events.every((_, index) => rec.undone.some((u) => u.in === "post" && u.seq === seq && u.index === index)))
+      if (entry2.events.length > 0 && entry2.events.every((_, index2) => rec.undone.some((u) => u.in === "post" && u.seq === seq && u.index === index2)))
         return { applied: false, pending: false };
       const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs: [], entry: seq });
       if (entry2.agent?.role === ASSISTANT_ROLE && (result.applied || result.pending))
@@ -151504,8 +153523,8 @@ class Dispatcher {
   async retell(chatId, userId, messageId, swipe, seq, choice) {
     const result = await this.rt.ledger.writeTogether(chatId, userId, (core, observed) => {
       const chain = core.chain(observed);
-      const index = chain.findIndex((x) => x.id === messageId);
-      const m = chain[index];
+      const index2 = chain.findIndex((x) => x.id === messageId);
+      const m = chain[index2];
       const rec = m ? activeRecord(m, core.journal.tombstones) : null;
       const entry2 = rec?.post.find((p) => p.seq === seq && p.kind === "fix");
       if (!m || !rec || !entry2 || String(m.swipeId) !== swipe)
@@ -151516,14 +153535,14 @@ class Dispatcher {
       if (core.journal.pauses.length > 0)
         return { refused: new RequestError("paused", "an earlier message was edited: Keep or Discard first") };
       const fold = core.fold(observed);
-      const stands = appliedEvents(rec, fold, index).fixes.find((f) => f.seq === seq);
+      const stands = appliedEvents(rec, fold, index2).fixes.find((f) => f.seq === seq);
       if (!stands || by.told !== undefined === (choice === "tell"))
         return [];
       if (this.rt.ledger.queuedOn(chatId) !== null)
         return { refused: new RequestError("unavailable", "The next turn is already under way, so whether this is told can't change now.") };
-      if (index !== chain.findLastIndex((x) => !x.isUser))
+      if (index2 !== chain.findLastIndex((x) => !x.isUser))
         return { refused: new RequestError("bad_request", "The next turn has already come, so whether this was told can't change now.") };
-      if (doneAfter(chain, fold, rec, index, seq))
+      if (doneAfter(chain, fold, rec, index2, seq))
         return { refused: new RequestError("bad_request", "Something changed after this, so whether it's told can't change now: only the last thing done can be told or not.") };
       const render = core.renderState(observed);
       const told = choice === "tell" && render ? neutralizeMacros(toldWords(by.label, fixLines(this.rt.registry, render.world, render.state, stands.events))) : undefined;
@@ -151580,6 +153599,13 @@ class Dispatcher {
       }
     };
     switch (chip.kind) {
+      case "edit_read": {
+        const strings7 = (v4) => Array.isArray(v4) ? v4.filter((x) => typeof x === "string") : [];
+        if (choice !== "undo" || chip.swipeId === undefined)
+          throw new RequestError("bad_request", `unknown choice ${choice}`);
+        this.rt.editUndo(chatId, userId, chip.messageId, chip.swipeId, { amended: strings7(chip.payload.amended), struck: strings7(chip.payload.struck) });
+        return { applied: true, pending: false };
+      }
       case "confirm": {
         const picked2 = /^pick:(\d+)$/.exec(choice);
         const picks = Array.isArray(chip.payload.picks) ? chip.payload.picks : [];
@@ -151742,8 +153768,8 @@ class Dispatcher {
         if (choice !== keep2 && choice !== "drop")
           throw new RequestError("bad_request", `unknown choice ${choice}`);
         const text11 = typeof chip.payload.text === "string" ? chip.payload.text : "";
-        const index = typeof chip.payload.index === "number" ? chip.payload.index : -1;
-        return { applied: this.rt.answerAsk(chatId, text11, index, choice === keep2), pending: false };
+        const index2 = typeof chip.payload.index === "number" ? chip.payload.index : -1;
+        return { applied: this.rt.answerAsk(chatId, text11, index2, choice === keep2), pending: false };
       }
       case "intent_gate":
       case "outline_gate": {
@@ -151830,8 +153856,8 @@ class Dispatcher {
         }
         const events3 = [...outcome.materialized, ...outcome.events];
         const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: events3 } });
-        const added = typeof chip.payload.added === "string" ? chip.payload.added : "Added to the routine";
-        await this.rt.chips.add(chatId, userId, [{ id: id2.replace(/^routine_ask:/, "routine_added:"), kind: "routine_added", messageId: chip.messageId, label: added, ...chip.detail !== undefined ? { detail: chip.detail } : {}, actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send", payload: { events: JSON.parse(JSON.stringify(events3)) } }]);
+        const added2 = typeof chip.payload.added === "string" ? chip.payload.added : "Added to the routine";
+        await this.rt.chips.add(chatId, userId, [{ id: id2.replace(/^routine_ask:/, "routine_added:"), kind: "routine_added", messageId: chip.messageId, label: added2, ...chip.detail !== undefined ? { detail: chip.detail } : {}, actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send", payload: { events: JSON.parse(JSON.stringify(events3)) } }]);
         this.rt.push.changed(chatId, userId);
         return { applied: result.applied, ...waits(result) };
       }
@@ -151845,7 +153871,7 @@ class Dispatcher {
           const entry2 = rec?.post.findLast((p) => p.kind === "confirm" && JSON.stringify(p.events) === wanted);
           if (!rec || !entry2)
             continue;
-          if (entry2.events.every((_, index) => rec.undone.some((u) => u.in === "post" && u.seq === entry2.seq && u.index === index)))
+          if (entry2.events.every((_, index2) => rec.undone.some((u) => u.in === "post" && u.seq === entry2.seq && u.index === index2)))
             return { applied: false, pending: false };
           const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs: [], entry: entry2.seq });
           return { applied: result.applied, ...waits(result) };
@@ -151877,7 +153903,7 @@ function chipValue(chip, choice, payload) {
     return null;
   if (input.type === "money")
     return typeof payload.cents === "number" && Number.isSafeInteger(payload.cents) && payload.cents > 0 ? payload.cents : null;
-  if (input.type === "text" || input.type === "action" || input.type === "org" || input.type === "settings" || input.type === "draft")
+  if (input.type === "text" || input.type === "action" || input.type === "org" || input.type === "settings" || input.type === "draft" || input.type === "bootstrap")
     return null;
   return typeof payload.value === "string" && input.options.some((o) => o.value === payload.value) ? payload.value : null;
 }
@@ -151972,7 +153998,7 @@ function toJsonObject(value) {
       out2[k] = toJson2(v4);
   return out2;
 }
-function str32(o, key) {
+function str33(o, key) {
   if (!isRecord(o))
     return;
   const v4 = o[key];
@@ -151986,10 +154012,10 @@ function num8(o, key) {
 }
 var GENERATION_TYPES = { normal: "normal", regenerate: "regenerate", swipe: "swipe", continue: "continue", impersonate: "impersonate" };
 function generationType(o) {
-  return GENERATION_TYPES[str32(o, "generationType") ?? "normal"] ?? "normal";
+  return GENERATION_TYPES[str33(o, "generationType") ?? "normal"] ?? "normal";
 }
 function contextType(o) {
-  const type = str32(o, "generationType");
+  const type = str33(o, "generationType");
   return type === undefined ? "normal" : GENERATION_TYPES[type] ?? "other";
 }
 function hostCapabilities() {
@@ -152004,10 +154030,10 @@ function promptMessageOf(raw) {
   const clean = { ...flagged2 };
   for (const flag2 of PROMPT_FLAGS)
     delete clean[flag2];
-  const index = flagged2.sourceIndexInChat;
+  const index2 = flagged2.sourceIndexInChat;
   const content = typeof raw.content === "string" ? raw.content : JSON.stringify(raw.content);
   return {
-    message: { role: raw.role, content, history: flagged2.__isChatHistory === true, worldInfo: flagged2.__isWorldInfoEntry === true, ...typeof index === "number" ? { sourceIndex: index } : {} },
+    message: { role: raw.role, content, history: flagged2.__isChatHistory === true, worldInfo: flagged2.__isWorldInfoEntry === true, ...typeof index2 === "number" ? { sourceIndex: index2 } : {} },
     clean
   };
 }
@@ -152017,11 +154043,11 @@ function bookEntryOf(e) {
 function decodeMessage(raw, chatId) {
   if (!isRecord(raw))
     return null;
-  const id2 = str32(raw, "id");
+  const id2 = str33(raw, "id");
   if (!id2)
     return null;
   const swipes = Array.isArray(raw.swipes) ? raw.swipes.map((s) => typeof s === "string" ? s : "") : [];
-  const stored = str32(raw, "content") ?? "";
+  const stored = str33(raw, "content") ?? "";
   const swipeId = num8(raw, "swipe_id") ?? 0;
   if (swipes.length === 0)
     swipes.push(stored);
@@ -152029,13 +154055,13 @@ function decodeMessage(raw, chatId) {
   const content = shown5 === stored ? shown5 : stored;
   const extra = isRecord(raw.extra) ? raw.extra : {};
   const metadata = isRecord(raw.metadata) ? raw.metadata : isRecord(extra.spindle_metadata) ? extra.spindle_metadata : {};
-  const role = str32(raw, "role");
+  const role = str33(raw, "role");
   return {
     id: id2,
-    chatId: str32(raw, "chat_id") ?? chatId,
+    chatId: str33(raw, "chat_id") ?? chatId,
     index: num8(raw, "index_in_chat") ?? 0,
     isUser: raw.is_user === true || role === "user",
-    name: str32(raw, "name") ?? "",
+    name: str33(raw, "name") ?? "",
     content,
     swipeId,
     swipes,
@@ -152045,51 +154071,51 @@ function decodeMessage(raw, chatId) {
 var SWIPE_ACTIONS = { added: "added", navigated: "navigated", updated: "updated", deleted: "deleted" };
 function decodeEvent(event, p) {
   if (event === "PRESET_CHANGED")
-    return { presetId: str32(p, "id") ?? null };
+    return { presetId: str33(p, "id") ?? null };
   if (event === "SETTINGS_UPDATED") {
-    const key = str32(p, "key");
+    const key = str33(p, "key");
     const keys = isRecord(p) && Array.isArray(p.keys) ? p.keys.filter((k) => typeof k === "string") : null;
     return { keys: key !== undefined ? [key] : keys };
   }
   if (event === "FRONTEND_SESSION_CLOSED") {
-    const frontendSessionId = str32(p, "frontendSessionId");
+    const frontendSessionId = str33(p, "frontendSessionId");
     return frontendSessionId ? { frontendSessionId } : null;
   }
-  const chatId = str32(p, event === "CHAT_DELETED" ? "id" : "chatId");
+  const chatId = str33(p, event === "CHAT_DELETED" ? "id" : "chatId");
   if (!chatId)
     return null;
   switch (event) {
     case "GENERATION_STARTED":
     case "GENERATION_IN_PROGRESS": {
-      const generationId = str32(p, "generationId");
+      const generationId = str33(p, "generationId");
       if (!generationId)
         return null;
       const base = {
         generationId,
         chatId,
-        model: str32(p, "model") ?? "",
-        targetMessageId: str32(p, "targetMessageId") ?? null,
+        model: str33(p, "model") ?? "",
+        targetMessageId: str33(p, "targetMessageId") ?? null,
         targetSwipeId: num8(p, "targetSwipeId") ?? null,
-        characterId: str32(p, "characterId") ?? null,
-        characterName: str32(p, "characterName") ?? null
+        characterId: str33(p, "characterId") ?? null,
+        characterName: str33(p, "characterName") ?? null
       };
       if (event === "GENERATION_IN_PROGRESS")
         return base;
-      const frontendSessionId = str32(p, "frontendSessionId");
+      const frontendSessionId = str33(p, "frontendSessionId");
       return { ...base, generationType: generationType(p), ...frontendSessionId ? { frontendSessionId } : {} };
     }
     case "GENERATION_ENDED": {
-      const generationId = str32(p, "generationId");
+      const generationId = str33(p, "generationId");
       if (!generationId)
         return null;
-      const messageId = str32(p, "messageId");
-      const error = str32(p, "error");
-      const finish3 = str32(p, "finish_reason");
-      const draft = str32(p, "impersonateDraft");
+      const messageId = str33(p, "messageId");
+      const error = str33(p, "error");
+      const finish3 = str33(p, "finish_reason");
+      const draft = str33(p, "impersonateDraft");
       return {
         generationId,
         chatId,
-        content: str32(p, "content") ?? "",
+        content: str33(p, "content") ?? "",
         generationType: generationType(p),
         ...messageId ? { messageId } : {},
         ...error ? { error } : {},
@@ -152099,8 +154125,8 @@ function decodeEvent(event, p) {
       };
     }
     case "GENERATION_STOPPED": {
-      const generationId = str32(p, "generationId");
-      return generationId ? { generationId, chatId, content: str32(p, "content") ?? "" } : null;
+      const generationId = str33(p, "generationId");
+      return generationId ? { generationId, chatId, content: str33(p, "content") ?? "" } : null;
     }
     case "MESSAGE_SENT":
     case "MESSAGE_EDITED": {
@@ -152109,7 +154135,7 @@ function decodeEvent(event, p) {
     }
     case "MESSAGE_SWIPED": {
       const message2 = decodeMessage(isRecord(p) ? p.message : null, chatId);
-      const action2 = SWIPE_ACTIONS[str32(p, "action") ?? ""];
+      const action2 = SWIPE_ACTIONS[str33(p, "action") ?? ""];
       if (!message2 || !action2)
         return null;
       const previousSwipeId = num8(p, "previousSwipeId");
@@ -152120,16 +154146,16 @@ function decodeEvent(event, p) {
     case "CHAT_CHANGED":
       return { chatId, renamed: (num8(p, "reattributedUserMessages") ?? 0) > 0 };
     case "MESSAGE_DELETED": {
-      const messageId = str32(p, "messageId");
+      const messageId = str33(p, "messageId");
       return messageId ? { chatId, messageId } : null;
     }
     case "WORLD_INFO_ACTIVATED": {
       const entries3 = [];
       if (isRecord(p) && Array.isArray(p.entries)) {
         for (const e of p.entries) {
-          const id2 = str32(e, "id");
+          const id2 = str33(e, "id");
           if (id2)
-            entries3.push({ id: id2, comment: str32(e, "comment") ?? "", source: str32(e, "source") ?? "", bookId: str32(e, "bookId") ?? "" });
+            entries3.push({ id: id2, comment: str33(e, "comment") ?? "", source: str33(e, "source") ?? "", bookId: str33(e, "bookId") ?? "" });
         }
       }
       return { chatId, entries: entries3, stats: isRecord(p) && isRecord(p.stats) ? toJsonObject(p.stats) : {} };
@@ -152137,7 +154163,7 @@ function decodeEvent(event, p) {
   }
 }
 function decodeAnswer(raw) {
-  const type = str32(raw, "type");
+  const type = str33(raw, "type");
   if (!isRecord(raw))
     return null;
   const probabilities = {};
@@ -152147,7 +154173,7 @@ function decodeAnswer(raw) {
         probabilities[k] = v4;
   }
   if (type === "choice")
-    return { type, choice: str32(raw, "choice") ?? "", probabilities, confidence: num8(raw, "confidence") ?? 0 };
+    return { type, choice: str33(raw, "choice") ?? "", probabilities, confidence: num8(raw, "confidence") ?? 0 };
   if (type === "score")
     return { type, score: num8(raw, "score") ?? 0, probabilities, confidence: num8(raw, "confidence") ?? 0 };
   if (type === "noul")
@@ -152212,12 +154238,12 @@ function toolDTO(t) {
   return { name: t.name, description: t.description, parameters: t.parameters, ...t.cache ? { cache_control: { type: "ephemeral" } } : {} };
 }
 function thinkingBlock(raw) {
-  const type = str32(raw, "type");
+  const type = str33(raw, "type");
   if (type !== "thinking" && type !== "redacted_thinking")
     return null;
-  const thinking = str32(raw, "thinking");
-  const signature = str32(raw, "signature");
-  const data = str32(raw, "data");
+  const thinking = str33(raw, "thinking");
+  const signature = str33(raw, "signature");
+  const data = str33(raw, "data");
   return { type, ...thinking !== undefined ? { thinking } : {}, ...signature !== undefined ? { signature } : {}, ...data !== undefined ? { data } : {} };
 }
 async function streamedAnswer(stream, signal2, onPiece) {
@@ -152347,19 +154373,19 @@ async function quietCall(request, userId, signal2, onPiece) {
   const toolCalls = calls.flatMap((c, i) => {
     if (!isRecord(c) || typeof c.name !== "string")
       return [];
-    const signature = str32(c, "thought_signature");
-    return [{ name: c.name, args: toJsonObject(c.args), callId: str32(c, "call_id") ?? `call_${i}`, ...signature !== undefined ? { thoughtSignature: signature } : {} }];
+    const signature = str33(c, "thought_signature");
+    return [{ name: c.name, args: toJsonObject(c.args), callId: str33(c, "call_id") ?? `call_${i}`, ...signature !== undefined ? { thoughtSignature: signature } : {} }];
   });
   const usage2 = isRecord(raw) && isRecord(raw.usage) ? raw.usage : null;
   const tokensIn = usage2 ? num8(usage2, "input_tokens") ?? num8(usage2, "prompt_tokens") : undefined;
   const tokensOut = usage2 ? num8(usage2, "output_tokens") ?? num8(usage2, "completion_tokens") : undefined;
-  const model2 = str32(raw, "model");
-  const thought = str32(raw, "reasoning");
+  const model2 = str33(raw, "model");
+  const thought = str33(raw, "reasoning");
   const blocks = isRecord(raw) && Array.isArray(raw.thinking_blocks) ? raw.thinking_blocks.flatMap((b) => thinkingBlock(b) ?? []) : [];
   const details = isRecord(raw) && Array.isArray(raw.reasoning_details) ? raw.reasoning_details.filter(isRecord).map(toJsonObject) : [];
   return {
-    content: str32(raw, "content") ?? "",
-    finishReason: str32(raw, "finish_reason") ?? "",
+    content: str33(raw, "content") ?? "",
+    finishReason: str33(raw, "finish_reason") ?? "",
     ...isRecord(raw) && isRecord(raw.stop_details) ? { stopDetails: toJsonObject(raw.stop_details) } : {},
     tokens: usageTokens(raw),
     ...tokensIn !== undefined ? { tokensIn } : {},
@@ -152481,8 +154507,8 @@ function createSpindleHost() {
     capabilities: hostCapabilities(),
     registerContextHandler(handler, options) {
       spindle.registerContextHandler(async (context2, signal2) => {
-        const chatId = str32(context2, "chatId");
-        const userId = str32(context2, "userId");
+        const chatId = str33(context2, "chatId");
+        const userId = str33(context2, "userId");
         if (!chatId || !userId)
           return context2;
         const input = {
@@ -152490,10 +154516,10 @@ function createSpindleHost() {
           userId,
           generationType: contextType(context2),
           dryRun: isRecord(context2) && context2.dryRun === true,
-          connectionId: str32(context2, "connectionId") ?? null,
-          personaId: str32(context2, "personaId") ?? null
+          connectionId: str33(context2, "connectionId") ?? null,
+          personaId: str33(context2, "personaId") ?? null
         };
-        const session = str32(context2, "frontendSessionId");
+        const session = str33(context2, "frontendSessionId");
         if (session)
           input.frontendSessionId = session;
         const verdict2 = await handler(input, signal2 ?? new AbortController().signal);
@@ -152516,18 +154542,18 @@ function createSpindleHost() {
           const read = messages.map(promptMessageOf);
           const clean = read.map((r) => r.clean);
           const ctx = context2;
-          const chatId = str32(ctx, "chatId");
-          const userId = str32(ctx, "userId");
+          const chatId = str33(ctx, "chatId");
+          const userId = str33(ctx, "userId");
           if (!chatId || !userId)
             return clean;
-          const session = str32(ctx, "frontendSessionId");
+          const session = str33(ctx, "frontendSessionId");
           const input = {
             chatId,
             userId,
             generationType: contextType(ctx),
             dryRun: isRecord(ctx) && (ctx.dryRun === true || ctx.isDryRun === true),
-            connectionId: str32(ctx, "connectionId") ?? null,
-            presetId: str32(ctx, "presetId") ?? null,
+            connectionId: str33(ctx, "connectionId") ?? null,
+            presetId: str33(ctx, "presetId") ?? null,
             ...session ? { frontendSessionId: session } : {},
             messages: read.map((r) => r.message)
           };
@@ -152687,7 +154713,7 @@ function createSpindleHost() {
         for (const [id2, on] of Object.entries(states))
           if (typeof on === "boolean")
             blockStates[id2] = on;
-        return { presetId: str32(raw, "preset_id") ?? null, blockStates };
+        return { presetId: str33(raw, "preset_id") ?? null, blockStates };
       },
       async blocks(presetId, userId) {
         return (await spindle.presets.blocks.list(presetId, userId)).map((b) => ({
@@ -152824,9 +154850,9 @@ function createSpindleHost() {
   };
 }
 function spliceBlocks(stored, at3, blocks, newId4) {
-  const added = blocks.map((b) => ({ id: newId4(), name: b.name, content: b.kind === "text" ? b.content : "", role: "system", enabled: b.kind === "category", position: "pre_history", depth: 0, marker: b.kind === "category" ? "category" : null, isLocked: false, color: null, injectionTrigger: [], group: null, categoryMode: b.kind === "category" ? "checkbox" : null }));
-  const index = at3 === null ? stored.length : Math.max(0, Math.min(stored.length, at3));
-  return [...stored.slice(0, index), ...added, ...stored.slice(index)];
+  const added2 = blocks.map((b) => ({ id: newId4(), name: b.name, content: b.kind === "text" ? b.content : "", role: "system", enabled: b.kind === "category", position: "pre_history", depth: 0, marker: b.kind === "category" ? "category" : null, isLocked: false, color: null, injectionTrigger: [], group: null, categoryMode: b.kind === "category" ? "checkbox" : null }));
+  const index2 = at3 === null ? stored.length : Math.max(0, Math.min(stored.length, at3));
+  return [...stored.slice(0, index2), ...added2, ...stored.slice(index2)];
 }
 function accountName() {
   try {
