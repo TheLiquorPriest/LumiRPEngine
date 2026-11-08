@@ -108679,19 +108679,17 @@ function giveWay() {
 // src/backend/layer-carry.ts
 var LAYER_CARRY_KEY = "lre_layer";
 var LAYER_CARRY_MAX = 1e6;
-var LAYER_CARRY_RAW_MAX = 8000000;
 function carryOf(chatId, runSeed, entries2, chain) {
   const at2 = new Date().toISOString();
   const head = { v: 1, chat: chatId, runSeed, at: at2, entries: entries2.length };
-  const json = JSON.stringify(entries2);
-  if (json.length > LAYER_CARRY_RAW_MAX)
+  const size = JSON.stringify(entries2).length;
+  if (size > LAYER_CARRY_MAX)
     return { ...head, over: true };
   const bases = new Set(entries2.map((e) => e.basis.message));
   const messages = chain.filter((m) => bases.has(m.id)).map((m) => ({ id: m.id, user: m.isUser, keys: m.swipes.map((_, s) => swipeKeyOf({ ...m, swipeId: s }, [])) }));
-  const gz = Buffer.from(Bun.gzipSync(json)).toString("base64");
-  if (gz.length + JSON.stringify(messages).length > LAYER_CARRY_MAX)
+  if (size + JSON.stringify(messages).length > LAYER_CARRY_MAX)
     return { ...head, over: true };
-  return { ...head, messages, gz };
+  return { ...head, messages, list: [...entries2] };
 }
 function carryIn(meta) {
   const c = meta[LAYER_CARRY_KEY];
@@ -108699,19 +108697,12 @@ function carryIn(meta) {
     return null;
   if (c.over === true)
     return c;
-  if (typeof c.gz !== "string" || !Array.isArray(c.messages))
+  if (!Array.isArray(c.list) || !Array.isArray(c.messages))
     return null;
   return c;
 }
 function carriedEntries(carry) {
-  if ("over" in carry)
-    return null;
-  try {
-    const list2 = JSON.parse(new TextDecoder().decode(Bun.gunzipSync(Uint8Array.from(atob(carry.gz), (ch) => ch.charCodeAt(0)))));
-    return Array.isArray(list2) ? list2 : null;
-  } catch {
-    return null;
-  }
+  return "over" in carry ? null : carry.list;
 }
 function carriedMap(carry, copy) {
   return copyMap(carry.messages.map((m) => ({ id: m.id, user: m.user, keys: new Set(m.keys) })), copy.map((m) => ({ id: m.id, user: m.isUser, keys: new Set(m.swipes.map((_, s) => swipeKeyOf({ ...m, swipeId: s }, []))) })));
@@ -129091,9 +129082,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path3 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "cc0289ae36904375fa9de23d5c68326c27b5e086254d379c46a0b6dc50d10136";
+  const sha256 = "a63ec9d9ba9378c9e3f1c4c39fc5e6d825a507a9335938e6ac48040b63bb09d3";
   const tools = ["4408800e42056eef2a7fc9f5cdf99aca", "66c7161bb4f87be1dbc8e68504ddcba8"].filter((f) => f !== undefined);
-  return { id: "9a4d55b5", kit: sha256 !== undefined && path3 !== null && core !== null ? { path: path3, core, sha256, api: KIT_API } : null, tools };
+  return { id: "60282477", kit: sha256 !== undefined && path3 !== null && core !== null ? { path: path3, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -144879,7 +144870,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "9a4d55b5", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "60282477", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;
