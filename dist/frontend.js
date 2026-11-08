@@ -19103,7 +19103,7 @@ function defaultDepthSettings() {
     reads: { sceneBeats: 60, others: 24, places: 60, watchBeats: 40, episodeBeats: 40, settleBeats: 200, pollBeats: 400, due: 24, narratorQuotes: 6, quoteWords: 120, quotesPerBeat: 8, quotesPerAnswer: 32 },
     realtime: "judged",
     background: { on: true, offscreen: true, atOnce: 2 },
-    bootstrap: { chunkTokens: 60000, atOnce: { minds: 3 }, mostMinds: 0, cap: { unit: "tokens", value: 20000000 }, sample: 5, pauseAfterWrong: 3, returning: "auto" }
+    bootstrap: { chunkTokens: 60000, atOnce: { minds: 3 }, mostMinds: 0, cap: { unit: "tokens", value: 20000000 }, sample: 5, pauseAfterWrong: 3, returning: "flag" }
   };
 }
 var DEPTH_THRESHOLD_DEFAULT = "More than written when it could change what someone the player knows wants, believes or does, or when the player is likely to meet it soon.";
@@ -37161,6 +37161,7 @@ var DEPTH_PROMPT_PAGE = {
 var DEPTH_TEXT = {
   authorRead: "depth.author.read",
   authorChapter: "depth.author.chapter",
+  jumpstart: "depth.author.jumpstart",
   truthLink: "depth.gm.truth_link",
   historian: "depth.historian"
 };
@@ -37234,6 +37235,24 @@ Say what the chapter meant, which questions it answered and which it opened, whi
 
 Answer with one JSON object: {"files": [{"path": "notebook/...md", "edit": "append" to add to the file's end, "section" to rewrite one section of it, or "whole" for a new file or one you reshape throughout, "section": the heading of the section a "section" edit rewrites (a file without it gains it), "text": what you add, the section's new text, or the whole file's}], "comments": [{"path": a pinned file, "text": what you make of the player's edit}], "drift": [{"who": an id, "drift": "none", "some" or "strong", "note": what you make of it}], "predictions": [{"text": the prediction, "about": [ids]}], "uncertain": [what you are unsure of, for the player's spot checks], "why": one or two plain sentences on what moved and why}. Edit only what changed, and never write out again what stays as it is.`,
     asks: [ACCOUNT_ASK]
+  },
+  {
+    id: DEPTH_TEXT.jumpstart,
+    page: DEPTH_PROMPT_PAGE.id,
+    group: "Author",
+    label: "Jumpstart from LumiBooks",
+    note: "On a chat with a LumiBooks book, the bootstrap's first stage: a call per volume reads the book's records, the world's lore and what the engine holds of the cast, and writes cores where none stands, what each character knows and doesn't (for review) and the notebook's first notes. The records are evidence only.",
+    vars: [],
+    contract: '{"cast": [{"name", "core", "knows", "doesntKnow"}], "notebook": [{"path", "text"}]}',
+    text: [
+      "You are the story's author, starting your notes on a long chat from its LumiBooks summaries.",
+      "The summaries are evidence only, not canon: canon going forward is what you and the characters write from here. Keep to what they say; never invent history they don't support.",
+      "From the summaries, the world's lore and what you already hold of the cast, answer one JSON object:",
+      '{"cast":[{"name":"","core":"","knows":"","doesntKnow":""}],"notebook":[{"path":"notebook/story.md","text":""}]}',
+      "cast: only the main and returning characters. core: who they are at root (traits, values, voice), only for a character marked as having no core. knows / doesntKnow: what they know of the story so far, and what they don't, in plain lines.",
+      "notebook: what you add to your notes (the story so far, threads left open, where things stand); each path is under notebook/."
+    ].join(`
+`)
   },
   {
     id: DEPTH_TEXT.truthLink,
@@ -58549,10 +58568,10 @@ function DepthPage(props) {
               value: boot.returning,
               standard: sboot.returning,
               options: [
-                { value: "auto", label: "Catch them up" },
-                { value: "flag", label: "Flag them" }
+                { value: "flag", label: "Flag them" },
+                { value: "auto", label: "Catch them up" }
               ],
-              help: "A character back in the story whose time in the LumiBooks book hasn't been read into their mind yet. Catch them up: the author runs a catch-up on just what they missed first, and says so. Flag them: they're played from their core and the archive, and marked as not caught up. This build records the choice; nothing acts on it yet.",
+              help: "A character back in the story whose time in the LumiBooks book hasn't been read into their mind yet. Flag them (the standard): they're played from their core and the archive, and marked as not caught up. Catch them up: the author runs a catch-up on just the book's parts that name them first, and says so; it counts against Settings → Depth → Budget → Per day.",
               busy,
               set: (returning) => set({ bootstrap: { returning } })
             }, undefined, false, undefined, this)
