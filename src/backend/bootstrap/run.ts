@@ -716,8 +716,8 @@ export class BootstrapRun {
     this.laneStopped = false;
     try {
       const knobs = await this.env.knobs();
-      // The jumpstart first, through the author's metered port (the cap and the spend count its calls): once its entry landed, the survey skips what the book covers.
-      const jumped = await this.env.jumpstart?.(this.metered("author"));
+      // The jumpstart first, through the author's metered port under the room rule (the cap and the spend count its calls; the user's own author room wins, else one sized from what it reads, asked again at twice it when cut): once its entry landed, the survey skips what the book covers.
+      const jumped = await this.env.jumpstart?.(this.roomRule("author", this.metered("author")));
       if (jumped) this.note(`The author's jumpstart read the chat's LumiBooks records in ${jumped.calls} call${jumped.calls === 1 ? "" : "s"}: the cast's cores and knowledge and the notebook's seed, for review. The read skips the messages they cover.`);
       const { manifest, spooled } = await this.spool(knobs);
       this.measure("survey");

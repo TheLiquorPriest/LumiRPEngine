@@ -16,7 +16,6 @@ import { seedCore } from "../character-agent";
 import { answerRead, type ModelPort, type PortMessage } from "../depth/port";
 import { DepthAnswerError } from "../depth/common";
 import { cutShort } from "../agents/runtime";
-import { roomFor } from "./run";
 
 export interface JumpstartRecord {
   id: string;
@@ -81,20 +80,17 @@ function messagesOf(group: readonly JumpstartRecord[], input: JumpstartInput): P
 const text = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
 
 /**
- * One group's reading: asked at a room sized from what it reads (`roomFor`), read as the other bootstrap
- * answers are (`answerRead`: fences, a stray tail and tool tags around the object are read past). An
- * answer cut off at its room is asked again at twice it; one still cut off, or not an object at all,
- * splits the group in halves, each read beside the same cast and notebook. A single record that still
- * won't read fails the pass with what the model said, so the run pauses and Resume asks again.
+ * One group's reading, read as the other bootstrap answers are (`answerRead`: fences, a stray tail and
+ * tool tags around the object are read past). Its room is the run's room rule's (the author's own room
+ * where the user set one, else sized from what it reads, asked again at twice it when cut). One still
+ * cut off, or not an object at all, splits the group in halves, each read beside the same cast and
+ * notebook. A single record that still won't read fails the pass with what the model said, so the run
+ * pauses and Resume asks again.
  */
 async function readGroup(model: ModelPort, group: readonly JumpstartRecord[], input: JumpstartInput, signal: AbortSignal | undefined, asked: { calls: number }): Promise<Record<string, unknown>[]> {
   const messages = messagesOf(group, input);
-  const ask = async (maxTokens: number) => {
-    asked.calls++;
-    return model("author", messages, { json: true, maxTokens, ...(signal ? { signal } : {}) });
-  };
-  let answer = await ask(roomFor(messages));
-  if (cutShort(answer.finish)) answer = await ask(roomFor(messages) * 2);
+  asked.calls++;
+  const answer = await model("author", messages, { json: true, ...(signal ? { signal } : {}) });
   const read = cutShort(answer.finish) ? null : answerRead(answer.text);
   if (read) return [read.answer];
   if (group.length > 1) {
