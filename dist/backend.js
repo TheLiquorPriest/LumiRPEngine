@@ -108707,7 +108707,7 @@ function carriedEntries(carry) {
   if ("over" in carry)
     return null;
   try {
-    const list2 = JSON.parse(new TextDecoder().decode(Bun.gunzipSync(Buffer.from(carry.gz, "base64"))));
+    const list2 = JSON.parse(new TextDecoder().decode(Bun.gunzipSync(Uint8Array.from(atob(carry.gz), (ch) => ch.charCodeAt(0)))));
     return Array.isArray(list2) ? list2 : null;
   } catch {
     return null;
@@ -129091,9 +129091,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path3 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "3aa2c0672119658fc622a9ac0c26eb5de838fdf7e758948fde1c817dfd076705";
+  const sha256 = "cc0289ae36904375fa9de23d5c68326c27b5e086254d379c46a0b6dc50d10136";
   const tools = ["4408800e42056eef2a7fc9f5cdf99aca", "66c7161bb4f87be1dbc8e68504ddcba8"].filter((f) => f !== undefined);
-  return { id: "bd8a6365", kit: sha256 !== undefined && path3 !== null && core !== null ? { path: path3, core, sha256, api: KIT_API } : null, tools };
+  return { id: "9a4d55b5", kit: sha256 !== undefined && path3 !== null && core !== null ? { path: path3, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -144879,7 +144879,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "bd8a6365", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "9a4d55b5", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;
