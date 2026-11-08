@@ -129082,9 +129082,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path3 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "a63ec9d9ba9378c9e3f1c4c39fc5e6d825a507a9335938e6ac48040b63bb09d3";
+  const sha256 = "d0a904175624c6b904841dd5c88a75f9bc988605620c5c8cdb7bdcbf0a7e9e35";
   const tools = ["4408800e42056eef2a7fc9f5cdf99aca", "66c7161bb4f87be1dbc8e68504ddcba8"].filter((f) => f !== undefined);
-  return { id: "60282477", kit: sha256 !== undefined && path3 !== null && core !== null ? { path: path3, core, sha256, api: KIT_API } : null, tools };
+  return { id: "4c708ac9", kit: sha256 !== undefined && path3 !== null && core !== null ? { path: path3, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -144870,7 +144870,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "60282477", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "4c708ac9", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;
