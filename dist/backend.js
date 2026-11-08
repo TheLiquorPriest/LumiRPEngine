@@ -123523,45 +123523,56 @@ ${notebook}` }
   ];
 }
 var text7 = (v4) => typeof v4 === "string" ? v4.trim() : "";
+async function readGroup(model2, group4, input, signal2, asked2) {
+  const messages = messagesOf(group4, input);
+  const ask4 = async (maxTokens) => {
+    asked2.calls++;
+    return model2("author", messages, { json: true, maxTokens, ...signal2 ? { signal: signal2 } : {} });
+  };
+  let answer = await ask4(roomFor(messages));
+  if (cutShort(answer.finish))
+    answer = await ask4(roomFor(messages) * 2);
+  const read = cutShort(answer.finish) ? null : answerRead(answer.text);
+  if (read)
+    return [read.answer];
+  if (group4.length > 1) {
+    const half = Math.ceil(group4.length / 2);
+    return [...await readGroup(model2, group4.slice(0, half), input, signal2, asked2), ...await readGroup(model2, group4.slice(half), input, signal2, asked2)];
+  }
+  throw new DepthAnswerError("author", answer.text, { ...answer.finish !== undefined ? { finish: answer.finish } : {}, ...answer.usage ? { usage: answer.usage } : {} });
+}
 async function jumpstart(model2, input, signal2) {
   const byName = new Map(input.cast.map((c) => [c.name.trim().toLowerCase(), c]));
   const cores = new Map;
   const knowledge = new Map;
   const notebook = new Map;
   const groups = jumpstartGroups(input.records);
-  for (const group4 of groups) {
-    const answer = await model2("author", messagesOf(group4, input), { json: true, ...signal2 ? { signal: signal2 } : {} });
-    let parsed;
-    try {
-      parsed = JSON.parse(answer.text);
-    } catch {
-      parsed = null;
+  const asked2 = { calls: 0 };
+  for (const group4 of groups)
+    for (const parsed of await readGroup(model2, group4, input, signal2, asked2)) {
+      for (const raw of Array.isArray(parsed.cast) ? parsed.cast : []) {
+        if (!isRecord(raw))
+          continue;
+        const who = byName.get(text7(raw.name).toLowerCase());
+        if (!who)
+          continue;
+        const core = text7(raw.core);
+        if (!who.core && core !== "" && !cores.has(who.id))
+          cores.set(who.id, core);
+        const lines2 = [text7(raw.knows) !== "" ? `Knows: ${text7(raw.knows)}` : "", text7(raw.doesntKnow) !== "" ? `Doesn't know: ${text7(raw.doesntKnow)}` : ""].filter((l) => l !== "");
+        if (lines2.length > 0)
+          knowledge.set(who.id, [...knowledge.get(who.id) ?? [], ...lines2]);
+      }
+      for (const raw of Array.isArray(parsed.notebook) ? parsed.notebook : []) {
+        if (!isRecord(raw))
+          continue;
+        const path2 = text7(raw.path);
+        const body = text7(raw.text);
+        if (!path2.startsWith(NOTEBOOK_DIR) || path2.length === NOTEBOOK_DIR.length || path2.includes("..") || body === "")
+          continue;
+        notebook.set(path2, [...notebook.get(path2) ?? [], body]);
+      }
     }
-    if (!isRecord(parsed))
-      throw new Error("the author's jumpstart answer didn't read as one JSON object");
-    for (const raw of Array.isArray(parsed.cast) ? parsed.cast : []) {
-      if (!isRecord(raw))
-        continue;
-      const who = byName.get(text7(raw.name).toLowerCase());
-      if (!who)
-        continue;
-      const core = text7(raw.core);
-      if (!who.core && core !== "" && !cores.has(who.id))
-        cores.set(who.id, core);
-      const lines2 = [text7(raw.knows) !== "" ? `Knows: ${text7(raw.knows)}` : "", text7(raw.doesntKnow) !== "" ? `Doesn't know: ${text7(raw.doesntKnow)}` : ""].filter((l) => l !== "");
-      if (lines2.length > 0)
-        knowledge.set(who.id, [...knowledge.get(who.id) ?? [], ...lines2]);
-    }
-    for (const raw of Array.isArray(parsed.notebook) ? parsed.notebook : []) {
-      if (!isRecord(raw))
-        continue;
-      const path2 = text7(raw.path);
-      const body = text7(raw.text);
-      if (!path2.startsWith(NOTEBOOK_DIR) || path2.length === NOTEBOOK_DIR.length || path2.includes("..") || body === "")
-        continue;
-      notebook.set(path2, [...notebook.get(path2) ?? [], body]);
-    }
-  }
   const events3 = [];
   const blobs = {};
   const add2 = (out2) => {
@@ -123595,7 +123606,7 @@ ${lines2.join(`
   }
   if (Object.keys(files).length > 0)
     events3.push(notebookEvent({ kind: "light", files, through: input.through, reason: "Seeded from the chat's LumiBooks records, which are evidence only." }));
-  return { events: events3, blobs, calls: groups.length };
+  return { events: events3, blobs, calls: asked2.calls };
 }
 
 // src/backend/bootstrap/lumibooks-service.ts
@@ -132590,9 +132601,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path3 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "79cfa735bae9b65b6af71de2591f7145c5cc0ea3e8004eaaeb0f28884e05d04c";
+  const sha256 = "15a4af81127f189ab413dfe933f578e92a8c2a692c4355ce4ac72d2bce5a77f5";
   const tools = ["4408800e42056eef2a7fc9f5cdf99aca", "66c7161bb4f87be1dbc8e68504ddcba8"].filter((f) => f !== undefined);
-  return { id: "8d0bc947", kit: sha256 !== undefined && path3 !== null && core !== null ? { path: path3, core, sha256, api: KIT_API } : null, tools };
+  return { id: "a6a79c4e", kit: sha256 !== undefined && path3 !== null && core !== null ? { path: path3, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -147239,7 +147250,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "8d0bc947", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "a6a79c4e", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;
