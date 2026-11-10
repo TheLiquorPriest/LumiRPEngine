@@ -32,7 +32,6 @@ import { own } from "./pack-kit";
 import { minutesBetween } from "./world-state";
 import { feedEvent } from "./feed";
 import { wsDeleteEvent, wsPinEvent, wsReadersEvent, wsWriteEvent } from "./workspace";
-import { notebookReviseEvent } from "./notebook";
 import { outLinesEvent, outSceneEvent } from "./outputs";
 import { THING_NAME_MAX } from "../shared/things";
 
@@ -557,8 +556,6 @@ export const enginePack: PackDef = {
     r.event(wsDeleteEvent);
     r.event(wsPinEvent);
     r.event(wsReadersEvent);
-    // The author's notebook revisions, beside the workspace files they write (DEPTH-PLAN §4.5).
-    r.event(notebookReviseEvent);
     // What an agent turn tells its narrator, recorded on the turn (INC2-SPEC C11): no state of its own.
     r.event(outLinesEvent);
     r.event(outSceneEvent);

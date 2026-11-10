@@ -6,7 +6,7 @@
 
 import type { RoleId, RoleOnFail, RoleTier } from "../../shared/agent-roles";
 import { ROLE_LABEL } from "../../shared/agent-roles";
-import type { AgentEffort, ChatEngine, MemoryPlacement, PipelineMode, ReviewPlacement, FinalReviewOnFail, AssistantApply } from "../../shared/agent-settings";
+import type { AgentEffort, MemoryPlacement, PipelineMode, ReviewPlacement, FinalReviewOnFail, AssistantApply } from "../../shared/agent-settings";
 import { BUDGET_DEFS, COMPACTION_DEFS, CURATOR_OPS_DEF, GM_OPS_DEF, HISTORY_TOKENS_DEF, KEPT_DEFS, LOOP_DEFS, MAIN_DEFS, OUTPUT_CHARS_DEF, SYSTEM_TOKENS_DEF, TURN_DEFS } from "../../shared/agent-settings";
 import type { RolePerspective, SourceUse } from "../../shared/agent-context";
 import { hasOwn } from "../../shared/json";
@@ -81,15 +81,6 @@ export const STAGE_LABEL: Readonly<Record<MainRoleStage, { number: number; label
 export const PIPELINE_HELP: Readonly<Record<PipelineMode, string>> = {
   fixed: "Each role runs in the steps' own order and gives their outputs, worked out by agents: the same steps, the same gates and cards.",
   main: "A main agent for each chat decides which roles to run and what to tell them, in the order the engine keeps; it keeps a session from turn to turn.",
-};
-
-/** Settings → Agents → Pipeline → New chats start on: each engine as these pages name it (INC3 3a). */
-export const NEW_CHATS_LABELS: Readonly<Record<ChatEngine, string>> = { agents: "Agents", classic: "The steps engine" };
-
-/** Settings → Agents → Pipeline → New chats start on, for each engine (INC3 3a). */
-export const NEW_CHATS_HELP: Readonly<Record<ChatEngine, string>> = {
-  agents: "A chat with no turn played yet starts on agents, and its first turn keeps that as the chat's own. A chat that played before keeps its engine, and one on the steps engine that never chose is offered the switch. GM → This chat → Engine switches any one chat.",
-  classic: "A chat with no turn played yet starts on the steps engine, and its first turn keeps that as the chat's own. GM → This chat → Engine switches any one chat.",
 };
 
 export const MEMORY_HELP: Readonly<Record<MemoryPlacement, string>> = {

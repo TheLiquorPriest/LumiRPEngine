@@ -20,22 +20,11 @@ import { checkAnswer } from "../../../engine/tracks";
 import { canSeeEntity, canSeePlace, plainLetters, playerTrack, shownTrackId, trackKnown, visibilityOf, type PlayerTrack } from "../../../engine/visibility";
 import { parseMoneyInput } from "../../../shared/money";
 import { together } from "../../../engine/presence";
-import { storyBeatEvent, storyStagingEvent, storyStrikeEvent } from "./beats";
-import { storyPassageEvent, storyUnrenderedEvent } from "./passage-events";
-import { storySceneEvent } from "./scene";
-import { storyTalkEvent } from "./talk";
-import { storyRecordEvent } from "./record";
-import { storyDraftEvent, storySettleEvent } from "./episodes";
-import { droppedHolds, heldIn, type DraftHold } from "../../../shared/episodes";
 
 declare module "../../../engine/registry" {
   interface QueryMap {
     /** A story flag's value (false when unset). */
     "story.flag": (ctx: ReadContext, name: string) => JsonValue;
-    /** Whether a draft of what happens off screen holds `who` at story minute `at` (DEPTH-PLAN §4.6): they are in its episode then, so no routine places them. */
-    "story.held": (ctx: ReadContext, who: string, at: number) => boolean;
-    /** The holds a draft the author dropped had on `who` over story minute `at` (DEPTH-PLAN §4.6), earliest first: it never happened, so their routine takes them back. */
-    "story.released": (ctx: ReadContext, who: string, at: number) => DraftHold[];
   }
 }
 
@@ -525,20 +514,6 @@ export const storyPack: PackDef = {
   domain: null,
   requires: [],
   register(r) {
-    // The narrative record (DEPTH-PLAN §4.2): beats, staging and strikes, read off the chain (`engine/ledger/story.ts`).
-    r.event<PackEvent>(storyBeatEvent);
-    r.event<PackEvent>(storyStagingEvent);
-    r.event<PackEvent>(storyStrikeEvent);
-    r.event<PackEvent>(storyRecordEvent);
-    // How a scene was rendered (§1.3): each moment's passage and its checks, and the moments the narrator couldn't render, in the record's read part.
-    r.event<PackEvent>(storyPassageEvent);
-    r.event<PackEvent>(storyUnrenderedEvent);
-    // The author's setup of a scene, with each character's effort (§4.4), and real-time dialogue's state (§2.5).
-    r.event<PackEvent>(storySceneEvent);
-    r.event<PackEvent>(storyTalkEvent);
-    // The world beyond view (§4.6): a draft of an off-screen episode (not canon), and its settlement.
-    r.event<PackEvent>(storyDraftEvent);
-    r.event<PackEvent>(storySettleEvent);
     r.event<PackEvent>({
       type: "story.flag",
       validate: (e) => (strOf(e.data.name) !== "" ? null : { code: "bad_flag", reason: "a flag needs a name" }),
@@ -549,8 +524,6 @@ export const storyPack: PackDef = {
       describe: (e) => `flag ${strOf(e.data.name)}`,
     });
     r.query("story.flag", (ctx, name) => flagValue(ctx, name));
-    r.query("story.held", (ctx, who, at) => heldIn(sliceOf(ctx.state, "story"), sliceOf(ctx.state, "author"), who, at));
-    r.query("story.released", (ctx, who, at) => droppedHolds(sliceOf(ctx.state, "story"), sliceOf(ctx.state, "author"), who, at));
     r.formula("flag", (ctx, name) => {
       const v = flagValue(ctx, String(name ?? ""));
       return typeof v === "number" || typeof v === "boolean" || typeof v === "string" ? v : v !== null;

@@ -4,7 +4,7 @@
 
 import { hasOwn, isRecord } from "../shared/json";
 import { isPrototypeKey, jsonEqual, parsePointer, pointerOf } from "../shared/json-patch";
-import { clip, nameOf } from "../shared/tool-read";
+import { clip, nameOf } from "./read";
 
 /** The collections of a world (`lre-world-v1`): objects keyed by id, compared item by item. */
 const IS_COLLECTION: Record<string, true> = {

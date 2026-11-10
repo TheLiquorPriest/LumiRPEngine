@@ -8,7 +8,6 @@ import { INFER_MODE_LABEL } from "../shared/inferred";
 import { DOMAINS, pathSafe } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
-import { withPov } from "../shared/character-engine";
 import { routineSettingsOf } from "../shared/routines";
 import type { EventRef, FixDirective, HeldWrite, LedgerEvent, MarkerBody, Rec } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
@@ -26,13 +25,12 @@ import { ROUTINE_CHANNEL } from "../packs/castlife/core/story";
 import { sheetRulesetProblem } from "../engine/ruleset";
 import { formulaFunctions } from "../engine/scope";
 import { neutralizeMacros } from "../shared/macros";
-import type { DraftChanged, ErrorCode, ErrorMessage, FrontendToBackend, LintIssue, MarkerPreview, RequestFields, RequestType, ResultBodies, ResultMessage, UpgradePreview, WorldChatInfo } from "../shared/protocol";
+import type { DraftChanged, ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies, UpgradePreview, WorldChatInfo } from "../shared/protocol";
 import { AGENT_API, FIX_THINGS_MAX, PROTOCOL_VERSION } from "../shared/protocol";
 import { EXTRACTION_TYPES, helperCallOf, narratorViewOf, perfSettingsOf, type UserSettings } from "../shared/settings";
 import type { DiagStep } from "../shared/diagnostics";
 import { formatMs, TimeoutFired, timerMs } from "../shared/timeouts";
 import type { TimelapseTarget } from "../shared/ledger";
-import { calendarOf, formatClock } from "../engine/calendar";
 import { TIME_CONTROLS, validMarkerBody } from "../engine/events";
 import { materializeIfNeeded } from "../engine/materialize";
 import { optionalQuery, optionalService } from "../engine/pack-kit";
@@ -52,12 +50,6 @@ import { ENGINE_EVENTS } from "../engine/engine-pack";
 import type { ChainMessage } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
 import { activeRecord } from "../engine/ledger/path";
-import type { ChatEngine, EngineSource } from "../shared/agent-settings";
-import { ENGINE_OFFER_CHOICES, ENGINE_OFFER_KIND } from "../shared/engine-offer";
-import { DEPTH_OFFER_CHOICES, DEPTH_OFFER_KIND, isDepthOfferChoice } from "../shared/depth-offer";
-import type { BootstrapOp } from "../shared/bootstrap";
-import { depthChosen, depthOfferChip } from "./bootstrap/depth-offer";
-import { type ChatKnowledgeChange, type ChatKnowledgePrefs, engineOf, playedOn } from "./chat-knowledge-prefs";
 import type { StoredChip } from "./chips";
 import { toChain } from "./ledger-io";
 import { cachedChain } from "./chain-cache";
@@ -68,14 +60,12 @@ import { markBookEntry, MarkChangeError, markChangeOf, writeBookFields } from ".
 import { LoreIndexError } from "./lore-routing";
 import { bookLoreFieldsOf, engineWroteEntry, OLD_SECRECY_FIELDS } from "../shared/lore";
 import { MindsRuns, RunError } from "./minds-run";
-import { MIND_EDIT_CHIP, MindRefused, mindEditUndo } from "./character-engine";
-import { BootstrapError, Bootstraps } from "./bootstrap/service";
 import { ACTIVE_CONNECTION, readRun, replyReadKey, Runtime, unpricedChip } from "./runtime";
 import { playerReason } from "./requirement-words";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
 import { applyProposals } from "./turn-model";
 import { upgradePreview } from "./upgrade-preview";
-import { appliedEvents, clockMinutes, doneAfter, fixChip, fixLines, recentLines, TIMELAPSE_ACTION, toldWords } from "./view";
+import { appliedEvents, doneAfter, fixChip, fixLines, recentLines, TIMELAPSE_ACTION, toldWords } from "./view";
 import { buildGmView, gmThings, gmThingsHead, keepInWorld, madeInPlay } from "./gm";
 import { readGmPart, type GmReadSteps } from "./gm-memo";
 import type { QueuedOn } from "../shared/gm-parts";
@@ -89,16 +79,6 @@ import { Assistant, AssistantError, ASSISTANT_ROLE, workspaceRequest } from "./a
 import { roleTextTest, testedRole } from "./agents/roles/test";
 import { promptDef, swipeDirectionOf } from "../shared/prompts";
 import { type Review, ReviewError } from "./agents/review";
-import { DepthRefused, depthRequest } from "./depth-views";
-import { isTalkChoice, TALK_CHIP_KIND, talkLeft, talkTap } from "./depth/scene/talk";
-import { ASK_CHIP_KIND, askAnswer, isAskChoice } from "./depth/offscreen/asks";
-import { draftAnswered } from "./depth/offscreen/jobs";
-import { chatBudget } from "./depth/chat-allowances";
-import { LoopbackRefused } from "./loopback/bridge";
-import { listsText, OutsideTools, servedTools } from "./agents/tools/outside";
-import { Refusal } from "./agents/tools/outside-tool";
-import { ToolError } from "../shared/tool-args";
-import type { FixOp } from "../shared/ledger";
 
 export class RequestError extends Error {
   constructor(
@@ -133,32 +113,17 @@ function keepAcceptance(current: Readonly<UserSettings>, next: Readonly<UserSett
 /** Notes that a request changed a world's working copy, to the state it has now. */
 type DraftNoted = DraftNotice;
 
-/** An outside client as its hello named itself (DESIGN §23). */
-interface HelloClient {
-  name: string;
-  version: string;
-  harness: string | null;
-}
-
-/**
- * Outside clients remembered per user, by session, while their sessions are open (a CLI opens one per
- * connection, closed when it exits): past this many open at once, that user's least recently used
- * goes. Another user's hellos never count against them.
- */
-const CLIENTS_PER_USER = 32;
+/** Outside clients remembered by session: a CLI makes a session per connection, so old ones go. */
+const CLIENTS_CAP = 256;
 
 export class Dispatcher {
   private writeSeq = 0;
   /** Stored chip actions in flight per (user, chat): one at a time, so a double tap acts once. */
   private readonly chipLocks = new Map<string, Promise<void>>();
-  /** Sessions that said `lre.hello` with `client` (DESIGN §23), each user's by session, least recently used first: their commits are `agent`'s, and their agent tools' writes name them with their harness. */
-  private readonly clients = new Map<UserId, Map<string, HelloClient>>();
-  /** The tools LumiRPEngine serves outside clients (DESIGN §23): `lre.tools`. */
-  private readonly tools: OutsideTools;
+  /** Sessions that said `lre.hello` with `client` (DESIGN §23), by `user \0 session`: their commits are `agent`'s. */
+  private readonly clients = new Map<string, { name: string; version: string }>();
   /** GM → Minds' runs on demand (DESIGN §24.9). */
   private readonly minds: MindsRuns;
-  /** The bootstrap's runs and GM → This chat → Depth's opt-in (DEPTH-PLAN §8). */
-  readonly bootstraps: Bootstraps;
   /** Build's moves of the user's World Info books to secret marks (DESIGN §4.2). */
   private readonly secrecy: SecrecyMoves;
   /** GM → Assistant, the GM agent's chat about each chat's world (DESIGN §4.5): its answers run in the background. */
@@ -171,15 +136,11 @@ export class Dispatcher {
     private readonly jobs: JobRunner,
   ) {
     this.minds = new MindsRuns(rt);
-    this.tools = new OutsideTools(rt);
-    this.bootstraps = new Bootstraps(rt);
     this.secrecy = new SecrecyMoves(rt.host);
     this.assistant = new Assistant(rt);
     this.review = rt.review;
     // A read proposal on a card applies, or is turned down, as its own confirm chip's Apply and No do.
     this.review.readChip = async (chatId, userId, chipId, choice) => void (await this.chip(chatId, userId, chipId, choice));
-    // The depth offer is built from the chat's bootstrap, which the dispatcher holds; where the user's loopback isn't ready, Set up the loopback comes first.
-    rt.depthOffer = async (chatId, userId, messageId) => ((await depthChosen(rt.host, chatId, userId)) ? null : depthOfferChip(await this.bootstraps.view(chatId, userId), messageId, await rt.loopback.unready(userId)));
   }
 
   start(): void {
@@ -193,32 +154,15 @@ export class Dispatcher {
         .then(async (settings) => this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.acceptance.changed", state: await this.rt.agentAccounts.state(userId, settings.agents) }, userId))
         .catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] the acceptance run's counter wasn't sent (${error instanceof Error ? error.message : String(error)})`, userId));
     });
-    // A closed session's client is gone: it no longer counts toward its user's open clients.
-    this.rt.host.on("FRONTEND_SESSION_CLOSED", (e, userId) => {
-      for (const [user, sessions] of this.clients) {
-        if (userId !== null && user !== userId) continue;
-        sessions.delete(e.frontendSessionId);
-        if (sessions.size === 0) this.clients.delete(user);
-      }
-    });
     this.assistant.start();
   }
 
-  handle(raw: unknown, userId: UserId, session?: string): Promise<void> {
-    return this.serve(raw, userId, session, (message) => this.rt.host.frontend.send(message, userId, session));
-  }
-
-  /**
-   * Answers one request with exactly one `lre.result` or `lre.error`, handed to `send`: the socket's
-   * session, or a tool LumiRPEngine serves outside clients, whose requests run here as that client's
-   * session sends them (`OutsideCaller.request`), with every check, diagnostic and draft push alike.
-   */
-  async serve(raw: unknown, userId: UserId, session: string | undefined, send: (message: ResultMessage | ErrorMessage) => void): Promise<void> {
+  async handle(raw: unknown, userId: UserId, session?: string): Promise<void> {
     // Ids that name storage paths must be plain (a `..` chat or world id would reach other files).
     const unsafe = isRecord(raw) ? ["chatId", "worldId", "revision"].find((k) => raw[k] !== undefined && raw[k] !== null && !pathSafe(raw[k])) : undefined;
     if (!isRequest(raw)) return;
     if (unsafe) {
-      send({ lre: PROTOCOL_VERSION, type: "lre.error", reqId: raw.reqId, code: "bad_request", message: `invalid ${unsafe}` });
+      this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.error", reqId: raw.reqId, code: "bad_request", message: `invalid ${unsafe}` }, userId, session);
       return;
     }
     // The drafts the request changed, announced to every session of the user once it is answered,
@@ -229,7 +173,7 @@ export class Dispatcher {
       drafts.clear();
     };
     const reply = <K extends keyof ResultBodies>(request: K, body: ResultBodies[K]): void => {
-      send({ lre: PROTOCOL_VERSION, type: "lre.result", reqId: raw.reqId, request, body } as never);
+      this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.result", reqId: raw.reqId, request, body } as never, userId, session);
       announce();
     };
     const noted: DraftNoted = (worldId, draft) => {
@@ -243,11 +187,11 @@ export class Dispatcher {
     try {
       await this.route(raw, userId, session, reply, noted, steps);
     } catch (error) {
-      const e = error instanceof RequestError ? error : error instanceof WorldError || error instanceof Refusal ? new RequestError(error.code, error.message, error.lint.length > 0 ? [...error.lint] : undefined) : error instanceof JobError || error instanceof LoopbackRefused ? new RequestError(error.code, error.message) : error instanceof ToolError ? new RequestError("bad_request", error.message) : new RequestError("internal", error instanceof Error ? error.message : String(error));
+      const e = error instanceof RequestError ? error : error instanceof WorldError ? new RequestError(error.code, error.message, error.lint) : error instanceof JobError ? new RequestError(error.code, error.message) : new RequestError("internal", error instanceof Error ? error.message : String(error));
       if (e.code === "internal") this.rt.host.log("error", `[LumiRPEngine] ${raw.type}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`, userId);
       // A request the engine couldn't answer goes to the chat's diagnostics; a refused one is the player's to read.
       if (chatId && (e.code === "internal" || e.code === "unavailable")) this.rt.diag.error({ chatId, userId, turn: null }, what, error);
-      send({ lre: PROTOCOL_VERSION, type: "lre.error", reqId: raw.reqId, code: e.code, message: e.message, ...(e.lint ? { lint: e.lint } : {}) });
+      this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.error", reqId: raw.reqId, code: e.code, message: e.message, ...(e.lint ? { lint: e.lint } : {}) }, userId, session);
       // A request that failed after it changed a draft (a commit whose book sync failed) still says so.
       announce();
     } finally {
@@ -278,28 +222,12 @@ export class Dispatcher {
     return { applied: result.applied, ...waits(result), ...(result.posted ? { posted: result.posted } : {}) };
   }
 
-  /** The chat's head as a request is checked against it: the player character the player last switched to as its point of view (D-10). */
   private async head(chatId: ChatId, userId: UserId): Promise<{ state: Working["state"]; world: Working["world"] }> {
     const core = await this.rt.ledger.core(chatId, userId);
     if (!core) throw new RequestError("not_world_chat", "this chat is not attached to a world");
     const render = core.renderState(toChain(await this.rt.host.chats.messages(chatId, userId)));
     if (!render) throw new RequestError("unavailable", "the chat's world revision is not loaded");
-    return { ...render, world: withPov(render.world, render.state) };
-  }
-
-  /**
-   * One GM edit (DESIGN §7): every operation checked against the chat's head, all or none, one `fix`
-   * entry marked as the GM's, held while a reply is written; its Undo is the chip of the entry it
-   * wrote, so it takes back this edit and nothing that landed meanwhile. The GM's words in a minds
-   * edit are held to the user's lengths (Settings → Minds → Lengths), refused past them, never cut.
-   */
-  private async gmEdit(chatId: ChatId, userId: UserId, ops: FixOp[]): Promise<{ pending: boolean; queued?: QueuedOn; undo: string | null }> {
-    const { state, world } = await this.head(chatId, userId);
-    const edit = resolveEdit(this.rt.registry, world, state, ops, { gm: true, runSeed: this.runSeedOf(chatId), mindLengths: (await this.rt.settings.get(userId)).minds.lengths });
-    if ("rejection" in edit) throw new RequestError("validation", edit.rejection.gm ?? edit.rejection.reason);
-    const result = edit.events.length > 0 ? await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", gm: true, events: edit.events, edit: { ops } } }) : { pending: false };
-    const posted = "posted" in result ? result.posted : undefined;
-    return { ...waits(result), undo: posted ? fixChip(posted.messageId, posted.swipeId, posted.seq) : null };
+    return render;
   }
 
   /**
@@ -479,8 +407,6 @@ export class Dispatcher {
           // Restart recovery and the chat's sync wait for that step on the queue; a delta brings what they change.
           const chatId = r.chatId;
           if (run) void this.rt.ledger.open(chatId, userId).catch((error: unknown) => this.rt.diag.error({ chatId, userId, turn: null }, "ledger", error, "the chat wasn't opened"));
-          // A chat on depth opened off the loopback is flagged now, before a reply runs no turn (L15).
-          if (run) await this.rt.openedDepth(chatId, userId).catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: its loopback connection wasn't checked (${error instanceof Error ? error.message : String(error)})`, userId));
         }
         return;
       }
@@ -495,12 +421,9 @@ export class Dispatcher {
         // Cancel on the activity line (DESIGN §5.1): only the user whose chat it is can stop its turn.
         reply("lre.cancel", { cancelled: this.rt.ledger.cancel(r.chatId, userId) });
         return;
-      case "lre.restart": {
-        const direction = swipeDirectionOf(r.direction) ?? undefined;
-        // A loopback swipe's ask names its generation, under way already: the answer goes to it, and nothing is to start (`LoopbackBridge.askSwipe`).
-        reply("lre.restart", { start: !this.rt.loopback.swipeAnswer(r.chatId, userId, r.turn, direction) && this.rt.ledger.claimRestart(r.chatId, userId, session, r.turn, direction) });
+      case "lre.restart":
+        reply("lre.restart", { start: this.rt.ledger.claimRestart(r.chatId, userId, session, r.turn, swipeDirectionOf(r.direction) ?? undefined) });
         return;
-      }
       case "lre.action": {
         await this.requireWorldChat(r.chatId, userId);
         // Words typed with the action describe the player's approach (the judge rates them); without
@@ -662,12 +585,6 @@ export class Dispatcher {
         }
         const result = events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events, ...(by ? { by } : {}), ...(asked ? { edit: asked } : {}) } }) : { pending: false };
         const posted = "posted" in result ? result.posted : undefined;
-        // The clock moved on outside a turn: on a chat on depth, the time it passed off screen wakes the author's poll (DEPTH-PLAN §6.4).
-        const moved = "time" in r && posted ? clockMinutes(events) : 0;
-        if (posted && moved > 0) {
-          const cal = calendarOf(world);
-          this.rt.clockMovedOn(r.chatId, userId, { fix: posted.seq, minutes: moved, why: `the player moved the clock on, from ${formatClock(cal, state.clock)} to ${formatClock(cal, state.clock + moved)}` });
-        }
         reply("lre.fix", { ...waits(result), undo: posted ? fixChip(posted.messageId, posted.swipeId, posted.seq) : null });
         return;
       }
@@ -675,7 +592,14 @@ export class Dispatcher {
         // The GM editor (DESIGN §7): every operation checked, all or none, one `fix` entry; locked fields too.
         const ops = parseEditOps(r.ops);
         if (!ops) throw new RequestError("bad_request", "not a list of edits");
-        reply("lre.edit", await this.gmEdit(r.chatId, userId, ops));
+        const { state, world } = await this.head(r.chatId, userId);
+        // The GM's words in a minds edit are held to the user's lengths (Settings → Minds → Lengths), refused past them, never cut.
+        const edit = resolveEdit(this.rt.registry, world, state, ops, { gm: true, runSeed: this.runSeedOf(r.chatId), mindLengths: (await this.rt.settings.get(userId)).minds.lengths });
+        if ("rejection" in edit) throw new RequestError("validation", edit.rejection.gm ?? edit.rejection.reason);
+        const result = edit.events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", gm: true, events: edit.events, edit: { ops } } }) : { pending: false };
+        // The chip of the entry this edit wrote, so the GM view's Undo takes back this edit and nothing that landed meanwhile.
+        const posted = "posted" in result ? result.posted : undefined;
+        reply("lre.edit", { ...waits(result), undo: posted ? fixChip(posted.messageId, posted.swipeId, posted.seq) : null });
         return;
       }
       case "lre.gm": {
@@ -855,13 +779,9 @@ export class Dispatcher {
         if (r.type === "lre.settings.set") {
           // Acceptance runs guard a connection from agents (AGENT-LOOP-PLAN §12): an outside client, which may be one, can't change what they guard, whatever its patch's shape (a reset of the whole Agents page included).
           const guard = this.outside(userId, session) ? keepAcceptance : undefined;
-          const before = await this.rt.settings.get(userId);
-          const after = await this.rt.settings.set(userId, r.patch, guard);
-          if (after.hideJsonBlocks !== before.hideJsonBlocks) await this.rt.hidingChanged(userId, after.hideJsonBlocks);
-          if (before.depth.background.on && !after.depth.background.on) this.rt.depthPaused(userId);
-          // A served tool's text changed: every outside client of the user lists the tools again (DESIGN §23).
-          const listed = (texts: typeof before.prompts.texts): string => JSON.stringify(Object.entries(texts).filter(([id]) => listsText(id)));
-          if (listed(after.prompts.texts) !== listed(before.prompts.texts)) this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.tools.changed" }, userId);
+          const hid = (await this.rt.settings.get(userId)).hideJsonBlocks;
+          const hides = (await this.rt.settings.set(userId, r.patch, guard)).hideJsonBlocks;
+          if (hides !== hid) await this.rt.hidingChanged(userId, hides);
         }
         const settings = await this.rt.settings.get(userId);
         const routed = helperCallOf(settings.modelUse.steps.extract, settings.helper).connectionId;
@@ -920,15 +840,20 @@ export class Dispatcher {
         const narrator = r.narrator === undefined || r.narrator === null ? r.narrator : narratorViewOf(r.narrator);
         if (narrator === null && r.narrator !== null) throw new RequestError("bad_request", 'the narrator\'s knowledge is {"knowledge": "scene" or "pov", "secrets": "marked" or "omit"}, or null to follow the world\'s default, else Settings');
         const engine = r.engine;
-        if (engine !== undefined && engine !== null && engine !== "classic" && engine !== "agents") throw new RequestError("bad_request", "the engine is classic or agents, or null to return the chat to what a chat with no choice plays");
+        if (engine !== undefined && engine !== null && engine !== "classic" && engine !== "agents") throw new RequestError("bad_request", "the engine is classic or agents, or null to play classic");
         if (r.tidy !== undefined && r.tidy !== null && typeof r.tidy !== "boolean") throw new RequestError("bad_request", "tidying impossible holds automatically is on (true), off (false) or as the world has it (null)");
-        const change: ChatKnowledgeChange = { ...(r.knowledge !== undefined ? { knowledge: r.knowledge } : {}), ...(narrator !== undefined ? { narrator } : {}), ...(r.tidy !== undefined ? { tidy: r.tidy } : {}) };
-        const changes = engine !== undefined || Object.keys(change).length > 0;
-        const prefs = engine !== undefined ? await this.switchEngine(r.chatId, userId, engine, change) : changes ? await this.rt.chatKnowledge.set(r.chatId, userId, change) : await this.rt.chatKnowledge.get(r.chatId, userId);
+        // A turn finishes on the engine it started on: while one waits at a gate, what it kept for its
+        // resume (changes a review card approved among them) would be lost, so the switch waits for it.
+        if (engine !== undefined && (engine ?? "classic") !== (await this.rt.chatKnowledge.engine(r.chatId, userId))) {
+          const waiting = await this.rt.gateWaiting(r.chatId, userId);
+          if (waiting !== null) throw new RequestError("conflict", `This chat's turn is waiting on ${waiting}. Answer or cancel it before you switch the engine: a turn finishes on the engine it started on.`);
+        }
+        const change = { ...(r.knowledge !== undefined ? { knowledge: r.knowledge } : {}), ...(narrator !== undefined ? { narrator } : {}), ...(engine !== undefined ? { engine } : {}), ...(r.tidy !== undefined ? { tidy: r.tidy } : {}) };
+        const changes = Object.keys(change).length > 0;
+        const prefs = changes ? await this.rt.chatKnowledge.set(r.chatId, userId, change) : await this.rt.chatKnowledge.get(r.chatId, userId);
         // A turn under way finishes on the engine and choices it started with (`TurnFrame`): the change applies from the chat's next turn.
         if (changes) this.rt.push.changed(r.chatId, userId);
-        const { engine: plays, from } = await this.engineNow(r.chatId, userId, prefs);
-        reply("lre.chat.knowledge", { knowledge: prefs.knowledge ?? null, narrator: prefs.narrator ?? null, engine: plays, engineFrom: from, ...(prefs.tidy !== undefined ? { tidy: prefs.tidy } : {}) });
+        reply("lre.chat.knowledge", { knowledge: prefs.knowledge ?? null, narrator: prefs.narrator ?? null, ...(prefs.engine === "agents" ? { engine: "agents" as const } : {}), ...(prefs.tidy !== undefined ? { tidy: prefs.tidy } : {}) });
         return;
       }
       case "lre.job": {
@@ -1021,20 +946,9 @@ export class Dispatcher {
         // GM → Minds (DESIGN §24.9): sent only from behind the GM gate; its progress goes to this session.
         try {
           const run = r.op === "run" ? await this.minds.start(r.chatId, userId, session, Array.isArray(r.who) ? r.who.filter((id) => typeof id === "string") : undefined) : r.op === "cancel" ? this.minds.cancel(r.chatId, userId, r.runId) : this.minds.status(r.chatId, userId);
-          const off = r.op === "status" ? await this.minds.off(r.chatId, userId) : null;
-          reply("lre.minds", { run, ...(off !== null ? { off } : {}) });
+          reply("lre.minds", { run });
         } catch (error) {
           if (error instanceof RunError) throw new RequestError(error.code, error.message);
-          throw error;
-        }
-        return;
-      }
-      case "lre.bootstrap": {
-        // GM → This chat → Depth and the Bootstrap view (DEPTH-PLAN §8): every page of the user's hears its progress.
-        try {
-          reply("lre.bootstrap", await this.bootstraps.handle(r, userId));
-        } catch (error) {
-          if (error instanceof BootstrapError) throw new RequestError(error.code, error.message);
           throw error;
         }
         return;
@@ -1065,33 +979,6 @@ export class Dispatcher {
       case "lre.agents": {
         // The outside MCP servers (DESIGN §23): a server's own check, and Settings → MCP server.
         reply("lre.agents", await this.rt.agents.request(r, userId, session));
-        return;
-      }
-      case "lre.tools": {
-        // The tools served to outside clients (DESIGN §23): a session that said hello as one asks, and a call runs as that session.
-        const client = this.client(userId, session);
-        if (session === undefined || client === undefined) throw new RequestError("forbidden", "LumiRPEngine's tools are served to outside clients (the lumirpengine MCP server and command line), not to a page");
-        if (r.op === "list") {
-          reply("lre.tools", { tools: servedTools((await this.rt.settings.get(userId)).prompts.texts), build: this.rt.agents.build.id });
-          return;
-        }
-        if (r.op === "describe") {
-          reply("lre.tools", { tool: await this.tools.describe(userId, r.name, r.chatId) });
-          return;
-        }
-        const caller = {
-          userId,
-          session,
-          client: client.harness === null ? client.name : `${client.name} (${client.harness})`,
-          request: async <T extends RequestType>(type: T, fields: RequestFields<T>): Promise<ResultBodies[T]> => {
-            let answer: ResultMessage | ErrorMessage | undefined;
-            await this.serve({ lre: PROTOCOL_VERSION, type, reqId: `${r.reqId}:${this.nextId()}`, ...fields }, userId, session, (message) => void (answer = message));
-            if (answer === undefined) throw new Error(`${type} wasn't answered`);
-            if (answer.type === "lre.error") throw new Refusal(answer.code, answer.message, answer.lint ?? []);
-            return answer.body as ResultBodies[T];
-          },
-        };
-        reply("lre.tools", { result: await this.tools.call(caller, r.name, r.args, r.readOnly === true) });
         return;
       }
       case "lre.acceptance": {
@@ -1150,50 +1037,6 @@ export class Dispatcher {
         reply("lre.live", { live: this.rt.live.view(r.chatId, userId) });
         return;
       }
-      case "lre.depth": {
-        // GM → Minds, Notebook and Archive (DEPTH-PLAN §7): the player's to read and edit, like every GM page (D-9).
-        await this.requireWorldChat(r.chatId, userId);
-        try {
-          reply("lre.depth", await depthRequest(this.rt, { head: (chatId, user) => this.head(chatId, user), edit: (chatId, user, ops) => this.gmEdit(chatId, user, ops) }, r, userId));
-        } catch (error) {
-          if (error instanceof DepthRefused) throw new RequestError(error.code, error.message);
-          throw error;
-        }
-        return;
-      }
-      // The loopback relay's requests (DEPTH-PLAN §3.6), from its own session; each but `register` names its secret.
-      case "lre.loopback.register":
-        reply(r.type, await this.rt.loopback.register(r, userId));
-        return;
-      case "lre.loopback.hello":
-        reply(r.type, await this.rt.loopback.hello(r, userId, session));
-        return;
-      case "lre.loopback.models":
-        reply(r.type, await this.rt.loopback.models(r, userId, session));
-        return;
-      case "lre.loopback.begin":
-        reply(r.type, await this.rt.loopback.begin(r, userId, session));
-        return;
-      case "lre.loopback.passthrough":
-        reply(r.type, await this.rt.loopback.passthrough(r, userId, session));
-        return;
-      case "lre.loopback.abort":
-        reply(r.type, await this.rt.loopback.abort(r, userId, session));
-        return;
-      case "lre.loopback.resend":
-        reply(r.type, await this.rt.loopback.resend(r, userId, session));
-        return;
-      case "lre.loopback.ack":
-        reply(r.type, await this.rt.loopback.ack(r, userId, session));
-        return;
-      case "lre.loopback.ping":
-        reply(r.type, await this.rt.loopback.ping(r, userId, session));
-        return;
-      case "lre.loopback.page":
-        // Settings → Loopback (DEPTH-PLAN §3.3, §3.7): the user's own page, never an outside client's.
-        if (this.outside(userId, session)) throw new RequestError("forbidden", "Settings → Loopback is the user's own page, not an outside client's");
-        reply(r.type, { page: await this.rt.loopback.page(r, userId) });
-        return;
       case "lre.prompts": {
         // Settings → Agents → Prompts' Test for a role's text (DESIGN §6.12): it runs the role on the
         // chat, so it reads the chat and is GM data, behind the gate as `lre.gm` is; one call a press.
@@ -1232,7 +1075,7 @@ export class Dispatcher {
         return { worlds: await store.list(userId) };
       case "commit": {
         // A session that said hello as an outside client commits as `agent` (DESIGN §23).
-        const committed = await store.commit(r.worldId, r.base, userId, { source: this.outside(userId, session) ? "agent" : "build", ...(r.note !== undefined ? { note: r.note } : {}), ...(r.version !== undefined ? { version: r.version } : {}) }, noted);
+        const committed = await store.commit(r.worldId, r.base, userId, { source: session !== undefined && this.clients.has(`${userId}\u0000${session}`) ? "agent" : "build", ...(r.note !== undefined ? { note: r.note } : {}), ...(r.version !== undefined ? { version: r.version } : {}) }, noted);
         await this.syncBook(r.worldId, userId);
         return committed;
       }
@@ -1321,41 +1164,25 @@ export class Dispatcher {
    * frontend's, so the session's commits are Build's.
    */
   private meet(userId: UserId, session: string | undefined, client: unknown): void {
-    const sessions = this.clients.get(userId);
-    if (session !== undefined) sessions?.delete(session);
-    if (!isRecord(client) || typeof client.name !== "string" || typeof client.version !== "string") {
-      if (sessions?.size === 0) this.clients.delete(userId);
-      return;
-    }
+    const key = `${userId}\u0000${session ?? ""}`;
+    this.clients.delete(key);
+    if (!isRecord(client) || typeof client.name !== "string" || typeof client.version !== "string") return;
     // Both go into a log line: control characters can't start another line, and each is bounded.
     const shown = (text: string): string => text.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 80);
-    const named: HelloClient = { name: shown(client.name), version: shown(client.version), harness: typeof client.harness === "string" && shown(client.harness) !== "" ? shown(client.harness) : null };
+    const named = { name: shown(client.name), version: shown(client.version) };
     if (session !== undefined) {
-      const mine = sessions ?? new Map<string, HelloClient>();
-      mine.set(session, named);
-      for (const oldest of mine.keys()) {
-        if (mine.size <= CLIENTS_PER_USER) break;
-        mine.delete(oldest);
+      this.clients.set(key, named);
+      for (const oldest of this.clients.keys()) {
+        if (this.clients.size <= CLIENTS_CAP) break;
+        this.clients.delete(oldest);
       }
-      this.clients.set(userId, mine);
     }
     this.rt.host.log("info", `[LumiRPEngine] outside client connected: ${named.name} ${named.version}`, userId);
   }
 
-  /** The outside client a session said hello as, now its user's most recently used; undefined for a page's session. */
-  private client(userId: UserId, session: string | undefined): HelloClient | undefined {
-    if (session === undefined) return undefined;
-    const sessions = this.clients.get(userId);
-    const client = sessions?.get(session);
-    if (sessions === undefined || client === undefined) return undefined;
-    sessions.delete(session);
-    sessions.set(session, client);
-    return client;
-  }
-
   /** Whether the session said hello as an outside client (DESIGN §23): an MCP server or the CLI, not one of the user's pages. */
   private outside(userId: UserId, session: string | undefined): boolean {
-    return this.client(userId, session) !== undefined;
+    return session !== undefined && this.clients.has(`${userId}\u0000${session}`);
   }
 
   /** The world's engine-managed book follows its head revision: a slot entry per section, and no leftover lore copies (DESIGN §4.2). */
@@ -1415,42 +1242,12 @@ export class Dispatcher {
     return upgradePreview(this.rt.registry, plan, state, doc(to), doc(state.revision));
   }
 
-  /** Which engine the chat's next turn plays, and where that comes from (`engineOf`): its own choices, then its path (read only for a chat with no engine of its own) and the user's New chats start on. */
-  private async engineNow(chatId: ChatId, userId: UserId, prefs: ChatKnowledgePrefs): Promise<{ engine: ChatEngine; from: EngineSource }> {
-    const { newChats } = (await this.rt.settings.get(userId)).agents;
-    if (prefs.engine) return engineOf(prefs, true, newChats);
-    const core = await this.rt.ledger.core(chatId, userId);
-    return engineOf(prefs, core ? playedOn(core, toChain(await this.rt.host.chats.messages(chatId, userId))) : false, newChats);
-  }
-
-  /**
-   * Sets the chat's engine as its own choice (GM → This chat → Engine, the offer's buttons; null
-   * returns it to what a chat with no choice plays), with the rest of `change`. A choice that changes
-   * the engine the next turn plays is refused while the chat's turn waits at a gate or on its card,
-   * saying on what, since a turn finishes on the engine it started on and what it kept for its resume
-   * would be lost; once made, it drops a turn the engine prepared for the next reply, which the
-   * engine switched to works out again.
-   */
-  private async switchEngine(chatId: ChatId, userId: UserId, engine: ChatEngine | null, change: ChatKnowledgeChange = {}): Promise<ChatKnowledgePrefs> {
-    const before = (await this.engineNow(chatId, userId, await this.rt.chatKnowledge.get(chatId, userId))).engine;
-    const after = engine ?? (await this.engineNow(chatId, userId, {})).engine;
-    if (after !== before) {
-      const waiting = await this.rt.gateWaiting(chatId, userId);
-      if (waiting !== null) throw new RequestError("conflict", `This chat's turn is waiting on ${waiting}. Answer or cancel it before you switch the engine: a turn finishes on the engine it started on.`);
-    }
-    const prefs = await this.rt.chatKnowledge.set(chatId, userId, { ...change, engine });
-    if (after !== before) this.rt.ledger.engineSwitched(chatId);
-    return prefs;
-  }
-
   private async chip(chatId: ChatId, userId: UserId, id: string, choice: string, payload?: JsonObject): Promise<ResultBodies["lre.chip"]> {
     await this.requireWorldChat(chatId, userId);
     const observed = toChain(await this.rt.host.chats.messages(chatId, userId));
     const [kind, messageId = "", swipe = "0"] = id.split(":");
     // Chips derived from records.
     if (kind === "reread" || kind === "retry_read") {
-      // On depth nothing reads a reply into canon (DEPTH-PLAN §1.3): an edit is the author's to read, and Re-run plays a turn again.
-      if (await this.rt.depth.on(chatId, userId)) throw new RequestError("bad_request", "This chat is on depth, where nothing reads a reply into the story: your edit of a reply goes to the author as a directive, and Swipe as… → Re-run plays a turn again.");
       // One read at a time per chat, re-checked inside the lock: a double tap reads once.
       return this.locked(`${userId}\u0000${chatId}`, async () => {
         const core = await this.rt.ledger.core(chatId, userId);
@@ -1506,74 +1303,6 @@ export class Dispatcher {
       this.rt.setSwipeChoice(chatId, choice, swipeDirectionOf(payload?.text) ?? undefined);
       return { applied: true, pending: false };
     }
-    if (kind === "unfaithful") {
-      // A passage that streamed though the GM's check found it unfaithful (DEPTH-PLAN §1.3): Re-narrate
-      // renders the same beats again, as the next swipe's one-shot choice; the page then swipes.
-      if (choice !== "renarrate") throw new RequestError("bad_request", `unknown choice ${choice}`);
-      this.rt.setSwipeChoice(chatId, "renarrate");
-      return { applied: true, pending: false };
-    }
-    if (kind === TALK_CHIP_KIND) {
-      // Real-time dialogue's chip (DEPTH-PLAN §2.5): Leave ends it, Talk takes the author's offer, each a
-      // `story.talk` the player decided, landed at the chat's last message, so his next line plays as he chose.
-      if (!isTalkChoice(choice)) throw new RequestError("bad_request", `unknown choice ${choice}`);
-      const tap = await talkTap(this.rt, chatId, userId, id, choice);
-      if ("lapsed" in tap) throw new RequestError("not_found", tap.lapsed);
-      // A Leave ends the talk's scene for its partner, who remembers it now, in the background (§4.4).
-      if (tap.left) void talkLeft(this.rt, chatId, userId, tap.left).then(() => this.rt.push.changed(chatId, userId));
-      this.rt.push.changed(chatId, userId);
-      return { applied: true, pending: tap.pending };
-    }
-    if (kind === ASK_CHIP_KIND) {
-      // "Ask me" (DEPTH-PLAN §6.5): the player's answer to an episode held past an allowance lands beside
-      // its ask; the episode is then drafted in the background, at the treatments the author wanted or a
-      // step down the ladder. His tap is his own decision: it runs whatever the ceilings.
-      if (!isAskChoice(choice)) throw new RequestError("bad_request", `unknown choice ${choice}`);
-      const tap = await askAnswer(this.rt, chatId, userId, id, choice);
-      if ("lapsed" in tap) throw new RequestError("not_found", tap.lapsed);
-      const budget = await chatBudget(this.rt.host, chatId, userId, (await this.rt.settings.get(userId)).depth.budget);
-      void draftAnswered(this.rt, chatId, userId, tap, { budget })
-        .then((r) => {
-          for (const line of r.said) this.rt.host.log("info", `[LumiRPEngine] chat ${chatId}, the episode you answered for: ${line}`, userId);
-          if (r.landed?.status === "refused") this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}, the episode you answered for wasn't kept: ${r.landed.reason}`, userId);
-          this.rt.push.changed(chatId, userId);
-        })
-        .catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}, the episode you answered for didn't draft: ${error instanceof Error ? error.message : String(error)}`, userId));
-      this.rt.push.changed(chatId, userId);
-      return { applied: true, pending: tap.pending };
-    }
-    if (kind === ENGINE_OFFER_KIND) {
-      // The offer to switch to agents (INC3 3a, D2): either button records the chat's own engine through
-      // the switch's path, and is refused as the switch is while a turn waits at a gate; the chip, built
-      // from the chat's choices, stays until one lands.
-      const engine = choice === ENGINE_OFFER_CHOICES.switch || choice === ENGINE_OFFER_CHOICES.keep ? choice : null;
-      if (engine === null) throw new RequestError("bad_request", `unknown choice ${choice}: ${ENGINE_OFFER_CHOICES.switch} or ${ENGINE_OFFER_CHOICES.keep}`);
-      await this.switchEngine(chatId, userId, engine);
-      this.rt.push.changed(chatId, userId);
-      return { applied: true, pending: false };
-    }
-    if (kind === DEPTH_OFFER_KIND) {
-      // The depth offer (DEPTH-PLAN Round 2): Estimate surveys the chat with no model call; Turn on depth
-      // opts in as GM → This chat → Depth does (refused while the user can't play depth, said why) and
-      // starts the bootstrap under Settings → Depth's cap; Keep off records the chat's choice.
-      if (!isDepthOfferChoice(choice)) throw new RequestError("bad_request", `unknown choice ${choice}`);
-      const ask = async (op: BootstrapOp): Promise<void> => {
-        try {
-          await this.bootstraps.handle({ lre: PROTOCOL_VERSION, type: "lre.bootstrap", reqId: `depth_offer:${this.nextId()}`, chatId, ...op }, userId);
-        } catch (error) {
-          if (error instanceof BootstrapError) throw new RequestError(error.code, error.message);
-          throw error;
-        }
-      };
-      if (choice === DEPTH_OFFER_CHOICES.estimate) await ask({ op: "estimate" });
-      else if (choice === DEPTH_OFFER_CHOICES.off) await ask({ op: "opt", on: false });
-      else {
-        await ask({ op: "opt", on: true });
-        await ask({ op: "start" });
-      }
-      this.rt.push.changed(chatId, userId);
-      return { applied: true, pending: false };
-    }
     if (kind === "reply_failed") {
       // Re-run the engine (DESIGN §5.1): the kept turn goes, and the Regenerate that follows runs the
       // engine again. Retry the reply is the page's Regenerate alone, with nothing to send here.
@@ -1620,15 +1349,6 @@ export class Dispatcher {
       // An agent turn's change applied from its review card: its Undo counts toward its role's learning.
       else if (entry.agent && (result.applied || result.pending)) await this.review.undone(chatId, userId, id);
       return { applied: result.applied, ...waits(result) };
-    }
-    if (kind === MIND_EDIT_CHIP) {
-      // Undo on the player's edit of a mind file (`mind_edit:<entry>`, GM → Minds, from the GM's edits or its notice): an entry superseding the edit's lands where it did, so the file reads as it did before (DEPTH-PLAN §7).
-      if (choice !== "undo") throw new RequestError("bad_request", `unknown choice ${choice}`);
-      const landed = await mindEditUndo(this.rt, chatId, userId, messageId).catch((error: unknown) => {
-        throw error instanceof MindRefused ? new RequestError(error.code === "moved" ? "not_found" : "conflict", error.message) : error;
-      });
-      this.rt.push.changed(chatId, userId);
-      return { applied: landed.status === "landed", pending: landed.status === "held" };
     }
     if (kind === "refused") {
       // Dismiss on the notice of a held write that didn't apply (P2).
@@ -1733,13 +1453,6 @@ export class Dispatcher {
       }
     };
     switch (chip.kind) {
-      case "edit_read": {
-        // Undo on an edit the author read as amending (M-16): the reverse amendment, with its catch-ups, runs in the background; the chip then says what became of it.
-        const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
-        if (choice !== "undo" || chip.swipeId === undefined) throw new RequestError("bad_request", `unknown choice ${choice}`);
-        this.rt.editUndo(chatId, userId, chip.messageId, chip.swipeId, { amended: strings(chip.payload.amended), struck: strings(chip.payload.struck) });
-        return { applied: true, pending: false };
-      }
       case "confirm": {
         // Set price and Pick item price a purchase nothing priced, and Pay another way pays the first
         // other way that covers it (DESIGN §9.5): each applies it as Apply would, so each accepts it.
@@ -2045,7 +1758,7 @@ function chipValue(chip: StoredChip, choice: string, payload: JsonObject | undef
   const input = chip.actions.find((a) => a.id === choice)?.input;
   if (!input || !payload) return null;
   if (input.type === "money") return typeof payload.cents === "number" && Number.isSafeInteger(payload.cents) && payload.cents > 0 ? payload.cents : null;
-  if (input.type === "text" || input.type === "action" || input.type === "org" || input.type === "settings" || input.type === "draft" || input.type === "bootstrap") return null;
+  if (input.type === "text" || input.type === "action" || input.type === "org") return null;
   return typeof payload.value === "string" && input.options.some((o) => o.value === payload.value) ? payload.value : null;
 }
 

@@ -7,9 +7,8 @@
 import type { ComponentChildren } from "preact";
 import { createContext } from "preact";
 import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
-import type { JsonObject, JsonValue } from "../shared/json";
+import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
-import { composeMergePatches, jsonEqual } from "../shared/json-patch";
 import type { OutcomeOdds } from "../shared/state-view";
 import { diffCounts, diffRows, lineDiff } from "../shared/text-diff";
 import { useApp, useUi } from "./app";
@@ -293,7 +292,7 @@ export function Toasts(props: { surface: ToastSurface }) {
   );
 }
 
-/** Runs an async action with a busy flag; repeated taps while busy are ignored. A value edit, which must never be dropped, saves through `useSaves`. */
+/** Runs an async action with a busy flag; repeated taps while busy are ignored. */
 export function useBusy(): [boolean, (run: () => Promise<unknown>) => void] {
   const [busy, setBusy] = useState(false);
   const live = useRef(true);
@@ -313,63 +312,6 @@ export function useBusy(): [boolean, (run: () => Promise<unknown>) => void] {
       });
     },
   ];
-}
-
-/**
- * Saves value edits one at a time and never drops one (a field that saves on every key, as the model
- * picker does, edits faster than a save answers): an edit made while a save is under way waits, the
- * edits waiting fold into one where they can (`composeMergePatches`), else wait in order, and the
- * next goes when the save before it ends. One the same as the save just made changes nothing, so it
- * isn't sent: a tap repeated while its save is under way is still one save. `busy` hears saving
- * start and stop.
- */
-export function saveQueue(save: (patch: JsonObject) => Promise<unknown>, busy: (on: boolean) => void): (patch: JsonObject) => void {
-  // The save under way, null while none is.
-  let sent: JsonObject | null = null;
-  const waiting: JsonObject[] = [];
-  const send = (patch: JsonObject) => {
-    sent = patch;
-    void save(patch).finally(next);
-  };
-  const next = () => {
-    let patch = waiting.shift();
-    while (patch !== undefined && jsonEqual(patch, sent)) patch = waiting.shift();
-    if (patch !== undefined) return send(patch);
-    sent = null;
-    busy(false);
-  };
-  return (patch) => {
-    if (sent === null) {
-      busy(true);
-      return send(patch);
-    }
-    const last = waiting[waiting.length - 1];
-    const folded = last === undefined ? null : composeMergePatches(last, patch);
-    if (folded === null) waiting.push(patch);
-    else waiting[waiting.length - 1] = folded;
-  };
-}
-
-/** A `saveQueue` for a component's settings: whether a save is under way, and the patch that saves one. The latest `save` given is the one called. */
-export function useSaves(save: (patch: JsonObject) => Promise<unknown>): [boolean, (patch: JsonObject) => void] {
-  const [busy, setBusy] = useState(false);
-  const live = useRef(true);
-  useEffect(
-    () => () => {
-      live.current = false;
-    },
-    [],
-  );
-  const latest = useRef(save);
-  latest.current = save;
-  const queue = useRef<((patch: JsonObject) => void) | null>(null);
-  queue.current ??= saveQueue(
-    (patch) => latest.current(patch),
-    (on) => {
-      if (live.current) setBusy(on);
-    },
-  );
-  return [busy, queue.current];
 }
 
 // ---------------------------------------------------------------- shared UI atoms

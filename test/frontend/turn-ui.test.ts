@@ -10,14 +10,12 @@ import { describe, expect, test } from "bun:test";
 import type { VNode } from "preact";
 import { Button, Seg } from "../../src/frontend/components";
 import { AgentTrace, agentTokensText, cancelTurn } from "../../src/frontend/diagnostics";
-import { engineRequest, EngineSwitch, readEngine, type ChatEngineRead } from "../../src/frontend/gm/engine";
+import { engineRequest, EngineSwitch, readEngine, type ChatEngine } from "../../src/frontend/gm/engine";
 import { SessionPanel, workspaceControls, type WorkspaceBody, type WorkspaceResult } from "../../src/frontend/gm/workspace";
 import { followReview, type ReviewBody, ReviewCard, reviewHandlers, ReviewUnread } from "../../src/frontend/review-card";
 import type { ActivityAgent } from "../../src/shared/diagnostics";
 import type { GenerateAs, ReviewCardView, SessionView } from "../../src/shared/protocol";
 import { press, propsOf, type Props } from "../support/tree";
-import { TurnBody } from "../../src/frontend/depth/turn";
-import type { DepthSceneView } from "../../src/shared/scene-view";
 
 const CHAT = "chat-port-alder";
 
@@ -45,9 +43,9 @@ function click(props: Props): void {
 }
 
 describe("GM → This chat: the Engine switch", () => {
-  test("shows the engine and where it comes from, and sends lre.chat.knowledge with the one picked, saying a switch drops a prepared turn", () => {
+  test("shows the engine and sends lre.chat.knowledge with the one picked, saying a switch drops a prepared turn", () => {
     const picked: string[] = [];
-    const tree = EngineSwitch({ engine: { engine: "classic", from: "played" }, busy: false, onChange: (engine) => picked.push(engine) });
+    const tree = EngineSwitch({ engine: "classic", busy: false, onChange: (engine) => picked.push(engine) });
     const seg = propsOf(tree, Seg)[0] ?? {};
     expect(seg.label).toBe("Which engine plays this chat's turns");
     expect(seg.value).toBe("classic");
@@ -56,14 +54,11 @@ describe("GM → This chat: the Engine switch", () => {
       { value: "agents", label: "Agents" },
     ]);
     expect(textOf(tree)).toContain("Switching drops a turn the engine has already prepared for the next reply");
-    expect(textOf(tree)).toContain("This chat played before it chose an engine, so it plays classic until you switch it.");
-    expect(textOf(EngineSwitch({ engine: { engine: "agents", from: "default" }, busy: false, onChange: () => undefined }))).toContain("The default for new chats when this chat played its first turn");
-    expect(textOf(EngineSwitch({ engine: { engine: "agents", from: "chosen" }, busy: false, onChange: () => undefined }))).toContain("This chat's own choice.");
     press(seg, "agents");
     expect(picked).toEqual(["agents"]);
     expect(engineRequest(CHAT, "agents")).toEqual({ type: "lre.chat.knowledge", chatId: CHAT, engine: "agents" });
     expect(engineRequest(CHAT, "classic")).toEqual({ type: "lre.chat.knowledge", chatId: CHAT, engine: "classic" });
-    expect(propsOf(EngineSwitch({ engine: { engine: "agents", from: "new" }, busy: false, onChange: () => undefined }), Seg)[0]?.value).toBe("agents");
+    expect(propsOf(EngineSwitch({ engine: "agents", busy: false, onChange: () => undefined }), Seg)[0]?.value).toBe("agents");
     // While it is read, no switch to press.
     expect(propsOf(EngineSwitch({ engine: null, busy: false, onChange: () => undefined }), Seg)).toEqual([]);
   });
@@ -307,43 +302,24 @@ describe("the review card when its read fails", () => {
 
 describe("the Engine page across chats", () => {
   test("each read starts unknown and not failed, so one chat's failure doesn't stay on the next; a stopped read's answer is dropped", async () => {
-    const state: { engine: ChatEngineRead | null; failed: boolean } = { engine: null, failed: false };
-    const out = { engine: (engine: ChatEngineRead | null) => void (state.engine = engine), failed: (failed: boolean) => void (state.failed = failed) };
+    const state: { engine: ChatEngine | null; failed: boolean } = { engine: null, failed: false };
+    const out = { engine: (engine: ChatEngine | null) => void (state.engine = engine), failed: (failed: boolean) => void (state.failed = failed) };
     let pending: Promise<unknown> = Promise.resolve();
-    type Answer = { engine: "classic" | "agents"; engineFrom: "chosen" | "default" | "new" | "played" } | null;
-    const answer = (result: Answer) => () => (pending = Promise.resolve(result)) as Promise<Answer>;
+    const answer = (result: { engine?: "agents" } | null) => () => (pending = Promise.resolve(result)) as Promise<{ engine?: "agents" } | null>;
     const stop = readEngine(answer(null), out);
     await pending.then(() => undefined);
     expect(state).toEqual({ engine: null, failed: true });
     stop();
     // Another chat opened: its read resets the failure at once, then shows its engine.
-    const next = readEngine(answer({ engine: "agents", engineFrom: "default" }), out);
+    const next = readEngine(answer({ engine: "agents" }), out);
     expect(state).toEqual({ engine: null, failed: false });
     await pending.then(() => undefined);
-    expect(state).toEqual({ engine: { engine: "agents", from: "default" }, failed: false });
+    expect(state).toEqual({ engine: "agents", failed: false });
     next();
     // A read stopped before it answers changes nothing.
-    const late = readEngine(answer({ engine: "classic", engineFrom: "chosen" }), out);
+    const late = readEngine(answer({}), out);
     late();
     await pending.then(() => undefined);
     expect(state).toEqual({ engine: null, failed: false });
-  });
-});
-
-describe("GM → Depth → Turn: each call's chat messages", () => {
-  test("a call row says which chat messages its request carried, or that it carried none", () => {
-    const call = { connection: "conn-1", model: "deepseek-v4-flash", requestId: null };
-    const view: DepthSceneView = {
-      reply: { messageId: "m38", swipeId: 0, index: 38, at: "" },
-      replies: [{ messageId: "m38", swipeId: 0, index: 38, at: "" }],
-      pov: null,
-      staging: [],
-      beats: [],
-      told: [],
-      takes: [],
-      provenance: { calls: [{ ...call, role: "narrator", history: { first: 28, last: 37, count: 10 } }, { ...call, role: "gm", history: { first: 0, last: 0, count: 0 } }, { ...call, role: "check" }], turnMs: 1000, firstContentMs: null },
-    };
-    const rows = propsOf(TurnBody({ view, busy: false, onPick: () => {}, onJump: () => {} }), "p").filter((p) => p["data-lre-depth-call-history"] !== undefined);
-    expect(rows.map((p) => textOf(p.children))).toEqual(["Messages #28–#37 (10)", "No chat messages"]);
   });
 });

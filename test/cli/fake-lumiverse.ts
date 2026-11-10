@@ -16,8 +16,7 @@ import { applyPatch, PatchError, readOp } from "../../src/shared/json-patch";
 import { HostConnection } from "../../src/cli/connection";
 import { Live } from "../../src/cli/live";
 import type { ToolContext } from "../../src/cli/tools";
-import { KeyedQueue } from "../../src/shared/keyed-queue";
-import type { OutsideTool } from "../../src/shared/outside-tools";
+import { KeyedQueue } from "../../src/cli/tools";
 
 type Payload = Record<string, unknown>;
 
@@ -60,11 +59,6 @@ export class FakeLre {
   kit: { path: string; sha256: string; api: number; core: string } | null = null;
   /** Whether the kit check knows the asking session (false: the extension restarted since its hello). */
   known = true;
-  /**
-   * The tools it serves outside clients (`lre.tools`, DESIGN §23), as its list names them; null serves
-   * none, as a build from before them refuses the request. A call of one answers what it was asked.
-   */
-  served: OutsideTool[] | null = null;
   /** The id a server's check-in is given. */
   readonly clientId = "c0ffee0000000001";
   private seq = 0;
@@ -210,11 +204,6 @@ export class FakeLre {
       if (r.type === "lre.world") return reply(this.worldOp(r));
       if (r.type === "lre.editor") return reply(this.editor(r));
       if (r.type === "lre.marker" && r.kind === "migrate" && r.preview === true) return reply({ pending: false, preview: structuredClone(this.preview) as unknown as JsonValue as Payload });
-      if (r.type === "lre.tools" && this.served !== null) {
-        if (r.op === "list") return reply({ tools: structuredClone(this.served) as unknown as JsonValue as Payload[], build: this.build ?? "dev" });
-        if (!this.served.some((t) => t.name === r.name)) throw new Refusal("not_found", `There is no tool ${String(r.name)}.`);
-        return reply({ result: { text: `the fake ran ${String(r.name)}`, isError: true } });
-      }
       throw new Refusal("bad_request", `the fake doesn't do ${String(r.type)}`);
     } catch (error) {
       if (!(error instanceof Refusal)) throw error;

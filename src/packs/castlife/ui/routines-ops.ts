@@ -250,7 +250,7 @@ export function originWords(origin: BlockOrigin, name: (id: string) => string): 
     case "trip":
       return "A trip";
     case "plan":
-      return origin.source === "gm" ? "Your plan for them" : origin.source === "memory" ? "A plan from the story" : origin.source === "agent" ? "A plan of their own" : "A plan from their mind";
+      return origin.source === "gm" ? "Your plan for them" : origin.source === "memory" ? "A plan from the story" : "A plan from their mind";
     case "agenda":
       return `Their agenda: ${name(origin.track)}`;
     case "invitation":

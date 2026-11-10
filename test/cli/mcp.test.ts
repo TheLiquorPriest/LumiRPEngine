@@ -3,14 +3,12 @@
 // anything malformed, and calls in flight side by side.
 
 import { describe, expect, test } from "bun:test";
-import { servedTools } from "../../src/backend/agents/tools/outside";
 import { isRecord } from "../../src/shared/json";
 import { kit } from "../../src/cli/agent-kit";
 import type { KitContext } from "../../src/cli/kit-api";
 import type { RpcReply } from "../../src/cli/mcp";
 import { lineServer, McpServer, PROTOCOL_VERSIONS } from "../../src/cli/mcp";
-import { TOOLS } from "../../src/cli/tools";
-import { KeyedQueue } from "../../src/shared/keyed-queue";
+import { KeyedQueue, TOOLS } from "../../src/cli/tools";
 import { client, FakeLumiverse } from "./fake-lumiverse";
 
 function serve(fake: FakeLumiverse, readOnly = false): { feed(text: string): void; replies(): Promise<RpcReply[]> } {
@@ -126,10 +124,7 @@ describe("the MCP server", () => {
   });
 
   test("an unknown tool and a null id are protocol errors, as MCP has them", async () => {
-    // A name neither this client nor LumiRPEngine serves: LumiRPEngine answers not_found.
-    const fake = new FakeLumiverse();
-    fake.lre.served = servedTools({});
-    const s = serve(fake);
+    const s = serve(new FakeLumiverse());
     s.feed(rpc(1, "tools/call", { name: "lre_no_such_tool", arguments: {} }));
     s.feed(`${JSON.stringify({ jsonrpc: "2.0", id: null, method: "tools/list" })}\n`);
     const replies = await s.replies();

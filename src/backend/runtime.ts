@@ -22,7 +22,7 @@ import { isMindPurpose, KNOWLEDGE_CHANGES, MINDS_EVENTS, MINDS_SLOT, type MindCa
 import { firedTimeout, TimeoutFired, TIMEOUTS, timerMs } from "../shared/timeouts";
 import { KEPT_MIND_REASON, mindsOn, mindsStepConfig, postKnowledge, postMemory, postMinds, postMindsInput, postOpening, preMinds, runMinds, type MindsDeps, type PreMindsInput, type RunMindsResult } from "./minds";
 import { runSkip, type BeatMinds, type SkipRun } from "./skip";
-import { DEPTH_SKIP_PLAN, planSkip } from "./skip-plan";
+import { planSkip } from "./skip-plan";
 import { mindLines } from "../packs/minds/core/section";
 import { namedInText, singlesOut } from "../packs/minds/core/fidelity";
 import { matchCatalog, transferCents, type PaidFrom } from "../packs/economy/core/index";
@@ -45,8 +45,6 @@ import type { ChainMessage } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import type { LedgerCore, LedgerEnv } from "../engine/ledger/journal";
 import { activeRecord, activeText, isTombstoned, ownMessage } from "../engine/ledger/path";
-import { chainBases } from "../engine/ledger/layer";
-import { withPov } from "../shared/character-engine";
 import { optionalQuery, own } from "../engine/pack-kit";
 import type { PackDef, ReadContext } from "../engine/registry";
 import { createRegistry, type Registry } from "../engine/registry-impl";
@@ -96,11 +94,10 @@ import { BlobStore } from "./agents/blobs";
 import { Sessions } from "./agents/sessions";
 import { CompactionMemo } from "./agents/compaction-memo";
 import { Sweep } from "./agents/sweep";
-import { ChatKnowledge, chatKnowledgePrefsOf, engineOfferChip, knowledgeOn, narratorView, playedOn, tidyOn } from "./chat-knowledge-prefs";
+import { ChatKnowledge, chatKnowledgePrefsOf, knowledgeOn, narratorView, tidyOn } from "./chat-knowledge-prefs";
 import { ChipStore, type StoredChip } from "./chips";
-import { ArchiveIndex } from "./archive-index";
 import type { DryRun, HostPort } from "./host";
-import { EngineFailure, eventsOf, LedgerService, OPEN_CHATS_CAP, toChain, type Delivered, type PlayerEdit, type PreOutcome, type RunOutcome, type TurnContext, type TurnGone, type TurnHooks } from "./ledger-io";
+import { EngineFailure, LedgerService, OPEN_CHATS_CAP, toChain, type Delivered, type PreOutcome, type RunOutcome, type TurnContext, type TurnGone, type TurnHooks } from "./ledger-io";
 import { outsideTurns, turnFrame, type TurnFrame } from "./turn-frame";
 import type { TrimReport } from "./memory-budget";
 import { MessageCache } from "./message-cache";
@@ -129,23 +126,11 @@ import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBin
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, applyRead, type EnginePipeline, type PlannedRead, type PlanProse, type PreparedRead, type ProposalOutcome, type ReadChip, type ReadStep, TurnBridge, type UnfitAction } from "./turn-model";
 import { agentsActHere, factLines, handedCash, judge, keepLine, noFacts, npcAsked, npcOdds, oddsDecisions, paidOutside, payeeOf, phaseBudget, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, sceneClock, slotVars, type EarlierMessage, type StepBudget, tiesOf, turnTimeLine, unfitRef, type PlanStart, type ProseMark, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
-import { beatTextHashes, buildView, clockMinutes, notWorldView, palette, recentLines, replyFailedChip, TIMELAPSE_ACTION, ViewMemo } from "./view";
+import { buildView, clockMinutes, notWorldView, palette, recentLines, replyFailedChip, TIMELAPSE_ACTION, ViewMemo } from "./view";
 import { actionWords, compactSpan, editedText, spanText } from "../engine/action-words";
 import { WorldStore } from "./worlds";
 import { Diagnostics, type DiagAt } from "./diagnostics";
 import { Orchestrator, type TurnCalls } from "./agents/orchestrator";
-import { LoopbackBridge } from "./loopback/bridge";
-import type { PlacedSection } from "./loopback/compose";
-import { talkChipOn } from "./depth/scene/talk";
-import { STORY_TALK } from "../shared/talk";
-import { DepthTurns } from "./depth/scene/runner";
-import { afterDepthReply } from "./depth/scene/after";
-import { chatArchive } from "./depth/archive-tools";
-import { headBasis } from "./character-engine";
-import { editUndone, replyEdited } from "./depth/scene/edit";
-import { ASK_TYPES, askChipsOn } from "./depth/offscreen/asks";
-import { DRAFT_TYPES, draftsOn, settledChipsOn } from "./depth/offscreen/drafts";
-import { rebaseCandidates } from "./depth/offscreen/jobs";
 import { Review } from "./agents/review";
 import { LiveFeeds } from "./agents/live";
 import { uncurated } from "./agents/roles/curator";
@@ -153,7 +138,7 @@ import { quietCurator } from "./agents/curator-gate";
 import { defaultAgentSettings, KEPT_FOLDS_DEFAULT } from "../shared/agent-settings";
 import type { ExtractInput, InterpretOutcome, ProseAsk, SceneOut } from "./agents/turn-ctx";
 import { chainMarks, sceneBasis, ScenePersistence } from "./agents/persist";
-import { curatorKinds, ROLE_IDS, type RoleId, type RoleSettings } from "../shared/agent-roles";
+import { curatorKinds, type RoleId, type RoleSettings } from "../shared/agent-roles";
 import { outputsOf } from "../engine/outputs";
 import { CANNOT_STOP, DIAG_RING, type DiagPhase, type DiagStep, STEP_LABEL } from "../shared/diagnostics";
 import { RETENTION_DEFAULTS } from "../shared/stores";
@@ -201,22 +186,6 @@ interface LorePhase {
 /** The model calls of the minds' post phase (`postMinds`): their diagnostics step takes them as its own, beside the read's. */
 const MINDS_POST_CALLS: readonly StepPurpose[] = ["memory", "consolidate", "knowledge"];
 
-/** Why every role of an agent turn is none in GM → Live when a chat on depth generated off the loopback (`offLoopback`). */
-const OFF_LOOPBACK_WHY = "Generated off the loopback: no scene and no read of the reply.";
-
-/** One piece of depth work under way in a chat (`Runtime.depthWorking`): what it is, whose, the message it reads through once known, whether it is work between turns, its abort, and when what the next turn reads of it is in. */
-interface DepthJob {
-  what: string;
-  userId: UserId;
-  message: MessageId | null;
-  between: boolean;
-  stop: AbortController;
-  ready: Promise<void>;
-  isReady: boolean;
-}
-
-/** How long a turn waits for depth work it reads through before it goes on without it (`Runtime.depthNeeded`). */
-const NEEDED_WAIT_MS = 120_000;
 
 /** Refusals of a change the state already holds (a fact already known, a life state already so): nothing to show or tell. */
 const ALREADY_SO: ReadonlySet<string> = new Set(["already_known", "already"]);
@@ -884,8 +853,6 @@ export class Runtime implements TurnHooks {
   /** Each World Info book's entries as last read, until the book changes: what live lore reads (`liveLore`). */
   readonly bookReads = new BookReads();
   readonly ledger: LedgerService;
-  /** The raw archive index (DEPTH-PLAN §4.3): the author's and the GM's search and quotes of the chat's prose. */
-  readonly archive: ArchiveIndex;
   /** The JSON regex scripts, each world chat's and the user's unwraps (DESIGN §6.7). */
   readonly jsonHiding: JsonHiding;
   /** What the active preset says: section outlets, helper guidance, narrator rules (DESIGN §6.8). */
@@ -903,22 +870,8 @@ export class Runtime implements TurnHooks {
   readonly review: Review;
   /** GM → Live (DESIGN §4.6): each chat's latest agent run as its agents work it, pushed to the pages watching it. */
   readonly live: LiveFeeds;
-  /** The bootstrap's chips on a depth chat (DEPTH-PLAN §7 Chips): its progress while it runs, its spot checks waiting; set by the service that runs it (`Bootstraps.chipsOn`). */
-  bootstrapChips: ((chatId: ChatId, userId: UserId, at: MessageId) => Promise<StateView["chips"]>) | null = null;
-  /** A character the scene cast before LumiBooks' time of theirs was read into their mind (Settings → Depth → Bootstrap → When a character returns): caught up first, or flagged; the lines said of it. Set by the bootstrap's service (`Bootstraps.returning`). */
-  bootstrapReturning: ((chatId: ChatId, userId: UserId, who: readonly EntityId[]) => Promise<string[]>) | null = null;
   /** The agent turn loop (INC2-SPEC lane T1): a chat on agents plays each turn through its roles. */
   readonly orchestrator: Orchestrator;
-  /** The loopback's bridge (DEPTH-PLAN §3): the relay's requests, the turn tagger, the turns run inside their provider calls, Settings → Loopback. */
-  readonly loopback: LoopbackBridge;
-  /** A2's depth turns (DEPTH-PLAN §2.3, §9.2 A2): the scene a loopback turn plays for a chat on depth, in place of today's narrator, and what runs after its reply. */
-  readonly depth: DepthTurns;
-  /** The depth offer under a world chat's last message (`bootstrap/depth-offer.ts`), set by the dispatcher, which holds the chats' bootstraps; null until it is. */
-  depthOffer: ((chatId: ChatId, userId: UserId, messageId: MessageId) => Promise<StateView["chips"][number] | null>) | null = null;
-  /** What follows depth replies and reads the player's edits of them, under way outside every turn (`depthSettled`). */
-  private readonly depthWork = new Set<Promise<void>>();
-  /** The same work by chat (DEPTH-PLAN §6.1-6.3): what a swipe or delete stops, what Work between turns off stops, and what a turn waits for. */
-  private readonly depthJobs = new Map<ChatId, Set<DepthJob>>();
   /** Smart persistence (Settings → Agents → Pipeline): each chat's last agent turn's scene, which its next turn's quiet minds and scene notes are kept by. */
   readonly persistence: ScenePersistence;
   /** Each chat's agent metadata: the learned area's index, the GM assistant's thread and a session rollback asked for (DESIGN §4.4). */
@@ -975,8 +928,8 @@ export class Runtime implements TurnHooks {
   private readonly preBudgets = new Map<string, StepBudget>();
   /** The POV's place after each chat's last plan (the `scene_change` signal). */
   private readonly lastPlace = new Map<ChatId, string | null>();
-  /** What the pre phase saw, per generation, for the plan phase's signals and the reply's read (a Re-read's too, while it is kept); `scene` when the reply is a depth scene, which writes no brief or outline. */
-  private readonly prePhase = new Map<string, { chatId: ChatId; facts: SignalFacts; text: string; start: PlanStart; connectionId: string | null; preset: PresetConfig; scene: boolean }>();
+  /** What the pre phase saw, per generation, for the plan phase's signals and the reply's read (a Re-read's too, while it is kept). */
+  private readonly prePhase = new Map<string, { chatId: ChatId; facts: SignalFacts; text: string; start: PlanStart; connectionId: string | null; preset: PresetConfig }>();
   /** Each generation's lore traces, step by step (the inspector shows them, DESIGN §6.5). */
   private readonly loreTraces = new Map<string, LoreStepTrace[]>();
   /** Each engine run's lore with World Info read live, by its turn id: one read for its phases (DESIGN §4.2). */
@@ -1062,7 +1015,6 @@ export class Runtime implements TurnHooks {
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets, loreEntry: (userId, id) => this.loreRouting.ids.entryOf(userId, id) };
     // Each user's chats fold on their own fold, its caches within their Settings → Agents → Budgets.
     this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), (userId) => this.foldOf(userId), (chatId) => this.messages.forget(chatId));
-    this.archive = new ArchiveIndex(this.ledger, this.host);
     this.sessions = new Sessions(this.blobs, this.ledger);
     this.chatAgents = new ChatAgentMeta(this.host, this.chatMeta);
     this.globalFiles = new GlobalWorkspace(this.host);
@@ -1073,9 +1025,6 @@ export class Runtime implements TurnHooks {
     this.review = new Review(this);
     this.live = new LiveFeeds(this.host, (userId) => this.settings.known(userId)?.agents.kept.live ?? defaultAgentSettings().kept.live);
     this.orchestrator = new Orchestrator(this, this.review);
-    this.loopback = new LoopbackBridge(this);
-    this.depth = new DepthTurns(this);
-    this.loopback.depth = this.depth.run;
   }
 
   start(): void {
@@ -1085,7 +1034,6 @@ export class Runtime implements TurnHooks {
     this.ledger.attach();
     this.agents.start();
     this.review.start();
-    this.loopback.start();
     this.host.on("MESSAGE_SENT", (e, userId) => {
       if (!e.message.isUser || !userId) return;
       void this.lapse(e.chatId, userId);
@@ -1093,19 +1041,11 @@ export class Runtime implements TurnHooks {
     });
     // The host shifts a message's swipes down when one is deleted; the chips shown by swipe follow.
     this.host.on("MESSAGE_SWIPED", (e, userId) => {
-      // Another swipe shows, or the shown one went: depth work that read through this message's swipe has lost its basis (DEPTH-PLAN §6.3).
-      if (e.action !== "updated") {
-        this.depthLeft(e.chatId, e.message.id, "a swipe took the reply it read off the chat");
-        // A new swipe's own reply runs the step after it; one navigated to or deleted writes nothing, so the poll is woken here.
-        if (userId && e.action !== "added") this.swipeWoke(e.chatId, userId, e.message.id, e.swipeId);
-      }
       if (e.action === "deleted" && userId) this.swipeDeleted(e.chatId, userId, e.message.id, e.swipeId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: chips didn't follow a deleted swipe (${error instanceof Error ? error.message : String(error)})`, userId));
     });
-    this.host.on("MESSAGE_DELETED", (e) => this.depthLeft(e.chatId, e.messageId, "the message it read was deleted"));
     this.host.on("WORLD_INFO_ACTIVATED", (e) => this.onActivated(e.chatId, e.entries.map((x) => x.id)));
     const gate = this.worldInfoGate();
-    // A loopback generation's prompt also gets the marks of the engine entries its turn fills (DEPTH-PLAN §3.12, B2): core places each where it places the entry, and the narrator's prompt puts the section there.
-    this.host.registerWorldInfoInterceptor(async (input) => this.loopback.marked(input, await worldInfoVerdict(gate, input)));
+    this.host.registerWorldInfoInterceptor((input) => worldInfoVerdict(gate, input));
     // The host keeps a deleted chat's chat-scoped regex scripts, so the engine removes its own (DESIGN §6.7).
     this.host.on("CHAT_DELETED", (e, userId) => {
       if (userId) this.jsonHiding.removeChat(e.chatId, userId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: its JSON regex scripts weren't removed (${error instanceof Error ? error.message : String(error)})`, userId));
@@ -1261,11 +1201,6 @@ export class Runtime implements TurnHooks {
    * action, else `interpret` when its signals fire), `npc.choose` for agents with the POV,
    * `puzzle.answer` when an answer needs judging, and `judge` when the adjudication policy weighs the
    * player's words or leaves the check to the story. One call budget covers this and `afterPlan`.
-   * A turn of a chat on depth asks no model anything here: the guard lets a generation of it reach
-   * the engine only on the loopback (`offLoopback`), so its reply is the scene, whose GM reads the
-   * player's words and resolves what he attempts by the rules, whose characters choose for
-   * themselves, and where no agent role or main agent runs (DEPTH.md, "What still runs before the
-   * scene"); what stays is deterministic.
    */
   async beforePlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; connectionId: string | null; runKey: string; signal: AbortSignal }): Promise<PreOutcome | undefined> {
     const bridge = this.bridges.get(input.chatId);
@@ -1273,10 +1208,6 @@ export class Runtime implements TurnHooks {
     // A Re-narrate copies its source's plan (P3): no resolve, simulate or model calls before it.
     if (!bridge || !p || p.kind === "continue" || p.kind === "impersonate" || (p.kind === "renarrate" && p.renarrateOf)) return;
     const settings = await this.settings.get(input.userId);
-    // A chat on depth (GM → This chat → Depth) plays its turns through the loopback, its reply the
-    // scene, which does the work of every model step of this phase and plays its characters as their
-    // own agents (DEPTH-PLAN §9.2 A2): no classic mind call, memory or knowledge step runs for them.
-    const depth = await this.depth.on(input.chatId, input.userId);
     // The preset the reply assembles with, read once for the engine run's phases and its sections.
     const preset = await this.presets.current(input.chatId, input.userId);
     const target = p.messageId ? input.observed.findIndex((m) => m.id === p.messageId) : input.observed.length;
@@ -1287,15 +1218,13 @@ export class Runtime implements TurnHooks {
     const folded = input.core.renderState(input.observed);
     if (!folded) return;
     // The turn's helpers, minds and checks read the same lore, World Info read live included (DESIGN §4.2).
-    const render = { ...folded, world: await this.liveWorld(p.generationId, input.chatId, input.userId, folded.world, folded.state) };
+    const render = { ...folded, world: await this.liveWorld(p.generationId, input.chatId, input.userId, folded.world) };
     // What the bridge keeps for these words is one turn's (DESIGN §5.1): the same words in a later
     // turn, or this turn after an earlier message changed, are read again; a Re-run or a Retry of it isn't.
     bridge.begin(text, input.core.planState(p.generationId, input.observed)?.parentPath ?? "");
-    // A depth scene's own clock moves its turn's time (its beats and what its attempts take, `SceneBook`), so the plan passes no scene tick: a spoken line no longer takes the world's half hour, nor runs its routines for it.
-    bridge.setScene(text, depth);
     // An agent turn (GM → This chat → Engine) plays this same flow with its roles at each model call
     // (`Orchestrator`); a classic turn's calls are classic's own.
-    const agent = await this.orchestrator.begin({ chatId: input.chatId, userId: input.userId, generationId: p.generationId, core: input.core, observed: input.observed, text, scene: depth });
+    const agent = await this.orchestrator.begin({ chatId: input.chatId, userId: input.userId, generationId: p.generationId, core: input.core, observed: input.observed, text });
     const calls = this.orchestrator.calls(p.generationId);
     // What the pre phase's roles stage lands after the plan's own events; nothing on a classic turn.
     bridge.setCommit(text, this.orchestrator.preCommit(p.generationId));
@@ -1353,12 +1282,12 @@ export class Runtime implements TurnHooks {
     // gate) or a failure takes what it remembered from the bridge, until the turn commits; a resume
     // that replays its plan replays it.
     let remembered = bridge.memoryOf(text);
-    if (remembered === undefined && !depth && !shown && lastReply && this.orchestrator.memoryOwed(input.core, lastReply)) {
+    if (remembered === undefined && !shown && lastReply && this.orchestrator.memoryOwed(input.core, lastReply)) {
       const context = input.core.readContext(lastReply.id, input.observed);
       const said = ownMessage(input.observed.slice(0, input.observed.indexOf(lastReply)));
       if (context) {
         // Its knowledge step ran with that reply's read; what is left is the memory alone, on the post phase's opening as it was.
-        const remember = postMindsInput({ ...context, world: await this.liveWorld(p.generationId, input.chatId, input.userId, context.world, context.state) }, { chatId: input.chatId, userId: input.userId, messageId: lastReply.id, user: said ? (said.swipes[said.swipeId] ?? "") : "", reply: lastReply.swipes[lastReply.swipeId] ?? "", guidance: preset.guidance, knowledge: knowledgeOn(await this.chatKnowledge.get(input.chatId, input.userId), render.world, settings) });
+        const remember = postMindsInput({ ...context, world: await this.liveWorld(p.generationId, input.chatId, input.userId, context.world) }, { chatId: input.chatId, userId: input.userId, messageId: lastReply.id, user: said ? (said.swipes[said.swipeId] ?? "") : "", reply: lastReply.swipes[lastReply.swipeId] ?? "", guidance: preset.guidance, knowledge: knowledgeOn(await this.chatKnowledge.get(input.chatId, input.userId), render.world, settings) });
         const opening = await postOpening(this.minds, remember);
         remembered = opening ? (await this.diag.step(runAt, "memory", "minds", () => calls.memory({ input: remember, opening, classic: (signal) => postMemory(this.minds, { ...remember, signal }, opening) }, budget.signal), undefined, MINDS_POST_CALLS)).events : [];
         // What a Cancel or the run's time cut short is asked again by the next run.
@@ -1385,8 +1314,8 @@ export class Runtime implements TurnHooks {
       bridge.setTidied(text, tidied);
       if (tidied.length > 0) render.state = w.state;
     } else bridge.setTidied(text, []);
-    // Whether the chat tracks knowledge (DESIGN §24.11): its own switch, else the user's; the turn records a change, and minds read what they hold. A chat on depth leaves it to its GM, after the reply.
-    const knowing = !depth && knowledgeOn(await this.chatKnowledge.get(input.chatId, input.userId), render.world, settings);
+    // Whether the chat tracks knowledge (DESIGN §24.11): its own switch, else the user's; the turn records a change, and minds read what they hold.
+    const knowing = knowledgeOn(await this.chatKnowledge.get(input.chatId, input.userId), render.world, settings);
     const mindsKey = [input.runKey, render.state.revision, text, hashParts("lre.kept-minds", JSON.stringify({ minds: settings.minds, knowing, step: mindsStepConfig(settings.modelUse, "mind"), guidance: preset.guidance.mind ?? "" }))].join("\u0000");
     const kept = this.keptMinds.get(input.chatId);
     this.keptMinds.delete(input.chatId);
@@ -1402,20 +1331,18 @@ export class Runtime implements TurnHooks {
     const asking = { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", guidance: preset.guidance.mind ?? "", knowledge: knowing, ...(p.messageId ? { replaces: p.messageId } : {}), ...(persist?.holds === true && settings.agents.roles.minds.run === "smart" ? { persist: true } : {}) };
     const readTimelapse = (): boolean => bridge.intentOf(text)?.action === TIMELAPSE_ACTION;
     const known = text.trim() === "" || bridge.hasIntent(text) || bridge.isHeld(text);
-    // A chat on depth thinks for no one here: its characters think in the scene.
-    let thinking: ThinkingMinds | null = shown ? null : depth ? { timelapse: false, task: Promise.resolve({ events: [], traces: [] }), stop: new AbortController() } : this.thinkMinds(asking, known ? readTimelapse() : facts.timelapse, budget.signal, same, calls);
+    let thinking = shown ? null : this.thinkMinds(asking, known ? readTimelapse() : facts.timelapse, budget.signal, same, calls);
     const at = await this.lorePhase("pre", p.generationId, input.chatId, input.userId, render.world, render.state, budget, text, preset.guidance);
     // What the reply before it left unplayed of the last message, which this one may take as done (DESIGN §5.2).
     const left = text.trim() === "" ? "" : await this.leftUnplayed(input.chatId, input.userId, earlier, text);
-    const intentTask = text.trim() === "" || bridge.hasIntent(text) || bridge.isHeld(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, earlier, settings, facts, budget, at, left, calls, depth);
+    const intentTask = text.trim() === "" || bridge.hasIntent(text) || bridge.isHeld(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, earlier, settings, facts, budget, at, left, calls);
     // The judge's call for the player's own action comes before npc.choose's (DESIGN §11). Present
     // agents' choices run beside the intent only while a call stays free for the judge; otherwise
     // they take what is left once it has run. Before `interpret` names the action, the judge may
     // run whenever the policy weighs the player's words or leaves checks to the story.
     const policy = policyOf(render.world, render.state);
-    const judging = !depth && described && runsOf(settings.modelUse, render.world, "judge", facts, { guidance: at.guidance }).length > 0 && (bridge.hasIntent(text) ? this.judgeTarget(bridge.intentOf(text), render) !== null : policy.description.weight !== "none" || policy.authority === "narrative");
-    // A depth scene's characters choose for themselves as they play: no classic choice for those present.
-    const npcRun = depth ? undefined : runsOf(settings.modelUse, render.world, "npc.choose", facts, { guidance: at.guidance })[0];
+    const judging = described && runsOf(settings.modelUse, render.world, "judge", facts, { guidance: at.guidance }).length > 0 && (bridge.hasIntent(text) ? this.judgeTarget(bridge.intentOf(text), render) !== null : policy.description.weight !== "none" || policy.authority === "narrative");
+    const npcRun = runsOf(settings.modelUse, render.world, "npc.choose", facts, { guidance: at.guidance })[0];
     const choose = npcRun && ties.present.length > 0
       ? async (): Promise<LedgerEvent[]> => {
           const asked = npcAsked(ties.present);
@@ -1430,7 +1357,7 @@ export class Runtime implements TurnHooks {
     // the player lets it play: a choice made before a Cancel would be a call spent for nothing. A turn
     // whose outline the player let through plays the plan it was shown, so it chooses nothing again.
     // A main agent's turn keeps C14's order: its decisions come with the scene and minds, after the gates.
-    const gating = shown || this.orchestrator.ordered(p.generationId) || (settings.gates.intent && typed && !depth && !bridge.intentPassed(text));
+    const gating = shown || this.orchestrator.ordered(p.generationId) || (settings.gates.intent && typed && !bridge.intentPassed(text));
     // An agent turn's scene role (its lore and notes are told the narrator with the turn's lines). On
     // the fixed pipeline it starts with the intent while no gate can hold the turn, since it reads only
     // the scene and the player's words; a claim or check that holds it after all stops it. A scene
@@ -1443,7 +1370,7 @@ export class Runtime implements TurnHooks {
     const [, early] = await Promise.all([intentTask, choose && !gating && budget.take(judging ? 1 : 0) ? choose() : null]);
     // A role that stopped the turn before the gates stops it here: no gate shows, and no later role runs.
     this.haltStopped(runAt);
-    if (!depth && thinking && thinking.timelapse !== readTimelapse()) {
+    if (thinking && thinking.timelapse !== readTimelapse()) {
       thinking.stop.abort(new NotNeeded(readTimelapse() ? "the message plays a timelapse, whose minds think at its beats" : "the message plays no timelapse"));
       thinking = this.thinkMinds(asking, readTimelapse(), budget.signal, same, calls);
     }
@@ -1457,22 +1384,20 @@ export class Runtime implements TurnHooks {
       this.push.changed(input.chatId, input.userId);
     }
     // A claim, a suggested check or the intent gate waits on the player (`previewGates`): nothing is generated.
-    const waiting = await this.previewGates({ chatId: input.chatId, userId: input.userId, bridge, text, lastUser, settings, render, typed, shown, mindsKey, thinking, scene: depth });
+    const waiting = await this.previewGates({ chatId: input.chatId, userId: input.userId, bridge, text, lastUser, settings, render, typed, shown, mindsKey, thinking });
     if (waiting) {
       sceneStop.abort(new NotNeeded("the turn waits on you at a gate"));
       return waiting;
     }
     // The gates let the turn play: a main agent's stage 3 opens (INC2-SPEC C14).
     this.orchestrator.played(p.generationId);
-    this.prePhase.set(p.generationId, { chatId: input.chatId, facts, text, start: { place: placeOfEntity(render.state, render.world.pov), clock: render.state.clock }, connectionId: input.connectionId, preset, scene: depth });
+    this.prePhase.set(p.generationId, { chatId: input.chatId, facts, text, start: { place: placeOfEntity(render.state, render.world.pov), clock: render.state.clock }, connectionId: input.connectionId, preset });
     trimMap(this.prePhase);
     // Let through the outline gate, the turn plays the plan the player was shown (`TurnBridge.plan`):
     // its minds, decisions and skip are that plan's, so nothing more is asked.
     if (!thinking) return;
     const scene = (): Promise<void> => (agent ? this.orchestrator.scene(p.generationId, sceneAsk, budget.signal, keepScene && !readTimelapse() ? keepScene : null) : Promise.resolve());
-    // A depth scene's GM rates the approach and judges an answer as it resolves the attempt.
     const judged = async (): Promise<void> => {
-      if (depth) return;
       await this.judgeAnswer(bridge, text, render, settings, facts, budget, at, calls);
       if (described) await this.judgeApproach(bridge, text, render, settings, facts, budget, at, calls);
     };
@@ -1519,15 +1444,14 @@ export class Runtime implements TurnHooks {
         const journal = recentLines(input.core, input.observed, target < 0 ? input.observed.length : target, this.registry);
         const log = (message: string): void => this.host.log("info", `[LumiRPEngine] plan ${p.generationId.slice(0, 8)}: ${message}`, input.userId);
         // The step switched off makes no call (`mindsStepConfig` is null): the plan is recorded empty.
-        // A depth scene's span asks none either: the author's poll plays the world beyond view.
-        const world = await this.liveWorld(p.generationId, input.chatId, input.userId, from.world, from.state);
-        const planInput = { chatId: input.chatId, userId: input.userId, world, state: start.state, intent, runSeed: bridge.runSeed, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", journal, reads: settings.minds.reads, hideJson: settings.hideJsonBlocks, limit: settings.timeouts.skipPlanMs, config: depth ? null : mindsStepConfig(settings.modelUse, "skip"), ...(depth ? { off: DEPTH_SKIP_PLAN } : {}), guidance: preset.guidance.skip ?? "" };
+        const world = await this.liveWorld(p.generationId, input.chatId, input.userId, from.world);
+        const planInput = { chatId: input.chatId, userId: input.userId, world, state: start.state, intent, runSeed: bridge.runSeed, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", journal, reads: settings.minds.reads, hideJson: settings.hideJsonBlocks, limit: settings.timeouts.skipPlanMs, config: mindsStepConfig(settings.modelUse, "skip"), guidance: preset.guidance.skip ?? "" };
         bridge.setSkipPlan(text, await calls.skipPlan({ world, state: start.state, input: planInput, log, classic: (signal) => planSkip({ registry: this.registry, steps: this.steps, log, host: this.host }, { ...planInput, signal }) }, budget.signal));
       }
     }
     // A timelapse with minds on is a time skip (DESIGN §24.7): its beats and the minds at them are
     // found and recorded now, from exactly the state the plan starts from, and the plan replays them.
-    const base = intent?.action === TIMELAPSE_ACTION && mindsOn(settings) && !depth ? input.core.planState(p.generationId, input.observed) : null;
+    const base = intent?.action === TIMELAPSE_ACTION && mindsOn(settings) ? input.core.planState(p.generationId, input.observed) : null;
     let skip: SkipRun | null = null;
     if (intent && base) {
       const start = new Working(this.registry, base.world, base.state);
@@ -1541,7 +1465,7 @@ export class Runtime implements TurnHooks {
       };
       try {
         // Minds at the skip's beats and at its end read the lore the run read (DESIGN §4.2, §24.7).
-        const world = await this.liveWorld(p.generationId, input.chatId, input.userId, base.world, base.state);
+        const world = await this.liveWorld(p.generationId, input.chatId, input.userId, base.world);
         const skipInput = { chatId: input.chatId, userId: input.userId, world, state: start.state, intent, runSeed: bridge.runSeed, settings, guidance: preset.guidance };
         skip = await calls.skip({ world, state: start.state, input: skipInput, minds: beatMinds, classic: (signal) => runSkip({ registry: this.registry, steps: this.steps, minds: beatMinds, host: this.host }, { ...skipInput, signal }) }, budget.signal);
       } catch (error) {
@@ -1563,7 +1487,7 @@ export class Runtime implements TurnHooks {
    * picked, so it plays. Either way the minds the run started are handed on (`keepMinds`). Null when
    * the turn plays on.
    */
-  private async previewGates(g: { chatId: ChatId; userId: UserId; bridge: TurnBridge; text: string; lastUser: ChainMessage | undefined; settings: UserSettings; render: { world: WorldDoc; state: WorldState }; typed: boolean; shown: boolean; mindsKey: string; thinking: ThinkingMinds | null; scene: boolean }): Promise<PreOutcome | null> {
+  private async previewGates(g: { chatId: ChatId; userId: UserId; bridge: TurnBridge; text: string; lastUser: ChainMessage | undefined; settings: UserSettings; render: { world: WorldDoc; state: WorldState }; typed: boolean; shown: boolean; mindsKey: string; thinking: ThinkingMinds | null }): Promise<PreOutcome | null> {
     const { bridge, text, lastUser } = g;
     const asked = bridge.askOf(text);
     if (asked && lastUser) {
@@ -1574,8 +1498,7 @@ export class Runtime implements TurnHooks {
       return { waiting: `waiting for the player's answer: ${asked.question}` };
     }
     const read = bridge.intentOf(text);
-    // A depth scene's turn made no read to show: its GM reads the words in the scene.
-    if (g.settings.gates.intent && g.typed && lastUser && read?.action && !g.shown && !g.scene && !bridge.intentPassed(text)) {
+    if (g.settings.gates.intent && g.typed && lastUser && read?.action && !g.shown && !bridge.intentPassed(text)) {
       const card = this.intentCard(bridge, text, read, g.render.world, g.render.state, g.settings);
       const actions: ChipAction[] = [{ id: "play", label: "Play", style: "primary" }, ...(card.edit ? [{ id: "edit", label: "Edit", input: card.edit }] : []), { id: "cancel", label: "Cancel" }];
       await this.chips.add(g.chatId, g.userId, [{ id: `intent_gate:${lastUser.id}`, kind: "intent_gate", messageId: lastUser.id, label: card.label, ...(card.detail !== "" ? { detail: card.detail } : {}), actions, expires: "next_send", payload: { text } }]);
@@ -1708,7 +1631,7 @@ export class Runtime implements TurnHooks {
     if (!folded?.start) return;
     const start = folded.start;
     // The brief, the outline, their leak checks and the outline gate read the run's lore, World Info included (DESIGN §4.2).
-    const render = { state: folded.state, world: await this.liveWorld(input.generationId, input.chatId, input.userId, folded.world, folded.state) };
+    const render = { state: folded.state, world: await this.liveWorld(input.generationId, input.chatId, input.userId, folded.world) };
     const agent = this.orchestrator.isAgent(input.generationId);
     const calls = this.orchestrator.calls(input.generationId);
     // An agent turn's roles read and write against the planned turn from now on.
@@ -1733,11 +1656,6 @@ export class Runtime implements TurnHooks {
     const offstage = offstageLines(input.core, input.observed, target < 0 ? input.observed.length : target, settings.prompts.texts);
     const planned = plan ? planLines(plan, render.world, render.state, this.registry) : null;
     const engineLines = planned ? { outcome: [...offstage, ...planned.outcome], montage: planned.montage } : { outcome: [], montage: [] };
-    // A depth scene's beats tell its narrator what the turn did (DEPTH.md): no brief or outline is written, and no outline gate holds it.
-    if (pre.scene) {
-      this.keepRunLines(input.generationId, p.seed, plan, engineLines, { brief: null, outline: [] });
-      return;
-    }
     if (shown) {
       if (!agent) {
         this.keepRunLines(input.generationId, p.seed, plan, engineLines, { brief: null, outline: [] }, [...shown]);
@@ -2042,10 +1960,9 @@ export class Runtime implements TurnHooks {
   /**
    * The turn's intent: a recorded palette or chip action, else `interpret` (helper JSON, or a
    * Decision choice over the actions), which reads what the POV can do now, the scene and places as
-   * it knows them, and the messages before this one (`earlier`, DESIGN §5.2). A depth scene's turn
-   * (`scene`) plays a recorded or staged action alone: its GM reads the words in the scene.
+   * it knows them, and the messages before this one (`earlier`, DESIGN §5.2).
    */
-  private async readIntent(bridge: TurnBridge, text: string, recorded: JsonValue | undefined, render: { world: WorldDoc; state: WorldState }, all: ActionDef[], earlier: readonly ChainMessage[], settings: UserSettings, facts: SignalFacts, budget: StepBudget, at: LorePhase, left: string, calls: TurnCalls, scene: boolean): Promise<void> {
+  private async readIntent(bridge: TurnBridge, text: string, recorded: JsonValue | undefined, render: { world: WorldDoc; state: WorldState }, all: ActionDef[], earlier: readonly ChainMessage[], settings: UserSettings, facts: SignalFacts, budget: StepBudget, at: LorePhase, left: string, calls: TurnCalls): Promise<void> {
     const userId = at.userId;
     // A palette or chip action records its intent on the user message (dispatch `lre.action`); it
     // survives restarts and a bridge that never saw the request. One staged for a message the player
@@ -2067,7 +1984,7 @@ export class Runtime implements TurnHooks {
       bridge.setIntent(text, recorded.action === TIMELAPSE_ACTION ? (target ? { ...timelapseIntent(target, overrides, 1, params.povRoutine !== false), ...fill } : null) : { action: recorded.action, params, probabilities: { [recorded.action]: 1 }, picked: true });
       return;
     }
-    const run = scene ? undefined : runsOf(settings.modelUse, render.world, "interpret", facts, { guidance: at.guidance })[0];
+    const run = runsOf(settings.modelUse, render.world, "interpret", facts, { guidance: at.guidance })[0];
     if (!run || !budget.take()) {
       playStaged();
       return;
@@ -2430,7 +2347,7 @@ export class Runtime implements TurnHooks {
    * without lore.
    */
   private async lorePhase(phase: "pre" | "post", key: string, chatId: ChatId, userId: UserId, folded: WorldDoc, state: WorldState, budget: StepBudget, said: string, guidance: Guidance): Promise<LorePhase> {
-    const world = await this.liveWorld(key, chatId, userId, folded, state);
+    const world = await this.liveWorld(key, chatId, userId, folded);
     const here = pinsFor(world, placeOfEntity(state, world.pov));
     // The minds steps read their pins with their own calls (`runMinds`, `postMinds`, the skip's beats).
     const own = LORE_AUDIENCE.filter((step) => !isMindPurpose(step)).map((step) => [step, pinsFor(world, null, undefined, [step])] as const);
@@ -2563,22 +2480,6 @@ export class Runtime implements TurnHooks {
   }
 
   async beforeCommit(input: TurnContext): Promise<void> {
-    // A depth turn (DEPTH-PLAN §1.3): its scene is the turn's plan, cut where a Stop's last passage
-    // streamed or a stage failed, and its prose is the read part; nothing reads the reply.
-    if (input.scene) {
-      for (const text of Object.values(input.scene.blobs)) await this.blobs.put(input.userId, text);
-      input.core.scene(input.generationId, input.scene.pre, input.scene.read, input.observed);
-      return;
-    }
-    // A reply on a chat on depth that no scene played (a Continue, a turn made under a pause, a
-    // Re-narrate of a reply written before depth, a reply off the loopback) commits unread: no
-    // Extract, choices, Curator, off-screen choice or mind step reads it (`PendingTurn.depth`).
-    if (input.core.journal.pending[input.generationId]?.depth) {
-      // A Continue's whole text, its prose and what it added, is what the author reads the player's next edit of the reply against (`Rec.shown`).
-      const shown = input.kind === "continue" ? input.observed.find((m) => m.id === input.messageId) : undefined;
-      if (shown) await this.blobs.put(input.userId, shown.swipes[shown.swipeId] ?? "");
-      return;
-    }
     const index = input.observed.findIndex((m) => m.id === input.messageId);
     const recent = recentLines(input.core, input.observed, index < 0 ? input.observed.length : index, this.registry);
     // A Continue reads what it added, matched against the whole message: a JSON block it split is left out whole (DESIGN §6.7).
@@ -2631,8 +2532,6 @@ export class Runtime implements TurnHooks {
    */
   async prepareRead(chatId: ChatId, userId: UserId, messageId: MessageId, swipeId: number, key: string, content: string, context: ReadInput, post: boolean, replace = false, before = "", signal?: AbortSignal): Promise<void> {
     const settings = await this.settings.get(userId);
-    // What the reply tells of "you" is the player character's: the one the player last switched to (D-10).
-    context = { ...context, world: withPov(context.world, context.state) };
     // What the engine reads of the reply: none of the JSON blocks the display hides, matched against the
     // whole message when `before` holds the text a Continue went on from (DESIGN §6.7).
     const text = readableReply(before + content, settings.hideJsonBlocks, before.length);
@@ -2657,7 +2556,7 @@ export class Runtime implements TurnHooks {
     // Under the reply read's signal when the turn has one, so Cancel skips the reads still waiting.
     const budget = phaseBudget(settings, "post", signal);
     // The secrets the reply's steps may not repeat include the World Info ones this run reads (DESIGN §4.2, §7).
-    const live = await this.liveWorld(key, chatId, userId, context.world, context.state);
+    const live = await this.liveWorld(key, chatId, userId, context.world);
     const secrets = unrevealedSecrets(this.registry, live, context.state);
     // The usual routines of the people with the POV, as it may know them: extract's own input, never a
     // fact, only to tell where a move the reply describes is going (DESIGN §9.4, §6.10). A world's own
@@ -3133,8 +3032,6 @@ export class Runtime implements TurnHooks {
 
   async afterCommit(input: TurnContext): Promise<void> {
     this.meter.close(input.userId);
-    // Right after a depth reply: whoever played remembers it, the GM links it to the truth, the author polls.
-    if (input.scene) this.afterDepth(input);
     // Smart persistence: the chat's last scene is this turn's now, on the reply it wrote; a Continue's turn keeps its own.
     if (input.kind !== "continue") this.persistence.closed(input.generationId, { messageId: input.messageId, swipeId: input.swipeId }, chainMarks(input.core, input.observed));
     const bridge = this.bridges.get(input.chatId);
@@ -3143,8 +3040,6 @@ export class Runtime implements TurnHooks {
     const stored: StoredChip[] = [];
     const at = `${input.messageId}:${input.swipeId}`;
     const base = { messageId: input.messageId, swipeId: input.swipeId };
-    // A scene a stage failed in once a passage had streamed (DEPTH-PLAN §3.14): the reply says why; what streamed stands with its beats.
-    if (input.scene?.error !== undefined) stored.push({ id: `scene_failed:${at}`, kind: "degraded", ...base, label: "The scene stopped part-way", detail: `${input.scene.error}. The beats whose prose streamed are kept, and nothing after them was decided: your next message plays on from here, or Swipe as… → Re-run plays the scene again.`, actions: [], expires: "next_send", payload: {} });
     const plan = rec ? bridge.planFor(rec.seed) : undefined;
     if (rec && rec.seed !== "" && !plan && input.kind !== "renarrate" && input.kind !== "continue") this.host.log("warn", `[LumiRPEngine] chat ${input.chatId}: no engine plan for the committed turn (seed ${rec.seed.slice(0, 8)}); its chips are missing`, input.userId);
     const idx = input.observed.findIndex((m) => m.id === input.messageId);
@@ -3157,18 +3052,10 @@ export class Runtime implements TurnHooks {
     const played = plan?.resolutions ?? [];
     const checked = played.map((res) => `action ${res.action}, check ${res.check?.outcome ?? (res.adjudged ? `${res.outcome ?? "-"} (no roll: ${res.adjudged.why ?? "-"})` : "-")}`);
     this.host.log("info", `[LumiRPEngine] turn ${input.messageId.slice(0, 8)}:${input.swipeId} ${input.kind}: plan ${plan ? "yes" : "no"}, ${checked.length > 0 ? checked.join("; ") : "action -"}${plan?.stopped ? `; queue stopped (${plan.stopped.cause}) with ${plan.stopped.left} left` : ""}`, input.userId);
-    // What the chips name, they name as the player character knows it at the head: the one the player
-    // switched to, once he has (`withPov`). The actions live in the revision the chat folds at (after
-    // any Upgrade), not the run's first. Folded once, and only for a chip that names something.
-    let chipView: { head: WorldState; world: WorldDoc | undefined } | undefined;
-    const named = (): { head: WorldState; world: WorldDoc | undefined } => {
-      if (chipView) return chipView;
-      const head = input.core.fold(input.observed).state;
-      const at = input.core.playedAt(head) ?? input.core.playedAt(head, rec?.defHash ?? "");
-      return (chipView = { head, world: at ? withPov(at, head) : undefined });
-    };
     if (played.length > 0) {
-      const { head, world } = named();
+      // The actions live in the revision the chat folds at (after any Upgrade), not the run's first.
+      const head = input.core.fold(input.observed).state;
+      const world = input.core.playedAt(head) ?? input.core.playedAt(head, rec?.defHash ?? "");
       const labelOf = (res: Resolution): string => res.inferred?.label ?? (world?.actions[res.action] ?? this.registry.actions.get(res.action))?.label ?? res.action;
       for (const [i, res] of played.entries()) {
         const label = labelOf(res);
@@ -3200,14 +3087,16 @@ export class Runtime implements TurnHooks {
     // The impossible holds this turn put right, recorded first in its plan (ITEMS-SPEC §9): its Undo puts back what it put right.
     const tidied = rec && input.kind !== "renarrate" && input.kind !== "continue" ? rec.events.slice(0, rec.pre).filter((e) => isTidiedGroup(e.group)) : [];
     if (tidied.length > 0) {
-      const { head, world } = named();
+      const head = input.core.fold(input.observed).state;
+      const world = input.core.playedAt(head) ?? input.core.playedAt(head, rec?.defHash ?? "");
       stored.push({ id: `tidied:${at}`, kind: "tidied", ...base, label: "Things tidied", detail: tidiedDetail(this.registry, world, head, tidied), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send", payload: { events: JSON.parse(JSON.stringify(tidied)) as JsonValue } });
     }
     // The plan the player's message gave (assess-party §6.2), as the turn's plan added it: its receipt
     // (`planReceipt`). A Re-narrate tells the same plan again, so its swipe gets the same receipt.
     const planned = rec && rec.seed !== "" && input.kind !== "continue" ? bridge.plannedFor(rec.seed) : undefined;
     if (planned) {
-      const { head, world } = named();
+      const head = input.core.fold(input.observed).state;
+      const world = input.core.playedAt(head) ?? input.core.playedAt(head, rec?.defHash ?? "");
       stored.push(this.planReceipt(`plan:${at}`, base, planned, world ? { world, state: head } : null, userText));
     }
     // `interpret` couldn't read the typed text (DESIGN §9.4): its call failed, or a Decision route's choice
@@ -3252,178 +3141,6 @@ export class Runtime implements TurnHooks {
     bridge.turnCommitted(userText);
     // An agent turn closes: which role wrote what, its review card, its session.
     await this.orchestrator.closed(input);
-  }
-
-  /**
-   * What follows a depth reply (DEPTH-PLAN §2.4, §6.4; `afterDepthReply`), at the reply's basis, as
-   * its turn said. Started from the commit and never awaited there: its every read and landing waits
-   * on the chat's queue, which the commit holds.
-   */
-  private afterDepth(input: TurnContext): void {
-    const after = this.depth.after(input.generationId);
-    const basis = after ? chainBases(input.core.chain(input.observed), input.core.journal.tombstones).find((b) => b.message === input.messageId) : undefined;
-    if (after && basis) this.depthWorking(input.chatId, input.userId, "the step after the reply", (job) => afterDepthReply(this, input.chatId, input.userId, basis, after, { signal: job.signal, ready: job.ready, archive: chatArchive(this, input.chatId, input.userId, basis.message) }).then(() => undefined), { reads: basis.message, between: true });
-  }
-
-  /**
-   * The player's edit of a message the ledger kept the world through: a reply (an assistant edit,
-   * L38), or his own message beats were made from (`isUser`, `LedgerCore.keepIdentity`). On a chat
-   * on depth it is his directive, which the author reads, his own message as what he now says he did
-   * or said, and lands at the message (DEPTH-PLAN §1.3, §4.2; `replyEdited`), outside the chat's
-   * queue, through which it reads and lands. What became of it is the player's to read, on the swipe
-   * he edited (`edit_read`); a later edit of it says its own in its place.
-   */
-  assistantEdited(input: { chatId: ChatId; userId: UserId; messageId: MessageId } & PlayerEdit): void {
-    this.depthWorking(
-      input.chatId,
-      input.userId,
-      "the reading of your edit",
-      () => (async () => {
-        if (!(await this.depth.on(input.chatId, input.userId))) return;
-        const head = await headBasis(this, input.chatId, input.userId);
-        const out = await replyEdited(this, input.chatId, input.userId, input.messageId, input.text, head ? { archive: chatArchive(this, input.chatId, input.userId, head.message) } : {});
-        this.host.log("info", `[LumiRPEngine] chat ${input.chatId}, your edit of ${input.isUser ? "your message" : "a reply"}: ${out.said}`, input.userId);
-        // An edit that amended or struck beats offers Undo (M-16): the reverse amendment, with its catch-ups (`editUndo`).
-        const undoable = out.cosmetic === false && out.amended.length + out.struck.length > 0;
-        await this.chips.add(input.chatId, input.userId, [{ id: `edit_read:${input.messageId}:${input.swipeId}`, kind: "edit_read", messageId: input.messageId, swipeId: input.swipeId, label: "Your edit, as the author read it", detail: out.said, actions: undoable ? [{ id: "undo", label: "Undo", style: "danger" }] : [], expires: "next_send", payload: undoable ? { amended: [...out.amended], struck: [...out.struck] } : {} }]);
-        this.changed(input.chatId, input.userId);
-      })(),
-    );
-  }
-
-  /**
-   * Undo on an edit's chip (M-16; `editUndone`): what the edit replaced and struck stands again, as
-   * a reverse amendment landed at the message, with its catch-ups, in the background; the chip then
-   * says what became of it, with nothing more to press.
-   */
-  editUndo(chatId: ChatId, userId: UserId, messageId: MessageId, swipeId: number, undone: { amended: string[]; struck: string[] }): void {
-    this.depthWorking(chatId, userId, "the undoing of your edit", () => (async () => {
-      const head = await headBasis(this, chatId, userId);
-      const out = await editUndone(this, chatId, userId, messageId, undone, head ? { archive: chatArchive(this, chatId, userId, head.message) } : {});
-      this.host.log("info", `[LumiRPEngine] chat ${chatId}, undoing your edit: ${out.said}`, userId);
-      await this.chips.add(chatId, userId, [{ id: `edit_read:${messageId}:${swipeId}`, kind: "edit_read", messageId, swipeId, label: "Your edit, undone", detail: out.said, actions: [], expires: "next_send", payload: {} }]);
-      this.changed(chatId, userId);
-    })());
-  }
-
-  /**
-   * The clock the player moved on with ✎ outside a turn (DESIGN §9.2, §12): on a chat on depth, story
-   * time passed off screen, so the step after a reply runs at the chat's head (`headBasis`) with the
-   * poll on, the fix its occasion (`clock:<seq>`, keying what it lands), the time it moved on what
-   * wakes the author's poll (DEPTH-PLAN §6.4; `afterDepthReply`'s `woken`), which reads it beside what
-   * passed since it last looked.
-   */
-  clockMovedOn(chatId: ChatId, userId: UserId, moved: { fix: number; minutes: number; why: string }): void {
-    this.depthWorking(
-      chatId,
-      userId,
-      "the author's poll after the clock moved on",
-      (job) => (async () => {
-        if (!(await this.depth.on(chatId, userId))) return;
-        const basis = await headBasis(this, chatId, userId);
-        if (basis === null) return;
-        job.reads(basis.message);
-        await afterDepthReply(this, chatId, userId, basis, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { occasion: `clock:${moved.fix}`, woken: { minutes: moved.minutes, why: moved.why }, signal: job.signal, ready: job.ready, archive: chatArchive(this, chatId, userId, basis.message) });
-        this.changed(chatId, userId);
-      })(),
-      { between: true },
-    );
-  }
-
-  /**
-   * A swipe changed the chain (DEPTH-PLAN §6.3, Y25): when it took drafts off the chain only because
-   * a later reply was swiped, the author's poll is woken at the chat's head now, with them as its
-   * rebase candidates, rather than when it next runs. Nothing is woken when no draft lost its basis.
-   */
-  private swipeWoke(chatId: ChatId, userId: UserId, message: MessageId, swipe: number): void {
-    this.depthWorking(
-      chatId,
-      userId,
-      "the author's poll after a swipe",
-      (job) => (async () => {
-        if (!(await this.depth.on(chatId, userId))) return;
-        const basis = await headBasis(this, chatId, userId);
-        const at = basis ? await this.ledger.foldAtBasis(chatId, userId, basis, DRAFT_TYPES) : null;
-        if (!basis || !at) return;
-        job.reads(basis.message);
-        const rebase = await rebaseCandidates(this, chatId, userId, new Set(draftsOn(at.events).map((d) => d.draft.id)));
-        if (rebase.length === 0 || job.signal.aborted) return;
-        const why = `a swipe took draft${rebase.length === 1 ? "" : "s"} ${rebase.map((d) => d.id).join(", ")} off the chain`;
-        await afterDepthReply(this, chatId, userId, basis, { scene: null, ended: false, remember: [], poll: true, beats: [] }, { occasion: `swipe:${message}:${swipe}`, woken: { minutes: 0, why }, signal: job.signal, ready: job.ready, archive: chatArchive(this, chatId, userId, basis.message) });
-        this.changed(chatId, userId);
-      })(),
-      { between: true },
-    );
-  }
-
-  /**
-   * Keeps the work `run` starts among the depth work under way until it is done; what it throws is
-   * logged. `reads`: the message it reads through, once known (`job.reads` sets it later): a swipe or
-   * delete of that message stops it (`depthLeft`), and a turn reading through it waits for what the
-   * next turn reads of it (`depthNeeded`). `between`: work between turns, which Work between turns
-   * off stops (`depthPaused`).
-   */
-  private depthWorking(chatId: ChatId, userId: UserId, what: string, run: (job: { signal: AbortSignal; ready: () => void; reads: (message: MessageId) => void }) => Promise<void>, o: { reads?: MessageId; between?: boolean } = {}): void {
-    const ready = Promise.withResolvers<void>();
-    const job: DepthJob = { what, userId, message: o.reads ?? null, between: o.between === true, stop: new AbortController(), ready: ready.promise, isReady: false };
-    const markReady = (): void => {
-      job.isReady = true;
-      ready.resolve();
-    };
-    const jobs = this.depthJobs.get(chatId) ?? new Set<DepthJob>();
-    this.depthJobs.set(chatId, jobs.add(job));
-    const tracked: Promise<void> = run({ signal: job.stop.signal, ready: markReady, reads: (message) => (job.message = message) })
-      .catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${chatId}: ${what} didn't go through: ${error instanceof Error ? error.message : String(error)}`, userId))
-      .finally(() => {
-        markReady();
-        jobs.delete(job);
-        if (jobs.size === 0 && this.depthJobs.get(chatId) === jobs) this.depthJobs.delete(chatId);
-        this.depthWork.delete(tracked);
-      });
-    this.depthWork.add(tracked);
-  }
-
-  /** Stops the depth work in `chatId` that read through `message`, which left the chain (DEPTH-PLAN §6.3): cancelling only saves its cost; what it already landed stays at a basis the chain no longer folds. */
-  private depthLeft(chatId: ChatId, message: MessageId, why: string): void {
-    for (const job of this.depthJobs.get(chatId) ?? []) {
-      if (job.message !== message || job.stop.signal.aborted) continue;
-      job.stop.abort(new Error(why));
-      this.host.log("info", `[LumiRPEngine] chat ${chatId}: ${job.what} stopped: ${why}`, job.userId);
-    }
-  }
-
-  /**
-   * Work between turns was turned off (Settings → Depth): `userId`'s work between turns under way
-   * stops once what the next turn reads of it is in (the remembering and truth links that run with
-   * the setting off too), so a running poll, its reflections and the work off screen stop with it.
-   */
-  depthPaused(userId: UserId): void {
-    for (const jobs of this.depthJobs.values())
-      for (const job of jobs) if (job.userId === userId && job.between) void job.ready.then(() => job.stop.abort(new Error("Work between turns was turned off")));
-  }
-
-  /**
-   * The foreground's wait (DEPTH-PLAN §6, "needed by this turn"): a turn reading through the messages
-   * `on` waits for what the next turn reads of the depth work under way at them (the remembering, its
-   * truth links, the catch-ups the poll asked for now), up to `NEEDED_WAIT_MS`; what isn't in by then
-   * it goes on without, and that work lands after it. What it waited for and went without, for its
-   * citation (`author.adopt`).
-   */
-  async depthNeeded(chatId: ChatId, on: ReadonlySet<MessageId>, signal?: AbortSignal): Promise<{ waited: { what: string; message: MessageId }[]; without: { what: string; message: MessageId }[] }> {
-    const jobs = [...(this.depthJobs.get(chatId) ?? [])].filter((j) => j.message !== null && on.has(j.message) && !j.isReady && !j.stop.signal.aborted);
-    if (jobs.length === 0) return { waited: [], without: [] };
-    const late = Promise.withResolvers<void>();
-    const timer = setTimeout(late.resolve, NEEDED_WAIT_MS);
-    signal?.addEventListener("abort", () => late.resolve(), { once: true });
-    await Promise.race([Promise.all(jobs.map((j) => j.ready)), late.promise]);
-    clearTimeout(timer);
-    const cite = (j: DepthJob): { what: string; message: MessageId } => ({ what: j.what, message: j.message ?? ("" as MessageId) });
-    return { waited: jobs.filter((j) => j.isReady && !j.stop.signal.aborted).map(cite), without: jobs.filter((j) => !j.isReady || j.stop.signal.aborted).map(cite) };
-  }
-
-  /** Resolves once nothing that follows a depth reply or reads an edit of one is under way (tests; shutdown). */
-  async depthSettled(): Promise<void> {
-    while (this.depthWork.size > 0) await Promise.all([...this.depthWork]);
   }
 
   /**
@@ -3563,9 +3280,7 @@ export class Runtime implements TurnHooks {
     const at = `${input.messageId}:${input.swipeId}`;
     const base = { messageId: input.messageId, swipeId: input.swipeId };
     const headState = input.core.fold(input.observed).state;
-    // Its offers are the player character's: the one the player switched to, once he has (`withPov`).
-    const playedIn = input.core.playedAt(headState) ?? input.core.playedAt(headState, rec?.defHash ?? "");
-    const chipWorld = playedIn ? withPov(playedIn, headState) : undefined;
+    const chipWorld = input.core.playedAt(headState) ?? input.core.playedAt(headState, rec?.defHash ?? "");
     // Time the message asked for that the turn didn't run (DESIGN §9.2): a typed timelapse longer than
     // a turn runs, offered and never run unasked, or time it lets pass after its actions, never offered
     // while some of them are left to play.
@@ -3836,137 +3551,6 @@ export class Runtime implements TurnHooks {
     return this.bridges.get(chatId)?.passOutline(text, lines) ?? false;
   }
 
-  /** Whether a generation on this connection goes through the loopback (DEPTH-PLAN §3.4): the guard lets it straight on. */
-  isLoopback(connectionId: string | null, userId: UserId): Promise<boolean> {
-    return this.loopback.isLoopback(connectionId, userId);
-  }
-
-  /** The loopback's work for a generation, while it is under way: its end commits once that is over. */
-  loopSettled(generationId: string): Promise<void> | null {
-    return this.loopback.settled(generationId);
-  }
-
-  /** Whether the chat is on depth as a generation starts on it: nothing reads that generation's reply into canon (DEPTH-PLAN §1.3). */
-  depthOn(chatId: ChatId, userId: UserId): Promise<boolean> {
-    return this.depth.on(chatId, userId);
-  }
-
-  /**
-   * Opening a chat (`lre.hello`, `lre.state.resync`) checks a chat on depth against the loopback
-   * (L15): the connection it generates on, its pin or else your active connection, read for this one
-   * chat, never by listing every chat. Off the loopback, a standing chip on its latest message and a
-   * line on Settings → Loopback say so with the fix before a reply runs no turn; back on it, or off
-   * depth, both go.
-   */
-  async openedDepth(chatId: ChatId, userId: UserId): Promise<void> {
-    const id = `needs_loopback:open:${chatId}`;
-    const depth = await this.depth.on(chatId, userId);
-    const pin = depth ? (await this.host.chats.chatMetadata(chatId, userId)).connection_profile_id : null;
-    const connectionId = typeof pin === "string" && pin.trim() !== "" ? pin : null;
-    if (!depth || (await this.loopback.isLoopback(connectionId, userId))) {
-      this.loopback.offChat(userId, chatId, null);
-      const had = (await this.chips.list(chatId, userId)).some((c) => c.id === id);
-      if (had) {
-        await this.chips.removeWhere(chatId, userId, (c) => c.id === id);
-        this.push.changed(chatId, userId);
-      }
-      return;
-    }
-    const name = (await this.host.connections.profile(connectionId, userId).catch(() => null))?.name ?? null;
-    const on = connectionId === null ? `your active connection${name ? `, ${name}` : ""}` : (name ?? "another connection");
-    this.loopback.offChat(userId, chatId, name ?? (connectionId === null ? "your active connection" : connectionId));
-    const latest = (await this.host.chats.messages(chatId, userId)).at(-1);
-    if (!latest) return;
-    await this.chips.add(chatId, userId, [
-      {
-        id,
-        kind: "needs_loopback",
-        messageId: latest.id,
-        label: "This chat is off the loopback",
-        detail: `This chat is on depth, which plays its turns through the loopback connection, but it generates on ${on}, so its next reply would run no engine turn and nothing would read it into the story. Fix: pick a loopback connection as this chat's connection (opting it out of depth and back in, in GM → This chat → Depth, pins it to one again), or opt it out of depth. Settings → Loopback names your loopback connections.`,
-        actions: [{ id: "loopback", label: "Settings → Loopback", input: { type: "settings", label: "Settings → Loopback", page: "loopback" } }],
-        expires: "never",
-        payload: {},
-      },
-    ]);
-    this.push.changed(chatId, userId);
-  }
-
-  /**
-   * A generation of a chat on depth off the loopback (DEPTH-PLAN §3.4), which the guard lets on with
-   * no engine run: no scene plays it, nothing reads its reply into the story, and so it costs no model
-   * call. The player is told under the message the reply answers (`target`, a swipe's reply), with the
-   * way to Settings → Loopback; on a chat whose Engine is Agents, GM → Live shows the turn's plan,
-   * every role none, saying why.
-   */
-  async offLoopback(input: { chatId: ChatId; userId: UserId; generationId: string | null; target: MessageId | null }): Promise<void> {
-    const messages = await this.host.chats.messages(input.chatId, input.userId);
-    const at = input.target === null ? -1 : messages.findIndex((m) => m.id === input.target);
-    const said = ownMessage(at < 0 ? messages : messages.slice(0, at));
-    const told = said?.id ?? input.target;
-    if (told) {
-      await this.chips.add(input.chatId, input.userId, [
-        {
-          id: `needs_loopback:${told}`,
-          kind: "needs_loopback",
-          messageId: told,
-          label: "Depth needs the loopback connection",
-          detail: "This chat is on depth, which plays its turns through the loopback connection. This reply was generated on another, so the engine didn't run for it and made no model call: no scene played it, no step ran before it, and nothing reads it into the story. Settings → Loopback names your loopback connections and how to make one; generate on one of them.",
-          actions: [{ id: "loopback", label: "Settings → Loopback", input: { type: "settings", label: "Settings → Loopback", page: "loopback" } }],
-          expires: "next_send",
-          payload: {},
-        },
-      ]);
-    }
-    if (input.generationId === null || (await this.chatKnowledge.engine(input.chatId, input.userId)) !== "agents") return;
-    const settings = await this.settings.get(input.userId);
-    const live = this.live.start({ chatId: input.chatId, userId: input.userId, turn: input.generationId, kind: "turn", pipeline: settings.agents.pipeline.mode === "main" ? "main" : "fixed", text: said ? (said.swipes[said.swipeId] ?? "") : "" });
-    live.add({ kind: "plan", rows: ROLE_IDS.map((role) => ({ role, status: "none", why: OFF_LOOPBACK_WHY })) });
-    live.end("done", "Generated off the loopback, so the engine didn't run.");
-  }
-
-  /**
-   * A world chat's generation on the loopback while no relay of the player's runs (L55): the reply
-   * never reaches LumiRPEngine, and core shows only a connection error. He is told why under the
-   * message the reply answers (as `offLoopback` places it), with Settings → Loopback's own line for it.
-   */
-  async relayDown(input: { chatId: ChatId; userId: UserId; target: MessageId | null; why: string }): Promise<void> {
-    const messages = await this.host.chats.messages(input.chatId, input.userId);
-    const at = input.target === null ? -1 : messages.findIndex((m) => m.id === input.target);
-    const told = ownMessage(at < 0 ? messages : messages.slice(0, at))?.id ?? input.target;
-    if (!told) return;
-    await this.chips.add(input.chatId, input.userId, [
-      {
-        id: `needs_loopback:relay:${told}`,
-        kind: "needs_loopback",
-        messageId: told,
-        label: "The loopback relay isn't running",
-        detail: `This chat generates through the loopback, so its reply reaches LumiRPEngine only through a running relay. ${input.why}`,
-        actions: [{ id: "loopback", label: "Settings → Loopback", input: { type: "settings", label: "Settings → Loopback", page: "loopback" } }],
-        expires: "next_send",
-        payload: {},
-      },
-    ]);
-  }
-
-  /**
-   * A loopback turn's sections (DEPTH-PLAN §3.12): each entry the engine run filled, with a swipe's
-   * asked change at the narrator rules' end (`directedFills`), the entry's id (its mark in the prompt
-   * shows where core placed it, `compose.ts`), and where today's book would put it: at the chat depth
-   * and role its book entry sits at, or with the others before the history.
-   */
-  async loopbackSections(userId: UserId, delivered: Delivered): Promise<PlacedSection[]> {
-    const fills = directedFills(delivered);
-    const entries = new Map((await this.host.books.entries(delivered.bookId, userId)).map((e) => [e.id, e]));
-    return delivered.parts.flatMap((part): PlacedSection[] => {
-      const text = fills.get(part.entry);
-      if (!text) return [];
-      const entry = entries.get(part.entry);
-      const role = entry?.role === "user" || entry?.role === "assistant" ? entry.role : "system";
-      return [{ label: part.label, text, entry: part.entry, at: entry && entry.position === 4 ? { depth: entry.depth, role } : "front" }];
-    });
-  }
-
   async kindOf(input: { chatId: ChatId; userId: UserId; kind: GenerationKind; generationId?: string; target?: MessageId | null }): Promise<GenerationKind> {
     if (input.kind !== "swipe" && input.kind !== "regenerate") return input.kind;
     const choice = this.swipeChoice.get(input.chatId);
@@ -4032,17 +3616,10 @@ export class Runtime implements TurnHooks {
    * What a turn runs on (DESIGN §5.1; `TurnHooks.frame`): the user's settings and the chat's own
    * choices as they stand as its engine run starts, read outside any other turn's frame. The run,
    * the guard's write of its sections and its reply's read all read them, so a change saved meanwhile
-   * applies from the chat's next turn and never keeps this one's reply from starting. With the chain
-   * the run starts on (`at`), a chat with no engine of its own and no LRE turn on its path records the
-   * user's New chats start on as its engine first (INC3 3a, `ChatKnowledge.forTurn`).
+   * applies from the chat's next turn and never keeps this one's reply from starting.
    */
-  frame(chatId: ChatId, userId: UserId, at?: { core: LedgerCore; observed: readonly ChainMessage[] }): Promise<TurnFrame> {
-    return outsideTurns(async () => {
-      const settings = await this.settings.get(userId);
-      const revision = this.settings.revision(userId);
-      const chat = at ? await this.chatKnowledge.forTurn(chatId, userId, settings.agents.newChats, () => playedOn(at.core, at.observed)) : await this.chatKnowledge.get(chatId, userId);
-      return { userId, chatId, settings, revision, chat };
-    });
+  frame(chatId: ChatId, userId: UserId): Promise<TurnFrame> {
+    return outsideTurns(async () => ({ userId, chatId, settings: await this.settings.get(userId), revision: this.settings.revision(userId), chat: await this.chatKnowledge.get(chatId, userId) }));
   }
 
   /** A section's size in tokens: the host's count of that very text when it has one, else the estimate. */
@@ -4112,7 +3689,7 @@ export class Runtime implements TurnHooks {
     const { world: folded, state } = render;
     // The sections read the lore the engine run read, World Info included (DESIGN §4.2): the Place
     // section's lore and the leak checks alike.
-    const world = await this.liveWorld(input.generationId, input.chatId, input.userId, folded, state);
+    const world = await this.liveWorld(input.generationId, input.chatId, input.userId, folded);
     const index = await this.worlds.index(run.worldId, input.userId);
     if (!index) throw new Error("the chat's world is gone");
     // A slot entry deleted in the host's UI is made again, and each sits where this chat's revision puts it.
@@ -4422,15 +3999,13 @@ export class Runtime implements TurnHooks {
   }
 
   /**
-   * `folded` as a turn reads it at `state`: with the player character the player last switched to
-   * as its point of view (D-10, `withPov`), and the lore its World Info books hold now (DESIGN §4.2,
-   * `readLore`), read once per engine run, under its turn id, so its phases, its sections, its time
-   * skip and its checks read the same entries; each caller keeps its own world, with that lore. Its
-   * first read brings the lore index entry Build wrote for this world up to date (`LoreRouting.sync`,
-   * on Settings as they stand, never the turn's snapshot), before the reply's prompt is assembled.
+   * `world` with the lore its World Info books hold now (DESIGN §4.2, `readLore`), read once per
+   * engine run, under its turn id, so its phases, its sections, its time skip and its checks read the
+   * same entries; each caller keeps its own world, with that lore. Its first read brings the lore
+   * index entry Build wrote for this world up to date (`LoreRouting.sync`, on Settings as they stand,
+   * never the turn's snapshot), before the reply's prompt is assembled.
    */
-  private async liveWorld(key: string, chatId: ChatId, userId: UserId, folded: WorldDoc, state: Readonly<WorldState>): Promise<WorldDoc> {
-    const world = withPov(folded, state);
+  private async liveWorld(key: string, chatId: ChatId, userId: UserId, world: WorldDoc): Promise<WorldDoc> {
     const kept = this.liveLores.get(key);
     if (kept) return kept === world.lore ? world : { ...world, lore: kept };
     const live = await this.readLore(chatId, userId, world);
@@ -4452,11 +4027,7 @@ export class Runtime implements TurnHooks {
     return {
       registry: this.registry,
       playsWorld: (meta) => readRun(meta) !== null,
-      // The narrator's player character is the one the player last switched to (D-10).
-      head: async (chatId, userId) => {
-        const head = await this.ledger.narratorState(chatId, userId);
-        return head && { ...head, world: withPov(head.world, head.state) };
-      },
+      head: (chatId, userId) => this.ledger.narratorState(chatId, userId),
       narrator: async (chatId, userId, meta, world) => {
         const turn = this.turnNarrator.get(chatId);
         if (turn) return turn;
@@ -4742,8 +4313,7 @@ export class Runtime implements TurnHooks {
     const records = this.inspector.records(chatId) ?? [];
     for (const w of this.presetWarnings.get(chatId) ?? []) if (!warnings.includes(w)) warnings.push(w);
     for (const w of this.ledger.notices(chatId, userId)) if (!warnings.includes(w)) warnings.push(w);
-    // A call's answer as written (`misread`) stays on the record, for GM → Depth → Turn: the panel is what outside clients read without spoilers.
-    const view: ContextView = { generations: records.map(({ forced: _forced, entries: _entries, ...r }) => (r.provenance ? { ...r, provenance: { ...r.provenance, calls: r.provenance.calls.map(({ misread: _misread, ...c }) => c) } } : r)).reverse(), warnings };
+    const view: ContextView = { generations: records.map(({ forced: _forced, entries: _entries, ...r }) => r).reverse(), warnings };
     return JSON.parse(JSON.stringify(view)) as JsonValue;
   }
 
@@ -4769,48 +4339,20 @@ export class Runtime implements TurnHooks {
     const settings = await this.settings.get(userId);
     const knowledge = { chat: await this.chatKnowledge.get(chatId, userId), tracking: knowledgeOn(null, null, settings), narrator: narratorView(null, null, settings) };
     const mapDisplay = await this.chatPrefs.mapDisplay(chatId, userId);
-    // On depth nothing reads a reply into canon: no Re-read edit or Retry read is offered, and a swipe's word reaches the author too.
-    const depth = await this.depth.on(chatId, userId);
     let memo = this.viewMemos.get(core);
     if (!memo) {
       memo = new ViewMemo();
       this.viewMemos.set(core, memo);
     }
-    // The head reply's beats by their texts, read first: its change chip lists each that reached the player character (LIVE3 lane 1b).
-    const beatTexts = new Map<string, string>();
-    for (const hash of beatTextHashes(core, observed)) {
-      const text = await this.blobs.get(userId, hash);
-      if (text !== null) beatTexts.set(hash, text);
-    }
     // Each panel's cost, kept by Diagnostics where it is slow, so the next log names it.
     const parts: DiagStep[] = [];
-    const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay, knowledge, offstage: settings.offstage, depth, memo, beatTexts, parts });
+    const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay, knowledge, offstage: settings.offstage, memo, parts });
     for (const p of parts) this.diag.slow(userId, chatId, `state view/${p.name}`, p.ms);
     view.panels["core.context"] = this.inspectorView(chatId, userId);
     // A turn kept from a reply that failed waits on the player (DESIGN §5.1): its card shows while it lasts.
     const kept = this.ledger.keptOf(chatId);
     const last = observed.at(-1);
     if (kept && last) view.chips.push(replyFailedChip(kept.turn, kept.failed, kept.as, last.id));
-    // The offer to switch to agents (INC3 3a, D2): a classic chat that played and never chose, while new chats start on agents.
-    const offer = engineOfferChip(knowledge.chat, () => playedOn(core, observed), settings, last?.id ?? null);
-    if (offer) view.chips.push(offer);
-    // The offer to put a world chat that has played on depth, with the bootstrap's estimate (DEPTH-PLAN Round 2), until the chat chooses either way.
-    if (!depth && last && this.depthOffer && observed.some((m) => m.isUser)) {
-      const depthOffer = await this.depthOffer(chatId, userId, last.id);
-      if (depthOffer) view.chips.push(depthOffer);
-    }
-    // The depth chips, from the chain's live talk, asks and answers read in one walk, and none on a
-    // chain that holds none of them, as a chat never on depth (`liveEventsOn`): real-time dialogue's
-    // (DEPTH-PLAN §2.5), whom the player is talking with, with Leave, or the author's offer, with
-    // Talk; "Ask me" (§6.5), an episode the author held past an allowance, under the reply its
-    // ask stands at, with Spend one more and Keep to the allowance; and "Settled off screen" (§7),
-    // each draft a settlement made canon at the last reply, with Read.
-    const live = eventsOf(core, observed, [STORY_TALK, ...ASK_TYPES, ...DRAFT_TYPES]);
-    const talk = talkChipOn(core, observed, settings.prompts.texts, live);
-    if (talk) view.chips.push(talk);
-    view.chips.push(...askChipsOn(core, observed, live), ...(await settledChipsOn(core, observed, live, this.blobs, userId)));
-    // The bootstrap's progress while it runs and its spot checks waiting for the player (§7 Chips, §8), under the chat's last message.
-    if (depth && last && this.bootstrapChips) view.chips.push(...(await this.bootstrapChips(chatId, userId, last.id)));
     const staged = await this.staged.get(chatId, userId);
     view.staged = staged ? { action: staged.action, params: staged.request, source: staged.source, label: staged.label } : null;
     return view;

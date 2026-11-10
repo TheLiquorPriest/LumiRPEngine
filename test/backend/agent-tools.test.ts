@@ -85,8 +85,7 @@ describe("the Every agent page lists exactly the tools", () => {
     expect(promptGroups(GM_AGENT_PAGE).map((g) => g.title)).toEqual(["Instructions", "The conversation"]);
     expect(PROMPTS.filter((d) => d.page === GM_AGENT_PAGE.id).map((d) => d.id)).toEqual(["gm.system", "gm.instructions", "gm.history_note"]);
     const titles = promptGroups(RUNTIME_PROMPT_PAGE).map((g) => g.title);
-    // After them the offer to switch to agents (INC3 3a) and the tools served through MCP (INC3 U3).
-    expect(titles.slice(-5)).toEqual(["Tools", "Tool answers", "Lore index", "Switching to agents", "MCP tools"]);
+    expect(titles.slice(-3)).toEqual(["Tools", "Tool answers", "Lore index"]);
     expect(titles[0]).toBe(RUNTIME_PROMPT_PAGE.label);
     for (const id of [toolTextId("people_where"), toolArgTextId("people_where", "person"), TOOL_NOTE.badValue, ...Object.values(LORE_INDEX_TEXT)]) expect({ id, page: promptDef(id)?.page }).toEqual({ id, page: RUNTIME_PROMPT_PAGE.id });
     // A text saved under a moved id before the move is still the user's own.
@@ -254,7 +253,7 @@ describe("the resolver", () => {
   test("a name reaches its id by id in any case, by its whole name, by a word only one name has, and with its mark after it", async () => {
     const { rig, chatId } = await alderChat();
     const view = await toolEnv(rig, chatId, "everyone").reader.view();
-    for (const said of ["danny_okafor", "DANNY_OKAFOR", "danny  okafor", "Danny-Okafor", "Danny", "Danny Okafor's", "Danny Okafor [secret; known to Marcus Delgado]"]) expect({ said, got: resolvePerson(view, said) }).toEqual({ said, got: { id: "danny_okafor" } });
+    for (const said of ["danny_okafor", "DANNY_OKAFOR", "danny  okafor", "Danny", "Danny Okafor's", "Danny Okafor [secret; known to Marcus Delgado]"]) expect({ said, got: resolvePerson(view, said) }).toEqual({ said, got: { id: "danny_okafor" } });
     expect(resolvePlace(view, "the rusty anchor")).toEqual({ id: "rusty_anchor" });
     expect(resolveTrack(view, "s_shop_trouble")).toEqual({ id: "s_shop_trouble" });
   });

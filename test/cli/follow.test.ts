@@ -10,7 +10,6 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { servedTools } from "../../src/backend/agents/tools/outside";
 import { kit as bundled } from "../../src/cli/agent-kit";
 import { CredentialStore } from "../../src/cli/credentials";
 import type { KitFiles } from "../../src/cli/follow";
@@ -94,7 +93,7 @@ function serve(fake: FakeLumiverse, options: { pin?: boolean; files?: KitFiles; 
   };
 }
 
-const own = bundled.own(false).map((t) => t.name);
+const own = bundled.tools(false).map((t) => t.name);
 /** Each hello's client, as the fake host received it. */
 const checkIns = (fake: FakeLumiverse): Record<string, unknown>[] => fake.lre.sent("lre.hello").map((h) => (isRecord(h.client) ? h.client : {}));
 
@@ -109,7 +108,7 @@ describe("following the extension's kit", () => {
     expect(await s.tools()).toEqual(own);
     expect(s.changed()).toBe(0);
     // It checked in on connecting, and again once its client had listed the tools.
-    const first = { name: "lumirpengine", version: "0.0.1", serves: "mcp", core: "dev", kit: bundled.build, follows: true, why: null, host: "test-host", harness: "test-harness", listedBackend: null };
+    const first = { name: "lumirpengine", version: "0.0.1", serves: "mcp", core: "dev", kit: bundled.build, follows: true, why: null, host: "test-host", harness: "test-harness" };
     expect(checkIns(fake)).toEqual([
       { ...first, listed: null },
       { ...first, listed: bundled.build },
@@ -345,57 +344,5 @@ describe("Reconnect in Lumiverse", () => {
       expect(s.order).not.toContain("exit");
       expect(s.logs.some((l) => l.includes("exiting"))).toBe(false);
     }
-  });
-});
-
-describe("the tools LumiRPEngine serves (lre.tools)", () => {
-  /** A pinned server (its kit never moves) whose client listed its own tools and those LumiRPEngine serves under the bundled build; then LumiRPEngine restarts as build b7. */
-  async function restartedAs(harness: string) {
-    const fake = new FakeLumiverse();
-    fake.lre.build = bundled.build;
-    fake.lre.served = servedTools({});
-    const s = serve(fake, { pin: true, harness });
-    await s.start();
-    const listed = await s.tools();
-    fake.lre.build = "b7";
-    fake.restart();
-    return { fake, s, listed };
-  }
-  const served = servedTools({}).map((t) => t.name);
-
-  test("listed beside its own, their build in its check-in; a hello answering another build tells the client the tools changed, once, and the list after it is the new build's", async () => {
-    const { fake, s, listed } = await restartedAs("test-harness");
-    expect(listed).toEqual([...own, ...served]);
-    expect(checkIns(fake).at(-1)).toMatchObject({ listed: bundled.build, listedBackend: bundled.build });
-    expect(s.changed()).toBe(0);
-    // The next call connects again: its hello answers b7, not the build the client listed.
-    await s.ask("tools/call", { name: "lre_worlds", arguments: {} });
-    expect(fake.lre.sent("lre.hello").length).toBe(3);
-    expect(s.changed()).toBe(1);
-    expect(await s.tools()).toEqual([...own, ...served]);
-    expect(checkIns(fake).at(-1)).toMatchObject({ listed: bundled.build, listedBackend: "b7" });
-    // Its client holds b7's list now: another hello from b7 changes nothing.
-    fake.restart();
-    await s.ask("tools/call", { name: "lre_worlds", arguments: {} });
-    expect(s.changed()).toBe(1);
-  });
-
-  test("a Lumiverse-run server whose client holds another build's served list is stale, though its kit is current: asked to reconnect, it exits and says why", async () => {
-    const { fake, s } = await restartedAs("lumiverse");
-    await s.ask("tools/call", { name: "lre_worlds", arguments: {} });
-    expect(s.order).not.toContain("exit");
-    fake.push({ type: "lre.kit.reconnect", client: fake.lre.clientId });
-    await s.settle();
-    expect(s.order.at(-1)).toBe("exit");
-    expect(s.logs.at(-1)).toContain(`holds LumiRPEngine build ${bundled.build}'s served tools until it connects again, and on connecting it lists build b7's`);
-  });
-
-  test("a Lumiverse-run server whose client listed this build's served tools stays when asked", async () => {
-    const { fake, s } = await restartedAs("lumiverse");
-    await s.ask("tools/call", { name: "lre_worlds", arguments: {} });
-    await s.tools();
-    fake.push({ type: "lre.kit.reconnect", client: fake.lre.clientId });
-    await s.settle();
-    expect(s.order).not.toContain("exit");
   });
 });

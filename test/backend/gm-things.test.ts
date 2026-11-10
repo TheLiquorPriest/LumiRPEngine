@@ -384,7 +384,7 @@ describe("every turn's Things tidied fix (ITEMS-SPEC §9, §12 Phase 4; N3)", ()
   test("this chat's own switch (GM → This chat → Things) overrides the world's: off, the first turn records nothing; back to the world's, the next turn tidies", async () => {
     const { rig, chatId } = await oldChat(RECORDED.events);
     expect((await rig.rt.view(chatId, rig.host.userId)).controls?.things.tidy).toEqual({ chat: null, world: true });
-    expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, tidy: false }))).toMatchObject({ knowledge: null, narrator: null, tidy: false });
+    expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, tidy: false }))).toEqual({ knowledge: null, narrator: null, tidy: false });
     expect((await rig.rt.view(chatId, rig.host.userId)).controls?.things.tidy).toEqual({ chat: false, world: true });
     await rig.turn(chatId, "I look over the produce.", "You look over the produce at Alder Market.");
     expect((await headState(rig, chatId)).state.entities[FRIDGE]?.relations).toEqual([{ type: "in", to: "pov" }]);
@@ -394,8 +394,7 @@ describe("every turn's Things tidied fix (ITEMS-SPEC §9, §12 Phase 4; N3)", ()
     const again = rig.restart();
     expect(again.body(await again.send({ type: "lre.chat.knowledge", chatId })).tidy).toBe(false);
     // Following the world's again, the chain holds no fix yet, so the next turn records it.
-    const following = again.body(await again.send({ type: "lre.chat.knowledge", chatId, tidy: null }));
-    expect([following.knowledge, following.narrator, following.tidy]).toEqual([null, null, undefined]);
+    expect(again.body(await again.send({ type: "lre.chat.knowledge", chatId, tidy: null }))).toEqual({ knowledge: null, narrator: null });
     await again.turn(chatId, "I pick out some apples.", "You pick out some apples.");
     expect((await headState(again, chatId)).state.entities[FRIDGE]?.fields.place).toBe("harbor_street_114");
     expect((await again.rt.view(chatId, again.host.userId)).chips.filter((c) => c.kind === "tidied").map((c) => c.label)).toEqual(["Things tidied"]);

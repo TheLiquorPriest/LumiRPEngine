@@ -132,9 +132,6 @@ const host: StepsHost = {
       if (r.status !== 200 || !isRecord(r.data)) throw new Error(`quiet ${r.status}`);
       return { content: typeof r.data.content === "string" ? r.data.content : "", finishReason: typeof r.data.finish_reason === "string" ? r.data.finish_reason : "", tokens: 0 };
     },
-    async stream() {
-      throw new Error("extract never streams");
-    },
     async decide() {
       throw new Error("extract never decides");
     },

@@ -5,17 +5,15 @@
 // paragraphs around it, not as the section's start.
 
 import guideText from "../../docs/AGENT-GUIDE.md" with { type: "text" };
-import depthText from "../../docs/DEPTH.md" with { type: "text" };
 import designText from "../../docs/DESIGN.md" with { type: "text" };
 import expressionsText from "../../docs/EXPRESSIONS.md" with { type: "text" };
-import loopbackText from "../../docs/LOOPBACK.md" with { type: "text" };
 import mcpText from "../../docs/MCP.md" with { type: "text" };
 import presetsText from "../../docs/PRESETS.md" with { type: "text" };
 import recipesText from "../../docs/RECIPES.md" with { type: "text" };
 import referenceText from "../../docs/REFERENCE.md" with { type: "text" };
 import userGuideText from "../../docs/USER-GUIDE.md" with { type: "text" };
 import { hasOwn } from "../shared/json";
-import { ANSWER_LIMIT, BODY_LIMIT, count } from "../shared/tool-read";
+import { ANSWER_LIMIT, BODY_LIMIT, count } from "./read";
 
 export const GUIDE = guideText;
 
@@ -27,8 +25,6 @@ export const DOCS: Readonly<Record<string, { file: string; text: string }>> = {
   design: { file: "DESIGN.md", text: designText },
   "user-guide": { file: "USER-GUIDE.md", text: userGuideText },
   presets: { file: "PRESETS.md", text: presetsText },
-  depth: { file: "DEPTH.md", text: depthText },
-  loopback: { file: "LOOPBACK.md", text: loopbackText },
   "agent-guide": { file: "AGENT-GUIDE.md", text: guideText },
   mcp: { file: "MCP.md", text: mcpText },
 };

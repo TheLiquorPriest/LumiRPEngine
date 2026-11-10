@@ -32,7 +32,7 @@ import { activitySpanEnd, type FacetId, type FacetValueId, type FeedScope, type 
 import type { LintIssue } from "../../../shared/protocol";
 import { initialState, minutesBetween } from "../../../engine/world-state";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import { calendarOf, clockAt, dateAt, formatClock, formatHHMM, formatTimeOfDay, MINUTES_PER_DAY, parseHHMM, slotIndexAt, slotStart } from "../../../engine/calendar";
+import { calendarOf, clockAt, dateAt, formatClock, formatHHMM, formatTimeOfDay, MINUTES_PER_DAY, parseHHMM } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { labelOf, mutableSlice, numOf, objOf, optionalQuery, optionalService, sliceOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
 import { planDay, tieKey, type FixedBlock, type PlanBlock, type PlanOption } from "../../../engine/plan-day";
@@ -453,9 +453,7 @@ function acquainted(state: Readonly<WorldState>, a: EntityId, b: EntityId): bool
 /**
  * Someone takes up a block of their day (DESIGN §8): its place and its activity (null leaves either
  * as it is), unless a hold keeps either, a fight under way keeps them (the combat pack's
- * `combat.engaged`), an episode off screen holds them (the story pack's `story.held`: a draft's
- * people are in it for its span, DEPTH-PLAN §4.6) or the POV's routine can't take it there
- * (stranded, or the place out of reach).
+ * `combat.engaged`) or the POV's routine can't take it there (stranded, or the place out of reach).
  * Arriving where the POV is says so; `quiet`, it only notes, as an arrival a Live or Near character's
  * routine makes in a skip never stops it. `seen`, a block of their skip life taking them out of the
  * POV's scene: the POV sees them go, a note the Montage tells. A block of their own plan (`holdUntil`,
@@ -465,7 +463,7 @@ function acquainted(state: Readonly<WorldState>, a: EntityId, b: EntityId): bool
 function takeUp(ctx: ReadContext, who: EntityId, place: PlaceId | null, activity: string | null, at: number, holdUntil?: number, quiet = false, seen = false): LedgerEvent[] {
   const out: LedgerEvent[] = [];
   const e = own(ctx.state.entities, who);
-  if (!e || routineStays(ctx, who, place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true || optionalQuery(ctx, "story.held")?.(ctx, who, at) === true) return out;
+  if (!e || routineStays(ctx, who, place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true) return out;
   if (!held(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
     // Seen as their arrival is: by a POV that can see them, whether or not it holds a `knows` link to them.
     if (seen && withPov(ctx, who)) out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "public" } });
@@ -533,44 +531,6 @@ function liveBlock(ctx: ReadContext, who: EntityId, plan: DayPlan, block: DayPla
   const skipLife = skip && who !== ctx.world.pov && routineRole(ctx, who) !== "enforced";
   const tier = skip && place !== null ? (optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background") : "background";
   return takeUp(ctx, who, place, doing, at, undefined, tier === "live" || tier === "near" || skipLife, skipLife);
-}
-
-/** The moment a run opens at in the span of a hold a dropped draft had on someone (`releaseHold`). */
-const RELEASE = "release";
-
-/**
- * Someone a dropped draft held goes back to their routine (DEPTH-PLAN §4.6): the draft never
- * happened, so its hold leaves no trace. As a run opens in the span of a hold a dropped draft had on
- * them (`story.released`), they live the latest moment of their day that came due while it held them
- * (the slot step at the latest slot boundary, or a block's start they live at its own minute, as this
- * run's `livesEveryBlock` reads it) as `liveBlock` would have then, reading where their routine had
- * them from the hold's start; nothing came due, nothing moves. Only while they are where the hold kept
- * them (the place or the activity of the block their day had as it began): once the story or their
- * routine has moved them since, there is nothing of it left. A settled draft's hold is canon and
- * stays as it is, as does one whose span ended before the drop.
- */
-function releaseHold(ctx: ReadContext, who: EntityId, at: number, slot: SlotInfo): LedgerEvent[] {
-  const from = optionalQuery(ctx, "story.released")?.(ctx, who, at)[0]?.from;
-  const e = own(ctx.state.entities, who);
-  if (from === undefined || !e) return [];
-  const cal = calendarOf(ctx.world);
-  const begun = dayPlan(ctx, who, dateAt(cal, from).dayIndex).blocks.find((b) => b.start <= from && from < b.end);
-  if (!begun || (e.fields.place !== begun.place && e.fields.activity !== blockActivity(begun.activity))) return [];
-  // The latest moment due in [from, at]: the slot step at the latest slot boundary (the block holding from it), or a later block's start.
-  let due: { at: number; plan: DayPlan; block: DayPlan["blocks"][number] } | null = null;
-  const step = slotStart(cal, slotIndexAt(cal, at));
-  if (step >= from) {
-    const plan = dayPlan(ctx, who, dateAt(cal, step).dayIndex);
-    const block = plan.blocks.find((b) => b.start <= step && step < b.end) ?? plan.blocks[plan.blocks.length - 1];
-    if (block) due = { at: step, plan, block };
-  }
-  if (livesEveryBlock(ctx, who, slot)) {
-    for (let day = dateAt(cal, from).dayIndex; day <= dateAt(cal, at).dayIndex; day++) {
-      const plan = dayPlan(ctx, who, day);
-      for (const block of plan.blocks) if (block.start >= from && block.start <= at && block.activity !== "trip" && (!due || block.start > due.at)) due = { at: block.start, plan, block };
-    }
-  }
-  return due ? liveBlock(ctx, who, due.plan, due.block, from, at, slot.povRoutine === false, slot.timelapse === true) : [];
 }
 
 /**
@@ -725,8 +685,7 @@ function bookInvitation(ctx: ReadContext, host: EntityId): LedgerEvent[] {
  * start of every other block of their day inside it, so a fixed block happens at its time and dinner
  * at dinner time, unless a plan's end hands them to it or it is a trip (`stepTrips` takes them away);
  * in a skip the model planned for them, the start of each block of their skip life (`skipBlocksOf`:
- * the plan's, and the basic needs filling the time it leaves open); as a run opens in the span of a
- * hold a dropped draft had on them, the moment they go back to their routine (`releaseHold`); and from
+ * the plan's, and the basic needs filling the time it leaves open); and from
  * Cast life 4 the moment something of theirs asks the POV along. The POV's day only while its routine
  * runs (`SlotInfo.povRoutine`). Laid from the plans, the routine, the commitments and the recorded
  * skip plan alone, so every segment of a timelapse finds the same.
@@ -766,9 +725,6 @@ function planMoments(ctx: ReadContext, who: EntityId, slot: SlotInfo): AgentInst
       }
     }
   }
-  // A run opening while a dropped draft's hold would still have them gives them back to their routine.
-  const run = slot.run?.from;
-  if (who !== ctx.world.pov && run !== undefined && run >= slot.start && run < slot.end && (optionalQuery(ctx, "story.released")?.(ctx, who, run).length ?? 0) > 0) out.push({ at: run, key: RELEASE, opens: true });
   if (ctx.levelOf(who, "castlife") >= 4) for (const a of asksOf(ctx, who, slotDays(ctx, slot))) if (inside(a.ask)) out.push({ at: a.ask, key: `invite:${a.key}` });
   if (who === ctx.world.pov) out.push(...activityEndMoment(ctx, slot));
   return out;
@@ -893,8 +849,7 @@ function liveSkipBlock(ctx: ReadContext, who: EntityId, block: SkipLived, at: nu
 /**
  * What an agent does at a moment: the invitation goes out; at a block of their day starting, they
  * live it as a slot step would (`liveBlock`, so the story still comes first); at a block the model
- * planned for their skip starting, they take it up (`liveSkipBlock`); as a run opens in a dropped
- * draft's hold, they go back to their routine (`releaseHold`); or at their own plan's start or
+ * planned for their skip starting, they take it up (`liveSkipBlock`); or at their own plan's start or
  * end they take up the block of their day that holds from then (the plan's own, held for its span;
  * after its end what follows, home when that names no place), unless they are in a scene with the POV
  * while the story holds the POV (`SlotInfo.povRoutine` false), which in a skip only a story plan's
@@ -905,7 +860,6 @@ function liveSkipBlock(ctx: ReadContext, who: EntityId, block: SkipLived, at: nu
  */
 function atPlanMoment(ctx: ReadContext, who: EntityId, moment: AgentInstant, slot: SlotInfo): LedgerEvent[] {
   if (moment.key === ACTIVITY_END) return povLivedNeeds(ctx, slot, moment.at);
-  if (moment.key === RELEASE) return releaseHold(ctx, who, moment.at, slot);
   const cal = calendarOf(ctx.world);
   if (moment.key.startsWith("invite:")) {
     const ask = asksOf(ctx, who, [dateAt(cal, moment.at).dayIndex, dateAt(cal, moment.at).dayIndex + 1]).find((a) => `invite:${a.key}` === moment.key);

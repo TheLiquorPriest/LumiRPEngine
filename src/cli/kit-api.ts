@@ -43,16 +43,12 @@ export interface AgentKit {
   readonly build: string;
   /** Its version, the engine and world format it bundles, and the agent API its tools need of LumiRPEngine. */
   readonly versions: { cli: string; engine: string; worldFormat: string; agentApi: number };
-  /** Its own tools (guide, docs, worlds, settings, builds, jobs, sandboxes), without the write tools when read-only: the lists `bun run build` fingerprints. */
-  own(readOnly: boolean): readonly KitTool[];
-  /**
-   * Its own tools and those LumiRPEngine serves (`lre.tools list`), without the write tools when the
-   * session is read-only; `backend`: the LumiRPEngine build that listed them, null when none could
-   * (not signed in, or LumiRPEngine unreachable), and only its own tools are listed.
-   */
-  tools(ctx: KitContext): Promise<{ tools: readonly KitTool[]; backend: string | null }>;
-  /** Runs one tool, its own or one LumiRPEngine serves; null when neither has a tool of that name. Never throws. */
-  call(name: string, args: unknown, ctx: KitContext): Promise<KitResult | null>;
+  /** The tools, without the write tools when read-only. */
+  tools(readOnly: boolean): readonly KitTool[];
+  /** Whether it has a tool of that name, listed or not. */
+  has(name: string): boolean;
+  /** Runs one tool; never throws. */
+  call(name: string, args: unknown, ctx: KitContext): Promise<KitResult>;
 }
 
 /** The kit a core ships with also runs the command line. */
@@ -79,7 +75,7 @@ export function kitOf(module: unknown): AgentKit | string {
   if (!isRecord(kit)) return "it exports no kit";
   if (kit.api !== KIT_API) return `it is kit API ${String(kit.api)}, and this lumirpengine reads kit API ${KIT_API}`;
   const versions = kit.versions;
-  if (typeof kit.build !== "string" || !isRecord(versions) || typeof versions.agentApi !== "number" || typeof kit.own !== "function" || typeof kit.tools !== "function" || typeof kit.call !== "function") return "it isn't a whole kit";
+  if (typeof kit.build !== "string" || !isRecord(versions) || typeof versions.agentApi !== "number" || typeof kit.tools !== "function" || typeof kit.has !== "function" || typeof kit.call !== "function") return "it isn't a whole kit";
   return kit as unknown as AgentKit;
 }
 

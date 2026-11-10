@@ -15,21 +15,15 @@
 //    same (events, post entries, undos, Keep overlays, path and markers) folded from on its own
 //    path with nothing failing applies without re-validation (validation is a function of state).
 // L1 holds when this equals referenceFold for every input; L42 checks snapshot-started folds.
-// The basis-anchored layer (DEPTH-PLAN §4.9) folds right after each entry's basis message: a step's
-// key and the chain's shape take the entries folding there (`layerKey`: each one's id, the parent
-// path it was made on and its events' digest), so landing work re-folds from its message on without
-// moving a path, and a check's fold of an entry that never lands never stands in for one that does.
 
 import { KEPT_FOLDS_DEFAULT } from "../../shared/agent-settings";
 import { hashJson, hashParts } from "../../shared/hash";
-import type { FoldLayerEntry } from "../../shared/layer";
 import type { EventRef, JournalNote, KeepLine, LedgerEvent, Marker, MarkerBody, PathHash, PostEntry, Rec } from "../../shared/ledger";
 import { ROOT_PATH } from "../../shared/ledger";
 import { apartHost, applyEvent, applyMarker, tiesOf, TIED_DROP, validateEvent } from "../events";
 import type { WorldState } from "../state";
 import { initialState } from "../world-state";
-import { FoldError, type ChainMessage, type FoldInput, type FoldOutput, type FoldSnapshot, type LayerDrop, type MessageResult, type ResolvedFix } from "./chain";
-import { foldLayerEntries, layerKey, liveLayer, type LiveLayer } from "./layer";
+import { FoldError, type ChainMessage, type FoldInput, type FoldOutput, type FoldSnapshot, type MessageResult, type ResolvedFix } from "./chain";
 import { activeRecord, activeText, contentId, isLive, isTombstoned, markersHash, recordHash, stepPath, turnPath } from "./path";
 import type { FoldTypes } from "./reference";
 
@@ -42,8 +36,6 @@ interface Step {
   violations: string[];
   /** The GM edits and ✎ fixes this step, a rebased view, worked out again: state-dependent, as its drops are. */
   resolved: ResolvedFix[];
-  /** The layer units this step dropped as a rebased view: state-dependent, as its drops are. */
-  layer: LayerDrop[];
   paused: boolean;
   /** The chain's fold shape through this step (`shapeAfter`), which a stored snapshot keys on with the path. */
   shape: string;
@@ -60,8 +52,6 @@ interface Frame {
   livePost: PostEntry[];
   /** Whether the chain is paused after this message. */
   paused: boolean;
-  /** The live layer entries folding right after this message, in landing order (none when paused). */
-  layer: FoldLayerEntry[];
 }
 
 function refEq(a: EventRef, b: EventRef): boolean {
@@ -85,14 +75,9 @@ const NO_SHAPE = "";
  * requests; any other step leaves the shape as it was.
  */
 function shapeAfter(prev: string, f: Frame): string {
-  let shape = prev;
-  if (f.result.fold === "view") {
-    const asked = f.livePost.flatMap((p) => (p.kind === "fix" && p.edit !== undefined ? [[p.seq, p.edit, p.gm ?? null]] : []));
-    shape = hashParts("lre.shape", prev, f.result.path, hashJson(asked));
-  }
-  // Layer entries fold without moving a path, so the shape carries them (a stored snapshot keys on it).
-  if (f.layer.length > 0) shape = hashParts("lre.shape.layer", shape, f.result.path, layerKey(f.layer));
-  return shape;
+  if (f.result.fold !== "view") return prev;
+  const asked = f.livePost.flatMap((p) => (p.kind === "fix" && p.edit !== undefined ? [[p.seq, p.edit, p.gm ?? null]] : []));
+  return hashParts("lre.shape", prev, f.result.path, hashJson(asked));
 }
 
 /** Fold ends whose state the cache keeps, the most recently used: a turn folds its chat's head, and the messages just before it, over and over. */
@@ -187,7 +172,7 @@ export class LedgerFold {
     this.limit = options.keep ?? (() => KEPT_FOLDS_DEFAULT);
   }
 
-  private keyOf(prev: string, m: ChainMessage, input: FoldInput, paused: boolean, pausesHere: boolean, live: LiveLayer): string {
+  private keyOf(prev: string, m: ChainMessage, input: FoldInput, paused: boolean, pausesHere: boolean): string {
     const rec = activeRecord(m, input.tombstones);
     // A tombstoned record folds as none, but adds a note: key the stored record, and whether it is live.
     const stored = m.ledger?.swipes[String(m.swipeId)];
@@ -195,11 +180,9 @@ export class LedgerFold {
     const markers = m.ledger ? digestOf(this.markers, m.ledger.markers, JSON.stringify(m.ledger.markers), () => hashJson(m.ledger?.markers)) : "";
     const content = contentId(activeText(m)).hash;
     const flags = `${m.isUser ? "u" : "a"}${paused ? "p" : ""}${pausesHere ? "P" : ""}`;
-    // The layer entries folding after it (`layerKey`): the key before fixes the parent path a view is told by.
-    const layered = paused ? "" : layerKey(live.at.get(m.id) ?? []);
     // The memo key: every part but the message id has a fixed form without NUL, and the id comes last.
-    const memo = `${prev}\u0000${flags}\u0000${m.swipeId}\u0000${content}\u0000${recKey}\u0000${markers}\u0000${layered}\u0000${m.id}`;
-    return this.recent(this.stepKeys, memo, () => hashParts("lre.fold", prev, m.id, m.isUser ? "u" : "a", String(m.swipeId), content, recKey, markers, paused ? "p" : "", pausesHere ? "P" : "", ...(layered === "" ? [] : ["layer", layered])));
+    const memo = `${prev}\u0000${flags}\u0000${m.swipeId}\u0000${content}\u0000${recKey}\u0000${markers}\u0000${m.id}`;
+    return this.recent(this.stepKeys, memo, () => hashParts("lre.fold", prev, m.id, m.isUser ? "u" : "a", String(m.swipeId), content, recKey, markers, paused ? "p" : "", pausesHere ? "P" : ""));
   }
 
   /** `memo`'s value for `key`, now its newest; else `make()`'s, kept, the least recently used going past the limit. */
@@ -229,18 +212,16 @@ export class LedgerFold {
   keys(input: FoldInput): FoldKeys {
     const root = hashParts("lre.fold", input.revision);
     const pausedAt = new Set(input.pauses.map((p) => p.messageId));
-    const live = liveLayer(input.chain, input.tombstones, input.layer);
     const steps: string[] = [];
     let key = root;
     let state = root;
     let paused = false;
     for (const m of input.chain) {
       const here = pausedAt.has(m.id);
-      key = this.keyOf(key, m, input, paused, here, live);
+      key = this.keyOf(key, m, input, paused, here);
       steps.push(key);
-      const layered = !paused && live.at.has(m.id);
       paused = pausedAfter(m, paused, here);
-      if (layered || (!m.isUser && (m.ledger?.swipes[String(m.swipeId)] !== undefined || (m.ledger?.markers.length ?? 0) > 0))) state = key;
+      if (!m.isUser && (m.ledger?.swipes[String(m.swipeId)] !== undefined || (m.ledger?.markers.length ?? 0) > 0)) state = key;
     }
     return { root, steps, state };
   }
@@ -264,7 +245,6 @@ export class LedgerFold {
     if (!startWorld) throw new FoldError(`unknown revision ${input.revision}`);
     const n = input.chain.length;
     const pausedAt = new Set(input.pauses.map((p) => p.messageId));
-    const live = liveLayer(input.chain, input.tombstones, input.layer);
     const steps: Step[] = [];
     const keys: string[] = [];
     let key = hashParts("lre.fold", input.revision);
@@ -273,7 +253,7 @@ export class LedgerFold {
     let base = -1;
     for (let i = 0; i < n; i++) {
       const m = input.chain[i] as ChainMessage;
-      const k = this.keyOf(key, m, input, paused, pausedAt.has(m.id), live);
+      const k = this.keyOf(key, m, input, paused, pausedAt.has(m.id));
       const cached = this.cache.get(k);
       if (!cached) break;
       this.cache.delete(k);
@@ -310,8 +290,8 @@ export class LedgerFold {
       let snapshot: FoldSnapshot | undefined;
       for (let i = base + 1; i < n; i++) {
         const m = input.chain[i] as ChainMessage;
-        const f = this.frame(input, m, p, false, false, live);
-        k = this.keyOf(k, m, input, false, false, live);
+        const f = this.frame(input, m, p, false, false);
+        k = this.keyOf(k, m, input, false, false);
         s = shapeAfter(s, f);
         frames.push(f);
         frameKeys.push(k);
@@ -321,8 +301,7 @@ export class LedgerFold {
         const found = input.snapshots.get(hashParts(context, p, s));
         // A snapshot that lacks the clock of a step it would restore (saved before steps kept their
         // clocks, or on top of one), or the fixes its views worked out again (saved before the folds
-        // kept them), is passed over, so every reply keeps the time it ended at and its chips. One
-        // saved before the layer holds no layer drops: its shape says no entry folded in its steps.
+        // kept them), is passed over, so every reply keeps the time it ended at and its chips.
         if (found && found.resolved !== undefined && clocksCover(found, base, i)) {
           best = i;
           snapshot = found;
@@ -337,8 +316,6 @@ export class LedgerFold {
         for (const [i, x] of snapshot.keep) keep.set(i, [...(keep.get(i) ?? []), x]);
         for (const [i, x] of snapshot.violations) violations.set(i, [...(violations.get(i) ?? []), x]);
         for (const [i, x] of snapshot.resolved ?? []) resolved.set(i, [...(resolved.get(i) ?? []), x]);
-        const layered = new Map<number, LayerDrop[]>();
-        for (const [i, x] of snapshot.layer ?? []) layered.set(i, [...(layered.get(i) ?? []), x]);
         const clocks = new Map(snapshot.clocks ?? []);
         // Steps already cached keep their outputs; the rest come from their frames and the snapshot.
         // They are remembered, the snapshot's step with its state, so the next fold of this chain
@@ -346,7 +323,7 @@ export class LedgerFold {
         for (let i = base + 1; i <= best; i++) {
           const f = frames[i - base - 1] as Frame;
           const k = frameKeys[i - base - 1] as string;
-          const step: Step = { state: null, result: { ...f.result, clock: clocks.get(i) ?? null }, notes: [...f.notes, ...(notes.get(i) ?? [])], keep: [...f.keep, ...(keep.get(i) ?? [])], violations: violations.get(i) ?? [], resolved: resolved.get(i) ?? [], layer: layered.get(i) ?? [], paused: false, shape: frameShapes[i - base - 1] as string };
+          const step: Step = { state: null, result: { ...f.result, clock: clocks.get(i) ?? null }, notes: [...f.notes, ...(notes.get(i) ?? [])], keep: [...f.keep, ...(keep.get(i) ?? [])], violations: violations.get(i) ?? [], resolved: resolved.get(i) ?? [], paused: false, shape: frameShapes[i - base - 1] as string };
           this.remember(k, i === best ? { ...step, state: snapshot.state } : step, i === best ? "checkpoint" : null, true);
           steps.push(step);
           keys.push(k);
@@ -362,15 +339,14 @@ export class LedgerFold {
     }
 
     // 3. Fold on from there. A step that changes nothing (a user message, a paused one, one with no
-    // record, marker or layer entry to fold) ends on the state it started from: a kept state is copied
-    // only when the first step that may change it runs, and the steps before that keep the same state.
+    // record or marker to fold) ends on the state it started from: a kept state is copied only when
+    // the first step that may change it runs, and the steps before that keep the same state.
     for (let i = base + 1; i < n; i++) {
       const m = input.chain[i] as ChainMessage;
-      key = this.keyOf(key, m, input, paused, pausedAt.has(m.id), live);
-      const f = this.frame(input, m, parent, paused, pausedAt.has(m.id), live);
+      key = this.keyOf(key, m, input, paused, pausedAt.has(m.id));
+      const f = this.frame(input, m, parent, paused, pausedAt.has(m.id));
       shape = shapeAfter(shape, f);
-      const still = (m.isUser || f.result.fold === "paused" || (!f.rec && f.liveMarkers.length === 0)) && f.layer.length === 0;
-      if (shared && !still) {
+      if (shared && !(m.isUser || f.result.fold === "paused" || (!f.rec && f.liveMarkers.length === 0))) {
         state = structuredClone(shared);
         shared = null;
       }
@@ -385,14 +361,13 @@ export class LedgerFold {
     }
 
     // A reader that only reads (`FoldInput.share`) takes the kept state as it is; any other, its own copy.
-    const out: FoldOutput = { state: shared ? (input.share ? shared : structuredClone(shared)) : state, notes: [], keepReport: [], messages: [], resolved: [], violations: [], layerDrops: [] };
+    const out: FoldOutput = { state: shared ? (input.share ? shared : structuredClone(shared)) : state, notes: [], keepReport: [], messages: [], resolved: [], violations: [] };
     for (const s of steps) {
       out.messages.push(s.result);
       out.notes.push(...s.notes);
       out.keepReport.push(...s.keep);
       out.resolved.push(...s.resolved);
       out.violations.push(...s.violations);
-      out.layerDrops.push(...s.layer);
     }
     return out;
   }
@@ -401,14 +376,12 @@ export class LedgerFold {
   private snapshotOf(key: string, steps: readonly Step[], state: WorldState): FoldSnapshot {
     const clocks: [number, number][] = [];
     const resolved: [number, ResolvedFix][] = [];
-    const layer: [number, LayerDrop][] = [];
-    const snap: FoldSnapshot = { key, state, notes: [], keep: [], violations: [], clocks, resolved, layer };
+    const snap: FoldSnapshot = { key, state, notes: [], keep: [], violations: [], clocks, resolved };
     steps.forEach((s, i) => {
       for (const x of s.notes) if (dependentNote(x)) snap.notes.push([i, x]);
       for (const x of s.keep) if (dependentKeep(x)) snap.keep.push([i, x]);
       for (const x of s.violations) snap.violations.push([i, x]);
       for (const x of s.resolved) resolved.push([i, x]);
-      for (const x of s.layer) layer.push([i, x]);
       if (s.result.clock !== null) clocks.push([i, s.result.clock]);
     });
     return snap;
@@ -640,22 +613,16 @@ export class LedgerFold {
       }
       if (before !== null && violations.length === 0) this.recent(this.settled, settledKey, () => before);
     }
-    // The layer entries anchored here fold right after the message's record (DEPTH-PLAN §4.9).
-    const layer: LayerDrop[] = [];
-    if (f.layer.length > 0) foldLayerEntries(types, input.worlds, state, m.id, parent, f.layer, layer, violations);
-    return { state, result: { ...f.result, clock: state.clock }, notes, keep, violations, resolved, layer, paused: f.paused, shape };
+    return { state, result: { ...f.result, clock: state.clock }, notes, keep, violations, resolved, paused: f.paused, shape };
   }
 
   /** Everything about one message that doesn't need the state: its record, live entries, path, fold kind and inert notes. */
-  private frame(input: FoldInput, m: ChainMessage, parent: PathHash, paused: boolean, pausesHere: boolean, live: LiveLayer): Frame {
-    // The layer entries folding after it, unless the chain is paused before it.
-    const layer = paused ? [] : (live.at.get(m.id) ?? []);
-    const layered = layer.length > 0 ? { layer: layer.map((e) => e.id) } : {};
+  private frame(input: FoldInput, m: ChainMessage, parent: PathHash, paused: boolean, pausesHere: boolean): Frame {
     const notes: JournalNote[] = [];
     const keep: KeepLine[] = [];
     if (m.isUser) {
       const path = stepPath(parent, true, contentId(activeText(m)).hash, "", "");
-      return { result: { id: m.id, fold: "user", parentPath: parent, path, ...layered }, notes, keep, rec: null, recPath: null, liveMarkers: [], livePost: [], paused: pausedAfter(m, paused, pausesHere), layer };
+      return { result: { id: m.id, fold: "user", parentPath: parent, path }, notes, keep, rec: null, recPath: null, liveMarkers: [], livePost: [], paused: pausedAfter(m, paused, pausesHere) };
     }
     const rec = activeRecord(m, input.tombstones);
     const stored = m.ledger?.swipes[String(m.swipeId)];
@@ -683,7 +650,7 @@ export class LedgerFold {
     const fold: MessageResult["fold"] = paused ? "paused" : !rec ? (tombstoned ? "tombstoned" : "plain") : recPath === null ? "plain" : view ? "view" : "on_path";
     const content = rec ? rec.swipeHash.hash : contentId(activeText(m)).hash;
     const path = stepPath(parent, false, content, recordHash(rec, livePost, parent), markersHash(liveMarkers));
-    return { result: { id: m.id, fold, parentPath: parent, path, ...layered }, notes, keep, rec, recPath, liveMarkers, livePost, paused: pausedAfter(m, paused, pausesHere), layer };
+    return { result: { id: m.id, fold, parentPath: parent, path }, notes, keep, rec, recPath, liveMarkers, livePost, paused: pausedAfter(m, paused, pausesHere) };
   }
 }
 

@@ -20,9 +20,7 @@ import { formatMs, TIMEOUTS, timerMs } from "../shared/timeouts";
 import type { Activity } from "../shared/diagnostics";
 import type { ChatId } from "../shared/ids";
 import { PROTOCOL_VERSION } from "../shared/protocol";
-import type { AssistantUpdate, AssistantView, BootstrapUpdate, DeltaOp, DraftChanged, ErrorCode, ErrorMessage, FrontendToBackend, GeneratePush, JobUpdate, LiveUpdate, MindsRunUpdate, ResultBodies, ResultMessage, ReviewCardView, ReviewUpdate } from "../shared/protocol";
-import type { BootstrapView } from "../shared/bootstrap";
-import type { LoopbackResultBodies } from "../shared/loopback";
+import type { AssistantUpdate, AssistantView, DeltaOp, DraftChanged, ErrorCode, ErrorMessage, FrontendToBackend, GeneratePush, JobUpdate, LiveUpdate, MindsRunUpdate, ResultBodies, ResultMessage, ReviewCardView, ReviewUpdate } from "../shared/protocol";
 import type { LiveChange, LiveView } from "../shared/live";
 import type { AgentsView } from "../shared/agents";
 import type { AcceptanceRunView, AcceptanceState } from "../shared/agent-settings";
@@ -107,13 +105,7 @@ interface Pending {
   timer: unknown;
 }
 
-/** The requests only an outside client sends (DESIGN §23): the tools LumiRPEngine serves it. */
-type OutsideOnlyRequestType = "lre.tools";
-
-/** The requests a page sends: the loopback relay's (`lre.loopback.*`) and an outside client's never come from one. */
-type PageRequestType = Exclude<keyof ResultBodies, keyof LoopbackResultBodies | OutsideOnlyRequestType>;
-
-const REQUEST_TYPES: Record<PageRequestType, true> = {
+const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.hello": true,
   "lre.state.resync": true,
   "lre.restart": true,
@@ -155,12 +147,9 @@ const REQUEST_TYPES: Record<PageRequestType, true> = {
   "lre.review": true,
   "lre.prompts": true,
   "lre.live": true,
-  "lre.bootstrap": true,
-  "lre.depth": true,
-  "lre.loopback.page": true,
 };
 
-function isRequestType(value: unknown): value is PageRequestType {
+function isRequestType(value: unknown): value is keyof ResultBodies {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(REQUEST_TYPES, value);
 }
 
@@ -187,7 +176,6 @@ export class ProtocolClient {
   private readonly assistantListeners = new Set<(update: AssistantUpdate) => void>();
   private readonly reviewListeners = new Set<(update: ReviewUpdate) => void>();
   private readonly liveListeners = new Set<(update: LiveUpdate) => void>();
-  private readonly bootstrapListeners = new Set<(update: BootstrapUpdate) => void>();
   private readonly unsubscribe: () => void;
   private requestMs: Limit;
   private readonly newReqId: () => string;
@@ -277,12 +265,6 @@ export class ProtocolClient {
   onLive(listener: (update: LiveUpdate) => void): () => void {
     this.liveListeners.add(listener);
     return () => this.liveListeners.delete(listener);
-  }
-
-  /** A chat's bootstrap moved on (`lre.bootstrap.update`): GM → Depth → Bootstrap and This chat → Depth follow it. */
-  onBootstrap(listener: (update: BootstrapUpdate) => void): () => void {
-    this.bootstrapListeners.add(listener);
-    return () => this.bootstrapListeners.delete(listener);
   }
 
   /** Whether this page's document is on screen (setup reads `document.visibilityState`); sent with each hello, resync and `page`. */
@@ -458,7 +440,7 @@ export class ProtocolClient {
         return;
       case "lre.generate":
         if (typeof payload.chatId === "string" && typeof payload.turn === "string" && (payload.as === "regenerate" || payload.as === "continue" || payload.as === "send")) {
-          const push: GeneratePush = { lre: PROTOCOL_VERSION, type: "lre.generate", chatId: payload.chatId, as: payload.as, turn: payload.turn, ...(payload.ask === true ? { ask: true as const } : {}) };
+          const push: GeneratePush = { lre: PROTOCOL_VERSION, type: "lre.generate", chatId: payload.chatId, as: payload.as, turn: payload.turn };
           for (const listener of this.generateListeners) listener(push);
         }
         return;
@@ -491,12 +473,6 @@ export class ProtocolClient {
           const change: LiveChange = "view" in payload ? { view: payload.view as LiveView } : { turn: payload.turn, entries: payload.entries, ended: payload.ended };
           const update: LiveUpdate = { lre: PROTOCOL_VERSION, type: "lre.live.update", chatId: payload.chatId, ...change };
           for (const listener of this.liveListeners) listener(update);
-        }
-        return;
-      case "lre.bootstrap.update":
-        if (typeof payload.chatId === "string" && isRecord(payload.view) && typeof payload.view.status === "string") {
-          const update: BootstrapUpdate = { lre: PROTOCOL_VERSION, type: "lre.bootstrap.update", chatId: payload.chatId, view: payload.view as unknown as BootstrapView };
-          for (const listener of this.bootstrapListeners) listener(update);
         }
         return;
     }

@@ -11,7 +11,7 @@ import { apartHost, applyEvent, applyMarker, tiesOf, TIED_DROP, validateEvent } 
 import type { ReadContext } from "../registry";
 import type { MarkerEnv, UpgradeTypes } from "../upgrade";
 import { initialState } from "../world-state";
-import { FoldError, type FoldInput, type FoldOutput, type LayerDrop, type MessageResult, type ResolvedFix } from "./chain";
+import { FoldError, type FoldInput, type FoldOutput, type MessageResult, type ResolvedFix } from "./chain";
 
 /** What the fold needs from the registry: event types, relation types for the start state, read contexts (what an Upgrade's merge needs too). */
 export type FoldTypes = UpgradeTypes;
@@ -35,60 +35,6 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
   let paused = false;
   let parent: PathHash = ROOT_PATH;
 
-  // The layer (DEPTH-PLAN §4.9): an entry is live where its basis message shows the swipe it was made
-  // from (a turn record's seq; else the text the swipe was made with, which a bare record keeps, a
-  // reply's or a player's message's); a live entry's `supersedes` stops the ones it names. A live
-  // entry folds right after its message.
-  const swipeKey = (m: (typeof input.chain)[number]): string => {
-    const rec = m.ledger?.swipes[String(m.swipeId)];
-    const stored = rec ? hashJson(rec) : "";
-    const gone = rec !== undefined && input.tombstones.some((t) => t.messageId === m.id && t.swipeHash.len === rec.swipeHash.len && t.swipeHash.hash === rec.swipeHash.hash && t.recHash === stored);
-    if (rec && !gone) return rec.path !== "" ? `r${rec.seq}` : `c${rec.swipeHash.hash}`;
-    return `c${textHash(m.swipes[m.swipeId] ?? "")}`;
-  };
-  const byId = new Map(input.chain.map((m) => [m.id, m]));
-  const liveEntries = (input.layer ?? []).filter((e) => {
-    const m = byId.get(e.basis.message);
-    return m !== undefined && swipeKey(m) === e.basis.swipe;
-  });
-  const superseded = new Set(liveEntries.flatMap((e) => e.supersedes ?? []));
-  const layerDrops: LayerDrop[] = [];
-  /** Folds the live entries after `messageId`, whose parent path is `at`: as made where they read this chain, else as a view (a unit that no longer fits drops). Their ids. */
-  const layerAfter = (messageId: string, at: PathHash): string[] => {
-    const here = liveEntries.filter((e) => e.basis.message === messageId && !superseded.has(e.id));
-    for (const e of here) {
-      const view = e.basis.parentPath !== at;
-      let i = 0;
-      while (i < e.events.length) {
-        const group = e.events[i]?.group;
-        let j = i + 1;
-        while (group !== undefined && j < e.events.length && e.events[j]?.group === group) j++;
-        const unit = e.events.slice(i, j);
-        if (!view) {
-          unit.forEach((ev, k) => {
-            const failure = validateEvent(types, ev, ctx());
-            if (failure) violations.push(`${messageId}: layer entry ${e.id} event ${i + k} ${ev.type} failed re-validation (${failure.reason})`);
-            else applyEvent(types, ev, state, ctx());
-          });
-        } else {
-          const trial = structuredClone(state);
-          let failure: { reason: string } | null = null;
-          for (const ev of unit) {
-            const world = input.worlds(trial.revision);
-            if (!world) throw new FoldError(`unknown revision ${trial.revision}`);
-            failure = validateEvent(types, ev, types.context(world, trial));
-            if (failure) break;
-            applyEvent(types, ev, trial, types.context(world, trial));
-          }
-          if (failure) for (let k = i; k < j; k++) layerDrops.push({ messageId, entry: e.id, index: k, text: failure.reason });
-          else for (const ev of unit) applyEvent(types, ev, state, ctx());
-        }
-        i = j;
-      }
-    }
-    return here.map((e) => e.id);
-  };
-
   const ctx = (): ReadContext => {
     const world = input.worlds(state.revision);
     if (!world) throw new FoldError(`unknown revision ${state.revision}`);
@@ -109,8 +55,7 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
     const text = m.swipes[m.swipeId] ?? "";
     if (m.isUser) {
       const path = hashParts("lre.path", parent, "u", textHash(text), "", "");
-      const layered = paused ? [] : layerAfter(m.id, parent);
-      messages.push({ id: m.id, fold: "user", parentPath: parent, path, clock: state.clock, ...(layered.length > 0 ? { layer: layered } : {}) });
+      messages.push({ id: m.id, fold: "user", parentPath: parent, path, clock: state.clock });
       parent = path;
       if (pausedAfter.has(m.id)) paused = true;
       continue;
@@ -334,10 +279,9 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
             }),
           );
     const path = hashParts("lre.path", parent, "a", content, recHash, markerHash);
-    const layered = paused ? [] : layerAfter(m.id, parent);
-    messages.push({ id: m.id, fold, parentPath: parent, path, clock: state.clock, ...(layered.length > 0 ? { layer: layered } : {}) });
+    messages.push({ id: m.id, fold, parentPath: parent, path, clock: state.clock });
     parent = path;
   }
   state = structuredClone(state);
-  return { state, notes, keepReport, messages, resolved, violations, layerDrops };
+  return { state, notes, keepReport, messages, resolved, violations };
 }

@@ -13,8 +13,8 @@
 
 import { useEffect, useId, useState } from "preact/hooks";
 import { ROLE_IDS, ROLE_LABEL, type RoleId } from "../../shared/agent-roles";
-import type { AcceptanceConnection, AcceptanceRunView, AcceptanceState, AgentBudget, AgentSettings, ChatEngine, ConnectionThrottle, KeptSettings, MemoryPlacement, PipelineMode, ReviewPlacement, TurnBudget } from "../../shared/agent-settings";
-import { AT_ONCE_DEF, BUDGET_DEFS, CEILING_MIN, CHAT_ENGINES, COMPACTION_DEFS, DEFAULT_ACCEPTANCE, defaultAgentSettings, ESTIMATE_FACTOR_MIN, GM_OPS_DEF, KEPT_DEFS, LOOP_DEFS, MAIN_AGENT_ROLE, MEMORY_PLACEMENT_LABELS, MEMORY_PLACEMENTS, OUTPUT_CHARS_DEF, PERSIST_DEFS, PIPELINE_MODE_LABELS, PIPELINE_MODES, REVIEW_PLACEMENT_LABELS, REVIEW_PLACEMENTS, SYSTEM_TOKENS_DEF, THROTTLE_MIN, TURN_DEFS } from "../../shared/agent-settings";
+import type { AcceptanceConnection, AcceptanceRunView, AcceptanceState, AgentBudget, AgentSettings, ConnectionThrottle, KeptSettings, MemoryPlacement, PipelineMode, ReviewPlacement, TurnBudget } from "../../shared/agent-settings";
+import { AT_ONCE_DEF, BUDGET_DEFS, CEILING_MIN, COMPACTION_DEFS, DEFAULT_ACCEPTANCE, defaultAgentSettings, ESTIMATE_FACTOR_MIN, GM_OPS_DEF, KEPT_DEFS, LOOP_DEFS, MAIN_AGENT_ROLE, MEMORY_PLACEMENT_LABELS, MEMORY_PLACEMENTS, OUTPUT_CHARS_DEF, PERSIST_DEFS, PIPELINE_MODE_LABELS, PIPELINE_MODES, REVIEW_PLACEMENT_LABELS, REVIEW_PLACEMENTS, SYSTEM_TOKENS_DEF, THROTTLE_MIN, TURN_DEFS } from "../../shared/agent-settings";
 import { NEVER_SKIPPED, PIPELINE_ROLES, STAGE_MODE_LABELS, stageOf, type StageMode } from "../../shared/agent-pipeline";
 import { hasOwn, type JsonObject } from "../../shared/json";
 import type { MainRoleStage } from "../../shared/main-agent-prompts";
@@ -25,7 +25,7 @@ import { useApp } from "../app";
 import { Badge, Banner, Button, Empty, Field, HostSwitch, List, NumberStepper, Row, Section, Seg, useBusy } from "../components";
 import { agentsChanged, agentsSubChanged } from "./changed";
 import { amountText, ChangedBadge, freshNonce, LimitGroup, LimitRow, NavRow, SettingRow, STEP } from "./kit";
-import { AGENTS_SUB, AGENTS_SUBS, CURATOR_HELP, MEMORY_HELP, NEW_CHATS_HELP, NEW_CHATS_LABELS, PIPELINE_HELP, REVIEW_HELP, STAGE_LABEL, STREAM_HELP, THINKING_HELP, type AgentsSub } from "./labels";
+import { AGENTS_SUB, AGENTS_SUBS, CURATOR_HELP, MEMORY_HELP, PIPELINE_HELP, REVIEW_HELP, STAGE_LABEL, STREAM_HELP, THINKING_HELP, type AgentsSub } from "./labels";
 import { routeText } from "./role-page";
 import type { Connection } from "./steps";
 import type { UserSettings } from "../../shared/settings";
@@ -60,7 +60,7 @@ export function agentsSummary(agents: AgentSettings): string {
 export function agentsSubSummary(sub: AgentsSub, agents: AgentSettings, connections: readonly Connection[]): string {
   switch (sub) {
     case "pipeline":
-      return `New chats on ${NEW_CHATS_LABELS[agents.newChats].toLowerCase()} · ${PIPELINE_MODE_LABELS[agents.pipeline.mode]} · memory ${MEMORY_PLACEMENT_LABELS[agents.pipeline.memory].toLowerCase()} · Curator ${onOff(agents.pipeline.curator)}`;
+      return `${PIPELINE_MODE_LABELS[agents.pipeline.mode]} · memory ${MEMORY_PLACEMENT_LABELS[agents.pipeline.memory].toLowerCase()} · Curator ${onOff(agents.pipeline.curator)}`;
     case "review":
       return REVIEW_PLACEMENT_LABELS[agents.review.placement];
     case "system":
@@ -237,7 +237,7 @@ export function AgentsHub(props: { agents: AgentSettings; routes: RouteSettings;
 
 // ---------------------------------------------------------------- the sections
 
-/** Pipeline: which engine new chats start on, how a turn is run, when memory runs, and the Curator. Hook-free. */
+/** Pipeline: how a turn is run, when memory runs, and the Curator. Hook-free. */
 export function PipelineSection(props: { agents: AgentSettings; busy: boolean; patch(patch: JsonObject): void }) {
   const { agents, busy } = props;
   const p = agents.pipeline;
@@ -245,9 +245,6 @@ export function PipelineSection(props: { agents: AgentSettings; busy: boolean; p
   const set = (fields: JsonObject) => props.patch({ agents: { pipeline: fields } });
   return (
     <div class="lre-set-rows" data-lre-agents-sub="pipeline">
-      <SettingRow id="new-chats" label="New chats start on" changed={agents.newChats !== DEFAULTS.newChats} help={NEW_CHATS_HELP[agents.newChats]} reset={{ label: `Reset which engine new chats start on to its default, ${NEW_CHATS_LABELS[DEFAULTS.newChats]}`, to: NEW_CHATS_LABELS[DEFAULTS.newChats], onClick: () => props.patch({ agents: { newChats: null } }) }} busy={busy}>
-        <Seg<ChatEngine> label="Which engine new chats start on" value={agents.newChats} options={CHAT_ENGINES.map((value) => ({ value, label: NEW_CHATS_LABELS[value] }))} disabled={busy} onChange={(newChats) => props.patch({ agents: { newChats } })} />
-      </SettingRow>
       <SettingRow id="pipeline-mode" label="How a turn is run" changed={p.mode !== d.mode} help={PIPELINE_HELP[p.mode]} reset={{ label: `Reset how a turn is run to its default, ${PIPELINE_MODE_LABELS[d.mode]}`, to: PIPELINE_MODE_LABELS[d.mode], onClick: () => set({ mode: null }) }} busy={busy}>
         <Seg<PipelineMode> label="How an agent turn is run" value={p.mode} options={PIPELINE_MODES.map((value) => ({ value, label: PIPELINE_MODE_LABELS[value] }))} disabled={busy} onChange={(mode) => set({ mode })} />
       </SettingRow>

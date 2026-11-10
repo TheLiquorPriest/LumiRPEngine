@@ -19,9 +19,9 @@ import type { ChatExport } from "../shared/protocol";
 import { formatMs } from "../shared/timeouts";
 import type { WorldDoc } from "../shared/world";
 import { ENGINE_VERSION, formatMoney } from "../shared/world";
-import { ToolError } from "../shared/tool-args";
+import { ToolError } from "./args";
 import { sandboxGmCount, sandboxGmPart, sandboxGmWorld, sandboxSpan, sandboxTurn } from "./local-engine";
-import { noneNamed, type GmReadPick, type GmSource } from "../shared/chat-reads";
+import { noneNamed, type GmReadPick, type GmSource } from "./tools-play";
 
 /** How many sandboxes one process holds at once: each is a whole world and its state. */
 export const SANDBOX_MAX = 3;

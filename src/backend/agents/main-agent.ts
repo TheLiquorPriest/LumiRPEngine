@@ -90,9 +90,6 @@ import type { ChoicesTask, ChooseTask, DirectorProse, ExtractTask, KnowledgeTask
 import { digestOf, MAIN_PINS, MAIN_PINS_TEXTS, pinnedFiles, tidy, turnTask } from "./turn-task";
 import type { StagePhase } from "./turn-writer";
 import { emptyUsage } from "./usage";
-import { archiveTools } from "../depth/archive-tools";
-import { quoteView } from "../archive-index";
-import { archiveViewOf, type ArchiveView } from "../ledger-io";
 import { firedTimeout } from "../../shared/timeouts";
 
 /** Where each request is worked: its role, and the stage of the turn it belongs to (a memory asked before the plan is the last turn's). */
@@ -276,8 +273,6 @@ export class MainTurn {
   private replyShown = false;
   /** What ran on its own since the main agent's last message (`autoRan`), one line each: its next send leads with them. */
   private readonly auto: string[] = [];
-  /** The chat's archive as the turn's own snapshot holds it, made on its first search: the turn already holds the chat's ledger queue, so its reads never go through it. */
-  private archive: ArchiveView | null = null;
 
   constructor(
     private readonly host: MainHost,
@@ -939,7 +934,7 @@ export class MainTurn {
       // A look back at a past turn in full, in a stage or in the review alike: it changes nothing.
       pastTurnTool({ texts: this.texts, page: Math.max(1000, settings.agents.clipChars - 400), source: () => this.pastTurns() }),
     ];
-    return [...own, ...(reviewing ? reviewTools(this.texts, "draft" in work ? work : null) : []), ...this.readTools(), ...this.archiveTools()];
+    return [...own, ...(reviewing ? reviewTools(this.texts, "draft" in work ? work : null) : []), ...this.readTools()];
   }
 
   /** The turn's past turns, for `past_turn`: each reply on the chain before it, numbered as the digest numbers them, whose record holds a segment of the session. */
@@ -963,19 +958,6 @@ export class MainTurn {
     if (!head || main.families.length === 0) return [];
     // Its tools read only, the GM's view with every secret marked: it changes nothing itself but the notes it condenses.
     return toolsFor({ world: head.world, tiers: ["read"], families: main.families, texts: this.texts, env: { userId: this.host.userId, chatId: this.host.chatId, knowledge: "gm", marks: true, reader: this.host.reader(), writer: null, agent: { role: MAIN_AGENT_ROLE, id: MAIN_AGENT_ROLE }, signal: this.host.stop, loads: this.host.loads } });
-  }
-
-  /**
-   * The author's archive tools (DEPTH-PLAN §4.3, §8.7): the chat's own prose before this turn,
-   * searched and quoted from the turn's own snapshot, so a re-run never reads the reply it replaces
-   * and no read waits on the queue the turn holds. None while the chat's world isn't loaded.
-   */
-  private archiveTools(): AgentTool[] {
-    const head = this.host.head();
-    if (!head) return [];
-    const { rt, chatId, userId } = this.host;
-    const view = (): ArchiveView => (this.archive ??= archiveViewOf(this.start.core, this.start.observed));
-    return archiveTools({ texts: this.texts, world: head.world, state: head.state, source: { search: async (q) => rt.archive.searchView(chatId, userId, view(), q), quote: async (r) => quoteView(view(), r) } });
   }
 
   /** `condense`: a source condensed with the main agent's own model (`condenseSource`) into a workspace note staged as `role`'s, which a task names. */

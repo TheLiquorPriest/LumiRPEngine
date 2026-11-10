@@ -16,12 +16,11 @@ export interface StoredChip extends Chip {
   payload: JsonObject;
 }
 
-/** A chip action's input as stored: an amount (with an optional starting amount), a list of options, an organization's page or a Settings page to open. */
+/** A chip action's input as stored: an amount (with an optional starting amount), a list of options, or an organization's page to open. */
 function isChipInput(raw: unknown): boolean {
   if (!isRecord(raw) || typeof raw.label !== "string") return false;
   if (raw.type === "money") return raw.value === undefined || Number.isSafeInteger(raw.value);
   if (raw.type === "org") return typeof raw.org === "string" && (raw.tab === undefined || typeof raw.tab === "string");
-  if (raw.type === "settings") return raw.page === "loopback";
   return raw.type === "choice" && Array.isArray(raw.options) && raw.options.every((o) => isRecord(o) && typeof o.value === "string" && typeof o.label === "string");
 }
 

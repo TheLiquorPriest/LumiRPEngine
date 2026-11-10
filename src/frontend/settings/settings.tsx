@@ -1,7 +1,6 @@
 // Settings (DESIGN §12): a home list of pages in groups, each page under a header with Back, and a
 // page with pages of its own opening each under its own header. Getting started: Helper model, Model
-// use, Steps and connections, Minds, Narrator, Timeouts. Depth: Depth, and Loopback (the relay a world
-// chat's reply runs through). Agents: Agents (a turn at a glance, every
+// use, Steps and connections, Minds, Narrator, Timeouts. Agents: Agents (a turn at a glance, every
 // agent call's switches, and its sections, each a page of its own: Pipeline, Review card, System
 // instructions, Budgets, Compaction, Recording, Throttles, Caching, Acceptance runs), Roles (a row
 // per role, each opening the role's page), Context (what each role starts with, each row opening the
@@ -30,7 +29,7 @@ import { ADJUDICATION_PRESET_LABEL } from "../../shared/adjudication";
 import { STEP_LABEL } from "../../shared/steps";
 import type { SettingsPage, SettingsRoute } from "../app";
 import { settingsBack, settingsFocus, useApp, useUi, useView } from "../app";
-import { Badge, Banner, Button, Empty, HostSwitch, List, ListRow, PageHeader, Section, useSaves, useShowIds } from "../components";
+import { Badge, Banner, Button, Empty, HostSwitch, List, ListRow, PageHeader, Section, useBusy, useShowIds } from "../components";
 import { humanize } from "../format";
 import type { IconName } from "../icons";
 import { revealInScroller } from "../scroll";
@@ -57,8 +56,6 @@ import { LorePage, loreSummary } from "./lore";
 import { ownTextCount, promptTestRequest, PromptsPage } from "./agent-prompts";
 import { SpeedPage, speedSummary } from "./speed";
 import { speedChanged } from "../../shared/speed-presets";
-import { depthChanged, DepthSettingsPage, depthSummary } from "./depth";
-import { LoopbackSettingsPage } from "./loopback";
 
 type Page = Exclude<SettingsPage, "home">;
 type Caveat = { code: string; message: string };
@@ -95,14 +92,11 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
   mcp: { title: "MCP server", subtitle: "Your agent's lumirpengine, and how it follows updates", icon: "branch" },
   prompts: { title: "Prompts", subtitle: "Every text sent to a model, yours to edit", icon: "edit" },
   retention: { title: "Retention", subtitle: "Which turns keep their transcripts, and how long the agents' stored texts are kept", icon: "box" },
-  depth: { title: "Depth", subtitle: "Every model depth uses, its presets, budget and bootstrap", icon: "layers" },
-  loopback: { title: "Loopback", subtitle: "The relay a world chat's reply runs through", icon: "route" },
 };
 
 /** The home list's groups, in order, each with its pages. */
 export const HOME_GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
   { title: "Getting started", pages: ["helper", "model", "steps", "minds", "narrator", "timeouts"] },
-  { title: "Depth", pages: ["depth", "loopback"] },
   { title: "Agents", pages: ["agents", "speed", "roles", "context", "main", "assistant", "prompts", "retention"] },
   { title: "Defaults for new chats", pages: ["realism", "checks", "time"] },
   { title: "Replies", pages: ["extraction", "swipes"] },
@@ -152,10 +146,6 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
   switch (page) {
     case "helper":
       return { subtitle: helperSummary(settings.helper, connections) };
-    case "depth":
-      return { subtitle: depthSummary(settings.depth), ...changed(depthChanged(settings.depth)) };
-    case "loopback":
-      return { subtitle: "Start the relay, your key and the connection" };
     case "model":
       return { subtitle: `${humanize(settings.modelUse.preset)} preset` };
     case "minds":
@@ -368,10 +358,6 @@ export function SettingsBody(props: { route: SettingsRoute; data: SettingsResult
       return <PromptsPage prompts={settings.prompts} patch={patch} busy={busy} {...(ctx.test ? { test: ctx.test } : {})} {...(route.open ? { open: route.open } : {})} />;
     case "retention":
       return <RetentionPage retention={settings.retention} patch={patch} busy={busy} />;
-    case "depth":
-      return <DepthSettingsPage depth={settings.depth} connections={connections} busy={busy} patch={patch} />;
-    case "loopback":
-      return <LoopbackSettingsPage />;
     case "caveats":
       return <CaveatsPage caveats={ctx.caveats} open={(page) => go({ page })} />;
   }
@@ -389,6 +375,7 @@ export function Settings() {
   // The preset caveats, checked apart from settings (a dry run of the chat takes long on a long chat): null while checking.
   const [caveats, setCaveats] = useState<Caveat[] | null>(null);
   const caveatsAsked = useRef(0);
+  const [busy, run] = useBusy();
   const [adjusted, setAdjusted] = useState<MergeAdjustment[]>([]);
   const where = `${route.page}/${route.sub ?? ""}/${route.at ?? ""}`;
   useEffect(() => setAdjusted([]), [where]);
@@ -422,14 +409,14 @@ export function Settings() {
     revealInScroller(focus.selector === ".lre-page-header button" ? (target.closest(".lre-page-header") ?? target) : target, focus.reveal);
   }, [where, data !== null]);
   const go = (next: SettingsRoute) => app.ui.update((ui) => ({ ...ui, settings: next }));
-  // Every page's edits save through one queue: a field that saves on each key (a model's name) keeps its last edit, as every other.
-  const [busy, patch] = useSaves(async (body) => {
-    const result = await app.request({ type: "lre.settings.set", patch: body });
-    if (!result) return;
-    setData(result);
-    // What came out other than sent (a value out of range, of the wrong kind, a key it doesn't know), said here by each setting's name.
-    setAdjusted(mergeAdjusted(body, result.settings as unknown as JsonValue));
-  });
+  const patch = (body: JsonObject) =>
+    run(async () => {
+      const result = await app.request({ type: "lre.settings.set", patch: body });
+      if (!result) return;
+      setData(result);
+      // What came out other than sent (a value out of range, of the wrong kind, a key it doesn't know), said here by each setting's name.
+      setAdjusted(mergeAdjusted(body, result.settings as unknown as JsonValue));
+    });
   if (!data) return failed ? <Empty icon="alert">Settings could not be loaded.</Empty> : <Empty>Loading settings…</Empty>;
   const header = settingsHeader(route);
   if (header === null) {

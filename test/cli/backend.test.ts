@@ -3,13 +3,11 @@
 // fake of it. The socket is left out here; connection.test.ts covers it.
 
 import { expect, test } from "bun:test";
-import type { Connection, HostDescription } from "../../src/cli/connection";
-import type { RequestFields, RequestType } from "../../src/shared/protocol";
+import type { Connection, HostDescription, RequestFields, RequestType } from "../../src/cli/connection";
 import { LreError } from "../../src/cli/connection";
 import { Live } from "../../src/cli/live";
 import type { ToolContext } from "../../src/cli/tools";
-import { callTool } from "../../src/cli/tools";
-import { KeyedQueue } from "../../src/shared/keyed-queue";
+import { callTool, KeyedQueue } from "../../src/cli/tools";
 import type { FrontendToBackend, ResultBodies } from "../../src/shared/protocol";
 import { AGENT_API, PROTOCOL_VERSION } from "../../src/shared/protocol";
 import { GUIDE_SECTIONS, guidePatches } from "../support/agent-guide";

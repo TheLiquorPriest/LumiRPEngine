@@ -6,7 +6,7 @@
 import type { ComponentChildren, RefObject } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useApp, useUi } from "../app";
-import { focusTaken, gmOpen } from "./nav";
+import { focusTaken, gmOpen } from "./gate";
 import type { EditNotice } from "./editor";
 import { Button, IconButton, IdText, PageHeader } from "../components";
 import { Icon } from "../icons";

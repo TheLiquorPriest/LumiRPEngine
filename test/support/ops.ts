@@ -32,9 +32,6 @@ import type { ChainMessage, FoldOutput } from "../../src/engine/ledger/chain";
 import type { WriteResult } from "../../src/engine/ledger/journal";
 import { activeRecord, isLive, isTombstoned, turnPath } from "../../src/engine/ledger/path";
 import { referenceFold } from "../../src/engine/ledger/reference";
-import { basisIndex } from "../../src/engine/ledger/layer";
-import { workspaceOf, WS_WRITE, wsWrite } from "../../src/engine/workspace";
-import type { Basis } from "../../src/shared/layer";
 import { createRng, type Rng } from "../../src/engine/rng";
 import type { FakeMessage, Generation } from "./fake-host";
 import { noCoverage, type Coverage } from "./coverage";
@@ -96,9 +93,7 @@ export type Op =
    * its event arriving while the engine still runs (`now`) or after, while the turn waits for its
    * reply; then the reply (or its stop).
    */
-  | { op: "duringRun"; type: number; writes: WriteOp[]; edit?: number; now: boolean; stop: boolean; reply: number }
-  /** A job's result landed in the basis-anchored layer (DEPTH-PLAN §4.9) at the message `at` picks: a notebook file of its own, which folds exactly while that message shows the swipe it was made from. */
-  | { op: "land"; at: number };
+  | { op: "duringRun"; type: number; writes: WriteOp[]; edit?: number; now: boolean; stop: boolean; reply: number };
 
 const USER_TEXTS = ["buy:map:30", "buy:lamp:20", "buy:rope:90", "use:map", "use:lamp", "use:rope", "earn:15", "roll", "look around"];
 const REPLIES = ["Okay.", "You find coins. [found:5]", "The lamp slips away. [lose:lamp]", "A windfall! [found:40]", "You drop the map. [lose:map]", "Nothing happens."];
@@ -305,30 +300,9 @@ export function generate(rng: Rng, length: number, depth = 0): Op[] {
     // Writes made while the engine runs a turn before its reply, last, from their own stream.
     const during = rng.fork("during-run");
     ops.push(...generateDuringRun(during, 1 + Math.floor(during.next() * 6)));
-    // Layer landings and the swipes, deletes, branches and restarts that move their bases on and off the chain, after those, from their own stream.
-    const layer = rng.fork("layer");
-    ops.push(...generateLayer(layer, 1 + Math.floor(layer.next() * 10)));
   }
   // Drawn from a stream of its own, so the sequence is otherwise as before.
   if (depth === 0 && rng.fork("earlier-build").next() < 0.25) ops.unshift({ op: "earlierBuild" });
-  return ops;
-}
-
-/** Landings in the layer among the operations that take their bases off the chain and bring them back. */
-function generateLayer(rng: Rng, length: number): Op[] {
-  const ops: Op[] = [];
-  const r = (): number => rng.next();
-  for (let i = 0; i < length; i++) {
-    const roll = r();
-    if (roll < 0.4) ops.push({ op: "land", at: r() });
-    else if (roll < 0.55) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: false, rerender: false });
-    else if (roll < 0.67) ops.push({ op: "regenerate", at: r(), reply: r(), renarrate: r() < 0.3 });
-    else if (roll < 0.77) ops.push({ op: "navigate", at: r(), swipe: r() });
-    else if (roll < 0.83) ops.push({ op: "editAssistant", at: r(), text: r() });
-    else if (roll < 0.89) ops.push({ op: "deleteMessage", at: r() });
-    else if (roll < 0.94) ops.push({ op: "branch", at: r() });
-    else ops.push({ op: "restart" });
-  }
   return ops;
 }
 
@@ -648,8 +622,6 @@ export class Runner {
   private readonly earlier = new Set<ChatId>();
   /** Chats whose starting markers are journaled as the world writes them: an earlier build's, and their copies. */
   private readonly asWritten = new Set<ChatId>();
-  /** Layer entries landed in each chat by `land` (only its own: a branch also folds what it inherited), each a notebook file of its own. */
-  private readonly landed = new Map<ChatId, { path: string; basis: Basis }[]>();
 
   constructor(readonly h: Harness) {}
 
@@ -903,31 +875,11 @@ export class Runner {
         }
         return;
       }
-      case "land": {
-        // An earlier build's chat is copied after every operation (L45), and a copy carries the layer only as of the last turn's end.
-        if (this.earlier.has(chat) || this.asWritten.has(chat)) return;
-        const all = this.messages();
-        if (all.length === 0) return;
-        const at = pick(all, op.at);
-        const basis = await this.h.service.basisFor(chat, host.userId, at.id);
-        if (!basis) return;
-        const id = `ly${++this.ids}`;
-        const path = `notebook/${id}.md`;
-        const out = await this.h.service.landLayer(chat, host.userId, { id, basis, kind: WS_WRITE, events: [wsWrite(path, hashJson(id))] });
-        await host.settle();
-        // A paused chat refuses it, and one with a window open holds it: only a landing is checked after.
-        if (out.status !== "landed") return;
-        this.landed.set(chat, [...(this.landed.get(chat) ?? []), { path, basis }]);
-        return;
-      }
       case "branch": {
         const all = this.messages();
         if (all.length === 0) return;
         const at = pick(all, op.at);
-        // As core makes one, its metadata naming where it came from: it inherits what its source landed in the layer.
-        const branch = host.branch(chat, at.id);
-        await host.chats.mergeChatMetadata(branch, { branched_from: chat, branch_at_message: at.id }, host.userId);
-        await this.copy(chat, branch, all.indexOf(at) + 1);
+        await this.copy(chat, host.branch(chat, at.id), all.indexOf(at) + 1);
         return;
       }
       case "import":
@@ -1515,13 +1467,6 @@ export class Runner {
         return rec && rec.path !== "" && m.ledger ? { ...m, ledger: { ...m.ledger, swipes: { ...m.ledger.swipes, [String(m.swipeId)]: { ...rec, readElsewhere: true } } } } : m;
       });
       if (hashJson(referenceFold({ ...input, chain: views }, this.h.registry).state) !== hashJson(reference.state)) throw new InvariantError("L49", `${chatId}: folding every record as a view ends elsewhere than the chat`);
-      // LY: a layer entry folds exactly while its basis message shows the swipe it was made from and isn't past a pause (DEPTH-PLAN §4.9); the folds above agree on it.
-      const ws = workspaceOf(reference.state);
-      for (const { path, basis } of this.landed.get(chatId) ?? []) {
-        const at = basisIndex(input.chain, input.tombstones, basis);
-        const live = at >= 0 && !reference.messages.slice(0, at + 1).some((m) => m.fold === "paused");
-        if (hasOwn(ws, path) !== live) throw new InvariantError("LY", `${chatId}: ${path} ${hasOwn(ws, path) ? "folds off" : "doesn't fold on"} its basis ${basis.message}/${basis.swipe}`);
-      }
       // L40: no own account folds below zero, on any path; a rebased view drops what
       // fails against its new parent, and every drop has its Keep line (and its note).
       // A Keep "convert to manual adjustment" is the player's explicit override, so only it may leave an account short.

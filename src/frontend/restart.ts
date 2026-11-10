@@ -8,8 +8,6 @@
 // A swipe the backend says to ask about first (`push.ask`: Settings → Swipes → Ask what should change
 // on each swipe) asks the player once (`ReplyPage.ask`, swipe-ask.tsx), and its claim carries the
 // answer (`direction`), which only the narrator reads (Build C item 1).
-// A loopback swipe, under way already, is asked the same way by its generation: its claim carries
-// the answer to it, and the backend says no, since there is nothing to start.
 
 import type { GenerateAs } from "../shared/protocol";
 import type { ProtocolClient } from "./protocol-client";

@@ -32,7 +32,7 @@ const RAW = /\b(?:worldAt|worlds)\s*\(|\.worlds\.(?:get|getMany|cached)\s*\(/;
 /** Each bare lookup allowed: its file, a text its line holds, how many such lines, and why it may read a revision as authored. */
 const ALLOWED: readonly { file: string; has: string; count: number; why: string }[] = [
   { file: "engine/ledger/fold.ts", has: "input.worlds(", count: 5, why: "the fold: its reads go through `types.context`, which plays the world over the state; the rest look for a revision or start the state, before anything is made" },
-  { file: "engine/ledger/reference.ts", has: "input.worlds(", count: 6, why: "the reference fold, as the fold, and its layer's rebased views tried on a copy, read through `types.context`" },
+  { file: "engine/ledger/reference.ts", has: "input.worlds(", count: 5, why: "the reference fold, as the fold" },
   { file: "engine/ledger/journal.ts", has: "worlds(revision: RevisionId): WorldDoc | undefined;", count: 1, why: "the env's lookup, declared" },
   { file: "engine/ledger/journal.ts", has: "worldAt(revision: RevisionId)", count: 1, why: "`worldAt`, a revision as authored, declared" },
   { file: "engine/ledger/journal.ts", has: "return this.env.worlds(revision);", count: 1, why: "`worldAt` itself" },
@@ -40,10 +40,7 @@ const ALLOWED: readonly { file: string; has: string; count: number; why: string 
   { file: "engine/ledger/journal.ts", has: "worlds: (r) => this.env.worlds(r),", count: 1, why: "the fold's input" },
   { file: "engine/ledger/journal.ts", has: "this.env.worlds(scratch.revision)", count: 1, why: "a carried fix, read through `types.context`" },
   { file: "engine/ledger/journal.ts", has: "const world = this.env.worlds(state.revision);", count: 2, why: "`prefixState`, which hands its world out played over its state, and the held writes, read through `types.context` and `resolveFix`" },
-  { file: "engine/ledger/journal.ts", has: "const world = this.env.worlds(head.state.revision);", count: 3, why: "a Continue's suffix, and a Continue's scene (`continueScene`), read through `types.context`" },
-  { file: "engine/ledger/journal.ts", has: "const world = this.env.worlds(out.state.revision);", count: 1, why: "a layer entry's landing check (`layerVerdict`), read through `types.context`" },
-  { file: "engine/ledger/layer.ts", has: "const world = worlds(state.revision);", count: 1, why: "the layer's entries folding after a message, read through `types.context`, as the fold's" },
-  { file: "engine/ledger/layer.ts", has: "const world = worlds(scratch.revision);", count: 1, why: "a rebased view's unit tried on a copy, read through `types.context`" },
+  { file: "engine/ledger/journal.ts", has: "const world = this.env.worlds(head.state.revision);", count: 2, why: "a Continue's suffix, read through `types.context`" },
   { file: "engine/upgrade.ts", has: "worlds(revision: RevisionId): WorldDoc | undefined;", count: 1, why: "the marker env's lookup, declared" },
   { file: "engine/upgrade.ts", has: "env.worlds(revision)", count: 1, why: "an Upgrade compares revisions as authored; its reads of the state go through `types.context`" },
   { file: "backend/runtime.ts", has: "this.worlds.get(run.worldId, userId, run.revision)).world;", count: 1, why: "the env's pinned revision" },

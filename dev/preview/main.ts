@@ -9,12 +9,9 @@
 //     `helen_kowalczyk`: a household; `pov`: a job and investments).
 //   ?pickers: the character pickers alone in the drawer (place, bed, a list of text) over a 320-place world,
 //     in place of the app (dev/preview/pickers.tsx).
-//   ?depth: GM → Depth → Bootstrap alone in the drawer (the LumiBooks tree, the run, the opt-in page) from
-//     fixtures, in place of the app (dev/preview/depth.tsx).
 
 import { setup } from "../../src/frontend/setup";
 import type { FrontendToBackend } from "../../src/shared/protocol";
-import { mountDepth } from "./depth";
 import { STARTER_MAPS } from "./fixtures";
 import { MockBackend } from "./mock-backend";
 import { createMockHost } from "./mock-host";
@@ -37,7 +34,7 @@ const activityParam = params.get("activity");
 const activity = activityParam === "busy" || activityParam === "failed" ? activityParam : undefined;
 const backend = new MockBackend((payload) => host.deliver(payload), { scenario, ...(starter ? { map: starter } : {}), ...(money ? { money } : {}), ...(draftElsewhereMs !== undefined ? { draftElsewhereMs } : {}), ...(activity ? { activity } : {}), closeDrawer: () => host.setDrawer(false) });
 host.onSend = (payload) => backend.receive(payload as FrontendToBackend);
-const teardown = params.has("pickers") ? mountPickers() : params.has("depth") ? mountDepth(host.ctx) : setup(host.ctx);
+const teardown = params.has("pickers") ? mountPickers() : setup(host.ctx);
 
 declare global {
   interface Window {

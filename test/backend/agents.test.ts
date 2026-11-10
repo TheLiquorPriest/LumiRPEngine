@@ -421,24 +421,6 @@ describe("a server Lumiverse runs (Reconnect in Lumiverse)", () => {
     expect(rig.host.mcpReads).toEqual([]);
   });
 
-  test("a process whose kit is this build's but whose client listed another build's served tools counts as stale and is asked; back once a new process lists this build's", async () => {
-    const rig = new Rig({ build: build("b2") });
-    const id = await hello(rig, "srv-lv", { ...fresh("b2"), listedBackend: "a1" });
-    expect(lumiverseLine(await get(rig))?.lumiverse).toEqual({ stale: 1, unknown: 0, profiles: null, reconnect: null });
-    const from = rig.host.sent.length;
-    const view = await press(rig, id);
-    expect(asked(rig, from)).toEqual([{ client: id, session: "srv-lv" }]);
-    expect(lumiverseLine(view)?.lumiverse?.reconnect).toEqual({ state: "waiting", waitMs: 60_000, through: "server" });
-    rig.host.closeSession("srv-lv");
-    // Its kit's tools alone listed under this build isn't back: the served ones are still to be listed.
-    await hello(rig, "srv-lv-2", { ...fresh("b2"), listedBackend: "a1" });
-    await rig.host.settle();
-    expect(lumiverseLine(await get(rig))?.lumiverse?.reconnect?.state).toBe("waiting");
-    await hello(rig, "srv-lv-2", { ...fresh("b2"), listedBackend: "b2" });
-    await rig.host.settle();
-    expect(lumiverseLine(await get(rig))?.lumiverse).toEqual({ stale: 0, unknown: 0, profiles: null, reconnect: null });
-  });
-
   test("not back within the user's wait, the line says so; pressed again it waits again; with no limit it never gives up", async () => {
     let now = Date.UTC(2026, 9, 21, 12);
     const later = (ms: number): void => {

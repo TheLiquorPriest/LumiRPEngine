@@ -60,7 +60,7 @@ describe("the guard's registration", () => {
 
   test("on a Lumiverse without required handlers the guard still registers, and the chat says the engine can't stop a generation there", async () => {
     const host = new FakeHost();
-    host.capabilities = { cancel: false, required: false, sessions: true, interceptors: false, messageSessions: false };
+    host.capabilities = { cancel: false, required: false, sessions: true };
     const rig = new Rig({ host });
     expect(rig.host.contextRequired).toBe(false);
     const chatId = await rig.worldChat();

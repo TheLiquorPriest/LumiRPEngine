@@ -9,7 +9,6 @@
 import { LUMIVERSE_HARNESS } from "../shared/agents";
 import type { AgentCheckIn } from "../shared/agents";
 import { isRecord } from "../shared/json";
-import { KeyedQueue } from "../shared/keyed-queue";
 import type { ResultBodies } from "../shared/protocol";
 import { ENGINE_EXTENSION } from "../shared/protocol";
 import type { CliIO } from "./commands";
@@ -57,6 +56,28 @@ export interface SessionOptions {
   clock?: Clock;
 }
 
+/**
+ * Runs work by key one after another, keys side by side. The session's own rather than a kit's
+ * (tools.ts has the same for the command line): it outlives every kit it loads, so one world's
+ * writes stay in order across a reload, and the core carries no tool code.
+ */
+class Queue {
+  private readonly tails = new Map<string, Promise<unknown>>();
+
+  run<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const result = (this.tails.get(key) ?? Promise.resolve()).then(work, work);
+    const tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.tails.set(key, tail);
+    void tail.then(() => {
+      if (this.tails.get(key) === tail) this.tails.delete(key);
+    });
+    return result;
+  }
+}
+
 export class McpSession implements ToolHost {
   readonly readOnly: boolean;
   readonly context: KitContext;
@@ -76,10 +97,6 @@ export class McpSession implements ToolHost {
   private initializedOnce = false;
   /** The kit build whose tools the client last listed; null before it asked. */
   private listedBuild: string | null = null;
-  /** The LumiRPEngine build whose served tools the client last listed; null before it asked, or when none were listed. */
-  private listedBackend: string | null = null;
-  /** The LumiRPEngine build the last hello answered from. */
-  private backendBuild: string | null = null;
   private leaving = false;
   private looked = Number.NEGATIVE_INFINITY;
   /** Following, one step at a time. */
@@ -93,8 +110,7 @@ export class McpSession implements ToolHost {
     this.readOnly = options.mcp.readOnly;
     this.clock = options.clock ?? REAL_CLOCK;
     this.follower = new KitFollower(options.bundled, { pin: options.mcp.pin, cannotLoad: options.cannotLoad ?? null, identifier: ENGINE_EXTENSION, files: options.files, where: () => this.conn?.base ?? "your Lumiverse" });
-    // The session's own queue rather than a kit's: it outlives every kit it loads, so one world's writes stay in order across a reload.
-    const queue = new KeyedQueue();
+    const queue = new Queue();
     this.context = { readFile: (path) => options.io.readFile(path), readOnly: this.readOnly, connection: () => this.connection(), serialize: (key, work) => queue.run(key, work), sandboxBudgetMs: options.mcp.sandboxBudgetMs };
     this.said = stanceOf(this.checkIn());
   }
@@ -106,7 +122,7 @@ export class McpSession implements ToolHost {
   /** What this server checks in with. */
   checkIn(): AgentCheckIn {
     const { follows, why } = this.follower.state;
-    return { serves: "mcp", core: BUILD, kit: this.follower.kit.build, follows, why, host: this.options.host, harness: this.harness, listed: this.listedBuild, listedBackend: this.listedBackend };
+    return { serves: "mcp", core: BUILD, kit: this.follower.kit.build, follows, why, host: this.options.host, harness: this.harness, listed: this.listedBuild };
   }
 
   /** Looks every minute while connected. The connection opens at the client's initialize, so the first check-in names the harness. */
@@ -130,11 +146,10 @@ export class McpSession implements ToolHost {
     })();
   }
 
-  /** The client was answered a `tools/list`: a Lumiverse-run server's line says whether Lumiverse's client holds this build's tools by it, and LumiRPEngine's served ones of which build. */
-  listed(build: string, backend: string | null): void {
-    if (this.listedBuild === build && this.listedBackend === backend) return;
+  /** The client was answered a `tools/list`: a Lumiverse-run server's line says whether Lumiverse's client holds this build's tools by it. */
+  listed(build: string): void {
+    if (this.listedBuild === build) return;
     this.listedBuild = build;
-    this.listedBackend = backend;
     void this.after(() => this.tell());
   }
 
@@ -175,19 +190,12 @@ export class McpSession implements ToolHost {
       needs: () => this.follower.kit.versions.agentApi,
       onHello: (answer, sent) => {
         if (typeof answer.client === "string") this.agent = answer.client;
-        // LumiRPEngine runs another build than the one whose served tools the client listed: it lists them again.
-        if (typeof answer.build === "string") {
-          if (this.listedBackend !== null && answer.build !== this.listedBackend) this.toolsChanged();
-          this.backendBuild = answer.build;
-        }
         // What that hello said, not what this server says now: a list answered while it was on its way is still to be told.
         if (sent !== null) this.said = stanceOf(sent);
         this.looked = this.clock.now();
         void this.after(() => this.take(answer));
       },
       onPush: (push) => {
-        // A served tool's text was edited: the client lists the tools again.
-        if (push.type === "lre.tools.changed") return this.toolsChanged();
         if (this.agent === null || !("client" in push) || push.client !== this.agent) return;
         // Update now: LumiRPEngine asks this server, by the id its hello was given, to look at once.
         if (push.type === "lre.kit.reload") void this.look();
@@ -201,16 +209,14 @@ export class McpSession implements ToolHost {
   /**
    * Reconnect in Lumiverse: Lumiverse's MCP client lists a server's tools only on connecting and
    * ignores tools/list_changed, but connects a stdio server again about a second after it exits.
-   * Only a Lumiverse-run server whose client holds another build's tools than it serves (its kit's,
-   * or LumiRPEngine's served ones) leaves; any other harness would just lose its server.
+   * Only a Lumiverse-run server whose client holds another build's tools than it serves leaves; any
+   * other harness would just lose its server.
    */
   private reconnect(): void {
     const serving = this.follower.kit.build;
-    const kitStale = this.listedBuild !== null && this.listedBuild !== serving;
-    const servedStale = this.listedBackend !== null && this.backendBuild !== null && this.listedBackend !== this.backendBuild;
-    if (this.leaving || this.harness !== LUMIVERSE_HARNESS || (!kitStale && !servedStale)) return;
+    if (this.leaving || this.harness !== LUMIVERSE_HARNESS || this.listedBuild === null || this.listedBuild === serving) return;
     this.leaving = true;
-    this.options.log(`lumirpengine: exiting, as LumiRPEngine's Reconnect in Lumiverse asked, once the calls in flight are answered: Lumiverse's MCP client holds ${kitStale ? `build ${this.listedBuild ?? ""}'s tools` : `LumiRPEngine build ${this.listedBackend ?? ""}'s served tools`} until it connects again, and on connecting it lists build ${kitStale ? serving : (this.backendBuild ?? "")}'s`);
+    this.options.log(`lumirpengine: exiting, as LumiRPEngine's Reconnect in Lumiverse asked, once the calls in flight are answered: Lumiverse's MCP client holds build ${this.listedBuild}'s tools until it connects again, and on connecting it lists build ${serving}'s`);
     this.leave();
   }
 
@@ -261,7 +267,7 @@ export class McpSession implements ToolHost {
 
 /** What a check-in says, as a key: the kit loaded, whether (and why not) it follows, and the tools its client last listed. */
 function stanceOf(c: AgentCheckIn): string {
-  return `${c.kit}\u0000${String(c.follows)}\u0000${c.why?.code ?? ""}\u0000${c.listed ?? ""}\u0000${c.listedBackend ?? ""}`;
+  return `${c.kit}\u0000${String(c.follows)}\u0000${c.why?.code ?? ""}\u0000${c.listed ?? ""}`;
 }
 
 /** The MCP server over a session, on lines: it tells its client when the session swaps the tools, and ends (`exit`) once every call is answered when the session leaves. */

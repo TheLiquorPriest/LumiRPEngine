@@ -1,19 +1,19 @@
 // GM mode, inside the drawer's GM frame: a bottom bar in GM gold (World, Places, Things,
 // Story, each pack's tab in its order, the core pack's Assistant and Workspace last, This chat) over
 // the GM panels. The truth (World, Places, Things, Story, the packs' tabs, the Fight and the Edits
-// log) is the `core.gm` panel; This chat's rules and the Inspector (`core.context` and any other GM
-// panel) are pages of This chat. Nothing waits behind a gate: every page is the player's to read
-// (DEPTH-PLAN §1.4, D-9). The bar's height is published (`--lre-gm-nav-h`) so what a list pins
+// log) is the `core.gm` panel, behind the gate in UI state; This chat's rules and the Inspector
+// (`core.context` and any other GM panel) aren't behind it. Leaving GM mode, or moving to another
+// chat, closes the gate again. The bar's height is published (`--lre-gm-nav-h`) so what a list pins
 // at the bottom (its selection bar, an edit's notice) sits above the bar, never under it.
 
-import { useLayoutEffect, useRef } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import type { GmSection } from "../app";
 import { useApp, useUi } from "../app";
 import { BottomNav, Button, Empty, NoView } from "../components";
 import type { IconName } from "../icons";
 import { useSelect } from "../store";
 import { ThisChat } from "./chat";
-import { gmAt } from "./nav";
+import { gmAt, hideTruth } from "./gate";
 
 /** The engine's own sections; the packs' tabs go between Story and This chat. */
 const ENGINE: readonly { id: GmSection; label: string; icon: IconName }[] = [
@@ -27,6 +27,8 @@ export function GmMode() {
   const app = useApp();
   const sync = useSelect(app.sync, (state) => state);
   const section = useUi((ui) => ui.gm.section);
+  // Unmounting is leaving GM mode: the next visit asks again before showing the truth.
+  useEffect(() => () => app.ui.update(hideTruth), []);
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const nav = root.current?.querySelector<HTMLElement>(":scope > .lre-bottomnav");
@@ -38,6 +40,13 @@ export function GmMode() {
     observer?.observe(nav);
     return () => observer?.disconnect();
   });
+  // The gate was opened for one chat's truth, not the next one's.
+  const chat = useRef(sync.chatId);
+  useEffect(() => {
+    if (chat.current === sync.chatId) return;
+    chat.current = sync.chatId;
+    app.ui.update(hideTruth);
+  }, [sync.chatId]);
   const view = sync.view;
   const toPlay = (
     <Button icon="dice" onClick={() => app.ui.update((ui) => ({ ...ui, mode: "play" }))}>

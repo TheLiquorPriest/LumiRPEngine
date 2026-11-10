@@ -150,7 +150,7 @@ describe("GM → Assistant answers from the tools", () => {
       ["assistant", null, "ok", ["items_inventory"]],
       ["assistant", null, "ok", []],
     ]);
-    // A record's text is what that call was sent and answered, read in Diagnostics.
+    // A record's text is what that call was sent and answered, read behind Diagnostics' curtain.
     const text = rig.body(await rig.send({ type: "lre.diag", chatId, op: "text", hash: records[2]?.agent?.text ?? "" })).text;
     expect(text).toContain("Where is Danny?");
     expect(text).toContain("people_where");

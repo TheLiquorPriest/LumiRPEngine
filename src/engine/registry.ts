@@ -16,7 +16,6 @@ import type { DomainId, EntityId, FieldId, KindId, Level, PackId, PanelId, Relat
 import type { LedgerEvent } from "../shared/ledger";
 import type { OrgMember, OrgPower } from "../shared/org";
 import type { LintIssue } from "../shared/protocol";
-import type { StoryRead } from "../shared/story";
 import type { ColumnDef, DataTable, ShippedRevision } from "../shared/tables";
 import type { ActionDef, EffectSpec, FeedScope, FieldType, KindDef, MapDisplay, RelationTypeDef, RuleDef, ScheduleDef, WorldDoc } from "../shared/world";
 import type { Value } from "./expr";
@@ -82,22 +81,6 @@ export interface EventTypeDef<E extends LedgerEvent = LedgerEvent> {
   validate(event: E, ctx: ReadContext): Rejection | null;
   /** Applies the event to the working state. Must be total for any event `validate` accepted. */
   apply(event: E, state: WorldState, ctx: ReadContext): void;
-  /**
-   * The event changes no world state: `apply` does nothing (the narrative record's events, the
-   * author's records), and it is read by walking the chain (`engine/ledger/story.ts`). A layer entry
-   * whose events are all neutral, and which supersedes nothing, stays out of the world-state folds
-   * (DEPTH-PLAN §4.9, `foldsState`), so landing one never re-folds the chain after it.
-   */
-  neutral?: true;
-  /**
-   * A layer entry holding this event was decided at its basis, before any turn that may follow it
-   * there (DEPTH-PLAN §4.6, §4.9: a settlement's world changes, a draft's drop), so its landing is
-   * checked against what follows: every turn and entry after its basis must still fold as made with
-   * it in place (`LedgerCore.layerVerdict`). `pins`, when given, checks the story it read: handed the
-   * live narrative record through the chain's end (the entry itself not on it yet), it says why that
-   * isn't what it read (a settlement's pins: a beat a later turn decided, or one amended since), or null.
-   */
-  later?: { pins?(event: E, story: Pick<StoryRead, "beats">): string | null };
   /**
    * One-line description, filtered by visibility by the caller. `viewer` is the POV a player's line
    * is worded for, so a describer can leave out what it can't see; it is absent for the GM's and

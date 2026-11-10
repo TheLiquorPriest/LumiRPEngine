@@ -18,7 +18,7 @@ import { Badge, Button, Empty, Field, List, ListRow, Section } from "../../../fr
 import { decodeOrgView } from "./decode";
 import { humanize } from "../../../frontend/format";
 import { FieldRow } from "../../../frontend/gm/entity";
-import { gmOpen } from "../../../frontend/gm/nav";
+import { gmOpen } from "../../../frontend/gm/gate";
 import { ActionRow, ActionRows, GmPage, useGmFocus, usePages } from "../../../frontend/gm/ui";
 import { Icon } from "../../../frontend/icons";
 import { MoneyInput } from "../../../frontend/money-input";

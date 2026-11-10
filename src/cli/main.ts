@@ -6,17 +6,14 @@
 // only file that touches the disk, the terminal, the network and the process; the extension's
 // backend and frontend never import src/cli.
 
-import { execFile } from "node:child_process";
-import { chmodSync, chownSync, closeSync, copyFileSync, existsSync, ftruncateSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { KIT_FILE } from "../shared/agents";
 import type { CliIO } from "./commands";
 import type { Http, OpenSocket } from "./connection";
-import type { LoopbackIO } from "./loopback";
 import { CredentialStore, credentialsPath } from "./credentials";
 import type { CredentialFiles } from "./credentials";
 import type { KitFiles } from "./follow";
@@ -107,83 +104,6 @@ function ask(question: string, hidden: boolean): Promise<string | null> {
   return promise;
 }
 
-/** The loopback relay's side of the machine (DEPTH-PLAN §3.3): Bun's server, the files and units `up` writes, the programs it runs. */
-const loopbackIO: LoopbackIO = {
-  serve:
-    process.versions.bun === undefined
-      ? null
-      : (options) => {
-          // No idle limit: a turn's stream can go quiet between keep-alives, and Bun's default closes it after 10 s (F23).
-          const server = Bun.serve({ hostname: options.hostname, port: options.port, idleTimeout: 0, fetch: options.fetch });
-          return { stop: () => void server.stop(true) };
-        },
-  stopped() {
-    const { promise, resolve } = Promise.withResolvers<string>();
-    process.once("SIGTERM", () => resolve("SIGTERM"));
-    process.once("SIGINT", () => resolve("SIGINT"));
-    return promise;
-  },
-  bun: process.versions.bun === undefined ? null : process.execPath,
-  self: fileURLToPath(import.meta.url),
-  uid: process.getuid?.() ?? null,
-  cwd: process.cwd(),
-  hostname: hostname(),
-  platform: process.platform,
-  home: homedir(),
-  files: {
-    read: (path) => files.read(path),
-    write(path, text, mode, dirMode) {
-      mkdirSync(dirname(path), { recursive: true, mode: dirMode });
-      const temp = `${path}.${process.pid}.tmp`;
-      writeFileSync(temp, text, { mode });
-      chmodSync(temp, mode);
-      renameSync(temp, path);
-    },
-    rewrite(path, text) {
-      // Opened as it is, never made, and cut to the new text: the file keeps its owner and mode.
-      const fd = openSync(path, "r+");
-      try {
-        ftruncateSync(fd, 0);
-        writeSync(fd, text, 0);
-      } finally {
-        closeSync(fd);
-      }
-    },
-    copy(from, to, mode) {
-      mkdirSync(dirname(to), { recursive: true, mode: 0o755 });
-      const temp = `${to}.${process.pid}.tmp`;
-      copyFileSync(from, temp);
-      chmodSync(temp, mode);
-      renameSync(temp, to);
-    },
-    exists: (path) => existsSync(path),
-    list(dir) {
-      try {
-        return readdirSync(dir);
-      } catch {
-        return [];
-      }
-    },
-    remove: (path) => rmSync(path, { force: true }),
-    // Owners and mode bits are POSIX's: Windows gives neither to check.
-    stat(path) {
-      if (process.platform === "win32") return null;
-      const entry = statSync(path);
-      return { uid: entry.uid, gid: entry.gid, mode: entry.mode };
-    },
-    real: (path) => realpathSync(path),
-    chown: (path, uid, gid) => chownSync(path, uid, gid),
-  },
-  run(command, args, env) {
-    const { promise, resolve } = Promise.withResolvers<{ code: number; out: string; err: string }>();
-    execFile(command, [...args], { encoding: "utf8", ...(env !== undefined ? { env: { ...process.env, ...env } } : {}) }, (error, out, err) => {
-      const code = error === null ? 0 : typeof error.code === "number" ? error.code : 127;
-      resolve({ code, out, err: err || (error !== null && typeof error.code !== "number" ? error.message : "") });
-    });
-    return promise;
-  },
-};
-
 const io: CliIO = {
   out: (text) => process.stdout.write(text.endsWith("\n") ? text : `${text}\n`),
   err: (text) => process.stderr.write(text.endsWith("\n") ? text : `${text}\n`),
@@ -195,7 +115,6 @@ const io: CliIO = {
   credentials: new CredentialStore(files, credentialsPath(process.env, process.platform, homedir())),
   http,
   openSocket,
-  loopback: loopbackIO,
 };
 
 /** Following's side of the disk (DESIGN §23): symlinks resolved, and owners as the files themselves say. */

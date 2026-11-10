@@ -1,8 +1,7 @@
 // Every request LumiRPEngine's protocol accepts, and every op of one that has ops, mapped to the
-// tools that send it (or, served in the backend, do what it does: the workspace tools), or to why no
-// tool does (DESIGN §23). The type is complete by construction: a new request type or op (a GM
-// edit's included) without a row fails the typecheck, so no surface ships without tools or a stated
-// reason, and the tests check that every tool named here exists, this client's own or served.
+// tools that send it, or to why no tool does (DESIGN §23). The type is complete by construction:
+// a new request type or op (a GM edit's included) without a row fails the typecheck, so no surface
+// ships without tools or a stated reason, and the tests check that every tool named here exists.
 
 import type { FrontendToBackend } from "../shared/protocol";
 
@@ -149,11 +148,6 @@ export const COVERAGE: Coverage = {
     restore: { excluded: "Puts the user's World Info book back exactly as it stood before its move: the user's own press on Build's secrecy page, never an agent's call." },
   },
   "lre.cancel": { excluded: "Cancel on the activity line, the player's own stop for a turn in flight in the chat they watch; a tool's turn is the player's chat too, so the page that shows it stops it." },
-  "lre.tools": {
-    list: { excluded: "The MCP server's and the command line's own listing of the tools LumiRPEngine serves, beside their own (tools/list, and a command's usage); never an agent's call." },
-    describe: { excluded: "One served tool with a chat's world filled into its schema: lre_tool_describe answers it as a call, which an MCP client keeps no list of its own for." },
-    call: { excluded: "How every tool LumiRPEngine serves runs: the command line and the MCP server forward each call of one, so every served tool rides on it rather than naming it." },
-  },
   "lre.acceptance": {
     get: { excluded: "Settings → Agents and the drawer's counter read the acceptance run; an agent learns of a refused call from the call itself." },
     open: { excluded: "Opening an acceptance run is the user's own GM action in Settings → Agents, refused to outside clients, so no agent arms a connection the runs guard." },
@@ -168,17 +162,17 @@ export const COVERAGE: Coverage = {
     clear: { excluded: "Forgets the chat's thread with the GM agent, the user's own press in GM → Assistant; an outside agent keeps no thread there." },
   },
   "lre.workspace": {
-    list: { tools: ["workspace_list"] },
-    read: { tools: ["workspace_read"] },
-    write: { tools: ["workspace_write", "workspace_edit"] },
-    delete: { tools: ["workspace_delete"] },
-    move: { tools: ["workspace_move"] },
-    pin: { tools: ["workspace_pin"] },
-    session: { excluded: "GM → Workspace's view of the main agent's session in the chat (its summary, turns and rollback), GM data for the page; an outside agent keeps no main session, and reads the turns' transcripts under transcripts/ with workspace_list and workspace_read." },
+    list: { excluded: "GM → Workspace's list of the agents' workspace files; the MCP server's tools reach the workspace when they move onto the agent tool layer (AGENT-LOOP-PLAN §11, Increment 3)." },
+    read: { excluded: "GM → Workspace reads an agent's workspace file for the user; the MCP server's tools reach the workspace when they move onto the agent tool layer (Increment 3)." },
+    write: { excluded: "GM → Workspace's own save of a file the user edited, held while a turn runs; the MCP server's tools write the workspace once they move onto the agent tool layer (Increment 3)." },
+    delete: { excluded: "GM → Workspace's Delete of a file, the user's own press with its Undo; the MCP server's tools reach the workspace once they move onto the agent tool layer (Increment 3)." },
+    move: { excluded: "GM → Workspace's Move of a file to another path, the user's own; the MCP server's tools reach the workspace once they move onto the agent tool layer (Increment 3)." },
+    pin: { excluded: "GM → Workspace's pin of a file for the agents, the user's own choice; the MCP server's tools reach the workspace once they move onto the agent tool layer (Increment 3)." },
+    session: { excluded: "GM → Workspace's view of the main agent's session in the chat (its summary, turns and rollback), GM data for the page; the MCP server's tools reach the main agent once they move onto the agent tool layer (Increment 3)." },
     rollback: { excluded: "GM → Workspace's rollback of the main agent's latest compaction, the user's own press, which the next agent turn carries; an outside agent keeps no main session." },
   },
   "lre.review": {
-    get: { excluded: "An agent turn's review card in the chat's chips area, which the page reads to show it; lre_chips reads the chips the card rides on, and workspace_read the turn's transcript under transcripts/." },
+    get: { excluded: "An agent turn's review card in the chat's chips area, which the page reads to show it; lre_chips reads the chips the card rides on, and the MCP server's tools reach agent turns once they move onto the agent tool layer (AGENT-LOOP-PLAN §11, Increment 3)." },
     apply: { excluded: "Applies changes an agent turn asked to make, the player's own Apply or pick on its review card; an outside agent makes its own changes with lre_edit, each with its own Undo." },
     reject: { excluded: "Turns down the changes an agent turn asked to make, the player's own No on its review card; nothing an outside agent does goes through those cards." },
   },
@@ -186,60 +180,7 @@ export const COVERAGE: Coverage = {
     test: { excluded: "Settings → Agents → Prompts' Test of a role's text, the user's own press that runs the role once on the chat; an outside agent edits no prompt texts." },
   },
   "lre.live": {
-    get: { tools: ["workspace_read"] },
+    get: { excluded: "GM → Live, the page's live view of the chat's agent turn as its agents work it, pushed to that page; an outside agent reads what a turn left with lre_chat_state and lre_gm, and its transcript once the MCP server's tools reach the workspace (Increment 3)." },
     leave: { excluded: "GM → Live's page closing its live view, so the engine stops pushing the turn to it; nothing an outside agent watches." },
   },
-  "lre.depth": {
-    minds: { excluded: "GM → Minds' list of the characters with a mind (DEPTH-PLAN §7), the page's own read; a mind is chat workspace files under minds/, which an outside agent lists with workspace_list." },
-    mind: { excluded: "GM → Minds' page of one character: its files, writes, beliefs beside the truth and points of view, the page's own read; an outside agent reads the same files under minds/ with workspace_read." },
-    mind_edit: { excluded: "The player's own edit of a mind file on GM → Minds, a directive the file keeps pinned (DEPTH-PLAN §7); an outside agent never writes a character's mind, which only its own agent and the user do." },
-    interview: { excluded: "GM → Minds' Interview, the player's own question to a character in voice (DEPTH-PLAN §4.4), one model call a press; an outside agent asks nothing of a character's agent." },
-    pov: { excluded: "GM → Minds' Play as (owner D-10), which isn't supported yet: the backend refuses every switch, and an outside agent never switches whom the player plays." },
-    catch_up: { excluded: "GM → Minds' Catch up now, the player's own press that has a character's agent live the points of view waiting for it (DEPTH-PLAN §4.4); the author's poll does it otherwise, and an outside agent drives no character's agent." },
-    reflect: { excluded: "GM → Minds' Reflect now, the player's own press that has a character's agent reflect at once (DEPTH-PLAN §4.4); the author judges the cadence otherwise, and an outside agent drives no character's agent." },
-    notebook: { excluded: "GM → Notebook, the author's files, revisions, poll and predictions (DEPTH-PLAN §4.5), the page's own read; the files are chat workspace files under notebook/, which an outside agent reads with workspace_list and workspace_read." },
-    notebook_edit: { excluded: "The player's own edit of the author's notebook, a directive the file keeps pinned (DEPTH-PLAN §4.5); an outside agent never writes the author's notebook." },
-    archive: { excluded: "GM → Archive's search of the chat's prose by text, person, place or story time (DEPTH-PLAN §4.3), the page's own read; an outside agent reads the chat's messages through Lumiverse itself." },
-    scene: { excluded: "GM → Depth → Turn, the turn inspector's scene view of one reply (DEPTH-PLAN §7): its staging, beats, points of view and each passage with its checks, the page's own read; lre_inspector reads the turn's model calls." },
-    dry_run: { excluded: "GM → This chat → Inspector's Dry run, the narrator prompt the chat's last dry run on the loopback would send, the page's own read; an outside agent never runs Lumiverse's prompt preview." },
-    drafts: { excluded: "GM → Depth → Drafts, every off-screen draft on the chat's chain with its state, beats, holds and the author's verdicts (DEPTH-PLAN §4.6), the page's own read; an outside agent reads what settled as the chat's beats." },
-    draft_settle: { excluded: "The player's own Settle now on GM → Depth → Drafts: the author reads an open draft against everything since its time, model calls an outside agent never spends for him." },
-    draft_drop: { excluded: "The player's own Drop of an open draft on GM → Depth → Drafts, his verdict that it won't happen (DEPTH-PLAN §4.6); an outside agent never decides what happens off screen." },
-    draft_redraft: { excluded: "The player's own Re-draft on GM → Depth → Drafts: an open draft dropped and its episode drafted again, model calls an outside agent never spends for him." },
-    treatments: { excluded: "GM → Depth → Treatments, the treatment log, the meter, the allowances, the ceilings and the asks waiting on the player (DEPTH-PLAN §6.5, §7), the page's own read; an outside agent never spends or answers for him." },
-  },
-  "lre.loopback.page": {
-    get: { excluded: "Settings → Loopback, the user's own page: the one line, the relays and their status (DEPTH-PLAN §3.3); an outside client never reads it." },
-    mint: { excluded: "The user's own press that mints or rotates the loopback key, shown once (DEPTH-PLAN §3.7); an outside client never sees a key." },
-    shared: { excluded: "The operator's own choice of the shared relay (D-8), a trust decision no outside agent makes." },
-    fix: { excluded: "Settings → Loopback's Fix, the user's own press that has a relay put its address back in the scheduler's exclusions; the relay's alone to act on." },
-    forget: { excluded: "The user's own press that forgets a relay of theirs, refusing its secret from then on." },
-    test: { excluded: "Settings → Loopback's Test, the user's own press that checks a relay of theirs is running, their key is set, a connection is the loopback and the narrator writes on a real model; an outside client never reads it." },
-  },
-  "lre.bootstrap": {
-    status: { excluded: "GM → Bootstrap's progress view of the chat's onboarding into depth (DEPTH-PLAN §8.3), the page's own read, pushed as it moves; an outside agent reads what the bootstrap landed as the chat's beats, minds and notebook." },
-    estimate: { excluded: "The bootstrap's survey and estimate before it starts (DEPTH-PLAN §8.1), the opt-in's own read for the player to decide on; an outside agent starts no bootstrap." },
-    opt: { excluded: "GM → This chat → Depth, the player's own choice to put the chat on depth (DEPTH-PLAN §8); an outside agent never opts a chat in or out." },
-    start: { excluded: "The player's own press that starts the bootstrap under the budget he set (DEPTH-PLAN §8.3): hours of model calls an outside agent never spends for him." },
-    pause: { excluded: "The bootstrap view's Pause, the player's own control of a run he started." },
-    resume: { excluded: "The bootstrap view's Resume, the player's own press under the cap he set (DEPTH-PLAN §8.3)." },
-    mark: { excluded: "The player's own right-or-wrong mark on a spot-check card (DEPTH-PLAN §8.6): his review of the run, which no agent makes for him." },
-    redo: { excluded: "Redo from chapter N, the player's own choice after his spot checks (DEPTH-PLAN §8.4, §8.6)." },
-    history: { excluded: "GM → This chat → Depth → History, the player's own choice of how many of the chat's messages a depth turn's request carries; an outside agent reads the whole chat through its own tools." },
-    allowances: { excluded: "GM → This chat → Depth → Allowances, the player's own choice of how much work between turns this chat may spend; an outside agent never sets his budget." },
-    absorption: { excluded: "GM → This chat → Depth → Your preset, the player's own choice of how this chat's narrator takes his preset (DEPTH-PLAN §3.13); an outside agent never shapes the narrator's prompt." },
-    lb_tree: { excluded: "GM → Depth → Bootstrap's LumiBooks tree, the page's own read of the book the bootstrap imported; an outside agent reads what the bootstrap landed as the chat's beats, minds and notebook." },
-    lb_catchup: { excluded: "The player's own Catch up on a LumiBooks node, after its estimate: model calls an outside agent never spends for him." },
-    lb_deep: { excluded: "The player's own Read deeply on a LumiBooks node, after its estimate: model calls an outside agent never spends for him." },
-    lb_fullmind: { excluded: "The player's own Build a full mind from the LumiBooks book, after its estimate: model calls an outside agent never spends for him." },
-  },
-  "lre.loopback.register": { excluded: "`lumirpengine loopback up` registering the loopback relay (DEPTH-PLAN §3.3), which mints its secret; no tool: the relay is a service, not an agent's." },
-  "lre.loopback.hello": { excluded: "The loopback relay's own handshake on each socket it opens (src/cli/loopback-link.ts), with its secret." },
-  "lre.loopback.models": { excluded: "The loopback relay checking a loopback key for core's model list; the relay's alone." },
-  "lre.loopback.begin": { excluded: "The loopback relay handing LumiRPEngine a turn's provider call (DEPTH-PLAN §3.5); only core's request through the relay carries a turn token." },
-  "lre.loopback.passthrough": { excluded: "The loopback relay handing LumiRPEngine an untagged provider call (DEPTH-PLAN §3.9); the relay's alone." },
-  "lre.loopback.abort": { excluded: "The loopback relay telling LumiRPEngine core closed a call (Stop, DEPTH-PLAN §3.10); the relay's alone." },
-  "lre.loopback.resend": { excluded: "The loopback relay asking for a call's chunks again after a gap; the relay's alone." },
-  "lre.loopback.ack": { excluded: "The loopback relay acknowledging a call's chunks; the relay's alone." },
-  "lre.loopback.ping": { excluded: "The loopback relay's heartbeat for Settings → Loopback; the relay's alone." },
 };

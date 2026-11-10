@@ -96,8 +96,8 @@ export interface BookEntries {
   narratorOutlet: string | null;
 }
 
-/** The engine's entries among a book's (or a prompt's World Info candidates), with the Position each slot entry was placed for, and the lore copies an earlier build left. */
-export function sortEntries(all: readonly Pick<HostBookEntry, "id" | "extensions">[]): { found: BookEntries; slots: Map<SlotId, { id: string; placed: string | null; extensions: JsonObject }>; leftoverLore: string[] } {
+/** The engine's entries among a book's, with the Position each slot entry was placed for, and the lore copies an earlier build left. */
+function sortEntries(all: readonly HostBookEntry[]): { found: BookEntries; slots: Map<SlotId, { id: string; placed: string | null; extensions: JsonObject }>; leftoverLore: string[] } {
   const found: BookEntries = { slots: new Map(), twins: new Map(), atOutlet: new Set(), narrator: null, narratorOutlet: null };
   const slots = new Map<SlotId, { id: string; placed: string | null; extensions: JsonObject }>();
   const leftoverLore: string[] = [];

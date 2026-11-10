@@ -10,12 +10,11 @@ import { hasOwn, isRecord } from "../shared/json";
 import type { WorldDoc } from "../shared/world";
 import { checkWorld, ENGINE_VERSION, EXPORT_FORMAT, exportFile, load, MAP_SCHEMA, playtest } from "./local-engine";
 import type { LoadResult, PlaytestTurn, RunResult } from "./local-engine";
-import type { Args } from "../shared/tool-args";
-import { intArg, neededText, textArg, ToolError } from "../shared/tool-args";
-import { BODY_LIMIT, clip, readAt } from "../shared/tool-read";
-import type { ToolResult } from "../shared/tool-answer";
-import { json, lintSummary } from "../shared/tool-answer";
-import { contentsOf, entityKindsOf, schemaIssues } from "./report";
+import type { Args } from "./args";
+import { intArg, neededText, textArg, ToolError } from "./args";
+import { BODY_LIMIT, clip, readAt } from "./read";
+import type { ToolResult } from "./report";
+import { contentsOf, entityKindsOf, json, lintSummary, schemaIssues } from "./report";
 import { docs, DOCS, guide } from "./texts";
 import type { ToolContext } from "./tools";
 

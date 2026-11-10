@@ -9,20 +9,15 @@
   "permissions": [
     "generation",
     "context_handler",
-    "interceptor",
-    "generation_parameters",
     "chats",
-    "characters",
     "chat_mutation",
     "world_books",
     "presets",
     "regex_scripts",
     "decisions",
     "ui_panels",
-    "mcp_servers",
-    "memories"
+    "mcp_servers"
   ],
   "entry_backend": "dist/backend.js",
-  "entry_frontend": "dist/frontend.js",
-  "interceptorTimeoutMs": 30000
+  "entry_frontend": "dist/frontend.js"
 }

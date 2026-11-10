@@ -14,7 +14,7 @@ import { useId, useState } from "preact/hooks";
 import { orgRoute, orgRouteOf, useApp, type App, type SheetRoute } from "../../../frontend/app";
 import { OverflowMenu, type MenuItem } from "../../../frontend/build/chrome";
 import { Banner, Button, Empty, Field, IdText, PageHeader, Section, Tabs, tabPanel, useBusy } from "../../../frontend/components";
-import { gmOpen } from "../../../frontend/gm/nav";
+import { gmOpen } from "../../../frontend/gm/gate";
 import type { OrgShellTab, OrgTabDef, Send, SheetProps } from "../../../frontend/registry";
 import type { ChatId } from "../../../shared/ids";
 import type { JsonObject } from "../../../shared/json";

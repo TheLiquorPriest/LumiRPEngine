@@ -209,8 +209,6 @@ export interface TurnPlanInput {
   intent: InterpretOutput | null;
   /** A timelapse intent's time skip as the pre phase ran it (DESIGN §24.7), replayed beat by beat; absent, a plain timelapse. */
   skip?: SkipRecord | null;
-  /** A depth scene plays the turn's reply (DEPTH-PLAN §1.3): its own clock moves the time (its beats and what its attempts take, passed at its end), so the plan passes no scene tick; an action's own time still passes. */
-  scene?: boolean;
 }
 
 /** Pre-reply events: resolution, elapsed time, simulation, timelapse and in-turn materialization, in fold order. */

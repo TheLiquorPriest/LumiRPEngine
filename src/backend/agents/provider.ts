@@ -386,77 +386,25 @@ const MINUTE_MS = 60_000;
 const NOTHING_HELD = (): void => undefined;
 
 /**
- * The line a call keeps on its connection (DEPTH-PLAN §5.3, §6.2): the foreground (an agent turn's
- * calls, a depth turn's scene), then depth's background work (what follows a reply, the world off
- * screen, the player's presses in GM → Minds and Depth), then the idle lane (the bootstrap).
- */
-export type GateLane = "foreground" | "background" | "idle";
-
-const LANE_RANK: Readonly<Record<GateLane, number>> = { foreground: 0, background: 1, idle: 2 };
-
-/** How a call takes its place: its lane (the foreground's by default); for a background call, how many of them its connection may have under way at once; for a background or idle call, how it gives its place up. */
-export interface GatePlace {
-  lane?: GateLane;
-  background?: number;
-  giveWay?: () => void;
-}
-
-interface GateWaiter {
-  lane: GateLane;
-  most: number;
-  background: number;
-  giveWay: (() => void) | undefined;
-  grant(release: () => void): void;
-}
-
-interface GateHolder {
-  lane: GateLane;
-  giveWay: (() => void) | undefined;
-  asked: boolean;
-}
-
-/**
- * A connection's calls under way at once (`ConnectionThrottle.atOnce`), one gate for agents' calls,
- * an agent turn's prompt-only calls and depth's: each takes a place, one past the limit waits for one
- * to free, and one whose signal aborts while it waits leaves the line. The line goes by lane, then
- * in the order calls came: a foreground call goes first, and one that has to wait asks the newest
- * idle call under way, else the newest background one, to give its place up (that call is made
- * again once it has a place); a background call also waits while `background` of them are under way.
+ * A connection's calls under way at once (`ConnectionThrottle.atOnce`), one gate for agents' calls
+ * and an agent turn's prompt-only calls: each takes a place, one past the limit waits, in the order
+ * they came, for a place to free, and one whose signal aborts while it waits leaves the line.
  */
 export class ConnectionGate {
   running = 0;
-  private backgrounds = 0;
-  private readonly holders: GateHolder[] = [];
-  private readonly queue: GateWaiter[] = [];
+  private readonly queue: (() => void)[] = [];
 
-  /** A place among the calls under way, once there is room for one under `most`; its release, which frees it once, lets the next in line take it. */
-  take(most: number, signal: AbortSignal, o: GatePlace = {}): Promise<() => void> {
-    const { promise, resolve, reject } = Promise.withResolvers<() => void>();
-    const leave = (): void => {
-      const at = this.queue.indexOf(waiter);
-      if (at < 0) return;
-      this.queue.splice(at, 1);
-      reject(signal.reason);
+  /** A place among the calls under way, once there is room for one under `most`; its release, which frees it once, wakes the next in line. */
+  async take(most: number, signal: AbortSignal): Promise<() => void> {
+    while (this.running >= most) await this.wait(signal);
+    this.running++;
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      this.running--;
+      this.queue.shift()?.();
     };
-    const waiter: GateWaiter = {
-      lane: o.lane ?? "foreground",
-      most,
-      background: o.background ?? Number.POSITIVE_INFINITY,
-      giveWay: o.giveWay,
-      grant: (release) => {
-        signal.removeEventListener("abort", leave);
-        resolve(release);
-      },
-    };
-    this.queue.push(waiter);
-    this.pump();
-    if (!this.queue.includes(waiter)) return promise;
-    if (signal.aborted) leave();
-    else {
-      signal.addEventListener("abort", leave, { once: true });
-      if (waiter.lane === "foreground") this.askGiveWay();
-    }
-    return promise;
   }
 
   /** How many calls wait for a place. */
@@ -464,135 +412,21 @@ export class ConnectionGate {
     return this.queue.length;
   }
 
-  /** Every call in line that fits takes its place, by lane, then in the order they came. */
-  private pump(): void {
-    const line = this.queue.map((w, i) => ({ w, i })).sort((a, b) => LANE_RANK[a.w.lane] - LANE_RANK[b.w.lane] || a.i - b.i);
-    for (const { w } of line) {
-      if (this.running >= w.most || (w.lane === "background" && this.backgrounds >= w.background)) continue;
-      this.queue.splice(this.queue.indexOf(w), 1);
-      w.grant(this.hold(w));
-    }
-  }
-
-  private hold(w: GateWaiter): () => void {
-    this.running++;
-    if (w.lane === "background") this.backgrounds++;
-    const h: GateHolder = { lane: w.lane, giveWay: w.giveWay, asked: false };
-    if (w.lane !== "foreground") this.holders.push(h);
-    let held = true;
-    return () => {
-      if (!held) return;
-      held = false;
-      this.running--;
-      if (h.lane === "background") this.backgrounds--;
-      const at = this.holders.indexOf(h);
-      if (at >= 0) this.holders.splice(at, 1);
-      this.pump();
+  private wait(signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    const { promise, resolve, reject } = Promise.withResolvers<void>();
+    const wake = (): void => {
+      signal.removeEventListener("abort", abort);
+      resolve();
     };
-  }
-
-  /** The newest idle call under way not yet asked, else the newest background one, gives its place up. */
-  private askGiveWay(): void {
-    const open = (lane: GateLane) => this.holders.findLast((h) => h.lane === lane && !h.asked && h.giveWay !== undefined);
-    const h = open("idle") ?? open("background");
-    if (!h) return;
-    h.asked = true;
-    h.giveWay?.();
-  }
-}
-
-/** Each runtime's connection gates (by its host), by user and connection: agent turns' calls and depth's share them. */
-const GATES = new WeakMap<object, Map<string, ConnectionGate>>();
-
-/**
- * A place among `connection`'s calls under way at once for `userId` (Settings → Agents → Throttles,
- * `atOnce`; a connection whose throttle sets none takes `fallback`, the calls at once every such
- * connection takes, Settings → Speed → Calls), in `o`'s lane; past the limit a call waits for one to
- * free, and one whose signal aborts meanwhile throws its reason. Its release frees it. With no
- * limit, only a background call (held to its own at once) holds anything.
- */
-export function connectionPlace(host: object, userId: UserId, connection: string, throttles: readonly ConnectionThrottle[], signal: AbortSignal, fallback: Limit = "none", o: GatePlace = {}): Promise<() => void> {
-  const own = throttles.find((t) => t.id === connection)?.atOnce;
-  const most = limitOf(own !== undefined && own !== "none" ? own : fallback);
-  if (most === Number.POSITIVE_INFINITY && (o.lane !== "background" || o.background === undefined)) return Promise.resolve(NOTHING_HELD);
-  let gates = GATES.get(host);
-  if (!gates) {
-    gates = new Map();
-    GATES.set(host, gates);
-  }
-  const key = `${userId}\u0000${connection}`;
-  let gate = gates.get(key);
-  if (!gate) {
-    gate = new ConnectionGate();
-    gates.set(key, gate);
-  }
-  return gate.take(most, signal, o);
-}
-
-/** A connection's requests in the last minute: when, and their tokens (settling a call corrects its entry to what it spent). */
-export type MinuteWindow = Map<string, { at: number; tokens: number }[]>;
-
-/** Each runtime's per-minute windows (by its host), by user: agent turns' calls and depth's share them, as they share the gates. */
-const WINDOWS = new WeakMap<object, Map<UserId, MinuteWindow>>();
-/** The foreground calls waiting for room in each window, by connection: a background or idle call lets them go first. */
-const FORE_WAITING = new WeakMap<MinuteWindow, Map<string, number>>();
-
-/** `userId`'s per-minute window on `host`'s connections, shared by every caller on that host. */
-export function minuteWindowOf(host: object, userId: UserId): MinuteWindow {
-  let users = WINDOWS.get(host);
-  if (!users) {
-    users = new Map();
-    WINDOWS.set(host, users);
-  }
-  let w = users.get(userId);
-  if (!w) {
-    w = new Map();
-    users.set(userId, w);
-  }
-  return w;
-}
-
-/**
- * Waits until `connection`'s throttle (Settings → Agents → Throttles) has room this minute in
- * `window` for a call of `tokens`; refuses a call bigger than the whole minute. A background or idle
- * call (`lane`) also waits while a foreground call is waiting for room, so the foreground goes first
- * as room frees. Once it has room its entry (now, `tokens`) is in the window, returned for the caller
- * to correct or take back; with no throttle nothing is kept and a fresh entry is returned.
- */
-export async function minuteRoom(window: MinuteWindow, connection: string, tokens: number, throttle: ConnectionThrottle | undefined, signal: AbortSignal, clock: AccountsClock = SYSTEM_CLOCK, lane: GateLane = "foreground"): Promise<{ at: number; tokens: number }> {
-  if (!throttle) return { at: clock.now(), tokens };
-  const requests = limitOf(throttle.requestsPerMinute);
-  const perMinute = limitOf(throttle.tokensPerMinute);
-  if (tokens > perMinute) throw new AgentStop("throttle", { id: STOP_TEXT.throttle, vars: { tokens: counted(tokens, "token", "tokens"), limit: String(perMinute) } });
-  let fore = FORE_WAITING.get(window);
-  if (!fore) {
-    fore = new Map();
-    FORE_WAITING.set(window, fore);
-  }
-  let waiting = false;
-  try {
-    for (;;) {
-      const now = clock.now();
-      const recent = (window.get(connection) ?? []).filter((e) => e.at > now - MINUTE_MS);
-      window.set(connection, recent);
-      const used = recent.reduce((n, e) => n + e.tokens, 0);
-      const oldest = recent[0];
-      const room = !oldest || (recent.length < requests && used + tokens <= perMinute);
-      const ahead = lane === "foreground" ? 0 : (fore.get(connection) ?? 0);
-      if (room && ahead === 0) {
-        const entry = { at: now, tokens };
-        recent.push(entry);
-        return entry;
-      }
-      if (lane === "foreground" && !waiting) {
-        waiting = true;
-        fore.set(connection, (fore.get(connection) ?? 0) + 1);
-      }
-      // Behind a waiting foreground call, a moment later than it wakes.
-      await clock.sleep(room || !oldest ? 1 : oldest.at + MINUTE_MS - now + (lane === "foreground" ? 0 : 1), signal);
-    }
-  } finally {
-    if (waiting) fore.set(connection, (fore.get(connection) ?? 1) - 1);
+    const abort = (): void => {
+      const at = this.queue.indexOf(wake);
+      if (at >= 0) this.queue.splice(at, 1);
+      reject(signal.reason);
+    };
+    this.queue.push(wake);
+    signal.addEventListener("abort", abort, { once: true });
+    return promise;
   }
 }
 
@@ -615,7 +449,7 @@ interface UserAccounts {
   /** What calls in flight hold, per connection. */
   held: Map<string, { tokensIn: number; tokensOut: number }>;
   /** Each connection's requests in the last minute: when, and their tokens. */
-  window: MinuteWindow;
+  window: Map<string, { at: number; tokens: number }[]>;
   /** Each connection and model's reported prompt tokens over the estimate, once a call has reported them. */
   calibration: Map<string, number>;
   /** Connections seen refusing native tools since the extension started. */
@@ -682,6 +516,8 @@ export class AgentAccounts {
   private readonly listeners = new Set<(userId: UserId) => void>();
   /** The stand-in accounts serving each user's calls while their file can't be read (`forCall`). */
   private readonly unread = new Map<UserId, UserAccounts>();
+  /** Each user's connections' calls under way at once (`atOnce`), by user and connection. */
+  private readonly gates = new Map<string, ConnectionGate>();
 
   constructor(
     private readonly host: Pick<HostPort, "storage" | "log">,
@@ -707,7 +543,7 @@ export class AgentAccounts {
       let damaged = false;
       const raw = await readStoredJson(this.host, ACCEPTANCE_PATH, userId, "acceptance runs", (r) => isRecord(r) && r.v === 1, () => (damaged = true));
       const file = isRecord(raw) ? raw : {};
-      const u: UserAccounts = { run: runOf(file.run), last: runOf(file.last), guard: Array.isArray(file.connections) ? acceptanceConnectionsOf(file.connections) : undefined, lost: damaged || file.lost === true, setAside: damaged, held: new Map(), window: minuteWindowOf(this.host, userId), calibration: new Map(), refusesTools: new Set(), writing: Promise.resolve(), unread: null, warned: new Set() };
+      const u: UserAccounts = { run: runOf(file.run), last: runOf(file.last), guard: Array.isArray(file.connections) ? acceptanceConnectionsOf(file.connections) : undefined, lost: damaged || file.lost === true, setAside: damaged, held: new Map(), window: new Map(), calibration: new Map(), refusesTools: new Set(), writing: Promise.resolve(), unread: null, warned: new Set() };
       this.users.set(userId, u);
       // The fresh file says the guard was lost, so a restart doesn't read the missing file as no guard.
       if (damaged) void this.save(userId, u);
@@ -773,7 +609,7 @@ export class AgentAccounts {
     } catch (error) {
       const known = this.unread.get(userId);
       if (known) return known;
-      const u: UserAccounts = { run: null, last: null, guard: undefined, lost: false, setAside: false, held: new Map(), window: minuteWindowOf(this.host, userId), calibration: new Map(), refusesTools: new Set(), writing: Promise.resolve(), unread: error instanceof Error ? error.message : String(error), warned: new Set() };
+      const u: UserAccounts = { run: null, last: null, guard: undefined, lost: false, setAside: false, held: new Map(), window: new Map(), calibration: new Map(), refusesTools: new Set(), writing: Promise.resolve(), unread: error instanceof Error ? error.message : String(error), warned: new Set() };
       this.unread.set(userId, u);
       return u;
     }
@@ -840,6 +676,23 @@ export class AgentAccounts {
     this.host.log("info", `[LumiRPEngine] connection ${connection} refused native tools (${reason.slice(0, 200)}); its agents are offered them as text from now on`, userId);
   }
 
+  /** Waits until the connection's throttle has room this minute; refuses a call bigger than the whole minute. */
+  private async throttle(u: UserAccounts, connection: string, tokens: number, throttle: ConnectionThrottle | undefined, signal: AbortSignal): Promise<void> {
+    if (!throttle) return;
+    const requests = limitOf(throttle.requestsPerMinute);
+    const perMinute = limitOf(throttle.tokensPerMinute);
+    if (tokens > perMinute) throw new AgentStop("throttle", { id: STOP_TEXT.throttle, vars: { tokens: counted(tokens, "token", "tokens"), limit: String(perMinute) } });
+    for (;;) {
+      const now = this.clock.now();
+      const recent = (u.window.get(connection) ?? []).filter((e) => e.at > now - MINUTE_MS);
+      u.window.set(connection, recent);
+      const used = recent.reduce((n, e) => n + e.tokens, 0);
+      const oldest = recent[0];
+      if (!oldest || (recent.length < requests && used + tokens <= perMinute)) return;
+      await this.clock.sleep(oldest.at + MINUTE_MS - now, signal);
+    }
+  }
+
   /**
    * Holds a call's tokens on its connection (null: the default connection, which couldn't be told)
    * before it is sent: the acceptance guard, the throttle, then the run's ceilings. The guard is the
@@ -875,10 +728,8 @@ export class AgentAccounts {
     const release = await this.atOnce(userId, connection, settings.throttles, input.signal, settings.callsAtOnce);
     let tokensIn: number;
     const run = u.run;
-    // Only a throttled connection keeps its minute; settling a call corrects its entry to what it spent.
-    let entryAt: { at: number; tokens: number } | null = null;
     try {
-      entryAt = await minuteRoom(u.window, connection, input.tokensIn + input.tokensOut, throttle, input.signal, this.clock);
+      await this.throttle(u, connection, input.tokensIn + input.tokensOut, throttle, input.signal);
       const factor = u.calibration.get(`${connection}\u0000${input.model}`) ?? settings.acceptance.estimateFactor;
       tokensIn = Math.ceil(input.tokensIn * factor);
       if (run && entry) {
@@ -895,24 +746,37 @@ export class AgentAccounts {
         }
       }
     } catch (error) {
-      const kept = u.window.get(connection);
-      if (entryAt && kept) u.window.set(connection, kept.filter((e) => e !== entryAt));
       release();
       throw error;
     }
     const held = u.held.get(connection) ?? { tokensIn: 0, tokensOut: 0 };
     u.held.set(connection, { tokensIn: held.tokensIn + tokensIn, tokensOut: held.tokensOut + input.tokensOut });
+    // Only a throttled connection keeps its minute; settling a call corrects its entry to what it spent.
+    const entryAt = { at: this.clock.now(), tokens: input.tokensIn + input.tokensOut };
+    if (throttle) u.window.set(connection, [...(u.window.get(connection) ?? []), entryAt]);
     if (run) this.changed(userId);
     return { userId, connection, model: input.model, estimate: input.tokensIn, tokensIn, tokensOut: input.tokensOut, run, entry: entryAt, accounts: u, release };
   }
 
   /**
-   * A place among the connection's calls under way at once (`connectionPlace`), in the foreground's
-   * line: every agent's call takes one as it is reserved, and an agent turn's prompt-only call as it
-   * is made (`Steps.gate`), through the same gate as depth's calls.
+   * A place among the connection's calls under way at once (Settings → Agents → Throttles, `atOnce`;
+   * a connection whose throttle sets none takes `fallback`, the calls at once every such connection
+   * takes, Settings → Speed → Calls): every agent's call takes one as it is reserved, and an agent
+   * turn's prompt-only call as it is made (`Steps.gate`), through the same gate; past the limit a
+   * call waits for one to free, and one whose signal aborts meanwhile throws its reason. Its release
+   * frees it. A connection with no limit holds nothing.
    */
-  atOnce(userId: UserId, connection: string, throttles: readonly ConnectionThrottle[], signal: AbortSignal, fallback: Limit = "none"): Promise<() => void> {
-    return connectionPlace(this.host, userId, connection, throttles, signal, fallback);
+  async atOnce(userId: UserId, connection: string, throttles: readonly ConnectionThrottle[], signal: AbortSignal, fallback: Limit = "none"): Promise<() => void> {
+    const own = throttles.find((t) => t.id === connection)?.atOnce;
+    const most = limitOf(own !== undefined && own !== "none" ? own : fallback);
+    if (most === Number.POSITIVE_INFINITY) return NOTHING_HELD;
+    const key = `${userId}\u0000${connection}`;
+    let gate = this.gates.get(key);
+    if (!gate) {
+      gate = new ConnectionGate();
+      this.gates.set(key, gate);
+    }
+    return gate.take(most, signal);
   }
 
   /**

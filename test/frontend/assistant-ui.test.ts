@@ -410,16 +410,13 @@ describe("GM → Assistant: the request each control sends", () => {
 });
 
 describe("GM → Assistant's place in GM mode", () => {
-  test("the agents' tabs (Assistant, Live, Workspace) are the last GM tabs, after every pack's and Depth, behind This chat", () => {
+  test("the agents' tabs (Assistant, Live, Workspace) are the last GM tabs, after every pack's, behind This chat", () => {
     const tabs = buildCatalog(UI_PACKS).gmSections.map((def) => [def.id, def.label]);
     expect(tabs.slice(-3)).toEqual([
       ["core.assistant", "Assistant"],
       ["core.live", "Live"],
       ["core.workspace", "Workspace"],
     ]);
-    // The one core tab among the packs' is Depth, beside Minds (DESIGN §30.17).
-    const before = tabs.slice(0, -3).map(([id]) => id);
-    expect(before.filter((id) => id?.startsWith("core."))).toEqual(["core.depth"]);
-    expect(before.indexOf("core.depth")).toBe(before.indexOf("minds.gm") + 1);
+    expect(tabs.slice(0, -3).every(([id]) => !id?.startsWith("core."))).toBe(true);
   });
 });

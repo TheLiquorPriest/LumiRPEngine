@@ -5,7 +5,7 @@
 import { isRecord } from "../shared/json";
 import { pointerOf } from "../shared/json-patch";
 import type { WorldItem } from "./diff";
-import { cutAt, nameOf } from "../shared/tool-read";
+import { cutAt, nameOf } from "./read";
 
 export interface SearchHit {
   worldId: string;

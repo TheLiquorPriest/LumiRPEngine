@@ -51,7 +51,7 @@ import { SpecsEditor } from "../things/specs";
 import type { BulkEditor, Editor } from "./editor";
 import { FieldRow, Relations } from "./entity";
 import { thinEntity } from "./parts";
-import { gmAt, gmOpen } from "./nav";
+import { gmAt, gmOpen } from "./gate";
 import { ActionRow, ActionRows, GmCard, GmPage, usePages } from "./ui";
 
 type ThingsBody = ResultBodies["lre.things"];

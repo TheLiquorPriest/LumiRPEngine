@@ -378,39 +378,6 @@ describe("reference fold", () => {
     expect(restarted.messages.every((m) => m.clock !== null)).toBe(true);
   });
 
-  test("a snapshot saved before the layer still starts a cold fold: its key says no entry folded in its steps (L42)", () => {
-    let validations = 0;
-    const counted: FoldTypes = {
-      relations: registry.relations,
-      context: registry.context,
-      get: (type) => {
-        const def = registry.get(type);
-        return def && { ...def, validate: (e, ctx) => (validations++, def.validate(e, ctx)) };
-      },
-    };
-    const stored = new Map<string, FoldSnapshot>();
-    const snapshots: SnapshotStore = { get: (key) => stored.get(key), put: (snapshot) => void stored.set(snapshot.key, snapshot) };
-    const chain: ChainMessage[] = [reply("a0", "Morning.")];
-    for (let t = 1; t <= 8; t++) {
-      chain.push(user(`u${t}`, "walk"), reply(`a${t}`, `Walked ${t}.`));
-      record(chain, chain.length - 1, [{ type: "clock", minutes: 2, cause: "tick" }]);
-    }
-    const input: FoldInput = { worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain, snapshots, resolveFix: fixes };
-    new LedgerFold(registry, { snapshotEvery: 3 }).fold(input);
-    // As the build before the layer stored them: no layer drops at all.
-    for (const [key, s] of stored) {
-      const { layer: _layer, ...before } = s;
-      stored.set(key, before);
-    }
-    const restarted = new LedgerFold(counted, { snapshotEvery: 3 }).fold(input);
-    // It started from the last snapshot, two messages before the end: one record was left to validate.
-    expect(validations).toBe(1);
-    const reference = referenceFold(input, registry);
-    expect(hashJson(restarted.state)).toBe(hashJson(reference.state));
-    expect(restarted.messages).toEqual(reference.messages);
-    expect(restarted.layerDrops).toEqual([]);
-  });
-
   test("past the states the cache keeps, every fold of several chats still equals the reference fold, and no output or snapshot a caller changes reaches a later fold", () => {
     const stored = new Map<string, FoldSnapshot>();
     const snapshots: SnapshotStore = { get: (key) => stored.get(key), put: (snapshot) => void stored.set(snapshot.key, snapshot) };

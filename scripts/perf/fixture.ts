@@ -97,19 +97,14 @@ export function ipcPort(host: FakeHost, options: IpcOptions = {}): HostPort {
     mcp: namespace("mcp"),
     regex: namespace("regex"),
     processes: namespace("processes"),
-    users: namespace("users"),
     on: call(self, "on"),
     registerContextHandler: call(self, "registerContextHandler"),
     registerWorldInfoInterceptor: call(self, "registerWorldInfoInterceptor"),
-    registerPromptInterceptor: call(self, "registerPromptInterceptor"),
     toast: call(self, "toast"),
     dryRun: call(self, "dryRun"),
     log: call(self, "log"),
     get capabilities() {
       return copy(near().capabilities);
-    },
-    get bunPath() {
-      return near().bunPath;
     },
   };
   return port as unknown as HostPort;

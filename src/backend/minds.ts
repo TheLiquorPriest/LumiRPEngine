@@ -56,7 +56,6 @@ import { consolidateContext, memoryContext, mindContext, pinnedLines, povLabel, 
 import type { PresetBinding } from "./preset-binding";
 import type { SettingsStore } from "./settings-store";
 import { NotNeeded, type Steps } from "./steps";
-import { sameName } from "./depth/common";
 import { renderTemplate } from "./turn-steps";
 
 /** What the minds need of the backend: the host (the chat's messages), the registry, the steps, the user's settings and preset. */
@@ -111,8 +110,6 @@ export interface RunMindsInput {
   spared?: boolean;
   /** The user's knowledge settings, while the chat tracks knowledge (DESIGN §24.11): each mind reads what it holds. */
   knowledge?: KnowledgeSettings;
-  /** The call each mind runs on in place of the mind step's (GM → Minds → Run minds now: on the Minds role's connection, model and effort, INC3 3a); absent, the step's, and none while it is off. */
-  config?: StepConfig;
 }
 
 export interface RunMindsResult {
@@ -190,19 +187,21 @@ export function localTime(world: WorldDoc, now: number, text: string): number | 
   return hours <= 23 && minutes <= 59 ? nextTimeOfDay(cal, now - 1, hours * 60 + minutes) : null;
 }
 
-/** A person named by a model: by id, whole name, or a word of their name that is no one else's, each as an answer may write a name (`sameName`). */
+/** A person named by a model: by id, whole name, or a word of their name that is no one else's. */
 export function personNamed(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, name: string): EntityId | null {
-  if (name.trim() === "") return null;
+  const n = name.trim().toLowerCase();
+  if (n === "") return null;
   const people = Object.keys(state.entities).filter((id) => kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && !isGone(state, id));
-  const exact = people.find((id) => id === name.trim() || sameName(name, own(state.entities, id)?.name ?? ""));
+  const exact = people.find((id) => id === name.trim() || own(state.entities, id)?.name.toLowerCase() === n);
   if (exact) return exact;
-  const partial = people.filter((id) => (own(state.entities, id)?.name.split(/\s+/) ?? []).some((w) => sameName(name, w)));
+  const partial = people.filter((id) => (own(state.entities, id)?.name.toLowerCase().split(/\s+/) ?? []).includes(n));
   return partial.length === 1 ? (partial[0] ?? null) : null;
 }
 
 function placeNamed(world: WorldDoc, name: string): string | null {
-  if (name.trim() === "") return null;
-  return Object.keys(world.places).find((id) => id === name.trim() || sameName(name, own(world.places, id)?.name ?? "")) ?? null;
+  const n = name.trim().toLowerCase();
+  if (n === "") return null;
+  return Object.keys(world.places).find((id) => id === name.trim() || own(world.places, id)?.name.toLowerCase() === n) ?? null;
 }
 
 /**
@@ -345,7 +344,7 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
   const { registry: reg } = deps;
   const { world, state, userId } = input;
   const settings = await deps.settings.get(userId);
-  const config = input.config ?? mindsStepConfig(settings.modelUse, "mind");
+  const config = mindsStepConfig(settings.modelUse, "mind");
   if (!config || input.who.length === 0) return { events: [], traces: [] };
   const memory = effectiveMemory(world, settings.minds);
   const guidance = input.guidance ?? deps.presets.last(userId).guidance.mind ?? "";

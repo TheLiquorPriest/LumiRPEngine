@@ -1,7 +1,6 @@
 // Inputs and outputs shared by both folds (types only; each fold has its own logic).
 
 import type { MessageId, RevisionId } from "../../shared/ids";
-import type { FoldLayerEntry } from "../../shared/layer";
 import type { JournalNote, KeepLine, LedgerEvent, MessageFold, MessageLedger, PathHash, Pause, PostEntry, Tombstone } from "../../shared/ledger";
 import type { WorldDoc } from "../../shared/world";
 import type { Rejection } from "../registry";
@@ -23,11 +22,6 @@ export interface FoldInput {
   chain: ChainMessage[];
   pauses: Pause[];
   tombstones: Tombstone[];
-  /**
-   * The chat's basis-anchored layer (DEPTH-PLAN §4.9), in landing order, its ancestors' first
-   * (`foldLayerOf`): each live entry folds right after its basis message. Absent: none.
-   */
-  layer?: readonly FoldLayerEntry[];
   /** The chat's stored fold snapshots: a cold fold starts from the furthest one on its chain. The reference fold ignores them. */
   snapshots?: SnapshotStore;
   /**
@@ -60,8 +54,6 @@ export interface FoldSnapshot {
   clocks?: [number, number][];
   /** Each step's worked-out GM edits and ✎ fixes (`FoldOutput.resolved`); absent in a snapshot saved before the folds kept them. */
   resolved?: [number, ResolvedFix][];
-  /** Each step's layer drops (`FoldOutput.layerDrops`); absent in a snapshot saved before the layer. */
-  layer?: [number, LayerDrop][];
 }
 
 export interface SnapshotStore {
@@ -78,8 +70,6 @@ export interface MessageResult {
   path: PathHash;
   /** The world clock once this message folded, the end of its turn (what a reply shows under it); null for a step restored from a snapshot saved before clocks were kept. */
   clock: number | null;
-  /** The layer entries that folded right after this message, by id, in landing order; absent when none. */
-  layer?: string[];
 }
 
 /**
@@ -93,15 +83,6 @@ export interface ResolvedFix {
   events: LedgerEvent[];
 }
 
-/** A unit of a layer entry a rebased view dropped (DEPTH-PLAN §4.9): it no longer fits the state its basis folds to. */
-export interface LayerDrop {
-  messageId: MessageId;
-  entry: string;
-  /** The event's index in the entry. */
-  index: number;
-  text: string;
-}
-
 export interface FoldOutput {
   state: WorldState;
   notes: JournalNote[];
@@ -111,8 +92,6 @@ export interface FoldOutput {
   resolved: ResolvedFix[];
   /** L7: an on-path event or entry that failed validation when re-folded. Always empty when the ledger is correct. */
   violations: string[];
-  /** Layer entry units dropped on a rebased view. */
-  layerDrops: LayerDrop[];
 }
 
 export class FoldError extends Error {

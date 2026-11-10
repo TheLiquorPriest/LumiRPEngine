@@ -108,7 +108,7 @@ describe("the Journal read back to front", () => {
       });
 
       test("the state view's Journal is the whole read's latest hundred", () => {
-        const view = buildView({ chatId: "journal-window", run, core, observed, registry: reg, world: (r) => core.worldAt(r), stored: [], meter: null, knowledge: { chat: {}, tracking: false, narrator: NARRATOR_DEFAULTS }, offstage: OFFSTAGE_DEFAULTS, depth: false, memo: new ViewMemo() });
+        const view = buildView({ chatId: "journal-window", run, core, observed, registry: reg, world: (r) => core.worldAt(r), stored: [], meter: null, knowledge: { chat: {}, tracking: false, narrator: NARRATOR_DEFAULTS }, offstage: OFFSTAGE_DEFAULTS, memo: new ViewMemo() });
         expect(view.journal).toEqual(all.slice(-JOURNAL));
         expect(view.journal).toHaveLength(Math.min(turns, JOURNAL));
       });

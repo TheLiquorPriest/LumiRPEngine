@@ -253,8 +253,8 @@ export interface PostEntry {
   by?: { action: string; label: string; told?: string };
   /** A `fix` the GM made (`lre.edit`, a GM's minds run), not a ✎ correction of the player's: its chip says it was a GM edit (DESIGN §7). */
   gm?: true;
-  /** An agent's write (AGENT-LOOP-PLAN §4): its role, its batch's key (of the operations it was asked for), the keys of those it applied, the label its writer gave it, the knowledge it wrote under (absent: the GM's own), and the outside client that called the tool (DESIGN §23: "lumirpengine (claude-code)"); GM-level, never on a player surface. */
-  agent?: { role: string; key: string; applied?: string[]; label: string; knowledge?: "pov" | "everyone" | "gm"; client?: string };
+  /** An agent's write (AGENT-LOOP-PLAN §4): its role, its batch's key (of the operations it was asked for), the keys of those it applied, the label its writer gave it, and the knowledge it wrote under (absent: the GM's own); GM-level, never on a player surface. */
+  agent?: { role: string; key: string; applied?: string[]; label: string; knowledge?: "pov" | "everyone" | "gm" };
   /**
    * What a GM edit or ✎ fix asked for (DESIGN §7, §12): its operations, or the time it set the
    * clock to. Landing after a reply it was held through, or carried after a read (a Re-read, a Retry
@@ -455,16 +455,6 @@ export interface Rec {
   dropped?: CarryDrop[];
   /** Content accepted without being read: an assistant edit or an unread Continue (DESIGN §4.3). Outside every hash. */
   accepted?: ContentId;
-  /**
-   * Text of the reply that no scene decided, on a chat on depth, which nothing read (DEPTH-PLAN §1.3):
-   * `reply` when no scene played the reply at all (made under a pause, a Re-narrate of a reply written
-   * before the chat went on depth, a reply generated off the loopback, or one that stopped or failed
-   * before its scene was handed over), so none of what it tells is canon beyond what its turn
-   * decided; `continue` when a Continue added text to it. Outside every hash but the tombstone's.
-   */
-  unread?: "reply" | "continue";
-  /** With `unread: "continue"`, the blob of the whole text the reply showed after its latest Continue, or after the player's edit of it the author read since: what the author reads his next edit of it against (`scene/edit.ts`). Outside every hash. */
-  shown?: string;
   diag?: string;
   /** The hash of the prompt set the turn's narrator prompt was made from (DESIGN §6.12), which a Re-narrate may use again. Outside every hash. */
   prompts?: string;
@@ -641,10 +631,6 @@ export interface PendingTurn {
   finalEdits?: FinalEdit[];
   /** Each part the turn's final review saw, as made (`Rec.finalParts`), recorded on its record at commit. */
   finalParts?: Record<string, string>;
-  /** A depth turn's read part (DEPTH-PLAN §1.3, §3.10): the narrator's `story.passage` events, which its commit records in place of reading the reply, whether the reply ended or was stopped (`LedgerCore.scene`). A Continue's: its scene's further beats and prose together, which its commit lands as a `cont` entry on the reply's record (§3.9). */
-  sceneRead?: LedgerEvent[];
-  /** Generated on a chat on depth (DEPTH-PLAN §1.3): its commit never reads its text. Its read part is its scene's (`sceneRead`), else nothing but a Re-narrate's source's; a Continue no scene carried on is accepted unread. */
-  depth?: true;
 }
 
 /** Latest journal state of one message's ledger. */

@@ -2,8 +2,7 @@
 // per-step cards, the extraction rows, the timeout and agent limit rows, the drawer's notices, and
 // the settings kit (kit.tsx): a setting's row with its Changed badge and Default, a folded limit,
 // a row that opens a page, tool chips, a role's routes, the Agents hub's turn at a glance and the
-// sections of an agent's page; Settings → Loopback's lines to copy, a relay's facts and the
-// connection's steps. Built on the tokens and the shared atoms only.
+// sections of an agent's page. Built on the tokens and the shared atoms only.
 
 export const SETTINGS_CSS = `
 .lre-set{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
@@ -103,9 +102,4 @@ export const SETTINGS_CSS = `
 .lre-set-agent-section:focus{outline:none}
 .lre-set-agent-section:focus-visible{outline:2px solid var(--lre-accent);outline-offset:2px}
 .lre-set-agent-reset{display:flex;justify-content:center;padding:var(--lre-s2) 0}
-.lre-loopback-line{align-items:flex-start}
-.lre-loopback-line>code{display:block;align-self:stretch;box-sizing:border-box;padding:var(--lre-s2);border:1px solid var(--lre-hairline);border-radius:var(--lre-r);background:var(--lre-well);user-select:all}
-.lre-loopback-badges{display:inline-flex;flex-wrap:wrap;justify-content:flex-end;gap:var(--lre-s1)}
-.lre-loopback-facts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;font-size:var(--lre-fs-sm);color:var(--lre-muted);min-width:0;overflow-wrap:anywhere}
-.lre-loopback-steps{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:var(--lre-s2);font-size:var(--lre-fs-sm);min-width:0;overflow-wrap:anywhere}
 `;

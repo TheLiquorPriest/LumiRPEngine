@@ -2,8 +2,7 @@
 // fixed, matched by severity, code and path, their words first; and the order answers list them in.
 
 import { describe, expect, test } from "bun:test";
-import { lintDiff } from "../../src/cli/report";
-import { lintSummary, ranked } from "../../src/shared/tool-answer";
+import { lintDiff, lintSummary, ranked } from "../../src/cli/report";
 import type { LintIssue } from "../../src/shared/protocol";
 
 const issue = (severity: LintIssue["severity"], code: string, path: string, message = `${code} at ${path}`): LintIssue => ({ severity, path, code, message });

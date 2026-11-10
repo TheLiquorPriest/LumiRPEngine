@@ -49,7 +49,7 @@ export function isPlan(v: JsonValue | undefined): v is MindPlan & JsonObject {
     v.priority <= PLAN_PRIORITY.max &&
     (v.status === "open" || v.status === "done" || v.status === "dropped") &&
     finite(v.made) &&
-    (v.source === "mind" || v.source === "memory" || v.source === "gm" || v.source === "agent") &&
+    (v.source === "mind" || v.source === "memory" || v.source === "gm") &&
     (v.closed === null || finite(v.closed)) &&
     (v.reason === null || str(v.reason)) &&
     // Only a plan with others in it that isn't a payment or a loan is shared (`sharesPlan`).

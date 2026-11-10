@@ -265,9 +265,9 @@ describe("the Engine switch while a turn waits at a gate", () => {
     expect(g.halted).toBeUndefined();
     await rig.host.finish(g, "You count your cash.");
     expect(await cashOf(rig, chatId)).toBe(before - 100);
-    // The turn done, the chat switches; what it chose stays as it is, classic stored as its own choice (INC3 3a).
-    expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engine: "classic" }))).toMatchObject({ engine: "classic", engineFrom: "chosen" });
-    expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId }))).toMatchObject({ engine: "classic", engineFrom: "chosen" });
+    // The turn done, the chat switches; what it chose stays as it is.
+    expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engine: "classic" })).engine).toBeUndefined();
+    expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId })).engine).toBeUndefined();
   });
 
   test("a classic turn at its intent gate holds the switch to agents; Cancel lets it go", async () => {

@@ -34,8 +34,8 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
 export function agentsSubChanged(agents: Readonly<AgentSettings>, sub: AgentsSub): number {
   switch (sub) {
     case "pipeline":
-      // The Curator's gate is on its role page (When it runs), so it counts there, not here; New chats start on sits on this page.
-      return fieldsChanged({ ...agents.pipeline, curatorGate: DEFAULTS.pipeline.curatorGate }, DEFAULTS.pipeline) + fieldsChanged(agents.persist, DEFAULTS.persist) + (agents.newChats === DEFAULTS.newChats ? 0 : 1);
+      // The Curator's gate is on its role page (When it runs), so it counts there, not here.
+      return fieldsChanged({ ...agents.pipeline, curatorGate: DEFAULTS.pipeline.curatorGate }, DEFAULTS.pipeline) + fieldsChanged(agents.persist, DEFAULTS.persist);
     case "review":
       return fieldsChanged(agents.review, DEFAULTS.review);
     case "system":

@@ -3,7 +3,7 @@
 // warned of, and the tools' schemas take exactly as many operations as the engine accepts.
 
 import { describe, expect, test } from "bun:test";
-import { OUTSIDE_PLAY_TOOLS } from "../../src/backend/agents/tools/outside-play";
+import { PLAY_TOOLS } from "../../src/cli/tools-play";
 import { lintWorld } from "../../src/engine/authoring";
 import { EDIT_OPS_MAX } from "../../src/shared/protocol";
 import { createRegistry } from "../../src/engine/registry-impl";
@@ -38,7 +38,7 @@ describe("step template checks", () => {
 
 describe("the GM edit tools", () => {
   test("each takes at most as many operations as the engine accepts in one edit", () => {
-    const limits = OUTSIDE_PLAY_TOOLS.flatMap((tool) => {
+    const limits = PLAY_TOOLS.flatMap((tool) => {
       const ops = isRecord(tool.inputSchema.properties) ? tool.inputSchema.properties.ops : undefined;
       return isRecord(ops) && ops.type === "array" ? [[tool.name, ops.maxItems]] : [];
     });

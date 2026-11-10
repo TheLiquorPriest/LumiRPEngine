@@ -208,10 +208,10 @@ describe("a chat's own knowledge choices through the tools", () => {
 });
 
 describe("read-only mode", () => {
-  test("hides the job, Build, map and chat knowledge tools that write, and keeps the ones that read", () => {
+  test("hides the lore, job, Build, map and chat knowledge tools that write, and keeps the ones that read", () => {
     const listed = toolsFor(true).map((t) => t.name);
-    for (const name of ["lre_job_start", "lre_job_apply", "lre_job_cancel", "lre_job_dismiss", "lre_profile", "lre_map_display", "lre_chat_knowledge"]) expect(listed).not.toContain(name);
-    for (const name of ["lre_jobs", "lre_job", "lre_lint", "lre_sheet", "lre_map_walk"]) expect(listed).toContain(name);
+    for (const name of ["lre_lore_save", "lre_job_start", "lre_job_apply", "lre_job_cancel", "lre_job_dismiss", "lre_profile", "lre_map_display", "lre_chat_knowledge"]) expect(listed).not.toContain(name);
+    for (const name of ["lre_lore_books", "lre_lore_entries", "lre_lore_pins", "lre_jobs", "lre_job", "lre_lint", "lre_sheet", "lre_map_walk"]) expect(listed).toContain(name);
   });
 
   test("refuses a write before anything is sent", async () => {

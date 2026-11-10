@@ -397,7 +397,7 @@ describe("what the engine keeps of agent turns", () => {
     const observed = toChain(await rig.host.chats.messages(chatId, rig.host.userId));
     // Both users play the chat on agents (the host keeps one user's chats, so the switch is read as theirs).
     Reflect.set(rig.rt.chatKnowledge, "engine", async () => "agents");
-    const begin = (userId: string, generationId: string): Promise<boolean> => rig.rt.orchestrator.begin({ chatId, userId, generationId, core, observed, text: "I wait by the pier.", scene: false });
+    const begin = (userId: string, generationId: string): Promise<boolean> => rig.rt.orchestrator.begin({ chatId, userId, generationId, core, observed, text: "I wait by the pier." });
     await begin(rig.host.userId, "gen-a");
     await begin(other, "gen-b1");
     await begin(other, "gen-b2");

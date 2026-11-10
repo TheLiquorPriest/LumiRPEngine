@@ -8,14 +8,6 @@
 import { AGENT_FAILURE_PROMPTS } from "./agent-failures";
 import { AGENT_YIELD_PROMPTS } from "./agent-yield";
 import { RUNTIME_PROMPT_PAGE, RUNTIME_PROMPTS } from "./agent-prompts";
-import { BOOTSTRAP_PROMPT_PAGE, BOOTSTRAP_PROMPTS } from "./bootstrap-prompts";
-import { CHARACTER_PROMPT_PAGE, CHARACTER_PROMPTS } from "./character-prompts";
-import { DEPTH_PROMPT_PAGE, DEPTH_PROMPTS } from "./depth-prompts";
-import { SCENE_GM_PROMPTS } from "./scene-gm-prompts";
-import { SCENE_PROMPTS } from "./scene-prompts";
-import { OFFSCREEN_PROMPTS } from "./offscreen-prompts";
-import { NARRATION_PROMPTS } from "./narration-prompts";
-import { REALTIME_PROMPTS } from "./realtime-prompts";
 import { FINAL_REVIEW_PROMPTS } from "./final-review";
 import { MAIN_AGENT_PAGE, MAIN_AGENT_PROMPTS } from "./main-agent-prompts";
 import { ROLE_PROMPT_PAGES, ROLE_PROMPTS } from "./role-prompts";
@@ -26,8 +18,6 @@ import { DEFAULT_SECTIONS } from "./sections";
 import { SECRET_MARK_WORDING, type SecretMarkWording } from "./secret-marks";
 import { loreIndexPrompts } from "./lore-routing";
 import { neutralizeMacros } from "./macros";
-import { ENGINE_OFFER_PROMPTS } from "./engine-offer";
-import { OUTSIDE_TOOL_PROMPTS } from "./outside-tool-texts";
 
 /** A placeholder a text may use: `{{name}}`, filled with what `text` says it holds; `required` when the text can't work without it. */
 export interface PromptVar {
@@ -60,20 +50,6 @@ export interface PromptDef {
   world?: "first" | "after-user";
   /** The text can't be empty (a secret's mark always needs words): an empty one is never saved or sent. */
   nonEmpty?: true;
-  /**
-   * What the text asks its answer for that a text of the user's own written before it was asked
-   * leaves out, or asks the old way, each by the words that ask it (`staleAsks`): Settings → Prompts
-   * flags such a text as needing a fix. It is still sent, and saved: what its answer then lacks is
-   * said back to the model.
-   */
-  asks?: readonly PromptAsk[];
-}
-
-/** One thing a text asks its answer for (`PromptDef.asks`): the words a text that asks it holds, every one; the words only a text written before it was asked so holds (`outdated`), any one; and what a text with neither right leaves out or gets wrong, in plain words. */
-export interface PromptAsk {
-  says: readonly string[];
-  outdated?: readonly string[];
-  message: string;
 }
 
 /** A Prompts page: the final output, or an agent's. */
@@ -366,10 +342,10 @@ export const GM_AGENT_PROMPTS: readonly PromptDef[] = [
 ];
 
 /** The Prompts pages, in the order Settings lists them. */
-export const PROMPT_PAGES: readonly PromptPage[] = [FINAL_OUTPUT_PAGE, GM_AGENT_PAGE, MAIN_AGENT_PAGE, RUNTIME_PROMPT_PAGE, ...ROLE_PROMPT_PAGES, CHARACTER_PROMPT_PAGE, DEPTH_PROMPT_PAGE, BOOTSTRAP_PROMPT_PAGE];
+export const PROMPT_PAGES: readonly PromptPage[] = [FINAL_OUTPUT_PAGE, GM_AGENT_PAGE, MAIN_AGENT_PAGE, RUNTIME_PROMPT_PAGE, ...ROLE_PROMPT_PAGES];
 
-/** Every editable text, each page's after the one before it: the Every agent page's own texts lead the tools' texts and answers, the lore index it holds for every agent, the offer to switch to agents, and the tools LumiRPEngine serves outside clients. */
-export const PROMPTS: readonly PromptDef[] = [...FINAL_OUTPUT_PROMPTS, ...GM_AGENT_PROMPTS, ...MAIN_AGENT_PROMPTS, ...FINAL_REVIEW_PROMPTS, ...AGENT_FAILURE_PROMPTS, ...AGENT_YIELD_PROMPTS, ...RUNTIME_PROMPTS, ...TOOL_PROMPTS, ...loreIndexPrompts(RUNTIME_PROMPT_PAGE.id), ...ENGINE_OFFER_PROMPTS, ...OUTSIDE_TOOL_PROMPTS, ...ROLE_PROMPTS, ...CHARACTER_PROMPTS, ...DEPTH_PROMPTS, ...SCENE_PROMPTS, ...OFFSCREEN_PROMPTS, ...SCENE_GM_PROMPTS, ...NARRATION_PROMPTS, ...REALTIME_PROMPTS, ...BOOTSTRAP_PROMPTS];
+/** Every editable text, each page's after the one before it: the Every agent page's own texts lead the tools' texts and answers and the lore index it holds for every agent. */
+export const PROMPTS: readonly PromptDef[] = [...FINAL_OUTPUT_PROMPTS, ...GM_AGENT_PROMPTS, ...MAIN_AGENT_PROMPTS, ...FINAL_REVIEW_PROMPTS, ...AGENT_FAILURE_PROMPTS, ...AGENT_YIELD_PROMPTS, ...RUNTIME_PROMPTS, ...TOOL_PROMPTS, ...loreIndexPrompts(RUNTIME_PROMPT_PAGE.id), ...ROLE_PROMPTS];
 
 /** The pages whose texts a turn's prompt set records (DESIGN §6.12): what the narrator's prompt is made from. */
 export const TURN_PROMPT_PAGES: readonly string[] = [FINAL_OUTPUT_PAGE.id];
@@ -402,11 +378,6 @@ export function missingPlaceholders(def: PromptDef, text: string): PromptVar[] {
 /** Whether `text` can be sent as `def`'s: it keeps every placeholder its text requires, and isn't blank where the text can't be. */
 export function sendable(def: PromptDef, text: string): boolean {
   return missingPlaceholders(def, text).length === 0 && !(def.nonEmpty === true && text.trim() === "");
-}
-
-/** What a text of the user's own for `def` doesn't ask for that its shipped text does, or still asks the old way (`PromptDef.asks`), in words: Settings → Prompts flags it as needing a fix, while it is still sent. */
-export function staleAsks(def: PromptDef, text: string): string[] {
-  return (def.asks ?? []).filter((a) => !a.says.every((s) => text.includes(s)) || (a.outdated ?? []).some((s) => text.includes(s))).map((a) => a.message);
 }
 
 /**

@@ -6,7 +6,6 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { KitFiles } from "../../src/cli/follow";
-import { KIT_API } from "../../src/shared/agents";
 import type { KitReport } from "../../src/shared/agents";
 
 /** An installed extension's dist/ under a Lumiverse data dir at `root/name`. */
@@ -19,15 +18,14 @@ export const distOf = (root: string, name: string): string => join(root, name, "
  */
 export function writeKit(dir: string, build: string, tools: string[], pad = 0): KitReport {
   const names = JSON.stringify(tools);
-  const text = `const own = () => ${names}.map((name) => ({ name, description: "from build ${build}", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, openWorldHint: false } }));
-export const kit = { api: ${KIT_API}, build: ${JSON.stringify(build)}, versions: { cli: "0.0.1", engine: "9.9.9", worldFormat: "lre-world-v1", agentApi: 1 },
-  own,
-  tools: async () => ({ tools: own(), backend: null }),
-  call: async (name) => (${names}.includes(name) ? { text: name + " answered by build ${build}" } : null) };\n${pad > 0 ? `// ${"x".repeat(pad)}\n` : ""}`;
+  const text = `export const kit = { api: 1, build: ${JSON.stringify(build)}, versions: { cli: "0.0.1", engine: "9.9.9", worldFormat: "lre-world-v1", agentApi: 1 },
+  tools: () => ${names}.map((name) => ({ name, description: "from build ${build}", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, openWorldHint: false } })),
+  has: (name) => ${names}.includes(name),
+  call: async (name) => ({ text: name + " answered by build ${build}" }) };\n${pad > 0 ? `// ${"x".repeat(pad)}\n` : ""}`;
   mkdirSync(dir, { recursive: true, mode: 0o755 });
   const path = join(dir, "agent-kit.js");
   writeFileSync(path, text, { mode: 0o644 });
-  return { path, sha256: createHash("sha256").update(text).digest("hex"), api: KIT_API, core: join(dir, "lumirpengine.js") };
+  return { path, sha256: createHash("sha256").update(text).digest("hex"), api: 1, core: join(dir, "lumirpengine.js") };
 }
 
 export const disk: KitFiles = {

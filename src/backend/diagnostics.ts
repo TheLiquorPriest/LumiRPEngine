@@ -14,7 +14,6 @@ import { agentLabel } from "../shared/agent-settings";
 import type { ChatId, UserId } from "../shared/ids";
 import { runDir } from "../shared/ids";
 import { isRecord } from "../shared/json";
-import type { LoopbackModelCall } from "../shared/loopback";
 import type { Activity, ActivityAgent, DiagAgentCall, DiagCall, DiagLevel, DiagOffered, DiagPhase, DiagRecord, DiagSection, DiagStatus, DiagStep, DiagUsage, TurnPhaseName } from "../shared/diagnostics";
 import { callLabel, DIAG_AGENT_OUTCOMES, DIAG_PHASES, DIAG_RING, DIAG_USAGE_FIELDS, SLOW_MS, STEP_LABEL, suggestFix } from "../shared/diagnostics";
 import type { Limit } from "../shared/minds";
@@ -180,12 +179,6 @@ export class Diagnostics {
   private readonly inflight = new Map<UserId, string[]>();
   /** Whether the chat has an engine run or reply read Cancel can stop (the ledger's, `LedgerService.cancel`): what the running line offers Cancel by. */
   cancellable: (chatId: ChatId) => boolean = () => false;
-  /**
-   * Who hears each chat's activity line as it changes and each model call made for a chat (the
-   * loopback's bridge, which streams a loopback turn's stage lines into its thinking block and lists
-   * its calls as the turn's provenance, DEPTH-PLAN §3.8, §9.0).
-   */
-  observer: { activity(chatId: ChatId, label: string): void; call(chatId: ChatId, call: LoopbackModelCall): void } | null = null;
   /**
    * Agent turns (INC2-SPEC lane T1), by `chat \0 turn`: their roles' failures follow the roles' own
    * settings, and only a fatal record stops one (`failure`). Each is kept while its turn is under way:
@@ -480,7 +473,6 @@ export class Diagnostics {
     const open = stack.findLast((s) => s.purposes?.has(call.purpose) === true) ?? stack.findLast((s) => s.purposes === undefined);
     if (open) {
       open.calls.push(call);
-      this.observer?.call(open.at.chatId, { role: call.purpose, connection: call.connection, model: call.model, requestId: null, ...(call.tokensIn !== null ? { promptTokens: call.tokensIn } : {}), ...(call.tokensOut !== null ? { completionTokens: call.tokensOut } : {}), ms: Math.round(call.ms) });
       this.publishUser(userId);
       return;
     }
@@ -512,7 +504,6 @@ export class Diagnostics {
     const usage = usageOf(call.usage) ?? null;
     const offered = offeredOf(call.offered);
     const agent: DiagAgentCall = { role: call.role, connection: call.connection, model: call.model, usage, ms: call.ms, outcome: call.outcome, ...(call.error !== undefined ? { error: call.error } : {}), ...(call.tools && call.tools.length > 0 ? { tools: [...call.tools] } : {}), ...(offered ? { offered } : {}), ...(hash ? { text: hash } : {}) };
-    this.observer?.call(at.chatId, { role: call.role, connection: call.connection, model: call.model, requestId: null, ...(usage ? { promptTokens: usage.in, completionTokens: usage.out } : {}), ms: Math.round(call.ms) });
     const record = this.add(at, { kind: "agent", level: status === "failed" ? "warn" : "info", turn: at.turn, phase, step: call.role, status, start: end - call.ms, end, ms: call.ms, ...(reason ? { reason } : {}), ...(fix ? { fix } : {}), agent });
     if (hash !== undefined && text !== undefined && blobs) await blobs.put(at.userId, text).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${at.chatId}: the ${call.role} agent call's text wasn't stored (${messageOf(error)})`, at.userId, at.turn ?? undefined));
     return record;
@@ -748,9 +739,7 @@ export class Diagnostics {
   }
 
   private send(chatId: ChatId, userId: UserId): void {
-    const activity = this.activityOf(chatId);
-    if (activity?.state === "running") this.observer?.activity(chatId, activity.label);
-    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity }, userId);
+    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: this.activityOf(chatId) }, userId);
   }
 
   // ------------------------------------------------------------ storage

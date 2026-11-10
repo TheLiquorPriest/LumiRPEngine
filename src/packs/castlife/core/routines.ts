@@ -426,15 +426,12 @@ export function routineLived(ctx: ReadContext, who: EntityId, skip: boolean): bo
 
 /**
  * Whether a routine or a schedule must leave someone's place or activity as it is (DESIGN §8): a
- * routine is a default, never authority, so it never moves anyone out of a scene with the POV, nor
- * anyone an episode off screen holds (the story pack's `story.held`: a draft's people are in it for
- * its span, DEPTH-PLAN §4.6; a dropped one never happened, and the next run to open gives them back
- * to the routine, `releaseHold`), and moves no one whose routine it doesn't live (`routineLived`: by
- * default the Live, Near and Far cast's is lived only in a skip they spend on it; otherwise their
- * minds, story plans and the narration decide what they do). A skip's is the exception to the
- * scene: in a time skip (`skip`), the routine of someone who spends it on their routine may take them
- * out of the scene the story holds with the POV, and back. An enforced routine gives way to the GM's
- * intent, and to a timed order of the party's
+ * routine is a default, never authority, so it never moves anyone out of a scene with the POV, and
+ * moves no one whose routine it doesn't live (`routineLived`: by default the Live, Near and Far cast's
+ * is lived only in a skip they spend on it; otherwise their minds, story plans and the narration
+ * decide what they do). A skip's is the exception to the scene: in a time skip (`skip`), the routine
+ * of someone who spends it on their routine may take them out of the scene the story holds with the
+ * POV, and back. An enforced routine gives way to the GM's intent, and to a timed order of the party's
  * under way before its time (`orgs.on_order` at `at`, else now; assess-party §6.2), for anyone but a
  * Background character (for anyone, story first); a skip's always does. Otherwise it yields to what the story
  * set: when `who` isn't where the routine last had them (`expected`), something else put them there.
@@ -448,7 +445,6 @@ export function routineLived(ctx: ReadContext, who: EntityId, skip: boolean): bo
  * housemate still goes to work and a trip still leaves.
  */
 export function routineYields(ctx: ReadContext, who: EntityId, field: "place" | "activity", expected: JsonValue | null, opts: { edge: boolean; release?: boolean; scene?: boolean; skip?: boolean; at?: number }): boolean {
-  if (optionalQuery(ctx, "story.held")?.(ctx, who, opts.at ?? ctx.state.clock) === true) return true;
   const pov = who === ctx.world.pov;
   const enforced = routineRole(ctx, who) === "enforced";
   if ((pov || enforced || opts.skip !== true) && opts.scene !== false && withPov(ctx, who)) return true;

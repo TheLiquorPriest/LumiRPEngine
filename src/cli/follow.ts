@@ -71,7 +71,7 @@ async function sha256Of(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
 const SHARED_WRITE = 0o022;
 
 /** Only this user or root can change it: one of theirs, and writable by no one else. */
-export function ownersOnly(entry: Owned, uid: number): boolean {
+function ownersOnly(entry: Owned, uid: number): boolean {
   return (entry.uid === uid || entry.uid === 0) && (entry.mode & SHARED_WRITE) === 0;
 }
 

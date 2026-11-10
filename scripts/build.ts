@@ -42,8 +42,8 @@ if (typeof built === "string") {
   console.error(`build: dist/agent-kit.js can't be loaded: ${built}`);
   process.exit(1);
 }
-// As Lumiverse's client keeps a listed tool (an absent description is "", an absent schema {}): the kit's own tools, which the backend fingerprints apart from those it serves.
-const listFingerprint = (readOnly: boolean): string => toolsFingerprint(built.own(readOnly).map((t) => ({ name: t.name, description: t.description || "", input_schema: t.inputSchema || {} })));
+// As Lumiverse's client keeps a listed tool (an absent description is "", an absent schema {}).
+const listFingerprint = (readOnly: boolean): string => toolsFingerprint(built.tools(readOnly).map((t) => ({ name: t.name, description: t.description || "", input_schema: t.inputSchema || {} })));
 bundle("src/backend.ts", "dist/backend.js", "bun", { ...stamp, "process.env.LRE_KIT_SHA256": kitSha256, "process.env.LRE_TOOLS_FULL": listFingerprint(false), "process.env.LRE_TOOLS_READ_ONLY": listFingerprint(true) });
 bundle("src/frontend.ts", "dist/frontend.js", "browser", stamp);
 bundle("src/worker/background-lane.ts", "dist/worker/background-lane.js", "bun", stamp);

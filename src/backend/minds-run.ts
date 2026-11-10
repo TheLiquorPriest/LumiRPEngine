@@ -2,30 +2,22 @@
 // of everyone Live and Near, between turns. The run thinks at the chat's head exactly as a turn's
 // minds would: the head's state, the latest reply's end (and a player's message still waiting for a
 // reply), recall by presence from the chat's messages, and lore read as each of them with what is
-// pinned first. Each mind is the mind step's own call, on the Minds role's connection, model and
-// effort where the role names them (Settings → Agents → Roles → Minds; INC3 3a), else the step's, as
-// a role that names none follows its step. It answers the request at once and goes on in the
-// background, at most a few calls at a time, pushing its progress to the session that started it;
-// its minds are recorded as one GM edit (a `fix` entry marked as the GM's, with the GM edit chip's
-// Undo). Nothing reaches a player surface: the edit's lines word nothing for a player, and the
-// progress is GM data shown behind the gate.
+// pinned first. It answers the request at once and goes on in the background, at most a few calls at
+// a time, pushing its progress to the session that started it; its minds are recorded as one GM edit
+// (a `fix` entry marked as the GM's, with the GM edit chip's Undo). Nothing reaches a player surface:
+// the edit's lines word nothing for a player, and the progress is GM data shown behind the gate.
 
-import type { RoleSettings } from "../shared/agent-roles";
-import { MINDS_RUN_OFF_TEXT } from "../shared/agent-failures";
 import type { ChatId, EntityId, UserId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
 import type { Fidelity, MindMoment, MindsRunEntry, MindsRunView } from "../shared/minds";
 import { PROTOCOL_VERSION } from "../shared/protocol";
-import { stepConfigOf, type HelperDefault, type ModelUseSettings, type StepConfig, type StepRoute } from "../shared/settings";
-import { effortChoice } from "./agents/provider";
-import { renderPrompt } from "./prompts";
 import { own } from "../engine/pack-kit";
 import { fixChip } from "./view";
 import { fidelityOf } from "../packs/minds/core/fidelity";
 import { latestTexts } from "./gm";
 import { toChain } from "./ledger-io";
 import { knowledgeOn } from "./chat-knowledge-prefs";
-import { runMinds } from "./minds";
+import { mindsStepConfig, runMinds } from "./minds";
 import { TimeoutFired, within } from "../shared/timeouts";
 import type { Runtime } from "./runtime";
 
@@ -33,25 +25,6 @@ import type { Runtime } from "./runtime";
 const RUN_CONCURRENCY = 4;
 /** What a mind is told when the player hasn't said anything since the latest reply. */
 const BETWEEN_TURNS = "Nothing new has been said since; take stock of where things stand now.";
-
-/**
- * The call Run minds now makes for each mind (INC3 3a): the mind step's, on the Minds role's own
- * connection and model when it names a connection; its model alone on the connection the step runs
- * on (the step's own, else the helper model's) when it names only that, as a role run reads it
- * (`taskRoute`); its effort unless it inherits; the rest is the step's. Null when the role names no
- * connection and the step is switched off: there is nowhere to run it.
- */
-export function mindsRunConfig(settings: { modelUse: Pick<ModelUseSettings, "steps">; helper: Pick<HelperDefault, "connectionId"> }, role: Pick<RoleSettings, "connectionId" | "model" | "effort">): StepConfig | null {
-  const step = stepConfigOf(settings.modelUse.steps, "mind");
-  if (!step.enabled && role.connectionId === null) return null;
-  const base: StepRoute = step.route ?? { provider: "helper", connectionId: null, model: null };
-  const connection = role.connectionId !== null ? { connectionId: role.connectionId, model: role.model } : role.model !== null ? { connectionId: base.connectionId ?? settings.helper.connectionId, model: role.model } : {};
-  const route: StepRoute = { ...base, provider: "helper", ...connection, ...(role.effort !== "inherit" ? { effort: effortChoice(role.effort) } : {}) };
-  return { ...step, enabled: true, route };
-}
-
-/** Why GM → Minds' run, Ladder and the MCP's `lre_minds_run` are off on a chat on depth. */
-export const CLASSIC_MINDS_OFF = "This chat plays at depth: each character's mind is written by their own agent from what they lived, so running minds and their ladder here are off. GM → Depth → Minds shows their minds.";
 
 export class RunError extends Error {
   constructor(
@@ -81,11 +54,6 @@ export class MindsRuns {
     return this.runs.get(`${userId}\u0000${chatId}`)?.view ?? null;
   }
 
-  /** Why the classic run is off in this chat, in the words GM → Minds shows; null where it runs. A depth chat's minds are its character agents' (GM → Depth → Minds), written only from what each lived: this run would be a second writer. */
-  async off(chatId: ChatId, userId: UserId): Promise<string | null> {
-    return (await this.rt.depthOn(chatId, userId)) ? CLASSIC_MINDS_OFF : null;
-  }
-
   /** Stops a running run: what is still thinking is dropped and nothing is recorded. */
   cancel(chatId: ChatId, userId: UserId, runId: string): MindsRunView | null {
     const run = this.runs.get(`${userId}\u0000${chatId}`);
@@ -104,13 +72,9 @@ export class MindsRuns {
     if (this.runs.get(key)?.view.status === "running") throw new RunError("conflict", "Minds are already running in this chat; wait for them, or cancel the run.");
     const core = await this.rt.ledger.core(chatId, userId);
     if (!core || !(await this.rt.runOf(chatId, userId))) throw new RunError("not_world_chat", "this chat is not attached to a world");
-    // A depth chat's minds are its character agents' (GM → Depth → Minds), written only from what each lived: today's run would be a second writer.
-    const off = await this.off(chatId, userId);
-    if (off !== null) throw new RunError("bad_request", off);
     const settings = await this.rt.settings.get(userId);
-    // Each mind runs where the Minds role does (Settings → Agents → Roles → Minds), else on its step.
-    const config = mindsRunConfig(settings, settings.agents.roles.minds);
-    if (!config) throw new RunError("bad_request", renderPrompt(MINDS_RUN_OFF_TEXT, settings.prompts.texts, {}).trim());
+    const config = mindsStepConfig(settings.modelUse, "mind");
+    if (!config) throw new RunError("bad_request", "The mind step is switched off in Settings → Steps: switch it on to run minds.");
     const messages = await this.rt.host.chats.messages(chatId, userId);
     const observed = toChain(messages);
     const render = core.renderState(observed);
@@ -147,7 +111,7 @@ export class MindsRuns {
       try {
         // Minds read what they hold while the chat tracks knowledge (DESIGN §24.11), as a turn's do.
         const knowing = knowledgeOn(await this.rt.chatKnowledge.get(chatId, userId), live, settings);
-        const ran = await runMinds(this.rt.minds, { chatId, userId, world: live, state, who: picked, moment, levels, reasons: Object.fromEntries(picked.map((id) => [id, "gm"])), signal, messages, concurrency: RUN_CONCURRENCY, progress, config, ...(knowing ? { knowledge: settings.minds.knowledge } : {}) });
+        const ran = await runMinds(this.rt.minds, { chatId, userId, world: live, state, who: picked, moment, levels, reasons: Object.fromEntries(picked.map((id) => [id, "gm"])), signal, messages, concurrency: RUN_CONCURRENCY, progress, ...(knowing ? { knowledge: settings.minds.knowledge } : {}) });
         for (const entry of ran.report ?? []) progress(run.cancelled && entry.status !== "recorded" ? { ...entry, status: "cancelled", reason: "you cancelled the run" } : entry);
         if (run.cancelled) return this.end(run, "cancelled", "Cancelled: nothing was recorded.");
         if (ran.events.length === 0) return this.end(run, "failed", signal.reason instanceof TimeoutFired ? "The run reached its time limit before any mind came back, so nothing was recorded: raise Minds run on demand in Settings → Timeouts." : "No mind came back, so nothing was recorded; each one says why.");

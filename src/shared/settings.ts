@@ -17,7 +17,6 @@ import type { DiagnosticsSettings } from "./diagnostics";
 import type { RetentionSettings } from "./stores";
 import { ITEM_CHANGES } from "./things";
 import type { OffstageSettings } from "./offstage";
-import type { DepthSettings } from "./depth-settings";
 
 /**
  * How hard a model reasons on a call (Lumiverse's per-request reasoning override): `inherit` leaves
@@ -676,8 +675,6 @@ export interface UserSettings {
   gm: GmPageSettings;
   /** Reusing work (Settings → Speed): whether built views are shared instead of built again. */
   perf: PerfSettings;
-  /** Settings → Depth (DEPTH-PLAN §7): every depth role's model, the presets' cadence, the budget dial, the narrator's window, the thinking block, absorption, redrafts, real time, the background lanes and the bootstrap. Calls read a role through `depthCall`. */
-  depth: DepthSettings;
 }
 
 /** What a swipe does as shipped (Settings → Swipes): it tells the same turn again, asking nothing first, with the texts its turn was made with. */
@@ -737,21 +734,10 @@ export function perfSettingsOf(raw: unknown, base: Readonly<PerfSettings> = PERF
 }
 
 /** The shipped defaults' revision (`UserSettings.defaults`). */
-export const SETTINGS_DEFAULTS_REV = 10;
-
-/** What the jobs that call a model run on (`JobSettings.model`): a step's route and max tokens, nothing a step schedules. */
-export type JobModel = Pick<StepConfig, "route" | "maxTokens">;
+export const SETTINGS_DEFAULTS_REV = 9;
 
 /** Build's jobs (DESIGN §13.1): the user's own, which no preset sets. */
 export interface JobSettings {
-  /**
-   * The jobs' own model (Settings → Steps and connections → Build jobs): the connection, model,
-   * effort and max tokens of every job that calls one (Import, Index this text, Refine, Describe a
-   * map, Propose routines); each one left out is the helper model's, and null runs them all on the
-   * helper model. A settings file from before revision 10 gets a copy of the brief step's (else
-   * interpret's), which the jobs read before; one with neither keeps null.
-   */
-  model: JobModel | null;
   /**
    * The lore Propose routines from lore gives the helper about each person or group, in tokens:
    * whole entries, the most about them first, until the next would pass it; "none" gives all of it.
@@ -760,17 +746,11 @@ export interface JobSettings {
   routineLoreTokens: Limit;
 }
 
-/** A new user's job settings: the helper model, and room for a dozen long entries about each person or group. */
-export const JOB_SETTINGS_DEFAULTS: Readonly<JobSettings> = Object.freeze({ model: null, routineLoreTokens: 8000 });
+/** A new user's job settings: room for a dozen long entries about each person or group. */
+export const JOB_SETTINGS_DEFAULTS: Readonly<JobSettings> = Object.freeze({ routineLoreTokens: 8000 });
 
-/** The jobs' model a step's settings give: its route and max tokens, as far as it has them; null for no step. */
-export function jobModelFrom(step: Readonly<StepConfig> | null | undefined): JobModel | null {
-  if (!step) return null;
-  return { ...(step.route ? { route: structuredClone(step.route) } : {}), ...(step.maxTokens !== undefined ? { maxTokens: step.maxTokens } : {}) };
-}
-
-/** `UserSettings.jobs` as the engine reads it: each field checked, else `base`'s; the model is the settings store's to check (`jobModelOf`), so it is `base`'s here. */
+/** `UserSettings.jobs` as the engine reads it: each field checked, else `base`'s. */
 export function jobSettingsOf(raw: unknown, base: Readonly<JobSettings> = JOB_SETTINGS_DEFAULTS): JobSettings {
   const j = isRecord(raw) ? raw : {};
-  return { model: base.model ? structuredClone(base.model) : null, routineLoreTokens: limitIn(j.routineLoreTokens, 1, Number.MAX_SAFE_INTEGER, base.routineLoreTokens) };
+  return { routineLoreTokens: limitIn(j.routineLoreTokens, 1, Number.MAX_SAFE_INTEGER, base.routineLoreTokens) };
 }

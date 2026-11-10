@@ -28,8 +28,8 @@ export interface ToolHost {
   ready(): Promise<void>;
   /** The client's `initialize`: the harness that runs this server (its clientInfo.name), or null when it gave none. */
   initialized?(harness: string | null): void;
-  /** The client was answered a `tools/list` with this kit build's tools and LumiRPEngine build `backend`'s served ones (null: none listed): a client that never lists again (Lumiverse's) keeps them. */
-  listed?(build: string, backend: string | null): void;
+  /** The client was answered a `tools/list` with this kit build's tools: a client that never lists again (Lumiverse's) keeps them. */
+  listed?(build: string): void;
   readonly context: KitContext;
 }
 
@@ -81,17 +81,17 @@ export class McpServer {
           return reply({});
         case "tools/list": {
           const kit = this.host.kit();
-          const listed = await kit.tools(this.host.context);
-          const tools = listed.tools.map((t): JsonObject => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: t.annotations }));
-          this.host.listed?.(kit.build, listed.backend);
+          const tools = kit.tools(this.host.readOnly).map((t): JsonObject => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: t.annotations }));
+          this.host.listed?.(kit.build);
           return reply({ tools });
         }
         case "tools/call": {
           if (typeof params.name !== "string") return fail(id, -32602, "Invalid params: tools/call needs the tool's name");
           await this.host.ready();
-          const result = await this.host.kit().call(params.name, params.arguments, this.host.context);
+          const kit = this.host.kit();
           // An unknown tool is a protocol error (MCP's "Unknown tools"); a known one that refuses answers isError.
-          if (result === null) return fail(id, -32602, `Unknown tool: ${params.name}`);
+          if (!kit.has(params.name)) return fail(id, -32602, `Unknown tool: ${params.name}`);
+          const result = await kit.call(params.name, params.arguments, this.host.context);
           return reply({ content: [{ type: "text", text: result.text }], ...(result.isError ? { isError: true } : {}) });
         }
       }

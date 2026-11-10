@@ -74,10 +74,8 @@ export interface SkipPlanInput {
   /** The engine run's clock, and the call's own limit (`skipPlanMs`). */
   signal: AbortSignal;
   limit: Limit;
-  /** The time-skip step's own settings (connection, model, max tokens, sampling) and the preset's guidance for it: the plan is part of that step. Null when the step is switched off, or the turn asks it nothing (`off` says why): no call is made. */
+  /** The time-skip step's own settings (connection, model, max tokens, sampling) and the preset's guidance for it: the plan is part of that step. Null when the step is switched off: no call is made. */
   config: StepConfig | null;
-  /** Why a null `config` makes no call, when it isn't the step switched off: the GM's view says it. */
-  off?: string;
   guidance: string;
 }
 
@@ -93,9 +91,6 @@ export interface SkipPlanDeps {
 
 /** Why a skip plan has no blocks when the `skip` step is off, for the GM's view of the people it would have planned. */
 const STEP_OFF_NOTE = `The skip plan wasn't made: the ${STEP_LABEL.skip} step is off (Settings → Steps and connections), so everyone it would have planned keeps to their basic needs.`;
-
-/** Why a depth scene's time skip has no planned blocks: the author plays the world beyond the player's view (DEPTH.md), so no `skip` call is made. */
-export const DEPTH_SKIP_PLAN = "The skip plan wasn't made: the chat is on depth, whose author plays the world beyond your view, so everyone it would have planned keeps to their basic needs.";
 
 /**
  * The `castlife.skip_plan` a timelapse turn records ahead of its timelapse: null when the timelapse
@@ -119,7 +114,7 @@ export async function planSkip(deps: SkipPlanDeps, input: SkipPlanInput): Promis
   if (people.length === 0) return null;
   // The `skip` step switched off makes no call: the skip runs on the engine alone, as a failed plan
   // does, everyone it would have planned keeping to their basic needs, and the GM's view says why.
-  if (!input.config) return { type: ROUTINE_EVENTS.skipPlan, data: { from, to, plans: [], note: input.off ?? STEP_OFF_NOTE } };
+  if (!input.config) return { type: ROUTINE_EVENTS.skipPlan, data: { from, to, plans: [], note: STEP_OFF_NOTE } };
   const safe = povSafe(ctx);
   const reply = input.reply.slice(-REPLY_CAP);
   const told = safe(reply) ? reply : "";

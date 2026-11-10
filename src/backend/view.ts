@@ -25,13 +25,12 @@ import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { clockPaused, DEFAULT_SCENE_TYPE, ENGINE_SCENE_TYPES, placeSceneType, sceneType } from "../engine/time";
 import { identifiers } from "../engine/expr";
 import type { ChainMessage, FoldOutput } from "../engine/ledger/chain";
-import { keepsPassages, type LedgerCore } from "../engine/ledger/journal";
+import type { LedgerCore } from "../engine/ledger/journal";
 import { activeRecord, isLive, turnPath } from "../engine/ledger/path";
 import { actsFor } from "../engine/org";
 import { optionalQuery, own } from "../engine/pack-kit";
 import { knownSubjects, playerDrop, playerLines, povMayKnow, UNSEEN_DROP } from "../engine/player-events";
 import { playedWorld } from "../engine/places-in-play";
-import { withPov } from "../shared/character-engine";
 import type { ReadContext } from "../engine/registry";
 import { readPass } from "../engine/read-pass";
 import { claimsOf, presetOf } from "../engine/realism";
@@ -57,8 +56,6 @@ import { FEATURE_DEFS } from "../shared/finance";
 import { turnFrame } from "./turn-frame";
 import { gmKeyOf } from "./gm-memo";
 import type { DiagStep } from "../shared/diagnostics";
-import { unfaithfulChip, unreachedChip } from "../shared/passage";
-import { beatOf, STORY_BEAT } from "../shared/story";
 
 /** The palette's timelapse action; its params are `{target, overrides}`. */
 export const TIMELAPSE_ACTION = "timelapse";
@@ -369,43 +366,6 @@ const JOURNAL_TURNS = 100;
  */
 export function turnLines(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, events: readonly LedgerEvent[]): string[] {
   return playerLines(registry, world, state, world.pov, events, 8);
-}
-
-/**
- * A depth reply's beats as its change chip lists them (LIVE3 lane 1b), each one that reached the
- * player character `pov`, in the order the scene decided them, by what reached him: his own point of
- * view where he has one (a reach in part, or a stranger in a beat he had whole), else what there was
- * to sense with the words said. A beat's texts are blobs, read before the build (`beatTextHashes`):
- * one whose text wasn't read, or that never reached him, isn't listed. None is capped, so the chip
- * counts every beat it lists.
- */
-export function beatLines(events: readonly LedgerEvent[], pov: EntityId, texts: ReadonlyMap<string, string>): string[] {
-  const out: string[] = [];
-  for (const e of events) {
-    const b = e.type === STORY_BEAT && "data" in e ? beatOf(e.data) : null;
-    const x = b?.exposure.find((r) => r.who === pov);
-    if (!b || !x) continue;
-    const surface = x.reach === "whole" ? texts.get(b.surface) : undefined;
-    const quotes = b.quotes ? texts.get(b.quotes) : undefined;
-    const line = (x.pov !== undefined ? texts.get(x.pov) : surface !== undefined ? `${surface}${quotes ? ` “${quotes}”` : ""}` : undefined)?.trim();
-    if (line && !out.includes(line)) out.push(line);
-  }
-  return out;
-}
-
-/** The texts the head reply's change chip words its beats with (`beatLines`), by hash: each beat's surface, its words and every point of view of it. */
-export function beatTextHashes(core: LedgerCore, observed: readonly ChainMessage[]): string[] {
-  const head = core.chain(observed).findLast((m) => !m.isUser);
-  const rec = head ? activeRecord(head, core.journal.tombstones) : null;
-  const out = new Set<string>();
-  for (const e of rec?.events ?? []) {
-    const b = e.type === STORY_BEAT && "data" in e ? beatOf(e.data) : null;
-    if (!b) continue;
-    out.add(b.surface);
-    if (b.quotes) out.add(b.quotes);
-    for (const x of b.exposure) if (x.pov) out.add(x.pov);
-  }
-  return [...out];
 }
 
 /** How a ✎ fix of the time moved the clock, in words ("Clock moved on 2 h 15 min", "Clock set back 3 h"); null for a fix that moved none. */
@@ -750,15 +710,8 @@ export function replyFailedChip(turn: string, failed: ReplyFailure, as: Generate
   };
 }
 
-/**
- * Chips derived from the records: Re-read edit, Retry read, Retry (empty reply), degraded, Keep
- * report, what changed (on a depth reply, each beat that reached the player character by its text,
- * from `texts`, `beatLines`), elapsed, overdue, a correction's Undo, a refused write's notice, a
- * depth reply's unfaithful rendering and its text no scene decided. On a chat on depth (`depth`)
- * nothing reads a reply into canon (DEPTH-PLAN §1.3): no Re-read edit or Retry read is offered
- * there, nor anywhere for a depth scene's record, whose rendering stays as it streamed.
- */
-function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepReport: readonly KeepLine[], core: LedgerCore, registry: Registry, world: WorldDoc, depth: boolean, texts: ReadonlyMap<string, string>): Chip[] {
+/** Chips derived from the records: Re-read edit, Retry read, Retry (empty reply), degraded, Keep report, what changed, elapsed, overdue, a correction's Undo, a refused write's notice. */
+function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepReport: readonly KeepLine[], core: LedgerCore, registry: Registry, world: WorldDoc): Chip[] {
   const chips: Chip[] = [];
   const headIndex = chain.findLastIndex((m) => !m.isUser);
   chain.forEach((m, i) => {
@@ -766,38 +719,27 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
     const rec: Rec | null = activeRecord(m, core.journal.tombstones);
     if (!rec) return;
     const fold_ = fold.messages[i]?.fold;
-    if (rec.accepted && !depth && (fold_ === "on_path" || fold_ === "plain") && !keepsPassages(rec)) {
+    if (rec.accepted && (fold_ === "on_path" || fold_ === "plain")) {
       chips.push({ id: `reread:${m.id}:${m.swipeId}`, kind: "reread", messageId: m.id, label: "Re-read edit", detail: "The engine kept the world as simulated. Re-read this text to update it.", actions: [{ id: "reread", label: "Re-read edit", style: "primary" }], expires: "never" });
     }
     if (i !== headIndex) return;
     const text = m.swipes[m.swipeId] ?? "";
     // A record read elsewhere never folds as stored, so a read of it is always refused: no chip leads there.
-    if (rec.status === "stopped" && !rec.readElsewhere && !depth && !keepsPassages(rec)) chips.push({ id: `retry_read:${m.id}:${m.swipeId}`, kind: "retry_read", messageId: m.id, label: "Retry read", detail: "The reply stopped early; read what was saved.", actions: [{ id: "retry_read", label: "Retry read" }], expires: "never" });
-    // Text of the reply no scene decided, which nothing read (`Rec.unread`): none of it is canon.
-    if (rec.unread === "reply") chips.push({ id: `not_canon:${m.id}:${m.swipeId}`, kind: "untracked", messageId: m.id, label: "Not canon", detail: "No scene played this reply on depth, and nothing read it into the story: none of what it tells happened beyond what its turn decided.", actions: [], expires: "never" });
-    else if (rec.unread === "continue") chips.push({ id: `not_canon:${m.id}:${m.swipeId}`, kind: "untracked", messageId: m.id, label: "What Continue added isn't canon", detail: "On depth a scene doesn't carry on a reply yet: the narrator wrote on from the reply's last words with nothing decided for it, and nothing read it into the story.", actions: [], expires: "never" });
-    // A reply nothing read on depth is Not canon, above, which says what its record is: no Not fully simulated beside it.
+    if (rec.status === "stopped" && !rec.readElsewhere) chips.push({ id: `retry_read:${m.id}:${m.swipeId}`, kind: "retry_read", messageId: m.id, label: "Retry read", detail: "The reply stopped early; read what was saved.", actions: [{ id: "retry_read", label: "Retry read" }], expires: "never" });
     if (rec.status === "degraded" && text.trim() === "") chips.push({ id: `retry:${m.id}:${m.swipeId}`, kind: "retry", messageId: m.id, label: "Retry", detail: "The narrator returned an empty reply.", actions: [{ id: "regenerate", label: "Retry", style: "primary" }], expires: "next_send" });
-    else if (rec.status === "degraded" && rec.unread !== "reply") chips.push({ id: `degraded:${m.id}:${m.swipeId}`, kind: "degraded", messageId: m.id, label: "Not fully simulated", detail: "Part of this turn ran engine-only.", actions: [], expires: "next_send" });
+    else if (rec.status === "degraded") chips.push({ id: `degraded:${m.id}:${m.swipeId}`, kind: "degraded", messageId: m.id, label: "Not fully simulated", detail: "Part of this turn ran engine-only.", actions: [], expires: "next_send" });
     const minutes = clockMinutes(rec.events);
     if (minutes > 0) chips.push({ id: `elapsed:${m.id}:${m.swipeId}`, kind: "elapsed", messageId: m.id, label: minutes >= 60 ? `+${Math.floor(minutes / 60)} h ${minutes % 60} min` : `+${minutes} min`, actions: [], expires: "next_send" });
-    // Re-narrate/Re-run (P3, §12; Build C item 1): the choice sets the next swipe's mode, with what the player asks of the new telling when they say, then the UI swipes. On depth the author reads it too, among the player's signals (DEPTH-PLAN §3.9, §4.5); elsewhere only the narrator does.
+    // Re-narrate/Re-run (P3, §12; Build C item 1): the choice sets the next swipe's mode, with what the player asks of the new telling when they say (only the narrator reads it), then the UI swipes.
     if (rec.seed !== "" && rec.path !== "") {
       const ask = { type: "text" as const, label: "What should change?", value: "", optional: true as const };
-      const detail = depth ? "Re-narrate tells this turn again: the same beats, new prose. Re-run plays the scene again from the same moment. Either may take a word on what should change: the narrator reads it, and so does the author, who on a Re-run sets the scene by it." : "Re-narrate tells this turn again: the same outcome, new prose. Re-run the turn with the engine plays it again, with a fresh roll. Either may take a word on what should change, which only the narrator reads.";
-      chips.push({ id: `swipe_option:${m.id}:${m.swipeId}`, kind: "swipe_option", messageId: m.id, label: "Swipe as…", detail, actions: [{ id: "renarrate", label: "Re-narrate…", input: ask }, { id: "rerun", label: depth ? "Re-run the scene" : "Re-run the turn with the engine", input: ask }], expires: "next_send" });
+      chips.push({ id: `swipe_option:${m.id}:${m.swipeId}`, kind: "swipe_option", messageId: m.id, label: "Swipe as…", detail: "Re-narrate tells this turn again: the same outcome, new prose. Re-run the turn with the engine plays it again, with a fresh roll. Either may take a word on what should change, which only the narrator reads.", actions: [{ id: "renarrate", label: "Re-narrate…", input: ask }, { id: "rerun", label: "Re-run the turn with the engine", input: ask }], expires: "next_send" });
     }
-    // A depth reply that doesn't render its beats faithfully (DEPTH-PLAN §1.3, §1.4): a passage that streamed though its check failed, where it departs, and the moments the narrator couldn't render, with Re-narrate.
-    const unfaithful = unfaithfulChip(m.id, m.swipeId, [...rec.events, ...rec.post.filter((e) => e.kind === "cont").flatMap((e) => e.events)]);
-    if (unfaithful) chips.push(unfaithful);
-    // A depth reply nothing of whose turn reached the player character but his own beats (LIVE3c L3c-5): its quiet passage tells where he is, and this says nothing reached him.
-    const unreached = unreachedChip(m.id, m.swipeId, rec.events, (id) => own(fold.state.entities, id)?.name ?? own(world.entities, id)?.name ?? id);
-    if (unreached) chips.push(unreached);
     const state = fold.state;
     const ctx = registry.context(world, state);
     const applied = appliedEvents(rec, fold, i);
-    const lines = [...turnLines(registry, world, state, applied.events), ...beatLines(applied.events, world.pov, texts)];
-    // One change: the label says it all; several: "N changes" with the list as detail, every line it lists counted.
+    const lines = turnLines(registry, world, state, applied.events);
+    // One change: the label says it all; several: "N changes" with the list as detail.
     if (lines.length > 0) chips.push({ id: `change:${m.id}:${m.swipeId}`, kind: "change", messageId: m.id, label: lines.length === 1 ? (lines[0] ?? "Changed") : `${lines.length} changes`, ...(lines.length > 1 ? { detail: lines.join("\n") } : {}), actions: [], expires: "next_send" });
     // Each ✎ fix or GM edit on the head, with Undo, worded for the player (DESIGN §12): what the POV
     // may see of it, else who it was about as far as the POV knows them. Another person's moves and
@@ -920,12 +862,8 @@ export interface ViewInput {
   knowledge: { chat: ChatKnowledgePrefs; tracking: boolean; narrator: NarratorView };
   /** Settings → Narrator → Out-of-play actions, the user's: what each confirm step's Tell switch starts from (`ControlsView.offstage`). */
   offstage: OffstageSettings;
-  /** The chat is on depth (GM → This chat → Depth): nothing reads a reply into canon, so no Re-read edit or Retry read is offered (DEPTH-PLAN §1.3). */
-  depth: boolean;
   /** What the chat's views share between builds (`ViewMemo`). */
   memo: ViewMemo;
-  /** The head reply's beats' texts, by hash (`beatTextHashes`), read before the build: its change chip lists each beat that reached the player character by them (`beatLines`). Absent: it lists none. */
-  beatTexts?: ReadonlyMap<string, string>;
   /**
    * Where the build's time went, filled as it goes: the fold, each pack panel (`panel:<id>`), and
    * the HUD, scene, chips, clocks, Journal, palette and controls it made, in order, each in ms. The
@@ -950,7 +888,7 @@ export function buildView(input: ViewInput): StateView {
   const journal = core.journal;
   const keys = core.foldKeys(observed);
   const stateKey = `${keys.state}\u0000${input.run.revision}\u0000${JSON.stringify(input.mapDisplay ?? null)}`;
-  const chainKey = `${keys.steps.at(-1) ?? keys.root}\u0000${input.run.revision}\u0000${JSON.stringify(journal.pauses)}\u0000${JSON.stringify(journal.refused ?? [])}\u0000${input.depth}\u0000${input.beatTexts?.size ?? 0}`;
+  const chainKey = `${keys.steps.at(-1) ?? keys.root}\u0000${input.run.revision}\u0000${JSON.stringify(journal.pauses)}\u0000${JSON.stringify(journal.refused ?? [])}`;
   const stateHit = memo.state?.key === stateKey ? memo.state : null;
   const chainHit = memo.chain?.key === chainKey ? memo.chain : null;
   // Folded only when a part kept doesn't stand for the chat as it is now.
@@ -958,9 +896,8 @@ export function buildView(input: ViewInput): StateView {
   const folded = (): FoldOutput => (fold ??= timedPart(input.parts, "fold", () => core.fold(observed)));
   const head = stateHit ? null : folded().state;
   const doc = head ? (input.world(head.revision) ?? input.world(input.run.revision)) : undefined;
-  // The world as the head state plays it (ITEMS-SPEC §6.2): with the places it made, and the player
-  // character the player last switched to as its point of view (D-10).
-  const world = stateHit?.world ?? (head && doc ? withPov(playedWorld(doc, head), head) : undefined);
+  // The world as the head state plays it (ITEMS-SPEC §6.2): with the places it made.
+  const world = stateHit?.world ?? (head && doc ? playedWorld(doc, head) : undefined);
   if (!world) return notWorldView(input.chatId);
   // The palette and the controls are judged against what the next turn acts on: before the first
   // record, that includes the starting markers (the world's defaults, the user's settings filling
@@ -1007,7 +944,7 @@ export function buildView(input: ViewInput): StateView {
       read = memo.chain = {
         key: chainKey,
         scene: kept(timedPart(input.parts, "scene", () => scene(world, state, lastRec ? clockMinutes(lastRec.events) : 0, registry))),
-        chips: kept(timedPart(input.parts, "chips", () => derivedChips(chain, out, drops.keep, core, registry, world, input.depth, input.beatTexts ?? new Map()))),
+        chips: kept(timedPart(input.parts, "chips", () => derivedChips(chain, out, drops.keep, core, registry, world))),
         replyClocks: kept(timedPart(input.parts, "clocks", () => replyClocks(chain, out, core, world, state))),
         journal: kept([...timedPart(input.parts, "journal", () => turnNotes(chain, out, core, registry, world, state)), ...drops.notes]),
         keepReport: kept(drops.keep),

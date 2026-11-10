@@ -3,7 +3,6 @@
 // event payloads carry no userId; handlers receive it as the second argument) and maps the port's
 // calls onto `lumiverse-spindle-types` 0.6.49 plus the local augmentation.
 
-import { userInfo } from "node:os";
 import type { GenerationReasoningOverrideDTO, GenerationRequestDTO, LlmMessageDTO, LlmMessagePartDTO, PromptBlockDTO, PromptBlockSnapshotDTO, StreamChunkDTO, ToolSchemaDTO, WorldBookEntryCreateDTO, WorldBookEntryDTO, WorldInfoInterceptorCtxDTO } from "lumiverse-spindle-types";
 import type { HostSpindleAPI, RegexScriptInput } from "../spindle-augment";
 import { MCP_PERMISSION } from "../shared/agents";
@@ -28,12 +27,8 @@ import type {
   HostPort,
   HostCapabilities,
   HostRegexScript,
-  PromptInterceptorInput,
-  PromptMessage,
-  StreamPiece,
   QuietMessage,
   QuietRequest,
-  QuietResult,
   QuietThinkingBlock,
   QuietTool,
   QuietToolCall,
@@ -93,24 +88,7 @@ function contextType(o: unknown): HostGenerationType | "other" {
 function hostCapabilities(): HostCapabilities {
   const contracts: Readonly<Record<string, number>> = spindle.contracts ?? {};
   const capabilities: Readonly<Record<string, number>> = spindle.host?.capabilities ?? {};
-  const has = (name: string): boolean => (capabilities[name] ?? 0) >= 1;
-  return { cancel: (contracts.preAssemblyGenerationContext ?? 0) >= 1, required: has("required-context-handlers-v1"), sessions: has("frontend-session-routing-v1"), interceptors: has("required-interceptors-v1"), messageSessions: has("generation-message-sessions-v1") };
-}
-
-/** The host's own flags on an interceptor's messages (worker-host.ts:3181-3196 on staging): read, then taken off, so none reaches the provider. */
-const PROMPT_FLAGS = ["__isChatHistory", "__isWorldInfoEntry", "sourceMessageId", "sourceIndexInChat", "sourceMessageMetadata"] as const;
-
-/** A prompt message as the interceptor port reads it, and the message without the host's flags. */
-function promptMessageOf(raw: LlmMessageDTO): { message: PromptMessage; clean: LlmMessageDTO } {
-  const flagged = raw as LlmMessageDTO & Record<string, unknown>;
-  const clean = { ...flagged } as Record<string, unknown>;
-  for (const flag of PROMPT_FLAGS) delete clean[flag];
-  const index = flagged.sourceIndexInChat;
-  const content = typeof raw.content === "string" ? raw.content : JSON.stringify(raw.content);
-  return {
-    message: { role: raw.role, content, history: flagged.__isChatHistory === true, worldInfo: flagged.__isWorldInfoEntry === true, ...(typeof index === "number" ? { sourceIndex: index } : {}) },
-    clean: clean as unknown as LlmMessageDTO,
-  };
+  return { cancel: (contracts.preAssemblyGenerationContext ?? 0) >= 1, required: (capabilities["required-context-handlers-v1"] ?? 0) >= 1, sessions: (capabilities["frontend-session-routing-v1"] ?? 0) >= 1 };
 }
 
 /** A World Info entry as the port reads it. */
@@ -356,7 +334,7 @@ function thinkingBlock(raw: unknown): QuietThinkingBlock | null {
  * answered the cancel the stream sends it; the stream is let go of either way, which after a cancel
  * tells Lumiverse again.
  */
-async function streamedAnswer(stream: AsyncGenerator<StreamChunkDTO, void, void>, signal: AbortSignal, onPiece?: (piece: StreamPiece) => void): Promise<unknown> {
+async function streamedAnswer(stream: AsyncGenerator<StreamChunkDTO, void, void>, signal: AbortSignal): Promise<unknown> {
   type Step = IteratorResult<StreamChunkDTO, void>;
   let wait: PromiseWithResolvers<Step> | null = null;
   const abort = (): void => wait?.reject(new DOMException("Generation aborted", "AbortError"));
@@ -368,10 +346,7 @@ async function streamedAnswer(stream: AsyncGenerator<StreamChunkDTO, void, void>
       else stream.next().then(wait.resolve, wait.reject);
       const step = await wait.promise;
       if (step.done) throw new Error("The model's stream ended without its answer");
-      const chunk = step.value;
-      if (chunk.type === "done") return chunk;
-      // Each piece as it is written, for a caller that streams it on (the loopback's narrator and passthrough).
-      if (onPiece && chunk.token !== "") onPiece({ kind: chunk.type === "reasoning" ? "reasoning" : "content", text: chunk.token });
+      if (step.value.type === "done") return step.value;
     }
   } finally {
     signal.removeEventListener("abort", abort);
@@ -462,63 +437,6 @@ async function listScripts(options: { scope: "chat" | "global"; scopeId?: string
 
 // ---------------------------------------------------------------- the port
 
-/**
- * One quiet call (`generate.quiet`), or streamed (`generate.quietStream`) when the request asks or a
- * caller takes its pieces as they are written (`onPiece`); either way the answer reads the same.
- */
-async function quietCall(request: QuietRequest, userId: UserId, signal: AbortSignal, onPiece?: (piece: StreamPiece) => void): Promise<QuietResult> {
-  // The host merges these over the connection's preset parameters, so one left out stays the connection's own.
-  const parameters: Record<string, unknown> = { ...request.params, max_tokens: request.maxTokens };
-  if (request.json && (await takesJsonMode(request.connectionId, userId))) parameters.response_format = { type: "json_object" };
-  // The host reads `parameters.model` as a per-request model override.
-  if (request.model) parameters.model = request.model;
-  // Only then does an OpenAI-compatible stream (every call with tools) report usage; every provider drops the key itself.
-  if (request.usage) parameters._include_usage = true;
-  if (request.toolChoice !== undefined) parameters.tool_choice = request.toolChoice;
-  const reasoning = reasoningOverride(request.effort, request.thinkingDisplay);
-  const input: GenerationRequestDTO = {
-    type: "quiet",
-    messages: request.messages.map(messageDTO),
-    parameters,
-    ...(request.connectionId ? { connection_id: request.connectionId } : {}),
-    ...(request.tools && request.tools.length > 0 ? { tools: request.tools.map(toolDTO) } : {}),
-    ...(reasoning ? { reasoning } : {}),
-    userId,
-    signal,
-  };
-  // Streamed, the answer comes as the model writes it and ends whole, as `generate.quiet` returns it.
-  const raw = request.stream || onPiece ? await streamedAnswer(spindle.generate.quietStream(input), signal, onPiece) : await spindle.generate.quiet(input);
-  // `tool_calls` (`ToolCallDTO[]`): a call without a name is dropped; arguments that aren't an object read as none.
-  const calls = isRecord(raw) && Array.isArray(raw.tool_calls) ? raw.tool_calls : [];
-  const toolCalls: QuietToolCall[] = calls.flatMap((c, i) => {
-    if (!isRecord(c) || typeof c.name !== "string") return [];
-    const signature = str(c, "thought_signature");
-    return [{ name: c.name, args: toJsonObject(c.args), callId: str(c, "call_id") ?? `call_${i}`, ...(signature !== undefined ? { thoughtSignature: signature } : {}) }];
-  });
-  const usage = isRecord(raw) && isRecord(raw.usage) ? raw.usage : null;
-  const tokensIn = usage ? (num(usage, "input_tokens") ?? num(usage, "prompt_tokens")) : undefined;
-  const tokensOut = usage ? (num(usage, "output_tokens") ?? num(usage, "completion_tokens")) : undefined;
-  const model = str(raw, "model");
-  const thought = str(raw, "reasoning");
-  // Carriers a reasoning model needs back after a tool call, once the host passes them (the core PR, AGENT-LOOP-PLAN §2).
-  const blocks = isRecord(raw) && Array.isArray(raw.thinking_blocks) ? raw.thinking_blocks.flatMap((b) => thinkingBlock(b) ?? []) : [];
-  const details = isRecord(raw) && Array.isArray(raw.reasoning_details) ? raw.reasoning_details.filter(isRecord).map(toJsonObject) : [];
-  return {
-    content: str(raw, "content") ?? "",
-    finishReason: str(raw, "finish_reason") ?? "",
-    ...(isRecord(raw) && isRecord(raw.stop_details) ? { stopDetails: toJsonObject(raw.stop_details) } : {}),
-    tokens: usageTokens(raw),
-    ...(tokensIn !== undefined ? { tokensIn } : {}),
-    ...(tokensOut !== undefined ? { tokensOut } : {}),
-    ...(model ? { model } : {}),
-    ...(toolCalls.length > 0 ? { toolCalls } : {}),
-    ...(thought ? { reasoning: thought } : {}),
-    ...(blocks.length > 0 ? { thinkingBlocks: blocks } : {}),
-    ...(details.length > 0 ? { reasoningDetails: details } : {}),
-    ...(usage ? { usage: toJsonObject(usage) } : {}),
-  };
-}
-
 export function createSpindleHost(): HostPort {
   const diagnostics = new DiagnosticsLog();
   return {
@@ -539,10 +457,6 @@ export function createSpindleHost(): HostPort {
         const chat = await spindle.chats.get(chatId, userId);
         return toJsonObject(chat?.metadata);
       },
-      async created(chatId, userId) {
-        const chat = await spindle.chats.get(chatId, userId);
-        return typeof chat?.created_at === "number" ? chat.created_at : null;
-      },
       async mergeChatMetadata(chatId, patch, userId) {
         const chat = await spindle.chats.get(chatId, userId);
         if (!chat) throw new Error(`chat ${chatId} not found`);
@@ -557,9 +471,6 @@ export function createSpindleHost(): HostPort {
       },
       async setSwipes(chatId, messageId, swipes, swipeId) {
         await spindle.chat.updateMessage(chatId, messageId, { swipes: [...swipes], swipe_id: swipeId });
-      },
-      async deleteMessage(chatId, messageId) {
-        await spindle.chat.deleteMessage(chatId, messageId);
       },
       // The host lists the newest first by offset, so the list shifts while it is read: a chat
       // updated or made meanwhile moves to the front, and one deleted moves the rest up. The pages
@@ -659,48 +570,57 @@ export function createSpindleHost(): HostPort {
         return await handler({ chatId: ctx.chatId, userId: ctx.userId, entries, chatMetadata: ctx.chatMetadata as JsonObject });
       }, 100);
     },
-    registerPromptInterceptor(handler, options) {
-      // Core drops a registration made while `interceptor` isn't granted and never asks again, so the
-      // grant registers it once more. Core keeps one interceptor per extension: this one replaces it.
-      let dispose: (() => void) | null = null;
-      const register = (): void => {
-        dispose?.();
-        dispose = spindle.registerInterceptor(
-        async (messages, context) => {
-          const read = messages.map(promptMessageOf);
-          const clean = read.map((r) => r.clean);
-          const ctx: unknown = context;
-          const chatId = str(ctx, "chatId");
-          const userId = str(ctx, "userId");
-          if (!chatId || !userId) return clean;
-          const session = str(ctx, "frontendSessionId");
-          const input: PromptInterceptorInput = {
-            chatId,
-            userId,
-            generationType: contextType(ctx),
-            // Staging's context says `dryRun`; the published types say `isDryRun`.
-            dryRun: isRecord(ctx) && (ctx.dryRun === true || ctx.isDryRun === true),
-            connectionId: str(ctx, "connectionId") ?? null,
-            presetId: str(ctx, "presetId") ?? null,
-            ...(session ? { frontendSessionId: session } : {}),
-            messages: read.map((r) => r.message),
-          };
-          const verdict = await handler(input);
-          const omit = new Set(verdict.omit ?? []);
-          const sent = omit.size > 0 ? clean.filter((_, i) => !omit.has(i)) : clean;
-          return verdict.parameters ? { messages: sent, parameters: verdict.parameters } : sent;
-        },
-        { priority: options.priority, match: { generationTypes: [...options.generationTypes] }, required: options.required },
-        );
-      };
-      register();
-      spindle.on("PERMISSION_CHANGED", (detail) => {
-        if (detail.permission === "interceptor" && detail.granted) register();
-      });
-    },
     models: {
-      quiet: (request, userId, signal) => quietCall(request, userId, signal),
-      stream: (request, userId, signal, onPiece) => quietCall(request, userId, signal, onPiece),
+      async quiet(request, userId, signal) {
+        // The host merges these over the connection's preset parameters, so one left out stays the connection's own.
+        const parameters: Record<string, unknown> = { ...request.params, max_tokens: request.maxTokens };
+        if (request.json && (await takesJsonMode(request.connectionId, userId))) parameters.response_format = { type: "json_object" };
+        // The host reads `parameters.model` as a per-request model override.
+        if (request.model) parameters.model = request.model;
+        // Only then does an OpenAI-compatible stream (every call with tools) report usage; every provider drops the key itself.
+        if (request.usage) parameters._include_usage = true;
+        const reasoning = reasoningOverride(request.effort, request.thinkingDisplay);
+        const input: GenerationRequestDTO = {
+          type: "quiet",
+          messages: request.messages.map(messageDTO),
+          parameters,
+          ...(request.connectionId ? { connection_id: request.connectionId } : {}),
+          ...(request.tools && request.tools.length > 0 ? { tools: request.tools.map(toolDTO) } : {}),
+          ...(reasoning ? { reasoning } : {}),
+          userId,
+          signal,
+        };
+        // Streamed, the answer comes as the model writes it and ends whole, as `generate.quiet` returns it.
+        const raw = request.stream ? await streamedAnswer(spindle.generate.quietStream(input), signal) : await spindle.generate.quiet(input);
+        // `tool_calls` (`ToolCallDTO[]`): a call without a name is dropped; arguments that aren't an object read as none.
+        const calls = isRecord(raw) && Array.isArray(raw.tool_calls) ? raw.tool_calls : [];
+        const toolCalls: QuietToolCall[] = calls.flatMap((c, i) => {
+          if (!isRecord(c) || typeof c.name !== "string") return [];
+          const signature = str(c, "thought_signature");
+          return [{ name: c.name, args: toJsonObject(c.args), callId: str(c, "call_id") ?? `call_${i}`, ...(signature !== undefined ? { thoughtSignature: signature } : {}) }];
+        });
+        const usage = isRecord(raw) && isRecord(raw.usage) ? raw.usage : null;
+        const tokensIn = usage ? (num(usage, "input_tokens") ?? num(usage, "prompt_tokens")) : undefined;
+        const tokensOut = usage ? (num(usage, "output_tokens") ?? num(usage, "completion_tokens")) : undefined;
+        const model = str(raw, "model");
+        const thought = str(raw, "reasoning");
+        // Carriers a reasoning model needs back after a tool call, once the host passes them (the core PR, AGENT-LOOP-PLAN §2).
+        const blocks = isRecord(raw) && Array.isArray(raw.thinking_blocks) ? raw.thinking_blocks.flatMap((b) => thinkingBlock(b) ?? []) : [];
+        const details = isRecord(raw) && Array.isArray(raw.reasoning_details) ? raw.reasoning_details.filter(isRecord).map(toJsonObject) : [];
+        return {
+          content: str(raw, "content") ?? "",
+          finishReason: str(raw, "finish_reason") ?? "",
+          tokens: usageTokens(raw),
+          ...(tokensIn !== undefined ? { tokensIn } : {}),
+          ...(tokensOut !== undefined ? { tokensOut } : {}),
+          ...(model ? { model } : {}),
+          ...(toolCalls.length > 0 ? { toolCalls } : {}),
+          ...(thought ? { reasoning: thought } : {}),
+          ...(blocks.length > 0 ? { thinkingBlocks: blocks } : {}),
+          ...(details.length > 0 ? { reasoningDetails: details } : {}),
+          ...(usage ? { usage: toJsonObject(usage) } : {}),
+        };
+      },
       async decide(request, userId, signal) {
         // The Decision API takes text, a list or an object as state; scalars go as their text.
         const s = request.state;
@@ -753,16 +673,6 @@ export function createSpindleHost(): HostPort {
       closeDrawer: (userId: UserId) => spindle.ui.closeDrawer({ userId }),
     },
     toast: (message, userId) => spindle.toast.info(message, { title: "LumiRPEngine", userId }),
-    characters: {
-      async get(characterId, userId) {
-        const c = await spindle.characters.get(characterId, userId);
-        return c ? { id: c.id, name: c.name, description: c.description ?? "", personality: c.personality ?? "", scenario: c.scenario ?? "", examples: c.mes_example ?? "" } : null;
-      },
-      async ofChat(chatId, userId) {
-        const chat = await spindle.chats.get(chatId, userId);
-        return typeof chat?.character_id === "string" && chat.character_id !== "" ? chat.character_id : null;
-      },
-    },
     books: {
       async create(name, description, userId) {
         const book = await spindle.world_books.create({ name, description, metadata: { lumi_rp_engine: true } }, userId);
@@ -772,16 +682,15 @@ export function createSpindleHost(): HostPort {
         return (await spindle.world_books.get(bookId, userId)) !== null;
       },
       async list(userId) {
-        const out: { id: string; name: string; engine: boolean; character: boolean; added: number | null; updated: number | null; metadata: JsonObject }[] = [];
+        const out: { id: string; name: string; engine: boolean; character: boolean; added: number | null; updated: number | null }[] = [];
         const seconds = (t: unknown): number | null => (typeof t === "number" && Number.isFinite(t) ? t : null);
         for (let offset = 0; offset < 100_000; offset += 200) {
           const page = await spindle.world_books.list({ limit: 200, offset, userId });
           for (const b of page.data) {
             const meta: Record<string, unknown> = isRecord(b.metadata) ? b.metadata : {};
             // Core marks a book it made from a character's card with that character (`source_character_id`),
-            // and bumps a book's `updated_at` whenever it or any of its entries changes; other extensions mark
-            // their own books in its metadata (LumiBooks: `lumibooks_chat_id`, `lumibooks_codex_chat_id`).
-            out.push({ id: b.id, name: b.name, engine: meta.lumi_rp_engine === true, character: typeof meta.source_character_id === "string" && meta.source_character_id !== "", added: seconds(b.created_at), updated: seconds(b.updated_at), metadata: toJsonObject(meta) });
+            // and bumps a book's `updated_at` whenever it or any of its entries changes.
+            out.push({ id: b.id, name: b.name, engine: meta.lumi_rp_engine === true, character: typeof meta.source_character_id === "string" && meta.source_character_id !== "", added: seconds(b.created_at), updated: seconds(b.updated_at) });
           }
           if (page.data.length < 200 || out.length >= page.total) break;
         }
@@ -896,16 +805,7 @@ export function createSpindleHost(): HostPort {
       async profile(connectionId, userId) {
         // A connection named by its id is read by it: the list stops at 100 connections.
         const c = connectionId ? await spindle.connections.get(connectionId, userId) : (await spindle.connections.list(userId)).find((x) => x.is_default);
-        return c ? { id: c.id, name: c.name, provider: c.provider, model: c.model, cache: cacheBreakpoints(c.provider, c.metadata), targets: rouletteTargets(c), url: c.api_url } : null;
-      },
-    },
-    memories: {
-      granted: () => spindle.permissions.has("memories"),
-      async entities(chatId, userId) {
-        return (await spindle.memories.entities.list(chatId, { activeOnly: false, userId })).map((e) => ({ id: e.id, name: e.name, aliases: e.aliases, description: e.description, facts: e.facts }));
-      },
-      async consolidations(chatId, userId) {
-        return (await spindle.memories.consolidations.list(chatId, { userId })).map((c) => ({ id: c.id, title: c.title, summary: c.summary, tier: c.tier, messageRangeStart: c.messageRangeStart, messageRangeEnd: c.messageRangeEnd }));
+        return c ? { id: c.id, name: c.name, provider: c.provider, model: c.model, cache: cacheBreakpoints(c.provider, c.metadata), targets: rouletteTargets(c) } : null;
       },
     },
     mcp: {
@@ -969,12 +869,6 @@ export function createSpindleHost(): HostPort {
         return spindle.backendProcesses.onLifecycle((e) => handler({ processId: e.processId, key: e.key ?? "", state: e.state, ...(e.error ? { error: e.error } : {}) }));
       },
     },
-    users: {
-      role: (userId) => spindle.users.getRole(userId),
-    },
-    // The worker runs on Lumiverse's own Bun: its path is what systemd and sudo need (DEPTH-PLAN F32).
-    bunPath: typeof process.execPath === "string" && process.execPath.startsWith("/") ? process.execPath : null,
-    account: accountName(),
     log(level, message, userId, turn) {
       if (level === "error") spindle.log.error(message);
       else if (level === "warn") spindle.log.warn(message);
@@ -995,13 +889,4 @@ export function spliceBlocks(stored: readonly PromptBlockSnapshotDTO[], at: numb
   const added = blocks.map((b): PromptBlockDTO => ({ id: newId(), name: b.name, content: b.kind === "text" ? b.content : "", role: "system", enabled: b.kind === "category", position: "pre_history", depth: 0, marker: b.kind === "category" ? "category" : null, isLocked: false, color: null, injectionTrigger: [], group: null, categoryMode: b.kind === "category" ? "checkbox" : null }));
   const index = at === null ? stored.length : Math.max(0, Math.min(stored.length, at));
   return [...stored.slice(0, index), ...added, ...stored.slice(index)];
-}
-
-/** The account this process runs as; null where the system can't name it (`userInfo` throws for a uid with no passwd entry, as in a container run under an arbitrary uid). */
-function accountName(): string | null {
-  try {
-    return userInfo().username || null;
-  } catch {
-    return null;
-  }
 }

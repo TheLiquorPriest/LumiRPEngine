@@ -80,10 +80,9 @@ async function roomy(rig: Rig): Promise<void> {
   await settings(rig, { modelUse: { tokens: { sections: 100_000 } } });
 }
 
-/** GM → This chat → Knowledge: sets the parts given, and answers with the chat's own knowledge choices (its engine is GM → This chat → Engine's, tested with the switch). */
-async function chatKnowledge(rig: Rig, chatId: string, change: { knowledge?: boolean | null; narrator?: NarratorView | null }): Promise<Pick<ResultBodies["lre.chat.knowledge"], "knowledge" | "narrator">> {
-  const { knowledge, narrator } = rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, ...change })) as unknown as ResultBodies["lre.chat.knowledge"];
-  return { knowledge, narrator };
+/** GM → This chat → Knowledge: sets the parts given, and answers with the chat's own choices. */
+async function chatKnowledge(rig: Rig, chatId: string, change: { knowledge?: boolean | null; narrator?: NarratorView | null }): Promise<ResultBodies["lre.chat.knowledge"]> {
+  return rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, ...change })) as unknown as ResultBodies["lre.chat.knowledge"];
 }
 
 async function edit(rig: Rig, chatId: string, op: EditOp): Promise<void> {

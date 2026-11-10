@@ -30,13 +30,9 @@ import type {
   HostPresetBlock,
   HostRegexScript,
   ProcessEvent,
-  PromptInterceptorInput,
-  PromptMessage,
-  PromptVerdict,
   QuietRequest,
   QuietResult,
   QuietToolCall,
-  StreamPiece,
   WorldInfoInput,
   WorldInfoVerdict,
 } from "../../src/backend/host";
@@ -45,7 +41,7 @@ import { outsideTurns } from "../../src/backend/turn-frame";
 
 export interface FakeMessage {
   id: MessageId;
-  /** The host's `index_in_chat`: one past the chat's highest when the message is made, never renumbered after a deletion; a message inserted before it (`insertBefore`) numbers it up by one. */
+  /** The host's `index_in_chat`: one past the chat's highest when the message is made, never renumbered after a deletion. */
   index: number;
   isUser: boolean;
   name: string;
@@ -60,8 +56,6 @@ export interface FakeChat {
   name: string;
   metadata: JsonObject;
   messages: FakeMessage[];
-  /** When it was made, in Unix seconds, as the host keeps it (`created_at`): a branch's is when it was branched. */
-  created: number;
 }
 
 type Handler = (payload: never, userId: UserId | null) => void;
@@ -83,13 +77,6 @@ function untilAborted<T>(answer: Promise<T>, signal: AbortSignal, stopped: (why:
   else signal.addEventListener("abort", stop, { once: true });
   answer.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
   return promise;
-}
-
-/** A reply's text in the pieces a provider streams it in: two, split at a space past the middle. */
-function splitText(text: string): string[] {
-  if (text === "") return [];
-  const at = text.indexOf(" ", Math.floor(text.length / 2));
-  return at <= 0 ? [text] : [text.slice(0, at), text.slice(at)];
 }
 
 /** An entry as the fake host stores it: with the outlet it keeps beside its extension data, and whether its text triggers others (Prevent further recursion). */
@@ -119,10 +106,6 @@ export interface Generation {
   open: boolean;
   /** The generation stopped before its prompt: the guard cancelled it, or a required handler failed. */
   halted?: "cancelled" | "failed";
-  /** What the prompt interceptor merged into the generation's parameters (the loopback's turn tag). */
-  parameters?: JsonObject;
-  /** The prompt the provider call carries, after the interceptors: what a Custom connection posts as `messages`. */
-  prompt?: { role: string; content: string }[];
 }
 
 export interface StartOptions {
@@ -183,7 +166,7 @@ export class FakeHost implements HostPort {
     return promise;
   }
   /** What this host does with the handler's answer (`cancelGeneration`, `required`) and frontend pages; a test plays an older host by switching one off. */
-  capabilities: HostCapabilities = { cancel: true, required: true, sessions: true, interceptors: true, messageSessions: false };
+  capabilities: HostCapabilities = { cancel: true, required: true, sessions: true };
   /** The frontend's side of `lre.generate` (DESIGN §5.1): what the engine asked to start, of which page, in order, until `start` plays it. */
   readonly restarts: { chatId: ChatId; as: GenerateAs; turn: string; session?: string }[] = [];
   private readonly queue: { event: HostEventName; payload: HostEventMap[HostEventName] }[] = [];
@@ -206,7 +189,6 @@ export class FakeHost implements HostPort {
     },
     // The real host resolves a chat for its owner only; another user sees no metadata.
     chatMetadata: async (chatId, userId) => (userId === this.userId ? structuredClone(this.chat(chatId).metadata) : {}),
-    created: async (chatId, userId) => (userId === this.userId ? (this.chatsById.get(chatId)?.created ?? null) : null),
     mergeChatMetadata: async (chatId, patch) => {
       const c = this.chat(chatId);
       c.metadata = { ...c.metadata, ...structuredClone(patch) };
@@ -223,8 +205,6 @@ export class FakeHost implements HostPort {
       m.swipeId = swipeId;
       this.emit("MESSAGE_EDITED", { chatId, message: this.hostMessage(chatId, messageId) });
     },
-    // `chat.deleteMessage`: MESSAGE_DELETED, as when the user deletes it.
-    deleteMessage: async (chatId, messageId) => this.deleteMessage(chatId, messageId),
   };
 
   /** The chat the user has open (`chats.getActive`). */
@@ -284,7 +264,7 @@ export class FakeHost implements HostPort {
    * provider that takes none) and a Model Roulette's connections (absent: none); and their Decisions
    * API profiles.
    */
-  connectionProfiles: ({ id: string; name: string; models: string[] | null } & Partial<Pick<HostConnectionProfile, "provider" | "cache" | "targets" | "url">>)[] = [];
+  connectionProfiles: ({ id: string; name: string; models: string[] | null } & Partial<Pick<HostConnectionProfile, "provider" | "cache" | "targets">>)[] = [];
   decisionProfiles: { id: string; name: string }[] = [];
 
   connections: HostPort["connections"] = {
@@ -296,7 +276,7 @@ export class FakeHost implements HostPort {
       const c = connectionId === null ? this.activeConnection : (this.connectionProfiles.find((p) => p.id === connectionId) ?? (this.activeConnection?.id === connectionId ? this.activeConnection : null));
       if (!c) return null;
       const own = this.connectionProfiles.find((p) => p.id === c.id);
-      return { id: c.id, name: c.name, provider: own?.provider ?? "fake", model: own?.models?.[0] ?? "", cache: own?.cache ?? null, targets: own?.targets ?? [], url: own?.url ?? "" };
+      return { id: c.id, name: c.name, provider: own?.provider ?? "fake", model: own?.models?.[0] ?? "", cache: own?.cache ?? null, targets: own?.targets ?? [] };
     },
   };
 
@@ -410,21 +390,6 @@ export class FakeHost implements HostPort {
     this.worldInfoInterceptor = handler;
   }
 
-  /** The prompt interceptor (the loopback's turn tagger), asked after the World Info for the types it named; a throw from a required one stops the generation. */
-  promptInterceptor: { handler: (input: PromptInterceptorInput) => Promise<PromptVerdict>; types: readonly HostGenerationType[]; required: boolean; priority: number } | null = null;
-
-  registerPromptInterceptor(handler: (input: PromptInterceptorInput) => Promise<PromptVerdict>, options: { priority: number; generationTypes: readonly HostGenerationType[]; required: boolean }): void {
-    this.promptInterceptor = { handler, types: [...options.generationTypes], required: options.required, priority: options.priority };
-  }
-
-  /** The users' roles (`spindle.users.getRole`): the host's user is the operator unless a test says otherwise. */
-  readonly roles = new Map<UserId, "operator" | "admin" | "user">();
-  users: HostPort["users"] = {
-    role: async (userId) => this.roles.get(userId) ?? (userId === this.userId ? "operator" : "user"),
-  };
-  bunPath: string | null = "/home/lumi/.bun/bin/bun";
-  account: string | null = "lumi";
-
   /** The user's global books, which every chat's prompt scans beside the chat's own. */
   globalBooks: string[] = [];
 
@@ -462,17 +427,6 @@ export class FakeHost implements HostPort {
         ...(reasoningDetails ? { reasoningDetails } : {}),
         ...(usage ? { usage } : {}),
       };
-    },
-    stream: async (request, userId, signal, onPiece) => {
-      // The scripted answer, written in pieces as a provider streams it: its reasoning first, then its text.
-      const result = await this.models.quiet(request, userId, signal);
-      const pieces: StreamPiece[] = [...(result.reasoning ? [{ kind: "reasoning" as const, text: result.reasoning }] : []), ...splitText(result.content).map((text) => ({ kind: "content" as const, text }))];
-      for (const piece of pieces) {
-        if (signal.aborted) throw signal.reason;
-        onPiece(piece);
-        await Promise.resolve();
-      }
-      return result;
     },
     decide: async (request) => {
       this.decideCalls.push(request);
@@ -578,7 +532,7 @@ export class FakeHost implements HostPort {
 
   createChat(greeting?: string): ChatId {
     const id = `chat-${++this.nextId}`;
-    const chat: FakeChat = { id, name: `Chat ${this.nextId}`, metadata: {}, messages: [], created: Math.floor(Date.now() / 1000) };
+    const chat: FakeChat = { id, name: `Chat ${this.nextId}`, metadata: {}, messages: [] };
     this.chatsById.set(id, chat);
     if (greeting !== undefined) this.append(chat, { id: this.newId("m"), isUser: false, name: "Narrator", swipes: [greeting], swipeId: 0, bag: {} });
     return id;
@@ -623,19 +577,6 @@ export class FakeHost implements HostPort {
 
   sendUser(chatId: ChatId, text: string, metadata: JsonObject = {}): MessageId {
     const m = this.append(this.chat(chatId), { id: this.newId("u"), isUser: true, name: "User", swipes: [text], swipeId: 0, bag: structuredClone(metadata) });
-    this.emit("MESSAGE_SENT", { chatId, message: this.hostMessage(chatId, m.id) });
-    return m.id;
-  }
-
-  /** A message inserted before `beforeId`, as the host inserts one (`createMessage` with `beforeId`): it takes that message's `index_in_chat`, and every one from there on is numbered up by one. MESSAGE_SENT. */
-  insertBefore(chatId: ChatId, beforeId: MessageId, message: { isUser: boolean; text: string }): MessageId {
-    const c = this.chat(chatId);
-    const at = c.messages.findIndex((m) => m.id === beforeId);
-    const before = c.messages[at];
-    if (!before) throw new Error(`no message ${beforeId} in ${chatId}`);
-    const m: FakeMessage = { id: this.newId(message.isUser ? "u" : "m"), index: before.index, isUser: message.isUser, name: message.isUser ? "User" : "Narrator", swipes: [message.text], swipeId: 0, bag: {} };
-    for (const x of c.messages) if (x.index >= before.index) x.index++;
-    c.messages.splice(at, 0, m);
     this.emit("MESSAGE_SENT", { chatId, message: this.hostMessage(chatId, m.id) });
     return m.id;
   }
@@ -697,7 +638,7 @@ export class FakeHost implements HostPort {
     const c = this.chat(chatId);
     const index = c.messages.findIndex((m) => m.id === messageId);
     const id = `chat-${++this.nextId}`;
-    this.chatsById.set(id, { id, name: `${c.name} (branch)`, metadata: structuredClone(c.metadata), messages: c.messages.slice(0, index + 1).map((m) => ({ ...structuredClone(m), id: this.newId(m.isUser ? "u" : "m") })), created: Math.floor(Date.now() / 1000) });
+    this.chatsById.set(id, { id, name: `${c.name} (branch)`, metadata: structuredClone(c.metadata), messages: c.messages.slice(0, index + 1).map((m) => ({ ...structuredClone(m), id: this.newId(m.isUser ? "u" : "m") })) });
     return id;
   }
 
@@ -842,38 +783,9 @@ export class FakeHost implements HostPort {
     const prompt = await this.worldInfo(chatId);
     this.assembled = prompt.placed;
     if (this.options.wiBook) this.emit("WORLD_INFO_ACTIVATED", { chatId, entries: prompt.activated.map((e) => ({ id: e.id, comment: e.comment, source: "constant", bookId: e.bookId })), stats: {} });
-    if ((await this.intercept(g, prompt.placed, opts.session ?? FakeHost.PAGE)) === "failed") return this.halt(g, "failed");
     this.emit("GENERATION_IN_PROGRESS", { generationId: g.id, chatId, model: "fake", targetMessageId, targetSwipeId, characterId: null, characterName: "Narrator" });
     await this.settle();
     return g;
-  }
-
-  /**
-   * The prompt as Lumiverse assembles it for the provider (`g.prompt`): a system prompt, the World Info
-   * placed, then the chat's history, each history message flagged with its index in the chat. The
-   * prompt interceptor, when it registered for the type, is asked last and its parameters are the
-   * generation's (`g.parameters`); a required one that throws stops the generation.
-   */
-  private async intercept(g: Generation, placed: readonly AssembledEntry[], session: string): Promise<"go" | "failed"> {
-    const history = this.chat(g.chatId).messages.filter((m) => m.isUser || (m.swipes[m.swipeId] ?? "") !== "");
-    const messages: PromptMessage[] = [
-      { role: "system", content: "You are the narrator of this story.", history: false, worldInfo: false },
-      ...placed.map((e) => ({ role: "system", content: e.content, history: false, worldInfo: true })),
-      ...history.map((m) => ({ role: m.isUser ? "user" : "assistant", content: m.swipes[m.swipeId] ?? "", history: true, worldInfo: false, sourceIndex: m.index })),
-    ];
-    g.prompt = messages.map(({ role, content }) => ({ role, content }));
-    const tagger = this.promptInterceptor;
-    if (!tagger || !tagger.types.includes(g.type)) return "go";
-    try {
-      const verdict = await tagger.handler({ chatId: g.chatId, userId: this.userId, generationType: g.type, dryRun: false, connectionId: this.contextConnectionId, presetId: this.activePreset, frontendSessionId: session, messages });
-      if (verdict.parameters) g.parameters = structuredClone(verdict.parameters);
-      // The messages the interceptor left out never reach the provider.
-      const omit = new Set(verdict.omit ?? []);
-      if (omit.size > 0) g.prompt = (g.prompt ?? []).filter((_, i) => !omit.has(i));
-      return "go";
-    } catch {
-      return tagger.required && this.capabilities.interceptors ? "failed" : "go";
-    }
   }
 
   /**
@@ -955,12 +867,9 @@ export class FakeHost implements HostPort {
         const verdict = await this.worldInfoInterceptor({ chatId, userId: this.userId, entries: candidates.map((e) => ({ id: e.id, bookId: e.bookId, disabled: e.disabled, extensions: structuredClone(e.extensions), comment: e.comment, content: e.content })), chatMetadata: structuredClone(this.chat(chatId).metadata) });
         const off = new Set(verdict.disabled);
         const on = new Set(verdict.enabled);
-        // `forced` activates an entry whatever its keys: the host takes it as constant.
-        const forced = new Set(verdict.forced ?? []);
         const text = new Map((verdict.mutated ?? []).map((m) => [m.id, m.content]));
         for (const e of candidates) {
           e.disabled = off.has(e.id) || (e.disabled && !on.has(e.id));
-          e.constant = e.constant || (forced.has(e.id) && !off.has(e.id));
           e.content = text.get(e.id) ?? e.content;
         }
       } catch {
@@ -1000,7 +909,7 @@ export class FakeHost implements HostPort {
    * and age (see `userBook`); `updated` as it reports the book's last change, which every change to
    * the book or any of its entries bumps (a count here, where Lumiverse keeps Unix seconds).
    */
-  readonly bookStore = new Map<string, { name: string; character?: boolean; added?: number; metadata?: JsonObject; updated: number; entries: Map<string, StoredEntry> }>();
+  readonly bookStore = new Map<string, { name: string; character?: boolean; added?: number; updated: number; entries: Map<string, StoredEntry> }>();
   private bookChanges = 0;
 
   /** Entries whose writes the host refuses (`update` throws), as a write a host fails would. */
@@ -1018,8 +927,8 @@ export class FakeHost implements HostPort {
     if (book) book.updated = ++this.bookChanges;
   }
 
-  /** A book of the user's own, as Lumiverse keeps one: `character` when a character's card brought it, made at `added` (Unix seconds), with the `metadata` an extension marked it with. */
-  userBook(name: string, origin: { character?: boolean; added?: number; metadata?: JsonObject } = {}): string {
+  /** A book of the user's own, as Lumiverse keeps one: `character` when a character's card brought it, made at `added` (Unix seconds). */
+  userBook(name: string, origin: { character?: boolean; added?: number } = {}): string {
     const id = this.newId("book");
     this.bookStore.set(id, { name, ...origin, updated: ++this.bookChanges, entries: new Map() });
     return id;
@@ -1069,7 +978,7 @@ export class FakeHost implements HostPort {
       return id;
     },
     exists: async (bookId) => this.bookStore.has(bookId),
-    list: async () => [...this.bookStore.entries()].map(([id, book]) => ({ id, name: book.name, engine: book.name.startsWith("LumiRPEngine · "), character: book.character === true, added: book.added ?? null, updated: book.updated, metadata: structuredClone(book.metadata ?? {}) })),
+    list: async () => [...this.bookStore.entries()].map(([id, book]) => ({ id, name: book.name, engine: book.name.startsWith("LumiRPEngine · "), character: book.character === true, added: book.added ?? null, updated: book.updated })),
     global: async () => [...this.globalBooks],
     entries: async (bookId) => [...(this.bookStore.get(bookId)?.entries.values() ?? [])].map(({ outlet: _outlet, ...e }) => structuredClone(e)),
     entry: async (entryId) => {

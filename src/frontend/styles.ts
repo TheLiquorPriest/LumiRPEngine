@@ -8,7 +8,6 @@ import { BUILD_CSS } from "./styles/build";
 import { CHARACTER_CSS } from "./styles/character";
 import { CHAT_CSS } from "./styles/chat";
 import { COMPONENTS_CSS } from "./styles/components";
-import { DEPTH_CSS } from "./styles/depth";
 import { DIAGNOSTICS_CSS } from "./styles/diagnostics";
 import { FORMS_CSS } from "./styles/forms";
 import { GM_CSS } from "./styles/gm";
@@ -27,4 +26,4 @@ import { TOKENS_CSS } from "./styles/tokens";
 import { VISUAL_EDITORS_CSS } from "./styles/visual-editors";
 import { WORKSPACE_CSS } from "./styles/workspace";
 
-export const CSS = [TOKENS_CSS, COMPONENTS_CSS, SHELL_CSS, CHAT_CSS, PLAY_CSS, PACKS_ME_CSS, PACKS_MONEY_CSS, PACKS_WORLD_CSS, GM_CSS, MINDS_CSS, DEPTH_CSS, ROUTINES_GM_CSS, ASSISTANT_CSS, LIVE_CSS, WORKSPACE_CSS, SELECT_CSS, SETTINGS_CSS, BUILD_CSS, FORMS_CSS, CHARACTER_CSS, THINGS_CSS, VISUAL_EDITORS_CSS, DIAGNOSTICS_CSS].join("\n");
+export const CSS = [TOKENS_CSS, COMPONENTS_CSS, SHELL_CSS, CHAT_CSS, PLAY_CSS, PACKS_ME_CSS, PACKS_MONEY_CSS, PACKS_WORLD_CSS, GM_CSS, MINDS_CSS, ROUTINES_GM_CSS, ASSISTANT_CSS, LIVE_CSS, WORKSPACE_CSS, SELECT_CSS, SETTINGS_CSS, BUILD_CSS, FORMS_CSS, CHARACTER_CSS, THINGS_CSS, VISUAL_EDITORS_CSS, DIAGNOSTICS_CSS].join("\n");

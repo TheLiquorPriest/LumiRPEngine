@@ -98,8 +98,7 @@
     "story": {"version": 1, "config": {"flags": {"causeway_open": true, "phone_working": true, "alaric_alive": true, "ledger_page_intact": true}}},
     "combat": {"version": 1, "config": {}},
     "minds": {"version": 1, "config": {}},
-    "orgs": {"version": 1, "config": {}},
-    "author": {"version": 1, "config": {}}
+    "orgs": {"version": 1, "config": {}}
   },
   "pins": {
     "generators": {"money": 2, "gear": 2, "vehicles": 1},

@@ -6,13 +6,16 @@
 import { describe, expect, test } from "bun:test";
 import { chatHead } from "../../src/backend/agents/tools/workspace";
 import type { QuietResult } from "../../src/backend/host";
-import { servedTools } from "../../src/cli/tools";
+import { toolsFor } from "../../src/cli/tools";
 import { madePlaces } from "../../src/engine/places-in-play";
 import { isRecord } from "../../src/shared/json";
 import type { CliRig } from "../support/cli-rig";
-import { CLI_SESSION, cliRig } from "../support/cli-rig";
+import { cliRig } from "../support/cli-rig";
 import { expectMatch } from "../support/match";
 import { plainMinds } from "../support/rig";
+
+/** The frontend session the client's requests come from (cliRig's). */
+const CLI_SESSION = "s_cli";
 
 interface Played extends CliRig {
   chatId: string;
@@ -75,7 +78,7 @@ describe("the chat tools", () => {
   });
 
   test("lre_gm and lre_gm_edit need spoilers; a GM edit shows in the GM view and in Play", async () => {
-    const { asked, chatId, call, raw, read } = await portAlder();
+    const { rig, chatId, call, raw, read } = await portAlder();
     const move = [{ op: "move", entity: "pov", to: "bluebird_coffee" }];
     const gated: [string, Record<string, unknown>][] = [
       ["lre_gm", {}],
@@ -84,13 +87,13 @@ describe("the chat tools", () => {
       ["lre_mind_edit", { ops: [{ op: "mind_pin", entity: "danny_okafor", level: "live" }] }],
       ["lre_minds_run", {}],
     ];
-    const sent = asked.length;
+    const sent = rig.host.sent.length;
     for (const [name, args] of gated) {
       const refused = await raw(name, { chatId, ...args });
       expect({ name, isError: refused.isError, says: refused.text.includes("spoilers: true") }).toEqual({ name, isError: true, says: true });
     }
     // Refused before anything was asked of LumiRPEngine.
-    expect(asked.length).toBe(sent);
+    expect(rig.host.sent.length).toBe(sent);
     expect(await read("lre_chat_state", { pointer: "/hud/place/id" })).toBe("harbor_street_114");
     expect(await read("lre_gm", { spoilers: true, pointer: "/edits" })).toEqual([]);
     expect(await call("lre_gm_edit", { chatId, spoilers: true, ops: move })).toMatchObject({ applied: 1, pending: false });
@@ -99,10 +102,11 @@ describe("the chat tools", () => {
   });
 
   test("lre_gm with no part answers how many each part holds, never the whole view; part all reads it whole", async () => {
-    const { rig, asked, chatId, raw, read } = await portAlder();
-    const before = asked.length;
+    const { rig, chatId, raw, read } = await portAlder();
+    const answered = (from: number): string[] => rig.host.sent.slice(from).flatMap((m) => (m.type === "lre.result" ? [m.request] : []));
+    const before = rig.host.sent.length;
     const outline = await read("lre_gm", { spoilers: true });
-    expect(asked.slice(before)).toEqual(["lre.gm.part"]);
+    expect(answered(before)).toEqual(["lre.gm.part"]);
     const whole = rig.body(await rig.send({ type: "lre.gm", chatId }));
     const count = (key: string): number => (Array.isArray(whole[key]) ? whole[key].length : -1);
     expect(isRecord(outline) ? outline.parts : null).toMatchObject({ entities: count("entities"), money: count("money"), orgs: count("orgs"), places: count("places"), held: 0, encounter: 0 });
@@ -146,12 +150,12 @@ describe("the chat tools", () => {
   });
 
   test("lre_items_find needs spoilers, and answers the things words name, best first, each with where it is and whose", async () => {
-    const { asked, chatId, call, raw } = await portAlder();
+    const { rig, chatId, call, raw } = await portAlder();
     const ids = (answer: Record<string, unknown>): unknown => (Array.isArray(answer.things) ? answer.things.map((t: unknown) => (isRecord(t) ? t.id : null)) : null);
-    const sent = asked.length;
+    const sent = rig.host.sent.length;
     const refused = await raw("lre_items_find", { chatId, words: "the keys" });
     expect({ isError: refused.isError, says: refused.text.includes("spoilers: true") }).toEqual({ isError: true, says: true });
-    expect(asked.length).toBe(sent);
+    expect(rig.host.sent.length).toBe(sent);
     // "The keys" are Jordan's first, as he would mean them, then the others' keys.
     const keys = await call("lre_items_find", { chatId, spoilers: true, words: "the keys" });
     expect(ids(keys)).toEqual(["pov_keys", "pontoon_keys", "shop_office_key"]);
@@ -274,8 +278,6 @@ describe("the chat tools", () => {
     const started = await call("lre_minds_run", { chatId, spoilers: true, who: ["danny_okafor"] });
     const runId = isRecord(started.run) ? started.run.runId : null;
     expect(typeof runId).toBe("string");
-    // It runs in the background: its end is pushed to the client's session.
-    await rig.host.sentWhere((m) => m.type === "lre.minds.update" && m.run.runId === runId && m.run.status !== "running");
     expect(await read("lre_minds", { spoilers: true, pointer: "/run/status" })).toBe("done");
     expect(await read("lre_minds", { spoilers: true, pointer: "/run/runId" })).toBe(runId);
     // A run cancelled while it is under way records nothing: its minds are held at their model calls until then.
@@ -299,17 +301,17 @@ describe("the chat tools", () => {
   });
 
   test("a read-only client lists only the reads, and refuses every write before anything is sent", async () => {
-    const { asked, ctx, chatId, raw, read } = await portAlder({ readOnly: true });
+    const { rig, chatId, raw, read } = await portAlder({ readOnly: true });
     const writes = ["lre_fix", "lre_gm_edit", "lre_mind_edit", "lre_marker", "lre_chip", "lre_keep", "lre_view_open", "lre_action", "lre_timelapse", "lre_minds_run", "lre_minds_cancel"];
-    const listed = ((await servedTools({ ...ctx, readOnly: true }))?.tools ?? []).map((t) => t.name);
+    const listed = toolsFor(true).map((t) => t.name);
     for (const name of writes) expect({ name, listed: listed.includes(name) }).toEqual({ name, listed: false });
     for (const name of ["lre_chat_state", "lre_chips", "lre_inspector", "lre_gm", "lre_minds"]) expect(listed).toContain(name);
-    const sent = asked.length;
+    const sent = rig.host.sent.length;
     for (const name of writes) {
       const refused = await raw(name, { chatId });
       expect({ name, refused: refused.isError === true && refused.text.includes("read-only") }).toEqual({ name, refused: true });
     }
-    expect(asked.length).toBe(sent);
+    expect(rig.host.sent.length).toBe(sent);
     expect(await read("lre_chat_state", { pointer: "/hud/cash" })).toEqual({ cents: 8500 });
   });
 });

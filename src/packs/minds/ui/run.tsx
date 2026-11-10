@@ -30,8 +30,6 @@ export interface MindsRun {
   error: string | null;
   /** The run's Undo was used. */
   undone: boolean;
-  /** Why running minds and their ladder are off in this chat (a chat on depth), in the backend's words; null where they run. */
-  off: string | null;
   start(who?: EntityId[]): Promise<boolean>;
   cancel(): Promise<boolean>;
   undo(): Promise<void>;
@@ -43,13 +41,10 @@ export function useMindsRun(chatId: string, send: Send, reload: () => Promise<vo
   const [run, setRun] = useState<MindsRunView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [undone, setUndone] = useState(false);
-  const [off, setOff] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
     void send({ type: "lre.minds", op: "status", chatId }).then((m) => {
-      if (!live || m.type !== "lre.result" || m.request !== "lre.minds") return;
-      setRun(m.body.run);
-      setOff(m.body.off ?? null);
+      if (live && m.type === "lre.result" && m.request === "lre.minds") setRun(m.body.run);
     });
     const off = app.client.onMindsRun((u) => {
       if (u.chatId !== chatId) return;
@@ -75,7 +70,6 @@ export function useMindsRun(chatId: string, send: Send, reload: () => Promise<vo
     run,
     error,
     undone,
-    off,
     start: (who?: EntityId[]) => {
       setUndone(false);
       return act({ type: "lre.minds", op: "run", chatId, ...(who ? { who } : {}) });

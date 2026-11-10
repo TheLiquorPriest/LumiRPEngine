@@ -21,10 +21,7 @@ import { knowledgeLines } from "./knowledge-section";
 import { buildKnownView } from "./known";
 import { MINDS_LINTS } from "./lint";
 import { mindLines, minded } from "./section";
-import { TRUTH_EVENT_DEFS } from "./truth";
 import { keptPlans, lastDue, PACK, readCharacter } from "./state";
-import { MIND_V2_EVENT_DEFS } from "./v2";
-import { mindV2At } from "../../../shared/character-engine";
 
 export const mindsPack: PackDef = {
   id: PACK,
@@ -34,17 +31,11 @@ export const mindsPack: PackDef = {
   requires: [],
   register(r) {
     for (const def of MINDS_EVENT_DEFS) r.event(def);
-    // The GM's truth links, projected into holdings (DEPTH-PLAN §4.4).
-    for (const def of TRUTH_EVENT_DEFS) r.event(def);
-    // The Character Engine's mind writes, lived batches, interviews and the player character's switch (DEPTH-PLAN §4.4, D-10).
-    for (const def of MIND_V2_EVENT_DEFS) r.event(def);
     r.service("minds.edit", mindEdit);
     r.query("minds.plans", (ctx, who) => keptPlans(readCharacter(ctx.state, who)));
-    // A character whose own agent keeps its mind (DEPTH-PLAN §4.4) has no level on the ladder, which
-    // decides nothing on a depth chat: it lives its plans as a Near character does, unless the GM pinned it.
     r.query("minds.tier", (ctx, who) => {
       const c = readCharacter(ctx.state, who);
-      return c.pin ?? lastDue(c)?.level ?? (Object.keys(mindV2At(ctx.state, who).files).length > 0 ? "near" : "background");
+      return c.pin ?? lastDue(c)?.level ?? "background";
     });
     r.query("minds.minded", minded);
     r.query("minds.on", mindsOn);

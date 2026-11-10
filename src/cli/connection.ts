@@ -8,14 +8,13 @@
 
 import type { AgentCheckIn, HelloClient } from "../shared/agents";
 import { isRecord } from "../shared/json";
-import type { ErrorCode, LintIssue, RequestFields, RequestType, ResultBodies } from "../shared/protocol";
+import type { ErrorCode, FrontendToBackend, LintIssue, ResultBodies } from "../shared/protocol";
 import { AGENT_API, ENGINE_EXTENSION, PROTOCOL_VERSION } from "../shared/protocol";
 import { formatMs } from "../shared/timeouts";
 import { inClear } from "./credentials";
 
 export interface HttpRequest {
-  /** PUT: the loopback's scheduler exclusion (loopback-link.ts). */
-  method: "GET" | "POST" | "PUT";
+  method: "GET" | "POST";
   url: string;
   headers: Record<string, string>;
   body?: string;
@@ -85,6 +84,11 @@ export class LreError extends Error {
     Object.defineProperty(this, LRE_ERROR, { value: true });
   }
 }
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+export type RequestType = FrontendToBackend["type"];
+/** A request's own fields: the envelope (`lre`, `type`, `reqId`) is the connection's. */
+export type RequestFields<T extends RequestType> = DistributiveOmit<Extract<FrontendToBackend, { type: T }>, "lre" | "type" | "reqId">;
 
 export interface ExtensionInfo {
   /** Its database id, which frames are addressed by. */
@@ -250,58 +254,6 @@ export async function sessionOf(http: Http, base: string, token: string | null):
   return { valid: true, expiresAt: typeof session.expiresAt === "string" ? session.expiresAt : null };
 }
 
-/** A connection profile the user has on the host (`GET /api/v1/connections`), as much of it as tells the loopback's. */
-export interface ConnectionProfileSummary {
-  id: string;
-  name: string;
-  provider: string;
-  apiUrl: string;
-  model: string;
-}
-
-function profileOf(raw: unknown): ConnectionProfileSummary | null {
-  if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.provider !== "string") return null;
-  return { id: raw.id, name: typeof raw.name === "string" ? raw.name : "", provider: raw.provider, apiUrl: typeof raw.api_url === "string" ? raw.api_url : "", model: typeof raw.model === "string" ? raw.model : "" };
-}
-
-/** The user's connection profiles, as the session's owner sees them in Connections (the first 200, newest first). */
-export async function connectionProfiles(http: Http, base: string, token: string): Promise<ConnectionProfileSummary[]> {
-  const reply = await exchange(http, base, "GET", "/api/v1/connections?limit=200", token);
-  if (reply.status !== 200) throw refused(base, reply, "was asked for your connections");
-  const body = parse(reply.text);
-  const rows = isRecord(body) && Array.isArray(body.data) ? body.data : Array.isArray(body) ? body : [];
-  return rows.map(profileOf).filter((p): p is ConnectionProfileSummary => p !== null);
-}
-
-/**
- * Adds a connection profile as the session's owner would in Connections (`POST /api/v1/connections`):
- * Spindle lets an extension read connections but not add one, so the CLI adds it with the owner's own
- * session. A key, where given, goes to the host's secrets and never comes back.
- */
-export async function addConnectionProfile(http: Http, base: string, token: string, profile: { name: string; provider: string; apiUrl: string; model: string; apiKey?: string }): Promise<ConnectionProfileSummary> {
-  const reply = await exchange(http, base, "POST", "/api/v1/connections", token, JSON.stringify({ name: profile.name, provider: profile.provider, api_url: profile.apiUrl, model: profile.model, ...(profile.apiKey !== undefined ? { api_key: profile.apiKey } : {}) }));
-  if (reply.status !== 200 && reply.status !== 201) throw refused(base, reply, "was asked to add the connection");
-  const made = profileOf(parse(reply.text));
-  if (made === null) throw new LiveError("protocol", `Lumiverse at ${base} added the connection but didn't say what it made.`);
-  return made;
-}
-
-/**
- * Whether the user has Lumiverse's "always use the active connection" on for Edit and Send
- * (`quickToolbarSettings.editAndSendAlwaysUseActiveConnection`, read as the owner's session reads it):
- * true or false, or null where the host wouldn't say. Core also needs its Lumiverse Suite extension
- * on for the setting to act, which this doesn't read, so true means the setting is on, not that it acts.
- */
-export async function editAndSendPrefersActive(http: Http, base: string, token: string): Promise<boolean | null> {
-  const reply = await exchange(http, base, "GET", "/api/v1/settings/quickToolbarSettings", token).catch(() => null);
-  if (reply === null) return null;
-  if (reply.status === 404) return false;
-  if (reply.status !== 200) return null;
-  const body = parse(reply.text);
-  const value = isRecord(body) && isRecord(body.value) ? body.value : null;
-  return value !== null && value.editAndSendAlwaysUseActiveConnection === true;
-}
-
 interface Pending {
   resolve(body: unknown): void;
   reject(error: Error): void;
@@ -332,12 +284,6 @@ export interface ConnectionOptions {
   onHello?(answer: Record<string, unknown>, sent: AgentCheckIn | null): void;
   /** What LumiRPEngine sends unasked (no reqId of ours): an MCP server is asked to reload there. */
   onPush?(push: Record<string, unknown>): void;
-  /**
-   * Lumiverse started, stopped or reported an error in the extension (`SPINDLE_EXTENSION_LOADED`,
-   * `_UNLOADED`, `_ERROR`, which it sends every socket; `detail` is the error's words): the loopback
-   * relay ends its calls at once rather than wait for silence (D0a check 4).
-   */
-  onExtension?(change: "loaded" | "unloaded" | "error", detail: string | null): void;
   /** Null: no limit. */
   timeoutMs?: number | null;
   pingMs?: number;
@@ -561,13 +507,6 @@ export class HostConnection implements Connection {
     }
     if (msg.event === "AUTH_ERROR") {
       this.greeting?.reject(new LiveError("protocol", "Lumiverse refused the event socket's ticket."));
-      return;
-    }
-    const lifecycle = msg.event === "SPINDLE_EXTENSION_LOADED" ? "loaded" : msg.event === "SPINDLE_EXTENSION_UNLOADED" ? "unloaded" : msg.event === "SPINDLE_EXTENSION_ERROR" ? "error" : null;
-    if (lifecycle !== null) {
-      // Every extension's lifecycle reaches every socket: only this one's counts.
-      const id = this.opened?.extension.id ?? this.lastExtension?.id;
-      if (isRecord(msg.payload) && id !== undefined && msg.payload.extensionId === id) this.options.onExtension?.(lifecycle, typeof msg.payload.error === "string" ? msg.payload.error : null);
       return;
     }
     if (msg.event !== "SPINDLE_FRONTEND_MSG" || !isRecord(msg.payload) || msg.payload.extensionId !== this.opened?.extension.id) return;

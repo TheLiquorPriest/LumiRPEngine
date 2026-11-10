@@ -37,17 +37,6 @@ export interface HostChat {
   metadata: JsonObject;
 }
 
-/** A character card's own text (the host's `CharacterDTO`, D-17): what seeds its character's core. */
-export interface HostCharacter {
-  id: string;
-  name: string;
-  description: string;
-  personality: string;
-  scenario: string;
-  /** Example messages: how the character talks. */
-  examples: string;
-}
-
 // ---------------------------------------------------------------- events
 
 export interface GenerationStartedEvent {
@@ -224,52 +213,13 @@ export interface WorldInfoInput {
 
 /**
  * Its answer, for this prompt only and never stored: entries to switch off, entries stored switched
- * off to switch on (an off vote anywhere wins), entries to activate whatever their keys (`forced`: the
- * host takes them as constant), and entries whose text the prompt holds instead of their own
- * (`mutated`, absent for none: the host activates and inserts that text).
+ * off to switch on (an off vote anywhere wins), and entries whose text the prompt holds instead of
+ * their own (`mutated`, absent for none: the host activates and inserts that text).
  */
 export interface WorldInfoVerdict {
   disabled: string[];
   enabled: string[];
-  forced?: string[];
   mutated?: { id: string; content: string }[];
-}
-
-/**
- * A message of an assembled prompt as the prompt interceptor sees it (DEPTH-PLAN §3.5, F6): its role
- * and text, and whether the host assembled it from the chat's history (`history`, with the message's
- * index in the chat) or from a World Info entry (`worldInfo`). The flags never reach the provider.
- */
-export interface PromptMessage {
-  role: string;
-  content: string;
-  history: boolean;
-  worldInfo: boolean;
-  sourceIndex?: number;
-}
-
-/** What the prompt interceptor is asked, after every assembly and every earlier interceptor: the generation's context and the prompt as it stands. */
-export interface PromptInterceptorInput {
-  chatId: ChatId;
-  userId: UserId;
-  generationType: HostGenerationType | "other";
-  dryRun: boolean;
-  connectionId: string | null;
-  presetId: string | null;
-  frontendSessionId?: string;
-  messages: PromptMessage[];
-}
-
-/** Its answer: parameters merged into the generation's (the turn tag, DEPTH-PLAN §3.5), and the places of the messages that leave the prompt (`omit`: a depth chat's history before its cutoff); the rest goes on as it is. */
-export interface PromptVerdict {
-  parameters?: JsonObject;
-  omit?: readonly number[];
-}
-
-/** A piece of a streamed call's answer as it is written: the reply's text, or the model's reasoning. */
-export interface StreamPiece {
-  kind: "content" | "reasoning";
-  text: string;
 }
 
 /** What the running Lumiverse does with a context handler's answer (DESIGN §5.1). */
@@ -280,10 +230,6 @@ export interface HostCapabilities {
   required: boolean;
   /** Frontend messages name the page they came from, and a send may go to that page alone (`frontend-session-routing-v1`). */
   sessions: boolean;
-  /** A `required` prompt interceptor that fails or runs out of time stops the generation (`required-interceptors-v1`): a world chat's reply can't reach the loopback untagged. */
-  interceptors: boolean;
-  /** An extension may generate into a blank reply it saved, under Lumiverse's own busy state and Stop (`generation-message-sessions-v1`, DEPTH-PLAN §3.15). */
-  messageSessions: boolean;
 }
 
 // ---------------------------------------------------------------- model calls
@@ -341,8 +287,6 @@ export interface QuietRequest {
   usage?: true;
   /** Takes the answer as Lumiverse streams it (`generate.quietStream`) instead of whole at the end (`generate.quiet`): the result reads the same, but the provider's connection carries it as it is written. */
   stream?: true;
-  /** The provider's `tool_choice`, passed through as the request gave it (the loopback's passthrough, DEPTH-PLAN §3.9). */
-  toolChoice?: JsonValue;
 }
 
 /**
@@ -368,8 +312,6 @@ export interface QuietToolCall {
 export interface QuietResult {
   content: string;
   finishReason: string;
-  /** The provider's own account of why it stopped, where the host passes it: Anthropic's `stop_details` on a `refusal` (`type`, `category`, `explanation`). */
-  stopDetails?: JsonObject;
   tokens: number;
   /** The prompt's and the answer's tokens, when the provider reports them apart. */
   tokensIn?: number;
@@ -402,8 +344,6 @@ export interface HostConnectionProfile {
   model: string;
   cache: { limit: number; system: boolean; lastMessage: boolean; tools: boolean; automatic: boolean } | null;
   targets: string[];
-  /** The connection's base URL as saved (a Custom connection's: where its provider calls go). */
-  url: string;
 }
 
 export interface DecideRequest {
@@ -560,8 +500,6 @@ export interface HostPort {
     /** Replaces the message's whole `spindle_metadata` bag (host semantics; G2). Callers read-merge-write. */
     writeMetadata(chatId: ChatId, messageId: MessageId, bag: JsonObject, userId: UserId): Promise<void>;
     chatMetadata(chatId: ChatId, userId: UserId): Promise<JsonObject>;
-    /** When the chat was made, in Unix seconds (`ChatDTO.created_at`: a branch's is when it was branched); null when it isn't the user's. */
-    created(chatId: ChatId, userId: UserId): Promise<number | null>;
     mergeChatMetadata(chatId: ChatId, patch: JsonObject, userId: UserId): Promise<void>;
     /** Appends a user message, optionally triggering a generation (palette and chip actions). */
     appendUserMessage(chatId: ChatId, content: string, metadata: JsonObject, triggerGeneration: boolean, userId: UserId): Promise<MessageId>;
@@ -571,8 +509,6 @@ export interface HostPort {
     list(userId: UserId): Promise<HostChat[]>;
     /** Rewrites a message's swipes and the one shown (`chat.updateMessage`); the host keeps the swipe dates in step. */
     setSwipes(chatId: ChatId, messageId: MessageId, swipes: readonly string[], swipeId: number, userId: UserId): Promise<void>;
-    /** Deletes a message (`chat.deleteMessage`); the host sends MESSAGE_DELETED. */
-    deleteMessage(chatId: ChatId, messageId: MessageId, userId: UserId): Promise<void>;
   };
   storage: {
     read(path: string, userId: UserId): Promise<string | null>;
@@ -594,26 +530,10 @@ export interface HostPort {
   registerContextHandler(handler: (input: ContextHandlerInput, signal: AbortSignal) => Promise<ContextVerdict>, options: { timeoutMs: number; required: boolean }): void;
   /** The one World Info interceptor (DESIGN §6.1), asked before activation in every prompt assembly; on a throw or past the host's time, the entries go on as stored. */
   registerWorldInfoInterceptor(handler: (input: WorldInfoInput) => Promise<WorldInfoVerdict>): void;
-  /**
-   * The one prompt interceptor (the loopback's turn tagger, DEPTH-PLAN §3.5), asked after assembly
-   * for the generation types named, after every interceptor of a lower priority. `required` asks the
-   * host to stop the generation when it fails or runs out of time.
-   */
-  registerPromptInterceptor(handler: (input: PromptInterceptorInput) => Promise<PromptVerdict>, options: { priority: number; generationTypes: readonly HostGenerationType[]; required: boolean }): void;
   models: {
     quiet(request: QuietRequest, userId: UserId, signal: AbortSignal): Promise<QuietResult>;
-    /** A quiet call streamed (`generate.quietStream`): each piece as it is written goes to `onPiece`; the answer ends whole, as `quiet`'s does. */
-    stream(request: QuietRequest, userId: UserId, signal: AbortSignal, onPiece: (piece: StreamPiece) => void): Promise<QuietResult>;
     decide(request: DecideRequest, userId: UserId, signal: AbortSignal): Promise<DecideResult>;
   };
-  /** Who a user is to Lumiverse (`spindle.users.getRole`): the operator decides the shared loopback relay (DEPTH-PLAN §3.11). */
-  users: {
-    role(userId: UserId): Promise<"operator" | "admin" | "user">;
-  };
-  /** The Bun running Lumiverse (`process.execPath`), for Settings → Loopback's line; null when the host can't say. */
-  readonly bunPath: string | null;
-  /** The account Lumiverse runs as (its process's `os.userInfo().username`), which Settings → Loopback's lines run as (`sudo -u`); null when the host can't say. */
-  readonly account: string | null;
   tokens: {
     /** The host tokenizer's count for each text (the user's main model, as the prompt breakdown counts), or null when it can't count; rejects with a `TimeoutFired` when counting takes longer than `limit` (Settings → Timeouts → Token counts). */
     count(texts: readonly string[], userId: UserId, limit: Limit): Promise<number[] | null>;
@@ -626,16 +546,6 @@ export interface HostPort {
   };
   /** A toast on the user's open pages (`spindle.toast.info`), titled LumiRPEngine. */
   toast(message: string, userId: UserId): void;
-  /**
-   * Character cards (`spindle.characters`, the `characters` permission, D-17): a card's own text,
-   * which seeds its character's core, and the card a chat was made with. Optional, so a host
-   * without the permission (and a test's) seeds no core from a card.
-   */
-  characters?: {
-    get(characterId: string, userId: UserId): Promise<HostCharacter | null>;
-    /** The card the chat was made with; null when the host doesn't say. */
-    ofChat(chatId: ChatId, userId: UserId): Promise<string | null>;
-  };
   books: {
     create(name: string, description: string, userId: UserId): Promise<string>;
     exists(bookId: string, userId: UserId): Promise<boolean>;
@@ -644,10 +554,9 @@ export interface HostPort {
      * engine made for a world; `character`: one a character brought (Lumiverse makes a book of its
      * own for each one a card it imports carries, so it may share a name with one the user imported);
      * `added`: when it was made, in Unix seconds (null when the host doesn't say); `updated`: when it
-     * or any of its entries last changed, in Unix seconds (null when the host doesn't say);
-     * `metadata`: the book's own, as other extensions mark theirs (LumiBooks: `lumibooks_chat_id`).
+     * or any of its entries last changed, in Unix seconds (null when the host doesn't say).
      */
-    list(userId: UserId): Promise<{ id: string; name: string; engine: boolean; character: boolean; added: number | null; updated: number | null; metadata: JsonObject }[]>;
+    list(userId: UserId): Promise<{ id: string; name: string; engine: boolean; character: boolean; added: number | null; updated: number | null }[]>;
     entries(bookId: string, userId: UserId): Promise<HostBookEntry[]>;
     /** One entry by id (`world_books.entries.get`), or null when it is gone. */
     entry(entryId: string, userId: UserId): Promise<HostBookEntry | null>;
@@ -695,19 +604,6 @@ export interface HostPort {
     decisionList(userId: UserId): Promise<{ id: string; name: string }[]>;
     /** One connection (null: the user's default) as the agent runtime needs it; null when there's no such connection. */
     profile(connectionId: string | null, userId: UserId): Promise<HostConnectionProfile | null>;
-  };
-  /**
-   * Memory Cortex, read only (`spindle.memories`, the `memories` permission): the bootstrap's import
-   * reads a chat's entities and arcs as evidence to reconcile (DEPTH-PLAN §8.1 step 2). Absent on a
-   * host without it; nothing here writes Cortex.
-   */
-  memories?: {
-    /** Whether `memories` is granted now. */
-    granted(): boolean;
-    /** Every entity of the chat's, retired ones too, with its facts. */
-    entities(chatId: ChatId, userId: UserId): Promise<{ id: string; name: string; aliases: string[]; description: string; facts: string[] }[]>;
-    /** The chat's arcs, every tier, with the messages each covers where Cortex knows. */
-    consolidations(chatId: ChatId, userId: UserId): Promise<{ id: string; title: string | null; summary: string; tier: number; messageRangeStart: number | null; messageRangeEnd: number | null }[]>;
   };
   /**
    * Lumiverse's MCP server profiles (`spindle.mcp.servers`, the `mcp_servers` permission; DESIGN §23,
