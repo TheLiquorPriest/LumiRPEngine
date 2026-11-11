@@ -156,6 +156,8 @@ interface SideRun {
   userId: UserId;
   cast: Cast;
   staged: Map<string, "auto" | "confirm">;
+  /** The log was told that this run is tied to no reply the engine knows. */
+  warned?: boolean;
 }
 
 /** What one call runs with once it has passed its gate, and where its caller stands for that gate. */
@@ -165,6 +167,8 @@ interface Served {
   standing: Standing;
   frame: TurnFrame | null;
   answered?: (out: { text: string; error?: boolean }) => void;
+  /** A job the engine can tie to no reply: it reads the chat as it stands, and what it would change is answered so. */
+  noReply?: true;
 }
 
 /** What a turn left for its commit, between `beforeCommit` and `afterCommit`. */
@@ -490,7 +494,8 @@ export class HarnessEngine implements HarnessHooks {
       served = got;
       const closed = toolRefusal(call.name, got.standing, say);
       const run = (): Promise<{ text: string; error?: boolean }> => runHarnessTool(got.env(), call.name, call.args);
-      out = closed ? closedAnswer(closed) : await (got.frame ? inTurn(got.frame, run) : run());
+      // A job tied to no reply is told that, not that its starter holds too little.
+      out = closed ? (got.noReply ? { text: JSON.stringify({ refused: { code: "no_basis", reason: say(HARNESS_NOTE.noBasis) } }), error: true } : closedAnswer(closed)) : await (got.frame ? inTurn(got.frame, run) : run());
     } catch (error) {
       // A tool that throws is the engine's fault, never the model's: said plainly, and logged.
       const reason = error instanceof Error ? error.message : String(error);
@@ -516,10 +521,11 @@ export class HarnessEngine implements HarnessHooks {
     }
     // A job's run, or what an agent of a turn still calls once its reply is saved: the turn whose record it belongs to.
     const job = this.jobs.get(call.turn);
-    const basis = job?.basis ?? (own || this.over.has(call.turn) ? call.turn : null);
-    if (!userId || (basis === null && !this.sides.has(call.turn))) return { text: say(HARNESS_NOTE.noTurn), error: true };
-    if (basis === null) return { text: say(HARNESS_NOTE.noBasis), error: true };
-    const ceiling = job ? this.ceilingOf(call.turn) : null;
+    const known = job?.basis ?? (own || this.over.has(call.turn) ? call.turn : null);
+    if (!userId || (known === null && !this.sides.has(call.turn))) return { text: say(HARNESS_NOTE.noTurn), error: true };
+    // A run tied to no reply (a job the user or a side session started): it reads the chat as it stands and changes nothing (`jobEnv`).
+    const basis = known ?? "";
+    const ceiling: Ceiling | null = job ? this.ceilingOf(call.turn) : known === null ? { tier: "read", by: call.turn } : null;
     const files = this.files?.({ chatId: call.chatId, userId }) ?? null;
     const turn = this.turns.get(basis);
     const beside = turn && !turn.closed && turn.replied === null ? this.sides.get(call.turn) : undefined;
@@ -544,7 +550,13 @@ export class HarnessEngine implements HarnessHooks {
     const standing = standingOf(agent, undefined, ceiling, agent.main && agent.job === null);
     const env = await jobEnv(this.rt, this.review, { chatId: call.chatId, userId, basis, committed: this.over.get(basis)?.committed === true, agent, standing, tool: call.name, files, staged: side.staged, signal });
     if ("refused" in env) return { text: JSON.stringify({ refused: { code: env.code, reason: env.reason } }), error: true };
-    return { env: () => env, standing, frame: null };
+    const noReply = known === null || (!turn && !this.over.has(basis));
+    // Said once per run, for whoever reads the log: which of the two it was.
+    if (noReply && !side.warned) {
+      side.warned = true;
+      this.rt.host.log("warn", `[LumiRPEngine] run ${call.turn.slice(0, 12)} is tied to no reply the engine knows (${known === null ? "it was started outside a reply's turn" : `turn ${basis.slice(0, 12)} was never opened here`}): it reads the chat as it stands and changes nothing`, userId);
+    }
+    return { env: () => env, standing, frame: null, ...(noReply ? { noReply: true as const } : {}) };
   }
 
   /**

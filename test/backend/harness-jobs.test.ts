@@ -13,7 +13,7 @@ import { readSlice } from "../../src/packs/minds/core/state";
 import type { Rig } from "../support/rig";
 import { HOME } from "../support/tools";
 import { turnChat } from "./harness-cast-kit";
-import { A_BRIEF, type Agent, AUTHOR, beginJob, beginTurn, harnessChat, MARA, noModelCalls, OKORO, type Run, recordOn, stateOf, turnRecord } from "./harness-driver";
+import { A_BRIEF, type Agent, AUTHOR, beginJob, beginTurn, beginUserJob, harnessChat, MARA, noModelCalls, OKORO, type Run, recordOn, stateOf, turnRecord } from "./harness-driver";
 
 const note = (id: string, vars: Record<string, string> = {}): string => renderPrompt(id, {}, vars);
 
@@ -117,9 +117,15 @@ describe("a harness turn's jobs", () => {
     rig.host.deleteMessage(chatId, replyId);
     await rig.host.settle();
     expect(JSON.parse(await job.refusal(MIND, "mind_remember", remember("The step was empty.")))).toEqual({ refused: { code: "off_path", reason: note(HARNESS_NOTE.offPath) } });
-    // A job the engine can't tie to any turn writes nothing either.
+    // A job the engine can't tie to any turn writes nothing either, and still reads the world as it stands.
     const lost = await beginJob(rig, { chatId, turn: "a-turn-never-seen" }, "job-lost");
-    expect(JSON.parse(await lost.refusal(MIND, "mind_remember", remember("Nothing.")))).toEqual({ refused: { code: "no_basis", reason: note(HARNESS_NOTE.noBasis) } });
+    const noReply = { refused: { code: "no_basis", reason: note(HARNESS_NOTE.noBasis) } };
+    expect(JSON.parse(await lost.refusal(MIND, "mind_remember", remember("Nothing.")))).toEqual(noReply);
+    expect(await lost.answer(CHRONICLER, "world_status")).toMatchObject({ behind: false });
+    // So does one the user started, which belongs to no turn: the engine is told of no reply for it.
+    const users = await beginUserJob(rig, chatId, "job-users");
+    expect(await users.answer(CHRONICLER, "world_status")).toMatchObject({ behind: false });
+    expect(JSON.parse(await users.refusal(CHRONICLER, "person_add", { name: "Nobody" }))).toEqual(noReply);
     noModelCalls(rig);
   });
 

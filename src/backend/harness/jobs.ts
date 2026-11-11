@@ -99,8 +99,12 @@ export async function jobEnv(rt: Runtime, review: Review, call: JobCall): Promis
   const note = (id: string, vars: Readonly<Record<string, string>> = {}): string => renderPrompt(id, settings.prompts.texts, vars);
   const head = await chatHead(rt, chatId, userId);
   if (!head) return refusal("no_world", note(WRITE_NOTE.noWorld));
-  const record = recordOf(call, head.core, head.observed);
-  if (typeof record === "string") return offPath(record, note);
+  const found = recordOf(call, head.core, head.observed);
+  // A record that left the path stops its job. A job the engine can tie to no reply (one the user or a side
+  // session started, or of a turn it never saw) still reads: the chat as it stands, with its newest reply as
+  // the reply. What it would change is refused where the change is made (`stageChange`, `jobWriter`, `departure`).
+  if (found === "off_path") return offPath(found, note);
+  const record = typeof found === "string" ? null : found;
   const { view, marks } = agent.role ?? { view: "everyone" as const, marks: true };
   const reader = outsideReader(rt, { userId, chatId, knowledge: view, marks });
   const role = agent.role;
@@ -108,12 +112,13 @@ export async function jobEnv(rt: Runtime, review: Review, call: JobCall): Promis
   // As in a turn: an agent writes as the role its tier's changes are made as, one of the engine's own that only reads is told so by its own writer, and an agent of no definition of the engine's has none.
   const as = writerRole(role, tier) ?? role?.role ?? null;
   const writer = as ? jobWriter(rt, review, call, as, tier, reader) : null;
-  const reply = head.observed[record.index];
-  const before = head.observed.slice(0, record.index);
+  const at = record ? record.index : head.observed.findLastIndex((m) => !m.isUser);
+  const reply = at >= 0 ? head.observed[at] : undefined;
+  const before = at >= 0 ? head.observed.slice(0, at) : head.observed;
   const said = ownMessage(before);
   const earlier = before.findLast((m) => !m.isUser);
   // Where the turn started and what it landed, as its record holds them: what a memory or a learning reads as what happened.
-  const context = head.core.readContext(record.messageId, head.observed);
+  const context = record ? head.core.readContext(record.messageId, head.observed) : null;
   const turn: HarnessTurn = {
     main: false,
     tier,
@@ -130,12 +135,12 @@ export async function jobEnv(rt: Runtime, review: Review, call: JobCall): Promis
     knowing: knowledgeOn(await rt.chatKnowledge.get(chatId, userId), head.world, settings),
     settings,
     host: rt.host,
-    seed: record.rec.seed,
+    seed: record ? record.rec.seed : head.run.runSeed,
     runSeed: head.run.runSeed,
     start: context?.start ?? head.state,
-    landed: () => [...record.rec.events],
+    landed: () => (record ? [...record.rec.events] : []),
     said: { messageId: said?.id ?? null, user: said ? activeText(said) : "", before: earlier ? activeText(earlier) : "" },
-    reply: { messageId: record.messageId, text: reply ? activeText(reply) : "" },
+    reply: record ? { messageId: record.messageId, text: reply ? activeText(reply) : "" } : reply ? { messageId: reply.id, text: activeText(reply) } : null,
     stage: (change) => stageChange(rt, review, call, role?.role ?? null, change),
     commit: async () => refusal("not_turn", note(HARNESS_NOTE.notTurn)),
     depart: (lines) => departure(rt, call, lines),

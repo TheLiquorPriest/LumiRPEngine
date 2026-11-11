@@ -207,6 +207,13 @@ export class Run {
   }
 }
 
+/** A job's run begins that no agent of a turn started (the user's own): the engine is told of no reply for it. */
+export async function beginUserJob(rig: Rig, chatId: string, id: string): Promise<Run> {
+  const run = new Run(rig, chatId, id, "job", null);
+  await rig.rt.harness.extension.runBegan?.({ userId: rig.host.userId, chatId, turn: id, kind: "job", story: STORY_WITHOUT_CLAIM });
+  return run;
+}
+
 /** What counts as the chat's story without the engine's word, as LumiAH resolves it for the claim (its defaults: hidden messages left out, everyone's messages read). */
 export const STORY_WITHOUT_CLAIM: StorySource = { hidden: "leave_out", from: "everyone", newest: "directive" };
 
