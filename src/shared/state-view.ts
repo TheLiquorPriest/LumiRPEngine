@@ -406,6 +406,12 @@ export interface StateView {
   /** The revision the chat's entity definitions still come from, when an Upgrade left them behind `revision` (DESIGN §4.3 `migrate`). */
   definitionsFrom?: RevisionId;
   status: ChatStatus;
+  /**
+   * Which engine plays this chat's turns (GM → This chat → Engine): its classic steps, agents, or the
+   * harness. The drawer offers the harness's own pages only for a chat on the harness, and Settings
+   * says there which of its pages such a chat doesn't use. Absent on a chat that isn't a world's.
+   */
+  engine?: "classic" | "agents" | "harness";
   hud: HudView | null;
   scene: SceneView | null;
   chips: Chip[];

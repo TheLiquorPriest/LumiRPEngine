@@ -52,7 +52,9 @@ const ALLOWED: readonly { file: string; has: string; count: number; why: string 
   { file: "backend/agents/turn-task.ts", has: "const was = env.worlds(before.revision);", count: 1, why: "the digest's Upgrade lines: an entity's classes and tags as the revision before the Upgrade authors them, to compare it across the Upgrade as the Upgrade does" },
   { file: "backend/agents/turn-task.ts", has: "const now = env.worlds(after.revision);", count: 1, why: "the digest's Upgrade lines: an entity's classes and tags as the revision after it authors them" },
   { file: "backend/dispatch.ts", has: "const { world } = await this.rt.worlds.get(worldId, userId);", count: 1, why: "the world's book follows its head revision as authored" },
-  { file: "backend/dispatch.ts", has: "docs.set(revision, (await this.rt.worlds.get(", count: 1, why: "an Upgrade preview's revisions, as authored" },
+  { file: "backend/upgrade-preview.ts", has: "(await rt.worlds.get(run.worldId, userId, revision)).world", count: 1, why: "an Upgrade preview's revisions, as authored" },
+  { file: "backend/agents/tools/harness-ports.ts", has: "rt.book.ensure((await rt.worlds.get(worldId, userId)).world", count: 1, why: "the world's book follows its head revision as authored, after an agent's commit as after Build's" },
+  { file: "backend/agents/tools/harness-ports.ts", has: "revision: async (revision) => (await rt.worlds.get(worldId, userId, revision)).world", count: 1, why: "the world tools compare a draft with a revision as authored, for the review card; nothing is played from it" },
   { file: "backend/jobs.ts", has: "await this.worlds.get(worldId, job.userId)", count: 1, why: "a Build job, on the world as authored" },
 ];
 

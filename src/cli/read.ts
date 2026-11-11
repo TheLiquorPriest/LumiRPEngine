@@ -9,6 +9,7 @@ import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import { parsePointer, pointerOf } from "../shared/json-patch";
 import { keyedItem } from "../shared/gm-parts";
+import { nameOf } from "../shared/world-diff";
 
 /** The most one answer holds. */
 export const ANSWER_LIMIT = 24_000;
@@ -43,16 +44,6 @@ export function clip(text: string, max: number): string {
  */
 export function jsonText(value: unknown, compact = false): string {
   return (compact ? JSON.stringify(value) : JSON.stringify(value, null, 1)) ?? "null";
-}
-
-/** An item's own name, for outlines and listings. */
-export function nameOf(item: unknown): string | null {
-  if (!isRecord(item)) return null;
-  for (const key of ["name", "title", "label"]) {
-    const value = item[key];
-    if (typeof value === "string" && value.trim() !== "") return value;
-  }
-  return null;
 }
 
 function kindOf(value: unknown): string {

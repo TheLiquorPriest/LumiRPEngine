@@ -17,6 +17,8 @@ import type { WorldDoc } from "../../../shared/world";
 import { renderPrompt } from "../../prompts";
 import type { AgentTool, ToolOutcome } from "../runtime";
 import { CONDENSE_TOOLS, type Summarize } from "./condense";
+import type { HarnessFiles, WorldBuild } from "./harness-ports";
+import type { HarnessTurn } from "./harness-turn";
 import { LORE_TOOLS } from "./lore";
 import { READ_TOOLS } from "./read";
 import type { ToolReader } from "./read-view";
@@ -50,6 +52,12 @@ export interface ToolEnv {
   summarize?: Summarize;
   /** Where the Curator's tools note what lands with the reply's read (ITEMS-SPEC §7.3); absent outside the Curator's turn. */
   notes?: ReadNotes;
+  /** The harness turn the call belongs to (`tools/harness-turn.ts`): what the harness engine's own tools stage into and read of the turn; absent on the classic and agents engines, where those tools aren't given. */
+  turn?: HarnessTurn;
+  /** The world's document as Build edits it (`tools/harness-ports.ts`): what the harness engine's `world` tools write through; absent or null where the call has none. */
+  build?: WorldBuild | null;
+  /** The chat's area of LumiAH's workspace (`tools/harness-ports.ts`): where a tool that keeps a file writes it on the harness; absent or null until the harness gives one. */
+  files?: HarnessFiles | null;
 }
 
 /**
@@ -99,13 +107,19 @@ function propertyAt(schema: JsonObject, path: string): JsonObject | null {
   return at;
 }
 
-/** `schema` with each argument's description, in the user's words where they wrote one; a tool whose texts name an argument its schema lacks is a bug, and says so. */
-function described(def: ToolDefinition, schema: JsonObject, texts: PromptTexts): JsonObject {
-  const out = structuredClone(schema);
-  for (const arg of toolText(def.name)?.args ?? []) {
+/**
+ * `schema` with the description of each argument `args` names (a tool's texts), in the user's words
+ * where they wrote one; a tool whose texts name an argument its schema lacks is a bug, and says so.
+ * A schema may use one node for several arguments (a shared boolean, say): the copy gives each
+ * argument a node of its own, so that each carries its own description rather than the last one
+ * written to the node they shared (`structuredClone` would keep them one node).
+ */
+export function describedSchema(tool: string, args: readonly { path: string }[], schema: JsonObject, texts: PromptTexts): JsonObject {
+  const out = JSON.parse(JSON.stringify(schema)) as JsonObject;
+  for (const arg of args) {
     const property = propertyAt(out, arg.path);
-    if (!property) throw new Error(`the ${def.name} tool's texts describe an argument its schema doesn't have: ${arg.path}`);
-    property.description = renderPrompt(toolArgTextId(def.name, arg.path), texts, {});
+    if (!property) throw new Error(`the ${tool} tool's texts describe an argument its schema doesn't have: ${arg.path}`);
+    property.description = renderPrompt(toolArgTextId(tool, arg.path), texts, {});
   }
   return out;
 }
@@ -124,7 +138,7 @@ export function toolsFor(input: { world: WorldDoc; tiers: readonly ToolTier[]; f
     (def): AgentTool => ({
       name: def.name,
       description: renderPrompt(toolTextId(def.name), texts, {}),
-      parameters: described(def, def.parameters(world), texts),
+      parameters: describedSchema(def.name, toolText(def.name)?.args ?? [], def.parameters(world), texts),
       run: (args, ctx) => def.run(args, { ...env, agent: { role: ctx.role, id: ctx.agentId }, signal: AbortSignal.any([env.signal, ctx.signal]) }),
     }),
   );

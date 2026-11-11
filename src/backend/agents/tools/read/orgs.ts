@@ -117,7 +117,7 @@ function belonging(view: ToolReadView, who: EntityId, org: EntityId, ref: ViewRe
  * restricted in it marked so (a History line, a chain of bases); as it is under a view that marks
  * nothing. A secret is marked once: `value` must hold the GM's own words, never a view's marks.
  */
-function named<T>(view: ToolReadView, value: T): T {
+export function named<T>(view: ToolReadView, value: T): T {
   if (!view.marked) return value;
   const nameOf = (id: string): string | null => (view.seesEntity(id) ? view.entity(id)?.name : view.seesPlace(id) ? view.place(id)?.name : undefined) ?? null;
   // Each restricted name as the view names it, the longest first, so a text's names are marked in one pass.

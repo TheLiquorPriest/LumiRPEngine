@@ -994,6 +994,16 @@ export class SettingsStore {
     return frame?.userId === userId ? frame.settings : this.settings.get(userId);
   }
 
+  /**
+   * The settings as the user last set them, whatever turn is running, without reading storage.
+   * For what the player decides and must hold from the moment they decide it (the mode of an act
+   * made outside the chat's record, which a turn asks for, commits and has applied at different
+   * times), where `known` gives a turn its own.
+   */
+  latest(userId: UserId): UserSettings | undefined {
+    return this.settings.get(userId);
+  }
+
   async learningOf(userId: UserId): Promise<ExtractionLearning> {
     const known = this.learning.get(userId);
     if (known) return known;

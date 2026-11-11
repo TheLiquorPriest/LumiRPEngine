@@ -1,9 +1,10 @@
 // What a chat chose for knowledge (DESIGN §6.11, §24): whether it tracks who knows what, and what
 // the narrator knows (`NarratorView`); which engine plays its turns (INC2-SPEC C12: classic, or
-// agents); and whether its impossible holds are tidied automatically (ITEMS-SPEC §9, §11: GM → This
-// chat → Things). Knowledge and the narrator fall back in one order: this chat's own choice, then its
-// world's default, then the user's Settings; the tidy switch is this chat's own, else its world's;
-// the engine is classic unless the chat chose agents. A chat's own choice lives in the host's chat
+// agents; HARNESS-SLICE3: or the harness, whose agents LumiAH runs); and whether its impossible
+// holds are tidied automatically (ITEMS-SPEC §9, §11: GM → This chat → Things). Knowledge and the
+// narrator fall back in one order: this chat's own choice, then its world's default, then the user's
+// Settings; the tidy switch is this chat's own, else its world's; the engine is classic unless the
+// chat chose another. A chat's own choice lives in the host's chat
 // metadata under LRE's key (`lumi_rp_engine.prefs`, beside the chat's `ChatRun`), never in its
 // ledger: it is how the chat is played, not a fact of its story, so a swipe, a Re-run or an Undo
 // never changes it, recorded turns replay as they were, and a Lumiverse Branch, which copies the
@@ -20,9 +21,9 @@ import { ChatMetaQueue } from "./chat-meta-queue";
 import type { HostPort } from "./host";
 import { turnFrame } from "./turn-frame";
 
-/** Which engine plays a chat's turns (GM → This chat): its classic steps, or the agent loop. */
-export type ChatEngine = "classic" | "agents";
-export const CHAT_ENGINES: readonly ChatEngine[] = ["classic", "agents"];
+/** Which engine plays a chat's turns (GM → This chat): its classic steps, the agent loop, or the harness, where the author and the agents it starts play the turn through tools. */
+export type ChatEngine = "classic" | "agents" | "harness";
+export const CHAT_ENGINES: readonly ChatEngine[] = ["classic", "agents", "harness"];
 
 /** A chat's own choices; a part left out follows its world's default, else the user's Settings; the engine left out is classic. */
 export interface ChatKnowledgePrefs {
@@ -56,7 +57,9 @@ export function chatKnowledgePrefsOf(meta: JsonObject): ChatKnowledgePrefs {
   const raw = isRecord(own) ? own[PREFS_KEY] : undefined;
   if (!isRecord(raw)) return {};
   const narrator = narratorViewOf(raw.narrator);
-  return { ...(typeof raw.knowledge === "boolean" ? { knowledge: raw.knowledge } : {}), ...(narrator ? { narrator } : {}), ...(raw.engine === "agents" ? { engine: "agents" as const } : {}), ...(typeof raw.tidy === "boolean" ? { tidy: raw.tidy } : {}) };
+  // Classic is what a chat with no choice plays, so only the others are stored and read.
+  const engine = raw.engine === "agents" || raw.engine === "harness" ? raw.engine : null;
+  return { ...(typeof raw.knowledge === "boolean" ? { knowledge: raw.knowledge } : {}), ...(narrator ? { narrator } : {}), ...(engine ? { engine } : {}), ...(typeof raw.tidy === "boolean" ? { tidy: raw.tidy } : {}) };
 }
 
 /** What the narrator knows: this chat's choice, else its world's default (when it is a whole one), else the user's. */

@@ -9,6 +9,7 @@ import { AGENT_FAILURE_PROMPTS } from "./agent-failures";
 import { AGENT_YIELD_PROMPTS } from "./agent-yield";
 import { RUNTIME_PROMPT_PAGE, RUNTIME_PROMPTS } from "./agent-prompts";
 import { FINAL_REVIEW_PROMPTS } from "./final-review";
+import { HARNESS_PAGES, HARNESS_PROMPTS } from "./harness-texts";
 import { MAIN_AGENT_PAGE, MAIN_AGENT_PROMPTS } from "./main-agent-prompts";
 import { ROLE_PROMPT_PAGES, ROLE_PROMPTS } from "./role-prompts";
 import { TOOL_FAMILY_LABEL, TOOL_NOTES, TOOL_TEXTS, type ToolTier, toolArgTextId, toolTextId } from "./agent-tools";
@@ -341,11 +342,11 @@ export const GM_AGENT_PROMPTS: readonly PromptDef[] = [
   },
 ];
 
-/** The Prompts pages, in the order Settings lists them. */
-export const PROMPT_PAGES: readonly PromptPage[] = [FINAL_OUTPUT_PAGE, GM_AGENT_PAGE, MAIN_AGENT_PAGE, RUNTIME_PROMPT_PAGE, ...ROLE_PROMPT_PAGES];
+/** The Prompts pages, in the order Settings lists them: the harness engine's last, which only a chat on that engine reads. */
+export const PROMPT_PAGES: readonly PromptPage[] = [FINAL_OUTPUT_PAGE, GM_AGENT_PAGE, MAIN_AGENT_PAGE, RUNTIME_PROMPT_PAGE, ...ROLE_PROMPT_PAGES, ...HARNESS_PAGES];
 
 /** Every editable text, each page's after the one before it: the Every agent page's own texts lead the tools' texts and answers and the lore index it holds for every agent. */
-export const PROMPTS: readonly PromptDef[] = [...FINAL_OUTPUT_PROMPTS, ...GM_AGENT_PROMPTS, ...MAIN_AGENT_PROMPTS, ...FINAL_REVIEW_PROMPTS, ...AGENT_FAILURE_PROMPTS, ...AGENT_YIELD_PROMPTS, ...RUNTIME_PROMPTS, ...TOOL_PROMPTS, ...loreIndexPrompts(RUNTIME_PROMPT_PAGE.id), ...ROLE_PROMPTS];
+export const PROMPTS: readonly PromptDef[] = [...FINAL_OUTPUT_PROMPTS, ...GM_AGENT_PROMPTS, ...MAIN_AGENT_PROMPTS, ...FINAL_REVIEW_PROMPTS, ...AGENT_FAILURE_PROMPTS, ...AGENT_YIELD_PROMPTS, ...RUNTIME_PROMPTS, ...TOOL_PROMPTS, ...loreIndexPrompts(RUNTIME_PROMPT_PAGE.id), ...ROLE_PROMPTS, ...HARNESS_PROMPTS];
 
 /** The pages whose texts a turn's prompt set records (DESIGN §6.12): what the narrator's prompt is made from. */
 export const TURN_PROMPT_PAGES: readonly string[] = [FINAL_OUTPUT_PAGE.id];

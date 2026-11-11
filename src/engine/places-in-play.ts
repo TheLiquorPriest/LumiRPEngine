@@ -245,7 +245,7 @@ function cleanAliases(name: string, aliases: readonly string[]): string[] {
 }
 
 /** A name's slug for an id: lower case letters and digits, `_` between, at most 40. */
-function slug(name: string): string {
+export function slug(name: string): string {
   const s = name
     .normalize("NFD")
     .replace(/\p{M}+/gu, "")

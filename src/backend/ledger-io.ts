@@ -12,7 +12,7 @@ import type { ChatId, MessageId, UserId, WorldId } from "../shared/ids";
 import { runDir } from "../shared/ids";
 import type { SecretMarkWording } from "../shared/secret-marks";
 import type { NarratorView } from "../shared/settings";
-import type { ChatRun, GenerationKind, HeldWrite, Journal, Marker, MarkerBody, MessageLedger, PendingTurn, PostKind, Rec, RecSession, RecStatus, RefusedWrite } from "../shared/ledger";
+import type { ChatRun, GenerationKind, HeldWrite, Journal, Marker, MarkerBody, MessageLedger, PendingTurn, PostKind, Rec, RecHarness, RecSession, RecStatus, RefusedWrite } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { PROTOCOL_VERSION, type GenerateAs, type GeneratePush } from "../shared/protocol";
 import type { Limit } from "../shared/minds";
@@ -500,6 +500,38 @@ export interface TurnHooks {
    * that took it, if one did; `how` says how it ended.
    */
   turnGone?(input: { chatId: ChatId; userId: UserId; turn: string; generationId: string | null; how: TurnGone }): void;
+  /** The harness engine's part of a turn (HARNESS-SLICE3); absent, no chat is played by the harness. */
+  harness?: HarnessHooks;
+}
+
+/**
+ * What the ledger asks of the harness engine (HARNESS-SLICE3). On a chat the harness plays, the
+ * author and the agents it starts play the turn through tools while the reply's generation is
+ * under way: no engine run comes before the reply, the guard never stops it, and none of the fixed
+ * steps after a reply run. The ledger keeps what is its own: one generation, one window, one pending
+ * turn, and one commit when the reply is saved.
+ */
+export interface HarnessHooks {
+  /** Whether the harness plays the chat's turns now: the chat's own choice (GM → This chat → Engine). */
+  plays(chatId: ChatId, userId: UserId): Promise<boolean>;
+  /**
+   * The engine's entries for a generation's prompt, as `deliver` gives a turn's sections: each
+   * section's entry with the section as the chat's head has it, between the markers the writer's
+   * request finds it by and swaps it at. The guard writes and empties them as it does a prepared
+   * turn's sections (`fill`, `clear`).
+   */
+  markers(input: { chatId: ChatId; userId: UserId; generationId: string }): Promise<Delivered>;
+  /**
+   * The turn's reply is saved, and the core is about to commit the turn: what its agents committed
+   * joins the turn's planned events, with what is still staged. Null when the turn stands; else why
+   * nothing of it does (no run of the harness began for it, or its run failed), and the reply is left
+   * with no record.
+   */
+  beforeCommit(input: TurnContext): Promise<string | null>;
+  /** The turn committed: its record takes the harness's part, and what asks first goes on its review card. */
+  afterCommit(input: TurnContext): Promise<void>;
+  /** A generation ended with nothing to commit (stopped, failed, empty, or its turn doesn't stand): everything the harness kept for it goes, staged or committed. */
+  dropped(input: { chatId: ChatId; userId: UserId; generationId: string; why: string }): Promise<void>;
 }
 
 /** How an engine run ended (`TurnHooks.ran`). */
@@ -656,6 +688,36 @@ interface Gate {
    * swipe before the read runs is kept again on it.
    */
   reading: string | null;
+  /** The harness turn the generation under way is (`HarnessHold`), from its guard to its generation's end; null on a chat another engine plays. */
+  harness: HarnessHold | null;
+}
+
+/**
+ * A harness turn as the guard holds it (HARNESS-SLICE3), in memory only: the generation it is, what
+ * it runs on (`TurnHooks.frame`, taken as its guard ran), and the marked sections the guard wrote
+ * into the world's book for its prompt, until that prompt is assembled.
+ */
+interface HarnessHold {
+  /** The book's owner while its marked sections are in it (`Lease.owner`). */
+  id: string;
+  generationId: string;
+  worldId: WorldId;
+  frame: TurnFrame;
+  /** The marked sections in the book; null before they are made and once they are emptied. */
+  delivered: Delivered | null;
+  /** The guard's write of them: what emptying them waits for. */
+  writing: Promise<void> | null;
+}
+
+/** Why a reply of a chat the harness plays has no turn, where the engine held none for it as it ended. */
+const TURN_LOST = "the engine restarted while this reply was being written";
+const TURN_UNHEARD = "the engine wasn't running when this reply was started";
+
+/** A harness turn that restart recovery closed while its reply may still be under way: where it was to land, and for a Continue how long the reply was when it began (null: not a Continue). */
+interface HarnessGone {
+  messageId: MessageId | null;
+  swipeId: number | null;
+  continued: number | null;
 }
 
 /**
@@ -737,6 +799,13 @@ export class LedgerService {
    */
   private readonly generating = new Set<string>();
   /**
+   * The harness turns restart recovery closed (`open`), by generation, until each one's end is
+   * heard: a backend that restarts alone leaves Lumiverse writing the reply, and its end still has
+   * to say that no turn was played for it. In memory only; one whose end never comes (Lumiverse
+   * restarted too) is let go as the newest take its place.
+   */
+  private readonly harnessGone = new Map<string, HarnessGone>();
+  /**
    * The ids of writes a pre-reply window holds (`early`): made during an engine run, they made no turn
    * stale then, so their landing does (DESIGN §5.1). Every other held write did as it was made.
    */
@@ -811,7 +880,10 @@ export class LedgerService {
         this.release(e.chatId, e.generationId);
       }),
       h.on("GENERATION_ENDED", (e, userId) => {
+        // A turn the harness plays ends on its own path (`harnessEnded`): none of the steps below run for it.
+        const held = this.harnessOf(e.chatId, e.generationId);
         this.generationOver(e.chatId, e.generationId);
+        if (held && userId) return this.harnessEnded(e.chatId, userId, held, e);
         // The reply of a turn the engine prepared is read on what that turn runs on (`Prepared.frame`).
         const taken = this.gates.get(e.chatId)?.taken;
         const ours = taken?.generationId === e.generationId ? taken : null;
@@ -826,6 +898,8 @@ export class LedgerService {
         if (halt && userId) this.diag?.end({ chatId: e.chatId, userId, turn: halt.id }, { status: "failed", reason: `Lumiverse ended the stopped generation instead of stopping it${e.error ? ` (${e.error.slice(0, 200)})` : ""}, so the engine didn't run; generate again` });
         return this.run(e.chatId, userId, async (core, observed) => {
           core.sync(observed);
+          // A chat the harness plays, whose turn the engine no longer holds: nothing of the turn is committed.
+          if (!ours && userId && (await this.harnessLost(core, observed, e.chatId, userId, e.generationId, e.messageId, { impersonate: e.generationType === "impersonate" }))) return;
           // A generation that ended in error commits as stopped: no auto-read, no
           // extraction; the reply's Retry read chip covers whatever text was saved.
           if (e.error) {
@@ -846,14 +920,17 @@ export class LedgerService {
         });
       }),
       h.on("GENERATION_STOPPED", (e, userId) => {
+        const held = this.harnessOf(e.chatId, e.generationId);
         this.generationOver(e.chatId, e.generationId);
+        if (held && userId) return this.harnessStopped(e.chatId, userId, held, e.generationId);
         // A stop is the player's: the turn it took goes, as it always has.
         this.afterReply(e.chatId, e.generationId, null);
         const halt = this.haltOf(e.chatId, e.generationId, userId !== null);
         if (userId && !halt) this.diag?.end({ chatId: e.chatId, userId, turn: e.generationId }, { status: "skipped", reason: "the reply was stopped" });
         let started = false;
-        return this.run(e.chatId, userId, (core, observed) => {
+        return this.run(e.chatId, userId, async (core, observed) => {
           core.sync(observed);
+          if (!halt && userId && (await this.harnessLost(core, observed, e.chatId, userId, e.generationId, undefined, { stopped: true }))) return;
           // The kind the stopped generation started as (a one-shot Re-narrate's) is the engine run's.
           const kind = core.journal.pending[e.generationId]?.kind ?? (halt ? KIND[halt.type] : "normal");
           core.stopped({ generationId: e.generationId, content: e.content }, observed);
@@ -927,7 +1004,9 @@ export class LedgerService {
       if (this.answered.size > 1024) this.answered.delete(this.answered.values().next().value ?? "");
     }
     if (type === "impersonate") return this.impersonate(input.chatId, gate, started, signal);
-    if (!this.host.capabilities.cancel) {
+    // On a chat the harness plays the guard never stops a generation, so a host that can't stop one is no obstacle there.
+    const harness = (await this.hooks?.harness?.plays(input.chatId, input.userId)) === true;
+    if (!harness && !this.host.capabilities.cancel) {
       this.diag?.failed({ chatId: input.chatId, userId: input.userId, turn: started?.generationId ?? null }, "pre", "guard", CANNOT_STOP);
       return "go";
     }
@@ -936,6 +1015,8 @@ export class LedgerService {
       const filled = await this.fill(input.chatId, gate, p, started.generationId, signal);
       if (filled !== "moved") return filled;
     }
+    // A turn another engine prepared before the chat was switched finishes on that engine, above: any other generation here is the harness's.
+    if (harness) return this.harnessGuard(input.chatId, gate, started, signal);
     const id = `engine-${crypto.randomUUID()}`;
     gate.halt = { id, generationId: started?.generationId ?? null, type, target: isSwipe(type) ? (started?.targetMessageId ?? null) : null, connectionId: input.connectionId, ...(input.frontendSessionId ? { session: input.frontendSessionId } : {}), stoppedAt: Date.now() };
     this.diag?.begin({ chatId: input.chatId, userId: input.userId, turn: id }, STEP_LABEL.engine);
@@ -1293,12 +1374,12 @@ export class LedgerService {
     if (!worldId) return null;
     const raced = this.gates.get(chatId);
     if (raced) return raced.userId === userId ? raced : null;
-    const gate: Gate = { userId, worldId, mirror: null, epoch: ++this.epochs, halt: null, prepared: null, taken: null, running: null, reading: null };
+    const gate: Gate = { userId, worldId, mirror: null, epoch: ++this.epochs, halt: null, prepared: null, taken: null, running: null, reading: null, harness: null };
     this.gates.set(chatId, gate);
     for (const [id, g] of this.gates) {
       if (this.gates.size <= OPEN_CHATS_CAP * 8) break;
-      // A gate holding a stopped generation, its engine run, a prepared turn, a taken one or a late reply's read stays: those live only here.
-      if (id !== chatId && !g.prepared && !g.halt && !g.taken && g.running === null && g.reading === null) this.gates.delete(id);
+      // A gate holding a stopped generation, its engine run, a prepared turn, a taken one, a late reply's read or a harness turn stays: those live only here.
+      if (id !== chatId && !g.prepared && !g.halt && !g.taken && g.running === null && g.reading === null && g.harness === null) this.gates.delete(id);
     }
     return gate;
   }
@@ -1373,6 +1454,251 @@ export class LedgerService {
     return "cancel";
   }
 
+  // ------------------------------------------------------------------ the harness engine (HARNESS-SLICE3)
+
+  /** The harness turn the chat's gate holds for this generation, if it is one. */
+  private harnessOf(chatId: ChatId, generationId: string): HarnessHold | null {
+    const held = this.gates.get(chatId)?.harness;
+    return held && held.generationId === generationId ? held : null;
+  }
+
+  /** The harness turn is over, committed or not: its gate holds it no longer. */
+  private harnessOver(chatId: ChatId, held: HarnessHold): void {
+    const gate = this.gates.get(chatId);
+    if (gate?.harness === held) gate.harness = null;
+  }
+
+  /** Tells the harness that nothing of a generation's turn stands; a failure to say so is the turn's diagnostics', never the ledger's. */
+  private async harnessDropped(chatId: ChatId, userId: UserId, generationId: string, why: string): Promise<void> {
+    await this.hooks?.harness?.dropped({ chatId, userId, generationId, why }).catch((error: unknown) => this.diag?.error({ chatId, userId, turn: generationId }, "harness", error, "what the harness kept for the turn wasn't let go"));
+  }
+
+  /**
+   * The guard of a chat the harness plays: it never stops the generation, and no engine run comes
+   * before the reply. The author works after this prompt is assembled, so the turn's own sections
+   * don't exist yet: each section's entry takes the section as the chat's head has it, between
+   * markers, written and emptied as a prepared turn's sections are, and the writer's request swaps
+   * each marked span for the turn's section. A reply written from the prompt as assembled (the
+   * harness had no part in it, or ran out of time) is written from the chat as it stood, never from
+   * marker text. Entries that can't be written stop nothing: the turn's sections then go in before
+   * the player's last message.
+   */
+  private async harnessGuard(chatId: ChatId, gate: Gate, started: GenerationStartedEvent | null, signal: AbortSignal): Promise<ContextVerdict> {
+    const userId = gate.userId;
+    const hooks = this.hooks;
+    const harness = hooks?.harness;
+    if (!hooks || !harness) return "go";
+    // A generation the guard stopped for an engine run before the chat was switched: that run never starts.
+    gate.halt = null;
+    // A turn another engine prepared that this generation didn't take gets no reply.
+    const earlier = gate.prepared;
+    if (earlier && earlier.generationId === null) {
+      gate.prepared = null;
+      this.diag?.end({ chatId, userId, turn: earlier.id }, { status: "skipped", reason: "the chat plays on the harness now, which prepares no turn before its reply" });
+      this.drop(chatId, userId, earlier);
+      this.gone(chatId, userId, earlier, "dropped");
+      this.endRun(chatId, userId, earlier);
+    }
+    // This chat's earlier harness turn whose end was never heard: Lumiverse runs one generation per chat at a time, so it is over.
+    const before = gate.harness;
+    if (before) {
+      gate.harness = null;
+      await this.unmark(chatId, userId, before);
+      await this.harnessDropped(chatId, userId, before.generationId, "another reply started before its end was heard");
+    }
+    if (!started) {
+      this.diag?.failed({ chatId, userId, turn: null }, "pre", "guard", "Lumiverse named no generation for this prompt, so the harness has no turn to open for it");
+      return "go";
+    }
+    const at = { chatId, userId, turn: started.generationId };
+    let frame: TurnFrame;
+    try {
+      frame = await hooks.frame(chatId, userId);
+    } catch (error) {
+      this.diag?.failed(at, "pre", "guard", `${FRAME_UNREAD} (${messageOf(error)})`);
+      return "go";
+    }
+    const held: HarnessHold = { id: `harness-${started.generationId}`, generationId: started.generationId, worldId: gate.worldId, frame, delivered: null, writing: null };
+    gate.harness = held;
+    this.diag?.begin(at, STEP_LABEL.reply ?? "Waiting for the reply…");
+    try {
+      // False when the host stopped waiting for the guard: its prompt is assembled without the engine's sections.
+      if (await this.claim(gate.worldId, chatId, held.id, "turn", at, signal)) {
+        const delivered = await inTurn(frame, () => harness.markers({ chatId, userId, generationId: started.generationId }));
+        held.delivered = delivered;
+        const writing = inTurn(frame, () => hooks.fill(chatId, userId, delivered));
+        held.writing = writing.then(
+          () => undefined,
+          () => undefined,
+        );
+        await writing;
+      }
+    } catch (error) {
+      this.diag?.failed(at, "sections", "markers", `the sections couldn't be written into this prompt's entries, so the turn's own go in before your last message: ${messageOf(error)}`);
+    }
+    // Nothing was written, or the generation ended while the guard worked: nothing else gives the book back.
+    if (held.delivered === null || !this.generating.has(started.generationId)) await this.unmark(chatId, userId, held);
+    return "go";
+  }
+
+  /** A harness turn's markers go from the book, once their write is done, and the book goes back (`unfill`): once, after which the turn holds none. */
+  private async unmark(chatId: ChatId, userId: UserId, held: HarnessHold): Promise<void> {
+    const { delivered, writing } = held;
+    held.delivered = null;
+    held.writing = null;
+    if (delivered) await this.unfill(chatId, userId, { id: held.id, generationId: held.generationId, worldId: held.worldId, delivered, writing });
+    else this.letGo(held.worldId, held.id);
+  }
+
+  /**
+   * A harness turn's generation ended. Its reply saved, the turn commits once: the harness adds what
+   * its agents committed to the turn's planned events (`beforeCommit`), the core commits the turn as
+   * it commits any (`ended`), and the harness closes it (`afterCommit`). None of the fixed steps
+   * after a reply run: no read, no chips of a plan, no memory. A generation that failed, came back
+   * empty, or whose turn doesn't stand commits nothing: its reply, if it left one, has no record, and
+   * nothing its agents staged or committed lands.
+   */
+  private harnessEnded(chatId: ChatId, userId: UserId, held: HarnessHold, e: GenerationEndedEvent): Promise<void> {
+    const at = { chatId, userId, turn: e.generationId };
+    const harness = this.hooks?.harness;
+    return this.run(chatId, userId, async (core, observed) => {
+      core.sync(observed);
+      const p = core.journal.pending[e.generationId];
+      const messageId = e.messageId ?? p?.messageId ?? undefined;
+      // Whether the journal still holds the turn open: on any way out of here it is closed, so no write waits on it for ever.
+      let open = p !== undefined;
+      const drop = async (why: string): Promise<void> => {
+        this.harnessUnplayed(core, observed, e.generationId, messageId, why);
+        open = false;
+        await this.harnessDropped(chatId, userId, e.generationId, why);
+        this.diag?.end(at, { status: "failed", reason: why });
+      };
+      try {
+        if (e.error) return await drop(`the reply's generation failed: ${e.error.slice(0, 300)}`);
+        if (!harness || !p || !messageId) return await drop("the engine lost track of the reply's turn");
+        if (p.kind !== "continue" && e.content.trim() === "") return await drop("the writer returned an empty reply");
+        const swipeId = p.swipeId ?? observed.find((m) => m.id === messageId)?.swipeId ?? 0;
+        // The commit makes no call a cancel could cut short: its signal never aborts.
+        const turn: TurnContext = { chatId, userId, core, observed, generationId: e.generationId, messageId, swipeId, kind: p.kind, content: e.content, signal: new AbortController().signal };
+        await inTurn(held.frame, async () => {
+          const why = await harness.beforeCommit(turn);
+          if (why !== null) return drop(why);
+          core.ended({ generationId: e.generationId, messageId, content: e.content }, observed);
+          open = false;
+          await harness.afterCommit(turn);
+          this.diag?.end(at);
+        });
+      } catch (error) {
+        if (open) this.harnessUnplayed(core, observed, e.generationId, messageId, messageOf(error));
+        if (open) await this.harnessDropped(chatId, userId, e.generationId, messageOf(error));
+        this.diag?.error(at, "harness", error, open ? "the turn wasn't committed: its reply stands without a record" : "the turn committed, but its close didn't finish");
+        this.diag?.end(at, { status: "failed", reason: messageOf(error) });
+      }
+    }).finally(() => this.harnessOver(chatId, held));
+  }
+
+  /** A harness turn's generation was stopped: nothing of the turn stands. What its agents committed never reached the journal, and the text it left says no turn was played for it. */
+  private harnessStopped(chatId: ChatId, userId: UserId, held: HarnessHold, generationId: string): Promise<void> {
+    this.diag?.end({ chatId, userId, turn: generationId }, { status: "skipped", reason: "the reply was stopped" });
+    return this.run(chatId, userId, async (core, observed) => {
+      core.sync(observed);
+      this.harnessUnplayed(core, observed, generationId, undefined, "the reply was stopped");
+      await this.harnessDropped(chatId, userId, generationId, "the reply was stopped");
+    }).finally(() => this.harnessOver(chatId, held));
+  }
+
+  /**
+   * A harness generation is over with no turn standing: the journal's turn closes with nothing
+   * committed, and the reply it left, if it left one, is marked as one no turn was played for
+   * (`LedgerCore.recordUnplayed`), so the game master sees it there and the next turn's author is
+   * told. A Continue that added text marks the record of the reply it added to, which a turn was
+   * played for; one that added none left nothing to tell of.
+   */
+  private harnessUnplayed(core: LedgerCore, observed: ChainMessage[], generationId: string, messageId: MessageId | undefined, why: string): void {
+    const p = core.journal.pending[generationId];
+    const continues = p?.kind === "continue";
+    const target = messageId ?? p?.messageId ?? (continues ? p?.continueHead : undefined) ?? undefined;
+    const swipeId = p?.swipeId ?? observed.find((m) => m.id === target)?.swipeId ?? 0;
+    const text = observed.find((m) => m.id === target)?.swipes[swipeId] ?? "";
+    const added = !continues || p?.captured === undefined || text.length > p.captured.len;
+    core.stopped({ generationId, content: "" }, observed);
+    if (target && p?.kind !== "impersonate" && added) core.recordUnplayed(target, swipeId, why, observed, continues);
+  }
+
+  /**
+   * A generation ended on a chat the harness plays with no harness turn held for it: the engine
+   * restarted while the reply was being written, and what its agents had done went with it, or it
+   * wasn't running when the reply was started. Nothing of the turn is committed, as for any harness
+   * turn that doesn't stand, so nothing half-written is left, and the reply says no turn was played
+   * for it. A turn restart recovery closed before its reply ended (`open`) is known by what recovery
+   * kept of it; a generation the engine never heard of marks only a saved reply that holds no
+   * record at all. False for any other chat, for an Impersonate, which is no turn, and where there
+   * is nothing to mark.
+   */
+  private async harnessLost(core: LedgerCore, observed: ChainMessage[], chatId: ChatId, userId: UserId, generationId: string, messageId: MessageId | undefined, how: { stopped?: true; impersonate?: boolean }): Promise<boolean> {
+    const p = core.journal.pending[generationId];
+    const gone = this.harnessGone.get(generationId);
+    this.harnessGone.delete(generationId);
+    if (p?.kind === "impersonate" || how.impersonate === true || (await this.hooks?.harness?.plays(chatId, userId)) !== true) return false;
+    const why = `${p || gone ? TURN_LOST : TURN_UNHEARD}${how.stopped ? ", and the reply was stopped" : ""}`;
+    if (p) this.harnessUnplayed(core, observed, generationId, messageId, why);
+    else {
+      const target = messageId ?? gone?.messageId ?? null;
+      const reply = target ? core.chain(observed).find((m) => m.id === target) : undefined;
+      if (!reply || reply.isUser) return false;
+      const swipeId = gone?.swipeId ?? reply.swipeId;
+      // What a Continue recovery closed went on to add has no turn; one that added nothing left nothing to tell of.
+      const added = gone !== undefined && gone.continued !== null;
+      if (added && (reply.swipes[swipeId] ?? "").length <= (gone.continued ?? 0)) return false;
+      // A turn's own record there stands as it is, and one that already says no turn was played says it once: only that Continue's mark is added to a turn's record. A record with no turn (the reply's text arriving, which the ledger took for an edit) takes the mark.
+      const held = reply.ledger?.swipes[String(swipeId)];
+      if (held && !added && (held.path !== "" || held.harness?.unplayed !== undefined)) return false;
+      if (core.recordUnplayed(reply.id, swipeId, why, observed, added) !== null) return false;
+    }
+    await this.harnessDropped(chatId, userId, generationId, why);
+    this.diag?.end({ chatId, userId, turn: generationId }, { status: "failed", reason: why });
+    return true;
+  }
+
+  /**
+   * A harness generation's prompt is assembled: its run began, which whoever plays it starts from the
+   * assembled prompt (LumiAH's runtime from the request it was sent, LumiAH built into Lumiverse
+   * from the interceptor it is handed). Its entries leave the book and the book goes back now, so
+   * another chat of the same world never waits while the author works.
+   */
+  harnessAssembled(chatId: ChatId, generationId: string): void {
+    const gate = this.gates.get(chatId);
+    const held = this.harnessOf(chatId, generationId);
+    if (!gate || !held) return;
+    this.outstanding++;
+    void this.unmark(chatId, gate.userId, held).finally(() => this.outstanding--);
+  }
+
+  /** What a harness turn runs on, as its generation's guard took it; null when the gate holds no harness turn for the generation. */
+  harnessFrame(chatId: ChatId, generationId: string): TurnFrame | null {
+    return this.harnessOf(chatId, generationId)?.frame ?? null;
+  }
+
+  /** Whose the chat is, as its guard state or its open ledger has it; null for a chat the ledger hasn't met since it started. */
+  ownerOf(chatId: ChatId): UserId | null {
+    return this.gates.get(chatId)?.userId ?? this.chats.get(chatId)?.userId ?? null;
+  }
+
+  /**
+   * A harness turn's part of a record written from outside the turn's own operation, on the chat's
+   * queue (`LedgerCore.recordHarness`): LumiAH's record of a turn, which may arrive after the turn
+   * committed. `make` reads the chat as that operation finds it and answers which record takes what;
+   * null leaves every record as it is. Null once written, else why it wasn't.
+   */
+  async recordHarness(chatId: ChatId, userId: UserId, make: (core: LedgerCore, observed: ChainMessage[]) => { messageId: MessageId; swipeId: number; harness: RecHarness } | null): Promise<string | null> {
+    let refused: string | null = "the chat plays no world";
+    await this.run(chatId, userId, (core, observed) => {
+      const made = make(core, observed);
+      refused = made ? core.recordHarness(made.messageId, made.swipeId, made.harness, observed) : "the turn has no record on the chat";
+    });
+    return refused;
+  }
+
   /**
    * The generation the guard let through takes the prepared plan; what the engine run recorded
    * follows it, and so does what the run's pre-reply window holds, which lands as this turn closes
@@ -1405,6 +1731,8 @@ export class LedgerService {
     this.answered.delete(generationId);
     this.giveBack(generationId);
     const gate = this.gates.get(chatId);
+    // A harness turn's marked sections go once its prompt is assembled, where its run's beginning hasn't taken them already; the turn stays the gate's until its generation's end.
+    this.harnessAssembled(chatId, generationId);
     const p = gate?.prepared;
     if (!gate || !p || p.generationId !== generationId) return;
     gate.prepared = null;
@@ -1517,6 +1845,12 @@ export class LedgerService {
       }
       if (lease.kind === "impersonate" && lease.chatId === chatId) {
         this.letGo(worldId, lease.owner);
+        continue;
+      }
+      // So does this chat's own earlier harness turn, whose markers were never emptied.
+      const held = holder?.harness?.id === lease.owner ? holder.harness : null;
+      if (holder && held && lease.chatId === chatId) {
+        await this.unmark(lease.chatId, holder.userId, held);
         continue;
       }
       if (lease.chatId !== chatId) this.diag?.rest(at, STEP_LABEL.book ?? "Waiting for another chat of this world…");
@@ -1693,6 +2027,12 @@ export class LedgerService {
       // stand. A read of them that fails fails the run as a failed step does (its Diagnostics record,
       // the engine-failed card and its Retry), never silently; that run has no frame to run in.
       const frame = this.hooks ? await this.hooks.frame(chatId, userId).catch((error: unknown) => new EngineFailure("engine", `${FRAME_UNREAD} (${messageOf(error)})`)) : null;
+      // The chat was switched to the harness after the guard stopped this generation: the harness runs no engine stage, so the run ends here, and the next generation is the harness's.
+      if (frame !== null && !(frame instanceof EngineFailure) && frame.chat.engine === "harness") {
+        ending = "cancelled";
+        this.diag?.end(at, { status: "skipped", reason: "this chat was switched to the harness before its engine run started; generate again" });
+        return;
+      }
       await (frame === null || frame instanceof EngineFailure ? plan(core, observed, frame) : inTurn(frame, () => plan(core, observed, frame)));
     }).finally(() => {
       this.ran(chatId, halt.id);
@@ -1787,8 +2127,12 @@ export class LedgerService {
    * so the player's notice tells them, and is told as its refusal is (`writesLanded`); Diagnostics says why.
    * Without it (an agent's write: the assistant's, the minds run's), the answer waits for the op, so
    * it says what the op made of the write: held, landed or refused.
+   *
+   * `unless`: its maker's own refusal, asked as the write reaches the chat, with the chat as it then
+   * stands: a reason refuses the write there, with nothing written or held (a harness job's write,
+   * once the reply it belongs to has left the chat's path).
    */
-  async write(chatId: ChatId, userId: UserId, w: HeldWrite, opts: { answerQueued?: boolean } = {}): Promise<WriteResult & { queued?: QueuedOn }> {
+  async write(chatId: ChatId, userId: UserId, w: HeldWrite, opts: { answerQueued?: boolean; unless?: (core: LedgerCore, observed: ChainMessage[]) => string | null } = {}): Promise<WriteResult & { queued?: QueuedOn }> {
     const gate = this.gates.get(chatId);
     const early = gate !== undefined && (gate.running !== null || (gate.prepared !== null && gate.prepared.kept === null) || gate.taken !== null);
     // What a write held now waits on, as it is made: a window that opened since is a reply's.
@@ -1803,6 +2147,11 @@ export class LedgerService {
       userId,
       async (core, observed) => {
         core.sync(observed);
+        const no = opts.unless?.(core, observed) ?? null;
+        if (no !== null) {
+          result = { applied: false, pending: false, reason: no };
+          return;
+        }
         result = core.write(w, observed, early);
         if (early && result.pending) this.unbumped.add(w.id);
         if (!result.applied) {
@@ -1882,7 +2231,7 @@ export class LedgerService {
 
   /** Restart recovery and chat open: classify against the snapshot, and close the windows a stopped backend left open (never a turn under way here). */
   async open(chatId: ChatId, userId: UserId): Promise<void> {
-    await this.run(chatId, userId, (core, observed) => {
+    await this.run(chatId, userId, async (core, observed) => {
       core.sync(observed);
       const slot = this.chats.get(chatId);
       // A turn this backend's engine run plans, or that waits here for its reply, keeps its pre-reply window.
@@ -1890,6 +2239,17 @@ export class LedgerService {
       const live = [gate?.running, gate?.prepared && gate.prepared.kept === null ? gate.prepared.id : null];
       const gone = new Set([...(slot?.leftOpen ?? [])].filter((id) => !this.generating.has(id) && !live.includes(id)));
       if (gone.size === 0) return;
+      // A turn the harness was playing went with the backend that held it: nothing of it is committed, where recovery would commit a classic turn's plan with its saved reply. Its reply may still be under way in Lumiverse: what it was is kept until its end is heard.
+      if ([...gone].some((id) => core.journal.pending[id]) && (await this.hooks?.harness?.plays(chatId, userId)) === true) {
+        for (const id of gone) {
+          const p = core.journal.pending[id];
+          if (!p || p.kind === "impersonate") continue;
+          this.harnessGone.delete(id);
+          this.harnessGone.set(id, { messageId: p.messageId ?? p.continueHead ?? null, swipeId: p.swipeId, continued: p.kind === "continue" ? (p.captured?.len ?? 0) : null });
+          if (this.harnessGone.size > OPEN_CHATS_CAP * 8) this.harnessGone.delete(this.harnessGone.keys().next().value ?? "");
+          this.harnessUnplayed(core, observed, id, undefined, TURN_LOST);
+        }
+      }
       core.restart(observed, gone);
       for (const id of gone) slot?.leftOpen.delete(id);
     });
@@ -1934,6 +2294,13 @@ export class LedgerService {
       this.drop(chatId, gate.userId, p);
       this.gone(chatId, gate.userId, p, "dropped");
     }
+    // A harness turn under way there goes with it: its markers leave the book, and nothing of it lands.
+    const held = gate?.harness;
+    if (gate && held) {
+      this.outstanding++;
+      void this.unmark(chatId, gate.userId, held).finally(() => this.outstanding--);
+      void this.harnessDropped(chatId, gate.userId, held.generationId, "the chat's world was attached or detached");
+    }
   }
 
   /**
@@ -1948,9 +2315,9 @@ export class LedgerService {
     return gate !== undefined && this.holdsTurn(gate);
   }
 
-  /** Whether the chat's gate holds a turn: from the guard's stop through its engine run, a prepared turn waiting, the reply that took it, a late reply's read. */
+  /** Whether the chat's gate holds a turn: from the guard's stop through its engine run, a prepared turn waiting, the reply that took it, a late reply's read, or a harness turn under way. */
   private holdsTurn(gate: Gate): boolean {
-    return gate.prepared !== null || gate.halt !== null || gate.taken !== null || gate.running !== null || gate.reading !== null;
+    return gate.prepared !== null || gate.halt !== null || gate.taken !== null || gate.running !== null || gate.reading !== null || gate.harness !== null;
   }
 
   /**
@@ -2051,6 +2418,11 @@ export class LedgerService {
   /** Runs `op` on the chat's queue (reads that must see a settled core). */
   async with(chatId: ChatId, userId: UserId, op: Op): Promise<void> {
     await this.run(chatId, userId, op);
+  }
+
+  /** Whether the chat's queue holds work now, queued or running (a commit, a write, a resync): what a wait on the queue would wait for. False for a chat that isn't open. */
+  queued(chatId: ChatId): boolean {
+    return (this.chats.get(chatId)?.ops ?? 0) > 0;
   }
 
   private onMessage(chatId: ChatId, userId: UserId | null, messageId: MessageId, kind: "sent" | "edited" | "deleted"): void {

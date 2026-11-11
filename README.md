@@ -6,8 +6,11 @@ I built LumiRPEngine because long roleplay chats forget things. Who owes whom mo
 
 You choose how deep it goes. On the lowest setting it is a light layer that tracks where you are, what time it is and what you are carrying. On the highest it runs payroll with withholding, credit card statements, fuel and maintenance, and whole days of NPC life, while you are chatting.
 
+Since November 2026 a world chat can be played by an **AI author**. On the harness engine nothing about a turn is fixed in code: the author reads what it needs of the world, has each person present think for themselves, plays what needs a roll through the rules, moves people and things, lets time pass, and briefs your model, which writes the reply under your preset as before. LumiRPEngine supplies the tools and the rules. The agents run in [LumiAH](https://github.com/TheLiquorPriest/LumiAH), which is built in, so there is nothing else to install. A chat new to its world plays this way from its first turn. The two earlier engines are still there, chosen per chat, for any chat that prefers them.
+
 ## What you get
 
+- **An AI author that runs the game.** On the harness engine the author plays each turn with the engine's own tools, and hands work to other agents when a turn needs them: a **character** agent for each person who has to think, who is given only what that person perceives and knows; a **game master** who rules on what the rules don't settle; a **knowledge** agent who works out who learned what; a **chronicler** who records what the reply itself established. Together they can do what a human GM does in the GM and Build pages: make a person whole (sheet, place, belongings, a mind), make items and places, lay paths and maps into the world, run a fight, write lore. Every change goes through the engine's own rules and through the modes you set (Auto, Confirm on the review card, or Never), and a change to the world you authored waits for your Apply. [The harness engine](docs/HARNESS.md) explains a turn; [the tools](docs/harness-tools.md) lists every surface and the tool for it.
 - **A world you can build.** Kinds with typed fields and derived values, entities and relationships, places, routes and grids, inventories and ownership, character sheets. A schema-driven editor for all of it, and three starter worlds to begin from: Brindlemere (a fantasy town), Harrowmere Hall (a mystery manor) and Port Alder (a modern slice-of-life town).
 - **Deterministic actions.** Go places, take, give, wear, use, eat, rest, sleep, buy, pay, drive, lend, let time pass and more. Checks use dice with exact odds, shown before you choose, and the result is decided before the narrator writes a word. How much the dice decide is up to the world and to you: every check, only risky ones or only marked ones; how much your described approach counts; and whether the roll or the story settles it.
 - **Ready-made rulesets.** Start a world's ruleset from a profile: Modern, Classic or Fifth, three takes on d20 play, each with abilities, skills, saves, HP, levels from XP, a character sheet and combat; or Custom, the least to grow from (one stat, one check, an HP pool, a plain attack and a single level). All of it is editable data. The profiles are original implementations of common tabletop mechanics, with no rules text.
@@ -28,6 +31,8 @@ The full walkthrough is in the [user guide](docs/USER-GUIDE.md).
 - **[User guide](docs/USER-GUIDE.md):** playing, tuning and building, every button explained.
 - **[Presets and RPEngine](docs/PRESETS.md):** for preset authors: the section outlets, placement precedence, guidance blocks for the engine's helpers and the narrator, with examples.
 - **[GM guide](docs/GM-GUIDE.md):** running a chat: who sees what, the GM view and its edits, fixes and Undo, checks, realism and time in one chat, Upgrade, and the Context inspector.
+- **[The harness engine](docs/HARNESS.md):** the engine where an AI author plays each turn: what happens in a turn, who the agents are, what you can change, and how the code is laid out.
+- **[The harness tools](docs/harness-tools.md):** every GM surface and the tool that gives it to an agent, with each tool's tier, checked by a test.
 - **[Recipes](docs/RECIPES.md):** small worlds that each show one thing working, from XP and levels to a family's schedule, every one checked by a test.
 - **[Expressions](docs/EXPRESSIONS.md):** the formula language for requirements, checks, derived fields and rules.
 - **[Reference](docs/REFERENCE.md):** every kind, field, effect, formula function, action, event and lint code the engine and its packs register, generated from the code (`bun run reference`).
@@ -44,7 +49,7 @@ LumiRPEngine requires **Lumiverse's `staging` branch from 16 October 2026 (commi
 
 ## Permissions
 
-LumiRPEngine asks for ten permissions. Here is why each one is there:
+LumiRPEngine asks for sixteen permissions. Here is why each one is there:
 
 - `generation`: to follow each reply from start to finish, to stop a reply the engine hasn't prepared yet so the engine can run first, and to make its own small helper calls.
 - `context_handler`: to check, just before each reply, that the engine has prepared it (the turn's plan, and the world's sections in the prompt), and stop it when it hasn't.
@@ -55,7 +60,13 @@ LumiRPEngine asks for ten permissions. Here is why each one is there:
 - `regex_scripts`: to keep the JSON blocks some presets ask replies to carry out of World Info scanning and hide them in world chats, with two regex scripts in each world chat and two global ones that take the engine's wrapper off again before your own scripts read a reply. **Settings → Preset** turns the hiding off.
 - `decisions`: to use Lumiverse's Decisions API for the probability questions the engine asks, such as what an NPC does on a close call.
 - `ui_panels`: for the status pill, the map and the action palette with its Timelapse tab, which float over the chat. The drawer tab needs no permission.
-- `mcp_servers` (optional; only an owner or admin can switch it on): if Lumiverse runs LumiRPEngine's MCP server itself, to check that Lumiverse's own MCP client has the new tools after an update, for **Reconnect in Lumiverse**. It reads which of your Lumiverse MCP servers hold LumiRPEngine's tools and nothing else of them, and never adds, changes, connects or disconnects one. Without it, Reconnect in Lumiverse still works and goes by what the server says.
+- `mcp_servers` (optional; only an owner or admin can switch it on): if Lumiverse runs LumiRPEngine's MCP server itself, to check that Lumiverse's own MCP client has the new tools after an update, for **Reconnect in Lumiverse**. It reads which of your Lumiverse MCP servers hold LumiRPEngine's tools and nothing else of them, and never adds, changes, connects or disconnects one. Without it, Reconnect in Lumiverse still works and goes by what the server says. On a Harness chat it also lets the agents call the tools of the MCP servers you switched on for them (the drawer's **Harness** tab → **Tools**); none is on until you switch it on.
+- `interceptor`: to let the Harness engine's author work on a reply before it is written. On a chat you switch to **Harness** (**GM → This chat → Engine**), Lumiverse waits, for up to five minutes, while the author plays the turn, then sends the prompt with the author's brief in it. Chats on the other engines don't use it.
+- `embeddings` (optional): on a Harness chat, so the agents' searches of the chat and its lore can match by meaning as well as by word, where you have an embedding connection. Without it they search by word, and say so.
+- `memories` (optional): on a Harness chat, so the agents can search what Lumiverse's own memory keeps of the chat, where you have that on. Without it they aren't offered that search.
+- `databanks` (optional): on a Harness chat, so the agents can list, search and read the databanks that apply to the chat. It only reads them. Without it they aren't offered those tools.
+- `web_search` (optional): on a Harness chat, so the agents can search the web through the search provider you set up in Lumiverse. Without it, or with no provider, they aren't offered it.
+- `generation_parameters` (optional): only for a Harness chat you choose to run in a runtime, a program you start beside Lumiverse for turns that need longer than Lumiverse waits before a reply. It lets the extension mark that chat's request so the runtime finds it. A chat that runs built in, which is how every chat starts, never uses it.
 
 LumiRPEngine deliberately does **not** request the `characters` permission. Character cards stay out of its reach. To know whether the world's sections really reached a reply's prompt, it reads which of its entries Lumiverse activated for that reply, and a section whose entry didn't activate shows as "not delivered".
 
@@ -64,7 +75,7 @@ LumiRPEngine deliberately does **not** request the `characters` permission. Char
 1. Open the **LumiRPEngine** tab in the drawer and go to **Build**.
 2. Tap **New world**, pick a **Template** (fantasy town, mystery manor or modern slice-of-life) or **Blank**, name it and tap **Create world**. To build from your existing lore books instead, create a Blank world and use its **Import from lore** tool.
 3. Attach the world to a chat with the world's **Attach to this chat** tool (or, in **Play**, **Attach a world to this chat…**). LumiRPEngine creates a lore book for the world's sections and adds it to that chat.
-4. Go to **Play** and write. Blank worlds start on the **Story** preset, which keeps things light, as does the fantasy town; the mystery manor starts on **Grounded** and the modern slice-of-life on **Simulation**. Change the realism whenever you like in **Settings → Realism**.
+4. Go to **Play** and write. Blank worlds start on the **Story** preset, which keeps things light, as does the fantasy town; the mystery manor starts on **Grounded** and the modern slice-of-life on **Simulation**. Change the realism whenever you like in **Settings → Realism**. A new world chat plays on the harness engine with nothing more to set up: the author works on the chat's own connection before each reply, for up to five minutes, and the drawer's Harness tab shows what it is doing. To play a chat on the classic steps or on agents instead, choose it in **GM → This chat → Engine**.
 
 ## Your own agent: the CLI and MCP server
 
@@ -95,6 +106,10 @@ These are the known limits of this release. Most of them need a change in Lumive
 - **A rare overlap case.** If another extension writes to a reply while it is still streaming, an edit you make to your own message right afterwards can be mistaken for Lumiverse's own re-render and will not pause the chat.
 - **Rare overlapping turns** fall back to planning from the last saved state.
 - **Worlds from other people can carry macros.** A world file's lore and templates may contain Lumiverse macros (`{{…}}`), which Lumiverse runs when it builds a prompt, as in any World Book. Lumiverse's macro engine also acts on control characters (it turns some of them back into braces on a later pass) and on the `<user>`, `<char>` and `<bot>` shorthands. LumiRPEngine keeps authored text as written. Everything it inserts itself (a name, a price, what a model said) has its braces swapped for look-alikes, its control characters dropped and its `<user>`-style shorthands broken, so a value can never form a macro however many times Lumiverse processes it. It lists all of these in an imported world for you to review before you play it.
+- **On the harness engine a reply starts later,** because the author works first. The Harness tab shows the work and how long it may take at most. Skipping it sends the prompt on with the world as it stood, and the reply is marked "No turn was played".
+- **A path, a map or a place of the world's own that an agent makes is played from the turn after you apply it.** Those live in the world's document. People, things and places made in play are there at once.
+- **On a harness chat the engine reads no reply itself,** so Re-read edit, Retry read and Swipe as… aren't offered. A swipe or a Regenerate plays the turn afresh.
+- **The harness engine is new.** It is covered by tests and was read by an independent reviewer, whose serious findings were fixed. It has not had the months of play the classic steps have, and the fixes have not had a second review. A chat can be switched to another engine between turns.
 
 ## Tests
 
@@ -113,6 +128,8 @@ The release gate prints the fresh sequences' seed base: `LRE_PROPERTY_SEED=<base
 ## Credits
 
 Parts of the engine are adapted from [Warp](https://github.com/japolino/warp) by japolino, used with the author's permission for this non-commercial project. The details, file by file, are in [`NOTICE`](NOTICE).
+
+The harness engine's agents run in [LumiAH](https://github.com/TheLiquorPriest/LumiAH), my own agent harness for Lumiverse (MIT), built into LumiRPEngine as a package.
 
 ## License
 

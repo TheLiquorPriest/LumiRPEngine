@@ -8,14 +8,16 @@
 
 import { describe, expect, test } from "bun:test";
 import type { VNode } from "preact";
-import { Button, Seg } from "../../src/frontend/components";
+import { Banner, Button, HostSwitch, Seg } from "../../src/frontend/components";
 import { AgentTrace, agentTokensText, cancelTurn } from "../../src/frontend/diagnostics";
-import { engineRequest, EngineSwitch, readEngine, type ChatEngine } from "../../src/frontend/gm/engine";
+import { ENGINE_HELP, engineRequest, EngineSwitch, HarnessRows, readEngine, type ChatEngine } from "../../src/frontend/gm/engine";
 import { SessionPanel, workspaceControls, type WorkspaceBody, type WorkspaceResult } from "../../src/frontend/gm/workspace";
 import { followReview, type ReviewBody, ReviewCard, reviewHandlers, ReviewUnread } from "../../src/frontend/review-card";
 import type { ActivityAgent } from "../../src/shared/diagnostics";
 import type { GenerateAs, ReviewCardView, SessionView } from "../../src/shared/protocol";
-import { press, propsOf, type Props } from "../support/tree";
+import { LimitRow, SettingRow } from "../../src/frontend/settings/kit";
+import type { JsonObject } from "../../src/shared/json";
+import { labelled, press, propsOf, type Props } from "../support/tree";
 
 const CHAT = "chat-port-alder";
 
@@ -52,15 +54,83 @@ describe("GM → This chat: the Engine switch", () => {
     expect(seg.options).toEqual([
       { value: "classic", label: "Classic steps" },
       { value: "agents", label: "Agents" },
+      { value: "harness", label: "Harness" },
     ]);
     expect(textOf(tree)).toContain("Switching drops a turn the engine has already prepared for the next reply");
     press(seg, "agents");
     expect(picked).toEqual(["agents"]);
     expect(engineRequest(CHAT, "agents")).toEqual({ type: "lre.chat.knowledge", chatId: CHAT, engine: "agents" });
     expect(engineRequest(CHAT, "classic")).toEqual({ type: "lre.chat.knowledge", chatId: CHAT, engine: "classic" });
+    expect(engineRequest(CHAT, "harness")).toEqual({ type: "lre.chat.knowledge", chatId: CHAT, engine: "harness" });
     expect(propsOf(EngineSwitch({ engine: "agents", busy: false, onChange: () => undefined }), Seg)[0]?.value).toBe("agents");
     // While it is read, no switch to press.
     expect(propsOf(EngineSwitch({ engine: null, busy: false, onChange: () => undefined }), Seg)).toEqual([]);
+  });
+
+  test("says what each engine is before one is picked: the harness in two lines, for someone who has never met one", () => {
+    expect(ENGINE_HELP.harness.length).toBe(2);
+    // Who plays the turn, and what the player will notice; nothing to install, no key, no connection to make.
+    expect(ENGINE_HELP.harness[0]).toContain("An AI author plays each turn before the reply is written");
+    expect(ENGINE_HELP.harness[1]).toContain("Nothing to set up: it works on this chat's own connection, and your preset still writes the reply.");
+    for (const engine of ["classic", "agents", "harness"] as const) {
+      const shown = textOf(EngineSwitch({ engine, busy: false, onChange: () => undefined }));
+      for (const line of Object.values(ENGINE_HELP).flat()) expect(shown).toContain(line);
+    }
+  });
+
+  test("where the harness can't play, its option can't be pressed and the page says why and what to do; a chat already on it is warned", () => {
+    const why = "This build of LumiRPEngine doesn't include the harness yet. Update LumiRPEngine in Lumiverse (Extensions → LumiRPEngine), then choose Harness here.";
+    const closed = EngineSwitch({ engine: "classic", busy: false, blocked: why, onChange: () => undefined });
+    expect(propsOf(closed, Seg)[0]?.options).toEqual([
+      { value: "classic", label: "Classic steps" },
+      { value: "agents", label: "Agents" },
+      { value: "harness", label: "Harness", disabled: true, title: why },
+    ]);
+    expect(propsOf(closed, Banner).map((b) => [b.tone, b.title, textOf(b.children)])).toEqual([["info", "Harness can't be chosen yet", why]]);
+    // A chat that is on the harness keeps its switch whole, so it can be switched away, and says what its replies are meanwhile.
+    const stuck = EngineSwitch({ engine: "harness", busy: false, blocked: why, onChange: () => undefined });
+    expect(propsOf(stuck, Seg)[0]?.options).toEqual([
+      { value: "classic", label: "Classic steps" },
+      { value: "agents", label: "Agents" },
+      { value: "harness", label: "Harness" },
+    ]);
+    const [warning] = propsOf(stuck, Banner);
+    expect([warning?.tone, warning?.title]).toEqual(["warn", "The harness can't play this chat now"]);
+    expect(textOf(warning?.children)).toContain(why);
+    expect(textOf(warning?.children)).toContain("Switch to another engine to go on playing meanwhile.");
+    // Where it can play, nothing is said.
+    expect(propsOf(EngineSwitch({ engine: "harness", busy: false, blocked: null, onChange: () => undefined }), Banner)).toEqual([]);
+  });
+
+  test("a chat on the harness shows the harness's settings: the time for a turn whose author says none, the wait for the last turn, and the finished runs remembered, each with its Default", () => {
+    const patches: JsonObject[] = [];
+    const rows = (defaultTick: boolean, commitWaitMs = 5000, runsRemembered = 1024) => HarnessRows({ harness: { defaultTick, commitWaitMs, runsRemembered }, busy: false, patch: (patch) => void patches.push(patch) });
+    const on = rows(true);
+    expect(textOf(on)).toContain("for every chat you play on it");
+    const row = propsOf(on, SettingRow)[0] ?? {};
+    expect([row.changed, textOf(row.help)]).toEqual([false, "A turn whose author never says how much time it took takes the scene's usual time for a turn, as a turn on the other engines does."]);
+    press(labelled(on, HostSwitch, "Pass the scene's usual time when the author says none"), false);
+    // Off differs from the default: the row says what off does, and its Default sends null.
+    const off = propsOf(rows(false), SettingRow)[0] ?? {};
+    expect([off.changed, textOf(off.help)]).toEqual([true, "A turn takes only the time its author says: one whose author says nothing takes none."]);
+    const reset = off.reset;
+    if (!reset || typeof reset !== "object" || !("onClick" in reset) || typeof reset.onClick !== "function") throw new Error("the row has no Default");
+    reset.onClick();
+    expect(patches).toEqual([{ agents: { harness: { defaultTick: false } } }, { agents: { harness: { defaultTick: null } } }]);
+    // The wait for the last turn's record is a limit like any other: its number, and null for its Default.
+    const wait = propsOf(rows(true, 2000), LimitRow)[0] ?? {};
+    expect([wait.value, wait.standard]).toEqual([2000, 5000]);
+    if (typeof wait.set !== "function") throw new Error("the wait has no control");
+    wait.set(8000);
+    wait.set(null);
+    expect(patches.slice(2)).toEqual([{ agents: { harness: { commitWaitMs: 8000 } } }, { agents: { harness: { commitWaitMs: null } } }]);
+    // So is how many finished runs the engine keeps track of: never fewer than one turn and its jobs need.
+    const kept = propsOf(rows(true, 5000, 64), LimitRow)[1] ?? {};
+    expect([kept.id, kept.value, kept.standard, (kept.def as { min?: number } | undefined)?.min]).toEqual(["harness-runs-remembered", 64, 1024, 16]);
+    if (typeof kept.set !== "function") throw new Error("the runs remembered have no control");
+    kept.set(256);
+    kept.set(null);
+    expect(patches.slice(4)).toEqual([{ agents: { harness: { runsRemembered: 256 } } }, { agents: { harness: { runsRemembered: null } } }]);
   });
 });
 

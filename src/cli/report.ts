@@ -9,7 +9,7 @@ import type { LintIssue } from "../shared/protocol";
 import type { WorldDoc } from "../shared/world";
 import { MAP_SCHEMA } from "../shared/maps";
 import { checkSchema, pathText, type Schema } from "../shared/schema-check";
-import { isCollection } from "./diff";
+import { isCollection } from "../shared/world-diff";
 
 // A JSON module's inferred type spells out every node, which `Schema` describes in general.
 const WORLD_SCHEMA = worldSchemaJson as unknown as Schema;

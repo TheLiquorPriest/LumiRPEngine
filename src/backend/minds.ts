@@ -22,7 +22,7 @@ import type { ChatId, EntityId, MessageId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { CommitmentKind, FactId, Fidelity, KnowledgeProposal, KnowledgeSettings, Limit, MemoryEventData, MindCallTrace, MindCommitment, MindCuts, MindEventData, MindLengths, MindMoment, MindNote, MindPlan, MindPurpose, MindsRunEntry, MindsSettings, PinnedTrace, PlanKind, PresenceEventData } from "../shared/minds";
+import type { CommitmentKind, FactId, Fidelity, KnowledgeProposal, KnowledgeSettings, Limit, MemoryEventData, MindCallTrace, MindCommitment, MindCuts, MindEventData, MindLengths, MindMoment, MindNote, MindPlan, MindPurpose, MindsMemoryConfig, MindsRunEntry, MindsSettings, PinnedTrace, PlanKind, PresenceEventData } from "../shared/minds";
 import { answerLengths, COMMITMENT_KINDS, cutsNote, effectiveMemory, knowledgeAnswerFormat, knowledgeThreshold, knowledgeTracked, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MINDS_EVENTS, MINDS_SLOT, parseFactId, PLAN_KINDS, PLAN_PRIORITY, sharedPlanId, sharesPlan, worldMindsOf, worldMindTemplate } from "../shared/minds";
 import type { ModelUseSettings, StepConfig, UserSettings } from "../shared/settings";
 import { helperCallOf, stepConfigOf } from "../shared/settings";
@@ -676,7 +676,7 @@ export function turnPresence(reg: Registry, world: WorldDoc, input: Pick<PostMin
  * reaches only `listeners`, who were with them for the turn (none while the chat tracks knowledge,
  * whose step is telling's only writer).
  */
-function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue, listeners: readonly EntityId[], lengths: Readonly<MindLengths>, cuts?: MindCuts): MemoryEventData | null {
+export function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, raw: JsonValue, listeners: readonly EntityId[], lengths: Readonly<MindLengths>, cuts?: MindCuts): MemoryEventData | null {
   if (!isRecord(raw)) return null;
   const now = state.clock;
   // A list's items that say something (`text`), the first so many of them.
@@ -707,6 +707,21 @@ function memoryData(reg: Registry, world: WorldDoc, state: Readonly<WorldState>,
 const CONSOLIDATIONS_PER_TURN = 2;
 
 /**
+ * The notes of `id` due to fold into their summary at `now` (a consolidation's): the least salient
+ * past the number kept, and every faded one; none while their last consolidation is under
+ * `consolidate.periodDays` old. The classic memory step asks its own model call to fold them; on
+ * the harness engine the person's own agent does (`mind_consolidate`).
+ */
+export function notesToFold(state: Readonly<WorldState>, id: EntityId, now: number, memory: Pick<MindsMemoryConfig, "notes" | "salience" | "consolidate">): MindNote[] {
+  const c = readCharacter(state, id);
+  const last = c.consolidated ?? null;
+  if (last !== null && now - last < memory.consolidate.periodDays * 1440) return [];
+  const ranked = [...c.notes].sort((a, b) => salienceNow(a, now, memory) - salienceNow(b, now, memory) || a.at - b.at);
+  const surplus = Math.max(0, c.notes.length - memory.notes.keep);
+  return ranked.filter((n, i) => i < surplus || faded(n, now, memory));
+}
+
+/**
  * What the knowledge step gives a turn: everyone else's learnings as events, the player character's
  * own as changes, its calls' traces, the connection it ran on, and what it didn't take: how many it
  * refused, by why (and the limits it refused by, as the yield names them), and how many of its calls
@@ -727,7 +742,7 @@ interface KnowledgeRan {
  * mark, by its short id too), for `checkKnowledge`. Only the ids the answer names that aren't a
  * fact's id already, each looked up once.
  */
-async function loreRefs(deps: MindsDeps, world: WorldDoc, userId: UserId, raw: JsonValue): Promise<Map<string, FactId>> {
+export async function loreRefs(deps: Pick<MindsDeps, "loreEntry">, world: WorldDoc, userId: UserId, raw: JsonValue): Promise<Map<string, FactId>> {
   const out = new Map<string, FactId>();
   if (!isRecord(raw)) return out;
   const named = new Set<string>();
@@ -1012,19 +1027,11 @@ async function remember(deps: MindsDeps, input: PostMindsInput, settings: UserSe
   const consolidateConfig = minds && memory.consolidate.enabled ? mindsStepConfig(settings.modelUse, "consolidate") : null;
   const folding = consolidateConfig !== null && ((memoryConfig !== null && settings.minds.memoryLevels.length > 0) || reads.summary.on || reads.memory.on);
   const now = w.state.clock;
-  const foldOf = (at: Readonly<WorldState>, id: EntityId): MindNote[] => {
-    const c = readCharacter(at, id);
-    const last = c.consolidated ?? null;
-    if (last !== null && now - last < memory.consolidate.periodDays * 1440) return [];
-    const ranked = [...c.notes].sort((a, b) => salienceNow(a, now, memory) - salienceNow(b, now, memory) || a.at - b.at);
-    const surplus = Math.max(0, c.notes.length - memory.notes.keep);
-    return ranked.filter((n, i) => i < surplus || faded(n, now, memory));
-  };
   const due = folding
     ? Object.keys(readSlice(w.state).chars)
         .sort()
         .flatMap((id) => {
-          const fold = foldOf(w.state, id);
+          const fold = notesToFold(w.state, id, now, memory);
           return fold.length > 0 ? [{ id, fold }] : [];
         })
         .slice(0, CONSOLIDATIONS_PER_TURN)
@@ -1079,7 +1086,7 @@ async function remember(deps: MindsDeps, input: PostMindsInput, settings: UserSe
     consolidations.map(async ({ id, asked, rewritten }) => {
       if (!(await rewritten)) return asked;
       await asked;
-      const fold = foldOf(w.state, id);
+      const fold = notesToFold(w.state, id, now, memory);
       return fold.length > 0 ? consolidate(id, fold, w.state, input.signal) : null;
     }),
   );

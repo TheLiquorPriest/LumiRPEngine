@@ -19,7 +19,8 @@ import type { Readable, Store } from "./store";
 import { useSelect } from "./store";
 import type { UiCatalog } from "./ui-registry";
 
-export type Mode = "play" | "gm" | "build" | "settings";
+/** The drawer's modes. `harness` holds the harness's own pages and is offered only while the open chat plays on the harness (`harness/mode.ts`). */
+export type Mode = "play" | "gm" | "build" | "settings" | "harness";
 
 /** Play's bottom-bar destinations. */
 export type Dest = "now" | "me" | "people" | "orgs" | "places" | "story";

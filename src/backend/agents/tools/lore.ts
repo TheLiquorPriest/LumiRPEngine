@@ -4,6 +4,12 @@
 // propose a workspace file (`propose`). Nothing here writes a book, the world's lore or any host
 // store: a draft is applied in Build, on the game master's own press.
 //
+// On the harness engine a file these tools keep is the harness's workspace's, which the agents'
+// own files and each mind's are in too (`tools/harness.ts` writes it there, under the mode of
+// workspace notes). So there a saved entry stays under `lore/` and a draft under `lore-drafts/`,
+// and a new entry's id is held to the form the engine mints its own ids in. The old engines take
+// the paths and ids they always took.
+//
 // The corpus is the view's live lore (`ToolReadView.lore`, `liveLore`), each entry as the view gives
 // it (`loreEntry`); one the view gives nothing of reads as one that doesn't exist. Live lore reads a
 // book entry's text with its marks left out (`publicText`), each mark an entry of its own beside it
@@ -17,6 +23,7 @@
 // (Settings → Lore) is given instead of the index, its text as written, its marks as the view reads.
 
 import { WRITE_NOTE } from "../../../shared/agent-tools-write";
+import { SURFACE_NOTE } from "../../../shared/harness-texts-surfaces";
 import type { JsonObject } from "../../../shared/json";
 import { loreSourceOf } from "../../../shared/lore";
 import { LORE_INDEX_TEXT } from "../../../shared/lore-routing";
@@ -24,13 +31,14 @@ import { publicText, wholeEntrySecret } from "../../../shared/secret-marks";
 import { nounFor } from "../../../shared/words";
 import type { LoreEntryDef } from "../../../shared/world";
 import { loreSearch } from "../../../engine/lore";
+import { slug } from "../../../engine/places-in-play";
 import { bookLoreId } from "../../book-lore";
 import { tokensOf } from "../../book";
 import { renderIndex } from "../../lore-routing";
 import type { ToolOutcome } from "../runtime";
 import { propose } from "./propose";
 import type { ToolReadView, ViewLore } from "./read-view";
-import type { ToolDefinition } from "./registry";
+import type { ToolDefinition, ToolEnv } from "./registry";
 import { needText, objectSchema, text, textArg } from "./schema";
 
 /** A lore entry the view may read: the entry as the search reads it (its text the viewed one), and as the view gives it. */
@@ -56,6 +64,34 @@ interface GrepMatch {
 
 /** Where a lore draft goes: never a book, nor the world's lore (see the header). */
 const DRAFTS = "lore-drafts/";
+
+/** Where a saved entry goes when the call names no file, and on the harness the only folder one goes to. */
+const SAVED = "lore/";
+
+/** Whether the call is a harness chat's: only the harness gives a call its turn or its workspace (see the header). */
+const onHarness = (env: ToolEnv): boolean => env.turn !== undefined || (env.files ?? null) !== null;
+
+/** A front matter value that can be written as it is: one line that starts with a letter or a digit and ends in neither a space nor a colon. */
+const PLAIN_VALUE = /^[\p{L}\p{N}](?:[^\p{C}\p{Zl}\p{Zp}]*[^\p{C}\p{Z}:])?$/u;
+
+/** What starts a field or a comment inside a plain value: a colon before a space, a `#` after one. */
+const FIELD_OR_COMMENT = /: | #/;
+
+/**
+ * A file's text with its front matter: each field on one line, then `body`. The one place a front
+ * matter is written, so that whatever a value holds stays that field's value: a plain one is
+ * written as it is, and any other (a line break, a `---`, a colon that would start a field, a
+ * quote, a space at either end) as a JSON string, which a front matter reads as one string too.
+ * No value adds a field, and none ends the front matter.
+ */
+function withFrontMatter(fields: readonly (readonly [string, string])[], body: string): string {
+  const lines = fields.map(([key, value]) => {
+    if (PLAIN_VALUE.test(value) && !FIELD_OR_COMMENT.test(value)) return `${key}: ${value}`;
+    // JSON leaves the line breaks of other scripts as they are: written as their codes, so no editor shows part of a value as a line of its own.
+    return `${key}: ${JSON.stringify(value).replace(/[\u007f-\u009f\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`)}`;
+  });
+  return `---\n${lines.join("\n")}\n---\n${body}`;
+}
 
 /** What a workspace path's name can't hold: an entry id names its file with each such character as `_`. */
 const NOT_IN_NAME = /[^\p{L}\p{N}._-]/gu;
@@ -256,7 +292,9 @@ export const LORE_TOOLS: readonly ToolDefinition[] = [
       const view = await env.reader.view();
       const found = await namedLore(view, "lore_save", args);
       if (!("lore" in found)) return found;
-      const path = textArg(args, "path") ?? `lore/${found.id.replace(NOT_IN_NAME, "_")}.md`;
+      const path = textArg(args, "path") ?? `${SAVED}${found.id.replace(NOT_IN_NAME, "_")}.md`;
+      // The harness's workspace holds each mind's files and the agents' own: a saved entry stays in its folder, so this tool writes over nothing of theirs.
+      if (onHarness(env) && !path.startsWith(SAVED)) return view.refuse(SURFACE_NOTE.lorePath, { path });
       return propose(view, env.writer, { kind: "ws_write", path, text: found.lore.text });
     },
   },
@@ -273,11 +311,13 @@ export const LORE_TOOLS: readonly ToolDefinition[] = [
       if (typeof draft !== "string") return draft;
       // A draft of an entry the view can't read is a draft of a new one: it goes by the id given, and its title tells nothing.
       const found = await namedLore(view, "lore_draft", args);
+      // On the harness a new entry's id is one the engine could have minted, as every id an agent makes there is. An entry the view may not read is answered the same, so the answer tells nothing of one.
+      if (!("lore" in found) && onHarness(env) && ref !== slug(ref)) return view.refuse(SURFACE_NOTE.loreId, { id: ref });
       const id = "lore" in found ? found.id : ref;
       const path = textArg(args, "path") ?? `${DRAFTS}${id.replace(NOT_IN_NAME, "_")}.md`;
       if (!path.startsWith(DRAFTS)) return view.refuse(WRITE_NOTE.draftPath, { path });
       const title = "lore" in found ? found.lore.title : id;
-      return propose(view, env.writer, { kind: "ws_write", path, text: `---\nlore: ${id}\ntitle: ${title}\n---\n${draft}` });
+      return propose(view, env.writer, { kind: "ws_write", path, text: withFrontMatter([["lore", id], ["title", title]], draft) });
     },
   },
 ];

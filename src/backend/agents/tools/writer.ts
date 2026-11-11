@@ -78,13 +78,17 @@ import { markWording, renderPrompt } from "../../prompts";
 import type { Runtime } from "../../runtime";
 import { effectiveMode } from "../../settings-store";
 import { appliedEvents, clockFixLine, fixChip, unseenFixLine } from "../../view";
+import { makeWorldActs, type WorldAct, type WorldActDetail, worldActLines, worldActOf, worldActShown } from "./harness-ports";
 import { readView, type ToolReadView } from "./read-view";
 import type { ToolEnv } from "./registry";
 import { chatHead, type ChatHead, keptFiles } from "./workspace";
 
 // ---------------------------------------------------------------- the contract
 
-/** One change an agent asks for. A GM edit's `op` is typed as `lre.edit` takes it; a mind's, a routine's and a ✎ fix's are read for their shape here. A workspace path is the chat's, or the global workspace's under `~/`. */
+/**
+ * One change an agent asks for. A GM edit's `op` is typed as `lre.edit` takes it; a mind's, a routine's and a ✎ fix's are read for their shape here. A workspace path is the chat's, or the global workspace's under `~/`.
+ * `world` is an act on the world's document (`harness-ports.ts`): no write of the chat's record, so it is checked for its mode alone, told in the words its tool gave it (`line`, then what it would change, `detail`, as each reader is told that), and made in the world's store on apply.
+ */
 export type AgentOp =
   | { kind: "gm_edit"; op: EditOp }
   | { kind: "mind_edit"; edit: JsonObject }
@@ -93,7 +97,8 @@ export type AgentOp =
   | { kind: "ws_write"; path: string; text: string }
   | { kind: "ws_delete"; path: string }
   | { kind: "ws_move"; from: string; to: string }
-  | { kind: "ws_pin"; path: string; pinned: boolean };
+  | { kind: "ws_pin"; path: string; pinned: boolean }
+  | { kind: "world"; act: WorldAct; line: string; detail?: WorldActDetail };
 
 /**
  * Whether an operation changes a file kept apart from the story (`isKeptPath`: under `learned/` or
@@ -120,6 +125,8 @@ export interface OpPreview {
   /** The user's mode for its change type (Settings → Changes from the reply): Auto may apply it at once; Confirm waits for the game master's Apply. Never is a refusal. */
   mode: "auto" | "confirm";
   lines: string[];
+  /** A stage that wrote the change as it was made rather than staging it (a harness run after the reply, where no turn is open to hold it; a file written to the harness's workspace): where it was written, in words, which the tool's answer says instead of "when the turn commits". */
+  written?: string;
 }
 
 /**
@@ -208,6 +215,8 @@ export interface PreparedOp {
   body?: { text: string; hash: string };
   /** A kept file's change instead (in its store, not the ledger): each path's file after it, null where it is taken out, and the events that word it, never written. */
   kept?: { changes: Record<string, KeptFile | null>; shown: LedgerEvent[] };
+  /** An act on the world's document instead (in the world's store, not the ledger), and the events that word it, never written. */
+  world?: { act: WorldAct; shown: LedgerEvent[] };
 }
 
 type Prepared = PreparedOp;
@@ -350,6 +359,11 @@ function prepare(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<WorldSta
     case "ws_move":
     case "ws_pin":
       return prepareFile(ctx, env, kept, key, op);
+    case "world": {
+      const act = worldActOf(op.act);
+      const shown = act && typeof op.line === "string" ? worldActShown(op.line, op.detail) : null;
+      return act && shown ? { key, op, ops: [], world: { act, shown } } : bad(key);
+    }
     default:
       return bad(key);
   }
@@ -560,6 +574,8 @@ export function changeTypeOf(rt: Runtime, head: ChatHead, state: Readonly<WorldS
     case "ws_move":
     case "ws_pin":
       return "workspace";
+    case "world":
+      return "world_document";
     case "mind_edit":
     case "routine_edit":
       return "gm_edit";
@@ -611,7 +627,9 @@ function gate(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<WorldState>
   const { world } = ctx.head;
   const type = changeTypeOf(rt, ctx.head, state, p.op);
   if (env.agent.role === GM_ROLE) return { type, mode: "auto", pinned: true };
-  const { mode, source } = effectiveMode(ctx.settings, ctx.learning, env.connectionId ?? ctx.active, type, env.agent.role);
+  // An act on the world's document is decided by the mode as the player has it when it is decided, not as the turn began with it (`known` gives a turn its own settings): it is asked, committed and applied at three different times.
+  const settings = type === "world_document" ? (rt.settings.latest(env.userId) ?? ctx.settings) : ctx.settings;
+  const { mode, source } = effectiveMode(settings, ctx.learning, env.connectionId ?? ctx.active, type, env.agent.role);
   if (mode === "never") return refusal("mode_never", ctx.view.text(WRITE_NOTE.never, { type: changeLabel(type) }), p.key);
   const spawn = p.ops[0];
   if (type === "gm_spawn" && spawn?.op === "spawn" && kindIs(rt.registry, world, spawn.kind, "person")) {
@@ -676,6 +694,8 @@ export function opLines(rt: Runtime, ctx: Ctx, reader: ToolView | "player", type
   const reg = rt.registry;
   const world = ctx.head.world;
   if (type === "workspace") return reader === "gm" ? authorLines(reg, world, after, events, events.length) : [ctx.view.text(WRITE_NOTE.workspaceLine)];
+  // An act on the world's document is told in its tool's own words, which name nothing of the chat's state: what it would change in the document reads one way for the player, another for an agent.
+  if (type === "world_document") return worldActLines(events, reader === "player");
   const clock = clockFixLine(events);
   if (reader === "player") {
     const lines = [...(clock ? [clock] : []), ...playerLines(reg, world, after, world.pov, events, events.length)];
@@ -728,6 +748,8 @@ export function checkOp(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<W
   if (isRefusal(g)) return g;
   // A kept file's change is its store's, not the engine's: it writes no event.
   if (p.kept) return { p, type: g.type, mode: g.mode, events: [], shown: p.kept.shown };
+  // Nor does an act on the world's document: only its mode is the writer's to say.
+  if (p.world) return { p, type: g.type, mode: g.mode, events: [], shown: p.world.shown };
   // A GM edit's rules; a ✎ fix's operations keep the player's (`fix_set`).
   const gm = env.gm ?? true;
   const by = ROLE_IDS.find((r: RoleId) => r === env.agent.role);
@@ -816,13 +838,14 @@ async function apply(rt: Runtime, env: WriterEnv, ops: readonly AgentOp[], label
       continue;
     }
     if (checked.p.kept) kept = withKept(kept, checked.p.kept.changes);
-    else running.applyAll(checked.events);
+    else if (!checked.p.world) running.applyAll(checked.events);
     verdicts.push(checked.p);
   }
   const passed = verdicts.filter((v): v is Prepared => !isRefusal(v));
   if (passed.length === 0) return { applied: [], refused: verdicts.filter((v): v is OpRefusal => isRefusal(v)), chipId: null, pending: false };
   const files = passed.filter((p) => p.kept !== undefined);
-  const edits = passed.filter((p) => p.kept === undefined);
+  const acts = passed.filter((p) => p.world !== undefined);
+  const edits = passed.filter((p) => p.kept === undefined && p.world === undefined);
   /** The kept operations the write refused after all, each as its refusal words it. */
   const refusedAs = new Map<Prepared, OpRefusal>();
   const refuseEdits = (why: (p: Prepared) => OpRefusal): void => {
@@ -836,6 +859,14 @@ async function apply(rt: Runtime, env: WriterEnv, ops: readonly AgentOp[], label
     for (const p of passed) if (p.body) await rt.blobs.put(env.userId, p.body.text, holder);
     // A kept file's change lands at once, in its store: no turn holds it, and a swipe never changes it.
     if (files.length > 0) await landKept(rt, env.chatId, env.userId, Object.assign({}, ...files.map((p) => p.kept?.changes ?? {})) as Record<string, KeptFile | null>);
+    // An act on the world's document is made in the world's store, in the order asked; the store's refusal is the act's.
+    if (acts.length > 0) {
+      const results = await makeWorldActs(rt, env, acts.flatMap((p) => (p.world ? [p.world.act] : [])));
+      acts.forEach((p, i) => {
+        const result = results[i];
+        if (result && "refused" in result) refusedAs.set(p, refusal("write_refused", result.refused, p.key));
+      });
+    }
     if (edits.length > 0) {
       // The batch is one GM edit, resolved as `resolveFix` will resolve it again: one generator over
       // all of its operations, so a rebased view or a held landing works out the same ids.

@@ -90,6 +90,18 @@ const PACKAGES: Record<Zone["kind"], Record<string, "value" | "type">> = {
   outside: {},
 };
 
+/**
+ * LumiAH, the agent harness built into the extension (docs/HARNESS.md), is named in two places
+ * only: the backend's side of the boundary (`backend/harness/`), which mounts LumiAH's backend and
+ * hands its shapes on, and the frontend's (`frontend/harness/`), which mounts its pages. Nothing
+ * else under `src/` imports the package, so what RPEngine takes of it can be read in two folders.
+ */
+const HARNESS_PACKAGE = /^lumi-ah\//;
+const HARNESS_DOORS: readonly { under: string; packages: readonly string[] }[] = [
+  { under: "backend/harness/", packages: ["lumi-ah/core", "lumi-ah/extension/backend", "lumi-ah/shared"] },
+  { under: "frontend/harness/", packages: ["lumi-ah/extension/frontend", "lumi-ah/shared"] },
+];
+
 function allowedLocal(from: Zone, to: Zone, typeOnly: boolean, targetRel: string): boolean {
   const pure = to.kind === "shared" || to.kind === "engine";
   switch (from.kind) {
@@ -169,6 +181,10 @@ describe("module boundaries", () => {
           // backend's turn frame is the one that carries a turn's settings across its async work.
           const spec = rel.split("\\").join("/");
           if (!(spec === "cli/main.ts" && edge.spec.startsWith("node:")) && !(spec === "backend/turn-frame.ts" && edge.spec === "node:async_hooks")) violations.push(`${rel}: runtime module ${edge.spec} (only backend I/O may use host storage through HostPort, and only the CLI's entry may use node:, but for the turn frame's node:async_hooks)`);
+        } else if (HARNESS_PACKAGE.test(edge.spec)) {
+          const door = HARNESS_DOORS.find((d) => rel.split("\\").join("/").startsWith(d.under));
+          if (!door) violations.push(`${rel}: ${edge.spec} is imported only under ${HARNESS_DOORS.map((d) => `src/${d.under}`).join(" and ")}`);
+          else if (!door.packages.includes(edge.spec)) violations.push(`${rel}: ${edge.spec} isn't one of the package's entries this side takes (${door.packages.join(", ")})`);
         } else {
           const rule = PACKAGES[from.kind][edge.spec];
           if (!rule) violations.push(`${rel} (${from.kind}): package ${edge.spec} not allowed`);

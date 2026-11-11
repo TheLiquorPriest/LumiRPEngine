@@ -1,7 +1,8 @@
 // Frontend entry (ARCHITECTURE §2): wires the protocol client, the UI registry, the drawer tab,
 // the HUD (the phone's status line above the message input, else the floating pill), message chips
 // (DOM decorators), input-bar palette actions and the float overlays. It renders `StateView` only
-// and sends protocol requests; it computes no world state.
+// and sends protocol requests; it computes no world state. The harness's own pages (LumiAH's, in
+// the drawer's Harness tab) are wired here too, over the same messaging: `harness/pages.tsx`.
 
 import { render } from "preact";
 import type { SpindleFloatWidgetHandle, SpindleFrontendContext } from "lumiverse-spindle-types";
@@ -14,6 +15,8 @@ import { MessageChips, messageIdFromScope } from "./chips";
 import { Toasts } from "./components";
 import { Drawer } from "./drawer";
 import { createHost } from "./host";
+import { harnessChat } from "./harness/mode";
+import { createHarnessPages, HARNESS_PAGES_CSS } from "./harness/pages";
 import { Hud, StatusLine } from "./hud";
 import type { HudSize } from "./hud";
 import { createOverlays } from "./overlays";
@@ -40,6 +43,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const host = createHost(ctx);
   cleanups.push(() => host.dispose());
   cleanups.push(ctx.dom.addStyle(CSS));
+  // LumiAH's own stylesheet for the harness's pages, added once, beside ours: its names are all `lah-`, ours `lre-`, so neither restyles the other.
+  cleanups.push(ctx.dom.addStyle(HARNESS_PAGES_CSS));
 
   const client = new ProtocolClient({ send: (payload: FrontendToBackend) => ctx.sendToBackend(payload), subscribe: (handler) => ctx.onBackendMessage(handler) });
   cleanups.push(() => client.dispose());
@@ -125,6 +130,17 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   document.addEventListener("visibilitychange", visible);
   cleanups.push(watchReconnects(ctx.events, ctx.host.extensionInstallationId, recheck), () => window.removeEventListener("online", recheck), () => document.removeEventListener("visibilitychange", visible));
 
+  // ------------------------------------------------------------ the harness's pages
+  // Made before the drawer that shows them, so they outlive it on teardown. They say hello only once
+  // a chat on the harness is open: a user who plays none never asks LumiAH's backend for anything.
+  const harness = createHarnessPages(ctx);
+  cleanups.push(() => harness.dispose());
+  cleanups.push(
+    client.subscribe((state) => {
+      if (harnessChat(state) === true) harness.start();
+    }),
+  );
+
   // ------------------------------------------------------------ drawer tab
   const tab = host.ui.registerDrawerTab({
     id: "lumirpengine",
@@ -137,7 +153,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   });
   render(
     <AppContext.Provider value={app}>
-      <Drawer measure={(el) => host.ui.geometry.layoutElementRect(el)} />
+      <Drawer measure={(el) => host.ui.geometry.layoutElementRect(el)} harness={harness} />
       <Toasts surface="drawer" />
     </AppContext.Provider>,
     tab.root,

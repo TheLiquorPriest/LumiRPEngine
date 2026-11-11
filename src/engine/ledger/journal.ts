@@ -24,6 +24,7 @@ import type {
   PostEntry,
   Rec,
   RecAgent,
+  RecHarness,
   RecSession,
   RecStatus,
   CarryDrop,
@@ -748,7 +749,7 @@ export class LedgerCore {
     if (!this.journal.started) {
       // Journaled checked and clamped, as every marker is (`apply`), so the chain hashes the values
       // that fold: the starters' half-minute action tick is journaled as the whole minute it plays.
-      startMarkers = this.env.startMarkers().flatMap((raw) => {
+      startMarkers = this.startMarkersOver(state).flatMap((raw) => {
         const body = validMarkerBody(raw);
         return body ? [{ ...body, seq: ++seq, at: null, start: true as const }] : [];
       });
@@ -1064,9 +1065,19 @@ export class LedgerCore {
       return world ? { state: head.state, world } : null;
     }
     const state = structuredClone(out.state);
-    if (!this.journal.started) for (const body of this.env.startMarkers()) applyMarker(state, body, this.env);
+    if (!this.journal.started) for (const body of this.startMarkersOver(state)) applyMarker(state, body, this.env);
     const world = this.playedAt(state);
     return world ? { state, world } : null;
+  }
+
+  /**
+   * The starting markers as they apply over `state`, the fold ahead of the chat's first record. They
+   * are journaled with that record, so a marker written before it folds ahead of them: their
+   * `migrate` names the revision that fold is on, which is the run's own unless an Upgrade was made
+   * before the first turn. A chat is on the revision its last Upgrade put it on, turn or no turn.
+   */
+  private startMarkersOver(state: Readonly<WorldState>): MarkerBody[] {
+    return this.env.startMarkers().map((raw) => (raw.kind === "migrate" ? { ...raw, to: state.revision } : raw));
   }
 
   /**
@@ -1459,6 +1470,52 @@ export class LedgerCore {
     const kept = agents.filter((a) => Number.isInteger(a.from) && Number.isInteger(a.to) && a.from >= 0 && a.from < a.to && a.to <= (a.seq === undefined ? rec.events.length : (rec.post.find((p) => p.seq === a.seq)?.events.length ?? 0))).map((a) => ({ role: a.role, key: a.key, from: a.from, to: a.to, ...(a.seq !== undefined ? { seq: a.seq } : {}) }));
     if (kept.length > 0) rec.agents = kept;
     else delete rec.agents;
+    return null;
+  }
+
+  /**
+   * A harness turn's own part of its record (`Rec.harness`, HARNESS-SLICE3), written whole in place
+   * of what the record holds: at the turn's close, and again whenever LumiAH writes its own record
+   * for the swipe, which may be after later turns (a job of the turn ending). Outside every hash but
+   * the tombstone's, so no path moves and no fold changes; a record already discarded is refused,
+   * since its tombstone names it as it stood. Null once written, else why it wasn't.
+   */
+  recordHarness(messageId: MessageId, swipeId: number, harness: RecHarness, observed: readonly ChainMessage[]): string | null {
+    const index = observed.findIndex((m) => m.id === messageId);
+    const stored = this.chain(observed)[index]?.ledger?.swipes[String(swipeId)];
+    if (!stored) return "the reply has no turn record";
+    if (isTombstoned(this.journal.tombstones, messageId, stored)) return "the reply's record was discarded";
+    const rec = this.ledgerFor(messageId, observed[index]).swipes[String(swipeId)];
+    if (!rec) return "the reply has no turn record";
+    rec.harness = structuredClone(harness);
+    return null;
+  }
+
+  /**
+   * Marks a reply no turn was played for (`RecHarness.unplayed`, HARNESS-SLICE3). On the harness
+   * engine a generation whose turn doesn't stand commits nothing, and the reply it left says so: on
+   * a record with no turn (as an edited reply's is), so no path moves and nothing folds. A swipe
+   * that holds a turn's record keeps it as it is, unless the generation was a Continue of it
+   * (`added`): then the record itself says that what was added to the reply has no turn, in its
+   * harness part, which is outside every hash but the tombstone's. Null once marked, else why it
+   * wasn't.
+   */
+  recordUnplayed(messageId: MessageId, swipeId: number, why: string, observed: readonly ChainMessage[], added = false): string | null {
+    const m = observed.find((o) => o.id === messageId);
+    const text = m && !m.isUser ? (m.swipes[swipeId] ?? "") : "";
+    if (!m || text === "") return "the reply holds no text";
+    const ledger = this.ledgerFor(messageId, m);
+    const held = ledger.swipes[String(swipeId)];
+    if (held && held.path !== "") {
+      if (!added) return "the reply holds a turn's record";
+      // A discarded record's tombstone names it as it stood, as for any write of this part (`recordHarness`).
+      if (isTombstoned(this.journal.tombstones, messageId, held)) return "the reply's record was discarded";
+      held.harness = { ...(held.harness ?? { turns: [] }), unplayed: why };
+      return null;
+    }
+    const rec = held ?? this.bareRecord(contentId(text), undefined);
+    rec.harness = { turns: [], unplayed: why };
+    ledger.swipes[String(swipeId)] = rec;
     return null;
   }
 

@@ -390,6 +390,9 @@ export class FakeHost implements HostPort {
     this.worldInfoInterceptor = handler;
   }
 
+  /** The prompt interceptor, run once a generation's prompt is assembled and before GENERATION_IN_PROGRESS: where an agent harness built into Lumiverse does its work, for as long as the host waits. */
+  promptInterceptor: ((generation: Generation) => Promise<void>) | null = null;
+
   /** The user's global books, which every chat's prompt scans beside the chat's own. */
   globalBooks: string[] = [];
 
@@ -699,6 +702,11 @@ export class FakeHost implements HostPort {
     this.inFlight.clear();
     this.queue.length = 0;
     this.restarts.length = 0;
+    this.reload();
+  }
+
+  /** The extension's backend restarts alone (an update, a crash) while Lumiverse goes on: its handlers go with it, and the generations under way go on to their ends. */
+  reload(): void {
     this.handlers.clear();
     this.contextHandler = null;
     this.frontendHandlers.clear();
@@ -783,6 +791,11 @@ export class FakeHost implements HostPort {
     const prompt = await this.worldInfo(chatId);
     this.assembled = prompt.placed;
     if (this.options.wiBook) this.emit("WORLD_INFO_ACTIVATED", { chatId, entries: prompt.activated.map((e) => ({ id: e.id, comment: e.comment, source: "constant", bookId: e.bookId })), stats: {} });
+    // Lumiverse runs an extension's prompt interceptor on the assembled prompt, before the generation itself (generate.service: context handlers, the assembly, the interceptors, then the call).
+    if (this.promptInterceptor) {
+      await this.settle();
+      await this.promptInterceptor(g);
+    }
     this.emit("GENERATION_IN_PROGRESS", { generationId: g.id, chatId, model: "fake", targetMessageId, targetSwipeId, characterId: null, characterName: "Narrator" });
     await this.settle();
     return g;

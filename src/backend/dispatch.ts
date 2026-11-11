@@ -61,10 +61,11 @@ import { LoreIndexError } from "./lore-routing";
 import { bookLoreFieldsOf, engineWroteEntry, OLD_SECRECY_FIELDS } from "../shared/lore";
 import { MindsRuns, RunError } from "./minds-run";
 import { ACTIVE_CONNECTION, readRun, replyReadKey, Runtime, unpricedChip } from "./runtime";
+import { EngineRefused } from "./harness/extension";
 import { playerReason } from "./requirement-words";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
 import { applyProposals } from "./turn-model";
-import { upgradePreview } from "./upgrade-preview";
+import { previewUpgrade } from "./upgrade-preview";
 import { appliedEvents, doneAfter, fixChip, fixLines, recentLines, TIMELAPSE_ACTION, toldWords } from "./view";
 import { buildGmView, gmThings, gmThingsHead, keepInWorld, madeInPlay } from "./gm";
 import { readGmPart, type GmReadSteps } from "./gm-memo";
@@ -76,9 +77,11 @@ import type { CharacterResult } from "../shared/character";
 import { type DraftNotice, newChatRun, WorldError } from "./worlds";
 import { SecrecyError, SecrecyMoves } from "./secrecy-migration";
 import { Assistant, AssistantError, ASSISTANT_ROLE, workspaceRequest } from "./agents/assistant";
+import { SideAssistant } from "./harness/assistant";
 import { roleTextTest, testedRole } from "./agents/roles/test";
 import { promptDef, swipeDirectionOf } from "../shared/prompts";
 import { type Review, ReviewError } from "./agents/review";
+import { CHAT_ENGINES } from "./chat-knowledge-prefs";
 
 export class RequestError extends Error {
   constructor(
@@ -126,7 +129,7 @@ export class Dispatcher {
   private readonly minds: MindsRuns;
   /** Build's moves of the user's World Info books to secret marks (DESIGN §4.2). */
   private readonly secrecy: SecrecyMoves;
-  /** GM → Assistant, the GM agent's chat about each chat's world (DESIGN §4.5): its answers run in the background. */
+  /** GM → Assistant, the GM agent's chat about each chat's world (DESIGN §4.5): its answers run in the background. On a chat the harness plays they are LumiAH's, from a side session (`SideAssistant`). */
   readonly assistant: Assistant;
   /** An agent turn's review card (INC2-SPEC C13): its changes that ask first, answered through `lre.review` or its chip. */
   readonly review: Review;
@@ -137,7 +140,7 @@ export class Dispatcher {
   ) {
     this.minds = new MindsRuns(rt);
     this.secrecy = new SecrecyMoves(rt.host);
-    this.assistant = new Assistant(rt);
+    this.assistant = new Assistant(rt, new SideAssistant(rt));
     this.review = rt.review;
     // A read proposal on a card applies, or is turned down, as its own confirm chip's Apply and No do.
     this.review.readChip = async (chatId, userId, chipId, choice) => void (await this.chip(chatId, userId, chipId, choice));
@@ -840,20 +843,22 @@ export class Dispatcher {
         const narrator = r.narrator === undefined || r.narrator === null ? r.narrator : narratorViewOf(r.narrator);
         if (narrator === null && r.narrator !== null) throw new RequestError("bad_request", 'the narrator\'s knowledge is {"knowledge": "scene" or "pov", "secrets": "marked" or "omit"}, or null to follow the world\'s default, else Settings');
         const engine = r.engine;
-        if (engine !== undefined && engine !== null && engine !== "classic" && engine !== "agents") throw new RequestError("bad_request", "the engine is classic or agents, or null to play classic");
+        if (engine !== undefined && engine !== null && !(CHAT_ENGINES as readonly unknown[]).includes(engine)) throw new RequestError("bad_request", "the engine is classic, agents or harness, or null to play classic");
+        // The harness plays a chat through LumiAH. Where that can't play it (this build carries none, or LumiAH says what it lacks), a chat switched to it would get replies no engine plays: nothing rolled, nothing recorded. The Engine page asks, so it can say why before the switch is pressed.
+        const blocked = r.engines === true ? await this.rt.harness.blocked(userId) : null;
         if (r.tidy !== undefined && r.tidy !== null && typeof r.tidy !== "boolean") throw new RequestError("bad_request", "tidying impossible holds automatically is on (true), off (false) or as the world has it (null)");
-        // A turn finishes on the engine it started on: while one waits at a gate, what it kept for its
-        // resume (changes a review card approved among them) would be lost, so the switch waits for it.
-        if (engine !== undefined && (engine ?? "classic") !== (await this.rt.chatKnowledge.engine(r.chatId, userId))) {
-          const waiting = await this.rt.gateWaiting(r.chatId, userId);
-          if (waiting !== null) throw new RequestError("conflict", `This chat's turn is waiting on ${waiting}. Answer or cancel it before you switch the engine: a turn finishes on the engine it started on.`);
+        // The engine is chosen through the harness's one door, which keeps LumiAH's own switch for the chat with the choice (`HarnessEngine.choose`): the same door LumiAH's pages go through for a world chat.
+        if (engine !== undefined) {
+          await this.rt.harness.choose(r.chatId, userId, engine ?? "classic").catch((error: unknown) => {
+            throw error instanceof EngineRefused ? new RequestError(error.code, error.message) : error;
+          });
         }
-        const change = { ...(r.knowledge !== undefined ? { knowledge: r.knowledge } : {}), ...(narrator !== undefined ? { narrator } : {}), ...(engine !== undefined ? { engine } : {}), ...(r.tidy !== undefined ? { tidy: r.tidy } : {}) };
+        const change = { ...(r.knowledge !== undefined ? { knowledge: r.knowledge } : {}), ...(narrator !== undefined ? { narrator } : {}), ...(r.tidy !== undefined ? { tidy: r.tidy } : {}) };
         const changes = Object.keys(change).length > 0;
         const prefs = changes ? await this.rt.chatKnowledge.set(r.chatId, userId, change) : await this.rt.chatKnowledge.get(r.chatId, userId);
         // A turn under way finishes on the engine and choices it started with (`TurnFrame`): the change applies from the chat's next turn.
         if (changes) this.rt.push.changed(r.chatId, userId);
-        reply("lre.chat.knowledge", { knowledge: prefs.knowledge ?? null, narrator: prefs.narrator ?? null, ...(prefs.engine === "agents" ? { engine: "agents" as const } : {}), ...(prefs.tidy !== undefined ? { tidy: prefs.tidy } : {}) });
+        reply("lre.chat.knowledge", { knowledge: prefs.knowledge ?? null, narrator: prefs.narrator ?? null, ...(prefs.engine && prefs.engine !== "classic" ? { engine: prefs.engine } : {}), ...(prefs.tidy !== undefined ? { tidy: prefs.tidy } : {}), ...(blocked !== null ? { harnessBlocked: blocked } : {}) });
         return;
       }
       case "lre.job": {
@@ -1016,7 +1021,9 @@ export class Dispatcher {
           if (r.op === "get") reply("lre.review", { cards: await this.review.cards(r.chatId, userId, session ?? "") });
           else {
             const answer = r.op === "apply" ? await this.review.apply(r.chatId, userId, r.turn, r.keys) : await this.review.reject(r.chatId, userId, r.turn);
-            reply("lre.review", { cards: await this.review.cards(r.chatId, userId), start: answer.start });
+            // A harness turn waits at its gate inside its own generation (its commit goes on from the answer), so no page starts anything for it.
+            const held = this.rt.harness.reviewed(r.chatId, r.turn);
+            reply("lre.review", { cards: await this.review.cards(r.chatId, userId), start: held ? null : answer.start });
           }
         } catch (error) {
           if (error instanceof ReviewError) throw new RequestError(error.code, error.message);
@@ -1105,6 +1112,8 @@ export class Dispatcher {
           await this.rt.book.attach(r.chatId, bookId, userId);
           this.rt.forgetChat(r.chatId);
           await this.rt.ledger.open(r.chatId, userId);
+          // A chat new to its world plays on the harness where the harness can play it (HARNESS-SLICE3): the chats made before keep the engine they have.
+          await this.rt.harness.adopt(r.chatId, userId);
         }
         // The chat's JSON blocks are hidden from now on (DESIGN §6.7); without the permission the attach still stands.
         await this.rt.jsonHiding.ensure(r.chatId, r.worldId, userId).catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] chat ${r.chatId}: the JSON regex scripts weren't written (${error instanceof Error ? error.message : String(error)})`, userId));
@@ -1229,17 +1238,9 @@ export class Dispatcher {
 
   /** What an Upgrade with picks would bring into the chat, from the head state: the plan the fold applies, worded. */
   private async upgradePreview(chatId: ChatId, userId: UserId, state: Working["state"], to: RevisionId): Promise<UpgradePreview> {
-    const run = await this.rt.runOf(chatId, userId);
-    if (!run) throw new RequestError("not_world_chat", "this chat is not attached to a world");
-    const docs = new Map<RevisionId, WorldDoc>();
-    for (const revision of new Set([definitionsLag(state) ?? state.revision, state.revision, to])) docs.set(revision, (await this.rt.worlds.get(run.worldId, userId, revision)).world);
-    const doc = (revision: RevisionId): WorldDoc => {
-      const found = docs.get(revision);
-      if (!found) throw new RequestError("not_found", `revision ${revision} of the world not found`);
-      return found;
-    };
-    const plan = planUpgrade(state, { worlds: (revision) => docs.get(revision), types: this.rt.registry }, to);
-    return upgradePreview(this.rt.registry, plan, state, doc(to), doc(state.revision));
+    const preview = await previewUpgrade(this.rt, chatId, userId, state, to);
+    if (!preview) throw new RequestError("not_world_chat", "this chat is not attached to a world");
+    return preview;
   }
 
   private async chip(chatId: ChatId, userId: UserId, id: string, choice: string, payload?: JsonObject): Promise<ResultBodies["lre.chip"]> {
@@ -1247,6 +1248,8 @@ export class Dispatcher {
     const observed = toChain(await this.rt.host.chats.messages(chatId, userId));
     const [kind, messageId = "", swipe = "0"] = id.split(":");
     // Chips derived from records.
+    // On a chat the harness plays the engine reads nothing itself: a read here would be a model call of the engine's own, and those are the agents' there.
+    if ((kind === "reread" || kind === "retry_read") && (await this.rt.chatKnowledge.engine(chatId, userId)) === "harness") throw new RequestError("bad_request", "This chat plays on the harness, where the engine reads no reply itself. Send a message that says what changed, and the author takes it from there.");
     if (kind === "reread" || kind === "retry_read") {
       // One read at a time per chat, re-checked inside the lock: a double tap reads once.
       return this.locked(`${userId}\u0000${chatId}`, async () => {
@@ -1323,6 +1326,7 @@ export class Dispatcher {
       const turn = id.slice("review:".length);
       try {
         await (choice === "apply" ? this.review.apply(chatId, userId, turn) : this.review.reject(chatId, userId, turn));
+        this.rt.harness.reviewed(chatId, turn);
       } catch (error) {
         if (error instanceof ReviewError) throw new RequestError(error.code, error.message);
         throw error;
@@ -1471,6 +1475,18 @@ export class Dispatcher {
         }
         const chosen = picked ? picks[Number(picked[1])] : chip.payload.proposal;
         const proposal = isRecord(chosen) ? (JSON.parse(JSON.stringify(chosen)) as JsonObject) : null;
+        // A change a harness turn's agents recorded that has no form to make it from again (`harness/card.ts`): the events the engine's validator made of it, whole or not at all on the chat as it stands, with what follows from them.
+        // The chip is the engine's own, so its events are as the ledger wrote them; each is checked again by its reducer as it is applied.
+        const staged = !proposal && choice === "confirm" && Array.isArray(chip.payload.staged) ? (JSON.parse(JSON.stringify(chip.payload.staged)) as LedgerEvent[]) : null;
+        if (staged) {
+          const { state, world } = await this.head(chatId, userId);
+          const w = new Working(this.rt.registry, world, state);
+          if (staged.length === 0 || w.applyAll(staged).length < staged.length) throw new RequestError("validation", w.dropped.at(-1)?.rejection?.reason ?? "the change no longer applies");
+          // What the author played through the rules (an attempt, a fight's round: the type `play`) and a span of time the engine ran across carry what the world's rules made of them already: the rules hear neither a second time.
+          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: this.consequences(w, [...w.events], `${id}:confirm`, chip.payload.type !== "play" && chip.payload.type !== "time_advance") } });
+          await settle("accepted");
+          return { applied: result.applied, ...waits(result) };
+        }
         if (!proposal) throw new RequestError("bad_request", "the chip has no proposal");
         // Edit amount: the purchase is charged what the player set, as set.
         if (choice === "amount") {

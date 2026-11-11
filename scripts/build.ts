@@ -5,12 +5,21 @@
 // which tells outside clients where the kit is and what it hashes to, and so do the fingerprints of
 // its two tool lists (read-only and full), by which the backend knows whether Lumiverse's own MCP
 // client holds this build's tools for a profile (Reconnect in Lumiverse).
+//
+// LumiAH is built into the extension (docs/HARNESS.md): its backend's code reaches dist/backend.js
+// and its pages' dist/frontend.js through what the sources import from `lumi-ah`, stamped with this
+// build's id as LumiAH's own build stamps them (`process.env.LAH_BUILD_ID`, replaced here so no
+// bundle reads the environment), and its runtime is built from the package's own entry and shipped
+// as dist/lumiah.js, with the same id, so the runtime and the backend it links to are one build.
+// The backend bundle is then held to Lumiverse's install scan (`install-scan.ts`): a bundle the
+// host would refuse to load fails the build here, with what it found and where.
 
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { kitOf } from "../src/cli/kit-api";
 import { toolsFingerprint } from "../src/shared/agents";
+import { installScan } from "./install-scan";
 
 const ROOT = resolve(import.meta.dir, "..");
 const seconds = Math.floor(Date.now() / 1000);
@@ -34,6 +43,8 @@ function bundle(entry: string, out: string, target: "bun" | "node" | "browser", 
 }
 
 const stamp = { "process.env.LRE_BUILD_ID": id };
+/** LumiAH's own stamp, in every bundle that carries its code. */
+const harness = { "process.env.LAH_BUILD_ID": id };
 bundle("src/cli/agent-kit.ts", "dist/agent-kit.js", "node", stamp);
 const kitSha256 = createHash("sha256").update(readFileSync(join(ROOT, "dist/agent-kit.js"))).digest("hex");
 // The bundle just built, not the sources: its lists are what a server answers tools/list with.
@@ -44,10 +55,27 @@ if (typeof built === "string") {
 }
 // As Lumiverse's client keeps a listed tool (an absent description is "", an absent schema {}).
 const listFingerprint = (readOnly: boolean): string => toolsFingerprint(built.tools(readOnly).map((t) => ({ name: t.name, description: t.description || "", input_schema: t.inputSchema || {} })));
-bundle("src/backend.ts", "dist/backend.js", "bun", { ...stamp, "process.env.LRE_KIT_SHA256": kitSha256, "process.env.LRE_TOOLS_FULL": listFingerprint(false), "process.env.LRE_TOOLS_READ_ONLY": listFingerprint(true) });
-bundle("src/frontend.ts", "dist/frontend.js", "browser", stamp);
+bundle("src/backend.ts", "dist/backend.js", "bun", { ...stamp, ...harness, "process.env.LRE_KIT_SHA256": kitSha256, "process.env.LRE_TOOLS_FULL": listFingerprint(false), "process.env.LRE_TOOLS_READ_ONLY": listFingerprint(true) });
+const refused = installScan(readFileSync(join(ROOT, "dist/backend.js"), "utf8"));
+if (refused.length > 0) {
+  console.error(`build: Lumiverse's install scan would refuse dist/backend.js:\n${refused.map((hit) => `  ${hit.what}, near: ${hit.near}`).join("\n")}`);
+  process.exit(1);
+}
+bundle("src/frontend.ts", "dist/frontend.js", "browser", { ...stamp, ...harness });
 bundle("src/worker/background-lane.ts", "dist/worker/background-lane.js", "bun", stamp);
 bundle("src/cli/main.ts", "dist/lumirpengine.js", "node", stamp);
+
+// LumiAH's runtime, for the chats a user plays in a runtime beside Lumiverse: the package's own
+// entry, built here so it carries this build's id. It must start under the Bun that built it. A
+// `lumi-ah` that ships no runtime entry has none to build, and the build says so.
+const RUNTIME_ENTRY = "node_modules/lumi-ah/src/runtime/main.ts";
+if (existsSync(join(ROOT, RUNTIME_ENTRY))) {
+  bundle(RUNTIME_ENTRY, "dist/lumiah.js", "bun", harness);
+  if (Bun.spawnSync([process.execPath, "dist/lumiah.js", "--version"], { cwd: ROOT, stdout: "ignore", stderr: "inherit" }).exitCode !== 0) {
+    console.error("build: dist/lumiah.js --version failed");
+    process.exit(1);
+  }
+} else console.log(`build: the installed lumi-ah has no ${RUNTIME_ENTRY.slice("node_modules/lumi-ah/".length)}, so dist/lumiah.js isn't built`);
 
 // The command line runs under Bun 1.4+ or Node 22+: it must start under the Bun building it, and
 // under Node too where there is one (a machine with only Bun, as Lumiverse's own can be, has none).

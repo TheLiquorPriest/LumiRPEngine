@@ -13,7 +13,7 @@ import { hashJson } from "../../src/shared/hash";
 import { GM_OUTLINE, GM_ROSTER, gmRosterEntry } from "../../src/shared/gm-parts";
 import { applyPatch } from "../../src/shared/json-patch";
 import type { MindsRunView } from "../../src/shared/minds";
-import type { AssistantProposal, AssistantProposalOp, AssistantRun, AssistantView, LoreBookEntryView, LorePinView, TraceRow, WorkspaceFileView } from "../../src/shared/protocol";
+import type { AssistantProposal, AssistantProposalOp, AssistantRun, AssistantView, LoreBookEntryView, LorePinView, ReviewCardView, TraceRow, WorkspaceFileView } from "../../src/shared/protocol";
 import { editedBookFields, OLD_SECRECY_FIELDS, withBookLoreFields, type BookLoreFields } from "../../src/shared/lore";
 import { parseSecretMarks, unreadableMarks, wholeEntrySecret } from "../../src/shared/secret-marks";
 import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, PresetCard, ResultBodies } from "../../src/shared/protocol";
@@ -23,7 +23,7 @@ import { LORE_INDEX_TEXT } from "../../src/shared/lore-routing";
 import { renderIndex } from "../../src/backend/lore-routing";
 import { agentSettingsOf, type AcceptanceState } from "../../src/shared/agent-settings";
 import { blobHash, isFilePath, isKeptPath, isLearnedPath } from "../../src/shared/stores";
-import type { GmView, StateView } from "../../src/shared/state-view";
+import type { Chip, GmView, StateView } from "../../src/shared/state-view";
 import type { ThingType } from "../../src/shared/thing-view";
 import { setIdOf, SET_KINDS } from "../../src/shared/things";
 import type { VehicleClassChoice } from "../../src/shared/vehicles";
@@ -38,6 +38,7 @@ import { assistantFileChanges, assistantFixture, extractionView, freshFixture, g
 import { combatFixture } from "./combat-fixture";
 import { applyRoutineOp, chatRolesFixture, previewRoutines, routineChangedFixture, routineGmFixture, type PreviewRoutines } from "./routines-fixture";
 import { ROUTINE_PROPOSALS, routinePlayerFixture } from "./routines-player-fixture";
+import { answerReview, HARNESS_BLOCKED, harnessChips, harnessReview, UNPLAYED_WHY } from "./harness-fixture";
 import { migrateWorld, previewSheet, previewSkills } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { formulaFunctions } from "../../src/engine/scope";
@@ -71,6 +72,12 @@ export interface MockOptions {
   draftElsewhereMs?: number;
   /** `?activity=`: the engine mid-turn (`busy`), or its last turn failed (`failed`). */
   activity?: "busy" | "failed";
+  /** `?engine=`: the engine that plays the chat (classic unless given). On the harness its chips are the harness's: no read's, a reply no turn was played for flagged, and a review card holding the world's document. */
+  engine?: "classic" | "agents" | "harness";
+  /** `?harness=blocked`: the harness can't play the user's chats now, so GM → This chat → Engine says why. */
+  harnessBlocked?: boolean;
+  /** `?unplayed=`: why no turn was played for the flagged reply. */
+  unplayed?: keyof typeof UNPLAYED_WHY;
   closeDrawer(): void;
 }
 
@@ -206,6 +213,13 @@ export class MockBackend {
   };
   private view: StateView | null = null;
   private rev = 0;
+  /** The engine that plays the chat, its chips as the scenario made them (the harness shows its own of them), and its review cards (`lre.review`). `played`: the chat has replies behind it, so the harness's chips (a flagged reply, a review card) have somewhere to sit. */
+  private engine: "classic" | "agents" | "harness" = "classic";
+  private scenarioChips: Chip[] = [];
+  private review: ReviewCardView[] = [];
+  private played = true;
+  /** A chat with no world was attached to one (`lre.world attach`): its next hello is a new world chat's. */
+  private attached = false;
   private settings: UserSettings = settingsFixture();
   /** Acceptance runs (`lre.acceptance`): the open one and the last closed. */
   private acceptance: AcceptanceState = { run: null, last: null };
@@ -344,6 +358,15 @@ export class MockBackend {
       view.panels["economy.money"] = paid as unknown as JsonValue;
     }, 60);
     return true;
+  }
+
+  /** The chat plays on an engine from here: the view says which, and its chips are that engine's. */
+  private playOn(view: StateView, engine: "classic" | "agents" | "harness"): void {
+    this.engine = engine;
+    view.engine = engine;
+    const harness = engine === "harness" && this.played;
+    view.chips = harness ? harnessChips(this.scenarioChips, UNPLAYED_WHY[this.options.unplayed ?? "failed"]) : structuredClone(this.scenarioChips);
+    this.review = harness ? harnessReview() : [];
   }
 
   private snapshot(): void {
@@ -503,9 +526,16 @@ export class MockBackend {
           this.result(reqId, "lre.hello", { accepted: true, agentApi: AGENT_API, requestMs: this.settings.timeouts.requestMs, canStop: true });
           return;
         }
-        this.view = this.options.scenario === "paused" ? pausedFixture(message.chatId) : this.options.scenario === "fresh" ? freshFixture(message.chatId) : stateFixture(message.chatId);
-        if (this.options.scenario === "not_world") this.view = { ...stateFixture(message.chatId), status: "not_world", hud: null, scene: null, chips: [], panels: {}, palette: null, controls: null };
+        // A chat attached here is new to its world: it opens as a new chat does, on the harness where the harness can play it.
+        const fresh = this.options.scenario === "fresh" || (this.options.scenario === "not_world" && this.attached);
+        this.view = this.options.scenario === "paused" ? pausedFixture(message.chatId) : fresh ? freshFixture(message.chatId) : stateFixture(message.chatId);
+        if (this.options.scenario === "not_world" && !this.attached) this.view = { ...stateFixture(message.chatId), status: "not_world", hud: null, scene: null, chips: [], panels: {}, palette: null, controls: null };
         else if (this.options.map) this.view.panels["space.map"] = starterMap(this.options.map);
+        if (this.view.status !== "not_world") {
+          this.scenarioChips = structuredClone(this.view.chips);
+          this.played = !fresh;
+          this.playOn(this.view, this.attached ? (this.options.harnessBlocked ? "classic" : "harness") : (this.options.engine ?? "classic"));
+        }
         const money = this.options.money && this.options.scenario !== "not_world" ? portAlderMoney(this.options.money) : null;
         if (money) {
           this.view.panels["economy.money"] = money.play;
@@ -667,15 +697,23 @@ export class MockBackend {
         const tracking = message.knowledge !== undefined ? message.knowledge : knowledge.tracking.chat;
         const narrator = message.narrator !== undefined ? message.narrator : knowledge.narrator.chat;
         const tidy = message.tidy !== undefined ? message.tidy : controls.things.tidy.chat;
-        this.result(reqId, "lre.chat.knowledge", { knowledge: tracking, narrator, ...(tidy !== null ? { tidy } : {}) });
+        const blocked = this.options.harnessBlocked === true;
+        const engine = message.engine !== undefined ? (message.engine ?? "classic") : this.engine;
+        if (engine === "harness" && this.engine !== "harness" && blocked) return this.error(reqId, "unavailable", `${HARNESS_BLOCKED} This chat stays on the engine it has.`);
+        this.result(reqId, "lre.chat.knowledge", { knowledge: tracking, narrator, ...(engine !== "classic" ? { engine } : {}), ...(tidy !== null ? { tidy } : {}), ...(message.engines && blocked ? { harnessBlocked: HARNESS_BLOCKED } : {}) });
         this.mutate((view) => {
           const c = view.controls;
           if (!c) return;
           c.knowledge.tracking.chat = tracking;
           c.knowledge.narrator.chat = narrator ? { ...narrator } : null;
           c.things.tidy.chat = tidy;
+          if (engine !== this.engine) this.playOn(view, engine);
         }, 40);
         return;
+      }
+      case "lre.review": {
+        if (message.op !== "get") this.review = answerReview(this.review, message.turn, message.op === "reject" ? "reject" : { apply: message.keys ?? null });
+        return this.result(reqId, "lre.review", { cards: structuredClone(this.review), ...(message.op === "get" ? {} : { start: null }) });
       }
       case "lre.character": {
         // The real builder: Build's from the draft; GM's from the preview world as a chat starts it,
@@ -881,9 +919,11 @@ export class MockBackend {
             return this.result(reqId, "lre.world", { revision: `r${Date.now().toString(16)}`, lint: [] });
           case "export":
             return this.result(reqId, "lre.world", { file: this.world as unknown as JsonValue });
+          case "attach":
+            this.attached = true;
+            return this.result(reqId, "lre.world", {});
           case "import":
           case "delete":
-          case "attach":
           case "upgrade":
             return this.result(reqId, "lre.world", {});
           case "sheet": {

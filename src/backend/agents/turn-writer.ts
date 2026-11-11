@@ -50,6 +50,7 @@ import { latestTexts } from "../gm";
 import { markWording, renderPrompt } from "../prompts";
 import type { Runtime } from "../runtime";
 import type { KeptFile } from "../../shared/stores";
+import type { WorldAct } from "./tools/harness-ports";
 import { readView, type ToolReader, viewRouting } from "./tools/read-view";
 import { type ChatHead, listWorkspace, type WorkspaceAt } from "./tools/workspace";
 import { type AgentOp, checkOp, contextOf, isOpRefusal, opKey, opLines, type OpPreview, type OpRefusal, type ToolWriter, withKept, type WriterCtx, type WriterEnv } from "./tools/writer";
@@ -444,6 +445,8 @@ export interface CommitOutcome {
   refused: { op: StagedOp; refusal: OpRefusal }[];
   /** The kept files' changes it committed, each path's file after them, null where taken out: made when the turn closes. */
   kept: Record<string, KeptFile | null>;
+  /** Each act on the world's document that lands, in the order asked. It writes nothing of the chat's record, and the world's store is read and written off the core's own steps, so the caller makes each once this returns (`makeWorldActs`) and says what it came to. */
+  acts: { op: StagedOp; act: WorldAct }[];
 }
 
 /** What a turn's commit checks its operations with: the roles' writer context, against the turn's base and kept files. */
@@ -473,7 +476,7 @@ function namesAny(value: unknown, ids: ReadonlySet<string>): boolean {
  * now). Synchronous: the plan and the read call it inside the core's own steps.
  */
 export function commitStaged(rt: Runtime, commit: CommitCtx, ops: readonly StagedOp[], w: Working): CommitOutcome {
-  const out: CommitOutcome = { committed: [], confirm: [], refused: [], kept: {} };
+  const out: CommitOutcome = { committed: [], confirm: [], refused: [], kept: {}, acts: [] };
   // What the operations set aside make, and their events, in order.
   const made = new Set<string>();
   const aside: LedgerEvent[] = [];
@@ -501,6 +504,11 @@ export function commitStaged(rt: Runtime, commit: CommitCtx, ops: readonly Stage
         else if (e.type === PLACE_EVENT && "data" in e && isRecord(e.data) && typeof e.data.place === "string") made.add(e.data.place);
       }
       aside.push(...checked.events);
+      continue;
+    }
+    // An act on the world's document writes no event either: it is handed back for the caller to make.
+    if (checked.p.world) {
+      out.acts.push({ op, act: checked.p.world.act });
       continue;
     }
     // A kept file's change writes no event: it is made in its store when the turn closes.

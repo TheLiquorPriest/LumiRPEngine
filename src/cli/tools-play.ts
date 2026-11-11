@@ -26,11 +26,12 @@ import type { AdjudicationDef } from "../shared/world";
 import { TIME_CONTROLS } from "../engine/events";
 // The one limit on a GM edit's operations: the schemas take no more than the engine accepts.
 import { EDIT_OPS_MAX } from "../shared/protocol";
+import { nameOf } from "../shared/world-diff";
 import type { Args } from "./args";
 import { boolArg, intArg, neededText, textArg, textsArg, ToolError } from "./args";
 import type { RequestFields, RequestType } from "./connection";
 import { LreError } from "./connection";
-import { BODY_LIMIT, itemKey, nameOf, readAt } from "./read";
+import { BODY_LIMIT, itemKey, readAt } from "./read";
 import type { ToolResult } from "./report";
 import { json } from "./report";
 import type { CliMirror, ToolModule } from "./tool-module";

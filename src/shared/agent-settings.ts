@@ -17,7 +17,7 @@ import { type ContextSettings, contextSettingsOf, defaultContextSettings } from 
 import { hasOwn, isRecord, safeKey } from "./json";
 import type { Limit } from "./minds";
 import { limitIn } from "./minds";
-import { HELPER_MAX_TOKENS } from "./settings";
+import { HELPER_MAX_TOKENS, TIMELAPSE_REACH_MINUTES } from "./settings";
 
 /**
  * How hard an agent's model reasons (§8): off, an effort, `model` ("set by the model", for alias
@@ -173,6 +173,52 @@ export interface ReviewSettings {
   placement: ReviewPlacement;
 }
 
+/**
+ * What one call of a harness tool may write or span at most (`docs/harness-tools.md`). Each is a
+ * setting, so a world that needs more room can be given it; a call past one is refused with the
+ * bound in its reason.
+ */
+export interface HarnessLimits {
+  /** The farthest one `time_pass` moves the clock, in minutes; never past the engine's own reach for a timelapse. */
+  timePassMinutes: number;
+  /** How many examples of a collection a world tool lists where it shows what an item looks like. */
+  worldExamples: number;
+  /** The longest text a world tool writes into one field of the world's draft (a description, a lore entry's body), in characters. */
+  worldTextChars: number;
+  /** The longest file a character's agent keeps of its own (`mind_file_write`), in characters. */
+  mindFileChars: number;
+  /** The longest name of such a file, in characters. */
+  mindFileNameChars: number;
+}
+
+/** What the engine still does by itself on a turn the harness plays (HARNESS-SLICE3): there the author decides the turn through tools, and only its consequences stay the engine's. */
+export interface HarnessSettings {
+  /**
+   * When a turn ends and no agent of it said how much time it took (`time_pass`, a clock set), its
+   * last commit applies the scene's default tick, as a classic turn's plan does, and the turn's
+   * record says so. Off: such a turn takes no time. A turn whose author said no time passed takes
+   * none either way.
+   */
+  defaultTick: boolean;
+  /**
+   * How long the start of a turn waits for the turn before it to finish being recorded, in
+   * milliseconds, so its author reads the world whole. A turn's tail never holds the player: when
+   * the wait runs out the turn goes on, and its author is told the last turn's changes may not all
+   * be in. LumiAH bounds every answer of the engine's too (its "Wait for the extension", ten
+   * seconds as shipped), so a wait longer than that is cut there.
+   */
+  commitWaitMs: number;
+  /**
+   * How many runs that are over the engine keeps track of at once: each turn that committed or was
+   * let go, each job's run and the turn it belongs to, and who the agents of each were (the person
+   * a character's agent thinks for, who started what). Bookkeeping, not a limit on any agent: a run
+   * older than that is forgotten, and a call that still comes from it is answered that no turn is
+   * open. The engine's tables hold every user's runs together, so the number in force is that of
+   * the user whose run it last heard begin.
+   */
+  runsRemembered: number;
+}
+
 /** What a final review that fails does (Settings → Agents → Main agent → Final review): the narrator gets the sections as the engine made them, with a Diagnostics record (`send`), or the turn stops with the engine-failed card and its Retry (`stop`). */
 export type FinalReviewOnFail = "send" | "stop";
 export const FINAL_REVIEW_ON_FAIL: readonly FinalReviewOnFail[] = ["send", "stop"];
@@ -323,6 +369,10 @@ export interface AgentSettings {
   vsClassic: number;
   /** How much of each agent's prompt its system files may take together (Settings → Agents → System instructions): AGENTS.md and roles/<role>.md, the global workspace's and the chat's, in tokens. */
   systemTokens: number;
+  /** What the engine still does by itself on a turn the harness plays (GM → This chat → Engine: Harness; HARNESS-SLICE3). */
+  harness: HarnessSettings;
+  /** What one call of a harness tool may write or span at most, on a chat the harness plays. */
+  harnessLimits: HarnessLimits;
 }
 
 /**
@@ -366,6 +416,10 @@ export function defaultAgentSettings(): AgentSettings {
     vsClassic: 2,
     // Room for a page or two of instructions at each level; files that aren't there cost nothing.
     systemTokens: 8000,
+    // A turn takes its scene's time unless its author said otherwise, as every other engine's turn does. Recording a turn takes well under a second: five is room for a slow host, inside LumiAH's own ten for any one answer of the engine's. A run remembered is a few short strings: a thousand of them is weeks of play in a megabyte, and far more than any late call needs.
+    harness: { defaultTick: true, commitWaitMs: 5000, runsRemembered: 1024 },
+    // A day-long file or a novel in one field is a mistake or an attack, never a turn's work: room for a long lore entry and a character's longest notes, and no more.
+    harnessLimits: { timePassMinutes: TIMELAPSE_REACH_MINUTES, worldExamples: 3, worldTextChars: 20000, mindFileChars: 20000, mindFileNameChars: 80 },
   };
 }
 
@@ -515,6 +569,12 @@ export const OUTPUT_CHARS_DEF: AgentLimitDef = { label: "Narrator-facing output,
 
 /** Settings → Agents → System instructions: how much of an agent's prompt its system files may take. */
 export const SYSTEM_TOKENS_DEF: AgentLimitDef = { label: "System instructions", limits: "How much of each agent's prompt its system files may take together: AGENTS.md and roles/<role>.md, the global workspace's (~/) and this chat's.", fires: "The files past it are cut at a line, and the agent is told which were cut.", unit: "tokens", min: 0, none: null };
+
+/** GM → This chat → Engine, on a chat the harness plays: how long a turn's start waits for the turn before it to be recorded. */
+export const HARNESS_COMMIT_WAIT_DEF: AgentLimitDef = { label: "Wait for the last turn", limits: "How long the start of a turn waits for the turn before it to finish being recorded, so the author reads the world whole.", fires: "The turn goes on, and its author is told the last turn's changes may not all be in yet.", unit: "ms", min: 0, none: null };
+
+/** GM → This chat → Engine, on a chat the harness plays: how many runs that are over the engine keeps track of. At least room for one turn and the jobs it starts. */
+export const HARNESS_REMEMBERED_DEF: AgentLimitDef = { label: "Finished runs remembered", limits: "How many runs that are over the engine keeps track of: each turn that was recorded or let go, each job's run, and who the agents of each were.", fires: "The oldest is forgotten: a call that still comes from it is answered that no turn is open. Shared by every user of this Lumiverse: the number in force is the last one read.", unit: "count", min: 16, none: null };
 
 /** Settings → Agents → Pipeline's words for each choice. */
 export const PIPELINE_MODE_LABELS: Readonly<Record<PipelineMode, string>> = { fixed: "A fixed pipeline", main: "A main agent decides" };
@@ -716,6 +776,8 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
   const review = isRecord(a.review) ? a.review : {};
   const kept = isRecord(a.kept) ? a.kept : {};
   const persist = isRecord(a.persist) ? a.persist : {};
+  const harness = isRecord(a.harness) ? a.harness : {};
+  const limits = isRecord(a.harnessLimits) ? a.harnessLimits : {};
   return {
     thinkingInToolLoops: typeof a.thinkingInToolLoops === "boolean" ? a.thinkingInToolLoops : d.thinkingInToolLoops,
     stream: typeof a.stream === "boolean" ? a.stream : d.stream,
@@ -746,6 +808,18 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
     // A ratio, so any amount above none: under 1, an agent turn must spend less than classic's.
     vsClassic: typeof a.vsClassic === "number" && Number.isFinite(a.vsClassic) && a.vsClassic > 0 ? a.vsClassic : d.vsClassic,
     systemTokens: whole(a.systemTokens, SYSTEM_TOKENS_DEF.min) ?? d.systemTokens,
+    harness: {
+      defaultTick: typeof harness.defaultTick === "boolean" ? harness.defaultTick : d.harness.defaultTick,
+      commitWaitMs: whole(harness.commitWaitMs, HARNESS_COMMIT_WAIT_DEF.min) ?? d.harness.commitWaitMs,
+      runsRemembered: whole(harness.runsRemembered, HARNESS_REMEMBERED_DEF.min) ?? d.harness.runsRemembered,
+    },
+    harnessLimits: {
+      timePassMinutes: Math.min(whole(limits.timePassMinutes, 1) ?? d.harnessLimits.timePassMinutes, TIMELAPSE_REACH_MINUTES),
+      worldExamples: whole(limits.worldExamples, 1) ?? d.harnessLimits.worldExamples,
+      worldTextChars: whole(limits.worldTextChars, 1) ?? d.harnessLimits.worldTextChars,
+      mindFileChars: whole(limits.mindFileChars, 1) ?? d.harnessLimits.mindFileChars,
+      mindFileNameChars: whole(limits.mindFileNameChars, 1) ?? d.harnessLimits.mindFileNameChars,
+    },
   };
 }
 

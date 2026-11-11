@@ -7,8 +7,9 @@
 // was made, with no event handling. All hold blob hashes (a blob is a text in the user's store,
 // `agents/blobs.ts`): the learned index each file's path with the hash of its body, its pin and who
 // wrote it (an earlier build's `readers` read and ignored); the thread each message's hash in order,
-// and each proposal's by its id; the rollback the compaction's summary it undoes and the span it
-// brings back. The sweep keeps every blob any chat's metadata names (`agentRefs`). Every write takes
+// and each proposal's by its id (and, the one thing here that is no hash, the id of the LumiAH side
+// session a harness chat's assistant talks in); the rollback the compaction's summary it undoes and
+// the span it brings back. The sweep keeps every blob any chat's metadata names (`agentRefs`). Every write takes
 // its turn in the chat's queue (`ChatMetaQueue`), with LRE's other writes of the chat's metadata.
 
 import type { ChatId, UserId } from "../shared/ids";
@@ -19,10 +20,17 @@ import { isBlobHash, isLearnedPath, isWorkspacePath, type KeptFile, keptFileJson
 import { ChatMetaQueue } from "./chat-meta-queue";
 import type { HostPort } from "./host";
 
-/** The GM assistant's thread (`lumi_rp_engine.agents.assistant`): its messages' blobs, oldest first, and its proposals' blobs by id, oldest first. */
+/**
+ * The GM assistant's thread (`lumi_rp_engine.agents.assistant`): its messages' blobs, oldest first,
+ * and its proposals' blobs by id, oldest first. `side`: on a chat the harness plays, the side session
+ * of LumiAH's its answers come from (`harness/assistant.ts`), kept here so a restart finds it; absent
+ * until one is started, and once the thread is cleared. A Branch copies it with the thread, though
+ * the session stays about the chat it was started in: whoever reads it checks whose it is.
+ */
 export interface AssistantThread {
   messages: string[];
   proposals: Record<string, string>;
+  side?: string;
 }
 
 /** A rollback of the main session's latest compaction (`lumi_rp_engine.agents.rollback`): the summary it undoes, and the span that compaction archived, which comes back. */
@@ -59,9 +67,10 @@ export function agentMetaOf(meta: JsonObject): AgentMeta {
   const messages = Array.isArray(thread.messages) ? thread.messages.filter(isBlobHash) : [];
   const proposals: Record<string, string> = {};
   if (isRecord(thread.proposals)) for (const [id, hash] of Object.entries(thread.proposals)) if (safeKey(id) && isBlobHash(hash)) proposals[id] = hash;
+  const side = safeKey(thread.side) ? thread.side : undefined;
   const asked = isRecord(agents) && isRecord(agents.rollback) ? agents.rollback : {};
   const rollback = isBlobHash(asked.base) && isBlobHash(asked.archived) ? { base: asked.base, archived: asked.archived } : null;
-  return { learned, assistant: { messages, proposals }, rollback };
+  return { learned, assistant: { messages, proposals, ...(side !== undefined ? { side } : {}) }, rollback };
 }
 
 /** The blobs a chat's agent metadata names (the learned files' bodies, the assistant thread's messages and proposals, a rollback's summary and span): what the sweep keeps for it. */
@@ -103,14 +112,16 @@ export class ChatAgentMeta {
 
   /**
    * Changes the assistant's thread to what `change` makes of it as the chat holds it then: the blobs
-   * it names are ones the caller stored and holds until this lands.
+   * it names are ones the caller stored and holds until this lands. The side session it names is the
+   * one kept; none named, none is kept.
    */
   async setAssistant(chatId: ChatId, userId: UserId, change: (now: Readonly<AssistantThread>) => AssistantThread): Promise<AgentMeta> {
     return this.update(chatId, userId, (now) => {
       const next = change(now.assistant);
       for (const hash of [...next.messages, ...Object.values(next.proposals)]) if (!isBlobHash(hash)) throw new Error(`"${hash}" isn't a stored blob's hash`);
       for (const id of Object.keys(next.proposals)) if (!safeKey(id)) throw new Error(`"${id}" isn't a proposal's id`);
-      return { assistant: { messages: [...next.messages], proposals: { ...next.proposals } } };
+      if (next.side !== undefined && !safeKey(next.side)) throw new Error(`"${next.side}" isn't a side session's id`);
+      return { assistant: { messages: [...next.messages], proposals: { ...next.proposals }, ...(next.side !== undefined ? { side: next.side } : {}) } };
     });
   }
 
@@ -138,7 +149,7 @@ export class ChatAgentMeta {
       const parts = change(now);
       const agents: JsonObject = isRecord(own[AGENTS_KEY]) ? { ...(own[AGENTS_KEY] as JsonObject) } : {};
       if (parts.learned) agents.learned = Object.fromEntries(Object.entries(parts.learned).map(([path, file]) => [path, keptFileJson(file)]));
-      if (parts.assistant) agents.assistant = { messages: parts.assistant.messages, proposals: parts.assistant.proposals };
+      if (parts.assistant) agents.assistant = { messages: parts.assistant.messages, proposals: parts.assistant.proposals, ...(parts.assistant.side !== undefined ? { side: parts.assistant.side } : {}) };
       if (parts.rollback === null) delete agents.rollback;
       else if (parts.rollback) agents.rollback = { base: parts.rollback.base, archived: parts.rollback.archived };
       await this.host.chats.mergeChatMetadata(chatId, { [LEDGER_NAMESPACE]: { ...own, [AGENTS_KEY]: agents } }, userId);

@@ -90,6 +90,16 @@ export class Rig {
     return new Rig({ ...this.options, ...options, host: this.host });
   }
 
+  /**
+   * The extension's backend restarts alone while Lumiverse goes on (an update, a crash): this
+   * backend's handlers go, the generations under way go on, and a new runtime starts over the same
+   * chats and storage, which hears how they end.
+   */
+  reload(options: RigOptions = {}): Rig {
+    this.host.reload();
+    return new Rig({ ...this.options, ...options, host: this.host });
+  }
+
   async cashOf(chatId: string): Promise<unknown> {
     const core = await this.rt.ledger.core(chatId, this.host.userId);
     return core?.fold(toChain(await this.host.chats.messages(chatId, this.host.userId))).state.entities[POV]?.fields.cash;

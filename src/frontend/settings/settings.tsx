@@ -12,7 +12,9 @@
 // curtain). Where Settings is, is UI state (`ui.settings`, a `SettingsRoute`), so it holds while the
 // drawer switches modes; Back and Escape go up one level (`settingsBack`), and focus returns to the
 // row that opened the page left (`settingsFocus`). A running chat's own rules (realism, checks, time,
-// pins and Upgrade) live in GM → This chat.
+// pins and Upgrade) live in GM → This chat. While the open chat plays on the harness, the pages that
+// set up the classic and agents engines open with a note that says so, and where the harness's own
+// agents are set up (`EngineNote`).
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -33,6 +35,7 @@ import { Badge, Banner, Button, Empty, HostSwitch, List, ListRow, PageHeader, Se
 import { humanize } from "../format";
 import type { IconName } from "../icons";
 import { revealInScroller } from "../scroll";
+import { HARNESS_MODE } from "../harness/mode";
 import { useSelect } from "../store";
 import { DiagnosticsPage } from "../diagnostics";
 import { McpServerPage } from "../agents";
@@ -49,7 +52,7 @@ import { MainAgentPage, mainSummary } from "./main-agent";
 import { RolePage } from "./role-page";
 import { RolesPage, rolesSummary } from "./roles";
 import { assistantChanged, mainChanged, agentsChanged, rolesChanged } from "./changed";
-import { adjustedText, AGENTS_SUB, AGENTS_SUBS, ROLE_PLAIN, type AgentsSub } from "./labels";
+import { adjustedText, AGENTS_SUB, AGENTS_SUBS, ENGINE_NOTE_PAGES, engineNote, ROLE_PLAIN, type AgentsSub } from "./labels";
 import { limitText, TimeoutsSection } from "./timeouts";
 import { RetentionPage, retentionSummary } from "./retention";
 import { LorePage, loreSummary } from "./lore";
@@ -298,6 +301,34 @@ export interface BodyContext {
   go(route: SettingsRoute): void;
 }
 
+/**
+ * The note a page opens with while the open chat plays on the harness, without hooks: on a page that
+ * sets up the classic and agents engines, that this chat doesn't use it (or which part of it), what
+ * the harness is, and the way to where its agents are set up. Nothing on any other page, or for a
+ * chat on another engine. The page under it stays whole: the user's other chats may play on it.
+ */
+export function EngineNote(props: { route: SettingsRoute; engine: StateView["engine"]; onOpen(): void }) {
+  if (props.engine !== "harness") return null;
+  const kind = ENGINE_NOTE_PAGES[props.route.page];
+  if (kind === undefined) return null;
+  const note = engineNote(kind);
+  return (
+    <div class="lre-set-engine-note" data-lre-engine-note={kind}>
+      <Banner
+        tone="info"
+        title={note.title}
+        actions={
+          <Button icon={HARNESS_MODE.icon} onClick={props.onOpen}>
+            {`Open ${HARNESS_MODE.label}`}
+          </Button>
+        }
+      >
+        {note.text}
+      </Banner>
+    </div>
+  );
+}
+
 /** The body of the page `route` names, without hooks of its own: a page within a page where the route names one it has, else the page itself. */
 export function SettingsBody(props: { route: SettingsRoute; data: SettingsResult; ctx: BodyContext }) {
   const { route, data, ctx } = props;
@@ -431,6 +462,7 @@ export function Settings() {
   return (
     <div ref={root} class="lre-set" data-lre-section="settings" data-lre-settings-at={route.sub ?? route.page} onKeyDown={(event) => settingsKeyDown(event, back)}>
       <PageHeader title={header.title} subtitle={header.subtitle} onBack={back} backLabel={header.backLabel} />
+      <EngineNote route={route} engine={view?.engine} onOpen={() => app.ui.update((ui) => ({ ...ui, mode: HARNESS_MODE.id }))} />
       {adjusted.length > 0 ? (
         <Banner tone="info">
           <span data-lre-settings-adjusted>{adjustedText(adjusted)}</span>

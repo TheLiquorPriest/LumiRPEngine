@@ -47,6 +47,7 @@ import { combatEntries, paletteEncounter } from "../packs/combat/core/index";
 import { thingsConfigOf } from "../shared/things";
 import type { ChatKnowledgePrefs } from "./chat-knowledge-prefs";
 import type { StoredChip } from "./chips";
+import { unplayedOf } from "./harness/record";
 import type { ReplyFailure } from "./ledger-io";
 import { OFFSTAGE_TEXT_ID, type PromptTexts } from "../shared/prompts";
 import { TELL_LABEL, type OffstageSettings } from "../shared/offstage";
@@ -710,8 +711,11 @@ export function replyFailedChip(turn: string, failed: ReplyFailure, as: Generate
   };
 }
 
-/** Chips derived from the records: Re-read edit, Retry read, Retry (empty reply), degraded, Keep report, what changed, elapsed, overdue, a correction's Undo, a refused write's notice. */
-function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepReport: readonly KeepLine[], core: LedgerCore, registry: Registry, world: WorldDoc): Chip[] {
+/**
+ * Chips derived from the records: Re-read edit, Retry read, Retry (empty reply), degraded, Keep report, what changed, elapsed, overdue, a correction's Undo, a refused write's notice.
+ * On a chat the harness plays (`harness`) none offers a read or a telling of the engine's own: there the engine reads no reply and tells none again itself, every model call being an agent's. A reply no turn was played for says so, on any chat.
+ */
+function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepReport: readonly KeepLine[], core: LedgerCore, registry: Registry, world: WorldDoc, harness: boolean): Chip[] {
   const chips: Chip[] = [];
   const headIndex = chain.findLastIndex((m) => !m.isUser);
   chain.forEach((m, i) => {
@@ -719,19 +723,24 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
     const rec: Rec | null = activeRecord(m, core.journal.tombstones);
     if (!rec) return;
     const fold_ = fold.messages[i]?.fold;
-    if (rec.accepted && (fold_ === "on_path" || fold_ === "plain")) {
+    const unplayed = unplayedOf(rec);
+    if (unplayed !== null) {
+      const what = unplayed.added ? "What Continue added to this reply was written" : "This reply was written";
+      chips.push({ id: `unplayed:${m.id}:${m.swipeId}`, kind: "degraded", messageId: m.id, label: "No turn was played", detail: `${what} without the harness's agents: ${unplayed.why}. Nothing was rolled for it, no time passed, and nothing it tells was recorded. The author of the next harness turn is told, and records what still matters.`, actions: [], expires: "never" });
+    }
+    if (!harness && rec.accepted && (fold_ === "on_path" || fold_ === "plain")) {
       chips.push({ id: `reread:${m.id}:${m.swipeId}`, kind: "reread", messageId: m.id, label: "Re-read edit", detail: "The engine kept the world as simulated. Re-read this text to update it.", actions: [{ id: "reread", label: "Re-read edit", style: "primary" }], expires: "never" });
     }
     if (i !== headIndex) return;
     const text = m.swipes[m.swipeId] ?? "";
     // A record read elsewhere never folds as stored, so a read of it is always refused: no chip leads there.
-    if (rec.status === "stopped" && !rec.readElsewhere) chips.push({ id: `retry_read:${m.id}:${m.swipeId}`, kind: "retry_read", messageId: m.id, label: "Retry read", detail: "The reply stopped early; read what was saved.", actions: [{ id: "retry_read", label: "Retry read" }], expires: "never" });
+    if (!harness && rec.status === "stopped" && !rec.readElsewhere) chips.push({ id: `retry_read:${m.id}:${m.swipeId}`, kind: "retry_read", messageId: m.id, label: "Retry read", detail: "The reply stopped early; read what was saved.", actions: [{ id: "retry_read", label: "Retry read" }], expires: "never" });
     if (rec.status === "degraded" && text.trim() === "") chips.push({ id: `retry:${m.id}:${m.swipeId}`, kind: "retry", messageId: m.id, label: "Retry", detail: "The narrator returned an empty reply.", actions: [{ id: "regenerate", label: "Retry", style: "primary" }], expires: "next_send" });
     else if (rec.status === "degraded") chips.push({ id: `degraded:${m.id}:${m.swipeId}`, kind: "degraded", messageId: m.id, label: "Not fully simulated", detail: "Part of this turn ran engine-only.", actions: [], expires: "next_send" });
     const minutes = clockMinutes(rec.events);
     if (minutes > 0) chips.push({ id: `elapsed:${m.id}:${m.swipeId}`, kind: "elapsed", messageId: m.id, label: minutes >= 60 ? `+${Math.floor(minutes / 60)} h ${minutes % 60} min` : `+${minutes} min`, actions: [], expires: "next_send" });
     // Re-narrate/Re-run (P3, §12; Build C item 1): the choice sets the next swipe's mode, with what the player asks of the new telling when they say (only the narrator reads it), then the UI swipes.
-    if (rec.seed !== "" && rec.path !== "") {
+    if (!harness && rec.seed !== "" && rec.path !== "") {
       const ask = { type: "text" as const, label: "What should change?", value: "", optional: true as const };
       chips.push({ id: `swipe_option:${m.id}:${m.swipeId}`, kind: "swipe_option", messageId: m.id, label: "Swipe as…", detail: "Re-narrate tells this turn again: the same outcome, new prose. Re-run the turn with the engine plays it again, with a fresh roll. Either may take a word on what should change, which only the narrator reads.", actions: [{ id: "renarrate", label: "Re-narrate…", input: ask }, { id: "rerun", label: "Re-run the turn with the engine", input: ask }], expires: "next_send" });
     }
@@ -888,7 +897,9 @@ export function buildView(input: ViewInput): StateView {
   const journal = core.journal;
   const keys = core.foldKeys(observed);
   const stateKey = `${keys.state}\u0000${input.run.revision}\u0000${JSON.stringify(input.mapDisplay ?? null)}`;
-  const chainKey = `${keys.steps.at(-1) ?? keys.root}\u0000${input.run.revision}\u0000${JSON.stringify(journal.pauses)}\u0000${JSON.stringify(journal.refused ?? [])}`;
+  // A chat the harness plays shows other chips (`derivedChips`), and a reply no turn was played for is marked outside every hash: its chain's parts are kept by the engine and the journal's count too.
+  const harness = input.knowledge.chat.engine === "harness";
+  const chainKey = `${keys.steps.at(-1) ?? keys.root}\u0000${input.run.revision}\u0000${JSON.stringify(journal.pauses)}\u0000${JSON.stringify(journal.refused ?? [])}\u0000${harness ? `harness:${journal.seq}` : ""}`;
   const stateHit = memo.state?.key === stateKey ? memo.state : null;
   const chainHit = memo.chain?.key === chainKey ? memo.chain : null;
   // Folded only when a part kept doesn't stand for the chat as it is now.
@@ -944,7 +955,7 @@ export function buildView(input: ViewInput): StateView {
       read = memo.chain = {
         key: chainKey,
         scene: kept(timedPart(input.parts, "scene", () => scene(world, state, lastRec ? clockMinutes(lastRec.events) : 0, registry))),
-        chips: kept(timedPart(input.parts, "chips", () => derivedChips(chain, out, drops.keep, core, registry, world))),
+        chips: kept(timedPart(input.parts, "chips", () => derivedChips(chain, out, drops.keep, core, registry, world, harness))),
         replyClocks: kept(timedPart(input.parts, "clocks", () => replyClocks(chain, out, core, world, state))),
         journal: kept([...timedPart(input.parts, "journal", () => turnNotes(chain, out, core, registry, world, state)), ...drops.notes]),
         keepReport: kept(drops.keep),
@@ -965,6 +976,8 @@ export function buildView(input: ViewInput): StateView {
       revision: parts.revision,
       ...(parts.lag !== null ? { definitionsFrom: parts.lag } : {}),
       status: journal.pauses.length > 0 ? "paused" : core.inFlight ? "in_flight" : "idle",
+      // Pushed, so the page follows the Engine switch without asking: the drawer's Harness tab shows and goes with it.
+      engine: input.knowledge.chat.engine ?? "classic",
       hud: parts.hud,
       scene: read.scene,
       chips: [...shown.map(({ payload: _payload, ...chip }) => chip), ...read.chips],

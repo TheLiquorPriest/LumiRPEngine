@@ -5,10 +5,12 @@
 // checked by the `spawn` channel (its cap and its find first) and settled with the read's changes. A
 // name resolves only among what the agent's knowledge may name, so a hidden one reads as not found.
 
+import { STORY_NOTE } from "../../../../shared/harness-texts-story";
 import { DOMAINS, LEVEL_LABEL } from "../../../../shared/ids";
 import type { JsonObject } from "../../../../shared/json";
 import { tiersInOrder } from "../../../../shared/tiers";
 import { lifeStatesOf, type WorldDoc } from "../../../../shared/world";
+import { slug } from "../../../../engine/places-in-play";
 import { BOOLEAN, boolArg, fieldValueArg, gmEdit, JSON_VALUE, missing, needId, noteFact, NUMBER, propose, TEXT_LIST } from "../propose";
 import type { ToolReadView } from "../read-view";
 import type { ToolDefinition } from "../registry";
@@ -16,7 +18,7 @@ import { type Resolved, resolveEntity, resolvePerson, resolvePlace } from "../re
 import { argGiven, badValue, fieldEnum, jsonObject, kindEnum, needText, objectArg, objectSchema, schemaWorld, text, textArg } from "../schema";
 
 /** The world's tier ids, lowest first. */
-function tierIds(world: Pick<WorldDoc, "tiers">): string[] {
+export function tierIds(world: Pick<WorldDoc, "tiers">): string[] {
   return tiersInOrder(world).map(([id]) => id);
 }
 
@@ -30,7 +32,7 @@ const FOLLOW_TIER = (LEVELS[0] ?? 0) - 1;
 const LEVEL: JsonObject = { type: "integer", minimum: FOLLOW_TIER, maximum: LEVELS.at(-1) ?? 0 };
 
 /** A relation's far end: a person or thing, else a place (a relation to a place); one that is neither is told as a thing not found. */
-function relationEnd(view: ToolReadView, said: string): Resolved {
+export function relationEnd(view: ToolReadView, said: string): Resolved {
   const entity = resolveEntity(view, said);
   if (!("refused" in entity)) return entity;
   const place = resolvePlace(view, said);
@@ -148,6 +150,8 @@ export const PEOPLE_WRITES: readonly ToolDefinition[] = [
       const name = needText(view, "gm_spawn", args, "name");
       if (typeof name !== "string") return name;
       const id = textArg(args, "id");
+      // On the harness an id an agent makes is in the form the engine mints its own in (`slug`), as `person_make` holds one: every later call names the entity by it, a mind's own folder among them. The old engines' agents give an id as they always did.
+      if (env.turn && id !== null && id !== slug(id)) return view.refuse(STORY_NOTE.badId, { id });
       const tier = textArg(args, "tier");
       const tiers = tierIds(view.world);
       if (tier !== null && !tiers.includes(tier)) return badValue(view, "gm_spawn", "tier", tier, tiers);

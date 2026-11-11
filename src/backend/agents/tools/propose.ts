@@ -6,7 +6,8 @@
 // card. A tool answers as JSON: what the change does in plain words, its change type and mode (and, in
 // a turn, where it stands), or the code and reason it can't be made.
 
-import { TOOL_NOTE, toolArgTextId } from "../../../shared/agent-tools";
+import { ROLE_TIERS } from "../../../shared/agent-roles";
+import { TOOL_NOTE, toolArgTextId, type ToolTier } from "../../../shared/agent-tools";
 import { WRITE_NOTE } from "../../../shared/agent-tools-write";
 import type { EditOp } from "../../../shared/protocol";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
@@ -62,18 +63,42 @@ export async function propose(view: ToolReadView, writer: ToolWriter | null, op:
   const out = writer.stage ? await writer.stage(op) : await writer.dryRun(op);
   if ("refused" in out) return refusedAnswer(out);
   const change = { key: out.key, changeType: out.changeType, mode: out.mode, lines: out.lines };
-  // A staged change says where it stands: landing with the turn, or waiting on the review card.
-  if (writer.stage) return view.answer({ staged: { ...change, lands: view.text(out.mode === "confirm" ? WRITE_NOTE.stagedReview : WRITE_NOTE.staged) } });
+  // A staged change says where it stands: landing with the turn, waiting on the review card, or written already where no turn holds it.
+  if (writer.stage) return view.answer({ staged: { ...change, lands: out.mode === "confirm" ? view.text(WRITE_NOTE.stagedReview) : (out.written ?? view.text(WRITE_NOTE.staged)) } });
   return view.answer({ proposed: change });
 }
 
 /**
+ * Why the calling agent may not make a change of the tier `needs` that never passes through the
+ * writer (a noted fact, a harness tool's own staged change), which checks its operations' tiers
+ * itself; null when it may. On the harness the turn says what the caller holds (`HarnessTurn.tier`,
+ * the author's grants included; unsaid, the game master's for the author and nothing for anyone
+ * else): an agent there is given whatever tools its definition lists, a user's own among them, so
+ * being given a tool says nothing of who it is. The old engines give an agent a tool only at a tier
+ * its role holds (`roleToolScope`), and have no turn to ask.
+ */
+export function tierRefusal(view: ToolReadView, env: Pick<ToolEnv, "turn">, needs: ToolTier): ToolOutcome | null {
+  const turn = env.turn;
+  if (!turn) return null;
+  const held = turn.tier ?? (turn.main ? "gm" : "read");
+  if (ROLE_TIERS.indexOf(held) >= ROLE_TIERS.indexOf(needs)) return null;
+  return held === "read" ? view.refuse(WRITE_NOTE.noWriter) : view.refuse(WRITE_NOTE.notGranted, { tier: held, needs });
+}
+
+/** The tier a noted fact is: the story's own change (ITEMS-SPEC §7.3), which every tool that notes one is listed at. */
+export const NOTE_TIER: ToolTier = "story";
+
+/**
  * A fact a Curator's tool notes for the reply's read (`ToolEnv.notes`): read as classic's parser reads
  * the read's own (money in minor units), checked by its channel against the head, then noted once,
- * to land with the read's changes under its type's mode; or why it can't be.
+ * to land with the read's changes under its type's mode; or why it can't be. The caller's tier is
+ * held here (`tierRefusal`), where every tool that notes passes, and before anything of the fact is
+ * read: a note is no operation of the writer's, so nothing after this checks who makes it.
  */
-export function noteFact(view: ToolReadView, env: Pick<ToolEnv, "notes">, fact: JsonObject): ToolOutcome {
+export function noteFact(view: ToolReadView, env: Pick<ToolEnv, "notes" | "turn">, fact: JsonObject): ToolOutcome {
   if (!env.notes) return view.refuse(WRITE_NOTE.noWriter);
+  const below = tierRefusal(view, env, NOTE_TIER);
+  if (below) return below;
   const type = String(fact.type);
   const read = extractAnswer({ proposals: [fact] }, { world: view.world, appliedMinutes: 0, channels: [type], moves: false }).proposals[0];
   const channel = view.registry.proposals.get(type);

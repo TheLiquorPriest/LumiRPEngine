@@ -24,7 +24,7 @@ import { actionEnum, argGiven, badValue, jsonObject, needText, objectArg, object
 const ODDS = "checks_odds";
 
 /** An action's odds as `checks_odds` gives them. */
-interface OddsAnswer {
+export interface OddsAnswer {
   action: { id: string; label: string };
   actor: ViewRef | null;
   /** Whether it can be tried now. */
@@ -49,7 +49,7 @@ interface OddsAnswer {
 }
 
 /** A probability as a percentage, to a tenth. */
-function percent(p: number): number {
+export function percent(p: number): number {
   return Math.round(p * 1000) / 10;
 }
 
@@ -97,7 +97,35 @@ function paramValue(view: ToolReadView, def: ParamDef | undefined, given: JsonVa
   }
 }
 
-function oddsAnswer(view: ToolReadView, action: ActionDef, actor: EntityId, params: JsonObject): OddsAnswer {
+/**
+ * The check a call names, as the action takes it: the action among every one there is, who takes it
+ * (the player character when the call names no one) and its arguments (`paramValue`); or the answer
+ * that says what the call got wrong. What a harness turn reads of an attempt before it is played
+ * (`checks_stakes`) and the attempt it plays read their call through this too, so the check that is
+ * rolled is the one these odds are of.
+ */
+export function checkCall(view: ToolReadView, tool: string, args: JsonObject): { action: ActionDef; actor: EntityId; params: JsonObject } | ToolOutcome {
+  const said = needText(view, tool, args, "action");
+  if (typeof said !== "string") return said;
+  const named = textArg(args, "actor");
+  const r: Resolved = named === null ? { id: view.pov } : resolvePerson(view, named);
+  if ("refused" in r) return r.refused;
+  const actions = view.read(() => namable(view));
+  const action = actions.find((a) => a.id === said);
+  if (!action) return badValue(view, tool, "action", said, actions.map((a) => a.id).sort());
+  const params: JsonObject = {};
+  const given = objectArg(args, "params");
+  if (argGiven(args, "params") && given === null) return missing(view, tool, "params");
+  for (const [name, value] of Object.entries(given ?? {})) {
+    const v = paramValue(view, own(action.params, name), value);
+    if ("refused" in v) return v.refused;
+    params[name] = v.value;
+  }
+  return { action, actor: r.id, params };
+}
+
+/** An action's odds as `checks_odds` answers them. */
+export function oddsAnswer(view: ToolReadView, action: ActionDef, actor: EntityId, params: JsonObject): OddsAnswer {
   const a = actionOdds(view.registry, view.world, view.state, { action, actor, params });
   const shown = checkView(a, policyOf(view.world, view.state).retry);
   const c = a.check;
@@ -131,23 +159,9 @@ export const CHECKS_TOOLS: readonly ToolDefinition[] = [
     parameters: (world) => objectSchema({ action: text(actionEnum(world)), actor: text(), params: jsonObject() }, ["action"]),
     run: async (args, env) => {
       const view = await env.reader.view();
-      const said = needText(view, ODDS, args, "action");
-      if (typeof said !== "string") return said;
-      const named = textArg(args, "actor");
-      const r: Resolved = named === null ? { id: view.pov } : resolvePerson(view, named);
-      if ("refused" in r) return r.refused;
-      const actions = view.read(() => namable(view));
-      const action = actions.find((a) => a.id === said);
-      if (!action) return badValue(view, ODDS, "action", said, actions.map((a) => a.id).sort());
-      const params: JsonObject = {};
-      const given = objectArg(args, "params");
-      if (argGiven(args, "params") && given === null) return missing(view, ODDS, "params");
-      for (const [name, value] of Object.entries(given ?? {})) {
-        const v = paramValue(view, own(action.params, name), value);
-        if ("refused" in v) return v.refused;
-        params[name] = v.value;
-      }
-      return view.answer(view.read(() => oddsAnswer(view, action, r.id, params)));
+      const call = checkCall(view, ODDS, args);
+      if (!("action" in call)) return call;
+      return view.answer(view.read(() => oddsAnswer(view, call.action, call.actor, call.params)));
     },
   },
 ];

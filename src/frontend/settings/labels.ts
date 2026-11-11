@@ -2,7 +2,8 @@
 // Context, Main agent, Assistant): every title, choice and line of help they show, apart from the
 // limits' own words (shared/agent-settings.ts) and the stored values, which stay as they are. No
 // label names the steps engine's old name, a raw id or a JSON pointer: a role is its label, a task
-// what it does, a stored path the setting's name (`settingName`).
+// what it does, a stored path the setting's name (`settingName`). And the note a chat on the harness
+// is shown on the pages that set up the other engines (`ENGINE_NOTE_PAGES`, `engineNote`).
 
 import type { RoleId, RoleOnFail, RoleTier } from "../../shared/agent-roles";
 import { ROLE_LABEL } from "../../shared/agent-roles";
@@ -10,9 +11,12 @@ import type { AgentEffort, MemoryPlacement, PipelineMode, ReviewPlacement, Final
 import { BUDGET_DEFS, COMPACTION_DEFS, CURATOR_OPS_DEF, GM_OPS_DEF, HISTORY_TOKENS_DEF, KEPT_DEFS, LOOP_DEFS, MAIN_DEFS, OUTPUT_CHARS_DEF, SYSTEM_TOKENS_DEF, TURN_DEFS } from "../../shared/agent-settings";
 import type { RolePerspective, SourceUse } from "../../shared/agent-context";
 import { hasOwn } from "../../shared/json";
+import { HARNESS_PAGE } from "../../shared/harness-text-kit";
 import type { MainRoleStage } from "../../shared/main-agent-prompts";
 import type { RouteSource } from "../../shared/role-routes";
-import { TIMEOUTS, type TimeoutKey } from "../../shared/timeouts";
+import { TIMEOUT_KEYS, TIMEOUTS, type TimeoutKey } from "../../shared/timeouts";
+import type { SettingsPage } from "../app";
+import { HARNESS_MODE } from "../harness/mode";
 import type { IconName } from "../icons";
 
 /** Settings → Agents' sections, each a page of its own under its name. */
@@ -214,4 +218,53 @@ export function settingName(pointer: string): string {
 /** Settings' notice for a value saved otherwise than sent: each by its name, as kept and as sent. */
 export function adjustedText(adjusted: readonly { pointer: string; now: unknown; sent: unknown }[]): string {
   return `Saved, kept within what each setting takes: ${adjusted.map((a) => `${settingName(a.pointer)} is ${valueWords(a.now)}, not ${valueWords(a.sent)}`).join("; ")}.`;
+}
+
+// ---------------------------------------------------------------- a chat on the harness
+
+/**
+ * What Settings says to a chat on the harness at the top of a page (`EngineNote`): `whole`, on a
+ * page that only sets up turns on the classic and agents engines, none of whose steps such a chat's
+ * turns run; `timeouts` and `prompts`, on a page only part of which is theirs.
+ */
+export type EngineNoteKind = "whole" | "timeouts" | "prompts";
+
+/**
+ * The pages that open with the note while the open chat plays on the harness, each with which. A
+ * page within one of them (a role's page, from Roles or Context) opens with its page's. Settings
+ * keeps every one of them: the user's other chats may play on the engines they set up.
+ */
+export const ENGINE_NOTE_PAGES: Readonly<Partial<Record<SettingsPage, EngineNoteKind>>> = { model: "whole", steps: "whole", speed: "whole", roles: "whole", context: "whole", main: "whole", timeouts: "timeouts", prompts: "prompts" };
+
+/**
+ * The timeouts that time a turn's steps on the classic and agents engines; the harness runs none of
+ * those steps. What else is a turn's (the generation guard, Lumiverse's wait as any generation
+ * starts) holds on every engine, and the note names it as what still applies.
+ */
+export const OLD_ENGINE_TIMEOUTS: readonly TimeoutKey[] = ["engineRunMs", "preLookupMs", "finalReviewMs", "postReplyMs", "postLookupMs", "skipPlanMs"];
+
+/** The section of Timeouts that holds a turn's timeouts, as that page titles it: the note points there. */
+export const TURN_TIMEOUTS_TITLE = "Turns";
+
+/** A list as a sentence says it: "a, b and c". */
+function listed(parts: readonly string[]): string {
+  return parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1] ?? ""}`;
+}
+
+/** What the harness is, for someone who has never met one, and where its agents are set up: each note says both. */
+const HARNESS_IS = "an AI author plays each turn with agents it starts";
+const HARNESS_AT = `under ${HARNESS_MODE.label}`;
+
+/** The note's title and its text, in plain words: what on the page isn't this chat's, what the harness is, and where its agents are set up. */
+export function engineNote(kind: EngineNoteKind): { title: string; text: string } {
+  switch (kind) {
+    case "whole":
+      return { title: "This chat doesn't use these settings", text: `They belong to the classic and agents engines, which your other chats may play on. This chat plays on the harness: ${HARNESS_IS}, and those are set up ${HARNESS_AT}.` };
+    case "timeouts": {
+      const kept = TIMEOUT_KEYS.filter((id) => TIMEOUTS[id].group === "turn" && !OLD_ENGINE_TIMEOUTS.includes(id)).map((id) => TIMEOUTS[id].label);
+      return { title: "This chat doesn't use some of these", text: `Under ${TURN_TIMEOUTS_TITLE}, only ${listed(kept)} ${kept.length === 1 ? "applies" : "apply"} to this chat: the rest time a turn's steps on the classic and agents engines. This chat plays on the harness: ${HARNESS_IS}, and their own limits are set ${HARNESS_AT}.` };
+    }
+    case "prompts":
+      return { title: "This chat plays on the harness", text: `That is, ${HARNESS_IS}. What they are sent is on the page ${HARNESS_PAGE.label}, here in Prompts; each agent's model, tools and limits are set ${HARNESS_AT}.` };
+  }
 }

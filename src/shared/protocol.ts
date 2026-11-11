@@ -472,10 +472,12 @@ export interface ChatKnowledgeRequest extends Request<"lre.chat.knowledge"> {
   chatId: ChatId;
   knowledge?: boolean | null;
   narrator?: NarratorView | null;
-  /** Which engine plays the chat's turns (GM → This chat, INC2-SPEC C12): its classic steps, or the agent loop; null returns it to classic. A change drops a turn the engine prepared for it. */
-  engine?: "classic" | "agents" | null;
+  /** Which engine plays the chat's turns (GM → This chat, INC2-SPEC C12; HARNESS-SLICE3): its classic steps, the agent loop, or the harness, where the author and the agents it starts play the turn through tools; null returns it to classic. A change drops a turn the engine prepared for it. */
+  engine?: "classic" | "agents" | "harness" | null;
   /** Whether this chat's impossible holds are tidied automatically, its one-time Things tidied fix (GM → This chat → Things, ITEMS-SPEC §9, §11); null returns it to the world's (`tidy.auto`). */
   tidy?: boolean | null;
+  /** GM → This chat → Engine's own read: the answer also says why an engine can't be chosen now, where one can't (`harnessBlocked`). */
+  engines?: true;
 }
 
 /**
@@ -1344,8 +1346,8 @@ export interface ResultBodies {
   "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; skills?: SheetSkill[]; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean; updates?: TableUpdate[] };
   "lre.ui": { done: true };
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
-  /** The chat's own knowledge choices after the request, null where it follows; `engine` when the chat plays the agent loop (absent: classic, which a chat with no choice plays); `tidy`, its own Tidy up switch (absent: the world's). */
-  "lre.chat.knowledge": { knowledge: boolean | null; narrator: NarratorView | null; engine?: "agents"; tidy?: boolean };
+  /** The chat's own knowledge choices after the request, null where it follows; `engine` when the chat plays the agent loop or the harness (absent: classic, which a chat with no choice plays); `tidy`, its own Tidy up switch (absent: the world's); `harnessBlocked`, for a request that asked which engines can be chosen (`engines`): why the harness can't play the user's chats now and what to do about it, in words the page shows under the Engine switch (absent: it can). */
+  "lre.chat.knowledge": { knowledge: boolean | null; narrator: NarratorView | null; engine?: "agents" | "harness"; tidy?: boolean; harnessBlocked?: string };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
   "lre.job": { jobId?: string; jobs?: JobSummary[] };
   /**

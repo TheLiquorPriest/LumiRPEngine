@@ -1,9 +1,11 @@
 // Starts the backend on the real host: every pack, the simulation pipeline, the spindle adapter,
-// the runtime, the protocol dispatcher, the background lane's message route and the memory budget.
+// the runtime, the protocol dispatcher, the background lane's message route, the memory budget, and
+// LumiAH's backend, built in for the chats the harness plays (docs/HARNESS.md).
 
 import { ALL_PACKS, STARTER_INFO, STARTER_TABLES, STARTER_WORLDS } from "../packs/index";
 import { planTurn, postTurn } from "../engine/turn";
 import { Dispatcher } from "./dispatch";
+import { startHarness } from "./harness/mount";
 import { JobRunner } from "./jobs";
 import { watchMemory } from "./memory-budget";
 import { Runtime } from "./runtime";
@@ -20,6 +22,12 @@ export function startBackend(): Runtime {
   const jobs = new JobRunner(host, runtime.worlds, runtime.steps, runtime.settings, runtime.registry);
   runtime.start();
   new Dispatcher(runtime, jobs).start();
+  // After the engine's own handlers are registered, so the engine hears each of Lumiverse's events before LumiAH does. A LumiAH that can't start leaves the engine as it is without one: no chat can be switched to the harness, and the Engine page says so.
+  try {
+    startHarness(runtime);
+  } catch (error) {
+    caught("the harness couldn't be built in")(error);
+  }
   host.processes.onMessage((event) => jobs.onLane(event.payload));
   // The host gives no sign of memory pressure: the engine minds its own RSS (DESIGN §9.6).
   const probe = {

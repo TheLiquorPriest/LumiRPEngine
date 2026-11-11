@@ -4,8 +4,8 @@
 
 import { isRecord } from "../shared/json";
 import { pointerOf } from "../shared/json-patch";
-import type { WorldItem } from "./diff";
-import { cutAt, nameOf } from "./read";
+import { nameOf, type WorldItem } from "../shared/world-diff";
+import { cutAt } from "./read";
 
 export interface SearchHit {
   worldId: string;

@@ -8,6 +8,7 @@
 // or a trust a company (Build's Change what it is, 6.16) is one change, "Change what it is": its
 // kind, its fields and the memberships that seat its trustees, taken or kept together.
 
+import type { ChatId, RevisionId, UserId } from "../shared/ids";
 import type { EntityUpgradePick, UpgradeAspect } from "../shared/ledger";
 import { UPGRADE_ASPECTS } from "../shared/ledger";
 import { OWNER_ROLE_LABELS, ownersIn, ROLE_RIGHTS, worthShares, type OwnerRole } from "../shared/finance";
@@ -23,8 +24,10 @@ import { relationDef } from "../engine/relations";
 import { fieldDef, kindDef, kindIs } from "../engine/scope";
 import { GROUP_KIND, MEMBER_OF } from "../engine/selector";
 import type { WorldState } from "../engine/state";
-import { PLACEMENT_FIELDS, type EntityDiff, type PartDiff, type RelationDiff, type UpgradePlan } from "../engine/upgrade";
+import { definitionsLag, PLACEMENT_FIELDS, planUpgrade, type EntityDiff, type PartDiff, type RelationDiff, type UpgradePlan } from "../engine/upgrade";
 import { canSeeEntity, canSeePlace, trackKnown, visibilityOf } from "../engine/visibility";
+import type { Runtime } from "./runtime";
+import { WorldError } from "./worlds";
 
 const ASPECT_LABEL: Record<UpgradeAspect, string> = { kind: "Kind", name: "Name", tier: "Tier", agent: "Lives off-screen", levels: "Level overrides", class: "Classes and tags", life: "Life state" };
 
@@ -230,4 +233,24 @@ export function upgradePreview(reg: Registry, plan: UpgradePlan, state: Readonly
     return trackShown(t.track) ? { text } : { text, secret: true as const };
   });
   return { from: plan.from, to: plan.to, entities: rows, tracks };
+}
+
+/**
+ * What an Upgrade of the chat to `to` would bring into it, from `state` (the chat's head): the plan
+ * the fold applies, worded (`upgradePreview`). Null for a chat that plays no world. `unmade` is the
+ * document `to` names while it is no revision of the world yet (a draft, named as its commit will
+ * name it), so what a commit and the Upgrade after it bring can be shown before either is made.
+ */
+export async function previewUpgrade(rt: Pick<Runtime, "runOf" | "worlds" | "registry">, chatId: ChatId, userId: UserId, state: Readonly<WorldState>, to: RevisionId, unmade?: WorldDoc): Promise<UpgradePreview | null> {
+  const run = await rt.runOf(chatId, userId);
+  if (!run) return null;
+  const docs = new Map<RevisionId, WorldDoc>();
+  for (const revision of new Set([definitionsLag(state) ?? state.revision, state.revision, to])) docs.set(revision, unmade !== undefined && revision === to ? unmade : (await rt.worlds.get(run.worldId, userId, revision)).world);
+  const doc = (revision: RevisionId): WorldDoc => {
+    const found = docs.get(revision);
+    if (!found) throw new WorldError("not_found", `revision ${revision} of the world not found`);
+    return found;
+  };
+  const plan = planUpgrade(state, { worlds: (revision) => docs.get(revision), types: rt.registry }, to);
+  return upgradePreview(rt.registry, plan, state, doc(to), doc(state.revision));
 }

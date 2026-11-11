@@ -22,13 +22,15 @@ export interface SegOption<T extends string | number> {
   value: T;
   label: string;
   title?: string;
+  /** This one option can't be picked now; whoever lays the control out says why beside it. */
+  disabled?: boolean;
 }
 
 export function Seg<T extends string | number>(props: { value: T | null; options: readonly SegOption<T>[]; onChange(value: T): void; label: string; disabled?: boolean }) {
   return (
     <div class="lre-seg" role="group" aria-label={props.label}>
       {props.options.map((option) => (
-        <button key={String(option.value)} type="button" aria-pressed={option.value === props.value} title={option.title} disabled={props.disabled} onClick={() => props.onChange(option.value)}>
+        <button key={String(option.value)} type="button" aria-pressed={option.value === props.value} title={option.title} disabled={props.disabled || option.disabled} onClick={() => props.onChange(option.value)}>
           {option.label}
         </button>
       ))}

@@ -346,14 +346,14 @@ export function thingReadsOf(raw: unknown, base: Readonly<ThingReadSettings> = T
  * are a saved outfit or loadout made, dropped or changed into (`item_set`). An organization's changes
  * (`{op: "org"}`) are its people, its powers, its shares and structure, and its rules.
  */
-export const AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace", "item_home", "item_grant", "item_label", "item_merge", "item_set", "item_remove", "org_people", "org_powers", "org_shares", "org_rules"] as const;
+export const AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace", "item_home", "item_grant", "item_label", "item_merge", "item_set", "item_remove", "org_people", "org_powers", "org_shares", "org_rules", "world_document", "play", "mind"] as const;
 export type AgentChangeType = (typeof AGENT_CHANGE_TYPES)[number];
 
 /** Every type with a mode: what a reply may change, then what an agent may. */
 export type ChangeType = ExtractionType | AgentChangeType;
 export const CHANGE_TYPES: readonly ChangeType[] = [...EXTRACTION_TYPES, ...AGENT_CHANGE_TYPES];
 
-/** AGENT-LOOP-PLAN §6: despawn, destroy, money adjustment, stage and GM spawn confirm; other GM edits and workspace notes apply. ITEMS-SPEC §5.4: a thing's rest, grants and labels apply; a merge and a removal ask. ORG-SPEC §9: an organization's people, powers and shares ask; its rules apply. */
+/** AGENT-LOOP-PLAN §6: despawn, destroy, money adjustment, stage and GM spawn confirm; other GM edits and workspace notes apply. ITEMS-SPEC §5.4: a thing's rest, grants and labels apply; a merge and a removal ask. ORG-SPEC §9: an organization's people, powers and shares ask; its rules apply. The world's document asks: committing it changes the world every chat of it plays, an Upgrade brings that to this chat, and dropping or restoring its draft can throw away the user's own Build edits. */
 export const AGENT_CHANGE_DEFAULTS: Readonly<Record<AgentChangeType, BoundMode>> = Object.freeze({
   gm_spawn: "confirm",
   despawn: "confirm",
@@ -372,6 +372,10 @@ export const AGENT_CHANGE_DEFAULTS: Readonly<Record<AgentChangeType, BoundMode>>
   org_powers: "confirm",
   org_shares: "confirm",
   org_rules: "auto",
+  world_document: "confirm",
+  // The harness engine's own tools: what its author plays and what its characters' agents record land with the turn unless the player says otherwise.
+  play: "auto",
+  mind: "auto",
 });
 
 /** Each agent change type in plain words, for Settings and for the writer's refusals. */
@@ -393,6 +397,9 @@ export const AGENT_CHANGE_LABEL: Readonly<Record<AgentChangeType, string>> = Obj
   org_powers: "Organizations' positions and delegations",
   org_shares: "Organizations' shares and structure (founding, issuing, buying back, transfers, restructuring)",
   org_rules: "Organizations' rules (entry, dues, names)",
+  world_document: "The world's document (committing its draft, bringing this chat to a revision, dropping or restoring the draft)",
+  play: "What the author plays (an attempt and its roll, a fight's rounds)",
+  mind: "Characters' minds (what they decide and remember, and their own files)",
 });
 
 /**

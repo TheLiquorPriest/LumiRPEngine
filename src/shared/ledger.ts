@@ -425,6 +425,30 @@ export interface RecAgent {
   seq?: number;
 }
 
+/**
+ * A harness turn's own part of its record (HARNESS-SLICE3): on the harness engine a turn is played
+ * by the author and the agents it starts, in LumiAH's runtime, and what ties their work to this
+ * reply lives here, so a reply holds one record. Outside every hash but the tombstone's, like
+ * `session`, and read leniently (`recHarnessOf`): a damaged one costs LumiAH's session link and the
+ * jobs' tie to the turn, never the turn's world changes.
+ */
+export interface RecHarness {
+  /** The harness turns that wrote this record, oldest first: the reply's, then each Continue of it. A job is tied to its record by the turn that started it. None on a reply no turn was played for (`unplayed`). */
+  turns: string[];
+  /** LumiAH's own record of the latest of them, as LumiAH gave it (its session, its workspace's files, what the turn spent): LumiAH's anchor for the swipe is read from here. On a reply no turn was played for, LumiAH's record that it had no part in the reply, which names no turn of the engine's. */
+  record?: JsonObject;
+  /** The minutes of the scene's default tick the commit applied, because no agent of the turn said how much time it took (Settings: `agents.harness.defaultTick`). */
+  defaultTick?: number;
+  /**
+   * Why this reply stands with no turn played: its generation was stopped, its run failed, or the
+   * engine restarted while it was written. Nothing of a turn was recorded for it; the reply says so
+   * to the game master, and the next turn's author is told. On a record that names turns it is
+   * about what a later Continue added to the reply, which no turn was played for; the next turn
+   * that writes the record (another Continue) clears it.
+   */
+  unplayed?: string;
+}
+
 /** One swipe's turn record (DESIGN §4.3, `Rec`). */
 export interface Rec {
   v: 1;
@@ -490,6 +514,8 @@ export interface Rec {
    * every hash but the tombstone's, read leniently (`finalPartsOf`), a damaged one costing only that.
    */
   finalParts?: Record<string, string>;
+  /** A harness turn's own part (`RecHarness`): outside every hash but the tombstone's, written at the turn's close and whenever LumiAH writes its record for the swipe (`LedgerCore.recordHarness`). */
+  harness?: RecHarness;
 }
 
 /** `spindle_metadata.lumi_rp_engine` on an assistant message. Swipe keys are decimal indexes. */
