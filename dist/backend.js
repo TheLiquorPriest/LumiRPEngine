@@ -93745,7 +93745,7 @@ var tool2 = v4("tool", "the tool called");
 var NOTE_PROMPTS = [
   { id: HARNESS_NOTE.noTurn, page: page6, group: ANSWERS3, label: "No turn is open", note: "A harness tool's answer when the engine has no turn open for its call.", text: "The engine has no turn open for this call: the turn ended, was stopped, or never began on this chat, so the tool didn't run.", vars: [] },
   { id: HARNESS_NOTE.offPath, page: page6, group: ANSWERS3, label: "The reply is off the path", note: "A job's write is answered so once the reply it was started from is no longer on the chat's path.", text: "The reply this work was started from is no longer on the chat's path (it was swiped away or deleted, or the chat before it was edited), so nothing more of it is written. Stop here.", vars: [] },
-  { id: HARNESS_NOTE.noBasis, page: page6, group: ANSWERS3, label: "No reply to write for", note: "A job's write is answered so when the engine can't tell which reply the job was started from.", text: "The engine can't tell which reply this job was started from, so it writes nothing for it.", vars: [] },
+  { id: HARNESS_NOTE.noBasis, page: page6, group: ANSWERS3, label: "No reply to write for", note: "A job's write is answered so when the engine can't tell which reply the job was started from: one the user or a side conversation started, or one whose turn the engine never recorded. Such a job still reads the world as it stands.", text: "The engine can't tell which reply this job was started from, so it writes nothing for it. You can still read the world as it stands: read what you need, change nothing, and say in your answer what you found and what you would have recorded.", vars: [] },
   { id: HARNESS_NOTE.notTurn, page: page6, group: ANSWERS3, label: "Nothing to commit", note: "commit's answer outside a turn, where each change is written as it is made.", text: "Outside a turn each change is written as it is made, under its change type's mode: there is nothing to commit.", vars: [] },
   { id: HARNESS_NOTE.notMain, page: page6, group: ANSWERS3, label: "Not the author's call", note: "The engine's answer when an agent other than the author would commit a turn or say how much time it takes.", text: "Only the author commits a turn and says how much time it takes: your changes stay staged until it commits.", vars: [] },
   { id: HARNESS_NOTE.needsProposal, page: page6, group: ANSWERS3, label: "A change the review card can't hold", note: "A staged change's answer when its type is set to Confirm and it has no form the review card can apply.", text: "{{type}} is set to Confirm (Settings \u2192 Changes from the reply), and this change has no form the review card can hold, so it isn't staged.", vars: [v4("type", "the change type, as Settings names it", true)] },
@@ -114916,9 +114916,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path2 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "1b12b742daea0c055ae881c4274dd60a0ca01eed6f6ffde16053fdc07993d4e0";
+  const sha256 = "51b601afaf88c3fd7e2978814eb6605fbfd5057de413e78659005c34cb5d7d7f";
   const tools = ["5db39011b1a09652e3360031f99d4092", "b2101fc2b5d70b51c9dccdfef28a3f73"].filter((f) => f !== undefined);
-  return { id: "2b1756c2", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
+  return { id: "94db91bd", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -148147,20 +148147,22 @@ async function jobEnv(rt, review, call) {
   const head2 = await chatHead(rt, chatId, userId);
   if (!head2)
     return refusal6("no_world", note2(WRITE_NOTE.noWorld));
-  const record3 = recordOf3(call, head2.core, head2.observed);
-  if (typeof record3 === "string")
-    return offPath(record3, note2);
+  const found = recordOf3(call, head2.core, head2.observed);
+  if (found === "off_path")
+    return offPath(found, note2);
+  const record3 = typeof found === "string" ? null : found;
   const { view, marks } = agent.role ?? { view: "everyone", marks: true };
   const reader = outsideReader(rt, { userId, chatId, knowledge: view, marks });
   const role = agent.role;
   const tier = reach2(call.standing);
   const as = writerRole(role, tier) ?? role?.role ?? null;
   const writer = as ? jobWriter(rt, review, call, as, tier, reader) : null;
-  const reply = head2.observed[record3.index];
-  const before = head2.observed.slice(0, record3.index);
+  const at3 = record3 ? record3.index : head2.observed.findLastIndex((m) => !m.isUser);
+  const reply = at3 >= 0 ? head2.observed[at3] : undefined;
+  const before = at3 >= 0 ? head2.observed.slice(0, at3) : head2.observed;
   const said3 = ownMessage(before);
   const earlier = before.findLast((m) => !m.isUser);
-  const context2 = head2.core.readContext(record3.messageId, head2.observed);
+  const context2 = record3 ? head2.core.readContext(record3.messageId, head2.observed) : null;
   const turn = {
     main: false,
     tier,
@@ -148177,12 +148179,12 @@ async function jobEnv(rt, review, call) {
     knowing: knowledgeOn(await rt.chatKnowledge.get(chatId, userId), head2.world, settings),
     settings,
     host: rt.host,
-    seed: record3.rec.seed,
+    seed: record3 ? record3.rec.seed : head2.run.runSeed,
     runSeed: head2.run.runSeed,
     start: context2?.start ?? head2.state,
-    landed: () => [...record3.rec.events],
+    landed: () => record3 ? [...record3.rec.events] : [],
     said: { messageId: said3?.id ?? null, user: said3 ? activeText(said3) : "", before: earlier ? activeText(earlier) : "" },
-    reply: { messageId: record3.messageId, text: reply ? activeText(reply) : "" },
+    reply: record3 ? { messageId: record3.messageId, text: reply ? activeText(reply) : "" } : reply ? { messageId: reply.id, text: activeText(reply) } : null,
     stage: (change3) => stageChange2(rt, review, call, role?.role ?? null, change3),
     commit: async () => refusal6("not_turn", note2(HARNESS_NOTE.notTurn)),
     depart: (lines4) => departure(rt, call, lines4)
@@ -148661,7 +148663,7 @@ ${guidance.text}` } : guidance, withdraw: LUMIAH_LORE.filter((name) => !mine.has
       served = got;
       const closed = toolRefusal(call.name, got.standing, say);
       const run2 = () => runHarnessTool(got.env(), call.name, call.args);
-      out = closed ? closedAnswer(closed) : await (got.frame ? inTurn(got.frame, run2) : run2());
+      out = closed ? got.noReply ? { text: JSON.stringify({ refused: { code: "no_basis", reason: say(HARNESS_NOTE.noBasis) } }), error: true } : closedAnswer(closed) : await (got.frame ? inTurn(got.frame, run2) : run2());
     } catch (error) {
       const reason3 = error instanceof Error ? error.message : String(error);
       this.rt.host.log("error", `[LumiRPEngine] harness tool ${call.name} failed: ${error instanceof Error ? error.stack ?? reason3 : reason3}`, userId ?? undefined);
@@ -148683,12 +148685,11 @@ ${guidance.text}` } : guidance, withdraw: LUMIAH_LORE.filter((name) => !mine.has
       return { env: () => given3.env, standing: { own: given3.tier, over: "gm", under: null, author: false, def: call.role }, frame: null, ...given3.answered ? { answered: given3.answered } : {} };
     }
     const job = this.jobs.get(call.turn);
-    const basis = job?.basis ?? (own2 || this.over.has(call.turn) ? call.turn : null);
-    if (!userId || basis === null && !this.sides.has(call.turn))
+    const known = job?.basis ?? (own2 || this.over.has(call.turn) ? call.turn : null);
+    if (!userId || known === null && !this.sides.has(call.turn))
       return { text: say(HARNESS_NOTE.noTurn), error: true };
-    if (basis === null)
-      return { text: say(HARNESS_NOTE.noBasis), error: true };
-    const ceiling = job ? this.ceilingOf(call.turn) : null;
+    const basis = known ?? "";
+    const ceiling = job ? this.ceilingOf(call.turn) : known === null ? { tier: "read", by: call.turn } : null;
     const files = this.files?.({ chatId: call.chatId, userId }) ?? null;
     const turn = this.turns.get(basis);
     const beside = turn && !turn.closed && turn.replied === null ? this.sides.get(call.turn) : undefined;
@@ -148712,7 +148713,12 @@ ${guidance.text}` } : guidance, withdraw: LUMIAH_LORE.filter((name) => !mine.has
     const env = await jobEnv(this.rt, this.review, { chatId: call.chatId, userId, basis, committed: this.over.get(basis)?.committed === true, agent, standing: standing4, tool: call.name, files, staged: side.staged, signal: signal2 });
     if ("refused" in env)
       return { text: JSON.stringify({ refused: { code: env.code, reason: env.reason } }), error: true };
-    return { env: () => env, standing: standing4, frame: null };
+    const noReply = known === null || !turn && !this.over.has(basis);
+    if (noReply && !side.warned) {
+      side.warned = true;
+      this.rt.host.log("warn", `[LumiRPEngine] run ${call.turn.slice(0, 12)} is tied to no reply the engine knows (${known === null ? "it was started outside a reply's turn" : `turn ${basis.slice(0, 12)} was never opened here`}): it reads the chat as it stands and changes nothing`, userId);
+    }
+    return { env: () => env, standing: standing4, frame: null, ...noReply ? { noReply: true } : {} };
   }
   ceilingOf(id2, seen = new Set) {
     const job = this.jobs.get(id2);
@@ -150440,7 +150446,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "2b1756c2", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "94db91bd", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;
@@ -164965,7 +164971,7 @@ function createSpindleHost(identifier = EXTENSION_IDENTIFIER) {
 // src/backend/harness/mount.ts
 var NAME = "LumiRPEngine";
 var STORAGE = "harness";
-var BUILD = "2b1756c2";
+var BUILD = "94db91bd";
 var TICK_MS = 1000;
 var MOUNT_SESSION = "lre-harness-mount";
 var OWNERS_KEPT = OPEN_CHATS_CAP * 8;
