@@ -293,6 +293,56 @@ var RECALL_SETTINGS_SCHEMA = {
   }
 };
 
+// node_modules/lumi-ah/src/core/story.ts
+var STORY_DEFAULTS = { hidden: "leave_out", from: "lumiverse", newest: "directive" };
+var VALUES = {
+  hidden: ["leave_out", "include"],
+  from: ["lumiverse", "everyone", "replies"],
+  newest: ["directive", "leave_out"]
+};
+function storyValue(member, value) {
+  return VALUES[member].includes(value);
+}
+function storyWordOf(raw) {
+  if (!isRecord(raw))
+    return {};
+  const out = {};
+  if (storyValue("hidden", raw.hidden))
+    out.hidden = raw.hidden;
+  if (storyValue("from", raw.from))
+    out.from = raw.from;
+  if (storyValue("newest", raw.newest))
+    out.newest = raw.newest;
+  return out;
+}
+function storyHolds(words) {
+  const { claim, chat, user } = words;
+  const settle = (member) => {
+    const claimed = claim?.[member];
+    if (claimed !== undefined)
+      return { value: claimed, by: "claim" };
+    const chosen = chat?.[member];
+    return chosen !== undefined ? { value: chosen, by: "chat" } : { value: user[member], by: "user" };
+  };
+  const hidden = settle("hidden");
+  const from = settle("from");
+  const newest = settle("newest");
+  const follows = from.value === "lumiverse";
+  const whose = from.value === "lumiverse" ? words.sovereignHand === true ? "replies" : "everyone" : from.value;
+  return {
+    source: { hidden: hidden.value, from: whose, newest: newest.value },
+    by: { hidden: hidden.by, from: from.by, newest: newest.by },
+    ...follows ? { sovereignHand: words.sovereignHand } : {}
+  };
+}
+function leftOutWhy(message, source) {
+  if (source.hidden === "leave_out" && message.hidden === true)
+    return "hidden";
+  if (source.from === "replies" && message.role === "user")
+    return "direction";
+  return null;
+}
+
 // node_modules/lumi-ah/src/core/text-def.ts
 var SCRATCH_READ = "scratch_read";
 var TOOL = {
@@ -439,6 +489,7 @@ function defaultSettings() {
   const unlimited = { callTokensIn: null, callMs: null, callTools: null, tokensIn: null, tokensOut: null, wallMs: null };
   return {
     reply: { writer: "writer", briefAt: "before_last_user", briefRole: "system", withoutBrief: "write", progress: true, progressChars: 160, writerGuidance: false, warnMs: 60000, pendingMs: 600000 },
+    story: { ...STORY_DEFAULTS },
     agents: {
       [AGENT.main]: { connectionId: null, model: null, effort: "inherit", tools: [...MAIN_TOOLS], toolCalls: "auto", budget: { ...unlimited, callTokensOut: 16000, toolTurns: 24, revisions: 2, concurrency: 4 } },
       [AGENT.writer]: { connectionId: null, model: null, effort: "inherit", tools: [], toolCalls: "auto", budget: { ...unlimited, callTokensOut: 8192, toolTurns: 8, revisions: 1, concurrency: 4 } },
@@ -569,6 +620,26 @@ var SETTINGS_SCHEMA = {
         writerGuidance: flag2("Give the writer your guidance", "Put the guidance your agents are given (yours, the character's, the chat's) beside the brief in the writer's prompt. Off, the writer is sent the prompt as Lumiverse assembled it with the brief alone, and the main agent carries into the brief what of your guidance bears on the prose."),
         warnMs: { ...limit("Warn before the reply is due", "Where Lumiverse's own generation writes the reply, it waits only so long for LumiAH. This long before that time is up, the main agent is told to brief the writer with what it has.", "ms", 0), "x-none": "No warning" },
         pendingMs: { ...limit("Give up a reply that isn't written", "Where Lumiverse's own generation writes the reply: how long a turn waits for that reply before it is given up, with no record of it kept.", "ms"), "x-none": "As long as it takes" }
+      }
+    },
+    story: {
+      title: "What counts as the story",
+      description: "Which of a chat's messages the agents read as its story. A chat can choose otherwise on Home, and an extension that answers a chat may set it there.",
+      type: "object",
+      properties: {
+        hidden: choice("Messages you hid", "Messages you hid from the prompt in Lumiverse.", [
+          ["leave_out", "Leave out", "The agents never read them, and their answers say how many were left out."],
+          ["include", "Read them", "The agents read them like any other message."]
+        ]),
+        from: choice("Whose messages", "Whose messages are the story.", [
+          ["lumiverse", "As Lumiverse", "Only the model's replies while Sovereign Hand is on in Lumiverse, everyone's while it is off. Where Lumiverse doesn't say, everyone's."],
+          ["everyone", "Everyone's", "Your messages and the model's replies."],
+          ["replies", "Replies only", "Only the model's replies. Your messages are directions to the model, not part of the story."]
+        ]),
+        newest: choice("Your newest message", "With only the model's replies: what the main agent is given of your newest message.", [
+          ["directive", "As direction", "It is given to the main agent as the direction for the reply."],
+          ["leave_out", "Leave out", "It isn't given: your preset already carries it."]
+        ])
       }
     },
     agents: agentsSchema(CORE_SCOPE),
@@ -1475,6 +1546,14 @@ var RECALL_TEXT = {
     chatRead: "tool.answer.chat_read",
     chatNoMessage: "tool.answer.chat_no_message",
     chatEmpty: "tool.answer.chat_empty",
+    chatNoStory: "tool.answer.chat_no_story",
+    chatLeftOut: "tool.answer.chat_left_out",
+    chatLeftHidden: "tool.answer.chat_left_out.hidden",
+    chatLeftDirections: "tool.answer.chat_left_out.directions",
+    chatLeftOne: "tool.answer.chat_left_one",
+    chatLeftOneHidden: "tool.answer.chat_left_one.hidden",
+    chatLeftOneDirection: "tool.answer.chat_left_one.direction",
+    chatAllLeftOut: "tool.answer.chat_all_left_out",
     loreBook: "tool.answer.lore_book",
     loreEntry: "tool.answer.lore_entry",
     loreHit: "tool.answer.lore_hit",
@@ -1597,6 +1676,7 @@ var RECALL_TEXT = {
     pinnedFile: "recall.chronicle.pinned.file",
     pinnedMore: "recall.chronicle.pinned.more",
     pinnedFailed: "recall.chronicle.pinned.failed",
+    pinnedApart: "recall.chronicle.pinned.apart",
     reach: "recall.chronicle.reach",
     reachNone: "recall.chronicle.reach.none",
     empty: "recall.chronicle.empty",
@@ -1872,6 +1952,16 @@ Mentioning it ({{others}}):
   { id: A.chatRead, group: ANSWERS4, label: "chat_read: its answer", note: "Heads chat_read's and chat_around's answers.", text: "Chat messages #{{from}} to #{{to}} ({{count}} asked for):", vars: [v("from", "the first message asked for"), v("to", "the last message asked for"), v("count", "how many that is")] },
   { id: A.chatNoMessage, group: ANSWERS4, label: "No such message", note: "A chat tool's answer to a number the chat doesn't have.", text: "There is no chat message #{{index}}: this turn reads messages #{{first}} to #{{last}}. Give a number in that range.", vars: [v("index", "the number asked for", true), v("first", "the first message's number"), v("last", "the last message's number")] },
   { id: A.chatEmpty, group: ANSWERS4, label: "The chat is empty", note: "A chat tool's answer when the chat has no message before this reply.", text: "This chat has no messages before this reply, so there is nothing to read here. Work from the request.", vars: [] },
+  { id: A.chatNoStory, group: ANSWERS4, label: "No message is part of the story", note: "A chat tool's answer when the chat has messages before this reply and What counts as the story leaves out every one of them.", text: `{{left}}
+No message of this chat before this reply is part of the story, so there is nothing to read here. Work from the request.`, vars: [v("left", "how many messages are left out and why, as Messages left out says it", true)] },
+  { id: A.chatLeftOut, group: ANSWERS4, label: "Messages left out", note: "One line of a chat tool's answer where messages in what it covers are left out of the story (What counts as the story), so the agent doesn't take their numbers for gaps.", text: "[Left out here, as not part of the story: {{parts}}.]", vars: [v("parts", "how many, and why, in the words below, joined by and", true)] },
+  { id: A.chatLeftHidden, group: ANSWERS4, label: "Messages left out: hidden", note: "Fills {{parts}} in Messages left out with those the user hid from the prompt.", text: "{{count}} the user hid from the prompt", vars: [v("count", 'how many, with the word: "3 messages"', true)] },
+  { id: A.chatLeftDirections, group: ANSWERS4, label: "Messages left out: the user's", note: "Fills {{parts}} in Messages left out with the user's own messages, where only the model's replies are the story.", text: "{{count}} by the user, which direct the story from outside it", vars: [v("count", 'how many, with the word: "12 messages"', true)] },
+  { id: A.chatLeftOne, group: ANSWERS4, label: "A message left out", note: "A chat tool's answer to a message, named by number or citation, that is left out of the story.", text: "Chat message #{{index}} isn't part of the story here: {{why}}. No chat tool reads it.", vars: [v("index", "the number asked for", true), v("why", "why, in the words below", true)] },
+  { id: A.chatLeftOneHidden, group: ANSWERS4, label: "A message left out: hidden", note: "Fills {{why}} in A message left out when the user hid it from the prompt.", text: "the user hid it from the prompt", vars: [] },
+  { id: A.chatLeftOneDirection, group: ANSWERS4, label: "A message left out: the user's", note: "Fills {{why}} in A message left out when it is the user's own and only the model's replies are the story.", text: "it is the user's, a direction from outside the story", vars: [] },
+  { id: A.chatAllLeftOut, group: ANSWERS4, label: "A range left out whole", note: "chat_read's answer when every message from its first to its last is left out of the story.", text: `{{left}}
+No message from #{{from}} to #{{to}} is part of the story.`, vars: [v("left", "how many messages are left out and why, as Messages left out says it", true), v("from", "the first message asked for"), v("to", "the last message asked for")] },
   { id: A.chatNoSpeaker, group: ANSWERS4, label: "No such speaker", note: "A chat tool's answer to a speaker nobody in the chat goes by.", text: "Nobody in this chat speaks as \u201C{{speaker}}\u201D. Its speakers are: {{speakers}}. Give one of those, or user or assistant.", vars: [v("speaker", "the speaker asked for", true), v("speakers", "who speaks in the chat, each with how many messages")] },
   { id: A.chatBadRange, group: ANSWERS4, label: "A range that holds no message", note: "A chat tool's answer to from and to that leave no message between them.", text: "No message lies between #{{from}} and #{{to}}: this turn reads messages #{{first}} to #{{last}}.", vars: [v("from", "from, as given", true), v("to", "to, as given", true), v("first", "the first message's number"), v("last", "the last message's number")] },
   { id: A.chatNotNamed, group: ANSWERS4, label: "A message that isn't named", note: "A chat tool's answer to a message argument that is neither a number nor a citation.", text: "\u201C{{given}}\u201D names no message. Give its number (412) or its citation ([#412 a3f9c27e]).", vars: [v("given", "what was given", true)] },
@@ -2020,6 +2110,7 @@ Relations ({{relations}}):
 {{lines}}`, vars: [v("path", "the file's path", true), v("more", "that only its top is shown, in the words below"), v("failed", "that lines were left out, in the words below"), v("lines", "the lines shown", true)] },
   { id: C.pinnedMore, group: RECALL, label: "A pinned file cut", note: "Fills {{more}} when a file is longer than its share of Pinned chronicle: length.", text: " (its first {{shown}} of {{total}}; workspace_read reads the rest)", vars: [v("shown", "how many lines are shown", true), v("total", 'how many lines the file has, with the word: "120 lines"')] },
   { id: C.pinnedFailed, group: RECALL, label: "A pinned file with lines left out", note: "Fills {{failed}} when lines of the file fail the check.", text: " ({{count}} left out: they cite nothing, or cite what no message reads as; chronicle_check lists them)", vars: [v("count", 'how many lines, with the word: "2 lines"', true)] },
+  { id: C.pinnedApart, group: RECALL, label: "A pinned file with lines that rest on what isn't the story", note: "Fills {{failed}} when lines of the file cite only messages that What counts as the story leaves out now.", text: " ({{count}} left out: every message they cite is left out of the story now)", vars: [v("count", 'how many lines, with the word: "2 lines"', true)] },
   { id: C.reach, group: RECALL, label: "How far the chronicle reaches", note: "Fills {{reach}}: the last message a line that passes cites, where the chat is, and how many messages it is past the chronicle.", text: "It reaches message #{{covered}}; the chat is at #{{last}}, {{count}} past it.", vars: [v("covered", "the last message a line that passes cites", true), v("last", "the chat's last message", true), v("count", 'how many messages the chat is past the chronicle, with the word: "14 messages"', true)] },
   { id: C.reachNone, group: RECALL, label: "A chronicle none of whose lines passes", note: "Fills {{reach}} when no line of the chronicle passes the check.", text: "None of its lines passes the check; the chat is at #{{last}} and has {{count}}.", vars: [v("last", "the chat's last message", true), v("count", 'how many messages the chat has, with the word: "140 messages"')] },
   { id: C.empty, group: RECALL, label: "No chronicle yet", note: "Leads the main agent's turn in a chat that has no chronicle and is longer than Bring up to date after, while Settings ask for one to be kept and jobs can run.", text: "[This chat has no chronicle yet (learned/chronicle/): nothing keeps what the story established, so the past has to be searched each time. It is at message #{{last}} and has {{count}}.]{{remind}}", vars: [v("last", "the chat's last message", true), v("count", 'how many messages the chat has, with the word: "140 messages"'), v("remind", "the line on its upkeep, in the words below", true)] },
@@ -2394,7 +2485,10 @@ var TEXT = {
     noteSummary: "main.turn.summary",
     noteContinued: "main.turn.continued",
     replyOne: "main.turn.reply_one",
-    replyMany: "main.turn.reply_many"
+    replyMany: "main.turn.reply_many",
+    directed: "main.turn.directed",
+    direction: "main.turn.directed.direction",
+    noDirection: "main.turn.directed.none"
   },
   request: {
     message: "request.message",
@@ -2666,7 +2760,7 @@ var MAIN_TEXTS = [
 {{request}}
 
 {{ask}}`,
-    vars: [v("kind", "why a reply is needed, in the words below", true), v("notes", "what changed about its notes since its last turn, each ending in a blank line; nothing when nothing did. Required: a summary of its notes reaches the agent only here when no later turn follows it", true), v("count", 'how many messages the request has, with the word: "42 messages"'), v("request", "the request's messages, each framed as below", true), v("ask", "what to do with it, in the words below", true)]
+    vars: [v("kind", "why a reply is needed, in the words below", true), v("notes", "what changed about its notes since its last turn, and how the user directs the story where only the model's replies are its story, each ending in a blank line; nothing when there is none of it. Required: a summary of its notes reaches the agent only here when no later turn follows it", true), v("count", 'how many messages the request has, with the word: "42 messages"'), v("request", "the request's messages, each framed as below", true), v("ask", "what to do with it, in the words below", true)]
   },
   { id: TEXT.main.kindNew, group: MAIN, label: "Why: a new reply", note: "Fills {{kind}} for a new reply.", text: "The user sent a message: a reply is needed.", vars: [] },
   { id: TEXT.main.kindRegenerate, group: MAIN, label: "Why: a regenerate", note: "Fills {{kind}} when the user regenerated the reply.", text: "The user asked for this reply again (a regenerate): the last one is gone, and a new reply is needed in its place.", vars: [] },
@@ -2681,7 +2775,22 @@ var MAIN_TEXTS = [
   { id: TEXT.main.noteContinued, group: MAIN, label: "The turn continued", note: "Leads a turn's message when it continues a reply the main agent already worked on: what it did then.", text: `You already worked on this reply before it was continued. What you did then:
 {{receipt}}`, vars: [v("receipt", "the receipt of that work", true)] },
   { id: TEXT.main.replyOne, group: MAIN, label: "Notes dropped: one reply", note: "Fills {{replies}} in Notes dropped, and in its progress line, when one reply's notes were dropped.", text: "reply {{list}}", vars: [v("list", `the reply's number: "#12"`, true)] },
-  { id: TEXT.main.replyMany, group: MAIN, label: "Notes dropped: several replies", note: "Fills {{replies}} in Notes dropped, and in its progress line, when several replies' notes were dropped.", text: "replies {{list}}", vars: [v("list", `the replies' numbers: "#12, #14"`, true)] }
+  { id: TEXT.main.replyMany, group: MAIN, label: "Notes dropped: several replies", note: "Fills {{replies}} in Notes dropped, and in its progress line, when several replies' notes were dropped.", text: "replies {{list}}", vars: [v("list", `the replies' numbers: "#12, #14"`, true)] },
+  {
+    id: TEXT.main.directed,
+    group: MAIN,
+    label: "The user directs the story",
+    note: "A note of a turn's message where only the model's replies are the story (What counts as the story): the user's messages are directions from outside it.",
+    text: "The user directs this story from outside it. Their messages are directions to you, not events of the story and not their character's words, and the directions they gave before this one are not part of its record: the chat tools leave the user's messages out.{{direction}}",
+    vars: [v("direction", "the direction for this reply, or that there is none, in the words below; nothing where the user's newest message is left out too")]
+  },
+  { id: TEXT.main.direction, group: MAIN, label: "The direction for this reply", note: "Fills {{direction}} with the user's newest message, read from the chat, where it is given to the main agent (Your newest message: give it as the direction).", text: `
+
+The direction for this reply:
+{{text}}`, vars: [v("text", "the user's newest message", true)] },
+  { id: TEXT.main.noDirection, group: MAIN, label: "No direction for this reply", note: "Fills {{direction}} where the chat ends with a reply, or with a message the user hid, so the user gave no direction for this one.", text: `
+
+The user gave no direction for this reply: carry the story on from where it stands.`, vars: [] }
 ];
 var REQUEST_TEXTS = [
   { id: TEXT.request.message, group: REQUEST, label: "A message", note: "One message of the request that isn't a preset instruction.", text: `[{{n}}] {{role}}{{from}}
@@ -6516,6 +6625,10 @@ class Definitions {
     const view = this.agentRows.get(id);
     return view && !view.off ? view : undefined;
   }
+  sourced(id) {
+    const view = this.agentRows.get(id);
+    return view && !view.off ? { source: view.source, ...view.over !== undefined ? { over: view.over } : {} } : undefined;
+  }
   agents() {
     return [...this.agentRows.values()].filter((view) => !view.off);
   }
@@ -6748,16 +6861,28 @@ function speakersOf(docs) {
 class ChatRun {
   messages;
   index;
+  left;
   byNumber;
   docs;
-  constructor(messages, index) {
+  constructor(messages, index, left) {
     this.messages = messages;
     this.index = index;
+    this.left = left;
     this.byNumber = new Map(messages.map((m) => [m.index, m]));
     this.docs = new Map(messages.map((m) => [m.id, m]));
   }
   at(index) {
     return this.byNumber.get(index);
+  }
+  leftAt(index) {
+    return this.left.get(index)?.why;
+  }
+  leftIn(from, to) {
+    const count2 = { hidden: 0, direction: 0 };
+    for (const [index, { why }] of this.left)
+      if (index >= from && index <= to)
+        count2[why]++;
+    return count2;
   }
   place(index) {
     let low = 0;
@@ -6782,14 +6907,23 @@ class ChatRun {
     return this.messages.at(-1);
   }
   hashes() {
-    return new Map(this.messages.map((m) => [m.index, m.hash]));
+    const out = new Map(this.messages.map((m) => [m.index, m.hash]));
+    for (const [index, { hash }] of this.left)
+      out.set(index, hash);
+    return out;
+  }
+  story() {
+    return this.messages.map((m) => m.index);
   }
 }
-function runsOf2(indices, most) {
+function runsOf2(indices, most, passes) {
   const runs = [];
   for (const index of indices) {
     const last = runs.at(-1);
-    if (last && index === last[1] && index - last[0] < most)
+    let joins = last !== undefined && index - last[0] < most;
+    for (let between = last?.[1] ?? index;joins && between < index; between++)
+      joins = passes(between);
+    if (last && joins)
       last[1] = index + 1;
     else
       runs.push([index, index + 1]);
@@ -6811,7 +6945,7 @@ class ChatCorpus {
     this.pieceChars = pieceChars;
     this.index = new LexicalIndex(pieceChars);
   }
-  sync(run, path, sizes) {
+  sync(run, path, sizes, story) {
     if (this.last?.run === run)
       return this.last.done;
     const before = this.last?.done.then(() => {
@@ -6819,7 +6953,7 @@ class ChatCorpus {
     }, () => {
       return;
     });
-    const done = (before ?? Promise.resolve()).then(() => this.read(path, sizes));
+    const done = (before ?? Promise.resolve()).then(() => this.read(path, sizes, story));
     const held = { run, done };
     this.last = held;
     done.catch(() => {
@@ -6832,15 +6966,24 @@ class ChatCorpus {
     const port = this.host.recall?.chat;
     return port ? port.messages(this.chatId, from, to) : this.host.chat.messages(this.chatId, from, to);
   }
-  async read(path, sizes) {
+  async read(path, sizes, story) {
     if (sizes.pieceChars !== this.pieceChars) {
       this.pieceChars = sizes.pieceChars;
       this.index = new LexicalIndex(sizes.pieceChars);
       this.docs = new Map;
     }
-    const wanted = new Map(path.map((m) => [m.id, m]));
-    const stale = path.filter((m) => this.docs.get(m.id)?.hash !== m.hash).map((m) => m.index);
-    for (const [from, to] of runsOf2(stale, Math.max(1, sizes.chatBatch))) {
+    const left = new Map;
+    const kept = [];
+    for (const m of path) {
+      const why = leftOutWhy(m, story);
+      if (why === null)
+        kept.push(m);
+      else
+        left.set(m.index, { why, hash: m.hash });
+    }
+    const wanted = new Map(kept.map((m) => [m.id, m]));
+    const stale = kept.filter((m) => this.docs.get(m.id)?.hash !== m.hash).map((m) => m.index);
+    for (const [from, to] of runsOf2(stale, Math.max(1, sizes.chatBatch), (index) => left.has(index))) {
       const read2 = await this.texts(from, to);
       const given = [];
       for (const raw of Array.isArray(read2) ? read2 : []) {
@@ -6868,7 +7011,7 @@ class ChatCorpus {
       this.index.remove(id);
     }
     const messages = [];
-    for (const m of path) {
+    for (const m of kept) {
       const doc = this.docs.get(m.id);
       if (!doc)
         continue;
@@ -6877,7 +7020,7 @@ class ChatCorpus {
         this.docs.set(m.id, placed);
       messages.push(placed);
     }
-    return new ChatRun(messages, this.index);
+    return new ChatRun(messages, this.index, left);
   }
 }
 
@@ -7549,8 +7692,10 @@ class Meaning {
               lacks.set(text2.hash, text2.text);
             }
           }
-          if (start)
+          if (start) {
+            this.unqueue(state2, group);
             this.queue(state2, lacking);
+          }
         });
         this.trim(settings);
         if (start)
@@ -7595,6 +7740,7 @@ class Meaning {
         else if (kept.q.length > 0 && (!keep || keep(text2.key)))
           have.push({ text: text2, state: state2, kept });
       }
+      this.unqueue(state2, group);
       this.queue(state2, lacking);
     });
     this.start();
@@ -7845,6 +7991,12 @@ ${text2.hash}`;
       if (state2.ready(text2.hash) && !this.waiting.has(id))
         this.waiting.set(id, { owner: state2.owner, who: state2.who, hash: text2.hash, text: text2.text });
     }
+  }
+  unqueue(state2, group) {
+    const now = new Set(group.texts.map((text2) => text2.hash));
+    for (const [id, item] of this.waiting)
+      if (item.who === state2.who && !now.has(item.hash))
+        this.waiting.delete(id);
   }
   allowed() {
     const settings = this.settings;
@@ -8402,7 +8554,7 @@ class RecallRun {
   }
   async chat() {
     const { pieceChars, chatBatch } = this.env.settings.tools;
-    return this.corpora.chat.sync(this.env.run.id, await this.env.chat.path(), { pieceChars, chatBatch });
+    return this.corpora.chat.sync(this.env.run.id, await this.env.chat.path(), { pieceChars, chatBatch }, this.env.story);
   }
   async activated(turn) {
     const port = this.host.recall?.lore;
@@ -8658,29 +8810,35 @@ function claimOf(raw) {
   if (!isRecord(raw))
     return null;
   const guidance = isRecord(raw.guidance) && typeof raw.guidance.name === "string" ? raw.guidance : null;
+  const story = storyWordOf(raw.story);
   return {
     ...typeof raw.mainAgent === "string" ? { mainAgent: raw.mainAgent } : {},
     ...guidance && typeof guidance.path === "string" ? { guidance: { name: guidance.name, path: guidance.path } } : guidance && typeof guidance.text === "string" ? { guidance: { name: guidance.name, text: guidance.text } } : {},
-    ...Array.isArray(raw.withdraw) ? { withdraw: raw.withdraw.filter((name) => typeof name === "string") } : {}
+    ...Array.isArray(raw.withdraw) ? { withdraw: raw.withdraw.filter((name) => typeof name === "string") } : {},
+    ...Object.keys(story).length > 0 ? { story } : {}
   };
 }
 async function readSetup(shared, chatId, userId = shared.options.userId ?? "") {
   const { host, options } = shared;
   const stored = await options.settings();
   const extension = options.extension;
-  const { waitMs } = settingsOf(stored.values).extension;
+  const early = settingsOf(stored.values);
+  const { waitMs } = early.extension;
   let chat = null;
   if (chatId !== "") {
     try {
       chat = await host.chat.info?.(chatId) ?? null;
     } catch (error) {
-      host.log("warn", `[LumiAH] the chat ${chatId} couldn't be read (${errorText(error)}): this run has no character's guidance`);
+      host.log("warn", `[LumiAH] the chat ${chatId} couldn't be read (${errorText(error)}): this run has no character's guidance, and no choice of the chat's own on what counts as its story`);
     }
   }
   const asked = chat ?? { id: chatId, name: "", characterId: null, characterName: null, branchedFrom: null };
+  const chosen = storyWordOf(chat?.story);
+  const sovereignHand = typeof chat?.sovereignHand === "boolean" ? chat.sovereignHand : null;
+  const below = storyHolds({ chat: chosen, user: early.story, sovereignHand });
   const [own, claimed, remote] = await Promise.all([
     askExtension(shared, "definitions", waitMs, extension?.definitions ? () => extension.definitions?.({ userId, chatId: chatId === "" ? null : chatId }) ?? Promise.resolve({}) : undefined, {}),
-    chatId === "" ? null : askExtension(shared, "answer for the chat", waitMs, extension?.claim ? () => extension.claim?.({ userId, chatId, chat: asked }) ?? Promise.resolve(null) : undefined, null),
+    chatId === "" ? null : askExtension(shared, "answer for the chat", waitMs, extension?.claim ? () => extension.claim?.({ userId, chatId, chat: asked, story: below.source, sovereignHand }) ?? Promise.resolve(null) : undefined, null),
     remoteTools(host, chatId)
   ]);
   const supplied = isRecord(own) ? own : {};
@@ -8695,7 +8853,8 @@ async function readSetup(shared, chatId, userId = shared.options.userId ?? "") {
   }, host);
   const settings = settingsOf(stored.values, definitions.scope());
   shared.latest = settings;
-  return { userId, settings, texts: textsOf(stored.texts), definitions, chat, claim };
+  const story = claim?.story ? storyHolds({ claim: claim.story, chat: chosen, user: early.story, sovereignHand }) : below;
+  return { userId, settings, texts: textsOf(stored.texts), definitions, chat, claim, story };
 }
 function instructionsOf(definition, texts) {
   return definition.text !== undefined && textDef(definition.text) ? texts.render(definition.text) : definition.instructions;
@@ -8712,6 +8871,7 @@ class Run {
   definitions;
   chat;
   claim;
+  story;
   startedAt;
   trace;
   agents;
@@ -8742,6 +8902,7 @@ class Run {
     this.definitions = setup.definitions;
     this.chat = setup.chat;
     this.claim = setup.claim;
+    this.story = setup.story;
     this.startedAt = start.startedAt;
     this.trace = new TurnTrace(host, { turn: this.info.id, chatId: this.info.chatId }, shared.blobs, this.settings.keep.prompts, (event) => this.hear(event));
     this.agents = new AgentTurn(start.budget, start.startedAt - (start.spent?.workedMs ?? 0), this.trace, start.words);
@@ -8791,12 +8952,12 @@ class Run {
     ]);
     this.guidance = guidance;
     this.book = book;
-    this.recall = recallOf({ host: shared.host, run: this.info, ...this.start.turn ? { turn: this.start.turn } : {}, settings, texts, chat: equipment.chat, ...book ? { book } : {} });
+    this.recall = recallOf({ host: shared.host, run: this.info, ...this.start.turn ? { turn: this.start.turn } : {}, settings, texts, chat: equipment.chat, story: this.story.source, ...book ? { book } : {} });
     await this.recall.ready();
     this.prefix = guidancePrefix(guidance, settings, texts);
     this.guard = guidanceGuard(guidance, settings, texts);
     const extension = shared.options.extension;
-    await askExtension(shared, "answer to a run beginning", settings.extension.waitMs, extension?.runBegan ? () => extension.runBegan?.({ userId: this.userId, chatId: this.info.chatId, turn: this.info.id, kind: this.info.kind }) ?? Promise.resolve() : undefined, undefined);
+    await askExtension(shared, "answer to a run beginning", settings.extension.waitMs, extension?.runBegan ? () => extension.runBegan?.({ userId: this.userId, chatId: this.info.chatId, turn: this.info.id, kind: this.info.kind, story: this.story.source }) ?? Promise.resolve() : undefined, undefined);
   }
   equipped() {
     if (!this.equipment)
@@ -8894,6 +9055,7 @@ class Run {
       depth: how.depth,
       standing: { main: how.main === true, above },
       chat: equipment.chat,
+      story: this.story.source,
       lore: equipment.lore,
       past: how.past ?? equipment.past,
       ...how.writeReply ? { writeReply: how.writeReply } : {},
@@ -9599,6 +9761,19 @@ ${message}`, signal);
 // node_modules/lumi-ah/src/core/recall/definitions.ts
 var CHRONICLER = "chronicler";
 var READER = "story-reader";
+function chronicleRefusal(definitions, extension) {
+  for (const [id, name] of [
+    [CHRONICLER, "chronicler"],
+    [READER, "story reader"]
+  ]) {
+    const sourced = definitions.sourced(id);
+    if (sourced === undefined)
+      return `LumiAH's ${name} is switched off, so it keeps no chronicle for this chat and doesn't learn its story. Switch it on on the Agents page.`;
+    if (sourced.source === "extension" || sourced.over === "extension")
+      return `${extension ?? "The extension that answers this chat"} gives this chat an agent of its own in place of LumiAH's ${name}, so LumiAH keeps no chronicle for it and doesn't learn its story.`;
+  }
+  return null;
+}
 var RECALL_SKILL = { keep: "chronicle-keep", learn: "story-learn" };
 var CHRONICLER_TOOLS = [
   TOOL.chatOutline,
@@ -9774,6 +9949,9 @@ var CAST = `${FOLDER}/cast.md`;
 var CHRONICLE_FILES = [OUTLINE, FACTS, THREADS, CAST];
 var BESIDE = [`${FOLDER}/plan.md`, `${FOLDER}/unverified.md`];
 var PINNED_ORDER = [CAST, THREADS, FACTS, OUTLINE].map((path) => showPath("learned", path));
+function storyHashes(path, story) {
+  return { hashes: () => new Map(path.map((m) => [m.index, m.hash])), story: () => path.filter((m) => leftOutWhy(m, story) === null).map((m) => m.index) };
+}
 function inChronicle(path) {
   return path.startsWith(`${FOLDER}/`) && path.endsWith(".md") && !path.includes("/", FOLDER.length + 1) && !BESIDE.includes(path);
 }
@@ -9813,17 +9991,23 @@ function linesOf(text2) {
 function examine(files, chat) {
   const hashes = chat.hashes();
   const places = placesOf(hashes);
+  const story = new Set(chat.story());
   const check = { files: [], failures: [], moved: [], uncited: [] };
   const failed = new Map;
+  const aside = new Map;
   const several = [];
   let reach = null;
   const passesAt = (index) => {
+    if (!story.has(index))
+      return false;
     if (reach === null || index > reach)
       reach = index;
+    return true;
   };
   for (const { path, text: text2 } of files) {
     const lines = linesOf(text2);
     const fails = new Set;
+    const apart = new Set;
     let cited = 0;
     lines.forEach((raw, i) => {
       const line = i + 1;
@@ -9838,15 +10022,16 @@ function examine(files, chat) {
       }
       cited++;
       const seen = new Set;
+      let rests = false;
       for (const cite of cites) {
         if (seen.has(cite.text))
           continue;
         seen.add(cite.text);
         const stands = checkCitation(cite, hashes, places);
         if (stands.state === "ok")
-          passesAt(cite.index);
+          rests = passesAt(cite.index) || rests;
         else if (stands.state === "moved") {
-          passesAt(stands.now);
+          rests = passesAt(stands.now) || rests;
           check.moved.push({ path, line, citation: cite.text, index: cite.index, now: stands.now });
         } else {
           fails.add(line);
@@ -9854,11 +10039,14 @@ function examine(files, chat) {
           several.push(stands.several);
         }
       }
+      if (!rests && !fails.has(line))
+        apart.add(line);
     });
     failed.set(path, fails);
+    aside.set(path, apart);
     check.files.push({ path, chars: text2.length, lines: lines.length, cited, failed: fails.size });
   }
-  return { check, failed, several, reach };
+  return { check, failed, aside, several, reach };
 }
 function checkChronicle(files, chat) {
   return examine(files, chat).check;
@@ -9887,12 +10075,13 @@ function chroniclerJob(jobs) {
     return "running";
   return own.some((job) => job.state === "queued") ? "waiting" : "none";
 }
-function pinnedBlock(file, fails, texts, room) {
+function pinnedBlock(file, fails, apart, texts, room) {
   const C2 = TEXT.recall.chronicle;
-  const held = linesOf(file.text).map((line, i) => ({ text: line.trimEnd(), fails: fails.has(i + 1) })).filter((line) => line.text.trim() !== "");
-  const kept = held.filter((line) => !line.fails).map((line) => line.text);
-  const left = held.length - kept.length;
-  const failedNote = left === 0 ? "" : texts.render(C2.pinnedFailed, { count: texts.counted(left, TEXT.recall.word.line) });
+  const held = linesOf(file.text).map((line, i) => ({ text: line.trimEnd(), fails: fails.has(i + 1), apart: apart.has(i + 1) })).filter((line) => line.text.trim() !== "");
+  const kept = held.filter((line) => !line.fails && !line.apart).map((line) => line.text);
+  const failing = held.filter((line) => line.fails).length;
+  const resting = held.filter((line) => line.apart).length;
+  const failedNote = `${failing === 0 ? "" : texts.render(C2.pinnedFailed, { count: texts.counted(failing, TEXT.recall.word.line) })}${resting === 0 ? "" : texts.render(C2.pinnedApart, { count: texts.counted(resting, TEXT.recall.word.line) })}`;
   const block = (more2, shown2) => texts.render(C2.pinnedFile, { path: file.path, more: more2, failed: failedNote, lines: shown2.join(`
 `) }).trimEnd();
   const more = (shown2) => texts.render(C2.pinnedMore, { shown: String(shown2), total: texts.counted(held.length, TEXT.recall.word.line) });
@@ -9925,8 +10114,8 @@ async function pinnedChronicle(input) {
   if (!pin || !input.learned)
     return "";
   const keeper = remind ? input.jobs : null;
-  const numbers = [...chat.hashes().keys()].sort((a, b) => a - b);
-  const last = String(chat.last?.index ?? 0);
+  const numbers = chat.story();
+  const last = String(numbers.at(-1) ?? 0);
   const files = (await readChronicle(input.learned)).filter((file) => file.text.trim() !== "");
   const found = files.length === 0 ? null : examine(files, chat);
   const reach = found ? found.reach : null;
@@ -9967,7 +10156,7 @@ async function pinnedChronicle(input) {
   const blocks = [];
   ordered.forEach((file, i) => {
     const share = Math.floor(room / (ordered.length - i)) - 1;
-    const block = pinnedBlock({ path: file.path, text: correctedText(file, found.check.moved) }, found.failed.get(file.path) ?? new Set, texts, share);
+    const block = pinnedBlock({ path: file.path, text: correctedText(file, found.check.moved) }, found.failed.get(file.path) ?? new Set, found.aside.get(file.path) ?? new Set, texts, share);
     if (block === null)
       return;
     blocks.push(block);
@@ -10012,17 +10201,16 @@ function coveredAmong(files, numbers) {
     return run !== undefined && run[0] <= index;
   });
 }
-var numbersOf = (chat) => [...chat.hashes().keys()].sort((a, b) => a - b);
 function chronicleReach(files, chat) {
-  return { covered: coveredAmong(files, numbersOf(chat)).filter((is) => is).length };
+  return { covered: coveredAmong(files, chat.story()).filter((is) => is).length };
 }
 function uncoveredMessages(files, chat) {
-  const numbers = numbersOf(chat);
+  const numbers = chat.story();
   const covered = coveredAmong(files, numbers);
   return numbers.filter((_index, at) => !covered[at]);
 }
 function uncoveredRuns(files, chat) {
-  const numbers = numbersOf(chat);
+  const numbers = chat.story();
   const covered = coveredAmong(files, numbers);
   const runs = [];
   let open = false;
@@ -10785,9 +10973,6 @@ function partLine(texts, chat, part, settings) {
 
 // node_modules/lumi-ah/src/core/recall/page.ts
 var PLAN = "chronicle/plan.md";
-function hashesOf(path) {
-  return { hashes: () => new Map(path.map((m) => [m.index, m.hash])), last: path.at(-1) };
-}
 function storyEstimate(rest, starts, settings, model) {
   const { stretchMessages, stretchChars, estimateSent, estimateWritten, estimateRounds } = settings.recall.chronicle;
   const chars = rest.reduce((n, message) => n + message.chars, 0);
@@ -10846,10 +11031,10 @@ function recallPage(deps) {
     return input.chatId;
   };
   const view = async (chatId) => {
-    const { settings, texts } = await deps.setup(chatId);
+    const { settings, texts, story } = await deps.setup(chatId);
     let read2;
     const path = () => read2 ??= host.chat.path(chatId);
-    return { run: recallOf({ host, run: { id: `page-${++asked}`, kind: "side", chatId }, settings, texts, chat: { path } }), settings, texts, path };
+    return { run: recallOf({ host, run: { id: `page-${++asked}`, kind: "side", chatId }, settings, texts, chat: { path }, story }), settings, texts };
   };
   const status = async (run, settings, start) => recall.meaning.status({ lore: await run.loreGroups(), chat: await run.chatGroup(), settings, start });
   return {
@@ -10918,7 +11103,8 @@ function recallPage(deps) {
     },
     async chronicle(input) {
       const chatId = chatOf(input);
-      return checkChronicle(await readChronicle(await deps.learned(chatId)), hashesOf(await host.chat.path(chatId)));
+      const { story } = await deps.setup(chatId);
+      return checkChronicle(await readChronicle(await deps.learned(chatId)), storyHashes(await host.chat.path(chatId), story));
     },
     async cited(input) {
       const chatId = chatOf(input);
@@ -10949,19 +11135,19 @@ function recallPage(deps) {
     },
     async story(input) {
       const chatId = chatOf(input);
-      const { settings, texts, definitions } = await deps.setup(chatId);
+      const { settings, texts, definitions, story, chronicle } = await deps.setup(chatId);
       const learned = await deps.learned(chatId);
       const path = await host.chat.path(chatId);
       const plan = learned && fileAt(await learned.index(), PLAN) ? showPath("learned", PLAN) : null;
       const files = await readChronicle(learned);
-      const chat = hashesOf(path);
+      const chat = storyHashes(path, story);
       const { covered } = chronicleReach(files, chat);
       const left = new Set(uncoveredMessages(files, chat));
       const [builtIn] = recallAgents();
       const resolved = definitions?.resolve(CHRONICLER, settings) ?? (builtIn ? resolveAgent(builtIn, settings, baseAgents().find((agent) => agent.id === AGENT.main)) : undefined);
       const model = resolved?.model ?? (await host.connections.get(resolved?.connectionId ?? null).catch(() => null))?.model ?? null;
       const estimate = storyEstimate(path.filter((m) => left.has(m.index)), uncoveredRuns(files, chat).map(([from]) => from), settings, model === "" ? null : model);
-      return { plan, messages: path.length, covered, estimate, suggested: { task: texts.render(TEXT.recall.story.objective, { skill: RECALL_SKILL.learn }), agent: CHRONICLER } };
+      return { plan, messages: chat.story().length, covered, estimate, suggested: { task: texts.render(TEXT.recall.story.objective, { skill: RECALL_SKILL.learn }), agent: CHRONICLER }, refused: chronicle };
     }
   };
 }
@@ -11832,11 +12018,23 @@ function trailOf(docs, name) {
 // node_modules/lumi-ah/src/core/tools/chat.ts
 var A2 = TEXT.recall.answer;
 var WORD3 = TEXT.recall.word;
+function leftNote(texts, chat, from, to) {
+  const count2 = chat.leftIn(from, to);
+  const parts = [...count2.hidden > 0 ? [texts.render(A2.chatLeftHidden, { count: texts.counted(count2.hidden, WORD3.message) })] : [], ...count2.direction > 0 ? [texts.render(A2.chatLeftDirections, { count: texts.counted(count2.direction, WORD3.message) })] : []];
+  return parts.length === 0 ? "" : texts.render(A2.chatLeftOut, { parts: parts.join(", and ") });
+}
+function leftOne(p, index, why) {
+  const { texts } = p;
+  return { text: texts.render(A2.chatLeftOne, { index: String(index), why: texts.render(why === "hidden" ? A2.chatLeftOneHidden : A2.chatLeftOneDirection) }), error: true };
+}
 async function chatOf(env) {
   const run = recallOf(env);
   const chat = await run.chat();
   const { first, last } = chat;
-  return first && last ? { run, chat, first, last } : { text: env.texts.render(A2.chatEmpty) };
+  if (first && last)
+    return { run, chat, first, last };
+  const left = leftNote(env.texts, chat, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY);
+  return { text: left === "" ? env.texts.render(A2.chatEmpty) : env.texts.render(A2.chatNoStory, { left }) };
 }
 function held(p, { answer, ...offered }) {
   return {
@@ -11865,44 +12063,55 @@ function scopeOf(p, { chat, first, last }, args, speakers) {
   let high = to ?? last.index;
   if (from !== null && to !== null && low > high)
     [low, high] = [high, low];
+  const ranged = from !== null || to !== null;
+  const left = ranged ? leftNote(texts, chat, low, high) : leftNote(texts, chat, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY);
   const start = chat.place(low);
   const end = chat.place(high + 1);
   if (start >= end)
-    return { text: texts.render(A2.chatBadRange, { from: String(low), to: String(high), first: String(first.index), last: String(last.index) }), error: true };
-  const ranged = from !== null || to !== null;
+    return { text: [left, texts.render(A2.chatBadRange, { from: String(low), to: String(high), first: String(first.index), last: String(last.index) })].filter((part) => part !== "").join(`
+`), error: true };
   const inRange = ranged ? chat.messages.slice(start, end) : chat.messages;
   const speaker = speakers ? textArg(args.speaker) : null;
   if (speaker === null)
-    return { docs: inRange, ...ranged ? { keep: (doc) => doc.index >= low && doc.index <= high } : {}, start, end, ranged };
+    return { docs: inRange, ...ranged ? { keep: (doc) => doc.index >= low && doc.index <= high } : {}, start, end, ranged, left };
   const wanted = speaker.toLowerCase();
   const spoken = (doc) => doc.role === wanted || whoOf(doc).trim().toLowerCase() === wanted;
   if (!chat.messages.some(spoken)) {
     const all = speakersOf(chat.messages).map(([who, count2]) => `${who} (${texts.counted(count2, WORD3.message)})`);
-    return { text: fitted(p, all.join(", "), (list) => saidBack(p, speaker, (said) => texts.render(A2.chatNoSpeaker, { speaker: said, speakers: list }))), error: true };
+    const whole3 = leftNote(texts, chat, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY);
+    const said = fitted(p, all.join(", "), (list) => saidBack(p, speaker, (named2) => texts.render(A2.chatNoSpeaker, { speaker: named2, speakers: list })));
+    return { text: [whole3, said].filter((part) => part !== "").join(`
+`), error: true };
   }
-  return { docs: inRange.filter(spoken), keep: (doc) => doc.index >= low && doc.index <= high && spoken(doc), start, end, ranged };
+  return { docs: inRange.filter(spoken), keep: (doc) => doc.index >= low && doc.index <= high && spoken(doc), start, end, ranged, left };
 }
-function located({ chat, first, last }, p, named2) {
+function located({ chat, first, last }, p, named2, bound = false) {
   const { texts } = p;
   const span = { first: String(first.index), last: String(last.index) };
   const index = String(named2.index);
-  const missing = { text: texts.render(A2.chatNoMessage, { index, ...span }), error: true };
-  if (named2.hash === null) {
-    const doc2 = chat.at(named2.index);
-    return doc2 ? { doc: doc2, note: "" } : missing;
-  }
+  const elsewhere = (number) => {
+    const why = chat.leftAt(number);
+    if (why === undefined)
+      return { text: texts.render(A2.chatNoMessage, { index: String(number), ...span }), error: true };
+    return bound ? { index: number, note: "" } : leftOne(p, number, why);
+  };
+  if (named2.hash === null)
+    return chat.at(named2.index) ? { index: named2.index, note: "" } : elsewhere(named2.index);
   const hashes = chat.hashes();
   const state2 = checkCitation({ index: named2.index, hash: named2.hash }, hashes, placesOf(hashes));
   const cited = citeDoc({ index: named2.index, hash: named2.hash });
-  const doc = chat.at(state2.state === "moved" ? state2.now : named2.index);
-  if (state2.state === "ok")
-    return doc ? { doc, note: "" } : missing;
-  if (state2.state === "moved")
-    return doc ? { doc, note: texts.render(A2.chatCiteMoved, { given: cited, index, now: String(doc.index), cite: citeDoc(doc) }) } : missing;
-  const where = state2.several.length === 0 ? texts.render(A2.chronicleNowhere) : texts.render(A2.chronicleSeveral, { messages: clip(state2.several.map((n) => texts.render(TEXT.recall.message, { index: String(n) })).join(", "), p.lineChars) });
-  if (state2.state === "gone" || !doc)
+  const where = state2.state === "ok" || state2.state === "moved" ? "" : state2.several.length === 0 ? texts.render(A2.chronicleNowhere) : texts.render(A2.chronicleSeveral, { messages: clip(state2.several.map((n) => texts.render(TEXT.recall.message, { index: String(n) })).join(", "), p.lineChars) });
+  if (state2.state === "gone")
     return { text: texts.render(A2.chatCiteGone, { given: cited, index, where, ...span }), error: true };
-  return { doc, note: texts.render(A2.chatCiteChanged, { given: cited, index, where, cite: citeDoc(doc) }) };
+  const target = state2.state === "moved" ? state2.now : named2.index;
+  const doc = chat.at(target);
+  if (!doc)
+    return elsewhere(target);
+  if (state2.state === "ok")
+    return { index: target, note: "" };
+  if (state2.state === "moved")
+    return { index: target, note: texts.render(A2.chatCiteMoved, { given: cited, index, now: String(target), cite: citeDoc(doc) }) };
+  return { index: target, note: texts.render(A2.chatCiteChanged, { given: cited, index, where, cite: citeDoc(doc) }) };
 }
 function readMessages(p, args, docs, notes) {
   const { texts } = p;
@@ -11939,15 +12148,21 @@ var chatRead = {
         const read2 = await chatOf(env);
         if ("text" in read2)
           return read2;
-        const a = located(read2, p, from);
+        const ranged = to !== from;
+        const a = located(read2, p, from, ranged);
         if ("text" in a)
           return a;
-        const b = to === from ? a : located(read2, p, to);
+        const b = ranged ? located(read2, p, to, true) : a;
         if ("text" in b)
           return b;
         const { chat } = read2;
-        const docs = chat.messages.slice(chat.place(Math.min(a.doc.index, b.doc.index)), chat.place(Math.max(a.doc.index, b.doc.index) + 1));
-        return readMessages(p, args, docs, [a.note, b.note]);
+        const low = Math.min(a.index, b.index);
+        const high = Math.max(a.index, b.index);
+        const docs = chat.messages.slice(chat.place(low), chat.place(high + 1));
+        const left = leftNote(texts, chat, low, high);
+        if (docs.length === 0)
+          return { text: texts.render(A2.chatAllLeftOut, { left, from: String(low), to: String(high) }) };
+        return readMessages(p, args, docs, [a.note, b.note, left]);
       }
     });
   }
@@ -11984,9 +12199,9 @@ var chatAround = {
           return centre;
         const { chat } = read2;
         const each = env.settings.recall.chat.around;
-        const place = chat.place(centre.doc.index);
+        const place = chat.place(centre.index);
         const docs = chat.messages.slice(Math.max(0, place - Math.max(0, wholeArg(args.before) ?? each)), place + 1 + Math.max(0, wholeArg(args.after) ?? each));
-        return readMessages(p, args, docs, [centre.note]);
+        return readMessages(p, args, docs, [centre.note, leftNote(texts, chat, docs[0]?.index ?? centre.index, docs.at(-1)?.index ?? centre.index)]);
       }
     });
   }
@@ -12038,7 +12253,8 @@ var chatGrep = {
         if ("late" in found)
           return lateAnswer(p, bound, found, texts.counted(bodies.length, WORD3.message));
         if (found.length === 0)
-          return { text: saidBack(p, needle, (said) => texts.render(A2.chatGrepNothing, { query: said })) };
+          return { text: [scope.left, saidBack(p, needle, (said) => texts.render(A2.chatGrepNothing, { query: said }))].filter((part) => part !== "").join(`
+`) };
         return listPage(p, {
           total: found.length,
           noun: WORD3.line,
@@ -12047,7 +12263,8 @@ var chatGrep = {
             const line = found[i];
             const doc = line ? scope.docs[line.key] : undefined;
             return line && doc ? texts.render(A2.chatLine, { cite: citeDoc(doc), index: String(doc.index), who: whoOf(doc), line: String(line.line), text: around(line.text, line.at, line.length, p.lineChars) }) : "";
-          }
+          },
+          ...scope.left !== "" ? { lead: scope.left } : {}
         });
       }
     });
@@ -12137,7 +12354,7 @@ var chatSearch = {
         const searched = await searchChat(run, chat, queries, { ...scope.keep ? { keep: scope.keep } : {}, signal: ctx.signal });
         const wordOnly = run.wordOnlyNote(searched.state);
         const parts = searched.queries.map((found) => searchPart(p, env, found));
-        const answer = searchAnswer(p, args, parts, [restNote(p, Math.max(1, limit2), rest), wordOnly]);
+        const answer = searchAnswer(p, args, parts, [restNote(p, Math.max(1, limit2), rest), wordOnly, scope.left]);
         if (answer.error && wordOnly !== "")
           run.saidWordOnly = false;
         return answer;
@@ -12221,9 +12438,9 @@ var chatAbout = {
         const scope = scopeOf(p, read2, args, false);
         if ("text" in scope)
           return scope;
-        const tail = restNote(p, Math.max(1, limit2), rest);
-        const share = Math.max(1, Math.floor((p.pageChars - (tail === "" ? 0 : tail.length + 1)) / names.length) - 1);
-        return { text: [...names.map((name) => aboutText(p, env, read2.chat, scope, name, share)), ...tail === "" ? [] : [tail]].join(`
+        const tail = [restNote(p, Math.max(1, limit2), rest), scope.left].filter((note) => note !== "");
+        const share = Math.max(1, Math.floor((p.pageChars - tail.reduce((n, note) => n + note.length + 1, 0)) / names.length) - 1);
+        return { text: [...names.map((name) => aboutText(p, env, read2.chat, scope, name, share)), ...tail].join(`
 `) };
       }
     });
@@ -12254,15 +12471,17 @@ var chatOutline = {
         if (args.stretches === true || args.stretches === "true") {
           const stretches = await readerStretches(run, chat, scope);
           const size = stretchesHead(texts, env.settings, stretches.length);
+          const top = scope.left === "" ? size : `${size}
+${scope.left}`;
           const cut = {
             query: "",
             total: stretches.length,
-            head: () => size,
+            head: () => top,
             item: (i) => {
               const stretch = stretches[i];
               return stretch ? stretchLine(texts, stretch) : "";
             },
-            nothing: size
+            nothing: top
           };
           return searchAnswer(p, args, [cut]);
         }
@@ -12278,7 +12497,7 @@ var chatOutline = {
           },
           nothing: head2
         };
-        return searchAnswer(p, args, [listing], [texts.render(outline.leaf ? A2.outlineLeaf : A2.outlineNext)]);
+        return searchAnswer(p, args, [listing], [texts.render(outline.leaf ? A2.outlineLeaf : A2.outlineNext), scope.left]);
       }
     });
   }
@@ -14681,7 +14900,7 @@ async function recallTold(run, input) {
         input.log("warn", `[LumiAH] the chat's jobs couldn't be read (${errorText(error)}): the main agent is told nothing of the chronicle's upkeep this turn`);
       }
     }
-    const pinned = await pinnedChronicle({ learned: input.learned, chat: { hashes: () => new Map(input.path.map((m) => [m.index, m.hash])), last: input.path.at(-1) }, settings, texts, jobs: keeper, writes: input.writes });
+    const pinned = await pinnedChronicle({ learned: input.learned, chat: storyHashes(input.path, run.env.story), settings, texts, jobs: keeper, writes: input.writes });
     if (pinned !== "")
       parts.push(pinned);
   } catch (error) {
@@ -15137,18 +15356,33 @@ class Turn {
     const main = (claimed !== undefined ? run.resolve(claimed) : undefined) ?? this.resolved(run, AGENT.main);
     const writes2 = this.mainWrites();
     const blocks = await this.blocks();
-    const told = run.recall ? await recallTold(run.recall, { path: session.before, blocks, writes: writes2, learned: run.areas.learned, jobs: settings.jobs.enabled && host.jobs !== undefined ? () => shared.jobs.open(turn.chatId) : null, emit: (event) => run.trace.emit(event), log: host.log, now: host.clock.now() }) : undefined;
+    const kept = settings.jobs.enabled && host.jobs !== undefined && chronicleRefusal(run.definitions, shared.options.extension?.name ?? null) === null;
+    const told = run.recall ? await recallTold(run.recall, { path: session.before, blocks, writes: writes2, learned: run.areas.learned, jobs: kept ? () => shared.jobs.open(turn.chatId) : null, emit: (event) => run.trace.emit(event), log: host.log, now: host.clock.now() }) : undefined;
     const document = requestDocument(turn.messages, blocks, session.before, texts, told);
     work.request = { messages: document.messages, last: document.last };
     run.request = { count: texts.counted(document.messages, TEXT.word.message), text: document.text };
     const jobs = jobNews(news, texts);
+    const directed = await directedNote({
+      source: run.story.source,
+      before: session.before,
+      texts,
+      read: async (message2) => {
+        try {
+          return (await host.chat.messages(turn.chatId, message2.index, message2.index + 1)).find((m) => m.id === message2.id)?.content ?? null;
+        } catch (error) {
+          host.log("warn", `[LumiAH] the user's newest message couldn't be read (${errorText(error)}): the main agent is told the story is directed, without this reply's direction`);
+          return null;
+        }
+      }
+    });
     const notes = [
       ...refs.fresh.length > 0 ? [texts.render(TEXT.main.noteDropped, { replies: droppedReplies })] : [],
       ...refs.rolledBack !== null ? [texts.render(TEXT.main.noteRolledBack)] : [],
       ...session.missing > 0 ? [texts.render(TEXT.main.noteMissing, { count: texts.counted(session.missing, TEXT.word.part) })] : [],
       ...lead !== null ? [texts.render(TEXT.main.noteSummary, { summary: lead })] : [],
       ...session.continued ? [texts.render(TEXT.main.noteContinued, { receipt: receiptOf(session.continued.segment, settings.session, texts) })] : [],
-      ...jobs !== null ? [jobs] : []
+      ...jobs !== null ? [jobs] : [],
+      ...directed !== null ? [directed] : []
     ];
     const kinds = { new: TEXT.main.kindNew, regenerate: TEXT.main.kindRegenerate, swipe: TEXT.main.kindSwipe, continue: TEXT.main.kindContinue };
     const asked = texts.render(TEXT.main.turn, { kind: texts.render(kinds[turn.kind]), notes: notes.map((note) => `${note}
@@ -15571,11 +15805,26 @@ async function completeStored(shared, input) {
     told.then(() => askExtension(shared, "answer to a run ending", waitMs, extension?.runEnded ? () => extension.runEnded?.({ userId, chatId, turn: generationId, kind: stored.turn, status: "done", reply, record, usage }) ?? Promise.resolve() : undefined, undefined));
   return { status: "done", record, reply, usage, recovered };
 }
+async function directedNote(input) {
+  const { source, before, texts } = input;
+  if (source.from !== "replies")
+    return null;
+  let direction = "";
+  if (source.newest === "directive") {
+    const last = before.at(-1);
+    const given2 = last !== undefined && last.role === "user" && leftOutWhy(last, source) !== "hidden" ? await input.read(last) : "";
+    if (given2 === null)
+      direction = "";
+    else
+      direction = given2.trim() === "" ? texts.render(TEXT.main.noDirection) : texts.render(TEXT.main.direction, { text: given2 });
+  }
+  return texts.render(TEXT.main.directed, { direction });
+}
 function shippedSetup(shared, userId) {
   const definitions = mergeDefinitions({ code: { agents: shared.agents.all(), skills: shared.skills.all(), tools: shared.tools.all() }, core: shared.core, extension: { agents: [], skills: [] }, remote: [], user: null, claim: null }, shared.host);
   const settings = settingsOf(null, definitions.scope());
   settings.keep = { ...settings.keep, prompts: false, transcripts: false };
-  return { userId, settings, texts: textsOf(null), definitions, chat: null, claim: null };
+  return { userId, settings, texts: textsOf(null), definitions, chat: null, claim: null, story: storyHolds({ user: settings.story, sovereignHand: null }) };
 }
 
 // node_modules/lumi-ah/src/core/upkeep.ts
@@ -16263,7 +16512,14 @@ function createHarness(host, options) {
         return { kept: approvalRows(chatId, await forgetApproval(host, chatId, tool)).sort(newestFirst) };
       }
     },
-    recall: recallPage({ host, setup: (chatId) => readSetup(shared, chatId), learned: (chatId) => shared.areas.learned(chatId) })
+    recall: recallPage({
+      host,
+      setup: async (chatId) => {
+        const setup = await readSetup(shared, chatId);
+        return { ...setup, story: setup.story.source, chronicle: chronicleRefusal(setup.definitions, shared.options.extension?.name ?? null) };
+      },
+      learned: (chatId) => shared.areas.learned(chatId)
+    })
   };
 }
 function allowanceOf(raw) {
@@ -20519,7 +20775,7 @@ if (process.versions.bun === undefined) {
 `);
   process.exit(1);
 }
-var BUILD = "56fd19c0";
+var BUILD = "2b1756c2";
 var http = async (request) => {
   const response = await fetch(request.url, { method: request.method, headers: request.headers, ...request.body !== undefined ? { body: request.body } : {}, redirect: "manual" });
   const text3 = await response.text();

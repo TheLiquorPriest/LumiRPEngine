@@ -2964,7 +2964,7 @@ var AGENT_CHANGE_DEFAULTS = Object.freeze({
   org_powers: "confirm",
   org_shares: "confirm",
   org_rules: "auto",
-  world_document: "confirm",
+  world_document: "auto",
   play: "auto",
   mind: "auto"
 });

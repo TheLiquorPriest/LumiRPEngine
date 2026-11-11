@@ -3716,7 +3716,7 @@ var AGENT_CHANGE_DEFAULTS = Object.freeze({
   org_powers: "confirm",
   org_shares: "confirm",
   org_rules: "auto",
-  world_document: "confirm",
+  world_document: "auto",
   play: "auto",
   mind: "auto"
 });
@@ -92154,7 +92154,7 @@ Every change an agent makes goes through one writer (\`backend/agents/tools/writ
 - **Change types and modes** (\`shared/settings.ts\` \`AGENT_CHANGE_TYPES\`, \`backend/settings-store.ts\`): sixteen agent change types sit beside the reply's. They are not extraction types: no reply proposes them, so the \`extract\` step never lists them. An agent's change to a thing or a place takes the reply's item and place types where one fits (a move \`item_move\`, a handover \`item_hand\` or \`item_own\` by its basis, a make \`item_make\`, a place made \`place_make\`, §28.9), and these where none does.
   - \`gm_spawn\` "Adding people or things" (\`confirm\`), \`despawn\` "Removing people" (\`confirm\`), \`destroy\` "Destroying things" (\`confirm\`: removing anything but a person), \`money_adjust\` "Money adjustments" (\`confirm\`: an \`adjust\`, a set or add of a money field, or a ✎ fix of one), \`stage\` "Quest and secret stages" (\`confirm\`), \`gm_edit\` "Other GM edits (fields, tiers, minds, routines, sections, the clock)" (\`auto\`), \`workspace\` "Workspace notes" (\`auto\`), \`item_home\` "Where things are kept", \`item_grant\` "Who may use things" (grants and standing permissions) and \`item_label\` "Things' names, descriptions and sizes" (each \`auto\`), \`item_merge\` "Two things merged into one" and \`item_remove\` "Things removed from the world" (each \`confirm\`).
   - The organization op's four (ORG-SPEC §7.3; \`ORG_OP_CHANGE\` names each op's): \`org_people\` "Organizations' people (members, positions held, titles, staff, pay, the party's tiers)" (\`confirm\`: admit, remove, appoint, title, hire, fire, pay, tier), \`org_powers\` "Organizations' positions and delegations" (\`confirm\`: position, unposition, delegate, revoke), \`org_shares\` "Organizations' shares and structure (founding, issuing, buying back, transfers, restructuring)" (\`confirm\`) and \`org_rules\` "Organizations' rules (entry, dues, names)" (\`auto\`). Settings' defaults revision 6 gives every saved role whose families hold \`money\` the \`orgs\` family too.
-  - The world's document's one (the harness engine's; \`docs/harness-tools.md\`): \`world_document\` "The world's document (committing its draft, bringing this chat to a revision, dropping or restoring the draft)" (\`confirm\`). \`world_commit\`, \`world_upgrade\`, \`world_discard\` and \`world_restore\` ask under it as the writer's \`world\` operation, which writes no event of the chat's record: it is staged with the turn and decided when the turn commits, by the mode set then (read then, not from the settings the turn began with), and where it lands, at that commit or on the review card's Apply, the act is made in the world's store (\`makeWorldActs\`). Editing the world's draft is no change of the chat's and asks nothing.
+  - The world's document's one (the harness engine's; \`docs/harness-tools.md\`): \`world_document\` "The world's document (committing its draft, bringing this chat to a revision, dropping or restoring the draft)" (\`auto\`: the author decides, and the user reviews after, on the reply, where a commit the turn made has its Undo). \`world_commit\`, \`world_upgrade\`, \`world_discard\` and \`world_restore\` ask under it as the writer's \`world\` operation, which writes no event of the chat's record: it is staged with the turn and decided when the turn commits, by the mode set then (read then, not from the settings the turn began with), and where it lands, at that commit or on the review card's Apply, the act is made in the world's store (\`makeWorldActs\`). Whatever the mode, a commit, a drop or a restore of a draft that holds edits no agent of the turn wrote (the user's own, from Build) goes to the review card, and so does a move to the head asked after such a commit (\`harness/turn.ts\`). Editing the world's draft is no change of the chat's and asks nothing.
   - The harness engine's own two (\`docs/harness-tools.md\`), each \`auto\`: \`play\` "What the author plays (an attempt and its roll, a fight's rounds)" for \`action_play\` and the fight tools, and \`mind\` "Characters' minds (what they decide and remember, and their own files)" for the \`mind_\` tools that write. With them every write tool of the harness engine has a change type, so Never refuses it and Confirm cards it.
   - Their pins share \`UserSettings.extraction\` (\`{extraction: {despawn: {mode}}}\`), with no max delta.
   - \`effectiveMode(settings, learning, connection, type, role?)\` takes the pinned mode, then the mode learned for the role, the connection and the type, then the type's default, then \`confirm\`. \`recordOutcome(…, role?)\` counts an agent's outcome under its role with D4's thresholds (§11), in \`extraction-learning.json\`'s \`roles\` (\`{role: {connection: {type: stats}}}\`); its \`undone\` turns an outcome counted accepted into rejected (an applied change undone), so a proposal counts once. The GM assistant counts its Apply, No and Undo (§4.5). The reply's types learn per connection as before, and only they reach the chat's mode-change chips (\`ExtractionType\`): an agent's type never reaches the extract step's code.
@@ -98607,7 +98607,7 @@ var package_default = {
     typescript: "7.0.2"
   },
   dependencies: {
-    "lumi-ah": "github:TheLiquorPriest/LumiAH#e26b08e7c032f7516e3591061bdb62c005c1db39",
+    "lumi-ah": "github:TheLiquorPriest/LumiAH#4aa9d53e5331241ca4ca85af65c179fe56a1c03a",
     preact: "^11.0.1"
   }
 };
@@ -98615,7 +98615,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "56fd19c0";
+var BUILD = "2b1756c2";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
