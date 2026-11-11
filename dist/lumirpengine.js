@@ -977,10 +977,11 @@ var package_default = {
   },
   devDependencies: {
     "bun-types": "^1.4.2",
-    "lumiverse-spindle-types": "0.6.49",
+    "lumiverse-spindle-types": "0.6.79",
     typescript: "7.0.2"
   },
   dependencies: {
+    "lumi-ah": "github:TheLiquorPriest/LumiAH#e26b08e7c032f7516e3591061bdb62c005c1db39",
     preact: "^11.0.1"
   }
 };
@@ -996,7 +997,7 @@ var DEFAULT_PLACE_CAPS = Object.freeze({ turn: 2, chat: 64 });
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "fabe287a";
+var BUILD = "56fd19c0";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

@@ -2944,7 +2944,7 @@ var EXTRACTION_DEFAULTS = Object.freeze({
 });
 var THING_READ_DEFAULTS = Object.freeze({ shown: 40, whyMax: 120, madeMax: 6 });
 var THING_READ_BOUNDS = Object.freeze({ shown: [1, 200], whyMax: [20, 500], madeMax: [0, 500] });
-var AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace", "item_home", "item_grant", "item_label", "item_merge", "item_set", "item_remove", "org_people", "org_powers", "org_shares", "org_rules"];
+var AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace", "item_home", "item_grant", "item_label", "item_merge", "item_set", "item_remove", "org_people", "org_powers", "org_shares", "org_rules", "world_document", "play", "mind"];
 var CHANGE_TYPES = [...EXTRACTION_TYPES, ...AGENT_CHANGE_TYPES];
 var AGENT_CHANGE_DEFAULTS = Object.freeze({
   gm_spawn: "confirm",
@@ -2963,7 +2963,10 @@ var AGENT_CHANGE_DEFAULTS = Object.freeze({
   org_people: "confirm",
   org_powers: "confirm",
   org_shares: "confirm",
-  org_rules: "auto"
+  org_rules: "auto",
+  world_document: "confirm",
+  play: "auto",
+  mind: "auto"
 });
 var AGENT_CHANGE_LABEL = Object.freeze({
   gm_spawn: "Adding people or things",
@@ -2982,7 +2985,10 @@ var AGENT_CHANGE_LABEL = Object.freeze({
   org_people: "Organizations' people (members, positions held, titles, staff, pay, the party's tiers)",
   org_powers: "Organizations' positions and delegations",
   org_shares: "Organizations' shares and structure (founding, issuing, buying back, transfers, restructuring)",
-  org_rules: "Organizations' rules (entry, dues, names)"
+  org_rules: "Organizations' rules (entry, dues, names)",
+  world_document: "The world's document (committing its draft, bringing this chat to a revision, dropping or restoring the draft)",
+  play: "What the author plays (an attempt and its roll, a fight's rounds)",
+  mind: "Characters' minds (what they decide and remember, and their own files)"
 });
 var EXTRACTION_LEARNING = Object.freeze({
   promoteAt: 0.9,

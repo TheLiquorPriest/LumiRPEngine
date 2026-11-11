@@ -3696,7 +3696,7 @@ var EXTRACTION_DEFAULTS = Object.freeze({
 });
 var THING_READ_DEFAULTS = Object.freeze({ shown: 40, whyMax: 120, madeMax: 6 });
 var THING_READ_BOUNDS = Object.freeze({ shown: [1, 200], whyMax: [20, 500], madeMax: [0, 500] });
-var AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace", "item_home", "item_grant", "item_label", "item_merge", "item_set", "item_remove", "org_people", "org_powers", "org_shares", "org_rules"];
+var AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace", "item_home", "item_grant", "item_label", "item_merge", "item_set", "item_remove", "org_people", "org_powers", "org_shares", "org_rules", "world_document", "play", "mind"];
 var CHANGE_TYPES = [...EXTRACTION_TYPES, ...AGENT_CHANGE_TYPES];
 var AGENT_CHANGE_DEFAULTS = Object.freeze({
   gm_spawn: "confirm",
@@ -3715,7 +3715,10 @@ var AGENT_CHANGE_DEFAULTS = Object.freeze({
   org_people: "confirm",
   org_powers: "confirm",
   org_shares: "confirm",
-  org_rules: "auto"
+  org_rules: "auto",
+  world_document: "confirm",
+  play: "auto",
+  mind: "auto"
 });
 var AGENT_CHANGE_LABEL = Object.freeze({
   gm_spawn: "Adding people or things",
@@ -3734,7 +3737,10 @@ var AGENT_CHANGE_LABEL = Object.freeze({
   org_people: "Organizations' people (members, positions held, titles, staff, pay, the party's tiers)",
   org_powers: "Organizations' positions and delegations",
   org_shares: "Organizations' shares and structure (founding, issuing, buying back, transfers, restructuring)",
-  org_rules: "Organizations' rules (entry, dues, names)"
+  org_rules: "Organizations' rules (entry, dues, names)",
+  world_document: "The world's document (committing its draft, bringing this chat to a revision, dropping or restoring the draft)",
+  play: "What the author plays (an attempt and its roll, a fight's rounds)",
+  mind: "Characters' minds (what they decide and remember, and their own files)"
 });
 var EXTRACTION_LEARNING = Object.freeze({
   promoteAt: 0.9,
@@ -88802,6 +88808,104 @@ function onlyArgs(args, schema) {
     throw new ToolError(`Unknown argument${unknown.length === 1 ? "" : "s"} ${unknown.join(", ")}. This tool takes ${properties.length > 0 ? properties.join(", ") : "no arguments"}.`);
 }
 
+// src/shared/world-diff.ts
+function nameOf8(item2) {
+  if (!isRecord(item2))
+    return null;
+  for (const key of ["name", "title", "label"]) {
+    const value = item2[key];
+    if (typeof value === "string" && value.trim() !== "")
+      return value;
+  }
+  return null;
+}
+var IS_COLLECTION = {
+  packs: true,
+  kinds: true,
+  relations: true,
+  entities: true,
+  places: true,
+  routes: true,
+  grids: true,
+  maps: true,
+  rules: true,
+  actions: true,
+  checks: true,
+  schedules: true,
+  tracks: true,
+  tables: true,
+  sections: true,
+  steps: true,
+  lore: true,
+  classifications: true,
+  tiers: true,
+  lifeStates: true
+};
+function isCollection(key) {
+  return hasOwn(IS_COLLECTION, key);
+}
+function idMap(value) {
+  return isRecord(value) && Object.values(value).every(isRecord);
+}
+function packItems(id, pack) {
+  const self = (value) => ({ collection: "packs", id, pointer: pointerOf(["packs", id]), value });
+  const config3 = isRecord(pack) && isRecord(pack.config) ? pack.config : null;
+  if (!isRecord(pack) || config3 === null)
+    return [self(pack)];
+  const entries2 = Object.entries(config3).filter(([key]) => !isPrototypeKey(key));
+  const maps = entries2.filter((e) => idMap(e[1]));
+  if (maps.length === 0)
+    return [self(pack)];
+  const rest = Object.fromEntries(entries2.filter(([, value]) => !idMap(value)));
+  const opened2 = maps.flatMap(([name, map]) => Object.entries(map).flatMap(([entry, value]) => isPrototypeKey(entry) ? [] : [{ collection: name, id: entry, pointer: pointerOf(["packs", id, "config", name, entry]), value }]));
+  return [self({ ...pack, config: rest }), ...opened2];
+}
+var IN = " › ";
+function changesBetween(from, to) {
+  const a = isRecord(from) ? from : {};
+  const b = isRecord(to) ? to : {};
+  const out = [];
+  const compare = (was, now) => {
+    const item2 = now ?? was;
+    if (item2 === undefined || jsonEqual(was?.value, now?.value))
+      return;
+    const name = nameOf8(now?.value) ?? nameOf8(was?.value);
+    const label2 = item2.id === "" ? item2.collection : `${item2.collection}${IN}${name !== null && name !== item2.id ? `${name} (${item2.id})` : item2.id}`;
+    out.push({ key: item2.pointer, label: label2, kind: was?.value === undefined ? "added" : now?.value === undefined ? "removed" : "changed" });
+  };
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    if (isPrototypeKey(key))
+      continue;
+    const before = hasOwn(a, key) ? a[key] : undefined;
+    const after = hasOwn(b, key) ? b[key] : undefined;
+    if (isCollection(key) && isRecord(before) && isRecord(after)) {
+      for (const id of new Set([...Object.keys(before), ...Object.keys(after)])) {
+        if (isPrototypeKey(id))
+          continue;
+        const was = hasOwn(before, id) ? before[id] : undefined;
+        const now = hasOwn(after, id) ? after[id] : undefined;
+        if (jsonEqual(was, now))
+          continue;
+        if (key !== "packs") {
+          compare(was === undefined ? undefined : { collection: key, id, pointer: pointerOf([key, id]), value: was }, now === undefined ? undefined : { collection: key, id, pointer: pointerOf([key, id]), value: now });
+          continue;
+        }
+        const wasItems = new Map((was === undefined ? [] : packItems(id, was)).map((i) => [i.pointer, i]));
+        const nowItems = new Map((now === undefined ? [] : packItems(id, now)).map((i) => [i.pointer, i]));
+        for (const pointer of new Set([...wasItems.keys(), ...nowItems.keys()]))
+          compare(wasItems.get(pointer), nowItems.get(pointer));
+      }
+      continue;
+    }
+    compare(before === undefined ? undefined : { collection: key, id: "", pointer: pointerOf([key]), value: before }, after === undefined ? undefined : { collection: key, id: "", pointer: pointerOf([key]), value: after });
+  }
+  return out;
+}
+function groupOf(pointer) {
+  const tokens3 = parsePointer(pointer);
+  return tokens3.length === 5 && tokens3[0] === "packs" && tokens3[2] === "config" ? tokens3[3] ?? "" : tokens3[0] ?? "";
+}
+
 // src/shared/gm-parts.ts
 var GM_PARTS = ["entities", "kinds", "tiers", "lifeStates", "domains", "classifications", "places", "tracks", "relationTypes", "money", "orgs", "encounter", "routineRoles", "edits", "refused", "held", "minds"];
 var GM_ROSTER = "roster";
@@ -88838,16 +88942,6 @@ function clip(text4, max) {
 }
 function jsonText(value, compact = false) {
   return (compact ? JSON.stringify(value) : JSON.stringify(value, null, 1)) ?? "null";
-}
-function nameOf8(item2) {
-  if (!isRecord(item2))
-    return null;
-  for (const key of ["name", "title", "label"]) {
-    const value = item2[key];
-    if (typeof value === "string" && value.trim() !== "")
-      return value;
-  }
-  return null;
 }
 function kindOf(value) {
   if (Array.isArray(value))
@@ -89016,47 +89110,6 @@ ${outline(Array.isArray(value) ? value.slice(0, end) : Object.fromEntries(entrie
 }
 
 // src/cli/diff.ts
-var IS_COLLECTION = {
-  packs: true,
-  kinds: true,
-  relations: true,
-  entities: true,
-  places: true,
-  routes: true,
-  grids: true,
-  maps: true,
-  rules: true,
-  actions: true,
-  checks: true,
-  schedules: true,
-  tracks: true,
-  tables: true,
-  sections: true,
-  steps: true,
-  lore: true,
-  classifications: true,
-  tiers: true,
-  lifeStates: true
-};
-function isCollection(key) {
-  return hasOwn(IS_COLLECTION, key);
-}
-function idMap(value) {
-  return isRecord(value) && Object.values(value).every(isRecord);
-}
-function packItems(id, pack) {
-  const self = (value) => ({ collection: "packs", id, pointer: pointerOf(["packs", id]), value });
-  const config3 = isRecord(pack) && isRecord(pack.config) ? pack.config : null;
-  if (!isRecord(pack) || config3 === null)
-    return [self(pack)];
-  const entries2 = Object.entries(config3).filter(([key]) => !isPrototypeKey(key));
-  const maps = entries2.filter((e) => idMap(e[1]));
-  if (maps.length === 0)
-    return [self(pack)];
-  const rest = Object.fromEntries(entries2.filter(([, value]) => !idMap(value)));
-  const opened2 = maps.flatMap(([name, map]) => Object.entries(map).flatMap(([entry, value]) => isPrototypeKey(entry) ? [] : [{ collection: name, id: entry, pointer: pointerOf(["packs", id, "config", name, entry]), value }]));
-  return [self({ ...pack, config: rest }), ...opened2];
-}
 function itemsOf(doc) {
   if (!isRecord(doc))
     return [];
@@ -89078,50 +89131,6 @@ function itemsOf(doc) {
     }
   }
   return out;
-}
-function changesBetween(from, to) {
-  const a = isRecord(from) ? from : {};
-  const b = isRecord(to) ? to : {};
-  const out = [];
-  const compare = (was, now) => {
-    const item2 = now ?? was;
-    if (item2 === undefined || jsonEqual(was?.value, now?.value))
-      return;
-    const name = nameOf8(now?.value) ?? nameOf8(was?.value);
-    const label2 = item2.id === "" ? item2.collection : `${item2.collection} › ${name !== null && name !== item2.id ? `${name} (${item2.id})` : item2.id}`;
-    out.push({ key: item2.pointer, label: label2, kind: was?.value === undefined ? "added" : now?.value === undefined ? "removed" : "changed" });
-  };
-  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
-    if (isPrototypeKey(key))
-      continue;
-    const before = hasOwn(a, key) ? a[key] : undefined;
-    const after = hasOwn(b, key) ? b[key] : undefined;
-    if (isCollection(key) && isRecord(before) && isRecord(after)) {
-      for (const id of new Set([...Object.keys(before), ...Object.keys(after)])) {
-        if (isPrototypeKey(id))
-          continue;
-        const was = hasOwn(before, id) ? before[id] : undefined;
-        const now = hasOwn(after, id) ? after[id] : undefined;
-        if (jsonEqual(was, now))
-          continue;
-        if (key !== "packs") {
-          compare(was === undefined ? undefined : { collection: key, id, pointer: pointerOf([key, id]), value: was }, now === undefined ? undefined : { collection: key, id, pointer: pointerOf([key, id]), value: now });
-          continue;
-        }
-        const wasItems = new Map((was === undefined ? [] : packItems(id, was)).map((i) => [i.pointer, i]));
-        const nowItems = new Map((now === undefined ? [] : packItems(id, now)).map((i) => [i.pointer, i]));
-        for (const pointer of new Set([...wasItems.keys(), ...nowItems.keys()]))
-          compare(wasItems.get(pointer), nowItems.get(pointer));
-      }
-      continue;
-    }
-    compare(before === undefined ? undefined : { collection: key, id: "", pointer: pointerOf([key]), value: before }, after === undefined ? undefined : { collection: key, id: "", pointer: pointerOf([key]), value: after });
-  }
-  return out;
-}
-function groupOf(pointer) {
-  const tokens3 = parsePointer(pointer);
-  return tokens3.length === 5 && tokens3[0] === "packs" && tokens3[2] === "config" ? tokens3[3] ?? "" : tokens3[0] ?? "";
 }
 function countsOf(changes) {
   const counts2 = Object.create(null);
@@ -91529,9 +91538,9 @@ Six concepts plus one pipeline.
   - \`src/shared/\`: types and contracts both sides use;
   - \`src/cli/\`: the \`lumirpengine\` command line and MCP server, with the engine run on the machine (\`local-engine.ts\`) for its offline commands (§23).
 - \`lumiverse-spindle-types\` is pinned to \`0.6.49\`, the host's version (0.6.50 adds only \`ctx.client\`). One local augmentation module covers what the published types get wrong or omit: \`ctx.ui.registerDomDecorator({mount, render, …}) → () => void\` (the published top-level \`registerDomDecorator\` does not exist, and \`instanceKey\` filters anchors, so decorators omit it), \`geometry.createResizeController(el, opts) → () => void\`, and float and dock \`persistGeometry\`.
-- The backend registers exactly **one** context handler, the guard (§5.1), and one World Info interceptor (§6.1), which changes a world chat's entries for one prompt and writes nothing; a second registration of either replaces the first.
+- The backend registers exactly **one** context handler, the guard (§5.1), and one World Info interceptor (§6.1), which changes a world chat's entries for one prompt and writes nothing; a second registration of either replaces the first. LumiAH, built into the backend for the harness engine (\`docs/HARNESS.md\`, "The mount"), registers the one prompt interceptor, where the author works on a harness chat's reply before it is written; on every other chat it leaves the prompt as it came.
 - **\`userId\`:** event payloads carry none. The host passes it as the handler's second argument, and the context-handler context carries it. Operator-scoped (locally imported) installs must pass it on every host call. Every per-user cache is keyed by it.
-- **Permissions.** The extension requests ten: \`generation\` (follow each reply, stop a generation the engine hasn't prepared, make helper calls), \`context_handler\` (the guard before each reply), \`chats\` (read and update a chat's metadata, where a world chat records the world it plays and lists the world's lore book; find the open chat), \`chat_mutation\` (read messages and swipes, save the world's record on each reply, add palette, chip and map actions as messages, remove a stopped Regenerate's blank swipe), \`world_books\` (create the world's lore book and its slot entries, attach it, fill and empty a turn's entries, read the books chosen for Import from lore or lore indexing, read the user's books as lore, compare indexed lore with its book, and write one of the user's entries only on the user's press in Build: a secret mark into its text, or its own LRE fields, §4.2), \`presets\` (read the active preset to check where sections land and to lint it), \`regex_scripts\` (keep each world chat's script that hides JSON blocks, §6.7), \`decisions\` (the Decisions API), \`ui_panels\` (the pill, the map and the palette sheet, which are float widgets; the drawer tab needs no permission) and \`mcp_servers\` (optional, and privileged: only an owner or admin grants it; read which of the user's Lumiverse MCP servers hold lumirpengine's tools, and whether that list is this build's, for Reconnect in Lumiverse, §23). It deliberately does **not** request \`characters\`: character cards stay out of its reach (§4.2).
+- **Permissions.** The extension requests sixteen: \`generation\` (follow each reply, stop a generation the engine hasn't prepared, make helper calls), \`context_handler\` (the guard before each reply), \`chats\` (read and update a chat's metadata, where a world chat records the world it plays and lists the world's lore book; find the open chat), \`chat_mutation\` (read messages and swipes, save the world's record on each reply, add palette, chip and map actions as messages, remove a stopped Regenerate's blank swipe), \`world_books\` (create the world's lore book and its slot entries, attach it, fill and empty a turn's entries, read the books chosen for Import from lore or lore indexing, read the user's books as lore, compare indexed lore with its book, and write one of the user's entries only on the user's press in Build: a secret mark into its text, or its own LRE fields, §4.2), \`presets\` (read the active preset to check where sections land and to lint it), \`regex_scripts\` (keep each world chat's script that hides JSON blocks, §6.7), \`decisions\` (the Decisions API), \`ui_panels\` (the pill, the map and the palette sheet, which are float widgets; the drawer tab needs no permission), \`mcp_servers\` (optional, and privileged: only an owner or admin grants it; read which of the user's Lumiverse MCP servers hold lumirpengine's tools, and whether that list is this build's, for Reconnect in Lumiverse, §23; on a harness chat, call the tools of the MCP servers the user switched on for the agents), and six for the harness engine (\`docs/HARNESS.md\`), which no chat on the other engines uses: \`interceptor\` (the author works on a reply before it is written, while Lumiverse waits to send the prompt) and, each optional, \`embeddings\` (its agents' searches match by meaning), \`memories\` (they search what Lumiverse's memory keeps of the chat), \`databanks\` (they list, search and read the chat's databanks), \`web_search\` (they search the web through the user's provider) and \`generation_parameters\` (only for a chat the user sets to run in a runtime beside Lumiverse: the request is marked so the runtime finds it; a chat that runs built in, as every chat starts, never uses it). It deliberately does **not** request \`characters\`: character cards stay out of its reach (§4.2).
 - **Safe keys.** Entity, place, track, kind and field ids, marker keys, editor keys and table keys are validated. Every lookup by a data id resolves own keys only, so \`__proto__\`, \`constructor\` and \`toString\` name nothing.
 
 ## 4. Data and persistence
@@ -91726,6 +91735,7 @@ GM → Assistant is the game master's chat with an agent about the chat's world 
 - **Its changes are proposals.** An edit tool's run never writes: it hands the writer (C7, \`outsideWriter\`) its operation for a dry run, which checks it against the head and words it for the GM, and the answer collects each change that passed, once per operation key, as one proposal (\`{id, messageId, ops: {key, changeType, lines, mode}[], status}\`), the operations themselves kept in its blob and never sent to a page. Under **Apply** \`ask\` (the default) it waits for **Apply** (all of it, or the changes picked) or **No**; under \`at_once\` it is applied as soon as the answer is in, unless the answer stopped short or a change's type asks first (mode \`confirm\`, Settings → Changes from the reply), which waits for Apply. Applied, its picked operations are one GM edit through the writer, with the GM's view (a refusal in the engine's own words), held through a turn's engine run and reply, as every write made while a turn is under way is (§4.3 P2), and landing when the turn closes, never discarding it; the proposal keeps the edit's chip (\`chipId\`), whose Undo takes it back, or says it is \`pending\` while held. The write runs outside the thread's lock: Cancel, a new message and every other request of the thread never wait on it, and while it is under way the proposal can't be applied again or turned down (\`conflict\`). A held one is named its chip once its write lands (\`Runtime.onWritesLanded\`, the write found by its batch key), none when the turn had already made it so, and the thread is pushed: its card then shows Undo; a write that settles before its Apply has taken in its own result is kept for that Apply, which settles the proposal at once. One whose write the turn's close refuses (the notice's \`refused\`, from the journal's refused writes) has each change that write held marked \`write_refused\` (\`WRITE_REFUSED\`) with the journal's reason, and the thread is pushed; it waits for Apply or No again, unless a change it made to a kept file (§4.4) landed at Apply without that write: that change stays applied, and so does the proposal (\`settledProposal\`). Such a proposal's refused changes may be applied once more (**Apply again**): an Apply of an applied proposal sends only its changes marked \`write_refused\`, as one GM edit with its own chip, and leaves what landed as it is, so a kept note is never written twice; a change refused for what it is (any other code) isn't sent again, and with none left the Apply is refused (\`bad_request\`). An Undo of it, wherever it is pressed (its card, the chat, GM → Edits), marks it \`undone\`, and each change the chip took back \`undone\` too, only they counting as undone toward its learning: a change it made to a kept file is no chip's, and stays applied. A change the head refuses by then is marked on its op with the writer's code and reason, and a proposal none of whose changes landed stays open. A kept file's change (§4.4) lands at once, with no chip.
 - **Learning:** its change types learn for the role \`assistant\` on the connection a proposal was made on (its own, else your default's), with D4's thresholds (§7.2), once its changes land: Apply counts each change it applied as accepted and each one its pick left out as rejected (a held one when its write lands; one the turn's close refuses counts nothing, and a proposal whose learned-area change stood beside that refused write counts as one applied with that change alone), Apply again counts only the changes it sent (a held one, again, when its write lands), No counts each change as rejected, and an Undo turns an Apply's accepted into rejected, so a proposal counts once. A learned mode applies to its later changes, and Settings → Changes from the reply shows it; no chat chip tells of a flip, since the chat is a player surface.
 - **Limits:** the assistant's budget is every agent's (\`agents.budget\`) with the limits it sets of its own standing in (\`assistant.budget\`); the loop detector, clipping and throttles are the runtime's; there is no turn budget, so a limit set to none is no limit at all (Settings words it so). **Cancel** stops the answer under way, its model call and tools alike, at once: it never waits for the thread's lock, and the page keeps it pressable while another request of its is under way; what it said so far is kept, and it proposes nothing.
+- **On a chat the harness plays** (\`docs/HARNESS.md\`) the engine makes no model call, the assistant's included. The thread, its proposals, Apply, No and Undo are as above; only where an answer comes from changes (\`backend/harness/assistant.ts\`, behind the seam \`SideAnswers\`). Each message is said in a LumiAH side session, one per thread, run as the engine's \`gm_assistant\` definition with the GM's view; its tool calls are given the same dry-run-only writer, so a change it makes is still a proposal and never a write; the side turn's end is the answer. Its connection, model, effort and budgets are that definition's in LumiAH's settings, not Settings → Agents → Assistant. Where LumiAH can't be reached the message is refused with what to do, never answered by the old loop.
 - **Records:** each call it makes is a Diagnostics agent record outside any turn (§6.9), with the text that call was sent and answered, and one more for an answer stopped short of an answer, with why; a call its connection refused for its native tools is one too (outcome \`refused\`, with the provider's words), after which the answer goes on with its tools written as text. While it answers, the chat's activity line shows its label ("Asking the GM assistant…") and nothing else, unless a turn runs there, whose line comes first.
 - **On the page** (\`frontend/markdown.tsx\`): an answer reads as Markdown's safe subset, built as Preact elements, so every character of it reaches the page as text: paragraphs (a line break kept), headings (one modest bold style whatever their level, the level kept for assistive tech as \`aria-level\`), lists (bulleted, or numbered from their first number), fenced code (\`pre\` and \`code\`, its text kept exactly), quotes (\`blockquote\`, their lines read as blocks of their own), bold, italics and inline code; a link shows as its words and its address, never as a link, and an image as its description, never loaded; HTML and every other mark (a table, a rule) stay as written. Your own messages show as you wrote them.
 - **GM → Workspace** (\`lre.workspace\`) reads the chat's workspace at its head, its learned area and the user's global workspace (each file's path, hash, size, pin, whether it is a learned file, and provenance: the agent's role and operation key, and the reply whose record holds the write) and writes it as the GM: each change one GM edit through the same writer as the agents (role \`gm\`, which no change type's mode applies to), with its Undo chip, held while a turn runs; a kept file's change (\`learned/\`, \`~/\`) lands at once, with none. Every file is every agent's to read; an earlier build's \`readers\` on a write is ignored, and its \`{op: "readers"}\` is no operation (\`bad_request\`). The page (\`frontend/gm/workspace.tsx\`, \`workspace-tree.ts\`) lists the chat's areas, Notes, Learned, Transcripts (folded) and the Pins file, then **Global (~/)** apart from them, each file with chips for who wrote it, at which reply (a global file is no reply's), and whether it is a **System** file (whose instructions it is in its tooltip), **Global**, pinned, learned or read-only; a system file has no Pin. **New note** asks where it goes (this chat, or Global, which puts \`~/\` before the path) and takes a path of either level; a move stays in its part (the story, \`learned/\`, \`~/\`); deleting a kept file asks first, since it lands at once with no Undo. It reads its list, the session and the open file again when the chat moves on (\`GmSectionProps.reloadKey\`, \`gmReloadKey\`: a turn, an edit, an Undo), never on each load of the GM view, so one change reads each once. A new note held while a reply is written (\`pending\`, not listed yet) keeps its pane open as the empty note it will be (\`paneFile\`, \`heldCreate\`), its text saveable meanwhile and its other actions waiting, until the list holds it.
@@ -92144,6 +92154,8 @@ Every change an agent makes goes through one writer (\`backend/agents/tools/writ
 - **Change types and modes** (\`shared/settings.ts\` \`AGENT_CHANGE_TYPES\`, \`backend/settings-store.ts\`): sixteen agent change types sit beside the reply's. They are not extraction types: no reply proposes them, so the \`extract\` step never lists them. An agent's change to a thing or a place takes the reply's item and place types where one fits (a move \`item_move\`, a handover \`item_hand\` or \`item_own\` by its basis, a make \`item_make\`, a place made \`place_make\`, §28.9), and these where none does.
   - \`gm_spawn\` "Adding people or things" (\`confirm\`), \`despawn\` "Removing people" (\`confirm\`), \`destroy\` "Destroying things" (\`confirm\`: removing anything but a person), \`money_adjust\` "Money adjustments" (\`confirm\`: an \`adjust\`, a set or add of a money field, or a ✎ fix of one), \`stage\` "Quest and secret stages" (\`confirm\`), \`gm_edit\` "Other GM edits (fields, tiers, minds, routines, sections, the clock)" (\`auto\`), \`workspace\` "Workspace notes" (\`auto\`), \`item_home\` "Where things are kept", \`item_grant\` "Who may use things" (grants and standing permissions) and \`item_label\` "Things' names, descriptions and sizes" (each \`auto\`), \`item_merge\` "Two things merged into one" and \`item_remove\` "Things removed from the world" (each \`confirm\`).
   - The organization op's four (ORG-SPEC §7.3; \`ORG_OP_CHANGE\` names each op's): \`org_people\` "Organizations' people (members, positions held, titles, staff, pay, the party's tiers)" (\`confirm\`: admit, remove, appoint, title, hire, fire, pay, tier), \`org_powers\` "Organizations' positions and delegations" (\`confirm\`: position, unposition, delegate, revoke), \`org_shares\` "Organizations' shares and structure (founding, issuing, buying back, transfers, restructuring)" (\`confirm\`) and \`org_rules\` "Organizations' rules (entry, dues, names)" (\`auto\`). Settings' defaults revision 6 gives every saved role whose families hold \`money\` the \`orgs\` family too.
+  - The world's document's one (the harness engine's; \`docs/harness-tools.md\`): \`world_document\` "The world's document (committing its draft, bringing this chat to a revision, dropping or restoring the draft)" (\`confirm\`). \`world_commit\`, \`world_upgrade\`, \`world_discard\` and \`world_restore\` ask under it as the writer's \`world\` operation, which writes no event of the chat's record: it is staged with the turn and decided when the turn commits, by the mode set then (read then, not from the settings the turn began with), and where it lands, at that commit or on the review card's Apply, the act is made in the world's store (\`makeWorldActs\`). Editing the world's draft is no change of the chat's and asks nothing.
+  - The harness engine's own two (\`docs/harness-tools.md\`), each \`auto\`: \`play\` "What the author plays (an attempt and its roll, a fight's rounds)" for \`action_play\` and the fight tools, and \`mind\` "Characters' minds (what they decide and remember, and their own files)" for the \`mind_\` tools that write. With them every write tool of the harness engine has a change type, so Never refuses it and Confirm cards it.
   - Their pins share \`UserSettings.extraction\` (\`{extraction: {despawn: {mode}}}\`), with no max delta.
   - \`effectiveMode(settings, learning, connection, type, role?)\` takes the pinned mode, then the mode learned for the role, the connection and the type, then the type's default, then \`confirm\`. \`recordOutcome(…, role?)\` counts an agent's outcome under its role with D4's thresholds (§11), in \`extraction-learning.json\`'s \`roles\` (\`{role: {connection: {type: stats}}}\`); its \`undone\` turns an outcome counted accepted into rejected (an applied change undone), so a proposal counts once. The GM assistant counts its Apply, No and Undo (§4.5). The reply's types learn per connection as before, and only they reach the chat's mode-change chips (\`ExtractionType\`): an agent's type never reaches the extract step's code.
   - Settings → Changes from the reply shows them in a section of their own, "The GM assistant's changes" (Auto, Confirm or Never, where the mode comes from, Unpin), each as the assistant's role learned it on the assistant's connection (its own, else your default; \`SettingsStore.result\`'s \`agent\`), as the reply's types show theirs on the extract step's. With the assistant set to apply at once, an Auto change applies with its Undo, a Confirm one waits for Apply and a Never one is refused; the GM's own edits are never held back by them.
@@ -98591,10 +98603,11 @@ var package_default = {
   },
   devDependencies: {
     "bun-types": "^1.4.2",
-    "lumiverse-spindle-types": "0.6.49",
+    "lumiverse-spindle-types": "0.6.79",
     typescript: "7.0.2"
   },
   dependencies: {
+    "lumi-ah": "github:TheLiquorPriest/LumiAH#e26b08e7c032f7516e3591061bdb62c005c1db39",
     preact: "^11.0.1"
   }
 };
@@ -98602,7 +98615,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "fabe287a";
+var BUILD = "56fd19c0";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
