@@ -225,16 +225,20 @@ export function adjustedText(adjusted: readonly { pointer: string; now: unknown;
 /**
  * What Settings says to a chat on the harness at the top of a page (`EngineNote`): `whole`, on a
  * page that only sets up turns on the classic and agents engines, none of whose steps such a chat's
- * turns run; `timeouts` and `prompts`, on a page only part of which is theirs.
+ * turns run; `helper`, the model those engines' steps and Build's jobs call; `timeouts`, `prompts`,
+ * `minds`, `agents` and `assistant`, on a page only part of which is theirs, each naming the part
+ * that is the harness's too; `home`, Settings' own list, which says which engine the chat plays and
+ * that the pages say what of them it uses.
  */
-export type EngineNoteKind = "whole" | "timeouts" | "prompts";
+export type EngineNoteKind = "home" | "whole" | "helper" | "timeouts" | "prompts" | "minds" | "agents" | "assistant";
 
 /**
  * The pages that open with the note while the open chat plays on the harness, each with which. A
- * page within one of them (a role's page, from Roles or Context) opens with its page's. Settings
- * keeps every one of them: the user's other chats may play on the engines they set up.
+ * page within one of them (a role's page, from Roles or Context) opens with its page's; a section of
+ * Agents with none, since the note on Agents names the sections the harness reads. Settings keeps
+ * every one of them: the user's other chats may play on the engines they set up.
  */
-export const ENGINE_NOTE_PAGES: Readonly<Partial<Record<SettingsPage, EngineNoteKind>>> = { model: "whole", steps: "whole", speed: "whole", roles: "whole", context: "whole", main: "whole", timeouts: "timeouts", prompts: "prompts" };
+export const ENGINE_NOTE_PAGES: Readonly<Partial<Record<SettingsPage, EngineNoteKind>>> = { home: "home", helper: "helper", model: "whole", steps: "whole", minds: "minds", speed: "whole", agents: "agents", roles: "whole", context: "whole", main: "whole", assistant: "assistant", timeouts: "timeouts", prompts: "prompts" };
 
 /**
  * The timeouts that time a turn's steps on the classic and agents engines; the harness runs none of
@@ -260,6 +264,16 @@ export function engineNote(kind: EngineNoteKind): { title: string; text: string 
   switch (kind) {
     case "whole":
       return { title: "This chat doesn't use these settings", text: `They belong to the classic and agents engines, which your other chats may play on. This chat plays on the harness: ${HARNESS_IS}, and those are set up ${HARNESS_AT}.` };
+    case "home":
+      return { title: "This chat plays on the harness", text: `That is, ${HARNESS_IS}. Its agents are set up ${HARNESS_AT}. A page here that sets up the classic and agents engines says at its top what of it this chat uses.` };
+    case "helper":
+      return { title: "This chat's turns don't use the helper model", text: `It runs the model calls of the classic and agents engines, which your other chats may play on, and Build's jobs. This chat plays on the harness: ${HARNESS_IS}, and their models are set ${HARNESS_AT}.` };
+    case "minds":
+      return { title: "This chat uses some of these", text: `On the harness, Character minds, Lengths, Knowledge and What a mind reads apply; the rest set up minds on the classic and agents engines. Each character's agent is set up ${HARNESS_AT}.` };
+    case "agents":
+      return { title: "This chat uses some of these", text: `On the harness, Review card applies, and under Budgets Tool results clipped past and Agent turns under way; the rest set up the agents engine. The harness's own agents are set up ${HARNESS_AT}.` };
+    case "assistant":
+      return { title: "This chat uses one of these", text: `On the harness the GM assistant is one of the harness's agents: How its changes land applies here. Where it runs, its effort and its limits are set ${HARNESS_AT}, and its texts on the page ${HARNESS_PAGE.label} in Prompts.` };
     case "timeouts": {
       const kept = TIMEOUT_KEYS.filter((id) => TIMEOUTS[id].group === "turn" && !OLD_ENGINE_TIMEOUTS.includes(id)).map((id) => TIMEOUTS[id].label);
       return { title: "This chat doesn't use some of these", text: `Under ${TURN_TIMEOUTS_TITLE}, only ${listed(kept)} ${kept.length === 1 ? "applies" : "apply"} to this chat: the rest time a turn's steps on the classic and agents engines. This chat plays on the harness: ${HARNESS_IS}, and their own limits are set ${HARNESS_AT}.` };

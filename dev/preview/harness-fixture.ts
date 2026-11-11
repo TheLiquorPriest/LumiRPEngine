@@ -4,11 +4,13 @@
 // words them, so the pages are judged on what a player would read.
 
 import type { UiState } from "lumi-ah/shared";
+import { renderPrompt } from "../../src/backend/prompts";
+import { HARNESS_TEXT } from "../../src/shared/harness-texts";
 import type { ReviewCardView } from "../../src/shared/protocol";
 import type { Chip } from "../../src/shared/state-view";
 
-/** Why the harness can't be chosen (`?harness=blocked`), as the engine says it of a permission LumiAH lacks. */
-export const HARNESS_BLOCKED = 'The permission "interceptor" isn\'t granted: LumiRPEngine needs it to see a reply\'s prompt before it is sent: without it no reply is worked on. Grant it in Lumiverse (Extensions → LumiRPEngine → Permissions).';
+/** Why the harness can't be chosen (`?harness=blocked`), as the engine says it of a permission LumiAH lacks (backend/harness/mount.ts, `ready`). */
+export const HARNESS_BLOCKED = 'The permission "interceptor" isn\'t granted: LumiRPEngine needs it to see a reply\'s prompt before it is sent. Grant it in Lumiverse (Extensions → LumiRPEngine → Permissions).';
 
 /** The chips only the other engines make: a read of the reply, its gate and its learning, and a swipe's choice. */
 const NOT_HARNESS: Partial<Record<Chip["kind"], true>> = { retry: true, swipe_option: true, reread: true, retry_read: true, not_action: true, intent_gate: true, mode_change: true, confirm: true, timelapse_offer: true };
@@ -16,25 +18,40 @@ const NOT_HARNESS: Partial<Record<Chip["kind"], true>> = { retry: true, swipe_op
 /** The reply whose changes ask first, and its swipe. */
 const REVIEW_AT = { messageId: "m4", swipeId: 0 };
 
-/** Why no turn was played for the flagged reply (`?unplayed=`), each as the engine says it. */
+/**
+ * Why no turn was played for the flagged reply (`?unplayed=`), each as the engine says it: the
+ * harness's own texts as shipped (Settings → Prompts → Harness engine), and the ledger's words for a
+ * reply stopped in Lumiverse or one the engine lost to a restart (backend/ledger-io.ts).
+ */
 export const UNPLAYED_WHY = {
-  failed: "the harness's run failed: the connection answered 429 (too many requests)",
+  failed: renderPrompt(HARNESS_TEXT.unplayedFailed, {}, { reason: ": the connection answered 429 (too many requests)" }),
+  nobrief: renderPrompt(HARNESS_TEXT.unplayedNoBrief, {}, {}),
+  norun: renderPrompt(HARNESS_TEXT.unplayedNoRun, {}, {}),
   stopped: "the reply was stopped",
   restarted: "the engine restarted while this reply was being written",
 } as const;
 
-/** A reply's flag that no turn was played for it, as the engine words it (`derivedChips`). */
-export function unplayedChip(messageId: string, why: string): Chip {
-  return { id: `unplayed:${messageId}:0`, kind: "degraded", messageId, label: "No turn was played", detail: `This reply was written without the harness's agents: ${why}. Nothing was rolled for it, no time passed, and nothing it tells was recorded. The author of the next harness turn is told, and records what still matters.`, actions: [], expires: "never" };
+/** A reply's flag that no turn was played for it, as the engine words it (`derivedChips`): on the chat's last reply (`head`) with Regenerate, on an earlier one with nothing to press. */
+export function unplayedChip(messageId: string, why: string, head: boolean): Chip {
+  const next = head ? " Regenerate to play the turn, or go on: the author of the next harness turn is told, and records what still matters." : "";
+  return { id: `unplayed:${messageId}:0`, kind: "degraded", messageId, label: "No turn was played", detail: `This reply was written without the harness's agents: ${why}. Nothing was rolled for it, no time passed, and nothing it tells was recorded.${next}`, actions: head ? [{ id: "regenerate", label: "Regenerate" }] : [], expires: "never" };
 }
 
-/** The preview chat's chips on the harness: none of a read's, the first reply flagged, and the last one's review card. */
-export function harnessChips(chips: readonly Chip[], why: string): Chip[] {
-  return [
-    unplayedChip("m1", why),
-    ...chips.filter((chip) => NOT_HARNESS[chip.kind] !== true),
-    { id: `review:${REVIEW_AT.messageId}:${String(REVIEW_AT.swipeId)}`, kind: "review", ...REVIEW_AT, label: "", actions: [{ id: "apply", label: "Apply all", style: "primary" }, { id: "reject", label: "No" }], expires: "next_send" },
-  ];
+/** The last reply's flag that it says something against what its turn decided, as the engine words it (`derivedChips`): what the world keeps, then a line for each departure the chronicler noted. */
+export function departedChip(messageId: string, lines: readonly string[]): Chip {
+  const first = "Where this reply differs from what its turn decided, the world keeps the turn's version, and the author of the next turn is told. Regenerate to play the turn again, or say in your next message how it should go.";
+  return { id: `departed:${messageId}:0`, kind: "degraded", messageId, label: "The reply doesn't match the world", detail: [first, ...lines].join("\n"), actions: [{ id: "regenerate", label: "Regenerate" }], expires: "never" };
+}
+
+/** The last reply's review chip as the engine stores it (`Review.save`): labelled by the changes still open, with nothing to press once none is. */
+export function reviewChip(review: readonly ReviewCardView[]): Chip {
+  const open = review.find((card) => card.messageId === REVIEW_AT.messageId && card.swipeId === REVIEW_AT.swipeId)?.items.filter((item) => item.status === "open") ?? [];
+  return { id: `review:${REVIEW_AT.messageId}:${String(REVIEW_AT.swipeId)}`, kind: "review", ...REVIEW_AT, label: open.length === 1 ? "1 change to review" : `${String(open.length)} changes to review`, detail: open.flatMap((item) => item.lines).join("\n"), actions: open.length > 0 ? [{ id: "apply", label: "Apply all", style: "primary" }, { id: "reject", label: "No" }] : [], expires: "next_send" };
+}
+
+/** The preview chat's chips on the harness: none of a read's, the first reply flagged as unplayed, and the last one's departure flag and review chip. */
+export function harnessChips(chips: readonly Chip[], why: string, review: readonly ReviewCardView[]): Chip[] {
+  return [unplayedChip("m1", why, false), ...chips.filter((chip) => NOT_HARNESS[chip.kind] !== true), departedChip(REVIEW_AT.messageId, ["The reply has Dev pay for you with a twenty; the world has Dev with no cash on him."]), reviewChip(review)];
 }
 
 /** That turn's card: what the author asked of the world's document (`world_commit`, `world_upgrade`, `world_restore`), a person it would add, and a change the turn's own tools staged. */

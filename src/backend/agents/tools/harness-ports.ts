@@ -32,17 +32,21 @@ import { effectiveMode } from "../../settings-store";
 import { previewUpgrade } from "../../upgrade-preview";
 import { type DraftNotice, type EditorResult, WorldError } from "../../worlds";
 
-/** One write of the world's draft, as Build's editor makes it: an `EditorRequest` without its envelope. */
+/**
+ * One write of the world's draft, as Build's editor makes it: an `EditorRequest` without its
+ * envelope. `version`: the draft's version as the caller read it; the store refuses the write once
+ * the draft has moved on since, so nothing is written over what the caller hasn't seen.
+ */
 export type WorldEdit =
   | { op: "get" }
-  /** `version`: the draft's version as the caller read it; the store refuses the discard when the draft has moved on since. */
-  | { op: "discard"; version?: number }
-  | { op: "put"; collection: WorldCollection; id: string; value: JsonValue }
-  | { op: "remove"; collection: WorldCollection; id: string }
-  | { op: "set"; part: WorldPart; value: JsonValue }
-  | { op: "patch"; ops: JsonPatchOp[] }
-  /** `version`: as a discard's, so a restore replaces no draft its caller hasn't seen. */
-  | { op: "restore"; revision: RevisionId; version?: number };
+  | ({ version?: number } & (
+      | { op: "discard" }
+      | { op: "put"; collection: WorldCollection; id: string; value: JsonValue }
+      | { op: "remove"; collection: WorldCollection; id: string }
+      | { op: "set"; part: WorldPart; value: JsonValue }
+      | { op: "patch"; ops: JsonPatchOp[] }
+      | { op: "restore"; revision: RevisionId }
+    ));
 
 /**
  * The document of the world a chat plays, as an agent edits it. Every member answers as the store
@@ -214,31 +218,39 @@ export function worldActOf(raw: unknown): WorldAct | null {
   }
 }
 
-/** What an act came to: what was made, in words for whoever asked for it, or why the world's store refused it. */
-export type WorldActResult = { made: string } | { refused: string };
+/**
+ * What an act came to: what was made, in words for whoever asked for it, or why the world's store
+ * refused it. A commit that made a new revision says which, and the world's newest revision before
+ * it (`committed`); an Upgrade says the revision it brings the chat to (`moved`).
+ */
+export type WorldActResult = { made: string; committed?: { from: RevisionId; to: RevisionId }; moved?: RevisionId } | { refused: string };
 
 /**
  * Makes each act in the order asked, as a turn's commit or a review card's Apply lands them, and
  * says what each came to in the user's texts. One the store refuses stops none of the others.
+ * `heard`: told of each change an act makes to the draft, as the store makes it (`worldBuild`).
  */
-export async function makeWorldActs(rt: BuildRuntime, who: { chatId: ChatId; userId: UserId }, acts: readonly WorldAct[]): Promise<WorldActResult[]> {
+export async function makeWorldActs(rt: BuildRuntime, who: { chatId: ChatId; userId: UserId }, acts: readonly WorldAct[], heard?: DraftNotice): Promise<WorldActResult[]> {
   const { texts } = (await rt.settings.get(who.userId)).prompts;
   const say = (id: string, vars: Record<string, string> = {}): string => renderPrompt(id, texts, vars);
-  const build = await worldBuild(rt, who.chatId, who.userId);
+  const build = await worldBuild(rt, who.chatId, who.userId, heard);
   /** The revision the chat plays now: a move that waits for the turn's end hasn't changed it. */
   const playing = async (): Promise<string | null> => {
     const core = await rt.ledger.core(who.chatId, who.userId);
     return core?.renderState(toChain(await rt.host.chats.messages(who.chatId, who.userId)))?.state.revision ?? null;
   };
-  const make = async (port: WorldBuild, act: WorldAct): Promise<string> => {
+  const make = async (port: WorldBuild, act: WorldAct): Promise<Extract<WorldActResult, { made: string }>> => {
     switch (act.do) {
       case "commit": {
         // The draft may have moved since the commit was asked, and an act kept on a card before acts were pinned names no version: what is closed to agents is held to as it stands now.
-        const closed = closedChanges(await port.revision(await port.head()), (await port.edit({ op: "get" })).draft);
+        const head = await port.head();
+        const closed = closedChanges(await port.revision(head), (await port.edit({ op: "get" })).draft);
         if (closed.length > 0) throw new WorldError("conflict", say(WORLD_NOTE.closedCommit, { paths: closed.join(", ") }));
+        // The store refuses a draft begun on another head, so a commit it makes was made on the head read here.
         const { revision } = await port.commit(act.note, act.version ?? undefined);
         const at = await playing();
-        return at !== null && at !== revision ? `${say(WORLD_NOTE.committed, { revision })} ${say(WORLD_NOTE.upgradeNext, { playing: at })}` : say(WORLD_NOTE.committed, { revision });
+        const made = at !== null && at !== revision ? `${say(WORLD_NOTE.committed, { revision })} ${say(WORLD_NOTE.upgradeNext, { playing: at })}` : say(WORLD_NOTE.committed, { revision });
+        return { made, ...(revision !== head ? { committed: { from: head, to: revision } } : {}) };
       }
       case "upgrade": {
         const to = act.to ?? (await port.head());
@@ -250,17 +262,17 @@ export async function makeWorldActs(rt: BuildRuntime, who: { chatId: ChatId; use
         const closed = at === null ? [] : closedChanges(await port.revision(at), await port.revision(to));
         if (closed.length > 0) throw new WorldError("conflict", say(WORLD_NOTE.closedUpgrade, { revision: to, paths: closed.join(", ") }));
         const { pending } = await port.upgrade(to, act.merge);
-        return say(pending ? WORLD_NOTE.upgradePending : WORLD_NOTE.upgradeLanded, { revision: to });
+        return { made: say(pending ? WORLD_NOTE.upgradePending : WORLD_NOTE.upgradeLanded, { revision: to }), moved: to };
       }
       case "discard":
         await port.edit({ op: "discard", version: act.version });
-        return say(WORLD_NOTE.discarded);
+        return { made: say(WORLD_NOTE.discarded) };
       case "restore": {
         // The draft may have moved since the restore was asked: what is closed to agents is held to as it stands now.
         const closed = closedChanges((await port.edit({ op: "get" })).draft, await port.revision(act.revision));
         if (closed.length > 0) throw new WorldError("conflict", say(WORLD_NOTE.closedRestore, { revision: act.revision, paths: closed.join(", ") }));
         await port.edit({ op: "restore", revision: act.revision, ...(act.version !== undefined ? { version: act.version } : {}) });
-        return say(WORLD_NOTE.restored, { revision: act.revision });
+        return { made: say(WORLD_NOTE.restored, { revision: act.revision }) };
       }
     }
   };
@@ -268,7 +280,7 @@ export async function makeWorldActs(rt: BuildRuntime, who: { chatId: ChatId; use
   for (const act of acts) {
     try {
       if (!build) throw new WorldError("not_found", say(WRITE_NOTE.noWorld));
-      out.push({ made: await make(build, act) });
+      out.push(await make(build, act));
     } catch (error) {
       if (!(error instanceof WorldError)) throw error;
       out.push({ refused: error.message });
@@ -279,21 +291,32 @@ export async function makeWorldActs(rt: BuildRuntime, who: { chatId: ChatId; use
 
 let writes = 0;
 
+/** Tells the user's open Build pages of a change to a world's draft, as they are told of their own (`lre.draft.changed`). */
+export function draftNotice(rt: Pick<Runtime, "host">, userId: UserId): DraftNotice {
+  return (id, draft) => rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId: id, version: draft.version, stored: draft.stored, base: draft.base }, userId);
+}
+
+/** The world's lore book follows its head, as after Build's own commit and Upgrade. */
+export async function syncWorldBook(rt: Pick<Runtime, "worlds" | "book">, worldId: WorldId, userId: UserId): Promise<void> {
+  const index = await rt.worlds.index(worldId, userId);
+  if (index) await rt.book.ensure((await rt.worlds.get(worldId, userId)).world, index, userId);
+}
+
 /**
  * The world's document for a call on `chatId`; null for a chat that plays no world. A write is the
  * store's, in turn with the world's other writes; the user's open Build page is told of each as it
- * is of its own (`lre.draft.changed`). What the port refuses by itself it says in the user's texts.
+ * is of its own (`lre.draft.changed`), and so is `heard`, in the store's own turn of that write.
+ * What the port refuses by itself it says in the user's texts.
  */
-export async function worldBuild(rt: BuildRuntime, chatId: ChatId, userId: UserId): Promise<WorldBuild | null> {
+export async function worldBuild(rt: BuildRuntime, chatId: ChatId, userId: UserId, heard?: DraftNotice): Promise<WorldBuild | null> {
   const run = await rt.runOf(chatId, userId);
   if (!run) return null;
   const worldId = run.worldId;
   const say = async (id: string, vars: Record<string, string> = {}): Promise<string> => renderPrompt(id, (await rt.settings.get(userId)).prompts.texts, vars);
-  const changed: DraftNotice = (id, draft) => rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId: id, version: draft.version, stored: draft.stored, base: draft.base }, userId);
-  // The world's lore book follows its head (as after Build's own commit and Upgrade).
-  const syncBook = async (): Promise<void> => {
-    const index = await rt.worlds.index(worldId, userId);
-    if (index) await rt.book.ensure((await rt.worlds.get(worldId, userId)).world, index, userId);
+  const told = draftNotice(rt, userId);
+  const changed: DraftNotice = (id, draft) => {
+    told(id, draft);
+    heard?.(id, draft);
   };
   return {
     worldId,
@@ -316,7 +339,7 @@ export async function worldBuild(rt: BuildRuntime, chatId: ChatId, userId: UserI
     edit: (edit) => rt.worlds.edit({ lre: PROTOCOL_VERSION, type: "lre.editor", reqId: "harness", worldId, base: null, ...edit } as EditorRequest, userId, changed),
     commit: async (note, version) => {
       const committed = await rt.worlds.commit(worldId, null, userId, { source: "agent", ...(note !== null ? { note } : {}), ...(version !== undefined ? { version } : {}) }, changed);
-      await syncBook();
+      await syncWorldBook(rt, worldId, userId);
       return committed;
     },
     upgrade: async (to, merge) => {
@@ -327,7 +350,7 @@ export async function worldBuild(rt: BuildRuntime, chatId: ChatId, userId: UserI
       const result = await rt.ledger.write(chatId, userId, { kind: "marker", id: `h${Date.now().toString(36)}${(++writes).toString(36)}`, target: "head", body }, { answerQueued: true });
       if (!result.applied && !result.pending) throw new WorldError("conflict", result.reason === "paused" ? await say(WRITE_NOTE.paused) : (result.reason ?? (await say(WRITE_NOTE.stale))));
       rt.push.changed(chatId, userId);
-      await syncBook();
+      await syncWorldBook(rt, worldId, userId);
       return { pending: result.pending };
     },
     preview: async (state, to, unmade) => {

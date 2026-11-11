@@ -353,7 +353,7 @@ export type AgentChangeType = (typeof AGENT_CHANGE_TYPES)[number];
 export type ChangeType = ExtractionType | AgentChangeType;
 export const CHANGE_TYPES: readonly ChangeType[] = [...EXTRACTION_TYPES, ...AGENT_CHANGE_TYPES];
 
-/** AGENT-LOOP-PLAN §6: despawn, destroy, money adjustment, stage and GM spawn confirm; other GM edits and workspace notes apply. ITEMS-SPEC §5.4: a thing's rest, grants and labels apply; a merge and a removal ask. ORG-SPEC §9: an organization's people, powers and shares ask; its rules apply. The world's document asks: committing it changes the world every chat of it plays, an Upgrade brings that to this chat, and dropping or restoring its draft can throw away the user's own Build edits. */
+/** AGENT-LOOP-PLAN §6: despawn, destroy, money adjustment, stage and GM spawn confirm; other GM edits and workspace notes apply. ITEMS-SPEC §5.4: a thing's rest, grants and labels apply; a merge and a removal ask. ORG-SPEC §9: an organization's people, powers and shares ask; its rules apply. The world's document lands (it is the harness engine's alone): the author decides, and the player reviews after, on the reply, where a commit has its Undo; an act that would publish or throw away the user's own Build edits asks first whatever the mode (`harness/turn.ts`). A pin keeps the mode the user chose. */
 export const AGENT_CHANGE_DEFAULTS: Readonly<Record<AgentChangeType, BoundMode>> = Object.freeze({
   gm_spawn: "confirm",
   despawn: "confirm",
@@ -372,7 +372,7 @@ export const AGENT_CHANGE_DEFAULTS: Readonly<Record<AgentChangeType, BoundMode>>
   org_powers: "confirm",
   org_shares: "confirm",
   org_rules: "auto",
-  world_document: "confirm",
+  world_document: "auto",
   // The harness engine's own tools: what its author plays and what its characters' agents record land with the turn unless the player says otherwise.
   play: "auto",
   mind: "auto",

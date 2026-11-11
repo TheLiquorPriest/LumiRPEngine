@@ -156,7 +156,7 @@ async function thread(rig: Rig, chatId: string): Promise<AssistantView> {
 
 /** A side turn begins, as LumiAH tells the engine before anything of it is sent to a model. */
 async function begins(rig: Rig, chatId: string, turn: string): Promise<void> {
-  await rig.rt.harness.extension.runBegan?.({ userId: rig.host.userId, chatId, turn, kind: "side" });
+  await rig.rt.harness.extension.runBegan?.({ userId: rig.host.userId, chatId, turn, kind: "side", story: { hidden: "leave_out", from: "everyone", newest: "directive" } });
 }
 
 let calls = 0;

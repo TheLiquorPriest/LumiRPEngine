@@ -16,6 +16,7 @@ import type { IconName } from "../icons";
 import type { PanelDef } from "../registry";
 import { useSelect } from "../store";
 import type { UiCatalog } from "../ui-registry";
+import { attachedText } from "../gm/engine";
 
 /** Core panels always show; a pack's panel shows once its view model is in the state (a null one is none, as the Encounter's between fights). */
 export function visiblePanels(catalog: UiCatalog, view: StateView): PanelDef[] {
@@ -193,7 +194,11 @@ function NotWorld(props: { chatId: string }) {
       const ok = await app.host.confirm("Attach world", `Attach “${world.name}” to this chat? The world starts at its current revision.`, "info", "Attach");
       if (!ok) return;
       const result = await app.request({ type: "lre.world", op: "attach", worldId: world.id, chatId: props.chatId });
-      if (result) void app.client.open(props.chatId);
+      if (!result) return;
+      void app.client.open(props.chatId);
+      // Which engine the chat plays from its first turn: the harness where it can, else its classic steps, and why.
+      const engine = await app.request<"lre.chat.knowledge">({ type: "lre.chat.knowledge", chatId: props.chatId, engines: true });
+      if (engine) app.toast(attachedText(world.name, engine.engine ?? "classic", engine.harnessBlocked ?? null), "info");
     });
   return (
     <div class="lre-play-notworld" data-lre-section="play-not-world">

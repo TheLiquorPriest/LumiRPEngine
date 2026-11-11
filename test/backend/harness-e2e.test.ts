@@ -293,7 +293,7 @@ describe("what the harness leaves alone", () => {
     const chatId = await chatOn(rig, worldId);
     // Nothing failed and nothing was asked of the player: the chat is the engine's own to play.
     expect(await engineOf(rig, chatId)).toBe("classic");
-    expect(String(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engines: true })).harnessBlocked)).toContain('The permission "generation" isn\'t granted');
+    expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engines: true })).harnessBlocked).toBe("The permission \"generation\" isn't granted: LumiRPEngine needs it to make its agents' model calls and hear when a reply starts and ends. Grant it in Lumiverse (Extensions → LumiRPEngine → Permissions).");
     bed.permit("generation", true);
     expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engines: true })).harnessBlocked).toBeUndefined();
     await playOn(rig, chatId, "harness");

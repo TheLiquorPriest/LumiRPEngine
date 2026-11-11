@@ -9,7 +9,7 @@
 // tool call the test makes as an agent, as the author's would be.
 
 import { expect } from "bun:test";
-import type { AgentUsage, ChatInfo, ModelMessage, RemoteTool, RunKind, TurnKind, TurnRecord, TurnStatus } from "../../src/backend/harness/shapes";
+import type { AgentUsage, ChatInfo, ModelMessage, RemoteTool, RunKind, StorySource, TurnKind, TurnRecord, TurnStatus } from "../../src/backend/harness/shapes";
 import { toChain } from "../../src/backend/ledger-io";
 import { HARNESS_AGENT } from "../../src/shared/harness-texts";
 import type { JsonObject } from "../../src/shared/json";
@@ -207,10 +207,13 @@ export class Run {
   }
 }
 
-/** What the engine claims of the chat, as the runtime asks at the start of every run. */
-export function claimOf(rig: Rig, chatId: string) {
+/** What counts as the chat's story without the engine's word, as LumiAH resolves it for the claim (its defaults: hidden messages left out, everyone's messages read). */
+export const STORY_WITHOUT_CLAIM: StorySource = { hidden: "leave_out", from: "everyone", newest: "directive" };
+
+/** What the engine claims of the chat, as the runtime asks at the start of every run: with what holds of the story without the claim, and Lumiverse's Sovereign Hand as the runtime read it (null: Lumiverse doesn't say). */
+export function claimOf(rig: Rig, chatId: string, without: { story?: StorySource; sovereignHand?: boolean | null } = {}) {
   const chat: ChatInfo = { id: chatId, name: "Alder", characterId: null, characterName: "Narrator", branchedFrom: null };
-  return rig.rt.harness.extension.claim?.({ userId: rig.host.userId, chatId, chat }) ?? Promise.resolve(null);
+  return rig.rt.harness.extension.claim?.({ userId: rig.host.userId, chatId, chat, story: without.story ?? STORY_WITHOUT_CLAIM, sovereignHand: without.sovereignHand ?? null }) ?? Promise.resolve(null);
 }
 
 /** The engine's tools as the runtime lists them for the chat. */
@@ -233,7 +236,7 @@ export async function beginTurn(rig: Rig, chatId: string, text: string | null, o
   if (!kind) throw new Error(`no turn answers a ${generation.type} generation`);
   const run = new Run(rig, chatId, generation.id, kind, generation);
   await claimOf(rig, chatId);
-  await rig.rt.harness.extension.runBegan?.({ userId: rig.host.userId, chatId, turn: generation.id, kind });
+  await rig.rt.harness.extension.runBegan?.({ userId: rig.host.userId, chatId, turn: generation.id, kind, story: STORY_WITHOUT_CLAIM });
   return run;
 }
 
@@ -241,7 +244,7 @@ export async function beginTurn(rig: Rig, chatId: string, text: string | null, o
 export async function beginJob(rig: Rig, basis: Pick<Run, "turn" | "chatId">, id: string, by: Agent = AUTHOR, parent?: string): Promise<Run> {
   rig.rt.harness.jobKnown({ id, basis: basis.turn, by: { who: "agent", id: by.id, role: by.role }, ...(parent !== undefined ? { parent } : {}) });
   const run = new Run(rig, basis.chatId, id, "job", null);
-  await rig.rt.harness.extension.runBegan?.({ userId: rig.host.userId, chatId: basis.chatId, turn: id, kind: "job" });
+  await rig.rt.harness.extension.runBegan?.({ userId: rig.host.userId, chatId: basis.chatId, turn: id, kind: "job", story: STORY_WITHOUT_CLAIM });
   return run;
 }
 

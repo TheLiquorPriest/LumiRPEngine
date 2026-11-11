@@ -1,6 +1,7 @@
-// What the reply told, recorded once it is written (`story_record`), and two of the game master's
-// own moves that had no tool: a thing put back where it is kept (`item_away`) and someone or
-// something taken out of what holds it (`gm_take_out`).
+// What the reply told, recorded once it is written (`story_record`); where it says something against
+// its turn, noted on it (`story_departure`); and two of the game master's own moves that had no
+// tool: a thing put back where it is kept (`item_away`) and someone or something taken out of what
+// holds it (`gm_take_out`).
 //
 // `story_record` stands in for the classic turn's read of its reply (`extract`), for the change
 // types no other tool notes (`STORY_TYPES`). The calling agent says what the reply told, one change
@@ -22,6 +23,12 @@
 // volunteering a task (`agendaAsks` on the other engines) and a field its world's author bounded in
 // Build are therefore refused with why, never recorded unasked.
 //
+// The reply serves the turn: what it says against what the turn decided or the world holds is never
+// written into the world. `story_departure` keeps it on the reply instead, a line each (what the
+// reply says, what the world holds), where the player sees it and the next turn's author is told.
+// It changes nothing of the world, so no mode and no card applies: only the story's tier, and the
+// limits of what a reply keeps (`DEPARTURE_LIMITS`).
+//
 // The two moves go through the writer as the game master's own controls send them: Put it away is
 // the item op `move` to where the thing is kept (`putAwaySpot`), Take out the edit `{op: "put"}`
 // with no holder. The writer checks each as it checks any: the caller's tier, the change type's
@@ -30,7 +37,7 @@
 import { toolArgTextId } from "../../../../shared/agent-tools";
 import { HARNESS_FAMILY } from "../../../../shared/harness-text-kit";
 import { HARNESS_NOTE } from "../../../../shared/harness-texts";
-import { STORY_NOTE, STORY_TOOL, STORY_TYPES, type StoryType } from "../../../../shared/harness-texts-story";
+import { DEPARTURE_LIMITS, STORY_NOTE, STORY_TOOL, STORY_TYPES, type StoryType } from "../../../../shared/harness-texts-story";
 import { hashJson } from "../../../../shared/hash";
 import { hasOwn, type JsonObject } from "../../../../shared/json";
 import { ORG_FACT_TYPES } from "../../../../shared/role-prompts";
@@ -40,17 +47,18 @@ import { namedInText } from "../../../../packs/minds/core/fidelity";
 import { quotesReply } from "../../../../packs/orgs/core/story";
 import type { ToolOutcome } from "../../runtime";
 import type { HarnessTurn } from "../harness-turn";
-import { gmEdit, needId, NOTE_TIER, noteFact, propose, tierRefusal } from "../propose";
+import { gmEdit, missing, needId, NOTE_TIER, noteFact, propose, refusedAnswer, tierRefusal, wordsArg } from "../propose";
 import type { ToolReadView } from "../read-view";
 import { type Resolved, resolveEntity, resolveNamedThing, resolvePerson, resolvePlace } from "../resolve";
 import { argGiven, intArg, jsonObject, needText, objectArg, objectSchema, text } from "../schema";
 import { checkOrPropose } from "../write/items";
-import { type HarnessToolDefinition, stageChange } from "./kit";
+import { type HarnessToolDefinition, stageChange, words } from "./kit";
 import { passSpan } from "./time";
 
 const RECORD = STORY_TOOL.record;
 const AWAY = STORY_TOOL.away;
 const TAKE_OUT = STORY_TOOL.takeOut;
+const DEPARTURE = STORY_TOOL.departure;
 
 /** How a field that names someone or something is found among what the caller's view may name. */
 type Finder = (view: ToolReadView, said: string) => Resolved;
@@ -216,6 +224,33 @@ export const STORY_TOOLS: readonly HarnessToolDefinition[] = [
       const entity = needId(view, TAKE_OUT, args, "entity", resolveEntity);
       if (typeof entity !== "string") return entity;
       return propose(view, env.writer, gmEdit({ op: "put", entity, into: null }));
+    },
+  },
+  {
+    name: DEPARTURE,
+    family: HARNESS_FAMILY.turn,
+    tier: "write",
+    parameters: () => objectSchema({ lines: words() }, ["lines"]),
+    async run(args, env) {
+      const view = await env.reader.view();
+      const turn = env.turn;
+      if (!turn) return view.refuse(HARNESS_NOTE.noTurn);
+      // Held here too, whatever lets the call through: lines of departure pass no writer, which would hold its caller to its tier.
+      const below = tierRefusal(view, env, NOTE_TIER);
+      if (below) return below;
+      if (turn.reply === null || !turn.depart) return view.refuse(STORY_NOTE.departAfterReply);
+      // One line given as text, not as a list, is a list of one.
+      const raw = args.lines;
+      const lines = typeof raw === "string" ? [raw.trim()].filter((line) => line !== "") : wordsArg(args, "lines");
+      if (lines === null || lines.length === 0) return missing(view, DEPARTURE, "lines");
+      const most = String(DEPARTURE_LIMITS.lines);
+      if (lines.length > DEPARTURE_LIMITS.lines) return view.refuse(STORY_NOTE.departMany, { most, count: String(lines.length) });
+      const long = lines.findIndex((line) => line.length > DEPARTURE_LIMITS.chars);
+      if (long >= 0) return view.refuse(STORY_NOTE.departLong, { at: String(long + 1), chars: String(lines[long]?.length ?? 0), most: String(DEPARTURE_LIMITS.chars) });
+      const kept = await turn.depart(lines);
+      if ("refused" in kept) return refusedAnswer(kept);
+      if ("full" in kept) return view.refuse(STORY_NOTE.departFull, { held: String(kept.full), most });
+      return view.answer({ departures: { lines: kept.departures, lands: view.text(STORY_NOTE.departed) } });
     },
   },
 ];

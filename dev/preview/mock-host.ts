@@ -313,6 +313,13 @@ export function createMockHost(options: MockHostOptions): MockHost {
     events: { on: () => () => {}, emit: () => {} },
     host: {
       surfaces: {
+        // Lumiverse's own places and actions as its host lists them: the commands the preview's pages press.
+        list: () => [
+          { kind: "command", id: "action-regenerate", invocable: true },
+          { kind: "command", id: "action-continue", invocable: true },
+          { kind: "command", id: "action-stop-generation", invocable: true },
+        ],
+        subscribe: () => () => undefined,
         invoke: async (ref: { kind: string; id: string }) => {
           hostActions.push(`${ref.kind}:${ref.id}`);
         },

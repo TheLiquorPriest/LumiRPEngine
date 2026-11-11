@@ -42,6 +42,8 @@ export type {
   RunEnded,
   RunKind,
   Skill,
+  StorySetting,
+  StorySource,
   ToolsPort,
   ToolTier,
   TurnKind,

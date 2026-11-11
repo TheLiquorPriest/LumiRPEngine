@@ -4,7 +4,7 @@
 // those derived from records (Re-read edit, Retry, Keep report) and the card for a turn kept from a
 // reply that failed.
 
-import type { ChatId, EntityId, MessageId, PackId, PanelId } from "../shared/ids";
+import type { ChatId, EntityId, MessageId, PackId, PanelId, RevisionId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { deepFreeze, hasOwn, isRecord } from "../shared/json";
 import { formatMoney, requirementExpr } from "../shared/world";
@@ -47,7 +47,8 @@ import { combatEntries, paletteEncounter } from "../packs/combat/core/index";
 import { thingsConfigOf } from "../shared/things";
 import type { ChatKnowledgePrefs } from "./chat-knowledge-prefs";
 import type { StoredChip } from "./chips";
-import { unplayedOf } from "./harness/record";
+import { WORLD_MADE, worldMadeShown } from "./harness/card";
+import { departuresOf, unplayedOf } from "./harness/record";
 import type { ReplyFailure } from "./ledger-io";
 import { OFFSTAGE_TEXT_ID, type PromptTexts } from "../shared/prompts";
 import { TELL_LABEL, type OffstageSettings } from "../shared/offstage";
@@ -711,9 +712,16 @@ export function replyFailedChip(turn: string, failed: ReplyFailure, as: Generate
   };
 }
 
+/** What a reply's flags say the player can do on the chat's last reply, which Lumiverse's Regenerate plays again: one no turn was played for, and one that says something against its turn (before its lines of departure, `departuresOf`, which an earlier reply's flag lists with only what the world kept). */
+const FLAG_NEXT = {
+  unplayed: "Regenerate to play the turn, or go on: the author of the next harness turn is told, and records what still matters.",
+  departed: "Where this reply differs from what its turn decided, the world keeps the turn's version, and the author of the next turn is told. Regenerate to play the turn again, or say in your next message how it should go.",
+  departedEarlier: "Where this reply differs from what its turn decided, the world kept the turn's version.",
+} as const;
+
 /**
  * Chips derived from the records: Re-read edit, Retry read, Retry (empty reply), degraded, Keep report, what changed, elapsed, overdue, a correction's Undo, a refused write's notice.
- * On a chat the harness plays (`harness`) none offers a read or a telling of the engine's own: there the engine reads no reply and tells none again itself, every model call being an agent's. A reply no turn was played for says so, on any chat.
+ * On a chat the harness plays (`harness`) none offers a read or a telling of the engine's own: there the engine reads no reply and tells none again itself, every model call being an agent's. A reply no turn was played for says so, on any chat, and so does a reply that says something against what its turn decided, with each line of it.
  */
 function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepReport: readonly KeepLine[], core: LedgerCore, registry: Registry, world: WorldDoc, harness: boolean): Chip[] {
   const chips: Chip[] = [];
@@ -723,11 +731,14 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
     const rec: Rec | null = activeRecord(m, core.journal.tombstones);
     if (!rec) return;
     const fold_ = fold.messages[i]?.fold;
+    const head = i === headIndex;
     const unplayed = unplayedOf(rec);
     if (unplayed !== null) {
       const what = unplayed.added ? "What Continue added to this reply was written" : "This reply was written";
-      chips.push({ id: `unplayed:${m.id}:${m.swipeId}`, kind: "degraded", messageId: m.id, label: "No turn was played", detail: `${what} without the harness's agents: ${unplayed.why}. Nothing was rolled for it, no time passed, and nothing it tells was recorded. The author of the next harness turn is told, and records what still matters.`, actions: [], expires: "never" });
+      chips.push({ id: `unplayed:${m.id}:${m.swipeId}`, kind: "degraded", messageId: m.id, label: "No turn was played", detail: `${what} without the harness's agents: ${unplayed.why}. Nothing was rolled for it, no time passed, and nothing it tells was recorded.${head ? ` ${FLAG_NEXT.unplayed}` : ""}`, actions: head ? [{ id: "regenerate", label: "Regenerate" }] : [], expires: "never" });
     }
+    const departed = departuresOf(rec);
+    if (departed.length > 0) chips.push({ id: `departed:${m.id}:${m.swipeId}`, kind: "degraded", messageId: m.id, label: "The reply doesn't match the world", detail: [head ? FLAG_NEXT.departed : FLAG_NEXT.departedEarlier, ...departed].join("\n"), actions: head ? [{ id: "regenerate", label: "Regenerate" }] : [], expires: "never" });
     if (!harness && rec.accepted && (fold_ === "on_path" || fold_ === "plain")) {
       chips.push({ id: `reread:${m.id}:${m.swipeId}`, kind: "reread", messageId: m.id, label: "Re-read edit", detail: "The engine kept the world as simulated. Re-read this text to update it.", actions: [{ id: "reread", label: "Re-read edit", style: "primary" }], expires: "never" });
     }
@@ -864,6 +875,8 @@ export interface ViewInput {
   registry: Registry;
   world: (revision: string) => WorldDoc | undefined;
   stored: readonly StoredChip[];
+  /** The world's newest revision, read where the chat holds a reply's chip that offers Undo only while a commit is still that (`harness/card.ts`); absent where none does. */
+  head?: RevisionId | null;
   meter: CallMeterView | null;
   /** How the player chose to see the chat's map (`ChatPrefs`); null or absent follows the world. The map panel is built for it. */
   mapDisplay?: MapDisplay | null;
@@ -969,6 +982,7 @@ export function buildView(input: ViewInput): StateView {
     for (const pack of registry.packs) packs[pack.id] = pack.version;
     // A swipe's chips show only while that swipe is displayed (switching back shows them again).
     const shown = input.stored.filter((c) => c.swipeId === undefined || observed.find((m) => m.id === c.messageId)?.swipeId === c.swipeId);
+    const chain = shown.some((c) => c.kind === WORLD_MADE) ? core.chain(observed) : [];
     return {
       v: 1,
       chatId: input.chatId,
@@ -980,7 +994,7 @@ export function buildView(input: ViewInput): StateView {
       engine: input.knowledge.chat.engine ?? "classic",
       hud: parts.hud,
       scene: read.scene,
-      chips: [...shown.map(({ payload: _payload, ...chip }) => chip), ...read.chips],
+      chips: [...shown.map(({ payload, ...chip }) => (chip.kind === WORLD_MADE ? worldMadeShown(chip, payload, { head: input.head, core, chain }) : chip)), ...read.chips],
       replyClocks: read.replyClocks,
       journal: read.journal,
       keepReport: read.keepReport,

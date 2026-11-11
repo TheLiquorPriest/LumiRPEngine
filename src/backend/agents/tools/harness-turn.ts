@@ -101,4 +101,12 @@ export interface HarnessTurn {
   stage(change: HarnessChange): Promise<{ mode: "auto" | "confirm" } | OpRefusal>;
   /** Makes everything staged so far definitive, with the author's note of why now (null: none); a refusal in a job's run, where nothing waits. */
   commit(note: string | null): Promise<HarnessCommit | OpRefusal>;
+  /**
+   * Keeps `lines` on the turn's reply as where it says something against what the turn decided or
+   * the world holds (`RecHarness.departures`), after the lines it holds: nothing of the world
+   * changes. Answers every line the reply holds now; `full`, with how many it holds, where they
+   * would come to more than a reply keeps, and nothing was kept; or why the reply's record takes no
+   * more. Absent before the reply, where there is no reply to keep them on.
+   */
+  depart?(lines: readonly string[]): Promise<{ departures: string[] } | { full: number } | OpRefusal>;
 }

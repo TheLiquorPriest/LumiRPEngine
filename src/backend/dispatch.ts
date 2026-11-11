@@ -78,6 +78,7 @@ import { type DraftNotice, newChatRun, WorldError } from "./worlds";
 import { SecrecyError, SecrecyMoves } from "./secrecy-migration";
 import { Assistant, AssistantError, ASSISTANT_ROLE, workspaceRequest } from "./agents/assistant";
 import { SideAssistant } from "./harness/assistant";
+import { undoWorldMade } from "./harness/card";
 import { roleTextTest, testedRole } from "./agents/roles/test";
 import { promptDef, swipeDirectionOf } from "../shared/prompts";
 import { type Review, ReviewError } from "./agents/review";
@@ -1745,6 +1746,14 @@ export class Dispatcher {
           return { applied: result.applied, ...waits(result) };
         }
         throw new RequestError("not_found", "the routine change is gone");
+      }
+      case "world_made": {
+        // What a harness turn made of the world's document (`harness/card.ts`): Undo puts the world and this chat back, the user's own act. Open in Build is the page's own and sends nothing.
+        if (choice !== "undo") throw new RequestError("bad_request", `unknown choice ${choice}`);
+        const undone = await undoWorldMade(this.rt, { chatId, userId }, chip);
+        if ("refused" in undone) throw new RequestError("conflict", undone.refused);
+        this.rt.push.changed(chatId, userId);
+        return { applied: true, pending: undone.pending };
       }
       case "read_failed": {
         // Retry: the next swipe re-runs the turn, reading the typed text afresh; the UI swipes.

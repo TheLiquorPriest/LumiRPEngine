@@ -30,6 +30,7 @@ import type { RoleId, RoleTier } from "../../shared/agent-roles";
 import type { ToolView } from "../../shared/agent-tools";
 import { WRITE_NOTE } from "../../shared/agent-tools-write";
 import { HARNESS_AGENT, HARNESS_NOTE } from "../../shared/harness-texts";
+import { WORLD_NOTE } from "../../shared/harness-texts-world";
 import { hashParts } from "../../shared/hash";
 import type { ChatId, EntityId, MessageId, UserId } from "../../shared/ids";
 import { isRecord } from "../../shared/json";
@@ -37,6 +38,7 @@ import type { ChatRun, LedgerEvent, RecAgent } from "../../shared/ledger";
 import { type ChangeType, EXTRACTION_TYPES, type ExtractionLearning } from "../../shared/settings";
 import type { KeptFile } from "../../shared/stores";
 import type { WorldDoc } from "../../shared/world";
+import { changesBetween } from "../../shared/world-diff";
 import type { ChainMessage } from "../../engine/ledger/chain";
 import type { LedgerCore } from "../../engine/ledger/journal";
 import { activeRecord } from "../../engine/ledger/path";
@@ -48,7 +50,7 @@ import { stepTracks } from "../../engine/tracks";
 import { Working } from "../../engine/working";
 import { type Review, reviewChipId, type StoredReviewItem } from "../agents/review";
 import { HARNESS_LISTED, type HarnessListed } from "../agents/tools/harness";
-import { type HarnessFiles, makeWorldActs, type WorldAct, type WorldBuild } from "../agents/tools/harness-ports";
+import { type HarnessFiles, makeWorldActs, type WorldAct, worldActLines, worldActShown, type WorldBuild } from "../agents/tools/harness-ports";
 import type { HarnessChange, HarnessCommit, HarnessTurn } from "../agents/tools/harness-turn";
 import { refusedAnswer } from "../agents/tools/propose";
 import type { LoreLoads, ToolEnv } from "../agents/tools/registry";
@@ -62,7 +64,7 @@ import { renderPrompt } from "../prompts";
 import type { Runtime } from "../runtime";
 import { effectiveMode, recordOutcome } from "../settings-store";
 import type { TurnFrame } from "../turn-frame";
-import { cardedChange, cardLines } from "./card";
+import { cardedChange, cardLines, stagedBy, worldMadeChip } from "./card";
 import { harnessRole, type HarnessRole } from "./definitions";
 import type { AgentRef, RemoteToolCall } from "./shapes";
 
@@ -291,6 +293,16 @@ type Asked = { op: StagedOp } | { staged: StagedChange };
 /** An act on the world's document a commit landed (`CommitOutcome.acts`): made in the world's store once the commit has landed everything else. */
 type LandedAct = { op: StagedOp; act: WorldAct };
 
+/**
+ * The world's draft as the turn's agents found it and left it: whether it holds edits of someone
+ * else's (the user's own, from Build), as it did when they first came to it or as a write between
+ * theirs made it, and the version they last left it at.
+ */
+interface Drafted {
+  theirs: boolean;
+  last: number;
+}
+
 /** What a turn is opened with: the generation it is, what it runs on, and the state it starts from. */
 export interface OpenTurnInit {
   chatId: ChatId;
@@ -379,6 +391,16 @@ export class OpenTurn {
   private acting: Promise<unknown> = Promise.resolve();
   /** Those its last commit landed, as its reply was saved: made once the turn's record is written (`late`). */
   private readonly left: LandedAct[] = [];
+  /** The draft as the turn's agents found and left it (`found`): read at their first write of it or their first act on it. */
+  private drafting: Promise<Drafted> | null = null;
+  /** A commit of the turn went to the review card for edits no agent of it made: a move to the world's head asked after it waits there too, so one Apply makes both. */
+  private carded = false;
+  /** What the turn's acts made of the world's document, for its reply's chips (`madeChips`): each commit, and each revision an Upgrade brought the chat to. */
+  private readonly made: { commits: { op: StagedOp; act: WorldAct; from: string; to: string }[]; moved: Set<string> } = { commits: [], moved: new Set() };
+  /** The definition each agent that called runs as, by its key: what the review card names it by (`stagedBy`). */
+  private readonly defs = new Map<string, string>();
+  /** The reply the turn's record is on, once it is written (`finish`). */
+  private reply: { messageId: MessageId; swipeId: number } | null = null;
   /** A landed change said how much time the turn takes (none included). */
   private timeSaid = false;
   private tick: number | null = null;
@@ -418,7 +440,7 @@ export class OpenTurn {
     this.kept = init.kept;
     this.learning = init.learning;
     this.active = init.active;
-    this.build = init.build;
+    this.build = init.build ? this.watched(init.build) : null;
     this.w = new Working(rt.registry, init.world, init.start);
     this.w.applyAll(init.opening);
     this.opened = this.w.events.length;
@@ -541,6 +563,7 @@ export class OpenTurn {
    */
   env(call: TurnCall, signal: AbortSignal): ToolEnv {
     const { agent } = call;
+    this.defs.set(agent.id, agent.def);
     const both = AbortSignal.any([signal, this.stop.signal]);
     const base = (): ChatHead => this.headFor(agent);
     const staged = (head: ChatHead) => stagedWorkspace(this.rt, this.draft, head, withKept(this.kept, this.landing));
@@ -678,6 +701,72 @@ export class OpenTurn {
     return { mode };
   }
 
+  // ---------------------------------------------------------------- the world's draft
+
+  /**
+   * The world's document as the turn's agents reach it: the store's own port, with each write of the
+   * draft followed. A tool's write names the version it read (`writeDraft`), so one that names
+   * another version than the turn's agents last left was made over someone else's write.
+   */
+  private watched(port: WorldBuild): WorldBuild {
+    return {
+      ...port,
+      edit: async (edit) => {
+        if (edit.op === "get") return port.edit(edit);
+        const drafted = await this.found(port);
+        const after = await port.edit(edit);
+        if (edit.version !== drafted.last) drafted.theirs = true;
+        drafted.last = after.version;
+        return after;
+      },
+    };
+  }
+
+  /** The draft as the turn's agents first came to it: whether it differs from the world's head (the comparison the review card lists), and its version. Read once; a read the store refused is made again. */
+  private found(port: WorldBuild): Promise<Drafted> {
+    if (this.drafting) return this.drafting;
+    const reading = (async (): Promise<Drafted> => {
+      const draft = await port.edit({ op: "get" });
+      return { theirs: draft.stored && changesBetween(await port.revision(await port.head()), draft.draft).length > 0, last: draft.version };
+    })();
+    this.drafting = reading;
+    reading.catch(() => {
+      if (this.drafting === reading) this.drafting = null;
+    });
+    return reading;
+  }
+
+  /**
+   * Whether an act landing now would publish or throw away what no agent of the turn wrote: a commit,
+   * a drop or a restore of a draft that holds such edits, or of a version the turn's agents didn't
+   * leave it at; or a move to the world's head after a commit of the turn that waits on the review
+   * card, which it follows. Such an act asks first, whatever the mode.
+   */
+  private async theirs(act: WorldAct): Promise<boolean> {
+    if (act.do === "upgrade") return act.to === null && this.carded;
+    if (!this.build) return false;
+    const drafted = await this.found(this.build);
+    return drafted.theirs || (act.version ?? null) !== drafted.last;
+  }
+
+  /** Sends to the review card each act of a commit that would land on edits no agent of the turn made (`theirs`), saying why in plain words: to the player on the card, to the author in the commit's answer. */
+  private async holdTheirs(acts: LandedAct[], ask: Asked[]): Promise<void> {
+    const landing: LandedAct[] = [];
+    for (const landed of acts) {
+      if (!(await this.theirs(landed.act))) {
+        landing.push(landed);
+        continue;
+      }
+      const { op, act } = landed;
+      if (act.do === "commit") this.carded = true;
+      const shown = op.op.kind === "world" ? worldActShown(op.op.line, op.op.detail) : null;
+      const card = shown ? worldActLines(shown, true) : op.lines;
+      const why = act.do === "upgrade" ? "It waits with the commit before it, whose draft holds your own edits from Build." : "The world's draft also holds your own edits from Build, so this waits for you.";
+      ask.push({ op: { ...op, mode: "confirm", lines: [...op.lines, this.text(act.do === "upgrade" ? WORLD_NOTE.followsCommit : WORLD_NOTE.theirEdits)], cardLines: [...card.slice(0, 1), why, ...card.slice(1)] } });
+    }
+    acts.splice(0, acts.length, ...landing);
+  }
+
   // ---------------------------------------------------------------- committing
 
   /**
@@ -723,6 +812,8 @@ export class OpenTurn {
       this.commitChange(item.staged, out, ask);
     }
     this.commitOps(ctx, ops, out, ask, acts);
+    // An act on the world's document that would land on edits no agent of the turn made asks first, whatever the mode.
+    await this.holdTheirs(acts, ask);
     if (ask.length > 0) await this.askFirst(ctx, ask, out, signal, closing, acts);
     if (this.w.events.length > from) {
       // The story moves on from what landed: a stage it made true is entered now, so the author and the writer read it.
@@ -742,11 +833,18 @@ export class OpenTurn {
     const made = this.acting
       .catch(() => undefined)
       .then(async () => {
-        const results = await makeWorldActs(this.rt, { chatId: this.chatId, userId: this.userId }, acts.map((a) => a.act));
+        // What an act of the turn's leaves of the draft holds nobody's unfinished work: committed, dropped, or a revision's copy.
+        const results = await makeWorldActs(this.rt, { chatId: this.chatId, userId: this.userId }, acts.map((a) => a.act), (_world, draft) => {
+          this.drafting = Promise.resolve({ theirs: false, last: draft.version });
+        });
         const refused: { op: StagedOp; refusal: OpRefusal }[] = [];
-        acts.forEach(({ op }, i) => {
+        acts.forEach(({ op, act }, i) => {
           const result = results[i];
-          if (result && "made" in result) return void out.landed.push([...op.lines, result.made]);
+          if (result && "made" in result) {
+            if (result.committed) this.made.commits.push({ op, act, ...result.committed });
+            if (result.moved !== undefined) this.made.moved.add(result.moved);
+            return void out.landed.push([...op.lines, result.made]);
+          }
           const reason = result?.refused ?? this.text(WRITE_NOTE.stale);
           out.refused.push({ lines: op.lines, reason });
           refused.push({ op, refusal: refusal("world_refused", reason, op.key) });
@@ -815,10 +913,15 @@ export class OpenTurn {
   private cardItem(asked: Asked): StoredReviewItem {
     if ("op" in asked) {
       const op = asked.op;
-      return { key: op.key, source: "agent", role: op.role, changeType: op.changeType, lines: op.cardLines ?? [], status: "open", op: op.op, agentId: op.agentId, connection: op.connectionId };
+      return { key: op.key, source: "agent", role: op.role, changeType: op.changeType, lines: op.cardLines ?? [], status: "open", op: op.op, agentId: op.agentId, connection: op.connectionId, by: this.by(op.agentId) };
     }
-    const { change } = asked.staged;
-    return { key: change.key, source: "read", role: "read", changeType: String(change.changeType), lines: cardLines(this.rt, change, this.w.ctx), status: "open" };
+    const { change, agentId } = asked.staged;
+    return { key: change.key, source: "read", role: "read", changeType: String(change.changeType), lines: cardLines(this.rt, change, this.w.ctx), status: "open", by: this.by(agentId) };
+  }
+
+  /** Who staged a change, as the review card names them (`stagedBy`): the agent of the turn that did, by its harness name. */
+  private by(agentId: string): string {
+    return stagedBy(this.frame.settings.prompts.texts, this.defs.get(agentId) ?? agentId, false);
   }
 
   /**
@@ -940,6 +1043,7 @@ export class OpenTurn {
    * what the gate's cards taught is counted.
    */
   async finish(core: LedgerCore, observed: readonly ChainMessage[], messageId: MessageId, swipeId: number): Promise<TurnClose> {
+    this.reply = { messageId, swipeId };
     try {
       const reply = core.chain(observed).find((m) => m.id === messageId);
       const rec = reply ? activeRecord(reply, core.journal.tombstones) : null;
@@ -973,10 +1077,21 @@ export class OpenTurn {
     try {
       await this.makeActs(acts, out);
       await this.acting;
+      await this.madeChips();
     } catch (error) {
-      this.rt.host.log("warn", `[LumiRPEngine] chat ${this.chatId}: what the turn's agents asked of the world's document wasn't all made (${error instanceof Error ? error.message : String(error)})`, this.userId);
+      this.rt.host.log("warn", `[LumiRPEngine] chat ${this.chatId}: what the turn's agents asked of the world's document wasn't all made, or its reply doesn't show it (${error instanceof Error ? error.message : String(error)})`, this.userId);
     }
     if (acts.length > 0) this.rt.host.log("info", `[LumiRPEngine] turn ${this.generationId.slice(0, 8)}: of the world's document, ${out.landed.length} made and ${out.refused.length} refused once its reply was saved`, this.userId);
+  }
+
+  /** The reply's chips for what the turn's acts made of the world's document: one for each commit, marked as made, with Undo (`worldMadeChip`). */
+  private async madeChips(): Promise<void> {
+    const reply = this.reply;
+    const worldId = this.build?.worldId;
+    if (!reply || worldId === undefined || this.made.commits.length === 0) return;
+    const chips = this.made.commits.map(({ op, act, from, to }, i) => worldMadeChip({ worldId, from, to, turn: this.generationId }, { id: `world_made:${reply.messageId}:${reply.swipeId}:${this.generationId}:${i}`, ...reply }, { note: act.do === "commit" ? act.note : null, changes: op.op.kind === "world" ? (op.op.detail?.player.slice(1) ?? []) : [], plays: this.made.moved.has(to) }));
+    await this.rt.chips.add(this.chatId, this.userId, chips);
+    this.rt.push.changed(this.chatId, this.userId);
   }
 
   /** The reply's review card for what still asks first: an operation as an agent turn's, applied through the writer; a harness tool's change as a confirm chip the card holds, applied as a reply's own confirm is. */
@@ -991,7 +1106,7 @@ export class OpenTurn {
       }
       const { change } = asked.staged;
       if (change.changeType === null) continue;
-      const carded = cardedChange(this.rt, change, change.changeType, this.w.ctx, { id: `confirm:${messageId}:${this.generationId}:h${chips.length}`, messageId, swipeId, connection: this.active, detail: change.time !== undefined ? "The turn's agents say this much time passed. Apply it?" : "A change the turn's agents recorded. Apply it?" });
+      const carded = cardedChange(this.rt, change, change.changeType, this.w.ctx, { id: `confirm:${messageId}:${this.generationId}:h${chips.length}`, messageId, swipeId, connection: this.active, detail: change.time !== undefined ? "The turn's agents say this much time passed. Apply it?" : "A change the turn's agents recorded. Apply it?", by: this.by(asked.staged.agentId) });
       chips.push(carded.chip);
       items.push(carded.item);
     }

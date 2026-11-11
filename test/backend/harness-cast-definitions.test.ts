@@ -78,10 +78,10 @@ describe("the definitions the harness engine registers", () => {
     expect(given(knowledge).filter((n) => tool(n).tier !== "read")).toEqual([HARNESS_TOOL.knowledgeInfer]);
     for (const name of [HARNESS_TOOL.knowledgeScene, "knowledge_who_knows", "knowledge_what_knows", "people_find"]) expect(given(knowledge)).toContain(name);
 
-    // The chronicler: the chat as written, what reads the world, the story's own changes and what the reply told (`story_record`, the time its telling added among it); none of the game master's edits, and not the turn's own time, which is the author's alone.
+    // The chronicler: the chat as written, what reads the world, the story's own changes, what the reply told (`story_record`, the time its telling added among it) and where the reply says something against its turn (`story_departure`); none of the game master's edits, and not the turn's own time, which is the author's alone.
     const chronicler = definition(HARNESS_AGENT.chronicler);
     expect(given(chronicler).filter((n) => tool(n).writer === "gm")).toEqual([]);
-    expect(given(chronicler).filter((n) => tool(n).writer === null)).toEqual([STORY_TOOL.record]);
+    expect(given(chronicler).filter((n) => tool(n).writer === null)).toEqual([STORY_TOOL.record, STORY_TOOL.departure]);
     for (const name of ["item_move", "item_make", "person_add", "purchase", "place_make", "items_find", "time_clock"]) expect(given(chronicler)).toContain(name);
     for (const name of [LUMIAH_TOOL.chatRead, LUMIAH_TOOL.chatGrep, LUMIAH_TOOL.chatSearch]) expect(chronicler.tools).toContain(name);
 

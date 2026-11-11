@@ -4511,7 +4511,9 @@ export class Runtime implements TurnHooks {
     }
     // Each panel's cost, kept by Diagnostics where it is slow, so the next log names it.
     const parts: DiagStep[] = [];
-    const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay, knowledge, offstage: settings.offstage, memo, parts });
+    // A harness turn's change to the world's document offers Undo only while its revision is the world's newest: the head is read for a chat that holds one.
+    const head = stored.some((c) => c.kind === "world_made") ? ((await this.worlds.index(run.worldId, userId))?.head ?? null) : undefined;
+    const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, head, meter: this.meter.view(userId), mapDisplay, knowledge, offstage: settings.offstage, memo, parts });
     for (const p of parts) this.diag.slow(userId, chatId, `state view/${p.name}`, p.ms);
     view.panels["core.context"] = this.inspectorView(chatId, userId);
     // A turn kept from a reply that failed waits on the player (DESIGN §5.1): its card shows while it lasts.

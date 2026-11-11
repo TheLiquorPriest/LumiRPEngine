@@ -108,7 +108,7 @@ export const HARNESS_OWN_NEEDS: ReadonlyMap<string, HarnessNeeds> = new Map(
       ["read", ["knowledge_scene", "checks_stakes", "fight_read", "gm_effects", "sections_read", "world_status", "world_read", "world_shape", "world_history", "world_made"]],
       ["any", ["knowledge_infer"]],
       ["author", ["time_pass", "commit", "grant_writes", "action_play", "fight_start", "fight_round", "fight_end"]],
-      ["story", ["set_drop", "story_record", "item_away"]],
+      ["story", ["set_drop", "story_record", "item_away", "story_departure"]],
       ["gm", ["person_make", "place_remove", "gm_take_out", "world_put", "world_remove", "world_set", "world_patch", "world_discard", "world_commit", "world_upgrade", "world_restore", "world_keep", "world_place", "world_path", "world_map", "world_map_place", "world_map_link", "world_map_settings"]],
     ] as const
   ).flatMap(([needs, tools]) => tools.map((name): [string, HarnessNeeds] => [name, needs])),

@@ -143,10 +143,12 @@ export function noDraft(draft: EditorResult | ToolOutcome): draft is ToolOutcome
  * line (`changed`, in the tool's own words), the draft's version, the lint issues this write
  * brought (errors first) with the draft's counts, and the standing reminder that the draft reaches
  * this chat only once it is committed and the chat brought to it. `before`: the draft as the tool
- * read it, when it did; else it is read here, for the lint the write is compared with. `extra`:
+ * read it, when it did; else it is read here, for the lint the write is compared with. The write is
+ * pinned to that draft's version: what the tool checked is what it writes over, and the store
+ * refuses it once someone else wrote to the draft since (Build is the same working copy). `extra`:
  * what the tool's answer says besides (an id it made, say). A write that changed nothing says so.
  */
-export async function writeDraft(call: WorldCall, edit: WorldEdit, changed: string, input: { before?: EditorResult; extra?: Readonly<Record<string, unknown>> } = {}): Promise<ToolOutcome> {
+export async function writeDraft(call: WorldCall, edit: Exclude<WorldEdit, { op: "get" }>, changed: string, input: { before?: EditorResult; extra?: Readonly<Record<string, unknown>> } = {}): Promise<ToolOutcome> {
   const before = input.before ?? (await draftOf(call));
   if (noDraft(before)) return before;
   const unchanged = (version: number): ToolOutcome => call.view.answer({ unchanged: call.view.text(WORLD_NOTE.unchanged), draft: { version }, ...(input.extra ?? {}) });
@@ -159,7 +161,7 @@ export async function writeDraft(call: WorldCall, edit: WorldEdit, changed: stri
   if (closed.length > 0) return call.view.refuse(WORLD_NOTE.closed, { paths: closed.join(", ") });
   let after: EditorResult;
   try {
-    after = await call.build.edit(edit);
+    after = await call.build.edit({ ...edit, version: before.version });
   } catch (error) {
     return storeRefusal(call, error);
   }
@@ -182,7 +184,7 @@ export async function writeDraft(call: WorldCall, edit: WorldEdit, changed: stri
  * item put or taken out, a part written whole (`meta`: the root's own members, of which only those
  * given change). A patch that can't be applied is the store's to refuse, in its own words.
  */
-function closedBy(draft: WorldDoc, edit: WorldEdit): string[] {
+function closedBy(draft: WorldDoc, edit: Exclude<WorldEdit, { op: "get" }>): string[] {
   const doc = draft as unknown as JsonObject;
   switch (edit.op) {
     case "patch":

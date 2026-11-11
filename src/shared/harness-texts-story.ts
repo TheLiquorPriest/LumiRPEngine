@@ -1,4 +1,4 @@
-// What LumiRPEngine says to a model about recording what the reply told (the changes a reply's read records on the classic and agents engines), putting a thing away and taking something out of what holds it, on the harness engine: each tool's
+// What LumiRPEngine says to a model about recording what the reply told (the changes a reply's read records on the classic and agents engines), noting where the reply says something against its turn, putting a thing away and taking something out of what holds it, on the harness engine: each tool's
 // description and its arguments', and what those tools answer besides a result. Registry texts of the
 // page "Harness engine", gathered by `harness-texts.ts`.
 
@@ -7,7 +7,10 @@ import type { PromptDef } from "./prompts";
 import type { ExtractionType } from "./settings";
 
 /** The tools, by name. */
-export const STORY_TOOL = { record: "story_record", away: "item_away", takeOut: "gm_take_out" } as const;
+export const STORY_TOOL = { record: "story_record", away: "item_away", takeOut: "gm_take_out", departure: "story_departure" } as const;
+
+/** The most lines of departure a reply's record keeps (`RecHarness.departures`, `story_departure`), and the longest line, in characters. */
+export const DEPARTURE_LIMITS = { lines: 8, chars: 200 } as const;
 
 /**
  * The kinds of change `story_record` records, each an argument of its own: the change types a
@@ -34,6 +37,11 @@ export const STORY_NOTE = {
   timeTooMuch: "harness.note.story.time_too_much",
   awayNowhere: "harness.note.story.away_nowhere",
   badId: "harness.note.story.bad_id",
+  departAfterReply: "harness.note.story.depart_after_reply",
+  departMany: "harness.note.story.depart_many",
+  departLong: "harness.note.story.depart_long",
+  departFull: "harness.note.story.depart_full",
+  departed: "harness.note.story.departed",
 } as const;
 
 // What every change that quotes the reply says of `said`: the read holds it to the reply's own words.
@@ -86,6 +94,14 @@ export const STORY_TOOL_TEXTS: readonly HarnessToolText[] = [
     text: "Take someone or something out of what it is inside, as the game master's Take out does: a thing out of the bag, box or car that holds it, or out of someone's hands, to lie where that holder stands; a person out of what they are in. It is refused, with why, when it is inside nothing. To put a thing into a holder, or anywhere else, use item_move. It is a game master's edit: the answer is the change in plain words, its change type and its mode; in a turn it is staged and lands when the turn commits, or waits on the review card when its mode is confirm.",
     args: [{ path: "entity", text: "Who or what to take out: an id or a name." }],
   },
+  {
+    name: STORY_TOOL.departure,
+    family: HARNESS_FAMILY.turn,
+    tier: "write",
+    note: "Notes where the written reply says something against what its turn decided or the world holds. Nothing of the world changes.",
+    text: `Note where the reply, once written, says something against what this turn decided or what the world holds: someone does or says otherwise than the turn played it, a thing is somewhere it isn't, a roll comes out otherwise than it fell. Each line says what the reply says and what the world holds, in one plain sentence, such as: The reply has Okoro leave; the world has him in the kitchen. A reply keeps at most ${DEPARTURE_LIMITS.lines} lines, each at most ${DEPARTURE_LIMITS.chars} characters, and a line it holds already is kept once. Nothing noted here is written into the world, which keeps what the turn decided. The player sees the lines on the reply, with what they can do about it, and the next turn's author is told, to steer the story back. What the reply adds that contradicts nothing is no departure: record that with your other tools.`,
+    args: [{ path: "lines", text: "The departures, as a list of text, a line each: what the reply says, and what the world holds." }],
+  },
 ];
 
 const type = v("type", "the kind of change the call gave", true);
@@ -122,4 +138,9 @@ export const STORY_NOTE_PROMPTS: readonly PromptDef[] = [
   answerPrompt(STORY_NOTE.timeTooMuch, "Too much happens", "story_record's answer when more happens in the narrated span than the engine runs in one go.", "Too much happens in that span to run in one go, so it wasn't passed. Say so in your answer: the player can skip ahead themselves."),
   answerPrompt(STORY_NOTE.awayNowhere, "Nowhere to put it away", "item_away's answer when the thing is where it is kept already, or nothing says where it is kept.", "{{name}} is where it is kept already, or is kept nowhere a move reaches, so nothing was moved. item_home sets where a thing is kept; item_move puts it anywhere.", [v("name", "the thing", true)]),
   answerPrompt(STORY_NOTE.badId, "An id it can't take", "gm_spawn's answer on the harness engine when id isn't in the form the engine makes its own ids in.", "{{id}} isn't an id an agent may give: an id is lower case letters and digits with _ between them, at most 40, as the engine makes its own. Give one in that form, or leave id out for one the engine makes.", [v("id", "the id the call gave", true)]),
+  answerPrompt(STORY_NOTE.departAfterReply, "Departures: only once the reply is written", "story_departure's answer before the turn's reply is written.", "story_departure notes where the written reply says something against its turn, so there is nothing for it to note until the reply is written. Until then the turn decides what happens, and the brief tells the writer. Call story_departure once the reply is written: it is work for after the reply."),
+  answerPrompt(STORY_NOTE.departMany, "Departures: too many lines", "story_departure's answer when one call gives more lines than a reply keeps.", "A reply keeps at most {{most}} lines of departure, and this call gave {{count}}, so nothing was noted. Keep the ones that matter most to the story, and call again.", [v("most", "the most lines a reply keeps", true), v("count", "how many lines the call gave")]),
+  answerPrompt(STORY_NOTE.departLong, "Departures: a line too long", "story_departure's answer when one of its lines is longer than a line of departure may be.", "Line {{at}} is {{chars}} characters long, and a line of departure is at most {{most}}, so nothing was noted. Say it in fewer words and call again.", [v("at", "which line, counted from 1", true), v("chars", "how long it is"), v("most", "the longest a line may be", true)]),
+  answerPrompt(STORY_NOTE.departFull, "Departures: the reply holds enough", "story_departure's answer when the reply's own lines and the call's would come to more than a reply keeps.", "The reply holds {{held}} lines of departure already and keeps at most {{most}}: with these it would hold more, so nothing was noted. Note only what matters most beyond the lines it holds.", [v("held", "how many lines the reply holds", true), v("most", "the most lines a reply keeps", true)]),
+  answerPrompt(STORY_NOTE.departed, "Departures: kept on the reply", "What story_departure's answer says of the lines it kept.", "Kept on the reply: the player sees them there, and the next turn's author is told. Nothing of the world changed."),
 ];

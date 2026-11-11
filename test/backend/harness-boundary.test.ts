@@ -61,7 +61,7 @@ describe("what LumiAH is told and given", () => {
     rig.host.promptInterceptor = async (generation) => {
       rig.host.promptInterceptor = null;
       const assembled = [...rig.host.assembled];
-      await rig.rt.harness.extension.runBegan?.({ userId, chatId, turn: generation.id, kind: "new" });
+      await rig.rt.harness.extension.runBegan?.({ userId, chatId, turn: generation.id, kind: "new", story: { hidden: "leave_out", from: "everyone", newest: "directive" } });
       await rig.host.settle();
       const held = await liveEntries(rig, chatId);
       // The author is still at work, and the other chat's reply starts: its guard takes the book at once. Were the book still the first turn's, this guard would wait for a generation that can't begin until it answers, and the test would never get past here.
@@ -82,7 +82,7 @@ describe("what LumiAH is told and given", () => {
 
     // Both turns play on to their own records.
     const second = new Run(rig, other, seen.second.id, "new", seen.second);
-    await rig.rt.harness.extension.runBegan?.({ userId, chatId: other, turn: seen.second.id, kind: "new" });
+    await rig.rt.harness.extension.runBegan?.({ userId, chatId: other, turn: seen.second.id, kind: "new", story: { hidden: "leave_out", from: "everyone", newest: "directive" } });
     rig.host.assembled = seen.assembled;
     const run = new Run(rig, chatId, first.id, "new", first);
     const clock = (await stateOf(rig, chatId)).clock;

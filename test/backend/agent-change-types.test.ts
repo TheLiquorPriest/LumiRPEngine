@@ -27,7 +27,7 @@ function acceptMany(learning: ExtractionLearning, connectionId: string, type: Ch
 describe("agent change types", () => {
   test("each takes the plan's default mode, has a label, and is no extraction type", () => {
     const settings = defaultSettings();
-    expect(AGENT_CHANGE_DEFAULTS).toEqual({ gm_spawn: "confirm", despawn: "confirm", destroy: "confirm", money_adjust: "confirm", stage: "confirm", gm_edit: "auto", workspace: "auto", item_home: "auto", item_grant: "auto", item_label: "auto", item_merge: "confirm", item_set: "auto", item_remove: "confirm", org_people: "confirm", org_powers: "confirm", org_shares: "confirm", org_rules: "auto", world_document: "confirm", play: "auto", mind: "auto" });
+    expect(AGENT_CHANGE_DEFAULTS).toEqual({ gm_spawn: "confirm", despawn: "confirm", destroy: "confirm", money_adjust: "confirm", stage: "confirm", gm_edit: "auto", workspace: "auto", item_home: "auto", item_grant: "auto", item_label: "auto", item_merge: "confirm", item_set: "auto", item_remove: "confirm", org_people: "confirm", org_powers: "confirm", org_shares: "confirm", org_rules: "auto", world_document: "auto", play: "auto", mind: "auto" });
     expect(CHANGE_TYPES).toEqual([...EXTRACTION_TYPES, ...AGENT_CHANGE_TYPES]);
     for (const type of AGENT_CHANGE_TYPES) {
       const cold = { mode: AGENT_CHANGE_DEFAULTS[type], source: "default" as const };

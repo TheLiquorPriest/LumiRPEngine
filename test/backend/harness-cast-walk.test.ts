@@ -13,7 +13,7 @@ const MILL = "the_old_mill";
 describe("building a world (the skill, walked)", () => {
   test("a place, its paths, its people: written to the world's document in one turn, played in the next", async () => {
     const { rig, chatId } = await turnChat();
-    // New people and the world's document land with the turn here; as shipped both wait on the review card (`harness-cast-people.test.ts`, `harness-cast-world.test.ts`).
+    // New people land with the turn here, as the world's document does as shipped; as shipped new people wait on the review card (`harness-cast-people.test.ts`).
     rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { gm_spawn: { mode: "auto" }, world_document: { mode: "auto" } } } }));
 
     // The first turn writes the world's document: a place of the world's own, and the way to it.

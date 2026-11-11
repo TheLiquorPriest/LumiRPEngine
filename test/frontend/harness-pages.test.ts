@@ -24,7 +24,8 @@ import { drawerModes, ModeBar, ModeBody } from "../../src/frontend/drawer";
 import { HARNESS_MODE, harnessChat, harnessOffered, shownMode } from "../../src/frontend/harness/mode";
 import { HARNESS_PAGES, HARNESS_PAGES_CSS, HarnessCurtain, type HarnessPages, HarnessView, waitingOf } from "../../src/frontend/harness/pages";
 import { Play } from "../../src/frontend/play/play";
-import { ENGINE_NOTE_PAGES, engineNote, OLD_ENGINE_TIMEOUTS, TURN_TIMEOUTS_TITLE } from "../../src/frontend/settings/labels";
+import { AGENTS_SUB, ENGINE_NOTE_PAGES, engineNote, OLD_ENGINE_TIMEOUTS, TURN_TIMEOUTS_TITLE } from "../../src/frontend/settings/labels";
+import { KEPT_DEFS, LOOP_DEFS } from "../../src/shared/agent-settings";
 import { EngineNote, HOME_GROUPS, Settings } from "../../src/frontend/settings/settings";
 import { TimeoutsSection } from "../../src/frontend/settings/timeouts";
 import { CSS } from "../../src/frontend/styles";
@@ -283,17 +284,31 @@ describe("the two stylesheets", () => {
 });
 
 describe("Settings on a chat that plays on the harness", () => {
-  const OLD_ENGINE_PAGES: readonly SettingsPage[] = ["model", "steps", "timeouts", "speed", "roles", "context", "main", "prompts"];
+  const OLD_ENGINE_PAGES: readonly SettingsPage[] = ["helper", "model", "steps", "minds", "timeouts", "agents", "speed", "roles", "context", "main", "assistant", "prompts"];
   const noteOn = (route: SettingsRoute, engine: StateView["engine"], onOpen: () => void = () => undefined): unknown => EngineNote({ route, engine, onOpen });
 
-  test("the pages that set up the classic and agents engines open with the note, each of them and no other", () => {
+  test("Settings' list and every page that sets up the classic and agents engines open with the note, and no other page", () => {
     expect(ALL_PAGES.filter((page) => noteOn({ page }, "harness") !== null)).toEqual([...OLD_ENGINE_PAGES]);
-    expect(Object.keys(ENGINE_NOTE_PAGES).sort()).toEqual([...OLD_ENGINE_PAGES].sort());
-    expect(noteOn({ page: "home" }, "harness")).toBeNull();
-    // A role's page, from Roles or Context, opens with its page's; a section of Agents, which a harness chat still reads in part, with none.
+    expect(Object.keys(ENGINE_NOTE_PAGES).sort()).toEqual(["home", ...OLD_ENGINE_PAGES].sort());
+    expect(propsOf(noteOn({ page: "home" }, "harness"), Banner)[0]?.title).toBe("This chat plays on the harness");
+    // A role's page, from Roles or Context, opens with its page's; a section of Agents with none, as the note on Agents names the sections the harness reads.
     expect(noteOn({ page: "roles", sub: "intent" }, "harness")).not.toBeNull();
     expect(noteOn({ page: "context", sub: "read" }, "harness")).not.toBeNull();
     expect(noteOn({ page: "agents", sub: "pipeline" }, "harness")).toBeNull();
+    expect(noteOn({ page: "agents", sub: "review" }, "harness")).toBeNull();
+  });
+
+  test("on a page part of which the harness reads, the note names that part as the page names it", () => {
+    // Minds: the switch and the sections the harness's tools read (`settings.minds.enabled`, `lengths`, `knowledge`, `reads`).
+    const minds = engineNote("minds").text;
+    for (const part of ["Character minds", "Lengths", "Knowledge", "What a mind reads"]) expect(minds).toContain(part);
+    // Agents: the review card's place, and the two limits under Budgets the harness reads (`clipChars`, `kept.runs`), by their labels.
+    const agents = engineNote("agents").text;
+    for (const part of [AGENTS_SUB.review.title, AGENTS_SUB.budgets.title, LOOP_DEFS.clipChars.label, KEPT_DEFS.runs.label]) expect(agents).toContain(part);
+    // Assistant: how its changes land is the engine's on every chat; where it runs is LumiAH's on the harness.
+    expect(engineNote("assistant").text).toContain("How its changes land");
+    // The helper model runs no harness turn, but Build's jobs as well as the other engines' steps.
+    expect(engineNote("helper").text).toContain("Build's jobs");
   });
 
   test("only while the open chat is on the harness: never on another engine, a chat that plays no world, or no chat", () => {
@@ -316,6 +331,8 @@ describe("Settings on a chat that plays on the harness", () => {
     expect(opened).toBe(1);
     // One note a page, in the same words on every page that is the other engines' whole.
     for (const page of ["model", "speed", "roles", "context", "main"] as const) expect(propsOf(noteOn({ page }, "harness"), Banner).map((b) => textOf(b.children))).toEqual([textOf(banner?.children)]);
+    // Every note has the way to the Harness tab.
+    for (const page of OLD_ENGINE_PAGES) expect(propsOf(propsOf(noteOn({ page }, "harness"), Banner)[0]?.actions, Button).map((b) => textOf(b.children))).toEqual(["Open Harness"]);
   });
 
   test("on Timeouts it says which of a turn's timeouts still applies: the rest are the other engines'", () => {

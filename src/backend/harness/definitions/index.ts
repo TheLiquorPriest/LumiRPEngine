@@ -62,9 +62,10 @@ const NOT_IN_CONVERSATION: readonly string[] = ["person_add", "purchase", "reven
  *   It changes nothing, and it rolls nothing: the dice fall when the author plays the attempt.
  * - The knowledge agent: its own two tools, and what reads people and who knows what.
  * - The chronicler: the chat as written, what reads the world, the story's own changes (things,
- *   places made in play, people who walk on, purchases), and what the reply told (`story_record`:
- *   a move, an injury, a payment, a death, the time its telling added). Not `time_pass`: the
- *   turn's own time is the author's alone, before its reply.
+ *   places made in play, people who walk on, purchases), what the reply told (`story_record`: a
+ *   move, an injury, a payment, a death, the time its telling added), and where the reply says
+ *   something against its turn (`story_departure`). Not `time_pass`: the turn's own time is the
+ *   author's alone, before its reply.
  * - The game master's assistant: what reads the world, and every change the old engines' assistant
  *   could propose (the story's and the game master's), but those its conversation can't use
  *   (`NOT_IN_CONVERSATION`); LumiAH's chat and workspace. None of the harness engine's own tools:
@@ -82,7 +83,7 @@ function toolsOf(id: HarnessAgentId): string[] {
     case HARNESS_AGENT.knowledge:
       return [HARNESS_TOOL.knowledgeScene, HARNESS_TOOL.knowledgeInfer, ...names((t) => reads(t) && (t.family === "knowledge" || t.family === "people"))];
     case HARNESS_AGENT.chronicler:
-      return [LUMIAH_TOOL.chatRead, LUMIAH_TOOL.chatGrep, LUMIAH_TOOL.chatSearch, ...names((t) => reads(t) || t.writer === "story"), STORY_TOOL.record];
+      return [LUMIAH_TOOL.chatRead, LUMIAH_TOOL.chatGrep, LUMIAH_TOOL.chatSearch, ...names((t) => reads(t) || t.writer === "story"), STORY_TOOL.record, STORY_TOOL.departure];
     case HARNESS_AGENT.assistant:
       return [...names((t) => t.writer !== null && t.name !== "lore_load" && !NOT_IN_CONVERSATION.includes(t.name)), family(LUMIAH_FAMILY.chat), family(LUMIAH_FAMILY.workspace)];
   }

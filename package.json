@@ -33,7 +33,7 @@
     "typescript": "7.0.2"
   },
   "dependencies": {
-    "lumi-ah": "github:TheLiquorPriest/LumiAH#e26b08e7c032f7516e3591061bdb62c005c1db39",
+    "lumi-ah": "github:TheLiquorPriest/LumiAH#4aa9d53e5331241ca4ca85af65c179fe56a1c03a",
     "preact": "^11.0.1"
   }
 }

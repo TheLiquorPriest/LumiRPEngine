@@ -1,4 +1,5 @@
-// Play → Now, the hub, registered as the core Scene panel: the status banners; the
+// Play → Now, the hub, registered as the core Scene panel: the status banners; which engine plays
+// the chat and why, while the harness can't play the user's chats (a permission isn't granted); the
 // scene card (time and day part, place, scene type with the last turn's elapsed time, weather, cash,
 // each fixable value, the time among them, with its ✎); what needs you; the fight while one is on
 // (Now's other panels); who is here; the packs' glances; the quick actions. Opening someone here
@@ -17,6 +18,8 @@ import type { IconName } from "../icons";
 import { Icon } from "../icons";
 import type { PanelDef, PanelProps } from "../registry";
 import { NeedsYou, QuickActions, StatusBanners } from "./now";
+import { EngineBlocked, useHarnessBlocked } from "../gm/engine";
+import { gmAt } from "../gm/gate";
 import { toastQueued } from "../queued";
 import { visiblePanels } from "./play";
 
@@ -34,6 +37,14 @@ function weatherIcon(weather: string): IconName {
   return "cloud";
 }
 
+/** Where the harness can't play the user's chats, which engine plays this one and why, with the way to the Engine switch (GM → This chat). */
+function EngineWord(props: { state: StateView }) {
+  const app = useApp();
+  const engine = props.state.engine ?? "classic";
+  const blocked = useHarnessBlocked(props.state.chatId, engine);
+  return <EngineBlocked engine={engine} blocked={blocked} onOpen={() => app.ui.update((ui) => gmAt({ ...ui, mode: "gm" }, "chat"))} />;
+}
+
 export function ScenePanel(props: PanelProps) {
   const app = useApp();
   const { state } = props;
@@ -44,6 +55,7 @@ export function ScenePanel(props: PanelProps) {
   return (
     <div class="lre-play-now" data-lre-panel="core.scene">
       <StatusBanners state={state} />
+      <EngineWord state={state} />
       <SceneCard state={state} />
       <NeedsYou state={state} />
       {inline.map((panel) => (

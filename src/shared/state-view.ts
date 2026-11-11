@@ -172,6 +172,8 @@ export type ChipKind =
   | "routine_added"
   /** A ✎ fix or GM edit on the head ("Corrected …"), with Undo (DESIGN §12). */
   | "fix"
+  /** What a harness turn's agents changed in the world's document, made when the author committed (`backend/harness/card.ts`): Undo while that commit's revision is still the world's newest and the chat has played no later turn, and Open in Build, which the page does without asking the backend. */
+  | "world_made"
   /** A write held during a reply that couldn't be made when the reply finished (P2), with Dismiss. */
   | "refused"
   /** The intent gate (DESIGN §5.1 preview gates): a typed message's read action waits, nothing generated, on Play, Edit (its params) or Cancel; Play and Edit resume the turn. */

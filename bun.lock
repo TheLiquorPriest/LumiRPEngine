@@ -5,7 +5,7 @@
     "": {
       "name": "lumi-rp-engine",
       "dependencies": {
-        "lumi-ah": "github:TheLiquorPriest/LumiAH#e26b08e7c032f7516e3591061bdb62c005c1db39",
+        "lumi-ah": "github:TheLiquorPriest/LumiAH#4aa9d53e5331241ca4ca85af65c179fe56a1c03a",
         "preact": "^11.0.1",
       },
       "devDependencies": {
@@ -60,7 +60,7 @@
 
     "bun-types": ["bun-types@1.4.3", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-tinRJNGOmUN+tEAsn2y2e942n9JHRHR42iUYzDH75NmhJqVBokGSQkkfSFdNWwsANIdrK6ACH9t01M452YyTwg=="],
 
-    "lumi-ah": ["lumi-ah@github:TheLiquorPriest/LumiAH#e26b08e", { "dependencies": { "preact": "^11.0.1" }, "bin": { "lumiah": "dist/lumiah.js" } }, "TheLiquorPriest-LumiAH-e26b08e", "sha512-suPIDYeFZ3LM2cqNO9UAHTIVDu1pa/kn+4l/nuw/1MY5B5XBb43Y7YfogEgevJI8tTcTxkcoI50QKXUR4QYSew=="],
+    "lumi-ah": ["lumi-ah@github:TheLiquorPriest/LumiAH#4aa9d53", { "dependencies": { "preact": "^11.0.1" }, "bin": { "lumiah": "dist/lumiah.js" } }, "TheLiquorPriest-LumiAH-4aa9d53", "sha512-3Pe5Pas9MFadOW7fhTTVjpeexk9WDbvyC9wc6QcK38TcGbl6Eb5ur8noCxOl2zFjwcHcLO2+xBD1rdsXahZYEg=="],
 
     "lumiverse-spindle-types": ["lumiverse-spindle-types@0.6.79", "", {}, "sha512-Pke9burnhJqdqt8vEmjTu3xpTZnEyWfiMY0i0X2f0C14efwgAZivdZQbO0zD6k2bYj/Lts/0tzJ/eXi/qc0I9g=="],
 

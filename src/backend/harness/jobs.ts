@@ -42,8 +42,8 @@ import { knowledgeOn } from "../chat-knowledge-prefs";
 import { renderPrompt } from "../prompts";
 import type { Runtime } from "../runtime";
 import { effectiveMode } from "../settings-store";
-import { cardedChange } from "./card";
-import { type OffPath, turnRecord, type TurnRecordAt } from "./record";
+import { cardedChange, stagedBy } from "./card";
+import { type DeparturesKept, keepDepartures, type OffPath, turnRecord, type TurnRecordAt } from "./record";
 import { reach, type Standing, toolRefusal, type TurnAgent, writerRole } from "./turn";
 
 /** What the ledger answers a write its maker refused as it reached the chat (`LedgerService.write`'s `unless`): the job's record left the path between its check and its write. */
@@ -138,6 +138,7 @@ export async function jobEnv(rt: Runtime, review: Review, call: JobCall): Promis
     reply: { messageId: record.messageId, text: reply ? activeText(reply) : "" },
     stage: (change) => stageChange(rt, review, call, role?.role ?? null, change),
     commit: async () => refusal("not_turn", note(HARNESS_NOTE.notTurn)),
+    depart: (lines) => departure(rt, call, lines),
   };
   return { userId, chatId, knowledge: view, marks, reader, writer, agent: { role: agent.def, id: agent.id }, signal: call.signal, build: await worldBuild(rt, chatId, userId), files: call.files, turn };
 }
@@ -145,6 +146,23 @@ export async function jobEnv(rt: Runtime, review: Review, call: JobCall): Promis
 /** The job's record as the chat stands when a write reaches it, inside the write's own operation: the last word on whether it lands. */
 function unlessOffPath(call: Pick<JobCall, "basis" | "committed">): (core: LedgerCore, observed: ChainMessage[]) => string | null {
   return (core, observed) => (typeof recordOf(call, core, observed) === "string" ? LEFT_PATH : null);
+}
+
+/**
+ * Lines of departure for the job's reply, kept on its record (`keepDepartures`) while that record is
+ * on the chat's path, where the reply's flag shows them at once. Nothing of the world changes, so no
+ * mode and no card applies: only the call's own gate, held once more as for any change of a job.
+ */
+async function departure(rt: Runtime, call: JobCall, lines: readonly string[]): Promise<DeparturesKept | OpRefusal> {
+  const texts = (await rt.settings.get(call.userId)).prompts.texts;
+  const note = (id: string, vars: Readonly<Record<string, string>> = {}): string => renderPrompt(id, texts, vars);
+  if (call.signal.aborted) return refusal("cancelled", note(WRITE_NOTE.cancelled));
+  const closed = toolRefusal(call.tool, { ...call.standing, author: false }, note);
+  if (closed) return closed;
+  const kept = await keepDepartures(rt.ledger, { chatId: call.chatId, userId: call.userId, turn: call.basis, committed: call.committed }, lines);
+  if (typeof kept === "string") return offPath(kept, note);
+  if ("departures" in kept) rt.push.changed(call.chatId, call.userId);
+  return kept;
 }
 
 /** One checked operation, with what it was checked against. */
@@ -233,7 +251,7 @@ function jobWriter(rt: Runtime, review: Review, call: JobCall, role: RoleId, tie
       if (c.checked.mode === "confirm") {
         // The card is the player's: its lines are the player character's.
         const lines = opLines(rt, c.ctx, "player", c.checked.type, c.after, c.checked.shown);
-        await review.make({ chatId, userId, turn: `${c.record.messageId}:${c.record.swipeId}`, messageId: c.record.messageId, swipeId: c.record.swipeId, placement: "chips", text: "", items: [{ key: c.checked.p.key, source: "agent", role, changeType: c.checked.type, lines, status: "open", op, agentId: call.agent.id, connection: null }] });
+        await review.make({ chatId, userId, turn: `${c.record.messageId}:${c.record.swipeId}`, messageId: c.record.messageId, swipeId: c.record.swipeId, placement: "chips", text: "", items: [{ key: c.checked.p.key, source: "agent", role, changeType: c.checked.type, lines, status: "open", op, agentId: call.agent.id, connection: null, by: stagedBy(c.ctx.settings.prompts.texts, call.agent.def, true) }] });
         return preview(c);
       }
       const done = await write(c, `${role}: ${c.lines[0] ?? c.checked.type}`);
@@ -273,7 +291,7 @@ async function stageChange(rt: Runtime, review: Review, call: JobCall, role: Rol
     if (mode === "never") return refusal("mode_never", note(WRITE_NOTE.never, { type }), change.key);
     if (mode === "confirm") {
       // On the reply's card, as a chip the card owns: with a proposal it is made from again, or, with none, in its tool's plain words (`cardedChange`).
-      const carded = cardedChange(rt, change, type, rt.registry.context(head.world, head.state), { id: `confirm:${record.messageId}:${call.basis}:j${hashParts("lre.harness.job", change.key).slice(0, 12)}`, messageId: record.messageId, swipeId: record.swipeId, connection: active, detail: change.time !== undefined ? "The reply's telling added this much time. Apply it?" : "A change recorded after the reply. Apply it?" });
+      const carded = cardedChange(rt, change, type, rt.registry.context(head.world, head.state), { id: `confirm:${record.messageId}:${call.basis}:j${hashParts("lre.harness.job", change.key).slice(0, 12)}`, messageId: record.messageId, swipeId: record.swipeId, connection: active, detail: change.time !== undefined ? "The reply's telling added this much time. Apply it?" : "A change recorded after the reply. Apply it?", by: stagedBy(settings.prompts.texts, call.agent.def, true) });
       await rt.chips.add(chatId, userId, [carded.chip]);
       await review.make({ chatId, userId, turn: `${record.messageId}:${record.swipeId}`, messageId: record.messageId, swipeId: record.swipeId, placement: "chips", text: "", items: [carded.item] });
       call.staged.set(change.key, "confirm");

@@ -264,7 +264,7 @@ export function mountHarness(rt: Runtime, base: BackendHost, env: BackendEnv): M
     extension: {
       name: extension.name,
       definitions: (userId, chatId) => extension.definitions?.({ userId, chatId }) ?? Promise.resolve({}),
-      claim: (chat, userId) => extension.claim?.({ userId, chatId: chat.id, chat }) ?? Promise.resolve(null),
+      claim: (ask, userId) => extension.claim?.({ ...ask, userId }) ?? Promise.resolve(null),
       writerRequest: (request, userId) => extension.writerRequest?.({ ...request, userId }) ?? Promise.resolve(null),
       runBegan: (run, userId) => extension.runBegan?.({ ...run, userId }) ?? Promise.resolve(),
       replyWritten: (reply, userId) => extension.replyWritten?.({ ...reply, userId }) ?? Promise.resolve(),
@@ -307,7 +307,7 @@ export function mountHarness(rt: Runtime, base: BackendHost, env: BackendEnv): M
   // What keeps LumiAH from answering this user's chats where they run built in, as LumiAH itself reports it to its pages: a permission it can't do without. LumiAH's page names the permission beside its words ("needs it to …"); here it is one sentence, so the name leads. What LumiAH reports of a runtime (a Lumiverse no runtime can link to) keeps no chat from the harness: a runtime is an option, and its own page says what it lacks.
   engine.ready = async (userId) => {
     const state = await ask<UiState>(userId, { type: "lah.hello" });
-    const lacks = state.permissions.filter((need) => need.needed).map((need) => `The permission "${need.id}" isn't granted: ${need.what} ${need.todo}`);
+    const lacks = state.permissions.filter((need) => need.needed).map((need) => `The permission "${need.id}" isn't granted: ${NAME} needs it to ${need.what}. ${need.todo}`);
     return lacks.length > 0 ? lacks.join(" ") : null;
   };
 

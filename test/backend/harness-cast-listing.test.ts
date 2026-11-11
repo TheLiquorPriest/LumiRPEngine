@@ -158,6 +158,7 @@ describe("the tools the harness lists", () => {
       ["story_record", "people", "write"],
       ["item_away", "items", "write"],
       ["gm_take_out", "places", "write"],
+      ["story_departure", "turn", "write"],
       ["place_remove", "places", "write"],
       ["set_drop", "items", "write"],
       ["gm_effects", "money", "read"],

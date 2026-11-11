@@ -423,6 +423,8 @@ export function seatOf(rig: Rig, identifier: string = ENGINE_EXTENSION): Seat {
     },
 
     chats: {
+      // The fake Lumiverse, like this one, doesn't tell extensions whether Sovereign Hand is on.
+      sovereignHand: () => Promise.resolve(null),
       get(chatId, user) {
         const chat = user === userId ? host.chatsById.get(chatId) : undefined;
         return Promise.resolve(chat ? { id: chat.id, name: chat.name, characterId: null, metadata: structuredClone(chat.metadata) } : null);

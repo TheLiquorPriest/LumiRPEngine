@@ -38,7 +38,7 @@ import { assistantFileChanges, assistantFixture, extractionView, freshFixture, g
 import { combatFixture } from "./combat-fixture";
 import { applyRoutineOp, chatRolesFixture, previewRoutines, routineChangedFixture, routineGmFixture, type PreviewRoutines } from "./routines-fixture";
 import { ROUTINE_PROPOSALS, routinePlayerFixture } from "./routines-player-fixture";
-import { answerReview, HARNESS_BLOCKED, harnessChips, harnessReview, UNPLAYED_WHY } from "./harness-fixture";
+import { answerReview, HARNESS_BLOCKED, harnessChips, harnessReview, reviewChip, UNPLAYED_WHY } from "./harness-fixture";
 import { migrateWorld, previewSheet, previewSkills } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { formulaFunctions } from "../../src/engine/scope";
@@ -365,8 +365,8 @@ export class MockBackend {
     this.engine = engine;
     view.engine = engine;
     const harness = engine === "harness" && this.played;
-    view.chips = harness ? harnessChips(this.scenarioChips, UNPLAYED_WHY[this.options.unplayed ?? "failed"]) : structuredClone(this.scenarioChips);
     this.review = harness ? harnessReview() : [];
+    view.chips = harness ? harnessChips(this.scenarioChips, UNPLAYED_WHY[this.options.unplayed ?? "failed"], this.review) : structuredClone(this.scenarioChips);
   }
 
   private snapshot(): void {
@@ -554,7 +554,8 @@ export class MockBackend {
         if (this.options.scenario === "sheet") this.view.panels["sheets.you"] = modernSheetFixture();
         this.result(reqId, "lre.hello", { accepted: true, agentApi: AGENT_API, requestMs: this.settings.timeouts.requestMs, canStop: true });
         setTimeout(() => this.snapshot(), 50);
-        if (this.options.activity) setTimeout(() => this.activity(this.options.activity === "busy" ? { state: "running", label: "Asking 3 minds…", since: Date.now() - 12_000 } : { state: "failed", label: "Failed: Planning", since: Date.now() - 60_000 }), 80);
+        // A harness turn names no step of its own while its author works: the strip says what the engine says from the guard on (`STEP_LABEL.reply`).
+        if (this.options.activity) setTimeout(() => this.activity(this.options.activity === "busy" ? { state: "running", label: this.engine === "harness" ? (STEP_LABEL.reply ?? "") : "Asking 3 minds…", since: Date.now() - 12_000 } : { state: "failed", label: "Failed: Planning", since: Date.now() - 60_000 }), 80);
         return;
       case "lre.state.resync":
         this.result(reqId, "lre.state.resync", { accepted: true });
@@ -712,7 +713,14 @@ export class MockBackend {
         return;
       }
       case "lre.review": {
-        if (message.op !== "get") this.review = answerReview(this.review, message.turn, message.op === "reject" ? "reject" : { apply: message.keys ?? null });
+        if (message.op !== "get") {
+          this.review = answerReview(this.review, message.turn, message.op === "reject" ? "reject" : { apply: message.keys ?? null });
+          // The engine stores the chip again as its card's items stand: its label counts what is still open.
+          const chip = reviewChip(this.review);
+          this.mutate((view) => {
+            view.chips = view.chips.map((c) => (c.id === chip.id ? chip : c));
+          });
+        }
         return this.result(reqId, "lre.review", { cards: structuredClone(this.review), ...(message.op === "get" ? {} : { start: null }) });
       }
       case "lre.character": {

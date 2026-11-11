@@ -21,7 +21,7 @@ import { KnowledgeThisChat, knowledgeSummary } from "./chat-knowledge";
 import { thingsSummary, ThingsThisChat } from "./chat-things";
 import { cashSummary, MoneyThisChat } from "./chat-money";
 import { toastQueued } from "../queued";
-import { EngineThisChat } from "./engine";
+import { ENGINE_LABEL, EngineThisChat } from "./engine";
 import { GmPage, usePages } from "./ui";
 
 type ChatPage = "engine" | "realism" | "checks" | "time" | "sections" | "knowledge" | "things" | "money" | "pins" | "edits" | { panel: PanelDef };
@@ -68,7 +68,7 @@ export function ThisChat(props: { view: StateView; truth: PanelDef | undefined; 
       <div class="lre-stack lre-gm-list" hidden={page !== null}>
         <Section title="Rules" flush>
           <List>
-            <ListRow icon="function" title="Engine" subtitle="Classic steps or agents, for this chat's turns" chevron onClick={() => pages.open("engine")} />
+            <ListRow icon="function" title="Engine" subtitle={`${ENGINE_LABEL[view.engine ?? "classic"]} · which engine plays this chat's turns`} chevron onClick={() => pages.open("engine")} />
             <ListRow icon="sliders" title="Realism" subtitle={controls ? `${humanize(controls.realism.preset)} · how deeply each part of the world is simulated` : "How deeply each part of the world is simulated"} chevron onClick={() => pages.open("realism")} />
             <ListRow icon="dice" title="Checks" subtitle={controls ? `${ADJUDICATION_PRESET_LABEL[controls.adjudication.preset]} · inferred checks: ${INFER_MODE_LABEL[controls.inferred.mode].toLowerCase()}` : "How checks are decided"} chevron onClick={() => pages.open("checks")} />
             <ListRow icon="clock" title="Time" subtitle={controls ? `${controls.time.scale}× time scale · montage ${controls.time.montage === "key" ? "by key events" : `per ${controls.time.montage}`}${controls.time.paused ? " · clock paused" : ""}` : "Ticks, interrupts, Speed through, Montage"} chevron onClick={() => pages.open("time")} />

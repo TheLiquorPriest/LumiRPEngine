@@ -8,7 +8,7 @@
 //     engine keeps them nine days into a chat (`marcus_delgado`: a business, a house and credit;
 //     `helen_kowalczyk`: a household; `pov`: a job and investments).
 //   &engine=classic|agents|harness (default classic): the engine that plays the chat. On the harness the drawer
-//     has its Harness tab, a reply is flagged "No turn was played" (&unplayed=failed|stopped|restarted says why,
+//     has its Harness tab, a reply is flagged "No turn was played" (&unplayed=failed|nobrief|norun|stopped|restarted says why,
 //     default failed), and the last reply's review card holds changes to the world's document.
 //     &harness=blocked: the harness can't be chosen, and GM → This chat → Engine says why.
 //     With scenario=not_world, Build's "Attach to this chat" makes the chat a new world chat on the harness.

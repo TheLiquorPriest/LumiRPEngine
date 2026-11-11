@@ -1208,6 +1208,8 @@ export interface ReviewItemView {
   refused?: { code: string; reason: string };
   undo?: string;
   undone?: true;
+  /** On a harness chat, who staged it: the agent's harness name, and after the reply that it came then. Absent on the other engines, where `source` and `role` say it. */
+  by?: string;
 }
 
 /** One turn's review card: the turn (`<message>:<swipe>`, or `<message>:gate`), the message it shows on, where its changes wait, its items, and at a gate how its turn resumes. */

@@ -39,7 +39,7 @@ async function worldEnv(): Promise<{ rig: Rig; chatId: string; env: ToolEnv; bui
   return { rig, chatId, build, as, env: await as({}) };
 }
 
-/** The world's document set to land at once (Settings → Changes from the reply): as shipped it asks first, which its own tests cover. */
+/** The world's document pinned to Auto (Settings → Changes from the reply), as a user pins it: what it ships with is `harness-world-made.test.ts`'s. */
 async function auto(rig: Rig): Promise<void> {
   rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { world_document: { mode: "auto" } } } }));
 }
@@ -507,8 +507,9 @@ describe("the world's document asks first", () => {
     return (cards[0]?.items ?? []).map((item) => item.status);
   }
 
-  test("as shipped (Confirm) a commit and the Upgrade that follows it wait on the review card, each listing what it would change against the world's head, and one Apply makes both", async () => {
+  test("a user's saved Confirm still asks: a commit and the Upgrade that follows it wait on the review card, each listing what it would change against the world's head, and one Apply makes both", async () => {
     const { rig, chatId } = await harnessChat();
+    await setMode(rig, "confirm");
     const build = await worldBuild(rig.rt, chatId, rig.host.userId);
     if (!build) throw new Error("the harness chat plays no world");
     const first = await build.head();
@@ -612,6 +613,7 @@ describe("the world's document asks first", () => {
 
   test("under Confirm a draft is neither dropped nor replaced by a revision until Apply", async () => {
     const { rig, chatId } = await harnessChat();
+    await setMode(rig, "confirm");
     const build = await worldBuild(rig.rt, chatId, rig.host.userId);
     if (!build) throw new Error("the harness chat plays no world");
     const head = await build.head();
@@ -777,7 +779,7 @@ describe("a turn stopped after it asked for an Upgrade", () => {
     }
   });
 
-  test("stopped after its author committed: as shipped the two waited on a card that no reply came to hold, so nothing was made; where the document lands by itself what the commit made stands, and the fold and the tools still answer one way", async () => {
+  test("stopped after its author committed: under Confirm the two waited on a card that no reply came to hold, so nothing was made; where the document lands by itself what the commit made stands, and the fold and the tools still answer one way", async () => {
     const asked = await stopped("confirm", true);
     expect({ head: asked.head, fold: asked.fold, status: asked.status, found: asked.found }).toEqual({ head: asked.first, fold: asked.first, status: { playing: asked.first, head: asked.first, behind: false }, found: false });
     noModelCalls(asked.rig);

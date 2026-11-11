@@ -7,6 +7,7 @@ import { playAt, useApp } from "../app";
 import { KeepReportChip } from "../chips";
 import { chipRole, chipTone } from "../chip-roles";
 import { Badge, Banner, Button, List, ListRow, Section, useBusy } from "../components";
+import { HARNESS_MODE } from "../harness/mode";
 import type { IconName } from "../icons";
 import { Icon } from "../icons";
 import { isMobile } from "../layout";
@@ -30,7 +31,7 @@ const DECISION_ICON: Partial<Record<ChipKind, IconName>> = {
   overdue: "clock",
 };
 
-/** Paused with the Keep report, or a turn running; nothing otherwise. */
+/** Paused with the Keep report, or a turn running (on the harness, its author at work); nothing otherwise. */
 export function StatusBanners(props: { state: StateView }) {
   const app = useApp();
   const { state } = props;
@@ -45,16 +46,37 @@ export function StatusBanners(props: { state: StateView }) {
       </div>
     );
   }
-  if (state.status === "in_flight") {
+  if (state.status === "in_flight") return <TurnRunning engine={state.engine} onWatch={() => app.ui.update((ui) => ({ ...ui, mode: HARNESS_MODE.id }))} />;
+  return null;
+}
+
+/**
+ * A turn under way, without hooks. On the harness the author works before the reply is written, for
+ * up to five minutes, while the activity line says only that the reply is awaited: the banner says
+ * who is at work and gives the way to watch it (the Harness tab, which opens on Live).
+ */
+export function TurnRunning(props: { engine: StateView["engine"]; onWatch(): void }) {
+  if (props.engine === "harness") {
     return (
       <div class="lre-play-status" data-lre-status="in_flight">
-        <Banner tone="info" icon="hourglass" title="A turn is running">
-          Changes you make now apply when it finishes.
+        <Banner tone="info" icon="sparkle" title="The author is working on this turn" actions={<Button icon={HARNESS_MODE.icon} size="sm" onClick={props.onWatch}>Watch it work</Button>}>
+          It reads the world, lets the characters think and records what changed, then the reply is written. This can take a few minutes. Changes you make now apply when it finishes.
         </Banner>
       </div>
     );
   }
-  return null;
+  return (
+    <div class="lre-play-status" data-lre-status="in_flight">
+      <Banner tone="info" icon="hourglass" title="A turn is running">
+        Changes you make now apply when it finishes.
+      </Banner>
+    </div>
+  );
+}
+
+/** What a Needs you row says under its label: a review card's label already counts its changes, and the card under the reply lists them, so its row says where to answer; every other chip, its detail. */
+export function needsYouDetail(chip: Chip): string | undefined {
+  return chip.kind === "review" ? "Under the reply: apply them or turn them down." : chip.detail;
 }
 
 /** The decisions waiting under replies; tapping one shows that reply in the chat, closing the drawer first on a phone, where it covers the chat. */
@@ -82,7 +104,7 @@ export function NeedsYou(props: { state: StateView }) {
                   <span class="lre-sr"> (show in the chat)</span>
                 </>
               }
-              subtitle={chip.detail}
+              subtitle={needsYouDetail(chip)}
               chevron
               disabled={busy}
               onClick={() => reveal(chip)}

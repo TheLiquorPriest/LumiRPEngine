@@ -447,6 +447,14 @@ export interface RecHarness {
    * that writes the record (another Continue) clears it.
    */
   unplayed?: string;
+  /**
+   * Where the reply says something against what its turn decided or the world holds, a line each,
+   * as an agent of the turn found it once the reply was written (`story_departure`): never written
+   * into the world, which keeps what the turn decided. The reply says so to the player, and the
+   * next turn's author is told. A Continue's turn keeps them, since the reply still says them. A
+   * record without them has none.
+   */
+  departures?: string[];
 }
 
 /** One swipe's turn record (DESIGN §4.3, `Rec`). */

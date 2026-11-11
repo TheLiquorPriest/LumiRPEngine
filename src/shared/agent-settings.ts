@@ -191,6 +191,18 @@ export interface HarnessLimits {
   mindFileNameChars: number;
 }
 
+/**
+ * Whether a harness chat is played with Sovereign Hand (Lumiverse's own name for it): the player's
+ * messages are directions to the author, not what their character says and does. `follow`: as
+ * Lumiverse's own Sovereign Hand switch is; `on` and `off` whatever it is.
+ */
+export type SovereignHand = "follow" | "on" | "off";
+export const SOVEREIGN_HANDS: readonly SovereignHand[] = ["follow", "on", "off"];
+
+/** With Sovereign Hand on, what the author is given of the player's newest message: it, as the direction for the reply (`direction`), or nothing, where the preset carries it (`leave_out`). */
+export type NewestMessage = "direction" | "leave_out";
+export const NEWEST_MESSAGES: readonly NewestMessage[] = ["direction", "leave_out"];
+
 /** What the engine still does by itself on a turn the harness plays (HARNESS-SLICE3): there the author decides the turn through tools, and only its consequences stay the engine's. */
 export interface HarnessSettings {
   /**
@@ -217,6 +229,10 @@ export interface HarnessSettings {
    * the user whose run it last heard begin.
    */
   runsRemembered: number;
+  /** Whether the user's chats on the harness are played with Sovereign Hand (`SovereignHand`). The chat's claim passes it to LumiAH, which gives the author the direction. */
+  sovereignHand: SovereignHand;
+  /** With Sovereign Hand on, what the author is given of the player's newest message (`NewestMessage`). */
+  newestMessage: NewestMessage;
 }
 
 /** What a final review that fails does (Settings → Agents → Main agent → Final review): the narrator gets the sections as the engine made them, with a Diagnostics record (`send`), or the turn stops with the engine-failed card and its Retry (`stop`). */
@@ -416,8 +432,8 @@ export function defaultAgentSettings(): AgentSettings {
     vsClassic: 2,
     // Room for a page or two of instructions at each level; files that aren't there cost nothing.
     systemTokens: 8000,
-    // A turn takes its scene's time unless its author said otherwise, as every other engine's turn does. Recording a turn takes well under a second: five is room for a slow host, inside LumiAH's own ten for any one answer of the engine's. A run remembered is a few short strings: a thousand of them is weeks of play in a megabyte, and far more than any late call needs.
-    harness: { defaultTick: true, commitWaitMs: 5000, runsRemembered: 1024 },
+    // A turn takes its scene's time unless its author said otherwise, as every other engine's turn does. Recording a turn takes well under a second: five is room for a slow host, inside LumiAH's own ten for any one answer of the engine's. A run remembered is a few short strings: a thousand of them is weeks of play in a megabyte, and far more than any late call needs. Sovereign Hand is the player's switch in Lumiverse until they set it here, and the author is given the direction they wrote unless their preset carries it.
+    harness: { defaultTick: true, commitWaitMs: 5000, runsRemembered: 1024, sovereignHand: "follow", newestMessage: "direction" },
     // A day-long file or a novel in one field is a mistake or an attack, never a turn's work: room for a long lore entry and a character's longest notes, and no more.
     harnessLimits: { timePassMinutes: TIMELAPSE_REACH_MINUTES, worldExamples: 3, worldTextChars: 20000, mindFileChars: 20000, mindFileNameChars: 80 },
   };
@@ -812,6 +828,8 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
       defaultTick: typeof harness.defaultTick === "boolean" ? harness.defaultTick : d.harness.defaultTick,
       commitWaitMs: whole(harness.commitWaitMs, HARNESS_COMMIT_WAIT_DEF.min) ?? d.harness.commitWaitMs,
       runsRemembered: whole(harness.runsRemembered, HARNESS_REMEMBERED_DEF.min) ?? d.harness.runsRemembered,
+      sovereignHand: oneOf(harness.sovereignHand, SOVEREIGN_HANDS, d.harness.sovereignHand),
+      newestMessage: oneOf(harness.newestMessage, NEWEST_MESSAGES, d.harness.newestMessage),
     },
     harnessLimits: {
       timePassMinutes: Math.min(whole(limits.timePassMinutes, 1) ?? d.harnessLimits.timePassMinutes, TIMELAPSE_REACH_MINUTES),

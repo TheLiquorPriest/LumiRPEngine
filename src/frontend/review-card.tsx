@@ -65,9 +65,9 @@ const STATUS: Readonly<Record<Exclude<ReviewItemView["status"], "open">, { icon:
   refused: { icon: "alert", words: "Refused", tone: "lre-neg" },
 };
 
-/** Who proposed a change, in words: the role that staged it, or the reply's read. */
-function sourceWords(item: ReviewItemView): string {
-  return item.source === "read" ? "From reading the reply" : agentLabel(item.role);
+/** Who proposed a change, in words: on a harness chat the agent that staged it, by its harness name; on the other engines the role that staged it, or the reply's read. */
+export function sourceWords(item: ReviewItemView): string {
+  return item.by ?? (item.source === "read" ? "From reading the reply" : agentLabel(item.role));
 }
 
 /**

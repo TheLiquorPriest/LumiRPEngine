@@ -431,8 +431,17 @@ export function secretMarkText(text: string, known: readonly string[], kept: rea
  */
 export function holdsSecretMark(text: string, wording: SecretMarkWording = SECRET_MARK_WORDING): boolean {
   return [wording.known, wording.kept, wording.both].some((form) => {
-    const parts = form.split(/\{\{(?:text|known|kept)\}\}/);
-    return parts.join("").trim() !== "" && new RegExp(parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s\\S]*?")).test(text);
+    const parts = form.split(/\{\{(?:text|known|kept)\}\}/).filter((p) => p !== "");
+    if (parts.join("").trim() === "") return false;
+    // The form's own words in order, anything between them, by plain search. As one pattern it began
+    // with a wildcard, and a long text holding no mark cost its length squared (5 s for 78 KB).
+    let from = 0;
+    for (const part of parts) {
+      const at = text.indexOf(part, from);
+      if (at < 0) return false;
+      from = at + part.length;
+    }
+    return true;
   });
 }
 

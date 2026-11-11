@@ -40,12 +40,12 @@
 // until its generation ends, is stopped, or another starts on the chat.
 
 import type { RoleTier } from "../../shared/agent-roles";
-import { defaultAgentSettings } from "../../shared/agent-settings";
+import { defaultAgentSettings, type NewestMessage, type SovereignHand } from "../../shared/agent-settings";
 import { HARNESS_AGENT, HARNESS_FAMILY, HARNESS_NOTE, HARNESS_TEXT } from "../../shared/harness-texts";
 import { hashParts } from "../../shared/hash";
 import type { ChatId, MessageId, UserId } from "../../shared/ids";
 import type { JsonObject, JsonValue } from "../../shared/json";
-import type { LedgerEvent, RecHarness } from "../../shared/ledger";
+import type { LedgerEvent, Rec, RecHarness } from "../../shared/ledger";
 import { MINDS_EVENTS } from "../../shared/minds";
 import type { PromptTexts } from "../../shared/prompts";
 import type { WorldDoc } from "../../shared/world";
@@ -76,12 +76,18 @@ import { harnessDefinitions, harnessRole, worldGuidance } from "./definitions";
 import { LUMIAH_TOOL } from "./definitions/lumiah";
 import { jobEnv } from "./jobs";
 import { briefLines, markerNonce, placeParts, withoutBrief } from "./markers";
-import { type AnchorRow, anchorsOf, findTurn, noPartOf, recHarnessOf, unplayedOf } from "./record";
-import type { ChatClaim, ClaimAsk, DefinitionsAsk, ExtensionDefinitions, HarnessExtension, JobView, ModelMessage, RemoteTool, RemoteToolCall, ReplyWritten, RunBegan, RunEnded, ToolsPort, WriterRequest } from "./shapes";
+import { type AnchorRow, anchorsOf, departuresOf, findTurn, noPartOf, recHarnessOf, unplayedOf } from "./record";
+import type { ChatClaim, ClaimAsk, DefinitionsAsk, ExtensionDefinitions, HarnessExtension, JobView, ModelMessage, RemoteTool, RemoteToolCall, ReplyWritten, RunBegan, RunEnded, StorySetting, ToolsPort, WriterRequest } from "./shapes";
 import { Cast, type Ceiling, closedAnswer, OpenTurn, reach, type Standing, standingOf, toolRefusal, type TurnCall } from "./turn";
 
 /** The Outline section's slot: where the author's brief goes. */
 const OUTLINE_SLOT = "outline";
+
+/** Sovereign Hand as the harness's settings have it (`agents.harness.sovereignHand`), as the claim's word on whose messages are the chat's story. */
+const SOVEREIGN_FROM: Readonly<Record<SovereignHand, StorySetting["from"]>> = { follow: "lumiverse", on: "replies", off: "everyone" };
+
+/** What the author is given of the player's newest message under Sovereign Hand (`agents.harness.newestMessage`), as the claim's word. */
+const NEWEST_GIVEN: Readonly<Record<NewestMessage, StorySetting["newest"]>> = { direction: "directive", leave_out: "leave_out" };
 
 /** The family of each tool the engine lists, by its name. */
 const FAMILY: ReadonlyMap<string, string> = new Map(HARNESS_LISTED.map((t) => [t.name, t.family]));
@@ -374,14 +380,20 @@ export class HarnessEngine implements HarnessHooks {
    * a world chat on the harness; nothing for any other, which LumiAH answers itself. LumiAH's own
    * lore tools give way to the engine's there (`LUMIAH_LORE`).
    *
-   * Two things head the guidance when they apply. Guidance heads an agent's instructions, so each is
-   * the first thing the run's author reads, and a level cut for its length (LumiAH's setting) keeps
-   * it:
-   * - The reply the turn follows stands with no turn played: the author reads it first and records
-   *   what it established.
+   * Four things head the guidance when they apply. Guidance heads an agent's instructions, so each
+   * is the first thing the run's author reads, and a level cut for its length (LumiAH's setting)
+   * keeps it:
+   * - The run's story is the model's replies alone (Sovereign Hand, as the claim's own word on the
+   *   story and what holds without it resolve, `storyHolds`): the player's message is a direction,
+   *   which the author carries out through its tools.
    * - The turn before was still being recorded when this run began, and the wait for it ran out
    *   (Settings: `agents.harness.commitWaitMs`). A turn's tail never holds the player, so the run
    *   goes on, and its author knows the last turn's changes may not all be in.
+   * - The reply the turn follows stands with no turn played: the author reads it first and records
+   *   what it established.
+   * - The reply the turn follows says something against what its turn decided (`departuresOf`):
+   *   the world kept the turn's, and the author steers the story back to it unless the player asks
+   *   otherwise.
    */
   private async claim(ask: ClaimAsk): Promise<ChatClaim | null> {
     const userId = await this.userOf(ask.chatId, ask.userId);
@@ -394,10 +406,21 @@ export class HarnessEngine implements HarnessHooks {
     if (!head) return null;
     const narrator = narratorView(await this.rt.chatKnowledge.get(ask.chatId, userId), head.world, settings);
     const guidance = worldGuidance({ world: head.world, state: head.state, texts, narrator });
-    const unplayed = unplayedBefore(head, texts);
-    const first = [...(whole ? [] : [renderPrompt(HARNESS_TEXT.behind, texts, {})]), ...(unplayed !== null ? [renderPrompt(HARNESS_TEXT.unplayed, texts, { why: unplayed })] : [])].filter((text) => text.trim() !== "");
+    const last = lastReply(head);
+    const unplayed = unplayedBefore(last, texts);
+    const departed = departuresOf(last);
+    // The claim's word on what counts as the chat's story: whose messages are, as Sovereign Hand is set for the harness, and what of the newest the author is given. Whether a hidden message is read is LumiAH's own setting.
+    const story: Partial<StorySetting> = { from: SOVEREIGN_FROM[settings.agents.harness.sovereignHand], newest: NEWEST_GIVEN[settings.agents.harness.newestMessage] };
+    // What the run reads as its story is known now, before the guidance is read: the claim's word stands over what holds without it, and following Lumiverse is its Sovereign Hand switch as LumiAH read it (off where Lumiverse doesn't say).
+    const directed = (story.from === "lumiverse" ? (ask.sovereignHand === true ? "replies" : "everyone") : story.from) === "replies";
+    const first = [
+      ...(directed ? [renderPrompt(HARNESS_TEXT.sovereign, texts, {})] : []),
+      ...(whole ? [] : [renderPrompt(HARNESS_TEXT.behind, texts, {})]),
+      ...(unplayed !== null ? [renderPrompt(HARNESS_TEXT.unplayed, texts, { why: unplayed })] : []),
+      ...(departed.length > 0 ? [renderPrompt(HARNESS_TEXT.departed, texts, { lines: departed.map((line) => `- ${line}`).join("\n") })] : []),
+    ].filter((text) => text.trim() !== "");
     const mine = new Set(harnessTools({ world: head.world, registry: this.rt.registry, texts }).map((tool) => tool.name));
-    return { mainAgent: HARNESS_AGENT.author, guidance: first.length > 0 ? { ...guidance, text: `${first.join("\n\n")}\n\n${guidance.text}` } : guidance, withdraw: LUMIAH_LORE.filter((name) => !mine.has(name)) };
+    return { mainAgent: HARNESS_AGENT.author, guidance: first.length > 0 ? { ...guidance, text: `${first.join("\n\n")}\n\n${guidance.text}` } : guidance, withdraw: LUMIAH_LORE.filter((name) => !mine.has(name)), story };
   }
 
   /**
@@ -858,8 +881,9 @@ export class HarnessEngine implements HarnessHooks {
   /**
    * `HarnessHooks.afterCommit`: the turn's record is written. It takes the harness's part: the turn
    * that wrote it (after those a Continue adds to), LumiAH's record of it when its run already
-   * ended, and the default tick when the turn took one. The turn closes: which role wrote what, the
-   * kept files it changed, its review card.
+   * ended, and the default tick when the turn took one. A Continue keeps the lines of departure the
+   * reply holds: the reply still says what they are about. The turn closes: which role wrote what,
+   * the kept files it changed, its review card.
    */
   async afterCommit(input: TurnContext): Promise<void> {
     const { chatId, userId, generationId, core, observed, messageId, swipeId } = input;
@@ -879,7 +903,7 @@ export class HarnessEngine implements HarnessHooks {
       const held = recHarnessOf(core.chain(observed).find((m) => m.id === messageId)?.ledger?.swipes[String(swipeId)]);
       const record = this.records.get(generationId) ?? (turn.continues ? held?.record : undefined);
       this.records.delete(generationId);
-      const harness: RecHarness = { turns: [...(turn.continues ? (held?.turns ?? []) : []), generationId], ...(record ? { record } : {}), ...(close.defaultTick !== null ? { defaultTick: close.defaultTick } : {}) };
+      const harness: RecHarness = { turns: [...(turn.continues ? (held?.turns ?? []) : []), generationId], ...(record ? { record } : {}), ...(close.defaultTick !== null ? { defaultTick: close.defaultTick } : {}), ...(turn.continues && held?.departures ? { departures: held.departures } : {}) };
       const refused = core.recordHarness(messageId, swipeId, harness, observed);
       if (refused) this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the turn's record doesn't name its harness turn (${refused})`, userId);
       else this.recorded?.(chatId);
@@ -909,10 +933,15 @@ export class HarnessEngine implements HarnessHooks {
   }
 }
 
-/** Why the reply a turn follows stands with no turn played, if it does, as the author is told it, in `texts`: the last reply with text the chat shows, which a reply being written (still empty) comes after. */
-function unplayedBefore(head: ChatHead, texts: PromptTexts): string | null {
+/** The record of the last reply with text the chat shows, which a reply being written (still empty) comes after: the reply a turn follows, whose marks its author is told first. Null where there is none. */
+function lastReply(head: ChatHead): Rec | null {
   const reply = head.core.chain(head.observed).findLast((m) => !m.isUser && activeText(m) !== "");
-  const mark = reply ? unplayedOf(activeRecord(reply, head.core.journal.tombstones)) : null;
+  return reply ? activeRecord(reply, head.core.journal.tombstones) : null;
+}
+
+/** Why the reply a turn follows (`rec`, `lastReply`) stands with no turn played, if it does, as the author is told it, in `texts`. */
+function unplayedBefore(rec: Rec | null, texts: PromptTexts): string | null {
+  const mark = unplayedOf(rec);
   if (mark === null) return null;
   return mark.added ? renderPrompt(HARNESS_TEXT.unplayedAdded, texts, { why: mark.why }) : mark.why;
 }

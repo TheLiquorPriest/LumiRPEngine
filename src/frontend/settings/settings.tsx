@@ -12,9 +12,9 @@
 // curtain). Where Settings is, is UI state (`ui.settings`, a `SettingsRoute`), so it holds while the
 // drawer switches modes; Back and Escape go up one level (`settingsBack`), and focus returns to the
 // row that opened the page left (`settingsFocus`). A running chat's own rules (realism, checks, time,
-// pins and Upgrade) live in GM → This chat. While the open chat plays on the harness, the pages that
-// set up the classic and agents engines open with a note that says so, and where the harness's own
-// agents are set up (`EngineNote`).
+// pins and Upgrade) live in GM → This chat. While the open chat plays on the harness, Settings' list
+// says so, and the pages that set up the classic and agents engines open with a note that says what
+// of them the chat uses and where the harness's own agents are set up (`EngineNote`).
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -211,11 +211,12 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
   }
 }
 
-function Home(props: { data: SettingsResult; caveats: readonly Caveat[] | null; connections: readonly Connection[]; open(page: Page): void }) {
+function Home(props: { data: SettingsResult; caveats: readonly Caveat[] | null; connections: readonly Connection[]; note: ComponentChildren; open(page: Page): void }) {
   const showIds = useShowIds();
   return (
     <div class="lre-stack lre-set-home" data-lre-settings-page="home">
       <PageHeader title="Settings" subtitle="Yours, for every world chat" />
+      {props.note}
       {HOME_GROUPS.map((group) => (
         <Section key={group.title} title={group.title} flush>
           <List>
@@ -304,11 +305,14 @@ export interface BodyContext {
 /**
  * The note a page opens with while the open chat plays on the harness, without hooks: on a page that
  * sets up the classic and agents engines, that this chat doesn't use it (or which part of it), what
- * the harness is, and the way to where its agents are set up. Nothing on any other page, or for a
- * chat on another engine. The page under it stays whole: the user's other chats may play on it.
+ * the harness is, and the way to where its agents are set up; on Settings' own list, which engine
+ * this chat plays. Nothing on any other page, on a section of Agents (the note on Agents names the
+ * ones the harness reads), or for a chat on another engine. The page under it stays whole: the
+ * user's other chats may play on it.
  */
 export function EngineNote(props: { route: SettingsRoute; engine: StateView["engine"]; onOpen(): void }) {
   if (props.engine !== "harness") return null;
+  if (props.route.page === "agents" && props.route.sub !== undefined) return null;
   const kind = ENGINE_NOTE_PAGES[props.route.page];
   if (kind === undefined) return null;
   const note = engineNote(kind);
@@ -453,7 +457,7 @@ export function Settings() {
   if (header === null) {
     return (
       <div ref={root} class="lre-set" data-lre-section="settings">
-        <Home data={data} caveats={caveats} connections={connections} open={(page) => go({ page })} />
+        <Home data={data} caveats={caveats} connections={connections} note={<EngineNote route={route} engine={view?.engine} onOpen={() => app.ui.update((ui) => ({ ...ui, mode: HARNESS_MODE.id }))} />} open={(page) => go({ page })} />
       </div>
     );
   }

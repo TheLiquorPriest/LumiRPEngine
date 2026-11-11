@@ -28,6 +28,7 @@ import type { ChipProps } from "./registry";
 import { chipIntent, convertRequest } from "./requests";
 import { toastQueued } from "./queued";
 import { followReview, ReviewCard, reviewHandlers, ReviewUnread } from "./review-card";
+import { go } from "./build/chrome";
 
 const CHIP_ICON: Record<ChipKind, IconName> = {
   change: "check",
@@ -60,6 +61,7 @@ const CHIP_ICON: Record<ChipKind, IconName> = {
   routine_ask: "calendar",
   routine_added: "calendar",
   fix: "edit",
+  world_made: "globe",
   refused: "alert",
   intent_gate: "pause",
   outline_gate: "list",
@@ -74,7 +76,7 @@ const ACTION_ICON: Partial<Record<string, IconName>> = { undo: "undo", regenerat
  * The receipt's order: what went wrong first, so it never hides behind "n more";
  * then time, money, the roll, the changes, how the message was read, and what the engine didn't track.
  */
-const RECEIPT_ORDER: readonly ChipKind[] = ["decline", "degraded", "pending", "elapsed", "price", "undo", "roll", "change", "not_action", "fix", "mode_change", "untracked"];
+const RECEIPT_ORDER: readonly ChipKind[] = ["decline", "degraded", "pending", "elapsed", "price", "undo", "roll", "change", "not_action", "fix", "world_made", "mode_change", "untracked"];
 
 /** Segments the receipt line shows before "n more". */
 const RECEIPT_SEGMENTS = 3;
@@ -232,6 +234,7 @@ function ReviewChip(props: ChipProps) {
 
 function useChipAction(chip: Chip, chatId: ChatId): [boolean, (choice: string, payload?: JsonObject) => void] {
   const app = useApp();
+  const view = useView();
   const [busy, run] = useBusy();
   return [
     busy,
@@ -239,6 +242,15 @@ function useChipAction(chip: Chip, chatId: ChatId): [boolean, (choice: string, p
       run(async () => {
         // A failed engine run's way to what failed (DESIGN §5.1): the drawer at Settings → Diagnostics.
         if (choice === "diagnostics") return openDiagnostics();
+        // A harness turn's change to the world's document: Open in Build opens the chat's world there, and sends nothing.
+        if (chip.kind === "world_made" && choice === "build") {
+          const worldId = view?.worldId ?? null;
+          if (worldId !== null) {
+            app.ui.update((ui) => ({ ...ui, mode: "build" }));
+            go(app, { view: "world", worldId });
+          }
+          return;
+        }
         await sendChipChoice(app, chip, choice, chatId, payload);
       }),
   ];

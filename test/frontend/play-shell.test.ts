@@ -4,7 +4,9 @@ import { initialUi, openAt, orgRoute, orgRouteOf, playAt, popSheet, pushSheet, s
 import type { Overlays } from "../../src/frontend/app";
 import { ProtocolClient } from "../../src/frontend/protocol-client";
 import { createStore } from "../../src/frontend/store";
-import { needsYou } from "../../src/frontend/play/now";
+import { needsYou, needsYouDetail, TurnRunning } from "../../src/frontend/play/now";
+import { Banner, Button } from "../../src/frontend/components";
+import { propsOf } from "../support/tree";
 import { destinations } from "../../src/frontend/play/play";
 import type { PanelDef } from "../../src/frontend/registry";
 import type { UiCatalog } from "../../src/frontend/ui-registry";
@@ -77,6 +79,22 @@ describe("Needs you on Now", () => {
       chip("retry", "retry", "next_send", [{ id: "regenerate", label: "Retry" }]),
     ];
     expect(needsYou(chips).map((c) => c.id)).toEqual(["keep", "confirm", "unread", "retry"]);
+  });
+
+  test("a review card's row says where to answer, not every change it holds; another decision's row keeps its detail", () => {
+    const review: Chip = { ...chip("review:m4:0", "review", "next_send"), label: "5 changes to review", detail: "Commit the world's draft…\nAdd Joss, a courier…" };
+    expect(needsYouDetail(review)).not.toContain("Add Joss");
+    const confirm: Chip = { ...chip("confirm", "confirm", "next_send"), detail: "Move Dev to the garage?" };
+    expect(needsYouDetail(confirm)).toBe("Move Dev to the garage?");
+  });
+
+  test("while a harness turn runs, Now says its author is at work and offers the way to watch it; on another engine, no such way", () => {
+    let watched = 0;
+    const [watch] = propsOf(propsOf(TurnRunning({ engine: "harness", onWatch: () => (watched += 1) }), Banner)[0]?.actions, Button);
+    if (typeof watch?.onClick !== "function") throw new Error("nothing to press to watch the author");
+    watch.onClick();
+    expect(watched).toBe(1);
+    for (const engine of ["classic", "agents", undefined] as const) expect(propsOf(propsOf(TurnRunning({ engine, onWatch: () => undefined }), Banner)[0]?.actions, Button)).toEqual([]);
   });
 });
 

@@ -55,6 +55,8 @@ export interface StoredReviewItem {
   /** Applied while a turn ran: its write's batch, by which its Undo chip is named once it lands. */
   batch?: string;
   undone?: true;
+  /** On a harness chat, who staged it, by the agent's harness name (`harness/card.ts`, `stagedBy`); absent on the other engines, whose `source` and `role` say it. */
+  by?: string;
   /** An operation's own: what it asks, who staged it, and the connection its change type's learning is keyed by. An older item's `knowledge` is read and ignored. */
   op?: AgentOp;
   agentId?: string;
@@ -88,7 +90,7 @@ export function reviewChipId(turn: string): ChipId {
 
 /** What `lre.review` answers with for one card: its items without what only the backend reads. */
 function viewOf(chip: StoredChip, card: CardPayload): ReviewCardView {
-  const items = card.items.map(({ key, source, role, changeType, lines, status, refused, chipId, undone }): ReviewItemView => ({ key, source, role, changeType, lines: [...lines], status, ...(refused ? { refused } : {}), ...(chipId !== undefined && source === "agent" ? { undo: chipId } : {}), ...(undone ? { undone } : {}) }));
+  const items = card.items.map(({ key, source, role, changeType, lines, status, refused, chipId, undone, by }): ReviewItemView => ({ key, source, role, changeType, lines: [...lines], status, ...(refused ? { refused } : {}), ...(chipId !== undefined && source === "agent" ? { undo: chipId } : {}), ...(undone ? { undone } : {}), ...(typeof by === "string" ? { by } : {}) }));
   return { turn: card.turn, messageId: chip.messageId, ...(chip.swipeId !== undefined ? { swipeId: chip.swipeId } : {}), placement: card.placement, items, ...(chip.as ? { resume: chip.as } : {}) };
 }
 
