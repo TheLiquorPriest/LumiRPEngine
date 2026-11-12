@@ -970,12 +970,13 @@ var package_default = {
     reference: "bun scripts/reference/build.ts",
     test: "bun scripts/test/run.ts",
     check: "bun scripts/test/run.ts --check",
-    "test:all": "bun scripts/test/run.ts --all",
+    "test:all": "bun scripts/test-all.ts",
     "test:release": "bun scripts/test/run.ts --release",
     "test:properties": "bun scripts/test/run.ts --properties",
-    "test:timings": "bun scripts/test/run.ts --timings"
+    "test:timings": "bun scripts/test-all.ts --record"
   },
   devDependencies: {
+    "@earendil-works/pi-ai": "1.5.2",
     "bun-types": "^1.4.2",
     "lumiverse-spindle-types": "0.6.79",
     typescript: "7.0.2"
@@ -997,7 +998,7 @@ var DEFAULT_PLACE_CAPS = Object.freeze({ turn: 2, chat: 64 });
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "f525a88e";
+var BUILD = "a63f715f";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
