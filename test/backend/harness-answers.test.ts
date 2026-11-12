@@ -200,12 +200,48 @@ describe("the engine's claim on a chat", () => {
     const late = renderPrompt(HARNESS_TEXT.worldLate, {}, {});
     expect(held.lead).toBe(HARNESS_AGENT.author);
     expect(held.text.startsWith(late)).toBe(true);
-    expect(rig.host.logs.filter((line) => line.includes("world") && line.includes("wasn't read within 300 ms"))).toHaveLength(1);
+    expect(rig.host.logs.filter((line) => line.includes("its world wasn't read within"))).toHaveLength(1);
     // Read in time, the world's own guidance is there, and nothing is said to be late.
     const read = await guidance();
     if (read === "late") throw new Error("the claim wasn't answered within LumiAH's wait");
     expect(read.text).not.toContain(late);
     expect(read.text).toContain("Jordan Ellis");
+    noModelCalls(rig);
+  });
+
+  test("a reply starting while the turn before is still being recorded past half of LumiAH's wait: the world is still read, in a quarter of that wait of its own, after the word that the last turn may not all be in", async () => {
+    const { rig, chatId } = await harnessChat();
+    // LumiAH's Wait for the extension, as the mount reads it for the user: Wait for the last turn, as shipped, is longer than half of it.
+    rig.rt.harness.extensionWait = async () => 600;
+    const guidance = async (): Promise<string | "late"> => {
+      const claim = await inTime(claimOf(rig, chatId), 600);
+      return claim === "late" ? claim : claim?.guidance && "text" in claim.guidance ? claim.guidance.text : "";
+    };
+    // A reply starts: the guard lets its generation go to the runtime, whose run asks the claim next.
+    rig.host.sendUser(chatId, "I wait for the kettle.");
+    await rig.host.settle();
+    await rig.host.begin(chatId, { type: "normal" });
+    const whole = await guidance();
+    // The turn before, still being written on the chat's queue, for longer than LumiAH waits.
+    const commit = Promise.withResolvers<void>();
+    const done = rig.rt.ledger.with(chatId, rig.host.userId, () => commit.promise);
+    for (let i = 0; i < 1000 && !rig.rt.ledger.queued(chatId); i++) await Promise.resolve();
+    expect(rig.rt.ledger.queued(chatId)).toBe(true);
+    // The chat's messages come in a few ms: a read through Lumiverse takes real time, and one that took none would be in before any limit could run out.
+    const chats = rig.rt.host.chats;
+    const messages = chats.messages.bind(chats);
+    chats.messages = async (id, user) => {
+      await Bun.sleep(5);
+      return messages(id, user);
+    };
+    const behind = await guidance();
+    chats.messages = messages;
+    commit.resolve();
+    await done;
+    if (whole === "late" || behind === "late") throw new Error("the claim wasn't answered within LumiAH's wait");
+    // The word that the last turn may not all be in, then the world's guidance as it is with nothing held up.
+    expect(whole).not.toBe("");
+    expect(behind).toBe(`${renderPrompt(HARNESS_TEXT.behind, {}, {})}\n\n${whole}`);
     noModelCalls(rig);
   });
 });

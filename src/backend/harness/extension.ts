@@ -160,9 +160,11 @@ const LUMIAH_WAIT_MS = 10_000;
 
 /**
  * The share of LumiAH's Wait for the extension that what only adds to an answer of the engine's may
- * take (the chat's preset and the author's opening in the definitions; the turn before's commit and
- * the chat's world in the claim): half, so the answer is in well inside the wait, with the rest for
- * its way to the runtime. Not a setting of its own: it follows LumiAH's, which the user sets.
+ * take: half, so the answer is in well inside the wait, with the rest for its way to the runtime. In
+ * the definitions it holds the chat's preset and the author's opening; in the claim, the turn before's
+ * commit, and then the chat's world, whose read has what is left of it and never less than half of it
+ * of its own (`claim`), so the claim's two waits take three quarters of LumiAH's wait at most. Not a
+ * setting of its own: it follows LumiAH's, which the user sets.
  */
 const ENRICH_SHARE = 0.5;
 
@@ -704,12 +706,14 @@ export class HarnessEngine implements HarnessHooks {
    * Asked at the start of every run about the chat, and by LumiAH's pages outside any run (the Agents
    * page whenever it shows with the chat open, the story's page), with the same answer. LumiAH waits
    * for it no longer than its Wait for the extension, and starts no run about the chat without it, so
-   * what it waits on is held within half of that wait, counted from the ask (`enrichMs`):
-   * while a reply of the chat is starting (`starting`), whoever asks, it first waits for the turn
-   * before that reply to be recorded (`caughtUp`), and no longer than Wait for the last turn either;
-   * then it reads the chat's world in what is left of the half, and a world not read by then is left
-   * out. Nothing of it is kept, so whoever asks changes nothing a run is told: a run's own word on the
-   * story reaches the engine as it begins (`runBegan`). It never throws. Null says the chat isn't the
+   * what it waits on is held to that wait, counted from the ask: while a reply of the chat is starting
+   * (`starting`), whoever asks, it first waits for the turn before that reply to be recorded
+   * (`caughtUp`), no longer than Wait for the last turn and half of LumiAH's wait (`enrichMs`); then it
+   * reads the chat's world in what is left of that half, and never in less than a quarter of LumiAH's
+   * wait, so a turn before that takes the whole half doesn't cost the author the world, and the two
+   * waits take three quarters of LumiAH's wait at most. A world not read by then is left out. Nothing
+   * of it is kept, so whoever asks changes nothing a run is told: a run's own word on the story
+   * reaches the engine as it begins (`runBegan`). It never throws. Null says the chat isn't the
    * harness's, which only a chat on another engine is: a chat on the harness always gets a claim that
    * names the author, whatever couldn't be read or came late, since LumiAH's own main agent would
    * answer it otherwise.
@@ -719,7 +723,8 @@ export class HarnessEngine implements HarnessHooks {
    * keeps it:
    * - What couldn't be read as the run began (`HARNESS_TEXT.unread`): whose chat it is, its choices,
    *   the engine's settings (the shipped ones stand in), its world (no world's guidance then); and a
-   *   world not read in time (`HARNESS_TEXT.worldLate`).
+   *   world not read in time (`HARNESS_TEXT.worldLate`), which says too that whether a turn was played
+   *   for the reply before isn't known: that is read with the world.
    * - The run's story is the model's replies alone (Sovereign Hand, as the claim's own word on the
    *   story and what holds without it resolve, `storyHolds`): the player's message is a direction,
    *   which the author carries out through its tools.
@@ -768,15 +773,15 @@ export class HarnessEngine implements HarnessHooks {
       let world = { name: renderPrompt(HARNESS_TEXT.guidanceName, texts, {}), text: "" };
       let unplayed: string | null = null;
       if (userId !== null) {
-        // Half of LumiAH's own wait for this answer, counted from the ask, holds what the claim waits on: the turn before's commit, where a reply of the chat is starting, then the chat's world in what is left.
+        // Counted from the ask: the turn before is waited for, where a reply of the chat is starting, within half of LumiAH's own wait for this answer (`bound`); the world's read then has what is left of that half, and never less than half of it (a quarter of LumiAH's wait) of its own, so a turn before that takes the whole half doesn't cost the author the world. The two waits take three quarters of LumiAH's wait at most.
         const bound = await this.enrichMs(userId);
-        const left = (): number | null => (bound === null ? null : Math.max(0, bound - (performance.now() - asked)));
-        if (this.starting.has(chatId)) whole = await this.caughtUp(chatId, userId, Math.min(harness.commitWaitMs, left() ?? Infinity));
-        // Read late, the world goes nowhere: what it would have said is left out, and the guidance says so first.
-        const read = await within(this.claimRead(chatId, userId), left()).catch((error: unknown) => void missed("This chat's world", error));
+        if (this.starting.has(chatId)) whole = await this.caughtUp(chatId, userId, bound === null ? harness.commitWaitMs : Math.min(harness.commitWaitMs, Math.max(0, bound - (performance.now() - asked))));
+        const ms = bound === null ? null : Math.round(Math.max(bound - (performance.now() - asked), bound / 2));
+        // Read late, the world goes nowhere: what it would have said is left out, and so is whether the reply before was played, which is read with it; the late text tells the author both.
+        const read = await within(this.claimRead(chatId, userId), ms).catch((error: unknown) => void missed("This chat's world", error));
         if (read === "late") {
           late = true;
-          this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: its world wasn't read within ${bound} ms (half of LumiAH's Wait for the extension), so the engine's claim on it goes on without it; the claim still names the author`, userId);
+          this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: its world wasn't read within ${ms} ms (what was left of half of LumiAH's Wait for the extension, and never less than a quarter of it), so the engine's claim on it goes on without it; the claim still names the author`, userId);
         } else if (read !== undefined) {
           if (read.value === null) unread.add(NO_WORLD);
           else {
