@@ -12,10 +12,11 @@
 //     default failed), and the last reply's review card holds changes to the world's document.
 //     &harness=blocked: the harness can't play the chat now, and GM → This chat → Engine and Play say why.
 //     With scenario=not_world, Build's "Attach to this chat" makes the chat a new world chat on the harness.
-//     The Harness tab's Cast, Record and Notebook, and Play → Now's prepared start, read a made-up story
-//     (dev/preview/story-fixture.ts); &prepare=offer|planning|waiting|running|paused|failed|done (default
-//     offer) is where the prepared start begins. `__lre.story.writeAsAgent(path, text)` writes a workspace
-//     file as an agent would, so an editor holding it meets a conflict on its next save.
+//     The Harness tab's Cast, Record and Notebook, and Play → Now's prepared start with its live view, read a
+//     made-up story (dev/preview/story-fixture.ts); &prepare=offer|planning|revising|waiting|running|paused|
+//     done|cancelled|failed|unreachable (default offer) is where the prepared start begins.
+//     `__lre.story.writeAsAgent(path, text)` writes a workspace file as an agent would, so an editor holding it
+//     meets a conflict on its next save.
 //   ?pickers: the character pickers alone in the drawer (place, bed, a list of text) over a 320-place world,
 //     in place of the app (dev/preview/pickers.tsx).
 
