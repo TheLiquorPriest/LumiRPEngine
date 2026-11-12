@@ -41804,7 +41804,7 @@ var require_parse = __commonJS(function(exports, module) {
           return !_options.alwaysParseAsBig ? number2 : _options.useNativeBigInt ? BigInt(number2) : new BigNumber(number2);
       }
     }, string = function() {
-      var hex2, i, string2 = "", uffff;
+      var hex3, i, string2 = "", uffff;
       if (ch === '"') {
         var startAt = at;
         while (next()) {
@@ -41821,11 +41821,11 @@ var require_parse = __commonJS(function(exports, module) {
             if (ch === "u") {
               uffff = 0;
               for (i = 0;i < 4; i += 1) {
-                hex2 = parseInt(next(), 16);
-                if (!isFinite(hex2)) {
+                hex3 = parseInt(next(), 16);
+                if (!isFinite(hex3)) {
                   break;
                 }
-                uffff = uffff * 16 + hex2;
+                uffff = uffff * 16 + hex3;
               }
               string2 += String.fromCharCode(uffff);
             } else if (typeof escapee[ch] === "string") {
@@ -76273,7 +76273,7 @@ function requestOf(spec, p, maxTokens, settings) {
     messages: p.messages,
     maxTokens,
     connectionId: p.connectionId,
-    model: spec.model,
+    model: p.modelId,
     ...p.tools.length > 0 ? { tools: p.tools } : {},
     ...p.tools.length > 0 && !p.parallel ? { parallelToolCalls: false } : {},
     effort: callEffort(spec.effort, p.names.size > 0, settings.loop.thinkingInToolLoops),
@@ -76310,6 +76310,9 @@ class ProviderSession {
   get gone() {
     return this.profile !== undefined && this.spec.connectionId !== null && this.named !== this.spec.connectionId ? this.spec.connectionId : null;
   }
+  get model() {
+    return this.gone !== null ? this.profile?.model ?? null : this.spec.model;
+  }
   async connection() {
     if (this.profile !== undefined)
       return this.profile;
@@ -76341,7 +76344,8 @@ class ProviderSession {
     const read2 = this.reading ?? this.connection();
     this.reading = null;
     const profile = await read2;
-    const model = this.spec.model ?? profile.model ?? "";
+    const modelId = this.gone !== null ? null : this.spec.model;
+    const model = modelId ?? profile.model ?? "";
     if (this.toolCalls === "auto" && !this.textTools && tools.length > 0 && accounts.refusesTools(profile.id, model, settings.connections))
       this.textTools = true;
     const wires = wireNames(tools);
@@ -76355,7 +76359,7 @@ class ProviderSession {
     const messages = assemble(opening, conversation);
     for (const [i, m] of messages.entries())
       messages[i] = onWire(m, wires.out);
-    return { messages, tools: offered, names: new Set(tools.map((t) => t.name)), called: wires.back, textTools: this.textTools && tools.length > 0, estimate: promptTokens(messages, offered, settings.loop.charsPerToken), connection: profile.id, connectionId: this.named, model, parallel: profile.parallelTools };
+    return { messages, tools: offered, names: new Set(tools.map((t) => t.name)), called: wires.back, textTools: this.textTools && tools.length > 0, estimate: promptTokens(messages, offered, settings.loop.charsPerToken), connection: profile.id, connectionId: this.named, model, modelId, parallel: profile.parallelTools };
   }
   async send(p, request, signal) {
     const { host, settings, texts, accounts } = this.deps;
@@ -76545,7 +76549,7 @@ class Agent {
       const gone = this.session.gone;
       on = { connectionId: profile.id, connectionName: profile.name, ...gone !== null ? { gone } : {} };
     } catch {}
-    this.deps.turn?.trace?.start({ id: this.id, role: spec.role, ...on, model: spec.model, effort: spec.effort, system: spec.system, prefix: [...spec.prefix], history: spec.history?.length ?? 0, ...spec.parent !== undefined ? { parent: spec.parent } : {}, ...spec.task !== undefined ? { task: spec.task } : {}, ...spec.as !== undefined ? { as: spec.as } : {}, at: this.now() });
+    this.deps.turn?.trace?.start({ id: this.id, role: spec.role, ...on, model: this.session.model, effort: spec.effort, system: spec.system, prefix: [...spec.prefix], history: spec.history?.length ?? 0, ...spec.parent !== undefined ? { parent: spec.parent } : {}, ...spec.task !== undefined ? { task: spec.task } : {}, ...spec.as !== undefined ? { as: spec.as } : {}, at: this.now() });
   }
   text(id, vars = {}) {
     return this.deps.texts.render(id, vars);
@@ -88535,7 +88539,7 @@ function linkedBackendOf(raw) {
     return OWN_BACKEND;
   return { name: raw.name, connection: raw.connection, ...text2(raw.settingsAt) && raw.settingsAt !== "" ? { settingsAt: raw.settingsAt } : {} };
 }
-var ERROR_CODES = { bad_request: true, forbidden: true, not_found: true, conflict: true, unavailable: true, version: true, too_large: true, internal: true };
+var ERROR_CODES = { bad_request: true, forbidden: true, not_found: true, conflict: true, unavailable: true, version: true, too_large: true, superseded: true, internal: true };
 function answerOf(raw) {
   if (!isLinkFrame(raw) || !text2(raw.id))
     return null;
@@ -88547,6 +88551,42 @@ function answerOf(raw) {
     return { link: LINK, type: "error", id: raw.id, code, message: text2(raw.message) ? raw.message : "LumiAH refused the request.", ...took };
   }
   return null;
+}
+
+// node_modules/lumi-ah/src/link/road.ts
+var ASK_PATH = "/x/ask";
+var PROBE_HEADER = "x-lumiah-probe";
+var PROBE_NONCE = /^[0-9a-f]{32}$/;
+var PROXY_MAX_BYTES = 25 * 1024 * 1024;
+var PROXY_ROOM_BYTES = 64 * 1024;
+var TOO_LARGE_STATUS = 507;
+var ASK_ID = /^[0-9a-f]{16,128}$/;
+function hex2(bytes) {
+  let out = "";
+  for (const b of bytes)
+    out += b.toString(16).padStart(2, "0");
+  return out;
+}
+async function roadProof(secret, relay, nonce) {
+  const encoder = new TextEncoder;
+  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return hex2(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(`lumiah ask road
+${relay}
+${nonce}`))));
+}
+async function sameSecret(a, b) {
+  const encoder = new TextEncoder;
+  const [x, y] = await Promise.all([crypto.subtle.digest("SHA-256", encoder.encode(a)), crypto.subtle.digest("SHA-256", encoder.encode(b))]);
+  const left = new Uint8Array(x);
+  const right = new Uint8Array(y);
+  let differs = 0;
+  for (let i = 0;i < left.length; i++)
+    differs |= (left[i] ?? 0) ^ (right[i] ?? 0);
+  return differs === 0;
+}
+function isLoopback(listen) {
+  const name = listen.toLowerCase();
+  return name === "localhost" || name === "::1" || name === "[::1]" || /^127(\.\d{1,3}){3}$/.test(name);
 }
 
 // node_modules/lumi-ah/src/link/settings.ts
@@ -88610,7 +88650,9 @@ var RUNTIME_DEFAULTS = Object.freeze({
   copyReadMs: 15000,
   copyChars: 32000000,
   providerMs: 60000,
-  answerSilentMs: 5 * 60000
+  answerSilentMs: 5 * 60000,
+  signInMs: 10 * 60000,
+  buildStartMs: 30000
 });
 var TRANSPORT_DEFAULTS = Object.freeze({
   history: Object.freeze({ keep: "last", count: 40 }),
@@ -88803,7 +88845,9 @@ var TRANSPORT_SCHEMA = {
         copyReadMs: ms("Chat data wait", "How long each request the runtime makes to Lumiverse for its own copy of your chats and world books waits for its answer: a page of a chat's messages or of a book's entries, a check of a chat before an agent reads it. Past it that read is given up, and the agent's read is asked of this extension instead.", 1000, 10 * 60000),
         copyChars: whole3("Chat data kept", "The most characters of your chats and world books the runtime keeps in memory, so an agent reads them without asking this extension. What was used least recently goes first; a chat larger than this alone is read from this extension every time. 0 keeps none.", 0, 1e9, "characters"),
         providerMs: ms("Provider wait", "How long testing one of the runtime's connections (Runtime \u2192 Connections), or reading a server's list of its models for a model picker, waits for the provider to answer. Past it the page says the provider didn't answer.", 1000, 10 * 60000),
-        answerSilentMs: ms("Silent answer ends after", "How long a model's answer, once it has begun, may go with nothing at all from its provider's server before the call is ended and made again, as a dropped stream is. Before its answer begins a model may still be reading a long prompt or thinking unseen: that is never cut short. 0: no limit.", 0, DAY_MS4)
+        answerSilentMs: ms("Silent answer ends after", "How long a model's answer, once it has begun, may go with nothing at all from its provider's server before the call is ended and made again, as a dropped stream is. Before its answer begins a model may still be reading a long prompt or thinking unseen: that is never cut short. 0: no limit.", 0, DAY_MS4),
+        signInMs: ms("Sign-in stays open", "How long a sign-in to Anthropic or OpenAI (Runtime \u2192 Connections) stays open for you to sign in and paste back what the provider gave you. Past it the sign-in ends and says so: start it again. A provider keeps what it gives you good for about ten minutes, so a longer wait seldom helps.", 60000, 60 * 60000),
+        buildStartMs: ms("New build's start check", "How long a new build of the runtime is given to start and say its version before the runtime updates to it. Past it the build is taken as one that can't start here, and the runtime stays on the build it runs. A slow or busy machine may need longer.", 5000, 10 * 60000)
       }
     }
   }
@@ -89109,7 +89153,7 @@ var TIMEOUT_GROUPS = [
   {
     id: "runtime",
     label: "Waiting for the runtime",
-    about: "How long a page, a reply or a key waits for your runtime to do something.",
+    about: "How long a page, a reply or a key waits for your runtime to do something, and how long a new build of the runtime has to start before it updates to it.",
     rows: [
       ["transport", "pages", "askMs"],
       ["transport", "pages", "proxyMs"],
@@ -89118,7 +89162,8 @@ var TIMEOUT_GROUPS = [
       ["transport", "runtime", "turnWaitMs"],
       ["transport", "runtime", "drainMs"],
       ["transport", "live", "lostMs"],
-      ["transport", "link", "quietMs"]
+      ["transport", "link", "quietMs"],
+      ["transport", "runtime", "buildStartMs"]
     ]
   },
   {
@@ -89155,8 +89200,8 @@ var TIMEOUT_GROUPS = [
   {
     id: "model",
     label: "A model call",
-    about: "How long an agent's calls, the agent, a turn or a job may take, how long a model's answer may go silent, how long a connection's test waits for its provider, and the wait before a failed call is made again.",
-    rows: [...AGENT_TIMES, ["core", "turn", "wallMs"], ["core", "jobs", "budget", "wallMs"], ["core", "loop", "retryWaitMs"], ["transport", "runtime", "answerSilentMs"], ["transport", "runtime", "providerMs"]]
+    about: "How long an agent's calls, the agent, a turn or a job may take, how long a model's answer may go silent, how long a connection's test waits for its provider, how long a sign-in stays open, and the wait before a failed call is made again.",
+    rows: [...AGENT_TIMES, ["core", "turn", "wallMs"], ["core", "jobs", "budget", "wallMs"], ["core", "loop", "retryWaitMs"], ["transport", "runtime", "answerSilentMs"], ["transport", "runtime", "providerMs"], ["transport", "runtime", "signInMs"]]
   },
   {
     id: "store",
@@ -91059,6 +91104,8 @@ function headersOf(given2, had, carried) {
     }
     if (/[\r\n\0]/.test(value))
       throw new Error(`The header "${name}" can't hold a line break.`);
+    if (value.trim().length < SECRET_FLOOR)
+      throw new Error(`The value of "${name}" needs ${SECRET_FLOOR} characters at least: the runtime takes a header's value out of whatever a server says back, as it does a key, and a shorter one can't be told from ordinary words.`);
     headers[name] = value;
   }
   return Object.keys(headers).length > 0 ? headers : undefined;
@@ -91236,6 +91283,8 @@ class Book {
     const connection = checked(input, input.id ?? newId());
     if (key !== undefined && key !== null && (typeof key !== "string" || key.trim() === ""))
       throw new Error("A key can't be empty: leave it out to keep the one there is.");
+    if (typeof key === "string" && key.trim().length < SECRET_FLOOR)
+      throw new Error(`A key needs ${SECRET_FLOOR} characters at least: the runtime takes a key out of whatever a server says back (some repeat a key they refuse), and a shorter one can't be told from ordinary words.`);
     const before = at === -1 ? undefined : s.connections[at];
     const carried = before !== undefined && before.provider === connection.provider && originOf(before.baseUrl) === originOf(connection.baseUrl);
     const headers = headersOf(input.headers, before?.headers, carried);
@@ -92249,7 +92298,6 @@ async function passedJob(request2, connectionId, shape) {
 }
 
 // node_modules/lumi-ah/src/runtime/models/signin.ts
-var SIGN_IN_MS = 10 * 60000;
 var ENDED_KEPT_MS = 10 * 60000;
 var NAMES = { anthropic: "Anthropic", openai: "OpenAI" };
 var NOTES = {
@@ -92305,6 +92353,7 @@ function createSignIn(deps) {
       if (earlier !== undefined)
         end(earlier, "A new sign-in was started in its place.");
       const device = await deps.book.device(deps.uuid);
+      const openMs = await deps.signInMs();
       const stop2 = new AbortController;
       const pasted = Promise.withResolvers();
       pasted.promise.catch(() => {
@@ -92339,8 +92388,8 @@ function createSignIn(deps) {
         timer: deps.setTimeout(() => {
           const open2 = flows.get(id);
           if (open2 !== undefined)
-            end(open2, "The sign-in was left open too long.");
-        }, deps.signInMs)
+            end(open2, `The sign-in was left open longer than ${durationWords(openMs)}. ${transportWait(["runtime", "signInMs"], deps.owner())} says how long a sign-in stays open.`);
+        }, openMs)
       };
       flow.done = deps.pi.login(provider2, "oauth", interaction, { getDeviceId: () => device, agentName: AGENT_NAME }).then(() => {
         if (flows.get(id) === flow) {
@@ -92400,6 +92449,7 @@ function createSignIn(deps) {
 var TEST_PROMPT = "Reply with the word OK.";
 var TEST_ROOM = 64;
 var ASK_MS = RUNTIME_DEFAULTS.providerMs;
+var SIGN_IN_MS = RUNTIME_DEFAULTS.signInMs;
 var LIST_MAX = 8 * 1024 * 1024;
 var NOWHERE = { env: async () => {
   return;
@@ -92478,7 +92528,7 @@ function createModelLayer(deps) {
   for (const provider2 of [...builtInProviders(), ...deps.providers ?? []])
     pi.setProvider(provider2);
   const callDeps = { pi, book, fetch: deps.fetch, now: deps.now, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, silentMs: async () => await deps.silentMs?.() ?? SILENT_MS, silentSetting: () => transportWait(["runtime", "answerSilentMs"], deps.owner?.() ?? OWN_BACKEND) };
-  const signIn2 = createSignIn({ pi, book, id: deps.id, uuid: deps.uuid, now: deps.now, log: deps.log, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, signInMs: deps.signInMs ?? SIGN_IN_MS });
+  const signIn2 = createSignIn({ pi, book, id: deps.id, uuid: deps.uuid, now: deps.now, log: deps.log, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, signInMs: async () => await deps.signInMs?.() ?? SIGN_IN_MS, owner: () => deps.owner?.() ?? OWN_BACKEND });
   const deadline = async (late) => {
     const ms2 = await deps.askMs?.() ?? ASK_MS;
     const stop2 = new AbortController;
@@ -92629,18 +92679,18 @@ function createModelLayer(deps) {
 // node_modules/lumi-ah/src/runtime/proof.ts
 var PROOF_WINDOW_MS = 60000;
 var FORM = /^([0-9]{1,16})\.([0-9a-f]{32})\.([0-9a-f]{64})$/;
-function hex2(bytes2) {
+function hex3(bytes2) {
   return [...bytes2].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 async function mac(secret, at, nonce) {
   const encoder2 = new TextEncoder;
   const key = await crypto.subtle.importKey("raw", encoder2.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return hex2(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder2.encode(`lumiah healthz
+  return hex3(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder2.encode(`lumiah healthz
 ${at}
 ${nonce}`))));
 }
 async function healthProof(secret, at) {
-  const nonce = hex2(crypto.getRandomValues(new Uint8Array(16)));
+  const nonce = hex3(crypto.getRandomValues(new Uint8Array(16)));
   return `${at}.${nonce}.${await mac(secret, at, nonce)}`;
 }
 function same(a, b) {
@@ -92758,38 +92808,6 @@ class Timings {
     const slowest = [...rows].sort((a, b) => b.ms - a.ms || b.at - a.at).slice(0, SLOWEST_SHOWN);
     return { since: rows[0]?.at ?? null, rows: rows.length, capacity: this.capacity, ops, slowest };
   }
-}
-
-// node_modules/lumi-ah/src/link/road.ts
-var ASK_PATH = "/x/ask";
-var PROBE_HEADER = "x-lumiah-probe";
-var PROBE_NONCE = /^[0-9a-f]{32}$/;
-var PROXY_MAX_BYTES = 25 * 1024 * 1024;
-var PROXY_ROOM_BYTES = 64 * 1024;
-var TOO_LARGE_STATUS = 507;
-var ASK_ID = /^[0-9a-f]{16,128}$/;
-function hex3(bytes2) {
-  let out = "";
-  for (const b of bytes2)
-    out += b.toString(16).padStart(2, "0");
-  return out;
-}
-async function roadProof(secret, relay, nonce) {
-  const encoder2 = new TextEncoder;
-  const key = await crypto.subtle.importKey("raw", encoder2.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return hex3(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder2.encode(`lumiah ask road
-${relay}
-${nonce}`))));
-}
-async function sameSecret(a, b) {
-  const encoder2 = new TextEncoder;
-  const [x, y] = await Promise.all([crypto.subtle.digest("SHA-256", encoder2.encode(a)), crypto.subtle.digest("SHA-256", encoder2.encode(b))]);
-  const left = new Uint8Array(x);
-  const right = new Uint8Array(y);
-  let differs = 0;
-  for (let i = 0;i < left.length; i++)
-    differs |= (left[i] ?? 0) ^ (right[i] ?? 0);
-  return differs === 0;
 }
 
 // node_modules/lumi-ah/src/link/work.ts
@@ -93078,8 +93096,6 @@ class AskDesk {
   run(id, op, args, road) {
     const known = this.asks.get(id);
     if (known !== undefined) {
-      if (road === "proxy")
-        known.remembered = true;
       if (known.endedAt === null)
         return known.done;
       if (known.outcome !== null)
@@ -93087,7 +93103,7 @@ class AskDesk {
       return Promise.resolve({ value: null, refusal: { code: "unavailable", message: "The runtime answered this already, by the other road. Try again." }, took: 0 });
     }
     const started = this.deps.now();
-    const kept = { done: Promise.resolve({ value: null, refusal: null, took: 0 }), endedAt: null, outcome: null, chars: 0, remembered: road === "proxy" };
+    const kept = { done: Promise.resolve({ value: null, refusal: null, took: 0 }), endedAt: null, outcome: null, chars: 0 };
     kept.done = this.deps.answer(op, args).then((value) => ({ value, refusal: null, took: this.deps.now() - started }), (error3) => {
       const refusal = refusalOf(error3);
       if (refusal.code === "internal")
@@ -93097,11 +93113,11 @@ class AskDesk {
     this.asks.set(id, kept);
     kept.done.then((outcome) => {
       kept.endedAt = this.deps.now();
-      if (kept.remembered)
-        kept.outcome = outcome;
+      kept.outcome = outcome;
+      if (road === "link")
+        this.counted(id, JSON.stringify(outcome).length);
       else
-        this.asks.delete(id);
-      this.prune();
+        this.prune();
     });
     return kept.done;
   }
@@ -93843,11 +93859,11 @@ function linkStorage(deps, mirror) {
     },
     store: {
       read: async (path6) => (await ask3("doc.get", { path: path6 })).doc,
-      write: async (path6, value) => {
-        await ask3("doc.put", { path: path6, doc: value, ...as });
+      write: async (path6, value, ago) => {
+        await ask3("doc.put", { path: path6, doc: value, ...as, ...ago === undefined ? {} : { ago } });
       },
-      remove: async (path6) => {
-        await ask3("doc.remove", { path: path6, ...as });
+      remove: async (path6, ago) => {
+        await ask3("doc.remove", { path: path6, ...as, ...ago === undefined ? {} : { ago } });
       },
       list: async (prefix) => (await ask3("doc.list", { prefix })).paths
     }
@@ -93859,7 +93875,7 @@ function withdrawn(error3) {
 }
 function refusedForGood(error3) {
   const cause = error3 instanceof Error ? error3.cause : undefined;
-  return cause instanceof LinkError && (cause.code === "bad_request" || cause.code === "too_large");
+  return cause instanceof LinkError && (cause.code === "bad_request" || cause.code === "too_large" || cause.code === "superseded");
 }
 function unknownRuntime(error3) {
   const cause = error3 instanceof Error ? error3.cause : undefined;
@@ -94868,7 +94884,7 @@ class Shelf {
   }
   due(id) {
     const slot = this.slots.get(id);
-    if (slot !== undefined && slot.copy !== null)
+    if (slot !== undefined)
       slot.due = ++this.dues;
   }
   awaited(slot) {
@@ -96297,6 +96313,7 @@ function listed2(lore, books, persona, character) {
 function createChatData(deps) {
   const name = () => deps.link.backendName ?? "LumiAH";
   const link = { link: deps.link, now: deps.now, tuning: deps.tuning };
+  const besideLumiverse = isLoopback(new URL(deps.base).hostname);
   let offer = null;
   let greeted = false;
   let last = 0;
@@ -96438,7 +96455,7 @@ function createChatData(deps) {
       const codec = records === null ? null : records.under === null ? OWN_ANCHORS : anchorsUnder(records.under);
       built = { copy, reader: new ChatReader({ chats: copy.chats }, () => deps.pathKeeping(), deps.now, codec ?? OWN_ANCHORS), userId: user, identifier, ownElsewhere: said3.ownElsewhere, declinesLore: said3.declinesLore, records, codec };
     }
-    switchReader(said3.database, user, said3.identifier);
+    switchReader(besideLumiverse ? said3.database : null, user, said3.identifier);
   }
   function askUser(now) {
     if (asking)
@@ -96553,6 +96570,8 @@ function createChatData(deps) {
       return "The operator switched the database reader on for this runtime: the copy reads Lumiverse's own file, the runtime's user's rows alone.";
     if (db !== null)
       return `The copy reads Lumiverse as the runtime's signed-in user: the database reader is off (${db.why ?? "it was closed"}).`;
+    if (offer !== null && offer.database !== null && !besideLumiverse)
+      return `The copy reads Lumiverse as the runtime's signed-in user: the operator switched the database reader on, but this runtime reaches Lumiverse at ${new URL(deps.base).host}, not at a loopback address, and the reader opens Lumiverse's file only where the runtime runs on Lumiverse's own machine.`;
     return "The copy reads Lumiverse as the runtime's signed-in user: the database reader isn't switched on for this runtime.";
   }
   return {
@@ -96936,6 +96955,7 @@ class Relay {
   env;
   calls = new Map;
   proofs = new HealthProofs(() => this.env.secret(), () => this.env.now());
+  stopping = false;
   constructor(link, layer, turns, settings, env4) {
     this.link = link;
     this.layer = layer;
@@ -96955,6 +96975,7 @@ class Relay {
         call.answer.keepAlive(now, alive, tuning);
   }
   shutdown() {
+    this.stopping = true;
     for (const call of [...this.calls.values()]) {
       call.closed();
       this.end(call, { message: "The runtime is restarting. Press Retry in a moment.", code: "unavailable" });
@@ -96966,6 +96987,8 @@ class Relay {
       return json4(403, errorJson("LumiAH's runtime answers Lumiverse's server, not a browser.", "forbidden"));
     if (!this.hostAllowed(req.headers.get("host")))
       return json4(421, errorJson(`This is LumiAH's runtime at ${this.settings.listen}:${this.settings.port}; it answers requests addressed to it alone.`, "misdirected"));
+    if (this.stopping && (url.pathname !== ASK_PATH || req.headers.get(PROBE_HEADER) === null))
+      return json4(503, errorJson("The runtime is restarting. Press Retry in a moment.", "unavailable"));
     if (url.pathname === ASK_PATH && this.env.ask !== undefined)
       return this.env.ask(req);
     const path6 = url.pathname.replace(/\/+$/, "").replace(/^\/v1(?=\/)/, "");
@@ -97487,6 +97510,7 @@ function createWorkingStore(deps) {
   let closing = null;
   let opening2 = Promise.resolve();
   let shutOut = null;
+  let emptying = false;
   const backoff3 = () => {
     const { retryFirstMs, retryMostMs } = limits();
     return Math.min(retryMostMs, retryFirstMs * 2 ** Math.min(Math.max(failures - 1, 0), 30));
@@ -97676,18 +97700,38 @@ function createWorkingStore(deps) {
         return true;
     return false;
   }
-  async function wipe(gen) {
-    await disk.removeAll(JOURNAL);
-    await disk.removeAll(DOCS);
-    await disk.removeAll(BLOBS);
-    made.clear();
-    await disk.mkdir(JOURNAL);
-    made.add(TMP).add(JOURNAL);
+  async function wipe(gen, kept = new Set) {
+    if (kept.size === 0) {
+      await disk.removeAll(JOURNAL);
+      await disk.removeAll(DOCS);
+      await disk.removeAll(BLOBS);
+      made.clear();
+      await disk.mkdir(JOURNAL);
+      made.add(TMP).add(JOURNAL);
+      docs.clear();
+      blobs.clear();
+      counting = false;
+      uncounted.clear();
+    } else {
+      for (const path6 of await localDocs()) {
+        if (kept.has(`d:${path6}`))
+          continue;
+        await disk.remove(docFile(path6));
+        docs.drop(path6);
+        await prune(path6);
+      }
+      for (const pair of await disk.entries(BLOBS)) {
+        if (!pair.folder)
+          continue;
+        for (const file of await disk.entries(`${BLOBS}/${pair.name}`)) {
+          if (file.folder || kept.has(`b:${file.name}`))
+            continue;
+          await disk.remove(`${BLOBS}/${pair.name}/${file.name}`);
+          dropBlob(file.name);
+        }
+      }
+    }
     absent.clear();
-    docs.clear();
-    blobs.clear();
-    counting = false;
-    uncounted.clear();
     await reborn(gen);
   }
   function logDropped(dropped, why) {
@@ -97725,11 +97769,13 @@ function createWorkingStore(deps) {
           return;
         }
         const held2 = queue.size > 0 || await holdsFile(DOCS) || await holdsFile(BLOBS);
-        const dropped = [...queue.values()];
         const own = mark !== null && mark.copy === copy;
+        const kept = new Set(mark !== null && !own ? queue.keys() : []);
+        const dropped = [...queue.values()].filter((entry) => !kept.has(entry.key));
         if (found !== null || held2) {
-          queue.clear();
-          await serial("", () => wipe(word2.gen));
+          for (const entry of dropped)
+            queue.delete(entry.key);
+          await serial("", () => wipe(word2.gen, kept));
         } else if (seen !== word2.gen) {
           seen = word2.gen;
           await serial("", keepIdentity);
@@ -97742,7 +97788,7 @@ function createWorkingStore(deps) {
           takeover = { from, at: deps.now(), dropped: dropped.length };
           const whose = mark === null ? "doesn't say which runtime keeps it" : own ? "has taken more from this runtime's copy than the copy holds (a copy from a backup, or from another machine)" : `is kept by another runtime (${from}, since ${new Date(mark.at).toISOString()})`;
           logDropped(dropped, "the copy was thrown away for the storage's");
-          deps.log("warn", `the extension's storage ${whose}: this runtime threw its own copy away${dropped.length > 0 ? `, with ${dropped.length} changes the storage never had,` : ""} and keeps the storage from now on`);
+          deps.log("warn", `the extension's storage ${whose}: this runtime threw its own copy away${dropped.length > 0 ? `, with ${dropped.length} changes the storage never had,` : ""}${kept.size > 0 ? ` but for the ${kept.size} changes it hadn't sent, which go to the storage,` : ""} and keeps the storage from now on`);
         }
         reached2();
         return;
@@ -97763,6 +97809,7 @@ function createWorkingStore(deps) {
     }
   }
   function open3(word2) {
+    emptying = false;
     become("opening");
     opening2 = claim(word2).then(() => {
       if (mode !== "opening" || closed || shutOut !== null)
@@ -97796,22 +97843,27 @@ function createWorkingStore(deps) {
     markLater = null;
     for (const wake of [...sleeps])
       wake();
+    emptying = true;
     const who = to === null ? "Another runtime" : `Another runtime (${to})`;
-    deps.log("warn", `the runtime's store: ${who} keeps the extension's storage now, so this runtime stops using its own copy and reads and writes the storage directly until it starts again`);
+    deps.log("warn", `the runtime's store: ${who} keeps the extension's storage now, so this runtime stops using its own copy, sends the storage what it hadn't sent there, and reads and writes the storage directly until it starts again`);
+    if (queue.size === 0)
+      drained();
+    else
+      kick(true);
+  }
+  function drained() {
     track((async () => {
       await quiet2();
-      const dropped = [...queue.values()];
-      queue.clear();
-      logDropped(dropped, "another runtime keeps the storage now");
-      const ended = lost;
-      if (ended !== null)
-        ended.dropped = dropped.length;
-      if (dropped.length > 0) {
-        const words5 = `${who} keeps the extension's storage now, so this runtime stopped using its own copy, and ${dropped.length === 1 ? "a change" : `${dropped.length} changes`} it hadn't sent there ${dropped.length === 1 ? "was" : "were"} dropped (the log names each). It reads and writes the storage directly from now on.`;
-        tell({ from: Math.min(...dropped.map((entry) => entry.first)), until: null, words: words5 });
+      if (closed || mode !== "direct")
+        return;
+      if (queue.size > 0) {
+        kick(true);
+        return;
       }
-      notify();
-      await serial("", () => wipe(0)).catch((error3) => deps.log("warn", `the runtime's store couldn't take its old copy off the disk (${errorText(error3)}): the next start throws it away`));
+      emptying = false;
+      become("direct");
+      if (lost !== null)
+        await serial("", () => wipe(0)).catch((error3) => deps.log("warn", `the runtime's store couldn't take its old copy off the disk (${errorText(error3)}): the next start throws it away`));
     })());
   }
   function tell(owed) {
@@ -97898,7 +97950,7 @@ function createWorkingStore(deps) {
     for (;; ) {
       if (closed)
         throw new Error(WORDS.closed);
-      if (mode === "direct")
+      if (mode === "direct" && (!emptying || shutOut !== null))
         return null;
       if (mode === "held")
         return epoch;
@@ -97906,7 +97958,9 @@ function createWorkingStore(deps) {
         throw new Error(shutOutWords(shutOut));
       await within2(turned.promise, Math.max(0, until - deps.now()), () => {
         const cause = lastError === null ? "" : ` (${lastError.words})`;
-        return mode === "waiting" ? new Error(`The runtime's store hasn't heard from the extension which runtime keeps its storage since it started${cause}, so it can't yet tell whether to use its own copy. Try again once the runtime is linked.`) : new Error(`The runtime's store hasn't reached the extension's storage since it was given it${cause}, so it can't yet tell whether the copy it holds is still the one the extension keeps. Try again once the runtime is linked.`);
+        const setting = deps.waitsOwner === undefined ? "" : ` It waits as long as ${transportWait(["runtime", "storeWaitMs"], deps.waitsOwner())} says.`;
+        const why = mode === "waiting" ? `The runtime's store hasn't heard from the extension which runtime keeps its storage since it started${cause}, so it can't yet tell whether to use its own copy.` : mode === "direct" ? `The runtime's store hasn't yet sent the extension's storage what it saved there and hadn't sent${cause}, which goes first so that nothing is written over it.` : `The runtime's store hasn't reached the extension's storage since it was given it${cause}, so it can't yet tell whether the copy it holds is still the one the extension keeps.`;
+        return new Error(`${why} Try again once the runtime is linked.${setting}`);
       });
     }
   }
@@ -97935,7 +97989,7 @@ function createWorkingStore(deps) {
       throw new Ended(WORDS.ended);
   }
   function fresh(key, doc, name, change3, since) {
-    return { key, doc, name, first: change3, since, last: change3, sending: null, again: null };
+    return { key, doc, name, first: change3, since, last: change3, sending: null, again: null, made: since };
   }
   async function enter(key, doc, name, change3) {
     entered += 1;
@@ -97951,6 +98005,7 @@ function createWorkingStore(deps) {
     if (entry.sending !== null && entry.again === null)
       entry.again = { change: change3, at: deps.now() };
     entry.last = change3;
+    entry.made = deps.now();
     queue.delete(key);
     queue.set(key, entry);
     return false;
@@ -97998,7 +98053,9 @@ function createWorkingStore(deps) {
     return taken > markTaken && deps.now() - markAt >= limits().markMs;
   }
   function kick(now = false) {
-    if (closed || shutOut !== null || mode !== "held" || round !== null || queue.size === 0 && !markDue())
+    if (closed || shutOut !== null || round !== null)
+      return;
+    if (mode === "held" ? queue.size === 0 && !markDue() : mode !== "direct" || !emptying || queue.size === 0)
       return;
     if (retry3 !== null) {
       if (!now && (lone === null || ![...queue.keys()].some((key) => key !== lone)))
@@ -98014,14 +98071,18 @@ function createWorkingStore(deps) {
   }
   async function send() {
     const at2 = epoch;
+    const was = mode;
+    const ports2 = was === "held" ? remote : direct;
     try {
       let failedLast = false;
       for (;; ) {
-        if (closed || epoch !== at2 || mode !== "held")
+        if (closed || epoch !== at2 || mode !== was)
           return;
         const entry = queue.values().next().value;
         if (entry === undefined) {
-          if (taken > markTaken) {
+          if (was === "direct")
+            drained();
+          else if (taken > markTaken) {
             const wait = limits().markMs - (deps.now() - markAt);
             if (wait <= 0)
               await writeMark();
@@ -98034,7 +98095,7 @@ function createWorkingStore(deps) {
           return;
         }
         try {
-          await sendOne(entry, at2);
+          await sendOne(entry, at2, ports2);
         } catch (error3) {
           if (failedLast || closed) {
             lone = null;
@@ -98077,19 +98138,19 @@ function createWorkingStore(deps) {
       });
     }
   }
-  async function sendOne(entry, at2) {
+  async function sendOne(entry, at2, ports2) {
     const read2 = await serial(entry.key, async () => {
       if (closed || epoch !== at2 || queue.get(entry.key) !== entry)
         return;
       const text4 = await disk.read(fileOf(entry));
       entry.sending = entry.last;
-      return { text: text4 };
+      return { text: text4, made: entry.made };
     });
     if (read2 === undefined)
       return;
     let sent;
     try {
-      sent = await deliver(entry, read2.text);
+      sent = await deliver(entry, read2.text, ports2, read2.made);
     } catch (error3) {
       if (!closed && deps.withdrawn?.(error3) === true) {
         lose(null);
@@ -98121,6 +98182,8 @@ function createWorkingStore(deps) {
     }
     await disk.remove(markerOf(entry));
     queue.delete(entry.key);
+    if (lost !== null)
+      lost.dropped += 1;
     await disk.remove(fileOf(entry));
     if (entry.doc) {
       docs.drop(entry.name);
@@ -98128,7 +98191,7 @@ function createWorkingStore(deps) {
     } else
       dropBlob(entry.name);
   }
-  async function deliver(entry, text4) {
+  async function deliver(entry, text4, ports2, made2) {
     if (text4 === null)
       return false;
     if (!entry.doc) {
@@ -98136,11 +98199,11 @@ function createWorkingStore(deps) {
         deps.log("warn", `the runtime's copy of blob ${entry.name} doesn't match its hash any more, so it isn't sent`);
         return false;
       }
-      await remote.blobs.put(entry.name, text4);
+      await ports2.blobs.put(entry.name, text4);
       return true;
     }
     if (text4 === "") {
-      await remote.store.remove(entry.name);
+      await ports2.store.remove(entry.name, Math.max(0, deps.now() - made2));
       return true;
     }
     const value = parseJson(text4);
@@ -98148,7 +98211,7 @@ function createWorkingStore(deps) {
       deps.log("warn", `the runtime's copy of ${entry.name} isn't JSON any more, so it isn't sent`);
       return false;
     }
-    await remote.store.write(entry.name, value);
+    await ports2.store.write(entry.name, value, Math.max(0, deps.now() - made2));
     return true;
   }
   async function landed(entry, at2, text4, sent) {
@@ -98584,7 +98647,7 @@ function createWorkingStore(deps) {
       for (const entry of queue.values())
         if (behindSince === null || entry.since < behindSince)
           behindSince = entry.since;
-      return { open: mode === "held" || mode === "direct", mode, holder, lost: lost === null ? null : { ...lost }, waiting: queue.size, behindSince, lastError, lastSent, bytes: docs.total + blobs.total, counting, takeover, refused: [...refused3] };
+      return { open: mode === "held" || mode === "direct" && (!emptying || shutOut !== null), mode, holder, lost: lost === null ? null : { ...lost }, waiting: queue.size, behindSince, lastError, lastSent, bytes: docs.total + blobs.total, counting, takeover, refused: [...refused3] };
     },
     async ask() {
       try {
@@ -98601,9 +98664,11 @@ function createWorkingStore(deps) {
         holder = word2?.holder ?? null;
         if (mode === "held" || mode === "opening")
           lose(holder);
-        else if (mode === "waiting")
+        else if (mode === "waiting") {
+          emptying = queue.size > 0;
           become("direct");
-        else if (lost !== null && lost.to === null)
+          kick();
+        } else if (lost !== null && lost.to === null)
           lost.to = holder;
         return;
       }
@@ -99060,6 +99125,7 @@ function createRuntime(config, deps) {
     serialTools: async () => transportOf((await held2.get()).values[TRANSPORT_KEY]).connections.oneToolAtATime,
     silentMs: () => tuning().answerSilentMs,
     askMs: () => tuning().providerMs,
+    signInMs: () => tuning().signInMs,
     owner: () => linkedBackendOf(link.hello?.backend)
   });
   const host = linkHost({
@@ -99469,7 +99535,6 @@ function offerOf(raw) {
 function message(error3) {
   return error3 instanceof Error ? error3.message : String(error3);
 }
-var STARTS_MS = 30000;
 function createUpdate(deps) {
   let running = null;
   try {
@@ -99551,9 +99616,12 @@ function createUpdate(deps) {
     }
   }
   async function starts(bun, file) {
-    const said3 = await deps.run(bun, [file, "--version"], undefined, STARTS_MS);
+    const ms2 = deps.buildStartMs();
+    const said3 = await deps.run(bun, [file, "--version"], undefined, ms2);
     if (said3.code === 0 && /^lumiah /.test(said3.out))
       return null;
+    if (said3.late === true)
+      return `${shown2(bun)} ${shown2(file)} --version said no version within ${spanWords(ms2)}; ${transportWait(["runtime", "buildStartMs"], deps.owner())} says how long a new build has to start`;
     const words5 = (said3.err || said3.out).split(`
 `).map((piece) => piece.trim()).filter((piece) => piece !== "").slice(-3).join(" ");
     return `${shown2(bun)} ${shown2(file)} --version ${said3.code === 0 ? "said no version" : `ended with ${said3.code}`}${words5 !== "" ? `: ${shown2(words5)}` : ""}`;
@@ -99566,11 +99634,18 @@ function createUpdate(deps) {
     deps.log(`${done}: restarting through ${service.unit}`);
     return null;
   }
-  async function apply() {
+  async function apply(now) {
     const o = waiting;
     if (o === null || updating)
       return null;
     updating = true;
+    const begun = () => {
+      if (now || !deps.busy())
+        return false;
+      updating = false;
+      deps.log(`build ${o.build} waits: a reply or a job began while it was checked`);
+      return true;
+    };
     const drop = (words5, run = null) => {
       waiting = null;
       updating = false;
@@ -99602,6 +99677,10 @@ function createUpdate(deps) {
           discard(temp);
           return cannot(why);
         }
+        if (begun()) {
+          discard(temp);
+          return { taken: "waiting" };
+        }
         try {
           put(temp, deps.installed);
         } catch (error3) {
@@ -99611,6 +99690,8 @@ function createUpdate(deps) {
         const why = await starts(bun, source);
         if (why !== null)
           return cannot(why);
+        if (begun())
+          return { taken: "waiting" };
       }
       waiting = null;
       clear();
@@ -99704,21 +99785,21 @@ function createUpdate(deps) {
         deps.log(`build ${o.build} waits: ${autoUpdate ? "a reply or a job is under way" : "updates are taken from the Runtime page"}`);
         return { taken: "waiting" };
       }
-      return await apply() ?? { taken: "updating" };
+      return await apply(false) ?? { taken: "updating" };
     },
     async tick() {
       if (waiting === null || updating || !deps.config().autoUpdate || deps.busy())
         return;
-      await apply();
+      await apply(false);
     },
     async applyNow() {
       if (updating)
         throw new OpRefused("unavailable", "The runtime is updating already: it is back in a moment.");
       if (waiting === null)
         throw new OpRefused("unavailable", problem ?? `There is no update to take: this runtime is on the build ${shown2(deps.name())} offered, or ${shown2(deps.name())} hasn't offered one since it started.`);
-      const refused3 = await apply();
-      if (refused3 !== null)
-        throw new OpRefused("unavailable", refused3.refused);
+      const outcome = await apply(true);
+      if (outcome !== null && "refused" in outcome)
+        throw new OpRefused("unavailable", outcome.refused);
       return get();
     },
     get,
@@ -100272,19 +100353,29 @@ async function loopbackConnection(io, base, token, url, model2, read2, linked) {
 }
 var WAIT_MS = 5000;
 var WAITING = "waiting.json";
-async function answersThere(config, io) {
+async function servingThere(config, io) {
+  const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const late = AbortSignal.timeout(WAIT_MS);
+  const reply = await io.http({ method: "POST", url: `${runtimeBase(config.listen, config.port).replace(/\/v1$/, "")}${ASK_PATH}`, headers: { [PROBE_HEADER]: nonce, "Content-Type": "application/json" }, body: "{}", signal: late }).catch(() => null);
+  if (reply === null)
+    return late.aborted ? "something else" : "nothing";
+  let said3 = null;
   try {
-    const body = await healthOf(config, io);
-    return isRecord2(body) && (body.up === true || typeof body.link === "string");
-  } catch {
-    return false;
-  }
+    said3 = JSON.parse(reply.text);
+  } catch {}
+  const proof = isRecord2(said3) && typeof said3.proof === "string" ? said3.proof : "";
+  return reply.status === 200 && await sameSecret(proof, await roadProof(config.secret, config.relay, nonce)) ? "this runtime" : "something else";
 }
 async function waitForPort(config, io, dir, log3, stopping) {
   const mark = `${dir}/${WAITING}`;
   let since = null;
   try {
-    while (await answersThere(config, io)) {
+    for (;; ) {
+      const there = await servingThere(config, io);
+      if (there === "nothing")
+        return null;
+      if (there === "something else")
+        throw new Error(`Something other than this runtime holds ${config.listen}:${config.port}: what answers there can't prove it holds this runtime's secret, so the runtime doesn't wait for it. Stop what holds the port (another program, or a runtime set up there before under another registration), or set this runtime up again on another port with --port.`);
       const now = io.now();
       if (since === null) {
         since = now;
@@ -100295,7 +100386,6 @@ async function waitForPort(config, io, dir, log3, stopping) {
       if (stopped !== null)
         return stopped;
     }
-    return null;
   } finally {
     if (since !== null)
       io.files.remove(mark);
@@ -100379,6 +100469,8 @@ async function serve(config, path6, io) {
       now: io.now,
       log: log3,
       name: () => runtime.link.backendName,
+      owner: () => runtime.link.owner,
+      buildStartMs: () => current.tuning.buildStartMs,
       handedOver: io.env[HANDED_OVER] !== undefined,
       waitingCopy: () => waitingCopy(io, dir)
     })
@@ -100398,8 +100490,8 @@ async function serve(config, path6, io) {
   clearInterval(timer);
   runtime.shutdown();
   await io.sleep(current.tuning.stopGraceMs);
-  server.stop();
   await runtime.close();
+  server.stop();
   if (typeof ended === "string")
     return 0;
   try {
@@ -100562,7 +100654,7 @@ function runProgram(command, args, env4, timeoutMs) {
     const code = error3 === null ? 0 : typeof error3.code === "number" ? error3.code : 127;
     const why = error3 !== null && error3.killed === true ? `${command} was ended after ${Math.round((timeoutMs ?? 0) / 1000)} seconds` : error3 !== null && typeof error3.code !== "number" ? error3.message : "";
     const signal = error3 !== null && error3.killed !== true && typeof error3.signal === "string" ? error3.signal : undefined;
-    resolve2({ code, out, err: err || why, ...signal !== undefined ? { signal } : {} });
+    resolve2({ code, out, err: err || why, ...signal !== undefined ? { signal } : {}, ...error3 !== null && error3.killed === true ? { late: true } : {} });
   });
   return promise;
 }
@@ -100573,7 +100665,7 @@ if (process.versions.bun === undefined) {
 `);
   process.exit(1);
 }
-var BUILD = "a63f715f";
+var BUILD = "3bfdc8d9";
 var http = async (request2) => {
   const response = await fetch(request2.url, { method: request2.method, headers: request2.headers, ...request2.body !== undefined ? { body: request2.body } : {}, ...request2.signal !== undefined ? { signal: request2.signal } : {}, redirect: "manual" });
   const text4 = await response.text();

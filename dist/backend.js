@@ -94851,6 +94851,7 @@ var HARNESS_TEXT = {
   unplayed: "harness.guidance.unplayed",
   behind: "harness.guidance.behind",
   unread: "harness.guidance.unread",
+  worldLate: "harness.guidance.world_late",
   openingLate: "harness.opening.late",
   presetLate: "harness.opening.preset_late",
   presetPart: "harness.opening.preset_part",
@@ -95092,6 +95093,7 @@ var GUIDANCE_PROMPTS = [
   { id: HARNESS_TEXT.guidanceName, page: page7, group: GUIDANCE2, label: "What the level is called", note: "The name every agent is told the world's guidance under, between your own guidance and the chat's.", text: "this world's", vars: [], nonEmpty: true },
   { id: HARNESS_TEXT.behind, page: page7, group: GUIDANCE2, label: "The turn before isn't all recorded yet", note: "Heads the world's guidance when a turn began before the turn before it was all recorded: its start stopped waiting for that turn's commit (the setting agents.harness.commitWaitMs).", text: "The turn before this one was still being recorded when this one began, so what it changed may not all be in what your tools show yet. Where something of it matters here, read it again before you rely on it.", vars: [], nonEmpty: true },
   { id: HARNESS_TEXT.unread, page: page7, group: GUIDANCE2, label: "Part of the chat wasn't read", note: "Heads the guidance of a run on a chat the harness plays when the engine couldn't read part of the chat as the run began (its world isn't loaded, or a read failed): the author still leads, and is told what is missing.", text: "{{why}} as this run began, so this run goes on without it. Read what you need with your tools, and say so in your answer where they can't.", vars: [v4("why", "what wasn't read and why, in the engine's own words", true)], nonEmpty: true },
+  { id: HARNESS_TEXT.worldLate, page: page7, group: GUIDANCE2, label: "As a turn begins: the world not read in time", note: "Heads the guidance of a run on a chat the harness plays when reading the chat's world took longer than half of LumiAH's Wait for the extension: the author still leads, and the run goes on without the world's guidance rather than not at all.", text: "This chat's world wasn't read in time as this run began, so you aren't told here what the world is, whose the player character is, or how it plays. Read what you need of it with your tools, and say so in your answer where they can't.", vars: [], nonEmpty: true },
   { id: HARNESS_TEXT.openingLate, page: page7, group: GUIDANCE2, label: "As a turn begins: the moment not read in time", note: "Ends the author's instructions in place of the moment, the drafts due and the story's preparation when reading them took longer than half of LumiAH's Wait for the extension: the run starts without them rather than not at all.", text: "The moment as it stands, the drafts due and the story's preparation weren't read in time, so this turn goes on without them here. Read what you need of them with your tools.", vars: [], nonEmpty: true },
   { id: HARNESS_TEXT.presetLate, page: page7, group: GUIDANCE2, label: "As a turn begins: the preset not read in time", note: "Told the author when the chat's preset took longer to read than half of LumiAH's Wait for the extension: no agent of the run gets its part of the player's preset.", text: "Your part of the player's preset is missing this turn, and so are the parts of the agents you start: it wasn't read in time, so this turn goes on without it.", vars: [], nonEmpty: true },
   { id: HARNESS_TEXT.presetPart, page: page7, group: GUIDANCE2, label: "An agent's part of the player's preset: its heading", note: "Heads each agent's part of the chat's preset in its instructions, so the model, and whoever reads the agent's instructions in the live view, can tell where the engine's own words end and the player's preset begins.", text: "Your part of the player's preset, \u201C{{preset}}\u201D:", vars: [v4("preset", "the preset's name, as Lumiverse shows it", true)], nonEmpty: true },
@@ -115236,9 +115238,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path2 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "9eb97dd981833c2d9bcb68c0dd5fb9ad78f9b9a7d48cd2f5ff8040e08b999713";
+  const sha256 = "b11ba796d23e69c4c9bf37de52572b35897c0f684eb1af78b796409957b0b01c";
   const tools = ["5db39011b1a09652e3360031f99d4092", "b2101fc2b5d70b51c9dccdfef28a3f73"].filter((f) => f !== undefined);
-  return { id: "a63f715f", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
+  return { id: "3bfdc8d9", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -135614,6 +135616,9 @@ function limitOf2(limit3) {
   return limit3 === null ? Number.POSITIVE_INFINITY : limit3;
 }
 var TIMER_MAX_MS2 = 2147483647;
+function timerMs2(left) {
+  return left >= TIMER_MAX_MS2 ? null : Math.max(0, left);
+}
 function cutAt3(text7, at3) {
   const unit3 = text7.charCodeAt(at3 - 1);
   return at3 > 0 && at3 < text7.length && unit3 >= 55296 && unit3 <= 56319 ? at3 - 1 : at3;
@@ -136487,6 +136492,12 @@ var RETIRED_SETTINGS = [
 ];
 function settingsSchema(scope) {
   return { ...SETTINGS_SCHEMA, properties: { ...SETTINGS_SCHEMA.properties, agents: agentsSchema(scope) } };
+}
+function settingTitle(path3) {
+  let at3 = SETTINGS_SCHEMA;
+  for (const key of path3)
+    at3 = isRecord2(at3) && isRecord2(at3.properties) ? at3.properties[key] : undefined;
+  return isRecord2(at3) && typeof at3.title === "string" ? at3.title : path3.join(".");
 }
 function shapeOf(scope) {
   const defaults = defaultSettings2();
@@ -147365,7 +147376,10 @@ class HarnessEngine {
     if (ask3.userId === "")
       return harnessDefinitions({});
     const userId = ask3.userId;
-    const settings = await this.rt.settings.get(userId);
+    const settings = await this.rt.settings.get(userId).catch((error) => {
+      this.rt.host.log("warn", `[LumiRPEngine] ${ask3.chatId !== null ? `chat ${ask3.chatId}: ` : ""}LumiRPEngine's settings couldn't be read for its agents' definitions (${wordsOf10(error)}); they are given on the shipped settings`, userId);
+      return defaultSettings();
+    });
     const defs = harnessDefinitions(settings.prompts.texts);
     if (ask3.chatId === null)
       return defs;
@@ -147408,6 +147422,7 @@ class HarnessEngine {
   }
   async claim(ask3) {
     const chatId = ask3.chatId;
+    const asked2 = performance.now();
     const unread = new Set;
     let userId = null;
     const missed = (what, error) => {
@@ -147439,31 +147454,35 @@ class HarnessEngine {
       const texts2 = settings.prompts.texts;
       const harness = settings.agents.harness;
       let whole7 = true;
+      let late = false;
       let world = { name: renderPrompt(HARNESS_TEXT.guidanceName, texts2, {}), text: "" };
       let unplayed = null;
       if (userId !== null) {
-        if (this.starting.has(chatId)) {
-          const bound = await this.enrichMs(userId);
-          whole7 = await this.caughtUp(chatId, userId, bound === null ? harness.commitWaitMs : Math.min(harness.commitWaitMs, bound));
-        }
-        let head2 = null;
-        try {
-          head2 = await chatHead(this.rt, chatId, userId);
-          if (head2 === null)
+        const bound = await this.enrichMs(userId);
+        const left = () => bound === null ? null : Math.max(0, bound - (performance.now() - asked2));
+        if (this.starting.has(chatId))
+          whole7 = await this.caughtUp(chatId, userId, Math.min(harness.commitWaitMs, left() ?? Infinity));
+        const read2 = await within8(this.claimRead(chatId, userId), left()).catch((error) => void missed("This chat's world", error));
+        if (read2 === "late") {
+          late = true;
+          this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: its world wasn't read within ${bound} ms (half of LumiAH's Wait for the extension), so the engine's claim on it goes on without it; the claim still names the author`, userId);
+        } else if (read2 !== undefined) {
+          if (read2.value === null)
             unread.add(NO_WORLD);
-        } catch (error) {
-          missed("This chat's world", error);
-        }
-        if (head2 !== null) {
-          const prefs = await this.rt.chatKnowledge.get(chatId, userId).catch((error) => void missed("This chat's choices", error));
-          world = worldGuidance({ world: head2.world, state: head2.state, texts: texts2, ...prefs !== undefined ? { narrator: narratorView(prefs, head2.world, settings) } : {} });
-          unplayed = unplayedBefore(lastReply(head2), texts2);
+          else {
+            const { head: head2, prefs } = read2.value;
+            if ("error" in prefs)
+              missed("This chat's choices", prefs.error);
+            world = worldGuidance({ world: head2.world, state: head2.state, texts: texts2, ..."value" in prefs ? { narrator: narratorView(prefs.value, head2.world, settings) } : {} });
+            unplayed = unplayedBefore(lastReply(head2), texts2);
+          }
         }
       }
       const from = SOVEREIGN_FROM[harness.sovereignHand];
       const directed = (from === "lumiverse" ? ask3.sovereignHand === true ? "replies" : "everyone" : from) === "replies";
       const text8 = [
         ...[...unread].map((why3) => renderPrompt(HARNESS_TEXT.unread, texts2, { why: why3 })),
+        ...late ? [renderPrompt(HARNESS_TEXT.worldLate, texts2, {})] : [],
         ...directed ? [renderPrompt(HARNESS_TEXT.sovereign, texts2, {})] : [],
         ...whole7 ? [] : [renderPrompt(HARNESS_TEXT.behind, texts2, {})],
         ...unplayed !== null ? [renderPrompt(HARNESS_TEXT.unplayed, texts2, { why: unplayed })] : [],
@@ -147480,6 +147499,12 @@ class HarnessEngine {
         return claimed(null);
       }
     }
+  }
+  async claimRead(chatId, userId) {
+    const head2 = await chatHead(this.rt, chatId, userId);
+    if (head2 === null)
+      return null;
+    return { head: head2, prefs: await this.rt.chatKnowledge.get(chatId, userId).then((value) => ({ value }), (error) => ({ error })) };
   }
   async caughtUp(chatId, userId, ms) {
     if (!this.rt.ledger.queued(chatId))
@@ -149218,7 +149243,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "a63f715f", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "3bfdc8d9", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;
@@ -155865,7 +155890,9 @@ var RUNTIME_DEFAULTS = Object.freeze({
   copyReadMs: 15000,
   copyChars: 32000000,
   providerMs: 60000,
-  answerSilentMs: 5 * 60000
+  answerSilentMs: 5 * 60000,
+  signInMs: 10 * 60000,
+  buildStartMs: 30000
 });
 var TRANSPORT_DEFAULTS = Object.freeze({
   history: Object.freeze({ keep: "last", count: 40 }),
@@ -156059,7 +156086,9 @@ var TRANSPORT_SCHEMA = {
         copyReadMs: ms("Chat data wait", "How long each request the runtime makes to Lumiverse for its own copy of your chats and world books waits for its answer: a page of a chat's messages or of a book's entries, a check of a chat before an agent reads it. Past it that read is given up, and the agent's read is asked of this extension instead.", 1000, 10 * 60000),
         copyChars: whole7("Chat data kept", "The most characters of your chats and world books the runtime keeps in memory, so an agent reads them without asking this extension. What was used least recently goes first; a chat larger than this alone is read from this extension every time. 0 keeps none.", 0, 1e9, "characters"),
         providerMs: ms("Provider wait", "How long testing one of the runtime's connections (Runtime \u2192 Connections), or reading a server's list of its models for a model picker, waits for the provider to answer. Past it the page says the provider didn't answer.", 1000, 10 * 60000),
-        answerSilentMs: ms("Silent answer ends after", "How long a model's answer, once it has begun, may go with nothing at all from its provider's server before the call is ended and made again, as a dropped stream is. Before its answer begins a model may still be reading a long prompt or thinking unseen: that is never cut short. 0: no limit.", 0, DAY_MS5)
+        answerSilentMs: ms("Silent answer ends after", "How long a model's answer, once it has begun, may go with nothing at all from its provider's server before the call is ended and made again, as a dropped stream is. Before its answer begins a model may still be reading a long prompt or thinking unseen: that is never cut short. 0: no limit.", 0, DAY_MS5),
+        signInMs: ms("Sign-in stays open", "How long a sign-in to Anthropic or OpenAI (Runtime \u2192 Connections) stays open for you to sign in and paste back what the provider gave you. Past it the sign-in ends and says so: start it again. A provider keeps what it gives you good for about ten minutes, so a longer wait seldom helps.", 60000, 60 * 60000),
+        buildStartMs: ms("New build's start check", "How long a new build of the runtime is given to start and say its version before the runtime updates to it. Past it the build is taken as one that can't start here, and the runtime stays on the build it runs. A slow or busy machine may need longer.", 5000, 10 * 60000)
       }
     }
   }
@@ -156393,7 +156422,7 @@ var TIMEOUT_GROUPS = [
   {
     id: "runtime",
     label: "Waiting for the runtime",
-    about: "How long a page, a reply or a key waits for your runtime to do something.",
+    about: "How long a page, a reply or a key waits for your runtime to do something, and how long a new build of the runtime has to start before it updates to it.",
     rows: [
       ["transport", "pages", "askMs"],
       ["transport", "pages", "proxyMs"],
@@ -156402,7 +156431,8 @@ var TIMEOUT_GROUPS = [
       ["transport", "runtime", "turnWaitMs"],
       ["transport", "runtime", "drainMs"],
       ["transport", "live", "lostMs"],
-      ["transport", "link", "quietMs"]
+      ["transport", "link", "quietMs"],
+      ["transport", "runtime", "buildStartMs"]
     ]
   },
   {
@@ -156439,8 +156469,8 @@ var TIMEOUT_GROUPS = [
   {
     id: "model",
     label: "A model call",
-    about: "How long an agent's calls, the agent, a turn or a job may take, how long a model's answer may go silent, how long a connection's test waits for its provider, and the wait before a failed call is made again.",
-    rows: [...AGENT_TIMES, ["core", "turn", "wallMs"], ["core", "jobs", "budget", "wallMs"], ["core", "loop", "retryWaitMs"], ["transport", "runtime", "answerSilentMs"], ["transport", "runtime", "providerMs"]]
+    about: "How long an agent's calls, the agent, a turn or a job may take, how long a model's answer may go silent, how long a connection's test waits for its provider, how long a sign-in stays open, and the wait before a failed call is made again.",
+    rows: [...AGENT_TIMES, ["core", "turn", "wallMs"], ["core", "jobs", "budget", "wallMs"], ["core", "loop", "retryWaitMs"], ["transport", "runtime", "answerSilentMs"], ["transport", "runtime", "providerMs"], ["transport", "runtime", "signInMs"]]
   },
   {
     id: "store",
@@ -159588,6 +159618,7 @@ function runtimeReportOf(raw) {
 
 // node_modules/lumi-ah/src/extension/backend/mirror.ts
 var FILE2 = "mirror-holder.json";
+var STAMPS_KEPT = 1e4;
 var id2 = (v6) => typeof v6 === "string" && MIRROR_ID.test(v6);
 function holderDocOf(raw) {
   if (!isRecord3(raw) || raw.v !== 1 || typeof raw.gen !== "number" || !Number.isSafeInteger(raw.gen) || raw.gen < 0)
@@ -159613,6 +159644,8 @@ class Mirrors {
   sessions = new Map;
   started;
   raising = new Set;
+  stamps = new Map;
+  writing = new Map;
   constructor(host, env) {
     this.host = host;
     this.env = env;
@@ -159668,11 +159701,13 @@ class Mirrors {
     }
     return { held: true, holder: null, gen: doc.gen, ...ask3.seen < doc.gen ? { dropped: { docs: [], blobs: [], all: true } } : {} };
   }
-  async write(caller, mark2, changed, apply2) {
+  async write(caller, mark2, changed, apply2, ago) {
     const { userId } = caller;
     const doc = await this.docs.get(userId);
     const held5 = doc.holder;
     const { name: name2 } = this.env;
+    const made = typeof ago === "number" && Number.isFinite(ago) && ago > 0 ? this.env.now() - ago : null;
+    const path3 = changed.docs.length === 1 && changed.blobs.length === 0 ? changed.docs[0] : undefined;
     if (mark2 !== undefined) {
       if (held5 === null || held5.relay !== caller.relay.id || held5.process !== mark2) {
         throw new LinkRefused("conflict", `${held5 === null ? "No runtime keeps" : `Another runtime (${held5.owner}) keeps`} ${name2}'s storage now, so ${name2} takes nothing from this runtime's own copy of it: this runtime reads and writes the storage directly from now on.`);
@@ -159680,14 +159715,48 @@ class Mirrors {
       const live2 = this.liveOf(userId);
       live2.heardAt = this.env.now();
       live2.session ??= caller.session;
-      await apply2();
+      await this.ordered(userId, caller.relay.id, path3, made, apply2);
       return;
     }
     if (changed.docs.includes(MARK_PATH))
       throw new LinkRefused("bad_request", `${MARK_PATH} is where the runtime that keeps ${name2}'s storage notes its copy: no other runtime writes it.`);
-    await apply2();
+    await this.ordered(userId, caller.relay.id, path3, made, apply2);
     if (changed.docs.length > 0 || changed.blobs.length > 0)
       await this.tell(userId, changed);
+  }
+  ordered(userId, relay, path3, made, apply2) {
+    if (path3 === undefined)
+      return apply2();
+    const key2 = `${userId}
+${path3}`;
+    const step2 = (this.writing.get(key2) ?? Promise.resolve()).then(async () => {
+      const stood = this.stamps.get(userId)?.get(path3);
+      if (made !== null && stood !== undefined && stood.relay !== relay && stood.at > made) {
+        throw new LinkRefused("superseded", `Another runtime saved ${path3} in ${this.env.name}'s storage after this change was made, so the storage keeps that save.`);
+      }
+      const at4 = made ?? this.env.now();
+      await apply2();
+      const stamps = this.stamps.get(userId) ?? new Map;
+      this.stamps.set(userId, stamps);
+      stamps.delete(path3);
+      stamps.set(path3, { relay, at: at4 });
+      for (const oldest of stamps.keys()) {
+        if (stamps.size <= STAMPS_KEPT)
+          break;
+        stamps.delete(oldest);
+      }
+    });
+    const done = step2.then(() => {
+      return;
+    }, () => {
+      return;
+    });
+    this.writing.set(key2, done);
+    done.then(() => {
+      if (this.writing.get(key2) === done)
+        this.writing.delete(key2);
+    });
+    return step2;
   }
   async tell(userId, changed) {
     const doc = await this.docs.get(userId);
@@ -160914,10 +160983,10 @@ class LinkServer {
       case "doc.get":
         return { doc: await d.storage.doc(userId, r.path) };
       case "doc.put":
-        await d.mirror.write(caller, r.mirror, { docs: typeof r.path === "string" ? [r.path] : [], blobs: [] }, () => d.storage.putDoc(userId, r.path, r.doc));
+        await d.mirror.write(caller, r.mirror, { docs: typeof r.path === "string" ? [r.path] : [], blobs: [] }, () => d.storage.putDoc(userId, r.path, r.doc), r.ago);
         return { written: true };
       case "doc.remove":
-        await d.mirror.write(caller, r.mirror, { docs: typeof r.path === "string" ? [r.path] : [], blobs: [] }, () => d.storage.removeDoc(userId, r.path));
+        await d.mirror.write(caller, r.mirror, { docs: typeof r.path === "string" ? [r.path] : [], blobs: [] }, () => d.storage.removeDoc(userId, r.path), r.ago);
         return { removed: true };
       case "chat.path":
         return { messages: await d.chats.path(userId, text12(r.chat, "chat")) };
@@ -161436,9 +161505,12 @@ class SettingsStore2 {
       }
     }
     const values = this.valuesOf(own2);
-    for (const section of this.sections)
-      for (const p of await section.check(values[section.key], userId))
+    const changed = [...reset, ...set.map((s) => s.path)];
+    for (const section of this.sections) {
+      const touched = changed.flatMap((path3) => path3.length === 0 ? [[]] : path3[0] === section.key ? [path3.slice(1)] : []);
+      for (const p of await section.check(values[section.key], userId, touched))
         problems.push({ path: [section.key, ...p.path], message: p.message });
+    }
     if (problems.length > 0)
       throw new SettingsRefused(`The settings refused ${problems.length === 1 ? "a value" : `${problems.length} values`}: nothing was changed.`, problems);
     const revision = await this.docs.change(userId, (doc) => {
@@ -161737,26 +161809,36 @@ class ChatSwitch {
     if (ask3 === null)
       throw new LinkRefused("not_found", "There is no such chat in this account.");
     const chosen = ask3.chat.story ?? {};
-    const answered2 = this.deps.claim === undefined ? null : await this.deps.claim(ask3, userId);
-    const said4 = answered2 !== null && "claim" in answered2 ? answered2 : null;
+    const { claimer } = this.deps;
+    const answered2 = claimer === undefined ? null : await claimer.claim(ask3, userId);
+    const said4 = claimer !== undefined && answered2 !== null && "claim" in answered2 ? { by: claimer.name, claim: answered2.claim } : null;
     const word3 = storyWordOf(said4?.claim.story);
     const claimed = said4 !== null && Object.keys(word3).length > 0 ? { by: said4.by, story: word3 } : null;
     return { chatId, chosen, setting, claimed, sovereignHand: ask3.sovereignHand, holds: storyHolds({ claim: claimed?.story ?? null, chat: chosen, user: setting, sovereignHand: ask3.sovereignHand }) };
   }
   async lead(userId, chatId) {
     await this.deps.chats.own(userId, chatId);
-    if (this.deps.claim === undefined)
+    const { claimer } = this.deps;
+    if (claimer === undefined)
       return null;
     const ask3 = await this.claimAsk(userId, chatId);
     if (ask3 === null)
       throw new LinkRefused("not_found", "There is no such chat in this account.");
-    const said4 = await this.deps.claim(ask3, userId);
+    const ms2 = timerMs2(limitOf2(await this.deps.extensionWait(userId)));
+    const late = Promise.withResolvers();
+    const place2 = timeoutPlace(["core", "extension", "waitMs"], settingTitle(["extension", "waitMs"]), this.deps.identity);
+    const cancel = ms2 === null ? () => {
+      return;
+    } : this.deps.later(ms2, () => late.resolve({ late: `nothing within ${spanWords(ms2)}; ${place2} says how long a reply waits for it` }));
+    const said4 = await Promise.race([claimer.claim(ask3, userId), late.promise]).finally(cancel);
     if (said4 === null)
       return null;
+    if ("late" in said4)
+      return { by: claimer.name, unanswered: said4.late };
     if ("failed" in said4)
-      return { by: said4.by, unanswered: said4.failed };
+      return { by: claimer.name, unanswered: said4.failed };
     const { mainAgent, reply } = said4.claim;
-    return { by: said4.by, lead: typeof mainAgent === "string" && mainAgent !== "" ? mainAgent : null, released: reply === "released" };
+    return { by: claimer.name, lead: typeof mainAgent === "string" && mainAgent !== "" ? mainAgent : null, released: reply === "released" };
   }
   async setStory(userId, chatId, story) {
     await this.deps.chats.own(userId, chatId);
@@ -162177,7 +162259,14 @@ class Turns {
         this.host.log("warn", `[LumiAH] a reply's connection couldn't be checked (${wordsOf11(error)}), so it was left as it is`);
         return false;
       }
-      throw new Error(`${this.deps.name} answers this chat in its runtime, and couldn't check its connection now (${wordsOf11(error)}), so its agents had no part in this reply. Try again in a moment; if it keeps happening, see ${this.deps.name}'s Runtime page.`);
+      const why3 = wordsOf11(error);
+      const lead = this.deps.lead === undefined ? null : await this.deps.lead(input.userId, input.chatId);
+      if (lead !== null) {
+        const whose = "unanswered" in lead ? `this chat may be ${lead.by}'s, which gave no word on it (${lead.unanswered})` : `${lead.by} answers this chat`;
+        const wait = transportWait(["tags", "checkMs"], { name: this.deps.name, ...this.deps.settingsAt !== undefined ? { settingsAt: this.deps.settingsAt } : {} });
+        return { stop: `${this.deps.name} couldn't confirm this chat's connection in time (${why3}), so this reply wasn't written: ${whose}, and nothing else writes its replies. Send the message again; it usually works. ${wait} says how long a reply waits for that check.` };
+      }
+      throw new Error(`${this.deps.name} answers this chat in its runtime, and couldn't check its connection now (${why3}), so its agents had no part in this reply. Try again in a moment; if it keeps happening, see ${this.deps.name}'s Runtime page.`);
     } finally {
       unwait();
     }
@@ -162235,8 +162324,19 @@ class Turns {
     const kind = KINDS7[input.type];
     if (kind === undefined)
       return {};
-    if (!await this.where(input))
+    const where2 = await this.where(input);
+    if (where2 === false)
       return {};
+    if (where2 !== true) {
+      if (input.dryRun || !this.host.granted("generation_parameters"))
+        throw new Error(where2.stop);
+      const generation2 = this.generationOf(input);
+      if (generation2 === null)
+        throw new Error(where2.stop);
+      const turn2 = this.take(input, kind, generation2, []);
+      turn2.refused = where2.stop;
+      return { parameters: { [TAG_PARAM]: turn2.tag } };
+    }
     if (!input.dryRun)
       this.deps.toRuntime?.(input.userId, input.chatId);
     if (!this.host.granted("generation_parameters"))
@@ -162280,6 +162380,8 @@ class Turns {
     const turn = this.accounts.get(userId)?.byTag.get(tag);
     if (turn === undefined || this.deps.now() - turn.at > lifeMs)
       throw new LinkRefused("not_found", `${name2} doesn't know this reply's tag: the extension started again since the reply was asked for, or the tag is too old. Send the message again.`);
+    if (turn.refused !== undefined)
+      throw new LinkRefused("unavailable", turn.refused);
     if (turn.request !== null && turn.request !== request)
       throw new LinkRefused("conflict", "This reply's tag was already used. A tag admits one request, so this one wasn't answered: send the message again.");
     if (turn.facts === null) {
@@ -163046,6 +163148,19 @@ class Ui {
 
 // node_modules/lumi-ah/src/extension/backend/backend.ts
 var CORE_KEY = "core";
+var RUNTIME_JUDGES = "Only your runtime knows this agent or tool (your own agent, or an extension's or MCP server's tool), and it isn't linked now. Start the runtime (its line is on the Runtime page), then make this change again.";
+function namedScope(values) {
+  const agents = isRecord3(values) && isRecord3(values.agents) ? values.agents : {};
+  const tools = new Set(CORE_TOOLS);
+  for (const agent of Object.values(agents))
+    if (isRecord3(agent) && Array.isArray(agent.tools)) {
+      for (const tool6 of agent.tools)
+        if (typeof tool6 === "string")
+          tools.add(tool6);
+    }
+  const defaults = defaultSettings2().agents[AGENT.main];
+  return { tools: [...tools], agents: Object.keys(agents).filter((id3) => !CORE_AGENTS.includes(id3)).map((id3) => ({ id: id3, label: id3, note: "", defaults })) };
+}
 function settingsSections(scope) {
   return [
     {
@@ -163053,13 +163168,19 @@ function settingsSections(scope) {
       defaults: () => defaultSettings2(),
       schema: SETTINGS_SCHEMA,
       retired: RETIRED_SETTINGS,
-      async check(values, userId) {
+      async check(values, userId, changed) {
         const known = await scope?.(userId);
         const plain5 = checkSettings(values);
-        if (known === undefined)
-          return plain5;
-        const refused4 = new Set(plain5.map((problem) => JSON.stringify(problem.path)));
-        return checkSettings(values, known).filter((problem) => refused4.has(JSON.stringify(problem.path)));
+        const key4 = (problem) => JSON.stringify(problem.path.map(String));
+        if (known === undefined) {
+          const touched = (path3) => changed.some((place2) => place2.every((k, i) => i >= path3.length || String(path3[i]) === k));
+          const all2 = checkSettings(values, namedScope(values));
+          const judged = new Set(all2.map(key4));
+          const named6 = all2.filter((problem) => !(problem.path[0] === "agents" && problem.path.length > 1 && !CORE_AGENTS.includes(String(problem.path[1]))) || touched(problem.path));
+          return [...named6, ...plain5.filter((problem) => !judged.has(key4(problem)) && touched(problem.path)).map((problem) => ({ path: problem.path, message: RUNTIME_JUDGES }))];
+        }
+        const refused4 = new Set(plain5.map(key4));
+        return checkSettings(values, known).filter((problem) => refused4.has(key4(problem)));
       },
       async fixed(userId) {
         const known = await scope?.(userId);
@@ -163159,6 +163280,7 @@ function createBackend(host, env, options = {}) {
       }
     }
   };
+  const claimer = options.extension;
   const turns = new Turns(host, {
     chats,
     connections,
@@ -163167,8 +163289,10 @@ function createBackend(host, env, options = {}) {
     open,
     toRuntime: warnAway,
     name: name2,
+    settingsAt: identity.settingsAt,
     now,
-    later
+    later,
+    ...claimer?.claim !== undefined ? { lead: async (userId, chatId) => made.chatSwitch === null ? null : made.chatSwitch.lead(userId, chatId).catch((error) => ({ by: claimer.name, unanswered: wordsOf11(error) })) } : {}
   });
   const storage = new Storage(host);
   const mirror = new Mirrors(host, { now, quietMs: async (userId) => (await settings.transport(userId)).link.quietMs, send: (push2, userId, session) => made.server?.send(push2, userId, session), name: name2 });
@@ -163181,7 +163305,6 @@ function createBackend(host, env, options = {}) {
   const copy = new CopyFeed(host, { relays, registry, chats, turns, ...options.ownElsewhere !== undefined ? { ownElsewhere: options.ownElsewhere } : {}, declinesLore: options.declinesLore === true, records: codec.reads ?? null, name: name2 });
   const live2 = new LiveBuffer(host, { now, transport: (userId) => settings.transport(userId), linkGoneFor: (userId, relay) => relays.goneFor(userId, relay), missing: () => permissions().some((need2) => need2.needed) });
   const keys = new Keys(host, { registry, relays, settings, connectionName: identity.connectionName, now, later });
-  const claimer = options.extension;
   const chatSwitch = new ChatSwitch(host, {
     chats,
     connections,
@@ -163189,15 +163312,20 @@ function createBackend(host, env, options = {}) {
     blocked,
     identity,
     now,
+    later,
     storySetting: async (userId) => settingsOf((await settings.values(userId))[CORE_KEY]).story,
+    extensionWait: async (userId) => settingsOf((await settings.values(userId))[CORE_KEY]).extension.waitMs,
     ...claimer?.claim !== undefined ? {
-      claim: async (ask3, userId) => {
-        try {
-          const claim2 = await claimer.claim?.(ask3, userId);
-          return claim2 === null || claim2 === undefined ? null : { by: claimer.name, claim: claim2 };
-        } catch (error) {
-          warn(`${claimer.name} gave no answer for chat ${ask3.chatId}, so its claim on it isn't known`)(error);
-          return { by: claimer.name, failed: wordsOf11(error) };
+      claimer: {
+        name: claimer.name,
+        claim: async (ask3, userId) => {
+          try {
+            const claim2 = await claimer.claim?.(ask3, userId);
+            return claim2 === null || claim2 === undefined ? null : { claim: claim2 };
+          } catch (error) {
+            warn(`${claimer.name} gave no answer for chat ${ask3.chatId}, so its claim on it isn't known`)(error);
+            return { failed: wordsOf11(error) };
+          }
         }
       }
     } : {}
@@ -164195,9 +164323,9 @@ function createSpindleHost(identifier = EXTENSION_IDENTIFIER) {
 var NAME = "LumiRPEngine";
 var SETTINGS_AT = `${NAME}'s Harness tab \u2192 System \u2192 Settings`;
 var STORAGE = "harness";
-var BUILD = "a63f715f";
-var RUNTIME_SHA256 = "781572f3b7b9f2f5ef4125246570b404336e38ef1961d3802ca93b393c41c89e";
-var RUNTIME_SIZE = "4652063";
+var BUILD = "3bfdc8d9";
+var RUNTIME_SHA256 = "39f598ba1c2e173cc65af07bae1efb0b6d7b1aa8dd7f098e22a54a7011116335";
+var RUNTIME_SIZE = "4658350";
 var TICK_MS = 1000;
 var MOUNT_SESSION = "lre-harness-mount";
 var OWNERS_KEPT = OPEN_CHATS_CAP * 8;
