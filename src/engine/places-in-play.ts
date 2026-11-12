@@ -4,10 +4,12 @@
 // (`packs.space.places`), each written whole by a `space.place` event, and every reader sees them
 // through `playedWorld`, which overlays them on the world's places wherever a world meets a state:
 // a read context (`registry.context`, the fold's included), a `Working`, and the journal's views and
-// read contexts (`LedgerCore.playedAt`). The world's own places win any collision, so a made place
-// kept into the world under its own id becomes the world's. A made place is found first, by name
-// or alias under the same parent; its id is a slug and a digest, as a spawned person's is. It is as
-// visible as the place it is in. Pure.
+// read contexts (`LedgerCore.playedAt`). The played world is first this chat's own draft of its
+// world (`world-draft.ts`: places, paths and maps made or changed in play) laid over the revision it
+// plays, then the places made in play over that. The world's own places (as the draft has them) win
+// any collision, so a made place kept into the world under its own id becomes the world's. A made
+// place is found first, by name or alias under the same parent; its id is a slug and a digest, as a
+// spawned person's is. It is as visible as the place it is in. Pure.
 
 import { hashParts } from "../shared/hash";
 import type { EntityId, PlaceId } from "../shared/ids";
@@ -21,6 +23,7 @@ import { headSays, placeAliases, placeDistance, placeKey, placeSaid } from "./pl
 import type { ReadContext, Rejection } from "./registry";
 import { placeOfEntity, placeWithin } from "./scope";
 import type { WorldState } from "./state";
+import { chatDraftOf, draftedWorld, NO_DRAFT } from "./world-draft";
 
 /** The event that writes a made place whole, or (`gone`) takes it away (ITEMS-SPEC §3.5, a fixed format). */
 export const PLACE_EVENT = "space.place";
@@ -96,56 +99,91 @@ export function keptPlace(place: MadePlace): PlaceDef {
   return kept;
 }
 
-/** Each world's own document under it: itself for one as authored, the world it was played over for a played one. */
+/** Each played world's revision as authored under it; one as authored is its own. */
 const BASES = new WeakMap<WorldDoc, WorldDoc>();
-/** Each slice's played world over each base (a slice is never mutated in place, so its identity keys it). */
-const PLAYED = new WeakMap<object, WeakMap<WorldDoc, WorldDoc>>();
+/** Each draft's, then each slice's, played world over each base (neither is mutated in place, so its identity keys it). */
+const PLAYED = new WeakMap<object, WeakMap<object, WeakMap<WorldDoc, WorldDoc>>>();
+/**
+ * Each part a played world holds of its own (a collection or the map settings the draft or the
+ * places made in play changed), with the base's value of that part: so a copy of a played world
+ * (`{...world, lore}`) is read back to the revision as authored part by part, and never keeps what
+ * the state has since changed or taken away.
+ */
+const ORIGIN = new WeakMap<object, { of: WorldDoc }>();
+/** The parts of the world a played world may hold of its own. */
+const PLAYED_PARTS = ["places", "routes", "grids", "maps", "mapSettings"] as const;
 
 /**
  * The world as authored under `world`: itself, the world a played one was played over, or, for a
- * copy of a played one (`{...world, lore}`), the copy without the places play made, so that a copy
- * never keeps one the state has since changed or taken away.
+ * copy of a played one (`{...world, lore}`), the copy with each part it shares with that played
+ * world put back as authored, and without the places play made, so that a copy never keeps one the
+ * state has since changed or taken away.
  */
 export function baseWorld(world: WorldDoc): WorldDoc {
   const known = BASES.get(world);
   if (known !== undefined) return known;
   let base = world;
-  for (const id in world.places) {
-    if (!hasOwn(world.places, id) || madeOf(world.places[id]) === null) continue;
+  for (const part of PLAYED_PARTS) {
+    const held: unknown = world[part];
+    const origin = isRecord(held) ? ORIGIN.get(held) : undefined;
+    if (origin === undefined) continue;
+    if (base === world) base = { ...world };
+    if (part === "mapSettings") {
+      if (origin.of.mapSettings === undefined) delete base.mapSettings;
+      else base.mapSettings = origin.of.mapSettings;
+    } else (base as unknown as Record<string, unknown>)[part] = origin.of[part];
+  }
+  for (const id in base.places) {
+    if (!hasOwn(base.places, id) || madeOf(base.places[id]) === null) continue;
     const places: Record<PlaceId, PlaceDef> = {};
-    for (const [key, def] of Object.entries(world.places)) if (madeOf(def) === null) places[key] = def;
-    base = { ...world, places };
-    BASES.set(base, base);
+    for (const [key, def] of Object.entries(base.places)) if (madeOf(def) === null) places[key] = def;
+    base = { ...base, places };
     break;
   }
+  if (base !== world) BASES.set(base, base);
   BASES.set(world, base);
   return base;
 }
 
 /**
- * The world as this state plays it (ITEMS-SPEC §6.2): the world's own places, then the places the
- * state made that the world has no place of the same id for. The world itself while the state made
- * none, and the same object for the same slice and world, so a reader keyed on the world's identity
- * keeps its memo until a place is made, labelled or taken away. Idempotent: a played world is played
- * again from the world under it.
+ * The world as this state plays it (ITEMS-SPEC §6.2): the revision as authored with this chat's own
+ * draft of it laid over (`draftedWorld`), then the places the state made that it has no place of
+ * the same id for. The world itself while the state changed and made nothing, and the same object
+ * for the same draft, slice and world, so a reader keyed on the world's identity keeps its memo
+ * until something is made, changed or taken away. Idempotent: a played world is played again from
+ * the world under it.
  */
 export function playedWorld(world: WorldDoc, state: Readonly<WorldState>): WorldDoc {
   const base = baseWorld(world);
+  const draft = chatDraftOf(state);
   const made = madePlacesOf(state);
-  if (made === NONE) return base;
-  let byBase = PLAYED.get(made);
+  if (draft === NO_DRAFT && made === NONE) return base;
+  let byMade = PLAYED.get(draft);
+  let byBase = byMade?.get(made);
   const hit = byBase?.get(base);
   if (hit !== undefined) return hit;
-  let played = base;
+  const drafted = draftedWorld(base, draft);
+  let places: Record<PlaceId, PlaceDef> | null = null;
   for (const [id, def] of Object.entries(made)) {
-    if (hasOwn(base.places, id)) continue;
-    if (played === base) played = { ...base, places: { ...base.places } };
-    played.places[id] = def;
+    if (hasOwn(drafted.places, id)) continue;
+    places ??= { ...drafted.places };
+    places[id] = def;
   }
-  if (played !== base) BASES.set(played, base);
+  const played = places === null ? drafted : { ...drafted, places };
+  if (played !== base) {
+    BASES.set(played, base);
+    for (const part of PLAYED_PARTS) {
+      const held: unknown = played[part];
+      if (isRecord(held) && held !== base[part]) ORIGIN.set(held, { of: base });
+    }
+  }
+  if (byMade === undefined) {
+    byMade = new WeakMap();
+    PLAYED.set(draft, byMade);
+  }
   if (byBase === undefined) {
     byBase = new WeakMap();
-    PLAYED.set(made, byBase);
+    byMade.set(made, byBase);
   }
   byBase.set(base, played);
   return played;

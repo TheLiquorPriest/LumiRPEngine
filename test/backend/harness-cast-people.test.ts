@@ -138,7 +138,7 @@ describe("a person made in a harness turn", () => {
     refused: { lines: string[]; reason: string }[];
   }
 
-  test("set to Auto, the person lands with the author's commit and the next tool call finds them; a part that asks first by its own rule still waits on the card", async () => {
+  test("set to Auto, the person lands whole with the author's commit and the next tool call finds them: on the harness nothing of them asks first by a rule of its own", async () => {
     const { rig, chatId } = await turnChat();
     rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { gm_spawn: { mode: "auto" } } } }));
     const run = await beginTurn(rig, chatId, "Someone knocks. I open the door.");
@@ -149,31 +149,28 @@ describe("a person made in a harness turn", () => {
     expect((await turnState(rig, chatId)).entities.brann).toBeUndefined();
     const committed = (await run.answer(AUTHOR, "commit")).committed as Committed;
     expect(committed.refused).toEqual([]);
-    // Each part is its own change: a new thing the world prices above what a reply may claim asks first whatever its mode (the writer's rule for `item_make`), and wearing it waits with it.
-    expect(committed.review).toEqual([["a grey scarf appears"], ["a grey scarf is now worn by Brann"]]);
-    expect(committed.landed).toHaveLength(1 + (out.parts ?? []).length - committed.review.length);
+    // Each part is its own change, and every one lands: a thing priced above what a reply may claim asks first on the old engines only.
+    expect(committed.review).toEqual([]);
+    expect(committed.landed).toHaveLength(1 + (out.parts ?? []).length);
     const sheet = (await run.answer(AUTHOR, "people_sheet", { person: "Brann" })) as { person: { id: string }; place: { id: string } };
     expect(sheet).toMatchObject({ person: { id: "brann" }, place: { id: HOME } });
     const inventory = (await run.answer(AUTHOR, "items_inventory", { person: "brann" })) as { worn: { name: string }[]; carried: { name: string }[] };
     expect(inventory.carried.map((t) => t.name)).toEqual(["a sealed letter"]);
-    expect(inventory.worn).toEqual([]);
+    expect(inventory.worn.map((t) => t.name)).toEqual(["a grey scarf"]);
     const mind = (await run.answer(AUTHOR, "minds_read", { person: "brann" })) as { intent: { text: string }; notes: { text: string }[] };
     expect(mind.intent.text).toBe(INTENT);
     expect(mind.notes.map((n) => n.text)).toEqual(NOTES);
     await run.finish("A courier in a grey scarf holds out a letter.");
-    expect((await turnState(rig, chatId)).entities.brann).toMatchObject({ name: "Brann", fields: { place: HOME, occupation: "courier" } });
-    // The card's Apply lands what waited: the scarf, on them.
-    const reply = rig.host.head(chatId);
-    if (!reply) throw new Error("no reply");
-    rig.body(await rig.send({ type: "lre.review", chatId, op: "apply", turn: `${reply.id}:0` }));
     const state = await turnState(rig, chatId);
-    const scarf = Object.keys(state.entities).find((id) => state.entities[id]?.name === "a grey scarf");
-    expect(scarf).toBeDefined();
+    expect(state.entities.brann).toMatchObject({ name: "Brann", fields: { place: HOME, occupation: "courier" } });
+    expect(Object.values(state.entities).filter((e) => e.name === "a grey scarf" || e.name === "a sealed letter")).toHaveLength(2);
+    expect(rig.body(await rig.send({ type: "lre.review", chatId, op: "get" })).cards).toEqual([]);
     driverNoModelCalls(rig);
   });
 
-  test("set to Confirm, as shipped, the person waits on the reply's card with every part that names them, and Apply lands them whole", async () => {
+  test("set to Confirm by the user, the person waits on the reply's card with every part that names them, and Apply lands them whole", async () => {
     const { rig, chatId } = await turnChat();
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { gm_spawn: { mode: "confirm" } } } }));
     const run = await beginTurn(rig, chatId, "Someone knocks. I open the door.");
     const out = (await run.answer(AUTHOR, "person_make", BRANN)) as unknown as Made;
     expect(out.made.lands).toContain("review card");

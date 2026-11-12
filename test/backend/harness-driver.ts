@@ -1,8 +1,8 @@
 // A small driver that plays LumiAH's runtime against the harness engine, on the fake host: what the
 // runtime does at its side of the boundary (`backend/harness/shapes.ts`), in the order it does it.
-// It asks what the engine claims of a chat, begins a run, sends tool calls as named agents, asks for
-// the writer's request, says the reply was written, and ends the run. The host plays Lumiverse as it
-// does for every other test: the generation, its prompt, the reply saved.
+// It asks what the engine claims of a chat, begins a run, sends tool calls as named agents, releases
+// the reply passage by passage, says the reply was written, and ends the run. The host plays Lumiverse as
+// it does for every other test: the generation, its prompt, the reply saved or stopped.
 //
 // Nothing here is a model, and no test that uses it scripts one: the fake host's helper throws, and
 // `noModelCalls` checks that the engine never reached it. Every decision a test's turn takes is a
@@ -45,6 +45,8 @@ export interface Agent {
   main?: boolean;
   /** The agents over it, from the run's main agent down to the one that started it. */
   above?: readonly Agent[];
+  /** Which instance of its definition it runs as (`delegate`'s or `job_start`'s `as`): the person a character's agent is. */
+  as?: string;
 }
 
 /** The main agent of a turn's run. */
@@ -52,24 +54,17 @@ export const AUTHOR: Agent = { id: "main", role: HARNESS_AGENT.author, main: tru
 
 const USAGE: AgentUsage = { calls: 0, toolTurns: 0, in: 0, cachedIn: 0, out: 0, reasoningOut: 0, estimated: false, ms: 0 };
 
-/** How the core frames the brief it puts into the writer's request (its `writer.brief` text, which is the user's to change). */
-const BRIEF_FRAME = "The author's brief for this reply:";
-
-/** What the author hands the writer where a test names no brief of its own. A turn is played only once its author handed one over: the core asks for the writer's request with no brief when the author stopped short of one, and the reply is then one no turn was played for. */
-export const A_BRIEF = "- Write the scene as it now stands.";
-
 const KINDS: Record<string, TurnKind> = { normal: "new", regenerate: "regenerate", swipe: "swipe", continue: "continue" };
-
-/** A marker line of the engine's, of any turn: what stands before and after a section in a prompt as Lumiverse assembled it. */
-export const MARKER = /\/\/ lre:[0-9a-f]{8}:[0-9a-f]{8}(?::end)?/;
 
 /** LumiAH's switch for each chat, as the engine set it: what mounting LumiAH gives the engine (`HarnessEngine.pin`). */
 export type Pins = { chatId: string; harness: boolean }[];
 
-/** Mounts the driver where LumiAH's backend will be: the engine is given LumiAH's switch for a chat, which lets a chat be switched to the harness. */
+/** Mounts the driver where LumiAH's backend will be: the engine is given LumiAH's switch for a chat, a linked runtime, and every chat's replies on its way there. */
 export function mount(rig: Rig): Pins {
   const pins: Pins = [];
   rig.rt.harness.pin = async (chatId, _userId, harness) => void pins.push({ chatId, harness });
+  rig.rt.harness.runtime = async () => null;
+  rig.rt.harness.seated = async () => true;
   return pins;
 }
 
@@ -130,7 +125,7 @@ export class Run {
     const own = this.kind === "job" || this.kind === "side";
     const above = agent.above ?? (agent.main === true || own ? [] : [AUTHOR]);
     const main = agent.main ?? (own && above.length === 0);
-    return this.engine.tools.call({ name, args, turn: this.turn, chatId: this.chatId, agentId: agent.id, role: agent.role, callId: `call-${++this.calls}`, kind: this.kind, main, above: above.map(({ id, role }) => ({ agentId: id, role })) }, signal);
+    return this.engine.tools.call({ name, args, turn: this.turn, chatId: this.chatId, agentId: agent.id, role: agent.role, callId: `call-${++this.calls}`, kind: this.kind, main, above: above.map(({ id, role, as }) => ({ agentId: id, role, ...(as !== undefined ? { as } : {}) })), ...(agent.as !== undefined ? { as: agent.as } : {}) }, signal);
   }
 
   /** A call's answer read back from its JSON; a refusal fails the test with its text. */
@@ -147,63 +142,34 @@ export class Run {
     return out.text;
   }
 
-  /**
-   * The writer's request as the core builds it from the prompt Lumiverse assembled: each enabled
-   * preset block, with the World Info of each outlet it holds where the outlet stands; then the
-   * World Info placed by position; then the chat; and the brief as one message before the player's
-   * last.
-   */
-  request(brief: string | null): ModelMessage[] {
-    const host = this.rig.host;
-    const outlet = (name: string): string =>
-      this.assembled
-        .filter((e) => e.position === 8 && (e.outlet ?? "").toLowerCase() === name)
-        .map((e) => e.content)
-        .join("\n");
-    const blocks = host.presetBlocks.filter((b) => host.blockStates[b.id] ?? b.enabled).map((b): ModelMessage => ({ role: "system", content: b.content.replace(/\{\{outlet::([^}]*)\}\}/gi, (_whole, name: string) => outlet(name.trim().toLowerCase())) }));
-    const lore = this.assembled.filter((e) => e.position !== 8).map((e): ModelMessage => ({ role: "system", content: e.content }));
-    const chat = host
-      .chat(this.chatId)
-      .messages.filter((m) => m.isUser || (m.swipes[m.swipeId] ?? "") !== "")
-      .map((m): ModelMessage => ({ role: m.isUser ? "user" : "assistant", content: m.swipes[m.swipeId] ?? "" }));
-    const messages = [...blocks, ...lore, ...chat];
-    if (brief !== null) {
-      const at = messages.findLastIndex((m) => m.role === "user");
-      messages.splice(at < 0 ? messages.length : at, 0, { role: "system", content: `${BRIEF_FRAME}\n${brief}` });
-    }
-    return messages;
-  }
-
-  /** The messages the writer is sent: the core's request (`messages`, as it built it unless given) as the engine rewrote it, or as it came where the engine rewrites nothing. */
-  async writer(brief: string | null, messages: ModelMessage[] = this.request(brief)): Promise<ModelMessage[]> {
-    if (this.kind === "job" || this.kind === "side") throw new Error("only a turn has a writer");
-    return (await this.engine.extension.writerRequest?.({ userId: this.rig.host.userId, chatId: this.chatId, generationId: this.turn, kind: this.kind, brief, messages })) ?? messages;
-  }
-
-  /** The reply was written whole. */
+  /** The reply was written whole: what was released, in order. */
   async written(reply: string): Promise<void> {
     await this.engine.extension.replyWritten?.({ userId: this.rig.host.userId, chatId: this.chatId, turn: this.turn, reply, finish: "stop" });
   }
 
-  /** The run ended, with LumiAH's record of the turn when it is done. */
+  /** The run ended, with LumiAH's record of the turn when it stands (done, or stopped once something was released). */
   async end(status: TurnStatus = "done", over: { record?: TurnRecord | null; reason?: string; reply?: string } = {}): Promise<void> {
-    const record = over.record !== undefined ? over.record : status === "done" && this.generation ? turnRecord(this) : null;
+    const stands = status === "done" || (status === "stopped" && (over.reply ?? "").trim() !== "");
+    const record = over.record !== undefined ? over.record : stands && this.generation ? turnRecord(this) : null;
     await this.engine.extension.runEnded?.({ userId: this.rig.host.userId, chatId: this.chatId, turn: this.turn, kind: this.kind, status, ...(over.reason !== undefined ? { reason: over.reason } : {}), reply: over.reply ?? "", record, usage: USAGE });
     await this.rig.host.settle();
   }
 
-  /**
-   * The rest of a turn as it usually goes: the writer is asked with the author's brief, the reply is
-   * written and Lumiverse saves it, and the run ends with its record. The messages the writer was sent.
-   * `brief` null: the author stopped short of a brief, and the reply is written without one.
-   */
-  async finish(reply: string, brief: string | null = A_BRIEF): Promise<ModelMessage[]> {
+  /** The rest of a turn as it usually goes: the author releases the reply piece by piece (`released`, in order; the reply is what was released), Lumiverse saves it, and the run ends with its record. */
+  async finish(...released: string[]): Promise<void> {
     if (!this.generation) throw new Error("only a turn has a reply");
-    const sent = await this.writer(brief);
+    const reply = released.join("");
     await this.written(reply);
     await this.rig.host.finish(this.generation, reply);
-    await this.end("done");
-    return sent;
+    await this.end("done", { reply });
+  }
+
+  /** The reply is stopped once `released` of it went out (nothing: ""): Lumiverse keeps what was written, and the run ends stopped. `first`: which hears of the stop first. */
+  async stop(released: string, first: "lumiverse" | "runtime" = "lumiverse"): Promise<void> {
+    if (!this.generation) throw new Error("only a turn has a reply");
+    if (first === "runtime") await this.end("stopped", { reply: released, reason: "the user stopped the reply" });
+    await this.rig.host.stop(this.generation, released);
+    if (first === "lumiverse") await this.end("stopped", { reply: released, reason: "the user stopped the reply" });
   }
 }
 
@@ -245,6 +211,13 @@ export async function beginJob(rig: Rig, basis: Pick<Run, "turn" | "chatId">, id
   rig.rt.harness.jobKnown({ id, basis: basis.turn, by: { who: "agent", id: by.id, role: by.role }, ...(parent !== undefined ? { parent } : {}) });
   const run = new Run(rig, basis.chatId, id, "job", null);
   await rig.rt.harness.extension.runBegan?.({ userId: rig.host.userId, chatId: basis.chatId, turn: id, kind: "job", story: STORY_WITHOUT_CLAIM });
+  return run;
+}
+
+/** A job's run begins that no agent of a turn started (the user's own): the engine is told of no reply for it. */
+export async function beginUserJob(rig: Rig, chatId: string, id: string): Promise<Run> {
+  const run = new Run(rig, chatId, id, "job", null);
+  await rig.rt.harness.extension.runBegan?.({ userId: rig.host.userId, chatId, turn: id, kind: "job", story: STORY_WITHOUT_CLAIM });
   return run;
 }
 

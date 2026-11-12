@@ -18,7 +18,7 @@ import { editedBookFields, OLD_SECRECY_FIELDS, withBookLoreFields, type BookLore
 import { parseSecretMarks, unreadableMarks, wholeEntrySecret } from "../../src/shared/secret-marks";
 import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, PresetCard, ResultBodies } from "../../src/shared/protocol";
 import { AGENT_API } from "../../src/shared/protocol";
-import { loreBooksSettingOf, loreIndexSettingsOf, type UserSettings } from "../../src/shared/settings";
+import { loreBooksSettingOf, loreIndexSettingsOf, narrationSettingsOf, storySettingsOf, type UserSettings } from "../../src/shared/settings";
 import { LORE_INDEX_TEXT } from "../../src/shared/lore-routing";
 import { renderIndex } from "../../src/backend/lore-routing";
 import { agentSettingsOf, type AcceptanceState } from "../../src/shared/agent-settings";
@@ -870,6 +870,9 @@ export class MockBackend {
         // The lore settings as the store reads them back: a part reset to its default (null) reads as the default.
         next.loreBooks = loreBooksSettingOf(next.loreBooks);
         next.loreIndex = loreIndexSettingsOf(next.loreIndex);
+        // The story engine's settings as the store reads them back: a dial reset (null) reads as its default, a level cleared is gone.
+        next.story = storySettingsOf(next.story);
+        next.narration = narrationSettingsOf(next.narration);
         this.settings = next;
         this.result(reqId, "lre.settings.set", { settings: structuredClone(this.settings), extraction: extractionView(this.settings) });
         return;

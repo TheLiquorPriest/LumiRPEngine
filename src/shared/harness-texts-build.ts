@@ -47,11 +47,16 @@ export const BUILD_NOTE = {
   noMapPlace: "harness.note.build.no_map_place",
   noLink: "harness.note.build.no_link",
   manyLinks: "harness.note.build.many_links",
+  inChat: "harness.note.build.in_chat",
+  inDocument: "harness.note.build.in_document",
 } as const;
 
-const draft = "It writes the world's draft: this chat plays it only after world_commit and then world_upgrade. The answer says what changed, the draft's version, and the problems the write brought (world_status lists them all).";
-const aPlace = "its id or its exact name in the draft";
+const draft =
+  "It writes this chat's own world unless in says document: staged with your turn like any change, and played at once (your next call sees it, and everyone's once you commit), it goes with the turn if the turn is undone, and world_keep copies it into the world's document for other chats. With in: document it writes the world's draft instead, which this chat plays only after world_commit and then world_upgrade; the answer then says the draft's version and the problems the write brought (world_status lists them all).";
+const aPlace = "its id or its exact name, in the world the call writes";
 const remove = "true to take it out instead.";
+/** The `in` argument, the same for every building tool. */
+const inArg = { path: "in", text: "chat (the default): this chat's own world, played at once. document: the world's draft, played once committed and this chat brought to it." };
 
 /** The tools as shipped, in the order the Prompts page lists them. */
 export const BUILD_TOOL_TEXTS: readonly HarnessToolText[] = [
@@ -59,8 +64,8 @@ export const BUILD_TOOL_TEXTS: readonly HarnessToolText[] = [
     name: BUILD_TOOL.place,
     family: HARNESS_FAMILY.world,
     tier: "write",
-    note: "Makes, changes or removes a place of the world's document.",
-    text: `Make a place in the world's document, change one, or take one out, without writing its JSON. To make one, leave place out and give name (and parent, for a place inside another: a room in a house, a house in a town). To change one, name it in place and give only what changes: everything else stays. A place a map draws is changed in its map, and the refusal says which (world_map_place). This is the world as authored, for every chat that plays it; a room the story walks into right now is place_make instead. Next: world_path joins the place to others, world_map draws what is inside it. ${draft}`,
+    note: "Makes, changes or removes a place of the world's own, in this chat's world or the world's document.",
+    text: `Make a place of the world's own, change one, or take one out, without writing its JSON. To make one, leave place out and give name (and parent, for a place inside another: a room in a house, a house in a town). To change one, name it in place and give only what changes: everything else stays. A place a map draws is changed in its map, and the refusal says which (world_map_place); a place made in play is changed with place_label and place_remove. This is the world itself, kept with its own places once world_keep copies it into the world's document; a room the story walks into right now is place_make instead. Next: world_path joins the place to others, world_map draws what is inside it. ${draft}`,
     args: [
       { path: "place", text: `The place to change or remove: ${aPlace}. Leave it out to make a new place.` },
       { path: "name", text: "The place's name as the story says it: The Old Mill. Needed for a new place; for an existing one, its new name." },
@@ -71,14 +76,15 @@ export const BUILD_TOOL_TEXTS: readonly HarnessToolText[] = [
       { path: "visibility", text: "Who knows the place exists: public (everyone), known_by (only those the world says know it), secret (no one until the story reveals it), discoverable (hidden until the player character has been there or learned of it)." },
       { path: "description", text: "What the place is like, in a sentence or a few: what the reply's writer is told when the story is there." },
       { path: "fields", text: 'Its other fields, as a JSON object written as text: {"tags":["shop"],"region":"north"}. Each field given is set and the rest stay; a field given as null is taken out.' },
-      { path: "remove", text: `${remove} The answer's problems say what still points at the place (people who live there, places inside it, paths): fix those next.` },
+      { path: "remove", text: `${remove} Someone or something still there, or a place inside it, keeps it in this chat's world: move or take those out first. In the world's draft, the answer's problems say what still points at it (people who live there, places inside it, paths): fix those next.` },
+      inArg,
     ],
   },
   {
     name: BUILD_TOOL.path,
     family: HARNESS_FAMILY.world,
     tier: "write",
-    note: "Connects two places of the world's document, changes the way between them, or disconnects them.",
+    note: "Connects two places, changes the way between them, or disconnects them: in this chat's world or the world's document.",
     text: `Connect two places so people can travel between them, change how long the way takes, or disconnect them. One call sets one way of travelling (mode): call again for another, and the ways already there stay. A path the two places already have is changed, never doubled. Where none of the places inside a place have paths (the rooms of a house), people walk between them freely and need none. Once any of them have paths (the buildings of a town), each is reached only by its paths: a place made there needs one too. A path has no lock of its own: what bars a way is the entry rule of the place it leads to (gm_org with do: entry, or place_make's entry) and, on a grid map, its walls. A path a map draws is changed in its map, and the refusal says which (world_map_link). ${draft}`,
     args: [
       { path: "from", text: `Where the path starts: a place, by ${aPlace}.` },
@@ -89,13 +95,14 @@ export const BUILD_TOOL_TEXTS: readonly HarnessToolText[] = [
       { path: "terrain", text: "What the way goes over, in a word or two: paved, gravel, forest track. Optional." },
       { path: "one_way", text: "true: the path only leads from from to to. false: both ways. Left out, a new path goes both ways and an existing one stays as it is." },
       { path: "remove", text: "true to disconnect instead: the one mode when mode is given, else the whole path." },
+      inArg,
     ],
   },
   {
     name: BUILD_TOOL.map,
     family: HARNESS_FAMILY.world,
     tier: "write",
-    note: "Makes, changes or removes a map of the world's document.",
+    note: "Makes, changes or removes a map: in this chat's world or the world's document.",
     text: `Make a map of what is inside one place, change one, or take one out. A map is where the places inside its scope come from: the places put on it (world_map_place) become places of the world, and its links (world_map_link) become the paths between them. A node map is places and links, for a town or a region: make it with scope and title, then add its places and links. A grid map draws an interior cell by cell: give layout (its rows) and legend (what each character stands for). A legend may only name places the map already has, so for a grid map with rooms, make the map, put its places on it, then call again with layout and legend. Taking a map out takes the places and paths it made with it. ${draft}`,
     args: [
       { path: "map", text: "The map to change or remove: its id or its title. For a new map, the id to give it; leave it out and the id is made from the title." },
@@ -107,6 +114,7 @@ export const BUILD_TOOL_TEXTS: readonly HarnessToolText[] = [
       { path: "legend", text: 'What the layout\'s other characters stand for, as a JSON object written as text, one entry for each character: {"k":{"place":"kitchen"},"b":{"place":"bedroom"},"d":{"door":true,"place":"kitchen"},"~":{"terrain":"water","blocked":true},"z":{"zone":"stage"},"c":{"item":"oak_chest"}}. A character given is set and the rest stay; one given as null is taken out.' },
       { path: "cell_meters", text: "A grid map's cell size in metres, for walking times on it: 1 or 2 suits a room. 80 when left out." },
       { path: "remove", text: remove },
+      inArg,
     ],
   },
   {
@@ -124,6 +132,7 @@ export const BUILD_TOOL_TEXTS: readonly HarnessToolText[] = [
       { path: "y", text: "Where it is on the map, from the top, a whole number. It goes with x." },
       { path: "opens", text: "The map that draws the inside of this place: its id or title. That map's scope must be this place, so make it first (world_map with scope set to this place)." },
       { path: "remove", text: "true to take the place off the map, and its links with it." },
+      inArg,
     ],
   },
   {
@@ -140,19 +149,21 @@ export const BUILD_TOOL_TEXTS: readonly HarnessToolText[] = [
       { path: "minutes", text: "How long the link takes, in minutes. Needed for a new link." },
       { path: "one_way", text: "true: the link only leads from from to to. false: both ways. Left out, a new link goes both ways and an existing one stays as it is." },
       { path: "remove", text: "true to remove the link instead: the one of that mode when mode is given, else every link between the two." },
+      inArg,
     ],
   },
   {
     name: BUILD_TOOL.mapSettings,
     family: HARNESS_FAMILY.world,
     tier: "write",
-    note: "Changes the world's map settings.",
+    note: "Changes how the world's maps work: in this chat's world or the world's document.",
     text: `Change how the world's maps work: what the player's map shows, whether people walk grid maps cell by cell, how far the player character sees on one, and whether travel needs a path. Give only what changes; the answer gives the settings as they stand after it. ${draft}`,
     args: [
       { path: "display", text: "What the player's map shows: knowledge (the places the player character knows, those only heard of drawn dashed) or fog (fog over what it hasn't seen)." },
       { path: "grid_movement", text: "true: the grid system is on, so walls and doors steer people across grid maps, things lie in cells, and cells and zones can trigger rules. false: grid maps are drawn, not walked." },
       { path: "sight_radius", text: "With the grid system on, how many cells around it the player character sees: a whole number." },
       { path: "travel_simulation", text: "true: going somewhere needs a path that leads there. false: a move the story tells simply lands." },
+      inArg,
     ],
   },
 ];
@@ -170,8 +181,8 @@ export const BUILD_NOTE_PROMPTS: readonly PromptDef[] = [
   answerPrompt(BUILD_NOTE.settings, "The map settings, named", "How world_map_settings's answer names what it changed.", "the map settings"),
   answerPrompt(BUILD_NOTE.none, "None", "Stands in a building tool's refusal for a list with nothing in it.", "none"),
   answerPrompt(BUILD_NOTE.moreIds, "More than fit", "Ends a list of ids in a building tool's refusal that was cut to fit one answer.", "and {{count}} more", [v("count", "how many more", true)]),
-  answerPrompt(BUILD_NOTE.noPlace, "No such place in the draft", "A building tool's answer when a place it was given is not in the world's draft.", "The world's draft has no place with the id or exact name {{name}}. Its places, by id: {{places}}. Give one of these, or make the place first (world_place).", [v("name", "what the call gave"), v("places", "the ids of the draft's places", true)]),
-  answerPrompt(BUILD_NOTE.placeExists, "A place of that name exists", "world_place's answer to a new place whose name a place of the draft already has.", "The draft already has a place called {{name}} ({{id}}). To change it, name it in place; to make another of the same name, give id.", [v("name", "the place's name", true), v("id", "its id", true)]),
+  answerPrompt(BUILD_NOTE.noPlace, "No such place", "A building tool's answer when a place it was given is not in the world the call writes: this chat's own, or the world's draft.", "There is no place with the id or exact name {{name}} {{where}}. Its places, by id: {{places}}. Give one of these, or make the place first (world_place).", [v("name", "what the call gave"), v("where", "the world the call writes, as the two texts below say it", true), v("places", "the ids of that world's places", true)]),
+  answerPrompt(BUILD_NOTE.placeExists, "A place of that name exists", "world_place's answer to a new place whose name a place of that world already has.", "There is a place called {{name}} ({{id}}) already. To change it, name it in place; to make another of the same name, give id.", [v("name", "the place's name", true), v("id", "its id", true)]),
   answerPrompt(BUILD_NOTE.idTaken, "That id is taken", "A building tool's answer to a new place or map whose id is already in use.", "The id {{id}} is taken: {{by}}. To change that one, name it in {{arg}}; to make a new one, give another id.", [v("id", "the id", true), v("by", "what has it", true), v("arg", "the argument that names an existing one", true)]),
   answerPrompt(BUILD_NOTE.keepsId, "An existing one keeps its id", "A building tool's answer to a call that gives a new id for something that exists.", "{{name}} keeps its id, {{id}}: everything that points at it names it by that. Leave id out. For a place under another id, make a new one and remove this one.", [v("name", "its name", true), v("id", "its id", true)]),
   answerPrompt(BUILD_NOTE.placeOfMap, "The place is a map's", "world_place's answer for a place a map draws.", "{{name}} ({{id}}) is drawn by the map {{map}}, so it is changed there: world_map_place with map {{map}} and place {{id}} renames, moves or removes it.", [v("name", "the place's name", true), v("id", "its id", true), v("map", "the map that draws it", true)]),
@@ -188,10 +199,12 @@ export const BUILD_NOTE_PROMPTS: readonly PromptDef[] = [
   answerPrompt(BUILD_NOTE.noPath, "No path between them", "world_path's answer to a removal when the two places have no path of the world's own.", "No path joins {{from}} and {{to}}, so there is nothing to remove. {{from}} has paths to: {{others}}.", [v("from", "the id of one end", true), v("to", "the id of the other", true), v("others", "the ids of the places the first has paths to", true)]),
   answerPrompt(BUILD_NOTE.noPathMode, "The path has no such mode", "world_path's answer to the removal of a mode the path doesn't have.", "The path between {{from}} and {{to}} has no {{mode}} way. Its modes: {{modes}}. Give one of them, or leave mode out to remove the whole path.", [v("from", "the id of one end", true), v("to", "the id of the other", true), v("mode", "the mode the call gave", true), v("modes", "the modes the path has", true)]),
   answerPrompt(BUILD_NOTE.otherWay, "It runs one way, the other way", "A building tool's answer when the way between the two places is one-way and runs against the call.", "The way between them runs one way only, from {{to}} to {{from}}. Give one_way: false to open it both ways, one_way: true to turn it round, or swap from and to to change it as it runs.", [v("from", "the call's from", true), v("to", "the call's to", true)]),
-  answerPrompt(BUILD_NOTE.noMap, "No such map in the draft", "A building tool's answer when the map it was given is not in the world's draft.", "The world's draft has no map with the id or title {{map}}. Its maps, by id: {{maps}}. Give one of these, or make the map first: world_map with scope (the place it draws) and title.", [v("map", "what the call gave"), v("maps", "the ids of the draft's maps", true)]),
+  answerPrompt(BUILD_NOTE.noMap, "No such map", "A building tool's answer when the map it was given is not in the world the call writes.", "There is no map with the id or title {{map}} {{where}}. Its maps, by id: {{maps}}. Give one of these, or make the map first: world_map with scope (the place it draws) and title.", [v("map", "what the call gave"), v("where", "the world the call writes, as the two texts below say it", true), v("maps", "the ids of that world's maps", true)]),
   answerPrompt(BUILD_NOTE.badMap, "The map would be wrong", "A building tool's answer when the write would leave the map with errors: the engine's own checks of a map, one to a line.", "That would leave the map {{map}} wrong, so nothing was written. Fix these and call again:\n{{problems}}", [v("map", "the map's id", true), v("problems", "what the engine's checks of the map found, one to a line", true)]),
   answerPrompt(BUILD_NOTE.badRows, "The layout isn't rows of text", "world_map's answer to a layout that isn't a list of rows.", 'layout must be a list of rows, each a text with one character for each cell: ["####","#..#","####"].'),
   answerPrompt(BUILD_NOTE.noMapPlace, "No such place on the map", "world_map_place's answer when the map has no place of that id or name.", "The map {{map}} has no place with the id or name {{name}}. Its places, by id: {{places}}. Give one of these, or leave place out to put a new one on the map.", [v("map", "the map's id", true), v("name", "what the call gave"), v("places", "the ids of the map's places", true)]),
   answerPrompt(BUILD_NOTE.noLink, "No such link on the map", "world_map_link's answer to a removal when the map has no such link.", "The map {{map}} has no link between {{from}} and {{to}}{{mode}}, so there is nothing to remove. Its links: {{links}}.", [v("map", "the map's id", true), v("from", "the id of one end", true), v("to", "the id of the other", true), v("mode", "the mode asked for, after a space, or nothing"), v("links", "the map's links, each as from, to and mode", true)]),
   answerPrompt(BUILD_NOTE.manyLinks, "Several links join them", "world_map_link's answer when the two places have several links and the call names no mode.", "{{from}} and {{to}} have several links on the map {{map}}, one for each of: {{modes}}. Say which with mode.", [v("map", "the map's id", true), v("from", "the id of one end", true), v("to", "the id of the other", true), v("modes", "the modes of their links", true)]),
+  answerPrompt(BUILD_NOTE.inChat, "In this chat's world", "How a refusal says it looked in this chat's own world (in: chat).", "in this chat's world"),
+  answerPrompt(BUILD_NOTE.inDocument, "In the world's draft", "How a refusal says it looked in the world's draft (in: document).", "in the world's draft"),
 ];

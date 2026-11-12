@@ -13,12 +13,14 @@
 // ledger's path for writes outside a turn.
 
 import type { RoleTier } from "../../../shared/agent-roles";
-import type { EntityId, MessageId } from "../../../shared/ids";
+import type { MessageId } from "../../../shared/ids";
 import type { JsonObject } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { ChangeType, UserSettings } from "../../../shared/settings";
 import type { WorldState } from "../../../engine/state";
 import type { HostPort } from "../../host";
+import type { StageBook } from "../../story/narration";
+import type { StoryPort } from "../../story/record";
 import type { OpRefusal } from "./writer";
 
 /** One change a harness tool stages: the events an engine validator made of the call. */
@@ -55,10 +57,8 @@ export interface HarnessTurn {
   main: boolean;
   /** The calling agent's writer tier now, the author's grants included: what a tool that writes outside the writer (the world's document) is gated by. Absent, it is read as the game master's for the author and none for anyone else. */
   tier?: RoleTier;
-  /** The person the calling agent thinks for, once it has said so (`bind`); null until then. */
-  character: EntityId | null;
-  /** Makes the calling agent that person's mind for the rest of the run; false when it is someone else's already. */
-  bind(entity: EntityId): boolean;
+  /** The run plays under Sovereign Hand, as its claim decided: the player's messages are directions, and the player's character may have a mind of its own (`StoryMinds.playerMind`). */
+  directed: boolean;
   /**
    * Raises the writer tier of an agent (by its id, a delegate's handle) or of every agent of a
    * definition (by its id) for the rest of the run. False when there is no such agent; a refusal,
@@ -97,16 +97,39 @@ export interface HarnessTurn {
   said: { messageId: MessageId | null; user: string; before: string };
   /** The turn's own reply once it is written; null until then, so only a job's run has one. */
   reply: { messageId: MessageId; text: string } | null;
+  /**
+   * The job whose run the call is of, by its id, and whether the user started it (on a page: no
+   * turn's record holds it); absent for a turn's own run. `spent`: what the work the job does has
+   * spent so far, as LumiAH counts it (for the prepared start, every job that prepared the story);
+   * absent where it can't be read.
+   */
+  job?: { id: string; byUser: boolean; spent?: () => Promise<JobSpent> };
   /** Stages one change; answers its mode, or why it can't be staged. */
   stage(change: HarnessChange): Promise<{ mode: "auto" | "confirm" } | OpRefusal>;
   /** Makes everything staged so far definitive, with the author's note of why now (null: none); a refusal in a job's run, where nothing waits. */
   commit(note: string | null): Promise<HarnessCommit | OpRefusal>;
   /**
-   * Keeps `lines` on the turn's reply as where it says something against what the turn decided or
-   * the world holds (`RecHarness.departures`), after the lines it holds: nothing of the world
-   * changes. Answers every line the reply holds now; `full`, with how many it holds, where they
-   * would come to more than a reply keeps, and nothing was kept; or why the reply's record takes no
-   * more. Absent before the reply, where there is no reply to keep them on.
+   * The story record as the call reaches it (`backend/story/record.ts`): read along the chat's path,
+   * written with the turn (staged, landing on its record as it commits) or, in a job's run, on the
+   * record of the turn the job belongs to. Absent where the bridge gives none: the story tools say so.
    */
-  depart?(lines: readonly string[]): Promise<{ departures: string[] } | { full: number } | OpRefusal>;
+  story?: StoryPort;
+  /**
+   * Each passage of the reply this turn is writing (`backend/story/narration.ts`): what the narrator
+   * was handed, its drafts and their checks, and what the reply released so far. Only a turn that
+   * writes a reply has one; a job's run has none, and the narration tools say so.
+   */
+  stageBook?: StageBook;
+}
+
+/**
+ * What a job's work has spent so far, as LumiAH counts it: its tokens in and out over its model
+ * calls, and what one model call of it weighs where LumiAH measured one: from the work's own calls
+ * (`job`), or, before it made one, from the chat's last run of the same agent (`chat`). Null where
+ * neither is known.
+ */
+export interface JobSpent {
+  tokens: number;
+  calls: number;
+  call: { tokens: number; from: "job" | "chat" } | null;
 }

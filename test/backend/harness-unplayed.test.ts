@@ -1,8 +1,9 @@
 // A reply no turn was played for (HARNESS-SLICE3: "One turn on the harness engine", step 8). On the
 // harness a turn's work lives in the backend's memory until its reply is saved, so a turn that
-// doesn't stand leaves nothing: a backend that restarts while the reply is written, a reply that is
-// stopped, a run that fails. The reply then stands with no turn's record. It says so, where the game
-// master sees it, and the author of the next turn is told first, so it records what still matters.
+// doesn't stand leaves nothing: a backend that restarts while the reply is written, or one that was
+// down when it began. The reply then stands with no turn's record. It says so, where the game master
+// sees it, and the author of the next turn is told first, so it records what still matters. (A Stop
+// is the runtime's: `harness-runtime.test.ts`.)
 
 import { describe, expect, test } from "bun:test";
 import { recHarnessOf, unplayedOf } from "../../src/backend/harness/record";
@@ -10,22 +11,22 @@ import { renderPrompt } from "../../src/backend/prompts";
 import { HARNESS_AGENT, HARNESS_NOTE, HARNESS_TEXT } from "../../src/shared/harness-texts";
 import type { Chip } from "../../src/shared/state-view";
 import { placeOfEntity } from "../../src/engine/scope";
-import { readSlice } from "../../src/packs/minds/core/state";
+import { recStoryOf } from "../../src/engine/story/record";
 import type { Rig } from "../support/rig";
 import { HOME } from "../support/tools";
 import { type Agent, AUTHOR, beginTurn, claimOf, harnessChat, MARA, mount, noModelCalls, OKORO, type Run, recordOn, stateOf } from "./harness-driver";
 
 const note = (id: string, vars: Record<string, string> = {}): string => renderPrompt(id, {}, vars);
-const MIND: Agent = { id: "delegate-mara", role: HARNESS_AGENT.character };
+const MIND: Agent = { id: "delegate-mara", role: HARNESS_AGENT.character, as: MARA };
 const CASH = "acct_pov_cash";
 
 const RESTARTED = "the engine restarted while this reply was being written";
 const UNHEARD = "the engine wasn't running when this reply was started";
-const STOPPED = "the reply was stopped";
 
-/** What a turn's agents do before its reply: Mara decides, Okoro arrives, ten minutes pass and are committed; a payment is staged and left uncommitted. */
+/** What a turn's agents do before its reply: Mara is cast and speaks, Okoro arrives, ten minutes pass and are committed; a payment is staged and left uncommitted. */
 async function play(run: Run): Promise<void> {
-  await run.answer(MIND, "mind_decide", { who: "Mara", monologue: "He said noon, so I will say noon.", depiction: "Mara glances at the door", intent: "Tell him Okoro comes by at noon.", mood: "easy" });
+  await run.answer(AUTHOR, "cast_set", { who: "Mara", standing: "principal", why: "The story turns on her." });
+  await run.answer(MIND, "beat_write", { by: "Mara", kind: "say", what: "Mara says Okoro comes by at noon.", surface: "Mara says Okoro comes by at noon.", exposure: [{ who: "player", reach: "whole" }] });
   await run.answer(AUTHOR, "gm_move", { entity: "Okoro", to: HOME });
   await run.answer(AUTHOR, "time_pass", { minutes: 10 });
   await run.answer(AUTHOR, "commit", {});
@@ -50,12 +51,13 @@ async function guidanceOf(rig: Rig, chatId: string): Promise<string> {
   return guidance && "text" in guidance ? guidance.text : "";
 }
 
-/** Nothing of a turn is in the chat: nobody moved, no time passed, no mind was recorded, no card waits, and the journal holds no turn open. */
+/** Nothing of a turn is in the chat: nobody moved, no time passed, no beat was recorded, no card waits, and the journal holds no turn open. */
 async function untouched(rig: Rig, chatId: string, clock: number): Promise<void> {
   const state = await stateOf(rig, chatId);
   expect(placeOfEntity(state, OKORO)).toBeNull();
   expect(state.clock).toBe(clock);
-  expect(readSlice(state).chars[MARA]?.mind ?? null).toBeNull();
+  const reply = rig.host.head(chatId);
+  expect(reply ? recStoryOf(await recordOn(rig, chatId, reply.id)).beats : []).toEqual([]);
   expect(rig.body(await rig.send({ type: "lre.review", chatId, op: "get" })).cards).toEqual([]);
   const journal = (await rig.rt.ledger.core(chatId, rig.host.userId))?.journal;
   expect(Object.keys(journal?.pending ?? {})).toEqual([]);
@@ -116,6 +118,7 @@ describe("a reply no turn was played for", () => {
     await play(run);
     if (!run.generation) throw new Error("no generation");
     const later = rig.reload();
+    mount(later);
     await later.host.finish(run.generation, "Mara glances at the door. Okoro is already on the step.");
     await untouched(later, chatId, clock);
     await saysUnplayed(later, chatId, RESTARTED);
@@ -148,49 +151,5 @@ describe("a reply no turn was played for", () => {
     await saysUnplayed(later, chatId, UNHEARD);
     expect(await guidanceOf(later, chatId)).toContain(note(HARNESS_TEXT.unplayed, { why: UNHEARD }));
     noModelCalls(later);
-  });
-
-  test("a stopped reply says so too; a Continue that is stopped marks only what it added, on the record its reply keeps, until a turn is played for the reply again", async () => {
-    const { rig, chatId } = await harnessChat({ minds: true });
-    const clock = (await stateOf(rig, chatId)).clock;
-    const stopped = await beginTurn(rig, chatId, "I ask Mara whether Okoro is coming by today.");
-    await play(stopped);
-    if (!stopped.generation) throw new Error("no generation");
-    await rig.host.stop(stopped.generation, "Mara glances at the");
-    await stopped.end("stopped");
-    await untouched(rig, chatId, clock);
-    await saysUnplayed(rig, chatId, STOPPED);
-
-    // The reply told again, with a turn played for it: its own record, and no mark.
-    const again = await beginTurn(rig, chatId, null, { type: "regenerate" });
-    await again.answer(AUTHOR, "time_pass", { minutes: 10 });
-    await again.finish("Mara glances at the door.");
-    const reply = head(rig, chatId);
-    expect(unplayedOf(await recordOn(rig, chatId, reply.id))).toBeNull();
-    expect((await chipsOn(rig, chatId, reply.id)).filter((c) => c.id.startsWith("unplayed:"))).toEqual([]);
-
-    // A Continue stopped part-way: what it added stands with no turn, and the turn played for the reply keeps its record.
-    const more = await beginTurn(rig, chatId, null, { type: "continue" });
-    await more.answer(AUTHOR, "gm_move", { entity: "Okoro", to: HOME });
-    if (!more.generation) throw new Error("no generation");
-    await rig.host.stop(more.generation, "Okoro is already");
-    await more.end("stopped");
-    const rec = await recordOn(rig, chatId, reply.id);
-    expect(recHarnessOf(rec)?.turns).toEqual([again.turn]);
-    expect(unplayedOf(rec)).toEqual({ why: STOPPED, added: true });
-    expect(placeOfEntity(await stateOf(rig, chatId), OKORO)).toBeNull();
-    expect((await stateOf(rig, chatId)).clock).toBe(clock + 10);
-    expect((await chipsOn(rig, chatId, reply.id)).find((c) => c.id.startsWith("unplayed:"))?.detail).toContain(`What Continue added to this reply was written without the harness's agents: ${STOPPED}.`);
-    // The next turn's author is told which part.
-    const next = await beginTurn(rig, chatId, null, { type: "continue" });
-    expect(await guidanceOf(rig, chatId)).toContain(note(HARNESS_TEXT.unplayed, { why: `${STOPPED}; that is only what a Continue added to it, the rest of it was played` }));
-    // A Continue a turn is played for writes the record again, and the mark goes.
-    await next.answer(AUTHOR, "gm_move", { entity: "Okoro", to: HOME });
-    await next.finish(" on the step.");
-    const after = await recordOn(rig, chatId, reply.id);
-    expect(recHarnessOf(after)?.turns).toEqual([again.turn, next.turn]);
-    expect(unplayedOf(after)).toBeNull();
-    expect(placeOfEntity(await stateOf(rig, chatId), OKORO)).toBe(HOME);
-    noModelCalls(rig);
   });
 });

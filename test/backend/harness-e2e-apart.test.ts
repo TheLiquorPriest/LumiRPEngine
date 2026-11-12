@@ -1,5 +1,5 @@
-// What the harness leaves alone, end to end with LumiAH's real backend and core
-// (`harness-e2e-kit.ts`, `support/lumiah-bed.ts`): chats on the engine's own two engines beside a
+// What the harness leaves alone, end to end with LumiAH's real backend mounted and its runtime linked
+// (`harness-e2e-kit.ts`, `support/runtime-bed.ts`): chats on the engine's own two engines beside a
 // harness chat, and LumiAH itself installed beside the engine. Each answers its own chats and has no
 // part in the other's.
 
@@ -8,10 +8,11 @@ import { createBackend } from "lumi-ah/extension/backend";
 import { recHarnessOf, unplayedOf } from "../../src/backend/harness/record";
 import { isRecord } from "../../src/shared/json";
 import { agentChat, replyText, scripted, userText } from "../support/agent-chat";
-import { type Bed, cast, lumiahBed, offers, PageRefused, type Seat, seatOf } from "../support/lumiah-bed";
+import { cast, offers, PageRefused, type Seat, seatOf, toolCall } from "../support/lumiah-bed";
 import { Rig } from "../support/rig";
+import { runtimeBed } from "../support/runtime-bed";
 import { playOn, recordOn } from "./harness-driver";
-import { brief, calls, chatOn, engineOf, guard, say, worldChat } from "./harness-e2e-kit";
+import { calls, chatOn, engineOf, guard, release, say, worldChat } from "./harness-e2e-kit";
 
 const seats: Seat[] = [];
 afterEach(() => {
@@ -28,7 +29,7 @@ const refusalOf = (asked: Promise<unknown>): Promise<unknown> =>
 describe("what the harness leaves alone", () => {
   test("a classic chat and an agents chat play as before beside a harness chat: LumiAH has no part in their turns, and the engine no model call in the harness's", async () => {
     const rig = new Rig({ shipped: true, minds: true });
-    const bed: Bed = lumiahBed(rig);
+    const bed = await runtimeBed(rig);
     seats.push(bed);
     // The engine's own models, scripted as the agents engine's tests script them: its main agent, its roles, its minds.
     rig.host.quietReply = scripted(() => 1);
@@ -58,13 +59,14 @@ describe("what the harness leaves alone", () => {
     }
     expect(rig.host.quietCalls.length).toBeGreaterThan(0);
 
-    // The harness chat beside them is LumiAH's: its author plays the turn, and the engine calls no model of its own for it.
+    // The harness chat beside them is LumiAH's: its author plays the turn in the runtime, and the engine calls no model of its own for it.
+    await bed.until(async () => (await bed.page<{ chat: { place: string } }>("lah.chat.get", { chatId: harness })).chat.place === "runtime", "the harness chat set to play in the runtime");
     const before = rig.host.quietCalls.length;
-    const play = cast({ name: "author", is: offers("write_reply"), lines: [calls("time_pass", { minutes: 5 }), calls("commit"), brief("Five quiet minutes pass.")] });
+    const play = cast({ name: "author", is: offers("reply_write"), lines: [calls("time_pass", { minutes: 5 }), calls("commit"), release("Five quiet minutes pass."), "Released."] });
     bed.script = play.script;
-    const generation = await say(rig, harness, "I sit a while.");
-    await rig.host.finish(generation, "Five quiet minutes pass.");
-    await bed.until(async () => recHarnessOf(await recordOn(rig, harness, generation.messageId ?? ""))?.record !== undefined, "the harness turn's record");
+    const replied = await say(bed, rig, harness, "I sit a while.");
+    expect(replied.content).toBe("Five quiet minutes pass.");
+    await bed.until(async () => recHarnessOf(await recordOn(rig, harness, replied.generation.messageId ?? ""))?.record !== undefined, "the harness turn's record");
     expect(play.left("author")).toBe(0);
     expect(rig.host.quietCalls.length).toBe(before);
     // What the other two recorded is as it was.
@@ -90,20 +92,22 @@ describe("what the harness leaves alone", () => {
     expect((await solo.page<ChatView>("lah.chat.set", { chatId: plain, on: true })).chat.on).toBe(true);
     expect((await bed.page<ChatView>("lah.chat.get", { chatId: plain })).chat).toMatchObject({ on: false, other: { identifier: "lumi_ah" } });
 
-    // A reply in the world chat: the engine's author works on it, and LumiAH's own agents are never called.
-    const author = cast({ name: "author", is: offers("write_reply"), lines: [calls("time_pass", { minutes: 5 }), calls("commit"), brief("Five quiet minutes pass.")] });
+    // A reply in the world chat: the engine's author plays it in the runtime, and LumiAH's own agents are never called.
+    const author = cast({ name: "author", is: offers("reply_write"), lines: [calls("time_pass", { minutes: 5 }), calls("commit"), release("Five quiet minutes pass."), "Released."] });
     bed.script = author.script;
-    const turn = await say(rig, chatId, "I sit a while.");
-    await rig.host.finish(turn, "Five quiet minutes pass.");
-    await bed.until(async () => recHarnessOf(await recordOn(rig, chatId, turn.messageId ?? ""))?.record !== undefined, "the engine's record of its turn");
+    const turn = await say(bed, rig, chatId, "I sit a while.");
+    expect(turn.content).toBe("Five quiet minutes pass.");
+    await bed.until(async () => recHarnessOf(await recordOn(rig, chatId, turn.generation.messageId ?? ""))?.record !== undefined, "the engine's record of its turn");
     expect(solo.calls).toEqual([]);
-    expect(rig.host.message(chatId, turn.messageId ?? "").bag.lumi_ah).toBeUndefined();
+    expect(rig.host.message(chatId, turn.generation.messageId ?? "").bag.lumi_ah).toBeUndefined();
 
     // A reply in the plain chat: LumiAH's main agent briefs it and keeps its record in its own entry; the engine's LumiAH is never called, and the engine keeps no ledger for the chat.
     const engineCalls = bed.calls.length;
-    const main = cast({ name: "main", is: offers("write_reply"), lines: [brief("Say hello back.")] });
+    const main = cast({ name: "main", is: offers("write_reply"), lines: [{ toolCalls: [toolCall("write_reply", { brief: "Say hello back." })] }] });
     solo.script = main.script;
-    const hello = await say(rig, plain, "Hello there.");
+    rig.host.sendUser(plain, "Hello there.");
+    await rig.host.settle();
+    const hello = await rig.host.begin(plain, { type: "normal" });
     expect(solo.prompt(hello.id).filter((m) => m.text.includes("Say hello back."))).toHaveLength(1);
     await rig.host.finish(hello, "Hello yourself.");
     await solo.until(() => isRecord(rig.host.message(plain, hello.messageId ?? "").bag.lumi_ah), "LumiAH's own record on its reply");
@@ -111,14 +115,19 @@ describe("what the harness leaves alone", () => {
     expect(bed.calls.length).toBe(engineCalls);
     expect(await rig.rt.ledger.core(plain, rig.host.userId)).toBeNull();
 
-    // A world chat LumiAH itself answers (the player switched it on there while the chat played its classic steps) can't be given to the harness until that is switched off: the Engine page says who answers it.
+    // A world chat LumiAH itself answers (the player switched it on there while the chat played its classic steps): given to the harness, it waits until that is switched off. A reply meanwhile is stopped before anything is written, and says who answers the chat.
     guard(rig);
     const second = await chatOn(rig, worldId);
     await playOn(rig, second, "classic");
     expect((await solo.page<ChatView>("lah.chat.set", { chatId: second, on: true })).chat.on).toBe(true);
-    const refused = await rig.send({ type: "lre.chat.knowledge", chatId: second, engine: "harness" });
-    expect(refused.type).toBe("lre.error");
-    expect(refused.type === "lre.error" ? refused.message : "").toContain("LumiAH answers this chat");
-    expect(await engineOf(rig, second)).toBe("classic");
+    expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId: second, engine: "harness" })).engine).toBe("harness");
+    rig.host.sendUser(second, "I wait.");
+    await rig.host.settle();
+    const waiting = await rig.host.begin(second, { type: "normal" });
+    await rig.host.settle();
+    expect(waiting.halted).toBe("cancelled");
+    expect((await rig.rt.chips.list(second, rig.host.userId)).find((c) => c.kind === "engine_failed")?.detail).toContain("LumiAH answers this chat");
+    expect(String(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId: second, engines: true })).harnessBlocked)).toContain("LumiAH answers this chat");
+    expect((await solo.page<ChatView>("lah.chat.get", { chatId: second })).chat.on).toBe(true);
   });
 });

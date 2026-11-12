@@ -1,19 +1,17 @@
 // What the end-to-end tests of a harness chat share (`harness-e2e*.test.ts`): a new world chat in a
-// Lumiverse where LumiAH is built into the engine, the player's message that starts a reply, and the
-// lines an author's part is mostly made of.
+// Lumiverse where LumiAH's backend is mounted in the engine and its runtime is linked
+// (`support/runtime-bed.ts`), the player's message that starts a reply, and the lines an author's
+// part is mostly made of.
 
-import type { Generation } from "../support/fake-host";
-import { type Answer, type Bed, lumiahBed, toolCall } from "../support/lumiah-bed";
+import { type Answer, toolCall } from "../support/lumiah-bed";
 import { Rig } from "../support/rig";
+import { type Replied, type RuntimeBed, runtimeBed } from "../support/runtime-bed";
 import { PEOPLE } from "./harness-driver";
 
-/** The player character's wallet in the shipped world. */
-export const CASH = "acct_pov_cash";
-
-/** A rig with LumiAH built into its engine, as the extension starts: nothing switched or set up by hand. */
-export function builtIn(): { bed: Bed; rig: Rig } {
+/** A rig with LumiAH's backend mounted in its engine and a runtime linked to it, as a player sets one up: nothing switched by hand. */
+export async function linked(): Promise<{ bed: RuntimeBed; rig: Rig }> {
   const rig = new Rig({ shipped: true, minds: true });
-  return { bed: lumiahBed(rig), rig };
+  return { bed: await runtimeBed(rig), rig };
 }
 
 /** A new Port Alder world with the tests' people, committed: its id. */
@@ -24,7 +22,7 @@ export async function alderWorld(rig: Rig): Promise<string> {
   return worldId;
 }
 
-/** A new chat given a world, as the player does it: with LumiAH built in it plays on the harness from here on, with nothing else chosen. */
+/** A new chat given a world, as the player does it: with LumiAH mounted it plays on the harness from here on, with nothing else chosen. */
 export async function chatOn(rig: Rig, worldId: string): Promise<string> {
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
@@ -39,14 +37,15 @@ export function guard(rig: Rig): void {
 }
 
 /**
- * A new Port Alder chat with the tests' people, in a Lumiverse where LumiAH is built into the
- * engine. `guarded`: the engine's own helper model throws if reached, as it must never be on a chat
- * the harness plays.
+ * A new Port Alder chat with the tests' people, on the harness in a linked runtime, once LumiAH has
+ * set it to play there. `guarded`: the engine's own helper model throws if reached, as it must never
+ * be on a chat the harness plays.
  */
-export async function worldChat(guarded = true): Promise<{ bed: Bed; rig: Rig; chatId: string; worldId: string }> {
-  const { bed, rig } = builtIn();
+export async function worldChat(guarded = true): Promise<{ bed: RuntimeBed; rig: Rig; chatId: string; worldId: string }> {
+  const { bed, rig } = await linked();
   const worldId = await alderWorld(rig);
   const chatId = await chatOn(rig, worldId);
+  await bed.until(async () => (await bed.page<{ chat: { place: string } }>("lah.chat.get", { chatId })).chat.place === "runtime", "the chat set to play in the runtime");
   if (guarded) guard(rig);
   return { bed, rig, chatId, worldId };
 }
@@ -54,15 +53,15 @@ export async function worldChat(guarded = true): Promise<{ bed: Bed; rig: Rig; c
 /** Which engine plays a chat, as GM → This chat → Engine reads it. */
 export const engineOf = async (rig: Rig, chatId: string): Promise<unknown> => rig.body(await rig.send({ type: "lre.chat.knowledge", chatId })).engine ?? "classic";
 
-/** The player says something and Lumiverse starts the reply: its prompt is assembled and its interceptors have answered when this resolves. */
-export async function say(rig: Rig, chatId: string, text: string): Promise<Generation> {
+/** The player says something, and Lumiverse runs the reply through the runtime to its end. */
+export async function say(bed: RuntimeBed, rig: Rig, chatId: string, text: string): Promise<Replied> {
   rig.host.sendUser(chatId, text);
   await rig.host.settle();
-  return rig.host.begin(chatId, { type: "normal" });
+  return bed.reply(chatId);
 }
 
-/** The author hands the reply over with this brief. */
-export const brief = (text: string): Answer => ({ toolCalls: [toolCall("write_reply", { brief: text })] });
+/** The author releases this as the reply. */
+export const release = (text: string): Answer => ({ toolCalls: [toolCall("reply_write", { text })] });
 
 /** One answer that calls one tool. */
 export const calls = (name: string, args: Record<string, unknown> = {}): Answer => ({ toolCalls: [toolCall(name, args as never)] });

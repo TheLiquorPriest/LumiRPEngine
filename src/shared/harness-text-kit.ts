@@ -13,14 +13,17 @@ export const HARNESS_PAGE: PromptPage = {
 };
 
 /** The groups the page lists its texts under. */
-export const HARNESS_GROUP = { agents: "Agents", skills: "Skills", guidance: "World guidance", tools: "Tools", answers: "Tool answers" } as const;
+export const HARNESS_GROUP = { agents: "Agents", skills: "Skills", notebook: "The author's notebook", guidance: "World guidance", tools: "Tools", answers: "Tool answers" } as const;
 
 /**
  * The families the harness engine's own tools sit in, beside the engine's families
  * (`ToolFamily`): a definition is given a whole family as `@<family>`. A person's own mind's tools
  * are a family of their own (`mind`), apart from the tools that read and edit minds as the game
  * master does (`minds`), so the author can be given every family but that one. `world` is the
- * world's document as Build edits it, and `fights` a fight's rounds.
+ * world's document as Build edits it, `fights` a fight's rounds, and `story` the story record: its
+ * beats, its cast and its drafts (a person's own feed is their mind's), `narration` a passage of
+ * the reply on its way out: what the narrator is handed, its drafts and their checks, and `prepare`
+ * the prepared start: the author's plan and the historian's record of the chat's past.
  */
 export const HARNESS_FAMILY = {
   mind: "mind",
@@ -35,6 +38,9 @@ export const HARNESS_FAMILY = {
   items: "items",
   money: "money",
   lore: "lore",
+  story: "story",
+  narration: "narration",
+  prepare: "prepare",
 } as const;
 
 /** What approval is decided by on the harness: a tool that changes nothing, or one that changes what the engine keeps. */
@@ -48,6 +54,33 @@ export interface HarnessToolText {
   note: string;
   text: string;
   args: readonly { path: string; text: string }[];
+}
+
+/**
+ * An agent definition's texts as shipped: its label on the Prompts page, its name, what it is for,
+ * and its instructions. Each lane's file exports its own, and `harness-texts.ts` registers them all
+ * under `harness.agent.<id>.<part>`.
+ */
+export interface HarnessAgentText {
+  id: string;
+  label: string;
+  name: string;
+  description: string;
+  instructions: string;
+}
+
+/**
+ * A skill's texts as shipped: its name, what it is for, and its body, which starts `# <name>`; and
+ * the agent definitions it is offered to, by id: those that hold every tool its procedure names
+ * (LumiAH offers a skill only to them). Registered under `harness.skill.<id>.<part>` by
+ * `harness-texts.ts`.
+ */
+export interface HarnessSkillText {
+  id: string;
+  agents: readonly string[];
+  name: string;
+  description: string;
+  body: string;
 }
 
 /** A placeholder of a text: `required` when the text says nothing without it. */

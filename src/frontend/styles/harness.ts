@@ -25,7 +25,7 @@ export const HARNESS_CSS = `
 .lre-harness{flex:1;display:flex;flex-direction:column;min-width:0}
 .lre-harness>.lre-harness-curtain{margin:var(--lre-s3) 0 var(--lre-s5)}
 .lre-harness-curtain>.lre-btn,.lre-set-engine-note .lre-btn{min-height:var(--lre-tap-lg)}
-.lre-harness>.lah-root{flex:1 1 auto;min-height:0;--lah-stick-top:calc(var(--lre-stick-top,0px) + var(--lre-modebar-h,0px))!important;--lah-bleed-l:calc(var(--lre-s3) + var(--lre-gutter-l))!important;--lah-bleed-r:calc(var(--lre-s3) + var(--lre-gutter-r))!important;--lah-fill-h:calc(var(--lre-fill-h,100vh) - var(--lre-modebar-h,0px))!important}
+.lre-story-body>.lah-root{flex:1 1 auto;min-height:0;--lah-stick-top:calc(var(--lre-stick-top,0px) + var(--lre-modebar-h,0px))!important;--lah-bleed-l:calc(var(--lre-s3) + var(--lre-gutter-l))!important;--lah-bleed-r:calc(var(--lre-s3) + var(--lre-gutter-r))!important;--lah-fill-h:calc(var(--lre-fill-h,100vh) - var(--lre-modebar-h,0px) - var(--lre-harness-nav-h,0px))!important}
 .lre-harness .lah-chatswitch>.lah-switch{pointer-events:none;cursor:default}
 .lre-harness .lah-chatswitch>.lah-switch>input,.lre-harness .lah-chatswitch>.lah-switch>.lah-switch-track{display:none}
 .lre-harness .lah-chatrow:has(>.lah-chatswitch[data-on=false]){display:none}

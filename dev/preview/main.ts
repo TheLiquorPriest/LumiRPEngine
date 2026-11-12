@@ -8,10 +8,14 @@
 //     engine keeps them nine days into a chat (`marcus_delgado`: a business, a house and credit;
 //     `helen_kowalczyk`: a household; `pov`: a job and investments).
 //   &engine=classic|agents|harness (default classic): the engine that plays the chat. On the harness the drawer
-//     has its Harness tab, a reply is flagged "No turn was played" (&unplayed=failed|nobrief|norun|stopped|restarted says why,
+//     has its Harness tab, a reply is flagged "No turn was played" (&unplayed=failed|norun|stopped|restarted says why,
 //     default failed), and the last reply's review card holds changes to the world's document.
-//     &harness=blocked: the harness can't be chosen, and GM → This chat → Engine says why.
+//     &harness=blocked: the harness can't play the chat now, and GM → This chat → Engine and Play say why.
 //     With scenario=not_world, Build's "Attach to this chat" makes the chat a new world chat on the harness.
+//     The Harness tab's Cast, Record and Notebook, and Play → Now's prepared start, read a made-up story
+//     (dev/preview/story-fixture.ts); &prepare=offer|planning|waiting|running|paused|failed|done (default
+//     offer) is where the prepared start begins. `__lre.story.writeAsAgent(path, text)` writes a workspace
+//     file as an agent would, so an editor holding it meets a conflict on its next save.
 //   ?pickers: the character pickers alone in the drawer (place, bed, a list of text) over a 320-place world,
 //     in place of the app (dev/preview/pickers.tsx).
 
@@ -19,6 +23,7 @@ import { setup } from "../../src/frontend/setup";
 import type { FrontendToBackend } from "../../src/shared/protocol";
 import { STARTER_MAPS } from "./fixtures";
 import { harnessAnswer, UNPLAYED_WHY } from "./harness-fixture";
+import { prepareParam, StoryPreview } from "./story-fixture";
 import { MockBackend } from "./mock-backend";
 import { createMockHost } from "./mock-host";
 import { mountPickers } from "./pickers";
@@ -53,9 +58,10 @@ const backend = new MockBackend((payload) => host.deliver(payload), {
   ...(unplayed ? { unplayed } : {}),
   closeDrawer: () => host.setDrawer(false),
 });
-// LumiAH's pages in the Harness tab speak to LumiAH's backend over the same line; the preview answers them apart.
+// LumiAH's pages in the Harness tab speak to LumiAH's backend over the same line; the preview answers them apart, and the story's pages from its made-up story.
+const story = engine === "harness" ? new StoryPreview(prepareParam(params.get("prepare"))) : null;
 host.onSend = (payload) => {
-  const answer = harnessAnswer(payload, "chat-1");
+  const answer = story?.answer(payload) ?? harnessAnswer(payload, "chat-1");
   if (answer === undefined) backend.receive(payload as FrontendToBackend);
   else setTimeout(() => host.deliver(answer), 30);
 };
@@ -63,7 +69,7 @@ const teardown = params.has("pickers") ? mountPickers() : setup(host.ctx);
 
 declare global {
   interface Window {
-    __lre: { backend: MockBackend; host: typeof host; teardown: () => void };
+    __lre: { backend: MockBackend; host: typeof host; teardown: () => void; story: StoryPreview | null };
   }
 }
-window.__lre = { backend, host, teardown };
+window.__lre = { backend, host, teardown, story };

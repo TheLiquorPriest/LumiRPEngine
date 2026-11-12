@@ -133,7 +133,6 @@ import { Diagnostics, type DiagAt } from "./diagnostics";
 import { Orchestrator, type TurnCalls } from "./agents/orchestrator";
 import { Review } from "./agents/review";
 import { HarnessEngine } from "./harness/extension";
-import { markedText, markerNonce } from "./harness/markers";
 import { LiveFeeds } from "./agents/live";
 import { uncurated } from "./agents/roles/curator";
 import { quietCurator } from "./agents/curator-gate";
@@ -819,21 +818,6 @@ function rerunSource(core: LedgerCore, observed: readonly ChainMessage[], plan: 
 
 function signalWithin(signal: AbortSignal, ms: number): AbortSignal {
   return ms > 0 ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : signal;
-}
-
-/** What the sections of a harness generation are built from: the chat before its reply, the state they tell, the player's words, the author's brief as the outline's lines, the lore loaded into the reply, and the minutes the turn took (null where that isn't told). */
-export interface HarnessSectionsInput {
-  chatId: ChatId;
-  userId: UserId;
-  generationId: string;
-  core: LedgerCore;
-  before: readonly ChainMessage[];
-  world: WorldDoc;
-  state: Readonly<WorldState>;
-  said: string;
-  outline: readonly string[];
-  loads: readonly string[];
-  elapsed: number | null;
 }
 
 export class Runtime implements TurnHooks {
@@ -4008,130 +3992,7 @@ export class Runtime implements TurnHooks {
     if (bookId) await this.book.vacate(bookId, userId);
   }
 
-  // ---------------------------------------------------------------- the harness engine's sections (HARNESS-SLICE3)
-
-  /**
-   * The engine's entries for a harness generation's prompt (`HarnessHooks.markers`). The author works
-   * after the prompt is assembled, so the turn's own sections don't exist when the guard runs. Each
-   * section's entry (its own, or its outlet twin where the preset places the section itself, as
-   * `deliver` chooses) takes the section as the chat's head has it, between this turn's markers for
-   * it, and the writer's request swaps each marked span for the turn's own section
-   * (`harness/markers.ts`). So the prompt as Lumiverse assembles it is one a reply can be written
-   * from, whatever becomes of the turn: every section as the chat stood, and nothing of the turn. The
-   * narrator rules need nothing of the turn, so they go in as they are. The book is made, repaired,
-   * placed for the chat's revision and attached first, as for any turn.
-   */
-  async harnessMarkers(input: { chatId: ChatId; userId: UserId; generationId: string }): Promise<Delivered> {
-    const run = await this.runOf(input.chatId, input.userId);
-    const core = run ? await this.ledger.core(input.chatId, input.userId) : null;
-    if (!run || !core) throw new Error("the chat has no world attached");
-    lruSet(this.lastWorldChat, input.userId, input.chatId, 1024);
-    const observed = toChain(await this.host.chats.messages(input.chatId, input.userId));
-    const render = core.renderState(observed);
-    if (!render) throw new Error("the chat's world revision isn't loaded");
-    const { world } = render;
-    const index = await this.worlds.index(run.worldId, input.userId);
-    if (!index) throw new Error("the chat's world is gone");
-    const bookId = await this.book.ensure(world, index, input.userId);
-    await this.keepBookAttached(input.chatId, bookId, input.userId);
-    const entries = await this.book.entriesOf(bookId, input.userId);
-    const settings = await this.settings.get(input.userId);
-    const texts = settings.prompts.texts;
-    const preset = await this.presets.current(input.chatId, input.userId);
-    // The chat before this generation's reply: Lumiverse stages a new reply, or a new swipe of one, empty; a Continue adds to the reply the chat ends with.
-    const last = observed.at(-1);
-    const before = last && !last.isUser && activeText(last) === "" ? observed.slice(0, -1) : observed;
-    const said = ownMessage(before);
-    let head = new Map<string, string>();
-    try {
-      const built = await this.harnessBuild({ ...input, core, before, world, state: render.state, said: said ? activeText(said) : "", outline: [], loads: [], elapsed: null }, "harness turn, sections as the chat stands, in the prompt as assembled");
-      head = new Map(built.map((f) => [f.slot, f.content]));
-    } catch (error) {
-      // The places are marked all the same: the turn's own sections go where the preset put them, and the prompt as assembled holds none.
-      this.host.log("warn", `[LumiRPEngine] chat ${input.chatId}: the sections as the chat stands couldn't be built for this prompt (${error instanceof Error ? error.message : String(error)})`, input.userId);
-    }
-    const nonce = markerNonce(input.generationId);
-    const fills: { id: string; content: string; part: string; label: string }[] = [];
-    for (const section of sectionsOf(world)) {
-      const twin = entries.twins.get(section.id);
-      const id = twin !== undefined && preset.outlets.has(outletOf(section.id)) ? twin : entries.slots.get(section.id);
-      if (id !== undefined) fills.push({ id, content: markedText(section.id, nonce, head.get(section.id) ?? ""), part: section.id, label: section.label });
-    }
-    const rulesAt = entries.narratorOutlet !== null && preset.outlets.has(NARRATOR_OUTLET) ? entries.narratorOutlet : entries.narrator;
-    if (rulesAt) fills.push({ id: rulesAt, content: narratorRules(preset.guidance.narrator ?? null, texts, settings.statePrices), part: RULES_PART, label: "Narrator rules" });
-    const chat = await this.chatKnowledge.get(input.chatId, input.userId);
-    return { bookId, fills: new Map(fills.map((f) => [f.id, f.content])), parts: fills.map((f) => ({ id: f.part, label: f.label, entry: f.id })), placed: `${preset.placed}\u0000${this.book.placedAs(bookId)}`, wording: markWording(texts), view: narratorView(chat, world, settings) };
-  }
-
-  /**
-   * A harness turn's sections for its writer, from the state the author's commits left. The author's
-   * brief is the Outline, the lore its agents loaded leads the Scene, and Outcome holds only what
-   * was seen to off screen: the turn's resolution is the brief's to tell. Every section goes, at its
-   * marked span or before the player's last message, so none waits on an entry. `prompts` names the
-   * texts they were made from, for the turn's record.
-   */
-  async harnessSections(input: HarnessSectionsInput): Promise<{ fills: { slot: string; content: string }[]; prompts: string }> {
-    const fills = await this.harnessBuild(input, "harness turn, sections put into the writer's request");
-    return { fills, prompts: await this.promptSets.put(input.userId, turnPromptSet((await this.settings.get(input.userId)).prompts.texts)) };
-  }
-
-  /**
-   * The sections of a harness generation from one state, built as `deliver` builds a prepared turn's
-   * (`buildSections`: the same renderers, scopes, caps, marks and budgets), in the sections' own
-   * order. They are the generation's row in the inspector's history: the chat's head as the prompt is
-   * assembled, then the turn's own once its writer is asked, which take that row's place.
-   */
-  private async harnessBuild(input: HarnessSectionsInput, label: string): Promise<{ slot: string; content: string }[]> {
-    const started = Date.now();
-    const settings = await this.settings.get(input.userId);
-    const { state } = input;
-    const world = await this.liveWorld(input.generationId, input.chatId, input.userId, input.world);
-    const texts = settings.prompts.texts;
-    const chat = await this.chatKnowledge.get(input.chatId, input.userId);
-    const scene = [...new Set(input.loads)].flatMap((id) => {
-      const entry = world.lore[id];
-      return entry && loreReadable(this.registry, world, state, entry, "brief") ? [`${entry.title}: ${entry.content}`] : [];
-    });
-    const uncounted: string[] = [];
-    const built = buildSections({
-      registry: this.registry,
-      world,
-      state,
-      secrets: unrevealedSecrets(this.registry, world, state),
-      budget: settings.modelUse.tokens.sections,
-      mindsBudget: settings.minds.tokens,
-      narrator: { chat: chat.narrator ?? null, view: narratorView(chat, world, settings) },
-      wording: markWording(texts),
-      texts,
-      knowledge: settings.minds.knowledge,
-      prices: settings.statePrices,
-      said: input.said,
-      planned: { outcome: offstageLines(input.core, input.before, input.before.length, texts), montage: [], scene },
-      outline: input.outline,
-      elapsed: input.elapsed,
-      hasEntry: () => true,
-      cost: (content) => this.sectionCost(input.userId, content),
-      seen: (content) => {
-        if (!this.tokenCounts.has(hashParts("lre.tokens", input.userId, content))) uncounted.push(content);
-      },
-      warn: (message) => this.host.log("warn", `[LumiRPEngine] ${message}`, input.userId),
-    });
-    this.countLater(input.userId, uncounted);
-    const record: InspectorRecord = { id: input.generationId, at: Date.now(), activation: "unconfirmed", sections: built.record, budget: { sections: settings.modelUse.tokens.sections, used: built.used }, forced: [], entries: {} };
-    const log = await this.inspector.load(input.chatId, input.userId);
-    const earlier = log.records.findIndex((r) => r.id === input.generationId);
-    if (earlier < 0) await this.inspector.add(input.chatId, input.userId, record);
-    else {
-      log.records[earlier] = record;
-      this.inspector.save(input.chatId);
-    }
-    this.push.changed(input.chatId, input.userId);
-    const sent = new Set(built.fills.map((f) => f.slot));
-    this.diag.sections({ chatId: input.chatId, userId: input.userId, turn: input.generationId }, label, sectionsOf(world).map((s) => ({ slot: s.id, outlet: null, filled: sent.has(s.id) })), started);
-    // In the sections' own order, whatever order they were filled in: the ones no span places go into the request so.
-    const rank = new Map(built.sections.map((s) => [s.slot, s.rank]));
-    return [...built.fills].sort((a, b) => (rank.get(a.slot) ?? 0) - (rank.get(b.slot) ?? 0));
-  }
+  // ---------------------------------------------------------------- the harness engine (HARNESS-SLICE3)
 
   /** What follows a turn's reply with no model (`postTurn`): off-screen catch-up, the turn's tick rules and the story's tracks. A harness turn's commit applies them, as a classic turn's read does. */
   turnConsequences(input: { world: WorldDoc; state: Readonly<WorldState>; runSeed: string; seed: string; appliedMinutes: number }): LedgerEvent[] {
@@ -4511,9 +4372,7 @@ export class Runtime implements TurnHooks {
     }
     // Each panel's cost, kept by Diagnostics where it is slow, so the next log names it.
     const parts: DiagStep[] = [];
-    // A harness turn's change to the world's document offers Undo only while its revision is the world's newest: the head is read for a chat that holds one.
-    const head = stored.some((c) => c.kind === "world_made") ? ((await this.worlds.index(run.worldId, userId))?.head ?? null) : undefined;
-    const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, head, meter: this.meter.view(userId), mapDisplay, knowledge, offstage: settings.offstage, memo, parts });
+    const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay, knowledge, offstage: settings.offstage, memo, parts });
     for (const p of parts) this.diag.slow(userId, chatId, `state view/${p.name}`, p.ms);
     view.panels["core.context"] = this.inspectorView(chatId, userId);
     // A turn kept from a reply that failed waits on the player (DESIGN §5.1): its card shows while it lasts.

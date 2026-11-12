@@ -183,4 +183,21 @@ export const COVERAGE: Coverage = {
     get: { excluded: "GM → Live, the page's live view of the chat's agent turn as its agents work it, pushed to that page; an outside agent reads what a turn left with lre_chat_state and lre_gm, and its transcript once the MCP server's tools reach the workspace (Increment 3)." },
     leave: { excluded: "GM → Live's page closing its live view, so the engine stops pushing the turn to it; nothing an outside agent watches." },
   },
+  "lre.story": {
+    cast: { excluded: "The Harness tab's Cast, the page's view of who the author cast and why, behind the curtain; an outside agent reads the story through the harness's own tools, which the MCP server doesn't offer." },
+    pin: { excluded: "The player's own pin on someone's standing, pressed on the Harness tab's Cast; an outside agent casts no one." },
+    reached: { excluded: "What last reached someone, shown on the Harness tab's Cast behind the curtain; an outside agent reads no character's feed." },
+    record: { excluded: "A reply's beats and the drafts kept for later, the Harness tab's Record behind the curtain; an outside agent reads what a turn left with lre_chat_state and lre_gm." },
+    budget: { excluded: "How much of the story budget the treatments around now use, shown on Settings → Story → Budget; an outside agent opens no treatment." },
+  },
+  "lre.prepare": {
+    get: { excluded: "The prepared start as Play → Now shows it, the player's own page; an outside agent prepares no story." },
+    start: { excluded: "The player's press that starts preparing the story, a job of the author's that spends their tokens; never an outside agent's." },
+    approve: { excluded: "The player's word on the author's plan, pressed on Play → Now; never an outside agent's." },
+    steer: { excluded: "What the player tells the author about its plan, in their own words on Play → Now; an outside agent steers no preparation." },
+    cap: { excluded: "The most the player lets the preparation spend, set on Play → Now; never an outside agent's." },
+    pause: { excluded: "The player holding the preparation, pressed on Play → Now; an outside agent holds no job." },
+    resume: { excluded: "The player carrying the preparation on, pressed on Play → Now; an outside agent resumes no job." },
+    cancel: { excluded: "The player stopping the preparation, pressed on Play → Now; an outside agent cancels no job." },
+  },
 };

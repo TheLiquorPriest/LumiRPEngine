@@ -27,7 +27,7 @@ function acceptMany(learning: ExtractionLearning, connectionId: string, type: Ch
 describe("agent change types", () => {
   test("each takes the plan's default mode, has a label, and is no extraction type", () => {
     const settings = defaultSettings();
-    expect(AGENT_CHANGE_DEFAULTS).toEqual({ gm_spawn: "confirm", despawn: "confirm", destroy: "confirm", money_adjust: "confirm", stage: "confirm", gm_edit: "auto", workspace: "auto", item_home: "auto", item_grant: "auto", item_label: "auto", item_merge: "confirm", item_set: "auto", item_remove: "confirm", org_people: "confirm", org_powers: "confirm", org_shares: "confirm", org_rules: "auto", world_document: "auto", play: "auto", mind: "auto" });
+    expect(AGENT_CHANGE_DEFAULTS).toEqual({ gm_spawn: "confirm", despawn: "confirm", destroy: "confirm", money_adjust: "confirm", stage: "confirm", gm_edit: "auto", workspace: "auto", item_home: "auto", item_grant: "auto", item_label: "auto", item_merge: "confirm", item_set: "auto", item_remove: "confirm", org_people: "confirm", org_powers: "confirm", org_shares: "confirm", org_rules: "auto", world_document: "auto", world_edit: "auto", play: "auto", mind: "auto" });
     expect(CHANGE_TYPES).toEqual([...EXTRACTION_TYPES, ...AGENT_CHANGE_TYPES]);
     for (const type of AGENT_CHANGE_TYPES) {
       const cold = { mode: AGENT_CHANGE_DEFAULTS[type], source: "default" as const };
@@ -37,6 +37,23 @@ describe("agent change types", () => {
       expect(AGENT_CHANGE_LABEL[type].length).toBeGreaterThan(0);
       expect(EXTRACTION_TYPES.some((t: string) => t === type)).toBe(false);
     }
+  });
+
+  test("on the harness every type lands unless the user set it: no learned mode, no type's own default", () => {
+    const settings = defaultSettings();
+    const learning = fresh();
+    // Learned to ask first on the older engines: the harness doesn't learn it.
+    const demote = (type: ChangeType): void => {
+      for (let i = 0; i < EXTRACTION_LEARNING.minProposals; i++) recordOutcome(settings, learning, "conn-a", type, "rejected", 1000 + i, "assistant");
+    };
+    demote("gm_edit");
+    expect(effectiveMode(settings, learning, "conn-a", "gm_edit", "assistant").mode).toBe("confirm");
+    for (const type of CHANGE_TYPES) expect(effectiveMode(settings, learning, "conn-a", type, "assistant", "harness")).toEqual({ mode: "auto", source: "default" });
+    // What the user set keeps the user's mode, ask first and never among them.
+    settings.extraction.gm_spawn = { mode: "confirm" };
+    settings.extraction.world_edit = { mode: "never" };
+    expect(effectiveMode(settings, learning, "conn-a", "gm_spawn", "assistant", "harness")).toEqual({ mode: "confirm", source: "pinned" });
+    expect(effectiveMode(settings, learning, "conn-a", "world_edit", undefined, "harness")).toEqual({ mode: "never", source: "pinned" });
   });
 
   test("a pin set over the protocol wins, keeps no maxDelta, and null unpins it", async () => {

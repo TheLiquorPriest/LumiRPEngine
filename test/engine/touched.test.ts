@@ -2,16 +2,19 @@
 // kept inside event apply, names only.
 
 import { describe, expect, test } from "bun:test";
+import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { blobHash } from "../../src/shared/stores";
 import type { WorldDoc } from "../../src/shared/world";
 import { blankWorld, migrateWorld } from "../../src/engine/authoring";
 import { applyEvent, applyMarker, coreEventTypes, EXTERNAL_ACCOUNT_PREFIX, validateEvent } from "../../src/engine/events";
 import { own } from "../../src/engine/pack-kit";
+import { playedWorld } from "../../src/engine/places-in-play";
 import type { CoreRegistry, EventTypeDef, Touch } from "../../src/engine/registry";
 import { createRegistry } from "../../src/engine/registry-impl";
 import type { WorldState } from "../../src/engine/state";
 import { touchedAspect, touchedField, touchedRelation } from "../../src/engine/touched";
+import { chatDraftOf, draftEvent, NO_DRAFT } from "../../src/engine/world-draft";
 import { initialState } from "../../src/engine/world-state";
 import { ALL_PACKS } from "../../src/packs/index";
 import { baseWorld, fold, POV, startState } from "../packs/support";
@@ -200,6 +203,8 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "space.route", data: { route: "lane", open: false } },
   // A place made in play is the space slice's (ITEMS-SPEC §3.5), never an entity's definition.
   { type: "space.place", data: { place: "booth", def: { id: "booth", name: "Booth", parent: "taproom", fields: {}, made: { as: "spot", by: "story", at: 0, why: "A quiet corner" } } } },
+  // This chat's own change to the world's places, paths and maps is the engine's world slice (DEPTH2-PLAN §2), never an entity's definition: an Upgrade carries it to the new revision itself (`carryDraft`), as the last test here shows.
+  { type: "engine.world", data: { collection: "routes", id: "back_way", value: { id: "back_way", from: "inn", to: "town", modes: { walk: { minutes: 5 } }, bidirectional: true }, over: null } },
   { type: "economy.anchor", data: { entity: "dev", band: "comfortable", typical: 3000, base: 2000 } },
   { type: "economy.txn", data: { memo: "Rent", lines: [{ account: "acct", amount: -100 }] } },
   { type: "economy.note", data: { entity: "dev", class: "bill", text: "Rent is due" } },
@@ -369,5 +374,40 @@ describe("the event types", () => {
       }
     }
     expect(problems).toEqual([]);
+  });
+});
+
+describe("this chat's own world across an Upgrade (DEPTH2-PLAN §2)", () => {
+  test("is kept as the touched record keeps what play wrote: a change the new revision took in goes, one it changed otherwise plays on", () => {
+    const a = migrateWorld(blankWorld("w_up", "Upgrade"));
+    a.places.town = { id: "town", name: "Saltmarsh", fields: {} };
+    a.routes.lane = { id: "lane", from: "home", to: "town", modes: { walk: { minutes: 20 } }, bidirectional: true };
+    const slow: JsonObject = { id: "lane", from: "home", to: "town", modes: { walk: { minutes: 90 } }, bidirectional: true };
+    const made: JsonObject = { id: "back_way", from: "town", to: "home", modes: { walk: { minutes: 30 } }, bidirectional: true };
+    const state = fold(reg, a, initialState(a, "ra", reg), [
+      draftEvent(a, NO_DRAFT, { collection: "routes", id: "lane", value: slow }),
+      draftEvent(a, NO_DRAFT, { collection: "routes", id: "back_way", value: made }),
+    ]);
+    // The next revision changed the lane otherwise (the user's own edit in Build), and took in the way the chat made (kept and committed).
+    const b: WorldDoc = {
+      ...a,
+      routes: {
+        ...a.routes,
+        lane: { id: "lane", from: "home", to: "town", modes: { walk: { minutes: 5 } }, bidirectional: true },
+        back_way: { id: "back_way", from: "town", to: "home", modes: { walk: { minutes: 30 } }, bidirectional: true },
+      },
+    };
+    // A later one changes the way it took in.
+    const c: WorldDoc = { ...b, routes: { ...b.routes, back_way: { id: "back_way", from: "town", to: "home", modes: { walk: { minutes: 12 } }, bidirectional: true } } };
+    const docs: Record<string, WorldDoc> = { ra: a, rb: b, rc: c };
+    const env = { worlds: (r: string) => own(docs, r), types: reg };
+    applyMarker(state, { kind: "migrate", to: "rb" }, env);
+    expect(playedWorld(b, state).routes.lane?.modes.walk?.minutes).toBe(90);
+    expect(Object.keys(chatDraftOf(state).routes ?? {})).toEqual(["lane"]);
+    expect(playedWorld(b, state).routes.back_way).toEqual(b.routes.back_way);
+    // Taken in, the way is the world's own: the document's next change of it plays. The lane plays on as the chat has it.
+    applyMarker(state, { kind: "migrate", to: "rc", merge: {} }, env);
+    expect(playedWorld(c, state).routes.back_way?.modes.walk?.minutes).toBe(12);
+    expect(playedWorld(c, state).routes.lane?.modes.walk?.minutes).toBe(90);
   });
 });

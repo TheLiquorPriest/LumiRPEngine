@@ -32,9 +32,9 @@ async function made(): Promise<{ rig: Rig; chatId: string; build: WorldBuild; fi
 /** One turn whose author lays a place and a path to it, then asks for the commit and the move to it, and commits: what the commit answered. */
 async function layPath(rig: Rig, chatId: string, between?: () => Promise<void>): Promise<Committed> {
   const turn = await beginTurn(rig, chatId, "I ask Mara whether the old mill past the creek still stands.");
-  await turn.answer(AUTHOR, "world_place", { name: "The Old Mill", parent: HOME });
+  await turn.answer(AUTHOR, "world_place", { name: "The Old Mill", parent: HOME, in: "document" });
   await between?.();
-  await turn.answer(AUTHOR, "world_path", { from: HOME, to: "The Old Mill", minutes: 25, km: 2 });
+  await turn.answer(AUTHOR, "world_path", { from: HOME, to: "The Old Mill", minutes: 25, km: 2, in: "document" });
   await turn.answer(AUTHOR, "world_commit", { note: "The old mill and the way to it" });
   await turn.answer(AUTHOR, "world_upgrade");
   const committed = (await turn.answer(AUTHOR, "commit")).committed as Committed;
@@ -57,7 +57,7 @@ async function press(rig: Rig, chatId: string, chip: string, choice: string): Pr
 }
 
 describe("the world's document as it ships", () => {
-  test("a commit lands when the author commits, with nothing waiting for the user: the world has a new revision, the chat plays it after the turn, and the reply lists the change with Undo", async () => {
+  test("a commit lands when the author commits, with nothing waiting for the user: the world has a new revision, the chat plays it after the turn, and the reply lists the change, which undoing the turn leaves", async () => {
     const { rig, chatId, build, first } = await made();
     const committed = await layPath(rig, chatId);
     expect(committed).toMatchObject({ review: [], refused: [] });
@@ -69,69 +69,23 @@ describe("the world's document as it ships", () => {
     // On the reply, marked as made: what the commit changed, in the lines its card would have listed.
     const [chip] = await madeChips(rig, chatId);
     expect(chip?.messageId).toBe(rig.host.head(chatId)?.id ?? "");
-    expect(chip?.actions.map((a) => a.id)).toEqual(["undo", "build"]);
-    expect(chip?.detail).toContain("The author made this the world's newest revision (The old mill and the way to it). This chat plays it from the next turn.");
+    expect(chip?.actions.map((a) => a.id)).toEqual(["build"]);
+    expect(chip?.detail).toContain("The author made this the world's newest revision (The old mill and the way to it). This chat plays it from the next turn. Undoing this turn leaves the world's document as it is");
     expect(chip?.detail).toContain("places: added The Old Mill (the_old_mill)");
     expect(chip?.detail).toContain("routes: added");
     noModelCalls(rig);
   });
 
-  test("Undo puts the world back to the revision before the commit and brings this chat back to it; the line goes", async () => {
-    const { rig, chatId, build, first } = await made();
+  test("a commit's chip stored with an Undo of its own, before a turn was undone whole, shows none", async () => {
+    const { rig, chatId } = await made();
     await layPath(rig, chatId);
     const [chip] = await madeChips(rig, chatId);
-    expect(await press(rig, chatId, chip?.id ?? "", "undo")).toEqual({ done: true });
-    expect(await build.head()).toBe(first);
-    expect((await build.edit({ op: "get" })).stored).toBe(false);
-    expect((await stateOf(rig, chatId)).revision).toBe(first);
-    expect((await build.revision(first)).places).not.toHaveProperty("the_old_mill");
-    expect(await madeChips(rig, chatId)).toEqual([]);
-    noModelCalls(rig);
-  });
-});
-
-describe("Undo is offered only while it can be made whole", () => {
-  /** After the commit, `then` happens; the reply's line then offers no Undo and says how to change it now, and a press of it is refused with why, changing nothing. */
-  async function refused(then: (rig: Rig, chatId: string, build: WorldBuild) => Promise<void>, offered: boolean, why: string): Promise<void> {
-    const { rig, chatId, build } = await made();
-    await layPath(rig, chatId);
-    const [chip] = await madeChips(rig, chatId);
-    await then(rig, chatId, build);
-    const head = await build.head();
-    const playing = (await stateOf(rig, chatId)).revision;
+    const stored = (await rig.rt.chips.list(chatId, rig.host.userId)).find((c) => c.id === chip?.id);
+    if (!stored) throw new Error("no stored chip");
+    await rig.rt.chips.add(chatId, rig.host.userId, [{ ...stored, actions: [{ id: "undo", label: "Undo", style: "danger" }, ...stored.actions] }]);
     const [shown] = await madeChips(rig, chatId);
-    expect(shown?.actions.map((a) => a.id)).toEqual(offered ? ["undo", "build"] : ["build"]);
-    if (!offered) expect(shown?.detail).toContain("The world has changed since, or this chat has played on. To change it now, edit the world in Build, or ask the author in your next message.");
-    const answer = await press(rig, chatId, chip?.id ?? "", "undo");
-    expect("refused" in answer ? answer.refused : "").toContain(why);
-    expect([await build.head(), (await stateOf(rig, chatId)).revision]).toEqual([head, playing]);
+    expect(shown?.actions.map((a) => a.id)).toEqual(["build"]);
     noModelCalls(rig);
-  }
-
-  test("once the world has a newer revision", async () => {
-    await refused(
-      async (rig, _chatId, build) => {
-        await buildEdit(rig, build.worldId);
-        rig.body(await rig.send({ type: "lre.world", op: "commit", worldId: build.worldId, base: null }));
-      },
-      false,
-      "newer revision",
-    );
-  });
-
-  test("once this chat has played on", async () => {
-    await refused(
-      async (rig, chatId) => {
-        const next = await beginTurn(rig, chatId, "I set off for the mill.");
-        await next.finish("The creek is low this time of year.");
-      },
-      false,
-      "played on",
-    );
-  });
-
-  test("while the draft holds the user's own uncommitted edits, which putting the revision back would replace", async () => {
-    await refused((rig, _chatId, build) => buildEdit(rig, build.worldId), true, "holds edits of yours");
   });
 });
 
@@ -196,11 +150,11 @@ describe("who staged a change, on a harness chat's review card", () => {
   });
 
   test("named in the user's own texts, after the reply said as such; a definition that isn't the engine's by its id; the other engines' cards as before", () => {
-    expect(stagedBy({ "harness.agent.chronicler.name": "Scribe" }, "chronicler", true)).toBe("Scribe, after the reply");
+    expect(stagedBy({ "harness.agent.game_master.name": "Referee" }, "game_master", true)).toBe("Referee, after the reply");
     expect(stagedBy({}, "author", false)).toBe("Author");
     expect(stagedBy({}, "my_scout", false)).toBe("my_scout");
     const item = { key: "k", changeType: "learn", lines: [], status: "open" as const };
-    expect(sourceWords({ ...item, source: "read", role: "read", by: "Chronicler, after the reply" })).toBe("Chronicler, after the reply");
+    expect(sourceWords({ ...item, source: "read", role: "read", by: "Game master, after the reply" })).toBe("Game master, after the reply");
     expect(sourceWords({ ...item, source: "read", role: "read" })).toBe("From reading the reply");
     expect(sourceWords({ ...item, source: "agent", role: "director" })).not.toBe("director");
   });

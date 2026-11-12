@@ -1,5 +1,6 @@
 // Play → Now, the hub, registered as the core Scene panel: the status banners; which engine plays
-// the chat and why, while the harness can't play the user's chats (a permission isn't granted); the
+// the chat and why, while the harness can't play the user's chats (a permission isn't granted); on a
+// chat the harness plays, the prepared start while it's offered or under way (`story/prepare.tsx`); the
 // scene card (time and day part, place, scene type with the last turn's elapsed time, weather, cash,
 // each fixable value, the time among them, with its ✎); what needs you; the fight while one is on
 // (Now's other panels); who is here; the packs' glances; the quick actions. Opening someone here
@@ -22,6 +23,7 @@ import { EngineBlocked, useHarnessBlocked } from "../gm/engine";
 import { gmAt } from "../gm/gate";
 import { toastQueued } from "../queued";
 import { visiblePanels } from "./play";
+import { PrepareCard } from "../story/prepare";
 
 type FixKey = "time" | "place" | "weather" | "cash" | "scene";
 
@@ -56,6 +58,7 @@ export function ScenePanel(props: PanelProps) {
     <div class="lre-play-now" data-lre-panel="core.scene">
       <StatusBanners state={state} />
       <EngineWord state={state} />
+      {state.engine === "harness" ? <PrepareCard chatId={state.chatId} /> : null}
       <SceneCard state={state} />
       <NeedsYou state={state} />
       {inline.map((panel) => (

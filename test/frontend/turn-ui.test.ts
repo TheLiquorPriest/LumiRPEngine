@@ -69,69 +69,60 @@ describe("GM → This chat: the Engine switch", () => {
 
   test("says what each engine is before one is picked: the harness in two lines, for someone who has never met one", () => {
     expect(ENGINE_HELP.harness.length).toBe(2);
-    // Who plays the turn, and what the player will notice; nothing to install, no key, no connection to make.
-    expect(ENGINE_HELP.harness[0]).toContain("An AI author plays each turn before the reply is written");
-    expect(ENGINE_HELP.harness[1]).toContain("Nothing to set up: it works on this chat's own connection, and your preset still writes the reply.");
+    // Who plays the turn and writes the reply, and what the player will notice: the runtime it needs.
+    expect(ENGINE_HELP.harness[0]).toContain("An AI author plays each turn and writes the reply itself");
+    expect(ENGINE_HELP.harness[1]).toContain("It runs in LumiRPEngine's runtime, a program you start beside Lumiverse");
     for (const engine of ["classic", "agents", "harness"] as const) {
       const shown = textOf(EngineSwitch({ engine, busy: false, onChange: () => undefined }));
       for (const line of Object.values(ENGINE_HELP).flat()) expect(shown).toContain(line);
     }
   });
 
-  test("where the harness can't play, its option can't be pressed and the page says right under the switch which engine plays and why; a chat already on it is warned", () => {
-    const why = "This build of LumiRPEngine doesn't include the harness yet. Update LumiRPEngine in Lumiverse (Extensions → LumiRPEngine), then choose Harness here.";
-    const closed = EngineSwitch({ engine: "classic", busy: false, blocked: why, onChange: () => undefined });
-    expect(propsOf(closed, Seg)[0]?.options).toEqual([
-      { value: "classic", label: "Classic steps" },
-      { value: "agents", label: "Agents" },
-      { value: "harness", label: "Harness", disabled: true, title: why },
-    ]);
-    const [notice] = propsOf(closed, Banner);
-    expect([notice?.tone, notice?.title]).toEqual(["warn", "This chat plays its classic steps, not the harness"]);
-    expect(textOf(notice?.children)).toContain(why);
-    // A new world chat falls back as well: the notice says so, since nothing else does.
-    expect(textOf(notice?.children)).toContain("a chat new to its world plays its classic steps");
-    expect(propsOf(EngineSwitch({ engine: "agents", busy: false, blocked: why, onChange: () => undefined }), Banner)[0]?.title).toBe("This chat plays on agents, not the harness");
-    // The notice is the switch's next sibling: above what each engine is, so a phone shows it without scrolling.
-    const order: unknown[] = ((closed as VNode<Props>).props.children as unknown[]).filter((child) => child !== null && typeof child === "object").map((child) => (child as VNode).type);
-    expect(order.indexOf(Banner)).toBe(order.indexOf(Seg) + 1);
-    // A chat that is on the harness keeps its switch whole, so it can be switched away, and says what its replies are meanwhile.
-    const stuck = EngineSwitch({ engine: "harness", busy: false, blocked: why, onChange: () => undefined });
-    expect(propsOf(stuck, Seg)[0]?.options).toEqual([
+  test("where the harness can't play, the page says so right under the switch, and the harness can still be chosen; a chat on it is told it plays nothing until then", () => {
+    const why = "LumiRPEngine's runtime isn't linked now. Start it again with its line on LumiRPEngine's Runtime page.";
+    const other = EngineSwitch({ engine: "classic", busy: false, blocked: why, onChange: () => undefined });
+    expect(propsOf(other, Seg)[0]?.options).toEqual([
       { value: "classic", label: "Classic steps" },
       { value: "agents", label: "Agents" },
       { value: "harness", label: "Harness" },
     ]);
-    const [warning] = propsOf(stuck, Banner);
-    expect([warning?.tone, warning?.title]).toEqual(["warn", "The harness can't play this chat now"]);
+    const [notice] = propsOf(other, Banner);
+    expect([notice?.tone, notice?.title]).toEqual(["warn", "The harness can't play chats now"]);
+    expect(textOf(notice?.children)).toContain(why);
+    expect(textOf(notice?.children)).toContain("This chat plays its classic steps, as you set it.");
+    // The notice is the switch's next sibling: above what each engine is, so a phone shows it without scrolling.
+    const order: unknown[] = ((other as VNode<Props>).props.children as unknown[]).filter((child) => child !== null && typeof child === "object").map((child) => (child as VNode).type);
+    expect(order.indexOf(Banner)).toBe(order.indexOf(Seg) + 1);
+    // A chat on the harness plays nothing until it can, and no other engine stands in.
+    const waiting = EngineSwitch({ engine: "harness", busy: false, blocked: why, onChange: () => undefined });
+    const [warning] = propsOf(waiting, Banner);
+    expect([warning?.tone, warning?.title]).toEqual(["warn", "This chat doesn't play now"]);
     expect(textOf(warning?.children)).toContain(why);
-    expect(textOf(warning?.children)).toContain("Switch to another engine to go on playing meanwhile.");
+    expect(textOf(warning?.children)).toContain("no other engine plays it");
     // Where it can play, nothing is said.
     expect(propsOf(EngineSwitch({ engine: "harness", busy: false, blocked: null, onChange: () => undefined }), Banner)).toEqual([]);
   });
 
-  test("Play's first screen says the same while the harness can't play, with the way to the switch; nothing while it can", () => {
-    const why = 'The permission "interceptor" isn\'t granted: LumiRPEngine needs it to see a reply\'s prompt before it is sent. Grant it in Lumiverse (Extensions → LumiRPEngine → Permissions).';
-    for (const engine of ["classic", "agents", "harness"] as const) {
-      let opened = 0;
-      const play = EngineBlocked({ engine, blocked: why, onOpen: () => (opened += 1) });
-      const switched = propsOf(EngineSwitch({ engine, busy: false, blocked: why, onChange: () => undefined }), Banner)[0];
-      const [notice] = propsOf(play, Banner);
-      expect([notice?.title, textOf(notice?.children)]).toEqual([switched?.title, textOf(switched?.children)]);
-      click(button(notice?.actions, "Open Engine"));
-      expect(opened).toBe(1);
-      expect(EngineBlocked({ engine, blocked: null, onOpen: () => undefined })).toBeNull();
-    }
+  test("Play's first screen says the same for a chat on the harness that can't play, with the way to the switch; nothing for another engine or while it can", () => {
+    const why = "LumiRPEngine's runtime isn't linked now. Start it again with its line on LumiRPEngine's Runtime page.";
+    let opened = 0;
+    const play = EngineBlocked({ engine: "harness", blocked: why, onOpen: () => (opened += 1) });
+    const switched = propsOf(EngineSwitch({ engine: "harness", busy: false, blocked: why, onChange: () => undefined }), Banner)[0];
+    const [notice] = propsOf(play, Banner);
+    expect([notice?.title, textOf(notice?.children)]).toEqual([switched?.title, textOf(switched?.children)]);
+    click(button(notice?.actions, "Open Engine"));
+    expect(opened).toBe(1);
+    expect(EngineBlocked({ engine: "harness", blocked: null, onOpen: () => undefined })).toBeNull();
+    for (const engine of ["classic", "agents"] as const) expect(EngineBlocked({ engine, blocked: why, onOpen: () => undefined })).toBeNull();
   });
 
-  test("once a world is attached, Play says which engine plays the chat, and where the harness can't, that Play says why", () => {
-    expect(attachedText("Maple Falls", "harness", null)).toContain("plays this chat on the harness");
+  test("once a world is attached, Play says which engine plays the chat, and where the harness can't play yet, that Play says why", () => {
+    expect(attachedText("Maple Falls", "harness", null)).toContain("An AI author plays this chat");
     expect(attachedText("Maple Falls", "classic", null)).toBe("Maple Falls is attached. This chat plays its classic steps.");
-    const fell = attachedText("Maple Falls", "classic", "a reason");
-    expect(fell).toContain("This chat plays its classic steps");
-    expect(fell).toContain("the harness can't play your chats yet");
+    const waiting = attachedText("Maple Falls", "harness", "a reason");
+    expect(waiting).toContain("Play says what it needs");
     // The reason itself is Play's to show whole, not a toast's.
-    expect(fell).not.toContain("a reason");
+    expect(waiting).not.toContain("a reason");
   });
 
   test("a chat on the harness shows the harness's settings: the time for a turn whose author says none, the wait for the last turn, and the finished runs remembered, each with its Default", () => {

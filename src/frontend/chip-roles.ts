@@ -41,6 +41,7 @@ const ROLE: Record<ChipKind, ChipRole> = {
   mode_change: "done",
   fix: "done",
   world_made: "done",
+  turn: "done",
   pending: "done",
   degraded: "done",
   untracked: "done",
@@ -83,6 +84,7 @@ const TONE: Record<ChipKind, ChipTone> = {
   mode_change: "neutral",
   fix: "neutral",
   world_made: "neutral",
+  turn: "neutral",
   untracked: "neutral",
 };
 

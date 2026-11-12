@@ -25,7 +25,6 @@ const REVIEW_AT = { messageId: "m4", swipeId: 0 };
  */
 export const UNPLAYED_WHY = {
   failed: renderPrompt(HARNESS_TEXT.unplayedFailed, {}, { reason: ": the connection answered 429 (too many requests)" }),
-  nobrief: renderPrompt(HARNESS_TEXT.unplayedNoBrief, {}, {}),
   norun: renderPrompt(HARNESS_TEXT.unplayedNoRun, {}, {}),
   stopped: "the reply was stopped",
   restarted: "the engine restarted while this reply was being written",

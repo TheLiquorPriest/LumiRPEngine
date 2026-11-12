@@ -115,10 +115,7 @@ export const PLAY_TOOL_TEXTS: readonly HarnessToolText[] = [
     tier: "write",
     note: "A fighter's own mind reads the fight and decides what it does on its next turn.",
     text: 'Decide what you do on your next turn in the fight under way, as the fighter you are. Without choice it answers the fight as you perceive it and the options you may choose from, each by its key. In that answer "you" is you; party is the player character\'s side and foes the other; your own health is exact, and anyone else\'s only as far as you can tell. With choice it records your decision for that turn. It is played when the author plays the round, if it is still possible then; otherwise the engine\'s own tactics choose for you. Call it when your task says a fight is under way. With one option or none there is nothing to choose.',
-    args: [
-      { path: "who", text: "Who you are: your name or id, as your task gives it. Your first call makes you that person for this turn." },
-      { path: "choice", text: "The key of the option you choose, as this tool lists them. Leave it out to read the fight and your options first." },
-    ],
+    args: [{ path: "choice", text: "The key of the option you choose, as this tool lists them. Leave it out to read the fight and your options first." }],
   },
 ];
 

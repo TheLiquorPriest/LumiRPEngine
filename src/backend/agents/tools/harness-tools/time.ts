@@ -9,9 +9,8 @@
 // timelapse's are (coarsened, one unit kept or dropped whole) and staged as the turn's time
 // (`HarnessChange.time`), so a turn that passed time, or said that none passes, gets no tick besides.
 //
-// - `time_pass` is the turn's main agent's alone, and only until the turn's reply is written: no
-//   agent it started and no job's run passes time with it. The time a reply's telling added is the
-//   story's to record afterwards (`story_record`, which passes it through `passSpan` too).
+// - `time_pass` is the turn's main agent's alone, and only in its own turn: no agent it started and
+//   no job's run passes time with it.
 // - A span is a change of the type "time passing" (`time_advance`): Never refuses it, Confirm puts
 //   it on the review card. Saying that no time passes changes nothing in the chat's record, so it is
 //   under no mode: it only tells the turn to add no tick of its own.
@@ -58,7 +57,7 @@ function spanOf(view: ToolReadView, args: JsonObject): number | ToolOutcome {
 }
 
 /** A span as the engine passed it on the state a call read. */
-export interface PassedSpan {
+interface PassedSpan {
   /** What the span did, recorded as a timelapse's events are: coarsened, and as one unit kept or dropped whole. */
   events: LedgerEvent[];
   /** How much time passed, as the turn's own time is told. */
@@ -76,7 +75,7 @@ export interface PassedSpan {
  * says passed (`applyTimeAdvance`), no farther than `most`; or why it wasn't passed: longer than
  * that, or more happens in the span than the engine runs in one go.
  */
-export function passSpan(view: ToolReadView, runSeed: string, minutes: number, most: number): PassedSpan | { stopped: "over_cap" | "unit_cap" } {
+function passSpan(view: ToolReadView, runSeed: string, minutes: number, most: number): PassedSpan | { stopped: "over_cap" | "unit_cap" } {
   const { registry: reg, world, state } = view;
   const w = new Working(reg, world, state);
   return view.read(() => {

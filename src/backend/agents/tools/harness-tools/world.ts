@@ -1,33 +1,40 @@
-// The world's document as an agent edits it: Build's own draft, lint, commit and Upgrade.
+// The world's document as an agent edits it: Build's own draft, lint, commit and Upgrade; and this
+// chat's own world, which the chat plays.
 //
-// A chat plays one revision of its world; what exists only in the world's document (the calendar,
-// schedules, routines, kinds, actions, checks, tracks, lore, tables, rules, sections and every other
-// collection and part) is changed there, in the world's draft, exactly as the Build page changes
-// it: the same operations through the same store (`WorldBuild`), so the same checks refuse the same
-// writes. The draft is then committed as the world's next revision, and the chat brought to it.
-// None of these tools decides anything: each reads or writes what its call names.
+// A chat plays one revision of its world, with what it made or changed of the world's places, paths
+// and maps in play laid over (`engine/world-draft.ts`). An item of those collections is written to
+// that, this chat's own world, by default (`chatTarget`): staged with the turn, played at once, gone
+// with the turn, and kept into the world's document by `world_keep`. What exists only in the world's
+// document (the calendar, schedules, routines, kinds, actions, checks, tracks, lore, tables, rules,
+// sections and every other collection and part) is changed there, in the world's draft, exactly as
+// the Build page changes it: the same operations through the same store (`WorldBuild`), so the same
+// checks refuse the same writes. The draft is then committed as the world's next revision, and the
+// chat brought to it. None of these tools decides anything: each reads or writes what its call names.
 //
 // What an answer may hold is the one limit a tool result has (Settings → Agents, Tool results
 // clipped past): a value longer than that is answered as an outline to read further into, and a list
 // of names is cut to half of it, as the lint issues are (`lintLines`).
 
 import { HARNESS_FAMILY } from "../../../../shared/harness-text-kit";
+import { BUILD_NOTE } from "../../../../shared/harness-texts-build";
 import { PART_SHAPES, shapeTextId } from "../../../../shared/harness-texts-shapes";
 import { WORLD_NOTE, WORLD_TOOL } from "../../../../shared/harness-texts-world";
 import { hasOwn, isRecord, type JsonObject, type JsonValue } from "../../../../shared/json";
-import { getAt, parsePointer, pointerOf } from "../../../../shared/json-patch";
+import { getAt, jsonEqual, parsePointer, pointerOf } from "../../../../shared/json-patch";
 import type { JsonPatchOp, WorldCollection, WorldPart } from "../../../../shared/protocol";
-import type { RevisionNote } from "../../../../shared/world";
+import type { RevisionNote, WorldDoc } from "../../../../shared/world";
 import { nameOf } from "../../../../shared/world-diff";
+import { baseWorld } from "../../../../engine/places-in-play";
+import { DRAFT_COLLECTIONS, type DraftCollection, type DraftEdit } from "../../../../engine/world-draft";
 import { keepInWorld, madeInPlay } from "../../../gm";
 import { WORLD_COLLECTIONS, WorldError } from "../../../worlds";
 import type { ToolOutcome } from "../../runtime";
 import { closedChanges, type WorldActDetail } from "../harness-ports";
-import { missing, propose, wordsArg } from "../propose";
+import { boolArg, missing, propose, wordsArg } from "../propose";
 import type { Secrecy, ToolReadView } from "../read-view";
 import { argGiven, badValue, intArg, integer, jsonObject, jsonTextOf, needText, objectArg, objectSchema, text, textArg } from "../schema";
 import { type HarnessToolDefinition, words } from "./kit";
-import { changeDetail, draftOf, keptFromPlayer, lintCounts, lintLines, noDraft, refusedCall, storeRefusal, type WorldCall, worldCall, writeDraft } from "./world-kit";
+import { changeDetail, chatChanges, chatTarget, draftOf, inArg, keptFromPlayer, lintCounts, lintLines, noDraft, noTarget, refusedCall, storeRefusal, type WorldCall, worldCall, WORLD_INS, writeDraft } from "./world-kit";
 
 const COLLECTIONS = Object.keys(WORLD_COLLECTIONS) as WorldCollection[];
 const PARTS = Object.keys(PART_SHAPES) as WorldPart[];
@@ -147,7 +154,12 @@ function secretsShown(call: Pick<WorldCall, "view" | "turn">, doc: JsonValue, to
 
 /** Which of the draft's issues `world_status` lists, and which of what a chat made `world_made` lists. */
 const ISSUES: readonly string[] = ["all", "errors"];
-const MADE_KINDS: readonly string[] = ["things", "places"];
+const MADE_KINDS: readonly string[] = ["things", "places", "world"];
+
+/** The collection of this chat's own world `collection` is, or null for one only the world's document holds. */
+function carriedOf(collection: WorldCollection): DraftCollection | null {
+  return DRAFT_COLLECTIONS.find((c) => c === collection) ?? null;
+}
 
 export const WORLD_TOOLS: readonly HarnessToolDefinition[] = [
   {
@@ -172,11 +184,13 @@ export const WORLD_TOOLS: readonly HarnessToolDefinition[] = [
       if (!ISSUES.includes(which)) return badValue(view, WORLD_TOOL.status, "issues", which, ISSUES);
       // The counts are the draft's whole lint either way: only the list is narrowed.
       const { lines, more } = lintLines(turn, which === "errors" ? draft.lint.filter((i) => i.severity === "error") : draft.lint);
+      const changes = chatChanges(view);
       return view.answer({
         playing,
         head,
         behind: playing !== head,
         ...(playing !== head ? { upgrade: view.text(WORLD_NOTE.behind, { head }) } : {}),
+        ...(changes.length > 0 ? { chat: { changes: changes.length, note: view.text(WORLD_NOTE.chatChanges, { count: String(changes.length) }) } } : {}),
         draft: {
           stored: draft.stored,
           version: draft.version,
@@ -283,42 +297,68 @@ export const WORLD_TOOLS: readonly HarnessToolDefinition[] = [
     name: WORLD_TOOL.put,
     family: HARNESS_FAMILY.world,
     tier: "write",
-    parameters: () => objectSchema({ collection: text(COLLECTIONS), id: text(), value: jsonObject() }, ["collection", "id", "value"]),
+    parameters: () => objectSchema({ collection: text(COLLECTIONS), id: text(), value: jsonObject(), in: text(WORLD_INS) }, ["collection", "id", "value"]),
     async run(args, env) {
-      const call = await worldCall(env, true);
-      if (refusedCall(call)) return call;
-      const { view } = call;
+      const view = await env.reader.view();
       const collection = oneOf(view, WORLD_TOOL.put, args, "collection", COLLECTIONS);
       if (typeof collection !== "string") return collection;
       const id = needText(view, WORLD_TOOL.put, args, "id");
       if (typeof id !== "string") return id;
       const item = valueArg(view, WORLD_TOOL.put, args);
       if ("refused" in item) return item.refused;
+      const hint = view.text(WORLD_NOTE.shapeHint, { of: collection });
+      const carried = carriedOf(collection);
+      const into = inArg(view, WORLD_TOOL.put, args, carried === null ? "document" : "chat");
+      if (typeof into !== "string") return into;
+      if (into === "chat") {
+        if (carried === null) return view.refuse(WORLD_NOTE.notCarried, { collection });
+        const t = await chatTarget(env);
+        if (noTarget(t)) return t;
+        // A new item written without its id takes its key, as the store gives a draft's.
+        const value = item.value.id === undefined ? { ...item.value, id } : item.value;
+        const changed = view.text(idsOf(t.doc, collection).includes(id) ? WORLD_NOTE.replaced : WORLD_NOTE.added, { collection, id, where: view.text(BUILD_NOTE.inChat) });
+        return hinted(await t.put(carried, id, value, changed, {}), hint);
+      }
+      const call = await worldCall(env, true);
+      if (refusedCall(call)) return call;
       const before = await draftOf(call);
       if (noDraft(before)) return before;
-      const changed = view.text(idsOf(before.draft, collection).includes(id) ? WORLD_NOTE.replaced : WORLD_NOTE.added, { collection, id });
-      return hinted(await writeDraft(call, { op: "put", collection, id, value: item.value }, changed, { before }), view.text(WORLD_NOTE.shapeHint, { of: collection }));
+      const changed = view.text(idsOf(before.draft, collection).includes(id) ? WORLD_NOTE.replaced : WORLD_NOTE.added, { collection, id, where: view.text(BUILD_NOTE.inDocument) });
+      return hinted(await writeDraft(call, { op: "put", collection, id, value: item.value }, changed, { before }), hint);
     },
   },
   {
     name: WORLD_TOOL.remove,
     family: HARNESS_FAMILY.world,
     tier: "write",
-    parameters: () => objectSchema({ collection: text(COLLECTIONS), id: text() }, ["collection", "id"]),
+    parameters: () => objectSchema({ collection: text(COLLECTIONS), id: text(), in: text(WORLD_INS) }, ["collection", "id"]),
     async run(args, env) {
-      const call = await worldCall(env, true);
-      if (refusedCall(call)) return call;
-      const { view } = call;
+      const view = await env.reader.view();
       const collection = oneOf(view, WORLD_TOOL.remove, args, "collection", COLLECTIONS);
       if (typeof collection !== "string") return collection;
       const id = needText(view, WORLD_TOOL.remove, args, "id");
       if (typeof id !== "string") return id;
+      const carried = carriedOf(collection);
+      const into = inArg(view, WORLD_TOOL.remove, args, carried === null ? "document" : "chat");
+      if (typeof into !== "string") return into;
+      if (into === "chat") {
+        if (carried === null) return view.refuse(WORLD_NOTE.notCarried, { collection });
+        const t = await chatTarget(env);
+        if (noTarget(t)) return t;
+        const where = view.text(BUILD_NOTE.inChat);
+        const ids = idsOf(t.doc, collection);
+        if (!ids.includes(id)) return view.refuse(WORLD_NOTE.noItem, { collection, id, where, ids: named(t, ids) });
+        return t.remove(carried, id, view.text(WORLD_NOTE.removed, { collection, id, where }), {});
+      }
+      const call = await worldCall(env, true);
+      if (refusedCall(call)) return call;
       const before = await draftOf(call);
       if (noDraft(before)) return before;
       // The store takes the removal of an item that isn't there as a write, and counts a version for it.
+      const where = view.text(BUILD_NOTE.inDocument);
       const ids = idsOf(before.draft, collection);
-      if (!ids.includes(id)) return view.refuse(WORLD_NOTE.noItem, { collection, id, ids: named(call, ids) });
-      return writeDraft(call, { op: "remove", collection, id }, view.text(WORLD_NOTE.removed, { collection, id }), { before });
+      if (!ids.includes(id)) return view.refuse(WORLD_NOTE.noItem, { collection, id, where, ids: named(call, ids) });
+      return writeDraft(call, { op: "remove", collection, id }, view.text(WORLD_NOTE.removed, { collection, id, where }), { before });
     },
   },
   {
@@ -517,11 +557,14 @@ export const WORLD_TOOLS: readonly HarnessToolDefinition[] = [
       const made = madeInPlay(view.ctx, draft.draft);
       const kind = textArg(args, "kind");
       if (kind !== null && !MADE_KINDS.includes(kind)) return badValue(view, WORLD_TOOL.made, "kind", kind, MADE_KINDS);
-      if (made.things.length === 0 && made.places.length === 0) return view.answer({ things: [], places: [], note: view.text(WORLD_NOTE.nothingMade) });
+      const base = baseWorld(view.ctx.world);
+      const world = chatChanges(view).map((c) => changeRow(view, base, draft.draft, c));
+      if (made.things.length === 0 && made.places.length === 0 && world.length === 0) return view.answer({ things: [], places: [], world: [], note: view.text(WORLD_NOTE.nothingMade) });
       // Where each is, outermost first, by the names the game master reads.
       return view.answer({
-        ...(kind !== "places" ? { things: made.things.map((t) => ({ id: t.id, name: t.name, where: t.where.map((s) => s.name).join(" › "), ...(t.inDraft ? { inDraft: true } : {}) })) } : {}),
-        ...(kind !== "things" ? { places: made.places.map((p) => ({ id: p.id, name: p.name, in: p.path.map((s) => s.name).join(" › "), as: p.as, ...(p.inDraft ? { inDraft: true } : {}) })) } : {}),
+        ...(kind === null || kind === "things" ? { things: made.things.map((t) => ({ id: t.id, name: t.name, where: t.where.map((s) => s.name).join(" › "), ...(t.inDraft ? { inDraft: true } : {}) })) } : {}),
+        ...(kind === null || kind === "places" ? { places: made.places.map((p) => ({ id: p.id, name: p.name, in: p.path.map((s) => s.name).join(" › "), as: p.as, ...(p.inDraft ? { inDraft: true } : {}) })) } : {}),
+        ...(kind === null || kind === "world" ? { world } : {}),
         next: view.text(WORLD_NOTE.madeNext),
       });
     },
@@ -530,7 +573,7 @@ export const WORLD_TOOLS: readonly HarnessToolDefinition[] = [
     name: WORLD_TOOL.keep,
     family: HARNESS_FAMILY.world,
     tier: "write",
-    parameters: () => objectSchema({ things: words(), places: words() }),
+    parameters: () => objectSchema({ things: words(), places: words(), paths: words(), maps: words(), settings: { type: "boolean" } }),
     async run(args, env) {
       const call = await worldCall(env, true);
       if (refusedCall(call)) return call;
@@ -544,15 +587,103 @@ export const WORLD_TOOLS: readonly HarnessToolDefinition[] = [
         const bearing = among.filter((m) => m.name.trim().toLowerCase() === said.toLowerCase());
         return bearing.length === 1 ? (bearing[0]?.id ?? said) : said;
       };
+      const base = baseWorld(view.ctx.world);
+      const changes = chatChanges(view);
       const things = (wordsArg(args, "things") ?? []).map((said) => idOf(said, made.things));
-      const places = (wordsArg(args, "places") ?? []).map((said) => idOf(said, made.places));
-      if (things.length === 0 && places.length === 0) return view.refuse(WORLD_NOTE.keepNames);
-      const { ops, result } = keepInWorld(view.ctx, draft.draft, things, places);
-      if (ops.length === 0) return view.refuse(WORLD_NOTE.keptNothing, { skipped: result.skipped.map((s) => `- ${s.id}: ${s.reason}`).join("\n") });
-      return writeDraft(call, { op: "patch", ops }, view.text(WORLD_NOTE.kept, { things: String(result.things.length), places: String(result.places.length) }), {
+      const placesSaid = wordsArg(args, "places") ?? [];
+      const pathsSaid = wordsArg(args, "paths") ?? [];
+      const mapsSaid = wordsArg(args, "maps") ?? [];
+      const settings = boolArg(args, "settings") === true;
+      if (things.length === 0 && placesSaid.length === 0 && pathsSaid.length === 0 && mapsSaid.length === 0 && !settings) return view.refuse(WORLD_NOTE.keepNames);
+      const skipped: { id: string; reason: string }[] = [];
+      const chosen: DraftEdit[] = [];
+      // A place this chat changed of the world's own is found by its id or its name; any other goes on to Keep in the world, as one made in play.
+      const madePlaces: string[] = [];
+      for (const said of placesSaid) {
+        const c = changeNamed(changes, "places", said, (v) => (typeof v?.name === "string" ? v.name : null), base);
+        if (c) chosen.push(c);
+        else madePlaces.push(idOf(said, made.places));
+      }
+      for (const [collection, saids] of [["routes", pathsSaid], ["maps", mapsSaid]] as const) {
+        for (const said of saids) {
+          const c = changeNamed(changes, collection, said, (v) => (typeof v?.title === "string" ? v.title : null), base);
+          if (c) chosen.push(c);
+          else skipped.push({ id: said, reason: view.text(WORLD_NOTE.notChanged) });
+        }
+      }
+      if (settings) {
+        const c = changes.find((one) => "part" in one);
+        if (c) chosen.push(c);
+        else skipped.push({ id: "settings", reason: view.text(WORLD_NOTE.notChanged) });
+      }
+      const { ops, result } = keepInWorld(view.ctx, draft.draft, things, madePlaces);
+      skipped.unshift(...result.skipped);
+      // Each of this chat's changes is written into the draft as this chat has it: the item whole, or taken out.
+      const kept: Record<"places" | "paths" | "maps", string[]> & { settings?: true } = { places: [], paths: [], maps: [] };
+      const doc = draft.draft as unknown as JsonValue;
+      const written = new Set<string>();
+      for (const c of chosen) {
+        const steps = "part" in c ? [c.part] : [c.collection, c.id];
+        const path = pointerOf(steps);
+        if (written.has(path)) continue;
+        written.add(path);
+        const held = getAt(doc, steps);
+        const id = "part" in c ? "settings" : c.id;
+        if ("value" in c ? jsonEqual(held, c.value) : held === undefined) {
+          skipped.push({ id, reason: view.text(WORLD_NOTE.inDraftAlready) });
+          continue;
+        }
+        ops.push("value" in c ? { op: "add", path, value: c.value } : { op: "remove", path });
+        if ("part" in c) kept.settings = true;
+        else kept[c.collection === "routes" ? "paths" : c.collection].push(c.id);
+      }
+      if (ops.length === 0) return view.refuse(WORLD_NOTE.keptNothing, { skipped: skipped.map((s) => `- ${s.id}: ${s.reason}`).join("\n") });
+      const count = result.things.length + result.places.length + kept.places.length + kept.paths.length + kept.maps.length + (kept.settings ? 1 : 0);
+      return writeDraft(call, { op: "patch", ops }, view.text(WORLD_NOTE.kept, { count: String(count) }), {
         before: draft,
-        extra: { kept: { things: result.things, places: result.places }, ...(result.skipped.length > 0 ? { skipped: result.skipped } : {}), ...(result.notes.length > 0 ? { notes: result.notes } : {}) },
+        extra: { kept: { things: result.things, places: [...result.places, ...kept.places], ...(kept.paths.length > 0 ? { paths: kept.paths } : {}), ...(kept.maps.length > 0 ? { maps: kept.maps } : {}), ...(kept.settings ? { settings: true } : {}) }, ...(skipped.length > 0 ? { skipped } : {}), ...(result.notes.length > 0 ? { notes: result.notes } : {}) },
       });
     },
   },
 ];
+
+/**
+ * The one of this chat's changes to `collection` that `said` names: by its id, else by its name
+ * (a place's) or title (a map's), as this chat has it or, for one taken out, as the revision it plays
+ * has it, case and spaces aside. Null where none, or more than one, bears it.
+ */
+function changeNamed(changes: readonly DraftEdit[], collection: DraftCollection, said: string, nameOf: (v: Readonly<Record<string, unknown>> | undefined) => string | null, base: WorldDoc): (DraftEdit & { collection: DraftCollection; id: string }) | null {
+  const among = changes.filter((c): c is DraftEdit & { collection: DraftCollection; id: string } => "collection" in c && c.collection === collection);
+  const byId = among.find((c) => c.id === said);
+  if (byId) return byId;
+  const key = said.trim().replace(/\s+/g, " ").toLowerCase();
+  const bearing = among.filter((c) => {
+    const v = "value" in c ? c.value : (getAt(base as unknown as JsonValue, [c.collection, c.id]) as Readonly<Record<string, unknown>> | undefined);
+    return nameOf(v)?.trim().replace(/\s+/g, " ").toLowerCase() === key;
+  });
+  return bearing.length === 1 ? (bearing[0] ?? null) : null;
+}
+
+/**
+ * One of this chat's changes to its world as `world_made` lists it: what it is, by the names the
+ * game master reads; whether it was made, changed or removed over the revision this chat plays
+ * (`base`); and whether the world's draft has it so already.
+ */
+function changeRow(view: ToolReadView, base: WorldDoc, draft: WorldDoc, c: DraftEdit): JsonObject {
+  const steps = "part" in c ? [c.part] : [c.collection, c.id];
+  const held = getAt(base as unknown as JsonValue, steps);
+  const value = "value" in c ? c.value : undefined;
+  const change = value === undefined ? "removed" : held === undefined ? "made" : "changed";
+  const inDraft = value === undefined ? getAt(draft as unknown as JsonValue, steps) === undefined : jsonEqual(getAt(draft as unknown as JsonValue, steps), value);
+  const shown = (value ?? (isRecord(held) ? held : {})) as JsonObject;
+  const place = (id: unknown): string => (typeof id === "string" ? (view.world.places[id]?.name ?? base.places[id]?.name ?? id) : "");
+  const what: JsonObject =
+    "part" in c
+      ? { part: c.part }
+      : c.collection === "routes"
+        ? { path: c.id, from: place(shown.from), to: place(shown.to) }
+        : c.collection === "maps"
+          ? { map: c.id, ...(typeof shown.title === "string" ? { title: shown.title } : {}) }
+          : { place: c.id, name: typeof shown.name === "string" ? shown.name : c.id };
+  return { ...what, change, ...(inDraft ? { inDraft: true } : {}) };
+}

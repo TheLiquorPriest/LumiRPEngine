@@ -360,8 +360,8 @@ export async function worldBuild(rt: BuildRuntime, chatId: ChatId, userId: UserI
     },
     never: async () => {
       const settings = rt.settings.latest(userId) ?? (await rt.settings.get(userId));
-      // Never is only ever the player's own setting of the type, so whose change it would be doesn't enter.
-      const { mode } = effectiveMode(settings, await rt.settings.learningOf(userId), await rt.activeConnectionId(userId), "world_document");
+      // Never is only ever the player's own setting of the type, so whose change it would be doesn't enter; on the harness a type the player didn't set lands.
+      const { mode } = effectiveMode(settings, await rt.settings.learningOf(userId), await rt.activeConnectionId(userId), "world_document", undefined, "harness");
       return mode === "never" ? renderPrompt(WRITE_NOTE.never, settings.prompts.texts, { type: AGENT_CHANGE_LABEL.world_document }) : null;
     },
     sections: async () => {

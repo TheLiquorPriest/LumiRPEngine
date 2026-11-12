@@ -27,6 +27,7 @@
 //   marks, each is marked as every read marks a secret (`marker`, `nameIn`).
 
 import { HARNESS_FAMILY, HARNESS_NOTE } from "../../../../shared/harness-texts";
+import { MINDS_NOTE } from "../../../../shared/harness-texts-minds";
 import { PLAY_NOTE, PLAY_TOOL } from "../../../../shared/harness-texts-play";
 import { hashJson, hashParts } from "../../../../shared/hash";
 import type { EntityId } from "../../../../shared/ids";
@@ -46,6 +47,7 @@ import { Working } from "../../../../engine/working";
 import { type FightOption, fightOptions, optionKey, turnKey, turnRefill } from "../../../../packs/combat/core/flow";
 import { decisionsOf, type Encounter, encounterOf, fighterOf, PACK, povLeft, rulesOf, standing, writeEncounter } from "../../../../packs/combat/core/model";
 import { buildEncounterView, type EncounterView } from "../../../../packs/combat/core/view";
+import { characterSelf, PLAYER } from "../../../story/minds";
 import type { ToolOutcome } from "../../runtime";
 import { BOOLEAN, boolArg, wordsArg } from "../propose";
 import { percent } from "../read/checks";
@@ -54,7 +56,6 @@ import { resolvePerson } from "../resolve";
 import { argGiven, badValue, jsonObject, objectArg, objectSchema, text, textArg } from "../schema";
 import { type Attempt, askedOf, attemptOf, attemptProperties, marker, type Played, rollAnswer } from "./checks";
 import { type HarnessToolDefinition, stageChange, words } from "./kit";
-import { ownMind } from "./minds";
 import { authorTurn, playOn, retryNote } from "./play";
 
 const READ = PLAY_TOOL.fightRead;
@@ -381,11 +382,13 @@ export const FIGHT_TOOLS: readonly HarnessToolDefinition[] = [
     name: MIND,
     family: HARNESS_FAMILY.mind,
     tier: "write",
-    parameters: () => objectSchema({ who: text(), choice: text() }, ["who"]),
+    parameters: () => objectSchema({ choice: text() }),
     async run(args, env) {
       const view = await env.reader.view();
-      const mine = await ownMind(view, env, MIND, args);
+      // Who the fighter is comes from the call's `as`, never from an argument: the player's character fights as the player plays them, through the author's fight_round.
+      const mine = await characterSelf(view, env, MIND);
       if (!("who" in mine)) return mine;
+      if (mine.who === PLAYER) return view.refuse(MINDS_NOTE.playerFights);
       const { turn, who } = mine;
       const { registry: reg, world, state, ctx } = view;
       const rules = rulesOf(world);

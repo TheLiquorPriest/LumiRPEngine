@@ -5,13 +5,14 @@
 
 import { CHECK_TOOLS } from "./checks";
 import { FIGHT_TOOLS } from "./fight";
-import { FILE_TOOLS } from "./files";
 import type { HarnessToolDefinition } from "./kit";
-import { KNOWLEDGE_TOOLS } from "./knowledge";
-import { MIND_TOOLS } from "./minds";
 import { PEOPLE_TOOLS } from "./people";
 import { PLAY_TOOLS } from "./play";
 import { STORY_TOOLS } from "./story";
+import { PREPARE_TOOLS } from "./story-prepare";
+import { RECORD_TOOLS } from "./story-record";
+import { MIND_FILE_TOOLS } from "./story-minds";
+import { STAGE_TOOLS } from "./story-stage";
 import { SURFACE_TOOLS } from "./surfaces";
 import { TIME_TOOLS } from "./time";
 import { TURN_TOOLS } from "./turn";
@@ -20,4 +21,4 @@ import { WORLD_BUILD_TOOLS } from "./world-build";
 
 export type { HarnessToolDefinition } from "./kit";
 
-export const HARNESS_TOOL_DEFINITIONS: readonly HarnessToolDefinition[] = [...MIND_TOOLS, ...KNOWLEDGE_TOOLS, ...CHECK_TOOLS, ...TIME_TOOLS, ...TURN_TOOLS, ...PLAY_TOOLS, ...FIGHT_TOOLS, ...FILE_TOOLS, ...PEOPLE_TOOLS, ...STORY_TOOLS, ...SURFACE_TOOLS, ...WORLD_TOOLS, ...WORLD_BUILD_TOOLS];
+export const HARNESS_TOOL_DEFINITIONS: readonly HarnessToolDefinition[] = [...CHECK_TOOLS, ...TIME_TOOLS, ...TURN_TOOLS, ...PLAY_TOOLS, ...FIGHT_TOOLS, ...MIND_FILE_TOOLS, ...PEOPLE_TOOLS, ...STORY_TOOLS, ...SURFACE_TOOLS, ...WORLD_TOOLS, ...WORLD_BUILD_TOOLS, ...RECORD_TOOLS, ...STAGE_TOOLS, ...PREPARE_TOOLS];

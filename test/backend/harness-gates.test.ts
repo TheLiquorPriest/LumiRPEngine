@@ -5,7 +5,6 @@
 // each test is the rule a finding states, on the bridge's own turn and its own job path.
 //
 // - A tool's tier is checked at the call, in a turn and in a job, and again in `stage`.
-// - An agent is one record for its run's whole life: who it thinks for is said once.
 // - The engine's tools are given the chat's files in a turn, in its tail and in a job.
 // - `grant_writes` opens what it says, and refuses with why where it would open nothing.
 // - The author is the run's main agent; an agent writes no higher than the agents over it, and a
@@ -23,26 +22,27 @@ import { Cast, type OpenTurn, standingOf } from "../../src/backend/harness/turn"
 import { renderPrompt } from "../../src/backend/prompts";
 import { WRITE_NOTE } from "../../src/shared/agent-tools-write";
 import { HARNESS_AGENT, HARNESS_NOTE } from "../../src/shared/harness-texts";
+import { MINDS_NOTE } from "../../src/shared/harness-texts-minds";
 import type { JsonObject } from "../../src/shared/json";
 import { placeOfEntity } from "../../src/engine/scope";
-import { readKnowledge, readSlice } from "../../src/packs/minds/core/state";
 import { Rig } from "../support/rig";
 import { HOME } from "../support/tools";
 import { memoryFiles, turnChat } from "./harness-cast-kit";
-import { A_BRIEF, type Agent, AUTHOR, beginJob, beginTurn, harnessChat, JOSS, MARA, mount, noModelCalls, OKORO, PEOPLE, playOn, type Run, stateOf } from "./harness-driver";
+import { type Agent, AUTHOR, beginJob, beginTurn, harnessChat, JOSS, MARA, mount, noModelCalls, OKORO, PEOPLE, playOn, type Run, stateOf } from "./harness-driver";
 
 const note = (id: string, vars: Record<string, string> = {}): string => renderPrompt(id, {}, vars);
 
-/** An agent of the game master's definition, which only reads; one of a definition the user made, which the engine lets only read; the chronicler, which holds the story's tier. Each is started by the author unless a test says otherwise. */
+/** An agent of the game master's definition, which only reads; one of a definition the user made, which the engine lets only read; the historian, which holds the story's tier. Each is started by the author unless a test says otherwise. */
 const GM: Agent = { id: "gm-1", role: HARNESS_AGENT.gm };
 const OWN: Agent = { id: "helper-1", role: "a_definition_of_the_users" };
-const CHRONICLER: Agent = { id: "chronicler-1", role: HARNESS_AGENT.chronicler };
-/** A character's agent, as the author's `delegate` starts one. */
-const mind = (handle: string, above?: readonly Agent[]): Agent => ({ id: `mind-${handle}`, role: HARNESS_AGENT.character, ...(above ? { above } : {}) });
+const HISTORIAN: Agent = { id: "historian-1", role: HARNESS_AGENT.historian };
+/** A character's agent, as the author's `delegate` starts one: it is the person `as` names. */
+const mind = (handle: string, as: string, above?: readonly Agent[]): Agent => ({ id: `mind-${handle}`, role: HARNESS_AGENT.character, as, ...(above ? { above } : {}) });
+/** The author casts someone as a principal, who has an agent and a mind of their own. */
+const principal = (run: Run, who: string): Promise<Record<string, unknown>> => run.answer(AUTHOR, "cast_set", { who, standing: "principal", why: "The story turns on them." });
 
 const MOVE: JsonObject = { entity: "Okoro", to: HOME };
 const WHISTLE: JsonObject = { name: "a tin whistle", at: HOME, why: "it lies on the sill" };
-const DECISION: JsonObject = { who: "Mara", monologue: "He said noon, so I will say noon.", depiction: "Mara glances at the door", intent: "Tell him Okoro comes by at noon.", mood: "easy" };
 const REPLY = "Mara shrugs and says nobody new has come by.";
 
 /** A refusal the writer words: its code, with the reason in the user's text for it. */
@@ -89,7 +89,7 @@ describe("a tool's tier is checked at the call, whatever the caller's definition
     expect(placeOfEntity(after, MARA)).toBe(HOME);
     // The same tool, from an agent at the story's tier, is staged and lands: the gate closed the caller, not the tool.
     const next = await beginTurn(rig, chatId, "I ask again.");
-    expect(await next.answer(CHRONICLER, "person_add", { name: "Brann" })).toMatchObject({ staged: { changeType: "spawn" } });
+    expect(await next.answer(HISTORIAN, "person_add", { name: "Brann" })).toMatchObject({ staged: { changeType: "spawn" } });
     await next.finish("Brann, Mara says, as of this morning.");
     expect(await namesIn(rig, chatId)).toContain("Brann");
     noModelCalls(rig);
@@ -106,12 +106,12 @@ describe("a tool's tier is checked at the call, whatever the caller's definition
     expect(await refusalOf(job, GM, "person_add", { name: "Brann" })).toEqual(refusedAs("no_writer", WRITE_NOTE.noWriter));
     expect(await refusalOf(job, OWN, "person_add", { name: "Brann" })).toEqual(refusedAs("no_writer", WRITE_NOTE.noWriter));
     // Time is the author's to pass, in its own turn: after the reply no one is the author, whatever tier it holds.
-    for (const agent of [GM, CHRONICLER, { id: "job-author", role: HARNESS_AGENT.author }]) expect({ agent: agent.role, answer: await job.refusal(agent, "time_pass", { minutes: 5 }) }).toEqual({ agent: agent.role, answer: note(HARNESS_NOTE.authorOnly, { tool: "time_pass" }) });
+    for (const agent of [GM, HISTORIAN, { id: "job-author", role: HARNESS_AGENT.author }]) expect({ agent: agent.role, answer: await job.refusal(agent, "time_pass", { minutes: 5 }) }).toEqual({ agent: agent.role, answer: note(HARNESS_NOTE.authorOnly, { tool: "time_pass" }) });
     const after = await stateOf(rig, chatId);
     expect(after.clock).toBe(before.clock);
     expect(await namesIn(rig, chatId)).not.toContain("Brann");
-    // The chronicler's own note is written at once.
-    expect(await job.answer(CHRONICLER, "person_add", { name: "Brann" })).toMatchObject({ staged: { changeType: "spawn", lands: note(HARNESS_NOTE.recorded) } });
+    // The historian's own note is written at once.
+    expect(await job.answer(HISTORIAN, "person_add", { name: "Brann" })).toMatchObject({ staged: { changeType: "spawn", lands: note(HARNESS_NOTE.recorded) } });
     expect(await namesIn(rig, chatId)).toContain("Brann");
     noModelCalls(rig);
   });
@@ -123,81 +123,56 @@ describe("a tool's tier is checked at the call, whatever the caller's definition
     await turn.answer(AUTHOR, "time_clock");
     // Behind the call's gate: the env the bridge would build for a call of `person_add`, and a change handed to its turn as a tool would hand one.
     const open = openTurn(rig, turn);
-    const envOf = (agent: Agent) => open.env({ agent: open.cast.of({ agentId: agent.id, role: agent.role, main: false, above: [{ agentId: AUTHOR.id, role: AUTHOR.role }] }), tool: "person_add", ceiling: null, files: null }, signal);
+    const envOf = (agent: Agent) => open.env({ agent: open.cast.of({ agentId: agent.id, role: agent.role, main: false, above: [{ agentId: AUTHOR.id, role: AUTHOR.role }] }), tool: "person_add", ceiling: null, files: null, as: null, job: null }, signal);
     expect(await envOf(GM).turn?.stage(HANDED)).toEqual({ refused: true, code: "no_writer", reason: note(WRITE_NOTE.noWriter), key: HANDED.key });
     expect(await envOf(OWN).turn?.stage(HANDED)).toEqual({ refused: true, code: "no_writer", reason: note(WRITE_NOTE.noWriter), key: HANDED.key });
-    expect(await envOf(CHRONICLER).turn?.stage(HANDED)).toEqual({ mode: "auto" });
+    expect(await envOf(HISTORIAN).turn?.stage(HANDED)).toEqual({ mode: "auto" });
     await turn.finish(REPLY);
     // The same after the reply, where a job's change is written as it is made.
     const jobEnvOf = async (agent: Agent) => {
       const one = new Cast("job-after").of({ agentId: agent.id, role: agent.role, main: true, above: [] });
-      const env = await jobEnv(rig.rt, rig.rt.review, { chatId, userId: rig.host.userId, basis: turn.turn, committed: true, agent: one, standing: standingOf(one), tool: "person_add", files: null, staged: new Map(), signal });
+      const env = await jobEnv(rig.rt, rig.rt.review, { chatId, userId: rig.host.userId, basis: turn.turn, committed: true, agent: one, standing: standingOf(one), tool: "person_add", files: null, staged: new Map(), signal, as: null, directed: false, job: "job-after" });
       if ("refused" in env) throw new Error(`no env for the job's call: ${env.reason}`);
       return env;
     };
     expect(await (await jobEnvOf(GM)).turn?.stage(HANDED)).toEqual({ refused: true, code: "no_writer", reason: note(WRITE_NOTE.noWriter), key: HANDED.key });
     expect(await (await jobEnvOf(OWN)).turn?.stage(HANDED)).toEqual({ refused: true, code: "no_writer", reason: note(WRITE_NOTE.noWriter), key: HANDED.key });
-    expect(await (await jobEnvOf(CHRONICLER)).turn?.stage(HANDED)).toEqual({ mode: "auto" });
+    expect(await (await jobEnvOf(HISTORIAN)).turn?.stage(HANDED)).toEqual({ mode: "auto" });
     noModelCalls(rig);
   });
 
   test("a tool that writes is closed to an agent started by one that only reads, whatever it runs as", async () => {
     const { rig, chatId } = await turnChat();
+    const files = memoryFiles();
+    rig.rt.harness.files = () => files;
     const turn = await beginTurn(rig, chatId, "I ask Mara whether Okoro is coming by today.");
-    await turn.answer(AUTHOR, "time_clock");
-    // A person's own mind, started by the game master's agent: it reads its mind, and records nothing.
-    const under = mind("mara", [AUTHOR, GM]);
-    expect((await turn.call(under, "mind_view", { who: "Mara" })).text).toContain("You are Mara.");
-    expect(await turn.refusal(under, "mind_decide", DECISION)).toBe(held("mind_decide", GM.id, "read"));
+    await principal(turn, "Mara");
+    const NOW = "Okoro said noon.";
+    // A person's own mind, started by the game master's agent: it reads its mind, and writes nothing of it.
+    const under = mind("mara", MARA, [AUTHOR, GM]);
+    expect((await turn.call(under, "mind_read", {})).error).toBeUndefined();
+    expect(await turn.refusal(under, "mind_write", { file: "now.md", text: NOW })).toBe(held("mind_write", GM.id, "read"));
     // An agent of the author's own definition, started the same way: its definition's tier is no higher than what started it.
     const second: Agent = { id: "author-2", role: HARNESS_AGENT.author, above: [AUTHOR, GM] };
     expect(await turn.refusal(second, "gm_move", MOVE)).toBe(held("gm_move", GM.id, "read"));
     expect(await turn.refusal(second, "person_add", { name: "Brann" })).toBe(held("person_add", GM.id, "read"));
     expect(JSON.stringify(await turn.answer(second, "people_find", { name: "Okoro" }))).toContain("Okoro");
-    // Started by the author, the same mind decides.
-    await turn.answer(mind("mara-2"), "mind_decide", DECISION);
+    expect(files.files.size).toBe(0);
     await turn.finish(REPLY);
-    const state = await stateOf(rig, chatId);
-    expect(readSlice(state).chars[MARA]?.mind?.intent).toBe("Tell him Okoro comes by at noon.");
-    expect(placeOfEntity(state, OKORO)).toBeNull();
-    noModelCalls(rig);
-  });
-});
-
-describe("an agent is one record for its run's whole life", () => {
-  test("who a character's agent thinks for is said once, and holds in the turn, in what it calls after the reply, and across a job's runs", async () => {
-    const { rig, chatId } = await harnessChat({ minds: true });
-    const other = (self: string, named: string): string => note(HARNESS_NOTE.otherMind, { self, other: named, tool: "mind_view" });
-    const turn = await beginTurn(rig, chatId, "I ask Mara about the rent.");
-    const one = mind("one");
-    expect((await turn.call(one, "mind_view", { who: "Mara" })).text).toContain("You are Mara.");
-    expect(await turn.refusal(one, "mind_view", { who: "Ilse" })).toBe(other("Mara", "Ilse"));
-    await turn.finish("Mara sighs.");
-    // The reply is saved: the same agent is still Mara's mind, and no one else's.
-    expect(await turn.refusal(one, "mind_view", { who: "Ilse" })).toBe(other("Mara", "Ilse"));
-    expect((await turn.call(one, "mind_view", { who: "Mara" })).text).toContain("You are Mara.");
-    // An agent of the turn that first speaks after the reply is bound then, for good.
-    const late = mind("late");
-    expect((await turn.call(late, "mind_view", { who: "Ilse" })).text).toContain("You are Ilse.");
-    expect(await turn.refusal(late, "mind_view", { who: "Mara" })).toBe(other("Ilse", "Mara"));
-    // A job's agent is one mind from its first call to its last, through a run of the job that ended and one started again.
-    const job = await beginJob(rig, turn, "job-memory");
-    const kept = mind("job");
-    expect((await job.call(kept, "mind_view", { who: "Joss" })).text).toContain("You are Joss.");
-    await job.end("done", { record: null });
-    expect(await job.refusal(kept, "mind_view", { who: "Mara" })).toBe(other("Joss", "Mara"));
-    const again = await beginJob(rig, turn, "job-memory");
-    expect(await again.refusal(kept, "mind_view", { who: "Mara" })).toBe(other("Joss", "Mara"));
-    expect((await again.call(kept, "mind_view", { who: "Joss" })).text).toContain("You are Joss.");
-    // The same handle in another job is another agent.
-    const elsewhere = await beginJob(rig, turn, "job-other");
-    expect((await elsewhere.call(kept, "mind_view", { who: "Mara" })).text).toContain("You are Mara.");
+    // After the reply, where a mind is written: the same mind in a job the game master's agent started is still held to it; in one the author started it writes.
+    const byReader = await beginJob(rig, turn, "job-by-reader", GM);
+    expect(await byReader.refusal(mind("mara-gm", MARA), "mind_write", { file: "now.md", text: NOW })).toBe(held("mind_write", GM.id, "read"));
+    expect(files.files.size).toBe(0);
+    const byAuthor = await beginJob(rig, turn, "job-by-author");
+    expect(await byAuthor.answer(mind("mara-2", MARA), "mind_write", { file: "now.md", text: NOW })).toMatchObject({ written: { file: "now.md", size: NOW.length } });
+    expect(files.files.get(`minds/${MARA}/now.md`)?.text).toBe(NOW);
+    expect(placeOfEntity(await stateOf(rig, chatId), OKORO)).toBeNull();
     noModelCalls(rig);
   });
 });
 
 describe("the chat's files reach the engine's tools", () => {
-  test("a person's own files are written and read in a turn, in what its agent calls after the reply, and in a job", async () => {
+  test("a person's own files are written after the reply, by its turn's agent and by a job's, and read in the next turn; inside the turn they are only read", async () => {
     const { rig, chatId } = await turnChat();
     const files = memoryFiles();
     const asked: { chatId: string; userId: string }[] = [];
@@ -206,19 +181,25 @@ describe("the chat's files reach the engine's tools", () => {
       return files;
     };
     const turn = await beginTurn(rig, chatId, "I ask Mara about the rent.");
-    const one = mind("one");
+    await principal(turn, "Mara");
+    const one = mind("one", MARA);
     const NOW = "Rent is due Friday.";
-    expect(await turn.answer(one, "mind_file_write", { who: "Mara", file: "now.md", text: NOW })).toMatchObject({ written: { file: "now.md", size: NOW.length } });
-    expect(await turn.answer(one, "mind_file_read", { who: "Mara", file: "now.md" })).toMatchObject({ file: "now.md", text: NOW });
+    // Inside the turn she acts; taking it in is the run after the reply's.
+    expect(await turn.refusal(one, "mind_write", { file: "now.md", text: NOW })).toBe(note(MINDS_NOTE.afterReply));
+    expect(await turn.refusal(one, "mind_digested", { to: "anything" })).toBe(note(MINDS_NOTE.afterReply));
+    expect(files.files.size).toBe(0);
     await turn.finish("Mara sighs.");
     // After the reply, by the same agent, and by a job's.
-    expect((await turn.answer(one, "mind_files", { who: "Mara" })).files).toEqual([{ file: "now.md", size: NOW.length }]);
+    expect(await turn.answer(one, "mind_write", { file: "now.md", text: NOW })).toMatchObject({ written: { file: "now.md", size: NOW.length } });
     const job = await beginJob(rig, turn, "job-memory");
-    const kept = mind("job");
+    const kept = mind("job", MARA);
     const LATER = "Joss said nothing about it.";
-    expect(await job.answer(kept, "mind_file_write", { who: "Mara", file: "later.md", text: LATER })).toMatchObject({ written: { file: "later.md", size: LATER.length } });
-    expect(await job.answer(kept, "mind_file_read", { who: "Mara", file: "now.md" })).toMatchObject({ text: NOW });
-    expect([...files.files.keys()].sort()).toEqual([`minds/${MARA}/later.md`, `minds/${MARA}/now.md`]);
+    expect(await job.answer(kept, "mind_write", { file: "memory.md", text: LATER })).toMatchObject({ written: { file: "memory.md", size: LATER.length } });
+    expect((await job.call(kept, "mind_read", { file: "now.md" })).text).toContain(NOW);
+    // The next turn's Mara reads what she took in.
+    const next = await beginTurn(rig, chatId, "I ask again.");
+    expect((await next.call(mind("next", MARA), "mind_read", {})).text).toContain(LATER);
+    expect([...files.files.keys()].sort()).toEqual([`minds/${MARA}/memory.md`, `minds/${MARA}/now.md`]);
     // Each was given the area of this chat, as this user's.
     expect(asked.length).toBeGreaterThan(0);
     expect(asked.every((at) => at.chatId === chatId && at.userId === rig.host.userId)).toBe(true);
@@ -241,9 +222,9 @@ describe("grant_writes does what it says", () => {
     expect(await turn.answer(AUTHOR, "grant_writes", { to: OWN.id, tier: "gm" })).toEqual({ granted: { to: OWN.id, tier: "gm" } });
     expect(await turn.answer(OWN, "gm_move", MOVE)).toMatchObject({ staged: {} });
     // To every agent of a definition, by its id: one that calls afterwards holds it too.
-    const knowledge: Agent = { id: "knowledge-1", role: HARNESS_AGENT.knowledge };
-    expect(await turn.answer(AUTHOR, "grant_writes", { to: HARNESS_AGENT.knowledge, tier: "story" })).toEqual({ granted: { to: HARNESS_AGENT.knowledge, tier: "story" } });
-    expect(await turn.answer(knowledge, "person_add", { name: "Brann" })).toMatchObject({ staged: { changeType: "spawn" } });
+    const narrator: Agent = { id: "narrator-1", role: HARNESS_AGENT.narrator };
+    expect(await turn.answer(AUTHOR, "grant_writes", { to: HARNESS_AGENT.narrator, tier: "story" })).toEqual({ granted: { to: HARNESS_AGENT.narrator, tier: "story" } });
+    expect(await turn.answer(narrator, "person_add", { name: "Brann" })).toMatchObject({ staged: { changeType: "spawn" } });
     const done = await committed(turn);
     expect(done.refused).toEqual([]);
     await turn.finish(REPLY);
@@ -271,8 +252,8 @@ describe("grant_writes does what it says", () => {
     await turn.answer(AUTHOR, "grant_writes", { to: under.id, tier: "gm" });
     expect(await turn.answer(under, "gm_move", MOVE)).toMatchObject({ staged: {} });
     // A person's own mind keeps to its own tools whatever it is granted: by its handle, and by its definition.
-    const mara = mind("mara");
-    await turn.call(mara, "mind_view", { who: "Mara" });
+    const mara = mind("mara", MARA);
+    await turn.call(mara, "feed_read");
     expect(await grant(mara.id, "story")).toEqual(refusedAs("grant_mind", HARNESS_NOTE.grantMind, { to: mara.id }));
     expect(await grant(HARNESS_AGENT.character, "gm")).toEqual(refusedAs("grant_mind", HARNESS_NOTE.grantMind, { to: HARNESS_AGENT.character }));
     // No one by that handle or definition; and only the author grants.
@@ -285,7 +266,7 @@ describe("grant_writes does what it says", () => {
     const { rig, chatId } = await turnChat();
     const turn = await beginTurn(rig, chatId, "I ask Mara what is on the sill.");
     // The run's main agent runs as a definition that holds the story's tier.
-    const main: Agent = { id: "main", role: HARNESS_AGENT.chronicler, main: true };
+    const main: Agent = { id: "main", role: HARNESS_AGENT.historian, main: true };
     await turn.answer(main, "time_clock");
     await turn.call(GM, "time_clock");
     expect(await refusalOf(turn, main, "grant_writes", { to: GM.id, tier: "gm" })).toEqual(refusedAs("grant_above", HARNESS_NOTE.grantAbove, { tier: "gm", yours: "story" }));
@@ -326,7 +307,7 @@ describe("the author is the run's main agent, as LumiAH says on every call", () 
     await turn.answer(AUTHOR, "time_clock");
     await turn.call(GM, "time_clock");
     const worker: Agent = { id: "job-author", role: HARNESS_AGENT.author };
-    const scribe: Agent = { id: "job-chronicler", role: HARNESS_AGENT.chronicler };
+    const scribe: Agent = { id: "job-historian", role: HARNESS_AGENT.historian };
     // Started by the game master's agent, which only reads: beside the turn its agents stage nothing, whatever they run as.
     const byReader = await beginJob(rig, turn, "job-by-reader", GM);
     expect(await byReader.refusal(worker, "gm_move", MOVE)).toBe(held("gm_move", GM.id, "read"));
@@ -344,7 +325,7 @@ describe("the author is the run's main agent, as LumiAH says on every call", () 
     await byReader.call(worker, "time_clock");
     const child = await beginJob(rig, turn, "job-child", worker, "job-by-reader");
     expect(await child.refusal(scribe, "item_make", WHISTLE)).toBe(held("item_make", worker.id, "read"));
-    // Started by the author, a job's chronicler writes the story's changes, and one started by its agent does too.
+    // Started by the author, a job's historian writes the story's changes, and one started by its agent does too.
     const byAuthor = await beginJob(rig, turn, "job-by-author");
     expect(await byAuthor.answer(scribe, "item_make", WHISTLE)).toMatchObject({ staged: { changeType: "item_make" } });
     await byAuthor.call(worker, "time_clock");
@@ -384,7 +365,7 @@ describe("a cap that holds across the turn is counted on what every agent staged
     rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { spawn: { mode: "auto" } } } }));
     const turn = await beginTurn(rig, chatId, "I ask Mara who is new in town.");
     await turn.answer(AUTHOR, "time_clock");
-    expect(await turn.answer(CHRONICLER, "person_add", { name: "Brann" })).toMatchObject({ staged: { changeType: "spawn" } });
+    expect(await turn.answer(HISTORIAN, "person_add", { name: "Brann" })).toMatchObject({ staged: { changeType: "spawn" } });
     // The author reads what landed and what it staged itself: Brann is no one to it yet, and the cap is still the turn's.
     expect(await refusalOf(turn, AUTHOR, "person_add", { name: "Okoro" })).toMatchObject({ refused: { code: "spawn_cap" } });
     // The same note from another agent is the one already staged: one person, once.
@@ -394,25 +375,6 @@ describe("a cap that holds across the turn is counted on what every agent staged
     await turn.finish("Brann, Mara says, as of this morning.");
     const names = await namesIn(rig, chatId);
     expect([names.includes("Brann"), names.includes("Okoro")]).toEqual([true, false]);
-    noModelCalls(rig);
-  });
-
-  test("the facts a turn may record: two knowledge agents share the turn's one budget", async () => {
-    const { rig, chatId } = await turnChat();
-    rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, knowledge: true }));
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { knowledge: { factsPerTurn: 1 } }, extraction: { learn: { mode: "auto" } } } }));
-    const turn = await beginTurn(rig, chatId, "I ask Joss whether the rent is paid.");
-    const told = (claim: string): JsonObject => ({ who: ["Mara", "Joss"], facts: [{ ref: "n1", claim, matters: "Mara means to collect, and Joss is hiding it." }], learned: [{ fact: "n1", how: "told", by: "Joss", who: ["Mara"] }] });
-    const first = "Joss owes Mara two months of rent.";
-    const second = "Joss has pawned the spare key.";
-    const recorded = (await turn.answer({ id: "knowledge-1", role: HARNESS_AGENT.knowledge }, "knowledge_infer", told(first))).recorded as { claim: string }[];
-    expect(recorded.map((r) => r.claim)).toEqual([first]);
-    // Another agent of the same turn: what the first staged is no part of its own view, and counts against the turn all the same.
-    const over = await turn.call({ id: "knowledge-2", role: HARNESS_AGENT.knowledge }, "knowledge_infer", told(second));
-    expect(over.error).toBe(true);
-    await turn.finish("Joss shrugs and says the rent can wait.");
-    const claims = Object.values(readKnowledge(await stateOf(rig, chatId)).facts).map((fact) => fact.claim);
-    expect([claims.includes(first), claims.includes(second)]).toEqual([true, false]);
     noModelCalls(rig);
   });
 });
@@ -438,12 +400,10 @@ describe("what a gate's card taught", () => {
       expect((await waiting).landed.length).toBe(1);
       return turn;
     };
-    // Let through, then stopped: nothing of the turn stands, and neither does what its card taught.
+    // Let through, then stopped before anything of its reply went out: nothing of the turn stands, and neither does what its card taught.
     const stopped = await letThrough("I ask Mara who is new in town.");
     expect(await learning()).toBe(untaught);
-    if (!stopped.generation) throw new Error("no generation");
-    await rig.host.stop(stopped.generation, "Mara");
-    await stopped.end("stopped");
+    await stopped.stop("");
     expect(await namesIn(rig, chatId)).not.toContain("Brann");
     expect(await learning()).toBe(untaught);
     // Let through, and the reply saved: the answer counts toward what the type learns.
@@ -473,13 +433,12 @@ describe("what a turn asks of the world's document", () => {
     await turn.answer(AUTHOR, "world_commit", { note: "The old pier's story" });
     await turn.answer(AUTHOR, "world_upgrade");
     // The author never commits: the reply's own commit lands both. Until then nothing is made.
-    await turn.writer(A_BRIEF);
     await turn.written(reply);
     expect(await build.head()).toBe(first);
     // A job for after the reply reads the world before Lumiverse has saved the reply: its call waits for the turn's record and for what the turn asked of the world's document.
     const job = await beginJob(rig, turn, "job-after");
     let answered = false;
-    const early = job.answer(CHRONICLER, "world_status").finally(() => {
+    const early = job.answer(HISTORIAN, "world_status").finally(() => {
       answered = true;
     });
     await rig.host.settle();
@@ -495,13 +454,11 @@ describe("what a turn asks of the world's document", () => {
     expect(await turn.answer(AUTHOR, "world_status")).toMatchObject({ playing: second, head: second, behind: false });
     expect((await stateOf(rig, chatId)).revision).toBe(second);
 
-    // A turn that is stopped with a commit of the document still staged makes nothing of it.
+    // A turn stopped once something of its reply went out, with a commit of the document still staged (never committed by its author), makes nothing of it.
     const stopped = await beginTurn(rig, chatId, "I ask about the boathouse.");
     await stopped.answer(AUTHOR, "world_put", { collection: "lore", id: "boathouse", value: JSON.stringify({ ...PIER, title: "The boathouse", keys: ["boathouse"] }) });
     await stopped.answer(AUTHOR, "world_commit", { note: "The boathouse" });
-    if (!stopped.generation) throw new Error("no generation");
-    await rig.host.stop(stopped.generation, "The boat");
-    await stopped.end("stopped");
+    await stopped.stop("The boat");
     expect(await build.head()).toBe(second);
     expect((await stateOf(rig, chatId)).revision).toBe(second);
     noModelCalls(rig);
@@ -527,11 +484,11 @@ describe("the bridge's own words and limits are the user's", () => {
     await turn.answer(AUTHOR, "time_clock");
     await turn.finish(REPLY);
     const oldest = await beginJob(rig, turn, "job-0");
-    expect(JSON.stringify(await oldest.answer(CHRONICLER, "people_find", { name: "Mara" }))).toContain("Mara");
+    expect(JSON.stringify(await oldest.answer(HISTORIAN, "people_find", { name: "Mara" }))).toContain("Mara");
     let newest = oldest;
     for (let n = 1; n <= 16; n++) newest = await beginJob(rig, turn, `job-${n}`);
-    expect(await oldest.refusal(CHRONICLER, "people_find", { name: "Mara" })).toBe(note(HARNESS_NOTE.noTurn));
-    expect(JSON.stringify(await newest.answer(CHRONICLER, "people_find", { name: "Mara" }))).toContain("Mara");
+    expect(await oldest.refusal(HISTORIAN, "people_find", { name: "Mara" })).toBe(note(HARNESS_NOTE.noTurn));
+    expect(JSON.stringify(await newest.answer(HISTORIAN, "people_find", { name: "Mara" }))).toContain("Mara");
     noModelCalls(rig);
   });
 });

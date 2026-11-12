@@ -346,14 +346,14 @@ export function thingReadsOf(raw: unknown, base: Readonly<ThingReadSettings> = T
  * are a saved outfit or loadout made, dropped or changed into (`item_set`). An organization's changes
  * (`{op: "org"}`) are its people, its powers, its shares and structure, and its rules.
  */
-export const AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace", "item_home", "item_grant", "item_label", "item_merge", "item_set", "item_remove", "org_people", "org_powers", "org_shares", "org_rules", "world_document", "play", "mind"] as const;
+export const AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace", "item_home", "item_grant", "item_label", "item_merge", "item_set", "item_remove", "org_people", "org_powers", "org_shares", "org_rules", "world_document", "world_edit", "play", "mind"] as const;
 export type AgentChangeType = (typeof AGENT_CHANGE_TYPES)[number];
 
 /** Every type with a mode: what a reply may change, then what an agent may. */
 export type ChangeType = ExtractionType | AgentChangeType;
 export const CHANGE_TYPES: readonly ChangeType[] = [...EXTRACTION_TYPES, ...AGENT_CHANGE_TYPES];
 
-/** AGENT-LOOP-PLAN §6: despawn, destroy, money adjustment, stage and GM spawn confirm; other GM edits and workspace notes apply. ITEMS-SPEC §5.4: a thing's rest, grants and labels apply; a merge and a removal ask. ORG-SPEC §9: an organization's people, powers and shares ask; its rules apply. The world's document lands (it is the harness engine's alone): the author decides, and the player reviews after, on the reply, where a commit has its Undo; an act that would publish or throw away the user's own Build edits asks first whatever the mode (`harness/turn.ts`). A pin keeps the mode the user chose. */
+/** AGENT-LOOP-PLAN §6: despawn, destroy, money adjustment, stage and GM spawn confirm; other GM edits and workspace notes apply. ITEMS-SPEC §5.4: a thing's rest, grants and labels apply; a merge and a removal ask. ORG-SPEC §9: an organization's people, powers and shares ask; its rules apply. The world's document lands (it is the harness engine's alone): the author decides, and the player reviews after, on the reply; an act that would publish or throw away the user's own Build edits asks first whatever the mode (`harness/turn.ts`). The world as a chat plays it (its places, paths and maps made or changed in play) lands with its turn. A pin keeps the mode the user chose. These are the older engines' defaults: on the harness every type lands unless the user set it (`effectiveMode`). */
 export const AGENT_CHANGE_DEFAULTS: Readonly<Record<AgentChangeType, BoundMode>> = Object.freeze({
   gm_spawn: "confirm",
   despawn: "confirm",
@@ -373,6 +373,7 @@ export const AGENT_CHANGE_DEFAULTS: Readonly<Record<AgentChangeType, BoundMode>>
   org_shares: "confirm",
   org_rules: "auto",
   world_document: "auto",
+  world_edit: "auto",
   // The harness engine's own tools: what its author plays and what its characters' agents record land with the turn unless the player says otherwise.
   play: "auto",
   mind: "auto",
@@ -398,6 +399,7 @@ export const AGENT_CHANGE_LABEL: Readonly<Record<AgentChangeType, string>> = Obj
   org_shares: "Organizations' shares and structure (founding, issuing, buying back, transfers, restructuring)",
   org_rules: "Organizations' rules (entry, dues, names)",
   world_document: "The world's document (committing its draft, bringing this chat to a revision, dropping or restoring the draft)",
+  world_edit: "The world as this chat plays it (its places, paths and maps, made or changed in play)",
   play: "What the author plays (an attempt and its roll, a fight's rounds)",
   mind: "Characters' minds (what they decide and remember, and their own files)",
 });
@@ -682,6 +684,12 @@ export interface UserSettings {
   gm: GmPageSettings;
   /** Reusing work (Settings → Speed): whether built views are shared instead of built again. */
   perf: PerfSettings;
+  /** The story engine's dials on a chat the harness plays (DEPTH2-PLAN §5): the budget of treatments, and what its story record keeps and gives at once. */
+  story: StorySettings;
+  /** What the story engine reads of the chat's preset (DEPTH2-PLAN §7): the part each category's blocks go to, and how much of each part an agent is given. */
+  storyPreset: StoryPresetSettings;
+  /** How a passage of the reply is told and let out on a chat the harness plays (DEPTH2-PLAN §3.3): who checks it, how often it may be drafted, the prose the narrator is handed for its voice, what the author may release in its own words, and whose the direct line's passage is. */
+  narration: NarrationSettings;
 }
 
 /** What a swipe does as shipped (Settings → Swipes): it tells the same turn again, asking nothing first, with the texts its turn was made with. */
@@ -738,6 +746,334 @@ export const PERF_DEFAULTS: Readonly<PerfSettings> = Object.freeze({ reuseViews:
 export function perfSettingsOf(raw: unknown, base: Readonly<PerfSettings> = PERF_DEFAULTS): PerfSettings {
   const v = isRecord(raw) ? raw.reuseViews : undefined;
   return { reuseViews: typeof v === "boolean" ? v : base.reuseViews };
+}
+
+/**
+ * The story engine's dials on a chat the harness plays (DEPTH2-PLAN §5): how many treatments of each
+ * tier a stretch of story time allows (`budget`, T4 never counted), and what its story record keeps
+ * and gives at once (`limits`). Each is the player's to change.
+ */
+export interface StorySettings {
+  budget: StoryBudget;
+  limits: StoryLimits;
+  minds: StoryMinds;
+  models: StoryModels;
+  prepare: StoryPrepare;
+}
+
+/** How many T1, T2 and T3 treatments the drafts of any stretch of `stretchMinutes` of story time may hold between them: what `draft_open` and the scene tools refuse past. */
+export interface StoryBudget {
+  stretchMinutes: number;
+  t1: number;
+  t2: number;
+  t3: number;
+}
+
+/** What the story record takes and gives at most. */
+export interface StoryLimits {
+  /** A beat's `what` and `surface`, and what someone got of it, in characters. */
+  beatChars: number;
+  /** One quote of a beat, in characters. */
+  quoteChars: number;
+  /** Quotes a beat holds. */
+  quotes: number;
+  /** People one beat is addressed to or reached, or one draft names. */
+  people: number;
+  /** Beats one turn's record holds, its jobs' included. */
+  beatsPerTurn: number;
+  /** A draft's `what` and its notes, in characters. */
+  draftChars: number;
+  /** Drafts one turn's record opens, its jobs' included. */
+  draftsPerTurn: number;
+  /** Why someone is cast as they are, or why a beat is struck, in characters. */
+  whyChars: number;
+  /** Beats one `beats_read` gives. */
+  beatsRead: number;
+  /** Items one `feed_read` gives. */
+  feedItems: number;
+  /** The moment the author is given as a turn begins (`authorOpening`), in characters. */
+  openingChars: number;
+}
+
+/** A mind's files (DEPTH2-PLAN §4), by name without `.md`: `core` says who someone is (the author and the user write it); `now`, `memory`, `beliefs`, `people` and `plans` are the character's own, in its voice; `outline` is what they know only in outline of a past they didn't relive, written while the story is prepared; `profile` is all a supporting character has, and the author keeps it. */
+export const MIND_FILE_IDS = ["core", "now", "memory", "beliefs", "people", "plans", "outline", "profile"] as const;
+export type MindFileId = (typeof MIND_FILE_IDS)[number];
+
+/** What the story engine keeps of minds: how long each file may be, in characters, and whether the player's character has a mind while Sovereign Hand is on (the direction says what happens; the mind gives his voice and inner life). */
+export interface StoryMinds {
+  chars: Record<MindFileId, number>;
+  playerMind: boolean;
+}
+
+/** How hard a model thinks, as LumiAH takes it. */
+export const MODEL_EFFORTS = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"] as const;
+export type ModelEffortPick = (typeof MODEL_EFFORTS)[number];
+
+/** Where an agent runs and how hard it thinks, as one level of the ladder picks it: a member left out is not picked here. */
+export interface ModelPick {
+  connectionId?: string;
+  model?: string;
+  effort?: ModelEffortPick;
+}
+
+/** A character's kinds of run: in a scene (or on the direct line), digesting what reached it, preparing for what may come, reliving the story's past. */
+export const CHARACTER_RUNS = ["scene", "digest", "prepare", "relive"] as const;
+export type CharacterRun = (typeof CHARACTER_RUNS)[number];
+
+/** How an agent stands in its run, as LumiAH asks: one the run starts itself, one another agent started, a job's. */
+export const AGENT_STANDINGS = ["turn", "sub", "job"] as const;
+export type AgentStanding = (typeof AGENT_STANDINGS)[number];
+
+/** The model ladder (`chooseAgentModel`): most specific first, this character, the kind of run, the standing, the agent, the default. Each level picks what it says; the rest falls through, and nothing picked leaves the agent's own. */
+export interface StoryModels {
+  default: ModelPick;
+  /** By agent definition id (`author`, `game_master`, `narrator`, `character`, `historian`). */
+  agents: Record<string, ModelPick>;
+  standings: Partial<Record<AgentStanding, ModelPick>>;
+  runs: Partial<Record<CharacterRun, ModelPick>>;
+  /** By the entity id a character's agent runs as. */
+  characters: Record<string, ModelPick>;
+}
+
+/**
+ * The prepared start (`backend/story/prepare.ts`): how many messages one historian run reads (a
+ * stretch), the reckoned cost of the whole preparation above which a plan always waits for the
+ * player's word, how many principals may have reliving to do at once, what one stretch's read and
+ * record hold, and what one model call is reckoned to weigh before LumiAH has measured one.
+ */
+export interface StoryPrepare {
+  /** The most messages one stretch takes: one historian run reads it. A longer stretch is planned as several. */
+  stretchMessages: number;
+  /** A plan the engine reckons above this many tokens in all, the author's own work included, waits for the player's word before anything is relived; 0: every plan waits. */
+  askAboveTokens: number;
+  /** How many principals may have moments to relive at once: opening a stretch past it is refused. */
+  reliveAtOnce: number;
+  /** The most beats the historian records for one stretch. */
+  beatsPerStretch: number;
+  /** The most characters one read of a stretch gives. */
+  readChars: number;
+  /** Each text of a plan (what the story is, why a stretch or a principal, what is filled from summaries), in characters. */
+  textChars: number;
+  /** What one model call of the preparation is reckoned to weigh, in tokens, until LumiAH has measured a call of it or of this chat's last author run. */
+  callTokens: number;
+}
+
+/** As shipped: a story day's stretch holds one T1, two T2 and four T3 treatments; a beat's texts as long as DEPTH2-PLAN §4 has them. */
+export const STORY_DEFAULTS: Readonly<StorySettings> = Object.freeze({
+  budget: Object.freeze({ stretchMinutes: 1440, t1: 1, t2: 2, t3: 4 }),
+  // A beat's text and a quote are roomy: in live play a model put a whole speech in one quote and a full sentence or three in the event, and every refusal for length cost the turn another round.
+  limits: Object.freeze({ beatChars: 800, quoteChars: 600, quotes: 6, people: 24, beatsPerTurn: 40, draftChars: 600, draftsPerTurn: 12, whyChars: 300, beatsRead: 40, feedItems: 40, openingChars: 4000 }),
+  // A mind holds what a person carries; past its size the character condenses, as memory does. The player's character has a mind under Sovereign Hand as shipped.
+  minds: Object.freeze({ chars: Object.freeze({ core: 4000, now: 2000, memory: 8000, beliefs: 4000, people: 4000, plans: 2000, outline: 6000, profile: 1500 }), playerMind: true }),
+  // Nothing picked: every agent runs on its own connection, model and effort until the user picks.
+  models: Object.freeze({ default: Object.freeze({}), agents: Object.freeze({}), standings: Object.freeze({}), runs: Object.freeze({}), characters: Object.freeze({}) }),
+  // A historian run reads about forty messages; a plan past 200,000 tokens in all asks first; three principals relive at once; a stretch keeps thirty beats; a call unmeasured is reckoned at 60,000 tokens.
+  prepare: Object.freeze({ stretchMessages: 40, askAboveTokens: 200_000, reliveAtOnce: 3, beatsPerStretch: 30, readChars: 24_000, textChars: 1200, callTokens: 60_000 }),
+});
+
+/** Each dial's bounds: a stretch from an hour to a story year; a tier's count from none to a hundred; a limit from one to what a record keeps sensibly. */
+export const STORY_BOUNDS = Object.freeze({
+  stretchMinutes: [60, 525_600] as const,
+  treatments: [0, 100] as const,
+  limits: Object.freeze({ beatChars: [40, 4000], quoteChars: [20, 2000], quotes: [0, 40], people: [1, 200], beatsPerTurn: [1, 400], draftChars: [40, 4000], draftsPerTurn: [1, 100], whyChars: [20, 2000], beatsRead: [1, 400], feedItems: [1, 400], openingChars: [500, 40_000] } satisfies Record<keyof StoryLimits, readonly [number, number]>),
+  /** A mind's file, in characters: from a few lines to a long story's worth. */
+  mindChars: [200, 50_000] as const,
+  /** How many agents and characters the model ladder names, and how long a connection id or model name it keeps. */
+  modelAgents: 64,
+  modelCharacters: 500,
+  modelChars: 200,
+  /** The prepared start: a stretch from a few messages to a long scene; a ceiling from none to a hundred million tokens; a handful of principals at once; a call from a thousand tokens to two million. */
+  prepare: Object.freeze({ stretchMessages: [5, 400], askAboveTokens: [0, 100_000_000], reliveAtOnce: [1, 24], beatsPerStretch: [1, 200], readChars: [2000, 200_000], textChars: [200, 8000], callTokens: [1000, 2_000_000] } satisfies Record<keyof StoryPrepare, readonly [number, number]>),
+});
+
+/** One level of the model ladder as the engine reads it: each member kept where it is one it takes, else left out. */
+function modelPickOf(raw: unknown): ModelPick {
+  const p = isRecord(raw) ? raw : {};
+  const name = (x: unknown): string | null => (typeof x === "string" && x.trim() !== "" && x.length <= STORY_BOUNDS.modelChars ? x.trim() : null);
+  const connectionId = name(p.connectionId);
+  const model = name(p.model);
+  const effort = MODEL_EFFORTS.find((e) => e === p.effort);
+  return { ...(connectionId !== null ? { connectionId } : {}), ...(model !== null ? { model } : {}), ...(effort !== undefined ? { effort } : {}) };
+}
+
+/** Levels of the ladder by key: keys a stored key may be, each level that picks something, at most `most`. */
+function modelPicksOf(raw: unknown, most: number, keyOk: (key: string) => boolean = () => true): Record<string, ModelPick> {
+  const out: Record<string, ModelPick> = {};
+  if (!isRecord(raw)) return out;
+  for (const [key, value] of Object.entries(raw)) {
+    if (Object.keys(out).length >= most) break;
+    if (!safeKey(key) || key.length > STORY_BOUNDS.modelChars || !keyOk(key)) continue;
+    const pick = modelPickOf(value);
+    if (Object.keys(pick).length > 0) out[key] = pick;
+  }
+  return out;
+}
+
+/** `StorySettings.models` as the engine reads it. */
+export function storyModelsOf(raw: unknown): StoryModels {
+  const m = isRecord(raw) ? raw : {};
+  return {
+    default: modelPickOf(m.default),
+    agents: modelPicksOf(m.agents, STORY_BOUNDS.modelAgents),
+    standings: modelPicksOf(m.standings, AGENT_STANDINGS.length, (key) => (AGENT_STANDINGS as readonly string[]).includes(key)) as StoryModels["standings"],
+    runs: modelPicksOf(m.runs, CHARACTER_RUNS.length, (key) => (CHARACTER_RUNS as readonly string[]).includes(key)) as StoryModels["runs"],
+    characters: modelPicksOf(m.characters, STORY_BOUNDS.modelCharacters),
+  };
+}
+
+/** `StorySettings.prepare` as the engine reads it: each dial a whole number in its bounds, else `base`'s. */
+export function storyPrepareOf(raw: unknown, base: Readonly<StoryPrepare> = STORY_DEFAULTS.prepare): StoryPrepare {
+  const p = isRecord(raw) ? raw : {};
+  const whole = (key: keyof StoryPrepare): number => {
+    const x = p[key];
+    const [lo, hi] = STORY_BOUNDS.prepare[key];
+    return typeof x === "number" && Number.isInteger(x) && x >= lo && x <= hi ? x : base[key];
+  };
+  return { stretchMessages: whole("stretchMessages"), askAboveTokens: whole("askAboveTokens"), reliveAtOnce: whole("reliveAtOnce"), beatsPerStretch: whole("beatsPerStretch"), readChars: whole("readChars"), textChars: whole("textChars"), callTokens: whole("callTokens") };
+}
+
+/** `UserSettings.story` as the engine reads it: each dial a whole number in its bounds, else `base`'s; a file from before it reads as shipped. */
+export function storySettingsOf(raw: unknown, base: Readonly<StorySettings> = STORY_DEFAULTS): StorySettings {
+  const s = isRecord(raw) ? raw : {};
+  const b = isRecord(s.budget) ? s.budget : {};
+  const l = isRecord(s.limits) ? s.limits : {};
+  const m = isRecord(s.minds) ? s.minds : {};
+  const c = isRecord(m.chars) ? m.chars : {};
+  const whole = (x: unknown, [lo, hi]: readonly [number, number], fallback: number): number => (typeof x === "number" && Number.isInteger(x) && x >= lo && x <= hi ? x : fallback);
+  const [t1, t2, t3] = (["t1", "t2", "t3"] as const).map((tier) => whole(b[tier], STORY_BOUNDS.treatments, base.budget[tier]));
+  const limit = (key: keyof StoryLimits): number => whole(l[key], STORY_BOUNDS.limits[key], base.limits[key]);
+  const limits: StoryLimits = { beatChars: limit("beatChars"), quoteChars: limit("quoteChars"), quotes: limit("quotes"), people: limit("people"), beatsPerTurn: limit("beatsPerTurn"), draftChars: limit("draftChars"), draftsPerTurn: limit("draftsPerTurn"), whyChars: limit("whyChars"), beatsRead: limit("beatsRead"), feedItems: limit("feedItems"), openingChars: limit("openingChars") };
+  const chars = Object.fromEntries(MIND_FILE_IDS.map((file) => [file, whole(c[file], STORY_BOUNDS.mindChars, base.minds.chars[file])])) as Record<MindFileId, number>;
+  const minds: StoryMinds = { chars, playerMind: typeof m.playerMind === "boolean" ? m.playerMind : base.minds.playerMind };
+  return { budget: { stretchMinutes: whole(b.stretchMinutes, STORY_BOUNDS.stretchMinutes, base.budget.stretchMinutes), t1: t1 ?? base.budget.t1, t2: t2 ?? base.budget.t2, t3: t3 ?? base.budget.t3 }, limits, minds, models: storyModelsOf(s.models ?? base.models), prepare: storyPrepareOf(s.prepare, base.prepare) };
+}
+
+/**
+ * Where the story engine gives a block of the chat's preset (DEPTH2-PLAN §7, `backend/story/preset.ts`):
+ * the story contract every agent reads, the author's direction, how to be a person for the
+ * characters, rulings for the game master, prose for the narrator, how lines are written (the
+ * narrator's, and a character's on the direct line), or the presentation modules the author calls
+ * for by name.
+ */
+export type StoryPart = "contract" | "author" | "character" | "gm" | "narrator" | "voice" | "module";
+export const STORY_PARTS: readonly StoryPart[] = ["contract", "author", "character", "gm", "narrator", "voice", "module"];
+
+/** What the story engine reads of the chat's preset: the part each category's blocks go to, and how much of each part an agent is given. */
+export interface StoryPresetSettings {
+  /** A category's name and the part its blocks go to; a block in no category named here is the narrator's. Names match with case, spacing and the marks around words ignored (`storyCategoryKey`). */
+  categories: Record<string, StoryPart>;
+  limits: StoryPresetLimits;
+}
+
+/** The most characters an agent is given of each part, of the author's list of modules, of one module's line in it and of one module's text. A block that would pass its part's limit is left out whole. */
+export interface StoryPresetLimits {
+  contract: number;
+  author: number;
+  character: number;
+  gm: number;
+  narrator: number;
+  voice: number;
+  list: number;
+  line: number;
+  module: number;
+}
+
+/** As shipped: the categories of the story preset this engine is designed for, and room for each part. */
+export const STORY_PRESET_DEFAULTS: Readonly<StoryPresetSettings> = Object.freeze({
+  categories: Object.freeze({ "Story contract": "contract", Author: "author", Characters: "character", "Game master": "gm", Narrator: "narrator", Voice: "voice", "Presentation modules": "module" } satisfies Record<string, StoryPart>),
+  limits: Object.freeze({ contract: 16_000, author: 40_000, character: 20_000, gm: 20_000, narrator: 48_000, voice: 12_000, list: 4_000, line: 160, module: 24_000 }),
+});
+
+/** At most 64 categories named, each name at most 80 characters; a part's limit from 100 to 400,000 characters, the list's to 100,000, a module's line from 20 to 1,000. */
+export const STORY_PRESET_BOUNDS = Object.freeze({
+  categories: 64,
+  name: 80,
+  limits: Object.freeze({ contract: [100, 400_000], author: [100, 400_000], character: [100, 400_000], gm: [100, 400_000], narrator: [100, 400_000], voice: [100, 400_000], list: [100, 100_000], line: [20, 1_000], module: [100, 400_000] } satisfies Record<keyof StoryPresetLimits, readonly [number, number]>),
+});
+
+/** A category's name as the story engine matches it: case, spacing and the marks around and between words ignored, so "----> Game Master" matches "Game master". */
+export function storyCategoryKey(name: string): string {
+  return name.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+/** `UserSettings.storyPreset` as the engine reads it: each named category with a name it can match and a part it has (the rest dropped), else `base`'s mapping; each limit a whole number in its bounds, else `base`'s. */
+export function storyPresetSettingsOf(raw: unknown, base: Readonly<StoryPresetSettings> = STORY_PRESET_DEFAULTS): StoryPresetSettings {
+  const s = isRecord(raw) ? raw : {};
+  const l = isRecord(s.limits) ? s.limits : {};
+  const limits = Object.fromEntries(
+    (Object.keys(STORY_PRESET_BOUNDS.limits) as (keyof StoryPresetLimits)[]).map((key) => {
+      const [lo, hi] = STORY_PRESET_BOUNDS.limits[key];
+      const v = l[key];
+      return [key, typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : base.limits[key]];
+    }),
+  ) as unknown as StoryPresetLimits;
+  let categories: Record<string, StoryPart> = { ...base.categories };
+  if (isRecord(s.categories)) {
+    categories = {};
+    for (const [name, part] of Object.entries(s.categories).slice(0, STORY_PRESET_BOUNDS.categories)) {
+      if (safeKey(name) && name.length <= STORY_PRESET_BOUNDS.name && storyCategoryKey(name) !== "" && STORY_PARTS.some((p) => p === part)) categories[name] = part as StoryPart;
+    }
+  }
+  return { categories, limits };
+}
+
+/** Who holds a passage to its beats before the author may release it: the game master, the author itself, or no one. */
+export type NarrationCheck = "gm" | "author" | "none";
+export const NARRATION_CHECKS: readonly NarrationCheck[] = ["gm", "author", "none"];
+
+/** Whose the direct line's passage is: the character's own, streamed as it speaks, or the narrator's, told afterwards. */
+export type DirectLinePassage = "own" | "narrated";
+export const DIRECT_LINE_PASSAGES: readonly DirectLinePassage[] = ["own", "narrated"];
+
+/** How a passage of the reply is told and let out (DEPTH2-PLAN §3.3). Every number is the player's to change. */
+export interface NarrationSettings {
+  /** Who checks a passage against its beats before it is released. */
+  check: NarrationCheck;
+  /** How many times the narrator may draft a passage again after a check finds it at fault. */
+  revisions: number;
+  /** The end of the reply's own prose so far that the narrator is handed, in characters. */
+  replyChars: number;
+  /** The end of the chat's prose before the turn that the narrator is handed for its voice, in characters. */
+  recentChars: number;
+  /** The longest passage the narrator may draft, in characters. */
+  passageChars: number;
+  /** The most changes one check gives. */
+  changes: number;
+  /** The longest change a check gives, in characters. */
+  changeChars: number;
+  /** The most the author may release in its own words with no check (a line for an extra, an answer out of character), in characters; 0 for nothing. */
+  ownChars: number;
+  /** Whose the direct line's passage is. */
+  directLine: DirectLinePassage;
+}
+
+type NarrationNumber = { [K in keyof NarrationSettings]: NarrationSettings[K] extends number ? K : never }[keyof NarrationSettings];
+
+/** As shipped: the game master checks; two revisions; the narrator handed the reply's last 1,500 characters and the chat's last 4,000; a passage of up to 12,000 characters; up to 12 changes of 400 characters a check; 600 characters in the author's own words; the direct line's passage the character's own. */
+export const NARRATION_DEFAULTS: Readonly<NarrationSettings> = Object.freeze({ check: "gm", revisions: 2, replyChars: 1500, recentChars: 4000, passageChars: 12_000, changes: 12, changeChars: 400, ownChars: 600, directLine: "own" });
+
+/** Each number's bounds: up to ten revisions; prose windows up to a long chapter; a passage from a paragraph to a chapter; a check's changes from one to forty, each a sentence to a page. */
+export const NARRATION_BOUNDS: Readonly<Record<NarrationNumber, readonly [number, number]>> = Object.freeze({ revisions: [0, 10], replyChars: [0, 20_000], recentChars: [0, 40_000], passageChars: [200, 60_000], changes: [1, 40], changeChars: [40, 2000], ownChars: [0, 4000] });
+
+/** `UserSettings.narration` as the engine reads it: each choice one it takes and each number a whole one in its bounds, else `base`'s; a file from before it reads as shipped. */
+export function narrationSettingsOf(raw: unknown, base: Readonly<NarrationSettings> = NARRATION_DEFAULTS): NarrationSettings {
+  const s = isRecord(raw) ? raw : {};
+  const whole = (key: NarrationNumber): number => {
+    const v = s[key];
+    const [lo, hi] = NARRATION_BOUNDS[key];
+    return typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : base[key];
+  };
+  return {
+    check: NARRATION_CHECKS.find((c) => c === s.check) ?? base.check,
+    revisions: whole("revisions"),
+    replyChars: whole("replyChars"),
+    recentChars: whole("recentChars"),
+    passageChars: whole("passageChars"),
+    changes: whole("changes"),
+    changeChars: whole("changeChars"),
+    ownChars: whole("ownChars"),
+    directLine: DIRECT_LINE_PASSAGES.find((d) => d === s.directLine) ?? base.directLine,
+  };
 }
 
 /** The shipped defaults' revision (`UserSettings.defaults`). */

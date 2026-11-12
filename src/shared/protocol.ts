@@ -27,6 +27,7 @@ import type { LiveChange, LiveView } from "./live";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
 import type { AdjudicationDef, FacetId, FacetValueId, FeedScope, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, SectionFeed, StepPurpose, WorldDoc, WorldIndex } from "./world";
 import type { GM_OUTLINE, GmPartReply, GmReadPart, QueuedOn } from "./gm-parts";
+import type { PrepareAsk, PrepareView, StoryAnswer, StoryAsk } from "./story-pages";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -1181,6 +1182,19 @@ export type LiveRequest = Request<"lre.live"> & { chatId: ChatId; op: "get" | "l
 /** What a chat's agent run did since this page last heard (`lre.live`): a new run's view, or the entries its run added and how it stands. Sent to the pages that asked about that chat's live view. */
 export type LiveUpdate = Envelope<"lre.live.update"> & { chatId: ChatId } & LiveChange;
 
+// ---------------------------------------------------------------- the story engine's pages (DEPTH2-PLAN §1, `shared/story-pages.ts`)
+
+/**
+ * The Harness tab's Cast and Record, and the use Settings → Story → Budget shows: `cast` (everyone
+ * the story names, with their minds), `pin` (the player's pin on someone's standing, or lifting it),
+ * `reached` (what last reached someone), `record` (a reply's beats and the drafts on the path) and
+ * `budget` (the treatments counted around now). GM data, behind the gate as `lre.gm` is.
+ */
+export type StoryRequest = Request<"lre.story"> & { chatId: ChatId } & StoryAsk;
+
+/** The prepared start on Play → Now (`backend/story/prepare.ts`): read it, start it, give the plan the player's word, steer it, cap it, hold it, carry it on, cancel it. */
+export type PrepareRequest = Request<"lre.prepare"> & { chatId: ChatId } & PrepareAsk;
+
 // ---------------------------------------------------------------- an agent turn's review card (INC2-SPEC C13)
 
 /**
@@ -1263,7 +1277,9 @@ export type FrontendToBackend =
   | WorkspaceRequest
   | ReviewRequest
   | PromptsRequest
-  | LiveRequest;
+  | LiveRequest
+  | StoryRequest
+  | PrepareRequest;
 
 // ---------------------------------------------------------------- responses (backend → frontend)
 
@@ -1392,6 +1408,10 @@ export interface ResultBodies {
   "lre.prompts": { test: PromptTestView };
   /** `get`: the chat's live view now (null when it has had no agent run since the engine started); `leave`: none. */
   "lre.live": { live: LiveView | null };
+  /** `cast` and `pin`: the cast after it; `reached`, `record` and `budget` answer theirs. */
+  "lre.story": StoryAnswer;
+  /** Every op: the prepared start as it stands after it. */
+  "lre.prepare": PrepareView;
 }
 
 export type ResultMessage = {

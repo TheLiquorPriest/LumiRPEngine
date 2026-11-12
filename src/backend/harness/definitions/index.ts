@@ -1,22 +1,35 @@
-// What the harness engine registers with LumiAH (HARNESS-SLICE3: "Agents RPEngine registers"): its
-// agent definitions with its skills, how an agent of each definition reads and writes in RPEngine,
-// and the world's level of guidance.
+// What the harness engine registers with LumiAH: its cast of agent definitions with their skills,
+// how an agent of each definition reads and writes in RPEngine, and the world's level of guidance.
 //
+// - The cast (DEPTH2-PLAN §3, §5): the author, the main agent of every turn, and those it starts
+//   (`delegate`, `job_start`): a character, one instance per principal (`as`, the person it is); the
+//   game master; the narrator; the historian. The game master's assistant is the GM's own
+//   conversation (GM → Assistant), which no turn starts. Nothing here starts an agent or decides for
+//   one.
 // - A definition is LumiAH's (`AgentDefinition`). Its name, what it is for and its instructions are
-//   registry texts (`shared/harness-texts.ts`, the page "Harness engine"), sent in the user's own
-//   words where they wrote them. Its tools, effort and budget are what it runs with until the user's
-//   own settings for it say otherwise: LumiAH takes an extension's definitions as defaults the user
-//   still overrides, so every number here is a setting's default, never a rule.
-// - The author is the main agent of a chat the engine claims; every other definition is one it
-//   starts (`delegate`, `job_start`). Nothing here starts an agent or decides for one.
+//   registry texts (`shared/harness-texts.ts`, the page "Harness engine", each lane's own gathered
+//   there), sent in the user's own words where they wrote them. Its effort and budget are what it
+//   runs with until the user's own settings for it say otherwise: LumiAH takes an extension's
+//   definitions as defaults the user still overrides, so every number here is a setting's default,
+//   never a rule. Its name, what it is for, its instructions and its tools stay the engine's
+//   (`owns`), whatever version of it the user keeps in LumiAH: the texts are edited on the engine's
+//   own Prompts page, and they name the tools. A definition whose texts aren't registered isn't
+//   registered.
+// - Each is given the tools its part needs and no more, and every tool its texts and skills name
+//   (`test/backend/harness-cast-held.test.ts`). What it may do with them is held by the tools
+//   themselves and the bridge's gate (who may write which beat, whose mind a character reads),
+//   never by these lists alone.
 // - The world's guidance is read for each chat: what the world is, whose the player character is,
 //   and a line for each of the world's rules and tone settings as they stand in that chat.
 
 import type { RoleId, RoleTier } from "../../../shared/agent-roles";
 import type { ToolView } from "../../../shared/agent-tools";
 import { HARNESS_AGENT, HARNESS_AGENT_IDS, HARNESS_FAMILY, HARNESS_TEXT, HARNESS_TOOL, type HarnessAgentId } from "../../../shared/harness-texts";
+import { MINDS_TOOL } from "../../../shared/harness-texts-minds";
 import { PLAY_TOOL } from "../../../shared/harness-texts-play";
-import { STORY_TOOL } from "../../../shared/harness-texts-story";
+import { PREPARE_TOOL } from "../../../shared/harness-texts-prepare";
+import { RECORD_TOOL } from "../../../shared/harness-texts-record";
+import { STAGE_TOOL } from "../../../shared/harness-texts-stage";
 import { hasOwn } from "../../../shared/json";
 import { worldMindsOf } from "../../../shared/minds";
 import type { PromptTexts } from "../../../shared/prompts";
@@ -29,7 +42,7 @@ import type { WorldState } from "../../../engine/state";
 import { HARNESS_LISTED, type HarnessListed } from "../../agents/tools/harness";
 import { toolsGuide } from "../../agents/tools/registry";
 import { renderPrompt } from "../../prompts";
-import type { AgentBudget, AgentDefinition, Skill } from "../shapes";
+import type { AgentBudget, AgentDefinition, OwnedField, Skill } from "../shapes";
 import { harnessSkills } from "../skills";
 import { LUMIAH_FAMILY, LUMIAH_TOOL } from "./lumiah";
 
@@ -44,6 +57,14 @@ const names = (pick: (tool: HarnessListed) => boolean): string[] => HARNESS_LIST
 const reads = (tool: HarnessListed): boolean => tool.writer === "read" && tool.name !== "lore_load";
 
 /**
+ * LumiAH's families the author is given whole: all but the reply's (it names `reply_write` alone:
+ * on the harness no writer writes the reply, so `write_reply` is no tool of its), the preset's
+ * (each agent is given its own part of the preset, `story/preset.ts`), and the web, which acts
+ * outside the world and the chat.
+ */
+const AUTHOR_LUMIAH = Object.values(LUMIAH_FAMILY).filter((f) => f !== LUMIAH_FAMILY.reply && f !== LUMIAH_FAMILY.preset && f !== LUMIAH_FAMILY.web);
+
+/**
  * The old engines' tools the assistant's own conversation can't use. Four note a fact for a turn's
  * own record to land (`ReadNotes`), and a conversation outside a turn has no record. The two that
  * keep a lore file would land it, on the game master's Apply, in the chat's own kept files rather
@@ -52,20 +73,26 @@ const reads = (tool: HarnessListed): boolean => tool.writer === "read" && tool.n
 const NOT_IN_CONVERSATION: readonly string[] = ["person_add", "purchase", "revenue_note", "project_note", "lore_save", "lore_draft"];
 
 /**
- * The tools each definition is given until the user says otherwise, by name or as a whole family
- * (`@<family>`).
+ * The tools each definition is given, by name or as a whole family (`@<family>`): the engine's own
+ * whatever version the user keeps (`OWNS`), each switched off only on LumiAH's Tools page.
  * - The author: every family of the engine's but a person's own mind (it knows what no one person
- *   does, so a mind it wrote would be no one's own), and every family of LumiAH's.
- * - A character: only its own mind's tools (its view, its decision, its memory, its files, its
- *   choice in a fight), so what it reads is what that person perceives.
- * - The game master: what reads the world, a fight as it stands, and an attempt's odds and stakes.
- *   It changes nothing, and it rolls nothing: the dice fall when the author plays the attempt.
- * - The knowledge agent: its own two tools, and what reads people and who knows what.
- * - The chronicler: the chat as written, what reads the world, the story's own changes (things,
- *   places made in play, people who walk on, purchases), what the reply told (`story_record`: a
- *   move, an injury, a payment, a death, the time its telling added), and where the reply says
- *   something against its turn (`story_departure`). Not `time_pass`: the turn's own time is the
- *   author's alone, before its reply.
+ *   does), with the mind tools it needs by name (it reads any mind, and writes who a principal is
+ *   and a supporting character's profile); LumiAH's families but the reply's, the preset's and the
+ *   web; and `reply_write`, which releases a passage.
+ * - A character: what reached it (`feed_read`), its own acts (`beat_write`), its own mind, its
+ *   choice in a fight, and its skills. Nothing that reads the world as the game master does. On the
+ *   direct line its answer is the reply: the author hands it the reply's stream (`delegate` with
+ *   `to_reply`), which LumiAH streams through the author's own hold on the reply, so the character
+ *   holds no `reply_write` of its own.
+ * - The game master: what reads the world, an attempt's odds and stakes and a fight as it stands;
+ *   a passage held to its beats (`passage_read`, `passage_check`); the story record it reads and
+ *   writes its rulings to; any mind, to read. It rolls nothing: the dice fall when the author plays
+ *   the attempt.
+ * - The narrator: what reached the point of view it tells, and the passage it drafts, and nothing
+ *   else.
+ * - The historian: the one stretch of the chat's past the author opened for it (`stretch_read`),
+ *   the beats it records from it (`stretch_beats`, `stretch_done`), and what reads the people,
+ *   places, clock and lore those beats name. None of LumiAH's chat tools: it reads only its stretch.
  * - The game master's assistant: what reads the world, and every change the old engines' assistant
  *   could propose (the story's and the game master's), but those its conversation can't use
  *   (`NOT_IN_CONVERSATION`); LumiAH's chat and workspace. None of the harness engine's own tools:
@@ -75,15 +102,15 @@ const NOT_IN_CONVERSATION: readonly string[] = ["person_add", "purchase", "reven
 function toolsOf(id: HarnessAgentId): string[] {
   switch (id) {
     case HARNESS_AGENT.author:
-      return [...new Set([...HARNESS_LISTED.map((t) => t.family).filter((f) => f !== HARNESS_FAMILY.mind), ...Object.values(LUMIAH_FAMILY)])].map(family);
+      return [...new Set([...HARNESS_LISTED.map((t) => t.family).filter((f) => f !== HARNESS_FAMILY.mind), ...AUTHOR_LUMIAH])].map(family).concat(MINDS_TOOL.read, MINDS_TOOL.write, LUMIAH_TOOL.replyWrite);
     case HARNESS_AGENT.character:
-      return [family(HARNESS_FAMILY.mind)];
+      return [RECORD_TOOL.feedRead, RECORD_TOOL.beatWrite, MINDS_TOOL.read, MINDS_TOOL.write, MINDS_TOOL.digested, PLAY_TOOL.mindFight, LUMIAH_TOOL.skillLoad];
     case HARNESS_AGENT.gm:
-      return [...names(reads), HARNESS_TOOL.checksStakes, PLAY_TOOL.fightRead];
-    case HARNESS_AGENT.knowledge:
-      return [HARNESS_TOOL.knowledgeScene, HARNESS_TOOL.knowledgeInfer, ...names((t) => reads(t) && (t.family === "knowledge" || t.family === "people"))];
-    case HARNESS_AGENT.chronicler:
-      return [LUMIAH_TOOL.chatRead, LUMIAH_TOOL.chatGrep, LUMIAH_TOOL.chatSearch, ...names((t) => reads(t) || t.writer === "story"), STORY_TOOL.record, STORY_TOOL.departure];
+      return [...names(reads), HARNESS_TOOL.checksStakes, PLAY_TOOL.fightRead, STAGE_TOOL.passageRead, STAGE_TOOL.passageCheck, RECORD_TOOL.beatsRead, RECORD_TOOL.beatWrite, MINDS_TOOL.read, MINDS_TOOL.seed];
+    case HARNESS_AGENT.narrator:
+      return [STAGE_TOOL.narrationRead, STAGE_TOOL.passageDraft];
+    case HARNESS_AGENT.historian:
+      return [PREPARE_TOOL.read, PREPARE_TOOL.beats, PREPARE_TOOL.done, "people_find", "people_sheet", "places_find", "places_read", "time_clock", "lore_search", "lore_read"];
     case HARNESS_AGENT.assistant:
       return [...names((t) => t.writer !== null && t.name !== "lore_load" && !NOT_IN_CONVERSATION.includes(t.name)), family(LUMIAH_FAMILY.chat), family(LUMIAH_FAMILY.workspace)];
   }
@@ -104,27 +131,43 @@ const UNLIMITED = { callTokensIn: null, callMs: null, callTools: null, tokensIn:
  * bounded; everything else is unlimited until the user bounds it.
  */
 const BUDGETS: Readonly<Record<HarnessAgentId, AgentBudget>> = {
-  // Room in each answer for a reasoning model's thinking and a brief; rounds enough for a turn that reads, has people think, rolls, records, commits and starts its jobs.
-  [HARNESS_AGENT.author]: { ...UNLIMITED, callTokensOut: 16_000, toolTurns: 40, revisions: 2, concurrency: 4 },
-  // A look, a file or two of its own, its notes folded when some are due, and one record: a mind still calling tools after that has left its task.
-  [HARNESS_AGENT.character]: { ...UNLIMITED, callTokensOut: 4000, toolTurns: 10, revisions: 2, concurrency: 2 },
-  // The odds, what the ruling turns on, what is at stake.
-  [HARNESS_AGENT.gm]: { ...UNLIMITED, callTokensOut: 4000, toolTurns: 8, revisions: 2, concurrency: 2 },
-  // The scene, one record, and a second for what the first refused.
-  [HARNESS_AGENT.knowledge]: { ...UNLIMITED, callTokensOut: 8000, toolTurns: 8, revisions: 1, concurrency: 2 },
-  // Lookups together, then changes together, a few times over.
-  [HARNESS_AGENT.chronicler]: { ...UNLIMITED, callTokensOut: 8000, toolTurns: 12, revisions: 1, concurrency: 4 },
+  // A call's answer room holds the model's reasoning too, and a strong reasoning model can spend several thousand tokens deciding before it writes or calls anything: with too little room the answer is cut mid-thought and the run ends with nothing. So every agent's room is generous; rounds enough for a scene of several beats, its rulings, each passage released, and the jobs it starts.
+  [HARNESS_AGENT.author]: { ...UNLIMITED, callTokensOut: 32_000, toolTurns: 40, revisions: 2, concurrency: 4 },
+  // What reached them, a file or two of their own mind, their act, and a passage when the reply is theirs: a mind still calling tools after that has left its task.
+  [HARNESS_AGENT.character]: { ...UNLIMITED, callTokensOut: 16_000, toolTurns: 12, revisions: 2, concurrency: 2 },
+  // The odds, what the ruling turns on, what is at stake, the beat it writes; or a passage held to its beats, and held again after each redraft.
+  [HARNESS_AGENT.gm]: { ...UNLIMITED, callTokensOut: 16_000, toolTurns: 12, revisions: 2, concurrency: 2 },
+  // What reached the point of view, then the passage, and a round for each redraft the check asks: six rounds ran out mid-revision in a live scene, and its last draft was refused.
+  [HARNESS_AGENT.narrator]: { ...UNLIMITED, callTokensOut: 16_000, toolTurns: 12, revisions: 3, concurrency: 1 },
+  // One stretch read whole, its beats recorded a few calls at a time, and the stretch closed.
+  [HARNESS_AGENT.historian]: { ...UNLIMITED, callTokensOut: 16_000, toolTurns: 16, revisions: 1, concurrency: 2 },
   // A question read from several sides, then the changes it asked for, each checked.
-  [HARNESS_AGENT.assistant]: { ...UNLIMITED, callTokensOut: 8000, toolTurns: 20, revisions: 1, concurrency: 4 },
+  [HARNESS_AGENT.assistant]: { ...UNLIMITED, callTokensOut: 16_000, toolTurns: 20, revisions: 1, concurrency: 4 },
 };
 
 // ---------------------------------------------------------------- definitions
 
 /**
+ * Definitions whose tools are their own trade, given whoever starts them (LumiAH's `grant`): the
+ * author, who starts them all, holds none of a person's own mind's tools, nor the narrator's, nor
+ * every tool the game master and the historian read and write with, and must not.
+ */
+const OWN_TOOLS: ReadonlySet<HarnessAgentId> = new Set([HARNESS_AGENT.character, HARNESS_AGENT.gm, HARNESS_AGENT.narrator, HARNESS_AGENT.historian]);
+
+/**
+ * What of each definition stays the engine's wherever the user keeps a version of it in LumiAH
+ * (LumiAH's `owns`): its name, what it is for and its instructions, which are edited on the engine's
+ * own Prompts page, and its tools, which those texts name. The user's version keeps its connection,
+ * model, effort and limits.
+ */
+const OWNS: readonly OwnedField[] = ["instructions", "tools", "name", "description"];
+
+/**
  * One definition in `texts`. Its instructions end with what its tools share (`toolsGuide`: what a
  * change does, how a thing is named), which the old engines tell an agent once in its system prompt
- * too. The author is given the request its turn answers; everyone it starts, its task alone, on the
- * author's connection and model until the user gives them their own.
+ * too. The author is given the request its turn answers (as much of it as the chat's claim shows
+ * it); everyone it starts, its task alone, on the author's connection and model until the user, or
+ * the engine's model settings, give them their own.
  */
 function definitionOf(id: HarnessAgentId, texts: PromptTexts): AgentDefinition {
   const tools = toolsOf(id);
@@ -136,8 +179,8 @@ function definitionOf(id: HarnessAgentId, texts: PromptTexts): AgentDefinition {
     instructions,
     given: id === HARNESS_AGENT.author ? "request" : "task",
     ...(id === HARNESS_AGENT.author ? {} : { follows: HARNESS_AGENT.author }),
-    // A character's tools are its definition's, whoever starts it. LumiAH gives a delegate only what its starter holds unless the definition says otherwise, and the author, who starts every character, holds none of a mind's tools itself (it knows what no one person does).
-    ...(id === HARNESS_AGENT.character ? { grant: "definition" as const } : {}),
+    ...(OWN_TOOLS.has(id) ? { grant: "definition" as const } : {}),
+    owns: [...OWNS],
     connectionId: null,
     model: null,
     effort: "inherit",
@@ -174,9 +217,10 @@ const ROLES: Readonly<Record<HarnessAgentId, HarnessRole>> = {
   [HARNESS_AGENT.character]: { role: "minds", tier: "read", view: "everyone", marks: false },
   // The ruling stands in for the judge's answer, which the intent role gave.
   [HARNESS_AGENT.gm]: { role: "intent", tier: "read", view: "gm", marks: true },
-  [HARNESS_AGENT.knowledge]: { role: "knowledge", tier: "read", view: "gm", marks: true },
-  // The chronicler keeps the world's fabric true to the reply, as the Curator did, at the story's tier.
-  [HARNESS_AGENT.chronicler]: { role: "curator", tier: "story", view: "gm", marks: true },
+  // The narrator tells what reached a point of view, through its own tool: it reads nothing else, and writes nothing.
+  [HARNESS_AGENT.narrator]: { role: "scene", tier: "read", view: "everyone", marks: false },
+  // The historian records what the chat's past established, as the Curator kept the world's fabric, at the story's tier.
+  [HARNESS_AGENT.historian]: { role: "curator", tier: "story", view: "gm", marks: true },
   // In a turn it only reads, as any agent no turn has a part for. Its own conversation (GM → Assistant, `harness/assistant.ts`) gives it the game master's tier there, with a writer that only checks.
   [HARNESS_AGENT.assistant]: { role: "director", tier: "read", view: "gm", marks: true },
 };

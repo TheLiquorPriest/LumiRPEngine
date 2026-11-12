@@ -127,10 +127,11 @@ const PATIENCE_MS = 5_000;
 type Sent = { role: string; text: string }[];
 type Interceptor = (input: InterceptorInput) => Promise<InterceptorVerdict>;
 
-/** What every seat of one fake Lumiverse shares: the interceptors it runs on a prompt, in the order they registered, what it then sends its model, and its wait for them. */
+/** What every seat of one fake Lumiverse shares: the interceptors it runs on a prompt, in the order they registered, what it then sends its model and the parameters they set on the request, and its wait for them. */
 interface Shared {
   interceptors: { handler: Interceptor; logs: string[] }[];
   sent: Map<string, Sent>;
+  params: Map<string, Record<string, unknown>>;
   waits: Map<string, { stop: AbortController; lost: PromiseWithResolvers<"lost"> }>;
 }
 
@@ -160,10 +161,11 @@ function promptOf(host: FakeHost, g: Generation): PromptMessage[] {
 function sharedOf(host: FakeHost): Shared {
   const known = SHARED.get(host);
   if (known) return known;
-  const shared: Shared = { interceptors: [], sent: new Map(), waits: new Map() };
+  const shared: Shared = { interceptors: [], sent: new Map(), params: new Map(), waits: new Map() };
   SHARED.set(host, shared);
   host.promptInterceptor = async (g) => {
     let prompt = promptOf(host, g);
+    let parameters: Record<string, unknown> = {};
     const wait = { stop: new AbortController(), lost: Promise.withResolvers<"lost">() };
     shared.waits.set(g.id, wait);
     const gaveUp = new Promise<"gave up">((resolve) => wait.stop.signal.addEventListener("abort", () => resolve("gave up"), { once: true }));
@@ -188,12 +190,15 @@ function sharedOf(host: FakeHost): Shared {
               return kept ? [kept] : [];
             })
           : came.filter((_, i) => !left.has(i));
+      // A later interceptor's parameters go over an earlier one's, as Lumiverse merges them into the request.
+      parameters = { ...parameters, ...verdict.parameters };
     }
     shared.waits.delete(g.id);
     shared.sent.set(
       g.id,
       prompt.map((m) => ({ role: m.role, text: m.text })),
     );
+    shared.params.set(g.id, parameters);
   };
   return shared;
 }
@@ -214,6 +219,16 @@ export interface Seat {
   permit(permission: string, on: boolean): void;
   /** What Lumiverse sends its own model for a generation, once every interceptor answered: the messages in order. */
   prompt(generationId: string): Sent;
+  /** The parameters the interceptors set on a generation's request, a later one's over an earlier one's. */
+  parameters(generationId: string): Record<string, unknown>;
+  /** The user's connections as Lumiverse lists them: Lumiverse's own, and any a runtime adds (its loopback). */
+  connections: HostConnection[];
+  /** A session of Lumiverse's event socket that isn't a page (a runtime's link): what the backend sends to it reaches `receive`, and none of it is a page's. */
+  outlet(session: string, receive: (message: unknown) => void): void;
+  /** Something that session sends the backend, as Lumiverse hands it on. */
+  deliver(payload: unknown, session: string): void;
+  /** That session is gone: the backend is told, as Lumiverse tells it of a closed socket. */
+  closeSession(session: string): void;
   /** Lumiverse stops waiting for the interceptors of a generation under way, and says so: its time ran out (`timed out`), or the user pressed Stop. */
   giveUp(generationId: string, why: "timed out" | "stopped"): void;
   /** The extension's backend is gone while a generation waits on its interceptor: Lumiverse goes on with the prompt as it stood, and nothing is told to a backend that isn't there. */
@@ -249,6 +264,8 @@ export function seatOf(rig: Rig, identifier: string = ENGINE_EXTENSION): Seat {
   const timers = new Set<() => void>();
   const permission: ((permission: string, granted: boolean) => void)[] = [];
   const pageHandlers: ((payload: unknown, userId: string, sessionId: string | undefined) => void)[] = [];
+  const outlets = new Map<string, (message: unknown) => void>();
+  const closed: ((userId: string, sessionId: string) => void)[] = [];
   const answers = new Map<string, PromiseWithResolvers<unknown>>();
   const written = new Map<string, number>();
   const files = identifier === ENGINE_EXTENSION ? host.files : new Map<string, string>();
@@ -293,6 +310,18 @@ export function seatOf(rig: Rig, identifier: string = ENGINE_EXTENSION): Seat {
       for (const handler of permission) handler(name, on);
     },
     prompt: (generationId) => shared.sent.get(generationId) ?? [],
+    parameters: (generationId) => shared.params.get(generationId) ?? {},
+    connections: [CONNECTION],
+    outlet(session, receive) {
+      outlets.set(session, receive);
+    },
+    deliver(payload, session) {
+      for (const handler of pageHandlers) handler(payload, userId, session);
+    },
+    closeSession(session) {
+      if (!outlets.delete(session)) return;
+      for (const handler of closed) handler(userId, session);
+    },
     giveUp(generationId, why) {
       shared.waits.get(generationId)?.stop.abort(new Error(why === "timed out" ? "The interceptor timed out." : "The generation was stopped."));
     },
@@ -349,6 +378,8 @@ export function seatOf(rig: Rig, identifier: string = ENGINE_EXTENSION): Seat {
     frontend: {
       send(message, _userId, sessionId) {
         if (dead) return;
+        const outlet = sessionId === undefined ? undefined : outlets.get(sessionId);
+        if (outlet !== undefined) return outlet(message);
         pushed.push({ message, session: sessionId });
         if (!isRecord(message) || typeof message.reqId !== "string") return;
         const answer = answers.get(message.reqId);
@@ -358,7 +389,7 @@ export function seatOf(rig: Rig, identifier: string = ENGINE_EXTENSION): Seat {
         else answer.resolve(message.body);
       },
       onMessage: (handler) => void pageHandlers.push(handler),
-      onClosed: () => undefined,
+      onClosed: (handler) => void closed.push(handler),
     },
 
     events: {
@@ -375,7 +406,7 @@ export function seatOf(rig: Rig, identifier: string = ENGINE_EXTENSION): Seat {
     registerInterceptor: (handler) => void shared.interceptors.push({ handler, logs }),
 
     models: {
-      async call(request, _userId, signal) {
+      async call(request, _userId, signal, onDelta) {
         if (dead) return new Promise<ModelResult>(() => undefined);
         calls.push(request);
         const ended = new Promise<never>((_resolve, reject) => {
@@ -385,19 +416,22 @@ export function seatOf(rig: Rig, identifier: string = ENGINE_EXTENSION): Seat {
         });
         ended.catch(() => undefined);
         const answer = await Promise.race([Promise.resolve().then(() => seat.script(request)), ended]);
+        // The answer's text streams as Lumiverse's generation API streams it, before the call ends.
+        const content = typeof answer === "string" ? answer : (answer.content ?? "");
+        if (content !== "" && (typeof answer === "string" || answer.error === undefined)) onDelta?.({ content });
         if (typeof answer === "string") return { content: answer, finishReason: "stop" } satisfies ModelResult;
         if (answer.error !== undefined) throw new Error(answer.error);
         const tools = answer.toolCalls ?? [];
-        return { content: answer.content ?? "", finishReason: tools.length > 0 ? "tool_calls" : "stop", ...(tools.length > 0 ? { toolCalls: tools } : {}) } satisfies ModelResult;
+        return { content, finishReason: tools.length > 0 ? "tool_calls" : "stop", ...(tools.length > 0 ? { toolCalls: tools } : {}) } satisfies ModelResult;
       },
-      pass: () => Promise.reject(new Error("the bed passes no request through: a chat that runs built in never asks for it")),
+      pass: () => Promise.reject(new Error("the bed passes no request through: no chat of the engine's asks for it")),
     },
 
     connections: {
-      list: () => Promise.resolve([CONNECTION]),
-      get: (connectionId) => Promise.resolve(connectionId === CONNECTION.id ? CONNECTION : null),
+      list: () => Promise.resolve([...seat.connections]),
+      get: (connectionId) => Promise.resolve(seat.connections.find((c) => c.id === connectionId) ?? null),
       active: () => Promise.resolve(CONNECTION.id),
-      models: () => Promise.resolve([CONNECTION.model]),
+      models: (connectionId) => Promise.resolve([seat.connections.find((c) => c.id === connectionId)?.model ?? CONNECTION.model]),
     },
 
     storage: {

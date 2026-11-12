@@ -1,6 +1,7 @@
 // Settings (DESIGN §12): a home list of pages in groups, each page under a header with Back, and a
 // page with pages of its own opening each under its own header. Getting started: Helper model, Model
-// use, Steps and connections, Minds, Narrator, Timeouts. Agents: Agents (a turn at a glance, every
+// use, Steps and connections, Minds, Narrator, Timeouts. The story engine: Story (the harness's
+// models, budget, minds, preparing and the record's limits, `story.tsx`). Agents: Agents (a turn at a glance, every
 // agent call's switches, and its sections, each a page of its own: Pipeline, Review card, System
 // instructions, Budgets, Compaction, Recording, Throttles, Caching, Acceptance runs), Roles (a row
 // per role, each opening the role's page), Context (what each role starts with, each row opening the
@@ -58,6 +59,7 @@ import { RetentionPage, retentionSummary } from "./retention";
 import { LorePage, loreSummary } from "./lore";
 import { ownTextCount, promptTestRequest, PromptsPage } from "./agent-prompts";
 import { SpeedPage, speedSummary } from "./speed";
+import { narrationChanged, STORY_SUB, STORY_SUBS, storyChanged, StoryHub, StorySubPage, storySummary, type StorySub } from "./story";
 import { speedChanged } from "../../shared/speed-presets";
 
 type Page = Exclude<SettingsPage, "home">;
@@ -95,11 +97,13 @@ const PAGE: Record<Page, { title: string; subtitle: string; icon: IconName }> = 
   mcp: { title: "MCP server", subtitle: "Your agent's lumirpengine, and how it follows updates", icon: "branch" },
   prompts: { title: "Prompts", subtitle: "Every text sent to a model, yours to edit", icon: "edit" },
   retention: { title: "Retention", subtitle: "Which turns keep their transcripts, and how long the agents' stored texts are kept", icon: "box" },
+  story: { title: "Story", subtitle: "The story engine: models, budget, minds, preparing and the record's limits", icon: "book" },
 };
 
 /** The home list's groups, in order, each with its pages. */
 export const HOME_GROUPS: readonly { title: string; pages: readonly Page[] }[] = [
   { title: "Getting started", pages: ["helper", "model", "steps", "minds", "narrator", "timeouts"] },
+  { title: "The story engine", pages: ["story"] },
   { title: "Agents", pages: ["agents", "speed", "roles", "context", "main", "assistant", "prompts", "retention"] },
   { title: "Defaults for new chats", pages: ["realism", "checks", "time"] },
   { title: "Replies", pages: ["extraction", "swipes"] },
@@ -117,12 +121,13 @@ const STATIC_CAVEATS = [
   "Undo covers the latest reply; earlier changes go through Keep or Discard.",
 ];
 
-/** A page within a page that names one of its own: an Agents section, or a role on Roles or Context. */
-function subOf(route: SettingsRoute): { agents: AgentsSub } | { role: RoleId } | null {
+/** A page within a page that names one of its own: an Agents section, a role on Roles or Context, or one of Story's pages. */
+function subOf(route: SettingsRoute): { agents: AgentsSub } | { role: RoleId } | { story: StorySub } | null {
   const sub = route.sub;
   if (sub === undefined) return null;
   if (route.page === "agents") return (AGENTS_SUBS as readonly string[]).includes(sub) ? { agents: sub as AgentsSub } : null;
   if (route.page === "roles" || route.page === "context") return (ROLE_IDS as readonly string[]).includes(sub) ? { role: sub as RoleId } : null;
+  if (route.page === "story") return (STORY_SUBS as readonly string[]).includes(sub) ? { story: sub as StorySub } : null;
   return null;
 }
 
@@ -132,6 +137,7 @@ export function settingsHeader(route: SettingsRoute): { title: string; subtitle:
   const sub = subOf(route);
   if (sub === null) return { ...PAGE[route.page], backLabel: "Settings" };
   if ("agents" in sub) return { title: AGENTS_SUB[sub.agents].title, subtitle: AGENTS_SUB[sub.agents].subtitle, backLabel: PAGE[route.page].title };
+  if ("story" in sub) return { title: STORY_SUB[sub.story].title, subtitle: STORY_SUB[sub.story].subtitle, backLabel: PAGE[route.page].title };
   return { title: ROLE_LABEL[sub.role], subtitle: ROLE_PLAIN[sub.role], backLabel: PAGE[route.page].title };
 }
 
@@ -208,6 +214,8 @@ function summaryOf(page: Page, data: SettingsResult, caveats: readonly Caveat[] 
     }
     case "retention":
       return { subtitle: retentionSummary(settings.retention) };
+    case "story":
+      return { subtitle: storySummary(settings.story), ...changed(storyChanged(settings.story) + narrationChanged(settings.narration)) };
   }
 }
 
@@ -341,6 +349,7 @@ export function SettingsBody(props: { route: SettingsRoute; data: SettingsResult
   const routes: RouteSettings = { modelUse: settings.modelUse, helper: settings.helper };
   const sub = subOf(route);
   if (sub !== null && "agents" in sub) return <AgentsSubPage sub={sub.agents} agents={settings.agents} connections={connections} busy={busy} patch={patch} go={go} />;
+  if (sub !== null && "story" in sub) return <StorySubPage sub={sub.story} story={settings.story} narration={settings.narration} view={ctx.view} busy={busy} patch={patch} />;
   if (sub !== null) return <RolePage id={sub.role} agents={settings.agents} routes={routes} prompts={settings.prompts} connections={connections} busy={busy} patch={patch} go={go} />;
   switch (route.page) {
     case "home":
@@ -393,6 +402,8 @@ export function SettingsBody(props: { route: SettingsRoute; data: SettingsResult
       return <PromptsPage prompts={settings.prompts} patch={patch} busy={busy} {...(ctx.test ? { test: ctx.test } : {})} {...(route.open ? { open: route.open } : {})} />;
     case "retention":
       return <RetentionPage retention={settings.retention} patch={patch} busy={busy} />;
+    case "story":
+      return <StoryHub story={settings.story} narration={settings.narration} busy={busy} patch={patch} go={go} />;
     case "caveats":
       return <CaveatsPage caveats={ctx.caveats} open={(page) => go({ page })} />;
   }

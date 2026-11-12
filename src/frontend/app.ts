@@ -56,7 +56,17 @@ export interface GmState {
   focus?: string;
 }
 
-export type SettingsPage = "home" | "helper" | "model" | "steps" | "minds" | "narrator" | "timeouts" | "agents" | "roles" | "context" | "main" | "assistant" | "prompts" | "retention" | "speed" | "realism" | "checks" | "time" | "extraction" | "swipes" | "preset" | "lore" | "display" | "caveats" | "diagnostics" | "mcp";
+export type SettingsPage = "home" | "helper" | "model" | "steps" | "minds" | "narrator" | "timeouts" | "agents" | "roles" | "context" | "main" | "assistant" | "prompts" | "retention" | "speed" | "realism" | "checks" | "time" | "extraction" | "swipes" | "preset" | "lore" | "display" | "caveats" | "diagnostics" | "mcp" | "story";
+
+/** The Harness tab's pages: LumiAH's (the agents at work, where the tab opens) and the story's own, Cast, Record and Notebook (`story/`). */
+export type HarnessPage = "agents" | "cast" | "record" | "notebook";
+
+/** Where the Harness tab is: its page, and what that page opens at: someone on Cast, a reply on Record. */
+export interface HarnessRoute {
+  page: HarnessPage;
+  entity?: string;
+  at?: { messageId: string; swipeId: number };
+}
 
 /**
  * Where Settings is: a page, and on a page with pages of its own one of them (`sub`: one of the
@@ -110,6 +120,7 @@ export interface UiState {
   gm: GmState;
   build: BuildRoute;
   settings: SettingsRoute;
+  harness: HarnessRoute;
   /** The float overlay that is open; one at a time. */
   overlay: "map" | "palette" | "world" | null;
   /** Ids show beside names everywhere (Settings → Display); kept on this device under SHOW_IDS_KEY. */
@@ -121,7 +132,7 @@ export const SHOW_IDS_KEY = "lre:ui:show-ids";
 
 /** The UI state a session starts with. */
 export function initialUi(showIds: boolean): UiState {
-  return { mode: "play", play: { dest: "now", tab: {}, stack: [] }, gm: { revealed: false, section: "world" }, build: { view: "worlds" }, settings: { page: "home" }, overlay: null, showIds };
+  return { mode: "play", play: { dest: "now", tab: {}, stack: [] }, gm: { revealed: false, section: "world" }, build: { view: "worlds" }, settings: { page: "home" }, harness: { page: "agents" }, overlay: null, showIds };
 }
 
 /** Play at a destination, on one of its panels when given. Navigating starts with no sheet open. */

@@ -1,17 +1,18 @@
 // The world built without hand-written JSON: a place, a path between two places, a map, what is on a
-// map, and the map settings. Each tool reads the world's draft, works out one write of it from its
-// arguments (a whole place, route or map put back with only what the call gave changed; a patch for
-// the map settings, which are no part the store sets), and writes it as the document tools do
-// (`world-kit.ts`): through the store's own path for an editor's writes, answered with what changed,
-// the draft's version and the lint the write brought.
+// map, and the map settings. Each tool reads the world where its call writes (`worldTarget`: this
+// chat's own world unless `in` says the world's document), works out one write from its arguments (a
+// whole place, route or map put back with only what the call gave changed; the map settings whole),
+// and writes it there (`world-kit.ts`): in this chat's own world, staged with the turn and played at
+// once; in the world's document, through the store's own path for an editor's writes, answered with
+// what changed, the draft's version and the lint the write brought.
 //
 // What a map draws is the map's: a place or a route with a `map` is refused here as the store
 // refuses it, with the tool that changes it in its map. A map is checked before it is written by
 // the engine's own checks of one (`mapProblems`: the published schema, then the compiled world), so
-// a write that would leave it wrong is refused with what they say and the draft stays as it was.
+// a write that would leave it wrong is refused with what they say and the world stays as it was.
 //
-// Places are named as the draft has them (`draftPlace`), not as the chat plays them: the draft may
-// hold a place the chat's revision doesn't.
+// Places are named as the world the call writes has them (`placeIn`): this chat's own world plays
+// what the world's draft doesn't hold, and the draft may hold a place the chat doesn't play.
 
 import { TOOL_NOTE } from "../../../../shared/agent-tools";
 import { SIGHT_MAX } from "../../../../shared/grid";
@@ -21,7 +22,7 @@ import { HARNESS_FAMILY } from "../../../../shared/harness-text-kit";
 import { WORLD_NOTE } from "../../../../shared/harness-texts-world";
 import type { PlaceVisibility, TravelMode } from "../../../../shared/ids";
 import { hasOwn, type JsonObject, type JsonValue, safeKey } from "../../../../shared/json";
-import { jsonEqual, pointerOf } from "../../../../shared/json-patch";
+import { jsonEqual } from "../../../../shared/json-patch";
 import { mapProblems, mapSettingsOf, nameOfId, TRAVEL_MODES } from "../../../../shared/maps";
 import { pathText } from "../../../../shared/schema-check";
 import type { MapCellDef, MapDisplay, MapDoc, MapLinkDef, MapPlaceDef, PlaceDef, RouteDef, WorldDoc } from "../../../../shared/world";
@@ -29,12 +30,11 @@ import { knownZone } from "../../../../engine/calendar";
 import { own } from "../../../../engine/pack-kit";
 import { placeKey } from "../../../../engine/place-names";
 import { slug } from "../../../../engine/places-in-play";
-import type { EditorResult } from "../../../worlds";
 import type { ToolOutcome } from "../../runtime";
 import { boolArg, missing } from "../propose";
 import { argGiven, badValue, integer, jsonObject, needText, objectArg, objectSchema, text, textArg } from "../schema";
 import { type HarnessToolDefinition, number, words } from "./kit";
-import { draftOf, noDraft, refusedCall, type WorldCall, worldCall, writeDraft } from "./world-kit";
+import { noTarget, WORLD_INS, type WorldTarget, worldTarget } from "./world-kit";
 
 const boolean = (): JsonObject => ({ type: "boolean" });
 
@@ -47,12 +47,15 @@ const WALK: TravelMode = "walk";
 
 const spaced = (s: string): string => s.trim().replace(/\s+/g, " ").toLowerCase();
 
+/** The parts of a target a refusal is worded with: its view, its turn's settings, and which world it writes. */
+type Said = Pick<WorldTarget, "view" | "turn" | "in">;
+
 /**
  * `items` as a refusal lists them: as many as fit in half of what one tool result may hold
  * (Settings → Agents, Tool results clipped past; as `lintLines` fits its issues), then how many more.
  */
-function fitted(call: WorldCall, items: readonly string[]): string[] {
-  const room = Math.floor(call.turn.settings.agents.clipChars / 2);
+function fitted(t: Said, items: readonly string[]): string[] {
+  const room = Math.floor(t.turn.settings.agents.clipChars / 2);
   const shown: string[] = [];
   let used = 0;
   for (const item of items) {
@@ -61,20 +64,25 @@ function fitted(call: WorldCall, items: readonly string[]): string[] {
     shown.push(item);
   }
   const more = items.length - shown.length;
-  return more > 0 ? [...shown, call.view.text(BUILD_NOTE.moreIds, { count: String(more) })] : shown;
+  return more > 0 ? [...shown, t.view.text(BUILD_NOTE.moreIds, { count: String(more) })] : shown;
 }
 
 /** Ids on one line, for a refusal that says what to choose from. */
-function listed(call: WorldCall, ids: readonly string[]): string {
-  return ids.length === 0 ? call.view.text(BUILD_NOTE.none) : fitted(call, ids).join(", ");
+function listed(t: Said, ids: readonly string[]): string {
+  return ids.length === 0 ? t.view.text(BUILD_NOTE.none) : fitted(t, ids).join(", ");
+}
+
+/** Where a refusal says it looked: this chat's world, or the world's draft. */
+function where(t: Said): string {
+  return t.view.text(t.in === "chat" ? BUILD_NOTE.inChat : BUILD_NOTE.inDocument);
 }
 
 /**
- * The place of the draft `said` names: by its id, its id in any case, else its exact name (case,
- * spaces and a leading article aside); or the refusal, which lists the draft's places. The draft is
+ * The place of the target's world `said` names: by its id, its id in any case, else its exact name
+ * (case, spaces and a leading article aside); or the refusal, which lists that world's places. It is
  * read as compiled, so a place a map draws is found too.
  */
-function draftPlace(call: WorldCall, doc: WorldDoc, said: string): string | ToolOutcome {
+function placeIn(t: Said, doc: WorldDoc, said: string): string | ToolOutcome {
   if (hasOwn(doc.places, said)) return said;
   const lower = said.toLowerCase();
   const rules: ((p: PlaceDef) => boolean)[] = [(p) => p.id.toLowerCase() === lower, (p) => spaced(p.name) === spaced(said) || (placeKey(p.name) !== "" && placeKey(p.name) === placeKey(said))];
@@ -82,32 +90,32 @@ function draftPlace(call: WorldCall, doc: WorldDoc, said: string): string | Tool
     const found = Object.values(doc.places).filter(rule);
     const [one] = found;
     if (one && found.length === 1) return one.id;
-    if (found.length > 1) return call.view.refuse(TOOL_NOTE.ambiguous, { name: said, matches: found.map((p) => `${p.name} (${p.id})`).join("; ") });
+    if (found.length > 1) return t.view.refuse(TOOL_NOTE.ambiguous, { name: said, matches: found.map((p) => `${p.name} (${p.id})`).join("; ") });
   }
-  return call.view.refuse(BUILD_NOTE.noPlace, { name: said, places: listed(call, Object.keys(doc.places).sort()) });
+  return t.view.refuse(BUILD_NOTE.noPlace, { name: said, where: where(t), places: listed(t, Object.keys(doc.places).sort()) });
 }
 
-/** The draft's place an argument the tool can't do without names, or the refusal. */
-function needPlace(call: WorldCall, doc: WorldDoc, tool: string, args: JsonObject, key: string): string | ToolOutcome {
-  const said = needText(call.view, tool, args, key);
-  return typeof said !== "string" ? said : draftPlace(call, doc, said);
+/** The target's place an argument the tool can't do without names, or the refusal. */
+function needPlace(t: Said, doc: WorldDoc, tool: string, args: JsonObject, key: string): string | ToolOutcome {
+  const said = needText(t.view, tool, args, key);
+  return typeof said !== "string" ? said : placeIn(t, doc, said);
 }
 
-/** The id of the draft's map `said` names: its id, its id in any case, else its title; or the refusal, which lists the draft's maps. */
-function draftMap(call: WorldCall, doc: WorldDoc, said: string): string | ToolOutcome {
+/** The id of the target's map `said` names: its id, its id in any case, else its title; or the refusal, which lists that world's maps. */
+function mapIn(t: Said, doc: WorldDoc, said: string): string | ToolOutcome {
   const ids = Object.keys(doc.maps);
   const id = hasOwn(doc.maps, said) ? said : (ids.find((m) => m.toLowerCase() === said.toLowerCase()) ?? ids.find((m) => spaced(doc.maps[m]?.title ?? "") === spaced(said)));
-  return id ?? call.view.refuse(BUILD_NOTE.noMap, { map: said, maps: listed(call, ids.sort()) });
+  return id ?? t.view.refuse(BUILD_NOTE.noMap, { map: said, where: where(t), maps: listed(t, ids.sort()) });
 }
 
-/** The draft's map a call's `map` names, with its id; or the refusal. */
-function needMap(call: WorldCall, doc: WorldDoc, tool: string, args: JsonObject): { id: string; map: MapDoc } | ToolOutcome {
-  const said = needText(call.view, tool, args, "map");
+/** The target's map a call's `map` names, with its id; or the refusal. */
+function needMap(t: Said, doc: WorldDoc, tool: string, args: JsonObject): { id: string; map: MapDoc } | ToolOutcome {
+  const said = needText(t.view, tool, args, "map");
   if (typeof said !== "string") return said;
-  const id = draftMap(call, doc, said);
+  const id = mapIn(t, doc, said);
   if (typeof id !== "string") return id;
   const map = own(doc.maps, id);
-  return map ? { id, map } : call.view.refuse(BUILD_NOTE.noMap, { map: said, maps: listed(call, Object.keys(doc.maps).sort()) });
+  return map ? { id, map } : t.view.refuse(BUILD_NOTE.noMap, { map: said, where: where(t), maps: listed(t, Object.keys(doc.maps).sort()) });
 }
 
 /** A number a call gave, a numeric text read as one: null when it is left out, NaN when it is no number. */
@@ -124,44 +132,28 @@ function refusedArg(n: number | null | ToolOutcome): n is ToolOutcome {
 }
 
 /** A number above 0 (minutes, kilometres, metres), null when left out; or the refusal. */
-function positiveArg(call: WorldCall, tool: string, args: JsonObject, key: string): number | null | ToolOutcome {
+function positiveArg(t: Said, tool: string, args: JsonObject, key: string): number | null | ToolOutcome {
   const n = numberArg(args, key);
-  return n === null || n > 0 ? n : call.view.refuse(BUILD_NOTE.needsPositive, { tool, arg: key, value: String(args[key]) });
+  return n === null || n > 0 ? n : t.view.refuse(BUILD_NOTE.needsPositive, { tool, arg: key, value: String(args[key]) });
 }
 
 /** A whole number, 0 or above (a size, a position), null when left out; or the refusal. */
-function wholeArg(call: WorldCall, tool: string, args: JsonObject, key: string): number | null | ToolOutcome {
+function wholeArg(t: Said, tool: string, args: JsonObject, key: string): number | null | ToolOutcome {
   const n = numberArg(args, key);
-  return n === null || (Number.isInteger(n) && n >= 0) ? n : call.view.refuse(BUILD_NOTE.needsWhole, { tool, arg: key, value: String(args[key]) });
-}
-
-/** The answer of a write that would leave the draft as it is. */
-function same(call: WorldCall, before: EditorResult, extra: Readonly<Record<string, unknown>>): ToolOutcome {
-  return call.view.answer({ unchanged: call.view.text(WORLD_NOTE.unchanged), draft: { version: before.version }, ...extra });
+  return n === null || (Number.isInteger(n) && n >= 0) ? n : t.view.refuse(BUILD_NOTE.needsWhole, { tool, arg: key, value: String(args[key]) });
 }
 
 /**
- * A whole place, route or map written to the draft, answered as every write of the document is. One
- * that is the item as it stands writes nothing: the store counts a version for every item put, so
- * only here can a call that changes nothing be told from one that does.
+ * What the engine's own checks of a map say against `map` as the map `id` of the target's world:
+ * the errors it would have (the schema's, then what the compiled world says of it) that it doesn't
+ * have now, as a refusal; null when the write brings none. Errors the map already had stay its own.
  */
-function putItem(call: WorldCall, before: EditorResult, collection: "places" | "routes" | "maps", id: string, value: PlaceDef | RouteDef | MapDoc, changed: string, extra: Readonly<Record<string, unknown>>): Promise<ToolOutcome> | ToolOutcome {
-  const items: Readonly<Record<string, unknown>> = before.draft[collection];
-  if (jsonEqual(own(items, id), value)) return same(call, before, extra);
-  return writeDraft(call, { op: "put", collection, id, value: value as unknown as JsonValue }, changed, { before, extra });
-}
-
-/**
- * What the engine's own checks of a map say against `map` as the draft's map `id`: the errors it
- * would have (the schema's, then what the compiled world says of it) that it doesn't have now, as a
- * refusal; null when the write brings none. Errors the map already had stay the draft's to fix.
- */
-function mapRefusal(call: WorldCall, doc: WorldDoc, id: string, map: MapDoc): ToolOutcome | null {
+function mapRefusal(t: Said, doc: WorldDoc, id: string, map: MapDoc): ToolOutcome | null {
   const errors = (world: WorldDoc): { at: string; message: string; key: string }[] => (mapProblems(world).get(id) ?? []).filter((p) => p.severity === "error").map((p) => ({ at: pathText(p.path), message: p.message, key: `${p.code}\u0000${p.message}` }));
   const had = new Set(errors(doc).map((p) => p.key));
   const brought = errors({ ...doc, maps: { ...doc.maps, [id]: map } }).filter((p) => !had.has(p.key));
   if (brought.length === 0) return null;
-  return call.view.refuse(BUILD_NOTE.badMap, { map: id, problems: fitted(call, brought.map((p) => (p.at === "" ? p.message : `${p.at}: ${p.message}`))).map((line) => `- ${line}`).join("\n") });
+  return t.view.refuse(BUILD_NOTE.badMap, { map: id, problems: fitted(t, brought.map((p) => (p.at === "" ? p.message : `${p.at}: ${p.message}`))).map((line) => `- ${line}`).join("\n") });
 }
 
 /** The arguments among `keys` a call gave: what a change's answer says it changed, and none when it gave nothing to change. */
@@ -180,26 +172,23 @@ export const WORLD_BUILD_TOOLS: readonly HarnessToolDefinition[] = [
     name: BUILD_TOOL.place,
     family: HARNESS_FAMILY.world,
     tier: "write",
-    parameters: () => objectSchema({ place: text(), name: text(), id: text(), parent: text(), scene: text(), time_zone: text(), visibility: text(VISIBILITIES), description: text(), fields: jsonObject(), remove: boolean() }),
+    parameters: () => objectSchema({ place: text(), name: text(), id: text(), parent: text(), scene: text(), time_zone: text(), visibility: text(VISIBILITIES), description: text(), fields: jsonObject(), remove: boolean(), in: text(WORLD_INS) }),
     async run(args, env) {
-      const call = await worldCall(env, true);
-      if (refusedCall(call)) return call;
-      const before = await draftOf(call);
-      if (noDraft(before)) return before;
-      const { view } = call;
-      const doc = before.draft;
       const tool = BUILD_TOOL.place;
+      const t = await worldTarget(env, tool, args);
+      if (noTarget(t)) return t;
+      const { view, doc } = t;
       const said = textArg(args, "place");
       let current: PlaceDef | undefined;
       if (said !== null) {
-        const found = draftPlace(call, doc, said);
+        const found = placeIn(t, doc, said);
         if (typeof found !== "string") return found;
         current = own(doc.places, found);
         if (current?.map !== undefined) return view.refuse(BUILD_NOTE.placeOfMap, { name: current.name, id: current.id, map: current.map });
       }
       if (boolArg(args, "remove") === true) {
         if (!current) return missing(view, tool, "place");
-        return writeDraft(call, { op: "remove", collection: "places", id: current.id }, view.text(BUILD_NOTE.removed, { what: view.text(BUILD_NOTE.aPlace, { name: current.name, id: current.id }) }), { before, extra: { place: current.id } });
+        return t.remove("places", current.id, view.text(BUILD_NOTE.removed, { what: view.text(BUILD_NOTE.aPlace, { name: current.name, id: current.id }) }), { place: current.id });
       }
       const name = textArg(args, "name");
       const givenId = textArg(args, "id");
@@ -219,7 +208,7 @@ export const WORLD_BUILD_TOOLS: readonly HarnessToolDefinition[] = [
       const parentSaid = textArg(args, "parent");
       let parent = current?.parent;
       if (parentSaid !== null) {
-        const found = draftPlace(call, doc, parentSaid);
+        const found = placeIn(t, doc, parentSaid);
         if (typeof found !== "string") return found;
         // Up from the parent through the places it is inside: reaching this place closes a loop.
         let at: string | undefined = found;
@@ -257,25 +246,22 @@ export const WORLD_BUILD_TOOLS: readonly HarnessToolDefinition[] = [
         fields,
       };
       const what = view.text(BUILD_NOTE.aPlace, { name: next.name, id });
-      return putItem(call, before, "places", id, next, current ? view.text(BUILD_NOTE.changed, { what, members: changes.join(", ") }) : view.text(BUILD_NOTE.made, { what }), { place: id });
+      return t.put("places", id, next, current ? view.text(BUILD_NOTE.changed, { what, members: changes.join(", ") }) : view.text(BUILD_NOTE.made, { what }), { place: id });
     },
   },
   {
     name: BUILD_TOOL.path,
     family: HARNESS_FAMILY.world,
     tier: "write",
-    parameters: () => objectSchema({ from: text(), to: text(), mode: text(TRAVEL_MODES), minutes: number(), km: number(), terrain: text(), one_way: boolean(), remove: boolean() }, ["from", "to"]),
+    parameters: () => objectSchema({ from: text(), to: text(), mode: text(TRAVEL_MODES), minutes: number(), km: number(), terrain: text(), one_way: boolean(), remove: boolean(), in: text(WORLD_INS) }, ["from", "to"]),
     async run(args, env) {
-      const call = await worldCall(env, true);
-      if (refusedCall(call)) return call;
-      const before = await draftOf(call);
-      if (noDraft(before)) return before;
-      const { view } = call;
-      const doc = before.draft;
       const tool = BUILD_TOOL.path;
-      const from = needPlace(call, doc, tool, args, "from");
+      const t = await worldTarget(env, tool, args);
+      if (noTarget(t)) return t;
+      const { view, doc } = t;
+      const from = needPlace(t, doc, tool, args, "from");
       if (typeof from !== "string") return from;
-      const to = needPlace(call, doc, tool, args, "to");
+      const to = needPlace(t, doc, tool, args, "to");
       if (typeof to !== "string") return to;
       const nameOf = (id: string): string => own(doc.places, id)?.name ?? id;
       if (from === to) return view.refuse(BUILD_NOTE.sameEnds, { name: nameOf(from) });
@@ -292,25 +278,25 @@ export const WORLD_BUILD_TOOLS: readonly HarnessToolDefinition[] = [
       if (boolArg(args, "remove") === true) {
         if (!route) {
           const others = Object.values(doc.routes).flatMap((r) => (r.from === from ? [r.to] : r.to === from ? [r.from] : []));
-          return view.refuse(BUILD_NOTE.noPath, { from, to, others: listed(call, [...new Set(others)].sort()) });
+          return view.refuse(BUILD_NOTE.noPath, { from, to, others: listed(t, [...new Set(others)].sort()) });
         }
         const extra = { route: route.id };
         const names = { from: nameOf(route.from), to: nameOf(route.to), id: route.id };
         const modes = { ...route.modes };
         if (mode !== null) {
-          if (!modes[mode]) return view.refuse(BUILD_NOTE.noPathMode, { from, to, mode, modes: listed(call, Object.keys(modes)) });
+          if (!modes[mode]) return view.refuse(BUILD_NOTE.noPathMode, { from, to, mode, modes: listed(t, Object.keys(modes)) });
           delete modes[mode];
         }
         // A route with no way left to travel it is no path: its last mode takes the route with it.
-        if (mode === null || Object.keys(modes).length === 0) return writeDraft(call, { op: "remove", collection: "routes", id: route.id }, view.text(BUILD_NOTE.removed, { what: view.text(BUILD_NOTE.aPath, names) }), { before, extra });
-        return putItem(call, before, "routes", route.id, { ...route, modes }, view.text(BUILD_NOTE.removed, { what: view.text(BUILD_NOTE.aPathMode, { ...names, mode }) }), extra);
+        if (mode === null || Object.keys(modes).length === 0) return t.remove("routes", route.id, view.text(BUILD_NOTE.removed, { what: view.text(BUILD_NOTE.aPath, names) }), extra);
+        return t.put("routes", route.id, { ...route, modes }, view.text(BUILD_NOTE.removed, { what: view.text(BUILD_NOTE.aPathMode, { ...names, mode }) }), extra);
       }
       const oneWay = boolArg(args, "one_way");
       const changes = given(args, [...LEG_ARGS, "one_way"]);
       if (route && changes.length === 0) return view.refuse(BUILD_NOTE.nothing, { tool, args: [...LEG_ARGS, "one_way"].join(", ") });
-      const minutes = positiveArg(call, tool, args, "minutes");
+      const minutes = positiveArg(t, tool, args, "minutes");
       if (refusedArg(minutes)) return minutes;
-      const km = positiveArg(call, tool, args, "km");
+      const km = positiveArg(t, tool, args, "km");
       if (refusedArg(km)) return km;
       const terrain = textArg(args, "terrain");
       // A one-way route that runs against the call would take the new way of travelling the wrong way round.
@@ -333,38 +319,35 @@ export const WORLD_BUILD_TOOLS: readonly HarnessToolDefinition[] = [
       // Made one-way, a route runs as the call says, whichever way it ran.
       const next: RouteDef = route ? { ...route, ...(oneWay === true ? { from, to } : {}), modes, bidirectional: oneWay === null ? route.bidirectional : !oneWay } : { id, from, to, modes, bidirectional: oneWay !== true };
       const what = view.text(BUILD_NOTE.aPath, { from: nameOf(next.from), to: nameOf(next.to), id });
-      return putItem(call, before, "routes", id, next, route ? view.text(BUILD_NOTE.changed, { what, members: changes.join(", ") }) : view.text(BUILD_NOTE.made, { what }), { route: id });
+      return t.put("routes", id, next, route ? view.text(BUILD_NOTE.changed, { what, members: changes.join(", ") }) : view.text(BUILD_NOTE.made, { what }), { route: id });
     },
   },
   {
     name: BUILD_TOOL.map,
     family: HARNESS_FAMILY.world,
     tier: "write",
-    parameters: () => objectSchema({ map: text(), scope: text(), title: text(), width: integer({ minimum: 0 }), height: integer({ minimum: 0 }), layout: words(), legend: jsonObject(), cell_meters: number(), remove: boolean() }),
+    parameters: () => objectSchema({ map: text(), scope: text(), title: text(), width: integer({ minimum: 0 }), height: integer({ minimum: 0 }), layout: words(), legend: jsonObject(), cell_meters: number(), remove: boolean(), in: text(WORLD_INS) }),
     async run(args, env) {
-      const call = await worldCall(env, true);
-      if (refusedCall(call)) return call;
-      const before = await draftOf(call);
-      if (noDraft(before)) return before;
-      const { view } = call;
-      const doc = before.draft;
       const tool = BUILD_TOOL.map;
+      const t = await worldTarget(env, tool, args);
+      if (noTarget(t)) return t;
+      const { view, doc } = t;
       const said = textArg(args, "map");
-      const found = said === null ? null : draftMap(call, doc, said);
+      const found = said === null ? null : mapIn(t, doc, said);
       const current = typeof found === "string" ? own(doc.maps, found) : undefined;
       if (boolArg(args, "remove") === true) {
         if (found === null) return missing(view, tool, "map");
         if (typeof found !== "string") return found;
-        return writeDraft(call, { op: "remove", collection: "maps", id: found }, view.text(BUILD_NOTE.removed, { what: view.text(BUILD_NOTE.aMap, { id: found }) }), { before, extra: { map: found } });
+        return t.remove("maps", found, view.text(BUILD_NOTE.removed, { what: view.text(BUILD_NOTE.aMap, { id: found }) }), { map: found });
       }
       const scopeSaid = textArg(args, "scope");
-      const scope = scopeSaid === null ? null : draftPlace(call, doc, scopeSaid);
+      const scope = scopeSaid === null ? null : placeIn(t, doc, scopeSaid);
       if (scope !== null && typeof scope !== "string") return scope;
       const title = textArg(args, "title");
       let id: string;
       if (current && typeof found === "string") id = found;
       else {
-        // A map named that the draft doesn't have is a new one only with the place it draws: without one, the name is taken for a mistake.
+        // A map named that the world doesn't have is a new one only with the place it draws: without one, the name is taken for a mistake.
         if (scope === null) return found !== null && typeof found !== "string" ? found : missing(view, tool, said === null && title === null ? "map" : "scope");
         if (said === null && title === null) return missing(view, tool, "map");
         id = said ?? slug(title ?? "");
@@ -372,9 +355,9 @@ export const WORLD_BUILD_TOOLS: readonly HarnessToolDefinition[] = [
       }
       const changes = given(args, MAP_ARGS);
       if (current && changes.length === 0) return view.refuse(BUILD_NOTE.nothing, { tool, args: MAP_ARGS.join(", ") });
-      const width = wholeArg(call, tool, args, "width");
+      const width = wholeArg(t, tool, args, "width");
       if (refusedArg(width)) return width;
-      const height = wholeArg(call, tool, args, "height");
+      const height = wholeArg(t, tool, args, "height");
       if (refusedArg(height)) return height;
       const w = width ?? current?.size?.[0];
       const h = height ?? current?.size?.[1];
@@ -396,7 +379,7 @@ export const WORLD_BUILD_TOOLS: readonly HarnessToolDefinition[] = [
           else legend[ch] = cell as unknown as MapCellDef;
         }
       }
-      const cellMeters = positiveArg(call, tool, args, "cell_meters");
+      const cellMeters = positiveArg(t, tool, args, "cell_meters");
       if (refusedArg(cellMeters)) return cellMeters;
       const next: MapDoc = {
         ...(current ?? { id, scope: scope ?? "" }),
@@ -408,40 +391,37 @@ export const WORLD_BUILD_TOOLS: readonly HarnessToolDefinition[] = [
       };
       if (Object.keys(legend).length > 0) next.legend = legend;
       else delete next.legend;
-      const refusal = mapRefusal(call, doc, id, next);
+      const refusal = mapRefusal(t, doc, id, next);
       if (refusal) return refusal;
       const what = view.text(BUILD_NOTE.aMap, { id });
-      return putItem(call, before, "maps", id, next, current ? view.text(BUILD_NOTE.changed, { what, members: changes.join(", ") }) : view.text(BUILD_NOTE.made, { what }), { map: id });
+      return t.put("maps", id, next, current ? view.text(BUILD_NOTE.changed, { what, members: changes.join(", ") }) : view.text(BUILD_NOTE.made, { what }), { map: id });
     },
   },
   {
     name: BUILD_TOOL.mapPlace,
     family: HARNESS_FAMILY.world,
     tier: "write",
-    parameters: () => objectSchema({ map: text(), place: text(), name: text(), id: text(), x: integer({ minimum: 0 }), y: integer({ minimum: 0 }), opens: text(), remove: boolean() }, ["map"]),
+    parameters: () => objectSchema({ map: text(), place: text(), name: text(), id: text(), x: integer({ minimum: 0 }), y: integer({ minimum: 0 }), opens: text(), remove: boolean(), in: text(WORLD_INS) }, ["map"]),
     async run(args, env) {
-      const call = await worldCall(env, true);
-      if (refusedCall(call)) return call;
-      const before = await draftOf(call);
-      if (noDraft(before)) return before;
-      const { view } = call;
-      const doc = before.draft;
       const tool = BUILD_TOOL.mapPlace;
-      const on = needMap(call, doc, tool, args);
+      const t = await worldTarget(env, tool, args);
+      if (noTarget(t)) return t;
+      const { view, doc } = t;
+      const on = needMap(t, doc, tool, args);
       if ("text" in on) return on;
       const { map } = on;
       const places = map.places ?? [];
       const nameOf = (p: MapPlaceDef): string => p.name ?? nameOfId(p.id);
       const said = textArg(args, "place");
       const current = said === null ? undefined : (places.find((p) => p.id === said) ?? places.find((p) => p.id.toLowerCase() === said.toLowerCase()) ?? places.find((p) => spaced(nameOf(p)) === spaced(said)));
-      if (said !== null && !current) return view.refuse(BUILD_NOTE.noMapPlace, { map: on.id, name: said, places: listed(call, places.map((p) => p.id)) });
+      if (said !== null && !current) return view.refuse(BUILD_NOTE.noMapPlace, { map: on.id, name: said, places: listed(t, places.map((p) => p.id)) });
       if (boolArg(args, "remove") === true) {
         if (!current) return missing(view, tool, "place");
         // A link to a place the map no longer has leads nowhere: it goes with the place.
         const next: MapDoc = { ...map, places: places.filter((p) => p !== current), ...(map.links ? { links: map.links.filter((l) => l.from !== current.id && l.to !== current.id) } : {}) };
-        const refusal = mapRefusal(call, doc, on.id, next);
+        const refusal = mapRefusal(t, doc, on.id, next);
         if (refusal) return refusal;
-        return putItem(call, before, "maps", on.id, next, view.text(BUILD_NOTE.removed, { what: view.text(BUILD_NOTE.aMapPlace, { name: nameOf(current), id: current.id, map: on.id }) }), { map: on.id, place: current.id });
+        return t.put("maps", on.id, next, view.text(BUILD_NOTE.removed, { what: view.text(BUILD_NOTE.aMapPlace, { name: nameOf(current), id: current.id, map: on.id }) }), { map: on.id, place: current.id });
       }
       const name = textArg(args, "name");
       const givenId = textArg(args, "id");
@@ -452,9 +432,9 @@ export const WORLD_BUILD_TOOLS: readonly HarnessToolDefinition[] = [
       if (twin) return view.refuse(BUILD_NOTE.idTaken, { id, by: view.text(BUILD_NOTE.aMapPlace, { name: nameOf(twin), id, map: on.id }), arg: "place" });
       const changes = given(args, MAP_PLACE_ARGS);
       if (current && changes.length === 0) return view.refuse(BUILD_NOTE.nothing, { tool, args: MAP_PLACE_ARGS.join(", ") });
-      const x = wholeArg(call, tool, args, "x");
+      const x = wholeArg(t, tool, args, "x");
       if (refusedArg(x)) return x;
-      const y = wholeArg(call, tool, args, "y");
+      const y = wholeArg(t, tool, args, "y");
       if (refusedArg(y)) return y;
       const px = x ?? current?.at?.[0];
       const py = y ?? current?.at?.[1];
@@ -463,35 +443,32 @@ export const WORLD_BUILD_TOOLS: readonly HarnessToolDefinition[] = [
         if (y !== null) return view.refuse(BUILD_NOTE.needsBoth, { tool, one: "y", other: "x" });
       }
       const opensSaid = textArg(args, "opens");
-      const opens = opensSaid === null ? null : draftMap(call, doc, opensSaid);
+      const opens = opensSaid === null ? null : mapIn(t, doc, opensSaid);
       if (opens !== null && typeof opens !== "string") return opens;
       const placed: MapPlaceDef = { ...(current ?? { id }), ...(name !== null ? { name } : {}), ...(px !== undefined && py !== undefined && (x !== null || y !== null) ? { at: [px, py] } : {}), ...(opens !== null ? { opens } : {}) };
       const next: MapDoc = { ...map, places: current ? places.map((p) => (p === current ? placed : p)) : [...places, placed] };
-      const refusal = mapRefusal(call, doc, on.id, next);
+      const refusal = mapRefusal(t, doc, on.id, next);
       if (refusal) return refusal;
       const what = view.text(BUILD_NOTE.aMapPlace, { name: nameOf(placed), id, map: on.id });
-      return putItem(call, before, "maps", on.id, next, current ? view.text(BUILD_NOTE.changed, { what, members: changes.join(", ") }) : view.text(BUILD_NOTE.made, { what }), { map: on.id, place: id });
+      return t.put("maps", on.id, next, current ? view.text(BUILD_NOTE.changed, { what, members: changes.join(", ") }) : view.text(BUILD_NOTE.made, { what }), { map: on.id, place: id });
     },
   },
   {
     name: BUILD_TOOL.mapLink,
     family: HARNESS_FAMILY.world,
     tier: "write",
-    parameters: () => objectSchema({ map: text(), from: text(), to: text(), mode: text(LINK_MODES), minutes: number(), one_way: boolean(), remove: boolean() }, ["map", "from", "to"]),
+    parameters: () => objectSchema({ map: text(), from: text(), to: text(), mode: text(LINK_MODES), minutes: number(), one_way: boolean(), remove: boolean(), in: text(WORLD_INS) }, ["map", "from", "to"]),
     async run(args, env) {
-      const call = await worldCall(env, true);
-      if (refusedCall(call)) return call;
-      const before = await draftOf(call);
-      if (noDraft(before)) return before;
-      const { view } = call;
-      const doc = before.draft;
       const tool = BUILD_TOOL.mapLink;
-      const on = needMap(call, doc, tool, args);
+      const t = await worldTarget(env, tool, args);
+      if (noTarget(t)) return t;
+      const { view, doc } = t;
+      const on = needMap(t, doc, tool, args);
       if ("text" in on) return on;
       const { map } = on;
-      const from = needPlace(call, doc, tool, args, "from");
+      const from = needPlace(t, doc, tool, args, "from");
       if (typeof from !== "string") return from;
-      const to = needPlace(call, doc, tool, args, "to");
+      const to = needPlace(t, doc, tool, args, "to");
       if (typeof to !== "string") return to;
       if (from === to) return view.refuse(BUILD_NOTE.sameEnds, { name: own(doc.places, from)?.name ?? from });
       const said = textArg(args, "mode");
@@ -504,15 +481,15 @@ export const WORLD_BUILD_TOOLS: readonly HarnessToolDefinition[] = [
       const what = view.text(BUILD_NOTE.aLink, { from, to, map: on.id });
       if (boolArg(args, "remove") === true) {
         const gone = mode === null ? between : between.filter((l) => modeOf(l) === mode);
-        if (gone.length === 0) return view.refuse(BUILD_NOTE.noLink, { map: on.id, from, to, mode: mode === null ? "" : ` (${mode})`, links: listed(call, links.map((l) => `${l.from} - ${l.to} (${modeOf(l)})`)) });
+        if (gone.length === 0) return view.refuse(BUILD_NOTE.noLink, { map: on.id, from, to, mode: mode === null ? "" : ` (${mode})`, links: listed(t, links.map((l) => `${l.from} - ${l.to} (${modeOf(l)})`)) });
         const next: MapDoc = { ...map, links: links.filter((l) => !gone.includes(l)) };
-        const refusal = mapRefusal(call, doc, on.id, next);
+        const refusal = mapRefusal(t, doc, on.id, next);
         if (refusal) return refusal;
-        return putItem(call, before, "maps", on.id, next, view.text(BUILD_NOTE.removed, { what }), extra);
+        return t.put("maps", on.id, next, view.text(BUILD_NOTE.removed, { what }), extra);
       }
       if (mode === null && between.length > 1) return view.refuse(BUILD_NOTE.manyLinks, { map: on.id, from, to, modes: between.map(modeOf).join(", ") });
       const current = mode === null ? between[0] : between.find((l) => modeOf(l) === mode);
-      const minutes = positiveArg(call, tool, args, "minutes");
+      const minutes = positiveArg(t, tool, args, "minutes");
       if (refusedArg(minutes)) return minutes;
       const oneWay = boolArg(args, "one_way");
       let link: MapLinkDef;
@@ -527,24 +504,21 @@ export const WORLD_BUILD_TOOLS: readonly HarnessToolDefinition[] = [
         link = { from, to, ...(mode !== null ? { mode } : {}), minutes, ...(oneWay === true ? { bidirectional: false } : {}) };
       }
       const next: MapDoc = { ...map, links: current ? links.map((l) => (l === current ? link : l)) : [...links, link] };
-      const refusal = mapRefusal(call, doc, on.id, next);
+      const refusal = mapRefusal(t, doc, on.id, next);
       if (refusal) return refusal;
-      return putItem(call, before, "maps", on.id, next, current ? view.text(BUILD_NOTE.changed, { what, members: given(args, ["minutes", "one_way"]).join(", ") }) : view.text(BUILD_NOTE.made, { what }), extra);
+      return t.put("maps", on.id, next, current ? view.text(BUILD_NOTE.changed, { what, members: given(args, ["minutes", "one_way"]).join(", ") }) : view.text(BUILD_NOTE.made, { what }), extra);
     },
   },
   {
     name: BUILD_TOOL.mapSettings,
     family: HARNESS_FAMILY.world,
     tier: "write",
-    parameters: () => objectSchema({ display: text(DISPLAYS), grid_movement: boolean(), sight_radius: integer({ minimum: 0, maximum: SIGHT_MAX }), travel_simulation: boolean() }),
+    parameters: () => objectSchema({ display: text(DISPLAYS), grid_movement: boolean(), sight_radius: integer({ minimum: 0, maximum: SIGHT_MAX }), travel_simulation: boolean(), in: text(WORLD_INS) }),
     async run(args, env) {
-      const call = await worldCall(env, true);
-      if (refusedCall(call)) return call;
-      const before = await draftOf(call);
-      if (noDraft(before)) return before;
-      const { view } = call;
-      const doc = before.draft;
       const tool = BUILD_TOOL.mapSettings;
+      const t = await worldTarget(env, tool, args);
+      if (noTarget(t)) return t;
+      const { view, doc } = t;
       const said = textArg(args, "display");
       const display = DISPLAYS.find((d) => d === said) ?? null;
       if (said !== null && display === null) return badValue(view, tool, "display", said, DISPLAYS);
@@ -562,9 +536,8 @@ export const WORLD_BUILD_TOOLS: readonly HarnessToolDefinition[] = [
       const then = mapSettingsOf({ mapSettings: next });
       const extra = { settings: { display: then.display, grid_movement: then.grid.movement, sight_radius: then.grid.sightRadius, travel_simulation: then.travelSimulation === true } };
       // Settings that play as they did are not written: a world without the part keeps none.
-      if (jsonEqual(then, now)) return same(call, before, extra);
-      // The map settings are none of the parts the store sets: a patch writes them, whole.
-      return writeDraft(call, { op: "patch", ops: [{ op: "add", path: pointerOf(["mapSettings"]), value: next as unknown as JsonValue }] }, view.text(BUILD_NOTE.changed, { what: view.text(BUILD_NOTE.settings), members: changes.join(", ") }), { before, extra });
+      if (jsonEqual(then, now)) return t.same(extra);
+      return t.settings(next as unknown as JsonObject, view.text(BUILD_NOTE.changed, { what: view.text(BUILD_NOTE.settings), members: changes.join(", ") }), extra);
     },
   },
 ];

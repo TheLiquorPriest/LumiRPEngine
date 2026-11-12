@@ -5,8 +5,8 @@
 //
 // - The working state: the state the turn started from with what has landed on it, the opening's
 //   bookkeeping first, then what each `commit` made definitive. It is the turn's own, in memory: the
-//   journal takes it whole when the reply is saved (`close`), or never (a stopped or failed run
-//   leaves nothing staged and nothing half-written).
+//   journal takes it whole when the reply ends (`close`), or never (a run that failed, or a reply
+//   stopped before anything of it was released, leaves nothing staged and nothing half-written).
 // - The staged writes: the operations the write tools staged (`TurnDraft`, through the turn writer
 //   every agent turn uses) and the changes the harness engine's own tools staged (`HarnessTurn.stage`),
 //   in one staging order.
@@ -32,7 +32,7 @@ import { WRITE_NOTE } from "../../shared/agent-tools-write";
 import { HARNESS_AGENT, HARNESS_NOTE } from "../../shared/harness-texts";
 import { WORLD_NOTE } from "../../shared/harness-texts-world";
 import { hashParts } from "../../shared/hash";
-import type { ChatId, EntityId, MessageId, UserId } from "../../shared/ids";
+import type { ChatId, MessageId, UserId } from "../../shared/ids";
 import { isRecord } from "../../shared/json";
 import type { ChatRun, LedgerEvent, RecAgent } from "../../shared/ledger";
 import { type ChangeType, EXTRACTION_TYPES, type ExtractionLearning } from "../../shared/settings";
@@ -65,6 +65,9 @@ import type { Runtime } from "../runtime";
 import { effectiveMode, recordOutcome } from "../settings-store";
 import type { TurnFrame } from "../turn-frame";
 import { cardedChange, cardLines, stagedBy, worldMadeChip } from "./card";
+import { StageBook } from "../story/narration";
+import { readStoryPreset } from "../story/preset";
+import { turnStoryPort } from "../story/record";
 import { harnessRole, type HarnessRole } from "./definitions";
 import type { AgentRef, RemoteToolCall } from "./shapes";
 
@@ -77,7 +80,7 @@ const OTHER_VIEW: { view: ToolView; marks: boolean } = { view: "everyone", marks
 
 /**
  * The roles a tier's writes are made as where an agent's own definition doesn't hold that tier
- * (`writerRole`): the chronicler's at the story's, the author's at the game master's. They follow
+ * (`writerRole`): the story keeper's at the story's, the author's at the game master's. They follow
  * the definitions (`definitions/index.ts`), so they are no setting of their own.
  */
 const STORY_ROLE: RoleId = "curator";
@@ -96,11 +99,10 @@ export interface Placed {
 /**
  * One agent of a run, as LumiAH said who it is on its first call (`RemoteToolCall`): the
  * definition it runs as, whether it is the run's main agent, the agents over it. With how that
- * definition reads and writes, and the person it thinks for once it has said so.
+ * definition reads and writes.
  */
 export interface TurnAgent extends Placed {
   role: HarnessRole | null;
-  character: EntityId | null;
   /** It is its run's main agent: the author, where the run is a turn's own. */
   main: boolean;
   /** The job whose run it is of; null for an agent of a turn's own run. */
@@ -146,7 +148,7 @@ export class Cast {
       if (!this.agents.has(one.agentId) && !this.named.has(one.agentId)) this.named.set(one.agentId, { id: this.key(one.agentId), def: one.role, above: [...above] });
       above.push({ id: this.key(one.agentId), def: one.role });
     }
-    const agent: TurnAgent = { id: this.key(call.agentId), def: call.role, role: harnessRole(call.role), character: null, main: call.main === true && above.length === 0, above, job: this.job };
+    const agent: TurnAgent = { id: this.key(call.agentId), def: call.role, role: harnessRole(call.role), main: call.main === true && above.length === 0, above, job: this.job };
     this.agents.set(call.agentId, agent);
     this.named.delete(call.agentId);
     return agent;
@@ -272,6 +274,10 @@ export interface TurnCall {
   ceiling: Ceiling | null;
   /** The chat's area of LumiAH's workspace, where whoever mounts LumiAH gives one (`ToolEnv.files`). */
   files: HarnessFiles | null;
+  /** Which instance of its definition the caller is (LumiAH's `RemoteToolCall.as`: the person a character plays); null where nobody said. */
+  as: string | null;
+  /** For an agent of a job that runs beside the turn: the job's id. */
+  job: string | null;
 }
 
 /** A change one of the harness engine's own tools staged, with who staged it. */
@@ -328,6 +334,8 @@ export interface OpenTurnInit {
   said: HarnessTurn["said"];
   /** The document of the world the chat plays, as the `world` tools edit it (`worldBuild`). */
   build: WorldBuild | null;
+  /** The player directs the story, as the run's claim decided (Sovereign Hand): `HarnessTurn.directed`. */
+  directed: boolean;
 }
 
 /** What a turn leaves once its reply is committed. */
@@ -345,8 +353,12 @@ export class OpenTurn {
   readonly seed: string;
   readonly continues: boolean;
   readonly said: HarnessTurn["said"];
-  /** The lore the turn's agents loaded into the reply it is writing (`lore_load`): the Scene section's. */
+  /** The lore the turn's agents loaded for its reply (`lore_load`). */
   readonly loads: string[] = [];
+  /** The player directs the story in this turn (`OpenTurnInit.directed`). */
+  readonly directed: boolean;
+  /** What each passage of the turn is held to as it is released, and what of the reply went out (`releaseGate`, `releaseNoted`), with the chat's preset read once for the turn when the narrator asks for a module of it. */
+  readonly stageBook: StageBook;
   /** Ends when the turn is let go: every call still working for it stops. */
   private readonly stop = new AbortController();
   /** Ends when the turn closes: a commit still waiting at its gate goes on, and what it waited for goes to the reply's card. */
@@ -404,22 +416,11 @@ export class OpenTurn {
   /** A landed change said how much time the turn takes (none included). */
   private timeSaid = false;
   private tick: number | null = null;
-  /** The writer's request was made from the turn (`sections`): whoever writes the reply, LumiAH's writer or Lumiverse's own generation, has what it will be given. */
-  private requested = false;
-  /**
-   * The author handed the reply over with a brief (`writerRequest`, as LumiAH last asked it): the
-   * reply is this turn's. False while it hasn't, and where LumiAH had the reply written without one
-   * (the author failed, ran out of time or was stopped in the harness before it briefed the writer):
-   * such a reply is one no turn was played for, and nothing of the turn stands.
-   */
-  briefed = false;
   /** The reply's text once LumiAH says it is written (`replyWritten`, or its run's end); null until then. */
   replied: string | null = null;
   closed = false;
   /** Settles once the turn's record is written or the turn is let go: a call that belongs to that record waits for it. */
   readonly settled = Promise.withResolvers<void>();
-  /** The texts the writer's sections were made from, by their prompt set's hash: recorded on the turn's record. */
-  prompts: string | null = null;
 
   constructor(
     private readonly rt: Runtime,
@@ -441,6 +442,13 @@ export class OpenTurn {
     this.learning = init.learning;
     this.active = init.active;
     this.build = init.build ? this.watched(init.build) : null;
+    this.directed = init.directed;
+    this.stageBook = new StageBook(() =>
+      readStoryPreset(rt.host, init.chatId, init.userId, init.frame.settings.storyPreset).catch((error: unknown) => {
+        rt.host.log("warn", `[LumiRPEngine] chat ${init.chatId}: the preset's modules weren't read for this turn's narrator (${error instanceof Error ? error.message : String(error)})`, init.userId);
+        return null;
+      }),
+    );
     this.w = new Working(rt.registry, init.world, init.start);
     this.w.applyAll(init.opening);
     this.opened = this.w.events.length;
@@ -471,19 +479,6 @@ export class OpenTurn {
   }
 
   // ---------------------------------------------------------------- reading the turn
-
-  /**
-   * The turn's sections for its writer (`Runtime.harnessSections`), from what has landed, with its
-   * time settled first, so they tell the time its record will hold. `outline`: the author's brief, a
-   * line each.
-   */
-  async sections(outline: readonly string[]): Promise<{ slot: string; content: string }[]> {
-    this.settleTime(false);
-    this.requested = true;
-    const built = await this.rt.harnessSections({ chatId: this.chatId, userId: this.userId, generationId: this.generationId, core: this.core, before: this.before, world: this.landedAt.world, state: this.landedAt.state, said: this.said.user, outline, loads: this.loads, elapsed: this.continues ? null : this.w.state.clock - this.start.clock });
-    this.prompts = built.prompts;
-    return built.fills;
-  }
 
   /** The turn's landed events but the opening's: what joins its planned events when its reply is saved (a Continue's: what its read records). */
   private own(): LedgerEvent[] {
@@ -572,16 +567,15 @@ export class OpenTurn {
     const tier = reach(this.standing(agent, call.ceiling));
     // An agent writes as the role its tier's changes are made as, whatever it runs as; one of the engine's own that only reads is told so by its own writer, and an agent of no definition of the engine's has none until the author grants it a tier.
     const role = writerRole(agent.role, tier) ?? agent.role?.role ?? null;
-    const writer = role ? turnWriter(this.rt, this.draft, { userId: this.userId, chatId: this.chatId, role, agentId: agent.id, tier, connectionId: null, phase: "pre", base, kept: () => withKept(this.kept, this.landing), reader, gmOps: this.frame.settings.agents.gmOpsPerTurn, holder: this.holder, signal: both }) : null;
+    const writer = role ? turnWriter(this.rt, this.draft, { userId: this.userId, chatId: this.chatId, role, agentId: agent.id, tier, connectionId: null, phase: "pre", base, kept: () => withKept(this.kept, this.landing), reader, gmOps: this.frame.settings.agents.gmOpsPerTurn, holder: this.holder, signal: both, engine: "harness" }) : null;
     const loads: LoreLoads = {
       add: (loreId) => {
-        // Once the writer's request is made, nothing more reaches the reply.
-        if (this.requested || this.closed) return false;
+        if (this.closed) return false;
         if (!this.loads.includes(loreId)) this.loads.push(loreId);
         return true;
       },
     };
-    return { userId: this.userId, chatId: this.chatId, knowledge: view, marks, reader, writer, agent: { role: agent.def, id: agent.id }, signal: both, loads, build: this.build, files: call.files, turn: this.turnFor(call, tier, both) };
+    return { userId: this.userId, chatId: this.chatId, knowledge: view, marks, reader, writer, agent: { role: agent.def, id: agent.id, ...(call.as !== null ? { as: call.as } : {}) }, signal: both, loads, build: this.build, files: call.files, turn: this.turnFor(call, tier, both) };
   }
 
   /** The turn as one agent's harness tools reach it. */
@@ -592,14 +586,7 @@ export class OpenTurn {
       main,
       // As the call finds it: a grant the author makes later raises it for the calls after.
       tier,
-      get character() {
-        return agent.character;
-      },
-      bind: (entity) => {
-        if (agent.character !== null) return agent.character === entity;
-        agent.character = entity;
-        return true;
-      },
+      directed: this.directed,
       grant: (to, granted) => this.grant(agent, to, granted),
       knowing: knowledgeOn(this.frame.chat, this.landedAt.world, this.frame.settings),
       settings: this.frame.settings,
@@ -612,6 +599,9 @@ export class OpenTurn {
       staged: () => this.order.flatMap((item) => ("op" in item ? item.op.events : item.staged.change.events)),
       said: this.said,
       reply: null,
+      ...(call.job !== null ? { job: { id: call.job, byUser: false } } : {}),
+      story: turnStoryPort(this.rt, { chatId: this.chatId, userId: this.userId, turn: this.generationId }),
+      stageBook: this.stageBook,
       stage: (change) => this.stage(call, change, signal),
       commit: async (note) => {
         if (!main) return refusal("not_main", this.text(HARNESS_NOTE.notMain));
@@ -651,7 +641,7 @@ export class OpenTurn {
 
   /** The mode of a change type now, for whoever staged it. */
   private modeOf(type: ChangeType, role: RoleId | null): "auto" | "confirm" | "never" {
-    return effectiveMode(this.frame.settings, this.learning, this.active, type, role ?? undefined).mode;
+    return effectiveMode(this.frame.settings, this.learning, this.active, type, role ?? undefined, "harness").mode;
   }
 
   /**
@@ -855,13 +845,25 @@ export class OpenTurn {
     return made;
   }
 
-  /** What a commit checks operations with: the roles' writer context over the turn's landed state as the commit starts. */
+  /**
+   * What a commit checks operations with: the roles' writer context over the turn's landed state as
+   * it stands when each operation is checked, so one staged after a change that made a place or a
+   * person finds them, as the change landed just before it in the same commit. It is read again only
+   * once something more has landed (the working state's events, by their count and their last).
+   */
   private commitCtx(): CommitCtx {
-    const head: ChatHead = { run: this.run, core: this.core, observed: this.before, world: this.w.world, state: structuredClone(this.w.state) };
-    let ctx: WriterCtx | null = null;
+    let at: { count: number; last: LedgerEvent | undefined; head: ChatHead; ctx: WriterCtx | null } | null = null;
+    const now = (): { head: ChatHead; ctx: WriterCtx | null } => {
+      const { events } = this.w;
+      if (at === null || at.count !== events.length || at.last !== events.at(-1)) at = { count: events.length, last: events.at(-1), head: { run: this.run, core: this.core, observed: this.before, world: this.w.world, state: structuredClone(this.w.state) }, ctx: null };
+      return at;
+    };
     return {
-      ctx: () => (ctx ??= contextOf(this.rt, { knowledge: "everyone" }, head, this.frame.settings, this.learning, withKept(this.kept, this.landing), this.active)),
-      reader: turnReader(this.rt, () => head, { userId: this.userId, chatId: this.chatId, knowledge: "gm" }),
+      ctx: () => {
+        const held = now();
+        return (held.ctx ??= contextOf(this.rt, { knowledge: "everyone" }, held.head, this.frame.settings, this.learning, withKept(this.kept, this.landing), this.active, "harness"));
+      },
+      reader: turnReader(this.rt, () => now().head, { userId: this.userId, chatId: this.chatId, knowledge: "gm" }),
       userId: this.userId,
       chatId: this.chatId,
       signal: this.stop.signal,
@@ -1025,13 +1027,18 @@ export class OpenTurn {
   // ---------------------------------------------------------------- the turn's end
 
   /**
-   * The turn's reply is saved (HARNESS-SLICE3 step 8): what is still staged is committed, the turn's
-   * time settled, and the turn takes nothing more. The events it leaves join the journal's planned
-   * turn (a Continue's: its read).
+   * The turn's reply ended (HARNESS-SLICE3 step 8): what is still staged is committed, the turn's
+   * time settled, and the turn takes nothing more. `stopped`: the reply was stopped once some of it
+   * was released, and the turn keeps only what it had committed: what is still staged was never
+   * decided, and goes. The events it leaves join the journal's planned turn (a Continue's: its read).
    */
-  async close(): Promise<LedgerEvent[]> {
+  async close(stopped = false): Promise<LedgerEvent[]> {
     this.finishing.abort();
-    await this.commit(null, this.stop.signal, true);
+    if (stopped) {
+      await this.committing.catch(() => undefined);
+      this.order = [];
+      this.draft.clear();
+    } else await this.commit(null, this.stop.signal, true);
     this.settleTime(true);
     this.closed = true;
     return this.own();

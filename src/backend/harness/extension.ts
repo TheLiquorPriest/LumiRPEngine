@@ -1,53 +1,59 @@
 // The harness engine: RPEngine's side of LumiAH (HARNESS-SLICE3). A chat whose engine is `harness`
-// is played by the author, LumiAH's main agent for that chat, and the agents it starts: characters,
-// the game master, the knowledge inference. They decide everything a turn needs by calling tools.
-// RPEngine supplies those tools, the agents' definitions, the skills and the rules of the world, and
-// makes no model call of its own: every model call is an agent's, wherever LumiAH runs them (in
-// its runtime, or built into Lumiverse: its DESIGN §25).
+// is played by the author, LumiAH's main agent for that chat, and the agents it starts. They decide
+// everything a turn needs by calling tools, and the author writes the reply itself. RPEngine
+// supplies those tools, the agents' definitions, the skills and the rules of the world, and makes no
+// model call of its own: every model call is an agent's, in LumiAH's runtime (its DESIGN §25). A
+// chat the engine plays runs only there (`ChatClaim.place`): no built-in way plays it, and while
+// the runtime is down the chat plays nothing and says why.
 //
-// This is what LumiAH is given, to the shapes of its own boundary (`shapes.ts`; nothing here imports
-// LumiAH yet, and the step that mounts it swaps those copies for its package's):
+// This is what LumiAH is given, to the shapes of its own boundary (`shapes.ts`):
 // - `extension`: what an extension that builds LumiAH into itself supplies (`HarnessExtension`): its
-//   definitions, what it claims of a chat, the writer's request rewritten, and the run's milestones.
+//   definitions, what it claims of a chat, which model an agent runs on, and the run's milestones.
 //   Each is told which user it is for, and answers for that user: nothing here guesses one.
 // - `tools`: the tools that run in the extension (`ToolsPort`): listed for a chat, and run for a call
 //   with a `ToolEnv` built for that call; told the user too, where the caller serves more than one.
 //
 // And what the ledger asks of the engine for a chat the harness plays (`HarnessHooks`): whether it
-// plays the chat, the engine's entries for a prompt, and the turn's commit when its reply is saved.
+// plays the chat, whether its runtime can take a generation, and the turn's commit when its reply is
+// saved or stopped.
 //
 // One turn, as the ledger and LumiAH tell it:
-// 1. `GENERATION_STARTED` opens the pending turn, as for any engine. The guard never stops the
-//    generation: it writes each section into its entry as the chat's head has it, between markers
-//    (`markers`). The prompt as Lumiverse assembles it is one a reply can be written from, whatever
-//    becomes of the turn.
+// 1. `GENERATION_STARTED` opens the pending turn, as for any engine. The guard asks whether the
+//    harness can play the generation in its runtime (`refused`): one that isn't going there, or that
+//    no runtime can take now, is stopped, and the chat says why and what to do. Nothing of the world
+//    goes into the prompt: the author is shown only the player's newest message (`ChatClaim.request`).
 // 2. `runBegan` opens the engine's side of the turn (`OpenTurn`): what it runs on, its staged writes
 //    and its working state, on the generation's own pending turn, which takes the opening's
 //    bookkeeping as its plan. Nothing is simulated: no action is read, no time passes, no one acts.
 // 3. Each tool call runs with the calling agent's view, writer and tier (`OpenTurn.env`), once the
 //    one gate every call enters by has seen that the tool is the caller's to call (`toolRefusal`).
-// 4. `writerRequest` swaps each marked span for the turn's own section, where the preset placed it.
-//    Whoever writes the reply is sent that: LumiAH's writer, or Lumiverse's own generation. The
-//    engine learns the reply's text only when LumiAH says it is written, or Lumiverse saves it.
-// 5. `GENERATION_ENDED`, the reply saved: what is still staged is committed, what the turn landed
-//    joins its planned events, the core commits the turn, and its record takes LumiAH's own record
-//    of the turn. A turn has one record. A generation that was stopped, failed or came back empty,
-//    or a run that failed, leaves nothing: no record, nothing staged, nothing half-written.
+// 4. The author writes the reply: each passage it releases, in order (`reply_write`), or a character's
+//    answer it hands the stream to (`delegate` with `to_reply`). LumiAH's runtime streams them to
+//    Lumiverse as one reply, and no writer writes any of it (`ChatClaim.reply`). The engine reads
+//    nothing out of the reply.
+// 5. The reply ends. Saved whole (`GENERATION_ENDED`): what is still staged is committed, what the
+//    turn landed joins its planned events, the core commits the turn, and its record takes LumiAH's
+//    own record of the turn. Stopped once something was released: the turn keeps what it had
+//    committed, and its record says the reply was stopped. A turn has one record. A reply stopped
+//    with nothing released, failed or empty, or a run that failed, leaves nothing: no record,
+//    nothing staged, nothing half-written.
 // 6. A job the turn's agents started writes through the ledger's path for writes outside a turn,
 //    tied to the turn's record, until that record leaves the chat's path (`jobs.ts`).
 //
-// Nothing between a run's beginning and its writer's request waits on a clock: the turn stays open
-// until its generation ends, is stopped, or another starts on the chat.
+// Nothing between a run's beginning and its reply's end waits on a clock: the turn stays open until
+// its generation ends, is stopped, or another starts on the chat.
 
 import type { RoleTier } from "../../shared/agent-roles";
 import { defaultAgentSettings, type NewestMessage, type SovereignHand } from "../../shared/agent-settings";
-import { HARNESS_AGENT, HARNESS_FAMILY, HARNESS_NOTE, HARNESS_TEXT } from "../../shared/harness-texts";
+import { HARNESS_AGENT, HARNESS_AGENT_IDS, HARNESS_FAMILY, HARNESS_NOTE, HARNESS_TEXT } from "../../shared/harness-texts";
+import { PREPARE_PATH } from "../../shared/harness-texts-prepare";
 import { hashParts } from "../../shared/hash";
 import type { ChatId, MessageId, UserId } from "../../shared/ids";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import type { LedgerEvent, Rec, RecHarness } from "../../shared/ledger";
 import { MINDS_EVENTS } from "../../shared/minds";
 import type { PromptTexts } from "../../shared/prompts";
+import type { UserSettings } from "../../shared/settings";
 import type { WorldDoc } from "../../shared/world";
 import { blankWorld } from "../../engine/authoring";
 import type { ChainMessage } from "../../engine/ledger/chain";
@@ -65,7 +71,7 @@ import { outsideReader } from "../agents/tools/read-view";
 import type { ToolEnv } from "../agents/tools/registry";
 import { type ChatHead, chatHead, keptFiles } from "../agents/tools/workspace";
 import { type ChatEngine, type ChatKnowledgePrefs, knowledgeOn, narratorView } from "../chat-knowledge-prefs";
-import type { Delivered, HarnessHooks, TurnContext } from "../ledger-io";
+import type { HarnessHooks, TurnContext } from "../ledger-io";
 import { toChain } from "../ledger-io";
 import { knowledgeSwitch, postMindsInput, postOpening } from "../minds";
 import { renderPrompt } from "../prompts";
@@ -75,13 +81,15 @@ import { clockMinutes } from "../view";
 import { harnessDefinitions, harnessRole, worldGuidance } from "./definitions";
 import { LUMIAH_TOOL } from "./definitions/lumiah";
 import { jobEnv } from "./jobs";
-import { briefLines, markerNonce, placeParts, withoutBrief } from "./markers";
-import { type AnchorRow, anchorsOf, departuresOf, findTurn, noPartOf, recHarnessOf, unplayedOf } from "./record";
-import type { ChatClaim, ClaimAsk, DefinitionsAsk, ExtensionDefinitions, HarnessExtension, JobView, ModelMessage, RemoteTool, RemoteToolCall, ReplyWritten, RunBegan, RunEnded, StorySetting, ToolsPort, WriterRequest } from "./shapes";
+import { type AnchorRow, anchorsOf, findTurn, noPartOf, recHarnessOf, unplayedOf } from "./record";
+import type { AgentModelAsk, AgentModelChoice, ChatClaim, ClaimAsk, DefinitionsAsk, ExtensionDefinitions, HarnessExtension, HeldTools, JobView, ReleaseVerdict, RemoteTool, RemoteToolCall, ReplyRelease, ReplyWritten, RunBegan, RunEnded, StorySetting, ToolsPort } from "./shapes";
 import { Cast, type Ceiling, closedAnswer, OpenTurn, reach, type Standing, standingOf, toolRefusal, type TurnCall } from "./turn";
-
-/** The Outline section's slot: where the author's brief goes. */
-const OUTLINE_SLOT = "outline";
+import { chooseAgentModel } from "../../shared/story-models";
+import { shapeNotebook } from "../story/notebook";
+import { directLineGuidance, narrationGuidance, releaseGate, releaseNoted } from "../story/narration";
+import { authorOpening } from "../story/opening";
+import { prepareEnv } from "../story/prepare";
+import { presetParts, readStoryPreset, type StoryPresetRead, type StoryReader } from "../story/preset";
 
 /** Sovereign Hand as the harness's settings have it (`agents.harness.sovereignHand`), as the claim's word on whose messages are the chat's story. */
 const SOVEREIGN_FROM: Readonly<Record<SovereignHand, StorySetting["from"]>> = { follow: "lumiverse", on: "replies", off: "everyone" };
@@ -92,8 +100,60 @@ const NEWEST_GIVEN: Readonly<Record<NewestMessage, StorySetting["newest"]>> = { 
 /** The family of each tool the engine lists, by its name. */
 const FAMILY: ReadonlyMap<string, string> = new Map(HARNESS_LISTED.map((t) => [t.name, t.family]));
 
+/** The one tool outside a person's own mind that a character's agent may call: writing a beat of its own act (`beat_write`, which holds it to its own). */
+const BEAT_WRITE = "beat_write";
+
+/** Which reader of the chat's preset each definition is (`presetParts`): the author, a person, the game master, the narrator. A definition not here reads no part of it. */
+const PRESET_READER: Readonly<Record<string, StoryReader>> = { [HARNESS_AGENT.author]: "author", [HARNESS_AGENT.character]: "character", [HARNESS_AGENT.gm]: "gm", [HARNESS_AGENT.narrator]: "narrator" };
+
+/**
+ * What the engine adds to its definitions' instructions for one chat, by definition id, in order:
+ * the definition's part of the chat's preset (`presetParts`, by reader; `read`: the preset as it was
+ * read, null where it couldn't be, its macros resolved; the engine's own texts alone where the preset
+ * gives that reader nothing); how the story's narration is set (the author: how a moment is
+ * narrated, `narrationGuidance`; a person: how it speaks on the direct line, `directLineGuidance`,
+ * nothing where every moment is narrated); and the author's opening (`authorOpening`; null where it
+ * couldn't be read): the moment as it stands, the drafts that need it now and what the prepared
+ * start still lacks, which no other agent of the chat reads. Only what holds text: a definition
+ * given nothing has no entry.
+ */
+export function chatAdditions(input: { read: StoryPresetRead | null; settings: Pick<UserSettings, "narration" | "prompts">; opening: string | null }): ReadonlyMap<string, readonly string[]> {
+  const { read, settings, opening } = input;
+  const preset = read === null ? null : presetParts(read, settings.prompts.texts);
+  const ends: Readonly<Record<string, readonly (string | null)[]>> = { [HARNESS_AGENT.author]: [narrationGuidance(settings), opening], [HARNESS_AGENT.character]: [directLineGuidance(read, settings)] };
+  const added = new Map<string, readonly string[]>();
+  for (const id of HARNESS_AGENT_IDS) {
+    const reader = PRESET_READER[id];
+    const more = [reader === undefined || preset === null ? "" : preset[reader], ...(ends[id] ?? [])].filter((part): part is string => part !== null && part.trim() !== "");
+    if (more.length > 0) added.set(id, more);
+  }
+  return added;
+}
+
 /** Why the harness can't be chosen in a build that doesn't carry LumiAH, and what to do. The chat page shows it as it stands, so it is no model's text. */
 const NOT_BUILT_IN = "This build of LumiRPEngine doesn't include the harness yet. Update LumiRPEngine in Lumiverse (Extensions → LumiRPEngine), then choose Harness here.";
+
+/** Why a reply of a chat that was just set to the runtime didn't go there: the generation was already on its way to the chat's old connection. */
+const SET_JUST_NOW = "This chat was set to play in LumiRPEngine's runtime just now, so this reply didn't go there. The next one will.";
+
+/** How many tools a line of the words below names before it says how many more there are. */
+const TOOLS_NAMED = 8;
+
+/** Tools as the words below name them: "a", "a and b", "a, b and c", the rest past `TOOLS_NAMED` as how many more. */
+function toolList(tools: readonly string[]): string {
+  const named = tools.length > TOOLS_NAMED ? [...tools.slice(0, TOOLS_NAMED), `${tools.length - TOOLS_NAMED} more`] : [...tools];
+  return named.length > 1 ? `${named.slice(0, -1).join(", ")} and ${named.at(-1)}` : (named[0] ?? "");
+}
+
+/** Why a chat plays no turn while an agent of the cast can't use a tool it is given, said before a line for each such agent. The chat page shows it as it stands, so it is no model's text. */
+const UNHELD = "This chat plays no turn while one of LumiRPEngine's agents can't use a tool it needs.";
+
+/** An agent's tools the user switched off, and where to switch them on. */
+const switchedOff = (agent: string, tools: readonly string[]): string =>
+  tools.length === 1 ? `${agent} can't use ${toolList(tools)}: it is switched off. On the Tools page of the Harness tab, switch it on.` : `${agent} can't use ${toolList(tools)}: they are switched off. On the Tools page of the Harness tab, switch them on.`;
+
+/** An agent's tools that no tool here answers to, and how to give it LumiRPEngine's own again. */
+const notHere = (agent: string, tools: readonly string[]): string => `${agent} is given ${toolList(tools)}, which ${tools.length === 1 ? "isn't a tool" : "aren't tools"} here. On the Agents page of the Harness tab, reset ${agent} to LumiRPEngine's own.`;
 
 type PlanInput = Parameters<TurnModel["plan"]>[0];
 type ReadInput = Parameters<TurnModel["read"]>[0];
@@ -132,6 +192,20 @@ export interface HarnessCore {
   stop(userId: UserId, run: string, why: string): boolean;
   /** The side sessions' turns and jobs' runs under way built in, by their ids. */
   running(userId: UserId): string[];
+  /**
+   * What the latest run LumiAH's live view holds of a stream has spent: a job's (the stream is the
+   * job's id, and its count runs over every run of the job) or a chat's reply turns' (the chat's
+   * id). Null where the live view holds no run of it, or one that made no model call yet.
+   */
+  spent?(userId: UserId, stream: string): RunSpent | null;
+}
+
+/** What a run has spent, as LumiAH counts it: its tokens in and out, its model calls, and what its latest call weighed, in and out. */
+export interface RunSpent {
+  in: number;
+  out: number;
+  calls: number;
+  last: number;
 }
 
 /**
@@ -150,12 +224,18 @@ export type SideEnvOf = (input: { call: RemoteToolCall; userId: UserId; signal: 
  */
 const LUMIAH_LORE: readonly string[] = [LUMIAH_TOOL.loreIndex, LUMIAH_TOOL.loreSearch, LUMIAH_TOOL.loreGrep, LUMIAH_TOOL.loreRead, LUMIAH_TOOL.activeLore, LUMIAH_TOOL.loreRelated, LUMIAH_TOOL.loreAbout];
 
-/** A run as its calls are served once no turn takes them: a job's, or what an agent of a turn still calls after its reply. Its agents are the run's own, from its first call to its last (`Cast`). */
+/** LumiAH's lore tools the claim withdraws in a chat the engine plays: those the engine has no tool of the same name for. No agent there is given them. */
+export const LUMIAH_WITHDRAWN: readonly string[] = LUMIAH_LORE.filter((name) => !FAMILY.has(name));
+
+/** A run as its calls are served once no turn takes them: a job's, or what an agent of a turn still calls after its reply. Its agents are the run's own, from its first call to its last (`Cast`). `directed`: the claim's word for the run, that the player directs the story (`HarnessTurn.directed`). */
 interface SideRun {
   chatId: ChatId;
   userId: UserId;
   cast: Cast;
   staged: Map<string, "auto" | "confirm">;
+  directed: boolean;
+  /** The log was told that this run is tied to no reply the engine knows. */
+  warned?: boolean;
 }
 
 /** What one call runs with once it has passed its gate, and where its caller stands for that gate. */
@@ -165,6 +245,8 @@ interface Served {
   standing: Standing;
   frame: TurnFrame | null;
   answered?: (out: { text: string; error?: boolean }) => void;
+  /** A job the engine can tie to no reply: it reads the chat as it stands, and what it would change is answered so. */
+  noReply?: true;
 }
 
 /** What a turn left for its commit, between `beforeCommit` and `afterCommit`. */
@@ -190,8 +272,8 @@ export class HarnessEngine implements HarnessHooks {
   private readonly over = new Map<string, { chatId: ChatId; userId: UserId; committed: boolean; settled?: Promise<void> }>();
   /** The runs that aren't a generation's own turn, and each committed turn's own run for what its agents still call. */
   private readonly sides = new Map<string, SideRun>();
-  /** Each job the engine was told of, by its id: the turn it belongs to (LumiAH's `JobView.basis`), and who started it where LumiAH said: the agent, by its handle in the run it was of, and the job that run was, if it was a job's. */
-  private readonly jobs = new Map<string, { basis: string; by: string | null; parent: string | null }>();
+  /** Each job the engine was told of, by its id: the turn it belongs to (LumiAH's `JobView.basis`; null for one the user started), who started it where LumiAH said (the agent, by its handle in the run it was of), the job that run was, if it was a job's, whether the next turn waits for it, and the plan file its objective names (`author/prepare.md` for the story's prepared start). */
+  private readonly jobs = new Map<string, { basis: string | null; by: string | null; parent: string | null; due: NonNullable<JobView["due"]> | null; plan: string | null }>();
   /** Whose each chat is, as its guard last said. */
   private readonly owners = new Map<ChatId, UserId>();
   /** The opening a chat's core is planning now, and the consequences its commit reads: set around the core's own synchronous steps, inside the chat's queue. */
@@ -200,8 +282,10 @@ export class HarnessEngine implements HarnessHooks {
   private readonly closing = new Map<string, Closing>();
   /** The side sessions' turns under way, by the turn's id: a conversation with an agent that is no reply and no job. */
   private readonly talks = new Map<string, { chatId: ChatId; userId: UserId }>();
-  /** The chats LumiAH is known to be switched on for since this backend started. */
-  private readonly pinned = new Map<ChatId, true>();
+  /** The harness chats LumiAH couldn't be set on in its runtime yet (no runtime was ever set up, another harness answers the chat), whose each is and LumiAH's words for why: set when the user's runtime changes (`runtimeChanged`) or a reply of the chat starts (`refused`). */
+  private readonly unseated = new Map<ChatId, { userId: UserId; why: string }>();
+  /** Whether the player directs the story in each chat, as its claim last said (Sovereign Hand): the claim is asked at the start of every run, just before the run begins. */
+  private readonly directed = new Map<ChatId, boolean>();
 
   /**
    * How many of each thing the engine keeps about runs that are over, or not its own to bound (a
@@ -222,23 +306,79 @@ export class HarnessEngine implements HarnessHooks {
   }
 
   /**
-   * LumiAH's own switch for a chat: turns it on when the chat is switched to the harness, and off
-   * when it is switched away (HARNESS-SLICE3: "One control in the UI, not two"). Whoever mounts
-   * LumiAH sets it. Until then nothing can play a harness chat, so none can be chosen (`blocked`).
+   * LumiAH's own switch for a chat: on, in LumiAH's runtime, when the chat is switched to the
+   * harness, and off when it is switched away (HARNESS-SLICE3: "One control in the UI, not two").
+   * Rejects in LumiAH's own words where the chat can't be set on now. Whoever mounts LumiAH sets
+   * it. Until then nothing can play a harness chat, so none can be chosen (`blocked`).
    */
   pin: ((chatId: ChatId, userId: UserId, harness: boolean) => Promise<void>) | null = null;
 
   /**
-   * Why LumiAH can't play a user's chats now, in words that say what to do about it (a permission
-   * they haven't granted, a Lumiverse too old for it); null where it can. Whoever mounts LumiAH sets
-   * it, from what LumiAH's own backend reports.
+   * Why a reply of a chat (`chatId`; null: of any of the user's chats) can't be played in LumiAH's
+   * runtime now, in plain words that say what to do: a permission it needs isn't granted, no runtime
+   * is linked, its link is refused, it isn't set up to answer chats yet. Null where it can. Whoever
+   * mounts LumiAH sets it, from what LumiAH's own backend reports.
    */
-  ready: ((userId: UserId) => Promise<string | null>) | null = null;
+  runtime: ((userId: UserId, chatId: ChatId | null) => Promise<string | null>) | null = null;
 
-  /** Why a chat can't be switched to the harness now, and what to do; null where it can. GM → This chat → Engine says it under the switch, and a request to switch is refused with it. */
-  async blocked(userId: UserId): Promise<string | null> {
-    if (this.pin === null) return NOT_BUILT_IN;
-    return (await this.ready?.(userId)) ?? null;
+  /**
+   * Whether a reply of a chat made on `connectionId` goes to LumiAH's runtime: LumiAH is on for the
+   * chat there, and that connection is the runtime's own for it. Whoever mounts LumiAH sets it.
+   */
+  seated: ((chatId: ChatId, userId: UserId, connectionId: string | null) => Promise<boolean>) | null = null;
+
+  /**
+   * Each agent that can run in a chat, as LumiAH holds it there: each tool its definition names
+   * that it can't use, with why (LumiAH's `agents.held`, asked where the chat runs). Whoever mounts
+   * LumiAH sets it; without it no turn is held to its agents' tools.
+   */
+  held: ((userId: UserId, chatId: ChatId) => Promise<readonly HeldTools[]>) | null = null;
+
+  /**
+   * Why the harness can't play this chat of the user's now, and what to do; null where it can: why
+   * it can't play any of the user's chats, else LumiAH's words for this one while it can't be set to
+   * the runtime (another harness answers it, say), else an agent of the cast that can't use a tool it
+   * is given there (`unheld`). A chat that couldn't be set before is set again here, once nothing
+   * keeps the user's runtime from every chat (a permission granted since): the player has nothing
+   * more to press. GM → This chat → Engine says it under the switch and Play on its first screen,
+   * and the guard stops a harness chat's generations with the same words (`refused`): no other
+   * engine plays one.
+   */
+  async blocked(userId: UserId, chatId: ChatId): Promise<string | null> {
+    if (this.pin === null || this.runtime === null) return NOT_BUILT_IN;
+    const all = await this.runtime(userId, null);
+    if (all !== null) return all;
+    const unset = this.unseated.get(chatId)?.userId === userId ? await this.seat(chatId, userId) : null;
+    if (unset !== null) return unset;
+    return (await this.rt.chatKnowledge.engine(chatId, userId)) === "harness" ? this.unheld(userId, chatId) : null;
+  }
+
+  /**
+   * Why the cast can't play a chat of the user's now: an agent of the engine's that can't use a tool
+   * its definition names there, because the user switched the tool off or no tool of that name is
+   * there, in words that name each such agent and its tools and say what to do. Null where each can
+   * use all it is given. A tool the engine's own claim withdraws in the chat is no fault: the engine
+   * leaves it out on purpose. Null too where LumiAH can't say (the log says why): the turn goes on,
+   * and an agent short of a tool is told so when it calls it.
+   */
+  private async unheld(userId: UserId, chatId: ChatId): Promise<string | null> {
+    if (this.held === null) return null;
+    let agents: readonly HeldTools[];
+    try {
+      agents = await this.held(userId, chatId);
+    } catch (error) {
+      this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: LumiAH didn't say which tools its agents can use here (${error instanceof Error ? error.message : String(error)})`, userId);
+      return null;
+    }
+    const cast: readonly string[] = HARNESS_AGENT_IDS;
+    const lines = agents
+      .filter((agent) => cast.includes(agent.id))
+      .flatMap((agent) => {
+        const off = agent.cannot.filter((c) => c.why === "off").map((c) => c.tool);
+        const unknown = agent.cannot.filter((c) => c.why === "unknown").map((c) => c.tool);
+        return [...(off.length > 0 ? [switchedOff(agent.name, off)] : []), ...(unknown.length > 0 ? [notHere(agent.name, unknown)] : [])];
+      });
+    return lines.length === 0 ? null : [UNHELD, ...lines].join(" ");
   }
 
   /** Whose a chat is, where LumiAH's backend knows and neither the call nor the ledger says. Whoever mounts LumiAH may set it. */
@@ -271,8 +411,10 @@ export class HarnessEngine implements HarnessHooks {
       name: "LumiRPEngine",
       definitions: (ask) => this.definitions(ask),
       claim: (ask) => this.claim(ask),
-      writerRequest: (request) => this.writerRequest(request),
       runBegan: (run) => this.runBegan(run),
+      agentModel: (ask) => this.agentModel(ask),
+      releasing: (release) => this.releasing(release),
+      released: (release) => this.released(release),
       replyWritten: (reply) => this.replyWritten(reply),
       runEnded: (run) => this.runEnded(run),
     };
@@ -294,93 +436,164 @@ export class HarnessEngine implements HarnessHooks {
     return known;
   }
 
-  /**
-   * `HarnessHooks.plays`: the chat's own choice, as it stands. A chat the harness plays is one
-   * LumiAH is switched on for: the two are set together (`choose`), but a chat that came by its
-   * choice another way (a Branch copies it with the chat) is switched on here, before its prompt
-   * is assembled, so its first reply is played like any other.
-   */
+  /** `HarnessHooks.plays`: the chat's own choice, as it stands. Whether the harness can play it now is the guard's to ask (`refused`). */
   async plays(chatId: ChatId, userId: UserId): Promise<boolean> {
     this.remember(this.owners, chatId, userId);
-    if ((await this.rt.chatKnowledge.engine(chatId, userId)) !== "harness") return false;
-    if (this.pin !== null && !this.pinned.has(chatId)) {
-      try {
-        await this.pin(chatId, userId, true);
-        this.remember(this.pinned, chatId, true);
-      } catch (error) {
-        // Its replies are then written with no turn played, and each says so: the reason is here.
-        this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId} plays on the harness, which couldn't be switched on for it (${error instanceof Error ? error.message : String(error)})`, userId);
-      }
+    return (await this.rt.chatKnowledge.engine(chatId, userId)) === "harness";
+  }
+
+  /**
+   * `HarnessHooks.refused`: why the harness can't play this generation of a chat it plays, in plain
+   * words that say what to do; null where it can. It plays a turn only in LumiAH's runtime, where
+   * the author writes the reply itself: the generation must be on its way there (`seated`: LumiAH is
+   * on for the chat in the runtime, and the generation's connection is the runtime's), and the
+   * runtime must be able to take it now (`runtime`). A chat not yet set to the runtime (a Branch
+   * copies its engine with it; one chosen before any runtime was set up) is set now. A generation
+   * already on the runtime's connection then goes there: a Branch copies the chat's connection too,
+   * so its first reply plays. One on another connection is stopped, and the next reply goes there.
+   * A chat that can't be set reaches no runtime, so what keeps the user's runtime from every chat is
+   * said first, then LumiAH's words for this one. Where the runtime can take it, the turn still
+   * starts only once every agent of the cast can use each tool it is given there (`unheld`).
+   */
+  async refused(input: { chatId: ChatId; userId: UserId; connectionId: string | null }): Promise<string | null> {
+    const { chatId, userId, connectionId } = input;
+    this.remember(this.owners, chatId, userId);
+    if (this.pin === null || this.runtime === null || this.seated === null) return NOT_BUILT_IN;
+    let seated = await this.seated(chatId, userId, connectionId);
+    const unset = seated ? null : await this.seat(chatId, userId);
+    if (unset !== null) return (await this.runtime(userId, null)) ?? unset;
+    if (!seated) seated = await this.seated(chatId, userId, connectionId);
+    return (await this.runtime(userId, chatId)) ?? (seated ? await this.unheld(userId, chatId) : SET_JUST_NOW);
+  }
+
+  /**
+   * Sets a chat the harness plays on in LumiAH's runtime (`pin`): null once it is, else LumiAH's
+   * words for why it can't be now (no runtime was ever set up, another harness answers the chat, a
+   * permission isn't granted). One that can't be set now is set again when the user's runtime
+   * changes (`runtimeChanged`), and its pages say why it doesn't play meanwhile.
+   */
+  private async seat(chatId: ChatId, userId: UserId): Promise<string | null> {
+    try {
+      await this.pin?.(chatId, userId, true);
+      this.unseated.delete(chatId);
+      return null;
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      this.remember(this.unseated, chatId, { userId, why });
+      this.rt.host.log("info", `[LumiRPEngine] chat ${chatId} plays on the harness, and isn't set to its runtime yet: ${why}`, userId);
+      return why;
     }
-    return true;
+  }
+
+  /** The user's runtime linked, dropped, was refused or got its connection (LumiAH's `onRuntime`): each harness chat of theirs that couldn't be set to it yet is set now, and its pages read again. */
+  async runtimeChanged(userId: UserId): Promise<void> {
+    for (const [chatId, { userId: owner }] of [...this.unseated]) {
+      if (owner !== userId) continue;
+      if ((await this.rt.chatKnowledge.engine(chatId, userId)) !== "harness") this.unseated.delete(chatId);
+      else if ((await this.seat(chatId, userId)) === null) this.rt.push.changed(chatId, userId);
+    }
+  }
+
+  /**
+   * A page opened a chat (its hello): one the harness plays that isn't set to its runtime yet (one
+   * from before an update, a Branch) is set now, before any reply is asked of it, so none is lost
+   * to setting it. Where it can't be set yet nothing changes, and Play says why (`blocked`). The
+   * guard still sets a chat whose reply comes first (`refused`).
+   */
+  async opened(chatId: ChatId, userId: UserId): Promise<void> {
+    if (this.pin === null || this.seated === null) return;
+    this.remember(this.owners, chatId, userId);
+    try {
+      if ((await this.rt.chatKnowledge.engine(chatId, userId)) !== "harness" || (await this.seated(chatId, userId, null))) return;
+      if ((await this.seat(chatId, userId)) === null) this.rt.push.changed(chatId, userId);
+    } catch (error) {
+      this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId} wasn't set to its runtime as it opened: ${error instanceof Error ? error.message : String(error)}`, userId);
+    }
   }
 
   /**
    * Chooses the engine that plays a chat (GM → This chat → Engine), whole: LumiAH's own switch for
    * the chat follows the choice, so the two never disagree and the player has one control
-   * (HARNESS-SLICE3). The harness is chosen only where LumiAH can play the chat, and its switch
-   * goes on before the choice is kept, so a chat is never left on a harness nothing plays; it goes
-   * off once another engine's choice is kept. A turn finishes on the engine it started on: while
-   * one waits at a gate, what it kept for its resume would be lost, so the switch waits for it.
-   * Refused (`EngineRefused`) in words that say what to do.
+   * (HARNESS-SLICE3). The harness plays a chat only in LumiAH's runtime, so choosing it sets the
+   * chat there too (`seat`). Until it can play (no runtime is linked, a permission isn't granted),
+   * the chat plays nothing and its pages say why and what to do: no other engine stands in. A turn
+   * finishes on the engine it started on: while one waits at a gate, what it kept for its resume
+   * would be lost, so the switch waits for it. Refused (`EngineRefused`) in words that say what to do.
    */
   async choose(chatId: ChatId, userId: UserId, engine: ChatEngine): Promise<ChatKnowledgePrefs> {
     this.remember(this.owners, chatId, userId);
-    const stay = "This chat stays on the engine it has.";
-    if (engine === "harness") {
-      const blocked = await this.blocked(userId);
-      if (blocked !== null) throw new EngineRefused("unavailable", `${blocked} ${stay}`);
-    }
+    if (engine === "harness" && this.pin === null) throw new EngineRefused("unavailable", `${NOT_BUILT_IN} This chat stays on the engine it has.`);
     if (engine !== (await this.rt.chatKnowledge.engine(chatId, userId))) {
       const waiting = await this.rt.gateWaiting(chatId, userId);
       if (waiting !== null) throw new EngineRefused("conflict", `This chat's turn is waiting on ${waiting}. Answer or cancel it before you switch the engine: a turn finishes on the engine it started on.`);
     }
-    if (engine === "harness") {
-      try {
-        await this.pin?.(chatId, userId, true);
-        this.remember(this.pinned, chatId, true);
-      } catch (error) {
-        throw new EngineRefused("unavailable", `${error instanceof Error ? error.message : String(error)} ${stay}`);
-      }
-    }
     const prefs = await this.rt.chatKnowledge.set(chatId, userId, { engine: engine === "classic" ? null : engine });
     // A turn under way finishes on the engine and choices it started with (`TurnFrame`): the change applies from the chat's next turn.
     this.rt.push.changed(chatId, userId);
-    if (engine !== "harness") {
-      this.pinned.delete(chatId);
+    if (engine === "harness") await this.seat(chatId, userId);
+    else {
+      this.unseated.delete(chatId);
       await this.pin?.(chatId, userId, false);
     }
     return prefs;
   }
 
   /**
-   * A chat has just been given its world: it plays on the harness from its first turn, where the
-   * harness can play it, with nothing for the player to set up. Where it can't, the chat plays its
-   * classic steps, and GM → This chat → Engine says why and what to do. The chats made before keep
-   * the engine they had: only a chat's first attach comes here.
+   * A chat has just been given its world: it plays on the harness from its first turn, in LumiAH's
+   * runtime, with nothing more to choose. Where the harness can't play it yet, it plays nothing until
+   * it can, and its pages say why: no quieter engine stands in. The chats made before keep the
+   * engine they had: only a chat's first attach comes here.
    */
   async adopt(chatId: ChatId, userId: UserId): Promise<void> {
-    if ((await this.blocked(userId)) !== null) return;
     try {
       await this.choose(chatId, userId, "harness");
     } catch (error) {
-      this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the new world chat stays on its classic steps (${error instanceof Error ? error.message : String(error)})`, userId);
+      this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the new world chat couldn't be set to the harness (${error instanceof Error ? error.message : String(error)})`, userId);
     }
   }
 
   // ---------------------------------------------------------------- what LumiAH is given
 
-  /** The engine's agent definitions and skills for a user, in their own words where they wrote them; the shipped ones where the call names no user. */
+  /**
+   * The engine's agent definitions and skills for a user, in their own words where they wrote them;
+   * the shipped ones where the call names no user. For a run about a chat, each definition's
+   * instructions end with what the engine adds for that chat (`chatAdditions`): its part of the
+   * chat's preset, how the story's narration is set, and the author's opening. A preset or an
+   * opening that can't be read gives nothing, and the log says why: the run goes on with the rest.
+   */
   private async definitions(ask: DefinitionsAsk): Promise<ExtensionDefinitions> {
-    return harnessDefinitions(ask.userId !== "" ? (await this.rt.settings.get(ask.userId)).prompts.texts : {});
+    if (ask.userId === "") return harnessDefinitions({});
+    const userId = ask.userId;
+    const settings = await this.rt.settings.get(userId);
+    const defs = harnessDefinitions(settings.prompts.texts);
+    if (ask.chatId === null) return defs;
+    const chatId = ask.chatId;
+    const unread = (what: string) => (error: unknown) => {
+      this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: ${what} (${error instanceof Error ? error.message : String(error)})`, userId);
+      return null;
+    };
+    const [read, opening] = await Promise.all([
+      readStoryPreset(this.rt.host, chatId, userId, settings.storyPreset).catch(unread("the preset's parts for the agents weren't read, so they run on the engine's own texts")),
+      authorOpening(this.rt, { chatId, userId }, this.files?.({ chatId, userId }) ?? null, settings).catch(unread("the author's opening wasn't read: the moment, the drafts due and the story's preparation")),
+    ]);
+    const added = chatAdditions({ read, settings, opening });
+    const agents = defs.agents.map((agent) => {
+      const more = added.get(agent.id);
+      return more === undefined ? agent : { ...agent, instructions: [agent.instructions, ...more].join("\n\n") };
+    });
+    return { ...defs, agents };
   }
 
   /**
-   * What the engine supplies for a chat: its author as the main agent and the world's guidance, for
-   * a world chat on the harness; nothing for any other, which LumiAH answers itself. LumiAH's own
-   * lore tools give way to the engine's there (`LUMIAH_LORE`).
+   * What the engine supplies for a chat: for a world chat on the harness, its author as the main
+   * agent and the world's guidance, and its word that the chat plays only in LumiAH's runtime
+   * (`place`), that the author is shown only the player's newest message of what Lumiverse
+   * assembled (`request`), and that the reply is only what the chat's agents release (`reply`).
+   * Nothing for any other chat, which LumiAH answers itself. LumiAH's own lore tools give way to
+   * the engine's there, and those the engine has none of its own name for are withdrawn
+   * (`LUMIAH_WITHDRAWN`).
    *
-   * Four things head the guidance when they apply. Guidance heads an agent's instructions, so each
+   * Three things head the guidance when they apply. Guidance heads an agent's instructions, so each
    * is the first thing the run's author reads, and a level cut for its length (LumiAH's setting)
    * keeps it:
    * - The run's story is the model's replies alone (Sovereign Hand, as the claim's own word on the
@@ -389,11 +602,7 @@ export class HarnessEngine implements HarnessHooks {
    * - The turn before was still being recorded when this run began, and the wait for it ran out
    *   (Settings: `agents.harness.commitWaitMs`). A turn's tail never holds the player, so the run
    *   goes on, and its author knows the last turn's changes may not all be in.
-   * - The reply the turn follows stands with no turn played: the author reads it first and records
-   *   what it established.
-   * - The reply the turn follows says something against what its turn decided (`departuresOf`):
-   *   the world kept the turn's, and the author steers the story back to it unless the player asks
-   *   otherwise.
+   * - The reply the turn follows stands with no turn played: nothing it tells is in the world.
    */
   private async claim(ask: ClaimAsk): Promise<ChatClaim | null> {
     const userId = await this.userOf(ask.chatId, ask.userId);
@@ -406,21 +615,18 @@ export class HarnessEngine implements HarnessHooks {
     if (!head) return null;
     const narrator = narratorView(await this.rt.chatKnowledge.get(ask.chatId, userId), head.world, settings);
     const guidance = worldGuidance({ world: head.world, state: head.state, texts, narrator });
-    const last = lastReply(head);
-    const unplayed = unplayedBefore(last, texts);
-    const departed = departuresOf(last);
+    const unplayed = unplayedBefore(lastReply(head), texts);
     // The claim's word on what counts as the chat's story: whose messages are, as Sovereign Hand is set for the harness, and what of the newest the author is given. Whether a hidden message is read is LumiAH's own setting.
     const story: Partial<StorySetting> = { from: SOVEREIGN_FROM[settings.agents.harness.sovereignHand], newest: NEWEST_GIVEN[settings.agents.harness.newestMessage] };
-    // What the run reads as its story is known now, before the guidance is read: the claim's word stands over what holds without it, and following Lumiverse is its Sovereign Hand switch as LumiAH read it (off where Lumiverse doesn't say).
+    // What the run reads as its story is known now, before the guidance is read: the claim's word stands over what holds without it, and following Lumiverse is its Sovereign Hand switch as LumiAH read it (off where Lumiverse doesn't say). The run that begins next is told it too (`HarnessTurn.directed`).
     const directed = (story.from === "lumiverse" ? (ask.sovereignHand === true ? "replies" : "everyone") : story.from) === "replies";
+    this.remember(this.directed, ask.chatId, directed);
     const first = [
       ...(directed ? [renderPrompt(HARNESS_TEXT.sovereign, texts, {})] : []),
       ...(whole ? [] : [renderPrompt(HARNESS_TEXT.behind, texts, {})]),
       ...(unplayed !== null ? [renderPrompt(HARNESS_TEXT.unplayed, texts, { why: unplayed })] : []),
-      ...(departed.length > 0 ? [renderPrompt(HARNESS_TEXT.departed, texts, { lines: departed.map((line) => `- ${line}`).join("\n") })] : []),
     ].filter((text) => text.trim() !== "");
-    const mine = new Set(harnessTools({ world: head.world, registry: this.rt.registry, texts }).map((tool) => tool.name));
-    return { mainAgent: HARNESS_AGENT.author, guidance: first.length > 0 ? { ...guidance, text: `${first.join("\n\n")}\n\n${guidance.text}` } : guidance, withdraw: LUMIAH_LORE.filter((name) => !mine.has(name)), story };
+    return { mainAgent: HARNESS_AGENT.author, guidance: first.length > 0 ? { ...guidance, text: `${first.join("\n\n")}\n\n${guidance.text}` } : guidance, withdraw: [...LUMIAH_WITHDRAWN], story, place: "runtime", request: "newest", reply: "released" };
   }
 
   /**
@@ -479,9 +685,9 @@ export class HarnessEngine implements HarnessHooks {
     const userId = await this.userOf(call.chatId, told);
     const texts = userId ? (await this.rt.settings.get(userId)).prompts.texts : {};
     const say = (id: string, vars: Readonly<Record<string, string>> = {}): string => renderPrompt(id, texts, vars);
-    // A person's own mind reads through its own tools alone, whatever its definition was given: the read view has no one person's point of view, so any other tool would show it what that person doesn't know.
+    // A person's own mind reads through its own tools alone, whatever its definition was given: the read view has no one person's point of view, so any other tool would show it what that person doesn't know. Its own acts it writes as beats (`beat_write`), which holds it to its own.
     const family = FAMILY.get(call.name);
-    if (call.role === HARNESS_AGENT.character && family !== undefined && family !== HARNESS_FAMILY.mind) return { text: say(HARNESS_NOTE.mindOnly, { tool: call.name }), error: true };
+    if (call.role === HARNESS_AGENT.character && family !== undefined && family !== HARNESS_FAMILY.mind && call.name !== BEAT_WRITE) return { text: say(HARNESS_NOTE.mindOnly, { tool: call.name }), error: true };
     let served: Served | null = null;
     let out: { text: string; error?: boolean };
     try {
@@ -490,7 +696,8 @@ export class HarnessEngine implements HarnessHooks {
       served = got;
       const closed = toolRefusal(call.name, got.standing, say);
       const run = (): Promise<{ text: string; error?: boolean }> => runHarnessTool(got.env(), call.name, call.args);
-      out = closed ? closedAnswer(closed) : await (got.frame ? inTurn(got.frame, run) : run());
+      // A job tied to no reply is told that, not that its starter holds too little.
+      out = closed ? (got.noReply ? { text: JSON.stringify({ refused: { code: "no_basis", reason: say(HARNESS_NOTE.noBasis) } }), error: true } : closedAnswer(closed)) : await (got.frame ? inTurn(got.frame, run) : run());
     } catch (error) {
       // A tool that throws is the engine's fault, never the model's: said plainly, and logged.
       const reason = error instanceof Error ? error.message : String(error);
@@ -503,9 +710,10 @@ export class HarnessEngine implements HarnessHooks {
 
   /** What a call runs with and where its caller stands; or its answer, where the engine has nothing to run it on. */
   private async serve(call: RemoteToolCall, userId: UserId | null, signal: AbortSignal, say: (id: string) => string): Promise<Served | { text: string; error: true }> {
+    const as = call.as ?? null;
     const own = this.turns.get(call.turn);
     if (own && !own.closed) {
-      const mine: TurnCall = { agent: own.cast.of(call), tool: call.name, ceiling: null, files: this.files?.({ chatId: own.chatId, userId: own.userId }) ?? null };
+      const mine: TurnCall = { agent: own.cast.of(call), tool: call.name, ceiling: null, files: this.files?.({ chatId: own.chatId, userId: own.userId }) ?? null, as, job: null };
       return { env: () => own.env(mine, signal), standing: own.standing(mine.agent), frame: own.frame };
     }
     // A side session's turn: a conversation with an agent, tied to no reply. It reads the chat as it stands, as its definition reads; what more it may do is whoever started it's to give (`sideEnv`), and no agent of it is an author.
@@ -514,17 +722,31 @@ export class HarnessEngine implements HarnessHooks {
       const given = (await this.sideEnv?.({ call, userId, signal })) ?? { env: this.reading(call, userId, signal), tier: "read" as RoleTier };
       return { env: () => given.env, standing: { own: given.tier, over: "gm", under: null, author: false, def: call.role }, frame: null, ...(given.answered ? { answered: given.answered } : {}) };
     }
-    // A job's run, or what an agent of a turn still calls once its reply is saved: the turn whose record it belongs to.
     const job = this.jobs.get(call.turn);
-    const basis = job?.basis ?? (own || this.over.has(call.turn) ? call.turn : null);
-    if (!userId || (basis === null && !this.sides.has(call.turn))) return { text: say(HARNESS_NOTE.noTurn), error: true };
-    if (basis === null) return { text: say(HARNESS_NOTE.noBasis), error: true };
-    const ceiling = job ? this.ceilingOf(call.turn) : null;
-    const files = this.files?.({ chatId: call.chatId, userId }) ?? null;
+    const files = userId ? (this.files?.({ chatId: call.chatId, userId }) ?? null) : null;
+    // A job no reply's turn started belongs to no turn: it works on the chat as it stands (`prepareEnv`). The story's prepared start writes on the chat's first reply, any other on its newest.
+    if (job && job.basis === null) {
+      const side = this.sides.get(call.turn);
+      if (!userId || !side) return { text: say(HARNESS_NOTE.noTurn), error: true };
+      const agent = side.cast.of(call);
+      const prepared = this.preparing(call.turn);
+      // The player's own job, and every job of the prepared start, stand as their definitions: the job's main agent running as the author stands as the author. One an agent started outside them (in a conversation with an agent, or in another job of the player's) is held to that agent, who wrote nothing there: it reads, and what it would change is refused.
+      const held = job.by !== null && !prepared;
+      const standing = standingOf(agent, undefined, held ? this.ceilingOf(call.turn) : null, agent.main && agent.def === HARNESS_AGENT.author);
+      const env = await prepareEnv(this.rt, { chatId: call.chatId, userId, job: call.turn, prepared, directed: side.directed, agent, tier: reach(standing), files, as, signal });
+      if ("refused" in env) return { text: JSON.stringify({ refused: { code: env.code, reason: env.reason } }), error: true };
+      return { env: () => env, standing, frame: null, ...(held ? { noReply: true as const } : {}) };
+    }
+    // A job's run, or what an agent of a turn still calls once its reply is saved: the turn whose record it belongs to.
+    const known = job?.basis ?? (own || this.over.has(call.turn) ? call.turn : null);
+    if (!userId || (known === null && !this.sides.has(call.turn))) return { text: say(HARNESS_NOTE.noTurn), error: true };
+    // A run tied to no reply (a job's run the engine was never told of, started outside a reply's turn): it reads the chat as it stands and changes nothing (`jobEnv`).
+    const basis = known ?? "";
+    const ceiling: Ceiling | null = job ? this.ceilingOf(call.turn) : known === null ? { tier: "read", by: call.turn } : null;
     const turn = this.turns.get(basis);
     const beside = turn && !turn.closed && turn.replied === null ? this.sides.get(call.turn) : undefined;
     if (turn && beside) {
-      const theirs: TurnCall = { agent: beside.cast.of(call), tool: call.name, ceiling, files };
+      const theirs: TurnCall = { agent: beside.cast.of(call), tool: call.name, ceiling, files, as, job: job ? call.turn : null };
       return { env: () => turn.env(theirs, signal), standing: turn.standing(theirs.agent, ceiling), frame: turn.frame };
     }
     // A call that belongs to the turn's record waits for it, and for what the turn's last commit asked of the world's document. The call ending ends the wait as the commit does.
@@ -542,9 +764,15 @@ export class HarnessEngine implements HarnessHooks {
     const agent = side.cast.of(call);
     // No grant reaches past the turn it was made in: after the reply an agent stands where its definition and the agents over it leave it.
     const standing = standingOf(agent, undefined, ceiling, agent.main && agent.job === null);
-    const env = await jobEnv(this.rt, this.review, { chatId: call.chatId, userId, basis, committed: this.over.get(basis)?.committed === true, agent, standing, tool: call.name, files, staged: side.staged, signal });
+    const env = await jobEnv(this.rt, this.review, { chatId: call.chatId, userId, basis, committed: this.over.get(basis)?.committed === true, agent, standing, tool: call.name, files, staged: side.staged, signal, as, directed: side.directed, job: job ? call.turn : null });
     if ("refused" in env) return { text: JSON.stringify({ refused: { code: env.code, reason: env.reason } }), error: true };
-    return { env: () => env, standing, frame: null };
+    const noReply = known === null || (!turn && !this.over.has(basis));
+    // Said once per run, for whoever reads the log: which of the two it was.
+    if (noReply && !side.warned) {
+      side.warned = true;
+      this.rt.host.log("warn", `[LumiRPEngine] run ${call.turn.slice(0, 12)} is tied to no reply the engine knows (${known === null ? "it was started outside a reply's turn" : `turn ${basis.slice(0, 12)} was never opened here`}): it reads the chat as it stands and changes nothing`, userId);
+    }
+    return { env: () => env, standing, frame: null, ...(noReply ? { noReply: true as const } : {}) };
   }
 
   /**
@@ -557,7 +785,7 @@ export class HarnessEngine implements HarnessHooks {
    */
   private ceilingOf(id: string, seen: ReadonlySet<string> = new Set()): Ceiling {
     const job = this.jobs.get(id);
-    if (!job || job.by === null || seen.has(id)) return { tier: "read", by: job?.by ?? id };
+    if (!job || job.by === null || job.basis === null || seen.has(id)) return { tier: "read", by: job?.by ?? id };
     if (job.parent !== null) {
       const starter = this.sides.get(job.parent)?.cast.placed(job.by);
       return { tier: starter ? reach(standingOf(starter, undefined, this.ceilingOf(job.parent, new Set([...seen, id])))) : "read", by: job.by };
@@ -572,36 +800,7 @@ export class HarnessEngine implements HarnessHooks {
   private reading(call: RemoteToolCall, userId: UserId, signal: AbortSignal): ToolEnv {
     const { view, marks } = harnessRole(call.role) ?? { view: "everyone" as const, marks: true };
     const base = { userId, chatId: call.chatId, knowledge: view, marks };
-    return { ...base, reader: outsideReader(this.rt, base), writer: null, agent: { role: call.role, id: call.agentId }, signal, files: this.files?.({ chatId: call.chatId, userId }) ?? null };
-  }
-
-  /**
-   * The writer's request, with the engine's sections where the preset placed them (HARNESS-SLICE3:
-   * "Sections where the preset places them"): built now, from the state the author's commits left,
-   * with the brief as the Outline, each swapped for the span the guard marked for it (which holds the
-   * section as the chat's head had it); one with no span goes, with the others like it, before the
-   * player's last message. The brief the core put in goes once the Outline carries it. Whoever
-   * writes the reply is sent these: LumiAH's writer, or Lumiverse's own generation.
-   *
-   * For a generation that is no open harness turn (it never opened, or is over) the sections stay as
-   * the chat's head had them and only their marker lines go; null where there are none: as the core
-   * built it.
-   */
-  private async writerRequest(request: WriterRequest): Promise<ModelMessage[] | null> {
-    await this.opening.get(request.generationId);
-    const turn = this.turns.get(request.generationId);
-    const nonce = markerNonce(request.generationId);
-    if (!turn || turn.closed) {
-      const bare = placeParts(request.messages, null, nonce).messages;
-      return bare.length === request.messages.length && bare.every((m, i) => m === request.messages[i]) ? null : bare;
-    }
-    // As LumiAH last asked: a request it makes with no brief is one the author never handed over.
-    turn.briefed = request.brief !== null;
-    return inTurn(turn.frame, async () => {
-      const fills = await turn.sections(briefLines(request.brief));
-      const messages = fills.some((f) => f.slot === OUTLINE_SLOT) ? withoutBrief(request.messages, request.brief) : request.messages;
-      return placeParts(messages, fills.map((f) => ({ part: f.slot, text: f.content })), nonce).messages;
-    });
+    return { ...base, reader: outsideReader(this.rt, base), writer: null, agent: { role: call.role, id: call.agentId, ...(call.as !== undefined ? { as: call.as } : {}) }, signal, files: this.files?.({ chatId: call.chatId, userId }) ?? null };
   }
 
   /** A run begins. A turn that answers a generation opens the engine's side of it; a job's run is noted, to be tied to its turn; a side session's turn is noted, and whoever follows it is told. */
@@ -622,18 +821,31 @@ export class HarnessEngine implements HarnessHooks {
     const chatId = run.chatId;
     const userId = await this.userOf(chatId, run.userId);
     if (!userId) return;
-    // A job's run started again goes on as the run before it left it: who its agents were, and what it wrote.
-    if (run.kind === "job") return this.remember(this.sides, run.turn, this.sides.get(run.turn) ?? { chatId, userId, cast: new Cast(run.turn), staged: new Map() });
+    // A job's run started again goes on as the run before it left it: who its agents were, and what it wrote. Whether the player directs the story is the claim's word, asked as this run began.
+    if (run.kind === "job") return this.remember(this.sides, run.turn, this.sides.get(run.turn) ?? { chatId, userId, cast: new Cast(run.turn), staged: new Map(), directed: this.directed.get(chatId) ?? false });
     // What the turn runs on: as its generation's guard took it, so the whole turn reads one set of settings and choices.
     const frame = this.rt.ledger.harnessFrame(chatId, run.turn) ?? (await this.rt.frame(chatId, userId));
-    // Its run begins from the assembled prompt: the book that held the prompt's sections goes back now, before the author works, so no other chat of the world waits on it.
-    this.rt.ledger.harnessAssembled(chatId, run.turn);
     const chatRun = await this.rt.runOf(chatId, userId);
     if (frame.chat.engine !== "harness" || !chatRun) return;
+    await this.notebook(chatId, userId, frame);
     await this.rt.ledger.with(chatId, userId, (core, observed) => inTurn(frame, () => this.open(run.turn, frame, chatRun.runSeed, core, observed)));
     // Agent turns under way, across the user's chats (Settings → Agents → Budgets): the oldest is let go when another starts.
     const mine = [...this.turns.values()].filter((t) => t.userId === userId);
     for (const stale of mine.slice(0, Math.max(0, mine.length - frame.settings.agents.kept.runs))) await this.dropped({ chatId: stale.chatId, userId, generationId: stale.generationId, why: "more turns were under way than the engine keeps" });
+  }
+
+  /**
+   * The author's notebook, ready before the author starts on a turn: each of its files the chat's
+   * area lacks is written in its first shape, and its first page is pinned for the author, so LumiAH
+   * shows it to the author at the turn's start (`shapeNotebook`). A notebook that can't be made now
+   * costs the turn nothing: it is made at the next.
+   */
+  private async notebook(chatId: ChatId, userId: UserId, frame: TurnFrame): Promise<void> {
+    const files = this.files?.({ chatId, userId });
+    const core = this.core;
+    if (!files || !core) return;
+    const pin = async (path: string, agent: string): Promise<void> => void (await core.ask(userId, "workspace.pin", { chatId, area: "chat", path, on: true, role: agent }, { chat: chatId }));
+    await shapeNotebook({ list: files.list, write: files.write, pin }, frame.settings.prompts.texts).catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the author's notebook wasn't made ready (${error instanceof Error ? error.message : String(error)})`, userId));
   }
 
   /**
@@ -690,6 +902,7 @@ export class HarnessEngine implements HarnessHooks {
       active: await this.rt.activeConnectionId(userId),
       said: answers,
       build: await worldBuild(this.rt, chatId, userId),
+      directed: this.directed.get(chatId) ?? false,
     });
     this.turns.set(generationId, turn);
   }
@@ -701,11 +914,14 @@ export class HarnessEngine implements HarnessHooks {
   }
 
   /**
-   * A run ended. A turn's that failed or was stopped leaves nothing, whatever its generation then
-   * does. One that is done hands the engine LumiAH's own record of the turn, which the turn's record
-   * takes: with the reply's commit when that is still to come, else now. The jobs its agents started
-   * belong to that record. A job's run stays known when it ends (`sides`): a job its agents started
-   * is held to where they stood, and a run of it started again goes on as the same agents.
+   * A run ended. A turn's that failed, or was stopped with nothing of its reply released, leaves
+   * nothing, whatever its generation then does. One that is done, or was stopped once some of its
+   * reply was released, hands the engine LumiAH's own record of the turn, which the turn's record
+   * takes: with the reply's commit when that is still to come, else now. Stopped, what was released
+   * stands, and the turn commits as its generation stops (`TurnContext.stopped`). The jobs its
+   * agents started belong to that record. A job's run stays known when it ends (`sides`): a job its
+   * agents started is held to where they stood, and a run of it started again goes on as the same
+   * agents.
    */
   private async runEnded(run: RunEnded): Promise<void> {
     if (run.kind === "side") {
@@ -715,13 +931,14 @@ export class HarnessEngine implements HarnessHooks {
     }
     if (run.kind === "job") return;
     // Named by the turn's record alone, a job has its turn and no one who started it: `jobKnown` says who.
-    for (const job of run.record?.jobs ?? []) if (!this.jobs.has(job.id)) this.remember(this.jobs, job.id, { basis: run.turn, by: null, parent: null });
+    for (const job of run.record?.jobs ?? []) if (!this.jobs.has(job.id)) this.remember(this.jobs, job.id, { basis: run.turn, by: null, parent: null, due: null, plan: null });
+    const stands = run.status === "done" || (run.status === "stopped" && run.reply.trim() !== "");
     // The reply's text reaches the engine here too, where its run ends before anything else says it was written.
     const open = this.turns.get(run.turn);
-    if (open && open.replied === null && run.status === "done") open.replied = run.reply;
+    if (open && open.replied === null && stands) open.replied = run.reply;
     const userId = await this.userOf(run.chatId, run.userId);
     if (!userId) return;
-    if (run.status !== "done") {
+    if (!stands) {
       const texts = (await this.rt.settings.get(userId)).prompts.texts;
       const why = renderPrompt(run.status === "stopped" ? HARNESS_TEXT.unplayedStopped : HARNESS_TEXT.unplayedFailed, texts, { reason: run.reason ? `: ${run.reason.slice(0, 300)}` : "" });
       // Kept for the generation's end, which may still save a reply: nothing of this turn stands for it.
@@ -735,17 +952,60 @@ export class HarnessEngine implements HarnessHooks {
     await this.keep(run.chatId, userId, run.turn, record);
   }
 
+  /**
+   * Which connection, model and effort an agent of a run starts on (LumiAH's `agentModel`): the
+   * story's choice for its definition, the person it plays (`as`) and how it stands
+   * (`chooseAgentModel`), with the job whose run it is of where it is a job's, whether the job's own
+   * agent or one an agent of it started. Null: its definition's own.
+   */
+  private async agentModel(ask: AgentModelAsk): Promise<AgentModelChoice | null> {
+    if (ask.userId === "") return null;
+    const job = ask.kind === "job" ? this.jobs.get(ask.turn) : undefined;
+    return chooseAgentModel(await this.rt.settings.get(ask.userId), { definition: ask.definition, as: ask.as, standing: ask.standing, job: job ? { basis: job.basis, ...(job.due !== null ? { due: job.due } : {}), prepared: this.preparing(ask.turn) } : null });
+  }
+
+  /** Whether job `id` is of the story's prepared start: the preparation's own job (its plan is the preparation's file), or one an agent of it started, however far down. */
+  private preparing(id: string): boolean {
+    const seen = new Set<string>();
+    for (let at: string | null = id; at !== null && !seen.has(at); ) {
+      seen.add(at);
+      const job = this.jobs.get(at);
+      if (!job) return false;
+      if (job.plan === PREPARE_PATH) return true;
+      at = job.parent;
+    }
+    return false;
+  }
+
+  /**
+   * Whether a passage an agent of a turn releases may go out (LumiAH's `releasing`): the turn's
+   * stage book holds it to what the turn decided (`releaseGate`). A passage of no open turn of the
+   * engine's is refused: nothing of it is the engine's to tell.
+   */
+  private async releasing(release: ReplyRelease): Promise<ReleaseVerdict> {
+    const open = this.turns.get(release.turn);
+    if (!open || open.closed) return { refused: renderPrompt(HARNESS_NOTE.noTurn, release.userId !== "" ? (await this.rt.settings.get(release.userId)).prompts.texts : {}, {}) };
+    return releaseGate(open.stageBook, open.frame.settings, { role: release.agent.role, text: release.text });
+  }
+
+  /** A passage went out, or a handed-on stream ended (LumiAH's `released`): the turn's stage book notes what reached the player. */
+  private released(release: ReplyRelease): Promise<void> {
+    const open = this.turns.get(release.turn);
+    if (open) releaseNoted(open.stageBook, { role: release.agent.role, text: release.text });
+    return Promise.resolve();
+  }
+
   // ---------------------------------------------------------------- LumiAH's records in the ledger
 
   /**
    * A job as LumiAH lists it. The turn it belongs to is the turn its writes are tied to, and who
    * started it is who its agents are held to (`ceilingOf`): the agent whose `job_start` made it,
    * and the job that agent was of, where it was a job's own. Whoever mounts LumiAH tells the engine
-   * of each job as it starts. One the user started belongs to no turn: nothing is kept of it, and
-   * its calls write nothing.
+   * of each job as it starts. One the user started belongs to no turn: it works on the chat as it
+   * stands (`prepareEnv`), the story's prepared start on the chat's first reply (`preparing`).
    */
-  jobKnown(job: Pick<JobView, "id" | "basis" | "by" | "parent">): void {
-    if (job.basis !== null) this.remember(this.jobs, job.id, { basis: job.basis, by: job.by.who === "agent" ? job.by.id : null, parent: job.parent ?? null });
+  jobKnown(job: Pick<JobView, "id" | "basis" | "by" | "parent" | "due" | "plan">): void {
+    this.remember(this.jobs, job.id, { basis: job.basis, by: job.by.who === "agent" ? job.by.id : null, parent: job.parent ?? null, due: job.due ?? null, plan: job.plan ?? null });
   }
 
   /** Writes LumiAH's record of turn `turn` into the record that turn wrote, wherever it is now. */
@@ -820,11 +1080,6 @@ export class HarnessEngine implements HarnessHooks {
 
   // ---------------------------------------------------------------- the ledger's hooks
 
-  /** `HarnessHooks.markers`. */
-  markers(input: { chatId: ChatId; userId: UserId; generationId: string }): Promise<Delivered> {
-    return this.rt.harnessMarkers(input);
-  }
-
   /** The gate card `turn` of a chat was answered (`lre.review`, or its chip): a harness turn's commit waiting on it goes on. False when no harness turn waits there. */
   reviewed(chatId: ChatId, turn: string): boolean {
     let waited = false;
@@ -833,24 +1088,19 @@ export class HarnessEngine implements HarnessHooks {
   }
 
   /**
-   * `HarnessHooks.beforeCommit`, inside the chat's queue, the reply saved. The turn takes its last
-   * commit and nothing more; what it landed joins the journal's planned turn. What follows from the
-   * turn with no model is made ready for the core's own commit, which reads it (`read`): off-screen
-   * catch-up, the turn's tick rules and the story's tracks (`postTurn`), then who was there for the
-   * turn and what the world authors that the chat doesn't hold yet (`postOpening`). A Continue has
-   * no plan: what it landed is what its read records.
+   * `HarnessHooks.beforeCommit`, inside the chat's queue, the reply saved or stopped. The turn takes
+   * its last commit and nothing more: what is still staged lands with it, unless the reply was
+   * stopped, and then the turn keeps only what it had committed. What it landed joins the journal's
+   * planned turn. What follows from the turn with no model is made ready for the core's own commit,
+   * which reads it (`read`): off-screen catch-up, the turn's tick rules and the story's tracks
+   * (`postTurn`), then who was there for the turn and what the world authors that the chat doesn't
+   * hold yet (`postOpening`). A Continue has no plan: what it landed is what its read records.
    */
   async beforeCommit(input: TurnContext): Promise<string | null> {
     const { chatId, userId, generationId, core, observed } = input;
     const turn = this.turns.get(generationId);
     if (!turn) return this.blank.has(generationId) ? null : (this.failed.get(generationId) ?? renderPrompt(HARNESS_TEXT.unplayedNoRun, (await this.rt.settings.get(userId)).prompts.texts, {}));
-    // The reply was written with nothing handed over from the turn: its author failed, ran out of time or was stopped in the harness before it briefed the writer, and LumiAH let the reply be written without it. Nothing of the turn stands, as for a run that was stopped; LumiAH's own words for why reach the mark with its record (`anchor`).
-    if (!turn.briefed) {
-      const why = renderPrompt(HARNESS_TEXT.unplayedNoBrief, turn.frame.settings.prompts.texts, {});
-      await this.dropped({ chatId, userId, generationId, why });
-      return why;
-    }
-    const events = await turn.close();
+    const events = await turn.close(input.stopped === true);
     const closing: Closing = { events, read: false };
     this.closing.set(generationId, closing);
     if (turn.continues) {
@@ -862,8 +1112,6 @@ export class HarnessEngine implements HarnessHooks {
       });
       return null;
     }
-    const p = core.journal.pending[generationId];
-    if (p && turn.prompts !== null) p.prompts = turn.prompts;
     core.appendPlanned(generationId, events, observed);
     const context = core.commitContext(generationId, input.messageId, observed);
     const knowing = context ? knowledgeOn(turn.frame.chat, context.world, turn.frame.settings) : false;
@@ -881,9 +1129,8 @@ export class HarnessEngine implements HarnessHooks {
   /**
    * `HarnessHooks.afterCommit`: the turn's record is written. It takes the harness's part: the turn
    * that wrote it (after those a Continue adds to), LumiAH's record of it when its run already
-   * ended, and the default tick when the turn took one. A Continue keeps the lines of departure the
-   * reply holds: the reply still says what they are about. The turn closes: which role wrote what,
-   * the kept files it changed, its review card.
+   * ended, and the default tick when the turn took one. The turn closes: which role wrote what, the
+   * kept files it changed, its review card.
    */
   async afterCommit(input: TurnContext): Promise<void> {
     const { chatId, userId, generationId, core, observed, messageId, swipeId } = input;
@@ -903,14 +1150,14 @@ export class HarnessEngine implements HarnessHooks {
       const held = recHarnessOf(core.chain(observed).find((m) => m.id === messageId)?.ledger?.swipes[String(swipeId)]);
       const record = this.records.get(generationId) ?? (turn.continues ? held?.record : undefined);
       this.records.delete(generationId);
-      const harness: RecHarness = { turns: [...(turn.continues ? (held?.turns ?? []) : []), generationId], ...(record ? { record } : {}), ...(close.defaultTick !== null ? { defaultTick: close.defaultTick } : {}), ...(turn.continues && held?.departures ? { departures: held.departures } : {}) };
+      const harness: RecHarness = { turns: [...(turn.continues ? (held?.turns ?? []) : []), generationId], ...(record ? { record } : {}), ...(close.defaultTick !== null ? { defaultTick: close.defaultTick } : {}) };
       const refused = core.recordHarness(messageId, swipeId, harness, observed);
       if (refused) this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: the turn's record doesn't name its harness turn (${refused})`, userId);
       else this.recorded?.(chatId);
     } finally {
       // The turn stays known until its record names it, so a call that came meanwhile finds the one or the other. Its agents are the same agents in what they still call: the turn's own cast serves its tail, and none is made again.
       this.remember(this.over, generationId, { chatId, userId, committed: true, settled: turn.settled.promise });
-      this.remember(this.sides, generationId, { chatId, userId, cast: turn.cast, staged: new Map() });
+      this.remember(this.sides, generationId, { chatId, userId, cast: turn.cast, staged: new Map(), directed: turn.directed });
       this.turns.delete(generationId);
       // What its last commit landed of the world's document is made as this operation lets go of the chat's ledger (`OpenTurn.late`): nothing here waits for it, and whoever waits for the turn does.
       void turn.late().finally(() => turn.settled.resolve());

@@ -1,10 +1,11 @@
 // LumiAH's backend, built into the engine (HARNESS-SLICE3 "Boundary with LumiAH"; LumiAH's DESIGN
 // §21, §25). LumiAH's own `createBackend` runs here, in the engine's Spindle worker, over the same
-// Lumiverse: its prompt interceptor, its core where a chat runs built in, its link to a runtime, its
+// Lumiverse: its prompt interceptor, which tags each reply for the runtime, its link to a runtime, its
 // pages' requests. The engine is the extension it is built into: it gives LumiAH its definitions,
-// its claim on a chat, the writer's request, its hooks around a run and its tools (`HarnessEngine`),
-// and it takes back what it needs of LumiAH (the switch for a chat, what LumiAH lacks, the
-// workspace, side sessions).
+// its claim on a chat, the model each agent runs on, its hooks around a run and its tools
+// (`HarnessEngine`), and it takes back what it needs of LumiAH (the switch for a chat, where the
+// user's runtime stands, the workspace, side sessions). A chat the engine plays runs only in the
+// runtime (`ChatClaim.place`): no turn of it runs here.
 //
 // LumiAH is given Lumiverse through a host that differs from Lumiverse's own in four places, each
 // because the two extensions are one extension here:
@@ -21,7 +22,7 @@
 
 import type { AnchorCodec, Backend, BackendEnv, BackendHost, HostMessage } from "lumi-ah/extension/backend";
 import { createBackend, createSpindleHost, UiRefused } from "lumi-ah/extension/backend";
-import type { ChatView, UiState } from "lumi-ah/shared";
+import type { ChatView } from "lumi-ah/shared";
 import { UI_VERSION, uiMessageOf, uiRequestOf } from "lumi-ah/shared";
 import type { ChatId, MessageId, UserId } from "../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../shared/json";
@@ -63,6 +64,15 @@ const RECORDS_KEPT = OPEN_CHATS_CAP;
 
 /** What the switch is refused with for a chat that plays no world. */
 const NOT_A_WORLD_CHAT = `${NAME}'s harness answers the chats that play one of its worlds. This chat plays none: give it a world first (the ${NAME} drawer → Worlds), or use LumiAH itself for a chat without one.`;
+
+/** The permissions without which a reply can't reach the runtime as a turn: the interceptor tags it, and the tag travels in its parameters. Untagged, the runtime would pass it to a writer with no turn played. */
+const RUNTIME_NEEDS: readonly { id: string; what: string }[] = [
+  { id: "interceptor", what: "mark each reply of a harness chat for its runtime" },
+  { id: "generation_parameters", what: "carry that mark to the runtime with the reply's request" },
+];
+
+/** Why the runtime can't answer chats yet where it is linked but not set up: LumiAH's words cover a runtime that isn't linked. */
+const NOT_SET_UP = `${NAME}'s runtime is linked, but it isn't set up to answer chats yet: mint its key on the Runtime page of the Harness tab, which also makes its connection.`;
 
 function keep<K, V>(map: Map<K, V>, key: K, value: V, most: number): void {
   map.delete(key);
@@ -265,8 +275,10 @@ export function mountHarness(rt: Runtime, base: BackendHost, env: BackendEnv): M
       name: extension.name,
       definitions: (userId, chatId) => extension.definitions?.({ userId, chatId }) ?? Promise.resolve({}),
       claim: (ask, userId) => extension.claim?.({ ...ask, userId }) ?? Promise.resolve(null),
-      writerRequest: (request, userId) => extension.writerRequest?.({ ...request, userId }) ?? Promise.resolve(null),
       runBegan: (run, userId) => extension.runBegan?.({ ...run, userId }) ?? Promise.resolve(),
+      agentModel: (ask, userId) => extension.agentModel?.({ ...ask, userId }) ?? Promise.resolve(null),
+      releasing: (release, userId) => extension.releasing?.({ ...release, userId }) ?? Promise.resolve(null),
+      released: (release, userId) => extension.released?.({ ...release, userId }) ?? Promise.resolve(),
       replyWritten: (reply, userId) => extension.replyWritten?.({ ...reply, userId }) ?? Promise.resolve(),
       runEnded: (run, userId) => extension.runEnded?.({ ...run, userId }) ?? Promise.resolve(),
     },
@@ -277,6 +289,10 @@ export function mountHarness(rt: Runtime, base: BackendHost, env: BackendEnv): M
     anchor: LEDGER_ANCHORS,
     // The manifest asks for neither: the engine reads no character card and no persona, and LumiAH's tools that rest on them are absent here.
     declined: ["characters", "personas"],
+    // The engine writes the reply itself, which only the runtime allows: LumiAH's pages then say the runtime is needed and offer no built-in way.
+    place: "runtime",
+    // The story record and the author's notebook are this engine's memory: LumiAH's own chronicle would only be a second, unchecked one, so no agent here can start it.
+    withoutAgents: ["chronicler", "story-reader"],
   });
 
   /** One request of LumiAH's page contract, made by the mount itself: its answer's body, or a rejection in LumiAH's own words. */
@@ -298,18 +314,34 @@ export function mountHarness(rt: Runtime, base: BackendHost, env: BackendEnv): M
     return asker.promise as Promise<T>;
   };
 
-  // LumiAH's switch for a chat follows the chat's engine. A chat it is already as asked for is left as it is: its place (built in, or a runtime the user chose for it) is the user's.
+  // LumiAH's switch for a chat follows the chat's engine: on, in the runtime, for a chat the harness plays (set again where it isn't on the runtime's connection), and off for any other. LumiAH refuses it in its own words where it can't be set now: no runtime was ever set up, another harness answers the chat, a permission isn't granted.
   engine.pin = async (chatId, userId, harness) => {
     const { chat } = await ask<{ chat: ChatView }>(userId, { type: "lah.chat.get", chatId });
-    if (chat.on !== harness) await ask(userId, { type: "lah.chat.set", chatId, on: harness });
+    if (harness && (!chat.on || chat.place !== "runtime" || chat.connection?.loopback !== true)) await ask(userId, { type: "lah.chat.set", chatId, on: true, place: "runtime" });
+    else if (!harness && chat.on) await ask(userId, { type: "lah.chat.set", chatId, on: false });
   };
 
-  // What keeps LumiAH from answering this user's chats where they run built in, as LumiAH itself reports it to its pages: a permission it can't do without. LumiAH's page names the permission beside its words ("needs it to …"); here it is one sentence, so the name leads. What LumiAH reports of a runtime (a Lumiverse no runtime can link to) keeps no chat from the harness: a runtime is an option, and its own page says what it lacks.
-  engine.ready = async (userId) => {
-    const state = await ask<UiState>(userId, { type: "lah.hello" });
-    const lacks = state.permissions.filter((need) => need.needed).map((need) => `The permission "${need.id}" isn't granted: ${NAME} needs it to ${need.what}. ${need.todo}`);
-    return lacks.length > 0 ? lacks.join(" ") : null;
+  // What keeps the user's runtime from answering a chat now, in words that say what to do: a permission the reply's way there needs, then LumiAH's own word on the runtime the chat's replies reach (not linked, refused, never set up), then a runtime linked but not set up to answer chats.
+  engine.runtime = async (userId, chatId) => {
+    const lacks = RUNTIME_NEEDS.filter((need) => !base.granted(need.id)).map((need) => `The permission "${need.id}" isn't granted: ${NAME} needs it to ${need.what}. Grant it in Lumiverse (Extensions → ${NAME} → Permissions).`);
+    if (lacks.length > 0) return lacks.join(" ");
+    const state = await backend.runtimeState(userId, chatId);
+    if (!state.linked) return state.words ?? NOT_SET_UP;
+    return state.ready ? null : NOT_SET_UP;
   };
+
+  // A reply of a chat goes to the runtime where LumiAH is on for the chat there, no other harness answers it, and the reply's connection is the runtime's own for the chat.
+  engine.seated = async (chatId, userId, connectionId) => {
+    const { chat } = await ask<{ chat: ChatView }>(userId, { type: "lah.chat.get", chatId });
+    const connection = chat.connection;
+    return chat.on && chat.place === "runtime" && chat.other === undefined && connection !== null && connection.loopback && (connectionId === null || connection.id === connectionId);
+  };
+
+  // What each agent that can run in a chat can use there, and what of its tools it can't, with why, asked where the chat runs: a turn of a harness chat starts only once every agent of the engine's can use each tool it is given.
+  engine.held = (userId, chatId) => backend.agents.held(userId, chatId);
+
+  // A user's runtime linked, dropped, was refused or got its connection: the harness chats that couldn't be set to it are set now.
+  backend.onRuntime((userId) => void engine.runtimeChanged(userId).catch((error: unknown) => base.log("warn", `[${NAME}] the harness chats weren't set to the runtime: ${words(error)}`)));
 
   engine.owner = (chatId) => Promise.resolve(owners.get(chatId) ?? null);
 
@@ -332,6 +364,11 @@ export function mountHarness(rt: Runtime, base: BackendHost, env: BackendEnv): M
       return false;
     },
     running: (userId) => backend.builtin.runs(userId),
+    spent(userId, stream) {
+      // The latest usage the stream's run traced: what it has spent so far, and what its latest call weighed.
+      const usage = backend.live.whole(userId, stream)?.events.findLast((record) => record.event.kind === "usage")?.event;
+      return usage?.kind === "usage" ? { in: usage.turn.in, out: usage.turn.out, calls: usage.turn.calls, last: usage.call.in + usage.call.out } : null;
+    },
   };
 
   engine.files = ({ chatId, userId }) => chatFiles((op, args) => core(userId, op, { chatId, area: "chat", ...args }, { chat: chatId }));

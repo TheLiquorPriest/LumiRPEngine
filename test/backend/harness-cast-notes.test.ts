@@ -24,7 +24,7 @@ import { type Agent, AUTHOR, beginJob, beginTurn, cashOf, stateOf } from "./harn
 /** An agent of the game master's definition, which only reads, and one of a definition the user made, which the engine gives no tier at all. */
 const GM: Agent = { id: "gm-1", role: HARNESS_AGENT.gm };
 const OWN: Agent = { id: "helper-1", role: "a_definition_of_the_users" };
-const CHRONICLER: Agent = { id: "job-chronicler", role: HARNESS_AGENT.chronicler };
+const HISTORIAN: Agent = { id: "job-historian", role: HARNESS_AGENT.historian };
 
 const SHOP = "alder_automotive_co";
 
@@ -60,8 +60,8 @@ describe("who may note a fact", () => {
     const job = await beginJob(rig, turn, "job-notes");
     for (const [tool, args] of ASKED) expect({ tool, refused: (await job.call(GM, tool, args)).error === true }).toEqual({ tool, refused: true });
     expect(await left(rig, chatId)).toEqual(before);
-    // The same calls from the chronicler, which holds the story's tier, are recorded: what refused the others was their tier, not the calls.
-    for (const [tool, args] of ASKED) expect({ tool, refused: (await job.call(CHRONICLER, tool, args)).error === true }).toEqual({ tool, refused: false });
+    // The same calls from the historian, which holds the story's tier, are recorded: what refused the others was their tier, not the calls.
+    for (const [tool, args] of ASKED) expect({ tool, refused: (await job.call(HISTORIAN, tool, args)).error === true }).toEqual({ tool, refused: false });
     const after = await left(rig, chatId);
     expect({ brann: after.brann, bread: after.bread - before.bread, moved: after.mara !== before.mara }).toEqual({ brann: true, bread: 1, moved: true });
     noModelCalls(rig);
@@ -90,7 +90,7 @@ describe("who may note a fact", () => {
     // At the story's tier each is staged as the change its own channel makes of it; so is the author's, which holds the game master's.
     for (const setup of [{ main: false, tier: "story" as const }, { main: true }]) {
       const turn = await castTurn(rig, chatId, setup);
-      const env = castEnv(rig, chatId, turn, HARNESS_AGENT.chronicler);
+      const env = castEnv(rig, chatId, turn, HARNESS_AGENT.historian);
       for (const [tool, args] of noted) await answer(env, tool, args);
       expect(turn.changes.map((c) => c.changeType)).toEqual(noted.map(([, , type]) => type));
     }

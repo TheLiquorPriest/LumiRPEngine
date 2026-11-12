@@ -1,8 +1,9 @@
 // The world built without hand-written JSON (`harness-tools/world-build.ts`): a place, a path between
 // two places, a map, what is on a map, and the map settings. Each tool writes the world's draft
-// through the port a harness call is given (`worldBuild`), so what a tool says it wrote is read back
-// from the store, as Build would read it; nothing reaches the chat until the draft is committed and
-// the chat brought to it, which the last test walks through.
+// through the port a harness call is given (`worldBuild`) when the call says `in: "document"` (every
+// call here does; the chat's own world is `harness-world-draft.test.ts`'s), so what a tool says it
+// wrote is read back from the store, as Build would read it; nothing reaches the chat until the draft
+// is committed and the chat brought to it, which the last test walks through.
 
 import { describe, expect, test } from "bun:test";
 import { type WorldBuild, worldBuild } from "../../src/backend/agents/tools/harness-ports";
@@ -11,7 +12,12 @@ import type { WorldDoc } from "../../src/shared/world";
 import { stateOf } from "../support/mind-chat";
 import type { Rig } from "../support/rig";
 import { HOME } from "../support/tools";
-import { answer, castChat, castEnv, castTurn, noModelCalls, refusal, type TurnSetup } from "./harness-cast-kit";
+import type { JsonObject } from "../../src/shared/json";
+import { answer as answerOf, castChat, castEnv, castTurn, noModelCalls, refusal as refusalOf, type TurnSetup } from "./harness-cast-kit";
+
+/** A build tool's call aimed at the world's document. */
+const answer = (env: ToolEnv, name: string, args: JsonObject = {}): Promise<Record<string, unknown>> => answerOf(env, name, { in: "document", ...args });
+const refusal = (env: ToolEnv, name: string, args: JsonObject = {}): Promise<string> => refusalOf(env, name, { in: "document", ...args });
 
 const BLUEBIRD = "bluebird_coffee";
 const ANCHOR = "rusty_anchor";

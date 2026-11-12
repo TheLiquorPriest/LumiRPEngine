@@ -457,6 +457,123 @@ export interface RecHarness {
   departures?: string[];
 }
 
+// ---------------------------------------------------------------- the story record (DEPTH2-PLAN §4)
+
+/** What a beat is: something said, something done, something that happened in the world, or a thought, which reaches no one but its owner. */
+export type BeatKind = "say" | "do" | "happen" | "inner";
+export const BEAT_KINDS: readonly BeatKind[] = ["say", "do", "happen", "inner"];
+
+/** How fully a beat reached someone: all of it, part of it, or only as they were told it. */
+export type BeatReach = "whole" | "part" | "told";
+export const BEAT_REACHES: readonly BeatReach[] = ["whole", "part", "told"];
+
+/** Whom a beat reached, and how: `got`, what of it they took in, in their terms (part, told); `from`, who told them (told). */
+export interface Exposure {
+  who: string;
+  reach: BeatReach;
+  got?: string;
+  from?: string;
+}
+
+/**
+ * One thing that happened in the story, as whoever decided it wrote it (`beat_write`): who did or
+ * said what, where and when, and whom it reached. A character's agent is given only what reached
+ * that person of it (`FeedItem`), never `what` unless the beat is their own.
+ */
+export interface Beat {
+  /** Unique in the chat. */
+  id: string;
+  /** The harness turn that wrote it: the turn's own, or the turn a job that wrote it belongs to. */
+  turn: string;
+  /** Story time, as the engine keeps the clock. */
+  at: number;
+  /** A place's id; null where it happened nowhere the world names. */
+  where: string | null;
+  /** Who did it: an entity's id, "player" for the player's character, or "world". */
+  by: string;
+  kind: BeatKind;
+  /** The event as true. */
+  what: string;
+  /** What someone present could sense of it. */
+  surface: string;
+  /** The exact words spoken, each a quote. */
+  quotes?: string[];
+  /** Whom it was addressed to, by entity id. */
+  to?: string[];
+  exposure: Exposure[];
+  /** The agent that decided it (its definition's id) and the instance it ran as. */
+  decidedBy: { agent: string; as?: string };
+  /** The draft it settles. */
+  settles?: string;
+  /** Why it no longer stands: a later correction's (`BeatStrike`), as the path reads it; never written with the beat. */
+  struck?: string;
+  /** A beat recorded afterwards from the chat's past: the stretch of messages it was read from, by the ids of its first and last. */
+  past?: { from: string; to: string };
+}
+
+/** A beat that no longer stands, and why: a correction, kept on the record of the turn that made it, so it is undone with that turn. */
+export interface BeatStrike {
+  beat: string;
+  why: string;
+}
+
+/** Someone's place in the story as the author casts them: an extra has no mind and is voiced by the author, a supporting character has a short profile the author keeps, a principal has an agent and mind of their own. */
+export type CastStanding = "extra" | "supporting" | "principal";
+export const CAST_STANDINGS: readonly CastStanding[] = ["extra", "supporting", "principal"];
+
+/** One person's casting as it stands: the author's standing for them and why, the player's pin, and the last beat their mind took in (`digestedTo`, a beat's id). */
+export interface Cast {
+  entity: string;
+  standing: CastStanding;
+  /** The player pinned the standing: the author can't change it. */
+  pinned?: boolean;
+  why?: string;
+  digestedTo?: string;
+}
+
+/** How a stretch of story is treated: T1 the characters live it, T2 the author plays every part, T3 the author and game master decide it and brief the characters, T4 the author just writes it. */
+export type DraftTier = 1 | 2 | 3 | 4;
+export const DRAFT_TIERS: readonly DraftTier[] = [1, 2, 3, 4];
+export type DraftState = "open" | "settled" | "dropped" | "stale";
+export const DRAFT_STATES: readonly DraftState[] = ["open", "settled", "dropped", "stale"];
+
+/** The point of the chat a draft was written against: a message and the swipe it showed, and the number of the record it held (`Rec.seq`), which a Branch's copy keeps where the message's id doesn't. */
+export interface DraftBasis {
+  messageId: string;
+  swipeId: number;
+  seq?: number;
+}
+
+/** Off-screen work kept until the story needs it: what happens, how it is to be treated, who and where it concerns, and when in story time. */
+export interface Draft {
+  id: string;
+  what: string;
+  tier: DraftTier;
+  /** The people it names, by entity id. */
+  who: string[];
+  /** The places it names, by place id; none for a draft that names none. */
+  where?: string[];
+  /** When it happens, in story time. */
+  when: number;
+  basis: DraftBasis;
+  state: DraftState;
+  notes?: string;
+}
+
+/**
+ * The story's part of a record: what the record's turn, and every job tied to it, wrote of the story
+ * record. Each list holds that turn's own: the beats it wrote, the beats it struck, each person's
+ * casting as it set it, each draft as it left it. Outside every hash but the tombstone's, as `harness`
+ * is, so it follows swipes and branches with the record and moves no path; read leniently
+ * (`recStoryOf`), a record without it holding none.
+ */
+export interface RecStory {
+  beats?: Beat[];
+  struck?: BeatStrike[];
+  cast?: Cast[];
+  drafts?: Draft[];
+}
+
 /** One swipe's turn record (DESIGN §4.3, `Rec`). */
 export interface Rec {
   v: 1;
@@ -524,6 +641,8 @@ export interface Rec {
   finalParts?: Record<string, string>;
   /** A harness turn's own part (`RecHarness`): outside every hash but the tombstone's, written at the turn's close and whenever LumiAH writes its record for the swipe (`LedgerCore.recordHarness`). */
   harness?: RecHarness;
+  /** The story record's part (`RecStory`): outside every hash but the tombstone's, written as its turn commits and by the jobs tied to it (`LedgerService.recordStory`). */
+  story?: RecStory;
 }
 
 /** `spindle_metadata.lumi_rp_engine` on an assistant message. Swipe keys are decimal indexes. */

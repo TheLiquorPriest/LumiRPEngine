@@ -1,0 +1,451 @@
+// What LumiRPEngine says to a model about the prepared start on the harness engine (DEPTH2-PLAN
+// §1.11): the historian's definition, the author's skill for preparing a story, the tools the author
+// and the historian prepare with and what they answer, the task the player's press gives the
+// author's job and what the player says to it, the line a turn's author is told while a preparation
+// is unfinished, and the words of the preparation's own file (`author/prepare.md`). Registry texts of
+// the page "Harness engine", gathered by `harness-texts.ts`.
+
+import { answerPrompt, HARNESS_FAMILY, HARNESS_GROUP, HARNESS_PAGE, type HarnessAgentText, type HarnessSkillText, type HarnessToolText, lines, v } from "./harness-text-kit";
+import type { PromptDef, PromptVar } from "./prompts";
+
+/** The tools, by name. */
+export const PREPARE_TOOL = {
+  survey: "prepare_survey",
+  status: "prepare_status",
+  plan: "prepare_plan",
+  relive: "prepare_relive",
+  read: "stretch_read",
+  beats: "stretch_beats",
+  done: "stretch_done",
+  outline: "prepare_outline",
+  finish: "prepare_finish",
+} as const;
+
+/** The file the preparation keeps itself in, in the chat's own area: what a run that carries it on starts from. */
+export const PREPARE_PATH = "author/prepare.md";
+
+/** The historian's definition id, and the author's skill for preparing. */
+export const HISTORIAN = "historian";
+export const PREPARE_SKILL = "prepare_the_story";
+
+/** What these tools answer besides a result, and the preparation's other texts: ids, so code names each once. */
+export const PREPARE_NOTE = {
+  noFiles: "harness.note.prepare.no_files",
+  noStory: "harness.note.prepare.no_story",
+  noPlan: "harness.note.prepare.no_plan",
+  damaged: "harness.note.prepare.damaged",
+  conflict: "harness.note.prepare.conflict",
+  waits: "harness.note.prepare.waits",
+  stands: "harness.note.prepare.stands",
+  split: "harness.note.prepare.split",
+  newChat: "harness.note.prepare.new_chat",
+  badRange: "harness.note.prepare.bad_range",
+  overlap: "harness.note.prepare.overlap",
+  notPrincipal: "harness.note.prepare.not_principal",
+  playerCast: "harness.note.prepare.player_cast",
+  noPrincipals: "harness.note.prepare.no_principals",
+  long: "harness.note.prepare.long",
+  noStretch: "harness.note.prepare.no_stretch",
+  recordedAlready: "harness.note.prepare.recorded_already",
+  droppedAlready: "harness.note.prepare.dropped_already",
+  openAlready: "harness.note.prepare.open_already",
+  order: "harness.note.prepare.order",
+  capped: "harness.note.prepare.capped",
+  atOnce: "harness.note.prepare.at_once",
+  crowd: "harness.note.prepare.crowd",
+  tooLong: "harness.note.prepare.too_long",
+  chatChanged: "harness.note.prepare.chat_changed",
+  opened: "harness.note.prepare.opened",
+  dropped: "harness.note.prepare.dropped",
+  notOpen: "harness.note.prepare.not_open",
+  readMore: "harness.note.prepare.read_more",
+  readEnd: "harness.note.prepare.read_end",
+  through: "harness.note.prepare.through",
+  beatsFull: "harness.note.prepare.beats_full",
+  badWhen: "harness.note.prepare.bad_when",
+  outlineWho: "harness.note.prepare.outline_who",
+  leftStretch: "harness.note.prepare.left_stretch",
+  leftRelive: "harness.note.prepare.left_relive",
+  leftCore: "harness.note.prepare.left_core",
+  leftOutline: "harness.note.prepare.left_outline",
+  leftScene: "harness.note.prepare.left_scene",
+  leftNotebook: "harness.note.prepare.left_notebook",
+  exposure: "harness.note.prepare.exposure",
+  badBeat: "harness.note.prepare.bad_beat",
+  recorded: "harness.note.prepare.recorded",
+  later: "harness.note.prepare.later",
+  closed: "harness.note.prepare.closed",
+  noneReached: "harness.note.prepare.none_reached",
+  outlineLong: "harness.note.prepare.outline_long",
+  outlined: "harness.note.prepare.outlined",
+  outlineHead: "harness.note.prepare.outline_head",
+  unfinished: "harness.note.prepare.unfinished",
+  finished: "harness.note.prepare.finished",
+  worldless: "harness.note.prepare.worldless",
+  turnNote: "harness.note.prepare.turn_note",
+  turnWaits: "harness.note.prepare.turn_waits",
+  turnUnder: "harness.note.prepare.turn_under",
+  turnLeft: "harness.note.prepare.turn_left",
+  taskHistory: "harness.prepare.task.history",
+  taskNew: "harness.prepare.task.new",
+  taskCarry: "harness.prepare.task.carry",
+  taskWords: "harness.prepare.task.words",
+  taskApproved: "harness.prepare.task.approved",
+  taskCap: "harness.prepare.task.cap",
+  sayWords: "harness.prepare.say.words",
+  sayApproved: "harness.prepare.say.approved",
+  sayCap: "harness.prepare.say.cap",
+  sayUncapped: "harness.prepare.say.uncapped",
+  file: "harness.prepare.file",
+  fileWaits: "harness.prepare.file.waits",
+  fileUnder: "harness.prepare.file.under",
+  fileDone: "harness.prepare.file.done",
+  filePrincipal: "harness.prepare.file.principal",
+  fileStretch: "harness.prepare.file.stretch",
+  fileCost: "harness.prepare.file.cost",
+  fileCap: "harness.prepare.file.cap",
+  callJob: "harness.prepare.call.job",
+  callChat: "harness.prepare.call.chat",
+  callDefault: "harness.prepare.call.default",
+  fileApproved: "harness.prepare.file.approved",
+  fileAuto: "harness.prepare.file.auto",
+  fileAsked: "harness.prepare.file.asked",
+  fileSaid: "harness.prepare.file.said",
+  fileNone: "harness.prepare.file.none",
+  fileStateOpen: "harness.prepare.file.state.open",
+  fileStatePlanned: "harness.prepare.file.state.planned",
+  fileStateRecorded: "harness.prepare.file.state.recorded",
+  fileStateDropped: "harness.prepare.file.state.dropped",
+} as const;
+
+// ---------------------------------------------------------------- the historian
+
+/** The historian's texts as shipped: the definition `backend/harness/definitions` registers. */
+export const PREPARE_AGENT_TEXTS: readonly HarnessAgentText[] = [
+  {
+    id: HISTORIAN,
+    label: "The historian",
+    name: "Historian",
+    description: "Reads one stretch of the chat's past and records it as beats: who did or said what, where and when in story time, and whom each reached. Start one for each stretch you open to be relived (prepare_relive), with the stretch's id in its task.",
+    instructions: lines(
+      "You are the historian of a roleplay whose world LumiRPEngine keeps. The story already has a past in the chat, written before the engine kept it. Your task names one stretch of that chat. You read it and record what happened in it as beats, so that the people who lived it can live it again in their own minds.",
+      "",
+      "A beat is one thing that happened: something someone said, something someone did, something the world did, or a thought. Each beat says who did it, where, and when in story time; what happened, as true; what someone present could see or hear of it; and whom it reached, and how. A person's mind is built only from what reached them, never from what was true. So who was there, who caught only part of it, and who was only told of it matter as much as what happened.",
+      "",
+      "How to work:",
+      "- Read the stretch with stretch_read. Read it whole before you record. It says when there is more to read.",
+      "- Find people and places in the world with people_find and places_find: a beat names them by their ids. Someone the world doesn't have can't act or be reached in a beat. Name them in its words instead.",
+      "- Record in story order with stretch_beats, several beats a call, each with its time. Story time is the world's clock, written the way stretch_read writes the time now. Give the hour where the chat says one, and your best judgement where it says less. Keep times in order with what was recorded before.",
+      "- Record what matters to the people in it and to the story: words that were said, choices made, things learned, harm done, promises. Leave out the small motions of a scene. Quote words exactly where they matter.",
+      "- Whom a beat reached is yours to judge from the telling. Everyone present took in what was openly said and done. Someone at a distance caught part of it. Someone who heard of it later was told. A thought reaches no one, and the one who did it is never among those it reached.",
+      "- The player's messages are their character's words and deeds. Where a message directs the story instead, record what the replies made of it.",
+      "- When the stretch is recorded, close it with stretch_done. Then answer the author briefly: what the stretch held, whom it reached, and anything you were unsure of.",
+    ),
+  },
+];
+
+// ---------------------------------------------------------------- the author's skill
+
+/** The author's definition id (`HARNESS_AGENT.author`, which this file can't import): the one agent the skill is offered to. */
+const AUTHOR = "author";
+
+export const PREPARE_SKILL_TEXTS: readonly HarnessSkillText[] = [
+  {
+    id: PREPARE_SKILL,
+    agents: [AUTHOR],
+    name: "Preparing the story",
+    description: "When you are asked to prepare this story: catch up on a chat that already has a history, or set up a new one, so the first reply is not shallow.",
+    body: lines(
+      "# Preparing the story",
+      "",
+      "A prepared start means you know this story as its author must: where it stands, where it points, and who it turns on. And the few people it turns on have minds of their own, built from what they lived. The goal is a first reply that is not shallow, without reading everything twice or spending more than the story needs. How deep to go is your judgement, from what the story is and what there is to draw on.",
+      "",
+      "## Survey first",
+      "prepare_survey says what there is: how long the chat is, a LumiBooks book or other summaries in the World Info books, the lore, the world's own people and places, and what the engine already holds. Lumiverse's memory tools are yours where they are in your list. Read the summaries before the chat: they tell you where the story went, so you can choose where it is worth reading closely.",
+      "",
+      "## Plan before you spend",
+      "Write the plan with prepare_plan:",
+      "- Whom you cast as principals: the few people the story turns on, who need minds of their own. Not everyone. A minor figure is an extra you voice, or a supporting character with a short profile. You can add people later.",
+      "- Which moments each principal relives: the stretches of the chat that made them who they are in the story now. Choose the moments that matter. The rest you fill from summaries and lore.",
+      "- What you fill from summaries and lore, and from where.",
+      "- Your estimate of what the whole preparation costs in tokens, your own work included. Every model call, yours and those of the agents you start, sends a whole prompt again, so the cost is mostly in the calls. The engine reckons the whole from the calls the plan takes, at what one of them weighs, with what is spent already, and the plan carries the larger.",
+      "A plan above the player's ceiling waits for their word. Then end your run with a short report of the plan. The preparation carries on when they answer, from author/prepare.md.",
+      "",
+      "## Relive",
+      "Cast each principal with cast_set. Open each stretch with prepare_relive, in the chat's order, and hand it to the historian (delegate, agent: historian) with the stretch's id. When the historian closes it, start each principal it reached to relive it: a character's agent, as that person, in its reliving run. While they relive one stretch, the historian can record the next. A refusal says why: the player's word, their cap, too many principals reliving at once, a stretch out of order.",
+      "",
+      "## The rest",
+      "For each principal, write with prepare_outline what they would know of what they didn't relive: in outline, as they would know it, and never what they couldn't have known. Write each principal's core.md from their record in the world and what you learned. Then write where everyone stands now (where they are, what they want, what is in motion) in author/scene.md and your notebook. Where the world's state is behind the story (the clock, where someone is), say so in author/scene.md. The first turn sets it right with its own tools: a preparation changes nothing in the world.",
+      "",
+      "## A new chat",
+      "Nothing to relive. Cast the principals from the world's own people, write each core.md from their records, and set the scene.",
+      "",
+      "## Finish",
+      "prepare_finish closes the preparation once it holds what a first turn needs. If you are stopped before, prepare_status picks it up again from author/prepare.md.",
+    ),
+  },
+];
+
+// ---------------------------------------------------------------- tools
+
+const STAMP = "a date and time in the world's calendar, written YYYY-MM-DD HH:MM, as stretch_read writes the time now";
+const STRETCH = "The stretch's id, as the plan gives it: s1, s2 and on.";
+
+/** The tools as shipped, in the order the Prompts page lists them. */
+export const PREPARE_TOOL_TEXTS: readonly HarnessToolText[] = [
+  {
+    name: PREPARE_TOOL.survey,
+    family: HARNESS_FAMILY.prepare,
+    tier: "read",
+    note: "Says what there is to prepare the story from: the chat, its summaries, the lore, the world's people, and what the engine already holds.",
+    text: "Survey what there is to draw on before you prepare the story: how long the chat is and how far the engine has played it; a LumiBooks book or other summaries in the chat's World Info books, each by the messages it spans, with the id lore_read takes; how much lore there is; the world's people and places; and what the engine already holds: the clock, the cast, the beats, the minds, and the people an older engine kept a mind for. It reads only, and costs little. Where they are in your list, chat_outline and the other history tools give the chat's own outline.",
+    args: [{ path: "part", text: "Only this part: chat, summaries, lore, world or engine. Left out: all of them." }],
+  },
+  {
+    name: PREPARE_TOOL.status,
+    family: HARNESS_FAMILY.prepare,
+    tier: "read",
+    note: "Says where the preparation stands, from its file.",
+    text: "Read where the preparation of this story stands, from its file (author/prepare.md): the plan, the player's word on it (approved, a cap, what they said), each stretch and how far it has come, each principal and whether their core and outline are written, and what is left. Read it first when you carry a preparation on.",
+    args: [{ path: "stretch", text: "Only this stretch, by its id, with whom its beats reached and who has relived it." }],
+  },
+  {
+    name: PREPARE_TOOL.plan,
+    family: HARNESS_FAMILY.prepare,
+    tier: "write",
+    note: "Writes the preparation's plan to author/prepare.md before anything is spent. The author's alone.",
+    text: "Write the plan of the preparation before you spend: what the story is and what a prepared start must give it; whom you cast as principals; which stretches of the chat each principal relives, and why; what you fill from summaries and lore; and your estimate of what the whole preparation costs in tokens, your own work included. The engine reckons the whole too: what the preparation has spent so far, as LumiAH counts it, and the model calls the plan still takes, yours, the historian's and the principals', at what one of its calls weighs. The plan keeps the larger estimate. A stretch longer than one historian run reads is planned as several. The plan goes to author/prepare.md, which the player reads. Above the player's ceiling on the whole (Settings → Story → Preparing) it waits for their word, and nothing is relived until they give it. Calling it again changes the plan: what is recorded stays recorded.",
+    args: [
+      { path: "about", text: "What the story is and where it stands, and what a prepared start must give it, in a few sentences." },
+      { path: "principals", text: "The principals: the few people the story turns on, each with why." },
+      { path: "principals.who", text: "A person of the world: an id or a name." },
+      { path: "principals.why", text: "Why they need a mind of their own, in a sentence." },
+      { path: "stretches", text: "The stretches of the chat to relive, in the chat's order. Leave it out for a new chat, or where summaries are enough." },
+      { path: "stretches.from", text: "The stretch's first message, by its number in the chat: #12 is 12." },
+      { path: "stretches.to", text: "Its last message, by its number." },
+      { path: "stretches.why", text: "Why this moment, in a sentence: what it made of the people in it." },
+      { path: "stretches.who", text: "The principals who relive it: ids or names, each among the principals." },
+      { path: "fills", text: "What you fill from summaries and lore rather than relive, and from where." },
+      { path: "estimate", text: "Your own estimate of what the whole preparation will cost in tokens, your own work included." },
+    ],
+  },
+  {
+    name: PREPARE_TOOL.relive,
+    family: HARNESS_FAMILY.prepare,
+    tier: "write",
+    note: "Opens one stretch of the plan to be recorded and relived, or drops it. The author's alone.",
+    text: "Open one stretch of the plan to be relived, then hand it to the historian (delegate, agent: historian) with its id: the historian reads it and records its beats. Open stretches in the chat's order. It is refused while the plan waits for the player's word; when what the preparation has spent so far, all its work counted, and what the stretch is reckoned at would pass the player's cap; and while as many principals as may relive at once still have earlier moments to take in (Settings → Story → Preparing). With drop set, the stretch is dropped instead, and filled from summaries and lore.",
+    args: [
+      { path: "stretch", text: STRETCH },
+      { path: "drop", text: "true: drop this stretch from the plan instead of opening it." },
+    ],
+  },
+  {
+    name: PREPARE_TOOL.read,
+    family: HARNESS_FAMILY.prepare,
+    tier: "read",
+    note: "Reads the messages of a stretch the author opened, for the historian to record.",
+    text: "Read the messages of the stretch you are to record, from the first not yet recorded: each by its number in the chat and who wrote it. It also gives the story time now and the time of the last beat recorded before this stretch, so the times you give follow on. It reads only a stretch the author opened.",
+    args: [
+      { path: "stretch", text: STRETCH },
+      { path: "from", text: "Read from this message, by its number. Left out: from the first not yet recorded." },
+    ],
+  },
+  {
+    name: PREPARE_TOOL.beats,
+    family: HARNESS_FAMILY.prepare,
+    tier: "write",
+    note: "Records beats of an open stretch, each marked as recorded from the chat's past.",
+    text: "Record beats of the stretch you read: several in a call, in story order. Each says what happened as true, what someone present could sense of it, who did it, where and when, and whom it reached. Each is marked as recorded from the chat's past, from this stretch. Say whom each reached: the past is not proposed from who is here now, and an empty list is what reached no one. through is the last message these beats cover, so a stretch can be recorded over several calls.",
+    args: [
+      { path: "stretch", text: STRETCH },
+      { path: "through", text: "The last message these beats cover, by its number." },
+      { path: "beats", text: "The beats, in story order." },
+      { path: "beats.when", text: `When it happened: ${STAMP}.` },
+      { path: "beats.where", text: "Where it happened: a place's id or name. Left out: nowhere the world names." },
+      { path: "beats.by", text: "Who did it: a person's id or name, player for the player's character, or world for what the world did." },
+      { path: "beats.kind", text: "say: words spoken. do: something done. happen: something the world did. inner: a thought or a feeling, which reaches no one." },
+      { path: "beats.what", text: "What happened, as true, in a sentence or two." },
+      { path: "beats.surface", text: "What someone present could see or hear of it. Leave it out only for a thought." },
+      { path: "beats.quotes", text: "The exact words spoken, each a quote of its own, without quotation marks." },
+      { path: "beats.to", text: "Whom it was addressed to: ids or names, player for the player's character." },
+      { path: "beats.exposure", text: "Whom it reached, and how: a list, empty where it reached no one." },
+      { path: "beats.exposure.who", text: "Who it reached: a person's id or name, or player." },
+      { path: "beats.exposure.reach", text: "whole: they took in all of it. part: they caught only part of it. told: they were told of it." },
+      { path: "beats.exposure.got", text: "For part and told: what they took in of it, in their own terms." },
+      { path: "beats.exposure.from", text: "For told: who told them, by id or name." },
+    ],
+  },
+  {
+    name: PREPARE_TOOL.done,
+    family: HARNESS_FAMILY.prepare,
+    tier: "write",
+    note: "Closes a stretch once its beats are recorded, and says which principals relive it.",
+    text: "Close the stretch once its beats are recorded. The answer says which principals its beats reached: each then relives it, in order, in a run of their own.",
+    args: [{ path: "stretch", text: STRETCH }],
+  },
+  {
+    name: PREPARE_TOOL.outline,
+    family: HARNESS_FAMILY.prepare,
+    tier: "write",
+    note: "Writes what a principal knows in outline of the past they didn't relive. The author's alone.",
+    text: "Write what a principal would know, in outline, of the stretches they didn't relive: from summaries and lore, as they would know it, and nothing they couldn't have known. It goes into their mind, marked as known in outline and not lived, in place of what was there.",
+    args: [
+      { path: "who", text: "The principal: an id or a name." },
+      { path: "text", text: "What they know in outline, in their terms, oldest first." },
+    ],
+  },
+  {
+    name: PREPARE_TOOL.finish,
+    family: HARNESS_FAMILY.prepare,
+    tier: "write",
+    note: "Closes the preparation once it holds what a first turn needs. The author's alone.",
+    text: "Close the preparation once it holds what a first turn needs: every stretch recorded or dropped; each principal's core.md written, and, for a chat with a history, their outline; and author/scene.md and your notebook written. It is refused with what is left.",
+    args: [{ path: "note", text: "What the preparation leaves for the first turn, in a sentence or two." }],
+  },
+];
+
+// ---------------------------------------------------------------- answers and the preparation's other texts
+
+const stretch = v("stretch", "the stretch's id", true);
+const span = v("span", "the stretch's messages, as #12 to #48", true);
+const ceiling = v("ceiling", "the player's ceiling on the whole preparation, in tokens", true);
+const estimate = v("estimate", "the whole preparation's estimate, in tokens, the author's own work included", true);
+
+const GUIDE = HARNESS_GROUP.guidance;
+
+/** A text of the preparation that isn't a tool's answer: the job's task, what the player says to it, the line a turn's author is told, and the file's words. */
+function other(id: string, label: string, note: string, text: string, vars: readonly PromptVar[] = []): PromptDef {
+  return { id, page: HARNESS_PAGE.id, group: GUIDE, label, note, text, vars: [...vars] };
+}
+
+export const PREPARE_NOTE_PROMPTS: readonly PromptDef[] = [
+  answerPrompt(PREPARE_NOTE.noFiles, "Preparing: no workspace", "A preparing tool's answer where the chat's workspace isn't reachable.", "This chat's workspace isn't reachable from this call, so the preparation's file can't be read or written. Nothing was changed."),
+  answerPrompt(PREPARE_NOTE.noStory, "Preparing: no story record", "A preparing tool's answer where the story record isn't reachable.", "The story record isn't reachable from this call, so nothing was recorded. It is reached by a turn on a chat the harness plays, and by its jobs."),
+  answerPrompt(PREPARE_NOTE.noPlan, "Preparing: no plan yet", "A preparing tool's answer before any plan is written.", "There is no plan yet. Survey what there is (prepare_survey), then write the plan with prepare_plan."),
+  answerPrompt(PREPARE_NOTE.damaged, "Preparing: the file can't be read", "A preparing tool's answer when the record at the end of author/prepare.md isn't one it can read: someone edited it.", "The record at the end of author/prepare.md can't be read: it was edited. Write the plan again with prepare_plan. What is already recorded stays in the story record."),
+  answerPrompt(PREPARE_NOTE.conflict, "Preparing: the file kept changing", "A preparing tool's answer when author/prepare.md changed under it each time it tried to write.", "author/prepare.md changed each time this tried to write it. Nothing was changed. Call again."),
+  answerPrompt(
+    PREPARE_NOTE.waits,
+    "Preparing: the plan waits for the player",
+    "What prepare_plan says, and what prepare_relive refuses with, while the plan waits for the player's word.",
+    "The plan is reckoned at {{estimate}} tokens in all, your own work included, above the player's ceiling of {{ceiling}} (Settings → Story → Preparing), so it waits for their word. Nothing is relived until they give it. End your run now with a short report of the plan. The preparation carries on from author/prepare.md when they answer.",
+    [estimate, ceiling],
+  ),
+  answerPrompt(PREPARE_NOTE.stands, "Preparing: the plan stands", "What prepare_plan says when the plan needs no word from the player, or has it.", "The plan stands, reckoned at {{estimate}} tokens in all, your own work included. Open the first stretch with prepare_relive.", [estimate]),
+  answerPrompt(PREPARE_NOTE.split, "Preparing: a stretch was split", "What prepare_plan says of a stretch longer than one historian run reads.", "#{{from}} to #{{to}} is longer than one historian run reads ({{most}} messages, Settings → Story → Preparing), so it is planned as {{count}} stretches.", [v("from", "its first message", true), v("to", "its last message", true), v("most", "the most messages one run reads", true), v("count", "how many stretches it became", true)]),
+  answerPrompt(PREPARE_NOTE.newChat, "Preparing: nothing to relive", "prepare_plan's answer to stretches given for a chat with no history.", "This chat has no history to relive yet, so a plan for it has no stretches. Cast the principals and write their cores. Nothing was written."),
+  answerPrompt(PREPARE_NOTE.badRange, "Preparing: not messages of the chat", "prepare_plan's answer to a stretch whose messages the chat doesn't have.", "#{{from}} to #{{to}} isn't a stretch of this chat: its messages run from #{{first}} to #{{last}}. Nothing was written.", [v("from", "the stretch's first message", true), v("to", "its last message", true), v("first", "the chat's first message"), v("last", "the chat's last message")]),
+  answerPrompt(PREPARE_NOTE.overlap, "Preparing: stretches overlap", "prepare_plan's answer to two stretches that share messages.", "Two stretches share messages: #{{first}} to #{{to}} and one from #{{from}}. Each moment is recorded once, so give stretches that don't overlap. Nothing was written.", [v("first", "the earlier stretch's first message", true), v("to", "its last message", true), v("from", "the later one's first message", true)]),
+  answerPrompt(PREPARE_NOTE.notPrincipal, "Preparing: not a principal", "prepare_plan's answer to a stretch relived by someone not among the principals.", "{{name}} relives a stretch but isn't among the principals. Only a principal relives. Nothing was written.", [v("name", "the person", true)]),
+  answerPrompt(PREPARE_NOTE.playerCast, "Preparing: the player's character", "A preparing tool's answer for the player's character.", "{{name}} is the player's character. Whether they have a mind is the player's setting, so they aren't cast or outlined. Nothing was written.", [v("name", "the player's character", true)]),
+  answerPrompt(PREPARE_NOTE.noPrincipals, "Preparing: no principals", "prepare_plan's answer to a plan with no principals.", "A plan casts at least one principal: someone the story turns on, with a mind of their own. Nothing was written."),
+  answerPrompt(PREPARE_NOTE.long, "Preparing: a text too long", "A preparing tool's answer to a text past the player's limit (Settings → Story → Preparing).", "{{field}} is {{size}} characters long, and holds at most {{max}} (Settings → Story). Say it in fewer words and call again. Nothing was written.", [v("field", "what was too long", true), v("size", "how long it is"), v("max", "the most it holds", true)]),
+  answerPrompt(PREPARE_NOTE.noStretch, "Preparing: no such stretch", "A preparing tool's answer for a stretch the plan doesn't have.", "The plan has no stretch {{stretch}}. prepare_status lists them.", [stretch]),
+  answerPrompt(PREPARE_NOTE.recordedAlready, "Preparing: recorded already", "A preparing tool's answer for a stretch whose beats are recorded already.", "Stretch {{stretch}} is recorded already, and closed. Nothing was changed.", [stretch]),
+  answerPrompt(PREPARE_NOTE.droppedAlready, "Preparing: dropped", "A preparing tool's answer for a stretch that was dropped.", "Stretch {{stretch}} was dropped from the plan. Nothing was changed.", [stretch]),
+  answerPrompt(PREPARE_NOTE.openAlready, "Preparing: open already", "prepare_relive's answer for a stretch that is open already.", "Stretch {{stretch}} ({{span}}) is open already, recorded through #{{through}}. Hand it to the historian again: it reads on from there.", [stretch, span, v("through", "the last message recorded", true)]),
+  answerPrompt(PREPARE_NOTE.order, "Preparing: in the chat's order", "prepare_relive's answer for a stretch opened before an earlier one is recorded.", "Stretches are relived in the chat's order, so minds take in their past as it happened. Stretch {{before}} ({{span}}) comes first: open it, or drop it. Nothing was opened.", [v("before", "the earlier stretch's id", true), span]),
+  answerPrompt(
+    PREPARE_NOTE.capped,
+    "Preparing: past the player's cap",
+    "prepare_relive's answer when opening a stretch would take the whole preparation past the player's cap.",
+    "Reliving {{stretch}} is reckoned at {{cost}} tokens, and the preparation has spent {{spent}} so far, all its work counted, of the {{cap}} the player allowed it. Nothing more is relived past their cap. Fill the rest from summaries and lore (prepare_outline), drop the stretches left, or ask the player in your report to raise the cap.",
+    [stretch, v("cost", "the stretch's reckoning, in tokens", true), v("spent", "what the preparation has spent so far, in tokens, as LumiAH counts it", true), v("cap", "the player's cap on the whole preparation, in tokens", true)],
+  ),
+  answerPrompt(
+    PREPARE_NOTE.atOnce,
+    "Preparing: too many reliving at once",
+    "prepare_relive's answer while as many principals as may relive at once still have earlier moments to take in.",
+    "{{reliving}} still have earlier moments to relive, and at most {{most}} principals relive at once (Settings → Story → Preparing). Start them on what they have, and open {{stretch}} when they have taken it in. Nothing was opened.",
+    [v("reliving", "who has moments left to relive", true), v("most", "how many may relive at once", true), stretch],
+  ),
+  answerPrompt(PREPARE_NOTE.crowd, "Preparing: a stretch with too many principals", "prepare_relive's answer for a stretch relived by more principals than may relive at once.", "Stretch {{stretch}} is relived by {{count}} principals, and at most {{most}} relive at once (Settings → Story → Preparing). Plan it for fewer: the others take it in outline. Nothing was opened.", [stretch, v("count", "how many relive it", true), v("most", "how many may relive at once", true)]),
+  answerPrompt(PREPARE_NOTE.tooLong, "Preparing: longer than one run reads", "prepare_relive's answer for a stretch longer than one historian run reads now.", "Stretch {{stretch}} ({{span}}) is longer than one historian run reads now ({{most}} messages, Settings → Story → Preparing). Plan it again with prepare_plan, and it is split. Nothing was opened.", [stretch, span, v("most", "the most messages one run reads", true)]),
+  answerPrompt(PREPARE_NOTE.chatChanged, "Preparing: the chat changed", "A preparing tool's answer when the messages a stretch was planned on are no longer where they were.", "The chat changed since the plan: stretch {{stretch}} ({{span}}) no longer begins and ends where it did. Plan it again with prepare_plan. Nothing was changed.", [stretch, span]),
+  answerPrompt(
+    PREPARE_NOTE.opened,
+    "Preparing: a stretch opened",
+    "What prepare_relive says of the stretch it opened.",
+    "Stretch {{stretch}} ({{span}}) is open. Hand it to the historian now: delegate, agent historian, with a task that names the stretch {{stretch}} and says why it matters: {{why}} Those who relive it once it is recorded: {{who}}.",
+    [stretch, span, v("why", "why the stretch is relived", true), v("who", "the principals who relive it", true)],
+  ),
+  answerPrompt(PREPARE_NOTE.dropped, "Preparing: a stretch dropped", "What prepare_relive says of a stretch it dropped.", "Stretch {{stretch}} ({{span}}) is dropped from the plan. Fill it from summaries and lore for those it concerned (prepare_outline).", [stretch, span]),
+  answerPrompt(PREPARE_NOTE.notOpen, "Preparing: the stretch isn't open", "The historian's tools' answer for a stretch that isn't open.", "Stretch {{stretch}} isn't open to be recorded: the author opens it with prepare_relive. Nothing was read or written.", [stretch]),
+  answerPrompt(PREPARE_NOTE.readMore, "Preparing: more to read", "What stretch_read says when the stretch has more messages than one read gives.", "More of the stretch follows: read on from #{{next}}.", [v("next", "the next message to read", true)]),
+  answerPrompt(PREPARE_NOTE.readEnd, "Preparing: the stretch read to its end", "What stretch_read says when it gave the stretch to its end.", "That is the stretch to its end."),
+  answerPrompt(PREPARE_NOTE.through, "Preparing: through isn't in the stretch", "stretch_beats' answer when through isn't a message of the stretch.", "through must be a message of stretch {{stretch}} ({{span}}). Nothing was recorded.", [stretch, span]),
+  answerPrompt(PREPARE_NOTE.beatsFull, "Preparing: the stretch holds enough", "stretch_beats' answer when the stretch would hold more beats than the player allows.", "Stretch {{stretch}} holds {{count}} beats already, and keeps at most {{most}} (Settings → Story → Preparing). Record only what matters most, or close it with stretch_done. Nothing was recorded.", [stretch, v("count", "how many it holds", true), v("most", "the most it keeps", true)]),
+  answerPrompt(PREPARE_NOTE.badWhen, "Preparing: a time it can't read", "Why stretch_beats refuses a beat whose time isn't one the world's calendar reads.", "{{when}} isn't a time the world's calendar reads. Write it as {{now}} is written: YYYY-MM-DD HH:MM.", [v("when", "what the call gave", true), v("now", "the time now, as it is written", true)]),
+  answerPrompt(PREPARE_NOTE.exposure, "Preparing: whom it reached", "Why stretch_beats refuses a beat that doesn't say whom it reached.", "It doesn't say whom it reached. The past isn't proposed from who is here now: give exposure, an empty list where it reached no one."),
+  answerPrompt(PREPARE_NOTE.badBeat, "Preparing: a beat that can't be recorded", "stretch_beats' answer when one of its beats can't be recorded; why follows, as the story record's tools and the lookups word it.", "Beat {{n}} can't be recorded, so none of this call was. {{why}}", [v("n", "the beat's place in the call, from 1", true), v("why", "why, as the rule or the lookup words it", true)]),
+  answerPrompt(PREPARE_NOTE.recorded, "Preparing: beats recorded", "What stretch_beats says of the beats it recorded.", "Recorded {{count}} beats of stretch {{stretch}}, through #{{through}}. It holds {{held}}.", [v("count", "how many this call recorded", true), stretch, v("through", "the last message they cover", true), v("held", "how many it holds now", true)]),
+  answerPrompt(PREPARE_NOTE.later, "Preparing: later than the clock", "What stretch_beats and stretch_done add when beats are later than the world's clock now.", "{{count}} of these beats are later than the world's clock now ({{now}}). Say so in author/scene.md: the first turn sets the clock right.", [v("count", "how many beats", true), v("now", "the clock now, as it is written", true)]),
+  answerPrompt(PREPARE_NOTE.closed, "Preparing: a stretch closed", "What stretch_done says of the stretch it closed.", "Stretch {{stretch}} ({{span}}) is recorded: {{count}} beats. Principals it reached, who relive it next, in order: {{who}}.", [stretch, span, v("count", "how many beats it holds", true), v("who", "the principals it reached", true)]),
+  answerPrompt(PREPARE_NOTE.noneReached, "Preparing: no principal reached", "Fills the principals stretch_done names when its beats reached none.", "none"),
+  answerPrompt(PREPARE_NOTE.outlineLong, "Preparing: an outline too long", "prepare_outline's answer to an outline past the size of a mind's outline (Settings → Story → Minds).", "That outline is {{size}} characters long, and a mind's outline holds at most {{max}} (Settings → Story). Keep what they would carry. Nothing was written.", [v("size", "how long it is"), v("max", "the most it holds", true)]),
+  answerPrompt(PREPARE_NOTE.outlined, "Preparing: an outline written", "What prepare_outline says of the outline it wrote.", "Written: what {{name}} knows in outline. Their mind reads it, marked as not lived.", [v("name", "the principal", true)]),
+  other(PREPARE_NOTE.outlineHead, "Preparing: an outline's heading", "Heads the outline file a principal's mind is given (minds/<who>/outline.md): what marks it as known in outline, not lived.", "# Known in outline\n\nWhat {{name}} knows of these times only in outline: what they would have heard or pieced together, not what they lived.", [v("name", "the principal", true)]),
+  answerPrompt(PREPARE_NOTE.outlineWho, "Preparing: not a principal of the plan", "prepare_outline's answer for someone the plan doesn't cast as a principal.", "{{name}} isn't among the plan's principals, and only a principal is given an outline. Nothing was written.", [v("name", "the person", true)]),
+  answerPrompt(PREPARE_NOTE.leftStretch, "Preparing: left, a stretch", "One thing prepare_finish names as left: a stretch not recorded.", "stretch {{stretch}} ({{span}}) isn't recorded or dropped", [stretch, span]),
+  answerPrompt(PREPARE_NOTE.leftRelive, "Preparing: left, reliving", "One thing prepare_finish names as left: a principal who hasn't relived what was recorded.", "{{name}} hasn't relived all that was recorded", [v("name", "the principal", true)]),
+  answerPrompt(PREPARE_NOTE.leftCore, "Preparing: left, a core", "One thing prepare_finish names as left: a principal with no core.md.", "{{name}} has no core.md", [v("name", "the principal", true)]),
+  answerPrompt(PREPARE_NOTE.leftOutline, "Preparing: left, an outline", "One thing prepare_finish names as left: a principal of a chat with a history with nothing in outline.", "{{name}} has nothing in outline (prepare_outline)", [v("name", "the principal", true)]),
+  answerPrompt(PREPARE_NOTE.leftScene, "Preparing: left, the scene", "One thing prepare_finish names as left: the scene not written since the plan.", "author/scene.md isn't written since the plan"),
+  answerPrompt(PREPARE_NOTE.leftNotebook, "Preparing: left, the notebook", "One thing prepare_finish names as left: the notebook not written since the plan.", "your notebook (author/notebook.md) isn't written since the plan"),
+  answerPrompt(PREPARE_NOTE.unfinished, "Preparing: not finished", "prepare_finish's answer while something a first turn needs is left.", "The preparation isn't finished: {{left}}. Nothing was changed.", [v("left", "what is left, each named", true)]),
+  answerPrompt(PREPARE_NOTE.finished, "Preparing: finished", "What prepare_finish says once the preparation is closed.", "The preparation is finished. End your run with a short report for the player: whom you cast, what was relived, and what the first turn should know."),
+  answerPrompt(PREPARE_NOTE.worldless, "Preparing: nothing changes in the world", "The answer of a tool that would change the world, called in a preparation the player started.", "A preparation changes nothing in the world. Note what the world's state should be in author/scene.md: the first turn makes it so with its own tools."),
+  other(
+    PREPARE_NOTE.turnNote,
+    "Preparing: while it is unfinished",
+    "Told to the author as each of its runs on the chat begins, while the preparation waits or is under way: how far it has come, and where to read the rest.",
+    "This story's preparation {{state}}: {{recorded}} of {{stretches}} stretches of its past are recorded so far, and author/prepare.md says what is left.",
+    [v("state", "how it stands, as the two texts below write it", true), v("recorded", "the stretches recorded", true), v("stretches", "the stretches planned", true)],
+  ),
+  other(PREPARE_NOTE.turnWaits, "Preparing: while it waits", "Fills {{state}} of the line above while the plan waits for the player's word.", "waits for the player's word on its plan"),
+  other(PREPARE_NOTE.turnUnder, "Preparing: while it is under way", "Fills {{state}} of the line above while the preparation is under way.", "isn't finished"),
+  other(PREPARE_NOTE.turnLeft, "Preparing: what a first turn still lacks", "Follows the line above where the preparation still lacks something a first turn needs: each thing named as prepare_finish names it.", "Not prepared yet: {{left}}.", [v("left", "what is left, each named", true)]),
+  other(PREPARE_NOTE.taskHistory, "Preparing: the task for a chat with a history", "The task the player's Prepare this story gives the author's job on a chat that already has a history.", "Prepare this story for play. The chat already has a history: catch up on it as its author, and give the few people it turns on minds built from what they lived. Load the skill Preparing the story (skill_load) and use your judgement."),
+  other(PREPARE_NOTE.taskNew, "Preparing: the task for a new chat", "The task the player's Prepare this story gives the author's job on a new chat.", "Prepare this new story for play: cast the few people it turns on from the world's own, and give each a core of who they are. Load the skill Preparing the story (skill_load)."),
+  other(PREPARE_NOTE.taskCarry, "Preparing: the task to carry it on", "The task of the author's job that carries a preparation on: after the player's word on its plan, or after it was stopped.", "Carry on preparing this story. Read where it stands with prepare_status first: author/prepare.md says what is done and what is left.{{word}}{{words}}", [v("word", "the player's word on the plan, as the text below writes it; nothing when they gave none now"), v("words", "what the player said, as the text below writes it; nothing when they said nothing")]),
+  other(PREPARE_NOTE.taskWords, "Preparing: what the player said", "Fills {{words}} of a preparation's task with the player's own words.", "\n\nThe player said: {{text}}", [v("text", "the player's words", true)]),
+  other(PREPARE_NOTE.taskApproved, "Preparing: the player approved", "Fills {{word}} of the task that carries a preparation on, when the player approved its plan.", "\n\nThe player approved the plan.{{cap}}", [v("cap", "their cap, as the text below writes it; nothing when they set none")]),
+  other(PREPARE_NOTE.taskCap, "Preparing: the player's cap", "Fills {{cap}} where the player capped what the whole preparation may spend.", " They capped what the whole preparation may spend, all its work counted, at {{cap}} tokens.", [v("cap", "the cap, in tokens", true)]),
+  other(PREPARE_NOTE.sayWords, "Preparing: the player speaks to it", "What a preparation that runs is told when the player says something to it.", "The player says: {{text}}", [v("text", "the player's words", true)]),
+  other(PREPARE_NOTE.sayApproved, "Preparing: the player's word, told to it", "What a preparation that still runs is told when the player approves its plan.", "The player approved the plan.{{cap}} Carry on with it.", [v("cap", "their cap, as Preparing: the player's cap writes it; nothing when they set none")]),
+  other(PREPARE_NOTE.sayCap, "Preparing: the player caps it, told to it", "What a preparation that runs is told when the player caps what it may spend.", "The player capped what the whole preparation may spend, all its work counted, at {{cap}} tokens.", [v("cap", "the cap, in tokens", true)]),
+  other(PREPARE_NOTE.sayUncapped, "Preparing: the player lifts the cap, told to it", "What a preparation that runs is told when the player lifts their cap.", "The player lifted their cap on what the preparation may spend."),
+  other(
+    PREPARE_NOTE.file,
+    "Preparing: the file",
+    "author/prepare.md as the preparing tools write it, for the author and the player to read. The record at its end is what the tools read; it follows this text.",
+    "# Preparing this story\n\n{{status}}\n\n## The story\n{{about}}\n\n## Principals\n{{principals}}\n\n## Stretches to relive\n{{stretches}}\n\n## Filled from summaries and lore\n{{fills}}\n\n## Cost\n{{cost}}\n\n## The player's word\n{{word}}",
+    [v("status", "how it stands, as the three texts below write it", true), v("about", "what the story is, as the author wrote it"), v("principals", "each principal, a line each"), v("stretches", "each stretch, a line each"), v("fills", "what is filled from summaries, as the author wrote it"), v("cost", "the estimate of the whole, what a call weighs, and the cap"), v("word", "the player's word on the plan")],
+  ),
+  other(PREPARE_NOTE.fileWaits, "Preparing: the file, waiting", "How author/prepare.md says the plan waits for the player's word.", "The plan waits for the player's word: it is reckoned at {{estimate}} tokens in all, the author's own work included, above their ceiling of {{ceiling}}.", [estimate, ceiling]),
+  other(PREPARE_NOTE.fileUnder, "Preparing: the file, under way", "How author/prepare.md says the preparation is under way.", "Under way: {{recorded}} of {{stretches}} stretches recorded.", [v("recorded", "the stretches recorded", true), v("stretches", "the stretches planned", true)]),
+  other(PREPARE_NOTE.fileDone, "Preparing: the file, done", "How author/prepare.md says the preparation is finished.", "Finished.{{note}}", [v("note", "what the author left for the first turn, after a space; nothing when it left nothing")]),
+  other(PREPARE_NOTE.filePrincipal, "Preparing: the file, a principal", "One principal's line in author/prepare.md.", "- {{name}} ({{id}}): {{why}}", [v("name", "the principal's name", true), v("id", "their id", true), v("why", "why they are a principal")]),
+  other(PREPARE_NOTE.fileStretch, "Preparing: the file, a stretch", "One stretch's line in author/prepare.md.", "- {{stretch}}, #{{from}} to #{{to}}, {{state}}: {{why}} Relived by {{who}}.", [stretch, v("from", "its first message", true), v("to", "its last message", true), v("state", "how far it has come, as the texts below write it", true), v("why", "why it is relived"), v("who", "who relives it")]),
+  other(PREPARE_NOTE.fileStatePlanned, "Preparing: the file, a stretch planned", "A stretch not yet opened, in author/prepare.md.", "planned"),
+  other(PREPARE_NOTE.fileStateOpen, "Preparing: the file, a stretch open", "A stretch the historian is recording, in author/prepare.md.", "being recorded, {{beats}} beats through #{{through}}", [v("beats", "the beats recorded so far", true), v("through", "the last message recorded", true)]),
+  other(PREPARE_NOTE.fileStateRecorded, "Preparing: the file, a stretch recorded", "A stretch the historian closed, in author/prepare.md.", "recorded, {{beats}} beats", [v("beats", "the beats it holds", true)]),
+  other(PREPARE_NOTE.fileStateDropped, "Preparing: the file, a stretch dropped", "A stretch dropped from the plan, in author/prepare.md.", "dropped"),
+  other(
+    PREPARE_NOTE.fileCost,
+    "Preparing: the file, the cost",
+    "The cost in author/prepare.md.",
+    "Reckoned at {{estimate}} tokens in all, the author's own work included: what is spent already, and the model calls left at about {{call}} tokens a call ({{from}}). The author's own estimate: {{author}}.{{cap}}",
+    [estimate, v("call", "what one model call is reckoned to weigh, in tokens", true), v("from", "where that weight was measured, as the three texts below say it", true), v("author", "the author's own estimate", true), v("cap", "the player's cap, as the text below writes it; nothing when they set none")],
+  ),
+  other(PREPARE_NOTE.fileCap, "Preparing: the file, the cap", "The player's cap in author/prepare.md.", " The player's cap on all the preparation may spend: {{cap}}.", [v("cap", "the cap, in tokens", true)]),
+  other(PREPARE_NOTE.callJob, "Preparing: a call weighed by its own", "Where the weight of a call came from: the preparation's own model calls.", "as the preparation's own calls weigh"),
+  other(PREPARE_NOTE.callChat, "Preparing: a call weighed by the chat's", "Where the weight of a call came from, before the preparation made one: this chat's last author run.", "as this chat's last author run weighed"),
+  other(PREPARE_NOTE.callDefault, "Preparing: a call not measured yet", "Where the weight of a call came from when LumiAH measured none yet: the player's setting.", "the setting for a call not yet measured, Settings → Story → Preparing"),
+  other(PREPARE_NOTE.fileApproved, "Preparing: the file, approved", "In author/prepare.md, once the player approved the plan.", "Approved."),
+  other(PREPARE_NOTE.fileAuto, "Preparing: the file, within the ceiling", "In author/prepare.md, for a plan within the player's ceiling, which needs no word.", "Within the player's ceiling of {{ceiling}} tokens for the whole preparation: it needs no word.", [ceiling]),
+  other(PREPARE_NOTE.fileAsked, "Preparing: the file, asked", "In author/prepare.md, for a plan that waits for the player's word.", "Asked: it waits for their word."),
+  other(PREPARE_NOTE.fileSaid, "Preparing: the file, what they said", "One thing the player said, in author/prepare.md.", "\n- They said: {{text}}", [v("text", "their words", true)]),
+  other(PREPARE_NOTE.fileNone, "Preparing: the file, nothing", "Stands in author/prepare.md where a part holds nothing.", "None."),
+];

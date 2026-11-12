@@ -202,6 +202,8 @@ export interface WriterCtx {
   kept: Readonly<Record<string, KeptFile>>;
   /** The connection an agent naming none works on (the user's default): its changes' learned modes count there, the key the review card counts their outcomes under. */
   active: string;
+  /** On a chat the harness plays: every change lands unless the user set its type (`effectiveMode`), so nothing asks first by a default of its own. */
+  engine?: "harness";
 }
 
 type Ctx = WriterCtx;
@@ -629,7 +631,7 @@ function gate(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<WorldState>
   if (env.agent.role === GM_ROLE) return { type, mode: "auto", pinned: true };
   // An act on the world's document is decided by the mode as the player has it when it is decided, not as the turn began with it (`known` gives a turn its own settings): it is asked, committed and applied at three different times.
   const settings = type === "world_document" ? (rt.settings.latest(env.userId) ?? ctx.settings) : ctx.settings;
-  const { mode, source } = effectiveMode(settings, ctx.learning, env.connectionId ?? ctx.active, type, env.agent.role);
+  const { mode, source } = effectiveMode(settings, ctx.learning, env.connectionId ?? ctx.active, type, env.agent.role, ctx.engine);
   if (mode === "never") return refusal("mode_never", ctx.view.text(WRITE_NOTE.never, { type: changeLabel(type) }), p.key);
   const spawn = p.ops[0];
   if (type === "gm_spawn" && spawn?.op === "spawn" && kindIs(rt.registry, world, spawn.kind, "person")) {
@@ -716,10 +718,10 @@ async function context(rt: Runtime, env: WriterEnv): Promise<Ctx | OpRefusal> {
   return contextOf(rt, env, head, settings, await rt.settings.learningOf(env.userId), await keptFiles(rt, env.chatId, env.userId), await rt.activeConnectionId(env.userId));
 }
 
-/** The writer's context over a head and kept files in hand: a turn's own, as its engine run reads them (`turn-writer.ts`), never through the ledger's queue. */
-export function contextOf(rt: Runtime, env: Pick<WriterEnv, "knowledge">, head: ChatHead, settings: UserSettings, learning: ExtractionLearning, kept: Readonly<Record<string, KeptFile>>, active: string): Ctx {
+/** The writer's context over a head and kept files in hand: a turn's own, as its engine run reads them (`turn-writer.ts`), never through the ledger's queue. `engine`: the harness plays the chat. */
+export function contextOf(rt: Runtime, env: Pick<WriterEnv, "knowledge">, head: ChatHead, settings: UserSettings, learning: ExtractionLearning, kept: Readonly<Record<string, KeptFile>>, active: string, engine?: "harness"): Ctx {
   const view = readView({ knowledge: env.knowledge, registry: rt.registry, world: head.world, state: head.state, texts: settings.prompts.texts, wording: markWording(settings.prompts.texts), threshold: settings.minds.knowledge.threshold });
-  return { head, view, settings, learning, kept, active };
+  return { head, view, settings, learning, kept, active, ...(engine !== undefined ? { engine } : {}) };
 }
 
 /** A checked operation: what it writes in the head (none for a kept file's change), its type and mode, and the events that word it. */
@@ -760,7 +762,8 @@ export function checkOp(rt: Runtime, ctx: Ctx, env: WriterEnv, state: Readonly<W
   if (builtin) out = resolveEdit(rt.registry, ctx.head.world, state, p.ops, { ...opts, confirmed: true });
   if ("rejection" in out) return refused(rt, ctx, env.knowledge, out.rejection, p.key);
   if (out.events.length === 0) return refusal("no_change", ctx.view.text(WRITE_NOTE.noChange), p.key);
-  const mode = builtin || (!g.pinned && asksFirst(rt, ctx, state, p, out.events)) ? "confirm" : g.mode;
+  // On the harness only the user's own setting of a type asks first (`effectiveMode`).
+  const mode = builtin || (!g.pinned && ctx.engine !== "harness" && asksFirst(rt, ctx, state, p, out.events)) ? "confirm" : g.mode;
   return { p, type: g.type, mode, events: out.events, shown: out.events };
 }
 

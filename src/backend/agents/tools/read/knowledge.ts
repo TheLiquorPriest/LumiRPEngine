@@ -176,16 +176,6 @@ function factSecrecy(view: ToolReadView, holders: readonly Held[]): Secrecy | nu
   };
 }
 
-/**
- * A fact's secrecy by its id (`factSecrecy`, over everyone the view may name who holds it), the
- * chat's holdings read once for the call: what a tool that lists the chat's facts some other way
- * marks them by, so a fact someone keeps reads as the same secret wherever it is listed.
- */
-export function factSecrecyOf(view: ToolReadView): (fact: FactId) => Secrecy | null {
-  const k = knowing(view);
-  return (fact) => factSecrecy(view, k.holders(fact));
-}
-
 /** A fact's part of an answer (see the header); `secrecy` gives, where the view marks, what marks its claim. */
 function factPart(view: ToolReadView, fact: Fact, secrecy: () => Secrecy | null): FactAnswer {
   if (view.knowledge === "everyone") return { fact: fact.id, claim: view.mark(fact.claim, secrecy()) };

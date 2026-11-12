@@ -2,20 +2,17 @@
 // The record of a reply is RPEngine's, and LumiAH's own record of the turn rides inside it
 // (`Rec.harness`, `shared/ledger.ts`), so a reply holds one record: LumiAH's anchor for a swipe is
 // read from here and written back here. A job a turn's agents started is tied to that turn's record
-// by the turn's id; its writes land only while that record is on the chat's path. Where the reply
-// says something against its turn, the lines that say so are kept here too (`keepDepartures`).
+// by the turn's id; its writes land only while that record is on the chat's path.
 //
 // Reads are lenient: the part is outside every hash, any metadata writer can change it, and a damaged
 // one costs the session link or the job's tie, never the turn's world changes.
 
-import { DEPARTURE_LIMITS } from "../../shared/harness-texts-story";
-import type { ChatId, MessageId, UserId } from "../../shared/ids";
+import type { MessageId } from "../../shared/ids";
 import { isRecord, type JsonObject } from "../../shared/json";
 import type { Rec, RecHarness } from "../../shared/ledger";
 import type { ChainMessage } from "../../engine/ledger/chain";
 import type { LedgerCore } from "../../engine/ledger/journal";
 import { activeRecord, isTombstoned } from "../../engine/ledger/path";
-import type { LedgerService } from "../ledger-io";
 
 /** A record's harness part as stored; null when it has none, or what it holds names no turn (a reply no turn was played for has only its mark, `unplayedOf`). */
 export function recHarnessOf(rec: Pick<Rec, "harness"> | null | undefined): RecHarness | null {
@@ -23,28 +20,13 @@ export function recHarnessOf(rec: Pick<Rec, "harness"> | null | undefined): RecH
   if (!isRecord(raw) || !Array.isArray(raw.turns)) return null;
   const turns = raw.turns.filter((t): t is string => typeof t === "string" && t !== "");
   if (turns.length === 0) return null;
-  const departures = departuresIn(raw);
   return {
     turns,
     ...(isRecord(raw.record) ? { record: raw.record as JsonObject } : {}),
     ...(typeof raw.defaultTick === "number" && Number.isFinite(raw.defaultTick) && raw.defaultTick > 0 ? { defaultTick: raw.defaultTick } : {}),
     // Kept through a later write of LumiAH's record (a job of the turn ending): only a turn that writes the record again clears it.
     ...(typeof raw.unplayed === "string" && raw.unplayed !== "" ? { unplayed: raw.unplayed } : {}),
-    // Kept through every later write of the part: LumiAH's record, more lines of departure, a Continue's turn.
-    ...(departures.length > 0 ? { departures } : {}),
   };
-}
-
-/** The lines of departure a stored harness part holds: each a line of text, no more than a record keeps; none for a part without them, or one that holds them damaged. */
-function departuresIn(raw: Readonly<Record<string, unknown>>): string[] {
-  const held = raw.departures;
-  return Array.isArray(held) ? held.filter((line): line is string => typeof line === "string" && line.trim() !== "").slice(0, DEPARTURE_LIMITS.lines) : [];
-}
-
-/** Where a reply says something against what its turn decided or the world holds, a line each, as its record keeps them (`RecHarness.departures`); none for a record without them. */
-export function departuresOf(rec: Pick<Rec, "harness"> | null | undefined): string[] {
-  const raw: unknown = rec?.harness;
-  return isRecord(raw) ? departuresIn(raw) : [];
 }
 
 /** A reply's mark that no turn was played for it, as its record holds it: why, and whether it is about only what a Continue added to a reply a turn was played for (`added`) or the whole reply. Null for a reply with no such mark. */
@@ -143,38 +125,4 @@ export function anchorsOf(core: LedgerCore, observed: readonly ChainMessage[]): 
     }
     return [{ messageId: m.id, swipeId: m.swipeId, swipes }];
   });
-}
-
-/** How a reply's lines of departure were kept (`keepDepartures`): every line its record holds now; or, where they would come to more than a record keeps, how many it holds, and nothing was kept. */
-export type DeparturesKept = { departures: string[] } | { full: number };
-
-/**
- * Keeps `lines` on the record of harness turn `turn`, after those it holds, as where its reply says
- * something against what the turn decided or the world holds (`RecHarness.departures`). Only the
- * record's harness part is written, in the chat's queue: it is outside every hash but the
- * tombstone's, so nothing of the world moves and no path changes. A line the record holds already
- * is kept once. As for every write tied to a turn's record (`turnRecord`), only while that record
- * is on the chat's path; `committed`: the engine saw the turn write its record, so a record it no
- * longer finds has left the path, where one it never saw is unknown.
- */
-export async function keepDepartures(ledger: Pick<LedgerService, "recordHarness">, at: { chatId: ChatId; userId: UserId; turn: string; committed: boolean }, lines: readonly string[]): Promise<DeparturesKept | OffPath> {
-  const out: { kept: DeparturesKept | OffPath } = { kept: "unknown" };
-  const refused = await ledger.recordHarness(at.chatId, at.userId, (core, observed) => {
-    const found = turnRecord(core, observed, at.turn);
-    if (typeof found === "string") {
-      out.kept = found === "unknown" && at.committed ? "off_path" : found;
-      return null;
-    }
-    const held = recHarnessOf(found.rec);
-    if (!held) return null;
-    const departures = [...new Set([...(held.departures ?? []), ...lines])];
-    if (departures.length > DEPARTURE_LIMITS.lines) {
-      out.kept = { full: held.departures?.length ?? 0 };
-      return null;
-    }
-    out.kept = { departures };
-    return { messageId: found.messageId, swipeId: found.swipeId, harness: { ...held, departures } };
-  });
-  // The write itself was refused as it reached the record (it was discarded meanwhile): the record takes no more.
-  return refused !== null && typeof out.kept !== "string" && "departures" in out.kept ? "off_path" : out.kept;
 }

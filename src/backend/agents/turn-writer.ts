@@ -319,6 +319,8 @@ export interface TurnWriterEnv {
   /** Holds the workspace bodies it stages until the turn's run lets them go. */
   holder: string;
   signal: AbortSignal;
+  /** On a chat the harness plays: only the user's own setting of a type asks first (`effectiveMode`). */
+  engine?: "harness";
 }
 
 /**
@@ -336,7 +338,7 @@ export function turnWriter(rt: Runtime, draft: TurnDraft, env: TurnWriterEnv): T
     const head = env.base();
     if (!head) return { refused: true, code: "no_world", reason: note(WRITE_NOTE.noWorld) };
     const learning = await rt.settings.learningOf(env.userId);
-    return { ctx: contextOf(rt, { knowledge: "everyone" }, head, settings, learning, env.kept(), await rt.activeConnectionId(env.userId)), settings, learning };
+    return { ctx: contextOf(rt, { knowledge: "everyone" }, head, settings, learning, env.kept(), await rt.activeConnectionId(env.userId), env.engine), settings, learning };
   };
   /**
    * One operation checked for this agent on `state`: its role's tier (the GM tier takes every change,

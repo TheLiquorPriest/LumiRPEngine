@@ -185,10 +185,6 @@ export interface HarnessLimits {
   worldExamples: number;
   /** The longest text a world tool writes into one field of the world's draft (a description, a lore entry's body), in characters. */
   worldTextChars: number;
-  /** The longest file a character's agent keeps of its own (`mind_file_write`), in characters. */
-  mindFileChars: number;
-  /** The longest name of such a file, in characters. */
-  mindFileNameChars: number;
 }
 
 /**
@@ -434,8 +430,8 @@ export function defaultAgentSettings(): AgentSettings {
     systemTokens: 8000,
     // A turn takes its scene's time unless its author said otherwise, as every other engine's turn does. Recording a turn takes well under a second: five is room for a slow host, inside LumiAH's own ten for any one answer of the engine's. A run remembered is a few short strings: a thousand of them is weeks of play in a megabyte, and far more than any late call needs. Sovereign Hand is the player's switch in Lumiverse until they set it here, and the author is given the direction they wrote unless their preset carries it.
     harness: { defaultTick: true, commitWaitMs: 5000, runsRemembered: 1024, sovereignHand: "follow", newestMessage: "direction" },
-    // A day-long file or a novel in one field is a mistake or an attack, never a turn's work: room for a long lore entry and a character's longest notes, and no more.
-    harnessLimits: { timePassMinutes: TIMELAPSE_REACH_MINUTES, worldExamples: 3, worldTextChars: 20000, mindFileChars: 20000, mindFileNameChars: 80 },
+    // A day-long file or a novel in one field is a mistake or an attack, never a turn's work: room for a long lore entry, and no more. A mind's files have their own sizes (`StoryMinds.chars`).
+    harnessLimits: { timePassMinutes: TIMELAPSE_REACH_MINUTES, worldExamples: 3, worldTextChars: 20000 },
   };
 }
 
@@ -835,8 +831,6 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
       timePassMinutes: Math.min(whole(limits.timePassMinutes, 1) ?? d.harnessLimits.timePassMinutes, TIMELAPSE_REACH_MINUTES),
       worldExamples: whole(limits.worldExamples, 1) ?? d.harnessLimits.worldExamples,
       worldTextChars: whole(limits.worldTextChars, 1) ?? d.harnessLimits.worldTextChars,
-      mindFileChars: whole(limits.mindFileChars, 1) ?? d.harnessLimits.mindFileChars,
-      mindFileNameChars: whole(limits.mindFileNameChars, 1) ?? d.harnessLimits.mindFileNameChars,
     },
   };
 }

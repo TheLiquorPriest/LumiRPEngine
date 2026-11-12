@@ -1,20 +1,22 @@
 // One turn on the harness engine (HARNESS-SLICE3: "One turn on the harness engine"), played by a
 // driver that stands where LumiAH's runtime does (`harness-driver.ts`): the guard lets the generation
-// through, the run begins, the author and the agents it starts call tools, the writer is asked, the
-// reply is saved, and the turn commits once, with one record on the reply. Every decision is a tool
-// call the test makes as an agent; the engine makes no model call (`noModelCalls`).
+// through, the run begins, the author and the agents it starts call tools, the reply is released,
+// saved, and the turn commits once, with one record on the reply. Every decision is a tool call the
+// test makes as an agent; the engine makes no model call (`noModelCalls`).
 
 import { describe, expect, test } from "bun:test";
 import { recHarnessOf } from "../../src/backend/harness/record";
 import { renderPrompt } from "../../src/backend/prompts";
-import { WRITE_NOTE } from "../../src/shared/agent-tools-write";
+import { recStoryOf } from "../../src/engine/story/record";
 import { HARNESS_AGENT, HARNESS_NOTE } from "../../src/shared/harness-texts";
-import { readKnowledge, readSlice } from "../../src/packs/minds/core/state";
+import { MINDS_NOTE } from "../../src/shared/harness-texts-minds";
+import type { JsonObject } from "../../src/shared/json";
 import { placeOfEntity } from "../../src/engine/scope";
 import type { QuietRequest } from "../../src/backend/host";
 import { plainMinds, Rig } from "../support/rig";
 import { HOME } from "../support/tools";
-import { type Agent, AUTHOR, beginTurn, cashOf, claimOf, harnessChat, JOSS, MARA, MARKER, noModelCalls, OKORO, PEOPLE, playOn, type Run, recordOn, stateOf, toolsOf, turnRecord } from "./harness-driver";
+import { memoryFiles } from "./harness-cast-kit";
+import { type Agent, AUTHOR, beginTurn, cashOf, claimOf, harnessChat, JOSS, MARA, noModelCalls, OKORO, PEOPLE, playOn, type Run, recordOn, stateOf, toolsOf, turnRecord } from "./harness-driver";
 
 const note = (id: string, vars: Record<string, string> = {}): string => renderPrompt(id, {}, vars);
 const CASH = "acct_pov_cash";
@@ -22,8 +24,8 @@ const CASH = "acct_pov_cash";
 /** What the player character's wallet opens with, as the world has it: an account posts its opening the first time money moves. */
 const openingOf = async (rig: Rig, chatId: string): Promise<number> => Number((await stateOf(rig, chatId)).entities[CASH]?.fields.opening);
 
-/** A character's agent, as the author's `delegate` starts one: a handle of its own, running as the character definition. */
-const mind = (of: string): Agent => ({ id: `delegate-${of}`, role: HARNESS_AGENT.character });
+/** A character's agent, as the author's `delegate` starts one: a handle of its own, running as the character definition, as the person it is. */
+const mind = (of: string): Agent => ({ id: `delegate-${of}`, role: HARNESS_AGENT.character, as: of });
 const GM: Agent = { id: "delegate-gm", role: HARNESS_AGENT.gm };
 
 interface Committed {
@@ -33,12 +35,18 @@ interface Committed {
 }
 const commit = async (run: Run, noteText?: string): Promise<Committed> => (await run.answer(AUTHOR, "commit", noteText === undefined ? {} : { note: noteText })).committed as Committed;
 
-/** What the author and a character do in the turn these tests play: Mara decides for herself, Okoro arrives, ten minutes pass. */
+/** What Mara says aloud, as her own agent writes it. */
+const MARA_SAYS: JsonObject = { by: "Mara", kind: "say", what: "Mara tells Jordan that Okoro comes by at noon.", surface: "Mara says Okoro comes by at noon.", quotes: ["He said noon."], exposure: [{ who: "player", reach: "whole" }] };
+
+/** What the author and a character do in the turn these tests play: Mara is cast and speaks for herself, Okoro arrives, ten minutes pass. */
 async function play(run: Run): Promise<void> {
-  await run.answer(mind(MARA), "mind_decide", { who: "Mara", monologue: "He said noon, so I will say noon.", depiction: "Mara glances at the door", intent: "Tell him Okoro comes by at noon.", mood: "easy" });
+  await run.answer(AUTHOR, "cast_set", { who: "Mara", standing: "principal", why: "The story turns on her." });
+  await run.answer(mind(MARA), "beat_write", MARA_SAYS);
   await run.answer(AUTHOR, "gm_move", { entity: "Okoro", to: HOME });
   await run.answer(AUTHOR, "time_pass", { minutes: 10 });
 }
+/** The beats a message's record holds, by what happened. */
+const beatsOn = async (rig: Rig, chatId: string, messageId: string | undefined): Promise<string[]> => (messageId ? recStoryOf(await recordOn(rig, chatId, messageId)).beats.map((b) => b.what) : []);
 
 describe("a turn on the harness engine", () => {
   test("the staged writes of a whole turn land in the ledger when its reply is saved, with one record on the reply", async () => {
@@ -48,7 +56,7 @@ describe("a turn on the harness engine", () => {
     expect(claim?.mainAgent).toBe(HARNESS_AGENT.author);
     expect(claim?.guidance && "text" in claim.guidance ? claim.guidance.text.length : 0).toBeGreaterThan(0);
     const tools = (await toolsOf(rig, chatId)).map((t) => t.name);
-    for (const name of ["commit", "grant_writes", "time_pass", "checks_stakes", "mind_view", "mind_decide", "knowledge_infer", "gm_move", "people_find"]) expect(tools).toContain(name);
+    for (const name of ["commit", "grant_writes", "time_pass", "checks_stakes", "beat_write", "feed_read", "mind_read", "mind_write", "gm_move", "people_find"]) expect(tools).toContain(name);
     // About no chat it is the engine's whole catalogue, which LumiAH's own Agents and Tools pages hold a definition's tools to: every tool with its family, its tier and what it does. A chat that plays no world on the harness is given none.
     const catalogue = await toolsOf(rig, "");
     expect(catalogue.map((t) => t.name)).toEqual(expect.arrayContaining(tools));
@@ -62,8 +70,7 @@ describe("a turn on the harness engine", () => {
     expect(run.generation?.open).toBe(true);
     expect(rig.host.restarts).toEqual([]);
 
-    // A character the author started reads as the person she is, and stages her own decision.
-    expect((await run.call(mind(MARA), "mind_view", { who: "Mara" })).text).toContain("You are Mara.");
+    // A character the author cast and started speaks for herself: her beat is staged with the turn.
     await play(run);
     // Each agent reads what it staged itself; no one else does, and the chat's ledger holds nothing of the turn.
     expect(JSON.stringify(await run.answer(AUTHOR, "people_find", { name: "Okoro" }))).toContain(HOME);
@@ -73,7 +80,7 @@ describe("a turn on the harness engine", () => {
     // Only the author commits: the call's gate closes it to anyone else. Its commit lands what every agent staged, in the order it was staged.
     expect(await run.refusal(GM, "commit", {})).toBe(note(HARNESS_NOTE.authorOnly, { tool: "commit" }));
     const committed = await commit(run, "Okoro is here");
-    expect(committed.landed.length).toBe(3);
+    expect(committed.landed.length).toBe(2);
     expect(committed.review).toEqual([]);
     expect(committed.refused).toEqual([]);
     // Landed is the turn's own until its reply is saved: every agent reads it now, and the ledger takes it whole then, or never.
@@ -81,18 +88,18 @@ describe("a turn on the harness engine", () => {
     expect(placeOfEntity(await stateOf(rig, chatId), OKORO)).toBeNull();
     expect((await stateOf(rig, chatId)).clock).toBe(clock);
 
-    await run.finish("Mara glances at the door. Okoro is already on the step.", "- Mara says noon.\n- Okoro arrives early.");
+    await run.finish("Mara glances at the door. ", "Okoro is already on the step.");
     const state = await stateOf(rig, chatId);
     expect(placeOfEntity(state, OKORO)).toBe(HOME);
     expect(state.clock).toBe(clock + 10);
-    expect(readSlice(state).chars[MARA]?.mind?.intent).toBe("Tell him Okoro comes by at noon.");
+    // Her beat, decided by her own agent, is on the reply's record with the turn's world changes.
+    expect(await beatsOn(rig, chatId, rig.host.head(chatId)?.id)).toEqual([String(MARA_SAYS.what)]);
     // One record, on the reply: it names the turn that wrote it, holds LumiAH's own record of that turn, and says which role wrote what.
     const reply = rig.host.head(chatId);
     const rec = reply ? await recordOn(rig, chatId, reply.id) : null;
     expect(rec?.status).toBe("ok");
     expect(recHarnessOf(rec)).toEqual({ turns: [run.turn], record: JSON.parse(JSON.stringify(turnRecord(run))) });
     expect(rec?.agents?.map((a) => a.role)).toEqual(["director"]);
-    expect(rec?.events.map((e) => e.type)).toContain("minds.mind");
     const said = rig.host.chat(chatId).messages.findLast((m) => m.isUser);
     expect(said ? await recordOn(rig, chatId, said.id) : null).toBeNull();
     // Once the turn is over, a call of its run stages nothing: there is nothing to commit.
@@ -123,22 +130,25 @@ describe("a turn on the harness engine", () => {
     noModelCalls(rig);
   });
 
-  test("a character's agent reads what its person knows, and nothing else", async () => {
+  test("a character's agent reads what reached its person and its own mind, and nothing else", async () => {
     const secret = { id: "joss_debt", title: "Joss's debt", content: "HELD-MARK: Joss owes the harbor office two months of rent.", keys: ["rent"], links: [], secret: true, gate: "false", holders: [JOSS] };
     const { rig, chatId } = await harnessChat({ minds: true, put: { lore: { joss_debt: secret } } });
+    // What Joss took in after an earlier reply: his own beliefs, in his mind's file.
+    const files = memoryFiles();
+    await files.write(`minds/${JOSS}/beliefs.md`, "THOUGHT-MARK nobody here knows about the rent.", null);
+    rig.rt.harness.files = () => files;
     const run = await beginTurn(rig, chatId, "I ask who is behind on the rent.");
-    // Joss holds his secret, and his own mind is given it.
-    expect((await run.call(mind(JOSS), "mind_view", { who: "Joss" })).text).toContain("HELD-MARK");
-    await run.answer(mind(JOSS), "mind_decide", { who: "Joss", monologue: "THOUGHT-MARK two months behind, and nobody here knows.", depiction: "Joss studies the kettle", intent: "Say nothing about the rent.", mood: "tense" });
-    await commit(run);
-    // Mara's mind is given what Mara perceives: Joss in the room, but neither his secret nor what he thinks.
-    const seen = (await run.call(mind(MARA), "mind_view", { who: "Mara" })).text;
-    expect(seen).toContain("You are Mara.");
-    expect(seen).toContain("- Joss");
-    expect(seen).not.toContain("HELD-MARK");
-    expect(seen).not.toContain("THOUGHT-MARK");
-    // She is one person: another's mind is closed to her agent, by any of its tools.
-    expect(await run.refusal(mind(MARA), "mind_view", { who: "Joss" })).toBe(note(HARNESS_NOTE.otherMind, { self: "Mara", other: "Joss", tool: "mind_view" }));
+    for (const who of ["Mara", "Joss"]) await run.answer(AUTHOR, "cast_set", { who, standing: "principal", why: "The story turns on them." });
+    // Joss thinks to himself and hides the notice: Mara catches only part of it. His mind is his to write after the reply, not now.
+    await run.answer(mind(JOSS), "beat_write", { by: "Joss", kind: "inner", what: "THOUGHT-MARK two months behind, and nobody here knows.", surface: "Joss studies the kettle." });
+    expect(await run.refusal(mind(JOSS), "mind_write", { file: "beliefs.md", text: "Nothing." })).toBe(note(MINDS_NOTE.afterReply));
+    await run.answer(mind(JOSS), "beat_write", { by: "Joss", kind: "do", what: "Joss slides the overdue rent notice under the bread bin.", surface: "Joss tidies something away.", exposure: [{ who: "Mara", reach: "part", got: "Joss tucks a paper away." }] });
+    // Mara's feed is what reached her, as it reached her: neither his secret, nor what he thinks, nor what the paper was.
+    const seen = (await run.call(mind(MARA), "feed_read")).text;
+    expect(seen).toContain("Joss tucks a paper away.");
+    for (const kept of ["HELD-MARK", "THOUGHT-MARK", "rent notice"]) expect({ kept, seen: seen.includes(kept) }).toEqual({ kept, seen: false });
+    // She is one person: another's mind is closed to her agent.
+    expect(await run.refusal(mind(MARA), "mind_read", { who: "Joss" })).toBe(note(MINDS_NOTE.otherMind, { self: "Mara", other: "Joss" }));
     // And the tools that read the world as no one person does refuse her agent, whatever its definition was given.
     const closed: [string, Record<string, string>][] = [
       ["people_sheet", { person: "Joss" }],
@@ -146,23 +156,26 @@ describe("a turn on the harness engine", () => {
       ["knowledge_what_knows", { person: "Joss" }],
       ["lore_search", { query: "rent" }],
       ["lore_read", { id: "joss_debt" }],
+      ["beats_read", {}],
       ["gm_move", { entity: "Joss", to: HOME }],
     ];
     for (const [tool, args] of closed) expect(await run.refusal(mind(MARA), tool, args)).toBe(note(HARNESS_NOTE.mindOnly, { tool }));
     // The author reads all of it, marked as secret: the boundary is the character's, not the turn's.
     expect(JSON.stringify(await run.answer(AUTHOR, "lore_search", { query: "rent" }))).toContain('"id":"joss_debt"');
     expect((await run.call(AUTHOR, "lore_read", { id: "joss_debt" })).text).toContain("HELD-MARK");
-    expect((await run.call(AUTHOR, "minds_read", { person: "Joss" })).text).toContain("THOUGHT-MARK");
+    expect((await run.call(AUTHOR, "mind_read", { who: "Joss" })).text).toContain("THOUGHT-MARK");
     await run.finish("Nobody answers at first.");
-    // After the reply the same holds for a job's run: the character's agent still reads through its own tools alone.
+    // After the reply the same holds: the character's agent still reads through its own tools alone.
     expect(await run.refusal(mind(MARA), "minds_read", { person: "Joss" })).toBe(note(HARNESS_NOTE.mindOnly, { tool: "minds_read" }));
     noModelCalls(rig);
   });
 
-  test("a write set to Confirm waits on the reply's review card, and lands when the game master applies it", async () => {
+  test("a write the user set to Confirm waits on the reply's review card, and lands when the game master applies it", async () => {
     const { rig, chatId } = await harnessChat();
+    // On the harness every change lands unless the user set its type to ask first (Settings → Changes from the reply).
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { money_adjust: { mode: "confirm" } } } }));
     const run = await beginTurn(rig, chatId, "I pay Mara back the twenty I owe her.");
-    // Money adjustments are Confirm as shipped (Settings → Changes from the reply): the write is staged, and says where it waits.
+    // The write is staged, and says where it waits.
     const staged = (await run.answer(AUTHOR, "gm_adjust_money", { account: CASH, cents: -2000 })).staged as { mode: string; lines: string[] };
     expect(staged.mode).toBe("confirm");
     const committed = await commit(run);
@@ -184,40 +197,9 @@ describe("a turn on the harness engine", () => {
     noModelCalls(rig);
   });
 
-  test("a change set to Confirm that no proposal form holds goes on the card in its tool's plain words, and Apply lands what was recorded", async () => {
-    const { rig, chatId } = await harnessChat({ minds: true });
-    rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, knowledge: true }));
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { learn: { mode: "confirm" } } } }));
-    const claim = "Joss owes Mara two months of rent.";
-    const holds = async (): Promise<boolean> => Object.values(readKnowledge(await stateOf(rig, chatId)).facts).some((fact) => fact.claim === claim);
-    const run = await beginTurn(rig, chatId, "I ask Joss whether the rent is paid.");
-    // What Mara learns from Joss is someone else's learning: the reply's own confirm has a form for the player character's alone.
-    const knowledge: Agent = { id: "delegate-knowledge", role: HARNESS_AGENT.knowledge };
-    const told = { who: ["Mara", "Joss"], facts: [{ ref: "n1", claim, matters: "Mara means to collect, and Joss is hiding it." }], learned: [{ fact: "n1", how: "told", by: "Joss", who: ["Mara"] }] };
-    const recorded = (await run.answer(knowledge, "knowledge_infer", told)).recorded as { claim: string; lands: string }[];
-    expect(recorded.map((r) => [r.claim, r.lands])).toEqual([[claim, note(WRITE_NOTE.stagedReview)]]);
-    const committed = await commit(run);
-    expect([committed.landed, committed.refused]).toEqual([[], []]);
-    expect(committed.review.length).toBe(1);
-    await run.finish("Joss shrugs and says the rent can wait.");
-    const reply = rig.host.head(chatId);
-    if (!reply) throw new Error("no reply");
-    // The card tells it as the tool did, and nothing of it is in the ledger.
-    const cards = rig.body(await rig.send({ type: "lre.review", chatId, op: "get" })).cards as { turn: string; items: { status: string; source: string; changeType: string; lines: string[] }[] }[];
-    expect(cards.map((c) => c.turn)).toEqual([`${reply.id}:0`]);
-    expect(cards[0]?.items).toMatchObject([{ status: "open", source: "read", changeType: "learn", lines: committed.review[0] }]);
-    expect(cards[0]?.items[0]?.lines.join(" ")).toContain(claim);
-    expect(await holds()).toBe(false);
-    // Apply lands the events the engine's validator made of the call.
-    const applied = rig.body(await rig.send({ type: "lre.review", chatId, op: "apply", turn: `${reply.id}:0` })).cards as typeof cards;
-    expect(applied[0]?.items.map((i) => i.status)).toEqual(["applied"]);
-    expect(await holds()).toBe(true);
-    noModelCalls(rig);
-  });
-
   test("at a gate the commit waits on the card under the player's message: what is let through lands with the turn, what is declined never does", async () => {
     const { rig, chatId } = await harnessChat();
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { review: { placement: "gate" } } } }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { review: { placement: "gate" } }, extraction: { money_adjust: { mode: "confirm" } } } }));
     const run = await beginTurn(rig, chatId, "I pay Mara back the twenty I owe her.");
     const said = rig.host.chat(chatId).messages.findLast((m) => m.isUser);
     if (!said) throw new Error("no message");
@@ -251,14 +233,13 @@ describe("a turn on the harness engine", () => {
     noModelCalls(rig);
   });
 
-  test("a turn that is stopped, or whose run fails, leaves nothing: no record, nothing staged, nothing half-written", async () => {
+  test("a turn stopped before anything of its reply went out, or whose run fails, leaves nothing: no record, nothing staged, nothing half-written", async () => {
     const { rig, chatId } = await harnessChat({ minds: true });
     const start = await stateOf(rig, chatId);
     const untouched = async (): Promise<void> => {
       const state = await stateOf(rig, chatId);
       expect(placeOfEntity(state, OKORO)).toBeNull();
       expect(state.clock).toBe(start.clock);
-      expect(readSlice(state).chars[MARA]?.mind ?? null).toBeNull();
       expect(rig.body(await rig.send({ type: "lre.review", chatId, op: "get" })).cards).toEqual([]);
     };
     // Stopped by the player, after the author committed and while a write still waited to be committed.
@@ -266,27 +247,27 @@ describe("a turn on the harness engine", () => {
     await play(stopped);
     await commit(stopped);
     await stopped.answer(AUTHOR, "gm_adjust_money", { account: CASH, cents: -2000 });
-    if (!stopped.generation) throw new Error("no generation");
-    await rig.host.stop(stopped.generation, "Mara glances at the");
-    await stopped.end("stopped");
+    await stopped.stop("");
     await untouched();
     const cut = rig.host.head(chatId);
     expect(recHarnessOf(cut ? await recordOn(rig, chatId, cut.id) : null)).toBeNull();
     expect((cut ? await recordOn(rig, chatId, cut.id) : null)?.events ?? []).toEqual([]);
+    expect(await beatsOn(rig, chatId, cut?.id)).toEqual([]);
     // What its run still calls is no turn's.
     expect(await stopped.refusal(AUTHOR, "gm_move", { entity: "Okoro", to: HOME })).toBe(note(HARNESS_NOTE.noTurn));
     expect(await stopped.refusal(AUTHOR, "commit", {})).toBe(note(HARNESS_NOTE.noTurn));
 
-    // The run failed, and Lumiverse still saved what the writer had sent: the reply stands, with no record of the turn.
+    // The run failed before it released anything: Lumiverse ends the reply with the error, and nothing of the turn stands.
     const failed = await beginTurn(rig, chatId, null, { type: "regenerate" });
     await play(failed);
     await commit(failed);
     await failed.end("failed", { reason: "the connection dropped" });
     if (!failed.generation) throw new Error("no generation");
-    await rig.host.finish(failed.generation, "Mara glances at the door.");
+    await rig.host.finish(failed.generation, "", { error: "the connection dropped" });
     await untouched();
     const kept = rig.host.head(chatId);
     expect(recHarnessOf(kept ? await recordOn(rig, chatId, kept.id) : null)).toBeNull();
+    expect(await beatsOn(rig, chatId, kept?.id)).toEqual([]);
 
     // Neither left anything in the way: the next telling of the reply plays from where the chat stood, and commits.
     const again = await beginTurn(rig, chatId, null, { type: "regenerate" });
@@ -311,10 +292,8 @@ describe("a turn on the harness engine", () => {
     const run = await beginTurn(rig, chatId, "I ask Mara whether Okoro is coming by today.");
     await play(run);
     await commit(run);
-    const sent = await run.finish("Mara glances at the door. Okoro is already on the step.", "- Mara says noon.");
+    await run.finish("Mara glances at the door. Okoro is already on the step.");
     noModelCalls(rig);
-    expect(run.assembled.some((e) => MARKER.test(e.content))).toBe(true);
-    expect(sent.some((m) => MARKER.test(m.content))).toBe(false);
 
     // The same message on the classic chat: the engine runs first, asks its model steps, and the reply starts again with its sections written.
     const calls: QuietRequest[] = [];
@@ -324,7 +303,6 @@ describe("a turn on the harness engine", () => {
     };
     await rig.turn(classic, "I ask Mara whether Okoro is coming by today.", "Mara glances at the door.");
     expect(calls.length).toBeGreaterThan(0);
-    expect(rig.host.assembled.some((e) => MARKER.test(e.content))).toBe(false);
     expect(rig.host.section("Scene")).not.toBe("");
     const reply = rig.host.head(classic);
     const rec = reply ? await recordOn(rig, classic, reply.id) : null;

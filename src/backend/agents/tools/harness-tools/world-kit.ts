@@ -1,30 +1,39 @@
-// What the tools of the world's document share (`world.ts`: the document as Build edits it;
-// `world-build.ts`: a place, a path and a map made without hand-written JSON): who may call one,
-// how the store's refusal is answered, and what every write of the draft answers.
+// What the tools of the world share (`world.ts`: the document as Build edits it; `world-build.ts`:
+// a place, a path and a map made without hand-written JSON): who may call one, where a write goes,
+// how a refusal is answered, and what every write answers.
 //
-// A chat plays one revision of its world. These tools edit the world's draft, as Build does, through
-// the store's own path for an editor's writes (`WorldBuild.edit`): nothing they write reaches the
-// chat until the draft is committed as the world's next revision and the chat is brought to it (an
-// Upgrade), which every write's answer says. A read needs only the turn and the port; a write needs
-// the game master's tier too, which the author holds and may grant.
+// A chat plays its own world: the revision of its world's document it plays, with what this chat
+// made or changed of it in play laid over (`engine/world-draft.ts`). A write of a place, a path, a
+// map or the map settings goes there by default (`in: chat`, `chatTarget`): staged with the turn as
+// one change of "The world as this chat plays it", under the mode the player set for it, played at
+// once, and gone with the turn. `in: document` writes the world's draft instead, as Build does,
+// through the store's own path for an editor's writes (`WorldBuild.edit`): nothing written there
+// reaches the chat until the draft is committed as the world's next revision and the chat is brought
+// to it (an Upgrade), which every such write's answer says. A read needs only the turn; a write
+// needs the game master's tier too, which the author holds and may grant.
 //
-// Two rules hold for every write, whichever tool makes it:
+// Two rules hold for every write of the world's document, whichever tool makes it:
 // - The player's Never for "The world's document" refuses it, the draft's own edits too (`worldCall`):
 //   the draft is the user's working copy.
 // - What is closed to agents (`CLOSED_PATHS`: who the player's character is, what the engine holds
 //   agents to) is never changed, whatever the mode. A write of the draft that would leave one
 //   changed is refused before the store is asked (`writeDraft`); a commit, a restore and an Upgrade
 //   are held to the same paths where they are asked (`world.ts`) and where they are made
-//   (`makeWorldActs`).
+//   (`makeWorldActs`). This chat's own world holds none of them.
 
+import { hashJson } from "../../../../shared/hash";
 import { HARNESS_NOTE } from "../../../../shared/harness-texts";
 import { WORLD_NOTE } from "../../../../shared/harness-texts-world";
 import { hasOwn, isRecord, type JsonObject, type JsonValue } from "../../../../shared/json";
-import { applyPatch, getAt, jsonEqual, parsePointer } from "../../../../shared/json-patch";
+import { applyPatch, getAt, jsonEqual, parsePointer, pointerOf } from "../../../../shared/json-patch";
 import { loreIsSecret } from "../../../../shared/lore";
 import type { LintIssue } from "../../../../shared/protocol";
 import type { WorldDoc } from "../../../../shared/world";
 import { type Change, changedItem, changesBetween, groupOf } from "../../../../shared/world-diff";
+import { own } from "../../../../engine/pack-kit";
+import { baseWorld } from "../../../../engine/places-in-play";
+import { Working } from "../../../../engine/working";
+import { chatDraftOf, type DraftCollection, type DraftEdit, draftChanges, draftEvent } from "../../../../engine/world-draft";
 import { type EditorResult, WorldError } from "../../../worlds";
 import type { ToolOutcome } from "../../runtime";
 import { closedChanges, type WorldActDetail, type WorldBuild, type WorldEdit } from "../harness-ports";
@@ -32,6 +41,8 @@ import type { HarnessTurn } from "../harness-turn";
 import { refusedAnswer } from "../propose";
 import type { ToolReadView } from "../read-view";
 import type { ToolEnv } from "../registry";
+import { badValue, textArg } from "../schema";
+import { stageChange } from "./kit";
 
 /** What a tool of the world's document runs with, once the call may be made. */
 export interface WorldCall {
@@ -206,6 +217,109 @@ function closedBy(draft: WorldDoc, edit: Exclude<WorldEdit, { op: "get" }>): str
     default:
       return [];
   }
+}
+
+// ---------------------------------------------------------------- where a building write goes
+
+/** Where a write of the world goes: this chat's own world, played at once (`chat`, the default), or the world's document, played once committed and the chat brought to it (`document`). */
+export const WORLD_INS = ["chat", "document"] as const;
+export type WorldIn = (typeof WORLD_INS)[number];
+
+/** A call's `in`, `fallback` where it is left out; or the refusal that says what it takes. */
+export function inArg(view: ToolReadView, tool: string, args: JsonObject, fallback: WorldIn): WorldIn | ToolOutcome {
+  const said = textArg(args, "in");
+  if (said === null) return fallback;
+  return WORLD_INS.find((w) => w === said) ?? badValue(view, tool, "in", said, WORLD_INS);
+}
+
+type Extra = Readonly<Record<string, unknown>>;
+
+/**
+ * What a building tool reads and writes, wherever its call writes: the world as there (as this chat
+ * plays it, or the world's draft as stored), and its writes of a whole place, path or map, of an item
+ * taken out, and of the map settings. One that leaves the world as it is writes nothing (`same`).
+ */
+export interface WorldTarget {
+  in: WorldIn;
+  view: ToolReadView;
+  turn: HarnessTurn;
+  doc: WorldDoc;
+  put(collection: DraftCollection, id: string, value: object, changed: string, extra: Extra): Promise<ToolOutcome> | ToolOutcome;
+  remove(collection: DraftCollection, id: string, changed: string, extra: Extra): Promise<ToolOutcome>;
+  settings(value: JsonObject, changed: string, extra: Extra): Promise<ToolOutcome>;
+  same(extra: Extra): ToolOutcome;
+}
+
+/** Where a building call writes (its `in`, this chat's own world when left out), with that world read; or the answer that says why the call can't be made. */
+export async function worldTarget(env: ToolEnv, tool: string, args: JsonObject): Promise<WorldTarget | ToolOutcome> {
+  const into = inArg(await env.reader.view(), tool, args, "chat");
+  if (typeof into !== "string") return into;
+  return into === "chat" ? chatTarget(env) : documentTarget(env);
+}
+
+/** Whether `worldTarget` answered instead of giving a target. */
+export function noTarget(target: WorldTarget | ToolOutcome): target is ToolOutcome {
+  return "text" in target;
+}
+
+/**
+ * This chat's own world: the world as the caller plays it, each write one change of "The world as
+ * this chat plays it" (`world_edit`), checked by the engine's own validator on what the caller reads
+ * and staged with the turn (after the reply, in a job, written at once). The game master's tier
+ * writes it, as it writes the world's document; the player's mode for the type decides the rest.
+ */
+export async function chatTarget(env: ToolEnv): Promise<WorldTarget | ToolOutcome> {
+  const view = await env.reader.view();
+  const turn = env.turn;
+  if (!turn) return view.refuse(HARNESS_NOTE.noTurn);
+  if ((turn.tier ?? (turn.main ? "gm" : "read")) !== "gm") return view.refuse(WORLD_NOTE.needsGm);
+  const doc = view.ctx.world;
+  const same = (extra: Extra): ToolOutcome => view.answer({ unchanged: view.text(WORLD_NOTE.unchangedChat), ...extra });
+  const stage = async (edit: DraftEdit, changed: string, extra: Extra): Promise<ToolOutcome> => {
+    const event = draftEvent(baseWorld(doc), chatDraftOf(view.state), edit);
+    const bad = new Working(view.registry, doc, view.state).apply(event);
+    if (bad) return view.refuse(WORLD_NOTE.chatRefused, { reason: bad.gm ?? bad.reason });
+    const staged = await stageChange(view, turn, { key: hashJson(["lre.harness.world", event.data]), changeType: "world_edit", events: [event], lines: [changed] });
+    if ("refused" in staged) return staged.refused;
+    return view.answer({ changed, ...extra, lands: staged.lands, next: view.text(WORLD_NOTE.chatNext) });
+  };
+  return {
+    in: "chat",
+    view,
+    turn,
+    doc,
+    put: (collection, id, value, changed, extra) => (jsonEqual(own(doc[collection] as Readonly<Record<string, unknown>>, id), value) ? same(extra) : stage({ collection, id, value: value as JsonObject }, changed, extra)),
+    remove: (collection, id, changed, extra) => stage({ collection, id, gone: true }, changed, extra),
+    settings: (value, changed, extra) => stage({ part: "mapSettings", value }, changed, extra),
+    same,
+  };
+}
+
+/** The world's document: its draft as stored, each write the store's own, as Build makes it (`writeDraft`). */
+async function documentTarget(env: ToolEnv): Promise<WorldTarget | ToolOutcome> {
+  const call = await worldCall(env, true);
+  if (refusedCall(call)) return call;
+  const before = await draftOf(call);
+  if (noDraft(before)) return before;
+  const doc = before.draft;
+  const same = (extra: Extra): ToolOutcome => call.view.answer({ unchanged: call.view.text(WORLD_NOTE.unchanged), draft: { version: before.version }, ...extra });
+  return {
+    in: "document",
+    view: call.view,
+    turn: call.turn,
+    doc,
+    // The store counts a version for every item put, so only here can a write that changes nothing be told from one that does.
+    put: (collection, id, value, changed, extra) => (jsonEqual(own(doc[collection] as Readonly<Record<string, unknown>>, id), value) ? same(extra) : writeDraft(call, { op: "put", collection, id, value: value as unknown as JsonValue }, changed, { before, extra })),
+    remove: (collection, id, changed, extra) => writeDraft(call, { op: "remove", collection, id }, changed, { before, extra }),
+    // The map settings are none of the parts the store sets: a patch writes them, whole.
+    settings: (value, changed, extra) => writeDraft(call, { op: "patch", ops: [{ op: "add", path: pointerOf(["mapSettings"]), value: value as unknown as JsonValue }] }, changed, { before, extra }),
+    same,
+  };
+}
+
+/** What this chat made or changed of its world in play that the revision it plays doesn't have, as the caller reads it. */
+export function chatChanges(view: ToolReadView): DraftEdit[] {
+  return draftChanges(baseWorld(view.ctx.world), chatDraftOf(view.state));
 }
 
 /** Whether the item at `pointer` in `doc` is one the document keeps from the player's character: a restricted person, thing, place or track, or lore that is secret or read only by those who know it. */

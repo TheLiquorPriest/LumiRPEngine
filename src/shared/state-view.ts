@@ -172,8 +172,10 @@ export type ChipKind =
   | "routine_added"
   /** A ✎ fix or GM edit on the head ("Corrected …"), with Undo (DESIGN §12). */
   | "fix"
-  /** What a harness turn's agents changed in the world's document, made when the author committed (`backend/harness/card.ts`): Undo while that commit's revision is still the world's newest and the chat has played no later turn, and Open in Build, which the page does without asking the backend. */
+  /** What a harness turn's agents changed in the world's document, made when the author committed (`backend/harness/card.ts`), with Open in Build, which the page does without asking the backend. Undoing the turn leaves it. */
   | "world_made"
+  /** A harness reply's footer (DEPTH2-PLAN §2): one line of what its turn did (time passed, beats, people, things, world edits), its record's turns for the page that opens it (`turns`), and on the latest reply Undo, which takes the reply and its whole turn away. */
+  | "turn"
   /** A write held during a reply that couldn't be made when the reply finished (P2), with Dismiss. */
   | "refused"
   /** The intent gate (DESIGN §5.1 preview gates): a typed message's read action waits, nothing generated, on Play, Edit (its params) or Cancel; Play and Edit resume the turn. */
@@ -223,6 +225,8 @@ export interface Chip {
   as?: GenerateAs;
   /** Confirm and action chips lapse at the next send (DESIGN §11). */
   expires: "next_send" | "never";
+  /** A harness reply's footer (`turn`): the harness turns that wrote the reply's record, the reply's and each Continue's, oldest first: with the chip's message and swipe, what a page opens the turn's record by. */
+  turns?: string[];
 }
 
 /**

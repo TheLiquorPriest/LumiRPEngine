@@ -51,16 +51,17 @@ export function StatusBanners(props: { state: StateView }) {
 }
 
 /**
- * A turn under way, without hooks. On the harness the author works before the reply is written, for
- * up to five minutes, while the activity line says only that the reply is awaited: the banner says
- * who is at work and gives the way to watch it (the Harness tab, which opens on Live).
+ * A turn under way, without hooks. On the harness the author works in LumiRPEngine's runtime and
+ * writes the reply itself, a passage at a time, while the activity line says only that the reply
+ * is awaited: the banner says who is at work and gives the way to watch it (the Harness tab, which
+ * opens on Live).
  */
 export function TurnRunning(props: { engine: StateView["engine"]; onWatch(): void }) {
   if (props.engine === "harness") {
     return (
       <div class="lre-play-status" data-lre-status="in_flight">
         <Banner tone="info" icon="sparkle" title="The author is working on this turn" actions={<Button icon={HARNESS_MODE.icon} size="sm" onClick={props.onWatch}>Watch it work</Button>}>
-          It reads the world, lets the characters think and records what changed, then the reply is written. This can take a few minutes. Changes you make now apply when it finishes.
+          It reads the world, lets the characters think, records what changed and writes the reply as it goes. This can take a while. Changes you make now apply when it finishes.
         </Banner>
       </div>
     );

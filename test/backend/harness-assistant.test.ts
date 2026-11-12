@@ -18,7 +18,8 @@ import { STEP_LABEL } from "../../src/shared/diagnostics";
 import { HARNESS_AGENT } from "../../src/shared/harness-texts";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import type { AssistantView, BackendToFrontend } from "../../src/shared/protocol";
-import { type Bed, cast, heard, lumiahBed, offers, results, toolCall } from "../support/lumiah-bed";
+import { type Bed, cast, heard, offers, results, toolCall } from "../support/lumiah-bed";
+import { runtimeBed } from "../support/runtime-bed";
 import { Rig } from "../support/rig";
 import { HOME } from "../support/tools";
 import { harnessChat, mount, noModelCalls, OKORO, PEOPLE, playOn, stateOf } from "./harness-driver";
@@ -517,16 +518,16 @@ describe("GM → Assistant on a chat another engine plays", () => {
   }
 });
 
-describe("GM → Assistant with LumiAH's own backend mounted in the engine", () => {
+describe("GM → Assistant with LumiAH's own backend mounted in the engine and its runtime linked", () => {
   let open: Bed | null = null;
   afterEach(() => {
     open?.close();
     open = null;
   });
 
-  test("the assistant's agent answers in a side session of LumiAH's: it is offered the engine's change tools, its change is the answer's proposal, and Apply lands it", async () => {
+  test("the assistant's agent answers in a side session of LumiAH's, which the chat's claim runs in the runtime: it is offered the engine's change tools, its change is the answer's proposal, and Apply lands it", async () => {
     const rig = new Rig({ shipped: true });
-    const bed = (open = lumiahBed(rig));
+    const bed = (open = await runtimeBed(rig));
     const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
     for (const [id, value] of Object.entries(PEOPLE)) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id, value }));
     rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));

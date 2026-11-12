@@ -13,12 +13,14 @@ import type { HarnessFile, HarnessFiles } from "../../src/backend/agents/tools/h
 import type { HarnessChange, HarnessCommit, HarnessTurn } from "../../src/backend/agents/tools/harness-turn";
 import type { ToolEnv } from "../../src/backend/agents/tools/registry";
 import { type AgentOp, type OpRefusal, outsideWriter, type ToolWriter } from "../../src/backend/agents/tools/writer";
+import type { StoryPort } from "../../src/backend/story/record";
 import type { RoleTier } from "../../src/shared/agent-roles";
 import { HARNESS_AGENT } from "../../src/shared/harness-texts";
 import type { JsonObject } from "../../src/shared/json";
-import type { LedgerEvent } from "../../src/shared/ledger";
+import type { LedgerEvent, RecStory } from "../../src/shared/ledger";
 import type { WorldDoc } from "../../src/shared/world";
 import type { WorldState } from "../../src/engine/state";
+import { type StoryPart, walkStory, withStory } from "../../src/engine/story/record";
 import { Working } from "../../src/engine/working";
 import { stateOf } from "../support/mind-chat";
 import type { Rig } from "../support/rig";
@@ -75,7 +77,7 @@ export interface CastTurn extends HarnessTurn {
 }
 
 /** What a test sets of its turn: any of the turn's own members, and what staging answers (`mode`, or a refusal for every change). */
-export type TurnSetup = Partial<Omit<HarnessTurn, "bind" | "grant" | "stage" | "commit" | "landed">> & { mode?: "auto" | "confirm"; refuse?: OpRefusal; landed?: LedgerEvent[] };
+export type TurnSetup = Partial<Omit<HarnessTurn, "grant" | "stage" | "commit" | "landed">> & { mode?: "auto" | "confirm"; refuse?: OpRefusal; landed?: LedgerEvent[] };
 
 /**
  * The author's turn on `chatId`, open and before its reply, unless `setup` says otherwise: staging
@@ -88,7 +90,7 @@ export async function castTurn(rig: Rig, chatId: string, setup: TurnSetup = {}):
   const first = (await rig.host.chats.messages(chatId, rig.host.userId))[0];
   const turn: CastTurn = {
     main: true,
-    character: null,
+    directed: false,
     knowing: false,
     settings: await rig.rt.settings.get(rig.host.userId),
     host: rig.host,
@@ -103,11 +105,6 @@ export async function castTurn(rig: Rig, chatId: string, setup: TurnSetup = {}):
     granted: [],
     landed: () => landed ?? [],
     staged: () => turn.changes.flatMap((c) => c.events),
-    bind(entity) {
-      if (turn.character !== null && turn.character !== entity) return false;
-      turn.character = entity;
-      return true;
-    },
     grant(to, tier) {
       if (to === "nobody") return false;
       turn.granted.push([to, tier]);
@@ -126,9 +123,26 @@ export async function castTurn(rig: Rig, chatId: string, setup: TurnSetup = {}):
   return turn;
 }
 
-/** The env the bridge would build for a call of an agent of the definition `role` in `turn`, reading the chat's head as the game master does. */
-export function castEnv(rig: Rig, chatId: string, turn: HarnessTurn | null, role: string = HARNESS_AGENT.author, writer: ToolEnv["writer"] = null): ToolEnv {
-  return { ...toolEnv(rig, chatId, "gm", writer), marks: true, agent: { role, id: `agent_${role}` }, ...(turn ? { turn } : {}) };
+/** The env the bridge would build for a call of an agent of the definition `role` in `turn`, reading the chat's head as the game master does; `as`, the instance it was started as (the person a character's agent is). */
+export function castEnv(rig: Rig, chatId: string, turn: HarnessTurn | null, role: string = HARNESS_AGENT.author, writer: ToolEnv["writer"] = null, as?: string): ToolEnv {
+  return { ...toolEnv(rig, chatId, "gm", writer), marks: true, agent: { role, id: `agent_${role}`, ...(as !== undefined ? { as } : {}) }, ...(turn ? { turn } : {}) };
+}
+
+/** A story record kept in memory as a run reaches it (`HarnessTurn.story`): `held` stands on the path, and each write goes on top of it (`written`). `staged`: a turn's own run (true), or a run after the reply, preparing or reliving (false). */
+export function memoryStory(held: RecStory = {}, staged = true): StoryPort & { written: StoryPart } {
+  const port: StoryPort & { written: StoryPart } = {
+    turn: "turn-seed",
+    staged,
+    written: withStory({}, {}),
+    async read() {
+      return { path: walkStory([{ messageId: "m-held", swipeId: 0, seq: 1, story: withStory({}, held) }], port.written), own: port.written, basis: null, onPath: () => true };
+    },
+    async write(change) {
+      port.written = withStory(port.written, change);
+      return { kept: true };
+    },
+  };
+  return port;
 }
 
 /** One call of a tool, as the bridge makes it. */

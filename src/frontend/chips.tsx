@@ -29,6 +29,7 @@ import { chipIntent, convertRequest } from "./requests";
 import { toastQueued } from "./queued";
 import { followReview, ReviewCard, reviewHandlers, ReviewUnread } from "./review-card";
 import { go } from "./build/chrome";
+import { openTurnRecord } from "./story/open";
 
 const CHIP_ICON: Record<ChipKind, IconName> = {
   change: "check",
@@ -62,6 +63,7 @@ const CHIP_ICON: Record<ChipKind, IconName> = {
   routine_added: "calendar",
   fix: "edit",
   world_made: "globe",
+  turn: "list",
   refused: "alert",
   intent_gate: "pause",
   outline_gate: "list",
@@ -76,7 +78,7 @@ const ACTION_ICON: Partial<Record<string, IconName>> = { undo: "undo", regenerat
  * The receipt's order: what went wrong first, so it never hides behind "n more";
  * then time, money, the roll, the changes, how the message was read, and what the engine didn't track.
  */
-const RECEIPT_ORDER: readonly ChipKind[] = ["decline", "degraded", "pending", "elapsed", "price", "undo", "roll", "change", "not_action", "fix", "world_made", "mode_change", "untracked"];
+const RECEIPT_ORDER: readonly ChipKind[] = ["decline", "degraded", "pending", "turn", "elapsed", "price", "undo", "roll", "change", "not_action", "fix", "world_made", "mode_change", "untracked"];
 
 /** Segments the receipt line shows before "n more". */
 const RECEIPT_SEGMENTS = 3;
@@ -242,6 +244,11 @@ function useChipAction(chip: Chip, chatId: ChatId): [boolean, (choice: string, p
       run(async () => {
         // A failed engine run's way to what failed (DESIGN §5.1): the drawer at Settings → Diagnostics.
         if (choice === "diagnostics") return openDiagnostics();
+        // A harness reply's footer opens its turn's record in the drawer, and sends nothing.
+        if (chip.kind === "turn" && choice === "record") {
+          openTurnRecord({ messageId: chip.messageId, swipeId: chip.swipeId ?? 0 });
+          return;
+        }
         // A harness turn's change to the world's document: Open in Build opens the chat's world there, and sends nothing.
         if (chip.kind === "world_made" && choice === "build") {
           const worldId = view?.worldId ?? null;

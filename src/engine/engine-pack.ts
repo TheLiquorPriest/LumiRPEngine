@@ -3,7 +3,8 @@
 // choices, puzzle attempts, reveals, the hints the player opened, the paused scene, checks rolled by the `check` effect), GM
 // edits of an entity's tier, agent flag and levels and of its classes and tags, the chat's workspace
 // files and pins (`engine/workspace`: `engine.ws.write`, `engine.ws.delete`, `engine.ws.pin`), life states
-// (`engine/life`: the events, the `life` effect, the `life` channel and `life_of`), the engine's
+// (`engine/life`: the events, the `life` effect, the `life` channel and `life_of`), this chat's own
+// draft of its world (`engine/world-draft`: `engine.world`), the engine's
 // narration channels (`knows`, `spawn`) and the taxonomy formulas (`kind_is`, `in_class`,
 // `has_tag`, `member_of`, `tier_of`, `band_of`). Every registry is built with it first:
 // `createRegistry([enginePack, ...packs])`. Its state lives in `state.packs.engine`.
@@ -33,6 +34,7 @@ import { minutesBetween } from "./world-state";
 import { feedEvent } from "./feed";
 import { wsDeleteEvent, wsPinEvent, wsReadersEvent, wsWriteEvent } from "./workspace";
 import { outLinesEvent, outSceneEvent } from "./outputs";
+import { draftEventDef } from "./world-draft";
 import { THING_NAME_MAX } from "../shared/things";
 
 const LEVELS: readonly Level[] = [0, 1, 2, 3, 4];
@@ -559,6 +561,8 @@ export const enginePack: PackDef = {
     // What an agent turn tells its narrator, recorded on the turn (INC2-SPEC C11): no state of its own.
     r.event(outLinesEvent);
     r.event(outSceneEvent);
+    // This chat's own draft of its world (`world-draft.ts`): places, paths and maps made or changed in play.
+    r.event(draftEventDef);
     r.proposal(knowsChannel);
     r.proposal(spawnChannel);
     r.proposal(lifeChannel);

@@ -123,7 +123,7 @@ describe("the audit of what an agent can do (docs/harness-tools.md)", () => {
       if (out.text === note(HARNESS_NOTE.notCharacter, { tool: name })) return "mind";
       return /^\{"refused":\{"code":"(no_writer|not_granted)"/.exec(out.text)?.[1] ?? "open";
     };
-    /** What the table's tier closes a tool to: for an agent that only reads (the game master's ruling), one at the story's tier (the chronicler), and the author itself. */
+    /** What the table's tier closes a tool to: for an agent that only reads (the game master's ruling), one at the story's tier (the historian), and the author itself. */
     const closes = (needs: HarnessNeeds, role: string): string => {
       if (needs === "mind") return "mind";
       if (role === HARNESS_AGENT.author) return "open";
@@ -133,7 +133,7 @@ describe("the audit of what an agent can do (docs/harness-tools.md)", () => {
     };
     const wrong: string[] = [];
     for (const tool of HARNESS_LISTED) {
-      for (const role of [HARNESS_AGENT.gm, HARNESS_AGENT.chronicler, HARNESS_AGENT.author]) {
+      for (const role of [HARNESS_AGENT.gm, HARNESS_AGENT.historian, HARNESS_AGENT.author]) {
         const got = closedBy(tool.name, await answered(tool.name, role));
         if (got !== closes(tool.needs, role)) wrong.push(`${tool.name} (${tool.needs}) called by ${role}: ${got}`);
       }

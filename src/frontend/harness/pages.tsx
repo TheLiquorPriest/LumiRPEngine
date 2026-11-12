@@ -11,15 +11,23 @@
 //   and what they think. That is GM-level, like GM → Live and Settings → Diagnostics, so the tab
 //   opens behind the same kind of gate, opened for one chat and closed again on leaving the tab.
 // - Hello. Nothing of LumiAH's is asked for until a chat on the harness is open (`start`).
+// - The story's pages. Cast, Record and Notebook (`story/`) sit beside LumiAH's under one bottom
+//   bar, behind the same curtain. They read the chat's workspace through LumiAH's own page requests
+//   (`files`), and LumiAH's list of the user's connections, which marks the loopbacks no agent may
+//   run on (`connections`, which the drawer hands to Settings too), so nothing under `story/`
+//   imports LumiAH.
 
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
-import { type App as PagesApp, AppContext as PagesContext, createApp, createHost, CSS, type PageId, type PrefsStorage, Shell } from "lumi-ah/extension/frontend";
-import type { FrontendToBackend, UiState } from "lumi-ah/shared";
+import { type App as PagesApp, AppContext as PagesContext, createApp, createHost, CSS, type PageId, type PrefsStorage, Shell, UiRequestError } from "lumi-ah/extension/frontend";
+import type { FrontendToBackend, UiState, WorkspaceFile } from "lumi-ah/shared";
 import { useState } from "preact/hooks";
-import { useApp } from "../app";
+import { type HarnessRoute, useApp, useUi } from "../app";
 import { Button } from "../components";
 import { Icon } from "../icons";
 import { type Readable, useSelect } from "../store";
+import type { FilesFailed, StoryFile, StoryFiles } from "../story/files";
+import type { ConnectionsPort } from "../story/connections";
+import { StoryFrame } from "../story/tab";
 
 /** LumiAH's stylesheet, added to the page once beside ours. Its every class, variable, animation and container is `lah`-named, ours `lre`-named, so neither restyles the other. */
 export const HARNESS_PAGES_CSS: string = CSS;
@@ -51,7 +59,34 @@ export interface HarnessPages {
   app: PagesApp;
   /** Says hello to LumiAH's backend, the first time it is called: the pages hold its state from then on. */
   start(): void;
+  /** The chat's area of LumiAH's workspace, for the story's pages. */
+  files: StoryFiles;
+  /** LumiAH's list of the user's connections, which marks the loopbacks no agent may run on: for the story's pages and Settings → Story → Models. */
+  connections: ConnectionsPort;
   dispose(): void;
+}
+
+/** The chat's area of LumiAH's workspace over LumiAH's page requests (`lah.ws.*`), as the story's pages reach it. */
+export function storyFiles(client: Pick<PagesApp["client"], "request">): StoryFiles {
+  const fileOf = (f: WorkspaceFile): StoryFile => ({ path: f.path, chars: f.chars, at: f.at, by: f.by.who === "user" ? { who: "user" } : { who: "agent", agent: f.by.role }, version: f.hash });
+  const failed = (error: unknown): FilesFailed => (error instanceof UiRequestError ? { failed: error.message, code: error.code === "conflict" ? "conflict" : error.code === "not_found" ? "missing" : "other" } : { failed: error instanceof Error ? error.message : String(error), code: "other" });
+  return {
+    list: (chatId, prefix) =>
+      client.request("lah.ws.list", { chatId, area: "chat" }).then(
+        (view) => view.files.filter((f) => f.path.startsWith(prefix)).map(fileOf),
+        failed,
+      ),
+    read: (chatId, path) =>
+      client.request("lah.ws.read", { chatId, area: "chat", path }).then(
+        (got) => ({ text: got.text, version: got.version }),
+        failed,
+      ),
+    write: (chatId, path, text, base) =>
+      client.request("lah.ws.write", { chatId, area: "chat", path, text, base }).then(
+        (got) => ({ file: fileOf(got.file) }),
+        failed,
+      ),
+  };
 }
 
 /** This browser's storage for LumiAH's preferences on this device; null where the browser blocks it (a private window, a sandboxed frame). */
@@ -72,13 +107,16 @@ export function createHarnessPages(ctx: SpindleFrontendContext): HarnessPages {
   const unwatch = host.watch(() => {
     if (started) app.client.resync();
   });
+  const start = (): void => {
+    if (started) return;
+    started = true;
+    void app.client.sync();
+  };
   return {
     app,
-    start() {
-      if (started) return;
-      started = true;
-      void app.client.sync();
-    },
+    start,
+    files: storyFiles(app.client),
+    connections: { state: app.client.state, failed: { get: () => app.client.connection.get() === "failed", subscribe: (listener) => app.client.connection.subscribe((now) => listener(now === "failed")) }, start },
     dispose() {
       unwatch();
       app.client.dispose();
@@ -116,23 +154,25 @@ export function HarnessCurtain(props: { onReveal(): void }) {
         <Icon name="eye-off" size={24} />
       </span>
       <h2 class="lre-gm-gate-title">Spoilers ahead</h2>
-      <p class="lre-gm-gate-text">The harness is the AI author that plays this chat's turns, with the agents it starts. These pages show them at work and how they are set up: everything they read of the world and everything they think, secrets and hidden agendas among it.</p>
+      <p class="lre-gm-gate-text">The harness is the AI author that plays this chat's turns, with the agents it starts. These pages show the story as the author keeps it, and the agents at work and how they are set up: everything they read of the world and everything they think, secrets and hidden agendas among it.</p>
       <Button variant="primary" icon="eye" onClick={props.onReveal}>
-        Show the agents at work
+        Show the story and the agents
       </Button>
       <p class="lre-gm-gate-note">The pages close again when you leave this tab or open another chat.</p>
     </div>
   );
 }
 
-/** The tab's body, without hooks: the curtain while it is closed, else LumiAH's shell with the pages offered. Behind a closed curtain no page is drawn, so none asks for anything. */
-export function HarnessView(props: { pages: HarnessPages; revealed: boolean; onReveal(): void }) {
+/** The tab's body, without hooks: the curtain while it is closed, else the story's pages and LumiAH's shell with the pages offered, under one bar. Behind a closed curtain no page is drawn, so none asks for anything. */
+export function HarnessView(props: { pages: HarnessPages; revealed: boolean; onReveal(): void; chatId: string | null; route: HarnessRoute; go(route: HarnessRoute): void }) {
   return (
     <div class="lre-harness" data-lre-section="harness">
-      {props.revealed ? (
-        <PagesContext.Provider value={props.pages.app}>
-          <Shell pages={HARNESS_PAGES} />
-        </PagesContext.Provider>
+      {props.revealed && props.chatId !== null ? (
+        <StoryFrame route={props.route} chatId={props.chatId} files={props.pages.files} go={props.go}>
+          <PagesContext.Provider value={props.pages.app}>
+            <Shell pages={HARNESS_PAGES} />
+          </PagesContext.Provider>
+        </StoryFrame>
       ) : (
         <HarnessCurtain onReveal={props.onReveal} />
       )}
@@ -140,10 +180,11 @@ export function HarnessView(props: { pages: HarnessPages; revealed: boolean; onR
   );
 }
 
-/** The Harness tab. The curtain is opened for the chat that is open: another chat's pages wait behind it again, and so does this one's once the tab is left (its state goes with it). */
+/** The Harness tab. The curtain is opened for the chat that is open: another chat's pages wait behind it again, and so does this one's once the tab is left (its state goes with it). Where it is among its pages is UI state (`ui.harness`), so a reply's footer can open it at its record. */
 export function HarnessTab(props: { pages: HarnessPages }) {
   const app = useApp();
   const chatId = useSelect(app.sync, (state) => state.chatId);
+  const route = useUi((ui) => ui.harness);
   const [shownFor, setShownFor] = useState<string | null>(null);
-  return <HarnessView pages={props.pages} revealed={chatId !== null && shownFor === chatId} onReveal={() => setShownFor(chatId)} />;
+  return <HarnessView pages={props.pages} revealed={chatId !== null && shownFor === chatId} onReveal={() => setShownFor(chatId)} chatId={chatId} route={route} go={(next) => app.ui.update((ui) => ({ ...ui, harness: next }))} />;
 }

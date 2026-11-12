@@ -19,7 +19,8 @@ import { currentSignals } from "../shared/steps";
 import type { Limit } from "../shared/minds";
 import { defaultMindsSettings, isMindPurpose, KNOWLEDGE_DEFAULTS, migrateMindReads, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
 import { defaultTimeouts, migrateTimeouts, TIMEOUTS, timeoutsOf } from "../shared/timeouts";
-import { JOB_SETTINGS_DEFAULTS, jobSettingsOf, GM_PAGE_DEFAULTS, gmPageSettingsOf, LORE_INDEX_DEFAULTS, loreBooksSettingOf, loreIndexSettingsOf, PERF_DEFAULTS, perfSettingsOf, stepConfigOf, SWIPE_DEFAULTS } from "../shared/settings";
+import { JOB_SETTINGS_DEFAULTS, jobSettingsOf, GM_PAGE_DEFAULTS, gmPageSettingsOf, LORE_INDEX_DEFAULTS, loreBooksSettingOf, loreIndexSettingsOf, PERF_DEFAULTS, perfSettingsOf, stepConfigOf, storySettingsOf, SWIPE_DEFAULTS } from "../shared/settings";
+import { narrationSettingsOf, storyPresetSettingsOf } from "../shared/settings";
 import { type AcceptanceConnection, agentSettingsOf, defaultAgentSettings } from "../shared/agent-settings";
 import { MARK_TEXT_IDS, PROMPT_SETTINGS_DEFAULTS, promptSettingsOf, promptsWritten, SWIPE_TEXTS } from "../shared/prompts";
 import { DIAGNOSTICS_DEFAULTS, diagnosticsSettingsOf } from "../shared/diagnostics";
@@ -301,6 +302,12 @@ export function defaultSettings(): UserSettings {
     gm: { ...GM_PAGE_DEFAULTS },
     // A view built for a ledger head is shared by every request at that head.
     perf: { ...PERF_DEFAULTS },
+    // A story day holds one T1, two T2 and four T3 treatments; the story record's limits as DEPTH2-PLAN §4 has them.
+    story: storySettingsOf(undefined),
+    // The story engine reads the chat's preset by the categories of the preset designed for it, with room for each part.
+    storyPreset: storyPresetSettingsOf(undefined),
+    // The game master checks each passage, which may be drafted three times; the direct line's passage is the character's own.
+    narration: narrationSettingsOf(undefined),
   };
 }
 
@@ -643,6 +650,9 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     tidy: tidySettingsOf(v.tidy, d.tidy),
     gm: gmPageSettingsOf(v.gm, d.gm),
     perf: perfSettingsOf(v.perf, d.perf),
+    story: storySettingsOf(v.story, d.story),
+    storyPreset: storyPresetSettingsOf(v.storyPreset, d.storyPreset),
+    narration: narrationSettingsOf(v.narration, d.narration),
   };
 }
 
@@ -789,11 +799,15 @@ function learningFrom(raw: Readonly<Record<string, unknown>>): ExtractionLearnin
 
 /**
  * The effective mode for a type on a connection, with its source (DESIGN §11 precedence): pinned,
- * then learned (under `role` when an agent's change is asked about), then the type's default.
+ * then learned (under `role` when an agent's change is asked about), then the type's default. On a
+ * chat the harness plays (`engine`), every change lands unless the user set its type (DEPTH2-PLAN
+ * §2): no learned mode and no type's own default, so the review card holds only what the user
+ * asked to see first.
  */
-export function effectiveMode(settings: UserSettings, learning: ExtractionLearning, connectionId: string | null, type: ChangeType, role?: string): { mode: BoundMode; source: ExtractionModeView["source"] } {
+export function effectiveMode(settings: UserSettings, learning: ExtractionLearning, connectionId: string | null, type: ChangeType, role?: string, engine?: "harness"): { mode: BoundMode; source: ExtractionModeView["source"] } {
   const pinned = settings.extraction[type];
   if (pinned) return { mode: pinned.mode, source: "pinned" };
+  if (engine === "harness") return { mode: "auto", source: "default" };
   const learned = connectionId ? statsFor(learning, connectionId, type, role)?.learned : undefined;
   if (learned) return { mode: learned, source: "learned" };
   const cold = isAgentChangeType(type) ? AGENT_CHANGE_DEFAULTS[type] : EXTRACTION_DEFAULTS[type];

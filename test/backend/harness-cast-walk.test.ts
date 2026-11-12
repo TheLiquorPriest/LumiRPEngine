@@ -16,17 +16,17 @@ describe("building a world (the skill, walked)", () => {
     // New people land with the turn here, as the world's document does as shipped; as shipped new people wait on the review card (`harness-cast-people.test.ts`).
     rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { gm_spawn: { mode: "auto" }, world_document: { mode: "auto" } } } }));
 
-    // The first turn writes the world's document: a place of the world's own, and the way to it.
+    // The first turn writes the world's document (in: document): a place of the world's own, and the way to it.
     const first = await beginTurn(rig, chatId, "I ask Mara whether the old mill past the creek still stands.");
     const status = (await first.answer(AUTHOR, "world_status")) as { playing: string; head: string; behind: boolean; draft: { stored: boolean } };
     expect(status).toMatchObject({ behind: false, draft: { stored: false } });
     expect(await first.refusal(AUTHOR, "places_read", { place: "The Old Mill" })).toContain("The Old Mill");
-    const place = (await first.answer(AUTHOR, "world_place", { name: "The Old Mill", parent: "port_alder", description: "A weatherboard mill on the creek, its wheel long still." })) as { place: string; next: string };
+    const place = (await first.answer(AUTHOR, "world_place", { name: "The Old Mill", parent: "port_alder", description: "A weatherboard mill on the creek, its wheel long still.", in: "document" })) as { place: string; next: string };
     expect(place.place).toBe(MILL);
     // Every write says the draft isn't played yet, and how it comes to be.
     expect(place.next).toContain("world_commit");
     expect(place.next).toContain("world_upgrade");
-    const path = (await first.answer(AUTHOR, "world_path", { from: HOME, to: "The Old Mill", minutes: 25, km: 2 })) as { route: string };
+    const path = (await first.answer(AUTHOR, "world_path", { from: HOME, to: "The Old Mill", minutes: 25, km: 2, in: "document" })) as { route: string };
     expect(path.route).toBe(`rt_${HOME}_${MILL}`);
     // Still the draft's alone: the chat plays what it played.
     expect(await first.refusal(AUTHOR, "places_read", { place: "The Old Mill" })).toContain("The Old Mill");

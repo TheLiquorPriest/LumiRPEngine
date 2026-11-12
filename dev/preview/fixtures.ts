@@ -9,6 +9,7 @@ import { OFFSTAGE_DEFAULTS } from "../../src/shared/offstage";
 import type { AssistantProposalOp, AssistantView, ExtractionModeView, TraceRow, UpgradePreview, WorkspaceFileView } from "../../src/shared/protocol";
 import type { ChangeType, ExtractionType, UserSettings } from "../../src/shared/settings";
 import { AGENT_CHANGE_DEFAULTS, AGENT_CHANGE_TYPES, LORE_INDEX_DEFAULTS, NARRATOR_DEFAULTS, SETTINGS_DEFAULTS_REV } from "../../src/shared/settings";
+import { narrationSettingsOf, storyPresetSettingsOf, storySettingsOf } from "../../src/shared/settings";
 import { claimFactId, defaultMindsSettings, KNOWLEDGE_DEFAULTS, MIND_LENGTH_DEFAULTS, witnessRef } from "../../src/shared/minds";
 import { defaultTimeouts } from "../../src/shared/timeouts";
 import { hashJson } from "../../src/shared/hash";
@@ -1455,6 +1456,9 @@ export function settingsFixture(): UserSettings {
     tidy: { findings: 50 },
     gm: { duringTurn: "hold" },
     perf: { reuseViews: true },
+    storyPreset: storyPresetSettingsOf(undefined),
+    story: storySettingsOf(undefined),
+    narration: narrationSettingsOf(undefined),
   };
 }
 

@@ -120,7 +120,7 @@ describe("where a harness turn starts from", () => {
 });
 
 describe("the engine choice", () => {
-  test("a chat is switched to the harness only where LumiAH can play it; the page is told why not and what to do; and LumiAH's own switch for the chat follows the choice", async () => {
+  test("a chat can be switched to the harness only in a build that mounts LumiAH; where its runtime can't play it yet the page says why and the choice is kept all the same; and LumiAH's own switch for the chat follows the choice", async () => {
     const { rig, chatId } = await alderChat();
     const choose = (engine: string | null) => rig.send({ type: "lre.chat.knowledge", chatId, engine });
     const asked = async (on: Rig) => on.body(await on.send({ type: "lre.chat.knowledge", chatId, engines: true }));
@@ -134,17 +134,15 @@ describe("the engine choice", () => {
     expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId }))).toEqual({ knowledge: null, narrator: null });
     const unknown = await choose("turbo");
     expect(unknown.type === "lre.error" ? unknown.code : null).toBe("bad_request");
-    // Mounted, but LumiAH lacks something of the user's: it says what, and the choice is still refused, with LumiAH's switch untouched.
+    // Mounted, but LumiAH lacks something of the user's: the page says what, and the choice is kept all the same, with LumiAH's switch on: the chat waits for its runtime, and no other engine stands in.
     const pins = mount(rig);
-    rig.rt.harness.ready = async () => "LumiRPEngine isn't granted the interceptor permission. Grant it in Lumiverse (Extensions → LumiRPEngine → Permissions).";
+    rig.rt.harness.runtime = async () => "LumiRPEngine isn't granted the interceptor permission. Grant it in Lumiverse (Extensions → LumiRPEngine → Permissions).";
     expect((await asked(rig)).harnessBlocked).toContain("Grant it in Lumiverse");
-    expect((await choose("harness")).type).toBe("lre.error");
-    expect(pins).toEqual([]);
-    // Able to play, nothing else is asked of the user: the choice is kept with the chat, LumiAH's switch goes on, and both survive a restart of the backend.
-    rig.rt.harness.ready = async () => null;
-    expect(await asked(rig)).toEqual({ knowledge: null, narrator: null });
     expect(rig.body(await choose("harness")).engine).toBe("harness");
     expect(pins).toEqual([{ chatId, harness: true }]);
+    // Able to play, nothing else is asked of the user, and the choice and LumiAH's switch survive a restart of the backend.
+    rig.rt.harness.runtime = async () => null;
+    expect(await asked(rig)).toEqual({ engine: "harness", knowledge: null, narrator: null });
     const restarted = rig.restart();
     const later = mount(restarted);
     expect(await restarted.rt.chatKnowledge.engine(chatId, restarted.host.userId)).toBe("harness");
@@ -158,13 +156,21 @@ describe("the engine choice", () => {
     expect(await restarted.rt.chatKnowledge.engine(chatId, restarted.host.userId)).toBe("classic");
   });
 
-  test("LumiAH's switch goes on before the choice is kept: where it refuses, the chat stays on the engine it had", async () => {
+  test("where LumiAH's switch refuses, the chat is the harness's all the same, and is set to its runtime when the user's runtime changes", async () => {
     const { rig, chatId } = await alderChat();
+    const pins = mount(rig);
+    const working = rig.rt.harness.pin;
     rig.rt.harness.pin = async () => {
-      throw new Error("the chat couldn't be switched on");
+      throw new Error("no runtime was ever set up");
     };
-    expect((await rig.send({ type: "lre.chat.knowledge", chatId, engine: "harness" })).type).toBe("lre.error");
-    expect(await rig.rt.chatKnowledge.engine(chatId, rig.host.userId)).toBe("classic");
+    expect(rig.body(await rig.send({ type: "lre.chat.knowledge", chatId, engine: "harness" })).engine).toBe("harness");
+    expect(pins).toEqual([]);
+    // The runtime links: the chat that couldn't be set is set now, and only once.
+    rig.rt.harness.pin = working;
+    await rig.rt.harness.runtimeChanged(rig.host.userId);
+    await rig.rt.harness.runtimeChanged(rig.host.userId);
+    expect(pins).toEqual([{ chatId, harness: true }]);
+    expect(await rig.rt.chatKnowledge.engine(chatId, rig.host.userId)).toBe("harness");
   });
 
   test("on a harness chat the engine reads and tells no reply itself: no chip offers it, one pressed anyway is refused with no model call, and the chat's other engines offer theirs as they always did", async () => {

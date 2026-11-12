@@ -29,6 +29,7 @@ import { scrollParent } from "./scroll";
 import { Settings } from "./settings/settings";
 import { AcceptanceBanner } from "./settings/agents";
 import { useSelect } from "./store";
+import { ConnectionsContext } from "./story/connections";
 
 /** A mode as the bar shows it. */
 export interface ModeEntry {
@@ -191,7 +192,10 @@ export function Drawer(props: { measure(el: Element): Rect; harness?: HarnessPag
       <UpdateNotice />
       <AcceptanceBanner />
       <div class="lre-mode-body" id={bodyId} role="tabpanel" aria-labelledby={`${bodyId}-tab-${mode}`}>
-        <ModeBody mode={mode} harness={pages !== null ? <HarnessTab pages={pages} /> : null} />
+        {/* LumiAH's list of connections, for the pages that offer one to an agent (the Harness tab's Cast, Settings → Story → Models). */}
+        <ConnectionsContext.Provider value={pages?.connections ?? null}>
+          <ModeBody mode={mode} harness={pages !== null ? <HarnessTab pages={pages} /> : null} />
+        </ConnectionsContext.Provider>
       </div>
     </div>
   );

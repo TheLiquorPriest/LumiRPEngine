@@ -194,6 +194,7 @@ export class FakeHost implements HostPort {
       c.metadata = { ...c.metadata, ...structuredClone(patch) };
     },
     appendUserMessage: async (chatId, content, metadata) => this.sendUser(chatId, content, metadata),
+    deleteMessage: async (chatId, messageId) => this.deleteMessage(chatId, messageId),
     active: async () => this.activeChat,
     // The real host lists only its owner's chats.
     list: async (userId) => (userId === this.userId ? [...this.chatsById.values()].reverse().map((c) => ({ id: c.id, name: c.name, metadata: structuredClone(c.metadata) })) : []),
@@ -254,6 +255,11 @@ export class FakeHost implements HostPort {
       this.presetRevision++;
       this.presetWrites++;
     },
+  };
+
+  /** Lumiverse's macro engine (`macros.resolve`): the text as given, which a test can replace with its own. */
+  macros: HostPort["macros"] = {
+    resolve: async (template) => ({ text: template, diagnostics: [] }),
   };
 
   /** The user's default connection (`connections.list`, `is_default`). */

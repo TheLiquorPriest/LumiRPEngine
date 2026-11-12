@@ -12,9 +12,11 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import type { WorldDoc } from "../../src/shared/world";
 import { baseWorld, madePlaces, PLACE_EVENT, placeOp, playedWorld } from "../../src/engine/places-in-play";
+import { chatDraftOf, draftChanges, draftEvent } from "../../src/engine/world-draft";
 import { createRegistry } from "../../src/engine/registry-impl";
 import type { WorldState } from "../../src/engine/state";
 import { Working } from "../../src/engine/working";
@@ -164,5 +166,50 @@ describe("no reader takes a world without its state (ITEMS-SPEC §6.2, §13)", (
     expect(playedWorld(copy, removed).places[booth]).toBeUndefined();
     expect(reg.context(copy, removed).world.places[booth]).toBeUndefined();
     expect(Object.keys(baseWorld(copy).places)).toEqual(Object.keys(world.places));
+  });
+});
+
+describe("this chat's own world (DEPTH2-PLAN §2: the chat plays its own working draft of the world)", () => {
+  const PATH = { id: "rt_lane", from: "harbor_street_114", to: "rusty_anchor", modes: { walk: { minutes: 7 } }, bidirectional: true };
+
+  test("a path laid in play plays at once, folds alike, and is gone without its event", () => {
+    const { world, state } = portAlder();
+    const laid = draftEvent(world, chatDraftOf(state), { collection: "routes", id: "rt_lane", value: PATH });
+    const w = new Working(reg, world, state);
+    expect(w.apply(laid)).toBeNull();
+    expect(w.world.routes.rt_lane).toEqual(PATH);
+    expect(world.routes.rt_lane).toBeUndefined();
+    // The same record folded again plays the same world.
+    const folded = fold(reg, world, state, [laid]);
+    expect(playedWorld(world, folded).routes.rt_lane).toEqual(PATH);
+    expect(draftChanges(world, chatDraftOf(folded))).toEqual([{ collection: "routes", id: "rt_lane", value: PATH }]);
+    expect(playedWorld(world, state)).toBe(world);
+  });
+
+  test("the world's own item wins once it is no longer what the change was made over; a change back is no change", () => {
+    const { world, state } = portAlder();
+    const [id, own] = Object.entries(world.routes).find(([, r]) => r.map === undefined) ?? [];
+    if (!id || !own) throw new Error("no authored route in Port Alder");
+    const slower = { ...own, modes: { walk: { minutes: 99 } } };
+    const changed = fold(reg, world, state, [draftEvent(world, chatDraftOf(state), { collection: "routes", id, value: slower })]);
+    expect(playedWorld(world, changed).routes[id]).toEqual(slower);
+    // Laid over a revision it wasn't carried to (an Upgrade carries it: `carryDraft`), the revision's own item plays.
+    const edited = { ...world, routes: { ...world.routes, [id]: { ...own, modes: { walk: { minutes: 3 } } } } };
+    expect(playedWorld(edited, changed).routes[id]?.modes.walk?.minutes).toBe(3);
+    // Written back as the world has it, the change goes.
+    const back = fold(reg, world, changed, [draftEvent(world, chatDraftOf(changed), { collection: "routes", id, value: own as unknown as JsonObject })]);
+    expect(draftChanges(world, chatDraftOf(back))).toEqual([]);
+  });
+
+  test("a change that would leave someone nowhere is refused, and a copy of a played world never keeps a path the state took away", () => {
+    const { world, state } = portAlder();
+    const w = new Working(reg, world, state);
+    const home = "harbor_street_114";
+    expect(w.apply(draftEvent(world, chatDraftOf(state), { collection: "places", id: home, gone: true }))?.code).toBe("leaves_out");
+    const laid = fold(reg, world, state, [draftEvent(world, chatDraftOf(state), { collection: "routes", id: "rt_lane", value: PATH })]);
+    const copy: WorldDoc = { ...playedWorld(world, laid), lore: {} };
+    expect(copy.routes.rt_lane).toBeDefined();
+    expect(baseWorld(copy).routes.rt_lane).toBeUndefined();
+    expect(reg.context(copy, state).world.routes.rt_lane).toBeUndefined();
   });
 });

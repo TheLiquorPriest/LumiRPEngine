@@ -709,8 +709,7 @@ const CONSOLIDATIONS_PER_TURN = 2;
 /**
  * The notes of `id` due to fold into their summary at `now` (a consolidation's): the least salient
  * past the number kept, and every faded one; none while their last consolidation is under
- * `consolidate.periodDays` old. The classic memory step asks its own model call to fold them; on
- * the harness engine the person's own agent does (`mind_consolidate`).
+ * `consolidate.periodDays` old. The classic memory step asks its own model call to fold them.
  */
 export function notesToFold(state: Readonly<WorldState>, id: EntityId, now: number, memory: Pick<MindsMemoryConfig, "notes" | "salience" | "consolidate">): MindNote[] {
   const c = readCharacter(state, id);

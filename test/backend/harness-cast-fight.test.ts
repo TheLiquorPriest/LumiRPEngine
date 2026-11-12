@@ -15,6 +15,7 @@ import { renderPrompt } from "../../src/backend/prompts";
 import { WRITE_NOTE } from "../../src/shared/agent-tools-write";
 import { hashJson, hashParts } from "../../src/shared/hash";
 import { HARNESS_AGENT, HARNESS_NOTE } from "../../src/shared/harness-texts";
+import { MINDS_NOTE } from "../../src/shared/harness-texts-minds";
 import { PLAY_NOTE } from "../../src/shared/harness-texts-play";
 import type { JsonObject } from "../../src/shared/json";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
@@ -29,11 +30,14 @@ import { runRulesOnEvents } from "../../src/engine/rules";
 import { Working } from "../../src/engine/working";
 import { Rig } from "../support/rig";
 import { HOME, POV, recordFix } from "../support/tools";
-import { answer, applied, call, castChat, castEnv, type CastTurn, castTurn, guardModel, ILSE, JOSS, MARA, noModelCalls, OKORO, refusal } from "./harness-cast-kit";
+import { answer, applied, call, castChat, castEnv, type CastTurn, castTurn, guardModel, ILSE, JOSS, MARA, memoryStory, noModelCalls, OKORO, refusal } from "./harness-cast-kit";
 import { AUTHOR, beginTurn, mount, playOn } from "./harness-driver";
 
 /** A registry text as shipped, filled: what a tool answers when the user changed nothing. */
 const note = (id: string, vars: Record<string, string> = {}): string => renderPrompt(id, {}, vars);
+
+/** Joss and Ilse cast as principals: each has an agent of their own. */
+const PRINCIPALS = { cast: [{ entity: JOSS, standing: "principal" as const }, { entity: ILSE, standing: "principal" as const }] };
 
 const person = (id: string, name: string, here: boolean): JsonObject => ({ id, kind: "character", name, tier: "background", fields: here ? { place: HOME } : {}, relations: [] });
 
@@ -159,8 +163,8 @@ describe("a world without combat rules", () => {
     expect(await refusal(author, "fight_start", { foes: ["Joss"] })).toBe(none);
     expect(await refusal(author, "fight_round", { tactics: true })).toBe(none);
     expect(await refusal(author, "fight_end")).toBe(none);
-    const mind = castEnv(rig, chatId, await castTurn(rig, chatId, { main: false }), HARNESS_AGENT.character);
-    expect(await refusal(mind, "mind_fight", { who: "Joss" })).toBe(note(PLAY_NOTE.mindNoTurn, { name: "Joss" }));
+    const mind = castEnv(rig, chatId, await castTurn(rig, chatId, { main: false, story: memoryStory(PRINCIPALS) }), HARNESS_AGENT.character, null, JOSS);
+    expect(await refusal(mind, "mind_fight")).toBe(note(PLAY_NOTE.mindNoTurn, { name: "Joss" }));
     expect(turn.changes).toEqual([]);
     noModelCalls(rig);
   });
@@ -330,20 +334,20 @@ describe("a fighter's own mind", () => {
   test("mind_fight answers the fight as that fighter perceives it and records its choice, which the round then plays", async () => {
     const { rig, chatId, turn, author, fight } = await started("joss");
     const name = fight.player.name;
-    const theirs = await castTurn(rig, chatId, { main: false });
-    const mind = castEnv(rig, chatId, theirs, HARNESS_AGENT.character);
+    const theirs = await castTurn(rig, chatId, { main: false, story: memoryStory(PRINCIPALS) });
+    const mind = castEnv(rig, chatId, theirs, HARNESS_AGENT.character, null, JOSS);
 
-    const seen = (await answer(mind, "mind_fight", { who: "Joss" })) as unknown as Seen;
+    const seen = (await answer(mind, "mind_fight")) as unknown as Seen;
     expect(seen).toMatchObject({ you: { id: JOSS, name: "Joss" }, round: 1, fight: { round: 1, turn: "you", yours: true }, note: note(PLAY_NOTE.mindChoose) });
     expect(seen.options).toEqual(fight.due[0]?.options);
     // Their own health exactly; the player character's only as a look tells it.
     const rows = seen.fight.order;
     expect(rows.find((f) => f.id === JOSS)).toMatchObject({ name: "You", you: true, hp: fight.encounter.order.find((f) => f.id === JOSS)?.hp ?? null });
     expect(rows.find((f) => f.id === POV)).toMatchObject({ name, you: false, hp: null, wound: "unhurt" });
-    expect([theirs.character, theirs.changes]).toEqual([JOSS, []]);
+    expect(theirs.changes).toEqual([]);
 
-    expect(await refusal(mind, "mind_fight", { who: "Joss", choice: "fly@" })).toBe(note(PLAY_NOTE.badChoice, { name: "Joss", choice: "fly@", options: `attack@${POV}, end_turn@, total_defense@` }));
-    const chose = await answer(mind, "mind_fight", { who: "Joss", choice: "total_defense@" });
+    expect(await refusal(mind, "mind_fight", { choice: "fly@" })).toBe(note(PLAY_NOTE.badChoice, { name: "Joss", choice: "fly@", options: `attack@${POV}, end_turn@, total_defense@` }));
+    const chose = await answer(mind, "mind_fight", { choice: "total_defense@" });
     expect(chose).toEqual({ decided: { choice: "total_defense@", label: "Total defense", round: 1, lands: note(WRITE_NOTE.staged) }, note: note(PLAY_NOTE.mindDecided) });
     const key = `combat:${String(dataOf(turn.changes[0]?.events.at(-1)).encounter)}:1:${JOSS}`;
     expect(theirs.changes).toEqual([{ key: theirs.changes[0]?.key ?? "", changeType: "mind", events: [{ type: "combat.decision", data: { key, choice: "total_defense@" } }], lines: [note(PLAY_NOTE.decided, { name: "Joss", round: "1", choice: "Total defense" })] }]);
@@ -357,13 +361,15 @@ describe("a fighter's own mind", () => {
     expect(turn.changes.at(-1)?.events).toEqual(classic.events);
     expect([round.happened, dataOf(turn.changes.at(-1)?.events[1]).action]).toEqual([classic.lines, "total_defense"]);
 
-    // The tool is a person's own: the author can't call it, no one decides for the player character or for someone else, and only a fighter has a turn.
-    expect(await refusal(author, "mind_fight", { who: "Joss" })).toBe(note(HARNESS_NOTE.notCharacter, { tool: "mind_fight" }));
-    expect(await refusal(mind, "mind_fight", {})).toContain("mind_fight needs who");
-    expect(await refusal(mind, "mind_fight", { who: name })).toBe(note(HARNESS_NOTE.playerMind, { name }));
-    expect(await refusal(mind, "mind_fight", { who: "Mara" })).toBe(note(HARNESS_NOTE.otherMind, { self: "Joss", other: "Mara", tool: "mind_fight" }));
-    const ilse = castEnv(rig, chatId, await castTurn(rig, chatId, { main: false }), HARNESS_AGENT.character);
-    expect(await refusal(ilse, "mind_fight", { who: "Ilse" })).toBe(note(PLAY_NOTE.mindNoTurn, { name: "Ilse" }));
+    // The tool is a principal's own, and who they are is the call's `as`: the author can't call it, an agent started as no one or as someone not cast a principal is refused, the player's character fights as the player plays them, and only a fighter has a turn.
+    expect(await refusal(author, "mind_fight")).toBe(note(MINDS_NOTE.onlyCharacter, { tool: "mind_fight" }));
+    expect(await refusal(castEnv(rig, chatId, theirs, HARNESS_AGENT.character), "mind_fight")).toBe(note(MINDS_NOTE.noOne, { tool: "mind_fight" }));
+    expect(await refusal(castEnv(rig, chatId, theirs, HARNESS_AGENT.character, null, MARA), "mind_fight")).toBe(note(MINDS_NOTE.notPrincipal, { name: "Mara", standing: note(MINDS_NOTE.standingExtra) }));
+    expect(await refusal(castEnv(rig, chatId, theirs, HARNESS_AGENT.character, null, POV), "mind_fight")).toBe(note(MINDS_NOTE.playerNoMind, { name }));
+    const directed = await castTurn(rig, chatId, { main: false, directed: true, story: memoryStory(PRINCIPALS) });
+    expect(await refusal(castEnv(rig, chatId, directed, HARNESS_AGENT.character, null, "player"), "mind_fight")).toBe(note(MINDS_NOTE.playerFights));
+    const ilse = castEnv(rig, chatId, await castTurn(rig, chatId, { main: false, story: memoryStory(PRINCIPALS) }), HARNESS_AGENT.character, null, ILSE);
+    expect(await refusal(ilse, "mind_fight")).toBe(note(PLAY_NOTE.mindNoTurn, { name: "Ilse" }));
     noModelCalls(rig);
   });
 });

@@ -8,211 +8,21 @@
 // call of its own.
 
 import { describe, expect, test } from "bun:test";
-import { HARNESS_MIND_REASON } from "../../src/backend/agents/tools/harness-tools/minds";
 import type { ToolWriter } from "../../src/backend/agents/tools/writer";
 import { renderPrompt } from "../../src/backend/prompts";
 import { WRITE_NOTE } from "../../src/shared/agent-tools-write";
 import { HARNESS_AGENT, HARNESS_NOTE } from "../../src/shared/harness-texts";
 import type { JsonObject } from "../../src/shared/json";
-import { MINDS_EVENTS } from "../../src/shared/minds";
 import { ELAPSED_TEXT_IDS } from "../../src/shared/prompts";
 import { TIME_LIMITS } from "../../src/engine/time-limits";
-import { readCharacter, readKnowledge } from "../../src/packs/minds/core/state";
-import { stateOf } from "../support/mind-chat";
-import { HOME, POV, recordFix } from "../support/tools";
+import { HOME, POV } from "../support/tools";
 import { answer, applied, call, castChat, castEnv, castTurn, JOSS, MARA, noModelCalls, refusal } from "./harness-cast-kit";
 import { type Agent, AUTHOR, BRANN, beginJob, beginTurn, harnessChat, noModelCalls as noModelCallsOf, stateOf as foldOf } from "./harness-driver";
 
 /** A registry text as shipped, filled: what a tool answers when the user changed nothing. */
 const note = (id: string, vars: Record<string, string> = {}): string => renderPrompt(id, {}, vars);
 
-const DECISION: JsonObject = { who: "Mara", monologue: "He is up early. I wonder why.", depiction: "Mara looks up from her cup.", intent: "Ask what he is doing today.", reactions: ["if asked about the rent, changes the subject"], mood: "curious" };
 const REPLY = { messageId: "m-reply", text: "Mara laughs and says she will bring the ladder back at noon." };
-const CLAIM = "Joss owes Mara two months of rent.";
-const RENT: JsonObject = { ref: "n1", claim: CLAIM, matters: "Mara means to collect, and Joss is hiding it." };
-
-describe("a person's own mind", () => {
-  test("a character's agent reads as the one person it is, and its decision is staged as the mind step's own event", async () => {
-    const { rig, chatId } = await castChat();
-    const turn = await castTurn(rig, chatId, { main: false });
-    const mind = castEnv(rig, chatId, turn, HARNESS_AGENT.character);
-
-    const seen = await call(mind, "mind_view", { who: "Mara" });
-    expect(seen.error).toBeUndefined();
-    expect(seen.text.startsWith("You are Mara.")).toBe(true);
-    expect(seen.text).toContain(turn.said.user);
-    // Its first call made it Mara's mind; reading stages nothing.
-    expect([turn.character, turn.changes]).toEqual([MARA, []]);
-
-    const decided = await answer(mind, "mind_decide", DECISION);
-    expect(decided.decided).toMatchObject({ who: { id: MARA, name: "Mara" }, intent: "Ask what he is doing today.", mood: "curious", lands: note(WRITE_NOTE.staged) });
-    expect(turn.changes.map((c) => [c.changeType, c.time, c.proposal, c.events.map((e) => e.type), c.lines])).toEqual([["mind", undefined, undefined, [MINDS_EVENTS.mind], ["Mara's mind, at Near fidelity, means to: Ask what he is doing today."]]]);
-    expect(turn.changes[0]?.events[0]).toMatchObject({ data: { entity: MARA, place: HOME, moment: "turn", reason: HARNESS_MIND_REASON, monologue: "He is up early. I wonder why.", depiction: "Mara looks up from her cup.", reactions: ["if asked about the rent, changes the subject"], interrupt: null } });
-    // The engine's reducer takes it: Mara's mind is the one the call gave.
-    const after = await applied(rig, chatId, turn.changes[0]?.events ?? []);
-    expect(readCharacter(after.state, MARA).mind).toMatchObject({ intent: "Ask what he is doing today.", mood: "curious" });
-    expect(readCharacter(after.before, MARA).mind).toBeNull();
-
-    // The same decision again is the one staged; a moment inside skipped time may say it would break in.
-    await answer(mind, "mind_decide", DECISION);
-    expect(turn.changes.length).toBe(1);
-    await answer(mind, "mind_decide", { who: MARA, intent: "Go and knock on his door.", moment: "beat", interrupt: { reason: "The rent is due today." } });
-    expect(turn.changes[1]?.events[0]).toMatchObject({ data: { entity: MARA, moment: "beat", interrupt: { reason: "The rent is due today." } } });
-    noModelCalls(rig);
-  });
-
-  test("a mind decides for itself alone: not for another person, not for the player's character, and no other agent decides for it", async () => {
-    const { rig, chatId } = await castChat();
-    const turn = await castTurn(rig, chatId, { main: false });
-    const mind = castEnv(rig, chatId, turn, HARNESS_AGENT.character);
-    await answer(mind, "mind_decide", DECISION);
-
-    // Mara's agent names Joss: refused with whose mind it is, and nothing of Joss's is staged.
-    for (const tool of ["mind_decide", "mind_view", "mind_remember"]) expect(await refusal(mind, tool, { who: "Joss", intent: "Leave without paying." })).toBe(note(HARNESS_NOTE.otherMind, { self: "Mara", other: "Joss", tool }));
-    expect<unknown>(turn.changes.map((c) => c.events.map((e) => ("data" in e ? e.data.entity : null)))).toEqual([[MARA]]);
-
-    // The author knows what no one person does, so it writes no mind itself; nor does any agent but a character.
-    for (const role of [HARNESS_AGENT.author, HARNESS_AGENT.gm, HARNESS_AGENT.knowledge, HARNESS_AGENT.chronicler, "someone_else"]) {
-      const other = await castTurn(rig, chatId, { main: role === HARNESS_AGENT.author });
-      expect(await refusal(castEnv(rig, chatId, other, role), "mind_decide", DECISION)).toBe(note(HARNESS_NOTE.notCharacter, { tool: "mind_decide" }));
-      expect([other.character, other.changes]).toEqual([null, []]);
-    }
-
-    // The player decides for their own character.
-    const fresh = await castTurn(rig, chatId, { main: false });
-    const pov = (await stateOf(rig, chatId)).state.entities[POV]?.name ?? "";
-    expect(await refusal(castEnv(rig, chatId, fresh, HARNESS_AGENT.character), "mind_decide", { ...DECISION, who: POV })).toBe(note(HARNESS_NOTE.playerMind, { name: pov }));
-    expect(fresh.character).toBeNull();
-
-    // What a call got wrong is said so that the next call can fix it.
-    const again = castEnv(rig, chatId, await castTurn(rig, chatId, { main: false }), HARNESS_AGENT.character);
-    expect(await refusal(again, "mind_decide", { who: "Mara" })).toBe(note(HARNESS_NOTE.mindEmpty));
-    expect(await refusal(again, "mind_decide", { ...DECISION, moment: "dusk" })).toContain("turn, beat");
-    expect(await refusal(again, "mind_decide", { intent: "Wait." })).toContain("mind_decide needs who");
-    expect(await refusal(again, "mind_decide", { ...DECISION, who: "Nobody By That Name" })).toContain("Nobody By That Name");
-
-    // Minds switched off in Settings: nothing is recorded, and the mind is told to answer in words.
-    const settings = (await castTurn(rig, chatId)).settings;
-    const off = await castTurn(rig, chatId, { main: false, settings: { ...settings, minds: { ...settings.minds, enabled: false } } });
-    expect(await refusal(castEnv(rig, chatId, off, HARNESS_AGENT.character), "mind_decide", DECISION)).toBe(note(HARNESS_NOTE.mindsOff));
-    // Outside a harness turn there is nothing to stage into.
-    expect(await refusal(castEnv(rig, chatId, null, HARNESS_AGENT.character), "mind_decide", DECISION)).toBe(note(HARNESS_NOTE.noTurn));
-    noModelCalls(rig);
-  });
-
-  test("after the reply it remembers the turn as written, and is told what was left out and why", async () => {
-    const { rig, chatId } = await castChat();
-    const turn = await castTurn(rig, chatId, { main: false, reply: REPLY });
-    const mind = castEnv(rig, chatId, turn, HARNESS_AGENT.character);
-
-    // Once the reply is written, what it reads is that turn as written.
-    const seen = await call(mind, "mind_view", { who: "Mara" });
-    expect(seen.text).toContain("## The turn just written");
-    expect(seen.text).toContain(REPLY.text);
-
-    const remembered = await answer(mind, "mind_remember", {
-      who: MARA,
-      notes: [{ text: "He asked who was in today.", salience: 2 }, { text: "" }],
-      commitments: [{ kind: "promise", with: ["Joss"], text: "Bring the ladder back at noon." }],
-      plans: [{ what: "Return the ladder", kind: "errand", when: { from: "12:00" } }, { what: "No time given", when: { from: "whenever" } }],
-      told: [{ to: ["Joss"], what: "The ladder comes back at noon." }],
-      resolved: [{ id: "no-such-commitment", status: "kept" }],
-    });
-    // After the reply no turn holds a change: it is written as it is made, and the answer says so.
-    expect(remembered.remembered).toEqual({ who: { id: MARA, name: "Mara" }, notes: 1, commitments: 1, resolved: 0, plans: 1, told: 1, summary: false, lands: note(HARNESS_NOTE.recorded) });
-    expect(remembered.leftOut).toEqual([note(HARNESS_NOTE.leftWordless, { count: "1", list: "notes" }), note(HARNESS_NOTE.leftPlans, { count: "1" }), note(HARNESS_NOTE.leftResolved, { count: "1" })]);
-    expect(turn.changes.map((c) => [c.changeType, c.events.map((e) => e.type)])).toEqual([["mind", [MINDS_EVENTS.memory]]]);
-    const after = await applied(rig, chatId, turn.changes[0]?.events ?? []);
-    const kept = readCharacter(after.state, MARA);
-    expect([kept.notes.map((n) => n.text), kept.commitments.map((c) => [c.kind, c.with, c.text]), kept.plans.map((p) => p.what)]).toEqual([["He asked who was in today."], [["promise", [JOSS], "Bring the ladder back at noon."]], ["Return the ladder"]]);
-
-    // Nothing it can keep is no memory: the mind is told why, and nothing is staged.
-    const empty = await castTurn(rig, chatId, { main: false, reply: REPLY });
-    expect(await refusal(castEnv(rig, chatId, empty, HARNESS_AGENT.character), "mind_remember", { who: MARA, notes: [{ text: "" }] })).toBe(note(HARNESS_NOTE.memoryEmpty, { why: note(HARNESS_NOTE.leftWordless, { count: "1", list: "notes" }) }));
-    expect(empty.changes).toEqual([]);
-
-    // While the chat tracks who knows what, telling is the knowledge agent's to record.
-    const knowing = await castTurn(rig, chatId, { main: false, reply: REPLY, knowing: true });
-    const told = await answer(castEnv(rig, chatId, knowing, HARNESS_AGENT.character), "mind_remember", { who: MARA, notes: [{ text: "He asked who was in today." }], told: [{ to: ["Joss"], what: "The ladder comes back at noon." }] });
-    expect(told.leftOut).toEqual([note(HARNESS_NOTE.leftToldKnowing)]);
-    expect(knowing.changes[0]?.events[0]).toMatchObject({ data: { told: [] } });
-    noModelCalls(rig);
-  });
-});
-
-describe("who knows what", () => {
-  test("the scene is the knowledge step's own context, and an answer is checked as the step's is: what holds is staged, the player character's own as a change its mode decides", async () => {
-    const { rig, chatId } = await castChat();
-    const turn = await castTurn(rig, chatId, { main: false, knowing: true });
-    const agent = castEnv(rig, chatId, turn, HARNESS_AGENT.knowledge);
-
-    const scene = await call(agent, "knowledge_scene", {});
-    expect(scene.error).toBeUndefined();
-    for (const part of ["## What happened this turn", turn.said.user, "## Who could perceive it", "- Mara (id: mara): there throughout", "What this turn can still record: 3 new facts"]) expect(scene.text).toContain(part);
-    expect(await refusal(agent, "knowledge_scene", { who: ["Okoro"] })).toBe(note(HARNESS_NOTE.knowledgeNotThere, { name: "Okoro" }));
-
-    const recorded = await answer(agent, "knowledge_infer", { facts: [RENT], learned: [{ fact: "n1", how: "witnessed" }] });
-    const lines = recorded.recorded as { who: string[]; claim: string; how: string; lands: string }[];
-    expect(lines.map((l) => [l.claim, l.how, l.lands])).toEqual([[CLAIM, "witnessed", note(WRITE_NOTE.staged)], [CLAIM, "witnessed", note(WRITE_NOTE.staged)]]);
-    expect(lines[0]?.who).toContain("Mara");
-    expect(lines[1]?.who.length).toBe(1);
-    // Everyone else's learning is one `learn` change of the engine's events; the player character's own carries the proposal its channel takes, for the review card.
-    expect(turn.changes.map((c) => [c.changeType, c.proposal !== undefined, c.events.map((e) => e.type)])).toEqual([["learn", false, [MINDS_EVENTS.fact, MINDS_EVENTS.learn]], ["learn", true, [MINDS_EVENTS.fact, MINDS_EVENTS.learn]]]);
-    expect(turn.changes[1]?.proposal).toMatchObject({ type: "learn", claim: CLAIM, learn: { who: [POV] } });
-    // Both hold when they land in staging order: the second names the same fact, which is recorded once.
-    const after = await applied(rig, chatId, turn.changes.flatMap((c) => c.events));
-    const known = readKnowledge(after.state);
-    expect(Object.values(known.facts).map((f) => f.claim)).toEqual([CLAIM]);
-    expect([MARA, JOSS, POV].map((id) => Object.keys(known.holdings[id] ?? {}).length)).toEqual([1, 1, 1]);
-    noModelCalls(rig);
-  });
-
-  test("what the knowledge step's check refuses is refused, with the engine's reason, and nothing of it is staged", async () => {
-    const { rig, chatId } = await castChat();
-    const turn = await castTurn(rig, chatId, { main: false, knowing: true });
-    const agent = castEnv(rig, chatId, turn, HARNESS_AGENT.knowledge);
-    const unlearned = `- ${note(HARNESS_NOTE.knowledgeUnlearned, { claim: CLAIM })}`;
-    const refusedFor = (...reasons: string[]): string => note(HARNESS_NOTE.knowledgeRefused, { refused: reasons.join("\n") });
-
-    // A teller who doesn't hold what they tell; an inference from nothing its person holds; the player character's own inference; a fact that doesn't say why it matters; a fact no one learned.
-    expect(await refusal(agent, "knowledge_infer", { facts: [RENT], learned: [{ fact: "n1", how: "told", by: "Okoro", who: ["Mara"] }] })).toBe(refusedFor(`- Okoro told what they don't hold: "${CLAIM}"`, unlearned));
-    expect(await refusal(agent, "knowledge_infer", { facts: [RENT], inferred: [{ who: "Mara", fact: "n1", confidence: 0.8, evidence: ["nothing-held"] }] })).toBe(refusedFor(`- Mara infers from what they neither hold nor witnessed (nothing-held): "${CLAIM}"`, unlearned));
-    expect(await refusal(agent, "knowledge_infer", { facts: [RENT], inferred: [{ who: POV, fact: "n1", confidence: 0.8, evidence: ["n1"] }] })).toContain("or by the player character");
-    expect(await refusal(agent, "knowledge_infer", { facts: [{ ref: "n1", claim: CLAIM }], learned: [{ fact: "n1", how: "witnessed" }] })).toContain("a new fact that doesn't say why it matters, or to whom");
-    expect(await refusal(agent, "knowledge_infer", { facts: [RENT] })).toBe(refusedFor(unlearned));
-    expect(await refusal(agent, "knowledge_infer", {})).toBe(note(HARNESS_NOTE.knowledgeNothing));
-    expect(turn.changes).toEqual([]);
-
-    // A chat that doesn't track who knows what has nothing to read and records nothing.
-    const off = await castTurn(rig, chatId, { main: false });
-    for (const tool of ["knowledge_scene", "knowledge_infer"]) expect(await refusal(castEnv(rig, chatId, off, HARNESS_AGENT.knowledge), tool, { facts: [RENT], learned: [{ fact: "n1", how: "witnessed" }] })).toBe(note(HARNESS_NOTE.knowledgeOff));
-    // Before the reply, in a turn that answers no message of the player's, there is nothing to record a learning against.
-    const unanswered = await castTurn(rig, chatId, { main: false, knowing: true, said: { messageId: null, user: "", before: "Morning." } });
-    expect(await refusal(castEnv(rig, chatId, unanswered, HARNESS_AGENT.knowledge), "knowledge_infer", { facts: [RENT], learned: [{ fact: "n1", how: "witnessed" }] })).toBe(note(HARNESS_NOTE.knowledgeNoMessage));
-    // A change type the user set to Never is refused where it is staged, and the answer carries why.
-    const never = await castTurn(rig, chatId, { main: false, knowing: true, refuse: { refused: true, code: "never", reason: "Learning is set to Never." } });
-    expect(await refusal(castEnv(rig, chatId, never, HARNESS_AGENT.knowledge), "knowledge_infer", { who: ["Mara", "Joss"], facts: [RENT], learned: [{ fact: "n1", how: "told", by: "Joss", who: ["Mara"] }] })).toBe(refusedFor("- Learning is set to Never."));
-    noModelCalls(rig);
-  });
-
-  test("a turn's limits hold across calls: what it already recorded counts, and what someone already holds is not recorded again", async () => {
-    const { rig, chatId } = await castChat();
-    const turn = await castTurn(rig, chatId, { main: false, knowing: true });
-    const agent = castEnv(rig, chatId, turn, HARNESS_AGENT.knowledge);
-    const told = { who: ["Mara", "Joss"], facts: [RENT], learned: [{ fact: "n1", how: "told", by: "Joss", who: ["Mara"], keptFrom: ["everyone"] }] };
-    await answer(agent, "knowledge_infer", told);
-    // Kept from everyone, as the one word in the list says.
-    expect(turn.changes[0]?.events.at(-1)).toMatchObject({ type: MINDS_EVENTS.learn, data: { who: [MARA], by: JOSS, how: "told", keptFrom: "everyone" } });
-    // Once the change is in the state the tools read, the turn has spent it: one fact and one learning fewer.
-    await recordFix(rig, chatId, "staged-learning", turn.changes[0]?.events ?? []);
-    const scene = await call(agent, "knowledge_scene", { who: ["Mara"] });
-    expect(scene.text).toContain("What this turn can still record: 2 new facts");
-    expect(scene.text).toContain("and 23 learnings");
-    expect(scene.text).toContain("Joss owes Mara two months of rent. (told by Joss); keeps it from everyone");
-    expect(await refusal(agent, "knowledge_infer", told)).toBe(note(HARNESS_NOTE.knowledgeHeld));
-    noModelCalls(rig);
-  });
-});
 
 // The engine's dice (`checks_stakes`, `action_play`) have a file of their own: `harness-cast-play.test.ts`.
 
@@ -266,12 +76,12 @@ describe("time", () => {
     expect((await answer(castEnv(rig, chatId, brief), "time_pass", { minutes: 60 })).passed).toMatchObject({ minutes: 60 });
     // In a turn the time is the author's alone: an agent it started tells it how long things took.
     const other = await castTurn(rig, chatId, { main: false });
-    for (const role of [HARNESS_AGENT.character, HARNESS_AGENT.gm, HARNESS_AGENT.chronicler, HARNESS_AGENT.author]) expect(await refusal(castEnv(rig, chatId, other, role), "time_pass", { minutes: 5 })).toBe(note(HARNESS_NOTE.timeAuthor));
+    for (const role of [HARNESS_AGENT.character, HARNESS_AGENT.gm, HARNESS_AGENT.historian, HARNESS_AGENT.author]) expect(await refusal(castEnv(rig, chatId, other, role), "time_pass", { minutes: 5 })).toBe(note(HARNESS_NOTE.timeAuthor));
     expect(await refusal(castEnv(rig, chatId, null), "time_pass", { minutes: 5 })).toBe(note(HARNESS_NOTE.noTurn));
     // Once the reply is written the turn's time is settled: no one passes it then, a job's agent or the author itself, whatever tier it holds.
     const after = await castTurn(rig, chatId, { main: false, reply: REPLY, tier: "gm" });
     const still = await castTurn(rig, chatId, { main: true, reply: REPLY });
-    for (const env of [castEnv(rig, chatId, after, HARNESS_AGENT.chronicler), castEnv(rig, chatId, after, HARNESS_AGENT.gm), castEnv(rig, chatId, still)]) expect(await refusal(env, "time_pass", { minutes: 5 })).toBe(note(HARNESS_NOTE.timeAfter));
+    for (const env of [castEnv(rig, chatId, after, HARNESS_AGENT.historian), castEnv(rig, chatId, after, HARNESS_AGENT.gm), castEnv(rig, chatId, still)]) expect(await refusal(env, "time_pass", { minutes: 5 })).toBe(note(HARNESS_NOTE.timeAfter));
     expect([turn.changes, other.changes, after.changes, still.changes]).toEqual([[], [], [], []]);
 
     // The player's mode for time passing decides a span: Confirm sends it to the review card, Never refuses it.
@@ -331,7 +141,7 @@ describe("time", () => {
 
     // After the reply no one passes time with it: a job's agent is refused, whichever it is, and so is the author's own handle. The clock stands.
     const job = await beginJob(rig, turn, "job-after");
-    for (const agent of [GM, { id: "chronicler-1", role: HARNESS_AGENT.chronicler }]) expect((await job.call(agent, "time_pass", { minutes: 5 })).error).toBe(true);
+    for (const agent of [GM, { id: "historian-1", role: HARNESS_AGENT.historian }]) expect((await job.call(agent, "time_pass", { minutes: 5 })).error).toBe(true);
     expect((await turn.call(AUTHOR, "time_pass", { minutes: 5 })).error).toBe(true);
     expect((await clock()) - start).toBe(30);
     noModelCallsOf(rig);
@@ -349,7 +159,7 @@ describe("the turn's own tools", () => {
     expect(turn.committed).toEqual(["before the reply", null]);
 
     const other = await castTurn(rig, chatId, { main: false });
-    for (const role of [HARNESS_AGENT.character, HARNESS_AGENT.gm, HARNESS_AGENT.knowledge, HARNESS_AGENT.chronicler]) expect(await refusal(castEnv(rig, chatId, other, role), "commit")).toBe(note(HARNESS_NOTE.commitAuthor));
+    for (const role of [HARNESS_AGENT.character, HARNESS_AGENT.gm, HARNESS_AGENT.historian]) expect(await refusal(castEnv(rig, chatId, other, role), "commit")).toBe(note(HARNESS_NOTE.commitAuthor));
     // After the reply each change is written as it is made: nothing waits.
     const after = await castTurn(rig, chatId, { main: false, reply: REPLY });
     expect(await refusal(castEnv(rig, chatId, after), "commit")).toBe(note(HARNESS_NOTE.notTurn));
@@ -366,20 +176,20 @@ describe("the turn's own tools", () => {
     const { rig, chatId } = await castChat();
     const turn = await castTurn(rig, chatId);
     const author = castEnv(rig, chatId, turn);
-    expect(await answer(author, "grant_writes", { to: HARNESS_AGENT.chronicler, tier: "gm" })).toEqual({ granted: { to: HARNESS_AGENT.chronicler, tier: "gm" } });
-    expect(turn.granted).toEqual([[HARNESS_AGENT.chronicler, "gm"]]);
+    expect(await answer(author, "grant_writes", { to: HARNESS_AGENT.historian, tier: "gm" })).toEqual({ granted: { to: HARNESS_AGENT.historian, tier: "gm" } });
+    expect(turn.granted).toEqual([[HARNESS_AGENT.historian, "gm"]]);
     // A grant opens the story's changes or the game master's edits: every agent reads from the start, so `read` is no tier to grant.
-    expect(await refusal(author, "grant_writes", { to: HARNESS_AGENT.chronicler, tier: "admin" })).toContain("story, gm");
-    expect(await refusal(author, "grant_writes", { to: HARNESS_AGENT.chronicler, tier: "read" })).toContain("story, gm");
+    expect(await refusal(author, "grant_writes", { to: HARNESS_AGENT.historian, tier: "admin" })).toContain("story, gm");
+    expect(await refusal(author, "grant_writes", { to: HARNESS_AGENT.historian, tier: "read" })).toContain("story, gm");
     expect(await refusal(author, "grant_writes", { tier: "gm" })).toContain("grant_writes needs to");
     expect(await refusal(author, "grant_writes", { to: "nobody", tier: "gm" })).toBe(note(HARNESS_NOTE.grantNone, { to: "nobody" }));
     // Whom a grant can't reach is the turn's to say, and its reason is the tool's answer.
-    const held = castEnv(rig, chatId, { ...turn, grant: () => ({ refused: true, code: "not_granted", reason: "the chronicler was started by an agent that holds less" }) });
-    expect(await refusal(held, "grant_writes", { to: HARNESS_AGENT.chronicler, tier: "gm" })).toContain("started by an agent that holds less");
+    const held = castEnv(rig, chatId, { ...turn, grant: () => ({ refused: true, code: "not_granted", reason: "the historian was started by an agent that holds less" }) });
+    expect(await refusal(held, "grant_writes", { to: HARNESS_AGENT.historian, tier: "gm" })).toContain("started by an agent that holds less");
     const other = await castTurn(rig, chatId, { main: false });
-    expect(await refusal(castEnv(rig, chatId, other, HARNESS_AGENT.chronicler), "grant_writes", { to: HARNESS_AGENT.chronicler, tier: "gm" })).toBe(note(HARNESS_NOTE.grantAuthor));
+    expect(await refusal(castEnv(rig, chatId, other, HARNESS_AGENT.historian), "grant_writes", { to: HARNESS_AGENT.historian, tier: "gm" })).toBe(note(HARNESS_NOTE.grantAuthor));
     const after = await castTurn(rig, chatId, { main: false, reply: REPLY });
-    expect(await refusal(castEnv(rig, chatId, after), "grant_writes", { to: HARNESS_AGENT.chronicler, tier: "gm" })).toBe(note(HARNESS_NOTE.grantAuthor));
+    expect(await refusal(castEnv(rig, chatId, after), "grant_writes", { to: HARNESS_AGENT.historian, tier: "gm" })).toBe(note(HARNESS_NOTE.grantAuthor));
     expect([turn.granted.length, other.granted, after.granted]).toEqual([1, [], []]);
     noModelCalls(rig);
   });
@@ -421,7 +231,7 @@ describe("the old engines' tools through the harness", () => {
     const never = await castTurn(rig, chatId, { refuse: { refused: true, code: "never", reason: "Walk-on people are set to Never." } });
     expect(JSON.parse(await refusal(castEnv(rig, chatId, never), "person_add", { name: "Brann" }))).toEqual({ refused: { code: "never", reason: "Walk-on people are set to Never." } });
     const written = await castTurn(rig, chatId, { main: false, reply: REPLY, tier: "story" });
-    expect((await answer(castEnv(rig, chatId, written, HARNESS_AGENT.chronicler), "person_add", { name: "Brann" })).staged).toMatchObject({ lands: note(HARNESS_NOTE.recorded) });
+    expect((await answer(castEnv(rig, chatId, written, HARNESS_AGENT.historian), "person_add", { name: "Brann" })).staged).toMatchObject({ lands: note(HARNESS_NOTE.recorded) });
     // A place made in play for someone to be put in is its channel's change too.
     expect((await answer(author, "place_make", { name: "The back room", parent: HOME, as: "room", why: "Mara steps into it.", entity: "Mara" })).staged).toMatchObject({ changeType: "place_make" });
     expect(turn.changes[2]).toMatchObject({ changeType: "place_make", proposal: { type: "place_make", entity: MARA } });
@@ -445,7 +255,7 @@ describe("the old engines' tools through the harness", () => {
     const move = { entity: JOSS, to: HOME };
     const open = await answer(castEnv(rig, chatId, await castTurn(rig, chatId), HARNESS_AGENT.author, writer), "gm_move", move);
     expect(open).toEqual({ staged: { key: "k", changeType: "gm_edit", mode: "auto", lines: ["Joss moves"], lands: note(WRITE_NOTE.staged) } });
-    const closed = await answer(castEnv(rig, chatId, await castTurn(rig, chatId, { main: false, reply: REPLY }), HARNESS_AGENT.chronicler, writer), "gm_move", move);
+    const closed = await answer(castEnv(rig, chatId, await castTurn(rig, chatId, { main: false, reply: REPLY }), HARNESS_AGENT.historian, writer), "gm_move", move);
     expect(closed).toEqual({ staged: { key: "k", changeType: "gm_edit", mode: "auto", lines: ["Joss moves"], lands: note(HARNESS_NOTE.recorded) } });
     expect(ops.length).toBe(2);
     // An agent with no writer only reads, on the harness as before.

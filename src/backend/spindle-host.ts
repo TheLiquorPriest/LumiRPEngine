@@ -34,6 +34,8 @@ import type {
   QuietToolCall,
   SwipeAction,
   WorldInfoCandidate,
+  HostPromptValues,
+  HostPromptVariable,
 } from "./host";
 
 declare const spindle: HostSpindleAPI;
@@ -94,6 +96,28 @@ function hostCapabilities(): HostCapabilities {
 /** A World Info entry as the port reads it. */
 function bookEntryOf(e: WorldBookEntryDTO): HostBookEntry {
   return { id: e.id, bookId: e.world_book_id, comment: e.comment, content: e.content, keys: [...e.key], secondaryKeys: [...(e.keysecondary ?? [])], disabled: e.disabled, constant: e.constant, position: e.position, depth: e.depth, role: e.role, order: e.order_value, extensions: toJsonObject(e.extensions) };
+}
+
+const VARIABLE_TYPES: Readonly<Record<HostPromptVariable["type"], true>> = { text: true, textarea: true, number: true, slider: true, range: true, select: true, switch: true, multiselect: true };
+
+function isVariableType(type: string): type is HostPromptVariable["type"] {
+  return Object.hasOwn(VARIABLE_TYPES, type);
+}
+
+/** A block's prompt variables as the port reads them: each with a name and a kind Lumiverse has, a choice's options by id and value. */
+function promptVariablesOf(raw: unknown): HostPromptVariable[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((v): HostPromptVariable[] => {
+    if (!isRecord(v) || typeof v.name !== "string" || v.name === "" || typeof v.type !== "string" || !isVariableType(v.type)) return [];
+    const options = Array.isArray(v.options) ? v.options.flatMap((o) => (isRecord(o) && typeof o.id === "string" && typeof o.value === "string" ? [{ id: o.id, value: o.value }] : [])) : undefined;
+    return [{ name: v.name, type: v.type, defaultValue: v.defaultValue, ...(typeof v.min === "number" ? { min: v.min } : {}), ...(typeof v.max === "number" ? { max: v.max } : {}), ...(options ? { options } : {}), ...(typeof v.separator === "string" ? { separator: v.separator } : {}) }];
+  });
+}
+
+/** The values a preset's user set for its blocks' variables (`metadata.promptVariables`), by block id and name. */
+function promptValuesOf(metadata: unknown): HostPromptValues {
+  const raw = isRecord(metadata) && isRecord(metadata.promptVariables) ? metadata.promptVariables : {};
+  return Object.fromEntries(Object.entries(raw).flatMap(([id, bucket]) => (isRecord(bucket) ? [[id, { ...bucket }]] : [])));
 }
 
 /** A host message (`getMessages` row or event DTO). `spindle_metadata` arrives as `metadata` or inside `extra`. */
@@ -450,6 +474,9 @@ export function createSpindleHost(): HostPort {
         }
         return out.sort((a, b) => a.index - b.index);
       },
+      async deleteMessage(chatId, messageId) {
+        await spindle.chat.deleteMessage(chatId, messageId);
+      },
       async writeMetadata(chatId, messageId, bag) {
         await spindle.chat.updateMessage(chatId, messageId, { metadata: bag });
       },
@@ -746,7 +773,7 @@ export function createSpindleHost(): HostPort {
     presets: {
       async get(presetId, userId) {
         const preset = await spindle.presets.get(presetId, userId);
-        return preset ? { id: preset.id, name: preset.name, revision: preset.cache_revision } : null;
+        return preset ? { id: preset.id, name: preset.name, revision: preset.cache_revision, values: promptValuesOf(preset.metadata) } : null;
       },
       async active(chatId, userId) {
         // `presets.getActive` (staging 7524546f, worker-runtime.ts:2940) is newer than the published types.
@@ -771,6 +798,9 @@ export function createSpindleHost(): HostPort {
           // The host keeps a block's character tag trigger beside the published fields.
           characterTagTrigger: "characterTagTrigger" in b && Array.isArray(b.characterTagTrigger) ? b.characterTagTrigger.filter((t): t is string => typeof t === "string") : [],
           categoryMode: b.categoryMode === "radio" || b.categoryMode === "checkbox" ? b.categoryMode : null,
+          // An older preset's block has no group: it falls under the header above it.
+          ...("group" in b ? { group: typeof b.group === "string" && b.group !== "" ? b.group : null } : {}),
+          variables: promptVariablesOf(b.variables),
         }));
       },
       async insertBlocks(presetId, revision, at, blocks, userId) {
@@ -779,6 +809,12 @@ export function createSpindleHost(): HostPort {
         if (!preset) throw new Error("the preset is gone");
         if (preset.cache_revision !== revision) throw new Error("the preset changed while the blocks were being added; try again");
         await spindle.presets.update(presetId, { prompt_order: spliceBlocks(preset.prompt_order, at, blocks, () => crypto.randomUUID()), expected_cache_revision: revision }, userId);
+      },
+    },
+    macros: {
+      async resolve(template, chatId, userId) {
+        const result = await spindle.macros.resolve(template, { chatId, userId, commit: false });
+        return { text: result.text, diagnostics: [...new Set(result.diagnostics.map((d) => d.message))] };
       },
     },
     connections: {

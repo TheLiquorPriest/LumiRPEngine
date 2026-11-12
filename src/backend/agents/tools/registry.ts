@@ -45,7 +45,8 @@ export interface ToolEnv {
   marks?: boolean;
   reader: ToolReader;
   writer: ToolWriter | null;
-  agent: { role: string; id: string };
+  /** Who calls: the definition it runs as (`role`), its handle, and which instance of that definition it is (`as`, the call's own from LumiAH's `delegate` or `job_start`; the person a character's agent is). Absent where nobody said. Never taken from a tool's arguments. */
+  agent: { role: string; id: string; as?: string };
   signal: AbortSignal;
   loads?: LoreLoads;
   /** Condenses a source with the agent's own model (`condense`); absent for an agent that can't make the call. */

@@ -30,6 +30,8 @@ import { startPreparedReplies } from "./restart";
 import { askSwipeDirection } from "./swipe-ask";
 import type { FrontendToBackend } from "../shared/protocol";
 import { CannotStopNotice, OPEN_DIAGNOSTICS_EVENT } from "./diagnostics";
+import { atTurnRecord, OPEN_TURN_RECORD_EVENT } from "./story/open";
+import type { StoryAt } from "../shared/story-pages";
 import { timeMarker } from "./requests";
 import { createStore } from "./store";
 import { CSS } from "./styles";
@@ -169,6 +171,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   };
   window.addEventListener(OPEN_DIAGNOSTICS_EVENT, showDiagnostics);
   cleanups.push(() => window.removeEventListener(OPEN_DIAGNOSTICS_EVENT, showDiagnostics));
+  // A harness reply's footer's way into its turn's record: the drawer at Harness → Record on that reply.
+  const showRecord = (event: Event) => {
+    const at = (event as CustomEvent<StoryAt>).detail;
+    ui.update((state) => atTurnRecord(state, at));
+    tab.activate();
+  };
+  window.addEventListener(OPEN_TURN_RECORD_EVENT, showRecord);
+  cleanups.push(() => window.removeEventListener(OPEN_TURN_RECORD_EVENT, showRecord));
 
   // ------------------------------------------------------------ HUD pill and status line
   // How many status lines are mounted above a message input. On a phone the status line does the

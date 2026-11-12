@@ -78,11 +78,13 @@ import { type DraftNotice, newChatRun, WorldError } from "./worlds";
 import { SecrecyError, SecrecyMoves } from "./secrecy-migration";
 import { Assistant, AssistantError, ASSISTANT_ROLE, workspaceRequest } from "./agents/assistant";
 import { SideAssistant } from "./harness/assistant";
-import { undoWorldMade } from "./harness/card";
+import { TURN_FOOTER, undoTurn } from "./harness/card";
 import { roleTextTest, testedRole } from "./agents/roles/test";
 import { promptDef, swipeDirectionOf } from "../shared/prompts";
 import { type Review, ReviewError } from "./agents/review";
 import { CHAT_ENGINES } from "./chat-knowledge-prefs";
+import { storyPage, StoryPageRefused } from "./story/pages";
+import { preparePage, PrepareRefused } from "./story/prepare";
 
 export class RequestError extends Error {
   constructor(
@@ -399,6 +401,8 @@ export class Dispatcher {
         // Which chat this page shows, and whether on screen: who starts a prepared reply (DESIGN §5.1). An outside client is no page.
         if (session !== undefined && !(r.type === "lre.hello" && r.client !== undefined)) this.rt.ledger.page(session, userId, r.chatId, r.chatId !== null && r.viewing !== false);
         if (r.chatId) {
+          // A chat the harness plays is set to its runtime as it opens, not at its first reply, so no reply is lost to setting it. It never throws, and waits on no chat's queue.
+          await this.rt.harness.opened(r.chatId, userId);
           const run = await this.rt.runOf(r.chatId, userId);
           if (run) this.rt.jsonHiding.seen(r.chatId, run.worldId, userId);
           // The page gets its view, its activity line and a reply waiting for it at once, even while a
@@ -845,8 +849,7 @@ export class Dispatcher {
         if (narrator === null && r.narrator !== null) throw new RequestError("bad_request", 'the narrator\'s knowledge is {"knowledge": "scene" or "pov", "secrets": "marked" or "omit"}, or null to follow the world\'s default, else Settings');
         const engine = r.engine;
         if (engine !== undefined && engine !== null && !(CHAT_ENGINES as readonly unknown[]).includes(engine)) throw new RequestError("bad_request", "the engine is classic, agents or harness, or null to play classic");
-        // The harness plays a chat through LumiAH. Where that can't play it (this build carries none, or LumiAH says what it lacks), a chat switched to it would get replies no engine plays: nothing rolled, nothing recorded. The Engine page asks, so it can say why before the switch is pressed.
-        const blocked = r.engines === true ? await this.rt.harness.blocked(userId) : null;
+        // The harness plays a chat through LumiAH. Where that can't play it (this build carries none, LumiAH says what it lacks, or this chat couldn't be set to the runtime), a chat switched to it would get replies no engine plays: nothing rolled, nothing recorded. The Engine page asks, so it can say why before the switch is pressed, and after it.
         if (r.tidy !== undefined && r.tidy !== null && typeof r.tidy !== "boolean") throw new RequestError("bad_request", "tidying impossible holds automatically is on (true), off (false) or as the world has it (null)");
         // The engine is chosen through the harness's one door, which keeps LumiAH's own switch for the chat with the choice (`HarnessEngine.choose`): the same door LumiAH's pages go through for a world chat.
         if (engine !== undefined) {
@@ -854,6 +857,7 @@ export class Dispatcher {
             throw error instanceof EngineRefused ? new RequestError(error.code, error.message) : error;
           });
         }
+        const blocked = r.engines === true ? await this.rt.harness.blocked(userId, r.chatId) : null;
         const change = { ...(r.knowledge !== undefined ? { knowledge: r.knowledge } : {}), ...(narrator !== undefined ? { narrator } : {}), ...(r.tidy !== undefined ? { tidy: r.tidy } : {}) };
         const changes = Object.keys(change).length > 0;
         const prefs = changes ? await this.rt.chatKnowledge.set(r.chatId, userId, change) : await this.rt.chatKnowledge.get(r.chatId, userId);
@@ -1057,6 +1061,28 @@ export class Dispatcher {
         const found = await roleTextTest(this.rt, { userId, chatId: r.chatId, def, role, text: r.text, signal: new AbortController().signal });
         const problems = [...found.problems.map((p) => p.message), ...(found.contract?.problems ?? []).map((p) => `the answer breaks its contract: ${p}`)];
         reply("lre.prompts", { test: { ok: problems.length === 0 && found.contract !== null, problems, left: found.left } });
+        return;
+      }
+      case "lre.story": {
+        // The Harness tab's Cast and Record, and Settings → Story → Budget's use (`story/pages.ts`): GM data, behind the gate as `lre.gm` is; the player's pin is their own write.
+        await this.requireWorldChat(r.chatId, userId);
+        try {
+          reply("lre.story", await storyPage(this.rt, { chatId: r.chatId, userId }, r));
+        } catch (error) {
+          if (error instanceof StoryPageRefused) throw new RequestError(error.code, error.message);
+          throw error;
+        }
+        return;
+      }
+      case "lre.prepare": {
+        // The prepared start on Play → Now (`story/prepare.ts`): the player's own presses, each answered with how it stands after.
+        await this.requireWorldChat(r.chatId, userId);
+        try {
+          reply("lre.prepare", await preparePage(this.rt, { chatId: r.chatId, userId }, r));
+        } catch (error) {
+          if (error instanceof PrepareRefused) throw new RequestError(error.code, error.message);
+          throw error;
+        }
         return;
       }
     }
@@ -1287,6 +1313,13 @@ export class Dispatcher {
           throw error;
         }
       });
+    }
+    if (kind === TURN_FOOTER) {
+      // A harness turn undone whole (`harness/card.ts`): the user's own act on the latest reply, which goes with everything its turn wrote.
+      if (choice !== "undo") throw new RequestError("bad_request", `unknown choice ${choice}`);
+      const undone = await undoTurn(this.rt, { chatId, userId }, { messageId, swipeId: Number(swipe) });
+      if ("refused" in undone) throw new RequestError("conflict", undone.refused);
+      return { applied: true, pending: false };
     }
     if (kind === "overdue") {
       // `overdue:<thing>:<borrower>`: Take back (the owner) or Give back (the borrower), as a palette action.
@@ -1746,14 +1779,6 @@ export class Dispatcher {
           return { applied: result.applied, ...waits(result) };
         }
         throw new RequestError("not_found", "the routine change is gone");
-      }
-      case "world_made": {
-        // What a harness turn made of the world's document (`harness/card.ts`): Undo puts the world and this chat back, the user's own act. Open in Build is the page's own and sends nothing.
-        if (choice !== "undo") throw new RequestError("bad_request", `unknown choice ${choice}`);
-        const undone = await undoWorldMade(this.rt, { chatId, userId }, chip);
-        if ("refused" in undone) throw new RequestError("conflict", undone.refused);
-        this.rt.push.changed(chatId, userId);
-        return { applied: true, pending: undone.pending };
       }
       case "read_failed": {
         // Retry: the next swipe re-runs the turn, reading the typed text afresh; the UI swipes.

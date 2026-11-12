@@ -102,11 +102,23 @@ export const WORLD_NOTE = {
   changesMore: "harness.note.world.changes_more",
   theirEdits: "harness.note.world.their_edits",
   followsCommit: "harness.note.world.follows_commit",
+  unchangedChat: "harness.note.world.unchanged_chat",
+  chatRefused: "harness.note.world.chat_refused",
+  chatNext: "harness.note.world.chat_next",
+  notCarried: "harness.note.world.not_carried",
+  chatChanges: "harness.note.world.chat_changes",
+  notChanged: "harness.note.world.not_changed",
+  inDraftAlready: "harness.note.world.in_draft_already",
 } as const;
 
 const DRAFT =
   "It changes the world's draft, which nobody plays yet: world_commit makes the draft the world's next revision, then world_upgrade brings this chat to it. Only the game master's tier may call it, and while the player has the world's document set to Never (Settings → Changes from the reply) it is refused like every other write of the document. Who the player's character is and what the engine holds agents to are closed to every agent: a write that would change one is refused, with the paths it names.";
 const JSON_TEXT = "written as JSON text";
+/** What world_put and world_remove say of where they write. */
+const CARRIED =
+  "A place, a path (routes) or a map is written to this chat's own world unless in says document: staged with your turn like any change, played at once, gone with the turn if it is undone, and kept into the world's document by world_keep. Every other collection is the world's document's alone, and what follows is said of it.";
+/** The `in` argument of world_put and world_remove. */
+const IN_ARG = { path: "in", text: "For places, routes and maps: chat (the default), this chat's own world, played at once; document, the world's draft. Every other collection is the world's draft's: in: chat is refused for it." };
 /** What a commit, an Upgrade and a restore say of what they would change, and of what no agent changes by any of them. */
 const LISTED =
   "Its answer lists what it would change in the world's document, by collection. The player is shown the same where it waits on the review card, and a commit's on the reply once it is made, with what the world keeps from the player's character counted, never named. Set to Never the world's document refuses it. What is closed to agents (who the player's character is, what the engine holds agents to) no agent changes this way either: where it would, the call is refused with the paths, and it is the user's to do in Build.";
@@ -118,7 +130,7 @@ export const WORLD_TOOL_TEXTS: readonly HarnessToolText[] = [
     family: HARNESS_FAMILY.world,
     tier: "read",
     note: "Says which revision of the world this chat plays, the world's head, and how the draft stands.",
-    text: "Read where the world's document stands. A chat plays one revision of its world; the world's head is its newest revision; the draft is the working copy every world_ write changes, which nobody plays until it is committed. The answer gives the revision this chat plays, the head, whether the chat is behind the head (world_upgrade brings it there), whether a draft is stored with its version and the revision it began on, and the draft's lint: how many errors, warnings and infos, and the issues themselves, errors first, each with the pointer it is at. A draft with errors can't be committed. The draft is the same working copy the user edits in Build: one that is stored before you wrote anything holds someone's unfinished work, so add to it only what you mean to. Call it before you edit the world and before world_commit.",
+    text: "Read where the world stands for this chat. A chat plays one revision of its world's document, with what it made or changed of its places, paths and maps in play laid over: this chat's own world. The world's head is the document's newest revision; its draft is the working copy every world_ write with in: document changes, which nobody plays until it is committed. The answer gives the revision this chat plays, the head, whether the chat is behind the head (world_upgrade brings it there), how many changes of this chat's own world the document doesn't have (world_made lists them), whether a draft is stored with its version and the revision it began on, and the draft's lint: how many errors, warnings and infos, and the issues themselves, errors first, each with the pointer it is at. A draft with errors can't be committed. The draft is the same working copy the user edits in Build: one that is stored before you wrote anything holds someone's unfinished work, so add to it only what you mean to. Call it before you edit the world and before world_commit.",
     args: [{ path: "issues", text: "Which of the draft's issues to list: all, or errors for only what stops a commit. All when left out; the counts are of all of them either way." }],
   },
   {
@@ -129,7 +141,7 @@ export const WORLD_TOOL_TEXTS: readonly HarnessToolText[] = [
     text: "Read the world's document: everything the world is made of, including what no other tool reaches (the calendar, schedules, routines, kinds, actions, checks, tracks, lore, tables, rules, sections). Give pointer to read one part of it: /calendar, /entities/mara, /tracks/harbour_debt/stages. Without it you get the document's root. A value too long for one answer comes back as an outline instead: each member with what it holds, so you read on with a longer pointer. It reads the draft unless source says playing, which is the revision this chat plays. The value is the document's own, unmarked; what it shows that is kept from the player's character (a restricted person, thing, place or track, secret lore, a field that isn't everyone's to see) is listed beside it under secret, each by its pointer, marked as a secret is marked in every read. Read a thing before you change it (world_put, world_set, world_patch), and use world_shape for what one item of a collection must look like.",
     args: [
       { path: "pointer", text: 'Where in the document, as a JSON Pointer: "" or left out for the whole document, else /member/member, such as /entities/mara/fields. In a member\'s name write ~1 for / and ~0 for ~.' },
-      { path: "source", text: "draft (the default): the working copy the world_ writes change. playing: the revision this chat plays, with what play made overlaid." },
+      { path: "source", text: "draft (the default): the world's draft, the working copy the world_ writes with in: document change. playing: this chat's own world as it plays, the revision it plays with what this chat made or changed in play laid over." },
       { path: "after", text: "Only for an outline that was cut short: the last member it showed (a list's index), to go on from the one after it." },
     ],
   },
@@ -145,23 +157,25 @@ export const WORLD_TOOL_TEXTS: readonly HarnessToolText[] = [
     name: WORLD_TOOL.put,
     family: HARNESS_FAMILY.world,
     tier: "write",
-    note: "Writes one item of a collection of the world's draft, whole.",
-    text: `Write one item of a collection of the world's document, whole: a new one, or one that replaces the item of that id. The item is ${JSON_TEXT}; world_shape says what the collection's items look like, and world_read gives an existing one to start from. To change only part of an item, use world_patch. The answer says what changed, the draft's version, and the lint issues the write brought: fix an error before you commit. ${DRAFT}`,
+    note: "Writes one item of a collection of the world, whole: a place, a path or a map in this chat's world, anything else in the world's draft.",
+    text: `Write one item of a collection of the world, whole: a new one, or one that replaces the item of that id. The item is ${JSON_TEXT}; world_shape says what the collection's items look like, and world_read gives an existing one to start from. To change only part of an item in the world's draft, use world_patch. ${CARRIED} The answer says what changed; in the world's draft, also the draft's version and the lint issues the write brought: fix an error before you commit. ${DRAFT}`,
     args: [
       { path: "collection", text: "The collection the item belongs to." },
       { path: "id", text: "The item's id: its key in the collection. Letters, digits, _ and -." },
       { path: "value", text: `The whole item, a JSON object ${JSON_TEXT}: {"id": "night_shift", "target": "place", ...}. A new item written without id takes the one given here.` },
+      IN_ARG,
     ],
   },
   {
     name: WORLD_TOOL.remove,
     family: HARNESS_FAMILY.world,
     tier: "write",
-    note: "Takes one item out of a collection of the world's draft.",
-    text: `Take one item out of a collection of the world's document. What still names it (an entity's place, a schedule's owner, a stage of a track) shows in the answer's lint as an issue to fix. A place, a path or a grid that a map draws is removed in its map instead. ${DRAFT}`,
+    note: "Takes one item out of a collection of the world: a place, a path or a map in this chat's world, anything else in the world's draft.",
+    text: `Take one item out of a collection of the world. ${CARRIED} In this chat's world a place someone or something is at, or that holds other places or a path, isn't taken out: the refusal says what still needs it. In the world's draft, what still names it (an entity's place, a schedule's owner, a stage of a track) shows in the answer's lint as an issue to fix. A place, a path or a grid that a map draws is removed in its map instead. ${DRAFT}`,
     args: [
       { path: "collection", text: "The collection the item is in." },
       { path: "id", text: "The item's id: its key in the collection." },
+      IN_ARG,
     ],
   },
   {
@@ -230,30 +244,43 @@ export const WORLD_TOOL_TEXTS: readonly HarnessToolText[] = [
     name: WORLD_TOOL.made,
     family: HARNESS_FAMILY.world,
     tier: "read",
-    note: "Lists what this chat made in play that the world's document doesn't have.",
-    text: "List the things and places this chat made in play that its world's document doesn't have: each with its id, its name, where it is, and whether the world's draft has it already. What was made in play exists only in this chat; world_keep copies it into the world's document, so other chats of the world have it too.",
-    args: [{ path: "kind", text: "Only the things, or only the places. Both when left out." }],
+    note: "Lists what this chat made or changed in play that the world's document doesn't have.",
+    text: "List what this chat made or changed in play that its world's document doesn't have: the things and places made in play, each with its id, its name and where it is; and this chat's own changes to the world's places, paths, maps and map settings (world), each with what it is and whether it was made, changed or taken out. Each says whether the world's draft has it already. What was made or changed in play exists only in this chat; world_keep copies it into the world's document, so other chats of the world have it too.",
+    args: [{ path: "kind", text: "Only the things, only the places made in play, or only this chat's changes to the world (world). All when left out." }],
   },
   {
     name: WORLD_TOOL.keep,
     family: HARNESS_FAMILY.world,
     tier: "write",
-    note: "Copies things and places made in play into the world's draft.",
-    text: `Copy things and places this chat made in play into the world's document, each under its own id: places first, so a thing kept with the place it lies at lies there. The answer says what was kept, what was skipped and why, and what a kept thing lost on the way. world_made lists what there is to keep. ${DRAFT}`,
+    note: "Copies what this chat made or changed in play into the world's draft.",
+    text: `Copy what this chat made or changed in play into the world's document, each under its own id: the things and places made in play, places first, so a thing kept with the place it lies at lies there; and this chat's own changes to the world's places, paths and maps and to its map settings, each written into the draft as this chat has it (one taken out is taken out of the draft too). The answer says what was kept, what was skipped and why, and what a kept thing lost on the way. world_made lists what there is to keep. Committing the draft is a separate act (world_commit). ${DRAFT}`,
     args: [
-      { path: "things", text: "The things to keep, each by id or name." },
-      { path: "places", text: "The places to keep, each by id or name." },
+      { path: "things", text: "The things made in play to keep, each by id or name." },
+      { path: "places", text: "The places to keep, each by id or name: a place made in play, or a place of the world this chat made, changed or took out." },
+      { path: "paths", text: "The paths this chat made, changed or took out to keep, each by its id (world_made lists them)." },
+      { path: "maps", text: "The maps this chat made, changed or took out to keep, each by its id or title." },
+      { path: "settings", text: "true to keep this chat's map settings." },
     ],
   },
 ];
 
 export const WORLD_NOTE_PROMPTS: readonly PromptDef[] = [
   answerPrompt(WORLD_NOTE.noBuild, "The world's document can't be reached", "A world tool's answer when its call has no way to the world's document: the chat plays no world, or the call was made where the document isn't offered.", "The world's document can't be reached from this call, so nothing was read or written."),
-  answerPrompt(WORLD_NOTE.needsGm, "Only the game master's tier edits the world", "A world tool's answer to a write by an agent below the game master's tier.", "Only the game master's tier edits the world's document. The author holds it and may grant it to an agent it started (grant_writes, tier gm): ask the author, or tell it in your answer what should change."),
+  answerPrompt(WORLD_NOTE.needsGm, "Only the game master's tier edits the world", "A world tool's answer to a write by an agent below the game master's tier.", "Only the game master's tier edits the world, this chat's own or its document. The author holds it and may grant it to an agent it started (grant_writes, tier gm): ask the author, or tell it in your answer what should change."),
   answerPrompt(WORLD_NOTE.refused, "The world's document refused it", "A world tool's answer when the world's store refuses the read or the write, with the store's own reason.", "The world's document refused it: {{reason}}. Nothing was written.", [v("reason", "why, in the store's words, which say what to fix", true)]),
   answerPrompt(WORLD_NOTE.refusedLint, "The world's document refused it, with its errors", "A world tool's answer when the store's checks refuse a write, with the errors they found.", "The world's document refused it: {{reason}}. Nothing was written. Fix these and write it again:\n{{errors}}", [v("reason", "why, in the store's words", true), v("errors", "the errors the checks found, one to a line", true)]),
   answerPrompt(WORLD_NOTE.more, "More issues than fit", "Ends a list of lint issues that was cut to fit one answer.", "and {{count}} more: world_status lists them.", [v("count", "how many more", true)]),
   answerPrompt(WORLD_NOTE.unchanged, "Nothing changed", "A world tool's answer for a write that left the draft as it was.", "The draft already says so: nothing was written."),
+  answerPrompt(WORLD_NOTE.unchangedChat, "Nothing changed in this chat's world", "A world tool's answer for a write of this chat's own world that leaves it as it plays.", "This chat's world already has it so: nothing was staged."),
+  answerPrompt(WORLD_NOTE.chatRefused, "This chat's world can't take it", "A world tool's answer when the engine's own checks refuse a change of this chat's world, with its reason.", "That can't be made in this chat's world: {{reason}}. Nothing was staged.", [v("reason", "why, in the engine's words", true)]),
+  answerPrompt(
+    WORLD_NOTE.chatNext,
+    "This chat's world plays it",
+    "Ends every write of this chat's own world: where it stands and how it is kept.",
+    "This is this chat's own world: your next call plays it, everyone's once you commit, and it goes with this turn if the turn is undone. world_keep copies it into the world's document, so other chats have it too; world_commit then makes that a revision.",
+  ),
+  answerPrompt(WORLD_NOTE.notCarried, "Not a part of this chat's world", "world_put's and world_remove's answer to in: chat for a collection only the world's document holds.", "This chat's own world holds its places, paths (routes) and maps; {{collection}} is the world's document's alone. Leave in out, or give in: document.", [v("collection", "the collection the call named", true)]),
+  answerPrompt(WORLD_NOTE.chatChanges, "This chat changed its world", "Part of world_status's answer when this chat holds changes of its own to its world that the world's document doesn't have.", "This chat has {{count}} changes of its own to its world's places, paths, maps or map settings that the world's document doesn't have: world_made lists them, world_keep copies them into the world's draft.", [v("count", "how many changes", true)]),
   answerPrompt(WORLD_NOTE.next, "The draft isn't played yet", "Ends every write of the world's document: the draft reaches the chat only once it is committed and the chat brought to it.", "This is the world's draft. This chat still plays revision {{revision}}: world_commit makes the draft the world's next revision, then world_upgrade brings this chat to it.", [v("revision", "the revision the chat plays", true)]),
   answerPrompt(WORLD_NOTE.behind, "The chat is behind the world's head", "Part of world_status's answer when the chat plays another revision than the world's head.", "This chat doesn't play the world's head ({{head}}): world_upgrade brings it there.", [v("head", "the world's head revision", true)]),
   answerPrompt(WORLD_NOTE.staleDraft, "The draft began on an older head", "world_status's and world_commit's answer when the stored draft began on a revision that is no longer the world's head, so a commit of it is refused.", "The draft began on revision {{base}}, which is no longer the world's head: it can't be committed. Drop it with world_discard and make its changes again, on the head.", [v("base", "the revision the draft began on", true)]),
@@ -271,10 +298,10 @@ export const WORLD_NOTE_PROMPTS: readonly PromptDef[] = [
   answerPrompt(WORLD_NOTE.shapeHintAny, "Where a shape is found", "Added to a refused world_patch.", "world_read shows what is at a path; world_shape gives the shape of a collection's item or of a part."),
   answerPrompt(WORLD_NOTE.needsObject, "The value isn't a JSON object", "world_put's and world_set's answer when value isn't a JSON object.", '{{tool}} takes {{arg}} as a JSON object written as text, such as {"label": "..."}, and what was given isn\'t one. world_shape gives the shape it takes.', [v("tool", "the tool", true), v("arg", "the argument", true)]),
   answerPrompt(WORLD_NOTE.needsOps, "The operations aren't a JSON array", "world_patch's answer when ops isn't a JSON array.", 'world_patch takes ops as a JSON array of operations written as text, such as [{"op": "replace", "path": "/calendar/timeZone", "value": "Europe/Lisbon"}], and what was given isn\'t one.'),
-  answerPrompt(WORLD_NOTE.noItem, "No such item in the collection", "world_remove's answer when the draft's collection has no item of that id.", "The draft's {{collection}} has no {{id}}. It has: {{ids}}.", [v("collection", "the collection", true), v("id", "the id the call gave", true), v("ids", "the ids the collection has, or that it has none", true)]),
-  answerPrompt(WORLD_NOTE.added, "An item was added", "What world_put's answer says changed, for a new item.", "Added {{id}} to the draft's {{collection}}.", [v("collection", "the collection", true), v("id", "the item's id", true)]),
-  answerPrompt(WORLD_NOTE.replaced, "An item was replaced", "What world_put's answer says changed, for an item that was there.", "Replaced {{id}} in the draft's {{collection}}.", [v("collection", "the collection", true), v("id", "the item's id", true)]),
-  answerPrompt(WORLD_NOTE.removed, "An item was removed", "What world_remove's answer says changed.", "Removed {{id}} from the draft's {{collection}}.", [v("collection", "the collection", true), v("id", "the item's id", true)]),
+  answerPrompt(WORLD_NOTE.noItem, "No such item in the collection", "world_remove's answer when the collection, in the world the call writes, has no item of that id.", "There is no {{id}} in {{collection}} {{where}}. It has: {{ids}}.", [v("collection", "the collection", true), v("id", "the id the call gave", true), v("where", "the world the call writes: in this chat's world, or in the world's draft", true), v("ids", "the ids the collection has, or that it has none", true)]),
+  answerPrompt(WORLD_NOTE.added, "An item was added", "What world_put's answer says changed, for a new item.", "Added {{id}} to {{collection}} {{where}}.", [v("collection", "the collection", true), v("id", "the item's id", true), v("where", "the world the call writes: in this chat's world, or in the world's draft", true)]),
+  answerPrompt(WORLD_NOTE.replaced, "An item was replaced", "What world_put's answer says changed, for an item that was there.", "Replaced {{id}} in {{collection}} {{where}}.", [v("collection", "the collection", true), v("id", "the item's id", true), v("where", "the world the call writes: in this chat's world, or in the world's draft", true)]),
+  answerPrompt(WORLD_NOTE.removed, "An item was removed", "What world_remove's answer says changed.", "Removed {{id}} from {{collection}} {{where}}.", [v("collection", "the collection", true), v("id", "the item's id", true), v("where", "the world the call writes: in this chat's world, or in the world's draft", true)]),
   answerPrompt(WORLD_NOTE.wrotePart, "A part was written", "What world_set's answer says changed.", "Wrote the draft's {{part}} part.", [v("part", "the part", true)]),
   answerPrompt(WORLD_NOTE.patched, "A patch was applied", "What world_patch's answer says changed.", "Applied the patch to the draft: {{count}} operations.", [v("count", "how many operations the patch had", true)]),
   answerPrompt(WORLD_NOTE.nothingToDiscard, "No draft to drop", "world_discard's answer when no draft is stored.", "No draft is stored, so there is nothing to drop: the world's document stands as its head has it."),
@@ -296,11 +323,13 @@ export const WORLD_NOTE_PROMPTS: readonly PromptDef[] = [
   answerPrompt(WORLD_NOTE.upgradePending, "The Upgrade waits for the turn's end", "What a world_upgrade came to once it was made, when the move waits for the turn that is running.", "It is pending: the move to revision {{revision}} waits for this turn's end. Until then this chat plays the revision it played, and reads of the world show that one.", [v("revision", "the revision the chat will play", true)]),
   answerPrompt(WORLD_NOTE.revisionHint, "Where the revisions are listed", "Added to a refused world_upgrade or world_restore.", "world_history lists the world's revisions."),
   answerPrompt(WORLD_NOTE.restored, "The draft is a copy of a revision", "What a world_restore came to once it was made: told to the author with the commit that made it.", "The draft is a copy of revision {{revision}} now.", [v("revision", "the revision copied", true)]),
-  answerPrompt(WORLD_NOTE.nothingMade, "Nothing was made in play", "world_made's answer when the chat made nothing its world's document lacks.", "This chat has made nothing in play that its world's document doesn't have."),
-  answerPrompt(WORLD_NOTE.madeNext, "How what was made is kept", "Ends world_made's answer.", "world_keep copies any of these into the world's draft, by id or name. One marked inDraft is in the draft already."),
-  answerPrompt(WORLD_NOTE.keepNames, "Nothing was named to keep", "world_keep's answer when neither things nor places names anything.", "Name what to keep: things, places or both, each a list of ids or names. world_made lists what this chat made in play."),
+  answerPrompt(WORLD_NOTE.nothingMade, "Nothing was made in play", "world_made's answer when the chat made or changed nothing its world's document lacks.", "This chat has made or changed nothing in play that its world's document doesn't have."),
+  answerPrompt(WORLD_NOTE.madeNext, "How what was made is kept", "Ends world_made's answer.", "world_keep copies any of these into the world's draft: things and places by id or name, paths and maps by id, the map settings with settings: true. One marked inDraft is in the draft already."),
+  answerPrompt(WORLD_NOTE.keepNames, "Nothing was named to keep", "world_keep's answer when it names nothing to keep.", "Name what to keep: things, places, paths or maps, each a list of ids or names, or settings: true. world_made lists what this chat made or changed in play."),
   answerPrompt(WORLD_NOTE.keptNothing, "Nothing could be kept", "world_keep's answer when nothing named could be copied into the draft.", "Nothing was kept:\n{{skipped}}\nworld_made lists what this chat made in play and what the draft has already.", [v("skipped", "what was skipped and why, one to a line", true)]),
-  answerPrompt(WORLD_NOTE.kept, "Things and places were kept", "What world_keep's answer says changed.", "Copied into the draft: {{things}} of the things and {{places}} of the places named.", [v("things", "how many things were kept", true), v("places", "how many places were kept", true)]),
+  answerPrompt(WORLD_NOTE.kept, "What was kept", "What world_keep's answer says changed.", "Copied into the world's draft: {{count}} of what was named.", [v("count", "how many were kept", true)]),
+  answerPrompt(WORLD_NOTE.notChanged, "Not one of this chat's changes", "Why world_keep skips a path, a map, a place or the map settings this chat didn't make, change or take out.", "this chat made, changed and took out nothing of that name in its world (world_made lists what it did)"),
+  answerPrompt(WORLD_NOTE.inDraftAlready, "The draft has it so already", "Why world_keep skips one of this chat's changes that the world's draft already holds as this chat has it.", "the world's draft has it so already"),
   answerPrompt(WORLD_NOTE.notCommitted, "The draft's commit wasn't made", "What a world_upgrade asked right after a world_commit came to when that commit wasn't made, so the revision it was to bring the chat to doesn't exist.", "the world has no revision {{revision}}: it is the one the draft at version {{version}} was to become, and that commit wasn't made", [v("revision", "the revision the draft's commit would have made", true), v("version", "the draft's version when the Upgrade was asked")]),
   answerPrompt(WORLD_NOTE.badMerge, "Picks it can't read", "world_upgrade's reason when an Upgrade's picks aren't ones the engine reads.", "an Upgrade's picks say take or keep for each part of an entity, by the entity's id, and these can't be read as that"),
   answerPrompt(

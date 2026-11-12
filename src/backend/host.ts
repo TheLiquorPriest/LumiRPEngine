@@ -448,7 +448,27 @@ export interface HostPresetBlock {
   characterTagTrigger: string[];
   /** On a category header: `radio` keeps only the first switched-on block under it, `checkbox` each one. */
   categoryMode: "radio" | "checkbox" | null;
+  /** The category header it is filed under, by id (null: none), as the preset editor shows it; absent in an older preset, where a block falls under the header above it. */
+  group?: string | null;
+  /** The prompt variables it declares, which every switched-on block's macros read (`{{var::name}}`). */
+  variables?: readonly HostPromptVariable[];
 }
+
+/** A prompt variable a preset block declares (Lumiverse's `PromptVariableDef`): its name, its kind, its default and, for a choice, its options. */
+export interface HostPromptVariable {
+  name: string;
+  type: "text" | "textarea" | "number" | "slider" | "range" | "select" | "switch" | "multiselect";
+  defaultValue: unknown;
+  min?: number;
+  max?: number;
+  /** A select's or a multiselect's options: what is stored is the option's id, what macros read its value. */
+  options?: readonly { id: string; value: string }[];
+  /** What a multiselect's values are joined with; two newlines when absent. */
+  separator?: string;
+}
+
+/** The values a preset's user set for its blocks' variables (its `metadata.promptVariables`), by block id, then by variable name. */
+export type HostPromptValues = Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 
 /** A block the engine adds to a preset: a category header, or text that stays switched off. */
 export type HostPresetBlockInput = { kind: "category"; name: string } | { kind: "text"; name: string; content: string };
@@ -509,6 +529,8 @@ export interface HostPort {
     list(userId: UserId): Promise<HostChat[]>;
     /** Rewrites a message's swipes and the one shown (`chat.updateMessage`); the host keeps the swipe dates in step. */
     setSwipes(chatId: ChatId, messageId: MessageId, swipes: readonly string[], swipeId: number, userId: UserId): Promise<void>;
+    /** Deletes a message, every swipe of it (`chat.deleteMessage`): the host sends MESSAGE_DELETED. Only the user's own act starts one (a whole turn undone). */
+    deleteMessage(chatId: ChatId, messageId: MessageId, userId: UserId): Promise<void>;
   };
   storage: {
     read(path: string, userId: UserId): Promise<string | null>;
@@ -580,8 +602,8 @@ export interface HostPort {
   /** A dry-run assembly of the chat's next prompt (deliverability check, DESIGN §4.2; the D32 preset lint). */
   dryRun(chatId: ChatId, userId: UserId): Promise<DryRun>;
   presets: {
-    /** A preset with its revision (each change to it bumps it); null when there's no such preset. */
-    get(presetId: string, userId: UserId): Promise<{ id: string; name: string; revision: number } | null>;
+    /** A preset with its revision (each change to it bumps it) and the values its user set for its blocks' variables; null when there's no such preset. */
+    get(presetId: string, userId: UserId): Promise<{ id: string; name: string; revision: number; values?: HostPromptValues } | null>;
     /**
      * The preset the host generates the chat with, by its own resolution as prompt assembly makes it
      * (the selected Loom preset, else the chat's connection's, then the profile bindings), and the
@@ -592,6 +614,14 @@ export interface HostPort {
     blocks(presetId: string, userId: UserId): Promise<HostPresetBlock[]>;
     /** Inserts blocks at `at` (null: the end) in one write of the preset's stored blocks as they are, while it is still at `revision`. */
     insertBlocks(presetId: string, revision: number, at: number | null, blocks: readonly HostPresetBlockInput[], userId: UserId): Promise<void>;
+  };
+  macros: {
+    /**
+     * `template` with its macros resolved by Lumiverse's own engine for the chat, committing nothing
+     * (`macros.resolve`, `commit: false`): the chat's character, persona, chat and messages, but none
+     * of prompt assembly's own state. What the engine said of it besides, once each.
+     */
+    resolve(template: string, chatId: ChatId, userId: UserId): Promise<{ text: string; diagnostics: string[] }>;
   };
   connections: {
     /** The user's default connection: the one a generation without its own route uses. */

@@ -32,6 +32,7 @@ import { touching } from "./touched";
 import type { WorldState } from "./state";
 import { clampLevel } from "./time-limits";
 import { canSeeEntity } from "./visibility";
+import { chatDraftOf } from "./world-draft";
 
 export interface Registry extends EventTypes {
   readonly packs: readonly PackDef[];
@@ -153,18 +154,21 @@ export function createRegistry(packs: readonly PackDef[]): Registry {
     orgSections,
     get: (type) => events.get(type),
     context(world, state, overrides) {
-      // The world as the state plays it (ITEMS-SPEC §6.2): the places play made overlaid on the
-      // world's, read again whenever they change, since a Working applies events to this very state
-      // and a place made by one is there for the next.
+      // The world as the state plays it (ITEMS-SPEC §6.2): this chat's draft of its world and the
+      // places play made overlaid on the world's, read again whenever either changes, since a
+      // Working applies events to this very state and what one makes is there for the next.
       let base = baseWorld(world);
       let made: object | null = null;
+      let drafted: object | null = null;
       let played = base;
       return {
         registry,
         get world(): WorldDoc {
           const now = madePlacesOf(state);
-          if (now !== made) {
+          const draft = chatDraftOf(state);
+          if (now !== made || draft !== drafted) {
             made = now;
+            drafted = draft;
             played = playedWorld(base, state);
           }
           return played;
@@ -172,6 +176,7 @@ export function createRegistry(packs: readonly PackDef[]): Registry {
         set world(next: WorldDoc) {
           base = baseWorld(next);
           made = null;
+          drafted = null;
         },
         state,
         tables: { get: (id) => world.tables[id] },

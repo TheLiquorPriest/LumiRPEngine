@@ -27,6 +27,7 @@ import type {
   RecHarness,
   RecSession,
   RecStatus,
+  RecStory,
   CarryDrop,
 } from "../../shared/ledger";
 import { REC_SESSION_PARTS, ROOT_PATH } from "../../shared/ledger";
@@ -1488,6 +1489,30 @@ export class LedgerCore {
     const rec = this.ledgerFor(messageId, observed[index]).swipes[String(swipeId)];
     if (!rec) return "the reply has no turn record";
     rec.harness = structuredClone(harness);
+    return null;
+  }
+
+  /**
+   * The story record's part of a reply's record (`Rec.story`, DEPTH2-PLAN §4), written whole in place
+   * of what the record holds (null: none): at a harness turn's close, by the jobs tied to a turn, and
+   * by a run the player started. Outside every hash but the tombstone's, so no path moves and no fold
+   * changes. A shown swipe that holds no record is given a bare one (path "", as the mark for a reply
+   * no turn was played for is made, `recordUnplayed`), which hashes like no record. A record already
+   * discarded is refused, since its tombstone names it as it stood. Null once written, else why not.
+   */
+  recordStory(messageId: MessageId, swipeId: number, story: RecStory | null, observed: readonly ChainMessage[]): string | null {
+    const index = observed.findIndex((m) => m.id === messageId);
+    const m = observed[index];
+    const text = m && !m.isUser ? (m.swipes[swipeId] ?? "") : "";
+    if (!m || text === "") return "the reply holds no text";
+    const stored = this.chain(observed)[index]?.ledger?.swipes[String(swipeId)];
+    if (stored && isTombstoned(this.journal.tombstones, messageId, stored)) return "the reply's record was discarded";
+    if (!stored && story === null) return null;
+    const ledger = this.ledgerFor(messageId, m);
+    const rec = ledger.swipes[String(swipeId)] ?? this.bareRecord(contentId(text), undefined);
+    if (story === null) delete rec.story;
+    else rec.story = structuredClone(story);
+    ledger.swipes[String(swipeId)] = rec;
     return null;
   }
 

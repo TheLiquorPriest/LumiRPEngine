@@ -47,6 +47,7 @@ import type { EntityState, WorldState } from "./state";
 import { observeCells } from "./seen";
 import { forget, touchedAnyRelation, touchedAspect, touchedField, touchedRelation } from "./touched";
 import { visibilityOf } from "./visibility";
+import { carryDraft, chatDraftOf, NO_DRAFT } from "./world-draft";
 import { clampLevels } from "./world-state";
 
 /** What the merge needs from the registry: event types (an account's posting), relation types and read contexts. */
@@ -519,6 +520,8 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
  * which revision its definitions still come from.
  */
 export function migrate(state: WorldState, body: Extract<MarkerBody, { kind: "migrate" }>, env: MarkerEnv): string[] {
+  // This chat's own changes to the world go with it to the new revision (`world-draft.ts`).
+  if (chatDraftOf(state) !== NO_DRAFT) carryDraft(state, revisionDoc(env, body.to));
   if (body.merge) return applyUpgrade(state, planUpgrade(state, env, body.to), body.merge, env);
   const lag = definitionsLag(state);
   if (lag === null && body.to !== state.revision) setLag(state, state.revision);

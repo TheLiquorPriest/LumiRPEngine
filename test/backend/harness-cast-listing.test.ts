@@ -12,9 +12,12 @@ import { TOOL_TEXTS, toolArgTextId, toolText, toolTextId } from "../../src/share
 import { HARNESS_TOOL, HARNESS_TOOL_TEXTS, harnessToolText } from "../../src/shared/harness-texts";
 import { NESTED_ARG_TEXTS } from "../../src/shared/harness-texts-args";
 import { BUILD_TOOL } from "../../src/shared/harness-texts-build";
-import { FILES_TOOL } from "../../src/shared/harness-texts-files";
+import { MINDS_TOOL } from "../../src/shared/harness-texts-minds";
 import { PEOPLE_TOOL } from "../../src/shared/harness-texts-people";
 import { PLAY_TOOL } from "../../src/shared/harness-texts-play";
+import { PREPARE_TOOL } from "../../src/shared/harness-texts-prepare";
+import { RECORD_TOOL } from "../../src/shared/harness-texts-record";
+import { STAGE_TOOL } from "../../src/shared/harness-texts-stage";
 import { STORY_TOOL } from "../../src/shared/harness-texts-story";
 import { HARNESS_DESCRIBED, SURFACE_TOOL } from "../../src/shared/harness-texts-surfaces";
 import { WORLD_TOOL } from "../../src/shared/harness-texts-world";
@@ -130,16 +133,11 @@ describe("the tools the harness lists", () => {
 
   test("the harness engine's own tools are listed with the family and tier their texts say, each argument described, in schemas every connection takes", async () => {
     const { tools } = await listed();
-    const names = [HARNESS_TOOL, PLAY_TOOL, FILES_TOOL, PEOPLE_TOOL, STORY_TOOL, SURFACE_TOOL, WORLD_TOOL, BUILD_TOOL].flatMap((family) => Object.values<string>(family));
+    const names = [HARNESS_TOOL, PLAY_TOOL, MINDS_TOOL, PEOPLE_TOOL, STORY_TOOL, SURFACE_TOOL, WORLD_TOOL, BUILD_TOOL, RECORD_TOOL, STAGE_TOOL, PREPARE_TOOL].flatMap((family) => Object.values<string>(family));
     expect(HARNESS_TOOL_DEFINITIONS.map((d) => d.name)).toEqual(names);
     expect(HARNESS_TOOL_TEXTS.map((t) => t.name)).toEqual(names);
     const own = tools.filter((t) => HARNESS_TOOL_DEFINITIONS.some((d) => d.name === t.name));
     expect(own.map((t) => [t.name, t.family, t.tier])).toEqual([
-      ["mind_view", "mind", "read"],
-      ["mind_decide", "mind", "write"],
-      ["mind_remember", "mind", "write"],
-      ["knowledge_scene", "knowledge", "read"],
-      ["knowledge_infer", "knowledge", "write"],
       ["checks_stakes", "checks", "read"],
       ["time_pass", "time", "write"],
       ["commit", "turn", "write"],
@@ -150,15 +148,13 @@ describe("the tools the harness lists", () => {
       ["fight_round", "fights", "write"],
       ["fight_end", "fights", "write"],
       ["mind_fight", "mind", "write"],
-      ["mind_files", "mind", "read"],
-      ["mind_file_read", "mind", "read"],
-      ["mind_file_write", "mind", "write"],
-      ["mind_consolidate", "mind", "write"],
+      ["mind_read", "mind", "read"],
+      ["mind_write", "mind", "write"],
+      ["mind_digested", "mind", "write"],
+      ["mind_seed", "minds", "read"],
       ["person_make", "people", "write"],
-      ["story_record", "people", "write"],
       ["item_away", "items", "write"],
       ["gm_take_out", "places", "write"],
-      ["story_departure", "turn", "write"],
       ["place_remove", "places", "write"],
       ["set_drop", "items", "write"],
       ["gm_effects", "money", "read"],
@@ -183,6 +179,29 @@ describe("the tools the harness lists", () => {
       ["world_map_place", "world", "write"],
       ["world_map_link", "world", "write"],
       ["world_map_settings", "world", "write"],
+      ["beat_write", "story", "write"],
+      ["beats_read", "story", "read"],
+      ["beat_strike", "story", "write"],
+      ["feed_read", "mind", "read"],
+      ["cast_set", "story", "write"],
+      ["cast_list", "story", "read"],
+      ["draft_open", "story", "write"],
+      ["draft_settle", "story", "write"],
+      ["draft_drop", "story", "write"],
+      ["drafts_due", "story", "read"],
+      ["narration_read", "narration", "read"],
+      ["passage_draft", "narration", "write"],
+      ["passage_read", "narration", "read"],
+      ["passage_check", "narration", "write"],
+      ["prepare_survey", "prepare", "read"],
+      ["prepare_status", "prepare", "read"],
+      ["prepare_plan", "prepare", "write"],
+      ["prepare_relive", "prepare", "write"],
+      ["stretch_read", "prepare", "read"],
+      ["stretch_beats", "prepare", "write"],
+      ["stretch_done", "prepare", "write"],
+      ["prepare_outline", "prepare", "write"],
+      ["prepare_finish", "prepare", "write"],
     ]);
     for (const text of HARNESS_TOOL_TEXTS) {
       const tool = own.find((t) => t.name === text.name);
@@ -206,13 +225,22 @@ describe("the tools the harness lists", () => {
     expect(old.length).toBeGreaterThan(60);
   });
 
+  test("the knowledge agent's tools and the reading of the reply after it are retired: the harness lists none of them, and no text of its names them", async () => {
+    const { tools } = await listed();
+    const retired = ["knowledge_scene", "knowledge_infer", "story_record", "story_departure"];
+    expect(tools.map((t) => t.name).filter((n) => retired.includes(n))).toEqual([]);
+    expect(HARNESS_LISTED.map((t) => t.name).filter((n) => retired.includes(n))).toEqual([]);
+    expect(HARNESS_TOOL_TEXTS.map((t) => t.name).filter((n) => retired.includes(n))).toEqual([]);
+    expect([...HARNESS_OWN_NEEDS.keys()].filter((n) => retired.includes(n))).toEqual([]);
+  });
+
   test("a description is the user's own where they wrote one, for the old engines' tools and the harness's alike", async () => {
-    const mine = { [toolTextId("checks_stakes")]: "Read it.", [toolArgTextId("time_pass", "minutes")]: "Minutes, whole.", [toolArgTextId("mind_remember", "plans.when.from")]: "The start.", [toolTextId("people_where")]: "Where is someone?" };
+    const mine = { [toolTextId("checks_stakes")]: "Read it.", [toolArgTextId("time_pass", "minutes")]: "Minutes, whole.", [toolArgTextId("mind_write", "append")]: "Add it at the end.", [toolTextId("people_where")]: "Where is someone?" };
     const { tools } = await listed(mine);
     const of = (name: string): RemoteTool | undefined => tools.find((t) => t.name === name);
     expect(of("checks_stakes")?.description).toBe("Read it.");
     expect(at(of("time_pass")?.parameters ?? {}, "minutes")?.description).toBe("Minutes, whole.");
-    expect(at(of("mind_remember")?.parameters ?? {}, "plans.when.from")?.description).toBe("The start.");
+    expect(at(of("mind_write")?.parameters ?? {}, "append")?.description).toBe("Add it at the end.");
     expect(of("people_where")?.description).toBe("Where is someone?");
     // What they didn't write stays as shipped.
     expect(of("commit")?.description).toBe(HARNESS_TOOL_TEXTS.find((t) => t.name === "commit")?.text ?? "");

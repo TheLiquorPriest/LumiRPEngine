@@ -30,7 +30,9 @@ import { activeRecord, isLive, turnPath } from "../engine/ledger/path";
 import { actsFor } from "../engine/org";
 import { optionalQuery, own } from "../engine/pack-kit";
 import { knownSubjects, playerDrop, playerLines, povMayKnow, UNSEEN_DROP } from "../engine/player-events";
-import { playedWorld } from "../engine/places-in-play";
+import { PLACE_EVENT, playedWorld } from "../engine/places-in-play";
+import { recStoryOf } from "../engine/story/record";
+import { isDraftEvent } from "../engine/world-draft";
 import type { ReadContext } from "../engine/registry";
 import { readPass } from "../engine/read-pass";
 import { claimsOf, presetOf } from "../engine/realism";
@@ -47,8 +49,8 @@ import { combatEntries, paletteEncounter } from "../packs/combat/core/index";
 import { thingsConfigOf } from "../shared/things";
 import type { ChatKnowledgePrefs } from "./chat-knowledge-prefs";
 import type { StoredChip } from "./chips";
-import { WORLD_MADE, worldMadeShown } from "./harness/card";
-import { departuresOf, unplayedOf } from "./harness/record";
+import { TURN_FOOTER, WORLD_MADE } from "./harness/card";
+import { unplayedOf } from "./harness/record";
 import type { ReplyFailure } from "./ledger-io";
 import { OFFSTAGE_TEXT_ID, type PromptTexts } from "../shared/prompts";
 import { TELL_LABEL, type OffstageSettings } from "../shared/offstage";
@@ -712,12 +714,57 @@ export function replyFailedChip(turn: string, failed: ReplyFailure, as: Generate
   };
 }
 
-/** What a reply's flags say the player can do on the chat's last reply, which Lumiverse's Regenerate plays again: one no turn was played for, and one that says something against its turn (before its lines of departure, `departuresOf`, which an earlier reply's flag lists with only what the world kept). */
+/** What a reply's flag says the player can do on the chat's last reply, which Lumiverse's Regenerate plays again: one no turn was played for. */
 const FLAG_NEXT = {
   unplayed: "Regenerate to play the turn, or go on: the author of the next harness turn is told, and records what still matters.",
-  departed: "Where this reply differs from what its turn decided, the world keeps the turn's version, and the author of the next turn is told. Regenerate to play the turn again, or say in your next message how it should go.",
-  departedEarlier: "Where this reply differs from what its turn decided, the world kept the turn's version.",
 } as const;
+
+/** A count in the footer's line: "1 beat", "3 beats". */
+function counted(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * A harness reply's footer (DEPTH2-PLAN §2): one line of what its turn did, in place of a chip for
+ * each change. The story time that passed, the beats its story record holds, the people and the
+ * things it changed, and its changes to the world as this chat plays it (places made in play, and
+ * places, paths and maps made or changed), each counted over what the record applied, its jobs'
+ * writes included and the user's own corrections not. On the latest reply, Undo takes the reply and
+ * its whole turn away (`harness/card.ts` `undoTurn`), and the detail lists its changes as the player
+ * character may read them; every footer names the turns its record holds, for the page that opens it.
+ */
+function turnFooter(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, m: ChainMessage, rec: Rec, events: readonly LedgerEvent[], head: boolean): Chip | null {
+  const turns = rec.harness?.turns ?? [];
+  if (turns.length === 0) return null;
+  const people = new Set<EntityId>();
+  const things = new Set<EntityId>();
+  let edits = 0;
+  for (const e of events) {
+    if (isDraftEvent(e) || e.type === PLACE_EVENT) edits++;
+    for (const t of registry.get(e.type)?.touches?.(e) ?? []) {
+      const kind = own(state.entities, t.entity)?.kind;
+      if (kind === undefined) continue;
+      if (kindIs(registry, world, kind, "person")) people.add(t.entity);
+      else if (kindIs(registry, world, kind, "thing")) things.add(t.entity);
+    }
+  }
+  const minutes = clockMinutes(rec.events);
+  const beats = recStoryOf(rec).beats.length;
+  const parts = [minutes > 0 ? `${compactSpan(minutes)} passed` : null, beats > 0 ? counted(beats, "beat", "beats") : null, people.size > 0 ? counted(people.size, "person", "people") : null, things.size > 0 ? counted(things.size, "thing", "things") : null, edits > 0 ? counted(edits, "world edit", "world edits") : null].filter((p): p is string => p !== null);
+  const lines = head ? turnLines(registry, world, state, events) : [];
+  return {
+    id: `${TURN_FOOTER}:${m.id}:${m.swipeId}`,
+    kind: TURN_FOOTER,
+    messageId: m.id,
+    swipeId: m.swipeId,
+    label: parts.length > 0 ? parts.join(" · ") : "Nothing changed",
+    ...(lines.length > 0 ? { detail: lines.join("\n") } : {}),
+    // Record opens the turn's record in the drawer, which the page does by itself (`frontend/chips.tsx`); Undo is the latest reply's alone.
+    actions: [{ id: "record", label: "Record" }, ...(head ? [{ id: "undo", label: "Undo the turn", style: "danger" as const }] : [])],
+    expires: "never",
+    turns: [...turns],
+  };
+}
 
 /**
  * Chips derived from the records: Re-read edit, Retry read, Retry (empty reply), degraded, Keep report, what changed, elapsed, overdue, a correction's Undo, a refused write's notice.
@@ -737,10 +784,14 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
       const what = unplayed.added ? "What Continue added to this reply was written" : "This reply was written";
       chips.push({ id: `unplayed:${m.id}:${m.swipeId}`, kind: "degraded", messageId: m.id, label: "No turn was played", detail: `${what} without the harness's agents: ${unplayed.why}. Nothing was rolled for it, no time passed, and nothing it tells was recorded.${head ? ` ${FLAG_NEXT.unplayed}` : ""}`, actions: head ? [{ id: "regenerate", label: "Regenerate" }] : [], expires: "never" });
     }
-    const departed = departuresOf(rec);
-    if (departed.length > 0) chips.push({ id: `departed:${m.id}:${m.swipeId}`, kind: "degraded", messageId: m.id, label: "The reply doesn't match the world", detail: [head ? FLAG_NEXT.departed : FLAG_NEXT.departedEarlier, ...departed].join("\n"), actions: head ? [{ id: "regenerate", label: "Regenerate" }] : [], expires: "never" });
     if (!harness && rec.accepted && (fold_ === "on_path" || fold_ === "plain")) {
       chips.push({ id: `reread:${m.id}:${m.swipeId}`, kind: "reread", messageId: m.id, label: "Re-read edit", detail: "The engine kept the world as simulated. Re-read this text to update it.", actions: [{ id: "reread", label: "Re-read edit", style: "primary" }], expires: "never" });
+    }
+    // A harness reply its turn was played for says in one line what that turn did.
+    if (harness && unplayed === null) {
+      const applied = appliedEvents(rec, fold, i);
+      const footer = turnFooter(registry, world, fold.state, m, rec, [...applied.events, ...applied.post], head);
+      if (footer) chips.push(footer);
     }
     if (i !== headIndex) return;
     const text = m.swipes[m.swipeId] ?? "";
@@ -749,7 +800,7 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
     if (rec.status === "degraded" && text.trim() === "") chips.push({ id: `retry:${m.id}:${m.swipeId}`, kind: "retry", messageId: m.id, label: "Retry", detail: "The narrator returned an empty reply.", actions: [{ id: "regenerate", label: "Retry", style: "primary" }], expires: "next_send" });
     else if (rec.status === "degraded") chips.push({ id: `degraded:${m.id}:${m.swipeId}`, kind: "degraded", messageId: m.id, label: "Not fully simulated", detail: "Part of this turn ran engine-only.", actions: [], expires: "next_send" });
     const minutes = clockMinutes(rec.events);
-    if (minutes > 0) chips.push({ id: `elapsed:${m.id}:${m.swipeId}`, kind: "elapsed", messageId: m.id, label: minutes >= 60 ? `+${Math.floor(minutes / 60)} h ${minutes % 60} min` : `+${minutes} min`, actions: [], expires: "next_send" });
+    if (!harness && minutes > 0) chips.push({ id: `elapsed:${m.id}:${m.swipeId}`, kind: "elapsed", messageId: m.id, label: minutes >= 60 ? `+${Math.floor(minutes / 60)} h ${minutes % 60} min` : `+${minutes} min`, actions: [], expires: "next_send" });
     // Re-narrate/Re-run (P3, §12; Build C item 1): the choice sets the next swipe's mode, with what the player asks of the new telling when they say (only the narrator reads it), then the UI swipes.
     if (!harness && rec.seed !== "" && rec.path !== "") {
       const ask = { type: "text" as const, label: "What should change?", value: "", optional: true as const };
@@ -759,8 +810,8 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
     const ctx = registry.context(world, state);
     const applied = appliedEvents(rec, fold, i);
     const lines = turnLines(registry, world, state, applied.events);
-    // One change: the label says it all; several: "N changes" with the list as detail.
-    if (lines.length > 0) chips.push({ id: `change:${m.id}:${m.swipeId}`, kind: "change", messageId: m.id, label: lines.length === 1 ? (lines[0] ?? "Changed") : `${lines.length} changes`, ...(lines.length > 1 ? { detail: lines.join("\n") } : {}), actions: [], expires: "next_send" });
+    // One change: the label says it all; several: "N changes" with the list as detail. A harness reply has its footer instead.
+    if (!harness && lines.length > 0) chips.push({ id: `change:${m.id}:${m.swipeId}`, kind: "change", messageId: m.id, label: lines.length === 1 ? (lines[0] ?? "Changed") : `${lines.length} changes`, ...(lines.length > 1 ? { detail: lines.join("\n") } : {}), actions: [], expires: "next_send" });
     // Each ✎ fix or GM edit on the head, with Undo, worded for the player (DESIGN §12): what the POV
     // may see of it, else who it was about as far as the POV knows them. Another person's moves and
     // doings are never worded for the player, and a mind or a section's settings has no player line.
@@ -875,8 +926,6 @@ export interface ViewInput {
   registry: Registry;
   world: (revision: string) => WorldDoc | undefined;
   stored: readonly StoredChip[];
-  /** The world's newest revision, read where the chat holds a reply's chip that offers Undo only while a commit is still that (`harness/card.ts`); absent where none does. */
-  head?: RevisionId | null;
   meter: CallMeterView | null;
   /** How the player chose to see the chat's map (`ChatPrefs`); null or absent follows the world. The map panel is built for it. */
   mapDisplay?: MapDisplay | null;
@@ -982,7 +1031,6 @@ export function buildView(input: ViewInput): StateView {
     for (const pack of registry.packs) packs[pack.id] = pack.version;
     // A swipe's chips show only while that swipe is displayed (switching back shows them again).
     const shown = input.stored.filter((c) => c.swipeId === undefined || observed.find((m) => m.id === c.messageId)?.swipeId === c.swipeId);
-    const chain = shown.some((c) => c.kind === WORLD_MADE) ? core.chain(observed) : [];
     return {
       v: 1,
       chatId: input.chatId,
@@ -994,7 +1042,8 @@ export function buildView(input: ViewInput): StateView {
       engine: input.knowledge.chat.engine ?? "classic",
       hud: parts.hud,
       scene: read.scene,
-      chips: [...shown.map(({ payload, ...chip }) => (chip.kind === WORLD_MADE ? worldMadeShown(chip, payload, { head: input.head, core, chain }) : chip)), ...read.chips],
+      // A commit's chip stored before a harness turn was undone whole kept an Undo of its own: there is none now.
+      chips: [...shown.map(({ payload: _payload, ...chip }) => (chip.kind === WORLD_MADE ? { ...chip, actions: chip.actions.filter((a) => a.id !== "undo") } : chip)), ...read.chips],
       replyClocks: read.replyClocks,
       journal: read.journal,
       keepReport: read.keepReport,

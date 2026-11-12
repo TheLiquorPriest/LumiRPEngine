@@ -23,6 +23,7 @@ import { Banner, Button, Section } from "../../src/frontend/components";
 import { drawerModes, ModeBar, ModeBody } from "../../src/frontend/drawer";
 import { HARNESS_MODE, harnessChat, harnessOffered, shownMode } from "../../src/frontend/harness/mode";
 import { HARNESS_PAGES, HARNESS_PAGES_CSS, HarnessCurtain, type HarnessPages, HarnessView, waitingOf } from "../../src/frontend/harness/pages";
+import { HARNESS_TABS, StoryFrame } from "../../src/frontend/story/tab";
 import { Play } from "../../src/frontend/play/play";
 import { AGENTS_SUB, ENGINE_NOTE_PAGES, engineNote, OLD_ENGINE_TIMEOUTS, TURN_TIMEOUTS_TITLE } from "../../src/frontend/settings/labels";
 import { KEPT_DEFS, LOOP_DEFS } from "../../src/shared/agent-settings";
@@ -67,7 +68,10 @@ function barFor(harness: boolean | null, chosen: Mode, waiting = 0): unknown {
 }
 
 /** LumiAH's pages as the tab is handed them; walking a tree reads nothing of them. */
-const PAGES: HarnessPages = { app: {} as HarnessPages["app"], start: () => undefined, dispose: () => undefined };
+const PAGES: HarnessPages = { app: {} as HarnessPages["app"], start: () => undefined, files: { list: async () => [], read: async () => ({ failed: "none", code: "missing" }), write: async () => ({ failed: "none", code: "other" }) }, connections: { state: { get: () => null, subscribe: () => () => undefined }, failed: { get: () => false, subscribe: () => () => undefined }, start: () => undefined }, dispose: () => undefined };
+
+/** Where the tab stands, as UI state keeps it: on LumiAH's pages, where it opens. */
+const AT = { chatId: "chat-1", route: { page: "agents" as const }, go: () => undefined };
 
 const ALL_PAGES: readonly SettingsPage[] = HOME_GROUPS.flatMap((group) => group.pages);
 
@@ -206,7 +210,7 @@ describe("the harness's pages", () => {
 
   test("the tab opens behind a curtain: nothing of the pages is drawn until it is opened, and it says what the harness is", () => {
     let opened = 0;
-    const closed = HarnessView({ pages: PAGES, revealed: false, onReveal: () => (opened += 1) });
+    const closed = HarnessView({ pages: PAGES, revealed: false, onReveal: () => (opened += 1), ...AT });
     expect(propsOf(closed, Shell)).toEqual([]);
     const [curtain] = propsOf(closed, HarnessCurtain);
     if (!curtain) throw new Error("no curtain in front of the pages");
@@ -215,16 +219,19 @@ describe("the harness's pages", () => {
     expect(textOf(gate)).toContain("The harness is the AI author that plays this chat's turns, with the agents it starts.");
     expect(textOf(gate)).toContain("everything they read of the world and everything they think");
     const [show] = propsOf(gate, Button);
-    expect(textOf(show?.children)).toBe("Show the agents at work");
+    expect(textOf(show?.children)).toBe("Show the story and the agents");
     if (typeof show?.onClick !== "function") throw new Error("the curtain has nothing to press");
     show.onClick();
     expect(opened).toBe(1);
   });
 
-  test("opened, it shows LumiAH's shell with exactly the pages offered", () => {
-    const open = HarnessView({ pages: PAGES, revealed: true, onReveal: () => undefined });
+  test("opened, it shows LumiAH's shell with exactly the pages offered, under the bar that goes to the story's pages", () => {
+    const open = HarnessView({ pages: PAGES, revealed: true, onReveal: () => undefined, ...AT });
     expect(propsOf(open, HarnessCurtain)).toEqual([]);
     expect(propsOf(open, Shell)).toEqual([{ pages: HARNESS_PAGES }]);
+    const [frame] = propsOf(open, StoryFrame);
+    expect(frame?.route).toEqual({ page: "agents" });
+    expect(HARNESS_TABS.map((t) => t.id)).toEqual(["agents", "cast", "record", "notebook"]);
   });
 });
 
@@ -242,7 +249,7 @@ describe("LumiAH's own switch for a chat", () => {
     // The rule holds only while LumiAH names these parts so: a rename there must fail here.
     for (const part of [".lah-chatswitch{", ".lah-switch>input{", ".lah-switch-track{"]) expect(LUMIAH_CSS).toContain(part);
     // The pages sit inside the element the rule starts from.
-    expect((HarnessView({ pages: PAGES, revealed: true, onReveal: () => undefined }) as VNode<Props>).props.class).toBe("lre-harness");
+    expect((HarnessView({ pages: PAGES, revealed: true, onReveal: () => undefined, ...AT }) as VNode<Props>).props.class).toBe("lre-harness");
   });
 });
 
@@ -276,8 +283,8 @@ describe("the two stylesheets", () => {
     expect(CSS.includes(LUMIAH_CSS)).toBe(false);
   });
 
-  test("under our mode bar LumiAH's shell is told where its bar sticks, how far it reaches and the height it has", () => {
-    for (const measure of ["--lah-stick-top:calc(var(--lre-stick-top,0px) + var(--lre-modebar-h,0px))!important", "--lah-bleed-l:calc(var(--lre-s3) + var(--lre-gutter-l))!important", "--lah-bleed-r:calc(var(--lre-s3) + var(--lre-gutter-r))!important", "--lah-fill-h:calc(var(--lre-fill-h,100vh) - var(--lre-modebar-h,0px))!important"]) expect(HARNESS_CSS).toContain(measure);
+  test("under our mode bar and above the story's bar, LumiAH's shell is told where its bar sticks, how far it reaches and the height it has", () => {
+    for (const measure of ["--lah-stick-top:calc(var(--lre-stick-top,0px) + var(--lre-modebar-h,0px))!important", "--lah-bleed-l:calc(var(--lre-s3) + var(--lre-gutter-l))!important", "--lah-bleed-r:calc(var(--lre-s3) + var(--lre-gutter-r))!important", "--lah-fill-h:calc(var(--lre-fill-h,100vh) - var(--lre-modebar-h,0px) - var(--lre-harness-nav-h,0px))!important"]) expect(HARNESS_CSS).toContain(measure);
     // The shell still reads each of them: a measure it drops or renames must fail here.
     for (const read of ["var(--lah-stick-top", "var(--lah-bleed-l", "var(--lah-bleed-r", "var(--lah-fill-h"]) expect(LUMIAH_CSS).toContain(read);
   });

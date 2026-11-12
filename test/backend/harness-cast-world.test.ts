@@ -11,6 +11,7 @@ import { WORLD_COLLECTIONS } from "../../src/backend/worlds";
 import { renderPrompt } from "../../src/backend/prompts";
 import { COLLECTION_SHAPES, PART_SHAPES, shapeTextId } from "../../src/shared/harness-texts-shapes";
 import { HARNESS_AGENT, HARNESS_NOTE } from "../../src/shared/harness-texts";
+import { MINDS_NOTE } from "../../src/shared/harness-texts-minds";
 import { WORLD_NOTE } from "../../src/shared/harness-texts-world";
 import { isRecord, type JsonObject } from "../../src/shared/json";
 import { MAP_SCHEMA } from "../../src/shared/maps";
@@ -657,12 +658,12 @@ describe("the world's document asks first", () => {
       ["world_set", { part: "meta", value: text({ name: "Another name" }) }],
       ["world_patch", { ops: text([{ op: "replace", path: "/name", value: "Another name" }]) }],
       ["world_keep", { things: ["anything"] }],
-      ["world_place", { name: "The Old Mill", parent: HOME }],
-      ["world_path", {}],
-      ["world_map", {}],
-      ["world_map_place", {}],
-      ["world_map_link", {}],
-      ["world_map_settings", {}],
+      ["world_place", { in: "document", name: "The Old Mill", parent: HOME }],
+      ["world_path", { in: "document" }],
+      ["world_map", { in: "document" }],
+      ["world_map_place", { in: "document" }],
+      ["world_map_link", { in: "document" }],
+      ["world_map_settings", { in: "document" }],
     ];
     for (const [name, args] of writes) {
       const never = await refusal(env, name, args);
@@ -679,7 +680,7 @@ describe("the world's document asks first", () => {
 });
 
 describe("what is closed to agents in the world's document", () => {
-  const CHARACTER = { id: "c-pov", role: HARNESS_AGENT.character };
+  const CHARACTER = { id: "c-pov", role: HARNESS_AGENT.character, as: POV };
 
   test("who the player's character is, and what the engine holds agents to, no draft tool writes, under any mode: by patch, by a parent's patch, by a part or by a pack", async () => {
     for (const mode of ["auto", "confirm"] as const) {
@@ -709,7 +710,7 @@ describe("what is closed to agents in the world's document", () => {
       // The player's character is who it was: a character's agent is still refused their mind.
       const state = (await stateOf(rig, chatId)).state;
       const next = await beginTurn(rig, chatId, "I wait again.");
-      expect(await next.refusal(CHARACTER, "mind_view", { who: POV })).toBe(note(HARNESS_NOTE.playerMind, { name: state.entities[POV]?.name ?? "" }));
+      expect(await next.refusal(CHARACTER, "mind_read")).toBe(note(MINDS_NOTE.playerNoMind, { name: state.entities[POV]?.name ?? "" }));
       noModelCalls(rig);
     }
   });
@@ -753,7 +754,7 @@ describe("a turn stopped after it asked for an Upgrade", () => {
     if (!build) throw new Error("the harness chat plays no world");
     const first = await build.head();
     const one = await beginTurn(rig, chatId, "I ask about the mill.");
-    await one.answer(AUTHOR, "world_place", { name: "The Old Mill", parent: HOME });
+    await one.answer(AUTHOR, "world_place", { in: "document", name: "The Old Mill", parent: HOME });
     await one.answer(AUTHOR, "world_commit");
     await one.answer(AUTHOR, "world_upgrade");
     if (commits) await one.answer(AUTHOR, "commit");
@@ -927,7 +928,7 @@ describe("an Upgrade before the chat's first turn", () => {
 describe("world_made and world_keep", () => {
   test("what the chat made in play is listed, and copied into the world's draft by name", async () => {
     const { rig, env, build } = await worldEnv();
-    expect(String((await answer(env, "world_made")).note)).toContain("made nothing");
+    expect(String((await answer(env, "world_made")).note)).toContain("made or changed nothing");
     expect(await refusal({ ...env, build: null }, "world_made")).toContain("can't be reached");
     await answer(env, "place_make", { name: "the back room", parent: HOME, as: "room", why: "the story walks into a back room" });
     await answer(env, "item_make", { name: "grey scarf", in: MARA, why: "she is wearing a grey scarf" });
@@ -953,7 +954,7 @@ describe("world_made and world_keep", () => {
 
     const kept = await answer(env, "world_keep", { places: ["The Back Room"], things: [things[0]?.name ?? ""] });
     expect(kept.kept).toEqual({ things: [scarf], places: [id] });
-    expect(String(kept.changed)).toContain("1 of the things and 1 of the places");
+    expect(String(kept.changed)).toContain("2 of what was named");
     expect(String(kept.next)).toContain("world_commit");
     const draft = await draftOf(build);
     expect(draft.stored).toBe(true);
