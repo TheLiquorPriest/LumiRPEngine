@@ -95,5 +95,6 @@ describe("trust tax", () => {
     const exempt = holding({ tax_exempt: "charity" });
     expect([investmentTax(exempt.ctx, TRUST, 2026).cents, taxFlow(exempt)]).toEqual([0, false]);
     expect(taxesOf(exempt, SHOP)).toMatchObject({ taxedTo: [{ name: "Marcus Delgado", share: 60 }], exemptHolders: [{ name: "Harbor Family Trust", share: 40 }] });
-  });
+    // Two Port Alders, one of them run through its 15 April, take a while.
+  }, 30_000);
 });

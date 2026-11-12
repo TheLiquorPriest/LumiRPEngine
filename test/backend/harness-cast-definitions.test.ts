@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { HARNESS_LISTED, harnessTools } from "../../src/backend/agents/tools/harness";
 import { HARNESS_AGENT, harnessDefinitions, harnessRole, READER_PROMPT_TOKENS, worldGuidance } from "../../src/backend/harness/definitions";
 import { defaultSettings } from "../../src/backend/settings-store";
-import { lumiahBed } from "../support/lumiah-bed";
+import { runtimeBed } from "../support/runtime-bed";
 import { Rig } from "../support/rig";
 import { LUMIAH_FAMILY, LUMIAH_TOOL } from "../../src/backend/harness/definitions/lumiah";
 import type { AgentBudget, AgentDefinition } from "../../src/backend/harness/shapes";
@@ -143,7 +143,8 @@ describe("the cast the harness engine registers", () => {
   });
 
   test("the prompt per call the author and the historian ship with is the user's to change: a version they save keeps its own, and the engine keeps its instructions", async () => {
-    const bed = lumiahBed(new Rig());
+    // LumiAH's Agents page reads the definitions of the runtime that plays its chats: one is linked, as a player has one.
+    const bed = await runtimeBed(new Rig());
     try {
       const agents = async () => (await bed.page<{ agents: AgentDefinition[] }>("lah.defs.get", {})).agents;
       const limit = async (id: string) => (await agents()).find((a) => a.id === id)?.budget.callTokensIn;

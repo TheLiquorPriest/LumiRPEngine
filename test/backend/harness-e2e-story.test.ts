@@ -12,7 +12,7 @@ import { cast, offers, results, told, toolCall } from "../support/lumiah-bed";
 import { Rig } from "../support/rig";
 import { type RuntimeBed, runtimeBed } from "../support/runtime-bed";
 import { JOSS, MARA, noModelCalls, recordOn, stateOf } from "./harness-driver";
-import { alderWorld, chatOn, guard } from "./harness-e2e-kit";
+import { alderWorld, chatOn, guard, inRuntime } from "./harness-e2e-kit";
 
 const beds: RuntimeBed[] = [];
 afterEach(() => {
@@ -25,7 +25,7 @@ async function storyChat(): Promise<{ bed: RuntimeBed; rig: Rig; chatId: string 
   const bed = await runtimeBed(rig);
   beds.push(bed);
   const chatId = await chatOn(rig, await alderWorld(rig));
-  await bed.until(async () => (await bed.page<{ chat: { on: boolean; place: string } }>("lah.chat.get", { chatId })).chat.place === "runtime", "the chat set to play in the runtime");
+  await bed.until(() => inRuntime(bed, chatId), "the chat set to play in the runtime");
   guard(rig);
   return { bed, rig, chatId };
 }

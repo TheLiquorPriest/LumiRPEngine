@@ -8,7 +8,8 @@
 // one note while the open chat is on the harness, and never otherwise.
 
 import { describe, expect, test } from "bun:test";
-import { CSS as LUMIAH_CSS, GROUPS, Shell } from "lumi-ah/extension/frontend";
+import { CSS as LUMIAH_CSS, GROUPS, type KnownConnections as LumiahKnown, Shell } from "lumi-ah/extension/frontend";
+import { TRANSPORT_SCHEMA } from "lumi-ah/link";
 import type { VNode } from "preact";
 import type { ChatKnowledgePrefs } from "../../src/backend/chat-knowledge-prefs";
 import { buildView, notWorldView, ViewMemo } from "../../src/backend/view";
@@ -22,13 +23,13 @@ import type { Mode, SettingsPage, SettingsRoute } from "../../src/frontend/app";
 import { Banner, Button, Section } from "../../src/frontend/components";
 import { drawerModes, ModeBar, ModeBody } from "../../src/frontend/drawer";
 import { HARNESS_MODE, harnessChat, harnessOffered, shownMode } from "../../src/frontend/harness/mode";
-import { HARNESS_PAGES, HARNESS_PAGES_CSS, HarnessCurtain, type HarnessPages, HarnessView, waitingOf } from "../../src/frontend/harness/pages";
+import { HARNESS_PAGES, HARNESS_PAGES_CSS, HarnessCurtain, type HarnessPages, HarnessView, knownOf, waitingOf } from "../../src/frontend/harness/pages";
 import { HARNESS_TABS, StoryFrame } from "../../src/frontend/story/tab";
 import { Play } from "../../src/frontend/play/play";
 import { AGENTS_SUB, ENGINE_NOTE_PAGES, engineNote, OLD_ENGINE_TIMEOUTS, TURN_TIMEOUTS_TITLE } from "../../src/frontend/settings/labels";
 import { KEPT_DEFS, LOOP_DEFS } from "../../src/shared/agent-settings";
 import { EngineNote, HOME_GROUPS, Settings } from "../../src/frontend/settings/settings";
-import { TimeoutsSection } from "../../src/frontend/settings/timeouts";
+import { RUNTIME_WAITS, TimeoutsSection } from "../../src/frontend/settings/timeouts";
 import { CSS } from "../../src/frontend/styles";
 import { HARNESS_CSS } from "../../src/frontend/styles/harness";
 import { hashJson } from "../../src/shared/hash";
@@ -68,7 +69,7 @@ function barFor(harness: boolean | null, chosen: Mode, waiting = 0): unknown {
 }
 
 /** LumiAH's pages as the tab is handed them; walking a tree reads nothing of them. */
-const PAGES: HarnessPages = { app: {} as HarnessPages["app"], start: () => undefined, files: { list: async () => [], read: async () => ({ failed: "none", code: "missing" }), write: async () => ({ failed: "none", code: "other" }) }, connections: { state: { get: () => null, subscribe: () => () => undefined }, failed: { get: () => false, subscribe: () => () => undefined }, start: () => undefined }, dispose: () => undefined };
+const PAGES: HarnessPages = { app: {} as HarnessPages["app"], start: () => undefined, files: { list: async () => [], read: async () => ({ failed: "none", code: "missing" }), write: async () => ({ failed: "none", code: "other" }) }, connections: { useKnown: () => ({ list: null, default: null, runtime: null, linked: false, runtimes: 0, chat: false, failed: null }), models: async () => [], open: () => undefined, start: () => undefined }, dispose: () => undefined };
 
 /** Where the tab stands, as UI state keeps it: on LumiAH's pages, where it opens. */
 const AT = { chatId: "chat-1", route: { page: "agents" as const }, go: () => undefined };
@@ -198,8 +199,8 @@ describe("the harness's pages", () => {
       { group: "Agents", pages: ["Agents", "Skills", "Tools"] },
       { group: "System", pages: ["Settings", "Spend", "Storage", "Runtime"] },
     ]);
-    // Runtime says of itself that it is optional.
-    expect(GROUPS.flatMap((group) => group.pages).find((page) => page.id === "runtime")?.about).toStartWith("Optional.");
+    // Runtime says of itself that it is needed: every chat on the harness plays in it.
+    expect(GROUPS.flatMap((group) => group.pages).find((page) => page.id === "runtime")?.about).toStartWith("Needed.");
   });
 
   test("every page of LumiAH's is either offered or left out on purpose: a page it adds is a choice to make here", () => {
@@ -240,16 +241,80 @@ describe("LumiAH's own switch for a chat", () => {
     expect(HARNESS_PAGES.includes("home")).toBe(false);
   });
 
-  test("and on Runtime, which lists the chats with it, its control is taken away: the row can't be pressed and shows no switch", () => {
-    expect(HARNESS_CSS).toContain(".lre-harness .lah-chatswitch>.lah-switch{pointer-events:none;cursor:default}");
-    expect(HARNESS_CSS).toContain(".lre-harness .lah-chatswitch>.lah-switch>input,.lre-harness .lah-chatswitch>.lah-switch>.lah-switch-track{display:none}");
-    // A chat LumiAH doesn't answer has nothing else in its row, which reads "switched on, it runs…": the row goes.
+  test("and on Runtime, which lists the chats it plays, LumiAH draws no switch of its own once told LumiRPEngine switches them, so our sheet takes none away; a chat set to the harness that LumiAH hasn't taken yet is left out", () => {
+    // LumiAH leaves its switch out by itself now (`RuntimeView.switchedBy`): nothing of ours hides it.
+    expect(HARNESS_CSS).not.toContain(".lah-switch");
+    // Such a row would say to switch the chat on in our own pages, where it already is on the harness: it goes.
     expect(HARNESS_CSS).toContain(".lre-harness .lah-chatrow:has(>.lah-chatswitch[data-on=false]){display:none}");
-    expect(LUMIAH_CSS).toContain(".lah-chatrow{");
     // The rule holds only while LumiAH names these parts so: a rename there must fail here.
-    for (const part of [".lah-chatswitch{", ".lah-switch>input{", ".lah-switch-track{"]) expect(LUMIAH_CSS).toContain(part);
+    for (const part of [".lah-chatrow{", ".lah-chatswitch{"]) expect(LUMIAH_CSS).toContain(part);
     // The pages sit inside the element the rule starts from.
     expect((HarnessView({ pages: PAGES, revealed: true, onReveal: () => undefined, ...AT }) as VNode<Props>).props.class).toBe("lre-harness");
+  });
+});
+
+describe("the runtime's connections, as the story's pages read them from LumiAH's", () => {
+  const known: LumiahKnown = {
+    view: {
+      connections: [
+        { id: "conn-ds", name: "Deepseek", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", default: true, key: { set: true, last4: "7f3a" } },
+        { id: "rc-claude", name: "Claude", provider: "anthropic", auth: "signin", default: false, key: null, signedIn: true },
+      ],
+      default: "conn-ds",
+      providers: [
+        { id: "deepseek", name: "DeepSeek", auth: ["key"], apis: ["openai-completions"], needsBaseUrl: false },
+        { id: "anthropic", name: "Anthropic", auth: ["key", "signin"], apis: ["anthropic-messages"], needsBaseUrl: false },
+      ],
+      relay: { id: "rt-home", name: "home-pc" },
+    },
+    linked: true,
+    runtimes: 1,
+    chat: true,
+    failed: null,
+    reading: false,
+  };
+
+  test("each connection by its name and in LumiAH's own words for a picker, the default, and the runtime they are of; never a key", () => {
+    const ours = knownOf(known, false);
+    expect(ours).toEqual({
+      list: [
+        { id: "conn-ds", name: "Deepseek", label: "Deepseek · DeepSeek · deepseek-v4-flash", model: "deepseek-v4-flash" },
+        { id: "rc-claude", name: "Claude", label: "Claude · Anthropic", model: null },
+      ],
+      default: "conn-ds",
+      runtime: { id: "rt-home", name: "home-pc" },
+      linked: true,
+      runtimes: 1,
+      chat: true,
+      failed: null,
+    });
+    expect(JSON.stringify(ours)).not.toContain("7f3a");
+  });
+
+  test("while nothing is read, nothing is listed; where LumiAH's backend never answered, the page says so", () => {
+    const unread = { ...known, view: null, linked: false };
+    expect(knownOf(unread, false)).toMatchObject({ list: null, default: null, runtime: null, failed: null });
+    expect(knownOf(unread, true).failed).toBe("LumiRPEngine's harness didn't answer. Reload the page to try again.");
+    // A list read stands for its names even when the hello failed since.
+    expect(knownOf(known, true).failed).toBeNull();
+  });
+});
+
+describe("Settings → Timeouts and the runtime's waits", () => {
+  test("one line says where they are: LumiAH's own Timeouts page, in the Harness tab, named as a timeout of the harness names it, whose waits it names as LumiAH titles them", () => {
+    const page = TimeoutsSection({ timeouts: defaultTimeouts(), patch: () => undefined, busy: false });
+    const runtime = propsOf(page, Section).find((section) => propsOf(section.children, "div").some((rows) => rows["data-lre-runtime-waits"] !== undefined));
+    expect(runtime?.title).toBe("The runtime's waits");
+    expect(textOf(runtime?.children)).toBe(RUNTIME_WAITS);
+    // As the mount tells LumiAH where its Settings are (`settingsAt`), so the place and a timeout's words, quoted, read as a timeout of the harness reads (harness-mount.test.ts holds the line to the words themselves).
+    expect(RUNTIME_WAITS).toContain("on its Timeouts page: LumiRPEngine's Harness tab → System → Settings → Timeouts.");
+    expect(RUNTIME_WAITS).toContain("“Runtime wait (LumiRPEngine's Harness tab → System → Settings → Timeouts → Waiting for the runtime)”");
+    // LumiAH's Settings page, where its Timeouts page is, is one of the tab's pages, under System.
+    expect(HARNESS_PAGES.includes("settings")).toBe(true);
+    expect(GROUPS.find((group) => group.pages.some((page) => page.id === "settings"))?.label).toBe("System");
+    // The two waits it names are LumiAH's settings, by the titles LumiAH gives them.
+    const pages = (TRANSPORT_SCHEMA.properties as Record<string, { properties: Record<string, { title: string }> }>).pages?.properties;
+    for (const key of ["askMs", "proxyMs"]) expect(RUNTIME_WAITS).toContain(pages?.[key]?.title ?? key);
   });
 });
 

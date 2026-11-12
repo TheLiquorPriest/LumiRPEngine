@@ -788,7 +788,11 @@ export function createSpindleHost(): HostPort {
         return { presetId: str(raw, "preset_id") ?? null, blockStates };
       },
       async blocks(presetId, userId) {
-        return (await spindle.presets.blocks.list(presetId, userId)).map((b) => ({
+        // `blocks.list` gives every block a `group`, null where the stored block has none, so only the stored block says whether it names one.
+        const [listed, preset] = await Promise.all([spindle.presets.blocks.list(presetId, userId), spindle.presets.get(presetId, userId)]);
+        const stored: unknown = preset?.prompt_order;
+        const naming = Array.isArray(stored) ? new Set(stored.flatMap((raw: unknown) => (isRecord(raw) && typeof raw.id === "string" && raw.group !== undefined ? [raw.id] : []))) : null;
+        return listed.map((b) => ({
           id: b.id,
           name: b.name,
           content: b.content,
@@ -798,8 +802,8 @@ export function createSpindleHost(): HostPort {
           // The host keeps a block's character tag trigger beside the published fields.
           characterTagTrigger: "characterTagTrigger" in b && Array.isArray(b.characterTagTrigger) ? b.characterTagTrigger.filter((t): t is string => typeof t === "string") : [],
           categoryMode: b.categoryMode === "radio" || b.categoryMode === "checkbox" ? b.categoryMode : null,
-          // An older preset's block has no group: it falls under the header above it.
-          ...("group" in b ? { group: typeof b.group === "string" && b.group !== "" ? b.group : null } : {}),
+          // An older preset's block names no group: it falls under the header above it.
+          ...("group" in b && (naming === null || naming.has(b.id)) ? { group: typeof b.group === "string" && b.group !== "" ? b.group : null } : {}),
           variables: promptVariablesOf(b.variables),
         }));
       },

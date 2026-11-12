@@ -143,7 +143,8 @@ describe("a typed skip to Friday at 6 PM", () => {
     const skip = record?.events.find((e) => e.type === "minds.skip");
     expect(skip && "data" in skip ? skip.data.beats : null).toEqual(expect.arrayContaining([expect.objectContaining({ at: wednesday, source: "scan" })]));
     expect(calls.some((c) => c.at === wednesday && c.who.includes(MARCUS))).toBe(true);
-  });
+    // A turn and a skip of most of a week on Port Alder, its beats' minds run, take a while.
+  }, 30_000);
 
   test("one that has passed runs no skip: the turn notes why", async () => {
     const rig = new Rig({ shipped: true });

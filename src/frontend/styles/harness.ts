@@ -14,11 +14,12 @@
 // bar, "Jump to the newest", "Back to top", its notices) sticks in the same scrolling panel as our
 // bar and would sit under it otherwise.
 //
-// LumiAH's Runtime page lists the chats it answers, each with LumiAH's own on/off switch for the
-// chat. GM → This chat → Engine is the one control for that, and LumiAH's pages can't be told to
-// leave the switch out, so its control is taken away here: the row keeps the chat's name, how it
-// stands and where it runs. The row of a chat LumiAH doesn't answer has nothing else in it, and
-// reads "switched on, it runs…" with no switch to be seen, so that row goes too.
+// LumiAH's Runtime page lists the chats it plays. Told that LumiRPEngine switches its chats on in its
+// own pages (`RuntimeView.switchedBy`, from the mount's `ownSwitch`), it offers no switch of its own
+// there and says where the switch is. One row still goes: a chat set to the harness that LumiAH
+// hasn't taken yet (no runtime was linked when it was set; it is taken as its next reply starts)
+// would read "LumiAH is off for this chat. Switch it on in LumiRPEngine's own pages", though GM →
+// This chat → Engine already has it on the harness.
 
 export const HARNESS_CSS = `
 .lre-modeseg[data-lre-modes="5"]>button{position:relative;min-height:var(--lre-tap-lg)}
@@ -29,7 +30,5 @@ export const HARNESS_CSS = `
 .lre-harness>.lre-harness-curtain{margin:var(--lre-s3) 0 var(--lre-s5)}
 .lre-harness-curtain>.lre-btn,.lre-set-engine-note .lre-btn{min-height:var(--lre-tap-lg)}
 .lre-story-body>.lah-root{flex:1 1 auto;min-height:0;--lah-stick-top:calc(var(--lre-stick-top,0px) + var(--lre-modebar-h,0px))!important;--lah-stick-bottom:var(--lre-harness-nav-h,0px)!important;--lah-bleed-l:calc(var(--lre-s3) + var(--lre-gutter-l))!important;--lah-bleed-r:calc(var(--lre-s3) + var(--lre-gutter-r))!important;--lah-fill-h:calc(var(--lre-fill-h,100vh) - var(--lre-modebar-h,0px) - var(--lre-harness-nav-h,0px))!important}
-.lre-harness .lah-chatswitch>.lah-switch{pointer-events:none;cursor:default}
-.lre-harness .lah-chatswitch>.lah-switch>input,.lre-harness .lah-chatswitch>.lah-switch>.lah-switch-track{display:none}
 .lre-harness .lah-chatrow:has(>.lah-chatswitch[data-on=false]){display:none}
 `;

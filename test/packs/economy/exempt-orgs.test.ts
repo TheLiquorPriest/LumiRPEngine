@@ -176,7 +176,8 @@ describe("exempt organizations: gifts", () => {
     const flows = (x: Working): string[] => x.ctx.query("economy.finance")(x.ctx, JORDAN, false).flows.map((f) => f.id);
     expect(flows(w)).toContain(`donation_refund:${JORDAN}`);
     expect(flows(flat)).not.toContain(`donation_refund:${JORDAN}`);
-  });
+    // Two Port Alders, one of them run through its 15 April, take a while.
+  }, 30_000);
 });
 
 describe("exempt organizations: the tax_status op", () => {
@@ -239,7 +240,8 @@ describe("a private foundation (§26.3)", () => {
     const left = Number(rec?.shortfall) - 3_100_000;
     expect(later).toMatchObject({ grants: 3_100_000, toPrior: 3_100_000, undistributed: left, tax: Math.round(left * 0.3) });
     expect(taxesOf(next, FOUNDATION)).toMatchObject({ foundation: { payoutPct: 5, excisePct: 1.39, last: { year: 2027, undistributed: left }, due: Number(later?.excise) + Math.round(left * 0.3) } });
-  });
+    // Two closes of the whole town's year and its days around 15 May take a while.
+  }, 30_000);
 
   test("a person's gifts to it are deductible up to 30% of their income; the donation is marked a foundation's", () => {
     const w = foundation();

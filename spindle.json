@@ -22,7 +22,8 @@
     "memories",
     "databanks",
     "web_search",
-    "generation_parameters"
+    "generation_parameters",
+    "cors_proxy"
   ],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js"

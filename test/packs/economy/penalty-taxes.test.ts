@@ -28,6 +28,8 @@ function april(w: Working): Working {
   return x;
 }
 
+// Each test closes the year of all of Port Alder, every household and company at once, and most run
+// its 15 April too: a second or two alone, more with every core busy, so each is given 30 s.
 describe("penalty taxes", () => {
   test("a personal holding company pays 20% on what it kept, booked on 15 April", () => {
     const { w, id } = holdingCompany();
@@ -47,7 +49,7 @@ describe("penalty taxes", () => {
       { account: "economy.external:tax:federal", amount: tax?.cents ?? 0 },
     ]);
     expect(taxesOf(paid, id).penalty?.last?.paid).toBe(true);
-  });
+  }, 30_000);
 
   test("a consent dividend before the return clears it: no money moves, and it is Jordan's income and basis for 2026", () => {
     const { w, id } = holdingCompany();
@@ -67,7 +69,7 @@ describe("penalty taxes", () => {
     expect(posts(april(feb), /^Personal holding company tax/)).toEqual([]);
     // After its return is due, last year's is closed to it.
     expect(why(act(at(jan, "2027-05-01T09:00"), JORDAN, "consent_dividend", { org: id, amount: 1_000, year: 2026 }))).toContain("until its return is filed on 15 April");
-  });
+  }, 30_000);
 
   test("an operating company keeping more than its credit pays the accumulated earnings tax; opening E&P uses the credit up", () => {
     const w = portAlder(ON);
@@ -89,7 +91,7 @@ describe("penalty taxes", () => {
     const closed = closeYear(kept, 2026);
     expect(penaltyTaxFor(closed.ctx, other, 2026)).toMatchObject({ kind: "aet", credit: 0 });
     expect(closedYear(closed.state, other, 2026)?.epStart).toBe(25_000_000);
-  });
+  }, 30_000);
 
   test("off, the default: no close for a profitable corporation, nothing booked, Taxes says it's off", () => {
     const { w, id } = holdingCompany(false);
@@ -98,5 +100,5 @@ describe("penalty taxes", () => {
     expect(jan.events.some((e) => e.type === "economy.year_close")).toBe(false);
     expect(taxesOf(jan, id).penalty).toMatchObject({ on: false, last: null });
     expect(posts(april(jan), /^(Personal holding company|Accumulated earnings) tax/)).toEqual([]);
-  });
+  }, 30_000);
 });

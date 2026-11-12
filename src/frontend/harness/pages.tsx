@@ -6,27 +6,29 @@
 // drawer changes of their layout.
 //
 // - Which pages (`HARNESS_PAGES`). What the agents are doing comes first, then what they keep and
-//   how they are set up; a runtime, its key and its connection are optional and come last.
+//   how they are set up; the runtime, which every chat on the harness needs (the agents run there,
+//   on the runtime's own connections), comes last, as LumiAH's own bar has it.
 // - The curtain. The pages show the agents' work whole: what they read of the world, secrets marked,
 //   and what they think. That is GM-level, like GM → Live and Settings → Diagnostics, so the tab
 //   opens behind the same kind of gate, opened for one chat and closed again on leaving the tab.
 // - Hello. Nothing of LumiAH's is asked for until a chat on the harness is open (`start`).
 // - The story's pages. Cast, Record and Notebook (`story/`) sit beside LumiAH's under one bottom
 //   bar, behind the same curtain. They read the chat's workspace through LumiAH's own page requests
-//   (`files`), and LumiAH's list of the user's connections, which marks the loopbacks no agent may
-//   run on (`connections`, which the drawer hands to Settings too), so nothing under `story/`
-//   imports LumiAH.
+//   (`files`), and the runtime's connections as LumiAH's pages know them (`connections`, which the
+//   drawer hands to Settings → Story → Models and Play too, under `HarnessReach`), so nothing under
+//   `story/` imports LumiAH.
 
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
-import { type App as PagesApp, AppContext as PagesContext, createApp, createHost, CSS, type PageId, type PrefsStorage, Shell, UiRequestError } from "lumi-ah/extension/frontend";
+import { type App as PagesApp, AppContext as PagesContext, createApp, createHost, CSS, type KnownConnections as LumiahKnown, leadToConnections, type PageId, pickerLabel, type PrefsStorage, Shell, UiRequestError, useRuntimeConnections } from "lumi-ah/extension/frontend";
 import type { FrontendToBackend, UiState, WorkspaceFile } from "lumi-ah/shared";
-import { useState } from "preact/hooks";
+import type { ComponentChildren } from "preact";
+import { useMemo, useState } from "preact/hooks";
 import { type HarnessRoute, useApp, useUi } from "../app";
 import { Button } from "../components";
 import { Icon } from "../icons";
 import { type Readable, useSelect } from "../store";
 import type { FilesFailed, StoryFile, StoryFiles } from "../story/files";
-import type { ConnectionsPort } from "../story/connections";
+import { ConnectionsContext, type ConnectionsPort, type KnownConnections } from "../story/connections";
 import { StoryFrame } from "../story/tab";
 
 /** LumiAH's stylesheet, added to the page once beside ours. Its every class, variable, animation and container is `lah`-named, ours `lre`-named, so neither restyles the other. */
@@ -41,7 +43,8 @@ export const HARNESS_PAGES_CSS: string = CSS;
  *   that call).
  * - Story: Workspace (the agents' files) and Guidance (their standing instructions).
  * - Agents: each agent, the skills and the tools.
- * - System: Settings, Spend, Storage, and Runtime last: starting one is optional, and few need it.
+ * - System: Settings, Spend, Storage, and Runtime last: every chat on the harness needs a runtime,
+ *   and its page holds its connections, its settings and its update.
  *
  * Left out, each because our drawer has the one place for it:
  * - Home: it is LumiAH's switch for the chat, and GM → This chat → Engine is the one control. What
@@ -61,9 +64,23 @@ export interface HarnessPages {
   start(): void;
   /** The chat's area of LumiAH's workspace, for the story's pages. */
   files: StoryFiles;
-  /** LumiAH's list of the user's connections, which marks the loopbacks no agent may run on: for the story's pages and Settings → Story → Models. */
+  /** The runtime's connections as LumiAH's pages know them, for the story's pages, Settings → Story → Models and Play (under `HarnessReach`). */
   connections: ConnectionsPort;
   dispose(): void;
+}
+
+/** What LumiAH's pages know of a runtime's connections, as the story's pages read it: each by name and in LumiAH's own words for a picker, the default, and whose they are. `unreachable`: LumiAH's backend never answered the hello. */
+export function knownOf(known: LumiahKnown, unreachable: boolean): KnownConnections {
+  const view = known.view;
+  return {
+    list: view === null ? null : view.connections.map((c) => ({ id: c.id, name: c.name, label: pickerLabel(c, view), model: c.model ?? null })),
+    default: view?.default ?? null,
+    runtime: view === null ? null : { id: view.relay.id, name: view.relay.name },
+    linked: known.linked,
+    runtimes: known.runtimes,
+    chat: known.chat,
+    failed: known.failed ?? (view === null && unreachable ? "LumiRPEngine's harness didn't answer. Reload the page to try again." : null),
+  };
 }
 
 /** The chat's area of LumiAH's workspace over LumiAH's page requests (`lah.ws.*`), as the story's pages reach it. */
@@ -112,11 +129,22 @@ export function createHarnessPages(ctx: SpindleFrontendContext): HarnessPages {
     started = true;
     void app.client.sync();
   };
+  // Whether LumiAH's backend never answered the hello: nothing of the runtime can be known then.
+  const unreachable: Readable<boolean> = { get: () => app.client.connection.get() === "failed", subscribe: (listener) => app.client.connection.subscribe((now) => listener(now === "failed")) };
   return {
     app,
     start,
     files: storyFiles(app.client),
-    connections: { state: app.client.state, failed: { get: () => app.client.connection.get() === "failed", subscribe: (listener) => app.client.connection.subscribe((now) => listener(now === "failed")) }, start },
+    connections: {
+      useKnown(chatId) {
+        const known = useRuntimeConnections(chatId ?? undefined);
+        const failed = useSelect(unreachable, (value) => value);
+        return useMemo(() => knownOf(known, failed), [known, failed]);
+      },
+      models: (runtime, connectionId) => app.client.request("lah.connections.models", { ...(runtime !== null ? { relay: runtime } : {}), connectionId }).then((answer) => answer.models),
+      open: () => leadToConnections(app),
+      start,
+    },
     dispose() {
       unwatch();
       app.client.dispose();
@@ -140,6 +168,20 @@ const NO_STATE: Readable<UiState | null> = { get: () => null, subscribe: () => (
 /** `waitingOf` LumiAH's state as it changes; 0 where the drawer has no pages. */
 export function useWaiting(pages: HarnessPages | null): number {
   return useSelect(pages?.app.client.state ?? NO_STATE, waitingOf);
+}
+
+/**
+ * What every mode of the drawer reaches of LumiAH: the runtime's connections (`ConnectionsContext`),
+ * for the pages of ours that offer or name one, under LumiAH's own app, whose hooks the port runs.
+ * Without LumiAH's pages, none.
+ */
+export function HarnessReach(props: { pages: HarnessPages | null; children: ComponentChildren }) {
+  if (props.pages === null) return <ConnectionsContext.Provider value={null}>{props.children}</ConnectionsContext.Provider>;
+  return (
+    <PagesContext.Provider value={props.pages.app}>
+      <ConnectionsContext.Provider value={props.pages.connections}>{props.children}</ConnectionsContext.Provider>
+    </PagesContext.Provider>
+  );
 }
 
 /**

@@ -2,7 +2,9 @@
 // limits, what happens when it runs out, its default and its value in seconds, with no ceiling. One
 // that may be lifted has a No limit switch; one that runs inside a Lumiverse limit says where
 // Lumiverse stops it, and the page ends with Lumiverse's own limits, which no setting changes. The
-// definitions and Lumiverse's limits are one table each, in shared/timeouts.ts. Styles: styles/settings.ts.
+// definitions and Lumiverse's limits are one table each, in shared/timeouts.ts. The waits of the
+// harness and its runtime are LumiAH's own settings, with the same controls on LumiAH's own Timeouts
+// page in the Harness tab: one line here says where (`RUNTIME_WAITS`). Styles: styles/settings.ts.
 
 import type { JsonObject } from "../../shared/json";
 import type { Limit } from "../../shared/minds";
@@ -67,6 +69,10 @@ export function TimeoutRow(props: { id: TimeoutKey; value: Limit; busy: boolean;
   );
 }
 
+/** Where the waits of the harness and its runtime are, as the page says it: LumiAH's own Timeouts page, named as a timeout's words name it (the mount's `settingsAt`), with one such timeout's words. */
+export const RUNTIME_WAITS =
+  "The waits of the harness and its runtime (Runtime wait and Proxy road wait among them) are LumiAH's own settings, on its Timeouts page: LumiRPEngine's Harness tab → System → Settings → Timeouts. A timeout of the harness names the wait that ran out there, with its group: “Runtime wait (LumiRPEngine's Harness tab → System → Settings → Timeouts → Waiting for the runtime)”.";
+
 export function TimeoutsSection(props: { timeouts: TimeoutSettings; patch(patch: JsonObject): void; busy: boolean }) {
   const set = (id: TimeoutKey) => (value: Limit | null) => props.patch({ timeouts: { [id]: value } });
   return (
@@ -82,6 +88,11 @@ export function TimeoutsSection(props: { timeouts: TimeoutSettings; patch(patch:
           </div>
         </Section>
       ))}
+      <Section title="The runtime's waits" flush>
+        <div class="lre-set-rows" data-lre-runtime-waits>
+          <p class="lre-set-timeout-lead">{RUNTIME_WAITS}</p>
+        </div>
+      </Section>
       <Section title="Lumiverse's own limits" flush>
         <div class="lre-set-rows" data-lre-host-limits>
           <p class="lre-set-timeout-lead">Lumiverse limits some waits itself. No setting here changes these; the settings above that run inside one say so.</p>

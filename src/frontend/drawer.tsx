@@ -20,7 +20,7 @@ import { ActivityBanner } from "./diagnostics";
 import { UpdateNotice } from "./agents";
 import { GmMode } from "./gm/mode";
 import { HARNESS_MODE, harnessChat, harnessOffered, shownMode } from "./harness/mode";
-import { type HarnessPages, HarnessTab, useWaiting } from "./harness/pages";
+import { type HarnessPages, HarnessReach, HarnessTab, useWaiting } from "./harness/pages";
 import type { IconName } from "./icons";
 import { Icon } from "./icons";
 import type { Rect } from "./layout";
@@ -29,7 +29,6 @@ import { scrollParent } from "./scroll";
 import { Settings } from "./settings/settings";
 import { AcceptanceBanner } from "./settings/agents";
 import { useSelect } from "./store";
-import { ConnectionsContext } from "./story/connections";
 
 /** A mode as the bar shows it. */
 export interface ModeEntry {
@@ -192,10 +191,10 @@ export function Drawer(props: { measure(el: Element): Rect; harness?: HarnessPag
       <UpdateNotice />
       <AcceptanceBanner />
       <div class="lre-mode-body" id={bodyId} role="tabpanel" aria-labelledby={`${bodyId}-tab-${mode}`}>
-        {/* LumiAH's list of connections, for the pages that offer one to an agent (the Harness tab's Cast, Settings → Story → Models). */}
-        <ConnectionsContext.Provider value={pages?.connections ?? null}>
+        {/* The runtime's connections as LumiAH's pages know them, for the pages that offer or name one (the Harness tab's Cast, Settings → Story → Models, Play). */}
+        <HarnessReach pages={pages}>
           <ModeBody mode={mode} harness={pages !== null ? <HarnessTab pages={pages} /> : null} />
-        </ConnectionsContext.Provider>
+        </HarnessReach>
       </div>
     </div>
   );

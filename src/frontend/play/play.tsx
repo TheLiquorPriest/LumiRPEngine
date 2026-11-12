@@ -3,9 +3,11 @@
 // several. Now is a hub (scene.tsx) rather than tabs: it holds the status banners, what needs you, the
 // fight while one is on and the packs' glances. Details open as sheets stacked over the destination;
 // each sheet draws its own header, and the shell keeps the frame, Escape and focus return. A chat
-// that isn't a world chat offers to attach a world, with no bottom bar.
+// that isn't a world chat offers to attach a world, with no bottom bar. The bar's height is published
+// (`--lre-play-nav-h`, bar-height.ts), as GM's is, so what floats at the bottom of a view (Back to
+// top, a selection bar) sits above the bar however tall its buttons are, never under it.
 
-import { useEffect, useId, useRef, useState } from "preact/hooks";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { PanelId } from "../../shared/ids";
 import type { WorldIndex } from "../../shared/world";
 import type { StateView } from "../../shared/state-view";
@@ -17,6 +19,7 @@ import type { PanelDef } from "../registry";
 import { useSelect } from "../store";
 import type { UiCatalog } from "../ui-registry";
 import { attachedText } from "../gm/engine";
+import { publishBarHeight } from "../bar-height";
 
 /** Core panels always show; a pack's panel shows once its view model is in the state (a null one is none, as the Encounter's between fights). */
 export function visiblePanels(catalog: UiCatalog, view: StateView): PanelDef[] {
@@ -59,6 +62,11 @@ export function Play() {
   const play = useUi((ui) => ui.play);
   const panelId = useId();
   const shell = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = shell.current;
+    const nav = el?.querySelector<HTMLElement>(":scope > .lre-bottomnav");
+    return el && nav ? publishBarHeight(el, nav, "--lre-play-nav-h", typeof ResizeObserver === "undefined" ? undefined : ResizeObserver) : undefined;
+  });
   const view = sync.view;
   const world = view !== null && view.status !== "not_world" ? view : null;
   const dests = world ? destinations(app.catalog, world) : [];

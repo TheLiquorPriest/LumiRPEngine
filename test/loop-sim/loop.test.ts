@@ -151,6 +151,7 @@ describe("loop-sim: converted starter worlds", () => {
       const generic = (i: number): InterpretOutput | null => (i % 4 === 3 ? timelapseIntent({ type: "duration", minutes: 360 }, ALL_NOTE) : i % 4 === 1 ? { action: "eat", params: {}, probabilities: {} } : null);
       const { s, mid } = run(make(`loop-${id}`, id), 20, `starter:${id}`, generic);
       expectRestores(s, mid);
-    });
+      // 20 turns of the largest starter, Port Alder, take a few seconds alone.
+    }, 30_000);
   }
 });

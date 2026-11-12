@@ -503,9 +503,14 @@ export class FakeHost implements HostPort {
   /** Events lost on their way to the backend, the next one of each name: a host whose event never arrived. */
   readonly lost = new Set<HostEventName>();
 
+  /** Who hears each event the moment the host sends it, before any handler does: the payload the handlers will be handed, while the change it tells of is just made (another extension's view of Lumiverse's events: `lumiverse-rows.ts`). */
+  readonly taps = new Set<(event: HostEventName, payload: unknown) => void>();
+
   private emit<K extends HostEventName>(event: K, payload: HostEventMap[K]): void {
     if (this.lost.delete(event)) return;
-    this.queue.push({ event, payload: structuredClone(payload) });
+    const queued = structuredClone(payload);
+    this.queue.push({ event, payload: queued });
+    for (const tap of this.taps) tap(event, queued);
   }
 
   /** Delivers queued events in order; after each, waits until the backend is idle. */

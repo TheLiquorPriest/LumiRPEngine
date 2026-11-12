@@ -75,7 +75,7 @@ async function longChat(chatMs?: number): Promise<Long> {
   const env: ToolEnv = { ...castEnv(rig, made.chatId, turn, HARNESS_AGENT.author), files };
   mount(rig);
   await playOn(rig, made.chatId, "harness");
-  const core: HarnessCore = { ask: async () => ({ jobs: [] }), stop: () => false, running: () => [], spent: () => null };
+  const core: HarnessCore = { ask: async () => ({ jobs: [] }), stop: () => undefined, spent: () => null };
   rig.rt.harness.core = core;
   rig.rt.harness.files = () => files;
   const reads = { n: 0 };

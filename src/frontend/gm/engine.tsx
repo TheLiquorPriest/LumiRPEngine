@@ -7,13 +7,15 @@
 //
 // The page says what each engine is before one is picked, in words for someone who has met none of
 // them: what plays a turn, and what they will notice. The harness plays a chat only in
-// LumiRPEngine's runtime. Where it can't play the user's chats now (`harnessBlocked`: no runtime is
-// linked, a permission isn't granted), the page says right under the switch why and what to do, and
-// Play's first screen says the same for a chat on the harness (`EngineBlocked`): such a chat plays
-// nothing until then, and no other engine stands in.
+// LumiRPEngine's runtime, whose agents call your providers on the runtime's own connections. Where
+// it can't play the user's chats now (`harnessBlocked`: no runtime is linked, a permission isn't
+// granted), the page says right under the switch why and what to do, and Play's first screen says
+// the same for a chat on the harness (`EngineBlocked`): such a chat plays nothing until then, and no
+// other engine stands in. Play also says when the runtime keeps no connection yet
+// (`NoConnectionNotice`), with the way to Harness → System → Runtime → Connections.
 // A chat on the harness also shows the harness engine's own settings (Settings: `agents.harness`),
-// which are the user's for every chat. `EngineSwitch`, `EngineBlocked`, `HarnessRows` and
-// `engineRequest` are hook-free, so tests press them without a DOM.
+// which are the user's for every chat. `EngineSwitch`, `EngineBlocked`, `NoConnectionNotice`,
+// `HarnessRows` and `engineRequest` are hook-free, so tests press them without a DOM.
 
 import { useEffect, useState } from "preact/hooks";
 import { defaultAgentSettings, HARNESS_COMMIT_WAIT_DEF, HARNESS_REMEMBERED_DEF, type HarnessSettings, NEWEST_MESSAGES, type NewestMessage, SOVEREIGN_HANDS, type SovereignHand } from "../../shared/agent-settings";
@@ -22,6 +24,7 @@ import type { JsonObject } from "../../shared/json";
 import { useApp, useView } from "../app";
 import { Banner, Button, Empty, HostSwitch, Section, Seg, type SegOption, useBusy } from "../components";
 import { LimitRow, SettingRow } from "../settings/kit";
+import { NO_CONNECTION } from "../story/connections";
 
 /** Which engine plays a chat's turns. */
 export type ChatEngine = "classic" | "agents" | "harness";
@@ -38,7 +41,7 @@ export const ENGINE_HELP: Record<ChatEngine, readonly string[]> = {
   agents: ["Each turn's steps are worked out by agents, as Settings → Agents, Roles and Main agent set them; the gates, cards and chips stay as they are."],
   harness: [
     "An AI author plays each turn and writes the reply itself: it reads the world, lets each character think for themselves, rolls what needs a roll, records what changed, and releases the reply a passage at a time.",
-    "It runs in LumiRPEngine's runtime, a program you start beside Lumiverse (the drawer's Harness tab, then System, then Runtime). While the runtime is down this chat plays nothing until it is back. Changes you set to ask first still ask.",
+    "It runs in LumiRPEngine's runtime, a program you start beside Lumiverse (the drawer's Harness tab, then System, then Runtime), and its agents call your providers from there, on the runtime's own connections (the same page, under Connections). While the runtime is down this chat plays nothing until it is back. Changes you set to ask first still ask.",
   ],
 };
 
@@ -143,6 +146,34 @@ export function EngineBlocked(props: { engine: ChatEngine; blocked: string | nul
     <div data-lre-engine-blocked={props.engine}>
       <Banner tone="warn" icon="alert" title={notice.title} actions={<Button icon="function" size="sm" onClick={props.onOpen}>Open Engine</Button>}>
         {notice.text}
+      </Banner>
+    </div>
+  );
+}
+
+/**
+ * Play's word on the runtime's connections, without hooks: for a chat on the harness whose runtime
+ * is linked and keeps no connection yet (the first thing a player meets after updating from a build
+ * whose agents ran on Lumiverse's connections), what to do, with the way to Harness → System →
+ * Runtime → Connections where the drawer can open it (`onOpen`); nothing otherwise.
+ */
+export function NoConnectionNotice(props: { engine: ChatEngine; none: boolean; onOpen: (() => void) | null }) {
+  if (!props.none || props.engine !== "harness") return null;
+  return (
+    <div data-lre-no-connection>
+      <Banner
+        tone="warn"
+        icon="alert"
+        title={NO_CONNECTION.title}
+        actions={
+          props.onOpen !== null ? (
+            <Button icon="link" size="sm" onClick={props.onOpen}>
+              Open Connections
+            </Button>
+          ) : undefined
+        }
+      >
+        {NO_CONNECTION.text}
       </Banner>
     </div>
   );

@@ -94,7 +94,8 @@ describe("people's money (Port Alder at Simulation over a month)", () => {
     // None of it reaches the player: their notes and postings are no player line.
     const lines = playerLines(reg, w.world, w.state, w.world.pov, events, 1000);
     expect(lines.some((l) => l.includes("Unit 2A") || l.includes("Household share") || l.includes("Living costs"))).toBe(false);
-  });
+    // A month of the whole town's money at Simulation takes a while.
+  }, 30_000);
 
   test("an NPC's declined bill is a private note: it never stops the player's timelapse", () => {
     const w = portAlder((world) => {
@@ -125,7 +126,8 @@ describe("people's money (Port Alder at Simulation over a month)", () => {
     // Both bills are the world's own, and their lines say so (DESIGN §11 provenance).
     expect(jess?.notes.some((n) => n.text.startsWith("First:") && n.text.endsWith("paid (set up in the world)."))).toBe(true);
     expect(jess?.notes.some((n) => n.text.startsWith("Second") && n.text.includes("declined"))).toBe(true);
-  });
+    // Twenty days of the whole town's money take a while.
+  }, 30_000);
 
   test("living costs follow a world's own amounts by wealth band, and never charge the POV", () => {
     const w = portAlder((world) => {

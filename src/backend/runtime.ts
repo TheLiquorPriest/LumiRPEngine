@@ -3331,6 +3331,7 @@ export class Runtime implements TurnHooks {
 
   changed(chatId: ChatId, userId: UserId): void {
     this.push.changed(chatId, userId);
+    this.harness.ledgerChanged(chatId, userId);
     // A sweep that is due runs once nothing of the user's is in flight (DESIGN §4.4).
     this.sweep.nudge(userId);
   }

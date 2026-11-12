@@ -104,5 +104,5 @@ export const THINGS_CSS = `
 .lre-bel-set-name{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s1);font-weight:600;overflow-wrap:anywhere}
 .lre-bel-set-sub{color:var(--lre-muted);font-size:var(--lre-fs-sm);overflow-wrap:anywhere}
 .lre-bel-set-actions{display:flex;flex-wrap:wrap;gap:var(--lre-s1)}
-.lre-play .lre-selectbar{bottom:calc(var(--lre-tap-lg) + 2 * var(--lre-s1) + 1px + env(safe-area-inset-bottom,0px) + var(--lre-s2))}
+.lre-play .lre-selectbar{bottom:calc(var(--lre-play-nav-h,0px) + var(--lre-s2))}
 `;

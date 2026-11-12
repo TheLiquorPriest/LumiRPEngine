@@ -1,16 +1,18 @@
 // The story engine's pages (src/frontend/story/): what Cast, Record, Notebook, the prepared start
-// and Settings → Story → Models say of what the backend answers, read without a DOM.
+// and Settings → Story → Models say of what the backend answers, and what the pickers of an agent's
+// connection say of the runtime's own connections, read without a DOM.
 
 import { describe, expect, test } from "bun:test";
 import type { VNode } from "preact";
 import { NARRATION_BOUNDS, NARRATION_DEFAULTS, STORY_DEFAULTS, type StoryModels } from "../../src/shared/settings";
 import type { BeatView, CastRowView, DraftView, PrepareAsk, PrepareView } from "../../src/shared/story-pages";
-import { Button, HostModelPicker, Seg } from "../../src/frontend/components";
-import { narrationChanged, narrationSummary, StorySubPage } from "../../src/frontend/settings/story";
-import { agentConnections, LOOPBACK_PROBLEM, UNSET_CONNECTION } from "../../src/frontend/story/connections";
+import { Banner, Button, Seg } from "../../src/frontend/components";
+import { NoConnectionNotice } from "../../src/frontend/gm/engine";
+import { modelsNotices, narrationChanged, narrationSummary, StorySubPage } from "../../src/frontend/settings/story";
+import { agentConnections, type KnownConnections, NO_CONNECTION, notTheRuntimes, notTheRuntimesMark, notTheRuntimesText, unsetText } from "../../src/frontend/story/connections";
 import { savedWords } from "../../src/frontend/story/editor";
 import { lastReflected, mindEntries, notebookFiles, type StoryFile } from "../../src/frontend/story/files";
-import { ModelPickRows, runsOnText } from "../../src/frontend/story/model-pick";
+import { ModelPickRows, runsOnText, RuntimeModelField } from "../../src/frontend/story/model-pick";
 import { agoText, beatHead, capOf, castGroups, castLine, characterAsk, draftsInOrder, exposureLine, pickedBy, prepareBusy, prepareShown, reachedLine, reachedText, stretchText, tokensText } from "../../src/frontend/story/model";
 import { PrepareBody, PrepareLine, PrepareQuiet, prepareSlot, type PrepareTyped } from "../../src/frontend/story/prepare";
 import { replyLabel } from "../../src/frontend/story/record";
@@ -25,12 +27,25 @@ function textOf(node: unknown): string {
   return "";
 }
 
-/** Lumiverse's connections, one of them the runtime's own loopback as LumiAH marks it. */
-const ALL = [
+/** The runtime's connections as LumiAH's pages know them: DeepSeek, copied from Lumiverse under its own id and the default, and Claude, signed in. */
+const KNOWN: KnownConnections = {
+  list: [
+    { id: "c1", name: "DeepSeek", label: "DeepSeek · DeepSeek · v4", model: "v4" },
+    { id: "rc-claude", name: "Claude", label: "Claude · Anthropic · claude-sonnet-4-5", model: "claude-sonnet-4-5" },
+  ],
+  default: "c1",
+  runtime: { id: "rt-home", name: "home-pc" },
+  linked: true,
+  runtimes: 1,
+  chat: true,
+  failed: null,
+};
+/** Lumiverse's own connections: DeepSeek, which the runtime has under the same id, and Deepseek Pro, chosen before the runtime kept connections and never copied into it. */
+const LUMIVERSE = [
   { id: "c1", name: "DeepSeek", model: "v4" },
-  { id: "loop", name: "LumiRPEngine", model: "lumiah" },
+  { id: "c-pro", name: "Deepseek Pro", model: "v4-pro" },
 ];
-const CONNECTIONS = agentConnections(ALL, ["loop"], false);
+const CONNECTIONS = agentConnections(KNOWN, LUMIVERSE);
 
 const names = { player: "Sam", npc_rosie: "Rosie", npc_dev: "Dev", diner: "Rosie's Diner" };
 const time = (at: number) => ({ at, text: `t${at}` });
@@ -64,34 +79,122 @@ describe("Cast", () => {
     expect(scene).toEqual({ connection: "character", model: null, effort: "default", pick: { connectionId: "c1", effort: "high" } });
     expect(runsOnText(scene, CONNECTIONS)).toEqual({ line: "DeepSeek · effort high", note: "Set by this character and the default." });
     expect(pickedBy({ ...models, runs: { digest: { effort: "low" } } }, characterAsk("npc_rosie", "digest")).effort).toBe("run");
-    expect(runsOnText(pickedBy(STORY_DEFAULTS.models, characterAsk("npc_dev", "scene")), CONNECTIONS)).toEqual({ line: "Nothing set", note: UNSET_CONNECTION });
-    expect(runsOnText(pickedBy({ ...STORY_DEFAULTS.models, default: { connectionId: "loop" } }, characterAsk("npc_dev", "scene")), CONNECTIONS).note).toContain("set by the default, is the runtime's own");
+    expect(runsOnText(pickedBy(STORY_DEFAULTS.models, characterAsk("npc_dev", "scene")), CONNECTIONS)).toEqual({ line: "Nothing set", note: "With no connection set, an agent runs on the runtime's default connection (now DeepSeek)." });
+    const old = runsOnText(pickedBy({ ...STORY_DEFAULTS.models, default: { connectionId: "c-pro" } }, characterAsk("npc_dev", "scene")), CONNECTIONS);
+    expect(old.line).toBe("Deepseek Pro");
+    expect(old.note).toBe("Its connection, set by the default: Deepseek Pro is one of Lumiverse's connections, not one of the runtime's, so it runs on the runtime's default, DeepSeek. Pick another below, or in Settings → Story → Models, or copy it into the runtime (Harness → System → Runtime → Connections → Copy from Lumiverse): the copy keeps its id, so this choice works again.");
   });
 });
 
 describe("the connections an agent may run on", () => {
-  test("every loopback LumiAH marks is left out, and none is offered until LumiAH has said which those are", () => {
-    expect(CONNECTIONS.choices?.map((c) => c.id)).toEqual(["c1"]);
-    expect(agentConnections(ALL, null, false)).toMatchObject({ choices: null, waiting: "Reading which connections are the runtime's own…" });
-    expect(agentConnections(ALL, null, true).waiting).toContain("Reload the page");
-  });
-
-  test("a level saved on a loopback shows it, marked, with what to do, and offers no model from it", () => {
-    const tree = ModelPickRows({ id: "agent-author", owner: "The author", pick: { connectionId: "loop", effort: "high" }, fallsTo: "the default", connections: CONNECTIONS, busy: false, set: () => undefined });
-    expect(propsOf(tree, "option").slice(0, 3).map((o) => [o.value, o.disabled === true])).toEqual([
-      ["", false],
-      ["loop", true],
-      ["c1", false],
+  test("are the runtime's own, each in LumiAH's words, with its default; none is offered while they aren't known, and the page says why", () => {
+    expect(CONNECTIONS.choices?.map((c) => [c.id, c.label])).toEqual([
+      ["c1", "DeepSeek · DeepSeek · v4"],
+      ["rc-claude", "Claude · Anthropic · claude-sonnet-4-5"],
     ]);
-    expect(textOf(tree)).toContain("LumiRPEngine (the runtime's own)");
-    expect(textOf(tree)).toContain(LOOPBACK_PROBLEM);
-    expect(propsOf(tree, HostModelPicker)).toEqual([]);
+    expect([CONNECTIONS.fallback?.name, CONNECTIONS.runtime, CONNECTIONS.waiting, CONNECTIONS.whose, CONNECTIONS.none]).toEqual(["DeepSeek", "rt-home", null, null, false]);
+    const unread = { ...KNOWN, list: null, default: null, runtime: null };
+    expect(agentConnections({ ...unread, linked: false }, LUMIVERSE).waiting).toBe("The agents' connections are kept in the runtime, so they show once it is linked. Harness → System → Runtime shows how to start it.");
+    expect(agentConnections(unread, LUMIVERSE).waiting).toBe("Reading the runtime's connections…");
+    expect(agentConnections({ ...unread, failed: "it didn't answer" }, LUMIVERSE).waiting).toBe("The runtime's connections couldn't be read: it didn't answer");
+    expect(agentConnections(null, LUMIVERSE)).toMatchObject({ choices: null, waiting: "The harness's pages aren't loaded in this LumiRPEngine, so the runtime's connections can't be read. Reload the page to try again." });
+    // Each runtime keeps its own: where several are linked, the picker says whose these are.
+    expect(agentConnections({ ...KNOWN, runtimes: 2 }, LUMIVERSE).whose).toBe("These are the connections of home-pc, the runtime that plays this chat. Each runtime keeps its own, and an agent runs on those of the runtime its chat runs in.");
   });
 
-  test("the default, with no connection set, says in a line what an agent then runs on", () => {
-    const tree = ModelPickRows({ id: "default", owner: "Every agent", pick: undefined, unset: UNSET_CONNECTION, connections: CONNECTIONS, busy: false, set: () => undefined });
-    expect(textOf(tree)).toContain("an agent runs on the connection its chat was on before it moved to the runtime, or on Lumiverse's default connection");
-    expect(textOf(tree)).not.toContain("LumiAH's settings");
+  test("a level saved on one of Lumiverse's connections, from before the runtime kept its own, keeps it, says what runs instead and how to choose again, and offers the default's models", () => {
+    const set: unknown[] = [];
+    const pick = { connectionId: "c-pro", effort: "high" as const };
+    expect(notTheRuntimes(pick, CONNECTIONS)).toBe(true);
+    const tree = ModelPickRows({ id: "agent-narrator", owner: "The narrator", pick, fallsTo: "the default", connections: CONNECTIONS, busy: false, set: (fields) => set.push(fields) });
+    expect(propsOf(tree, "option").slice(0, 4).map((o) => [o.value, textOf(o.children)])).toEqual([
+      ["", "Not set: the default"],
+      ["c-pro", "Deepseek Pro (not one of the runtime's connections: runs on its default)"],
+      ["c1", "DeepSeek · DeepSeek · v4"],
+      ["rc-claude", "Claude · Anthropic · claude-sonnet-4-5"],
+    ]);
+    expect(notTheRuntimesMark(CONNECTIONS)).toBe("not one of the runtime's connections: runs on its default");
+    expect(textOf(tree)).toContain(notTheRuntimesText("c-pro", CONNECTIONS));
+    // Nothing is dropped: the choice stays as saved until one is picked.
+    expect(propsOf(tree, "select")[0]?.value).toBe("c-pro");
+    expect(set).toEqual([]);
+    // It runs on the default now, so the model field lists the default's models (null: the default).
+    expect(propsOf(tree, RuntimeModelField).map((p) => [p.runtime, p.connection])).toEqual([["rt-home", null]]);
+    // Picking again sends the new connection, and the model goes with the old one.
+    const select = propsOf(tree, "select")[0];
+    if (typeof select?.onChange !== "function") throw new Error("no connection select");
+    select.onChange({ currentTarget: { value: "rc-claude" } });
+    expect(set).toEqual([{ connectionId: "rc-claude", model: null }]);
+  });
+
+  test("a level on one of the runtime's connections offers that connection's models; one with no connection lists none", () => {
+    const on = ModelPickRows({ id: "agent-author", owner: "The author", pick: { connectionId: "rc-claude" }, fallsTo: "the default", connections: CONNECTIONS, busy: false, set: () => undefined });
+    expect(propsOf(on, RuntimeModelField).map((p) => [p.runtime, p.connection])).toEqual([["rt-home", "rc-claude"]]);
+    expect(textOf(on)).not.toContain(notTheRuntimesMark(CONNECTIONS));
+    const off = ModelPickRows({ id: "agent-gm", owner: "The game master", pick: { effort: "low" }, fallsTo: "the default", connections: CONNECTIONS, busy: false, set: () => undefined });
+    expect(propsOf(off, RuntimeModelField).map((p) => "connection" in p)).toEqual([false]);
+  });
+
+  test("the default, with no connection set, says in a line that the runtime's default runs it, by name", () => {
+    const tree = ModelPickRows({ id: "default", owner: "Every agent", pick: undefined, connections: CONNECTIONS, busy: false, set: () => undefined });
+    expect(textOf(tree)).toContain("With no connection set, an agent runs on the runtime's default connection (now DeepSeek).");
+    expect(textOf(tree)).not.toContain("Lumiverse's default connection");
+    expect(unsetText({ choices: CONNECTIONS.choices, fallback: null })).toContain("the runtime has none now, so its calls are refused");
+  });
+
+  test("a level saved on a connection the runtime doesn't have, where the runtime has no default, says its calls are refused, never that it runs on a default", () => {
+    const none = agentConnections({ ...KNOWN, list: [], default: null }, LUMIVERSE);
+    const tree = ModelPickRows({ id: "agent-narrator", owner: "The narrator", pick: { connectionId: "c-pro" }, fallsTo: "the default", connections: none, busy: false, set: () => undefined });
+    expect(propsOf(tree, "option").slice(0, 2).map((o) => [o.value, textOf(o.children)])).toEqual([
+      ["", "Not set: the default"],
+      ["c-pro", "Deepseek Pro (not one of the runtime's connections, and the runtime has no default: refused)"],
+    ]);
+    expect(textOf(tree)).toContain("Deepseek Pro is one of Lumiverse's connections, not one of the runtime's, and the runtime has no default connection, so its calls are refused.");
+    expect(textOf(tree)).not.toContain("runs on its default");
+    // Models counts it, in the same words.
+    expect(modelsNotices({ ...STORY_DEFAULTS.models, agents: { narrator: { connectionId: "c-pro" } } }, none).map((n) => [n.id, n.text])).toEqual([
+      ["none", NO_CONNECTION.text],
+      ["not-runtimes", "It was made before the runtime kept connections of its own, or its connection was removed since. Until you choose again, its agents' calls are refused, since the runtime has no default connection: each is marked below. Copy from Lumiverse, in Harness → System → Runtime → Connections, copies a connection of yours into the runtime under its own id, so a choice of it works again."],
+    ]);
+  });
+
+  test("with no connection made yet, the picker, Models and Play say so, and how: add one or Copy from Lumiverse, in Harness → System → Runtime → Connections", () => {
+    const none = agentConnections({ ...KNOWN, list: [], default: null }, LUMIVERSE);
+    expect(none.none).toBe(true);
+    const tree = ModelPickRows({ id: "default", owner: "Every agent", pick: undefined, connections: none, busy: false, set: () => undefined });
+    expect(textOf(tree)).toContain(NO_CONNECTION.line);
+    expect(NO_CONNECTION.line).toContain("Harness → System → Runtime → Connections");
+    expect(NO_CONNECTION.text).toContain("Copy from Lumiverse");
+    expect(modelsNotices(STORY_DEFAULTS.models, none).map((n) => [n.id, n.title])).toEqual([["none", "Your runtime has no connection yet"]]);
+    // Play: the notice, with the way there where the drawer can open it.
+    let opened = 0;
+    const notice = NoConnectionNotice({ engine: "harness", none: true, onOpen: () => (opened += 1) });
+    const [banner] = propsOf(notice, Banner);
+    expect([banner?.title, textOf(banner?.children)]).toEqual([NO_CONNECTION.title, NO_CONNECTION.text]);
+    const [open] = propsOf(banner?.actions, Button);
+    expect(textOf(open?.children)).toBe("Open Connections");
+    if (typeof open?.onClick !== "function") throw new Error("nothing to press");
+    open.onClick();
+    expect(opened).toBe(1);
+    expect(propsOf(NoConnectionNotice({ engine: "harness", none: true, onOpen: null }), Banner)[0]?.actions).toBeUndefined();
+    // Nothing while the runtime has one, or for a chat on another engine.
+    expect(NoConnectionNotice({ engine: "harness", none: false, onOpen: null })).toBeNull();
+    expect(NoConnectionNotice({ engine: "classic", none: true, onOpen: null })).toBeNull();
+    // While the runtime's list isn't known, nothing is said to be missing.
+    expect(agentConnections({ ...KNOWN, list: null, default: null, linked: false }, LUMIVERSE).none).toBe(false);
+  });
+
+  test("Models counts the choices that name a connection the runtime doesn't have, with what their agents run on until they are chosen again", () => {
+    const models: StoryModels = { ...STORY_DEFAULTS.models, default: { connectionId: "c1" }, agents: { narrator: { connectionId: "c-pro" } }, characters: { npc_rosie: { connectionId: "gone" } } };
+    expect(modelsNotices(models, CONNECTIONS)).toEqual([
+      {
+        id: "not-runtimes",
+        title: "2 choices name connections the runtime doesn't have",
+        text: "They were made before the runtime kept connections of its own, or their connections were removed since. Until you choose again, their agents run on the runtime's default, DeepSeek: each is marked below. Copy from Lumiverse, in Harness → System → Runtime → Connections, copies a connection of yours into the runtime under its own id, so a choice of it works again.",
+      },
+    ]);
+    // While the list is read, nothing is counted against a choice.
+    expect(modelsNotices(models, agentConnections({ ...KNOWN, list: null }, LUMIVERSE))).toEqual([]);
   });
 });
 

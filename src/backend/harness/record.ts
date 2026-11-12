@@ -46,17 +46,6 @@ export function anchorOf(rec: Pick<Rec, "harness"> | null | undefined): JsonObje
   return isRecord(raw) && isRecord(raw.record) ? (raw.record as JsonObject) : null;
 }
 
-/**
- * Why LumiAH says it had no part in a reply, as its record of that reply holds it (what its backend
- * keeps beside the core's own fields, `ran.noPart.text`): its own words, which say what happened and
- * what to do. Null for a record that says no such thing.
- */
-export function noPartOf(record: JsonObject): string | null {
-  const ran = record.ran;
-  const noPart = isRecord(ran) ? ran.noPart : null;
-  return isRecord(noPart) && typeof noPart.text === "string" && noPart.text.trim() !== "" ? noPart.text : null;
-}
-
 /** Where a harness turn's record is: its reply, the swipe that holds it, and its place in the chain. */
 export interface TurnRecordAt {
   messageId: MessageId;

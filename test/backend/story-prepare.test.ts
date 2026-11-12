@@ -69,7 +69,7 @@ async function preparing(askAboveTokens?: number, spent?: JobSpent, said: { mess
 }
 
 /** LumiAH's core as the page reaches it, with the chat's `jobs` as it lists them and what its live view counts of each stream under way (`live`). */
-const coreWith = (jobs: JsonObject[], live: Readonly<Record<string, RunSpent>> = {}): HarnessCore => ({ ask: async () => ({ jobs }), stop: () => false, running: () => [], spent: (_userId, stream) => live[stream] ?? null });
+const coreWith = (jobs: JsonObject[], live: Readonly<Record<string, RunSpent>> = {}): HarnessCore => ({ ask: async () => ({ jobs }), stop: () => undefined, spent: (_userId, stream) => live[stream] ?? null });
 
 /** A job of the chat's as LumiAH lists it: the preparation's (the player's, keeping its file) unless `by` says another started it. */
 const job = (id: string, state: string, usage: { in: number; out: number; calls: number }, by: JsonObject = { who: "user" }): JsonObject => ({ id, chatId: "chat", state, agent: HARNESS_AGENT.author, by, ...(by.who === "user" ? { plan: PREPARE_PATH } : {}), usage });
@@ -99,8 +99,7 @@ async function pageOn(rig: Rig, chatId: string, files: HarnessFiles, jobs: JsonO
       }
       return {};
     },
-    stop: () => false,
-    running: () => [],
+    stop: () => undefined,
     spent: () => null,
   };
   return { tasks, said, jobs, ask: (body: PrepareAsk) => preparePage(rig.rt, { chatId, userId: rig.host.userId }, body) };

@@ -4,8 +4,8 @@
 // pages' requests. The engine is the extension it is built into: it gives LumiAH its definitions,
 // its claim on a chat, the model each agent runs on, its hooks around a run and its tools
 // (`HarnessEngine`), and it takes back what it needs of LumiAH (the switch for a chat, where the
-// user's runtime stands, the workspace, side sessions). A chat the engine plays runs only in the
-// runtime (`ChatClaim.place`): no turn of it runs here.
+// user's runtime stands, the workspace, side sessions). Every turn runs in the user's runtime, which
+// calls its agents' models itself on its own connections: no turn and no model call runs here.
 //
 // LumiAH is given Lumiverse through a host that differs from Lumiverse's own in four places, each
 // because the two extensions are one extension here:
@@ -14,16 +14,20 @@
 // - **The record on a message.** A reply holds one record, the engine's, and LumiAH's record of the
 //   turn rides inside it (`Rec.harness`). LumiAH reads its records from the chat's ledger and
 //   writes them to it; it never reads or writes the message's entry itself, which is the ledger's.
+//   LumiAH is told so (`ownElsewhere`), so the runtime's copy of a chat reads the records from here
+//   and is told when they change.
 // - **Lore.** In a chat the engine plays, World Info is the engine's to read, under its secrets
-//   rule, through its own lore tools. LumiAH is shown no book.
+//   rule, through its own lore tools. LumiAH is shown no book, and is told so (`declinesLore`).
 // - **The switch for a chat.** This LumiAH answers the chats that play a world on the harness
 //   engine, and no other: its switch for a chat and the chat's engine are one choice
-//   (`HarnessEngine.choose`), whichever page it is made on.
+//   (`HarnessEngine.choose`), whichever page it is made on (`ownSwitch`).
 
+import { settingsOf } from "lumi-ah/core";
 import type { AnchorCodec, Backend, BackendEnv, BackendHost, HostMessage } from "lumi-ah/extension/backend";
-import { createBackend, createSpindleHost, UiRefused } from "lumi-ah/extension/backend";
+import { CORE_KEY, createBackend, createSpindleHost, UiRefused } from "lumi-ah/extension/backend";
 import type { ChatView } from "lumi-ah/shared";
 import { UI_VERSION, uiMessageOf, uiRequestOf } from "lumi-ah/shared";
+import { hashJson } from "../../shared/hash";
 import type { ChatId, MessageId, UserId } from "../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../shared/json";
 import { ENGINE_EXTENSION } from "../../shared/protocol";
@@ -35,11 +39,29 @@ import { EngineRefused } from "./extension";
 /** The engine as LumiAH's pages, its messages and its runtime's words name it. */
 const NAME = "LumiRPEngine";
 
+/**
+ * Where LumiAH's Settings, its Timeouts page among them, are shown here: the drawer's Harness tab,
+ * LumiAH's System group, its Settings page. A timeout's words name it in place of "LumiRPEngine's
+ * Settings", the engine's own tab, which doesn't hold them: "Runtime wait (LumiRPEngine's Harness
+ * tab → System → Settings → Timeouts → Waiting for the runtime)". The runtime is told it too, so its
+ * own timeouts say the same.
+ */
+const SETTINGS_AT = `${NAME}'s Harness tab → System → Settings`;
+
 /** The folder of the user's storage LumiAH's files are under. */
 const STORAGE = "harness";
 
 /** The build this bundle came from, as LumiAH's own entry reads it: `bun run build` defines it into every bundle; "dev" run from source. */
 const BUILD: string = process.env.LAH_BUILD_ID ?? "dev";
+
+/**
+ * The runtime this build ships beside its backend (`dist/lumiah.js`): its sha256 and its size, which
+ * `bun run build` defines into this bundle beside the build id, as LumiAH's own entry reads them. A
+ * runtime that says hello on another build is offered it, and updates itself from it. Run from
+ * source (no build), there are none, and no runtime is offered an update.
+ */
+const RUNTIME_SHA256: string = process.env.LAH_RUNTIME_SHA256 ?? "";
+const RUNTIME_SIZE: string = process.env.LAH_RUNTIME_SIZE ?? "";
 
 /**
  * How often LumiAH's backend looks at what waits on time alone. Every such timing is a setting of
@@ -72,7 +94,10 @@ const RUNTIME_NEEDS: readonly { id: string; what: string }[] = [
 ];
 
 /** Why the runtime can't answer chats yet where it is linked but not set up: LumiAH's words cover a runtime that isn't linked. */
-const NOT_SET_UP = `${NAME}'s runtime is linked, but it isn't set up to answer chats yet: mint its key on the Runtime page of the Harness tab, which also makes its connection.`;
+const NOT_SET_UP = `${NAME}'s runtime is linked, but it isn't set up to answer chats yet: mint its key on the Runtime page of the Harness tab, which also makes the loopback connection that carries the chats' replies to it.`;
+
+/** Why the runtime can't play a turn where it has no connection of its own to call its agents' models on. */
+const NO_CONNECTION = `${NAME}'s runtime has no connection to call a model on, so its agents can't play this chat. Add one on the Runtime page of the Harness tab, under Connections.`;
 
 function keep<K, V>(map: Map<K, V>, key: K, value: V, most: number): void {
   map.delete(key);
@@ -90,15 +115,30 @@ const words = (error: unknown): string => (error instanceof Error ? error.messag
 
 /**
  * Where LumiAH's record sits in what it is shown of a message. It is shown the records the ledger
- * holds for the message's swipes (`{ v: 1, swipes }`, as its own entry would be), and a record it
- * writes comes back as the one swipe it is for, which the host below hands to the ledger. A deleted
- * swipe moves nothing here: the ledger moves its own records, and LumiAH's with them.
+ * holds for the message's swipes (`{ v: 1, swipes }`, as its own entry would be: `reads`, so the
+ * runtime's copy of the chat reads them the same way), and a record it writes comes back as the one
+ * swipe it is for, which the host below hands to the ledger. A deleted swipe moves nothing here: the
+ * ledger moves its own records, and LumiAH's with them.
  */
 const LEDGER_ANCHORS: AnchorCodec = {
+  reads: { under: null },
   read: (own, swipe) => (isRecord(own) && isRecord(own.swipes) ? ((own.swipes[String(swipe)] as JsonValue | undefined) ?? null) : null),
   write: (_own, swipe, record) => ({ put: { swipe, record } }),
   swipeDeleted: () => null,
 };
+
+/** LumiAH's records on one message as its entry would hold them (`{ v: 1, swipes }`), and as both the host's `chats.messages` and the runtime's copy are given them; null for a message with none. */
+const entryOf = (swipes: Record<string, JsonObject> | undefined): JsonObject | null => (swipes !== undefined && Object.keys(swipes).length > 0 ? { v: 1, swipes } : null);
+
+/** LumiAH's records on each message of a chat that holds any, as their entries hold them: what the runtime's copy of the chat reads (`ownElsewhere.read`). */
+function entriesOf(held: ReadonlyMap<MessageId, Record<string, JsonObject>>): Record<string, JsonObject> {
+  return Object.fromEntries(
+    [...held].flatMap(([messageId, swipes]) => {
+      const entry = entryOf(swipes);
+      return entry === null ? [] : [[messageId, entry]];
+    }),
+  );
+}
 
 /** LumiAH mounted in the engine: its backend, and the host it was given. */
 export interface Mounted {
@@ -116,8 +156,25 @@ export function mountHarness(rt: Runtime, base: BackendHost, env: BackendEnv): M
   const owners = new Map<ChatId, UserId>();
   const records = new Map<ChatId, Promise<Map<MessageId, Record<string, JsonObject>>>>();
   const touched: ((chatId: string, gone: boolean, userId: string | null) => void)[] = [];
+  /** Who hears that a chat's records changed: LumiAH's backend, which tells its runtimes' copies of the chat (`ownElsewhere.onChanged`). */
+  const recordsHeard: ((chatId: string, userId: string | null) => void)[] = [];
+  /**
+   * What LumiAH was last given of each chat's records, as a hash of their entries (`entriesOf`), for
+   * the chats it was given any of: a change of the ledger that leaves them as they were tells it
+   * nothing, and one of a chat it holds none of costs nothing (`ledgerHeard`).
+   */
+  const given = new Map<ChatId, string>();
+  /** The chats whose records are being compared with what LumiAH was given now: true where the ledger changed again meanwhile, so they are compared once more after. */
+  const comparing = new Map<ChatId, boolean>();
   const waiting = new Map<string, PromiseWithResolvers<unknown>>();
   let asked = 0;
+
+  /** Keeps what LumiAH is given of a chat's records (`given`): nothing where it holds none. */
+  const gave = (chatId: ChatId, held: ReadonlyMap<MessageId, Record<string, JsonObject>>): void => {
+    const entries = entriesOf(held);
+    if (Object.keys(entries).length === 0) given.delete(chatId);
+    else keep(given, chatId, hashJson(entries), OWNERS_KEPT);
+  };
 
   const ownerOf = (chatId: ChatId): UserId | null => owners.get(chatId) ?? rt.ledger.ownerOf(chatId);
 
@@ -127,11 +184,33 @@ export function mountHarness(rt: Runtime, base: BackendHost, env: BackendEnv): M
     if (held) return held;
     const read = engine.anchors(chatId, userId).then((rows) => new Map(rows.map((row) => [row.messageId, row.swipes])));
     keep(records, chatId, read, RECORDS_KEPT);
-    // A read that failed is asked again, not kept as the answer.
-    read.catch(() => {
-      if (records.get(chatId) === read) records.delete(chatId);
-    });
+    // What LumiAH is given is kept to compare the ledger with. A read that failed is asked again, not kept as the answer.
+    read.then(
+      (held) => {
+        if (records.get(chatId) === read) gave(chatId, held);
+      },
+      () => {
+        if (records.get(chatId) === read) records.delete(chatId);
+      },
+    );
     return read;
+  };
+
+  /** A chat's records changed, or may have: what is kept of them here is read again, and LumiAH is told, so each runtime's copy of the chat reads them again too. `userId`: whose chat it is, where that is known. */
+  const recordsChanged = (chatId: ChatId, userId: UserId | null): void => {
+    records.delete(chatId);
+    for (const listener of recordsHeard) listener(chatId, userId);
+  };
+
+  /** A chat's records changed in its ledger, which Lumiverse tells nobody of: LumiAH reads them again, from `fresh` where the change was read already, and each runtime's copy of the chat with it; LumiAH's own reads of the chat hear it as Lumiverse's own change of the chat. */
+  const ledgerWrote = (chatId: ChatId, userId: UserId | null, fresh?: Map<MessageId, Record<string, JsonObject>>): void => {
+    if (fresh === undefined) records.delete(chatId);
+    else {
+      keep(records, chatId, Promise.resolve(fresh), RECORDS_KEPT);
+      gave(chatId, fresh);
+    }
+    for (const listener of recordsHeard) listener(chatId, userId);
+    for (const handler of touched) handler(chatId, false, userId);
   };
 
   /** Whether a chat plays a world of the engine's: the chats this LumiAH may answer. */
@@ -195,6 +274,7 @@ export function mountHarness(rt: Runtime, base: BackendHost, env: BackendEnv): M
         });
       },
       onClosed: (handler) => base.frontend.onClosed(handler),
+      everyone: (message) => base.frontend.everyone(message),
     },
 
     events: {
@@ -237,22 +317,20 @@ export function mountHarness(rt: Runtime, base: BackendHost, env: BackendEnv): M
         const userId = ownerOf(chatId);
         // A chat that plays no world has no ledger, and this LumiAH no record in it.
         const held = userId !== null && (await worldChat(chatId, userId)) ? await recordsOf(chatId, userId) : null;
-        return rows.map((message): HostMessage => {
-          const swipes = held?.get(message.id);
-          return { ...message, own: swipes !== undefined && Object.keys(swipes).length > 0 ? { v: 1, swipes } : null };
-        });
+        return rows.map((message): HostMessage => ({ ...message, own: entryOf(held?.get(message.id)) }));
       },
       async setOwn(chatId, messageId, value) {
         const put = isRecord(value) && isRecord(value.put) ? value.put : null;
         if (put === null || typeof put.swipe !== "number" || !isRecord(put.record)) throw new Error(`${NAME} keeps LumiAH's record of a turn in the chat's ledger, and this isn't one record for one swipe.`);
         const userId = ownerOf(chatId);
         if (userId === null) throw new Error(`${NAME} doesn't know whose chat ${chatId} is, so the turn's record wasn't kept.`);
-        records.delete(chatId);
+        recordsChanged(chatId, userId);
         // No record of a harness turn on that swipe, and no turn about to write one (a reply no turn was played for): there is nothing for LumiAH's record to ride in. Said once, here; LumiAH is answered so it doesn't try again.
         if (!(await engine.anchor(chatId, userId, messageId, put.swipe, put.record as JsonObject))) base.log("warn", `[${NAME}] chat ${chatId}: LumiAH's record for swipe ${put.swipe} of message ${messageId} wasn't kept (the engine recorded no harness turn there)`);
       },
     },
 
+    // LumiAH is told it is given no lore (`declinesLore`), and shown none.
     lore: {
       book: () => Promise.resolve(null),
       entries: () => Promise.resolve([]),
@@ -265,12 +343,12 @@ export function mountHarness(rt: Runtime, base: BackendHost, env: BackendEnv): M
     },
   };
 
-  // The chat's records are read again when Lumiverse says the chat changed.
-  base.events.onChatTouched((chatId) => void records.delete(chatId));
+  // The chat's records are read again when Lumiverse says the chat changed (a swipe deleted moves them with it), here and in each runtime's copy of the chat.
+  base.events.onChatTouched((chatId, _gone, userId) => recordsChanged(chatId, userId));
 
   const extension = engine.extension;
   const backend = createBackend(host, env, {
-    identity: { identifier: base.identifier, name: NAME, connectionName: NAME },
+    identity: { identifier: base.identifier, name: NAME, connectionName: NAME, settingsAt: SETTINGS_AT },
     extension: {
       name: extension.name,
       definitions: (userId, chatId) => extension.definitions?.({ userId, chatId }) ?? Promise.resolve({}),
@@ -287,10 +365,20 @@ export function mountHarness(rt: Runtime, base: BackendHost, env: BackendEnv): M
       call: (call, signal, userId) => engine.tools.call(call, signal, userId),
     },
     anchor: LEDGER_ANCHORS,
+    // LumiAH's records are the chat's ledger's (see `chats` above): the runtime's copy of a chat reads them from here, and is told when they change.
+    ownElsewhere: {
+      async read(chatId, userId) {
+        // A chat that plays no world has no ledger, and this LumiAH no record in it.
+        if (!(await worldChat(chatId, userId))) return {};
+        return entriesOf(await recordsOf(chatId, userId));
+      },
+      onChanged: (listener) => void recordsHeard.push(listener),
+    },
+    declinesLore: true,
     // The manifest asks for neither: the engine reads no character card and no persona, and LumiAH's tools that rest on them are absent here.
     declined: ["characters", "personas"],
-    // The engine writes the reply itself, which only the runtime allows: LumiAH's pages then say the runtime is needed and offer no built-in way.
-    place: "runtime",
+    // The engine's own pages switch a chat on and off (GM → This chat → Engine): LumiAH's pages offer no switch of their own, and say where it is.
+    ownSwitch: true,
     // The story record and the author's notebook are this engine's memory: LumiAH's own chronicle would only be a second, unchecked one, so no agent here can start it.
     withoutAgents: ["chronicler", "story-reader"],
   });
@@ -314,27 +402,40 @@ export function mountHarness(rt: Runtime, base: BackendHost, env: BackendEnv): M
     return asker.promise as Promise<T>;
   };
 
-  // LumiAH's switch for a chat follows the chat's engine: on, in the runtime, for a chat the harness plays (set again where it isn't on the runtime's connection), and off for any other. LumiAH refuses it in its own words where it can't be set now: no runtime was ever set up, another harness answers the chat, a permission isn't granted.
+  const core = (userId: UserId, op: string, args: JsonObject, where: { chat?: ChatId | null; side?: string; job?: string } = {}): Promise<JsonValue> => backend.asks.ask(userId, op, args, where) as Promise<JsonValue>;
+
+  // LumiAH's switch for a chat follows the chat's engine: on, pinned to the runtime's loopback connection, for a chat the harness plays (set again where it isn't on that connection), and off for any other. LumiAH refuses it in its own words where it can't be set now: no runtime was ever set up, another harness answers the chat, a permission isn't granted.
   engine.pin = async (chatId, userId, harness) => {
     const { chat } = await ask<{ chat: ChatView }>(userId, { type: "lah.chat.get", chatId });
-    if (harness && (!chat.on || chat.place !== "runtime" || chat.connection?.loopback !== true)) await ask(userId, { type: "lah.chat.set", chatId, on: true, place: "runtime" });
+    if (harness && (!chat.on || chat.connection?.loopback !== true)) await ask(userId, { type: "lah.chat.set", chatId, on: true });
     else if (!harness && chat.on) await ask(userId, { type: "lah.chat.set", chatId, on: false });
   };
 
-  // What keeps the user's runtime from answering a chat now, in words that say what to do: a permission the reply's way there needs, then LumiAH's own word on the runtime the chat's replies reach (not linked, refused, never set up), then a runtime linked but not set up to answer chats.
+  /**
+   * Whether the runtime that plays the chat (about no chat: the user's runtime heard from last) has a
+   * connection of its own to call its agents' models on, as its Runtime page lists them. One that
+   * can't be asked now isn't held up here: its agents say why if they can't run.
+   */
+  const connected = async (userId: UserId, chatId: ChatId | null): Promise<boolean> => {
+    const listed = await core(userId, "connections.list", {}, chatId === null ? {} : { chat: chatId }).catch(() => null);
+    return !(isRecord(listed) && Array.isArray(listed.connections) && listed.connections.length === 0);
+  };
+
+  // What keeps the user's runtime from answering a chat now, in words that say what to do: a permission the reply's way there needs, then LumiAH's own word on the runtime the chat's replies reach (not linked, refused, never set up), then a runtime linked but not set up to answer chats, then one with no connection to call a model on.
   engine.runtime = async (userId, chatId) => {
     const lacks = RUNTIME_NEEDS.filter((need) => !base.granted(need.id)).map((need) => `The permission "${need.id}" isn't granted: ${NAME} needs it to ${need.what}. Grant it in Lumiverse (Extensions → ${NAME} → Permissions).`);
     if (lacks.length > 0) return lacks.join(" ");
     const state = await backend.runtimeState(userId, chatId);
     if (!state.linked) return state.words ?? NOT_SET_UP;
-    return state.ready ? null : NOT_SET_UP;
+    if (!state.ready) return NOT_SET_UP;
+    return (await connected(userId, chatId)) ? null : NO_CONNECTION;
   };
 
-  // A reply of a chat goes to the runtime where LumiAH is on for the chat there, no other harness answers it, and the reply's connection is the runtime's own for the chat.
+  // A reply of a chat goes to the runtime where LumiAH is on for the chat, no other harness answers it, and the reply's connection is the runtime's loopback for the chat.
   engine.seated = async (chatId, userId, connectionId) => {
     const { chat } = await ask<{ chat: ChatView }>(userId, { type: "lah.chat.get", chatId });
     const connection = chat.connection;
-    return chat.on && chat.place === "runtime" && chat.other === undefined && connection !== null && connection.loopback && (connectionId === null || connection.id === connectionId);
+    return chat.on && chat.other === undefined && connection !== null && connection.loopback && (connectionId === null || connection.id === connectionId);
   };
 
   // What each agent that can run in a chat can use there, and what of its tools it can't, with why, asked where the chat runs: a turn of a harness chat starts only once every agent of the engine's can use each tool it is given.
@@ -345,25 +446,36 @@ export function mountHarness(rt: Runtime, base: BackendHost, env: BackendEnv): M
 
   engine.owner = (chatId) => Promise.resolve(owners.get(chatId) ?? null);
 
-  // Lumiverse tells nobody of a write that isn't a message's own: LumiAH hears of its record in the ledger here, and reads the chat's records again.
-  engine.recorded = (chatId) => {
-    records.delete(chatId);
-    // The chat's user as Lumiverse's own events named them; null where none has, and LumiAH then finds whose chat it is.
-    for (const handler of touched) handler(chatId, false, owners.get(chatId) ?? null);
+  // Lumiverse tells nobody of a write that isn't a message's own: LumiAH hears of its record in the ledger here, reads the chat's records again, and tells each runtime's copy of the chat. The chat's user as Lumiverse's own events named them; null where none has, and LumiAH then finds whose chat it is.
+  engine.recorded = (chatId) => ledgerWrote(chatId, owners.get(chatId) ?? null);
+
+  // The ledger changed (`HarnessEngine.ledgerChanged`), whoever changed it: an edit Discarded on the engine's own page drops the records after it, and nothing else tells of that. Where LumiAH was given records of the chat they are read once more, one read for each change at most, and LumiAH is told only where they now differ from what it was given; the read is what LumiAH reads next. A chat it was given none of (one the harness doesn't play) costs nothing.
+  engine.ledgerHeard = (chatId, userId) => {
+    if (!given.has(chatId)) return;
+    if (comparing.has(chatId)) return void comparing.set(chatId, true);
+    comparing.set(chatId, false);
+    void (async () => {
+      do {
+        comparing.set(chatId, false);
+        const fresh = new Map((await engine.anchors(chatId, userId)).map((row) => [row.messageId, row.swipes]));
+        const entries = entriesOf(fresh);
+        if ((Object.keys(entries).length === 0 ? undefined : hashJson(entries)) !== given.get(chatId)) ledgerWrote(chatId, userId, fresh);
+      } while (comparing.get(chatId) === true);
+    })()
+      .catch((error: unknown) => base.log("warn", `[${NAME}] chat ${chatId}: LumiAH's records weren't compared with the ledger after it changed (${words(error)})`))
+      .finally(() => comparing.delete(chatId));
   };
 
-  const core = (userId: UserId, op: string, args: JsonObject, where: { chat?: ChatId | null; side?: string; job?: string } = {}): Promise<JsonValue> => backend.asks.ask(userId, op, args, where) as Promise<JsonValue>;
+  // How long LumiAH waits for an answer of the engine's, for a user: its own Wait for the extension, as its Settings hold it.
+  engine.extensionWait = async (userId) => settingsOf((await backend.settings.values(userId))[CORE_KEY]).extension.waitMs;
 
   engine.core = {
     ask: core,
-    stop(userId, run, why) {
-      if (backend.builtin.stop(userId, run, why)) return true;
-      // A run in the user's runtime isn't stopped from here: the runtime is told, as LumiAH's own live view tells it, and says how the run ended when it has.
+    stop(userId, run) {
+      // Every run is in the user's runtime: it is told to stop, as LumiAH's own live view tells it, and says how the run ended when it has.
       const stream = backend.live.streamOf(userId, run);
       if (stream !== null) void ask(userId, { type: "lah.turn.stop", stream, turn: run }).catch((error: unknown) => base.log("warn", `[${NAME}] run ${run.slice(0, 8)} couldn't be stopped in its runtime: ${words(error)}`));
-      return false;
     },
-    running: (userId) => backend.builtin.runs(userId),
     spent(userId, stream) {
       // The latest usage the stream's run traced: what it has spent so far, and what its latest call weighed.
       const usage = backend.live.whole(userId, stream)?.events.findLast((record) => record.event.kind === "usage")?.event;
@@ -388,9 +500,10 @@ function fileOf(raw: unknown): { path: string; hash: string; chars: number } | n
 
 /**
  * The chat's area of LumiAH's workspace as the engine's tools reach it, through what LumiAH's own
- * Workspace page reads and writes it with: where the chat runs (built in, or in the user's
- * runtime), under the workspace's own limits and its rule that a write names the version it was
- * made on. A refusal of LumiAH's is the tool's answer, in LumiAH's words.
+ * Workspace page reads and writes it with: in the runtime that plays the chat, under the
+ * workspace's own limits and its rule that a write names the version it was made on. A write LumiAH
+ * refuses is the tool's answer, in LumiAH's words; a read or a listing it refuses (no runtime
+ * linked) fails the call with LumiAH's words, which the agent is told.
  */
 function chatFiles(ask: (op: string, args: JsonObject) => Promise<JsonValue>): HarnessFiles {
   const read = async (path: string): Promise<HarnessFile | null> => {
@@ -439,10 +552,11 @@ export function startHarness(rt: Runtime): Backend {
       return () => clearTimeout(timer);
     },
     build: BUILD,
+    runtime: { sha256: RUNTIME_SHA256, size: Number(RUNTIME_SIZE) },
   });
   setInterval(() => {
     backend.tick().catch((error: unknown) => base.log("warn", `[${NAME}] the harness's tick failed: ${words(error)}`));
   }, TICK_MS);
-  base.log("info", `[${NAME}] harness ${BUILD} built in`);
+  base.log("info", `[${NAME}] harness ${BUILD} started`);
   return backend;
 }

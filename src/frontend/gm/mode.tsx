@@ -3,8 +3,8 @@
 // the GM panels. The truth (World, Places, Things, Story, the packs' tabs, the Fight and the Edits
 // log) is the `core.gm` panel, behind the gate in UI state; This chat's rules and the Inspector
 // (`core.context` and any other GM panel) aren't behind it. Leaving GM mode, or moving to another
-// chat, closes the gate again. The bar's height is published (`--lre-gm-nav-h`) so what a list pins
-// at the bottom (its selection bar, an edit's notice) sits above the bar, never under it.
+// chat, closes the gate again. The bar's height is published (`--lre-gm-nav-h`, bar-height.ts) so what
+// a list pins at the bottom (its selection bar, an edit's notice) sits above the bar, never under it.
 
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import type { GmSection } from "../app";
@@ -14,6 +14,7 @@ import type { IconName } from "../icons";
 import { useSelect } from "../store";
 import { ThisChat } from "./chat";
 import { gmAt, hideTruth } from "./gate";
+import { publishBarHeight } from "../bar-height";
 
 /** The engine's own sections; the packs' tabs go between Story and This chat. */
 const ENGINE: readonly { id: GmSection; label: string; icon: IconName }[] = [
@@ -31,14 +32,9 @@ export function GmMode() {
   useEffect(() => () => app.ui.update(hideTruth), []);
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    const nav = root.current?.querySelector<HTMLElement>(":scope > .lre-bottomnav");
     const el = root.current;
-    if (!nav || !el) return;
-    const publish = () => el.style.setProperty("--lre-gm-nav-h", `${nav.offsetHeight}px`);
-    publish();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publish);
-    observer?.observe(nav);
-    return () => observer?.disconnect();
+    const nav = el?.querySelector<HTMLElement>(":scope > .lre-bottomnav");
+    return el && nav ? publishBarHeight(el, nav, "--lre-gm-nav-h", typeof ResizeObserver === "undefined" ? undefined : ResizeObserver) : undefined;
   });
   // The gate was opened for one chat's truth, not the next one's.
   const chat = useRef(sync.chatId);

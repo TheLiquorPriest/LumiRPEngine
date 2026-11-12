@@ -2,10 +2,8 @@
 //
 //   bun scripts/test/run.ts               the tests for what changed since the branch left main, and in the working tree
 //   bun scripts/test/run.ts --check       both typechecks and the generated files' checks, then those tests
-//   bun scripts/test/run.ts --all         every test file but the property suite
 //   bun scripts/test/run.ts --release     the release gate: the checks, every test file, the property suite on the fixed seeds and fresh ones
 //   bun scripts/test/run.ts --properties  the property suite alone, on the fixed seeds and fresh ones
-//   bun scripts/test/run.ts --timings     records test/timings.json again (every test file but the property suite, one at a time)
 //   bun scripts/test/run.ts <test files>  these files
 //
 //   --base <ref>      compare with <ref> instead of main (HEAD: only what isn't committed yet)
@@ -15,7 +13,9 @@
 //   --seed-base <b>   the fresh sequences' seed base (default a new one), to run a release's again
 //   -- <args>         passed on to `bun test` (`-t <pattern>`, `--bail`)
 //
-// Test files run in parallel, one process per core, slowest first by test/timings.json.
+// Test files run in parallel, one process per core, slowest first by test/timings.json. Every test
+// file, each in a process of its own, is `bun run test:all` (scripts/test-all.ts), which also
+// records test/timings.json (`bun run test:timings`).
 
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -23,21 +23,18 @@ import { availableParallelism, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { addCoverage, coverageGaps, noCoverage, type Coverage } from "../../test/support/coverage";
 import { changedSince, isTest, readRepo, readTimings, selectTests, type Pick } from "./select";
+import { TIMEOUT_MS } from "../test-all";
 
 const ROOT = resolve(import.meta.dir, "../..");
 const TIMINGS = "test/timings.json";
 const PROPERTIES = "test/ledger/properties.test.ts";
-/** Bun's 5 s default guards against a hang; with every core busy, a test that takes 2 s alone can take longer than that. */
-const TIMEOUT_MS = 30_000;
 /** Sequences a shard of the fixed sample runs: a multiple of ten, so its L31 double runs are the whole run's. */
 const FIXED_SHARD = 20;
 /** Sequences a shard of fresh seeds runs: enough that each is held to the minds' coverage, as a run of 40 is. */
 const FRESH_SHARD = 40;
-/** The property suite's sequences when a targeted run takes it because its own code changed. */
-const SMOKE_RUNS = "20";
 
 interface Args {
-  mode: "changed" | "check" | "all" | "release" | "properties" | "timings" | "files";
+  mode: "changed" | "check" | "release" | "properties" | "files";
   base: string;
   budget: number;
   list: boolean;
@@ -60,7 +57,7 @@ function parse(argv: readonly string[]): Args {
       args.bun.push(...argv.slice(i + 1));
       break;
     }
-    if (a === "--check" || a === "--all" || a === "--release" || a === "--properties" || a === "--timings") args.mode = a.slice(2) as Args["mode"];
+    if (a === "--check" || a === "--release" || a === "--properties") args.mode = a.slice(2) as Args["mode"];
     else if (a === "--list") args.list = true;
     else if (a === "--base") args.base = value(i++, a);
     else if (a === "--budget") args.budget = Number(value(i++, a));
@@ -206,9 +203,7 @@ async function targeted(args: Args): Promise<Done | null> {
     return null;
   }
   const files = selection.run.map((p) => p.file).sort();
-  const env: Record<string, string> = files.includes(PROPERTIES) && process.env.LRE_PROPERTY_RUNS === undefined ? { LRE_PROPERTY_RUNS: SMOKE_RUNS } : {};
-  if (env.LRE_PROPERTY_RUNS) console.log(`The property suite runs ${SMOKE_RUNS} sequences here; the release gate runs 200 fixed and ${200} fresh.`);
-  return bunTest(`tests: ${files.length} file(s) for what changed`, files, args.bun, env);
+  return bunTest(`tests: ${files.length} file(s) for what changed`, files, args.bun);
 }
 
 async function main(): Promise<boolean> {
@@ -229,17 +224,10 @@ async function main(): Promise<boolean> {
       const tests = await targeted(args);
       return report("Checks before a commit", tests ? [...steps, tests] : steps, started);
     }
-    case "all":
-      return (await bunTest("tests: every test file but the property suite", [], [`--path-ignore-patterns=${PROPERTIES}`, ...args.bun])).ok;
     case "properties": {
       const props = await properties(args.fresh, args.seedBase, availableParallelism(), Promise.resolve());
       if (args.fresh > 0) console.log(`Fresh sequences: LRE_PROPERTY_BASE=${args.seedBase} (LRE_PROPERTY_SEED=${args.seedBase}-<i> replays one).`);
       return report("Property suite", props, started);
-    }
-    case "timings": {
-      // One file at a time, as plain `bun test` runs them, so a file's time is its own and not a share of the machine's.
-      rmSync(join(ROOT, TIMINGS), { force: true });
-      return (await exec("timings", [bun, "test", `--timings=${TIMINGS}`, "--update-timings", `--path-ignore-patterns=${PROPERTIES}`])).ok;
     }
     case "release": {
       const steps = await checks();

@@ -163,7 +163,8 @@ describe("look-through", () => {
     const through = estimate("emr");
     expect(through.cents).toBeGreaterThan(0);
     expect(through.cents).toBe(estimate("jordan").cents);
-  });
+    // Two Port Alders, each run half a month to its estimated tax, take a while.
+  }, 30_000);
 
   test("regression: without look-through no one is taxed on it, since Jordan holds none of Ellis Towing and neither company pays estimated tax", () => {
     const { w } = estimate("emr");

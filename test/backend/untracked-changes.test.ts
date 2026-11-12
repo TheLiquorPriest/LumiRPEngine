@@ -249,5 +249,6 @@ describe("a change the engine has no place for", () => {
     expect(knows(after, "pov", OILSKIN)).toBe(true);
     const oilskins = (s: WorldState): number => Object.values(s.entities).filter((e) => /oilskin/i.test(e.name)).length;
     expect(oilskins(after)).toBe(oilskins(await folded(alder)));
-  });
+    // Four replies on each of two Port Alders, every chip confirmed, take a while.
+  }, 30_000);
 });

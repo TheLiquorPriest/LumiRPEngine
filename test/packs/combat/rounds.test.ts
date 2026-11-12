@@ -307,7 +307,8 @@ describe("no fight stalls", () => {
     }
     expect(reasons.length).toBeGreaterThan(0);
     expect(reasons).not.toContain("stalemate");
-  });
+    // Eight fights on a starter, up to 30 turns each, take a while.
+  }, 30_000);
 
   test("the ruleset sets how many calm rounds end a fight, and 0 never does", () => {
     const two = playOut(missWorld(true, (w) => (w.ruleset!.combat!.stalemate = 2)), "end_turn", 8);

@@ -44,8 +44,7 @@ function jobsStandIn(chatId: string) {
       }
       throw new Error(`the stand-in has no ${op}`);
     },
-    stop: () => false,
-    running: () => [],
+    stop: () => undefined,
     spent: (_userId, stream) => live[stream] ?? null,
   };
   return {

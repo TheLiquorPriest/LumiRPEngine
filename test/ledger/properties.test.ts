@@ -1,8 +1,12 @@
 // The ledger gate (DESIGN §14): generated operation sequences on the fake host, with the
-// reference fold as oracle and the ledger invariants checked after every operation. It runs at
-// release (`bun run test:release`, in shards); regressions.test.ts replays the failures on every run.
+// reference fold as oracle and the ledger invariants checked after every operation. Run as it is
+// (`bun run test:all`, `bun test`) it takes its everyday sample: the fixed sample's first ten
+// sequences, the first of them twice (L31), held to no coverage count. The whole run is `bun run
+// test:properties` (and part of `bun run test:release`), in shards: the fixed sample's 200, held
+// together to every coverage count (support/coverage.ts), and 200 fresh ones. regressions.test.ts
+// replays the failures on every run.
 //
-//   LRE_PROPERTY_RUNS      sequences per run (default 200)
+//   LRE_PROPERTY_RUNS      sequences per run (default 10, the everyday sample; the whole run's shards set their own)
 //   LRE_PROPERTY_OPS       longest sequence (default 60)
 //   LRE_PROPERTY_SEED      replay one seed
 //   LRE_PROPERTY_COVERAGE  write the run's coverage counts to this file, for a run split into shards
@@ -14,7 +18,7 @@ import { Harness } from "../support/harness";
 import { coverageGaps, noCoverage, type Coverage } from "../support/coverage";
 import { runSequence, sequenceFor, shrink, type Op } from "../support/ops";
 
-const RUNS = Number(process.env.LRE_PROPERTY_RUNS ?? "200");
+const RUNS = Number(process.env.LRE_PROPERTY_RUNS ?? "10");
 const MAX_OPS = Number(process.env.LRE_PROPERTY_OPS ?? "60");
 const ONE = process.env.LRE_PROPERTY_SEED;
 /** Seeds are `<base>-<i>`: fixed by default, so every run of this file is the same; set a base to explore new ones. */

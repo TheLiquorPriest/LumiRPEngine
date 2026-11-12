@@ -2,9 +2,13 @@
 // harness plays. The page holds a row for each page of its own, then the story record's limits.
 // - Models: where each agent runs and how hard it thinks: by default, by agent, by how it was
 //   started, by a character's kind of run, and per character. The most specific choice wins, each
-//   member apart; anything not set falls through to the next. The connections offered leave out
-//   every loopback, as LumiAH marks them (`story/connections.ts`); a choice saved on one is marked
-//   as a problem to fix. Under the default, one line says what an agent with no connection runs on.
+//   member apart; anything not set falls through to the next. The connections offered are the
+//   runtime's own, as LumiAH lists them for the runtime that plays the open chat
+//   (`story/connections.ts`); a choice saved on one the runtime doesn't have (one of Lumiverse's,
+//   from before the runtime kept its own) is marked, with what its agents run on instead. Under the
+//   default, one line says what an agent with no connection runs on: the runtime's default. While
+//   the runtime keeps no connection, the page says so first, with the way to Harness → System →
+//   Runtime → Connections.
 // - Narration: who checks a passage before it is released, how often it may be drafted again,
 //   what the narrator is given, how long a passage and a check's changes may be, what the author
 //   may release in its own words, and whose the direct line's answer is (`settings.narration`).
@@ -26,10 +30,10 @@ import type { BudgetUseView, StoryNames } from "../../shared/story-pages";
 import type { StateView } from "../../shared/state-view";
 import type { SettingsRoute } from "../app";
 import { useApp } from "../app";
-import { Banner, Disclosure, Empty, HostSwitch, List, NumberStepper, Section, Seg, Stat } from "../components";
+import { Banner, Button, Disclosure, Empty, HostSwitch, List, NumberStepper, Section, Seg, Stat } from "../components";
 import type { IconName } from "../icons";
 import { MIND_FILE_LABEL } from "../story/files";
-import { type AgentConnections, onLoopback, UNSET_CONNECTION, useAgentConnections } from "../story/connections";
+import { type AgentConnections, NO_CONNECTION, notTheRuntimes, notTheRuntimesMark, useAgentConnections, useOpenConnections } from "../story/connections";
 import { ModelPickRows, pickText } from "../story/model-pick";
 import { nameIn, picksAny, RUN_WORDS, STANDING_RUN_WORDS, STORY_AGENTS, STRETCH_CHOICES, stretchText, TIER_WORDS } from "../story/model";
 import { NavRow, SettingRow } from "./kit";
@@ -221,15 +225,15 @@ function NarrationPage(props: { narration: NarrationSettings; busy: boolean; pat
 
 /** A level's rows folded under its name and what it picks. */
 function LevelFold(props: { id: string; title: string; help: string; owner: string; pick: StoryModels["default"] | undefined; fallsTo: string; connections: AgentConnections; busy: boolean; set(fields: JsonObject | null): void }) {
-  const named = props.pick ? pickText(props.pick, props.connections.all) : null;
-  const bad = onLoopback(props.pick, props.connections.loopback);
+  const named = props.pick ? pickText(props.pick, props.connections) : null;
+  const bad = notTheRuntimes(props.pick, props.connections);
   return (
     <div class="lre-set-fold" data-lre-setting={props.id} data-lre-changed={named !== null ? "" : undefined}>
       <Disclosure
         summary={
           <span class="lre-story-level-head">
             <span class="lre-story-level-title">{props.title}</span>
-            <span class={bad ? "lre-story-level-value lre-story-problem" : "lre-story-level-value"}>{bad ? "Needs fixing: set to the runtime's own connection" : (named ?? `Not set: ${props.fallsTo}`)}</span>
+            <span class={bad ? "lre-story-level-value lre-story-problem" : "lre-story-level-value"}>{bad ? `${named ?? ""}: ${notTheRuntimesMark(props.connections)}` : (named ?? `Not set: ${props.fallsTo}`)}</span>
           </span>
         }
       >
@@ -242,11 +246,33 @@ function LevelFold(props: { id: string; title: string; help: string; owner: stri
   );
 }
 
+/**
+ * What Models says above its levels, without hooks: that the runtime keeps no connection yet (no
+ * agent can run, and how to give it one), and how many choices name a connection the runtime
+ * doesn't have, with what their agents run on until they are chosen again.
+ */
+export function modelsNotices(models: StoryModels, connections: AgentConnections): { id: "none" | "not-runtimes"; title: string; text: string }[] {
+  const out: { id: "none" | "not-runtimes"; title: string; text: string }[] = [];
+  if (connections.none) out.push({ id: "none", title: NO_CONNECTION.title, text: NO_CONNECTION.text });
+  const bad = [models.default, ...Object.values(models.agents), ...Object.values(models.standings), ...Object.values(models.runs), ...Object.values(models.characters)].filter((pick) => notTheRuntimes(pick, connections)).length;
+  if (bad > 0) {
+    const one = bad === 1;
+    const until = connections.fallback !== null ? `Until you choose again, ${one ? "its agents run" : "their agents run"} on the runtime's default, ${connections.fallback.name}` : `Until you choose again, ${one ? "its agents'" : "their agents'"} calls are refused, since the runtime has no default connection`;
+    out.push({
+      id: "not-runtimes",
+      title: one ? "A choice names a connection the runtime doesn't have" : `${bad} choices name connections the runtime doesn't have`,
+      text: `${one ? "It was" : "They were"} made before the runtime kept connections of its own, or ${one ? "its connection was" : "their connections were"} removed since. ${until}: each is marked below. Copy from Lumiverse, in Harness → System → Runtime → Connections, copies a connection of yours into the runtime under its own id, so a choice of it works again.`,
+    });
+  }
+  return out;
+}
+
 /** The model ladder, most general first; the open chat's cast names the characters given choices of their own. */
 function ModelsPage(props: { models: StoryModels; view: StateView | null; busy: boolean; patch(patch: JsonObject): void }) {
   const app = useApp();
   const { models, busy } = props;
-  const connections = useAgentConnections();
+  const connections = useAgentConnections(props.view?.chatId ?? null);
+  const open = useOpenConnections();
   const harness = props.view?.engine === "harness" ? props.view.chatId : null;
   const [names, setNames] = useState<StoryNames>({});
   useEffect(() => {
@@ -257,17 +283,28 @@ function ModelsPage(props: { models: StoryModels; view: StateView | null; busy: 
   }, [harness]);
   const send = (level: JsonObject) => props.patch({ story: { models: level } });
   const characters = Object.keys(models.characters);
-  const bad = [models.default, ...Object.values(models.agents), ...Object.values(models.standings), ...Object.values(models.runs), ...Object.values(models.characters)].filter((pick) => onLoopback(pick, connections.loopback)).length;
   return (
     <div class="lre-stack" data-lre-settings-page="story-models">
-      <p class="lre-set-lead">Where the story's agents run and how hard they think. The most specific choice wins: a character's own, then the kind of run, then how the agent was started, then the agent, then the default. Anything not set falls through to the next.</p>
-      {bad > 0 ? (
-        <Banner tone="warn" title={bad === 1 ? "A choice needs fixing" : `${bad} choices need fixing`}>
-          {`${bad === 1 ? "It is" : "They are"} set to the runtime's own connection, so ${bad === 1 ? "its agents" : "their agents"} would call back into the runtime. Each is marked below: choose another connection, or Not set.`}
-        </Banner>
-      ) : null}
+      <p class="lre-set-lead">Where the story's agents run and how hard they think, on the runtime's own connections (Harness → System → Runtime → Connections). The most specific choice wins: a character's own, then the kind of run, then how the agent was started, then the agent, then the default. Anything not set falls through to the next.</p>
+      {modelsNotices(models, connections).map((notice) => (
+        <div key={notice.id} data-lre-models-notice={notice.id}>
+          <Banner
+            tone="warn"
+            title={notice.title}
+            actions={
+              open !== null ? (
+                <Button size="sm" icon="link" onClick={open}>
+                  Open Connections
+                </Button>
+              ) : undefined
+            }
+          >
+            {notice.text}
+          </Banner>
+        </div>
+      ))}
       <Section title="The default">
-        <ModelPickRows id="default" owner="Every agent" pick={models.default} unset={UNSET_CONNECTION} connections={connections} busy={busy} set={(fields) => send({ default: fields })} />
+        <ModelPickRows id="default" owner="Every agent" pick={models.default} connections={connections} busy={busy} set={(fields) => send({ default: fields })} />
       </Section>
       <Section title="By agent" flush>
         {STORY_AGENTS.map((a) => (

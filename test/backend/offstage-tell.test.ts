@@ -258,5 +258,6 @@ describe("a standing payment's provenance", () => {
     const id = Object.keys(head.state.entities).find((e) => head.state.entities[e]?.kind === "flow" && head.state.entities[e]?.name === "Gym");
     if (!id) throw new Error("no Gym flow");
     expect(provenance(head, id)).toBe(" (set up off screen)");
-  });
+    // A 40-day time skip of the whole town takes a while.
+  }, 30_000);
 });

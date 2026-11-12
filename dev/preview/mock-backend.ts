@@ -13,6 +13,7 @@ import { hashJson } from "../../src/shared/hash";
 import { GM_OUTLINE, GM_ROSTER, gmRosterEntry } from "../../src/shared/gm-parts";
 import { applyPatch } from "../../src/shared/json-patch";
 import type { MindsRunView } from "../../src/shared/minds";
+import type { LiveView } from "../../src/shared/live";
 import type { AssistantProposal, AssistantProposalOp, AssistantRun, AssistantView, LoreBookEntryView, LorePinView, ReviewCardView, TraceRow, WorkspaceFileView } from "../../src/shared/protocol";
 import { editedBookFields, OLD_SECRECY_FIELDS, withBookLoreFields, type BookLoreFields } from "../../src/shared/lore";
 import { parseSecretMarks, unreadableMarks, wholeEntrySecret } from "../../src/shared/secret-marks";
@@ -39,6 +40,7 @@ import { combatFixture } from "./combat-fixture";
 import { applyRoutineOp, chatRolesFixture, previewRoutines, routineChangedFixture, routineGmFixture, type PreviewRoutines } from "./routines-fixture";
 import { ROUTINE_PROPOSALS, routinePlayerFixture } from "./routines-player-fixture";
 import { answerReview, HARNESS_BLOCKED, harnessChips, harnessReview, reviewChip, UNPLAYED_WHY } from "./harness-fixture";
+import { liveTurnFixture } from "./live-fixture";
 import { migrateWorld, previewSheet, previewSkills } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { formulaFunctions } from "../../src/engine/scope";
@@ -78,6 +80,8 @@ export interface MockOptions {
   harnessBlocked?: boolean;
   /** `?unplayed=`: why no turn was played for the flagged reply. */
   unplayed?: keyof typeof UNPLAYED_WHY;
+  /** `?live=turn`: GM → Live shows an agent turn under way, many screens long on a phone; else no agent turn has run. */
+  live?: "turn";
   closeDrawer(): void;
 }
 
@@ -271,6 +275,8 @@ export class MockBackend {
     ],
   };
   readonly log: FrontendToBackend[] = [];
+  /** The agent turn GM → Live shows (`?live=turn`), made when it is first asked for. */
+  private liveTurn: LiveView | null = null;
 
   constructor(private readonly emit: Emit, private readonly options: MockOptions) {}
 
@@ -1217,7 +1223,8 @@ export class MockBackend {
         return this.result(reqId, "lre.workspace", { files: structuredClone(this.workspace.files), pending: false, undo });
       }
       case "lre.live":
-        // The preview plays no agent turn: nothing to watch.
+        // With `?live=turn` an agent turn under way; else the preview played none: nothing to watch.
+        if (message.op === "get" && this.options.live === "turn") return this.result(reqId, "lre.live", { live: (this.liveTurn ??= liveTurnFixture(Date.now())) });
         return this.result(reqId, "lre.live", { live: null });
       case "lre.routine": {
         // Cast's usual day: someone's day as the POV may know it.

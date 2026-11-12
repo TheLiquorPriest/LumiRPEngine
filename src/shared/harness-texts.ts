@@ -95,6 +95,10 @@ export const HARNESS_TEXT = {
   guidanceName: "harness.guidance.name",
   unplayed: "harness.guidance.unplayed",
   behind: "harness.guidance.behind",
+  unread: "harness.guidance.unread",
+  openingLate: "harness.opening.late",
+  presetLate: "harness.opening.preset_late",
+  presetPart: "harness.opening.preset_part",
   unplayedStopped: "harness.guidance.unplayed.stopped",
   unplayedFailed: "harness.guidance.unplayed.failed",
   unplayedNoRun: "harness.guidance.unplayed.no_run",
@@ -588,6 +592,10 @@ const WORLD_VARS: readonly PromptVar[] = [v("world", "the world's name"), v("pov
 const GUIDANCE_PROMPTS: readonly PromptDef[] = [
   { id: HARNESS_TEXT.guidanceName, page, group: GUIDANCE, label: "What the level is called", note: "The name every agent is told the world's guidance under, between your own guidance and the chat's.", text: "this world's", vars: [], nonEmpty: true },
   { id: HARNESS_TEXT.behind, page, group: GUIDANCE, label: "The turn before isn't all recorded yet", note: "Heads the world's guidance when a turn began before the turn before it was all recorded: its start stopped waiting for that turn's commit (the setting agents.harness.commitWaitMs).", text: "The turn before this one was still being recorded when this one began, so what it changed may not all be in what your tools show yet. Where something of it matters here, read it again before you rely on it.", vars: [], nonEmpty: true },
+  { id: HARNESS_TEXT.unread, page, group: GUIDANCE, label: "Part of the chat wasn't read", note: "Heads the guidance of a run on a chat the harness plays when the engine couldn't read part of the chat as the run began (its world isn't loaded, or a read failed): the author still leads, and is told what is missing.", text: "{{why}} as this run began, so this run goes on without it. Read what you need with your tools, and say so in your answer where they can't.", vars: [v("why", "what wasn't read and why, in the engine's own words", true)], nonEmpty: true },
+  { id: HARNESS_TEXT.openingLate, page, group: GUIDANCE, label: "As a turn begins: the moment not read in time", note: "Ends the author's instructions in place of the moment, the drafts due and the story's preparation when reading them took longer than half of LumiAH's Wait for the extension: the run starts without them rather than not at all.", text: "The moment as it stands, the drafts due and the story's preparation weren't read in time, so this turn goes on without them here. Read what you need of them with your tools.", vars: [], nonEmpty: true },
+  { id: HARNESS_TEXT.presetLate, page, group: GUIDANCE, label: "As a turn begins: the preset not read in time", note: "Told the author when the chat's preset took longer to read than half of LumiAH's Wait for the extension: no agent of the run gets its part of the player's preset.", text: "Your part of the player's preset is missing this turn, and so are the parts of the agents you start: it wasn't read in time, so this turn goes on without it.", vars: [], nonEmpty: true },
+  { id: HARNESS_TEXT.presetPart, page, group: GUIDANCE, label: "An agent's part of the player's preset: its heading", note: "Heads each agent's part of the chat's preset in its instructions, so the model, and whoever reads the agent's instructions in the live view, can tell where the engine's own words end and the player's preset begins.", text: "Your part of the player's preset, “{{preset}}”:", vars: [v("preset", "the preset's name, as Lumiverse shows it", true)], nonEmpty: true },
   {
     id: HARNESS_TEXT.guidance,
     page,

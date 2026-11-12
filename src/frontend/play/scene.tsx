@@ -1,6 +1,7 @@
 // Play → Now, the hub, registered as the core Scene panel: the status banners; which engine plays
 // the chat and why, while the harness can't play the user's chats (a permission isn't granted); on a
-// chat the harness plays, the prepared start while it's offered or under way (`story/prepare.tsx`); the
+// chat the harness plays, what to do while its runtime keeps no connection yet, and the prepared
+// start while it's offered or under way (`story/prepare.tsx`); the
 // scene card (time and day part, place, scene type with the last turn's elapsed time, weather, cash,
 // each fixable value, the time among them, with its ✎); what needs you; the fight while one is on
 // (Now's other panels); who is here; the packs' glances; the quick actions. Opening someone here
@@ -19,8 +20,9 @@ import type { IconName } from "../icons";
 import { Icon } from "../icons";
 import type { PanelDef, PanelProps } from "../registry";
 import { NeedsYou, QuickActions, StatusBanners } from "./now";
-import { EngineBlocked, useHarnessBlocked } from "../gm/engine";
+import { EngineBlocked, NoConnectionNotice, useHarnessBlocked } from "../gm/engine";
 import { gmAt } from "../gm/gate";
+import { useAgentConnections, useOpenConnections } from "../story/connections";
 import { toastQueued } from "../queued";
 import { visiblePanels } from "./play";
 import { PrepareCard } from "../story/prepare";
@@ -44,7 +46,19 @@ function EngineWord(props: { state: StateView }) {
   const app = useApp();
   const engine = props.state.engine ?? "classic";
   const blocked = useHarnessBlocked(props.state.chatId, engine);
-  return <EngineBlocked engine={engine} blocked={blocked} onOpen={() => app.ui.update((ui) => gmAt({ ...ui, mode: "gm" }, "chat"))} />;
+  return (
+    <>
+      <EngineBlocked engine={engine} blocked={blocked} onOpen={() => app.ui.update((ui) => gmAt({ ...ui, mode: "gm" }, "chat"))} />
+      {engine === "harness" && blocked === null ? <ConnectionsWord chatId={props.state.chatId} /> : null}
+    </>
+  );
+}
+
+/** On a chat the harness plays, while its runtime is linked and keeps no connection: what to do, with the way to Harness → System → Runtime → Connections. */
+function ConnectionsWord(props: { chatId: string }) {
+  const connections = useAgentConnections(props.chatId);
+  const open = useOpenConnections();
+  return <NoConnectionNotice engine="harness" none={connections.none} onOpen={open} />;
 }
 
 export function ScenePanel(props: PanelProps) {

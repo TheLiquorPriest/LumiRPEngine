@@ -36,6 +36,12 @@ export function guard(rig: Rig): void {
   };
 }
 
+/** Whether LumiAH answers a chat in its runtime, as its page reads it: switched on, pinned to the runtime's loopback connection. */
+export const inRuntime = async (bed: RuntimeBed, chatId: string): Promise<boolean> => {
+  const { chat } = await bed.page<{ chat: { on: boolean; connection: { loopback: boolean } | null } }>("lah.chat.get", { chatId });
+  return chat.on && chat.connection?.loopback === true;
+};
+
 /**
  * A new Port Alder chat with the tests' people, on the harness in a linked runtime, once LumiAH has
  * set it to play there. `guarded`: the engine's own helper model throws if reached, as it must never
@@ -45,7 +51,7 @@ export async function worldChat(guarded = true): Promise<{ bed: RuntimeBed; rig:
   const { bed, rig } = await linked();
   const worldId = await alderWorld(rig);
   const chatId = await chatOn(rig, worldId);
-  await bed.until(async () => (await bed.page<{ chat: { place: string } }>("lah.chat.get", { chatId })).chat.place === "runtime", "the chat set to play in the runtime");
+  await bed.until(() => inRuntime(bed, chatId), "the chat set to play in the runtime");
   if (guarded) guard(rig);
   return { bed, rig, chatId, worldId };
 }

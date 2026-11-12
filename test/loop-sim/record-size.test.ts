@@ -88,6 +88,7 @@ describe("a dense timelapse segment run to the unit cap records ≤ 32 KB, exact
       const fromRecord = moneyOf(plan.events, accounts);
       for (const m of plan.montage?.money ?? []) expect({ in: m.in, out: m.out }).toEqual(fromRecord[m.account] ?? { in: 0, out: 0 });
       expect(recorded.clock).toBe(s0.clock + plan.elapsedMinutes);
-    });
+      // A dense world's month-long timelapse to the unit cap, planned and run raw, takes a while.
+    }, 30_000);
   }
 });

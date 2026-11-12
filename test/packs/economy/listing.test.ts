@@ -251,7 +251,8 @@ describe("its price", () => {
     // The stock's own draw follows the chat's seed; at a correlation of 1 only the books and the index move it.
     const market = config({ listingCorrelation: 1 });
     expect(run("one", market)).toEqual(run("two", market));
-  });
+    // Four Port Alders, each marked through 14 trading days, take a while.
+  }, 30_000);
 
   test("it follows the books: valued at four times as much, its price climbs toward the new books a unit", () => {
     const w = portAlder(config({ listingReversion: 50 }));

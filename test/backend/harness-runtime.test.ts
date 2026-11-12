@@ -1,7 +1,7 @@
-// The harness engine on LumiAH's runtime (DEPTH2 stage A, Mount6): a chat the harness plays is
-// claimed for the runtime and is never played anywhere else; the reply is exactly what the engine
-// released; Stop keeps a turn only once something of its reply went out; and with no runtime linked
-// the chat plays nothing and its pages say why.
+// The harness engine on LumiAH's runtime (DEPTH2 stage A, Mount6): a chat the harness plays runs in
+// the runtime and is never played anywhere else; the reply is exactly what the engine released; Stop
+// keeps a turn only once something of its reply went out; and with no runtime linked the chat plays
+// nothing and its pages say why.
 
 import { describe, expect, test } from "bun:test";
 import { recHarnessOf } from "../../src/backend/harness/record";
@@ -21,10 +21,10 @@ const written = (rig: Rig, chatId: string): string[] => {
 };
 
 describe("the harness on LumiAH's runtime", () => {
-  test("a claimed chat runs only in the runtime: its claim says so, and a reply not on its way there is stopped before anything is written", async () => {
+  test("a claimed chat runs only in the runtime: its claim takes the newest message and gives the released reply, and a reply not on its way there is stopped before anything is written", async () => {
     const { rig, chatId } = await harnessChat();
     const claim = await claimOf(rig, chatId);
-    expect([claim?.place, claim?.request, claim?.reply]).toEqual(["runtime", "newest", "released"]);
+    expect([claim?.request, claim?.reply]).toEqual(["newest", "released"]);
     // The chat's replies don't reach the runtime yet: the engine sets the chat there, and this reply goes nowhere.
     const pinned: boolean[] = [];
     rig.rt.harness.seated = async () => false;

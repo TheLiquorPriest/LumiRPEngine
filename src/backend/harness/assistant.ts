@@ -18,9 +18,9 @@
 // - Its end. LumiAH says how every side turn ended (`sideEnded`): a turn that is done gives the
 //   answer; one that was stopped is a cancelled answer and one that failed a failed one, each with
 //   LumiAH's own reason.
-// - Cancel stops the turn where LumiAH runs it built in. A turn it can't stop from here (it runs in
-//   the user's runtime, or was lost) is over for the thread all the same, as cancelled, and what its
-//   agent still calls then only reads.
+// - Cancel tells LumiAH's runtime to stop the turn, and the turn is over for the thread at once, as
+//   cancelled; what its agent still calls then only reads, and what LumiAH says of its end later is
+//   no answer's.
 //
 // Nothing here calls a model, and nothing here waits on a clock.
 
@@ -168,11 +168,10 @@ export class SideAssistant implements SideAnswers {
     await asked("remove the GM assistant's conversation", () => core.ask(input.userId, "sides.remove", { id: input.session }, { chat: input.chatId }));
   }
 
-  /** Cancel. LumiAH ends a turn it stops and says so (`sideEnded`), with `why` as its reason. */
+  /** Cancel: LumiAH's runtime is told to stop the turn, and the thread's answer ends here, as cancelled with `why`, without waiting for the runtime to say how the turn ended. */
   private stop(live: Live, why: string): void {
     if (this.turns.get(live.turn) !== live) return;
-    if (this.rt.harness.core?.stop(live.userId, live.turn, why)) return;
-    // Not a turn under way here: it runs in the user's runtime, which this port doesn't reach, or it is gone. Nothing would say how it ended, so it ends here.
+    this.rt.harness.core?.stop(live.userId, live.turn);
     live.end({ status: "cancelled", text: "", reason: why, usage: NOTHING_SPENT });
   }
 

@@ -10,6 +10,7 @@ import type { AssistantProposalOp, AssistantView, ExtractionModeView, TraceRow, 
 import type { ChangeType, ExtractionType, UserSettings } from "../../src/shared/settings";
 import { AGENT_CHANGE_DEFAULTS, AGENT_CHANGE_TYPES, LORE_INDEX_DEFAULTS, NARRATOR_DEFAULTS, SETTINGS_DEFAULTS_REV } from "../../src/shared/settings";
 import { narrationSettingsOf, storyPresetSettingsOf, storySettingsOf } from "../../src/shared/settings";
+import { HARNESS_AGENT } from "../../src/shared/harness-texts";
 import { claimFactId, defaultMindsSettings, KNOWLEDGE_DEFAULTS, MIND_LENGTH_DEFAULTS, witnessRef } from "../../src/shared/minds";
 import { defaultTimeouts } from "../../src/shared/timeouts";
 import { hashJson } from "../../src/shared/hash";
@@ -1457,7 +1458,8 @@ export function settingsFixture(): UserSettings {
     gm: { duringTurn: "hold" },
     perf: { reuseViews: true },
     storyPreset: storyPresetSettingsOf(undefined),
-    story: storySettingsOf(undefined),
+    // The default on Deepseek, which the runtime keeps under the id Lumiverse gave it (copied from Lumiverse); the narrator's own choice made before the runtime kept connections, on Lumiverse's Deepseek Pro, which the runtime doesn't have.
+    story: storySettingsOf({ models: { default: { connectionId: "conn-ds", effort: "medium" }, agents: { [HARNESS_AGENT.narrator]: { connectionId: "conn-ds-pro", model: "deepseek-v4-pro" } } } }),
     narration: narrationSettingsOf(undefined),
   };
 }

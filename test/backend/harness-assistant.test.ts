@@ -5,8 +5,9 @@
 // through the tools port, and it ends. The engine's own helper model throws if reached, and
 // `noModelCalls` checks it never was: on a harness chat every model call is an agent's.
 //
-// The last test mounts LumiAH's real backend instead (`support/lumiah-bed.ts`), its agent's model
-// scripted: what that agent is offered and what LumiAH itself says of a side turn is only seen there.
+// The last test mounts LumiAH's real backend instead, with its runtime linked
+// (`support/runtime-bed.ts`), its agent's model scripted: what that agent is offered and what LumiAH
+// itself says of a side turn is only seen there.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { HarnessCore } from "../../src/backend/harness/extension";
@@ -56,7 +57,8 @@ class Sides implements HarnessCore {
   readonly live = new Map<string, string>();
   /** Every turn `side.send` began, oldest first. */
   readonly begun: string[] = [];
-  readonly stopped: { run: string; why: string }[] = [];
+  /** The runs LumiAH's runtime was told to stop, in order. */
+  readonly stopped: string[] = [];
   /** The op refused next, once. */
   refuse: { op: string; error: Error } | null = null;
   /** While set: `side.send` begins its turn at once, as LumiAH does, and answers only when this does. */
@@ -104,14 +106,8 @@ class Sides implements HarnessCore {
     }
   }
 
-  stop(_userId: string, run: string, why: string): boolean {
-    if (!this.live.has(run)) return false;
-    this.stopped.push({ run, why });
-    return true;
-  }
-
-  running(): string[] {
-    return [...this.live.keys()];
+  stop(_userId: string, run: string): void {
+    this.stopped.push(run);
   }
 
   /** What was asked of one op, in order. */
@@ -287,23 +283,28 @@ describe("GM → Assistant on a chat the harness plays", () => {
     noModelCalls(rig);
   });
 
-  test("Cancel stops the turn, and a cancelled answer proposes nothing", async () => {
+  test("Cancel tells LumiAH's runtime to stop the turn and ends the answer at once, as cancelled: it proposes nothing, what its agent still calls only reads, and what LumiAH says of the turn's end later is no answer's", async () => {
     const { rig, chatId, core } = await assistantChat();
     rig.body(await say(rig, chatId, "Bring Okoro to the house."));
     const turn = core.turn;
     await begins(rig, chatId, turn);
     await call(rig, chatId, turn, "gm_move", MOVE);
-    // LumiAH is told to stop it, in the words a cancelled answer gives; the thread waits for LumiAH to say it ended.
-    expect(viewOf(rig, await rig.send({ type: "lre.assistant", op: "cancel", chatId }, PAGE)).running).not.toBeNull();
-    expect(core.stopped).toEqual([{ run: turn, why: CANCELLED }]);
-    await ends(rig, core, chatId, turn, "stopped", { reason: CANCELLED });
+    // LumiAH's runtime is told to stop it, and the thread doesn't wait for it to say the turn ended: the answer is cancelled, in the words a cancelled answer gives.
+    rig.body(await rig.send({ type: "lre.assistant", op: "cancel", chatId }, PAGE));
+    expect(core.stopped).toEqual([turn]);
+    await rig.dispatch.assistant.settle();
+    await rig.host.settle();
     const view = await thread(rig, chatId);
     expect(view.running).toBeNull();
     expect(view.thread.at(-1)).toMatchObject({ role: "assistant", text: "", status: "cancelled", reason: CANCELLED });
     expect(view.proposals).toEqual([]);
     expect(rig.rt.diag.activityOf(chatId)).toBeNull();
+    expect((await call(rig, chatId, turn, "gm_move", MOVE)).error).toBe(true);
+    expect((await call(rig, chatId, turn, "people_where", { person: "Okoro" })).error).toBeUndefined();
+    await ends(rig, core, chatId, turn, "stopped", { reason: CANCELLED });
+    expect((await thread(rig, chatId)).thread).toHaveLength(2);
 
-    // A turn LumiAH can't stop from here (it runs in the user's runtime, or was lost) is over for the thread all the same, and what its agent still calls only reads.
+    // The next message is taken, and a turn LumiAH has lost is cancelled the same way; an end LumiAH says of it later, even a done one, changes nothing.
     rig.body(await say(rig, chatId, "And Brann?"));
     const lost = core.turn;
     await begins(rig, chatId, lost);
@@ -318,6 +319,7 @@ describe("GM → Assistant on a chat the harness plays", () => {
     expect((await call(rig, chatId, lost, "people_where", { person: "Okoro" })).error).toBeUndefined();
     await ends(rig, core, chatId, lost, "done", { reply: "Brann is out." });
     expect((await thread(rig, chatId)).thread).toHaveLength(4);
+    expect(core.stopped).toEqual([turn, lost]);
     expect(await whereIsOkoro(rig, chatId)).toBeNull();
     noModelCalls(rig);
   });

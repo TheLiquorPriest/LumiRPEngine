@@ -70,8 +70,7 @@ async function preparing(state: PrepareState, prepare: JsonObject = {}) {
       jobs.push(job);
       return { job };
     },
-    stop: () => false,
-    running: () => [],
+    stop: () => undefined,
     spent: () => null,
   };
   rig.rt.harness.core = core;

@@ -8,22 +8,24 @@
 // on a message, its interceptor among the others'. The engine's seat is the one LumiAH is mounted
 // in; a test that installs LumiAH itself beside the engine gives it a seat of its own.
 //
-// Nothing here is a model. An agent's call reaches `models.call`, which a test answers with a cast:
-// each agent has a part, known by what its call holds (the tools it offers, what it was told), and
-// its lines in order. Lumiverse's own generation, which writes the reply on a chat that runs built
-// in, is the fake host's: the test says what it wrote (`host.finish`).
+// Nothing here is a model. An agent's call is made in the runtime the seat's backend links
+// (`runtime-bed.ts`), through the runtime's own model layer, which takes each call's answer from the
+// seat's `script` (`runtime-models.ts`). A test answers with a cast: each agent has a part, known by
+// what its call holds (the tools it offers, what it was told), and its lines in order.
 
-import type { ModelRequest, ModelResult, ModelToolCall } from "lumi-ah/core";
+import type { ModelRequest, ModelToolCall } from "lumi-ah/core";
 import type { Backend, BackendEnv, BackendHost, GenerationEnded, GenerationStarted, GenerationStopped, HostConnection, HostGenerationType, InterceptorInput, InterceptorVerdict, PromptMessage, SwipeChanged } from "lumi-ah/extension/backend";
 import { UI_VERSION } from "lumi-ah/shared";
 import { mountHarness } from "../../src/backend/harness/mount";
 import { isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";
 import { ENGINE_EXTENSION } from "../../src/shared/protocol";
+import type { HostEventName } from "../../src/backend/host";
 import type { FakeHost, Generation } from "./fake-host";
+import { hostChatOf, hostMessageOf, lumiverseRows, rowToChat, rowToMessage } from "./lumiverse-rows";
 import type { Rig } from "./rig";
 
-/** What a part answers a call with: text, tool calls, or a failure in the provider's words. */
-export type Answer = string | { content?: string; toolCalls?: ModelToolCall[]; error?: string };
+/** What a part answers a call with: text, tool calls, or a failure in the provider's words; with the reasoning the model thought first, where a test gives one. */
+export type Answer = string | { content?: string; reasoning?: string; toolCalls?: ModelToolCall[]; error?: string };
 
 /** One line of a part: an answer, or what gives it once the call is in (a test holds a call open by answering it later). */
 export type Line = Answer | ((request: ModelRequest) => Answer | Promise<Answer>);
@@ -116,8 +118,11 @@ export class PageRefused extends Error {
 /** The connection every chat of the bed generates on: Lumiverse's own, and no loopback. */
 const CONNECTION: HostConnection = { id: "conn-main", name: "Main", provider: "openai", url: "https://models.example.invalid/v1", model: "test-model", isDefault: true, metadata: {} };
 
-/** The permissions a manifest asks for and a user has granted, unless a test takes one away. */
+/** The permissions a manifest asks for and a user has granted, unless a test takes one away. Not `cors_proxy`, which only Lumiverse's owner or an admin grants: a test that wants it grants it. */
 const GRANTED = ["interceptor", "chats", "chat_mutation", "generation", "generation_parameters", "world_books", "presets", "connection_profiles", "mcp_servers", "embeddings", "memories", "databanks", "web_search"];
+
+/** The fake Lumiverse's events about a chat that an extension may hear by name (`events.onLumiverse`), each in the form Lumiverse sends it (`lumiverse-rows.ts`). Besides them, an extension hears the ones the engine's port hears nothing of. */
+const LUMIVERSE_EVENTS: readonly HostEventName[] = ["MESSAGE_SENT", "MESSAGE_EDITED", "MESSAGE_SWIPED", "MESSAGE_DELETED", "CHAT_CHANGED", "CHAT_DELETED"];
 
 const TYPES: Readonly<Record<string, HostGenerationType>> = { normal: "normal", regenerate: "regenerate", swipe: "swipe", continue: "continue", impersonate: "impersonate" };
 
@@ -127,8 +132,9 @@ const PATIENCE_MS = 5_000;
 type Sent = { role: string; text: string }[];
 type Interceptor = (input: InterceptorInput) => Promise<InterceptorVerdict>;
 
-/** What every seat of one fake Lumiverse shares: the interceptors it runs on a prompt, in the order they registered, what it then sends its model and the parameters they set on the request, and its wait for them. */
+/** What every seat of one fake Lumiverse shares: the user's connections, which are the user's and no one extension's; the interceptors it runs on a prompt, in the order they registered, what it then sends its model and the parameters they set on the request, and its wait for them. */
 interface Shared {
+  connections: HostConnection[];
   interceptors: { handler: Interceptor; logs: string[] }[];
   sent: Map<string, Sent>;
   params: Map<string, Record<string, unknown>>;
@@ -161,7 +167,7 @@ function promptOf(host: FakeHost, g: Generation): PromptMessage[] {
 function sharedOf(host: FakeHost): Shared {
   const known = SHARED.get(host);
   if (known) return known;
-  const shared: Shared = { interceptors: [], sent: new Map(), params: new Map(), waits: new Map() };
+  const shared: Shared = { connections: [CONNECTION], interceptors: [], sent: new Map(), params: new Map(), waits: new Map() };
   SHARED.set(host, shared);
   host.promptInterceptor = async (g) => {
     let prompt = promptOf(host, g);
@@ -209,9 +215,9 @@ export interface Seat {
   base: BackendHost;
   /** The clock and the build a backend is made with. */
   env: BackendEnv;
-  /** The agents' model: each call is answered by this. A test sets it (`cast(...).script`). */
+  /** The agents' model: each call the runtime linked to this seat's backend makes (`runtime-models.ts`) is answered by this. A test sets it (`cast(...).script`). */
   script: (request: ModelRequest) => Answer | Promise<Answer>;
-  /** Every agent's call, in the order they came. */
+  /** Every agent's call, in the order the runtime made them. */
   calls: ModelRequest[];
   /** The backend's own log lines. */
   logs: string[];
@@ -221,8 +227,10 @@ export interface Seat {
   prompt(generationId: string): Sent;
   /** The parameters the interceptors set on a generation's request, a later one's over an earlier one's. */
   parameters(generationId: string): Record<string, unknown>;
-  /** The user's connections as Lumiverse lists them: Lumiverse's own, and any a runtime adds (its loopback). */
+  /** The user's connections as Lumiverse lists them: Lumiverse's own, and any a runtime adds (its loopback). The agents run on none of them: a runtime calls its providers on its own connections. */
   connections: HostConnection[];
+  /** A server on Lumiverse's machine that its proxy reaches at `base` (`spindle.cors`, with `cors_proxy` granted): a runtime's loopback server. */
+  serve(base: string, handler: (request: Request) => Promise<Response>): void;
   /** A session of Lumiverse's event socket that isn't a page (a runtime's link): what the backend sends to it reaches `receive`, and none of it is a page's. */
   outlet(session: string, receive: (message: unknown) => void): void;
   /** Something that session sends the backend, as Lumiverse hands it on. */
@@ -235,7 +243,7 @@ export interface Seat {
   lose(generationId: string): void;
   /** The generations whose prompt is waiting on the interceptors now. */
   waiting(): string[];
-  /** The extension's backend is gone (it restarted, or crashed): its interceptor is Lumiverse's no longer, its timers end, a model call of its never answers, and nothing it sends reaches a page. */
+  /** The extension's backend is gone (it restarted, or crashed): its interceptor is Lumiverse's no longer, its timers end, and nothing it sends reaches a page. */
   gone(): void;
   /** One request of LumiAH's page contract, from a page of the user's. */
   page<T = Record<string, unknown>>(type: string, body?: JsonObject): Promise<T>;
@@ -257,6 +265,8 @@ export function seatOf(rig: Rig, identifier: string = ENGINE_EXTENSION): Seat {
   const host = rig.host;
   const userId = host.userId;
   const shared = sharedOf(host);
+  /** Lumiverse's rows behind the fake's chats: what this host reads of a chat, and the runtime's copy reads over Lumiverse's routes. */
+  const rows = lumiverseRows(host);
   const logs: string[] = [];
   const calls: ModelRequest[] = [];
   const granted = new Set(GRANTED);
@@ -268,6 +278,7 @@ export function seatOf(rig: Rig, identifier: string = ENGINE_EXTENSION): Seat {
   const closed: ((userId: string, sessionId: string) => void)[] = [];
   const answers = new Map<string, PromiseWithResolvers<unknown>>();
   const written = new Map<string, number>();
+  const servers = new Map<string, (request: Request) => Promise<Response>>();
   const files = identifier === ENGINE_EXTENSION ? host.files : new Map<string, string>();
   const events = {
     started: [] as ((event: GenerationStarted) => void)[],
@@ -311,7 +322,10 @@ export function seatOf(rig: Rig, identifier: string = ENGINE_EXTENSION): Seat {
     },
     prompt: (generationId) => shared.sent.get(generationId) ?? [],
     parameters: (generationId) => shared.params.get(generationId) ?? {},
-    connections: [CONNECTION],
+    connections: shared.connections,
+    serve(base, handler) {
+      servers.set(base, handler);
+    },
     outlet(session, receive) {
       outlets.set(session, receive);
     },
@@ -373,7 +387,23 @@ export function seatOf(rig: Rig, identifier: string = ENGINE_EXTENSION): Seat {
     capability: () => true,
     install: { bun: null, dir: null },
     identifier,
-    interceptorMs: 300_000,
+    // Lumiverse's own proxy as an extension sees it: refused without `cors_proxy` and for a path that ends in `.js`, its own User-Agent and the Host the address names added, and the answer brought back whole from the server on this machine that serves the address's origin.
+    async cors(url, init) {
+      if (!granted.has("cors_proxy")) throw new Error("PERMISSION_DENIED: cors_proxy — CORS proxy permission not granted");
+      const target = new URL(url);
+      if (/\.(js|mjs|cjs|es)$/i.test(target.pathname)) throw new Error("JavaScript downloads are blocked: URL path identifies a JavaScript file");
+      const server = servers.get(target.origin);
+      if (server === undefined) throw new Error("Unable to connect. Is the computer able to access the url?");
+      const response = await server(new Request(url, { method: init.method, headers: { ...init.headers, "User-Agent": "Lumiverse/test", Host: target.host }, body: init.body }));
+      const headers: Record<string, string> = {};
+      response.headers.forEach((value, name) => {
+        headers[name.toLowerCase()] = value;
+      });
+      return { status: response.status, headers, body: await response.text() };
+    },
+    // The bed's user is no operator of this Lumiverse, and the extension can't tell where Lumiverse's database is: the direct reader can't be switched on here.
+    role: () => Promise.resolve("user"),
+    database: () => null,
 
     frontend: {
       send(message, _userId, sessionId) {
@@ -390,6 +420,12 @@ export function seatOf(rig: Rig, identifier: string = ENGINE_EXTENSION): Seat {
       },
       onMessage: (handler) => void pageHandlers.push(handler),
       onClosed: (handler) => void closed.push(handler),
+      // To every page and runtime of the user's: the bed's one user.
+      everyone(message) {
+        if (dead) return;
+        for (const outlet of [...outlets.values()]) outlet(message);
+        pushed.push({ message, session: undefined });
+      },
     },
 
     events: {
@@ -401,37 +437,27 @@ export function seatOf(rig: Rig, identifier: string = ENGINE_EXTENSION): Seat {
       onChatTouched: (handler) => void events.touched.push(handler),
       onChatForked: () => undefined,
       onSelectedConnection: () => undefined,
+      // Lumiverse's own events of these names, each in its own form, made of its rows as they stood when it was sent (`lumiverse-rows.ts`): the ones the fake host sends the engine as it delivers them, and the ones the engine's port hears nothing of soon after their change.
+      onLumiverse(names, handler) {
+        for (const name of LUMIVERSE_EVENTS) {
+          if (!names.includes(name)) continue;
+          host.on(name, (payload) => {
+            const told = rows.form(payload);
+            if (told !== null) handler(told.name, told.payload, userId);
+          });
+        }
+        rows.hear((name, payload) => {
+          if (names.includes(name)) handler(name, payload, userId);
+        });
+      },
     },
 
     registerInterceptor: (handler) => void shared.interceptors.push({ handler, logs }),
-
-    models: {
-      async call(request, _userId, signal, onDelta) {
-        if (dead) return new Promise<ModelResult>(() => undefined);
-        calls.push(request);
-        const ended = new Promise<never>((_resolve, reject) => {
-          const end = (): void => reject(signal.reason instanceof Error ? signal.reason : new Error("the call was ended"));
-          if (signal.aborted) end();
-          else signal.addEventListener("abort", end, { once: true });
-        });
-        ended.catch(() => undefined);
-        const answer = await Promise.race([Promise.resolve().then(() => seat.script(request)), ended]);
-        // The answer's text streams as Lumiverse's generation API streams it, before the call ends.
-        const content = typeof answer === "string" ? answer : (answer.content ?? "");
-        if (content !== "" && (typeof answer === "string" || answer.error === undefined)) onDelta?.({ content });
-        if (typeof answer === "string") return { content: answer, finishReason: "stop" } satisfies ModelResult;
-        if (answer.error !== undefined) throw new Error(answer.error);
-        const tools = answer.toolCalls ?? [];
-        return { content, finishReason: tools.length > 0 ? "tool_calls" : "stop", ...(tools.length > 0 ? { toolCalls: tools } : {}) } satisfies ModelResult;
-      },
-      pass: () => Promise.reject(new Error("the bed passes no request through: no chat of the engine's asks for it")),
-    },
 
     connections: {
       list: () => Promise.resolve([...seat.connections]),
       get: (connectionId) => Promise.resolve(seat.connections.find((c) => c.id === connectionId) ?? null),
       active: () => Promise.resolve(CONNECTION.id),
-      models: (connectionId) => Promise.resolve([seat.connections.find((c) => c.id === connectionId)?.model ?? CONNECTION.model]),
     },
 
     storage: {
@@ -459,9 +485,10 @@ export function seatOf(rig: Rig, identifier: string = ENGINE_EXTENSION): Seat {
     chats: {
       // The fake Lumiverse, like this one, doesn't tell extensions whether Sovereign Hand is on.
       sovereignHand: () => Promise.resolve(null),
+      // The chat's row and its messages as Lumiverse keeps them, as Spindle hands them on: the rows the runtime's copy reads over Lumiverse's routes.
       get(chatId, user) {
-        const chat = user === userId ? host.chatsById.get(chatId) : undefined;
-        return Promise.resolve(chat ? { id: chat.id, name: chat.name, characterId: null, metadata: structuredClone(chat.metadata) } : null);
+        const read = rows.chat(chatId, user);
+        return Promise.resolve(read === null ? null : hostChatOf(rowToChat(read.chat)));
       },
       patchMetadata(chatId, patch) {
         const chat = host.chat(chatId);
@@ -475,12 +502,14 @@ export function seatOf(rig: Rig, identifier: string = ENGINE_EXTENSION): Seat {
         return Promise.resolve();
       },
       messages(chatId, range) {
-        const all = host.chat(chatId).messages.map((m) => ({ id: m.id, index: m.index, role: m.isUser ? ("user" as const) : ("assistant" as const), name: m.name, swipeId: m.swipeId, swipes: Math.max(1, m.swipes.length), content: m.swipes[m.swipeId] ?? "", hidden: false, own: (m.bag[identifier] as JsonValue | undefined) ?? null, at: null }));
+        host.chat(chatId);
+        const all = (rows.chat(chatId, userId)?.messages ?? []).map((row) => hostMessageOf(rowToMessage(row), identifier));
         return Promise.resolve(range === undefined ? all : "tail" in range ? all.slice(-range.tail) : all.slice(range.from, range.from + range.count));
       },
       swipe(chatId, messageId, swipe) {
-        const message = host.chat(chatId).messages.find((m) => m.id === messageId);
-        return Promise.resolve(message?.swipes[swipe] ?? null);
+        host.chat(chatId);
+        const row = rows.chat(chatId, userId)?.messages.find((m) => m.id === messageId);
+        return Promise.resolve(row === undefined ? null : (rowToMessage(row).swipes[swipe] ?? null));
       },
       async setOwn(chatId, messageId, value) {
         // The entry the engine's own extension keeps on a message is the ledger's: a LumiAH mounted in the engine never writes it.

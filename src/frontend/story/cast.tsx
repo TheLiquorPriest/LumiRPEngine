@@ -28,7 +28,7 @@ export function CastPage(props: { chatId: string; files: StoryFiles; open?: stri
   const [view, setView] = useState<CastView | null>(null);
   const [failed, setFailed] = useState(false);
   const [settings, setSettings] = useState<SettingsResult | null>(null);
-  const connections = useAgentConnections();
+  const connections = useAgentConnections(props.chatId);
   const pages = usePages<string>();
   useEffect(() => {
     let live = true;

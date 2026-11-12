@@ -1,0 +1,59 @@
+// GM → Live's agent turn for the preview (`?live=turn`): a turn under way on the main agent's
+// pipeline, long enough to scroll many screens on a phone. The main agent works stage 3 of its
+// eight; the intent and the scene have answered (the scene's note landed), two minds are still
+// thinking and the knowledge role has just begun, each with what it was sent, its reasoning, its
+// answers and its tool calls. Every name and line is made up.
+
+import type { LiveEntryBody, LiveView } from "../../src/shared/live";
+
+const usage = (input: number, out: number) => ({ in: input, cachedIn: Math.round(input * 0.6), out, reasoningOut: Math.round(out / 4) });
+
+/** The turn's entries, each a second or so after the one before. */
+const ENTRIES: LiveEntryBody[] = [
+  { kind: "agent", agent: "agent_main", role: "main", phase: "pre", stage: "Stage 3 of 8: the scene, the minds and the decisions", model: null, connection: null, effort: "medium", system: "You work one turn of a roleplay as its main agent. Ask each role for what the turn needs, then commit what landed and hand the reply to the narrator.", prefix: ["Port Alder, Tuesday 15 September, 7:42 in the morning. The player is Jordan Ellis."], history: 6 },
+  { kind: "message", agent: "agent_main", text: "Stage 3 of 8. The player said: “I ask Rosie whether the ferry still runs tonight, and if Marcus is taking his boat out.”\nOpen requests:\n- intent: what the player means to do\n- scene: who and what is at the diner\n- minds: Rosie and Marcus\n- knowledge: what Rosie knows of the ferry" },
+  { kind: "answer", agent: "agent_main", text: "Two people are asked about, and one of them isn't here. I ask the intent first, then the scene, then both minds at once, and the knowledge role for the ferry's timetable.", reasoning: "The player asks about two things: the ferry tonight, and Marcus's boat. Rosie runs the counter and hears the harbor talk, so she can answer the first from what she knows. Marcus isn't at the diner this morning: his mind still decides whether he is going out, and Rosie only knows what he said yesterday.", calls: [{ id: "c-intent", name: "run_role", args: { role: "intent", task: "What does the player mean to do?" } }], usage: usage(4200, 180), model: "the main agent's model", finish: "tool_calls", ms: 2400 },
+  { kind: "run", run: "intent:gen7:1", role: "intent", via: "agent" },
+  { kind: "agent", agent: "agent_intent", role: "intent", run: "intent:gen7:1", phase: "pre", task: "intent", model: "a fast model", connection: "Main", effort: "low", system: "You read what the player's character means to do this turn.", prefix: [], history: 0 },
+  { kind: "message", agent: "agent_intent", text: "What does the player mean to do? “I ask Rosie whether the ferry still runs tonight, and if Marcus is taking his boat out.”" },
+  { kind: "answer", agent: "agent_intent", text: "Jordan asks Rosie two questions, in words, at the counter: whether the evening ferry runs, and whether Marcus Delgado means to take his boat out. Nothing is bought or moved. It is talk, and it takes a minute or two.", calls: [], usage: usage(1800, 64), model: "a fast model", finish: "stop", ms: 900 },
+  { kind: "idle", agent: "agent_intent", usage: { in: 1800, out: 64 } },
+  { kind: "ran", run: "intent:gen7:1", ok: true, via: "agent", usage: { in: 1800, out: 64 }, ms: 1000 },
+  { kind: "result", agent: "agent_main", call: "c-intent", name: "run_role", text: "intent:gen7:1: Jordan asks Rosie two questions at the counter: the evening ferry, and Marcus's boat.", error: false, ms: 1100 },
+  { kind: "answer", agent: "agent_main", text: "The scene next: who is in the diner and what Rosie is doing.", calls: [{ id: "c-scene", name: "run_role", args: { role: "scene", task: "Who and what is at the diner now?" } }], usage: usage(4600, 40), model: "the main agent's model", finish: "tool_calls", ms: 1200 },
+  { kind: "run", run: "scene:gen7:1", role: "scene", via: "agent" },
+  { kind: "agent", agent: "agent_scene", role: "scene", run: "scene:gen7:1", phase: "pre", task: "scene", model: "a fast model", connection: "Main", effort: "low", system: "You set the scene: who is where, what they are doing, what can be seen and heard.", prefix: ["The world's places and who is at each."], history: 0 },
+  { kind: "message", agent: "agent_scene", text: "Who and what is at the diner now? Jordan is at the counter of the Harbor Diner." },
+  { kind: "answer", agent: "agent_scene", text: "", calls: [{ id: "w-scene", name: "workspace_write", args: { path: "notes/diner-morning.md", text: "Rosie behind the counter, refilling the coffee. Two dock workers in the back booth. The radio on low: the marine forecast, wind from the north-east by evening." } }], usage: usage(2600, 120), model: "a fast model", finish: "tool_calls", ms: 1400 },
+  { kind: "write", key: "op_scene_note", run: "scene:gen7:1", role: "scene", phase: "pre", outcome: "staged", changeType: "workspace", lines: ["Write notes/diner-morning.md"] },
+  { kind: "result", agent: "agent_scene", call: "w-scene", name: "workspace_write", text: "Proposed: Write notes/diner-morning.md", error: false, ms: 8 },
+  { kind: "answer", agent: "agent_scene", text: "Rosie is behind the counter with the coffee pot. Two dock workers sit in the back booth over eggs, talking about the weather. The radio plays the marine forecast low: wind from the north-east by evening, gusting later. Marcus isn't here; his cap isn't on its hook by the door.", calls: [], usage: usage(2900, 96), model: "a fast model", finish: "stop", ms: 1300 },
+  { kind: "idle", agent: "agent_scene", usage: { in: 5500, out: 216 } },
+  { kind: "ran", run: "scene:gen7:1", ok: true, via: "agent", usage: { in: 5500, out: 216 }, ms: 2900 },
+  { kind: "result", agent: "agent_main", call: "c-scene", name: "run_role", text: "scene:gen7:1: Rosie at the counter, two dock workers in the back booth, the forecast on the radio; Marcus not in.", error: false, ms: 3000 },
+  { kind: "write", key: "op_scene_note", run: "scene:gen7:1", role: "scene", phase: "pre", outcome: "landed" },
+  { kind: "answer", agent: "agent_main", text: "Both minds now, at once: Rosie answers the player, and Marcus decides about his boat wherever he is.", calls: [{ id: "c-rosie", name: "run_role", args: { role: "minds", task: "Rosie: what does she say to Jordan?" } }, { id: "c-marcus", name: "run_role", args: { role: "minds", task: "Marcus: is he taking the boat out tonight?" } }], usage: usage(5200, 72), model: "the main agent's model", finish: "tool_calls", ms: 1500 },
+  { kind: "run", run: "minds:gen7:1", role: "minds", via: "agent" },
+  { kind: "agent", agent: "agent_rosie", role: "minds", run: "minds:gen7:1", phase: "pre", task: "Rosie", model: "a careful model", connection: "Main", effort: "medium", system: "You are Rosie's mind: what she knows, what she wants, how she answers.", prefix: ["Rosie runs the Harbor Diner. She has known Marcus since school and worries when he fishes in bad weather."], history: 2 },
+  { kind: "message", agent: "agent_rosie", text: "Jordan asks you whether the ferry still runs tonight, and if Marcus is taking his boat out. What do you say, and what do you think?" },
+  { kind: "answer", agent: "agent_rosie", text: "", reasoning: "The ferry runs at six on weekdays; the board by the till says so, and nobody has called it off. With the wind turning north-east, they sometimes cancel the last run, but that's decided at four. Marcus said yesterday he wanted to try the far banks tonight. I don't like it with this forecast.", calls: [{ id: "r-board", name: "lore_read", args: { about: "the ferry's timetable" } }], usage: usage(3600, 140), model: "a careful model", finish: "tool_calls", ms: 2100 },
+  { kind: "result", agent: "agent_rosie", call: "r-board", name: "lore_read", text: "The Port Alder ferry: weekdays at 7:00, 12:30 and 18:00; the last run is called off when the harbor master posts a small-craft warning, by four in the afternoon.", error: false, ms: 40 },
+  { kind: "answer", agent: "agent_rosie", text: "“Six o'clock, same as always, unless the harbor master posts a warning by four. With that wind coming round, I wouldn't count on it.” She tops up Jordan's cup. “Marcus? He was talking about the far banks last night. I told him he's a fool. Ask him yourself, he's usually at the slip by noon.”", calls: [], usage: usage(3900, 110), model: "a careful model", finish: "stop", ms: 1700 },
+  { kind: "agent", agent: "agent_marcus", role: "minds", run: "minds:gen7:1", phase: "pre", task: "Marcus", model: "a careful model", connection: "Main", effort: "medium", system: "You are Marcus Delgado's mind: what he knows, what he wants, what he does next.", prefix: ["Marcus fishes out of Port Alder in a twenty-two foot boat, the Teresa. He owes on the engine."], history: 3 },
+  { kind: "message", agent: "agent_marcus", text: "Morning, at the slip. The forecast says wind from the north-east by evening. Are you taking the Teresa out tonight?" },
+  { kind: "answer", agent: "agent_marcus", text: "", reasoning: "The engine payment is due Friday and the near water has been fished out all week. The far banks would pay for it in one night. The wind is the problem: north-east means a following sea coming home, which the Teresa handles, if I'm back before it builds. Leave at five, back by one. I'll check the warning board at four first.", calls: [{ id: "m-plan", name: "mind_note", args: { text: "Means to fish the far banks tonight: out at five, back by one, if no warning is posted at four." } }], usage: usage(3300, 160), model: "a careful model", finish: "tool_calls", ms: 2300 },
+  { kind: "write", key: "op_marcus_plan", run: "minds:gen7:1", role: "minds", phase: "pre", outcome: "staged", changeType: "mind", lines: ["Marcus means to fish the far banks tonight, out at five"] },
+  { kind: "result", agent: "agent_marcus", call: "m-plan", name: "mind_note", text: "Proposed: Marcus's note “Means to fish the far banks tonight…”", error: false, ms: 6 },
+  { kind: "answer", agent: "agent_marcus", text: "He coils the bow line twice, looks north at the clear sky, and decides: the far banks, out at five, if the board at four says nothing.", reasoning: "Rosie will scold me. She always does.", calls: [], usage: usage(3500, 70), model: "a careful model", finish: "stop", ms: 1200 },
+  { kind: "run", run: "knowledge:gen7:1", role: "knowledge", via: "agent" },
+  { kind: "agent", agent: "agent_knowledge", role: "knowledge", run: "knowledge:gen7:1", phase: "pre", task: "knowledge", model: "a fast model", connection: "Main", effort: "low", system: "You check what each person in the scene may know.", prefix: [], history: 0 },
+  { kind: "message", agent: "agent_knowledge", text: "Does Rosie know about the small-craft warning rule, and does Jordan know Marcus owes on his engine?" },
+  { kind: "answer", agent: "agent_knowledge", text: "Rosie knows the ferry rule: it is on the board by her till, and she has worked the counter for eleven years. Jordan doesn't know about the engine payment; only Marcus and the boatyard do.", calls: [{ id: "k-check", name: "knowledge_check", args: { who: "jordan", about: "Marcus's engine payment" } }], usage: usage(2100, 88), model: "a fast model", finish: "tool_calls", ms: 1100 },
+];
+
+/** The turn as GM → Live reads it, started `ago` milliseconds before `now` and still running: its entries spread over that time. */
+export function liveTurnFixture(now: number, ago = 48_000): LiveView {
+  const startedAt = now - ago;
+  const step = Math.floor(ago / (ENTRIES.length + 1));
+  return { turn: "gen7", kind: "turn", pipeline: "main", text: "I ask Rosie whether the ferry still runs tonight, and if Marcus is taking his boat out.", startedAt, ended: null, entries: ENTRIES.map((e, i) => ({ ...e, seq: i + 1, at: startedAt + step * (i + 1) })) };
+}

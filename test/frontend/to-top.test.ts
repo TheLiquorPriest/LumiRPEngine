@@ -1,12 +1,11 @@
 // "Back to top" in the live views (src/frontend/to-top.tsx; GM → Live and Play → Now's preparation):
-// when it shows, from where the panel is scrolled, how tall it is and whether it can scroll; what the
-// button says; and that its foot sits above the bottom bars rather than under them. Read without a DOM.
+// when it shows, from where the panel is scrolled, how tall it is and whether it can scroll; and what
+// the button says. Read without a DOM. How high its foot floats, above the bottom bar's measured
+// height, is test/frontend/bar-height.test.ts.
 
 import { describe, expect, test } from "bun:test";
 import type { VNode } from "preact";
 import { Button } from "../../src/frontend/components";
-import { PREPARE_LIVE_CSS } from "../../src/frontend/story/prepare-live-styles";
-import { LIVE_CSS } from "../../src/frontend/styles/live";
 import { showsToTop, TO_TOP_SCREENS, ToTopButton } from "../../src/frontend/to-top";
 import type { Props } from "../support/tree";
 
@@ -53,18 +52,5 @@ describe("the button", () => {
     expect(tree.props.size).toBe("sm");
     (tree.props.onClick as () => void)();
     expect(pressed).toBe(1);
-  });
-
-  test("its foot sits above the bottom bar, wraps on a narrow phone, and only its buttons take a touch", () => {
-    expect(LIVE_CSS).toContain(".lre-gm .lre-live-follow{bottom:calc(var(--lre-gm-nav-h,0px) + var(--lre-s2))}");
-    expect(LIVE_CSS).toContain(".lre-gm:has(.lre-gm-notice) .lre-live-follow{bottom:calc(var(--lre-gm-nav-h,0px) + var(--lre-gm-notice-h,0px) + 2 * var(--lre-s2))}");
-    expect(PREPARE_LIVE_CSS).toContain(".lre-play .lre-prep-live-foot{bottom:calc(var(--lre-tap-lg) + 2 * var(--lre-s1) + 1px + env(safe-area-inset-bottom,0px) + var(--lre-s2))}");
-    for (const [css, foot] of [
-      [LIVE_CSS, ".lre-live-follow"],
-      [PREPARE_LIVE_CSS, ".lre-prep-live-foot"],
-    ] as const) {
-      expect(css).toContain(`${foot}{position:sticky;bottom:var(--lre-s2);z-index:1;display:flex;flex-wrap:wrap;justify-content:center;gap:var(--lre-s2);pointer-events:none}`);
-      expect(css).toContain(`${foot}>.lre-btn{pointer-events:auto;background:var(--lre-bar-bg);`);
-    }
   });
 });
