@@ -441,14 +441,14 @@ Event payloads are exactly those the host emits (DESIGN §14). `userId` arrives 
 | `test/boundaries.test.ts`, `test/manifest.test.ts` | Structure |
 
 Volume knobs:
-- `LRE_PROPERTY_RUNS` (sequences per run; default 200), `LRE_PROPERTY_OPS` (longest sequence; default 60), `LRE_PROPERTY_SEED` (replay one seed), `LRE_PROPERTY_BASE` (the seed base, `lre-fixed` by default, so every default run is the same; set another to explore new seeds) and `LRE_PROPERTY_FROM` (the first seed index, to split a long run into shards).
+- `LRE_PROPERTY_RUNS` (sequences per run; default 10, the everyday sample, about 20 seconds; `bun run test:properties` runs the fixed sample's 200 in shards, held to its coverage, and 200 fresh ones), `LRE_PROPERTY_OPS` (longest sequence; default 60), `LRE_PROPERTY_SEED` (replay one seed), `LRE_PROPERTY_BASE` (the seed base, `lre-fixed` by default, so every default run is the same; set another to explore new seeds) and `LRE_PROPERTY_FROM` (the first seed index, to split a long run into shards).
 - A failing seed is shrunk and appended to `regressions.json`. Every tenth sequence runs twice and must end byte-identical (L31).
 
 ## 9. Contributing
 
 The module boundaries in §2 are the contract, and `test/boundaries.test.ts` enforces them: a change that crosses a zone has to say so in the type contract first. When you add a pack, write it as a pure `core` and a `ui`, add it to `ALL_PACKS` in `src/packs/index.ts` (requirements first), give it a level contract (DESIGN §9.2), lint rules and tests, and keep cross-pack behavior behind registered services and queries (§5). Contract files in `src/shared/*` change only together with every module that reads them, and with this document; a change to the world document also changes `schemas/lre-world-v1.schema.json`. After changing what a pack registers, run `bun run reference` to regenerate [REFERENCE.md](REFERENCE.md).
 
-Commit your own changes in small, reviewable steps, and run `bun run typecheck` and `bun test` before you open a pull request. `dist/` is built output: rebuild it with `bun run build` from a clean checkout, and do not edit it by hand.
+Commit your own changes in small, reviewable steps, and run `bun run typecheck` and `bun run test:all` (every test file, each in a process of its own) before you open a pull request. `dist/` is built output: rebuild it with `bun run build` from a clean checkout, and do not edit it by hand.
 
 ## 10. Conventions
 
