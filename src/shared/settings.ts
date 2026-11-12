@@ -946,7 +946,9 @@ export function storyPrepareOf(raw: unknown, base: Readonly<StoryPrepare> = STOR
     const [lo, hi] = STORY_BOUNDS.prepare[key];
     return typeof x === "number" && Number.isInteger(x) && x >= lo && x <= hi ? x : base[key];
   };
-  return { stretchMessages: whole("stretchMessages"), askAboveTokens: whole("askAboveTokens"), reliveAtOnce: whole("reliveAtOnce"), beatsPerStretch: whole("beatsPerStretch"), readChars: whole("readChars"), textChars: whole("textChars"), callTokens: whole("callTokens"), surveyChars: whole("surveyChars"), watchSeconds: whole("watchSeconds"), watchRuns: whole("watchRuns"), runMinutes: whole("runMinutes"), runRounds: whole("runRounds"), idleRuns: whole("idleRuns") };
+  // A file from before a read reached its agent whole holds that build's 24,000 for a read of a stretch, sized to stay near LumiAH's cut, and no survey size yet: it reads as shipped now, not as the player's choice.
+  const readChars = p.surveyChars === undefined && p.readChars === 24_000 ? base.readChars : whole("readChars");
+  return { stretchMessages: whole("stretchMessages"), askAboveTokens: whole("askAboveTokens"), reliveAtOnce: whole("reliveAtOnce"), beatsPerStretch: whole("beatsPerStretch"), readChars, textChars: whole("textChars"), callTokens: whole("callTokens"), surveyChars: whole("surveyChars"), watchSeconds: whole("watchSeconds"), watchRuns: whole("watchRuns"), runMinutes: whole("runMinutes"), runRounds: whole("runRounds"), idleRuns: whole("idleRuns") };
 }
 
 /** `UserSettings.story` as the engine reads it: each dial a whole number in its bounds, else `base`'s; a file from before it reads as shipped. */

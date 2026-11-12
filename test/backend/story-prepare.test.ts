@@ -20,7 +20,7 @@ import { estimateOf, preparationSpent, preparePage, readPrepare, updatePrepare }
 import { HARNESS_AGENT } from "../../src/shared/harness-texts";
 import { PREPARE_NOTE, PREPARE_PATH, PREPARE_STORY } from "../../src/shared/harness-texts-prepare";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
-import type { UserSettings } from "../../src/shared/settings";
+import { STORY_DEFAULTS, storyPrepareOf, type UserSettings } from "../../src/shared/settings";
 import type { PrepareAsk } from "../../src/shared/story-pages";
 import type { Rig } from "../support/rig";
 import { attachBook } from "../support/tools";
@@ -424,6 +424,14 @@ describe("the survey", () => {
     const fresh = await castChat();
     const newChat = { ...castEnv(fresh.rig, fresh.chatId, await castTurn(fresh.rig, fresh.chatId, { main: false, story: memoryStory(), job: { id: "job-6", byUser: true } }), HARNESS_AGENT.author), files: memoryFiles() };
     expect((await call(newChat, "prepare_plan", { about: "A new story at the boarding house.", principals: [{ who: "Mara", why: "The house is hers." }] })).error).toBeUndefined();
+  });
+
+  test("a settings file from before reads reached their agent whole takes the new size of a read; a size the player set since is kept", () => {
+    // The older build's own 24,000, in a file with no survey size yet: it was never the player's choice.
+    expect(storyPrepareOf({ readChars: 24_000, stretchMessages: 20 })).toMatchObject({ readChars: STORY_DEFAULTS.prepare.readChars, stretchMessages: 20 });
+    expect(storyPrepareOf({ readChars: 30_000 }).readChars).toBe(30_000);
+    // Saved on this build, 24,000 is theirs.
+    expect(storyPrepareOf({ readChars: 24_000, surveyChars: 60_000 }).readChars).toBe(24_000);
   });
 });
 

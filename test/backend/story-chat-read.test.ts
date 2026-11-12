@@ -12,6 +12,7 @@ import type { HostPort } from "../../src/backend/host";
 import { preparePage } from "../../src/backend/story/prepare";
 import { chatStoryPort } from "../../src/backend/story/record";
 import { HARNESS_AGENT } from "../../src/shared/harness-texts";
+import { PREPARE_STORY } from "../../src/shared/harness-texts-prepare";
 import type { JsonObject } from "../../src/shared/json";
 import type { Rig } from "../support/rig";
 import { mount, playOn } from "./harness-driver";
@@ -66,6 +67,8 @@ async function longChat(chatMs?: number): Promise<Long> {
   const settings = await rig.rt.settings.get(userId);
   const prepared = { ...settings, story: { ...settings.story, prepare: { ...settings.story.prepare, askAboveTokens: 100_000_000 } } };
   const files = memoryFiles();
+  // The story as the author understands it, which a plan on a chat with a history is written from.
+  await files.write(PREPARE_STORY, "Mara keeps the boarding house.", null);
   const kept = async () => (await chatRead(rig.rt.host, { chatId: made.chatId, userId }, settings.agents.kept.chatMs)).messages;
   const story = chatStoryPort(rig.rt, { chatId: made.chatId, userId, turn: "job-1", on: "first", messages: kept });
   const turn = await castTurn(rig, made.chatId, { main: false, settings: prepared, story, host: rig.rt.host, job: { id: "job-1", byUser: true } });

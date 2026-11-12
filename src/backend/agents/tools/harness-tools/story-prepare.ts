@@ -539,7 +539,7 @@ export const PREPARE_TOOLS: readonly HarnessToolDefinition[] = [
         const given = ask.part;
         const noted = (await readPrepare(files)).state;
         if (noted?.surveyed !== true && !noted?.read?.includes(given)) {
-          const kind = noted?.kind ?? chatKind(await turn.host.chats.messages(env.chatId, env.userId));
+          const kind = noted?.kind ?? chatKind((await chatOf(env, turn)).messages);
           // A file whose record can't be read is planned afresh anyway: the note starts a preparation with no plan in its place.
           await updatePrepare<null>(files, turn.settings.prompts.texts, (now) => {
             const s = now.state ?? unplanned(kind, [], false);
