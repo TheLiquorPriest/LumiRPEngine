@@ -3,6 +3,8 @@
 // line; each tool call is a raised card whose caret's colour carries how it stands (muted running,
 // accent done, negative failed), its arguments in one line beside its name, folding over its
 // arguments laid out and its result. Statuses and failures in the tone tokens. Built on the tokens only.
+// The foot row (Follow the newest, Back to top) sticks above GM's bottom bar and any edit notice, its
+// buttons side by side and wrapping on a narrow phone, opaque so their words and the feed read cleanly.
 
 export const LIVE_CSS = `
 .lre-live{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
@@ -61,6 +63,10 @@ export const LIVE_CSS = `
 .lre-live-plan>li{overflow-wrap:anywhere}
 .lre-live-plan-role{font-weight:600}
 .lre-live-plan-why{color:var(--lre-muted)}
-.lre-live-follow{position:sticky;bottom:var(--lre-s2);display:flex;justify-content:center;pointer-events:none}
-.lre-live-follow>.lre-btn{pointer-events:auto}
+.lre-live-tab:focus{outline:none}
+.lre-live-follow{position:sticky;bottom:var(--lre-s2);z-index:1;display:flex;flex-wrap:wrap;justify-content:center;gap:var(--lre-s2);pointer-events:none}
+.lre-gm .lre-live-follow{bottom:calc(var(--lre-gm-nav-h,0px) + var(--lre-s2))}
+.lre-gm:has(.lre-gm-notice) .lre-live-follow{bottom:calc(var(--lre-gm-nav-h,0px) + var(--lre-gm-notice-h,0px) + 2 * var(--lre-s2))}
+.lre-live-follow>.lre-btn{pointer-events:auto;background:var(--lre-bar-bg);box-shadow:var(--lre-shadow-sm)}
+.lre-live-follow>.lre-btn:hover{background:linear-gradient(var(--lre-hover),var(--lre-hover)),var(--lre-bar-bg)}
 `;

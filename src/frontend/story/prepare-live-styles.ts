@@ -1,9 +1,14 @@
 // The live view of the prepared start, inside Play → Now's card (`story/prepare-live.tsx`). Phone
 // first: one column that wraps at 360 px and at the drawer's width; where the card is wide (720 px and
 // more) the whole lays out in two columns. Stretches and the trail scroll inside their own box, so a
-// long preparation never pushes the card past the screen and nothing is cut.
+// long preparation never pushes the card past the screen and nothing is cut. Back to top sticks at
+// the foot of what shows, above Play's bottom bar, only while the view is on screen; at the view's
+// end it takes its own line, so it covers nothing there. Its button is opaque, so its words and the
+// view's read cleanly while it floats.
 
 export const PREPARE_LIVE_CSS = `
+.lre-prep-live-frame{display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0}
+.lre-prep-live-frame:focus{outline:none}
 .lre-prep-live{container:lre-prep-live/inline-size;display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0}
 .lre-prep-live-now{margin:0;overflow-wrap:anywhere}
 .lre-prep-live-whole{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--lre-s4);min-width:0;padding-top:var(--lre-s2)}
@@ -31,4 +36,8 @@ export const PREPARE_LIVE_CSS = `
 .lre-prep-live-left{margin:0;font-size:var(--lre-fs-sm);overflow-wrap:anywhere}
 .lre-prep-live-actions{display:flex;flex-wrap:wrap;gap:var(--lre-s2)}
 .lre-prep-live-actions>.lre-btn{min-height:var(--lre-tap)}
+.lre-prep-live-foot{position:sticky;bottom:var(--lre-s2);z-index:1;display:flex;flex-wrap:wrap;justify-content:center;gap:var(--lre-s2);pointer-events:none}
+.lre-play .lre-prep-live-foot{bottom:calc(var(--lre-tap-lg) + 2 * var(--lre-s1) + 1px + env(safe-area-inset-bottom,0px) + var(--lre-s2))}
+.lre-prep-live-foot>.lre-btn{pointer-events:auto;background:var(--lre-bar-bg);box-shadow:var(--lre-shadow-sm)}
+.lre-prep-live-foot>.lre-btn:hover{background:linear-gradient(var(--lre-hover),var(--lre-hover)),var(--lre-bar-bg)}
 `;

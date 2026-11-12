@@ -7,7 +7,7 @@
 // is; the card's own state changing asks once more. Every line is worded here from what the backend
 // read, and says plainly where an older file keeps nothing to show.
 
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { PrepareLive as Live, PrepareLiveView, PreparePrincipalLine, PrepareRunLine, PrepareRunState, PrepareStage, PrepareStageState, PrepareStretchLine, PrepareStretchState, PrepareTrailEntry } from "../../shared/prepare-live";
 import type { PrepareState as CardState, StoryNames } from "../../shared/story-pages";
 import { useApp } from "../app";
@@ -16,6 +16,7 @@ import { HARNESS_MODE } from "../harness/mode";
 import { Icon, type IconName } from "../icons";
 import { useSelect } from "../store";
 import { pageStore, type RecentStore } from "../things/play-where";
+import { ToTopButton, useToTop } from "../to-top";
 import { andList, DEPTH_WORDS, nameIn, STORY_AGENTS, tokensText } from "./model";
 
 // ---------------------------------------------------------------- words
@@ -538,13 +539,19 @@ function trailBlock(live: Live, now: number) {
   );
 }
 
-/** The live view in the card: asks while the preparation runs, again whenever the card's state (`state`) changes, and keeps open or closed for the chat (`store`: this device's, as standard). */
+/**
+ * The live view in the card: asks while the preparation runs, again whenever the card's state (`state`) changes, and keeps open or closed for the chat (`store`: this device's, as standard).
+ * Opened, it runs many screens on a phone: once Play is well down, Back to top sits at the foot of what shows, inside the view only.
+ */
 export function PrepareLive(props: { state: CardState; store?: RecentStore }) {
   const app = useApp();
   const store = props.store ?? pageStore;
   const chatId = useSelect(app.sync, (s) => s.chatId);
   const [got, setGot] = useState<{ view: PrepareLiveView; skew: number } | null>(null);
   const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const drawn = chatId !== null && got !== null && got.view.prep !== null;
+  const top = useToTop(root, drawn);
   useEffect(() => {
     setGot(null);
     setOpen(chatId !== null && store.get(`${OPEN_KEY}${chatId}`) === "open");
@@ -564,10 +571,19 @@ export function PrepareLive(props: { state: CardState; store?: RecentStore }) {
       show: (view) => setGot({ view, skew: view.at - Date.now() }),
     });
   }, [chatId, props.state]);
-  if (chatId === null || got === null) return null;
+  if (!drawn) return null;
   const toggle = (next: boolean): void => {
     setOpen(next);
     store.set(`${OPEN_KEY}${chatId}`, next ? "open" : "closed");
   };
-  return <PrepareLiveBody view={got.view} now={Date.now() + got.skew} open={open} onToggle={toggle} onWatch={() => app.ui.update((ui) => ({ ...ui, mode: HARNESS_MODE.id, harness: { page: "agents" } }))} />;
+  return (
+    <div ref={root} class="lre-prep-live-frame" tabIndex={-1}>
+      <PrepareLiveBody view={got.view} now={Date.now() + got.skew} open={open} onToggle={toggle} onWatch={() => app.ui.update((ui) => ({ ...ui, mode: HARNESS_MODE.id, harness: { page: "agents" } }))} />
+      {top.shown ? (
+        <div class="lre-prep-live-foot">
+          <ToTopButton onClick={top.toTop} />
+        </div>
+      ) : null}
+    </div>
+  );
 }

@@ -11,7 +11,8 @@
 // ends, the plan's entry (else the feed's foot) shows where the turn's time went, read from
 // Diagnostics: each part in order with its time, its calls, and the slowest's way to Settings →
 // Speed. The feed follows the newest
-// unless you've scrolled up; a filter shows one role's work; Cancel stops the turn while it can be
+// unless you've scrolled up; well down the page, Back to top (beside Follow the newest) takes it to
+// its top and stops following; a filter shows one role's work; Cancel stops the turn while it can be
 // stopped. Once the turn ends, the view stays as that turn's record until the next one starts.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
@@ -26,6 +27,7 @@ import { cancelTurn, elapsedText, openSpeed, TurnTimeView } from "../diagnostics
 import type { GmSectionProps, RequestBody } from "../registry";
 import { scrollParent } from "../scroll";
 import { useSelect } from "../store";
+import { ToTopButton, useToTop } from "../to-top";
 
 /** A live request as the tab sends it (`lre.live`). */
 export type LiveBody = Extract<RequestBody, { type: "lre.live" }>;
@@ -429,8 +431,10 @@ export function LiveSection(props: GmSectionProps) {
     const scroller = following && root.current ? scrollParent(root.current) : null;
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
   }, [count, following]);
+  const top = useToTop(root, view === undefined);
+  const followable = !following && running;
   return (
-    <div ref={root} class="lre-live-tab" data-lre-gm-section="live">
+    <div ref={root} class="lre-live-tab" data-lre-gm-section="live" tabIndex={-1}>
       {view === undefined && !failed ? (
         <Empty icon="hourglass">Loading the live view…</Empty>
       ) : (
@@ -450,11 +454,22 @@ export function LiveSection(props: GmSectionProps) {
           onRetry={() => setTries((t) => t + 1)}
         />
       )}
-      {!following && running ? (
+      {followable || top.shown ? (
         <div class="lre-live-follow">
-          <Button size="sm" icon="chevron-down" onClick={() => setFollowing(true)}>
-            Follow the newest
-          </Button>
+          {followable ? (
+            <Button size="sm" icon="chevron-down" onClick={() => setFollowing(true)}>
+              Follow the newest
+            </Button>
+          ) : null}
+          {top.shown ? (
+            <ToTopButton
+              onClick={() => {
+                // At the top the feed must stay put: following would pull it back to the newest. "Follow the newest" brings it back.
+                setFollowing(false);
+                top.toTop();
+              }}
+            />
+          ) : null}
         </div>
       ) : null}
     </div>
