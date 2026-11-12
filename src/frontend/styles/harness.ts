@@ -10,6 +10,9 @@
 // say: where its bar sticks (below ours), how far the bar reaches (as far as ours), and the height
 // the panel shows (less our bar). The shell writes them as inline styles, which only an important
 // rule outweighs. Its root fills what our drawer leaves it, so its own least height is taken off.
+// A fourth says how tall our bottom bar is: what LumiAH keeps at the panel's foot (a running turn's
+// bar, "Jump to the newest", "Back to top", its notices) sticks in the same scrolling panel as our
+// bar and would sit under it otherwise.
 //
 // LumiAH's Runtime page lists the chats it answers, each with LumiAH's own on/off switch for the
 // chat. GM → This chat → Engine is the one control for that, and LumiAH's pages can't be told to
@@ -25,7 +28,7 @@ export const HARNESS_CSS = `
 .lre-harness{flex:1;display:flex;flex-direction:column;min-width:0}
 .lre-harness>.lre-harness-curtain{margin:var(--lre-s3) 0 var(--lre-s5)}
 .lre-harness-curtain>.lre-btn,.lre-set-engine-note .lre-btn{min-height:var(--lre-tap-lg)}
-.lre-story-body>.lah-root{flex:1 1 auto;min-height:0;--lah-stick-top:calc(var(--lre-stick-top,0px) + var(--lre-modebar-h,0px))!important;--lah-bleed-l:calc(var(--lre-s3) + var(--lre-gutter-l))!important;--lah-bleed-r:calc(var(--lre-s3) + var(--lre-gutter-r))!important;--lah-fill-h:calc(var(--lre-fill-h,100vh) - var(--lre-modebar-h,0px) - var(--lre-harness-nav-h,0px))!important}
+.lre-story-body>.lah-root{flex:1 1 auto;min-height:0;--lah-stick-top:calc(var(--lre-stick-top,0px) + var(--lre-modebar-h,0px))!important;--lah-stick-bottom:var(--lre-harness-nav-h,0px)!important;--lah-bleed-l:calc(var(--lre-s3) + var(--lre-gutter-l))!important;--lah-bleed-r:calc(var(--lre-s3) + var(--lre-gutter-r))!important;--lah-fill-h:calc(var(--lre-fill-h,100vh) - var(--lre-modebar-h,0px) - var(--lre-harness-nav-h,0px))!important}
 .lre-harness .lah-chatswitch>.lah-switch{pointer-events:none;cursor:default}
 .lre-harness .lah-chatswitch>.lah-switch>input,.lre-harness .lah-chatswitch>.lah-switch>.lah-switch-track{display:none}
 .lre-harness .lah-chatrow:has(>.lah-chatswitch[data-on=false]){display:none}
