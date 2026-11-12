@@ -3696,7 +3696,7 @@ var EXTRACTION_DEFAULTS = Object.freeze({
 });
 var THING_READ_DEFAULTS = Object.freeze({ shown: 40, whyMax: 120, madeMax: 6 });
 var THING_READ_BOUNDS = Object.freeze({ shown: [1, 200], whyMax: [20, 500], madeMax: [0, 500] });
-var AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace", "item_home", "item_grant", "item_label", "item_merge", "item_set", "item_remove", "org_people", "org_powers", "org_shares", "org_rules", "world_document", "play", "mind"];
+var AGENT_CHANGE_TYPES = ["gm_spawn", "despawn", "destroy", "money_adjust", "stage", "gm_edit", "workspace", "item_home", "item_grant", "item_label", "item_merge", "item_set", "item_remove", "org_people", "org_powers", "org_shares", "org_rules", "world_document", "world_edit", "play", "mind"];
 var CHANGE_TYPES = [...EXTRACTION_TYPES, ...AGENT_CHANGE_TYPES];
 var AGENT_CHANGE_DEFAULTS = Object.freeze({
   gm_spawn: "confirm",
@@ -3717,6 +3717,7 @@ var AGENT_CHANGE_DEFAULTS = Object.freeze({
   org_shares: "confirm",
   org_rules: "auto",
   world_document: "auto",
+  world_edit: "auto",
   play: "auto",
   mind: "auto"
 });
@@ -3739,6 +3740,7 @@ var AGENT_CHANGE_LABEL = Object.freeze({
   org_shares: "Organizations' shares and structure (founding, issuing, buying back, transfers, restructuring)",
   org_rules: "Organizations' rules (entry, dues, names)",
   world_document: "The world's document (committing its draft, bringing this chat to a revision, dropping or restoring the draft)",
+  world_edit: "The world as this chat plays it (its places, paths and maps, made or changed in play)",
   play: "What the author plays (an attempt and its roll, a fight's rounds)",
   mind: "Characters' minds (what they decide and remember, and their own files)"
 });
@@ -3764,6 +3766,34 @@ var TIDY_DEFAULTS = Object.freeze({ findings: 50 });
 var TIDY_BOUNDS = Object.freeze({ findings: [1, 500] });
 var GM_PAGE_DEFAULTS = Object.freeze({ duringTurn: "hold" });
 var PERF_DEFAULTS = Object.freeze({ reuseViews: true });
+var STORY_DEFAULTS = Object.freeze({
+  budget: Object.freeze({ stretchMinutes: 1440, t1: 1, t2: 2, t3: 4 }),
+  limits: Object.freeze({ beatChars: 800, quoteChars: 600, quotes: 6, people: 24, beatsPerTurn: 40, draftChars: 600, draftsPerTurn: 12, whyChars: 300, beatsRead: 40, feedItems: 40, openingChars: 4000 }),
+  minds: Object.freeze({ chars: Object.freeze({ core: 4000, now: 2000, memory: 8000, beliefs: 4000, people: 4000, plans: 2000, outline: 6000, profile: 1500 }), playerMind: true }),
+  models: Object.freeze({ default: Object.freeze({}), agents: Object.freeze({}), standings: Object.freeze({}), runs: Object.freeze({}), characters: Object.freeze({}) }),
+  prepare: Object.freeze({ stretchMessages: 40, askAboveTokens: 200000, reliveAtOnce: 3, beatsPerStretch: 30, readChars: 24000, textChars: 1200, callTokens: 60000 })
+});
+var STORY_BOUNDS = Object.freeze({
+  stretchMinutes: [60, 525600],
+  treatments: [0, 100],
+  limits: Object.freeze({ beatChars: [40, 4000], quoteChars: [20, 2000], quotes: [0, 40], people: [1, 200], beatsPerTurn: [1, 400], draftChars: [40, 4000], draftsPerTurn: [1, 100], whyChars: [20, 2000], beatsRead: [1, 400], feedItems: [1, 400], openingChars: [500, 40000] }),
+  mindChars: [200, 50000],
+  modelAgents: 64,
+  modelCharacters: 500,
+  modelChars: 200,
+  prepare: Object.freeze({ stretchMessages: [5, 400], askAboveTokens: [0, 1e8], reliveAtOnce: [1, 24], beatsPerStretch: [1, 200], readChars: [2000, 200000], textChars: [200, 8000], callTokens: [1000, 2000000] })
+});
+var STORY_PRESET_DEFAULTS = Object.freeze({
+  categories: Object.freeze({ "Story contract": "contract", Author: "author", Characters: "character", "Game master": "gm", Narrator: "narrator", Voice: "voice", "Presentation modules": "module" }),
+  limits: Object.freeze({ contract: 16000, author: 40000, character: 20000, gm: 20000, narrator: 48000, voice: 12000, list: 4000, line: 160, module: 24000 })
+});
+var STORY_PRESET_BOUNDS = Object.freeze({
+  categories: 64,
+  name: 80,
+  limits: Object.freeze({ contract: [100, 400000], author: [100, 400000], character: [100, 400000], gm: [100, 400000], narrator: [100, 400000], voice: [100, 400000], list: [100, 1e5], line: [20, 1000], module: [100, 400000] })
+});
+var NARRATION_DEFAULTS = Object.freeze({ check: "gm", revisions: 2, replyChars: 1500, recentChars: 4000, passageChars: 12000, changes: 12, changeChars: 400, ownChars: 600, directLine: "own" });
+var NARRATION_BOUNDS = Object.freeze({ revisions: [0, 10], replyChars: [0, 20000], recentChars: [0, 40000], passageChars: [200, 60000], changes: [1, 40], changeChars: [40, 2000], ownChars: [0, 4000] });
 var JOB_SETTINGS_DEFAULTS = Object.freeze({ routineLoreTokens: 8000 });
 
 // src/engine/read-pass.ts
@@ -11981,6 +12011,288 @@ var outSceneEvent = {
   describe: (_e, _ctx, viewer) => viewer !== undefined ? "" : "the scene's lore and notes told to the narrator"
 };
 
+// src/engine/world-draft.ts
+var DRAFT_EVENT = "engine.world";
+var PACK3 = "engine";
+var SLICE3 = "world";
+var DRAFT_COLLECTIONS = ["places", "routes", "maps"];
+var DRAFT_PARTS = ["mapSettings"];
+var NOUN = { places: "place", routes: "path", maps: "map" };
+var VISIBILITIES = ["public", "known_by", "secret", "discoverable"];
+var NO_DRAFT = Object.freeze({});
+function reject3(code, reason) {
+  return { code, reason };
+}
+function chatDraftOf(state) {
+  const v = state.packs[PACK3]?.[SLICE3];
+  return isRecord(v) ? v : NO_DRAFT;
+}
+function entryOf2(raw) {
+  if (!isRecord(raw))
+    return null;
+  const over = raw.over;
+  if (over !== null && typeof over !== "string")
+    return null;
+  if (raw.gone === true)
+    return raw.value === undefined ? { gone: true, over } : null;
+  return isRecord(raw.value) ? { value: raw.value, over } : null;
+}
+function digestOf(item2) {
+  return hashJson(item2);
+}
+function applies(entry, held) {
+  return entry.over === null ? held === undefined : held !== undefined && digestOf(held) === entry.over;
+}
+function heldIn(world, collection, id) {
+  return own(world[collection], id);
+}
+function draftedWorld(base, draft) {
+  if (draft === NO_DRAFT)
+    return base;
+  let out = null;
+  for (const collection of DRAFT_COLLECTIONS) {
+    const entries2 = draft[collection];
+    if (!isRecord(entries2))
+      continue;
+    let items = null;
+    for (const [id, raw] of Object.entries(entries2)) {
+      const entry = entryOf2(raw);
+      if (!entry || !applies(entry, heldIn(base, collection, id)))
+        continue;
+      items ??= { ...base[collection] };
+      if (entry.value)
+        items[id] = entry.value;
+      else
+        delete items[id];
+    }
+    if (items)
+      out = { ...out ?? base, [collection]: items };
+  }
+  const settings = entryOf2(draft.mapSettings);
+  if (settings && applies(settings, base.mapSettings)) {
+    out = { ...out ?? base };
+    if (settings.value)
+      out.mapSettings = settings.value;
+    else
+      delete out.mapSettings;
+  }
+  return out === null ? base : compileMaps(out);
+}
+function changeOf(data) {
+  if (!isRecord(data))
+    return null;
+  const over = data.over;
+  if (over !== null && typeof over !== "string")
+    return null;
+  const body = data.gone === true && data.value === undefined ? { gone: true } : isRecord(data.value) && data.gone === undefined ? { value: data.value } : null;
+  if (!body)
+    return null;
+  if (data.part !== undefined) {
+    const part = DRAFT_PARTS.find((p) => p === data.part);
+    return part && data.collection === undefined && data.id === undefined ? { part, ...body, over } : null;
+  }
+  const collection = DRAFT_COLLECTIONS.find((c) => c === data.collection);
+  return collection && safeKey(data.id) ? { collection, id: data.id, ...body, over } : null;
+}
+function placeProblem(id, v) {
+  if (v.id !== id)
+    return `a place's id is its key, ${id}`;
+  if (typeof v.name !== "string" || v.name.trim() === "")
+    return "a place needs a name";
+  if (v.parent !== undefined && (typeof v.parent !== "string" || v.parent === ""))
+    return "a place's parent is the id of a place";
+  if (!isRecord(v.fields))
+    return "a place's fields are an object";
+  if (v.visibility !== undefined && !VISIBILITIES.some((s) => s === v.visibility))
+    return `a place's visibility is one of ${VISIBILITIES.join(", ")}`;
+  for (const key of ["timeZone", "sceneType", "grid"])
+    if (v[key] !== undefined && typeof v[key] !== "string")
+      return `a place's ${key} is text`;
+  for (const key of ["cell", "layoutPos"]) {
+    const at2 = v[key];
+    if (at2 !== undefined && !(isRecord(at2) && typeof at2.x === "number" && typeof at2.y === "number"))
+      return `a place's ${key} is {x, y}`;
+  }
+  if (v.knownBy !== undefined && !isRecord(v.knownBy))
+    return "a place's knownBy is a selector";
+  if (v.adjudicate !== undefined && typeof v.adjudicate !== "boolean")
+    return "a place's adjudicate is true or false";
+  if (v.sources !== undefined && !(Array.isArray(v.sources) && v.sources.every((s) => typeof s === "string")))
+    return "a place's sources are a list of entries";
+  if (v.map !== undefined)
+    return "only a map marks what it draws";
+  if (v.made !== undefined)
+    return "a place made in play is changed by place_label and place_remove";
+  return null;
+}
+function routeProblem(id, v) {
+  if (v.id !== id)
+    return `a path's id is its key, ${id}`;
+  if (typeof v.from !== "string" || typeof v.to !== "string" || v.from === "" || v.to === "")
+    return "a path joins two places, from and to";
+  if (v.from === v.to)
+    return "a path joins two different places";
+  if (typeof v.bidirectional !== "boolean")
+    return "a path goes both ways or one way (bidirectional is true or false)";
+  if (!isRecord(v.modes) || Object.keys(v.modes).length === 0)
+    return "a path has at least one way of travelling it";
+  for (const [mode, leg] of Object.entries(v.modes)) {
+    if (!TRAVEL_MODES.some((m) => m === mode))
+      return `${mode} is no way of travelling: ${TRAVEL_MODES.join(", ")}`;
+    if (!isRecord(leg) || typeof leg.minutes !== "number" || !Number.isFinite(leg.minutes) || leg.minutes <= 0)
+      return `the ${mode} way takes some minutes, above 0`;
+    if (leg.distanceKm !== undefined && !(typeof leg.distanceKm === "number" && Number.isFinite(leg.distanceKm) && leg.distanceKm > 0))
+      return `the ${mode} way's distance is kilometres, above 0`;
+    if (leg.terrain !== undefined && typeof leg.terrain !== "string")
+      return `the ${mode} way's terrain is text`;
+  }
+  if (v.map !== undefined)
+    return "only a map marks what it draws";
+  return null;
+}
+function mapProblem(id, v) {
+  const { map, problems } = readMap(v);
+  if (!map)
+    return problems.slice(0, 3).map((p) => p.message).join("; ") || "that isn't a map";
+  return map.id === id ? null : `a map's id is its key, ${id}`;
+}
+var ITEM_PROBLEM = { places: placeProblem, routes: routeProblem, maps: mapProblem };
+function settingsProblem(v) {
+  if (v.display !== undefined && v.display !== "knowledge" && v.display !== "fog")
+    return 'the map shows "knowledge" or "fog"';
+  const grid = v.grid;
+  if (grid !== undefined) {
+    if (!isRecord(grid))
+      return "the grid system's settings are an object: movement and sightRadius";
+    if (grid.movement !== undefined && typeof grid.movement !== "boolean")
+      return "grid movement is true or false";
+    const r = grid.sightRadius;
+    if (r !== undefined && !(typeof r === "number" && Number.isInteger(r) && r >= 0 && r <= SIGHT_MAX))
+      return `the sight radius is a whole number of cells from 0 to ${SIGHT_MAX}`;
+  }
+  if (v.travelSimulation !== undefined && typeof v.travelSimulation !== "boolean")
+    return "the travel simulation is true or false";
+  if (v.travel !== undefined && !isRecord(v.travel))
+    return "travel times are an object";
+  return null;
+}
+function withChange(world, change) {
+  if ("part" in change) {
+    const out = { ...world };
+    if ("value" in change)
+      out.mapSettings = change.value;
+    else
+      delete out.mapSettings;
+    return compileMaps(out);
+  }
+  const items = { ...world[change.collection] };
+  if ("value" in change)
+    items[change.id] = change.value;
+  else
+    delete items[change.id];
+  return compileMaps({ ...world, [change.collection]: items });
+}
+function leftProblem(ctx, change) {
+  const before = ctx.world;
+  const after = withChange(before, change);
+  const has = (id) => hasOwn(after.places, id);
+  const lost = (id) => hasOwn(before.places, id) && !has(id);
+  if (lost(before.start.place))
+    return `it would take away ${labelOf(ctx, before.start.place)}, where the world starts`;
+  for (const [id, e] of Object.entries(ctx.state.entities)) {
+    const at2 = e.fields.place;
+    if (typeof at2 === "string" && lost(at2))
+      return `${e.name} (${id}) is at ${labelOf(ctx, at2)}, which it would take away`;
+  }
+  for (const [id, p] of Object.entries(after.places)) {
+    if (p.parent !== undefined && !has(p.parent) && (lost(p.parent) || !("part" in change) && change.collection === "places" && change.id === id))
+      return `${p.name} (${id}) would be inside ${p.parent}, which isn't a place`;
+  }
+  for (const [id, r] of Object.entries(after.routes)) {
+    if (has(r.from) && has(r.to))
+      continue;
+    const was = own(before.routes, id);
+    if (was && was.from === r.from && was.to === r.to && !(hasOwn(before.places, r.from) && hasOwn(before.places, r.to)))
+      continue;
+    return `the path ${id} would lead to ${has(r.from) ? r.to : r.from}, which isn't a place`;
+  }
+  if ("part" in change || !("value" in change))
+    return null;
+  if (change.collection === "places") {
+    let at2 = own(after.places, change.id)?.parent;
+    for (let guard = Object.keys(after.places).length;at2 !== undefined && guard >= 0; guard--) {
+      if (at2 === change.id)
+        return `${labelOf(ctx, change.id)} can't be inside itself`;
+      at2 = own(after.places, at2)?.parent;
+    }
+  }
+  if (change.collection === "maps" && typeof change.value.scope === "string" && !has(change.value.scope))
+    return `the map ${change.id} draws ${change.value.scope}, which isn't a place`;
+  return null;
+}
+var draftEventDef = {
+  type: DRAFT_EVENT,
+  validate(e, ctx) {
+    const change = changeOf(e.data);
+    if (!change)
+      return reject3("bad_change", "that isn't a change of the world as this chat plays it");
+    if ("part" in change) {
+      const bad = "value" in change ? settingsProblem(change.value) : null;
+      if (bad !== null)
+        return reject3("bad_item", bad);
+    } else {
+      const { collection, id } = change;
+      const held = heldIn(ctx.world, collection, id);
+      if (isRecord(held) && typeof held.map === "string")
+        return reject3("drawn", `the ${NOUN[collection]} ${id} is drawn by the map ${held.map}: change it in that map`);
+      if (collection === "places" && isRecord(held) && isRecord(held.made))
+        return reject3("made_in_play", `${labelOf(ctx, id)} was made in play: place_label and place_remove change it`);
+      if ("gone" in change && held === undefined)
+        return reject3("gone", `there is no ${NOUN[collection]} ${id} to take out`);
+      const bad = "value" in change ? ITEM_PROBLEM[collection](id, change.value) : null;
+      if (bad !== null)
+        return reject3("bad_item", bad);
+    }
+    const left = leftProblem(ctx, change);
+    return left === null ? null : reject3("leaves_out", left);
+  },
+  apply(e, state) {
+    const change = changeOf(e.data);
+    if (!change)
+      return;
+    const slice = mutableSlice(state, PACK3);
+    const was = isRecord(slice[SLICE3]) ? slice[SLICE3] : {};
+    const entry = "value" in change ? { value: structuredClone(change.value), over: change.over } : { gone: true, over: change.over };
+    const back = "value" in change ? change.over !== null && digestOf(change.value) === change.over : change.over === null;
+    if ("part" in change) {
+      const next = { ...was };
+      if (back)
+        delete next[change.part];
+      else
+        next[change.part] = entry;
+      slice[SLICE3] = next;
+      return;
+    }
+    const items = { ...isRecord(was[change.collection]) ? was[change.collection] : {} };
+    if (back)
+      delete items[change.id];
+    else
+      items[change.id] = entry;
+    slice[SLICE3] = { ...was, [change.collection]: items };
+  },
+  describe(e, ctx, viewer) {
+    const change = viewer === undefined ? changeOf(e.data) : null;
+    if (!change)
+      return "";
+    const how = "gone" in change ? "taken out" : change.over === null ? "made" : "changed";
+    if ("part" in change)
+      return `In this chat's world: the map settings ${how}`;
+    const v = "value" in change ? change.value : heldIn(ctx.world, change.collection, change.id);
+    const what = change.collection === "routes" ? `the path from ${labelOf(ctx, typeof v?.from === "string" ? v.from : "")} to ${labelOf(ctx, typeof v?.to === "string" ? v.to : "")}` : change.collection === "maps" ? `the map ${typeof v?.title === "string" ? v.title : change.id}` : `the place ${typeof v?.name === "string" ? v.name : labelOf(ctx, change.id)}`;
+    return `In this chat's world: ${what} ${how}`;
+  }
+};
+
 // src/engine/engine-pack.ts
 var LEVELS = [0, 1, 2, 3, 4];
 var ENGINE_PACK = "engine";
@@ -12452,6 +12764,7 @@ var enginePack = {
     r.event(wsReadersEvent);
     r.event(outLinesEvent);
     r.event(outSceneEvent);
+    r.event(draftEventDef);
     r.proposal(knowsChannel);
     r.proposal(spawnChannel);
     r.proposal(lifeChannel);
@@ -12503,13 +12816,13 @@ var enginePack = {
 };
 
 // src/engine/touched.ts
-var PACK3 = "engine";
-var SLICE3 = "touched";
+var PACK4 = "engine";
+var SLICE4 = "touched";
 function record(state) {
-  const v = state.packs[PACK3]?.[SLICE3];
+  const v = state.packs[PACK4]?.[SLICE4];
   return isRecord(v) ? v : undefined;
 }
-function entryOf2(state, id) {
+function entryOf3(state, id) {
   const all = record(state);
   const v = all ? own(all, id) : undefined;
   return isRecord(v) ? v : undefined;
@@ -12523,9 +12836,9 @@ function objectAt(parent, key) {
   return fresh;
 }
 function writable3(state, id) {
-  const slice2 = state.packs[PACK3] ?? {};
-  state.packs[PACK3] = slice2;
-  return objectAt(objectAt(slice2, SLICE3), id);
+  const slice2 = state.packs[PACK4] ?? {};
+  state.packs[PACK4] = slice2;
+  return objectAt(objectAt(slice2, SLICE4), id);
 }
 function touch(state, t) {
   if (!own(state.entities, t.entity))
@@ -12539,11 +12852,11 @@ function touch(state, t) {
     e[t.aspect] = true;
 }
 function touchedAspect(state, id, aspect) {
-  return entryOf2(state, id)?.[aspect] === true;
+  return entryOf3(state, id)?.[aspect] === true;
 }
 function forget(state, id, what) {
   const all = record(state);
-  const e = entryOf2(state, id);
+  const e = entryOf3(state, id);
   if (!all || !e)
     return;
   if (what === "all")
@@ -12611,17 +12924,17 @@ function touching(def) {
   };
 }
 function dropTouches(state) {
-  const slice2 = state.packs[PACK3];
+  const slice2 = state.packs[PACK4];
   if (!slice2)
     return;
-  delete slice2[SLICE3];
+  delete slice2[SLICE4];
   if (Object.keys(slice2).length === 0)
-    delete state.packs[PACK3];
+    delete state.packs[PACK4];
 }
 
 // src/engine/events.ts
 var EXTERNAL_ACCOUNT_PREFIX = "economy.external:";
-function reject3(code, reason) {
+function reject4(code, reason) {
   return { code, reason };
 }
 function hasEntity(state, id) {
@@ -12636,10 +12949,10 @@ var setDef = {
   type: "set",
   validate: (e, ctx) => {
     if (!hasEntity(ctx.state, e.entity))
-      return reject3("missing_entity", `no entity ${e.entity}`);
+      return reject4("missing_entity", `no entity ${e.entity}`);
     if (!safeKey(e.field))
-      return reject3("bad_field", "not a field name");
-    return e.atMost && (typeof e.value !== "number" || !Number.isFinite(e.value)) ? reject3("bad_value", "a cap is a finite number") : null;
+      return reject4("bad_field", "not a field name");
+    return e.atMost && (typeof e.value !== "number" || !Number.isFinite(e.value)) ? reject4("bad_value", "a cap is a finite number") : null;
   },
   apply: (e, state) => {
     const entity2 = hasEntity(state, e.entity) ? state.entities[e.entity] : undefined;
@@ -12657,13 +12970,13 @@ var addDef = {
   type: "add",
   validate: (e, ctx) => {
     if (!hasEntity(ctx.state, e.entity))
-      return reject3("missing_entity", `no entity ${e.entity}`);
+      return reject4("missing_entity", `no entity ${e.entity}`);
     if (!safeKey(e.field))
-      return reject3("bad_field", "not a field name");
+      return reject4("bad_field", "not a field name");
     const current = ctx.state.entities[e.entity]?.fields[e.field];
     if (current !== undefined && typeof current !== "number")
-      return reject3("not_numeric", `${e.entity}.${e.field} is not a number`);
-    return Number.isFinite(e.delta) ? null : reject3("bad_delta", "delta must be finite");
+      return reject4("not_numeric", `${e.entity}.${e.field} is not a number`);
+    return Number.isFinite(e.delta) ? null : reject4("bad_delta", "delta must be finite");
   },
   apply: (e, state) => {
     const entity2 = hasEntity(state, e.entity) ? state.entities[e.entity] : undefined;
@@ -12682,16 +12995,16 @@ var postDef = {
   type: "post",
   validate: (e, ctx) => {
     if (e.lines.length < 2)
-      return reject3("unbalanced", "a posting needs two lines");
+      return reject4("unbalanced", "a posting needs two lines");
     let sum = 0;
     for (const line2 of e.lines) {
       if (!Number.isSafeInteger(line2.amount))
-        return reject3("bad_amount", "amounts are integer cents");
+        return reject4("bad_amount", "amounts are integer cents");
       if (!isAccount(ctx.state, line2.account))
-        return reject3("missing_account", `no account ${line2.account}`);
+        return reject4("missing_account", `no account ${line2.account}`);
       sum += line2.amount;
     }
-    return sum === 0 ? null : reject3("unbalanced", `posting sums to ${sum}`);
+    return sum === 0 ? null : reject4("unbalanced", `posting sums to ${sum}`);
   },
   apply: (e, state) => {
     for (const line2 of e.lines)
@@ -12703,7 +13016,7 @@ var postDef = {
 };
 var linkDef = {
   type: "link",
-  validate: (e, ctx) => hasEntity(ctx.state, e.from) && (hasEntity(ctx.state, e.to) || e.rel === "knows" && safeKey(e.to) && hasOwn(ctx.world.places, e.to)) ? null : reject3("missing_entity", `link ${e.from} → ${e.to}`),
+  validate: (e, ctx) => hasEntity(ctx.state, e.from) && (hasEntity(ctx.state, e.to) || e.rel === "knows" && safeKey(e.to) && hasOwn(ctx.world.places, e.to)) ? null : reject4("missing_entity", `link ${e.from} → ${e.to}`),
   apply: (e, state) => {
     const entity2 = hasEntity(state, e.from) ? state.entities[e.from] : undefined;
     if (!entity2)
@@ -12718,7 +13031,7 @@ var unlinkDef = {
   type: "unlink",
   validate: (e, ctx) => {
     const entity2 = hasEntity(ctx.state, e.from) ? ctx.state.entities[e.from] : undefined;
-    return entity2 && entity2.relations.some((r) => r.type === e.rel && r.to === e.to) ? null : reject3("missing_relation", `no ${e.rel} from ${e.from} to ${e.to}`);
+    return entity2 && entity2.relations.some((r) => r.type === e.rel && r.to === e.to) ? null : reject4("missing_relation", `no ${e.rel} from ${e.from} to ${e.to}`);
   },
   apply: (e, state) => {
     const entity2 = hasEntity(state, e.from) ? state.entities[e.from] : undefined;
@@ -12730,7 +13043,7 @@ var unlinkDef = {
 };
 var spawnDef = {
   type: "spawn",
-  validate: (e, ctx) => !safeKey(e.entity.id) ? reject3("bad_id", "not an entity id") : hasEntity(ctx.state, e.entity.id) ? reject3("exists", `entity ${e.entity.id} exists`) : null,
+  validate: (e, ctx) => !safeKey(e.entity.id) ? reject4("bad_id", "not an entity id") : hasEntity(ctx.state, e.entity.id) ? reject4("exists", `entity ${e.entity.id} exists`) : null,
   apply: (e, state) => {
     const d = e.entity;
     if (!safeKey(d.id))
@@ -12755,16 +13068,16 @@ var stageDef = {
   validate: (e, ctx) => {
     const track2 = safeKey(e.track) && hasOwn(ctx.world.tracks, e.track) ? ctx.world.tracks[e.track] : undefined;
     if (!track2)
-      return reject3("missing_track", `no track ${e.track}`);
+      return reject4("missing_track", `no track ${e.track}`);
     if (!safeKey(e.to) || !hasOwn(track2.stages, e.to))
-      return reject3("missing_stage", `no stage ${e.to} in ${e.track}`);
+      return reject4("missing_stage", `no stage ${e.to} in ${e.track}`);
     if (e.from === undefined)
       return null;
     const at2 = (hasOwn(ctx.state.tracks, e.track) ? ctx.state.tracks[e.track]?.stage : undefined) ?? track2.start;
     if (at2 === e.from)
       return null;
     const label = (stage) => (hasOwn(track2.stages, stage) ? track2.stages[stage]?.label : undefined) ?? stage;
-    return reject3("stage_moved", `${track2.label} is at ${label(at2)} now, no longer at ${label(e.from)}, where this move began`);
+    return reject4("stage_moved", `${track2.label} is at ${label(at2)} now, no longer at ${label(e.from)}, where this move began`);
   },
   apply: (e, state) => {
     if (safeKey(e.track))
@@ -12777,7 +13090,7 @@ var stageDef = {
 };
 var clockDef = {
   type: "clock",
-  validate: (e) => Number.isFinite(e.minutes) && e.minutes >= 0 ? null : reject3("bad_minutes", "minutes must be ≥ 0"),
+  validate: (e) => Number.isFinite(e.minutes) && e.minutes >= 0 ? null : reject4("bad_minutes", "minutes must be ≥ 0"),
   apply: (e, state) => {
     state.clock += e.minutes;
   },
@@ -12785,7 +13098,7 @@ var clockDef = {
 };
 var timelapseDef = {
   type: "timelapse",
-  validate: (e) => e.to >= e.from ? null : reject3("bad_interval", "timelapse ends before it starts"),
+  validate: (e) => e.to >= e.from ? null : reject4("bad_interval", "timelapse ends before it starts"),
   apply: () => {
     return;
   },
@@ -12796,9 +13109,9 @@ function coreEventTypes(lookup) {
     type: "materialize",
     validate: (e, ctx) => {
       if (!hasEntity(ctx.state, e.entity))
-        return reject3("missing_entity", `no entity ${e.entity}`);
+        return reject4("missing_entity", `no entity ${e.entity}`);
       if (hasOwn(ctx.state.materialized, `${e.entity}:${e.domain}`))
-        return reject3("materialized", `${e.domain} detail for ${nameOf2(ctx, e.entity)} is already recorded`);
+        return reject4("materialized", `${e.domain} detail for ${nameOf2(ctx, e.entity)} is already recorded`);
       if (e.events.length <= 1)
         return e.events[0] ? validateEvent(lookup(), e.events[0], ctx) : null;
       const scratch = structuredClone(ctx.state);
@@ -12824,7 +13137,7 @@ function coreEventTypes(lookup) {
 function validateEvent(types, event, ctx) {
   const def = types.get(event.type);
   if (!def)
-    return reject3("unknown_event", `unknown event type ${event.type}`);
+    return reject4("unknown_event", `unknown event type ${event.type}`);
   return def.validate(event, ctx);
 }
 function applyEvent(types, event, state, ctx) {
@@ -12852,16 +13165,16 @@ var TIME_BOUNDS = Object.freeze({ tick: [0, 1440], scale: [0.25, 10], thresholdM
 
 // src/engine/places-in-play.ts
 var PLACE_EVENT = "space.place";
-var SLICE4 = "space";
+var SLICE5 = "space";
 var KEY = "places";
 var PLACE_NAME_MAX = 60;
 var ALIASES_MAX = 8;
 var NONE2 = Object.freeze({});
-function reject4(code, reason) {
+function reject5(code, reason) {
   return { code, reason };
 }
 function madePlacesOf(state) {
-  const v = state.packs[SLICE4]?.[KEY];
+  const v = state.packs[SLICE5]?.[KEY];
   return isRecord(v) ? v : NONE2;
 }
 function madeOf2(def) {
@@ -12870,47 +13183,78 @@ function madeOf2(def) {
 }
 var BASES = new WeakMap;
 var PLAYED = new WeakMap;
+var ORIGIN = new WeakMap;
+var PLAYED_PARTS = ["places", "routes", "grids", "maps", "mapSettings"];
 function baseWorld(world) {
   const known = BASES.get(world);
   if (known !== undefined)
     return known;
   let base = world;
-  for (const id in world.places) {
-    if (!hasOwn(world.places, id) || madeOf2(world.places[id]) === null)
+  for (const part of PLAYED_PARTS) {
+    const held = world[part];
+    const origin = isRecord(held) ? ORIGIN.get(held) : undefined;
+    if (origin === undefined)
+      continue;
+    if (base === world)
+      base = { ...world };
+    if (part === "mapSettings") {
+      if (origin.of.mapSettings === undefined)
+        delete base.mapSettings;
+      else
+        base.mapSettings = origin.of.mapSettings;
+    } else
+      base[part] = origin.of[part];
+  }
+  for (const id in base.places) {
+    if (!hasOwn(base.places, id) || madeOf2(base.places[id]) === null)
       continue;
     const places = {};
-    for (const [key, def] of Object.entries(world.places))
+    for (const [key, def] of Object.entries(base.places))
       if (madeOf2(def) === null)
         places[key] = def;
-    base = { ...world, places };
-    BASES.set(base, base);
+    base = { ...base, places };
     break;
   }
+  if (base !== world)
+    BASES.set(base, base);
   BASES.set(world, base);
   return base;
 }
 function playedWorld(world, state) {
   const base = baseWorld(world);
+  const draft = chatDraftOf(state);
   const made = madePlacesOf(state);
-  if (made === NONE2)
+  if (draft === NO_DRAFT && made === NONE2)
     return base;
-  let byBase = PLAYED.get(made);
+  let byMade = PLAYED.get(draft);
+  let byBase = byMade?.get(made);
   const hit = byBase?.get(base);
   if (hit !== undefined)
     return hit;
-  let played = base;
+  const drafted = draftedWorld(base, draft);
+  let places = null;
   for (const [id, def] of Object.entries(made)) {
-    if (hasOwn(base.places, id))
+    if (hasOwn(drafted.places, id))
       continue;
-    if (played === base)
-      played = { ...base, places: { ...base.places } };
-    played.places[id] = def;
+    places ??= { ...drafted.places };
+    places[id] = def;
   }
-  if (played !== base)
+  const played = places === null ? drafted : { ...drafted, places };
+  if (played !== base) {
     BASES.set(played, base);
+    for (const part of PLAYED_PARTS) {
+      const held = played[part];
+      if (isRecord(held) && held !== base[part])
+        ORIGIN.set(held, { of: base });
+    }
+  }
+  if (byMade === undefined) {
+    byMade = new WeakMap;
+    PLAYED.set(draft, byMade);
+  }
   if (byBase === undefined) {
     byBase = new WeakMap;
-    PLAYED.set(made, byBase);
+    byMade.set(made, byBase);
   }
   byBase.set(base, played);
   return played;
@@ -12996,18 +13340,18 @@ function placeOp(ctx, op, opts) {
 function makePlace(ctx, op, opts) {
   const name = cleanName(op.name);
   if (name === null)
-    return reject4("bad_name", `a new place needs a name of at most ${PLACE_NAME_MAX} characters`);
+    return reject5("bad_name", `a new place needs a name of at most ${PLACE_NAME_MAX} characters`);
   if (!hasOwn(ctx.world.places, op.parent))
-    return reject4("missing_place", `no place ${labelOf(ctx, op.parent)}`);
+    return reject5("missing_place", `no place ${labelOf(ctx, op.parent)}`);
   const aliases = cleanAliases(name, op.aliases ?? []);
   for (const said2 of [name, ...aliases]) {
     const found = findPlaces(ctx, said2, { parent: op.parent })[0];
     if (found)
-      return { ...reject4("exists", `${found.name} is there already`), exists: found.id };
+      return { ...reject5("exists", `${found.name} is there already`), exists: found.id };
   }
   const cap = placeCapsOf(ctx.world).chat;
   if (placesMade(ctx.state) >= cap)
-    return reject4("place_cap", cap === 0 ? "this world makes no places in play" : `this chat has made ${cap} places already, all its world allows`);
+    return reject5("place_cap", cap === 0 ? "this world makes no places in play" : `this chat has made ${cap} places already, all its world allows`);
   const id = madeId(ctx, name, op.parent, opts.salt);
   const description = op.description?.trim() ?? "";
   const fields = { ...description !== "" ? { description } : {}, ...aliases.length > 0 ? { aliases } : {}, ...op.entry !== undefined && isAudience(op.entry) ? { entry: op.entry } : {} };
@@ -13017,18 +13361,18 @@ function makePlace(ctx, op, opts) {
 function labelPlace(ctx, op) {
   const def = own(ctx.world.places, op.place);
   if (!def)
-    return reject4("missing_place", `no place ${labelOf(ctx, op.place)}`);
+    return reject5("missing_place", `no place ${labelOf(ctx, op.place)}`);
   if (madeOf2(def) === null)
-    return reject4("not_made", `${def.name} is the world's own place: Build changes it`);
+    return reject5("not_made", `${def.name} is the world's own place: Build changes it`);
   const made = def;
   const name = op.name === undefined ? made.name : cleanName(op.name);
   if (name === null)
-    return reject4("bad_name", `a place needs a name of at most ${PLACE_NAME_MAX} characters`);
+    return reject5("bad_name", `a place needs a name of at most ${PLACE_NAME_MAX} characters`);
   const aliases = op.aliases === undefined ? placeAliases(made) : cleanAliases(name, op.aliases);
   for (const said2 of [name, ...aliases]) {
     const found = findPlaces(ctx, said2, { parent: made.parent }).find((h) => h.id !== op.place && h.matched !== "head");
     if (found)
-      return { ...reject4("exists", `${found.name} is there already`), exists: found.id };
+      return { ...reject5("exists", `${found.name} is there already`), exists: found.id };
   }
   const description = op.description === undefined ? made.fields.description : op.description.trim();
   const fields = { ...made.fields };
@@ -13040,20 +13384,20 @@ function labelPlace(ctx, op) {
     fields.aliases = aliases;
   const next = { ...made, name, fields };
   if (JSON.stringify(next) === JSON.stringify(made))
-    return reject4("no_change", `${made.name} is so already`);
+    return reject5("no_change", `${made.name} is so already`);
   return { events: [placeEvent(op.place, next)] };
 }
 function removePlace(ctx, place2) {
   const def = own(ctx.world.places, place2);
   if (!def)
-    return reject4("gone", `no place ${labelOf(ctx, place2)}`);
+    return reject5("gone", `no place ${labelOf(ctx, place2)}`);
   if (madeOf2(def) === null)
-    return reject4("not_made", `${def.name} is the world's own place: Build removes it`);
+    return reject5("not_made", `${def.name} is the world's own place: Build removes it`);
   if (Object.values(ctx.world.places).some((p) => p.parent === place2))
-    return reject4("occupied", `the places in ${def.name} go first`);
+    return reject5("occupied", `the places in ${def.name} go first`);
   const there = Object.keys(ctx.state.entities).some((id) => placeWithin(ctx.world, placeOfEntity(ctx.state, id), place2));
   if (there)
-    return reject4("occupied", `someone or something is still at ${def.name}`);
+    return reject5("occupied", `someone or something is still at ${def.name}`);
   return { events: [{ type: PLACE_EVENT, data: { place: place2, gone: true } }] };
 }
 function placeEvent(place2, def) {
@@ -13083,18 +13427,18 @@ function parentSaid(ctx, said2) {
 function settlePlaceFact(ctx, p) {
   const said2 = typeof p.place === "string" ? p.place.trim() : "";
   if (said2 === "")
-    return { kind: "refused", rejection: reject4("bad_name", "it names no place") };
+    return { kind: "refused", rejection: reject5("bad_name", "it names no place") };
   if (hasOwn(ctx.world.places, said2))
     return { kind: "found", place: said2 };
   const parent = parentSaid(ctx, typeof p.parent === "string" ? p.parent : "");
   if (parent === null)
-    return { kind: "refused", rejection: reject4("missing_place", "it names no place it is in") };
+    return { kind: "refused", rejection: reject5("missing_place", "it names no place it is in") };
   const found = findPlaces(ctx, said2, { parent })[0];
   if (found)
     return { kind: "found", place: found.id };
   const name = cleanName(said2);
   if (name === null)
-    return { kind: "refused", rejection: reject4("bad_name", `a new place needs a name of at most ${PLACE_NAME_MAX} characters`) };
+    return { kind: "refused", rejection: reject5("bad_name", `a new place needs a name of at most ${PLACE_NAME_MAX} characters`) };
   const as = PLACE_KINDS.includes(p.as) ? p.as : placeKindFor(ctx.world, parent, name);
   const aliases = Array.isArray(p.aliases) ? p.aliases.filter((a) => typeof a === "string") : [];
   const description = typeof p.description === "string" ? p.description : "";
@@ -13178,13 +13522,16 @@ function createRegistry(packs) {
     context(world, state, overrides) {
       let base = baseWorld(world);
       let made = null;
+      let drafted = null;
       let played = base;
       return {
         registry,
         get world() {
           const now = madePlacesOf(state);
-          if (now !== made) {
+          const draft = chatDraftOf(state);
+          if (now !== made || draft !== drafted) {
             made = now;
+            drafted = draft;
             played = playedWorld(base, state);
           }
           return played;
@@ -13192,6 +13539,7 @@ function createRegistry(packs) {
         set world(next) {
           base = baseWorld(next);
           made = null;
+          drafted = null;
         },
         state,
         tables: { get: (id) => world.tables[id] },
@@ -14102,7 +14450,7 @@ var SHEET_PREVIEW_LIMITS = Object.freeze({ sections: 32, rows: 64, thresholds: 2
 
 // src/engine/effects.ts
 var NESTING_CAP = 8;
-function reject5(code, reason) {
+function reject6(code, reason) {
   return { code, reason };
 }
 function isRejection(v) {
@@ -14132,22 +14480,22 @@ function followsXp(reg, world, kind, field2) {
   if (!prog)
     return null;
   const label = (id) => fieldDef(reg, world, kind, id)?.label ?? id.replace(/_/g, " ");
-  return reject5("follows_xp", `${label(prog.levelField)} follows ${label(prog.xpField)}: change ${label(prog.xpField)} instead`);
+  return reject6("follows_xp", `${label(prog.levelField)} follows ${label(prog.xpField)}: change ${label(prog.xpField)} instead`);
 }
 function change(reg, w, entity2, field2, delta) {
   const e = own(w.state.entities, entity2);
   if (!e)
-    return reject5("missing_entity", `no entity ${labelOf(w, entity2)}`);
+    return reject6("missing_entity", `no entity ${labelOf(w, entity2)}`);
   const def = fieldDef(reg, w.world, e.kind, field2);
   if (def?.derived !== undefined)
-    return reject5("derived", `${field2} is derived`);
+    return reject6("derived", `${field2} is derived`);
   const follows = followsXp(reg, w.world, e.kind, field2);
   if (follows)
     return follows;
   const stored = own(e.fields, field2);
   const cur = stored ?? def?.default ?? (def?.pool ? poolMax(reg, w.ctx, entity2, def.pool) ?? 0 : 0);
   if (typeof cur !== "number")
-    return reject5("not_numeric", `${e.name}'s ${field2.replace(/_/g, " ")} is not a number`);
+    return reject6("not_numeric", `${e.name}'s ${field2.replace(/_/g, " ")} is not a number`);
   const b = fieldBounds(reg, w.ctx, entity2, def);
   const next = clampNumber(cur + delta, b.min, b.max);
   if (next === cur)
@@ -14163,13 +14511,13 @@ function coreEffect(reg, w, type, args, rng) {
       const field2 = text2(args.field);
       const e = own(state.entities, entity2);
       if (!e)
-        return reject5("missing_entity", `no entity ${labelOf(w, entity2)}`);
+        return reject6("missing_entity", `no entity ${labelOf(w, entity2)}`);
       if (field2 === "")
-        return reject5("bad_args", "set needs a field");
+        return reject6("bad_args", "set needs a field");
       const def = fieldDef(reg, world, e.kind, field2);
       let value = args.value ?? null;
       if (def?.derived !== undefined)
-        return reject5("derived", `${field2} is derived`);
+        return reject6("derived", `${field2} is derived`);
       const follows = followsXp(reg, world, e.kind, field2);
       if (follows)
         return follows;
@@ -14178,12 +14526,12 @@ function coreEffect(reg, w, type, args, rng) {
         value = clampNumber(value, b.min, b.max);
       }
       if (def?.type === "enum" && def.values && typeof value === "string" && !def.values.includes(value))
-        return reject5("bad_value", `${field2} must be one of ${def.values.join(", ")}`);
+        return reject6("bad_value", `${field2} must be one of ${def.values.join(", ")}`);
       return [{ type: "set", entity: entity2, field: field2, value }];
     }
     case "add": {
       if (typeof args.delta !== "number" || !Number.isFinite(args.delta))
-        return reject5("bad_args", "add needs a numeric delta");
+        return reject6("bad_args", "add needs a numeric delta");
       return change(reg, w, text2(args.entity), text2(args.field), args.delta);
     }
     case "recover": {
@@ -14191,15 +14539,15 @@ function coreEffect(reg, w, type, args, rng) {
       const field2 = text2(args.field);
       const e = own(state.entities, entity2);
       if (!e)
-        return reject5("missing_entity", `no entity ${labelOf(w, entity2)}`);
+        return reject6("missing_entity", `no entity ${labelOf(w, entity2)}`);
       const pool = fieldDef(reg, world, e.kind, field2)?.pool;
       if (!pool)
-        return reject5("not_pool", `${e.name}'s ${field2.replace(/_/g, " ")} isn't a pool`);
+        return reject6("not_pool", `${e.name}'s ${field2.replace(/_/g, " ")} isn't a pool`);
       if (args.amount !== undefined && (typeof args.amount !== "number" || !Number.isFinite(args.amount)))
-        return reject5("bad_args", "recover needs a numeric amount");
+        return reject6("bad_args", "recover needs a numeric amount");
       const top = poolMax(reg, w.ctx, entity2, pool);
       if (top === null)
-        return reject5("no_max", `${e.name}'s ${field2.replace(/_/g, " ")} has no max to recover to`);
+        return reject6("no_max", `${e.name}'s ${field2.replace(/_/g, " ")} has no max to recover to`);
       const read = scopeEnv({ reg, ctx: w.ctx, bindings: { self: entity2 } });
       const now = Number(read.lookup(["self", field2])) || 0;
       const amount = typeof args.amount === "number" ? args.amount : args.full !== true && pool.recover !== undefined ? Number(evalExpr(pool.recover, read, 0)) || 0 : top - now;
@@ -14210,14 +14558,14 @@ function coreEffect(reg, w, type, args, rng) {
       const id = text2(args.progression);
       const prog = own(world.ruleset?.progression ?? {}, id);
       if (!prog)
-        return reject5("unknown_progression", `no progression ${id}`);
+        return reject6("unknown_progression", `no progression ${id}`);
       const e = own(state.entities, entity2);
       if (!e)
-        return reject5("missing_entity", `no entity ${labelOf(w, entity2)}`);
+        return reject6("missing_entity", `no entity ${labelOf(w, entity2)}`);
       if (!progressionApplies(reg, world, prog, e.kind))
-        return reject5("not_applicable", `${e.name} has no ${prog.label}`);
+        return reject6("not_applicable", `${e.name} has no ${prog.label}`);
       if (typeof args.amount !== "number" || !Number.isFinite(args.amount))
-        return reject5("bad_args", "award needs a numeric amount");
+        return reject6("bad_args", "award needs a numeric amount");
       return change(reg, w, entity2, prog.xpField, args.amount);
     }
     case "move": {
@@ -14225,9 +14573,9 @@ function coreEffect(reg, w, type, args, rng) {
       const to = text2(args.to);
       const e = own(state.entities, entity2);
       if (!e)
-        return reject5("missing_entity", `no entity ${labelOf(w, entity2)}`);
+        return reject6("missing_entity", `no entity ${labelOf(w, entity2)}`);
       if (!own(world.places, to))
-        return reject5("missing_place", `no place ${labelOf(w, to)}`);
+        return reject6("missing_place", `no place ${labelOf(w, to)}`);
       const here = placeOfEntity(state, entity2);
       const stayed = entity2 === world.pov ? movedElsewhere(w.events, here) : undefined;
       const moved = relocate(w.ctx, entity2, to, { party: true, ...stayed ? { stayed } : {}, ...typeof args.activity === "string" ? { activity: args.activity } : {}, ...args.told === true ? { told: true } : {} });
@@ -14247,7 +14595,7 @@ function coreEffect(reg, w, type, args, rng) {
     case "link": {
       const rel = text2(args.rel);
       if (rel === "")
-        return reject5("bad_args", "link needs rel");
+        return reject6("bad_args", "link needs rel");
       return linkEvents(reg, world, state, { rel, from: text2(args.from), to: text2(args.to), ...isRecord(args.fields) ? { fields: args.fields } : {}, ...typeof args.until === "number" ? { until: Math.round(args.until) } : {} });
     }
     case "unlink":
@@ -14255,7 +14603,7 @@ function coreEffect(reg, w, type, args, rng) {
     case "spawn": {
       const kind = text2(args.kind);
       if (kind === "" || !(own(world.kinds, kind) ?? reg.kinds.get(kind)))
-        return reject5("missing_kind", `no kind ${kind}`);
+        return reject6("missing_kind", `no kind ${kind}`);
       const id = text2(args.id) || `${kind}:${hashParts(rng.seed, "spawn", kind, text2(args.name)).slice(0, 10)}`;
       const tier = tierOf(world, text2(args.tier)) ? text2(args.tier) : spawnTierOf(world);
       const fields = isRecord(args.fields) ? { ...args.fields } : {};
@@ -14272,7 +14620,7 @@ function coreEffect(reg, w, type, args, rng) {
         const classes = classOf(args.class);
         const problem = classes ? classProblems(world, classes, entity2.name)[0] : { code: "bad_args", message: "a spawn's class is facet → values" };
         if (problem)
-          return reject5(problem.code, problem.message);
+          return reject6(problem.code, problem.message);
         if (classes && Object.keys(classes).length > 0)
           entity2.class = classes;
       }
@@ -14293,14 +14641,14 @@ function coreEffect(reg, w, type, args, rng) {
       return [{ type: "stage", track: text2(args.track), to: text2(args.to) }];
     case "post": {
       if (!Array.isArray(args.lines))
-        return reject5("bad_args", "post needs lines");
+        return reject6("bad_args", "post needs lines");
       const lines = objects(args.lines).map((l) => ({ account: text2(l.account), amount: typeof l.amount === "number" ? Math.round(l.amount) : NaN }));
       return [{ type: "post", lines, memo: text2(args.memo) }];
     }
     case "signal": {
       const cls = text2(args.class);
       if (!INTERRUPT_CLASSES.includes(cls))
-        return reject5("bad_args", `unknown interrupt class ${cls}`);
+        return reject6("bad_args", `unknown interrupt class ${cls}`);
       const data = { class: cls, text: text2(args.text) };
       if (typeof args.entity === "string")
         data.entity = args.entity;
@@ -14322,14 +14670,14 @@ function coreEffect(reg, w, type, args, rng) {
 }
 function resolveEffect(reg, w, spec, scope) {
   if (spec.type === "check")
-    return reject5("bad_effect", "a check applies its outcomes; run it through applyEffects");
+    return reject6("bad_effect", "a check applies its outcomes; run it through applyEffects");
   const args = scope.literal ? { ...spec.args } : evalArgs(spec.args ?? {}, scopeEnv({ reg, ctx: w.ctx, bindings: scope.bindings, vars: scope.vars, rng: scope.rng.fork("args") }), { self: w.world.pov, ...scope.bindings });
   const core = coreEffect(reg, w, spec.type, args, scope.rng);
   if (core)
     return core;
   const def = reg.effects.get(spec.type);
   if (!def)
-    return reject5("unknown_effect", `unknown effect ${spec.type}`);
+    return reject6("unknown_effect", `unknown effect ${spec.type}`);
   return def.resolve(args, { ...w.ctx, rng: scope.rng, params: scope.params ?? {}, effect: { type: spec.type, args } });
 }
 function effectList(v) {
@@ -14338,7 +14686,7 @@ function effectList(v) {
 function applyCheck(reg, w, spec, scope) {
   const depth2 = scope.depth ?? 0;
   if (depth2 >= NESTING_CAP)
-    return reject5("too_deep", `effects nested past ${NESTING_CAP} levels`);
+    return reject6("too_deep", `effects nested past ${NESTING_CAP} levels`);
   const a = spec.args ?? {};
   const bindings = { self: w.world.pov, ...scope.bindings };
   const env = scopeEnv({ reg, ctx: w.ctx, bindings: scope.bindings, vars: scope.vars });
@@ -14346,11 +14694,11 @@ function applyCheck(reg, w, spec, scope) {
   const target = a.target === undefined ? null : text2(evalArg(a.target, env, bindings));
   const def = checkOf(w.world, typeof a.check === "string" ? evalArg(a.check, env, bindings) : a.check);
   if (!def)
-    return reject5("unknown_check", `no check ${typeof a.check === "string" ? a.check : "given"}`);
+    return reject6("unknown_check", `no check ${typeof a.check === "string" ? a.check : "given"}`);
   if (!own(w.state.entities, actor))
-    return reject5("missing_entity", `no entity ${labelOf(w, actor)}`);
+    return reject6("missing_entity", `no entity ${labelOf(w, actor)}`);
   if (target !== null && !own(w.state.entities, target))
-    return reject5("missing_entity", `no entity ${labelOf(w, target)}`);
+    return reject6("missing_entity", `no entity ${labelOf(w, target)}`);
   const rolling = { ...scope.bindings, self: actor, actor, ...target !== null ? { target } : {} };
   const ready = readyCheck(reg, w.ctx, def, rolling, scope.vars);
   if ("code" in ready)
@@ -18273,7 +18621,7 @@ function placeLoreLines(ctx, scope) {
 }
 
 // src/packs/space/core/places.ts
-function reject6(code, reason) {
+function reject7(code, reason) {
   return { code, reason };
 }
 var placeEventDef = {
@@ -18281,18 +18629,18 @@ var placeEventDef = {
   validate(e, ctx) {
     const place2 = strOf(e.data.place);
     if (place2 === "" || !safeKey(place2))
-      return reject6("bad_place", "a place needs an id");
+      return reject7("bad_place", "a place needs an id");
     if (hasOwn(baseWorld(ctx.world).places, place2))
-      return reject6("not_made", `${labelOf(ctx, place2)} is the world's own place`);
+      return reject7("not_made", `${labelOf(ctx, place2)} is the world's own place`);
     if (e.data.gone === true)
-      return hasOwn(madePlacesOf(ctx.state), place2) ? null : reject6("gone", `no place ${labelOf(ctx, place2)}`);
+      return hasOwn(madePlacesOf(ctx.state), place2) ? null : reject7("gone", `no place ${labelOf(ctx, place2)}`);
     const def = madePlaceData(e.data.def, place2);
     if (!def)
-      return reject6("bad_place", "that isn't a place");
+      return reject7("bad_place", "that isn't a place");
     if (!own(ctx.world.places, def.parent))
-      return reject6("missing_place", `no place ${labelOf(ctx, def.parent)}`);
+      return reject7("missing_place", `no place ${labelOf(ctx, def.parent)}`);
     if (def.parent === place2 || placeWithin(ctx.world, def.parent, place2))
-      return reject6("bad_parent", "a place can't be inside itself");
+      return reject7("bad_parent", "a place can't be inside itself");
     return null;
   },
   apply(e, state) {
@@ -18332,7 +18680,7 @@ var makePlaceEffect = {
   resolve(a, ctx) {
     const p = factOf2(a.change);
     if (!p)
-      return reject6("bad_proposal", "the change isn't one");
+      return reject7("bad_proposal", "the change isn't one");
     const w = new Working(ctx.registry, ctx.world, ctx.state);
     const settled = settlePlaceFact(w.ctx, p);
     if (settled.kind === "refused")
@@ -18362,7 +18710,7 @@ var makePlaceEffect = {
         return failed.rejection;
     }
     if (w.events.length === 0)
-      return reject6("no_change", `${labelOf(w.ctx, place2)} is there already`);
+      return reject7("no_change", `${labelOf(w.ctx, place2)} is there already`);
     return [...w.events];
   }
 };
@@ -18375,9 +18723,9 @@ var placeMakeChannel = {
       return settled.rejection;
     const who = placeFactEntity(p);
     if (who !== null && !own(ctx.state.entities, who))
-      return reject6("missing_entity", `no entity ${labelOf(ctx, who)}`);
+      return reject7("missing_entity", `no entity ${labelOf(ctx, who)}`);
     if (settled.kind === "found")
-      return who === null ? reject6("no_change", `${labelOf(ctx, settled.place)} is there already`) : null;
+      return who === null ? reject7("no_change", `${labelOf(ctx, settled.place)} is there already`) : null;
     const out = placeOp(ctx, settled.op, { by: strOf(p.by) || "story", salt: "check" });
     return "code" in out && out.code !== "exists" ? out : null;
   },
@@ -18998,7 +19346,7 @@ function findThings(ctx, words3, opts, nested = false) {
 }
 
 // src/engine/thing-ops.ts
-function reject7(code, reason) {
+function reject8(code, reason) {
   return { code, reason };
 }
 var note = (text3, entity2) => ({ type: ENGINE_EVENTS.note, data: { text: text3, entity: entity2, visibility: "secret" } });
@@ -19050,36 +19398,36 @@ function roomProblem(ctx, name, holder, opts, adding) {
   const rule = thingsConfigOf(ctx.world).containers;
   const depth2 = 1 + holdersOf2(ctx.state, holder).length + (typeof adding === "string" ? nestDepth(ctx, adding) : 0);
   if (depth2 > rule.depth)
-    return reject7("too_deep", `${name} can't go in ${labelOf(ctx, holder)}: things are packed at most ${rule.depth} deep`);
+    return reject8("too_deep", `${name} can't go in ${labelOf(ctx, holder)}: things are packed at most ${rule.depth} deep`);
   if (rule.capacity === "off")
     return null;
   const problem = optionalQuery(ctx, "gear.room_problem")?.(ctx, holder, adding) ?? null;
-  return problem === null ? null : reject7("no_room", `${name} ${problem}`);
+  return problem === null ? null : reject8("no_room", `${name} ${problem}`);
 }
 function landing(ctx, name, size, to, opts, moving, adding) {
   if (moving && size === "part")
-    return reject7("part", `${name} is built into what holds it`);
+    return reject8("part", `${name} is built into what holds it`);
   if (moving && size === "builtin" && !opts.confirmed)
-    return reject7("builtin", `${name} is built in: moving it needs a confirmed change`);
+    return reject8("builtin", `${name} is built in: moving it needs a confirmed change`);
   if ("place" in to)
-    return own(ctx.world.places, to.place) ? { spot: to } : reject7("missing_place", `no place ${labelOf(ctx, to.place)}`);
+    return own(ctx.world.places, to.place) ? { spot: to } : reject8("missing_place", `no place ${labelOf(ctx, to.place)}`);
   const holder = own(ctx.state.entities, to.in);
   if (!holder || isGone(ctx.state, to.in))
-    return reject7("missing_entity", `no holder ${labelOf(ctx, to.in)}`);
+    return reject8("missing_entity", `no holder ${labelOf(ctx, to.in)}`);
   const holds2 = holdsOf2(ctx, to.in);
   if (holds2 === null)
-    return reject7("cant_hold", `${holder.name} can't hold anything`);
+    return reject8("cant_hold", `${holder.name} can't hold anything`);
   if (size === "vehicle" && !kindIs(ctx.registry, ctx.world, holder.kind, "vehicle"))
-    return reject7("cant_hold", `${name} is a vehicle: it goes only on another vehicle`);
+    return reject8("cant_hold", `${name} is a vehicle: it goes only on another vehicle`);
   if (size === "unknown" || size === "part" || size === "vehicle" || sizeRank(size) <= sizeRank(holds2))
     return roomProblem(ctx, name, to.in, opts, adding) ?? { spot: to };
   if (kindIs(ctx.registry, ctx.world, holder.kind, "person")) {
     const place2 = placeOfEntity(ctx.state, to.in);
     if (!place2)
-      return reject7("too_big", `${name} is too big for ${holder.name} to carry, and ${holder.name} is nowhere`);
+      return reject8("too_big", `${name} is too big for ${holder.name} to carry, and ${holder.name} is nowhere`);
     return { spot: { place: place2 }, noted: `${name} is too big to carry (${SIZE_LABELS[size]}), so it is at ${labelOf(ctx, place2)} rather than on ${holder.name}.` };
   }
-  return reject7("too_big", `${name} is too big for ${holder.name}, which takes things up to ${SIZE_LABELS[holds2]}`);
+  return reject8("too_big", `${name} is too big for ${holder.name}, which takes things up to ${SIZE_LABELS[holds2]}`);
 }
 function whyOf(why2, opts) {
   const text3 = why2.trim();
@@ -19099,11 +19447,11 @@ function moveThing(w, thing2, to, opts, why2, how) {
   const ctx = w.ctx;
   const e = own(ctx.state.entities, thing2);
   if (!e)
-    return reject7("missing_entity", `no thing ${labelOf(ctx, thing2)}`);
+    return reject8("missing_entity", `no thing ${labelOf(ctx, thing2)}`);
   if (sameSpot(spotOf(ctx.state, thing2), to) && !(typeof e.fields.place === "string" && e.fields.place !== "" && e.relations.some((r) => r.type === "in")))
-    return reject7("no_change", `${e.name} is there already`);
+    return reject8("no_change", `${e.name} is there already`);
   if ("in" in to && (to.in === thing2 || holdersOf2(ctx.state, to.in).includes(thing2)))
-    return reject7("cycle", `${e.name} can't go inside ${labelOf(ctx, to.in)}`);
+    return reject8("cycle", `${e.name} can't go inside ${labelOf(ctx, to.in)}`);
   const where = landing(ctx, e.name, sizeOf(ctx, thing2).size, to, opts, true, thing2);
   if ("code" in where)
     return where;
@@ -19152,11 +19500,11 @@ function ownerEvents(ctx, thing2, owner) {
 }
 function thingProblem(ctx, id) {
   if (!own(ctx.state.entities, id) || isGone(ctx.state, id))
-    return reject7("missing_entity", `no thing ${labelOf(ctx, id)}`);
-  return isThing(ctx, id) ? null : reject7("not_a_thing", `${labelOf(ctx, id)} isn't a thing`);
+    return reject8("missing_entity", `no thing ${labelOf(ctx, id)}`);
+  return isThing(ctx, id) ? null : reject8("not_a_thing", `${labelOf(ctx, id)} isn't a thing`);
 }
 function partyProblem(ctx, id) {
-  return own(ctx.state.entities, id) && !isGone(ctx.state, id) ? null : reject7("missing_entity", `no one ${labelOf(ctx, id)}`);
+  return own(ctx.state.entities, id) && !isGone(ctx.state, id) ? null : reject8("missing_entity", `no one ${labelOf(ctx, id)}`);
 }
 function madeId2(ctx, name, salt) {
   const slug3 = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "thing";
@@ -19173,8 +19521,8 @@ function restProblem(ctx, rest) {
   if (rest === "owner")
     return null;
   if ("place" in rest)
-    return own(ctx.world.places, rest.place) ? null : reject7("missing_place", `no place ${labelOf(ctx, rest.place)}`);
-  return own(ctx.state.entities, rest.in) && holdsOf2(ctx, rest.in) !== null ? null : reject7("cant_hold", `${labelOf(ctx, rest.in)} can't hold anything`);
+    return own(ctx.world.places, rest.place) ? null : reject8("missing_place", `no place ${labelOf(ctx, rest.place)}`);
+  return own(ctx.state.entities, rest.in) && holdsOf2(ctx, rest.in) !== null ? null : reject8("cant_hold", `${labelOf(ctx, rest.in)} can't hold anything`);
 }
 function thingTypeFor(ctx, name, place2) {
   const key = nameKey(name);
@@ -19211,35 +19559,35 @@ function makeVehicle(w, op, vehicleClass, opts) {
   const ctx = w.ctx;
   const spawn = optionalService(ctx, "vehicles.spawn");
   if (!spawn)
-    return reject7("no_vehicles", "this world plays no vehicles");
+    return reject8("no_vehicles", "this world plays no vehicles");
   const name = op.name.trim();
   if (name.length > THING_NAME_MAX)
-    return reject7("bad_name", `a name is at most ${THING_NAME_MAX} characters`);
+    return reject8("bad_name", `a name is at most ${THING_NAME_MAX} characters`);
   const problem = (op.owner !== undefined ? partyProblem(ctx, op.owner) : null) ?? (op.home !== undefined && op.home !== "owner" && "place" in op.home ? restProblem(ctx, op.home) : null);
   if (problem)
     return problem;
   let at2;
   if ("place" in op.at) {
     if (!own(ctx.world.places, op.at.place))
-      return reject7("missing_place", `no place ${labelOf(ctx, op.at.place)}`);
+      return reject8("missing_place", `no place ${labelOf(ctx, op.at.place)}`);
     at2 = op.at;
   } else {
     const holder = own(ctx.state.entities, op.at.in);
     if (!holder || isGone(ctx.state, op.at.in))
-      return reject7("missing_entity", `no holder ${labelOf(ctx, op.at.in)}`);
+      return reject8("missing_entity", `no holder ${labelOf(ctx, op.at.in)}`);
     const place3 = placeOfEntity(ctx.state, op.at.in);
     if (kindIs(ctx.registry, ctx.world, holder.kind, "vehicle"))
       at2 = op.at;
     else if (place3 !== null)
       at2 = { place: place3 };
     else
-      return reject7("missing_place", `${holder.name} is nowhere`);
+      return reject8("missing_place", `${holder.name} is nowhere`);
   }
   const place2 = "place" in at2 ? at2.place : placeOfEntity(ctx.state, at2.in);
   const viewer = opts.viewer ?? ctx.world.pov;
   const seen = name === "" ? undefined : findThings(ctx, name, { actor: viewer, viewer, scope: "all" }).find((c) => c.full && !c.secret && sizeOf(ctx, c.id).size === "vehicle" && placeOfEntity(ctx.state, c.id) === place2);
   if (seen)
-    return { ...reject7("exists", `${labelOf(ctx, seen.id)} is already there`), exists: seen.id };
+    return { ...reject8("exists", `${labelOf(ctx, seen.id)} is already there`), exists: seen.id };
   const fields = { made: { by: opts.by, at: at2 } };
   const description = op.description?.trim() ?? "";
   if (description !== "")
@@ -19262,23 +19610,23 @@ function make(w, op, opts) {
   const ctx = w.ctx;
   const name = op.name.trim();
   if (name === "" || name.length > THING_NAME_MAX)
-    return reject7("bad_name", `a name is 1–${THING_NAME_MAX} characters`);
+    return reject8("bad_name", `a name is 1–${THING_NAME_MAX} characters`);
   const problem = (op.owner !== undefined ? partyProblem(ctx, op.owner) : null) ?? (op.home !== undefined ? restProblem(ctx, op.home) : null);
   if (problem)
     return problem;
   if (op.qty !== undefined && !(Number.isInteger(op.qty) && op.qty >= 1))
-    return reject7("bad_amount", "a quantity is a whole number of at least 1");
+    return reject8("bad_amount", "a quantity is a whole number of at least 1");
   const near = "in" in op.at ? kindIs(ctx.registry, ctx.world, own(ctx.state.entities, op.at.in)?.kind ?? "", "person") ? op.at.in : possessorOf(ctx, op.at.in) : null;
   const place2 = "place" in op.at ? op.at.place : placeOfEntity(ctx.state, op.at.in);
   const viewer = opts.viewer ?? ctx.world.pov;
   const found = findThings(ctx, name, { actor: near ?? viewer, viewer, scope: near !== null ? "on" : "all", ...op.owner !== undefined ? { owner: op.owner } : {} }).filter((c) => c.full && (near !== null || place2 !== null && placeOfEntity(ctx.state, c.id) === place2));
   const seen = found.find((c) => !c.secret);
   if (seen)
-    return { ...reject7("exists", `${labelOf(ctx, seen.id)} is already there`), exists: seen.id };
+    return { ...reject8("exists", `${labelOf(ctx, seen.id)} is already there`), exists: seen.id };
   const type = op.type ?? (op.size === undefined && op.holds === undefined && op.category === undefined ? thingTypeFor(ctx, name, place2).type : undefined);
   const row = type !== undefined ? typeRowOf(ctx, { catalog: type }) : null;
   if (op.type !== undefined && !row)
-    return reject7("missing_type", `no type ${op.type} in the catalogs`);
+    return reject8("missing_type", `no type ${op.type} in the catalogs`);
   const typed = row && type !== undefined ? typeFields(row.table, type, row.row) : null;
   const kind = typed?.kind ?? (op.holds !== undefined ? "container" : "item");
   const fields = { ...typed?.fields };
@@ -19306,7 +19654,7 @@ function make(w, op, opts) {
   if (maybe)
     fields.maybe_same_as = maybe.id;
   if ("in" in op.at && !own(ctx.state.entities, op.at.in))
-    return reject7("missing_entity", `no holder ${labelOf(ctx, op.at.in)}`);
+    return reject8("missing_entity", `no holder ${labelOf(ctx, op.at.in)}`);
   const count = op.qty ?? 1;
   const adding = { volumeL: (typeof fields.volume_l === "number" ? fields.volume_l : 0) * count, weightG: (typeof fields.weight_g === "number" ? fields.weight_g : 0) * count };
   const where = landing(ctx, name, sizeOfDef(ctx, kind, fields, name).size, op.at, opts, false, adding);
@@ -19336,25 +19684,25 @@ function hand(w, op, opts) {
   const ctx = w.ctx;
   const to = own(ctx.state.entities, op.to);
   if (!to || isGone(ctx.state, op.to) || !kindIs(ctx.registry, ctx.world, to.kind, "person"))
-    return reject7("not_a_person", `${labelOf(ctx, op.to)} can't be handed anything`);
+    return reject8("not_a_person", `${labelOf(ctx, op.to)} can't be handed anything`);
   if (op.until !== undefined && !(op.until > ctx.state.clock))
-    return reject7("bad_until", "a loan's end is after now");
+    return reject8("bad_until", "a loan's end is after now");
   const e = own(ctx.state.entities, op.item);
   if (!e)
-    return reject7("missing_entity", `no thing ${labelOf(ctx, op.item)}`);
+    return reject8("missing_entity", `no thing ${labelOf(ctx, op.item)}`);
   const giver = possessorOf(ctx, op.item);
   const owners = ownersIn(e.fields).map((o) => o.party);
   if (op.basis === "return" && !owners.some((o) => o === op.to || orgTypeOf(ctx, o) !== null && orgPower(ctx, op.to, o, "assets.use") !== null))
-    return reject7("not_owner", `${e.name} goes back to its owner, not ${to.name}`);
+    return reject8("not_owner", `${e.name} goes back to its owner, not ${to.name}`);
   const newOwner = op.basis === "gift" || op.basis === "sale" || op.basis === "trade";
   const owning = newOwner && !(owners.length === 1 && owners[0] === op.to) ? ownerEvents(ctx, op.item, op.to) : [];
   if (sizeOf(ctx, op.item).size === "vehicle") {
     if (op.basis === "theft")
-      return reject7("cant_hold", `${e.name} is a vehicle: it is taken by driving it off, not by hand`);
+      return reject8("cant_hold", `${e.name} is a vehicle: it is taken by driving it off, not by hand`);
     const by = own(ctx.state.entities, opts.by) ? opts.by : owners.find((o) => own(ctx.state.entities, o) !== undefined) ?? null;
     const events3 = newOwner || op.basis === "return" ? [...endGrants(ctx, op.item), ...owning] : handGrant(ctx, op, by);
     if (events3.length === 0)
-      return reject7("no_change", `${to.name} may use ${e.name} already`);
+      return reject8("no_change", `${to.name} may use ${e.name} already`);
     return applyAll(w, events3) ?? {};
   }
   const how = { hold: "holding", loan: "loan", return: null, gift: "given", sale: "bought", trade: "bought", theft: "took" };
@@ -19372,7 +19720,7 @@ function grant(w, op) {
   if (op.do === "revoke")
     return applyAll(w, [{ type: "unlink", rel: "uses", from: op.who, to: op.item }]) ?? {};
   if (op.until !== undefined && !(op.until > ctx.state.clock))
-    return reject7("bad_until", "a grant's end is after now");
+    return reject8("bad_until", "a grant's end is after now");
   const basis = op.basis ?? (op.until !== undefined ? "loan" : "assign");
   const events2 = [{ type: "link", rel: "uses", from: op.who, to: op.item, fields: { basis, ...op.by !== undefined ? { by: op.by } : {} }, ...op.until !== undefined ? { until: Math.round(op.until) } : {} }];
   if (op.by !== undefined && assignFor(ctx, op.by, op.item) === null)
@@ -19385,11 +19733,11 @@ function permit(w, op) {
   if (missing)
     return missing;
   if (op.from === op.to)
-    return reject7("self", `${labelOf(ctx, op.from)} needs no leave of their own`);
+    return reject8("self", `${labelOf(ctx, op.from)} needs no leave of their own`);
   if (op.do === "unpermit")
     return applyAll(w, [{ type: "unlink", rel: "permits", from: op.from, to: op.to }]) ?? {};
   if (op.until !== undefined && !(op.until > ctx.state.clock))
-    return reject7("bad_until", "a permission's end is after now");
+    return reject8("bad_until", "a permission's end is after now");
   const events2 = [{ type: "link", rel: "permits", from: op.from, to: op.to, fields: { scope: op.scope ?? "all", ...op.by !== undefined ? { by: op.by } : {} }, ...op.until !== undefined ? { until: Math.round(op.until) } : {} }];
   if (op.by !== undefined && op.by !== op.from && (orgTypeOf(ctx, op.from) === null || orgPower(ctx, op.by, op.from, "assets.assign") === null))
     events2.push(note(`${labelOf(ctx, op.by)} let ${labelOf(ctx, op.to)} use what is ${labelOf(ctx, op.from)}'s, without the say to.`, op.from));
@@ -19400,25 +19748,25 @@ function wear(w, op, opts) {
   const e = own(ctx.state.entities, op.item);
   const who = own(ctx.state.entities, op.who);
   if (!e || !who || !kindIs(ctx.registry, ctx.world, who.kind, "person"))
-    return reject7("not_a_person", `${labelOf(ctx, op.who)} can't wear anything`);
+    return reject8("not_a_person", `${labelOf(ctx, op.who)} can't wear anything`);
   const worn = e.relations.filter((r) => (r.type === "worn_by" || r.type === "equipped") && r.to === op.who);
   const unworn = worn.map((r) => ({ type: "unlink", rel: r.type, from: op.item, to: op.who }));
   if (op.off === true)
-    return worn.length === 0 ? reject7("not_worn", `${who.name} isn't wearing ${e.name}`) : applyAll(w, unworn) ?? {};
+    return worn.length === 0 ? reject8("not_worn", `${who.name} isn't wearing ${e.name}`) : applyAll(w, unworn) ?? {};
   const ownSlot = slotOf2(ctx, e.fields);
   const slot = op.slot ?? ownSlot;
   if (slot === null || slot === "none")
-    return reject7("no_slot", `${e.name} isn't worn`);
+    return reject8("no_slot", `${e.name} isn't worn`);
   if (op.slot !== undefined && op.slot !== ownSlot && op.slot !== "hand_held" && rowOf(ctx, "gear.slots", op.slot) === undefined)
-    return reject7("bad_slot", `there is no ${op.slot.replace(/_/g, " ")} slot`);
+    return reject8("bad_slot", `there is no ${op.slot.replace(/_/g, " ")} slot`);
   if (worn.length > 0 && (op.slot === undefined || worn.some((r) => r.fields?.slot === slot)))
-    return reject7("no_change", `${who.name} already wears ${e.name}`);
+    return reject8("no_change", `${who.name} already wears ${e.name}`);
   if (holdersOf2(ctx.state, op.item)[0] !== op.who) {
     const moved = moveThing(w, op.item, { in: op.who }, opts, "", null);
     if ("code" in moved)
       return moved;
     if (moved.placed)
-      return reject7("too_big", `${e.name} is too big to wear`);
+      return reject8("too_big", `${e.name} is too big to wear`);
   }
   const rel = slot === "hand_held" ? "equipped" : "worn_by";
   const taken = hasOwn(SHARED_SLOTS, slot) ? [] : Object.keys(ctx.state.entities).sort().filter((id) => id !== op.item && own(ctx.state.entities, id)?.relations.some((r) => r.type === rel && r.to === op.who && r.fields?.slot === slot));
@@ -19427,18 +19775,18 @@ function wear(w, op, opts) {
 function merge(w, op, opts) {
   const ctx = w.ctx;
   if (op.keep === op.drop)
-    return reject7("self", "a thing merges with another");
+    return reject8("self", "a thing merges with another");
   const missing = thingProblem(ctx, op.keep);
   if (missing)
     return missing;
   if (own(ctx.world.entities, op.drop) && !opts.gm)
-    return reject7("authored", `${labelOf(ctx, op.drop)} is the world's own: merging it is the GM's`);
+    return reject8("authored", `${labelOf(ctx, op.drop)} is the world's own: merging it is the GM's`);
   const drop = own(ctx.state.entities, op.drop);
   const keep = own(ctx.state.entities, op.keep);
   if (!drop || !keep)
-    return reject7("missing_entity", `no thing ${labelOf(ctx, op.drop)}`);
+    return reject8("missing_entity", `no thing ${labelOf(ctx, op.drop)}`);
   if (holdersOf2(ctx.state, op.keep).includes(op.drop))
-    return reject7("cycle", `${drop.name} holds ${keep.name}, so it can't merge into it`);
+    return reject8("cycle", `${drop.name} holds ${keep.name}, so it can't merge into it`);
   const qty = typeof drop.fields.qty === "number" ? drop.fields.qty : 1;
   const events2 = [typeof keep.fields.qty === "number" ? { type: "add", entity: op.keep, field: "qty", delta: qty } : { type: "set", entity: op.keep, field: "qty", value: 1 + qty }];
   for (const id of Object.keys(ctx.state.entities).sort()) {
@@ -19464,13 +19812,13 @@ function lose(w, op, opts) {
   const ctx = w.ctx;
   const e = own(ctx.state.entities, op.item);
   if (!e)
-    return reject7("missing_entity", `no thing ${labelOf(ctx, op.item)}`);
+    return reject8("missing_entity", `no thing ${labelOf(ctx, op.item)}`);
   if (e.fields.lost === true)
-    return reject7("already_lost", `${e.name} is already lost`);
+    return reject8("already_lost", `${e.name} is already lost`);
   if (op.by !== undefined) {
     const thief = own(ctx.state.entities, op.by);
     if (!thief || !kindIs(ctx.registry, ctx.world, thief.kind, "person"))
-      return reject7("not_a_person", `${labelOf(ctx, op.by)} can't take anything`);
+      return reject8("not_a_person", `${labelOf(ctx, op.by)} can't take anything`);
     return moveThing(w, op.item, { in: op.by }, opts, "", "took");
   }
   const events2 = [];
@@ -19493,12 +19841,12 @@ function label(w, op) {
   const ctx = w.ctx;
   const e = own(ctx.state.entities, op.item);
   if (!e)
-    return reject7("missing_entity", `no thing ${labelOf(ctx, op.item)}`);
+    return reject8("missing_entity", `no thing ${labelOf(ctx, op.item)}`);
   const events2 = [];
   if (op.name !== undefined) {
     const name = op.name.trim();
     if (name === "" || name.length > THING_NAME_MAX)
-      return reject7("bad_name", `a name is 1–${THING_NAME_MAX} characters`);
+      return reject8("bad_name", `a name is 1–${THING_NAME_MAX} characters`);
     if (name !== e.name)
       events2.push({ type: ENGINE_EVENTS.rename, data: { entity: op.item, name, was: e.name } });
   }
@@ -19511,19 +19859,19 @@ function label(w, op) {
     events2.push({ type: "set", entity: op.item, field: "size", value: op.size });
   if (op.specs !== undefined) {
     if (!kindIs(ctx.registry, ctx.world, e.kind, "vehicle"))
-      return reject7("not_a_vehicle", `${e.name} isn't a vehicle; only a vehicle has specs`);
+      return reject8("not_a_vehicle", `${e.name} isn't a vehicle; only a vehicle has specs`);
     const specs = op.specs.length > 0 ? op.specs.map((s) => ({ label: s.label, value: s.value })) : null;
     if (JSON.stringify(specs) !== JSON.stringify(e.fields.specs ?? null))
       events2.push({ type: "set", entity: op.item, field: "specs", value: specs });
   }
   if (events2.length === 0)
-    return reject7("no_change", "nothing to change");
+    return reject8("no_change", "nothing to change");
   return applyAll(w, events2) ?? {};
 }
 function setOp(w, op, opts) {
   const sets = optionalService(w.ctx, "gear.set_op");
   if (!sets)
-    return reject7("no_sets", "saved outfits are the gear pack's");
+    return reject8("no_sets", "saved outfits are the gear pack's");
   const events2 = sets(w.ctx, op, opts);
   if (!Array.isArray(events2))
     return events2;
@@ -19554,7 +19902,7 @@ function applyItemOp(w, op, opts) {
       }
       const owners = ownersIn(e?.fields ?? {}).map((o) => o.party);
       if (op.owner === null ? owners.length === 0 : owners.length === 1 && owners[0] === op.owner)
-        return reject7("no_change", "it is so already");
+        return reject8("no_change", "it is so already");
       return applyAll(w, [...ownerEvents(ctx, op.item, op.owner), ...endGrants(ctx, op.item)]) ?? {};
     }
     case "grant":
@@ -19566,13 +19914,13 @@ function applyItemOp(w, op, opts) {
         return bad;
       const value = op.home === null ? null : restValue2(op.home);
       if ((own(ctx.state.entities, op.item)?.fields.home ?? null) === value)
-        return reject7("no_change", "it rests there already");
+        return reject8("no_change", "it rests there already");
       return applyAll(w, [{ type: "set", entity: op.item, field: "home", value }]) ?? {};
     }
     case "use": {
       const n = op.qty ?? 1;
       if (!(Number.isInteger(n) && n >= 1))
-        return reject7("bad_amount", "using up is a whole number of at least 1");
+        return reject8("bad_amount", "using up is a whole number of at least 1");
       const stored = own(ctx.state.entities, op.item)?.fields.qty;
       const left = (typeof stored === "number" ? stored : 1) - n;
       return applyAll(w, [left > 0 ? { type: "add", entity: op.item, field: "qty", delta: -n } : { type: "set", entity: op.item, field: GONE_FIELD, value: true }]) ?? {};
@@ -19585,7 +19933,7 @@ function applyItemOp(w, op, opts) {
       const now = typeof e?.fields.condition === "number" ? e.fields.condition : typeof def?.default === "number" ? def.default : 100;
       const next = Math.min(def?.max ?? Infinity, Math.max(def?.min ?? -Infinity, now + op.delta));
       if (next === now)
-        return reject7("no_change", "its condition stays as it is");
+        return reject8("no_change", "its condition stays as it is");
       return applyAll(w, [typeof e?.fields.condition === "number" ? { type: "add", entity: op.item, field: "condition", delta: next - now } : { type: "set", entity: op.item, field: "condition", value: next }]) ?? {};
     }
     case "lose":
@@ -20523,7 +20871,7 @@ var CREDIT_CAP = 60;
 var SCORES_KEPT = 24;
 var STATEMENTS_KEPT = 6;
 var UNSIDED_KINDS = new Set(["opening", "adjustment"]);
-function reject8(code, reason) {
+function reject9(code, reason) {
   return { code, reason };
 }
 function str3(e, k) {
@@ -20678,7 +21026,7 @@ function wordsOf2(words3, id) {
 var EVENTS = [
   {
     type: FINANCE_EVENTS.anchor,
-    validate: (e, ctx) => own(ctx.state.entities, str3(e, "entity")) && typeof e.data.typical === "number" && typeof e.data.base === "number" ? null : reject8("bad_event", "anchor needs entity, typical and base"),
+    validate: (e, ctx) => own(ctx.state.entities, str3(e, "entity")) && typeof e.data.typical === "number" && typeof e.data.base === "number" ? null : reject9("bad_event", "anchor needs entity, typical and base"),
     apply: (e, state) => {
       sliceRecord(state, "economy", "anchors")[str3(e, "entity")] = { band: str3(e, "band"), typical: numOf(e.data.typical), base: numOf(e.data.base) };
     },
@@ -20716,7 +21064,7 @@ var EVENTS = [
   },
   {
     type: FINANCE_EVENTS.note,
-    validate: (e, ctx) => own(ctx.state.entities, str3(e, "entity")) && str3(e, "text") !== "" ? null : reject8("bad_event", "a money note needs a party and its text"),
+    validate: (e, ctx) => own(ctx.state.entities, str3(e, "entity")) && str3(e, "text") !== "" ? null : reject9("bad_event", "a money note needs a party and its text"),
     apply: (e, state) => {
       const notes = sliceRecord(state, "economy", "notes");
       notes[str3(e, "entity")] = pushCapped(notes[str3(e, "entity")], { at: typeof e.data.at === "number" ? e.data.at : state.clock, class: str3(e, "class"), text: str3(e, "text") }, NOTES_CAP);
@@ -20725,7 +21073,7 @@ var EVENTS = [
   },
   {
     type: FINANCE_EVENTS.modifier,
-    validate: (e) => str3(e, "id") !== "" && (e.data.mult === undefined || typeof e.data.mult === "number" && e.data.mult > 0) ? null : reject8("bad_event", "a price modifier needs an id and a positive multiplier"),
+    validate: (e) => str3(e, "id") !== "" && (e.data.mult === undefined || typeof e.data.mult === "number" && e.data.mult > 0) ? null : reject9("bad_event", "a price modifier needs an id and a positive multiplier"),
     apply: (e, state) => {
       const mods = sliceRecord(state, "economy", "modifiers");
       if (typeof e.data.mult !== "number")
@@ -20737,7 +21085,7 @@ var EVENTS = [
   },
   {
     type: FINANCE_EVENTS.statement,
-    validate: (e, ctx) => isCreditAccount(ctx, str3(e, "account")) ? null : reject8("bad_event", "statements are for credit accounts"),
+    validate: (e, ctx) => isCreditAccount(ctx, str3(e, "account")) ? null : reject9("bad_event", "statements are for credit accounts"),
     apply: (e, state) => {
       const account = str3(e, "account");
       const at2 = typeof e.data.at === "number" ? e.data.at : state.clock;
@@ -20758,7 +21106,7 @@ var EVENTS = [
   },
   {
     type: FINANCE_EVENTS.cardPaid,
-    validate: (e, ctx) => isCreditAccount(ctx, str3(e, "account")) ? null : reject8("bad_event", "statement payments are for credit accounts"),
+    validate: (e, ctx) => isCreditAccount(ctx, str3(e, "account")) ? null : reject9("bad_event", "statement payments are for credit accounts"),
     apply: (e, state) => {
       const cycles = sliceRecord(state, "economy", "cycles");
       const account = str3(e, "account");
@@ -20773,7 +21121,7 @@ var EVENTS = [
   },
   {
     type: FINANCE_EVENTS.delinquency,
-    validate: (e, ctx) => isCreditAccount(ctx, str3(e, "account")) && DELINQUENCY_STAGES.includes(str3(e, "stage")) ? null : reject8("bad_event", "a delinquency stage needs a credit account and a stage"),
+    validate: (e, ctx) => isCreditAccount(ctx, str3(e, "account")) && DELINQUENCY_STAGES.includes(str3(e, "stage")) ? null : reject9("bad_event", "a delinquency stage needs a credit account and a stage"),
     apply: (e, state) => {
       const cycles = sliceRecord(state, "economy", "cycles");
       const account = str3(e, "account");
@@ -20789,7 +21137,7 @@ var EVENTS = [
   },
   {
     type: FINANCE_EVENTS.flowRun,
-    validate: (e) => str3(e, "flow") !== "" && typeof e.data.state === "object" ? null : reject8("bad_event", "a flow run needs its flow and state"),
+    validate: (e) => str3(e, "flow") !== "" && typeof e.data.state === "object" ? null : reject9("bad_event", "a flow run needs its flow and state"),
     apply: (e, state) => {
       sliceRecord(state, "economy", "flows")[str3(e, "flow")] = objOf(e.data.state);
     },
@@ -20800,7 +21148,7 @@ var EVENTS = [
     type: FINANCE_EVENTS.flowRenamed,
     validate: (e, ctx) => {
       const name = str3(e, "name");
-      return own(ctx.state.entities, str3(e, "flow"))?.kind === "flow" && name.trim() !== "" && name.length <= 80 ? null : reject8("bad_event", "a rename needs a standing payment and a name of up to 80 characters");
+      return own(ctx.state.entities, str3(e, "flow"))?.kind === "flow" && name.trim() !== "" && name.length <= 80 ? null : reject9("bad_event", "a rename needs a standing payment and a name of up to 80 characters");
     },
     apply: (e, state) => {
       const flow = own(state.entities, str3(e, "flow"));
@@ -20816,13 +21164,13 @@ var EVENTS = [
     validate: (e, ctx) => {
       const account = str3(e, "account");
       if (!own(ctx.state.entities, account) || str3(e, "id") === "")
-        return reject8("bad_event", "a hold needs an account and an id");
+        return reject9("bad_event", "a hold needs an account and an id");
       if (e.data.release === true)
         return null;
       const cents2 = numOf(e.data.cents);
       if (!(cents2 > 0) || typeof e.data.until !== "number")
-        return reject8("bad_event", "a hold needs an amount and an end");
-      return e.data.kind === "authorization" && availableOf(ctx, account) < cents2 ? reject8("declined", `${own(ctx.state.entities, account)?.name ?? account} can't cover ${formatMoney(cents2, ctx.world.currency)}`) : null;
+        return reject9("bad_event", "a hold needs an amount and an end");
+      return e.data.kind === "authorization" && availableOf(ctx, account) < cents2 ? reject9("declined", `${own(ctx.state.entities, account)?.name ?? account} can't cover ${formatMoney(cents2, ctx.world.currency)}`) : null;
     },
     apply: (e, state) => {
       const holds2 = sliceRecord(state, "economy", "holds");
@@ -20841,7 +21189,7 @@ var EVENTS = [
   },
   {
     type: FINANCE_EVENTS.settle,
-    validate: (e, ctx) => own(ctx.state.entities, str3(e, "account")) && typeof e.data.upto === "number" ? null : reject8("bad_event", "settling needs an account and a time"),
+    validate: (e, ctx) => own(ctx.state.entities, str3(e, "account")) && typeof e.data.upto === "number" ? null : reject9("bad_event", "settling needs an account and a time"),
     apply: (e, state) => {
       const journal = sliceRecord(state, "economy", "journal");
       const account = str3(e, "account");
@@ -20860,7 +21208,7 @@ var EVENTS = [
   },
   {
     type: FINANCE_EVENTS.credit,
-    validate: (e, ctx) => own(ctx.state.entities, str3(e, "person")) && str3(e, "kind") !== "" ? null : reject8("bad_event", "a credit entry needs a person and a kind"),
+    validate: (e, ctx) => own(ctx.state.entities, str3(e, "person")) && str3(e, "kind") !== "" ? null : reject9("bad_event", "a credit entry needs a person and a kind"),
     apply: (e, state) => {
       const credit = sliceRecord(state, "economy", "credit");
       const person3 = str3(e, "person");
@@ -20872,7 +21220,7 @@ var EVENTS = [
   },
   {
     type: FINANCE_EVENTS.score,
-    validate: (e, ctx) => own(ctx.state.entities, str3(e, "person")) && typeof e.data.score === "number" ? null : reject8("bad_event", "a score needs a person and a number"),
+    validate: (e, ctx) => own(ctx.state.entities, str3(e, "person")) && typeof e.data.score === "number" ? null : reject9("bad_event", "a score needs a person and a number"),
     apply: (e, state) => {
       const credit = sliceRecord(state, "economy", "credit");
       const person3 = str3(e, "person");
@@ -20884,7 +21232,7 @@ var EVENTS = [
   },
   {
     type: FINANCE_EVENTS.spend,
-    validate: (e, ctx) => own(ctx.state.entities, str3(e, "card")) && typeof e.data.day === "number" ? null : reject8("bad_event", "card spending needs a card and a day"),
+    validate: (e, ctx) => own(ctx.state.entities, str3(e, "card")) && typeof e.data.day === "number" ? null : reject9("bad_event", "card spending needs a card and a day"),
     apply: (e, state) => {
       sliceRecord(state, "economy", "spend")[str3(e, "card")] = { day: numOf(e.data.day), purchase: numOf(e.data.purchase), atm: numOf(e.data.atm) };
     },
@@ -20898,11 +21246,11 @@ var EVENTS = [
       const opened = objOf(sliceOf(ctx.state, "economy").opened);
       for (const a of list) {
         if (typeof a !== "string" || !own(ctx.state.entities, a))
-          return reject8("bad_event", "only accounts open");
+          return reject9("bad_event", "only accounts open");
         if (own(opened, a) === true)
-          return reject8("opened", `${own(ctx.state.entities, a)?.name ?? a} is already open`);
+          return reject9("opened", `${own(ctx.state.entities, a)?.name ?? a} is already open`);
       }
-      return list.length > 0 ? null : reject8("bad_event", "nothing to open");
+      return list.length > 0 ? null : reject9("bad_event", "nothing to open");
     },
     apply: (e, state) => {
       const opened = sliceRecord(state, "economy", "opened");
@@ -20914,7 +21262,7 @@ var EVENTS = [
   },
   {
     type: FINANCE_EVENTS.status,
-    validate: (e, ctx) => own(ctx.state.entities, str3(e, "account"))?.kind === "account" && ACCOUNT_STATUSES.includes(str3(e, "status")) ? null : reject8("bad_event", "a status needs an account and a status"),
+    validate: (e, ctx) => own(ctx.state.entities, str3(e, "account"))?.kind === "account" && ACCOUNT_STATUSES.includes(str3(e, "status")) ? null : reject9("bad_event", "a status needs an account and a status"),
     apply: (e, state) => {
       sliceRecord(state, "economy", "status")[str3(e, "account")] = str3(e, "status");
     },
@@ -20923,7 +21271,7 @@ var EVENTS = [
   },
   {
     type: FINANCE_EVENTS.accrue,
-    validate: (e, ctx) => own(ctx.state.entities, str3(e, "account")) && typeof e.data.at === "number" && (e.data.owed === undefined || typeof e.data.owed === "number" && Number.isFinite(e.data.owed)) ? null : reject8("bad_event", "an accrual needs an account and a time"),
+    validate: (e, ctx) => own(ctx.state.entities, str3(e, "account")) && typeof e.data.at === "number" && (e.data.owed === undefined || typeof e.data.owed === "number" && Number.isFinite(e.data.owed)) ? null : reject9("bad_event", "an accrual needs an account and a time"),
     apply: (e, state) => {
       const at2 = numOf(e.data.at);
       sliceRecord(state, "economy", "adb")[str3(e, "account")] = { from: at2, at: at2, sum: 0, spent: 0, ...typeof e.data.owed === "number" ? { owed: e.data.owed } : {} };
@@ -21233,9 +21581,9 @@ function chooseSource(ctx, payer, cents2, opts) {
     return first;
   if (opts.source && !opts.story) {
     if (first)
-      return reject8("declined", first.card ? `${labelOf(ctx, first.card)} was declined for ${money(cents2)}` : `${labelOf(ctx, first.account)} can't cover ${money(cents2)}`);
+      return reject9("declined", first.card ? `${labelOf(ctx, first.card)} was declined for ${money(cents2)}` : `${labelOf(ctx, first.account)} can't cover ${money(cents2)}`);
     if (problems.length > 0)
-      return reject8("declined", `${problems[0]}`);
+      return reject9("declined", `${problems[0]}`);
   }
   const method = opts.method ?? "auto";
   const tried = sourcesToTry(ctx, payer, cents2, opts, problems);
@@ -21260,11 +21608,11 @@ function chooseSource(ctx, payer, cents2, opts) {
   if (story) {
     const debt = candidates.findLast((s) => runsDebt(ctx, s.account)) ?? spendable(ctx, payer).filter((id) => id !== opts.except && runsDebt(ctx, id)).map(account).at(-1);
     const saved = debt ?? sourcesFor(ctx, payer, "savings", opts.till, []).find((s) => s.account !== opts.except && covers(ctx, s, cents2, false));
-    return saved ? elsewhere(saved) : reject8(NO_WAY_TO_PAY, `${name} has nothing that covers ${money(cents2)} or can run a debt, so nothing was paid`);
+    return saved ? elsewhere(saved) : reject9(NO_WAY_TO_PAY, `${name} has nothing that covers ${money(cents2)} or can run a debt, so nothing was paid`);
   }
   if (problems.length > 0 && (method !== "auto" || candidates.length === 0))
-    return reject8("declined", problems[0] ?? `${name}'s card was declined`);
-  return reject8("declined", method === "credit" || method === "card" || method === "charge" ? `${name}'s card was declined` : `${name} doesn't have ${money(cents2)} available`);
+    return reject9("declined", problems[0] ?? `${name}'s card was declined`);
+  return reject9("declined", method === "credit" || method === "card" || method === "charge" ? `${name}'s card was declined` : `${name} doesn't have ${money(cents2)} available`);
 }
 function depositAccount(ctx, party, except) {
   const operating = strOf(own(ctx.state.entities, party)?.fields.operating_account);
@@ -21416,7 +21764,7 @@ function saleTermsOf(hooks, ctx, payer, cents2, category, sale) {
 }
 function charge(hooks, ctx, payer, rawCents, memo, opts = {}) {
   if (!own(ctx.state.entities, payer))
-    return reject8("missing_entity", `no payer ${labelOf(ctx, payer)}`);
+    return reject9("missing_entity", `no payer ${labelOf(ctx, payer)}`);
   const cents2 = Math.round(rawCents);
   if (!(cents2 > 0) && !(cents2 === 0 && (opts.sale?.price ?? 0) > 0))
     return [];
@@ -21442,18 +21790,18 @@ function charge(hooks, ctx, payer, rawCents, memo, opts = {}) {
     picked = p;
     source = p.account;
     if (cashback > 0 && p.via !== "debit")
-      return reject8("no_cashback", "cash back comes only with a debit card");
+      return reject9("no_cashback", "cash back comes only with a debit card");
   } else {
     if (cashback > 0)
-      return reject8("no_cashback", "cash back needs an account");
+      return reject9("no_cashback", "cash back needs an account");
     if (level >= 1 && opts.story !== true && notional(ctx.state, payer) < total)
-      return reject8("declined", `${labelOf(ctx, payer)} can't afford ${formatMoney(total, ctx.world.currency)}`);
+      return reject9("declined", `${labelOf(ctx, payer)} can't afford ${formatMoney(total, ctx.world.currency)}`);
     source = external(payer);
     out.push(...l1Move(ctx.state, payer, -total));
   }
   const wallet = cashback > 0 ? cashAccount(ctx, payer) : null;
   if (cashback > 0 && !wallet)
-    return reject8("no_cashback", `${labelOf(ctx, payer)} has nowhere to carry cash`);
+    return reject9("no_cashback", `${labelOf(ctx, payer)} has nowhere to carry cash`);
   const lines = merged([
     { account: source, amount: -total },
     { account: dest.account, amount: cents2 },
@@ -21481,22 +21829,22 @@ function moverOf(ctx, from, to) {
 function mayUse(ctx, party, account, side) {
   const t = traitsOf(ctx, account);
   if (own(ctx.state.entities, account)?.kind !== "account" || !t)
-    return reject8("missing_account", `there's no account ${labelOf(ctx, account)}`);
+    return reject9("missing_account", `there's no account ${labelOf(ctx, account)}`);
   const status = statusOf(ctx.state, account);
   if (side === "from") {
     if (status !== "open")
-      return reject8("declined", `${labelOf(ctx, account)} is ${status.replace(/_/g, " ")}`);
+      return reject9("declined", `${labelOf(ctx, account)} is ${status.replace(/_/g, " ")}`);
     if (!canSpend(ctx.state, account, party))
-      return reject8("not_owner", `${labelOf(ctx, party)} can't spend from ${labelOf(ctx, account)}`);
-    return t.locked ? reject8("locked", `${labelOf(ctx, account)} can't be drawn on here`) : null;
+      return reject9("not_owner", `${labelOf(ctx, party)} can't spend from ${labelOf(ctx, account)}`);
+    return t.locked ? reject9("locked", `${labelOf(ctx, account)} can't be drawn on here`) : null;
   }
   if (status === "closed")
-    return reject8("declined", `${labelOf(ctx, account)} is closed`);
+    return reject9("declined", `${labelOf(ctx, account)} is closed`);
   if (rightsOf(ctx.state, account, party) === null)
-    return reject8("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, party)}'s`);
+    return reject9("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, party)}'s`);
   if (t.receivable)
-    return reject8("locked", `${labelOf(ctx, account)} is a loan made: only its borrower's payments reach it`);
-  return classOf2(ctx, account) === "cd" ? reject8("locked", `${labelOf(ctx, account)} takes nothing in after it opens`) : null;
+    return reject9("locked", `${labelOf(ctx, account)} is a loan made: only its borrower's payments reach it`);
+  return classOf2(ctx, account) === "cd" ? reject9("locked", `${labelOf(ctx, account)} takes nothing in after it opens`) : null;
 }
 function cashAdvanceFee(ctx, account, cents2) {
   const p = productOf(ctx, account);
@@ -21507,29 +21855,29 @@ function cashAdvanceFee(ctx, account, cents2) {
 function move(ctx, from, to, cents2, memo, opts = {}) {
   const s = ctx.state;
   if (own(s.entities, from)?.kind !== "account" || own(s.entities, to)?.kind !== "account")
-    return reject8("missing_account", "both accounts must exist");
+    return reject9("missing_account", "both accounts must exist");
   if (from === to)
-    return reject8("bad_party", `${labelOf(ctx, from)} can't pay itself`);
+    return reject9("bad_party", `${labelOf(ctx, from)} can't pay itself`);
   const party = moverOf(ctx, from, to);
   if (!party)
-    return reject8("not_owner", "both accounts must belong to the same holder");
+    return reject9("not_owner", "both accounts must belong to the same holder");
   const fromTraits = traitsOf(ctx, from);
   const toTraits = traitsOf(ctx, to);
   if (!fromTraits || !toTraits)
-    return reject8("missing_account", "both accounts must exist");
+    return reject9("missing_account", "both accounts must exist");
   const unusable = mayUse(ctx, party, from, "from") ?? mayUse(ctx, party, to, "into");
   if (unusable)
     return unusable;
   let c = Math.round(cents2);
   if (!(c > 0))
-    return reject8("bad_amount", "the amount must be positive");
+    return reject9("bad_amount", "the amount must be positive");
   if (toTraits.liability) {
     const owed = -balance(s, to);
     if (owed <= 0)
-      return reject8("nothing_owed", `${labelOf(ctx, to)} owes nothing`);
+      return reject9("nothing_owed", `${labelOf(ctx, to)} owes nothing`);
     if (c > owed) {
       if (!opts.cap)
-        return reject8("overpay", `${labelOf(ctx, to)} owes only ${formatMoney(owed, ctx.world.currency)}`);
+        return reject9("overpay", `${labelOf(ctx, to)} owes only ${formatMoney(owed, ctx.world.currency)}`);
       c = owed;
     }
   }
@@ -21537,7 +21885,7 @@ function move(ctx, from, to, cents2, memo, opts = {}) {
   const fee = advance2 ? cashAdvanceFee(ctx, from, c) : 0;
   const debt = opts.story === true && runsDebt(ctx, from);
   if (!opts.unchecked && !debt && ctx.levelOf(party, "money") >= 2 && availableOf(ctx, from) < c + fee)
-    return reject8("declined", `${labelOf(ctx, from)} doesn't have ${formatMoney(c + fee, ctx.world.currency)}`);
+    return reject9("declined", `${labelOf(ctx, from)} doesn't have ${formatMoney(c + fee, ctx.world.currency)}`);
   const lines = [
     { account: from, amount: -c },
     { account: to, amount: c }
@@ -21553,7 +21901,7 @@ function move(ctx, from, to, cents2, memo, opts = {}) {
 function transferParty(ctx, id, side) {
   const e = own(ctx.state.entities, id);
   if (!e)
-    return reject8("missing_entity", `no ${labelOf(ctx, id)}`);
+    return reject9("missing_entity", `no ${labelOf(ctx, id)}`);
   if (isParty(ctx, id))
     return { holder: id };
   const t = traitsOf(ctx, id);
@@ -21563,7 +21911,7 @@ function transferParty(ctx, id, side) {
     if (holder)
       return { holder, account: id };
   }
-  return reject8("bad_party", `${labelOf(ctx, id)} isn't someone, or an account someone can ${side === "from" ? "pay from" : "pay into"}`);
+  return reject9("bad_party", `${labelOf(ctx, id)} isn't someone, or an account someone can ${side === "from" ? "pay from" : "pay into"}`);
 }
 function transfer(hooks, ctx, from, to, cents2, memo, method = "auto", story = false) {
   const payer = transferParty(ctx, from, "from");
@@ -21585,7 +21933,7 @@ function transfer(hooks, ctx, from, to, cents2, memo, method = "auto", story = f
     return charge(hooks, ctx, payer.holder, cents2, memo, { ...side, method: paying, kind: "transfer", ...fromCash ? { source: fromCash } : {}, ...deposit ? { deposit } : {}, overdraft: false, story });
   }
   if (!payer.account && !payee.account)
-    return reject8("bad_party", `${labelOf(ctx, from)} can't pay themselves`);
+    return reject9("bad_party", `${labelOf(ctx, from)} can't pay themselves`);
   const level = ctx.levelOf(payer.holder, "money");
   if (level === 0)
     return [];
@@ -21602,7 +21950,7 @@ function transfer(hooks, ctx, from, to, cents2, memo, method = "auto", story = f
   }
   const target = payee.account ?? (cash !== undefined && cash !== source ? cash : depositAccount(ctx, payee.holder, source) ?? undefined);
   if (!target || target === source)
-    return reject8("bad_party", `${labelOf(ctx, source)} can't pay itself`);
+    return reject9("bad_party", `${labelOf(ctx, source)} can't pay itself`);
   return move(ctx, source, target, c, memo, { cap: true, story, ...named ? { named } : {} });
 }
 function postGuard(ctx, lines, overdraw = false) {
@@ -21623,9 +21971,9 @@ function postGuard(ctx, lines, overdraw = false) {
     const name = labelOf(ctx, l.account);
     const status = statusOf(s, l.account);
     if (status !== "open")
-      return reject8("declined", `${name} is ${status.replace(/_/g, " ")}`);
+      return reject9("declined", `${name} is ${status.replace(/_/g, " ")}`);
     if (!overdraw && availableOf(ctx, l.account) + overdraftRoom(ctx, l.account) + l.amount < 0) {
-      return reject8("declined", t.liability ? `${name} has no room for ${formatMoney(-l.amount, ctx.world.currency)}` : `${name} can't cover ${formatMoney(-l.amount, ctx.world.currency)}`);
+      return reject9("declined", t.liability ? `${name} has no room for ${formatMoney(-l.amount, ctx.world.currency)}` : `${name} can't cover ${formatMoney(-l.amount, ctx.world.currency)}`);
     }
   }
   return null;
@@ -21633,9 +21981,9 @@ function postGuard(ctx, lines, overdraw = false) {
 function loseWith(ctx, item2, thief) {
   const s = ctx.state;
   if (!own(s.entities, item2))
-    return reject8("missing_entity", `no ${labelOf(ctx, item2)}`);
+    return reject9("missing_entity", `no ${labelOf(ctx, item2)}`);
   if (thief && !own(s.entities, thief))
-    return reject8("missing_entity", `no ${labelOf(ctx, thief)}`);
+    return reject9("missing_entity", `no ${labelOf(ctx, thief)}`);
   const out = [];
   for (const id of Object.keys(s.entities).sort()) {
     const cents2 = balance(s, id);
@@ -21664,7 +22012,7 @@ function setCash(ctx, holder, cents2) {
     return null;
   const target = Math.round(cents2);
   if (!Number.isSafeInteger(target) || target < 0)
-    return reject8("bad_amount", "cash can't be less than nothing");
+    return reject9("bad_amount", "cash can't be less than nothing");
   let left = target - cash.reduce((a, id) => a + balance(s, id), 0);
   if (left === 0)
     return [];
@@ -21683,10 +22031,10 @@ function setCash(ctx, holder, cents2) {
 function claimCash(ctx, holder, cents2) {
   const into2 = cashAccount(ctx, holder);
   if (!into2)
-    return reject8("no_cash", `${labelOf(ctx, holder)} carries no cash`);
+    return reject9("no_cash", `${labelOf(ctx, holder)} carries no cash`);
   const c = Math.round(cents2);
   if (!Number.isSafeInteger(c) || c <= 0)
-    return reject8("bad_amount", "cash said to be had is a whole amount above zero");
+    return reject9("bad_amount", "cash said to be had is a whole amount above zero");
   const lines = [
     { account: into2, amount: c },
     { account: CORRECTION_ACCOUNT, amount: -c }
@@ -21708,10 +22056,10 @@ function reprice(ctx, events2, cents2) {
   const paid = post?.lines.find((l) => l.amount < 0);
   const got = post ? [...post.lines].filter((l) => l.amount > 0).sort((a, b) => b.amount - a.amount)[0] : undefined;
   if (!post || !paid || !got)
-    return reject8("not_a_purchase", "there's no purchase to reprice");
+    return reject9("not_a_purchase", "there's no purchase to reprice");
   const total = Math.round(cents2);
   if (!Number.isSafeInteger(total) || total <= 0)
-    return reject8("bad_amount", "the amount must be positive");
+    return reject9("bad_amount", "the amount must be positive");
   const diff = total - post.lines.reduce((sum, l) => sum + Math.max(0, l.amount), 0);
   if (diff === 0)
     return [];
@@ -21759,12 +22107,12 @@ function paidFrom(ctx, events2, viewer) {
 function otherWay(ctx, events2) {
   const paid = storyPayment(ctx, events2);
   if (!paid)
-    return reject8("not_a_payment", "there's no payment to pay another way");
+    return reject9("not_a_payment", "there's no payment to pay another way");
   const touched = new Set(paid.post.lines.map((l) => l.account));
   const ways = [...paid.named ? idSources(ctx, paid.payer, paid.named, []) : [], ...["savings", "card", "checking", "cash"].flatMap((method) => sourcesToTry(ctx, paid.payer, paid.total, { method, till: true }, []))];
   const way = ways.find((s) => !touched.has(s.account) && covers(ctx, s, paid.total, false));
   if (!way)
-    return reject8("declined", "No other way to pay covers it.");
+    return reject9("declined", "No other way to pay covers it.");
   const memo = `${paid.post.memo}: paid from ${labelOf(ctx, way.account)} instead`;
   const lines = [
     { account: way.account, amount: -paid.total },
@@ -22250,7 +22598,7 @@ function occurrenceAmount(hooks, ctx, flow, at2, rng, deferred) {
   } else {
     const provider = own(hooks.amounts, a.provider);
     if (!provider)
-      return reject8("no_provider", `nothing works out ${flow.label}`);
+      return reject9("no_provider", `nothing works out ${flow.label}`);
     const made = provider(ctx, flow, at2, rng);
     if (made === null)
       return deferred > 0 ? { cents: deferred } : null;
@@ -22298,7 +22646,7 @@ function payFrom(hooks, ctx, flow, fromId, cents2, at2, overdraft, made) {
   const targets = splitAmount(cents2, flow.splits ?? [], flow.to);
   if ("party" in from && !("account" in from)) {
     if (targets.length !== 1 || !targets[0])
-      return reject8("bad_flow", `${flow.label} splits a payment that has no account to pay from`);
+      return reject9("bad_flow", `${flow.label} splits a payment that has no account to pay from`);
     const land = landing2(ctx, targets[0].to, cents2);
     const side = sideOf(ctx, targets[0].to);
     const payee = "party" in side && !("account" in side) ? side.party : undefined;
@@ -22308,12 +22656,12 @@ function payFrom(hooks, ctx, flow, fromId, cents2, at2, overdraft, made) {
   const source = "account" in from ? from.account : outsideAccount(from.outside);
   if ("account" in from) {
     if (statusOf(ctx.state, from.account) !== "open")
-      return reject8("declined", `${labelOf(ctx, from.account)} is ${statusOf(ctx.state, from.account).replace(/_/g, " ")}`);
+      return reject9("declined", `${labelOf(ctx, from.account)} is ${statusOf(ctx.state, from.account).replace(/_/g, " ")}`);
     if (traitsOf(ctx, from.account)?.locked)
-      return reject8("locked", `${labelOf(ctx, from.account)} can't be drawn on`);
+      return reject9("locked", `${labelOf(ctx, from.account)} can't be drawn on`);
     const room = availableOf(ctx, from.account) + (overdraft ? overdraftRoom(ctx, from.account) : 0);
     if (accountLevel(ctx, from.account) >= 2 && room < cents2)
-      return reject8("declined", `${labelOf(ctx, from.account)} can't cover ${formatMoney(cents2, ctx.world.currency)}`);
+      return reject9("declined", `${labelOf(ctx, from.account)} can't cover ${formatMoney(cents2, ctx.world.currency)}`);
   }
   const lines = [{ account: source, amount: -cents2 }];
   const extra = [];
@@ -22336,7 +22684,7 @@ function payFrom(hooks, ctx, flow, fromId, cents2, at2, overdraft, made) {
   }
   const finalLines = merged2.filter((l) => l.amount !== 0);
   if (finalLines.length < 2)
-    return reject8("bad_flow", `${flow.label} pays itself`);
+    return reject9("bad_flow", `${flow.label} pays itself`);
   const od = "account" in from && overdraft ? overdraftEvents(ctx, from.account, cents2, at2) : { before: [], after: [] };
   return { events: asUnit([...od.before, ...posting(finalLines, { memo, ...meta, counterparty, payer: sideParty(from) }), ...extra, ...od.after]), paid: cents2 };
 }
@@ -22345,14 +22693,14 @@ function providedAttempt(ctx, flow, made, at2) {
   if (lines.length === 0)
     return { events: made.extra ?? [], paid: 0 };
   if (lines.reduce((a, l) => a + l.amount, 0) !== 0)
-    return reject8("unbalanced", `${flow.label} doesn't balance`);
+    return reject9("unbalanced", `${flow.label} doesn't balance`);
   for (const l of lines) {
     if (l.amount >= 0 || !own(ctx.state.entities, l.account))
       continue;
     if (statusOf(ctx.state, l.account) !== "open")
-      return reject8("declined", `${labelOf(ctx, l.account)} is ${statusOf(ctx.state, l.account)}`);
+      return reject9("declined", `${labelOf(ctx, l.account)} is ${statusOf(ctx.state, l.account)}`);
     if (accountLevel(ctx, l.account) >= 2 && availableOf(ctx, l.account) + overdraftRoom(ctx, l.account) + l.amount < 0)
-      return reject8("declined", `${labelOf(ctx, l.account)} can't cover ${formatMoney(-l.amount, ctx.world.currency)}`);
+      return reject9("declined", `${labelOf(ctx, l.account)} can't cover ${formatMoney(-l.amount, ctx.world.currency)}`);
   }
   const memo = made.memo ?? flow.label;
   const card = lines.filter((l) => l.amount > 0 && traitsOf(ctx, l.account)?.liability).map((l) => ({ type: FINANCE_EVENTS.cardPaid, data: { account: l.account, cents: l.amount } }));
@@ -22516,7 +22864,7 @@ function sharedAttempt(hooks, ctx, flow, cents2, at2, overdraft) {
   const shares = flow.shares ?? [];
   const total = shares.reduce((a, s) => a + Math.max(0, s.pct), 0);
   if (total <= 0)
-    return reject8("bad_flow", `${flow.label} has no shares`);
+    return reject9("bad_flow", `${flow.label} has no shares`);
   const trial = new Run(ctx);
   const events2 = [];
   let left = cents2;
@@ -22528,9 +22876,9 @@ function sharedAttempt(hooks, ctx, flow, cents2, at2, overdraft) {
     const share2 = { ...flow, from: s.from ?? s.party, label: flow.label };
     const paid = payFrom(hooks, trial.ctx, share2, s.from ?? s.party, part, at2, overdraft);
     if ("code" in paid)
-      return reject8("declined", `${labelOf(ctx, s.party)}'s share: ${paid.reason}`);
+      return reject9("declined", `${labelOf(ctx, s.party)}'s share: ${paid.reason}`);
     if (trial.emit(asUnit(paid.events)).length === 0)
-      return reject8("declined", `${labelOf(ctx, s.party)}'s share can't be covered`);
+      return reject9("declined", `${labelOf(ctx, s.party)}'s share can't be covered`);
     events2.push(...paid.events);
   }
   return { events: asUnit(events2), paid: cents2 };
@@ -22825,7 +23173,7 @@ function indexView(ctx) {
 }
 
 // src/packs/economy/core/assets.ts
-function reject9(code, reason) {
+function reject10(code, reason) {
   return { code, reason };
 }
 function holdingsSlice(state) {
@@ -23204,7 +23552,7 @@ function str4(e, k) {
 var EVENTS2 = [
   {
     type: "economy.price",
-    validate: (e) => typeof e.data.price === "number" && e.data.price > 0 && safeKey(str4(e, "symbol")) ? null : reject9("bad_event", "price needs a symbol and a positive price"),
+    validate: (e) => typeof e.data.price === "number" && e.data.price > 0 && safeKey(str4(e, "symbol")) ? null : reject10("bad_event", "price needs a symbol and a positive price"),
     apply: (e, state) => {
       const economy = mutableSlice(state, "economy");
       const prices = isRecord(economy.prices) ? economy.prices : {};
@@ -23219,12 +23567,12 @@ var EVENTS2 = [
       const price = e.data.price;
       const y = e.data.yield;
       if (!safeKey(str4(e, "asset")))
-        return reject9("bad_event", "a quote names its asset");
+        return reject10("bad_event", "a quote names its asset");
       if (price === undefined && y === undefined)
-        return reject9("bad_event", "a quote carries a price or a yield");
+        return reject10("bad_event", "a quote carries a price or a yield");
       if (price !== undefined && !(typeof price === "number" && Number.isFinite(price) && price > 0))
-        return reject9("bad_event", "a price is above zero");
-      return y === undefined || typeof y === "number" && Number.isFinite(y) && y >= 0 ? null : reject9("bad_event", "a yield is a percentage");
+        return reject10("bad_event", "a price is above zero");
+      return y === undefined || typeof y === "number" && Number.isFinite(y) && y >= 0 ? null : reject10("bad_event", "a yield is a percentage");
     },
     apply: (e, state) => {
       if (typeof e.data.price === "number")
@@ -23245,11 +23593,11 @@ var EVENTS2 = [
     validate: (e) => {
       const closes = e.data.closes;
       if (!safeKey(str4(e, "asset")))
-        return reject9("bad_event", "closes name their asset");
+        return reject10("bad_event", "closes name their asset");
       if (!Array.isArray(closes) || closes.length === 0 || closes.length > CLOSES_KEPT)
-        return reject9("bad_event", `closes are one to ${CLOSES_KEPT} months`);
+        return reject10("bad_event", `closes are one to ${CLOSES_KEPT} months`);
       const each = closes.every((c) => Array.isArray(c) && c.length === 2 && typeof c[0] === "string" && /^-?\d{4,}-\d{2}$/.test(c[0]) && typeof c[1] === "number" && Number.isFinite(c[1]) && c[1] > 0);
-      return each ? null : reject9("bad_event", "a close is a month (YYYY-MM) and a price above zero");
+      return each ? null : reject10("bad_event", "a close is a month (YYYY-MM) and a price above zero");
     },
     apply: (e, state) => {
       holdingsRecord(state, "closes")[str4(e, "asset")] = e.data.closes ?? [];
@@ -23269,10 +23617,10 @@ var EVENTS2 = [
       const id = str4(e, "asset");
       const def = readAssetDef(e.data.def);
       if (!safeKey(id) || !def || def.class !== "option")
-        return reject9("bad_event", "a minted asset is an option contract");
+        return reject10("bad_event", "a minted asset is an option contract");
       if (own(configAssets(ctx.world), id))
-        return reject9("bad_event", `${id} is an authored asset`);
-      return assetOf(ctx, def.underlying ?? "") ? null : reject9("missing_asset", `no asset ${def.underlying ?? ""}`);
+        return reject10("bad_event", `${id} is an authored asset`);
+      return assetOf(ctx, def.underlying ?? "") ? null : reject10("missing_asset", `no asset ${def.underlying ?? ""}`);
     },
     apply: (e, state) => {
       const def = readAssetDef(e.data.def);
@@ -23285,13 +23633,13 @@ var EVENTS2 = [
 function setPrice(ctx, asset, price) {
   const a = assetOf(ctx, asset);
   if (!a)
-    return reject9("missing_asset", `no asset ${asset}`);
+    return reject10("missing_asset", `no asset ${asset}`);
   if (a.option)
-    return reject9("derived_price", `${a.label} is priced from ${a.option.underlying}; set its price instead`);
+    return reject10("derived_price", `${a.label} is priced from ${a.option.underlying}; set its price instead`);
   if (a.class === "property" || a.class === "business_stake")
-    return reject9("derived_price", `${a.label} is valued from what it stands for`);
+    return reject10("derived_price", `${a.label} is valued from what it stands for`);
   if (!(Number.isFinite(price) && price > 0))
-    return reject9("bad_amount", "a price is above zero");
+    return reject10("bad_amount", "a price is above zero");
   if (a.bond)
     return [{ type: "economy.quote", data: { asset, yield: impliedYield(a.bond, price, ctx.state.clock, a.pays || 2) } }];
   return [{ type: "economy.quote", data: { asset, price: mark(price) } }];
@@ -23393,11 +23741,11 @@ function heldTo(ctx, act, may, code = "not_allowed") {
     return null;
   const approval = may.limit === true ? approvalFor(ctx, act.party) : null;
   if (approval)
-    return approval.cents !== undefined && act.cents !== undefined && act.cents > approval.cents ? reject8(code, `It comes to ${moneyWords(ctx, act.cents)} now, more than the ${moneyWords(ctx, approval.cents)} approved`) : null;
+    return approval.cents !== undefined && act.cents !== undefined && act.cents > approval.cents ? reject9(code, `It comes to ${moneyWords(ctx, act.cents)} now, more than the ${moneyWords(ctx, approval.cents)} approved`) : null;
   const asked2 = may.limit === true && ctx.params?.ask === true ? optionalService(ctx, "orgs.ask_approval") : null;
   if (asked2)
     return asked2(ctx, { org: act.party, by: act.by, power: act.power, ...act.cents !== undefined ? { cents: act.cents } : {}, ...act.account !== undefined ? { account: act.account } : {}, ...act.target !== undefined ? { target: act.target } : {}, text: act.text, why: may.reason });
-  return reject8(code, may.reason);
+  return reject9(code, may.reason);
 }
 function actAs(ctx, act, run) {
   const { by, party, power } = act;
@@ -23669,12 +24017,12 @@ function disposeEvent(api) {
     type: "economy.dispose",
     validate: (e, ctx) => {
       if (!own(ctx.state.entities, str6(e, "entity")) || !own(ctx.state.entities, str6(e, "party")))
-        return reject9("missing_entity", "a disposal names what was sold and who sold it");
+        return reject10("missing_entity", "a disposal names what was sold and who sold it");
       const pct = e.data.pct;
       const proceeds = e.data.proceeds;
       if (typeof pct !== "number" || !(pct > 0 && pct <= 100))
-        return reject9("bad_event", "a disposal is of a part of a share");
-      return typeof proceeds === "number" && Number.isSafeInteger(proceeds) && proceeds >= 0 ? null : reject9("bad_event", "a disposal's proceeds are a whole amount");
+        return reject10("bad_event", "a disposal is of a part of a share");
+      return typeof proceeds === "number" && Number.isSafeInteger(proceeds) && proceeds >= 0 ? null : reject10("bad_event", "a disposal's proceeds are a whole amount");
     },
     apply: (e, state, ctx) => {
       const entity2 = str6(e, "entity");
@@ -23695,9 +24043,9 @@ var acquireEvent = {
   type: "economy.acquire",
   validate: (e, ctx) => {
     if (!own(ctx.state.entities, str6(e, "entity")) || !own(ctx.state.entities, str6(e, "party")))
-      return reject9("missing_entity", "an acquisition names what was bought and who bought it");
+      return reject10("missing_entity", "an acquisition names what was bought and who bought it");
     const cents2 = e.data.cents;
-    return typeof cents2 === "number" && Number.isSafeInteger(cents2) && cents2 >= 0 ? null : reject9("bad_event", "an acquisition costs a whole amount");
+    return typeof cents2 === "number" && Number.isSafeInteger(cents2) && cents2 >= 0 ? null : reject10("bad_event", "an acquisition costs a whole amount");
   },
   apply: (e, state) => {
     const r = basisRecord(state, str6(e, "entity"), str6(e, "party"));
@@ -23732,7 +24080,7 @@ function trustDistributions(state, trust, year) {
 var TRUST_YEARS_KEPT = 2;
 var trustDistributionEvent = {
   type: TRUST_DISTRIBUTION,
-  validate: (e, ctx) => own(ctx.state.entities, str6(e, "trust")) && Array.isArray(e.data.parts) ? null : reject9("bad_event", "a trust's distribution names the trust and each beneficiary's part"),
+  validate: (e, ctx) => own(ctx.state.entities, str6(e, "trust")) && Array.isArray(e.data.parts) ? null : reject10("bad_event", "a trust's distribution names the trust and each beneficiary's part"),
   apply: (e, state, ctx) => {
     const trust = str6(e, "trust");
     const year = String(yearAt(ctx.world, state.clock));
@@ -24206,15 +24554,15 @@ function lotsEvent(api) {
       const holding = str7(e, "holding");
       const h = own(ctx.state.entities, holding);
       if (!h || h.kind !== "holding")
-        return reject9("missing_holding", `no holding ${labelOf(ctx, holding)}`);
+        return reject10("missing_holding", `no holding ${labelOf(ctx, holding)}`);
       const qty = e.data.qty;
       const cents2 = e.data.cents;
       if (typeof qty !== "number" || !Number.isFinite(qty) || Math.abs(qty) <= QTY_EPSILON)
-        return reject9("bad_event", "lots change by a number of units");
+        return reject10("bad_event", "lots change by a number of units");
       if (typeof cents2 !== "number" || !Number.isSafeInteger(cents2) || cents2 < 0)
-        return reject9("bad_event", "lots change for a whole amount, nothing or more");
+        return reject10("bad_event", "lots change for a whole amount, nothing or more");
       const held2 = qtyOf(lotsOf(ctx, holding));
-      return qty < 0 && held2 + qty < -QTY_EPSILON ? reject9("declined", `${h.name} holds ${held2} units, not ${-qty}`) : null;
+      return qty < 0 && held2 + qty < -QTY_EPSILON ? reject10("declined", `${h.name} holds ${held2} units, not ${-qty}`) : null;
     },
     apply: (e, state, ctx) => applyLots(api, state, ctx.world, ctx.tables, str7(e, "holding"), numOf(e.data.qty), numOf(e.data.cents), strOf(e.data.label, labelOf(ctx, str7(e, "holding")))),
     describe: (e, ctx, viewer) => viewer ? "" : `${labelOf(ctx, str7(e, "holding"))}: ${numOf(e.data.qty) > 0 ? "+" : ""}${numOf(e.data.qty)} units (${strOf(e.data.kind, "trade")}) for ${formatMoney(numOf(e.data.cents), ctx.world.currency)}`,
@@ -24254,64 +24602,64 @@ function marketOf(api, asset) {
 function proceedsAccount(api, ctx, party, holding, to) {
   const account = accountOfHolding(ctx.state, holding);
   if (account && api.traitsOf(ctx, account)?.locked && to && to !== account)
-    return reject9("locked", `${labelOf(ctx, account)} keeps what its holdings pay; move it out from the account itself`);
+    return reject10("locked", `${labelOf(ctx, account)} keeps what its holdings pay; move it out from the account itself`);
   if (to && to !== account)
     return api.mayUse(ctx, party, to, "into") ?? to;
-  return to ?? account ?? api.depositAccount(ctx, party) ?? reject9("no_account", `${labelOf(ctx, party)} has no account the money could go to`);
+  return to ?? account ?? api.depositAccount(ctx, party) ?? reject10("no_account", `${labelOf(ctx, party)} has no account the money could go to`);
 }
 function trade(api, ctx, t) {
   const { party } = t;
   if (!own(ctx.state.entities, party))
-    return reject9("missing_entity", `no ${labelOf(ctx, party)}`);
+    return reject10("missing_entity", `no ${labelOf(ctx, party)}`);
   if (!api.feature(ctx, party, "investments"))
-    return reject9("level", "investments aren't followed at this money level");
+    return reject10("level", "investments aren't followed at this money level");
   const events2 = [];
   let holding = t.holding && own(ctx.state.entities, t.holding)?.kind === "holding" ? t.holding : null;
   if (t.holding && !holding)
-    return reject9("missing_holding", `no holding ${labelOf(ctx, t.holding)}`);
+    return reject10("missing_holding", `no holding ${labelOf(ctx, t.holding)}`);
   let assetId = holding ? strOf(own(ctx.state.entities, holding)?.fields.asset) : t.asset ?? "";
   let asset = assetOf(ctx, assetId);
   if (t.option && !holding) {
     if (!api.feature(ctx, party, "options"))
-      return reject9("level", "options aren't followed at this money level");
+      return reject10("level", "options aren't followed at this money level");
     if (listedCompany(ctx, assetId) !== null)
-      return reject9("bad_option", `no options are written on ${asset?.label ?? labelOf(ctx, assetId)}'s stock: its units sell only from its float`);
+      return reject10("bad_option", `no options are written on ${asset?.label ?? labelOf(ctx, assetId)}'s stock: its units sell only from its float`);
     const def = optionDef(ctx, assetId, t.option.right, t.option.strike, t.option.expiry);
     if (!def)
-      return reject9("bad_option", `there's no ${t.option.right} on ${labelOf(ctx, assetId)} at that strike and expiry`);
+      return reject10("bad_option", `there's no ${t.option.right} on ${labelOf(ctx, assetId)} at that strike and expiry`);
     assetId = optionId(assetId, t.option.right, t.option.strike, t.option.expiry);
     asset = assetFromDef(ctx, assetId, def);
     if (!assetDefOf(ctx, assetId))
       events2.push({ type: "economy.mint", data: { asset: assetId, def } });
   }
   if (!asset)
-    return reject9("missing_asset", `no asset ${assetId || "named"}`);
+    return reject10("missing_asset", `no asset ${assetId || "named"}`);
   if (asset.option && !api.feature(ctx, party, "options"))
-    return reject9("level", "options aren't followed at this money level");
+    return reject10("level", "options aren't followed at this money level");
   if (asset.class === "property" || asset.class === "business_stake")
-    return reject9("not_traded", `${asset.label} changes hands as a property or a stake, not a trade`);
+    return reject10("not_traded", `${asset.label} changes hands as a property or a stake, not a trade`);
   const listed = listedFloat(ctx, assetId);
   if (listed && party === listed.business)
-    return reject9("own_stock", `${labelOf(ctx, party)} takes its own units back by buying back shares or going off the market`);
+    return reject10("own_stock", `${labelOf(ctx, party)} takes its own units back by buying back shares or going off the market`);
   const account = holding ? accountOfHolding(ctx.state, holding) : t.account && own(ctx.state.entities, t.account) ? t.account : null;
   if (t.account && !account)
-    return reject9("missing_account", `no account ${labelOf(ctx, t.account)}`);
+    return reject10("missing_account", `no account ${labelOf(ctx, t.account)}`);
   if (account && !holding) {
     if (!api.traitsOf(ctx, account)?.investment)
-      return reject9("not_investment", `${labelOf(ctx, account)} doesn't hold investments`);
+      return reject10("not_investment", `${labelOf(ctx, account)} doesn't hold investments`);
     if (!api.accountsOf(ctx, party, "spend").includes(account))
-      return reject9("not_yours", `${labelOf(ctx, account)} isn't ${labelOf(ctx, party)}'s to trade in`);
+      return reject10("not_yours", `${labelOf(ctx, account)} isn't ${labelOf(ctx, party)}'s to trade in`);
   }
   holding ??= findHolding(ctx.state, assetId, account, party);
   if (holding && !canTrade(api, ctx, party, holding))
-    return reject9("not_yours", `${labelOf(ctx, holding)} isn't ${labelOf(ctx, party)}'s to trade`);
+    return reject10("not_yours", `${labelOf(ctx, holding)} isn't ${labelOf(ctx, party)}'s to trade`);
   if (asset.option && ctx.state.clock >= asset.option.expiry)
-    return reject9("expired", `${asset.label} has expired`);
+    return reject10("expired", `${asset.label} has expired`);
   if (asset.bond && ctx.state.clock >= asset.bond.maturity)
-    return reject9("matured", `${asset.label} has matured`);
+    return reject10("matured", `${asset.label} has matured`);
   const price = priceOf3(ctx, asset);
   if (!(price > 0))
-    return reject9("no_price", `${asset.label} has no price to trade at`);
+    return reject10("no_price", `${asset.label} has no price to trade at`);
   const whole4 = asset.option !== null || listed !== null;
   const held2 = holding ? qtyOf(lotsOf(ctx, holding)) : 0;
   const money = (c) => formatMoney(c, ctx.world.currency);
@@ -24319,15 +24667,15 @@ function trade(api, ctx, t) {
     const raw = typeof t.qty === "number" && t.qty > 0 ? t.qty : typeof t.amount === "number" && t.amount > 0 ? t.amount / price : 0;
     const qty2 = whole4 ? Math.floor(raw + 0.000000001) : roundQty(raw);
     if (!(qty2 > QTY_EPSILON))
-      return reject9("bad_amount", whole4 ? `${money(Math.round(t.amount ?? 0))} buys no whole ${listed ? "unit" : "contract"} at ${money(Math.round(price))}` : "say how much to buy");
+      return reject10("bad_amount", whole4 ? `${money(Math.round(t.amount ?? 0))} buys no whole ${listed ? "unit" : "contract"} at ${money(Math.round(price))}` : "say how much to buy");
     if (listed && qty2 > listed.left + QTY_EPSILON)
-      return reject9("declined", listed.left > 0 ? `Only ${unitsText(listed.left)} units of ${asset.symbol ?? asset.label} are for sale on the market` : `No units of ${asset.symbol ?? asset.label} are for sale on the market`);
+      return reject10("declined", listed.left > 0 ? `Only ${unitsText(listed.left)} units of ${asset.symbol ?? asset.label} are for sale on the market` : `No units of ${asset.symbol ?? asset.label} are for sale on the market`);
     const cents3 = Math.round(qty2 * price);
     if (cents3 <= 0)
-      return reject9("bad_amount", "say how much to buy");
+      return reject10("bad_amount", "say how much to buy");
     const source = t.from ?? account ?? api.depositAccount(ctx, party);
     if (!source)
-      return reject9("no_account", `${labelOf(ctx, party)} has no account to pay from`);
+      return reject10("no_account", `${labelOf(ctx, party)} has no account to pay from`);
     const unusable = source === account ? null : api.mayUse(ctx, party, source, "from");
     if (unusable)
       return unusable;
@@ -24349,15 +24697,15 @@ function trade(api, ctx, t) {
   }
   if (!holding || held2 <= QTY_EPSILON) {
     if (listed && unitsOf(api.ownersOf(ctx.state, listed.business), party) > 0)
-      return reject9("nothing_held", `${labelOf(ctx, party)} holds ${labelOf(ctx, listed.business)}'s units on its cap table, not on the market: sell them as a stake`);
-    return reject9("nothing_held", `${labelOf(ctx, party)} holds no ${asset.label}`);
+      return reject10("nothing_held", `${labelOf(ctx, party)} holds ${labelOf(ctx, listed.business)}'s units on its cap table, not on the market: sell them as a stake`);
+    return reject10("nothing_held", `${labelOf(ctx, party)} holds no ${asset.label}`);
   }
   const wanted = typeof t.qty === "number" && t.qty > 0 ? t.qty : typeof t.amount === "number" && t.amount > 0 ? t.amount / price : held2;
   const qty = whole4 ? Math.min(held2, Math.floor(wanted + 0.000000001)) : Math.min(held2, roundQty(wanted));
   if (!(qty > QTY_EPSILON))
-    return reject9("bad_amount", "say how much to sell");
+    return reject10("bad_amount", "say how much to sell");
   if (typeof t.qty === "number" && t.qty > held2 + QTY_EPSILON)
-    return reject9("declined", `${labelOf(ctx, holding)} holds ${unitsText(held2)}, not ${unitsText(t.qty)}`);
+    return reject10("declined", `${labelOf(ctx, holding)} holds ${unitsText(held2)}, not ${unitsText(t.qty)}`);
   const cents2 = Math.round(qty * price);
   const dest = proceedsAccount(api, ctx, party, holding, t.to);
   if (typeof dest !== "string")
@@ -24374,14 +24722,14 @@ function trade(api, ctx, t) {
 }
 function setRoute(api, ctx, party, holding, to) {
   if (own(ctx.state.entities, holding)?.kind !== "holding")
-    return reject9("missing_holding", `no holding ${labelOf(ctx, holding)}`);
+    return reject10("missing_holding", `no holding ${labelOf(ctx, holding)}`);
   if (!canTrade(api, ctx, party, holding))
-    return reject9("not_yours", `${labelOf(ctx, holding)} isn't ${labelOf(ctx, party)}'s to manage`);
+    return reject10("not_yours", `${labelOf(ctx, holding)} isn't ${labelOf(ctx, party)}'s to manage`);
   const route = to.trim();
   if (route !== "" && route !== "reinvest") {
     const account = accountOfHolding(ctx.state, holding);
     if (account && api.traitsOf(ctx, account)?.locked && route !== account)
-      return reject9("locked", `${labelOf(ctx, account)} keeps what its holdings pay`);
+      return reject10("locked", `${labelOf(ctx, account)} keeps what its holdings pay`);
     const unusable = route === account ? null : api.mayUse(ctx, party, route, "into");
     if (unusable)
       return unusable;
@@ -24640,13 +24988,13 @@ function incomeEvent(api) {
     type: "economy.income",
     validate: (e, ctx) => {
       if (!own(ctx.state.entities, str8(e, "source")))
-        return reject9("missing_entity", `no ${labelOf(ctx, str8(e, "source"))}`);
+        return reject10("missing_entity", `no ${labelOf(ctx, str8(e, "source"))}`);
       if (!INCOME_KINDS.includes(str8(e, "kind")))
-        return reject9("bad_event", "income is a dividend, interest or a profit share");
+        return reject10("bad_event", "income is a dividend, interest or a profit share");
       const cents2 = e.data.cents;
       if (typeof cents2 !== "number" || !Number.isSafeInteger(cents2) || cents2 <= 0)
-        return reject9("bad_event", "income is a whole amount above nothing");
-      return str8(e, "party") === "" || own(ctx.state.entities, str8(e, "party")) ? null : reject9("missing_entity", `no ${labelOf(ctx, str8(e, "party"))}`);
+        return reject10("bad_event", "income is a whole amount above nothing");
+      return str8(e, "party") === "" || own(ctx.state.entities, str8(e, "party")) ? null : reject10("missing_entity", `no ${labelOf(ctx, str8(e, "party"))}`);
     },
     apply: (e, state, ctx) => {
       const kind = str8(e, "kind");
@@ -25430,7 +25778,7 @@ function str10(e, k) {
 }
 var routeEvent = {
   type: "economy.stake_route",
-  validate: (e, ctx) => own(ctx.state.entities, str10(e, "business")) && own(ctx.state.entities, str10(e, "owner")) ? null : reject9("missing_entity", "a route names a business and its owner"),
+  validate: (e, ctx) => own(ctx.state.entities, str10(e, "business")) && own(ctx.state.entities, str10(e, "owner")) ? null : reject10("missing_entity", "a route names a business and its owner"),
   apply: (e, state) => {
     const routes = holdingsRecord(state, "routes");
     const mine = objOf(own(routes, str10(e, "business")));
@@ -25444,9 +25792,9 @@ var routeEvent = {
 };
 function setStakeRoute(api, ctx, owner, business, to) {
   if (api.partyKind(ctx, business) !== "business")
-    return reject9("not_business", `${labelOf(ctx, business)} isn't a business`);
+    return reject10("not_business", `${labelOf(ctx, business)} isn't a business`);
   if (api.shareOf(ctx.state, business, owner) <= 0)
-    return reject9("not_yours", `${labelOf(ctx, owner)} owns no part of ${labelOf(ctx, business)}`);
+    return reject10("not_yours", `${labelOf(ctx, owner)} owns no part of ${labelOf(ctx, business)}`);
   const route = to.trim();
   if (route !== "" && route !== "reinvest") {
     const unusable = api.mayUse(ctx, owner, route, "into");
@@ -25459,7 +25807,7 @@ function setStakeRoute(api, ctx, owner, business, to) {
 }
 function sellStake(api, ctx, x) {
   if (api.partyKind(ctx, x.business) !== "business")
-    return reject9("not_business", `${labelOf(ctx, x.business)} isn't a business`);
+    return reject10("not_business", `${labelOf(ctx, x.business)} isn't a business`);
   if (x.buyer === undefined && listingIn(own(ctx.state.entities, x.business)?.fields ?? {})) {
     const market = optionalService(ctx, "economy.market_sale");
     if (market)
@@ -25470,35 +25818,35 @@ function sellStake(api, ctx, x) {
   const held2 = shares[x.party] ?? 0;
   const name = labelOf(ctx, x.business);
   if (held2 <= 0)
-    return reject9("not_yours", `${labelOf(ctx, x.party)} owns no part of ${name}`);
+    return reject10("not_yours", `${labelOf(ctx, x.party)} owns no part of ${name}`);
   const counting = countsUnits(owners);
   if (x.units !== undefined && !counting)
-    return reject9("no_units", `${name} doesn't count its shares in units: sell a share of it in percent`);
+    return reject10("no_units", `${name} doesn't count its shares in units: sell a share of it in percent`);
   const heldUnits = unitsOf(owners, x.party);
   const units = counting ? x.units ?? Math.round(unitsOf(owners) * (x.share ?? 0) / 100) : undefined;
   if (units !== undefined && !(Number.isSafeInteger(units) && units > 0))
-    return reject9("bad_amount", "say how many units to sell");
+    return reject10("bad_amount", "say how many units to sell");
   if (units !== undefined && units > heldUnits)
-    return reject9("declined", `${labelOf(ctx, x.party)} holds ${heldUnits} units of ${name}, not ${units}`);
+    return reject10("declined", `${labelOf(ctx, x.party)} holds ${heldUnits} units of ${name}, not ${units}`);
   const share2 = units !== undefined ? held2 * units / heldUnits : Math.min(held2, x.share ?? 0);
   if (!(share2 > 0))
-    return reject9("bad_amount", "say what share to sell");
+    return reject10("bad_amount", "say what share to sell");
   if (units === undefined && (x.share ?? 0) > held2 + 0.000000001)
-    return reject9("declined", `${labelOf(ctx, x.party)} owns ${Math.round(held2 * 100) / 100}% of ${name}, not ${x.share}%`);
+    return reject10("declined", `${labelOf(ctx, x.party)} owns ${Math.round(held2 * 100) / 100}% of ${name}, not ${x.share}%`);
   const price = Math.round(x.price);
   if (!(price >= 0) || !Number.isSafeInteger(price))
-    return reject9("bad_amount", "a price is a whole amount");
+    return reject10("bad_amount", "a price is a whole amount");
   if (x.buyer !== undefined && (!own(ctx.state.entities, x.buyer) || x.buyer === x.party || x.buyer === x.business))
-    return reject9("missing_entity", `no buyer ${labelOf(ctx, x.buyer)}`);
+    return reject10("missing_entity", `no buyer ${labelOf(ctx, x.buyer)}`);
   const whole4 = units !== undefined ? units === heldUnits : Math.abs(share2 - held2) < 0.000000001;
   if (x.buyer === undefined && !(whole4 && held2 >= 100 - 0.000000001))
-    return reject9("needs_buyer", `selling part of ${name} needs a buyer in the world`);
+    return reject10("needs_buyer", `selling part of ${name} needs a buyer in the world`);
   const worth = orgValue(api, ctx, x.business);
   if (x.buyer === undefined && price > worth)
-    return reject9("declined", `no buyer outside the world pays more than ${formatMoney(worth, ctx.world.currency)} for ${name}`);
+    return reject10("declined", `no buyer outside the world pays more than ${formatMoney(worth, ctx.world.currency)} for ${name}`);
   const to = x.to ?? api.depositAccount(ctx, x.party);
   if (!to)
-    return reject9("no_account", `${labelOf(ctx, x.party)} has no account the money could go to`);
+    return reject10("no_account", `${labelOf(ctx, x.party)} has no account the money could go to`);
   const unusable = api.mayUse(ctx, x.party, to, "into");
   if (unusable)
     return unusable;
@@ -25695,7 +26043,7 @@ function decide(ctx, person3, app, reports) {
   const def = own(products, app.product);
   const cls = def?.class ?? (isAccountClass(app.product) ? app.product : null);
   if (!cls || !isCredit(cls))
-    return reject8("not_credit", `${app.product.replace(/_/g, " ")} isn't a kind of credit`);
+    return reject9("not_credit", `${app.product.replace(/_/g, " ")} isn't a kind of credit`);
   const score = reports ? currentScore(ctx, person3) : null;
   const entries2 = reports ? creditEntriesOf(ctx, person3) : [];
   const chargedOff = entries2.some((e) => e.kind === "charged_off" && ctx.state.clock - numOf(e.at) <= 24 * MONTH);
@@ -25805,17 +26153,17 @@ function debitCard(ctx, who, account) {
 function withdraw(ctx, who, account, raw) {
   const cents2 = Math.round(raw);
   if (!(cents2 > 0))
-    return reject8("bad_amount", "the amount must be positive");
+    return reject9("bad_amount", "the amount must be positive");
   if (!canSpend(ctx.state, account, who) || !traitsOf(ctx, account)?.pays || traitsOf(ctx, account)?.cash)
-    return reject8("not_owner", `${labelOf(ctx, who)} can't draw cash from ${labelOf(ctx, account)}`);
+    return reject9("not_owner", `${labelOf(ctx, who)} can't draw cash from ${labelOf(ctx, account)}`);
   if (statusOf(ctx.state, account) !== "open")
-    return reject8("declined", `${labelOf(ctx, account)} is ${statusOf(ctx.state, account).replace(/_/g, " ")}`);
+    return reject9("declined", `${labelOf(ctx, account)} is ${statusOf(ctx.state, account).replace(/_/g, " ")}`);
   const wallet = cashAccount(ctx, who);
   if (!wallet)
-    return reject8("no_wallet", `${labelOf(ctx, who)} has nowhere to carry cash`);
+    return reject9("no_wallet", `${labelOf(ctx, who)} has nowhere to carry cash`);
   const p = productOf(ctx, account);
   if (!p)
-    return reject8("missing_account", "no such account");
+    return reject9("missing_account", "no such account");
   const t = traitsOf(ctx, account);
   const atTop = cashNeedsAMachine(ctx, who);
   const machine = [];
@@ -25832,11 +26180,11 @@ function withdraw(ctx, who, account, raw) {
     else if (atm) {
       card = debitCard(ctx, who, account);
       if (!card)
-        return reject8("no_card", cardsOn(ctx.state, account).length > 0 ? `none of ${labelOf(ctx, who)}'s cards on ${labelOf(ctx, account)} works` : `${labelOf(ctx, account)} has no card for a cash machine`);
+        return reject9("no_card", cardsOn(ctx.state, account).length > 0 ? `none of ${labelOf(ctx, who)}'s cards on ${labelOf(ctx, account)} works` : `${labelOf(ctx, account)} has no card for a cash machine`);
       if (typeof atm.feature.limit === "number" && cents2 > atm.feature.limit)
-        return reject8("over_limit", `the machine gives at most ${money(ctx, atm.feature.limit)} at a time`);
+        return reject9("over_limit", `the machine gives at most ${money(ctx, atm.feature.limit)} at a time`);
       if (cardRoom(ctx, card, "atm") < cents2)
-        return reject8("over_limit", `${labelOf(ctx, card)} has ${money(ctx, cardRoom(ctx, card, "atm"))} left of its daily cash limit`);
+        return reject9("over_limit", `${labelOf(ctx, card)} has ${money(ctx, cardRoom(ctx, card, "atm"))} left of its daily cash limit`);
       where = `at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
       if (accountFeature(ctx, account, "fees") && atm.feature.bank !== p.institution) {
         const surcharge = Math.max(0, Math.round(numOf(atm.feature.fee)));
@@ -25852,7 +26200,7 @@ function withdraw(ctx, who, account, raw) {
         extra.push({ type: FINANCE_EVENTS.spend, data: { card, day, purchase: s.purchase, atm: s.atm + cents2 } });
       }
     } else
-      return reject8("no_atm", `there's no cash machine or ${p.institution || "bank"} branch here`);
+      return reject9("no_atm", `there's no cash machine or ${p.institution || "bank"} branch here`);
   }
   const advance2 = cashAdvanceFee(ctx, account, cents2);
   if (advance2 > 0) {
@@ -25861,7 +26209,7 @@ function withdraw(ctx, who, account, raw) {
   }
   const total = cents2 + fees;
   if (availableOf(ctx, account) < total)
-    return reject8("declined", `${labelOf(ctx, account)} can't cover ${money(ctx, total)}`);
+    return reject9("declined", `${labelOf(ctx, account)} can't cover ${money(ctx, total)}`);
   const charge2 = (lines, memo2, category) => {
     const cents3 = lines.reduce((a, l) => a + l.amount, 0);
     return cents3 > 0 ? posting([{ account, amount: -cents3 }, ...lines], { memo: memo2, kind: "fee", category }) : [];
@@ -25872,20 +26220,20 @@ function withdraw(ctx, who, account, raw) {
 function deposit(ctx, who, account, raw) {
   const cents2 = Math.round(raw);
   if (!(cents2 > 0))
-    return reject8("bad_amount", "the amount must be positive");
+    return reject9("bad_amount", "the amount must be positive");
   const unusable = mayUse(ctx, who, account, "into");
   if (unusable)
     return unusable;
   if (traitsOf(ctx, account)?.cash || traitsOf(ctx, account)?.locked)
-    return reject8("not_owner", `${labelOf(ctx, who)} can't pay cash into ${labelOf(ctx, account)}`);
+    return reject9("not_owner", `${labelOf(ctx, who)} can't pay cash into ${labelOf(ctx, account)}`);
   const wallet = cashAccount(ctx, who);
   if (!wallet || availableOf(ctx, wallet) < cents2)
-    return reject8("declined", `${labelOf(ctx, who)} doesn't have ${money(ctx, cents2)} in cash`);
+    return reject9("declined", `${labelOf(ctx, who)} doesn't have ${money(ctx, cents2)} in cash`);
   const p = productOf(ctx, account);
   if (!p)
-    return reject8("missing_account", "no such account");
+    return reject9("missing_account", "no such account");
   if (traitsOf(ctx, account)?.liability && cents2 > -balance(ctx.state, account))
-    return reject8("overpay", `${labelOf(ctx, account)} owes only ${money(ctx, Math.max(0, -balance(ctx.state, account)))}`);
+    return reject9("overpay", `${labelOf(ctx, account)} owes only ${money(ctx, Math.max(0, -balance(ctx.state, account)))}`);
   let held2 = false;
   let where = "";
   if (cashNeedsAMachine(ctx, who)) {
@@ -25897,7 +26245,7 @@ function deposit(ctx, who, account, raw) {
       where = ` at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
       held2 = accountFeature(ctx, account, "holds") && p.hold_days > 0;
     } else
-      return reject8("no_atm", `there's no ${p.institution || "bank"} branch or deposit machine here`);
+      return reject9("no_atm", `there's no ${p.institution || "bank"} branch or deposit machine here`);
   }
   const lines = [
     { account: wallet, amount: -cents2 },
@@ -25913,27 +26261,27 @@ function deposit(ctx, who, account, raw) {
 function setCardState(ctx, who, card, state) {
   const e = own(ctx.state.entities, card);
   if (e?.kind !== "card")
-    return reject8("not_card", `${labelOf(ctx, card)} isn't a payment card`);
+    return reject9("not_card", `${labelOf(ctx, card)} isn't a payment card`);
   if (strOf(e.fields.holder) !== who && !managesAccount(ctx, strOf(e.fields.account), who))
-    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
+    return reject9("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
   if (!CARD_STATES.includes(state))
-    return reject8("bad_state", `a card can't be ${state}`);
+    return reject9("bad_state", `a card can't be ${state}`);
   const now = strOf(e.fields.state, "active");
   if (now === state)
     return [];
   if (now === "lost" || now === "cancelled")
-    return reject8("bad_state", `${e.name} is ${now}; replace it`);
+    return reject9("bad_state", `${e.name} is ${now}; replace it`);
   return [{ type: "set", entity: card, field: "state", value: state }];
 }
 function replaceCard(ctx, who, card) {
   const e = own(ctx.state.entities, card);
   if (e?.kind !== "card")
-    return reject8("not_card", `${labelOf(ctx, card)} isn't a payment card`);
+    return reject9("not_card", `${labelOf(ctx, card)} isn't a payment card`);
   const holder = strOf(e.fields.holder);
   if (holder !== who && !managesAccount(ctx, strOf(e.fields.account), who))
-    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
+    return reject9("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
   if (strOf(e.fields.state) === "cancelled" && strOf(e.fields.replaced_by) !== "")
-    return reject8("bad_state", `${e.name} was already replaced`);
+    return reject9("bad_state", `${e.name} was already replaced`);
   let n = 2;
   while (own(ctx.state.entities, `${card}_r${n}`))
     n++;
@@ -25967,25 +26315,25 @@ function said2(ctx, id) {
 function autopaySourceProblem(ctx, who, account, from) {
   const t = traitsOf(ctx, from);
   if (!canSpend(ctx.state, from, who) && !managesAccount(ctx, from, who) || !t?.pays || t.liability)
-    return reject8("bad_account", `${said2(ctx, who)} can't pay from ${said2(ctx, from)}`);
+    return reject9("bad_account", `${said2(ctx, who)} can't pay from ${said2(ctx, from)}`);
   const debtors = debtorsOf(ctx.state, account);
   if (!debtors.some((d) => canSpend(ctx.state, from, d) || rightsOf(ctx.state, from, d)?.worth === true))
-    return reject8("bad_account", `${said2(ctx, account)} is paid from ${said2(ctx, debtors[0] ?? who)}'s own money, not from ${said2(ctx, from)}`);
+    return reject9("bad_account", `${said2(ctx, account)} is paid from ${said2(ctx, debtors[0] ?? who)}'s own money, not from ${said2(ctx, from)}`);
   return null;
 }
 function setAutopay(ctx, who, account, mode, from, cents2) {
   const cls = classOf2(ctx, account);
   if (!cls || !isCredit(cls))
-    return reject8("not_credit", `${labelOf(ctx, account)} isn't a card or a loan`);
+    return reject9("not_credit", `${labelOf(ctx, account)} isn't a card or a loan`);
   if (!managesAccount(ctx, account, who))
-    return reject8("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, who)}'s to change`);
+    return reject9("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, who)}'s to change`);
   if (!AUTOPAY_MODES.includes(mode))
-    return reject8("bad_mode", `autopay can't be ${mode}`);
+    return reject9("bad_mode", `autopay can't be ${mode}`);
   const source = from === "" ? null : autopaySourceProblem(ctx, who, account, from);
   if (source)
     return source;
   if (mode === "fixed" && !(cents2 > 0))
-    return reject8("bad_amount", "fixed autopay needs an amount");
+    return reject9("bad_amount", "fixed autopay needs an amount");
   const out = [{ type: "set", entity: account, field: "autopay", value: mode }];
   if (from !== "")
     out.push({ type: "set", entity: account, field: "autopay_from", value: from });
@@ -26007,9 +26355,9 @@ function flowFields(args) {
       fields[field2] = v;
   }
   if (typeof fields.flow_kind === "string" && !FLOW_KINDS.includes(fields.flow_kind))
-    return reject8("bad_flow", `a flow can't be a ${fields.flow_kind}`);
+    return reject9("bad_flow", `a flow can't be a ${fields.flow_kind}`);
   if (typeof fields.shortfall === "string" && !FLOW_SHORTFALLS.includes(fields.shortfall))
-    return reject8("bad_flow", `there's no shortfall policy ${fields.shortfall}`);
+    return reject9("bad_flow", `there's no shortfall policy ${fields.shortfall}`);
   if (typeof fields.amount_cents === "number")
     fields.amount_cents = Math.round(fields.amount_cents);
   const every = args.every;
@@ -26017,10 +26365,10 @@ function flowFields(args) {
     delete fields.every;
     fields.once = strOf(args.once);
     if (fields.once === "")
-      return reject8("bad_flow", "a one-off flow needs its date and time");
+      return reject9("bad_flow", "a one-off flow needs its date and time");
   } else if (every !== undefined && every !== null && every !== "") {
     if (!["day", "week", "month", "year"].includes(String(every)))
-      return reject8("bad_flow", `a flow can't fall every ${String(every)}`);
+      return reject9("bad_flow", `a flow can't fall every ${String(every)}`);
     fields.once = "";
     if (typeof args.weekday === "number")
       fields.weekdays = [args.weekday];
@@ -26124,18 +26472,18 @@ function paysFor(ctx, who, to, from, opts = {}) {
 }
 function flowProblem(ctx, who, from, to, fallback) {
   if (!mayPayFrom(ctx, who, from))
-    return reject8("not_owner", `${said2(ctx, who)} can't pay from ${said2(ctx, from)}`);
+    return reject9("not_owner", `${said2(ctx, who)} can't pay from ${said2(ctx, from)}`);
   if (fallback !== "" && (!mayPayFrom(ctx, who, fallback) || !fallsBackOn(ctx, from, fallback))) {
-    return reject8("not_owner", own(ctx.state.entities, fallback) ? `${said2(ctx, who)} can't fall back on ${said2(ctx, fallback)}` : `a fallback is an account of ${said2(ctx, who)}'s, not "${fallback}"`);
+    return reject9("not_owner", own(ctx.state.entities, fallback) ? `${said2(ctx, who)} can't fall back on ${said2(ctx, fallback)}` : `a fallback is an account of ${said2(ctx, who)}'s, not "${fallback}"`);
   }
   const managed = [from, fallback].filter((side) => side !== "" && side !== who && (isParty(ctx, side) || !canSpend(ctx.state, side, who)));
   const paying = managed.find((side) => paysFor(ctx, who, to, side));
   if (paying === undefined)
     return null;
   if (isParty(ctx, paying))
-    return reject8("not_owner", `${said2(ctx, paying)} pays for itself, not for ${said2(ctx, who)}`);
+    return reject9("not_owner", `${said2(ctx, paying)} pays for itself, not for ${said2(ctx, who)}`);
   const holder = holdersOf3(ctx.state, paying).find((h) => managesParty(ctx.state, h, who)) ?? paying;
-  return reject8("not_owner", `${said2(ctx, paying)} pays for ${said2(ctx, holder)}, not for ${said2(ctx, who)}`);
+  return reject9("not_owner", `${said2(ctx, paying)} pays for ${said2(ctx, holder)}, not for ${said2(ctx, who)}`);
 }
 function createFlow(ctx, who, args) {
   const made = flowFields(args);
@@ -26145,12 +26493,12 @@ function createFlow(ctx, who, args) {
   const from = strOf(f.from);
   const to = strOf(f.to);
   if (from === "" || to === "" || typeof f.amount_cents !== "number" || !(f.amount_cents > 0))
-    return reject8("bad_flow", "a flow needs who pays, who is paid and an amount");
+    return reject9("bad_flow", "a flow needs who pays, who is paid and an amount");
   const problem = flowProblem(ctx, who, from, to, strOf(f.fallback));
   if (problem)
     return problem;
   if (f.once === undefined && f.every === undefined)
-    return reject8("bad_flow", "a flow needs a schedule");
+    return reject9("bad_flow", "a flow needs a schedule");
   const label2 = made.label ?? `Payment to ${labelOf(ctx, to)}`;
   const toMine = own(ctx.state.entities, to)?.kind === "account" && rightsOf(ctx.state, to, who) !== null;
   const fields = { flow_kind: toMine ? "transfer" : "bill", shortfall: "skip", status: "active", ...f };
@@ -26163,7 +26511,7 @@ function renameAndClear(current, id, name, clear) {
   const names = typeof clear === "string" ? clear.split(",").map((s) => s.trim()).filter((s) => s !== "") : [];
   const bad = names.find((n) => !CLEARABLE.includes(n));
   if (bad !== undefined)
-    return reject8("bad_flow", `a standing payment's ${bad.replace(/_/g, " ")} can't be cleared`);
+    return reject9("bad_flow", `a standing payment's ${bad.replace(/_/g, " ")} can't be cleared`);
   const out = [...new Set(names)].map((n) => ({ type: "set", entity: id, field: FLOW_PARAM_FIELDS[n] ?? n, value: null }));
   const label2 = name?.trim().slice(0, 80) ?? "";
   if (label2 !== "" && label2 !== current)
@@ -26173,9 +26521,9 @@ function renameAndClear(current, id, name, clear) {
 function updateFlow(ctx, who, flow, args) {
   const e = own(ctx.state.entities, flow);
   if (e?.kind !== "flow")
-    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
+    return reject9("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
   if (!mayPayFrom(ctx, who, strOf(e.fields.from)))
-    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
+    return reject9("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
   const made = flowFields(args);
   if ("code" in made)
     return made;
@@ -26184,7 +26532,7 @@ function updateFlow(ctx, who, flow, args) {
     return more;
   const both = more.find((x) => x.type === "set" && (x.field in made.fields));
   if (both && both.type === "set")
-    return reject8("bad_flow", `a standing payment's ${both.field.replace(/_/g, " ")} can't be both changed and cleared`);
+    return reject9("bad_flow", `a standing payment's ${both.field.replace(/_/g, " ")} can't be both changed and cleared`);
   const cleared = new Set(more.flatMap((x) => x.type === "set" ? [x.field] : []));
   const after = (field2) => cleared.has(field2) ? "" : strOf(made.fields[field2] ?? e.fields[field2]);
   const problem = flowProblem(ctx, who, after("from"), after("to"), after("fallback"));
@@ -26195,15 +26543,15 @@ function updateFlow(ctx, who, flow, args) {
 function editFlow(ctx, flow, name, clear) {
   const e = own(ctx.state.entities, flow);
   if (e?.kind !== "flow")
-    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
+    return reject9("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
   return renameAndClear(e.name, flow, name, clear);
 }
 function setFlowStatus(ctx, who, flow, status) {
   const e = own(ctx.state.entities, flow);
   if (e?.kind !== "flow")
-    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
+    return reject9("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
   if (!mayPayFrom(ctx, who, strOf(e.fields.from)))
-    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
+    return reject9("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
   const out = [{ type: "set", entity: flow, field: "status", value: status }];
   if (status === "ended")
     out.push({ type: "set", entity: flow, field: GONE_FIELD, value: true });
@@ -26220,10 +26568,10 @@ function openAccount(ctx, spec) {
   const products = worldProducts(ctx.world);
   const cls = own(products, spec.product)?.class ?? (isAccountClass(spec.product) ? spec.product : null);
   if (!cls)
-    return reject8("bad_product", `there's no product ${spec.product.replace(/_/g, " ")}`);
+    return reject9("bad_product", `there's no product ${spec.product.replace(/_/g, " ")}`);
   const holder = spec.owners[0]?.party;
   if (!holder || !own(ctx.state.entities, holder))
-    return reject8("missing_entity", "an account needs an owner");
+    return reject9("missing_entity", "an account needs an owner");
   const id = newAccountId(ctx, spec);
   const cal = calendarOf(ctx.world);
   const d = dateAt(cal, ctx.state.clock);
@@ -26268,7 +26616,7 @@ function openAccount(ctx, spec) {
 }
 function creditApplication(ctx, who, app) {
   if (!isParty(ctx, who))
-    return reject8("missing_entity", `no ${labelOf(ctx, who)}`);
+    return reject9("missing_entity", `no ${labelOf(ctx, who)}`);
   const reports = featureFor(ctx, who, "credit");
   const decision = decide(ctx, who, app, reports);
   if ("code" in decision)
@@ -26297,43 +26645,43 @@ function applyForCredit(ctx, who, product, cents2, term, securedBy) {
 }
 function setPayPrefs(ctx, who, tiers) {
   if (!isParty(ctx, who))
-    return reject8("missing_entity", `no ${labelOf(ctx, who)}`);
+    return reject9("missing_entity", `no ${labelOf(ctx, who)}`);
   let raw = tiers;
   if (typeof tiers === "string") {
     try {
       raw = JSON.parse(tiers);
     } catch {
-      return reject8("bad_tiers", "payment preferences are a list of ways to pay");
+      return reject9("bad_tiers", "payment preferences are a list of ways to pay");
     }
   }
   const list = Array.isArray(raw) ? raw.map((t) => objOf(t)).filter((t) => typeof t.use === "string" && t.use !== "") : null;
   if (!list)
-    return reject8("bad_tiers", "payment preferences are a list of ways to pay");
+    return reject9("bad_tiers", "payment preferences are a list of ways to pay");
   return [{ type: "set", entity: who, field: "pay_prefs", value: list }];
 }
 function closeAccount(ctx, account) {
   const e = own(ctx.state.entities, account);
   if (e?.kind !== "account")
-    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
+    return reject9("not_account", `${labelOf(ctx, account)} isn't an account`);
   if (balance(ctx.state, account) !== 0)
-    return reject8("not_empty", `${labelOf(ctx, account)} still has ${money(ctx, balance(ctx.state, account))} on it`);
+    return reject9("not_empty", `${labelOf(ctx, account)} still has ${money(ctx, balance(ctx.state, account))} on it`);
   const opening = Math.round(numOf(e.fields.opening));
   if (opening !== 0 && !isOpened(ctx.state, account, openerOf(ctx.state, account)))
-    return reject8("not_empty", `${labelOf(ctx, account)} opens with ${money(ctx, opening)} still to post`);
+    return reject9("not_empty", `${labelOf(ctx, account)} opens with ${money(ctx, opening)} still to post`);
   return [{ type: FINANCE_EVENTS.status, data: { account, status: "closed" } }, ...cardsOn(ctx.state, account).map((c) => ({ type: "set", entity: c, field: "state", value: "cancelled" }))];
 }
 function setStatus(ctx, account, status) {
   if (own(ctx.state.entities, account)?.kind !== "account")
-    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
+    return reject9("not_account", `${labelOf(ctx, account)} isn't an account`);
   if (!ACCOUNT_STATUSES.includes(status))
-    return reject8("bad_status", `an account can't be ${status}`);
+    return reject9("bad_status", `an account can't be ${status}`);
   if (statusOf(ctx.state, account) === status)
     return [];
   return status === "closed" ? closeAccount(ctx, account) : [{ type: FINANCE_EVENTS.status, data: { account, status } }];
 }
 function releaseHold(ctx, account, hold) {
   if (!own(ctx.state.entities, account))
-    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
+    return reject9("not_account", `${labelOf(ctx, account)} isn't an account`);
   return [{ type: FINANCE_EVENTS.hold, data: { id: hold, account, release: true } }];
 }
 
@@ -26517,33 +26865,33 @@ function lendNow(api, ctx, a) {
   const borrower = strOf(a.to);
   const cents2 = Math.round(numOf(a.cents));
   if (!own(ctx.state.entities, lender) || api.partyKind(ctx, lender) === null)
-    return reject8("missing_entity", "there's no one to lend it");
+    return reject9("missing_entity", "there's no one to lend it");
   if (!own(ctx.state.entities, borrower) || api.partyKind(ctx, borrower) === null)
-    return reject8("missing_entity", "there's no one to borrow it");
+    return reject9("missing_entity", "there's no one to borrow it");
   if (borrower === lender)
-    return reject8("bad_party", `${labelOf(ctx, lender)} can't lend to itself`);
+    return reject9("bad_party", `${labelOf(ctx, lender)} can't lend to itself`);
   if (!(cents2 > 0))
-    return reject8("bad_amount", "a loan needs an amount");
+    return reject9("bad_amount", "a loan needs an amount");
   for (const party of [lender, borrower])
     if (ctx.levelOf(party, "money") < 3)
-      return reject8("level", `${labelOf(ctx, party)}'s money isn't followed closely enough for loans between parties (Money 3)`);
+      return reject9("level", `${labelOf(ctx, party)}'s money isn't followed closely enough for loans between parties (Money 3)`);
   const apr = typeof a.apr === "number" && a.apr >= 0 ? a.apr : 0;
   const months = typeof a.months === "number" && a.months >= 1 ? Math.round(a.months) : 12;
   const named = strOf(a.from);
   const sources = lendingSources(api, ctx, lender);
   if (named !== "" && !sources.includes(named))
-    return reject8("bad_account", `${labelOf(ctx, lender)} can't lend from ${labelOf(ctx, named)}`);
+    return reject9("bad_account", `${labelOf(ctx, lender)} can't lend from ${labelOf(ctx, named)}`);
   const source = named !== "" ? named : sources.find((s) => availableOf(ctx, s) >= cents2);
   if (!source)
-    return reject8("insufficient_funds", `${labelOf(ctx, lender)} has no account with ${moneyWords(ctx, cents2)} to lend`);
+    return reject9("insufficient_funds", `${labelOf(ctx, lender)} has no account with ${moneyWords(ctx, cents2)} to lend`);
   if (availableOf(ctx, source) < cents2)
-    return reject8("insufficient_funds", `${labelOf(ctx, source)} has less than ${moneyWords(ctx, cents2)}`);
+    return reject9("insufficient_funds", `${labelOf(ctx, source)} has less than ${moneyWords(ctx, cents2)}`);
   const into2 = strOf(a.into) || api.depositAccount(ctx, borrower) || "";
   if (into2 === "" || api.mayUse(ctx, borrower, into2, "into") !== null || api.traitsOf(ctx, into2)?.pays !== true || api.traitsOf(ctx, into2)?.liability)
-    return reject8("no_account", `${labelOf(ctx, borrower)} has no bank account to take the loan into`);
+    return reject9("no_account", `${labelOf(ctx, borrower)} has no bank account to take the loan into`);
   const borrows = by !== "" && by !== borrower && own(ctx.state.entities, by) !== undefined;
   if (borrows && orgTypeOf(ctx, borrower) === null)
-    return reject8("not_allowed", `${labelOf(ctx, borrower)} has to agree to borrow it: ask them`);
+    return reject9("not_allowed", `${labelOf(ctx, borrower)} has to agree to borrow it: ask them`);
   const d = dateAt(calendarOf(ctx.world), ctx.state.clock);
   const opened = `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
   const dueDay = typeof a.due_day === "number" && a.due_day >= 1 ? Math.min(28, Math.round(a.due_day)) : Math.min(28, d.day);
@@ -27486,14 +27834,14 @@ function listed(ctx, business) {
 function standingProblem(ctx, business) {
   const name = labelOf(ctx, business);
   if (!isBusiness(ctx, business) || isGone(ctx.state, business))
-    return reject9("not_business", `${name} isn't a company`);
+    return reject10("not_business", `${name} isn't a company`);
   const dissolved = dissolvedOn(ctx.state, business);
   if (dissolved !== null)
-    return reject9("dissolved", `${name} was dissolved on ${dayWords(ctx.world, dissolved)}`);
+    return reject10("dissolved", `${name} was dissolved on ${dayWords(ctx.world, dissolved)}`);
   if (listed(ctx, business))
-    return reject9("listed", `${name} is listed on the market: delist it first`);
+    return reject10("listed", `${name} is listed on the market: delist it first`);
   if (ctx.levelOf(business, "money") < 3)
-    return reject9("level", `${name} is wound up or merged from Money 3`);
+    return reject10("level", `${name} is wound up or merged from Money 3`);
   return null;
 }
 function applied(w, events2) {
@@ -27594,15 +27942,15 @@ function deciderFor(ctx, by, business, power, doing) {
       continue;
     const holds2 = mayAct(ctx, party, business, power);
     if (!holds2.ok) {
-      first ??= reject9("not_allowed", holds2.reason);
+      first ??= reject10("not_allowed", holds2.reason);
       continue;
     }
     const why2 = decisionRefusal(ctx, business, party, doing);
     if (why2 === null)
       return { party };
-    first ??= reject9("votes", why2);
+    first ??= reject10("votes", why2);
   }
-  return first ?? reject9("not_allowed", `${labelOf(ctx, business)}: you may not ${POWER_WORDS[power]}`);
+  return first ?? reject10("not_allowed", `${labelOf(ctx, business)}: you may not ${POWER_WORDS[power]}`);
 }
 function openJobs(ctx, business) {
   return allJobs(ctx).filter((j) => j.party === business && j.status !== "ended");
@@ -27761,7 +28109,7 @@ function finish2(api, w, business, plan2, said3) {
   const bizName = labelOf(w.ctx, business);
   const holders = holdersOf4(api, w.ctx, business);
   if (holders.length === 0)
-    return reject9("no_owners", `${bizName} has no owners to pay out to`);
+    return reject10("no_owners", `${bizName} has no owners to pay out to`);
   const money3 = (c) => api.money(w.ctx, c);
   const run = (events2) => isRejection4(events2) ? events2 : applied(w, events2);
   const { properties, stakes } = heldAssets(api, w.ctx, business, plan2.property === "sell");
@@ -27778,14 +28126,14 @@ function finish2(api, w, business, plan2, said3) {
     if (isRejection4(sold))
       p.sold = false;
     else if (applied(w, sold))
-      return reject9("declined", `${labelOf(w.ctx, p.id)} couldn't be sold`);
+      return reject10("declined", `${labelOf(w.ctx, p.id)} couldn't be sold`);
   }
   for (const s of stakes.filter((x) => x.sold)) {
     const sold = sellStake(api, w.ctx, { party: business, business: s.id, share: 100, price: orgValue(api, w.ctx, s.id) });
     if (isRejection4(sold))
       s.sold = false;
     else if (applied(w, sold))
-      return reject9("declined", `${bizName}'s stake in ${labelOf(w.ctx, s.id)} couldn't be sold`);
+      return reject10("declined", `${bizName}'s stake in ${labelOf(w.ctx, s.id)} couldn't be sold`);
   }
   const gather = gatheringAccount(api, w.ctx, business);
   if (gather !== null) {
@@ -27802,7 +28150,7 @@ function finish2(api, w, business, plan2, said3) {
   const owing = debtsOf(api, w.ctx, business, gather, false, null).reduce((a, d) => a + d.cents, 0);
   const cash = gather === null ? 0 : api.balance(w.ctx.state, gather);
   if (owing > cash)
-    return reject9("insolvent", `${bizName} owes ${money3(owing)} and holds ${money3(Math.max(0, cash))}: it is ${money3(owing - Math.max(0, cash))} short. Sell something first, or put money in.`);
+    return reject10("insolvent", `${bizName} owes ${money3(owing)} and holds ${money3(Math.max(0, cash))}: it is ${money3(owing - Math.max(0, cash))} short. Sell something first, or put money in.`);
   const pay = (lines, memo, category, extra = []) => {
     const posted = api.post(w.ctx, [...lines], { memo, kind: "payment", category });
     return isRejection4(posted) ? posted : applied(w, [...posted, ...extra]);
@@ -27921,7 +28269,7 @@ function finish2(api, w, business, plan2, said3) {
     if (part.cents > 0 && gather !== null) {
       const into2 = api.depositAccount(w.ctx, part.party);
       if (!into2)
-        return reject9("no_account", `${labelOf(w.ctx, part.party)} has no account their share of ${bizName} could go to`);
+        return reject10("no_account", `${labelOf(w.ctx, part.party)} has no account their share of ${bizName} could go to`);
       const failed2 = run(api.pay(w.ctx, { from: gather, to: part.party, cents: part.cents, memo: `${bizName} wound up: a share of what was left`, deposit: into2, kind: "purchase", category: "investment" }));
       if (failed2)
         return failed2;
@@ -27960,7 +28308,7 @@ function windUp(api, ctx, business, plan2) {
     return standing;
   const winding = windingUpSince(ctx.state, business) !== null;
   if (plan2.stage === "begin" && winding)
-    return reject9("winding_up", `${labelOf(ctx, business)} is winding up already`);
+    return reject10("winding_up", `${labelOf(ctx, business)} is winding up already`);
   const w = new Working(ctx.registry, ctx.world, ctx.state);
   const said3 = [];
   const failed = (winding ? null : begin(api, w, business, said3)) ?? (plan2.stage === "finish" ? finish2(api, w, business, plan2, said3) : null);
@@ -27996,31 +28344,31 @@ function merge2(api, ctx, business, into2, terms) {
   const name = labelOf(ctx, business);
   const intoName = labelOf(ctx, into2);
   if (business === into2)
-    return reject9("same", `${name} can't merge with itself`);
+    return reject10("same", `${name} can't merge with itself`);
   const standing = standingProblem(ctx, business) ?? standingProblem(ctx, into2);
   if (standing)
     return standing;
   for (const id of [business, into2])
     if (windingUpSince(ctx.state, id) !== null)
-      return reject9("winding_up", `${labelOf(ctx, id)} is winding up`);
+      return reject10("winding_up", `${labelOf(ctx, id)} is winding up`);
   const b = unitValue(api, ctx, business);
   const a = unitValue(api, ctx, into2);
   const holders = holdersOf4(api, ctx, business).filter((h) => h.party !== into2);
   const cash = Math.max(0, Math.round(terms.cash ?? 0));
   const ratio = terms.ratio ?? (cash > 0 || holders.length === 0 ? 0 : a.perUnit > 0 ? b.perUnit / a.perUnit : Number.NaN);
   if (!Number.isFinite(ratio) || ratio < 0)
-    return reject9("bad_ratio", `${intoName} is worth nothing a unit: say how many of its units each of ${name}'s is worth, or a price`);
+    return reject10("bad_ratio", `${intoName} is worth nothing a unit: say how many of its units each of ${name}'s is worth, or a price`);
   const units = new Map(holders.map((h) => [h.party, Math.round(unitsOf(b.owners, h.party) * ratio)]));
   const paid = new Map(splitByShare(cash, holders).map((p) => [p.party, p.cents]));
   if (holders.length > 0 && cash === 0 && [...units.values()].every((u) => u === 0))
-    return reject9("bad_ratio", `${name}'s holders would get nothing: say a ratio or a price`);
+    return reject10("bad_ratio", `${name}'s holders would get nothing: say a ratio or a price`);
   const w = new Working(ctx.registry, ctx.world, ctx.state);
   const said3 = [];
   const money3 = (c) => api.money(ctx, c);
   if (cash > 0) {
     const from = terms.from ?? operatingAccount(api, ctx, into2);
     if (!from)
-      return reject9("no_account", `${intoName} has no account to pay from`);
+      return reject10("no_account", `${intoName} has no account to pay from`);
     const unusable = api.mayUse(ctx, into2, from, "from");
     if (unusable)
       return unusable;
@@ -28030,7 +28378,7 @@ function merge2(api, ctx, business, into2, terms) {
         continue;
       const deposit2 = api.depositAccount(w.ctx, h.party);
       if (!deposit2)
-        return reject9("no_account", `${labelOf(ctx, h.party)} has no account the money could go to`);
+        return reject10("no_account", `${labelOf(ctx, h.party)} has no account the money could go to`);
       const posted = api.pay(w.ctx, { from, to: h.party, cents: cents2, memo: `For a share of ${name}`, deposit: deposit2, kind: "purchase", category: "investment" });
       const failed2 = isRejection4(posted) ? posted : applied(w, posted);
       if (failed2)
@@ -28089,7 +28437,7 @@ function merge2(api, ctx, business, into2, terms) {
       continue;
     const posted = api.post(w.ctx, p.lines, { memo: p.memo ?? what, kind: "payment", category: p.category ?? what });
     if (isRejection4(posted))
-      return reject9("insolvent", `${name} can't pay what it owes ${what === "sales_tax" ? "in sales tax" : "its suppliers"} (${money3(p.cents)})`);
+      return reject10("insolvent", `${name} can't pay what it owes ${what === "sales_tax" ? "in sales tax" : "its suppliers"} (${money3(p.cents)})`);
     const failed2 = applied(w, [...posted, ...p.extra ?? []]);
     if (failed2)
       return failed2;
@@ -28098,7 +28446,7 @@ function merge2(api, ctx, business, into2, terms) {
   if (due && due.cents > 0) {
     const posted = api.post(w.ctx, due.lines, { memo: "Unemployment tax", kind: "payment", category: "payroll" });
     if (isRejection4(posted))
-      return reject9("insolvent", `${name} can't pay its unemployment tax (${money3(due.cents)})`);
+      return reject10("insolvent", `${name} can't pay its unemployment tax (${money3(due.cents)})`);
     const failed2 = applied(w, [...posted, ...due.events]);
     if (failed2)
       return failed2;
@@ -28108,7 +28456,7 @@ function merge2(api, ctx, business, into2, terms) {
     const from = gatheringAccount(api, w.ctx, business);
     const posted = from ? api.post(w.ctx, [{ account: from, amount: -tax.cents }, { account: api.outside("tax:federal"), amount: tax.cents }], { memo: "Corporate income tax", kind: "payment", category: "business_tax" }) : null;
     if (!posted || isRejection4(posted))
-      return reject9("insolvent", `${name} can't pay its income tax (${money3(tax.cents)})`);
+      return reject10("insolvent", `${name} can't pay its income tax (${money3(tax.cents)})`);
     const failed2 = applied(w, [...posted, ...tax.extra]);
     if (failed2)
       return failed2;
@@ -28291,15 +28639,15 @@ function decision(ctx, by, party, business, power, doing, what) {
   if (party !== by) {
     const may = mayAct(ctx, by, party, power);
     if (!may.ok)
-      return reject9("not_allowed", may.reason);
+      return reject10("not_allowed", may.reason);
   }
   const holds2 = mayAct(ctx, party, business, power);
   if (!holds2.ok)
-    return reject9("not_allowed", holds2.reason);
+    return reject10("not_allowed", holds2.reason);
   const why2 = decisionRefusal(ctx, business, party, doing);
   if (why2 === null)
     return null;
-  return optionalService(ctx, "orgs.put_to_vote")?.(ctx, { org: business, by, party, text: what ?? `${doing} ${labelOf(ctx, business)}`, why: why2 }) ?? reject9("votes", why2);
+  return optionalService(ctx, "orgs.put_to_vote")?.(ctx, { org: business, by, party, text: what ?? `${doing} ${labelOf(ctx, business)}`, why: why2 }) ?? reject10("votes", why2);
 }
 function decided(ctx, business, by, party, text3, names) {
   const acted = optionalService(ctx, "orgs.acted");
@@ -28319,19 +28667,19 @@ function counted(api, ctx, business) {
 function priced(api, ctx, business, owners, units, given) {
   if (typeof given === "number" && Number.isFinite(given)) {
     const each = Math.round(given);
-    return each >= 0 && Number.isSafeInteger(each * units) ? { each, cents: each * units } : reject9("bad_amount", "a price is a whole amount");
+    return each >= 0 && Number.isSafeInteger(each * units) ? { each, cents: each * units } : reject10("bad_amount", "a price is a whole amount");
   }
   const market = marketValueOf(ctx, business);
   if (market)
     return { each: Math.round(market.price), cents: Math.round(market.price * units) };
   const total = unitsOf(owners);
   if (total <= 0)
-    return reject9("bad_amount", `${labelOf(ctx, business)} has no units to value one by: say the price a unit`);
+    return reject10("bad_amount", `${labelOf(ctx, business)} has no units to value one by: say the price a unit`);
   const value = orgValue(api, ctx, business);
   return { each: Math.round(value / total), cents: Math.round(value * units / total) };
 }
 function wholeUnits(v) {
-  return typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : reject9("bad_amount", "say a whole number of units");
+  return typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : reject10("bad_amount", "say a whole number of units");
 }
 function isRejection5(v) {
   return typeof v === "object" && v !== null && "code" in v && "reason" in v;
@@ -28340,12 +28688,12 @@ function issueShares(api, ctx, a) {
   const business = strOf(a.business);
   const name = labelOf(ctx, business);
   if (!isBusiness(ctx, business))
-    return reject9("not_business", `${name} isn't a company`);
+    return reject10("not_business", `${name} isn't a company`);
   const by = strOf(a.by);
   const party = strOf(a.party) || by;
   const to = strOf(a.to);
   if (to === "" || to === business || api.partyKind(ctx, to) === null)
-    return reject9("missing_entity", `no one ${labelOf(ctx, to)} to issue shares to`);
+    return reject10("missing_entity", `no one ${labelOf(ctx, to)} to issue shares to`);
   const units = wholeUnits(a.units);
   if (isRejection5(units))
     return units;
@@ -28356,7 +28704,7 @@ function issueShares(api, ctx, a) {
   const classes = classesIn(fields);
   const named = strOf(a.class);
   if (named !== "" && !classes.some((c) => c.id === named))
-    return reject9("bad_class", `${name} has no class ${named}: its classes are ${classes.map((c) => c.label).join(", ")}`);
+    return reject10("bad_class", `${name} has no class ${named}: its classes are ${classes.map((c) => c.label).join(", ")}`);
   const owners = counted(api, ctx, business);
   const price = priced(api, ctx, business, owners, units, a.price);
   if (isRejection5(price))
@@ -28373,7 +28721,7 @@ function issueShares(api, ctx, a) {
   if (price.cents > 0) {
     const deposit2 = operatingAccount(api, ctx, business);
     if (!deposit2)
-      return reject9("no_account", `${name} has no account to take the money`);
+      return reject10("no_account", `${name} has no account to take the money`);
     const from = strOf(a.from);
     if (from !== "") {
       const unusable = api.mayUse(ctx, to, from, "from");
@@ -28396,7 +28744,7 @@ function buyBack(api, ctx, a) {
   const business = strOf(a.business);
   const name = labelOf(ctx, business);
   if (!isBusiness(ctx, business))
-    return reject9("not_business", `${name} isn't a company`);
+    return reject10("not_business", `${name} isn't a company`);
   const by = strOf(a.by);
   const party = strOf(a.party) || by;
   const holder = strOf(a.from);
@@ -28409,9 +28757,9 @@ function buyBack(api, ctx, a) {
   const owners = counted(api, ctx, business);
   const held2 = unitsOf(owners, holder);
   if (held2 <= 0)
-    return reject9("not_holder", `${labelOf(ctx, holder)} holds no units of ${name}`);
+    return reject10("not_holder", `${labelOf(ctx, holder)} holds no units of ${name}`);
   if (units > held2)
-    return reject9("declined", `${labelOf(ctx, holder)} holds ${held2} units of ${name}, not ${units}`);
+    return reject10("declined", `${labelOf(ctx, holder)} holds ${held2} units of ${name}, not ${units}`);
   const price = priced(api, ctx, business, owners, units, a.price);
   if (isRejection5(price))
     return price;
@@ -28420,10 +28768,10 @@ function buyBack(api, ctx, a) {
   if (price.cents > 0) {
     const source = operatingAccount(api, ctx, business);
     if (!source)
-      return reject9("no_account", `${name} has no account to pay from`);
+      return reject10("no_account", `${name} has no account to pay from`);
     const into2 = strOf(a.to) || api.depositAccount(ctx, holder);
     if (!into2)
-      return reject9("no_account", `${labelOf(ctx, holder)} has no account the money could go to`);
+      return reject10("no_account", `${labelOf(ctx, holder)} has no account the money could go to`);
     const unusable = api.mayUse(ctx, holder, into2, "into");
     if (unusable)
       return unusable;
@@ -28451,7 +28799,7 @@ function setClasses(api, ctx, a) {
   const business = strOf(a.business);
   const name = labelOf(ctx, business);
   if (!isBusiness(ctx, business))
-    return reject9("not_business", `${name} isn't a company`);
+    return reject10("not_business", `${name} isn't a company`);
   const by = strOf(a.by);
   const party = strOf(a.party) || by;
   const denied = decision(ctx, by, party, business, "shares.manage", "Changing the share classes of", `${a.remove === true ? "Remove" : "Set"} the share class ${strOf(a.label).trim() || strOf(a.class)} of ${name}${a.remove !== true && typeof a.votes === "number" ? ` (${a.votes} votes a unit)` : ""}${strOf(a.holder) !== "" ? `, with ${labelOf(ctx, strOf(a.holder))}'s units in it` : ""}`);
@@ -28462,12 +28810,12 @@ function setClasses(api, ctx, a) {
   const label2 = strOf(a.label).trim();
   const id = strOf(a.class) || positionIdOf(label2);
   if (id === "")
-    return reject9("bad_class", "a class needs a name");
+    return reject10("bad_class", "a class needs a name");
   const was = before.find((c) => c.id === id);
   let classes;
   if (a.remove === true) {
     if (!was)
-      return reject9("bad_class", `${name} has no class ${id}`);
+      return reject10("bad_class", `${name} has no class ${id}`);
     const rest = before.filter((c) => c.id !== id);
     classes = rest.length > 0 ? rest : [COMMON_CLASS];
   } else {
@@ -28479,7 +28827,7 @@ function setClasses(api, ctx, a) {
   const first = classes[0] ?? COMMON_CLASS;
   const owners = counted(api, ctx, business);
   if (holder !== "" && unitsOf(owners, holder) <= 0)
-    return reject9("not_holder", `${labelOf(ctx, holder)} holds no units of ${name}`);
+    return reject10("not_holder", `${labelOf(ctx, holder)} holds no units of ${name}`);
   const moved = [];
   for (const o of owners) {
     const target = ROLE_RIGHTS[o.role].worth && o.party === holder && a.remove !== true ? id : classes.some((c) => c.id === rowClass(o, before).id) ? rowClass(o, before).id : first.id;
@@ -30163,12 +30511,12 @@ function paycheckFor(ctx, api, found, at2, from) {
 function str13(e, k) {
   return typeof e.data[k] === "string" ? e.data[k] : "";
 }
-function reject10(code, reason) {
+function reject11(code, reason) {
   return { code, reason };
 }
 var PAYSLIP = {
   type: "economy.payslip",
-  validate: (e, ctx) => own(ctx.state.entities, str13(e, "job")) && own(ctx.state.entities, str13(e, "worker")) && typeof e.data.through === "number" ? null : reject10("bad_event", "a payslip needs its job, its worker and the time it pays through"),
+  validate: (e, ctx) => own(ctx.state.entities, str13(e, "job")) && own(ctx.state.entities, str13(e, "worker")) && typeof e.data.through === "number" ? null : reject11("bad_event", "a payslip needs its job, its worker and the time it pays through"),
   apply: (e, state, ctx) => {
     const job = str13(e, "job");
     const gross = numOf(e.data.gross);
@@ -30190,7 +30538,7 @@ function sheetDays(v) {
 }
 var TIMESHEET = {
   type: "economy.timesheet",
-  validate: (e, ctx) => own(ctx.state.entities, str13(e, "job")) && typeof e.data.minutes === "number" && e.data.minutes > 0 ? null : reject10("bad_event", "a timesheet entry needs its job and minutes"),
+  validate: (e, ctx) => own(ctx.state.entities, str13(e, "job")) && typeof e.data.minutes === "number" && e.data.minutes > 0 ? null : reject11("bad_event", "a timesheet entry needs its job and minutes"),
   apply: (e, state) => {
     const job = str13(e, "job");
     const payroll = sliceRecord(state, "economy", "payroll");
@@ -30207,7 +30555,7 @@ var TIMESHEET = {
 };
 var COMMISSION = {
   type: "economy.commission",
-  validate: (e, ctx) => own(ctx.state.entities, str13(e, "job")) && typeof e.data.cents === "number" ? null : reject10("bad_event", "a commission credit needs its job and amount"),
+  validate: (e, ctx) => own(ctx.state.entities, str13(e, "job")) && typeof e.data.cents === "number" ? null : reject11("bad_event", "a commission credit needs its job and amount"),
   apply: (e, state) => {
     const job = str13(e, "job");
     const payroll = sliceRecord(state, "economy", "payroll");
@@ -30364,20 +30712,20 @@ function hire(api, args, ctx) {
   const employer = strOf(args.business);
   const worker = strOf(args.worker);
   if (!own(ctx.state.entities, employer) || isGone(ctx.state, employer) || api.partyKind(ctx, employer) === null)
-    return reject10("missing_entity", `no employer ${labelOf(ctx, employer)}`);
+    return reject11("missing_entity", `no employer ${labelOf(ctx, employer)}`);
   if (!own(ctx.state.entities, worker) || isGone(ctx.state, worker) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, worker)?.kind ?? "", "person"))
-    return reject10("missing_entity", `no person ${labelOf(ctx, worker)}`);
+    return reject11("missing_entity", `no person ${labelOf(ctx, worker)}`);
   const position = strOf(args.position);
   const into2 = positionsOf(ctx, employer).find((p) => p.id === position);
   if (position !== "" && !into2)
-    return reject10("bad_position", `${labelOf(ctx, employer)} has no position ${position}`);
+    return reject11("bad_position", `${labelOf(ctx, employer)} has no position ${position}`);
   const by = strOf(args.by);
   const refusal = by === "" ? null : staffRefusal(ctx, by, employer, "staff.hire", { position }) ?? (by === employer ? null : payrollProblem(ctx, api, by, employer, worker, [], "hire"));
   if (refusal !== null)
-    return reject10("not_owner", refusal);
+    return reject11("not_owner", refusal);
   const jobs = allJobs(ctx);
   if (jobs.some((j) => j.worker === worker && j.party === employer && j.status !== "ended"))
-    return reject10("exists", `${labelOf(ctx, worker)} already works for ${labelOf(ctx, employer)}`);
+    return reject11("exists", `${labelOf(ctx, worker)} already works for ${labelOf(ctx, employer)}`);
   const cal = calendarOf(ctx.world);
   const fields = { worker, employer, status: "active", start: typeof args.start === "string" && args.start !== "" ? args.start : dateText2(cal, today2(ctx)), ...into2 ? { position } : {} };
   for (const k of ["title", "occupation", "basis", "hours", "pay_every"])
@@ -30406,14 +30754,14 @@ function hire(api, args, ctx) {
 function staffJob(ctx, args, power, position) {
   const job = readJob(ctx, strOf(args.job));
   if (!job)
-    return reject10("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
+    return reject11("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
   if (job.status === "ended")
-    return reject10("ended", "that job has already ended");
+    return reject11("ended", "that job has already ended");
   const by = strOf(args.by);
   if (by === "")
     return job;
   const refusal = job.party === null ? `${labelOf(ctx, by)} doesn't decide ${labelOf(ctx, job.id)}` : staffRefusal(ctx, by, job.party, power, position === undefined ? { worker: job.worker } : { worker: job.worker, position });
-  return refusal === null ? job : reject10("not_owner", refusal);
+  return refusal === null ? job : reject11("not_owner", refusal);
 }
 function payProblem(ctx, api, by, job) {
   return by === "" || job.party === null || by === job.party ? null : payrollProblem(ctx, api, by, job.party, job.worker, job.splits, "raise");
@@ -30421,15 +30769,15 @@ function payProblem(ctx, api, by, job) {
 function endJob(args, ctx) {
   const job = readJob(ctx, strOf(args.job));
   if (!job)
-    return reject10("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
+    return reject11("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
   const by = strOf(args.by);
   if (by !== "" && by !== job.worker) {
     const refusal = job.party === null ? `${labelOf(ctx, by)} can't end that job` : staffRefusal(ctx, by, job.party, "staff.fire", { worker: job.worker });
     if (refusal !== null)
-      return reject10("not_owner", refusal);
+      return reject11("not_owner", refusal);
   }
   if (job.status === "ended")
-    return reject10("ended", "that job has already ended");
+    return reject11("ended", "that job has already ended");
   const end = typeof args.end === "string" && args.end !== "" ? args.end : dateText2(calendarOf(ctx.world), today2(ctx));
   return [
     { type: "set", entity: job.id, field: "end", value: end },
@@ -30444,10 +30792,10 @@ function raise(api, args, ctx) {
   const by = strOf(args.by);
   const problem = payProblem(ctx, api, by, job);
   if (problem !== null)
-    return reject10("not_owner", problem);
+    return reject11("not_owner", problem);
   const rate = typeof args.rate === "number" && args.rate > 0 ? Math.round(args.rate) : typeof args.pct === "number" && args.pct > -100 ? Math.round(job.rate * (1 + args.pct / 100)) : NaN;
   if (!(rate > 0))
-    return reject10("bad_amount", "a raise needs a new rate above nothing, or a percentage");
+    return reject11("bad_amount", "a raise needs a new rate above nothing, or a percentage");
   const said3 = [{ type: "set", entity: job.id, field: "rate", value: rate }, ...acted(ctx, job.party, by, "staff.pay", `Set ${labelOf(ctx, job.worker)}'s pay to ${api.money(ctx, rate)} ${BASIS_WORDS[job.basis]}`, [job.worker])];
   if (strOf(own(ctx.state.entities, job.id)?.fields.pay_every) !== UNPAID)
     return said3;
@@ -30459,14 +30807,14 @@ function raise(api, args, ctx) {
 function setHours(api, args, ctx) {
   const hours = typeof args.hours_per_week === "number" && Number.isFinite(args.hours_per_week) ? args.hours_per_week : NaN;
   if (!(hours > 0 && hours <= 168))
-    return reject10("bad_amount", "hours a week are more than none and at most 168");
+    return reject11("bad_amount", "hours a week are more than none and at most 168");
   const job = staffJob(ctx, args, "staff.pay");
   if ("code" in job)
     return job;
   const by = strOf(args.by);
   const problem = payProblem(ctx, api, by, job);
   if (problem !== null)
-    return reject10("not_owner", problem);
+    return reject11("not_owner", problem);
   return [{ type: "set", entity: job.id, field: "hours_per_week", value: hours }, ...acted(ctx, job.party, by, "staff.pay", `Set ${labelOf(ctx, job.worker)}'s hours to ${hours} a week`, [job.worker])];
 }
 function setLeave(args, ctx) {
@@ -30476,7 +30824,7 @@ function setLeave(args, ctx) {
   const leave = args.leave !== false;
   const who = labelOf(ctx, job.worker);
   if (leave === (job.status === "leave"))
-    return reject10("unchanged", leave ? `${who} is already on leave` : `${who} isn't on leave`);
+    return reject11("unchanged", leave ? `${who} is already on leave` : `${who} isn't on leave`);
   return [{ type: "set", entity: job.id, field: "status", value: leave ? "leave" : "active" }, ...acted(ctx, job.party, strOf(args.by), "staff.pay", leave ? `Put ${who} on leave` : `${who} came back from leave`, [job.worker])];
 }
 function setPosition(args, ctx) {
@@ -30484,48 +30832,48 @@ function setPosition(args, ctx) {
   const held2 = readJob(ctx, strOf(args.job));
   const into2 = held2?.party ? positionsOf(ctx, held2.party).find((p) => p.id === position) : undefined;
   if (held2 && position !== "" && !into2)
-    return reject10("bad_position", `${held2.party ? labelOf(ctx, held2.party) : held2.employer} has no position ${position}`);
+    return reject11("bad_position", `${held2.party ? labelOf(ctx, held2.party) : held2.employer} has no position ${position}`);
   const job = staffJob(ctx, args, "members.appoint", into2 ? position : undefined);
   if ("code" in job)
     return job;
   const who = labelOf(ctx, job.worker);
   if (position === strOf(own(ctx.state.entities, job.id)?.fields.position))
-    return reject10("unchanged", into2 ? `${who} already holds ${into2.title}` : `${who} holds no position`);
+    return reject11("unchanged", into2 ? `${who} already holds ${into2.title}` : `${who} holds no position`);
   return [{ type: "set", entity: job.id, field: "position", value: into2 ? position : null }, ...acted(ctx, job.party, strOf(args.by), "members.appoint", into2 ? `Appointed ${who} ${into2.title}` : `${who} no longer holds a position`, [job.worker])];
 }
 function setTitle(args, ctx) {
   const held2 = readJob(ctx, strOf(args.job));
   if (!held2)
-    return reject10("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
+    return reject11("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
   const by = strOf(args.by);
   const theirOwn = by !== "" && by === held2.worker;
-  const job = theirOwn ? held2.status === "ended" ? reject10("ended", "that job has already ended") : held2 : staffJob(ctx, args, "members.appoint");
+  const job = theirOwn ? held2.status === "ended" ? reject11("ended", "that job has already ended") : held2 : staffJob(ctx, args, "members.appoint");
   if ("code" in job)
     return job;
   const words3 = strOf(args.title).trim();
   const who = labelOf(ctx, job.worker);
   if (words3 === strOf(own(ctx.state.entities, job.id)?.fields.title))
-    return reject10("unchanged", words3 !== "" ? `${who} already goes by ${words3}` : `${who}'s job has no title of its own`);
+    return reject11("unchanged", words3 !== "" ? `${who} already goes by ${words3}` : `${who}'s job has no title of its own`);
   const line2 = words3 !== "" ? `${who} goes by ${words3}` : `${who}'s job no longer has a title of its own`;
   return [{ type: "set", entity: job.id, field: "title", value: words3 === "" ? null : words3 }, ...theirOwn ? [] : acted(ctx, job.party, by, "members.appoint", line2, [job.worker])];
 }
 function paySchedule(args, ctx) {
   const org = strOf(args.org);
   if (!own(ctx.state.entities, org) || isGone(ctx.state, org) || orgTypeOf(ctx, org) === null)
-    return reject10("missing_entity", `no organization ${labelOf(ctx, org)}`);
+    return reject11("missing_entity", `no organization ${labelOf(ctx, org)}`);
   const every = strOf(args.every);
   if (!SCHEDULE_EVERY.includes(every))
-    return reject10("bad_schedule", `a pay schedule is ${SCHEDULE_EVERY.join(", ")}`);
+    return reject11("bad_schedule", `a pay schedule is ${SCHEDULE_EVERY.join(", ")}`);
   const by = strOf(args.by);
   const refusal = by === "" ? null : staffRefusal(ctx, by, org, "staff.pay", "all");
   if (refusal !== null)
-    return reject10("not_owner", refusal);
+    return reject11("not_owner", refusal);
   const cal = calendarOf(ctx.world);
   const weekly = every === "weekly" || every === "biweekly";
   const given = strOf(args.anchor);
   const anchor = given === "" ? null : dayOfField(cal, given);
   if (given !== "" && anchor === null)
-    return reject10("bad_date", `${given} isn't a date`);
+    return reject11("bad_date", `${given} isn't a date`);
   const weekday = anchor !== null ? dateAt(cal, clockAt(cal, anchor, 0)).weekday : typeof args.weekday === "number" && Number.isInteger(args.weekday) && args.weekday >= 0 && args.weekday <= 6 ? args.weekday : 5;
   const from = today2(ctx);
   const first = anchor ?? from + ((weekday - dateAt(cal, clockAt(cal, from, 0)).weekday) % 7 + 7) % 7;
@@ -30684,7 +31032,7 @@ var INVOICE_DAYS = 30;
 var LATE_FEE_EVERY = 30;
 var CLOSING = "17:00";
 var SALES_KEPT = 20;
-function reject11(code, reason) {
+function reject12(code, reason) {
   return { code, reason };
 }
 function str14(e, k) {
@@ -30706,7 +31054,7 @@ function marginOf(state, business) {
 }
 var SALE = {
   type: "economy.sale",
-  validate: (e, ctx) => own(ctx.state.entities, str14(e, "business")) && typeof e.data.cents === "number" ? null : reject11("bad_event", "a sale needs its business and price"),
+  validate: (e, ctx) => own(ctx.state.entities, str14(e, "business")) && typeof e.data.cents === "number" ? null : reject12("bad_event", "a sale needs its business and price"),
   apply: (e, state, ctx) => {
     const business = str14(e, "business");
     const cents2 = numOf(e.data.cents);
@@ -30722,7 +31070,7 @@ var SALE = {
 };
 var REMIT = {
   type: "economy.remit",
-  validate: (e, ctx) => own(ctx.state.entities, str14(e, "business")) && (e.data.what === "sales_tax" || e.data.what === "suppliers") ? null : reject11("bad_event", "a remittance needs its business and what it settles"),
+  validate: (e, ctx) => own(ctx.state.entities, str14(e, "business")) && (e.data.what === "sales_tax" || e.data.what === "suppliers") ? null : reject12("bad_event", "a remittance needs its business and what it settles"),
   apply: (e, state, ctx) => {
     const business = str14(e, "business");
     const cents2 = numOf(e.data.cents);
@@ -30845,7 +31193,7 @@ function allInvoices(ctx) {
 }
 var INVOICE_PAID = {
   type: "economy.invoice_paid",
-  validate: (e, ctx) => own(ctx.state.entities, str14(e, "invoice")) && typeof e.data.cents === "number" ? null : reject11("bad_event", "an invoice payment needs its invoice and amount"),
+  validate: (e, ctx) => own(ctx.state.entities, str14(e, "invoice")) && typeof e.data.cents === "number" ? null : reject12("bad_event", "an invoice payment needs its invoice and amount"),
   apply: (e, state, ctx) => {
     const month = monthOf(ctx.world, state.clock);
     const cents2 = numOf(e.data.cents);
@@ -30923,23 +31271,23 @@ function lateInvoices(slot, ctx, api) {
 function issueInvoice(ctx, api, args) {
   const business = strOf(args.business);
   if (!isBusiness(ctx, business))
-    return reject11("missing_entity", `no business ${labelOf(ctx, business)}`);
+    return reject12("missing_entity", `no business ${labelOf(ctx, business)}`);
   const by = strOf(args.by);
   const customer = strOf(args.customer) || strOf(args.customer_name).trim();
   const cents2 = typeof args.cents === "number" ? Math.round(args.cents) : NaN;
   return actAs(ctx, { by, party: business, power: "money.invoice", line: () => `Sent ${labelOf(ctx, customer)} an invoice for ${moneyWords(ctx, cents2)}`, names: [customer] }, () => {
     if (customer === "" || customer === business)
-      return reject11("bad_party", "an invoice needs someone to bill");
+      return reject12("bad_party", "an invoice needs someone to bill");
     if (by !== "" && customer !== by && managesParty(ctx.state, customer, by) && api.paysFor(ctx, by, business, customer, operatingAccount(api, ctx, business) ?? undefined))
-      return reject11("not_owner", `${shownLabel(ctx, ctx.world.pov, by)} runs ${shownLabel(ctx, ctx.world.pov, customer)} for others, so can't bill it for ${shownLabel(ctx, ctx.world.pov, business)}`);
+      return reject12("not_owner", `${shownLabel(ctx, ctx.world.pov, by)} runs ${shownLabel(ctx, ctx.world.pov, customer)} for others, so can't bill it for ${shownLabel(ctx, ctx.world.pov, business)}`);
     if (!(cents2 > 0))
-      return reject11("bad_amount", "an invoice needs an amount");
+      return reject12("bad_amount", "an invoice needs an amount");
     if (!own(ctx.state.entities, customer)) {
       const cap = unpricedCap(ctx.world);
       const month = monthOf(ctx.world, ctx.state.clock);
       const billed = allInvoices(ctx).filter((i) => i.business === business && i.party === null && i.state !== "void" && monthOf(ctx.world, i.issued) === month).reduce((a, i) => a + i.cents, 0);
       if (billed + cents2 > cap)
-        return reject11("over_cap", `${labelOf(ctx, business)} can bill customers outside the world at most ${api.money(ctx, cap)} a month, and has billed ${api.money(ctx, billed)}`);
+        return reject12("over_cap", `${labelOf(ctx, business)} can bill customers outside the world at most ${api.money(ctx, cap)} a month, and has billed ${api.money(ctx, billed)}`);
     }
     const days = typeof args.days === "number" && args.days >= 0 ? Math.round(args.days) : Math.round(numOf(own(ctx.state.entities, business)?.fields.invoice_days, INVOICE_DAYS));
     const cal = calendarOf(ctx.world);
@@ -30953,17 +31301,17 @@ function issueInvoice(ctx, api, args) {
 function payInvoice(ctx, api, args) {
   const inv = readInvoice(ctx, strOf(args.invoice));
   if (!inv)
-    return reject11("missing_entity", `no invoice ${labelOf(ctx, strOf(args.invoice))}`);
+    return reject12("missing_entity", `no invoice ${labelOf(ctx, strOf(args.invoice))}`);
   if (inv.left <= 0)
-    return reject11("settled", `${inv.memo} is ${inv.state === "void" ? "void" : "paid"}`);
+    return reject12("settled", `${inv.memo} is ${inv.state === "void" ? "void" : "paid"}`);
   const by = strOf(args.by);
   const payer = inv.party ?? inv.customer;
   if (by !== "" && by !== inv.party && !(inv.party && orgTypeOf(ctx, inv.party) !== null))
-    return reject11("not_customer", `${labelOf(ctx, by)} isn't billed for ${inv.memo}`);
+    return reject12("not_customer", `${labelOf(ctx, by)} isn't billed for ${inv.memo}`);
   const deposit2 = operatingAccount(api, ctx, inv.business);
   return actAs(ctx, { by, party: inv.party ?? payer, power: "money.spend", amount: inv.left, line: () => `Paid ${labelOf(ctx, inv.business)}'s invoice for ${moneyWords(ctx, inv.left)}`, names: [inv.business] }, () => {
     if (by !== "" && inv.party && by !== inv.party && api.paysFor(ctx, by, inv.business, inv.party, deposit2 ?? undefined))
-      return reject11("not_owner", `${shownLabel(ctx, ctx.world.pov, inv.party)} pays for itself, not for ${shownLabel(ctx, ctx.world.pov, by)}`);
+      return reject12("not_owner", `${shownLabel(ctx, ctx.world.pov, inv.party)} pays for itself, not for ${shownLabel(ctx, ctx.world.pov, by)}`);
     const paid = inv.party ? api.pay(ctx, { from: inv.party, to: inv.business, cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", method: "account", ...deposit2 ? { deposit: deposit2 } : {} }) : api.post(ctx, [{ account: api.outside(`customer:${payer}`), amount: -inv.left }, { account: deposit2 ?? api.outside(inv.business), amount: inv.left }], { memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", payer });
     if (!Array.isArray(paid))
       return paid;
@@ -30973,16 +31321,16 @@ function payInvoice(ctx, api, args) {
 function voidInvoice(ctx, api, args) {
   const inv = readInvoice(ctx, strOf(args.invoice));
   if (!inv)
-    return reject11("missing_entity", `no invoice ${labelOf(ctx, strOf(args.invoice))}`);
+    return reject12("missing_entity", `no invoice ${labelOf(ctx, strOf(args.invoice))}`);
   return actAs(ctx, { by: strOf(args.by), party: inv.business, power: "money.invoice", line: () => `Voided the invoice to ${labelOf(ctx, inv.customer)} for ${moneyWords(ctx, inv.cents)}`, names: [inv.customer] }, () => {
     if (inv.state === "paid" || inv.state === "void")
-      return reject11("settled", `${inv.memo} is already ${inv.state}`);
+      return reject12("settled", `${inv.memo} is already ${inv.state}`);
     return [{ type: "set", entity: inv.id, field: "state", value: "void" }];
   });
 }
 var PAYOUT = {
   type: "economy.payout",
-  validate: (e, ctx) => own(ctx.state.entities, str14(e, "business")) && typeof e.data.cents === "number" ? null : reject11("bad_event", "a payout needs its business and amount"),
+  validate: (e, ctx) => own(ctx.state.entities, str14(e, "business")) && typeof e.data.cents === "number" ? null : reject12("bad_event", "a payout needs its business and amount"),
   apply: (e, state, ctx) => {
     const business = str14(e, "business");
     const now = monthOf(ctx.world, state.clock);
@@ -31006,15 +31354,15 @@ function ownerDraw(ctx, api, args) {
   const business = strOf(args.business);
   const owner = strOf(args.owner) || strOf(args.by);
   if (!isBusiness(ctx, business))
-    return reject11("missing_entity", `no business ${labelOf(ctx, business)}`);
+    return reject12("missing_entity", `no business ${labelOf(ctx, business)}`);
   if (!mayDraw(api, ctx.state, owner, business))
-    return reject11("not_owner", structureOf(ctx.state, business) === "c_corp" ? `${labelOf(ctx, business)} is a corporation: it pays its owners by salary or dividends` : `${labelOf(ctx, owner)} doesn't own ${labelOf(ctx, business)}`);
+    return reject12("not_owner", structureOf(ctx.state, business) === "c_corp" ? `${labelOf(ctx, business)} is a corporation: it pays its owners by salary or dividends` : `${labelOf(ctx, owner)} doesn't own ${labelOf(ctx, business)}`);
   const cents2 = typeof args.cents === "number" ? Math.round(args.cents) : NaN;
   if (!(cents2 > 0))
-    return reject11("bad_amount", "a draw needs an amount");
+    return reject12("bad_amount", "a draw needs an amount");
   const from = operatingAccount(api, ctx, business);
   if (!from)
-    return reject11("no_account", `${labelOf(ctx, business)} has no account to draw on`);
+    return reject12("no_account", `${labelOf(ctx, business)} has no account to draw on`);
   const paid = api.pay(ctx, { from, to: owner, cents: cents2, memo: "Owner's draw", kind: "income", category: "draw" });
   if (!Array.isArray(paid))
     return paid;
@@ -31092,20 +31440,20 @@ function distribute(ctx, api, args) {
   const business = strOf(args.business);
   const trust = api.partyKind(ctx, business) === "trust" && !isGone(ctx.state, business);
   if (!isBusiness(ctx, business) && !trust)
-    return reject11("missing_entity", `no business or trust ${labelOf(ctx, business)}`);
+    return reject12("missing_entity", `no business or trust ${labelOf(ctx, business)}`);
   const stated = typeof args.cents === "number" && args.cents > 0 ? Math.round(args.cents) : null;
   if (trust && stated === null)
-    return reject11("bad_amount", `${labelOf(ctx, business)} pays out a stated amount: say how much goes to its beneficiaries`);
+    return reject12("bad_amount", `${labelOf(ctx, business)} pays out a stated amount: say how much goes to its beneficiaries`);
   let total = 0;
   return actAs(ctx, { by: strOf(args.by), party: business, power: "money.payout", line: () => trust ? `Paid ${moneyWords(ctx, total)} out to its beneficiaries` : `Paid ${moneyWords(ctx, total)} of profit out to its owners` }, () => {
     const since = numOf(own(objOf(sliceOf(ctx.state, "economy").distributed), business), monthStart(ctx, ctx.state.clock));
     const pct2 = numOf(own(ctx.state.entities, business)?.fields.distribution_pct, 100);
     const months = stated !== null ? { [monthOf(ctx.world, ctx.state.clock)]: stated } : undistributed(api, ctx, business, since, ctx.state.clock + 1, pct2);
     if (Object.keys(months).length === 0)
-      return reject11("bad_amount", `${labelOf(ctx, business)} has no profit to distribute`);
+      return reject12("bad_amount", `${labelOf(ctx, business)} has no profit to distribute`);
     const d = distribution(ctx, api, business, months, trust);
     if (!d)
-      return reject11("no_owners", trust ? `${labelOf(ctx, business)} has no beneficiaries with a share, or no account to pay from` : `${labelOf(ctx, business)} has no owners with a share, or no account to pay from`);
+      return reject12("no_owners", trust ? `${labelOf(ctx, business)} has no beneficiaries with a share, or no account to pay from` : `${labelOf(ctx, business)} has no owners with a share, or no account to pay from`);
     total = d.paid;
     if (d.lines.length === 0)
       return d.extra;
@@ -31407,7 +31755,7 @@ var MINUTES_A_YEAR = 365 * 1440;
 var FLOW_FIELDS = {
   revenue: { type: "list", label: "Revenue model ({type, …}, one record: units × price × buyers, a catalog, a royalty, fees or a formula)", domain: "money", level: 3 }
 };
-function reject12(code, reason) {
+function reject13(code, reason) {
   return { code, reason };
 }
 function streamIds(state) {
@@ -31568,7 +31916,7 @@ function unitsOf2(n) {
 }
 var RECORD = {
   type: REVENUE_EVENT,
-  validate: (e) => typeof e.data.stream === "string" && e.data.stream !== "" && typeof e.data.month === "string" && /^\d{4}-\d{2}$/.test(e.data.month) ? null : reject12("bad_event", "a stream's record needs its stream and month"),
+  validate: (e) => typeof e.data.stream === "string" && e.data.stream !== "" && typeof e.data.month === "string" && /^\d{4}-\d{2}$/.test(e.data.month) ? null : reject13("bad_event", "a stream's record needs its stream and month"),
   apply: (e, state) => {
     const stream = strOf(e.data.stream);
     const month = strOf(e.data.month);
@@ -31614,26 +31962,26 @@ function periodAmount(api, ctx, stream) {
 function adjustRefusal(api, ctx, a) {
   const stream = streamOf(ctx, a.stream);
   if (!stream)
-    return reject12("no_stream", `${a.stream || "That"} isn't a revenue stream`);
+    return reject13("no_stream", `${a.stream || "That"} isn't a revenue stream`);
   const name = labelOf(ctx, a.stream);
   if (stream.model.ai !== "bounded")
-    return reject12("not_open", `${name} isn't open to adjustment in play: its author left the agents off it`);
+    return reject13("not_open", `${name} isn't open to adjustment in play: its author left the agents off it`);
   if (a.factor === undefined === (a.cents === undefined))
-    return reject12("bad_amount", "an adjustment is either a factor or an amount, one of them");
+    return reject13("bad_amount", "an adjustment is either a factor or an amount, one of them");
   if (a.factor !== undefined && !(a.factor >= REVENUE_ADJUST.factorMin && a.factor <= REVENUE_ADJUST.factorMax))
-    return reject12("out_of_bounds", `a factor is between ${REVENUE_ADJUST.factorMin} and ${REVENUE_ADJUST.factorMax}`);
+    return reject13("out_of_bounds", `a factor is between ${REVENUE_ADJUST.factorMin} and ${REVENUE_ADJUST.factorMax}`);
   if (a.cents !== undefined) {
     const period2 = periodAmount(api, ctx, stream);
     if (!Number.isInteger(a.cents) || a.cents === 0 || Math.abs(a.cents) > period2)
-      return reject12("out_of_bounds", `an amount is at most one period's, ${formatMoney(period2, ctx.world.currency)}, in or out`);
+      return reject13("out_of_bounds", `an amount is at most one period's, ${formatMoney(period2, ctx.world.currency)}, in or out`);
   }
   const days = a.days ?? 7;
   if (!Number.isInteger(days) || days < 1 || days > REVENUE_ADJUST.days)
-    return reject12("out_of_bounds", `an adjustment lasts 1 to ${REVENUE_ADJUST.days} days`);
+    return reject13("out_of_bounds", `an adjustment lasts 1 to ${REVENUE_ADJUST.days} days`);
   if (inForce(ctx.state, a.stream, ctx.state.clock).length >= REVENUE_ADJUST.inForce)
-    return reject12("too_many", `${name} has ${REVENUE_ADJUST.inForce} adjustments in force already`);
+    return reject13("too_many", `${name} has ${REVENUE_ADJUST.inForce} adjustments in force already`);
   if (a.reason.trim() === "")
-    return reject12("no_reason", "an adjustment says why: the GM's reason, or what the story said");
+    return reject13("no_reason", "an adjustment says why: the GM's reason, or what the story said");
   return null;
 }
 function adjustArgs(a) {
@@ -31648,13 +31996,13 @@ var ADJUSTED = {
   validate: (e, ctx) => {
     const stream = strOf(e.data.stream);
     if (revenueOf(own(ctx.state.entities, stream)?.fields.revenue)?.ai !== "bounded")
-      return reject12("not_open", "that stream isn't open to adjustment in play");
+      return reject13("not_open", "that stream isn't open to adjustment in play");
     const from = numOf(e.data.from, NaN);
     const until2 = numOf(e.data.until, NaN);
     if (!(until2 > from) || until2 - from > REVENUE_ADJUST.days * 1440)
-      return reject12("out_of_bounds", `an adjustment lasts 1 to ${REVENUE_ADJUST.days} days`);
+      return reject13("out_of_bounds", `an adjustment lasts 1 to ${REVENUE_ADJUST.days} days`);
     if (inForce(ctx.state, stream, from).length >= REVENUE_ADJUST.inForce)
-      return reject12("too_many", `a stream has at most ${REVENUE_ADJUST.inForce} adjustments in force`);
+      return reject13("too_many", `a stream has at most ${REVENUE_ADJUST.inForce} adjustments in force`);
     return null;
   },
   apply: (e, state) => {
@@ -31854,7 +32202,7 @@ function registerRevenue(r) {
     boundField: "money",
     validate: (p, ctx) => {
       if (strOf(p.said).trim() === "")
-        return reject12("no_quote", "a revenue change quotes what the story said");
+        return reject13("no_quote", "a revenue change quotes what the story said");
       return adjustRefusal(r.api, ctx, adjustArgs(p));
     },
     toEffects: (p) => {
@@ -32179,38 +32527,38 @@ function securedLoans(api, state, id) {
 function buyProperty(api, ctx, x) {
   const e = own(ctx.state.entities, x.property);
   if (!e || e.kind !== "property")
-    return reject9("missing_property", `no property ${labelOf(ctx, x.property)}`);
+    return reject10("missing_property", `no property ${labelOf(ctx, x.property)}`);
   if (!api.feature(ctx, x.party, "property"))
-    return reject9("level", "property isn't followed at this money level");
+    return reject10("level", "property isn't followed at this money level");
   const { owners, shares } = payers(api, ctx.state, x.property);
   if (owners.some((o) => o.party === x.party))
-    return reject9("already_yours", `${e.name} is already ${labelOf(ctx, x.party)}'s`);
+    return reject10("already_yours", `${e.name} is already ${labelOf(ctx, x.party)}'s`);
   const asking = num5(e.fields.asking_price);
   if (owners.length > 0 && asking === undefined)
-    return reject9("not_for_sale", `${e.name} isn't for sale`);
+    return reject10("not_for_sale", `${e.name} isn't for sale`);
   const money3 = (c) => formatMoney(c, ctx.world.currency);
   const floor = Math.round(asking ?? propertyValue(ctx.state, x.property));
   const price = Math.round(x.price ?? floor);
   if (!(price > 0))
-    return reject9("bad_amount", "a price is above nothing");
+    return reject10("bad_amount", "a price is above nothing");
   if (price < floor)
-    return reject9("declined", asking !== undefined ? `the sellers want ${money3(floor)} for ${e.name}` : `${e.name} is worth ${money3(floor)}`);
+    return reject10("declined", asking !== undefined ? `the sellers want ${money3(floor)} for ${e.name}` : `${e.name} is worth ${money3(floor)}`);
   const down = Math.round(x.down ?? price);
   if (down < 0 || down > price)
-    return reject9("bad_amount", "a down payment is between nothing and the price");
+    return reject10("bad_amount", "a down payment is between nothing and the price");
   const financed = price - down;
   const leastDown = Math.ceil(price * numOf(objOf(mortgageRow(ctx).down_payment_pct).minimum_conventional, 3) / 100);
   if (financed > 0 && down < leastDown)
-    return reject9("declined", `a lender wants at least ${money3(leastDown)} down on ${e.name}`);
+    return reject10("declined", `a lender wants at least ${money3(leastDown)} down on ${e.name}`);
   const terms = mortgageTerms(ctx);
   const term = x.term_months ?? terms[0] ?? 360;
   if (financed > 0 && !terms.includes(term)) {
     const years = [...terms].sort((a, b) => a - b).map((m) => String(Math.round(m / 12 * 10) / 10));
-    return reject9("bad_term", `lenders offer mortgages over ${years.length > 1 ? `${years.slice(0, -1).join(", ")} or ${years[years.length - 1]}` : years[0]} years`);
+    return reject10("bad_term", `lenders offer mortgages over ${years.length > 1 ? `${years.slice(0, -1).join(", ")} or ${years[years.length - 1]}` : years[0]} years`);
   }
   const from = x.from ?? api.depositAccount(ctx, x.party);
   if (!from)
-    return reject9("no_account", `${labelOf(ctx, x.party)} has no account to pay from`);
+    return reject10("no_account", `${labelOf(ctx, x.party)} has no account to pay from`);
   const unusableFrom = api.mayUse(ctx, x.party, from, "from");
   if (unusableFrom)
     return unusableFrom;
@@ -32231,7 +32579,7 @@ function buyProperty(api, ctx, x) {
   const loans = securedLoans(api, ctx.state, x.property);
   const owed = loans.reduce((a, l) => a + l.owed, 0);
   if (owed > price)
-    return reject9("declined", `the price doesn't cover what ${e.name}'s sellers owe on it`);
+    return reject10("declined", `the price doesn't cover what ${e.name}'s sellers owe on it`);
   for (const l of loans)
     if (l.owed > 0)
       lines.push({ account: l.loan, amount: l.owed });
@@ -32269,15 +32617,15 @@ function buyProperty(api, ctx, x) {
 function priceOwned(api, ctx, x) {
   const e = own(ctx.state.entities, x.property);
   if (!e || e.kind !== "property")
-    return reject9("missing_property", `no property ${labelOf(ctx, x.property)}`);
+    return reject10("missing_property", `no property ${labelOf(ctx, x.property)}`);
   if (!api.feature(ctx, x.party, "property"))
-    return reject9("level", "property isn't followed at this money level");
+    return reject10("level", "property isn't followed at this money level");
   const price = Math.round(x.price);
   if (!(price > 0))
-    return reject9("bad_amount", "a price is above nothing");
+    return reject10("bad_amount", "a price is above nothing");
   const from = x.from ?? api.depositAccount(ctx, x.party);
   if (!from)
-    return reject9("no_account", `${labelOf(ctx, x.party)} has no account to pay from`);
+    return reject10("no_account", `${labelOf(ctx, x.party)} has no account to pay from`);
   const unusable = api.mayUse(ctx, x.party, from, "from");
   if (unusable)
     return unusable;
@@ -32301,12 +32649,12 @@ function propertyAt(state, place2) {
 function makeProperty(ctx, x) {
   const place2 = own(ctx.world.places, x.place);
   if (!place2)
-    return reject9("missing_place", `no place ${labelOf(ctx, x.place)}`);
+    return reject10("missing_place", `no place ${labelOf(ctx, x.place)}`);
   const had = propertyAt(ctx.state, x.place);
   if (had)
-    return reject9("already_property", `${place2.name} is a property already`);
+    return reject10("already_property", `${place2.name} is a property already`);
   if (x.owner && !own(ctx.state.entities, x.owner))
-    return reject9("missing_entity", `no owner ${labelOf(ctx, x.owner)}`);
+    return reject10("missing_entity", `no owner ${labelOf(ctx, x.owner)}`);
   let id = `property:${x.place}`;
   for (let i = 2;own(ctx.state.entities, id); i++)
     id = `property:${x.place}:${i}`;
@@ -32374,31 +32722,31 @@ function routeRent(api, ctx, property, route) {
 function sellProperty(api, ctx, x) {
   const e = own(ctx.state.entities, x.property);
   if (!e || e.kind !== "property")
-    return reject9("missing_property", `no property ${labelOf(ctx, x.property)}`);
+    return reject10("missing_property", `no property ${labelOf(ctx, x.property)}`);
   if (!api.feature(ctx, x.party, "property"))
-    return reject9("level", "property isn't followed at this money level");
+    return reject10("level", "property isn't followed at this money level");
   const owners = api.ownersOf(ctx.state, x.property);
   const mine = owners.find((o) => o.party === x.party);
   const share2 = api.shareOf(ctx.state, x.property, x.party);
   if (!mine || share2 <= 0)
-    return reject9("not_yours", `${e.name} isn't ${labelOf(ctx, x.party)}'s to sell`);
+    return reject10("not_yours", `${e.name} isn't ${labelOf(ctx, x.party)}'s to sell`);
   const price = Math.round(x.price);
   if (!(price > 0))
-    return reject9("bad_amount", "a price is above nothing");
+    return reject10("bad_amount", "a price is above nothing");
   if (x.buyer !== undefined && (!own(ctx.state.entities, x.buyer) || x.buyer === x.party))
-    return reject9("missing_entity", `no buyer ${labelOf(ctx, x.buyer)}`);
+    return reject10("missing_entity", `no buyer ${labelOf(ctx, x.buyer)}`);
   if (x.buyer === undefined && owners.some((o) => o.party !== x.party && api.shareOf(ctx.state, x.property, o.party) > 0))
-    return reject9("needs_buyer", `selling a share of ${e.name} needs a buyer in the world`);
+    return reject10("needs_buyer", `selling a share of ${e.name} needs a buyer in the world`);
   const to = x.to ?? api.depositAccount(ctx, x.party);
   if (!to)
-    return reject9("no_account", `${labelOf(ctx, x.party)} has no account the money could go to`);
+    return reject10("no_account", `${labelOf(ctx, x.party)} has no account the money could go to`);
   const unusableTo = api.mayUse(ctx, x.party, to, "into");
   if (unusableTo)
     return unusableTo;
   const money3 = (c) => formatMoney(c, ctx.world.currency);
   const value = propertyValue(ctx.state, x.property);
   if (x.buyer === undefined && price > value)
-    return reject9("declined", `no buyer outside the world pays more than ${money3(value)} for ${e.name}`);
+    return reject10("declined", `no buyer outside the world pays more than ${money3(value)} for ${e.name}`);
   const memo = `Sold ${share2 < 100 ? `a ${Math.round(share2)}% share of ` : ""}${e.name} for ${money3(price)}`;
   const loans = securedLoans(api, ctx.state, x.property).filter((l) => api.ownersOf(ctx.state, l.loan).some((o) => o.party === x.party) && l.owed > 0);
   const owed = loans.reduce((a, l) => a + l.owed, 0);
@@ -32448,19 +32796,19 @@ function sellProperty(api, ctx, x) {
 function startLease(api, ctx, x) {
   const e = own(ctx.state.entities, x.property);
   if (!e || e.kind !== "property")
-    return reject9("missing_property", `no property ${labelOf(ctx, x.property)}`);
+    return reject10("missing_property", `no property ${labelOf(ctx, x.property)}`);
   if (!api.feature(ctx, x.party, "property"))
-    return reject9("level", "property isn't followed at this money level");
+    return reject10("level", "property isn't followed at this money level");
   if (api.shareOf(ctx.state, x.property, x.party) <= 0)
-    return reject9("not_yours", `${e.name} isn't ${labelOf(ctx, x.party)}'s to let`);
+    return reject10("not_yours", `${e.name} isn't ${labelOf(ctx, x.party)}'s to let`);
   if (!own(ctx.state.entities, x.tenant) || x.tenant === x.party)
-    return reject9("missing_entity", `no tenant ${labelOf(ctx, x.tenant)}`);
+    return reject10("missing_entity", `no tenant ${labelOf(ctx, x.tenant)}`);
   const rent = Math.round(x.rent);
   if (!(rent > 0))
-    return reject9("bad_amount", "rent is above nothing");
+    return reject10("bad_amount", "rent is above nothing");
   const units = Math.max(1, Math.round(numOf(e.fields.units, 1)));
   if (authoredLeases(ctx, x.property).filter((l) => holdsUnit(l, ctx.state.clock)).length >= units)
-    return reject9("full", `every unit of ${e.name} is let`);
+    return reject10("full", `every unit of ${e.name} is let`);
   if (x.from) {
     const unusable = api.mayUse(ctx, x.tenant, x.from, "from");
     if (unusable)
@@ -32468,7 +32816,7 @@ function startLease(api, ctx, x) {
   }
   const side = rentSide(api, ctx, x.property);
   if (!side)
-    return reject9("no_account", `${labelOf(ctx, x.party)} has no account the rent could go to`);
+    return reject10("no_account", `${labelOf(ctx, x.party)} has no account the rent could go to`);
   const months = Math.max(1, Math.round(x.months ?? 12));
   const day = Math.min(28, Math.max(1, Math.round(x.day ?? 1)));
   const last = clockOfDate(ctx.world, addMonths(ctx.world, ctx.state.clock, months));
@@ -32497,26 +32845,26 @@ function startLease(api, ctx, x) {
 function endLease(api, ctx, party, lease, on) {
   const f = own(ctx.state.entities, lease);
   if (!f || f.kind !== "flow" || f.fields.flow_kind !== "rent")
-    return reject9("missing_lease", `no lease ${labelOf(ctx, lease)}`);
+    return reject10("missing_lease", `no lease ${labelOf(ctx, lease)}`);
   const property = strOf(f.fields.link);
   const from = strOf(f.fields.from);
   const tenant = from === party || api.ownersOf(ctx.state, from).some((o) => o.party === party);
   if (!tenant && api.shareOf(ctx.state, property, party) <= 0)
-    return reject9("not_yours", `${f.name} isn't ${labelOf(ctx, party)}'s to end`);
+    return reject10("not_yours", `${f.name} isn't ${labelOf(ctx, party)}'s to end`);
   const at2 = on ? clockOfDate(ctx.world, on) : ctx.state.clock;
   if (at2 === null)
-    return reject9("bad_date", "a lease ends on a date (YYYY-MM-DD)");
+    return reject10("bad_date", "a lease ends on a date (YYYY-MM-DD)");
   const date = dateText(ctx.world, Math.max(at2, ctx.state.clock));
   return strOf(f.fields.end) === date ? [] : [{ type: "set", entity: lease, field: "end", value: date }];
 }
 function listProperty(api, ctx, party, property, price) {
   const e = own(ctx.state.entities, property);
   if (!e || e.kind !== "property")
-    return reject9("missing_property", `no property ${labelOf(ctx, property)}`);
+    return reject10("missing_property", `no property ${labelOf(ctx, property)}`);
   if (!api.feature(ctx, party, "property"))
-    return reject9("level", "property isn't followed at this money level");
+    return reject10("level", "property isn't followed at this money level");
   if (api.shareOf(ctx.state, property, party) <= 0)
-    return reject9("not_yours", `${e.name} isn't ${labelOf(ctx, party)}'s to sell`);
+    return reject10("not_yours", `${e.name} isn't ${labelOf(ctx, party)}'s to sell`);
   const asking = price !== undefined && price > 0 ? Math.round(price) : null;
   return (num5(e.fields.asking_price) ?? null) === asking ? [] : [{ type: "set", entity: property, field: "asking_price", value: asking }];
 }
@@ -32921,8 +33269,8 @@ function tickerFor(ctx, business, asked2) {
   if (asked2 !== "") {
     const symbol = asked2.trim().toUpperCase();
     if (!/^[A-Z][A-Z0-9.]{0,5}$/.test(symbol))
-      return reject9("bad_symbol", "a ticker is a letter and up to five more letters, digits or dots");
-    return taken.has(symbol) ? reject9("bad_symbol", `${symbol} is already another asset's ticker`) : symbol;
+      return reject10("bad_symbol", "a ticker is a letter and up to five more letters, digits or dots");
+    return taken.has(symbol) ? reject10("bad_symbol", `${symbol} is already another asset's ticker`) : symbol;
   }
   const words3 = labelOf(ctx, business).split(/[^A-Za-z0-9]+/).filter((w) => w !== "" && !own(TICKER_SKIP, w.toLowerCase()));
   const initials = words3.map((w) => w[0] ?? "").join("").toUpperCase().slice(0, 5);
@@ -32932,7 +33280,7 @@ function tickerFor(ctx, business, asked2) {
   for (let i = 2;i < 100; i++)
     if (!taken.has(`${base}${i}`))
       return `${base}${i}`;
-  return reject9("bad_symbol", "say a ticker for it");
+  return reject10("bad_symbol", "say a ticker for it");
 }
 function assetIdFor(ctx, business) {
   const slice2 = holdingsSlice(ctx.state);
@@ -32963,15 +33311,15 @@ function listShares(api, ctx, a) {
   const business = strOf(a.business);
   const name = labelOf(ctx, business);
   if (!isBusiness(ctx, business))
-    return reject9("not_business", `${name} isn't a company`);
+    return reject10("not_business", `${name} isn't a company`);
   const by = strOf(a.by);
   const party = strOf(a.party) || by;
   const units = a.units;
   if (typeof units !== "number" || !Number.isSafeInteger(units) || units <= 0)
-    return reject9("bad_amount", "say a whole number of units");
+    return reject10("bad_amount", "say a whole number of units");
   const fields = own(ctx.state.entities, business)?.fields ?? {};
   if (strOf(fields.structure, "llc") !== "c_corp")
-    return reject9("structure", `Only a C corporation lists on a market: change ${name}'s structure first`);
+    return reject10("structure", `Only a C corporation lists on a market: change ${name}'s structure first`);
   const listing = listingIn(fields);
   const offered = `${listing ? `Offer ${units} more units of ${name}` : `List ${units} units of ${name}`} on the market${typeof a.price === "number" ? ` at ${moneyWords(ctx, a.price)} a unit` : ""}`;
   const denied = decision(ctx, by, party, business, "shares.manage", "Listing", offered);
@@ -32981,25 +33329,25 @@ function listShares(api, ctx, a) {
   const owners = counted(api, ctx, business);
   const registered = unitsOf(owners);
   if (registered <= 0)
-    return reject9("no_owners", `${name} has no owners to list it for`);
+    return reject10("no_owners", `${name} has no owners to list it for`);
   const classes = classesIn(fields);
   const cls = strOf(a.class);
   if (cls !== "" && !classes.some((c) => c.id === cls))
-    return reject9("bad_class", `${name} has no class ${cls}: its classes are ${classes.map((c) => c.label).join(", ")}`);
+    return reject10("bad_class", `${name} has no class ${cls}: its classes are ${classes.map((c) => c.label).join(", ")}`);
   const worth = listing ? Math.round(quoteOf(ctx, listing.asset) ?? listing.price) : Math.round(bookValuationOf(api, ctx, business).value / registered);
   const each = typeof a.price === "number" && Number.isFinite(a.price) ? Math.round(a.price) : worth;
   if (!(each > 0))
-    return reject9("bad_amount", listing || typeof a.price === "number" ? "a price a unit is above nothing" : `${name}'s books give its units no value yet, so the public pays nothing for them`);
+    return reject10("bad_amount", listing || typeof a.price === "number" ? "a price a unit is above nothing" : `${name}'s books give its units no value yet, so the public pays nothing for them`);
   const multiple = listingOfferCap(ctx);
   const cap = Math.floor(worth * multiple);
   if (each > cap)
-    return reject9("declined", `the public pays no more than ${multiple === 1 ? "" : `${Math.round(multiple * 100) / 100} times `}its ${listing ? "market price" : "books a unit"} for new units of ${name}, ${moneyWords(ctx, Math.max(0, cap))} a unit`);
+    return reject10("declined", `the public pays no more than ${multiple === 1 ? "" : `${Math.round(multiple * 100) / 100} times `}its ${listing ? "market price" : "books a unit"} for new units of ${name}, ${moneyWords(ctx, Math.max(0, cap))} a unit`);
   const cents2 = each * units;
   if (!Number.isSafeInteger(cents2))
-    return reject9("bad_amount", "a price is a whole amount");
+    return reject10("bad_amount", "a price is a whole amount");
   const deposit2 = operatingAccount(api, ctx, business);
   if (!deposit2)
-    return reject9("no_account", `${name} has no account to take the money`);
+    return reject10("no_account", `${name} has no account to take the money`);
   let next;
   if (listing)
     next = { ...listing, float: listing.float + units };
@@ -33026,10 +33374,10 @@ function delist(api, ctx, a) {
   const business = strOf(a.business);
   const name = labelOf(ctx, business);
   if (!isBusiness(ctx, business))
-    return reject9("not_business", `${name} isn't a company`);
+    return reject10("not_business", `${name} isn't a company`);
   const listing = listingIn(own(ctx.state.entities, business)?.fields ?? {});
   if (!listing)
-    return reject9("not_listed", `${name} isn't on a market`);
+    return reject10("not_listed", `${name} isn't on a market`);
   const by = strOf(a.by);
   const party = strOf(a.party) || by;
   const denied = decision(ctx, by, party, business, "shares.manage", "Delisting", `Take ${name} off the market${typeof a.price === "number" ? `, buying back its public units at ${moneyWords(ctx, a.price)} a unit` : ""}`);
@@ -33038,12 +33386,12 @@ function delist(api, ctx, a) {
   const market = Math.round(quoteOf(ctx, listing.asset) ?? listing.price);
   const given = typeof a.price === "number" && Number.isFinite(a.price) ? Math.round(a.price) : null;
   if (given !== null && given < market)
-    return reject9("declined", `the public sells at no less than its market price, ${moneyWords(ctx, market)} a unit`);
+    return reject10("declined", `the public sells at no less than its market price, ${moneyWords(ctx, market)} a unit`);
   const each = given ?? market;
   const float = listedFloat(ctx, listing.asset);
   const source = operatingAccount(api, ctx, business);
   if (!source)
-    return reject9("no_account", `${name} has no account to pay from`);
+    return reject10("no_account", `${name} has no account to pay from`);
   const lines = [];
   const add = (account, amount) => {
     const line2 = lines.find((l) => l.account === account);
@@ -33066,7 +33414,7 @@ function delist(api, ctx, a) {
     const owners = holdingOwners(api, ctx.state, holding);
     const paid = payout(api, ctx, owners, proceeds, source, null, accountOfHolding(ctx.state, holding));
     if (paid.paid < proceeds)
-      return reject9("no_account", `${labelOf(ctx, owners[0]?.party ?? holding)} has no account to be paid into`);
+      return reject10("no_account", `${labelOf(ctx, owners[0]?.party ?? holding)} has no account to be paid into`);
     for (const l of paid.lines)
       if (l.account !== source)
         add(l.account, l.amount);
@@ -33097,23 +33445,23 @@ function marketSale(api, ctx, sale) {
   const fields = own(ctx.state.entities, business)?.fields ?? {};
   const listing = listingIn(fields);
   if (!listing)
-    return reject9("not_listed", `${name} isn't on a market`);
+    return reject10("not_listed", `${name} isn't on a market`);
   const owners = ownersIn(fields);
   const held2 = unitsOf(owners, party);
   if (held2 <= 0)
-    return reject9("not_yours", `${labelOf(ctx, party)} holds no units of ${name} on its cap table`);
+    return reject10("not_yours", `${labelOf(ctx, party)} holds no units of ${name} on its cap table`);
   const units = sale.units ?? Math.round(allUnits(fields) * (sale.share ?? 0) / 100);
   if (!(Number.isSafeInteger(units) && units > 0))
-    return reject9("bad_amount", "say how many units to sell");
+    return reject10("bad_amount", "say how many units to sell");
   if (units > held2)
-    return reject9("declined", `${labelOf(ctx, party)} holds ${held2} units of ${name}, not ${units}`);
+    return reject10("declined", `${labelOf(ctx, party)} holds ${held2} units of ${name}, not ${units}`);
   if (units >= unitsOf(owners))
-    return reject9("last_units", `${name} keeps an owner on its cap table: sell to someone in the world, or take it off the market`);
+    return reject10("last_units", `${name} keeps an owner on its cap table: sell to someone in the world, or take it off the market`);
   const price = quoteOf(ctx, listing.asset) ?? listing.price;
   const cents2 = Math.round(price * units);
   const to = sale.to ?? api.depositAccount(ctx, party);
   if (!to)
-    return reject9("no_account", `${labelOf(ctx, party)} has no account the money could go to`);
+    return reject10("no_account", `${labelOf(ctx, party)} has no account the money could go to`);
   const unusable = api.mayUse(ctx, party, to, "into");
   if (unusable)
     return unusable;
@@ -35345,14 +35693,14 @@ function exerciseEvent(api) {
       const units = numOf(e.data.units);
       const cash = e.data.cash;
       if (own(ctx.state.entities, option)?.kind !== "holding" || own(ctx.state.entities, into2)?.kind !== "holding")
-        return reject9("missing_holding", "an exercise names its contracts and the holding of their underlying");
+        return reject10("missing_holding", "an exercise names its contracts and the holding of their underlying");
       if (!(qty > 0) || !(units > 0) || typeof cash !== "number" || !Number.isSafeInteger(cash) || cash < 0)
-        return reject9("bad_event", "an exercise is a number of contracts, their units and the strike's cash");
+        return reject10("bad_event", "an exercise is a number of contracts, their units and the strike's cash");
       if (qtyOf(lotsOf(ctx, option)) + QTY_EPSILON < qty)
-        return reject9("declined", `${labelOf(ctx, option)} holds fewer than ${qty} contracts`);
+        return reject10("declined", `${labelOf(ctx, option)} holds fewer than ${qty} contracts`);
       if (e.data.right === "put" && qtyOf(lotsOf(ctx, into2)) + QTY_EPSILON < units)
-        return reject9("declined", `${labelOf(ctx, into2)} holds fewer than ${unitsText(units)} units to deliver`);
-      return e.data.right === "call" || e.data.right === "put" ? null : reject9("bad_event", "an exercise is of a call or a put");
+        return reject10("declined", `${labelOf(ctx, into2)} holds fewer than ${unitsText(units)} units to deliver`);
+      return e.data.right === "call" || e.data.right === "put" ? null : reject10("bad_event", "an exercise is of a call or a put");
     },
     apply(e, state, ctx) {
       const option = str16(e, "option");
@@ -35379,25 +35727,25 @@ function exerciseEvent(api) {
 function exercise(api, ctx, x) {
   const h = own(ctx.state.entities, x.holding);
   if (!h || h.kind !== "holding")
-    return reject9("missing_holding", `no holding ${labelOf(ctx, x.holding)}`);
+    return reject10("missing_holding", `no holding ${labelOf(ctx, x.holding)}`);
   const a = assetOf(ctx, strOf(h.fields.asset));
   if (!a?.option)
-    return reject9("not_option", `${h.name} isn't an option`);
+    return reject10("not_option", `${h.name} isn't an option`);
   if (!api.feature(ctx, x.party, "options"))
-    return reject9("level", "options aren't followed at this money level");
+    return reject10("level", "options aren't followed at this money level");
   if (!canTrade(api, ctx, x.party, x.holding))
-    return reject9("not_yours", `${h.name} isn't ${labelOf(ctx, x.party)}'s to exercise`);
+    return reject10("not_yours", `${h.name} isn't ${labelOf(ctx, x.party)}'s to exercise`);
   if (ctx.state.clock >= a.option.expiry)
-    return reject9("expired", `${a.label} has expired`);
+    return reject10("expired", `${a.label} has expired`);
   const held2 = qtyOf(lotsOf(ctx, x.holding));
   const qty = typeof x.qty === "number" && x.qty > 0 ? Math.floor(x.qty + 0.000000001) : Math.floor(held2 + 0.000000001);
   if (qty < 1)
-    return reject9("nothing_held", `${labelOf(ctx, x.party)} holds no whole contract of ${a.label}`);
+    return reject10("nothing_held", `${labelOf(ctx, x.party)} holds no whole contract of ${a.label}`);
   if (qty > held2 + QTY_EPSILON)
-    return reject9("declined", `${h.name} holds ${unitsText(held2)} contracts, not ${qty}`);
+    return reject10("declined", `${h.name} holds ${unitsText(held2)} contracts, not ${qty}`);
   const under2 = assetOf(ctx, a.option.underlying);
   if (!under2)
-    return reject9("missing_asset", `no asset ${a.option.underlying}`);
+    return reject10("missing_asset", `no asset ${a.option.underlying}`);
   const units = qty * a.option.multiplier;
   const strike = Math.round(units * a.option.strike);
   const account = accountOfHolding(ctx.state, x.holding);
@@ -35406,7 +35754,7 @@ function exercise(api, ctx, x) {
   if (a.option.settlement === "cash") {
     const cash = Math.round(units * intrinsic(a.option.right, priceOf3(ctx, under2), a.option.strike));
     if (cash <= 0)
-      return reject9("out_of_money", `${a.label} is worth nothing to exercise`);
+      return reject10("out_of_money", `${a.label} is worth nothing to exercise`);
     const to = x.to !== undefined ? proceedsAccount(api, ctx, x.party, x.holding, x.to) : undefined;
     if (to !== undefined && typeof to !== "string")
       return to;
@@ -35421,12 +35769,12 @@ function exercise(api, ctx, x) {
   if (a.option.right === "call") {
     const listed2 = listedFloat(ctx, under2.id);
     if (listed2 && x.party === listed2.business)
-      return reject9("own_stock", `${labelOf(ctx, x.party)} takes its own units back by buying back shares or going off the market`);
+      return reject10("own_stock", `${labelOf(ctx, x.party)} takes its own units back by buying back shares or going off the market`);
     if (listed2 && units > listed2.left + QTY_EPSILON)
-      return reject9("declined", listed2.left > 0 ? `Only ${unitsText(listed2.left)} units of ${under2.symbol ?? under2.label} are for sale on the market` : `No units of ${under2.symbol ?? under2.label} are for sale on the market`);
+      return reject10("declined", listed2.left > 0 ? `Only ${unitsText(listed2.left)} units of ${under2.symbol ?? under2.label} are for sale on the market` : `No units of ${under2.symbol ?? under2.label} are for sale on the market`);
     const from = x.from ?? account ?? api.depositAccount(ctx, x.party);
     if (!from)
-      return reject9("no_account", `${labelOf(ctx, x.party)} has no account to pay the strike from`);
+      return reject10("no_account", `${labelOf(ctx, x.party)} has no account to pay the strike from`);
     const unusable = from === account ? null : api.mayUse(ctx, x.party, from, "from");
     if (unusable)
       return unusable;
@@ -35442,7 +35790,7 @@ function exercise(api, ctx, x) {
     ];
   } else {
     if (!target || qtyOf(lotsOf(ctx, target)) + QTY_EPSILON < units)
-      return reject9("nothing_to_deliver", `exercising ${qty} ${a.label} delivers ${unitsText(units)} ${under2.symbol ?? under2.label}, which ${labelOf(ctx, x.party)} doesn't hold${account ? ` in ${labelOf(ctx, account)}` : ""}`);
+      return reject10("nothing_to_deliver", `exercising ${qty} ${a.label} delivers ${unitsText(units)} ${under2.symbol ?? under2.label}, which ${labelOf(ctx, x.party)} doesn't hold${account ? ` in ${labelOf(ctx, account)}` : ""}`);
     const to = proceedsAccount(api, ctx, x.party, x.holding, x.to);
     if (typeof to !== "string")
       return to;
@@ -35461,7 +35809,7 @@ function settle(api, ctx, holding, a, qty, cash, label2, to) {
   const account = accountOfHolding(ctx.state, holding);
   const paid = payout(api, ctx, holdingOwners(api, ctx.state, holding), cash, source, to ?? null, account);
   if (paid.paid <= 0)
-    return reject9("no_account", `nobody holding ${a.label} has an account the cash could go to`);
+    return reject10("no_account", `nobody holding ${a.label} has an account the cash could go to`);
   const posted = api.post(ctx, paid.lines, { memo: label2, kind: "sale", category: "investment" });
   if (isRejection9(posted))
     return posted;
@@ -35540,12 +35888,12 @@ function registerOptions(r) {
 // src/packs/economy/core/wealth.ts
 function setRentRoute(api, ctx, party, property, to) {
   if (own(ctx.state.entities, property)?.kind !== "property")
-    return reject9("missing_property", `no property ${labelOf(ctx, property)}`);
+    return reject10("missing_property", `no property ${labelOf(ctx, property)}`);
   if (!api.ownersOf(ctx.state, property).some((o) => o.party === party && (o.role === "owner" || o.role === "joint" || o.role === "trustee" || o.role === "custodian")))
-    return reject9("not_yours", `${labelOf(ctx, property)} isn't ${labelOf(ctx, party)}'s to manage`);
+    return reject10("not_yours", `${labelOf(ctx, property)} isn't ${labelOf(ctx, party)}'s to manage`);
   const route = to.trim();
   if (route === "reinvest")
-    return reject9("bad_route", "rent goes to an account");
+    return reject10("bad_route", "rent goes to an account");
   if (route !== "") {
     const unusable = api.mayUse(ctx, party, route, "into");
     if (unusable)
@@ -35663,7 +36011,7 @@ function registerAssets(r) {
           return setRentRoute(r.api, ctx, party, strOf(a.property), to);
         if (strOf(a.business) !== "")
           return setStakeRoute(r.api, ctx, party, strOf(a.business), to);
-        return reject9("bad_route", "say which holding, property or business");
+        return reject10("bad_route", "say which holding, property or business");
       });
     }
   });
@@ -38081,10 +38429,10 @@ function methodSource(ctx, payer, words3) {
     const holder = e.kind === "card" ? strOf(e.fields.holder) : payer;
     if (holder === payer && canSpend(ctx.state, account, payer))
       return { source: id };
-    return reject8("bad_method", `${labelOf(ctx, payer)} can't pay from ${labelOf(ctx, id)}; they can pay from ${payChoices(ctx, payer)}`);
+    return reject9("bad_method", `${labelOf(ctx, payer)} can't pay from ${labelOf(ctx, id)}; they can pay from ${payChoices(ctx, payer)}`);
   }
   if (/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(id))
-    return reject8("bad_method", `no account or card ${id}; ${labelOf(ctx, payer)} can pay from ${payChoices(ctx, payer)}`);
+    return reject9("bad_method", `no account or card ${id}; ${labelOf(ctx, payer)} can pay from ${payChoices(ctx, payer)}`);
   return null;
 }
 function emptyHooks() {
@@ -38130,7 +38478,7 @@ function makeApi(hooks) {
       const made = creditApplication(ctx, who, app);
       if ("code" in made)
         return made;
-      return made.decision.approved ? made.events : reject8("declined", made.decision.reason);
+      return made.decision.approved ? made.events : reject9("declined", made.decision.reason);
     },
     securedBy: (state, asset) => Object.keys(state.entities).filter((id) => own(state.entities, id)?.kind === "account" && own(state.entities, id)?.fields.secured_by === asset).sort(),
     netWorth: (ctx, party) => netWorth(hooks, ctx, party)
@@ -38139,11 +38487,11 @@ function makeApi(hooks) {
 function payWith(hooks, ctx, p) {
   const from = own(ctx.state.entities, p.from);
   if (!from)
-    return reject8("missing_entity", `no ${labelOf(ctx, p.from)}`);
+    return reject9("missing_entity", `no ${labelOf(ctx, p.from)}`);
   const account = from.kind === "account" ? p.from : undefined;
   const payer = account ? holdersOf3(ctx.state, account).find((h) => canSpend(ctx.state, account, h)) : p.from;
   if (!payer)
-    return reject8("not_owner", `no one can pay from ${labelOf(ctx, p.from)}`);
+    return reject9("not_owner", `no one can pay from ${labelOf(ctx, p.from)}`);
   const to = own(ctx.state.entities, p.to);
   const opts = { method: p.method ?? (account ? "auto" : "account"), ...account ? { source: account } : {}, ...p.kind ? { kind: p.kind } : {}, ...p.category ? { category: p.category } : {}, ...p.flow ? { flow: p.flow } : {} };
   if (to?.kind === "account") {
@@ -38159,7 +38507,7 @@ function payWith(hooks, ctx, p) {
 function postWith(ctx, lines, meta) {
   const clean = lines.filter((l) => l.amount !== 0);
   if (clean.length < 2 || clean.reduce((a, l) => a + l.amount, 0) !== 0)
-    return reject8("unbalanced", `${meta.memo} doesn't balance`);
+    return reject9("unbalanced", `${meta.memo} doesn't balance`);
   if (!meta.unchecked) {
     const refused2 = postGuard(ctx, clean);
     if (refused2)
@@ -38256,9 +38604,9 @@ function registerRest(r, hooks) {
   r.service("economy.reprice", reprice);
   r.service("economy.adjust", (ctx, account, cents2) => {
     if (own(ctx.state.entities, account)?.kind !== "account")
-      return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
+      return reject9("not_account", `${labelOf(ctx, account)} isn't an account`);
     if (!Number.isSafeInteger(cents2) || cents2 === 0)
-      return reject8("bad_amount", "an adjustment is a whole amount other than nothing");
+      return reject9("bad_amount", "an adjustment is a whole amount other than nothing");
     const lines = [
       { account, amount: cents2 },
       { account: CORRECTION_ACCOUNT, amount: -cents2 }
@@ -38429,12 +38777,12 @@ function registerRest(r, hooks) {
     validate(p, ctx) {
       const { payer } = purchaser(p, ctx);
       if (!own(ctx.state.entities, payer))
-        return reject8("missing_entity", `no payer ${labelOf(ctx, payer)}`);
+        return reject9("missing_entity", `no payer ${labelOf(ctx, payer)}`);
       if (!isParty(ctx, payer))
-        return reject8("bad_payer", "a payer must be an account holder");
+        return reject9("bad_payer", "a payer must be an account holder");
       if (typeof p.property === "string" && p.property !== "")
-        return own(ctx.state.entities, p.property)?.kind === "property" || own(ctx.world.places, p.property) ? null : reject8("missing_property", `no property or place ${labelOf(ctx, p.property)}`);
-      return strOf(p.item) === "" && strOf(p.category) === "" ? reject8("bad_proposal", "a purchase needs an item or a category") : null;
+        return own(ctx.state.entities, p.property)?.kind === "property" || own(ctx.world.places, p.property) ? null : reject9("missing_property", `no property or place ${labelOf(ctx, p.property)}`);
+      return strOf(p.item) === "" && strOf(p.category) === "" ? reject9("bad_proposal", "a purchase needs an item or a category") : null;
     },
     toEffects: (p, ctx) => {
       const { payer, from, method } = purchaser(p, ctx);
@@ -38457,7 +38805,7 @@ function registerRest(r, hooks) {
     boundField: "money",
     validate(p, ctx) {
       if (!own(ctx.state.entities, strOf(p.from)) || !own(ctx.state.entities, strOf(p.to)))
-        return reject8("missing_entity", "a transfer needs a payer and a payee");
+        return reject9("missing_entity", "a transfer needs a payer and a payee");
       const payer = transferParty(ctx, strOf(p.from), "from");
       if ("code" in payer)
         return payer;
@@ -38465,7 +38813,7 @@ function registerRest(r, hooks) {
       if ("code" in payee)
         return payee;
       const cents2 = transferCents(p);
-      return Number.isFinite(cents2) && cents2 > 0 ? null : reject8("bad_amount", "a transfer needs a positive amount");
+      return Number.isFinite(cents2) && cents2 > 0 ? null : reject9("bad_amount", "a transfer needs a positive amount");
     },
     toEffects: (p) => [{ type: "economy.transfer", args: { from: strOf(p.from), to: strOf(p.to), cents: transferCents(p), memo: strOf(p.memo, "Payment"), ...typeof p.method === "string" ? { method: p.method } : {}, story: true } }]
   });
@@ -38607,7 +38955,7 @@ function registerEffects(r, hooks) {
       const qty = vehicle ? 1 : typeof args.qty === "number" && args.qty > 0 ? args.qty : 1;
       const story = args.story === true;
       if (!priced2 && !story)
-        return reject8("unpriced", `no price for ${labelOf(ctx, strOf(args.item) || strOf(args.category))}`);
+        return reject9("unpriced", `no price for ${labelOf(ctx, strOf(args.item) || strOf(args.category))}`);
       const name = sold ? own(ctx.state.entities, sold)?.name ?? "something" : strOf(args.name) || priced2?.price.name || strOf(args.item) || strOf(args.category) || "something";
       const what = `${name}${qty > 1 ? ` ×${qty}` : ""}`;
       const seller = strOf(args.seller);
@@ -38617,7 +38965,7 @@ function registerEffects(r, hooks) {
       const financing = spawnVehicle !== null && priced2 !== null && (args.finance === true || typeof args.down === "number" || typeof args.term_months === "number");
       const term = Math.round(typeof args.term_months === "number" ? args.term_months : numOf(terms2.typical, 60));
       if (financing && (term < numOf(terms2.min, 12) || term > numOf(terms2.max, 96)))
-        return reject8("bad_term", `car loans run ${numOf(terms2.min, 12)} to ${numOf(terms2.max, 96)} months`);
+        return reject9("bad_term", `car loans run ${numOf(terms2.min, 12)} to ${numOf(terms2.max, 96)} months`);
       const down = financing && priced2 ? Math.max(0, Math.min(priced2.price.cents, Math.round(typeof args.down === "number" ? args.down : priced2.price.cents * numOf(auto.down_payment_pct_typical, 12) / 100))) : 0;
       const financed = financing && priced2 ? priced2.price.cents - down : 0;
       return actAs(ctx, { by, party: payer, power: "money.spend", ...seller !== "" ? { target: seller } : {}, line: (paid) => `Bought ${what}${paid !== undefined ? ` for ${moneyWords(ctx, paid)}` : ""}` }, () => {
@@ -38705,13 +39053,13 @@ function registerEffects(r, hooks) {
       const scope = strOf(a.scope, "all");
       const place2 = strOf(a.place);
       if (place2 !== "" && !own(ctx.world.places, place2))
-        return reject8("missing_place", `no place ${labelOf(ctx, place2)}`);
+        return reject9("missing_place", `no place ${labelOf(ctx, place2)}`);
       const id = strOf(a.id) || `${place2 || "*"}:${scope}`;
       const percent = numOf(a.percent);
       if (a.clear === true || percent === 0)
         return [{ type: "economy.modifier", data: { id } }];
       if (percent <= -100)
-        return reject8("bad_amount", "a price modifier can't make things free");
+        return reject9("bad_amount", "a price modifier can't make things free");
       const minutes = numOf(a.minutes);
       return [{ type: "economy.modifier", data: { id, scope, place: place2, mult: Math.round((1 + percent / 100) * 1e4) / 1e4, ...minutes > 0 ? { until: ctx.state.clock + Math.round(minutes) } : {} } }];
     }
@@ -38723,16 +39071,16 @@ function registerEffects(r, hooks) {
     resolve(a, ctx) {
       const card = strOf(a.card);
       if (!traitsOf(ctx, card)?.liability)
-        return reject8("not_a_liability", `${labelOf(ctx, card)} isn't a card or a loan`);
+        return reject9("not_a_liability", `${labelOf(ctx, card)} isn't a card or a loan`);
       const who = strOf(a.who) || holdersOf3(ctx.state, card).find((h) => own(ctx.state.entities, h)) || "";
       const owed = Math.max(0, -balance(ctx.state, card));
       const cents2 = typeof a.cents === "number" && a.cents > 0 ? Math.round(a.cents) : owed;
       return actAs(ctx, { by: strOf(a.by), party: who, power: "money.manage", account: card, line: () => `Paid ${moneyWords(ctx, cents2)} toward ${labelOf(ctx, card)}` }, () => {
         if (rightsOf(ctx.state, card, who) === null)
-          return reject8("not_owner", `${labelOf(ctx, card)} isn't ${labelOf(ctx, who)}'s to pay`);
+          return reject9("not_owner", `${labelOf(ctx, card)} isn't ${labelOf(ctx, who)}'s to pay`);
         const from = strOf(a.from) || depositAccount(ctx, who, card) || "";
         if (from === "")
-          return reject8("missing_account", `${labelOf(ctx, who)} has no account to pay ${labelOf(ctx, card)} from`);
+          return reject9("missing_account", `${labelOf(ctx, who)} has no account to pay ${labelOf(ctx, card)} from`);
         const unusable = mayUse(ctx, who, from, "from");
         if (unusable)
           return unusable;
@@ -38767,7 +39115,7 @@ function registerEffects(r, hooks) {
 function gmOpenAccount(ctx, party, product, name) {
   const kind = partyKindOf2(ctx, party);
   if (!kind)
-    return reject8("missing_entity", `${labelOf(ctx, party)} can't hold money`);
+    return reject9("missing_entity", `${labelOf(ctx, party)} can't hold money`);
   const p = product.trim() || DEFAULT_ACCOUNT_PRODUCT[kind];
   const words3 = p === "business_checking" ? "checking" : p === "trust" ? "trust account" : p.replace(/_/g, " ");
   return openAccount(ctx, { name: name.trim() || `${labelOf(ctx, party)} ${words3}`, product: p, owners: [{ party, role: "owner" }] });
@@ -38871,11 +39219,11 @@ var core_default3 = economyPack;
 var SCENE = { on: true, handed: true, loose: true, holders: true, fixtures: true };
 var LEADING = /^(?:(?:a|an|the|some|my|your|his|her|their|our|its|this|that|these|those)\s+)+/i;
 var str17 = (v) => typeof v === "string" ? v.trim() : "";
-function reject13(code, reason) {
+function reject14(code, reason) {
   return { code, reason };
 }
-var already = (reason) => ({ kind: "refused", rejection: reject13("already", reason) });
-var refused2 = (code, reason) => ({ kind: "refused", rejection: reject13(code, reason) });
+var already = (reason) => ({ kind: "refused", rejection: reject14("already", reason) });
+var refused2 = (code, reason) => ({ kind: "refused", rejection: reject14(code, reason) });
 function refusedBy(r) {
   return r.code === "no_change" ? already(r.reason) : { kind: "refused", rejection: r };
 }
@@ -38957,9 +39305,9 @@ class Settling {
   make(words3, at2, extra = {}) {
     const ctx = this.w.ctx;
     if (extra.named !== undefined)
-      return reject13("not_here", `${labelOf(ctx, extra.named)} isn't where that could happen`);
+      return reject14("not_here", `${labelOf(ctx, extra.named)} isn't where that could happen`);
     if (this.opts.makes !== undefined && this.made.length >= this.opts.makes)
-      return reject13("thing_cap", "the reply has made as many things as one reply may (Settings → Changes from the reply)");
+      return reject14("thing_cap", "the reply has made as many things as one reply may (Settings → Changes from the reply)");
     const name = madeName(ctx, words3);
     const typed = thingTypeFor(ctx, name, "place" in at2 ? at2.place : placeOfEntity(ctx.state, at2.in));
     const out = this.apply({ do: "make", name, at: at2, why: this.why, ...typed.type !== undefined ? { type: typed.type } : {}, ...extra.owner !== undefined ? { owner: extra.owner } : {} });
@@ -38967,7 +39315,7 @@ class Settling {
       return out;
     const id = out.made;
     if (id === undefined)
-      return reject13("not_made", `${name} wasn't made`);
+      return reject14("not_made", `${name} wasn't made`);
     if (extra.maybe !== undefined && own(ctx.state.entities, id)?.fields.maybe_same_as === undefined) {
       const marked2 = this.w.apply({ type: "set", entity: id, field: "maybe_same_as", value: extra.maybe });
       if (marked2)
@@ -39000,7 +39348,7 @@ class Settling {
     if ("code" in out)
       return out;
     if (out.placed && where() === before)
-      return reject13("too_big", `${labelOf(ctx, thing2)} is too big to carry`);
+      return reject14("too_big", `${labelOf(ctx, thing2)} is too big to carry`);
     return secret ? this.know(thing2, [finder]) : null;
   }
   done(change2, extra = {}) {
@@ -40940,7 +41288,7 @@ function ammoOf(ctx, who, what) {
 }
 
 // src/packs/gear/core/sets.ts
-function reject14(code, reason) {
+function reject15(code, reason) {
   return { code, reason };
 }
 function wornSlot(ctx, who, thing2) {
@@ -41001,43 +41349,43 @@ function saveSet(ctx, op) {
   const who = own(ctx.state.entities, op.who);
   const name = op.name.trim();
   if (name === "" || name.length > SET_NAME_MAX)
-    return reject14("bad_name", `a name is 1–${SET_NAME_MAX} characters`);
+    return reject15("bad_name", `a name is 1–${SET_NAME_MAX} characters`);
   if (!who)
-    return reject14("missing_entity", `no one ${labelOf(ctx, op.who)}`);
+    return reject15("missing_entity", `no one ${labelOf(ctx, op.who)}`);
   const pieces = op.pieces ?? wornPieces(ctx, op.who, op.kind);
   const word = SET_KIND_LABEL[op.kind].toLowerCase();
   if (pieces.length === 0)
-    return reject14("nothing_worn", `${who.name} wears nothing to keep as ${word === "outfit" ? "an outfit" : "a loadout"}`);
+    return reject15("nothing_worn", `${who.name} wears nothing to keep as ${word === "outfit" ? "an outfit" : "a loadout"}`);
   for (const p of pieces)
     if (!isThing(ctx, p.item) || isGone(ctx.state, p.item))
-      return reject14("missing_entity", `no thing ${labelOf(ctx, p.item)}`);
+      return reject15("missing_entity", `no thing ${labelOf(ctx, p.item)}`);
   const sets = setsOf(who.fields);
   const id = setIdOf(name);
   const max = thingsConfigOf(ctx.world).sets.max;
   if (!Object.hasOwn(sets, id) && Object.keys(sets).length >= max)
-    return reject14("too_many", max === 0 ? "This world keeps no saved outfits" : `${who.name} keeps at most ${max} saved outfits and loadouts: drop one first`);
+    return reject15("too_many", max === 0 ? "This world keeps no saved outfits" : `${who.name} keeps at most ${max} saved outfits and loadouts: drop one first`);
   const set = { name, kind: op.kind, pieces: pieces.map((p) => ({ item: p.item, ...p.slot !== undefined ? { slot: p.slot } : {} })) };
   if (JSON.stringify(sets[id]) === JSON.stringify(set))
-    return reject14("no_change", `${name} is saved as it is`);
+    return reject15("no_change", `${name} is saved as it is`);
   return [written(op.who, { ...sets, [id]: set })];
 }
 function dropSet(ctx, op) {
   const who = own(ctx.state.entities, op.who);
   const sets = setsOf(who?.fields);
   if (!who || !Object.hasOwn(sets, op.set))
-    return reject14("no_set", `${labelOf(ctx, op.who)} keeps no such outfit`);
+    return reject15("no_set", `${labelOf(ctx, op.who)} keeps no such outfit`);
   const { [op.set]: _dropped, ...rest } = sets;
   return [written(op.who, rest)];
 }
 function applySet(ctx, op, opts) {
   const who = own(ctx.state.entities, op.who);
   if (!who || !kindIs(ctx.registry, ctx.world, who.kind, "person"))
-    return reject14("not_a_person", `${labelOf(ctx, op.who)} can't wear anything`);
+    return reject15("not_a_person", `${labelOf(ctx, op.who)} can't wear anything`);
   if (ctx.levelOf(op.who, "gear") < 3)
-    return reject14("level", "outfits are kept from Gear level 3");
+    return reject15("level", "outfits are kept from Gear level 3");
   const set = setsOf(who.fields)[op.set];
   if (!set)
-    return reject14("no_set", `${who.name} keeps no such outfit`);
+    return reject15("no_set", `${who.name} keeps no such outfit`);
   const w = new Working(ctx.registry, ctx.world, ctx.state);
   const before = wornPieces(w.ctx, op.who).map((p) => p.item);
   const missing = [];
@@ -41060,7 +41408,7 @@ function applySet(ctx, op, opts) {
     wearing.add(piece.item);
   }
   if (wearing.size === 0)
-    return reject14("none_to_hand", `None of ${set.name} is to hand: ${missing.join("; ")}`);
+    return reject15("none_to_hand", `None of ${set.name} is to hand: ${missing.join("; ")}`);
   for (const p of wornPieces(w.ctx, op.who, set.kind)) {
     if (wearing.has(p.item))
       continue;
@@ -41092,7 +41440,7 @@ function applySet(ctx, op, opts) {
 }
 function setOpEvents(ctx, op, opts) {
   if (!own(ctx.state.entities, op.who) || isGone(ctx.state, op.who))
-    return reject14("missing_entity", `no one ${labelOf(ctx, op.who)}`);
+    return reject15("missing_entity", `no one ${labelOf(ctx, op.who)}`);
   switch (op.do) {
     case "set_save":
       return saveSet(ctx, op);
@@ -42441,7 +42789,7 @@ var KIT = {
     piece_count: { type: "number", label: "Piece count", domain: "gear", level: 3 }
   }
 };
-function reject15(code, reason) {
+function reject16(code, reason) {
   return { code, reason };
 }
 var CASH_WORDS = { cash: null, money: null, buck: null, bucks: null, change: null, coin: null, coins: null, banknote: null, banknotes: null, twenties: null, fifties: null, fiver: 5, tenner: 10, twenty: 20, fifty: 50, hundred: 100 };
@@ -42484,24 +42832,24 @@ function detach(ctx, thing2) {
 }
 var transfer2 = (ctx, item2, to, told = false) => {
   if (!own(ctx.state.entities, item2))
-    return reject15("missing_entity", `no item ${labelOf(ctx, item2)}`);
+    return reject16("missing_entity", `no item ${labelOf(ctx, item2)}`);
   if (!own(ctx.state.entities, to))
-    return reject15("missing_entity", `no holder ${labelOf(ctx, to)}`);
+    return reject16("missing_entity", `no holder ${labelOf(ctx, to)}`);
   const level = gearLevel(ctx, item2, to);
   if (level === 0)
     return [];
   if (holderOf(ctx.state, item2) === to)
     return [];
   if (item2 === to || isInside(ctx.state, to, item2))
-    return reject15("cycle", "can't put something inside itself");
+    return reject16("cycle", "can't put something inside itself");
   const cannot = holdProblem(ctx, item2, to);
   if (cannot)
-    return reject15(fixedOf(ctx, item2) === null ? "cant_hold" : "fixed", cannot);
+    return reject16(fixedOf(ctx, item2) === null ? "cant_hold" : "fixed", cannot);
   const target = own(ctx.state.entities, to);
   if (!told && level >= 2 && target && !kindIs(ctx.registry, ctx.world, target.kind, "person")) {
     const problem = fitProblem(ctx.state, item2, to);
     if (problem)
-      return reject15("no_room", `${labelOf(ctx, item2)} ${problem}`);
+      return reject16("no_room", `${labelOf(ctx, item2)} ${problem}`);
   }
   const out = detach(ctx, item2);
   if (typeof own(ctx.state.entities, item2)?.fields.place === "string")
@@ -42512,9 +42860,9 @@ var transfer2 = (ctx, item2, to, told = false) => {
 };
 var drop = (ctx, item2, place2) => {
   if (!own(ctx.state.entities, item2))
-    return reject15("missing_entity", `no item ${labelOf(ctx, item2)}`);
+    return reject16("missing_entity", `no item ${labelOf(ctx, item2)}`);
   if (!own(ctx.world.places, place2))
-    return reject15("missing_place", `no place ${labelOf(ctx, place2)}`);
+    return reject16("missing_place", `no place ${labelOf(ctx, place2)}`);
   if (gearLevel(ctx, item2) === 0)
     return [];
   return [...detach(ctx, item2), { type: "set", entity: item2, field: "place", value: place2 }, ...optionalService(ctx, "space.lay")?.(ctx, item2, place2, holderOf(ctx.state, item2)) ?? []];
@@ -42528,11 +42876,11 @@ function endLoans(ctx, thing2) {
 var give2 = (ctx, item2, from, to, told = false) => {
   const e = own(ctx.state.entities, item2);
   if (!e)
-    return reject15("missing_entity", `no item ${labelOf(ctx, item2)}`);
+    return reject16("missing_entity", `no item ${labelOf(ctx, item2)}`);
   if (e.kind === "account")
-    return reject15("is_money", "cash changes hands as a transfer");
+    return reject16("is_money", "cash changes hands as a transfer");
   if (from !== to && !isInside(ctx.state, item2, from) && e.fields.owner !== from)
-    return reject15("not_held", `${labelOf(ctx, from)} doesn't have ${e.name}`);
+    return reject16("not_held", `${labelOf(ctx, from)} doesn't have ${e.name}`);
   const moved2 = transfer2(ctx, item2, to, told);
   if (!Array.isArray(moved2))
     return moved2;
@@ -42607,15 +42955,15 @@ function usedUp(ctx, item2, done) {
 }
 function search(ctx, who, target) {
   if (!own(ctx.state.entities, who))
-    return reject15("missing_entity", `no searcher ${labelOf(ctx, who)}`);
+    return reject16("missing_entity", `no searcher ${labelOf(ctx, who)}`);
   const place2 = placeOfEntity(ctx.state, who);
   if (target !== null) {
     if (!own(ctx.state.entities, target))
-      return reject15("missing_entity", `no ${labelOf(ctx, target)} to search`);
+      return reject16("missing_entity", `no ${labelOf(ctx, target)} to search`);
     if (placeOfEntity(ctx.state, target) !== place2)
-      return reject15("not_here", `${labelOf(ctx, target)} isn't here`);
+      return reject16("not_here", `${labelOf(ctx, target)} isn't here`);
   } else if (!place2)
-    return reject15("no_place", `${labelOf(ctx, who)} is nowhere`);
+    return reject16("no_place", `${labelOf(ctx, who)} is nowhere`);
   const found = target !== null ? contentsOf(ctx.state, target) : Object.keys(ctx.state.entities).filter((id) => holderOf(ctx.state, id) === null && own(ctx.state.entities, id)?.fields.place === place2).sort();
   return found.filter((id) => id !== who && !isGone(ctx.state, id) && isDiscoverable(ctx.world, ctx.state, id) && !knows(ctx.state, who, id)).map((id) => ({ type: "link", rel: "knows", from: who, to: id }));
 }
@@ -42696,11 +43044,11 @@ function claimId(ctx, c) {
 }
 var claim = (ctx, c) => {
   if (!own(ctx.state.entities, c.by))
-    return reject15("missing_entity", `no claimer ${labelOf(ctx, c.by)}`);
+    return reject16("missing_entity", `no claimer ${labelOf(ctx, c.by)}`);
   const name = c.name.trim();
   if (c.existing && own(ctx.state.entities, c.existing)) {
     const place3 = placeOfEntity(ctx.state, c.by);
-    const moved2 = c.at === "held" ? transfer2(ctx, c.existing, c.by) : place3 ? drop(ctx, c.existing, place3) : reject15("no_place", `${labelOf(ctx, c.by)} is nowhere`);
+    const moved2 = c.at === "held" ? transfer2(ctx, c.existing, c.by) : place3 ? drop(ctx, c.existing, place3) : reject16("no_place", `${labelOf(ctx, c.by)} is nowhere`);
     return Array.isArray(moved2) ? { entity: c.existing, events: moved2 } : moved2;
   }
   if (c.at === "held") {
@@ -42713,7 +43061,7 @@ var claim = (ctx, c) => {
   }
   const place2 = placeOfEntity(ctx.state, c.by);
   if (c.at === "here" && !place2)
-    return reject15("no_place", `${labelOf(ctx, c.by)} is nowhere`);
+    return reject16("no_place", `${labelOf(ctx, c.by)} is nowhere`);
   const row = c.like ? rowOf(ctx, "gear.items", c.like) ?? rowOf(ctx, "gear.containers", c.like) : undefined;
   const fields = { claimed: true, notable: true };
   if (c.at === "held")
@@ -42742,17 +43090,17 @@ var claim = (ctx, c) => {
 var takePiece = (ctx, kit, piece, to) => {
   const k = own(ctx.state.entities, kit);
   if (!k)
-    return reject15("missing_entity", `no kit ${labelOf(ctx, kit)}`);
+    return reject16("missing_entity", `no kit ${labelOf(ctx, kit)}`);
   const status = kitStatus(ctx, kit);
   const p = findPiece(ctx, kit, piece);
   if (!status || !p)
-    return reject15("no_piece", `${k.name} has no ${piece}`);
+    return reject16("no_piece", `${k.name} has no ${piece}`);
   const back = contentsOf(ctx.state, kit).find((id) => own(ctx.state.entities, id)?.fields.from_kit === kit && own(ctx.state.entities, id)?.fields.piece === p.name);
   if (back)
     return transfer2(ctx, back, to);
   const present2 = status.pieces.find((x) => x.name === p.name)?.present ?? 0;
   if (present2 <= 0)
-    return reject15("no_piece", `no ${p.name} left in ${k.name}`);
+    return reject16("no_piece", `no ${p.name} left in ${k.name}`);
   const taken = takenOf(ctx.state, kit);
   const spawned = spawn(ctx, { name: p.name, owner: typeof k.fields.owner === "string" ? k.fields.owner : null, holder: to, salt: `${kit}:${p.name}:${own(taken, p.name) ?? 0}` });
   if (!Array.isArray(spawned))
@@ -42768,11 +43116,11 @@ var takePiece = (ctx, kit, piece, to) => {
 var lend = (ctx, thing2, to, until2) => {
   const e = own(ctx.state.entities, thing2);
   if (!e)
-    return reject15("missing_entity", `no ${labelOf(ctx, thing2)}`);
+    return reject16("missing_entity", `no ${labelOf(ctx, thing2)}`);
   if (!own(ctx.state.entities, to))
-    return reject15("missing_entity", `no ${labelOf(ctx, to)}`);
+    return reject16("missing_entity", `no ${labelOf(ctx, to)}`);
   if (!Number.isFinite(until2) || until2 <= ctx.state.clock)
-    return reject15("bad_until", "a loan needs a future end");
+    return reject16("bad_until", "a loan needs a future end");
   const out = [];
   if (typeof e.fields.place !== "string" || holderOf(ctx.state, thing2)) {
     const moved2 = transfer2(ctx, thing2, to);
@@ -42788,7 +43136,7 @@ var lend = (ctx, thing2, to, until2) => {
 var retrieve = (ctx, thing2) => {
   const e = own(ctx.state.entities, thing2);
   if (!e)
-    return reject15("missing_entity", `no ${labelOf(ctx, thing2)}`);
+    return reject16("missing_entity", `no ${labelOf(ctx, thing2)}`);
   const out = [];
   for (const g of grants(ctx.state))
     if (g.thing === thing2)
@@ -42808,16 +43156,16 @@ var retrieve = (ctx, thing2) => {
 var wear2 = (ctx, item2, wearer, slot) => {
   const e = own(ctx.state.entities, item2);
   if (!e)
-    return reject15("missing_entity", `no item ${labelOf(ctx, item2)}`);
+    return reject16("missing_entity", `no item ${labelOf(ctx, item2)}`);
   if (ctx.levelOf(wearer, "gear") < 3)
-    return reject15("level", "slots are tracked from Gear level 3");
+    return reject16("level", "slots are tracked from Gear level 3");
   const s = slot ?? strOf(e.fields.slot);
   if (!s || s === "none")
-    return reject15("no_slot", `${e.name} isn't worn`);
+    return reject16("no_slot", `${e.name} isn't worn`);
   const rel = s === "hand_held" ? "equipped" : "worn_by";
   const occupied = Object.keys(ctx.state.entities).find((id) => id !== item2 && own(ctx.state.entities, id)?.relations.some((r) => r.type === rel && r.to === wearer && r.fields?.slot === s));
   if (occupied && s !== "pocket" && s !== "pocket_or_bag")
-    return reject15("slot_taken", `${labelOf(ctx, occupied)} is already in the ${s.replace(/_/g, " ")} slot`);
+    return reject16("slot_taken", `${labelOf(ctx, occupied)} is already in the ${s.replace(/_/g, " ")} slot`);
   const out = [];
   if (holderOf(ctx.state, item2) !== wearer) {
     const moved2 = transfer2(ctx, item2, wearer);
@@ -42907,7 +43255,7 @@ var gearPack = {
       const rest = restOf(ctx, item2).rest;
       const owner2 = whoseOf(ctx, item2).owners[0];
       if (rest === null || rest === "owner" && owner2 === undefined)
-        return reject15("no_rest", `${labelOf(ctx, item2)} has nowhere it's kept`);
+        return reject16("no_rest", `${labelOf(ctx, item2)} has nowhere it's kept`);
       const op = rest === "owner" ? { do: "hand", item: item2, to: owner2 ?? "", basis: "return", why: "" } : { do: "move", item: item2, to: rest, why: "" };
       return itemOpEvents(ctx, op, strOf(a.by) || ctx.world.pov, ctx.rng.seed);
     });
@@ -42920,13 +43268,13 @@ var gearPack = {
       const at2 = said3 !== "" ? clockOfPhrase(calendarOf(ctx.world), ctx.state.clock, said3) : null;
       const until2 = at2 ?? numOf(a.until, NaN);
       if (said3 !== "" && at2 === null && !(until2 > ctx.state.clock))
-        return reject15("bad_until", `"${said3}" names no time; say how many days or until when`);
+        return reject16("bad_until", `"${said3}" names no time; say how many days or until when`);
       return lend(ctx, strOf(a.item), strOf(a.to), until2);
     });
     wrap("gear.retrieve", ["item"], (a, ctx) => retrieve(ctx, strOf(a.item)));
     wrap("gear.set_save", ["who", "name", "kind"], (a, ctx) => {
       const kind = SET_KINDS.find((k) => k === a.kind);
-      return kind ? itemOpEvents(ctx, { do: "set_save", who: strOf(a.who) || ctx.world.pov, name: strOf(a.name), kind }, strOf(a.who) || ctx.world.pov, ctx.rng.seed) : reject15("bad_kind", "a saved set is an outfit or a loadout");
+      return kind ? itemOpEvents(ctx, { do: "set_save", who: strOf(a.who) || ctx.world.pov, name: strOf(a.name), kind }, strOf(a.who) || ctx.world.pov, ctx.rng.seed) : reject16("bad_kind", "a saved set is an outfit or a loadout");
     });
     const setOf = (a, ctx) => {
       const who = strOf(a.who) || ctx.world.pov;
@@ -42945,7 +43293,7 @@ var gearPack = {
       const item2 = strOf(a.item);
       const e = own(ctx.state.entities, item2);
       if (!e)
-        return reject15("missing_entity", `no item ${labelOf(ctx, item2)}`);
+        return reject16("missing_entity", `no item ${labelOf(ctx, item2)}`);
       return e.relations.filter((x) => x.type === "worn_by" || x.type === "equipped").map((x) => ({ type: "unlink", rel: x.type, from: item2, to: x.to }));
     });
     r.effect({
@@ -42956,14 +43304,14 @@ var gearPack = {
         const user = strOf(args.user) || ctx.world.pov;
         const e = own(ctx.state.entities, item2);
         if (!e)
-          return reject15("missing_entity", `no item ${labelOf(ctx, item2)}`);
+          return reject16("missing_entity", `no item ${labelOf(ctx, item2)}`);
         const level = ctx.levelOf(user, "gear");
         const out = [];
         if (level >= 4) {
           if (e.fields.consumable === true || typeof e.fields.uses === "number") {
             const uses = numOf(e.fields.uses, 1);
             if (uses <= 0)
-              return reject15("used_up", `${e.name} is used up`);
+              return reject16("used_up", `${e.name} is used up`);
             out.push(bump(ctx.state, item2, "uses", -1, uses));
           }
           const wearBy = ctx.rng.int(0, 2);
@@ -42983,9 +43331,9 @@ var gearPack = {
         const item2 = strOf(args.item);
         const e = own(ctx.state.entities, item2);
         if (!e)
-          return reject15("missing_entity", `no ${labelOf(ctx, item2)}`);
+          return reject16("missing_entity", `no ${labelOf(ctx, item2)}`);
         if (e.fields.lost === true)
-          return reject15("already_lost", `${e.name} is already lost`);
+          return reject16("already_lost", `${e.name} is already lost`);
         const out = [];
         const lose2 = optionalService(ctx, "economy.lose");
         if (lose2) {
@@ -43093,12 +43441,12 @@ var gearPack = {
     };
     const refusal3 = (p, out) => {
       if (out.kind === "which")
-        return reject15("ambiguous", "more than one thing fits");
+        return reject16("ambiguous", "more than one thing fits");
       if (out.kind === "refused")
         return out.rejection;
-      return isItemChange(p.type) && out.change !== p.type ? reject15("changed", "it would no longer happen as told") : null;
+      return isItemChange(p.type) && out.change !== p.type ? reject16("changed", "it would no longer happen as told") : null;
     };
-    const cash = (p, ctx) => factOf3(p) === "give" && cashGift(strOf(p.item), ctx.world.currency) ? reject15("is_money", "a cash give is a transfer") : null;
+    const cash = (p, ctx) => factOf3(p) === "give" && cashGift(strOf(p.item), ctx.world.currency) ? reject16("is_money", "a cash give is a transfer") : null;
     for (const type of new Set([...ITEM_CHANGES, ...THING_FACTS])) {
       r.proposal({
         type,
@@ -43122,10 +43470,10 @@ var gearPack = {
         try {
           p = JSON.parse(strOf(a.change));
         } catch {
-          return reject15("bad_proposal", "the change isn't one");
+          return reject16("bad_proposal", "the change isn't one");
         }
         if (!isRecord(p))
-          return reject15("bad_proposal", "the change isn't one");
+          return reject16("bad_proposal", "the change isn't one");
         const { out, w } = settled2(p, ctx, ctx.rng.seed);
         return refusal3(p, out) ?? [...w.events];
       }
@@ -43137,13 +43485,13 @@ var gearPack = {
         const item2 = strOf(p.item);
         const e = own(ctx.state.entities, item2);
         if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "item"))
-          return reject15("missing_entity", `no item ${labelOf(ctx, item2)}`);
+          return reject16("missing_entity", `no item ${labelOf(ctx, item2)}`);
         const delta = p.delta;
         if (typeof delta !== "number" || !Number.isInteger(delta) || delta === 0)
-          return reject15("bad_proposal", "quantity needs a whole, non-zero delta");
+          return reject16("bad_proposal", "quantity needs a whole, non-zero delta");
         const who = strOf(p.entity);
         if (who !== "" && who !== e.fields.owner && !isInside(ctx.state, item2, who))
-          return reject15("not_holder", `${labelOf(ctx, who)} doesn't have ${e.name}`);
+          return reject16("not_holder", `${labelOf(ctx, who)} doesn't have ${e.name}`);
         return null;
       },
       toEffects: (p) => [{ type: "add", args: { entity: strOf(p.item), field: "qty", delta: numOf(p.delta) } }],
@@ -43858,7 +44206,7 @@ function spawnVehicle(ctx, spec) {
   const row = rowOf(ctx, "vehicles.classes", spec.class);
   if (!row) {
     const some = Object.keys(ctx.tables.get("vehicles.classes")?.rows ?? {}).slice(0, 8);
-    return reject16("unknown_class", `no vehicle class ${spec.class}${some.length > 0 ? `; classes include ${some.join(", ")}` : ""}`);
+    return reject17("unknown_class", `no vehicle class ${spec.class}${some.length > 0 ? `; classes include ${some.join(", ")}` : ""}`);
   }
   const d = spec.details ?? {};
   const domain = vehicleDomainOf(row);
@@ -43921,7 +44269,7 @@ function pricedVehicle(ctx, words3, given) {
     return null;
   return { class: cls, name: vehicleNameFrom(words3, strOf(row.name, cls)), new: fresh, band: band2, cents: band2.typical };
 }
-function reject16(code, reason) {
+function reject17(code, reason) {
   return { code, reason };
 }
 function charge2(ctx, payer, cents2, memo, category, recurring = false) {
@@ -44008,19 +44356,19 @@ var vehiclesPack = {
         const driver = strOf(args.driver) || ctx.world.pov;
         const e = own(ctx.state.entities, v);
         if (!e)
-          return reject16("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
+          return reject17("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
         if (e.fields.status === "broken")
-          return reject16("broken", `${e.name} has broken down`);
+          return reject17("broken", `${e.name} has broken down`);
         const driverAt = placeOfEntity(ctx.state, driver);
         const vehicleAt = placeOfEntity(ctx.state, v);
         if (vehicleAt === to)
-          return reject16("already_there", `${e.name} is at ${labelOf(ctx, to)} already: walk there`);
+          return reject17("already_there", `${e.name} is at ${labelOf(ctx, to)} already: walk there`);
         const trip = (driverAt ? tripFor(ctx, v, driverAt, to) : null) ?? (vehicleAt && vehicleAt !== driverAt ? tripFor(ctx, v, vehicleAt, to) : null);
         if (!trip)
-          return reject16("no_route", `no route for ${e.name} to ${labelOf(ctx, to)}`);
+          return reject17("no_route", `no route for ${e.name} to ${labelOf(ctx, to)}`);
         const leg = legOf(trip);
         if (!fuelOk(ctx, v, leg))
-          return reject16("no_fuel", `${e.name} doesn't have the fuel`);
+          return reject17("no_fuel", `${e.name} doesn't have the fuel`);
         const out = [...consume(ctx, v, leg, ctx.rng), { type: "set", entity: v, field: "place", value: trip.park }];
         const leftShort = trip.park !== to;
         const named = Array.isArray(args.riders) ? args.riders.filter((x) => typeof x === "string") : [];
@@ -44047,13 +44395,13 @@ var vehiclesPack = {
         const payer = strOf(args.payer) || ctx.world.pov;
         const e = own(ctx.state.entities, v);
         if (!e)
-          return reject16("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
+          return reject17("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
         if (ownerLevel(ctx, v) < 2)
           return [];
         const fuel = numOf(e.fields.fuel_pct, 100);
         const wanted = Math.min(100 - fuel, numOf(args.pct, 100 - fuel));
         if (wanted <= 0)
-          return reject16("full", `${e.name} is full`);
+          return reject17("full", `${e.name} is full`);
         const product = fuelProduct(ctx, v);
         const qty = Math.round(wanted / 100 * product.capacity * 100) / 100;
         const cents2 = product.catalog !== null ? priceOf4(ctx, product.catalog, qty) : Math.round(product.perUnit * qty);
@@ -44071,7 +44419,7 @@ var vehiclesPack = {
         const payer = strOf(args.payer) || ctx.world.pov;
         const e = own(ctx.state.entities, v);
         if (!e)
-          return reject16("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
+          return reject17("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
         const repair = args.repair === true;
         const cents2 = repair ? priceOf4(ctx, "tow_hookup", 1) + priceOf4(ctx, "diagnostic_fee", 1) + priceOf4(ctx, "brake_pads_axle", 1) : priceOf4(ctx, "oil_change_synthetic", 1);
         const paid = charge2(ctx, payer, cents2, `${repair ? "Repair" : "Service"}: ${e.name}`, "vehicle_services");
@@ -44383,7 +44731,7 @@ function stepRegions(slot, ctx, rng) {
   }
   return out;
 }
-function reject17(code, reason) {
+function reject18(code, reason) {
   return { code, reason };
 }
 var weatherPack = {
@@ -44429,10 +44777,10 @@ var weatherPack = {
         const target = strOf(a.region);
         const region = own(ctx.state.entities, target) ? target : regionOf2(ctx, own(ctx.world.places, target) ? target : null);
         if (!region)
-          return reject17("missing_region", `no weather region for ${labelOf(ctx, target)}`);
+          return reject18("missing_region", `no weather region for ${labelOf(ctx, target)}`);
         const st = strOf(a.state);
         if (!climateOf(ctx, region).states.some((s) => s.id === st))
-          return reject17("bad_state", `no weather state ${st.replace(/_/g, " ")}`);
+          return reject18("bad_state", `no weather state ${st.replace(/_/g, " ")}`);
         const out = [{ type: "set", entity: region, field: "weather", value: st }];
         if (typeof a.minutes === "number" && a.minutes > 0)
           out.push({ type: "set", entity: region, field: "weather_hold", value: ctx.state.clock + Math.round(a.minutes) });
@@ -44448,14 +44796,14 @@ var weatherPack = {
         const target = strOf(a.region);
         const region = own(ctx.state.entities, target) ? target : regionOf2(ctx, own(ctx.world.places, target) ? target : null);
         if (!region)
-          return reject17("missing_region", `no weather region for ${labelOf(ctx, target)}`);
+          return reject18("missing_region", `no weather region for ${labelOf(ctx, target)}`);
         const climate = climateOf(ctx, region);
         const season = climateSeason(climate, dateAt(calendarOf(ctx.world), ctx.state.clock).month);
         const calm = climate.states.filter((s) => s.closes.length === 0 && Object.keys(s.travel).length === 0).map((s) => s.id);
         const likeliest = Object.entries(season?.weights ?? {}).filter(([id]) => calm.includes(id)).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]))[0]?.[0];
         const st = strOf(a.state) || likeliest || calm[0] || strOf(own(ctx.state.entities, region)?.fields.weather, "clear");
         if (!climate.states.some((s) => s.id === st))
-          return reject17("bad_state", `no weather state ${st.replace(/_/g, " ")}`);
+          return reject18("bad_state", `no weather state ${st.replace(/_/g, " ")}`);
         return [
           { type: "set", entity: region, field: "weather", value: st },
           { type: "set", entity: region, field: "weather_hold", value: 0 },
@@ -44763,7 +45111,7 @@ function groupRegard(ctx, group, to) {
     return 0;
   return Math.round(members.reduce((a, m) => a + regardValue(ctx, m, to), 0) / members.length * 10) / 10;
 }
-function reject18(code, reason) {
+function reject19(code, reason) {
   return { code, reason };
 }
 function voiceLine(ctx, who) {
@@ -44821,7 +45169,7 @@ var relationshipsPack = {
         const from = strOf(a.from);
         const to = strOf(a.to);
         if (!own(ctx.state.entities, from) || !own(ctx.state.entities, to))
-          return reject18("missing_entity", "regard needs two entities");
+          return reject19("missing_entity", "regard needs two entities");
         const delta = numOf(a.delta);
         const axis = strOf(a.axis);
         return appraise(ctx, from, to, axis ? { [axis]: delta } : Object.fromEntries(axesOf(ctx).map((x) => [x.id, delta])), strOf(a.why, "change"));
@@ -44834,11 +45182,11 @@ var relationshipsPack = {
       boundField: "number",
       validate(p, ctx) {
         if (!own(ctx.state.entities, strOf(p.from)) || !own(ctx.state.entities, strOf(p.to)))
-          return reject18("missing_entity", "regard needs two known people");
+          return reject19("missing_entity", "regard needs two known people");
         if (typeof p.delta !== "number" || p.delta === 0)
-          return reject18("bad_delta", "regard needs a non-zero delta");
+          return reject19("bad_delta", "regard needs a non-zero delta");
         if (typeof p.axis === "string" && !axesOf(ctx).some((a) => a.id === p.axis))
-          return reject18("bad_axis", `no regard axis ${p.axis}`);
+          return reject19("bad_axis", `no regard axis ${p.axis}`);
         return null;
       },
       toEffects: (p) => [{ type: "relationships.adjust", args: { from: strOf(p.from), to: strOf(p.to), ...typeof p.axis === "string" ? { axis: p.axis } : {}, delta: numOf(p.delta), why: strOf(p.why, "narrated") } }]
@@ -45073,7 +45421,7 @@ function sourceProblem(v, world) {
     return typeof v.at === "number" ? null : "a GM source has its time";
   return "its source isn't one";
 }
-function placeProblem(v) {
+function placeProblem2(v) {
   if (v === undefined || v === "home" || v === "work" || v === "here" || v === "with")
     return null;
   if (isRecord(v) && typeof v.place === "string" && v.place !== "")
@@ -45139,7 +45487,7 @@ function blockShapeProblems(v, world = true) {
     out.push("private is true or false");
   if (v.company !== undefined && !(isRecord(v.company) && isRecord(v.company.who) && (v.company.invite === undefined || typeof v.company.invite === "boolean")))
     out.push("its company is {who: a selector, invite?}");
-  for (const p of [placeProblem(v.place), daysProblem(v.days), sourceProblem(v.source, world)])
+  for (const p of [placeProblem2(v.place), daysProblem(v.days), sourceProblem(v.source, world)])
     if (p)
       out.push(p);
   return out;
@@ -48161,7 +48509,7 @@ function buildSheetView(ctx) {
     sections: designed ?? [...stats.length > 0 ? [{ title: "Stats", rows: stats }] : [], ...derived.length > 0 ? [{ title: "Derived", rows: derived }] : []]
   };
 }
-function reject19(code, reason) {
+function reject20(code, reason) {
   return { code, reason };
 }
 var sheetsPack = {
@@ -48188,10 +48536,10 @@ var sheetsPack = {
         const who = strOf(a.who) || ctx.world.pov;
         const e = own(ctx.state.entities, who);
         if (!e)
-          return reject19("missing_entity", `no ${labelOf(ctx, who)}`);
+          return reject20("missing_entity", `no ${labelOf(ctx, who)}`);
         const id = strOf(a.condition).toLowerCase().replace(/\W+/g, "_");
         if (!id)
-          return reject19("bad_condition", "a condition needs a name");
+          return reject20("bad_condition", "a condition needs a name");
         const kept3 = (Array.isArray(e.fields.conditions) ? e.fields.conditions : []).filter((c) => objOf(c).id !== id && !(typeof objOf(c).until === "number" && numOf(objOf(c).until) <= ctx.state.clock));
         if (a.clear === true)
           return [{ type: "set", entity: who, field: "conditions", value: kept3 }];
@@ -48230,9 +48578,9 @@ var sheetsPack = {
       validate(p, ctx) {
         const who = strOf(p.who) || ctx.world.pov;
         if (!own(ctx.state.entities, who) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person"))
-          return reject19("missing_entity", "a condition needs a person");
+          return reject20("missing_entity", "a condition needs a person");
         if (strOf(p.condition) === "")
-          return reject19("bad_condition", "a condition needs a name");
+          return reject20("bad_condition", "a condition needs a name");
         return null;
       },
       toEffects: (p) => [{ type: "sheets.condition", args: { who: strOf(p.who), condition: strOf(p.condition), ...typeof p.minutes === "number" ? { minutes: p.minutes } : {}, ...p.clear === true ? { clear: true } : {} } }]
@@ -48442,7 +48790,7 @@ function unsetFlags(world) {
   }
   return out;
 }
-function reject20(code, reason) {
+function reject21(code, reason) {
   return { code, reason };
 }
 function openPuzzles(ctx) {
@@ -48508,8 +48856,8 @@ function answerTo(ctx, track2, a) {
   const answer = typeof a.answer === "number" && Number.isFinite(a.answer) ? String(a.answer) : strOf(a.answer);
   const check2 = checkAnswer(ctx.world, ctx.state, track2, answer, decision2);
   if (check2.needsDecision)
-    return reject20("needs_decision", "this answer needs a judgement");
-  return check2.event ? [check2.event] : reject20("no_answer", "there is nothing to answer here");
+    return reject21("needs_decision", "this answer needs a judgement");
+  return check2.event ? [check2.event] : reject21("no_answer", "there is nothing to answer here");
 }
 var storyPack = {
   id: "story",
@@ -48532,7 +48880,7 @@ var storyPack = {
       const v = flagValue(ctx, String(name ?? ""));
       return typeof v === "number" || typeof v === "boolean" || typeof v === "string" ? v : v !== null;
     });
-    r.effect({ type: "story.flag", args: ["name", "value?"], resolve: (a) => strOf(a.name) === "" ? reject20("bad_flag", "a flag needs a name") : [{ type: "story.flag", data: { name: strOf(a.name), value: a.value ?? true } }] });
+    r.effect({ type: "story.flag", args: ["name", "value?"], resolve: (a) => strOf(a.name) === "" ? reject21("bad_flag", "a flag needs a name") : [{ type: "story.flag", data: { name: strOf(a.name), value: a.value ?? true } }] });
     r.effect({
       type: "story.answer",
       args: ["track?", "puzzle?", "answer", "decision?"],
@@ -48617,7 +48965,7 @@ var storyPack = {
 var core_default10 = storyPack;
 
 // src/packs/combat/core/model.ts
-var PACK4 = "combat";
+var PACK5 = "combat";
 var STALEMATE_ROUNDS = 3;
 var LOG_CAP = 24;
 var DEFAULT_WOUNDS = [
@@ -48640,7 +48988,7 @@ function numbers3(v) {
   return out;
 }
 function encounterOf(state2) {
-  const raw = sliceOf(state2, PACK4).encounter;
+  const raw = sliceOf(state2, PACK5).encounter;
   if (!isRecord(raw) || typeof raw.id !== "string" || !Array.isArray(raw.order))
     return null;
   const order = [];
@@ -48659,7 +49007,7 @@ function encounterOf(state2) {
   return { id: raw.id, place: typeof raw.place === "string" ? raw.place : null, round: Math.max(1, numOf(raw.round, 1)), turn: Math.max(0, numOf(raw.turn)), order, log, calm: { hp: numbers3(calm.hp), rounds: Math.max(0, numOf(calm.rounds)), struck: calm.struck === true } };
 }
 function writeEncounter(state2, enc) {
-  const slice2 = mutableSlice(state2, PACK4);
+  const slice2 = mutableSlice(state2, PACK5);
   if (enc)
     slice2.encounter = enc;
   else {
@@ -48667,11 +49015,11 @@ function writeEncounter(state2, enc) {
     delete slice2.decisions;
   }
   if (Object.keys(slice2).length === 0)
-    delete state2.packs[PACK4];
+    delete state2.packs[PACK5];
 }
 function decisionsOf(state2) {
   const out = {};
-  for (const [k, v] of Object.entries(objOf(sliceOf(state2, PACK4).decisions)))
+  for (const [k, v] of Object.entries(objOf(sliceOf(state2, PACK5).decisions)))
     if (typeof v === "string")
       out[k] = v;
   return out;
@@ -49336,14 +49684,14 @@ function buildEncounterView(ctx, opts = {}) {
 }
 
 // src/packs/combat/core/index.ts
-function reject21(code, reason) {
+function reject22(code, reason) {
   return { code, reason };
 }
 function current(e, ctx) {
   const enc = encounterOf(ctx.state);
   if (!enc)
-    return reject21("no_fight", "no fight is under way");
-  return enc.id === strOf(e.data.encounter) ? enc : reject21("other_fight", "that was another fight");
+    return reject22("no_fight", "no fight is under way");
+  return enc.id === strOf(e.data.encounter) ? enc : reject22("other_fight", "that was another fight");
 }
 function counts(v) {
   if (!isRecord(v))
@@ -49376,33 +49724,33 @@ function namedFoes(ctx, v, here) {
     return null;
   if (isRecord(v)) {
     const selector = knownBySelector(v);
-    return selector ? here.filter((id) => selectorMatches(ctx.registry, ctx.world, ctx.state, selector, id)) : reject21("bad_args", "the foes are ids or a selector");
+    return selector ? here.filter((id) => selectorMatches(ctx.registry, ctx.world, ctx.state, selector, id)) : reject22("bad_args", "the foes are ids or a selector");
   }
   const ids = (Array.isArray(v) ? v : [v]).filter((x) => typeof x === "string" && x !== "");
   const away = ids.find((id) => !here.includes(id));
-  return away !== undefined ? reject21("not_here", `${labelOf(ctx, away)} isn't here to fight`) : ids;
+  return away !== undefined ? reject22("not_here", `${labelOf(ctx, away)} isn't here to fight`) : ids;
 }
 function startFight(a, ctx) {
   const rules = rulesOf(ctx.world);
   if (!rules)
-    return reject21("no_combat", "this world has no combat");
+    return reject22("no_combat", "this world has no combat");
   if (encounterOf(ctx.state))
-    return reject21("in_fight", "a fight is already under way");
+    return reject22("in_fight", "a fight is already under way");
   const pov = ctx.world.pov;
   const place2 = placeOfEntity(ctx.state, pov);
   if (place2 === null)
-    return reject21("nowhere", "there's nowhere to fight");
+    return reject22("nowhere", "there's nowhere to fight");
   if (!canFight(ctx, rules, pov))
-    return reject21("cannot_fight", "you can't fight here");
+    return reject22("cannot_fight", "you can't fight here");
   const here = Object.keys(ctx.state.entities).sort().filter((id) => id !== pov && placeOfEntity(ctx.state, id) === place2 && canFight(ctx, rules, id));
   const named = namedFoes(ctx, a.foes, here);
   if (named !== null && !Array.isArray(named))
     return named;
   const foes = new Set(named ?? here.filter((id) => hostile(ctx, rules.sides?.hostile, id, pov)));
   if (foes.size === 0)
-    return reject21("no_foes", "there's no one to fight here");
+    return reject22("no_foes", "there's no one to fight here");
   if (foes.has(pov))
-    return reject21("bad_args", "you can't fight yourself");
+    return reject22("bad_args", "you can't fight yourself");
   const ally = (self, other) => rules.sides?.ally !== undefined && truthy2(readFor(ctx, rules.sides.ally, { self, other }, false));
   const party = new Set([pov, ...here.filter((id) => !foes.has(id) && ally(id, pov))]);
   const sworn = [...foes];
@@ -49411,7 +49759,7 @@ function startFight(a, ctx) {
       foes.add(id);
   const init = checkOf(ctx.world, rules.initiative);
   if (!init)
-    return reject21("no_initiative", "the initiative check is missing");
+    return reject22("no_initiative", "the initiative check is missing");
   const rolled = [];
   for (const id of [...party, ...[...foes].sort()]) {
     const ready = readyCheck(ctx.registry, ctx, init, { self: id, actor: id });
@@ -49434,23 +49782,23 @@ var events2 = [
     type: "combat.start",
     validate(e, ctx) {
       if (!rulesOf(ctx.world))
-        return reject21("no_combat", "this world has no combat");
+        return reject22("no_combat", "this world has no combat");
       if (encounterOf(ctx.state))
-        return reject21("in_fight", "a fight is already under way");
+        return reject22("in_fight", "a fight is already under way");
       const order = orderOf(e.data.order);
       if (strOf(e.data.encounter) === "" || !order)
-        return reject21("bad_event", "a fight needs an id and an initiative order");
+        return reject22("bad_event", "a fight needs an id and an initiative order");
       if (new Set(order.map((f) => f.id)).size !== order.length)
-        return reject21("bad_event", "someone is in the fight twice");
+        return reject22("bad_event", "someone is in the fight twice");
       const missing = order.find((f) => !own(ctx.state.entities, f.id));
       if (missing)
-        return reject21("missing_entity", `no ${labelOf(ctx, missing.id)}`);
+        return reject22("missing_entity", `no ${labelOf(ctx, missing.id)}`);
       if (order.find((f) => f.id === ctx.world.pov)?.side !== "party" || !order.some((f) => f.side === "foes"))
-        return reject21("bad_event", "a fight is the POV's side against foes");
+        return reject22("bad_event", "a fight is the POV's side against foes");
       return null;
     },
     apply(e, state2, ctx) {
-      delete mutableSlice(state2, PACK4).decisions;
+      delete mutableSlice(state2, PACK5).decisions;
       const order = orderOf(e.data.order) ?? [];
       const rules = rulesOf(ctx.world);
       writeEncounter(state2, { id: strOf(e.data.encounter), place: typeof e.data.place === "string" ? e.data.place : null, round: 1, turn: 0, order, log: [], calm: { hp: rules ? hpByFighter(ctx, rules, order) : {}, rounds: 0, struck: false } });
@@ -49466,15 +49814,15 @@ var events2 = [
       const round = e.data.round;
       const turn = e.data.turn;
       if (typeof round !== "number" || typeof turn !== "number" || !Number.isInteger(round) || !Number.isInteger(turn))
-        return reject21("bad_event", "a turn needs a round and a place in the order");
+        return reject22("bad_event", "a turn needs a round and a place in the order");
       if (enc.order[turn]?.id !== strOf(e.data.actor))
-        return reject21("bad_turn", "that isn't who goes there");
+        return reject22("bad_turn", "that isn't who goes there");
       if (round < enc.round || round === enc.round && turn <= enc.turn)
-        return reject21("bad_turn", "turns only move on");
+        return reject22("bad_turn", "turns only move on");
       const reset = objOf(e.data.reset);
       for (const [id, budgets] of Object.entries(reset))
         if (!fighterOf(enc, id) || !counts(budgets))
-          return reject21("bad_event", "a refill names a participant and its budgets");
+          return reject22("bad_event", "a refill names a participant and its budgets");
       return null;
     },
     apply(e, state2, ctx) {
@@ -49508,12 +49856,12 @@ var events2 = [
       const f = fighterOf(enc, who);
       const cost = counts(e.data.cost);
       if (!rules || !f || !cost || Object.values(cost).some((n) => n <= 0))
-        return reject21("bad_event", "a spend needs a participant and what it spends");
+        return reject22("bad_event", "a spend needs a participant and what it spends");
       if (!standing(ctx, enc, f))
-        return reject21("down", `${labelOf(ctx, who)} is out of the fight`);
+        return reject22("down", `${labelOf(ctx, who)} is out of the fight`);
       if (enc.order[enc.turn]?.id !== who && !offTurnCost(rules, cost))
-        return reject21("not_your_turn", `it isn't ${labelOf(ctx, who)}'s turn`);
-      return fits2(cost, f.left) ? null : reject21("spent", `${labelOf(ctx, who)} has nothing like that left`);
+        return reject22("not_your_turn", `it isn't ${labelOf(ctx, who)}'s turn`);
+      return fits2(cost, f.left) ? null : reject22("spent", `${labelOf(ctx, who)} has nothing like that left`);
     },
     apply(e, state2) {
       const enc = encounterOf(state2);
@@ -49529,7 +49877,7 @@ var events2 = [
       const enc = current(e, ctx);
       if ("code" in enc)
         return enc;
-      return fighterOf(enc, strOf(e.data.actor)) ? null : reject21("not_fighting", `${labelOf(ctx, strOf(e.data.actor))} isn't in this fight`);
+      return fighterOf(enc, strOf(e.data.actor)) ? null : reject22("not_fighting", `${labelOf(ctx, strOf(e.data.actor))} isn't in this fight`);
     },
     apply(e, state2, ctx) {
       const enc = encounterOf(state2);
@@ -49551,8 +49899,8 @@ var events2 = [
       const rules = rulesOf(ctx.world);
       const who = strOf(e.data.entity);
       if (!rules || !fighterOf(enc, who) || typeof e.data.down !== "boolean")
-        return reject21("bad_event", "a fall names a participant");
-      return downHolds(ctx, rules, who) === e.data.down ? null : reject21("not_down", e.data.down ? `${labelOf(ctx, who)} isn't down` : `${labelOf(ctx, who)} is still down`);
+        return reject22("bad_event", "a fall names a participant");
+      return downHolds(ctx, rules, who) === e.data.down ? null : reject22("not_down", e.data.down ? `${labelOf(ctx, who)} isn't down` : `${labelOf(ctx, who)} is still down`);
     },
     apply(e, state2) {
       const enc = encounterOf(state2);
@@ -49569,11 +49917,11 @@ var events2 = [
         return enc;
       const rules = rulesOf(ctx.world);
       if (e.data.reason === "over" && (!rules || !endHolds(ctx, rules, enc)))
-        return reject21("not_over", "the fight isn't over");
+        return reject22("not_over", "the fight isn't over");
       if (e.data.reason === "left" && !povLeft(ctx.state, ctx.world, enc))
-        return reject21("not_left", "you are still in the fight");
+        return reject22("not_left", "you are still in the fight");
       if (e.data.reason === "stalemate" && (!rules || !stalledHolds(ctx, rules, enc)))
-        return reject21("not_stalemate", rules && stalemateRounds(rules) === 0 ? "this world's fights never peter out" : "someone has attacked or been hurt since");
+        return reject22("not_stalemate", rules && stalemateRounds(rules) === 0 ? "this world's fights never peter out" : "someone has attacked or been hurt since");
       return null;
     },
     apply: (_e, state2) => writeEncounter(state2, null),
@@ -49581,9 +49929,9 @@ var events2 = [
   },
   {
     type: "combat.decision",
-    validate: (e) => strOf(e.data.key) !== "" && strOf(e.data.choice) !== "" ? null : reject21("bad_event", "a decision needs a key and a choice"),
+    validate: (e) => strOf(e.data.key) !== "" && strOf(e.data.choice) !== "" ? null : reject22("bad_event", "a decision needs a key and a choice"),
     apply: (e, state2) => {
-      sliceRecord(state2, PACK4, "decisions")[strOf(e.data.key)] = strOf(e.data.choice);
+      sliceRecord(state2, PACK5, "decisions")[strOf(e.data.key)] = strOf(e.data.choice);
     },
     describe: (e) => `decided ${strOf(e.data.choice)}`
   }
@@ -49594,7 +49942,7 @@ function fighterArg(ctx, v) {
   return enc && f ? { enc, f } : null;
 }
 var combatPack = {
-  id: PACK4,
+  id: PACK5,
   label: "Combat",
   version: 1,
   domain: null,
@@ -49609,7 +49957,7 @@ var combatPack = {
       resolve(a, ctx) {
         const enc = encounterOf(ctx.state);
         if (!enc)
-          return reject21("no_fight", "no fight is under way");
+          return reject22("no_fight", "no fight is under way");
         const winner = a.winner === "party" || a.winner === "foes" ? a.winner : winnerOf(ctx, enc);
         return [{ type: "combat.end", data: { encounter: enc.id, reason: "effect", winner, rounds: enc.round } }];
       }
@@ -49622,11 +49970,11 @@ var combatPack = {
         const enc = encounterOf(ctx.state);
         const who = strOf(a.who) || ctx.world.pov;
         if (!rules || !enc)
-          return reject21("no_fight", "no fight is under way");
+          return reject22("no_fight", "no fight is under way");
         if (enc.order[enc.turn]?.id !== who)
-          return reject21("not_your_turn", who === ctx.world.pov ? "it isn't your turn" : `it isn't ${labelOf(ctx, who)}'s turn`);
+          return reject22("not_your_turn", who === ctx.world.pov ? "it isn't your turn" : `it isn't ${labelOf(ctx, who)}'s turn`);
         const next = nextTurn(ctx, rules, enc);
-        return next ? [next] : reject21("no_one", "no one is left to take a turn");
+        return next ? [next] : reject22("no_one", "no one is left to take a turn");
       }
     });
     r.effect({ type: "combat.spend", args: ["who?", "cost"], resolve: (a, ctx) => spendFor(ctx, strOf(a.who) || ctx.world.pov, { combat: { cost: counts(a.cost) ?? {} } }) });
@@ -49642,7 +49990,7 @@ var combatPack = {
       const enc = encounterOf(ctx.state);
       return enc ? `${enc.id}:${enc.round}` : null;
     });
-    r.relation({ id: "hostile", label: "Hostile to", from: "*", to: "*", cardinality: "many_many", symmetric: true, fields: {}, pack: PACK4 });
+    r.relation({ id: "hostile", label: "Hostile to", from: "*", to: "*", cardinality: "many_many", symmetric: true, fields: {}, pack: PACK5 });
     r.formula("can_fight", (ctx, e) => {
       const rules = rulesOf(ctx.world);
       return rules !== null && typeof e === "string" && canFight(ctx, rules, e);
@@ -49673,7 +50021,7 @@ var combatPack = {
       id: "fight",
       label: "Fight",
       description: "Start a fight with someone.",
-      pack: PACK4,
+      pack: PACK5,
       params: { target: { type: "ref", label: "Opponent" } },
       requires: ["can_fight(target)"],
       combat: { cost: {}, start: true },
@@ -49686,7 +50034,7 @@ var combatPack = {
       id: "end_turn",
       label: "End turn",
       description: "End your turn in a fight.",
-      pack: PACK4,
+      pack: PACK5,
       params: {},
       requires: [],
       combat: { cost: {} },
@@ -49700,14 +50048,14 @@ var combatPack = {
 var core_default11 = combatPack;
 
 // src/packs/minds/core/state.ts
-var PACK5 = "minds";
+var PACK6 = "minds";
 var EMPTY_SLICE = { round: 0, on: false, chars: {}, presence: [] };
 var EMPTY_KNOWLEDGE = { facts: {}, holdings: {} };
 function emptyCharacter() {
   return { mind: null, plans: [], notes: [], commitments: [], witness: [], summary: "", pin: null, refresh: false, lastPresent: null, consolidated: null };
 }
 function readSlice(state2) {
-  const raw = state2.packs[PACK5];
+  const raw = state2.packs[PACK6];
   if (!raw)
     return EMPTY_SLICE;
   const s = raw;
@@ -49720,13 +50068,13 @@ function lastDue(c) {
   return c.passed && (!c.mind || c.passed.round > c.mind.round) ? c.passed : c.mind;
 }
 function writeSlice(state2) {
-  const s = state2.packs[PACK5] ?? {};
+  const s = state2.packs[PACK6] ?? {};
   s.round ??= 0;
   s.on ??= false;
   s.chars ??= {};
   s.presence ??= [];
   const full = s;
-  state2.packs[PACK5] = full;
+  state2.packs[PACK6] = full;
   return full;
 }
 function writeCharacter(state2, id) {
@@ -50391,7 +50739,7 @@ function mindsOn(ctx) {
 }
 
 // src/packs/minds/core/edit.ts
-function reject22(code, reason) {
+function reject23(code, reason) {
   return { code, reason };
 }
 function tidy(text4) {
@@ -50403,21 +50751,21 @@ function gmText(v, max, kept3, what) {
   const t = tidy(v);
   if (max === undefined || t.length <= max || t === kept3)
     return t;
-  return reject22("too_long", `${what} is at most ${max.toLocaleString("en-US")} characters, as Settings → Minds → Lengths has it, and this is ${t.length.toLocaleString("en-US")}`);
+  return reject23("too_long", `${what} is at most ${max.toLocaleString("en-US")} characters, as Settings → Minds → Lengths has it, and this is ${t.length.toLocaleString("en-US")}`);
 }
 var minutes = (v) => typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null;
 function peopleIn(ctx, v) {
   if (v === undefined)
     return [];
   if (!Array.isArray(v) || !v.every((x) => typeof x === "string"))
-    return reject22("bad_value", "who it's with is a list of people");
+    return reject23("bad_value", "who it's with is a list of people");
   const ids2 = v;
   for (const id of ids2) {
     const e = own(ctx.state.entities, id);
     if (!e)
-      return reject22("missing_entity", `there's no ${labelOf(ctx, id)}`);
+      return reject23("missing_entity", `there's no ${labelOf(ctx, id)}`);
     if (!kindIs(ctx.registry, ctx.world, e.kind, "person"))
-      return reject22("bad_value", `${e.name} isn't a person`);
+      return reject23("bad_value", `${e.name} isn't a person`);
   }
   return [...new Set(ids2)];
 }
@@ -50427,10 +50775,10 @@ function noteFrom(ctx, who, id, v, before, lengths) {
     return said3;
   const body = said3 ?? before?.text ?? null;
   if (body === null)
-    return reject22("bad_value", "a note needs its text");
+    return reject23("bad_value", "a note needs its text");
   const salience = v.salience === undefined ? before?.salience ?? 3 : typeof v.salience === "number" && v.salience >= 1 && v.salience <= 5 ? v.salience : null;
   if (salience === null)
-    return reject22("bad_value", "a note's salience is 1 to 5");
+    return reject23("bad_value", "a note's salience is 1 to 5");
   return { id: id ?? `n_${hashParts("minds.gm.note", who, String(ctx.state.clock), body).slice(0, 10)}`, text: body, salience, at: before?.at ?? ctx.state.clock };
 }
 function commitmentFrom(ctx, who, id, v, before, lengths) {
@@ -50439,19 +50787,19 @@ function commitmentFrom(ctx, who, id, v, before, lengths) {
     return said3;
   const body = said3 ?? before?.text ?? null;
   if (body === null)
-    return reject22("bad_value", "a commitment needs its text");
+    return reject23("bad_value", "a commitment needs its text");
   const kind = v.kind === undefined ? before?.kind ?? "other" : COMMITMENT_KINDS.includes(v.kind) ? v.kind : null;
   if (kind === null)
-    return reject22("bad_value", `a commitment is one of ${COMMITMENT_KINDS.join(", ")}`);
+    return reject23("bad_value", `a commitment is one of ${COMMITMENT_KINDS.join(", ")}`);
   const status = v.status === undefined ? before?.status ?? "open" : COMMITMENT_STATUSES.includes(v.status) ? v.status : null;
   if (status === null)
-    return reject22("bad_value", `a commitment's status is one of ${COMMITMENT_STATUSES.join(", ")}`);
+    return reject23("bad_value", `a commitment's status is one of ${COMMITMENT_STATUSES.join(", ")}`);
   const withList = v.with === undefined ? before?.with ?? [] : peopleIn(ctx, v.with);
   if (!Array.isArray(withList))
     return withList;
   const due = v.due === undefined ? before?.due ?? null : v.due === null ? null : minutes(v.due);
   if (v.due !== undefined && v.due !== null && due === null)
-    return reject22("bad_value", "a commitment's due time is game minutes");
+    return reject23("bad_value", "a commitment's due time is game minutes");
   const closed = status === "open" ? null : before && before.status !== "open" ? before.closed : ctx.state.clock;
   return { id: id ?? `c_${hashParts("minds.gm.commitment", who, String(ctx.state.clock), body).slice(0, 10)}`, kind, with: withList, text: body, due, status, made: before?.made ?? ctx.state.clock, closed };
 }
@@ -50461,31 +50809,31 @@ function planFrom(ctx, who, id, v, before, lengths) {
     return said3;
   const what = said3 ?? before?.what ?? null;
   if (what === null)
-    return reject22("bad_value", "a plan needs what it is");
+    return reject23("bad_value", "a plan needs what it is");
   const when2 = v.when === undefined ? before?.when ?? null : typeof v.when === "object" && v.when !== null && !Array.isArray(v.when) ? { from: minutes(v.when.from), to: minutes(v.when.to) } : null;
   if (!when2 || when2.from === null || when2.to === null || when2.to < when2.from)
-    return reject22("bad_value", "a plan needs when, from and to in game minutes, to not before from");
+    return reject23("bad_value", "a plan needs when, from and to in game minutes, to not before from");
   const kind = v.kind === undefined ? before?.kind ?? "other" : PLAN_KINDS.includes(v.kind) ? v.kind : null;
   if (kind === null)
-    return reject22("bad_value", `a plan is one of ${PLAN_KINDS.join(", ")}`);
+    return reject23("bad_value", `a plan is one of ${PLAN_KINDS.join(", ")}`);
   const where = v.where === undefined ? before?.where ?? null : v.where === null ? null : typeof v.where === "string" && own(ctx.world.places, v.where) ? v.where : undefined;
   if (where === undefined)
-    return reject22("missing_place", `there's no place ${typeof v.where === "string" ? labelOf(ctx, v.where) : "like that"}`);
+    return reject23("missing_place", `there's no place ${typeof v.where === "string" ? labelOf(ctx, v.where) : "like that"}`);
   const withList = v.with === undefined ? before?.with ?? [] : peopleIn(ctx, v.with);
   if (!Array.isArray(withList))
     return withList;
   const priority = v.priority === undefined ? before?.priority ?? PLAN_PRIORITY.normal : typeof v.priority === "number" && v.priority >= PLAN_PRIORITY.min && v.priority <= PLAN_PRIORITY.max ? Math.round(v.priority) : null;
   if (priority === null)
-    return reject22("bad_value", `a plan's priority is ${PLAN_PRIORITY.min} to ${PLAN_PRIORITY.max}`);
+    return reject23("bad_value", `a plan's priority is ${PLAN_PRIORITY.min} to ${PLAN_PRIORITY.max}`);
   const statuses = ["open", "done", "dropped"];
   const status = v.status === undefined ? before?.status ?? "open" : statuses.includes(v.status) ? v.status : null;
   if (status === null)
-    return reject22("bad_value", "a plan's status is open, done or dropped");
+    return reject23("bad_value", "a plan's status is open, done or dropped");
   const closed = status === "open" ? null : before && before.status !== "open" ? before.closed : ctx.state.clock;
   const money4 = kind === "pay" || kind === "lend";
   const cents2 = v.cents === undefined ? before?.cents : typeof v.cents === "number" && Number.isInteger(v.cents) && v.cents > 0 ? v.cents : null;
   if (money4 && (cents2 === null || cents2 === undefined || withList.length === 0))
-    return reject22("bad_value", "a pay or lend plan needs an amount in minor units and someone to hand it to");
+    return reject23("bad_value", "a pay or lend plan needs an amount in minor units and someone to hand it to");
   const shared = sharesPlan({ kind, with: withList });
   return {
     id: id ?? (shared ? sharedPlanId([who, ...withList], when2.from) : `p_${hashParts("minds.gm.plan", who, String(ctx.state.clock), what).slice(0, 10)}`),
@@ -50508,34 +50856,34 @@ function planFrom(ctx, who, id, v, before, lengths) {
 function knowledgeEdit(ctx, op, name) {
   const k = readKnowledge(ctx.state);
   if (!own(k.facts, op.fact))
-    return reject22("missing_fact", "the minds hold no such fact");
+    return reject23("missing_fact", "the minds hold no such fact");
   const before = own(own(k.holdings, op.entity) ?? {}, op.fact);
   if (op.holding === null)
-    return before ? [{ type: MINDS_EVENTS.forget, data: { who: [op.entity], fact: op.fact } }] : reject22("no_change", `${name} doesn't hold that`);
+    return before ? [{ type: MINDS_EVENTS.forget, data: { who: [op.entity], fact: op.fact } }] : reject23("no_change", `${name} doesn't hold that`);
   const h = op.holding;
   if (!isHolding(h))
-    return reject22("bad_value", "a holding is how it's held and by whom (one told names its teller), its evidence, since when, the belief, a confidence from 0 to 1 and whom it's kept from");
+    return reject23("bad_value", "a holding is how it's held and by whom (one told names its teller), its evidence, since when, the belief, a confidence from 0 to 1 and whom it's kept from");
   const named = peopleIn(ctx, [...h.by === null ? [] : [h.by], ...Array.isArray(h.keptFrom) ? h.keptFrom : []]);
   if (!Array.isArray(named))
     return named;
   if (h.by === op.entity)
-    return reject22("bad_value", `${name} can't have told themselves`);
+    return reject23("bad_value", `${name} can't have told themselves`);
   if (h.evidence.some((ref) => ref === op.fact || !isWitnessRef(ref) && !own(k.facts, ref)))
-    return reject22("missing_fact", "a holding rests on facts the minds hold, never on itself");
+    return reject23("missing_fact", "a holding rests on facts the minds hold, never on itself");
   const next = holdingOf(h, op.entity);
   if (before && JSON.stringify(holdingOf(before, op.entity)) === JSON.stringify(next))
-    return reject22("no_change", "nothing to change");
+    return reject23("no_change", "nothing to change");
   return [{ type: MINDS_EVENTS.learn, data: { who: [op.entity], fact: op.fact, how: next.how, by: next.by, evidence: next.evidence, belief: next.belief, confidence: next.confidence, ...next.keptFrom ? { keptFrom: next.keptFrom } : {}, msg: next.since.msg, at: next.since.at } }];
 }
 function mindEdit(ctx, op, lengths) {
   const { world, state: state2, registry } = ctx;
   const e = own(state2.entities, op.entity);
   if (!e)
-    return reject22("missing_entity", `there's no ${labelOf(ctx, op.entity)}`);
+    return reject23("missing_entity", `there's no ${labelOf(ctx, op.entity)}`);
   if (op.op === "mind_knowledge")
-    return kindIs(registry, world, e.kind, "person") ? knowledgeEdit(ctx, op, e.name) : reject22("bad_value", `${e.name} isn't a person`);
+    return kindIs(registry, world, e.kind, "person") ? knowledgeEdit(ctx, op, e.name) : reject23("bad_value", `${e.name} isn't a person`);
   if (op.entity === world.pov || !kindIs(registry, world, e.kind, "person"))
-    return reject22("no_mind", `${e.name} doesn't have a mind`);
+    return reject23("no_mind", `${e.name} doesn't have a mind`);
   if (op.op === "mind_pin")
     return [{ type: MINDS_EVENTS.pin, data: { entity: op.entity, level: op.level } }];
   if (op.op === "mind_refresh")
@@ -50543,7 +50891,7 @@ function mindEdit(ctx, op, lengths) {
   const c = readCharacter(state2, op.entity);
   if (op.op === "mind_intent") {
     if (op.text === undefined && op.approach === undefined)
-      return reject22("bad_value", "say what they mean to do, or how they go about it");
+      return reject23("bad_value", "say what they mean to do, or how they go about it");
     const said3 = op.text === undefined ? undefined : gmText(op.text, lengths?.gmIntent, c.intent?.text, "Your intent for them");
     if (typeof said3 === "object" && said3 !== null)
       return said3;
@@ -50555,26 +50903,26 @@ function mindEdit(ctx, op, lengths) {
   if (op.part === "note") {
     const before2 = op.id === null ? undefined : c.notes.find((n) => n.id === op.id);
     if (op.id !== null && !before2)
-      return reject22("missing_note", `${e.name} has no such note`);
+      return reject23("missing_note", `${e.name} has no such note`);
     if (value === null)
-      return op.id === null ? reject22("bad_value", "say which note to delete") : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: op.id, value: null } }];
+      return op.id === null ? reject23("bad_value", "say which note to delete") : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: op.id, value: null } }];
     const note2 = noteFrom(ctx, op.entity, op.id, value, before2, lengths);
     return "code" in note2 ? note2 : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: note2.id, value: note2 } }];
   }
   if (op.part === "commitment") {
     const before2 = op.id === null ? undefined : c.commitments.find((x) => x.id === op.id);
     if (op.id !== null && !before2)
-      return reject22("missing_commitment", `${e.name} has no such commitment`);
+      return reject23("missing_commitment", `${e.name} has no such commitment`);
     if (value === null)
-      return op.id === null ? reject22("bad_value", "say which commitment to delete") : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: op.id, value: null } }];
+      return op.id === null ? reject23("bad_value", "say which commitment to delete") : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: op.id, value: null } }];
     const commitment = commitmentFrom(ctx, op.entity, op.id, value, before2, lengths);
     return "code" in commitment ? commitment : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: commitment.id, value: commitment } }];
   }
   const before = op.id === null ? undefined : c.plans.find((p) => p.id === op.id);
   if (op.id !== null && !before)
-    return reject22("missing_plan", `${e.name} has no such plan`);
+    return reject23("missing_plan", `${e.name} has no such plan`);
   if (value === null)
-    return op.id === null ? reject22("bad_value", "say which plan to delete") : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: op.id, value: null } }];
+    return op.id === null ? reject23("bad_value", "say which plan to delete") : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: op.id, value: null } }];
   const plan2 = planFrom(ctx, op.entity, op.id, value, before, lengths);
   return "code" in plan2 ? plan2 : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: plan2.id, value: plan2 } }];
 }
@@ -51263,7 +51611,7 @@ function minded(ctx) {
 
 // src/packs/minds/core/index.ts
 var mindsPack = {
-  id: PACK5,
+  id: PACK6,
   label: "Minds",
   version: 1,
   domain: null,
@@ -94311,7 +94659,7 @@ Leave Gear and Money in the background unless the reply turns on them.
 var RECIPES_default = "# LumiRPEngine recipes\n\nSmall worlds that each show one thing working end to end. Every recipe here is a fragment of a world document: the parts it adds to a new world (Build's **Blank** template, or `lre_world_create` with no template). Merge it object by object: a collection gains the items shown, an item gains the fields shown, and a list replaces the one already there. In Build, enter each item in its editor; an agent merges the JSON with `lre_edit`. A new world carries every default data table, pinned as a template's are, so a recipe that needs a table of its own carries the whole table, rows and all, and it replaces the world's copy rather than merging into it; in Build, edit that copy in the **Data tables** editor. `test/docs/recipes.test.ts` builds every fragment on this page and plays it through the engine, so what each recipe says happens does happen.\n\nThe formulas are explained in [EXPRESSIONS.md](EXPRESSIONS.md), and every effect, function and pack kind used here is listed in the [reference](REFERENCE.md). Fights are set up in the user guide's [Combat and encounters](USER-GUIDE.md#combat-and-encounters).\n\n## XP and levels\n\nA progression keeps experience in one field and the level in another, and the level follows the XP both ways. After any effect changes an entity's XP (an award, a quest reward, a ✎ fix, a GM edit), the engine raises its level to the last threshold reached, one level at a time, and runs `onLevel` for each level gained; XP that falls below the level's threshold drops the level straight back, running nothing, and a pool left above its lower max comes down to it. Nothing else writes the level: to change one, change XP. Here sparring earns 150 XP, Level 2 starts at 300, and every level adds a point of Grit. The maximum hit points are derived from the level, so the pool grows with it, and the sheet shows the level, the XP to the next one, and the pool as a bar.\n\n```json\n{\n  \"kinds\": {\n    \"person\": {\n      \"fields\": {\n        \"xp\": { \"type\": \"number\", \"label\": \"XP\", \"min\": 0, \"default\": 0 },\n        \"level\": { \"type\": \"number\", \"label\": \"Level\", \"min\": 1, \"default\": 1 },\n        \"grit\": { \"type\": \"number\", \"label\": \"Grit\", \"default\": 10 },\n        \"hp_max\": { \"type\": \"number\", \"label\": \"Max HP\", \"derived\": \"8 + self.level * 4\" },\n        \"hp\": { \"type\": \"number\", \"label\": \"Hit points\", \"pool\": { \"max\": \"hp_max\" } }\n      }\n    }\n  },\n  \"actions\": {\n    \"spar\": {\n      \"id\": \"spar\",\n      \"label\": \"Spar at the yard\",\n      \"params\": {},\n      \"requires\": [],\n      \"outcomes\": { \"default\": [{ \"type\": \"award\", \"args\": { \"entity\": \"self\", \"progression\": \"adventurer\", \"amount\": 150 } }] },\n      \"duration\": \"60\",\n      \"lexicon\": [\"spar\"]\n    }\n  },\n  \"ruleset\": {\n    \"progression\": {\n      \"adventurer\": {\n        \"label\": \"Level\",\n        \"xpField\": \"xp\",\n        \"levelField\": \"level\",\n        \"thresholds\": [0, 300, 900, 2700],\n        \"maxLevel\": 4,\n        \"kind\": \"person\",\n        \"onLevel\": [{ \"type\": \"add\", \"args\": { \"entity\": \"self\", \"field\": \"grit\", \"delta\": 1 } }]\n      }\n    },\n    \"sheet\": {\n      \"sections\": [{ \"id\": \"growth\", \"label\": \"Growth\", \"rows\": [{ \"progression\": \"adventurer\" }, { \"pool\": \"hp\" }, { \"field\": \"grit\" }] }]\n    }\n  }\n}\n```\n\n**Try it.** In Playtest, type *I spar* three times. The second spar reaches 300 XP: you reach Level 2, Grit goes from 10 to 11, the Journal says \"You reached Level 2.\", and your hit points can now reach 16. The third leaves you at 450 XP, still Level 2.\n\nThe thresholds can come from a data table instead (`\"thresholds\": { \"table\": \"xp_levels\", \"column\": \"xp\" }`, read in row order). `onLevel` sees `level` and `from` in its formulas, so `\"delta\": \"=level % 2 == 0 ? 1 : 0\"` adds a point only on even levels.\n\n## A skill challenge\n\nA puzzle track that opens after three successful checks, under the **Balanced** adjudication policy. Each lock is a little harder than the last (the DC is 12, then 14, then 16). Balanced rolls every check between two limits: a check with a 95 % chance or better passes without a roll (\"No roll needed\"), one with 5 % or worse fails without one (\"Too hard to try\"), and a close roll is told to the narrator as a close call. A failed attempt stands until something changes: an hour passes, the odds change, or you leave and come back.\n\n```json\n{\n  \"kinds\": {\n    \"person\": {\n      \"fields\": {\n        \"finesse\": { \"type\": \"number\", \"label\": \"Finesse\", \"default\": 0 },\n        \"locks_open\": { \"type\": \"number\", \"label\": \"Locks open\", \"min\": 0, \"default\": 0 }\n      }\n    }\n  },\n  \"entities\": { \"you\": { \"fields\": { \"finesse\": 4 } } },\n  \"checks\": {\n    \"tumbler\": { \"id\": \"tumbler\", \"dice\": \"1d20\", \"modifier\": \"self.finesse\", \"dc\": \"12 + self.locks_open * 2\" }\n  },\n  \"actions\": {\n    \"work_lock\": {\n      \"id\": \"work_lock\",\n      \"label\": \"Work a lock\",\n      \"params\": {},\n      \"requires\": [\"stage.vault_door == 'locked'\"],\n      \"check\": \"tumbler\",\n      \"outcomes\": {\n        \"success\": [{ \"type\": \"add\", \"args\": { \"entity\": \"self\", \"field\": \"locks_open\", \"delta\": 1 } }],\n        \"failure\": [{ \"type\": \"note\", \"args\": { \"text\": \"A tumbler slips back into place.\" } }]\n      },\n      \"duration\": \"10\",\n      \"lexicon\": [\"work the lock\", \"pick the lock\"]\n    }\n  },\n  \"tracks\": {\n    \"vault_door\": {\n      \"id\": \"vault_door\",\n      \"kind\": \"puzzle\",\n      \"label\": \"The vault door\",\n      \"start\": \"locked\",\n      \"visibility\": \"public\",\n      \"stages\": {\n        \"locked\": {\n          \"label\": \"Three locks hold the door\",\n          \"objectives\": [{ \"label\": \"Open all three locks\", \"when\": \"pov.locks_open >= 3\" }],\n          \"next\": [{ \"to\": \"open\", \"when\": \"pov.locks_open >= 3\" }],\n          \"hints\": [\"Each lock gives a little under steady hands.\"]\n        },\n        \"open\": { \"label\": \"The door swings open\", \"next\": [] }\n      }\n    }\n  },\n  \"ruleset\": {\n    \"adjudication\": {\n      \"preset\": \"balanced\",\n      \"checks\": \"every\",\n      \"riskyAt\": 0.75,\n      \"trivialAt\": 0.95,\n      \"impossibleAt\": 0.05,\n      \"description\": { \"weight\": \"bonus\", \"max\": 2, \"advantageAt\": 2 },\n      \"authority\": \"hybrid\",\n      \"closeBy\": 2,\n      \"retry\": \"changed\",\n      \"retryAfter\": 60\n    }\n  }\n}\n```\n\n**Try it.** Type *I work the lock* until the door opens. With Finesse 4 each lock rolls (a 65 %, then 55 %, then 45 % chance), and the palette shows the odds before you choose. Raise Finesse to 15 and every lock is a sure thing: three tries, no rolls, and the door is open. Lower it to −30 and no lock can be picked: each try fails without a roll.\n\nThese values are Balanced's own, so the policy reads as Balanced. A policy's values are its own: change any of them and it plays as Custom with them (lint says so, and suggests naming it `\"custom\"`). The policy here is the world's default; a player can pick another for a chat in **Settings → Checks**. The check names no `pass`, so `success` counts as passing, the outcome a DC check reads when it isn't failed. To have the player's described approach count, keep `description.weight` at `bonus`: the judge step rates it, and the rating adds to the roll.\n\n## A shop with a priced catalog\n\nThe Buy action prices what you ask for from the world's `economy.catalog` table, finding the row by its id or by its name (with an `economy.categories` table, naming a whole category prices from its band instead). A row's `price_cents` is a band in minor units of the world's currency; a price drawn from it varies a little around `typical`, so a fixed price sets `min`, `typical` and `max` alike. At Money 2 the shop takes cash from the buyer's cash account and declines what they can't cover, and at Gear 1 or more a physical thing you buy (the categories `tools_hardware`, `groceries_staples`, `clothing` and the like) comes into being in your hands.\n\n```json\n{\n  \"realism\": { \"levels\": { \"money\": 2 } },\n  \"places\": { \"store\": { \"id\": \"store\", \"name\": \"Hollow Creek General Store\", \"fields\": {} } },\n  \"start\": { \"place\": \"store\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"store\" } },\n    \"purse\": { \"id\": \"purse\", \"kind\": \"account\", \"name\": \"Your purse\", \"tier\": \"background\", \"fields\": { \"owner\": \"you\", \"type\": \"cash\", \"opening\": 2000 }, \"relations\": [] }\n  },\n  \"tables\": {\n    \"economy.catalog\": {\n      \"id\": \"economy.catalog\",\n      \"pack\": \"economy\",\n      \"schema\": \"lre-table/economy.catalog/v1\",\n      \"revision\": \"05c9407d21cade2a99c5351d90b8e57d\",\n      \"label\": \"Hollow Creek General Store\",\n      \"columns\": {\n        \"name\": { \"type\": \"text\" },\n        \"category\": { \"type\": \"text\" },\n        \"unit\": { \"type\": \"text\" },\n        \"price_cents\": { \"type\": \"band\", \"unit\": \"cents\" }\n      },\n      \"rows\": {\n        \"lantern\": { \"name\": \"Brass lantern\", \"category\": \"tools_hardware\", \"unit\": \"each\", \"price_cents\": { \"min\": 1250, \"typical\": 1250, \"max\": 1250 } },\n        \"rope\": { \"name\": \"Hemp rope\", \"category\": \"tools_hardware\", \"unit\": \"50 ft\", \"price_cents\": { \"min\": 600, \"typical\": 800, \"max\": 1000 } },\n        \"jerky\": { \"name\": \"Beef jerky\", \"category\": \"groceries_staples\", \"unit\": \"bag\", \"price_cents\": { \"min\": 350, \"typical\": 350, \"max\": 350 } }\n      }\n    }\n  }\n}\n```\n\n**Try it.** With $20.00 in your purse, *I buy a brass lantern* costs $12.50 and puts the lantern in your hands; *I buy beef jerky* costs $3.50. A second lantern is declined: $4.00 doesn't cover it. Rope costs between $6.00 and $10.00, close to $8.00.\n\nThe `revision` is computed from the table's schema, columns and rows, never written by hand: whenever a table is saved to a draft (by Build's table editor, or by an agent's patch), the engine computes it and pins it in `pins.tables`. For a store that charges more than the world's usual prices, the `economy.price_modifier` effect raises a category, or everything, at one place (`\"percent\": 25` is a quarter dearer).\n\n## Secret lore behind a track\n\nA secret track reveals the mayor's debt once you reach the mill office, and a lore entry holds the secret itself. The entry is `secret`, so its `gate` keeps it shut until the track reaches `revealed`, and its `audience` names the one helper that may read it before then: `npc.choose`, the step that decides what NPCs do. No helper that writes prose for the narrator is in the audience, so nothing it reads can reach the story early.\n\n```json\n{\n  \"places\": {\n    \"mill\": { \"id\": \"mill\", \"name\": \"The mill\", \"fields\": {} },\n    \"mill_office\": { \"id\": \"mill_office\", \"name\": \"The mill office\", \"parent\": \"mill\", \"fields\": {} }\n  },\n  \"start\": { \"place\": \"mill\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"mill\" } },\n    \"hale\": { \"id\": \"hale\", \"kind\": \"person\", \"name\": \"Mayor Hale\", \"tier\": \"supporting\", \"fields\": { \"place\": \"mill\" }, \"relations\": [] }\n  },\n  \"tracks\": {\n    \"hale_debt\": {\n      \"id\": \"hale_debt\",\n      \"kind\": \"secret\",\n      \"label\": \"The mayor's debt\",\n      \"owner\": \"hale\",\n      \"start\": \"hidden\",\n      \"visibility\": \"secret\",\n      \"stages\": {\n        \"hidden\": {\n          \"label\": \"The mill's books don't add up\",\n          \"cue\": \"The miller won't meet your eye when the mayor's name comes up.\",\n          \"next\": [{ \"to\": \"revealed\", \"when\": \"at(pov, 'mill_office')\" }]\n        },\n        \"revealed\": {\n          \"label\": \"The mayor owes the mill\",\n          \"truth\": \"Mayor Hale borrowed the mill's grain money to cover his gambling debts.\",\n          \"next\": []\n        }\n      }\n    }\n  },\n  \"lore\": {\n    \"hale_debt\": {\n      \"id\": \"hale_debt\",\n      \"title\": \"Hale's debt\",\n      \"content\": \"Mayor Hale borrowed the mill's grain money to cover his gambling debts. He means to repay it before the harvest audit.\",\n      \"keys\": [\"mayor\", \"debt\", \"grain money\"],\n      \"links\": [\"hale\", \"mill\"],\n      \"secret\": true,\n      \"gate\": \"stage.hale_debt == 'revealed'\",\n      \"audience\": [\"npc.choose\"]\n    }\n  }\n}\n```\n\n**Try it.** Check world runs a day without a leak: the truth never shows in a section. In Playtest, *I go to the mill office* reveals the track, and from then on the gate holds.\n\nLint guards the secret. The entry repeats the track's truth, so without `\"secret\": true` it is an error (`secret_truth`); a secret entry needs a gate (`no_gate`); and putting a prose step such as `brief` in the audience is a warning (`prose_audience`). The GM view shows every track with its truth whatever the player knows.\n\n## A room on the grid\n\nA walled garden drawn as a grid map, with the optional grid system on: walls and doors steer you, things lie in cells, and stepping into a zone fires a rule. The potting shed is a room behind a door, an iron key lies on the path, and the fountain is a zone. Cells outside every room (the paths here) count as the map's own place, the garden.\n\n```json\n{\n  \"mapSettings\": { \"display\": \"knowledge\", \"grid\": { \"movement\": true, \"sightRadius\": 3 } },\n  \"places\": { \"garden\": { \"id\": \"garden\", \"name\": \"The walled garden\", \"fields\": {} } },\n  \"start\": { \"place\": \"garden\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"garden\" } },\n    \"key\": { \"id\": \"key\", \"kind\": \"item\", \"name\": \"Iron key\", \"tier\": \"background\", \"fields\": {}, \"relations\": [] }\n  },\n  \"maps\": {\n    \"garden\": {\n      \"id\": \"garden\",\n      \"scope\": \"garden\",\n      \"title\": \"The walled garden\",\n      \"cellMeters\": 2,\n      \"layout\": [\"#########\", \"#sss#...#\", \"#sss+.F.#\", \"#sss#.K.#\", \"######+##\"],\n      \"legend\": { \"s\": { \"place\": \"shed\" }, \"F\": { \"zone\": \"fountain\" }, \"K\": { \"item\": \"key\" } },\n      \"places\": [{ \"id\": \"shed\", \"name\": \"Potting shed\" }]\n    }\n  },\n  \"rules\": {\n    \"fountain_coins\": {\n      \"id\": \"fountain_coins\",\n      \"on\": { \"zone\": \"fountain\", \"in\": \"garden\" },\n      \"do\": [{ \"type\": \"note\", \"args\": { \"text\": \"Coins glint under the water.\" } }]\n    }\n  }\n}\n```\n\n**Try it.** You start at the gate in the bottom wall, x 6 and y 4 (x counts from the left, y from the top, both from 0). On the map, tap the fountain two squares up and **Walk here**: the rule fires and the Journal notes the coins. Standing there doesn't fire it again; stepping off and back on does. The key lies on the square below the fountain, close enough to **Take** from where you stand. Walk to the shed and you're in the potting shed: its door is the only way in.\n\nA zone trigger without `who` counts only the POV; `\"who\": { \"kind\": [\"person\"] }` counts anyone. Each room's area is also a zone named by the room, so `{ \"zone\": \"shed\", \"in\": \"garden\" }` fires on stepping into the shed. Lint checks the zone and cell triggers against the map.\n\n## A family\n\nA family is a group (the Relationships pack's `family` kind) whose members hold `member_of`, with kinship between them. `parent_of` and `child_of` are each other's inverse and `spouse_of` is symmetric, so the engine keeps both sides: the `link` and `unlink` effects write and remove the other side with them, and a chat starts with any side the world left out. Write both sides, as here, and lint has nothing to say. A schedule owned by the group applies to every member who isn't a group, so one schedule brings the whole family home for supper.\n\n```json\n{\n  \"places\": {\n    \"okafor_house\": { \"id\": \"okafor_house\", \"name\": \"The Okafor house\", \"fields\": {} },\n    \"bakery\": { \"id\": \"bakery\", \"name\": \"Okafor's Bakery\", \"fields\": {} }\n  },\n  \"start\": { \"at\": \"2026-01-01T17:00\" },\n  \"entities\": {\n    \"okafors\": { \"id\": \"okafors\", \"kind\": \"family\", \"name\": \"The Okafors\", \"tier\": \"background\", \"fields\": {}, \"relations\": [] },\n    \"ada\": {\n      \"id\": \"ada\",\n      \"kind\": \"person\",\n      \"name\": \"Ada Okafor\",\n      \"tier\": \"supporting\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Mother\" } },\n        { \"type\": \"spouse_of\", \"to\": \"emeka\" },\n        { \"type\": \"parent_of\", \"to\": \"tobi\" }\n      ]\n    },\n    \"emeka\": {\n      \"id\": \"emeka\",\n      \"kind\": \"person\",\n      \"name\": \"Emeka Okafor\",\n      \"tier\": \"supporting\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Father\" } },\n        { \"type\": \"spouse_of\", \"to\": \"ada\" },\n        { \"type\": \"parent_of\", \"to\": \"tobi\" }\n      ]\n    },\n    \"tobi\": {\n      \"id\": \"tobi\",\n      \"kind\": \"person\",\n      \"name\": \"Tobi Okafor\",\n      \"tier\": \"background\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Son\" } },\n        { \"type\": \"child_of\", \"to\": \"ada\" },\n        { \"type\": \"child_of\", \"to\": \"emeka\" }\n      ]\n    }\n  },\n  \"schedules\": {\n    \"okafor_supper\": {\n      \"id\": \"okafor_supper\",\n      \"owner\": \"okafors\",\n      \"target\": \"place\",\n      \"recurrence\": { \"every\": \"day\" },\n      \"slots\": [{ \"start\": \"18:00\", \"end\": \"20:00\", \"value\": \"okafor_house\" }]\n    }\n  }\n}\n```\n\n**Try it.** The day starts at five in the afternoon with the family at the bakery. Timelapse an hour and a half: at six they all go home for supper. Formulas can ask about them: `member_of(tobi, 'okafors')` is true, and so is `has_rel(ada, 'parent_of', 'tobi')`.\n\nA selector picks the family wherever one is asked for: `{ \"memberOf\": [\"okafors\"] }` matches the three of them, for a schedule's owner, a rule's `who`, an action parameter's candidates or who knows a secret (`knownBy`). The person's own schedule wins over the group's for the same field, so Tobi can keep his own Saturday plans.\n";
 
 // docs/REFERENCE.md
-var REFERENCE_default = "# LumiRPEngine reference\n\n<!-- Generated by `bun run reference` (scripts/reference/build.ts). Edit the packs, then run it again. -->\n\nWhat the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.\n\nEngine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1, `orgs` 1.\n\n## Contents\n\n- [Engine built-ins](#engine-built-ins)\n- [Calendar & time pack](#calendar--time-pack-calendar)\n- [Cast life pack](#cast-life-pack-castlife)\n- [Combat pack](#combat-pack-combat)\n- [Economy pack](#economy-pack-economy)\n- [Gear & containers pack](#gear--containers-pack-gear)\n- [Minds pack](#minds-pack-minds)\n- [Organizations pack](#organizations-pack-orgs)\n- [Relationships pack](#relationships-pack-relationships)\n- [Character sheets pack](#character-sheets-pack-sheets)\n- [Space & travel pack](#space--travel-pack-space)\n- [Story pack](#story-pack-story)\n- [Vehicles pack](#vehicles-pack-vehicles)\n- [Weather pack](#weather-pack-weather)\n\n## Engine built-ins\n\n### Core effects\n\n| Effect | Arguments |\n|---|---|\n| `add` | `entity`, `field`, `delta` |\n| `award` | `entity`, `progression`, `amount` |\n| `beat` | `hint` |\n| `check` | `check`, `actor?`, `target?`, `outcomes` |\n| `life` | `entity`, `to?`, `tell?` |\n| `link` | `rel`, `from`, `to`, `until?`, `fields?` |\n| `move` | `entity`, `to`, `activity?`, `told?`, `with?` |\n| `note` | `text`, `visibility?` |\n| `post` | `lines`, `memo?` |\n| `recover` | `entity`, `field`, `amount?`, `full?` |\n| `set` | `entity`, `field`, `value` |\n| `signal` | `class`, `text`, `entity?`, `visibility?` |\n| `spawn` | `kind`, `name`, `id?`, `tier?`, `fields?`, `relations?`, `agent?`, `place?`, `class?`, `tags?` |\n| `stage` | `track`, `to` |\n| `unlink` | `rel`, `from`, `to` |\n\n### Formula functions\n\nMath: `abs`, `ceil`, `clamp`, `floor`, `max`, `min`, `round`. `min` and `max` take any number of arguments.\n\nThe engine's own:\n\n- `at(entity, place)`\n- `attempts(track)`\n- `band(entity, field)`\n- `count_at(place, kind?)`\n- `days(n)`\n- `field(entity, field)`\n- `fired(rule)`\n- `has_rel(entity, type, to?)`\n- `holiday()`\n- `hours(n)`\n- `knows(entity, subject)`\n- `level(entity, domain)`\n- `next_time(time)`\n- `place(entity)`\n- `rel(entity, type, to?)`\n- `rel_count(entity, type)`\n- `rel_field(from, type, to, field)`\n- `revealed(track, stage?)`\n- `roll(notation)`: effect arguments only\n- `since(track)`\n- `stage(track)`\n- `table(table, key, column)`\n- `table_step(table, value, column)`\n- `today_at(time)`\n\nTaxonomy and life states:\n\n- `acting(self, as)`\n- `band_of(entity)`\n- `has_tag(entity, tag)`\n- `in_class(entity, facet, value)`\n- `kind_is(entity, kind)`\n- `life_of(entity)`\n- `may(who, org, power)`\n- `member_of(entity, group)`\n- `staff_of(who, org)`\n- `tier_of(entity)`\n\n### Events\n\nCore: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.\n\nEngine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.life`, `engine.note`, `engine.observed`, `engine.out.lines`, `engine.out.scene`, `engine.pause`, `engine.rename`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`, `engine.ws.delete`, `engine.ws.pin`, `engine.ws.readers`, `engine.ws.write`.\n\n### Relation types\n\nBuilt in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `regard`, `route`. Packs add the typed ones below.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `knows` | `knows` |\n| `life` | `life` |\n| `spawn` | `spawn` |\n\n### Step purposes\n\n| Purpose | Outputs a world template may declare |\n|---|---|\n| `brief` | `text` |\n| `choices` | `text`, `effects` |\n| `consolidate` | `text` |\n| `extract` | `text`, `effects` |\n| `interpret` | `decision`, `text` |\n| `judge` | `decision`, `text` |\n| `knowledge` | `text` |\n| `memory` | `text` |\n| `mind` | `text` |\n| `npc.choose` | `decision`, `text` |\n| `outline` | `text` |\n| `puzzle.answer` | `decision`, `text` |\n| `skip` | `text` |\n\nSignals: `agents_present`, `always`, `beat`, `conflict`, `day_start`, `invitation`, `never`, `offscreen`, `present`, `reply`, `scene_change`, `slot_crossed`, `tie_zone`, `timelapse`, `typed_input`, and `every_n:<k>`.\n\nTemplate placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `gear`, `knowledge`, `money`, `outcome`, `place`, `positions`, `pov`, `present`, `property`, `recent`, `reply`, `scene`, `user`, `world`.\n\n### Sections\n\nThe slots a world gets when it defines none, kept in rank order on the section budget. A world words any built-in slot it has without listing it in its `sectionTemplates` part, by slot id: a template holding `{{lines}}`, stored only where it differs from the built-in text.\n\n| Slot | Label | Rank |\n|---|---|---|\n| `outcome` | Outcome | 0 |\n| `montage` | Montage | 1 |\n| `scene` | Scene | 2 |\n| `people` | People | 3 |\n| `money` | Money | 4 |\n| `gear` | Gear | 5 |\n| `vehicles` | Vehicles | 6 |\n| `quest` | Quest | 7 |\n| `outline` | Outline | 8 |\n| `stance` | Stance | 9 |\n| `minds` | Minds | 10 |\n| `place` | Place | 11 |\n| `property` | Property | 12 |\n| `knowledge` | Who knows what | 13 |\n\n### Realism\n\nDomains: `money`, `gear`, `vehicles`, `castlife`, `relationships`, `space`, `calendar`, `weather`, `sheets`; each at a level from 0 to 4.\n\nDetail bands: `principal` (Leads), `supporting` (Supporting), `background` (Background).\n\nInterrupt classes: `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`, `arrival`, `overdue`, `needs`, `weather`.\n\n### Lore pins\n\nThe world's `lorePins` part: `characters`, `places` and `steps`, each a map from an id (a step's purpose, for `steps`) to a list of pins, where a pin is `{\"lore\": id}` (one of the world's lore entries), `{\"book\": id, \"entry\": id}` (an entry of one of the user's World Info books) or `{\"book\": id}` (a whole book: its switched-on entries in the book's order, read whenever a call reads it, so entries added later are read too). A character's pins reach only their own mind's calls; a step's reach every call of that step whatever its lore policy (the mind step's, every mind, after the character's own); a place's reach every helper and mind call there or in a place inside it, nearest place first. Pinned text comes first within a helper call's lore tokens, or within the pinned lore a mind reads (Settings → Minds → What a mind reads), and a pin that doesn't fit is cut, with a note in the Context panel.\n\n| Lint | Means |\n|---|---|\n| `pin_duplicate` | the same entry or book pinned twice to one character, place or step |\n| `pin_missing` | a pin naming a lore entry the world doesn't have |\n| `pin_pending` | an AI-written entry still waiting for review: no call reads it until it is accepted |\n| `pin_shape` | a pin that is none of {\"lore\": id}, {\"book\": id, \"entry\": id} and {\"book\": id}: it is ignored |\n| `pin_target` | pins under a character, place or step the world doesn't have: no call reads them |\n| `pin_unread` | a secret entry pinned to someone whose own it isn't: their mind never reads it |\n\n### Adjudication presets\n\n| Value | `narrative` | `balanced` | `crunchy` |\n|---|---|---|---|\n| `checks` | `\"risky\"` | `\"every\"` | `\"every\"` |\n| `riskyAt` | `0.75` | `0.75` | `0.75` |\n| `trivialAt` | `null` | `0.95` | `null` |\n| `impossibleAt` | `null` | `0.05` | `null` |\n| `description` | `{\"weight\":\"none\",\"max\":3,\"advantageAt\":2}` | `{\"weight\":\"bonus\",\"max\":2,\"advantageAt\":2}` | `{\"weight\":\"none\",\"max\":2,\"advantageAt\":2}` |\n| `authority` | `\"narrative\"` | `\"hybrid\"` | `\"mechanics\"` |\n| `closeBy` | `2` | `2` | `2` |\n| `retry` | `\"changed\"` | `\"changed\"` | `\"free\"` |\n| `retryAfter` | `60` | `60` | `60` |\n\n## Calendar & time pack (`calendar`)\n\nVersion 1 · realism domain `calendar` · requires none.\n\n### Formula functions\n\n- `days_until(date)`\n- `is_day_off()`\n- `is_weekend()`\n- `minutes_until(at)`\n- `weekday_name()`\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `time_advance` | `duration` |\n\n### Panels and slots\n\nPanels: `calendar.calendar`. Slots it writes: `scene`.\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `calendar.dst` | Daylight saving time, time zones and daylight hours | `lre-table/calendar.dst/v1` | start (json), end (json), duration_weeks_approx (int), exceptions (list), standard_offsets_h (json), note (text), daylight_hours (json) | 1 |\n| `calendar.holidays` | Federal holidays | `lre-table/calendar.holidays/v1` | name (text), rule_type (enum), month (int), day (int, optional), weekday (enum, optional), n (int, optional), federal_paid_day_off (bool), private_sector_paid_day_off (enum), observed_if_weekend (text, optional) | 11 |\n| `calendar.observances` | Common observances | `lre-table/calendar.observances/v1` | name (text), rule_type (enum), month (int, optional), day (int, optional), weekday (enum, optional), n (int, optional), base (ref, optional), offset_days (int, optional), algorithm (text, optional), window (text, optional), start (text, optional), end (text, optional), rule_text (text, optional), rule_note (text, optional) | 30 |\n| `calendar.school` | School year | `lre-table/calendar.school/v1` | title (text), values (json) | 2 |\n| `calendar.shifts` | Work shift patterns | `lre-table/calendar.shifts/v1` | name (text), description (text), days_per_week (number), typical_start (text), typical_shift_h (number), typical_hours_per_week (int), weekend_work (enum), notes (text) | 24 |\n| `calendar.work` | Work norms | `lre-table/calendar.work/v1` | full_time_hours_per_week (number), standard_work_year_h (int), overtime (text), vacation_days_after_1_year (int), vacation_days_after_5_years (int), vacation_days_after_10_years (int), sick_days_per_year (int), paid_time_off_note (text), paid_holidays_per_year (int), meal_break (text) | 1 |\n\n### Lint codes\n\n`calendar.epoch`, `calendar.schedule_times`, `calendar.unit_cap`.\n\n## Cast life pack (`castlife`)\n\nVersion 1 · realism domain `castlife` · requires `gear`, `relationships`, `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `castlife.book_invitation` | `host` |\n| `castlife.company` | `with`, `to` |\n| `castlife.decide` | `key`, `choice` |\n| `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |\n| `castlife.routine` | `entity`, `blocks?`, `schedules?`, `turn?`, `by?` |\n| `castlife.satisfy` | `need`, `entity?`, `minutes?`, `activity?`, `after?` |\n| `castlife.to_bed` | `entity?` |\n\n### Formula functions\n\n- `busy(who)`\n- `invited(host)`\n- `need(who, need)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `accept_invitation` | Accept invitation | Say yes to an invitation someone made you. | `host: ref → person` |  | `default` | `1` | accept, sure, let's, count me in |\n| `eat` | Eat | Have a meal or a snack. | `minutes?: duration` |  | `default` | `minutes > 0 ? minutes : 30` | eat, have lunch, have dinner, grab a bite |\n| `get_up` | Get up | Get up from bed or from a rest and get on with the day. |  |  | `default` | `2` | get up, wake up, get out of bed |\n| `rest` | Rest | Rest or relax for a while. | `minutes?: duration` |  | `default` | `minutes > 0 ? min(minutes, 30) : 30` | rest, relax, take a break |\n| `sleep` | Go to bed | Go to bed (your own, if you have one) and sleep until morning, or for as long as you say. | `minutes?: duration` |  | `default` | `minutes > 0 ? min(minutes, 5) : 5` | go to bed, sleep, turn in, hit the sack |\n\n### Rules\n\n- `castlife.conversation`: on `{\"event\":\"relationships.regard\"}`\n\n### Events\n\nIts own: `castlife.decision`, `castlife.follow`, `castlife.invitation`, `castlife.need`, `castlife.routine`, `castlife.schedule`, `castlife.skip_plan`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `routine` | `routine` |\n\n### Panels and slots\n\nPanels: `castlife.cast`, `castlife.needs`. Slots it writes: `people`, `stance`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `castlife.agents` | `castlife` | 3 | each agent |\n| `castlife.plans` | `castlife` | 0 | the world |\n| `castlife.trips` | `castlife` | 1 | the world |\n\n### Lint codes\n\n`castlife.birthday`, `castlife.cues`, `castlife.double_booking`, `castlife.needs`, `castlife.routines`.\n\n## Combat pack (`combat`)\n\nVersion 1 · realism domain none · requires none.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `hostile` | Hostile to | `*` | `*` | many_many | yes |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `combat.end` | `winner?` |\n| `combat.end_turn` | `who?` |\n| `combat.spend` | `who?`, `cost` |\n| `combat.start` | `foes?` |\n\n### Formula functions\n\n- `budget_left(e, budget)`\n- `can_fight(e)`\n- `encounter_round()`\n- `has_turn(e)`\n- `in_encounter(e)`\n- `is_ally(a, b)`\n- `is_down(e)`\n- `is_foe(a, b)`\n- `standing(side)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `end_turn` | End turn | End your turn in a fight. |  |  | `default` | `0` | end my turn, end turn |\n| `fight` | Fight | Start a fight with someone. | `target: ref` |  | `default` | `0` | start a fight, pick a fight, draw my weapon |\n\n### Events\n\nIts own: `combat.act`, `combat.decision`, `combat.down`, `combat.end`, `combat.spend`, `combat.start`, `combat.turn`.\n\n### Panels and slots\n\nPanels: `combat.encounter`. Slots it writes: none.\n\n## Economy pack (`economy`)\n\nVersion 1 · realism domain `money` · requires `space`.\n\n### Kinds\n\n#### `account`: Account\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `apr_pct` | APR % | number | ≥ 0 |  |  |  | live from money 4 |\n| `apy_pct` | APY % | number | ≥ 0 |  |  |  | live from money 4 |\n| `autopay` | Autopay | enum: none, minimum, statement, full, fixed |  | `\"none\"` |  |  | live from money 3 |\n| `autopay_cents` | Autopay amount (fixed) | money | ≥ 0 |  |  |  | live from money 3 |\n| `autopay_from` | Autopay from | ref → account |  |  |  |  | live from money 3 |\n| `due_day` | Due day of month | number | 1 … 31 |  |  |  | live from money 3 |\n| `institution` | Institution | text |  |  |  |  | live from money 3 |\n| `limit` | Credit limit | money | ≥ 0 |  |  |  | live from money 3 |\n| `min_floor` | Minimum payment floor | money | ≥ 0 |  |  |  | live from money 4 |\n| `min_pct` | Minimum payment % of balance | number | 0 … 100 |  |  |  | live from money 4 |\n| `months_left` | Months left (loans) | number | ≥ 0 |  |  |  | live from money 3 |\n| `opened` | Opened | date |  |  |  |  | live from money 4 |\n| `opening` | Opening balance | money |  |  |  |  | locked |\n| `overdraft` | Overdraft policy | enum: decline, fee, linked |  |  |  |  | live from money 2 |\n| `overdraft_limit` | Overdraft limit | money | ≥ 0 |  |  |  | live from money 2 |\n| `overdraft_link` | Overdraft from | ref → account |  |  |  |  | live from money 2 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `payment` | Monthly payment (loans) | money | ≥ 0 |  |  |  | live from money 3 |\n| `product` | Product (a world product, or a class: cash, checking, business_checking, savings, money_market, cd, trust, escrow, credit_card, charge_card, line_of_credit, loan, mortgage, brokerage, retirement, note) | text |  |  |  |  | live from money 2 |\n| `secured_by` | Secured by | ref |  |  |  |  | live from money 3 |\n| `statement_day` | Statement day | number | 1 … 28 |  |  |  | live from money 3 |\n| `status` | Status | enum: open, frozen, collections, charged_off, closed, paid_off, matured |  | `\"open\"` |  |  | live from money 2 |\n| `term_months` | Term in months | number | ≥ 0 |  |  |  | live from money 3 |\n\n#### `business`: Business\n\nExtends `group`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `close_at` | Closes at (HH:MM) | text |  |  |  |  | live from money 3 |\n| `collects_sales_tax` | Collects sales tax | bool |  |  |  |  | live from money 4 |\n| `consolidated_return` | Files one consolidated federal return with the corporations it holds 80% or more of (an election) | bool |  |  |  |  | live from money 3 |\n| `daily_sales` | Walk-in takings a trading day | money | ≥ 0 |  |  |  | live from money 3 |\n| `decide_pct` | Ownership decisions need more than % of the votes | number | 0 … 100 | `50` |  |  | live from money 4 |\n| `depreciation` | Depreciation | enum: world, none, straight_line |  | `\"world\"` |  |  | live from money 3 |\n| `dissolved` | Dissolved on (YYYY-MM-DD) | text |  |  |  |  | live from money 3 |\n| `distribution_every` | Paid out every | enum: month, quarter, year |  |  |  |  | live from money 4 |\n| `distribution_pct` | Profit paid out % | number | 0 … 100 |  |  |  | live from money 4 |\n| `industry` | Industry | text |  |  |  |  | live from money 3 |\n| `invoice_days` | Invoice terms (days) | number | ≥ 0 |  |  |  | live from money 3 |\n| `late_fee_pct` | Late fee % | number | ≥ 0 |  |  |  | live from money 4 |\n| `margin_pct` | Margin % | number | 0 … 100 |  |  |  | live from money 4 |\n| `merged_into` | Merged into | ref → business |  |  |  |  | live from money 3 |\n| `open_at` | Opens at (HH:MM) | text |  |  |  |  | live from money 3 |\n| `opening_ep` | Earnings and profits it had kept when the story begins (the accumulated earnings tax's credit reads it) | money |  |  |  |  | live from money 4 |\n| `operating_account` | Operating account | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `places` | Places it trades at | list of ref |  |  |  |  | live from money 3 |\n| `sales_spread_pct` | Takings vary by up to ± % | number | 0 … 100 | `30` |  |  | live from money 3 |\n| `share_classes` | Share classes ({id, label, votes}) | list |  |  |  |  | live from money 4 |\n| `structure` | Structure | enum: sole_proprietorship, partnership, llc, s_corp, c_corp, nonprofit |  |  |  |  | live from money 4 |\n| `structure_before` | Taxed as, until the change of structure (sole_proprietorship, partnership, llc, s_corp or c_corp) | text |  |  |  |  | live from money 4 |\n| `structure_from` | Its structure is taxed from (YYYY-MM-DD) | text |  |  |  |  | live from money 4 |\n| `trading_days` | Trading days (0 is Sunday) | list of number |  |  |  |  | live from money 3 |\n| `valuation_multiple` | Valued at this many years of profit, over its books | number | ≥ 0 | `3` |  |  | live from money 4 |\n| `value` | Value (set: overrides the books) | money | ≥ 0 |  |  |  | live from money 3 |\n| `winding_up` | Winding up since (YYYY-MM-DD) | text |  |  |  |  | live from money 3 |\n\n#### `card`: Payment card\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 2 |\n| `daily_atm_limit` | Daily cash machine limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `daily_purchase_limit` | Daily purchase limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `holder` | Holder | ref |  |  |  |  | live from money 2 |\n| `item` | The card in gear | ref |  |  |  |  | live from money 2 |\n| `last4` | Last four digits | text |  |  |  |  | live from money 3 |\n| `network` | Card type | enum: debit, credit, charge |  |  |  |  | live from money 2 |\n| `replaced_by` | Replaced by | ref → card |  |  |  |  | live from money 2 |\n| `replaces` | Replaces | ref → card |  |  |  |  | live from money 2 |\n| `state` | State | enum: active, frozen, lost, cancelled |  | `\"active\"` |  |  | live from money 2 |\n\n#### `flow`: Money flow\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `amount_cents` | Amount | money | ≥ 0 |  |  |  | live from money 2 |\n| `amount_due` | What's due on the credit account it pays | enum: minimum, statement, balance |  |  |  |  | live from money 3 |\n| `amount_formula` | Amount formula | text |  |  |  |  | live from money 3 |\n| `amount_max` | Amount at most | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_min` | Amount at least | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_of` | Percent of this account's balance | ref → account |  |  |  |  | live from money 3 |\n| `amount_pct` | Percent of a balance | number | 0 … 100 |  |  |  | live from money 3 |\n| `amount_table` | Amount from a table (table.row.column) | text |  |  |  |  | live from money 3 |\n| `at` | Time of day (HH:MM) | text |  |  |  |  | live from money 2 |\n| `category` | Category | text |  |  |  |  | live from money 2 |\n| `count` | Times at most | number | ≥ 1 |  |  |  | live from money 2 |\n| `days` | Days of the month (-1 = the last) | list of number |  |  |  |  | live from money 2 |\n| `end` | Ends | date |  |  |  |  | live from money 2 |\n| `every` | Every | enum: day, week, month, year |  |  |  |  | live from money 2 |\n| `except` | Except holidays | list of text |  |  |  |  | live from money 3 |\n| `fallback` | Fallback (an account or a party) | text |  |  |  |  | live from money 3 |\n| `flow_kind` | Kind | enum: transfer, bill, rent, utility, subscription, premium, loan_payment, card_payment, savings, income, payroll, allowance, living, tax, distribution, invoice, draw, other |  | `\"bill\"` |  |  | live from money 2 |\n| `from` | From (an account, a party, or an outside payer) | text |  |  |  |  | live from money 2 |\n| `interval` | Every Nth period | number | ≥ 1 |  |  |  | live from money 2 |\n| `link` | Belongs to | ref |  |  |  |  | live from money 2 |\n| `method` | Paid by (cash, card, checking, savings) | text |  |  |  |  | live from money 3 |\n| `months` | Months (yearly) | list of number |  |  |  |  | live from money 2 |\n| `once` | Once, at (YYYY-MM-DDTHH:MM) | text |  |  |  |  | live from money 2 |\n| `retries` | Retries | number | ≥ 0 |  |  |  | live from money 3 |\n| `retry_days` | Retry after days | number | ≥ 1 |  |  |  | live from money 3 |\n| `revenue` | Revenue model ({type, …}, one record: units × price × buyers, a catalog, a royalty, fees or a formula) | list |  |  |  |  | live from money 3 |\n| `roll` | Off a business day | enum: none, before, after |  | `\"none\"` |  |  | live from money 3 |\n| `shares` | Shares ({party, pct, from?}) | list |  |  |  |  | live from money 3 |\n| `shortfall` | When the money isn't there | enum: skip, partial, retry, fallback, overdraft, defer |  | `\"skip\"` |  |  | live from money 3 |\n| `splits` | Splits ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Starts | date |  |  |  |  | live from money 2 |\n| `status` | Status | enum: active, paused, ended |  | `\"active\"` |  |  | live from money 2 |\n| `to` | To (an account, a party, or an outside payee) | text |  |  |  |  | live from money 2 |\n| `weekdays` | Weekdays (0 = Sunday) | list of number |  |  |  |  | live from money 2 |\n\n#### `holding`: Holding\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 4 |\n| `asset` | Asset | text |  |  |  |  | live from money 4 |\n| `lots` | Lots ({qty, cost, at}) | list |  |  |  |  | live from money 4 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `route` | Distributions go to (an account, or reinvest) | text |  |  |  |  | live from money 4 |\n\n#### `invoice`: Invoice\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `business` | Business | ref → business |  |  |  |  | live from money 3 |\n| `cents` | Amount | money | ≥ 0 |  |  |  | live from money 3 |\n| `customer` | Customer (a party, or an outside customer) | text |  |  |  |  | live from money 3 |\n| `days_late` | Days late | number | ≥ 0 |  |  |  | live from money 4 |\n| `due` | Due | date |  |  |  |  | live from money 3 |\n| `fees` | Late fees charged | number | ≥ 0 |  |  |  | live from money 4; locked |\n| `flow` | Paid by flow | text |  |  |  |  | live from money 3 |\n| `issued` | Issued | date |  |  |  |  | live from money 3 |\n| `late_fee` | Late fee charged | money | ≥ 0 |  |  |  | live from money 4 |\n| `memo` | For | text |  |  |  |  | live from money 3 |\n| `paid` | Paid | money | ≥ 0 |  |  |  | live from money 3 |\n| `state` | State | enum: open, paid, late, void |  | `\"open\"` |  |  | live from money 3 |\n\n#### `job`: Job\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `basis` | Paid by | enum: salary, hourly, per_shift, commission, tips, stipend |  | `\"hourly\"` |  |  | live from money 3 |\n| `commission_pct` | Commission % | number | ≥ 0 |  |  |  | live from money 3 |\n| `contractor` | Contractor (nothing withheld) | bool |  |  |  |  | live from money 4 |\n| `deductions` | Deductions ({label, pretax, cents?, pct?, kind?, match_pct?, to?}) | list |  |  |  |  | live from money 4 |\n| `employer` | Employer (anyone in the world, a place, or an outside employer) | text |  |  |  |  | live from money 3 |\n| `end` | Ends | date |  |  |  |  | live from money 3 |\n| `hours` | Hours counted | enum: scheduled, attended, contract |  |  |  |  | live from money 3 |\n| `hours_per_week` | Hours a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_anchor` | First payday | date |  |  |  |  | live from money 3 |\n| `pay_days` | Paydays of the month | list of number |  |  |  |  | live from money 3 |\n| `pay_every` | Paid (none: an unpaid title) | enum: weekly, biweekly, semimonthly, monthly, per_job, custom, none |  | `\"monthly\"` |  |  | live from money 3 |\n| `pay_except` | Custom pay: except holidays | list of text |  |  |  |  | live from money 3 |\n| `pay_from` | Pay starts | date |  |  |  |  | live from money 3 |\n| `pay_interval` | Custom pay: every Nth | number | ≥ 1 |  |  |  | live from money 3 |\n| `pay_months` | Custom pay: months | list of number |  |  |  |  | live from money 3 |\n| `pay_roll` | Payday off a business day | enum: none, before, after |  | `\"before\"` |  |  | live from money 3 |\n| `pay_unit` | Custom pay: every | enum: day, week, month, year |  |  |  |  | live from money 3 |\n| `pay_weekday` | Payday weekday (0 = Sunday) | number | 0 … 6 |  |  |  | live from money 3 |\n| `pay_weekdays` | Custom pay: weekdays | list of number |  |  |  |  | live from money 3 |\n| `position` | Position (one its employer defines) | text |  |  |  |  | live from money 3 |\n| `rate` | Rate (a year, an hour or a shift) | money | ≥ 0 |  |  |  | live from money 3 |\n| `season_from` | Season from (MM-DD) | text |  |  |  |  | live from money 3 |\n| `season_to` | Season to (MM-DD) | text |  |  |  |  | live from money 3 |\n| `shift_pattern` | Shift pattern | text (row of calendar.shifts) |  |  |  |  | live from money 3 |\n| `shifts_per_week` | Shifts a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `splits` | Pay goes to ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Started | date |  |  |  |  | live from money 3 |\n| `status` | Status | enum: active, leave, ended |  | `\"active\"` |  |  | live from money 3 |\n| `tips_per_hour` | Tips an hour | money | ≥ 0 |  |  |  | live from money 3 |\n| `title` | Title | text |  |  |  |  | live from money 3 |\n| `weeks_per_year` | Weeks a year | number | 0 … 53 |  |  |  | live from money 3 |\n| `worker` | Worker | ref → person |  |  |  |  | live from money 3 |\n| `workplace` | Workplace | ref |  |  |  |  | live from money 3 |\n\n#### `project`: Project\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Paid from (its party's operating account when left out) | ref → account |  |  |  |  | live from money 3 |\n| `org` | Whose project (the organization or person that runs and pays for it) | ref |  |  |  |  | live from money 3 |\n| `payee` | Paid to (Contractors when left out) | text |  |  |  |  | live from money 3 |\n| `start` | Starts (as the story begins when left out) | date |  |  |  |  | live from money 3 |\n| `status` | Status | enum: planned, active |  | `\"planned\"` |  |  | live from money 3 |\n| `steps` | Steps ({id, name, days or business_days, cost, paid: start, end or split, after, inputs, crew, capitalize, unlocks, done}) | list |  |  |  |  | live from money 3 |\n| `template` | Template | text (row of economy.projects) |  |  |  |  | live from money 3 |\n\n#### `property`: Property\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `appreciation_pct` | Appreciation % a year | number |  |  |  |  | live from money 4 |\n| `asking_price` | Asking price (for sale) | money | ≥ 0 |  |  |  | live from money 3 |\n| `built_by` | Built by the project | ref → project |  |  |  |  | live from money 3 |\n| `capital_cost` | Capital cost | money | ≥ 0 |  |  |  | live from money 3 |\n| `in_service` | In service from | date |  |  |  |  | live from money 3 |\n| `insurance` | Insurance a month | money | ≥ 0 |  |  |  | live from money 4 |\n| `lease_months` | Lease term, months | number | ≥ 1 | `12` |  |  | live from money 3 |\n| `let_from` | Let since | date |  |  |  |  | live from money 3 |\n| `life_months` | Useful life (months) | number | ≥ 1 |  |  |  | live from money 3 |\n| `managed` | Let to outside tenants | bool |  | `false` |  |  | live from money 3 |\n| `market_rent` | Market rent, a unit a month | money | ≥ 0 |  |  |  | live from money 3 |\n| `mortgage` | Mortgage | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `place` | Place | ref |  |  |  |  | live from money 3 |\n| `property_type` | What it is (mineral: a mineral or royalty interest) | enum: building, land, mineral |  |  |  |  | live from money 3 |\n| `purchase_price` | Purchase price | money | ≥ 0 |  |  |  | live from money 4 |\n| `purchased` | Purchased | date |  |  |  |  | live from money 4 |\n| `region` | Region (for its property tax) | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `rent_to` | Rent paid into | ref → account |  |  |  |  | live from money 3 |\n| `reserves` | Reserves (units) | number | ≥ 0 |  |  |  | live from money 3 |\n| `salvage` | Salvage value | money | ≥ 0 |  |  |  | live from money 3 |\n| `tax_installments` | Property tax bills a year | number | 1 … 12 | `2` |  |  | live from money 3 |\n| `tax_pct` | Property tax % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `units` | Units to let | number | ≥ 1 | `1` |  |  | live from money 3 |\n| `upkeep_pct` | Upkeep % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `vacancy_months` | Months empty between tenants, on average | number | ≥ 0 | `1` |  |  | live from money 3 |\n| `valuation` | Valued from its streams' income ({method: pv, cap or multiple, discount_pct, cap_rate_pct, multiple, horizon_months}, one record) | list |  |  |  |  | live from money 4 |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n| `volatility_pct` | Value swings, % a year | number | ≥ 0 |  |  |  | live from money 4 |\n\n#### `trust`: Trust\n\nExtends `group`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `depreciation` | Depreciation | enum: world, none, straight_line |  | `\"world\"` |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `purpose` | What it is for | text |  |  |  |  |  |\n| `revocable` | Revocable (its settlor may take it back) | bool |  |  |  |  |  |\n| `settlor` | Settlor (who made it: a person or an organization) | ref |  |  |  |  |  |\n| `trustees_decide` | Its trustees decide (each on their own unless set, or together) | enum: each, together |  |  |  |  |  |\n| `until` | Until (the day it ends) | date |  |  |  |  |  |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `economy.apply_credit` | `product`, `cents?`, `term?`, `secured_by?`, `who?`, `by?` |\n| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?`, `story?`, `seller?`, `size?`, `at?`, `by?`, `class?`, `details?`, `finance?`, `down?`, `term_months?` |\n| `economy.card_replace` | `card`, `who?`, `by?` |\n| `economy.card_state` | `card`, `state`, `who?`, `by?` |\n| `economy.cash_rule` | `atm` |\n| `economy.close_account` | `account` |\n| `economy.consent_dividend` | `org`, `cents`, `year?`, `by?` |\n| `economy.consolidate` | `org`, `elect?`, `by?` |\n| `economy.delist` | `business`, `price?`, `party?`, `by?` |\n| `economy.deposit` | `account`, `cents`, `who?`, `by?` |\n| `economy.distribute` | `business`, `cents?`, `by?` |\n| `economy.donate` | `to`, `cents`, `from?`, `method?`, `by?` |\n| `economy.dues` | `org`, `cents`, `every?`, `day?`, `by?` |\n| `economy.exercise` | `holding`, `qty?`, `from?`, `to?`, `party?`, `by?` |\n| `economy.flow_create` | `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `by?` |\n| `economy.flow_edit` | `flow`, `name?`, `clear?` |\n| `economy.flow_status` | `flow`, `status`, `who?`, `by?` |\n| `economy.flow_update` | `flow`, `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `by?`, `clear?` |\n| `economy.hire` | `business`, `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours?`, `hours_per_week?`, `pay_every?`, `start?`, `position?`, `by?` |\n| `economy.invoice_issue` | `business`, `customer?`, `customer_name?`, `cents`, `memo?`, `days?`, `by?` |\n| `economy.invoice_pay` | `invoice`, `by?` |\n| `economy.invoice_void` | `invoice`, `by?` |\n| `economy.job_end` | `job`, `end?`, `by?` |\n| `economy.job_hours` | `job`, `hours_per_week`, `by?` |\n| `economy.job_leave` | `job`, `leave`, `by?` |\n| `economy.job_position` | `job`, `position?`, `by?` |\n| `economy.job_raise` | `job`, `rate?`, `pct?`, `by?` |\n| `economy.job_title` | `job`, `title?`, `by?` |\n| `economy.lease_end` | `lease`, `on?`, `party?`, `by?` |\n| `economy.lease_start` | `property`, `tenant`, `rent`, `months?`, `day?`, `unit?`, `from?`, `party?`, `by?` |\n| `economy.lend` | `to`, `cents`, `from?`, `into?`, `apr?`, `months?`, `payment?`, `due_day?`, `who?`, `by?` |\n| `economy.list` | `business`, `units`, `price?`, `symbol?`, `class?`, `party?`, `by?` |\n| `economy.lose` | `item`, `thief?` |\n| `economy.move` | `from`, `to`, `cents`, `memo?`, `by?`, `party?` |\n| `economy.open_account` | `party`, `product?`, `name?` |\n| `economy.owner_draw` | `business`, `cents`, `owner?`, `by?` |\n| `economy.pay_card` | `card`, `from?`, `cents?`, `who?`, `by?` |\n| `economy.pay_schedule` | `org`, `every`, `weekday?`, `anchor?`, `days?`, `by?` |\n| `economy.price_modifier` | `percent`, `scope?`, `place?`, `minutes?`, `id?`, `clear?` |\n| `economy.project_drop` | `project`, `org?`, `text?`, `by?` |\n| `economy.project_note` | `project`, `org?`, `step?`, `days?`, `cents?`, `text`, `source?`, `by?` |\n| `economy.project_pause` | `project`, `org?`, `by?` |\n| `economy.project_resume` | `project`, `org?`, `by?` |\n| `economy.project_start` | `org?`, `template?`, `project?`, `name?`, `account?`, `payee?`, `steps?`, `by?` |\n| `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `party?`, `by?`, `live?`, `story?`, `name?`, `owned?` |\n| `economy.property_list` | `property`, `price?`, `party?`, `by?` |\n| `economy.property_make` | `place`, `name?`, `value?`, `owner?`, `asking_price?` |\n| `economy.property_sell` | `property`, `price`, `buyer?`, `to?`, `party?`, `by?` |\n| `economy.release_hold` | `account`, `hold` |\n| `economy.revenue_adjust` | `stream`, `factor?`, `cents?`, `days?`, `reason`, `by?`, `story?` |\n| `economy.route` | `holding?`, `property?`, `business?`, `to?`, `party?`, `by?` |\n| `economy.set_autopay` | `account`, `mode`, `from?`, `cents?`, `who?`, `by?` |\n| `economy.set_pay_prefs` | `tiers`, `who?` |\n| `economy.set_price` | `asset`, `price` |\n| `economy.set_status` | `account`, `status` |\n| `economy.share_out` | `org`, `cents`, `from?`, `by?` |\n| `economy.shares_buy_back` | `business`, `from`, `units`, `price?`, `to?`, `party?`, `by?` |\n| `economy.shares_classes` | `business`, `class?`, `label?`, `votes?`, `holder?`, `remove?`, `party?`, `by?` |\n| `economy.shares_issue` | `business`, `to`, `units`, `price?`, `class?`, `from?`, `party?`, `by?` |\n| `economy.stake_sell` | `business`, `share?`, `units?`, `price?`, `buyer?`, `to?`, `party?`, `by?` |\n| `economy.tax_status` | `org`, `status?`, `by?` |\n| `economy.trade` | `side?`, `party?`, `holding?`, `asset?`, `account?`, `qty?`, `amount?`, `from?`, `to?`, `right?`, `strike?`, `expiry?`, `by?` |\n| `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?`, `story?`, `by?` |\n| `economy.withdraw` | `account`, `cents`, `who?`, `by?` |\n\n### Formula functions\n\n- `asset_price(id)`\n- `balance(account)`\n- `business_value(id)`\n- `can_afford(who, cents)`\n- `credit_score(who)`\n- `employs(employer, who)`\n- `holding_units(id)`\n- `holding_value(id)`\n- `holds(who, thing)`\n- `is_credit(account)`\n- `manages(who, thing)`\n- `may_draw(who, business)`\n- `money_feature(feature, who)`\n- `net_worth(who)`\n- `price(item)`\n- `property_value(id)`\n- `spends(who, account)`\n- `wealth(who)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `apply_credit` | Apply for credit | Apply for a credit card, a credit line or a loan. | `product: text`, `amount?: money`, `term?: number`, `as?: ref` |  | `default` | `15` | apply for a credit card, apply for a loan, take out a loan |\n| `buy` | Buy | Buy something: food, drinks, goods or a service, here or delivered. | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money`, `as?: ref`, `ask?: bool` |  | `default` | `5` | buy, purchase, order, pick up a |\n| `card_freeze` | Freeze card | Freeze a card so it can't be used. | `card: ref → card`, `as?: ref` |  | `default` | `2` | freeze my card, lock my card |\n| `card_replace` | Replace card | Order a replacement card. | `card: ref → card`, `as?: ref` |  | `default` | `2` | replace my card, order a new card |\n| `card_report_lost` | Report card lost | Report a card lost or stolen. | `card: ref → card`, `as?: ref` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |\n| `card_unfreeze` | Unfreeze card | Unfreeze a frozen card. | `card: ref → card`, `as?: ref` |  | `default` | `2` | unfreeze my card, unlock my card |\n| `consent_dividend` | Declare a consent dividend | For a C corporation you govern: its holders agree to count an amount as a dividend paid for the year, with no money moving, so the corporation keeps its cash but owes no tax on keeping its earnings (the accumulated earnings and personal holding company taxes). Each holder takes their part as income for that year and adds it to what their shares cost them. | `org: ref → business`, `amount: money`, `year?: number` |  | `default` | `15` | declare a consent dividend, consent dividend, treat it as a dividend paid, clear the accumulated earnings tax |\n| `deposit_cash` | Deposit cash | Put cash into a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default` | `3` | deposit, pay in cash, bank the cash |\n| `distribute_profit` | Distribute profit | Pay a business's profit out to its owners, or a stated amount of a trust's money to its beneficiaries, by their shares. | `business: ref`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners, pay the beneficiaries |\n| `donate` | Donate | Give money to an organization: a charity, a church, a club, a foundation. A person's gift to a charity, a church or a foundation is deductible from their income tax. An exempt organization (a foundation, a charity) may also grant money to a person. | `to: ref`, `amount: money`, `method?: text`, `as?: ref` |  | `default` | `5` | donate, make a donation, give to charity, tithe, put money in the collection plate, sponsor |\n| `exercise_option` | Exercise an option | Exercise an option contract you hold. | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account`, `as?: ref` |  | `default` | `2` | exercise the option, exercise my calls, exercise my puts |\n| `flow_create` | Set up a standing payment | Set up a standing payment: a bill, a regular transfer, an allowance. | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `as?: ref` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |\n| `flow_delete` | Cancel a standing payment | Cancel a standing payment. | `flow: ref → flow`, `as?: ref` |  | `default` | `2` | cancel the standing order, stop the recurring payment |\n| `flow_pause` | Pause a standing payment | Pause a standing payment. | `flow: ref → flow`, `as?: ref` |  | `default` | `2` | pause the standing order |\n| `flow_resume` | Resume a standing payment | Resume a paused standing payment. | `flow: ref → flow`, `as?: ref` |  | `default` | `2` | resume the standing order |\n| `flow_update` | Change a standing payment | Change a standing payment: its amount, its schedule or its accounts. | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `clear?: text`, `as?: ref` |  | `default` | `2` | change the standing order, change the recurring payment |\n| `invoice_issue` | Send an invoice | Bill a customer from a business you run. | `business: ref → business`, `customer?: ref`, `customer_name?: text`, `amount: money`, `memo?: text`, `days?: number` |  | `default` | `10` | send an invoice, invoice, bill them |\n| `invoice_pay` | Pay an invoice | Pay an invoice billed to you or to a business you run. | `invoice: ref → invoice` |  | `default` | `5` | pay the invoice, settle the bill |\n| `invoice_void` | Void an invoice | Cancel an invoice that a business you run sent. | `invoice: ref → invoice` |  | `default` | `5` | void the invoice, cancel the invoice, write it off |\n| `job_end` | End a job | End a job: quit your own, or let someone go who works for you or an organization you let staff go for. | `job: ref → job` |  | `default` | `10` | fire, let go, quit, resign, hand in my notice |\n| `job_hire` | Hire | Hire someone, for yourself or for an organization you hire for (a business, a household, the party), with a title, pay and a position. | `business: ref`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text`, `position?: text` |  | `default` | `15` | hire, take on, give a job to |\n| `job_hours` | Change hours | Change the hours a week someone works for you or an organization you set staff hours for. | `job: ref → job`, `hours_per_week: number` |  | `default` | `5` | change their hours, cut their hours, more hours, full time, part time |\n| `job_leave` | Put on leave | Put someone who works for you or an organization you set staff leave for on leave: they keep the job and are paid nothing while it lasts. | `job: ref → job` |  | `default` | `5` | put on leave, give time off, send on leave |\n| `job_position` | Appoint to a position | Promote or move someone who works for you or an organization you appoint for into one of its positions, or take them out of theirs. | `job: ref → job`, `position?: text` |  | `default` | `5` | promote, appoint, make them, move them to |\n| `job_raise` | Give a raise | Change the pay of someone who works for you or an organization you set staff pay for. | `job: ref → job`, `rate: money` |  | `default` | `5` | give a raise, raise the pay, pay more |\n| `job_return` | Back from leave | Bring someone on leave back to work, paid again from their next payday. | `job: ref → job` |  | `default` | `5` | back from leave, back to work, end their leave |\n| `job_title` | Change title | Change the title a job goes by: your own, or that of someone who works for you or an organization you appoint for. | `job: ref → job`, `title?: text` |  | `default` | `5` | change the job title, retitle |\n| `lease_end` | End a lease | End a tenant's lease. | `lease: ref → flow`, `on?: text`, `as?: ref` |  | `default` | `10` | end the lease, give notice, move out |\n| `lease_start` | Let a unit | Let a unit of a property you own to a tenant, for rent each month. | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text`, `as?: ref` |  | `default` | `20` | rent out, sign a lease, let the apartment |\n| `lend_money` | Lend money | Lend money to someone in the world (a company to its subsidiary, a person to a friend's business): a loan they repay with interest, monthly, by autopay. | `to: ref`, `amount: money`, `apr?: number`, `months?: number`, `from?: ref → account`, `as?: ref` |  | `default` | `10` | lend money to, make a loan to, loan the company |\n| `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money`, `as?: ref`, `ask?: bool` |  | `default` | `2` | transfer, move money, put into savings |\n| `org_dues` | Set dues | Set what each member pays into an organization's money, and how often; nothing ends them. | `org: ref`, `amount: money`, `every?: text`, `day?: number` |  | `default` | `2` | set dues, membership fee, everyone chips in |\n| `org_pay_schedule` | Change pay schedule | Set how often an organization you set staff pay for pays its staff, moving every job there to it. | `org: ref`, `every: text`, `weekday?: number`, `anchor?: text` |  | `default` | `2` | pay schedule, change payday, pay every other week |\n| `org_share_out` | Share out | Pay an amount from an organization's money to its members equally (the party's: its core members and companions). | `org: ref`, `amount: money`, `from?: ref → account`, `ask?: bool` |  | `default` | `5` | share out, split the money, divide the purse, hand out |\n| `owner_draw` | Take an owner's draw | Take money out of a business you own, for yourself. | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |\n| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref, outside: economy.external:world`, `amount: money`, `method?: text`, `as?: ref`, `ask?: bool` |  | `default` | `1` | pay, give money, send money, venmo |\n| `pay_card` | Pay card or loan | Pay off some or all of a card or loan balance. | `card: ref → account`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |\n| `project_drop` | Drop a project | Give up a project: nothing more is paid or done; what it paid stays paid and what it made stays. | `project: ref` |  | `default` | `2` | drop the project, abandon the well, cancel the build |\n| `project_pause` | Pause a project | Pause a project under way: its steps stop where they are and keep the work they have left. | `project: ref` |  | `default` | `2` | pause the project, halt work, stop drilling |\n| `project_resume` | Resume a project | Set a paused project going again: each step under way finishes the work it had left. | `project: ref` |  | `default` | `2` | resume the project, restart work |\n| `project_start` | Start a project | Start a production project for an organization: from one of the world's templates (a well, a foundry, a building, a farm season), or a planned one. Its steps run day by day and pay from its account; what it builds comes in as each is done. | `org: ref`, `template?: text`, `project?: ref`, `name?: text`, `account?: ref → account` |  | `default` | `2` | start a project, drill a well, build a foundry, put up a building, plant the crop |\n| `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number`, `live?: bool`, `as?: ref` |  | `default` | `60` | buy the house, buy the property, make an offer on |\n| `property_list` | List a property for sale | Put a property you own up for sale at an asking price, or take it off the market. | `property: ref → property`, `price?: money`, `as?: ref` |  | `default` | `5` | put the house on the market, list the property, take it off the market |\n| `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account`, `as?: ref` |  | `default` | `60` | sell the house, sell the property |\n| `route_distributions` | Route dividends, rent or profits | Choose where dividends, rent or profits are paid: reinvested, or into an account. | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text`, `as?: ref` |  | `default` | `1` | reinvest dividends, send dividends to, send the rent to |\n| `set_autopay` | Set autopay | Set how a card or loan pays itself each month. | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default` | `2` | set up autopay, turn on autopay, turn off autopay |\n| `set_pay_prefs` | Set how I pay | Set the order in which you prefer to pay: cash, debit, credit. | `tiers: text` |  | `default` | `2` | i'd rather pay with |\n| `shares_buy_back` | Buy back shares | Have a company you control buy back some of a holder's units, paying them from its account. | `business: ref → business`, `from: ref`, `units: number`, `price?: money`, `as?: ref`, `vote?: bool` |  | `default` | `30` | buy back shares, buy them out, buy back their stake |\n| `shares_classes` | Change share classes | Add, change or remove a company's share class (the votes a unit carries), and move a holder's units into it. | `business: ref → business`, `label: text`, `class?: text`, `votes?: number`, `holder?: ref`, `remove?: bool`, `as?: ref`, `vote?: bool` |  | `default` | `2` | add a share class, non-voting shares, change the votes |\n| `shares_delist` | Take it off the market | Take a listed company you control off the market, buying back every unit the public holds at its market price or more from its account. | `business: ref → business`, `price?: money`, `as?: ref`, `vote?: bool` |  | `default` | `60` | take the company private, delist the company, go private, buy out the public |\n| `shares_issue` | Issue shares | Issue new units of a company you control to a buyer, who pays for them into its account. | `business: ref → business`, `to: ref`, `units: number`, `price?: money`, `class?: text`, `from?: ref → account`, `as?: ref`, `vote?: bool` |  | `default` | `30` | issue shares, sell new shares in the company, bring in a partner, let them buy in |\n| `shares_list` | List on the market | List a C corporation you control on the market, selling new units to the public, or offer more units once it is listed; the market pays for them into its account. | `business: ref → business`, `units: number`, `price?: money`, `symbol?: text`, `as?: ref`, `vote?: bool` |  | `default` | `60` | list the company on the market, take the company public, go public, float the company, sell shares to the public |\n| `stake_sell` | Sell a share of a business | Sell part of your share of a business, in percent or, where it counts them, in units; to someone in the world, or a whole business to a buyer outside it. | `business: ref → business`, `share?: number`, `units?: number`, `price: money`, `buyer?: ref`, `to?: ref → account`, `as?: ref` |  | `default` | `60` | sell my share of the business, sell the shop, sell my shares |\n| `tax_consolidate` | File a consolidated return | Elect, or stop, for a C corporation you govern, to file one federal income tax return with the corporations it holds 80% or more of (by votes and by worth): their profits and losses offset, and it pays the group's tax. | `org: ref → business`, `elect?: text` |  | `default` | `15` | file a consolidated return, file one return for the group, consolidate our taxes, stop filing a consolidated return |\n| `trade` | Buy or sell investments | Buy or sell investments: stocks, funds, bonds, crypto. | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text`, `as?: ref` |  | `default` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |\n| `withdraw_cash` | Withdraw cash | Take cash out of a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default` | `3` | withdraw, take out cash, hit the atm, get cash |\n\n### Events\n\nIts own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.closes`, `economy.commission`, `economy.config`, `economy.consent_dividend`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.depreciate`, `economy.dispose`, `economy.dividend_received`, `economy.donation`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.foundation_mark`, `economy.foundation_tax`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.penalty_tax`, `economy.price`, `economy.project_begin`, `economy.project_drop`, `economy.project_note`, `economy.project_pause`, `economy.project_resume`, `economy.project_step`, `economy.quote`, `economy.remit`, `economy.revenue`, `economy.revenue_adjusted`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.trust_distribution`, `economy.txn`, `economy.unemployment_accrued`, `economy.unemployment_paid`, `economy.year_close`.\n\nChecks it adds to: `post`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `project_note` | `money` |\n| `purchase` | `money` |\n| `revenue` | `money` |\n| `transfer` | `money` |\n\n### Panels and slots\n\nPanels: `economy.money`. Slots it writes: `money`, `property`, `quest`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `economy.accounts` | `money` | 3 | the world |\n| `economy.invoices` | `money` | 3 | the world |\n| `economy.markets` | `money` | 3 | the world |\n| `economy.money` | `money` | 2 | the world |\n| `economy.plans` | `money` | 0 | the world |\n| `economy.projects` | `money` | 3 | the world |\n| `economy.property_values` | `money` | 3 | the world |\n| `economy.settlements` | `money` | 3 | the world |\n| `economy.timesheet` | `money` | 3 | the world |\n| `economy.year_close` | `money` | 3 | the world |\n\nDetail on demand: `money` (version 2).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `economy.catalog` | Price catalog | `lre-table/economy.catalog/v1` | name (text), aliases (list, optional), category (ref), unit (text), size (enum, optional), holds (enum, optional), price_cents (band), notes (text, optional) | 358 |\n| `economy.categories` | Price categories | `lre-table/economy.categories/v1` | name (text), basis (text), notes (text, optional), price_unit_note (text, optional), item_count (int), price_cents (band) | 20 |\n| `economy.exempt` | Tax-exempt organizations | `lre-table/economy.exempt/v1` | name (text), code (text), income_tax_exempt (bool), donations_deductible (bool), futa (bool), suta (bool), s_corp_holder (bool, optional), payout_pct (number, optional), excise_pct (number, optional), undistributed_tax_pct (number, optional), donor_limit_pct (number, optional), description (text) | 4 |\n| `economy.finance` | Finance parameters | `lre-table/economy.finance/v1` | title (text), values (json) | 8 |\n| `economy.index_history` | Stock index history (total return, month-end closes) | `lre-table/economy.index_history/v1` | date (text), level (number) | 282 |\n| `economy.occupations` | Occupations and pay | `lre-table/economy.occupations/v1` | title (text), category (enum), median_cents_per_h (int), median_cents_per_year (int), typical_earnings_cents_per_year (int), schedule_pattern (ref), typical_hours_per_week (number), weeks_per_year (number), weekend_work (enum), shifts (list), pay_frequency (enum), benefits (enum), benefits_note (text), withholding_rate_pct (number), description (text), wage_basis (text), tipped (bool, optional), tipped_cash_wage_cents_per_h (int, optional), self_employed (bool, optional), fica_exempt (bool, optional), estimated_tax_set_aside_pct (number, optional), withholding_note (text, optional) | 56 |\n| `economy.projects` | Production project templates | `lre-table/economy.projects/v1` | name (text), description (text), payee (text), days (band), cost_cents (band), steps (json) | 5 |\n| `economy.regions` | Regions (US states, DC and the national baseline) | `lre-table/economy.regions/v1` | name (text), abbr (text), scope (enum), census_region (enum, optional), census_division (enum, optional), time_zones (list, optional), observes_dst (bool, optional), state_income_tax_effective_pct (number, optional), local_income_tax_pct_typical (number, optional), sales_tax_combined_avg_pct (number), property_tax_effective_pct (number, optional), suta_wage_base_cents (int), suta_new_employer_pct (number), futa_credit_reduction_pct (number, optional), cost_of_living_multiplier (number), median_rent_1br_cents_per_month (int), median_rent_2br_cents_per_month (int), residential_electricity_cents_per_kwh (number), minimum_wage_cents_per_h (int), tipped_minimum_wage_cents_per_h (int, optional), notes (text, optional) | 52 |\n\n### Lint codes\n\n`economy.accounts`, `economy.assets`, `economy.business`, `economy.claim_cap`, `economy.depreciation`, `economy.holdings`, `economy.listing`, `economy.notes`, `economy.projects`, `economy.property`, `economy.revenue`, `economy.scorp_holders`, `economy.unpriced_cap`.\n\n## Gear & containers pack (`gear`)\n\nVersion 1 · realism domain `gear` · requires `space`.\n\n### Kinds\n\n#### `container`: Container\n\nExtends `item`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `capacity_l` | Capacity (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `max_load_kg` | Max load (kg) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `stock` | Contents category (sampled when first opened) | text |  |  |  |  |  |\n\n#### `item`: Item\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `access` | Who may use it | enum: owner, members, staff, customers, public |  |  |  |  |  |\n| `aliases` | Also called | list of text |  |  |  |  |  |\n| `catalog` | Catalog item | text (row of economy.catalog) |  |  |  |  |  |\n| `category` | Category | text |  |  |  |  |  |\n| `condition` | Condition | number | 0 … 100 | `100` |  |  | live from gear 3; bound auto; bands: broken, worn, good, like new |\n| `consumable` | Consumable | bool |  |  |  |  | live from gear 4 |\n| `description` | Description | text |  |  |  |  |  |\n| `fixed` | Fixed in place (can't be picked up) | bool |  |  |  |  | locked |\n| `from_kit` | From kit | ref |  |  |  |  | locked |\n| `got` | How its holder came to have it | list |  |  |  |  | locked |\n| `holds` | Takes things up to | enum: pocket, hand, armful, heavy, furniture, builtin |  |  |  |  |  |\n| `home` | Kept at (a place, a holder, or owner) | text |  |  |  |  |  |\n| `made` | Made in play (by whom, where) | list |  |  |  |  | locked |\n| `maybe_same_as` | Maybe the same as | ref |  |  |  |  | locked |\n| `merged_into` | Merged into | ref |  |  |  |  | locked |\n| `notable` | Notable | bool |  |  |  |  | live from gear 1 |\n| `overdue` | Overdue | bool |  |  |  |  | locked |\n| `part` | Built into what holds it | bool |  |  |  |  |  |\n| `piece` | Kit piece | text |  |  |  |  | locked |\n| `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2 |\n| `size` | Size | enum: pocket, hand, armful, heavy, furniture, builtin |  |  |  |  |  |\n| `sleep` | Can be slept in or on | bool |  |  |  |  |  |\n| `slot` | Equip slot | text |  |  |  |  | live from gear 3 |\n| `uses` | Uses left | number | ≥ 0 |  |  |  | live from gear 4 |\n| `volume_l` | Volume (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `weight_g` | Weight (g) | number | ≥ 0 |  |  |  | live from gear 2 |\n\n#### `kit`: Kit\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `kit` | Kit template | text |  |  |  |  | live from gear 3 |\n| `piece_count` | Piece count | number |  |  |  |  | live from gear 3 |\n| `pieces` | Pieces | list |  |  |  |  | live from gear 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `equipped` | Equipped by | `item` | `*` | many_one |  |  | `slot` |\n| `permits` | Lets use their things | `*` | `*` | many_many |  |  | `by`, `scope` |\n| `uses` | Uses (granted until) | `*` | `*` | many_many |  |  | `basis`, `by` |\n| `worn_by` | Worn by | `item` | `*` | many_one |  |  | `slot` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `gear.drop` | `item`, `place?` |\n| `gear.fetch` | `item`, `to` |\n| `gear.give` | `item`, `from`, `to`, `told?`, `basis?` |\n| `gear.hand` | `item`, `to`, `basis`, `until?`, `by?` |\n| `gear.lend` | `item`, `to`, `until?`, `said?` |\n| `gear.lose` | `item`, `thief?` |\n| `gear.put_away` | `item`, `by?` |\n| `gear.put_in` | `item`, `into`, `by?` |\n| `gear.receive` | `name`, `to`, `from?` |\n| `gear.remove` | `item` |\n| `gear.retrieve` | `item` |\n| `gear.search` | `who`, `target?` |\n| `gear.set_apply` | `who`, `set` |\n| `gear.set_drop` | `who`, `set` |\n| `gear.set_save` | `who`, `name`, `kind` |\n| `gear.take` | `item`, `to` |\n| `gear.take_piece` | `kit`, `piece`, `to` |\n| `gear.thing_change` | `change` |\n| `gear.transfer` | `item`, `to` |\n| `gear.use` | `item`, `user?` |\n| `gear.wear` | `item`, `wearer`, `slot?` |\n\n### Formula functions\n\n- `ammo_of(who, what)`\n- `carried_kg(holder)`\n- `carries(holder, item)`\n- `fetch_minutes(who, thing)`\n- `fits_in(thing, holder)`\n- `fits_on(_who, thing)`\n- `has_item(holder, what)`\n- `kit_complete(kit)`\n- `kit_present(kit)`\n- `lent_out(thing)`\n- `may_assign(who, thing)`\n- `may_use(who, thing)`\n- `movable(thing)`\n- `possessor(thing)`\n- `reach_of(who, thing)`\n- `readied(who, what)`\n- `rest_near(who, thing)`\n- `returns_to(who, thing)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `drop` | Drop | Put down something you carry, here. | `item: ref → item, claim: held` |  | `default` | `1` | drop, put down, leave |\n| `fetch` | Fetch | Go and get something of yours, or something you may use, from close by. | `item: ref → item` |  | `default` | `1 + fetch_minutes(self, item)` | fetch, go get, go and get |\n| `give` | Give | Give something you carry to someone here, for keeps. | `item: ref → item, claim: held`, `to: ref → person` |  | `default` | `1` | give, give away, let keep |\n| `give_back` | Give back | Give something back to whose it is, here. | `item: ref → item` |  | `default` | `1` | give back, return, hand back |\n| `hand_over` | Hand over | Hand something you carry to someone here to hold; it stays whose it is. | `item: ref → item, claim: held`, `to: ref → person` |  | `default` | `1` | hand, hand over, pass, toss |\n| `lend` | Lend | Lend something to someone, for some days or until a time. | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |\n| `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |\n| `put_away` | Put away | Put something back where it's kept. | `item: ref → item` |  | `default` | `2` | put away, put back, tidy away |\n| `put_in` | Put in | Put something you carry, or that is here, into a bag, a box or a piece of furniture here. | `item: ref → item`, `into: ref → item` |  | `default` | `1` | put in, put into, stash in, pack in, store in |\n| `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |\n| `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |\n| `search` | Search | Search where you are, or look through a container, for what isn't in plain sight. | `target?: ref → item` |  | `default` | `5` | search, look around, examine, look through, look inside, open, rummage |\n| `set_apply` | Change into | Change into one of your saved outfits or loadouts. | `set: text` |  | `default` | `5` | change into, put on my, get dressed in, gear up |\n| `set_drop` | Forget an outfit | Stop keeping one of your saved outfits or loadouts. | `set: text` |  | `default` | `0` |  |\n| `set_save` | Save what I'm wearing | Keep what you wear now as an outfit, or what you carry ready as a loadout. | `name: text`, `kind: text` |  | `default` | `0` |  |\n| `take` | Take | Pick up something that is here. | `item: ref → item, claim: here` |  | `default` | `1` | take, pick up, grab |\n| `take_piece` | Take from a kit | Take one piece, such as a tool or a part, out of a kit. | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |\n| `use` | Use | Use an item you carry or can reach. | `item: ref → item, claim: held` |  | `default` | `5` | use, apply |\n| `wear` | Wear or equip | Put on or equip clothing, armor or gear. | `item: ref → item, claim: held` |  | `default` | `2` | wear, put on, equip |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `drop` | `ref` |\n| `give` | `ref` |\n| `has` | `ref` |\n| `item_condition` | `number` |\n| `item_hand` | `ref` |\n| `item_lose` | `ref` |\n| `item_make` | `ref` |\n| `item_move` | `ref` |\n| `item_own` | `ref` |\n| `item_use` | `number` |\n| `item_wear` | `ref` |\n| `lose` | `ref` |\n| `owner` | `ref` |\n| `put` | `ref` |\n| `quantity` | `number` |\n| `take` | `ref` |\n| `use_up` | `number` |\n| `wear` | `ref` |\n\n### Panels and slots\n\nPanels: `gear.gear`. Slots it writes: `gear`, `people`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `gear.grants` | `gear` | 1 | the world |\n| `gear.put_away` | `gear` | 1 | the world |\n\nDetail on demand: `gear` (version 2).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `gear.containers` | Containers | `lre-table/gear.containers/v1` | name (text), capacity_l (number), max_load_kg (number), empty_weight_g (int), location (enum), size (enum, optional), holds (enum, optional), equip_slot (ref), price_cents (band), notes (text, optional) | 37 |\n| `gear.items` | Gear items | `lre-table/gear.items/v1` | name (text), category (enum), equip_slot (ref), weight_g (int), volume_l (number), size (enum, optional), price_cents (band), ammo (ref, optional), notes (text, optional) | 116 |\n| `gear.kits` | Kits | `lre-table/gear.kits/v1` | name (text), recommended_container (ref), description (text), piece_count (int), pieces_total_weight_g (number), packed_volume_l (number), price_cents (band), pieces (list), notes (text, optional) | 5 |\n| `gear.slots` | Equip slots | `lre-table/gear.slots/v1` | description (text) | 23 |\n\n### Lint codes\n\n`gear.carry`, `gear.contents`, `gear.holders`, `gear.kits`, `gear.things`.\n\n## Minds pack (`minds`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `minds.know` | `facts`, `learn` |\n\n### Events\n\nIts own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.fact`, `minds.forget`, `minds.intent`, `minds.keep`, `minds.knowledge`, `minds.learn`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.settle`, `minds.skip`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `learn` | `knowledge` |\n| `reveal` | `knowledge` |\n\n### Panels and slots\n\nPanels: `minds.known`. Slots it writes: `knowledge`, `minds`.\n\n### Lint codes\n\n`minds.config`, `minds.holdings`, `minds.steps`.\n\n## Organizations pack (`orgs`)\n\nVersion 1 · realism domain none · requires `economy`, `relationships`, `space`.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `acts_for` | Acts for | `*` | `*` | many_many |  |  | `accounts`, `by`, `month`, `payment`, `powers` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `orgs.admit` | `org`, `who`, `title?`, `position?`, `by?`, `why?` |\n| `orgs.answer` | `org`, `request`, `answer`, `why?`, `approver?`, `said?`, `by?` |\n| `orgs.appoint` | `org`, `who`, `position?`, `by?`, `why?` |\n| `orgs.decisions` | `org`, `vote_by?`, `quorum?`, `pass?`, `days?`, `approval_days?`, `by?` |\n| `orgs.delegate` | `org`, `to`, `powers`, `payment?`, `month?`, `until?`, `by?` |\n| `orgs.entry` | `place`, `entry?`, `keys?`, `org?`, `by?` |\n| `orgs.found` | `type`, `name`, `kind?`, `cents?`, `from?`, `structure?`, `units?`, `classes?`, `trustee?`, `beneficiary?`, `revocable?`, `purpose?`, `until?`, `founder?`, `by?` |\n| `orgs.leave` | `org`, `who`, `why?` |\n| `orgs.merge` | `org`, `into`, `ratio?`, `cash?`, `from?`, `keep?`, `why?`, `by?` |\n| `orgs.motion_end` | `org`, `motion`, `how?`, `by?` |\n| `orgs.note` | `org`, `text`, `by?`, `names?` |\n| `orgs.party_hire` | `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours_per_week?`, `pay_every?`, `by?` |\n| `orgs.party_name` | `name`, `by?` |\n| `orgs.party_purse` | `cents`, `from?`, `by?` |\n| `orgs.party_tier` | `who`, `tier`, `by?` |\n| `orgs.plan_goal` | `org`, `id?`, `text?`, `window?`, `where?`, `status?`, `source?`, `by?` |\n| `orgs.plan_order` | `org`, `id?`, `to?`, `lead?`, `text?`, `where?`, `when?`, `goal?`, `status?`, `said?`, `source?`, `by?` |\n| `orgs.plan_status` | `org`, `id`, `status`, `note?`, `said?`, `source?`, `by?` |\n| `orgs.position` | `org`, `title?`, `id?`, `powers?`, `seats?`, `reports_to?`, `no_report?`, `scope?`, `payment?`, `month?`, `successor?`, `default?`, `remove?`, `by?` |\n| `orgs.propose` | `change`, `by`, `party?` |\n| `orgs.remove` | `org`, `who`, `by?`, `why?` |\n| `orgs.rename` | `org`, `name`, `by?` |\n| `orgs.restructure` | `org`, `structure`, `party?`, `by?` |\n| `orgs.revoke` | `org`, `to`, `by?` |\n| `orgs.succession` | `on?` |\n| `orgs.title` | `org`, `who`, `title?`, `by?`, `why?` |\n| `orgs.vote` | `org`, `motion`, `vote`, `who?`, `said?`, `by?` |\n| `orgs.vote_rule` | `org`, `who?`, `vote?`, `with?`, `by?` |\n| `orgs.wind_up` | `org`, `stage?`, `property?`, `to?`, `why?`, `by?` |\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `org_admit` | Admit a member | Admit someone to an organization, with a title or into a position. | `org: ref`, `who: ref`, `title?: text`, `position?: text` |  | `default` | `10` | admit, take in as a member, welcome into |\n| `org_appoint` | Appoint | Appoint someone to a position in an organization, or take them out of theirs. | `org: ref`, `who: ref`, `position?: text` |  | `default` | `10` | appoint, make them foreman, promote |\n| `org_approve` | Approve | Approve a request made for an organization over the limit of someone below you there (you granted their delegation, hold a position above theirs, or govern or own it), within your own limits: it is done now, as theirs. | `org: ref`, `request: text` |  | `default` | `5` | approve it, sign off on it, okay the spend |\n| `org_decisions` | How decisions are made | Set how an organization's motions count their votes (shares or members), their quorum and pass mark in percent, how many days a motion stays open and a request for approval waits. | `org: ref`, `vote_by?: text`, `quorum?: number`, `pass?: number`, `days?: number`, `approval_days?: number` |  | `default` | `2` | set the quorum, change the voting rules |\n| `org_delegate` | Delegate | Let someone act for an organization with some of your powers there, within limits, until a date. | `org: ref`, `to: ref`, `powers: text`, `payment?: money`, `month?: money`, `until?: date` |  | `default` | `10` | let them act for, delegate, give them authority |\n| `org_deny` | Deny | Deny a request for approval made for an organization (your own request: withdraw it). | `org: ref`, `request: text`, `why?: text` |  | `default` | `5` | deny the request, turn it down, withdraw my request |\n| `org_entry` | Change entry | Change who may enter one of an organization's places, and its keys. | `org: ref → thing`, `place: ref → place`, `entry: text`, `keys?: text` |  | `default` | `0` |  |\n| `org_found` | Start an organization | Found a company (from Money 3: you its only owner, with capital from an account of yours, counted in units when you say how many; or, for an organization you govern, its subsidiary from its money), settle a trust (from Money 3: its trustee and beneficiary you unless named, with what you put in), start a nonprofit (from Money 3: no owners, you its Director, with what you give it), or a group of one of the world's kinds, which you lead. An organization you govern may settle a trust or start a nonprofit too. | `type: text`, `name: text`, `kind?: text`, `amount?: money`, `from?: ref → account`, `structure?: text`, `units?: number`, `trustee?: ref`, `beneficiary?: ref`, `revocable?: bool`, `purpose?: text`, `until?: text`, `as?: ref` |  | `default` | `30` | start a company, found a business, set up a company, start a group, found a club, form a crew, start a subsidiary, settle a trust, set up a trust, start a charity, start a nonprofit, set up a foundation |\n| `org_goal` | Set a goal | Add a goal to an organization's plan, or change one. | `org: text`, `id?: text`, `text?: text`, `window?: text`, `where?: text` |  | `default` | `2` | set a goal, add to the plan |\n| `org_leave` | Leave | Leave an organization you're a member of. | `org: ref` |  | `default` | `5` | leave the group, quit the club, resign from |\n| `org_merge` | Merge companies | Fold one company into another (from Money 3): its holders get the other's units at a ratio (by their values unless you say) and any cash it pays, and its accounts, property, staff and positions move over; or, kept, the other takes all of it as its subsidiary. You decide for both, with more than half the votes of each (yours, or an organization's you govern). | `org: ref → business`, `into: ref → business`, `ratio?: number`, `cash?: money`, `from?: ref → account`, `keep?: bool`, `vote?: bool` |  | `default` | `60` | merge the companies, fold it into, take over the company, buy out the company, acquire the business |\n| `org_motion_end` | Withdraw a motion | Withdraw a motion you put to a vote, while it is open. | `org: ref`, `motion: text` |  | `default` | `2` | withdraw the motion |\n| `org_order` | Give an order | Give people in an organization a task on its plan, or change one: whom it is for, who leads, where and when. | `org: text`, `id?: text`, `to?: text`, `lead?: text`, `text?: text`, `where?: text`, `when?: text`, `goal?: text` |  | `default` | `2` | give an order, put them on it |\n| `org_plan_status` | Move a plan along | Mark a goal or an order on an organization's plan under way, done, blocked, refused or dropped, or open it again. | `org: text`, `id: text`, `status: text`, `note?: text` |  | `default` | `2` | mark it done, drop the plan |\n| `org_position` | Set a position | Add, change or remove a position in an organization: its title, powers, seats, whom it reports to, its scope and limits. | `org: ref`, `title: text`, `id?: text`, `powers?: text`, `seats?: number`, `reports_to?: text`, `no_report?: bool`, `scope?: text`, `payment?: money`, `month?: money`, `successor?: text`, `default?: bool`, `remove?: bool` |  | `default` | `2` | add a position, change the position |\n| `org_remove` | Remove a member | Remove someone from an organization. | `org: ref`, `who: ref` |  | `default` | `10` | throw out, expel, remove from the group |\n| `org_rename` | Rename | Give an organization a new name. | `org: ref`, `name: text` |  | `default` | `2` | rename, call it |\n| `org_restructure` | Change structure | Change a company's legal structure (a sole proprietorship, a partnership, an LLC, an S or a C corporation): draws and payouts change at once, its taxes from the next estimated-tax period. | `org: ref → business`, `structure: text`, `as?: ref`, `vote?: bool` |  | `default` | `30` | incorporate, become an LLC, change the company's structure, turn it into a corporation |\n| `org_revoke` | Revoke | End someone's delegation to act for an organization. | `org: ref`, `to: ref` |  | `default` | `5` | revoke, take back their authority |\n| `org_title` | Change title | Give someone in an organization a title of their own, or take it away. | `org: ref`, `who: ref`, `title?: text` |  | `default` | `5` | call them, give them the title |\n| `org_vote` | Vote | Vote on a motion open at an organization: for, against, or abstain; as an organization holder whose shares you manage, with `as`. | `org: ref`, `motion: text`, `vote: text`, `as?: ref` |  | `default` | `5` | vote for the motion, vote against, raise a hand for, abstain |\n| `org_vote_rule` | Standing vote | Set how you vote on an organization's motions when you don't vote yourself: for, against, abstain, with another voter, or none. | `org: ref`, `vote: text`, `with?: ref` |  | `default` | `2` | vote with, always vote for |\n| `org_wind_up` | Wind up a company | Close a company down (from Money 3), all at once or in stages: begin (it stops trading: its staff go, its standing payments end), sell what you choose as the company, then finish (its debts paid, its holdings sold, its real estate and stakes handed to its owners by share or sold, the rest of its cash paid out to them by share, its accounts closed, it dissolved); or resume trading. Stage: all, begin, finish, resume. | `org: ref → business`, `stage?: text`, `property?: text`, `to?: ref`, `vote?: bool` |  | `default` | `60` | wind up the company, close the business down, dissolve the company, shut the business for good, liquidate the company |\n| `party_hire` | Hire a hand | Hire someone for your party, paid from its purse; they join it as a hired hand. | `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default` | `15` | hire a hand, take on a hand, hire them for the party |\n| `party_name` | Name the party | Give your party a name. | `name: text` |  | `default` | `1` | call our party, name our group |\n| `party_purse` | Start a purse | Open an account your party owns, with a deposit from an account of your own. | `amount: money`, `from?: ref → account` |  | `default` | `1` | start a party purse, pool our money, a kitty for the party |\n| `party_tier` | Party tier | Add someone you know to your party in a tier (core, companion, hired, ally), change their tier, or take them out of the party (out). | `who: ref → person`, `tier: text` |  | `default` | `1` | join my party, travel with me from now on, leave the party |\n\n### Events\n\nIts own: `orgs.answer`, `orgs.ask`, `orgs.config`, `orgs.entry`, `orgs.goal`, `orgs.lived`, `orgs.log`, `orgs.motion`, `orgs.motion_end`, `orgs.order`, `orgs.spent`, `orgs.status`, `orgs.trespass`, `orgs.vote`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `agenda` | `routine` |\n| `approval` | `routine` |\n| `employment` | `routine` |\n| `membership` | `routine` |\n| `vote` | `routine` |\n\n### Panels and slots\n\nPanels: `orgs.list`, `orgs.org`. Slots it writes: `people`, `quest`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `orgs.motions` | `relationships` | 0 | the world |\n| `orgs.orders` | `relationships` | 0 | the world |\n| `orgs.seats` | `relationships` | 0 | the world |\n\n### Lint codes\n\n`orgs.delegations`, `orgs.entry`, `orgs.kinds`, `orgs.owners`, `orgs.positions`, `orgs.taxes`.\n\n## Relationships pack (`relationships`)\n\nVersion 1 · realism domain `relationships` · requires `space`.\n\n### Kinds\n\n#### `company`: Company\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `faction`: Faction\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `family`: Family\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `household`: Household\n\nExtends `group`.\n\nNo fields of its own.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `child_of` | Child of | `person` | `person` | many_many |  | `parent_of` | none |\n| `knows` | Knows | `*` | `*` | many_many |  |  | none |\n| `member_of` | Member of | `*` | `group` | many_many |  |  | `position`, `rank`, `role`, `since` |\n| `parent_of` | Parent of | `person` | `person` | many_many |  | `child_of` | none |\n| `partner_of` | Partner of | `person` | `person` | many_many | yes |  | `since` |\n| `regard` | Regard | `*` | `*` | many_many |  |  | `respect`, `trust`, `warmth` |\n| `sibling_of` | Sibling of | `person` | `person` | many_many | yes |  | none |\n| `spouse_of` | Spouse of | `person` | `person` | many_many | yes |  | `since` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `relationships.adjust` | `from`, `to`, `delta`, `axis?`, `why?` |\n| `relationships.appraise` | `from`, `to`, `appraisal`, `why?`, `mutual?` |\n\n### Formula functions\n\n- `faction_regard(group, to)`\n- `regard(from, to, axis)`\n- `regard_band(from, to)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `chat_with` | Chat with | Spend a while talking with someone here. | `target: ref → person`, `minutes?: duration` |  | `default` | `minutes > 0 ? minutes : 15` | chat with, talk to, catch up with |\n| `give_gift` | Give a gift | Give someone here a present. | `target: ref → person` |  | `default` | `5` | give a gift, surprise |\n\n### Events\n\nIts own: `relationships.regard`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `regard` | `number` |\n\n### Lint codes\n\n`relationships.axes`.\n\n## Character sheets pack (`sheets`)\n\nVersion 1 · realism domain `sheets` · requires `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `sheets.condition` | `condition`, `who?`, `label?`, `mod?`, `minutes?`, `clear?` |\n\n### Formula functions\n\n- `condition_mod(who)`\n- `derived(who, id)`\n- `difficulty_of(v)`\n- `has_condition(who, id)`\n- `stat(who, stat)`\n- `stat_mod(who, stat)`\n- `stat_word(who, stat)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `attempt` | Attempt | Try something hard that one of your stats decides: climb, force, persuade, notice. | `stat: text`, `difficulty?: text` | `1d20` | `failure`, `great`, `success` | `5` | try to, attempt, check |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `condition` | `list` |\n\n### Panels and slots\n\nPanels: `sheets.you`. Slots it writes: `outcome`.\n\n### Lint codes\n\n`sheets.stat_range`.\n\n## Space & travel pack (`space`)\n\nVersion 1 · realism domain `space` · requires `calendar`.\n\n### Kinds\n\n#### `group`: Group\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `approval_days` | A request for approval waits for days (7 unless set) | number | 1 … 365 |  |  |  | live from money 2 |\n| `dues` | Dues ({cents, every, day?}) | list |  |  |  |  | live from money 3 |\n| `motion_days` | A motion stays open for days (7 unless set) | number | 1 … 365 |  |  |  |  |\n| `pass_pct` | A motion passes with more than % of the votes cast for or against (50 unless set) | number | 0 … 99.9 |  |  |  |  |\n| `payroll` | Pay schedule ({every, anchor, weekday, days}) | list |  |  |  |  | live from money 3 |\n| `payroll_account` | Payroll account | ref → account |  |  |  |  | live from money 3 |\n| `places` | Its places | list of ref |  |  |  |  |  |\n| `positions` | Positions ({id, title, powers, seats?, reports_to?, scope?, limits?, successor?, default?, no_dues?}) | list |  |  |  |  |  |\n| `quorum_pct` | A motion needs at least % of the votes to take part (50 unless set) | number | 0 … 100 |  |  |  |  |\n| `suta_pct` | Its state unemployment tax rate (%), when it isn't its state's new-employer rate | number | 0 … 100 |  |  |  | live from money 3 |\n| `tax_exempt` | Tax-exempt status (a row of the exempt table: charity, church, club) | text (row of economy.exempt) |  |  |  |  | live from money 3 |\n| `vote_by` | Votes are counted by (shares, one each for members, or one each for its trustees; a company counts shares unless set) | enum: shares, members, trustees |  |  |  |  |  |\n| `vote_rules` | Standing votes ({who, vote: for, against, abstain or with, with?}) | list |  |  |  |  |  |\n\n#### `party`: Party\n\nExtends `group`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `leader` | Leader | ref → person |  |  |  |  |  |\n\n#### `person`: Person\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `activity` | Activity | text |  | `\"idle\"` |  |  | live from castlife 1 |\n| `activity_until` | Activity ends | number |  |  |  |  | live from castlife 1; locked |\n| `agility` | Agility | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `appointments` | Appointments | list |  |  |  |  | live from castlife 2 |\n| `bed` | Bed (a place or an item) | ref |  |  |  |  | live from castlife 1 |\n| `birthday` | Birthday (MM-DD or YYYY-MM-DD) | date |  |  |  |  | live from castlife 3 |\n| `charm` | Charm | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `chores` | Chores | list |  |  |  |  | live from castlife 3 |\n| `conditions` | Conditions | list |  |  |  |  | live from sheets 4 |\n| `employer` | Employer | ref |  |  |  |  | live from money 3 |\n| `filing_status` | Tax filing status | enum: single, married_filing_jointly, head_of_household |  |  |  |  | live from money 4 |\n| `grit` | Grit | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `home` | Home | ref |  |  |  |  | live from space 1 |\n| `local_tax` | Pays local income tax | bool |  |  |  |  | live from money 4 |\n| `might` | Might | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `needs` | Needs | list |  |  |  |  | live from castlife 4; locked |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_prefs` | Pays with, in order ({use, min?, max?, categories?, except?}) | list |  |  |  |  | live from money 3 |\n| `region` | Region | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `scene` | Scene type | text |  |  |  |  |  |\n| `trips` | Trips | list |  |  |  |  | live from castlife 1 |\n| `wealth` | Wealth | text |  |  |  |  | live from money 1 |\n| `wits` | Wits | number | 3 … 18 |  |  |  | live from sheets 1 |\n\n#### `thing`: Thing\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owner` | Owner | ref |  |  |  |  |  |\n| `place` | Place | ref |  |  |  |  | live from space 1 |\n| `x` | Grid x | number |  |  |  |  | live from space 3 |\n| `y` | Grid y | number |  |  |  |  | live from space 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `in` | In | `*` | `*` | many_one |  |  | none |\n| `travels_with` | Travels with | `person` | `person` | many_one |  |  | `since`, `tier` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `space.entered` | `entity`, `to` |\n| `space.make_place` | `change` |\n| `space.set_route` | `route`, `open?` |\n| `space.step` | `x`, `y`, `entity?` |\n\n### Formula functions\n\n- `can_go(from, to)`\n- `distance_km(from, to, mode)`\n- `entry_why(who, place)`\n- `go_minutes(from, to)`\n- `grid_minutes(place, x, y)`\n- `grid_reachable(place, x, y)`\n- `may_enter(who, place)`\n- `on_grid(thing)`\n- `reach(a, b)`\n- `route_exists(from, to, mode)`\n- `route_open(route)`\n- `travel_minutes(from, to, mode)`\n- `within(place, ancestor)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `go` | Go to | Go to another place: a room, a building, a street, another part of town. | `to: ref → place`, `with?: list` |  | `default` | `go_minutes(here, to)` | go to, walk to, head to, head over to, leave for |\n| `step` | Move on the map | Walk to a square of the grid you stand on. | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |\n\n### Events\n\nIts own: `space.place`, `space.pos`, `space.route`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `location` | `ref` |\n| `place_make` | `ref` |\n\n### Panels and slots\n\nPanels: `space.map`. Slots it writes: `place`, `scene`.\n\n### Lint codes\n\n`space.grid`, `space.maps`, `space.references`.\n\n## Story pack (`story`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `story.answer` | `track?`, `puzzle?`, `answer`, `decision?` |\n| `story.flag` | `name`, `value?` |\n\n### Formula functions\n\n- `flag(name)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `answer` | Answer | Give your answer to a puzzle: a riddle, a code, a combination. | `puzzle?: text`, `answer: text`, `decision?: number` |  | `default` | `1` | the answer is, i think it's, solve, answer, the code is, the combination is, try the combination, dial, enter the code |\n\n### Events\n\nIts own: `story.flag`.\n\n### Panels and slots\n\nPanels: `story.quests`. Slots it writes: `quest`.\n\n### Lint codes\n\n`story.answer_track`, `story.leaky_id`, `story.leaky_label`, `story.unset_flag`.\n\n## Vehicles pack (`vehicles`)\n\nVersion 1 · realism domain `vehicles` · requires `economy`, `gear`, `space`.\n\n### Kinds\n\n#### `vehicle`: Vehicle\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `class` | Vehicle class | text |  |  |  |  |  |\n| `colour` | Colour | text |  |  |  |  |  |\n| `engine_hours` | Engine hours | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto |\n| `home` | Home base | ref |  |  |  |  | live from vehicles 3 |\n| `last_service` | Last service (mi or h) | number | ≥ 0 |  |  |  | live from vehicles 4 |\n| `make` | Make | text |  |  |  |  |  |\n| `model` | Model | text |  |  |  |  |  |\n| `odometer_mi` | Odometer (mi) | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `plate` | Plate | text |  |  |  |  |  |\n| `specs` | Specs ({label, value}) | list |  |  |  |  |  |\n| `status` | Status | enum: ok, needs_service, broken |  | `\"ok\"` |  |  | live from vehicles 1; bound confirm |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n| `year` | Year | number |  |  |  |  |  |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `vehicles.drive` | `vehicle`, `to`, `driver?`, `riders?` |\n| `vehicles.refuel` | `vehicle`, `payer?`, `pct?` |\n| `vehicles.service` | `vehicle`, `payer?`, `repair?` |\n\n### Formula functions\n\n- `drive_minutes(vehicle, to, from)`\n- `fuel_ok(vehicle, to, from)`\n- `fuel_pct(vehicle)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `drive` | Drive | Drive, ride, sail or fly a vehicle you own or may use to another place. | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to, here)` | drive to, drive over to, take the truck, take the car, sail to, ride to, fly to, fly the plane to |\n| `refuel` | Refuel | Fill up a vehicle's tank, or charge it. | `vehicle: ref → vehicle` |  | `default` | `10` | refuel, fill up, gas up, charge the car |\n| `repair_vehicle` | Repair | Have a damaged or broken-down vehicle repaired. | `vehicle: ref → vehicle` |  | `default` | `180` | repair, fix the truck, fix the car, get it towed |\n| `service_vehicle` | Service | Have a vehicle serviced: an oil change, a tune-up. | `vehicle: ref → vehicle` |  | `default` | `60` | service, oil change, tune up |\n\n### Panels and slots\n\nPanels: `vehicles.garage`. Slots it writes: `vehicles`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `vehicles.upkeep` | `vehicles` | 4 | the world |\n\nDetail on demand: `vehicles` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `vehicles.classes` | Vehicle classes | `lre-table/vehicles.classes/v1` | name (text), aliases (list, optional), make (text, optional), model (text, optional), domain (enum), fuel_type (enum), factor_guide (ref), tank_capacity_gal (number, optional), tank_capacity_l (number, optional), usable_battery_kwh (number, optional), consumption_unit (enum), consumption (json), range_mi (int, optional), range_h (number, optional), price_new_cents (band), price_used_cents (band), insurance_liability_cents_per_month (int), insurance_full_cents_per_month (int), registration_cents_per_year (band), fuel_cents_per_gal (band, optional), annual_maintenance_cents_per_year (int), maintenance (json), passengers (int), cargo_l (number), payload_kg (number), towing_kg (number, optional), charging (json, optional), notes (text) | 32 |\n| `vehicles.factors` | Consumption factor guides | `lre-table/vehicles.factors/v1` | basis (text), factors (json), note (text, optional) | 4 |\n\n### Lint codes\n\n`vehicles.classes`.\n\n## Weather pack (`weather`)\n\nVersion 1 · realism domain `weather` · requires `space`.\n\n### Kinds\n\n#### `region`: Weather region\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `climate` | Climate | text |  | `\"temperate\"` |  |  |  |\n| `temp_c` | Temperature (°C) | number |  |  |  |  | live from weather 3; bound never |\n| `weather` | Weather | text |  | `\"clear\"` |  |  | live from weather 2; bound never |\n| `weather_hold` | Weather held until | number |  |  |  |  | live from weather 2; locked |\n| `weather_hold_until` | Weather held until (condition) | text |  |  |  |  | live from weather 2; locked |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `weather.clear` | `region`, `state?` |\n| `weather.set` | `region`, `state`, `minutes?`, `until?` |\n\n### Formula functions\n\n- `season()`\n- `weather(place)`\n\n### Panels and slots\n\nPanels: `weather.now`. Slots it writes: `scene`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `weather.climate` | `weather` | 2 | the world |\n\n### Lint codes\n\n`weather.climates`.\n";
+var REFERENCE_default = "# LumiRPEngine reference\n\n<!-- Generated by `bun run reference` (scripts/reference/build.ts). Edit the packs, then run it again. -->\n\nWhat the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.\n\nEngine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1, `orgs` 1.\n\n## Contents\n\n- [Engine built-ins](#engine-built-ins)\n- [Calendar & time pack](#calendar--time-pack-calendar)\n- [Cast life pack](#cast-life-pack-castlife)\n- [Combat pack](#combat-pack-combat)\n- [Economy pack](#economy-pack-economy)\n- [Gear & containers pack](#gear--containers-pack-gear)\n- [Minds pack](#minds-pack-minds)\n- [Organizations pack](#organizations-pack-orgs)\n- [Relationships pack](#relationships-pack-relationships)\n- [Character sheets pack](#character-sheets-pack-sheets)\n- [Space & travel pack](#space--travel-pack-space)\n- [Story pack](#story-pack-story)\n- [Vehicles pack](#vehicles-pack-vehicles)\n- [Weather pack](#weather-pack-weather)\n\n## Engine built-ins\n\n### Core effects\n\n| Effect | Arguments |\n|---|---|\n| `add` | `entity`, `field`, `delta` |\n| `award` | `entity`, `progression`, `amount` |\n| `beat` | `hint` |\n| `check` | `check`, `actor?`, `target?`, `outcomes` |\n| `life` | `entity`, `to?`, `tell?` |\n| `link` | `rel`, `from`, `to`, `until?`, `fields?` |\n| `move` | `entity`, `to`, `activity?`, `told?`, `with?` |\n| `note` | `text`, `visibility?` |\n| `post` | `lines`, `memo?` |\n| `recover` | `entity`, `field`, `amount?`, `full?` |\n| `set` | `entity`, `field`, `value` |\n| `signal` | `class`, `text`, `entity?`, `visibility?` |\n| `spawn` | `kind`, `name`, `id?`, `tier?`, `fields?`, `relations?`, `agent?`, `place?`, `class?`, `tags?` |\n| `stage` | `track`, `to` |\n| `unlink` | `rel`, `from`, `to` |\n\n### Formula functions\n\nMath: `abs`, `ceil`, `clamp`, `floor`, `max`, `min`, `round`. `min` and `max` take any number of arguments.\n\nThe engine's own:\n\n- `at(entity, place)`\n- `attempts(track)`\n- `band(entity, field)`\n- `count_at(place, kind?)`\n- `days(n)`\n- `field(entity, field)`\n- `fired(rule)`\n- `has_rel(entity, type, to?)`\n- `holiday()`\n- `hours(n)`\n- `knows(entity, subject)`\n- `level(entity, domain)`\n- `next_time(time)`\n- `place(entity)`\n- `rel(entity, type, to?)`\n- `rel_count(entity, type)`\n- `rel_field(from, type, to, field)`\n- `revealed(track, stage?)`\n- `roll(notation)`: effect arguments only\n- `since(track)`\n- `stage(track)`\n- `table(table, key, column)`\n- `table_step(table, value, column)`\n- `today_at(time)`\n\nTaxonomy and life states:\n\n- `acting(self, as)`\n- `band_of(entity)`\n- `has_tag(entity, tag)`\n- `in_class(entity, facet, value)`\n- `kind_is(entity, kind)`\n- `life_of(entity)`\n- `may(who, org, power)`\n- `member_of(entity, group)`\n- `staff_of(who, org)`\n- `tier_of(entity)`\n\n### Events\n\nCore: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.\n\nEngine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.life`, `engine.note`, `engine.observed`, `engine.out.lines`, `engine.out.scene`, `engine.pause`, `engine.rename`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`, `engine.world`, `engine.ws.delete`, `engine.ws.pin`, `engine.ws.readers`, `engine.ws.write`.\n\n### Relation types\n\nBuilt in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `regard`, `route`. Packs add the typed ones below.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `knows` | `knows` |\n| `life` | `life` |\n| `spawn` | `spawn` |\n\n### Step purposes\n\n| Purpose | Outputs a world template may declare |\n|---|---|\n| `brief` | `text` |\n| `choices` | `text`, `effects` |\n| `consolidate` | `text` |\n| `extract` | `text`, `effects` |\n| `interpret` | `decision`, `text` |\n| `judge` | `decision`, `text` |\n| `knowledge` | `text` |\n| `memory` | `text` |\n| `mind` | `text` |\n| `npc.choose` | `decision`, `text` |\n| `outline` | `text` |\n| `puzzle.answer` | `decision`, `text` |\n| `skip` | `text` |\n\nSignals: `agents_present`, `always`, `beat`, `conflict`, `day_start`, `invitation`, `never`, `offscreen`, `present`, `reply`, `scene_change`, `slot_crossed`, `tie_zone`, `timelapse`, `typed_input`, and `every_n:<k>`.\n\nTemplate placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `gear`, `knowledge`, `money`, `outcome`, `place`, `positions`, `pov`, `present`, `property`, `recent`, `reply`, `scene`, `user`, `world`.\n\n### Sections\n\nThe slots a world gets when it defines none, kept in rank order on the section budget. A world words any built-in slot it has without listing it in its `sectionTemplates` part, by slot id: a template holding `{{lines}}`, stored only where it differs from the built-in text.\n\n| Slot | Label | Rank |\n|---|---|---|\n| `outcome` | Outcome | 0 |\n| `montage` | Montage | 1 |\n| `scene` | Scene | 2 |\n| `people` | People | 3 |\n| `money` | Money | 4 |\n| `gear` | Gear | 5 |\n| `vehicles` | Vehicles | 6 |\n| `quest` | Quest | 7 |\n| `outline` | Outline | 8 |\n| `stance` | Stance | 9 |\n| `minds` | Minds | 10 |\n| `place` | Place | 11 |\n| `property` | Property | 12 |\n| `knowledge` | Who knows what | 13 |\n\n### Realism\n\nDomains: `money`, `gear`, `vehicles`, `castlife`, `relationships`, `space`, `calendar`, `weather`, `sheets`; each at a level from 0 to 4.\n\nDetail bands: `principal` (Leads), `supporting` (Supporting), `background` (Background).\n\nInterrupt classes: `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`, `arrival`, `overdue`, `needs`, `weather`.\n\n### Lore pins\n\nThe world's `lorePins` part: `characters`, `places` and `steps`, each a map from an id (a step's purpose, for `steps`) to a list of pins, where a pin is `{\"lore\": id}` (one of the world's lore entries), `{\"book\": id, \"entry\": id}` (an entry of one of the user's World Info books) or `{\"book\": id}` (a whole book: its switched-on entries in the book's order, read whenever a call reads it, so entries added later are read too). A character's pins reach only their own mind's calls; a step's reach every call of that step whatever its lore policy (the mind step's, every mind, after the character's own); a place's reach every helper and mind call there or in a place inside it, nearest place first. Pinned text comes first within a helper call's lore tokens, or within the pinned lore a mind reads (Settings → Minds → What a mind reads), and a pin that doesn't fit is cut, with a note in the Context panel.\n\n| Lint | Means |\n|---|---|\n| `pin_duplicate` | the same entry or book pinned twice to one character, place or step |\n| `pin_missing` | a pin naming a lore entry the world doesn't have |\n| `pin_pending` | an AI-written entry still waiting for review: no call reads it until it is accepted |\n| `pin_shape` | a pin that is none of {\"lore\": id}, {\"book\": id, \"entry\": id} and {\"book\": id}: it is ignored |\n| `pin_target` | pins under a character, place or step the world doesn't have: no call reads them |\n| `pin_unread` | a secret entry pinned to someone whose own it isn't: their mind never reads it |\n\n### Adjudication presets\n\n| Value | `narrative` | `balanced` | `crunchy` |\n|---|---|---|---|\n| `checks` | `\"risky\"` | `\"every\"` | `\"every\"` |\n| `riskyAt` | `0.75` | `0.75` | `0.75` |\n| `trivialAt` | `null` | `0.95` | `null` |\n| `impossibleAt` | `null` | `0.05` | `null` |\n| `description` | `{\"weight\":\"none\",\"max\":3,\"advantageAt\":2}` | `{\"weight\":\"bonus\",\"max\":2,\"advantageAt\":2}` | `{\"weight\":\"none\",\"max\":2,\"advantageAt\":2}` |\n| `authority` | `\"narrative\"` | `\"hybrid\"` | `\"mechanics\"` |\n| `closeBy` | `2` | `2` | `2` |\n| `retry` | `\"changed\"` | `\"changed\"` | `\"free\"` |\n| `retryAfter` | `60` | `60` | `60` |\n\n## Calendar & time pack (`calendar`)\n\nVersion 1 · realism domain `calendar` · requires none.\n\n### Formula functions\n\n- `days_until(date)`\n- `is_day_off()`\n- `is_weekend()`\n- `minutes_until(at)`\n- `weekday_name()`\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `time_advance` | `duration` |\n\n### Panels and slots\n\nPanels: `calendar.calendar`. Slots it writes: `scene`.\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `calendar.dst` | Daylight saving time, time zones and daylight hours | `lre-table/calendar.dst/v1` | start (json), end (json), duration_weeks_approx (int), exceptions (list), standard_offsets_h (json), note (text), daylight_hours (json) | 1 |\n| `calendar.holidays` | Federal holidays | `lre-table/calendar.holidays/v1` | name (text), rule_type (enum), month (int), day (int, optional), weekday (enum, optional), n (int, optional), federal_paid_day_off (bool), private_sector_paid_day_off (enum), observed_if_weekend (text, optional) | 11 |\n| `calendar.observances` | Common observances | `lre-table/calendar.observances/v1` | name (text), rule_type (enum), month (int, optional), day (int, optional), weekday (enum, optional), n (int, optional), base (ref, optional), offset_days (int, optional), algorithm (text, optional), window (text, optional), start (text, optional), end (text, optional), rule_text (text, optional), rule_note (text, optional) | 30 |\n| `calendar.school` | School year | `lre-table/calendar.school/v1` | title (text), values (json) | 2 |\n| `calendar.shifts` | Work shift patterns | `lre-table/calendar.shifts/v1` | name (text), description (text), days_per_week (number), typical_start (text), typical_shift_h (number), typical_hours_per_week (int), weekend_work (enum), notes (text) | 24 |\n| `calendar.work` | Work norms | `lre-table/calendar.work/v1` | full_time_hours_per_week (number), standard_work_year_h (int), overtime (text), vacation_days_after_1_year (int), vacation_days_after_5_years (int), vacation_days_after_10_years (int), sick_days_per_year (int), paid_time_off_note (text), paid_holidays_per_year (int), meal_break (text) | 1 |\n\n### Lint codes\n\n`calendar.epoch`, `calendar.schedule_times`, `calendar.unit_cap`.\n\n## Cast life pack (`castlife`)\n\nVersion 1 · realism domain `castlife` · requires `gear`, `relationships`, `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `castlife.book_invitation` | `host` |\n| `castlife.company` | `with`, `to` |\n| `castlife.decide` | `key`, `choice` |\n| `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |\n| `castlife.routine` | `entity`, `blocks?`, `schedules?`, `turn?`, `by?` |\n| `castlife.satisfy` | `need`, `entity?`, `minutes?`, `activity?`, `after?` |\n| `castlife.to_bed` | `entity?` |\n\n### Formula functions\n\n- `busy(who)`\n- `invited(host)`\n- `need(who, need)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `accept_invitation` | Accept invitation | Say yes to an invitation someone made you. | `host: ref → person` |  | `default` | `1` | accept, sure, let's, count me in |\n| `eat` | Eat | Have a meal or a snack. | `minutes?: duration` |  | `default` | `minutes > 0 ? minutes : 30` | eat, have lunch, have dinner, grab a bite |\n| `get_up` | Get up | Get up from bed or from a rest and get on with the day. |  |  | `default` | `2` | get up, wake up, get out of bed |\n| `rest` | Rest | Rest or relax for a while. | `minutes?: duration` |  | `default` | `minutes > 0 ? min(minutes, 30) : 30` | rest, relax, take a break |\n| `sleep` | Go to bed | Go to bed (your own, if you have one) and sleep until morning, or for as long as you say. | `minutes?: duration` |  | `default` | `minutes > 0 ? min(minutes, 5) : 5` | go to bed, sleep, turn in, hit the sack |\n\n### Rules\n\n- `castlife.conversation`: on `{\"event\":\"relationships.regard\"}`\n\n### Events\n\nIts own: `castlife.decision`, `castlife.follow`, `castlife.invitation`, `castlife.need`, `castlife.routine`, `castlife.schedule`, `castlife.skip_plan`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `routine` | `routine` |\n\n### Panels and slots\n\nPanels: `castlife.cast`, `castlife.needs`. Slots it writes: `people`, `stance`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `castlife.agents` | `castlife` | 3 | each agent |\n| `castlife.plans` | `castlife` | 0 | the world |\n| `castlife.trips` | `castlife` | 1 | the world |\n\n### Lint codes\n\n`castlife.birthday`, `castlife.cues`, `castlife.double_booking`, `castlife.needs`, `castlife.routines`.\n\n## Combat pack (`combat`)\n\nVersion 1 · realism domain none · requires none.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `hostile` | Hostile to | `*` | `*` | many_many | yes |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `combat.end` | `winner?` |\n| `combat.end_turn` | `who?` |\n| `combat.spend` | `who?`, `cost` |\n| `combat.start` | `foes?` |\n\n### Formula functions\n\n- `budget_left(e, budget)`\n- `can_fight(e)`\n- `encounter_round()`\n- `has_turn(e)`\n- `in_encounter(e)`\n- `is_ally(a, b)`\n- `is_down(e)`\n- `is_foe(a, b)`\n- `standing(side)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `end_turn` | End turn | End your turn in a fight. |  |  | `default` | `0` | end my turn, end turn |\n| `fight` | Fight | Start a fight with someone. | `target: ref` |  | `default` | `0` | start a fight, pick a fight, draw my weapon |\n\n### Events\n\nIts own: `combat.act`, `combat.decision`, `combat.down`, `combat.end`, `combat.spend`, `combat.start`, `combat.turn`.\n\n### Panels and slots\n\nPanels: `combat.encounter`. Slots it writes: none.\n\n## Economy pack (`economy`)\n\nVersion 1 · realism domain `money` · requires `space`.\n\n### Kinds\n\n#### `account`: Account\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `apr_pct` | APR % | number | ≥ 0 |  |  |  | live from money 4 |\n| `apy_pct` | APY % | number | ≥ 0 |  |  |  | live from money 4 |\n| `autopay` | Autopay | enum: none, minimum, statement, full, fixed |  | `\"none\"` |  |  | live from money 3 |\n| `autopay_cents` | Autopay amount (fixed) | money | ≥ 0 |  |  |  | live from money 3 |\n| `autopay_from` | Autopay from | ref → account |  |  |  |  | live from money 3 |\n| `due_day` | Due day of month | number | 1 … 31 |  |  |  | live from money 3 |\n| `institution` | Institution | text |  |  |  |  | live from money 3 |\n| `limit` | Credit limit | money | ≥ 0 |  |  |  | live from money 3 |\n| `min_floor` | Minimum payment floor | money | ≥ 0 |  |  |  | live from money 4 |\n| `min_pct` | Minimum payment % of balance | number | 0 … 100 |  |  |  | live from money 4 |\n| `months_left` | Months left (loans) | number | ≥ 0 |  |  |  | live from money 3 |\n| `opened` | Opened | date |  |  |  |  | live from money 4 |\n| `opening` | Opening balance | money |  |  |  |  | locked |\n| `overdraft` | Overdraft policy | enum: decline, fee, linked |  |  |  |  | live from money 2 |\n| `overdraft_limit` | Overdraft limit | money | ≥ 0 |  |  |  | live from money 2 |\n| `overdraft_link` | Overdraft from | ref → account |  |  |  |  | live from money 2 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `payment` | Monthly payment (loans) | money | ≥ 0 |  |  |  | live from money 3 |\n| `product` | Product (a world product, or a class: cash, checking, business_checking, savings, money_market, cd, trust, escrow, credit_card, charge_card, line_of_credit, loan, mortgage, brokerage, retirement, note) | text |  |  |  |  | live from money 2 |\n| `secured_by` | Secured by | ref |  |  |  |  | live from money 3 |\n| `statement_day` | Statement day | number | 1 … 28 |  |  |  | live from money 3 |\n| `status` | Status | enum: open, frozen, collections, charged_off, closed, paid_off, matured |  | `\"open\"` |  |  | live from money 2 |\n| `term_months` | Term in months | number | ≥ 0 |  |  |  | live from money 3 |\n\n#### `business`: Business\n\nExtends `group`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `close_at` | Closes at (HH:MM) | text |  |  |  |  | live from money 3 |\n| `collects_sales_tax` | Collects sales tax | bool |  |  |  |  | live from money 4 |\n| `consolidated_return` | Files one consolidated federal return with the corporations it holds 80% or more of (an election) | bool |  |  |  |  | live from money 3 |\n| `daily_sales` | Walk-in takings a trading day | money | ≥ 0 |  |  |  | live from money 3 |\n| `decide_pct` | Ownership decisions need more than % of the votes | number | 0 … 100 | `50` |  |  | live from money 4 |\n| `depreciation` | Depreciation | enum: world, none, straight_line |  | `\"world\"` |  |  | live from money 3 |\n| `dissolved` | Dissolved on (YYYY-MM-DD) | text |  |  |  |  | live from money 3 |\n| `distribution_every` | Paid out every | enum: month, quarter, year |  |  |  |  | live from money 4 |\n| `distribution_pct` | Profit paid out % | number | 0 … 100 |  |  |  | live from money 4 |\n| `industry` | Industry | text |  |  |  |  | live from money 3 |\n| `invoice_days` | Invoice terms (days) | number | ≥ 0 |  |  |  | live from money 3 |\n| `late_fee_pct` | Late fee % | number | ≥ 0 |  |  |  | live from money 4 |\n| `margin_pct` | Margin % | number | 0 … 100 |  |  |  | live from money 4 |\n| `merged_into` | Merged into | ref → business |  |  |  |  | live from money 3 |\n| `open_at` | Opens at (HH:MM) | text |  |  |  |  | live from money 3 |\n| `opening_ep` | Earnings and profits it had kept when the story begins (the accumulated earnings tax's credit reads it) | money |  |  |  |  | live from money 4 |\n| `operating_account` | Operating account | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `places` | Places it trades at | list of ref |  |  |  |  | live from money 3 |\n| `sales_spread_pct` | Takings vary by up to ± % | number | 0 … 100 | `30` |  |  | live from money 3 |\n| `share_classes` | Share classes ({id, label, votes}) | list |  |  |  |  | live from money 4 |\n| `structure` | Structure | enum: sole_proprietorship, partnership, llc, s_corp, c_corp, nonprofit |  |  |  |  | live from money 4 |\n| `structure_before` | Taxed as, until the change of structure (sole_proprietorship, partnership, llc, s_corp or c_corp) | text |  |  |  |  | live from money 4 |\n| `structure_from` | Its structure is taxed from (YYYY-MM-DD) | text |  |  |  |  | live from money 4 |\n| `trading_days` | Trading days (0 is Sunday) | list of number |  |  |  |  | live from money 3 |\n| `valuation_multiple` | Valued at this many years of profit, over its books | number | ≥ 0 | `3` |  |  | live from money 4 |\n| `value` | Value (set: overrides the books) | money | ≥ 0 |  |  |  | live from money 3 |\n| `winding_up` | Winding up since (YYYY-MM-DD) | text |  |  |  |  | live from money 3 |\n\n#### `card`: Payment card\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 2 |\n| `daily_atm_limit` | Daily cash machine limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `daily_purchase_limit` | Daily purchase limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `holder` | Holder | ref |  |  |  |  | live from money 2 |\n| `item` | The card in gear | ref |  |  |  |  | live from money 2 |\n| `last4` | Last four digits | text |  |  |  |  | live from money 3 |\n| `network` | Card type | enum: debit, credit, charge |  |  |  |  | live from money 2 |\n| `replaced_by` | Replaced by | ref → card |  |  |  |  | live from money 2 |\n| `replaces` | Replaces | ref → card |  |  |  |  | live from money 2 |\n| `state` | State | enum: active, frozen, lost, cancelled |  | `\"active\"` |  |  | live from money 2 |\n\n#### `flow`: Money flow\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `amount_cents` | Amount | money | ≥ 0 |  |  |  | live from money 2 |\n| `amount_due` | What's due on the credit account it pays | enum: minimum, statement, balance |  |  |  |  | live from money 3 |\n| `amount_formula` | Amount formula | text |  |  |  |  | live from money 3 |\n| `amount_max` | Amount at most | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_min` | Amount at least | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_of` | Percent of this account's balance | ref → account |  |  |  |  | live from money 3 |\n| `amount_pct` | Percent of a balance | number | 0 … 100 |  |  |  | live from money 3 |\n| `amount_table` | Amount from a table (table.row.column) | text |  |  |  |  | live from money 3 |\n| `at` | Time of day (HH:MM) | text |  |  |  |  | live from money 2 |\n| `category` | Category | text |  |  |  |  | live from money 2 |\n| `count` | Times at most | number | ≥ 1 |  |  |  | live from money 2 |\n| `days` | Days of the month (-1 = the last) | list of number |  |  |  |  | live from money 2 |\n| `end` | Ends | date |  |  |  |  | live from money 2 |\n| `every` | Every | enum: day, week, month, year |  |  |  |  | live from money 2 |\n| `except` | Except holidays | list of text |  |  |  |  | live from money 3 |\n| `fallback` | Fallback (an account or a party) | text |  |  |  |  | live from money 3 |\n| `flow_kind` | Kind | enum: transfer, bill, rent, utility, subscription, premium, loan_payment, card_payment, savings, income, payroll, allowance, living, tax, distribution, invoice, draw, other |  | `\"bill\"` |  |  | live from money 2 |\n| `from` | From (an account, a party, or an outside payer) | text |  |  |  |  | live from money 2 |\n| `interval` | Every Nth period | number | ≥ 1 |  |  |  | live from money 2 |\n| `link` | Belongs to | ref |  |  |  |  | live from money 2 |\n| `method` | Paid by (cash, card, checking, savings) | text |  |  |  |  | live from money 3 |\n| `months` | Months (yearly) | list of number |  |  |  |  | live from money 2 |\n| `once` | Once, at (YYYY-MM-DDTHH:MM) | text |  |  |  |  | live from money 2 |\n| `retries` | Retries | number | ≥ 0 |  |  |  | live from money 3 |\n| `retry_days` | Retry after days | number | ≥ 1 |  |  |  | live from money 3 |\n| `revenue` | Revenue model ({type, …}, one record: units × price × buyers, a catalog, a royalty, fees or a formula) | list |  |  |  |  | live from money 3 |\n| `roll` | Off a business day | enum: none, before, after |  | `\"none\"` |  |  | live from money 3 |\n| `shares` | Shares ({party, pct, from?}) | list |  |  |  |  | live from money 3 |\n| `shortfall` | When the money isn't there | enum: skip, partial, retry, fallback, overdraft, defer |  | `\"skip\"` |  |  | live from money 3 |\n| `splits` | Splits ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Starts | date |  |  |  |  | live from money 2 |\n| `status` | Status | enum: active, paused, ended |  | `\"active\"` |  |  | live from money 2 |\n| `to` | To (an account, a party, or an outside payee) | text |  |  |  |  | live from money 2 |\n| `weekdays` | Weekdays (0 = Sunday) | list of number |  |  |  |  | live from money 2 |\n\n#### `holding`: Holding\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 4 |\n| `asset` | Asset | text |  |  |  |  | live from money 4 |\n| `lots` | Lots ({qty, cost, at}) | list |  |  |  |  | live from money 4 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `route` | Distributions go to (an account, or reinvest) | text |  |  |  |  | live from money 4 |\n\n#### `invoice`: Invoice\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `business` | Business | ref → business |  |  |  |  | live from money 3 |\n| `cents` | Amount | money | ≥ 0 |  |  |  | live from money 3 |\n| `customer` | Customer (a party, or an outside customer) | text |  |  |  |  | live from money 3 |\n| `days_late` | Days late | number | ≥ 0 |  |  |  | live from money 4 |\n| `due` | Due | date |  |  |  |  | live from money 3 |\n| `fees` | Late fees charged | number | ≥ 0 |  |  |  | live from money 4; locked |\n| `flow` | Paid by flow | text |  |  |  |  | live from money 3 |\n| `issued` | Issued | date |  |  |  |  | live from money 3 |\n| `late_fee` | Late fee charged | money | ≥ 0 |  |  |  | live from money 4 |\n| `memo` | For | text |  |  |  |  | live from money 3 |\n| `paid` | Paid | money | ≥ 0 |  |  |  | live from money 3 |\n| `state` | State | enum: open, paid, late, void |  | `\"open\"` |  |  | live from money 3 |\n\n#### `job`: Job\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `basis` | Paid by | enum: salary, hourly, per_shift, commission, tips, stipend |  | `\"hourly\"` |  |  | live from money 3 |\n| `commission_pct` | Commission % | number | ≥ 0 |  |  |  | live from money 3 |\n| `contractor` | Contractor (nothing withheld) | bool |  |  |  |  | live from money 4 |\n| `deductions` | Deductions ({label, pretax, cents?, pct?, kind?, match_pct?, to?}) | list |  |  |  |  | live from money 4 |\n| `employer` | Employer (anyone in the world, a place, or an outside employer) | text |  |  |  |  | live from money 3 |\n| `end` | Ends | date |  |  |  |  | live from money 3 |\n| `hours` | Hours counted | enum: scheduled, attended, contract |  |  |  |  | live from money 3 |\n| `hours_per_week` | Hours a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_anchor` | First payday | date |  |  |  |  | live from money 3 |\n| `pay_days` | Paydays of the month | list of number |  |  |  |  | live from money 3 |\n| `pay_every` | Paid (none: an unpaid title) | enum: weekly, biweekly, semimonthly, monthly, per_job, custom, none |  | `\"monthly\"` |  |  | live from money 3 |\n| `pay_except` | Custom pay: except holidays | list of text |  |  |  |  | live from money 3 |\n| `pay_from` | Pay starts | date |  |  |  |  | live from money 3 |\n| `pay_interval` | Custom pay: every Nth | number | ≥ 1 |  |  |  | live from money 3 |\n| `pay_months` | Custom pay: months | list of number |  |  |  |  | live from money 3 |\n| `pay_roll` | Payday off a business day | enum: none, before, after |  | `\"before\"` |  |  | live from money 3 |\n| `pay_unit` | Custom pay: every | enum: day, week, month, year |  |  |  |  | live from money 3 |\n| `pay_weekday` | Payday weekday (0 = Sunday) | number | 0 … 6 |  |  |  | live from money 3 |\n| `pay_weekdays` | Custom pay: weekdays | list of number |  |  |  |  | live from money 3 |\n| `position` | Position (one its employer defines) | text |  |  |  |  | live from money 3 |\n| `rate` | Rate (a year, an hour or a shift) | money | ≥ 0 |  |  |  | live from money 3 |\n| `season_from` | Season from (MM-DD) | text |  |  |  |  | live from money 3 |\n| `season_to` | Season to (MM-DD) | text |  |  |  |  | live from money 3 |\n| `shift_pattern` | Shift pattern | text (row of calendar.shifts) |  |  |  |  | live from money 3 |\n| `shifts_per_week` | Shifts a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `splits` | Pay goes to ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Started | date |  |  |  |  | live from money 3 |\n| `status` | Status | enum: active, leave, ended |  | `\"active\"` |  |  | live from money 3 |\n| `tips_per_hour` | Tips an hour | money | ≥ 0 |  |  |  | live from money 3 |\n| `title` | Title | text |  |  |  |  | live from money 3 |\n| `weeks_per_year` | Weeks a year | number | 0 … 53 |  |  |  | live from money 3 |\n| `worker` | Worker | ref → person |  |  |  |  | live from money 3 |\n| `workplace` | Workplace | ref |  |  |  |  | live from money 3 |\n\n#### `project`: Project\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Paid from (its party's operating account when left out) | ref → account |  |  |  |  | live from money 3 |\n| `org` | Whose project (the organization or person that runs and pays for it) | ref |  |  |  |  | live from money 3 |\n| `payee` | Paid to (Contractors when left out) | text |  |  |  |  | live from money 3 |\n| `start` | Starts (as the story begins when left out) | date |  |  |  |  | live from money 3 |\n| `status` | Status | enum: planned, active |  | `\"planned\"` |  |  | live from money 3 |\n| `steps` | Steps ({id, name, days or business_days, cost, paid: start, end or split, after, inputs, crew, capitalize, unlocks, done}) | list |  |  |  |  | live from money 3 |\n| `template` | Template | text (row of economy.projects) |  |  |  |  | live from money 3 |\n\n#### `property`: Property\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `appreciation_pct` | Appreciation % a year | number |  |  |  |  | live from money 4 |\n| `asking_price` | Asking price (for sale) | money | ≥ 0 |  |  |  | live from money 3 |\n| `built_by` | Built by the project | ref → project |  |  |  |  | live from money 3 |\n| `capital_cost` | Capital cost | money | ≥ 0 |  |  |  | live from money 3 |\n| `in_service` | In service from | date |  |  |  |  | live from money 3 |\n| `insurance` | Insurance a month | money | ≥ 0 |  |  |  | live from money 4 |\n| `lease_months` | Lease term, months | number | ≥ 1 | `12` |  |  | live from money 3 |\n| `let_from` | Let since | date |  |  |  |  | live from money 3 |\n| `life_months` | Useful life (months) | number | ≥ 1 |  |  |  | live from money 3 |\n| `managed` | Let to outside tenants | bool |  | `false` |  |  | live from money 3 |\n| `market_rent` | Market rent, a unit a month | money | ≥ 0 |  |  |  | live from money 3 |\n| `mortgage` | Mortgage | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `place` | Place | ref |  |  |  |  | live from money 3 |\n| `property_type` | What it is (mineral: a mineral or royalty interest) | enum: building, land, mineral |  |  |  |  | live from money 3 |\n| `purchase_price` | Purchase price | money | ≥ 0 |  |  |  | live from money 4 |\n| `purchased` | Purchased | date |  |  |  |  | live from money 4 |\n| `region` | Region (for its property tax) | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `rent_to` | Rent paid into | ref → account |  |  |  |  | live from money 3 |\n| `reserves` | Reserves (units) | number | ≥ 0 |  |  |  | live from money 3 |\n| `salvage` | Salvage value | money | ≥ 0 |  |  |  | live from money 3 |\n| `tax_installments` | Property tax bills a year | number | 1 … 12 | `2` |  |  | live from money 3 |\n| `tax_pct` | Property tax % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `units` | Units to let | number | ≥ 1 | `1` |  |  | live from money 3 |\n| `upkeep_pct` | Upkeep % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `vacancy_months` | Months empty between tenants, on average | number | ≥ 0 | `1` |  |  | live from money 3 |\n| `valuation` | Valued from its streams' income ({method: pv, cap or multiple, discount_pct, cap_rate_pct, multiple, horizon_months}, one record) | list |  |  |  |  | live from money 4 |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n| `volatility_pct` | Value swings, % a year | number | ≥ 0 |  |  |  | live from money 4 |\n\n#### `trust`: Trust\n\nExtends `group`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `depreciation` | Depreciation | enum: world, none, straight_line |  | `\"world\"` |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `purpose` | What it is for | text |  |  |  |  |  |\n| `revocable` | Revocable (its settlor may take it back) | bool |  |  |  |  |  |\n| `settlor` | Settlor (who made it: a person or an organization) | ref |  |  |  |  |  |\n| `trustees_decide` | Its trustees decide (each on their own unless set, or together) | enum: each, together |  |  |  |  |  |\n| `until` | Until (the day it ends) | date |  |  |  |  |  |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `economy.apply_credit` | `product`, `cents?`, `term?`, `secured_by?`, `who?`, `by?` |\n| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?`, `story?`, `seller?`, `size?`, `at?`, `by?`, `class?`, `details?`, `finance?`, `down?`, `term_months?` |\n| `economy.card_replace` | `card`, `who?`, `by?` |\n| `economy.card_state` | `card`, `state`, `who?`, `by?` |\n| `economy.cash_rule` | `atm` |\n| `economy.close_account` | `account` |\n| `economy.consent_dividend` | `org`, `cents`, `year?`, `by?` |\n| `economy.consolidate` | `org`, `elect?`, `by?` |\n| `economy.delist` | `business`, `price?`, `party?`, `by?` |\n| `economy.deposit` | `account`, `cents`, `who?`, `by?` |\n| `economy.distribute` | `business`, `cents?`, `by?` |\n| `economy.donate` | `to`, `cents`, `from?`, `method?`, `by?` |\n| `economy.dues` | `org`, `cents`, `every?`, `day?`, `by?` |\n| `economy.exercise` | `holding`, `qty?`, `from?`, `to?`, `party?`, `by?` |\n| `economy.flow_create` | `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `by?` |\n| `economy.flow_edit` | `flow`, `name?`, `clear?` |\n| `economy.flow_status` | `flow`, `status`, `who?`, `by?` |\n| `economy.flow_update` | `flow`, `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `by?`, `clear?` |\n| `economy.hire` | `business`, `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours?`, `hours_per_week?`, `pay_every?`, `start?`, `position?`, `by?` |\n| `economy.invoice_issue` | `business`, `customer?`, `customer_name?`, `cents`, `memo?`, `days?`, `by?` |\n| `economy.invoice_pay` | `invoice`, `by?` |\n| `economy.invoice_void` | `invoice`, `by?` |\n| `economy.job_end` | `job`, `end?`, `by?` |\n| `economy.job_hours` | `job`, `hours_per_week`, `by?` |\n| `economy.job_leave` | `job`, `leave`, `by?` |\n| `economy.job_position` | `job`, `position?`, `by?` |\n| `economy.job_raise` | `job`, `rate?`, `pct?`, `by?` |\n| `economy.job_title` | `job`, `title?`, `by?` |\n| `economy.lease_end` | `lease`, `on?`, `party?`, `by?` |\n| `economy.lease_start` | `property`, `tenant`, `rent`, `months?`, `day?`, `unit?`, `from?`, `party?`, `by?` |\n| `economy.lend` | `to`, `cents`, `from?`, `into?`, `apr?`, `months?`, `payment?`, `due_day?`, `who?`, `by?` |\n| `economy.list` | `business`, `units`, `price?`, `symbol?`, `class?`, `party?`, `by?` |\n| `economy.lose` | `item`, `thief?` |\n| `economy.move` | `from`, `to`, `cents`, `memo?`, `by?`, `party?` |\n| `economy.open_account` | `party`, `product?`, `name?` |\n| `economy.owner_draw` | `business`, `cents`, `owner?`, `by?` |\n| `economy.pay_card` | `card`, `from?`, `cents?`, `who?`, `by?` |\n| `economy.pay_schedule` | `org`, `every`, `weekday?`, `anchor?`, `days?`, `by?` |\n| `economy.price_modifier` | `percent`, `scope?`, `place?`, `minutes?`, `id?`, `clear?` |\n| `economy.project_drop` | `project`, `org?`, `text?`, `by?` |\n| `economy.project_note` | `project`, `org?`, `step?`, `days?`, `cents?`, `text`, `source?`, `by?` |\n| `economy.project_pause` | `project`, `org?`, `by?` |\n| `economy.project_resume` | `project`, `org?`, `by?` |\n| `economy.project_start` | `org?`, `template?`, `project?`, `name?`, `account?`, `payee?`, `steps?`, `by?` |\n| `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `party?`, `by?`, `live?`, `story?`, `name?`, `owned?` |\n| `economy.property_list` | `property`, `price?`, `party?`, `by?` |\n| `economy.property_make` | `place`, `name?`, `value?`, `owner?`, `asking_price?` |\n| `economy.property_sell` | `property`, `price`, `buyer?`, `to?`, `party?`, `by?` |\n| `economy.release_hold` | `account`, `hold` |\n| `economy.revenue_adjust` | `stream`, `factor?`, `cents?`, `days?`, `reason`, `by?`, `story?` |\n| `economy.route` | `holding?`, `property?`, `business?`, `to?`, `party?`, `by?` |\n| `economy.set_autopay` | `account`, `mode`, `from?`, `cents?`, `who?`, `by?` |\n| `economy.set_pay_prefs` | `tiers`, `who?` |\n| `economy.set_price` | `asset`, `price` |\n| `economy.set_status` | `account`, `status` |\n| `economy.share_out` | `org`, `cents`, `from?`, `by?` |\n| `economy.shares_buy_back` | `business`, `from`, `units`, `price?`, `to?`, `party?`, `by?` |\n| `economy.shares_classes` | `business`, `class?`, `label?`, `votes?`, `holder?`, `remove?`, `party?`, `by?` |\n| `economy.shares_issue` | `business`, `to`, `units`, `price?`, `class?`, `from?`, `party?`, `by?` |\n| `economy.stake_sell` | `business`, `share?`, `units?`, `price?`, `buyer?`, `to?`, `party?`, `by?` |\n| `economy.tax_status` | `org`, `status?`, `by?` |\n| `economy.trade` | `side?`, `party?`, `holding?`, `asset?`, `account?`, `qty?`, `amount?`, `from?`, `to?`, `right?`, `strike?`, `expiry?`, `by?` |\n| `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?`, `story?`, `by?` |\n| `economy.withdraw` | `account`, `cents`, `who?`, `by?` |\n\n### Formula functions\n\n- `asset_price(id)`\n- `balance(account)`\n- `business_value(id)`\n- `can_afford(who, cents)`\n- `credit_score(who)`\n- `employs(employer, who)`\n- `holding_units(id)`\n- `holding_value(id)`\n- `holds(who, thing)`\n- `is_credit(account)`\n- `manages(who, thing)`\n- `may_draw(who, business)`\n- `money_feature(feature, who)`\n- `net_worth(who)`\n- `price(item)`\n- `property_value(id)`\n- `spends(who, account)`\n- `wealth(who)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `apply_credit` | Apply for credit | Apply for a credit card, a credit line or a loan. | `product: text`, `amount?: money`, `term?: number`, `as?: ref` |  | `default` | `15` | apply for a credit card, apply for a loan, take out a loan |\n| `buy` | Buy | Buy something: food, drinks, goods or a service, here or delivered. | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money`, `as?: ref`, `ask?: bool` |  | `default` | `5` | buy, purchase, order, pick up a |\n| `card_freeze` | Freeze card | Freeze a card so it can't be used. | `card: ref → card`, `as?: ref` |  | `default` | `2` | freeze my card, lock my card |\n| `card_replace` | Replace card | Order a replacement card. | `card: ref → card`, `as?: ref` |  | `default` | `2` | replace my card, order a new card |\n| `card_report_lost` | Report card lost | Report a card lost or stolen. | `card: ref → card`, `as?: ref` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |\n| `card_unfreeze` | Unfreeze card | Unfreeze a frozen card. | `card: ref → card`, `as?: ref` |  | `default` | `2` | unfreeze my card, unlock my card |\n| `consent_dividend` | Declare a consent dividend | For a C corporation you govern: its holders agree to count an amount as a dividend paid for the year, with no money moving, so the corporation keeps its cash but owes no tax on keeping its earnings (the accumulated earnings and personal holding company taxes). Each holder takes their part as income for that year and adds it to what their shares cost them. | `org: ref → business`, `amount: money`, `year?: number` |  | `default` | `15` | declare a consent dividend, consent dividend, treat it as a dividend paid, clear the accumulated earnings tax |\n| `deposit_cash` | Deposit cash | Put cash into a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default` | `3` | deposit, pay in cash, bank the cash |\n| `distribute_profit` | Distribute profit | Pay a business's profit out to its owners, or a stated amount of a trust's money to its beneficiaries, by their shares. | `business: ref`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners, pay the beneficiaries |\n| `donate` | Donate | Give money to an organization: a charity, a church, a club, a foundation. A person's gift to a charity, a church or a foundation is deductible from their income tax. An exempt organization (a foundation, a charity) may also grant money to a person. | `to: ref`, `amount: money`, `method?: text`, `as?: ref` |  | `default` | `5` | donate, make a donation, give to charity, tithe, put money in the collection plate, sponsor |\n| `exercise_option` | Exercise an option | Exercise an option contract you hold. | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account`, `as?: ref` |  | `default` | `2` | exercise the option, exercise my calls, exercise my puts |\n| `flow_create` | Set up a standing payment | Set up a standing payment: a bill, a regular transfer, an allowance. | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `as?: ref` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |\n| `flow_delete` | Cancel a standing payment | Cancel a standing payment. | `flow: ref → flow`, `as?: ref` |  | `default` | `2` | cancel the standing order, stop the recurring payment |\n| `flow_pause` | Pause a standing payment | Pause a standing payment. | `flow: ref → flow`, `as?: ref` |  | `default` | `2` | pause the standing order |\n| `flow_resume` | Resume a standing payment | Resume a paused standing payment. | `flow: ref → flow`, `as?: ref` |  | `default` | `2` | resume the standing order |\n| `flow_update` | Change a standing payment | Change a standing payment: its amount, its schedule or its accounts. | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `clear?: text`, `as?: ref` |  | `default` | `2` | change the standing order, change the recurring payment |\n| `invoice_issue` | Send an invoice | Bill a customer from a business you run. | `business: ref → business`, `customer?: ref`, `customer_name?: text`, `amount: money`, `memo?: text`, `days?: number` |  | `default` | `10` | send an invoice, invoice, bill them |\n| `invoice_pay` | Pay an invoice | Pay an invoice billed to you or to a business you run. | `invoice: ref → invoice` |  | `default` | `5` | pay the invoice, settle the bill |\n| `invoice_void` | Void an invoice | Cancel an invoice that a business you run sent. | `invoice: ref → invoice` |  | `default` | `5` | void the invoice, cancel the invoice, write it off |\n| `job_end` | End a job | End a job: quit your own, or let someone go who works for you or an organization you let staff go for. | `job: ref → job` |  | `default` | `10` | fire, let go, quit, resign, hand in my notice |\n| `job_hire` | Hire | Hire someone, for yourself or for an organization you hire for (a business, a household, the party), with a title, pay and a position. | `business: ref`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text`, `position?: text` |  | `default` | `15` | hire, take on, give a job to |\n| `job_hours` | Change hours | Change the hours a week someone works for you or an organization you set staff hours for. | `job: ref → job`, `hours_per_week: number` |  | `default` | `5` | change their hours, cut their hours, more hours, full time, part time |\n| `job_leave` | Put on leave | Put someone who works for you or an organization you set staff leave for on leave: they keep the job and are paid nothing while it lasts. | `job: ref → job` |  | `default` | `5` | put on leave, give time off, send on leave |\n| `job_position` | Appoint to a position | Promote or move someone who works for you or an organization you appoint for into one of its positions, or take them out of theirs. | `job: ref → job`, `position?: text` |  | `default` | `5` | promote, appoint, make them, move them to |\n| `job_raise` | Give a raise | Change the pay of someone who works for you or an organization you set staff pay for. | `job: ref → job`, `rate: money` |  | `default` | `5` | give a raise, raise the pay, pay more |\n| `job_return` | Back from leave | Bring someone on leave back to work, paid again from their next payday. | `job: ref → job` |  | `default` | `5` | back from leave, back to work, end their leave |\n| `job_title` | Change title | Change the title a job goes by: your own, or that of someone who works for you or an organization you appoint for. | `job: ref → job`, `title?: text` |  | `default` | `5` | change the job title, retitle |\n| `lease_end` | End a lease | End a tenant's lease. | `lease: ref → flow`, `on?: text`, `as?: ref` |  | `default` | `10` | end the lease, give notice, move out |\n| `lease_start` | Let a unit | Let a unit of a property you own to a tenant, for rent each month. | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text`, `as?: ref` |  | `default` | `20` | rent out, sign a lease, let the apartment |\n| `lend_money` | Lend money | Lend money to someone in the world (a company to its subsidiary, a person to a friend's business): a loan they repay with interest, monthly, by autopay. | `to: ref`, `amount: money`, `apr?: number`, `months?: number`, `from?: ref → account`, `as?: ref` |  | `default` | `10` | lend money to, make a loan to, loan the company |\n| `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money`, `as?: ref`, `ask?: bool` |  | `default` | `2` | transfer, move money, put into savings |\n| `org_dues` | Set dues | Set what each member pays into an organization's money, and how often; nothing ends them. | `org: ref`, `amount: money`, `every?: text`, `day?: number` |  | `default` | `2` | set dues, membership fee, everyone chips in |\n| `org_pay_schedule` | Change pay schedule | Set how often an organization you set staff pay for pays its staff, moving every job there to it. | `org: ref`, `every: text`, `weekday?: number`, `anchor?: text` |  | `default` | `2` | pay schedule, change payday, pay every other week |\n| `org_share_out` | Share out | Pay an amount from an organization's money to its members equally (the party's: its core members and companions). | `org: ref`, `amount: money`, `from?: ref → account`, `ask?: bool` |  | `default` | `5` | share out, split the money, divide the purse, hand out |\n| `owner_draw` | Take an owner's draw | Take money out of a business you own, for yourself. | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |\n| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref, outside: economy.external:world`, `amount: money`, `method?: text`, `as?: ref`, `ask?: bool` |  | `default` | `1` | pay, give money, send money, venmo |\n| `pay_card` | Pay card or loan | Pay off some or all of a card or loan balance. | `card: ref → account`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |\n| `project_drop` | Drop a project | Give up a project: nothing more is paid or done; what it paid stays paid and what it made stays. | `project: ref` |  | `default` | `2` | drop the project, abandon the well, cancel the build |\n| `project_pause` | Pause a project | Pause a project under way: its steps stop where they are and keep the work they have left. | `project: ref` |  | `default` | `2` | pause the project, halt work, stop drilling |\n| `project_resume` | Resume a project | Set a paused project going again: each step under way finishes the work it had left. | `project: ref` |  | `default` | `2` | resume the project, restart work |\n| `project_start` | Start a project | Start a production project for an organization: from one of the world's templates (a well, a foundry, a building, a farm season), or a planned one. Its steps run day by day and pay from its account; what it builds comes in as each is done. | `org: ref`, `template?: text`, `project?: ref`, `name?: text`, `account?: ref → account` |  | `default` | `2` | start a project, drill a well, build a foundry, put up a building, plant the crop |\n| `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number`, `live?: bool`, `as?: ref` |  | `default` | `60` | buy the house, buy the property, make an offer on |\n| `property_list` | List a property for sale | Put a property you own up for sale at an asking price, or take it off the market. | `property: ref → property`, `price?: money`, `as?: ref` |  | `default` | `5` | put the house on the market, list the property, take it off the market |\n| `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account`, `as?: ref` |  | `default` | `60` | sell the house, sell the property |\n| `route_distributions` | Route dividends, rent or profits | Choose where dividends, rent or profits are paid: reinvested, or into an account. | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text`, `as?: ref` |  | `default` | `1` | reinvest dividends, send dividends to, send the rent to |\n| `set_autopay` | Set autopay | Set how a card or loan pays itself each month. | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default` | `2` | set up autopay, turn on autopay, turn off autopay |\n| `set_pay_prefs` | Set how I pay | Set the order in which you prefer to pay: cash, debit, credit. | `tiers: text` |  | `default` | `2` | i'd rather pay with |\n| `shares_buy_back` | Buy back shares | Have a company you control buy back some of a holder's units, paying them from its account. | `business: ref → business`, `from: ref`, `units: number`, `price?: money`, `as?: ref`, `vote?: bool` |  | `default` | `30` | buy back shares, buy them out, buy back their stake |\n| `shares_classes` | Change share classes | Add, change or remove a company's share class (the votes a unit carries), and move a holder's units into it. | `business: ref → business`, `label: text`, `class?: text`, `votes?: number`, `holder?: ref`, `remove?: bool`, `as?: ref`, `vote?: bool` |  | `default` | `2` | add a share class, non-voting shares, change the votes |\n| `shares_delist` | Take it off the market | Take a listed company you control off the market, buying back every unit the public holds at its market price or more from its account. | `business: ref → business`, `price?: money`, `as?: ref`, `vote?: bool` |  | `default` | `60` | take the company private, delist the company, go private, buy out the public |\n| `shares_issue` | Issue shares | Issue new units of a company you control to a buyer, who pays for them into its account. | `business: ref → business`, `to: ref`, `units: number`, `price?: money`, `class?: text`, `from?: ref → account`, `as?: ref`, `vote?: bool` |  | `default` | `30` | issue shares, sell new shares in the company, bring in a partner, let them buy in |\n| `shares_list` | List on the market | List a C corporation you control on the market, selling new units to the public, or offer more units once it is listed; the market pays for them into its account. | `business: ref → business`, `units: number`, `price?: money`, `symbol?: text`, `as?: ref`, `vote?: bool` |  | `default` | `60` | list the company on the market, take the company public, go public, float the company, sell shares to the public |\n| `stake_sell` | Sell a share of a business | Sell part of your share of a business, in percent or, where it counts them, in units; to someone in the world, or a whole business to a buyer outside it. | `business: ref → business`, `share?: number`, `units?: number`, `price: money`, `buyer?: ref`, `to?: ref → account`, `as?: ref` |  | `default` | `60` | sell my share of the business, sell the shop, sell my shares |\n| `tax_consolidate` | File a consolidated return | Elect, or stop, for a C corporation you govern, to file one federal income tax return with the corporations it holds 80% or more of (by votes and by worth): their profits and losses offset, and it pays the group's tax. | `org: ref → business`, `elect?: text` |  | `default` | `15` | file a consolidated return, file one return for the group, consolidate our taxes, stop filing a consolidated return |\n| `trade` | Buy or sell investments | Buy or sell investments: stocks, funds, bonds, crypto. | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text`, `as?: ref` |  | `default` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |\n| `withdraw_cash` | Withdraw cash | Take cash out of a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default` | `3` | withdraw, take out cash, hit the atm, get cash |\n\n### Events\n\nIts own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.closes`, `economy.commission`, `economy.config`, `economy.consent_dividend`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.depreciate`, `economy.dispose`, `economy.dividend_received`, `economy.donation`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.foundation_mark`, `economy.foundation_tax`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.penalty_tax`, `economy.price`, `economy.project_begin`, `economy.project_drop`, `economy.project_note`, `economy.project_pause`, `economy.project_resume`, `economy.project_step`, `economy.quote`, `economy.remit`, `economy.revenue`, `economy.revenue_adjusted`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.trust_distribution`, `economy.txn`, `economy.unemployment_accrued`, `economy.unemployment_paid`, `economy.year_close`.\n\nChecks it adds to: `post`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `project_note` | `money` |\n| `purchase` | `money` |\n| `revenue` | `money` |\n| `transfer` | `money` |\n\n### Panels and slots\n\nPanels: `economy.money`. Slots it writes: `money`, `property`, `quest`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `economy.accounts` | `money` | 3 | the world |\n| `economy.invoices` | `money` | 3 | the world |\n| `economy.markets` | `money` | 3 | the world |\n| `economy.money` | `money` | 2 | the world |\n| `economy.plans` | `money` | 0 | the world |\n| `economy.projects` | `money` | 3 | the world |\n| `economy.property_values` | `money` | 3 | the world |\n| `economy.settlements` | `money` | 3 | the world |\n| `economy.timesheet` | `money` | 3 | the world |\n| `economy.year_close` | `money` | 3 | the world |\n\nDetail on demand: `money` (version 2).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `economy.catalog` | Price catalog | `lre-table/economy.catalog/v1` | name (text), aliases (list, optional), category (ref), unit (text), size (enum, optional), holds (enum, optional), price_cents (band), notes (text, optional) | 358 |\n| `economy.categories` | Price categories | `lre-table/economy.categories/v1` | name (text), basis (text), notes (text, optional), price_unit_note (text, optional), item_count (int), price_cents (band) | 20 |\n| `economy.exempt` | Tax-exempt organizations | `lre-table/economy.exempt/v1` | name (text), code (text), income_tax_exempt (bool), donations_deductible (bool), futa (bool), suta (bool), s_corp_holder (bool, optional), payout_pct (number, optional), excise_pct (number, optional), undistributed_tax_pct (number, optional), donor_limit_pct (number, optional), description (text) | 4 |\n| `economy.finance` | Finance parameters | `lre-table/economy.finance/v1` | title (text), values (json) | 8 |\n| `economy.index_history` | Stock index history (total return, month-end closes) | `lre-table/economy.index_history/v1` | date (text), level (number) | 282 |\n| `economy.occupations` | Occupations and pay | `lre-table/economy.occupations/v1` | title (text), category (enum), median_cents_per_h (int), median_cents_per_year (int), typical_earnings_cents_per_year (int), schedule_pattern (ref), typical_hours_per_week (number), weeks_per_year (number), weekend_work (enum), shifts (list), pay_frequency (enum), benefits (enum), benefits_note (text), withholding_rate_pct (number), description (text), wage_basis (text), tipped (bool, optional), tipped_cash_wage_cents_per_h (int, optional), self_employed (bool, optional), fica_exempt (bool, optional), estimated_tax_set_aside_pct (number, optional), withholding_note (text, optional) | 56 |\n| `economy.projects` | Production project templates | `lre-table/economy.projects/v1` | name (text), description (text), payee (text), days (band), cost_cents (band), steps (json) | 5 |\n| `economy.regions` | Regions (US states, DC and the national baseline) | `lre-table/economy.regions/v1` | name (text), abbr (text), scope (enum), census_region (enum, optional), census_division (enum, optional), time_zones (list, optional), observes_dst (bool, optional), state_income_tax_effective_pct (number, optional), local_income_tax_pct_typical (number, optional), sales_tax_combined_avg_pct (number), property_tax_effective_pct (number, optional), suta_wage_base_cents (int), suta_new_employer_pct (number), futa_credit_reduction_pct (number, optional), cost_of_living_multiplier (number), median_rent_1br_cents_per_month (int), median_rent_2br_cents_per_month (int), residential_electricity_cents_per_kwh (number), minimum_wage_cents_per_h (int), tipped_minimum_wage_cents_per_h (int, optional), notes (text, optional) | 52 |\n\n### Lint codes\n\n`economy.accounts`, `economy.assets`, `economy.business`, `economy.claim_cap`, `economy.depreciation`, `economy.holdings`, `economy.listing`, `economy.notes`, `economy.projects`, `economy.property`, `economy.revenue`, `economy.scorp_holders`, `economy.unpriced_cap`.\n\n## Gear & containers pack (`gear`)\n\nVersion 1 · realism domain `gear` · requires `space`.\n\n### Kinds\n\n#### `container`: Container\n\nExtends `item`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `capacity_l` | Capacity (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `max_load_kg` | Max load (kg) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `stock` | Contents category (sampled when first opened) | text |  |  |  |  |  |\n\n#### `item`: Item\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `access` | Who may use it | enum: owner, members, staff, customers, public |  |  |  |  |  |\n| `aliases` | Also called | list of text |  |  |  |  |  |\n| `catalog` | Catalog item | text (row of economy.catalog) |  |  |  |  |  |\n| `category` | Category | text |  |  |  |  |  |\n| `condition` | Condition | number | 0 … 100 | `100` |  |  | live from gear 3; bound auto; bands: broken, worn, good, like new |\n| `consumable` | Consumable | bool |  |  |  |  | live from gear 4 |\n| `description` | Description | text |  |  |  |  |  |\n| `fixed` | Fixed in place (can't be picked up) | bool |  |  |  |  | locked |\n| `from_kit` | From kit | ref |  |  |  |  | locked |\n| `got` | How its holder came to have it | list |  |  |  |  | locked |\n| `holds` | Takes things up to | enum: pocket, hand, armful, heavy, furniture, builtin |  |  |  |  |  |\n| `home` | Kept at (a place, a holder, or owner) | text |  |  |  |  |  |\n| `made` | Made in play (by whom, where) | list |  |  |  |  | locked |\n| `maybe_same_as` | Maybe the same as | ref |  |  |  |  | locked |\n| `merged_into` | Merged into | ref |  |  |  |  | locked |\n| `notable` | Notable | bool |  |  |  |  | live from gear 1 |\n| `overdue` | Overdue | bool |  |  |  |  | locked |\n| `part` | Built into what holds it | bool |  |  |  |  |  |\n| `piece` | Kit piece | text |  |  |  |  | locked |\n| `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2 |\n| `size` | Size | enum: pocket, hand, armful, heavy, furniture, builtin |  |  |  |  |  |\n| `sleep` | Can be slept in or on | bool |  |  |  |  |  |\n| `slot` | Equip slot | text |  |  |  |  | live from gear 3 |\n| `uses` | Uses left | number | ≥ 0 |  |  |  | live from gear 4 |\n| `volume_l` | Volume (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `weight_g` | Weight (g) | number | ≥ 0 |  |  |  | live from gear 2 |\n\n#### `kit`: Kit\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `kit` | Kit template | text |  |  |  |  | live from gear 3 |\n| `piece_count` | Piece count | number |  |  |  |  | live from gear 3 |\n| `pieces` | Pieces | list |  |  |  |  | live from gear 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `equipped` | Equipped by | `item` | `*` | many_one |  |  | `slot` |\n| `permits` | Lets use their things | `*` | `*` | many_many |  |  | `by`, `scope` |\n| `uses` | Uses (granted until) | `*` | `*` | many_many |  |  | `basis`, `by` |\n| `worn_by` | Worn by | `item` | `*` | many_one |  |  | `slot` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `gear.drop` | `item`, `place?` |\n| `gear.fetch` | `item`, `to` |\n| `gear.give` | `item`, `from`, `to`, `told?`, `basis?` |\n| `gear.hand` | `item`, `to`, `basis`, `until?`, `by?` |\n| `gear.lend` | `item`, `to`, `until?`, `said?` |\n| `gear.lose` | `item`, `thief?` |\n| `gear.put_away` | `item`, `by?` |\n| `gear.put_in` | `item`, `into`, `by?` |\n| `gear.receive` | `name`, `to`, `from?` |\n| `gear.remove` | `item` |\n| `gear.retrieve` | `item` |\n| `gear.search` | `who`, `target?` |\n| `gear.set_apply` | `who`, `set` |\n| `gear.set_drop` | `who`, `set` |\n| `gear.set_save` | `who`, `name`, `kind` |\n| `gear.take` | `item`, `to` |\n| `gear.take_piece` | `kit`, `piece`, `to` |\n| `gear.thing_change` | `change` |\n| `gear.transfer` | `item`, `to` |\n| `gear.use` | `item`, `user?` |\n| `gear.wear` | `item`, `wearer`, `slot?` |\n\n### Formula functions\n\n- `ammo_of(who, what)`\n- `carried_kg(holder)`\n- `carries(holder, item)`\n- `fetch_minutes(who, thing)`\n- `fits_in(thing, holder)`\n- `fits_on(_who, thing)`\n- `has_item(holder, what)`\n- `kit_complete(kit)`\n- `kit_present(kit)`\n- `lent_out(thing)`\n- `may_assign(who, thing)`\n- `may_use(who, thing)`\n- `movable(thing)`\n- `possessor(thing)`\n- `reach_of(who, thing)`\n- `readied(who, what)`\n- `rest_near(who, thing)`\n- `returns_to(who, thing)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `drop` | Drop | Put down something you carry, here. | `item: ref → item, claim: held` |  | `default` | `1` | drop, put down, leave |\n| `fetch` | Fetch | Go and get something of yours, or something you may use, from close by. | `item: ref → item` |  | `default` | `1 + fetch_minutes(self, item)` | fetch, go get, go and get |\n| `give` | Give | Give something you carry to someone here, for keeps. | `item: ref → item, claim: held`, `to: ref → person` |  | `default` | `1` | give, give away, let keep |\n| `give_back` | Give back | Give something back to whose it is, here. | `item: ref → item` |  | `default` | `1` | give back, return, hand back |\n| `hand_over` | Hand over | Hand something you carry to someone here to hold; it stays whose it is. | `item: ref → item, claim: held`, `to: ref → person` |  | `default` | `1` | hand, hand over, pass, toss |\n| `lend` | Lend | Lend something to someone, for some days or until a time. | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |\n| `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |\n| `put_away` | Put away | Put something back where it's kept. | `item: ref → item` |  | `default` | `2` | put away, put back, tidy away |\n| `put_in` | Put in | Put something you carry, or that is here, into a bag, a box or a piece of furniture here. | `item: ref → item`, `into: ref → item` |  | `default` | `1` | put in, put into, stash in, pack in, store in |\n| `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |\n| `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |\n| `search` | Search | Search where you are, or look through a container, for what isn't in plain sight. | `target?: ref → item` |  | `default` | `5` | search, look around, examine, look through, look inside, open, rummage |\n| `set_apply` | Change into | Change into one of your saved outfits or loadouts. | `set: text` |  | `default` | `5` | change into, put on my, get dressed in, gear up |\n| `set_drop` | Forget an outfit | Stop keeping one of your saved outfits or loadouts. | `set: text` |  | `default` | `0` |  |\n| `set_save` | Save what I'm wearing | Keep what you wear now as an outfit, or what you carry ready as a loadout. | `name: text`, `kind: text` |  | `default` | `0` |  |\n| `take` | Take | Pick up something that is here. | `item: ref → item, claim: here` |  | `default` | `1` | take, pick up, grab |\n| `take_piece` | Take from a kit | Take one piece, such as a tool or a part, out of a kit. | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |\n| `use` | Use | Use an item you carry or can reach. | `item: ref → item, claim: held` |  | `default` | `5` | use, apply |\n| `wear` | Wear or equip | Put on or equip clothing, armor or gear. | `item: ref → item, claim: held` |  | `default` | `2` | wear, put on, equip |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `drop` | `ref` |\n| `give` | `ref` |\n| `has` | `ref` |\n| `item_condition` | `number` |\n| `item_hand` | `ref` |\n| `item_lose` | `ref` |\n| `item_make` | `ref` |\n| `item_move` | `ref` |\n| `item_own` | `ref` |\n| `item_use` | `number` |\n| `item_wear` | `ref` |\n| `lose` | `ref` |\n| `owner` | `ref` |\n| `put` | `ref` |\n| `quantity` | `number` |\n| `take` | `ref` |\n| `use_up` | `number` |\n| `wear` | `ref` |\n\n### Panels and slots\n\nPanels: `gear.gear`. Slots it writes: `gear`, `people`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `gear.grants` | `gear` | 1 | the world |\n| `gear.put_away` | `gear` | 1 | the world |\n\nDetail on demand: `gear` (version 2).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `gear.containers` | Containers | `lre-table/gear.containers/v1` | name (text), capacity_l (number), max_load_kg (number), empty_weight_g (int), location (enum), size (enum, optional), holds (enum, optional), equip_slot (ref), price_cents (band), notes (text, optional) | 37 |\n| `gear.items` | Gear items | `lre-table/gear.items/v1` | name (text), category (enum), equip_slot (ref), weight_g (int), volume_l (number), size (enum, optional), price_cents (band), ammo (ref, optional), notes (text, optional) | 116 |\n| `gear.kits` | Kits | `lre-table/gear.kits/v1` | name (text), recommended_container (ref), description (text), piece_count (int), pieces_total_weight_g (number), packed_volume_l (number), price_cents (band), pieces (list), notes (text, optional) | 5 |\n| `gear.slots` | Equip slots | `lre-table/gear.slots/v1` | description (text) | 23 |\n\n### Lint codes\n\n`gear.carry`, `gear.contents`, `gear.holders`, `gear.kits`, `gear.things`.\n\n## Minds pack (`minds`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `minds.know` | `facts`, `learn` |\n\n### Events\n\nIts own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.fact`, `minds.forget`, `minds.intent`, `minds.keep`, `minds.knowledge`, `minds.learn`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.settle`, `minds.skip`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `learn` | `knowledge` |\n| `reveal` | `knowledge` |\n\n### Panels and slots\n\nPanels: `minds.known`. Slots it writes: `knowledge`, `minds`.\n\n### Lint codes\n\n`minds.config`, `minds.holdings`, `minds.steps`.\n\n## Organizations pack (`orgs`)\n\nVersion 1 · realism domain none · requires `economy`, `relationships`, `space`.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `acts_for` | Acts for | `*` | `*` | many_many |  |  | `accounts`, `by`, `month`, `payment`, `powers` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `orgs.admit` | `org`, `who`, `title?`, `position?`, `by?`, `why?` |\n| `orgs.answer` | `org`, `request`, `answer`, `why?`, `approver?`, `said?`, `by?` |\n| `orgs.appoint` | `org`, `who`, `position?`, `by?`, `why?` |\n| `orgs.decisions` | `org`, `vote_by?`, `quorum?`, `pass?`, `days?`, `approval_days?`, `by?` |\n| `orgs.delegate` | `org`, `to`, `powers`, `payment?`, `month?`, `until?`, `by?` |\n| `orgs.entry` | `place`, `entry?`, `keys?`, `org?`, `by?` |\n| `orgs.found` | `type`, `name`, `kind?`, `cents?`, `from?`, `structure?`, `units?`, `classes?`, `trustee?`, `beneficiary?`, `revocable?`, `purpose?`, `until?`, `founder?`, `by?` |\n| `orgs.leave` | `org`, `who`, `why?` |\n| `orgs.merge` | `org`, `into`, `ratio?`, `cash?`, `from?`, `keep?`, `why?`, `by?` |\n| `orgs.motion_end` | `org`, `motion`, `how?`, `by?` |\n| `orgs.note` | `org`, `text`, `by?`, `names?` |\n| `orgs.party_hire` | `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours_per_week?`, `pay_every?`, `by?` |\n| `orgs.party_name` | `name`, `by?` |\n| `orgs.party_purse` | `cents`, `from?`, `by?` |\n| `orgs.party_tier` | `who`, `tier`, `by?` |\n| `orgs.plan_goal` | `org`, `id?`, `text?`, `window?`, `where?`, `status?`, `source?`, `by?` |\n| `orgs.plan_order` | `org`, `id?`, `to?`, `lead?`, `text?`, `where?`, `when?`, `goal?`, `status?`, `said?`, `source?`, `by?` |\n| `orgs.plan_status` | `org`, `id`, `status`, `note?`, `said?`, `source?`, `by?` |\n| `orgs.position` | `org`, `title?`, `id?`, `powers?`, `seats?`, `reports_to?`, `no_report?`, `scope?`, `payment?`, `month?`, `successor?`, `default?`, `remove?`, `by?` |\n| `orgs.propose` | `change`, `by`, `party?` |\n| `orgs.remove` | `org`, `who`, `by?`, `why?` |\n| `orgs.rename` | `org`, `name`, `by?` |\n| `orgs.restructure` | `org`, `structure`, `party?`, `by?` |\n| `orgs.revoke` | `org`, `to`, `by?` |\n| `orgs.succession` | `on?` |\n| `orgs.title` | `org`, `who`, `title?`, `by?`, `why?` |\n| `orgs.vote` | `org`, `motion`, `vote`, `who?`, `said?`, `by?` |\n| `orgs.vote_rule` | `org`, `who?`, `vote?`, `with?`, `by?` |\n| `orgs.wind_up` | `org`, `stage?`, `property?`, `to?`, `why?`, `by?` |\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `org_admit` | Admit a member | Admit someone to an organization, with a title or into a position. | `org: ref`, `who: ref`, `title?: text`, `position?: text` |  | `default` | `10` | admit, take in as a member, welcome into |\n| `org_appoint` | Appoint | Appoint someone to a position in an organization, or take them out of theirs. | `org: ref`, `who: ref`, `position?: text` |  | `default` | `10` | appoint, make them foreman, promote |\n| `org_approve` | Approve | Approve a request made for an organization over the limit of someone below you there (you granted their delegation, hold a position above theirs, or govern or own it), within your own limits: it is done now, as theirs. | `org: ref`, `request: text` |  | `default` | `5` | approve it, sign off on it, okay the spend |\n| `org_decisions` | How decisions are made | Set how an organization's motions count their votes (shares or members), their quorum and pass mark in percent, how many days a motion stays open and a request for approval waits. | `org: ref`, `vote_by?: text`, `quorum?: number`, `pass?: number`, `days?: number`, `approval_days?: number` |  | `default` | `2` | set the quorum, change the voting rules |\n| `org_delegate` | Delegate | Let someone act for an organization with some of your powers there, within limits, until a date. | `org: ref`, `to: ref`, `powers: text`, `payment?: money`, `month?: money`, `until?: date` |  | `default` | `10` | let them act for, delegate, give them authority |\n| `org_deny` | Deny | Deny a request for approval made for an organization (your own request: withdraw it). | `org: ref`, `request: text`, `why?: text` |  | `default` | `5` | deny the request, turn it down, withdraw my request |\n| `org_entry` | Change entry | Change who may enter one of an organization's places, and its keys. | `org: ref → thing`, `place: ref → place`, `entry: text`, `keys?: text` |  | `default` | `0` |  |\n| `org_found` | Start an organization | Found a company (from Money 3: you its only owner, with capital from an account of yours, counted in units when you say how many; or, for an organization you govern, its subsidiary from its money), settle a trust (from Money 3: its trustee and beneficiary you unless named, with what you put in), start a nonprofit (from Money 3: no owners, you its Director, with what you give it), or a group of one of the world's kinds, which you lead. An organization you govern may settle a trust or start a nonprofit too. | `type: text`, `name: text`, `kind?: text`, `amount?: money`, `from?: ref → account`, `structure?: text`, `units?: number`, `trustee?: ref`, `beneficiary?: ref`, `revocable?: bool`, `purpose?: text`, `until?: text`, `as?: ref` |  | `default` | `30` | start a company, found a business, set up a company, start a group, found a club, form a crew, start a subsidiary, settle a trust, set up a trust, start a charity, start a nonprofit, set up a foundation |\n| `org_goal` | Set a goal | Add a goal to an organization's plan, or change one. | `org: text`, `id?: text`, `text?: text`, `window?: text`, `where?: text` |  | `default` | `2` | set a goal, add to the plan |\n| `org_leave` | Leave | Leave an organization you're a member of. | `org: ref` |  | `default` | `5` | leave the group, quit the club, resign from |\n| `org_merge` | Merge companies | Fold one company into another (from Money 3): its holders get the other's units at a ratio (by their values unless you say) and any cash it pays, and its accounts, property, staff and positions move over; or, kept, the other takes all of it as its subsidiary. You decide for both, with more than half the votes of each (yours, or an organization's you govern). | `org: ref → business`, `into: ref → business`, `ratio?: number`, `cash?: money`, `from?: ref → account`, `keep?: bool`, `vote?: bool` |  | `default` | `60` | merge the companies, fold it into, take over the company, buy out the company, acquire the business |\n| `org_motion_end` | Withdraw a motion | Withdraw a motion you put to a vote, while it is open. | `org: ref`, `motion: text` |  | `default` | `2` | withdraw the motion |\n| `org_order` | Give an order | Give people in an organization a task on its plan, or change one: whom it is for, who leads, where and when. | `org: text`, `id?: text`, `to?: text`, `lead?: text`, `text?: text`, `where?: text`, `when?: text`, `goal?: text` |  | `default` | `2` | give an order, put them on it |\n| `org_plan_status` | Move a plan along | Mark a goal or an order on an organization's plan under way, done, blocked, refused or dropped, or open it again. | `org: text`, `id: text`, `status: text`, `note?: text` |  | `default` | `2` | mark it done, drop the plan |\n| `org_position` | Set a position | Add, change or remove a position in an organization: its title, powers, seats, whom it reports to, its scope and limits. | `org: ref`, `title: text`, `id?: text`, `powers?: text`, `seats?: number`, `reports_to?: text`, `no_report?: bool`, `scope?: text`, `payment?: money`, `month?: money`, `successor?: text`, `default?: bool`, `remove?: bool` |  | `default` | `2` | add a position, change the position |\n| `org_remove` | Remove a member | Remove someone from an organization. | `org: ref`, `who: ref` |  | `default` | `10` | throw out, expel, remove from the group |\n| `org_rename` | Rename | Give an organization a new name. | `org: ref`, `name: text` |  | `default` | `2` | rename, call it |\n| `org_restructure` | Change structure | Change a company's legal structure (a sole proprietorship, a partnership, an LLC, an S or a C corporation): draws and payouts change at once, its taxes from the next estimated-tax period. | `org: ref → business`, `structure: text`, `as?: ref`, `vote?: bool` |  | `default` | `30` | incorporate, become an LLC, change the company's structure, turn it into a corporation |\n| `org_revoke` | Revoke | End someone's delegation to act for an organization. | `org: ref`, `to: ref` |  | `default` | `5` | revoke, take back their authority |\n| `org_title` | Change title | Give someone in an organization a title of their own, or take it away. | `org: ref`, `who: ref`, `title?: text` |  | `default` | `5` | call them, give them the title |\n| `org_vote` | Vote | Vote on a motion open at an organization: for, against, or abstain; as an organization holder whose shares you manage, with `as`. | `org: ref`, `motion: text`, `vote: text`, `as?: ref` |  | `default` | `5` | vote for the motion, vote against, raise a hand for, abstain |\n| `org_vote_rule` | Standing vote | Set how you vote on an organization's motions when you don't vote yourself: for, against, abstain, with another voter, or none. | `org: ref`, `vote: text`, `with?: ref` |  | `default` | `2` | vote with, always vote for |\n| `org_wind_up` | Wind up a company | Close a company down (from Money 3), all at once or in stages: begin (it stops trading: its staff go, its standing payments end), sell what you choose as the company, then finish (its debts paid, its holdings sold, its real estate and stakes handed to its owners by share or sold, the rest of its cash paid out to them by share, its accounts closed, it dissolved); or resume trading. Stage: all, begin, finish, resume. | `org: ref → business`, `stage?: text`, `property?: text`, `to?: ref`, `vote?: bool` |  | `default` | `60` | wind up the company, close the business down, dissolve the company, shut the business for good, liquidate the company |\n| `party_hire` | Hire a hand | Hire someone for your party, paid from its purse; they join it as a hired hand. | `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default` | `15` | hire a hand, take on a hand, hire them for the party |\n| `party_name` | Name the party | Give your party a name. | `name: text` |  | `default` | `1` | call our party, name our group |\n| `party_purse` | Start a purse | Open an account your party owns, with a deposit from an account of your own. | `amount: money`, `from?: ref → account` |  | `default` | `1` | start a party purse, pool our money, a kitty for the party |\n| `party_tier` | Party tier | Add someone you know to your party in a tier (core, companion, hired, ally), change their tier, or take them out of the party (out). | `who: ref → person`, `tier: text` |  | `default` | `1` | join my party, travel with me from now on, leave the party |\n\n### Events\n\nIts own: `orgs.answer`, `orgs.ask`, `orgs.config`, `orgs.entry`, `orgs.goal`, `orgs.lived`, `orgs.log`, `orgs.motion`, `orgs.motion_end`, `orgs.order`, `orgs.spent`, `orgs.status`, `orgs.trespass`, `orgs.vote`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `agenda` | `routine` |\n| `approval` | `routine` |\n| `employment` | `routine` |\n| `membership` | `routine` |\n| `vote` | `routine` |\n\n### Panels and slots\n\nPanels: `orgs.list`, `orgs.org`. Slots it writes: `people`, `quest`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `orgs.motions` | `relationships` | 0 | the world |\n| `orgs.orders` | `relationships` | 0 | the world |\n| `orgs.seats` | `relationships` | 0 | the world |\n\n### Lint codes\n\n`orgs.delegations`, `orgs.entry`, `orgs.kinds`, `orgs.owners`, `orgs.positions`, `orgs.taxes`.\n\n## Relationships pack (`relationships`)\n\nVersion 1 · realism domain `relationships` · requires `space`.\n\n### Kinds\n\n#### `company`: Company\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `faction`: Faction\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `family`: Family\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `household`: Household\n\nExtends `group`.\n\nNo fields of its own.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `child_of` | Child of | `person` | `person` | many_many |  | `parent_of` | none |\n| `knows` | Knows | `*` | `*` | many_many |  |  | none |\n| `member_of` | Member of | `*` | `group` | many_many |  |  | `position`, `rank`, `role`, `since` |\n| `parent_of` | Parent of | `person` | `person` | many_many |  | `child_of` | none |\n| `partner_of` | Partner of | `person` | `person` | many_many | yes |  | `since` |\n| `regard` | Regard | `*` | `*` | many_many |  |  | `respect`, `trust`, `warmth` |\n| `sibling_of` | Sibling of | `person` | `person` | many_many | yes |  | none |\n| `spouse_of` | Spouse of | `person` | `person` | many_many | yes |  | `since` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `relationships.adjust` | `from`, `to`, `delta`, `axis?`, `why?` |\n| `relationships.appraise` | `from`, `to`, `appraisal`, `why?`, `mutual?` |\n\n### Formula functions\n\n- `faction_regard(group, to)`\n- `regard(from, to, axis)`\n- `regard_band(from, to)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `chat_with` | Chat with | Spend a while talking with someone here. | `target: ref → person`, `minutes?: duration` |  | `default` | `minutes > 0 ? minutes : 15` | chat with, talk to, catch up with |\n| `give_gift` | Give a gift | Give someone here a present. | `target: ref → person` |  | `default` | `5` | give a gift, surprise |\n\n### Events\n\nIts own: `relationships.regard`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `regard` | `number` |\n\n### Lint codes\n\n`relationships.axes`.\n\n## Character sheets pack (`sheets`)\n\nVersion 1 · realism domain `sheets` · requires `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `sheets.condition` | `condition`, `who?`, `label?`, `mod?`, `minutes?`, `clear?` |\n\n### Formula functions\n\n- `condition_mod(who)`\n- `derived(who, id)`\n- `difficulty_of(v)`\n- `has_condition(who, id)`\n- `stat(who, stat)`\n- `stat_mod(who, stat)`\n- `stat_word(who, stat)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `attempt` | Attempt | Try something hard that one of your stats decides: climb, force, persuade, notice. | `stat: text`, `difficulty?: text` | `1d20` | `failure`, `great`, `success` | `5` | try to, attempt, check |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `condition` | `list` |\n\n### Panels and slots\n\nPanels: `sheets.you`. Slots it writes: `outcome`.\n\n### Lint codes\n\n`sheets.stat_range`.\n\n## Space & travel pack (`space`)\n\nVersion 1 · realism domain `space` · requires `calendar`.\n\n### Kinds\n\n#### `group`: Group\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `approval_days` | A request for approval waits for days (7 unless set) | number | 1 … 365 |  |  |  | live from money 2 |\n| `dues` | Dues ({cents, every, day?}) | list |  |  |  |  | live from money 3 |\n| `motion_days` | A motion stays open for days (7 unless set) | number | 1 … 365 |  |  |  |  |\n| `pass_pct` | A motion passes with more than % of the votes cast for or against (50 unless set) | number | 0 … 99.9 |  |  |  |  |\n| `payroll` | Pay schedule ({every, anchor, weekday, days}) | list |  |  |  |  | live from money 3 |\n| `payroll_account` | Payroll account | ref → account |  |  |  |  | live from money 3 |\n| `places` | Its places | list of ref |  |  |  |  |  |\n| `positions` | Positions ({id, title, powers, seats?, reports_to?, scope?, limits?, successor?, default?, no_dues?}) | list |  |  |  |  |  |\n| `quorum_pct` | A motion needs at least % of the votes to take part (50 unless set) | number | 0 … 100 |  |  |  |  |\n| `suta_pct` | Its state unemployment tax rate (%), when it isn't its state's new-employer rate | number | 0 … 100 |  |  |  | live from money 3 |\n| `tax_exempt` | Tax-exempt status (a row of the exempt table: charity, church, club) | text (row of economy.exempt) |  |  |  |  | live from money 3 |\n| `vote_by` | Votes are counted by (shares, one each for members, or one each for its trustees; a company counts shares unless set) | enum: shares, members, trustees |  |  |  |  |  |\n| `vote_rules` | Standing votes ({who, vote: for, against, abstain or with, with?}) | list |  |  |  |  |  |\n\n#### `party`: Party\n\nExtends `group`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `leader` | Leader | ref → person |  |  |  |  |  |\n\n#### `person`: Person\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `activity` | Activity | text |  | `\"idle\"` |  |  | live from castlife 1 |\n| `activity_until` | Activity ends | number |  |  |  |  | live from castlife 1; locked |\n| `agility` | Agility | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `appointments` | Appointments | list |  |  |  |  | live from castlife 2 |\n| `bed` | Bed (a place or an item) | ref |  |  |  |  | live from castlife 1 |\n| `birthday` | Birthday (MM-DD or YYYY-MM-DD) | date |  |  |  |  | live from castlife 3 |\n| `charm` | Charm | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `chores` | Chores | list |  |  |  |  | live from castlife 3 |\n| `conditions` | Conditions | list |  |  |  |  | live from sheets 4 |\n| `employer` | Employer | ref |  |  |  |  | live from money 3 |\n| `filing_status` | Tax filing status | enum: single, married_filing_jointly, head_of_household |  |  |  |  | live from money 4 |\n| `grit` | Grit | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `home` | Home | ref |  |  |  |  | live from space 1 |\n| `local_tax` | Pays local income tax | bool |  |  |  |  | live from money 4 |\n| `might` | Might | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `needs` | Needs | list |  |  |  |  | live from castlife 4; locked |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_prefs` | Pays with, in order ({use, min?, max?, categories?, except?}) | list |  |  |  |  | live from money 3 |\n| `region` | Region | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `scene` | Scene type | text |  |  |  |  |  |\n| `trips` | Trips | list |  |  |  |  | live from castlife 1 |\n| `wealth` | Wealth | text |  |  |  |  | live from money 1 |\n| `wits` | Wits | number | 3 … 18 |  |  |  | live from sheets 1 |\n\n#### `thing`: Thing\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owner` | Owner | ref |  |  |  |  |  |\n| `place` | Place | ref |  |  |  |  | live from space 1 |\n| `x` | Grid x | number |  |  |  |  | live from space 3 |\n| `y` | Grid y | number |  |  |  |  | live from space 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `in` | In | `*` | `*` | many_one |  |  | none |\n| `travels_with` | Travels with | `person` | `person` | many_one |  |  | `since`, `tier` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `space.entered` | `entity`, `to` |\n| `space.make_place` | `change` |\n| `space.set_route` | `route`, `open?` |\n| `space.step` | `x`, `y`, `entity?` |\n\n### Formula functions\n\n- `can_go(from, to)`\n- `distance_km(from, to, mode)`\n- `entry_why(who, place)`\n- `go_minutes(from, to)`\n- `grid_minutes(place, x, y)`\n- `grid_reachable(place, x, y)`\n- `may_enter(who, place)`\n- `on_grid(thing)`\n- `reach(a, b)`\n- `route_exists(from, to, mode)`\n- `route_open(route)`\n- `travel_minutes(from, to, mode)`\n- `within(place, ancestor)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `go` | Go to | Go to another place: a room, a building, a street, another part of town. | `to: ref → place`, `with?: list` |  | `default` | `go_minutes(here, to)` | go to, walk to, head to, head over to, leave for |\n| `step` | Move on the map | Walk to a square of the grid you stand on. | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |\n\n### Events\n\nIts own: `space.place`, `space.pos`, `space.route`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `location` | `ref` |\n| `place_make` | `ref` |\n\n### Panels and slots\n\nPanels: `space.map`. Slots it writes: `place`, `scene`.\n\n### Lint codes\n\n`space.grid`, `space.maps`, `space.references`.\n\n## Story pack (`story`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `story.answer` | `track?`, `puzzle?`, `answer`, `decision?` |\n| `story.flag` | `name`, `value?` |\n\n### Formula functions\n\n- `flag(name)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `answer` | Answer | Give your answer to a puzzle: a riddle, a code, a combination. | `puzzle?: text`, `answer: text`, `decision?: number` |  | `default` | `1` | the answer is, i think it's, solve, answer, the code is, the combination is, try the combination, dial, enter the code |\n\n### Events\n\nIts own: `story.flag`.\n\n### Panels and slots\n\nPanels: `story.quests`. Slots it writes: `quest`.\n\n### Lint codes\n\n`story.answer_track`, `story.leaky_id`, `story.leaky_label`, `story.unset_flag`.\n\n## Vehicles pack (`vehicles`)\n\nVersion 1 · realism domain `vehicles` · requires `economy`, `gear`, `space`.\n\n### Kinds\n\n#### `vehicle`: Vehicle\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `class` | Vehicle class | text |  |  |  |  |  |\n| `colour` | Colour | text |  |  |  |  |  |\n| `engine_hours` | Engine hours | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto |\n| `home` | Home base | ref |  |  |  |  | live from vehicles 3 |\n| `last_service` | Last service (mi or h) | number | ≥ 0 |  |  |  | live from vehicles 4 |\n| `make` | Make | text |  |  |  |  |  |\n| `model` | Model | text |  |  |  |  |  |\n| `odometer_mi` | Odometer (mi) | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `plate` | Plate | text |  |  |  |  |  |\n| `specs` | Specs ({label, value}) | list |  |  |  |  |  |\n| `status` | Status | enum: ok, needs_service, broken |  | `\"ok\"` |  |  | live from vehicles 1; bound confirm |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n| `year` | Year | number |  |  |  |  |  |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `vehicles.drive` | `vehicle`, `to`, `driver?`, `riders?` |\n| `vehicles.refuel` | `vehicle`, `payer?`, `pct?` |\n| `vehicles.service` | `vehicle`, `payer?`, `repair?` |\n\n### Formula functions\n\n- `drive_minutes(vehicle, to, from)`\n- `fuel_ok(vehicle, to, from)`\n- `fuel_pct(vehicle)`\n\n### Actions\n\n| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `drive` | Drive | Drive, ride, sail or fly a vehicle you own or may use to another place. | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to, here)` | drive to, drive over to, take the truck, take the car, sail to, ride to, fly to, fly the plane to |\n| `refuel` | Refuel | Fill up a vehicle's tank, or charge it. | `vehicle: ref → vehicle` |  | `default` | `10` | refuel, fill up, gas up, charge the car |\n| `repair_vehicle` | Repair | Have a damaged or broken-down vehicle repaired. | `vehicle: ref → vehicle` |  | `default` | `180` | repair, fix the truck, fix the car, get it towed |\n| `service_vehicle` | Service | Have a vehicle serviced: an oil change, a tune-up. | `vehicle: ref → vehicle` |  | `default` | `60` | service, oil change, tune up |\n\n### Panels and slots\n\nPanels: `vehicles.garage`. Slots it writes: `vehicles`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `vehicles.upkeep` | `vehicles` | 4 | the world |\n\nDetail on demand: `vehicles` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `vehicles.classes` | Vehicle classes | `lre-table/vehicles.classes/v1` | name (text), aliases (list, optional), make (text, optional), model (text, optional), domain (enum), fuel_type (enum), factor_guide (ref), tank_capacity_gal (number, optional), tank_capacity_l (number, optional), usable_battery_kwh (number, optional), consumption_unit (enum), consumption (json), range_mi (int, optional), range_h (number, optional), price_new_cents (band), price_used_cents (band), insurance_liability_cents_per_month (int), insurance_full_cents_per_month (int), registration_cents_per_year (band), fuel_cents_per_gal (band, optional), annual_maintenance_cents_per_year (int), maintenance (json), passengers (int), cargo_l (number), payload_kg (number), towing_kg (number, optional), charging (json, optional), notes (text) | 32 |\n| `vehicles.factors` | Consumption factor guides | `lre-table/vehicles.factors/v1` | basis (text), factors (json), note (text, optional) | 4 |\n\n### Lint codes\n\n`vehicles.classes`.\n\n## Weather pack (`weather`)\n\nVersion 1 · realism domain `weather` · requires `space`.\n\n### Kinds\n\n#### `region`: Weather region\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `climate` | Climate | text |  | `\"temperate\"` |  |  |  |\n| `temp_c` | Temperature (°C) | number |  |  |  |  | live from weather 3; bound never |\n| `weather` | Weather | text |  | `\"clear\"` |  |  | live from weather 2; bound never |\n| `weather_hold` | Weather held until | number |  |  |  |  | live from weather 2; locked |\n| `weather_hold_until` | Weather held until (condition) | text |  |  |  |  | live from weather 2; locked |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `weather.clear` | `region`, `state?` |\n| `weather.set` | `region`, `state`, `minutes?`, `until?` |\n\n### Formula functions\n\n- `season()`\n- `weather(place)`\n\n### Panels and slots\n\nPanels: `weather.now`. Slots it writes: `scene`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `weather.climate` | `weather` | 2 | the world |\n\n### Lint codes\n\n`weather.climates`.\n";
 
 // docs/USER-GUIDE.md
 var USER_GUIDE_default = `# LumiRPEngine user guide
@@ -98607,7 +98955,7 @@ var package_default = {
     typescript: "7.0.2"
   },
   dependencies: {
-    "lumi-ah": "github:TheLiquorPriest/LumiAH#4aa9d53e5331241ca4ca85af65c179fe56a1c03a",
+    "lumi-ah": "github:TheLiquorPriest/LumiAH#561f9a64da9808dbc16504dddef58792e3cf07c2",
     preact: "^11.0.1"
   }
 };
@@ -98615,7 +98963,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "2b1756c2";
+var BUILD = "da77a3c6";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
