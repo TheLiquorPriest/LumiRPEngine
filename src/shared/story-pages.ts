@@ -149,8 +149,8 @@ export interface StoryAnswer {
 
 // ---------------------------------------------------------------- the prepared start
 
-/** Where the prepared start stands: not started; the author planning (its job under way, no plan yet); its plan waiting for the player's word; under way; held, or stopped before it finished (resume carries it on from its file); finished; cancelled by the player; failed. */
-export type PrepareState = "none" | "planning" | "waiting" | "running" | "paused" | "done" | "cancelled" | "failed";
+/** Where the prepared start stands: not started; the author planning (its job under way, no plan yet); revising its plan with what the player said; its plan waiting for the player's word; under way; held, or stopped before it finished (resume carries it on from its file); finished; cancelled by the player; failed; out of reach, the runtime not linked or the chat not moved to it (the note says what to do). */
+export type PrepareState = "none" | "planning" | "revising" | "waiting" | "running" | "paused" | "done" | "cancelled" | "failed" | "unreachable";
 
 /** One stretch of the chat's past the plan relives: its messages by number in the chat, why, who relives it, and how far it has come. */
 export interface PrepareStretchView {
@@ -164,7 +164,15 @@ export interface PrepareStretchView {
   state: "planned" | "open" | "recorded" | "dropped";
   /** Beats recorded of it so far. */
   beats: number;
+  /** One of the moments that made the story what it is, as the author marked it. */
+  key: boolean;
+  /** Within the depth the preparation goes to: a planned stretch outside it isn't relived unless the player raises the depth. */
+  chosen: boolean;
 }
+
+/** How deep a preparation goes, the player's pick: what each principal knows in outline alone (nothing relived), those and the key moments relived, or every stretch of the plan. */
+export type PrepareDepth = "outline" | "key" | "all";
+export const PREPARE_DEPTHS: readonly PrepareDepth[] = ["outline", "key", "all"];
 
 /** Where the weight of one model call of a preparation was measured: its own calls, this chat's last author run, or nowhere yet (the setting for a call not yet measured). */
 export type PrepareCallFrom = "job" | "chat" | "default";
@@ -186,6 +194,21 @@ export interface PreparePlan {
   call: { tokens: number; from: PrepareCallFrom } | null;
   /** The player's ceiling when the plan was written: a plan whose whole is reckoned above it waits for their word. */
   ceiling: number;
+  /** Each depth the plan offers, with what the whole preparation is reckoned at going that deep, the author's own work included: outlines only, key moments where some stretch is one, everything planned where there is a stretch. */
+  depths: { depth: PrepareDepth; tokens: number }[];
+  /** The depth the author recommends, and why, in a sentence. */
+  recommended: { depth: PrepareDepth; why: string };
+  /** The depth it goes to: the player's pick, else the author's recommendation. */
+  depth: PrepareDepth;
+}
+
+/** Something the player said to the preparation, as the card shows it: what became of it, and the author's own answer once it gave one. */
+export interface PrepareSaidView {
+  text: string;
+  /** What is happening to it, or happened, in the card's words. */
+  status: string;
+  /** The author's answer: what it changed for it, in its own words; null until it gave one. */
+  answer: string | null;
 }
 
 /** `lre.prepare`, every op: the chat's prepared start as it stands after it. */
@@ -200,14 +223,14 @@ export interface PrepareView {
   spent: number;
   /** The most the whole preparation may spend, the player's cap: no moment is relived past it; null: none. */
   cap: number | null;
-  /** What the player said to steer it, oldest first. */
-  steered: string[];
+  /** What the player said to it, oldest first, each with what became of it. */
+  steered: PrepareSaidView[];
   /** What isn't prepared yet, a line each, for a chat played meanwhile; empty once everything is. */
   notYet: string[];
-  /** Why it waits, failed or stopped, in words. */
+  /** Why it waits, failed, stopped or can't be reached, in words. */
   note: string | null;
   names: StoryNames;
 }
 
-/** The reads and acts of `lre.prepare`. */
-export type PrepareAsk = { op: "get" | "start" | "approve" | "pause" | "resume" | "cancel" } | { op: "steer"; text: string } | { op: "cap"; tokens: number | null };
+/** The reads and acts of `lre.prepare`. `start` may carry what the player says first (`about`: what the story is about and who matters), which goes to the author with the start as their word; `approve` may name the depth the player picks (else the author's recommendation); `depth` changes it later, and a deeper one carries the preparation on with the stretches it adds; `restart` plans afresh, keeping what was recorded. */
+export type PrepareAsk = { op: "get" | "pause" | "resume" | "cancel" | "restart" } | { op: "start"; about?: string } | { op: "approve"; depth?: PrepareDepth } | { op: "depth"; depth: PrepareDepth } | { op: "steer"; text: string } | { op: "cap"; tokens: number | null };

@@ -275,8 +275,10 @@ export interface PersistSettings {
  * did and the pages that watch it (one let go shows nothing until its next run; its turn's transcript
  * stays in GM → Workspace), the characters of the agents' stored texts kept once read (`texts`: the
  * main session's turns, the GM assistant's thread, workspace files; one let go is read from storage
- * again), and the messages of the user's chats kept worked out (`folds`: the fold's steps, each with
- * what it did to the world; one let go is worked out again from the nearest state kept or stored).
+ * again), the messages of the user's chats kept worked out (`folds`: the fold's steps, each with
+ * what it did to the world; one let go is worked out again from the nearest state kept or stored),
+ * and how long a chat read for the agents outside a turn and the story's pages is kept while nothing
+ * in it changes (`chatMs`, in ms: `backend/chat-read.ts`; 0 keeps none, every read asks the host).
  */
 export interface KeptSettings {
   runs: number;
@@ -285,6 +287,7 @@ export interface KeptSettings {
   live: number;
   texts: number;
   folds: number;
+  chatMs: number;
 }
 
 /** The messages kept worked out by default (`KeptSettings.folds`): room for the longest chats, each message's steps a few hundred bytes. */
@@ -420,7 +423,8 @@ export function defaultAgentSettings(): AgentSettings {
     persist: { on: false, turns: 3, minutes: 30 },
     gmOpsPerTurn: 10,
     curatorOps: 24,
-    kept: { runs: 64, gates: 256, watchers: 256, live: 16, texts: 4_000_000, folds: KEPT_FOLDS_DEFAULT },
+    // A change of the chat ends a kept read at once: five minutes is a backstop for one the host tells of no way.
+    kept: { runs: 64, gates: 256, watchers: 256, live: 16, texts: 4_000_000, folds: KEPT_FOLDS_DEFAULT, chatMs: 5 * 60_000 },
     // The summary is made ahead, on the main agent's route, 16,000 tokens at most (Build C).
     compaction: { atTokens: 32_000, keepTurns: 3, summarizeTool: true, when: "ahead", connectionId: null, model: null, effort: "main", summaryTokens: 16_000 },
     recording: { outputChars: 2000 },
@@ -556,6 +560,7 @@ export const KEPT_DEFS: Readonly<Record<keyof KeptSettings, AgentLimitDef>> = {
   live: { label: "Chats in the live view", limits: "How many chats' latest agent turn GM → Live keeps in memory, each with everything its agents did, and tells the pages watching it as it runs.", fires: "The chat whose turn started longest ago is let go: GM → Live shows nothing for it until its next turn, and that turn's transcript stays in GM → Workspace → transcripts.", unit: "count", min: 1, none: null },
   texts: { label: "Agent texts kept once read", limits: "How many characters of the agents' stored texts the engine keeps in memory once it has read them: the main agent's session, the GM assistant's conversation and the workspace's files, across your chats.", fires: "The text read longest ago is let go, and its next read comes from storage. At 0 every read does.", unit: "chars", min: 0, none: null },
   folds: { label: "Messages kept worked out", limits: "How many of your chats' messages the engine keeps worked out in memory, each with what it did to the world, so working a chat out again starts where it changed rather than from its first message. Keep it above your longest chat's messages.", fires: "The message used longest ago is let go: the next time it is needed, it is worked out again from the nearest state the engine kept or saved.", unit: "count", min: 1, none: null },
+  chatMs: { label: "Chat kept for its agents", limits: "How long the agents of a job and the story's pages keep a chat's messages once read. A message sent, edited, deleted or swiped ends it at once.", fires: "The chat is read again. At 0 every read does.", unit: "ms", min: 0, none: null },
 };
 
 /** Settings → Agents → Compaction and Main agent → Session: when the main session is summarized, how much of it stays whole, and how long a summary may be. */
@@ -813,7 +818,7 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
     persist: { on: typeof persist.on === "boolean" ? persist.on : d.persist.on, turns: whole(persist.turns, PERSIST_DEFS.turns.min) ?? d.persist.turns, minutes: whole(persist.minutes, PERSIST_DEFS.minutes.min) ?? d.persist.minutes },
     gmOpsPerTurn: whole(a.gmOpsPerTurn, GM_OPS_DEF.min) ?? d.gmOpsPerTurn,
     curatorOps: whole(a.curatorOps, CURATOR_OPS_DEF.min) ?? d.curatorOps,
-    kept: { runs: whole(kept.runs, KEPT_DEFS.runs.min) ?? d.kept.runs, gates: whole(kept.gates, KEPT_DEFS.gates.min) ?? d.kept.gates, watchers: whole(kept.watchers, KEPT_DEFS.watchers.min) ?? d.kept.watchers, live: whole(kept.live, KEPT_DEFS.live.min) ?? d.kept.live, texts: whole(kept.texts, KEPT_DEFS.texts.min) ?? d.kept.texts, folds: whole(kept.folds, KEPT_DEFS.folds.min) ?? d.kept.folds },
+    kept: { runs: whole(kept.runs, KEPT_DEFS.runs.min) ?? d.kept.runs, gates: whole(kept.gates, KEPT_DEFS.gates.min) ?? d.kept.gates, watchers: whole(kept.watchers, KEPT_DEFS.watchers.min) ?? d.kept.watchers, live: whole(kept.live, KEPT_DEFS.live.min) ?? d.kept.live, texts: whole(kept.texts, KEPT_DEFS.texts.min) ?? d.kept.texts, folds: whole(kept.folds, KEPT_DEFS.folds.min) ?? d.kept.folds, chatMs: whole(kept.chatMs, KEPT_DEFS.chatMs.min) ?? d.kept.chatMs },
     compaction: compactionOf(a.compaction, d.compaction),
     recording: { outputChars: whole(recording.outputChars, OUTPUT_CHARS_DEF.min) ?? d.recording.outputChars },
     review: { placement: oneOf(review.placement, REVIEW_PLACEMENTS, d.review.placement) },

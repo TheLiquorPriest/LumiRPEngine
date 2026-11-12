@@ -22,8 +22,9 @@ import { WRITE_NOTE } from "../../../../shared/agent-tools-write";
 import { HARNESS_AGENT, HARNESS_FAMILY, HARNESS_NOTE } from "../../../../shared/harness-texts";
 import { MINDS_NOTE, MINDS_TOOL } from "../../../../shared/harness-texts-minds";
 import type { JsonObject } from "../../../../shared/json";
-import { AGENT_CHANGE_LABEL, MIND_FILE_IDS, type MindFileId } from "../../../../shared/settings";
+import { AGENT_CHANGE_LABEL, MIND_FILE_IDS, type MindFileId, type UserSettings } from "../../../../shared/settings";
 import { castOn } from "../../../../engine/story/record";
+import { renderPrompt } from "../../../prompts";
 import { effectiveMode } from "../../../settings-store";
 import { castFor, markDigested } from "../../../story/cast";
 import { appendTo, baseOf, CHARACTER_FILES, characterSelf, fileNamed, filesOf, mindCall, mindEntity, mindPath, PRINCIPAL_FILES, readMind, standingIn, standingWords, whoNamed } from "../../../story/minds";
@@ -43,6 +44,23 @@ function shown(view: ToolReadView, id: MindFileId, file: HarnessFile | null, max
   return `### ${view.text(MINDS_NOTE.fileHead, { file: `${id}.md`, version: file.version, size: count(file.text.length), max: count(max) })}\n${file.text}`;
 }
 
+/** How long a person's name, their standing and a file's version may run in a read's heads, for its bound: far longer than any. */
+const HEAD_ROOM = 200;
+
+/**
+ * The most `mind_read` gives under `settings`: every file full to its size, each under its head,
+ * after the read's own head. A mind is read whole, so LumiAH gives up to this whole (its
+ * `wholeChars`); what is past it reaches the reader clipped, the rest kept for scratch_read.
+ */
+function mindReadChars(settings: UserSettings): number {
+  const { texts } = settings.prompts;
+  const max = settings.story.minds.chars;
+  const long = "x".repeat(HEAD_ROOM);
+  const head = renderPrompt(MINDS_NOTE.readHead, texts, { name: long, standing: long }).length;
+  // Each file: "### ", its head, a line break, its text, and the blank line before the next.
+  return MIND_FILE_IDS.reduce((sum, id) => sum + 7 + renderPrompt(MINDS_NOTE.fileHead, texts, { file: `${id}.md`, version: long, size: count(max[id]), max: count(max[id]) }).length + max[id], head);
+}
+
 /** The old engines' read tools by name: `mind_seed` reads a person with them, as the game master's tools read one. */
 const READS: ReadonlyMap<string, (typeof READ_TOOLS)[number]> = new Map(READ_TOOLS.map((t) => [t.name, t]));
 
@@ -52,6 +70,7 @@ export const MIND_FILE_TOOLS: readonly HarnessToolDefinition[] = [
     family: HARNESS_FAMILY.mind,
     tier: "read",
     parameters: () => objectSchema({ who: text(), file: text(MIND_FILE_IDS.map((f) => `${f}.md`)) }),
+    wholeChars: mindReadChars,
     async run(args, env) {
       const view = await env.reader.view();
       const call = await mindCall(view, env, MINDS_TOOL.read, args);

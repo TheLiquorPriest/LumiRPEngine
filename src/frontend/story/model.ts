@@ -7,7 +7,7 @@ import { HARNESS_AGENT } from "../../shared/harness-texts";
 import type { BeatKind, BeatReach, CastStanding, DraftState, DraftTier } from "../../shared/ledger";
 import type { AgentStanding, CharacterRun, ModelPick, StoryModels } from "../../shared/settings";
 import { type ModelAsk, type ModelLevel, modelLadder } from "../../shared/story-models";
-import type { BeatView, CastRowView, DraftView, ExposureView, PrepareState, PrepareView, ReachedItem, StoryNames } from "../../shared/story-pages";
+import type { BeatView, CastRowView, DraftView, ExposureView, PrepareDepth, PrepareState, PrepareView, ReachedItem, StoryNames } from "../../shared/story-pages";
 import { humanize } from "../format";
 
 /** Someone's name as a view gives it: the world as itself, an id with no name as written. */
@@ -228,24 +228,31 @@ export const STRETCH_CHOICES: readonly number[] = [60, 360, 720, 1440, 2880, 432
 export const PREPARE_STATE_WORDS: Readonly<Record<PrepareState, { title: string; tone: "info" | "warn" | "neg" }>> = {
   none: { title: "Prepare this story", tone: "info" },
   planning: { title: "The author is planning", tone: "info" },
+  revising: { title: "The author is revising its plan", tone: "info" },
   waiting: { title: "The author's plan waits for you", tone: "warn" },
   running: { title: "Preparing the story", tone: "info" },
   paused: { title: "Preparing is paused", tone: "warn" },
   done: { title: "The story is prepared", tone: "info" },
   cancelled: { title: "Preparing was cancelled", tone: "warn" },
   failed: { title: "Preparing stopped", tone: "neg" },
+  unreachable: { title: "The story's preparation can't be reached", tone: "warn" },
 };
 
-/** Whether Play → Now shows the prepared start: while it's offered or under way, waits, is held or failed. Once done, or cancelled with nothing more to offer, it goes. */
+/** Whether Play → Now shows the prepared start's card: while it's offered or under way, waits, is held, stopped or was cancelled. Once done it goes to a quiet line (`prepareQuiet`); out of reach, to one line saying so. */
 export function prepareShown(view: PrepareView | null): boolean {
   if (view === null) return false;
   if (view.offer !== null) return true;
-  return view.state === "planning" || view.state === "waiting" || view.state === "running" || view.state === "paused" || view.state === "failed";
+  return view.state === "planning" || view.state === "revising" || view.state === "waiting" || view.state === "running" || view.state === "paused" || view.state === "failed" || view.state === "cancelled";
+}
+
+/** Whether Play → Now shows a finished preparation's quiet line, which opens its card again. */
+export function prepareQuiet(view: PrepareView | null): boolean {
+  return view !== null && view.state === "done";
 }
 
 /** Whether the page asks again while it shows: the author or a job is at work. */
 export function prepareBusy(state: PrepareState): boolean {
-  return state === "planning" || state === "running";
+  return state === "planning" || state === "revising" || state === "running";
 }
 
 /** A count of tokens in words. */
@@ -253,12 +260,19 @@ export function tokensText(tokens: number): string {
   return `${Math.round(tokens).toLocaleString("en-US")} tokens`;
 }
 
-/** How far the plan has come: stretches recorded or dropped of all of them. */
+/** How far the plan has come: stretches recorded or dropped, of those it holds within the depth chosen (and any recorded or dropped already). */
 export function prepareProgress(view: PrepareView): { done: number; total: number } | null {
-  const stretches = view.plan?.stretches ?? [];
+  const stretches = (view.plan?.stretches ?? []).filter((s) => s.chosen || s.state === "recorded" || s.state === "dropped");
   if (stretches.length === 0) return null;
   return { done: stretches.filter((s) => s.state === "recorded" || s.state === "dropped").length, total: stretches.length };
 }
+
+/** Each depth a preparation can go to, in the pages' words: the card's choice, and the live view's. */
+export const DEPTH_WORDS: Readonly<Record<PrepareDepth, { label: string; help: string }>> = {
+  outline: { label: "Outlines only", help: "Every principal knows the past in outline, from the summaries and the lore, with their core. Nothing is relived." },
+  key: { label: "Key moments", help: "The outlines, and the few moments that made the story what it is, relived by those who were in them." },
+  all: { label: "Everything planned", help: "Every stretch of the plan, relived." },
+};
 
 /** What a stretch's state means, in words. */
 export const STRETCH_STATE_WORDS: Readonly<Record<"planned" | "open" | "recorded" | "dropped", string>> = { planned: "Planned", open: "Being recorded", recorded: "Relived", dropped: "Filled from summaries" };

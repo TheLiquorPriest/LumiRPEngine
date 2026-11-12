@@ -40,6 +40,7 @@ import { loreBookIds } from "../../book-lore";
 import { markWording } from "../../prompts";
 import type { HostBookEntry } from "../../host";
 import { latestTexts } from "../../gm";
+import { chatRead } from "../../chat-read";
 import { toChain } from "../../ledger-io";
 import { renderPrompt } from "../../prompts";
 import type { Runtime } from "../../runtime";
@@ -418,9 +419,10 @@ export function readView(input: ReadViewInput): ToolReadView {
 
 /**
  * The reader outside a turn (C6): the chat's head as the GM view reads it (`renderState`, a planned
- * turn included), never through the ledger's queue; the user's settings for their texts, their mark
- * wording and the suspicion threshold; the World Info books the chat reads lore from, read only
- * when a tool asks for lore; and the lore index of them (`viewRouting`).
+ * turn included), never through the ledger's queue, from the chat as read for its agents and kept
+ * until it changes (`chatRead`); the user's settings for their texts, their mark wording and the
+ * suspicion threshold; the World Info books the chat reads lore from, read only when a tool asks for
+ * lore; and the lore index of them (`viewRouting`).
  */
 export function outsideReader(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId" | "knowledge" | "marks">): ToolReader {
   return {
@@ -428,10 +430,10 @@ export function outsideReader(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId
     async view() {
       const core = await rt.ledger.core(env.chatId, env.userId);
       if (!core) throw new Error("this chat plays no LumiRPEngine world");
-      const chain = toChain(await rt.host.chats.messages(env.chatId, env.userId));
+      const settings = await rt.settings.get(env.userId);
+      const chain = toChain((await chatRead(rt.host, env, settings.agents.kept.chatMs)).messages);
       const head = core.renderState(chain);
       if (!head) throw new Error("this chat's world isn't loaded");
-      const settings = await rt.settings.get(env.userId);
       return readView({
         knowledge: env.knowledge,
         marks: env.marks,

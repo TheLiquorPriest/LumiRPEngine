@@ -23,16 +23,21 @@ import { HARNESS_DESCRIBED, SURFACE_TOOL } from "../../src/shared/harness-texts-
 import { WORLD_TOOL } from "../../src/shared/harness-texts-world";
 import { hasOwn, isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";
 import { promptDef, type PromptTexts } from "../../src/shared/prompts";
+import type { UserSettings } from "../../src/shared/settings";
+import { defaultSettings } from "../../src/backend/settings-store";
 import { stateOf } from "../support/mind-chat";
 import { alderChat, toolEnv } from "../support/tools";
 
-/** The harness's list for a Port Alder chat, in `texts`, with the chat it was read for. */
-async function listed(texts: PromptTexts = {}): Promise<{ tools: RemoteTool[]; old: { name: string; parameters: JsonObject }[] }> {
+/** The harness's list for a Port Alder chat, in `texts` and under the settings `change` makes, with the chat it was read for. */
+async function listed(texts: PromptTexts = {}, change: (s: UserSettings) => void = () => undefined): Promise<{ tools: RemoteTool[]; old: { name: string; parameters: JsonObject }[] }> {
   const { rig, chatId } = await alderChat();
   const { world } = await stateOf(rig, chatId);
   // What an agent of the old engines is given of the same tools, for the comparison: every tier, every family.
   const old = toolsFor({ world, tiers: ["read", "story", "gm"], texts, env: toolEnv(rig, chatId, "gm") });
-  return { tools: harnessTools({ world, registry: rig.rt.registry, texts }), old };
+  const settings = structuredClone(defaultSettings());
+  settings.prompts.texts = texts;
+  change(settings);
+  return { tools: harnessTools({ world, registry: rig.rt.registry, settings }), old };
 }
 
 /** The schema at a dotted path of `schema`: through nested properties and an array's items. */
@@ -259,5 +264,32 @@ describe("the tools the harness lists", () => {
     }
     // Who may call each of the harness engine's own tools is said for every one of them, and for nothing that isn't one.
     expect([...HARNESS_OWN_NEEDS.keys()].sort()).toEqual(HARNESS_TOOL_DEFINITIONS.map((d) => d.name).sort());
+  });
+
+  test("a tool read whole names how much of its answer reaches the model so, from the player's settings, and no other tool names any", async () => {
+    const whole = (tools: readonly RemoteTool[]) => Object.fromEntries(tools.flatMap((t) => (t.wholeChars === undefined ? [] : [[t.name, t.wholeChars]])));
+    const shipped = whole((await listed()).tools);
+    const { prepare, minds } = defaultSettings().story;
+    expect(shipped[PREPARE_TOOL.read]).toBe(prepare.readChars);
+    expect(shipped[PREPARE_TOOL.survey]).toBe(prepare.surveyChars);
+    // A mind is read whole: every file full, each under its head.
+    const files = Object.values(minds.chars).reduce((sum, n) => sum + n, 0);
+    expect(shipped[MINDS_TOOL.read]).toBeGreaterThan(files);
+    expect(shipped[MINDS_TOOL.read]).toBeLessThan(files + 4000);
+    expect(Object.keys(shipped).sort()).toEqual([MINDS_TOOL.read, PREPARE_TOOL.survey, PREPARE_TOOL.read].sort());
+    // Changed in Settings, the bounds follow.
+    const changed = whole(
+      (
+        await listed({}, (s) => {
+          s.story.prepare.readChars = 9000;
+          s.story.prepare.surveyChars = 7000;
+          s.story.minds.chars.memory += 10_000;
+        })
+      ).tools,
+    );
+    expect([changed[PREPARE_TOOL.read], changed[PREPARE_TOOL.survey]]).toEqual([9000, 7000]);
+    // The memory file's 10,000 more, and its head's longer figures.
+    const grown = (changed[MINDS_TOOL.read] ?? 0) - (shipped[MINDS_TOOL.read] ?? 0);
+    expect(grown >= 10_000 && grown < 10_010).toBe(true);
   });
 });

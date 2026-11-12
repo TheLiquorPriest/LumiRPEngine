@@ -33,6 +33,8 @@ interface Copy {
   chatId: ChatId;
   userId: UserId;
   messages: HostMessage[];
+  /** Moves on with every change made to it: its `stamp`. */
+  rev: number;
 }
 
 interface Reading {
@@ -54,6 +56,8 @@ export class MessageCache {
   private readonly reading = new Map<string, Reading>();
   /** Hears each whole read of a chat once it has landed (the memory budget looks then). */
   onRead: ((chatId: ChatId) => void) | null = null;
+  /** The last stamp given a copy: each copy kept, and each change to one, takes the next. */
+  private revs = 0;
 
   constructor(private readonly inner: HostPort) {
     inner.on("MESSAGE_SENT", (e) => this.change(e.chatId, (list) => sent(list, e.message)));
@@ -76,6 +80,7 @@ export class MessageCache {
       ...inner.chats,
       messages: (chatId, userId) => this.messages(chatId, userId),
       writeMetadata: (chatId, messageId, bag, userId) => this.writeMetadata(chatId, messageId, bag, userId),
+      stamp: (chatId, userId) => this.copies.get(`${userId}\u0000${chatId}`)?.rev ?? null,
     };
     this.host = new Proxy(inner, {
       get: (target, prop) => {
@@ -128,7 +133,7 @@ export class MessageCache {
         const list = [...read];
         const whole = !reading.forgotten && reading.changes.every((change) => change(list));
         reading.changes.length = 0;
-        if (whole) this.keep(key, { chatId, userId, messages: list });
+        if (whole) this.keep(key, { chatId, userId, messages: list, rev: ++this.revs });
         this.onRead?.(chatId);
         return whole ? list : read;
       },
@@ -164,7 +169,11 @@ export class MessageCache {
 
   /** A change to a chat: made in each copy of it (one it can't be made in is dropped), and in each read of it under way. */
   private change(chatId: ChatId, apply: Change): void {
-    for (const [key, copy] of this.copies) if (copy.chatId === chatId && !apply(copy.messages)) this.copies.delete(key);
+    for (const [key, copy] of this.copies) {
+      if (copy.chatId !== chatId) continue;
+      if (apply(copy.messages)) copy.rev = ++this.revs;
+      else this.copies.delete(key);
+    }
     for (const reading of this.reading.values()) if (reading.chatId === chatId) reading.changes.push(apply);
   }
 

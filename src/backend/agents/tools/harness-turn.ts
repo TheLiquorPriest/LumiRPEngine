@@ -70,8 +70,8 @@ export interface HarnessTurn {
   knowing: boolean;
   /** The user's settings as the turn's frame froze them. */
   settings: UserSettings;
-  /** The chat's messages and the World Info books: a mind's recall, the recent chat and pinned lore are read through them. */
-  host: Pick<HostPort, "chats" | "books" | "log">;
+  /** The chat's messages and the World Info books: a mind's recall, the recent chat and pinned lore are read through them; and the events that say the chat changed, which end a read of it kept for the run (`chatRead`). */
+  host: Pick<HostPort, "chats" | "books" | "log" | "on">;
   /** The seed this turn's dice are drawn from: the same turn rolls the same dice. */
   seed: string;
   /** The chat's run seed, which the world's own processes are seeded from whatever turn steps them, so time passed in pieces passes as it would whole. */

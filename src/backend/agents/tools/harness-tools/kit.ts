@@ -6,6 +6,7 @@
 import { WRITE_NOTE } from "../../../../shared/agent-tools-write";
 import { HARNESS_NOTE, type HarnessToolTier } from "../../../../shared/harness-texts";
 import type { JsonObject } from "../../../../shared/json";
+import type { UserSettings } from "../../../../shared/settings";
 import type { WorldDoc } from "../../../../shared/world";
 import type { ToolOutcome } from "../../runtime";
 import type { HarnessChange, HarnessTurn } from "../harness-turn";
@@ -19,6 +20,8 @@ export interface HarnessToolDefinition {
   family: string;
   tier: HarnessToolTier;
   parameters(world: WorldDoc): JsonObject; // hand-written JSON Schema, with the world's enums filled in
+  /** For a tool that bounds its own answer by one of the player's settings and is meant to be read in one go: that bound, in characters, under `settings`. LumiAH gives its answer whole up to it (its `wholeChars`) instead of clipping it at Tool results clipped past. */
+  wholeChars?: (settings: UserSettings) => number;
   run(args: JsonObject, env: ToolEnv): Promise<ToolOutcome>;
 }
 

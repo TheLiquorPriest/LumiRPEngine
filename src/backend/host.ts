@@ -517,6 +517,8 @@ export interface HostRegexScriptInput {
 export interface HostPort {
   chats: {
     messages(chatId: ChatId, userId: UserId): Promise<HostMessage[]>;
+    /** A stamp of the chat's messages as a port that keeps them holds them now: another stamp, or null, says they may have changed since. A port that keeps none has none. */
+    stamp?(chatId: ChatId, userId: UserId): number | null;
     /** Replaces the message's whole `spindle_metadata` bag (host semantics; G2). Callers read-merge-write. */
     writeMetadata(chatId: ChatId, messageId: MessageId, bag: JsonObject, userId: UserId): Promise<void>;
     chatMetadata(chatId: ChatId, userId: UserId): Promise<JsonObject>;

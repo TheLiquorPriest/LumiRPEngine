@@ -149,6 +149,7 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.live": true,
   "lre.story": true,
   "lre.prepare": true,
+  "lre.prepareLive": true,
 };
 
 function isRequestType(value: unknown): value is keyof ResultBodies {

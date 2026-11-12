@@ -1310,10 +1310,10 @@ describe("the settings", () => {
     expect((await again.rt.settings.get(again.host.userId)).swipeDefault).toBe("rerun");
   });
 
-  test("what the engine keeps in memory is 64 turns, 256 gates, 256 watched chats, 16 chats in the live view, 4,000,000 characters of texts read and 65,536 messages worked out; a count under its least or not whole falls back", () => {
-    expect(defaultAgentSettings().kept).toEqual({ runs: 64, gates: 256, watchers: 256, live: 16, texts: 4_000_000, folds: 65_536 });
-    expect(agentSettingsOf({ kept: { runs: 0, gates: -3, watchers: 2.5, live: 0, texts: -1, folds: 0 } }).kept).toEqual({ runs: 64, gates: 256, watchers: 256, live: 16, texts: 4_000_000, folds: 65_536 });
-    expect(agentSettingsOf({ kept: { runs: 1, gates: 8, watchers: 12, live: 3, texts: 0, folds: 1 } }).kept).toEqual({ runs: 1, gates: 8, watchers: 12, live: 3, texts: 0, folds: 1 });
+  test("what the engine keeps in memory is 64 turns, 256 gates, 256 watched chats, 16 chats in the live view, 4,000,000 characters of texts read, 65,536 messages worked out and a chat read for its agents for five minutes; a count under its least or not whole falls back", () => {
+    expect(defaultAgentSettings().kept).toEqual({ runs: 64, gates: 256, watchers: 256, live: 16, texts: 4_000_000, folds: 65_536, chatMs: 300_000 });
+    expect(agentSettingsOf({ kept: { runs: 0, gates: -3, watchers: 2.5, live: 0, texts: -1, folds: 0, chatMs: -5 } }).kept).toEqual({ runs: 64, gates: 256, watchers: 256, live: 16, texts: 4_000_000, folds: 65_536, chatMs: 300_000 });
+    expect(agentSettingsOf({ kept: { runs: 1, gates: 8, watchers: 12, live: 3, texts: 0, folds: 1, chatMs: 0 } }).kept).toEqual({ runs: 1, gates: 8, watchers: 12, live: 3, texts: 0, folds: 1, chatMs: 0 });
   });
 
   test("Settings saves them as the other pages' settings: a list replaces whole, and a reset goes back to the default", async () => {

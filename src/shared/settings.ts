@@ -839,7 +839,11 @@ export interface StoryModels {
  * The prepared start (`backend/story/prepare.ts`): how many messages one historian run reads (a
  * stretch), the reckoned cost of the whole preparation above which a plan always waits for the
  * player's word, how many principals may have reliving to do at once, what one stretch's read and
- * record hold, and what one model call is reckoned to weigh before LumiAH has measured one.
+ * record hold, what one model call is reckoned to weigh before LumiAH has measured one, how much
+ * one answer of the survey gives, how often its live view asks again and how many of the chat's
+ * runs it looks through, and what one run of it may spend (`backend/story/prepare-run.ts`) and how
+ * many runs in a row may move it nothing forward before it stops carrying on by itself
+ * (`backend/story/prepare-carry.ts`).
  */
 export interface StoryPrepare {
   /** The most messages one stretch takes: one historian run reads it. A longer stretch is planned as several. */
@@ -850,12 +854,24 @@ export interface StoryPrepare {
   reliveAtOnce: number;
   /** The most beats the historian records for one stretch. */
   beatsPerStretch: number;
-  /** The most characters one read of a stretch gives. */
+  /** The most characters one read of a stretch gives, its framing included. LumiAH hands the historian up to this whole (`stretch_read`'s `wholeChars`): fewer reads of a stretch, each a larger part of every later prompt. */
   readChars: number;
   /** Each text of a plan (what the story is, why a stretch or a principal, what is filled from summaries), in characters. */
   textChars: number;
   /** What one model call of the preparation is reckoned to weigh, in tokens, until LumiAH has measured a call of it or of this chat's last author run. */
   callTokens: number;
+  /** The most one answer of `prepare_survey` gives, in characters: the summaries' own text and the lore's within it, the rest named with how to read it. LumiAH hands the author up to this whole (`prepare_survey`'s `wholeChars`): fewer answers, each a larger part of every later prompt. */
+  surveyChars: number;
+  /** While a run of the preparation is at work, how often the live view of it on Play → Now asks again, in seconds. It stops asking once none is. */
+  watchSeconds: number;
+  /** The most of the chat's latest runs (LumiAH's jobs) the live view looks through for the preparation's own each time it asks. */
+  watchRuns: number;
+  /** How long one run of the preparation may work, in minutes: its job's own time, whatever LumiAH allows a job. */
+  runMinutes: number;
+  /** How many rounds of tool calls one run of the preparation has, its author's and those of the agents it starts together: its job's own, whatever LumiAH allows a job. */
+  runRounds: number;
+  /** How many runs it started by itself in a row may end with the preparation's file moved nothing forward before it stops carrying on by itself. */
+  idleRuns: number;
 }
 
 /** As shipped: a story day's stretch holds one T1, two T2 and four T3 treatments; a beat's texts as long as DEPTH2-PLAN §4 has them. */
@@ -867,8 +883,9 @@ export const STORY_DEFAULTS: Readonly<StorySettings> = Object.freeze({
   minds: Object.freeze({ chars: Object.freeze({ core: 4000, now: 2000, memory: 8000, beliefs: 4000, people: 4000, plans: 2000, outline: 6000, profile: 1500 }), playerMind: true }),
   // Nothing picked: every agent runs on its own connection, model and effort until the user picks.
   models: Object.freeze({ default: Object.freeze({}), agents: Object.freeze({}), standings: Object.freeze({}), runs: Object.freeze({}), characters: Object.freeze({}) }),
-  // A historian run reads about forty messages; a plan past 200,000 tokens in all asks first; three principals relive at once; a stretch keeps thirty beats; a call unmeasured is reckoned at 60,000 tokens.
-  prepare: Object.freeze({ stretchMessages: 40, askAboveTokens: 200_000, reliveAtOnce: 3, beatsPerStretch: 30, readChars: 24_000, textChars: 1200, callTokens: 60_000 }),
+  // A historian run reads about forty messages; a plan past 200,000 tokens in all asks first; three principals relive at once; a stretch keeps thirty beats; a call unmeasured is reckoned at 60,000 tokens; the live view asks every five seconds, through the chat's latest sixty runs. A run works an hour with 200 rounds, room for several stretches of a thousand-message chat each; two runs in a row that move nothing forward stop it.
+  // A read and a survey answer of 60,000 characters (about 19,000 tokens) each reach their agent whole: a stretch of forty messages of 7,000 characters is read in five, and summaries of 300,000 characters in all in about six, where LumiAH's own 6,000 would take dozens of rounds, each sending the whole prompt again.
+  prepare: Object.freeze({ stretchMessages: 40, askAboveTokens: 200_000, reliveAtOnce: 3, beatsPerStretch: 30, readChars: 60_000, textChars: 1200, callTokens: 60_000, surveyChars: 60_000, watchSeconds: 5, watchRuns: 60, runMinutes: 60, runRounds: 200, idleRuns: 2 }),
 });
 
 /** Each dial's bounds: a stretch from an hour to a story year; a tier's count from none to a hundred; a limit from one to what a record keeps sensibly. */
@@ -882,8 +899,8 @@ export const STORY_BOUNDS = Object.freeze({
   modelAgents: 64,
   modelCharacters: 500,
   modelChars: 200,
-  /** The prepared start: a stretch from a few messages to a long scene; a ceiling from none to a hundred million tokens; a handful of principals at once; a call from a thousand tokens to two million. */
-  prepare: Object.freeze({ stretchMessages: [5, 400], askAboveTokens: [0, 100_000_000], reliveAtOnce: [1, 24], beatsPerStretch: [1, 200], readChars: [2000, 200_000], textChars: [200, 8000], callTokens: [1000, 2_000_000] } satisfies Record<keyof StoryPrepare, readonly [number, number]>),
+  /** The prepared start: a stretch from a few messages to a long scene; a ceiling from none to a hundred million tokens; a handful of principals at once; a read of a stretch and a survey answer from a page, for a small local model, to a million characters, for a model with a very long context; a call from a thousand tokens to two million; the live view asking from every two seconds to every five minutes, through ten to five hundred runs; a run from five minutes to a day, with ten to five thousand rounds; one to twenty runs without progress. */
+  prepare: Object.freeze({ stretchMessages: [5, 400], askAboveTokens: [0, 100_000_000], reliveAtOnce: [1, 24], beatsPerStretch: [1, 200], readChars: [2000, 1_000_000], textChars: [200, 8000], callTokens: [1000, 2_000_000], surveyChars: [2000, 1_000_000], watchSeconds: [2, 300], watchRuns: [10, 500], runMinutes: [5, 1440], runRounds: [10, 5000], idleRuns: [1, 20] } satisfies Record<keyof StoryPrepare, readonly [number, number]>),
 });
 
 /** One level of the model ladder as the engine reads it: each member kept where it is one it takes, else left out. */
@@ -929,7 +946,7 @@ export function storyPrepareOf(raw: unknown, base: Readonly<StoryPrepare> = STOR
     const [lo, hi] = STORY_BOUNDS.prepare[key];
     return typeof x === "number" && Number.isInteger(x) && x >= lo && x <= hi ? x : base[key];
   };
-  return { stretchMessages: whole("stretchMessages"), askAboveTokens: whole("askAboveTokens"), reliveAtOnce: whole("reliveAtOnce"), beatsPerStretch: whole("beatsPerStretch"), readChars: whole("readChars"), textChars: whole("textChars"), callTokens: whole("callTokens") };
+  return { stretchMessages: whole("stretchMessages"), askAboveTokens: whole("askAboveTokens"), reliveAtOnce: whole("reliveAtOnce"), beatsPerStretch: whole("beatsPerStretch"), readChars: whole("readChars"), textChars: whole("textChars"), callTokens: whole("callTokens"), surveyChars: whole("surveyChars"), watchSeconds: whole("watchSeconds"), watchRuns: whole("watchRuns"), runMinutes: whole("runMinutes"), runRounds: whole("runRounds"), idleRuns: whole("idleRuns") };
 }
 
 /** `UserSettings.story` as the engine reads it: each dial a whole number in its bounds, else `base`'s; a file from before it reads as shipped. */

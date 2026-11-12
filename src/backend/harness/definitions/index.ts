@@ -126,13 +126,24 @@ function listedIn(tools: readonly string[]): { name: string }[] {
 const UNLIMITED = { callTokensIn: null, callMs: null, callTools: null, tokensIn: null, tokensOut: null, wallMs: null } as const;
 
 /**
+ * The prompt one call of the author's or the historian's may send, in tokens (LumiAH's Prompt per
+ * call): their reads come whole (a stretch, the survey's summaries, 60,000 characters each as
+ * shipped) and pile up in the prompt over a run, so this keeps it inside a 200,000-token window with
+ * the author's 32,000-token answer room and a margin. A read that would pass it reaches the agent
+ * cut to the room left, and it is told so, instead of the provider refusing the call.
+ */
+export const READER_PROMPT_TOKENS = 160_000;
+
+/**
  * Each definition's budget as shipped: the default of its settings in LumiAH, where the user changes
- * any of it. Only an answer's size, the rounds of tool calls, the revisions and the calls at once are
- * bounded; everything else is unlimited until the user bounds it.
+ * any of it, a version of their own keeping its own limits. An answer's size, the rounds of tool
+ * calls, the revisions and the calls at once are bounded, and the prompt per call of the two that
+ * read whole; everything else is unlimited until the user bounds it. No other agent's reads grow
+ * without bound in one run: each is held to its rounds, and each read to its own size.
  */
 const BUDGETS: Readonly<Record<HarnessAgentId, AgentBudget>> = {
   // A call's answer room holds the model's reasoning too, and a strong reasoning model can spend several thousand tokens deciding before it writes or calls anything: with too little room the answer is cut mid-thought and the run ends with nothing. So every agent's room is generous; rounds enough for a scene of several beats, its rulings, each passage released, and the jobs it starts.
-  [HARNESS_AGENT.author]: { ...UNLIMITED, callTokensOut: 32_000, toolTurns: 40, revisions: 2, concurrency: 4 },
+  [HARNESS_AGENT.author]: { ...UNLIMITED, callTokensIn: READER_PROMPT_TOKENS, callTokensOut: 32_000, toolTurns: 40, revisions: 2, concurrency: 4 },
   // What reached them, a file or two of their own mind, their act, and a passage when the reply is theirs: a mind still calling tools after that has left its task.
   [HARNESS_AGENT.character]: { ...UNLIMITED, callTokensOut: 16_000, toolTurns: 12, revisions: 2, concurrency: 2 },
   // The odds, what the ruling turns on, what is at stake, the beat it writes; or a passage held to its beats, and held again after each redraft.
@@ -140,7 +151,7 @@ const BUDGETS: Readonly<Record<HarnessAgentId, AgentBudget>> = {
   // What reached the point of view, then the passage, and a round for each redraft the check asks: six rounds ran out mid-revision in a live scene, and its last draft was refused.
   [HARNESS_AGENT.narrator]: { ...UNLIMITED, callTokensOut: 16_000, toolTurns: 12, revisions: 3, concurrency: 1 },
   // One stretch read whole, its beats recorded a few calls at a time, and the stretch closed.
-  [HARNESS_AGENT.historian]: { ...UNLIMITED, callTokensOut: 16_000, toolTurns: 16, revisions: 1, concurrency: 2 },
+  [HARNESS_AGENT.historian]: { ...UNLIMITED, callTokensIn: READER_PROMPT_TOKENS, callTokensOut: 16_000, toolTurns: 16, revisions: 1, concurrency: 2 },
   // A question read from several sides, then the changes it asked for, each checked.
   [HARNESS_AGENT.assistant]: { ...UNLIMITED, callTokensOut: 16_000, toolTurns: 20, revisions: 1, concurrency: 4 },
 };

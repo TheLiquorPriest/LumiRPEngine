@@ -4,14 +4,15 @@
 import { describe, expect, test } from "bun:test";
 import type { VNode } from "preact";
 import { NARRATION_BOUNDS, NARRATION_DEFAULTS, STORY_DEFAULTS, type StoryModels } from "../../src/shared/settings";
-import type { BeatView, CastRowView, DraftView, PrepareView } from "../../src/shared/story-pages";
-import { HostModelPicker, Seg } from "../../src/frontend/components";
+import type { BeatView, CastRowView, DraftView, PrepareAsk, PrepareView } from "../../src/shared/story-pages";
+import { Button, HostModelPicker, Seg } from "../../src/frontend/components";
 import { narrationChanged, narrationSummary, StorySubPage } from "../../src/frontend/settings/story";
 import { agentConnections, LOOPBACK_PROBLEM, UNSET_CONNECTION } from "../../src/frontend/story/connections";
 import { savedWords } from "../../src/frontend/story/editor";
 import { lastReflected, mindEntries, notebookFiles, type StoryFile } from "../../src/frontend/story/files";
 import { ModelPickRows, runsOnText } from "../../src/frontend/story/model-pick";
-import { agoText, beatHead, capOf, castGroups, castLine, characterAsk, draftsInOrder, exposureLine, pickedBy, prepareBusy, prepareProgress, prepareShown, reachedLine, reachedText, stretchText } from "../../src/frontend/story/model";
+import { agoText, beatHead, capOf, castGroups, castLine, characterAsk, draftsInOrder, exposureLine, pickedBy, prepareBusy, prepareProgress, prepareShown, reachedLine, reachedText, stretchText, tokensText } from "../../src/frontend/story/model";
+import { PrepareBody, PrepareLine, PrepareQuiet, prepareSlot, type PrepareTyped } from "../../src/frontend/story/prepare";
 import { replyLabel } from "../../src/frontend/story/record";
 import { expand, propsOf, type Props } from "../support/tree";
 
@@ -159,19 +160,19 @@ describe("minds and the notebook", () => {
 
 describe("the prepared start", () => {
   const view = (over: Partial<PrepareView>): PrepareView => ({ offer: null, state: "none", plan: null, estimate: null, spent: 0, cap: null, steered: [], notYet: [], note: null, names: {}, ...over });
-  test("Now shows it while it's offered, under way, waiting, held or stopped; not once done", () => {
+  test("Now shows its card while it's offered, under way, revised, waiting, held, stopped or cancelled; once done, a quiet line", () => {
     expect(prepareShown(null)).toBe(false);
     expect(prepareShown(view({ offer: "A chat with history." }))).toBe(true);
-    for (const state of ["planning", "waiting", "running", "paused", "failed"] as const) expect(prepareShown(view({ state }))).toBe(true);
+    for (const state of ["planning", "revising", "waiting", "running", "paused", "failed", "cancelled"] as const) expect(prepareShown(view({ state }))).toBe(true);
     expect(prepareShown(view({ state: "done" }))).toBe(false);
-    expect(prepareShown(view({ state: "cancelled" }))).toBe(false);
     expect(prepareBusy("running")).toBe(true);
+    expect(prepareBusy("revising")).toBe(true);
     expect(prepareBusy("waiting")).toBe(false);
   });
 
-  test("progress counts stretches relived or filled from summaries", () => {
-    const stretch = (state: "planned" | "open" | "recorded" | "dropped") => ({ id: state, from: 1, to: 2, why: "", who: [], state, beats: 0 });
-    const plan = { story: "", principals: [], stretches: [stretch("recorded"), stretch("dropped"), stretch("open"), stretch("planned")], summaries: null, authorEstimate: 0, reckoned: 0, call: null, ceiling: 0 };
+  test("progress counts stretches relived or filled from summaries, of those within the depth chosen", () => {
+    const stretch = (state: "planned" | "open" | "recorded" | "dropped", chosen = true) => ({ id: state, from: 1, to: 2, why: "", who: [], state, beats: 0, key: false, chosen });
+    const plan = { story: "", principals: [], stretches: [stretch("recorded"), stretch("dropped"), stretch("open"), stretch("planned"), stretch("planned", false)], summaries: null, authorEstimate: 0, reckoned: 0, call: null, ceiling: 0, depths: [], recommended: { depth: "key" as const, why: "" }, depth: "key" as const };
     expect(prepareProgress(view({ plan }))).toEqual({ done: 2, total: 4 });
     expect(prepareProgress(view({}))).toBeNull();
   });
@@ -181,6 +182,104 @@ describe("the prepared start", () => {
     expect(capOf(" ")).toEqual({ tokens: null });
     expect("problem" in capOf("lots")).toBe(true);
     expect("problem" in capOf("0")).toBe(true);
+  });
+
+  /** Every element of `type` in a tree, a banner's actions among them. */
+  const found = (node: unknown, type: unknown): Props[] => {
+    if (Array.isArray(node)) return node.flatMap((n) => found(n, type));
+    if (!node || typeof node !== "object" || !("props" in node)) return [];
+    const v = node as VNode<Props>;
+    return [...(v.type === type ? [v.props] : []), ...Object.values(v.props).flatMap((p) => found(p, type))];
+  };
+  const buttons = (tree: unknown): string[] => found(tree, Button).map((p) => textOf(p.children));
+  const press = (tree: unknown, text: string): void => (found(tree, Button).find((p) => textOf(p.children) === text)?.onClick as () => void)();
+  /** The card as drawn from `over`, with `typing` in its boxes: what it asks and what it types, kept. */
+  const card = (over: Partial<PrepareView>, typing: Partial<PrepareTyped> = {}) => {
+    const asked: PrepareAsk[] = [];
+    const typed: [string, string][] = [];
+    const tree = PrepareBody({ view: view(over), busy: false, typed: { steer: "", cap: null, about: "", depth: "", ...typing }, onType: (part, value) => typed.push([part, value]), ask: (body) => asked.push(body), onLater: () => undefined });
+    return { tree, asked, typed };
+  };
+  const closed = { hidden: false, opened: false, watched: false };
+
+  test("once the player sends words, the card says what is happening to them, and shows the author's answer under them once it gave one", () => {
+    const sending = card({ state: "running" }, { steer: "  Joss is who the story turns on.  " });
+    press(sending.tree, "Send");
+    expect(sending.asked).toEqual([{ op: "steer", text: "Joss is who the story turns on." }]);
+    expect(sending.typed).toEqual([["steer", ""]]);
+    const revising = textOf(card({ state: "revising", steered: [{ text: "Joss is who the story turns on.", status: "The author is revising the plan with this.", answer: null }] }).tree);
+    expect(revising).toContain("Joss is who the story turns on.The author is revising the plan with this.");
+    expect(revising).not.toContain("The author's answer");
+    const answered = textOf(card({ state: "waiting", note: "The author revised the plan for what you said. It now waits for your word: go ahead with it, or tell the author more.", steered: [{ text: "Joss is who the story turns on.", status: "The author revised the plan for this.", answer: "Joss is the principal now." }] }).tree);
+    expect(answered).toContain("The author revised the plan for this.The author's answer: Joss is the principal now.");
+    expect(answered).toContain("It now waits for your word");
+  });
+
+  test("the first card's box goes with the start, and an empty one sends none", () => {
+    const offered = card({ offer: "This chat has a history." }, { about: " The story is Mara's. Joss and Ilse matter most. " });
+    expect(found(offered.tree, "textarea").map((p) => p.value)).toEqual([" The story is Mara's. Joss and Ilse matter most. "]);
+    press(offered.tree, "Prepare the story");
+    expect(offered.asked).toEqual([{ op: "start", about: "The story is Mara's. Joss and Ilse matter most." }]);
+    const empty = card({ offer: "This chat has a history." });
+    press(empty.tree, "Prepare the story");
+    expect(empty.asked).toEqual([{ op: "start" }]);
+  });
+
+  test("a finished preparation stays one quiet line on Now that opens its card again; out of reach, one line says so and what to do", () => {
+    const done = view({ state: "done" });
+    expect(prepareSlot(done, closed)).toBe("quiet");
+    expect(prepareSlot(done, { ...closed, watched: true })).toBe("card");
+    expect(prepareSlot(done, { ...closed, watched: true, hidden: true })).toBe("quiet");
+    expect(prepareSlot(done, { ...closed, opened: true })).toBe("card");
+    let opened = false;
+    const quiet = PrepareQuiet({ onOpen: () => (opened = true) });
+    press(quiet, "See how it went, or tell the author what to change");
+    expect(opened).toBe(true);
+    expect(buttons(card({ state: "done" }).tree)).toEqual(["Close", "Send"]);
+    const linked = "No agent runtime is linked: link one on LumiAH's page, then open this chat again.";
+    expect(prepareSlot(view({ state: "unreachable", note: linked }), closed)).toBe("line");
+    expect(textOf(PrepareLine({ note: linked }))).toBe(linked);
+    expect(prepareSlot(view({ state: "none" }), closed)).toBe("nothing");
+  });
+
+  test("a cancelled preparation offers Carry on, Start over and the box that revises it", () => {
+    const cancelled = card({ state: "cancelled", note: "Cancelled. What it prepared stays: carry it on from its file, tell the author what to change, or start over." });
+    expect(buttons(cancelled.tree)).toEqual(["Carry on", "Start over", "Close", "Send", "Set the cap"]);
+    press(cancelled.tree, "Start over");
+    press(cancelled.tree, "Carry on");
+    expect(cancelled.asked).toEqual([{ op: "restart" }, { op: "resume" }]);
+  });
+
+  test("a plan offers each depth with its own cost; going ahead takes the one picked, else the author's recommendation, and a pick once under way changes it at once", () => {
+    const stretch = (id: string, key: boolean, chosen: boolean) => ({ id, from: 1, to: 2, why: "", who: [], state: "planned" as const, beats: 0, key, chosen });
+    const plan = { story: "", principals: [], stretches: [stretch("s1", true, true), stretch("s2", false, false)], summaries: null, authorEstimate: 0, reckoned: 900_000, call: null, ceiling: 200_000, depths: [{ depth: "outline" as const, tokens: 300_000 }, { depth: "key" as const, tokens: 900_000 }, { depth: "all" as const, tokens: 4_000_000 }], recommended: { depth: "key" as const, why: "Two moments made this story." }, depth: "key" as const };
+    const choice = (tree: unknown): Props => found(tree, Seg)[0]!;
+    const pick = (tree: unknown, depth: string): void => (choice(tree).onChange as (d: string) => void)(depth);
+
+    const waiting = card({ state: "waiting", plan });
+    expect((choice(waiting.tree).options as { value: string; label: string }[]).map((o) => o.label)).toEqual([`Outlines only: ${tokensText(300_000)}`, `Key moments: ${tokensText(900_000)}`, `Everything planned: ${tokensText(4_000_000)}`]);
+    expect(choice(waiting.tree).value).toBe("key");
+    expect(textOf(waiting.tree)).toContain("The author recommends key moments: Two moments made this story.");
+    press(waiting.tree, "Go ahead with the plan");
+    expect(waiting.asked).toEqual([{ op: "approve", depth: "key" }]);
+    // A pick before going ahead is only typed: nothing is asked until the player goes ahead with it.
+    pick(waiting.tree, "outline");
+    expect(waiting.typed).toEqual([["depth", "outline"]]);
+    expect(waiting.asked).toHaveLength(1);
+    const picked = card({ state: "waiting", plan }, { depth: "outline" });
+    expect(choice(picked.tree).value).toBe("outline");
+    press(picked.tree, "Go ahead with the plan");
+    expect(picked.asked).toEqual([{ op: "approve", depth: "outline" }]);
+
+    const running = card({ state: "running", plan });
+    pick(running.tree, "all");
+    expect(running.asked).toEqual([{ op: "depth", depth: "all" }]);
+
+    // One depth is no choice: nothing to pick, and going ahead names none.
+    const single = card({ state: "waiting", plan: { ...plan, stretches: [], depths: [{ depth: "outline" as const, tokens: 300_000 }], recommended: { depth: "outline" as const, why: "" }, depth: "outline" as const } });
+    expect(found(single.tree, Seg)).toEqual([]);
+    press(single.tree, "Go ahead with the plan");
+    expect(single.asked).toEqual([{ op: "approve" }]);
   });
 });
 

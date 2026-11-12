@@ -6,7 +6,10 @@
 
 import { describe, expect, test } from "bun:test";
 import { HARNESS_LISTED, harnessTools } from "../../src/backend/agents/tools/harness";
-import { HARNESS_AGENT, harnessDefinitions, harnessRole, worldGuidance } from "../../src/backend/harness/definitions";
+import { HARNESS_AGENT, harnessDefinitions, harnessRole, READER_PROMPT_TOKENS, worldGuidance } from "../../src/backend/harness/definitions";
+import { defaultSettings } from "../../src/backend/settings-store";
+import { lumiahBed } from "../support/lumiah-bed";
+import { Rig } from "../support/rig";
 import { LUMIAH_FAMILY, LUMIAH_TOOL } from "../../src/backend/harness/definitions/lumiah";
 import type { AgentBudget, AgentDefinition } from "../../src/backend/harness/shapes";
 import { harnessSkills } from "../../src/backend/harness/skills";
@@ -117,16 +120,19 @@ describe("the cast the harness engine registers", () => {
     }
   });
 
-  test("a budget is a default of the definition's settings in LumiAH: only an answer's size, the rounds, the revisions and the calls at once are bounded", () => {
+  test("a budget is a default of the definition's settings in LumiAH: only an answer's size, the rounds, the revisions, the calls at once and, for the two that read whole, the prompt per call are bounded", () => {
     const unlimited = { callTokensIn: null, callMs: null, callTools: null, tokensIn: null, tokensOut: null, wallMs: null };
+    const readers: string[] = [HARNESS_AGENT.author, HARNESS_AGENT.historian];
     for (const agent of harnessDefinitions({}).agents) {
       const { callTokensOut, toolTurns, revisions, concurrency, ...rest } = agent.budget;
-      // Everything else is left to the user's own LumiAH settings: a limit set here would cap them without saying so.
-      expect({ id: agent.id, rest }).toEqual({ id: agent.id, rest: unlimited });
+      // Everything else is left to the user's own LumiAH settings: a limit set here would cap them without saying so. The author and the historian read whole, so their prompt stops inside a 200,000-token window.
+      expect({ id: agent.id, rest }).toEqual({ id: agent.id, rest: { ...unlimited, callTokensIn: readers.includes(agent.id) ? READER_PROMPT_TOKENS : null } });
       // The four are real bounds, and an answer has room for a reasoning model's thinking as well as what it writes.
       expect({ id: agent.id, bounded: [callTokensOut, toolTurns, revisions, concurrency].every((n) => typeof n === "number" && n >= 1) }).toEqual({ id: agent.id, bounded: true });
       expect({ id: agent.id, room: (callTokensOut ?? 0) >= 16_000 }).toEqual({ id: agent.id, room: true });
     }
+    // The author's answer room and a margin fit beside its prompt in a 200,000-token window.
+    expect(READER_PROMPT_TOKENS + (definition(HARNESS_AGENT.author).budget.callTokensOut ?? 0)).toBeLessThan(200_000);
     expect(harnessDefinitions({}).agents.map((a) => a.id).sort()).toEqual([...HARNESS_AGENT_IDS].sort());
     // Each read is its own copy: a caller that changes one changes no other read.
     const once = definition(HARNESS_AGENT.author);
@@ -134,6 +140,23 @@ describe("the cast the harness engine registers", () => {
     once.budget.toolTurns = 1;
     once.tools.push("nothing");
     expect([definition(HARNESS_AGENT.author).budget.toolTurns, definition(HARNESS_AGENT.author).tools.includes("nothing")]).toEqual([rounds, false]);
+  });
+
+  test("the prompt per call the author and the historian ship with is the user's to change: a version they save keeps its own, and the engine keeps its instructions", async () => {
+    const bed = lumiahBed(new Rig());
+    try {
+      const agents = async () => (await bed.page<{ agents: AgentDefinition[] }>("lah.defs.get", {})).agents;
+      const limit = async (id: string) => (await agents()).find((a) => a.id === id)?.budget.callTokensIn;
+      expect([await limit(HARNESS_AGENT.author), await limit(HARNESS_AGENT.historian)]).toEqual([READER_PROMPT_TOKENS, READER_PROMPT_TOKENS]);
+      // A larger model's window: the user saves their own version of the historian with a higher limit.
+      const historian = definition(HARNESS_AGENT.historian);
+      await bed.page("lah.agent.save", { agent: { ...historian, instructions: "Read nothing.", budget: { ...historian.budget, callTokensIn: 800_000 } } as unknown as JsonValue });
+      const saved = (await agents()).find((a) => a.id === HARNESS_AGENT.historian);
+      expect([saved?.budget.callTokensIn, saved?.instructions]).toEqual([800_000, historian.instructions]);
+      expect(await limit(HARNESS_AGENT.author)).toBe(READER_PROMPT_TOKENS);
+    } finally {
+      bed.close();
+    }
   });
 
   test("every name, description, instruction, skill and notebook page is a text of the Harness engine page, sent in the user's own words where they wrote them", () => {
@@ -180,7 +203,7 @@ describe("the cast the harness engine registers", () => {
       }
       walk(schema.items);
     };
-    for (const listed of harnessTools({ world, registry: rig.rt.registry, texts: {} })) walk(listed.parameters);
+    for (const listed of harnessTools({ world, registry: rig.rt.registry, settings: defaultSettings() })) walk(listed.parameters);
     // Every word written like a tool's name is a tool the harness lists, one of LumiAH's, an agent, a skill, or something a tool takes.
     const known = new Set<string>([...HARNESS_LISTED.map((t) => t.name), ...lumiah.tools, ...Object.values(HARNESS_AGENT), ...HARNESS_SKILL_IDS, ...taken, "after_reply", "to_reply", "next_turn"]);
     // A word is written like a tool's name when it starts as one does (gm_, item_, world_, mind_): the words of an example (old_mill) don't.

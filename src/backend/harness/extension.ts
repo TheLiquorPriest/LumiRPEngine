@@ -75,6 +75,7 @@ import type { HarnessHooks, TurnContext } from "../ledger-io";
 import { toChain } from "../ledger-io";
 import { knowledgeSwitch, postMindsInput, postOpening } from "../minds";
 import { renderPrompt } from "../prompts";
+import { defaultSettings } from "../settings-store";
 import type { Runtime } from "../runtime";
 import { inTurn, type TurnFrame } from "../turn-frame";
 import { clockMinutes } from "../view";
@@ -89,6 +90,7 @@ import { shapeNotebook } from "../story/notebook";
 import { directLineGuidance, narrationGuidance, releaseGate, releaseNoted } from "../story/narration";
 import { authorOpening } from "../story/opening";
 import { prepareEnv } from "../story/prepare";
+import { preparationRunEnded } from "../story/prepare-carry";
 import { presetParts, readStoryPreset, type StoryPresetRead, type StoryReader } from "../story/preset";
 
 /** Sovereign Hand as the harness's settings have it (`agents.harness.sovereignHand`), as the claim's word on whose messages are the chat's story. */
@@ -660,12 +662,12 @@ export class HarnessEngine implements HarnessHooks {
    * outside a world chat on the harness still answers that no turn is open.
    */
   private async list(chatId: string, told = ""): Promise<RemoteTool[]> {
-    if (chatId === "") return harnessTools({ world: blankWorld("catalogue", ""), registry: this.rt.registry, texts: told !== "" ? (await this.rt.settings.get(told)).prompts.texts : {} });
+    if (chatId === "") return harnessTools({ world: blankWorld("catalogue", ""), registry: this.rt.registry, settings: told !== "" ? await this.rt.settings.get(told) : defaultSettings() });
     const userId = await this.userOf(chatId, told);
     if (!userId || (await this.rt.chatKnowledge.engine(chatId, userId)) !== "harness") return [];
     const head = await chatHead(this.rt, chatId, userId);
     if (!head) return [];
-    return harnessTools({ world: head.world, registry: this.rt.registry, texts: (await this.rt.settings.get(userId)).prompts.texts });
+    return harnessTools({ world: head.world, registry: this.rt.registry, settings: await this.rt.settings.get(userId) });
   }
 
   /**
@@ -921,7 +923,8 @@ export class HarnessEngine implements HarnessHooks {
    * stands, and the turn commits as its generation stops (`TurnContext.stopped`). The jobs its
    * agents started belong to that record. A job's run stays known when it ends (`sides`): a job its
    * agents started is held to where they stood, and a run of it started again goes on as the same
-   * agents.
+   * agents. A run of the story's preparation is carried on in a new run, or stopped with why
+   * (`preparationRunEnded`), and nothing waits for that.
    */
   private async runEnded(run: RunEnded): Promise<void> {
     if (run.kind === "side") {
@@ -929,7 +932,13 @@ export class HarnessEngine implements HarnessHooks {
       this.sideEnded?.(run);
       return;
     }
-    if (run.kind === "job") return;
+    if (run.kind === "job") {
+      const known = this.jobs.get(run.turn);
+      if (known !== undefined && known.plan !== PREPARE_PATH) return;
+      const userId = await this.userOf(run.chatId, run.userId);
+      if (userId) void preparationRunEnded(this.rt, { chatId: run.chatId, userId, job: run.turn }).catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] chat ${run.chatId}: the story's preparation wasn't carried on after its run ended (${error instanceof Error ? error.message : String(error)})`, userId));
+      return;
+    }
     // Named by the turn's record alone, a job has its turn and no one who started it: `jobKnown` says who.
     for (const job of run.record?.jobs ?? []) if (!this.jobs.has(job.id)) this.remember(this.jobs, job.id, { basis: run.turn, by: null, parent: null, due: null, plan: null });
     const stands = run.status === "done" || (run.status === "stopped" && run.reply.trim() !== "");

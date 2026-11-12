@@ -27,6 +27,7 @@ import type { LiveChange, LiveView } from "./live";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
 import type { AdjudicationDef, FacetId, FacetValueId, FeedScope, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, SectionFeed, StepPurpose, WorldDoc, WorldIndex } from "./world";
 import type { GM_OUTLINE, GmPartReply, GmReadPart, QueuedOn } from "./gm-parts";
+import type { PrepareLiveView } from "./prepare-live";
 import type { PrepareAsk, PrepareView, StoryAnswer, StoryAsk } from "./story-pages";
 
 export const PROTOCOL_VERSION = 1;
@@ -1195,6 +1196,9 @@ export type StoryRequest = Request<"lre.story"> & { chatId: ChatId } & StoryAsk;
 /** The prepared start on Play → Now (`backend/story/prepare.ts`): read it, start it, give the plan the player's word, steer it, cap it, hold it, carry it on, cancel it. */
 export type PrepareRequest = Request<"lre.prepare"> & { chatId: ChatId } & PrepareAsk;
 
+/** The prepared start as it runs, for the live view in Play → Now's card (`backend/story/prepare-live.ts`): a read only, from the preparation's file, the jobs and the list of the chat's files, never the chat itself; asked again every few seconds while a run of it is under way. */
+export type PrepareLiveRequest = Request<"lre.prepareLive"> & { chatId: ChatId };
+
 // ---------------------------------------------------------------- an agent turn's review card (INC2-SPEC C13)
 
 /**
@@ -1279,7 +1283,8 @@ export type FrontendToBackend =
   | PromptsRequest
   | LiveRequest
   | StoryRequest
-  | PrepareRequest;
+  | PrepareRequest
+  | PrepareLiveRequest;
 
 // ---------------------------------------------------------------- responses (backend → frontend)
 
@@ -1412,6 +1417,8 @@ export interface ResultBodies {
   "lre.story": StoryAnswer;
   /** Every op: the prepared start as it stands after it. */
   "lre.prepare": PrepareView;
+  /** The preparation as it runs (`prep` null: none to show), and whether the page asks again. */
+  "lre.prepareLive": PrepareLiveView;
 }
 
 export type ResultMessage = {

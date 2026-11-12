@@ -26,8 +26,7 @@ import { HARNESS_DESCRIBED } from "../../../shared/harness-texts-surfaces";
 import { hashJson, hashParts } from "../../../shared/hash";
 import { hasOwn, type JsonObject, type JsonValue } from "../../../shared/json";
 import { neutralizeMacros } from "../../../shared/macros";
-import type { PromptTexts } from "../../../shared/prompts";
-import { CHANGE_TYPES } from "../../../shared/settings";
+import { CHANGE_TYPES, type UserSettings } from "../../../shared/settings";
 import type { WorldDoc } from "../../../shared/world";
 import { authorLines } from "../../../engine/player-events";
 import type { Registry } from "../../../engine/registry-impl";
@@ -92,6 +91,8 @@ export interface HarnessListed {
 interface Entry extends HarnessListed {
   args: readonly { path: string }[];
   parameters(world: WorldDoc): JsonObject;
+  /** What of its answer reaches the model whole under the player's settings (`HarnessToolDefinition.wholeChars`); absent: LumiAH's Tool results clipped past. */
+  wholeChars?: (settings: UserSettings) => number;
   run: Run;
 }
 
@@ -131,7 +132,7 @@ export const HARNESS_OWN_NEEDS: ReadonlyMap<string, HarnessNeeds> = new Map(
 const ENTRIES: readonly Entry[] = [
   // An argument below the top level that the old engines leave to the description above it is described here too (`NESTED_ARG_TEXTS`): on the harness every argument has a text of its own.
   ...TOOL_DEFINITIONS.filter((def) => !hasOwn(HARNESS_SUPERSEDED, def.name)).map((def): Entry => ({ name: def.name, family: def.family, tier: def.tier === "read" ? "read" : "write", writer: def.tier, needs: def.tier, args: [...(toolText(def.name)?.args ?? []), ...NESTED_ARG_TEXTS.filter((a) => a.tool === def.name)], parameters: (world) => def.parameters(world), run: (args, env) => def.run(args, env) })),
-  ...HARNESS_TOOL_DEFINITIONS.map((def): Entry => ({ name: def.name, family: def.family, tier: def.tier, writer: null, needs: HARNESS_OWN_NEEDS.get(def.name) ?? (def.tier === "read" ? "read" : "gm"), args: harnessToolText(def.name)?.args ?? [], parameters: (world) => def.parameters(world), run: (args, env) => def.run(args, env) })),
+  ...HARNESS_TOOL_DEFINITIONS.map((def): Entry => ({ name: def.name, family: def.family, tier: def.tier, writer: null, needs: HARNESS_OWN_NEEDS.get(def.name) ?? (def.tier === "read" ? "read" : "gm"), args: harnessToolText(def.name)?.args ?? [], parameters: (world) => def.parameters(world), ...(def.wholeChars ? { wholeChars: def.wholeChars } : {}), run: (args, env) => def.run(args, env) })),
 ];
 
 /** Every tool the harness lists: the old engines' own that it keeps, then the harness engine's. An agent definition is given its tools from these (`backend/harness/definitions`). */
@@ -140,15 +141,17 @@ export const HARNESS_LISTED: readonly HarnessListed[] = ENTRIES.map(({ name, fam
 const RUNNERS: ReadonlyMap<string, Run> = new Map(ENTRIES.map((e) => [e.name, e.run]));
 
 /**
- * The tools that run in RPEngine, as the harness lists them for a chat of `world`: each with its
- * family, its tier, its description and its arguments' in `texts`, and its schema filled from the
- * world as an agent may name it (`schemaWorld`).
+ * The tools that run in RPEngine, as the harness lists them for a chat of `world` under the
+ * player's `settings`: each with its family, its tier, its description and its arguments' in the
+ * player's texts, its schema filled from the world as an agent may name it (`schemaWorld`), and,
+ * for a tool read whole, how much of its answer reaches the model so.
  */
-export function harnessTools(input: { world: WorldDoc; registry: Registry; texts: PromptTexts }): RemoteTool[] {
-  const { texts } = input;
+export function harnessTools(input: { world: WorldDoc; registry: Registry; settings: UserSettings }): RemoteTool[] {
+  const { settings } = input;
+  const { texts } = settings.prompts;
   const world = schemaWorld(input.world, input.registry);
   // A tool of the old engines' that works otherwise here is described for the harness in a text of its own (`HARNESS_DESCRIBED`): what those engines send stays theirs.
-  return ENTRIES.map((e): RemoteTool => ({ name: e.name, family: e.family, tier: e.tier, description: renderPrompt(hasOwn(HARNESS_DESCRIBED, e.name) ? HARNESS_DESCRIBED[e.name] : toolTextId(e.name), texts, {}), parameters: describedSchema(e.name, e.args, e.parameters(world), texts), source: "extension" }));
+  return ENTRIES.map((e): RemoteTool => ({ name: e.name, family: e.family, tier: e.tier, description: renderPrompt(hasOwn(HARNESS_DESCRIBED, e.name) ? HARNESS_DESCRIBED[e.name] : toolTextId(e.name), texts, {}), parameters: describedSchema(e.name, e.args, e.parameters(world), texts), ...(e.wholeChars ? { wholeChars: e.wholeChars(settings) } : {}), source: "extension" }));
 }
 
 /**

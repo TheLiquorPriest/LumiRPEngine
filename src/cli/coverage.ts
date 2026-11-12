@@ -199,5 +199,8 @@ export const COVERAGE: Coverage = {
     pause: { excluded: "The player holding the preparation, pressed on Play → Now; an outside agent holds no job." },
     resume: { excluded: "The player carrying the preparation on, pressed on Play → Now; an outside agent resumes no job." },
     cancel: { excluded: "The player stopping the preparation, pressed on Play → Now; an outside agent cancels no job." },
+    restart: { excluded: "The player's Start over on Play → Now: the preparation planned afresh, a job of the author's that spends their tokens; never an outside agent's." },
+    depth: { excluded: "How deep the player has the story prepared, chosen on Play → Now with each depth's cost; a deeper one starts the author's job again, spending their tokens; never an outside agent's." },
   },
+  "lre.prepareLive": { excluded: "The preparation as it runs, the live view in Play → Now's card that the page asks for every few seconds while a run of it works; an outside agent watches no preparation." },
 };

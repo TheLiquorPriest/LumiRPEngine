@@ -18,6 +18,7 @@ import type { LedgerCore } from "../../engine/ledger/journal";
 import { activeRecord } from "../../engine/ledger/path";
 import { castOn, recStoryOf, type StoryPart, type StoryPath, type StoryRecordAt, storedStory, walkStory, withStory } from "../../engine/story/record";
 import { turnRecord } from "../harness/record";
+import type { HostMessage } from "../host";
 import { type LedgerService, toChain } from "../ledger-io";
 import type { Runtime } from "../runtime";
 
@@ -91,11 +92,11 @@ function basisIn(chain: readonly ChainMessage[], core: LedgerCore): DraftBasis |
   return last ? { messageId: last.id, swipeId: last.swipeId } : null;
 }
 
-/** The chat's ledger and its messages as they stand, read without the ledger's queue; null for a chat that plays no world. */
-async function chatNow(rt: StoryRuntime, chatId: ChatId, userId: UserId): Promise<{ core: LedgerCore; observed: ChainMessage[] } | null> {
+/** The chat's ledger and its messages as they stand (from `messages` where given: a job's kept read of the chat, which a change ends), read without the ledger's queue; null for a chat that plays no world. */
+async function chatNow(rt: StoryRuntime, chatId: ChatId, userId: UserId, messages?: () => Promise<readonly HostMessage[]>): Promise<{ core: LedgerCore; observed: ChainMessage[] } | null> {
   const run = await rt.runOf(chatId, userId);
   const core = run ? await rt.ledger.core(chatId, userId) : null;
-  return core ? { core, observed: toChain(await rt.host.chats.messages(chatId, userId)) } : null;
+  return core ? { core, observed: toChain(await (messages ? messages() : rt.host.chats.messages(chatId, userId))) } : null;
 }
 
 /**
@@ -179,14 +180,15 @@ function replyOf(chain: readonly ChainMessage[], core: LedgerCore, which: "first
  * first (`first`), for the story's prepared start, whose past beats, castings and marks of what each
  * mind took in must stay on every path through the chat, whatever is swiped or regenerated later; the
  * newest (`last`), for any other job the player started. `turn`: the id the run's beats are written
- * under (`Beat.turn`).
+ * under (`Beat.turn`). `messages`: where a job's run reads the chat's messages, kept until the chat
+ * changes (`chatRead`); else the engine's host as it stands.
  */
-export function chatStoryPort(rt: StoryRuntime, at: { chatId: ChatId; userId: UserId; turn: string; on: "first" | "last" }): StoryPort {
+export function chatStoryPort(rt: StoryRuntime, at: { chatId: ChatId; userId: UserId; turn: string; on: "first" | "last"; messages?: () => Promise<readonly HostMessage[]> }): StoryPort {
   return {
     turn: at.turn,
     staged: false,
     async read() {
-      const now = await chatNow(rt, at.chatId, at.userId);
+      const now = await chatNow(rt, at.chatId, at.userId, at.messages);
       if (!now) return null;
       const { core, observed } = now;
       const chain = core.chain(observed);

@@ -13,10 +13,11 @@
 
 import { AUTHOR_FILE, HARNESS_NOTE } from "../../../../shared/harness-texts";
 import { HARNESS_FAMILY } from "../../../../shared/harness-text-kit";
-import { PREPARE_NOTE, PREPARE_PATH, PREPARE_TOOL } from "../../../../shared/harness-texts-prepare";
+import { PREPARE_NOTE, PREPARE_PATH, PREPARE_STORY, PREPARE_TOOL } from "../../../../shared/harness-texts-prepare";
 import { RECORD_NOTE } from "../../../../shared/harness-texts-record";
 import { hashParts } from "../../../../shared/hash";
 import { isRecord, type JsonObject, type JsonValue } from "../../../../shared/json";
+import { PREPARE_DEPTHS, type PrepareDepth } from "../../../../shared/story-pages";
 import { BEAT_KINDS, BEAT_REACHES, type Beat, type Exposure } from "../../../../shared/ledger";
 import { loreSourceOf } from "../../../../shared/lore";
 import { calendarOf, clockOfStamp, formatStamp, placeOffset } from "../../../../engine/calendar";
@@ -26,9 +27,12 @@ import { beatProblem, type StoryProblemCode } from "../../../../engine/story/che
 import { storyName } from "../../../../engine/story/feed";
 import type { StoryPath } from "../../../../engine/story/record";
 import { readSlice } from "../../../../packs/minds/core/state";
+import { bookEntryTitle } from "../../../book-lore";
+import { type ChatRead, chatRead } from "../../../chat-read";
 import type { HostBookEntry, HostMessage } from "../../../host";
+import { renderPrompt } from "../../../prompts";
 import { mindPath } from "../../../story/minds";
-import { byNumber, CALL_NOTE, callWeight, chatKind, estimateOf, messageTokens, planStretches, preparationLeft, type PrepareFile, type PrepareState, type PrepareStretch, readPrepare, reachedBy, reckonLeft, relivingNow, spanOf, type StretchAsked, stretchMessages, stretchStands, type Updated, updatePrepare, waits, wordFor } from "../../../story/prepare";
+import { CALL_NOTE, callWeight, chatKind, DEPTH_NOTE, depthOf, depthsOffered, estimateOf, logPrepare, messageTokens, planned, planStretches, preparationLeft, type PrepareFile, type PrepareState, type PrepareStretch, readPrepare, reachedBy, reckonLeft, relivingNow, spanOf, stillToRelive, type StretchAsked, stretchMessages, stretchStands, SURVEY_PARTS, unanswered, unplanned, type Updated, updatePrepare, waits, withRelived, within, wordFor } from "../../../story/prepare";
 import type { StoryRefusal } from "../../../story/record";
 import type { ToolOutcome } from "../../runtime";
 import type { HarnessFiles } from "../harness-ports";
@@ -50,10 +54,33 @@ async function prepared(env: ToolEnv): Promise<{ view: ToolReadView; turn: Harne
   return { view, turn: env.turn, files: env.files };
 }
 
-/** The preparation as its file holds it; or the answer for a file with no plan, or one whose record can't be read. */
-function planIn(view: ToolReadView, file: PrepareFile): PrepareState | ToolOutcome {
+/** How a tool that reads nothing of the chat answers: as a view does, in the user's own words. */
+type Words = Pick<ToolReadView, "answer" | "refuse" | "text">;
+
+/** What a preparing tool that reads only the file works with: the call's turn, the chat's workspace, and its words; or the answer that says which is missing. */
+async function preparedWords(env: ToolEnv): Promise<{ words: Words; turn: HarnessTurn; files: HarnessFiles } | ToolOutcome> {
+  if (!env.turn) return (await env.reader.view()).refuse(HARNESS_NOTE.noTurn);
+  const { texts } = env.turn.settings.prompts;
+  const words: Words = { answer: (value) => ({ text: JSON.stringify(value) }), refuse: (id, vars = {}) => ({ text: renderPrompt(id, texts, vars), error: true }), text: (id, vars = {}) => renderPrompt(id, texts, vars) };
+  if (!env.files) return words.refuse(PREPARE_NOTE.noFiles);
+  return { words, turn: env.turn, files: env.files };
+}
+
+/** The chat as the call reads it: the run's read of it, kept until the chat changes (`chatRead`). */
+function chatOf(env: ToolEnv, turn: HarnessTurn): Promise<ChatRead> {
+  return chatRead(turn.host, env, turn.settings.agents.kept.chatMs);
+}
+
+/** The preparation as its file holds it; or the answer for a file with no plan yet (it may hold only what the player said before one), or one whose record can't be read. */
+function planIn(view: Pick<ToolReadView, "refuse">, file: PrepareFile): PrepareState | ToolOutcome {
   if (file.damaged) return view.refuse(PREPARE_NOTE.damaged);
-  return file.state ?? view.refuse(PREPARE_NOTE.noPlan);
+  return file.state !== null && planned(file.state) ? file.state : view.refuse(PREPARE_NOTE.noPlan);
+}
+
+/** The answer while the player told the author something it hasn't answered: the plan is written again first; null where there is nothing. */
+function wordsFirst(view: Pick<ToolReadView, "refuse">, state: PrepareState): ToolOutcome | null {
+  const open = unanswered(state);
+  return open.length === 0 ? null : view.refuse(PREPARE_NOTE.unanswered, { said: quoted(open) });
 }
 
 /** Story time `at` as the tools write a time: YYYY-MM-DD HH:MM in the world's calendar, at the player character's place. */
@@ -100,13 +127,21 @@ function writtenOr(view: ToolReadView, out: Updated<ToolOutcome>): PrepareState 
 
 const PARTS = ["chat", "summaries", "lore", "world", "engine"] as const;
 
-/** A summary LumiBooks keeps in a World Info book: its level, its title, and the messages it spans, with the id lore_read takes. */
+/** A summary's level, the highest first: LumiBooks' volumes, arcs and chapters, then any other entry titled as a summary. */
+const LEVELS = ["volume", "arc", "chapter", "other"] as const;
+type Level = (typeof LEVELS)[number];
+
+/** The letter a summary's id in the survey starts with, by its level. */
+const LEVEL_MARK: Readonly<Record<Level, string>> = { volume: "v", arc: "a", chapter: "c", other: "o" };
+
+/** A summary of the story in the chat's World Info books: its id in the survey (its level's letter and its place in the story's order, c12), its book entry, its level and title, the messages it spans (none for one LumiBooks doesn't mark), and its text as the view may give it. */
 interface Summary {
   id: string;
-  level: "volume" | "arc" | "chapter";
+  entry: string;
+  level: Level;
   title: string;
-  from: number;
-  to: number;
+  span: { from: number; to: number } | null;
+  text: string;
 }
 
 /** "msgs 31-40" in a LumiBooks entry's comment: counted from 1. */
@@ -114,8 +149,8 @@ const MSGS = /\bmsgs?\s+(\d+)\s*[-–]\s*(\d+)/i;
 /** A title that names a summary of the story, where no LumiBooks mark says so. */
 const SUMMARY_TITLE = /\b(summary|summaries|recap|story so far|previously)\b/i;
 
-/** A LumiBooks summary, as its entry's marks say it (`lumibooks_summary`, `lumibooks`, or its comment's message numbers); null for an entry that isn't one. */
-function summaryOf(entry: HostBookEntry): Summary | null {
+/** A LumiBooks summary's level, title and span, as its entry's marks say them (`lumibooks_summary`, `lumibooks`, or its comment's message numbers); null for an entry that isn't one. */
+function lumibooksOf(entry: HostBookEntry): { level: Exclude<Level, "other">; title: string; span: { from: number; to: number } } | null {
   const marks = isRecord(entry.extensions.lumibooks_summary) ? entry.extensions.lumibooks_summary : null;
   const shelf = isRecord(entry.extensions.lumibooks) ? entry.extensions.lumibooks : null;
   if (marks === null && shelf === null) return null;
@@ -129,16 +164,48 @@ function summaryOf(entry: HostBookEntry): Summary | null {
   const range: [number, number] | null =
     indices.length > 0 ? [Math.min(...indices), Math.max(...indices)] : typeof first === "number" && typeof last === "number" && first <= last ? [first, last] : said ? [Number(said[1]) - 1, Number(said[2]) - 1] : null;
   if (range === null || range[0] < 0 || range[1] < range[0]) return null;
-  return { id: `${entry.bookId}/${entry.id}`, level, title: comment || (typeof shelf?.title === "string" ? shelf.title : "") || entry.id, from: range[0], to: range[1] };
+  return { level, title: comment || (typeof shelf?.title === "string" ? shelf.title : "") || entry.id, span: { from: range[0], to: range[1] } };
+}
+
+/**
+ * The summaries of the story in the chat's World Info books, read from the entries as the books
+ * hold them, an entry switched off in its book among them (LumiBooks keeps many of its summaries
+ * so): each LumiBooks level in the story's order, then any other entry titled as a summary, in its
+ * book's order. Their text is what the view may give of it.
+ */
+function summariesOf(view: ToolReadView, entries: readonly HostBookEntry[]): Summary[] {
+  const read = entries.map((e) => ({ e, marked: lumibooksOf(e) }));
+  const marked = read.flatMap(({ e, marked: m }) => (m ? [{ e, ...m }] : [])).sort((a, b) => a.span.from - b.span.from || b.span.to - a.span.to);
+  const others = read.filter(({ e, marked: m }) => m === null && SUMMARY_TITLE.test(e.comment)).map(({ e }) => ({ e, level: "other" as const, title: e.comment.trim(), span: null }));
+  return LEVELS.flatMap((level) => (level === "other" ? others : marked.filter((s) => s.level === level)).map((s, i) => ({ id: `${LEVEL_MARK[level]}${i + 1}`, entry: `${s.e.bookId}/${s.e.id}`, level, title: s.title, span: s.span, text: view.entryText(s.e.content) })));
+}
+
+/** A summary as an answer gives it: its id, level, title, the messages it spans, and its whole text. */
+function summaryItem(s: Summary): JsonObject {
+  return { id: s.id, level: s.level, title: s.title, ...(s.span ? { messages: spanOf(s.span) } : {}), text: s.text };
+}
+
+/** As many of `items`, in order, as fit in `room` characters given as `shown` makes each, each whole; and how many that was. */
+function fitting<T>(items: readonly T[], room: number, shown: (item: T) => JsonValue): { kept: JsonValue[]; count: number } {
+  const kept: JsonValue[] = [];
+  let used = 0;
+  for (const item of items) {
+    const value = shown(item);
+    const size = JSON.stringify(value).length + 1;
+    if (used + size > room) break;
+    kept.push(value);
+    used += size;
+  }
+  return { kept, count: kept.length };
 }
 
 /** The chat's messages no summary spans, as runs of numbers. */
-function uncovered(messages: readonly HostMessage[], summaries: readonly Summary[]): string[] {
+function uncovered(messages: readonly HostMessage[], spans: readonly { from: number; to: number }[]): string[] {
   const runs: string[] = [];
   let start: number | null = null;
   let previous: number | null = null;
   for (const m of [...messages].sort((a, b) => a.index - b.index)) {
-    const covered = summaries.some((s) => s.from <= m.index && m.index <= s.to);
+    const covered = spans.some((s) => s.from <= m.index && m.index <= s.to);
     if (!covered && start === null) start = m.index;
     if (covered && start !== null && previous !== null) {
       runs.push(`#${start} to #${previous}`);
@@ -150,57 +217,173 @@ function uncovered(messages: readonly HostMessage[], summaries: readonly Summary
   return runs;
 }
 
-async function survey(view: ToolReadView, env: ToolEnv, turn: HarnessTurn, files: HarnessFiles, part: string | null): Promise<JsonObject> {
-  const want = (p: (typeof PARTS)[number]): boolean => part === null || part === p;
-  const out: JsonObject = {};
-  const messages = want("chat") || want("summaries") ? await turn.host.chats.messages(env.chatId, env.userId) : [];
-  if (want("chat")) {
-    const players = messages.filter((m) => m.isUser).length;
-    const numbers = messages.map((m) => m.index);
-    out.chat = { messages: messages.length, ...(numbers.length > 0 ? { first: `#${Math.min(...numbers)}`, last: `#${Math.max(...numbers)}` } : {}), player: players, replies: messages.length - players, tokens: messages.reduce((sum, m) => sum + messageTokens(m.content), 0), kind: chatKind(messages) };
-  }
-  const entries = want("summaries") || want("lore") ? await view.bookEntries() : [];
-  if (want("summaries")) {
-    const lumibooks = entries.flatMap((e) => summaryOf(e) ?? []).sort((a, b) => a.from - b.from || b.to - a.to);
-    const others = entries.filter((e) => summaryOf(e) === null && SUMMARY_TITLE.test(e.comment)).map((e) => ({ id: `${e.bookId}/${e.id}`, title: e.comment.trim() }));
-    out.summaries = { lumibooks: lumibooks.map((s) => ({ id: s.id, level: s.level, title: s.title, messages: spanOf(s) })), ...(lumibooks.length > 0 ? { notCovered: uncovered(messages, lumibooks) } : {}), others };
-  }
-  if (want("lore")) {
-    const authored = Object.values((await view.lore()).lore).filter((e) => loreSourceOf(e.source).kind !== "book").length;
-    const names = new Map((await turn.host.books.list(env.userId)).map((b) => [b.id, b.name]));
-    const counts = new Map<string, { entries: number; summaries: number }>();
-    for (const e of entries) {
-      const held = counts.get(e.bookId) ?? { entries: 0, summaries: 0 };
-      counts.set(e.bookId, { entries: held.entries + 1, summaries: held.summaries + (summaryOf(e) === null ? 0 : 1) });
-    }
-    out.lore = { world: authored, books: [...counts].map(([id, c]) => ({ book: names.get(id) ?? id, entries: c.entries, summaries: c.summaries })) };
-  }
-  if (want("world")) {
-    const people = Object.keys(view.state.entities)
-      .filter((id) => view.isPerson(id) && view.seesEntity(id) && !isGone(view.state, id))
-      .map((id) => {
-        const at = placeOfEntity(view.state, id);
-        return { id, name: view.entity(id)?.name ?? id, ...(at ? { at: view.place(at)?.name ?? at } : {}), ...(id === view.pov ? { player: true } : {}) };
-      });
-    out.world = { player: { id: view.pov, name: nameOf(view, "player") }, people, places: Object.keys(view.world.places).length };
-  }
-  if (want("engine")) {
-    const read = turn.story ? await turn.story.read() : null;
-    const listed = await files.list("");
-    const minds = listed.flatMap((f) => {
-      const folder = /(?:^|\/)minds\/([^/]+)\/core\.md$/.exec(f.path)?.[1];
-      return folder === undefined ? [] : [decodeURIComponent(folder)];
-    });
-    const file = await readPrepare(files);
-    out.engine = {
-      now: stampOf(view, view.state.clock),
-      ...(read ? { cast: read.path.cast.map((c) => ({ id: c.entity, name: nameOf(view, c.entity), standing: c.standing })), beats: { all: read.path.beats.length, past: read.path.beats.filter((b) => b.beat.past !== undefined).length } } : {}),
-      minds: minds.map((id) => ({ id, name: nameOf(view, id) })),
-      olderMinds: Object.keys(readSlice(view.state).chars).map((id) => ({ id, name: nameOf(view, id) })),
-      preparation: file.damaged ? "damaged" : file.state === null ? "none" : file.state.done !== null ? "done" : waits(file.state) ? "waits for the player's word" : "under way",
-    };
+/** The spans the summaries cover, merged where they touch or overlap, in the chat's order. */
+function coveredBy(spans: readonly { from: number; to: number }[]): { from: number; to: number }[] {
+  const out: { from: number; to: number }[] = [];
+  for (const s of [...spans].sort((a, b) => a.from - b.from)) {
+    const last = out.at(-1);
+    if (last && s.from <= last.to + 1) last.to = Math.max(last.to, s.to);
+    else out.push({ ...s });
   }
   return out;
+}
+
+/** The summaries left out for size, each level's as a run of ids and the messages they span. */
+function leftOutText(left: readonly Summary[]): string {
+  return LEVELS.flatMap((level) => {
+    const at = left.filter((s) => s.level === level).sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
+    const first = at[0];
+    const last = at.at(-1);
+    if (!first || !last) return [];
+    const ids = first === last ? first.id : `${first.id} to ${last.id}`;
+    return [first.span && last.span ? `${level} ${ids} (${spanOf({ from: first.span.from, to: last.span.to })})` : `${level} ${ids}`];
+  }).join("; ");
+}
+
+/** What a call of the survey asks beyond its part. */
+interface SurveyAsk {
+  part: (typeof PARTS)[number] | null;
+  level: Level | null;
+  from: number | null;
+  to: number | null;
+  summary: string | null;
+  book: string | null;
+}
+
+/**
+ * The summaries part: one summary whole (`summary`); one level's in the story's order within a span
+ * of messages, as many as fit, and where to read on (`level`, `from`, `to`); else the story so far,
+ * the highest level first and the lower levels newest first, as many as fit, with what was left out
+ * and how to read it. Where the books hold no summary, how to read the chat in outline instead.
+ */
+function summariesPart(view: ToolReadView, all: readonly Summary[], messages: readonly HostMessage[], size: number, ask: SurveyAsk): JsonObject | ToolOutcome {
+  if (ask.summary !== null) {
+    const one = all.find((s) => s.id === ask.summary || s.entry === ask.summary);
+    return one ? { summary: summaryItem(one) } : view.refuse(PREPARE_NOTE.surveyNoSummary, { id: ask.summary });
+  }
+  if (all.length === 0) return { none: true, note: view.text(PREPARE_NOTE.surveyNone) };
+  const end = view.text(PREPARE_NOTE.surveyEnd);
+  if (ask.level !== null) {
+    const level = all.filter((s) => s.level === ask.level);
+    const from = ask.from ?? 0;
+    const asked = level.filter((s, i) => (s.span === null ? i + 1 >= Math.max(1, from) : s.span.to >= from && (ask.to === null || s.span.from <= ask.to)));
+    const more = view.text(PREPARE_NOTE.surveyMore, { next: "0000000" });
+    const { kept, count } = fitting(asked, size - more.length - 64, summaryItem);
+    const next = asked[count];
+    return { summaries: kept, note: next === undefined ? end : view.text(PREPARE_NOTE.surveyMore, { next: String(next.span ? next.span.from : level.indexOf(next) + 1) }) };
+  }
+  const order = LEVELS.flatMap((level) => all.filter((s) => s.level === level).reverse());
+  const lead = view.text(PREPARE_NOTE.surveyOrder, { size: size.toLocaleString("en-US") });
+  const notCovered = uncovered(
+    messages,
+    all.flatMap((s) => (s.span ? [s.span] : [])),
+  );
+  const frame = JSON.stringify({ order: lead, notCovered, leftOut: view.text(PREPARE_NOTE.surveyLeft, { left: leftOutText(order) }) }).length + 64;
+  const { kept, count } = fitting(order, size - frame, summaryItem);
+  const left = order.slice(count);
+  return { order: lead, summaries: kept, ...(notCovered.length > 0 ? { notCovered } : {}), ...(left.length > 0 ? { leftOut: view.text(PREPARE_NOTE.surveyLeft, { left: leftOutText(left) }) } : { note: end }) };
+}
+
+/** The lore part: the world's own entries and each World Info book the chat reads, with its size and how many of its entries are always on; or one book's entries (`book`), those always on first, each whole, as many as fit from `from`. Summaries are left to their own part. */
+async function lorePart(view: ToolReadView, env: ToolEnv, turn: HarnessTurn, entries: readonly HostBookEntry[], size: number, ask: SurveyAsk): Promise<JsonObject | ToolOutcome> {
+  const names = new Map((await turn.host.books.list(env.userId)).map((b) => [b.id, b.name]));
+  const books = [...new Set(entries.map((e) => e.bookId))];
+  if (ask.book !== null) {
+    const wanted = ask.book.trim().toLowerCase();
+    const id = books.find((b) => b === ask.book || (names.get(b) ?? "").trim().toLowerCase() === wanted);
+    if (id === undefined) return view.refuse(PREPARE_NOTE.surveyNoBook, { book: ask.book });
+    const own = entries.filter((e) => e.bookId === id && e.content.trim() !== "" && lumibooksOf(e) === null && !SUMMARY_TITLE.test(e.comment));
+    const ordered = [...own.filter((e) => e.constant), ...own.filter((e) => !e.constant)];
+    const start = Math.max(1, ask.from ?? 1);
+    const more = view.text(PREPARE_NOTE.surveyMore, { next: "0000000" });
+    const { kept, count } = fitting(ordered.slice(start - 1), size - more.length - 128, (e) => ({ title: bookEntryTitle(e), ...(e.constant ? { alwaysOn: true } : {}), ...(e.disabled ? { switchedOff: true } : {}), text: view.entryText(e.content) }));
+    const next = start + count;
+    return { book: names.get(id) ?? id, entries: ordered.length, from: start, read: kept, note: next <= ordered.length ? view.text(PREPARE_NOTE.surveyMore, { next: String(next) }) : view.text(PREPARE_NOTE.surveyEnd) };
+  }
+  const authored = Object.values((await view.lore()).lore).filter((e) => loreSourceOf(e.source).kind !== "book").length;
+  const listed = books.map((id) => {
+    const own = entries.filter((e) => e.bookId === id);
+    return { book: names.get(id) ?? id, entries: own.length, alwaysOn: own.filter((e) => e.constant && !e.disabled).length, switchedOff: own.filter((e) => e.disabled).length, summaries: own.filter((e) => lumibooksOf(e) !== null).length, chars: own.reduce((sum, e) => sum + e.content.length, 0) };
+  });
+  return { world: authored, books: listed, note: view.text(PREPARE_NOTE.surveyBooks) };
+}
+
+/** The world part: the player's character, the world's people as many as fit from `from`, each with where they are, and how many places there are. */
+function worldPart(view: ToolReadView, size: number, ask: SurveyAsk): JsonObject {
+  const people = Object.keys(view.state.entities)
+    .filter((id) => view.isPerson(id) && view.seesEntity(id) && !isGone(view.state, id))
+    .map((id) => {
+      const at = placeOfEntity(view.state, id);
+      return { id, name: view.entity(id)?.name ?? id, ...(at ? { at: view.place(at)?.name ?? at } : {}), ...(id === view.pov ? { player: true } : {}) };
+    });
+  const start = Math.max(1, ask.from ?? 1);
+  const { kept, count } = fitting(people.slice(start - 1), size - 256, (p) => p);
+  const next = start + count;
+  return { player: { id: view.pov, name: nameOf(view, "player") }, people: kept, of: people.length, places: Object.keys(view.world.places).length, note: next <= people.length ? view.text(PREPARE_NOTE.surveyMore, { next: String(next) }) : view.text(PREPARE_NOTE.surveyEnd) };
+}
+
+/** The chat part: how long the chat is, its first and last message, who wrote how many, its tokens (counted once for the read), and whether it has a history. */
+function chatPart(chat: ChatRead): JsonObject {
+  const { messages, players } = chat;
+  const first = messages[0];
+  const last = messages.at(-1);
+  return { messages: messages.length, ...(first && last ? { first: `#${first.index}`, last: `#${last.index}` } : {}), player: players, replies: messages.length - players, tokens: chat.tokens(messageTokens), kind: chatKind(messages) };
+}
+
+/** How the preparation stands, in the survey's and the status's words. */
+function standing(file: PrepareFile): string {
+  if (file.damaged) return "damaged";
+  if (file.state === null) return "none";
+  if (!planned(file.state)) return "no plan yet";
+  return file.state.done !== null ? "done" : waits(file.state) ? "waits for the player's word" : "under way";
+}
+
+/**
+ * What the survey answers: without a part, what there is in outline (counts and how to read each
+ * part), else the part asked for, each within the player's size for an answer of the survey.
+ */
+async function survey(view: ToolReadView, env: ToolEnv, turn: HarnessTurn, files: HarnessFiles, ask: SurveyAsk): Promise<JsonObject | ToolOutcome> {
+  const size = turn.settings.story.prepare.surveyChars;
+  const { part } = ask;
+  if (part === "chat") return { chat: chatPart(await chatOf(env, turn)) };
+  const entries = part === null || part === "summaries" || part === "lore" ? await view.bookEntries() : [];
+  if (part === "summaries") return summariesPart(view, summariesOf(view, entries), (await chatOf(env, turn)).messages, size, ask);
+  if (part === "lore") return lorePart(view, env, turn, entries, size, ask);
+  if (part === "world") return worldPart(view, size, ask);
+  const read = turn.story ? await turn.story.read() : null;
+  const minds = (await files.list("")).flatMap((f) => {
+    const folder = /(?:^|\/)minds\/([^/]+)\/core\.md$/.exec(f.path)?.[1];
+    return folder === undefined ? [] : [decodeURIComponent(folder)];
+  });
+  const preparation = standing(await readPrepare(files));
+  if (part === "engine") {
+    return {
+      engine: {
+        now: stampOf(view, view.state.clock),
+        ...(read ? { cast: read.path.cast.map((c) => ({ id: c.entity, name: nameOf(view, c.entity), standing: c.standing })), beats: { all: read.path.beats.length, past: read.path.beats.filter((b) => b.beat.past !== undefined).length } } : {}),
+        minds: minds.map((id) => ({ id, name: nameOf(view, id) })),
+        olderMinds: Object.keys(readSlice(view.state).chars).map((id) => ({ id, name: nameOf(view, id) })),
+        preparation,
+      },
+    };
+  }
+  const summaries = summariesOf(view, entries);
+  const people = Object.keys(view.state.entities).filter((id) => view.isPerson(id) && view.seesEntity(id) && !isGone(view.state, id)).length;
+  return {
+    chat: chatPart(await chatOf(env, turn)),
+    summaries: Object.fromEntries(LEVELS.map((level) => [level, summaries.filter((s) => s.level === level).length])),
+    lore: { books: new Set(entries.map((e) => e.bookId)).size, entries: entries.length, alwaysOn: entries.filter((e) => e.constant && !e.disabled).length, chars: entries.reduce((sum, e) => sum + e.content.length, 0) },
+    world: { player: nameOf(view, "player"), people, places: Object.keys(view.world.places).length },
+    engine: { now: stampOf(view, view.state.clock), cast: read?.path.cast.length ?? 0, beats: read?.path.beats.length ?? 0, minds: minds.length, preparation },
+    note: view.text(PREPARE_NOTE.surveyOutline),
+  };
+}
+
+// ---------------------------------------------------------------- the player's words in an answer
+
+/** What the player said, quoted, as a tool's answer tells the author of it. */
+function quoted(said: readonly { text: string }[]): string {
+  return said.map((s) => `“${s.text}”`).join(" ");
 }
 
 // ---------------------------------------------------------------- the plan
@@ -243,7 +426,7 @@ function stretchesArg(view: ToolReadView, args: JsonObject, principals: readonly
       if (!principals.some((p) => p.id === found.id)) return view.refuse(PREPARE_NOTE.notPrincipal, { name: nameOf(view, found.id) });
       if (!who.includes(found.id)) who.push(found.id);
     }
-    out.push({ from, to, why, who });
+    out.push({ from, to, why, who, key: entry.key === true });
   }
   return out;
 }
@@ -334,14 +517,37 @@ export const PREPARE_TOOLS: readonly HarnessToolDefinition[] = [
     name: T.survey,
     family: HARNESS_FAMILY.prepare,
     tier: "read",
-    parameters: () => objectSchema({ part: text(PARTS) }),
+    parameters: () => objectSchema({ part: text(PARTS), level: text(LEVELS), from: integer({ minimum: 0 }), to: integer({ minimum: 0 }), summary: text(), book: text() }),
+    // An answer reaches the author whole: each part is held to the player's size for one. One summary asked for by its id is given whole, and LumiAH keeps what is past that size for scratch_read.
+    wholeChars: (settings) => settings.story.prepare.surveyChars,
     async run(args, env) {
       const ready = await prepared(env);
       if (!("view" in ready)) return ready;
       const { view, turn, files } = ready;
       const part = textArg(args, "part");
       if (part !== null && !(PARTS as readonly string[]).includes(part)) return badValue(view, T.survey, "part", part, PARTS);
-      return view.answer(await survey(view, env, turn, files, part));
+      const level = textArg(args, "level");
+      if (level !== null && !(LEVELS as readonly string[]).includes(level)) return badValue(view, T.survey, "level", level, LEVELS);
+      const summary = textArg(args, "summary");
+      const book = textArg(args, "book");
+      // A level or a summary is the summaries part's, a book the lore's, whichever part was named.
+      const ask: SurveyAsk = { part: level !== null || summary !== null ? "summaries" : book !== null ? "lore" : (PARTS.find((p) => p === part) ?? null), level: LEVELS.find((l) => l === level) ?? null, from: intArg(args, "from"), to: intArg(args, "to"), summary, book };
+      const out = await survey(view, env, turn, files, ask);
+      if (out.error === true) return out as ToolOutcome;
+      // What the plan is held to: the story so far and the lore, noted in the preparation's file as given, so a later run need not read them again.
+      if (ask.part === "summaries" || ask.part === "lore") {
+        const given = ask.part;
+        const noted = (await readPrepare(files)).state;
+        if (noted?.surveyed !== true && !noted?.read?.includes(given)) {
+          const kind = noted?.kind ?? chatKind(await turn.host.chats.messages(env.chatId, env.userId));
+          // A file whose record can't be read is planned afresh anyway: the note starts a preparation with no plan in its place.
+          await updatePrepare<null>(files, turn.settings.prompts.texts, (now) => {
+            const s = now.state ?? unplanned(kind, [], false);
+            return s.surveyed || s.read?.includes(given) ? { stop: null } : { ...s, read: [...(s.read ?? []), given] };
+          });
+        }
+      }
+      return view.answer(out);
     },
   },
   {
@@ -350,28 +556,32 @@ export const PREPARE_TOOLS: readonly HarnessToolDefinition[] = [
     tier: "read",
     parameters: () => objectSchema({ stretch: text() }),
     async run(args, env) {
-      const ready = await prepared(env);
-      if (!("view" in ready)) return ready;
-      const { view, turn, files } = ready;
-      const state = planIn(view, await readPrepare(files));
+      const ready = await preparedWords(env);
+      if (!("words" in ready)) return ready;
+      const { words, turn, files } = ready;
+      const file = await readPrepare(files);
+      const playerSaid = (s: PrepareState) => s.word.said.map((x) => ({ said: x.text, ...(x.answer !== null ? { yourAnswer: x.answer } : { answered: false }) }));
+      // Before a plan the file keeps only what the player said: the plan answers it.
+      if (file.state !== null && !planned(file.state)) return words.answer({ status: standing(file), ...(file.state.word.said.length > 0 ? { playerSaid: playerSaid(file.state) } : {}), note: words.text(PREPARE_NOTE.noPlan) });
+      const state = planIn(words, file);
       if (!("v" in state)) return state;
-      const read = turn.story ? await turn.story.read() : null;
+      // Everything here is the file's: whom a recorded stretch reached, and who took it in as of the last relive or finish.
       const name = (id: string): string => state.principals.find((p) => p.id === id)?.name ?? id;
       const asked = textArg(args, "stretch");
       if (asked !== null) {
         const s = state.stretches.find((x) => x.id === asked);
-        if (!s) return view.refuse(PREPARE_NOTE.noStretch, { stretch: asked });
-        const beats = read ? stretchBeats(read.path, s) : [];
-        const reached = read ? reachedBy(read.path, beats.map((b) => b.id), state.principals.map((p) => p.id)) : [];
-        const reliving = read ? relivingNow(read.path, reached) : [];
-        return view.answer({ stretch: s.id, messages: spanOf(s), why: s.why, relivedBy: s.who.map(name), state: s.state, beats: beats.length, ...(s.through !== null ? { through: `#${s.through}` } : {}), reached: reached.map(name), stillToRelive: reliving.map(name) });
+        if (!s) return words.refuse(PREPARE_NOTE.noStretch, { stretch: asked });
+        const reached = s.reached ?? null;
+        const owed = reached === null ? [] : reached.filter((id) => !(s.relived ?? []).includes(id));
+        return words.answer({ stretch: s.id, messages: spanOf(s), why: s.why, relivedBy: s.who.map(name), state: s.state, beats: s.beats.length, ...(s.through !== null ? { through: `#${s.through}` } : {}), ...(reached !== null ? { reached: reached.map(name), stillToRelive: owed.map(name) } : {}) });
       }
       const has = async (path: string): Promise<boolean> => (await files.read(path)) !== null;
       const principals = await Promise.all(state.principals.map(async (p) => ({ id: p.id, name: p.name, why: p.why, core: await has(mindPath(p.id, "core")), outline: await has(mindPath(p.id, "outline")) })));
-      const reliving = read ? relivingNow(read.path, state.principals.map((p) => p.id)) : [];
+      const reliving = stillToRelive(state);
       const spent = (await turn.job?.spent?.()) ?? null;
-      return view.answer({
-        status: state.done !== null ? "done" : waits(state) ? "waits for the player's word" : "under way",
+      const first = wordsFirst(words, state);
+      return words.answer({
+        status: standing({ state, damaged: false, version: null }),
         kind: state.kind,
         about: state.about,
         principals: principals.map((p) => ({ ...p, stillToRelive: reliving.includes(p.id) })),
@@ -383,8 +593,8 @@ export const PREPARE_TOOLS: readonly HarnessToolDefinition[] = [
         ...(spent !== null ? { spentSoFar: spent.tokens } : {}),
         ...(state.word.cap !== null ? { cap: state.word.cap } : {}),
         playerApproved: state.word.asked && state.word.approved,
-        ...(state.word.said.length > 0 ? { playerSaid: state.word.said } : {}),
-        ...(waits(state) ? { note: view.text(PREPARE_NOTE.waits, { estimate: estimateOf(state).toLocaleString("en-US"), ceiling: state.word.ceiling.toLocaleString("en-US") }) } : {}),
+        ...(state.word.said.length > 0 ? { playerSaid: playerSaid(state) } : {}),
+        ...(first !== null ? { note: first.text } : waits(state) ? { note: state.word.revised ? words.text(PREPARE_NOTE.waitsRevised) : words.text(PREPARE_NOTE.waits, { estimate: estimateOf(state).toLocaleString("en-US"), ceiling: state.word.ceiling.toLocaleString("en-US") }) } : {}),
       });
     },
   },
@@ -397,9 +607,12 @@ export const PREPARE_TOOLS: readonly HarnessToolDefinition[] = [
         {
           about: text(),
           principals: list(objectSchema({ who: text(), why: text() }, ["who"])),
-          stretches: list(objectSchema({ from: integer({ minimum: 0 }), to: integer({ minimum: 0 }), why: text(), who: words() }, ["from", "to"])),
+          stretches: list(objectSchema({ from: integer({ minimum: 0 }), to: integer({ minimum: 0 }), why: text(), who: words(), key: { type: "boolean" } }, ["from", "to"])),
           fills: text(),
           estimate: integer({ minimum: 0 }),
+          answer: text(),
+          depth: text(PREPARE_DEPTHS),
+          depthWhy: text(),
         },
         ["about", "principals"],
       ),
@@ -411,47 +624,82 @@ export const PREPARE_TOOLS: readonly HarnessToolDefinition[] = [
       const about = needText(view, T.plan, args, "about");
       if (typeof about !== "string") return about;
       const fills = textArg(args, "fills") ?? "";
-      const long = fits(view, "about", about, limits.textChars) ?? fits(view, "fills", fills, limits.textChars);
+      const answer = textArg(args, "answer");
+      const depthSaid = textArg(args, "depth");
+      const recommended = depthSaid === null ? null : (PREPARE_DEPTHS.find((d) => d === depthSaid) ?? null);
+      if (depthSaid !== null && recommended === null) return badValue(view, T.plan, "depth", depthSaid, PREPARE_DEPTHS);
+      const depthWhy = textArg(args, "depthWhy") ?? "";
+      const long = fits(view, "about", about, limits.textChars) ?? fits(view, "fills", fills, limits.textChars) ?? fits(view, "answer", answer ?? "", limits.textChars) ?? fits(view, "depthWhy", depthWhy, limits.textChars);
       if (long) return long;
       const principals = principalsArg(view, args, limits.textChars);
       if (!Array.isArray(principals)) return principals;
       const asked = stretchesArg(view, args, principals, limits.textChars);
       if (!Array.isArray(asked)) return asked;
       const author = intArg(args, "estimate") ?? 0;
+      const { messages, numbered } = await chatOf(env, turn);
+      const kind = chatKind(messages);
+      if (kind === "new" && asked.length > 0) return view.refuse(PREPARE_NOTE.newChat);
+      // On a chat with a history the plan is written with the story so far and its lore read in this preparation, and the story as the author understands it kept in its file, which every later run reads first.
+      const noted = (await readPrepare(files)).state;
+      const unread = kind === "history" && noted?.surveyed !== true ? SURVEY_PARTS.filter((p) => !noted?.read?.includes(p)) : [];
+      if (unread.length > 0) return view.refuse(PREPARE_NOTE.surveyFirst, { parts: unread.join(", ") });
+      if (kind === "history" && ((await files.read(PREPARE_STORY))?.text.trim() ?? "") === "") return view.refuse(PREPARE_NOTE.storyFirst);
       // What the preparation has spent so far, as LumiAH counts it, and what one of its model calls weighs: the rest of the plan is reckoned at that.
       const spent = (await turn.job?.spent?.()) ?? null;
       const call = callWeight(spent, limits);
-      const messages = await turn.host.chats.messages(env.chatId, env.userId);
-      const kind = chatKind(messages);
-      if (kind === "new" && asked.length > 0) return view.refuse(PREPARE_NOTE.newChat);
-      const numbered = byNumber(messages);
-      // Where the scene and the notebook stood when the first plan was written: the preparation finishes once each was written since.
-      const [scene, notebook] = await Promise.all([files.read(AUTHOR_FILE.scene), files.read(AUTHOR_FILE.notebook)]);
+      // Where the scene and the notebook stood when the first plan was written: the preparation finishes once each was written since. And the chat as the plan found it, with what its summaries cover.
+      const [scene, notebook, entries] = await Promise.all([files.read(AUTHOR_FILE.scene), files.read(AUTHOR_FILE.notebook), view.bookEntries()]);
+      const numbers = messages.map((m) => m.index);
+      const chat = { messages: messages.length, first: numbers.length > 0 ? Math.min(...numbers) : 0, last: numbers.length > 0 ? Math.max(...numbers) : 0, covered: coveredBy(entries.flatMap((e) => lumibooksOf(e)?.span ?? [])) };
+      const at = Date.now();
       let splits: { from: number; to: number; count: number }[] = [];
       const out = await updatePrepare<ToolOutcome>(files, turn.settings.prompts.texts, (now) => {
         const before = now.state;
-        const planned = planStretches(asked, numbered, limits.stretchMessages, before?.stretches ?? [], { readChars: limits.readChars, call: call.tokens });
-        if ("problem" in planned) return { stop: view.refuse(planned.problem.id, planned.problem.vars) };
-        splits = planned.splits;
-        const draft = { kind, stretches: planned.stretches, principals };
-        const reckoned = (spent?.tokens ?? 0) + reckonLeft(draft, call.tokens);
-        return {
+        // What the player said that the author hasn't answered is answered with this plan: their words never approve it, so a plan written for them waits for their word, whatever their ceiling.
+        const open = before ? unanswered(before) : [];
+        if (open.length > 0 && answer === null) return { stop: view.refuse(PREPARE_NOTE.needAnswer, { said: quoted(open) }) };
+        const spoke = open.some((s) => s.how !== "start");
+        const word = before ? { ...before.word, said: before.word.said.map((s) => (s.answer === null && answer !== null ? { ...s, answer } : s)), ...(spoke ? { approved: false, revised: true } : {}) } : null;
+        const made = planStretches(asked, numbered, limits.stretchMessages, before?.stretches ?? [], { readChars: limits.readChars, call: call.tokens });
+        if ("problem" in made) return { stop: view.refuse(made.problem.id, made.problem.vars) };
+        splits = made.splits;
+        // The depths the plan offers, each reckoned from it: the author recommends one and the player picks; a pick they made carries over where the plan still offers it.
+        const offered = depthsOffered(made.stretches);
+        if (recommended === null && made.stretches.some((s) => s.state === "planned")) return { stop: view.refuse(PREPARE_NOTE.needDepth) };
+        const pick = recommended ?? "outline";
+        if (!offered.includes(pick)) return { stop: view.refuse(PREPARE_NOTE.depthOffered, { depth: view.text(DEPTH_NOTE[pick]), offered: offered.map((d) => view.text(DEPTH_NOTE[d])).join(", ") }) };
+        const reckonAt = (depth: PrepareDepth): number => (spent?.tokens ?? 0) + reckonLeft({ kind, stretches: made.stretches.filter((s) => within(s, depth)), principals }, call.tokens);
+        const depths = { outline: reckonAt("outline"), key: offered.includes("key") ? reckonAt("key") : null, all: reckonAt("all") };
+        const picked = word?.depth !== undefined && offered.includes(word.depth) ? word.depth : null;
+        const reckoned = depths[picked ?? pick] ?? depths.all;
+        const revised = before !== null && planned(before);
+        const next: PrepareState = {
           v: 1,
           kind,
           about,
           principals,
-          stretches: planned.stretches,
+          stretches: made.stretches,
           fills,
-          estimate: { author, reckoned, call: call.tokens, from: call.from },
-          word: wordFor(Math.max(author, reckoned), limits.askAboveTokens, before?.word ?? null),
+          estimate: { author, reckoned, call: call.tokens, from: call.from, depths },
+          depth: { recommended: pick, why: depthWhy },
+          word: wordFor(Math.max(author, reckoned), limits.askAboveTokens, word === null ? null : { asked: word.asked, approved: word.approved, for: word.for, ceiling: word.ceiling, cap: word.cap, said: word.said, revised: word.revised, ...(picked !== null ? { depth: picked } : {}) }),
           done: null,
-          marks: before?.marks ?? { scene: scene?.version ?? null, notebook: notebook?.version ?? null },
+          marks: before && revised ? before.marks : { scene: scene?.version ?? null, notebook: notebook?.version ?? null },
+          surveyed: true,
+          ...(before?.read ? { read: before.read } : {}),
+          chat,
+          ...(before?.log ? { log: before.log } : {}),
+          ...(before?.relivedAt !== undefined ? { relivedAt: before.relivedAt } : {}),
+          // What its runs spent stays with it, so a plan written again never counts the preparation as having spent less.
+          ...(before?.runs ? { runs: before.runs } : {}),
         };
+        const answered = open.length > 0 && answer !== null ? logPrepare(next, { at, what: "answered", text: answer }) : next;
+        return logPrepare(answered, { at, what: revised ? "revised" : "planned", count: next.stretches.length });
       });
       const state = writtenOr(view, out);
       if (!("v" in state)) return state;
       const estimate = estimateOf(state).toLocaleString("en-US");
-      const note = waits(state) ? view.text(PREPARE_NOTE.waits, { estimate, ceiling: state.word.ceiling.toLocaleString("en-US") }) : view.text(PREPARE_NOTE.stands, { estimate });
+      const note = waits(state) ? (state.word.revised ? view.text(PREPARE_NOTE.waitsRevised) : view.text(PREPARE_NOTE.waits, { estimate, ceiling: state.word.ceiling.toLocaleString("en-US") })) : view.text(PREPARE_NOTE.stands, { estimate });
       const split = splits.map((s) => view.text(PREPARE_NOTE.split, { from: String(s.from), to: String(s.to), most: String(limits.stretchMessages), count: String(s.count) }));
       return view.answer({
         file: PREPARE_PATH,
@@ -478,23 +726,34 @@ export const PREPARE_TOOLS: readonly HarnessToolDefinition[] = [
       const limits = turn.settings.story.prepare;
       const drop = boolArg(args, "drop") === true;
       // What opening is checked against beyond the file: the chat as it stands, and who has moments still to relive.
-      const [messages, path] = drop ? [[], null] : await Promise.all([turn.host.chats.messages(env.chatId, env.userId), pathOf(view, turn)]);
+      const [chat, path] = drop ? [null, null] : await Promise.all([chatOf(env, turn), pathOf(view, turn)]);
       if (path !== null && !("beats" in path)) return path;
-      const numbered = byNumber(messages);
+      const numbered: ReadonlyMap<number, HostMessage> = chat?.numbered ?? new Map();
       // What the cap is held to: what the preparation has spent so far, as LumiAH counts it.
       const used = drop ? 0 : (((await turn.job?.spent?.()) ?? null)?.tokens ?? 0);
+      const at = Date.now();
       const out = await updatePrepare<ToolOutcome>(files, turn.settings.prompts.texts, (now) => {
         const state = planIn(view, now);
         if (!("v" in state)) return { stop: state };
+        // The player's words come first: nothing is opened or dropped until the plan is written again for them.
+        const first = wordsFirst(view, state);
+        if (first) return { stop: first };
         const s = state.stretches.find((x) => x.id === id);
         if (!s) return { stop: view.refuse(PREPARE_NOTE.noStretch, { stretch: id }) };
         if (s.state === "recorded") return { stop: view.refuse(PREPARE_NOTE.recordedAlready, { stretch: s.id }) };
         if (s.state === "dropped") return { stop: view.refuse(PREPARE_NOTE.droppedAlready, { stretch: s.id }) };
-        const changed = (next: PrepareStretch): PrepareState => ({ ...state, stretches: state.stretches.map((x) => (x.id === s.id ? next : x)) });
+        // Opening a stretch, who has taken in each recorded one is worked out from the story record at hand.
+        const changed = (next: PrepareStretch): PrepareState => {
+          const made = { ...state, stretches: state.stretches.map((x) => (x.id === s.id ? next : x)) };
+          return logPrepare(path ? withRelived(made, path, at) : made, { at, what: next.state === "dropped" ? "dropped" : "opened", stretch: s.id });
+        };
         if (drop) return changed({ ...s, state: "dropped" });
         if (s.state === "open") return { stop: view.answer({ stretch: s.id, note: view.text(PREPARE_NOTE.openAlready, { stretch: s.id, span: spanOf(s), through: String(s.through ?? s.from - 1) }) }) };
-        if (waits(state)) return { stop: view.refuse(PREPARE_NOTE.waits, { estimate: estimateOf(state).toLocaleString("en-US"), ceiling: state.word.ceiling.toLocaleString("en-US") }) };
-        const before = state.stretches.find((x) => x.from < s.from && (x.state === "planned" || x.state === "open"));
+        if (waits(state)) return { stop: state.word.revised ? view.refuse(PREPARE_NOTE.waitsRevised) : view.refuse(PREPARE_NOTE.waits, { estimate: estimateOf(state).toLocaleString("en-US"), ceiling: state.word.ceiling.toLocaleString("en-US") }) };
+        // Only what the depth the player chose holds is opened, in the chat's order among it.
+        const depth = depthOf(state);
+        if (!within(s, depth)) return { stop: view.refuse(PREPARE_NOTE.notChosen, { stretch: s.id, depth: view.text(DEPTH_NOTE[depth]) }) };
+        const before = state.stretches.find((x) => x.from < s.from && (x.state === "open" || (x.state === "planned" && within(x, depth))));
         if (before) return { stop: view.refuse(PREPARE_NOTE.order, { before: before.id, span: spanOf(before) }) };
         if (s.to - s.from + 1 > limits.stretchMessages) return { stop: view.refuse(PREPARE_NOTE.tooLong, { stretch: s.id, span: spanOf(s), most: String(limits.stretchMessages) }) };
         if (!stretchStands(numbered, s)) return { stop: view.refuse(PREPARE_NOTE.chatChanged, { stretch: s.id, span: spanOf(s) }) };
@@ -523,6 +782,8 @@ export const PREPARE_TOOLS: readonly HarnessToolDefinition[] = [
     family: HARNESS_FAMILY.prepare,
     tier: "read",
     parameters: () => objectSchema({ stretch: text(), from: integer({ minimum: 0 }) }, ["stretch"]),
+    // A read reaches the historian whole: it is what the historian is there to read, and it is held to the player's size for one.
+    wholeChars: (settings) => settings.story.prepare.readChars,
     async run(args, env) {
       const ready = await prepared(env);
       if (!("view" in ready)) return ready;
@@ -534,36 +795,31 @@ export const PREPARE_TOOLS: readonly HarnessToolDefinition[] = [
       const s = state.stretches.find((x) => x.id === id);
       if (!s) return view.refuse(PREPARE_NOTE.noStretch, { stretch: id });
       if (s.state !== "open") return view.refuse(PREPARE_NOTE.notOpen, { stretch: s.id });
-      const numbered = byNumber(await turn.host.chats.messages(env.chatId, env.userId));
+      const { numbered } = await chatOf(env, turn);
       if (!stretchStands(numbered, s)) return view.refuse(PREPARE_NOTE.chatChanged, { stretch: s.id, span: spanOf(s) });
       const start = Math.min(s.to + 1, Math.max(s.from, intArg(args, "from") ?? (s.through ?? s.from - 1) + 1));
-      const most = turn.settings.story.prepare.readChars;
-      const read: JsonObject[] = [];
-      let used = 0;
-      let next: number | null = null;
-      for (const m of stretchMessages(numbered, start, s.to)) {
-        if (read.length > 0 && used + m.content.length > most) {
-          next = m.index;
-          break;
-        }
-        // A message longer than one read gives is given cut, whole up to what a read holds.
-        const text = m.content.length > most ? `${m.content.slice(0, most)}…` : m.content;
-        used += text.length;
-        read.push({ n: m.index, by: m.name, player: m.isUser, text });
-      }
       const path = turn.story ? await turn.story.read() : null;
       const lastPast = path?.path.beats.findLast((b) => b.beat.past !== undefined && b.beat.struck === undefined);
       const names = s.who.map((p) => state.principals.find((x) => x.id === p)?.name ?? p);
-      return view.answer({
-        stretch: s.id,
-        messages: spanOf(s),
-        why: s.why,
-        relivedBy: names,
-        now: stampOf(view, view.state.clock),
-        ...(lastPast ? { lastRecorded: stampOf(view, lastPast.beat.at) } : {}),
-        read,
-        note: next === null ? view.text(PREPARE_NOTE.readEnd) : view.text(PREPARE_NOTE.readMore, { next: String(next) }),
-      });
+      const head = { stretch: s.id, messages: spanOf(s), why: s.why, relivedBy: names, now: stampOf(view, view.state.clock), ...(lastPast ? { lastRecorded: stampOf(view, lastPast.beat.at) } : {}) };
+      // The whole answer is held to the player's size for a read, as the historian's model is sent it: what goes with the messages, with the longer of its two notes, counts too.
+      const notes = [view.text(PREPARE_NOTE.readEnd), view.text(PREPARE_NOTE.readMore, { next: String(s.to) })];
+      const most = turn.settings.story.prepare.readChars;
+      let used = Math.max(...notes.map((note) => JSON.stringify({ ...head, read: [], note }).length));
+      const read: JsonObject[] = [];
+      let next: number | null = null;
+      for (const m of stretchMessages(numbered, start, s.to)) {
+        const item = { n: m.index, by: m.name, player: m.isUser, text: m.content };
+        const size = JSON.stringify(item).length + 1;
+        if (read.length > 0 && used + size > most) {
+          next = m.index;
+          break;
+        }
+        // A message is never cut: one longer than a read by itself is given whole, and LumiAH keeps what is past the read for scratch_read.
+        used += size;
+        read.push(item);
+      }
+      return view.answer({ ...head, read, note: next === null ? view.text(PREPARE_NOTE.readEnd) : view.text(PREPARE_NOTE.readMore, { next: String(next) }) });
     },
   },
   {
@@ -659,7 +915,9 @@ export const PREPARE_TOOLS: readonly HarnessToolDefinition[] = [
         if (s.state === "recorded") return { stop: view.refuse(PREPARE_NOTE.recordedAlready, { stretch: s.id }) };
         if (s.state !== "open") return { stop: view.refuse(PREPARE_NOTE.notOpen, { stretch: s.id }) };
         const beats = stretchBeats(path, s).map((b) => b.id);
-        return { ...state, stretches: state.stretches.map((x) => (x.id === s.id ? { ...x, state: "recorded", beats } : x)) };
+        // Whom its beats reached is kept with it, for the page and for who relives it.
+        const reached = reachedBy(path, beats, state.principals.map((p) => p.id));
+        return logPrepare({ ...state, stretches: state.stretches.map((x) => (x.id === s.id ? { ...x, state: "recorded" as const, beats, reached, relived: [] } : x)) }, { at: Date.now(), what: "recorded", stretch: s.id, count: beats.length });
       });
       const state = writtenOr(view, out);
       if (!("v" in state)) return state;
@@ -685,6 +943,8 @@ export const PREPARE_TOOLS: readonly HarnessToolDefinition[] = [
       if (typeof said !== "string") return said;
       const state = planIn(view, await readPrepare(files));
       if (!("v" in state)) return state;
+      const first = wordsFirst(view, state);
+      if (first) return first;
       const found = resolvePerson(view, whoSaid);
       if ("refused" in found) return found.refused;
       if (found.id === view.pov) return view.refuse(PREPARE_NOTE.playerCast, { name: nameOf(view, "player") });
@@ -697,7 +957,11 @@ export const PREPARE_TOOLS: readonly HarnessToolDefinition[] = [
       // Written whole, in place of what was there: read again where someone wrote it between.
       for (let attempt = 0; attempt < 2; attempt++) {
         const written = await files.write(path, body, (await files.read(path))?.version ?? null);
-        if ("version" in written) return { text: view.text(PREPARE_NOTE.outlined, { name: principal.name }) };
+        if ("version" in written) {
+          // The log says whose outline was written; the outline stands whether or not that line could be kept.
+          await updatePrepare<null>(files, turn.settings.prompts.texts, (now) => (now.state ? logPrepare(now.state, { at: Date.now(), what: "outlined", who: principal.id }) : { stop: null }));
+          return { text: view.text(PREPARE_NOTE.outlined, { name: principal.name }) };
+        }
         if (written.refused.version === null) return { text: written.refused.reason, error: true };
       }
       return view.refuse(PREPARE_NOTE.conflict);
@@ -720,12 +984,16 @@ export const PREPARE_TOOLS: readonly HarnessToolDefinition[] = [
       const state = planIn(view, now);
       if (!("v" in state)) return state;
       if (state.done !== null) return { text: view.text(PREPARE_NOTE.finished) };
+      const first = wordsFirst(view, state);
+      if (first) return first;
       // What a first turn needs, each checked: nothing left of the plan, every principal's past taken in, their core and (with a past) their outline written, the scene and the notebook written since the plan.
       const left = await preparationLeft(files, state, read?.path ?? null, turn.settings.prompts.texts);
       if (left.length > 0) return view.refuse(PREPARE_NOTE.unfinished, { left: left.join("; ") });
+      const at = Date.now();
       const out = await updatePrepare<ToolOutcome>(files, turn.settings.prompts.texts, (fresh) => {
         const current = planIn(view, fresh);
-        return "v" in current ? { ...current, done: note } : { stop: current };
+        if (!("v" in current)) return { stop: current };
+        return logPrepare({ ...(read ? withRelived(current, read.path, at) : current), done: note }, { at, what: "finished" });
       });
       const done = writtenOr(view, out);
       return "v" in done ? { text: view.text(PREPARE_NOTE.finished) } : done;

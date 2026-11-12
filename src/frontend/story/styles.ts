@@ -55,6 +55,10 @@ textarea.lre-input.lre-story-text{min-height:16em;font-family:var(--lre-font);fo
 .lre-story-prepare-form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--lre-s2);min-width:0}
 .lre-story-prepare-form>.lre-field{flex:1 1 14em;min-width:0}
 .lre-story-prepare-form>.lre-btn{min-height:var(--lre-tap)}
+.lre-story-prepare-said{display:flex;flex-direction:column;gap:2px;min-width:0}
+.lre-story-prepare-answer{padding-left:var(--lre-s2);border-left:2px solid var(--lre-hairline);overflow-wrap:anywhere}
+.lre-story-prepare-line{margin:0;padding:var(--lre-s2) var(--lre-s3);border-radius:var(--lre-r);background:var(--lre-well);font-size:var(--lre-fs-sm);overflow-wrap:anywhere}
+.lre-story-prepare-quiet{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s2);min-width:0}
 .lre-story-budget{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--lre-s2)}
 @container (max-width:340px){.lre-story-budget{grid-template-columns:1fr}}
 textarea.lre-input.lre-story-say{min-height:4.5em;font-family:var(--lre-font);font-size:var(--lre-fs-md);line-height:1.45}

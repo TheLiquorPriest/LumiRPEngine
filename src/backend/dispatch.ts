@@ -85,6 +85,7 @@ import { type Review, ReviewError } from "./agents/review";
 import { CHAT_ENGINES } from "./chat-knowledge-prefs";
 import { storyPage, StoryPageRefused } from "./story/pages";
 import { preparePage, PrepareRefused } from "./story/prepare";
+import { prepareLive } from "./story/prepare-live";
 
 export class RequestError extends Error {
   constructor(
@@ -1083,6 +1084,12 @@ export class Dispatcher {
           if (error instanceof PrepareRefused) throw new RequestError(error.code, error.message);
           throw error;
         }
+        return;
+      }
+      case "lre.prepareLive": {
+        // The preparation as it runs, for the live view in Play → Now's card (`story/prepare-live.ts`): a read of its file, the jobs and the chat's file list, asked every few seconds while it runs.
+        await this.requireWorldChat(r.chatId, userId);
+        reply("lre.prepareLive", await prepareLive(this.rt, { chatId: r.chatId, userId }));
         return;
       }
     }

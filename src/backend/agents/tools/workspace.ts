@@ -27,6 +27,7 @@ import { activeRecord } from "../../../engine/ledger/path";
 import { own } from "../../../engine/pack-kit";
 import type { WorldState } from "../../../engine/state";
 import { WS_WRITE, workspaceOf, workspacePins } from "../../../engine/workspace";
+import type { HostMessage } from "../../host";
 import { toChain } from "../../ledger-io";
 import type { Runtime } from "../../runtime";
 import { appliedEvents } from "../../view";
@@ -48,12 +49,12 @@ export interface ChatHead {
   state: WorldState;
 }
 
-/** The chat's head, read without the ledger's queue; null when it plays no world, or its world revision isn't loaded. */
-export async function chatHead(rt: Runtime, chatId: ChatId, userId: UserId): Promise<ChatHead | null> {
+/** The chat's head, read without the ledger's queue (its messages from `messages` where given: a job's kept read of the chat, which a change ends); null when it plays no world, or its world revision isn't loaded. */
+export async function chatHead(rt: Runtime, chatId: ChatId, userId: UserId, messages?: () => Promise<readonly HostMessage[]>): Promise<ChatHead | null> {
   const run = await rt.runOf(chatId, userId);
   const core = run ? await rt.ledger.core(chatId, userId) : null;
   if (!run || !core) return null;
-  const observed = toChain(await rt.host.chats.messages(chatId, userId));
+  const observed = toChain(await (messages ? messages() : rt.host.chats.messages(chatId, userId)));
   const head = core.renderState(observed);
   return head ? { run, core, observed, world: head.world, state: head.state } : null;
 }
