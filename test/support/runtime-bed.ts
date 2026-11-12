@@ -129,6 +129,8 @@ function updateOf(config: RuntimeConfig, build: string, busy: () => boolean): Up
     now: () => Date.now(),
     log: () => undefined,
     name: () => "LumiRPEngine",
+    owner: () => ({ name: "LumiRPEngine" }),
+    buildStartMs: () => 30_000,
     handedOver: false,
     waitingCopy: () => null,
   });

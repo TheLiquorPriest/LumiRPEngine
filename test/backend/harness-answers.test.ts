@@ -1,14 +1,17 @@
 // LumiAH's two asks of the engine as every run starts: its agents' definitions and its claim on the
 // chat. LumiAH waits for each no longer than its Wait for the extension, and a reply whose lead isn't
-// there isn't started. So the definitions name the agents at once and wait for what only adds to them
-// (the chat's preset, the author's opening read through LumiAH's workspace) no longer than half of
-// that wait; the claim, which LumiAH's Agents page asks too, outside any run, is answered at once
-// there and changes nothing a run is told, and it never fails: a chat on the harness always gets one
-// that names the author. A reply the engine can't play is stopped before any agent runs. With
-// LumiAH's real backend mounted (`support/lumiah-bed.ts`), its runtime linked where a reply is played
-// (`support/runtime-bed.ts`), and the driver in the runtime's place where only the engine is asked.
+// there isn't started. So the definitions name the agents at once, on the shipped texts where the
+// engine's settings can't be read, and wait for what only adds to them (the chat's preset, the
+// author's opening read through LumiAH's workspace) no longer than half of that wait; the claim,
+// which LumiAH's Agents page asks too, outside any run, waits for no turn there, reads the chat's
+// world within half of that wait, and changes nothing a run is told, and it never fails: a chat on
+// the harness always gets one that names the author. A reply the engine can't play is stopped before
+// any agent runs. With LumiAH's real backend mounted (`support/lumiah-bed.ts`), its runtime linked
+// where a reply is played (`support/runtime-bed.ts`), and the driver in the runtime's place where
+// only the engine is asked.
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { harnessDefinitions } from "../../src/backend/harness/definitions";
 import { recHarnessOf } from "../../src/backend/harness/record";
 import { renderPrompt } from "../../src/backend/prompts";
 import { HARNESS_AGENT, HARNESS_TEXT } from "../../src/shared/harness-texts";
@@ -71,6 +74,23 @@ describe("the engine's definitions, asked as a run starts", () => {
     expect(author?.instructions).not.toContain(renderPrompt(HARNESS_TEXT.presetLate, {}, {}));
     // Waited for half of LumiAH's own wait, and the log says what was left out.
     expect(rig.host.logs.filter((line) => line.includes("the author's opening") && line.includes("wasn't read within 300 ms"))).toHaveLength(1);
+    noModelCalls(rig);
+  });
+
+  test("with the engine's settings unreadable, they still name the agents, on the shipped texts, and the log says why", async () => {
+    const { rig, chatId } = await harnessChat();
+    const definitions = rig.rt.harness.extension.definitions;
+    if (definitions === undefined) throw new Error("the engine gives LumiAH no definitions");
+    const settings = rig.rt.settings;
+    const get = settings.get.bind(settings);
+    settings.get = () => Promise.reject(new Error("the settings file is unreadable"));
+    const answered = await definitions({ userId: rig.host.userId, chatId }).finally(() => {
+      settings.get = get;
+    });
+    const shipped = harnessDefinitions({}).agents.find((agent) => agent.id === HARNESS_AGENT.author)?.instructions ?? "";
+    expect(shipped).not.toBe("");
+    expect(answered.agents?.find((agent) => agent.id === HARNESS_AGENT.author)?.instructions.startsWith(shipped)).toBe(true);
+    expect(rig.host.logs.filter((line) => line.includes("the settings file is unreadable"))).not.toEqual([]);
     noModelCalls(rig);
   });
 });
@@ -159,6 +179,33 @@ describe("the engine's claim on a chat", () => {
     // On another engine the chat isn't the harness's.
     await playOn(rig, chatId, "classic");
     expect(await claimOf(rig, chatId)).toBeNull();
+    noModelCalls(rig);
+  });
+
+  test("its world read late, it is answered within half of LumiAH's wait all the same: it names the author, and its guidance opens by saying the world wasn't read in time", async () => {
+    const { rig, chatId } = await harnessChat();
+    // LumiAH's Wait for the extension, as the mount reads it for the user.
+    rig.rt.harness.extensionWait = async () => 600;
+    const guidance = async (): Promise<{ lead: string | undefined; text: string } | "late"> => {
+      const claim = await inTime(claimOf(rig, chatId), 600);
+      return claim === "late" ? claim : { lead: claim?.mainAgent, text: claim?.guidance && "text" in claim.guidance ? claim.guidance.text : "" };
+    };
+    // The chat's messages never come: as a chat that isn't loaded, whose whole message list is read through Lumiverse, can keep them.
+    const chats = rig.rt.host.chats;
+    const messages = chats.messages.bind(chats);
+    chats.messages = () => new Promise(() => undefined);
+    const held = await guidance();
+    chats.messages = messages;
+    if (held === "late") throw new Error("the claim wasn't answered within LumiAH's wait");
+    const late = renderPrompt(HARNESS_TEXT.worldLate, {}, {});
+    expect(held.lead).toBe(HARNESS_AGENT.author);
+    expect(held.text.startsWith(late)).toBe(true);
+    expect(rig.host.logs.filter((line) => line.includes("world") && line.includes("wasn't read within 300 ms"))).toHaveLength(1);
+    // Read in time, the world's own guidance is there, and nothing is said to be late.
+    const read = await guidance();
+    if (read === "late") throw new Error("the claim wasn't answered within LumiAH's wait");
+    expect(read.text).not.toContain(late);
+    expect(read.text).toContain("Jordan Ellis");
     noModelCalls(rig);
   });
 });

@@ -1,13 +1,15 @@
 // `bun run test:all` (scripts/test-all.ts) on a suite of its own: every file runs in a process of its
 // own; a file that fails among the others is run again alone and counts as failing only if it fails
 // there too, named with its failing tests or what went wrong between them; one that passes alone is
-// listed as passed alone; the summary says how long the run took and which files were slowest.
+// listed as passed alone; one that never finishes is stopped at the limit and fails, named; what
+// follows `--` reaches each file's `bun test`; the summary says how long the run took and which files
+// were slowest.
 
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runAll, summarize, testFiles, type AllRun } from "../../scripts/test-all";
+import { parseArgs, runAll, summarize, testFiles, type AllRun } from "../../scripts/test-all";
 
 let root = "";
 let run: AllRun;
@@ -61,3 +63,38 @@ test("the summary gives the wall time, the tests passed, what failed alone too a
   expect(slowest).toHaveLength(6);
   expect(slowest.every((l) => /^ +\d+\.\d s {2}test\//.test(l))).toBe(true);
 });
+
+test("a file that never finishes is stopped at the limit, among the others and alone, and fails the run named as one that never finished", async () => {
+  const hung = mkdtempSync(join(tmpdir(), "lre-test-all-hung-"));
+  try {
+    mkdirSync(join(hung, "test"));
+    // Its top level never finishes loading: what it starts never lets go.
+    writeFileSync(join(hung, "test/hangs.test.ts"), 'import { test } from "bun:test";\nawait new Promise(() => setInterval(() => undefined, 1000));\ntest("never reached", () => {});\n');
+    writeFileSync(join(hung, "test/passes.test.ts"), 'import { expect, test } from "bun:test";\ntest("one", () => expect(1).toBe(1));\n');
+    // A real limit, and short: the file runs in a process of its own, whose time no fake clock here moves.
+    const stopped = await runAll({ root: hung, jobs: 2, limitMs: 1500 });
+    expect(stopped.first.find((r) => r.file === "test/passes.test.ts")).toMatchObject({ ok: true, passed: 1 });
+    const runs = [...stopped.first, ...stopped.alone].filter((r) => r.file === "test/hangs.test.ts");
+    expect(runs.map((r) => r.ok)).toEqual([false, false]);
+    expect(runs.every((r) => r.error?.includes("never finished"))).toBe(true);
+    const lines = summarize(stopped);
+    const failing = lines.slice(lines.indexOf("Failed, also when run alone (1):") + 1);
+    expect(failing[0]).toBe("  test/hangs.test.ts");
+    expect(failing[1]).toContain("never finished");
+  } finally {
+    rmSync(hung, { recursive: true, force: true });
+  }
+}, 20_000);
+
+test("what follows `--` goes on to each file's `bun test`: a pattern runs only the tests it names, and a file it names none of passes", async () => {
+  expect(parseArgs(["-t", "one"])).toEqual({ record: false, jobs: null, bun: ["-t", "one"] });
+  expect(parseArgs(["6", "--", "-t", "one"])).toEqual({ record: false, jobs: 6, bun: ["-t", "one"] });
+  expect(parseArgs(["--record"])).toEqual({ record: true, jobs: null, bun: [] });
+  // Anything else is refused with the usage line, and so is a recording of filtered files.
+  expect(parseArgs(["six"])).toBeNull();
+  expect(parseArgs(["--record", "--", "-t", "one"])).toBeNull();
+  const named = await runAll({ root, jobs: 2, files: ["test/passes.test.ts", "test/fails.test.ts"], bun: ["-t", "^one$"] });
+  expect(named.first.find((r) => r.file === "test/passes.test.ts")).toMatchObject({ ok: true, passed: 1 });
+  expect(named.first.find((r) => r.file === "test/fails.test.ts")).toMatchObject({ ok: true, passed: 0 });
+  expect(named.alone).toEqual([]);
+}, 20_000);

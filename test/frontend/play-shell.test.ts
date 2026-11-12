@@ -5,8 +5,11 @@ import type { Overlays } from "../../src/frontend/app";
 import { ProtocolClient } from "../../src/frontend/protocol-client";
 import { createStore } from "../../src/frontend/store";
 import { needsYou, needsYouDetail, TurnRunning } from "../../src/frontend/play/now";
+import { EngineNotice } from "../../src/frontend/play/scene";
+import { blockedNotice } from "../../src/frontend/gm/engine";
+import { NO_CONNECTION } from "../../src/frontend/story/connections";
 import { Banner, Button } from "../../src/frontend/components";
-import { propsOf } from "../support/tree";
+import { expand, propsOf } from "../support/tree";
 import { destinations } from "../../src/frontend/play/play";
 import type { PanelDef } from "../../src/frontend/registry";
 import type { UiCatalog } from "../../src/frontend/ui-registry";
@@ -95,6 +98,34 @@ describe("Needs you on Now", () => {
     watch.onClick();
     expect(watched).toBe(1);
     for (const engine of ["classic", "agents", undefined] as const) expect(propsOf(propsOf(TurnRunning({ engine, onWatch: () => undefined }), Banner)[0]?.actions, Button)).toEqual([]);
+  });
+});
+
+describe("Now's word on the engine", () => {
+  /** What the engine says of a chat on the harness while its runtime has no connection to call a model on. */
+  const RUNTIME_NONE = "LumiRPEngine's runtime has no connection to call a model on, so its agents can't play this chat. Add one on the Runtime page of the Harness tab, under Connections.";
+  const pressed: string[] = [];
+  const ways = { onEngine: () => void pressed.push("engine"), onConnections: () => void pressed.push("connections") };
+  /** A tree as Play draws it, down to its banners. */
+  const drawn = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(drawn);
+    if (node !== null && typeof node === "object" && "type" in node && typeof node.type === "function" && node.type !== Banner) return drawn(expand(node));
+    return node;
+  };
+  /** The banners Now shows for a chat on the harness, by title, and the way each offers, pressed. */
+  const shown = (blocked: string | null, none: boolean): { titles: unknown[]; pressed: string[] } => {
+    pressed.length = 0;
+    const banners = propsOf(drawn(EngineNotice({ blocked, none, ...ways })), Banner);
+    for (const way of propsOf(banners.map((banner) => banner.actions), Button)) if (typeof way.onClick === "function") way.onClick();
+    return { titles: banners.map((banner) => banner.title), pressed: [...pressed] };
+  };
+
+  test("a harness chat its runtime's lack of a connection keeps from playing says so with the way to Connections, not to the Engine switch", () => {
+    expect(shown(RUNTIME_NONE, true)).toEqual({ titles: [NO_CONNECTION.title], pressed: ["connections"] });
+    // Kept from playing by something else, it says why with the way to the Engine switch; able to play, nothing.
+    const permission = "The permission \"interceptor\" isn't granted: LumiRPEngine needs it to mark each reply of a harness chat for its runtime.";
+    expect(shown(permission, false)).toEqual({ titles: [blockedNotice("harness", permission).title], pressed: ["engine"] });
+    expect(shown(null, false)).toEqual({ titles: [], pressed: [] });
   });
 });
 

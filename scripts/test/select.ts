@@ -28,9 +28,9 @@ export interface Repo {
 }
 
 export interface Options {
-  /** Recorded milliseconds per test file; a file without a record counts as the median. */
+  /** Recorded milliseconds per test file, each file's in one `bun test` process that runs them one after another (test/timings.json); a file without a record counts as the median. */
   timings: ReadonlyMap<string, number>;
-  /** Recorded milliseconds the run may spend on the tests it takes nearest first. */
+  /** Recorded milliseconds, in that unit, the run may spend on the tests it takes nearest first. */
   budget: number;
   /** Test files that run only when they changed or import what changed (the property suite). */
   releaseOnly: readonly string[];

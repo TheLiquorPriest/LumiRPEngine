@@ -106,4 +106,9 @@ describe("on this repository", () => {
     }
     expect(run(selectTests(repo, ["src/backend/runtime.ts"], opts))).toContain("test/backend/runtime.test.ts");
   });
+
+  test("the budget is spent in the targeted run's own unit, each file's time in one `bun test` process, so a module most tests reach still runs over a hundred of them", () => {
+    // In a process of its own a file's time is mostly the process starting and loading (the whole run's recording, test/timings-all.json): a minute of that runs a fraction of these.
+    for (const module of ["src/backend/harness/extension.ts", "src/engine/ledger/fold.ts"]) expect({ module, run: selectTests(repo, [module], opts).run.length > 100 }).toEqual({ module, run: true });
+  });
 });

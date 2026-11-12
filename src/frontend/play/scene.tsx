@@ -41,24 +41,32 @@ function weatherIcon(weather: string): IconName {
   return "cloud";
 }
 
-/** Where the harness can't play the user's chats, which engine plays this one and why, with the way to the Engine switch (GM → This chat). */
+/** Where the harness can't play the user's chats, which engine plays this one and why, with the way to put it right (`EngineNotice`). */
 function EngineWord(props: { state: StateView }) {
   const app = useApp();
   const engine = props.state.engine ?? "classic";
   const blocked = useHarnessBlocked(props.state.chatId, engine);
-  return (
-    <>
-      <EngineBlocked engine={engine} blocked={blocked} onOpen={() => app.ui.update((ui) => gmAt({ ...ui, mode: "gm" }, "chat"))} />
-      {engine === "harness" && blocked === null ? <ConnectionsWord chatId={props.state.chatId} /> : null}
-    </>
-  );
+  if (engine !== "harness") return null;
+  return <HarnessWord chatId={props.state.chatId} blocked={blocked} onEngine={() => app.ui.update((ui) => gmAt({ ...ui, mode: "gm" }, "chat"))} />;
 }
 
-/** On a chat the harness plays, while its runtime is linked and keeps no connection: what to do, with the way to Harness → System → Runtime → Connections. */
-function ConnectionsWord(props: { chatId: string }) {
+/** On a chat the harness plays: whether its runtime keeps a connection, as the drawer reads it, with the way to Harness → System → Runtime → Connections. */
+function HarnessWord(props: { chatId: string; blocked: string | null; onEngine(): void }) {
   const connections = useAgentConnections(props.chatId);
   const open = useOpenConnections();
-  return <NoConnectionNotice engine="harness" none={connections.none} onOpen={open} />;
+  return <EngineNotice blocked={props.blocked} none={connections.none} onEngine={props.onEngine} onConnections={open} />;
+}
+
+/**
+ * Play's word on the engine for a chat the harness plays, without hooks. While its runtime keeps no
+ * connection (`none`), that keeps the chat from playing, whatever else does too, and only
+ * Connections puts it right: the notice says what to do there, with the way where the drawer can
+ * open it (`onConnections`). Otherwise, where the harness can't play the chat (`blocked`), why, with
+ * the way to the Engine switch (`onEngine`); nothing while it can.
+ */
+export function EngineNotice(props: { blocked: string | null; none: boolean; onEngine(): void; onConnections: (() => void) | null }) {
+  if (props.none) return <NoConnectionNotice engine="harness" none onOpen={props.onConnections} />;
+  return <EngineBlocked engine="harness" blocked={props.blocked} onOpen={props.onEngine} />;
 }
 
 export function ScenePanel(props: PanelProps) {
