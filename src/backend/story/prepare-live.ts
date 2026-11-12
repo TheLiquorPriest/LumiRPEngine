@@ -359,7 +359,8 @@ export async function prepareLive(rt: Runtime, at: { chatId: ChatId; userId: Use
     logged,
     names: Object.fromEntries((plan?.principals ?? []).map((p) => [p.id, p.name])),
   };
-  // Asked again while a run is at work or waits for its place, and for two asks past its latest run's end while it is stopped: a run started by itself shows.
+  // Asked again while a run is at work or waits for its place, a finished preparation's closing run among them (else the view would go on saying it is at work), and for two asks past its latest run's end while it is stopped: a run started by itself shows.
   const ended = going === "stopped" && lastEnd > 0 && now - lastEnd <= 2 * dials.watchSeconds * 1000;
-  return { at: now, live: going === "running" || going === "queued" || ended, every: dials.watchSeconds, prep };
+  const closing = done && underWay.some((r) => !r.paused);
+  return { at: now, live: going === "running" || going === "queued" || closing || ended, every: dials.watchSeconds, prep };
 }

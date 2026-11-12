@@ -260,13 +260,6 @@ export function tokensText(tokens: number): string {
   return `${Math.round(tokens).toLocaleString("en-US")} tokens`;
 }
 
-/** How far the plan has come: stretches recorded or dropped, of those it holds within the depth chosen (and any recorded or dropped already). */
-export function prepareProgress(view: PrepareView): { done: number; total: number } | null {
-  const stretches = (view.plan?.stretches ?? []).filter((s) => s.chosen || s.state === "recorded" || s.state === "dropped");
-  if (stretches.length === 0) return null;
-  return { done: stretches.filter((s) => s.state === "recorded" || s.state === "dropped").length, total: stretches.length };
-}
-
 /** Each depth a preparation can go to, in the pages' words: the card's choice, and the live view's. */
 export const DEPTH_WORDS: Readonly<Record<PrepareDepth, { label: string; help: string }>> = {
   outline: { label: "Outlines only", help: "Every principal knows the past in outline, from the summaries and the lore, with their core. Nothing is relived." },

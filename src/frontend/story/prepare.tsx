@@ -13,8 +13,8 @@
 import { useEffect, useState } from "preact/hooks";
 import { PREPARE_DEPTHS, type PrepareAsk, type PrepareCallFrom, type PrepareDepth, type PreparePlan, type PrepareView } from "../../shared/story-pages";
 import { useApp } from "../app";
-import { Badge, Banner, Button, Disclosure, Meter, Seg, Stat, useBusy } from "../components";
-import { capOf, DEPTH_WORDS, nameIn, PREPARE_STATE_WORDS, prepareBusy, prepareProgress, prepareQuiet, prepareShown, STRETCH_STATE_WORDS, tokensText } from "./model";
+import { Badge, Banner, Button, Disclosure, Seg, Stat, useBusy } from "../components";
+import { capOf, DEPTH_WORDS, nameIn, PREPARE_STATE_WORDS, prepareBusy, prepareQuiet, prepareShown, STRETCH_STATE_WORDS, tokensText } from "./model";
 import { PrepareLive } from "./prepare-live";
 
 /** How often the card reads the preparation again while it is at work, in ms. */
@@ -119,7 +119,6 @@ export function PrepareBody(props: { view: PrepareView; busy: boolean; typed: Pr
   const capText = typed.cap ?? (view.cap === null ? "" : String(view.cap));
   const capRead = capOf(capText);
   const words = PREPARE_STATE_WORDS[view.state];
-  const progress = prepareProgress(view);
   const offered = view.offer !== null;
   const working = view.state === "planning" || view.state === "revising" || view.state === "waiting" || view.state === "running";
   const stopped = view.state === "paused" || view.state === "failed" || view.state === "cancelled";
@@ -212,7 +211,6 @@ export function PrepareBody(props: { view: PrepareView; busy: boolean; typed: Pr
             <Stat label={view.state === "done" ? "Spent in all" : "Spent so far"} value={tokensText(view.spent)} sub="Every job of it, as LumiAH counts it" />
             <Stat label="Cap" value={view.cap !== null ? tokensText(view.cap) : "None"} sub="On all the preparation may spend" />
           </div>
-          {progress !== null ? <Meter label={`${progress.done} of ${progress.total} stretches prepared`} value={progress.done} max={progress.total} showValue /> : null}
           <PrepareLive state={view.state} />
           {view.notYet.length > 0 ? (
             <div class="lre-story-prepare-plan" data-lre-not-yet>

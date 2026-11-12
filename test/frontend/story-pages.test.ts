@@ -11,7 +11,7 @@ import { agentConnections, LOOPBACK_PROBLEM, UNSET_CONNECTION } from "../../src/
 import { savedWords } from "../../src/frontend/story/editor";
 import { lastReflected, mindEntries, notebookFiles, type StoryFile } from "../../src/frontend/story/files";
 import { ModelPickRows, runsOnText } from "../../src/frontend/story/model-pick";
-import { agoText, beatHead, capOf, castGroups, castLine, characterAsk, draftsInOrder, exposureLine, pickedBy, prepareBusy, prepareProgress, prepareShown, reachedLine, reachedText, stretchText, tokensText } from "../../src/frontend/story/model";
+import { agoText, beatHead, capOf, castGroups, castLine, characterAsk, draftsInOrder, exposureLine, pickedBy, prepareBusy, prepareShown, reachedLine, reachedText, stretchText, tokensText } from "../../src/frontend/story/model";
 import { PrepareBody, PrepareLine, PrepareQuiet, prepareSlot, type PrepareTyped } from "../../src/frontend/story/prepare";
 import { replyLabel } from "../../src/frontend/story/record";
 import { expand, propsOf, type Props } from "../support/tree";
@@ -168,13 +168,6 @@ describe("the prepared start", () => {
     expect(prepareBusy("running")).toBe(true);
     expect(prepareBusy("revising")).toBe(true);
     expect(prepareBusy("waiting")).toBe(false);
-  });
-
-  test("progress counts stretches relived or filled from summaries, of those within the depth chosen", () => {
-    const stretch = (state: "planned" | "open" | "recorded" | "dropped", chosen = true) => ({ id: state, from: 1, to: 2, why: "", who: [], state, beats: 0, key: false, chosen });
-    const plan = { story: "", principals: [], stretches: [stretch("recorded"), stretch("dropped"), stretch("open"), stretch("planned"), stretch("planned", false)], summaries: null, authorEstimate: 0, reckoned: 0, call: null, ceiling: 0, depths: [], recommended: { depth: "key" as const, why: "" }, depth: "key" as const };
-    expect(prepareProgress(view({ plan }))).toEqual({ done: 2, total: 4 });
-    expect(prepareProgress(view({}))).toBeNull();
   });
 
   test("the cap as typed: a whole number, none when empty, else a plain problem", () => {

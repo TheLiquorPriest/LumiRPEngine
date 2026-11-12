@@ -224,7 +224,8 @@ export function trailWords(e: PrepareTrailEntry, names: StoryNames): string {
     case "carried":
       return e.text ? `A run ended, and the next started by itself: ${e.text}` : "A run ended, and the next started by itself.";
     case "stopped":
-      return e.text ? `It stopped: ${e.text}` : "It stopped.";
+      // The stop's own words are whole sentences that say what stopped it.
+      return e.text ?? "It stopped.";
     case "reopened":
       return "Opened again.";
     case "finished":

@@ -4,16 +4,19 @@
 // haven't seen the cost of.
 //
 // A new run starts if and only if the run that ended is the preparation's latest job and ended on
-// its own, not held or cancelled by the player; the preparation's file holds a plan that isn't
-// finished; the plan has the player's word as it now stands and nothing in it waits for their word;
+// its own, not held or cancelled by the player; the preparation isn't finished; its plan, once
+// written with every word of the player's answered, has their word as it now stands and nothing in
+// it waits for their word (a run that ended before the plan was written, or before it answered
+// what the player said, is carried on to write it);
 // what the preparation has spent leaves room under their cap for another run; the run didn't fail
 // on what it runs on, which a new run would only meet again (no connection, a key or a model
 // refused: LumiAH marks such a job `lasting`), stop at a day's limit, or get cut off; and fewer
 // runs it started by itself in a row than Settings → Story → Preparing → Runs without progress
 // moved the preparation nothing forward. Forward is the file's own account: something it named as
 // left (`preparationLeft`, which follows the depth the player chose) is done, more beats are
-// recorded, more stretches recorded or dropped, or more principals have taken in what was
-// recorded. A run started so is logged "carried"; one not started is logged "stopped" with why, in
+// recorded, more stretches recorded or dropped, more principals have taken in what was recorded,
+// or, while it plans, more of the survey is read, the story file changed, or more of the player's
+// words are answered. A run started so is logged "carried"; one not started is logged "stopped" with why, in
 // plain words, which the card says (`pageState`). A run the player held or cancelled needs no word:
 // its job says it.
 //
@@ -29,7 +32,8 @@ import type { PromptTexts } from "../../shared/prompts";
 import type { StoryPath } from "../../engine/story/record";
 import type { HarnessFiles } from "../agents/tools/harness-ports";
 import type { Runtime } from "../runtime";
-import { callWeight, carryOn, jobRows, logPrepare, planned, preparationLeft, type PrepareState, preparing, readPrepare, spentOf, UNDER_WAY, updatePrepare, waits, withRelived } from "./prepare";
+import { PREPARE_STORY } from "../../shared/harness-texts-prepare";
+import { callWeight, carryOn, jobRows, logPrepare, planned, preparationLeft, type PrepareState, preparing, readPrepare, spentOf, unanswered, UNDER_WAY, updatePrepare, waits, withRelived } from "./prepare";
 import { prepareRun } from "./prepare-run";
 import { chatStoryPort } from "./record";
 
@@ -42,6 +46,8 @@ interface Mark {
   settled: number;
   /** Principals through a recorded stretch, over all of them. */
   relived: number;
+  /** What planning has to show for itself: the survey's parts read, the story file as it stands, the principals cast, and how many of the player's words are answered. */
+  notes: string;
 }
 
 /** For each chat whose preparation the engine carried on, by user and chat: the run it started, how far the preparation had come as it started, and how many runs in a row before it moved it nothing forward. */
@@ -54,7 +60,6 @@ const said = (reason: string | null, none: string): string => (reason ?? none).r
 
 /** Why it stopped instead of carrying on, as the card and the live view say it. */
 const WORDS = {
-  noPlan: "It stopped before it wrote a plan. Carry it on, and the author plans first.",
   waits: "It waits for your word on the plan before it goes on.",
   lasting: (reason: string | null): string => `It stopped: ${said(reason, "what it runs on failed")}. A new run would only fail the same way, so none was started. Put that right, then carry it on.`,
   day: (reason: string | null): string => `It stopped at a day's limit: ${said(reason, "a limit on a day's spend")}. A new run would stop there too. Carry it on once the day's count allows.`,
@@ -72,6 +77,7 @@ async function markOf(files: Pick<HarnessFiles, "read">, state: PrepareState, pa
     beats: state.stretches.reduce((n, s) => n + s.beats.length, 0),
     settled: state.stretches.filter((s) => s.state === "recorded" || s.state === "dropped").length,
     relived: through.reduce((n, s) => n + (s.relived?.length ?? 0), 0),
+    notes: JSON.stringify([state.read ?? [], (await files.read(PREPARE_STORY))?.version ?? null, state.principals.length, state.word.said.length - unanswered(state).length]),
   };
 }
 
@@ -125,8 +131,9 @@ export async function preparationRunEnded(rt: Runtime, at: { chatId: ChatId; use
   const file = await readPrepare(files);
   const state = file.state;
   if (file.damaged || state === null || state.done !== null) return;
-  if (!planned(state)) return stop(WORDS.noPlan);
-  if (waits(state) || !state.word.approved) return stop(WORDS.waits);
+  // The author's run ended before its plan did (none written yet, or what the player said not answered): it is carried on like any other run, and stopped like any other once runs move nothing forward. A plan that is written waits for the player's word.
+  const planning = !planned(state) || unanswered(state).length > 0;
+  if (!planning && (waits(state) || !state.word.approved)) return stop(WORDS.waits);
   if (ended.state === "failed" && ended.lasting) return stop(WORDS.lasting(ended.reason));
   if (ended.state === "spent" && ended.stoppedAt === "day") return stop(WORDS.day(ended.reason));
   if (ended.state === "interrupted" || ended.state === "off_path") return stop(WORDS.cutOff);
@@ -138,7 +145,7 @@ export async function preparationRunEnded(rt: Runtime, at: { chatId: ChatId; use
   const mark = await markOf(files, state, read?.path ?? null, texts);
   // A run the engine didn't start is the player's word: the count of runs without progress starts again after it. One it started moved the preparation forward where more is recorded or taken in than as it began, or something then left is done.
   const before = chain?.job === at.job ? chain : null;
-  const idle = before === null || mark.beats > before.mark.beats || mark.settled > before.mark.settled || mark.relived > before.mark.relived || before.mark.left.some((line) => !mark.left.includes(line)) ? 0 : before.idle + 1;
+  const idle = before === null || mark.beats > before.mark.beats || mark.settled > before.mark.settled || mark.relived > before.mark.relived || mark.notes !== before.mark.notes || before.mark.left.some((line) => !mark.left.includes(line)) ? 0 : before.idle + 1;
   if (idle >= prepare.idleRuns) return stop(WORDS.idle(idle));
   // Read again just before it starts: a run the player started meanwhile stands.
   if ((await jobRows(core, where)).find(preparing)?.id !== at.job) return;

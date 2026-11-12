@@ -9,7 +9,7 @@ import { preparePage, updatePrepare, withRelived } from "../../src/backend/story
 import { mindPath } from "../../src/backend/story/minds";
 import { prepareLive } from "../../src/backend/story/prepare-live";
 import { AUTHOR_FILE, HARNESS_AGENT } from "../../src/shared/harness-texts";
-import { PREPARE_PATH } from "../../src/shared/harness-texts-prepare";
+import { PREPARE_PATH, PREPARE_STORY } from "../../src/shared/harness-texts-prepare";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import type { PrepareLive, PrepareLiveView } from "../../src/shared/prepare-live";
 import type { UserSettings } from "../../src/shared/settings";
@@ -83,6 +83,8 @@ async function preparing(askAboveTokens: number) {
   const settings: UserSettings = { ...base, story: { ...base.story, prepare: { ...base.story.prepare, askAboveTokens } } };
   const story = memoryStory({ cast: [{ entity: MARA, standing: "principal" }, { entity: JOSS, standing: "principal" }] }, false);
   const files = memoryFiles();
+  // The story as the author understands it, which a plan on a chat with a history is written from.
+  await files.write(PREPARE_STORY, "Mara keeps the boarding house and is behind on the rent. Joss is owed.", null);
   const jobs = jobsStandIn(chatId);
   rig.rt.harness.files = () => files;
   rig.rt.harness.core = jobs.core;
@@ -235,6 +237,8 @@ describe("the prepared start as it runs", () => {
     // Finished: ready, done, and no longer asked for.
     at(100);
     expect((await call(author, "prepare_finish", { note: "Prepared." })).error).toBeUndefined();
+    // The author's closing run is still at work: the view is asked again until it ends, so it never goes on saying someone is at work.
+    expect((await look()).live).toBe(true);
     at(101);
     jobs.set("run-1", { state: "done", endedAt: Date.now(), workedMs: 95 * 60_000 });
     const ready = await look();

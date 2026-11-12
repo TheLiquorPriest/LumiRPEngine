@@ -16,7 +16,7 @@ import { mindPath } from "../../src/backend/story/minds";
 import { prepareFileText, preparePage, preparationSpent, type PrepareState, readPrepare, unplanned, updatePrepare } from "../../src/backend/story/prepare";
 import { preparationRunEnded } from "../../src/backend/story/prepare-carry";
 import { HARNESS_AGENT } from "../../src/shared/harness-texts";
-import { PREPARE_NOTE, PREPARE_PATH } from "../../src/shared/harness-texts-prepare";
+import { PREPARE_NOTE, PREPARE_PATH, PREPARE_STORY } from "../../src/shared/harness-texts-prepare";
 import { isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";
 import { castChat, MARA, memoryFiles } from "./harness-cast-kit";
 import { mount, playOn } from "./harness-driver";
@@ -141,6 +141,25 @@ describe("a preparation's runs", () => {
     expect(waiting.started).toHaveLength(1);
     expect((await waiting.log()).at(-1)).toMatchObject({ what: "stopped", text: "It waits for your word on the plan before it goes on." });
     expect((await waiting.view()).state).toBe("waiting");
+  });
+
+  test("a run that ends before the author's plan is written is followed by a new run too; what it read and wrote counts as progress, and runs that add nothing stop it", async () => {
+    // No plan yet: the file keeps only what the player said with the start.
+    const r = await preparing(unplanned("history", [{ text: "The story is Mara's.", how: "start", answer: null }], false));
+    await r.press("start");
+    await r.ends(ALLOWANCE);
+    expect(r.started).toHaveLength(2);
+    expect((await r.log()).at(-1)).toMatchObject({ what: "carried" });
+    // The run the engine started wrote more of the story as the author understands it: the next follows, and the count starts again.
+    await r.files.write(PREPARE_STORY, "Mara keeps the boarding house.", null);
+    await r.ends(ALLOWANCE);
+    expect(r.started).toHaveLength(3);
+    // Two runs in a row that read and wrote nothing new: no third is started, and the log says why.
+    await r.ends(ALLOWANCE);
+    expect(r.started).toHaveLength(4);
+    await r.ends(ALLOWANCE);
+    expect(r.started).toHaveLength(4);
+    expect((await r.log()).at(-1)).toMatchObject({ what: "stopped", text: "Its last 2 runs made no progress, so it stopped carrying on by itself. Tell the author what to change, or carry it on." });
   });
 
   test("a run the player held or cancelled is not followed by a new one, and the card says it as the job does", async () => {
