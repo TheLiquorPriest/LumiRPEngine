@@ -97579,11 +97579,17 @@ function createWorkingStore(deps) {
     cancel = deps.later(ms2, wake);
     return promise;
   }
+  let timeless = false;
   async function place(path6, text4, at2) {
     const temp = `${TMP}/${deps.id()}`;
     await disk.write(temp, text4);
-    if (at2 !== undefined)
-      await disk.touch(temp, at2);
+    if (at2 !== undefined) {
+      await disk.touch(temp, at2).catch((error3) => {
+        if (!timeless)
+          deps.log("warn", `the runtime's store couldn't set the time of ${path6} (${errorText(error3)}): after a restart a change on this disk counts from when it was written`);
+        timeless = true;
+      });
+    }
     const folder = path6.slice(0, path6.lastIndexOf("/"));
     for (let tries = 0;; tries++) {
       if (!made.has(folder)) {
@@ -100687,7 +100693,7 @@ if (process.versions.bun === undefined) {
 `);
   process.exit(1);
 }
-var BUILD = "0e519ae3";
+var BUILD = "a4ba5134";
 var http = async (request2) => {
   const response = await fetch(request2.url, { method: request2.method, headers: request2.headers, ...request2.body !== undefined ? { body: request2.body } : {}, ...request2.signal !== undefined ? { signal: request2.signal } : {}, redirect: "manual" });
   const text4 = await response.text();
