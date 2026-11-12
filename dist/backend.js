@@ -9400,7 +9400,7 @@ var STORY_DEFAULTS = Object.freeze({
   limits: Object.freeze({ beatChars: 800, quoteChars: 600, quotes: 6, people: 24, beatsPerTurn: 40, draftChars: 600, draftsPerTurn: 12, whyChars: 300, beatsRead: 40, feedItems: 40, openingChars: 4000 }),
   minds: Object.freeze({ chars: Object.freeze({ core: 4000, now: 2000, memory: 8000, beliefs: 4000, people: 4000, plans: 2000, outline: 6000, profile: 1500 }), playerMind: true }),
   models: Object.freeze({ default: Object.freeze({}), agents: Object.freeze({}), standings: Object.freeze({}), runs: Object.freeze({}), characters: Object.freeze({}) }),
-  prepare: Object.freeze({ stretchMessages: 40, askAboveTokens: 200000, reliveAtOnce: 3, beatsPerStretch: 30, readChars: 24000, textChars: 1200, callTokens: 60000 })
+  prepare: Object.freeze({ stretchMessages: 40, askAboveTokens: 200000, reliveAtOnce: 3, beatsPerStretch: 30, readChars: 60000, textChars: 1200, callTokens: 60000, surveyChars: 60000, watchSeconds: 5, watchRuns: 60, runMinutes: 60, runRounds: 200, idleRuns: 2 })
 });
 var STORY_BOUNDS = Object.freeze({
   stretchMinutes: [60, 525600],
@@ -9410,7 +9410,7 @@ var STORY_BOUNDS = Object.freeze({
   modelAgents: 64,
   modelCharacters: 500,
   modelChars: 200,
-  prepare: Object.freeze({ stretchMessages: [5, 400], askAboveTokens: [0, 1e8], reliveAtOnce: [1, 24], beatsPerStretch: [1, 200], readChars: [2000, 200000], textChars: [200, 8000], callTokens: [1000, 2000000] })
+  prepare: Object.freeze({ stretchMessages: [5, 400], askAboveTokens: [0, 1e8], reliveAtOnce: [1, 24], beatsPerStretch: [1, 200], readChars: [2000, 1e6], textChars: [200, 8000], callTokens: [1000, 2000000], surveyChars: [2000, 1e6], watchSeconds: [2, 300], watchRuns: [10, 500], runMinutes: [5, 1440], runRounds: [10, 5000], idleRuns: [1, 20] })
 });
 function modelPickOf(raw) {
   const p = isRecord(raw) ? raw : {};
@@ -9452,7 +9452,8 @@ function storyPrepareOf(raw, base = STORY_DEFAULTS.prepare) {
     const [lo, hi] = STORY_BOUNDS.prepare[key];
     return typeof x === "number" && Number.isInteger(x) && x >= lo && x <= hi ? x : base[key];
   };
-  return { stretchMessages: whole2("stretchMessages"), askAboveTokens: whole2("askAboveTokens"), reliveAtOnce: whole2("reliveAtOnce"), beatsPerStretch: whole2("beatsPerStretch"), readChars: whole2("readChars"), textChars: whole2("textChars"), callTokens: whole2("callTokens") };
+  const readChars = p.surveyChars === undefined && p.readChars === 24000 ? base.readChars : whole2("readChars");
+  return { stretchMessages: whole2("stretchMessages"), askAboveTokens: whole2("askAboveTokens"), reliveAtOnce: whole2("reliveAtOnce"), beatsPerStretch: whole2("beatsPerStretch"), readChars, textChars: whole2("textChars"), callTokens: whole2("callTokens"), surveyChars: whole2("surveyChars"), watchSeconds: whole2("watchSeconds"), watchRuns: whole2("watchRuns"), runMinutes: whole2("runMinutes"), runRounds: whole2("runRounds"), idleRuns: whole2("idleRuns") };
 }
 function storySettingsOf(raw, base = STORY_DEFAULTS) {
   const s = isRecord(raw) ? raw : {};
@@ -93440,6 +93441,7 @@ var PREPARE_TOOL = {
   finish: "prepare_finish"
 };
 var PREPARE_PATH = "author/prepare.md";
+var PREPARE_STORY = "author/story.md";
 var HISTORIAN = "historian";
 var PREPARE_SKILL = "prepare_the_story";
 var PREPARE_NOTE = {
@@ -93528,7 +93530,37 @@ var PREPARE_NOTE = {
   fileStateOpen: "harness.prepare.file.state.open",
   fileStatePlanned: "harness.prepare.file.state.planned",
   fileStateRecorded: "harness.prepare.file.state.recorded",
-  fileStateDropped: "harness.prepare.file.state.dropped"
+  fileStateDropped: "harness.prepare.file.state.dropped",
+  fileRevised: "harness.prepare.file.revised",
+  fileUnplanned: "harness.prepare.file.unplanned",
+  fileAnswer: "harness.prepare.file.answer",
+  unanswered: "harness.note.prepare.unanswered",
+  needAnswer: "harness.note.prepare.need_answer",
+  waitsRevised: "harness.note.prepare.waits_revised",
+  surveyFirst: "harness.note.prepare.survey_first",
+  storyFirst: "harness.note.prepare.story_first",
+  surveyOutline: "harness.note.prepare.survey_outline",
+  surveyNone: "harness.note.prepare.survey_none",
+  surveyOrder: "harness.note.prepare.survey_order",
+  surveyLeft: "harness.note.prepare.survey_left",
+  surveyMore: "harness.note.prepare.survey_more",
+  surveyEnd: "harness.note.prepare.survey_end",
+  surveyNoSummary: "harness.note.prepare.survey_no_summary",
+  surveyNoBook: "harness.note.prepare.survey_no_book",
+  surveyBooks: "harness.note.prepare.survey_books",
+  taskFirst: "harness.prepare.task.first",
+  taskRevise: "harness.prepare.task.revise",
+  taskAfresh: "harness.prepare.task.afresh",
+  runWords: "harness.prepare.run_words",
+  notChosen: "harness.note.prepare.not_chosen",
+  needDepth: "harness.note.prepare.need_depth",
+  depthOffered: "harness.note.prepare.depth_offered",
+  sayDepth: "harness.prepare.say.depth",
+  fileDepth: "harness.prepare.file.depth",
+  fileStateUnchosen: "harness.prepare.file.state.unchosen",
+  depthOutline: "harness.prepare.depth.outline",
+  depthKey: "harness.prepare.depth.key",
+  depthAll: "harness.prepare.depth.all"
 };
 var PREPARE_AGENT_TEXTS = [
   {
@@ -93546,7 +93578,7 @@ var PREPARE_SKILL_TEXTS = [
     agents: [AUTHOR],
     name: "Preparing the story",
     description: "When you are asked to prepare this story: catch up on a chat that already has a history, or set up a new one, so the first reply is not shallow.",
-    body: lines2("# Preparing the story", "", "A prepared start means you know this story as its author must: where it stands, where it points, and who it turns on. And the few people it turns on have minds of their own, built from what they lived. The goal is a first reply that is not shallow, without reading everything twice or spending more than the story needs. How deep to go is your judgement, from what the story is and what there is to draw on.", "", "## Survey first", "prepare_survey says what there is: how long the chat is, a LumiBooks book or other summaries in the World Info books, the lore, the world's own people and places, and what the engine already holds. Lumiverse's memory tools are yours where they are in your list. Read the summaries before the chat: they tell you where the story went, so you can choose where it is worth reading closely.", "", "## Plan before you spend", "Write the plan with prepare_plan:", "- Whom you cast as principals: the few people the story turns on, who need minds of their own. Not everyone. A minor figure is an extra you voice, or a supporting character with a short profile. You can add people later.", "- Which moments each principal relives: the stretches of the chat that made them who they are in the story now. Choose the moments that matter. The rest you fill from summaries and lore.", "- What you fill from summaries and lore, and from where.", "- Your estimate of what the whole preparation costs in tokens, your own work included. Every model call, yours and those of the agents you start, sends a whole prompt again, so the cost is mostly in the calls. The engine reckons the whole from the calls the plan takes, at what one of them weighs, with what is spent already, and the plan carries the larger.", "A plan above the player's ceiling waits for their word. Then end your run with a short report of the plan. The preparation carries on when they answer, from author/prepare.md.", "", "## Relive", "Cast each principal with cast_set. Open each stretch with prepare_relive, in the chat's order, and hand it to the historian (delegate, agent: historian) with the stretch's id. When the historian closes it, start each principal it reached to relive it: a character's agent, as that person, in its reliving run. While they relive one stretch, the historian can record the next. A refusal says why: the player's word, their cap, too many principals reliving at once, a stretch out of order.", "", "## The rest", "For each principal, write with prepare_outline what they would know of what they didn't relive: in outline, as they would know it, and never what they couldn't have known. Write each principal's core.md from their record in the world and what you learned. Then write where everyone stands now (where they are, what they want, what is in motion) in author/scene.md and your notebook. Where the world's state is behind the story (the clock, where someone is), say so in author/scene.md. The first turn sets it right with its own tools: a preparation changes nothing in the world.", "", "## A new chat", "Nothing to relive. Cast the principals from the world's own people, write each core.md from their records, and set the scene.", "", "## Finish", "prepare_finish closes the preparation once it holds what a first turn needs. If you are stopped before, prepare_status picks it up again from author/prepare.md.")
+    body: lines2("# Preparing the story", "", "A prepared start means you know this story as its author must: what it is about for the player's character, where it stands, where it points, and who it turns on. And the people it turns on have minds of their own. The goal is a first reply that is not shallow, without reading everything twice. How deep to go is the player's choice, once they have seen what it costs.", "", "## Survey first", "prepare_survey says what there is, in outline. Then read the story so far with it (part summaries): the summaries' own text, the highest level first, then the lower levels newest first. Read the rest of them by level or by id where you need it. Where the chat has no summaries, read the chat in outline with chat_outline, and closely with chat_read and chat_around where it matters. Then read the lore that frames the story (part lore): each World Info book with its size and how many of its entries are always on. Read the books the player names, and the entries that frame the story, before you say what it is about. The plan is refused on a chat with a history until the summaries and the lore were read in this preparation, and until author/story.md holds the story as you understand it.", "", "## The story as you understand it", "A preparation takes many runs, and a prompt can't hold everything you read: what you learn must live in your files, not only in your head. As you read, keep author/story.md, the story as you understand it: what it is about for the player's character, and the bigger picture the lore gives; what happened, in order; who the main characters are, and what each knows and wants now. Add to it after each part you read. A later run reads it first, and need not read the summaries again. When a tool says there is no room left in your prompt, write what you have in author/story.md and end your run: the preparation carries on from your files.", "", "## Whom the story turns on", "Principals are the story's main characters across its whole length, wherever they are now: the people it turns on for the player's character, those closest to them, and those who drive what is at stake, as the summaries and the latest stretch of the chat show. Not the people the present scene turns on, and never simply whoever is named most recently or most often in the world's records. Whoever the player names as a main character is a principal, and whoever they name as supporting is a supporting character with a short profile. Nobody the player named is left out for cost: the plan says what it costs, and the player decides. A cast of fifteen principals and nine supporting characters is planned for like any other.", "", "## Plan the whole, before you spend", "Write the plan with prepare_plan. It is the plan of the whole preparation, however many runs it takes. Never cut it to fit what one run may spend: its cost is shown to the player, who decides.", "- What the story is about for the player's character: the bigger picture, as the lore and the summaries give it, and where it stands now.", "- Whom you cast as principals, and why each.", "- Which moments each principal relives: the stretches of the chat that made them who they are. A principal need not relive anything to have a mind: what they know in outline and their core are a true start, and reliving is for the moments that made them.", "- What you fill from summaries and lore, and from where.", "- Your estimate of what the whole preparation costs in tokens, your own work included. Every model call, yours and those of the agents you start, sends a whole prompt again, so the cost is mostly in the calls. The engine reckons the whole from the calls the plan takes, at what one of them weighs, with what is spent already, and the plan carries the larger.", "A plan above the player's ceiling waits for their word. Then end your run with a short report of the plan. The preparation carries on when they answer, from author/prepare.md.", "", "## What the player tells you", "The player can tell you what to change at any time. Before you do anything else, write the plan again with prepare_plan for what they said, and give your answer with it: what you changed, or why you kept what you kept. They read your answer under their words. Their words never approve the plan: a plan you revised for them waits for their word, whatever their ceiling, and nothing more is relived until they give it. End your run once it is written.", "", "## Relive", "Cast each principal with cast_set. Open each stretch with prepare_relive, in the chat's order, and hand it to the historian (delegate, agent: historian) with the stretch's id. When the historian closes it, start each principal it reached to relive it: a character's agent, as that person, in its reliving run. While they relive one stretch, the historian can record the next. A refusal says why: the player's word, their cap, too many principals reliving at once, a stretch out of order.", "", "## The rest", "For each principal, write with prepare_outline what they would know of what they didn't relive: in outline, as they would know it, and never what they couldn't have known. Write each principal's core.md from their record in the world and what you learned, and each supporting character's profile. Then write where everyone stands now (where they are, what they want, what is in motion) in author/scene.md and your notebook. Where the world's state is behind the story (the clock, where someone is), say so in author/scene.md. The first turn sets it right with its own tools: a preparation changes nothing in the world.", "", "## A new chat", "Nothing to relive, and no summaries to read: keep author/story.md all the same, with what the story is about and whom it turns on. Cast the principals from the world's own people, write each core.md from their records, and set the scene.", "", "## Finish", "prepare_finish closes the preparation once it holds what a first turn needs. If you are stopped before, prepare_status picks it up again from author/prepare.md.")
   }
 ];
 var STAMP = "a date and time in the world's calendar, written YYYY-MM-DD HH:MM, as stretch_read writes the time now";
@@ -93556,9 +93588,16 @@ var PREPARE_TOOL_TEXTS = [
     name: PREPARE_TOOL.survey,
     family: HARNESS_FAMILY.prepare,
     tier: "read",
-    note: "Says what there is to prepare the story from: the chat, its summaries, the lore, the world's people, and what the engine already holds.",
-    text: "Survey what there is to draw on before you prepare the story: how long the chat is and how far the engine has played it; a LumiBooks book or other summaries in the chat's World Info books, each by the messages it spans, with the id lore_read takes; how much lore there is; the world's people and places; and what the engine already holds: the clock, the cast, the beats, the minds, and the people an older engine kept a mind for. It reads only, and costs little. Where they are in your list, chat_outline and the other history tools give the chat's own outline.",
-    args: [{ path: "part", text: "Only this part: chat, summaries, lore, world or engine. Left out: all of them." }]
+    note: "Says what there is to prepare the story from, in outline, and gives each part in answers that fit: the story so far in the summaries' own text, the lore's books, the world's people, and what the engine already holds.",
+    text: "Survey what there is to draw on before you prepare the story. Left without a part, it says what there is in outline: how long the chat is, how many summaries its World Info books hold at each level, its lore books, the world's people and places, and what the engine already holds. Each part then gives what it holds, in answers that fit (Settings \u2192 Story \u2192 Preparing): summaries, the story so far in the summaries' own text, the highest level first, then the lower levels newest first, with what was left out for size and how to read it; lore, each World Info book with its size and how many of its entries are always on, and with book, that book's entries; world, the world's people and places; engine, the clock, the cast, the beats and the minds; chat, the chat itself. It reads switched-off entries too, and reads only. On a chat with a history, read the summaries and the lore before you plan: the plan is refused until you have.",
+    args: [
+      { path: "part", text: "Only this part: chat, summaries, lore, world or engine. Left out: what there is, in outline." },
+      { path: "level", text: "With part summaries: only this level's summaries (volume, arc, chapter or other), in the story's order." },
+      { path: "from", text: "Where to read on from. With level: the first message, by its number in the chat. With book or part world: the first entry or person to give, from 1." },
+      { path: "to", text: "With level: the last message, by its number." },
+      { path: "summary", text: "One summary's whole text, by the id the survey gives it (c12, a3) or its book entry's id." },
+      { path: "book", text: "With part lore: one World Info book's entries, by its name or id, those always on first." }
+    ]
   },
   {
     name: PREPARE_TOOL.status,
@@ -93573,10 +93612,10 @@ var PREPARE_TOOL_TEXTS = [
     family: HARNESS_FAMILY.prepare,
     tier: "write",
     note: "Writes the preparation's plan to author/prepare.md before anything is spent. The author's alone.",
-    text: "Write the plan of the preparation before you spend: what the story is and what a prepared start must give it; whom you cast as principals; which stretches of the chat each principal relives, and why; what you fill from summaries and lore; and your estimate of what the whole preparation costs in tokens, your own work included. The engine reckons the whole too: what the preparation has spent so far, as LumiAH counts it, and the model calls the plan still takes, yours, the historian's and the principals', at what one of its calls weighs. The plan keeps the larger estimate. A stretch longer than one historian run reads is planned as several. The plan goes to author/prepare.md, which the player reads. Above the player's ceiling on the whole (Settings \u2192 Story \u2192 Preparing) it waits for their word, and nothing is relived until they give it. Calling it again changes the plan: what is recorded stays recorded.",
+    text: "Write the plan of the whole preparation before you spend, however many runs it takes: what the story is about for the player's character and what a prepared start must give it; whom you cast as principals; which stretches of the chat each principal relives, and why; what you fill from summaries and lore; and your estimate of what the whole preparation costs in tokens, your own work included. Never cut it to fit what one run may spend: the player sees its cost and decides. The engine reckons the whole too: what the preparation has spent so far, as LumiAH counts it, and the model calls the plan still takes, yours, the historian's and the principals', at what one of its calls weighs. The plan keeps the larger estimate. A stretch longer than one historian run reads is planned as several. The plan goes to author/prepare.md, which the player reads. Above the player's ceiling on the whole (Settings \u2192 Story \u2192 Preparing) it waits for their word, and nothing is relived until they give it. A plan written for what the player told you carries your answer, and waits for their word whatever their ceiling. On a chat with a history it is refused until you have read the summaries and the lore with prepare_survey, and written the story as you understand it in author/story.md. Calling it again changes the plan: what is recorded stays recorded.",
     args: [
-      { path: "about", text: "What the story is and where it stands, and what a prepared start must give it, in a few sentences." },
-      { path: "principals", text: "The principals: the few people the story turns on, each with why." },
+      { path: "about", text: "What the story is about for the player's character: the bigger picture as the lore and the summaries give it, where it stands now, and what a prepared start must give it, in a few sentences." },
+      { path: "principals", text: "The principals: the story's main characters across its whole length, wherever they are now, and everyone the player named as one, each with why." },
       { path: "principals.who", text: "A person of the world: an id or a name." },
       { path: "principals.why", text: "Why they need a mind of their own, in a sentence." },
       { path: "stretches", text: "The stretches of the chat to relive, in the chat's order. Leave it out for a new chat, or where summaries are enough." },
@@ -93584,8 +93623,12 @@ var PREPARE_TOOL_TEXTS = [
       { path: "stretches.to", text: "Its last message, by its number." },
       { path: "stretches.why", text: "Why this moment, in a sentence: what it made of the people in it." },
       { path: "stretches.who", text: "The principals who relive it: ids or names, each among the principals." },
+      { path: "stretches.key", text: "true: one of the few moments that made the story what it is. The player may relive only the key moments." },
       { path: "fills", text: "What you fill from summaries and lore rather than relive, and from where." },
-      { path: "estimate", text: "Your own estimate of what the whole preparation will cost in tokens, your own work included." }
+      { path: "estimate", text: "Your own estimate of what the whole preparation will cost in tokens, your own work included." },
+      { path: "answer", text: "Your answer to what the player told you since the plan was last written: what you changed for it, or why you kept what you kept, in a sentence or two. They read it under their words. Needed whenever they said something you haven't answered." },
+      { path: "depth", text: "The depth you recommend: outline (every principal knows the past in outline, from summaries and lore, and nothing is relived), key (those outlines, and the key moments relived by those who were in them), or all (every stretch of the plan). The engine reckons each from this plan, and the player picks. Needed where the plan has stretches." },
+      { path: "depthWhy", text: "Why that depth, in a sentence, for the player to read." }
     ]
   },
   {
@@ -93732,15 +93775,23 @@ What {{name}} knows of these times only in outline: what they would have heard o
   other(PREPARE_NOTE.turnLeft, "Preparing: what a first turn still lacks", "Follows the line above where the preparation still lacks something a first turn needs: each thing named as prepare_finish names it.", "Not prepared yet: {{left}}.", [v4("left", "what is left, each named", true)]),
   other(PREPARE_NOTE.taskHistory, "Preparing: the task for a chat with a history", "The task the player's Prepare this story gives the author's job on a chat that already has a history.", "Prepare this story for play. The chat already has a history: catch up on it as its author, and give the few people it turns on minds built from what they lived. Load the skill Preparing the story (skill_load) and use your judgement."),
   other(PREPARE_NOTE.taskNew, "Preparing: the task for a new chat", "The task the player's Prepare this story gives the author's job on a new chat.", "Prepare this new story for play: cast the few people it turns on from the world's own, and give each a core of who they are. Load the skill Preparing the story (skill_load)."),
-  other(PREPARE_NOTE.taskCarry, "Preparing: the task to carry it on", "The task of the author's job that carries a preparation on: after the player's word on its plan, or after it was stopped.", "Carry on preparing this story. Read where it stands with prepare_status first: author/prepare.md says what is done and what is left.{{word}}{{words}}", [v4("word", "the player's word on the plan, as the text below writes it; nothing when they gave none now"), v4("words", "what the player said, as the text below writes it; nothing when they said nothing")]),
-  other(PREPARE_NOTE.taskWords, "Preparing: what the player said", "Fills {{words}} of a preparation's task with the player's own words.", `
+  other(PREPARE_NOTE.taskCarry, "Preparing: the task to carry it on", "The task of the author's job that carries a preparation on: after the player's word on its plan, or after it was stopped.", "Carry on preparing this story. Read where it stands with prepare_status first: author/prepare.md says what is done and what is left.{{word}}", [v4("word", "the player's word on the plan, as the text below writes it; nothing when they gave none now")]),
+  other(PREPARE_NOTE.taskWords, "Preparing: what the player said", "Fills {{words}} of the task that revises a plan with the player's own words, each thing they said that the author hasn't answered.", `
 
 The player said: {{text}}`, [v4("text", "the player's words", true)]),
+  other(PREPARE_NOTE.taskFirst, "Preparing: what the player said first", "Follows the task that starts a preparation when the player wrote what the story is about and who matters in the first card's box.", `
+
+Before you plan, the player said this about the story and who matters in it. Take it as their word, and answer it in your plan: {{text}}`, [v4("text", "the player's words", true)]),
+  other(PREPARE_NOTE.taskRevise, "Preparing: the task to revise the plan", "The task of the author's job started when the player tells the author what to change while no run is under way: while its plan waits for their word, once it was stopped or cancelled, or after it was finished.", "The player told you what to change in the preparation of this story. Before anything else, read where it stands with prepare_status. Then write the plan again with prepare_plan for what they said: whom you cast as principals and why, the stretches each relives, what is filled from summaries and lore, and what the story is about. Give your answer with it: what you changed, or why you kept what you kept. Their words don't approve the plan: the revised plan waits for their word, whatever their ceiling. End your run with a short report once it is written.{{words}}", [v4("words", "what they said, as Preparing: what the player said writes each", true)]),
+  other(PREPARE_NOTE.taskAfresh, "Preparing: the task to start over", "The task of the author's job the player's Start over gives: the preparation planned afresh, what was recorded kept.", "Start the preparation of this story over: survey the story again, and write a new plan with prepare_plan. What was recorded already stays recorded, and the new plan keeps it. Load the skill Preparing the story (skill_load)."),
+  other(PREPARE_NOTE.runWords, "Preparing: what each run is told of its file", "Given to LumiAH with each run of the preparation, in place of its own ask that a job write its plan: the author reads it after what the run may spend, as the run begins and as it is carried on. The preparing tools keep author/prepare.md, the plan of the whole preparation, and what one run may spend (Settings \u2192 Story \u2192 Preparing) bounds that run only.", "This allowance is for this run only. author/prepare.md is the plan of the whole preparation, however many runs it takes: the preparing tools keep it, so never write or edit it yourself, and prepare_status reads where it stands. If this run ends before the preparation is finished, it carries on in a new run from that file."),
   other(PREPARE_NOTE.taskApproved, "Preparing: the player approved", "Fills {{word}} of the task that carries a preparation on, when the player approved its plan.", `
 
 The player approved the plan.{{cap}}`, [v4("cap", "their cap, as the text below writes it; nothing when they set none")]),
   other(PREPARE_NOTE.taskCap, "Preparing: the player's cap", "Fills {{cap}} where the player capped what the whole preparation may spend.", " They capped what the whole preparation may spend, all its work counted, at {{cap}} tokens.", [v4("cap", "the cap, in tokens", true)]),
-  other(PREPARE_NOTE.sayWords, "Preparing: the player speaks to it", "What a preparation that runs is told when the player says something to it.", "The player says: {{text}}", [v4("text", "the player's words", true)]),
+  other(PREPARE_NOTE.sayWords, "Preparing: the player speaks to it", "What a preparation that runs is told when the player says something to it, or when it is resumed with what they said while it was held.", `The player says: {{text}}
+
+Before you do anything else, write the plan again with prepare_plan for what they said, with your answer to it. Their words don't approve the plan: nothing more is relived until they approve it as you revised it. End your run once it is written.`, [v4("text", "the player's words", true)]),
   other(PREPARE_NOTE.sayApproved, "Preparing: the player's word, told to it", "What a preparation that still runs is told when the player approves its plan.", "The player approved the plan.{{cap}} Carry on with it.", [v4("cap", "their cap, as Preparing: the player's cap writes it; nothing when they set none")]),
   other(PREPARE_NOTE.sayCap, "Preparing: the player caps it, told to it", "What a preparation that runs is told when the player caps what it may spend.", "The player capped what the whole preparation may spend, all its work counted, at {{cap}} tokens.", [v4("cap", "the cap, in tokens", true)]),
   other(PREPARE_NOTE.sayUncapped, "Preparing: the player lifts the cap, told to it", "What a preparation that runs is told when the player lifts their cap.", "The player lifted their cap on what the preparation may spend."),
@@ -93784,7 +93835,35 @@ The player approved the plan.{{cap}}`, [v4("cap", "their cap, as the text below 
   other(PREPARE_NOTE.fileAsked, "Preparing: the file, asked", "In author/prepare.md, for a plan that waits for the player's word.", "Asked: it waits for their word."),
   other(PREPARE_NOTE.fileSaid, "Preparing: the file, what they said", "One thing the player said, in author/prepare.md.", `
 - They said: {{text}}`, [v4("text", "their words", true)]),
-  other(PREPARE_NOTE.fileNone, "Preparing: the file, nothing", "Stands in author/prepare.md where a part holds nothing.", "None.")
+  other(PREPARE_NOTE.fileNone, "Preparing: the file, nothing", "Stands in author/prepare.md where a part holds nothing.", "None."),
+  other(PREPARE_NOTE.fileRevised, "Preparing: the file, revised", "How author/prepare.md says the plan waits for the player's word because they told the author something.", "The plan is revised, or being revised, for what the player said, and waits for their word."),
+  other(PREPARE_NOTE.fileUnplanned, "Preparing: the file, no plan yet", "How author/prepare.md says the author has written no plan yet: it holds what the player said before it.", "No plan yet: the author is surveying the story."),
+  other(PREPARE_NOTE.fileAnswer, "Preparing: the file, the author's answer", "The author's answer to one thing the player said, in author/prepare.md, under their words.", `
+  The author's answer: {{answer}}`, [v4("answer", "what the author said it changed", true)]),
+  answerPrompt(PREPARE_NOTE.unanswered, "Preparing: the player's words come first", "A preparing tool's answer while the player has told the author something it hasn't answered: the plan is written again first.", "The player told you something you haven't answered: {{said}} Write the plan again with prepare_plan first, with your answer to it. Nothing more is relived until they approve the plan as you revised it. Nothing was changed.", [v4("said", "what they said", true)]),
+  answerPrompt(PREPARE_NOTE.needAnswer, "Preparing: the plan needs an answer", "prepare_plan's answer to a plan with no answer while the player has told the author something it hasn't answered.", "The player told you something you haven't answered: {{said}} Write the plan with it in mind, and give answer: what you changed for it, or why you kept what you kept. Nothing was written.", [v4("said", "what they said", true)]),
+  answerPrompt(PREPARE_NOTE.waitsRevised, "Preparing: the revised plan waits for the player", "What prepare_plan says, and what prepare_relive refuses with, while a plan revised for what the player said waits for their word.", "The plan is revised for what the player said, and waits for their word, whatever their ceiling: nothing is relived until they give it. End your run now with a short report of what you changed. The preparation carries on from author/prepare.md when they answer."),
+  answerPrompt(PREPARE_NOTE.surveyFirst, "Preparing: survey first", "prepare_plan's answer on a chat with a history before the survey's summaries and lore were read in this preparation.", "Survey first: read {{parts}} with prepare_survey before you write the plan, so you know what the story is about and whom it turns on. Nothing was written.", [v4("parts", "what is still to read: the summaries (part summaries), the lore (part lore), or both", true)]),
+  answerPrompt(PREPARE_NOTE.storyFirst, "Preparing: the story first", "prepare_plan's answer on a chat with a history while author/story.md holds nothing: the story as the author understands it is written first.", "Write the story as you understand it in author/story.md first: what it is about for the player's character and the bigger picture the lore gives; what happened, in order; who the main characters are, and what each knows and wants now. The plan is written from it, and every later run reads it first. Nothing was written."),
+  answerPrompt(PREPARE_NOTE.surveyOutline, "Preparing: the survey in outline", "Ends prepare_survey's answer without a part: how to read each part.", "That is what there is, in outline. Read each part with part: summaries for the story so far, lore for the books that frame it, world for its people, engine for what the engine holds, chat for the chat. On a chat with a history, read the summaries and the lore before you plan, and keep what you learn in author/story.md."),
+  answerPrompt(PREPARE_NOTE.surveyNone, "Preparing: no summaries", "prepare_survey's summaries part on a chat whose World Info books hold no summary of it.", "The chat's World Info books hold no summary of it. Before you plan, read the chat in outline with chat_outline, and closely with chat_read and chat_around where it matters."),
+  answerPrompt(PREPARE_NOTE.surveyOrder, "Preparing: the summaries as given", "Leads prepare_survey's summaries part: in what order they come, and within what size.", "The story so far, in the summaries' own text: the highest level first, then the lower levels newest first, each whole, within {{size}} characters (Settings \u2192 Story \u2192 Preparing).", [v4("size", "the most one answer gives", true)]),
+  answerPrompt(PREPARE_NOTE.surveyLeft, "Preparing: summaries left out for size", "Ends prepare_survey's summaries part when some didn't fit: what was left out, and how to read it.", "Left out for size: {{left}}. Read one with summary and its id, or several in a row with level, from and to.", [v4("left", "each level's summaries left out, by id and messages", true)]),
+  answerPrompt(PREPARE_NOTE.surveyMore, "Preparing: more follows", "Ends one of prepare_survey's answers that gave as much as fits: where to read on.", "More follows: call again with from {{next}}.", [v4("next", "where to read on from", true)]),
+  answerPrompt(PREPARE_NOTE.surveyEnd, "Preparing: nothing more", "Ends one of prepare_survey's answers that gave all there was.", "That is all of it."),
+  answerPrompt(PREPARE_NOTE.surveyNoSummary, "Preparing: no such summary", "prepare_survey's answer for a summary id it doesn't know.", "No summary goes by {{id}}. part summaries lists them.", [v4("id", "the id asked for", true)]),
+  answerPrompt(PREPARE_NOTE.surveyNoBook, "Preparing: no such book", "prepare_survey's answer for a World Info book this chat doesn't read.", "No World Info book this chat reads goes by {{book}}. part lore lists them.", [v4("book", "the book asked for", true)]),
+  answerPrompt(PREPARE_NOTE.surveyBooks, "Preparing: the lore's books", "Ends prepare_survey's lore part: how to read a book.", "Read a book's entries with book and its name, those always on first: the books the player names, and those that frame the story, before you say what it is about."),
+  answerPrompt(PREPARE_NOTE.notChosen, "Preparing: a stretch not chosen", "prepare_relive's answer for a stretch outside the depth the player chose.", "Stretch {{stretch}} isn't in the depth the preparation goes to ({{depth}}). It stays in the plan, not chosen, and is opened only if the player goes deeper. Nothing was opened.", [stretch, v4("depth", "the depth, as the three depth texts name it", true)]),
+  answerPrompt(PREPARE_NOTE.needDepth, "Preparing: say which depth", "prepare_plan's answer to a plan with stretches that recommends no depth.", "Say which depth you recommend (depth: outline, key or all) and why (depthWhy): the engine reckons each, and the player picks. Nothing was written."),
+  answerPrompt(PREPARE_NOTE.depthOffered, "Preparing: a depth the plan doesn't offer", "prepare_plan's answer to a depth the plan can't go to: key moments with no stretch marked key, or reliving with no stretch at all.", "This plan doesn't offer {{depth}}: it offers {{offered}}. Mark the key stretches (stretches.key), or recommend a depth it offers. Nothing was written.", [v4("depth", "the depth asked for", true), v4("offered", "the depths it offers", true)]),
+  other(PREPARE_NOTE.sayDepth, "Preparing: the player goes deeper, told to it", "What a preparation that runs is told when the player raises the depth it goes to.", "The player chose {{depth}}. Open the stretches it adds, in the chat's order, after what is under way.", [v4("depth", "the depth, as the three depth texts name it", true)]),
+  other(PREPARE_NOTE.fileDepth, "Preparing: the file, the depth", "The depth in author/prepare.md: the one it goes to, and the author's recommendation.", `
+Depth: {{depth}}. The author recommends {{recommended}}: {{why}}`, [v4("depth", "the depth it goes to", true), v4("recommended", "the depth the author recommends", true), v4("why", "why, as the author wrote it")]),
+  other(PREPARE_NOTE.fileStateUnchosen, "Preparing: the file, a stretch not chosen", "A planned stretch outside the depth the preparation goes to, in author/prepare.md.", "not chosen"),
+  other(PREPARE_NOTE.depthOutline, "Preparing: the depth, outlines only", "Names the depth where every principal knows the past in outline and nothing is relived.", "outlines only"),
+  other(PREPARE_NOTE.depthKey, "Preparing: the depth, key moments", "Names the depth where the key moments are relived as well.", "key moments"),
+  other(PREPARE_NOTE.depthAll, "Preparing: the depth, everything planned", "Names the depth where every stretch of the plan is relived.", "everything planned")
 ];
 
 // src/shared/harness-texts-record.ts
@@ -99727,7 +99806,7 @@ function defaultAgentSettings() {
     persist: { on: false, turns: 3, minutes: 30 },
     gmOpsPerTurn: 10,
     curatorOps: 24,
-    kept: { runs: 64, gates: 256, watchers: 256, live: 16, texts: 4000000, folds: KEPT_FOLDS_DEFAULT },
+    kept: { runs: 64, gates: 256, watchers: 256, live: 16, texts: 4000000, folds: KEPT_FOLDS_DEFAULT, chatMs: 5 * 60000 },
     compaction: { atTokens: 32000, keepTurns: 3, summarizeTool: true, when: "ahead", connectionId: null, model: null, effort: "main", summaryTokens: 16000 },
     recording: { outputChars: 2000 },
     review: { placement: "chips" },
@@ -99798,7 +99877,8 @@ var KEPT_DEFS = {
   watchers: { label: "Chats whose review cards are watched", limits: "How many chats' review cards the pages that show them hear about as they change.", fires: "The chat watched longest ago stops hearing, until a page asks for its cards again.", unit: "count", min: 1, none: null },
   live: { label: "Chats in the live view", limits: "How many chats' latest agent turn GM \u2192 Live keeps in memory, each with everything its agents did, and tells the pages watching it as it runs.", fires: "The chat whose turn started longest ago is let go: GM \u2192 Live shows nothing for it until its next turn, and that turn's transcript stays in GM \u2192 Workspace \u2192 transcripts.", unit: "count", min: 1, none: null },
   texts: { label: "Agent texts kept once read", limits: "How many characters of the agents' stored texts the engine keeps in memory once it has read them: the main agent's session, the GM assistant's conversation and the workspace's files, across your chats.", fires: "The text read longest ago is let go, and its next read comes from storage. At 0 every read does.", unit: "chars", min: 0, none: null },
-  folds: { label: "Messages kept worked out", limits: "How many of your chats' messages the engine keeps worked out in memory, each with what it did to the world, so working a chat out again starts where it changed rather than from its first message. Keep it above your longest chat's messages.", fires: "The message used longest ago is let go: the next time it is needed, it is worked out again from the nearest state the engine kept or saved.", unit: "count", min: 1, none: null }
+  folds: { label: "Messages kept worked out", limits: "How many of your chats' messages the engine keeps worked out in memory, each with what it did to the world, so working a chat out again starts where it changed rather than from its first message. Keep it above your longest chat's messages.", fires: "The message used longest ago is let go: the next time it is needed, it is worked out again from the nearest state the engine kept or saved.", unit: "count", min: 1, none: null },
+  chatMs: { label: "Chat kept for its agents", limits: "How long the agents of a job and the story's pages keep a chat's messages once read. A message sent, edited, deleted or swiped ends it at once.", fires: "The chat is read again. At 0 every read does.", unit: "ms", min: 0, none: null }
 };
 var COMPACTION_DEFS = {
   atTokens: { label: "Compact the session past", limits: "How long the main agent's session may grow before everything but its latest turns is summarized.", fires: "The older turns become one summary, kept with the span it replaced for a rollback.", unit: "tokens", min: 1, none: null },
@@ -99995,7 +100075,7 @@ function agentSettingsOf(raw, d = defaultAgentSettings()) {
     persist: { on: typeof persist.on === "boolean" ? persist.on : d.persist.on, turns: whole4(persist.turns, PERSIST_DEFS.turns.min) ?? d.persist.turns, minutes: whole4(persist.minutes, PERSIST_DEFS.minutes.min) ?? d.persist.minutes },
     gmOpsPerTurn: whole4(a.gmOpsPerTurn, GM_OPS_DEF.min) ?? d.gmOpsPerTurn,
     curatorOps: whole4(a.curatorOps, CURATOR_OPS_DEF.min) ?? d.curatorOps,
-    kept: { runs: whole4(kept3.runs, KEPT_DEFS.runs.min) ?? d.kept.runs, gates: whole4(kept3.gates, KEPT_DEFS.gates.min) ?? d.kept.gates, watchers: whole4(kept3.watchers, KEPT_DEFS.watchers.min) ?? d.kept.watchers, live: whole4(kept3.live, KEPT_DEFS.live.min) ?? d.kept.live, texts: whole4(kept3.texts, KEPT_DEFS.texts.min) ?? d.kept.texts, folds: whole4(kept3.folds, KEPT_DEFS.folds.min) ?? d.kept.folds },
+    kept: { runs: whole4(kept3.runs, KEPT_DEFS.runs.min) ?? d.kept.runs, gates: whole4(kept3.gates, KEPT_DEFS.gates.min) ?? d.kept.gates, watchers: whole4(kept3.watchers, KEPT_DEFS.watchers.min) ?? d.kept.watchers, live: whole4(kept3.live, KEPT_DEFS.live.min) ?? d.kept.live, texts: whole4(kept3.texts, KEPT_DEFS.texts.min) ?? d.kept.texts, folds: whole4(kept3.folds, KEPT_DEFS.folds.min) ?? d.kept.folds, chatMs: whole4(kept3.chatMs, KEPT_DEFS.chatMs.min) ?? d.kept.chatMs },
     compaction: compactionOf(a.compaction, d.compaction),
     recording: { outputChars: whole4(recording.outputChars, OUTPUT_CHARS_DEF.min) ?? d.recording.outputChars },
     review: { placement: oneOf3(review.placement, REVIEW_PLACEMENTS, d.review.placement) },
@@ -115153,9 +115233,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path2 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "84c467d1e4015cbfb7723f7dd621f7ef49663077ee9413f0fec38081a7d400b5";
+  const sha256 = "e6cbef44708aa7bbb73374c80f146a863079fa08eb8cad042c5ecb0585042b5a";
   const tools = ["5db39011b1a09652e3360031f99d4092", "b2101fc2b5d70b51c9dccdfef28a3f73"].filter((f) => f !== undefined);
-  return { id: "da77a3c6", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
+  return { id: "f525a88e", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -117373,6 +117453,7 @@ class MessageCache {
   copies = new Map;
   reading = new Map;
   onRead = null;
+  revs = 0;
   constructor(inner) {
     this.inner = inner;
     inner.on("MESSAGE_SENT", (e) => this.change(e.chatId, (list3) => sent(list3, e.message)));
@@ -117392,7 +117473,8 @@ class MessageCache {
     const chats = {
       ...inner.chats,
       messages: (chatId, userId) => this.messages(chatId, userId),
-      writeMetadata: (chatId, messageId, bag, userId) => this.writeMetadata(chatId, messageId, bag, userId)
+      writeMetadata: (chatId, messageId, bag, userId) => this.writeMetadata(chatId, messageId, bag, userId),
+      stamp: (chatId, userId) => this.copies.get(`${userId}\x00${chatId}`)?.rev ?? null
     };
     this.host = new Proxy(inner, {
       get: (target, prop) => {
@@ -117434,7 +117516,7 @@ class MessageCache {
       const whole5 = !reading.forgotten && reading.changes.every((change2) => change2(list3));
       reading.changes.length = 0;
       if (whole5)
-        this.keep(key, { chatId, userId, messages: list3 });
+        this.keep(key, { chatId, userId, messages: list3, rev: ++this.revs });
       this.onRead?.(chatId);
       return whole5 ? list3 : read;
     }, (error) => {
@@ -117462,9 +117544,14 @@ class MessageCache {
     });
   }
   change(chatId, apply) {
-    for (const [key, copy] of this.copies)
-      if (copy.chatId === chatId && !apply(copy.messages))
+    for (const [key, copy] of this.copies) {
+      if (copy.chatId !== chatId)
+        continue;
+      if (apply(copy.messages))
+        copy.rev = ++this.revs;
+      else
         this.copies.delete(key);
+    }
     for (const reading of this.reading.values())
       if (reading.chatId === chatId)
         reading.changes.push(apply);
@@ -120385,12 +120472,12 @@ function nullableObject(args, key) {
 }
 
 // src/backend/agents/tools/workspace.ts
-async function chatHead(rt, chatId, userId) {
+async function chatHead(rt, chatId, userId, messages) {
   const run2 = await rt.runOf(chatId, userId);
   const core = run2 ? await rt.ledger.core(chatId, userId) : null;
   if (!run2 || !core)
     return null;
-  const observed = toChain(await rt.host.chats.messages(chatId, userId));
+  const observed = toChain(await (messages ? messages() : rt.host.chats.messages(chatId, userId)));
   const head = core.renderState(observed);
   return head ? { run: run2, core, observed, world: head.world, state: head.state } : null;
 }
@@ -126076,6 +126163,81 @@ async function worldBuild(rt, chatId, userId, heard) {
   };
 }
 
+// src/backend/chat-read.ts
+function readOf2(messages) {
+  const counted5 = new Map;
+  return {
+    messages,
+    numbered: new Map(messages.map((m) => [m.index, m])),
+    players: messages.filter((m) => m.isUser).length,
+    tokens(count3) {
+      let total = counted5.get(count3);
+      if (total === undefined) {
+        total = messages.reduce((sum2, m) => sum2 + count3(m.content), 0);
+        counted5.set(count3, total);
+      }
+      return total;
+    }
+  };
+}
+
+class ChatReads {
+  host;
+  now;
+  held = new Map;
+  constructor(host, now) {
+    this.host = host;
+    this.now = now;
+    const end = (chatId) => {
+      for (const [key, held3] of this.held)
+        if (held3.chatId === chatId)
+          this.held.delete(key);
+    };
+    host.on("MESSAGE_SENT", (e) => end(e.chatId));
+    host.on("MESSAGE_EDITED", (e) => end(e.chatId));
+    host.on("MESSAGE_SWIPED", (e) => end(e.chatId));
+    host.on("MESSAGE_DELETED", (e) => end(e.chatId));
+    host.on("GENERATION_ENDED", (e) => end(e.chatId));
+    host.on("CHAT_DELETED", (e) => end(e.chatId));
+    host.on("CHAT_CHANGED", (e) => {
+      if (e.renamed)
+        end(e.chatId);
+    });
+  }
+  read(chatId, userId, keepMs) {
+    const now = this.now();
+    for (const [key2, held4] of this.held)
+      if (held4.until <= now)
+        this.held.delete(key2);
+    const key = `${userId}\x00${chatId}`;
+    const { chats } = this.host;
+    const kept4 = this.held.get(key);
+    if (kept4 && now - kept4.at < keepMs && (kept4.stamp === undefined || chats.stamp === undefined || chats.stamp(chatId, userId) === kept4.stamp))
+      return kept4.read;
+    const before = chats.stamp?.(chatId, userId) ?? null;
+    const read = chats.messages(chatId, userId).then((messages) => {
+      held3.stamp = before ?? chats.stamp?.(chatId, userId) ?? null;
+      return readOf2(messages);
+    });
+    const held3 = { chatId, read, at: now, until: now + keepMs, stamp: undefined };
+    if (keepMs <= 0)
+      return held3.read;
+    this.held.set(key, held3);
+    held3.read.catch(() => {
+      if (this.held.get(key) === held3)
+        this.held.delete(key);
+    });
+    return held3.read;
+  }
+}
+var READS = new WeakMap;
+function chatRead(host, at3, keepMs) {
+  let reads = READS.get(host);
+  if (!reads)
+    READS.set(host, reads = new ChatReads(host, () => Date.now()));
+  return reads.read(at3.chatId, at3.userId, keepMs);
+}
+
 // src/backend/agents/tools/read-view.ts
 function viewRouting(rt, userId, settings) {
   return {
@@ -126305,11 +126467,11 @@ function outsideReader(rt, env) {
       const core = await rt.ledger.core(env.chatId, env.userId);
       if (!core)
         throw new Error("this chat plays no LumiRPEngine world");
-      const chain = toChain(await rt.host.chats.messages(env.chatId, env.userId));
+      const settings = await rt.settings.get(env.userId);
+      const chain = toChain((await chatRead(rt.host, env, settings.agents.kept.chatMs)).messages);
       const head = core.renderState(chain);
       if (!head)
         throw new Error("this chat's world isn't loaded");
-      const settings = await rt.settings.get(env.userId);
       return readView({
         knowledge: env.knowledge,
         marks: env.marks,
@@ -130109,6 +130271,9 @@ var STORY_TOOLS = [
   }
 ];
 
+// src/shared/story-pages.ts
+var PREPARE_DEPTHS = ["outline", "key", "all"];
+
 // src/engine/story/checks.ts
 var long = (field3, size2, max2) => ({ code: "long", vars: { field: field3, size: String(size2), max: String(max2) } });
 var many = (field3, count3, max2) => ({ code: "many", vars: { field: field3, count: String(count3), max: String(max2) } });
@@ -130162,6 +130327,11 @@ function inReach2(reg, world, state2, where, by) {
   return Object.keys(state2.entities).sort().filter((id2) => together(world, where, placeOfEntity(state2, id2)) && kindIs(reg, world, state2.entities[id2]?.kind ?? "", "person") && !isGone(state2, id2) && acts(world, state2, id2)).map((id2) => id2 === world.pov ? "player" : id2).filter((who3) => who3 !== by).map((who3) => ({ who: who3, reach: "whole" }));
 }
 
+// src/backend/story/prepare-run.ts
+function prepareRun(prepare3, texts2) {
+  return { allowance: { wallMs: prepare3.runMinutes * 60000, toolTurns: prepare3.runRounds, tokensIn: null, tokensOut: null }, planWords: renderPrompt(PREPARE_NOTE.runWords, texts2, {}) };
+}
+
 // src/backend/story/record.ts
 function storyRecords(core, chain) {
   const out = [];
@@ -130196,10 +130366,10 @@ function basisIn(chain, core) {
   const last = chain.at(-1);
   return last ? { messageId: last.id, swipeId: last.swipeId } : null;
 }
-async function chatNow(rt, chatId, userId) {
+async function chatNow(rt, chatId, userId, messages) {
   const run2 = await rt.runOf(chatId, userId);
   const core = run2 ? await rt.ledger.core(chatId, userId) : null;
-  return core ? { core, observed: toChain(await rt.host.chats.messages(chatId, userId)) } : null;
+  return core ? { core, observed: toChain(await (messages ? messages() : rt.host.chats.messages(chatId, userId))) } : null;
 }
 function turnStoryPort(rt, at3) {
   return {
@@ -130264,7 +130434,7 @@ function chatStoryPort(rt, at3) {
     turn: at3.turn,
     staged: false,
     async read() {
-      const now = await chatNow(rt, at3.chatId, at3.userId);
+      const now = await chatNow(rt, at3.chatId, at3.userId, at3.messages);
       if (!now)
         return null;
       const { core, observed } = now;
@@ -130325,6 +130495,12 @@ async function keepStory(ledger, at3, change2) {
 
 // src/backend/story/prepare.ts
 var STRETCH_STATES = ["planned", "open", "recorded", "dropped"];
+var SAID_HOWS = ["start", "told", "revise", "kept"];
+var LOG_WHATS = ["planned", "revised", "said", "answered", "approved", "depth", "cap", "opened", "recorded", "dropped", "relived", "outlined", "profiled", "paused", "resumed", "cancelled", "carried", "stopped", "reopened", "finished"];
+var LOG_KEPT2 = 200;
+function logPrepare(state2, entry) {
+  return { ...state2, log: [...state2.log ?? [], entry].slice(-LOG_KEPT2) };
+}
 var isWord2 = (v5) => typeof v5 === "string" && v5 !== "";
 var isText2 = (v5) => typeof v5 === "string";
 var isCount2 = (v5) => typeof v5 === "number" && Number.isSafeInteger(v5) && v5 >= 0;
@@ -130335,28 +130511,78 @@ function stretchOf(raw) {
   const state2 = STRETCH_STATES.find((s) => s === raw.state);
   if (state2 === undefined || !(raw.through === null || isCount2(raw.through)))
     return null;
-  return { id: raw.id, from: raw.from, to: raw.to, fromId: raw.fromId, toId: raw.toId, why: raw.why, who: raw.who, state: state2, through: raw.through, beats: raw.beats, reckoned: raw.reckoned };
+  return { id: raw.id, from: raw.from, to: raw.to, fromId: raw.fromId, toId: raw.toId, why: raw.why, who: raw.who, state: state2, through: raw.through, beats: raw.beats, reckoned: raw.reckoned, ...raw.key === true ? { key: true } : {}, ...isWords2(raw.reached) ? { reached: raw.reached } : {}, ...isWords2(raw.relived) ? { relived: raw.relived } : {} };
 }
 function principalOf(raw) {
   return isRecord(raw) && isWord2(raw.id) && isText2(raw.name) && isText2(raw.why) ? { id: raw.id, name: raw.name, why: raw.why } : null;
 }
-function wordOf(raw) {
-  if (!isRecord(raw) || typeof raw.asked !== "boolean" || typeof raw.approved !== "boolean" || !isCount2(raw.for) || !isCount2(raw.ceiling) || !(raw.cap === null || isCount2(raw.cap)) || !Array.isArray(raw.said) || !raw.said.every(isText2))
+function saidOf(raw) {
+  if (typeof raw === "string")
+    return { text: raw, how: "kept", answer: null };
+  if (!isRecord(raw) || !isText2(raw.text) || !(raw.answer === null || isText2(raw.answer)))
     return null;
-  return { asked: raw.asked, approved: raw.approved, for: raw.for, ceiling: raw.ceiling, cap: raw.cap, said: raw.said };
+  const how = SAID_HOWS.find((h) => h === raw.how);
+  return how === undefined ? null : { text: raw.text, how, answer: raw.answer };
+}
+function wordOf(raw) {
+  if (!isRecord(raw) || typeof raw.asked !== "boolean" || typeof raw.approved !== "boolean" || !isCount2(raw.for) || !isCount2(raw.ceiling) || !(raw.cap === null || isCount2(raw.cap)) || !Array.isArray(raw.said))
+    return null;
+  const said2 = raw.said.map(saidOf);
+  if (said2.some((s) => s === null))
+    return null;
+  const depth2 = PREPARE_DEPTHS.find((d) => d === raw.depth);
+  return { asked: raw.asked, approved: raw.approved, for: raw.for, ceiling: raw.ceiling, cap: raw.cap, said: said2, revised: raw.revised === true, ...depth2 ? { depth: depth2 } : {} };
+}
+function chatOf(raw) {
+  if (!isRecord(raw) || !isCount2(raw.messages) || !isCount2(raw.first) || !isCount2(raw.last) || !Array.isArray(raw.covered))
+    return;
+  return { messages: raw.messages, first: raw.first, last: raw.last, covered: raw.covered.flatMap((c) => isRecord(c) && isCount2(c.from) && isCount2(c.to) ? [{ from: c.from, to: c.to }] : []) };
+}
+function logOf(raw) {
+  if (!Array.isArray(raw))
+    return;
+  return raw.flatMap((e) => {
+    const what = isRecord(e) ? LOG_WHATS.find((w) => w === e.what) : undefined;
+    if (!isRecord(e) || what === undefined || !isCount2(e.at))
+      return [];
+    return [{ at: e.at, what, ...isWord2(e.stretch) ? { stretch: e.stretch } : {}, ...isWord2(e.who) ? { who: e.who } : {}, ...isText2(e.text) ? { text: e.text } : {}, ...isCount2(e.count) ? { count: e.count } : {} }];
+  }).slice(-LOG_KEPT2);
+}
+function runsOf2(raw) {
+  if (!Array.isArray(raw))
+    return;
+  return raw.flatMap((r) => isRecord(r) && isWord2(r.job) && isCount2(r.tokens) && isCount2(r.calls) ? [{ job: r.job, tokens: r.tokens, calls: r.calls }] : []);
 }
 function prepareStateOf(raw) {
   if (!isRecord(raw) || raw.v !== 1 || raw.kind !== "history" && raw.kind !== "new" || !isText2(raw.about) || !isText2(raw.fills) || !(raw.done === null || isText2(raw.done)) || !isRecord(raw.marks))
     return null;
   const e = isRecord(raw.estimate) ? raw.estimate : null;
-  const estimate2 = e !== null && isCount2(e.author) && isCount2(e.reckoned) ? { author: e.author, reckoned: e.reckoned, call: isCount2(e.call) ? e.call : 0, from: CALL_FROM.find((f) => f === e.from) ?? "default" } : null;
+  const costs = e !== null && isRecord(e.depths) && isCount2(e.depths.outline) && isCount2(e.depths.all) && (e.depths.key === null || isCount2(e.depths.key)) ? { outline: e.depths.outline, key: e.depths.key, all: e.depths.all } : null;
+  const estimate2 = e !== null && isCount2(e.author) && isCount2(e.reckoned) ? { author: e.author, reckoned: e.reckoned, call: isCount2(e.call) ? e.call : 0, from: CALL_FROM.find((f) => f === e.from) ?? "default", ...costs ? { depths: costs } : {} } : null;
+  const recommended = isRecord(raw.depth) ? PREPARE_DEPTHS.find((d) => isRecord(raw.depth) && d === raw.depth.recommended) : undefined;
+  const depth2 = recommended !== undefined && isRecord(raw.depth) && isText2(raw.depth.why) ? { recommended, why: raw.depth.why } : null;
   const word = wordOf(raw.word);
   const { scene: scene2, notebook } = raw.marks;
   const principals = Array.isArray(raw.principals) ? raw.principals.map(principalOf) : [null];
   const stretches = Array.isArray(raw.stretches) ? raw.stretches.map(stretchOf) : [null];
   if (estimate2 === null || word === null || !(scene2 === null || isWord2(scene2)) || !(notebook === null || isWord2(notebook)) || principals.some((p) => p === null) || stretches.some((s) => s === null))
     return null;
-  return { v: 1, kind: raw.kind, about: raw.about, principals, stretches, fills: raw.fills, estimate: estimate2, word, done: raw.done, marks: { scene: scene2, notebook } };
+  const chat = chatOf(raw.chat);
+  const log = logOf(raw.log);
+  const runs = runsOf2(raw.runs);
+  const listed6 = Array.isArray(raw.read) ? raw.read : [];
+  const read = SURVEY_PARTS.filter((p) => listed6.includes(p));
+  return { v: 1, kind: raw.kind, about: raw.about, principals, stretches, fills: raw.fills, estimate: estimate2, word, done: raw.done, marks: { scene: scene2, notebook }, surveyed: raw.surveyed === true, ...read.length > 0 ? { read } : {}, ...depth2 ? { depth: depth2 } : {}, ...chat ? { chat } : {}, ...log ? { log } : {}, ...isCount2(raw.relivedAt) ? { relivedAt: raw.relivedAt } : {}, ...runs ? { runs } : {} };
+}
+var SURVEY_PARTS = ["summaries", "lore"];
+function unplanned(kind, said2, revised) {
+  return { v: 1, kind, about: "", principals: [], stretches: [], fills: "", estimate: { author: 0, reckoned: 0, call: 0, from: "default" }, word: { asked: revised, approved: false, for: 0, ceiling: 0, cap: null, said: said2, revised }, done: null, marks: { scene: null, notebook: null }, surveyed: false };
+}
+function planned2(state2) {
+  return state2.principals.length > 0;
+}
+function unanswered(state2) {
+  return state2.word.said.filter((s) => s.answer === null);
 }
 function estimateOf(state2) {
   return Math.max(state2.estimate.author, state2.estimate.reckoned);
@@ -130364,6 +130590,17 @@ function estimateOf(state2) {
 function waits(state2) {
   return state2.done === null && state2.word.asked && !state2.word.approved;
 }
+function depthOf(state2) {
+  return state2.word.depth ?? state2.depth?.recommended ?? "all";
+}
+function within7(s, depth2) {
+  return s.state === "open" || s.state === "recorded" || depth2 === "all" || depth2 === "key" && s.key === true;
+}
+function depthsOffered(stretches) {
+  const live = stretches.filter((s) => s.state !== "dropped");
+  return PREPARE_DEPTHS.filter((d) => d === "outline" || (d === "key" ? live.some((s) => s.key === true) : live.length > 0));
+}
+var DEPTH_NOTE = { outline: PREPARE_NOTE.depthOutline, key: PREPARE_NOTE.depthKey, all: PREPARE_NOTE.depthAll };
 var STATE_OPEN = "<!-- lre-prepare";
 var STATE_CLOSE = "-->";
 function stateInText(text7) {
@@ -130386,14 +130623,16 @@ function prepareFileText(state2, texts2) {
   const names3 = new Map(state2.principals.map((p) => [p.id, p.name]));
   const recorded2 = state2.stretches.filter((s) => s.state === "recorded").length;
   const live = state2.stretches.filter((s) => s.state !== "dropped").length;
-  const status = state2.done !== null ? t(PREPARE_NOTE.fileDone, { note: state2.done === "" ? "" : ` ${state2.done}` }) : waits(state2) ? t(PREPARE_NOTE.fileWaits, { estimate: count3(estimateOf(state2)), ceiling: count3(state2.word.ceiling) }) : t(PREPARE_NOTE.fileUnder, { recorded: String(recorded2), stretches: String(live) });
-  const stateWords = (s) => s.state === "open" ? t(PREPARE_NOTE.fileStateOpen, { beats: String(s.beats.length), through: s.through === null ? String(s.from - 1) : String(s.through) }) : s.state === "recorded" ? t(PREPARE_NOTE.fileStateRecorded, { beats: String(s.beats.length) }) : t(s.state === "dropped" ? PREPARE_NOTE.fileStateDropped : PREPARE_NOTE.fileStatePlanned);
+  const status = !planned2(state2) ? t(PREPARE_NOTE.fileUnplanned) : state2.done !== null ? t(PREPARE_NOTE.fileDone, { note: state2.done === "" ? "" : ` ${state2.done}` }) : waits(state2) ? state2.word.revised ? t(PREPARE_NOTE.fileRevised) : t(PREPARE_NOTE.fileWaits, { estimate: count3(estimateOf(state2)), ceiling: count3(state2.word.ceiling) }) : t(PREPARE_NOTE.fileUnder, { recorded: String(recorded2), stretches: String(live) });
+  const stateWords = (s) => s.state === "open" ? t(PREPARE_NOTE.fileStateOpen, { beats: String(s.beats.length), through: s.through === null ? String(s.from - 1) : String(s.through) }) : s.state === "recorded" ? t(PREPARE_NOTE.fileStateRecorded, { beats: String(s.beats.length) }) : t(s.state === "dropped" ? PREPARE_NOTE.fileStateDropped : within7(s, depthOf(state2)) ? PREPARE_NOTE.fileStatePlanned : PREPARE_NOTE.fileStateUnchosen);
   const principals = state2.principals.map((p) => t(PREPARE_NOTE.filePrincipal, { name: p.name, id: p.id, why: p.why })).join(`
 `);
   const stretches = state2.stretches.map((s) => t(PREPARE_NOTE.fileStretch, { stretch: s.id, from: String(s.from), to: String(s.to), state: stateWords(s), why: s.why, who: s.who.map((id2) => names3.get(id2) ?? id2).join(", ") || none })).join(`
 `);
   const cost = t(PREPARE_NOTE.fileCost, { estimate: count3(estimateOf(state2)), call: count3(state2.estimate.call), from: t(CALL_NOTE[state2.estimate.from]), author: count3(state2.estimate.author), cap: state2.word.cap === null ? "" : t(PREPARE_NOTE.fileCap, { cap: count3(state2.word.cap) }) });
-  const word = (state2.word.approved ? state2.word.asked ? t(PREPARE_NOTE.fileApproved) : t(PREPARE_NOTE.fileAuto, { ceiling: count3(state2.word.ceiling) }) : t(PREPARE_NOTE.fileAsked)) + state2.word.said.map((text7) => t(PREPARE_NOTE.fileSaid, { text: text7 })).join("");
+  const said2 = state2.word.said.map((s) => t(PREPARE_NOTE.fileSaid, { text: s.text }) + (s.answer === null ? "" : t(PREPARE_NOTE.fileAnswer, { answer: s.answer }))).join("");
+  const depth2 = state2.depth ? t(PREPARE_NOTE.fileDepth, { depth: t(DEPTH_NOTE[depthOf(state2)]), recommended: t(DEPTH_NOTE[state2.depth.recommended]), why: state2.depth.why }) : "";
+  const word = (state2.word.approved ? state2.word.asked ? t(PREPARE_NOTE.fileApproved) : t(PREPARE_NOTE.fileAuto, { ceiling: count3(state2.word.ceiling) }) : t(PREPARE_NOTE.fileAsked)) + depth2 + said2;
   const body = t(PREPARE_NOTE.file, { status, about: state2.about || none, principals: principals || none, stretches: stretches || none, fills: state2.fills || none, cost, word });
   return `${body}
 
@@ -130450,9 +130689,6 @@ function reckonLeft(plan2, call) {
   const stretches = plan2.stretches.filter((s) => s.state === "planned" || s.state === "open").reduce((sum2, s) => sum2 + s.reckoned, 0);
   return stretches + (plan2.principals.length * (AUTHOR_CALLS_A_PRINCIPAL + (plan2.kind === "history" ? OUTLINE_CALLS : 0)) + CLOSING_CALLS) * call;
 }
-function byNumber(messages) {
-  return new Map(messages.map((m) => [m.index, m]));
-}
 function chatKind(messages) {
   return messages.some((m) => m.isUser) ? "history" : "new";
 }
@@ -130499,17 +130735,19 @@ function planStretches(asked2, numbered2, most, held3, reckon) {
         continue;
       const tokens3 = inside2.reduce((sum2, m) => sum2 + messageTokens(m.content), 0);
       next++;
-      out.push({ id: `s${next}`, from: head.index, to: tail2.index, fromId: head.id, toId: tail2.id, why: a.why, who: [...a.who], state: "planned", through: null, beats: [], reckoned: stretchCalls(tokens3, a.who.length, reckon.readChars) * reckon.call });
+      out.push({ id: `s${next}`, from: head.index, to: tail2.index, fromId: head.id, toId: tail2.id, why: a.why, who: [...a.who], state: "planned", through: null, beats: [], reckoned: stretchCalls(tokens3, a.who.length, reckon.readChars) * reckon.call, ...a.key ? { key: true } : {} });
     }
   }
   return { stretches: out.sort((x, y) => x.from - y.from), splits };
 }
 function wordFor(estimate2, ceiling2, before) {
-  const kept4 = { cap: before?.cap ?? null, said: before?.said ?? [] };
+  const kept4 = { cap: before?.cap ?? null, said: before?.said ?? [], revised: before?.revised === true && !before.approved, ...before?.depth ? { depth: before.depth } : {} };
+  if (kept4.revised)
+    return { asked: true, approved: false, for: estimate2, ceiling: ceiling2, ...kept4 };
   if (estimate2 <= ceiling2)
     return { asked: false, approved: true, for: estimate2, ceiling: ceiling2, ...kept4 };
   if (before && before.approved && before.asked && estimate2 <= before.for)
-    return { ...before, ceiling: ceiling2 };
+    return { ...before, ceiling: ceiling2, revised: false };
   return { asked: true, approved: false, for: estimate2, ceiling: ceiling2, ...kept4 };
 }
 function pastOf(beat, who3) {
@@ -130532,6 +130770,38 @@ function reachedBy(path3, beats, who3) {
   const inStretch = path3.beats.filter((b) => ids2.has(b.beat.id));
   return who3.filter((p) => inStretch.some((b) => pastOf(b.beat, p)));
 }
+function stillToRelive(state2) {
+  const owed = new Set(state2.stretches.flatMap((s) => s.state === "recorded" ? (s.reached ?? []).filter((id2) => !(s.relived ?? []).includes(id2)) : []));
+  return state2.principals.map((p) => p.id).filter((id2) => owed.has(id2));
+}
+function relivedOf(path3, beats, reached) {
+  const at3 = new Map(path3.beats.map((b, i) => [b.beat.id, i]));
+  const ids2 = new Set(beats);
+  return reached.filter((p) => {
+    const last = path3.beats.findLastIndex((b) => ids2.has(b.beat.id) && pastOf(b.beat, p));
+    const mark2 = castOn(path3, p)?.digestedTo;
+    return last < 0 || mark2 !== undefined && (at3.get(mark2) ?? -1) >= last;
+  });
+}
+function withRelived(state2, path3, now) {
+  const principals = state2.principals.map((p) => p.id);
+  let logged = state2;
+  let changed = false;
+  const stretches = state2.stretches.map((s) => {
+    if (s.state !== "recorded")
+      return s;
+    const reached = s.reached ?? reachedBy(path3, s.beats, principals);
+    const relived = relivedOf(path3, s.beats, reached);
+    const before = s.relived ?? [];
+    if (s.reached !== undefined && relived.length === before.length && relived.every((p) => before.includes(p)))
+      return s;
+    changed = true;
+    for (const p of relived.filter((x) => !before.includes(x)))
+      logged = logPrepare(logged, { at: now, what: "relived", stretch: s.id, who: p });
+    return { ...s, reached, relived };
+  });
+  return changed ? { ...logged, stretches, relivedAt: now } : state2;
+}
 var spanOf = (s) => `#${s.from} to #${s.to}`;
 async function preparationLeft(files, state2, path3, texts2) {
   const t = (id2, vars = {}) => renderPrompt(id2, texts2, vars);
@@ -130542,7 +130812,7 @@ async function preparationLeft(files, state2, path3, texts2) {
     Promise.all(state2.principals.map(async (p) => ({ p, core: await files.read(mindPath(p.id, "core")) !== null, outline: await files.read(mindPath(p.id, "outline")) !== null })))
   ]);
   return [
-    ...state2.stretches.filter((s) => s.state === "planned" || s.state === "open").map((s) => t(PREPARE_NOTE.leftStretch, { stretch: s.id, span: spanOf(s) })),
+    ...state2.stretches.filter((s) => (s.state === "planned" || s.state === "open") && within7(s, depthOf(state2))).map((s) => t(PREPARE_NOTE.leftStretch, { stretch: s.id, span: spanOf(s) })),
     ...(path3 ? relivingNow(path3, state2.principals.map((p) => p.id)) : []).map((id2) => t(PREPARE_NOTE.leftRelive, { name: name2(id2) })),
     ...minds.flatMap(({ p, core, outline: outline2 }) => [...core ? [] : [t(PREPARE_NOTE.leftCore, { name: p.name })], ...outline2 || state2.kind === "new" ? [] : [t(PREPARE_NOTE.leftOutline, { name: p.name })]]),
     ...scene2 === null || scene2.version === state2.marks.scene ? [t(PREPARE_NOTE.leftScene)] : [],
@@ -130551,7 +130821,7 @@ async function preparationLeft(files, state2, path3, texts2) {
 }
 async function preparedNote(files, texts2, path3) {
   const { state: state2 } = await readPrepare(files);
-  if (!state2 || state2.done !== null)
+  if (!state2 || !planned2(state2) || state2.done !== null)
     return null;
   const live = state2.stretches.filter((s) => s.state !== "dropped");
   const left = await preparationLeft(files, state2, path3, texts2);
@@ -130563,7 +130833,8 @@ async function prepareEnv(rt, at3) {
   const core = rt.harness.core;
   const settings = await rt.settings.get(userId);
   const note2 = (id2) => renderPrompt(id2, settings.prompts.texts, {});
-  const head = await chatHead(rt, chatId, userId);
+  const kept4 = async () => (await chatRead(rt.host, { chatId, userId }, settings.agents.kept.chatMs)).messages;
+  const head = await chatHead(rt, chatId, userId, kept4);
   if (!head)
     return { refused: true, code: "no_world", reason: note2(WRITE_NOTE.noWorld) };
   const { view, marks } = agent.role ?? { view: "everyone", marks: true };
@@ -130582,10 +130853,10 @@ async function prepareEnv(rt, at3) {
     landed: () => [],
     said: { messageId: null, user: "", before: "" },
     reply: null,
-    job: { id: at3.job, byUser: true, ...at3.prepared && core !== null ? { spent: () => preparationSpent(core, { chatId, userId }) } : {} },
+    job: { id: at3.job, byUser: true, ...at3.prepared && core !== null ? { spent: () => preparationSpent(core, { chatId, userId }, at3.files) } : {} },
     stage: () => Promise.resolve(at3.prepared ? { refused: true, code: "prepare_world", reason: note2(PREPARE_NOTE.worldless) } : { refused: true, code: "no_basis", reason: note2(HARNESS_NOTE.noBasis) }),
     commit: () => Promise.resolve({ refused: true, code: "not_turn", reason: note2(HARNESS_NOTE.notTurn) }),
-    story: chatStoryPort(rt, { chatId, userId, turn: at3.job, on: at3.prepared ? "first" : "last" })
+    story: chatStoryPort(rt, { chatId, userId, turn: at3.job, on: at3.prepared ? "first" : "last", messages: kept4 })
   };
   return { userId, chatId, knowledge: view, marks, reader, writer: null, agent: { role: agent.def, id: agent.id, ...at3.as !== null ? { as: at3.as } : {} }, signal: at3.signal, build: null, files: at3.files, turn };
 }
@@ -130602,7 +130873,8 @@ var WORDS = {
   offerHistory: "This chat has a history. Prepare the story, and the author catches up on it and gives the people it turns on minds of their own before the first reply.",
   offerNew: "A new story. Prepare it, and the author casts the people it turns on and gives each a core of who they are before the first reply.",
   noHarness: "This chat isn't played by the harness engine, so there is nothing to prepare. Choose Harness in GM \u2192 This chat \u2192 Engine first.",
-  noCore: "The harness isn't running for this chat, so its preparation can't be reached now.",
+  noCore: "The story's preparation can't be reached: the agent runtime isn't running for this chat. Check LumiAH's page, then open this chat again.",
+  unreached: "The story's preparation can't be reached now",
   running: "The story is being prepared already. Pause, steer or cancel it.",
   noPlan: "There is no plan yet: the author writes one first.",
   noWords: "Say something first.",
@@ -130613,17 +130885,28 @@ var WORDS = {
   unwritten: "The preparation's file couldn't be written",
   held: "Held. Resume lets it go on.",
   stopped: "It stopped before it finished. Resume carries it on from its file.",
-  cancelled: "Cancelled. What it prepared stays, and resume carries it on from its file.",
+  cancelled: "Cancelled. What it prepared stays: carry it on from its file, tell the author what to change, or start over.",
   noPlanMade: "It ended before it wrote a plan.",
   scene: "The scene isn't set yet (author/scene.md).",
-  notebook: "The author's notebook isn't written yet (author/notebook.md)."
+  notebook: "The author's notebook isn't written yet (author/notebook.md).",
+  revising: "The author is revising its plan with what you said. The revised plan waits for your word.",
+  revised: "The author revised the plan for what you said. It now waits for your word: go ahead with it, or tell the author more.",
+  unanswered: "The author hasn't answered what you said yet. Its revised plan comes first, then your word on it.",
+  saidAnswered: "The author revised the plan for this.",
+  saidStart: "The author has this with the start, and answers it in its plan.",
+  saidRevise: "The author is revising the plan with this.",
+  saidTold: "The author was told, and revises the plan before it goes on.",
+  saidKept: "Kept until the preparation is resumed. The author reads it first then.",
+  saidWaiting: "Not answered yet: the run ended first. Carry the preparation on, and the author reads it first.",
+  badDepth: "Pick one of the depths this plan offers."
 };
 function jobRowOf(raw) {
   if (!isRecord(raw) || !isWord2(raw.id) || !isWord2(raw.state))
     return null;
   const usage2 = isRecord(raw.usage) ? raw.usage : {};
   const tokens3 = (isCount2(usage2.in) ? usage2.in : 0) + (isCount2(usage2.out) ? usage2.out : 0);
-  return { id: raw.id, state: raw.state, agent: isWord2(raw.agent) ? raw.agent : "", paused: raw.paused === true || raw.state === "paused", plan: isWord2(raw.plan) ? raw.plan : null, byUser: isRecord(raw.by) && raw.by.who === "user", tokens: tokens3, calls: isCount2(usage2.calls) ? usage2.calls : 0, reason: isWord2(raw.reason) ? raw.reason : null };
+  const stoppedAt = raw.stoppedAt === "allowance" || raw.stoppedAt === "day" ? raw.stoppedAt : null;
+  return { id: raw.id, state: raw.state, agent: isWord2(raw.agent) ? raw.agent : "", paused: raw.paused === true || raw.state === "paused", plan: isWord2(raw.plan) ? raw.plan : null, byUser: isRecord(raw.by) && raw.by.who === "user", tokens: tokens3, calls: isCount2(usage2.calls) ? usage2.calls : 0, reason: isWord2(raw.reason) ? raw.reason : null, stoppedAt, ...raw.lasting === true ? { lasting: true } : {} };
 }
 var UNDER_WAY = ["queued", "running", "paused"];
 var JOBS_LOOKED = 50;
@@ -130633,16 +130916,25 @@ async function jobRows(core, at3) {
   return rows.flatMap((raw) => jobRowOf(raw) ?? []);
 }
 var preparing = (job) => job.byUser && job.plan === PREPARE_PATH;
-function spentOf(core, at3, rows) {
+function spentOf(core, at3, rows, kept4) {
   let tokens3 = 0;
   let calls = 0;
   let last = 0;
+  const listed6 = new Set;
   for (const job of rows.filter(preparing)) {
+    listed6.add(job.id);
     const live = UNDER_WAY.includes(job.state) ? core.spent?.(at3.userId, job.id) ?? null : null;
-    tokens3 += live ? live.in + live.out : job.tokens;
-    calls += live ? live.calls : job.calls;
+    const was = kept4.find((k) => k.job === job.id);
+    tokens3 += live ? live.in + live.out : Math.max(job.tokens, was?.tokens ?? 0);
+    calls += live ? live.calls : Math.max(job.calls, was?.calls ?? 0);
     if (live && live.last > 0)
       last = live.last;
+  }
+  for (const k of kept4) {
+    if (listed6.has(k.job))
+      continue;
+    tokens3 += k.tokens;
+    calls += k.calls;
   }
   if (calls > 0)
     return { tokens: tokens3, calls, call: { tokens: last > 0 ? last : Math.round(tokens3 / calls), from: "job" } };
@@ -130651,42 +130943,58 @@ function spentOf(core, at3, rows) {
   const before = author ?? (reply !== null && reply.calls > 0 ? { tokens: reply.in + reply.out, calls: reply.calls } : null);
   return { tokens: tokens3, calls, call: before ? { tokens: Math.round(before.tokens / before.calls), from: "chat" } : null };
 }
-async function preparationSpent(core, at3) {
-  return spentOf(core, at3, await jobRows(core, at3));
+async function preparationSpent(core, at3, files) {
+  const [rows, file2] = await Promise.all([jobRows(core, at3), files ? readPrepare(files) : null]);
+  return spentOf(core, at3, rows, file2?.state?.runs ?? []);
 }
 function waitsWords(state2) {
+  if (state2.word.revised)
+    return WORDS.revised;
   return `The plan is reckoned at ${count3(estimateOf(state2))} tokens in all, the author's own work included, above your ceiling of ${count3(state2.word.ceiling)}. Approve it, steer it, or cap what the whole preparation may spend.`;
 }
 function pageState(state2, job) {
   if (state2 !== null && state2.done !== null)
     return { state: "done", note: null };
+  const plan2 = state2 !== null && planned2(state2) ? state2 : null;
+  const open = plan2 !== null && unanswered(plan2).length > 0;
   if (job !== null && UNDER_WAY.includes(job.state)) {
     if (job.paused)
       return { state: "paused", note: WORDS.held };
-    if (state2 === null)
+    if (plan2 === null)
       return { state: "planning", note: null };
-    return waits(state2) ? { state: "waiting", note: waitsWords(state2) } : { state: "running", note: null };
+    if (open)
+      return { state: "revising", note: WORDS.revising };
+    return waits(plan2) ? { state: "waiting", note: waitsWords(plan2) } : { state: "running", note: null };
   }
-  if (state2 === null) {
+  if (plan2 === null) {
     if (job === null)
       return { state: "none", note: null };
     return job.state === "cancelled" ? { state: "cancelled", note: WORDS.cancelled } : { state: "failed", note: job.reason ?? WORDS.noPlanMade };
   }
-  if (waits(state2))
-    return { state: "waiting", note: waitsWords(state2) };
+  if (waits(plan2) && !open)
+    return { state: "waiting", note: waitsWords(plan2) };
   if (job?.state === "cancelled")
     return { state: "cancelled", note: WORDS.cancelled };
+  const ended2 = plan2.log?.findLast((e) => e.what === "carried" || e.what === "stopped");
+  if (ended2?.what === "stopped")
+    return { state: "failed", note: ended2.text ?? WORDS.stopped };
   if (job !== null && job.state !== "done")
     return { state: "failed", note: job.reason ?? WORDS.stopped };
   return { state: "paused", note: WORDS.stopped };
 }
-async function notYetOf(rt, at3, files, state2) {
+function saidViews(state2, shown5) {
+  return (state2?.word.said ?? []).map((s) => {
+    if (s.answer !== null)
+      return { text: s.text, status: WORDS.saidAnswered, answer: s.answer };
+    const status = shown5 === "paused" ? WORDS.saidKept : shown5 === "planning" || shown5 === "revising" || shown5 === "running" || shown5 === "waiting" ? s.how === "start" ? WORDS.saidStart : s.how === "revise" ? WORDS.saidRevise : WORDS.saidTold : WORDS.saidWaiting;
+    return { text: s.text, status, answer: null };
+  });
+}
+async function notYetOf(files, state2) {
   const name2 = (id2) => state2.principals.find((p) => p.id === id2)?.name ?? id2;
-  const out = state2.stretches.filter((s) => s.state === "planned" || s.state === "open").map((s) => `${s.id}, #${s.from} to #${s.to}: ${s.state === "open" ? "being recorded" : "not relived yet"}`);
-  const read = await chatStoryPort(rt, { ...at3, turn: "", on: "first" }).read();
-  if (read)
-    for (const id2 of relivingNow(read.path, state2.principals.map((p) => p.id)))
-      out.push(`${name2(id2)}: moments recorded, not relived yet`);
+  const out = state2.stretches.filter((s) => (s.state === "planned" || s.state === "open") && within7(s, depthOf(state2))).map((s) => `${s.id}, #${s.from} to #${s.to}: ${s.state === "open" ? "being recorded" : "not relived yet"}`);
+  for (const id2 of stillToRelive(state2))
+    out.push(`${name2(id2)}: moments recorded, not relived yet`);
   const versionOf = async (path3) => (await files.read(path3))?.version ?? null;
   for (const p of state2.principals) {
     const [core, outline2] = await Promise.all([versionOf(mindPath(p.id, "core")), state2.kind === "history" ? versionOf(mindPath(p.id, "outline")) : Promise.resolve("")]);
@@ -130703,49 +131011,81 @@ async function notYetOf(rt, at3, files, state2) {
   return out;
 }
 async function viewOf2(rt, chatId, userId) {
-  const none = (note2) => ({ offer: null, state: "none", plan: null, estimate: null, spent: 0, cap: null, steered: [], notYet: [], note: note2, names: {} });
+  const none = (note2, state3 = "none") => ({ offer: null, state: state3, plan: null, estimate: null, spent: 0, cap: null, steered: [], notYet: [], note: note2, names: {} });
   if (await rt.chatKnowledge.engine(chatId, userId) !== "harness")
     return none(WORDS.noHarness);
   const core = rt.harness.core;
   const files = rt.harness.files?.({ chatId, userId }) ?? null;
   if (core === null || files === null)
-    return none(WORDS.noCore);
-  const [file2, rows, messages] = await Promise.all([readPrepare(files), jobRows(core, { chatId, userId }), rt.host.chats.messages(chatId, userId)]);
+    return none(await rt.harness.blocked(userId, chatId) ?? WORDS.noCore, "unreachable");
+  let read;
+  try {
+    read = await Promise.all([readPrepare(files), jobRows(core, { chatId, userId })]);
+  } catch (error) {
+    return none(`${WORDS.unreached}: ${error instanceof Error ? error.message : String(error)}`, "unreachable");
+  }
+  const [file2, rows] = read;
   const { state: state2 } = file2;
-  const shown5 = pageState(state2, rows.find(preparing) ?? null);
-  const names3 = Object.fromEntries((state2?.principals ?? []).map((p) => [p.id, p.name]));
-  const plan2 = state2 ? {
-    story: state2.about,
-    principals: state2.principals.map((p) => ({ entity: p.id, why: p.why })),
-    stretches: state2.stretches.map((s) => ({ id: s.id, from: s.from, to: s.to, why: s.why, who: [...s.who], state: s.state, beats: s.beats.length })),
-    summaries: state2.fills === "" ? null : state2.fills,
-    authorEstimate: state2.estimate.author,
-    reckoned: state2.estimate.reckoned,
-    call: state2.estimate.call > 0 ? { tokens: state2.estimate.call, from: state2.estimate.from } : null,
-    ceiling: state2.word.ceiling
-  } : null;
+  const job = rows.find(preparing) ?? null;
+  if (job === null || !UNDER_WAY.includes(job.state)) {
+    const blocked = await rt.harness.blocked(userId, chatId);
+    if (blocked !== null)
+      return none(blocked, "unreachable");
+  }
+  const shown5 = pageState(state2, job);
+  const plan2 = state2 !== null && planned2(state2) ? state2 : null;
+  const names3 = Object.fromEntries((plan2?.principals ?? []).map((p) => [p.id, p.name]));
   return {
-    offer: shown5.state === "none" ? (state2?.kind ?? chatKind(messages)) === "new" ? WORDS.offerNew : WORDS.offerHistory : null,
+    offer: shown5.state === "none" ? (state2?.kind ?? chatKind((await chatRead(rt.host, { chatId, userId }, (await rt.settings.get(userId)).agents.kept.chatMs)).messages)) === "new" ? WORDS.offerNew : WORDS.offerHistory : null,
     state: shown5.state,
-    plan: plan2,
-    estimate: state2 ? estimateOf(state2) : null,
-    spent: spentOf(core, { chatId, userId }, rows).tokens,
+    plan: plan2 ? {
+      story: plan2.about,
+      principals: plan2.principals.map((p) => ({ entity: p.id, why: p.why })),
+      stretches: plan2.stretches.map((s) => ({ id: s.id, from: s.from, to: s.to, why: s.why, who: [...s.who], state: s.state, beats: s.beats.length, key: s.key === true, chosen: within7(s, depthOf(plan2)) })),
+      summaries: plan2.fills === "" ? null : plan2.fills,
+      authorEstimate: plan2.estimate.author,
+      reckoned: plan2.estimate.reckoned,
+      call: plan2.estimate.call > 0 ? { tokens: plan2.estimate.call, from: plan2.estimate.from } : null,
+      ceiling: plan2.word.ceiling,
+      depths: depthsOffered(plan2.stretches).flatMap((depth2) => {
+        const tokens3 = plan2.estimate.depths?.[depth2] ?? (depth2 === depthOf(plan2) ? plan2.estimate.reckoned : null);
+        return tokens3 === null || tokens3 === undefined ? [] : [{ depth: depth2, tokens: tokens3 }];
+      }),
+      recommended: { depth: plan2.depth?.recommended ?? "all", why: plan2.depth?.why ?? "" },
+      depth: depthOf(plan2)
+    } : null,
+    estimate: plan2 ? estimateOf(plan2) : null,
+    spent: spentOf(core, { chatId, userId }, rows, state2?.runs ?? []).tokens,
     cap: state2?.word.cap ?? null,
-    steered: state2 ? [...state2.word.said] : [],
-    notYet: state2 && state2.done === null ? await notYetOf(rt, { chatId, userId }, files, state2) : [],
+    steered: saidViews(state2, shown5.state),
+    notYet: plan2 && plan2.done === null ? await notYetOf(files, plan2) : [],
     note: file2.damaged ? WORDS.damaged : shown5.note,
     names: names3
   };
 }
-function taskOf(texts2, kind, word) {
-  if (word === null)
-    return renderPrompt(kind === "new" ? PREPARE_NOTE.taskNew : PREPARE_NOTE.taskHistory, texts2, {});
-  const approved = word.asked && word.approved ? renderPrompt(PREPARE_NOTE.taskApproved, texts2, { cap: word.cap === null ? "" : renderPrompt(PREPARE_NOTE.taskCap, texts2, { cap: count3(word.cap) }) }) : "";
-  const said2 = word.said.length === 0 ? "" : renderPrompt(PREPARE_NOTE.taskWords, texts2, { text: word.said.join(" ") });
-  return renderPrompt(PREPARE_NOTE.taskCarry, texts2, { word: approved, words: said2 });
+function wordsOf8(texts2, said2) {
+  return said2.map((s) => renderPrompt(PREPARE_NOTE.taskWords, texts2, { text: s.text })).join("");
 }
-async function startJob(core, at3, task) {
-  await core.ask(at3.userId, "jobs.start", { chatId: at3.chatId, agent: HARNESS_AGENT.author, task, when: "now", area: "chat", plan: PREPARE_PATH }, { chat: at3.chatId });
+function taskOf(texts2, kind, state2) {
+  const open = state2 ? unanswered(state2) : [];
+  if (state2 === null || !planned2(state2)) {
+    const first = open.length === 0 ? "" : renderPrompt(PREPARE_NOTE.taskFirst, texts2, { text: open.map((s) => s.text).join(`
+
+`) });
+    return renderPrompt(kind === "new" ? PREPARE_NOTE.taskNew : PREPARE_NOTE.taskHistory, texts2, {}) + first;
+  }
+  if (open.length > 0)
+    return renderPrompt(PREPARE_NOTE.taskRevise, texts2, { words: wordsOf8(texts2, open) });
+  const { word } = state2;
+  const approved = word.asked && word.approved ? renderPrompt(PREPARE_NOTE.taskApproved, texts2, { cap: word.cap === null ? "" : renderPrompt(PREPARE_NOTE.taskCap, texts2, { cap: count3(word.cap) }) }) : "";
+  return renderPrompt(PREPARE_NOTE.taskCarry, texts2, { word: approved });
+}
+async function startJob(core, at3, task, run2) {
+  const started = await core.ask(at3.userId, "jobs.start", { chatId: at3.chatId, agent: HARNESS_AGENT.author, task, when: "now", area: "chat", plan: PREPARE_PATH, allowance: run2.allowance, planWords: run2.planWords }, { chat: at3.chatId });
+  return isRecord(started) && isRecord(started.job) && isWord2(started.job.id) ? started.job.id : null;
+}
+async function carryOn(core, at3, texts2, state2, run2) {
+  return startJob(core, at3, taskOf(texts2, state2.kind, state2), run2);
 }
 async function preparePage(rt, at3, ask) {
   const { chatId, userId } = at3;
@@ -130756,23 +131096,23 @@ async function preparePage(rt, at3, ask) {
   const core = rt.harness.core;
   const files = rt.harness.files?.({ chatId, userId }) ?? null;
   if (core === null || files === null)
-    throw new PrepareRefused("unavailable", WORDS.noCore);
-  const { texts: texts2 } = (await rt.settings.get(userId)).prompts;
+    throw new PrepareRefused("unavailable", await rt.harness.blocked(userId, chatId) ?? WORDS.noCore);
+  const settings = await rt.settings.get(userId);
+  const { texts: texts2 } = settings.prompts;
+  const runStart = prepareRun(settings.story.prepare, texts2);
+  const now = Date.now();
   const job = (await jobRows(core, at3)).find(preparing) ?? null;
   const active = job !== null && UNDER_WAY.includes(job.state) ? job : null;
-  const say = async (text7) => {
-    if (active === null || active.state !== "running")
-      return false;
-    const said2 = await core.ask(userId, "run.say", { run: active.id, text: text7 }, { job: active.id });
+  const running = active !== null && !active.paused ? active : null;
+  const sayTo = async (run2, text7) => {
+    const said2 = await core.ask(userId, "run.say", { run: run2, text: text7 }, { job: run2 });
     return isRecord(said2) && said2.said === true;
   };
-  const change2 = async (make2) => {
-    const out = await updatePrepare(files, texts2, (now) => {
-      if (now.damaged)
-        return { stop: new PrepareRefused("conflict", WORDS.damaged) };
-      if (!now.state)
-        return { stop: new PrepareRefused("not_found", WORDS.noPlan) };
-      const next = make2(now.state);
+  const say = (text7) => running === null ? Promise.resolve(false) : sayTo(running.id, text7);
+  const kindNow = async () => chatKind((await chatRead(rt.host, at3, settings.agents.kept.chatMs)).messages);
+  const write = async (make2) => {
+    const out = await updatePrepare(files, texts2, (file2) => {
+      const next = make2(file2);
       return next instanceof PrepareRefused ? { stop: next } : next;
     });
     if ("stop" in out)
@@ -130781,6 +131121,8 @@ async function preparePage(rt, at3, ask) {
       throw new PrepareRefused("conflict", `${WORDS.unwritten}: ${out.failed}`);
     return out.state;
   };
+  const change2 = (make2) => write((file2) => file2.damaged ? new PrepareRefused("conflict", WORDS.damaged) : file2.state && planned2(file2.state) ? make2(file2.state) : new PrepareRefused("not_found", WORDS.noPlan));
+  const logged = (entry) => updatePrepare(files, texts2, (file2) => file2.state ? logPrepare(file2.state, entry) : { stop: null });
   switch (ask.op) {
     case "start": {
       if (active)
@@ -130788,32 +131130,97 @@ async function preparePage(rt, at3, ask) {
       const file2 = await readPrepare(files);
       if (file2.state !== null && file2.state.done !== null)
         throw new PrepareRefused("conflict", WORDS.done);
-      await startJob(core, at3, taskOf(texts2, file2.state?.kind ?? chatKind(await rt.host.chats.messages(chatId, userId)), file2.state?.word ?? null));
+      const kind = file2.state?.kind ?? await kindNow();
+      const about2 = (ask.about ?? "").trim();
+      const state2 = about2 === "" ? file2.state : await write((f) => {
+        const s = f.state ?? unplanned(kind, [], false);
+        return logPrepare({ ...s, word: { ...s.word, said: [...s.word.said, { text: about2, how: "start", answer: null }] } }, { at: now, what: "said", text: about2 });
+      });
+      await startJob(core, at3, taskOf(texts2, kind, state2), runStart);
+      break;
+    }
+    case "restart": {
+      if (active)
+        throw new PrepareRefused("conflict", WORDS.running);
+      const kind = (await readPrepare(files)).state?.kind ?? await kindNow();
+      const state2 = await write((f) => {
+        const s = f.state;
+        const fresh = unplanned(kind, s?.word.said ?? [], false);
+        return logPrepare({ ...fresh, stretches: (s?.stretches ?? []).filter((x) => x.state === "open" || x.state === "recorded"), word: { ...fresh.word, cap: s?.word.cap ?? null }, ...s?.log ? { log: s.log } : {}, ...s?.runs ? { runs: s.runs } : {} }, { at: now, what: "reopened" });
+      });
+      await startJob(core, at3, renderPrompt(PREPARE_NOTE.taskAfresh, texts2, {}) + wordsOf8(texts2, unanswered(state2)), runStart);
       break;
     }
     case "approve": {
-      const state2 = await change2((s) => s.done !== null ? new PrepareRefused("conflict", WORDS.done) : { ...s, word: { ...s.word, approved: true, for: Math.max(s.word.for, estimateOf(s)) } });
+      const picked2 = ask.depth === undefined ? null : PREPARE_DEPTHS.find((d) => d === ask.depth) ?? null;
+      if (ask.depth !== undefined && picked2 === null)
+        throw new PrepareRefused("bad_request", WORDS.badDepth);
+      const state2 = await change2((s) => {
+        if (s.done !== null)
+          return new PrepareRefused("conflict", WORDS.done);
+        if (unanswered(s).length > 0)
+          return new PrepareRefused("conflict", WORDS.unanswered);
+        if (picked2 !== null && !depthsOffered(s.stretches).includes(picked2))
+          return new PrepareRefused("bad_request", WORDS.badDepth);
+        const depth2 = picked2 ?? depthOf(s);
+        const reckoned = s.estimate.depths?.[depth2] ?? s.estimate.reckoned;
+        return logPrepare({ ...s, estimate: { ...s.estimate, reckoned }, word: { ...s.word, approved: true, revised: false, for: Math.max(s.word.for, s.estimate.author, reckoned), ...s.depth ? { depth: depth2 } : {} } }, { at: now, what: "approved", text: depth2 });
+      });
       const cap = state2.word.cap === null ? "" : renderPrompt(PREPARE_NOTE.taskCap, texts2, { cap: count3(state2.word.cap) });
       if (!await say(renderPrompt(PREPARE_NOTE.sayApproved, texts2, { cap })) && active === null)
-        await startJob(core, at3, taskOf(texts2, state2.kind, state2.word));
+        await startJob(core, at3, taskOf(texts2, state2.kind, state2), runStart);
+      break;
+    }
+    case "depth": {
+      const depth2 = PREPARE_DEPTHS.find((d) => d === ask.depth);
+      if (depth2 === undefined)
+        throw new PrepareRefused("bad_request", WORDS.badDepth);
+      const before = (await readPrepare(files)).state;
+      const deeper = before !== null && before.stretches.some((x) => x.state === "planned" && within7(x, depth2) && !within7(x, depthOf(before)));
+      const state2 = await change2((s) => {
+        if (!depthsOffered(s.stretches).includes(depth2))
+          return new PrepareRefused("bad_request", WORDS.badDepth);
+        if (unanswered(s).length > 0)
+          return new PrepareRefused("conflict", WORDS.unanswered);
+        const reckoned = s.estimate.depths?.[depth2] ?? s.estimate.reckoned;
+        const word = { ...s.word, depth: depth2, ...s.word.approved ? { for: Math.max(s.word.for, s.estimate.author, reckoned) } : {} };
+        return logPrepare({ ...s, estimate: { ...s.estimate, reckoned }, word, ...deeper ? { done: null } : {} }, { at: now, what: "depth", text: depth2 });
+      });
+      if (deeper && state2.word.approved && !await say(renderPrompt(PREPARE_NOTE.sayDepth, texts2, { depth: renderPrompt(DEPTH_NOTE[depth2], texts2, {}) })) && active === null)
+        await carryOn(core, at3, texts2, state2, runStart);
       break;
     }
     case "steer": {
       const words10 = ask.text.trim();
       if (words10 === "")
         throw new PrepareRefused("bad_request", WORDS.noWords);
-      const kept4 = (await readPrepare(files)).state !== null;
-      if (kept4)
-        await change2((s) => ({ ...s, word: { ...s.word, said: [...s.word.said, words10] } }));
-      if (!await say(renderPrompt(PREPARE_NOTE.sayWords, texts2, { text: words10 })) && !kept4)
-        throw new PrepareRefused("not_found", WORDS.noJob);
+      const file2 = await readPrepare(files);
+      if (file2.damaged)
+        throw new PrepareRefused("conflict", WORDS.damaged);
+      const how = running ? "told" : active ? "kept" : file2.state !== null && planned2(file2.state) ? "revise" : "start";
+      const kind = file2.state?.kind ?? await kindNow();
+      const [scene2, notebook] = file2.state?.done != null ? await Promise.all([files.read(AUTHOR_FILE.scene), files.read(AUTHOR_FILE.notebook)]) : [null, null];
+      const state2 = await write((f) => {
+        if (f.damaged)
+          return new PrepareRefused("conflict", WORDS.damaged);
+        const s = f.state ?? unplanned(kind, [], false);
+        const word = how === "start" ? s.word : { ...s.word, asked: true, approved: false, revised: true };
+        const next = logPrepare({ ...s, word: { ...word, said: [...word.said, { text: words10, how, answer: null }] } }, { at: now, what: "said", text: words10 });
+        return s.done === null ? next : logPrepare({ ...next, done: null, marks: { scene: scene2?.version ?? null, notebook: notebook?.version ?? null } }, { at: now, what: "reopened" });
+      });
+      if (how === "kept")
+        break;
+      if (how === "told" && await say(renderPrompt(PREPARE_NOTE.sayWords, texts2, { text: words10 })))
+        break;
+      const told = how !== "told" ? state2 : await write((f) => f.state ? { ...f.state, word: { ...f.state.word, said: f.state.word.said.map((x) => x.answer === null && x.how === "told" ? { ...x, how: "revise" } : x) } } : state2);
+      await startJob(core, at3, taskOf(texts2, told.kind, told), runStart);
       break;
     }
     case "cap": {
       const { tokens: tokens3 } = ask;
       if (tokens3 !== null && !isCount2(tokens3))
         throw new PrepareRefused("bad_request", WORDS.badCap);
-      await change2((s) => ({ ...s, word: { ...s.word, cap: tokens3 } }));
+      await change2((s) => logPrepare({ ...s, word: { ...s.word, cap: tokens3 } }, { at: now, what: "cap", ...tokens3 !== null ? { count: tokens3 } : {} }));
       await say(tokens3 === null ? renderPrompt(PREPARE_NOTE.sayUncapped, texts2, {}) : renderPrompt(PREPARE_NOTE.sayCap, texts2, { cap: count3(tokens3) }));
       break;
     }
@@ -130821,6 +131228,7 @@ async function preparePage(rt, at3, ask) {
       if (active === null)
         throw new PrepareRefused("not_found", WORDS.noJob);
       await core.ask(userId, "run.pause", { run: active.id, on: true }, { job: active.id });
+      await logged({ at: now, what: "paused" });
       break;
     }
     case "resume": {
@@ -130828,18 +131236,31 @@ async function preparePage(rt, at3, ask) {
         const letGo = await core.ask(userId, "run.pause", { run: active.id, on: false }, { job: active.id });
         if (!(isRecord(letGo) && letGo.took === true) && active.paused)
           await core.ask(userId, "job.resume", { id: active.id }, { job: active.id });
+        const held3 = (await readPrepare(files)).state;
+        const kept4 = held3 ? unanswered(held3).filter((s) => s.how === "kept") : [];
+        if (kept4.length > 0 && await sayTo(active.id, renderPrompt(PREPARE_NOTE.sayWords, texts2, { text: kept4.map((s) => s.text).join(`
+
+`) }))) {
+          await write((f) => f.state ? { ...f.state, word: { ...f.state.word, said: f.state.word.said.map((x) => x.answer === null && x.how === "kept" ? { ...x, how: "told" } : x) } } : new PrepareRefused("not_found", WORDS.noPlan));
+        }
+        await logged({ at: now, what: "resumed" });
         break;
       }
       const { state: state2 } = await readPrepare(files);
-      if (state2 === null || state2.done !== null)
+      if (state2 !== null && state2.done !== null)
         throw new PrepareRefused("not_found", WORDS.noJob);
-      await startJob(core, at3, taskOf(texts2, state2.kind, state2.word));
+      if (state2 !== null)
+        await carryOn(core, at3, texts2, state2, runStart);
+      else
+        await startJob(core, at3, taskOf(texts2, await kindNow(), null), runStart);
+      await logged({ at: now, what: "resumed" });
       break;
     }
     case "cancel": {
       if (active === null)
         throw new PrepareRefused("not_found", WORDS.noJob);
       await core.ask(userId, "jobs.cancel", { id: active.id }, { job: active.id });
+      await logged({ at: now, what: "cancelled" });
       break;
     }
   }
@@ -130856,10 +131277,26 @@ async function prepared(env) {
     return view.refuse(PREPARE_NOTE.noFiles);
   return { view, turn: env.turn, files: env.files };
 }
+async function preparedWords(env) {
+  if (!env.turn)
+    return (await env.reader.view()).refuse(HARNESS_NOTE.noTurn);
+  const { texts: texts2 } = env.turn.settings.prompts;
+  const words10 = { answer: (value) => ({ text: JSON.stringify(value) }), refuse: (id2, vars = {}) => ({ text: renderPrompt(id2, texts2, vars), error: true }), text: (id2, vars = {}) => renderPrompt(id2, texts2, vars) };
+  if (!env.files)
+    return words10.refuse(PREPARE_NOTE.noFiles);
+  return { words: words10, turn: env.turn, files: env.files };
+}
+function chatOf2(env, turn) {
+  return chatRead(turn.host, env, turn.settings.agents.kept.chatMs);
+}
 function planIn(view, file2) {
   if (file2.damaged)
     return view.refuse(PREPARE_NOTE.damaged);
-  return file2.state ?? view.refuse(PREPARE_NOTE.noPlan);
+  return file2.state !== null && planned2(file2.state) ? file2.state : view.refuse(PREPARE_NOTE.noPlan);
+}
+function wordsFirst(view, state2) {
+  const open = unanswered(state2);
+  return open.length === 0 ? null : view.refuse(PREPARE_NOTE.unanswered, { said: quoted3(open) });
 }
 function stampOf(view, at3) {
   return formatStamp(calendarOf(view.world), at3, placeOffset(view.world, at3, placeOfEntity(view.state, view.world.pov)));
@@ -130890,9 +131327,11 @@ function writtenOr(view, out) {
   return out.state;
 }
 var PARTS4 = ["chat", "summaries", "lore", "world", "engine"];
+var LEVELS7 = ["volume", "arc", "chapter", "other"];
+var LEVEL_MARK = { volume: "v", arc: "a", chapter: "c", other: "o" };
 var MSGS = /\bmsgs?\s+(\d+)\s*[-\u2013]\s*(\d+)/i;
 var SUMMARY_TITLE = /\b(summary|summaries|recap|story so far|previously)\b/i;
-function summaryOf2(entry) {
+function lumibooksOf(entry) {
   const marks = isRecord(entry.extensions.lumibooks_summary) ? entry.extensions.lumibooks_summary : null;
   const shelf = isRecord(entry.extensions.lumibooks) ? entry.extensions.lumibooks : null;
   if (marks === null && shelf === null)
@@ -130907,14 +131346,36 @@ function summaryOf2(entry) {
   const range = indices.length > 0 ? [Math.min(...indices), Math.max(...indices)] : typeof first === "number" && typeof last === "number" && first <= last ? [first, last] : said2 ? [Number(said2[1]) - 1, Number(said2[2]) - 1] : null;
   if (range === null || range[0] < 0 || range[1] < range[0])
     return null;
-  return { id: `${entry.bookId}/${entry.id}`, level: level2, title: comment || (typeof shelf?.title === "string" ? shelf.title : "") || entry.id, from: range[0], to: range[1] };
+  return { level: level2, title: comment || (typeof shelf?.title === "string" ? shelf.title : "") || entry.id, span: { from: range[0], to: range[1] } };
 }
-function uncovered(messages, summaries) {
+function summariesOf(view, entries3) {
+  const read = entries3.map((e) => ({ e, marked: lumibooksOf(e) }));
+  const marked3 = read.flatMap(({ e, marked: m }) => m ? [{ e, ...m }] : []).sort((a, b) => a.span.from - b.span.from || b.span.to - a.span.to);
+  const others = read.filter(({ e, marked: m }) => m === null && SUMMARY_TITLE.test(e.comment)).map(({ e }) => ({ e, level: "other", title: e.comment.trim(), span: null }));
+  return LEVELS7.flatMap((level2) => (level2 === "other" ? others : marked3.filter((s) => s.level === level2)).map((s, i) => ({ id: `${LEVEL_MARK[level2]}${i + 1}`, entry: `${s.e.bookId}/${s.e.id}`, level: level2, title: s.title, span: s.span, text: view.entryText(s.e.content) })));
+}
+function summaryItem(s) {
+  return { id: s.id, level: s.level, title: s.title, ...s.span ? { messages: spanOf(s.span) } : {}, text: s.text };
+}
+function fitting(items, room, shown5) {
+  const kept4 = [];
+  let used = 0;
+  for (const item2 of items) {
+    const value = shown5(item2);
+    const size2 = JSON.stringify(value).length + 1;
+    if (used + size2 > room)
+      break;
+    kept4.push(value);
+    used += size2;
+  }
+  return { kept: kept4, count: kept4.length };
+}
+function uncovered(messages, spans) {
   const runs = [];
   let start = null;
   let previous = null;
   for (const m of [...messages].sort((a, b) => a.index - b.index)) {
-    const covered = summaries.some((s) => s.from <= m.index && m.index <= s.to);
+    const covered = spans.some((s) => s.from <= m.index && m.index <= s.to);
     if (!covered && start === null)
       start = m.index;
     if (covered && start !== null && previous !== null) {
@@ -130927,55 +131388,143 @@ function uncovered(messages, summaries) {
     runs.push(`#${start} to #${previous}`);
   return runs;
 }
-async function survey(view, env, turn, files, part) {
-  const want = (p) => part === null || part === p;
-  const out = {};
-  const messages = want("chat") || want("summaries") ? await turn.host.chats.messages(env.chatId, env.userId) : [];
-  if (want("chat")) {
-    const players = messages.filter((m) => m.isUser).length;
-    const numbers4 = messages.map((m) => m.index);
-    out.chat = { messages: messages.length, ...numbers4.length > 0 ? { first: `#${Math.min(...numbers4)}`, last: `#${Math.max(...numbers4)}` } : {}, player: players, replies: messages.length - players, tokens: messages.reduce((sum2, m) => sum2 + messageTokens(m.content), 0), kind: chatKind(messages) };
-  }
-  const entries3 = want("summaries") || want("lore") ? await view.bookEntries() : [];
-  if (want("summaries")) {
-    const lumibooks = entries3.flatMap((e) => summaryOf2(e) ?? []).sort((a, b) => a.from - b.from || b.to - a.to);
-    const others = entries3.filter((e) => summaryOf2(e) === null && SUMMARY_TITLE.test(e.comment)).map((e) => ({ id: `${e.bookId}/${e.id}`, title: e.comment.trim() }));
-    out.summaries = { lumibooks: lumibooks.map((s) => ({ id: s.id, level: s.level, title: s.title, messages: spanOf(s) })), ...lumibooks.length > 0 ? { notCovered: uncovered(messages, lumibooks) } : {}, others };
-  }
-  if (want("lore")) {
-    const authored3 = Object.values((await view.lore()).lore).filter((e) => loreSourceOf(e.source).kind !== "book").length;
-    const names3 = new Map((await turn.host.books.list(env.userId)).map((b) => [b.id, b.name]));
-    const counts2 = new Map;
-    for (const e of entries3) {
-      const held3 = counts2.get(e.bookId) ?? { entries: 0, summaries: 0 };
-      counts2.set(e.bookId, { entries: held3.entries + 1, summaries: held3.summaries + (summaryOf2(e) === null ? 0 : 1) });
-    }
-    out.lore = { world: authored3, books: [...counts2].map(([id2, c]) => ({ book: names3.get(id2) ?? id2, entries: c.entries, summaries: c.summaries })) };
-  }
-  if (want("world")) {
-    const people = Object.keys(view.state.entities).filter((id2) => view.isPerson(id2) && view.seesEntity(id2) && !isGone(view.state, id2)).map((id2) => {
-      const at3 = placeOfEntity(view.state, id2);
-      return { id: id2, name: view.entity(id2)?.name ?? id2, ...at3 ? { at: view.place(at3)?.name ?? at3 } : {}, ...id2 === view.pov ? { player: true } : {} };
-    });
-    out.world = { player: { id: view.pov, name: nameOf11(view, "player") }, people, places: Object.keys(view.world.places).length };
-  }
-  if (want("engine")) {
-    const read = turn.story ? await turn.story.read() : null;
-    const listed6 = await files.list("");
-    const minds = listed6.flatMap((f) => {
-      const folder = /(?:^|\/)minds\/([^/]+)\/core\.md$/.exec(f.path)?.[1];
-      return folder === undefined ? [] : [decodeURIComponent(folder)];
-    });
-    const file2 = await readPrepare(files);
-    out.engine = {
-      now: stampOf(view, view.state.clock),
-      ...read ? { cast: read.path.cast.map((c) => ({ id: c.entity, name: nameOf11(view, c.entity), standing: c.standing })), beats: { all: read.path.beats.length, past: read.path.beats.filter((b) => b.beat.past !== undefined).length } } : {},
-      minds: minds.map((id2) => ({ id: id2, name: nameOf11(view, id2) })),
-      olderMinds: Object.keys(readSlice(view.state).chars).map((id2) => ({ id: id2, name: nameOf11(view, id2) })),
-      preparation: file2.damaged ? "damaged" : file2.state === null ? "none" : file2.state.done !== null ? "done" : waits(file2.state) ? "waits for the player's word" : "under way"
-    };
+function coveredBy(spans) {
+  const out = [];
+  for (const s of [...spans].sort((a, b) => a.from - b.from)) {
+    const last = out.at(-1);
+    if (last && s.from <= last.to + 1)
+      last.to = Math.max(last.to, s.to);
+    else
+      out.push({ ...s });
   }
   return out;
+}
+function leftOutText(left) {
+  return LEVELS7.flatMap((level2) => {
+    const at3 = left.filter((s) => s.level === level2).sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
+    const first = at3[0];
+    const last = at3.at(-1);
+    if (!first || !last)
+      return [];
+    const ids2 = first === last ? first.id : `${first.id} to ${last.id}`;
+    return [first.span && last.span ? `${level2} ${ids2} (${spanOf({ from: first.span.from, to: last.span.to })})` : `${level2} ${ids2}`];
+  }).join("; ");
+}
+function summariesPart(view, all2, messages, size2, ask) {
+  if (ask.summary !== null) {
+    const one = all2.find((s) => s.id === ask.summary || s.entry === ask.summary);
+    return one ? { summary: summaryItem(one) } : view.refuse(PREPARE_NOTE.surveyNoSummary, { id: ask.summary });
+  }
+  if (all2.length === 0)
+    return { none: true, note: view.text(PREPARE_NOTE.surveyNone) };
+  const end = view.text(PREPARE_NOTE.surveyEnd);
+  if (ask.level !== null) {
+    const level2 = all2.filter((s) => s.level === ask.level);
+    const from = ask.from ?? 0;
+    const asked2 = level2.filter((s, i) => s.span === null ? i + 1 >= Math.max(1, from) : s.span.to >= from && (ask.to === null || s.span.from <= ask.to));
+    const more = view.text(PREPARE_NOTE.surveyMore, { next: "0000000" });
+    const { kept: kept5, count: count5 } = fitting(asked2, size2 - more.length - 64, summaryItem);
+    const next = asked2[count5];
+    return { summaries: kept5, note: next === undefined ? end : view.text(PREPARE_NOTE.surveyMore, { next: String(next.span ? next.span.from : level2.indexOf(next) + 1) }) };
+  }
+  const order = LEVELS7.flatMap((level2) => all2.filter((s) => s.level === level2).reverse());
+  const lead = view.text(PREPARE_NOTE.surveyOrder, { size: size2.toLocaleString("en-US") });
+  const notCovered = uncovered(messages, all2.flatMap((s) => s.span ? [s.span] : []));
+  const frame = JSON.stringify({ order: lead, notCovered, leftOut: view.text(PREPARE_NOTE.surveyLeft, { left: leftOutText(order) }) }).length + 64;
+  const { kept: kept4, count: count4 } = fitting(order, size2 - frame, summaryItem);
+  const left = order.slice(count4);
+  return { order: lead, summaries: kept4, ...notCovered.length > 0 ? { notCovered } : {}, ...left.length > 0 ? { leftOut: view.text(PREPARE_NOTE.surveyLeft, { left: leftOutText(left) }) } : { note: end } };
+}
+async function lorePart(view, env, turn, entries3, size2, ask) {
+  const names3 = new Map((await turn.host.books.list(env.userId)).map((b) => [b.id, b.name]));
+  const books = [...new Set(entries3.map((e) => e.bookId))];
+  if (ask.book !== null) {
+    const wanted = ask.book.trim().toLowerCase();
+    const id2 = books.find((b) => b === ask.book || (names3.get(b) ?? "").trim().toLowerCase() === wanted);
+    if (id2 === undefined)
+      return view.refuse(PREPARE_NOTE.surveyNoBook, { book: ask.book });
+    const own2 = entries3.filter((e) => e.bookId === id2 && e.content.trim() !== "" && lumibooksOf(e) === null && !SUMMARY_TITLE.test(e.comment));
+    const ordered = [...own2.filter((e) => e.constant), ...own2.filter((e) => !e.constant)];
+    const start = Math.max(1, ask.from ?? 1);
+    const more = view.text(PREPARE_NOTE.surveyMore, { next: "0000000" });
+    const { kept: kept4, count: count4 } = fitting(ordered.slice(start - 1), size2 - more.length - 128, (e) => ({ title: bookEntryTitle(e), ...e.constant ? { alwaysOn: true } : {}, ...e.disabled ? { switchedOff: true } : {}, text: view.entryText(e.content) }));
+    const next = start + count4;
+    return { book: names3.get(id2) ?? id2, entries: ordered.length, from: start, read: kept4, note: next <= ordered.length ? view.text(PREPARE_NOTE.surveyMore, { next: String(next) }) : view.text(PREPARE_NOTE.surveyEnd) };
+  }
+  const authored3 = Object.values((await view.lore()).lore).filter((e) => loreSourceOf(e.source).kind !== "book").length;
+  const listed6 = books.map((id2) => {
+    const own2 = entries3.filter((e) => e.bookId === id2);
+    return { book: names3.get(id2) ?? id2, entries: own2.length, alwaysOn: own2.filter((e) => e.constant && !e.disabled).length, switchedOff: own2.filter((e) => e.disabled).length, summaries: own2.filter((e) => lumibooksOf(e) !== null).length, chars: own2.reduce((sum2, e) => sum2 + e.content.length, 0) };
+  });
+  return { world: authored3, books: listed6, note: view.text(PREPARE_NOTE.surveyBooks) };
+}
+function worldPart(view, size2, ask) {
+  const people = Object.keys(view.state.entities).filter((id2) => view.isPerson(id2) && view.seesEntity(id2) && !isGone(view.state, id2)).map((id2) => {
+    const at3 = placeOfEntity(view.state, id2);
+    return { id: id2, name: view.entity(id2)?.name ?? id2, ...at3 ? { at: view.place(at3)?.name ?? at3 } : {}, ...id2 === view.pov ? { player: true } : {} };
+  });
+  const start = Math.max(1, ask.from ?? 1);
+  const { kept: kept4, count: count4 } = fitting(people.slice(start - 1), size2 - 256, (p) => p);
+  const next = start + count4;
+  return { player: { id: view.pov, name: nameOf11(view, "player") }, people: kept4, of: people.length, places: Object.keys(view.world.places).length, note: next <= people.length ? view.text(PREPARE_NOTE.surveyMore, { next: String(next) }) : view.text(PREPARE_NOTE.surveyEnd) };
+}
+function chatPart(chat) {
+  const { messages, players } = chat;
+  const first = messages[0];
+  const last = messages.at(-1);
+  return { messages: messages.length, ...first && last ? { first: `#${first.index}`, last: `#${last.index}` } : {}, player: players, replies: messages.length - players, tokens: chat.tokens(messageTokens), kind: chatKind(messages) };
+}
+function standing5(file2) {
+  if (file2.damaged)
+    return "damaged";
+  if (file2.state === null)
+    return "none";
+  if (!planned2(file2.state))
+    return "no plan yet";
+  return file2.state.done !== null ? "done" : waits(file2.state) ? "waits for the player's word" : "under way";
+}
+async function survey(view, env, turn, files, ask) {
+  const size2 = turn.settings.story.prepare.surveyChars;
+  const { part } = ask;
+  if (part === "chat")
+    return { chat: chatPart(await chatOf2(env, turn)) };
+  const entries3 = part === null || part === "summaries" || part === "lore" ? await view.bookEntries() : [];
+  if (part === "summaries")
+    return summariesPart(view, summariesOf(view, entries3), (await chatOf2(env, turn)).messages, size2, ask);
+  if (part === "lore")
+    return lorePart(view, env, turn, entries3, size2, ask);
+  if (part === "world")
+    return worldPart(view, size2, ask);
+  const read = turn.story ? await turn.story.read() : null;
+  const minds = (await files.list("")).flatMap((f) => {
+    const folder = /(?:^|\/)minds\/([^/]+)\/core\.md$/.exec(f.path)?.[1];
+    return folder === undefined ? [] : [decodeURIComponent(folder)];
+  });
+  const preparation = standing5(await readPrepare(files));
+  if (part === "engine") {
+    return {
+      engine: {
+        now: stampOf(view, view.state.clock),
+        ...read ? { cast: read.path.cast.map((c) => ({ id: c.entity, name: nameOf11(view, c.entity), standing: c.standing })), beats: { all: read.path.beats.length, past: read.path.beats.filter((b) => b.beat.past !== undefined).length } } : {},
+        minds: minds.map((id2) => ({ id: id2, name: nameOf11(view, id2) })),
+        olderMinds: Object.keys(readSlice(view.state).chars).map((id2) => ({ id: id2, name: nameOf11(view, id2) })),
+        preparation
+      }
+    };
+  }
+  const summaries = summariesOf(view, entries3);
+  const people = Object.keys(view.state.entities).filter((id2) => view.isPerson(id2) && view.seesEntity(id2) && !isGone(view.state, id2)).length;
+  return {
+    chat: chatPart(await chatOf2(env, turn)),
+    summaries: Object.fromEntries(LEVELS7.map((level2) => [level2, summaries.filter((s) => s.level === level2).length])),
+    lore: { books: new Set(entries3.map((e) => e.bookId)).size, entries: entries3.length, alwaysOn: entries3.filter((e) => e.constant && !e.disabled).length, chars: entries3.reduce((sum2, e) => sum2 + e.content.length, 0) },
+    world: { player: nameOf11(view, "player"), people, places: Object.keys(view.world.places).length },
+    engine: { now: stampOf(view, view.state.clock), cast: read?.path.cast.length ?? 0, beats: read?.path.beats.length ?? 0, minds: minds.length, preparation },
+    note: view.text(PREPARE_NOTE.surveyOutline)
+  };
+}
+function quoted3(said2) {
+  return said2.map((s) => `\u201C${s.text}\u201D`).join(" ");
 }
 function principalsArg(view, args, max2) {
   const given = listArg(args, "principals");
@@ -131025,7 +131574,7 @@ function stretchesArg(view, args, principals, max2) {
       if (!who3.includes(found.id))
         who3.push(found.id);
     }
-    out.push({ from, to, why: why3, who: who3 });
+    out.push({ from, to, why: why3, who: who3, key: entry.key === true });
   }
   return out;
 }
@@ -131121,7 +131670,8 @@ var PREPARE_TOOLS = [
     name: T.survey,
     family: HARNESS_FAMILY.prepare,
     tier: "read",
-    parameters: () => objectSchema({ part: text6(PARTS4) }),
+    parameters: () => objectSchema({ part: text6(PARTS4), level: text6(LEVELS7), from: integer({ minimum: 0 }), to: integer({ minimum: 0 }), summary: text6(), book: text6() }),
+    wholeChars: (settings) => settings.story.prepare.surveyChars,
     async run(args, env) {
       const ready = await prepared(env);
       if (!("view" in ready))
@@ -131130,7 +131680,27 @@ var PREPARE_TOOLS = [
       const part = textArg(args, "part");
       if (part !== null && !PARTS4.includes(part))
         return badValue(view, T.survey, "part", part, PARTS4);
-      return view.answer(await survey(view, env, turn, files, part));
+      const level2 = textArg(args, "level");
+      if (level2 !== null && !LEVELS7.includes(level2))
+        return badValue(view, T.survey, "level", level2, LEVELS7);
+      const summary = textArg(args, "summary");
+      const book = textArg(args, "book");
+      const ask = { part: level2 !== null || summary !== null ? "summaries" : book !== null ? "lore" : PARTS4.find((p) => p === part) ?? null, level: LEVELS7.find((l) => l === level2) ?? null, from: intArg(args, "from"), to: intArg(args, "to"), summary, book };
+      const out = await survey(view, env, turn, files, ask);
+      if (out.error === true)
+        return out;
+      if (ask.part === "summaries" || ask.part === "lore") {
+        const given = ask.part;
+        const noted2 = (await readPrepare(files)).state;
+        if (noted2?.surveyed !== true && !noted2?.read?.includes(given)) {
+          const kind = noted2?.kind ?? chatKind((await chatOf2(env, turn)).messages);
+          await updatePrepare(files, turn.settings.prompts.texts, (now) => {
+            const s = now.state ?? unplanned(kind, [], false);
+            return s.surveyed || s.read?.includes(given) ? { stop: null } : { ...s, read: [...s.read ?? [], given] };
+          });
+        }
+      }
+      return view.answer(out);
     }
   },
   {
@@ -131139,31 +131709,34 @@ var PREPARE_TOOLS = [
     tier: "read",
     parameters: () => objectSchema({ stretch: text6() }),
     async run(args, env) {
-      const ready = await prepared(env);
-      if (!("view" in ready))
+      const ready = await preparedWords(env);
+      if (!("words" in ready))
         return ready;
-      const { view, turn, files } = ready;
-      const state2 = planIn(view, await readPrepare(files));
+      const { words: words10, turn, files } = ready;
+      const file2 = await readPrepare(files);
+      const playerSaid = (s) => s.word.said.map((x) => ({ said: x.text, ...x.answer !== null ? { yourAnswer: x.answer } : { answered: false } }));
+      if (file2.state !== null && !planned2(file2.state))
+        return words10.answer({ status: standing5(file2), ...file2.state.word.said.length > 0 ? { playerSaid: playerSaid(file2.state) } : {}, note: words10.text(PREPARE_NOTE.noPlan) });
+      const state2 = planIn(words10, file2);
       if (!("v" in state2))
         return state2;
-      const read = turn.story ? await turn.story.read() : null;
       const name2 = (id2) => state2.principals.find((p) => p.id === id2)?.name ?? id2;
       const asked2 = textArg(args, "stretch");
       if (asked2 !== null) {
         const s = state2.stretches.find((x) => x.id === asked2);
         if (!s)
-          return view.refuse(PREPARE_NOTE.noStretch, { stretch: asked2 });
-        const beats = read ? stretchBeats(read.path, s) : [];
-        const reached = read ? reachedBy(read.path, beats.map((b) => b.id), state2.principals.map((p) => p.id)) : [];
-        const reliving2 = read ? relivingNow(read.path, reached) : [];
-        return view.answer({ stretch: s.id, messages: spanOf(s), why: s.why, relivedBy: s.who.map(name2), state: s.state, beats: beats.length, ...s.through !== null ? { through: `#${s.through}` } : {}, reached: reached.map(name2), stillToRelive: reliving2.map(name2) });
+          return words10.refuse(PREPARE_NOTE.noStretch, { stretch: asked2 });
+        const reached = s.reached ?? null;
+        const owed = reached === null ? [] : reached.filter((id2) => !(s.relived ?? []).includes(id2));
+        return words10.answer({ stretch: s.id, messages: spanOf(s), why: s.why, relivedBy: s.who.map(name2), state: s.state, beats: s.beats.length, ...s.through !== null ? { through: `#${s.through}` } : {}, ...reached !== null ? { reached: reached.map(name2), stillToRelive: owed.map(name2) } : {} });
       }
       const has = async (path3) => await files.read(path3) !== null;
       const principals = await Promise.all(state2.principals.map(async (p) => ({ id: p.id, name: p.name, why: p.why, core: await has(mindPath(p.id, "core")), outline: await has(mindPath(p.id, "outline")) })));
-      const reliving = read ? relivingNow(read.path, state2.principals.map((p) => p.id)) : [];
+      const reliving = stillToRelive(state2);
       const spent = await turn.job?.spent?.() ?? null;
-      return view.answer({
-        status: state2.done !== null ? "done" : waits(state2) ? "waits for the player's word" : "under way",
+      const first = wordsFirst(words10, state2);
+      return words10.answer({
+        status: standing5({ state: state2, damaged: false, version: null }),
         kind: state2.kind,
         about: state2.about,
         principals: principals.map((p) => ({ ...p, stillToRelive: reliving.includes(p.id) })),
@@ -131175,8 +131748,8 @@ var PREPARE_TOOLS = [
         ...spent !== null ? { spentSoFar: spent.tokens } : {},
         ...state2.word.cap !== null ? { cap: state2.word.cap } : {},
         playerApproved: state2.word.asked && state2.word.approved,
-        ...state2.word.said.length > 0 ? { playerSaid: state2.word.said } : {},
-        ...waits(state2) ? { note: view.text(PREPARE_NOTE.waits, { estimate: estimateOf(state2).toLocaleString("en-US"), ceiling: state2.word.ceiling.toLocaleString("en-US") }) } : {}
+        ...state2.word.said.length > 0 ? { playerSaid: playerSaid(state2) } : {},
+        ...first !== null ? { note: first.text } : waits(state2) ? { note: state2.word.revised ? words10.text(PREPARE_NOTE.waitsRevised) : words10.text(PREPARE_NOTE.waits, { estimate: estimateOf(state2).toLocaleString("en-US"), ceiling: state2.word.ceiling.toLocaleString("en-US") }) } : {}
       });
     }
   },
@@ -131187,9 +131760,12 @@ var PREPARE_TOOLS = [
     parameters: () => objectSchema({
       about: text6(),
       principals: list3(objectSchema({ who: text6(), why: text6() }, ["who"])),
-      stretches: list3(objectSchema({ from: integer({ minimum: 0 }), to: integer({ minimum: 0 }), why: text6(), who: words9() }, ["from", "to"])),
+      stretches: list3(objectSchema({ from: integer({ minimum: 0 }), to: integer({ minimum: 0 }), why: text6(), who: words9(), key: { type: "boolean" } }, ["from", "to"])),
       fills: text6(),
-      estimate: integer({ minimum: 0 })
+      estimate: integer({ minimum: 0 }),
+      answer: text6(),
+      depth: text6(PREPARE_DEPTHS),
+      depthWhy: text6()
     }, ["about", "principals"]),
     async run(args, env) {
       const ready = await prepared(env);
@@ -131201,7 +131777,13 @@ var PREPARE_TOOLS = [
       if (typeof about2 !== "string")
         return about2;
       const fills = textArg(args, "fills") ?? "";
-      const long2 = fits3(view, "about", about2, limits.textChars) ?? fits3(view, "fills", fills, limits.textChars);
+      const answer = textArg(args, "answer");
+      const depthSaid = textArg(args, "depth");
+      const recommended = depthSaid === null ? null : PREPARE_DEPTHS.find((d) => d === depthSaid) ?? null;
+      if (depthSaid !== null && recommended === null)
+        return badValue(view, T.plan, "depth", depthSaid, PREPARE_DEPTHS);
+      const depthWhy = textArg(args, "depthWhy") ?? "";
+      const long2 = fits3(view, "about", about2, limits.textChars) ?? fits3(view, "fills", fills, limits.textChars) ?? fits3(view, "answer", answer ?? "", limits.textChars) ?? fits3(view, "depthWhy", depthWhy, limits.textChars);
       if (long2)
         return long2;
       const principals = principalsArg(view, args, limits.textChars);
@@ -131211,41 +131793,72 @@ var PREPARE_TOOLS = [
       if (!Array.isArray(asked2))
         return asked2;
       const author = intArg(args, "estimate") ?? 0;
-      const spent = await turn.job?.spent?.() ?? null;
-      const call = callWeight(spent, limits);
-      const messages = await turn.host.chats.messages(env.chatId, env.userId);
+      const { messages, numbered: numbered2 } = await chatOf2(env, turn);
       const kind = chatKind(messages);
       if (kind === "new" && asked2.length > 0)
         return view.refuse(PREPARE_NOTE.newChat);
-      const numbered2 = byNumber(messages);
-      const [scene2, notebook] = await Promise.all([files.read(AUTHOR_FILE.scene), files.read(AUTHOR_FILE.notebook)]);
+      const noted2 = (await readPrepare(files)).state;
+      const unread = kind === "history" && noted2?.surveyed !== true ? SURVEY_PARTS.filter((p) => !noted2?.read?.includes(p)) : [];
+      if (unread.length > 0)
+        return view.refuse(PREPARE_NOTE.surveyFirst, { parts: unread.join(", ") });
+      if (kind === "history" && ((await files.read(PREPARE_STORY))?.text.trim() ?? "") === "")
+        return view.refuse(PREPARE_NOTE.storyFirst);
+      const spent = await turn.job?.spent?.() ?? null;
+      const call = callWeight(spent, limits);
+      const [scene2, notebook, entries3] = await Promise.all([files.read(AUTHOR_FILE.scene), files.read(AUTHOR_FILE.notebook), view.bookEntries()]);
+      const numbers4 = messages.map((m) => m.index);
+      const chat = { messages: messages.length, first: numbers4.length > 0 ? Math.min(...numbers4) : 0, last: numbers4.length > 0 ? Math.max(...numbers4) : 0, covered: coveredBy(entries3.flatMap((e) => lumibooksOf(e)?.span ?? [])) };
+      const at3 = Date.now();
       let splits = [];
       const out = await updatePrepare(files, turn.settings.prompts.texts, (now) => {
         const before = now.state;
-        const planned2 = planStretches(asked2, numbered2, limits.stretchMessages, before?.stretches ?? [], { readChars: limits.readChars, call: call.tokens });
-        if ("problem" in planned2)
-          return { stop: view.refuse(planned2.problem.id, planned2.problem.vars) };
-        splits = planned2.splits;
-        const draft2 = { kind, stretches: planned2.stretches, principals };
-        const reckoned = (spent?.tokens ?? 0) + reckonLeft(draft2, call.tokens);
-        return {
+        const open = before ? unanswered(before) : [];
+        if (open.length > 0 && answer === null)
+          return { stop: view.refuse(PREPARE_NOTE.needAnswer, { said: quoted3(open) }) };
+        const spoke = open.some((s) => s.how !== "start");
+        const word = before ? { ...before.word, said: before.word.said.map((s) => s.answer === null && answer !== null ? { ...s, answer } : s), ...spoke ? { approved: false, revised: true } : {} } : null;
+        const made = planStretches(asked2, numbered2, limits.stretchMessages, before?.stretches ?? [], { readChars: limits.readChars, call: call.tokens });
+        if ("problem" in made)
+          return { stop: view.refuse(made.problem.id, made.problem.vars) };
+        splits = made.splits;
+        const offered = depthsOffered(made.stretches);
+        if (recommended === null && made.stretches.some((s) => s.state === "planned"))
+          return { stop: view.refuse(PREPARE_NOTE.needDepth) };
+        const pick2 = recommended ?? "outline";
+        if (!offered.includes(pick2))
+          return { stop: view.refuse(PREPARE_NOTE.depthOffered, { depth: view.text(DEPTH_NOTE[pick2]), offered: offered.map((d) => view.text(DEPTH_NOTE[d])).join(", ") }) };
+        const reckonAt = (depth2) => (spent?.tokens ?? 0) + reckonLeft({ kind, stretches: made.stretches.filter((s) => within7(s, depth2)), principals }, call.tokens);
+        const depths = { outline: reckonAt("outline"), key: offered.includes("key") ? reckonAt("key") : null, all: reckonAt("all") };
+        const picked2 = word?.depth !== undefined && offered.includes(word.depth) ? word.depth : null;
+        const reckoned = depths[picked2 ?? pick2] ?? depths.all;
+        const revised = before !== null && planned2(before);
+        const next = {
           v: 1,
           kind,
           about: about2,
           principals,
-          stretches: planned2.stretches,
+          stretches: made.stretches,
           fills,
-          estimate: { author, reckoned, call: call.tokens, from: call.from },
-          word: wordFor(Math.max(author, reckoned), limits.askAboveTokens, before?.word ?? null),
+          estimate: { author, reckoned, call: call.tokens, from: call.from, depths },
+          depth: { recommended: pick2, why: depthWhy },
+          word: wordFor(Math.max(author, reckoned), limits.askAboveTokens, word === null ? null : { asked: word.asked, approved: word.approved, for: word.for, ceiling: word.ceiling, cap: word.cap, said: word.said, revised: word.revised, ...picked2 !== null ? { depth: picked2 } : {} }),
           done: null,
-          marks: before?.marks ?? { scene: scene2?.version ?? null, notebook: notebook?.version ?? null }
+          marks: before && revised ? before.marks : { scene: scene2?.version ?? null, notebook: notebook?.version ?? null },
+          surveyed: true,
+          ...before?.read ? { read: before.read } : {},
+          chat,
+          ...before?.log ? { log: before.log } : {},
+          ...before?.relivedAt !== undefined ? { relivedAt: before.relivedAt } : {},
+          ...before?.runs ? { runs: before.runs } : {}
         };
+        const answered2 = open.length > 0 && answer !== null ? logPrepare(next, { at: at3, what: "answered", text: answer }) : next;
+        return logPrepare(answered2, { at: at3, what: revised ? "revised" : "planned", count: next.stretches.length });
       });
       const state2 = writtenOr(view, out);
       if (!("v" in state2))
         return state2;
       const estimate2 = estimateOf(state2).toLocaleString("en-US");
-      const note2 = waits(state2) ? view.text(PREPARE_NOTE.waits, { estimate: estimate2, ceiling: state2.word.ceiling.toLocaleString("en-US") }) : view.text(PREPARE_NOTE.stands, { estimate: estimate2 });
+      const note2 = waits(state2) ? state2.word.revised ? view.text(PREPARE_NOTE.waitsRevised) : view.text(PREPARE_NOTE.waits, { estimate: estimate2, ceiling: state2.word.ceiling.toLocaleString("en-US") }) : view.text(PREPARE_NOTE.stands, { estimate: estimate2 });
       const split = splits.map((s) => view.text(PREPARE_NOTE.split, { from: String(s.from), to: String(s.to), most: String(limits.stretchMessages), count: String(s.count) }));
       return view.answer({
         file: PREPARE_PATH,
@@ -131273,15 +131886,19 @@ var PREPARE_TOOLS = [
         return id2;
       const limits = turn.settings.story.prepare;
       const drop2 = boolArg(args, "drop") === true;
-      const [messages, path3] = drop2 ? [[], null] : await Promise.all([turn.host.chats.messages(env.chatId, env.userId), pathOf2(view, turn)]);
+      const [chat, path3] = drop2 ? [null, null] : await Promise.all([chatOf2(env, turn), pathOf2(view, turn)]);
       if (path3 !== null && !("beats" in path3))
         return path3;
-      const numbered2 = byNumber(messages);
+      const numbered2 = chat?.numbered ?? new Map;
       const used = drop2 ? 0 : (await turn.job?.spent?.() ?? null)?.tokens ?? 0;
+      const at3 = Date.now();
       const out = await updatePrepare(files, turn.settings.prompts.texts, (now) => {
         const state3 = planIn(view, now);
         if (!("v" in state3))
           return { stop: state3 };
+        const first = wordsFirst(view, state3);
+        if (first)
+          return { stop: first };
         const s2 = state3.stretches.find((x) => x.id === id2);
         if (!s2)
           return { stop: view.refuse(PREPARE_NOTE.noStretch, { stretch: id2 }) };
@@ -131289,14 +131906,20 @@ var PREPARE_TOOLS = [
           return { stop: view.refuse(PREPARE_NOTE.recordedAlready, { stretch: s2.id }) };
         if (s2.state === "dropped")
           return { stop: view.refuse(PREPARE_NOTE.droppedAlready, { stretch: s2.id }) };
-        const changed = (next) => ({ ...state3, stretches: state3.stretches.map((x) => x.id === s2.id ? next : x) });
+        const changed = (next) => {
+          const made = { ...state3, stretches: state3.stretches.map((x) => x.id === s2.id ? next : x) };
+          return logPrepare(path3 ? withRelived(made, path3, at3) : made, { at: at3, what: next.state === "dropped" ? "dropped" : "opened", stretch: s2.id });
+        };
         if (drop2)
           return changed({ ...s2, state: "dropped" });
         if (s2.state === "open")
           return { stop: view.answer({ stretch: s2.id, note: view.text(PREPARE_NOTE.openAlready, { stretch: s2.id, span: spanOf(s2), through: String(s2.through ?? s2.from - 1) }) }) };
         if (waits(state3))
-          return { stop: view.refuse(PREPARE_NOTE.waits, { estimate: estimateOf(state3).toLocaleString("en-US"), ceiling: state3.word.ceiling.toLocaleString("en-US") }) };
-        const before = state3.stretches.find((x) => x.from < s2.from && (x.state === "planned" || x.state === "open"));
+          return { stop: state3.word.revised ? view.refuse(PREPARE_NOTE.waitsRevised) : view.refuse(PREPARE_NOTE.waits, { estimate: estimateOf(state3).toLocaleString("en-US"), ceiling: state3.word.ceiling.toLocaleString("en-US") }) };
+        const depth2 = depthOf(state3);
+        if (!within7(s2, depth2))
+          return { stop: view.refuse(PREPARE_NOTE.notChosen, { stretch: s2.id, depth: view.text(DEPTH_NOTE[depth2]) }) };
+        const before = state3.stretches.find((x) => x.from < s2.from && (x.state === "open" || x.state === "planned" && within7(x, depth2)));
         if (before)
           return { stop: view.refuse(PREPARE_NOTE.order, { before: before.id, span: spanOf(before) }) };
         if (s2.to - s2.from + 1 > limits.stretchMessages)
@@ -131332,6 +131955,7 @@ var PREPARE_TOOLS = [
     family: HARNESS_FAMILY.prepare,
     tier: "read",
     parameters: () => objectSchema({ stretch: text6(), from: integer({ minimum: 0 }) }, ["stretch"]),
+    wholeChars: (settings) => settings.story.prepare.readChars,
     async run(args, env) {
       const ready = await prepared(env);
       if (!("view" in ready))
@@ -131348,36 +131972,30 @@ var PREPARE_TOOLS = [
         return view.refuse(PREPARE_NOTE.noStretch, { stretch: id2 });
       if (s.state !== "open")
         return view.refuse(PREPARE_NOTE.notOpen, { stretch: s.id });
-      const numbered2 = byNumber(await turn.host.chats.messages(env.chatId, env.userId));
+      const { numbered: numbered2 } = await chatOf2(env, turn);
       if (!stretchStands(numbered2, s))
         return view.refuse(PREPARE_NOTE.chatChanged, { stretch: s.id, span: spanOf(s) });
       const start = Math.min(s.to + 1, Math.max(s.from, intArg(args, "from") ?? (s.through ?? s.from - 1) + 1));
-      const most = turn.settings.story.prepare.readChars;
-      const read = [];
-      let used = 0;
-      let next = null;
-      for (const m of stretchMessages(numbered2, start, s.to)) {
-        if (read.length > 0 && used + m.content.length > most) {
-          next = m.index;
-          break;
-        }
-        const text7 = m.content.length > most ? `${m.content.slice(0, most)}\u2026` : m.content;
-        used += text7.length;
-        read.push({ n: m.index, by: m.name, player: m.isUser, text: text7 });
-      }
       const path3 = turn.story ? await turn.story.read() : null;
       const lastPast = path3?.path.beats.findLast((b) => b.beat.past !== undefined && b.beat.struck === undefined);
       const names3 = s.who.map((p) => state2.principals.find((x) => x.id === p)?.name ?? p);
-      return view.answer({
-        stretch: s.id,
-        messages: spanOf(s),
-        why: s.why,
-        relivedBy: names3,
-        now: stampOf(view, view.state.clock),
-        ...lastPast ? { lastRecorded: stampOf(view, lastPast.beat.at) } : {},
-        read,
-        note: next === null ? view.text(PREPARE_NOTE.readEnd) : view.text(PREPARE_NOTE.readMore, { next: String(next) })
-      });
+      const head = { stretch: s.id, messages: spanOf(s), why: s.why, relivedBy: names3, now: stampOf(view, view.state.clock), ...lastPast ? { lastRecorded: stampOf(view, lastPast.beat.at) } : {} };
+      const notes = [view.text(PREPARE_NOTE.readEnd), view.text(PREPARE_NOTE.readMore, { next: String(s.to) })];
+      const most = turn.settings.story.prepare.readChars;
+      let used = Math.max(...notes.map((note2) => JSON.stringify({ ...head, read: [], note: note2 }).length));
+      const read = [];
+      let next = null;
+      for (const m of stretchMessages(numbered2, start, s.to)) {
+        const item2 = { n: m.index, by: m.name, player: m.isUser, text: m.content };
+        const size2 = JSON.stringify(item2).length + 1;
+        if (read.length > 0 && used + size2 > most) {
+          next = m.index;
+          break;
+        }
+        used += size2;
+        read.push(item2);
+      }
+      return view.answer({ ...head, read, note: next === null ? view.text(PREPARE_NOTE.readEnd) : view.text(PREPARE_NOTE.readMore, { next: String(next) }) });
     }
   },
   {
@@ -131486,7 +132104,8 @@ var PREPARE_TOOLS = [
         if (s2.state !== "open")
           return { stop: view.refuse(PREPARE_NOTE.notOpen, { stretch: s2.id }) };
         const beats2 = stretchBeats(path3, s2).map((b) => b.id);
-        return { ...state3, stretches: state3.stretches.map((x) => x.id === s2.id ? { ...x, state: "recorded", beats: beats2 } : x) };
+        const reached2 = reachedBy(path3, beats2, state3.principals.map((p) => p.id));
+        return logPrepare({ ...state3, stretches: state3.stretches.map((x) => x.id === s2.id ? { ...x, state: "recorded", beats: beats2, reached: reached2, relived: [] } : x) }, { at: Date.now(), what: "recorded", stretch: s2.id, count: beats2.length });
       });
       const state2 = writtenOr(view, out);
       if (!("v" in state2))
@@ -131518,6 +132137,9 @@ var PREPARE_TOOLS = [
       const state2 = planIn(view, await readPrepare(files));
       if (!("v" in state2))
         return state2;
+      const first = wordsFirst(view, state2);
+      if (first)
+        return first;
       const found = resolvePerson(view, whoSaid);
       if ("refused" in found)
         return found.refused;
@@ -131536,8 +132158,10 @@ ${said2}
       const path3 = mindPath(principal.id, "outline");
       for (let attempt = 0;attempt < 2; attempt++) {
         const written3 = await files.write(path3, body, (await files.read(path3))?.version ?? null);
-        if ("version" in written3)
+        if ("version" in written3) {
+          await updatePrepare(files, turn.settings.prompts.texts, (now) => now.state ? logPrepare(now.state, { at: Date.now(), what: "outlined", who: principal.id }) : { stop: null });
           return { text: view.text(PREPARE_NOTE.outlined, { name: principal.name }) };
+        }
         if (written3.refused.version === null)
           return { text: written3.refused.reason, error: true };
       }
@@ -131565,12 +132189,18 @@ ${said2}
         return state2;
       if (state2.done !== null)
         return { text: view.text(PREPARE_NOTE.finished) };
+      const first = wordsFirst(view, state2);
+      if (first)
+        return first;
       const left = await preparationLeft(files, state2, read?.path ?? null, turn.settings.prompts.texts);
       if (left.length > 0)
         return view.refuse(PREPARE_NOTE.unfinished, { left: left.join("; ") });
+      const at3 = Date.now();
       const out = await updatePrepare(files, turn.settings.prompts.texts, (fresh) => {
         const current2 = planIn(view, fresh);
-        return "v" in current2 ? { ...current2, done: note2 } : { stop: current2 };
+        if (!("v" in current2))
+          return { stop: current2 };
+        return logPrepare({ ...read ? withRelived(current2, read.path, at3) : current2, done: note2 }, { at: at3, what: "finished" });
       });
       const done = writtenOr(view, out);
       return "v" in done ? { text: view.text(PREPARE_NOTE.finished) } : done;
@@ -131980,8 +132610,8 @@ var RECORD_TOOLS = [
       const standingSaid = needText(view, T2.castSet, args, "standing");
       if (typeof standingSaid !== "string")
         return standingSaid;
-      const standing5 = CAST_STANDINGS.find((s) => s === standingSaid);
-      if (standing5 === undefined)
+      const standing6 = CAST_STANDINGS.find((s) => s === standingSaid);
+      if (standing6 === undefined)
         return badValue(view, T2.castSet, "standing", standingSaid, CAST_STANDINGS);
       const why3 = needText(view, T2.castSet, args, "why");
       if (typeof why3 !== "string")
@@ -131992,10 +132622,10 @@ var RECORD_TOOLS = [
       const cast = castOn(story.read.path, who3.id);
       if (cast?.pinned === true)
         return view.refuse(RECORD_NOTE.pinned, { name: nameOf12(view, who3.id), standing: cast.standing });
-      const lands = landed(view, story.port, await story.port.write({ cast: [{ ...cast, entity: who3.id, standing: standing5, why: why3 }] }));
+      const lands = landed(view, story.port, await story.port.write({ cast: [{ ...cast, entity: who3.id, standing: standing6, why: why3 }] }));
       if (typeof lands !== "string")
         return lands;
-      return view.answer({ cast: { who: who3.id, name: nameOf12(view, who3.id), standing: standing5, why: why3, lands } });
+      return view.answer({ cast: { who: who3.id, name: nameOf12(view, who3.id), standing: standing6, why: why3, lands } });
     }
   },
   {
@@ -132012,10 +132642,10 @@ var RECORD_TOOLS = [
       if ("text" in story)
         return story;
       const standingSaid = textArg(args, "standing");
-      const standing5 = standingSaid === null ? null : CAST_STANDINGS.find((s) => s === standingSaid);
-      if (standingSaid !== null && standing5 === undefined)
+      const standing6 = standingSaid === null ? null : CAST_STANDINGS.find((s) => s === standingSaid);
+      if (standingSaid !== null && standing6 === undefined)
         return badValue(view, T2.castList, "standing", standingSaid, CAST_STANDINGS);
-      return view.answer({ cast: story.read.path.cast.filter((c) => standing5 === null || c.standing === standing5).map((c) => ({ ...c, name: nameOf12(view, c.entity) })) });
+      return view.answer({ cast: story.read.path.cast.filter((c) => standing6 === null || c.standing === standing6).map((c) => ({ ...c, name: nameOf12(view, c.entity) })) });
     }
   },
   {
@@ -132121,13 +132751,22 @@ function shown5(view, id2, file2, max2) {
   return `### ${view.text(MINDS_NOTE.fileHead, { file: `${id2}.md`, version: file2.version, size: count4(file2.text.length), max: count4(max2) })}
 ${file2.text}`;
 }
-var READS = new Map(READ_TOOLS.map((t) => [t.name, t]));
+var HEAD_ROOM = 200;
+function mindReadChars(settings) {
+  const { texts: texts2 } = settings.prompts;
+  const max2 = settings.story.minds.chars;
+  const long2 = "x".repeat(HEAD_ROOM);
+  const head = renderPrompt(MINDS_NOTE.readHead, texts2, { name: long2, standing: long2 }).length;
+  return MIND_FILE_IDS.reduce((sum2, id2) => sum2 + 7 + renderPrompt(MINDS_NOTE.fileHead, texts2, { file: `${id2}.md`, version: long2, size: count4(max2[id2]), max: count4(max2[id2]) }).length + max2[id2], head);
+}
+var READS2 = new Map(READ_TOOLS.map((t) => [t.name, t]));
 var MIND_FILE_TOOLS = [
   {
     name: MINDS_TOOL.read,
     family: HARNESS_FAMILY.mind,
     tier: "read",
     parameters: () => objectSchema({ who: text6(), file: text6(MIND_FILE_IDS.map((f) => `${f}.md`)) }),
+    wholeChars: mindReadChars,
     async run(args, env) {
       const view = await env.reader.view();
       const call = await mindCall(view, env, MINDS_TOOL.read, args);
@@ -132135,7 +132774,7 @@ var MIND_FILE_TOOLS = [
         return call;
       if (!env.files)
         return view.refuse(MINDS_NOTE.noWorkspace);
-      const { caller, who: who3, standing: standing5, turn } = call;
+      const { caller, who: who3, standing: standing6, turn } = call;
       const entity2 = mindEntity(view, who3);
       const name2 = view.name(entity2);
       const one = argGiven(args, "file") ? fileNamed(view, MINDS_TOOL.read, args) : null;
@@ -132145,12 +132784,12 @@ var MIND_FILE_TOOLS = [
         return view.refuse(MINDS_NOTE.profileNotYours);
       const ids2 = one !== null ? [one] : caller === "self" ? PRINCIPAL_FILES : MIND_FILE_IDS;
       const read = await readMind(env.files, entity2, ids2);
-      const kept4 = filesOf2(standing5);
+      const kept4 = filesOf2(standing6);
       const parts = one !== null || caller === "self" ? read : read.filter((r) => r.file !== null || kept4.includes(r.id));
       if (parts.length === 0)
         return view.refuse(MINDS_NOTE.extraNoMind, { name: name2 });
       const max2 = turn.settings.story.minds.chars;
-      return { text: [view.text(MINDS_NOTE.readHead, { name: name2, standing: standingWords2(view, standing5) }), ...parts.map((r) => shown5(view, r.id, r.file, max2[r.id]))].join(`
+      return { text: [view.text(MINDS_NOTE.readHead, { name: name2, standing: standingWords2(view, standing6) }), ...parts.map((r) => shown5(view, r.id, r.file, max2[r.id]))].join(`
 
 `) };
     }
@@ -132165,7 +132804,7 @@ var MIND_FILE_TOOLS = [
       const call = await mindCall(view, env, MINDS_TOOL.write, args);
       if (!("who" in call))
         return call;
-      const { caller, who: who3, standing: standing5, turn } = call;
+      const { caller, who: who3, standing: standing6, turn } = call;
       if (caller === "self" && env.turn?.story?.staged === true)
         return view.refuse(MINDS_NOTE.afterReply);
       if (caller === "gm")
@@ -132188,12 +132827,12 @@ var MIND_FILE_TOOLS = [
       } else {
         if (CHARACTER_FILES.includes(file2))
           return view.refuse(MINDS_NOTE.charactersOwn, { file: named2, name: name2 });
-        if (standing5 === "player" && !turn.settings.story.minds.playerMind)
+        if (standing6 === "player" && !turn.settings.story.minds.playerMind)
           return view.refuse(MINDS_NOTE.playerNoMind, { name: name2 });
-        if (file2 === "core" && standing5 !== "principal" && standing5 !== "player")
-          return view.refuse(MINDS_NOTE.coreForPrincipal, { name: name2, standing: standingWords2(view, standing5) });
-        if (file2 === "profile" && standing5 !== "supporting")
-          return view.refuse(MINDS_NOTE.profileForSupporting, { name: name2, standing: standingWords2(view, standing5) });
+        if (file2 === "core" && standing6 !== "principal" && standing6 !== "player")
+          return view.refuse(MINDS_NOTE.coreForPrincipal, { name: name2, standing: standingWords2(view, standing6) });
+        if (file2 === "profile" && standing6 !== "supporting")
+          return view.refuse(MINDS_NOTE.profileForSupporting, { name: name2, standing: standingWords2(view, standing6) });
       }
       if (typeof args.text !== "string")
         return missing(view, MINDS_TOOL.write, "text");
@@ -132272,11 +132911,11 @@ var MIND_FILE_TOOLS = [
       if (typeof who3 !== "string")
         return who3;
       const entity2 = mindEntity(view, who3);
-      const standing5 = standingIn2(await castFor(env) ?? [], who3);
+      const standing6 = standingIn2(await castFor(env) ?? [], who3);
       const person5 = { person: entity2 };
-      const reads = await Promise.all(["people_sheet", "minds_read", "knowledge_what_knows"].map(async (name2) => await READS.get(name2)?.run(person5, env) ?? null));
+      const reads = await Promise.all(["people_sheet", "minds_read", "knowledge_what_knows"].map(async (name2) => await READS2.get(name2)?.run(person5, env) ?? null));
       const [sheet, mind2, knows2] = reads.map((out) => out?.text ?? "");
-      const parts = [view.text(MINDS_NOTE.seedHead, { name: view.name(entity2), standing: standingWords2(view, standing5) }), `${view.text(MINDS_NOTE.seedSheet)}
+      const parts = [view.text(MINDS_NOTE.seedHead, { name: view.name(entity2), standing: standingWords2(view, standing6) }), `${view.text(MINDS_NOTE.seedSheet)}
 ${sheet}`, `${view.text(MINDS_NOTE.seedMind)}
 ${mind2}`, `${view.text(MINDS_NOTE.seedKnows)}
 ${knows2}`];
@@ -132435,7 +133074,7 @@ function releaseNoted(book, release) {
 function plainText2(text7) {
   return text7.normalize("NFKC").replace(/[\u2018\u2019\u201A\u201B\u2032]/g, "'").replace(/[\u201C\u201D\u201E\u201F\u2033\u00AB\u00BB]/g, '"').replace(/[\u2010-\u2015\u2212]/g, "-").replace(/\s+/g, " ").trim();
 }
-function wordsOf8(text7) {
+function wordsOf9(text7) {
   return plainText2(text7).toLowerCase().match(/[\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)*/gu) ?? [];
 }
 function holdsRun(words10, run2) {
@@ -132448,8 +133087,8 @@ function holdsRun(words10, run2) {
 }
 var CLOSE = 0.85;
 function likeness(a, b) {
-  const x = new Set(wordsOf8(a));
-  const y = new Set(wordsOf8(b));
+  const x = new Set(wordsOf9(a));
+  const y = new Set(wordsOf9(b));
   if (x.size + y.size === 0)
     return 1;
   let shared = 0;
@@ -132462,19 +133101,19 @@ function spokenIn(text7) {
   const out = [];
   for (const m of text7.matchAll(/\u201C([^\u201D]+)\u201D|"([^"]+)"|\u00AB([^\u00BB]+)\u00BB|\u201E([^\u201C\u201D]+)[\u201C\u201D]/g)) {
     const span3 = (m[1] ?? m[2] ?? m[3] ?? m[4] ?? "").trim();
-    if (wordsOf8(span3).length > 0)
+    if (wordsOf9(span3).length > 0)
       out.push(span3);
   }
   return out;
 }
 function quoteFindings(draft2, quotes) {
   const spans = spokenIn(draft2);
-  const spoken = spans.flatMap(wordsOf8);
-  const all2 = wordsOf8(draft2);
-  const runs = quotes.map(wordsOf8);
+  const spoken = spans.flatMap(wordsOf9);
+  const all2 = wordsOf9(draft2);
+  const runs = quotes.map(wordsOf9);
   return {
     missing: quotes.filter((_, i) => !holdsRun(spoken, runs[i] ?? []) && !holdsRun(all2, runs[i] ?? [])),
-    unheld: spans.filter((span3) => !runs.some((run2) => holdsRun(run2, wordsOf8(span3))))
+    unheld: spans.filter((span3) => !runs.some((run2) => holdsRun(run2, wordsOf9(span3))))
   };
 }
 function tail2(text7, chars) {
@@ -132597,7 +133236,7 @@ function narrationGuidance(settings) {
 
 // src/backend/story/preset.ts
 var TEXT_PARTS = ["contract", "author", "character", "gm", "narrator", "voice"];
-var READS2 = {
+var READS3 = {
   author: ["contract", "author"],
   character: ["contract", "character"],
   direct: ["contract", "character", "voice"],
@@ -132735,7 +133374,7 @@ function findModule(read, name2) {
   return read.modules.find((m) => storyCategoryKey(m.name) === key) ?? null;
 }
 function presetFor(read, reader, texts2, asked2 = []) {
-  const out = READS2[reader].map((part) => read.parts[part]).filter((t) => t !== "");
+  const out = READS3[reader].map((part) => read.parts[part]).filter((t) => t !== "");
   if (reader === "author" && read.modules.length > 0)
     out.push(renderPrompt(PRESET_NOTE.modules, texts2, { modules: read.modules.map((m) => `- ${m.name}${m.line !== "" ? `: ${m.line}` : ""}`).join(`
 `) }));
@@ -132928,9 +133567,9 @@ async function recentProse(turn, env, chars) {
 }
 function quoteNotes(view, draft2, passage, beats) {
   const found = quoteFindings(draft2, quotesReaching(beats, passage.beats, passage.pov));
-  const quoted3 = (list4) => list4.map((q) => `"${q}"`).join(", ");
+  const quoted4 = (list4) => list4.map((q) => `"${q}"`).join(", ");
   const pov2 = view.name(passage.pov === PLAYER ? view.pov : passage.pov);
-  return [...found.missing.length > 0 ? [view.text(STAGE_NOTE.quotesMissing, { pov: pov2, quotes: quoted3(found.missing) })] : [], ...found.unheld.length > 0 ? [view.text(STAGE_NOTE.quotesUnheld, { quotes: quoted3(found.unheld) })] : []];
+  return [...found.missing.length > 0 ? [view.text(STAGE_NOTE.quotesMissing, { pov: pov2, quotes: quoted4(found.missing) })] : [], ...found.unheld.length > 0 ? [view.text(STAGE_NOTE.quotesUnheld, { quotes: quoted4(found.unheld) })] : []];
 }
 var READ6 = STAGE_TOOL.narrationRead;
 var DRAFT2 = STAGE_TOOL.passageDraft;
@@ -134868,14 +135507,15 @@ var HARNESS_OWN_NEEDS = new Map([
 ].flatMap(([needs2, tools]) => tools.map((name2) => [name2, needs2])));
 var ENTRIES = [
   ...TOOL_DEFINITIONS.filter((def2) => !hasOwn(HARNESS_SUPERSEDED, def2.name)).map((def2) => ({ name: def2.name, family: def2.family, tier: def2.tier === "read" ? "read" : "write", writer: def2.tier, needs: def2.tier, args: [...toolText(def2.name)?.args ?? [], ...NESTED_ARG_TEXTS.filter((a) => a.tool === def2.name)], parameters: (world) => def2.parameters(world), run: (args, env) => def2.run(args, env) })),
-  ...HARNESS_TOOL_DEFINITIONS.map((def2) => ({ name: def2.name, family: def2.family, tier: def2.tier, writer: null, needs: HARNESS_OWN_NEEDS.get(def2.name) ?? (def2.tier === "read" ? "read" : "gm"), args: harnessToolText(def2.name)?.args ?? [], parameters: (world) => def2.parameters(world), run: (args, env) => def2.run(args, env) }))
+  ...HARNESS_TOOL_DEFINITIONS.map((def2) => ({ name: def2.name, family: def2.family, tier: def2.tier, writer: null, needs: HARNESS_OWN_NEEDS.get(def2.name) ?? (def2.tier === "read" ? "read" : "gm"), args: harnessToolText(def2.name)?.args ?? [], parameters: (world) => def2.parameters(world), ...def2.wholeChars ? { wholeChars: def2.wholeChars } : {}, run: (args, env) => def2.run(args, env) }))
 ];
 var HARNESS_LISTED = ENTRIES.map(({ name: name2, family, tier, writer, needs: needs2 }) => ({ name: name2, family, tier, writer, needs: needs2 }));
 var RUNNERS = new Map(ENTRIES.map((e) => [e.name, e.run]));
 function harnessTools(input) {
-  const { texts: texts2 } = input;
+  const { settings } = input;
+  const { texts: texts2 } = settings.prompts;
   const world = schemaWorld(input.world, input.registry);
-  return ENTRIES.map((e) => ({ name: e.name, family: e.family, tier: e.tier, description: renderPrompt(hasOwn(HARNESS_DESCRIBED, e.name) ? HARNESS_DESCRIBED[e.name] : toolTextId(e.name), texts2, {}), parameters: describedSchema(e.name, e.args, e.parameters(world), texts2), source: "extension" }));
+  return ENTRIES.map((e) => ({ name: e.name, family: e.family, tier: e.tier, description: renderPrompt(hasOwn(HARNESS_DESCRIBED, e.name) ? HARNESS_DESCRIBED[e.name] : toolTextId(e.name), texts2, {}), parameters: describedSchema(e.name, e.args, e.parameters(world), texts2), ...e.wholeChars ? { wholeChars: e.wholeChars(settings) } : {}, source: "extension" }));
 }
 function writerOf(env) {
   const writer = env.writer;
@@ -135462,7 +136102,7 @@ var BUDGET_SCHEMA = {
   description: "What this agent may spend on one message it is sent. A limit that stops it says so in the live view.",
   type: "object",
   properties: {
-    callTokensIn: limit3("Prompt per call", "The most one call may send, in tokens, as estimated before it is sent. A call past it isn't made.", "tokens"),
+    callTokensIn: limit3("Prompt per call", "The most one call may send, in tokens, as estimated before it is sent. A call past it isn't made. A tool result that would take the next call past it reaches the model cut to the room left, and the rest waits for scratch_read.", "tokens"),
     callTokensOut: whole6("Answer per call", "The most one call may write, its reasoning included (max_tokens). The writer's is the request's own where the request names one.", 1, "tokens"),
     callMs: limit3("Time per call", "How long one call may take before it is given up.", "ms"),
     callTools: limit3("Tool calls per answer", "The most tools one answer may call. Calls past it aren't run, and the model is told.", "calls"),
@@ -135578,11 +136218,11 @@ var SETTINGS_SCHEMA = {
       type: "object",
       properties: {
         repeats: whole6("Loop detector", "An agent that makes the same tool call, on the same state, this many times in a row is stopped.", 2, "calls"),
-        clipChars: whole6("Tool results clipped past", "A tool result longer than this reaches the model clipped; scratch_read reads the rest.", 200, "characters"),
+        clipChars: whole6("Tool results clipped past", "A tool result longer than this reaches the model clipped; scratch_read reads the rest. A tool that bounds its own answer by a setting of its own, meant to be read in one go, is clipped only past that instead.", 200, "characters"),
         thinkingInToolLoops: flag3("Thinking in tool loops", "Let a model reason on calls that offer tools. Turn it off for a connection that fails when a reasoning model's thinking must be sent back after a tool call."),
         stream: flag3("Streaming", "Take every answer as the provider streams it, so a long answer's connection is never idle. The writer's reply streams either way."),
         charsPerToken: { title: "Characters per token", description: "For token estimates made before a provider reports its own count: budgets, and the length of the main agent's notes.", type: "number", minimum: 1, maximum: 8 },
-        retries: whole6("Retries", "A model call that fails in passing (a timeout, a rate limit, a provider error in the 500s, a stream that drops) is made again up to this many times, each shown in the live view. Never once part of the reply has reached you, and never a call one of your own limits stopped. 0 turns retries off.", 0, "retries"),
+        retries: whole6("Retries", "A model call that fails in passing (a timeout, a rate limit, a provider error in the 500s, a stream that drops, an answer that arrives garbled) is made again up to this many times, each shown in the live view. Never once part of the reply has reached you, and never a call one of your own limits stopped. 0 turns retries off.", 0, "retries"),
         retryWaitMs: whole6("Wait before a retry", "How long to wait before a failed call is made again. The agent's and the turn's time limits still run while it waits.", 0, "ms", TIMER_MAX_MS2),
         answerFloor: whole6("Least answer room", "A call isn't made with less room for its answer than this. An agent whose answer tokens (its own, or its turn's) are that close to spent stops and says so, instead of writing an answer that would be cut.", 1, "tokens"),
         warnRounds: whole6("Rounds left warning", "An agent is told when it has this many rounds of tool calls left, so it can finish with what it has. 0 for never.", 0, "rounds"),
@@ -136212,11 +136852,14 @@ var JOBS_TEXT = {
   objective: "jobs.objective",
   objectiveFiles: "jobs.objective.files",
   objectiveChat: "jobs.objective.chat",
+  objectiveFilesKept: "jobs.objective.files.kept",
+  objectiveChatKept: "jobs.objective.chat.kept",
   againNote: "jobs.again.note",
   againOffPath: "jobs.again.off_path",
   whyCutThinking: "jobs.why.cut_thinking",
   resumed: "jobs.resumed",
   resumedPlan: "jobs.resumed.plan",
+  resumedKept: "jobs.resumed.kept",
   allowance: "jobs.allowance",
   allowanceIn: "jobs.allowance.in",
   allowanceOut: "jobs.allowance.out",
@@ -136308,7 +136951,7 @@ var JOBS_TEXTS = [
     ].join(`
 
 `),
-    vars: [v5("task", "the objective, as the user wrote it", true), v5("allowance", "what the job may spend, as Its allowance writes it", true), v5("files", "for an agent that can write files: its plan and where it keeps its files, as A long objective: files (or its form for the chat's own area) writes it; nothing for one that can't")]
+    vars: [v5("task", "the objective, as the user wrote it", true), v5("allowance", "what the job may spend, as Its allowance writes it", true), v5("files", "for an agent that can write files: its plan and where it keeps its files, as A long objective: files writes it (or one of its forms: for the chat's own area, or for a plan its starter keeps); nothing for one that can't")]
   },
   {
     id: JOBS_TEXT.objectiveFiles,
@@ -136338,10 +136981,39 @@ var JOBS_TEXTS = [
 `),
     vars: [v5("plan", "the plan file's path", true)]
   },
+  {
+    id: JOBS_TEXT.objectiveFilesKept,
+    group: JOBS,
+    label: "A long objective: files, with a plan its starter keeps",
+    note: "Fills {{files}} in A long objective, in place of A long objective: files, where whoever started the job keeps its plan file with tools of its own (an extension that starts jobs): their words of the plan stand where the agent would be asked to write one.",
+    text: [
+      " So keep what you learn in files as you go, never only in your head.",
+      "{{kept}}",
+      "Work in learned/ (kept with this chat whatever path its story takes) and ~/ (the user's own, shared by all their chats). You can read the chat's own area (/) and can't change it: it follows the story as swipes and edits do, and you belong to the chat, not to a turn. Keep a plain list of what you have not verified in learned/, beside what you have, and say in your report where your files are."
+    ].join(`
+
+`),
+    vars: [v5("kept", "what whoever started the job tells its agent of the plan file they keep", true), v5("plan", "the plan file's path")]
+  },
+  {
+    id: JOBS_TEXT.objectiveChatKept,
+    group: JOBS,
+    label: "A long objective: files, with the chat's own area and a plan its starter keeps",
+    note: "Fills {{files}} in A long objective, in place of its form for the chat's own area, where whoever started the job keeps its plan file with tools of its own (an extension's prepared start): their words of the plan stand where the agent would be asked to write one.",
+    text: [
+      " So keep what you learn in files as you go, never only in your head.",
+      "{{kept}}",
+      "You may write the chat's own area (/), as it stands at the chat's latest reply, and learned/ (kept with this chat whatever path its story takes) and ~/ (the user's own, shared by all their chats). Keep a plain list of what you have not verified beside what you have, and say in your report where your files are."
+    ].join(`
+
+`),
+    vars: [v5("kept", "what whoever started the job tells its agent of the plan file they keep", true), v5("plan", "the plan file's path")]
+  },
   { id: JOBS_TEXT.againNote, group: JOBS, label: "A job run again", note: "Ends the first message of a job the user ran again from the Jobs page: it is the same job, told what its first run was told, and why that run stopped.", text: "This is the same job run again. Its last run stopped: {{why}}.", vars: [v5("why", "why the last run stopped, or how it stands", true)] },
   { id: JOBS_TEXT.againOffPath, group: GROUP5.answers, label: "Run again: its reply is gone", note: "Why a job can't be run again from the Jobs page: the reply it was started from is no longer on the chat's path.", text: "Not run again: job {{id}} belongs to a reply that is no longer on the chat's path (it was swiped, edited away or deleted), so it would have no turn to work for. Show that reply again to run it, or start a new job.", vars: [v5("id", "the job's id", true)] },
-  { id: JOBS_TEXT.resumed, group: JOBS, label: "A job carried on", note: "What a job's agent is sent when the job is carried on from its own session: the user granted it more after its allowance ran out, or resumed it after a restart had found it paused.", text: "This job was stopped and is carried on now, from where you left it. {{allowance}}{{plan}} Then go on.", vars: [v5("allowance", "what is left of what the job may spend, as Its allowance writes it", true), v5("plan", "where its plan is, as A job carried on: its plan writes it; nothing for a job that was asked for none")] },
+  { id: JOBS_TEXT.resumed, group: JOBS, label: "A job carried on", note: "What a job's agent is sent when the job is carried on from its own session: the user granted it more after its allowance ran out, or resumed it after a restart had found it paused.", text: "This job was stopped and is carried on now, from where you left it. {{allowance}}{{plan}} Then go on.", vars: [v5("allowance", "what is left of what the job may spend, as Its allowance writes it", true), v5("plan", "where its plan is, as A job carried on: its plan writes it (or its form for a plan its starter keeps); nothing for a job that was asked for none")] },
   { id: JOBS_TEXT.resumedPlan, group: JOBS, label: "A job carried on: its plan", note: "Fills {{plan}} for a job that was asked to keep a plan: one the user started.", text: " Read your plan ({{plan}}) and your files first: they say what is done and what is left.", vars: [v5("plan", "the plan file's path", true)] },
+  { id: JOBS_TEXT.resumedKept, group: JOBS, label: "A job carried on: a plan its starter keeps", note: "Fills {{plan}} in A job carried on, in place of A job carried on: its plan, for a job whose starter keeps its plan file with tools of its own: their words of the plan.", text: " {{kept}}", vars: [v5("kept", "what whoever started the job tells its agent of the plan file they keep", true), v5("plan", "the plan file's path")] },
   { id: JOBS_TEXT.allowance, group: JOBS, label: "Its allowance", note: "How a job's agent is told what the job may still spend.", text: "What this job may still spend: {{parts}}.", vars: [v5("parts", "each limit, as the four texts below write them, or that there is none", true)] },
   { id: JOBS_TEXT.allowanceIn, group: JOBS, label: "Its allowance: prompt tokens", note: "One part of Its allowance.", text: "{{tokens}} sent to models", vars: [v5("tokens", 'the prompt tokens left, with the word: "600000 tokens"', true)] },
   { id: JOBS_TEXT.allowanceOut, group: JOBS, label: "Its allowance: answer tokens", note: "One part of Its allowance.", text: "{{tokens}} written by them", vars: [v5("tokens", 'the answer tokens left, with the word: "60000 tokens"', true)] },
@@ -137437,7 +138109,9 @@ var TEXT = {
     notRun: "runtime.tool_not_run",
     oneEnding: "runtime.one_ending",
     clippedLost: "runtime.clipped_lost",
-    scratchLost: "runtime.scratch_lost"
+    scratchLost: "runtime.scratch_lost",
+    windowCut: "runtime.window_cut",
+    scratchFull: "runtime.scratch_full"
   },
   stop: {
     cancelled: "stop.cancelled",
@@ -137622,7 +138296,7 @@ var RUNTIME_TEXTS = [
   { id: TEXT.runtime.scratchRead, group: RUNTIME, label: "scratch_read: what it does", note: "The description of the built-in tool that reads the rest of a clipped tool result.", text: "Read more of a tool result that came back clipped. Give the scratch handle the clipped result names and where to start; you get the next part.", vars: [] },
   { id: TEXT.runtime.scratchHandle, group: RUNTIME, label: "scratch_read: handle", note: "The description of scratch_read's handle argument.", text: "The scratch handle the clipped result names, such as s1.", vars: [] },
   { id: TEXT.runtime.scratchOffset, group: RUNTIME, label: "scratch_read: offset", note: "The description of scratch_read's offset argument.", text: "The character to start from; 0 is the start.", vars: [] },
-  { id: TEXT.runtime.scratchLength, group: RUNTIME, label: "scratch_read: length", note: "The description of scratch_read's length argument.", text: "How many characters to read, at most {{max}}.", vars: [v5("max", "the most one read returns: Tool results clipped past")] },
+  { id: TEXT.runtime.scratchLength, group: RUNTIME, label: "scratch_read: length", note: "The description of scratch_read's length argument.", text: "How many characters to read, at most {{max}}.", vars: [v5("max", "the most one read returns: Tool results clipped past, or the most any of the agent's tools gives whole, where that is more")] },
   {
     id: TEXT.runtime.scratchPart,
     group: RUNTIME,
@@ -137682,7 +138356,16 @@ Arguments (JSON Schema): {{parameters}}`, vars: [v5("name", "the tool's name", t
   { id: TEXT.runtime.notRun, group: RUNTIME, label: "A tool call that never began", note: "The result of a tool call its round's end overtook before it began: the turn was stopped or a time limit passed while the call still waited for its place among the calls at once, or for your word.", text: "Not run: {{reason}}, before this call of {{name}} began. Nothing of it was started.", vars: [v5("name", "the tool"), v5("reason", "what ended the round, as the agent's stop says it", true)] },
   { id: TEXT.runtime.oneEnding, group: RUNTIME, label: "A second call that would end the work", note: "The result of a call to a tool whose result ends the agent's work (write_reply), where an earlier call of the same answer already does: only that first one is run.", text: "Not run: one answer may make one call that ends your work, and this answer's earlier call of {{first}} is that one. It stands, with what it was given. If its result says it failed, call {{name}} again in your next answer.", vars: [v5("name", "the tool whose call wasn't run", true), v5("first", "the tool whose earlier call stands")] },
   { id: TEXT.runtime.clippedLost, group: RUNTIME, label: "A clipped tool result whose rest couldn't be kept", note: "Follows the part of a long tool result that reaches the model when the whole couldn't be stored for scratch_read.", text: "[Clipped: the first {{shown}} of {{total}} characters. The rest couldn't be kept ({{error}}), so scratch_read can't give it. Call the tool again and ask for less at a time.]", vars: [v5("shown", "the characters shown"), v5("total", "the result's length"), v5("error", "why the whole couldn't be stored")] },
-  { id: TEXT.runtime.scratchLost, group: RUNTIME, label: "scratch_read: the result is no longer stored", note: "scratch_read's answer to a handle whose whole result is gone from storage.", text: "Scratch {{handle}} is no longer stored, so it can't be read. Call the tool that gave it again for what you need.", vars: [v5("handle", "the handle asked for")] }
+  { id: TEXT.runtime.scratchLost, group: RUNTIME, label: "scratch_read: the result is no longer stored", note: "scratch_read's answer to a handle whose whole result is gone from storage.", text: "Scratch {{handle}} is no longer stored, so it can't be read. Call the tool that gave it again for what you need.", vars: [v5("handle", "the handle asked for")] },
+  {
+    id: TEXT.runtime.windowCut,
+    group: RUNTIME,
+    label: "A tool result cut to the room left",
+    note: "Follows the part of a tool result that reaches the model when the whole would take the agent's next call past Prompt per call.",
+    text: "[Cut to fit: your prompt has room for only the first {{shown}} of {{total}} characters of this result (Prompt per call). The rest is in scratch {{handle}}; scratch_read gives it from offset {{shown}}, as much as your prompt still has room for. Once there is no room left, answer with what you have.]",
+    vars: [v5("shown", "the characters shown"), v5("total", "the result's length"), v5("handle", "where the whole result waits", true)]
+  },
+  { id: TEXT.runtime.scratchFull, group: RUNTIME, label: "scratch_read: no room left", note: "scratch_read's answer when the agent's prompt has no room left for any more of a result (Prompt per call).", text: "Your prompt has no room left for more of scratch {{handle}} (Prompt per call). Answer with what you have.", vars: [v5("handle", "the handle asked for", true)] }
 ];
 var STOP_TEXTS = [
   stopText(TEXT.stop.cancelled, "Cancelled", "The agent was cancelled: the turn was stopped, or whoever started it stopped it.", "the agent was cancelled"),
@@ -139122,9 +139805,9 @@ class Areas {
   }
   async newest(chatId) {
     const path3 = await this.host.chat.path(chatId);
-    const standing5 = (await pathTurns(path3)).filter((turn) => turn.onPath);
-    const latest = standing5.at(-1) ?? null;
-    return latest !== null && latest.at === path3.length - 1 ? { latest, base: standing5.at(-2) ?? null } : { latest };
+    const standing6 = (await pathTurns(path3)).filter((turn) => turn.onPath);
+    const latest = standing6.at(-1) ?? null;
+    return latest !== null && latest.at === path3.length - 1 ? { latest, base: standing6.at(-2) ?? null } : { latest };
   }
   forget(chatId) {
     this.open.delete(chatId);
@@ -139166,8 +139849,8 @@ class LiveArea {
     this.who = who3;
   }
   async target() {
-    let standing5 = null;
-    const turns = () => standing5 ??= this.areas.standing(this.chatId);
+    let standing6 = null;
+    const turns = () => standing6 ??= this.areas.standing(this.chatId);
     const turn = await this.areas.current(this.chatId, turns);
     if (turn)
       return { area: turn.area, also: this.who.basis === turn.generationId ? null : turn.under };
@@ -139410,11 +140093,24 @@ var TRANSIENT = [
   /\b(?:socket hang up|network error|connection error|fetch failed|unable to connect|other side closed|premature close|unexpected end of (?:stream|data|file|json input))\b/i,
   /\b(?:socket|connection)\b[^.\n]{0,30}\b(?:reset|closed|lost|refused|terminated|dropped)\b/i,
   /^\s*terminated\s*$/i,
-  /\bstream\b[^.\n]{0,40}\b(?:cut|dropped|ended|closed|interrupted|reset|lost|terminated|broke|broken)\b/i
+  /\bstream\b[^.\n]{0,40}\b(?:cut|dropped|ended|closed|interrupted|reset|lost|terminated|broke|broken)\b/i,
+  /\bJSON Parse error\b|\bis not valid JSON\b|\bin JSON at position\b/i
 ];
 function isTransient(error) {
   const texts2 = [errorText2(error), error instanceof Error && error.cause !== undefined ? errorText2(error.cause) : ""];
   return !texts2.some((text7) => LASTING.some((pattern) => pattern.test(text7))) && texts2.some((text7) => TRANSIENT.some((pattern) => pattern.test(text7)));
+}
+var REFUSED2 = [
+  /(?:^\s*|\b(?:status(?: code)?|http(?:\/[\d.]+)?|error|code)[\s:=#(]*)(?:401|403|404)\b/i,
+  /\b(?:unauthori[sz]ed|forbidden|permission[ _-]denied|access[ _-]denied|authentication (?:failed|error|required))\b/i,
+  /\b(?:invalid|incorrect|missing|expired|revoked)[ _-](?:x-)?(?:api[ _-]?)?key\b/i,
+  /\bapi[ _-]?key\b[^.\n]{0,30}\b(?:invalid|incorrect|missing|not valid|expired|revoked)\b/i,
+  /\b(?:model[ _]not[ _]found|no such model|unknown model|invalid model)\b/i,
+  /\bmodel\b[^.\n]{0,80}\b(?:not found|does(?: not|n't) exist|is not available|isn't available)\b/i
+];
+function isLasting(error) {
+  const texts2 = [errorText2(error), error instanceof Error && error.cause !== undefined ? errorText2(error.cause) : ""];
+  return texts2.some((text7) => LASTING.some((pattern) => pattern.test(text7)) || REFUSED2.some((pattern) => pattern.test(text7)));
 }
 function callEffort2(effort, offersTools, thinkingInToolLoops) {
   return offersTools && !thinkingInToolLoops ? "off" : effort;
@@ -140044,6 +140740,7 @@ class Agent2 {
   entries = [];
   total = emptyUsage2();
   scratch = new Map;
+  room = Number.POSITIVE_INFINITY;
   startedAt = null;
   heldBefore = 0;
   waited = 0;
@@ -140283,6 +140980,8 @@ class Agent2 {
       used.toolTurns += 1;
       if (turn)
         turn.usage.toolTurns += 1;
+      const encoding = reply.written ? TEXT_TURNS2 : NATIVE_TURNS2;
+      this.room = this.roomOf(prepared2, encoding, reply);
       const tools = this.scope(signal2, false);
       let round2;
       try {
@@ -140290,7 +140989,6 @@ class Agent2 {
       } finally {
         tools.clear();
       }
-      const encoding = reply.written ? TEXT_TURNS2 : NATIVE_TURNS2;
       this.conversation.push(encoding.assistant(reply), encoding.results(round2.map((ran2) => ran2.result), this.deps.texts));
       if (tools.signal.aborted)
         return this.end(used, this.why(tools.signal.reason, tools.signal), said2, finish3);
@@ -140348,14 +141046,30 @@ ${text7}`, ...last.parts ? { parts: [...last.parts, { type: "text", text: text7 
 
 ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.word.round) })}`;
   }
-  warnRounds() {
+  roundsNotice() {
     const left = this.roundsLeft();
     const { warnRounds } = this.deps.settings.loop;
     if (warnRounds <= 0 || left > warnRounds)
+      return null;
+    return left === 0 ? this.text(TEXT.runtime.roundsSpent) : this.text(TEXT.runtime.roundsLeft, { rounds: this.deps.texts.counted(left, TEXT.word.round) });
+  }
+  warnRounds() {
+    const text7 = this.roundsNotice();
+    if (text7 === null)
       return;
-    const text7 = left === 0 ? this.text(TEXT.runtime.roundsSpent) : this.text(TEXT.runtime.roundsLeft, { rounds: this.deps.texts.counted(left, TEXT.word.round) });
     this.tell(text7);
     this.record({ kind: "notice", text: text7, at: this.now() });
+  }
+  roomOf(p, encoding, reply) {
+    const window = limitOf2(this.spec.budget.callTokensIn);
+    if (!Number.isFinite(window))
+      return Number.POSITIVE_INFINITY;
+    const { charsPerToken } = this.deps.settings.loop;
+    const framing = messageText2(encoding.results(reply.calls.map((call) => ({ call, text: "", error: true })), this.deps.texts)).length;
+    const line2 = this.roundsNotice();
+    const notice = line2 === null ? 0 : line2.length + 2;
+    const after = p.estimate + tokensOf2(messageText2(encoding.assistant(reply)), charsPerToken) + 2;
+    return Math.max(0, Math.floor((window - after) * charsPerToken) - framing - notice);
   }
   timeUp() {
     const now = this.now();
@@ -140559,7 +141273,9 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
       }
     }
     const ends2 = outcome.end === true && outcome.error !== true;
-    const kept4 = call.name === SCRATCH_READ2 || ends2 ? null : await this.clip(outcome.text, signal2);
+    if (call.name === SCRATCH_READ2)
+      this.room = Math.max(0, this.room - outcome.text.length);
+    const kept4 = call.name === SCRATCH_READ2 || ends2 ? null : await this.clip(outcome.text, tool6?.wholeChars, signal2);
     const text7 = kept4?.text ?? outcome.text;
     const error = outcome.error === true;
     const scratch = kept4?.scratch !== undefined ? { scratch: kept4.scratch } : {};
@@ -140619,12 +141335,22 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
         this.waited += this.now() - this.waitingSince;
     }
   }
-  async clip(text7, signal2) {
-    const max2 = this.deps.settings.loop.clipChars;
-    if (text7.length <= max2)
+  async clip(text7, wholeChars, signal2) {
+    const max2 = Math.max(wholeChars ?? 0, this.deps.settings.loop.clipChars);
+    const room = this.room;
+    if (text7.length <= max2 && text7.length <= room) {
+      this.room = room - text7.length;
       return null;
-    const shown6 = cutAt3(text7, max2);
-    const sizes = { shown: String(shown6), total: String(text7.length) };
+    }
+    const total = String(text7.length);
+    const words10 = (id3) => this.text(id3, { shown: total, total, handle: "s000000" }).length + 1;
+    const fits4 = text7.length > max2 && max2 + words10(TEXT.runtime.clipped) <= room;
+    const id2 = fits4 ? TEXT.runtime.clipped : TEXT.runtime.windowCut;
+    const shown6 = cutAt3(text7, fits4 ? max2 : Math.max(0, room - words10(TEXT.runtime.windowCut)));
+    this.room = Math.max(0, room - shown6 - words10(id2));
+    const sizes = { shown: String(shown6), total };
+    const start = shown6 > 0 ? `${text7.slice(0, shown6)}
+` : "";
     const { blobs } = this.deps;
     let whole7 = { text: text7 };
     if (blobs) {
@@ -140634,17 +141360,15 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
         const stopped = signal2.aborted ? this.why(error, signal2) : null;
         if (!stopped)
           this.deps.host.log("warn", `[LumiAH] the whole of a clipped tool result couldn't be stored (${errorText2(error)}): the model has its start alone`);
-        return { text: `${text7.slice(0, shown6)}
-${this.text(TEXT.runtime.clippedLost, { ...sizes, error: stopped ? this.text(stopped.text.id, stopped.text.vars) : errorText2(error) })}`, whole: null };
+        return { text: `${start}${this.text(TEXT.runtime.clippedLost, { ...sizes, error: stopped ? this.text(stopped.text.id, stopped.text.vars) : errorText2(error) })}`, whole: null };
       }
     }
     const handle = `s${this.scratch.size + 1}`;
-    this.scratch.set(handle, whole7);
-    return { text: `${text7.slice(0, shown6)}
-${this.text(TEXT.runtime.clipped, { ...sizes, handle })}`, whole: whole7, scratch: "hash" in whole7 ? whole7.hash : handle };
+    this.scratch.set(handle, { whole: whole7, per: max2 });
+    return { text: `${start}${this.text(id2, { ...sizes, handle })}`, whole: whole7, scratch: "hash" in whole7 ? whole7.hash : handle };
   }
   scratchRead() {
-    const max2 = this.deps.settings.loop.clipChars;
+    const max2 = Math.max(this.deps.settings.loop.clipChars, ...[...this.tools.values()].map((tool6) => tool6.wholeChars ?? 0));
     return {
       name: SCRATCH_READ2,
       description: this.text(TEXT.runtime.scratchRead),
@@ -140662,13 +141386,17 @@ ${this.text(TEXT.runtime.clipped, { ...sizes, handle })}`, whole: whole7, scratc
         const kept4 = this.scratch.get(handle);
         if (kept4 === undefined)
           return { text: this.text(TEXT.runtime.scratchMissing, { handle, handles: [...this.scratch.keys()].join(", ") || this.text(TEXT.session.none) }), error: true };
-        const whole7 = "text" in kept4 ? kept4.text : await this.deps.blobs?.get(kept4.hash) ?? null;
+        const whole7 = "text" in kept4.whole ? kept4.whole.text : await this.deps.blobs?.get(kept4.whole.hash) ?? null;
         if (whole7 === null)
           return { text: this.text(TEXT.runtime.scratchLost, { handle }), error: true };
         const from = Math.min(Math.max(0, wholeArg3(args.offset) ?? 0), whole7.length);
-        const length = Math.min(Math.max(1, wholeArg3(args.length) ?? max2), max2);
+        const total = String(whole7.length);
+        const room = this.room - this.text(TEXT.runtime.scratchPart, { handle, from: total, to: total, total, text: "" }).length;
+        if (room < 1 && from < whole7.length)
+          return { text: this.text(TEXT.runtime.scratchFull, { handle }) };
+        const length = Math.min(Math.max(1, wholeArg3(args.length) ?? kept4.per), kept4.per, room);
         const to = cutAt3(whole7, Math.min(whole7.length, from + length));
-        return { text: this.text(TEXT.runtime.scratchPart, { handle, from: String(from), to: String(to), total: String(whole7.length), text: whole7.slice(from, to) }) };
+        return { text: this.text(TEXT.runtime.scratchPart, { handle, from: String(from), to: String(to), total, text: whole7.slice(from, to) }) };
       }
     };
   }
@@ -140740,7 +141468,7 @@ function foldOf3(session, input) {
     kept: session.turns.slice(cut2)
   };
 }
-function summaryOf3(reply, texts2) {
+function summaryOf2(reply, texts2) {
   const summary = reply.text.trim();
   if (reply.status !== "answered")
     return { failed: reply.reason ?? texts2.render(TEXT.session.failedNothing) };
@@ -141434,7 +142162,7 @@ function coverOf(records2, hashes, path3) {
     return bySpan && records2.some((r) => r.span !== null && r.span[0] <= m.index && m.index <= r.span[1]) ? "covered" : "uncovered";
   });
 }
-function runsOf2(path3, cover, which) {
+function runsOf3(path3, cover, which) {
   const runs = [];
   let count6 = 0;
   path3.forEach((m, i) => {
@@ -141494,8 +142222,8 @@ function bookOf(chatId, stored, path3) {
     coverage: {
       messages: path3.length,
       covered: cover.filter((c) => c !== "uncovered").length,
-      uncovered: runsOf2(path3, cover, "uncovered"),
-      changed: stored.hashes.length > 0 ? runsOf2(path3, cover, "changed") : null
+      uncovered: runsOf3(path3, cover, "uncovered"),
+      changed: stored.hashes.length > 0 ? runsOf3(path3, cover, "changed") : null
     },
     contents: new Map(records2.map((r) => [r.id, r.text]))
   };
@@ -141616,6 +142344,7 @@ function remoteDefinition(tool6, host) {
         description: tool6.description,
         parameters: tool6.parameters,
         tier: tool6.tier,
+        ...tool6.wholeChars !== undefined ? { wholeChars: tool6.wholeChars } : {},
         async run(args, ctx) {
           const { main = false, above = [] } = env.standing ?? {};
           const answer = await port.call({ name: tool6.name, args, turn: env.run.id, chatId: env.run.chatId, agentId: ctx.agentId, role: ctx.role, callId: ctx.callId, kind: env.run.kind, main, above: above.map(({ agentId, role, as }) => ({ agentId, role, ...as !== undefined ? { as } : {} })), ...ctx.as !== undefined ? { as: ctx.as } : {} }, ctx.signal);
@@ -142157,7 +142886,7 @@ class ChatRun {
     return this.messages.map((m) => m.index);
   }
 }
-function runsOf3(indices, most, passes) {
+function runsOf4(indices, most, passes) {
   const runs = [];
   for (const index of indices) {
     const last = runs.at(-1);
@@ -142187,7 +142916,8 @@ class ChatCorpus {
     this.index = new LexicalIndex(pieceChars);
   }
   sync(run2, path3, sizes, story) {
-    if (this.last?.run === run2)
+    const key = pathKey(path3);
+    if (this.last?.run === run2 && this.last.path === key)
       return this.last.done;
     const before = this.last?.done.then(() => {
       return;
@@ -142195,7 +142925,7 @@ class ChatCorpus {
       return;
     });
     const done = (before ?? Promise.resolve()).then(() => this.read(path3, sizes, story));
-    const held4 = { run: run2, done };
+    const held4 = { run: run2, path: key, done };
     this.last = held4;
     done.catch(() => {
       if (this.last === held4)
@@ -142224,7 +142954,8 @@ class ChatCorpus {
     }
     const wanted = new Map(kept4.map((m) => [m.id, m]));
     const stale = kept4.filter((m) => this.docs.get(m.id)?.hash !== m.hash).map((m) => m.index);
-    for (const [from, to] of runsOf3(stale, Math.max(1, sizes.chatBatch), (index) => left.has(index))) {
+    const numbers4 = new Set(path3.map((m) => m.index));
+    for (const [from, to] of runsOf4(stale, Math.max(1, sizes.chatBatch), (index) => left.has(index) || !numbers4.has(index))) {
       const read2 = await this.texts(from, to);
       const given2 = [];
       for (const raw of Array.isArray(read2) ? read2 : []) {
@@ -142263,6 +142994,9 @@ class ChatCorpus {
     }
     return new ChatRun(messages, this.index, left);
   }
+}
+function pathKey(path3) {
+  return path3.map((m) => `${m.id}\x01${m.index}\x01${m.role}\x01${m.name}\x01${m.hash}\x01${m.hidden === true ? 1 : 0}`).join("\x00");
 }
 
 // node_modules/lumi-ah/src/core/recall/lore.ts
@@ -143503,7 +144237,7 @@ function unheldLore(input) {
   const leading = new Set(first);
   return [...first, ...corpus.docs.filter((doc) => listed7(doc) && !leading.has(doc))];
 }
-function runsOf4(path3, has) {
+function runsOf5(path3, has) {
   const runs = [];
   let open = false;
   for (const m of path3) {
@@ -143541,7 +144275,7 @@ function heldHistory(input) {
     if (kind)
       stands.push({ kind, name: block2.name });
   }
-  return { held: runsOf4(input.path, (m) => ids2.has(m.id)), missing: runsOf4(input.path, (m) => !ids2.has(m.id)), stands };
+  return { held: runsOf5(input.path, (m) => ids2.has(m.id)), missing: runsOf5(input.path, (m) => !ids2.has(m.id)), stands };
 }
 function fit(lines4, room, more) {
   const kept4 = [];
@@ -143755,6 +144489,7 @@ class RecallRun {
   available = null;
   readied = null;
   corpora;
+  pathRead = null;
   heldRead = null;
   arcsRead = null;
   embedded = new WeakMap;
@@ -143795,7 +144530,19 @@ class RecallRun {
   }
   async chat() {
     const { pieceChars, chatBatch } = this.env.settings.tools;
-    return this.corpora.chat.sync(this.env.run.id, await this.env.chat.path(), { pieceChars, chatBatch }, this.env.story);
+    return this.corpora.chat.sync(this.env.run.id, await this.path(), { pieceChars, chatBatch }, this.env.story);
+  }
+  path() {
+    if (this.env.turn && this.env.chat)
+      return this.env.chat.path();
+    if (this.pathRead)
+      return this.pathRead;
+    const read2 = this.host.chat.path(this.chatId).finally(() => {
+      if (this.pathRead === read2)
+        this.pathRead = null;
+    });
+    this.pathRead = read2;
+    return read2;
   }
   async activated(turn) {
     const port = this.host.recall?.lore;
@@ -144072,9 +144819,16 @@ async function remoteTools(host, chatId) {
   }
   return (Array.isArray(listed7) ? listed7 : []).flatMap((tool6) => {
     const ok = isRecord2(tool6) && typeof tool6.name === "string" && tool6.name !== "" && typeof tool6.family === "string" && typeof tool6.tier === "string" && TIERS.includes(tool6.tier) && typeof tool6.description === "string" && isRecord2(tool6.parameters) && (tool6.source === "extension" || tool6.source === "user");
-    if (!ok)
+    if (!ok) {
       host.log("warn", `[LumiAH] a tool the extension listed isn't one (${isRecord2(tool6) && typeof tool6.name === "string" && tool6.name !== "" ? tool6.name : "no name"}): it isn't offered`);
-    return ok ? [tool6] : [];
+      return [];
+    }
+    if (tool6.wholeChars === undefined || Number.isSafeInteger(tool6.wholeChars) && tool6.wholeChars > 0)
+      return [tool6];
+    host.log("warn", `[LumiAH] the extension's tool ${tool6.name} names a length it reads whole that isn't a whole number of characters: its answers are clipped as any tool's`);
+    const rest = { ...tool6 };
+    delete rest.wholeChars;
+    return [rest];
   });
 }
 function claimOf2(raw) {
@@ -144686,6 +145440,7 @@ class Jobs {
     let task;
     let again;
     let kept4 = {};
+    let keptWords;
     let same3 = null;
     if ("again" in input.what) {
       const old = await this.doc(input.what.again);
@@ -144697,6 +145452,7 @@ class Jobs {
       task = old.task;
       again = old.job.id;
       kept4 = { ...old.job.as !== undefined ? { as: old.job.as } : {}, ...old.job.area !== undefined ? { area: old.job.area } : {}, ...old.job.plan !== undefined ? { plan: old.job.plan } : {} };
+      keptWords = old.planWords;
       if (input.by.who === "user") {
         const basis = old.job.basis;
         if (basis !== null && !this.shared().runs.has(basis) && !(await pathTurns(await this.host.chat.path(input.chatId))).some((turn) => turn.onPath && turn.record.generationId === basis))
@@ -144711,6 +145467,7 @@ class Jobs {
     const due = input.due ?? same3?.job.due;
     const area2 = by.who === "user" ? input.area ?? kept4.area : undefined;
     const plan2 = by.who === "user" ? input.plan ?? kept4.plan : undefined;
+    const planWords2 = plan2 !== undefined ? input.planWords ?? keptWords : undefined;
     const may = by.who === "user" ? definitions.agents().filter((d) => d.id !== AGENT.writer) : definitions.workers();
     if (!may.some((d) => d.id === agent))
       return { refused: definitions.without.has(agent) ? texts2.render(TEXT.agents.notOffered, { agent: clip4(agent, lineChars) }) : texts2.render(TEXT.jobs.noAgent, { agent: clip4(agent, lineChars), agents: may.map((d) => d.id).join(", ") }) };
@@ -144749,7 +145506,7 @@ class Jobs {
     this.forgotten.delete(input.chatId);
     const { starter: starter2 } = input;
     const given2 = same3 ? { ...same3.held !== undefined ? { held: same3.held } : {}, ...same3.depth !== undefined ? { depth: same3.depth } : {} } : starter2 ? { held: [...starter2.held], depth: starter2.depth + 1 } : {};
-    await this.put({ v: 1, kind: "job", job, task, ...given2 });
+    await this.put({ v: 1, kind: "job", job, task, ...given2, ...planWords2 !== undefined ? { planWords: planWords2 } : {} });
     port.queued(job);
     return job;
   }
@@ -144946,10 +145703,10 @@ class Jobs {
       if (!settings.jobs.enabled)
         return await this.stopped(doc, { state: "cancelled", reason: texts2.render(TEXT.jobs.whyOff) });
       if (setup.claim?.place === "runtime" && shared.options.place === "builtin")
-        return await this.stopped(doc, { state: "failed", reason: texts2.render(TEXT.jobs.whyRuntimeOnly) });
+        return await this.stopped(doc, { state: "failed", reason: texts2.render(TEXT.jobs.whyRuntimeOnly), lasting: true });
       const resolved2 = setup.definitions.resolve(doc.job.agent, settings);
       if (!resolved2)
-        return await this.stopped(doc, { state: "failed", reason: texts2.render(TEXT.jobs.whyGone, { agent: doc.job.agent }) });
+        return await this.stopped(doc, { state: "failed", reason: texts2.render(TEXT.jobs.whyGone, { agent: doc.job.agent }), lasting: true });
       if (!await this.stands(doc.job, settings.jobs.recordWaitMs, signal2).catch(() => true))
         return await this.stopped(doc, { state: "off_path", reason: texts2.render(this.ended.get(doc.job.basis ?? "")?.record === false ? TEXT.jobs.whyNoRecord : TEXT.jobs.whyOffPath) });
       const startedAt = host.clock.now();
@@ -144959,8 +145716,8 @@ class Jobs {
       let job = { ...carried, state: "running", startedAt: doc.job.startedAt ?? startedAt };
       let session = doc.session;
       let over = false;
-      const { held: held4, depth: depth2 } = doc;
-      const save = () => this.changed({ v: 1, kind: "job", job, task: doc.task, ...session !== undefined ? { session } : {}, ...held4 !== undefined ? { held: held4 } : {}, ...depth2 !== undefined ? { depth: depth2 } : {} });
+      const { held: held4, depth: depth2, planWords: planWords2 } = doc;
+      const save = () => this.changed({ v: 1, kind: "job", job, task: doc.task, ...session !== undefined ? { session } : {}, ...held4 !== undefined ? { held: held4 } : {}, ...depth2 !== undefined ? { depth: depth2 } : {}, ...planWords2 !== undefined ? { planWords: planWords2 } : {} });
       const run2 = new Run2(shared, setup, {
         info: { id: job.id, kind: "job", chatId: job.chatId },
         budget: jobBudget(job, settings),
@@ -145017,13 +145774,16 @@ class Jobs {
           }).catch((error) => host.log("warn", `[LumiAH] job ${job.id}'s session couldn't be kept (${errorText2(error)})`));
         };
         const plan2 = job.by.who === "user" && (started.held.has(TOOL4.workspaceWrite) || started.held.has(TOOL4.workspaceEdit)) ? job.plan ?? planPath(job.id) : null;
+        const kept4 = plan2 !== null && planWords2 !== undefined ? planWords2 : null;
         const allowance = allowanceText(run2.left(), texts2);
         const first = job.again !== undefined && !history ? await this.doc(job.again) : null;
         const ranAgain = first ? `
 
 ${texts2.render(TEXT.jobs.againNote, { why: first.job.reason ?? jobState(first.job, texts2) })}` : "";
-        const opening = job.by.who === "user" ? texts2.render(TEXT.jobs.objective, { task: doc.task, allowance, files: plan2 === null ? "" : texts2.render(job.area === "chat" ? TEXT.jobs.objectiveChat : TEXT.jobs.objectiveFiles, { plan: plan2 }) }) : texts2.render(TEXT.jobs.task, { task: doc.task });
-        const message = history ? texts2.render(TEXT.jobs.resumed, { allowance, plan: plan2 === null ? "" : texts2.render(TEXT.jobs.resumedPlan, { plan: plan2 }) }) : `${opening}${ranAgain}`;
+        const files = plan2 === null ? "" : kept4 !== null ? texts2.render(job.area === "chat" ? TEXT.jobs.objectiveChatKept : TEXT.jobs.objectiveFilesKept, { plan: plan2, kept: kept4 }) : texts2.render(job.area === "chat" ? TEXT.jobs.objectiveChat : TEXT.jobs.objectiveFiles, { plan: plan2 });
+        const opening = job.by.who === "user" ? texts2.render(TEXT.jobs.objective, { task: doc.task, allowance, files }) : texts2.render(TEXT.jobs.task, { task: doc.task });
+        const resumedPlan = plan2 === null ? "" : kept4 !== null ? texts2.render(TEXT.jobs.resumedKept, { plan: plan2, kept: kept4 }) : texts2.render(TEXT.jobs.resumedPlan, { plan: plan2 });
+        const message = history ? texts2.render(TEXT.jobs.resumed, { allowance, plan: resumedPlan }) : `${opening}${ranAgain}`;
         const reply = await agent.send(lead === "" ? message : `${lead}
 
 ${message}`, signal2);
@@ -145044,11 +145804,11 @@ ${message}`, signal2);
         }
         if (reply.code !== undefined && (reply.code === DAY_STOP || ALLOWANCE_STOPS.includes(reply.code))) {
           const day2 = reply.code === DAY_STOP;
-          const files = [...new Set(run2.wrote.map((file2) => showPath(file2.area, file2.path)))];
+          const files2 = [...new Set(run2.wrote.map((file2) => showPath(file2.area, file2.path)))];
           const report2 = texts2.render(day2 ? TEXT.jobs.dayReport : TEXT.jobs.spentReport, {
             reason: reply.reason ?? "",
             said: told === null ? "" : texts2.render(TEXT.jobs.spentSaid, { text: told }),
-            files: files.length === 0 ? "" : texts2.render(TEXT.jobs.spentFiles, { files: files.join(", ") }),
+            files: files2.length === 0 ? "" : texts2.render(TEXT.jobs.spentFiles, { files: files2.join(", ") }),
             plan: plan2 === null ? "" : texts2.render(TEXT.jobs.spentPlan, { plan: plan2 })
           });
           if (run2.agents.usage.calls > before.calls)
@@ -145056,12 +145816,12 @@ ${message}`, signal2);
           return { state: "spent", ...reply.reason !== undefined ? { reason: reply.reason } : {}, stoppedAt: day2 ? "day" : "allowance", report: report2, at: at4 };
         }
         if (!whole7)
-          return { state: "failed", reason: reply.status === "answered" && cutShort2(reply.finish) ? texts2.render(said2 === "" ? TEXT.jobs.whyCutThinking : TEXT.agents.cut) : reply.reason ?? texts2.render(TEXT.jobs.whyNoAnswer), report: told, at: at4 };
+          return { state: "failed", reason: reply.status === "answered" && cutShort2(reply.finish) ? texts2.render(said2 === "" ? TEXT.jobs.whyCutThinking : TEXT.agents.cut) : reply.reason ?? texts2.render(TEXT.jobs.whyNoAnswer), report: told, at: at4, ...reply.code === "connection" || reply.code === "failed" && isLasting(reply.reason ?? "") ? { lasting: true } : {} };
         if (await this.stands(job, settings.jobs.recordWaitMs, hostSignal).catch(() => true))
           return { state: "done", report: told, at: at4 };
         return { state: "off_path", reason: texts2.render(TEXT.jobs.whyOffPath), report: told, at: at4 };
       };
-      const { state: state3, reason: reason3, stoppedAt, report, at: at3 } = await worked().catch((error) => ({ state: live.cancelled !== null ? "cancelled" : "failed", reason: live.cancelled ?? errorText2(error), report: null, at: host.clock.now() }));
+      const { state: state3, reason: reason3, lasting, stoppedAt, report, at: at3 } = await worked().catch((error) => ({ state: live.cancelled !== null ? "cancelled" : "failed", reason: live.cancelled ?? errorText2(error), report: null, at: host.clock.now() }));
       over = true;
       const usage2 = { ...run2.agents.usage };
       const ended2 = { status: state3 === "done" ? "done" : state3 === "failed" ? "failed" : "stopped", ...reason3 !== undefined ? { reason: reason3 } : {}, at: at3 };
@@ -145074,6 +145834,7 @@ ${message}`, signal2);
         usage: usage2,
         workedMs: workedBy(at3),
         ...reason3 !== undefined ? { reason: reason3 } : {},
+        ...lasting ? { lasting } : {},
         ...stoppedAt !== undefined ? { stoppedAt } : {}
       };
       try {
@@ -146402,21 +147163,19 @@ function recallPage(deps) {
   const { host } = deps;
   const recall = Recall.of(host);
   let asked2 = 0;
-  const chatOf = (input) => {
+  const chatOf3 = (input) => {
     if (typeof input.chatId !== "string" || input.chatId === "")
       throw new HarnessRefusal("bad_request", "Say which chat.");
     return input.chatId;
   };
   const view = async (chatId) => {
     const { settings, texts: texts2, story } = await deps.setup(chatId);
-    let read2;
-    const path3 = () => read2 ??= host.chat.path(chatId);
-    return { run: recallOf({ host, run: { id: `page-${++asked2}`, kind: "side", chatId }, settings, texts: texts2, chat: { path: path3 }, story }), settings, texts: texts2 };
+    return { run: recallOf({ host, run: { id: `page-${++asked2}`, kind: "side", chatId }, settings, texts: texts2, story }), settings, texts: texts2 };
   };
   const status = async (run2, settings, start) => recall.meaning.status({ lore: await run2.loreGroups(), chat: await run2.chatGroup(), settings, start });
   return {
     async lore(input) {
-      const chatId = chatOf(input);
+      const chatId = chatOf3(input);
       const { run: run2, settings } = await view(chatId);
       const corpus = await run2.lore();
       const last = await recall.last(chatId);
@@ -146428,7 +147187,7 @@ function recallPage(deps) {
       };
     },
     async entry(input) {
-      const chatId = chatOf(input);
+      const chatId = chatOf3(input);
       const { run: run2, settings } = await view(chatId);
       const corpus = await run2.lore();
       const [doc, ...others] = typeof input.entryId === "string" ? corpus.named(input.entryId) : [];
@@ -146437,7 +147196,7 @@ function recallPage(deps) {
       return { entry: rowOf4(doc, await recall.last(chatId), settings.loop.charsPerToken), text: doc.entry.content };
     },
     async search(input) {
-      const chatId = chatOf(input);
+      const chatId = chatOf3(input);
       const queries = (Array.isArray(input.queries) ? input.queries : []).filter((q) => typeof q === "string" && q.trim() !== "").map((q) => q.trim());
       if (queries.length === 0)
         throw new HarnessRefusal("bad_request", "Say what to search for.");
@@ -146474,17 +147233,17 @@ function recallPage(deps) {
       };
     },
     async embed(input) {
-      const chatId = chatOf(input);
+      const chatId = chatOf3(input);
       const { run: run2, settings } = await view(chatId);
       return { embedding: await status(run2, settings, input.start === true) };
     },
     async chronicle(input) {
-      const chatId = chatOf(input);
+      const chatId = chatOf3(input);
       const { story } = await deps.setup(chatId);
       return checkChronicle(await readChronicle(await deps.learned(chatId)), storyHashes(await host.chat.path(chatId), story));
     },
     async cited(input) {
-      const chatId = chatOf(input);
+      const chatId = chatOf3(input);
       const citations = (Array.isArray(input.citations) ? input.citations : []).filter((c) => typeof c === "string");
       if (citations.length === 0)
         throw new HarnessRefusal("bad_request", "Say which citations to read.");
@@ -146511,7 +147270,7 @@ function recallPage(deps) {
       };
     },
     async story(input) {
-      const chatId = chatOf(input);
+      const chatId = chatOf3(input);
       const { settings, texts: texts2, definitions, story, chronicle } = await deps.setup(chatId);
       const learned = await deps.learned(chatId);
       const path3 = await host.chat.path(chatId);
@@ -146721,7 +147480,7 @@ class Sides {
 ${texts2.render(TEXT.side.answered, { text: turn.answered })}`);
       if (summarizer) {
         const { agent } = await run2.agent(summarizer, { depth: 0, system: texts2.render(TEXT.side.summarizer, { limit: String(settings.session.summaryTokens) }), toolless: true, plain: true, task: "summarize the side session's older turns" });
-        const made = summaryOf3(await agent.send(texts2.render(TEXT.side.summarizerInput, { summary: summary ?? texts2.render(TEXT.session.none), turns: turns.join(`
+        const made = summaryOf2(await agent.send(texts2.render(TEXT.side.summarizerInput, { summary: summary ?? texts2.render(TEXT.session.none), turns: turns.join(`
 
 `) }), signal2), texts2);
         if ("summary" in made) {
@@ -147403,7 +148162,7 @@ function leftOne(p, index, why3) {
   const { texts: texts2 } = p;
   return { text: texts2.render(A2.chatLeftOne, { index: String(index), why: texts2.render(why3 === "hidden" ? A2.chatLeftOneHidden : A2.chatLeftOneDirection) }), error: true };
 }
-async function chatOf(env) {
+async function chatOf3(env) {
   const run2 = recallOf(env);
   const chat = await run2.chat();
   const { first, last } = chat;
@@ -147500,7 +148259,7 @@ function readMessages(p, args, docs, notes) {
   return readAnswer(p, args, items, [...new Set(notes.filter((note2) => note2 !== "")), head2].join(`
 `));
 }
-var chatRead = {
+var chatRead2 = {
   name: TOOL4.chatRead,
   family: FAMILY.chat,
   tier: "read",
@@ -147521,7 +148280,7 @@ var chatRead = {
         const to = given2(args.to) ? namedMessage(args.to) : from;
         if (!to)
           return notNamed(p, args.to);
-        const read2 = await chatOf(env);
+        const read2 = await chatOf3(env);
         if ("text" in read2)
           return read2;
         const ranged = to !== from;
@@ -147567,7 +148326,7 @@ var chatAround = {
         const named4 = namedMessage(args.message);
         if (!named4)
           return notNamed(p, args.message);
-        const read2 = await chatOf(env);
+        const read2 = await chatOf3(env);
         if ("text" in read2)
           return read2;
         const centre = located(read2, p, named4);
@@ -147617,7 +148376,7 @@ var chatGrep = {
         const match = lineMatch(p, needle, args.regex === true || args.regex === "true", env.settings.recall.grep.pieceChars);
         if ("text" in match)
           return match;
-        const read2 = await chatOf(env);
+        const read2 = await chatOf3(env);
         if ("text" in read2)
           return read2;
         const scope = scopeOf(p, read2, args, true);
@@ -147720,7 +148479,7 @@ var chatSearch = {
         const { named: queries, rest } = namedArgs(args, "queries", "query", limit4);
         if (queries.length === 0)
           return needs2(p, "queries");
-        const read2 = await chatOf(env);
+        const read2 = await chatOf3(env);
         if ("text" in read2)
           return read2;
         const scope = scopeOf(p, read2, args, true);
@@ -147808,7 +148567,7 @@ var chatAbout = {
         const { named: names3, rest } = namedArgs(args, "names", "name", limit4);
         if (names3.length === 0)
           return needs2(p, "names");
-        const read2 = await chatOf(env);
+        const read2 = await chatOf3(env);
         if ("text" in read2)
           return read2;
         const scope = scopeOf(p, read2, args, false);
@@ -147837,7 +148596,7 @@ var chatOutline = {
       description: texts2.render(TEXT.tool(TOOL4.chatOutline)),
       parameters: { type: "object", properties: { from: { type: "integer", description: arg2("from") }, to: { type: "integer", description: arg2("to") }, stretches: { type: "boolean", description: arg2("stretches") }, cursor: { type: "string", description: arg2("cursor") } } },
       async answer(args) {
-        const read2 = await chatOf(env);
+        const read2 = await chatOf3(env);
         if ("text" in read2)
           return read2;
         const scope = scopeOf(p, read2, args, false);
@@ -147878,7 +148637,7 @@ ${scope.left}`;
     });
   }
 };
-var CHAT_TOOLS = [chatOutline, chatAbout, chatSearch, chatGrep, chatRead, chatAround];
+var CHAT_TOOLS = [chatOutline, chatAbout, chatSearch, chatGrep, chatRead2, chatAround];
 
 // node_modules/lumi-ah/src/core/tools/chronicle.ts
 var LEAD_SHARE = 0.5;
@@ -149081,7 +149840,7 @@ function entityOf2(raw) {
 function briefsOf(read2, most) {
   return (Array.isArray(read2) ? read2 : []).flatMap((raw) => isRecord2(raw) && typeof raw.name === "string" && raw.name.trim() !== "" ? [{ name: raw.name, type: textOf4(raw.type), mentions: Math.max(0, Math.round(numberOf(raw.mentions))) }] : []).slice(0, Math.max(1, most));
 }
-function fitting(lines4, room) {
+function fitting2(lines4, room) {
   const out = [];
   let used = 0;
   for (const line2 of lines4) {
@@ -149126,12 +149885,12 @@ function hitLine(env, hit) {
 }
 function queryPart(env, p, query, hits, share2, several) {
   const { texts: texts2 } = env;
-  const within7 = { ...p, pageChars: share2 };
+  const within8 = { ...p, pageChars: share2 };
   if (hits.length === 0)
-    return clip4(saidBack(within7, query, (said2) => texts2.render(A5.memoryNothing, { query: said2 })), share2);
-  const head2 = saidBack(within7, query, (said2) => texts2.render(A5.memoryHead, { query: said2, count: texts2.counted(hits.length, W4.memory) }));
+    return clip4(saidBack(within8, query, (said2) => texts2.render(A5.memoryNothing, { query: said2 })), share2);
+  const head2 = saidBack(within8, query, (said2) => texts2.render(A5.memoryHead, { query: said2, count: texts2.counted(hits.length, W4.memory) }));
   const more = (count6) => several ? texts2.render(A5.queryMore, { count: String(count6), tool: p.tool }) : texts2.render(A5.memoryMore, { count: String(count6) });
-  const lines4 = fitting(hits.map((hit) => hitLine(env, hit)), share2 - head2.length - more(hits.length).length - 2);
+  const lines4 = fitting2(hits.map((hit) => hitLine(env, hit)), share2 - head2.length - more(hits.length).length - 2);
   const left = hits.length - lines4.length;
   return clip4([head2, ...lines4, ...left > 0 ? [more(left)] : []].join(`
 `), share2);
@@ -149198,14 +149957,14 @@ function entityText(env, p, entity2) {
   });
   const shownOf = (shown6, total) => `${shown6}/${total}`;
   const room = p.pageChars - said2(shownOf(entity2.facts.length, entity2.facts.length), none, shownOf(entity2.relations.length, entity2.relations.length), none).length;
-  const relationLines = fitting(entity2.relations.slice(0, Math.max(0, mostRelations)).map((relation2) => clip4(texts2.render(A5.memoryRelation, {
+  const relationLines = fitting2(entity2.relations.slice(0, Math.max(0, mostRelations)).map((relation2) => clip4(texts2.render(A5.memoryRelation, {
     type: flat2(relation2.type, lineChars) || none,
     target: flat2(relation2.target, lineChars),
     label: relation2.label === null ? "" : `: ${flat2(relation2.label, lineChars)}`,
     strength: relation2.strength.toFixed(2),
     sentiment: relation2.sentiment.toFixed(2)
   }), lineChars)), Math.floor(room * RELATIONS_SHARE));
-  const factLines2 = fitting(entity2.facts.slice(0, Math.max(1, mostFacts)).map((fact) => `- ${flat2(fact, lineChars)}`), room - relationLines.reduce((n2, line2) => n2 + line2.length + 1, 0));
+  const factLines2 = fitting2(entity2.facts.slice(0, Math.max(1, mostFacts)).map((fact) => `- ${flat2(fact, lineChars)}`), room - relationLines.reduce((n2, line2) => n2 + line2.length + 1, 0));
   return clip4(said2(shownOf(factLines2.length, entity2.facts.length), factLines2.join(`
 `) || none, shownOf(relationLines.length, entity2.relations.length), relationLines.join(`
 `) || none), p.pageChars);
@@ -149244,7 +150003,7 @@ var memoryEntity = {
         if (briefs.length === 0)
           return { text: texts2.render(A5.memoryNoEntities) };
         const listed8 = (count6, entities2) => texts2.render(A5.memoryEntities, { count: texts2.counted(count6, W4.entity), entities: entities2 });
-        const lines4 = fitting(briefs, p.pageChars - listed8(briefs.length, "").length);
+        const lines4 = fitting2(briefs, p.pageChars - listed8(briefs.length, "").length);
         return { text: clip4(listed8(lines4.length, lines4.join(`
 `)), p.pageChars) };
       }
@@ -150973,7 +151732,7 @@ ${message}`, this.signal);
       const key = await foldKey2({ connectionId: summarizer.connectionId, model: summarizer.model, effort: summarizer.effort, callTokensOut: summarizer.budget.callTokensOut, system: fold.system, message: fold.message });
       const result = await shared.memo.run(key, async () => {
         const { agent } = await run2.agent(summarizer, { depth: 0, system: fold.system, toolless: true, plain: true, task: "summarize the main agent's notes" });
-        return summaryOf3(await agent.send(fold.message, this.signal), texts2);
+        return summaryOf2(await agent.send(fold.message, this.signal), texts2);
       });
       if ("failed" in result)
         return whole7(result.failed);
@@ -151787,7 +152546,7 @@ function createHarness(host, options) {
   };
   const approvalRows = (chatId, kept5) => kept5.map((k) => ({ chatId, ...k })).reverse();
   const newestFirst = (a, b) => (b.at ?? -1) - (a.at ?? -1);
-  const chatOf2 = (path3) => {
+  const chatOf4 = (path3) => {
     const key = path3.split("/")[1];
     if (key === undefined)
       return null;
@@ -151970,7 +152729,12 @@ function createHarness(host, options) {
         const plan2 = typeof input.plan === "string" && input.plan.trim() !== "" ? input.plan.trim() : null;
         if (plan2 !== null && plan2.length > setup.settings.workspace.pathChars)
           throw new HarnessRefusal("invalid", `The plan's path is ${plan2.length} characters, and a path may be ${setup.settings.workspace.pathChars} at most (Path length).`);
-        const started = await shared.jobs.createJob({ chatId: input.chatId, when: input.when === "now" ? "now" : "after_reply", what: { agent: input.agent, task: input.task }, by: { who: "user" }, basis: null, ...isRecord2(input.allowance) ? { allowance: allowanceOf(input.allowance) } : {}, ...input.area === "chat" ? { area: "chat" } : {}, ...plan2 !== null ? { plan: plan2 } : {} }, setup);
+        const planWords2 = typeof input.planWords === "string" && input.planWords.trim() !== "" ? input.planWords.trim() : null;
+        if (planWords2 !== null && plan2 === null)
+          throw new HarnessRefusal("invalid", "Words of a plan its starter keeps need the plan file they are about (plan).");
+        if (planWords2 !== null && planWords2.length > setup.settings.jobs.taskChars)
+          throw new HarnessRefusal("invalid", `The plan's words are ${planWords2.length} characters, and may be ${setup.settings.jobs.taskChars} at most (Task length).`);
+        const started = await shared.jobs.createJob({ chatId: input.chatId, when: input.when === "now" ? "now" : "after_reply", what: { agent: input.agent, task: input.task }, by: { who: "user" }, basis: null, ...isRecord2(input.allowance) ? { allowance: allowanceOf(input.allowance) } : {}, ...input.area === "chat" ? { area: "chat" } : {}, ...plan2 !== null ? { plan: plan2 } : {}, ...planWords2 !== null ? { planWords: planWords2 } : {} }, setup);
         if ("refused" in started)
           throw new HarnessRefusal("invalid", started.refused);
         return { job: started };
@@ -152079,7 +152843,7 @@ function createHarness(host, options) {
         const sample3 = DOC.approvals("x");
         const rows = [];
         for (const path3 of await host.store.list(sample3.slice(0, sample3.indexOf("x")))) {
-          const of = chatOf2(path3);
+          const of = chatOf4(path3);
           if (of !== null && DOC.approvals(of) === path3)
             rows.push(...approvalRows(of, await keptApprovals(host.store, of)));
         }
@@ -152138,12 +152902,13 @@ function listedIn(tools) {
   return HARNESS_LISTED.filter((t) => tools.includes(t.name) || tools.includes(family(t.family)));
 }
 var UNLIMITED = { callTokensIn: null, callMs: null, callTools: null, tokensIn: null, tokensOut: null, wallMs: null };
+var READER_PROMPT_TOKENS = 160000;
 var BUDGETS = {
-  [HARNESS_AGENT.author]: { ...UNLIMITED, callTokensOut: 32000, toolTurns: 40, revisions: 2, concurrency: 4 },
+  [HARNESS_AGENT.author]: { ...UNLIMITED, callTokensIn: READER_PROMPT_TOKENS, callTokensOut: 32000, toolTurns: 40, revisions: 2, concurrency: 4 },
   [HARNESS_AGENT.character]: { ...UNLIMITED, callTokensOut: 16000, toolTurns: 12, revisions: 2, concurrency: 2 },
   [HARNESS_AGENT.gm]: { ...UNLIMITED, callTokensOut: 16000, toolTurns: 12, revisions: 2, concurrency: 2 },
   [HARNESS_AGENT.narrator]: { ...UNLIMITED, callTokensOut: 16000, toolTurns: 12, revisions: 3, concurrency: 1 },
-  [HARNESS_AGENT.historian]: { ...UNLIMITED, callTokensOut: 16000, toolTurns: 16, revisions: 1, concurrency: 2 },
+  [HARNESS_AGENT.historian]: { ...UNLIMITED, callTokensIn: READER_PROMPT_TOKENS, callTokensOut: 16000, toolTurns: 16, revisions: 1, concurrency: 2 },
   [HARNESS_AGENT.assistant]: { ...UNLIMITED, callTokensOut: 16000, toolTurns: 20, revisions: 1, concurrency: 4 }
 };
 var OWN_TOOLS = new Set([HARNESS_AGENT.character, HARNESS_AGENT.gm, HARNESS_AGENT.narrator, HARNESS_AGENT.historian]);
@@ -152791,11 +153556,11 @@ class OpenTurn {
     const answers = await this.cardAnswers(key);
     await this.review.drop(this.chatId, this.userId, key);
     const keyOf5 = (a) => ("op" in a) ? a.op.key : a.staged.change.key;
-    const unanswered = ask3.filter((a) => answers.get(keyOf5(a)) === undefined || answers.get(keyOf5(a)) === "open");
+    const unanswered2 = ask3.filter((a) => answers.get(keyOf5(a)) === undefined || answers.get(keyOf5(a)) === "open");
     if (this.finishing.signal.aborted && !signal2.aborted)
-      later(unanswered);
+      later(unanswered2);
     else
-      for (const a of unanswered)
+      for (const a of unanswered2)
         out.refused.push({ lines: linesOf4(a), reason: this.text(WRITE_NOTE.cancelled) });
     const outcomes2 = [];
     for (const a of ask3) {
@@ -153457,6 +154222,114 @@ async function authorOpening(rt, at3, files, settings) {
 `);
 }
 
+// src/backend/story/prepare-carry.ts
+var carried = new Map;
+var count6 = (n2) => n2.toLocaleString("en-US");
+var said2 = (reason3, none) => (reason3 ?? none).replace(/[.\s]+$/, "");
+var WORDS2 = {
+  waits: "It waits for your word on the plan before it goes on.",
+  lasting: (reason3) => `It stopped: ${said2(reason3, "what it runs on failed")}. A new run would only fail the same way, so none was started. Put that right, then carry it on.`,
+  day: (reason3) => `It stopped at a day's limit: ${said2(reason3, "a limit on a day's spend")}. A new run would stop there too. Carry it on once the day's count allows.`,
+  cutOff: "The run was cut off before it finished, so no new one was started. Carry it on when you are ready.",
+  capped: (spent, cap) => `It has spent ${count6(spent)} tokens of the ${count6(cap)} your cap allows, too few for another run. Raise the cap, then carry it on.`,
+  idle: (runs) => `${runs === 1 ? "Its last run" : `Its last ${count6(runs)} runs`} made no progress, so it stopped carrying on by itself. Tell the author what to change, or carry it on.`,
+  unstarted: (reason3) => `Its next run couldn't start: ${said2(reason3, "LumiAH refused it")}. Carry it on once that is put right.`
+};
+async function markOf2(files, state3, path3, texts2) {
+  const through = path3 ? withRelived(state3, path3, Date.now()).stretches : state3.stretches;
+  return {
+    left: await preparationLeft(files, state3, path3, texts2),
+    beats: state3.stretches.reduce((n2, s) => n2 + s.beats.length, 0),
+    settled: state3.stretches.filter((s) => s.state === "recorded" || s.state === "dropped").length,
+    relived: through.reduce((n2, s) => n2 + (s.relived?.length ?? 0), 0),
+    notes: JSON.stringify([state3.read ?? [], (await files.read(PREPARE_STORY))?.version ?? null, state3.principals.length, state3.word.said.length - unanswered(state3).length])
+  };
+}
+async function preparationRunEnded(rt, at3) {
+  const core = rt.harness.core;
+  const files = rt.harness.files?.({ chatId: at3.chatId, userId: at3.userId }) ?? null;
+  if (core === null || files === null)
+    return;
+  const where2 = { chatId: at3.chatId, userId: at3.userId };
+  const rows = await jobRows(core, where2);
+  const settings = await rt.settings.get(at3.userId);
+  const { texts: texts2 } = settings.prompts;
+  const { prepare: prepare3 } = settings.story;
+  const counted5 = await updatePrepare(files, texts2, (now) => {
+    if (!now.state)
+      return { stop: null };
+    const runs = [...now.state.runs ?? []];
+    let more = false;
+    for (const r of rows) {
+      if (!preparing(r) || UNDER_WAY.includes(r.state))
+        continue;
+      const i = runs.findIndex((k) => k.job === r.id);
+      const was = runs[i];
+      if (was !== undefined && was.tokens >= r.tokens && was.calls >= r.calls)
+        continue;
+      const entry = { job: r.id, tokens: Math.max(r.tokens, was?.tokens ?? 0), calls: Math.max(r.calls, was?.calls ?? 0) };
+      if (was !== undefined)
+        runs[i] = entry;
+      else
+        runs.push(entry);
+      more = true;
+    }
+    return more ? { ...now.state, runs } : { stop: null };
+  });
+  if ("failed" in counted5)
+    rt.host.log("warn", `[LumiRPEngine] chat ${at3.chatId}: what the preparation's runs spent wasn't written to its file (${counted5.failed})`, at3.userId);
+  const ended2 = rows.find(preparing);
+  if (ended2?.id !== at3.job || ended2.paused || ended2.state === "cancelled" || UNDER_WAY.includes(ended2.state))
+    return;
+  if (await rt.chatKnowledge.engine(at3.chatId, at3.userId) !== "harness")
+    return;
+  const key = `${at3.userId}\x00${at3.chatId}`;
+  const chain = carried.get(key);
+  const log = async (entry) => {
+    const out = await updatePrepare(files, texts2, (now) => now.state ? logPrepare(now.state, { at: Date.now(), ...entry }) : { stop: null });
+    if ("failed" in out)
+      rt.host.log("warn", `[LumiRPEngine] chat ${at3.chatId}: the preparation's log wasn't written (${out.failed})`, at3.userId);
+  };
+  const stop2 = (text8) => {
+    carried.delete(key);
+    return log({ what: "stopped", text: text8 });
+  };
+  const file2 = await readPrepare(files);
+  const state3 = file2.state;
+  if (file2.damaged || state3 === null || state3.done !== null)
+    return;
+  const planning = !planned2(state3) || unanswered(state3).length > 0;
+  if (!planning && (waits(state3) || !state3.word.approved))
+    return stop2(WORDS2.waits);
+  if (ended2.state === "failed" && ended2.lasting)
+    return stop2(WORDS2.lasting(ended2.reason));
+  if (ended2.state === "spent" && ended2.stoppedAt === "day")
+    return stop2(WORDS2.day(ended2.reason));
+  if (ended2.state === "interrupted" || ended2.state === "off_path")
+    return stop2(WORDS2.cutOff);
+  const spent = spentOf(core, where2, rows, state3.runs ?? []);
+  const { cap } = state3.word;
+  if (cap !== null && spent.tokens + callWeight(spent, prepare3).tokens > cap)
+    return stop2(WORDS2.capped(spent.tokens, cap));
+  const read2 = await chatStoryPort(rt, { ...where2, turn: "", on: "first" }).read();
+  const mark2 = await markOf2(files, state3, read2?.path ?? null, texts2);
+  const before = chain?.job === at3.job ? chain : null;
+  const idle = before === null || mark2.beats > before.mark.beats || mark2.settled > before.mark.settled || mark2.relived > before.mark.relived || mark2.notes !== before.mark.notes || before.mark.left.some((line2) => !mark2.left.includes(line2)) ? 0 : before.idle + 1;
+  if (idle >= prepare3.idleRuns)
+    return stop2(WORDS2.idle(idle));
+  if ((await jobRows(core, where2)).find(preparing)?.id !== at3.job)
+    return;
+  let job;
+  try {
+    job = await carryOn(core, where2, texts2, state3, prepareRun(prepare3, texts2));
+  } catch (error) {
+    return stop2(WORDS2.unstarted(error instanceof Error ? error.message : String(error)));
+  }
+  if (job !== null)
+    carried.set(key, { job, mark: mark2, idle });
+  await log({ what: "carried" });
+}
+
 // src/backend/harness/extension.ts
 var SOVEREIGN_FROM = { follow: "lumiverse", on: "replies", off: "everyone" };
 var NEWEST_GIVEN = { direction: "directive", leave_out: "leave_out" };
@@ -153737,14 +154610,14 @@ ${guidance.text}` } : guidance, withdraw: [...LUMIAH_WITHDRAWN], story, place: "
   }
   async list(chatId, told = "") {
     if (chatId === "")
-      return harnessTools({ world: blankWorld("catalogue", ""), registry: this.rt.registry, texts: told !== "" ? (await this.rt.settings.get(told)).prompts.texts : {} });
+      return harnessTools({ world: blankWorld("catalogue", ""), registry: this.rt.registry, settings: told !== "" ? await this.rt.settings.get(told) : defaultSettings() });
     const userId = await this.userOf(chatId, told);
     if (!userId || await this.rt.chatKnowledge.engine(chatId, userId) !== "harness")
       return [];
     const head2 = await chatHead(this.rt, chatId, userId);
     if (!head2)
       return [];
-    return harnessTools({ world: head2.world, registry: this.rt.registry, texts: (await this.rt.settings.get(userId)).prompts.texts });
+    return harnessTools({ world: head2.world, registry: this.rt.registry, settings: await this.rt.settings.get(userId) });
   }
   async call(call, signal2, told = "") {
     await this.opening.get(call.turn);
@@ -153794,11 +154667,11 @@ ${guidance.text}` } : guidance, withdraw: [...LUMIAH_WITHDRAWN], story, place: "
       const agent2 = side2.cast.of(call);
       const prepared2 = this.preparing(call.turn);
       const held5 = job.by !== null && !prepared2;
-      const standing6 = standingOf(agent2, undefined, held5 ? this.ceilingOf(call.turn) : null, agent2.main && agent2.def === HARNESS_AGENT.author);
-      const env2 = await prepareEnv(this.rt, { chatId: call.chatId, userId, job: call.turn, prepared: prepared2, directed: side2.directed, agent: agent2, tier: reach2(standing6), files, as, signal: signal2 });
+      const standing7 = standingOf(agent2, undefined, held5 ? this.ceilingOf(call.turn) : null, agent2.main && agent2.def === HARNESS_AGENT.author);
+      const env2 = await prepareEnv(this.rt, { chatId: call.chatId, userId, job: call.turn, prepared: prepared2, directed: side2.directed, agent: agent2, tier: reach2(standing7), files, as, signal: signal2 });
       if ("refused" in env2)
         return { text: JSON.stringify({ refused: { code: env2.code, reason: env2.reason } }), error: true };
-      return { env: () => env2, standing: standing6, frame: null, ...held5 ? { noReply: true } : {} };
+      return { env: () => env2, standing: standing7, frame: null, ...held5 ? { noReply: true } : {} };
     }
     const known = job?.basis ?? (own2 || this.over.has(call.turn) ? call.turn : null);
     if (!userId || known === null && !this.sides.has(call.turn))
@@ -153823,8 +154696,8 @@ ${guidance.text}` } : guidance, withdraw: [...LUMIAH_WITHDRAWN], story, place: "
     if (!side)
       return { text: say(HARNESS_NOTE.noTurn), error: true };
     const agent = side.cast.of(call);
-    const standing5 = standingOf(agent, undefined, ceiling2, agent.main && agent.job === null);
-    const env = await jobEnv(this.rt, this.review, { chatId: call.chatId, userId, basis, committed: this.over.get(basis)?.committed === true, agent, standing: standing5, tool: call.name, files, staged: side.staged, signal: signal2, as, directed: side.directed, job: job ? call.turn : null });
+    const standing6 = standingOf(agent, undefined, ceiling2, agent.main && agent.job === null);
+    const env = await jobEnv(this.rt, this.review, { chatId: call.chatId, userId, basis, committed: this.over.get(basis)?.committed === true, agent, standing: standing6, tool: call.name, files, staged: side.staged, signal: signal2, as, directed: side.directed, job: job ? call.turn : null });
     if ("refused" in env)
       return { text: JSON.stringify({ refused: { code: env.code, reason: env.reason } }), error: true };
     const noReply = known === null || !turn && !this.over.has(basis);
@@ -153832,7 +154705,7 @@ ${guidance.text}` } : guidance, withdraw: [...LUMIAH_WITHDRAWN], story, place: "
       side.warned = true;
       this.rt.host.log("warn", `[LumiRPEngine] run ${call.turn.slice(0, 12)} is tied to no reply the engine knows (${known === null ? "it was started outside a reply's turn" : `turn ${basis.slice(0, 12)} was never opened here`}): it reads the chat as it stands and changes nothing`, userId);
     }
-    return { env: () => env, standing: standing5, frame: null, ...noReply ? { noReply: true } : {} };
+    return { env: () => env, standing: standing6, frame: null, ...noReply ? { noReply: true } : {} };
   }
   ceilingOf(id2, seen = new Set) {
     const job = this.jobs.get(id2);
@@ -153844,8 +154717,8 @@ ${guidance.text}` } : guidance, withdraw: [...LUMIAH_WITHDRAWN], story, place: "
     }
     const open = this.turns.get(job.basis);
     const left = open ? null : this.sides.get(job.basis)?.cast.placed(job.by);
-    const standing5 = open ? open.placing(job.by) : left ? standingOf(left) : null;
-    return { tier: standing5 ? reach2(standing5) : "read", by: job.by };
+    const standing6 = open ? open.placing(job.by) : left ? standingOf(left) : null;
+    return { tier: standing6 ? reach2(standing6) : "read", by: job.by };
   }
   reading(call, userId, signal2) {
     const { view, marks } = harnessRole(call.role) ?? { view: "everyone", marks: true };
@@ -153914,14 +154787,14 @@ ${guidance.text}` } : guidance, withdraw: [...LUMIAH_WITHDRAWN], story, place: "
       } finally {
         this.plans.delete(chatId);
       }
-      const planned2 = p.planned ? core.renderPlanned(observed, p, true) : null;
-      at3 = planned2?.start ? { start: planned2.start, world: planned2.world } : null;
+      const planned3 = p.planned ? core.renderPlanned(observed, p, true) : null;
+      at3 = planned3?.start ? { start: planned3.start, world: planned3.world } : null;
     }
     if (!at3)
       return void this.remember(this.blank, generationId, "an earlier message was edited: Keep or Discard it first");
-    const said2 = ownMessage(before);
+    const said3 = ownMessage(before);
     const earlier = before.findLast((m) => !m.isUser);
-    const answers = continues ? { messageId: null, user: "", before: earlier ? activeText(earlier) : "" } : { messageId: said2?.id ?? null, user: said2 ? activeText(said2) : "", before: earlier ? activeText(earlier) : "" };
+    const answers = continues ? { messageId: null, user: "", before: earlier ? activeText(earlier) : "" } : { messageId: said3?.id ?? null, user: said3 ? activeText(said3) : "", before: earlier ? activeText(earlier) : "" };
     const turn = new OpenTurn(this.rt, this.review, {
       chatId,
       userId,
@@ -153955,8 +154828,15 @@ ${guidance.text}` } : guidance, withdraw: [...LUMIAH_WITHDRAWN], story, place: "
       this.sideEnded?.(run2);
       return;
     }
-    if (run2.kind === "job")
+    if (run2.kind === "job") {
+      const known = this.jobs.get(run2.turn);
+      if (known !== undefined && known.plan !== PREPARE_PATH)
+        return;
+      const userId2 = await this.userOf(run2.chatId, run2.userId);
+      if (userId2)
+        preparationRunEnded(this.rt, { chatId: run2.chatId, userId: userId2, job: run2.turn }).catch((error) => this.rt.host.log("warn", `[LumiRPEngine] chat ${run2.chatId}: the story's preparation wasn't carried on after its run ended (${error instanceof Error ? error.message : String(error)})`, userId2));
       return;
+    }
     for (const job of run2.record?.jobs ?? [])
       if (!this.jobs.has(job.id))
         this.remember(this.jobs, job.id, { basis: run2.turn, by: null, parent: null, due: null, plan: null });
@@ -154298,11 +155178,11 @@ function reviewEditWords(e) {
   return `${e.label}: \u201C${e.line ?? ""}\u201D \u2192 \u201C${e.text ?? ""}\u201D`;
 }
 var seconds = (ms) => `${(ms / 1000).toFixed(1)} s`;
-var count6 = (n2) => n2.toLocaleString("en-US");
+var count7 = (n2) => n2.toLocaleString("en-US");
 function usageWords(u) {
-  const cached = u.cachedIn ? ` (${count6(u.cachedIn)} cached)` : "";
-  const reasoning = u.reasoningOut ? ` (${count6(u.reasoningOut)} reasoning)` : "";
-  return `${count6(u.in)} in${cached} \xB7 ${count6(u.out)} out${reasoning}`;
+  const cached = u.cachedIn ? ` (${count7(u.cachedIn)} cached)` : "";
+  const reasoning = u.reasoningOut ? ` (${count7(u.reasoningOut)} reasoning)` : "";
+  return `${count7(u.in)} in${cached} \xB7 ${count7(u.out)} out${reasoning}`;
 }
 function callWords(c) {
   return `${c.name} ${JSON.stringify(c.args)}`;
@@ -154360,7 +155240,7 @@ function transcriptText(view) {
 ${fenced(system)}`);
       }
       if (a.start.history > 0)
-        out.push(`Takes up ${count6(a.start.history)} message${a.start.history === 1 ? "" : "s"} of its session (GM \u2192 Workspace shows the session).`);
+        out.push(`Takes up ${count7(a.start.history)} message${a.start.history === 1 ? "" : "s"} of its session (GM \u2192 Workspace shows the session).`);
       for (const s of a.steps) {
         if (s.kind === "message")
           out.push(`Sent:
@@ -154740,7 +155620,7 @@ function unknownNames(text8, known, lower2) {
   }
   return out;
 }
-function quoted3(list4) {
+function quoted4(list4) {
   return list4.slice(0, 3).map((w) => `"${w}"`).join(", ");
 }
 function curatorGate(input) {
@@ -154754,11 +155634,11 @@ ${input.said}`;
         forms2.set(form, token);
   const things2 = [...new Set([...forms2].flatMap(([form, token]) => input.things.has(form) ? [token] : []))];
   if (things2.length > 0)
-    why3.push(`the words name something in the scene (${quoted3(things2)})`);
+    why3.push(`the words name something in the scene (${quoted4(things2)})`);
   const lower2 = new Set((text8.match(/(?<![\p{L}\p{M}'\u2019-])\p{Ll}[\p{L}\p{M}\p{N}'\u2019-]*/gu) ?? []).flatMap((w) => nameTokens(w)));
   const names4 = unknownNames(text8, input.known, lower2);
   if (names4.length > 0)
-    why3.push(`the words name someone or somewhere the world doesn't have (${quoted3(names4)})`);
+    why3.push(`the words name someone or somewhere the world doesn't have (${quoted4(names4)})`);
   const lowered = text8.normalize("NFD").replace(/\p{M}+/gu, "").toLowerCase().replace(/['\u2019]/g, "").replace(/\s+/g, " ");
   const acts3 = new Map;
   for (const { act: act2, words: pattern } of ACTS2) {
@@ -154887,10 +155767,10 @@ function prefixEntities(reg, world, state3, opts) {
   const index = thingIndex(ctx);
   const things2 = new Set(index.things);
   const words11 = new Set(opts.said.flatMap((t) => nameTokens(t)).map(stem));
-  const said2 = (id2) => (index.names.get(id2) ?? []).some((n2) => n2.by !== "type" && n2.heads.some((h) => words11.has(h)));
+  const said3 = (id2) => (index.names.get(id2) ?? []).some((n2) => n2.by !== "type" && n2.heads.some((h) => words11.has(h)));
   const scene2 = (id2) => here !== null && placeOfEntity(state3, id2) === here;
   const thingRank = (id2) => {
-    if (said2(id2))
+    if (said3(id2))
       return 0;
     if (scene2(id2) || holdersOf2(state3, id2).includes(world.pov))
       return 1;
@@ -154963,9 +155843,9 @@ function proposalKnown(p, reg, world, state3) {
   const free = typeof p.type === "string" ? own(FREE_TEXT, p.type) ?? [] : [];
   return Object.entries(p).every(([k, v6]) => k === "type" || free.includes(k) || k === "fact" && heardPlace({ registry: reg, world, state: state3 }, p) !== null || ok(v6, 0));
 }
-function knownRef(view, role, said2) {
+function knownRef(view, role, said3) {
   const { registry: reg, world, state: state3 } = view;
-  const t = said2.trim();
+  const t = said3.trim();
   if (role === "place" || role === "fact") {
     const place2 = placeSaid(reg, world, state3, t);
     if (place2 !== null && canSeePlace(reg, world, state3, world.pov, place2))
@@ -155077,12 +155957,12 @@ function boughtAlong(p, pre, ctx, typed = [], narration = "", items = []) {
   const { world } = ctx;
   if (p.type !== "purchase" || typeof p.item !== "string" || !povPays(p, world, ctx.state))
     return null;
-  const said2 = itemName(p.item);
-  if (!said2)
+  const said3 = itemName(p.item);
+  if (!said3)
     return null;
   const stated = typeof p.price === "number" && Number.isFinite(p.price) ? Math.abs(p.price) : null;
   const near = (v6) => stated === null || Math.abs(stated - v6) <= 0.25 * v6;
-  const another = ANOTHER.test(`${p.item} ${typeof p.name === "string" ? p.name : ""}`) || said2.trailing?.word === "for" && forSomeone(said2.trailing.words, ctx);
+  const another = ANOTHER.test(`${p.item} ${typeof p.name === "string" ? p.name : ""}`) || said3.trailing?.word === "for" && forSomeone(said3.trailing.words, ctx);
   const buys = buysIn(pre);
   const typedNames = items.flatMap((item2) => itemName(item2) ?? []);
   const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
@@ -155092,7 +155972,7 @@ function boughtAlong(p, pre, ctx, typed = [], narration = "", items = []) {
   let sameNoun = false;
   for (const buy of buys) {
     const bought = itemName(buy.name);
-    if (!bought || bought.head !== said2.head)
+    if (!bought || bought.head !== said3.head)
       continue;
     sameNoun = true;
     if (another)
@@ -155101,20 +155981,20 @@ function boughtAlong(p, pre, ctx, typed = [], narration = "", items = []) {
       continue;
     const typedOwn = typedNames.filter((n2) => n2.head === bought.head);
     const words11 = new Set([...bought.words, ...typedOwn.flatMap((n2) => [...n2.words])]);
-    const contrast = [...said2.words].some((w) => CONTRAST[w] !== undefined && !words11.has(w) && [...words11].some((b) => b !== w && CONTRAST[b] === CONTRAST[w]));
+    const contrast = [...said3.words].some((w) => CONTRAST[w] !== undefined && !words11.has(w) && [...words11].some((b) => b !== w && CONTRAST[b] === CONTRAST[w]));
     if (contrast)
       continue;
-    const holds4 = [...said2.words].every((w) => words11.has(w)) || [...bought.words].every((w) => said2.words.has(w)) || typedOwn.some((n2) => [...n2.words].every((w) => said2.words.has(w))) || rowDef !== undefined && rowDef.name === buy.name;
+    const holds4 = [...said3.words].every((w) => words11.has(w)) || [...bought.words].every((w) => said3.words.has(w)) || typedOwn.some((n2) => [...n2.words].every((w) => said3.words.has(w))) || rowDef !== undefined && rowDef.name === buy.name;
     const inBand = () => {
       const band2 = stated === null ? null : optionalQuery(ctx, "economy.bought_band")?.(ctx, buy.name, buy.qty, world.pov);
       return !!band2 && stated !== null && stated >= 0.75 * band2.min && stated <= 1.25 * band2.max;
     };
     const priced4 = near(buy.cents) || typed.some(near) || inBand();
-    if (holds4 && priced4 && !toldAsAnother(narration, said2.head, ctx))
+    if (holds4 && priced4 && !toldAsAnother(narration, said3.head, ctx))
       return "retold";
     verdict2 = "unsure";
   }
-  if (sameNoun || another || toldAsAnother(narration, said2.head, ctx))
+  if (sameNoun || another || toldAsAnother(narration, said3.head, ctx))
     return verdict2;
   const group = rowDef?.category;
   if (typeof group !== "string" || group === "")
@@ -155430,7 +156310,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "da77a3c6", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "f525a88e", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;
@@ -155542,9 +156422,9 @@ class Runtime {
     let remembered = bridge.memoryOf(text8);
     if (remembered === undefined && !shown7 && lastReply2 && this.orchestrator.memoryOwed(input.core, lastReply2)) {
       const context2 = input.core.readContext(lastReply2.id, input.observed);
-      const said2 = ownMessage(input.observed.slice(0, input.observed.indexOf(lastReply2)));
+      const said3 = ownMessage(input.observed.slice(0, input.observed.indexOf(lastReply2)));
       if (context2) {
-        const remember2 = postMindsInput({ ...context2, world: await this.liveWorld(p.generationId, input.chatId, input.userId, context2.world) }, { chatId: input.chatId, userId: input.userId, messageId: lastReply2.id, user: said2 ? said2.swipes[said2.swipeId] ?? "" : "", reply: lastReply2.swipes[lastReply2.swipeId] ?? "", guidance: preset.guidance, knowledge: knowledgeOn(await this.chatKnowledge.get(input.chatId, input.userId), render.world, settings) });
+        const remember2 = postMindsInput({ ...context2, world: await this.liveWorld(p.generationId, input.chatId, input.userId, context2.world) }, { chatId: input.chatId, userId: input.userId, messageId: lastReply2.id, user: said3 ? said3.swipes[said3.swipeId] ?? "" : "", reply: lastReply2.swipes[lastReply2.swipeId] ?? "", guidance: preset.guidance, knowledge: knowledgeOn(await this.chatKnowledge.get(input.chatId, input.userId), render.world, settings) });
         const opening2 = await postOpening(this.minds, remember2);
         remembered = opening2 ? (await this.diag.step(runAt, "memory", "minds", () => calls.memory({ input: remember2, opening: opening2, classic: (signal2) => postMemory(this.minds, { ...remember2, signal: signal2 }, opening2) }, budget.signal), undefined, MINDS_POST_CALLS)).events : [];
         if (!budget.signal.aborted)
@@ -155812,8 +156692,8 @@ class Runtime {
     }
     const settings = await this.settings.get(input.userId);
     const offstage = offstageLines(input.core, input.observed, target < 0 ? input.observed.length : target, settings.prompts.texts);
-    const planned2 = plan2 ? planLines2(plan2, render.world, render.state, this.registry) : null;
-    const engineLines = planned2 ? { outcome: [...offstage, ...planned2.outcome], montage: planned2.montage } : { outcome: [], montage: [] };
+    const planned3 = plan2 ? planLines2(plan2, render.world, render.state, this.registry) : null;
+    const engineLines = planned3 ? { outcome: [...offstage, ...planned3.outcome], montage: planned3.montage } : { outcome: [], montage: [] };
     if (shown7) {
       if (!agent) {
         this.keepRunLines(input.generationId, p.seed, plan2, engineLines, { brief: null, outline: [] }, [...shown7]);
@@ -156007,10 +156887,10 @@ class Runtime {
   untrackedThings(world, state3, proposals) {
     const view = { registry: this.registry, world, state: state3 };
     return proposals.flatMap((p) => Object.entries((typeof p.type === "string" ? own(REF_ROLES, p.type) : undefined) ?? {}).flatMap(([field3, role]) => {
-      const said2 = p[field3];
-      if (role !== "thing" || typeof said2 !== "string" || said2.trim() === "" || knownRef(view, role, said2) !== null)
+      const said3 = p[field3];
+      if (role !== "thing" || typeof said3 !== "string" || said3.trim() === "" || knownRef(view, role, said3) !== null)
         return [];
-      return [ID_SHAPED2.test(said2.trim()) ? UNKNOWN_PHRASE.thing : said2.trim()];
+      return [ID_SHAPED2.test(said3.trim()) ? UNKNOWN_PHRASE.thing : said3.trim()];
     }));
   }
   async readIntent(bridge, text8, recorded2, render, all2, earlier, settings, facts, budget, at3, left, calls) {
@@ -156154,7 +157034,7 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
     const policy = claimsOf(render.world, render.state);
     const steps = [];
     let rolls = false;
-    const take = (def2, read2, words11, thing3, said2, picked2 = false) => {
+    const take = (def2, read2, words11, thing3, said3, picked2 = false) => {
       const answered2 = picked2 ? read2 : ownAnswers(def2, read2);
       if (typeof answered2 === "string") {
         dropAnswer(def2, answered2);
@@ -156170,9 +157050,9 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
         rolls ||= checkOf(render.world, def2.check) !== null;
         return;
       }
-      const verdict2 = claimFor({ registry: this.registry, world: render.world, state: render.state, action: def2, params: answered2, unfit: ref, said: said2, thing: thing3, policy, mayKnow });
+      const verdict2 = claimFor({ registry: this.registry, world: render.world, state: render.state, action: def2, params: answered2, unfit: ref, said: said3, thing: thing3, policy, mayKnow });
       if (verdict2?.kind === "known")
-        return take(def2, verdict2.params, words11, undefined, said2, picked2);
+        return take(def2, verdict2.params, words11, undefined, said3, picked2);
       if (verdict2?.kind === "real")
         steps.push({ action: def2.id, params: given3, text: words11, claim: verdict2.claim, ...forWords, ...pick2 });
       else if (verdict2?.kind === "play")
@@ -156298,12 +157178,12 @@ ${answer}`, links: owner2 ? [owner2] : [] })) }, budget.signal);
     const place2 = placeOfEntity(state3, t.agent);
     return { agent: e?.name ?? t.agent, at: place2 ? world.places[place2]?.name ?? place2 : null, time: formatClock(calendarOf(world), state3.clock), options: t.options };
   }
-  async lorePhase(phase, key, chatId, userId, folded, state3, budget, said2, guidance) {
+  async lorePhase(phase, key, chatId, userId, folded, state3, budget, said3, guidance) {
     const world = await this.liveWorld(key, chatId, userId, folded);
     const here = pinsFor(world, placeOfEntity(state3, world.pov));
     const own2 = LORE_AUDIENCE.filter((step2) => !isMindPurpose(step2)).map((step2) => [step2, pinsFor(world, null, undefined, [step2])]);
     const textsOf2 = await pinReader(this.host, world, [...here, ...own2.flatMap(([, refs]) => refs)], userId);
-    const at3 = { phase, key, userId, world, state: state3, budget, active: ACTIVE_CONNECTION, said: said2, guidance, pinned: textsOf2(here), steps: Object.fromEntries(own2.map(([step2, refs]) => [step2, textsOf2(refs)])) };
+    const at3 = { phase, key, userId, world, state: state3, budget, active: ACTIVE_CONNECTION, said: said3, guidance, pinned: textsOf2(here), steps: Object.fromEntries(own2.map(([step2, refs]) => [step2, textsOf2(refs)])) };
     if (Object.keys(world.lore).length === 0)
       return at3;
     await this.toolSupport.ready(userId);
@@ -156324,8 +157204,8 @@ ${answer}`, links: owner2 ? [owner2] : [] })) }, budget.signal);
       this.toolSupport.refuse(userId, connection, reason3).catch((error) => this.host.log("warn", `[LumiRPEngine] the lore tool record wasn't saved (${error instanceof Error ? error.message : String(error)})`, userId));
     };
     const reader = { reg: this.registry, world, state: state3, tokens: (text8) => this.tokenCounts.get(hashParts("lre.tokens", userId, text8)) ?? sectionTokens(text8) };
-    const said2 = at3.said.toLowerCase();
-    const unsaid = (s) => !said2.includes(s.toLowerCase());
+    const said3 = at3.said.toLowerCase();
+    const unsaid = (s) => !said3.includes(s.toLowerCase());
     const people = [];
     const labels = unseenPlaceNames(this.registry, world, state3, world.pov);
     for (const [id2, e] of Object.entries(state3.entities))
@@ -156545,8 +157425,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
       this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${named5.length - known.length} proposal(s) naming what the player hasn't seen`, userId);
     const proposals = known.flatMap((p) => {
       if (ORG_FACT_TYPES.includes(String(p.type))) {
-        const said2 = typeof p.said === "string" ? p.said : "";
-        if (quotesReply(said2, text8) && (p.type === "agenda" || statesChange(said2)))
+        const said3 = typeof p.said === "string" ? p.said : "";
+        if (quotesReply(said3, text8) && (p.type === "agenda" || statesChange(said3)))
           return [p];
         this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped a ${String(p.type)} change the reply doesn't state in its own words`, userId);
         return [];
@@ -156864,11 +157744,11 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
       const world = input.core.playedAt(head2) ?? input.core.playedAt(head2, rec?.defHash ?? "");
       stored.push({ id: `tidied:${at3}`, kind: "tidied", ...base, label: "Things tidied", detail: tidiedDetail(this.registry, world, head2, tidied), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send", payload: { events: JSON.parse(JSON.stringify(tidied)) } });
     }
-    const planned2 = rec && rec.seed !== "" && input.kind !== "continue" ? bridge.plannedFor(rec.seed) : undefined;
-    if (planned2) {
+    const planned3 = rec && rec.seed !== "" && input.kind !== "continue" ? bridge.plannedFor(rec.seed) : undefined;
+    if (planned3) {
       const head2 = input.core.fold(input.observed).state;
       const world = input.core.playedAt(head2) ?? input.core.playedAt(head2, rec?.defHash ?? "");
-      stored.push(this.planReceipt(`plan:${at3}`, base, planned2, world ? { world, state: head2 } : null, userText));
+      stored.push(this.planReceipt(`plan:${at3}`, base, planned3, world ? { world, state: head2 } : null, userText));
     }
     if (input.kind !== "continue" && userText.trim() !== "" && bridge.wasUnread(userText)) {
       stored.push({ id: `read_failed:${at3}`, kind: "read_failed", ...base, label: "Couldn't read your action", detail: "The call that reads your message failed, or none was left before the reply, so this turn ran as plain roleplay. Retry runs the turn again.", actions: [{ id: "rerun", label: "Retry", style: "primary" }], expires: "next_send", payload: {} });
@@ -156899,15 +157779,15 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     bridge.turnCommitted(userText);
     await this.orchestrator.closed(input);
   }
-  planReceipt(id2, base, planned2, view, typed) {
-    if ("refused" in planned2) {
-      const reason3 = planned2.refused.reason.replace(/[.\s]+$/, "");
+  planReceipt(id2, base, planned3, view, typed) {
+    if ("refused" in planned3) {
+      const reason3 = planned3.refused.reason.replace(/[.\s]+$/, "");
       const secrets = view ? unrevealedSecrets(this.registry, view.world, view.state).filter((s) => !typed.toLowerCase().includes(s.toLowerCase())) : [];
       const hidden = !view || findLeaks(reason3, secrets).length > 0 || namesHiddenOrSecretLore(this.registry, view.world, view.state, reason3, typed);
       return { id: id2, kind: "decline", ...base, label: `Not added to the plan: ${hidden ? "it names someone or something you don't know" : reason3}`, actions: [], expires: "next_send", payload: {} };
     }
-    const what = [planned2.goals > 0 ? counted(planned2.goals, "goal", "goals") : "", planned2.orders > 0 ? counted(planned2.orders, "order", "orders") : ""].filter((s) => s !== "").join(", ");
-    const name2 = view ? own(view.state.entities, planned2.org)?.name : undefined;
+    const what = [planned3.goals > 0 ? counted(planned3.goals, "goal", "goals") : "", planned3.orders > 0 ? counted(planned3.orders, "order", "orders") : ""].filter((s) => s !== "").join(", ");
+    const name2 = view ? own(view.state.entities, planned3.org)?.name : undefined;
     return {
       id: id2,
       kind: "undo",
@@ -156915,11 +157795,11 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
       label: `Added to the plan: ${what}`,
       detail: `On ${name2 ? possessive(name2) : "your party's"} plan, as your message gives it. Edit opens the plan; Undo takes this back.`,
       actions: [
-        { id: "edit", label: "Edit", input: { type: "org", label: "The plan", org: planned2.org, tab: PLAN_TAB } },
+        { id: "edit", label: "Edit", input: { type: "org", label: "The plan", org: planned3.org, tab: PLAN_TAB } },
         { id: "undo", label: "Undo", style: "danger" }
       ],
       expires: "next_send",
-      payload: { events: JSON.parse(JSON.stringify(planned2.events)), plan: true }
+      payload: { events: JSON.parse(JSON.stringify(planned3.events)), plan: true }
     };
   }
   async swipeDeleted(chatId, userId, messageId, deleted2) {
@@ -157036,8 +157916,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
   answerAsk(chatId, text8, index, keep) {
     return this.bridges.get(chatId)?.answerAsk(text8, index, keep) ?? false;
   }
-  passIntent(chatId, text8, params2, said2) {
-    return this.bridges.get(chatId)?.passIntent(text8, params2, said2) ?? false;
+  passIntent(chatId, text8, params2, said3) {
+    return this.bridges.get(chatId)?.passIntent(text8, params2, said3) ?? false;
   }
   requestRefusal(world, state3, action2, params2, know, skip2) {
     const mayKnow = (id2) => know === "read" ? povMayKnow(this.registry, world, state3, id2) : id2 === world.pov || canSeeEntity(this.registry, world, state3, world.pov, id2);
@@ -157142,7 +158022,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     return { label: `Play ${head2}${queue.length > 0 ? `, then ${queue.length} more` : ""}?`, detail: lines4.join(`
 `), edit: def2 ? this.intentEdit(world, state3, def2, read2.params, text8) : null, what: head2 };
   }
-  stepWords(world, state3, action2, params2, typed, said2 = {}) {
+  stepWords(world, state3, action2, params2, typed, said3 = {}) {
     if (action2 === TRY_ACTION) {
       const verdict2 = inferredRead(this.registry, world, state3, params2);
       if (!verdict2.ok)
@@ -157154,20 +158034,20 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     const def2 = (hasOwn(world.actions, action2) ? world.actions[action2] : undefined) ?? this.registry.actions.get(action2);
     if (!def2)
       return "an action";
-    const picks = actionWords(this.registry, world, state3, def2, params2, typed, typed, said2);
+    const picks = actionWords(this.registry, world, state3, def2, params2, typed, typed, said3);
     return picks !== "" ? `${def2.label}: ${picks}` : def2.label;
   }
-  thenLine(chatId, said2, seed2, world, state3, settings, secrets) {
+  thenLine(chatId, said3, seed2, world, state3, settings, secrets) {
     const bridge = this.bridges.get(chatId);
-    const intent2 = said2 === "" ? null : bridge?.intentOf(said2);
-    const offer = said2 === "" ? undefined : bridge?.offerFor(said2);
+    const intent2 = said3 === "" ? null : bridge?.intentOf(said3);
+    const offer = said3 === "" ? undefined : bridge?.offerFor(said3);
     const turn = bridge?.planFor(seed2);
     if (!intent2?.action || intent2.action === TIMELAPSE_ACTION2 || !offer || !turn || turn.stopped)
       return null;
     if (offer.type === "duration" && offer.minutes > settings.time.askBeyondMinutes)
       return null;
-    const typed = said2.toLowerCase();
-    const words11 = typeof intent2.then?.span === "string" ? quotedWords(this.registry, world, state3, intent2.then.span, secrets.filter((s) => !typed.includes(s.toLowerCase())), said2) : null;
+    const typed = said3.toLowerCase();
+    const words11 = typeof intent2.then?.span === "string" ? quotedWords(this.registry, world, state3, intent2.then.span, secrets.filter((s) => !typed.includes(s.toLowerCase())), said3) : null;
     return `After those actions, the player's message lets time pass: ${skipWords(this.registry, world, state3, offer, false)}${words11 ? ` (\u201C${words11}\u201D)` : ""}. Tell that time in this reply, after them.`;
   }
   passOutline(chatId, text8, lines4) {
@@ -157306,11 +158186,11 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     }) : [];
     const unchanged = recorded2?.scene.kept && (scene2.length > 0 || recorded2.scene.notes.length > 0) ? renderPrompt(UNCHANGED_TEXT_ID, texts2, {}).trim() : "";
     const notes = recorded2 ? [...recorded2.scene.notes, ...unchanged !== "" ? [unchanged] : []] : [];
-    const planned2 = { outcome: [...turnLines2?.outcome ?? []], montage: [...turnLines2?.montage ?? []], scene: scene2, ...notes.length > 0 ? { notes } : {} };
+    const planned3 = { outcome: [...turnLines2?.outcome ?? []], montage: [...turnLines2?.montage ?? []], scene: scene2, ...notes.length > 0 ? { notes } : {} };
     const preset = this.prePhase.get(input.generationId)?.preset ?? await this.presets.current(input.chatId, input.userId);
     const after = plan2 ? this.thenLine(input.chatId, this.prePhase.get(input.generationId)?.text ?? "", plan2.seed, world, state3, settings, secrets) : null;
     if (after)
-      planned2.outcome.push(after);
+      planned3.outcome.push(after);
     const record3 = { id: input.generationId, at: Date.now(), activation: "unconfirmed", sections: [], budget: { sections: settings.modelUse.tokens.sections, used: 0 }, forced: [], entries: {} };
     const traces = this.loreTraces.get(input.generationId);
     if (traces)
@@ -157338,7 +158218,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
       knowledge: settings.minds.knowledge,
       prices: settings.statePrices,
       said: this.prePhase.get(input.generationId)?.text ?? "",
-      planned: planned2,
+      planned: planned3,
       outline: outline2,
       elapsed: plan2 ? clockMinutes(plan2.events) : null,
       hasEntry: (section) => entryOf5(section) !== null,
@@ -157608,10 +158488,10 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context2.world, context2.state) };
     if (!last)
       return;
     const why3 = (input.reason.startsWith(`${input.step} `) ? input.reason.slice(input.step.length + 1) : input.reason).replace(/(?:^|\b)(?:the )?call failed: /g, "");
-    const said2 = input.step === "mind" || input.step === "target" || input.step === "stale" ? why3 : `${(STEP_LABEL2[input.step] ?? input.step).replace(/\u2026$/, "")}: ${why3}`;
+    const said3 = input.step === "mind" || input.step === "target" || input.step === "stale" ? why3 : `${(STEP_LABEL2[input.step] ?? input.step).replace(/\u2026$/, "")}: ${why3}`;
     const cleared = input.step === "clear";
     const start = input.step === "target" || cleared ? undefined : input.as;
-    const detail = `${said2.charAt(0).toUpperCase()}${said2.slice(1)}${cleared ? ". Nothing went out with them; try again, and if it keeps failing, Diagnostics shows each attempt." : start === "send" ? ". Press Send, with nothing typed, to run it again." : ""}`;
+    const detail = `${said3.charAt(0).toUpperCase()}${said3.slice(1)}${cleared ? ". Nothing went out with them; try again, and if it keeps failing, Diagnostics shows each attempt." : start === "send" ? ". Press Send, with nothing typed, to run it again." : ""}`;
     const retry = start === "regenerate" || start === "continue" ? [{ id: start, label: "Retry", style: "primary" }] : [];
     const label3 = cleared ? "An earlier turn's sections couldn't be cleared, so nothing was generated" : input.step === "stale" ? "The reply didn't start, so nothing was generated" : "The engine didn't finish, so nothing was generated";
     await this.chips.add(input.chatId, input.userId, [{ id: `engine_failed:${input.turn}`, kind: "engine_failed", messageId: last.id, label: label3, detail, actions: [...retry, { id: "diagnostics", label: "Diagnostics" }], ...start ? { as: start } : {}, expires: "next_send", payload: {} }]);
@@ -157898,9 +158778,9 @@ function interpretedTarget(params2, world, state3, text8, reg) {
   const anchorAt = reg ? planAnchors(reg, world, state3) : undefined;
   const span3 = typeof params2.span === "string" ? params2.span : null;
   const long2 = span3 !== null && /[.!?\u2026]["\u201D\u2019)\]]*\s+\S/.test(span3.trim());
-  const said2 = span3 !== null && !long2 ? typedSpan(cal, now, span3, anchorAt) : null;
-  if (said2)
-    return said2;
+  const said3 = span3 !== null && !long2 ? typedSpan(cal, now, span3, anchorAt) : null;
+  if (said3)
+    return said3;
   const stated = (() => {
     const local = typeof params2.at === "string" ? clockOfStamp(cal, params2.at) : null;
     if (local !== null)
@@ -157957,16 +158837,16 @@ function restChipId(messageId, swipeId) {
 var NO_VALUE = { "": true, none: true, null: true, nil: true, na: true, "n a": true, nothing: true, no: true, undefined: true, empty: true };
 function offeredNext(reg, world, state3, next, text8, secrets) {
   const words11 = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/^(?:i|we)\s+/, "");
-  const said2 = words11(next);
-  if (hasOwn(NO_VALUE, said2) || words11(text8).startsWith(said2))
+  const said3 = words11(next);
+  if (hasOwn(NO_VALUE, said3) || words11(text8).startsWith(said3))
     return null;
   return findLeaks(next, secrets).length > 0 || namesHiddenOrSecretLore(reg, world, state3, next, text8) ? null : next;
 }
 function quotedWords(reg, world, state3, piece, secrets, heard) {
-  const said2 = piece.replace(/\s+/g, " ").trim();
-  if (hasOwn(NO_VALUE, said2.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()))
+  const said3 = piece.replace(/\s+/g, " ").trim();
+  if (hasOwn(NO_VALUE, said3.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()))
     return null;
-  return findLeaks(said2, secrets).length > 0 || namesHiddenOrSecretLore(reg, world, state3, said2, heard) ? null : said2;
+  return findLeaks(said3, secrets).length > 0 || namesHiddenOrSecretLore(reg, world, state3, said3, heard) ? null : said3;
 }
 function planSaid(reg, world, state3, agenda, text8, secrets) {
   const fits4 = (item2) => {
@@ -158017,8 +158897,8 @@ function narratedPending(stored, read2) {
   return minutes3;
 }
 function joinActions(pieces) {
-  const said2 = pieces.map((p) => p.trim()).filter((p) => p !== "");
-  return said2.map((p, i) => i < said2.length - 1 && !/[.!?]$/.test(p) ? `${p}.` : p).join(" ");
+  const said3 = pieces.map((p) => p.trim()).filter((p) => p !== "");
+  return said3.map((p, i) => i < said3.length - 1 && !/[.!?]$/.test(p) ? `${p}.` : p).join(" ");
 }
 var STOPPED = {
   check: "it stopped at the check",
@@ -158030,7 +158910,7 @@ var STOPPED_NOTE = {
   failure: "an action didn't go through",
   interruption: "something came up"
 };
-function playable(action2, params2, world, said2) {
+function playable(action2, params2, world, said3) {
   const out = { ...params2 };
   const scale = 10 ** world.currency.decimals;
   for (const [name2, def2] of Object.entries(action2.params)) {
@@ -158039,7 +158919,7 @@ function playable(action2, params2, world, said2) {
       out[name2] = Math.round(v6 * scale);
   }
   const method = out.method;
-  const named5 = hasOwn(action2.params, "method") && !(typeof method === "string" && method.trim() !== "") ? said2.map(saidPayMethod).find((m) => m !== null) ?? null : null;
+  const named5 = hasOwn(action2.params, "method") && !(typeof method === "string" && method.trim() !== "") ? said3.map(saidPayMethod).find((m) => m !== null) ?? null : null;
   if (named5)
     out.method = named5;
   return out;
@@ -158095,7 +158975,7 @@ function answerReader(reg, world, state3, mayKnow) {
     return names4;
   };
   const bare2 = (w) => (w.length > 1 && /^(the|a|an)$/.test(w[0] ?? "") ? w.slice(1) : w).join(" ");
-  const within7 = (hay, run2) => {
+  const within8 = (hay, run2) => {
     for (let i = 0;i + run2.length <= hay.length; i++)
       if (run2.every((w, k) => hay[i + k] === w))
         return true;
@@ -158109,14 +158989,14 @@ function answerReader(reg, world, state3, mayKnow) {
     const given3 = bare2(answerWords(value));
     const named5 = names4.has(value) ? [value] : [...names4].filter(([, ns]) => given3 !== "" && ns.some((n2) => bare2(n2) === given3)).map(([id2]) => id2);
     const target = named5.length === 1 ? named5[0] : undefined;
-    const said2 = answerWords(text8);
+    const said3 = answerWords(text8);
     for (const name2 of target === undefined ? [] : names4.get(target) ?? []) {
       for (let i = 0;i < name2.length; i++) {
         for (let j = i + 1;j <= name2.length; j++) {
           const run2 = name2.slice(i, j);
           if (run2.length < name2.length && !run2.some(singlesOut))
             continue;
-          if (within7(said2, run2) && [...names4].every(([id2, ns]) => id2 === target || !ns.some((n2) => within7(n2, run2))))
+          if (within8(said3, run2) && [...names4].every(([id2, ns]) => id2 === target || !ns.some((n2) => within8(n2, run2))))
             return value;
         }
       }
@@ -158270,10 +159150,10 @@ function purchaseQuote(p, events3, world) {
     const cents2 = post ? post.lines.reduce((sum2, l) => sum2 + Math.max(0, l.amount), 0) : lines4.reduce((sum2, l) => sum2 + (isRecord(l) && typeof l.amount === "number" && l.amount < 0 ? -l.amount : 0), 0);
     const money6 = (minor) => formatMoney(minor, world.currency);
     const name2 = memo.slice("Bought ".length).replace(/\s\u00D7\d+$/, "");
-    const said2 = typeof p.item === "string" ? p.item.trim().toLowerCase() : "";
+    const said3 = typeof p.item === "string" ? p.item.trim().toLowerCase() : "";
     const limit4 = e.data.limited === "cap" ? "capped at" : e.data.limited === "band" ? "clamped to" : null;
     const narrated = e.data.narrated;
-    const notes = [...name2.toLowerCase() !== said2 ? [`priced as ${name2}`] : [], ...limit4 && typeof narrated === "number" ? [`narrated ${money6(narrated)}, ${limit4} ${money6(cents2)}`] : []];
+    const notes = [...name2.toLowerCase() !== said3 ? [`priced as ${name2}`] : [], ...limit4 && typeof narrated === "number" ? [`narrated ${money6(narrated)}, ${limit4} ${money6(cents2)}`] : []];
     return { text: `: ${money6(cents2)}${notes.length > 0 ? ` (${notes.join("; ")})` : ""}`, cents: cents2, limited: limit4 !== null };
   }
   return null;
@@ -158340,8 +159220,8 @@ function unpricedAsk(proposal, ctx, applies2, priceWords) {
   const apply2 = buyer === null ? `Apply makes it yours with nothing charged; ${priceWords} makes it yours at that price.` : `Apply gives it to ${buyer} with nothing charged; ${priceWords} gives it to them at that price.`;
   return `The narration gives no price and the catalog doesn't list it. ${applies2 ? apply2 : `${priceWords} charges it.`}`;
 }
-function refName(view, role, said2) {
-  return knownRef(view, role, said2)?.name ?? (ID_SHAPED2.test(said2) ? UNKNOWN_PHRASE[role] : said2);
+function refName(view, role, said3) {
+  return knownRef(view, role, said3)?.name ?? (ID_SHAPED2.test(said3) ? UNKNOWN_PHRASE[role] : said3);
 }
 function whoseWords3(view, id2) {
   const owner2 = whoseOf(view, id2).owners.find((o) => o === view.world.pov || povMayKnow(view.registry, view.world, view.state, o));
@@ -158370,8 +159250,8 @@ function describeProposal(p, view) {
       const heard = role === "fact" ? heardPlace(view, p) : null;
       if (heard !== null)
         return own(view.world.places, heard)?.name ?? heard;
-      const said2 = v6.trim();
-      return refName(view, role, said2);
+      const said3 = v6.trim();
+      return refName(view, role, said3);
     }
     if (hasOwn(view.state.entities, v6))
       return povMayKnow(view.registry, view.world, view.state, v6) ? own(view.state.entities, v6)?.name ?? v6 : v6;
@@ -158485,8 +159365,8 @@ function describeProposal(p, view) {
       const at3 = org !== "" ? ` at ${org}` : "";
       const words11 = (k) => typeof p[k] === "string" ? p[k].trim() : "";
       const known = view && named5("org") ? knownRef(view, "person", String(p.org)) : null;
-      const said2 = words11("position");
-      const position = (known && view ? positionsOf(view, known.id).find((x) => x.id === said2 || x.title.toLowerCase() === said2.toLowerCase())?.title : undefined) ?? said2.replace(/_/g, " ");
+      const said3 = words11("position");
+      const position = (known && view ? positionsOf(view, known.id).find((x) => x.id === said3 || x.title.toLowerCase() === said3.toLowerCase())?.title : undefined) ?? said3.replace(/_/g, " ");
       const as = words11("title") || position;
       if (p.type === "membership") {
         if (p.change === "join")
@@ -158561,7 +159441,7 @@ function isFile(v6, bookId) {
 function fileOf(bookId) {
   return `${DIR}${hashParts("lre-secrecy-book-v1", bookId)}.json`;
 }
-function standing5(file2) {
+function standing6(file2) {
   const last = file2?.moves.at(-1) ?? null;
   const move3 = last !== null && last.restored === null ? last : null;
   return { last, move: move3, state: move3 === null ? "legacy" : move3.restoring ? "restoring" : move3.confirmed !== null ? "confirmed" : "applied" };
@@ -158705,22 +159585,22 @@ class SecrecyMoves {
     if (!book || book.engine)
       throw new SecrecyError("not_found", "that World Info book is gone");
     const [entries3, { file: file2, damaged }] = await Promise.all([this.host.books.entries(bookId, userId), this.read(bookId, userId)]);
-    const { last, move: move3, state: state3 } = standing5(file2);
+    const { last, move: move3, state: state3 } = standing6(file2);
     const byId = new Map(entries3.map((e) => [e.id, e]));
-    const planned2 = move3 ? [] : entries3.flatMap((e) => planEntry(e) ?? []);
+    const planned3 = move3 ? [] : entries3.flatMap((e) => planEntry(e) ?? []);
     const views = move3 ? move3.entries.map((b) => {
       const e = byId.get(b.id);
       const parts = e ? partsOf(e) : null;
       const now = parts === null ? "gone" : patchTo(parts, leftAs(b)) === null ? "moved" : patchTo(parts, b.before) === null ? "before" : "changed";
       return { ...entryView(b, e?.disabled ?? b.before.disabled), ...e && e.comment.trim() !== "" ? { title: bookEntryTitle(e) } : {}, now, ...b.kind === "mark" && e ? { marked: hasSecretMarks(e.content) } : {}, ...b.error ? { error: b.error } : {} };
-    }) : planned2.map((b) => entryView(b, b.before.disabled));
-    const ids2 = (move3 ? move3.entries : planned2).map((b) => b.id);
+    }) : planned3.map((b) => entryView(b, b.before.disabled));
+    const ids2 = (move3 ? move3.entries : planned3).map((b) => b.id);
     const version = hashParts("lre-secrecy-v1", bookId, move3 ? JSON.stringify(move3) : null, ...ids2.flatMap((id2) => {
       const e = byId.get(id2);
       return [id2, e ? JSON.stringify(partsOf(e)) : null];
     }));
     const plan2 = { bookId, name: book.name, state: state3, applied: last?.applied ?? null, confirmed: last?.confirmed ?? null, restored: last?.restored ?? null, version, entries: views, damaged };
-    return { name: book.name, file: file2, move: move3, planned: planned2, byId, plan: plan2 };
+    return { name: book.name, file: file2, move: move3, planned: planned3, byId, plan: plan2 };
   }
   async current(bookId, version, userId) {
     const look = await this.look(bookId, userId);
@@ -158732,7 +159612,7 @@ class SecrecyMoves {
     const kept4 = new Set(await this.host.storage.list(DIR, userId));
     const out = [];
     for (const book of await pinBooks(this.host, null, userId)) {
-      const { last, state: state3 } = standing5(kept4.has(fileOf(book.id)) ? (await this.read(book.id, userId)).file : null);
+      const { last, state: state3 } = standing6(kept4.has(fileOf(book.id)) ? (await this.read(book.id, userId)).file : null);
       out.push({ ...book, state: state3, applied: last?.applied ?? null, restored: last?.restored ?? null });
     }
     return out;
@@ -159217,30 +160097,30 @@ ${text8}` : text8;
     this.background(async () => {
       this.rt.diag.agentWorking(chatId, userId, run2.id, run2.label);
       this.push(t);
-      const said2 = await turn.ended.catch((error) => ({ status: "failed", text: "", reason: messageOf(error), usage: emptyUsage(), trace: [] })).finally(() => this.rt.diag.agentDone(chatId, userId, run2.id));
-      await this.conclude(t, run2, ask3, said2);
+      const said3 = await turn.ended.catch((error) => ({ status: "failed", text: "", reason: messageOf(error), usage: emptyUsage(), trace: [] })).finally(() => this.rt.diag.agentDone(chatId, userId, run2.id));
+      await this.conclude(t, run2, ask3, said3);
     });
   }
-  async conclude(t, run2, ask3, said2) {
+  async conclude(t, run2, ask3, said3) {
     const { chatId, userId } = t;
     const atOnce = await this.withThread(chatId, userId, async (u) => {
       try {
-        const { trace } = said2;
+        const { trace } = said3;
         const answer = {
           v: 1,
           id: newId3("m"),
           role: "assistant",
-          text: said2.text,
+          text: said3.text,
           at: Date.now(),
           ...trace.length > 0 ? { trace } : {},
-          usage: { in: said2.usage.in, out: said2.usage.out, cached: said2.usage.cachedIn, ...said2.usage.cacheWrite !== undefined ? { written: said2.usage.cacheWrite } : {} },
-          status: said2.status,
-          ...said2.status !== "answered" && said2.reason ? { reason: said2.reason } : {}
+          usage: { in: said3.usage.in, out: said3.usage.out, cached: said3.usage.cachedIn, ...said3.usage.cacheWrite !== undefined ? { written: said3.usage.cacheWrite } : {} },
+          status: said3.status,
+          ...said3.status !== "answered" && said3.reason ? { reason: said3.reason } : {}
         };
         const ops = [...ask3.collected.values()].map(({ op, preview }) => ({ key: preview.key, changeType: preview.changeType, lines: [...preview.lines], mode: preview.mode, op }));
-        const proposal = said2.status !== "cancelled" && ops.length > 0 ? { v: 1, id: newId3("p"), messageId: answer.id, agentId: run2.agentId, status: "open", ops, connection: ask3.modes } : null;
+        const proposal = said3.status !== "cancelled" && ops.length > 0 ? { v: 1, id: newId3("p"), messageId: answer.id, agentId: run2.agentId, status: "open", ops, connection: ask3.modes } : null;
         await this.save(u, { messages: [answer], proposals: proposal ? [proposal] : [] });
-        return proposal && ask3.apply === "at_once" && said2.status === "answered" && ops.every((o) => o.mode !== "confirm") ? proposal.id : null;
+        return proposal && ask3.apply === "at_once" && said3.status === "answered" && ops.every((o) => o.mode !== "confirm") ? proposal.id : null;
       } finally {
         u.run = null;
       }
@@ -159492,11 +160372,11 @@ class SideAssistant {
         tools: input.tools,
         signal: input.signal,
         trace: [],
-        end: (said2) => {
+        end: (said3) => {
           if (this.turns.get(turn) !== live2)
             return;
           this.turns.delete(turn);
-          ended2.resolve({ ...said2, trace: [...live2.trace] });
+          ended2.resolve({ ...said3, trace: [...live2.trace] });
         }
       };
       this.turns.set(turn, live2);
@@ -159589,13 +160469,13 @@ async function momentOf2(rt, chatId, userId, settings) {
   const { core, observed } = head2;
   const index = observed.findLastIndex((m) => !m.isUser);
   const last = observed[index];
-  const said2 = ownMessage(observed.slice(0, Math.max(index, 0)));
+  const said3 = ownMessage(observed.slice(0, Math.max(index, 0)));
   const record3 = last ? core.readContext(last.id, observed) : null;
   const recent = index < 0 ? [] : recentLines(core, observed, index, rt.registry);
   const left = [];
   if (!last)
     left.push("the reply: the chat has none yet");
-  else if (!said2)
+  else if (!said3)
     left.push("the player's message: none comes right before the latest reply");
   if (last && !record3)
     left.push("the turn's record: the latest reply has none, so the chat as it stands now is the state before and after it");
@@ -159609,8 +160489,8 @@ async function momentOf2(rt, chatId, userId, settings) {
     at: at3,
     world: await rt.readLore(chatId, userId, at3.world),
     reply: last ? { id: last.id, text: readableReply(last.swipes[last.swipeId] ?? "", settings.hideJsonBlocks) } : null,
-    user: said2 ? said2.swipes[said2.swipeId] ?? "" : "",
-    earlier: observed.slice(0, said2 ? observed.indexOf(said2) : Math.max(index, 0)),
+    user: said3 ? said3.swipes[said3.swipeId] ?? "" : "",
+    earlier: observed.slice(0, said3 ? observed.indexOf(said3) : Math.max(index, 0)),
     knowing: knowledgeOn(await rt.chatKnowledge.get(chatId, userId), at3.world, settings),
     left
   };
@@ -159849,10 +160729,10 @@ class Namer {
     return { at: at3, text: formatClock(calendarOf(world), at3, placeOffset(world, at3, placeOfEntity(state3, world.pov))) };
   }
 }
-function mindOf(head2, entity2, standing6, playerMind) {
+function mindOf(head2, entity2, standing7, playerMind) {
   if (entity2 === "player")
     return playerMind ? mindFolder(head2.world.pov) : null;
-  return standing6 === "extra" ? null : mindFolder(entity2);
+  return standing7 === "extra" ? null : mindFolder(entity2);
 }
 async function castView(rt, head2, userId) {
   const { path: path3, world } = head2;
@@ -159880,33 +160760,33 @@ async function castView(rt, head2, userId) {
   const index = new Map(path3.beats.map((b, i) => [b.beat.id, i]));
   const cast = order.map((entity2) => {
     const held5 = castOn(path3, entity2);
-    const standing6 = held5?.standing ?? (entity2 === "player" ? "principal" : "extra");
+    const standing7 = held5?.standing ?? (entity2 === "player" ? "principal" : "extra");
     const digestedTo = held5?.digestedTo;
     const at3 = digestedTo === undefined ? undefined : index.get(digestedTo);
     const beat = at3 === undefined ? undefined : path3.beats[at3]?.beat;
-    const takesIn = entity2 === "player" ? playerMind : standing6 === "principal";
+    const takesIn = entity2 === "player" ? playerMind : standing7 === "principal";
     const waiting = takesIn ? feedOf2(path3, entity2, world.pov, beat ? beat.id : null, Number.MAX_SAFE_INTEGER).items.length : 0;
     namer.person(entity2);
-    return { entity: entity2, standing: standing6, why: held5?.why ?? null, pinned: held5?.pinned === true, mind: mindOf(head2, entity2, standing6, playerMind), digested: beat ? { beat: beat.id, time: namer.time(beat.at) } : null, waiting };
+    return { entity: entity2, standing: standing7, why: held5?.why ?? null, pinned: held5?.pinned === true, mind: mindOf(head2, entity2, standing7, playerMind), digested: beat ? { beat: beat.id, time: namer.time(beat.at) } : null, waiting };
   });
   return { cast, names: namer.names };
 }
-async function pin2(rt, at3, head2, entity2, standing6) {
+async function pin2(rt, at3, head2, entity2, standing7) {
   if (entity2 === "player")
     throw new StoryPageRefused("bad_request", "Your character isn't cast: their place in the story is yours.");
-  if (standing6 !== null && !CAST_STANDINGS.includes(standing6))
+  if (standing7 !== null && !CAST_STANDINGS.includes(standing7))
     throw new StoryPageRefused("bad_request", "Pin someone as an extra, a supporting character or a principal.");
-  if (standing6 === null && castOn(head2.path, entity2)?.pinned !== true)
+  if (standing7 === null && castOn(head2.path, entity2)?.pinned !== true)
     throw new StoryPageRefused("conflict", "There's no pin on them to lift.");
   const entry = (held5) => {
-    if (standing6 === null) {
+    if (standing7 === null) {
       if (held5?.pinned !== true)
         return null;
       const { pinned: _lifted, ...rest } = held5;
       return rest;
     }
-    const why3 = held5 && held5.standing === standing6 && held5.why !== undefined ? { why: held5.why } : {};
-    return { entity: entity2, standing: standing6, pinned: true, ...why3, ...held5?.digestedTo !== undefined ? { digestedTo: held5.digestedTo } : {} };
+    const why3 = held5 && held5.standing === standing7 && held5.why !== undefined ? { why: held5.why } : {};
+    return { entity: entity2, standing: standing7, pinned: true, ...why3, ...held5?.digestedTo !== undefined ? { digestedTo: held5.digestedTo } : {} };
   };
   const written3 = await castOnReplies(rt, at3, entity2, entry);
   if ("refused" in written3)
@@ -159976,8 +160856,8 @@ async function budget(rt, head2, userId) {
   const { stretchMinutes } = (await rt.settings.get(userId)).story.budget;
   const now = head2.state.clock;
   const near = treatmentsOn(head2.path).filter((t) => Math.abs(t.at - now) < stretchMinutes);
-  const count7 = (tier) => near.filter((t) => t.tier === tier).length;
-  return { now: new Namer(head2).time(now), used: { t1: count7(1), t2: count7(2), t3: count7(3) } };
+  const count8 = (tier) => near.filter((t) => t.tier === tier).length;
+  return { now: new Namer(head2).time(now), used: { t1: count8(1), t2: count8(2), t3: count8(3) } };
 }
 async function storyPage(rt, at3, ask3) {
   const head2 = await headOf2(rt, at3.chatId, at3.userId);
@@ -160001,6 +160881,265 @@ async function storyPage(rt, at3, ask3) {
     default:
       throw new StoryPageRefused("bad_request", "Unknown story page request.");
   }
+}
+
+// src/shared/prepare-live.ts
+var PREPARE_STAGES = ["reading", "planning", "waiting", "reliving", "filling", "scene", "ready"];
+
+// src/backend/story/prepare-live.ts
+var word2 = (v6) => typeof v6 === "string" && v6 !== "" ? v6 : null;
+var count8 = (v6) => typeof v6 === "number" && Number.isSafeInteger(v6) && v6 >= 0 ? v6 : null;
+function runOf4(raw) {
+  if (!isRecord(raw))
+    return null;
+  const id2 = word2(raw.id);
+  const state3 = word2(raw.state);
+  if (id2 === null || state3 === null)
+    return null;
+  const usage2 = isRecord(raw.usage) ? raw.usage : {};
+  return {
+    id: id2,
+    state: state3,
+    agent: word2(raw.agent) ?? "",
+    as: word2(raw.as),
+    paused: raw.paused === true || state3 === "paused",
+    byUser: isRecord(raw.by) && raw.by.who === "user",
+    plan: word2(raw.plan),
+    parent: word2(raw.parent),
+    again: word2(raw.again),
+    createdAt: count8(raw.createdAt) ?? 0,
+    startedAt: count8(raw.startedAt),
+    endedAt: count8(raw.endedAt),
+    workedMs: count8(raw.workedMs) ?? 0,
+    tokens: (count8(usage2.in) ?? 0) + (count8(usage2.out) ?? 0),
+    calls: count8(usage2.calls) ?? 0,
+    reason: word2(raw.reason),
+    stoppedAt: raw.stoppedAt === "allowance" || raw.stoppedAt === "day" ? raw.stoppedAt : null
+  };
+}
+var UNDER_WAY2 = ["queued", "running", "paused"];
+var STOPPED2 = ["failed", "interrupted", "spent", "off_path"];
+var RUN_STATES = ["queued", "running", "paused", "failed", "interrupted", "spent", "off_path", "cancelled"];
+function preparationRuns(runs) {
+  const ours = new Set(runs.filter(preparing).map((r) => r.id));
+  for (let grew = true;grew; ) {
+    grew = false;
+    for (const r of runs) {
+      if (ours.has(r.id) || r.parent === null || !ours.has(r.parent))
+        continue;
+      ours.add(r.id);
+      grew = true;
+    }
+  }
+  return runs.filter((r) => ours.has(r.id));
+}
+function roleOf4(run2) {
+  if (run2.agent === HARNESS_AGENT.author)
+    return { role: "author", who: null };
+  if (run2.agent === HARNESS_AGENT.historian)
+    return { role: "historian", who: null };
+  if (run2.agent === HARNESS_AGENT.character && run2.as !== null)
+    return { role: "principal", who: run2.as };
+  return { role: "other", who: run2.as };
+}
+async function runsOf6(core, at3, most) {
+  const page9 = await core.ask(at3.userId, "jobs.list", { chatId: at3.chatId, cursor: null, limit: most }, { chat: at3.chatId });
+  const rows = isRecord(page9) && Array.isArray(page9.jobs) ? page9.jobs : [];
+  return { runs: rows.flatMap((raw) => runOf4(raw) ?? []), held: isRecord(page9) && page9.paused === true };
+}
+function runTrail(run2, logged) {
+  const { role, who: who3 } = roleOf4(run2);
+  const of = { role, agent: run2.agent, ...who3 !== null ? { who: who3 } : {} };
+  const out = [];
+  if (run2.again !== null && role !== "author")
+    out.push({ at: run2.createdAt, what: "run_again", ...of });
+  if (role === "author" && run2.startedAt !== null)
+    out.push({ at: run2.startedAt, what: "run_started", ...of });
+  if (run2.endedAt === null)
+    return out;
+  if (STOPPED2.includes(run2.state))
+    out.push({ at: run2.endedAt, what: "run_stopped", ...of, ...run2.reason !== null ? { text: run2.reason } : {} });
+  else if (run2.state === "cancelled" && !logged)
+    out.push({ at: run2.endedAt, what: "run_cancelled", ...of });
+  else if (run2.state === "done" && role === "author")
+    out.push({ at: run2.endedAt, what: "run_ended", ...of });
+  return out;
+}
+function stretchLine2(s, depth2) {
+  const kept4 = s.state === "recorded" && s.reached !== undefined;
+  const relivers = kept4 ? s.reached ?? [] : s.who;
+  const relived = kept4 ? relivers.filter((p) => (s.relived ?? []).includes(p)) : null;
+  const state3 = s.state === "planned" ? within7(s, depth2) ? "waiting" : "left" : s.state === "open" ? "reading" : s.state === "dropped" ? "dropped" : relived === null ? "recorded" : relived.length === relivers.length ? "done" : "reliving";
+  return { id: s.id, from: s.from, to: s.to, state: state3, beats: s.beats.length, through: s.through, key: s.key === true, relivers: [...relivers], relived };
+}
+function merged2(spans, first, last) {
+  const out = [];
+  const within8 = spans.map(([from, to]) => [Math.max(from, first), Math.min(to, last)]).filter(([from, to]) => from <= to);
+  for (const [from, to] of within8.sort((a, b) => a[0] - b[0])) {
+    const end = out.at(-1);
+    if (end && from <= end[1] + 1)
+      end[1] = Math.max(end[1], to);
+    else
+      out.push([from, to]);
+  }
+  return out;
+}
+var measure2 = (spans) => spans.reduce((n2, [from, to]) => n2 + to - from + 1, 0);
+function messagesOf(chat, lines4) {
+  const relived = merged2(lines4.filter((s) => s.state === "done").map((s) => [s.from, s.to]), chat.first, chat.last);
+  const covered = merged2(chat.covered.map((c) => [c.from, c.to]), chat.first, chat.last);
+  let both = 0;
+  for (const [cf, ct] of covered)
+    for (const [rf, rt] of relived)
+      both += Math.max(0, Math.min(ct, rt) - Math.max(cf, rf) + 1);
+  const done = Math.min(chat.messages, measure2(relived));
+  const filled = Math.min(chat.messages - done, measure2(covered) - both);
+  return { total: chat.messages, relived: done, filled, neither: chat.messages - done - filled };
+}
+function stagesOf2(f) {
+  const { plan: plan2 } = f;
+  const open = plan2 !== null && unanswered(plan2).length > 0;
+  const live2 = f.lines.filter((s) => s.state !== "dropped" && s.state !== "left");
+  const facts = {
+    reading: plan2 === null ? "now" : "done",
+    planning: plan2 === null ? "ahead" : open ? "now" : "done",
+    waiting: plan2 === null || open ? "ahead" : !plan2.word.asked ? "skipped" : plan2.word.approved ? "done" : "now",
+    reliving: plan2 !== null && (plan2.kind === "new" || live2.length === 0) ? "skipped" : plan2 !== null && live2.every((s) => s.state === "done" || s.state === "recorded") ? "done" : "ahead",
+    filling: plan2 !== null && f.principals.every((p) => p.profile && p.outline !== false) ? "done" : "ahead",
+    scene: plan2 !== null && f.scene && f.notebook ? "done" : "ahead",
+    ready: f.done ? "done" : "ahead"
+  };
+  if (f.done)
+    return { stage: "ready", stages: PREPARE_STAGES.map((id2) => ({ id: id2, state: facts[id2] === "skipped" ? "skipped" : "done" })) };
+  const at3 = PREPARE_STAGES.find((id2) => id2 !== "ready" && facts[id2] !== "done" && facts[id2] !== "skipped") ?? "scene";
+  return { stage: at3, stages: PREPARE_STAGES.map((id2) => ({ id: id2, state: id2 === at3 ? "now" : facts[id2] === "now" ? "ahead" : facts[id2] })) };
+}
+var HALTS = ["paused", "stopped", "cancelled", "said"];
+var GOES = ["resumed", "carried", "approved", "reopened"];
+function leftOf(log, lines4) {
+  const starts = log.filter((e) => e.what === "opened").map((e) => e.at);
+  if (starts.length === 0)
+    return null;
+  const start = Math.min(...starts);
+  const timed = lines4.flatMap((s) => {
+    if (s.state !== "done")
+      return [];
+    const times = log.filter((e) => e.stretch === s.id && (e.what === "relived" || e.what === "recorded")).map((e) => e.at);
+    return times.length > 0 && Math.max(...times) >= start ? [Math.max(...times)] : [];
+  });
+  const remaining = lines4.filter((s) => s.state === "waiting" || s.state === "reading" || s.state === "reliving").length;
+  if (timed.length === 0 || remaining === 0)
+    return null;
+  const end = Math.max(...timed);
+  let held5 = 0;
+  let since = null;
+  for (const e of log) {
+    if (e.at < start || e.at > end)
+      continue;
+    if (HALTS.includes(e.what))
+      since ??= e.at;
+    else if (GOES.includes(e.what) && since !== null) {
+      held5 += e.at - since;
+      since = null;
+    }
+  }
+  if (since !== null)
+    held5 += end - since;
+  const active = end - start - held5;
+  return active > 0 ? { ms: Math.round(active / timed.length * remaining), stretches: remaining } : null;
+}
+var nothing2 = (at3, every) => ({ at: at3, live: false, every, prep: null });
+async function prepareLive(rt, at3) {
+  const now = Date.now();
+  const { prepare: dials } = (await rt.settings.get(at3.userId)).story;
+  if (await rt.chatKnowledge.engine(at3.chatId, at3.userId) !== "harness")
+    return nothing2(now, dials.watchSeconds);
+  const core = rt.harness.core;
+  const files = rt.harness.files?.(at3) ?? null;
+  if (core === null || files === null)
+    return nothing2(now, dials.watchSeconds);
+  const [file2, listed8, chatFiles] = await Promise.all([readPrepare(files), runsOf6(core, at3, dials.watchRuns), files.list("")]);
+  const runs = preparationRuns(listed8.runs);
+  const state3 = file2.state;
+  if (file2.damaged || state3 === null && runs.length === 0)
+    return nothing2(now, dials.watchSeconds);
+  const plan2 = state3 !== null && planned2(state3) ? state3 : null;
+  const done = state3 !== null && state3.done !== null;
+  const log = state3?.log ?? [];
+  const versions = new Map(chatFiles.map((f) => [f.path, f.version]));
+  const depth2 = plan2 !== null ? depthOf(plan2) : "all";
+  const lines4 = (plan2?.stretches ?? []).map((s) => stretchLine2(s, depth2));
+  const underWay = runs.filter((r) => UNDER_WAY2.includes(r.state));
+  const opened2 = lines4.find((s) => s.state === "reading") ?? null;
+  const lineOf2 = (r, stretch2) => {
+    const live2 = r.state === "running" ? core.spent?.(at3.userId, r.id) ?? null : null;
+    return { id: r.id, ...roleOf4(r), agent: r.agent, state: RUN_STATES.find((s) => s === r.state) ?? "failed", stretch: stretch2, since: r.startedAt ?? r.createdAt, endedAt: r.endedAt, used: live2 ? { tokens: live2.in + live2.out, calls: live2.calls } : { tokens: r.tokens, calls: r.calls }, reason: r.reason, stoppedAt: r.stoppedAt, inside: null };
+  };
+  const atWork = underWay.map((r) => lineOf2(r, r.agent === HARNESS_AGENT.historian ? opened2?.id ?? null : lines4.find((s) => s.state === "reliving" && r.agent === HARNESS_AGENT.character && r.as !== null && s.relivers.includes(r.as) && !(s.relived ?? []).includes(r.as))?.id ?? null));
+  const author = atWork.find((r) => r.role === "author");
+  if (opened2 !== null && author !== undefined && !atWork.some((r) => r.role === "historian")) {
+    atWork.push({ id: author.id, role: "historian", who: null, agent: HARNESS_AGENT.historian, state: author.state, stretch: opened2.id, since: log.findLast((e) => e.what === "opened" && e.stretch === opened2.id)?.at ?? null, endedAt: null, used: null, reason: null, stoppedAt: null, inside: author.id });
+  }
+  const rank2 = (r) => r.role === "author" ? 0 : r.role === "historian" ? 1 : r.role === "principal" ? 2 + Math.max(0, plan2?.principals.findIndex((p) => p.id === r.who) ?? 0) : 1e4;
+  atWork.sort((a, b) => rank2(a) - rank2(b));
+  const latest = new Map;
+  for (const r of runs) {
+    const key = `${r.agent}\x00${r.as ?? ""}`;
+    if ((latest.get(key)?.createdAt ?? -1) < r.createdAt)
+      latest.set(key, r);
+  }
+  const stopped = done ? [] : [...latest.values()].filter((r) => STOPPED2.includes(r.state)).map((r) => lineOf2(r, null));
+  const principals = (plan2?.principals ?? []).map((p) => {
+    const theirs = lines4.filter((s) => s.state !== "dropped" && s.state !== "left" && s.relivers.includes(p.id));
+    return {
+      id: p.id,
+      planned: theirs.length,
+      relived: theirs.some((s) => s.state === "recorded") ? null : theirs.filter((s) => (s.relived ?? []).includes(p.id)).length,
+      outline: plan2?.kind === "new" ? null : versions.has(mindPath(p.id, "outline")),
+      profile: versions.has(mindPath(p.id, "core")),
+      atWork: underWay.some((r) => r.agent === HARNESS_AGENT.character && r.as === p.id)
+    };
+  });
+  const scene2 = versions.has(AUTHOR_FILE.scene) && versions.get(AUTHOR_FILE.scene) !== plan2?.marks.scene;
+  const notebook = versions.has(AUTHOR_FILE.notebook) && versions.get(AUTHOR_FILE.notebook) !== plan2?.marks.notebook;
+  const { stage, stages } = stagesOf2({ plan: plan2, done, lines: lines4, principals, scene: scene2, notebook });
+  const held5 = underWay.some((r) => r.paused) || listed8.held && underWay.length > 0;
+  const going = done ? "done" : !held5 && underWay.some((r) => r.state === "running") ? "running" : !held5 && underWay.some((r) => r.state === "queued") ? "queued" : underWay.length > 0 ? "held" : plan2 !== null && waits(plan2) && unanswered(plan2).length === 0 ? "waiting" : "stopped";
+  const logged = state3?.log !== undefined;
+  const trail = [
+    ...log.map((e) => ({ at: e.at, what: e.what, ...e.stretch !== undefined ? { stretch: e.stretch } : {}, ...e.who !== undefined ? { who: e.who } : {}, ...e.text !== undefined ? { text: e.text } : {}, ...e.count !== undefined ? { count: e.count } : {} })),
+    ...runs.flatMap((r) => runTrail(r, logged))
+  ].map((e, i) => ({ e, i })).sort((a, b) => b.e.at - a.e.at || b.i - a.i).map(({ e }) => e);
+  const firsts = [...log.slice(0, 1).map((e) => e.at), ...runs.map((r) => r.createdAt).filter((t) => t > 0)];
+  const lastEnd = Math.max(0, ...runs.map((r) => r.endedAt ?? 0));
+  const prep = {
+    kind: state3?.kind ?? null,
+    depth: plan2?.depth !== undefined ? { chosen: depth2, recommended: plan2.depth.recommended, picked: plan2.word.depth !== undefined } : null,
+    stage,
+    stages,
+    going,
+    runs: [...atWork, ...stopped],
+    stretches: lines4,
+    principals,
+    messages: plan2?.chat !== undefined ? messagesOf(plan2.chat, lines4) : null,
+    relivedAt: plan2?.relivedAt ?? null,
+    reach: (plan2?.stretches ?? []).every((s) => s.state !== "recorded" || s.reached !== undefined),
+    scene: scene2,
+    notebook,
+    startedAt: firsts.length > 0 ? Math.min(...firsts) : null,
+    endedAt: done ? log.findLast((e) => e.what === "finished")?.at ?? (lastEnd > 0 ? lastEnd : null) : null,
+    workedMs: runs.filter((r) => r.agent === HARNESS_AGENT.author).reduce((n2, r) => n2 + r.workedMs, 0),
+    left: done ? null : leftOf(log, lines4),
+    spent: spentOf(core, at3, listed8.runs, state3?.runs ?? []).tokens,
+    estimate: plan2 !== null ? estimateOf(plan2) : null,
+    cap: state3?.word.cap ?? null,
+    trail,
+    logged,
+    names: Object.fromEntries((plan2?.principals ?? []).map((p) => [p.id, p.name]))
+  };
+  const ended2 = going === "stopped" && lastEnd > 0 && now - lastEnd <= 2 * dials.watchSeconds * 1000;
+  const closing2 = done && underWay.some((r) => !r.paused);
+  return { at: now, live: going === "running" || going === "queued" || closing2 || ended2, every: dials.watchSeconds, prep };
 }
 
 // src/backend/dispatch.ts
@@ -160193,8 +161332,8 @@ class Dispatcher {
     if (res.events.length === 0)
       throw new RequestError("validation", "That changes nothing.");
     const tell2 = typeof r.tell === "boolean" ? r.tell : toldByDefault(r.action, r.params, (await this.rt.settings.get(userId)).offstage, world.currency.decimals);
-    const said2 = tell2 ? toldAction(this.rt.registry, world, w.state, res, before) : null;
-    const by = { action: r.action, label: neutralizeMacros(label3), ...said2 ? { told: neutralizeMacros(toldWords(said2.what, said2.changes)) } : {} };
+    const said3 = tell2 ? toldAction(this.rt.registry, world, w.state, res, before) : null;
+    const by = { action: r.action, label: neutralizeMacros(label3), ...said3 ? { told: neutralizeMacros(toldWords(said3.what, said3.changes)) } : {} };
     const events3 = res.events.map((e) => e.type === "spawn" && e.entity.kind === "flow" ? { ...e, entity: { ...e.entity, fields: { ...e.entity.fields, [ORIGIN_FIELD]: OFFSTAGE_ORIGIN } } } : e);
     const written3 = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: events3, by } });
     return { applied: true, ...waits2(written3), undo: written3.posted ? fixChip(written3.posted.messageId, written3.posted.swipeId, written3.posted.seq) : null };
@@ -160296,8 +161435,8 @@ class Dispatcher {
         return;
       case "lre.action": {
         await this.requireWorldChat(r.chatId, userId);
-        const said2 = r.text?.trim() ?? "";
-        let text8 = said2;
+        const said3 = r.text?.trim() ?? "";
+        let text8 = said3;
         let params2 = r.params;
         let label3 = "";
         if (r.action === TIMELAPSE_ACTION2) {
@@ -160332,7 +161471,7 @@ class Dispatcher {
         }
         const staged = await this.rt.staged.get(r.chatId, userId);
         const same3 = staged !== null && staged.action === r.action && JSON.stringify(staged.request) === JSON.stringify(r.params);
-        if ((r.source === "palette" || r.source === "map") && said2 === "" && r.now !== true) {
+        if ((r.source === "palette" || r.source === "map") && said3 === "" && r.now !== true) {
           const after = toChain(await this.rt.host.chats.messages(r.chatId, userId)).at(-1)?.id ?? null;
           await this.rt.staged.set(r.chatId, userId, same3 ? null : { action: r.action, request: r.params, params: params2, source: r.source, label: neutralizeMacros(label3), after });
           this.rt.push.changed(r.chatId, userId);
@@ -160343,7 +161482,7 @@ class Dispatcher {
           await this.rt.staged.set(r.chatId, userId, null);
           this.rt.push.changed(r.chatId, userId);
         }
-        const messageId = await this.rt.host.chats.appendUserMessage(r.chatId, text8, { [LEDGER_NAMESPACE]: { action: r.action, params: params2, source: r.source, ...said2 !== "" ? { described: true } : {} } }, true, userId);
+        const messageId = await this.rt.host.chats.appendUserMessage(r.chatId, text8, { [LEDGER_NAMESPACE]: { action: r.action, params: params2, source: r.source, ...said3 !== "" ? { described: true } : {} } }, true, userId);
         reply("lre.action", { messageId });
         return;
       }
@@ -160954,6 +162093,11 @@ class Dispatcher {
             throw new RequestError(error.code, error.message);
           throw error;
         }
+        return;
+      }
+      case "lre.prepareLive": {
+        await this.requireWorldChat(r.chatId, userId);
+        reply("lre.prepareLive", await prepareLive(this.rt, { chatId: r.chatId, userId }));
         return;
       }
     }
@@ -161717,8 +162861,8 @@ function runtimeBase(listen, port) {
   const host = listen.includes(":") && !listen.startsWith("[") ? `[${listen}]` : listen;
   return `http://${host}:${port}/v1`;
 }
-function shellWord2(word2) {
-  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(word2) ? word2 : `'${word2.replaceAll("'", "'\\''")}'`;
+function shellWord2(word3) {
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(word3) ? word3 : `'${word3.replaceAll("'", "'\\''")}'`;
 }
 
 // node_modules/lumi-ah/src/link/json.ts
@@ -161821,7 +162965,7 @@ var TRANSPORT_DEFAULTS = Object.freeze({
   link: Object.freeze({ quietMs: 120000, relays: 8, connectionMs: 15000, joinMaxUnits: 32 * 1024 * 1024, partStaleMs: 60000, joinFrames: 8, joinHeldUnits: 64 * 1024 * 1024 }),
   live: Object.freeze({ events: 20000, page: 500, chats: 32, lostMs: 30000 }),
   anchors: Object.freeze({ waitMs: 10 * 60000, held: 64 }),
-  sessions: Object.freeze({ previewChars: 120, page: 50, pathsKept: 16 }),
+  sessions: Object.freeze({ previewChars: 120, page: 50, pathsKept: 16, pathMs: 5 * 60000 }),
   runtime: RUNTIME_DEFAULTS
 });
 var ms = (title, description, minimum, maximum) => ({ type: "integer", title, description, minimum, maximum, "x-unit": "ms" });
@@ -161968,7 +163112,8 @@ var TRANSPORT_SCHEMA = {
       properties: {
         previewChars: whole7("Reply preview", "How much of a reply's opening the Sessions page shows to find it by.", 0, 2000, "characters"),
         page: whole7("Turns per page", "The most turns one page of the Sessions list holds.", 1, 500, "turns"),
-        pathsKept: whole7("Chats kept in memory", "The most chats whose list of messages (without their text) is kept in memory until the chat changes, so a reply reads its chat once. 0 keeps none: every read asks Lumiverse again.", 0, 1024, "chats")
+        pathsKept: whole7("Chats kept in memory", "The most chats whose list of messages (without their text) is kept in memory until the chat changes, so a reply reads its chat once. 0 keeps none: every read asks Lumiverse again.", 0, 1024, "chats"),
+        pathMs: ms("Keep a chat's list for", "How long such a list is kept at most, even while Lumiverse says nothing of the chat changing. After that the chat is read again. 0 keeps none: every read asks Lumiverse again.", 0, DAY_MS5)
       }
     },
     runtime: {
@@ -162061,12 +163206,12 @@ function checkTransport(values) {
     check2(TRANSPORT_SCHEMA, values, [], problems);
   return problems;
 }
-function merged2(defaults, own2) {
+function merged3(defaults, own2) {
   if (!isRecord3(defaults))
     return own2 === undefined ? defaults : own2;
   const out = {};
   for (const [key, value] of Object.entries(defaults))
-    out[key] = merged2(value, isRecord3(own2) && hasOwn8(own2, key) ? own2[key] : undefined);
+    out[key] = merged3(value, isRecord3(own2) && hasOwn8(own2, key) ? own2[key] : undefined);
   return out;
 }
 function transportDefaults() {
@@ -162091,7 +163236,7 @@ function transportOf(values) {
     }
     return out;
   };
-  return merged2(transportDefaults(), strip(values, []));
+  return merged3(transportDefaults(), strip(values, []));
 }
 
 // node_modules/lumi-ah/src/extension/backend/approvals.ts
@@ -162203,7 +163348,7 @@ class UiRefused extends Error {
 function wrongKey(name2) {
   return new LinkRefused("forbidden", `The key in the loopback connection isn't this account's loopback key. Mint a new one on ${name2}'s Runtime page: your linked runtime puts it in the connection.`);
 }
-function wordsOf9(error) {
+function wordsOf10(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -162815,9 +163960,9 @@ function problemsOf(raw) {
   return out;
 }
 function refused4(refusal7, who3) {
-  const said2 = typeof refusal7.message === "string" && refusal7.message !== "" ? refusal7.message : `${who3} couldn't do that.`;
+  const said3 = typeof refusal7.message === "string" && refusal7.message !== "" ? refusal7.message : `${who3} couldn't do that.`;
   const code = typeof refusal7.code === "string" ? CODES[refusal7.code] : undefined;
-  return new UiRefused(code ?? "internal", code === undefined ? `${who3} couldn't do that (${said2}).` : said2, problemsOf(refusal7.problems));
+  return new UiRefused(code ?? "internal", code === undefined ? `${who3} couldn't do that (${said3}).` : said3, problemsOf(refusal7.problems));
 }
 
 class Asks {
@@ -163104,11 +164249,11 @@ class Work3 {
     }
   }
   async pause(run2, on) {
-    const word2 = on ? this.harness.pause : this.harness.resume;
-    if (word2 === undefined)
+    const word3 = on ? this.harness.pause : this.harness.resume;
+    if (word3 === undefined)
       return false;
     try {
-      await word2.call(this.harness, { run: run2 });
+      await word3.call(this.harness, { run: run2 });
       return true;
     } catch (error) {
       if (gone(error))
@@ -163278,10 +164423,10 @@ function harnessExtension(extension, userId) {
     ...extension.runEnded ? { runEnded: (run2) => extension.runEnded?.({ ...run2, userId }, userId) ?? Promise.resolve() } : {}
   };
 }
-var said2 = (name2) => name2.length > CEILINGS.nameChars ? `${name2.slice(0, CEILINGS.nameChars)}\u2026` : name2;
+var said3 = (name2) => name2.length > CEILINGS.nameChars ? `${name2.slice(0, CEILINGS.nameChars)}\u2026` : name2;
 async function callExtension(extension, member, arg2, userId, chats) {
   if (typeof member !== "string" || !EXTENSION_MEMBERS.includes(member))
-    throw new LinkRefused("bad_request", `An extension has no member ${said2(String(member))}: update the runtime and the extension to the same build.`);
+    throw new LinkRefused("bad_request", `An extension has no member ${said3(String(member))}: update the runtime and the extension to the same build.`);
   const none = { supplied: false, value: null };
   if (extension === undefined)
     return none;
@@ -163372,7 +164517,7 @@ class RemoteTools {
     try {
       mcp = (await this.mcp.tools(userId)).filter((tool6) => !taken.has(tool6.name)).map((tool6) => ({ name: tool6.name, family: tool6.family, tier: "external", description: tool6.description, parameters: tool6.parameters, source: "user" }));
     } catch (error) {
-      this.log("warn", `[LumiAH] the MCP servers' tools couldn't be listed (${wordsOf9(error)})`);
+      this.log("warn", `[LumiAH] the MCP servers' tools couldn't be listed (${wordsOf10(error)})`);
     }
     return [...own2, ...mcp];
   }
@@ -163383,11 +164528,11 @@ class RemoteTools {
         return await this.own.call(call, signal2, userId);
       if (mcpNameOf(call.name) !== null)
         return { text: await this.mcp.call(userId, call.name, call.args, signal2) };
-      return { text: `There is no tool ${said2(call.name)} in this extension now. Go on without it.`, error: true };
+      return { text: `There is no tool ${said3(call.name)} in this extension now. Go on without it.`, error: true };
     } catch (error) {
       if (signal2.aborted)
         throw error;
-      return { text: wordsOf9(error), error: true };
+      return { text: wordsOf10(error), error: true };
     }
   }
 }
@@ -163429,7 +164574,7 @@ class Builtin {
         id: deps.id,
         within: (_run, fn) => fn(),
         traced: () => core.sending,
-        tell: (job) => void deps.jobs.took(userId, job, BUILTIN).catch((error) => this.host.log("warn", `[LumiAH] the pages weren't told of job ${job.id.slice(0, 8)} (${wordsOf9(error)})`)),
+        tell: (job) => void deps.jobs.took(userId, job, BUILTIN).catch((error) => this.host.log("warn", `[LumiAH] the pages weren't told of job ${job.id.slice(0, 8)} (${wordsOf10(error)})`)),
         words: {
           notYet: `This build of ${deps.name} can't do that.`,
           noSuch: (op) => `There is nothing ${deps.name} does by the name ${op}: reload the page.`,
@@ -163535,7 +164680,7 @@ class Builtin {
     core.sending = core.sending.then(async () => {
       while (core.traced.length > 0) {
         const batch = core.traced.splice(0);
-        await this.deps.live.push(userId, BUILTIN, batch).catch((error) => this.host.log("warn", `[LumiAH] a run's steps didn't reach the live view (${wordsOf9(error)})`));
+        await this.deps.live.push(userId, BUILTIN, batch).catch((error) => this.host.log("warn", `[LumiAH] a run's steps didn't reach the live view (${wordsOf10(error)})`));
       }
     });
   }
@@ -163546,7 +164691,7 @@ class Builtin {
     const core = this.users.get(userId);
     if (core === undefined)
       return;
-    this.deps.settings.transport(userId).then((transport) => core.work.setHold(transport.jobs.paused)).catch((error) => this.host.log("warn", `[LumiAH] whether jobs are held couldn't be read (${wordsOf9(error)})`));
+    this.deps.settings.transport(userId).then((transport) => core.work.setHold(transport.jobs.paused)).catch((error) => this.host.log("warn", `[LumiAH] whether jobs are held couldn't be read (${wordsOf10(error)})`));
   }
   async ask(userId, op, args) {
     try {
@@ -163579,7 +164724,7 @@ class Builtin {
     try {
       await this.of(userId).harness.chats?.forget({ chatId });
     } catch (error) {
-      this.host.log("warn", `[LumiAH] what was kept of the deleted chat ${chatId} couldn't be forgotten (${wordsOf9(error)})`);
+      this.host.log("warn", `[LumiAH] what was kept of the deleted chat ${chatId} couldn't be forgotten (${wordsOf10(error)})`);
     }
   }
   stop(userId, run2, why3) {
@@ -163746,16 +164891,30 @@ function anchorsUnder(key) {
   };
 }
 var TAIL_FIRST = 4;
+function placeOf7(rows, index) {
+  let low = 0;
+  let high = rows.length;
+  while (low < high) {
+    const mid = low + high >> 1;
+    if (rows[mid].index < index)
+      low = mid + 1;
+    else
+      high = mid;
+  }
+  return low;
+}
 
 class Chats {
   host;
   kept;
+  now;
   codec;
   writes = new KeyedQueue;
   paths = new Map;
-  constructor(host, kept4, codec = OWN_ANCHORS) {
+  constructor(host, kept4, now, codec = OWN_ANCHORS) {
     this.host = host;
     this.kept = kept4;
+    this.now = now;
     this.codec = codec;
   }
   async own(userId, chatId) {
@@ -163776,15 +164935,17 @@ class Chats {
   }
   async path(userId, chatId) {
     await this.own(userId, chatId);
+    const keeping2 = await this.kept(userId);
     const held5 = this.paths.get(chatId);
-    if (held5?.fresh === true) {
+    if (held5?.fresh === true && this.now() - held5.at < keeping2.ms) {
       const last = await this.last(chatId);
       const keptLast = held5.rows.at(-1);
       const same3 = last === null ? keptLast === undefined : keptLast !== undefined && keptLast.id === last.id && keptLast.index === last.index && keptLast.swipeId === last.swipeId && keptLast.mark === contentMark(last.role, last.content);
       if (same3)
         return held5.rows.map(({ mark: _mark, ...row }) => row);
     }
-    const mine = held5 ?? { rows: [], fresh: false, changes: 0 };
+    const at3 = this.now();
+    const mine = held5 ?? { rows: [], fresh: false, changes: 0, at: at3 };
     if (held5 === undefined)
       this.paths.set(chatId, mine);
     const changes = mine.changes;
@@ -163796,13 +164957,12 @@ class Chats {
       const hash = old !== undefined && old.swipeId === m.swipeId && old.mark === mark2 ? old.hash : await textHash(m.content);
       return { id: m.id, index: m.index, role: m.role, name: m.name, swipeId: m.swipeId, chars: m.content.length, hash, anchor: this.codec.read(m.own, m.swipeId), mark: mark2 };
     }));
-    const most = await this.kept(userId);
     const unchanged = this.paths.get(chatId) === mine && mine.changes === changes;
     this.paths.delete(chatId);
-    if (most > 0) {
-      this.paths.set(chatId, { rows: read2, fresh: unchanged, changes: mine.changes });
+    if (keeping2.chats > 0) {
+      this.paths.set(chatId, { rows: read2, fresh: unchanged && keeping2.ms > 0, changes: mine.changes, at: at3 });
       for (const oldest of this.paths.keys()) {
-        if (this.paths.size <= most)
+        if (this.paths.size <= keeping2.chats)
           break;
         this.paths.delete(oldest);
       }
@@ -163811,12 +164971,25 @@ class Chats {
   }
   async messages(userId, chatId, from, to) {
     await this.own(userId, chatId);
+    return (await this.range(chatId, from, to)).map((m) => ({ id: m.id, index: m.index, role: m.role, name: m.name, swipeId: m.swipeId, content: m.content }));
+  }
+  async range(chatId, from, to) {
     if (to <= from)
       return [];
-    let rows = await this.host.chats.messages(chatId, { from, count: to - from });
-    if (rows.some((m, i) => m.index !== from + i))
-      rows = await this.host.chats.messages(chatId);
-    return rows.filter((m) => m.index >= from && m.index < to).map((m) => ({ id: m.id, index: m.index, role: m.role, name: m.name, swipeId: m.swipeId, content: m.content }));
+    const kept4 = this.paths.get(chatId)?.rows ?? [];
+    const last = kept4.at(-1)?.index ?? -1;
+    const start = kept4.length > 0 ? placeOf7(kept4, from) : from;
+    const count9 = kept4.length > 0 && last >= to ? placeOf7(kept4, to) - start : to - from;
+    const rows = count9 > 0 ? await this.host.chats.messages(chatId, { from: start, count: count9 }) : [];
+    const placed2 = rows.every((m, i) => {
+      const held5 = kept4[start + i];
+      if (kept4.length === 0)
+        return m.index === from + i;
+      return held5 !== undefined ? held5.id === m.id : m.index > last;
+    });
+    if (placed2)
+      return rows.filter((m) => m.index >= from && m.index < to);
+    return (await this.host.chats.messages(chatId)).filter((m) => m.index >= from && m.index < to);
   }
   async find(chatId, messageId) {
     const tail3 = await this.host.chats.messages(chatId, { tail: TAIL_FIRST });
@@ -163937,7 +165110,7 @@ var SOURCES2 = { builtin: true, extension: true, user: true };
 var TIERS4 = { read: true, write: true, external: true };
 var JOB_STATES2 = { queued: true, running: true, done: true, failed: true, cancelled: true, interrupted: true, off_path: true, spent: true, paused: true };
 var TURN_ENDS = { done: true, failed: true, stopped: true };
-var LEVELS7 = { user: true, middle: true, chat: true };
+var LEVELS8 = { user: true, middle: true, chat: true };
 var OWNED = { instructions: true, tools: true, name: true, description: true };
 var UNUSABLE = { off: true, withdrawn: true, unknown: true };
 function namedOf(v6, what) {
@@ -164028,7 +165201,7 @@ function guidanceOf2(raw) {
     levels: list4(o.levels, what).map((one) => {
       const level2 = record4(one, what);
       return {
-        id: oneOf7(level2.id, LEVELS7, what),
+        id: oneOf7(level2.id, LEVELS8, what),
         whose: text8(level2.whose, what),
         text: text8(level2.text, what),
         path: textOrNull(level2.path, what),
@@ -164582,21 +165755,21 @@ class Definitions2 {
     return { tiers: { read: choice2(tiers.read), write: choice2(tiers.write), external: choice2(tiers.external) }, tools };
   }
   async view(userId) {
-    const merged3 = await this.deps.asks.ask(userId, "definitions.get", {});
+    const merged4 = await this.deps.asks.ask(userId, "definitions.get", {});
     const servers = await this.deps.mcp.servers(userId);
     const mcp = servers.map((s) => ({ id: s.id, name: s.name, off: !s.on, status: !s.enabled ? "stopped" : s.problem !== null ? "failed" : "ready", ...s.problem !== null ? { problem: s.problem } : {}, tools: s.tools.length }));
-    return defsView(merged3, await this.approval(userId), mcp);
+    return defsView(merged4, await this.approval(userId), mcp);
   }
   async merged(userId) {
-    const merged3 = await this.deps.asks.ask(userId, "definitions.get", {});
-    return isRecord3(merged3) ? merged3 : {};
+    const merged4 = await this.deps.asks.ask(userId, "definitions.get", {});
+    return isRecord3(merged4) ? merged4 : {};
   }
   async saveAgent(userId, agent) {
     const id2 = idOf2(agent.id, "An agent");
-    const merged3 = await this.merged(userId);
-    const tools = merged3.tools;
+    const merged4 = await this.merged(userId);
+    const tools = merged4.tools;
     const names4 = [...new Set([...(Array.isArray(tools) ? tools : []).flatMap((t) => isRecord3(t) && typeof t.name === "string" ? [t.name, ...typeof t.family === "string" && t.family !== "" ? [`@${t.family}`] : []] : []), ADDED_TOOLS])];
-    const row = (Array.isArray(merged3.agents) ? merged3.agents : []).find((a) => isRecord3(a) && a.id === id2);
+    const row = (Array.isArray(merged4.agents) ? merged4.agents : []).find((a) => isRecord3(a) && a.id === id2);
     const owned2 = isRecord3(row) && (row.source === "extension" || row.over === "extension") && Array.isArray(row.owns) ? row.owns.filter((field3) => typeof field3 === "string") : [];
     const given3 = { ...agent };
     for (const field3 of owned2)
@@ -164675,8 +165848,8 @@ class Definitions2 {
 // node_modules/lumi-ah/src/extension/backend/hosted.ts
 var DEADLINE_SLACK_MS = 250;
 function sentence4(text9) {
-  const said3 = text9.trim();
-  return said3 === "" || /[.!?\u2026]$/.test(said3) ? said3 : `${said3}.`;
+  const said4 = text9.trim();
+  return said4 === "" || /[.!?\u2026]$/.test(said4) ? said4 : `${said4}.`;
 }
 function slotsOf2(came, places2, handed, name2) {
   const slots = [];
@@ -164715,9 +165888,9 @@ class HostedTurns {
     try {
       return await this.work(input, turn, omit, startedAt, begun);
     } catch (error) {
-      const text9 = `${sentence4(wordsOf9(error))} Lumiverse sent the prompt as it was, so the reply is its own.`;
-      this.host.log("warn", `[LumiAH] turn ${turn.turn.slice(0, 8)} couldn't be worked on here (${wordsOf9(error)}), so Lumiverse wrote the reply on its own`);
-      await this.gaveUp(turn, begun.live, { why: "failed", text: text9 }, wordsOf9(error)).catch(() => {
+      const text9 = `${sentence4(wordsOf10(error))} Lumiverse sent the prompt as it was, so the reply is its own.`;
+      this.host.log("warn", `[LumiAH] turn ${turn.turn.slice(0, 8)} couldn't be worked on here (${wordsOf10(error)}), so Lumiverse wrote the reply on its own`);
+      await this.gaveUp(turn, begun.live, { why: "failed", text: text9 }, wordsOf10(error)).catch(() => {
         return;
       });
       return {};
@@ -164849,9 +166022,9 @@ class HostedTurns {
       return {};
     const reason3 = sentence4(prepared2.reason ?? "");
     const why3 = running.cut === "time" ? "time" : running.cut !== null ? "stopped" : now() >= replyBy ? "time" : "failed";
-    const said3 = reason3 !== "" ? reason3 : why3 === "time" ? `${name2}'s agents ran out of the time Lumiverse gives them before a reply.` : why3 === "stopped" ? `You skipped ${name2} for this reply.` : `${name2}'s agents didn't finish.`;
+    const said4 = reason3 !== "" ? reason3 : why3 === "time" ? `${name2}'s agents ran out of the time Lumiverse gives them before a reply.` : why3 === "stopped" ? `You skipped ${name2} for this reply.` : `${name2}'s agents didn't finish.`;
     const tail3 = why3 === "time" ? "Lumiverse sent the prompt as it was. A turn that needs longer can leave the rest to a job, or the chat can run in a runtime, which has no such limit." : why3 === "stopped" ? "Lumiverse wrote the reply from the prompt as it was. To stop a reply itself, use Lumiverse's own Stop." : "Lumiverse sent the prompt as it was, so the reply is its own.";
-    running.noPart ??= { why: why3, text: `${said3} ${tail3}` };
+    running.noPart ??= { why: why3, text: `${said4} ${tail3}` };
     live2.noPart(userId, turn.turn, running.noPart, why3 === "time" ? "time" : running.cut === "skipped" ? "skipped" : undefined);
     if (prepared2.pending)
       this.keep(running);
@@ -164863,7 +166036,7 @@ class HostedTurns {
   }
   keep(running) {
     const { turn, target, before, noPart } = running;
-    running.kept = this.deps.open.put(turn.userId, { turn: turn.turn, chatId: turn.chatId, place: "builtin", kind: turn.kind, target: { message: target.message, swipe: target.swipe }, at: this.deps.now(), ...before !== "" ? { before } : {}, ...noPart !== null ? { noPart } : {} }).catch((error) => this.host.log("warn", `[LumiAH] turn ${turn.turn.slice(0, 8)} couldn't be kept across a restart (${wordsOf9(error)})`));
+    running.kept = this.deps.open.put(turn.userId, { turn: turn.turn, chatId: turn.chatId, place: "builtin", kind: turn.kind, target: { message: target.message, swipe: target.swipe }, at: this.deps.now(), ...before !== "" ? { before } : {}, ...noPart !== null ? { noPart } : {} }).catch((error) => this.host.log("warn", `[LumiAH] turn ${turn.turn.slice(0, 8)} couldn't be kept across a restart (${wordsOf10(error)})`));
   }
   over(running) {
     if (running.done)
@@ -164887,7 +166060,7 @@ class HostedTurns {
     return { swipe: own2 ? target.swipe : shown7?.swipeId ?? 0, text: kind === "continue" && before !== "" && text9.startsWith(before) ? text9.slice(before.length) : text9 };
   }
   ended(event) {
-    const failed2 = (error) => this.host.log("error", `[LumiAH] turn ${event.generationId.slice(0, 8)}: it couldn't be recorded (${wordsOf9(error)})`);
+    const failed2 = (error) => this.host.log("error", `[LumiAH] turn ${event.generationId.slice(0, 8)}: it couldn't be recorded (${wordsOf10(error)})`);
     const running = this.running.get(event.generationId);
     if (running !== undefined)
       this.complete(running, event).catch(failed2);
@@ -164923,7 +166096,7 @@ class HostedTurns {
     if (this.seen.has(userId))
       return;
     this.seen.add(userId);
-    this.leftBy(userId).catch((error) => this.host.log("warn", `[LumiAH] what the last restart left waiting couldn't be looked at (${wordsOf9(error)})`));
+    this.leftBy(userId).catch((error) => this.host.log("warn", `[LumiAH] what the last restart left waiting couldn't be looked at (${wordsOf10(error)})`));
   }
   async leftBy(userId) {
     for (const kept4 of await this.deps.open.list(userId))
@@ -164990,7 +166163,7 @@ class HostedTurns {
       await open.drop(userId, kept4.turn).catch(() => {
         return;
       });
-      await this.say(userId, kept4, `${name2} was restarted while this reply was being written. The reply stands, and what its agents had worked out for it couldn't be recorded (${wordsOf9(error)}).`).catch(() => {
+      await this.say(userId, kept4, `${name2} was restarted while this reply was being written. The reply stands, and what its agents had worked out for it couldn't be recorded (${wordsOf10(error)}).`).catch(() => {
         return;
       });
     } finally {
@@ -165417,8 +166590,8 @@ class Connections {
     return { id: c.id, name: c.name, loopback: this.loops(c, await this.deps.bases(userId)), foreign: theirs };
   }
   async selectedId(userId) {
-    const said3 = await this.host.connections.active(userId);
-    return said3 !== undefined ? said3 : this.told.get(userId) ?? null;
+    const said4 = await this.host.connections.active(userId);
+    return said4 !== undefined ? said4 : this.told.get(userId) ?? null;
   }
   async unpinned(userId) {
     const selected = await this.selectedId(userId);
@@ -165568,7 +166741,7 @@ class Models {
       if (error instanceof CallRefused)
         writer.error(error.message, error.code);
       else
-        writer.error(wordsOf9(error), writer.signal.aborted ? "cancelled" : "model_failed");
+        writer.error(wordsOf10(error), writer.signal.aborted ? "cancelled" : "model_failed");
     }
   }
   async direct(userId, request, signal2, onDelta) {
@@ -165926,17 +167099,9 @@ class Recall2 {
       return { entryId: a.entryId, bookId: a.bookId ?? entry?.bookId ?? null, title: a.title !== "" ? a.title : entry?.title ?? "", how: a.how ?? null, ...a.score !== undefined ? { score: a.score } : {}, ...entry !== null ? { content: entry.content } : {} };
     }));
   }
-  async rows(chatId, from, to) {
-    if (to <= from)
-      return [];
-    let rows = await this.host.chats.messages(chatId, { from, count: to - from });
-    if (rows.some((m, i) => m.index !== from + i))
-      rows = await this.host.chats.messages(chatId);
-    return rows.filter((m) => m.index >= from && m.index < to);
-  }
   async messages(userId, chatId, from, to) {
     await this.deps.chats.own(userId, chatId);
-    return (await this.rows(chatId, from, to)).map((m) => ({ id: m.id, index: m.index, role: m.role, name: m.name, swipeId: m.swipeId, content: m.content, at: m.at }));
+    return (await this.deps.chats.range(chatId, from, to)).map((m) => ({ id: m.id, index: m.index, role: m.role, name: m.name, swipeId: m.swipeId, content: m.content, at: m.at }));
   }
   async embed(userId, texts2, kind, signal2) {
     if (texts2.length === 0 || texts2.length > EMBED_BATCH_MAX)
@@ -166020,7 +167185,7 @@ class Recall2 {
       return [];
     const first = kept4.reduce((least2, k) => Math.min(least2, k.index), Number.POSITIVE_INFINITY);
     const last = kept4.reduce((most, k) => Math.max(most, k.index), 0);
-    const now = new Map((await this.rows(chatId, first, last + 1)).map((m) => [m.index, m]));
+    const now = new Map((await this.deps.chats.range(chatId, first, last + 1)).map((m) => [m.index, m]));
     const out = [];
     for (const k of kept4) {
       const m = now.get(k.index);
@@ -166032,7 +167197,7 @@ class Recall2 {
 
 // node_modules/lumi-ah/src/link/frames.ts
 var text10 = (v6) => typeof v6 === "string";
-var count7 = (v6) => typeof v6 === "number" && Number.isSafeInteger(v6) && v6 >= 0;
+var count9 = (v6) => typeof v6 === "number" && Number.isSafeInteger(v6) && v6 >= 0;
 var REQUEST_TYPES = {
   register: true,
   hello: true,
@@ -166104,7 +167269,7 @@ function requestOf3(raw) {
   return { request: raw };
 }
 function deltaOf(raw) {
-  if (!isRecord3(raw) || !text10(raw.turn) || !text10(raw.chatId) || !text10(raw.agentId) || !count7(raw.call) || raw.call < 1 || typeof raw.at !== "number")
+  if (!isRecord3(raw) || !text10(raw.turn) || !text10(raw.chatId) || !text10(raw.agentId) || !count9(raw.call) || raw.call < 1 || typeof raw.at !== "number")
     return null;
   if (raw.text !== undefined && !text10(raw.text) || raw.reasoning !== undefined && !text10(raw.reasoning))
     return null;
@@ -166126,7 +167291,7 @@ function runtimeReportOf(raw) {
   const { name: name2, build, host, listen, port, scheduler, turns } = raw;
   const { bun, script, unit: unit4 } = raw.runtime;
   const { valid, expiresAt, checkedAt } = raw.session;
-  if (!short(name2) || !short(build) || !short(host) || !short(listen) || !count7(port) || port < 1 || port > 65535 || !text10(scheduler) || !hasOwn8(SCHEDULER, scheduler) || !count7(turns))
+  if (!short(name2) || !short(build) || !short(host) || !short(listen) || !count9(port) || port < 1 || port > 65535 || !text10(scheduler) || !hasOwn8(SCHEDULER, scheduler) || !count9(turns))
     return null;
   if (!(bun === null || path3(bun)) || !path3(script) || !(unit4 === null || short(unit4)))
     return null;
@@ -166495,21 +167660,21 @@ function needsParts(text11) {
   return encoder.encode(text11).length + ENVELOPE_BYTES > FRAME_LIMIT;
 }
 function splitFrame(text11, id2) {
-  const count8 = Math.max(1, Math.ceil(text11.length / PART_UNITS));
+  const count10 = Math.max(1, Math.ceil(text11.length / PART_UNITS));
   const parts = [];
-  for (let index = 0;index < count8; index++)
-    parts.push({ link: LINK, type: "part", id: id2, index, count: count8, data: text11.slice(index * PART_UNITS, (index + 1) * PART_UNITS) });
+  for (let index = 0;index < count10; index++)
+    parts.push({ link: LINK, type: "part", id: id2, index, count: count10, data: text11.slice(index * PART_UNITS, (index + 1) * PART_UNITS) });
   return parts;
 }
 function partOf3(raw) {
   if (!isRecord3(raw) || raw.link !== LINK || raw.type !== "part")
     return null;
-  const { id: id2, index, count: count8, data } = raw;
+  const { id: id2, index, count: count10, data } = raw;
   if (typeof id2 !== "string" || id2 === "" || typeof data !== "string")
     return null;
-  if (typeof index !== "number" || typeof count8 !== "number" || !Number.isSafeInteger(index) || !Number.isSafeInteger(count8) || count8 < 1 || index < 0 || index >= count8)
+  if (typeof index !== "number" || typeof count10 !== "number" || !Number.isSafeInteger(index) || !Number.isSafeInteger(count10) || count10 < 1 || index < 0 || index >= count10)
     return null;
-  return { link: LINK, type: "part", id: id2, index, count: count8, data };
+  return { link: LINK, type: "part", id: id2, index, count: count10, data };
 }
 var millions = (units) => (units / 1048576).toFixed(0);
 
@@ -166757,8 +167922,8 @@ class LinkServer {
       if (error instanceof LinkRefused)
         this.refuse(request.id, userId, session, error.code, error.message);
       else {
-        this.host.log("error", `[LumiAH] ${request.type} failed: ${wordsOf9(error)}`);
-        this.refuse(request.id, userId, session, "internal", `LumiAH couldn't do that (${wordsOf9(error)}).`);
+        this.host.log("error", `[LumiAH] ${request.type} failed: ${wordsOf10(error)}`);
+        this.refuse(request.id, userId, session, "internal", `LumiAH couldn't do that (${wordsOf10(error)}).`);
       }
     }
     return true;
@@ -166864,7 +168029,7 @@ class LinkServer {
           await d.chats.own(userId, call.chatId);
         const writer = d.streams.open(userId, relay, stream, call.turn, (await d.settings.transport(userId)).streams);
         if (writer !== null) {
-          d.tools.call(userId, call, writer.signal).then((out) => writer.value(out.error === true ? { text: out.text, error: true } : { text: out.text }), (error) => writer.error(wordsOf9(error), writer.signal.aborted ? "cancelled" : "tool_failed"));
+          d.tools.call(userId, call, writer.signal).then((out) => writer.value(out.error === true ? { text: out.text, error: true } : { text: out.text }), (error) => writer.error(wordsOf10(error), writer.signal.aborted ? "cancelled" : "tool_failed"));
         }
         return { accepted: true };
       }
@@ -166875,7 +168040,7 @@ class LinkServer {
           await d.chats.own(userId, ask3.chatId);
         const writer = d.streams.open(userId, relay, stream, ask3.turn, (await d.settings.transport(userId)).streams);
         if (writer !== null) {
-          holdCall(d, userId, ask3, writer.signal).then((answer) => writer.value(answer), (error) => writer.error(wordsOf9(error), "cancelled"));
+          holdCall(d, userId, ask3, writer.signal).then((answer) => writer.value(answer), (error) => writer.error(wordsOf10(error), "cancelled"));
         }
         return { accepted: true };
       }
@@ -166927,13 +168092,13 @@ function hashOf(raw, what) {
     throw new UiRefused("bad_request", `${what} is named by its hash.`);
   return raw;
 }
-function rollbackState(turn, turns, standing6) {
+function rollbackState(turn, turns, standing7) {
   const { record: record5 } = turn;
   if (record5.summary === undefined)
     return "none";
   if (record5.rolledBack !== undefined)
     return turns.some((t) => t.onPath && t.record.at > (record5.rolledBack ?? 0)) ? "done" : "pending";
-  return turn.onPath && record5.summary === standing6 ? "available" : "none";
+  return turn.onPath && record5.summary === standing7 ? "available" : "none";
 }
 function latestRecord(path3, turn) {
   for (let at3 = path3.length - 1;at3 >= 0; at3--) {
@@ -166976,7 +168141,7 @@ class SessionsPage {
     }, remove: async () => {
       return;
     } } }, chatId);
-    const standing6 = {
+    const standing7 = {
       asked: asked3,
       records: resumed.records,
       rolledBackAt,
@@ -166989,14 +168154,14 @@ class SessionsPage {
       summary: resumed.summary !== null,
       dropped: resumed.refs.dropped.length,
       missing: resumed.missing,
-      asked: compactionDue({ ...standing6, tokens: 0, limit: 0 }) === "due" ? asked3 : null,
-      held: compactionDue({ ...standing6, tokens: tokens3, limit: limitOf2(core.session.summarizeAtTokens) }) === "held"
+      asked: compactionDue({ ...standing7, tokens: 0, limit: 0 }) === "due" ? asked3 : null,
+      held: compactionDue({ ...standing7, tokens: tokens3, limit: limitOf2(core.session.summarizeAtTokens) }) === "held"
     };
   }
   async view(userId, chatId) {
     return this.session(userId, chatId, await this.deps.chats.path(userId, chatId));
   }
-  row(turn, turns, standing6, preview, ran2) {
+  row(turn, turns, standing7, preview, ran2) {
     const { record: record5 } = turn;
     return {
       turn: record5.generationId,
@@ -167008,7 +168173,7 @@ class SessionsPage {
       onPath: turn.onPath,
       preview,
       transcript: record5.transcript ?? null,
-      compaction: record5.summary !== undefined ? { summary: record5.summary, replaced: record5.folded ?? 0, rollback: rollbackState(turn, turns, standing6) } : null,
+      compaction: record5.summary !== undefined ? { summary: record5.summary, replaced: record5.folded ?? 0, rollback: rollbackState(turn, turns, standing7) } : null,
       usage: record5.usage,
       changes: record5.changed ?? 0,
       ...ran2.place !== undefined ? { place: ran2.place } : {},
@@ -167040,9 +168205,9 @@ class SessionsPage {
     const size2 = Math.min(limit4, (await this.deps.settings.transport(userId)).sessions.page);
     const page9 = [...turns].reverse().slice(from, from + size2);
     const previews = await this.previews(userId, chatId, page9);
-    const standing6 = sessionAt2(turns).summary;
+    const standing7 = sessionAt2(turns).summary;
     return {
-      turns: page9.map((t) => this.row(t, turns, standing6, previews.get(t.index) ?? "", ranOf(path3[t.at]?.anchor))),
+      turns: page9.map((t) => this.row(t, turns, standing7, previews.get(t.index) ?? "", ranOf(path3[t.at]?.anchor))),
       next: from + page9.length < turns.length ? String(from + page9.length) : null,
       total: turns.length,
       session: await this.session(userId, chatId, path3)
@@ -167164,7 +168329,7 @@ function storedOf4(raw, schema) {
   return { v: 1, rev: typeof raw.rev === "number" && Number.isSafeInteger(raw.rev) && raw.rev >= 0 ? raw.rev : 0, own: own2, texts: texts2, ...isRecord3(raw.definitions) ? { definitions: raw.definitions } : {} };
 }
 var clone2 = (value) => JSON.parse(JSON.stringify(value));
-var within7 = (path3, under2) => under2.length <= path3.length && under2.every((key2, i) => path3[i] === key2);
+var within8 = (path3, under2) => under2.length <= path3.length && under2.every((key2, i) => path3[i] === key2);
 function at3(root, path3) {
   let node = root;
   for (const key2 of path3) {
@@ -167269,8 +168434,8 @@ class SettingsStore2 {
       return null;
     };
     const place2 = (path3, value) => {
-      const above = own2.find((o) => o.path.length < path3.length && within7(path3, o.path));
-      own2 = own2.filter((o) => !within7(o.path, path3));
+      const above = own2.find((o) => o.path.length < path3.length && within8(path3, o.path));
+      own2 = own2.filter((o) => !within8(o.path, path3));
       if (above !== undefined) {
         const rest = path3.slice(above.path.length);
         if (!isRecord3(above.value))
@@ -167299,9 +168464,9 @@ class SettingsStore2 {
     for (const section of this.sections) {
       for (const tail3 of await section.fixed?.(userId) ?? []) {
         const fixed = [section.key, ...tail3];
-        own2 = own2.filter((o) => !within7(o.path, fixed));
+        own2 = own2.filter((o) => !within8(o.path, fixed));
         for (const o of own2) {
-          if (!within7(fixed, o.path))
+          if (!within8(fixed, o.path))
             continue;
           const parent = at3(o.value, fixed.slice(o.path.length, -1));
           if (isRecord3(parent))
@@ -167591,9 +168756,9 @@ function storedOf5(raw) {
   const story = {};
   if (isRecord3(raw.story)) {
     for (const [chatId, chosen] of Object.entries(raw.story)) {
-      const word2 = storyWordOf(chosen);
-      if (Object.keys(word2).length > 0)
-        story[chatId] = word2;
+      const word3 = storyWordOf(chosen);
+      if (Object.keys(word3).length > 0)
+        story[chatId] = word3;
     }
   }
   return { v: 1, on, ran: ran2, story };
@@ -167637,11 +168802,11 @@ class ChatSwitch {
       return patch;
     if (chat.metadata[PIN] !== connection.id)
       throw new UiRefused("unavailable", `This chat generates on "${connection.name}" because that is the connection selected in Lumiverse, and its replies go to that connection's own runtime. Select another connection in Lumiverse, then take the chat over.`);
-    const said3 = marks.find((mark2) => mark2.prior !== null);
-    const prior = said3?.prior ?? null;
+    const said4 = marks.find((mark2) => mark2.prior !== null);
+    const prior = said4?.prior ?? null;
     const back = prior !== null && prior !== connection.id && !loops.includes(prior) && await this.deps.connections.one(userId, prior) !== null ? prior : null;
     patch[PIN] = back;
-    patch[PIN_MODEL] = back !== null ? said3?.priorModel ?? null : null;
+    patch[PIN_MODEL] = back !== null ? said4?.priorModel ?? null : null;
     return patch;
   }
   async viewOf(userId, chat) {
@@ -167713,9 +168878,9 @@ class ChatSwitch {
     if (ask3 === null)
       throw new LinkRefused("not_found", "There is no such chat in this account.");
     const chosen = ask3.chat.story ?? {};
-    const said3 = this.deps.claim === undefined ? null : await this.deps.claim(ask3, userId);
-    const word2 = storyWordOf(said3?.claim.story);
-    const claimed = said3 !== null && Object.keys(word2).length > 0 ? { by: said3.by, story: word2 } : null;
+    const said4 = this.deps.claim === undefined ? null : await this.deps.claim(ask3, userId);
+    const word3 = storyWordOf(said4?.claim.story);
+    const claimed = said4 !== null && Object.keys(word3).length > 0 ? { by: said4.by, story: word3 } : null;
     return { chatId, chosen, setting, claimed, sovereignHand: ask3.sovereignHand, holds: storyHolds({ claim: claimed?.story ?? null, chat: chosen, user: setting, sovereignHand: ask3.sovereignHand }) };
   }
   async setStory(userId, chatId, story) {
@@ -167953,16 +169118,16 @@ class Turns {
       this.dropGeneration(account2, oldest);
     }
   }
-  shed(most, count8, drop2) {
+  shed(most, count10, drop2) {
     let total = 0;
     for (const account2 of this.accounts.values())
-      total += count8(account2);
+      total += count10(account2);
     while (total > most) {
       let largest;
       for (const account2 of this.accounts.values())
-        if (largest === undefined || count8(account2) > count8(largest))
+        if (largest === undefined || count10(account2) > count10(largest))
           largest = account2;
-      if (largest === undefined || count8(largest) === 0)
+      if (largest === undefined || count10(largest) === 0)
         return;
       drop2(largest);
       total--;
@@ -168108,7 +169273,7 @@ class Turns {
       if (messageId !== null)
         await this.deps.chats.deleteEmpty(turn.userId, turn.chatId, messageId);
     } catch (error) {
-      this.host.log("warn", `[LumiAH] turn ${turn.turn.slice(0, 8)}: the empty reply its stop left couldn't be deleted (${wordsOf9(error)})`);
+      this.host.log("warn", `[LumiAH] turn ${turn.turn.slice(0, 8)}: the empty reply its stop left couldn't be deleted (${wordsOf10(error)})`);
     }
   }
   unsure(userId) {
@@ -168179,12 +169344,12 @@ class Turns {
       return await Promise.race([check3, late.promise]);
     } catch (error) {
       if (held5 === undefined) {
-        this.host.log("warn", `[LumiAH] a reply's connection couldn't be checked (${wordsOf9(error)}), so it was left as it is`);
+        this.host.log("warn", `[LumiAH] a reply's connection couldn't be checked (${wordsOf10(error)}), so it was left as it is`);
         return false;
       }
       if (held5 === "builtin")
         return "builtin";
-      throw new Error(`${this.deps.name} answers this chat in its runtime, and couldn't check its connection now (${wordsOf9(error)}), so its agents had no part in this reply. Try again in a moment; if it keeps happening, see ${this.deps.name}'s Runtime page.`);
+      throw new Error(`${this.deps.name} answers this chat in its runtime, and couldn't check its connection now (${wordsOf10(error)}), so its agents had no part in this reply. Try again in a moment; if it keeps happening, see ${this.deps.name}'s Runtime page.`);
     } finally {
       unwait();
     }
@@ -168249,7 +169414,7 @@ class Turns {
       try {
         return await this.here(input, kind);
       } catch (error) {
-        this.host.log("warn", `[LumiAH] a built-in turn couldn't begin (${wordsOf9(error)}), so Lumiverse wrote this reply on its own`);
+        this.host.log("warn", `[LumiAH] a built-in turn couldn't begin (${wordsOf10(error)}), so Lumiverse wrote this reply on its own`);
         return {};
       }
     }
@@ -168321,7 +169486,7 @@ class Turns {
       turn.relay = relay;
       turn.facts = this.targetOf(turn).then((target) => {
         turn.target = target;
-        this.deps.open.put(userId, { turn: turn.turn, chatId: turn.chatId, place: "runtime", kind: turn.kind, target: { message: target.message, swipe: target.swipe }, at: this.deps.now() }).catch((error) => this.host.log("warn", `[LumiAH] turn ${turn.turn.slice(0, 8)} couldn't be kept across a restart (${wordsOf9(error)})`));
+        this.deps.open.put(userId, { turn: turn.turn, chatId: turn.chatId, place: "runtime", kind: turn.kind, target: { message: target.message, swipe: target.swipe }, at: this.deps.now() }).catch((error) => this.host.log("warn", `[LumiAH] turn ${turn.turn.slice(0, 8)} couldn't be kept across a restart (${wordsOf10(error)})`));
         const facts = { turn: turn.turn, user: turn.userId, chat: turn.chatId, generation: turn.turn, kind: turn.kind, target: { message: target.message, swipe: target.swipe }, preset: turn.presetId, sources: turn.sources };
         for (const listener of this.begun)
           listener(turn, facts);
@@ -168406,7 +169571,7 @@ class Turns {
         return false;
       }
     } catch (error) {
-      this.host.log("error", `[LumiAH] turn ${turn}: its record couldn't be written (${wordsOf9(error)})`);
+      this.host.log("error", `[LumiAH] turn ${turn}: its record couldn't be written (${wordsOf10(error)})`);
       return false;
     }
   }
@@ -168592,7 +169757,7 @@ class Ui {
     return null;
   }
   async remembered(kept4) {
-    await kept4.catch((error) => this.host.log("warn", `[LumiAH] which job learns a chat's story couldn't be kept (${wordsOf9(error)})`));
+    await kept4.catch((error) => this.host.log("warn", `[LumiAH] which job learns a chat's story couldn't be kept (${wordsOf10(error)})`));
   }
   async coreSettings(userId) {
     return settingsOf((await this.deps.settings.values(userId))[this.deps.coreKey]);
@@ -168676,7 +169841,7 @@ class Ui {
       try {
         Object.assign(patch, { [part]: await this.part(userId, part) });
       } catch (error) {
-        this.host.log("warn", `[LumiAH] the pages' ${part} couldn't be read (${wordsOf9(error)})`);
+        this.host.log("warn", `[LumiAH] the pages' ${part} couldn't be read (${wordsOf10(error)})`);
       }
     }
     if (Object.keys(patch).length === 0)
@@ -168734,8 +169899,8 @@ class Ui {
       else if (error instanceof LinkRefused)
         this.fail(request.reqId, userId, session, LINK_CODES[error.code] ?? "internal", error.message);
       else {
-        this.host.log("error", `[LumiAH] ${request.type} failed: ${wordsOf9(error)}`);
-        this.fail(request.reqId, userId, session, "internal", `LumiAH couldn't do that (${wordsOf9(error)}).`);
+        this.host.log("error", `[LumiAH] ${request.type} failed: ${wordsOf10(error)}`);
+        this.fail(request.reqId, userId, session, "internal", `LumiAH couldn't do that (${wordsOf10(error)}).`);
       }
     }
     return true;
@@ -169067,7 +170232,7 @@ function createBackend(host, env, options = {}) {
   const identity = identityOf({ identifier: host.identifier, ...options.identity });
   const { now, later, build } = env;
   const { name: name2 } = identity;
-  const warn = (what) => (error) => host.log("warn", `[LumiAH] ${what}: ${wordsOf9(error)}`);
+  const warn = (what) => (error) => host.log("warn", `[LumiAH] ${what}: ${wordsOf10(error)}`);
   const declined = new Set(options.declined ?? []);
   const grant2 = `Grant it in Lumiverse (Extensions \u2192 ${name2} \u2192 Permissions).`;
   const permissions = () => NEEDS2.filter((need2) => !declined.has(need2.id) && !host.granted(need2.id)).map((need2) => ({ id: need2.id, what: need2.what, without: need2.without, todo: grant2, needed: need2.needed }));
@@ -169082,8 +170247,8 @@ function createBackend(host, env, options = {}) {
   const scope = async (userId) => {
     try {
       const read2 = await made.builtin?.ask(userId, "definitions.get", {});
-      const said3 = isRecord3(read2) && isRecord3(read2.scope) ? read2.scope : null;
-      return said3 !== null && Array.isArray(said3.tools) && said3.tools.length > 0 && Array.isArray(said3.agents) ? said3 : undefined;
+      const said4 = isRecord3(read2) && isRecord3(read2.scope) ? read2.scope : null;
+      return said4 !== null && Array.isArray(said4.tools) && said4.tools.length > 0 && Array.isArray(said4.agents) ? said4 : undefined;
     } catch {
       return;
     }
@@ -169100,7 +170265,10 @@ function createBackend(host, env, options = {}) {
   const streams = new StreamRegistry({ now, later, push: (userId, relay, push2) => relays.push(userId, relay, push2) });
   const connections = new Connections(host, { model: loopbackModel(identity.identifier), bases: (userId) => relays.bases(userId), serialTools: async (userId) => (await settings.transport(userId)).connections.oneToolAtATime });
   made.connections = connections;
-  const chats = new Chats(host, async (userId) => (await settings.transport(userId)).sessions.pathsKept, options.anchor ?? (identity.anchorKey === identity.identifier ? OWN_ANCHORS : anchorsUnder(identity.anchorKey)));
+  const chats = new Chats(host, async (userId) => {
+    const { pathsKept, pathMs } = (await settings.transport(userId)).sessions;
+    return { chats: pathsKept, ms: pathMs };
+  }, now, options.anchor ?? (identity.anchorKey === identity.identifier ? OWN_ANCHORS : anchorsUnder(identity.anchorKey)));
   const open = new OpenTurns(host, async (userId) => Math.min((await settings.transport(userId)).tags.held, CEILINGS.tagsHeld));
   const runtimeOf = async (userId, chatId) => {
     const on = await connections.ofChat(userId, await chats.own(userId, chatId));
@@ -169475,7 +170643,7 @@ function generationType(o) {
   const type = str29(o, "generationType");
   return type === undefined ? "normal" : GENERATION_TYPES[type] ?? "other";
 }
-function roleOf4(raw) {
+function roleOf5(raw) {
   if (raw === "system")
     return "system";
   return typeof raw === "string" && raw.startsWith("assistant") ? "assistant" : "user";
@@ -170096,7 +171264,7 @@ function createSpindleHost(identifier = EXTENSION_IDENTIFIER) {
           return null;
         if (await spindle.presets.get(presetId, userId) === null)
           return null;
-        return (await spindle.presets.blocks.list(presetId, userId)).map((b) => ({ id: b.id, name: b.name, role: roleOf4(b.role), content: b.content, enabled: b.enabled, marker: typeof b.marker === "string" && b.marker !== "" ? b.marker : null }));
+        return (await spindle.presets.blocks.list(presetId, userId)).map((b) => ({ id: b.id, name: b.name, role: roleOf5(b.role), content: b.content, enabled: b.enabled, marker: typeof b.marker === "string" && b.marker !== "" ? b.marker : null }));
       },
       async active(chatId, userId) {
         if (!spindle.permissions.has("presets"))
@@ -170274,7 +171442,7 @@ function createSpindleHost(identifier = EXTENSION_IDENTIFIER) {
 // src/backend/harness/mount.ts
 var NAME = "LumiRPEngine";
 var STORAGE = "harness";
-var BUILD = "da77a3c6";
+var BUILD = "f525a88e";
 var TICK_MS = 1000;
 var MOUNT_SESSION = "lre-harness-mount";
 var OWNERS_KEPT = OPEN_CHATS_CAP * 8;

@@ -7156,7 +7156,7 @@ var STORY_DEFAULTS = Object.freeze({
   limits: Object.freeze({ beatChars: 800, quoteChars: 600, quotes: 6, people: 24, beatsPerTurn: 40, draftChars: 600, draftsPerTurn: 12, whyChars: 300, beatsRead: 40, feedItems: 40, openingChars: 4000 }),
   minds: Object.freeze({ chars: Object.freeze({ core: 4000, now: 2000, memory: 8000, beliefs: 4000, people: 4000, plans: 2000, outline: 6000, profile: 1500 }), playerMind: true }),
   models: Object.freeze({ default: Object.freeze({}), agents: Object.freeze({}), standings: Object.freeze({}), runs: Object.freeze({}), characters: Object.freeze({}) }),
-  prepare: Object.freeze({ stretchMessages: 40, askAboveTokens: 200000, reliveAtOnce: 3, beatsPerStretch: 30, readChars: 24000, textChars: 1200, callTokens: 60000 })
+  prepare: Object.freeze({ stretchMessages: 40, askAboveTokens: 200000, reliveAtOnce: 3, beatsPerStretch: 30, readChars: 60000, textChars: 1200, callTokens: 60000, surveyChars: 60000, watchSeconds: 5, watchRuns: 60, runMinutes: 60, runRounds: 200, idleRuns: 2 })
 });
 var STORY_BOUNDS = Object.freeze({
   stretchMinutes: [60, 525600],
@@ -7166,7 +7166,7 @@ var STORY_BOUNDS = Object.freeze({
   modelAgents: 64,
   modelCharacters: 500,
   modelChars: 200,
-  prepare: Object.freeze({ stretchMessages: [5, 400], askAboveTokens: [0, 1e8], reliveAtOnce: [1, 24], beatsPerStretch: [1, 200], readChars: [2000, 200000], textChars: [200, 8000], callTokens: [1000, 2000000] })
+  prepare: Object.freeze({ stretchMessages: [5, 400], askAboveTokens: [0, 1e8], reliveAtOnce: [1, 24], beatsPerStretch: [1, 200], readChars: [2000, 1e6], textChars: [200, 8000], callTokens: [1000, 2000000], surveyChars: [2000, 1e6], watchSeconds: [2, 300], watchRuns: [10, 500], runMinutes: [5, 1440], runRounds: [10, 5000], idleRuns: [1, 20] })
 });
 var STORY_PRESET_DEFAULTS = Object.freeze({
   categories: Object.freeze({ "Story contract": "contract", Author: "author", Characters: "character", "Game master": "gm", Narrator: "narrator", Voice: "voice", "Presentation modules": "module" }),
@@ -17875,7 +17875,7 @@ function defaultAgentSettings() {
     persist: { on: false, turns: 3, minutes: 30 },
     gmOpsPerTurn: 10,
     curatorOps: 24,
-    kept: { runs: 64, gates: 256, watchers: 256, live: 16, texts: 4000000, folds: KEPT_FOLDS_DEFAULT },
+    kept: { runs: 64, gates: 256, watchers: 256, live: 16, texts: 4000000, folds: KEPT_FOLDS_DEFAULT, chatMs: 5 * 60000 },
     compaction: { atTokens: 32000, keepTurns: 3, summarizeTool: true, when: "ahead", connectionId: null, model: null, effort: "main", summaryTokens: 16000 },
     recording: { outputChars: 2000 },
     review: { placement: "chips" },
@@ -17930,7 +17930,8 @@ var KEPT_DEFS = {
   watchers: { label: "Chats whose review cards are watched", limits: "How many chats' review cards the pages that show them hear about as they change.", fires: "The chat watched longest ago stops hearing, until a page asks for its cards again.", unit: "count", min: 1, none: null },
   live: { label: "Chats in the live view", limits: "How many chats' latest agent turn GM → Live keeps in memory, each with everything its agents did, and tells the pages watching it as it runs.", fires: "The chat whose turn started longest ago is let go: GM → Live shows nothing for it until its next turn, and that turn's transcript stays in GM → Workspace → transcripts.", unit: "count", min: 1, none: null },
   texts: { label: "Agent texts kept once read", limits: "How many characters of the agents' stored texts the engine keeps in memory once it has read them: the main agent's session, the GM assistant's conversation and the workspace's files, across your chats.", fires: "The text read longest ago is let go, and its next read comes from storage. At 0 every read does.", unit: "chars", min: 0, none: null },
-  folds: { label: "Messages kept worked out", limits: "How many of your chats' messages the engine keeps worked out in memory, each with what it did to the world, so working a chat out again starts where it changed rather than from its first message. Keep it above your longest chat's messages.", fires: "The message used longest ago is let go: the next time it is needed, it is worked out again from the nearest state the engine kept or saved.", unit: "count", min: 1, none: null }
+  folds: { label: "Messages kept worked out", limits: "How many of your chats' messages the engine keeps worked out in memory, each with what it did to the world, so working a chat out again starts where it changed rather than from its first message. Keep it above your longest chat's messages.", fires: "The message used longest ago is let go: the next time it is needed, it is worked out again from the nearest state the engine kept or saved.", unit: "count", min: 1, none: null },
+  chatMs: { label: "Chat kept for its agents", limits: "How long the agents of a job and the story's pages keep a chat's messages once read. A message sent, edited, deleted or swiped ends it at once.", fires: "The chat is read again. At 0 every read does.", unit: "ms", min: 0, none: null }
 };
 var COMPACTION_DEFS = {
   atTokens: { label: "Compact the session past", limits: "How long the main agent's session may grow before everything but its latest turns is summarized.", fires: "The older turns become one summary, kept with the span it replaced for a rollback.", unit: "tokens", min: 1, none: null },
@@ -34157,7 +34158,37 @@ var PREPARE_NOTE = {
   fileStateOpen: "harness.prepare.file.state.open",
   fileStatePlanned: "harness.prepare.file.state.planned",
   fileStateRecorded: "harness.prepare.file.state.recorded",
-  fileStateDropped: "harness.prepare.file.state.dropped"
+  fileStateDropped: "harness.prepare.file.state.dropped",
+  fileRevised: "harness.prepare.file.revised",
+  fileUnplanned: "harness.prepare.file.unplanned",
+  fileAnswer: "harness.prepare.file.answer",
+  unanswered: "harness.note.prepare.unanswered",
+  needAnswer: "harness.note.prepare.need_answer",
+  waitsRevised: "harness.note.prepare.waits_revised",
+  surveyFirst: "harness.note.prepare.survey_first",
+  storyFirst: "harness.note.prepare.story_first",
+  surveyOutline: "harness.note.prepare.survey_outline",
+  surveyNone: "harness.note.prepare.survey_none",
+  surveyOrder: "harness.note.prepare.survey_order",
+  surveyLeft: "harness.note.prepare.survey_left",
+  surveyMore: "harness.note.prepare.survey_more",
+  surveyEnd: "harness.note.prepare.survey_end",
+  surveyNoSummary: "harness.note.prepare.survey_no_summary",
+  surveyNoBook: "harness.note.prepare.survey_no_book",
+  surveyBooks: "harness.note.prepare.survey_books",
+  taskFirst: "harness.prepare.task.first",
+  taskRevise: "harness.prepare.task.revise",
+  taskAfresh: "harness.prepare.task.afresh",
+  runWords: "harness.prepare.run_words",
+  notChosen: "harness.note.prepare.not_chosen",
+  needDepth: "harness.note.prepare.need_depth",
+  depthOffered: "harness.note.prepare.depth_offered",
+  sayDepth: "harness.prepare.say.depth",
+  fileDepth: "harness.prepare.file.depth",
+  fileStateUnchosen: "harness.prepare.file.state.unchosen",
+  depthOutline: "harness.prepare.depth.outline",
+  depthKey: "harness.prepare.depth.key",
+  depthAll: "harness.prepare.depth.all"
 };
 var PREPARE_AGENT_TEXTS = [
   {
@@ -34175,7 +34206,7 @@ var PREPARE_SKILL_TEXTS = [
     agents: [AUTHOR],
     name: "Preparing the story",
     description: "When you are asked to prepare this story: catch up on a chat that already has a history, or set up a new one, so the first reply is not shallow.",
-    body: lines2("# Preparing the story", "", "A prepared start means you know this story as its author must: where it stands, where it points, and who it turns on. And the few people it turns on have minds of their own, built from what they lived. The goal is a first reply that is not shallow, without reading everything twice or spending more than the story needs. How deep to go is your judgement, from what the story is and what there is to draw on.", "", "## Survey first", "prepare_survey says what there is: how long the chat is, a LumiBooks book or other summaries in the World Info books, the lore, the world's own people and places, and what the engine already holds. Lumiverse's memory tools are yours where they are in your list. Read the summaries before the chat: they tell you where the story went, so you can choose where it is worth reading closely.", "", "## Plan before you spend", "Write the plan with prepare_plan:", "- Whom you cast as principals: the few people the story turns on, who need minds of their own. Not everyone. A minor figure is an extra you voice, or a supporting character with a short profile. You can add people later.", "- Which moments each principal relives: the stretches of the chat that made them who they are in the story now. Choose the moments that matter. The rest you fill from summaries and lore.", "- What you fill from summaries and lore, and from where.", "- Your estimate of what the whole preparation costs in tokens, your own work included. Every model call, yours and those of the agents you start, sends a whole prompt again, so the cost is mostly in the calls. The engine reckons the whole from the calls the plan takes, at what one of them weighs, with what is spent already, and the plan carries the larger.", "A plan above the player's ceiling waits for their word. Then end your run with a short report of the plan. The preparation carries on when they answer, from author/prepare.md.", "", "## Relive", "Cast each principal with cast_set. Open each stretch with prepare_relive, in the chat's order, and hand it to the historian (delegate, agent: historian) with the stretch's id. When the historian closes it, start each principal it reached to relive it: a character's agent, as that person, in its reliving run. While they relive one stretch, the historian can record the next. A refusal says why: the player's word, their cap, too many principals reliving at once, a stretch out of order.", "", "## The rest", "For each principal, write with prepare_outline what they would know of what they didn't relive: in outline, as they would know it, and never what they couldn't have known. Write each principal's core.md from their record in the world and what you learned. Then write where everyone stands now (where they are, what they want, what is in motion) in author/scene.md and your notebook. Where the world's state is behind the story (the clock, where someone is), say so in author/scene.md. The first turn sets it right with its own tools: a preparation changes nothing in the world.", "", "## A new chat", "Nothing to relive. Cast the principals from the world's own people, write each core.md from their records, and set the scene.", "", "## Finish", "prepare_finish closes the preparation once it holds what a first turn needs. If you are stopped before, prepare_status picks it up again from author/prepare.md.")
+    body: lines2("# Preparing the story", "", "A prepared start means you know this story as its author must: what it is about for the player's character, where it stands, where it points, and who it turns on. And the people it turns on have minds of their own. The goal is a first reply that is not shallow, without reading everything twice. How deep to go is the player's choice, once they have seen what it costs.", "", "## Survey first", "prepare_survey says what there is, in outline. Then read the story so far with it (part summaries): the summaries' own text, the highest level first, then the lower levels newest first. Read the rest of them by level or by id where you need it. Where the chat has no summaries, read the chat in outline with chat_outline, and closely with chat_read and chat_around where it matters. Then read the lore that frames the story (part lore): each World Info book with its size and how many of its entries are always on. Read the books the player names, and the entries that frame the story, before you say what it is about. The plan is refused on a chat with a history until the summaries and the lore were read in this preparation, and until author/story.md holds the story as you understand it.", "", "## The story as you understand it", "A preparation takes many runs, and a prompt can't hold everything you read: what you learn must live in your files, not only in your head. As you read, keep author/story.md, the story as you understand it: what it is about for the player's character, and the bigger picture the lore gives; what happened, in order; who the main characters are, and what each knows and wants now. Add to it after each part you read. A later run reads it first, and need not read the summaries again. When a tool says there is no room left in your prompt, write what you have in author/story.md and end your run: the preparation carries on from your files.", "", "## Whom the story turns on", "Principals are the story's main characters across its whole length, wherever they are now: the people it turns on for the player's character, those closest to them, and those who drive what is at stake, as the summaries and the latest stretch of the chat show. Not the people the present scene turns on, and never simply whoever is named most recently or most often in the world's records. Whoever the player names as a main character is a principal, and whoever they name as supporting is a supporting character with a short profile. Nobody the player named is left out for cost: the plan says what it costs, and the player decides. A cast of fifteen principals and nine supporting characters is planned for like any other.", "", "## Plan the whole, before you spend", "Write the plan with prepare_plan. It is the plan of the whole preparation, however many runs it takes. Never cut it to fit what one run may spend: its cost is shown to the player, who decides.", "- What the story is about for the player's character: the bigger picture, as the lore and the summaries give it, and where it stands now.", "- Whom you cast as principals, and why each.", "- Which moments each principal relives: the stretches of the chat that made them who they are. A principal need not relive anything to have a mind: what they know in outline and their core are a true start, and reliving is for the moments that made them.", "- What you fill from summaries and lore, and from where.", "- Your estimate of what the whole preparation costs in tokens, your own work included. Every model call, yours and those of the agents you start, sends a whole prompt again, so the cost is mostly in the calls. The engine reckons the whole from the calls the plan takes, at what one of them weighs, with what is spent already, and the plan carries the larger.", "A plan above the player's ceiling waits for their word. Then end your run with a short report of the plan. The preparation carries on when they answer, from author/prepare.md.", "", "## What the player tells you", "The player can tell you what to change at any time. Before you do anything else, write the plan again with prepare_plan for what they said, and give your answer with it: what you changed, or why you kept what you kept. They read your answer under their words. Their words never approve the plan: a plan you revised for them waits for their word, whatever their ceiling, and nothing more is relived until they give it. End your run once it is written.", "", "## Relive", "Cast each principal with cast_set. Open each stretch with prepare_relive, in the chat's order, and hand it to the historian (delegate, agent: historian) with the stretch's id. When the historian closes it, start each principal it reached to relive it: a character's agent, as that person, in its reliving run. While they relive one stretch, the historian can record the next. A refusal says why: the player's word, their cap, too many principals reliving at once, a stretch out of order.", "", "## The rest", "For each principal, write with prepare_outline what they would know of what they didn't relive: in outline, as they would know it, and never what they couldn't have known. Write each principal's core.md from their record in the world and what you learned, and each supporting character's profile. Then write where everyone stands now (where they are, what they want, what is in motion) in author/scene.md and your notebook. Where the world's state is behind the story (the clock, where someone is), say so in author/scene.md. The first turn sets it right with its own tools: a preparation changes nothing in the world.", "", "## A new chat", "Nothing to relive, and no summaries to read: keep author/story.md all the same, with what the story is about and whom it turns on. Cast the principals from the world's own people, write each core.md from their records, and set the scene.", "", "## Finish", "prepare_finish closes the preparation once it holds what a first turn needs. If you are stopped before, prepare_status picks it up again from author/prepare.md.")
   }
 ];
 var STAMP = "a date and time in the world's calendar, written YYYY-MM-DD HH:MM, as stretch_read writes the time now";
@@ -34185,9 +34216,16 @@ var PREPARE_TOOL_TEXTS = [
     name: PREPARE_TOOL.survey,
     family: HARNESS_FAMILY.prepare,
     tier: "read",
-    note: "Says what there is to prepare the story from: the chat, its summaries, the lore, the world's people, and what the engine already holds.",
-    text: "Survey what there is to draw on before you prepare the story: how long the chat is and how far the engine has played it; a LumiBooks book or other summaries in the chat's World Info books, each by the messages it spans, with the id lore_read takes; how much lore there is; the world's people and places; and what the engine already holds: the clock, the cast, the beats, the minds, and the people an older engine kept a mind for. It reads only, and costs little. Where they are in your list, chat_outline and the other history tools give the chat's own outline.",
-    args: [{ path: "part", text: "Only this part: chat, summaries, lore, world or engine. Left out: all of them." }]
+    note: "Says what there is to prepare the story from, in outline, and gives each part in answers that fit: the story so far in the summaries' own text, the lore's books, the world's people, and what the engine already holds.",
+    text: "Survey what there is to draw on before you prepare the story. Left without a part, it says what there is in outline: how long the chat is, how many summaries its World Info books hold at each level, its lore books, the world's people and places, and what the engine already holds. Each part then gives what it holds, in answers that fit (Settings → Story → Preparing): summaries, the story so far in the summaries' own text, the highest level first, then the lower levels newest first, with what was left out for size and how to read it; lore, each World Info book with its size and how many of its entries are always on, and with book, that book's entries; world, the world's people and places; engine, the clock, the cast, the beats and the minds; chat, the chat itself. It reads switched-off entries too, and reads only. On a chat with a history, read the summaries and the lore before you plan: the plan is refused until you have.",
+    args: [
+      { path: "part", text: "Only this part: chat, summaries, lore, world or engine. Left out: what there is, in outline." },
+      { path: "level", text: "With part summaries: only this level's summaries (volume, arc, chapter or other), in the story's order." },
+      { path: "from", text: "Where to read on from. With level: the first message, by its number in the chat. With book or part world: the first entry or person to give, from 1." },
+      { path: "to", text: "With level: the last message, by its number." },
+      { path: "summary", text: "One summary's whole text, by the id the survey gives it (c12, a3) or its book entry's id." },
+      { path: "book", text: "With part lore: one World Info book's entries, by its name or id, those always on first." }
+    ]
   },
   {
     name: PREPARE_TOOL.status,
@@ -34202,10 +34240,10 @@ var PREPARE_TOOL_TEXTS = [
     family: HARNESS_FAMILY.prepare,
     tier: "write",
     note: "Writes the preparation's plan to author/prepare.md before anything is spent. The author's alone.",
-    text: "Write the plan of the preparation before you spend: what the story is and what a prepared start must give it; whom you cast as principals; which stretches of the chat each principal relives, and why; what you fill from summaries and lore; and your estimate of what the whole preparation costs in tokens, your own work included. The engine reckons the whole too: what the preparation has spent so far, as LumiAH counts it, and the model calls the plan still takes, yours, the historian's and the principals', at what one of its calls weighs. The plan keeps the larger estimate. A stretch longer than one historian run reads is planned as several. The plan goes to author/prepare.md, which the player reads. Above the player's ceiling on the whole (Settings → Story → Preparing) it waits for their word, and nothing is relived until they give it. Calling it again changes the plan: what is recorded stays recorded.",
+    text: "Write the plan of the whole preparation before you spend, however many runs it takes: what the story is about for the player's character and what a prepared start must give it; whom you cast as principals; which stretches of the chat each principal relives, and why; what you fill from summaries and lore; and your estimate of what the whole preparation costs in tokens, your own work included. Never cut it to fit what one run may spend: the player sees its cost and decides. The engine reckons the whole too: what the preparation has spent so far, as LumiAH counts it, and the model calls the plan still takes, yours, the historian's and the principals', at what one of its calls weighs. The plan keeps the larger estimate. A stretch longer than one historian run reads is planned as several. The plan goes to author/prepare.md, which the player reads. Above the player's ceiling on the whole (Settings → Story → Preparing) it waits for their word, and nothing is relived until they give it. A plan written for what the player told you carries your answer, and waits for their word whatever their ceiling. On a chat with a history it is refused until you have read the summaries and the lore with prepare_survey, and written the story as you understand it in author/story.md. Calling it again changes the plan: what is recorded stays recorded.",
     args: [
-      { path: "about", text: "What the story is and where it stands, and what a prepared start must give it, in a few sentences." },
-      { path: "principals", text: "The principals: the few people the story turns on, each with why." },
+      { path: "about", text: "What the story is about for the player's character: the bigger picture as the lore and the summaries give it, where it stands now, and what a prepared start must give it, in a few sentences." },
+      { path: "principals", text: "The principals: the story's main characters across its whole length, wherever they are now, and everyone the player named as one, each with why." },
       { path: "principals.who", text: "A person of the world: an id or a name." },
       { path: "principals.why", text: "Why they need a mind of their own, in a sentence." },
       { path: "stretches", text: "The stretches of the chat to relive, in the chat's order. Leave it out for a new chat, or where summaries are enough." },
@@ -34213,8 +34251,12 @@ var PREPARE_TOOL_TEXTS = [
       { path: "stretches.to", text: "Its last message, by its number." },
       { path: "stretches.why", text: "Why this moment, in a sentence: what it made of the people in it." },
       { path: "stretches.who", text: "The principals who relive it: ids or names, each among the principals." },
+      { path: "stretches.key", text: "true: one of the few moments that made the story what it is. The player may relive only the key moments." },
       { path: "fills", text: "What you fill from summaries and lore rather than relive, and from where." },
-      { path: "estimate", text: "Your own estimate of what the whole preparation will cost in tokens, your own work included." }
+      { path: "estimate", text: "Your own estimate of what the whole preparation will cost in tokens, your own work included." },
+      { path: "answer", text: "Your answer to what the player told you since the plan was last written: what you changed for it, or why you kept what you kept, in a sentence or two. They read it under their words. Needed whenever they said something you haven't answered." },
+      { path: "depth", text: "The depth you recommend: outline (every principal knows the past in outline, from summaries and lore, and nothing is relived), key (those outlines, and the key moments relived by those who were in them), or all (every stretch of the plan). The engine reckons each from this plan, and the player picks. Needed where the plan has stretches." },
+      { path: "depthWhy", text: "Why that depth, in a sentence, for the player to read." }
     ]
   },
   {
@@ -34361,15 +34403,23 @@ What {{name}} knows of these times only in outline: what they would have heard o
   other(PREPARE_NOTE.turnLeft, "Preparing: what a first turn still lacks", "Follows the line above where the preparation still lacks something a first turn needs: each thing named as prepare_finish names it.", "Not prepared yet: {{left}}.", [v6("left", "what is left, each named", true)]),
   other(PREPARE_NOTE.taskHistory, "Preparing: the task for a chat with a history", "The task the player's Prepare this story gives the author's job on a chat that already has a history.", "Prepare this story for play. The chat already has a history: catch up on it as its author, and give the few people it turns on minds built from what they lived. Load the skill Preparing the story (skill_load) and use your judgement."),
   other(PREPARE_NOTE.taskNew, "Preparing: the task for a new chat", "The task the player's Prepare this story gives the author's job on a new chat.", "Prepare this new story for play: cast the few people it turns on from the world's own, and give each a core of who they are. Load the skill Preparing the story (skill_load)."),
-  other(PREPARE_NOTE.taskCarry, "Preparing: the task to carry it on", "The task of the author's job that carries a preparation on: after the player's word on its plan, or after it was stopped.", "Carry on preparing this story. Read where it stands with prepare_status first: author/prepare.md says what is done and what is left.{{word}}{{words}}", [v6("word", "the player's word on the plan, as the text below writes it; nothing when they gave none now"), v6("words", "what the player said, as the text below writes it; nothing when they said nothing")]),
-  other(PREPARE_NOTE.taskWords, "Preparing: what the player said", "Fills {{words}} of a preparation's task with the player's own words.", `
+  other(PREPARE_NOTE.taskCarry, "Preparing: the task to carry it on", "The task of the author's job that carries a preparation on: after the player's word on its plan, or after it was stopped.", "Carry on preparing this story. Read where it stands with prepare_status first: author/prepare.md says what is done and what is left.{{word}}", [v6("word", "the player's word on the plan, as the text below writes it; nothing when they gave none now")]),
+  other(PREPARE_NOTE.taskWords, "Preparing: what the player said", "Fills {{words}} of the task that revises a plan with the player's own words, each thing they said that the author hasn't answered.", `
 
 The player said: {{text}}`, [v6("text", "the player's words", true)]),
+  other(PREPARE_NOTE.taskFirst, "Preparing: what the player said first", "Follows the task that starts a preparation when the player wrote what the story is about and who matters in the first card's box.", `
+
+Before you plan, the player said this about the story and who matters in it. Take it as their word, and answer it in your plan: {{text}}`, [v6("text", "the player's words", true)]),
+  other(PREPARE_NOTE.taskRevise, "Preparing: the task to revise the plan", "The task of the author's job started when the player tells the author what to change while no run is under way: while its plan waits for their word, once it was stopped or cancelled, or after it was finished.", "The player told you what to change in the preparation of this story. Before anything else, read where it stands with prepare_status. Then write the plan again with prepare_plan for what they said: whom you cast as principals and why, the stretches each relives, what is filled from summaries and lore, and what the story is about. Give your answer with it: what you changed, or why you kept what you kept. Their words don't approve the plan: the revised plan waits for their word, whatever their ceiling. End your run with a short report once it is written.{{words}}", [v6("words", "what they said, as Preparing: what the player said writes each", true)]),
+  other(PREPARE_NOTE.taskAfresh, "Preparing: the task to start over", "The task of the author's job the player's Start over gives: the preparation planned afresh, what was recorded kept.", "Start the preparation of this story over: survey the story again, and write a new plan with prepare_plan. What was recorded already stays recorded, and the new plan keeps it. Load the skill Preparing the story (skill_load)."),
+  other(PREPARE_NOTE.runWords, "Preparing: what each run is told of its file", "Given to LumiAH with each run of the preparation, in place of its own ask that a job write its plan: the author reads it after what the run may spend, as the run begins and as it is carried on. The preparing tools keep author/prepare.md, the plan of the whole preparation, and what one run may spend (Settings → Story → Preparing) bounds that run only.", "This allowance is for this run only. author/prepare.md is the plan of the whole preparation, however many runs it takes: the preparing tools keep it, so never write or edit it yourself, and prepare_status reads where it stands. If this run ends before the preparation is finished, it carries on in a new run from that file."),
   other(PREPARE_NOTE.taskApproved, "Preparing: the player approved", "Fills {{word}} of the task that carries a preparation on, when the player approved its plan.", `
 
 The player approved the plan.{{cap}}`, [v6("cap", "their cap, as the text below writes it; nothing when they set none")]),
   other(PREPARE_NOTE.taskCap, "Preparing: the player's cap", "Fills {{cap}} where the player capped what the whole preparation may spend.", " They capped what the whole preparation may spend, all its work counted, at {{cap}} tokens.", [v6("cap", "the cap, in tokens", true)]),
-  other(PREPARE_NOTE.sayWords, "Preparing: the player speaks to it", "What a preparation that runs is told when the player says something to it.", "The player says: {{text}}", [v6("text", "the player's words", true)]),
+  other(PREPARE_NOTE.sayWords, "Preparing: the player speaks to it", "What a preparation that runs is told when the player says something to it, or when it is resumed with what they said while it was held.", `The player says: {{text}}
+
+Before you do anything else, write the plan again with prepare_plan for what they said, with your answer to it. Their words don't approve the plan: nothing more is relived until they approve it as you revised it. End your run once it is written.`, [v6("text", "the player's words", true)]),
   other(PREPARE_NOTE.sayApproved, "Preparing: the player's word, told to it", "What a preparation that still runs is told when the player approves its plan.", "The player approved the plan.{{cap}} Carry on with it.", [v6("cap", "their cap, as Preparing: the player's cap writes it; nothing when they set none")]),
   other(PREPARE_NOTE.sayCap, "Preparing: the player caps it, told to it", "What a preparation that runs is told when the player caps what it may spend.", "The player capped what the whole preparation may spend, all its work counted, at {{cap}} tokens.", [v6("cap", "the cap, in tokens", true)]),
   other(PREPARE_NOTE.sayUncapped, "Preparing: the player lifts the cap, told to it", "What a preparation that runs is told when the player lifts their cap.", "The player lifted their cap on what the preparation may spend."),
@@ -34413,7 +34463,35 @@ The player approved the plan.{{cap}}`, [v6("cap", "their cap, as the text below 
   other(PREPARE_NOTE.fileAsked, "Preparing: the file, asked", "In author/prepare.md, for a plan that waits for the player's word.", "Asked: it waits for their word."),
   other(PREPARE_NOTE.fileSaid, "Preparing: the file, what they said", "One thing the player said, in author/prepare.md.", `
 - They said: {{text}}`, [v6("text", "their words", true)]),
-  other(PREPARE_NOTE.fileNone, "Preparing: the file, nothing", "Stands in author/prepare.md where a part holds nothing.", "None.")
+  other(PREPARE_NOTE.fileNone, "Preparing: the file, nothing", "Stands in author/prepare.md where a part holds nothing.", "None."),
+  other(PREPARE_NOTE.fileRevised, "Preparing: the file, revised", "How author/prepare.md says the plan waits for the player's word because they told the author something.", "The plan is revised, or being revised, for what the player said, and waits for their word."),
+  other(PREPARE_NOTE.fileUnplanned, "Preparing: the file, no plan yet", "How author/prepare.md says the author has written no plan yet: it holds what the player said before it.", "No plan yet: the author is surveying the story."),
+  other(PREPARE_NOTE.fileAnswer, "Preparing: the file, the author's answer", "The author's answer to one thing the player said, in author/prepare.md, under their words.", `
+  The author's answer: {{answer}}`, [v6("answer", "what the author said it changed", true)]),
+  answerPrompt(PREPARE_NOTE.unanswered, "Preparing: the player's words come first", "A preparing tool's answer while the player has told the author something it hasn't answered: the plan is written again first.", "The player told you something you haven't answered: {{said}} Write the plan again with prepare_plan first, with your answer to it. Nothing more is relived until they approve the plan as you revised it. Nothing was changed.", [v6("said", "what they said", true)]),
+  answerPrompt(PREPARE_NOTE.needAnswer, "Preparing: the plan needs an answer", "prepare_plan's answer to a plan with no answer while the player has told the author something it hasn't answered.", "The player told you something you haven't answered: {{said}} Write the plan with it in mind, and give answer: what you changed for it, or why you kept what you kept. Nothing was written.", [v6("said", "what they said", true)]),
+  answerPrompt(PREPARE_NOTE.waitsRevised, "Preparing: the revised plan waits for the player", "What prepare_plan says, and what prepare_relive refuses with, while a plan revised for what the player said waits for their word.", "The plan is revised for what the player said, and waits for their word, whatever their ceiling: nothing is relived until they give it. End your run now with a short report of what you changed. The preparation carries on from author/prepare.md when they answer."),
+  answerPrompt(PREPARE_NOTE.surveyFirst, "Preparing: survey first", "prepare_plan's answer on a chat with a history before the survey's summaries and lore were read in this preparation.", "Survey first: read {{parts}} with prepare_survey before you write the plan, so you know what the story is about and whom it turns on. Nothing was written.", [v6("parts", "what is still to read: the summaries (part summaries), the lore (part lore), or both", true)]),
+  answerPrompt(PREPARE_NOTE.storyFirst, "Preparing: the story first", "prepare_plan's answer on a chat with a history while author/story.md holds nothing: the story as the author understands it is written first.", "Write the story as you understand it in author/story.md first: what it is about for the player's character and the bigger picture the lore gives; what happened, in order; who the main characters are, and what each knows and wants now. The plan is written from it, and every later run reads it first. Nothing was written."),
+  answerPrompt(PREPARE_NOTE.surveyOutline, "Preparing: the survey in outline", "Ends prepare_survey's answer without a part: how to read each part.", "That is what there is, in outline. Read each part with part: summaries for the story so far, lore for the books that frame it, world for its people, engine for what the engine holds, chat for the chat. On a chat with a history, read the summaries and the lore before you plan, and keep what you learn in author/story.md."),
+  answerPrompt(PREPARE_NOTE.surveyNone, "Preparing: no summaries", "prepare_survey's summaries part on a chat whose World Info books hold no summary of it.", "The chat's World Info books hold no summary of it. Before you plan, read the chat in outline with chat_outline, and closely with chat_read and chat_around where it matters."),
+  answerPrompt(PREPARE_NOTE.surveyOrder, "Preparing: the summaries as given", "Leads prepare_survey's summaries part: in what order they come, and within what size.", "The story so far, in the summaries' own text: the highest level first, then the lower levels newest first, each whole, within {{size}} characters (Settings → Story → Preparing).", [v6("size", "the most one answer gives", true)]),
+  answerPrompt(PREPARE_NOTE.surveyLeft, "Preparing: summaries left out for size", "Ends prepare_survey's summaries part when some didn't fit: what was left out, and how to read it.", "Left out for size: {{left}}. Read one with summary and its id, or several in a row with level, from and to.", [v6("left", "each level's summaries left out, by id and messages", true)]),
+  answerPrompt(PREPARE_NOTE.surveyMore, "Preparing: more follows", "Ends one of prepare_survey's answers that gave as much as fits: where to read on.", "More follows: call again with from {{next}}.", [v6("next", "where to read on from", true)]),
+  answerPrompt(PREPARE_NOTE.surveyEnd, "Preparing: nothing more", "Ends one of prepare_survey's answers that gave all there was.", "That is all of it."),
+  answerPrompt(PREPARE_NOTE.surveyNoSummary, "Preparing: no such summary", "prepare_survey's answer for a summary id it doesn't know.", "No summary goes by {{id}}. part summaries lists them.", [v6("id", "the id asked for", true)]),
+  answerPrompt(PREPARE_NOTE.surveyNoBook, "Preparing: no such book", "prepare_survey's answer for a World Info book this chat doesn't read.", "No World Info book this chat reads goes by {{book}}. part lore lists them.", [v6("book", "the book asked for", true)]),
+  answerPrompt(PREPARE_NOTE.surveyBooks, "Preparing: the lore's books", "Ends prepare_survey's lore part: how to read a book.", "Read a book's entries with book and its name, those always on first: the books the player names, and those that frame the story, before you say what it is about."),
+  answerPrompt(PREPARE_NOTE.notChosen, "Preparing: a stretch not chosen", "prepare_relive's answer for a stretch outside the depth the player chose.", "Stretch {{stretch}} isn't in the depth the preparation goes to ({{depth}}). It stays in the plan, not chosen, and is opened only if the player goes deeper. Nothing was opened.", [stretch, v6("depth", "the depth, as the three depth texts name it", true)]),
+  answerPrompt(PREPARE_NOTE.needDepth, "Preparing: say which depth", "prepare_plan's answer to a plan with stretches that recommends no depth.", "Say which depth you recommend (depth: outline, key or all) and why (depthWhy): the engine reckons each, and the player picks. Nothing was written."),
+  answerPrompt(PREPARE_NOTE.depthOffered, "Preparing: a depth the plan doesn't offer", "prepare_plan's answer to a depth the plan can't go to: key moments with no stretch marked key, or reliving with no stretch at all.", "This plan doesn't offer {{depth}}: it offers {{offered}}. Mark the key stretches (stretches.key), or recommend a depth it offers. Nothing was written.", [v6("depth", "the depth asked for", true), v6("offered", "the depths it offers", true)]),
+  other(PREPARE_NOTE.sayDepth, "Preparing: the player goes deeper, told to it", "What a preparation that runs is told when the player raises the depth it goes to.", "The player chose {{depth}}. Open the stretches it adds, in the chat's order, after what is under way.", [v6("depth", "the depth, as the three depth texts name it", true)]),
+  other(PREPARE_NOTE.fileDepth, "Preparing: the file, the depth", "The depth in author/prepare.md: the one it goes to, and the author's recommendation.", `
+Depth: {{depth}}. The author recommends {{recommended}}: {{why}}`, [v6("depth", "the depth it goes to", true), v6("recommended", "the depth the author recommends", true), v6("why", "why, as the author wrote it")]),
+  other(PREPARE_NOTE.fileStateUnchosen, "Preparing: the file, a stretch not chosen", "A planned stretch outside the depth the preparation goes to, in author/prepare.md.", "not chosen"),
+  other(PREPARE_NOTE.depthOutline, "Preparing: the depth, outlines only", "Names the depth where every principal knows the past in outline and nothing is relived.", "outlines only"),
+  other(PREPARE_NOTE.depthKey, "Preparing: the depth, key moments", "Names the depth where the key moments are relived as well.", "key moments"),
+  other(PREPARE_NOTE.depthAll, "Preparing: the depth, everything planned", "Names the depth where every stretch of the plan is relived.", "everything planned")
 ];
 
 // src/shared/harness-texts-record.ts
@@ -48712,7 +48790,7 @@ var BUDGET_SCHEMA = {
   description: "What this agent may spend on one message it is sent. A limit that stops it says so in the live view.",
   type: "object",
   properties: {
-    callTokensIn: limit2("Prompt per call", "The most one call may send, in tokens, as estimated before it is sent. A call past it isn't made.", "tokens"),
+    callTokensIn: limit2("Prompt per call", "The most one call may send, in tokens, as estimated before it is sent. A call past it isn't made. A tool result that would take the next call past it reaches the model cut to the room left, and the rest waits for scratch_read.", "tokens"),
     callTokensOut: whole4("Answer per call", "The most one call may write, its reasoning included (max_tokens). The writer's is the request's own where the request names one.", 1, "tokens"),
     callMs: limit2("Time per call", "How long one call may take before it is given up.", "ms"),
     callTools: limit2("Tool calls per answer", "The most tools one answer may call. Calls past it aren't run, and the model is told.", "calls"),
@@ -48828,11 +48906,11 @@ var SETTINGS_SCHEMA = {
       type: "object",
       properties: {
         repeats: whole4("Loop detector", "An agent that makes the same tool call, on the same state, this many times in a row is stopped.", 2, "calls"),
-        clipChars: whole4("Tool results clipped past", "A tool result longer than this reaches the model clipped; scratch_read reads the rest.", 200, "characters"),
+        clipChars: whole4("Tool results clipped past", "A tool result longer than this reaches the model clipped; scratch_read reads the rest. A tool that bounds its own answer by a setting of its own, meant to be read in one go, is clipped only past that instead.", 200, "characters"),
         thinkingInToolLoops: flag3("Thinking in tool loops", "Let a model reason on calls that offer tools. Turn it off for a connection that fails when a reasoning model's thinking must be sent back after a tool call."),
         stream: flag3("Streaming", "Take every answer as the provider streams it, so a long answer's connection is never idle. The writer's reply streams either way."),
         charsPerToken: { title: "Characters per token", description: "For token estimates made before a provider reports its own count: budgets, and the length of the main agent's notes.", type: "number", minimum: 1, maximum: 8 },
-        retries: whole4("Retries", "A model call that fails in passing (a timeout, a rate limit, a provider error in the 500s, a stream that drops) is made again up to this many times, each shown in the live view. Never once part of the reply has reached you, and never a call one of your own limits stopped. 0 turns retries off.", 0, "retries"),
+        retries: whole4("Retries", "A model call that fails in passing (a timeout, a rate limit, a provider error in the 500s, a stream that drops, an answer that arrives garbled) is made again up to this many times, each shown in the live view. Never once part of the reply has reached you, and never a call one of your own limits stopped. 0 turns retries off.", 0, "retries"),
         retryWaitMs: whole4("Wait before a retry", "How long to wait before a failed call is made again. The agent's and the turn's time limits still run while it waits.", 0, "ms", TIMER_MAX_MS2),
         answerFloor: whole4("Least answer room", "A call isn't made with less room for its answer than this. An agent whose answer tokens (its own, or its turn's) are that close to spent stops and says so, instead of writing an answer that would be cut.", 1, "tokens"),
         warnRounds: whole4("Rounds left warning", "An agent is told when it has this many rounds of tool calls left, so it can finish with what it has. 0 for never.", 0, "rounds"),
@@ -73032,32 +73110,36 @@ var STRETCH_CHOICES = [60, 360, 720, 1440, 2880, 4320, 10080, 20160, 43200, 5256
 var PREPARE_STATE_WORDS = {
   none: { title: "Prepare this story", tone: "info" },
   planning: { title: "The author is planning", tone: "info" },
+  revising: { title: "The author is revising its plan", tone: "info" },
   waiting: { title: "The author's plan waits for you", tone: "warn" },
   running: { title: "Preparing the story", tone: "info" },
   paused: { title: "Preparing is paused", tone: "warn" },
   done: { title: "The story is prepared", tone: "info" },
   cancelled: { title: "Preparing was cancelled", tone: "warn" },
-  failed: { title: "Preparing stopped", tone: "neg" }
+  failed: { title: "Preparing stopped", tone: "neg" },
+  unreachable: { title: "The story's preparation can't be reached", tone: "warn" }
 };
 function prepareShown(view) {
   if (view === null)
     return false;
   if (view.offer !== null)
     return true;
-  return view.state === "planning" || view.state === "waiting" || view.state === "running" || view.state === "paused" || view.state === "failed";
+  return view.state === "planning" || view.state === "revising" || view.state === "waiting" || view.state === "running" || view.state === "paused" || view.state === "failed" || view.state === "cancelled";
+}
+function prepareQuiet(view) {
+  return view !== null && view.state === "done";
 }
 function prepareBusy(state) {
-  return state === "planning" || state === "running";
+  return state === "planning" || state === "revising" || state === "running";
 }
 function tokensText(tokens) {
   return `${Math.round(tokens).toLocaleString("en-US")} tokens`;
 }
-function prepareProgress(view) {
-  const stretches = view.plan?.stretches ?? [];
-  if (stretches.length === 0)
-    return null;
-  return { done: stretches.filter((s3) => s3.state === "recorded" || s3.state === "dropped").length, total: stretches.length };
-}
+var DEPTH_WORDS = {
+  outline: { label: "Outlines only", help: "Every principal knows the past in outline, from the summaries and the lore, with their core. Nothing is relived." },
+  key: { label: "Key moments", help: "The outlines, and the few moments that made the story what it is, relived by those who were in them." },
+  all: { label: "Everything planned", help: "Every stretch of the plan, relived." }
+};
 var STRETCH_STATE_WORDS = { planned: "Planned", open: "Being recorded", recorded: "Relived", dropped: "Filled from summaries" };
 function capOf(text2) {
   const t3 = text2.replace(/[,\s_]/g, "");
@@ -79244,9 +79326,15 @@ var PREPARE_WORDS = {
   askAboveTokens: { label: "Ask first above", help: "A plan reckoned to cost more than this in all, the author's own work included, waits for your word before anything is relived. 0: every plan waits.", unit: "tokens", step: 1e4 },
   reliveAtOnce: { label: "Principals reliving at once", help: "How many principals may have moments to relive at the same time.", unit: "principals", step: 1 },
   beatsPerStretch: { label: "Beats in a stretch", help: "The most beats the historian records for one stretch.", unit: "beats", step: 5 },
-  readChars: { label: "One read of a stretch", help: "The most of the chat one read of a stretch gives.", unit: "characters", step: 1000 },
+  readChars: { label: "One read of a stretch", help: "The most of the chat one read of a stretch gives the historian, whole. Larger means fewer reads, so fewer model calls, but each read stays in the historian's prompt and is sent again with every later call. 60,000 characters is about 19,000 tokens. Lower it for a model with a short context; raise it for one with a long context. The historian's prompt stops at its Prompt per call, under Harness → Agents: 160,000 tokens as shipped, for a model that reads 200,000. Set it about 40,000 under what your model reads. At that limit a read is cut to the room left, the historian is told, and it records what it has and ends its run.", unit: "characters", step: 1000 },
   textChars: { label: "Each text of the plan", help: "What the story is, why a stretch or a principal, what is filled from summaries.", unit: "characters", step: 100 },
-  callTokens: { label: "A model call, before one is measured", help: "Every call of the preparation sends its agent's whole prompt again, so a plan is reckoned at its calls times what one weighs. That weight is measured from the preparation's own calls, or from this chat's last author run; until either is known, it is this.", unit: "tokens", step: 5000 }
+  callTokens: { label: "A model call, before one is measured", help: "Every call of the preparation sends its agent's whole prompt again, so a plan is reckoned at its calls times what one weighs. That weight is measured from the preparation's own calls, or from this chat's last author run; until either is known, it is this.", unit: "tokens", step: 5000 },
+  surveyChars: { label: "One answer of the survey", help: "The most one answer gives the author, whole, when it surveys the story: the summaries' own text and the lore's, the rest named with how to read it. Larger means fewer answers, so fewer model calls, but each answer stays in the author's prompt and is sent again with every later call. 60,000 characters is about 19,000 tokens. Lower it for a model with a short context; raise it for one with a long context. The author's prompt stops at its Prompt per call, under Harness → Agents: 160,000 tokens as shipped, for a model that reads 200,000. Set it about 40,000 under what your model reads. At that limit an answer is cut to the room left, the author is told, and it writes what it has to its files and ends its run.", unit: "characters", step: 1000 },
+  watchSeconds: { label: "The live view asks every", help: "While a run of the preparation is at work, the view of it on Play → Now asks how it stands this often. It stops asking once nothing runs.", unit: "seconds", step: 1 },
+  watchRuns: { label: "Runs the live view looks through", help: "The most of this chat's latest runs the live view reads each time it asks. Each principal relives in runs of their own, so a long preparation starts many: past this many, its oldest runs aren't shown.", unit: "runs", step: 10 },
+  runMinutes: { label: "Time for one run", help: "How long one run of the preparation may work. When a run ends with work left, the next one starts by itself, as long as the plan has your word, nothing waits for you, you haven't paused or cancelled it, and your cap allows. A run has no token limit of its own: your cap holds what the whole preparation spends.", unit: "minutes", step: 5 },
+  runRounds: { label: "Rounds for one run", help: "How many rounds of tool calls one run of the preparation has: the author's and those of the agents it starts, together. Each agent's own limits in LumiAH still stand.", unit: "rounds", step: 10 },
+  idleRuns: { label: "Runs without progress", help: "When this many runs it started on its own end in a row without moving the preparation forward, it stops carrying on by itself and says why. Carry on starts it again.", unit: "runs", step: 1 }
 };
 function storyChanged(story) {
   const d3 = STORY_DEFAULTS;
@@ -121933,6 +122021,650 @@ function QuickActions(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/shared/story-pages.ts
+var PREPARE_DEPTHS = ["outline", "key", "all"];
+
+// src/frontend/story/prepare-live.tsx
+var STAGE_WORDS3 = {
+  reading: "Reading the story",
+  planning: "Planning",
+  waiting: "Waiting for your word",
+  reliving: "Reliving",
+  filling: "Filling in the rest",
+  scene: "Setting the scene",
+  ready: "Ready"
+};
+var STAGE_ICON = { done: "check", now: "hourglass", ahead: "clock", skipped: "minus" };
+var RUN_STATE_WORDS = {
+  queued: { word: "Waiting", tone: "neutral" },
+  running: { word: "At work", tone: "accent" },
+  paused: { word: "Held", tone: "warn" },
+  failed: { word: "Failed", tone: "neg" },
+  interrupted: { word: "Cut off", tone: "neg" },
+  spent: { word: "Out of budget", tone: "warn" },
+  off_path: { word: "Stopped", tone: "neg" },
+  cancelled: { word: "Cancelled", tone: "neutral" }
+};
+var STOPPED_WORDS = {
+  failed: "It failed.",
+  interrupted: "A restart cut it off.",
+  spent: "It used all it may spend.",
+  off_path: "The reply it worked for is gone."
+};
+var AUTHOR_DOING = {
+  reading: "Reading the story so far",
+  planning: "Revising the plan with what you said",
+  waiting: "Waiting for your word",
+  reliving: "Opening stretches and starting who relives them",
+  filling: "Writing outlines and profiles",
+  scene: "Setting the scene",
+  ready: "Closing the preparation"
+};
+var plural = (n8, one, many) => `${n8.toLocaleString("en-US")} ${n8 === 1 ? one : many}`;
+function spanText(ms) {
+  const minutes2 = Math.floor(Math.max(0, ms) / 60000);
+  if (minutes2 < 1)
+    return "under a minute";
+  if (minutes2 < 60)
+    return `${minutes2} min`;
+  const hours = Math.floor(minutes2 / 60);
+  if (hours < 24)
+    return minutes2 % 60 === 0 ? `${hours} h` : `${hours} h ${minutes2 % 60} min`;
+  const days = Math.floor(hours / 24);
+  return hours % 24 === 0 ? plural(days, "day", "days") : `${plural(days, "day", "days")} ${hours % 24} h`;
+}
+function clockText2(at2, now) {
+  const when2 = new Date(at2);
+  const time = when2.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  return when2.toDateString() === new Date(now).toDateString() ? time : `${when2.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}, ${time}`;
+}
+function whoText2(r3, names) {
+  if (r3.role === "author")
+    return "The author";
+  if (r3.role === "historian")
+    return "The historian";
+  if (r3.role === "principal" && r3.who)
+    return nameIn2(names, r3.who);
+  return STORY_AGENTS.find((a3) => a3.id === r3.agent)?.label ?? r3.agent ?? "An agent";
+}
+var messagesText = (s3) => `messages ${s3.from} to ${s3.to}`;
+function stretchWords(s3, names) {
+  const head = `${s3.id}${s3.key ? " (a key moment)" : ""}, ${messagesText(s3)}`;
+  const beats = plural(s3.beats, "beat", "beats");
+  const who3 = (ids) => andList2(ids.map((id) => nameIn2(names, id)));
+  switch (s3.state) {
+    case "waiting":
+      return `${head}: not opened yet${s3.relivers.length > 0 ? `, for ${who3(s3.relivers)}` : ""}.`;
+    case "reading":
+      return `${head}: the historian records it, ${beats} so far${s3.through !== null ? `, through #${s3.through}` : ""}.`;
+    case "reliving": {
+      const through = s3.relived ?? [];
+      const left = s3.relivers.filter((p3) => !through.includes(p3));
+      return `${head}: ${beats}. Being relived by ${who3(left)}; ${through.length} of ${s3.relivers.length} through.`;
+    }
+    case "done":
+      return `${head}: ${beats}. ${s3.relivers.length === 0 ? "It reached none of the principals." : `Relived by ${who3(s3.relivers)}.`}`;
+    case "recorded":
+      return `${head}: ${beats}. This file doesn't say who has relived it.`;
+    case "left":
+      return `${head}: left out at the depth chosen, so not relived.`;
+    case "dropped":
+      return `${head}: dropped, filled from summaries instead.`;
+  }
+}
+var GROUPS6 = [
+  { state: "reading", label: "Being read" },
+  { state: "reliving", label: "Being relived" },
+  { state: "waiting", label: "Waiting" },
+  { state: "recorded", label: "Recorded" },
+  { state: "done", label: "Done" },
+  { state: "left", label: "Left out" },
+  { state: "dropped", label: "Dropped" }
+];
+function stretchGroups(stretches) {
+  return GROUPS6.map((g2) => ({ ...g2, stretches: stretches.filter((s3) => s3.state === g2.state) })).filter((g2) => g2.stretches.length > 0);
+}
+function principalWords(p3) {
+  const relived = p3.relived === null ? `${plural(p3.planned, "stretch", "stretches")} to relive; this file doesn't say how many are relived` : `${p3.relived} of ${plural(p3.planned, "stretch", "stretches")} relived`;
+  const outline = p3.outline === null ? null : p3.outline ? "outline written" : "no outline yet";
+  return [relived, outline, p3.profile ? "profile written" : "no profile yet"].filter((part) => part !== null).join(" · ");
+}
+function fixWords(r3) {
+  const day = r3.state === "spent" && r3.stoppedAt === "day";
+  if (r3.role === "author")
+    return day ? "It goes on once the day's spending limit allows it: Carry on then." : "Carry on starts it again from its file.";
+  if (day)
+    return "It goes on once the day's spending limit allows it: in the Harness tab, Agents, then Jobs.";
+  if (r3.state === "spent")
+    return "Grant it more in the Harness tab: Agents, then Jobs.";
+  return "Start it again in the Harness tab: Agents, then Jobs.";
+}
+function runWords(r3, live, now) {
+  const stretch2 = r3.stretch !== null ? live.stretches.find((s3) => s3.id === r3.stretch) ?? null : null;
+  const doing = r3.role === "author" ? AUTHOR_DOING[live.stage] : r3.role === "historian" ? stretch2 !== null ? `Recording ${stretch2.id}, ${messagesText(stretch2)}: ${plural(stretch2.beats, "beat", "beats")} so far` : "Recording a stretch" : r3.role === "principal" ? stretch2 !== null ? `Reliving ${stretch2.id}, ${messagesText(stretch2)}` : "Reliving what reached them" : "At work for the preparation";
+  const inside2 = r3.inside !== null ? ", inside the author's run" : "";
+  const when2 = r3.state === "running" ? r3.since !== null ? `For ${spanText(now - r3.since)}${inside2}` : `At work${inside2}` : r3.state === "queued" ? `Waiting for its place since ${clockText2(r3.since ?? now, now)}` : r3.state === "paused" ? `Held${inside2}` : `Stopped at ${clockText2(r3.endedAt ?? r3.since ?? now, now)}`;
+  const used2 = r3.used === null ? "Its use is counted in the author's run" : `${tokensText(r3.used.tokens)} in ${plural(r3.used.calls, "call", "calls")}`;
+  const stopped = r3.state === "failed" || r3.state === "interrupted" || r3.state === "spent" || r3.state === "off_path";
+  return { title: whoText2(r3, live.names), doing, when: when2, used: used2, problem: stopped ? `${r3.reason ?? STOPPED_WORDS[r3.state] ?? ""} ${fixWords(r3)}`.trim() : null };
+}
+function trailWords(e3, names) {
+  const name2 = e3.who !== undefined ? nameIn2(names, e3.who) : "";
+  const s3 = e3.stretch ?? "a stretch";
+  const run = whoText2(e3, names);
+  const stretches = e3.count != null ? `: ${plural(e3.count, "stretch", "stretches")}` : "";
+  switch (e3.what) {
+    case "planned":
+      return `The author wrote the plan${stretches}.`;
+    case "revised":
+      return `The author revised the plan${stretches}.`;
+    case "said":
+      return `You told the author: "${e3.text ?? ""}"`;
+    case "answered":
+      return `The author answered: "${e3.text ?? ""}"`;
+    case "approved":
+      return "You approved the plan.";
+    case "depth":
+      return e3.count != null ? `You chose how deep it goes, reckoned at ${tokensText(e3.count)}.` : "You chose how deep it goes.";
+    case "cap":
+      return e3.count != null ? `You capped what it may spend at ${tokensText(e3.count)}.` : "You took the cap off.";
+    case "opened":
+      return `${s3} opened for the historian.`;
+    case "recorded":
+      return e3.count != null ? `${s3} recorded: ${plural(e3.count, "beat", "beats")}.` : `${s3} recorded.`;
+    case "dropped":
+      return `${s3} dropped: filled from summaries instead.`;
+    case "relived":
+      return `${name2} relived ${s3}.`;
+    case "outlined":
+      return `${name2}'s outline written.`;
+    case "profiled":
+      return `${name2}'s profile written.`;
+    case "paused":
+      return "Paused.";
+    case "resumed":
+      return "Carried on.";
+    case "cancelled":
+      return "Cancelled.";
+    case "carried":
+      return e3.text ? `A run ended, and the next started by itself: ${e3.text}` : "A run ended, and the next started by itself.";
+    case "stopped":
+      return e3.text ?? "It stopped.";
+    case "reopened":
+      return "Opened again.";
+    case "finished":
+      return "The preparation finished.";
+    case "run_started":
+      return `${run}'s run began.`;
+    case "run_ended":
+      return `${run}'s run ended.`;
+    case "run_stopped":
+      return e3.text ? `${run}'s run stopped: ${e3.text}` : `${run}'s run stopped.`;
+    case "run_cancelled":
+      return `${run}'s run was cancelled.`;
+    case "run_again":
+      return `${run}'s run was started again.`;
+  }
+}
+function nowLine(live) {
+  switch (live.going) {
+    case "done":
+      return "Prepared. The first reply starts from it.";
+    case "held":
+      return "Held. Nothing moves until you carry it on.";
+    case "waiting":
+      return "The plan waits for your word: go ahead with it, tell the author what to change, or cap it.";
+    case "stopped":
+      return "Nothing is running now. Carry on goes on from where it stopped.";
+    case "queued":
+      return "A run waits for its place, then it goes on.";
+    case "running":
+      break;
+  }
+  switch (live.stage) {
+    case "reading":
+      return "The author is reading the story so far, and writes the plan once it has read enough.";
+    case "planning":
+      return "The author is revising the plan with what you said.";
+    case "waiting":
+      return "The plan waits for your word.";
+    case "reliving": {
+      const read = live.stretches.find((s3) => s3.state === "reading");
+      const relived = live.stretches.filter((s3) => s3.state === "reliving");
+      const parts = [];
+      if (read)
+        parts.push(`The historian records ${read.id}, ${messagesText(read)}.`);
+      const first = relived[0];
+      if (first) {
+        const left = first.relivers.filter((p3) => !(first.relived ?? []).includes(p3));
+        parts.push(`${andList2(left.map((id) => nameIn2(live.names, id)))} ${left.length === 1 ? "relives" : "relive"} ${first.id}${relived.length > 1 ? `, with ${plural(relived.length - 1, "more stretch", "more stretches")} being relived` : ""}.`);
+      }
+      const next = live.stretches.find((s3) => s3.state === "waiting");
+      if (parts.length === 0)
+        parts.push(next ? `Next: ${next.id}, ${messagesText(next)}.` : "The principals take in what was recorded.");
+      return parts.join(" ");
+    }
+    case "filling": {
+      const all = live.principals.length;
+      const profiles = live.principals.filter((p3) => p3.profile).length;
+      if (live.kind === "new")
+        return `The author writes each principal's profile: ${profiles} of ${all} written.`;
+      return `The author writes what each principal knows: ${live.principals.filter((p3) => p3.outline === true).length} of ${all} outlines and ${profiles} of ${all} profiles written.`;
+    }
+    case "scene":
+      return live.scene && live.notebook ? "The author is closing the preparation." : "The author sets the scene and writes its notebook.";
+    case "ready":
+      return "Prepared.";
+  }
+}
+function progressOf2(live) {
+  const planned = live.stretches.filter((s3) => s3.state !== "dropped" && s3.state !== "left");
+  if (planned.length > 0) {
+    const recorded = planned.filter((s3) => s3.state === "reliving" || s3.state === "done" || s3.state === "recorded").length;
+    return { label: `${recorded} of ${plural(planned.length, "stretch", "stretches")} recorded`, value: recorded, max: planned.length };
+  }
+  const stages = live.stages.filter((s3) => s3.state !== "skipped");
+  const done = stages.filter((s3) => s3.state === "done").length;
+  return { label: `${done} of ${plural(stages.length, "stage", "stages")} done`, value: done, max: stages.length };
+}
+function skippedWords(id, live) {
+  if (id === "waiting")
+    return "not needed: within your ceiling";
+  if (id === "reliving")
+    return live.kind === "new" ? "nothing to relive in a new story" : live.depth?.chosen === "outline" ? "outlines only, as chosen" : "the plan relives nothing";
+  return "not needed";
+}
+var NO_ONE = {
+  running: "No run is at work.",
+  queued: "A run waits for its place.",
+  held: "No one is at work: it is held.",
+  waiting: "No one is at work: the plan waits for your word.",
+  stopped: "No one is at work: nothing is running.",
+  done: "No one is at work: it is done."
+};
+function nextAsk(view) {
+  return view !== null && view.live ? view.every * 1000 : null;
+}
+function watchPreparation(io) {
+  let last = null;
+  let cancel = null;
+  let stopped = false;
+  const round2 = async () => {
+    const view = await io.ask();
+    if (stopped)
+      return;
+    if (view !== null) {
+      last = view;
+      io.show(view);
+    }
+    const wait = nextAsk(last);
+    if (wait !== null)
+      cancel = io.later(wait, () => void round2());
+  };
+  round2();
+  return () => {
+    stopped = true;
+    cancel?.();
+  };
+}
+var OPEN_KEY = "lre:prepare-live:";
+function PrepareLiveBody(props) {
+  const live = props.view.prep;
+  if (live === null)
+    return null;
+  const { now } = props;
+  const bar = progressOf2(live);
+  return /* @__PURE__ */ u3("section", {
+    class: "lre-prep-live",
+    "data-lre-prep-live": live.stage,
+    "data-lre-going": live.going,
+    "aria-label": "The preparation as it runs",
+    children: [
+      /* @__PURE__ */ u3("p", {
+        class: "lre-prep-live-now",
+        children: [
+          /* @__PURE__ */ u3("strong", {
+            children: [
+              STAGE_WORDS3[live.stage],
+              "."
+            ]
+          }, undefined, true, undefined, this),
+          " ",
+          nowLine(live)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Meter, {
+        label: bar.label,
+        value: bar.value,
+        max: bar.max,
+        tone: live.going === "done" ? "pos" : "accent"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Disclosure, {
+        summary: "The whole preparation",
+        open: props.open,
+        onToggle: props.onToggle,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-prep-live-whole",
+          children: [
+            /* @__PURE__ */ u3("div", {
+              class: "lre-prep-live-col",
+              children: [
+                stagesBlock(live),
+                runsBlock(live, now, props.onWatch),
+                costBlock(live, now)
+              ]
+            }, undefined, true, undefined, this),
+            /* @__PURE__ */ u3("div", {
+              class: "lre-prep-live-col",
+              children: [
+                progressBlock(live, now),
+                trailBlock(live, now)
+              ]
+            }, undefined, true, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function stagesBlock(live) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-prep-live-block",
+    "data-lre-live": "stages",
+    children: [
+      /* @__PURE__ */ u3("h4", {
+        children: "Where it stands"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("ol", {
+        class: "lre-prep-live-stages",
+        children: live.stages.map((s3) => /* @__PURE__ */ u3("li", {
+          "data-lre-stage": s3.id,
+          "data-state": s3.state,
+          "aria-current": s3.state === "now" ? "step" : undefined,
+          children: [
+            /* @__PURE__ */ u3(Icon, {
+              name: STAGE_ICON[s3.state],
+              size: 16
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("span", {
+              class: "lre-prep-live-stage",
+              children: STAGE_WORDS3[s3.id]
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("span", {
+              class: "lre-prep-live-stage-state",
+              children: s3.state === "done" ? "done" : s3.state === "now" ? "now" : s3.state === "ahead" ? "to come" : skippedWords(s3.id, live)
+            }, undefined, false, undefined, this)
+          ]
+        }, s3.id, true, undefined, this))
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function runsBlock(live, now, onWatch) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-prep-live-block",
+    "data-lre-live": "runs",
+    children: [
+      /* @__PURE__ */ u3("h4", {
+        children: "Who is at work"
+      }, undefined, false, undefined, this),
+      live.runs.length === 0 ? /* @__PURE__ */ u3("p", {
+        class: "lre-story-note",
+        children: NO_ONE[live.going]
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(List, {
+        children: live.runs.map((r3) => {
+          const words3 = runWords(r3, live, now);
+          const badge = RUN_STATE_WORDS[r3.state];
+          return /* @__PURE__ */ u3(ListRow, {
+            row: `run:${r3.role}:${r3.id}`,
+            title: words3.title,
+            subtitle: /* @__PURE__ */ u3(M, {
+              children: [
+                /* @__PURE__ */ u3("span", {
+                  class: "lre-prep-live-run-line",
+                  children: `${words3.doing}. ${words3.when}.`
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("span", {
+                  class: "lre-prep-live-run-line",
+                  children: [
+                    words3.used,
+                    "."
+                  ]
+                }, undefined, true, undefined, this),
+                words3.problem !== null ? /* @__PURE__ */ u3("span", {
+                  class: "lre-prep-live-run-line lre-story-problem",
+                  children: words3.problem
+                }, undefined, false, undefined, this) : null
+              ]
+            }, undefined, true, undefined, this),
+            badge: /* @__PURE__ */ u3(Badge, {
+              tone: badge.tone,
+              children: badge.word
+            }, undefined, false, undefined, this)
+          }, `${r3.role}:${r3.id}`, false, undefined, this);
+        })
+      }, undefined, false, undefined, this),
+      live.going === "running" || live.going === "queued" ? /* @__PURE__ */ u3("div", {
+        class: "lre-prep-live-actions",
+        children: /* @__PURE__ */ u3(Button, {
+          size: "sm",
+          icon: HARNESS_MODE.icon,
+          onClick: onWatch,
+          children: "Watch it work"
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function progressBlock(live, now) {
+  const groups = stretchGroups(live.stretches);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-prep-live-block",
+    "data-lre-live": "progress",
+    children: [
+      /* @__PURE__ */ u3("h4", {
+        children: "How far along"
+      }, undefined, false, undefined, this),
+      live.depth !== null ? /* @__PURE__ */ u3("p", {
+        class: "lre-story-note",
+        children: `Depth: ${DEPTH_WORDS[live.depth.chosen].label}, ${live.depth.picked ? "as you chose" : "as the author recommends"}.${live.stretches.some((s3) => s3.state === "left") ? ` ${plural(live.stretches.filter((s3) => s3.state === "left").length, "stretch is", "stretches are")} left out at it.` : ""}`
+      }, undefined, false, undefined, this) : null,
+      groups.length === 0 ? /* @__PURE__ */ u3("p", {
+        class: "lre-story-note",
+        children: live.stage === "reading" ? "The plan isn't written yet." : "The plan relives no stretch of the chat."
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+        class: "lre-prep-live-scroll",
+        role: "region",
+        "aria-label": "Stretches",
+        tabIndex: 0,
+        children: groups.map((g2) => /* @__PURE__ */ u3(Disclosure, {
+          summary: `${g2.label} (${g2.stretches.length})`,
+          defaultOpen: g2.state === "reading" || g2.state === "reliving",
+          children: /* @__PURE__ */ u3("ul", {
+            class: "lre-prep-live-list",
+            children: g2.stretches.map((s3) => /* @__PURE__ */ u3("li", {
+              "data-lre-stretch": s3.state,
+              children: stretchWords(s3, live.names)
+            }, s3.id, false, undefined, this))
+          }, undefined, false, undefined, this)
+        }, g2.state, false, undefined, this))
+      }, undefined, false, undefined, this),
+      !live.reach ? /* @__PURE__ */ u3("p", {
+        class: "lre-story-note",
+        children: "This preparation's file is older: it doesn't say whom each stretch reached or who has relived it."
+      }, undefined, false, undefined, this) : live.relivedAt !== null ? /* @__PURE__ */ u3("p", {
+        class: "lre-story-note",
+        children: `Who has relived what is as last checked at ${clockText2(live.relivedAt, now)}.`
+      }, undefined, false, undefined, this) : null,
+      live.principals.length > 0 ? /* @__PURE__ */ u3(List, {
+        children: live.principals.map((p3) => /* @__PURE__ */ u3(ListRow, {
+          row: `principal:${p3.id}`,
+          title: nameIn2(live.names, p3.id),
+          subtitle: principalWords(p3),
+          badge: p3.atWork ? /* @__PURE__ */ u3(Badge, {
+            tone: "accent",
+            children: "Reliving now"
+          }, undefined, false, undefined, this) : undefined
+        }, p3.id, false, undefined, this))
+      }, undefined, false, undefined, this) : null,
+      live.messages !== null ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-prep-live-figures",
+            children: [
+              /* @__PURE__ */ u3(Stat, {
+                label: "Relived",
+                value: live.messages.relived.toLocaleString("en-US")
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Stat, {
+                label: "Filled from summaries",
+                value: live.messages.filled.toLocaleString("en-US")
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Stat, {
+                label: "Neither",
+                value: live.messages.neither.toLocaleString("en-US"),
+                sub: "Not relived so far, and in no summary"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3("p", {
+            class: "lre-story-note",
+            children: `Of the chat's ${plural(live.messages.total, "message", "messages")} when the plan was written.`
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : live.stage !== "reading" ? /* @__PURE__ */ u3("p", {
+        class: "lre-story-note",
+        children: "This preparation's file is older: it doesn't keep the chat's count, so how much is relived or filled from summaries can't be shown."
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function costBlock(live, now) {
+  const max2 = live.cap ?? live.estimate ?? Math.max(live.spent, 1);
+  const label = live.cap !== null ? `Spent ${tokensText(live.spent)} of your ${tokensText(live.cap)} cap` : live.estimate !== null ? `Spent ${tokensText(live.spent)} of ${tokensText(live.estimate)} reckoned` : `Spent ${tokensText(live.spent)}`;
+  const tone2 = live.cap !== null && live.spent >= live.cap ? "neg" : live.estimate !== null && live.spent > live.estimate ? "warn" : "accent";
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-prep-live-block",
+    "data-lre-live": "cost",
+    children: [
+      /* @__PURE__ */ u3("h4", {
+        children: "Time and cost"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-prep-live-figures",
+        children: [
+          live.startedAt !== null ? /* @__PURE__ */ u3(Stat, {
+            label: "Started",
+            value: clockText2(live.startedAt, now),
+            sub: live.endedAt !== null ? `Took ${spanText(live.endedAt - live.startedAt)}` : `${spanText(now - live.startedAt)} ago`
+          }, undefined, false, undefined, this) : null,
+          live.endedAt !== null ? /* @__PURE__ */ u3(Stat, {
+            label: "Finished",
+            value: clockText2(live.endedAt, now)
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(Stat, {
+            label: "At work",
+            value: spanText(live.workedMs),
+            sub: "The author's runs, less the time held"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Meter, {
+        label,
+        value: live.spent,
+        max: max2,
+        tone: tone2
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("p", {
+        class: "lre-story-note",
+        children: live.estimate !== null ? `Reckoned at ${tokensText(live.estimate)} in all, the author's own work included. ${live.cap !== null ? `Your cap is ${tokensText(live.cap)}.` : "No cap."}` : "No plan yet, so nothing is reckoned."
+      }, undefined, false, undefined, this),
+      live.left !== null ? /* @__PURE__ */ u3("p", {
+        class: "lre-prep-live-left",
+        children: `Rough time left: about ${spanText(live.left.ms)} for the ${plural(live.left.stretches, "stretch", "stretches")} not done yet, at the pace so far. The closing work comes after.`
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function trailBlock(live, now) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-prep-live-block",
+    "data-lre-live": "trail",
+    children: [
+      /* @__PURE__ */ u3("h4", {
+        children: "What happened"
+      }, undefined, false, undefined, this),
+      !live.logged ? /* @__PURE__ */ u3("p", {
+        class: "lre-story-note",
+        children: "This preparation's file is older and keeps no trail of its own: only its runs show here."
+      }, undefined, false, undefined, this) : null,
+      live.trail.length === 0 ? /* @__PURE__ */ u3("p", {
+        class: "lre-story-note",
+        children: "Nothing yet."
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+        class: "lre-prep-live-scroll",
+        role: "region",
+        "aria-label": "What happened",
+        tabIndex: 0,
+        children: /* @__PURE__ */ u3("ol", {
+          class: "lre-prep-live-trail",
+          children: live.trail.map((e3, i3) => /* @__PURE__ */ u3("li", {
+            "data-lre-trail": e3.what,
+            children: [
+              /* @__PURE__ */ u3("time", {
+                dateTime: new Date(e3.at).toISOString(),
+                children: clockText2(e3.at, now)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                children: trailWords(e3, live.names)
+              }, undefined, false, undefined, this)
+            ]
+          }, `${e3.at}:${i3}`, true, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function PrepareLive(props) {
+  const app = useApp();
+  const store = props.store ?? pageStore;
+  const chatId = useSelect(app.sync, (s3) => s3.chatId);
+  const [got, setGot] = d2(null);
+  const [open, setOpen] = d2(false);
+  A(() => {
+    setGot(null);
+    setOpen(chatId !== null && store.get(`${OPEN_KEY}${chatId}`) === "open");
+  }, [chatId]);
+  A(() => {
+    if (chatId === null)
+      return;
+    return watchPreparation({
+      ask: async () => {
+        const answer = await app.send({ type: "lre.prepareLive", chatId });
+        return answer.type === "lre.result" && answer.request === "lre.prepareLive" ? answer.body : null;
+      },
+      later: (ms, then) => {
+        const timer = setTimeout(then, ms);
+        return () => clearTimeout(timer);
+      },
+      show: (view) => setGot({ view, skew: view.at - Date.now() })
+    });
+  }, [chatId, props.state]);
+  if (chatId === null || got === null)
+    return null;
+  const toggle = (next) => {
+    setOpen(next);
+    store.set(`${OPEN_KEY}${chatId}`, next ? "open" : "closed");
+  };
+  return /* @__PURE__ */ u3(PrepareLiveBody, {
+    view: got.view,
+    now: Date.now() + got.skew,
+    open,
+    onToggle: toggle,
+    onWatch: () => app.ui.update((ui) => ({ ...ui, mode: HARNESS_MODE.id, harness: { page: "agents" } }))
+  }, undefined, false, undefined, this);
+}
+
 // src/frontend/story/prepare.tsx
 var POLL_MS = 4000;
 var CALL_FROM_WORDS = {
@@ -121943,12 +122675,21 @@ var CALL_FROM_WORDS = {
 function callWords2(plan2) {
   return plan2?.call ? `The author's work included; ${tokensText(plan2.call.tokens)} a call, ${CALL_FROM_WORDS[plan2.call.from]}` : "The author's own work included";
 }
+function prepareSlot(view, shown2) {
+  if (view === null)
+    return "nothing";
+  if (view.state === "unreachable")
+    return "line";
+  if (!shown2.hidden && (prepareShown(view) || shown2.opened || shown2.watched && view.state === "done"))
+    return "card";
+  return prepareQuiet(view) ? "quiet" : "nothing";
+}
 function PrepareCard(props) {
   const app = useApp();
   const { chatId } = props;
   const [view, setView] = d2(null);
-  const [hidden, setHidden] = d2(false);
-  const [watched, setWatched] = d2(false);
+  const [shown2, setShown] = d2({ hidden: false, opened: false, watched: false });
+  const [typed, setTyped] = d2({ steer: "", cap: null, about: "", depth: "" });
   const [busy, run] = useBusy();
   const read = async () => {
     const answer = await app.send({ type: "lre.prepare", chatId, op: "get" });
@@ -121957,21 +122698,30 @@ function PrepareCard(props) {
   };
   A(() => {
     setView(null);
-    setHidden(false);
-    setWatched(false);
+    setShown({ hidden: false, opened: false, watched: false });
+    setTyped({ steer: "", cap: null, about: "", depth: "" });
     read();
   }, [chatId]);
   const state = view?.state ?? null;
   A(() => {
-    if (state === "planning" || state === "waiting" || state === "running" || state === "paused")
-      setWatched(true);
+    if (state === "planning" || state === "revising" || state === "waiting" || state === "running" || state === "paused")
+      setShown((s3) => s3.watched ? s3 : { ...s3, watched: true });
     if (state === null || !prepareBusy(state))
       return;
     const timer = setInterval(() => void read(), POLL_MS);
     return () => clearInterval(timer);
   }, [chatId, state]);
-  if (hidden || view === null || !(prepareShown(view) || watched && view.state === "done"))
+  const slot = prepareSlot(view, shown2);
+  if (view === null || slot === "nothing")
     return null;
+  if (slot === "line")
+    return /* @__PURE__ */ u3(PrepareLine, {
+      note: view.note
+    }, undefined, false, undefined, this);
+  if (slot === "quiet")
+    return /* @__PURE__ */ u3(PrepareQuiet, {
+      onOpen: () => setShown((s3) => ({ ...s3, hidden: false, opened: true }))
+    }, undefined, false, undefined, this);
   const ask = (body) => run(async () => {
     const answer = await app.request({ type: "lre.prepare", chatId, ...body });
     if (answer)
@@ -121980,20 +122730,47 @@ function PrepareCard(props) {
   return /* @__PURE__ */ u3(PrepareBody, {
     view,
     busy,
+    typed,
+    onType: (part, value) => setTyped((t3) => ({ ...t3, [part]: value })),
     ask,
-    onLater: () => setHidden(true)
+    onLater: () => setShown((s3) => ({ ...s3, hidden: true, opened: false }))
   }, undefined, false, undefined, this);
 }
+function PrepareLine(props) {
+  return /* @__PURE__ */ u3("p", {
+    class: "lre-story-prepare-line",
+    "data-lre-prepare": "unreachable",
+    role: "status",
+    children: props.note ?? "The story's preparation can't be reached now."
+  }, undefined, false, undefined, this);
+}
+function PrepareQuiet(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-story-prepare-quiet",
+    "data-lre-prepare": "quiet",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-story-note",
+        children: "This story was prepared."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Button, {
+        variant: "ghost",
+        icon: "scroll",
+        onClick: props.onOpen,
+        children: "See how it went, or tell the author what to change"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 function PrepareBody(props) {
-  const { view, busy, ask } = props;
-  const [steer, setSteer] = d2("");
-  const [cap2, setCap] = d2(view.cap === null ? "" : String(view.cap));
-  const capRead = capOf(cap2);
+  const { view, busy, typed, onType, ask } = props;
+  const capText = typed.cap ?? (view.cap === null ? "" : String(view.cap));
+  const capRead = capOf(capText);
   const words3 = PREPARE_STATE_WORDS[view.state];
-  const progress = prepareProgress(view);
-  const offered = view.offer !== null && (view.state === "none" || view.state === "cancelled" || view.state === "done");
-  const working = view.state === "planning" || view.state === "waiting" || view.state === "running";
-  const steering = view.state === "waiting" || view.state === "running" || view.state === "planning" || view.state === "paused";
+  const offered = view.offer !== null;
+  const working = view.state === "planning" || view.state === "revising" || view.state === "waiting" || view.state === "running";
+  const stopped = view.state === "paused" || view.state === "failed" || view.state === "cancelled";
+  const steering = working || stopped || view.state === "done";
   return /* @__PURE__ */ u3("section", {
     class: offered ? "lre-story-prepare" : "lre-card lre-story-prepare",
     "data-lre-prepare": view.state,
@@ -122001,7 +122778,7 @@ function PrepareBody(props) {
     children: [
       /* @__PURE__ */ u3(Banner, {
         tone: words3.tone,
-        icon: view.state === "planning" || view.state === "running" ? "hourglass" : "scroll",
+        icon: view.state === "planning" || view.state === "revising" || view.state === "running" ? "hourglass" : "scroll",
         title: words3.title,
         actions: /* @__PURE__ */ u3(M, {
           children: [
@@ -122009,24 +122786,34 @@ function PrepareBody(props) {
               variant: "primary",
               icon: "play",
               busy,
-              onClick: () => ask({ op: "start" }),
-              children: view.state === "none" ? "Prepare the story" : "Start again"
+              onClick: () => {
+                const about = typed.about.trim();
+                ask(about === "" ? { op: "start" } : { op: "start", about });
+                onType("about", "");
+              },
+              children: "Prepare the story"
             }, undefined, false, undefined, this) : null,
             view.state === "waiting" ? /* @__PURE__ */ u3(Button, {
               variant: "primary",
               icon: "check",
               busy,
-              onClick: () => ask({ op: "approve" }),
+              onClick: () => ask(view.plan !== null && view.plan.depths.length > 1 ? { op: "approve", depth: PREPARE_DEPTHS.find((d3) => d3 === typed.depth) ?? view.plan.depth } : { op: "approve" }),
               children: "Go ahead with the plan"
             }, undefined, false, undefined, this) : null,
-            view.state === "paused" || view.state === "failed" ? /* @__PURE__ */ u3(Button, {
+            stopped ? /* @__PURE__ */ u3(Button, {
               variant: "primary",
               icon: "play",
               busy,
               onClick: () => ask({ op: "resume" }),
               children: "Carry on"
             }, undefined, false, undefined, this) : null,
-            view.state === "planning" || view.state === "running" ? /* @__PURE__ */ u3(Button, {
+            view.state === "cancelled" ? /* @__PURE__ */ u3(Button, {
+              icon: "undo",
+              busy,
+              onClick: () => ask({ op: "restart" }),
+              children: "Start over"
+            }, undefined, false, undefined, this) : null,
+            view.state === "planning" || view.state === "revising" || view.state === "running" ? /* @__PURE__ */ u3(Button, {
               icon: "pause",
               busy,
               onClick: () => ask({ op: "pause" }),
@@ -122044,7 +122831,7 @@ function PrepareBody(props) {
               onClick: props.onLater,
               children: "Not now"
             }, undefined, false, undefined, this) : null,
-            view.state === "done" ? /* @__PURE__ */ u3(Button, {
+            view.state === "done" || view.state === "cancelled" ? /* @__PURE__ */ u3(Button, {
               variant: "ghost",
               onClick: props.onLater,
               children: "Close"
@@ -122073,10 +122860,31 @@ function PrepareBody(props) {
           children: "The principals are reliving the chat's past, a stretch at a time."
         }, undefined, false, undefined, this) : view.state === "done" ? /* @__PURE__ */ u3("p", {
           class: "lre-story-why",
-          children: "The author finished preparing the story. Below is what it cost, as LumiAH counts it."
+          children: "The author finished preparing the story. Below is what it cost, as LumiAH counts it. You can still tell the author what to change: it revises the plan, and asks for your word again."
         }, undefined, false, undefined, this) : null
       }, undefined, false, undefined, this),
-      !offered ? /* @__PURE__ */ u3(M, {
+      offered ? /* @__PURE__ */ u3("label", {
+        class: "lre-field",
+        "data-lre-prepare-first": true,
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: "What the story is about, and who matters (you may leave it empty)"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("textarea", {
+            class: "lre-input lre-story-say",
+            rows: 3,
+            value: typed.about,
+            placeholder: "In your own words: what the story is about for your character, who its main characters are, who is supporting.",
+            disabled: busy,
+            onInput: (event) => onType("about", event.currentTarget.value)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-field-help",
+            children: "It goes to the author with the start, as your word, before it plans."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : /* @__PURE__ */ u3(M, {
         children: [
           /* @__PURE__ */ u3("div", {
             class: "lre-story-prepare-figures",
@@ -122098,12 +122906,9 @@ function PrepareBody(props) {
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          progress !== null ? /* @__PURE__ */ u3(Meter, {
-            label: `${progress.done} of ${progress.total} stretches prepared`,
-            value: progress.done,
-            max: progress.total,
-            showValue: true
-          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(PrepareLive, {
+            state: view.state
+          }, undefined, false, undefined, this),
           view.notYet.length > 0 ? /* @__PURE__ */ u3("div", {
             class: "lre-story-prepare-plan",
             "data-lre-not-yet": true,
@@ -122133,6 +122938,11 @@ function PrepareBody(props) {
                 /* @__PURE__ */ u3("p", {
                   class: "lre-story-note",
                   children: "The plan may say what the characters keep from you."
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("p", {
+                  class: "lre-story-note",
+                  "data-lre-story-file": true,
+                  children: "The story as the author understands it is kept in Harness → Notebook, story.md: read it there, and tell the author what to correct."
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3("h4", {
                   children: "The story"
@@ -122176,8 +122986,12 @@ function PrepareBody(props) {
                           " ",
                           /* @__PURE__ */ u3(Badge, {
                             tone: s3.state === "recorded" ? "pos" : s3.state === "open" ? "accent" : "neutral",
-                            children: STRETCH_STATE_WORDS[s3.state]
-                          }, undefined, false, undefined, this)
+                            children: s3.state === "planned" && !s3.chosen ? "Not chosen" : STRETCH_STATE_WORDS[s3.state]
+                          }, undefined, false, undefined, this),
+                          s3.key ? /* @__PURE__ */ u3(Badge, {
+                            tone: "accent",
+                            children: "Key moment"
+                          }, undefined, false, undefined, this) : null
                         ]
                       }, s3.id, true, undefined, this))
                     }, undefined, false, undefined, this)
@@ -122200,94 +123014,133 @@ function PrepareBody(props) {
               ]
             }, undefined, true, undefined, this)
           }, undefined, false, undefined, this) : null,
+          view.plan !== null && view.plan.depths.length > 1 && view.state !== "planning" && view.state !== "revising" ? /* @__PURE__ */ u3("div", {
+            class: "lre-story-prepare-plan",
+            "data-lre-depths": true,
+            children: [
+              /* @__PURE__ */ u3("h4", {
+                children: "How deep"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Seg, {
+                label: "How deep",
+                value: view.state === "waiting" ? PREPARE_DEPTHS.find((d3) => d3 === typed.depth) ?? view.plan.depth : view.plan.depth,
+                options: view.plan.depths.map((d3) => ({ value: d3.depth, label: `${DEPTH_WORDS[d3.depth].label}: ${tokensText(d3.tokens)}` })),
+                disabled: busy,
+                onChange: (depth) => view.state === "waiting" ? onType("depth", depth) : ask({ op: "depth", depth })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("p", {
+                class: "lre-story-note",
+                children: `The author recommends ${DEPTH_WORDS[view.plan.recommended.depth].label.toLowerCase()}${view.plan.recommended.why === "" ? "." : `: ${view.plan.recommended.why}`}`
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("p", {
+                class: "lre-story-note",
+                children: view.state === "waiting" ? "Pick a depth, then go ahead: only its stretches are relived. You can go deeper later, and going shallower never undoes what was recorded." : "Going deeper carries the preparation on with the stretches it adds; going shallower never undoes what was recorded."
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : null,
           view.steered.length > 0 ? /* @__PURE__ */ u3("div", {
             class: "lre-story-prepare-plan",
+            "data-lre-steered": true,
             children: [
               /* @__PURE__ */ u3("h4", {
                 children: "What you told the author"
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3("ul", {
                 class: "lre-story-prepare-list",
-                children: view.steered.map((line3, i3) => /* @__PURE__ */ u3("li", {
-                  children: line3
-                }, `${i3}:${line3}`, false, undefined, this))
+                children: view.steered.map((said, i3) => /* @__PURE__ */ u3("li", {
+                  class: "lre-story-prepare-said",
+                  "data-lre-said": said.answer === null ? "open" : "answered",
+                  children: [
+                    /* @__PURE__ */ u3("span", {
+                      children: said.text
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3("span", {
+                      class: "lre-story-note",
+                      children: said.status
+                    }, undefined, false, undefined, this),
+                    said.answer !== null ? /* @__PURE__ */ u3("span", {
+                      class: "lre-story-prepare-answer",
+                      children: `The author's answer: ${said.answer}`
+                    }, undefined, false, undefined, this) : null
+                  ]
+                }, `${i3}:${said.text}`, true, undefined, this))
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this) : null,
-          steering ? /* @__PURE__ */ u3(M, {
+          steering ? /* @__PURE__ */ u3("div", {
+            class: "lre-story-prepare-form",
             children: [
-              /* @__PURE__ */ u3("div", {
-                class: "lre-story-prepare-form",
+              /* @__PURE__ */ u3("label", {
+                class: "lre-field",
                 children: [
-                  /* @__PURE__ */ u3("label", {
-                    class: "lre-field",
-                    children: [
-                      /* @__PURE__ */ u3("span", {
-                        class: "label",
-                        children: "Tell the author"
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ u3("textarea", {
-                        class: "lre-input lre-story-say",
-                        rows: 2,
-                        value: steer,
-                        placeholder: "In your own words: what to relive, who matters, what to leave out.",
-                        disabled: busy,
-                        onInput: (event) => setSteer(event.currentTarget.value)
-                      }, undefined, false, undefined, this)
-                    ]
-                  }, undefined, true, undefined, this),
-                  /* @__PURE__ */ u3(Button, {
-                    icon: "send",
-                    disabled: steer.trim() === "",
-                    busy,
-                    onClick: () => {
-                      ask({ op: "steer", text: steer.trim() });
-                      setSteer("");
-                    },
-                    children: "Send"
+                  /* @__PURE__ */ u3("span", {
+                    class: "label",
+                    children: "Tell the author"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("textarea", {
+                    class: "lre-input lre-story-say",
+                    rows: 2,
+                    value: typed.steer,
+                    placeholder: "In your own words: what the story is about, who matters, what to relive or leave out.",
+                    disabled: busy,
+                    onInput: (event) => onType("steer", event.currentTarget.value)
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("span", {
+                    class: "lre-field-help",
+                    children: view.state === "paused" ? "Kept until you carry it on: the author reads it first then." : "The author revises its plan with it, tells you what it changed, and asks for your word again."
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ u3("div", {
-                class: "lre-story-prepare-form",
+              /* @__PURE__ */ u3(Button, {
+                icon: "send",
+                disabled: typed.steer.trim() === "",
+                busy,
+                onClick: () => {
+                  ask({ op: "steer", text: typed.steer.trim() });
+                  onType("steer", "");
+                },
+                children: "Send"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : null,
+          steering && view.state !== "done" ? /* @__PURE__ */ u3("div", {
+            class: "lre-story-prepare-form",
+            children: [
+              /* @__PURE__ */ u3("label", {
+                class: "lre-field",
                 children: [
-                  /* @__PURE__ */ u3("label", {
-                    class: "lre-field",
-                    children: [
-                      /* @__PURE__ */ u3("span", {
-                        class: "label",
-                        children: "Most the preparation may spend (tokens)"
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ u3("input", {
-                        class: "problem" in capRead ? "lre-input invalid" : "lre-input",
-                        inputMode: "numeric",
-                        value: cap2,
-                        placeholder: "No cap",
-                        disabled: busy,
-                        onInput: (event) => setCap(event.currentTarget.value)
-                      }, undefined, false, undefined, this),
-                      "problem" in capRead ? /* @__PURE__ */ u3("span", {
-                        class: "lre-field-help",
-                        children: capRead.problem
-                      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
-                        class: "lre-field-help",
-                        children: "Counts all it spends, the author's own work included, as LumiAH counts it. Once the next moment to relive would take it past this, nothing more is relived: the author fills the rest from summaries and lore. Empty: no cap."
-                      }, undefined, false, undefined, this)
-                    ]
-                  }, undefined, true, undefined, this),
-                  /* @__PURE__ */ u3(Button, {
-                    icon: "check",
-                    disabled: "problem" in capRead || capRead.tokens === view.cap,
-                    busy,
-                    onClick: () => ("tokens" in capRead) && ask({ op: "cap", tokens: capRead.tokens }),
-                    children: "Set the cap"
+                  /* @__PURE__ */ u3("span", {
+                    class: "label",
+                    children: "Most the preparation may spend (tokens)"
+                  }, undefined, false, undefined, this),
+                  /* @__PURE__ */ u3("input", {
+                    class: "problem" in capRead ? "lre-input invalid" : "lre-input",
+                    inputMode: "numeric",
+                    value: capText,
+                    placeholder: "No cap",
+                    disabled: busy,
+                    onInput: (event) => onType("cap", event.currentTarget.value)
+                  }, undefined, false, undefined, this),
+                  "problem" in capRead ? /* @__PURE__ */ u3("span", {
+                    class: "lre-field-help",
+                    children: capRead.problem
+                  }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
+                    class: "lre-field-help",
+                    children: "Counts all it spends, the author's own work included, as LumiAH counts it. Once the next moment to relive would take it past this, nothing more is relived: the author fills the rest from summaries and lore. Empty: no cap."
                   }, undefined, false, undefined, this)
                 ]
-              }, undefined, true, undefined, this)
+              }, undefined, true, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                icon: "check",
+                disabled: "problem" in capRead || capRead.tokens === view.cap,
+                busy,
+                onClick: () => ("tokens" in capRead) && ask({ op: "cap", tokens: capRead.tokens }),
+                children: "Set the cap"
+              }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this) : null
         ]
-      }, undefined, true, undefined, this) : null
+      }, undefined, true, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
@@ -122729,7 +123582,8 @@ var REQUEST_TYPES = {
   "lre.prompts": true,
   "lre.live": true,
   "lre.story": true,
-  "lre.prepare": true
+  "lre.prepare": true,
+  "lre.prepareLive": true
 };
 function isRequestType(value) {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(REQUEST_TYPES, value);
@@ -125168,6 +126022,37 @@ textarea.lre-input.lre-workspace-text{min-height:min(50vh,360px);line-height:1.4
 .lre-ws-msg-foot{margin:0;max-width:92%;font-size:var(--lre-fs-xs);color:var(--lre-muted);overflow-wrap:anywhere}
 `;
 
+// src/frontend/story/prepare-live-styles.ts
+var PREPARE_LIVE_CSS = `
+.lre-prep-live{container:lre-prep-live/inline-size;display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0}
+.lre-prep-live-now{margin:0;overflow-wrap:anywhere}
+.lre-prep-live-whole{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--lre-s4);min-width:0;padding-top:var(--lre-s2)}
+.lre-prep-live-col{display:flex;flex-direction:column;gap:var(--lre-s4);min-width:0}
+@container lre-prep-live (min-width:720px){.lre-prep-live-whole{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.lre-prep-live-block{display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0}
+.lre-prep-live-block h4{margin:0;font-size:var(--lre-fs-sm)}
+.lre-prep-live-stages{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0}
+.lre-prep-live-stages>li{display:flex;align-items:center;gap:var(--lre-s2);min-width:0;color:var(--lre-muted)}
+.lre-prep-live-stages>li[data-state=done]{color:var(--lre-fg)}
+.lre-prep-live-stages>li[data-state=now]{color:var(--lre-fg);font-weight:600}
+.lre-prep-live-stages>li[data-state=now]>.lre-icon{color:var(--lre-accent)}
+.lre-prep-live-stages>li>.lre-icon{flex:none}
+.lre-prep-live-stage{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.lre-prep-live-stage-state{flex:0 1 auto;min-width:0;font-size:var(--lre-fs-xs);font-weight:400;color:var(--lre-muted);text-align:right;overflow-wrap:anywhere}
+.lre-prep-live-run-line{display:block;overflow-wrap:anywhere}
+.lre-prep-live-scroll{max-height:22em;overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0;padding:var(--lre-s1) var(--lre-s2);border:1px solid var(--lre-hairline);border-radius:var(--lre-r)}
+.lre-prep-live-scroll:focus-visible{outline-offset:-2px}
+.lre-prep-live-list,.lre-prep-live-trail{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0}
+.lre-prep-live-list>li,.lre-prep-live-trail>li{font-size:var(--lre-fs-sm);overflow-wrap:anywhere}
+.lre-prep-live-trail>li{display:flex;align-items:baseline;gap:var(--lre-s2)}
+.lre-prep-live-trail>li>time{flex:none;font-size:var(--lre-fs-xs);color:var(--lre-muted);font-variant-numeric:tabular-nums}
+.lre-prep-live-trail>li>span{flex:1 1 auto;min-width:0}
+.lre-prep-live-figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(8em,1fr));gap:var(--lre-s2);min-width:0}
+.lre-prep-live-left{margin:0;font-size:var(--lre-fs-sm);overflow-wrap:anywhere}
+.lre-prep-live-actions{display:flex;flex-wrap:wrap;gap:var(--lre-s2)}
+.lre-prep-live-actions>.lre-btn{min-height:var(--lre-tap)}
+`;
+
 // src/frontend/story/styles.ts
 var STORY_CSS = `
 .lre-story-frame{flex:1;display:flex;flex-direction:column;min-width:0;--lre-harness-nav-h:calc(var(--lre-tap-lg) + 2 * var(--lre-s1) + 1px + env(safe-area-inset-bottom,0px))}
@@ -125221,6 +126106,10 @@ textarea.lre-input.lre-story-text{min-height:16em;font-family:var(--lre-font);fo
 .lre-story-prepare-form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--lre-s2);min-width:0}
 .lre-story-prepare-form>.lre-field{flex:1 1 14em;min-width:0}
 .lre-story-prepare-form>.lre-btn{min-height:var(--lre-tap)}
+.lre-story-prepare-said{display:flex;flex-direction:column;gap:2px;min-width:0}
+.lre-story-prepare-answer{padding-left:var(--lre-s2);border-left:2px solid var(--lre-hairline);overflow-wrap:anywhere}
+.lre-story-prepare-line{margin:0;padding:var(--lre-s2) var(--lre-s3);border-radius:var(--lre-r);background:var(--lre-well);font-size:var(--lre-fs-sm);overflow-wrap:anywhere}
+.lre-story-prepare-quiet{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s2);min-width:0}
 .lre-story-budget{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--lre-s2)}
 @container (max-width:340px){.lre-story-budget{grid-template-columns:1fr}}
 textarea.lre-input.lre-story-say{min-height:4.5em;font-family:var(--lre-font);font-size:var(--lre-fs-md);line-height:1.45}
@@ -125231,7 +126120,7 @@ textarea.lre-input.lre-story-say{min-height:4.5em;font-family:var(--lre-font);fo
 `;
 
 // src/frontend/styles.ts
-var CSS3 = [TOKENS_CSS2, COMPONENTS_CSS2, SHELL_CSS2, CHAT_CSS, PLAY_CSS, PACKS_ME_CSS, PACKS_MONEY_CSS, PACKS_WORLD_CSS, GM_CSS, MINDS_CSS, ROUTINES_GM_CSS, ASSISTANT_CSS, LIVE_CSS2, WORKSPACE_CSS2, SELECT_CSS, SETTINGS_CSS, BUILD_CSS, FORMS_CSS, CHARACTER_CSS, THINGS_CSS, VISUAL_EDITORS_CSS, DIAGNOSTICS_CSS, HARNESS_CSS, STORY_CSS].join(`
+var CSS3 = [TOKENS_CSS2, COMPONENTS_CSS2, SHELL_CSS2, CHAT_CSS, PLAY_CSS, PACKS_ME_CSS, PACKS_MONEY_CSS, PACKS_WORLD_CSS, GM_CSS, MINDS_CSS, ROUTINES_GM_CSS, ASSISTANT_CSS, LIVE_CSS2, WORKSPACE_CSS2, SELECT_CSS, SETTINGS_CSS, BUILD_CSS, FORMS_CSS, CHARACTER_CSS, THINGS_CSS, VISUAL_EDITORS_CSS, DIAGNOSTICS_CSS, HARNESS_CSS, STORY_CSS, PREPARE_LIVE_CSS].join(`
 `);
 
 // src/frontend/ui-registry.ts
