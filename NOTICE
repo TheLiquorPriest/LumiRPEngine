@@ -107,3 +107,14 @@ Warp files that were looked at for reference and not used: src/frontend/overlay-
 and, from the "legacy" branch (@ cc90c1af), src/engine/world.ts, src/engine/quests.ts,
 src/engine/resolve.ts (companionLife) and src/engine/companions.test.ts. A comparison of
 LumiRPEngine's src/ and test/ against these files found no shared code or structure.
+
+Third-party code in the built bundles:
+
+  - LumiAH (https://github.com/TheLiquorPriest/LumiAH, MIT), the `lumi-ah` package: its extension
+    code in dist/backend.js, its page code in dist/frontend.js, and its runtime, dist/lumiah.js.
+  - dist/lumiah.js also contains pi-ai (@earendil-works/pi-ai, MIT) and the packages it brings
+    along: among them the Anthropic SDK (MIT), the OpenAI SDK (Apache-2.0), and Google's Gen AI SDK
+    and auth libraries (Apache-2.0).
+  - dist/frontend.js also contains Preact (MIT).
+
+Each package, its version, copyright notice and licence text are in THIRD-PARTY-NOTICES.md.
