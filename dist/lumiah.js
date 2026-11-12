@@ -91104,8 +91104,6 @@ function headersOf(given2, had, carried) {
     }
     if (/[\r\n\0]/.test(value))
       throw new Error(`The header "${name}" can't hold a line break.`);
-    if (value.trim().length < SECRET_FLOOR)
-      throw new Error(`The value of "${name}" needs ${SECRET_FLOOR} characters at least: the runtime takes a header's value out of whatever a server says back, as it does a key, and a shorter one can't be told from ordinary words.`);
     headers[name] = value;
   }
   return Object.keys(headers).length > 0 ? headers : undefined;
@@ -91284,7 +91282,7 @@ class Book {
     if (key !== undefined && key !== null && (typeof key !== "string" || key.trim() === ""))
       throw new Error("A key can't be empty: leave it out to keep the one there is.");
     if (typeof key === "string" && key.trim().length < SECRET_FLOOR)
-      throw new Error(`A key needs ${SECRET_FLOOR} characters at least: the runtime takes a key out of whatever a server says back (some repeat a key they refuse), and a shorter one can't be told from ordinary words.`);
+      throw new Error(`A key needs ${SECRET_FLOOR} characters at least: the runtime takes a key out of whatever a server says back (some repeat a key they refuse), and a shorter one can't be told from ordinary words. For a server that takes any key, choose No key: its calls then send "none".`);
     const before = at === -1 ? undefined : s.connections[at];
     const carried = before !== undefined && before.provider === connection.provider && originOf(before.baseUrl) === originOf(connection.baseUrl);
     const headers = headersOf(input.headers, before?.headers, carried);
@@ -93450,7 +93448,8 @@ class LinkClient {
         await pause();
       }
     }
-    return this.ask(type, { ...fields, secret: this.options.secret() });
+    const sent = typeof fields === "function" ? fields() : fields;
+    return this.ask(type, { ...sent, secret: this.options.secret() });
   }
   notify(notice) {
     if (this.up)
@@ -93859,11 +93858,13 @@ function linkStorage(deps, mirror) {
     },
     store: {
       read: async (path6) => (await ask3("doc.get", { path: path6 })).doc,
-      write: async (path6, value, ago) => {
-        await ask3("doc.put", { path: path6, doc: value, ...as, ...ago === undefined ? {} : { ago } });
+      write: async (path6, value, made) => {
+        const fields = { path: path6, doc: value, ...as };
+        await ask3("doc.put", made === undefined ? fields : () => ({ ...fields, ago: Math.max(0, deps.now() - made) }));
       },
-      remove: async (path6, ago) => {
-        await ask3("doc.remove", { path: path6, ...as, ...ago === undefined ? {} : { ago } });
+      remove: async (path6, made) => {
+        const fields = { path: path6, ...as };
+        await ask3("doc.remove", made === undefined ? fields : () => ({ ...fields, ago: Math.max(0, deps.now() - made) }));
       },
       list: async (prefix) => (await ask3("doc.list", { prefix })).paths
     }
@@ -93876,6 +93877,10 @@ function withdrawn(error3) {
 function refusedForGood(error3) {
   const cause = error3 instanceof Error ? error3.cause : undefined;
   return cause instanceof LinkError && (cause.code === "bad_request" || cause.code === "too_large" || cause.code === "superseded");
+}
+function superseded(error3) {
+  const cause = error3 instanceof Error ? error3.cause : undefined;
+  return cause instanceof LinkError && cause.code === "superseded";
 }
 function unknownRuntime(error3) {
   const cause = error3 instanceof Error ? error3.cause : undefined;
@@ -96571,7 +96576,7 @@ function createChatData(deps) {
     if (db !== null)
       return `The copy reads Lumiverse as the runtime's signed-in user: the database reader is off (${db.why ?? "it was closed"}).`;
     if (offer !== null && offer.database !== null && !besideLumiverse)
-      return `The copy reads Lumiverse as the runtime's signed-in user: the operator switched the database reader on, but this runtime reaches Lumiverse at ${new URL(deps.base).host}, not at a loopback address, and the reader opens Lumiverse's file only where the runtime runs on Lumiverse's own machine.`;
+      return `The copy reads Lumiverse as the runtime's signed-in user: the operator switched the database reader on, but this runtime reaches Lumiverse at ${new URL(deps.base).host}, not at a loopback address, and the reader opens Lumiverse's file only where the runtime runs on Lumiverse's own machine. Where it does, set it up with Lumiverse's loopback address: lumiah up --url http://127.0.0.1:<Lumiverse's port> (with --name, where you named the runtime). That registers the runtime anew.`;
     return "The copy reads Lumiverse as the runtime's signed-in user: the database reader isn't switched on for this runtime.";
   }
   return {
@@ -96987,12 +96992,13 @@ class Relay {
       return json4(403, errorJson("LumiAH's runtime answers Lumiverse's server, not a browser.", "forbidden"));
     if (!this.hostAllowed(req.headers.get("host")))
       return json4(421, errorJson(`This is LumiAH's runtime at ${this.settings.listen}:${this.settings.port}; it answers requests addressed to it alone.`, "misdirected"));
-    if (this.stopping && (url.pathname !== ASK_PATH || req.headers.get(PROBE_HEADER) === null))
+    const path6 = url.pathname.replace(/\/+$/, "").replace(/^\/v1(?=\/)/, "");
+    const healthz = path6 === "/healthz" && req.method === "GET";
+    if (this.stopping && !healthz && (url.pathname !== ASK_PATH || req.headers.get(PROBE_HEADER) === null))
       return json4(503, errorJson("The runtime is restarting. Press Retry in a moment.", "unavailable"));
     if (url.pathname === ASK_PATH && this.env.ask !== undefined)
       return this.env.ask(req);
-    const path6 = url.pathname.replace(/\/+$/, "").replace(/^\/v1(?=\/)/, "");
-    if (path6 === "/healthz" && req.method === "GET")
+    if (healthz)
       return this.health(req);
     if (path6 === "/models" && req.method === "GET")
       return this.models(req);
@@ -97021,7 +97027,7 @@ class Relay {
         return json4(200, { up: true });
     }
     const out = this.link.out;
-    return json4(200, { ok: this.link.refused === null, link: this.link.refused !== null ? "refused" : out?.why ?? (this.link.up ? "up" : "down"), backend: this.link.backendName ?? "LumiAH", turns: this.turns.count, requests: this.calls.size, ...this.link.refused !== null ? { problem: this.link.refused } : {} });
+    return json4(200, { ok: this.link.refused === null, link: this.link.refused !== null ? "refused" : out?.why ?? (this.link.up ? "up" : "down"), backend: this.link.backendName ?? "LumiAH", turns: this.turns.count, requests: this.calls.size, ...this.link.refused !== null ? { problem: this.link.refused } : {}, ...this.stopping ? { stopping: true } : {} });
   }
   keyOf(req) {
     const auth = req.headers.get("authorization") ?? "";
@@ -97573,9 +97579,11 @@ function createWorkingStore(deps) {
     cancel = deps.later(ms2, wake);
     return promise;
   }
-  async function place(path6, text4) {
+  async function place(path6, text4, at2) {
     const temp = `${TMP}/${deps.id()}`;
     await disk.write(temp, text4);
+    if (at2 !== undefined)
+      await disk.touch(temp, at2);
     const folder = path6.slice(0, path6.lastIndexOf("/"));
     for (let tries = 0;; tries++) {
       if (!made.has(folder)) {
@@ -97660,10 +97668,13 @@ function createWorkingStore(deps) {
           entry = fresh(`b:${name.slice(2)}`, false, name.slice(2), 0, since);
         else if (isRecord(held2) && typeof held2.path === "string" && DOC_PATH.test(held2.path) && held2.path !== MARK_PATH && name === `d.${sha256(held2.path)}`)
           entry = fresh(`d:${held2.path}`, true, held2.path, 0, since);
-        if (entry === null || await disk.stat(fileOf(entry)) === null) {
+        const onDisk = entry === null ? null : await disk.stat(fileOf(entry));
+        if (entry === null || onDisk === null) {
           await disk.removeAll(file);
           continue;
         }
+        if (entry.doc)
+          entry.made = onDisk.at;
         found.push(entry);
       } catch (error3) {
         deps.log("warn", `the runtime's store dropped ${name} from its journal, as the disk can't read what it names (${errorText(error3)})`);
@@ -97991,21 +98002,21 @@ function createWorkingStore(deps) {
   function fresh(key, doc, name, change3, since) {
     return { key, doc, name, first: change3, since, last: change3, sending: null, again: null, made: since };
   }
-  async function enter(key, doc, name, change3) {
+  async function enter(key, doc, name, change3, made2 = deps.now()) {
     entered += 1;
     if (watched.count > 0)
       watched.changes.set(key, entered);
     const entry = queue.get(key);
     if (entry === undefined) {
-      const added = fresh(key, doc, name, change3, deps.now());
+      const added = fresh(key, doc, name, change3, made2);
       await place(markerOf(added), JSON.stringify(doc ? { path: name, at: added.since } : { at: added.since }));
       queue.set(key, added);
       return true;
     }
     if (entry.sending !== null && entry.again === null)
-      entry.again = { change: change3, at: deps.now() };
+      entry.again = { change: change3, at: made2 };
     entry.last = change3;
-    entry.made = deps.now();
+    entry.made = made2;
     queue.delete(key);
     queue.set(key, entry);
     return false;
@@ -98036,9 +98047,10 @@ function createWorkingStore(deps) {
     const key = `d:${path6}`;
     await serial(key, async () => {
       check2(at2);
-      const noted = await enter(key, true, path6, number);
+      const made2 = deps.now();
+      const noted = await enter(key, true, path6, number, made2);
       try {
-        await place(docFile(path6), text4);
+        await place(docFile(path6), text4, made2);
       } catch (error3) {
         if (noted)
           await unenter(key);
@@ -98182,7 +98194,7 @@ function createWorkingStore(deps) {
     }
     await disk.remove(markerOf(entry));
     queue.delete(entry.key);
-    if (lost !== null)
+    if (lost !== null && deps.superseded?.(error3) === true)
       lost.dropped += 1;
     await disk.remove(fileOf(entry));
     if (entry.doc) {
@@ -98203,7 +98215,7 @@ function createWorkingStore(deps) {
       return true;
     }
     if (text4 === "") {
-      await ports2.store.remove(entry.name, Math.max(0, deps.now() - made2));
+      await ports2.store.remove(entry.name, made2);
       return true;
     }
     const value = parseJson(text4);
@@ -98211,7 +98223,7 @@ function createWorkingStore(deps) {
       deps.log("warn", `the runtime's copy of ${entry.name} isn't JSON any more, so it isn't sent`);
       return false;
     }
-    await ports2.store.write(entry.name, value, Math.max(0, deps.now() - made2));
+    await ports2.store.write(entry.name, value, made2);
     return true;
   }
   async function landed(entry, at2, text4, sent) {
@@ -99184,6 +99196,7 @@ function createRuntime(config, deps) {
     limits: () => ({ waitMs: tuning().storeWaitMs }),
     waitsOwner: () => linkedBackendOf(link.hello?.backend),
     refusedForGood,
+    superseded,
     withdrawn,
     disowned: (error3) => link.refused !== null || unknownRuntime(error3),
     release: async () => {
@@ -100353,7 +100366,7 @@ async function loopbackConnection(io, base, token, url, model2, read2, linked) {
 }
 var WAIT_MS = 5000;
 var WAITING = "waiting.json";
-async function servingThere(config, io) {
+async function servingThere(config, io, secret) {
   const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
   const late = AbortSignal.timeout(WAIT_MS);
   const reply = await io.http({ method: "POST", url: `${runtimeBase(config.listen, config.port).replace(/\/v1$/, "")}${ASK_PATH}`, headers: { [PROBE_HEADER]: nonce, "Content-Type": "application/json" }, body: "{}", signal: late }).catch(() => null);
@@ -100364,14 +100377,14 @@ async function servingThere(config, io) {
     said3 = JSON.parse(reply.text);
   } catch {}
   const proof = isRecord2(said3) && typeof said3.proof === "string" ? said3.proof : "";
-  return reply.status === 200 && await sameSecret(proof, await roadProof(config.secret, config.relay, nonce)) ? "this runtime" : "something else";
+  return reply.status === 200 && await sameSecret(proof, await roadProof(secret, config.relay, nonce)) ? "this runtime" : "something else";
 }
-async function waitForPort(config, io, dir, log3, stopping) {
+async function waitForPort(config, io, dir, log3, stopping, secret) {
   const mark = `${dir}/${WAITING}`;
   let since = null;
   try {
     for (;; ) {
-      const there = await servingThere(config, io);
+      const there = await servingThere(config, io, secret());
       if (there === "nothing")
         return null;
       if (there === "something else")
@@ -100414,6 +100427,12 @@ async function serve(config, path6, io) {
     } catch {}
     return current.session;
   };
+  const secretOnFile = () => {
+    try {
+      current = { ...current, secret: configOf(io.files.read(path6), path6).secret };
+    } catch {}
+    return current.secret;
+  };
   const keep = (change2) => {
     session();
     current = { ...current, ...change2 };
@@ -100427,7 +100446,7 @@ async function serve(config, path6, io) {
   const service = unitRunning(config, me);
   const dir = io.files.folder(runtimeDir(dataDir(io.env, io.home), config.name), RUNTIME_DIR_MODE);
   const stopping = io.stopped();
-  const stoppedFirst = await waitForPort(config, io, dir, log3, stopping);
+  const stoppedFirst = await waitForPort(config, io, dir, log3, stopping, secretOnFile);
   if (stoppedFirst !== null) {
     log3(`stopping (${stoppedFirst}) before it served`);
     return 0;
@@ -100557,9 +100576,12 @@ async function status(a, io) {
   let healthy = false;
   try {
     const body = await healthOf(config, io);
-    if (isRecord2(body) && typeof body.link === "string") {
+    const backend = isRecord2(body) && typeof body.backend === "string" && body.backend !== "" ? body.backend : "LumiAH";
+    if (isRecord2(body) && body.stopping === true)
+      io.out(`It answers, but is stopping: once ${backend}'s storage has what it saved (the Storage wait at most), its link closes and it lets go of its port.`);
+    else if (isRecord2(body) && typeof body.link === "string") {
       healthy = body.ok === true && body.link === "up";
-      io.out(`It answers: link to ${typeof body.backend === "string" && body.backend !== "" ? body.backend : "LumiAH"} ${body.link}, ${String(body.turns)} turn(s) under way${typeof body.problem === "string" ? `. ${body.problem}` : ""}.`);
+      io.out(`It answers: link to ${backend} ${body.link}, ${String(body.turns)} turn(s) under way${typeof body.problem === "string" ? `. ${body.problem}` : ""}.`);
     } else
       io.out(`Something answers on ${config.listen}:${config.port}, but not as the runtime this config is for: another runtime serves there, or this one was set up again and hasn't been restarted since.`);
   } catch (error3) {
@@ -100665,7 +100687,7 @@ if (process.versions.bun === undefined) {
 `);
   process.exit(1);
 }
-var BUILD = "3bfdc8d9";
+var BUILD = "0e519ae3";
 var http = async (request2) => {
   const response = await fetch(request2.url, { method: request2.method, headers: request2.headers, ...request2.body !== undefined ? { body: request2.body } : {}, ...request2.signal !== undefined ? { signal: request2.signal } : {}, redirect: "manual" });
   const text4 = await response.text();

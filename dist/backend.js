@@ -95093,7 +95093,7 @@ var GUIDANCE_PROMPTS = [
   { id: HARNESS_TEXT.guidanceName, page: page7, group: GUIDANCE2, label: "What the level is called", note: "The name every agent is told the world's guidance under, between your own guidance and the chat's.", text: "this world's", vars: [], nonEmpty: true },
   { id: HARNESS_TEXT.behind, page: page7, group: GUIDANCE2, label: "The turn before isn't all recorded yet", note: "Heads the world's guidance when a turn began before the turn before it was all recorded: its start stopped waiting for that turn's commit (the setting agents.harness.commitWaitMs).", text: "The turn before this one was still being recorded when this one began, so what it changed may not all be in what your tools show yet. Where something of it matters here, read it again before you rely on it.", vars: [], nonEmpty: true },
   { id: HARNESS_TEXT.unread, page: page7, group: GUIDANCE2, label: "Part of the chat wasn't read", note: "Heads the guidance of a run on a chat the harness plays when the engine couldn't read part of the chat as the run began (its world isn't loaded, or a read failed): the author still leads, and is told what is missing.", text: "{{why}} as this run began, so this run goes on without it. Read what you need with your tools, and say so in your answer where they can't.", vars: [v4("why", "what wasn't read and why, in the engine's own words", true)], nonEmpty: true },
-  { id: HARNESS_TEXT.worldLate, page: page7, group: GUIDANCE2, label: "As a turn begins: the world not read in time", note: "Heads the guidance of a run on a chat the harness plays when reading the chat's world took longer than half of LumiAH's Wait for the extension: the author still leads, and the run goes on without the world's guidance rather than not at all.", text: "This chat's world wasn't read in time as this run began, so you aren't told here what the world is, whose the player character is, or how it plays. Read what you need of it with your tools, and say so in your answer where they can't.", vars: [], nonEmpty: true },
+  { id: HARNESS_TEXT.worldLate, page: page7, group: GUIDANCE2, label: "As a turn begins: the world not read in time", note: "Heads the guidance of a run on a chat the harness plays when the chat's world wasn't read in time (in what was left of half of LumiAH's Wait for the extension, and never less than a quarter of it): rather than not start at all, the run goes on with the author leading, without the world's guidance and without knowing whether a turn was played for the reply before it.", text: "This chat's world wasn't read in time as this run began. You aren't told here what the world is, whose the player character is or how it plays, nor whether a turn was played for the reply before this one: what that reply tells may not be in the world. Play on from the world as your tools show it, not from that reply. Read what you need with them, and say so in your answer where they can't.", vars: [], nonEmpty: true },
   { id: HARNESS_TEXT.openingLate, page: page7, group: GUIDANCE2, label: "As a turn begins: the moment not read in time", note: "Ends the author's instructions in place of the moment, the drafts due and the story's preparation when reading them took longer than half of LumiAH's Wait for the extension: the run starts without them rather than not at all.", text: "The moment as it stands, the drafts due and the story's preparation weren't read in time, so this turn goes on without them here. Read what you need of them with your tools.", vars: [], nonEmpty: true },
   { id: HARNESS_TEXT.presetLate, page: page7, group: GUIDANCE2, label: "As a turn begins: the preset not read in time", note: "Told the author when the chat's preset took longer to read than half of LumiAH's Wait for the extension: no agent of the run gets its part of the player's preset.", text: "Your part of the player's preset is missing this turn, and so are the parts of the agents you start: it wasn't read in time, so this turn goes on without it.", vars: [], nonEmpty: true },
   { id: HARNESS_TEXT.presetPart, page: page7, group: GUIDANCE2, label: "An agent's part of the player's preset: its heading", note: "Heads each agent's part of the chat's preset in its instructions, so the model, and whoever reads the agent's instructions in the live view, can tell where the engine's own words end and the player's preset begins.", text: "Your part of the player's preset, \u201C{{preset}}\u201D:", vars: [v4("preset", "the preset's name, as Lumiverse shows it", true)], nonEmpty: true },
@@ -115238,9 +115238,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path2 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "b11ba796d23e69c4c9bf37de52572b35897c0f684eb1af78b796409957b0b01c";
+  const sha256 = "8ea1a82aa5eb633dc15dc57f3730d87adeab3f230fa9ea90f5c962501752d562";
   const tools = ["5db39011b1a09652e3360031f99d4092", "b2101fc2b5d70b51c9dccdfef28a3f73"].filter((f) => f !== undefined);
-  return { id: "3bfdc8d9", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
+  return { id: "0e519ae3", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -147459,13 +147459,13 @@ class HarnessEngine {
       let unplayed = null;
       if (userId !== null) {
         const bound = await this.enrichMs(userId);
-        const left = () => bound === null ? null : Math.max(0, bound - (performance.now() - asked2));
         if (this.starting.has(chatId))
-          whole7 = await this.caughtUp(chatId, userId, Math.min(harness.commitWaitMs, left() ?? Infinity));
-        const read2 = await within8(this.claimRead(chatId, userId), left()).catch((error) => void missed("This chat's world", error));
+          whole7 = await this.caughtUp(chatId, userId, bound === null ? harness.commitWaitMs : Math.min(harness.commitWaitMs, Math.max(0, bound - (performance.now() - asked2))));
+        const ms = bound === null ? null : Math.round(Math.max(bound - (performance.now() - asked2), bound / 2));
+        const read2 = await within8(this.claimRead(chatId, userId), ms).catch((error) => void missed("This chat's world", error));
         if (read2 === "late") {
           late = true;
-          this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: its world wasn't read within ${bound} ms (half of LumiAH's Wait for the extension), so the engine's claim on it goes on without it; the claim still names the author`, userId);
+          this.rt.host.log("warn", `[LumiRPEngine] chat ${chatId}: its world wasn't read within ${ms} ms (what was left of half of LumiAH's Wait for the extension, and never less than a quarter of it), so the engine's claim on it goes on without it; the claim still names the author`, userId);
         } else if (read2 !== undefined) {
           if (read2.value === null)
             unread.add(NO_WORLD);
@@ -149243,7 +149243,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "3bfdc8d9", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "0e519ae3", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;
@@ -164323,9 +164323,9 @@ function createSpindleHost(identifier = EXTENSION_IDENTIFIER) {
 var NAME = "LumiRPEngine";
 var SETTINGS_AT = `${NAME}'s Harness tab \u2192 System \u2192 Settings`;
 var STORAGE = "harness";
-var BUILD = "3bfdc8d9";
-var RUNTIME_SHA256 = "39f598ba1c2e173cc65af07bae1efb0b6d7b1aa8dd7f098e22a54a7011116335";
-var RUNTIME_SIZE = "4658350";
+var BUILD = "0e519ae3";
+var RUNTIME_SHA256 = "76a31c93b93f0a2079d6acc1d3aac0e3ac27de39a9355cbff3acc1e352e284f9";
+var RUNTIME_SIZE = "4659514";
 var TICK_MS = 1000;
 var MOUNT_SESSION = "lre-harness-mount";
 var OWNERS_KEPT = OPEN_CHATS_CAP * 8;
