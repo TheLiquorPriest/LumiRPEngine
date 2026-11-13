@@ -3766,9 +3766,10 @@ var TIDY_DEFAULTS = Object.freeze({ findings: 50 });
 var TIDY_BOUNDS = Object.freeze({ findings: [1, 500] });
 var GM_PAGE_DEFAULTS = Object.freeze({ duringTurn: "hold" });
 var PERF_DEFAULTS = Object.freeze({ reuseViews: true });
+var MIND_FILE_TITLES = Object.freeze({ core: "Who they are", now: "Right now", memory: "Memory", beliefs: "Beliefs", people: "People", plans: "Plans", outline: "Their past in outline", profile: "Profile" });
 var STORY_DEFAULTS = Object.freeze({
   budget: Object.freeze({ stretchMinutes: 1440, t1: 1, t2: 2, t3: 4 }),
-  limits: Object.freeze({ beatChars: 800, quoteChars: 600, quotes: 6, people: 24, beatsPerTurn: 40, draftChars: 600, draftsPerTurn: 12, whyChars: 300, beatsRead: 40, feedItems: 40, openingChars: 4000 }),
+  limits: Object.freeze({ beatChars: 800, quoteChars: 600, quotes: 6, people: 24, beatsPerTurn: 40, draftChars: 600, draftsPerTurn: 12, whyChars: 300, beatsRead: 24, feedItems: 24, openingChars: 4000 }),
   minds: Object.freeze({ chars: Object.freeze({ core: 4000, now: 2000, memory: 8000, beliefs: 4000, people: 4000, plans: 2000, outline: 6000, profile: 1500 }), playerMind: true }),
   models: Object.freeze({ default: Object.freeze({}), agents: Object.freeze({}), standings: Object.freeze({}), runs: Object.freeze({}), characters: Object.freeze({}) }),
   prepare: Object.freeze({ stretchMessages: 40, askAboveTokens: 200000, reliveAtOnce: 3, beatsPerStretch: 30, readChars: 60000, textChars: 1200, callTokens: 60000, surveyChars: 60000, watchSeconds: 5, watchRuns: 60, runMinutes: 60, runRounds: 200, idleRuns: 2 })
@@ -3783,6 +3784,34 @@ var STORY_BOUNDS = Object.freeze({
   modelChars: 200,
   prepare: Object.freeze({ stretchMessages: [5, 400], askAboveTokens: [0, 1e8], reliveAtOnce: [1, 24], beatsPerStretch: [1, 200], readChars: [2000, 1e6], textChars: [200, 8000], callTokens: [1000, 2000000], surveyChars: [2000, 1e6], watchSeconds: [2, 300], watchRuns: [10, 500], runMinutes: [5, 1440], runRounds: [10, 5000], idleRuns: [1, 20] })
 });
+var STORY_LIMIT_LABELS = Object.freeze({
+  beatChars: "A beat's text",
+  quoteChars: "One quote",
+  quotes: "Quotes in a beat",
+  people: "People in a beat",
+  beatsPerTurn: "Beats in a turn",
+  draftChars: "A draft's text",
+  draftsPerTurn: "Drafts in a turn",
+  whyChars: "A reason",
+  beatsRead: "Beats in one read",
+  feedItems: "Beats taken in at once",
+  openingChars: "The moment, as a turn begins"
+});
+var PREPARE_LABELS = Object.freeze({
+  stretchMessages: "Messages in a stretch",
+  askAboveTokens: "Ask first above",
+  reliveAtOnce: "Principals reliving at once",
+  beatsPerStretch: "Beats in a stretch",
+  readChars: "One read of a stretch",
+  textChars: "Each text of the plan",
+  callTokens: "A model call, before one is measured",
+  surveyChars: "One answer of the survey",
+  watchSeconds: "The live view asks every",
+  watchRuns: "Runs the live view looks through",
+  runMinutes: "Time for one run",
+  runRounds: "Rounds for one run",
+  idleRuns: "Runs without progress"
+});
 var STORY_PRESET_DEFAULTS = Object.freeze({
   categories: Object.freeze({ "Story contract": "contract", Author: "author", Characters: "character", "Game master": "gm", Narrator: "narrator", Voice: "voice", "Presentation modules": "module" }),
   limits: Object.freeze({ contract: 16000, author: 40000, character: 20000, gm: 20000, narrator: 48000, voice: 12000, list: 4000, line: 160, module: 24000 })
@@ -3792,8 +3821,17 @@ var STORY_PRESET_BOUNDS = Object.freeze({
   name: 80,
   limits: Object.freeze({ contract: [100, 400000], author: [100, 400000], character: [100, 400000], gm: [100, 400000], narrator: [100, 400000], voice: [100, 400000], list: [100, 1e5], line: [20, 1000], module: [100, 400000] })
 });
-var NARRATION_DEFAULTS = Object.freeze({ check: "gm", revisions: 2, replyChars: 1500, recentChars: 4000, passageChars: 12000, changes: 12, changeChars: 400, ownChars: 600, directLine: "own" });
+var NARRATION_DEFAULTS = Object.freeze({ check: "gm", revisions: 2, replyChars: 1500, recentChars: 4000, passageChars: 24000, changes: 12, changeChars: 400, ownChars: 600, directLine: "own" });
 var NARRATION_BOUNDS = Object.freeze({ revisions: [0, 10], replyChars: [0, 20000], recentChars: [0, 40000], passageChars: [200, 60000], changes: [1, 40], changeChars: [40, 2000], ownChars: [0, 4000] });
+var NARRATION_LABELS = Object.freeze({
+  revisions: "Revisions",
+  changes: "Changes a check may ask",
+  changeChars: "Longest change",
+  replyChars: "The reply so far",
+  recentChars: "The chat's recent prose",
+  passageChars: "Longest passage",
+  ownChars: "Released unchecked"
+});
 var JOB_SETTINGS_DEFAULTS = Object.freeze({ routineLoreTokens: 8000 });
 
 // src/engine/read-pass.ts
@@ -10909,6 +10947,7 @@ var relation = "The relation type's id: knows, owns, member_of, regard, in, or o
 var path = "The workspace file's path: names joined by /, such as notes/marcus.md; start it with ~/ for the global workspace, which every chat shares, such as ~/notes/style.md.";
 var under = "Only files under this folder, such as notes/; leave it out for every file.";
 var lore = "The lore entry's id, as lore_index, lore_search or lore_grep gives it: a short id such as lr0101, a World Info entry as bookId/entryId, or a world entry's own id.";
+var pageCursor = "Where to read on: the cursor the answer before ended with. Leave it out to start from the beginning.";
 var proposes = "The answer is the change in plain words, its change type and its mode. Working a turn, the change is staged at once: it lands when the turn commits, or, when its mode is confirm, waits for the game master's Apply on the turn's review card. Otherwise nothing changes until the game master applies it.";
 var dry = "true: check only; nothing is staged.";
 var dryWhole = "true: only check the change and say what it would do; nothing is staged.";
@@ -11670,32 +11709,44 @@ var WRITE_TOOL_TEXTS = [
     family: "lore",
     tier: "read",
     note: "Gives the lore index: every entry of the chat's World Info books by its id and title.",
-    text: "The lore index: every lore entry of the World Info books this chat reads, book by book, each by its short id and title, with a line of what it holds where the title doesn't say; or, where the game master keeps an index of their own, that index as they wrote it. Read an entry whole with lore_read and its id.",
-    args: [{ path: "book", text: "Only this book's entries: its name or id; leave it out for every book." }]
+    text: "The lore index: every lore entry of the World Info books this chat reads, book by book, each by its short id and title, with a line of what it holds where the title doesn't say; or, where the game master keeps an index of their own, that index as they wrote it. Read an entry whole with lore_read and its id. An index longer than one answer comes in pages, each ending with the cursor that reads on.",
+    args: [
+      { path: "book", text: "Only this book's entries: its name or id; leave it out for every book." },
+      { path: "cursor", text: pageCursor }
+    ]
   },
   {
     name: "lore_search",
     family: "lore",
     tier: "read",
     note: "Searches the world's lore and the chat's World Info books.",
-    text: "Search the lore: the world's own entries and those of the World Info books this chat reads, best matches first. Gives each match's id, title and why it matched, with its secret marker when it is a secret or a mark in a book (who knows it, whom it is kept from). Read one whole with lore_read.",
-    args: [{ path: "query", text: "Words or names to look for." }]
+    text: "Search the lore: the world's own entries and those of the World Info books this chat reads, best matches first. Gives each match's id, title and why it matched, with its secret marker when it is a secret or a mark in a book (who knows it, whom it is kept from). Read one whole with lore_read. More matches than one answer holds come in pages, each ending with the cursor that reads on.",
+    args: [
+      { path: "query", text: "Words or names to look for." },
+      { path: "cursor", text: pageCursor }
+    ]
   },
   {
     name: "lore_grep",
     family: "lore",
     tier: "read",
     note: "Finds lore entries that hold some text.",
-    text: "Find the lore entries whose text holds some text, in any case: each entry's id and title, its secret marker, and the lines that hold it.",
-    args: [{ path: "text", text: "What to look for." }]
+    text: "Find the lore entries whose text holds some text, in any case: each entry's id and title, its secret marker, and the lines that hold it. More lines than one answer holds come in pages, each ending with the cursor that reads on.",
+    args: [
+      { path: "text", text: "What to look for." },
+      { path: "cursor", text: pageCursor }
+    ]
   },
   {
     name: "lore_read",
     family: "lore",
     tier: "read",
     note: "Reads one lore entry, by its id.",
-    text: "Read one lore entry whole, by its id, as your knowledge has it: a secret in its text is marked with who knows it, or left out where your knowledge doesn't reach.",
-    args: [{ path: "id", text: lore }]
+    text: "Read one lore entry whole, by its id, as your knowledge has it: a secret in its text is marked with who knows it, or left out where your knowledge doesn't reach. An entry longer than one answer comes in pages, each ending with the cursor that reads on: read them all, nothing is left out or given twice.",
+    args: [
+      { path: "id", text: lore },
+      { path: "cursor", text: pageCursor }
+    ]
   },
   {
     name: "lore_load",
@@ -11745,6 +11796,10 @@ var WRITE_NOTE = {
   noLore: "tool.note.no_lore",
   draftPath: "tool.note.draft_path",
   loreLate: "tool.note.lore_late",
+  badCursor: "tool.note.bad_cursor",
+  pageMore: "tool.note.page_more",
+  pageEnd: "tool.note.page_end",
+  lineCut: "tool.note.line_cut",
   noBook: "tool.note.no_book",
   cancelled: "tool.note.cancelled",
   paused: "tool.note.paused",
@@ -11783,6 +11838,24 @@ var WRITE_TOOL_NOTES = [
   { id: WRITE_NOTE.draftPath, label: "A draft outside lore-drafts/", note: "lore_draft's answer when the path it was given isn't under lore-drafts/.", text: "A lore draft goes under lore-drafts/, and {{path}} isn't there.", vars: [filePath] },
   { id: WRITE_NOTE.loreLate, label: "Lore loaded after the reply", note: "lore_load's answer once the reply its turn was writing has gone out: it loads lore only while the turn is still being prepared.", text: "This turn's reply is written already, so {{id}} isn't loaded: load lore while a turn is being prepared.", vars: [{ name: "id", text: "the entry id the call gave" }] },
   { id: WRITE_NOTE.noBook, label: "No such book", note: "lore_index's answer when no World Info book read here has the name or id it was given.", text: "No World Info book {{book}} is read here.", vars: [{ name: "book", text: "the book's name or id the call gave" }] },
+  { id: WRITE_NOTE.badCursor, label: "Not a cursor", note: "A lore read's answer when its cursor isn't one an answer of that read gave.", text: "{{cursor}} isn't a cursor {{tool}} gave here. Leave cursor out to start from the beginning, or give the one the answer before ended with.", vars: [{ name: "cursor", text: "the cursor the call gave", required: true }, { name: "tool", text: "the tool called" }] },
+  {
+    id: WRITE_NOTE.pageMore,
+    label: "A page, more to come",
+    note: "Ends a page of a lore read whose answer is longer than one tool result may be (the setting named, Settings → Agents → Budgets): what this page gives, and the cursor that reads on.",
+    text: "This gives {{from}} to {{to}} of {{total}} {{what}}: one answer holds at most {{chars}} characters ({{setting}}, Settings → Agents → Budgets). Read on: the same call with cursor {{cursor}}.",
+    vars: [
+      { name: "from", text: "where this page starts, counted from 1", required: true },
+      { name: "to", text: "where it ends", required: true },
+      { name: "total", text: "how many there are in all", required: true },
+      { name: "what", text: "characters, matches or results" },
+      { name: "chars", text: "the most one answer holds", required: true },
+      { name: "setting", text: "the setting's label" },
+      { name: "cursor", text: "the cursor that reads on", required: true }
+    ]
+  },
+  { id: WRITE_NOTE.pageEnd, label: "The last page", note: "Ends the last page of a lore read that came in pages.", text: "This gives {{from}} to {{to}} of {{total}} {{what}}: the last of them.", vars: [{ name: "from", text: "where this page starts, counted from 1", required: true }, { name: "to", text: "where it ends", required: true }, { name: "total", text: "how many there are in all", required: true }, { name: "what", text: "characters, matches or results" }] },
+  { id: WRITE_NOTE.lineCut, label: "A line cut to fit", note: "Stands beside a line lore_grep found that is longer than one answer may be on its own (the setting named, Settings → Agents → Budgets): what was left out, and how to read it.", text: "This line is {{size}} characters, and only its first {{shown}} fit one answer ({{setting}}, Settings → Agents → Budgets): lore_read {{id}} reads the entry whole, in pages.", vars: [{ name: "size", text: "the line's length", required: true }, { name: "shown", text: "how much of it is given", required: true }, { name: "setting", text: "the setting's label" }, { name: "id", text: "the entry's id", required: true }] },
   { id: WRITE_NOTE.cancelled, label: "Cancelled", note: "A write's answer when the agent's work was cancelled before it ran.", text: "The agent's work was cancelled, so nothing was checked or written.", vars: [] },
   { id: WRITE_NOTE.paused, label: "The chat is paused", note: "An apply's answer while an earlier message's edit waits for Keep or Discard.", text: "An earlier message was edited: Keep or Discard it first, under that message.", vars: [] },
   { id: WRITE_NOTE.noWorld, label: "No world", note: "A write's answer when the chat plays no LumiRPEngine world, or its world isn't loaded.", text: "This chat plays no LumiRPEngine world, or its world isn't loaded.", vars: [] },
@@ -91917,7 +91990,7 @@ Six concepts plus one pipeline.
   - Writes are atomic (temp file, then \`storage.move\`). Pinned revisions are never garbage-collected automatically.
   - Edits in Build go to a **draft**; **Commit** makes a new revision and **Discard** throws the draft away.
   - Revisions are cached per user, world and revision (an LRU of 128, never replaced in place). A read or export needs a revision the world's index lists. An open chat pins only the revisions its ledger references (its run's, the targets of its migrate markers on the chain or in held writes, and the revisions its records were planned under), loading each before a fold can need it, so evicting a cache entry never breaks a fold and a world's long commit history stays out of memory.
-- **User-owned settings** (\`userStorage/settings.json\`): the helper model (\`helper\`: connection, model, reasoning effort, max tokens and sampling parameters, apart from the presets), model-use preset, per-step provider, connection, model and parameters, budgets, realism and time controls (§9.1, §9.2). Realism and time **seed new chats only**, filling in what the world's own defaults leave out (or replacing them, with "Use my settings instead of a world's defaults for new chats" on); a running chat changes through markers. Imports never change them. A settings file is conformed field by field to its schema when read (types, enums, ranges; open maps keep safe keys only; a bad value falls back to its default); a step's route is the file's own where it has one, so an effort or parameter it leaves out is the helper model's, never its preset's. A file without \`defaults\`, saved before the defaults rose for reasoning models, has each value still at an old default read as its new one: a step's 2,000 max tokens is dropped so the step follows the helper model, and the old lore tokens, lookup counts, section and Minds budgets rise. A file before \`defaults: 3\`, saved before memory, consolidation and the time skip's steps stopped reasoning (§5.3), has those steps' effort set to Off where it left it to a helper model at its default effort (Inherit). A file at \`defaults: 2\` or \`3\`, saved before the sections told their facts whole (§6.11), has a section budget still at Standard's old 4,000 or Full's old 8,000 read as that preset's new one (8,000, 12,000). Any other value is the user's and stays.
+- **User-owned settings** (\`userStorage/settings.json\`): the helper model (\`helper\`: connection, model, reasoning effort, max tokens and sampling parameters, apart from the presets), model-use preset, per-step provider, connection, model and parameters, budgets, realism and time controls (§9.1, §9.2). Realism and time **seed new chats only**, filling in what the world's own defaults leave out (or replacing them, with "Use my settings instead of a world's defaults for new chats" on); a running chat changes through markers. Imports never change them. A settings file is conformed field by field to its schema when read (types, enums, ranges; open maps keep safe keys only; a bad value falls back to its default); a step's route is the file's own where it has one, so an effort or parameter it leaves out is the helper model's, never its preset's, and so is the story preset's category mapping (\`storyPreset.categories\`), whole: a shipped name the user took out stays out across a save and a load. A file without \`defaults\`, saved before the defaults rose for reasoning models, has each value still at an old default read as its new one: a step's 2,000 max tokens is dropped so the step follows the helper model, and the old lore tokens, lookup counts, section and Minds budgets rise. A file before \`defaults: 3\`, saved before memory, consolidation and the time skip's steps stopped reasoning (§5.3), has those steps' effort set to Off where it left it to a helper model at its default effort (Inherit). A file at \`defaults: 2\` or \`3\`, saved before the sections told their facts whole (§6.11), has a section budget still at Standard's old 4,000 or Full's old 8,000 read as that preset's new one (8,000, 12,000). A file before \`defaults: 10\`, saved before the harness's sizes were set for long-form play, has the longest passage still at 12,000 characters read as 24,000, the beats in one read and taken in at once still at 40 read as 24, and the engine's answers shown whole (\`agents.clipChars\`) still at 4,000 characters read as 8,000. Any other value is the user's and stays. An older file's \`agents.harnessLimits.worldExamples\` and \`worldTextChars\`, which nothing read, are dropped as it loads.
 
 ### 4.2 Engine-managed lore book (D11)
 
@@ -92481,7 +92554,7 @@ What LRE's agents read the world through, and the reads it holds; the writes, th
 - **The resolver** (\`backend/agents/tools/resolve.ts\`): a person, a thing, a place or a track as a model wrote it (its id in any case; its whole name; its name followed by a mark, as an \`everyone\` answer writes it; words of one name only) resolves only among what the view may name. A hidden one is answered exactly as one that doesn't exist ("No such person here: …"), and a name that fits several lists only those the view may name.
 - **The read families** (\`backend/agents/tools/read/\`), each answering in compact JSON with every named thing as \`{id, name}\` and reusing the engine's own readers: people (find, sheet, where, regard), places and travel (a place, who and what is there, route and travel time, and \`places_find\`: the places words name, places made in play among them, each with the place it is in and how it matched), items (inventory, holder, condition; and over the things model, §28: \`items_find\`, the things words name through the one name resolver, each with whose it is, where, its size and why it matched, or that several or none do; \`items_at\`, a place's or a holder's contents tree with whose and size, secrets marked; \`items_of\`, a person's things on them, held for others, theirs elsewhere, lent out, borrowed and missing; \`items_read\`, one thing whole: type, size and where it comes from, traits, where it is and is kept, whose, stated or presumed, who may use it on which ground, its grants, how its holder got it and who made it; \`items_access\`, whether someone may use and dispose of it, each with its basis), money (balances by visibility, prices), quests and secrets (tracks, stage, what moves one on), knowledge (who knows a fact, what someone knows: each holding with how and from whom, since when, belief, confidence, a suspicion under the threshold, and whom it is kept from), time (the clock, local to a place asked about or else to where the player character is; someone's day), checks (an action's odds) and minds (a mind, its notes, commitments and plans).
 - **The organizations family** (\`orgs\`, \`read/orgs.ts\`, ORG-SPEC §7.1; granted wherever \`money\` is): \`orgs_list\`, the organizations someone belongs to (the player character by default), each with its type, their title and position there, the powers they hold and since when, or under \`gm\` with no one named every organization with who runs it; \`orgs_read\`, one organization's page whole or one part of it (overview, people, money, property, ownership, taxes, rules, decisions, log; decisions is the Decisions section, §29.19-29.20, its motions and requests by the ids \`gm_org\` names); \`orgs_who_may\`, whether someone may use a power there now, on what basis and within what limits, or every holder with the chain of bases it rests on. Secrecy is marks, never a filter: every view reads the GM's whole page (every member, every section, the dues and the whole History) with the player character's own place there (\`you\`), each person and place named as the view names them, a secret one marked with who knows it where the view marks (a ref, a name beside its id, each restricted name in a History line or a chain) and carrying its visibility under \`gm\`; only the player's own Orgs page counts the people they can't see.
-- **Answers and limits:** a tool returns what it found whole; the runtime clips a long result to **Tool results clipped past** and keeps the rest in the agent's scratch (§15 of the agent-loop plan). A refusal is one of the tool layer's notes (\`tool.note.*\`), editable on the Every agent page.
+- **Answers and limits:** a tool returns what it found whole; the runtime clips a long result to **Engine answers shown whole** (\`agents.clipChars\`) and keeps the rest in the agent's scratch (§15 of the agent-loop plan). A refusal is one of the tool layer's notes (\`tool.note.*\`), editable on the Every agent page.
 - **The lore family** (\`backend/agents/tools/lore.ts\`, §4.2): \`lore_index\` (the lore index, or the user's own index entry, as the view reads it; \`book\` keeps one book's line), \`lore_search\`, \`lore_grep\` and \`lore_read\` read the world's lore and the World Info books the chat reads, live; \`lore_load\` (turn agents only, §4.6) puts an entry into the reply the turn is writing; \`lore_save\` and \`lore_draft\` propose a workspace file and never write a book or the world's lore. Every one takes an entry by its short id (a mark's number after \`#\`), its \`bookId/entryId\` or its lore id (\`loreIdOf\`: a lore id the corpus holds, else the index's short id, else an id given before, else \`bookId/entryId\`), and answers each book entry by its short id.
 ### 7.2 The tool layer's writes (C7)
 Every change an agent makes goes through one writer (\`backend/agents/tools/writer.ts\`). \`outsideWriter(rt, env)\` is the writer outside a turn's engine run (the GM agent's chat and GM → Workspace; a turn agent's comes with Increment 2), with two calls: \`dryRun(op)\`, which checks one operation as it would be written and says what it would change, and \`apply(ops, label)\`, which writes a batch. Outside a turn a write tool only proposes: it answers with the dry run, and nothing changes until the GM assistant's collected proposals are applied. Working a turn, it stages instead (\`turnWriter\`'s \`stage\`, §4.6): the change lands when the turn commits, or waits for the GM's Apply on the review card.
@@ -92520,6 +92593,7 @@ Every change an agent makes goes through one writer (\`backend/agents/tools/writ
 - **The lore's tools** (family \`lore\`, \`backend/agents/tools/lore.ts\` \`LORE_TOOLS\`), over the view's live lore: the world's lore and the World Info books the chat reads, as the helpers read them live (§5.4); an entry the view gives nothing of reads as one that doesn't exist.
   - Read tier: \`lore_search\` gives ids, titles and why each matched; \`lore_grep\`, the lines holding a text (each with its entry's id, title and line number). Both mark a secret entry (\`secret\`).
   - Read tier: \`lore_read\`, one entry whole by id, its text through \`applyMarks\`, every mark marked; a secret entry marked with who knows it.
+  - Paging (read tier, \`lore_index\`, \`lore_search\`, \`lore_grep\`, \`lore_read\`): on the harness an answer longer than the engine's own size for one tool result (\`agents.clipChars\`, which the harness lists as each one's \`wholeChars\`) comes in pages, as LumiAH's own tools page theirs: each page ends with what it gives, the setting that bounds it and the cursor the same call reads on with (\`tool.note.page_more\`, \`tool.note.page_end\`), so a long entry is read whole across pages with nothing left out or given twice; a grep's line too long for a page of its own gives its start and says so (\`tool.note.line_cut\`). Elsewhere an answer goes whole, and the runtime clips it at that same setting.
   - GM tier: \`lore_save\` proposes the entry's text as read to a workspace file (\`lore/<id>.md\` by default), and \`lore_draft\` proposes a draft under \`lore-drafts/\` (\`lore-drafts/<id>.md\` by default; a path elsewhere is refused, \`tool.note.draft_path\`): a front matter naming the entry (\`lore:\` its id, \`title:\` its title, or the id when the view can't read it), then the text. Both are \`ws_write\` operations.
 - **No tool writes lore:** no tool writes a user's book or the world's lore. The user applies a draft in Build, on their own press (Build's own Save).
 
@@ -95960,7 +96034,7 @@ While a main agent decides the turn, **A turn at a glance** also shows how each 
 - **System instructions** (8,000 tokens): how much of each agent's prompt its system files may take together: **AGENTS.md** and its own **roles/<role>.md**, your global workspace's (~/) and this chat's, written in GM → Workspace (see [Workspace](#workspace)). They follow the agent's system prompt, the global ones first, so this chat's have the last word; past it, the file that no longer fits is cut at a line, the rest are left out, and the agent is told which. None ships, so until you write one they cost nothing.
 - **Budgets** is a page of its own: *Each agent*, *Each turn, every agent together*, *Loops and large results*, *The GM's edits*, *Kept in memory*, each a group with its Changed count; a role, the main agent or the assistant may set any of the first group as its own, on its page. Each limit says what it limits and what happens when it's reached: for **each agent**, the prompt and the answer of one call (the answer at 8,192 tokens), the time of one call, the tool calls one answer may make, its prompt and answer tokens in all, its rounds of tool calls (10), its time, its **revisions** (2: the messages it may be sent after its first answer) and how many of its tool calls run at once (4); for **each turn**, every agent together: prompt tokens, answer tokens, rounds and time, each none by default (a long chat's turn sends far more than a short one's, so each agent's own limits bound it; set one only where you want a limit for the whole turn). A call never asks for more answer tokens than the agent or the turn has left, and one that its prompt would take past a budget isn't sent: the agent stops with what it has, and its record says which limit stopped it.
 - **Fresh runs per request** (1), among each agent's budgets: how many times the main agent may run a role afresh on a request it already answered; the fresh run drops what the last one staged, and its revisions start again. It applies to turn roles only (not the assistant, the main agent or the final review).
-- **Loop detector** (3): the same tool call with the same arguments three times in a row stops the agent before it's run. The final review's rewrites and take-outs count only while the prompt hasn't changed since the last one: they name a line by its number as it reads now, so the same number after an edit is the next line. **Tool results clipped past** (4,000 characters): a longer result reaches the model clipped, and the rest waits in the agent's scratch, which it reads with its built-in **scratch_read** tool.
+- **Loop detector** (3): the same tool call with the same arguments three times in a row stops the agent before it's run. The final review's rewrites and take-outs count only while the prompt hasn't changed since the last one: they name a line by its number as it reads now, so the same number after an edit is the next line. **Engine answers shown whole** (8,000 characters): how much of one answer of the engine's own tools an agent is shown whole. On a Harness chat it bounds the world tools' answers: a longer value comes as an outline to read further into, and a list of names or issues is cut to half of it, saying how many more (LumiAH's own **Tool results clipped past** is LumiAH's setting, under **Harness** → **System** → **Settings**). On the agents engine a longer result reaches the model clipped, and the rest waits in the agent's scratch, which it reads with its built-in **scratch_read** tool. A file saved at the old default of 4,000 reads as 8,000; a number you chose stays.
 - **GM edits per turn** (10), among the budgets: how many of the GM's own edits (a spawn, a removal, any field, a stage, the clock) a turn's agents may stage together, over the whole turn: those made before the plan, after it and after the reply all count; the ones past it are refused, and the agent that asked is told so. Only a role whose tier grants the GM's edits (**Roles**) makes any.
 - **Kept in memory**, among the budgets, each with its **Default**: **Agent turns under way** (64): past it, starting another lets the oldest go, a turn that went stale; **Turns waiting at a gate** (256), across your chats: a turn that waits on you (the action or the outline shown before playing, a question asked first, the review card) keeps everything its agents had done, so answering it asks none of them again; past it, your oldest waiting turn forgets that, so when you answer it the turn asks its agents again where it still needs them, and a review gate's turn still plays its plan and lands what you let through, but its record no longer says which role made the changes from before the gate, and the narrator isn't told the lines its roles had; **Chats whose review cards are watched** (256): past it, the chat watched longest ago stops hearing about its cards until its page asks for them again; **Chats in the live view** (16): how many chats' latest agent turn GM → Live keeps, the one started longest ago let go past it (Live then shows nothing for it until its next turn, and its transcript stays in GM → Workspace); **Agent texts kept once read** (4,000,000 characters): the agents' stored texts (the main agent's session, the GM assistant's conversation, the workspace's files) kept in memory once read, so reading one again takes no trip to storage; past it the text read longest ago goes, and 0 reads every one from storage; and **Messages kept worked out** (65,536): how many of your chats' messages the engine keeps worked out, each with what it did to the world, so working a chat out again starts where it changed rather than from its first message; past it, the message used longest ago is worked out again when next needed. Keep it above your longest chat's messages. Each is at least 1 but **Agent texts kept once read**, which may be 0.
 - **Chat kept for its agents** (5 minutes), among **Kept in memory**: the agents of a job (the story's preparation among them) and the story's pages read a chat's messages once and keep them, so the next call and the next agent read none of it again. A message sent, edited, deleted or swiped ends that at once; past this time the chat is read again anyway. At 0 every read asks Lumiverse. What a turn reads to answer you is not kept this way.
@@ -98967,7 +99041,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "5f5a0bb1";
+var BUILD = "c52acae6";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

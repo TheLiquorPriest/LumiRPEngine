@@ -71708,6 +71708,7 @@ function leftOutWhy(message, source) {
 }
 
 // node_modules/lumi-ah/src/core/text-def.ts
+var SETTING_VAR = { name: "setting", text: `the setting, and where it is changed: "Tool results clipped past (LumiAH's Settings \u2192 The agent loop)"` };
 var SCRATCH_READ = "scratch_read";
 var TOOL = {
   chatSearch: "chat_search",
@@ -71861,19 +71862,19 @@ function defaultSettings() {
       [AGENT.summarizer]: { connectionId: null, model: null, effort: "inherit", tools: [...SUMMARIZER_TOOLS], toolCalls: "auto", budget: { ...unlimited, callTokensOut: 16000, toolTurns: 12, revisions: 1, concurrency: 4 } }
     },
     turn: { tokensIn: null, tokensOut: null, toolTurns: null, wallMs: null },
-    loop: { repeats: 3, clipChars: 6000, thinkingInToolLoops: true, stream: true, charsPerToken: 3.2, retries: 2, retryWaitMs: 2000, answerFloor: 256, warnRounds: 2, cutRoomFactor: 2, cutRoomTokens: 64000 },
+    loop: { repeats: 3, clipChars: 12000, thinkingInToolLoops: true, stream: true, charsPerToken: 3.2, retries: 2, retryWaitMs: 2000, answerFloor: 256, warnRounds: 2, cutRoomFactor: 2, cutRoomTokens: 64000 },
     cache: { retention: DEFAULT_CACHE_RETENTION, key: "" },
     connections: { atOnce: null, throttles: {}, toolRefusalMinutes: 60 },
     prices: {},
-    session: { summarizeAtTokens: 32000, keepTurns: 3, summaryTokens: 6000, receiptChars: 600, receiptArgChars: 600, rollbackMarginTokens: 8000 },
-    tools: { pageChars: 4000, pageItems: 10, lineChars: 300, excerptChars: 400, pieceChars: 600, chatBatch: 200, grepTurns: 40 },
+    session: { summarizeAtTokens: 48000, keepTurns: 4, summaryTokens: 6000, receiptChars: 1500, receiptArgChars: 1500, rollbackMarginTokens: 8000 },
+    tools: { pageChars: 8000, pageItems: 10, lineChars: 300, excerptChars: 400, pieceChars: 600, chatBatch: 200, grepTurns: 40 },
     keep: { prompts: true, transcripts: true, blobChars: 4000000, summaries: 32, promptDays: 30, transcriptDays: 90, spanDays: null, graceHours: 24 },
     trace: { deltaMs: 200 },
-    workspace: { fileChars: 200000, files: 400, areaChars: 4000000, pathChars: 200, versions: 10, pinChars: 12000, agentsPinUser: false },
+    workspace: { fileChars: 200000, files: 400, areaChars: 4000000, pathChars: 200, versions: 10, pinChars: 24000, agentsPinUser: false },
     guidance: { chars: 8000, agentsEdit: false },
     skills: { listChars: 4000 },
-    delegation: { depth: 2, atOnce: 3, perRun: 12, grant: "own", fileChars: 12000, asChars: 200, replyHoldChars: 200 },
-    jobs: { enabled: true, atOnce: 1, perRun: 3, budget: { tokensIn: 600000, tokensOut: 60000, toolTurns: 60, wallMs: 900000 }, tokensPerDay: 3000000, taskChars: 4000, openingChars: 600, recordWaitMs: 120000, chain: true, delegations: null, dueWaitMs: 60000 },
+    delegation: { depth: 2, atOnce: 3, perRun: 24, grant: "own", fileChars: 12000, asChars: 200, replyHoldChars: 200 },
+    jobs: { enabled: true, atOnce: 2, perRun: 6, budget: { tokensIn: 600000, tokensOut: 60000, toolTurns: 60, wallMs: 900000 }, tokensPerDay: 12000000, taskChars: 4000, openingChars: 600, recordWaitMs: 120000, chain: true, delegations: null, dueWaitMs: 60000 },
     approval: { tiers: { read: "allow", write: "allow", external: "allow" }, tools: {}, waitMs: 300000 },
     spend: { tokensPerDay: null, costPerDay: null, cachedWeight: 0.1 },
     extension: { waitMs: 1e4 },
@@ -72107,7 +72108,7 @@ var SETTINGS_SCHEMA = {
       description: "How much one tool answer holds. A longer one comes in pages, each naming the cursor for the next.",
       type: "object",
       properties: {
-        pageChars: whole2("Answer length", "The most characters one tool answer holds. Keep it under Tool results clipped past, so answers are paged and not clipped.", 200, "characters"),
+        pageChars: whole2("Answer length", "The most characters one tool answer holds. A longer answer comes in pages. It is never more than Tool results clipped past: a larger value reads as that, so an answer is paged and never clipped.", 200, "characters"),
         pageItems: whole2("Hits per page", "The most hits or lines one page of a search or a listing shows.", 1, "items"),
         lineChars: whole2("Line length", "A line a grep found is shown at most this long, around what it found.", 40, "characters"),
         excerptChars: whole2("Excerpt length", "A search hit's excerpt, at most.", 40, "characters"),
@@ -72345,11 +72346,18 @@ function read(schema, fallback, value, path, problems) {
 function settingsSchema(scope) {
   return { ...SETTINGS_SCHEMA, properties: { ...SETTINGS_SCHEMA.properties, agents: agentsSchema(scope) } };
 }
-function settingTitle(path) {
-  let at = SETTINGS_SCHEMA;
-  for (const key of path)
-    at = isRecord(at) && isRecord(at.properties) ? at.properties[key] : undefined;
-  return isRecord(at) && typeof at.title === "string" ? at.title : path.join(".");
+function settingPlaceOf(scope, place) {
+  const schema = scope ? settingsSchema(scope) : SETTINGS_SCHEMA;
+  return (path) => {
+    const titles = [];
+    let at = schema;
+    for (const key of path) {
+      at = isRecord(at) && isRecord(at.properties) ? at.properties[key] : undefined;
+      titles.push(isRecord(at) && typeof at.title === "string" ? at.title : key);
+    }
+    const title = titles.pop() ?? "";
+    return place?.(path, title, titles) ?? `${title} (Settings \u2192 ${titles.join(" \u2192 ")})`;
+  };
 }
 function shapeOf(scope) {
   const defaults = defaultSettings();
@@ -72400,8 +72408,9 @@ var AGENTS_TEXT = {
   noReply: "agents.delegate.no_reply",
   file: "agents.file",
   fileNamed: "agents.file.named",
+  pinnedNamed: "agents.pinned.named",
   pinned: "agents.pinned",
-  answer: "agents.delegate.answer",
+  from: "agents.delegate.from",
   stopped: "agents.delegate.stopped",
   noAgent: "agents.delegate.no_agent",
   notOffered: "agents.not_offered",
@@ -72438,16 +72447,16 @@ var AGENTS_TEXTS = [
   { id: AGENTS_TEXT.guidanceCharacter, group: AGENTS, label: "Guidance: the character's level", note: "Fills {{whose}} for the character's guidance file.", text: "from the user, for every chat with {{character}}", vars: [v("character", "the character's name", true)] },
   { id: AGENTS_TEXT.guidanceChat, group: AGENTS, label: "Guidance: the chat's level", note: "Fills {{whose}} for learned/GUIDANCE.md.", text: "for this chat", vars: [] },
   { id: AGENTS_TEXT.guidanceCut, group: AGENTS, label: "Guidance: cut", note: "Stands for a guidance file longer than Guidance length: its start, and where the whole is.", text: `{{text}}
-[Cut here, at {{shown}} of {{chars}} characters. The whole is the workspace file {{path}}.]`, vars: [v("text", "the start of the file", true), v("shown", "the characters given"), v("chars", "the file's length"), v("path", "the file's path", true)] },
+[Cut here, at {{shown}} of {{chars}} characters, as far as {{setting}} goes. The whole is the workspace file {{path}}.]`, vars: [v("text", "the start of the file", true), v("shown", "the characters given"), v("chars", "the file's length"), v("path", "the file's path", true), SETTING_VAR], setting: ["guidance", "chars"] },
   { id: AGENTS_TEXT.guidanceCutOwn, group: AGENTS, label: "Guidance: cut, where it is no file", note: "Stands for a level an extension keeps as a text of its own, when that is longer than Guidance length: its start. The rest is in no workspace file.", text: `{{text}}
-[Cut here, at {{shown}} of {{chars}} characters. The rest is in no workspace file, so it can't be read from here: work from what is above.]`, vars: [v("text", "the start of the level's text", true), v("shown", "the characters given"), v("chars", "the text's length")] },
+[Cut here, at {{shown}} of {{chars}} characters, as far as {{setting}} goes. The rest is in no workspace file, so it can't be read from here: work from what is above.]`, vars: [v("text", "the start of the level's text", true), v("shown", "the characters given"), v("chars", "the text's length"), SETTING_VAR], setting: ["guidance", "chars"] },
   { id: AGENTS_TEXT.guardUser, group: ANSWERS, label: "Guidance an agent can't change", note: "A workspace tool's answer to a change of the user's guidance, or of the middle level's.", text: "Not changed: {{path}} is guidance the user writes for you, and an agent can't change it. If it should change, say what and why in your answer.", vars: [v("path", "the file's path", true)] },
   { id: AGENTS_TEXT.guardChat, group: ANSWERS, label: "The chat's guidance, while agents may not edit it", note: "A workspace tool's answer to a change of the chat's guidance while Settings don't let agents edit it.", text: "Not changed: {{path}} is this chat's guidance, and Settings don't let agents edit it (Agents may edit the chat's guidance). If it should change, say what and why in your answer.", vars: [v("path", "the file's path", true)] },
   { id: AGENTS_TEXT.skills, group: AGENTS, label: "Skills: the list", note: "Follows the instructions of an agent that holds skill_load: the skills it may load.", text: `Skills you can load with skill_load. Each is a procedure written for you: load one when what you are doing is what it is for, and follow it.
 {{skills}}{{more}}`, vars: [v("skills", "each skill, as Skills: one skill writes it", true), v("more", "how many more there are, when the list was cut")] },
   { id: AGENTS_TEXT.skill, group: AGENTS, label: "Skills: one skill", note: "One skill in the list, and in skill_load's own list.", text: "- {{id}}: {{name}}. {{description}}", vars: [v("id", "the skill's id, which skill_load takes", true), v("name", "its name"), v("description", "what it is for")] },
   { id: AGENTS_TEXT.skillsMore, group: AGENTS, label: "Skills: more than fit", note: "Ends a list of skills cut at Skill list length.", text: `
-({{count}} more aren't listed here: skill_load with no skill lists them all.)`, vars: [v("count", "how many skills were left out", true)] },
+({{count}} more aren't listed here, past {{setting}}: skill_load with no skill lists them all.)`, vars: [v("count", "how many skills were left out", true), SETTING_VAR], setting: ["skills", "listChars"] },
   ...toolTexts(TOOL.skillLoad, "Load a skill: a procedure written for you to follow. Give the id of one your instructions list; leave skill out to list every skill there is.", {
     skill: "The skill's id. Leave it out to list the skills.",
     cursor: CURSOR_ARG
@@ -72471,7 +72480,7 @@ The agents you can delegate to:
   { id: toolArgId(TOOL.delegate, "task"), group: GROUP.tools, label: "delegate: task", note: "The description of delegate's task argument.", text: "What it is to do and what you want back, in full. It knows nothing you don't write here.", vars: [] },
   { id: toolArgId(TOOL.delegate, "files"), group: GROUP.tools, label: "delegate: files", note: "The description of delegate's files argument.", text: "Workspace files to give it with the task, by path. Leave it out for none.", vars: [] },
   { id: toolArgId(TOOL.delegate, "as"), group: GROUP.tools, label: "delegate: as", note: "The description of delegate's as argument, offered where an extension builds LumiAH in.", text: "Which one this agent is to be, where its kind stands for many (a character's id, for one): what it may read and the model it runs on follow from it. Leave it out for none.", vars: [] },
-  { id: toolArgId(TOOL.delegate, "to_reply"), group: GROUP.tools, label: "delegate: to_reply", note: "The description of delegate's to_reply argument, offered to an agent that may write the reply itself.", text: "true: its answer is part of the reply, streaming to the user as it is written, after what was released before; this call's result is that answer too. Leave it out for an answer only you read.", vars: [] },
+  { id: toolArgId(TOOL.delegate, "to_reply"), group: GROUP.tools, label: "delegate: to_reply", note: "The description of delegate's to_reply argument, offered to an agent that may write the reply itself. A turn's reply is released once, whole.", text: "true: its answer is this turn's whole reply, streaming to the user as it is written; this call's result is that answer too. A turn's reply is released once: hand it on only for an answer that is the whole reply, and never after reply_write. Leave it out for an answer only you read.", vars: [] },
   ...toolTexts(TOOL.agentMessage, "Send a follow-up to an agent you delegated to this turn. It goes on from where it left off, with everything it had read, and its answer is this tool's result.", {
     handle: "The handle that agent's answer named, such as agent_1a2b3c4d.",
     text: "What you want of it now."
@@ -72495,20 +72504,19 @@ For reference, the user's newest message:
 {{request}}`, vars: [v("request", "the user's newest message, as the main agent reads it", true)] },
   { id: AGENTS_TEXT.file, group: AGENTS, label: "A file in context", note: "One workspace file put in an agent's context whole: given with a task, or pinned.", text: `[{{path}}: {{chars}} characters, version {{version}}]
 {{text}}`, vars: [v("path", "the file's path", true), v("chars", "its length"), v("version", "its version, which a write or an edit of it names"), v("text", "its text", true)] },
-  { id: AGENTS_TEXT.fileNamed, group: AGENTS, label: "A file named, not included", note: "Stands for a file that didn't fit the room its setting gives (Files given with a task, Pinned files in context).", text: "[{{path}}: {{chars}} characters, not included here. workspace_read reads it.]", vars: [v("path", "the file's path", true), v("chars", "its length")] },
+  { id: AGENTS_TEXT.fileNamed, group: AGENTS, label: "A file named, not included", note: "Stands for a file given with a task that didn't fit the room Files given with a task leaves.", text: "[{{path}}: {{chars}} characters, not included here. workspace_read reads it.]", vars: [v("path", "the file's path", true), v("chars", "its length")] },
+  { id: AGENTS_TEXT.pinnedNamed, group: AGENTS, label: "A pinned file named, not included", note: "Stands for a pinned file that didn't fit the room Pinned files in context leaves.", text: "[{{path}}: {{chars}} characters, not included here: past the room {{setting}} leaves. workspace_read reads it.]", vars: [v("path", "the file's path", true), v("chars", "its length"), SETTING_VAR], setting: ["workspace", "pinChars"] },
   { id: AGENTS_TEXT.pinned, group: AGENTS, label: "Pinned files", note: "Leads what an agent is sent first with the workspace files pinned for it.", text: `Your pinned workspace files, as they stand now:
 
 {{files}}`, vars: [v("files", "each file, as A file in context writes it", true)] },
-  { id: AGENTS_TEXT.answer, group: ANSWERS, label: "delegate: the agent's answer", note: "What delegate and agent_message return when the agent answered.", text: `{{answer}}
-
-[From {{agent}}, handle {{handle}}. agent_message with this handle asks it more.]`, vars: [v("answer", "the agent's answer", true), v("agent", "the agent's id"), v("handle", "the handle agent_message takes", true)] },
+  { id: AGENTS_TEXT.from, group: ANSWERS, label: "delegate: whose answer it is", note: "Heads what delegate and agent_message return when the agent answered, with its answer after it: at the head, the handle stays when a long answer is clipped.", text: "[From {{agent}}, handle {{handle}}. agent_message with this handle asks it more. Its answer:]", vars: [v("agent", "the agent's id"), v("handle", "the handle agent_message takes", true)] },
   { id: AGENTS_TEXT.stopped, group: ANSWERS, label: "delegate: the agent stopped short", note: "What delegate and agent_message return when the agent stopped before an answer.", text: `{{agent}} (handle {{handle}}) stopped before it answered: {{reason}}.{{said}}
 agent_message with this handle has it go on, if it still may; or go on without it.`, vars: [v("agent", "the agent's id"), v("handle", "the handle agent_message takes", true), v("reason", "why it stopped", true), v("said", "what it had last written, if anything")] },
   { id: AGENTS_TEXT.noAgent, group: ANSWERS, label: "delegate: no such agent", note: "delegate's answer to an id that names no agent it may delegate to.", text: "There's no agent {{agent}} to delegate to. You can delegate to: {{agents}}.", vars: [v("agent", "the id asked for"), v("agents", "the ids there are", true)] },
   { id: AGENTS_TEXT.notOffered, group: ANSWERS, label: "delegate and job_start: an agent left out here", note: "The answer of delegate and job_start, and of a job you start, to a built-in agent the extension LumiAH is built into leaves out.", text: "Not started: {{agent}} isn't offered here, since the extension LumiAH is built into leaves it out. Do the work with the agents there are, or yourself.", vars: [v("agent", "the id asked for")] },
-  { id: AGENTS_TEXT.tooMany, group: ANSWERS, label: "delegate: too many sub-agents", note: "delegate's answer once the turn has started every sub-agent Sub-agents per turn allows.", text: "Not started: this turn has started the {{limit}} it may (Sub-agents per turn). Ask one you already have with agent_message, or do it yourself.", vars: [v("limit", 'Sub-agents per turn, with the word: "3 sub-agents"', true)] },
+  { id: AGENTS_TEXT.tooMany, group: ANSWERS, label: "delegate: too many sub-agents", note: "delegate's answer once the turn has started every sub-agent Sub-agents per turn allows.", text: "Not started: this turn has started the {{limit}} {{setting}} allows. Ask one you already have with agent_message, or do it yourself.", vars: [v("limit", 'Sub-agents per turn, with the word: "3 sub-agents"', true), SETTING_VAR], setting: ["delegation", "perRun"] },
   { id: AGENTS_TEXT.noFile, group: ANSWERS, label: "delegate: no such file", note: "delegate's answer to a file that isn't in the workspace.", text: "Not started: there's no workspace file {{path}}. workspace_list shows what there is. Call delegate again with the right path, or without it.", vars: [v("path", "the path asked for", true)] },
-  { id: AGENTS_TEXT.asLong, group: ANSWERS, label: "delegate and job_start: as too long", note: "The answer of delegate and job_start to an as past Instance name length.", text: "Not started: as is {{chars}} characters, and it may be {{limit}} at most (Instance name length). Give the short id.", vars: [v("chars", "its length"), v("limit", "Instance name length", true)] },
+  { id: AGENTS_TEXT.asLong, group: ANSWERS, label: "delegate and job_start: as too long", note: "The answer of delegate and job_start to an as past Instance name length.", text: "Not started: as is {{chars}} characters, and {{setting}} lets it be {{limit}} at most. Give the short id.", vars: [v("chars", "its length"), v("limit", "Instance name length", true), SETTING_VAR], setting: ["delegation", "asChars"] },
   { id: AGENTS_TEXT.noReply, group: ANSWERS, label: "delegate: to_reply without the reply", note: "delegate's answer to to_reply from an agent that doesn't write the reply.", text: "Not started: you don't write this reply, so you can't hand it on. Call delegate without to_reply.", vars: [] },
   { id: AGENTS_TEXT.noHandle, group: ANSWERS, label: "agent_message: no such handle", note: "agent_message's answer to a handle that names none of this turn's agents it started.", text: "There's no agent with the handle {{handle}} among those you started this turn. Your handles: {{handles}}.", vars: [v("handle", "the handle asked for"), v("handles", "the handles there are", true)] },
   { id: AGENTS_TEXT.noHandles, group: ANSWERS, label: "agent_message: nobody to message", note: "agent_message's answer when the agent has delegated to nobody this turn.", text: "You haven't delegated to anyone this turn, so there is nobody to message. delegate starts an agent.", vars: [] },
@@ -72851,10 +72859,10 @@ The agents a job can run as:
   { id: JOBS_TEXT.whenAfter, group: ANSWERS3, label: "job_start: runs after the reply", note: "Fills {{when}} for a job that waits for the reply.", text: "it runs once this turn's reply is written", vars: [] },
   { id: JOBS_TEXT.off, group: ANSWERS3, label: "job_start: jobs are off", note: "job_start's answer while Settings switch jobs off.", text: "Not started: jobs are switched off in Settings (Jobs). Do the work in this turn, or leave it.", vars: [] },
   { id: JOBS_TEXT.noAgent, group: ANSWERS3, label: "job_start: no such agent", note: "job_start's answer to an id that names no agent a job may run as.", text: "Not started: there's no agent {{agent}} a job can run as. A job can run as: {{agents}}.", vars: [v("agent", "the id asked for"), v("agents", "the ids there are", true)] },
-  { id: JOBS_TEXT.taskLong, group: ANSWERS3, label: "job_start: the task is too long", note: "job_start's answer to a task past Task length.", text: "Not started: the task is {{chars}} characters, and a task may be {{limit}} at most (Task length). Put the details in a workspace file and name the file in a shorter task.", vars: [v("chars", "the task's length"), v("limit", "Task length", true)] },
+  { id: JOBS_TEXT.taskLong, group: ANSWERS3, label: "job_start: the task is too long", note: "job_start's answer to a task past Task length.", text: "Not started: the task is {{chars}} characters, and {{setting}} lets a task be {{limit}} at most. Put the details in a workspace file and name the file in a shorter task.", vars: [v("chars", "the task's length"), v("limit", "Task length", true), SETTING_VAR], setting: ["jobs", "taskChars"] },
   { id: JOBS_TEXT.noTask, group: ANSWERS3, label: "job_start: nothing to start", note: "job_start's answer to a call with neither an agent and a task nor a job to start again.", text: "Not started: give agent and task, or again with the id of a job to start again.", vars: [] },
-  { id: JOBS_TEXT.tooMany, group: ANSWERS3, label: "job_start: too many jobs", note: "job_start's answer once the turn has started every job Jobs per turn allows.", text: "Not started: this turn has started the {{limit}} it may (Jobs per turn).", vars: [v("limit", 'Jobs per turn, with the word: "3 jobs"', true)] },
-  { id: JOBS_TEXT.tooManyDelegated, group: ANSWERS3, label: "delegate: too many sub-agents in a job", note: "delegate's answer once a job has started every sub-agent Delegations per job allows.", text: "Not started: this job has started the {{limit}} it may (Delegations per job). Ask one you already have with agent_message, or do it yourself.", vars: [v("limit", 'Delegations per job, with the word: "3 sub-agents"', true)] },
+  { id: JOBS_TEXT.tooMany, group: ANSWERS3, label: "job_start: too many jobs", note: "job_start's answer once the turn has started every job Jobs per turn allows.", text: "Not started: this turn has started the {{limit}} {{setting}} allows.", vars: [v("limit", 'Jobs per turn, with the word: "3 jobs"', true), SETTING_VAR], setting: ["jobs", "perRun"] },
+  { id: JOBS_TEXT.tooManyDelegated, group: ANSWERS3, label: "delegate: too many sub-agents in a job", note: "delegate's answer once a job has started every sub-agent Delegations per job allows.", text: "Not started: this job has started the {{limit}} {{setting}} allows. Ask one you already have with agent_message, or do it yourself.", vars: [v("limit", 'Delegations per job, with the word: "3 sub-agents"', true), SETTING_VAR], setting: ["jobs", "delegations"] },
   { id: JOBS_TEXT.noJob, group: ANSWERS3, label: "No such job", note: "The answer of job_read, job_cancel and job_start to an id that names no job of this chat.", text: "There's no job {{id}} in this chat. job_list lists the jobs there are.", vars: [v("id", "the id asked for", true)] },
   { id: JOBS_TEXT.notAgain, group: ANSWERS3, label: "job_start: a job that can't be started again", note: "job_start's answer to again naming a job that is still waiting, running or paused, or that ended with its report.", text: "Not started: job {{id}} is {{state}}. Only a job that was interrupted, failed, was cancelled, left the chat's path or stopped at its allowance can be started again.", vars: [v("id", "the job's id", true), v("state", "where it stands")] },
   { id: JOBS_TEXT.line, group: ANSWERS3, label: "job_list: one job", note: "One job in job_list's answer.", text: "- {{id}}: {{agent}}, {{state}}, started by {{by}}. Task: {{task}}{{report}}", vars: [v("id", "the job's id", true), v("agent", "the agent it runs as"), v("state", "where it stands"), v("by", "who started it"), v("task", "how its task opens"), v("report", "how its report opens, or why it has none")] },
@@ -72896,10 +72904,10 @@ It has no report.`, vars: [v("head", "the heading, as job_read: a job writes it"
   stopText(JOBS_TEXT.stopOffPath, "A job off the path", "The turn a job belongs to left the chat's active path, so the job stopped.", "the turn this job belongs to is no longer on the chat's active path"),
   stopText(JOBS_TEXT.stopJobTokens, "Job tokens per day spent", "A job's call once the jobs' calls together have sent and written all Job tokens per day allows.", "what jobs sent and wrote in the last 24 hours is counted as {{tokens}} of the {{limit}} Job tokens per day allows (a cached re-read counts as {{weight}} of a token)", [v("tokens", 'what jobs spent in the last 24 hours as the limit counts it, with the word: "3000000 tokens"', true), v("limit", "Job tokens per day", true), v("weight", "What a cached re-read counts as")]),
   stopText(JOBS_TEXT.stopJobTokensCall, "Job tokens per day: the call would pass it", "A job's call whose own prompt would take the jobs' calls past Job tokens per day, though they are under it so far.", "the call would take what jobs sent and wrote in the last 24 hours past Job tokens per day: counted as {{counted}} with it, of the {{limit}} allowed (a cached re-read counts as {{weight}} of a token)", [v("counted", `what jobs spent in the last 24 hours as the limit counts it, with this call's prompt as estimated and the calls under way, with the word: "3004000 tokens"`, true), v("limit", "Job tokens per day", true), v("weight", "What a cached re-read counts as")]),
-  stopText(JOBS_TEXT.stopIn, "The job's prompt tokens spent", "A call that would take the job's prompt tokens past Prompt tokens per job.", "the call would take the job's prompt tokens past Prompt tokens per job: counted as {{counted}} of the {{limit}} allowed (a cached re-read counts as {{weight}} of a token)", [v("counted", "the prompt tokens with this call, as the limit counts them"), v("weight", "What a cached re-read counts as"), v("limit", "Prompt tokens per job", true)]),
-  stopText(JOBS_TEXT.stopOut, "The job's answer tokens spent", "The job's agents have written all Answer tokens per job allows.", "the job's agents have written its {{tokens}} (Answer tokens per job)", [v("tokens", 'Answer tokens per job, with the word: "60000 tokens"', true)]),
-  stopText(JOBS_TEXT.stopRounds, "The job's tool rounds spent", "The job's agents have had every round of tool calls Tool rounds per job allows.", "the job's agents have had its {{rounds}} of tool calls (Tool rounds per job)", [v("rounds", 'Tool rounds per job, with the word: "60 rounds"', true)]),
-  stopText(JOBS_TEXT.stopTime, "The job out of time", "The job's time ran out (Time per job).", "the job's time ran out (Time per job)"),
+  { ...stopText(JOBS_TEXT.stopIn, "The job's prompt tokens spent", "A call that would take the job's prompt tokens past Prompt tokens per job.", "the call would take the job's prompt tokens past {{setting}}: counted as {{counted}} of the {{limit}} allowed (a cached re-read counts as {{weight}} of a token)", [v("counted", "the prompt tokens with this call, as the limit counts them"), v("weight", "What a cached re-read counts as"), v("limit", "Prompt tokens per job", true), SETTING_VAR]), setting: ["jobs", "budget", "tokensIn"] },
+  { ...stopText(JOBS_TEXT.stopOut, "The job's answer tokens spent", "The job's agents have written all Answer tokens per job allows.", "the job's agents have written its {{tokens}}, all that {{setting}} allows", [v("tokens", 'Answer tokens per job, with the word: "60000 tokens"', true), SETTING_VAR]), setting: ["jobs", "budget", "tokensOut"] },
+  { ...stopText(JOBS_TEXT.stopRounds, "The job's tool rounds spent", "The job's agents have had every round of tool calls Tool rounds per job allows.", "the job's agents have had its {{rounds}} of tool calls, all that {{setting}} allows", [v("rounds", 'Tool rounds per job, with the word: "60 rounds"', true), SETTING_VAR]), setting: ["jobs", "budget", "toolTurns"] },
+  { ...stopText(JOBS_TEXT.stopTime, "The job out of time", "The job's time ran out (Time per job).", "the job's agents have worked all the time {{setting}} allows", [SETTING_VAR]), setting: ["jobs", "budget", "wallMs"] },
   word(JOBS_TEXT.word, "job", "jobs"),
   word(JOBS_TEXT.wordCall, "call", "calls")
 ];
@@ -73804,7 +73812,7 @@ var WORKSPACE_TEXTS = [
   { id: WORKSPACE_TEXT.noArea, group: ANSWERS5, label: "An area this run doesn't have", note: "A workspace tool's answer to a path in an area the run has none of: a side session about no chat has the user's files alone.", text: "Your workspace has no {{area}} here. It has: {{areas}}. Give a path in one of those.", vars: [v("area", "the area asked for, by how its paths start"), v("areas", "the areas there are, each as the three texts above name it", true)] },
   { id: WORKSPACE_TEXT.pathBad, group: ANSWERS5, label: "A path that can't be one", note: "A workspace tool's answer to a path that holds a backslash or a control character.", text: "That path can't be used: a path holds no backslash and no control character. Put / between its folders, as in /notes/plan.md.", vars: [] },
   { id: WORKSPACE_TEXT.pathOutside, group: ANSWERS5, label: "A path that leaves its area", note: "A workspace tool's answer to a path that climbs out of its area.", text: "That path climbs out of its area: .. may go up inside an area, never above it. Say which area by how the path starts: / for this chat's own, learned/, or ~/ for the user's.", vars: [] },
-  { id: WORKSPACE_TEXT.pathLong, group: ANSWERS5, label: "A path too long", note: "A workspace tool's answer to a path past Path length.", text: "That path is too long: within its area a path may hold {{limit}} characters at most (Path length). Use shorter names or fewer folders.", vars: [v("limit", "Path length", true)] },
+  { id: WORKSPACE_TEXT.pathLong, group: ANSWERS5, label: "A path too long", note: "A workspace tool's answer to a path past Path length.", text: "That path is too long: within its area {{setting}} lets a path hold {{limit}} characters at most. Use shorter names or fewer folders.", vars: [v("limit", "Path length", true), SETTING_VAR], setting: ["workspace", "pathChars"] },
   { id: WORKSPACE_TEXT.listLead, group: ANSWERS5, label: "workspace_list: the chat's area", note: "Leads workspace_list's answer when it lists the chat's own area from the top.", text: "This is /, the chat's own area. ~/ is the user's own area, shared by all their chats: list it with path ~/.", vars: [] },
   { id: WORKSPACE_TEXT.listFolder, group: ANSWERS5, label: "workspace_list: a folder", note: "One folder in workspace_list's answer.", text: "- {{path}} (folder, {{files}})", vars: [v("path", "the folder's path, closed with a slash", true), v("files", 'how many files it holds, at any depth, with the word: "3 files"')] },
   { id: WORKSPACE_TEXT.listFile, group: ANSWERS5, label: "workspace_list: a file", note: "One file in workspace_list's answer.", text: "- {{path}} ({{chars}} characters, version {{version}}{{pinned}})", vars: [v("path", "the file's path", true), v("chars", "its length"), v("version", "its version, which a change to it names as base"), v("pinned", "that it is pinned for the agent that asks, in the words below; nothing when it isn't")] },
@@ -73844,9 +73852,9 @@ var WORKSPACE_TEXTS = [
   { id: WORKSPACE_TEXT.isFolder, group: ANSWERS5, label: "A folder where a file is needed", note: "A workspace tool's answer to a path that names a folder where it takes one file.", text: "{{path}} is a folder, and this takes one file. workspace_list with that path lists the files in it.", vars: [v("path", "the folder's path", true)] },
   { id: WORKSPACE_TEXT.exists, group: ANSWERS5, label: "A file already there", note: "The answer to a write that said the file was new, or a move to a path, where there is a file already.", text: "Nothing was changed: there is already a file {{path}}, at version {{version}}. To replace its text, read it with workspace_read and write with that version as base; else choose another path.", vars: [v("path", "the file's path", true), v("version", "the version it has", true)] },
   { id: WORKSPACE_TEXT.stale, group: ANSWERS5, label: "A change based on another version", note: "The answer to a write, an edit, a move or a delete whose base isn't the version the file has now.", text: "Nothing was changed: {{path}} is at version {{version}} now, and that isn't the version you gave as base: it was changed since you read it, or the base was miscopied. Read it again with workspace_read and make your change on what it holds now.", vars: [v("path", "the file's path", true), v("version", "the version it has now", true)] },
-  { id: WORKSPACE_TEXT.fileChars, group: ANSWERS5, label: "A file too long", note: "The answer to a write or an edit that would take a file past File length.", text: "Nothing was changed: the file would hold {{chars}} characters, and a file may hold {{limit}} at most (File length). Split it over several files.", vars: [v("chars", "the length it would have"), v("limit", "File length", true)] },
-  { id: WORKSPACE_TEXT.files, group: ANSWERS5, label: "Too many files", note: "The answer to a write of a new file into an area that holds as many as Files per area allows.", text: "Nothing was changed: this area already holds the {{limit}} it may (Files per area). Delete files nobody needs any more, or add to one there is.", vars: [v("limit", 'Files per area, with the word: "400 files"', true)] },
-  { id: WORKSPACE_TEXT.areaChars, group: ANSWERS5, label: "An area too big", note: "The answer to a write or an edit that would take an area's files past Area size.", text: "Nothing was changed: with it this area's files would hold {{chars}} characters together, and an area may hold {{limit}} at most (Area size). Delete or shorten files nobody needs any more first.", vars: [v("chars", "the length the area's files would have together"), v("limit", "Area size", true)] },
+  { id: WORKSPACE_TEXT.fileChars, group: ANSWERS5, label: "A file too long", note: "The answer to a write or an edit that would take a file past File length.", text: "Nothing was changed: the file would hold {{chars}} characters, and {{setting}} lets a file hold {{limit}} at most. Split it over several files.", vars: [v("chars", "the length it would have"), v("limit", "File length", true), SETTING_VAR], setting: ["workspace", "fileChars"] },
+  { id: WORKSPACE_TEXT.files, group: ANSWERS5, label: "Too many files", note: "The answer to a write of a new file into an area that holds as many as Files per area allows.", text: "Nothing was changed: this area already holds the {{limit}} {{setting}} allows. Delete files nobody needs any more, or add to one there is.", vars: [v("limit", 'Files per area, with the word: "400 files"', true), SETTING_VAR], setting: ["workspace", "files"] },
+  { id: WORKSPACE_TEXT.areaChars, group: ANSWERS5, label: "An area too big", note: "The answer to a write or an edit that would take an area's files past Area size.", text: "Nothing was changed: with it this area's files would hold {{chars}} characters together, and {{setting}} lets an area hold {{limit}} at most. Delete or shorten files nobody needs any more first.", vars: [v("chars", "the length the area's files would have together"), v("limit", "Area size", true), SETTING_VAR], setting: ["workspace", "areaChars"] },
   { id: WORKSPACE_TEXT.editNotFound, group: ANSWERS5, label: "workspace_edit: nothing to replace", note: "workspace_edit's answer when the file doesn't hold the text to replace.", text: "Nothing was changed: {{path}} (version {{version}}) doesn't hold that text, character for character. Read the file again with workspace_read and copy the text to replace from what it gives.", vars: [v("path", "the file's path", true), v("version", "its version")] },
   { id: WORKSPACE_TEXT.editSeveral, group: ANSWERS5, label: "workspace_edit: several matches", note: "workspace_edit's answer when the text to replace is in the file more than once and all wasn't asked for.", text: "Nothing was changed: that text is in {{path}} {{count}}. Give more of the text around the one you mean, until find matches once, or pass all: true to replace every one.", vars: [v("path", "the file's path", true), v("count", 'how many times, with the word: "3 times"', true)] },
   { id: WORKSPACE_TEXT.moveAcross, group: ANSWERS5, label: "workspace_move: across areas", note: "workspace_move's answer to a move from one area to another.", text: "Nothing was moved: a move stays inside one area, and {{from}} and {{to}} are in two. To take the file across, read it, write it there with workspace_write and base new, then delete it here with workspace_delete.", vars: [v("from", "the path it has"), v("to", "the path asked for")] },
@@ -73929,7 +73937,7 @@ var TEXT = {
     noDirection: "main.turn.directed.none",
     turnNewest: "main.turn.newest",
     noNewest: "main.turn.newest.none",
-    askReleases: "main.turn.ask.releases"
+    askRelease: "main.turn.ask.release_whole"
   },
   request: {
     message: "request.message",
@@ -73999,10 +74007,12 @@ var TEXT = {
     replyFailed: "tool.answer.reply_failed",
     replyNoBrief: "tool.answer.reply_no_brief",
     replyEmpty: "tool.answer.reply_empty",
-    replyReleased: "tool.answer.reply_released",
-    released: "tool.answer.released",
+    replyReleased: "tool.answer.reply_after_release",
+    released: "tool.answer.released_whole",
     releaseWriter: "tool.answer.release_writer",
-    releaseHeld: "tool.answer.release_held",
+    releaseAgain: "tool.answer.release_again",
+    releaseLate: "tool.answer.release_late",
+    releaseFailed: "tool.answer.release_failed",
     releaseUnchecked: "tool.answer.release_unchecked",
     releaseEnded: "tool.answer.release_ended"
   },
@@ -74073,7 +74083,7 @@ var RUNTIME_TEXTS = [
   { id: TEXT.runtime.scratchRead, group: RUNTIME, label: "scratch_read: what it does", note: "The description of the built-in tool that reads the rest of a clipped tool result.", text: "Read more of a tool result that came back clipped. Give the scratch handle the clipped result names and where to start; you get the next part.", vars: [] },
   { id: TEXT.runtime.scratchHandle, group: RUNTIME, label: "scratch_read: handle", note: "The description of scratch_read's handle argument.", text: "The scratch handle the clipped result names, such as s1.", vars: [] },
   { id: TEXT.runtime.scratchOffset, group: RUNTIME, label: "scratch_read: offset", note: "The description of scratch_read's offset argument.", text: "The character to start from; 0 is the start.", vars: [] },
-  { id: TEXT.runtime.scratchLength, group: RUNTIME, label: "scratch_read: length", note: "The description of scratch_read's length argument.", text: "How many characters to read, at most {{max}}.", vars: [v("max", "the most one read returns: Tool results clipped past, or the most any of the agent's tools gives whole, where that is more")] },
+  { id: TEXT.runtime.scratchLength, group: RUNTIME, label: "scratch_read: length", note: "The description of scratch_read's length argument.", text: "How many characters to read. One read gives at most as many as the clipped result says; left out, that many.", vars: [v("max", "the most one read gives of a result clipped at Tool results clipped past; a result a tool gives more of whole says its own")] },
   {
     id: TEXT.runtime.scratchPart,
     group: RUNTIME,
@@ -74089,8 +74099,9 @@ var RUNTIME_TEXTS = [
     group: RUNTIME,
     label: "A clipped tool result",
     note: "Follows the part of a long tool result that reaches the model.",
-    text: "[Clipped: the first {{shown}} of {{total}} characters. The rest is in scratch {{handle}}; read it with scratch_read from offset {{shown}}.]",
-    vars: [v("shown", "the characters shown"), v("total", "the result's length"), v("handle", "where the whole result waits", true)]
+    text: "[Clipped: the first {{shown}} of {{total}} characters; {{setting}} says where a result is clipped. The rest is in scratch {{handle}}: scratch_read gives it from offset {{shown}}, {{per}} characters a read at most.]",
+    vars: [v("shown", "the characters shown"), v("total", "the result's length"), v("handle", "where the whole result waits", true), v("per", "the most characters one scratch_read gives of this result"), SETTING_VAR],
+    setting: ["loop", "clipChars"]
   },
   { id: TEXT.runtime.unknownTool, group: RUNTIME, label: "A tool that doesn't exist", note: "The result of a call to a tool the agent wasn't given.", text: "There's no tool {{name}}. The tools are: {{tools}}. Call one of those.", vars: [v("name", "the name the model called"), v("tools", "the agent's tools")] },
   { id: TEXT.runtime.toolFailed, group: RUNTIME, label: "A tool that failed", note: "The result of a tool call that failed.", text: "{{name}} failed: {{error}}", vars: [v("name", "the tool"), v("error", "why", true)] },
@@ -74132,33 +74143,33 @@ Arguments (JSON Schema): {{parameters}}`, vars: [v("name", "the tool's name", tr
   { id: TEXT.runtime.roundsSpent, group: RUNTIME, label: "Rounds spent", note: "Follows the tool results of an agent's last round.", text: "[That was your last round of tool calls. Answer now with what you have: a tool call in your next answer isn't run, and your work stops without an answer.]", vars: [] },
   { id: TEXT.runtime.notRun, group: RUNTIME, label: "A tool call that never began", note: "The result of a tool call its round's end overtook before it began: the turn was stopped or a time limit passed while the call still waited for its place among the calls at once, or for your word.", text: "Not run: {{reason}}, before this call of {{name}} began. Nothing of it was started.", vars: [v("name", "the tool"), v("reason", "what ended the round, as the agent's stop says it", true)] },
   { id: TEXT.runtime.oneEnding, group: RUNTIME, label: "A second call that would end the work", note: "The result of a call to a tool whose result ends the agent's work (write_reply), where an earlier call of the same answer already does: only that first one is run.", text: "Not run: one answer may make one call that ends your work, and this answer's earlier call of {{first}} is that one. It stands, with what it was given. If its result says it failed, call {{name}} again in your next answer.", vars: [v("name", "the tool whose call wasn't run", true), v("first", "the tool whose earlier call stands")] },
-  { id: TEXT.runtime.clippedLost, group: RUNTIME, label: "A clipped tool result whose rest couldn't be kept", note: "Follows the part of a long tool result that reaches the model when the whole couldn't be stored for scratch_read.", text: "[Clipped: the first {{shown}} of {{total}} characters. The rest couldn't be kept ({{error}}), so scratch_read can't give it. Call the tool again and ask for less at a time.]", vars: [v("shown", "the characters shown"), v("total", "the result's length"), v("error", "why the whole couldn't be stored")] },
+  { id: TEXT.runtime.clippedLost, group: RUNTIME, label: "A clipped tool result whose rest couldn't be kept", note: "Follows the part of a long tool result that reaches the model when the whole couldn't be stored for scratch_read.", text: "[Clipped: the first {{shown}} of {{total}} characters; {{setting}} says where a result is clipped. The rest couldn't be kept ({{error}}), so scratch_read can't give it. Call the tool again and ask for less at a time.]", vars: [v("shown", "the characters shown"), v("total", "the result's length"), v("error", "why the whole couldn't be stored"), SETTING_VAR], setting: ["loop", "clipChars"] },
   { id: TEXT.runtime.scratchLost, group: RUNTIME, label: "scratch_read: the result is no longer stored", note: "scratch_read's answer to a handle whose whole result is gone from storage.", text: "Scratch {{handle}} is no longer stored, so it can't be read. Call the tool that gave it again for what you need.", vars: [v("handle", "the handle asked for")] },
   {
     id: TEXT.runtime.windowCut,
     group: RUNTIME,
     label: "A tool result cut to the room left",
     note: "Follows the part of a tool result that reaches the model when the whole would take the agent's next call past Prompt per call.",
-    text: "[Cut to fit: your prompt has room for only the first {{shown}} of {{total}} characters of this result (Prompt per call). The rest is in scratch {{handle}}; scratch_read gives it from offset {{shown}}, as much as your prompt still has room for. Once there is no room left, answer with what you have.]",
-    vars: [v("shown", "the characters shown"), v("total", "the result's length"), v("handle", "where the whole result waits", true)]
+    text: "[Cut to fit: your prompt has room for only the first {{shown}} of {{total}} characters of this result, under {{setting}}. The rest is in scratch {{handle}}; scratch_read gives it from offset {{shown}}, as much as your prompt still has room for. Once there is no room left, answer with what you have.]",
+    vars: [v("shown", "the characters shown"), v("total", "the result's length"), v("handle", "where the whole result waits", true), { ...SETTING_VAR, text: "Prompt per call, the agent's, and where it is changed" }]
   },
-  { id: TEXT.runtime.scratchFull, group: RUNTIME, label: "scratch_read: no room left", note: "scratch_read's answer when the agent's prompt has no room left for any more of a result (Prompt per call).", text: "Your prompt has no room left for more of scratch {{handle}} (Prompt per call). Answer with what you have.", vars: [v("handle", "the handle asked for", true)] }
+  { id: TEXT.runtime.scratchFull, group: RUNTIME, label: "scratch_read: no room left", note: "scratch_read's answer when the agent's prompt has no room left for any more of a result (Prompt per call).", text: "Your prompt has no room left for more of scratch {{handle}}, under {{setting}}. Answer with what you have.", vars: [v("handle", "the handle asked for", true), { ...SETTING_VAR, text: "Prompt per call, the agent's, and where it is changed" }] }
 ];
 var STOP_TEXTS = [
   stopText(TEXT.stop.cancelled, "Cancelled", "The agent was cancelled: the turn was stopped, or whoever started it stopped it.", "the agent was cancelled"),
   stopText(TEXT.stop.busy, "Still working", "A message sent while the agent still works on its last one.", "the agent is still working on its last message"),
   stopText(TEXT.stop.revisions, "Out of revisions", "A message after its first answer, once it has had every revision its budget allows (Revisions).", "it has had the {{revisions}} it may have after its first answer (Revisions)", [v("revisions", 'the revisions it may have, with the word: "2 revisions"', true)]),
-  stopText(TEXT.stop.wallTime, "Out of time", "The agent's own time ran out (Time per agent).", "the agent's time ran out (Time per agent)"),
-  stopText(TEXT.stop.turnTime, "The turn out of time", "The turn's time ran out (Time per turn).", "the turn's time ran out (Time per turn)"),
+  stopText(TEXT.stop.wallTime, "Out of time", "The agent's own time ran out (Time per agent).", "the agent has worked all the time {{setting}} allows", [{ ...SETTING_VAR, text: "Time per agent, the agent's, and where it is changed" }]),
+  { ...stopText(TEXT.stop.turnTime, "The turn out of time", "The turn's time ran out (Time per turn).", "the turn's agents have worked all the time {{setting}} allows", [SETTING_VAR]), setting: ["turn", "wallMs"] },
   stopText(TEXT.stop.callTime, "A call too slow", "One call took longer than Time per call.", "the call took longer than Time per call"),
-  stopText(TEXT.stop.callTokensIn, "A prompt too long", "A call whose prompt, as estimated, is past Prompt per call.", "the call's prompt, about {{tokens}}, is past Prompt per call ({{limit}})", [v("tokens", `the prompt's estimate, with the word: "9000 tokens"`, true), v("limit", "Prompt per call", true)]),
+  stopText(TEXT.stop.callTokensIn, "A prompt too long", "A call whose prompt, as estimated, is past Prompt per call.", "the call's prompt, about {{tokens}}, is past the {{limit}} tokens {{setting}} allows", [v("tokens", `the prompt's estimate, with the word: "9000 tokens"`, true), v("limit", "Prompt per call", true), { ...SETTING_VAR, text: "Prompt per call, the agent's, and where it is changed" }]),
   stopText(TEXT.stop.tokensIn, "The agent's prompt tokens spent", "A call that would take the agent's prompt tokens past Prompt tokens per agent.", "the call would take the agent's prompt tokens past Prompt tokens per agent: counted as {{counted}} of the {{limit}} allowed (a cached re-read counts as {{weight}} of a token)", [v("counted", "the prompt tokens with this call, as the limit counts them"), v("weight", "What a cached re-read counts as"), v("limit", "Prompt tokens per agent", true)]),
   stopText(TEXT.stop.tokensOut, "The agent's answer tokens spent", "The agent has written all Answer tokens per agent allows.", "the agent has written its {{tokens}} (Answer tokens per agent)", [v("tokens", 'Answer tokens per agent, with the word: "4000 tokens"', true)]),
-  stopText(TEXT.stop.turnTokensIn, "The turn's prompt tokens spent", "A call that would take the turn's prompt tokens past Prompt tokens per turn.", "the call would take the turn's prompt tokens past Prompt tokens per turn: counted as {{counted}} of the {{limit}} allowed (a cached re-read counts as {{weight}} of a token)", [v("counted", "the prompt tokens with this call, as the limit counts them"), v("weight", "What a cached re-read counts as"), v("limit", "Prompt tokens per turn", true)]),
-  stopText(TEXT.stop.turnTokensOut, "The turn's answer tokens spent", "The turn's agents have written all Answer tokens per turn allows.", "the turn's agents have written its {{tokens}} (Answer tokens per turn)", [v("tokens", 'Answer tokens per turn, with the word: "20000 tokens"', true)]),
-  stopText(TEXT.stop.loop, "The loop detector", "The agent called one tool with the same arguments, and got the same result, as many times in a row as the loop detector allows.", "the agent called {{tool}} with the same arguments {{times}} in a row and got the same result each time (Loop detector)", [v("tool", "the tool's name", true), v("times", 'how many times, with the word: "3 times"', true)]),
-  stopText(TEXT.stop.toolTurns, "The agent's tool rounds spent", "The agent has had every round of tool calls Tool rounds per agent allows.", "the agent has had its {{rounds}} of tool calls (Tool rounds per agent)", [v("rounds", 'Tool rounds per agent, with the word: "8 rounds"', true)]),
-  stopText(TEXT.stop.turnToolTurns, "The turn's tool rounds spent", "The turn's agents have had every round of tool calls Tool rounds per turn allows.", "the turn's agents have had its {{rounds}} of tool calls (Tool rounds per turn)", [v("rounds", 'Tool rounds per turn, with the word: "40 rounds"', true)]),
+  { ...stopText(TEXT.stop.turnTokensIn, "The turn's prompt tokens spent", "A call that would take the turn's prompt tokens past Prompt tokens per turn.", "the call would take the turn's prompt tokens past {{setting}}: counted as {{counted}} of the {{limit}} allowed (a cached re-read counts as {{weight}} of a token)", [v("counted", "the prompt tokens with this call, as the limit counts them"), v("weight", "What a cached re-read counts as"), v("limit", "Prompt tokens per turn", true), SETTING_VAR]), setting: ["turn", "tokensIn"] },
+  { ...stopText(TEXT.stop.turnTokensOut, "The turn's answer tokens spent", "The turn's agents have written all Answer tokens per turn allows.", "the turn's agents have written its {{tokens}}, all that {{setting}} allows", [v("tokens", 'Answer tokens per turn, with the word: "20000 tokens"', true), SETTING_VAR]), setting: ["turn", "tokensOut"] },
+  { ...stopText(TEXT.stop.loop, "The loop detector", "The agent called one tool with the same arguments, and got the same result, as many times in a row as the loop detector allows.", "the agent called {{tool}} with the same arguments {{times}} in a row and got the same result each time, as many as {{setting}} allows", [v("tool", "the tool's name", true), v("times", 'how many times, with the word: "3 times"', true), SETTING_VAR]), setting: ["loop", "repeats"] },
+  stopText(TEXT.stop.toolTurns, "The agent's tool rounds spent", "The agent has had every round of tool calls Tool rounds per agent allows.", "the agent has had its {{rounds}} of tool calls, all that {{setting}} allows", [v("rounds", 'Tool rounds per agent, with the word: "8 rounds"', true), { ...SETTING_VAR, text: "Tool rounds per agent, the agent's, and where it is changed" }]),
+  { ...stopText(TEXT.stop.turnToolTurns, "The turn's tool rounds spent", "The turn's agents have had every round of tool calls Tool rounds per turn allows.", "the turn's agents have had its {{rounds}} of tool calls, all that {{setting}} allows", [v("rounds", 'Tool rounds per turn, with the word: "40 rounds"', true), SETTING_VAR]), setting: ["turn", "toolTurns"] },
   stopText(TEXT.stop.failed, "A call failed", "A call that failed: the provider's error, as it gave it; words of your own may go around it.", "{{error}}", [v("error", "the error, as the provider gave it", true)]),
   stopText(TEXT.stop.throttle, "Past a connection's throttle", "A call that needs more tokens than its connection's throttle lets through in a minute.", "the call needs {{tokens}}, more than this connection's throttle lets through in a minute ({{limit}})", [v("tokens", 'the tokens the call needs, with the word: "9000 tokens"', true), v("limit", "the tokens the throttle lets through in a minute", true)]),
   stopText(TEXT.stop.connectionUnread, "A connection that couldn't be read", "The runtime couldn't read its connections to find the agent's.", "the connection {{connection}} couldn't be read ({{error}})", [v("connection", "the connection's id; empty for the default connection"), v("error", "why", true)]),
@@ -74271,7 +74282,7 @@ The user gave no direction for this reply: carry the story on from where it stan
     vars: [v("kind", "why a reply is needed, in the words above", true), v("notes", "what changed about its notes since its last turn, each ending in a blank line; nothing when there is none of it. Required: a summary of its notes reaches the agent only here when no later turn follows it", true), v("message", "the user's newest message, framed as a message of the request is, or that there is none", true), v("ask", "what to do, in the words above", true)]
   },
   { id: TEXT.main.noNewest, group: MAIN, label: "No newest message", note: "Fills {{message}} where the request holds no message from the user.", text: "The request holds no message from the user: carry the story on from where it stands.", vars: [] },
-  { id: TEXT.main.askReleases, group: MAIN, label: "What to do: release the reply", note: "Fills {{ask}} in a chat whose reply is only what its agents release: no writer writes it.", text: "Work out what this reply needs, then release it with reply_write, a passage at a time, or hand it to an agent with delegate and to_reply. Nothing else reaches the user.", vars: [] }
+  { id: TEXT.main.askRelease, group: MAIN, label: "What to do: release the reply", note: "Fills {{ask}} in a chat whose reply is only what its agents release: no writer writes it. A turn's reply is released once, whole.", text: "Work out everything this reply needs, then release it once, whole: with one reply_write call, or by handing it to one agent with delegate and to_reply. A turn's reply is released once and nothing can follow it, so never release part of it. Nothing else reaches the user.", vars: [] }
 ];
 var REQUEST_TEXTS = [
   { id: TEXT.request.message, group: REQUEST, label: "A message", note: "One message of the request that isn't a preset instruction.", text: `[{{n}}] {{role}}{{from}}
@@ -74339,7 +74350,7 @@ var TOOL_TEXTS = [
   ...toolTexts(TOOL.presetInstructions, "List the active preset's instruction blocks in order, those switched off marked: what the preset's author tells the model, as written in the preset, before Lumiverse fills in its macros. Give block to read one whole.", { block: "A block's id or name, to read that block whole.", cursor: CURSOR_ARG }),
   ...toolTexts(TOOL.pastTurn, "Read or search an earlier turn of yours in full: every tool call you made with what came back, and your brief, where your notes keep only a receipt. Without arguments it lists your turns. Give reply to list that turn's steps; add step to read one whole; give grep to find the lines that hold some text, in that turn or, without reply, in your latest turns.", { reply: "The reply's number in the chat, as your receipts name it (reply #12).", step: "Which of the turn's steps to read whole, by its number in the turn's list.", grep: "Text to find, in any letter case: every line that holds it, with its reply, step and line.", cursor: CURSOR_ARG }),
   ...toolTexts(TOOL.writeReply, "Hand the writer your brief and have it write the reply, which goes to the user. This ends your turn: call it once, when you have what the reply needs, and call nothing else beside it.", { brief: "What the writer needs that the prompt doesn't already give it: facts to keep straight, lore that bears on this moment, the thread to pick up. Short and specific; no prose for the reply itself." }),
-  ...toolTexts(TOOL.replyWrite, "Release a passage of the reply: it streams to the user at once, after what was released before. Call it again for the next passage; the reply is everything released, in order. Released text can't be taken back. Your turn ends when you answer.", { text: "The passage, exactly as the user should read it." })
+  ...toolTexts(TOOL.replyWrite, "Release this turn's reply: it streams to the user at once. A turn's reply is released once, whole: call this once, when the whole reply is ready, never for part of it, since nothing more can go into the reply after it. Released text can't be taken back. Your turn ends when you answer.", { text: "The whole reply, exactly as the user should read it." })
 ];
 var ANSWER_TEXTS = [
   { id: TEXT.answer.more, group: ANSWERS6, label: "There is more", note: "Ends a tool's answer that has more to give.", text: '[There is more: call {{tool}} again with the same arguments and cursor "{{cursor}}".]', vars: [v("tool", "the tool"), v("cursor", "where the next page starts", true)] },
@@ -74377,11 +74388,13 @@ Its steps, in full as they were; read one whole with step:`, vars: [v("told", "w
   { id: TEXT.answer.replyFailed, group: ANSWERS6, label: "write_reply: the writer failed", note: "write_reply's answer when the writer's call failed before any of the reply was sent.", text: "The writer couldn't write the reply: {{reason}}. Nothing was sent to the user. Call write_reply again to try once more.", vars: [v("reason", "why", true)] },
   { id: TEXT.answer.replyNoBrief, group: ANSWERS6, label: "write_reply: no brief", note: "write_reply's answer to a call without a brief.", text: "write_reply needs brief: what the writer needs that the prompt doesn't already give it. When the prompt holds everything, say that in a line. Call write_reply again with brief.", vars: [] },
   { id: TEXT.answer.replyEmpty, group: ANSWERS6, label: "write_reply: an empty reply", note: "Fills {{reason}} in The writer failed, and the turn's error, when the writer's model answered with nothing.", text: "its model answered with nothing", vars: [] },
-  { id: TEXT.answer.replyReleased, group: ANSWERS6, label: "write_reply: the reply was released already", note: "write_reply's answer once part of the reply was released with reply_write: no writer writes after it.", text: "Not handed to the writer: you released part of this reply with reply_write, so the reply is yours to finish. Go on with reply_write, or end your turn.", vars: [] },
-  { id: TEXT.answer.released, group: ANSWERS6, label: "reply_write: released", note: "reply_write's answer once its passage reached the user.", text: "Released: {{chars}} characters reached the user. The reply holds {{total}} characters now. Release the next passage, or end your turn.", vars: [v("chars", "the passage's length", true), v("total", "the reply's length so far")] },
+  { id: TEXT.answer.replyReleased, group: ANSWERS6, label: "write_reply: the reply was released already", note: "write_reply's answer once the turn's reply was released with reply_write, or while an agent's answer goes out as it (delegate with to_reply): no writer writes after it.", text: "Not handed to the writer: this turn's reply went out already, or is going out now as another agent's answer, and a turn's reply is written once. Nothing more goes into it: finish your turn.", vars: [] },
+  { id: TEXT.answer.released, group: ANSWERS6, label: "reply_write: released", note: "reply_write's answer once the turn's reply reached the user. A turn's reply is released once, whole.", text: "Released: the reply, {{chars}} characters, reached the user. A turn's reply is released once, so nothing more goes into it. Finish your turn: call what else you still need, then answer.", vars: [v("chars", "the reply's length", true)] },
   { id: TEXT.answer.releaseWriter, group: ANSWERS6, label: "reply_write: the writer has the reply", note: "The answer of reply_write, and of delegate with to_reply, once the writer is writing the reply or has written it.", text: "Not released: the writer is writing this reply, or has written it, so nothing more can go into it.", vars: [] },
-  { id: TEXT.answer.releaseHeld, group: ANSWERS6, label: "reply_write: another agent's answer is streaming", note: "The answer of reply_write, and of delegate with to_reply, while a sub-agent's answer streams into the reply.", text: "Not released: another agent's answer is streaming into the reply now. Wait for that call to end, then release yours.", vars: [] },
-  { id: TEXT.answer.releaseUnchecked, group: ANSWERS6, label: "reply_write: the extension didn't say", note: "reply_write's answer when the extension that checks each passage gave no word on it in time, or gave one that isn't a word: nothing goes out unchecked.", text: "Not released: the check on each passage didn't answer, so nothing was sent. Try again.", vars: [] },
+  { id: TEXT.answer.releaseAgain, group: ANSWERS6, label: "reply_write and to_reply: the reply was released already", note: "The answer of reply_write, and of delegate with to_reply, once the turn's reply went out, or while another agent's answer goes out as it: a turn's reply is released once, whole.", text: "Not released: this turn's reply went out already, or is going out now as another agent's answer, and a turn's reply is written once, whole. Nothing more goes into it: finish your turn.", vars: [] },
+  { id: TEXT.answer.releaseLate, group: ANSWERS6, label: "reply_write: the extension didn't answer in time", note: "reply_write's answer when the extension that checks the reply gave no word on it within Wait for the extension: nothing goes out unchecked, and the reply is still to be released.", text: "Not released: {{extension}} gave no word on the reply within {{wait}} ({{setting}}), so nothing was sent and the reply is still yours to release. Try again.", vars: [v("extension", "the extension's name"), v("wait", 'how long it was waited for: "10 seconds"'), v("setting", "Wait for the extension, with where it is changed", true)] },
+  { id: TEXT.answer.releaseFailed, group: ANSWERS6, label: "reply_write: the extension's check failed", note: "reply_write's answer when asking the extension that checks the reply failed: nothing goes out unchecked, and the reply is still to be released.", text: "Not released: {{extension}}'s check on the reply failed ({{error}}), so nothing was sent and the reply is still yours to release. Try again.", vars: [v("extension", "the extension's name"), v("error", "why it failed", true)] },
+  { id: TEXT.answer.releaseUnchecked, group: ANSWERS6, label: "reply_write: the extension gave no text", note: "reply_write's answer when the extension that checks the reply answered with neither a reason to keep it back nor a text that can go out (where the chat's reply_write is the extension's own, only a text lets anything go): nothing goes out, and the reply is still to be released.", text: "Not released: {{extension}} gave neither the reply's text nor a reason to keep it back, so nothing was sent and the reply is still yours to release. Try again.", vars: [v("extension", "the extension's name")] },
   { id: TEXT.answer.releaseEnded, group: ANSWERS6, label: "reply_write: the reply has ended", note: "The answer of reply_write, and of delegate with to_reply, once the turn's reply has ended or the turn was stopped.", text: "Not released: this reply has ended.", vars: [] }
 ];
 var PROGRESS_TEXTS = [
@@ -74464,13 +74477,14 @@ function defOf(id) {
   return def;
 }
 function renderDefault(id, vars = {}) {
-  const def = defOf(id);
-  return fill(def, def.text, vars);
+  return new Texts().render(id, vars);
 }
 
 class Texts {
+  place;
   own;
-  constructor(own = {}) {
+  constructor(own = {}, place = settingPlaceOf()) {
+    this.place = place;
     const kept = new Map;
     for (const [id, text] of Object.entries(own))
       if (typeof text === "string" && checkText(id, text) === null)
@@ -74481,7 +74495,11 @@ class Texts {
     return this.own.get(id) ?? defOf(id).text;
   }
   render(id, vars = {}) {
-    return fill(defOf(id), this.text(id), vars);
+    const def = defOf(id);
+    return fill(def, this.text(id), def.setting !== undefined && !hasOwn(vars, SETTING_VAR.name) ? { ...vars, [SETTING_VAR.name]: this.place(def.setting) } : vars);
+  }
+  setting(path) {
+    return this.place(path);
   }
   noun(n, id) {
     const [one = "", many = one] = this.text(id).split("|");
@@ -74494,14 +74512,14 @@ class Texts {
     return this.own.has(id);
   }
 }
-function textsOf(own) {
+function textsOf(own, place) {
   const texts = {};
   if (isRecord(own)) {
     for (const [id, text] of Object.entries(own))
       if (typeof text === "string")
         texts[id] = text;
   }
-  return new Texts(texts);
+  return new Texts(texts, place);
 }
 
 // node_modules/lumi-ah/src/core/agents.ts
@@ -75335,18 +75353,18 @@ var REFUSED = {
   outside: () => new HarnessRefusal("bad_request", "A path can't leave its area: \u201C..\u201D may climb within it, never out of it."),
   otherArea: () => new HarnessRefusal("bad_request", "In the chat's own area a path can't start with learned: learned/ is an area of its own."),
   noName: () => new HarnessRefusal("bad_request", "A file's path needs a name."),
-  longPath: (field, limit2) => invalid(field, `A path may hold ${limit2} characters at most (Path length).`),
+  longPath: (field, limit2, setting) => invalid(field, `${setting} lets a path hold ${limit2} characters at most.`),
   missing: (file) => new HarnessRefusal("not_found", `There is no file ${file}: it may have been moved or deleted since the page read it.`),
   noVersion: (file, kept) => new HarnessRefusal("not_found", `${file} has no such version among the ${kept} it keeps (Versions kept): it may have been dropped since the page listed them.`),
   gone: (file) => new HarnessRefusal("not_found", `The store no longer has the text of ${file}.`),
   exists: (file, hash) => new HarnessRefusal("conflict", `There is already a file ${file}, at version ${versionOf(hash)}.`),
   stale: (file, hash) => new HarnessRefusal("conflict", `${file} has changed since it was read: it is at version ${versionOf(hash)} now. Read it again, then make the change on that.`),
-  fileChars: (chars, limit2) => invalid("text", `The text is ${chars} characters, and a file may hold ${limit2} at most (File length).`),
-  files: (limit2) => invalid("path", `The area already holds as many files as it may: ${limit2} (Files per area).`),
-  areaChars: (chars, limit2) => invalid("text", `With this the area's files would hold ${chars} characters together, and an area may hold ${limit2} at most (Area size).`),
+  fileChars: (chars, limit2, setting) => invalid("text", `The text is ${chars} characters, and ${setting} lets a file hold ${limit2} at most.`),
+  files: (limit2, setting) => invalid("path", `The area already holds as many files as ${setting} lets it: ${limit2}.`),
+  areaChars: (chars, limit2, setting) => invalid("text", `With this the area's files would hold ${chars} characters together, and ${setting} lets an area hold ${limit2} at most.`),
   forbidden: (reason) => new HarnessRefusal("forbidden", reason)
 };
-function areaRefusal(area2, why) {
+function areaRefusal(area2, why, setting) {
   switch (why.code) {
     case "missing":
       return REFUSED.missing(showPath(area2, why.path));
@@ -75355,11 +75373,11 @@ function areaRefusal(area2, why) {
     case "stale":
       return REFUSED.stale(showPath(area2, why.path), why.version);
     case "file_chars":
-      return REFUSED.fileChars(why.chars, why.limit);
+      return REFUSED.fileChars(why.chars, why.limit, setting("fileChars"));
     case "files":
-      return REFUSED.files(why.limit);
+      return REFUSED.files(why.limit, setting("files"));
     case "area_chars":
-      return REFUSED.areaChars(why.chars, why.limit);
+      return REFUSED.areaChars(why.chars, why.limit, setting("areaChars"));
     case "refused":
       return REFUSED.forbidden(why.reason);
   }
@@ -75368,7 +75386,8 @@ function rowOf(path, entry) {
   return { path, hash: entry.hash, chars: entry.chars, at: entry.at, by: entry.by, pins: [...entry.pins] };
 }
 var A_VERSION = "the version the change was based on";
-function pageWorkspace(view, limits) {
+function pageWorkspace(view, limits, place = settingPlaceOf()) {
+  const setting = (key) => place(["workspace", key]);
   const areaOf = (input) => {
     const kind = WORKSPACE_AREAS.find((one) => one === input.area);
     if (kind === undefined)
@@ -75386,7 +75405,7 @@ function pageWorkspace(view, limits) {
     const { pathChars } = limits();
     const at = resolvePath(`${ROOT[kind]}${raw}`, pathChars);
     if ("refused" in at)
-      throw at.refused === "long" ? REFUSED.longPath(field, pathChars) : at.refused === "bad" ? REFUSED.badPath() : REFUSED.outside();
+      throw at.refused === "long" ? REFUSED.longPath(field, pathChars, setting("pathChars")) : at.refused === "bad" ? REFUSED.badPath() : REFUSED.outside();
     if (at.area !== kind)
       throw REFUSED.otherArea();
     if (at.path === "")
@@ -75402,7 +75421,7 @@ function pageWorkspace(view, limits) {
   };
   const left = (at, path, result) => {
     if (!result.ok)
-      throw areaRefusal(at.kind, result.why);
+      throw areaRefusal(at.kind, result.why, setting);
     if (!result.entry)
       throw REFUSED.missing(at.shown);
     return rowOf(path, result.entry);
@@ -75460,7 +75479,7 @@ function pageWorkspace(view, limits) {
       allowed2(at.kind, at.path);
       const result = await at.area.remove({ path: at.path, base: input.base, by: view.author });
       if (!result.ok)
-        throw areaRefusal(at.kind, result.why);
+        throw areaRefusal(at.kind, result.why, setting);
       return { deleted: true };
     },
     async pin(input) {
@@ -76554,6 +76573,9 @@ class Agent {
   text(id, vars = {}) {
     return this.deps.texts.render(id, vars);
   }
+  budgetSetting(key) {
+    return this.deps.texts.setting(["agents", this.spec.role, "budget", key]);
+  }
   send(text, signal) {
     return this.work(text, signal);
   }
@@ -76838,7 +76860,7 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
   timeUp() {
     const now = this.now();
     if (this.spent(now) >= limitOf(this.spec.budget.wallMs))
-      return new AgentStop("wall_time", { id: TEXT.stop.wallTime });
+      return new AgentStop("wall_time", { id: TEXT.stop.wallTime, vars: { setting: this.budgetSetting("wallMs") } });
     const turn = this.deps.turn;
     if (turn && now - turn.startedAt - turn.held(now) >= limitOf(turn.budget.wallMs))
       return new AgentStop("turn_time", { id: turn.words.time });
@@ -76849,7 +76871,7 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
     const turn = this.deps.turn;
     const { texts } = this.deps;
     if (p.estimate > limitOf(budget.callTokensIn))
-      return new AgentStop("call_tokens_in", { id: TEXT.stop.callTokensIn, vars: { tokens: texts.counted(p.estimate, TEXT.word.token), limit: String(budget.callTokensIn) } });
+      return new AgentStop("call_tokens_in", { id: TEXT.stop.callTokensIn, vars: { tokens: texts.counted(p.estimate, TEXT.word.token), limit: String(budget.callTokensIn), setting: this.budgetSetting("callTokensIn") } });
     const { cachedWeight } = this.deps.settings.spend;
     const weight = String(cachedWeight);
     const own = countedIn(this.total, cachedWeight) + p.estimate;
@@ -76880,7 +76902,7 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
   roundStop() {
     const { turn } = this.deps;
     if (this.total.toolTurns >= limitOf(this.spec.budget.toolTurns))
-      return new AgentStop("tool_turns", { id: TEXT.stop.toolTurns, vars: { rounds: this.deps.texts.counted(limitOf(this.spec.budget.toolTurns), TEXT.word.round) } });
+      return new AgentStop("tool_turns", { id: TEXT.stop.toolTurns, vars: { rounds: this.deps.texts.counted(limitOf(this.spec.budget.toolTurns), TEXT.word.round), setting: this.budgetSetting("toolTurns") } });
     if (turn && turn.usage.toolTurns >= limitOf(turn.budget.toolTurns))
       return new AgentStop("turn_tool_turns", { id: turn.words.toolTurns, vars: { rounds: this.deps.texts.counted(limitOf(turn.budget.toolTurns), TEXT.word.round) } });
     return null;
@@ -76920,7 +76942,7 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
       };
       arm();
     };
-    deadline(() => limitOf(this.spec.budget.wallMs) - this.spent(this.now()), new AgentStop("wall_time", { id: TEXT.stop.wallTime }));
+    deadline(() => limitOf(this.spec.budget.wallMs) - this.spent(this.now()), new AgentStop("wall_time", { id: TEXT.stop.wallTime, vars: { setting: this.budgetSetting("wallMs") } }));
     if (turn) {
       deadline(() => {
         const now = this.now();
@@ -77103,7 +77125,8 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
       return null;
     }
     const total = String(text.length);
-    const words = (id2) => this.text(id2, { shown: total, total, handle: "s000000" }).length + 1;
+    const said = (id2) => id2 === TEXT.runtime.clipped ? { per: String(max) } : { setting: this.budgetSetting("callTokensIn") };
+    const words = (id2) => this.text(id2, { shown: total, total, handle: "s000000", ...said(id2) }).length + 1;
     const fits = text.length > max && max + words(TEXT.runtime.clipped) <= room;
     const id = fits ? TEXT.runtime.clipped : TEXT.runtime.windowCut;
     const shown = cutAt(text, fits ? max : Math.max(0, room - words(TEXT.runtime.windowCut)));
@@ -77125,10 +77148,9 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
     }
     const handle = `s${this.scratch.size + 1}`;
     this.scratch.set(handle, { whole: whole3, per: max });
-    return { text: `${start}${this.text(id, { ...sizes, handle })}`, whole: whole3, scratch: "hash" in whole3 ? whole3.hash : handle };
+    return { text: `${start}${this.text(id, { ...sizes, handle, ...said(id) })}`, whole: whole3, scratch: "hash" in whole3 ? whole3.hash : handle };
   }
   scratchRead() {
-    const max = Math.max(this.deps.settings.loop.clipChars, ...[...this.tools.values()].map((tool) => tool.wholeChars ?? 0));
     return {
       name: SCRATCH_READ,
       description: this.text(TEXT.runtime.scratchRead),
@@ -77137,7 +77159,7 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
         properties: {
           handle: { type: "string", description: this.text(TEXT.runtime.scratchHandle) },
           offset: { type: "integer", minimum: 0, description: this.text(TEXT.runtime.scratchOffset) },
-          length: { type: "integer", minimum: 1, maximum: max, description: this.text(TEXT.runtime.scratchLength, { max: String(max) }) }
+          length: { type: "integer", minimum: 1, description: this.text(TEXT.runtime.scratchLength, { max: String(this.deps.settings.loop.clipChars) }) }
         },
         required: ["handle"]
       },
@@ -77153,7 +77175,7 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
         const total = String(whole3.length);
         const room = this.room - this.text(TEXT.runtime.scratchPart, { handle, from: total, to: total, total, text: "" }).length;
         if (room < 1 && from < whole3.length)
-          return { text: this.text(TEXT.runtime.scratchFull, { handle }) };
+          return { text: this.text(TEXT.runtime.scratchFull, { handle, setting: this.budgetSetting("callTokensIn") }) };
         const length = Math.min(Math.max(1, wholeArg(args.length) ?? kept.per), kept.per, room);
         const to = cutAt(whole3, Math.min(whole3.length, from + length));
         return { text: this.text(TEXT.runtime.scratchPart, { handle, from: String(from), to: String(to), total, text: whole3.slice(from, to) }) };
@@ -78527,7 +78549,9 @@ ${task}`;
     const { texts } = this.run;
     const cut = reply.status === "answered" && cutShort(reply.finish);
     if (reply.status === "answered" && !cut && reply.text.trim() !== "")
-      return { text: texts.render(TEXT.agents.answer, { answer: reply.text, agent: definition, handle }) };
+      return { text: `${texts.render(TEXT.agents.from, { agent: definition, handle })}
+
+${reply.text}` };
     const reason = cut ? texts.render(TEXT.agents.cut) : reply.reason ?? texts.render(TEXT.answer.replyEmpty);
     return { text: texts.render(TEXT.agents.stopped, { agent: definition, handle, reason, said: reply.text.trim() === "" ? "" : texts.render(TEXT.agents.stoppedSaid, { text: reply.text }) }), error: true };
   }
@@ -80573,9 +80597,7 @@ function waitWords(ms) {
   return `${seconds} second${seconds === 1 ? "" : "s"}`;
 }
 function extensionWait(options) {
-  const path = ["extension", "waitMs"];
-  const title = settingTitle(path);
-  return options.place?.(path, title) ?? title;
+  return settingPlaceOf(undefined, options.place)(["extension", "waitMs"]);
 }
 function unansweredWords(input) {
   const { why, texts, options } = input;
@@ -80613,19 +80635,43 @@ async function remoteTools(host, chatId) {
     return [rest];
   });
 }
-function claimOf(raw) {
+function claimOf(raw, extension, host) {
   if (!isRecord(raw))
     return null;
   const guidance = isRecord(raw.guidance) && typeof raw.guidance.name === "string" ? raw.guidance : null;
   const story = storyWordOf(raw.story);
+  const replyTool = raw.replyTool === undefined || raw.replyTool === null ? null : replyToolOf(raw.replyTool, extension?.releasing !== undefined);
+  if (typeof replyTool === "string")
+    host.log("warn", `[LumiAH] ${extension?.name ?? "the extension"}'s claim gives reply_write a description and arguments of its own that can't be offered (${replyTool}): reply_write takes the reply's text in this chat, as without them`);
   return {
     ...typeof raw.mainAgent === "string" ? { mainAgent: raw.mainAgent } : {},
     ...guidance && typeof guidance.path === "string" ? { guidance: { name: guidance.name, path: guidance.path } } : guidance && typeof guidance.text === "string" ? { guidance: { name: guidance.name, text: guidance.text } } : {},
     ...Array.isArray(raw.withdraw) ? { withdraw: raw.withdraw.filter((name) => typeof name === "string") } : {},
     ...Object.keys(story).length > 0 ? { story } : {},
     ...raw.request === "whole" || raw.request === "newest" ? { request: raw.request } : {},
-    ...raw.reply === "released" ? { reply: "released" } : {}
+    ...raw.reply === "released" ? { reply: "released" } : {},
+    ...replyTool !== null && typeof replyTool !== "string" ? { replyTool } : {}
   };
+}
+function replyToolOf(raw, releases) {
+  if (!releases)
+    return "it has no releasing to give the text that goes out";
+  if (!isRecord(raw) || typeof raw.description !== "string" || raw.description.trim() === "")
+    return "it has no description";
+  let parameters;
+  try {
+    parameters = JSON.parse(JSON.stringify(raw.parameters) ?? "null");
+  } catch (error) {
+    return `its arguments can't be written as JSON (${errorText(error)})`;
+  }
+  if (!isRecord(parameters) || parameters.type !== "object")
+    return "its arguments aren't a JSON Schema of type object";
+  const { properties, required } = parameters;
+  if (properties !== undefined && (!isRecord(properties) || !Object.values(properties).every((schema) => isRecord(schema))))
+    return "its arguments' properties aren't each a schema";
+  if (required !== undefined && (!Array.isArray(required) || !required.every((name) => typeof name === "string" && isRecord(properties) && hasOwn(properties, name))))
+    return "it requires an argument it doesn't describe";
+  return { description: raw.description, parameters };
 }
 async function readSetup(shared, chatId, userId = shared.options.userId ?? "") {
   const { host, options } = shared;
@@ -80661,7 +80707,7 @@ async function readSetup(shared, chatId, userId = shared.options.userId ?? "") {
     host.log("warn", `[LumiAH] ${name} gave no answer for the chat ${chatId} (${unansweredLog(claimed.unanswered)}): nobody knows whether it answers the chat itself, so this run doesn't start`);
   }
   const supplied = "answer" in own && isRecord(own.answer) ? own.answer : {};
-  const claim = "answer" in claimed ? claimOf(claimed.answer) : null;
+  const claim = "answer" in claimed ? claimOf(claimed.answer, extension, host) : null;
   const definitions = mergeDefinitions({
     code: { agents: shared.agents.all(), skills: shared.skills.all(), tools: shared.tools.all() },
     core: shared.core,
@@ -80673,7 +80719,7 @@ async function readSetup(shared, chatId, userId = shared.options.userId ?? "") {
   const settings = settingsOf(stored.values, definitions.scope());
   shared.latest = settings;
   const story = claim?.story ? storyHolds({ claim: claim.story, chat: chosen, user: early.story, sovereignHand }) : below;
-  return { userId, settings, texts: textsOf(stored.texts), definitions, chat, claim, story, unanswered };
+  return { userId, settings, texts: textsOf(stored.texts, settingPlaceOf(definitions.scope(), shared.options.place)), definitions, chat, claim, story, unanswered };
 }
 function instructionsOf(definition, texts) {
   return definition.text !== undefined && textDef(definition.text) ? texts.render(definition.text) : definition.instructions;
@@ -80969,7 +81015,7 @@ class Run {
         const path = showPath(pin.area, pin.path);
         const text2 = pin.entry.chars <= room ? await view.areas[pin.area]?.text(pin.entry.hash) ?? null : null;
         if (text2 === null)
-          files.push(texts.render(TEXT.agents.fileNamed, { path, chars: String(pin.entry.chars) }));
+          files.push(texts.render(TEXT.agents.pinnedNamed, { path, chars: String(pin.entry.chars) }));
         else {
           room -= text2.length;
           files.push(texts.render(TEXT.agents.file, { path, chars: String(text2.length), version: versionOf(pin.entry.hash), text: text2 }));
@@ -82160,7 +82206,7 @@ function uncoveredRuns(files, chat) {
 // node_modules/lumi-ah/src/core/tools/paging.ts
 function pagerOf(env, tool) {
   const { pageChars, pageItems, lineChars } = env.settings.tools;
-  return { tool, texts: env.texts, pageChars, pageItems, lineChars };
+  return { tool, texts: env.texts, pageChars: Math.min(pageChars, env.settings.loop.clipChars), pageItems, lineChars };
 }
 var CURSOR = /^(\d{1,15})(?::(\d{1,15}))?$/;
 function readCursor(p, args) {
@@ -86838,20 +86884,19 @@ var replyWrite = {
     if (!reply)
       return null;
     const p = pagerOf(env, TOOL.replyWrite);
+    const own = reply.tool;
     return {
       name: TOOL.replyWrite,
-      description: texts.render(TEXT.tool(TOOL.replyWrite)),
-      state: () => reply.length(),
-      parameters: { type: "object", properties: { text: { type: "string", description: texts.render(TEXT.toolArg(TOOL.replyWrite, "text")) } }, required: ["text"] },
+      description: own?.description ?? texts.render(TEXT.tool(TOOL.replyWrite)),
+      parameters: own?.parameters ?? { type: "object", properties: { text: { type: "string", description: texts.render(TEXT.toolArg(TOOL.replyWrite, "text")) } }, required: ["text"] },
       async run(args, ctx) {
         ctx.signal.throwIfAborted();
-        const text2 = typeof args.text === "string" && args.text.trim() !== "" ? args.text : null;
-        if (text2 === null)
+        if (own === null && (typeof args.text !== "string" || args.text.trim() === ""))
           return needs(p, "text");
-        const refused2 = await reply.write(text2, ctx);
-        if (refused2 !== null)
-          return { text: refused2, error: true };
-        return { text: texts.render(TEXT.answer.released, { chars: String(text2.length), total: String(reply.length()) }) };
+        const out = await reply.write(args, ctx);
+        if ("refused" in out)
+          return { text: out.refused, error: true };
+        return { text: texts.render(TEXT.answer.released, { chars: String(out.released.length) }) };
       }
     };
   }
@@ -87199,7 +87244,7 @@ class Turn {
       ...directed !== null ? [directed] : []
     ];
     const kinds = { new: TEXT.main.kindNew, regenerate: TEXT.main.kindRegenerate, swipe: TEXT.main.kindSwipe, continue: TEXT.main.kindContinue };
-    const ask3 = texts.render(releasedOnly ? TEXT.main.askReleases : writes2 ? TEXT.main.askWrites : TEXT.main.ask);
+    const ask3 = texts.render(releasedOnly ? TEXT.main.askRelease : writes2 ? TEXT.main.askWrites : TEXT.main.ask);
     const noted = notes.map((note) => `${note}
 
 `).join("");
@@ -87304,7 +87349,7 @@ ${asked}`, this.signal);
     if (this.signal.aborted)
       return { status: "stopped", reason: this.stoppedWhy() };
     if (this.streamed) {
-      this.host.log("warn", `[LumiAH] the turn's work failed after part of its reply was released (${reason}): what was released stands`);
+      this.host.log("warn", `[LumiAH] the turn's work failed after its reply was released (${reason}): what was released stands`);
       return this.released();
     }
     if (run.claim?.reply === "released")
@@ -87360,10 +87405,8 @@ ${asked}`, this.signal);
     }
   }
   async writeReply(brief, mainId, run) {
-    if (this.streamed)
+    if (this.streamed || this.holder)
       return { text: this.text(TEXT.answer.replyReleased), error: true };
-    if (this.holder)
-      return { text: this.text(TEXT.answer.releaseHeld), error: true };
     if (this.writing || this.written || this.broken !== null)
       return { text: this.text(TEXT.answer.replyBusy), error: true };
     this.progress(TEXT.progress.writing);
@@ -87451,14 +87494,15 @@ ${asked}`, this.signal);
         return this.text(TEXT.answer.releaseEnded);
       if (this.writing || this.written || this.broken !== null)
         return this.text(TEXT.answer.releaseWriter);
-      if (this.holder)
-        return this.text(TEXT.answer.releaseHeld);
+      if (this.streamed || this.holder)
+        return this.text(TEXT.answer.releaseAgain);
       return null;
     };
     return {
+      tool: run.claim?.replyTool ?? null,
       refused: shut,
-      write: (text2, ctx) => {
-        const next = this.releasing.then(() => this.release(text2, ctx, run, shut));
+      write: (args, ctx) => {
+        const next = this.releasing.then(() => this.release(args, ctx, run, shut));
         this.releasing = next.catch(() => {
           return;
         });
@@ -87473,35 +87517,49 @@ ${asked}`, this.signal);
           given2 = true;
           this.holder = false;
           if (released !== "")
-            this.tellReleased(run, agent, released);
+            this.tellReleased(run, agent, released, {});
         };
       },
-      stream: (text2) => this.streamOut(text2),
-      length: () => this.reply.length
+      stream: (text2) => this.streamOut(text2)
     };
   }
-  async release(text2, ctx, run, shut) {
+  async release(args, ctx, run, shut) {
     const first = shut();
     if (first !== null)
-      return first;
-    const { turn, shared } = this;
+      return { refused: first };
+    const { turn, shared, texts } = this;
     const agent = run.ref(ctx.agentId) ?? { agentId: ctx.agentId, role: ctx.role, ...ctx.as !== undefined ? { as: ctx.as } : {} };
+    const own = run.claim?.replyTool !== undefined;
+    const carried = !own && typeof args.text === "string" ? args.text : "";
+    let text2 = carried;
     const extension = shared.options.extension;
     if (extension?.releasing) {
-      const lost = {};
-      const verdict = await askExtension(shared, "word on a passage of the reply", this.settings.extension.waitMs, () => extension.releasing?.({ userId: run.userId, chatId: turn.chatId, turn: turn.generationId, agent, text: text2 }) ?? Promise.resolve(null), lost);
-      if (verdict === lost)
-        return this.text(TEXT.answer.releaseUnchecked);
-      if (verdict !== null && verdict !== undefined)
-        return isRecord(verdict) && typeof verdict.refused === "string" && verdict.refused.trim() !== "" ? clip(verdict.refused, this.settings.tools.pageChars) : this.text(TEXT.answer.releaseUnchecked);
+      const asked = await extensionAnswer(shared, this.settings.extension.waitMs, () => extension.releasing?.({ userId: run.userId, chatId: turn.chatId, turn: turn.generationId, agent, text: carried, args }) ?? Promise.resolve(null));
+      if ("unanswered" in asked) {
+        this.host.log("warn", `[LumiAH] ${extension.name} gave no word on the turn's reply (${unansweredLog(asked.unanswered)}): none of it was released`);
+        return { refused: unansweredWords({ why: asked.unanswered, late: TEXT.answer.releaseLate, failed: TEXT.answer.releaseFailed, texts, options: shared.options }) };
+      }
+      const verdict = asked.answer;
+      const said = (key) => {
+        const value = isRecord(verdict) ? verdict[key] : undefined;
+        return typeof value === "string" && value.trim() !== "" ? value : null;
+      };
+      const refused2 = said("refused");
+      if (refused2 !== null)
+        return { refused: clip(refused2, this.settings.tools.pageChars) };
+      const given2 = said("text");
+      if (given2 !== null)
+        text2 = given2;
+      else if (own || verdict !== null && verdict !== undefined)
+        return { refused: this.text(TEXT.answer.releaseUnchecked, { extension: extension.name }) };
       const late = shut();
       if (late !== null)
-        return late;
+        return { refused: late };
     }
     if (!this.streamOut(text2))
-      return this.text(TEXT.answer.releaseEnded);
-    this.tellReleased(run, agent, text2);
-    return null;
+      return { refused: this.text(TEXT.answer.releaseEnded) };
+    this.tellReleased(run, agent, text2, args);
+    return { released: text2 };
   }
   streamOut(text2) {
     if (text2 === "" || this.closed || this.signal.aborted)
@@ -87510,10 +87568,10 @@ ${asked}`, this.signal);
     this.content(text2);
     return true;
   }
-  tellReleased(run, agent, text2) {
+  tellReleased(run, agent, text2, args) {
     const { turn } = this;
     const extension = this.shared.options.extension;
-    run.hook("answer to a passage released", extension?.released ? () => extension.released?.({ userId: run.userId, chatId: turn.chatId, turn: turn.generationId, agent, text: text2 }) ?? Promise.resolve() : undefined);
+    run.hook("answer to the reply released", extension?.released ? () => extension.released?.({ userId: run.userId, chatId: turn.chatId, turn: turn.generationId, agent, text: text2, args }) ?? Promise.resolve() : undefined);
   }
   released() {
     if (this.signal.aborted)
@@ -88047,7 +88105,8 @@ function createHarness(host, options) {
     const areas = chatId === null ? { chat: null, learned: null, user: shared.areas.user() } : { chat: shared.areas.now(chatId, { throughSwipe: true }), learned: await shared.areas.learned(chatId), user: shared.areas.user() };
     return { author: { who: "user" }, role: AGENT.main, areas, guard: () => null };
   };
-  const page = async (chatId) => pageWorkspace(await userView(chatId), () => shared.latest.workspace);
+  const place = settingPlaceOf(undefined, options.place);
+  const page = async (chatId) => pageWorkspace(await userView(chatId), () => shared.latest.workspace, place);
   const kept = async (input, done) => {
     if (input.chatId !== null && input.area === "chat")
       await shared.jobs.anchorNewest(input.chatId).catch((error) => host.log("warn", `[LumiAH] a change to the chat's area couldn't be put on the reply's record (${errorText(error)}): a branch cut there won't have it`));
@@ -88182,7 +88241,7 @@ function createHarness(host, options) {
           view = { author: { who: "agent", id: agentId, role }, role, areas: user.areas, guard: guidanceGuard(read2, setup.settings, setup.texts) };
           limits = () => setup.settings.workspace;
         }
-        const written = await pageWorkspace(view, limits).write({ area: asked.area, path: asked.path, text: asked.text, base: asked.base });
+        const written = await pageWorkspace(view, limits, place).write({ area: asked.area, path: asked.path, text: asked.text, base: asked.base });
         if (run)
           fileChanges(run.info, callId, written.changes);
         return written;
@@ -88197,7 +88256,7 @@ function createHarness(host, options) {
           throw new HarnessRefusal("not_found", "There is no such level of guidance here: the middle level needs a chat with a character, and the chat's needs a chat.");
         if (!level.file)
           throw new HarnessRefusal("forbidden", "This level is kept by the extension that answers this chat: it is edited there.");
-        await pageWorkspace(read2.view, () => shared.latest.workspace).write({ area: level.file.area, path: level.file.path, text: input.text, base: input.base });
+        await pageWorkspace(read2.view, () => shared.latest.workspace, place).write({ area: level.file.area, path: level.file.path, text: input.text, base: input.base });
         return guidanceView(await levels(input.chatId));
       }
     },
@@ -88235,12 +88294,12 @@ function createHarness(host, options) {
         const setup = await readSetup(shared, input.chatId);
         const plan = typeof input.plan === "string" && input.plan.trim() !== "" ? input.plan.trim() : null;
         if (plan !== null && plan.length > setup.settings.workspace.pathChars)
-          throw new HarnessRefusal("invalid", `The plan's path is ${plan.length} characters, and a path may be ${setup.settings.workspace.pathChars} at most (Path length).`);
+          throw new HarnessRefusal("invalid", `The plan's path is ${plan.length} characters, and ${setup.texts.setting(["workspace", "pathChars"])} lets a path be ${setup.settings.workspace.pathChars} at most.`);
         const planWords = typeof input.planWords === "string" && input.planWords.trim() !== "" ? input.planWords.trim() : null;
         if (planWords !== null && plan === null)
           throw new HarnessRefusal("invalid", "Words of a plan its starter keeps need the plan file they are about (plan).");
         if (planWords !== null && planWords.length > setup.settings.jobs.taskChars)
-          throw new HarnessRefusal("invalid", `The plan's words are ${planWords.length} characters, and may be ${setup.settings.jobs.taskChars} at most (Task length).`);
+          throw new HarnessRefusal("invalid", `The plan's words are ${planWords.length} characters, and ${setup.texts.setting(["jobs", "taskChars"])} lets them be ${setup.settings.jobs.taskChars} at most.`);
         const started = await shared.jobs.createJob({ chatId: input.chatId, when: input.when === "now" ? "now" : "after_reply", what: { agent: input.agent, task: input.task }, by: { who: "user" }, basis: null, ...isRecord(input.allowance) ? { allowance: allowanceOf(input.allowance) } : {}, ...input.area === "chat" ? { area: "chat" } : {}, ...plan !== null ? { plan } : {}, ...planWords !== null ? { planWords } : {} }, setup);
         if ("refused" in started)
           throw new HarnessRefusal("invalid", started.refused);
@@ -89223,6 +89282,11 @@ function timeoutPlace(path, title, owner) {
   const group = timeoutGroupOf(path);
   const settings = owner.settingsAt ?? `${owner.name}'s Settings`;
   return `${title} (${settings} \u2192 Timeouts${group !== null ? ` \u2192 ${group.label}` : ""})`;
+}
+function settingPlace(path, title, trail, owner) {
+  if (timeoutGroupOf(path) !== null)
+    return timeoutPlace(path, title, owner);
+  return `${title} (${[owner.settingsAt ?? `${owner.name}'s Settings`, ...trail].join(" \u2192 ")})`;
 }
 
 // node_modules/lumi-ah/src/link/waits.ts
@@ -94076,7 +94140,9 @@ function linkExtension(deps) {
     runBegan: (run) => tell("runBegan", json4(run)),
     releasing: async (release) => {
       const value = await once2("releasing", json4(release));
-      return isRecord2(value) && typeof value.refused === "string" ? { refused: value.refused } : null;
+      if (isRecord2(value) && typeof value.refused === "string")
+        return { refused: value.refused };
+      return isRecord2(value) && typeof value.text === "string" ? { text: value.text } : null;
     },
     released: (release) => tell("released", json4(release)),
     replyWritten: (reply) => tell("replyWritten", json4(reply)),
@@ -99233,7 +99299,7 @@ function createRuntime(config, deps) {
   const harness = deps.harness(ported, async () => {
     const snapshot = await held2.get();
     return { values: snapshot.values.core, texts: snapshot.texts, ...snapshot.definitions !== undefined ? { definitions: snapshot.definitions } : {} };
-  }, linkExtension({ link, now: deps.now, tuning, offer: () => offer }), (path6, title) => timeoutPlace(["core", ...path6], title, linkedBackendOf(link.hello?.backend)));
+  }, linkExtension({ link, now: deps.now, tuning, offer: () => offer }), (path6, title, trail) => settingPlace(["core", ...path6], title, trail, linkedBackendOf(link.hello?.backend)));
   const work = new Work3(harness, {
     log: deps.log,
     id: () => hex4(16),
@@ -100693,7 +100759,7 @@ if (process.versions.bun === undefined) {
 `);
   process.exit(1);
 }
-var BUILD = "5f5a0bb1";
+var BUILD = "c52acae6";
 var http = async (request2) => {
   const response = await fetch(request2.url, { method: request2.method, headers: request2.headers, ...request2.body !== undefined ? { body: request2.body } : {}, ...request2.signal !== undefined ? { signal: request2.signal } : {}, redirect: "manual" });
   const text4 = await response.text();

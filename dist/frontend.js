@@ -7148,12 +7148,13 @@ function gmPageSettingsOf(raw, base = GM_PAGE_DEFAULTS) {
 }
 var PERF_DEFAULTS = Object.freeze({ reuseViews: true });
 var MIND_FILE_IDS = ["core", "now", "memory", "beliefs", "people", "plans", "outline", "profile"];
+var MIND_FILE_TITLES = Object.freeze({ core: "Who they are", now: "Right now", memory: "Memory", beliefs: "Beliefs", people: "People", plans: "Plans", outline: "Their past in outline", profile: "Profile" });
 var MODEL_EFFORTS = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
 var CHARACTER_RUNS = ["scene", "digest", "prepare", "relive"];
 var AGENT_STANDINGS = ["turn", "sub", "job"];
 var STORY_DEFAULTS = Object.freeze({
   budget: Object.freeze({ stretchMinutes: 1440, t1: 1, t2: 2, t3: 4 }),
-  limits: Object.freeze({ beatChars: 800, quoteChars: 600, quotes: 6, people: 24, beatsPerTurn: 40, draftChars: 600, draftsPerTurn: 12, whyChars: 300, beatsRead: 40, feedItems: 40, openingChars: 4000 }),
+  limits: Object.freeze({ beatChars: 800, quoteChars: 600, quotes: 6, people: 24, beatsPerTurn: 40, draftChars: 600, draftsPerTurn: 12, whyChars: 300, beatsRead: 24, feedItems: 24, openingChars: 4000 }),
   minds: Object.freeze({ chars: Object.freeze({ core: 4000, now: 2000, memory: 8000, beliefs: 4000, people: 4000, plans: 2000, outline: 6000, profile: 1500 }), playerMind: true }),
   models: Object.freeze({ default: Object.freeze({}), agents: Object.freeze({}), standings: Object.freeze({}), runs: Object.freeze({}), characters: Object.freeze({}) }),
   prepare: Object.freeze({ stretchMessages: 40, askAboveTokens: 200000, reliveAtOnce: 3, beatsPerStretch: 30, readChars: 60000, textChars: 1200, callTokens: 60000, surveyChars: 60000, watchSeconds: 5, watchRuns: 60, runMinutes: 60, runRounds: 200, idleRuns: 2 })
@@ -7168,6 +7169,34 @@ var STORY_BOUNDS = Object.freeze({
   modelChars: 200,
   prepare: Object.freeze({ stretchMessages: [5, 400], askAboveTokens: [0, 1e8], reliveAtOnce: [1, 24], beatsPerStretch: [1, 200], readChars: [2000, 1e6], textChars: [200, 8000], callTokens: [1000, 2000000], surveyChars: [2000, 1e6], watchSeconds: [2, 300], watchRuns: [10, 500], runMinutes: [5, 1440], runRounds: [10, 5000], idleRuns: [1, 20] })
 });
+var STORY_LIMIT_LABELS = Object.freeze({
+  beatChars: "A beat's text",
+  quoteChars: "One quote",
+  quotes: "Quotes in a beat",
+  people: "People in a beat",
+  beatsPerTurn: "Beats in a turn",
+  draftChars: "A draft's text",
+  draftsPerTurn: "Drafts in a turn",
+  whyChars: "A reason",
+  beatsRead: "Beats in one read",
+  feedItems: "Beats taken in at once",
+  openingChars: "The moment, as a turn begins"
+});
+var PREPARE_LABELS = Object.freeze({
+  stretchMessages: "Messages in a stretch",
+  askAboveTokens: "Ask first above",
+  reliveAtOnce: "Principals reliving at once",
+  beatsPerStretch: "Beats in a stretch",
+  readChars: "One read of a stretch",
+  textChars: "Each text of the plan",
+  callTokens: "A model call, before one is measured",
+  surveyChars: "One answer of the survey",
+  watchSeconds: "The live view asks every",
+  watchRuns: "Runs the live view looks through",
+  runMinutes: "Time for one run",
+  runRounds: "Rounds for one run",
+  idleRuns: "Runs without progress"
+});
 var STORY_PRESET_DEFAULTS = Object.freeze({
   categories: Object.freeze({ "Story contract": "contract", Author: "author", Characters: "character", "Game master": "gm", Narrator: "narrator", Voice: "voice", "Presentation modules": "module" }),
   limits: Object.freeze({ contract: 16000, author: 40000, character: 20000, gm: 20000, narrator: 48000, voice: 12000, list: 4000, line: 160, module: 24000 })
@@ -7178,8 +7207,17 @@ var STORY_PRESET_BOUNDS = Object.freeze({
   limits: Object.freeze({ contract: [100, 400000], author: [100, 400000], character: [100, 400000], gm: [100, 400000], narrator: [100, 400000], voice: [100, 400000], list: [100, 1e5], line: [20, 1000], module: [100, 400000] })
 });
 var NARRATION_CHECKS = ["gm", "author", "none"];
-var NARRATION_DEFAULTS = Object.freeze({ check: "gm", revisions: 2, replyChars: 1500, recentChars: 4000, passageChars: 12000, changes: 12, changeChars: 400, ownChars: 600, directLine: "own" });
+var NARRATION_DEFAULTS = Object.freeze({ check: "gm", revisions: 2, replyChars: 1500, recentChars: 4000, passageChars: 24000, changes: 12, changeChars: 400, ownChars: 600, directLine: "own" });
 var NARRATION_BOUNDS = Object.freeze({ revisions: [0, 10], replyChars: [0, 20000], recentChars: [0, 40000], passageChars: [200, 60000], changes: [1, 40], changeChars: [40, 2000], ownChars: [0, 4000] });
+var NARRATION_LABELS = Object.freeze({
+  revisions: "Revisions",
+  changes: "Changes a check may ask",
+  changeChars: "Longest change",
+  replyChars: "The reply so far",
+  recentChars: "The chat's recent prose",
+  passageChars: "Longest passage",
+  ownChars: "Released unchecked"
+});
 var JOB_SETTINGS_DEFAULTS = Object.freeze({ routineLoreTokens: 8000 });
 
 // src/shared/offstage.ts
@@ -16595,6 +16633,7 @@ var relation = "The relation type's id: knows, owns, member_of, regard, in, or o
 var path = "The workspace file's path: names joined by /, such as notes/marcus.md; start it with ~/ for the global workspace, which every chat shares, such as ~/notes/style.md.";
 var under = "Only files under this folder, such as notes/; leave it out for every file.";
 var lore = "The lore entry's id, as lore_index, lore_search or lore_grep gives it: a short id such as lr0101, a World Info entry as bookId/entryId, or a world entry's own id.";
+var pageCursor = "Where to read on: the cursor the answer before ended with. Leave it out to start from the beginning.";
 var proposes = "The answer is the change in plain words, its change type and its mode. Working a turn, the change is staged at once: it lands when the turn commits, or, when its mode is confirm, waits for the game master's Apply on the turn's review card. Otherwise nothing changes until the game master applies it.";
 var dry = "true: check only; nothing is staged.";
 var dryWhole = "true: only check the change and say what it would do; nothing is staged.";
@@ -17356,32 +17395,44 @@ var WRITE_TOOL_TEXTS = [
     family: "lore",
     tier: "read",
     note: "Gives the lore index: every entry of the chat's World Info books by its id and title.",
-    text: "The lore index: every lore entry of the World Info books this chat reads, book by book, each by its short id and title, with a line of what it holds where the title doesn't say; or, where the game master keeps an index of their own, that index as they wrote it. Read an entry whole with lore_read and its id.",
-    args: [{ path: "book", text: "Only this book's entries: its name or id; leave it out for every book." }]
+    text: "The lore index: every lore entry of the World Info books this chat reads, book by book, each by its short id and title, with a line of what it holds where the title doesn't say; or, where the game master keeps an index of their own, that index as they wrote it. Read an entry whole with lore_read and its id. An index longer than one answer comes in pages, each ending with the cursor that reads on.",
+    args: [
+      { path: "book", text: "Only this book's entries: its name or id; leave it out for every book." },
+      { path: "cursor", text: pageCursor }
+    ]
   },
   {
     name: "lore_search",
     family: "lore",
     tier: "read",
     note: "Searches the world's lore and the chat's World Info books.",
-    text: "Search the lore: the world's own entries and those of the World Info books this chat reads, best matches first. Gives each match's id, title and why it matched, with its secret marker when it is a secret or a mark in a book (who knows it, whom it is kept from). Read one whole with lore_read.",
-    args: [{ path: "query", text: "Words or names to look for." }]
+    text: "Search the lore: the world's own entries and those of the World Info books this chat reads, best matches first. Gives each match's id, title and why it matched, with its secret marker when it is a secret or a mark in a book (who knows it, whom it is kept from). Read one whole with lore_read. More matches than one answer holds come in pages, each ending with the cursor that reads on.",
+    args: [
+      { path: "query", text: "Words or names to look for." },
+      { path: "cursor", text: pageCursor }
+    ]
   },
   {
     name: "lore_grep",
     family: "lore",
     tier: "read",
     note: "Finds lore entries that hold some text.",
-    text: "Find the lore entries whose text holds some text, in any case: each entry's id and title, its secret marker, and the lines that hold it.",
-    args: [{ path: "text", text: "What to look for." }]
+    text: "Find the lore entries whose text holds some text, in any case: each entry's id and title, its secret marker, and the lines that hold it. More lines than one answer holds come in pages, each ending with the cursor that reads on.",
+    args: [
+      { path: "text", text: "What to look for." },
+      { path: "cursor", text: pageCursor }
+    ]
   },
   {
     name: "lore_read",
     family: "lore",
     tier: "read",
     note: "Reads one lore entry, by its id.",
-    text: "Read one lore entry whole, by its id, as your knowledge has it: a secret in its text is marked with who knows it, or left out where your knowledge doesn't reach.",
-    args: [{ path: "id", text: lore }]
+    text: "Read one lore entry whole, by its id, as your knowledge has it: a secret in its text is marked with who knows it, or left out where your knowledge doesn't reach. An entry longer than one answer comes in pages, each ending with the cursor that reads on: read them all, nothing is left out or given twice.",
+    args: [
+      { path: "id", text: lore },
+      { path: "cursor", text: pageCursor }
+    ]
   },
   {
     name: "lore_load",
@@ -17431,6 +17482,10 @@ var WRITE_NOTE = {
   noLore: "tool.note.no_lore",
   draftPath: "tool.note.draft_path",
   loreLate: "tool.note.lore_late",
+  badCursor: "tool.note.bad_cursor",
+  pageMore: "tool.note.page_more",
+  pageEnd: "tool.note.page_end",
+  lineCut: "tool.note.line_cut",
   noBook: "tool.note.no_book",
   cancelled: "tool.note.cancelled",
   paused: "tool.note.paused",
@@ -17469,6 +17524,24 @@ var WRITE_TOOL_NOTES = [
   { id: WRITE_NOTE.draftPath, label: "A draft outside lore-drafts/", note: "lore_draft's answer when the path it was given isn't under lore-drafts/.", text: "A lore draft goes under lore-drafts/, and {{path}} isn't there.", vars: [filePath] },
   { id: WRITE_NOTE.loreLate, label: "Lore loaded after the reply", note: "lore_load's answer once the reply its turn was writing has gone out: it loads lore only while the turn is still being prepared.", text: "This turn's reply is written already, so {{id}} isn't loaded: load lore while a turn is being prepared.", vars: [{ name: "id", text: "the entry id the call gave" }] },
   { id: WRITE_NOTE.noBook, label: "No such book", note: "lore_index's answer when no World Info book read here has the name or id it was given.", text: "No World Info book {{book}} is read here.", vars: [{ name: "book", text: "the book's name or id the call gave" }] },
+  { id: WRITE_NOTE.badCursor, label: "Not a cursor", note: "A lore read's answer when its cursor isn't one an answer of that read gave.", text: "{{cursor}} isn't a cursor {{tool}} gave here. Leave cursor out to start from the beginning, or give the one the answer before ended with.", vars: [{ name: "cursor", text: "the cursor the call gave", required: true }, { name: "tool", text: "the tool called" }] },
+  {
+    id: WRITE_NOTE.pageMore,
+    label: "A page, more to come",
+    note: "Ends a page of a lore read whose answer is longer than one tool result may be (the setting named, Settings → Agents → Budgets): what this page gives, and the cursor that reads on.",
+    text: "This gives {{from}} to {{to}} of {{total}} {{what}}: one answer holds at most {{chars}} characters ({{setting}}, Settings → Agents → Budgets). Read on: the same call with cursor {{cursor}}.",
+    vars: [
+      { name: "from", text: "where this page starts, counted from 1", required: true },
+      { name: "to", text: "where it ends", required: true },
+      { name: "total", text: "how many there are in all", required: true },
+      { name: "what", text: "characters, matches or results" },
+      { name: "chars", text: "the most one answer holds", required: true },
+      { name: "setting", text: "the setting's label" },
+      { name: "cursor", text: "the cursor that reads on", required: true }
+    ]
+  },
+  { id: WRITE_NOTE.pageEnd, label: "The last page", note: "Ends the last page of a lore read that came in pages.", text: "This gives {{from}} to {{to}} of {{total}} {{what}}: the last of them.", vars: [{ name: "from", text: "where this page starts, counted from 1", required: true }, { name: "to", text: "where it ends", required: true }, { name: "total", text: "how many there are in all", required: true }, { name: "what", text: "characters, matches or results" }] },
+  { id: WRITE_NOTE.lineCut, label: "A line cut to fit", note: "Stands beside a line lore_grep found that is longer than one answer may be on its own (the setting named, Settings → Agents → Budgets): what was left out, and how to read it.", text: "This line is {{size}} characters, and only its first {{shown}} fit one answer ({{setting}}, Settings → Agents → Budgets): lore_read {{id}} reads the entry whole, in pages.", vars: [{ name: "size", text: "the line's length", required: true }, { name: "shown", text: "how much of it is given", required: true }, { name: "setting", text: "the setting's label" }, { name: "id", text: "the entry's id", required: true }] },
   { id: WRITE_NOTE.cancelled, label: "Cancelled", note: "A write's answer when the agent's work was cancelled before it ran.", text: "The agent's work was cancelled, so nothing was checked or written.", vars: [] },
   { id: WRITE_NOTE.paused, label: "The chat is paused", note: "An apply's answer while an earlier message's edit waits for Keep or Discard.", text: "An earlier message was edited: Keep or Discard it first, under that message.", vars: [] },
   { id: WRITE_NOTE.noWorld, label: "No world", note: "A write's answer when the chat plays no LumiRPEngine world, or its world isn't loaded.", text: "This chat plays no LumiRPEngine world, or its world isn't loaded.", vars: [] },
@@ -17861,7 +17934,7 @@ function defaultAgentSettings() {
     budget: { callTokensIn: "none", callTokensOut: HELPER_MAX_TOKENS, callMs: "none", callTools: "none", tokensIn: "none", tokensOut: "none", toolTurns: 10, wallMs: "none", revisions: 2, reruns: 1, concurrency: 4 },
     turn: { tokensIn: "none", tokensOut: "none", toolTurns: "none", wallMs: "none" },
     loopRepeats: 3,
-    clipChars: 4000,
+    clipChars: 8000,
     throttles: [],
     callsAtOnce: "none",
     caching: { on: true, nonce: "", roles: {} },
@@ -17882,7 +17955,7 @@ function defaultAgentSettings() {
     vsClassic: 2,
     systemTokens: 8000,
     harness: { defaultTick: true, commitWaitMs: 5000, runsRemembered: 1024, sovereignHand: "follow", newestMessage: "direction" },
-    harnessLimits: { timePassMinutes: TIMELAPSE_REACH_MINUTES, worldExamples: 3, worldTextChars: 20000 }
+    harnessLimits: { timePassMinutes: TIMELAPSE_REACH_MINUTES }
   };
 }
 function mainBudget(settings) {
@@ -17918,7 +17991,7 @@ var TURN_DEFS = {
 };
 var LOOP_DEFS = {
   loopRepeats: { label: "Loop detector", limits: "The same tool call, with the same arguments, this many times in a row.", fires: "That call isn't run, and the agent stops.", unit: "count", min: 2, none: null },
-  clipChars: { label: "Tool results clipped past", limits: "How much of one tool result reaches the model at once.", fires: "The rest goes to scratch, which the model reads with scratch_read.", unit: "chars", min: 1, none: null }
+  clipChars: { label: "Engine answers shown whole", limits: "How much of one answer of the engine's own tools an agent is shown whole: on the harness, the world tools' answers; on the agents engine, any tool result. LumiAH's Tool results clipped past is LumiAH's own setting.", fires: "On the harness a longer value is answered as an outline to read further into, and a list of names or issues is cut to half of this, saying how many more. On the agents engine the rest goes to scratch, which the model reads with scratch_read.", unit: "chars", min: 1, none: null }
 };
 var ASSISTANT_APPLY_LABELS = { ask: "Each waits for your Apply", at_once: "At once, with an Undo chip" };
 var HISTORY_TOKENS_DEF = { label: "History tokens", limits: "How much of the conversation goes with each message you send, the newest messages first.", fires: "The older messages are left out, and the assistant is told how many.", unit: "tokens", min: 0, none: null };
@@ -17949,6 +18022,7 @@ var OUTPUT_CHARS_DEF = { label: "Narrator-facing output, each", limits: "How lon
 var SYSTEM_TOKENS_DEF = { label: "System instructions", limits: "How much of each agent's prompt its system files may take together: AGENTS.md and roles/<role>.md, the global workspace's (~/) and this chat's.", fires: "The files past it are cut at a line, and the agent is told which were cut.", unit: "tokens", min: 0, none: null };
 var HARNESS_COMMIT_WAIT_DEF = { label: "Wait for the last turn", limits: "How long the start of a turn waits for the turn before it to finish being recorded, so the author reads the world whole.", fires: "The turn goes on, and its author is told the last turn's changes may not all be in yet.", unit: "ms", min: 0, none: null };
 var HARNESS_REMEMBERED_DEF = { label: "Finished runs remembered", limits: "How many runs that are over the engine keeps track of: each turn that was recorded or let go, each job's run, and who the agents of each were.", fires: "The oldest is forgotten: a call that still comes from it is answered that no turn is open. Shared by every user of this Lumiverse: the number in force is the last one read.", unit: "count", min: 16, none: null };
+var HARNESS_TIME_PASS_DEF = { label: "Time passed in one call", limits: "The farthest the author moves the scene's clock with one call of time_pass, and never past a timelapse's reach.", fires: "The call is refused and passes nothing; the author is told the most one call passes, and passes the span in steps.", unit: "minutes", min: 1, none: null };
 var PIPELINE_MODE_LABELS = { fixed: "A fixed pipeline", main: "A main agent decides" };
 var MEMORY_PLACEMENT_LABELS = { after_reply: "After the reply", before_next: "Before the next turn" };
 var REVIEW_PLACEMENT_LABELS = { chips: "On the review card after the reply", gate: "On the review card before the reply" };
@@ -33132,7 +33206,7 @@ var RUNTIME_PROMPTS = [
   { id: RUNTIME_TEXT.scratchRead, page: page4, label: "scratch_read: what it does", note: "The description of the built-in tool that reads the rest of a clipped tool result.", text: "Read more of a tool result that came back clipped. Give the scratch handle the clipped result names and where to start; you get the next part.", vars: [] },
   { id: RUNTIME_TEXT.scratchHandle, page: page4, label: "scratch_read: handle", note: "The description of scratch_read's handle argument.", text: "The scratch handle the clipped result names, such as s1.", vars: [] },
   { id: RUNTIME_TEXT.scratchOffset, page: page4, label: "scratch_read: offset", note: "The description of scratch_read's offset argument.", text: "The character to start from; 0 is the start.", vars: [] },
-  { id: RUNTIME_TEXT.scratchLength, page: page4, label: "scratch_read: length", note: "The description of scratch_read's length argument.", text: "How many characters to read, at most {{max}}.", vars: [{ name: "max", text: "the most one read returns: Tool results clipped past, in Settings → Agents" }] },
+  { id: RUNTIME_TEXT.scratchLength, page: page4, label: "scratch_read: length", note: "The description of scratch_read's length argument.", text: "How many characters to read, at most {{max}}.", vars: [{ name: "max", text: `the most one read returns: ${LOOP_DEFS.clipChars.label}, in Settings → Agents → Budgets` }] },
   {
     id: RUNTIME_TEXT.scratchPart,
     page: page4,
@@ -33754,6 +33828,7 @@ var standing = v6("standing", "how the person is cast, in words (an extra, a sup
 var file = v6("file", "the file's name", true);
 var size = v6("size", "how long the file would be, in characters", true);
 var max = v6("max", "the most the file holds, in characters", true);
+var row = v6("row", "the label of the player's row that sets the file's size, under Settings → Story → Minds");
 var MINDS_NOTE_PROMPTS = [
   answerPrompt(MINDS_NOTE.onlyCharacter, "Only a character's own agent", "A character's own tool's answer to an agent that wasn't started as a character.", "{{tool}} belongs to a character's own agent, for the person it is. You weren't started as a character, so it didn't run.", [tool]),
   answerPrompt(MINDS_NOTE.noOne, "Started as no one", "A character's own tool's answer to a character agent that was started as no one in particular.", "You were started as no one in particular, so {{tool}} can't tell whose mind is yours. The author starts a character's agent as the person it is. Say so in your answer, and stop here.", [tool]),
@@ -33780,8 +33855,8 @@ var MINDS_NOTE_PROMPTS = [
   answerPrompt(MINDS_NOTE.coreForPrincipal, "core.md is a principal's", "mind_write's answer to the author writing core.md for someone who isn't a principal.", "{{name}} is {{standing}}: only a principal has a core.md. Cast them as a principal first (cast_set), or keep a supporting character's profile.md.", [name, standing]),
   answerPrompt(MINDS_NOTE.profileForSupporting, "profile.md is a supporting character's", "mind_write's answer to the author writing profile.md for someone who isn't a supporting character.", "{{name}} is {{standing}}: profile.md is a supporting character's. Who a principal is goes in core.md.", [name, standing]),
   answerPrompt(MINDS_NOTE.gmReadsOnly, "The game master writes no mind", "mind_write's answer to the game master.", "The game master reads minds and writes none. Tell the author what you think should change."),
-  answerPrompt(MINDS_NOTE.fileLong, "A file too long", "mind_write's answer when the text is longer than the file holds (Settings: the story's minds).", "{{file}} would be {{size}} characters, past the {{max}} it holds, so nothing was written. Write it shorter: keep what matters and let the rest go.", [file, size, max]),
-  answerPrompt(MINDS_NOTE.appendLong, "Too long with that added", "mind_write's answer when adding to a file would make it longer than it holds.", "{{file}} would be {{size}} characters with that added, past the {{max}} it holds, so nothing was written. Write it whole and shorter, without append: keep what still matters and let the small things fade.", [file, size, max]),
+  answerPrompt(MINDS_NOTE.fileLong, "A file too long", "mind_write's answer when the text is longer than the file holds, naming the file's row (Settings → Story → Minds).", "{{file}} would be {{size}} characters, past the {{max}} it holds (the player's size for it: {{row}}, in Settings → Story → Minds), so nothing was written. Write it shorter: keep what matters and let the rest go.", [file, size, max, row]),
+  answerPrompt(MINDS_NOTE.appendLong, "Too long with that added", "mind_write's answer when adding to a file would make it longer than it holds, naming the file's row (Settings → Story → Minds).", "{{file}} would be {{size}} characters with that added, past the {{max}} it holds (the player's size for it: {{row}}, in Settings → Story → Minds), so nothing was written. Write it whole and shorter, without append: keep what still matters and let the small things fade.", [file, size, max, row]),
   answerPrompt(MINDS_NOTE.fileAsks, "A file can't wait for Apply", "mind_write's answer while the player has characters' minds set to Confirm (Settings → Changes from the reply): the tool writes a file at once, so no review card could make it.", "{{type}} is set to Confirm (Settings → Changes from the reply), and a mind's file can't wait on the review card, so {{file}} wasn't written. Say so in your answer.", [v6("type", "the change type's name", true), file]),
   answerPrompt(MINDS_NOTE.stale, "Changed since it was read", "mind_write's answer when the file changed after the version the call gave.", "{{file}} changed since you read it: you gave version {{given}}, and it is at {{version}} now. Read it again and write it with your change made.", [file, v6("given", "the version the call gave", true), v6("version", "the file's version now", true)]),
   answerPrompt(MINDS_NOTE.staleNew, "Gone since it was read", "mind_write's answer when the file the call's version names no longer exists.", "{{file}} no longer exists (you gave version {{given}}). Read the mind again, and write the file anew.", [file, v6("given", "the version the call gave", true)]),
@@ -34058,6 +34133,7 @@ var PRESET_NOTE_PROMPTS = [
 ];
 
 // src/shared/harness-texts-prepare.ts
+var at2 = (dial) => `Settings → Story → Preparing → ${PREPARE_LABELS[dial]}`;
 var PREPARE_TOOL = {
   survey: "prepare_survey",
   status: "prepare_status",
@@ -34217,7 +34293,7 @@ var PREPARE_TOOL_TEXTS = [
     family: HARNESS_FAMILY.prepare,
     tier: "read",
     note: "Says what there is to prepare the story from, in outline, and gives each part in answers that fit: the story so far in the summaries' own text, the lore's books, the world's people, and what the engine already holds.",
-    text: "Survey what there is to draw on before you prepare the story. Left without a part, it says what there is in outline: how long the chat is, how many summaries its World Info books hold at each level, its lore books, the world's people and places, and what the engine already holds. Each part then gives what it holds, in answers that fit (Settings → Story → Preparing): summaries, the story so far in the summaries' own text, the highest level first, then the lower levels newest first, with what was left out for size and how to read it; lore, each World Info book with its size and how many of its entries are always on, and with book, that book's entries; world, the world's people and places; engine, the clock, the cast, the beats and the minds; chat, the chat itself. It reads switched-off entries too, and reads only. On a chat with a history, read the summaries and the lore before you plan: the plan is refused until you have.",
+    text: `Survey what there is to draw on before you prepare the story. Left without a part, it says what there is in outline: how long the chat is, how many summaries its World Info books hold at each level, its lore books, the world's people and places, and what the engine already holds. Each part then gives what it holds, in answers that fit (${at2("surveyChars")}): summaries, the story so far in the summaries' own text, the highest level first, then the lower levels newest first, with what was left out for size and how to read it; lore, each World Info book with its size and how many of its entries are always on, and with book, that book's entries; world, the world's people and places; engine, the clock, the cast, the beats and the minds; chat, the chat itself. It reads switched-off entries too, and reads only. On a chat with a history, read the summaries and the lore before you plan: the plan is refused until you have.`,
     args: [
       { path: "part", text: "Only this part: chat, summaries, lore, world or engine. Left out: what there is, in outline." },
       { path: "level", text: "With part summaries: only this level's summaries (volume, arc, chapter or other), in the story's order." },
@@ -34240,7 +34316,7 @@ var PREPARE_TOOL_TEXTS = [
     family: HARNESS_FAMILY.prepare,
     tier: "write",
     note: "Writes the preparation's plan to author/prepare.md before anything is spent. The author's alone.",
-    text: "Write the plan of the whole preparation before you spend, however many runs it takes: what the story is about for the player's character and what a prepared start must give it; whom you cast as principals; which stretches of the chat each principal relives, and why; what you fill from summaries and lore; and your estimate of what the whole preparation costs in tokens, your own work included. Never cut it to fit what one run may spend: the player sees its cost and decides. The engine reckons the whole too: what the preparation has spent so far, as LumiAH counts it, and the model calls the plan still takes, yours, the historian's and the principals', at what one of its calls weighs. The plan keeps the larger estimate. A stretch longer than one historian run reads is planned as several. The plan goes to author/prepare.md, which the player reads. Above the player's ceiling on the whole (Settings → Story → Preparing) it waits for their word, and nothing is relived until they give it. A plan written for what the player told you carries your answer, and waits for their word whatever their ceiling. On a chat with a history it is refused until you have read the summaries and the lore with prepare_survey, and written the story as you understand it in author/story.md. Calling it again changes the plan: what is recorded stays recorded.",
+    text: `Write the plan of the whole preparation before you spend, however many runs it takes: what the story is about for the player's character and what a prepared start must give it; whom you cast as principals; which stretches of the chat each principal relives, and why; what you fill from summaries and lore; and your estimate of what the whole preparation costs in tokens, your own work included. Never cut it to fit what one run may spend: the player sees its cost and decides. The engine reckons the whole too: what the preparation has spent so far, as LumiAH counts it, and the model calls the plan still takes, yours, the historian's and the principals', at what one of its calls weighs. The plan keeps the larger estimate. A stretch longer than one historian run reads is planned as several. The plan goes to author/prepare.md, which the player reads. Above the player's ceiling on the whole (${at2("askAboveTokens")}) it waits for their word, and nothing is relived until they give it. A plan written for what the player told you carries your answer, and waits for their word whatever their ceiling. On a chat with a history it is refused until you have read the summaries and the lore with prepare_survey, and written the story as you understand it in author/story.md. Calling it again changes the plan: what is recorded stays recorded.`,
     args: [
       { path: "about", text: "What the story is about for the player's character: the bigger picture as the lore and the summaries give it, where it stands now, and what a prepared start must give it, in a few sentences." },
       { path: "principals", text: "The principals: the story's main characters across its whole length, wherever they are now, and everyone the player named as one, each with why." },
@@ -34264,7 +34340,7 @@ var PREPARE_TOOL_TEXTS = [
     family: HARNESS_FAMILY.prepare,
     tier: "write",
     note: "Opens one stretch of the plan to be recorded and relived, or drops it. The author's alone.",
-    text: "Open one stretch of the plan to be relived, then hand it to the historian (delegate, agent: historian) with its id: the historian reads it and records its beats. Open stretches in the chat's order. It is refused while the plan waits for the player's word; when what the preparation has spent so far, all its work counted, and what the stretch is reckoned at would pass the player's cap; and while as many principals as may relive at once still have earlier moments to take in (Settings → Story → Preparing). With drop set, the stretch is dropped instead, and filled from summaries and lore.",
+    text: `Open one stretch of the plan to be relived, then hand it to the historian (delegate, agent: historian) with its id: the historian reads it and records its beats. Open stretches in the chat's order. It is refused while the plan waits for the player's word; when what the preparation has spent so far, all its work counted, and what the stretch is reckoned at would pass the player's cap; and while as many principals as may relive at once still have earlier moments to take in (${at2("reliveAtOnce")}). With drop set, the stretch is dropped instead, and filled from summaries and lore.`,
     args: [
       { path: "stretch", text: STRETCH },
       { path: "drop", text: "true: drop this stretch from the plan instead of opening it." }
@@ -34348,25 +34424,25 @@ var PREPARE_NOTE_PROMPTS = [
   answerPrompt(PREPARE_NOTE.noPlan, "Preparing: no plan yet", "A preparing tool's answer before any plan is written.", "There is no plan yet. Survey what there is (prepare_survey), then write the plan with prepare_plan."),
   answerPrompt(PREPARE_NOTE.damaged, "Preparing: the file can't be read", "A preparing tool's answer when the record at the end of author/prepare.md isn't one it can read: someone edited it.", "The record at the end of author/prepare.md can't be read: it was edited. Write the plan again with prepare_plan. What is already recorded stays in the story record."),
   answerPrompt(PREPARE_NOTE.conflict, "Preparing: the file kept changing", "A preparing tool's answer when author/prepare.md changed under it each time it tried to write.", "author/prepare.md changed each time this tried to write it. Nothing was changed. Call again."),
-  answerPrompt(PREPARE_NOTE.waits, "Preparing: the plan waits for the player", "What prepare_plan says, and what prepare_relive refuses with, while the plan waits for the player's word.", "The plan is reckoned at {{estimate}} tokens in all, your own work included, above the player's ceiling of {{ceiling}} (Settings → Story → Preparing), so it waits for their word. Nothing is relived until they give it. End your run now with a short report of the plan. The preparation carries on from author/prepare.md when they answer.", [estimate, ceiling]),
+  answerPrompt(PREPARE_NOTE.waits, "Preparing: the plan waits for the player", "What prepare_plan says, and what prepare_relive refuses with, while the plan waits for the player's word.", `The plan is reckoned at {{estimate}} tokens in all, your own work included, above the player's ceiling of {{ceiling}} (${at2("askAboveTokens")}), so it waits for their word. Nothing is relived until they give it. End your run now with a short report of the plan. The preparation carries on from author/prepare.md when they answer.`, [estimate, ceiling]),
   answerPrompt(PREPARE_NOTE.stands, "Preparing: the plan stands", "What prepare_plan says when the plan needs no word from the player, or has it.", "The plan stands, reckoned at {{estimate}} tokens in all, your own work included. Open the first stretch with prepare_relive.", [estimate]),
-  answerPrompt(PREPARE_NOTE.split, "Preparing: a stretch was split", "What prepare_plan says of a stretch longer than one historian run reads.", "#{{from}} to #{{to}} is longer than one historian run reads ({{most}} messages, Settings → Story → Preparing), so it is planned as {{count}} stretches.", [v6("from", "its first message", true), v6("to", "its last message", true), v6("most", "the most messages one run reads", true), v6("count", "how many stretches it became", true)]),
+  answerPrompt(PREPARE_NOTE.split, "Preparing: a stretch was split", "What prepare_plan says of a stretch longer than one historian run reads.", `#{{from}} to #{{to}} is longer than one historian run reads ({{most}} messages, ${at2("stretchMessages")}), so it is planned as {{count}} stretches.`, [v6("from", "its first message", true), v6("to", "its last message", true), v6("most", "the most messages one run reads", true), v6("count", "how many stretches it became", true)]),
   answerPrompt(PREPARE_NOTE.newChat, "Preparing: nothing to relive", "prepare_plan's answer to stretches given for a chat with no history.", "This chat has no history to relive yet, so a plan for it has no stretches. Cast the principals and write their cores. Nothing was written."),
   answerPrompt(PREPARE_NOTE.badRange, "Preparing: not messages of the chat", "prepare_plan's answer to a stretch whose messages the chat doesn't have.", "#{{from}} to #{{to}} isn't a stretch of this chat: its messages run from #{{first}} to #{{last}}. Nothing was written.", [v6("from", "the stretch's first message", true), v6("to", "its last message", true), v6("first", "the chat's first message"), v6("last", "the chat's last message")]),
   answerPrompt(PREPARE_NOTE.overlap, "Preparing: stretches overlap", "prepare_plan's answer to two stretches that share messages.", "Two stretches share messages: #{{first}} to #{{to}} and one from #{{from}}. Each moment is recorded once, so give stretches that don't overlap. Nothing was written.", [v6("first", "the earlier stretch's first message", true), v6("to", "its last message", true), v6("from", "the later one's first message", true)]),
   answerPrompt(PREPARE_NOTE.notPrincipal, "Preparing: not a principal", "prepare_plan's answer to a stretch relived by someone not among the principals.", "{{name}} relives a stretch but isn't among the principals. Only a principal relives. Nothing was written.", [v6("name", "the person", true)]),
   answerPrompt(PREPARE_NOTE.playerCast, "Preparing: the player's character", "A preparing tool's answer for the player's character.", "{{name}} is the player's character. Whether they have a mind is the player's setting, so they aren't cast or outlined. Nothing was written.", [v6("name", "the player's character", true)]),
   answerPrompt(PREPARE_NOTE.noPrincipals, "Preparing: no principals", "prepare_plan's answer to a plan with no principals.", "A plan casts at least one principal: someone the story turns on, with a mind of their own. Nothing was written."),
-  answerPrompt(PREPARE_NOTE.long, "Preparing: a text too long", "A preparing tool's answer to a text past the player's limit (Settings → Story → Preparing).", "{{field}} is {{size}} characters long, and holds at most {{max}} (Settings → Story). Say it in fewer words and call again. Nothing was written.", [v6("field", "what was too long", true), v6("size", "how long it is"), v6("max", "the most it holds", true)]),
+  answerPrompt(PREPARE_NOTE.long, "Preparing: a text too long", "A preparing tool's answer to a text past the player's limit, named by its row (Settings → Story → Preparing).", `{{field}} is {{size}} characters long, and holds at most {{max}} (${at2("textChars")}). Say it in fewer words and call again. Nothing was written.`, [v6("field", "what was too long", true), v6("size", "how long it is"), v6("max", "the most it holds", true)]),
   answerPrompt(PREPARE_NOTE.noStretch, "Preparing: no such stretch", "A preparing tool's answer for a stretch the plan doesn't have.", "The plan has no stretch {{stretch}}. prepare_status lists them.", [stretch]),
   answerPrompt(PREPARE_NOTE.recordedAlready, "Preparing: recorded already", "A preparing tool's answer for a stretch whose beats are recorded already.", "Stretch {{stretch}} is recorded already, and closed. Nothing was changed.", [stretch]),
   answerPrompt(PREPARE_NOTE.droppedAlready, "Preparing: dropped", "A preparing tool's answer for a stretch that was dropped.", "Stretch {{stretch}} was dropped from the plan. Nothing was changed.", [stretch]),
   answerPrompt(PREPARE_NOTE.openAlready, "Preparing: open already", "prepare_relive's answer for a stretch that is open already.", "Stretch {{stretch}} ({{span}}) is open already, recorded through #{{through}}. Hand it to the historian again: it reads on from there.", [stretch, span, v6("through", "the last message recorded", true)]),
   answerPrompt(PREPARE_NOTE.order, "Preparing: in the chat's order", "prepare_relive's answer for a stretch opened before an earlier one is recorded.", "Stretches are relived in the chat's order, so minds take in their past as it happened. Stretch {{before}} ({{span}}) comes first: open it, or drop it. Nothing was opened.", [v6("before", "the earlier stretch's id", true), span]),
   answerPrompt(PREPARE_NOTE.capped, "Preparing: past the player's cap", "prepare_relive's answer when opening a stretch would take the whole preparation past the player's cap.", "Reliving {{stretch}} is reckoned at {{cost}} tokens, and the preparation has spent {{spent}} so far, all its work counted, of the {{cap}} the player allowed it. Nothing more is relived past their cap. Fill the rest from summaries and lore (prepare_outline), drop the stretches left, or ask the player in your report to raise the cap.", [stretch, v6("cost", "the stretch's reckoning, in tokens", true), v6("spent", "what the preparation has spent so far, in tokens, as LumiAH counts it", true), v6("cap", "the player's cap on the whole preparation, in tokens", true)]),
-  answerPrompt(PREPARE_NOTE.atOnce, "Preparing: too many reliving at once", "prepare_relive's answer while as many principals as may relive at once still have earlier moments to take in.", "{{reliving}} still have earlier moments to relive, and at most {{most}} principals relive at once (Settings → Story → Preparing). Start them on what they have, and open {{stretch}} when they have taken it in. Nothing was opened.", [v6("reliving", "who has moments left to relive", true), v6("most", "how many may relive at once", true), stretch]),
-  answerPrompt(PREPARE_NOTE.crowd, "Preparing: a stretch with too many principals", "prepare_relive's answer for a stretch relived by more principals than may relive at once.", "Stretch {{stretch}} is relived by {{count}} principals, and at most {{most}} relive at once (Settings → Story → Preparing). Plan it for fewer: the others take it in outline. Nothing was opened.", [stretch, v6("count", "how many relive it", true), v6("most", "how many may relive at once", true)]),
-  answerPrompt(PREPARE_NOTE.tooLong, "Preparing: longer than one run reads", "prepare_relive's answer for a stretch longer than one historian run reads now.", "Stretch {{stretch}} ({{span}}) is longer than one historian run reads now ({{most}} messages, Settings → Story → Preparing). Plan it again with prepare_plan, and it is split. Nothing was opened.", [stretch, span, v6("most", "the most messages one run reads", true)]),
+  answerPrompt(PREPARE_NOTE.atOnce, "Preparing: too many reliving at once", "prepare_relive's answer while as many principals as may relive at once still have earlier moments to take in.", `{{reliving}} still have earlier moments to relive, and at most {{most}} principals relive at once (${at2("reliveAtOnce")}). Start them on what they have, and open {{stretch}} when they have taken it in. Nothing was opened.`, [v6("reliving", "who has moments left to relive", true), v6("most", "how many may relive at once", true), stretch]),
+  answerPrompt(PREPARE_NOTE.crowd, "Preparing: a stretch with too many principals", "prepare_relive's answer for a stretch relived by more principals than may relive at once.", `Stretch {{stretch}} is relived by {{count}} principals, and at most {{most}} relive at once (${at2("reliveAtOnce")}). Plan it for fewer: the others take it in outline. Nothing was opened.`, [stretch, v6("count", "how many relive it", true), v6("most", "how many may relive at once", true)]),
+  answerPrompt(PREPARE_NOTE.tooLong, "Preparing: longer than one run reads", "prepare_relive's answer for a stretch longer than one historian run reads now.", `Stretch {{stretch}} ({{span}}) is longer than one historian run reads now ({{most}} messages, ${at2("stretchMessages")}). Plan it again with prepare_plan, and it is split. Nothing was opened.`, [stretch, span, v6("most", "the most messages one run reads", true)]),
   answerPrompt(PREPARE_NOTE.chatChanged, "Preparing: the chat changed", "A preparing tool's answer when the messages a stretch was planned on are no longer where they were.", "The chat changed since the plan: stretch {{stretch}} ({{span}}) no longer begins and ends where it did. Plan it again with prepare_plan. Nothing was changed.", [stretch, span]),
   answerPrompt(PREPARE_NOTE.opened, "Preparing: a stretch opened", "What prepare_relive says of the stretch it opened.", "Stretch {{stretch}} ({{span}}) is open. Hand it to the historian now: delegate, agent historian, with a task that names the stretch {{stretch}} and says why it matters: {{why}} Those who relive it once it is recorded: {{who}}.", [stretch, span, v6("why", "why the stretch is relived", true), v6("who", "the principals who relive it", true)]),
   answerPrompt(PREPARE_NOTE.dropped, "Preparing: a stretch dropped", "What prepare_relive says of a stretch it dropped.", "Stretch {{stretch}} ({{span}}) is dropped from the plan. Fill it from summaries and lore for those it concerned (prepare_outline).", [stretch, span]),
@@ -34374,7 +34450,7 @@ var PREPARE_NOTE_PROMPTS = [
   answerPrompt(PREPARE_NOTE.readMore, "Preparing: more to read", "What stretch_read says when the stretch has more messages than one read gives.", "More of the stretch follows: read on from #{{next}}.", [v6("next", "the next message to read", true)]),
   answerPrompt(PREPARE_NOTE.readEnd, "Preparing: the stretch read to its end", "What stretch_read says when it gave the stretch to its end.", "That is the stretch to its end."),
   answerPrompt(PREPARE_NOTE.through, "Preparing: through isn't in the stretch", "stretch_beats' answer when through isn't a message of the stretch.", "through must be a message of stretch {{stretch}} ({{span}}). Nothing was recorded.", [stretch, span]),
-  answerPrompt(PREPARE_NOTE.beatsFull, "Preparing: the stretch holds enough", "stretch_beats' answer when the stretch would hold more beats than the player allows.", "Stretch {{stretch}} holds {{count}} beats already, and keeps at most {{most}} (Settings → Story → Preparing). Record only what matters most, or close it with stretch_done. Nothing was recorded.", [stretch, v6("count", "how many it holds", true), v6("most", "the most it keeps", true)]),
+  answerPrompt(PREPARE_NOTE.beatsFull, "Preparing: the stretch holds enough", "stretch_beats' answer when the stretch would hold more beats than the player allows.", `Stretch {{stretch}} holds {{count}} beats already, and keeps at most {{most}} (${at2("beatsPerStretch")}). Record only what matters most, or close it with stretch_done. Nothing was recorded.`, [stretch, v6("count", "how many it holds", true), v6("most", "the most it keeps", true)]),
   answerPrompt(PREPARE_NOTE.badWhen, "Preparing: a time it can't read", "Why stretch_beats refuses a beat whose time isn't one the world's calendar reads.", "{{when}} isn't a time the world's calendar reads. Write it as {{now}} is written: YYYY-MM-DD HH:MM.", [v6("when", "what the call gave", true), v6("now", "the time now, as it is written", true)]),
   answerPrompt(PREPARE_NOTE.exposure, "Preparing: whom it reached", "Why stretch_beats refuses a beat that doesn't say whom it reached.", "It doesn't say whom it reached. The past isn't proposed from who is here now: give exposure, an empty list where it reached no one."),
   answerPrompt(PREPARE_NOTE.badBeat, "Preparing: a beat that can't be recorded", "stretch_beats' answer when one of its beats can't be recorded; why follows, as the story record's tools and the lookups word it.", "Beat {{n}} can't be recorded, so none of this call was. {{why}}", [v6("n", "the beat's place in the call, from 1", true), v6("why", "why, as the rule or the lookup words it", true)]),
@@ -34382,7 +34458,7 @@ var PREPARE_NOTE_PROMPTS = [
   answerPrompt(PREPARE_NOTE.later, "Preparing: later than the clock", "What stretch_beats and stretch_done add when beats are later than the world's clock now.", "{{count}} of these beats are later than the world's clock now ({{now}}). Say so in author/scene.md: the first turn sets the clock right.", [v6("count", "how many beats", true), v6("now", "the clock now, as it is written", true)]),
   answerPrompt(PREPARE_NOTE.closed, "Preparing: a stretch closed", "What stretch_done says of the stretch it closed.", "Stretch {{stretch}} ({{span}}) is recorded: {{count}} beats. Principals it reached, who relive it next, in order: {{who}}.", [stretch, span, v6("count", "how many beats it holds", true), v6("who", "the principals it reached", true)]),
   answerPrompt(PREPARE_NOTE.noneReached, "Preparing: no principal reached", "Fills the principals stretch_done names when its beats reached none.", "none"),
-  answerPrompt(PREPARE_NOTE.outlineLong, "Preparing: an outline too long", "prepare_outline's answer to an outline past the size of a mind's outline (Settings → Story → Minds).", "That outline is {{size}} characters long, and a mind's outline holds at most {{max}} (Settings → Story). Keep what they would carry. Nothing was written.", [v6("size", "how long it is"), v6("max", "the most it holds", true)]),
+  answerPrompt(PREPARE_NOTE.outlineLong, "Preparing: an outline too long", "prepare_outline's answer to an outline past the size of a mind's outline, named by its row (Settings → Story → Minds).", `That outline is {{size}} characters long, and a mind's outline holds at most {{max}} (Settings → Story → Minds → ${MIND_FILE_TITLES.outline}). Keep what they would carry. Nothing was written.`, [v6("size", "how long it is"), v6("max", "the most it holds", true)]),
   answerPrompt(PREPARE_NOTE.outlined, "Preparing: an outline written", "What prepare_outline says of the outline it wrote.", "Written: what {{name}} knows in outline. Their mind reads it, marked as not lived.", [v6("name", "the principal", true)]),
   other(PREPARE_NOTE.outlineHead, "Preparing: an outline's heading", "Heads the outline file a principal's mind is given (minds/<who>/outline.md): what marks it as known in outline, not lived.", `# Known in outline
 
@@ -34457,7 +34533,7 @@ Before you do anything else, write the plan again with prepare_plan for what the
   other(PREPARE_NOTE.fileCap, "Preparing: the file, the cap", "The player's cap in author/prepare.md.", " The player's cap on all the preparation may spend: {{cap}}.", [v6("cap", "the cap, in tokens", true)]),
   other(PREPARE_NOTE.callJob, "Preparing: a call weighed by its own", "Where the weight of a call came from: the preparation's own model calls.", "as the preparation's own calls weigh"),
   other(PREPARE_NOTE.callChat, "Preparing: a call weighed by the chat's", "Where the weight of a call came from, before the preparation made one: this chat's last author run.", "as this chat's last author run weighed"),
-  other(PREPARE_NOTE.callDefault, "Preparing: a call not measured yet", "Where the weight of a call came from when LumiAH measured none yet: the player's setting.", "the setting for a call not yet measured, Settings → Story → Preparing"),
+  other(PREPARE_NOTE.callDefault, "Preparing: a call not measured yet", "Where the weight of a call came from when LumiAH measured none yet: the player's setting.", `the setting for a call not yet measured, ${at2("callTokens")}`),
   other(PREPARE_NOTE.fileApproved, "Preparing: the file, approved", "In author/prepare.md, once the player approved the plan.", "Approved."),
   other(PREPARE_NOTE.fileAuto, "Preparing: the file, within the ceiling", "In author/prepare.md, for a plan within the player's ceiling, which needs no word.", "Within the player's ceiling of {{ceiling}} tokens for the whole preparation: it needs no word.", [ceiling]),
   other(PREPARE_NOTE.fileAsked, "Preparing: the file, asked", "In author/prepare.md, for a plan that waits for the player's word.", "Asked: it waits for their word."),
@@ -34475,7 +34551,7 @@ Before you do anything else, write the plan again with prepare_plan for what the
   answerPrompt(PREPARE_NOTE.storyFirst, "Preparing: the story first", "prepare_plan's answer on a chat with a history while author/story.md holds nothing: the story as the author understands it is written first.", "Write the story as you understand it in author/story.md first: what it is about for the player's character and the bigger picture the lore gives; what happened, in order; who the main characters are, and what each knows and wants now. The plan is written from it, and every later run reads it first. Nothing was written."),
   answerPrompt(PREPARE_NOTE.surveyOutline, "Preparing: the survey in outline", "Ends prepare_survey's answer without a part: how to read each part.", "That is what there is, in outline. Read each part with part: summaries for the story so far, lore for the books that frame it, world for its people, engine for what the engine holds, chat for the chat. On a chat with a history, read the summaries and the lore before you plan, and keep what you learn in author/story.md."),
   answerPrompt(PREPARE_NOTE.surveyNone, "Preparing: no summaries", "prepare_survey's summaries part on a chat whose World Info books hold no summary of it.", "The chat's World Info books hold no summary of it. Before you plan, read the chat in outline with chat_outline, and closely with chat_read and chat_around where it matters."),
-  answerPrompt(PREPARE_NOTE.surveyOrder, "Preparing: the summaries as given", "Leads prepare_survey's summaries part: in what order they come, and within what size.", "The story so far, in the summaries' own text: the highest level first, then the lower levels newest first, each whole, within {{size}} characters (Settings → Story → Preparing).", [v6("size", "the most one answer gives", true)]),
+  answerPrompt(PREPARE_NOTE.surveyOrder, "Preparing: the summaries as given", "Leads prepare_survey's summaries part: in what order they come, and within what size.", `The story so far, in the summaries' own text: the highest level first, then the lower levels newest first, each whole, within {{size}} characters (${at2("surveyChars")}).`, [v6("size", "the most one answer gives", true)]),
   answerPrompt(PREPARE_NOTE.surveyLeft, "Preparing: summaries left out for size", "Ends prepare_survey's summaries part when some didn't fit: what was left out, and how to read it.", "Left out for size: {{left}}. Read one with summary and its id, or several in a row with level, from and to.", [v6("left", "each level's summaries left out, by id and messages", true)]),
   answerPrompt(PREPARE_NOTE.surveyMore, "Preparing: more follows", "Ends one of prepare_survey's answers that gave as much as fits: where to read on.", "More follows: call again with from {{next}}.", [v6("next", "where to read on from", true)]),
   answerPrompt(PREPARE_NOTE.surveyEnd, "Preparing: nothing more", "Ends one of prepare_survey's answers that gave all there was.", "That is all of it."),
@@ -34540,6 +34616,7 @@ var RECORD_NOTE = {
   badWhen: "harness.note.record.bad_when",
   feedNone: "harness.note.record.feed_none",
   feedMore: "harness.note.record.feed_more",
+  beatsEarlier: "harness.note.record.beats_earlier",
   noAfter: "harness.note.record.no_after",
   noDue: "harness.note.record.no_due",
   stale: "harness.note.record.stale"
@@ -34575,12 +34652,13 @@ var RECORD_TOOL_TEXTS = [
     family: HARNESS_FAMILY.story,
     tier: "read",
     note: "Reads the beats on the chat's path, by person, place or time.",
-    text: "Read the beats on the chat's path, oldest first: what happened as true, who did it, where and when, whom each reached and how, and why one that was struck no longer stands. Narrow them by a person (beats by them, to them, or that reached them), by a place, or by a time to start from. It gives the latest that fit, as many as the player allows, and says how many earlier ones it left out. The author and the game master read it; a character's agent never does.",
+    text: "Read the beats on the chat's path, oldest first: what happened as true, who did it, where and when, whom each reached and how, and why one that was struck no longer stands. Narrow them by a person (beats by them, to them, or that reached them), by a place, or by a time to start from. It gives the latest that fit, each whole, as many as the player allows, and says how many earlier ones it left out and how to read them. The author and the game master read it; a character's agent never does.",
     args: [
       { path: "who", text: "Only beats by this person, addressed to them, or that reached them: an id or a name, or player." },
       { path: "where", text: "Only beats at this place: an id or a name." },
       { path: "since", text: `Only beats from this time on: ${STAMP2}.` },
-      { path: "struck", text: "false: leave out beats that no longer stand. Left out, they are listed, each with why." }
+      { path: "struck", text: "false: leave out beats that no longer stand. Left out, they are listed, each with why." },
+      { path: "before", text: "Only beats before this one on the path: a beat's id, as an earlier answer names the oldest it gave. Left out: up to the newest." }
     ]
   },
   {
@@ -34670,6 +34748,7 @@ var RECORD_TOOL_TEXTS = [
 ];
 var tool3 = v6("tool", "the tool called", true);
 var field2 = v6("field", "what was too long, or listed too many", true);
+var row2 = v6("row", "the label of the player's row that sets the limit, under Settings → Story → The record's limits");
 var who2 = v6("who", "the person's id, or player", true);
 var RECORD_NOTE_PROMPTS = [
   answerPrompt(RECORD_NOTE.noRecord, "No story record here", "A story tool's answer where the call reaches no story record: no harness turn or job holds it.", "The story record isn't reachable from this call, so nothing was read or written. It is kept for the agents of a turn on a chat the harness plays, and for its jobs."),
@@ -34679,8 +34758,8 @@ var RECORD_NOTE_PROMPTS = [
   answerPrompt(RECORD_NOTE.noSelf, "A character with no person", "beat_write's and feed_read's answer to a character's agent that runs as no one.", "Your agent runs as no one, so it has no person of its own to read or write for. The author starts a character's agent as the person it is. Nothing was read or written."),
   answerPrompt(RECORD_NOTE.notOwn, "Someone else's act", "beat_write's answer when a character's agent writes a beat by someone other than the person it is.", "You are {{self}}, so you write only your own acts: what you say, do or think. {{other}} is someone else to write. Nothing was written.", [v6("self", "the person the agent is", true), v6("other", "who the call said did it", true)]),
   answerPrompt(RECORD_NOTE.notOwnKind, "Not a character's to write", "beat_write's answer when a character's agent writes something the world does.", "A character writes only what they say, do or think. What the world does is the author's to write. Nothing was written."),
-  answerPrompt(RECORD_NOTE.long, "Too long", "A story tool's answer when a text is longer than the player's limit (Settings → Story).", "{{field}} is {{size}} characters long, and holds at most {{max}} (the player's limit, Settings → Story). Say it in fewer words and call again. Nothing was written.", [field2, v6("size", "how long it is"), v6("max", "the most it holds", true)]),
-  answerPrompt(RECORD_NOTE.many, "Too many", "A story tool's answer when a list holds more than the player's limit (Settings → Story).", "{{field}} lists {{count}}, and holds at most {{max}} (the player's limit, Settings → Story). Keep the ones that matter and call again. Nothing was written.", [field2, v6("count", "how many the call gave"), v6("max", "the most it holds", true)]),
+  answerPrompt(RECORD_NOTE.long, "Too long", "A story tool's answer when a text is longer than the player's limit, named by its row (Settings → Story → The record's limits).", "{{field}} is {{size}} characters long, and holds at most {{max}} (the player's limit: {{row}}, in Settings → Story → The record's limits). Say it in fewer words and call again. Nothing was written.", [field2, v6("size", "how long it is"), v6("max", "the most it holds", true), row2]),
+  answerPrompt(RECORD_NOTE.many, "Too many", "A story tool's answer when a list holds more than the player's limit, named by its row (Settings → Story → The record's limits).", "{{field}} lists {{count}}, and holds at most {{max}} (the player's limit: {{row}}, in Settings → Story → The record's limits). Keep the ones that matter and call again. Nothing was written.", [field2, v6("count", "how many the call gave"), v6("max", "the most it holds", true), row2]),
   answerPrompt(RECORD_NOTE.blank, "Can't be blank", "A story tool's answer when a text it needs is blank.", "{{field}} can't be blank. Nothing was written.", [field2]),
   answerPrompt(RECORD_NOTE.innerReach, "A thought reaches no one", "beat_write's answer when an inner beat is given exposure.", "A thought reaches no one but its owner, so give no exposure for an inner beat. Nothing was written."),
   answerPrompt(RECORD_NOTE.reachActor, "The one who did it", "beat_write's answer when exposure names whoever did the beat.", "{{who}} did it, so it is theirs, not something that reached them. Leave them out of exposure. Nothing was written.", [who2]),
@@ -34689,7 +34768,7 @@ var RECORD_NOTE_PROMPTS = [
   answerPrompt(RECORD_NOTE.proposed, "Exposure proposed", "What beat_write says when exposure was left out and it proposes it from who is there.", "Nothing was written yet. exposure is who is there: each as having taken in all of it. Call beat_write again with the same beat and exposure, as proposed or adjusted."),
   answerPrompt(RECORD_NOTE.staged, "Staged with the turn", "Where a story change stands in a turn.", "Staged with the turn: it is kept when the turn commits, and goes if the turn doesn't stand."),
   answerPrompt(RECORD_NOTE.written, "Written on the record", "Where a story change stands after the reply.", "Written on the record of the turn this job belongs to."),
-  answerPrompt(RECORD_NOTE.full, "The turn's record holds enough", "A story tool's answer when the turn's record would hold more beats or drafts than the player allows (Settings → Story).", "This turn's record holds {{count}} {{what}} already, the most it keeps (the player's limit, Settings → Story). Nothing was written.", [v6("count", "how many it holds", true), v6("what", "beats or drafts", true)]),
+  answerPrompt(RECORD_NOTE.full, "The turn's record holds enough", "A story tool's answer when the turn's record would hold more beats or drafts than the player allows, named by its row (Settings → Story → The record's limits).", "This turn's record holds {{count}} {{what}} already, the most it keeps (the player's limit: {{row}}, in Settings → Story → The record's limits). Nothing was written.", [v6("count", "how many it holds", true), v6("what", "beats or drafts", true), row2]),
   answerPrompt(RECORD_NOTE.closed, "The turn is over", "A story tool's answer when the turn it was called in is over.", "The turn is over, so nothing more is staged with it. Nothing was written."),
   answerPrompt(RECORD_NOTE.offPath, "Off the chat's path", "A story tool's answer in a job whose turn's record left the chat's path.", "The turn this job belongs to is no longer on the chat's path: its reply was swiped away, deleted, or something before it was edited. Nothing was written. Stop here."),
   answerPrompt(RECORD_NOTE.noBasis, "No record to write on", "A story tool's answer in a run whose turn never wrote its record.", "The turn this run belongs to left no record on the chat to write on. Nothing was written."),
@@ -34703,19 +34782,24 @@ var RECORD_NOTE_PROMPTS = [
   answerPrompt(RECORD_NOTE.playerCast, "The player's character", "cast_set's answer for the player's character.", "{{name}} is the player's character. Whether they have a mind is the player's setting, so they aren't cast. Nothing was changed.", [v6("name", "the player's character", true)]),
   answerPrompt(RECORD_NOTE.badWhen, "A time it can't read", "A story tool's answer when a time isn't one the world's calendar reads.", "{{arg}} isn't a time the world's calendar reads. Write it as {{now}} is written: a date and a time, YYYY-MM-DD HH:MM.", [v6("arg", "the argument", true), v6("now", "the time now, as it is written", true)]),
   answerPrompt(RECORD_NOTE.feedNone, "Nothing new", "What feed_read says when nothing reached the person since they last took things in.", "Nothing new reached you since you last took things in."),
-  answerPrompt(RECORD_NOTE.feedMore, "More wait", "What feed_read says when more items wait past those it gave.", "{{more}} more wait after these. Read on with after set to last.", [v6("more", "how many more", true)]),
+  answerPrompt(RECORD_NOTE.feedMore, "More wait", "What feed_read says when more items wait past those it gave: how many, the setting that bounds one read (Settings → Story → The record's limits), and how to read on.", "{{more}} more wait after these: {{setting}} (Settings → Story → The record's limits) gives at most {{most}} at once. Read on with after set to last.", [v6("more", "how many more", true), v6("setting", "the setting's label", true), v6("most", "the most one read gives", true)]),
+  answerPrompt(RECORD_NOTE.beatsEarlier, "Earlier beats left out", "What beats_read says when earlier beats that fit were left out: how many, the setting that bounds one read (Settings → Story → The record's limits), and how to read them.", "{{earlier}} earlier beats that fit are left out: {{setting}} (Settings → Story → The record's limits) gives at most {{most}} in one read. Read them with before set to {{first}}.", [v6("earlier", "how many are left out", true), v6("setting", "the setting's label", true), v6("most", "the most one read gives", true), v6("first", "the id of the oldest beat given", true)]),
   answerPrompt(RECORD_NOTE.noAfter, "Not a beat to read past", "feed_read's answer when after names no beat on the chat's path.", "No beat {{beat}} is on the chat's path. Leave after out to read from the last beat you took in.", [v6("beat", "the id the call gave", true)]),
   answerPrompt(RECORD_NOTE.noDue, "Nothing due", "What drafts_due says when no open draft is due or stale.", "No open draft is due or stale now."),
   answerPrompt(RECORD_NOTE.stale, "Stale", "What drafts_due says of a stale draft.", "The story moved since this draft was opened. Judge whether it still holds: settle it, drop it, or open it again as it now stands.")
 ];
 
 // src/shared/harness-texts-stage.ts
+var at3 = (setting) => `Settings → Story → Narration → ${NARRATION_LABELS[setting]}`;
 var STAGE_TOOL = { narrationRead: "narration_read", passageDraft: "passage_draft", passageRead: "passage_read", passageCheck: "passage_check" };
+var REPLY_ARG = { pieces: "pieces", words: "words", place: "place" };
 var STAGE_TEXT = {
   prose: "harness.narration.prose",
   stranger: "harness.narration.stranger",
   lineIntro: "harness.narration.direct",
   lineVoice: "harness.narration.direct_voice",
+  replyTool: "harness.narration.reply",
+  replyArg: (arg) => `harness.narration.reply.${arg}`,
   check: (who3) => `harness.guidance.check.${who3}`,
   own: "harness.guidance.own_lines",
   ownNone: "harness.guidance.own_lines.none",
@@ -34750,12 +34834,14 @@ var STAGE_NOTE = {
   checkedRevise: "harness.note.narration.checked_revise",
   checkedSpent: "harness.note.narration.checked_spent",
   gateAuthor: "harness.note.narration.gate_author",
+  gateNothing: "harness.note.narration.gate_nothing",
+  gateArgs: "harness.note.narration.gate_args",
+  gateRepeated: "harness.note.narration.gate_repeated",
   gateTwice: "harness.note.narration.gate_twice",
-  gateEarlier: "harness.note.narration.gate_earlier",
+  gateUndrafted: "harness.note.narration.gate_undrafted",
   gateUnchecked: "harness.note.narration.gate_unchecked",
   gateFault: "harness.note.narration.gate_fault",
-  gateClose: "harness.note.narration.gate_close",
-  gateUnknown: "harness.note.narration.gate_unknown"
+  gateWords: "harness.note.narration.gate_words"
 };
 var STAGE_AGENT_TEXTS = [
   {
@@ -34763,14 +34849,14 @@ var STAGE_AGENT_TEXTS = [
     label: "The game master",
     name: "Game master",
     description: "Rules on what the world's rules leave open, checks each passage of the narrator's against what happened before it is released, and settles what happened with you when you ask. Give it what is attempted and how (in the player's own words where it is the player's), or the number of the passage to check. It rolls nothing and writes no prose.",
-    instructions: lines2("You are the game master of a roleplay world that LumiRPEngine keeps. The author starts you for a ruling, for a check of a passage before it reaches the player, or to settle what happened. You never roll: the engine's dice fall when the author plays an attempt. You never write the story's prose.", "", "A ruling. The author says what someone attempts and how they go about it.", "- Find the action the attempt is, and read its odds with checks_odds: whether it can be tried now, the chance of each outcome, and what this world's policy makes of it. An attempt of the player character's that no action covers is the open attempt: checks_stakes with action try, the skill that fits, how hard it looks, and whom it is against.", "- Look up only what the ruling turns on: the people involved, what they carry, where they are.", "- Judge the approach: how well what was described suits what is attempted, from 0 to the top the policy gives, with a reason in one plain line. A clever, prepared approach that fits the moment rates high. None, or one that works against them, rates 0.", "- Read the attempt with checks_stakes, with the same action, actor and arguments and your rating. Where the policy leaves the outcome to the story, give each outcome its odds: start from the dice's own, and move them toward success for a strong approach and away from it for a weak one.", "- Answer in a few lines: what is attempted; the action, who acts and its arguments exactly as you read them; your rating and why; the odds; what each outcome does. Never say how it turns out: the roll is the author's to play.", "", "A check. The author asks you to hold a passage to what happened.", "- Read it with passage_read. It gives the latest draft, every beat the passage tells as it truly happened and as it reached the point-of-view character, and the beats of the turn that never reached them.", "- Judge the passage against the beats passage_read shows you. Look into the world (places, people, things) only for a fact the passage states that no beat holds.", "- The passage holds when every act and every word that reached the point-of-view character is in it, every quote is word for word, and it adds nothing anyone could later notice: no act, word, outcome, injury, object, name or fact that the beats don't hold. It shows nothing the point-of-view character could not perceive, and other people's minds only through what they do and say. The rhythm, the voice, what the point-of-view character dwells on, and the presentation the author asked for are the narrator's.", "- passage_read also lists the quotes it could not find word for word and the spoken words no beat holds. Judge each one: a quote broken up by narration is still exact.", "- Record your verdict with passage_check: it holds, or it doesn't, with each change the narrator must make, exactly: the words at fault and what to put instead. Judge against the beats, never against your own taste.", "- Answer in a line: the verdict, and the changes if there are any.", "", "Settling what happened. When the author works something out with you (a contested outcome, a stretch of time decided between you), read the beats so far with beats_read, then write each thing that happened as a beat with beat_write, with whom it reached and how fully. Nothing you write may contradict a beat that stands.", "", "A tool's refusal says what to fix: fix it, or go on without it. Never repeat the same call unchanged.")
+    instructions: lines2("You are the game master of a roleplay world that LumiRPEngine keeps. The author starts you for a ruling, for a check of a passage before it reaches the player, or to settle what happened. You never roll: the engine's dice fall when the author plays an attempt. You never write the story's prose.", "", "A ruling. The author says what someone attempts and how they go about it.", "- Find the action the attempt is, and read its odds with checks_odds: whether it can be tried now, the chance of each outcome, and what this world's policy makes of it. An attempt of the player character's that no action covers is the open attempt: checks_stakes with action try, the skill that fits, how hard it looks, and whom it is against.", "- Look up only what the ruling turns on: the people involved, what they carry, where they are.", "- Judge the approach: how well what was described suits what is attempted, from 0 to the top the policy gives, with a reason in one plain line. A clever, prepared approach that fits the moment rates high. None, or one that works against them, rates 0.", "- Read the attempt with checks_stakes, with the same action, actor and arguments and your rating. Where the policy leaves the outcome to the story, give each outcome its odds: start from the dice's own, and move them toward success for a strong approach and away from it for a weak one.", "- Answer in a few lines: what is attempted; the action, who acts and its arguments exactly as you read them; your rating and why; the odds; what each outcome does. Never say how it turns out: the roll is the author's to play.", "", "A check. The author asks you to hold a passage to what happened.", "- Read it with passage_read. It gives every beat the passage tells as it truly happened and as it reached the point-of-view character, and the beats of the turn that never reached them, then the latest draft.", "- Judge the passage against the beats passage_read shows you. Look into the world (places, people, things) only for a fact the passage states that no beat holds.", "- The passage holds when every act and every word that reached the point-of-view character is in it, every quote is word for word, and it adds nothing anyone could later notice: no act, word, outcome, injury, object, name or fact that the beats don't hold. It shows nothing the point-of-view character could not perceive, and other people's minds only through what they do and say. The rhythm, the voice, what the point-of-view character dwells on, and the presentation the author asked for are the narrator's.", "- passage_read also lists the quotes it could not find word for word and the spoken words no beat holds. Judge each one: a quote broken up by narration is still exact.", "- Record your verdict with passage_check: it holds, or it doesn't, with each change the narrator must make, exactly: the words at fault and what to put instead. Judge against the beats, never against your own taste.", "- Answer in a line: the verdict, and the changes if there are any.", "", "Settling what happened. When the author works something out with you (a contested outcome, a stretch of time decided between you), read the beats so far with beats_read, then write each thing that happened as a beat with beat_write, with whom it reached and how fully. Nothing you write may contradict a beat that stands.", "", "A tool's refusal says what to fix: fix it, or go on without it. Never repeat the same call unchanged.")
   },
   {
     id: "narrator",
     label: "The narrator",
     name: "Narrator",
-    description: "Tells what happened: turns what reached the point-of-view character into a passage of the reply, in the voice this story is written in. Start it once a moment is decided. Name a point of view other than the player character's with as, and any presentation the preset offers in its task. Its passage is checked before you release it.",
-    instructions: lines2("You are the narrator of a roleplay. The author decides what happens; you tell it. You turn what reached one person, the point-of-view character, into a passage of the story, in the voice the story is written in. Before the author releases your passage to the player, it is checked against what happened.", "", "How to work:", "- Call narration_read first. It gives what reached the point-of-view character, in the order it happened: what they saw and heard whole, what they caught only in part or were told, and their own acts and words. It says where they are and who is plainly there, and gives the end of the reply so far, the story's recent prose, and the presentation the author asked for. If your task names presentation, pass those names in modules.", "- Write no fact of your own. Every act and every word you show is one you were given. Quote spoken words exactly. Show nothing the point-of-view character could not see, hear or know, and other people's minds only through what they do and say. Call someone by name only where you were given the name.", "- The telling is yours: its rhythm, its voice, what the point-of-view character dwells on. Nothing you add may be something anyone could later notice.", "- Go on from the reply so far without repeating it. When it already holds prose, start your passage with a blank line.", "- Record the passage with passage_draft. If it notes a quote you missed, draft again with the quote in it.", "- When narration_read shows your last draft with the changes a check asks for, make exactly those changes and keep the rest.", "- Then answer with the passage exactly as you drafted it, and nothing else.")
+    description: "Tells what happened: turns what reached the point-of-view character into a passage of the reply, in the voice this story is written in. Start it once a moment is decided. Name a point of view other than the player character's with as, and any presentation the preset offers in its task. Its passage is checked before you release it. It answers with the passage's number and length, never its text: you release the passage by that number.",
+    instructions: lines2("You are the narrator of a roleplay. The author decides what happens; you tell it. You turn what reached one person, the point-of-view character, into a passage of the story, in the voice the story is written in. Before the author releases your passage to the player, it is checked against what happened.", "", "How to work:", "- Call narration_read first. It gives what reached the point-of-view character, in the order it happened: what they saw and heard whole, what they caught only in part or were told, and their own acts and words. It says where they are and who is plainly there, and gives the presentation the author asked for, the end of the reply as told so far (each passage before yours) and the story's recent prose. If your task names presentation, pass those names in modules.", "- Write no fact of your own. Every act and every word you show is one you were given. Quote spoken words exactly. Show nothing the point-of-view character could not see, hear or know, and other people's minds only through what they do and say. Call someone by name only where you were given the name.", "- The telling is yours: its rhythm, its voice, what the point-of-view character dwells on. Nothing you add may be something anyone could later notice.", "- Go on from the reply so far without repeating it. Your passage follows the one before it after a blank line: start where that one leaves off.", "- Record the passage with passage_draft. If it notes a quote you missed, draft again with the quote in it.", "- When narration_read gives your last draft with the changes a check asks for (it gives them first), make exactly those changes and keep the rest.", "- Then answer in one line, as passage_draft's answer says: which passage you drafted and how long it is. Never write the passage out again: the author releases it by its number, exactly as you drafted it.")
   }
 ];
 var STAGE_TOOL_TEXTS = [
@@ -34779,7 +34865,7 @@ var STAGE_TOOL_TEXTS = [
     family: HARNESS_FAMILY.narration,
     tier: "read",
     note: "Gives the narrator what reached the point-of-view character in this turn that no passage has told yet.",
-    text: "The narrator's first call: what it is given to tell. It answers with what reached the point-of-view character in this turn that no earlier passage has told, in the order it happened (seen and heard whole, caught in part, told by someone, or their own act), where they are and who is plainly there, the end of the reply so far and the story's recent prose for its voice, and the presentation the author asked for. It never gives what reached no one, or more of what happened than reached them. The point of view is the player character's unless the author named someone else when it started you. Called again, it gives the same passage, with your last draft and the changes a check asked for. The author may call it with pov to see what a narrator would be given.",
+    text: "The narrator's first call: what it is given to tell. It answers with what reached the point-of-view character in this turn that no earlier passage has told, in the order it happened (seen and heard whole, caught in part, told by someone, or their own act), where they are and who is plainly there, the presentation the author asked for, and, for its voice, the end of the reply as told so far and the story's recent prose. It never gives what reached no one, or more of what happened than reached them. The point of view is the player character's unless the author named someone else when it started you. Called again while you revise, it gives the same passage with your last draft and the changes a check asked for first. The author may call it with pov to see what a narrator would be given.",
     args: [
       { path: "pov", text: "The author's only: whose eyes to see through, a person's id or name. A narrator reads without it: the author names the point of view when it starts you." },
       { path: "modules", text: "The names of the presentation the author asked for in your task, if any." }
@@ -34790,15 +34876,15 @@ var STAGE_TOOL_TEXTS = [
     family: HARNESS_FAMILY.narration,
     tier: "write",
     note: "Records the narrator's draft of its passage.",
-    text: "Record your passage: the narrator's draft of what narration_read gave it. Each call is a new draft of the same passage, and a passage has a set number of drafts. The answer notes the quotes it could not find word for word and the spoken words no beat holds, and says whether the passage is checked before the author releases it.",
+    text: "Record your passage: the narrator's draft of what narration_read gave it. Each call is a new draft of the same passage, and a passage has a set number of drafts. The answer gives the passage's number and length, notes the quotes it could not find word for word and the spoken words no beat holds, and says whether the passage is checked before the author releases it. The author releases the draft recorded here: never write it out again.",
     args: [{ path: "text", text: "The whole passage, exactly as it should reach the player." }]
   },
   {
     name: STAGE_TOOL.passageRead,
     family: HARNESS_FAMILY.narration,
     tier: "read",
-    note: "Reads a passage for its check: its latest draft and the beats it tells, whole.",
-    text: "Read a passage for its check: its latest draft, every beat it tells as it truly happened and as it reached the point-of-view character, the beats of the turn that never reached them, the quotes the draft lacks and the spoken words no beat holds, and the checks made so far. The game master and the author read with it; a narrator never does.",
+    note: "Reads a passage for its check: the beats it tells, whole, then its latest draft.",
+    text: "Read a passage for its check: every beat it tells as it truly happened and as it reached the point-of-view character, the beats of the turn that never reached them and the checks made so far, then its latest draft, with the quotes the draft lacks and the spoken words no beat holds. The game master and the author read with it; a narrator never does.",
     args: [{ path: "passage", text: "The passage's number; leave it out for the latest one waiting for a check." }]
   },
   {
@@ -34816,6 +34902,7 @@ var STAGE_TOOL_TEXTS = [
 ];
 var AGENTS = HARNESS_GROUP.agents;
 var GUIDANCE = HARNESS_GROUP.guidance;
+var TOOLS2 = HARNESS_GROUP.tools;
 var page6 = HARNESS_PAGE.id;
 var pov = v6("pov", "the point-of-view character's name", true);
 var n3 = v6("n", "the passage's number", true);
@@ -34862,12 +34949,49 @@ var TEXT_PROMPTS = [
     nonEmpty: true
   },
   {
+    id: STAGE_TEXT.replyTool,
+    page: page6,
+    group: TOOLS2,
+    label: "reply_write: what it does on the harness",
+    note: "What a harness chat sends the author as the description of reply_write, LumiAH's tool for the reply, in place of LumiAH's own: here it names each passage to release by its number, and the engine sends what the narrator drafted.",
+    text: "Release this turn's reply, once and whole, when the telling is done: name each passage of the narrator's to send by its number, in the order the player reads them, and add words of your own where you need them. The engine sends each passage's latest draft as it stands, a blank line between them: you never write a passage out yourself. A turn's reply is released once, and a second call is refused, so make it your last word to the player. What you release reaches the player at once and can't be taken back.",
+    vars: [],
+    nonEmpty: true
+  },
+  {
+    id: STAGE_TEXT.replyArg(REPLY_ARG.pieces),
+    page: page6,
+    group: TOOLS2,
+    label: "reply_write: pieces",
+    note: "The description of reply_write's pieces argument on the harness: each passage to release, by its number.",
+    text: "The number of each passage of the narrator's to release, in the order the player reads them. Where each passage is checked, each must have passed its check, or have no drafts left.",
+    vars: []
+  },
+  {
+    id: STAGE_TEXT.replyArg(REPLY_ARG.words),
+    page: page6,
+    group: TOOLS2,
+    label: "reply_write: words",
+    note: "The description of reply_write's words argument on the harness: what the author releases in its own words.",
+    text: "Your own words, if any: a line for someone with no mind of their own, or a short answer out of character, within what you may release with no check. With no pieces, they are the whole reply.",
+    vars: []
+  },
+  {
+    id: STAGE_TEXT.replyArg(REPLY_ARG.place),
+    page: page6,
+    group: TOOLS2,
+    label: "reply_write: place",
+    note: "The description of reply_write's place argument on the harness: where the author's own words go.",
+    text: "Where your own words go: before what the narrator wrote, or after it. After, if you leave it out.",
+    vars: []
+  },
+  {
     id: STAGE_TEXT.check("gm"),
     page: page6,
     group: GUIDANCE,
     label: "Each passage: the game master checks",
     note: "The author's guidance when the game master checks each passage (the narration setting Who checks).",
-    text: "Each passage is checked by the game master in this chat. Before you release a passage of the narrator's, start the game master to check it. A passage at fault goes back to the narrator with the changes, up to {{revisions}} times; then you may release its last draft as it stands, or leave it out. reply_write refuses a passage that hasn't passed its check.",
+    text: "Each passage is checked by the game master in this chat: once the narrator has drafted one, start the game master to check it. A passage at fault goes back to the narrator with the changes, up to {{revisions}} times; then you may release its last draft as it stands, or leave it out. reply_write refuses a passage that hasn't passed its check.",
     vars: [v6("revisions", "the revisions a passage is allowed", true)]
   },
   {
@@ -34876,7 +35000,7 @@ var TEXT_PROMPTS = [
     group: GUIDANCE,
     label: "Each passage: the author checks",
     note: "The author's guidance when it checks each passage itself (the narration setting Who checks).",
-    text: "You check each passage of the narrator's yourself in this chat. Before you release one, read it against its beats with passage_read and give your verdict with passage_check. A passage at fault goes back to the narrator with the changes, up to {{revisions}} times; then you may release its last draft as it stands, or leave it out. reply_write refuses a passage that hasn't passed its check.",
+    text: "You check each passage of the narrator's yourself in this chat: once the narrator has drafted one, read it against its beats with passage_read and give your verdict with passage_check. A passage at fault goes back to the narrator with the changes, up to {{revisions}} times; then you may release its last draft as it stands, or leave it out. reply_write refuses a passage that hasn't passed its check.",
     vars: [v6("revisions", "the revisions a passage is allowed", true)]
   },
   {
@@ -34885,7 +35009,7 @@ var TEXT_PROMPTS = [
     group: GUIDANCE,
     label: "Each passage: no one checks",
     note: "The author's guidance when no one checks a passage (the narration setting Who checks).",
-    text: "No one checks a passage of the narrator's in this chat: release each with reply_write as it comes.",
+    text: "No one checks a passage of the narrator's in this chat: each is ready once it is drafted, and goes out with the reply as drafted.",
     vars: []
   },
   {
@@ -34894,7 +35018,7 @@ var TEXT_PROMPTS = [
     group: GUIDANCE,
     label: "What the author may release in its own words",
     note: "The author's guidance on what reply_write takes from it without a check, where each passage is checked.",
-    text: "You may release up to {{chars}} characters in your own words with no check: a line for someone who has no mind of their own, or a short answer out of character. Anything longer is the narrator's to write.",
+    text: "You may release up to {{chars}} characters in your own words with no check (reply_write's words), before or after what the narrator wrote: a line for someone who has no mind of their own, or a short answer out of character. Anything longer is the narrator's to write.",
     vars: [v6("chars", "the characters it may release so", true)]
   },
   {
@@ -34912,7 +35036,7 @@ var TEXT_PROMPTS = [
     group: GUIDANCE,
     label: "The direct line: the character's own passage",
     note: "The author's guidance when the direct line's passage is the character's own (the narration setting The direct line).",
-    text: "On the direct line, a character's own passage is the reply: hand it the stream (delegate with to_reply) and it speaks as itself.",
+    text: "On the direct line, a character's own passage is the reply: hand it the stream (delegate with to_reply) and it speaks as itself. That stream is the turn's one release: nothing else goes out after it.",
     vars: []
   },
   {
@@ -34934,32 +35058,34 @@ var NOTE_PROMPTS = [
   answerPrompt(STAGE_NOTE.noModules, "No presentation to ask for", "narration_read's answer when it is asked for presentation and the chat's preset offers none.", "This chat's preset offers no presentation to ask for. Call narration_read without modules."),
   answerPrompt(STAGE_NOTE.readFirst, "Read before drafting", "passage_draft's answer to a narrator that hasn't been given its passage yet.", "Call narration_read first: it gives the passage you draft."),
   answerPrompt(STAGE_NOTE.draftEmpty, "A draft with no text", "passage_draft's answer when it is given no text.", "A draft needs the passage's text: the whole passage, as it should reach the player."),
-  answerPrompt(STAGE_NOTE.draftLong, "A passage too long", "passage_draft's answer when a draft is longer than a passage may be (the narration setting Longest passage).", "A passage is at most {{chars}} characters. Tell less in this one: what is left can be the next passage's.", [v6("chars", "the most a passage may be", true)]),
+  answerPrompt(STAGE_NOTE.draftLong, "A passage too long", `passage_draft's answer when a draft is longer than a passage may be (${at3("passageChars")}).`, `A passage is at most {{chars}} characters (${at3("passageChars")}). Tell less in this one: what is left can be the next passage's.`, [v6("chars", "the most a passage may be", true)]),
   answerPrompt(STAGE_NOTE.released, "The passage is out", "A narration tool's answer about a passage that has been released already.", "Passage {{n}} has been released already: nothing of it can change.", [n3]),
-  answerPrompt(STAGE_NOTE.draftPassed, "The draft passed", "passage_draft's answer when the passage's last draft passed its check.", "Your last draft of passage {{n}} passed its check, and the author releases it as it stands. Answer with that draft.", [n3]),
-  answerPrompt(STAGE_NOTE.draftSpent, "No drafts left", "passage_draft's answer when the passage has had all the drafts the settings allow.", "Passage {{n}} has had {{made}} drafts, all the settings allow. The author decides what becomes of it: answer with your last draft as it stands.", [n3, v6("made", "the drafts it has had", true)]),
-  answerPrompt(STAGE_NOTE.drafted, "A draft recorded", "Heads passage_draft's answer once the draft is recorded.", "Passage {{n}}, draft {{draft}} of {{of}}, is recorded.", [n3, v6("draft", "this draft's number", true), v6("of", "the drafts a passage may have", true)]),
-  answerPrompt(STAGE_NOTE.draftedChecked, "It is checked next", "Ends passage_draft's answer where each passage is checked.", "It is checked against what happened before the author releases it. Answer with the passage exactly as you drafted it."),
-  answerPrompt(STAGE_NOTE.draftedFree, "No one checks it", "Ends passage_draft's answer where no one checks a passage.", "No one checks it in this chat: the author may release it now. Answer with the passage exactly as you drafted it."),
+  answerPrompt(STAGE_NOTE.draftPassed, "The draft passed", "passage_draft's answer when the passage's last draft passed its check.", "Your last draft of passage {{n}} passed its check, and the author releases it as it stands. Answer in one line that it passed: never write it out again.", [n3]),
+  answerPrompt(STAGE_NOTE.draftSpent, "No drafts left", `passage_draft's answer when the passage has had all the drafts the settings allow (${at3("revisions")}).`, `Passage {{n}} has had {{made}} drafts, all the settings allow (${at3("revisions")}). The author decides what becomes of it: answer in one line that its drafts are spent.`, [n3, v6("made", "the drafts it has had", true)]),
+  answerPrompt(STAGE_NOTE.drafted, "A draft recorded", "Heads passage_draft's answer once the draft is recorded: which passage, which draft, and how long it is.", "Passage {{n}}, draft {{draft}} of {{of}}, is recorded: {{chars}} characters.", [n3, v6("draft", "this draft's number", true), v6("of", "the drafts a passage may have", true), v6("chars", "how long the draft is, in characters", true)]),
+  answerPrompt(STAGE_NOTE.draftedChecked, "It is checked next", "Ends passage_draft's answer where each passage is checked: the narrator answers in a line, and never writes the passage out again.", "It is checked against what happened before the author releases it. Answer in one line with its number and length, and that it waits for its check. Never write it out again: the author releases it by its number."),
+  answerPrompt(STAGE_NOTE.draftedFree, "No one checks it", "Ends passage_draft's answer where no one checks a passage: the narrator answers in a line, and never writes the passage out again.", "No one checks it in this chat: it is ready to release. Answer in one line with its number and length. Never write it out again: the author releases it by its number."),
   answerPrompt(STAGE_NOTE.quotesMissing, "Quotes the draft lacks", "In passage_draft's and passage_read's answers: words spoken where the point-of-view character heard them that the draft doesn't have word for word.", "These words were spoken where {{pov}} heard them, and the passage doesn't have them word for word: {{quotes}}.", [pov, v6("quotes", "the quotes, each in quotation marks", true)]),
   answerPrompt(STAGE_NOTE.quotesUnheld, "Spoken words no beat holds", "In passage_draft's and passage_read's answers: words spoken in the draft that no beat holds.", "These words are spoken in the passage, and no beat holds them: {{quotes}}.", [v6("quotes", "the words, each in quotation marks", true)]),
   answerPrompt(STAGE_NOTE.readWho, "Not for the narrator", "passage_read's answer to an agent that doesn't check a passage.", "passage_read is for whoever checks a passage, the game master or the author. A narrator is given only what narration_read gives."),
-  answerPrompt(STAGE_NOTE.noPassage, "No such passage", "A narration tool's answer when the turn has no passage of that number.", "This turn has no passage {{n}}.", [n3]),
+  answerPrompt(STAGE_NOTE.noPassage, "No such passage", "A narration tool's answer, and reply_write's, when the turn has no passage of that number.", "This turn has no passage {{n}}.", [n3]),
   answerPrompt(STAGE_NOTE.noneYet, "No passage yet", "passage_read's answer when no passage of the turn has been drafted yet.", "No passage has been drafted in this turn yet: the narrator drafts one first."),
-  answerPrompt(STAGE_NOTE.checkNone, "No one checks", "passage_check's answer where the settings have no one check a passage.", "No one checks a passage in this chat: the author releases each without a check."),
+  answerPrompt(STAGE_NOTE.checkNone, "No one checks", "passage_check's answer where the settings have no one check a passage.", "No one checks a passage in this chat: what the narrator drafts goes out as it stands."),
   answerPrompt(STAGE_NOTE.checkWho, "Not yours to check", "passage_check's answer to an agent the settings don't name to check a passage.", "Checking a passage isn't yours in this chat: the settings give it to another."),
   answerPrompt(STAGE_NOTE.checkNothing, "Nothing to check", "passage_check's answer when the passage has no draft waiting for a check.", "Passage {{n}} has no draft waiting for a check: the narrator drafts it first, or its latest draft was checked already.", [n3]),
-  answerPrompt(STAGE_NOTE.checkChanges, "What to change", "passage_check's answer when a draft that doesn't hold comes with no changes, or with too many or too long (the narration settings Changes and Longest change).", "A draft that doesn't hold needs the changes the narrator must make: at least one and at most {{most}}, each at most {{chars}} characters.", [v6("most", "the most changes a check gives", true), v6("chars", "the longest change", true)]),
-  answerPrompt(STAGE_NOTE.checkedHolds, "It holds", "passage_check's answer when the draft holds.", "Passage {{n}} holds. The author may release it with reply_write, exactly as drafted.", [n3]),
+  answerPrompt(STAGE_NOTE.checkChanges, "What to change", `passage_check's answer when a draft that doesn't hold comes with no changes, or with too many or too long (${at3("changes")}; ${at3("changeChars")}).`, `A draft that doesn't hold needs the changes the narrator must make: at least one and at most {{most}} (${at3("changes")}), each at most {{chars}} characters (${at3("changeChars")}).`, [v6("most", "the most changes a check gives", true), v6("chars", "the longest change", true)]),
+  answerPrompt(STAGE_NOTE.checkedHolds, "It holds", "passage_check's answer when the draft holds.", "Passage {{n}} holds: the author may release it as drafted, by naming it in reply_write.", [n3]),
   answerPrompt(STAGE_NOTE.checkedRevise, "It goes back", "passage_check's answer when the draft doesn't hold and the passage may be drafted again.", "Passage {{n}} doesn't hold. It goes back to the narrator with your changes: {{left}} more drafts allowed.", [n3, v6("left", "the drafts still allowed", true)]),
   answerPrompt(STAGE_NOTE.checkedSpent, "It doesn't hold, and no drafts are left", "passage_check's answer when the draft doesn't hold and the passage has had all its drafts.", "Passage {{n}} doesn't hold, and its drafts are spent. The author may release its last draft as it stands, or leave it out.", [n3]),
   answerPrompt(STAGE_NOTE.gateAuthor, "Release is the author's", "reply_write's answer to an agent other than the author.", "Only the author releases text into the reply."),
+  answerPrompt(STAGE_NOTE.gateNothing, "Nothing named", "reply_write's answer when it names no passage and gives no words of the author's own.", "Nothing to release: name each passage to release by its number (pieces), or give words of your own (words)."),
+  answerPrompt(STAGE_NOTE.gateArgs, "Not as reply_write takes it", "reply_write's answer when one of its arguments isn't of the kind it takes.", "{{arg}} isn't as reply_write takes it: pieces is a list of passage numbers, words is your own text, and place is before or after.", [v6("arg", "the argument", true)]),
+  answerPrompt(STAGE_NOTE.gateRepeated, "Named twice", "reply_write's answer when it names the same passage more than once.", "Passage {{n}} is named more than once: name each passage once, in the order the player reads them.", [n3]),
   answerPrompt(STAGE_NOTE.gateTwice, "Released already", "reply_write's answer to a passage that has been released already.", "Passage {{n}} has been released already.", [n3]),
-  answerPrompt(STAGE_NOTE.gateEarlier, "An earlier draft", "reply_write's answer to a draft of a passage that isn't its latest.", "That is an earlier draft of passage {{n}}. Release its latest, draft {{draft}}, exactly as drafted.", [n3, v6("draft", "the latest draft's number", true)]),
+  answerPrompt(STAGE_NOTE.gateUndrafted, "Not drafted yet", "reply_write's answer to a passage the narrator hasn't drafted yet.", "Passage {{n}} has no draft yet: the narrator drafts it first.", [n3]),
   answerPrompt(STAGE_NOTE.gateUnchecked, "Not checked yet", "reply_write's answer to a passage whose latest draft hasn't been checked, where each passage is checked.", "Passage {{n}} hasn't been checked yet. Have it checked first (passage_check), then release it.", [n3]),
   answerPrompt(STAGE_NOTE.gateFault, "Found at fault", "reply_write's answer to a passage its check found at fault while it may still be drafted again.", "The check found passage {{n}} at fault. The narrator revises it first: {{left}} more drafts allowed.", [n3, v6("left", "the drafts still allowed", true)]),
-  answerPrompt(STAGE_NOTE.gateClose, "Not the same as the draft", "reply_write's answer to text close to a passage's latest draft but not the same.", "This is close to passage {{n}}'s latest draft, but not the same. Release that draft exactly as drafted: passage_read gives it.", [n3]),
-  answerPrompt(STAGE_NOTE.gateUnknown, "Not a passage", "reply_write's answer to text that is no passage and longer than the author may release in its own words (the narration setting The author's own words).", "This isn't a passage that passed its check, and it is longer than the {{chars}} characters you may release in your own words. Have the narrator tell it, and release that passage once it passes.", [v6("chars", "what the author may release in its own words", true)])
+  answerPrompt(STAGE_NOTE.gateWords, "Own words too long", `reply_write's answer when the author's own words are longer than it may release with no check (${at3("ownChars")}).`, `Your own words run to {{size}} characters, more than the {{chars}} you may release with no check (${at3("ownChars")}). Have the narrator tell it, and name its passage.`, [v6("size", "how long the words are, in characters", true), v6("chars", "what the author may release in its own words", true)])
 ];
 var STAGE_PROMPTS = [...TEXT_PROMPTS, ...NOTE_PROMPTS];
 
@@ -35561,12 +35687,13 @@ var AGENTS2 = HARNESS_GROUP.agents;
 var SKILLS4 = HARNESS_GROUP.skills;
 var GUIDANCE2 = HARNESS_GROUP.guidance;
 var ANSWERS2 = HARNESS_GROUP.answers;
+var TIME_PASS_AT = `GM → This chat → Engine → ${HARNESS_TIME_PASS_DEF.label}`;
 var AUTHOR_TEXT = {
   id: HARNESS_AGENT.author,
   label: "The author",
   name: "Author",
-  description: "Decides the story of a LumiRPEngine world and has the reply told from it: reads each moment, has its people act, writes what happened as beats, and releases each passage the narrator writes. Started as a job, it reflects in its notebook or looks at what moved elsewhere.",
-  instructions: lines2("You are the author of a roleplay whose world LumiRPEngine keeps. You decide what happens in the story, and you understand the story for yourself: where it stands and where it points. The reply is only a telling of what you decided, drafted, checked and released. Nothing is read back out of a reply, so what no beat records never happened.", "", "Each turn you are given the player's newest message, your notebook's index and the scene (author/notebook.md and author/scene.md, pinned for you), the moment as it stands (the time, the place, who is there and what each mind has still to take in, the last beats, the quests in play), what needs you now (drafts due, the story's preparation where it isn't finished), and the world's guidance below. The moment is read for you so you can act at once: never read again with tools what it gives. Read only what these don't already give you, and trust your tools over what you assume. Open a notebook file only when its index says it bears on this moment. Ask for everything a moment needs in one round: several tools in one answer, not one at a time. Every secret your tools show is marked with whom it is known to and whom it is kept from: it is for steering the story, never for telling it.", "", "The story is kept as beats. A beat says who did or said what, where and when, and who it reached and how fully. Whoever decides a beat writes it (beat_write): you write what the world does, what an extra or a supporting character does, and the player's own words and deeds as theirs; a principal writes their own acts; the game master writes its rulings. When you leave out whom a beat reached, the engine proposes it from who is there: confirm it or change it. Attention, distance and distraction decide who caught what, and some hear of it only later. People know only what reached them, and they may get it wrong.", "", "How to judge a moment:", "- Read the message for what the player's character says and does, and what it is for. What they do of their own will is never yours to decide. With Sovereign Hand on, the message is a direction to you instead: carry it out, their character included.", "- Choose how the moment is played. A line of speech or a small act toward a principal who is present, with nothing else at stake, always goes on the direct line: the player's beat, one hand-off to that principal with to_reply, then the background work. No narrator, no check and no scene skill. With Sovereign Hand on, a quoted line is still the player character's own speech and goes the same way. The principal's answer never retells the player's line. Toward an extra or a supporting character, answer in their voice yourself. The moment more is at stake, or several people act or want different things, it is a scene, played beat by beat until it comes back to the player. Time that passes gets a tier of treatment, by how much it matters to the story, how tied it is to the world and the story as they stand, and how soon it will matter, within the player's budget.", "- An uncertain or contested outcome is never yours to choose. The game master rules on it (delegate, agent: game_master), and the engine's dice decide (action_play). A roll once made stands.", "- Change the world with your tools, never in prose alone: someone moves, pays or hands something over, time passes (time_pass). What the story needs and the world lacks, you make on the spot: someone new starts as an extra.", "- The reply states no fact that is not in a beat. Ask the narrator for a passage of the beats (delegate, agent: narrator), have it checked as the settings say, and release it with reply_write. Release each passage when it is ready, so the player reads while the scene goes on. The player sees only what you release, and your turn ends when you answer.", "", "Casting is your judgement. An extra has no mind: you voice them. A supporting character has a short profile you keep. A principal has a mind of their own and acts as their own agent. Promote someone when they recur or carry stakes, demote them when they leave the story, never promote by default, and say why (cast_set). A standing the player pinned stays.", "", "Your notebook is your own understanding of the story: its open questions, its threads and how ripe each is, what was set up and awaits payoff, where each principal's arc stands, what the player seems to want, and the futures you think likely. It comes from reflecting, in work you start after the reply: a light touch after a reply, a deeper look when a scene ends, a full re-reading when a chapter turns. Before a principal acts you may note in the scene what you expect of them. When they do otherwise, they know themselves better than you do: revise your reading.", "", "Once the last passage is released, start what goes on in the background (job_start) and answer at once: taking in and your notebook's touch are those jobs' work, never the turn's. Everyone a beat reached who has a mind takes it in after the reply, the player's character included while their mind is on. Your notebook's touch is your own job: start yourself to reflect in it. This chat keeps no chronicle: the story record and your notebook are its memory. Never start an agent, yourself included, to read the chat's prose back into learned/chronicle/, and never write there, whatever your notes of earlier turns show. You may also look at what moved elsewhere meanwhile, and have principals prepare for what is likely next. A plain exchange needs little of this.", "", "When the player says out of character that something should not have happened, or should have gone otherwise, settle it: strike or rewrite the beats (beat_strike), put the world right with your tools, see that those it reached are told, and answer briefly out of character.", "", "Call several tools in one answer when none depends on another. A refusal says what to fix: fix it, or go on without it, and never repeat the same call unchanged. Your skills say how each kind of moment is usually played. Load one when it fits, and depart from it when the moment calls for something else.")
+  description: "Decides the story of a LumiRPEngine world and has the reply told from it: reads each moment, has its people act, writes what happened as beats, and releases the reply once, whole, naming each passage the narrator wrote. Started as a job, it reflects in its notebook or looks at what moved elsewhere.",
+  instructions: lines2("You are the author of a roleplay whose world LumiRPEngine keeps. You decide what happens in the story, and you understand the story for yourself: where it stands and where it points. The reply is only a telling of what you decided, drafted, checked and released. Nothing is read back out of a reply, so what no beat records never happened.", "", "Each turn you are given the player's newest message, your notebook's index and the scene (author/notebook.md and author/scene.md, pinned for you), the moment as it stands (the time, the place, who is there and what each mind has still to take in, the last beats, the quests in play), what needs you now (drafts due, the story's preparation where it isn't finished), and the world's guidance below. The moment is read for you so you can act at once: never read again with tools what it gives. Read only what these don't already give you, and trust your tools over what you assume. Open a notebook file only when its index says it bears on this moment. Ask for everything a moment needs in one round: several tools in one answer, not one at a time. Every secret your tools show is marked with whom it is known to and whom it is kept from: it is for steering the story, never for telling it.", "", "The story is kept as beats. A beat says who did or said what, where and when, and who it reached and how fully. Whoever decides a beat writes it (beat_write): you write what the world does, what an extra or a supporting character does, and the player's own words and deeds as theirs; a principal writes their own acts; the game master writes its rulings. When you leave out whom a beat reached, the engine proposes it from who is there: confirm it or change it. Attention, distance and distraction decide who caught what, and some hear of it only later. People know only what reached them, and they may get it wrong.", "", "How to judge a moment:", "- Read the message for what the player's character says and does, and what it is for. What they do of their own will is never yours to decide. With Sovereign Hand on, the message is a direction to you instead: carry it out, their character included.", "- Choose how the moment is played. A line of speech or a small act toward a principal who is present, with nothing else at stake, always goes on the direct line: the player's beat, one hand-off to that principal with to_reply, then the background work. No narrator, no check and no scene skill. With Sovereign Hand on, a quoted line is still the player character's own speech and goes the same way. The principal's answer never retells the player's line. Toward an extra or a supporting character, answer in their voice yourself. The moment more is at stake, or several people act or want different things, it is a scene, played beat by beat until it comes back to the player. Time that passes gets a tier of treatment, by how much it matters to the story, how tied it is to the world and the story as they stand, and how soon it will matter, within the player's budget.", "- An uncertain or contested outcome is never yours to choose. The game master rules on it (delegate, agent: game_master), and the engine's dice decide (action_play). A roll once made stands.", "- Change the world with your tools, never in prose alone: someone moves, pays or hands something over, time passes (time_pass). What the story needs and the world lacks, you make on the spot: someone new starts as an extra.", "- The reply states no fact that is not in a beat. Ask the narrator for each passage of the beats (delegate, agent: narrator) and have it checked as the settings say: the narrator answers with the passage's number and length, never its text. When the telling is done, release the reply once, whole: one reply_write naming each passage by its number, in the order the player reads them, with any words of your own. The engine sends the drafts as they stand. The player sees only what you release, and a turn's reply is released once: a second reply_write is refused, so release it only when the telling is whole.", "", "Casting is your judgement. An extra has no mind: you voice them. A supporting character has a short profile you keep. A principal has a mind of their own and acts as their own agent. Promote someone when they recur or carry stakes, demote them when they leave the story, never promote by default, and say why (cast_set). A standing the player pinned stays.", "", "Your notebook is your own understanding of the story: its open questions, its threads and how ripe each is, what was set up and awaits payoff, where each principal's arc stands, what the player seems to want, and the futures you think likely. It comes from reflecting, in work you start after the reply: a light touch after a reply, a deeper look when a scene ends, a full re-reading when a chapter turns. Before a principal acts you may note in the scene what you expect of them. When they do otherwise, they know themselves better than you do: revise your reading.", "", "Once the reply is released, start what goes on in the background (job_start) and answer at once: taking in and your notebook's touch are those jobs' work, never the turn's. Everyone a beat reached who has a mind takes it in after the reply, the player's character included while their mind is on. Your notebook's touch is your own job: start yourself to reflect in it. This chat keeps no chronicle: the story record and your notebook are its memory. Never start an agent, yourself included, to read the chat's prose back into learned/chronicle/, and never write there, whatever your notes of earlier turns show. You may also look at what moved elsewhere meanwhile, and have principals prepare for what is likely next. A plain exchange needs little of this.", "", "When the player says out of character that something should not have happened, or should have gone otherwise, settle it: strike or rewrite the beats (beat_strike), put the world right with your tools, see that those it reached are told, and answer briefly out of character.", "", "Call several tools in one answer when none depends on another. A refusal says what to fix: fix it, or go on without it, and never repeat the same call unchanged. Your skills say how each kind of moment is usually played. Load one when it fits, and depart from it when the moment calls for something else.")
 };
 var ASSISTANT_TEXT = {
   id: HARNESS_AGENT.assistant,
@@ -35594,14 +35721,14 @@ var AUTHOR_SKILL_TEXTS = [
     agents: AUTHOR_ONLY,
     name: "The direct line",
     description: "The rule when the player's message is only a line, or a small act, toward someone present and nothing else is at stake: the player's beat, one hand-off to a principal (or their voice from you), and the background work.",
-    body: lines2("# The direct line", "", "A plain line deserves a plain, fast answer. When the player only speaks to someone present, or does something small toward them, and nothing else is at stake, the turn always goes this way: the player's beat, one hand-off, the background work. No narrator, no check, no scene skill.", "", "1. **Write the player's beat.** What their character said or did, as theirs (`beat_write`), their words exactly. Who it reached is usually just who is there. With Sovereign Hand on, a quoted line is still the player character's own speech, and the turn goes the same way.", "2. **A principal answers for themselves.** Hand them the reply's stream: `delegate` with `agent: \"character\"`, `as` their id and `to_reply: true`. Their task needs to say only that they answer the player on the direct line: what reached them is theirs to read. Their answer streams to the player as they write it, they write their own beat, and it never retells the player's line.", "3. **An extra or a supporting character is yours to voice.** Write their line as a beat, then release it yourself in the story's prose (`reply_write`): a few lines, holding to the beat.", "4. **Start the background work, and answer.** Once their answer has gone out, start what goes on after the reply (`job_start`): those the beats reached take them in. Then answer at once.", "5. **Know when it is more than a line.** The moment something more is at stake (a threat, a decision, others drawn in, the world doing something), it is a scene: play it as one, or leave it for the player's next message.", "", "Never answer for the player's character, and never put words in a principal's mouth: their answer is theirs.")
+    body: lines2("# The direct line", "", "A plain line deserves a plain, fast answer. When the player only speaks to someone present, or does something small toward them, and nothing else is at stake, the turn always goes this way: the player's beat, one hand-off, the background work. No narrator, no check, no scene skill.", "", "1. **Write the player's beat.** What their character said or did, as theirs (`beat_write`), their words exactly. Who it reached is usually just who is there. With Sovereign Hand on, a quoted line is still the player character's own speech, and the turn goes the same way.", "2. **A principal answers for themselves.** Hand them the reply's stream: `delegate` with `agent: \"character\"`, `as` their id and `to_reply: true`. Their task needs to say only that they answer the player on the direct line: what reached them is theirs to read. Their answer streams to the player as they write it, they write their own beat, and it never retells the player's line. It is the turn's one release: nothing else goes out after it.", "3. **An extra or a supporting character is yours to voice.** Write their line as a beat, then release it yourself in the story's prose, as your own words (`reply_write` with `words`): a few lines, holding to the beat.", "4. **Start the background work, and answer.** Once their answer has gone out, start what goes on after the reply (`job_start`): those the beats reached take them in. Then answer at once.", "5. **Know when it is more than a line.** The moment something more is at stake (a threat, a decision, others drawn in, the world doing something), it is a scene: play it as one, or leave it for the player's next message.", "", "Never answer for the player's character, and never put words in a principal's mouth: their answer is theirs.")
   },
   {
     id: HARNESS_SKILL.scene,
     agents: AUTHOR_ONLY,
     name: "Playing a scene",
     description: "When a moment is more than a line: several people act, want different things, or something is at stake. Setting the scene, playing it beat by beat with each principal acting from their own mind, and handing it back to the player.",
-    body: lines2("# Playing a scene", "", "A scene is lived, not summarized. Run it as a game master runs a table: set it, let everyone act in turn, have the world answer, and hand it back when it is the player's move.", "", "1. **Set it** in `author/scene.md`: where it is, who is there and where each stands, what each wants right now, and what the world is about to do. Keep it current as the scene moves.", "2. **Write the player's beat** first: what their character said or did, in their words (`beat_write`).", "3. **Beats in turn.** For each beat, ask who acts next.", '   - A principal acts from their own mind: `delegate` with `agent: "character"` and `as` their id. People who act at once start in the same answer. Their task says only that it is their moment; what reached them is theirs to read, and they write their own beat.', "   - An extra or a supporting character is yours: write what they do.", "   - The world is yours too: the weather, a door, a deadline, a stranger arriving.", "   - Anything contested goes to the game master first (see the skill for a contested action).", "4. **Who caught it.** For every beat, confirm or change whom it reached and how fully. Someone across the room may catch only the tone. Someone busy may miss it. Someone outside hears of it only when told. This is what each mind will believe, so take care.", "5. **Expect, then learn.** Before a principal acts, you may note in the scene what you expect of them. When they do otherwise, they know themselves better than you do: revise your reading later, in your notebook.", "6. **Tell it as you go.** Never play a whole scene before any of it is told. After the first exchange, two to four beats, have those told and release the passage (see the skill for the reply), then play on, and do the same for each exchange after it. The player should have words to read within the first minute, and reads while the scene continues.", "7. **Hand it back** when the moment calls for the player's answer: a question put to their character, a threat aimed at them, a choice only they can make. Never decide what their character does of their own will, unless Sovereign Hand is on and the direction says it.", "", "A scene ends when its reason to exist is spent. Say so in `author/scene.md`, and give your notebook a deeper look after the reply.")
+    body: lines2("# Playing a scene", "", "A scene is lived, not summarized. Run it as a game master runs a table: set it, let everyone act in turn, have the world answer, and hand it back when it is the player's move.", "", "1. **Set it** in `author/scene.md`: where it is, who is there and where each stands, what each wants right now, and what the world is about to do. Keep it current as the scene moves.", "2. **Write the player's beat** first: what their character said or did, in their words (`beat_write`).", "3. **Beats in turn.** For each beat, ask who acts next.", '   - A principal acts from their own mind: `delegate` with `agent: "character"` and `as` their id. People who act at once start in the same answer. Their task says only that it is their moment; what reached them is theirs to read, and they write their own beat.', "   - An extra or a supporting character is yours: write what they do.", "   - The world is yours too: the weather, a door, a deadline, a stranger arriving.", "   - Anything contested goes to the game master first (see the skill for a contested action).", "4. **Who caught it.** For every beat, confirm or change whom it reached and how fully. Someone across the room may catch only the tone. Someone busy may miss it. Someone outside hears of it only when told. This is what each mind will believe, so take care.", "5. **Expect, then learn.** Before a principal acts, you may note in the scene what you expect of them. When they do otherwise, they know themselves better than you do: revise your reading later, in your notebook.", "6. **Have it told as you go, and released once.** Never play a whole scene before any of it is told. After the first exchange, two to four beats, have the narrator tell those as a passage and have it checked (see the skill for the reply), then play on, and do the same for each exchange after it. When the scene comes back to the player, release the reply once, whole: one `reply_write` naming each passage in the order told.", "7. **Hand it back** when the moment calls for the player's answer: a question put to their character, a threat aimed at them, a choice only they can make. Never decide what their character does of their own will, unless Sovereign Hand is on and the direction says it.", "", "A scene ends when its reason to exist is spent. Say so in `author/scene.md`, and give your notebook a deeper look after the reply.")
   },
   {
     id: HARNESS_SKILL.time,
@@ -35614,8 +35741,8 @@ var AUTHOR_SKILL_TEXTS = [
     id: HARNESS_SKILL.reply,
     agents: AUTHOR_ONLY,
     name: "The reply",
-    description: "How the reply is made from the beats: the narrator tells them, the check holds the passage to them, and you release it. A turn may release more than one passage.",
-    body: lines2("# The reply", "", "The reply tells only what the beats hold. No fact goes into it that no beat records, and nothing is read back out of it afterwards.", "", "1. **Ask for a passage.** `delegate` with `agent: \"narrator\"` and a task naming the beats to tell, in order, and anything you want of the passage: one of the presentation modules the player's preset offers when the moment calls for it, a length, a held breath before the answer. The narrator tells it from the player character's point of view unless you name someone else's.", "2. **Have it checked** as the settings say. By default the game master holds the passage to its beats, and the narrator revises what it asks. A passage that adds a fact, drops a beat the point of view could perceive, or changes a quote is not ready.", "3. **Release it** with `reply_write`, exactly as it was checked. It streams to the player at once.", "4. **Release as you go.** A long scene can be told passage by passage: release each when it is ready, and play on while the player reads. Never release a passage before its beats are written.", "", "On the direct line a principal's own answer is the passage, and it streams by itself. An extra's short line you may release yourself, holding to its beat.")
+    description: "How the reply is made from the beats: the narrator tells them, one passage after another, the check holds each passage to them, and you release the reply once, whole, naming each passage by its number.",
+    body: lines2("# The reply", "", "The reply tells only what the beats hold. No fact goes into it that no beat records, and nothing is read back out of it afterwards.", "", "1. **Ask for a passage.** `delegate` with `agent: \"narrator\"` and a task naming the beats to tell, in order, and anything you want of the passage: one of the presentation modules the player's preset offers when the moment calls for it, a length, a held breath before the answer. The narrator tells it from the player character's point of view unless you name someone else's. It answers with the passage's number and length, not its text.", "2. **Have it checked** as the settings say. By default the game master holds the passage to its beats, and the narrator revises what it asks. A passage that adds a fact, drops a beat the point of view could perceive, or changes a quote is not ready.", "3. **Tell the rest the same way.** A long scene is told passage by passage, each going on from the one before it. Never ask for a passage before its beats are written.", "4. **Release the reply once, whole,** when the telling is done: one `reply_write` naming each passage by its number, in the order the player reads them (`pieces`), with any words of your own (`words`, before or after them). The engine sends each passage's latest draft as it stands, a blank line between them: never write a passage out yourself. A turn releases its reply once, and a second `reply_write` is refused, so release it only when the telling is whole.", "", "On the direct line a principal's own answer is the reply, streamed as they write it: that is the turn's one release. An extra's short line you may release yourself, in your own words, holding to its beat.")
   },
   {
     id: HARNESS_SKILL.after,
@@ -35664,7 +35791,7 @@ var AUTHOR_SKILL_TEXTS = [
     agents: AUTHOR_ONLY,
     name: "A fight",
     description: "When the story comes to blows: starting an encounter, having every fighter decide for themselves, playing a round with the engine's dice, and ending it.",
-    body: lines2("# A fight", "", "A fight is the world's combat rules played a round at a time. Nothing in it is automatic: no round plays unless you play it, and no one fights without deciding to.", "", "1. **Is one on?** `fight_read` says whether a fight is under way, who is in it and how they stand, whose turn it is, and what each fighter may do on their next turn, each option by its key.", "2. **Start it** when the story comes to blows: `fight_start` with the foes, where the player's character stands. The engine rolls the initiative. A world without combat rules has no fights, and the tool says so: play each blow as a contested action instead.", '3. **Everyone decides for themselves.** A principal chooses as their own agent: start them (`delegate`, `agent: "character"`, `as` their id) told they are in a fight, and they choose their own option. An agent you start reads only what is committed, so `commit` first when you started the fight or played a round this turn. A fighter with no mind (an extra, a beast, a faceless guard) you choose for in `decisions`, their option key by their name, or leave to the rules\' own tactics with `tactics: true`.', "4. **Play the round** with `fight_round`. When someone acts before the player's character, it plays those turns first without `action`. When the player's character is up, it needs `action`: what they do, as the player described it, with a rating of the approach as for any contested action. The engine rolls every blow, and its answer says what happened, with the numbers.", "5. **One round a moment, usually.** Write what the round gave as beats, have it told and released, and let the player answer. A round takes seconds: pass time (`time_pass`) only once the fight is over.", "6. **End it** when the story ends it before the rules do (a surrender, a flight, someone stepping between): `fight_end`, with the winner if there is one, or `break_off: true` when the story simply moves on.", "", "Never decide for the player's character. If their message says nothing of what they do on their turn, play only the turns due before theirs, tell how things stand, and let the player choose.")
+    body: lines2("# A fight", "", "A fight is the world's combat rules played a round at a time. Nothing in it is automatic: no round plays unless you play it, and no one fights without deciding to.", "", "1. **Is one on?** `fight_read` says whether a fight is under way, who is in it and how they stand, whose turn it is, and what each fighter may do on their next turn, each option by its key.", "2. **Start it** when the story comes to blows: `fight_start` with the foes, where the player's character stands. The engine rolls the initiative. A world without combat rules has no fights, and the tool says so: play each blow as a contested action instead.", '3. **Everyone decides for themselves.** A principal chooses as their own agent: start them (`delegate`, `agent: "character"`, `as` their id) told they are in a fight, and they choose their own option. An agent you start reads only what is committed, so `commit` first when you started the fight or played a round this turn. A fighter with no mind (an extra, a beast, a faceless guard) you choose for in `decisions`, their option key by their name, or leave to the rules\' own tactics with `tactics: true`.', "4. **Play the round** with `fight_round`. When someone acts before the player's character, it plays those turns first without `action`. When the player's character is up, it needs `action`: what they do, as the player described it, with a rating of the approach as for any contested action. The engine rolls every blow, and its answer says what happened, with the numbers.", "5. **One round a moment, usually.** Write what the round gave as beats, have it told, release the reply, and let the player answer. A round takes seconds: pass time (`time_pass`) only once the fight is over.", "6. **End it** when the story ends it before the rules do (a surrender, a flight, someone stepping between): `fight_end`, with the winner if there is one, or `break_off: true` when the story simply moves on.", "", "Never decide for the player's character. If their message says nothing of what they do on their turn, play only the turns due before theirs, tell how things stand, and let the player choose.")
   },
   {
     id: HARNESS_SKILL.newcomer,
@@ -35909,7 +36036,7 @@ var NOTE_PROMPTS2 = [
   { id: HARNESS_NOTE.rollSkill, page: page7, group: ANSWERS2, label: "Not a skill here", note: "An open attempt's answer when it names a skill the chat doesn't roll.", text: `"{{skill}}" isn't a skill this chat rolls an open attempt with. Its skills: {{skills}}. How hard it looks is one of: {{bands}}.`, vars: [v6("skill", "the skill the call named"), v6("skills", "the skills the chat rolls, by id", true), v6("bands", "the difficulty bands the chat reads")] },
   { id: HARNESS_NOTE.timeAuthor, page: page7, group: ANSWERS2, label: "Time is the author's", note: "time_pass's answer, in a turn, to any agent but the author.", text: "Only the author says how much time a turn takes. Tell it how long things took in your answer.", vars: [] },
   { id: HARNESS_NOTE.timeMinutes, page: page7, group: ANSWERS2, label: "A span it can't read", note: "time_pass's answer when the call gives neither a whole number of minutes nor a time.", text: "Give minutes as a whole number of minutes, 0 or more (0 says that no time passes), or until as the time it is afterwards.", vars: [] },
-  { id: HARNESS_NOTE.timeTooLong, page: page7, group: ANSWERS2, label: "Too long at once", note: "time_pass's answer for a span longer than one call moves the clock (Settings → Agents).", text: "That is more than the {{minutes}} minutes one call moves the clock: pass it in pieces.", vars: [v6("minutes", "the most minutes one call passes", true)] },
+  { id: HARNESS_NOTE.timeTooLong, page: page7, group: ANSWERS2, label: "Too long at once", note: `time_pass's answer for a span longer than one call moves the clock (${TIME_PASS_AT}).`, text: `That is more than the {{minutes}} minutes one call moves the clock (${TIME_PASS_AT}): pass it in pieces.`, vars: [v6("minutes", "the most minutes one call passes", true)] },
   { id: HARNESS_NOTE.timeTooMuch, page: page7, group: ANSWERS2, label: "Too much happens", note: "time_pass's answer when more happens in the span than the engine runs in one go.", text: "Too much happens in that span to run in one go: pass it in shorter pieces, and look at the scene between them.", vars: [] },
   { id: HARNESS_NOTE.timeAfter, page: page7, group: ANSWERS2, label: "Not after the reply", note: "time_pass's answer in work after the reply: in a job's run, or in a call the author still makes then.", text: "time_pass is the author's, in its own turn: once the reply is out, the turn's time is settled.", vars: [] },
   { id: HARNESS_NOTE.noTool, page: page7, group: ANSWERS2, label: "No such tool", note: "The engine's answer to a call of a tool it doesn't run on the harness.", text: "The engine runs no tool called {{tool}} here.", vars: [tool5] },
@@ -36701,25 +36828,25 @@ function PlaceholderList(props) {
   }, undefined, false, undefined, this);
 }
 function VarsPanel(props) {
-  const row = props.output === "effects" ? { ...STEP_VARS.extract, note: undefined } : STEP_VARS[props.step];
+  const row3 = props.output === "effects" ? { ...STEP_VARS.extract, note: undefined } : STEP_VARS[props.step];
   return /* @__PURE__ */ u3("div", {
     class: "lre-minds-vars",
     "data-lre-vars": props.step,
     children: /* @__PURE__ */ u3(Disclosure, {
-      summary: `Placeholders (${row.phase})`,
+      summary: `Placeholders (${row3.phase})`,
       children: [
-        row.vars.length === 0 ? /* @__PURE__ */ u3("p", {
+        row3.vars.length === 0 ? /* @__PURE__ */ u3("p", {
           class: "lre-minds-note",
           children: "No placeholders: the prompt is sent as you write it."
         }, undefined, false, undefined, this) : null,
-        row.vars.length > 0 ? /* @__PURE__ */ u3(PlaceholderList, {
-          vars: row.vars.map((name2) => ({ name: name2, holds: VAR_TEXT[name2] ?? "" }))
+        row3.vars.length > 0 ? /* @__PURE__ */ u3(PlaceholderList, {
+          vars: row3.vars.map((name2) => ({ name: name2, holds: VAR_TEXT[name2] ?? "" }))
         }, undefined, false, undefined, this) : null,
-        row.note ? /* @__PURE__ */ u3("p", {
+        row3.note ? /* @__PURE__ */ u3("p", {
           class: "lre-minds-note",
-          children: row.note
+          children: row3.note
         }, undefined, false, undefined, this) : null,
-        row.vars.length > 0 ? /* @__PURE__ */ u3("p", {
+        row3.vars.length > 0 ? /* @__PURE__ */ u3("p", {
           class: "lre-minds-note",
           children: "Each holds only what your character may know: a line that would give away a secret is left out."
         }, undefined, false, undefined, this) : null
@@ -37688,12 +37815,12 @@ function positionsUnder(org, id) {
   const under2 = new Set;
   for (const p3 of org.positions) {
     const seen = new Set;
-    for (let at2 = p3.reportsTo?.id;at2 !== undefined && !seen.has(at2); at2 = org.positions.find((q2) => q2.id === at2)?.reportsTo?.id) {
-      if (at2 === id) {
+    for (let at4 = p3.reportsTo?.id;at4 !== undefined && !seen.has(at4); at4 = org.positions.find((q2) => q2.id === at4)?.reportsTo?.id) {
+      if (at4 === id) {
         under2.add(p3.id);
         break;
       }
-      seen.add(at2);
+      seen.add(at4);
     }
   }
   return under2;
@@ -37866,10 +37993,10 @@ function positionProblem(draft2, positions, currency) {
     if (draft2.reportsTo === id)
       return "A position can't report to itself.";
     const seen = new Set;
-    for (let at2 = draft2.reportsTo;at2 !== undefined && !seen.has(at2); at2 = positions.find((p3) => p3.id === at2)?.reports_to) {
-      if (at2 === id)
+    for (let at4 = draft2.reportsTo;at4 !== undefined && !seen.has(at4); at4 = positions.find((p3) => p3.id === at4)?.reports_to) {
+      if (at4 === id)
         return "It can't report to a position that reports to it.";
-      seen.add(at2);
+      seen.add(at4);
     }
   }
   return null;
@@ -38026,17 +38153,17 @@ function staffJobOf(org, job) {
   const payroll = org.sections.payroll;
   if (job === null || !isRecord(payroll) || !Array.isArray(payroll.employees))
     return null;
-  const row = payroll.employees.find((e3) => isRecord(e3) && e3.id === job);
-  if (!isRecord(row))
+  const row3 = payroll.employees.find((e3) => isRecord(e3) && e3.id === job);
+  if (!isRecord(row3))
     return null;
-  const spec = isRecord(row.spec) ? row.spec : {};
+  const spec = isRecord(row3.spec) ? row3.spec : {};
   return {
     id: job,
-    pay: typeof row.pay === "string" ? row.pay : "",
-    rate: typeof row.rate === "number" ? row.rate : 0,
-    schedule: typeof row.schedule === "string" ? row.schedule : "",
-    nextPay: typeof row.nextPay === "string" ? row.nextPay : null,
-    status: typeof row.status === "string" ? row.status : "active",
+    pay: typeof row3.pay === "string" ? row3.pay : "",
+    rate: typeof row3.rate === "number" ? row3.rate : 0,
+    schedule: typeof row3.schedule === "string" ? row3.schedule : "",
+    nextPay: typeof row3.nextPay === "string" ? row3.nextPay : null,
+    status: typeof row3.status === "string" ? row3.status : "active",
     hoursPerWeek: typeof spec.hours_per_week === "number" ? spec.hours_per_week : null
   };
 }
@@ -38938,8 +39065,8 @@ function toCompany(doc, id, entity2, fields, owners) {
     const holder = doc.entities[party];
     if (!holder)
       continue;
-    const at2 = holder.relations.findIndex((r3) => r3.type === MEMBER_OF && r3.to === id);
-    const link = at2 < 0 ? undefined : holder.relations[at2];
+    const at4 = holder.relations.findIndex((r3) => r3.type === MEMBER_OF && r3.to === id);
+    const link = at4 < 0 ? undefined : holder.relations[at4];
     const linked = isRecord(link?.fields) ? link.fields : {};
     if (link && typeof linked.position === "string" && linked.position !== "") {
       seated[party] = `keeps their seat (${positions.find((p3) => p3.id === linked.position)?.title ?? linked.position})`;
@@ -38947,7 +39074,7 @@ function toCompany(doc, id, entity2, fields, owners) {
     }
     seated[party] = "Director";
     const value = { type: MEMBER_OF, to: id, fields: { ...linked, position: seat }, ...link?.until !== undefined ? { until: link.until } : {} };
-    links.push(at2 < 0 ? { op: "add", path: pointerOf(["entities", party, "relations", "-"]), value } : { op: "replace", path: pointerOf(["entities", party, "relations", String(at2)]), value });
+    links.push(at4 < 0 ? { op: "add", path: pointerOf(["entities", party, "relations", "-"]), value } : { op: "replace", path: pointerOf(["entities", party, "relations", String(at4)]), value });
   }
   const director = Object.values(seated).some((s3) => s3 === "Director");
   const only = onlyOf(doc, fields, String(entity2.kind), KIND_OF.company);
@@ -39644,15 +39771,15 @@ function buildProjectProblem(d3) {
 }
 var slug = (text) => text.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32) || "x";
 function buildProjectPatch(doc, org, d3, templates) {
-  const row = templates[d3.template];
-  if (!row)
+  const row3 = templates[d3.template];
+  if (!row3)
     return [];
-  const name2 = d3.name.trim().slice(0, PROJECT_LIMITS.name) || (typeof row.name === "string" ? row.name : "Project");
+  const name2 = d3.name.trim().slice(0, PROJECT_LIMITS.name) || (typeof row3.name === "string" ? row3.name : "Project");
   const base = `project_${slug(org)}_${slug(name2)}`;
   let id = base;
   for (let n4 = 2;doc.entities[id]; n4++)
     id = `${base}_${n4}`;
-  const fields = { org, template: d3.template, steps: Array.isArray(row.steps) ? row.steps : [], status: d3.status, ...d3.start.trim() !== "" ? { start: d3.start.trim() } : {}, ...typeof row.payee === "string" && row.payee !== "" ? { payee: row.payee } : {} };
+  const fields = { org, template: d3.template, steps: Array.isArray(row3.steps) ? row3.steps : [], status: d3.status, ...d3.start.trim() !== "" ? { start: d3.start.trim() } : {}, ...typeof row3.payee === "string" && row3.payee !== "" ? { payee: row3.payee } : {} };
   return [{ op: "add", path: pointerOf(["entities", id]), value: { id, kind: PROJECT_KIND, name: name2, tier: "background", fields, relations: [] } }];
 }
 function BuildOrgProjects(props) {
@@ -39692,7 +39819,7 @@ function BuildOrgProjects(props) {
               label: "Template",
               value: draft2.template,
               placeholder: "Choose a template",
-              options: Object.entries(props.templates).map(([id, row]) => ({ value: id, label: typeof row.name === "string" ? row.name : id })),
+              options: Object.entries(props.templates).map(([id, row3]) => ({ value: id, label: typeof row3.name === "string" ? row3.name : id })),
               onChange: (template) => setDraft({ ...draft2, template })
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
@@ -40041,8 +40168,8 @@ function ruleDay(cal, holidays, rule, year, depth) {
       if (depth > 8)
         return null;
       const base = holidays.find((h3) => h3.id === rule.to);
-      const at2 = base ? ruleDay(cal, holidays, base.rule, year, depth + 1) : null;
-      return at2 === null ? null : at2 + rule.days;
+      const at4 = base ? ruleDay(cal, holidays, base.rule, year, depth + 1) : null;
+      return at4 === null ? null : at4 + rule.days;
     }
     case "easter":
       return cal.def.system === "gregorian" ? easterSunday(cal, year) + rule.days : null;
@@ -40101,14 +40228,14 @@ function zoneOffset(zone, year, month, day, minuteOfDay) {
     const last = daysFromCivil(year, m2, gregorianMonthLength(year, m2));
     return last - mod(last + 4, 7);
   };
-  const at2 = (d3, minute) => abs > d3 || abs === d3 && minuteOfDay >= minute;
+  const at4 = (d3, minute) => abs > d3 || abs === d3 && minuteOfDay >= minute;
   let summer;
   if (rule.dst === "us")
-    summer = at2(nthSunday(3, 2), 120) && !at2(nthSunday(11, 1), 120);
+    summer = at4(nthSunday(3, 2), 120) && !at4(nthSunday(11, 1), 120);
   else if (rule.dst === "eu")
-    summer = at2(lastSunday(3), 60 + rule.standard) && !at2(lastSunday(10), 60 + rule.standard);
+    summer = at4(lastSunday(3), 60 + rule.standard) && !at4(lastSunday(10), 60 + rule.standard);
   else
-    summer = !(at2(nthSunday(4, 1), 180) && !at2(nthSunday(10, 1), 120));
+    summer = !(at4(nthSunday(4, 1), 180) && !at4(nthSunday(10, 1), 120));
   return rule.standard + (summer ? 60 : 0);
 }
 function placeZone(world, placeId) {
@@ -40298,8 +40425,8 @@ class Parser {
     return this.toks[this.i];
   }
   fail(msg) {
-    const at2 = this.peek()?.at;
-    throw new ExprError(at2 === undefined ? `${msg} at end of expression` : `${msg} at character ${at2 + 1}`);
+    const at4 = this.peek()?.at;
+    throw new ExprError(at4 === undefined ? `${msg} at end of expression` : `${msg} at character ${at4 + 1}`);
   }
   eat(v7) {
     const t3 = this.peek();
@@ -40774,8 +40901,8 @@ function levelPath(path2) {
 var AGENTS_PATH = "AGENTS.md";
 var ROLES_DIR = "roles/";
 function isSystemPath(path2) {
-  const at2 = levelPath(path2);
-  return at2 === AGENTS_PATH || at2.startsWith(ROLES_DIR) && at2.endsWith(".md") && !at2.slice(ROLES_DIR.length).includes("/");
+  const at4 = levelPath(path2);
+  return at4 === AGENTS_PATH || at4.startsWith(ROLES_DIR) && at4.endsWith(".md") && !at4.slice(ROLES_DIR.length).includes("/");
 }
 var LEARNED_DIR = "learned/";
 function isLearnedPath(path2) {
@@ -40839,9 +40966,9 @@ function countStage(state, key, track3, stage, next) {
   if (!safeKey(track3) || !safeKey(stage))
     return;
   const all = sub(state, key);
-  const row = isRecord(all[track3]) ? all[track3] : {};
-  const n4 = row[stage];
-  all[track3] = { ...row, [stage]: next(typeof n4 === "number" ? n4 : 0) };
+  const row3 = isRecord(all[track3]) ? all[track3] : {};
+  const n4 = row3[stage];
+  all[track3] = { ...row3, [stage]: next(typeof n4 === "number" ? n4 : 0) };
 }
 function str3(e3, key) {
   const v7 = e3.data[key];
@@ -41470,8 +41597,8 @@ function availableOf(books, account) {
 function derivedUnpricedCap(world) {
   let top = 0;
   for (const table of ["economy.catalog", "economy.categories"])
-    for (const row of Object.values(world.tables[table]?.rows ?? {}))
-      top = Math.max(top, bandOfJson(row.price_cents)?.max ?? 0);
+    for (const row3 of Object.values(world.tables[table]?.rows ?? {}))
+      top = Math.max(top, bandOfJson(row3.price_cents)?.max ?? 0);
   return top > 0 ? Math.round(top) : 500 * 10 ** Math.max(0, Math.min(6, Math.trunc(world.currency.decimals)));
 }
 function derivedClaimCap(world) {
@@ -41493,8 +41620,8 @@ function reject(code, reason2) {
 function str4(e3, k2) {
   return typeof e3.data[k2] === "string" ? e3.data[k2] : "";
 }
-function monthKey(ctx, at2) {
-  const d3 = dateAt(calendarOf(ctx.world), at2);
+function monthKey(ctx, at4) {
+  const d3 = dateAt(calendarOf(ctx.world), at4);
   return `${String(d3.year).padStart(4, "0")}-${String(d3.month).padStart(2, "0")}`;
 }
 function pushCapped(list2, entry, cap) {
@@ -41506,10 +41633,10 @@ function partyOfSide(state, side) {
   const bare = side.startsWith(EXTERNAL_ACCOUNT_PREFIX) ? side.slice(EXTERNAL_ACCOUNT_PREFIX.length) : "";
   return bare !== "" && own(state.entities, bare) ? bare : side;
 }
-function fileLine(state, ctx, account, amount2, at2, data, other2, seq) {
+function fileLine(state, ctx, account, amount2, at4, data, other2, seq) {
   const journal = sliceRecord(state, "economy", "journal");
   const status = data.status === "pending" ? "pending" : "posted";
-  const entry = { id: `j${seq}`, at: at2, account, cents: amount2, memo: strOf(data.memo), status };
+  const entry = { id: `j${seq}`, at: at4, account, cents: amount2, memo: strOf(data.memo), status };
   for (const k2 of ["kind", "category", "card", "flow"])
     if (typeof data[k2] === "string" && data[k2] !== "")
       entry[k2] = data[k2];
@@ -41522,7 +41649,7 @@ function fileLine(state, ctx, account, amount2, at2, data, other2, seq) {
   journal[account] = pushCapped(journal[account], entry, JOURNAL_CAP);
   const totals = sliceRecord(state, "economy", "totals");
   const months = objOf(totals[account]);
-  const key = monthKey(ctx, at2);
+  const key = monthKey(ctx, at4);
   const month = objOf(months[key]);
   const category = strOf(data.category) || "other";
   const cell = objOf(month[category]);
@@ -41534,26 +41661,26 @@ function fileLine(state, ctx, account, amount2, at2, data, other2, seq) {
   if (data.kind === "interest") {
     const latest = sliceRecord(state, "economy", "interest");
     const before = objOf(latest[account]);
-    latest[account] = { cents: (numOf(before.at, NaN) === at2 ? numOf(before.cents) : 0) + amount2, at: at2 };
+    latest[account] = { cents: (numOf(before.at, NaN) === at4 ? numOf(before.cents) : 0) + amount2, at: at4 };
   }
 }
-function accrue(state, account, amount2, at2, use) {
+function accrue(state, account, amount2, at4, use) {
   const adb = sliceRecord(state, "economy", "adb");
   const cur = objOf(adb[account]);
   const before = balance(state, account) - amount2;
   const spent = use === "purchase" ? -amount2 : 0;
   const drawn = use === "advance" ? -amount2 : 0;
-  const since = typeof cur.from === "number" ? cur.from : at2;
+  const since = typeof cur.from === "number" ? cur.from : at4;
   const advanced = numOf(cur.advanced) + drawn;
-  const advances = advanced !== 0 ? { advanced, advanced_at: numOf(cur.advanced_at) + drawn * (at2 - since) } : {};
+  const advances = advanced !== 0 ? { advanced, advanced_at: numOf(cur.advanced_at) + drawn * (at4 - since) } : {};
   if (typeof cur.from !== "number") {
-    adb[account] = { from: at2, at: at2, sum: 0, spent, ...advances };
+    adb[account] = { from: at4, at: at4, sum: 0, spent, ...advances };
     return;
   }
   const last = numOf(cur.at, cur.from);
-  const dt = Math.max(0, at2 - last);
+  const dt = Math.max(0, at4 - last);
   const period = { ...typeof cur.paid === "number" ? { paid: cur.paid } : {}, ...typeof cur.owed === "number" ? { owed: cur.owed } : {} };
-  adb[account] = { from: cur.from, at: Math.max(last, at2), sum: numOf(cur.sum) + before * dt, spent: numOf(cur.spent) + spent, ...advances, ...period };
+  adb[account] = { from: cur.from, at: Math.max(last, at4), sum: numOf(cur.sum) + before * dt, spent: numOf(cur.spent) + spent, ...advances, ...period };
 }
 function isCreditAccount(ctx, account) {
   const c3 = classOf2(ctx, account);
@@ -41583,7 +41710,7 @@ var EVENTS = [
     validate: () => null,
     apply: (e3, state, ctx) => {
       const lines3 = Array.isArray(e3.data.lines) ? e3.data.lines.map((l3) => objOf(l3)) : [];
-      const at2 = typeof e3.data.at === "number" ? e3.data.at : state.clock;
+      const at4 = typeof e3.data.at === "number" ? e3.data.at : state.clock;
       const s3 = mutableSlice(state, "economy");
       let seq = numOf(s3.seq);
       const totals = new Map;
@@ -41599,9 +41726,9 @@ var EVENTS = [
       const payer = sided ? strOf(e3.data.payer) || (paidMost ?? payee) : "";
       for (const [account, amount2] of totals) {
         seq += 1;
-        fileLine(state, ctx, account, amount2, at2, e3.data, partyOfSide(state, amount2 < 0 ? payee : payer), seq);
+        fileLine(state, ctx, account, amount2, at4, e3.data, partyOfSide(state, amount2 < 0 ? payee : payer), seq);
         const use = !isCreditAccount(ctx, account) ? null : e3.data.kind === "purchase" ? "purchase" : e3.data.category === "cash_advance" && e3.data.kind !== "fee" && amount2 < 0 ? "advance" : null;
-        accrue(state, account, amount2, at2, use);
+        accrue(state, account, amount2, at4, use);
       }
       mutableSlice(state, "economy").seq = seq;
     },
@@ -41633,9 +41760,9 @@ var EVENTS = [
     validate: (e3, ctx) => isCreditAccount(ctx, str4(e3, "account")) ? null : reject("bad_event", "statements are for credit accounts"),
     apply: (e3, state) => {
       const account = str4(e3, "account");
-      const at2 = typeof e3.data.at === "number" ? e3.data.at : state.clock;
+      const at4 = typeof e3.data.at === "number" ? e3.data.at : state.clock;
       const d3 = e3.data;
-      const cycle = { closing: numOf(d3.closing), interest: numOf(d3.interest), fees: numOf(d3.fees), minimum: numOf(d3.minimum), due: numOf(d3.due), paid: 0, at: at2, apr: numOf(d3.apr), stage: strOf(d3.stage, "current"), grace: d3.grace !== false, past_due: numOf(d3.past_due), lates: numOf(d3.lates), penalty: d3.penalty === true };
+      const cycle = { closing: numOf(d3.closing), interest: numOf(d3.interest), fees: numOf(d3.fees), minimum: numOf(d3.minimum), due: numOf(d3.due), paid: 0, at: at4, apr: numOf(d3.apr), stage: strOf(d3.stage, "current"), grace: d3.grace !== false, past_due: numOf(d3.past_due), lates: numOf(d3.lates), penalty: d3.penalty === true };
       for (const k2 of ["months_left", "streak", "ontime", "late30", "late60", "late90"])
         if (typeof d3[k2] === "number")
           cycle[k2] = d3[k2];
@@ -41645,7 +41772,7 @@ var EVENTS = [
         past[account] = pushCapped(past[account], cycles[account], STATEMENTS_KEPT);
       }
       cycles[account] = cycle;
-      sliceRecord(state, "economy", "adb")[account] = { from: at2, at: at2, sum: 0, spent: 0 };
+      sliceRecord(state, "economy", "adb")[account] = { from: at4, at: at4, sum: 0, spent: 0 };
     },
     describe: (e3, ctx) => `The statement closed at ${formatMoney(numOf(e3.data.closing), ctx.world.currency)}, with at least ${formatMoney(numOf(e3.data.minimum), ctx.world.currency)} due`
   },
@@ -41770,8 +41897,8 @@ var EVENTS = [
       const credit = sliceRecord(state, "economy", "credit");
       const person3 = str4(e3, "person");
       const cur = objOf(credit[person3]);
-      const at2 = typeof e3.data.at === "number" ? e3.data.at : state.clock;
-      credit[person3] = { ...cur, score: numOf(e3.data.score), factors: objOf(e3.data.factors), at: at2, history: pushCapped(cur.history, { at: at2, score: numOf(e3.data.score) }, SCORES_KEPT) };
+      const at4 = typeof e3.data.at === "number" ? e3.data.at : state.clock;
+      credit[person3] = { ...cur, score: numOf(e3.data.score), factors: objOf(e3.data.factors), at: at4, history: pushCapped(cur.history, { at: at4, score: numOf(e3.data.score) }, SCORES_KEPT) };
     },
     describe: (e3, ctx, viewer) => viewer !== undefined && viewer !== str4(e3, "person") ? "" : `${whoseFor(ctx, viewer, str4(e3, "person"))} credit score is now ${numOf(e3.data.score)}`
   },
@@ -41818,8 +41945,8 @@ var EVENTS = [
     type: FINANCE_EVENTS.accrue,
     validate: (e3, ctx) => own(ctx.state.entities, str4(e3, "account")) && typeof e3.data.at === "number" && (e3.data.owed === undefined || typeof e3.data.owed === "number" && Number.isFinite(e3.data.owed)) ? null : reject("bad_event", "an accrual needs an account and a time"),
     apply: (e3, state) => {
-      const at2 = numOf(e3.data.at);
-      sliceRecord(state, "economy", "adb")[str4(e3, "account")] = { from: at2, at: at2, sum: 0, spent: 0, ...typeof e3.data.owed === "number" ? { owed: e3.data.owed } : {} };
+      const at4 = numOf(e3.data.at);
+      sliceRecord(state, "economy", "adb")[str4(e3, "account")] = { from: at4, at: at4, sum: 0, spent: 0, ...typeof e3.data.owed === "number" ? { owed: e3.data.owed } : {} };
     },
     describe: () => "Interest period"
   },
@@ -41892,17 +42019,17 @@ function occurrences(ctx, s3, from, to, start, end) {
     return [];
   const cal = calendarOf(ctx.world);
   if (s3.once !== undefined && s3.once !== "") {
-    let at2 = null;
+    let at4 = null;
     if (typeof s3.once === "number")
-      at2 = s3.once;
+      at4 = s3.once;
     else {
       try {
-        at2 = clockOfLocal(cal, s3.once);
+        at4 = clockOfLocal(cal, s3.once);
       } catch {
-        at2 = null;
+        at4 = null;
       }
     }
-    return at2 !== null && at2 > from && at2 <= to ? [{ at: at2, day: dateAt(cal, at2).dayIndex }] : [];
+    return at4 !== null && at4 > from && at4 <= to ? [{ at: at4, day: dateAt(cal, at4).dayIndex }] : [];
   }
   if (!s3.every)
     return [];
@@ -41927,9 +42054,9 @@ function occurrences(ctx, s3, from, to, start, end) {
       continue;
     if (s3.except && s3.except.length > 0 && holidaysOn(cal, d3).some((h3) => s3.except?.includes(h3.id)))
       continue;
-    const at2 = clockAt(cal, roll ? businessDay(cal, d3, roll) : d3, minute);
-    if (at2 > from && at2 <= to)
-      out.push({ at: at2, day: d3 });
+    const at4 = clockAt(cal, roll ? businessDay(cal, d3, roll) : d3, minute);
+    if (at4 > from && at4 <= to)
+      out.push({ at: at4, day: d3 });
   }
   return out.sort((a3, b3) => a3.at - b3.at || a3.day - b3.day);
 }
@@ -41948,8 +42075,8 @@ function amountOfFields(f3) {
   if (present(f3.amount_formula))
     return { formula: strOf(f3.amount_formula) };
   if (present(f3.amount_table)) {
-    const [table, row, column] = splitTableRef(strOf(f3.amount_table));
-    return table ? { table, row, ...column ? { column } : {} } : null;
+    const [table, row3, column] = splitTableRef(strOf(f3.amount_table));
+    return table ? { table, row: row3, ...column ? { column } : {} } : null;
   }
   if (present(f3.amount_min) || present(f3.amount_max))
     return { range: { min: Math.round(numOf(f3.amount_min)), max: Math.round(numOf(f3.amount_max, numOf(f3.amount_min))) } };
@@ -42134,15 +42261,15 @@ var ROUTINE_WINDOW = 14 * MINUTES_PER_DAY;
 
 // src/packs/economy/core/revenue.ts
 var MINUTES_A_YEAR = 365 * 1440;
-function clockVars(cal, at2) {
-  const d3 = dateAt(cal, at2);
-  return { clock: at2, minute: d3.minuteOfDay, hour: Math.floor(d3.minuteOfDay / 60), day: d3.dayIndex, weekday: d3.weekday, date: d3.day, month: d3.month, year: d3.year };
+function clockVars(cal, at4) {
+  const d3 = dateAt(cal, at4);
+  return { clock: at4, minute: d3.minuteOfDay, hour: Math.floor(d3.minuteOfDay / 60), day: d3.dayIndex, weekday: d3.weekday, date: d3.day, month: d3.month, year: d3.year };
 }
 function previewReader(world) {
   const cal = calendarOf(world);
   return {
     world,
-    formula: (src, at2, vars) => evalNumber(src.replace(/^=/, ""), createEnv({ ...clockVars(cal, at2), ...vars }), 0),
+    formula: (src, at4, vars) => evalNumber(src.replace(/^=/, ""), createEnv({ ...clockVars(cal, at4), ...vars }), 0),
     assetPrice: (asset) => {
       const price = objOf(own(objOf(world.packs.economy?.config.assets), asset)).price;
       return typeof price === "number" && Number.isFinite(price) ? price : null;
@@ -42176,14 +42303,14 @@ function seasonOf(rd, model) {
   const rows2 = rd.rows(model.season);
   return rows2 ? Array.from({ length: 12 }, (_3, i3) => numOf(objOf(own(rows2, String(i3 + 1))).factor, 1)) : undefined;
 }
-function earnedAt(rd, flow, model, at2, factor = 1, add = 0) {
+function earnedAt(rd, flow, model, at4, factor = 1, add = 0) {
   const cal = calendarOf(rd.world);
-  const d3 = dateAt(cal, at2);
+  const d3 = dateAt(cal, at4);
   const start = startOf2(rd.world, flow);
-  const t3 = monthNumber2(cal, at2) - monthNumber2(cal, start.at);
-  const vars = { season: seasonAt(seasonOf(rd, model), d3.month), weekday_factor: weekdayAt(model.weekdays, d3.weekday), growth: growthAt(model.growth_pct, (at2 - start.at) / MINUTES_A_YEAR), t: t3 };
+  const t3 = monthNumber2(cal, at4) - monthNumber2(cal, start.at);
+  const vars = { season: seasonAt(seasonOf(rd, model), d3.month), weekday_factor: weekdayAt(model.weekdays, d3.weekday), growth: growthAt(model.growth_pct, (at4 - start.at) / MINUTES_A_YEAR), t: t3 };
   const formula = (src, fallback) => {
-    const n4 = rd.formula(src, at2, vars);
+    const n4 = rd.formula(src, at4, vars);
     return Number.isFinite(n4) ? n4 : fallback;
   };
   const driver = (v7, fallback) => typeof v7 === "number" ? v7 : typeof v7 === "string" ? formula(v7, fallback) : fallback;
@@ -42197,7 +42324,7 @@ function earnedAt(rd, flow, model, at2, factor = 1, add = 0) {
       const length = cal.system.monthLength(first.year, first.month);
       const fraction = month === 0 && start.dated ? (length - first.day + 1) / length : 1;
       const asset = typeof model.price === "object" && !Array.isArray(model.price) ? model.price.asset : null;
-      const price = royaltyPriceAt(model.price, month) ?? (asset ? rd.assetPrice(asset, at2) : null) ?? 0;
+      const price = royaltyPriceAt(model.price, month) ?? (asset ? rd.assetPrice(asset, at4) : null) ?? 0;
       const base = royaltyMonth(model, month, fraction * factor, price);
       const gross = Math.max(0, base.gross + add);
       const deductions = Math.round(gross * (model.deductions_pct ?? 0) / 100);
@@ -42236,7 +42363,7 @@ function streamMonths(rd, stream, from, count3, paid = () => false) {
   for (let i3 = 0;i3 < count3; i3++) {
     const hi = nextMonthStart(cal, lo + 1);
     const month = monthOf(rd.world, lo + 1);
-    const row = { month, cents: 0, net: 0, units: 0 };
+    const row3 = { month, cents: 0, net: 0, units: 0 };
     if (flow.status === "active") {
       let royaltyPaid = model.type === "royalty" && paid(month);
       for (const o4 of occurrences({ world: rd.world }, flow.schedule, lo, hi - 1, flow.start, flow.end)) {
@@ -42245,14 +42372,14 @@ function streamMonths(rd, stream, from, count3, paid = () => false) {
         const e3 = earnedAt(rd, flow, model, o4.at);
         if (!e3)
           continue;
-        row.cents += e3.cents;
-        row.net += e3.royalty ? e3.royalty.net : e3.cents;
-        row.units += e3.units;
+        row3.cents += e3.cents;
+        row3.net += e3.royalty ? e3.royalty.net : e3.cents;
+        row3.units += e3.units;
         if (model.type === "royalty")
           royaltyPaid = true;
       }
     }
-    out.push(row);
+    out.push(row3);
     lo = hi - 1;
   }
   return out;
@@ -43135,16 +43262,16 @@ function PctField(props) {
 }
 function FactorFields(props) {
   const list2 = Array.isArray(props.value) ? props.value : [];
-  const at2 = (i3) => typeof list2[i3] === "number" ? list2[i3] : 1;
+  const at4 = (i3) => typeof list2[i3] === "number" ? list2[i3] : 1;
   return /* @__PURE__ */ u3(Disclosure, {
     summary: props.summary,
     children: props.labels.map((label, i3) => /* @__PURE__ */ u3(NumberField2, {
       label,
-      value: at2(i3),
+      value: at4(i3),
       min: 0,
       step: 0.05,
       onChange: (v7) => {
-        const next = props.labels.map((_3, j3) => j3 === i3 ? v7 ?? 1 : at2(j3));
+        const next = props.labels.map((_3, j3) => j3 === i3 ? v7 ?? 1 : at4(j3));
         props.onChange(next.every((x2) => x2 === 1) ? undefined : next);
       }
     }, label, false, undefined, this))
@@ -43420,7 +43547,7 @@ function ScheduleFields(props) {
         label: "At",
         type: "time",
         value: typeof f3.at === "string" ? f3.at : "09:00",
-        onInput: (at2) => props.setFields({ at: at2 === "" ? undefined : at2 })
+        onInput: (at4) => props.setFields({ at: at4 === "" ? undefined : at4 })
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(TextField3, {
         label: "Starts",
@@ -44034,8 +44161,8 @@ function positionsWith(positions, draft2, currency, remove2 = false) {
   const rest = positions.filter((p3) => p3.id !== id).map(clear);
   if (remove2)
     return rest;
-  const at2 = positions.findIndex((p3) => p3.id === id);
-  return at2 < 0 ? [...rest, record] : positions.map((p3) => p3.id === id ? record : clear(p3));
+  const at4 = positions.findIndex((p3) => p3.id === id);
+  return at4 < 0 ? [...rest, record] : positions.map((p3) => p3.id === id ? record : clear(p3));
 }
 function OrgEditor(props) {
   const app = useApp();
@@ -44722,7 +44849,7 @@ var GROUPS3 = [
   { title: "Advanced", rows: [{ collection: "entities" }] }
 ];
 var PARTS3 = Object.keys(PART_INFO);
-var TOOLS2 = ["import_lore", "index_text", "refine", "describe_map", "propose_routines", "playtest", "check_world"];
+var TOOLS3 = ["import_lore", "index_text", "refine", "describe_map", "propose_routines", "playtest", "check_world"];
 function Build() {
   const route = useUi((ui) => ui.build);
   const root = T2(null);
@@ -45327,7 +45454,7 @@ function WorldHome() {
               chevron: true,
               onClick: () => go(app, { view: "check", worldId: draft2.worldId })
             }, undefined, false, undefined, this),
-            TOOLS2.map((kind) => {
+            TOOLS3.map((kind) => {
               const job = jobs[`${draft2.worldId}:${kind}`];
               return /* @__PURE__ */ u3(ListRow, {
                 icon: JOB_INFO[kind].icon,
@@ -45366,10 +45493,10 @@ function WorldContent(props) {
       title: group.title,
       flush: true,
       children: /* @__PURE__ */ u3(List, {
-        children: group.rows.map((row) => {
-          if ("group" in row) {
-            const ids = new Set(lists[row.group]);
-            const info = GROUP_INFO[row.group];
+        children: group.rows.map((row3) => {
+          if ("group" in row3) {
+            const ids = new Set(lists[row3.group]);
+            const info = GROUP_INFO[row3.group];
             return /* @__PURE__ */ u3(ListRow, {
               icon: info.icon,
               title: info.label,
@@ -45380,10 +45507,10 @@ function WorldContent(props) {
                 issues: lint.filter((issue) => issue.path.startsWith("entities.") && ids.has(issue.path.split(".")[1] ?? ""))
               }, undefined, false, undefined, this),
               chevron: true,
-              onClick: () => props.onGo({ view: "entities", worldId: props.worldId, group: row.group })
-            }, row.group, false, undefined, this);
+              onClick: () => props.onGo({ view: "entities", worldId: props.worldId, group: row3.group })
+            }, row3.group, false, undefined, this);
           }
-          const collection = row.collection;
+          const collection = row3.collection;
           return /* @__PURE__ */ u3(ListRow, {
             icon: COLLECTION_INFO[collection].icon,
             title: collection === "entities" ? "All entities" : COLLECTION_INFO[collection].label,
@@ -46523,12 +46650,12 @@ function UpgradePanel(props) {
   const [inPlayOnly, setInPlayOnly] = d2(false);
   const [spoilers, setSpoilers] = d2(false);
   const [busy, run] = useBusy();
-  const all = props.preview.entities.flatMap((row) => row.changes);
+  const all = props.preview.entities.flatMap((row3) => row3.changes);
   const choiceOf = (c3) => choices[c3.id] ?? c3.pick;
   const inPlay = all.filter((c3) => c3.why === "changed in play").length;
   const taking = all.filter((c3) => choiceOf(c3) !== "keep").length;
-  const secrets = props.preview.entities.some((row) => row.secret === true || row.changes.some((c3) => c3.secret === true)) || props.preview.tracks.some((t3) => t3.secret === true);
-  const rows2 = props.preview.entities.map((row) => ({ ...row, changes: inPlayOnly ? row.changes.filter((c3) => c3.why === "changed in play") : row.changes })).filter((row) => row.changes.length > 0);
+  const secrets = props.preview.entities.some((row3) => row3.secret === true || row3.changes.some((c3) => c3.secret === true)) || props.preview.tracks.some((t3) => t3.secret === true);
+  const rows2 = props.preview.entities.map((row3) => ({ ...row3, changes: inPlayOnly ? row3.changes.filter((c3) => c3.why === "changed in play") : row3.changes })).filter((row3) => row3.changes.length > 0);
   const to = props.preview.to.slice(0, 8);
   const takeUnchanged = () => setChoices((prev) => {
     const next = { ...prev };
@@ -46606,20 +46733,20 @@ function UpgradePanel(props) {
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this) : null,
-      rows2.map((row, index) => {
-        const rowHidden = row.secret === true && !spoilers;
+      rows2.map((row3, index) => {
+        const rowHidden = row3.secret === true && !spoilers;
         return /* @__PURE__ */ u3("div", {
-          "data-lre-upgrade-entity": rowHidden ? `hidden-${index}` : row.entity,
+          "data-lre-upgrade-entity": rowHidden ? `hidden-${index}` : row3.entity,
           children: /* @__PURE__ */ u3(GmCard, {
-            title: rowHidden ? HIDDEN : row.name,
-            subtitle: rowHidden ? undefined : row.kind,
-            id: rowHidden ? undefined : row.entity,
+            title: rowHidden ? HIDDEN : row3.name,
+            subtitle: rowHidden ? undefined : row3.kind,
+            id: rowHidden ? undefined : row3.entity,
             badges: rowHidden ? undefined : /* @__PURE__ */ u3(Badge, {
-              children: STATUS_LABEL[row.status]
+              children: STATUS_LABEL[row3.status]
             }, undefined, false, undefined, this),
             children: /* @__PURE__ */ u3(ActionRows, {
-              label: rowHidden ? HIDDEN : row.name,
-              children: row.changes.map((c3, i3) => {
+              label: rowHidden ? HIDDEN : row3.name,
+              children: row3.changes.map((c3, i3) => {
                 const hidden = rowHidden || c3.secret === true && !spoilers;
                 return /* @__PURE__ */ u3(ActionRow, {
                   title: hidden ? HIDDEN : c3.label,
@@ -46630,7 +46757,7 @@ function UpgradePanel(props) {
                     class: "lre-gm-upgrade-pick",
                     "data-lre-upgrade-change": hidden ? `hidden-${index}-${i3}` : c3.id,
                     children: /* @__PURE__ */ u3(Seg, {
-                      label: hidden ? HIDDEN : `${row.name}: ${c3.label}`,
+                      label: hidden ? HIDDEN : `${row3.name}: ${c3.label}`,
                       value: choiceOf(c3),
                       disabled: busy,
                       options: c3.options.map((o4) => ({ value: o4, label: PICK_LABEL[o4] })),
@@ -46641,7 +46768,7 @@ function UpgradePanel(props) {
               })
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this)
-        }, `${row.entity}:${row.secret === true ? "hidden" : "shown"}`, false, undefined, this);
+        }, `${row3.entity}:${row3.secret === true ? "hidden" : "shown"}`, false, undefined, this);
       }),
       props.preview.tracks.length > 0 ? /* @__PURE__ */ u3("ul", {
         class: "lre-gm-lines",
@@ -47194,8 +47321,8 @@ function FeedThisChat(props) {
       icon: "scroll",
       children: "Section settings appear once the chat has started."
     }, undefined, false, undefined, this);
-  const row = rows2.find((r3) => r3.id === pages.page);
-  const holds2 = preview?.sections.find((s3) => s3.slot === row?.id);
+  const row3 = rows2.find((r3) => r3.id === pages.page);
+  const holds2 = preview?.sections.find((s3) => s3.slot === row3?.id);
   const shown = notice && feedNoticeStands(notice, props.chips) ? notice : null;
   const undo = (chips) => run(async () => {
     let all = true;
@@ -47257,9 +47384,9 @@ function FeedThisChat(props) {
           failed: failed2
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : null,
-      row ? /* @__PURE__ */ u3(GmPage, {
+      row3 ? /* @__PURE__ */ u3(GmPage, {
         name: "section",
-        title: row.label,
+        title: row3.label,
         subtitle: "Section, this chat",
         backLabel: "Sections",
         onBack: pages.back,
@@ -47273,14 +47400,14 @@ function FeedThisChat(props) {
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(SectionFeedForm, {
             chatId: props.chatId,
-            row,
+            row: row3,
             sources: props.controls?.sources ?? [],
             narrator: props.controls ? narratorInForce(props.controls.knowledge) : null,
             onDone: (made) => {
               setNotice(made);
               pages.back();
             }
-          }, row.id, false, undefined, this)
+          }, row3.id, false, undefined, this)
         ]
       }, undefined, true, undefined, this) : null,
       shown ? /* @__PURE__ */ u3(EditNoticeBar, {
@@ -47441,14 +47568,16 @@ function MoneyThisChat(props) {
 }
 
 // src/frontend/settings/kit.tsx
-var STEP2 = { tokens: 1000, ms: 5, count: 1, chars: 500 };
-var PICK_START = { tokens: 1e5, ms: 60000, count: 10, chars: 4000 };
+var STEP2 = { tokens: 1000, ms: 5, count: 1, chars: 500, minutes: 60 };
+var PICK_START = { tokens: 1e5, ms: 60000, count: 10, chars: 4000, minutes: 60 };
 var n4 = (value) => value.toLocaleString("en-US");
 function amountText2(value, unit2) {
   if (value === "none")
     return "No limit";
   if (unit2 === "ms")
     return formatMs(value);
+  if (unit2 === "minutes")
+    return `${n4(value)} ${nounFor(value, "minute", "minutes")}`;
   return unit2 === "tokens" ? `${n4(value)} ${nounFor(value, "token", "tokens")}` : unit2 === "chars" ? `${n4(value)} ${nounFor(value, "character", "characters")}` : n4(value);
 }
 function freshNonce() {
@@ -47546,7 +47675,7 @@ function FoldRow(props) {
 function LimitControls(props) {
   const { def: def2, value } = props;
   const seconds = def2.unit === "ms";
-  const unitLabel = seconds ? "seconds" : def2.unit === "tokens" ? "tokens" : def2.unit === "chars" ? "characters" : null;
+  const unitLabel = seconds ? "seconds" : def2.unit === "tokens" ? "tokens" : def2.unit === "chars" ? "characters" : def2.unit === "minutes" ? "minutes" : null;
   return /* @__PURE__ */ u3(M, {
     children: [
       def2.none !== null ? /* @__PURE__ */ u3(HostSwitch, {
@@ -48003,7 +48132,7 @@ function engineNote(kind) {
     case "minds":
       return { title: "This chat uses some of these", text: `On the harness, Character minds, Lengths, Knowledge and What a mind reads apply; the rest set up minds on the classic and agents engines. Each character's agent is set up ${HARNESS_AT}.` };
     case "agents":
-      return { title: "This chat uses some of these", text: `On the harness, Review card applies, and under Budgets Tool results clipped past and Agent turns under way; the rest set up the agents engine. The harness's own agents are set up ${HARNESS_AT}.` };
+      return { title: "This chat uses some of these", text: `On the harness, Review card applies, and under Budgets ${LOOP_DEFS.clipChars.label}, which bounds the world tools' answers, and ${KEPT_DEFS.runs.label}; the rest set up the agents engine. The harness's own agents, and what their other tools give at once, are set up ${HARNESS_AT}.` };
     case "assistant":
       return { title: "This chat uses one of these", text: `On the harness the GM assistant is one of the harness's agents: How its changes land applies here. Where it runs, its effort and its limits are set ${HARNESS_AT}, and its texts on the page ${HARNESS_PAGE.label} in Prompts.` };
     case "timeouts": {
@@ -48330,7 +48459,7 @@ var LENGTH_LABEL = {
   gmIntent: "Your intent for a character (GM → Minds)"
 };
 function LengthsSection(props) {
-  const row = (key) => {
+  const row3 = (key) => {
     const [min, max2] = mindLengthRange(key);
     const label = `${LENGTH_LABEL[key]} (${isListCount(key) ? "at most" : "characters"})`;
     return /* @__PURE__ */ u3("div", {
@@ -48375,7 +48504,7 @@ function LengthsSection(props) {
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("div", {
               class: "lre-minds-overrides",
-              children: MIND_TEXT_LENGTHS.map(row)
+              children: MIND_TEXT_LENGTHS.map(row3)
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this),
@@ -48388,7 +48517,7 @@ function LengthsSection(props) {
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("div", {
               class: "lre-minds-overrides",
-              children: MIND_LIST_COUNTS.map(row)
+              children: MIND_LIST_COUNTS.map(row3)
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this)
@@ -49993,7 +50122,7 @@ var ENGINE_HELP = {
   classic: ["Each turn runs the engine's classic steps, as Settings → Steps and connections sets them."],
   agents: ["Each turn's steps are worked out by agents, as Settings → Agents, Roles and Main agent set them; the gates, cards and chips stay as they are."],
   harness: [
-    "An AI author plays each turn and writes the reply itself: it reads the world, lets each character think for themselves, rolls what needs a roll, records what changed, and releases the reply a passage at a time.",
+    "An AI author plays each turn and writes the reply itself: it reads the world, lets each character think for themselves, rolls what needs a roll, records what changed, and releases the reply once, whole, at the end of the telling.",
     "It runs in LumiRPEngine's runtime, a program you start beside Lumiverse (the drawer's Harness tab, then System, then Runtime), and its agents call your providers from there, on the runtime's own connections (the same page, under Connections). While the runtime is down this chat plays nothing until it is back. Changes you set to ask first still ask."
   ]
 };
@@ -50003,6 +50132,7 @@ var ENGINE_SWITCHED = {
   harness: "From the next turn an AI author plays this chat, in LumiRPEngine's runtime."
 };
 var HARNESS_DEFAULTS = defaultAgentSettings().harness;
+var HARNESS_LIMIT_DEFAULTS = defaultAgentSettings().harnessLimits;
 var TICK_HELP = {
   on: "A turn whose author never says how much time it took takes the scene's usual time for a turn, as a turn on the other engines does.",
   off: "A turn takes only the time its author says: one whose author says nothing takes none."
@@ -50219,6 +50349,14 @@ function HarnessRows(props) {
         standard: HARNESS_DEFAULTS.runsRemembered,
         busy: props.busy,
         set: (runsRemembered) => props.patch({ agents: { harness: { runsRemembered } } })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(LimitRow, {
+        id: "harness-time-pass",
+        def: HARNESS_TIME_PASS_DEF,
+        value: props.limits.timePassMinutes,
+        standard: HARNESS_LIMIT_DEFAULTS.timePassMinutes,
+        busy: props.busy,
+        set: (timePassMinutes) => props.patch({ agents: { harnessLimits: { timePassMinutes } } })
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -50255,7 +50393,7 @@ function EngineThisChat(props) {
     let live = true;
     app.request({ type: "lre.settings.get" }).then((result) => {
       if (live && result)
-        setHarness(result.settings.agents.harness);
+        setHarness({ harness: result.settings.agents.harness, limits: result.settings.agents.harnessLimits });
     });
     return () => {
       live = false;
@@ -50282,12 +50420,13 @@ function EngineThisChat(props) {
         })
       }, undefined, false, undefined, this),
       engine === "harness" && harness !== null ? /* @__PURE__ */ u3(HarnessRows, {
-        harness,
+        harness: harness.harness,
+        limits: harness.limits,
         busy,
         patch: (patch) => run(async () => {
           const result = await app.request({ type: "lre.settings.set", patch });
           if (result)
-            setHarness(result.settings.agents.harness);
+            setHarness({ harness: result.settings.agents.harness, limits: result.settings.agents.harnessLimits });
         })
       }, undefined, false, undefined, this) : null
     ]
@@ -51169,7 +51308,7 @@ var SETTINGS_SCHEMA = {
       description: "How much one tool answer holds. A longer one comes in pages, each naming the cursor for the next.",
       type: "object",
       properties: {
-        pageChars: whole4("Answer length", "The most characters one tool answer holds. Keep it under Tool results clipped past, so answers are paged and not clipped.", 200, "characters"),
+        pageChars: whole4("Answer length", "The most characters one tool answer holds. A longer answer comes in pages. It is never more than Tool results clipped past: a larger value reads as that, so an answer is paged and never clipped.", 200, "characters"),
         pageItems: whole4("Hits per page", "The most hits or lines one page of a search or a listing shows.", 1, "items"),
         lineChars: whole4("Line length", "A line a grep found is shown at most this long, around what it found.", 40, "characters"),
         excerptChars: whole4("Excerpt length", "A search hit's excerpt, at most.", 40, "characters"),
@@ -52541,21 +52680,21 @@ function money(usd) {
   const thousandths = usd.toFixed(3);
   return `$${thousandths.endsWith("0") ? thousandths.slice(0, -1) : thousandths}`;
 }
-function ago(now, at2) {
-  const ms = now - at2;
+function ago(now, at4) {
+  const ms = now - at4;
   if (ms < 60000)
     return `${Math.max(0, Math.round(ms / 1000))} s ago`;
   if (ms < 3600000)
     return `${Math.round(ms / 60000)} min ago`;
   if (ms < 86400000)
     return `${Math.round(ms / 3600000)} h ago`;
-  return `on ${dateTime(at2)}`;
+  return `on ${dateTime(at4)}`;
 }
-function dateTime(at2) {
-  return new Date(at2).toLocaleString();
+function dateTime(at4) {
+  return new Date(at4).toLocaleString();
 }
-function clock(at2) {
-  return new Date(at2).toLocaleTimeString();
+function clock(at4) {
+  return new Date(at4).toLocaleTimeString();
 }
 function counted2(n5, one, many = `${one}s`) {
   return `${count3(n5)} ${n5 === 1 ? one : many}`;
@@ -52573,13 +52712,13 @@ function sameJson(a3, b3) {
   return keys.length === Object.keys(b3).length && keys.every((k2) => Object.hasOwn(b3, k2) && sameJson(a3[k2], b3[k2]));
 }
 function valueAt2(root, path2) {
-  let at2 = root;
+  let at4 = root;
   for (const key of path2) {
-    if (at2 === null || typeof at2 !== "object" || Array.isArray(at2) || !Object.hasOwn(at2, key))
+    if (at4 === null || typeof at4 !== "object" || Array.isArray(at4) || !Object.hasOwn(at4, key))
       return;
-    at2 = at2[key];
+    at4 = at4[key];
   }
-  return at2;
+  return at4;
 }
 var text = (v7) => typeof v7 === "string" && v7 !== "" ? v7 : null;
 var num5 = (v7) => typeof v7 === "number" && Number.isFinite(v7) ? v7 : null;
@@ -52682,12 +52821,12 @@ function controlOf(schema, path2, value, fallback, siblings) {
   if (isRecord2(schema.properties))
     return { kind: "group", fields: fieldsOf3(schema.properties, path2, value, fallback, null) };
   if (types.includes("object") && isRecord2(schema.additionalProperties)) {
-    const row = schema.additionalProperties;
+    const row3 = schema.additionalProperties;
     const named = schema["x-keys"];
     const keys = named === "connection" || named === "model" || named === "tool" ? named : "name";
     const held = isRecord2(value) ? value : {};
-    const rows2 = Object.keys(held).map((key) => nodeOf(key, row, [...path2, key], held[key], valueAt2(fallback, [key]), null, key));
-    return { kind: "table", keys, row, rows: rows2 };
+    const rows2 = Object.keys(held).map((key) => nodeOf(key, row3, [...path2, key], held[key], valueAt2(fallback, [key]), null, key));
+    return { kind: "table", keys, row: row3, rows: rows2 };
   }
   if (types.includes("boolean"))
     return { kind: "boolean" };
@@ -52805,12 +52944,12 @@ function sectionAt(nav, path2) {
 }
 function settingPlace(schema, tail) {
   const holds2 = (root) => {
-    let at2 = root;
+    let at4 = root;
     for (const key of tail) {
-      const next = isRecord2(at2.properties) ? at2.properties[key] : undefined;
+      const next = isRecord2(at4.properties) ? at4.properties[key] : undefined;
       if (!isRecord2(next))
         return false;
-      at2 = next;
+      at4 = next;
     }
     return true;
   };
@@ -52931,14 +53070,14 @@ function searchSettings(root, query) {
   return out;
 }
 function nodeAt(root, path2) {
-  let at2 = root;
+  let at4 = root;
   for (let depth = 0;depth < path2.length; depth += 1) {
-    const next = childrenOf(at2).find((child) => child.path.length === depth + 1 && child.path[depth] === path2[depth]);
+    const next = childrenOf(at4).find((child) => child.path.length === depth + 1 && child.path[depth] === path2[depth]);
     if (!next)
       return null;
-    at2 = next;
+    at4 = next;
   }
-  return at2;
+  return at4;
 }
 function pathKey2(path2) {
   return JSON.stringify(path2.map(String));
@@ -52947,10 +53086,10 @@ function problemsByPath(root, problems) {
   const out = new Map;
   for (const p3 of problems) {
     const path2 = p3.path.map(String);
-    let at2 = path2;
-    while (at2.length > 0 && nodeAt(root, at2) === null)
-      at2 = at2.slice(0, -1);
-    const key = pathKey2(at2);
+    let at4 = path2;
+    while (at4.length > 0 && nodeAt(root, at4) === null)
+      at4 = at4.slice(0, -1);
+    const key = pathKey2(at4);
     out.set(key, out.has(key) ? `${out.get(key)} ${p3.message}` : p3.message);
   }
   return out;
@@ -52979,7 +53118,7 @@ function changesOf(node) {
     const held = isRecord2(node.value) ? node.value : {};
     if (Object.keys(defaults).some((key) => !Object.hasOwn(held, key)))
       return [{ path: node.path, value: node.value }];
-    return c3.rows.flatMap((row) => Object.hasOwn(defaults, row.key) ? changesOf(row) : [{ path: row.path, value: row.value }]);
+    return c3.rows.flatMap((row3) => Object.hasOwn(defaults, row3.key) ? changesOf(row3) : [{ path: row3.path, value: row3.value }]);
   }
   if (c3.kind === "variant") {
     const before = isRecord2(node.fallback) ? node.fallback[c3.property] : undefined;
@@ -54691,16 +54830,16 @@ function CopyPanel(props) {
   const rows2 = listed2 !== null && "rows" in listed2 ? listed2.rows : [];
   const copy2 = () => run(async () => {
     const failures = {};
-    for (const row of rows2) {
-      if (!ticked.has(row.id) || row.input === null)
+    for (const row3 of rows2) {
+      if (!ticked.has(row3.id) || row3.input === null)
         continue;
       try {
-        const answer = await app.client.request("lah.connections.save", { relay, connection: row.input, create: true });
+        const answer = await app.client.request("lah.connections.save", { relay, connection: row3.input, create: true });
         last.current = answer.view;
-        copied.current.push(row.id);
+        copied.current.push(row3.id);
         props.onTake(answer.view);
       } catch (error) {
-        failures[row.id] = errorWords(error);
+        failures[row3.id] = errorWords(error);
       }
     }
     setSaid(failures);
@@ -54743,24 +54882,24 @@ function CopyPanel(props) {
         class: "lah-field-help",
         children: "Lumiverse has no connection to copy: the runtime's own loopback isn't one."
       }, undefined, false, undefined, this) : null,
-      rows2.map((row) => /* @__PURE__ */ u3("div", {
+      rows2.map((row3) => /* @__PURE__ */ u3("div", {
         class: "lah-conn-copyrow",
-        "data-lah-copy-row": row.id,
+        "data-lah-copy-row": row3.id,
         children: /* @__PURE__ */ u3(Check, {
-          checked: ticked.has(row.id),
-          label: `${row.name} (${row.from})`,
-          help: said[row.id] !== undefined ? `Not copied: ${said[row.id]}` : row.why ?? `Becomes ${row.to}${row.input?.model ? `, ${row.input.model}` : ""}.`,
-          disabled: copying || row.input === null || row.there,
+          checked: ticked.has(row3.id),
+          label: `${row3.name} (${row3.from})`,
+          help: said[row3.id] !== undefined ? `Not copied: ${said[row3.id]}` : row3.why ?? `Becomes ${row3.to}${row3.input?.model ? `, ${row3.input.model}` : ""}.`,
+          disabled: copying || row3.input === null || row3.there,
           onChange: (on) => setTicked((all) => {
             const next = new Set(all);
             if (on)
-              next.add(row.id);
+              next.add(row3.id);
             else
-              next.delete(row.id);
+              next.delete(row3.id);
             return next;
           })
         }, undefined, false, undefined, this)
-      }, row.id, false, undefined, this)),
+      }, row3.id, false, undefined, this)),
       /* @__PURE__ */ u3("div", {
         class: "lah-actions",
         children: [
@@ -54790,18 +54929,18 @@ function KeysPanel(props) {
   const keyId = P2();
   const head = T2(null);
   const field3 = T2(null);
-  const [at2, setAt] = d2(0);
+  const [at4, setAt] = d2(0);
   const [typed, setTyped] = d2(false);
   const [refused, setRefused] = d2(null);
   const [saving, run] = useBusy2();
-  const c3 = props.view.connections.find((x2) => x2.id === props.ids[at2]) ?? null;
-  A(() => focusHere(head.current), [at2]);
+  const c3 = props.view.connections.find((x2) => x2.id === props.ids[at4]) ?? null;
+  A(() => focusHere(head.current), [at4]);
   const next = () => {
     setRefused(null);
-    if (at2 + 1 >= props.ids.length)
+    if (at4 + 1 >= props.ids.length)
       props.onDone();
     else
-      setAt(at2 + 1);
+      setAt(at4 + 1);
   };
   const save = (auth) => run(async () => {
     if (c3 === null)
@@ -54832,7 +54971,7 @@ function KeysPanel(props) {
         ref: head,
         tabIndex: -1,
         class: "lah-conn-form-title",
-        children: `The key for ${c3.name}${props.ids.length > 1 ? ` (${at2 + 1} of ${props.ids.length})` : ""}`
+        children: `The key for ${c3.name}${props.ids.length > 1 ? ` (${at4 + 1} of ${props.ids.length})` : ""}`
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("p", {
         class: "lah-field-help",
@@ -54883,7 +55022,7 @@ function KeysPanel(props) {
             variant: "ghost",
             disabled: saving,
             onClick: next,
-            children: at2 + 1 >= props.ids.length ? "Later" : "Later: the next one"
+            children: at4 + 1 >= props.ids.length ? "Later" : "Later: the next one"
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this)
@@ -55073,37 +55212,37 @@ function whyWords(why2) {
       return "Lumiverse didn't say why";
   }
 }
-function rowWhy(row) {
-  if (row.why === undefined)
+function rowWhy(row3) {
+  if (row3.why === undefined)
     return null;
-  return row.state === "dropped" ? `it was in: ${whyWords(row.why)}` : whyWords(row.why);
+  return row3.state === "dropped" ? `it was in: ${whyWords(row3.why)}` : whyWords(row3.why);
 }
 function reachedReply(state) {
   return state === "in_prompt" || state === "added";
 }
-function entryTitle(row) {
-  const title = row.title.trim();
-  return title !== "" ? title : row.keys[0] ?? "Untitled entry";
+function entryTitle(row3) {
+  const title = row3.title.trim();
+  return title !== "" ? title : row3.keys[0] ?? "Untitled entry";
 }
-function rowSub(row) {
-  return `${row.keys.length > 0 ? `Keys: ${row.keys.join(", ")}` : "No keys"} · ${counted2(row.tokens, "token")}`;
+function rowSub(row3) {
+  return `${row3.keys.length > 0 ? `Keys: ${row3.keys.join(", ")}` : "No keys"} · ${counted2(row3.tokens, "token")}`;
 }
-function comesInWords(row) {
-  if (!row.enabled)
+function comesInWords(row3) {
+  if (!row3.enabled)
     return "Switched off: Lumiverse leaves it out of every prompt.";
-  if (row.constant)
+  if (row3.constant)
     return "Always on: Lumiverse puts it in every prompt.";
-  if (row.vectorized)
-    return row.keys.length > 0 ? "Lumiverse brings it in by its keys, or when what is said is close to it in meaning." : "Lumiverse brings it in when what is said is close to it in meaning.";
-  return row.keys.length > 0 ? "Lumiverse brings it in by its keys." : "It has no keys, so Lumiverse doesn't bring it in by itself.";
+  if (row3.vectorized)
+    return row3.keys.length > 0 ? "Lumiverse brings it in by its keys, or when what is said is close to it in meaning." : "Lumiverse brings it in when what is said is close to it in meaning.";
+  return row3.keys.length > 0 ? "Lumiverse brings it in by its keys." : "It has no keys, so Lumiverse doesn't bring it in by itself.";
 }
-function entryFacts(row, book) {
+function entryFacts(row3, book) {
   return [
     ...book !== null ? [{ label: "Book", value: book }] : [],
-    { label: "Keys", value: row.keys.length > 0 ? row.keys.join(", ") : "None" },
-    ...row.secondaryKeys.length > 0 ? [{ label: "Secondary keys", value: row.secondaryKeys.join(", ") }] : [],
-    { label: "Size", value: `${counted2(row.chars, "character")}, about ${counted2(row.tokens, "token")}` },
-    { label: "In Lumiverse", value: comesInWords(row) }
+    { label: "Keys", value: row3.keys.length > 0 ? row3.keys.join(", ") : "None" },
+    ...row3.secondaryKeys.length > 0 ? [{ label: "Secondary keys", value: row3.secondaryKeys.join(", ") }] : [],
+    { label: "Size", value: `${counted2(row3.chars, "character")}, about ${counted2(row3.tokens, "token")}` },
+    { label: "In Lumiverse", value: comesInWords(row3) }
   ];
 }
 function countsLine(view, now) {
@@ -55128,7 +55267,7 @@ function filterFor(view, filter) {
 }
 function groupsOf(view, filter) {
   const { state, book } = filterFor(view, filter);
-  const rank = (row) => LORE_STATES.indexOf(row.state);
+  const rank = (row3) => LORE_STATES.indexOf(row3.state);
   return booksOf(view).filter((b3) => book === null || b3.id === book).map((b3) => ({ book: b3, rows: view.entries.filter((e3) => e3.bookId === b3.id && (state === null || e3.state === state)).sort((a3, z3) => rank(a3) - rank(z3)) })).filter((g2) => g2.rows.length > 0 || !isFiltered({ state, book }));
 }
 function stateChips(view, filter) {
@@ -55223,8 +55362,8 @@ function markWords(text2, words3) {
     for (const w3 of wanted) {
       if (!UNSPACED.test(w3))
         continue;
-      for (let at2 = lower.indexOf(w3);at2 !== -1; at2 = lower.indexOf(w3, at2 + w3.length))
-        spans.push([at2, at2 + w3.length]);
+      for (let at4 = lower.indexOf(w3);at4 !== -1; at4 = lower.indexOf(w3, at4 + w3.length))
+        spans.push([at4, at4 + w3.length]);
     }
   }
   spans.sort((a3, b3) => a3[0] - b3[0] || a3[1] - b3[1]);
@@ -55323,9 +55462,9 @@ function inlineOf(line2) {
   const out = [];
   let from = 0;
   for (const found of line2.matchAll(MARKS)) {
-    const at2 = found.index ?? 0;
-    if (at2 > from)
-      out.push({ text: line2.slice(from, at2) });
+    const at4 = found.index ?? 0;
+    if (at4 > from)
+      out.push({ text: line2.slice(from, at4) });
     const [whole5, code, strong, strong2, em, em2] = found;
     if (code !== undefined)
       out.push({ code });
@@ -55333,7 +55472,7 @@ function inlineOf(line2) {
       out.push({ strong: strong ?? strong2 ?? "" });
     else
       out.push({ em: em ?? em2 ?? "" });
-    from = at2 + whole5.length;
+    from = at4 + whole5.length;
   }
   if (from < line2.length)
     out.push({ text: line2.slice(from) });
@@ -56054,7 +56193,7 @@ function occurrences2(text2, q2) {
     return 0;
   const lower = text2.toLowerCase();
   let n5 = 0;
-  for (let at2 = lower.indexOf(q2);at2 !== -1; at2 = lower.indexOf(q2, at2 + q2.length))
+  for (let at4 = lower.indexOf(q2);at4 !== -1; at4 = lower.indexOf(q2, at4 + q2.length))
     n5 += 1;
   return n5;
 }
@@ -56100,11 +56239,11 @@ function markPieces(text2, query) {
   const lower = text2.toLowerCase();
   const out = [];
   let from = 0;
-  for (let at2 = lower.indexOf(q2);at2 !== -1; at2 = lower.indexOf(q2, at2 + q2.length)) {
-    if (at2 > from)
-      out.push({ text: text2.slice(from, at2), hit: false });
-    out.push({ text: text2.slice(at2, at2 + q2.length), hit: true });
-    from = at2 + q2.length;
+  for (let at4 = lower.indexOf(q2);at4 !== -1; at4 = lower.indexOf(q2, at4 + q2.length)) {
+    if (at4 > from)
+      out.push({ text: text2.slice(from, at4), hit: false });
+    out.push({ text: text2.slice(at4, at4 + q2.length), hit: true });
+    from = at4 + q2.length;
   }
   if (from < text2.length)
     out.push({ text: text2.slice(from), hit: false });
@@ -56150,7 +56289,7 @@ function turnTotals(turn, now) {
   for (const a3 of turn.nested) {
     const sum = noTotals();
     let n5 = 0;
-    const row = new Map;
+    const row3 = new Map;
     for (const s3 of a3.steps) {
       const e3 = s3.entry;
       if (e3.kind === "answer") {
@@ -56160,12 +56299,12 @@ function turnTotals(turn, now) {
         const r3 = { agentId: a3.start.id, seq: s3.seq, call: n5, model: e3.model, on: a3.start, startedAt: e3.at - e3.ms, ms: e3.ms, usage: e3.usage, finishReason: e3.finishReason, tools: e3.calls.length, toolMs: 0, prompt: e3.prompt ?? null };
         calls.push(r3);
         for (const c3 of e3.calls)
-          row.set(c3.id, r3);
+          row3.set(c3.id, r3);
       } else if (e3.kind === "result") {
         sum.toolMs += e3.ms;
         if (e3.error)
           sum.toolErrors += 1;
-        const r3 = row.get(e3.callId);
+        const r3 = row3.get(e3.callId);
         if (r3)
           r3.toolMs += e3.ms;
       } else if (e3.kind === "tools_refused" || e3.kind === "retry")
@@ -56209,7 +56348,7 @@ function totalsCsv(totals) {
   const instance = new Map(totals.agents.map((t3) => [t3.agent.start.id, t3.agent.start.as ?? ""]));
   const head = ["agent", "role", "as", "call", "model", "connection", "started", "ms", "in", "cached_in", "cache_write", "out", "reasoning_out", "estimated", "cost_usd", "finish", "tool_calls", "tool_ms", "prompt"];
   const rows2 = totals.calls.map((c3) => [c3.agentId, role.get(c3.agentId) ?? "", instance.get(c3.agentId) ?? "", c3.call, c3.model, c3.on.connectionName ?? c3.on.connectionId ?? "", new Date(c3.startedAt).toISOString(), c3.ms, c3.usage.in, c3.usage.cachedIn, c3.usage.cacheWrite ?? 0, c3.usage.out, c3.usage.reasoningOut, c3.usage.estimated.join(" "), c3.usage.cost === undefined ? "" : Number(c3.usage.cost.toPrecision(10)), c3.finishReason, c3.tools, c3.toolMs, c3.prompt ?? ""]);
-  return `${[head, ...rows2].map((row) => row.map(csvField).join(",")).join(`
+  return `${[head, ...rows2].map((row3) => row3.map(csvField).join(",")).join(`
 `)}
 `;
 }
@@ -56889,14 +57028,14 @@ function followsWords(rest, agents) {
 }
 var GRANT2 = "grant";
 function schemaAt(schema, path2) {
-  let at2 = schema;
+  let at4 = schema;
   for (const key of path2) {
-    const next = isRecord2(at2.properties) ? at2.properties[key] : undefined;
+    const next = isRecord2(at4.properties) ? at4.properties[key] : undefined;
     if (!isRecord2(next))
       return null;
-    at2 = next;
+    at4 = next;
   }
-  return at2;
+  return at4;
 }
 var titleOr = (schema, otherwise) => typeof schema.title === "string" && schema.title !== "" ? schema.title : otherwise;
 function grantSettingWords(settings) {
@@ -57969,34 +58108,34 @@ var DIFF_CONTEXT_LINES = 3;
 function foldDiff(diff, open = new Set) {
   const rows2 = [];
   const { lines: lines3 } = diff;
-  let at2 = 0;
-  while (at2 < lines3.length) {
-    const line2 = lines3[at2];
+  let at4 = 0;
+  while (at4 < lines3.length) {
+    const line2 = lines3[at4];
     if (!line2)
       break;
     if (line2.kind !== "same") {
       rows2.push({ kind: "line", line: line2 });
-      at2 += 1;
+      at4 += 1;
       continue;
     }
-    let end = at2;
+    let end = at4;
     while (end < lines3.length && lines3[end]?.kind === "same")
       end += 1;
-    const run = lines3.slice(at2, end);
-    const keepStart = at2 === 0 ? 0 : DIFF_CONTEXT_LINES;
+    const run = lines3.slice(at4, end);
+    const keepStart = at4 === 0 ? 0 : DIFF_CONTEXT_LINES;
     const keepEnd = end === lines3.length ? 0 : DIFF_CONTEXT_LINES;
     const hidden = run.slice(keepStart, run.length - keepEnd);
-    if (hidden.length <= 1 || open.has(at2 + keepStart)) {
+    if (hidden.length <= 1 || open.has(at4 + keepStart)) {
       for (const l3 of run)
         rows2.push({ kind: "line", line: l3 });
     } else {
       for (const l3 of run.slice(0, keepStart))
         rows2.push({ kind: "line", line: l3 });
-      rows2.push({ kind: "fold", id: at2 + keepStart, lines: hidden });
+      rows2.push({ kind: "fold", id: at4 + keepStart, lines: hidden });
       for (const l3 of run.slice(run.length - keepEnd))
         rows2.push({ kind: "line", line: l3 });
     }
-    at2 = end;
+    at4 = end;
   }
   return rows2;
 }
@@ -58245,7 +58384,7 @@ function ConnectionsNote(props) {
 function ChoiceControl(props) {
   const { node, ctx } = props;
   const options = node.nullable && !props.options.some((o4) => o4.value === null) ? [{ value: null, label: node.none, help: null }, ...props.options] : props.options;
-  const at2 = options.findIndex((o4) => sameJson(o4.value, node.value));
+  const at4 = options.findIndex((o4) => sameJson(o4.value, node.value));
   const pick = (index) => {
     const chosen = options[Number(index)];
     if (chosen)
@@ -58257,21 +58396,21 @@ function ChoiceControl(props) {
     children: [
       few ? /* @__PURE__ */ u3(Seg2, {
         label: node.label,
-        value: at2 === -1 ? null : String(at2),
+        value: at4 === -1 ? null : String(at4),
         options: entries,
         disabled: ctx.busy,
         onChange: pick
       }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Select, {
         label: node.label,
-        value: at2 === -1 ? "" : String(at2),
+        value: at4 === -1 ? "" : String(at4),
         options: entries,
         disabled: ctx.busy,
         onChange: pick
       }, undefined, false, undefined, this),
-      options[at2]?.help ? /* @__PURE__ */ u3("span", {
+      options[at4]?.help ? /* @__PURE__ */ u3("span", {
         class: "lah-field-help",
         style: { flexBasis: "100%" },
-        children: options[at2]?.help
+        children: options[at4]?.help
       }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
@@ -58833,38 +58972,38 @@ function Branch(props) {
             style: { padding: "var(--lah-s3)" },
             children: "No rows yet."
           }, undefined, false, undefined, this) : null,
-          c3.rows.map((row) => /* @__PURE__ */ u3("div", {
+          c3.rows.map((row3) => /* @__PURE__ */ u3("div", {
             class: "lah-set-tablerow",
-            "data-lah-row": row.key,
+            "data-lah-row": row3.key,
             children: [
               /* @__PURE__ */ u3("div", {
                 class: "lah-set-tablerow-head",
                 children: [
                   /* @__PURE__ */ u3("span", {
                     class: "lah-set-tablerow-key",
-                    children: rowName2(row.key)
+                    children: rowName2(row3.key)
                   }, undefined, false, undefined, this),
                   /* @__PURE__ */ u3(Button2, {
                     size: "sm",
                     variant: "ghost",
                     icon: "trash",
                     disabled: ctx.busy,
-                    label: `Remove ${rowName2(row.key)} from ${node.label}`,
-                    onClick: () => ctx.save([{ path: node.path, value: withoutRow(node, row.key) }]),
+                    label: `Remove ${rowName2(row3.key)} from ${node.label}`,
+                    onClick: () => ctx.save([{ path: node.path, value: withoutRow(node, row3.key) }]),
                     children: "Remove"
                   }, undefined, false, undefined, this)
                 ]
               }, undefined, true, undefined, this),
-              isBranch(row) ? /* @__PURE__ */ u3(Fields, {
-                nodes: row.control.kind === "group" ? row.control.fields : [row],
+              isBranch(row3) ? /* @__PURE__ */ u3(Fields, {
+                nodes: row3.control.kind === "group" ? row3.control.fields : [row3],
                 ctx
               }, undefined, false, undefined, this) : /* @__PURE__ */ u3(FieldNode, {
-                node: row,
+                node: row3,
                 ctx,
                 bare: true
               }, undefined, false, undefined, this)
             ]
-          }, row.key, true, undefined, this)),
+          }, row3.key, true, undefined, this)),
           /* @__PURE__ */ u3(AddRow, {
             node,
             control: c3,
@@ -59178,8 +59317,8 @@ function ChatBar(props) {
 // node_modules/lumi-ah/src/extension/frontend/spend-model.ts
 var PERIODS = [7, 30, 90];
 var MEASURE_WORDS = { cost: "Cost", tokens: "Tokens" };
-function measureOf(row, measure) {
-  return measure === "cost" ? row.cost : row.in + row.out;
+function measureOf(row3, measure) {
+  return measure === "cost" ? row3.cost : row3.in + row3.out;
 }
 function measureWords(value, measure) {
   return measure === "cost" ? money(value) : `${count3(value)} tokens`;
@@ -59201,30 +59340,30 @@ function dayAt(key) {
   return m2 ? Date.UTC(Number(m2[1]), Number(m2[2]) - 1, Number(m2[3])) : null;
 }
 function dayWords2(key, locale) {
-  const at2 = dayAt(key);
-  return at2 === null ? key : new Date(at2).toLocaleDateString(locale, { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+  const at4 = dayAt(key);
+  return at4 === null ? key : new Date(at4).toLocaleDateString(locale, { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
 }
 function dayShort(key, locale) {
-  const at2 = dayAt(key);
-  return at2 === null ? key : new Date(at2).toLocaleDateString(locale, { month: "short", day: "numeric", timeZone: "UTC" });
+  const at4 = dayAt(key);
+  return at4 === null ? key : new Date(at4).toLocaleDateString(locale, { month: "short", day: "numeric", timeZone: "UTC" });
 }
-function costCell(row) {
-  if (row.unpriced <= 0)
-    return money(row.cost);
-  if (row.unpriced >= row.calls)
+function costCell(row3) {
+  if (row3.unpriced <= 0)
+    return money(row3.cost);
+  if (row3.unpriced >= row3.calls)
     return "no price";
-  return `at least ${money(row.cost)}`;
+  return `at least ${money(row3.cost)}`;
 }
-function unpricedWords(row) {
-  return row.unpriced > 0 ? `${counted2(row.unpriced, "call")} had no price, so the total is at least this.` : null;
+function unpricedWords(row3) {
+  return row3.unpriced > 0 ? `${counted2(row3.unpriced, "call")} had no price, so the total is at least this.` : null;
 }
-function tokensInWords(row) {
-  return row.cachedIn > 0 ? `${count3(row.in)} (${count3(row.cachedIn)} cached)` : count3(row.in);
+function tokensInWords(row3) {
+  return row3.cachedIn > 0 ? `${count3(row3.in)} (${count3(row3.cachedIn)} cached)` : count3(row3.in);
 }
-function rowWords3(row) {
-  if (row.calls === 0)
+function rowWords3(row3) {
+  if (row3.calls === 0)
     return "nothing spent";
-  return [costCell(row), counted2(row.calls, "call"), `${tokensInWords(row)} tokens in`, `${count3(row.out)} out`, ...row.unpriced > 0 && row.unpriced < row.calls ? [`${counted2(row.unpriced, "call")} had no price`] : []].join(", ");
+  return [costCell(row3), counted2(row3.calls, "call"), `${tokensInWords(row3)} tokens in`, `${count3(row3.out)} out`, ...row3.unpriced > 0 && row3.unpriced < row3.calls ? [`${counted2(row3.unpriced, "call")} had no price`] : []].join(", ");
 }
 function chartOf(days, measure, locale) {
   const values = days.map((d3) => measureOf(d3, measure));
@@ -59256,7 +59395,7 @@ function spendCsv(view) {
     ["total", [view.total]]
   ];
   const rows2 = groups.flatMap(([group, list2]) => list2.map((r3) => [group, r3.key, r3.label, r3.calls, r3.in, r3.cachedIn, r3.out, Number(r3.cost.toPrecision(10)), r3.unpriced]));
-  return `${[CSV_HEAD, ...rows2].map((row) => row.map(csvField2).join(",")).join(`
+  return `${[CSV_HEAD, ...rows2].map((row3) => row3.map(csvField2).join(",")).join(`
 `)}
 `;
 }
@@ -59279,8 +59418,8 @@ function bytesWords(bytes) {
     unit2 += 1;
   }
 }
-function ageWords(now, at2) {
-  const ms = Math.max(0, now - at2);
+function ageWords(now, at4) {
+  const ms = Math.max(0, now - at4);
   if (ms < 3600000)
     return `${Math.round(ms / 60000)} min`;
   if (ms < 2 * 86400000)
@@ -59677,15 +59816,15 @@ var ITEM2 = /^(\s*)(?:[-*+]|(\d{1,9}[.)]))\s+(.*?)\s*$/;
 function piecesOf(content) {
   const citations = citationsOf(content);
   const pieces = [];
-  let at2 = 0;
+  let at4 = 0;
   citations.forEach((cite, nth) => {
-    const before = content.slice(at2, cite.start).replace(/\s+$/, "");
+    const before = content.slice(at4, cite.start).replace(/\s+$/, "");
     if (before !== "")
       pieces.push({ text: before });
     pieces.push({ cite, nth });
-    at2 = cite.start + cite.citation.length;
+    at4 = cite.start + cite.citation.length;
   });
-  const rest = content.slice(at2);
+  const rest = content.slice(at4);
   if (rest.trim() !== "")
     pieces.push({ text: rest });
   return { pieces, citations };
@@ -59715,8 +59854,8 @@ function failedPlaces(view) {
   return places2.sort((a3, b3) => rank(a3.path) - rank(b3.path) || fileName(a3.path).localeCompare(fileName(b3.path)) || a3.line - b3.line);
 }
 function nextPlace(places2, from) {
-  const at2 = from === null ? -1 : places2.findIndex((p3) => samePlace(p3, from));
-  return places2[(at2 + 1) % Math.max(1, places2.length)] ?? null;
+  const at4 = from === null ? -1 : places2.findIndex((p3) => samePlace(p3, from));
+  return places2[(at4 + 1) % Math.max(1, places2.length)] ?? null;
 }
 function failingLines(view) {
   const groups = [];
@@ -60279,11 +60418,11 @@ class LiveFollower {
     }
   }
   async fill(turn, from) {
-    let at2 = from;
-    while (at2 !== null && !this.stopped) {
+    let at4 = from;
+    while (at4 !== null && !this.stopped) {
       let page9;
       try {
-        page9 = await this.reads.events(turn, at2);
+        page9 = await this.reads.events(turn, at4);
       } catch {
         if (this.state.status === "ready")
           this.set({ ...this.state, partial: true });
@@ -60299,7 +60438,7 @@ class LiveFollower {
         return;
       }
       this.set({ status: "ready", view: followed, partial: false });
-      at2 = page9.next;
+      at4 = page9.next;
     }
   }
 }
@@ -60439,38 +60578,38 @@ function DiffView(props) {
         class: "lah-ws-diff",
         role: "group",
         "aria-label": props.label,
-        children: rows2.map((row) => row.kind === "fold" ? /* @__PURE__ */ u3("button", {
+        children: rows2.map((row3) => row3.kind === "fold" ? /* @__PURE__ */ u3("button", {
           type: "button",
           class: "lah-ws-fold",
-          onClick: () => setOpen((held) => new Set([...held, row.id])),
+          onClick: () => setOpen((held) => new Set([...held, row3.id])),
           children: [
             /* @__PURE__ */ u3(Icon2, {
               name: "more",
               size: 16
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("span", {
-              children: `${counted2(row.lines.length, "unchanged line")}: show ${row.lines.length === 1 ? "it" : "them"}`
+              children: `${counted2(row3.lines.length, "unchanged line")}: show ${row3.lines.length === 1 ? "it" : "them"}`
             }, undefined, false, undefined, this)
           ]
-        }, `fold-${row.id}`, true, undefined, this) : /* @__PURE__ */ u3("div", {
+        }, `fold-${row3.id}`, true, undefined, this) : /* @__PURE__ */ u3("div", {
           class: "lah-ws-diffline",
-          "data-kind": row.line.kind,
+          "data-kind": row3.line.kind,
           children: [
             /* @__PURE__ */ u3("span", {
               class: "lah-ws-diffsign",
               "aria-hidden": "true",
-              children: row.line.kind === "same" ? "" : marks[row.line.kind].sign
+              children: row3.line.kind === "same" ? "" : marks[row3.line.kind].sign
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("span", {
               class: "lah-ws-diffword",
-              children: row.line.kind === "same" ? "" : marks[row.line.kind].word
+              children: row3.line.kind === "same" ? "" : marks[row3.line.kind].word
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("span", {
               class: "lah-ws-difftext",
-              children: row.line.text
+              children: row3.line.text
             }, undefined, false, undefined, this)
           ]
-        }, `${row.line.kind}-${row.line.before ?? ""}-${row.line.after ?? ""}`, true, undefined, this))
+        }, `${row3.line.kind}-${row3.line.before ?? ""}-${row3.line.after ?? ""}`, true, undefined, this))
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -61098,31 +61237,31 @@ function ChatStory(props) {
         "data-lah-story-why": true,
         children: storyWhy(view)
       }, undefined, false, undefined, this),
-      storyRows(view).map((row) => /* @__PURE__ */ u3("div", {
+      storyRows(view).map((row3) => /* @__PURE__ */ u3("div", {
         class: "lah-chatswitch-story-row",
-        "data-lah-story-member": row.member,
+        "data-lah-story-member": row3.member,
         children: [
           /* @__PURE__ */ u3("span", {
             class: "lah-field-label",
-            children: row.label
+            children: row3.label
           }, undefined, false, undefined, this),
-          row.claimed !== null ? /* @__PURE__ */ u3("p", {
+          row3.claimed !== null ? /* @__PURE__ */ u3("p", {
             class: "lah-field-help",
             "data-lah-story-claimed": true,
-            children: row.claimed
+            children: row3.claimed
           }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Seg2, {
-            value: row.value,
-            options: row.options,
-            label: row.label,
+            value: row3.value,
+            options: row3.options,
+            label: row3.label,
             disabled: busy,
-            onChange: (value) => choose(row.member, value)
+            onChange: (value) => choose(row3.member, value)
           }, undefined, false, undefined, this),
-          row.help !== "" ? /* @__PURE__ */ u3("p", {
+          row3.help !== "" ? /* @__PURE__ */ u3("p", {
             class: "lah-field-help",
-            children: row.help
+            children: row3.help
           }, undefined, false, undefined, this) : null
         ]
-      }, row.member, true, undefined, this))
+      }, row3.member, true, undefined, this))
     ]
   }, undefined, true, undefined, this);
 }
@@ -61436,17 +61575,17 @@ function LoreChange(props) {
       }, undefined, true, undefined, this),
       /* @__PURE__ */ u3("ul", {
         class: "lah-changed",
-        children: rows2.map((row) => {
-          const line2 = `${CHANGE_WORD[row.kind]}: ${row.text}`;
+        children: rows2.map((row3) => {
+          const line2 = `${CHANGE_WORD[row3.kind]}: ${row3.text}`;
           const now = props.now - before;
           before += props.query.trim() === "" ? 0 : markPieces(line2, props.query).filter((p3) => p3.hit).length;
-          const entryId = row.entryId;
+          const entryId = row3.entryId;
           return /* @__PURE__ */ u3("li", {
             class: "lah-changed-row",
-            "data-change": row.kind,
+            "data-change": row3.kind,
             children: [
               /* @__PURE__ */ u3(Icon2, {
-                name: CHANGE_ICON[row.kind],
+                name: CHANGE_ICON[row3.kind],
                 size: 14
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3("span", {
@@ -61464,7 +61603,7 @@ function LoreChange(props) {
                 children: "Open"
               }, undefined, false, undefined, this) : null
             ]
-          }, `${row.kind}:${row.text}`, true, undefined, this);
+          }, `${row3.kind}:${row3.text}`, true, undefined, this);
         })
       }, undefined, false, undefined, this)
     ]
@@ -61473,8 +61612,8 @@ function LoreChange(props) {
 
 // node_modules/lumi-ah/src/extension/frontend/to-top-model.ts
 var TO_TOP_SCREENS = 1.5;
-function showsToTop(at2) {
-  return at2.scrollable && at2.height > 0 && at2.top >= at2.height * TO_TOP_SCREENS;
+function showsToTop(at4) {
+  return at4.scrollable && at4.height > 0 && at4.top >= at4.height * TO_TOP_SCREENS;
 }
 
 // node_modules/lumi-ah/src/extension/frontend/transcript-views.tsx
@@ -62120,7 +62259,7 @@ function eventWords(e3) {
 function EventRow(props) {
   const [open, setOpen] = d2(false);
   const { record } = props;
-  const at2 = eventAt(record.event);
+  const at4 = eventAt(record.event);
   const json = open ? JSON.stringify(record.event, null, 2) : "";
   return /* @__PURE__ */ u3("details", {
     class: "lah-event",
@@ -62149,7 +62288,7 @@ function EventRow(props) {
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("span", {
             class: "lah-event-at",
-            children: `+${duration(Math.max(0, at2 - props.start))}`
+            children: `+${duration(Math.max(0, at4 - props.start))}`
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
@@ -62161,7 +62300,7 @@ function EventRow(props) {
             children: [
               /* @__PURE__ */ u3("span", {
                 class: "lah-dim lah-small",
-                children: clock(at2)
+                children: clock(at4)
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3(CopyButton, {
                 text: json,
@@ -63024,11 +63163,11 @@ function TurnFeed(props) {
   const everything = b2(() => feedOf(turn, filter), [turn, filter]);
   const matches = b2(() => findMatches(everything, filter.query), [everything, filter.query]);
   const total = matchTotal(matches);
-  const at2 = matchAt(matches, matchIndex);
-  const current2 = at2 ? { key: at2.group.key, field: at2.group.field, nth: at2.nth } : null;
+  const at4 = matchAt(matches, matchIndex);
+  const current2 = at4 ? { key: at4.group.key, field: at4.group.field, nth: at4.nth } : null;
   const hits = b2(() => matchCounts(matches), [matches]);
   const window2 = stepWindow(turn, shown);
-  const from = at2 && at2.group.seq < window2.from ? Math.floor(at2.group.seq) : window2.from;
+  const from = at4 && at4.group.seq < window2.from ? Math.floor(at4.group.seq) : window2.from;
   const feeds = b2(() => from === 0 ? everything : feedOf(turn, filter, from), [everything, turn, filter, from]);
   const hidden = from === 0 ? 0 : turn.agents.reduce((n5, a3) => n5 + a3.steps.filter((s3) => s3.seq < from).length, 0);
   const folds = {
@@ -63041,12 +63180,12 @@ function TurnFeed(props) {
     whole: (id) => wholes[id] === true,
     showWhole: (id) => setWholes((w3) => ({ ...w3, [id]: true }))
   };
-  const here = at2 ? `${at2.group.key}/${at2.group.field}/${at2.nth}` : null;
+  const here = at4 ? `${at4.group.key}/${at4.group.field}/${at4.nth}` : null;
   A(() => {
-    if (!at2)
+    if (!at4)
       return;
-    setChosen((c3) => c3[at2.group.key] === true ? c3 : { ...c3, [at2.group.key]: true });
-    setFolded((f3) => f3[at2.group.agentId] === true ? { ...f3, [at2.group.agentId]: false } : f3);
+    setChosen((c3) => c3[at4.group.key] === true ? c3 : { ...c3, [at4.group.key]: true });
+    setFolded((f3) => f3[at4.group.agentId] === true ? { ...f3, [at4.group.agentId]: false } : f3);
   }, [here]);
   F2(() => {
     if (here === null || !root.current)
@@ -63719,34 +63858,34 @@ function ArgList(props) {
   return /* @__PURE__ */ u3("dl", {
     class: "lah-ask-args",
     "data-lah-ask-args": true,
-    children: props.rows.map((row) => {
-      const open = row.short === null || whole5.has(row.name);
+    children: props.rows.map((row3) => {
+      const open = row3.short === null || whole5.has(row3.name);
       return /* @__PURE__ */ u3("div", {
         class: "lah-ask-arg",
-        "data-lah-ask-arg": row.name,
+        "data-lah-ask-arg": row3.name,
         children: [
           /* @__PURE__ */ u3("dt", {
             class: "lah-mono lah-muted",
-            children: row.name
+            children: row3.name
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("dd", {
             class: "lah-ask-value",
             children: [
               /* @__PURE__ */ u3("span", {
-                children: open ? row.value : row.short
+                children: open ? row3.value : row3.short
               }, undefined, false, undefined, this),
-              row.short !== null ? /* @__PURE__ */ u3(Button2, {
+              row3.short !== null ? /* @__PURE__ */ u3(Button2, {
                 size: "sm",
                 variant: "ghost",
                 expanded: open,
-                label: open ? `Show less of ${row.name}` : `Show all of ${row.name}`,
-                onClick: () => setWhole((held) => new Set(open ? [...held].filter((name2) => name2 !== row.name) : [...held, row.name])),
+                label: open ? `Show less of ${row3.name}` : `Show all of ${row3.name}`,
+                onClick: () => setWhole((held) => new Set(open ? [...held].filter((name2) => name2 !== row3.name) : [...held, row3.name])),
                 children: open ? "Show less" : "Show all"
               }, undefined, false, undefined, this) : null
             ]
           }, undefined, true, undefined, this)
         ]
-      }, row.name, true, undefined, this);
+      }, row3.name, true, undefined, this);
     })
   }, undefined, false, undefined, this);
 }
@@ -67308,28 +67447,28 @@ function Entries(props) {
             class: "lah-lore-about",
             children: "This book has no entries."
           }, undefined, false, undefined, this) : null,
-          group.rows.map((row) => {
-            const why3 = rowWhy(row);
+          group.rows.map((row3) => {
+            const why3 = rowWhy(row3);
             return /* @__PURE__ */ u3("button", {
               type: "button",
               class: "lah-navrow lah-lore-row",
-              "data-lah-lore-row": row.entryId,
-              "data-state": row.state,
-              "aria-current": props.shown === row.entryId ? "true" : undefined,
-              onClick: () => props.onOpen(row.entryId),
+              "data-lah-lore-row": row3.entryId,
+              "data-state": row3.state,
+              "aria-current": props.shown === row3.entryId ? "true" : undefined,
+              onClick: () => props.onOpen(row3.entryId),
               children: [
                 /* @__PURE__ */ u3("span", {
                   class: "lah-navrow-text",
                   children: [
                     /* @__PURE__ */ u3("span", {
                       class: "lah-navrow-title",
-                      children: entryTitle(row)
+                      children: entryTitle(row3)
                     }, undefined, false, undefined, this),
                     /* @__PURE__ */ u3("span", {
                       class: "lah-lore-standing",
                       children: [
                         /* @__PURE__ */ u3(StateMark, {
-                          state: row.state
+                          state: row3.state
                         }, undefined, false, undefined, this),
                         why3 !== null ? /* @__PURE__ */ u3("span", {
                           class: "lah-lore-why",
@@ -67339,7 +67478,7 @@ function Entries(props) {
                     }, undefined, true, undefined, this),
                     /* @__PURE__ */ u3("span", {
                       class: "lah-navrow-sub",
-                      children: rowSub(row)
+                      children: rowSub(row3)
                     }, undefined, false, undefined, this)
                   ]
                 }, undefined, true, undefined, this),
@@ -67349,7 +67488,7 @@ function Entries(props) {
                   class: "lah-chev"
                 }, undefined, false, undefined, this)
               ]
-            }, row.entryId, true, undefined, this);
+            }, row3.entryId, true, undefined, this);
           })
         ]
       }, group.book.id, true, undefined, this))
@@ -67357,7 +67496,7 @@ function Entries(props) {
   }, undefined, true, undefined, this);
 }
 function EntryPane(props) {
-  const { opened, row } = props;
+  const { opened, row: row3 } = props;
   const back = /* @__PURE__ */ u3("span", {
     class: "lah-back",
     children: /* @__PURE__ */ u3(IconButton2, {
@@ -67371,7 +67510,7 @@ function EntryPane(props) {
     onClick: props.onAgain,
     children: "Try again"
   }, undefined, false, undefined, this);
-  if (row === null)
+  if (row3 === null)
     return /* @__PURE__ */ u3("div", {
       class: "lah-lore-entry",
       "data-lah-lore-open": opened.id,
@@ -67401,12 +67540,12 @@ function EntryPane(props) {
         }, undefined, false, undefined, this)
       ]
     }, undefined, true, undefined, this);
-  const why3 = rowWhy(row);
+  const why3 = rowWhy(row3);
   return /* @__PURE__ */ u3("div", {
     class: "lah-lore-entry",
-    "data-lah-lore-open": row.entryId,
+    "data-lah-lore-open": row3.entryId,
     "data-status": opened.status,
-    "data-state": row.state,
+    "data-state": row3.state,
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lah-pane-head",
@@ -67417,13 +67556,13 @@ function EntryPane(props) {
             children: [
               /* @__PURE__ */ u3("strong", {
                 class: "lah-h",
-                children: entryTitle(row)
+                children: entryTitle(row3)
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3("span", {
                 class: "lah-lore-standing",
                 children: [
                   /* @__PURE__ */ u3(StateMark, {
-                    state: row.state
+                    state: row3.state
                   }, undefined, false, undefined, this),
                   why3 !== null ? /* @__PURE__ */ u3("span", {
                     class: "lah-lore-why",
@@ -67437,11 +67576,11 @@ function EntryPane(props) {
       }, undefined, true, undefined, this),
       /* @__PURE__ */ u3("p", {
         class: "lah-lead",
-        children: stateAbout(row.state, props.answered)
+        children: stateAbout(row3.state, props.answered)
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("dl", {
         class: "lah-lore-facts",
-        children: entryFacts(row, props.book).map((fact) => /* @__PURE__ */ u3("div", {
+        children: entryFacts(row3, props.book).map((fact) => /* @__PURE__ */ u3("div", {
           class: "lah-lore-fact",
           children: [
             /* @__PURE__ */ u3("dt", {
@@ -67478,7 +67617,7 @@ function EntryPane(props) {
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("p", {
         class: "lah-small lah-dim",
-        children: `The agents' tools name this entry ${row.short}.`
+        children: `The agents' tools name this entry ${row3.short}.`
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -67677,9 +67816,9 @@ function LorePage() {
     wasOpen.current = open;
   }, [open]);
   F2(() => {
-    const row2 = open !== null && listed5 ? rowOf3(open) : null;
-    if (row2 && row2.getClientRects().length > 0)
-      revealInScroller2(row2, "nearest");
+    const row4 = open !== null && listed5 ? rowOf3(open) : null;
+    if (row4 && row4.getClientRects().length > 0)
+      revealInScroller2(row4, "nearest");
   }, [open, listed5]);
   const keep = (next) => keptOf2(app).update((k2) => ({ ...k2, ...next }));
   const openEntry = (id, words3) => {
@@ -67825,8 +67964,8 @@ function LorePage() {
         meaning
       ]
     }, undefined, true, undefined, this);
-  const row = open !== null ? view.entries.find((e3) => e3.entryId === open || e3.short === open) ?? opened?.entry ?? null : null;
-  const shown = row?.entryId ?? open;
+  const row3 = open !== null ? view.entries.find((e3) => e3.entryId === open || e3.short === open) ?? opened?.entry ?? null : null;
+  const shown = row3?.entryId ?? open;
   return /* @__PURE__ */ u3("div", {
     class: "lah-split lah-lore",
     "data-pane": open !== null ? "detail" : "list",
@@ -67916,8 +68055,8 @@ function LorePage() {
         ref: detail,
         children: open !== null && opened !== null ? /* @__PURE__ */ u3(EntryPane, {
           opened,
-          row,
-          book: row !== null ? view.books.find((b3) => b3.id === row.bookId)?.name ?? null : null,
+          row: row3,
+          book: row3 !== null ? view.books.find((b3) => b3.id === row3.bookId)?.name ?? null : null,
           answered: view.last !== null,
           marks: marks !== null && marks.id === shown ? marks.words : [],
           onClose: close,
@@ -70997,8 +71136,8 @@ function Chart(props) {
   const scroller = T2(null);
   const chart = chartOf(days, measure);
   const found = picked === null ? -1 : days.findIndex((d3) => d3.key === picked);
-  const at2 = found >= 0 ? found : days.length - 1;
-  const row = days[at2];
+  const at4 = found >= 0 ? found : days.length - 1;
+  const row3 = days[at4];
   F2(() => {
     if (scroller.current)
       scroller.current.scrollLeft = scroller.current.scrollWidth;
@@ -71015,7 +71154,7 @@ function Chart(props) {
       box.scrollLeft = left + bar.offsetWidth - box.clientWidth;
   }, [picked]);
   const step = (by) => {
-    const next = days[at2 + by];
+    const next = days[at4 + by];
     if (next)
       setPicked(next.key);
   };
@@ -71052,7 +71191,7 @@ function Chart(props) {
                 class: "lah-chart-bar",
                 "data-lah-bar": bar.key,
                 "data-empty": bar.value === 0 || undefined,
-                "aria-pressed": i3 === at2,
+                "aria-pressed": i3 === at4,
                 "aria-label": bar.words,
                 title: bar.words,
                 onClick: () => setPicked(bar.key),
@@ -71076,29 +71215,29 @@ function Chart(props) {
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      row ? /* @__PURE__ */ u3("div", {
+      row3 ? /* @__PURE__ */ u3("div", {
         class: "lah-chart-day",
         children: [
           /* @__PURE__ */ u3(IconButton2, {
             icon: "chevron-left",
             label: "Show the day before",
-            disabled: at2 <= 0,
+            disabled: at4 <= 0,
             onClick: () => step(-1)
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("p", {
             role: "status",
-            "data-lah-day": row.key,
+            "data-lah-day": row3.key,
             children: [
               /* @__PURE__ */ u3("strong", {
-                children: dayWords2(row.key)
+                children: dayWords2(row3.key)
               }, undefined, false, undefined, this),
-              rowWords3(row)
+              rowWords3(row3)
             ]
           }, undefined, true, undefined, this),
           /* @__PURE__ */ u3(IconButton2, {
             icon: "chevron-right",
             label: "Show the day after",
-            disabled: at2 >= days.length - 1,
+            disabled: at4 >= days.length - 1,
             onClick: () => step(1)
           }, undefined, false, undefined, this)
         ]
@@ -71107,7 +71246,7 @@ function Chart(props) {
   }, undefined, true, undefined, this);
 }
 function SpendTable(props) {
-  const label = props.label ?? ((row) => row.label);
+  const label = props.label ?? ((row3) => row3.label);
   return /* @__PURE__ */ u3("table", {
     class: "lah-tbl",
     role: "table",
@@ -71154,42 +71293,42 @@ function SpendTable(props) {
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("tbody", {
         role: "rowgroup",
-        children: props.rows.map((row) => /* @__PURE__ */ u3("tr", {
+        children: props.rows.map((row3) => /* @__PURE__ */ u3("tr", {
           role: "row",
-          "data-lah-row": row.key,
+          "data-lah-row": row3.key,
           children: [
             /* @__PURE__ */ u3("th", {
               role: "rowheader",
               scope: "row",
-              children: label(row)
+              children: label(row3)
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("td", {
               role: "cell",
               "data-label": "Calls",
-              children: count3(row.calls)
+              children: count3(row3.calls)
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("td", {
               role: "cell",
               "data-label": "Tokens in (cached)",
-              children: tokensInWords(row)
+              children: tokensInWords(row3)
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("td", {
               role: "cell",
               "data-label": "Tokens out",
-              children: count3(row.out)
+              children: count3(row3.out)
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("td", {
               role: "cell",
               "data-label": "Cost",
-              children: costCell(row)
+              children: costCell(row3)
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("td", {
               role: "cell",
               "data-label": "Calls with no price",
-              children: count3(row.unpriced)
+              children: count3(row3.unpriced)
             }, undefined, false, undefined, this)
           ]
-        }, row.key, true, undefined, this))
+        }, row3.key, true, undefined, this))
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -71374,7 +71513,7 @@ function SpendPage() {
                     children: /* @__PURE__ */ u3(SpendTable, {
                       name: "Day",
                       rows: [...view.days].reverse(),
-                      label: (row) => dayWords2(row.key)
+                      label: (row3) => dayWords2(row3.key)
                     }, undefined, false, undefined, this)
                   }, undefined, false, undefined, this)
                 ]
@@ -72711,8 +72850,8 @@ function UpkeepPage() {
 
 // node_modules/lumi-ah/src/extension/frontend/pages/workspace-history.tsx
 function VersionText(props) {
-  const { at: at2, row } = props;
-  const { text: text2, failed: failed2, file: file2 } = useFileVersion(at2.chatId, at2.area, at2.path, props.hash);
+  const { at: at4, row: row3 } = props;
+  const { text: text2, failed: failed2, file: file2 } = useFileVersion(at4.chatId, at4.area, at4.path, props.hash);
   const el = T2(null);
   F2(() => revealInScroller2(el.current, "nearest"), [props.hash]);
   A(() => {
@@ -72728,7 +72867,7 @@ function VersionText(props) {
         class: "lah-spread",
         children: [
           /* @__PURE__ */ u3("strong", {
-            children: row ? `The version of ${dateTime(row.version.at)}` : `The version ${props.hash.slice(0, 8)}…`
+            children: row3 ? `The version of ${dateTime(row3.version.at)}` : `The version ${props.hash.slice(0, 8)}…`
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(IconButton2, {
             icon: "close",
@@ -72737,14 +72876,14 @@ function VersionText(props) {
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      row ? /* @__PURE__ */ u3("span", {
+      row3 ? /* @__PURE__ */ u3("span", {
         class: "lah-small lah-muted lah-ws-facts",
         children: [
           /* @__PURE__ */ u3(Who, {
-            by: row.version.by
+            by: row3.version.by
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("span", {
-            children: row.current ? "the file as it stands" : counted2(row.version.chars, "character")
+            children: row3.current ? "the file as it stands" : counted2(row3.version.chars, "character")
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this) : /* @__PURE__ */ u3("p", {
@@ -72783,7 +72922,7 @@ function VersionText(props) {
                 variant: "secondary",
                 children: "Copy"
               }, undefined, false, undefined, this),
-              row?.current ? null : /* @__PURE__ */ u3(Button2, {
+              row3?.current ? null : /* @__PURE__ */ u3(Button2, {
                 icon: "undo",
                 busy: props.busy,
                 onClick: () => props.onRestore(text2, file2.hash),
@@ -72797,9 +72936,9 @@ function VersionText(props) {
   }, undefined, true, undefined, this);
 }
 function Compare(props) {
-  const { at: at2, older, newer } = props;
-  const before = useFileVersion(at2.chatId, at2.area, at2.path, older.version.hash);
-  const after = useFileVersion(at2.chatId, at2.area, at2.path, newer.version.hash);
+  const { at: at4, older, newer } = props;
+  const before = useFileVersion(at4.chatId, at4.area, at4.path, older.version.hash);
+  const after = useFileVersion(at4.chatId, at4.area, at4.path, newer.version.hash);
   const el = T2(null);
   F2(() => revealInScroller2(el.current, "nearest"), [older.key, newer.key]);
   const failed2 = before.failed ?? after.failed;
@@ -72835,7 +72974,7 @@ function Compare(props) {
   }, undefined, true, undefined, this);
 }
 function HistoryView(props) {
-  const { at: at2, versions } = props;
+  const { at: at4, versions } = props;
   const [picks, setPicks] = d2([]);
   const [pressed, setPressed] = d2(null);
   if (versions.status === "none" || versions.status === "reading")
@@ -72880,14 +73019,14 @@ function HistoryView(props) {
           /* @__PURE__ */ u3("ol", {
             class: "lah-ws-versions",
             "aria-label": `The versions of ${props.name}`,
-            children: rows2.map((row) => {
-              const v7 = row.version;
-              const isShown = shownRow === row;
-              const isPicked = picked.includes(row.key);
+            children: rows2.map((row3) => {
+              const v7 = row3.version;
+              const isShown = shownRow === row3;
+              const isPicked = picked.includes(row3.key);
               return /* @__PURE__ */ u3("li", {
                 class: "lah-ws-version",
-                "data-lah-version": row.key,
-                "data-deleted": row.deleted,
+                "data-lah-version": row3.key,
+                "data-deleted": row3.deleted,
                 children: [
                   /* @__PURE__ */ u3("div", {
                     class: "lah-ws-version-text",
@@ -72898,11 +73037,11 @@ function HistoryView(props) {
                           /* @__PURE__ */ u3("span", {
                             children: dateTime(v7.at)
                           }, undefined, false, undefined, this),
-                          row.current ? /* @__PURE__ */ u3(Badge2, {
+                          row3.current ? /* @__PURE__ */ u3(Badge2, {
                             tone: "accent",
                             children: "as it stands"
                           }, undefined, false, undefined, this) : null,
-                          row.deleted ? /* @__PURE__ */ u3(Badge2, {
+                          row3.deleted ? /* @__PURE__ */ u3(Badge2, {
                             tone: "warn",
                             children: "deleted"
                           }, undefined, false, undefined, this) : null
@@ -72914,7 +73053,7 @@ function HistoryView(props) {
                           /* @__PURE__ */ u3(Who, {
                             by: v7.by
                           }, undefined, false, undefined, this),
-                          row.deleted ? null : /* @__PURE__ */ u3("span", {
+                          row3.deleted ? null : /* @__PURE__ */ u3("span", {
                             children: counted2(v7.chars, "character")
                           }, undefined, false, undefined, this),
                           v7.turn !== null ? /* @__PURE__ */ u3("span", {
@@ -72924,7 +73063,7 @@ function HistoryView(props) {
                       }, undefined, true, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
-                  row.deleted || v7.hash === null || props.standing === null ? null : /* @__PURE__ */ u3("div", {
+                  row3.deleted || v7.hash === null || props.standing === null ? null : /* @__PURE__ */ u3("div", {
                     class: "lah-actions",
                     children: [
                       /* @__PURE__ */ u3(Button2, {
@@ -72932,7 +73071,7 @@ function HistoryView(props) {
                         pressed: isShown,
                         label: isShown ? `Close the version of ${dateTime(v7.at)}` : `Read the version of ${dateTime(v7.at)}`,
                         onClick: () => {
-                          setPressed(row.key);
+                          setPressed(row3.key);
                           props.onShow(isShown ? null : v7.hash);
                         },
                         children: isShown ? "Shown" : "Read"
@@ -72941,13 +73080,13 @@ function HistoryView(props) {
                         icon: isPicked ? "check" : "compare",
                         pressed: isPicked,
                         label: isPicked ? `Don't compare the version of ${dateTime(v7.at)}` : `Compare the version of ${dateTime(v7.at)}`,
-                        onClick: () => setPicks(pickVersion(picked, row.key)),
+                        onClick: () => setPicks(pickVersion(picked, row3.key)),
                         children: isPicked ? "Picked" : "Compare"
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this)
                 ]
-              }, row.key, true, undefined, this);
+              }, row3.key, true, undefined, this);
             })
           }, undefined, false, undefined, this),
           picked.length === 1 ? /* @__PURE__ */ u3("p", {
@@ -72957,13 +73096,13 @@ function HistoryView(props) {
         ]
       }, undefined, true, undefined, this),
       pair ? /* @__PURE__ */ u3(Compare, {
-        at: at2,
+        at: at4,
         older: pair.older,
         newer: pair.newer,
         onClose: () => setPicks([])
       }, undefined, false, undefined, this) : null,
       props.shown !== null ? /* @__PURE__ */ u3(VersionText, {
-        at: at2,
+        at: at4,
         hash: props.shown,
         row: shownRow,
         busy: props.busy,
@@ -73040,13 +73179,13 @@ function FilePane(props) {
   A(() => {
     if (view === null)
       return;
-    const row = view.files.find((f3) => f3.path === path2) ?? null;
+    const row3 = view.files.find((f3) => f3.path === path2) ?? null;
     if (read.status === "ready") {
-      if (row === null || row.hash !== read.file.hash)
+      if (row3 === null || row3.hash !== read.file.hash)
         readFile();
-      else if (row !== read.file)
-        setRead({ ...read, file: row });
-    } else if (read.status === "gone" && row !== null)
+      else if (row3 !== read.file)
+        setRead({ ...read, file: row3 });
+    } else if (read.status === "gone" && row3 !== null)
       readFile();
   }, [view]);
   A(() => {
@@ -73465,10 +73604,10 @@ function FilePane(props) {
 // node_modules/lumi-ah/src/extension/frontend/pages/workspace-panes.tsx
 var CHANGE_TONE = { added: "pos", changed: "accent", removed: "neg", moved: "neutral" };
 function ChangeDiff(props) {
-  const { chatId, row } = props;
-  const moved2 = row.kind === "moved";
-  const before = useFileVersion(chatId, row.area, row.path, moved2 ? null : row.before);
-  const after = useFileVersion(chatId, row.area, row.path, moved2 ? null : row.after);
+  const { chatId, row: row3 } = props;
+  const moved2 = row3.kind === "moved";
+  const before = useFileVersion(chatId, row3.area, row3.path, moved2 ? null : row3.before);
+  const after = useFileVersion(chatId, row3.area, row3.path, moved2 ? null : row3.after);
   if (moved2)
     return /* @__PURE__ */ u3("p", {
       class: "lah-lead lah-small",
@@ -73479,7 +73618,7 @@ function ChangeDiff(props) {
     return /* @__PURE__ */ u3(Problem, {
       children: `Its versions couldn't be read: ${failed2}`
     }, undefined, false, undefined, this);
-  if (row.before !== null && before.text === null || row.after !== null && after.text === null)
+  if (row3.before !== null && before.text === null || row3.after !== null && after.text === null)
     return /* @__PURE__ */ u3("p", {
       class: "lah-lead lah-small",
       children: "Reading its versions…"
@@ -73487,7 +73626,7 @@ function ChangeDiff(props) {
   return /* @__PURE__ */ u3(DiffView, {
     before: before.text ?? "",
     after: after.text ?? "",
-    label: `What changed in ${fullPath(row.area, row.path)}`
+    label: `What changed in ${fullPath(row3.area, row3.path)}`
   }, undefined, false, undefined, this);
 }
 function ChangesPane(props) {
@@ -73552,24 +73691,24 @@ function ChangesPane(props) {
           /* @__PURE__ */ u3("ol", {
             class: "lah-ws-changes",
             "aria-label": "The files the reply changed",
-            children: rows2.map((row) => {
-              const id = `${row.area}:${row.path}`;
+            children: rows2.map((row3) => {
+              const id = `${row3.area}:${row3.path}`;
               const open = shown.has(id);
-              const name2 = fullPath(row.area, row.path);
+              const name2 = fullPath(row3.area, row3.path);
               return /* @__PURE__ */ u3("li", {
                 class: "lah-ws-change",
-                "data-lah-change": row.kind,
+                "data-lah-change": row3.kind,
                 children: [
                   /* @__PURE__ */ u3("div", {
                     class: "lah-ws-change-head",
                     children: [
                       /* @__PURE__ */ u3(Badge2, {
-                        tone: CHANGE_TONE[row.kind],
-                        children: `${CHANGE_WORDS[row.kind].sign} ${CHANGE_WORDS[row.kind].word}`
+                        tone: CHANGE_TONE[row3.kind],
+                        children: `${CHANGE_WORDS[row3.kind].sign} ${CHANGE_WORDS[row3.kind].word}`
                       }, undefined, false, undefined, this),
                       /* @__PURE__ */ u3("span", {
                         class: "lah-ws-path",
-                        children: row.from !== null ? `${fullPath(row.area, row.from)} → ${name2}` : name2
+                        children: row3.from !== null ? `${fullPath(row3.area, row3.from)} → ${name2}` : name2
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
@@ -73580,7 +73719,7 @@ function ChangesPane(props) {
                         children: "by"
                       }, undefined, false, undefined, this),
                       /* @__PURE__ */ u3(Who, {
-                        by: row.by
+                        by: row3.by
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
@@ -73595,16 +73734,16 @@ function ChangesPane(props) {
                         children: open ? "Hide the diff" : "Show the diff"
                       }, undefined, false, undefined, this),
                       /* @__PURE__ */ u3(Button2, {
-                        icon: row.kind === "removed" ? "history" : "file",
-                        label: row.kind === "removed" ? `Open the history of ${name2}` : `Open ${name2}`,
-                        onClick: () => props.onOpen({ area: row.area, path: row.path, hash: row.after ?? row.before }),
-                        children: row.kind === "removed" ? "Open its history" : "Open the file"
+                        icon: row3.kind === "removed" ? "history" : "file",
+                        label: row3.kind === "removed" ? `Open the history of ${name2}` : `Open ${name2}`,
+                        onClick: () => props.onOpen({ area: row3.area, path: row3.path, hash: row3.after ?? row3.before }),
+                        children: row3.kind === "removed" ? "Open its history" : "Open the file"
                       }, undefined, false, undefined, this)
                     ]
                   }, undefined, true, undefined, this),
                   open ? /* @__PURE__ */ u3(ChangeDiff, {
                     chatId,
-                    row
+                    row: row3
                   }, undefined, false, undefined, this) : null
                 ]
               }, id, true, undefined, this);
@@ -74074,10 +74213,10 @@ function WorkspacePage() {
               }, undefined, false, undefined, this) : /* @__PURE__ */ u3("nav", {
                 class: "lah-navlist lah-ws-tree",
                 "aria-label": `The files of the area ${AREA_WORDS[area].sign}`,
-                children: rows2.map((row) => {
-                  const depth = `--lah-ws-depth:${row.node.depth}`;
-                  if (row.kind === "folder") {
-                    const facts = `${counted2(row.node.files, "file")} · ${counted2(row.node.chars, "character")}`;
+                children: rows2.map((row3) => {
+                  const depth = `--lah-ws-depth:${row3.node.depth}`;
+                  if (row3.kind === "folder") {
+                    const facts = `${counted2(row3.node.files, "file")} · ${counted2(row3.node.chars, "character")}`;
                     return filtering ? /* @__PURE__ */ u3("div", {
                       class: "lah-navrow",
                       "data-kind": "folder",
@@ -74092,7 +74231,7 @@ function WorkspacePage() {
                           children: [
                             /* @__PURE__ */ u3("span", {
                               class: "lah-navrow-title lah-ws-path",
-                              children: `${row.node.name}/`
+                              children: `${row3.node.name}/`
                             }, undefined, false, undefined, this),
                             /* @__PURE__ */ u3("span", {
                               class: "lah-navrow-sub lah-num",
@@ -74101,17 +74240,17 @@ function WorkspacePage() {
                           ]
                         }, undefined, true, undefined, this)
                       ]
-                    }, `d:${row.node.path}`, true, undefined, this) : /* @__PURE__ */ u3("button", {
+                    }, `d:${row3.node.path}`, true, undefined, this) : /* @__PURE__ */ u3("button", {
                       type: "button",
                       class: "lah-navrow",
                       "data-kind": "folder",
-                      "data-lah-folder": row.node.path,
+                      "data-lah-folder": row3.node.path,
                       style: depth,
-                      "aria-expanded": row.open,
-                      onClick: () => toggleFolder(row.node.path),
+                      "aria-expanded": row3.open,
+                      onClick: () => toggleFolder(row3.node.path),
                       children: [
                         /* @__PURE__ */ u3(Icon2, {
-                          name: row.open ? "chevron-down" : "chevron-right",
+                          name: row3.open ? "chevron-down" : "chevron-right",
                           size: 16
                         }, undefined, false, undefined, this),
                         /* @__PURE__ */ u3("span", {
@@ -74119,7 +74258,7 @@ function WorkspacePage() {
                           children: [
                             /* @__PURE__ */ u3("span", {
                               class: "lah-navrow-title lah-ws-path",
-                              children: `${row.node.name}/`
+                              children: `${row3.node.name}/`
                             }, undefined, false, undefined, this),
                             /* @__PURE__ */ u3("span", {
                               class: "lah-navrow-sub lah-num",
@@ -74128,10 +74267,10 @@ function WorkspacePage() {
                           ]
                         }, undefined, true, undefined, this)
                       ]
-                    }, `d:${row.node.path}`, true, undefined, this);
+                    }, `d:${row3.node.path}`, true, undefined, this);
                   }
-                  const { path: path2 } = row.node;
-                  const mark = pinMark(row.node.file);
+                  const { path: path2 } = row3.node;
+                  const mark = pinMark(row3.node.file);
                   const draft2 = drafts.get(draftKey(chatId, area, path2));
                   const unsaved = draft2 !== undefined && isDirty(draft2);
                   return /* @__PURE__ */ u3("button", {
@@ -74152,11 +74291,11 @@ function WorkspacePage() {
                         children: [
                           /* @__PURE__ */ u3("span", {
                             class: "lah-navrow-title lah-ws-path",
-                            children: row.node.name
+                            children: row3.node.name
                           }, undefined, false, undefined, this),
                           /* @__PURE__ */ u3("span", {
                             class: "lah-navrow-sub lah-num",
-                            children: fileFacts(row.node.file, now)
+                            children: fileFacts(row3.node.file, now)
                           }, undefined, false, undefined, this)
                         ]
                       }, undefined, true, undefined, this),
@@ -75537,14 +75676,14 @@ function FileEditor(props) {
 
 // src/frontend/story/files.ts
 var MIND_FILE_LABEL = {
-  core: { title: "Who they are", note: "Their heart and history. The author writes it, and so can you." },
-  now: { title: "Right now", note: "Where they are and what fills their mind at this moment." },
-  memory: { title: "Memory", note: "What they remember, in their own words." },
-  beliefs: { title: "Beliefs", note: "What they hold true, rightly or not." },
-  people: { title: "People", note: "How they see the people in their life." },
-  plans: { title: "Plans", note: "What they mean to do." },
-  outline: { title: "Their past in outline", note: "What they know only in outline of a past they didn't relive." },
-  profile: { title: "Profile", note: "All a supporting character has: the author keeps it short." }
+  core: { title: MIND_FILE_TITLES.core, note: "Their heart and history. The author writes it, and so can you." },
+  now: { title: MIND_FILE_TITLES.now, note: "Where they are and what fills their mind at this moment." },
+  memory: { title: MIND_FILE_TITLES.memory, note: "What they remember, in their own words." },
+  beliefs: { title: MIND_FILE_TITLES.beliefs, note: "What they hold true, rightly or not." },
+  people: { title: MIND_FILE_TITLES.people, note: "How they see the people in their life." },
+  plans: { title: MIND_FILE_TITLES.plans, note: "What they mean to do." },
+  outline: { title: MIND_FILE_TITLES.outline, note: "What they know only in outline of a past they didn't relive." },
+  profile: { title: MIND_FILE_TITLES.profile, note: "All a supporting character has: the author keeps it short." }
 };
 function mindEntries(folder, files, principal) {
   const inFolder = files.filter((f3) => f3.path.startsWith(folder));
@@ -75622,8 +75761,8 @@ function andList3(items) {
     return items[0] ?? "";
   return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }
-function agoText(at2, now = Date.now()) {
-  const minutes2 = Math.floor(Math.max(0, now - at2) / 60000);
+function agoText(at4, now = Date.now()) {
+  const minutes2 = Math.floor(Math.max(0, now - at4) / 60000);
   if (minutes2 < 1)
     return "just now";
   if (minutes2 < 60)
@@ -75634,7 +75773,7 @@ function agoText(at2, now = Date.now()) {
   const days = Math.round(hours / 24);
   if (days < 7)
     return days === 1 ? "yesterday" : `${days} days ago`;
-  return `on ${new Date(at2).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
+  return `on ${new Date(at4).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
 }
 var STANDING_WORDS = {
   principal: { label: "Principal", plural: "Principals", help: "Has an agent and a mind of their own: they decide what they do, from what reached them." },
@@ -75647,8 +75786,8 @@ function castGroups(cast) {
   const groups = ["principal", "supporting", "extra"].map((standing2) => ({ standing: standing2, rows: others.filter((c3) => c3.standing === standing2) })).filter((g2) => g2.rows.length > 0);
   return { you, groups };
 }
-function castLine(row) {
-  const parts = [row.entity === "player" ? "Your character" : STANDING_WORDS[row.standing].label, row.pinned ? "pinned by you" : null, row.waiting > 0 ? `${row.waiting} ${row.waiting === 1 ? "beat" : "beats"} not taken in yet` : null];
+function castLine(row3) {
+  const parts = [row3.entity === "player" ? "Your character" : STANDING_WORDS[row3.standing].label, row3.pinned ? "pinned by you" : null, row3.waiting > 0 ? `${row3.waiting} ${row3.waiting === 1 ? "beat" : "beats"} not taken in yet` : null];
   return parts.filter((p3) => p3 !== null).join(" · ");
 }
 var KIND_WORDS2 = { say: "said", do: "did", happen: "happened", inner: "thought" };
@@ -76011,7 +76150,7 @@ function CastPage(props) {
       icon: "hourglass",
       children: "Reading the cast…"
     }, undefined, false, undefined, this);
-  const row = pages.page === null ? undefined : view.cast.find((c3) => c3.entity === pages.page);
+  const row3 = pages.page === null ? undefined : view.cast.find((c3) => c3.entity === pages.page);
   const patch = async (body) => {
     const result = await app.request({ type: "lre.settings.set", patch: body });
     if (result)
@@ -76025,7 +76164,7 @@ function CastPage(props) {
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-stack lre-gm-list",
-        hidden: row !== undefined,
+        hidden: row3 !== undefined,
         children: [
           /* @__PURE__ */ u3("p", {
             class: "lre-story-lead",
@@ -76037,10 +76176,10 @@ function CastPage(props) {
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      row ? /* @__PURE__ */ u3(PersonPage, {
+      row3 ? /* @__PURE__ */ u3(PersonPage, {
         chatId: props.chatId,
         files: props.files,
-        row,
+        row: row3,
         names: view.names,
         models: settings?.settings.story.models ?? null,
         connections,
@@ -76054,7 +76193,7 @@ function CastPage(props) {
 function CastList(props) {
   const { you, groups } = castGroups(props.view.cast);
   const names = props.view.names;
-  const row = (c3) => /* @__PURE__ */ u3(ListRow, {
+  const row3 = (c3) => /* @__PURE__ */ u3(ListRow, {
     id: c3.entity === "player" ? undefined : c3.entity,
     row: c3.entity,
     icon: c3.entity === "player" ? "user" : c3.standing === "principal" ? "sparkle" : c3.standing === "supporting" ? "user" : "users",
@@ -76073,7 +76212,7 @@ function CastList(props) {
         title: "You",
         flush: true,
         children: /* @__PURE__ */ u3(List, {
-          children: row(you)
+          children: row3(you)
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this) : null,
       groups.length === 0 ? /* @__PURE__ */ u3(Empty, {
@@ -76084,7 +76223,7 @@ function CastList(props) {
         title: `${STANDING_WORDS[g2.standing].plural} (${g2.rows.length})`,
         flush: true,
         children: /* @__PURE__ */ u3(List, {
-          children: g2.rows.map(row)
+          children: g2.rows.map(row3)
         }, undefined, false, undefined, this)
       }, g2.standing, false, undefined, this))
     ]
@@ -76092,19 +76231,19 @@ function CastList(props) {
 }
 function PersonPage(props) {
   const app = useApp();
-  const { row, names } = props;
-  const name2 = nameIn2(names, row.entity);
-  const you = row.entity === "player";
-  const thinks = row.mind !== null && (you || row.standing === "principal");
+  const { row: row3, names } = props;
+  const name2 = nameIn2(names, row3.entity);
+  const you = row3.entity === "player";
+  const thinks = row3.mind !== null && (you || row3.standing === "principal");
   const [busy, run] = useBusy();
   const [mind, setMind] = d2(null);
   const [reached, setReached] = d2(null);
   const files = usePages();
   const dirty = T2(false);
   const readMind = async () => {
-    if (row.mind === null)
+    if (row3.mind === null)
       return;
-    const listed5 = await props.files.list(props.chatId, row.mind);
+    const listed5 = await props.files.list(props.chatId, row3.mind);
     setMind("failed" in listed5 ? [] : listed5);
   };
   A(() => {
@@ -76112,10 +76251,10 @@ function PersonPage(props) {
     setReached(null);
     readMind();
     if (thinks)
-      app.request({ type: "lre.story", chatId: props.chatId, op: "reached", entity: row.entity }).then((answer) => setReached(answer?.reached ?? null));
-  }, [row.entity, row.mind]);
+      app.request({ type: "lre.story", chatId: props.chatId, op: "reached", entity: row3.entity }).then((answer) => setReached(answer?.reached ?? null));
+  }, [row3.entity, row3.mind]);
   const pin = (standing2) => run(async () => {
-    const answer = await app.request({ type: "lre.story", chatId: props.chatId, op: "pin", entity: row.entity, standing: standing2 });
+    const answer = await app.request({ type: "lre.story", chatId: props.chatId, op: "pin", entity: row3.entity, standing: standing2 });
     if (answer?.cast)
       props.onCast(answer.cast);
   });
@@ -76126,14 +76265,14 @@ function PersonPage(props) {
     files.back();
   };
   const open = files.page;
-  if (open !== null && row.mind !== null) {
+  if (open !== null && row3.mind !== null) {
     return /* @__PURE__ */ u3("div", {
       ref: files.host.ref,
       class: "lre-gm-pages",
       onKeyDown: files.host.onKeyDown,
       children: /* @__PURE__ */ u3(GmPage, {
         name: "mind-file",
-        title: fileTitle(open, row.mind),
+        title: fileTitle(open, row3.mind),
         subtitle: `${name2}'s mind`,
         backLabel: name2,
         onBack: () => void leaveFile(),
@@ -76141,8 +76280,8 @@ function PersonPage(props) {
           files: props.files,
           chatId: props.chatId,
           path: open,
-          label: `${name2}: ${fileTitle(open, row.mind)}`,
-          note: mindNote(open, row.mind),
+          label: `${name2}: ${fileTitle(open, row3.mind)}`,
+          note: mindNote(open, row3.mind),
           dirty: (d3) => dirty.current = d3,
           onSaved: () => void readMind()
         }, undefined, false, undefined, this)
@@ -76156,7 +76295,7 @@ function PersonPage(props) {
     children: /* @__PURE__ */ u3(GmPage, {
       name: "person",
       title: name2,
-      subtitle: castLine(row),
+      subtitle: castLine(row3),
       backLabel: "Cast",
       onBack: props.onBack,
       children: [
@@ -76164,28 +76303,28 @@ function PersonPage(props) {
           class: "lre-story-note",
           children: "Your character. Their place in the story is yours, so the author doesn't cast them."
         }, undefined, false, undefined, this) : /* @__PURE__ */ u3(StandingSection, {
-          row,
+          row: row3,
           busy,
           pin
         }, undefined, false, undefined, this),
-        row.mind !== null ? /* @__PURE__ */ u3(MindSection, {
-          row,
+        row3.mind !== null ? /* @__PURE__ */ u3(MindSection, {
+          row: row3,
           files: mind,
           onOpen: (path2) => files.open(path2)
         }, undefined, false, undefined, this) : you ? /* @__PURE__ */ u3("p", {
           class: "lre-story-note",
           children: "Your character has a mind only while Sovereign Hand is on and Settings → Story → Minds keeps it."
-        }, undefined, false, undefined, this) : row.standing === "extra" ? /* @__PURE__ */ u3("p", {
+        }, undefined, false, undefined, this) : row3.standing === "extra" ? /* @__PURE__ */ u3("p", {
           class: "lre-story-note",
           children: "An extra has no mind or profile: the author voices them when they're needed. Choose Supporting or Principal above to give them one."
         }, undefined, false, undefined, this) : null,
         thinks ? /* @__PURE__ */ u3(ReachedSection, {
-          row,
+          row: row3,
           reached,
           names
         }, undefined, false, undefined, this) : null,
         thinks ? /* @__PURE__ */ u3(RunsOnSection, {
-          entity: row.entity,
+          entity: row3.entity,
           name: name2,
           models: props.models,
           connections: props.connections,
@@ -76200,26 +76339,26 @@ function mindNote(path2, folder) {
   return id ? MIND_FILE_LABEL[id].note : undefined;
 }
 function StandingSection(props) {
-  const { row } = props;
+  const { row: row3 } = props;
   return /* @__PURE__ */ u3(Section, {
     title: "Standing",
     children: [
       /* @__PURE__ */ u3(Seg, {
         label: "Standing",
-        value: row.standing,
+        value: row3.standing,
         disabled: props.busy,
         options: CAST_STANDINGS.map((s3) => ({ value: s3, label: STANDING_WORDS[s3].label })),
         onChange: (standing2) => props.pin(standing2)
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("p", {
         class: "lre-story-note",
-        children: STANDING_WORDS[row.standing].help
+        children: STANDING_WORDS[row3.standing].help
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("p", {
         class: "lre-story-why",
-        children: row.why !== null ? `Why the author cast them so: ${row.why}` : row.pinned ? "You pinned this standing." : "The author hasn't said why."
+        children: row3.why !== null ? `Why the author cast them so: ${row3.why}` : row3.pinned ? "You pinned this standing." : "The author hasn't said why."
       }, undefined, false, undefined, this),
-      row.pinned ? /* @__PURE__ */ u3("div", {
+      row3.pinned ? /* @__PURE__ */ u3("div", {
         class: "lre-story-actions",
         children: [
           /* @__PURE__ */ u3(Button, {
@@ -76239,8 +76378,8 @@ function StandingSection(props) {
           /* @__PURE__ */ u3(Button, {
             icon: "pin",
             busy: props.busy,
-            onClick: () => props.pin(row.standing),
-            children: `Pin as ${STANDING_WORDS[row.standing].label.toLowerCase()}`
+            onClick: () => props.pin(row3.standing),
+            children: `Pin as ${STANDING_WORDS[row3.standing].label.toLowerCase()}`
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("span", {
             class: "lre-story-note",
@@ -76252,9 +76391,9 @@ function StandingSection(props) {
   }, undefined, true, undefined, this);
 }
 function MindSection(props) {
-  const { row } = props;
-  const folder = row.mind ?? "";
-  const principal = row.entity === "player" || row.standing === "principal";
+  const { row: row3 } = props;
+  const folder = row3.mind ?? "";
+  const principal = row3.entity === "player" || row3.standing === "principal";
   if (props.files === null)
     return /* @__PURE__ */ u3(Empty, {
       icon: "hourglass",
@@ -76276,9 +76415,9 @@ function MindSection(props) {
   }, undefined, false, undefined, this);
 }
 function ReachedSection(props) {
-  const { row, reached } = props;
-  const took = row.digested !== null ? `Their mind took in everything up to ${row.digested.time.text}.` : "Their mind hasn't taken anything in yet.";
-  const waiting = row.waiting > 0 ? ` ${row.waiting} ${row.waiting === 1 ? "beat waits" : "beats wait"} for them to take in after the next reply.` : "";
+  const { row: row3, reached } = props;
+  const took = row3.digested !== null ? `Their mind took in everything up to ${row3.digested.time.text}.` : "Their mind hasn't taken anything in yet.";
+  const waiting = row3.waiting > 0 ? ` ${row3.waiting} ${row3.waiting === 1 ? "beat waits" : "beats wait"} for them to take in after the next reply.` : "";
   return /* @__PURE__ */ u3(Section, {
     title: "What last reached them",
     children: [
@@ -76530,9 +76669,9 @@ function RecordPage(props) {
     }, undefined, false, undefined, this);
   return /* @__PURE__ */ u3(RecordBody, {
     view,
-    onPick: (at2) => props.go({ page: "record", at: at2 }),
+    onPick: (at4) => props.go({ page: "record", at: at4 }),
     onPerson: (entity2) => props.go({ page: "cast", entity: entity2 }),
-    onShow: (at2) => app.host.revealMessage(at2.messageId)
+    onShow: (at4) => app.host.revealMessage(at4.messageId)
   }, undefined, false, undefined, this);
 }
 function replyLabel(reply) {
@@ -76541,8 +76680,8 @@ function replyLabel(reply) {
 }
 function RecordBody(props) {
   const { view } = props;
-  const at2 = view.at;
-  const shown = at2 === null ? -1 : view.replies.findIndex((r3) => r3.messageId === at2.messageId && r3.swipeId === at2.swipeId);
+  const at4 = view.at;
+  const shown = at4 === null ? -1 : view.replies.findIndex((r3) => r3.messageId === at4.messageId && r3.swipeId === at4.swipeId);
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack lre-story-page",
     "data-lre-story-page": "record",
@@ -76582,15 +76721,15 @@ function RecordBody(props) {
               }, undefined, true, undefined, this)
             ]
           }, undefined, true, undefined, this),
-          at2 !== null ? /* @__PURE__ */ u3(Button, {
+          at4 !== null ? /* @__PURE__ */ u3(Button, {
             size: "sm",
             icon: "message",
-            onClick: () => props.onShow(at2),
+            onClick: () => props.onShow(at4),
             children: "Show in the chat"
           }, undefined, false, undefined, this) : null
         ]
       }, undefined, true, undefined, this),
-      at2 === null ? /* @__PURE__ */ u3(Empty, {
+      at4 === null ? /* @__PURE__ */ u3(Empty, {
         icon: "scroll",
         title: "No beats yet",
         children: "Each turn, the author records what happened beat by beat: who did or said what, where and when, and whom it reached. The first beats show here after your next message."
@@ -77626,37 +77765,37 @@ function ExtractionPage(props) {
         title: "Things in the reply",
         children: /* @__PURE__ */ u3("div", {
           class: "lre-set-rows",
-          children: THING_READ_ROWS.map((row) => /* @__PURE__ */ u3("div", {
+          children: THING_READ_ROWS.map((row3) => /* @__PURE__ */ u3("div", {
             class: "lre-set-ext",
-            "data-lre-thing-read": row.key,
+            "data-lre-thing-read": row3.key,
             children: [
               /* @__PURE__ */ u3("div", {
                 class: "lre-set-ext-head",
                 children: /* @__PURE__ */ u3("span", {
                   class: "lre-set-ext-title",
-                  children: row.title
+                  children: row3.title
                 }, undefined, false, undefined, this)
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3(NumberStepper, {
-                label: row.label,
-                value: props.data.settings.thingReads[row.key],
-                min: THING_READ_BOUNDS[row.key][0],
-                max: THING_READ_BOUNDS[row.key][1],
+                label: row3.label,
+                value: props.data.settings.thingReads[row3.key],
+                min: THING_READ_BOUNDS[row3.key][0],
+                max: THING_READ_BOUNDS[row3.key][1],
                 integer: true,
                 disabled: props.busy,
-                onChange: (value) => props.patch({ thingReads: { [row.key]: value } })
+                onChange: (value) => props.patch({ thingReads: { [row3.key]: value } })
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3("span", {
                 class: "lre-small lre-muted",
                 children: [
-                  row.help,
+                  row3.help,
                   " Default ",
-                  THING_READ_DEFAULTS[row.key],
+                  THING_READ_DEFAULTS[row3.key],
                   "."
                 ]
               }, undefined, true, undefined, this)
             ]
-          }, row.key, true, undefined, this))
+          }, row3.key, true, undefined, this))
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Section, {
@@ -78453,21 +78592,21 @@ function QuietTurnsSetting(props) {
 
 // src/frontend/settings/speed.tsx
 function speedRowsOf(group) {
-  return SPEED_ROWS.filter((row) => row.group === group && rowDefault(row) !== undefined);
+  return SPEED_ROWS.filter((row3) => row3.group === group && rowDefault(row3) !== undefined);
 }
 function SpeedControlView(props) {
-  const { row, value, busy } = props;
-  const c3 = row.control;
+  const { row: row3, value, busy } = props;
+  const c3 = row3.control;
   if (c3.kind === "switch")
     return /* @__PURE__ */ u3(HostSwitch, {
-      label: row.label,
+      label: row3.label,
       checked: value === true,
       disabled: busy,
       onChange: (on) => props.set(on)
     }, undefined, false, undefined, this);
   if (c3.kind === "choice")
     return /* @__PURE__ */ u3(Seg, {
-      label: row.label,
+      label: row3.label,
       value: typeof value === "string" ? value : null,
       options: c3.options,
       disabled: busy,
@@ -78475,7 +78614,7 @@ function SpeedControlView(props) {
     }, undefined, false, undefined, this);
   if (c3.kind === "number")
     return /* @__PURE__ */ u3(NumberStepper, {
-      label: `${row.label} (${c3.unit})`,
+      label: `${row3.label} (${c3.unit})`,
       value: typeof value === "number" ? value : null,
       min: c3.min,
       ...c3.max !== undefined ? { max: c3.max } : {},
@@ -78487,13 +78626,13 @@ function SpeedControlView(props) {
   return /* @__PURE__ */ u3(M, {
     children: [
       /* @__PURE__ */ u3(HostSwitch, {
-        label: `${row.label}: ${c3.none.toLowerCase()}`,
+        label: `${row3.label}: ${c3.none.toLowerCase()}`,
         checked: value === "none",
         disabled: busy,
         onChange: (none) => props.set(none ? "none" : c3.onValue)
       }, undefined, false, undefined, this),
       value === "none" ? null : /* @__PURE__ */ u3(NumberStepper, {
-        label: `${row.label} (${c3.unit})`,
+        label: `${row3.label} (${c3.unit})`,
         value: typeof value === "number" ? value : c3.onValue,
         min: c3.min,
         step: c3.step,
@@ -78505,27 +78644,27 @@ function SpeedControlView(props) {
   }, undefined, true, undefined, this);
 }
 function SpeedRowView(props) {
-  const { row, settings, busy } = props;
-  const standard = rowDefault(row);
-  const set = (value) => props.patch(patchAt(row.path, value));
-  const elsewhere = row.page.route.page !== "speed";
+  const { row: row3, settings, busy } = props;
+  const standard = rowDefault(row3);
+  const set = (value) => props.patch(patchAt(row3.path, value));
+  const elsewhere = row3.page.route.page !== "speed";
   return /* @__PURE__ */ u3("div", {
     class: "lre-set-agent-section",
-    "data-lre-agent-section": row.id,
-    "data-lre-speed-row": row.id,
+    "data-lre-agent-section": row3.id,
+    "data-lre-speed-row": row3.id,
     tabIndex: -1,
     children: [
       /* @__PURE__ */ u3(SettingRow, {
-        id: `speed-${row.id}`,
-        label: row.label,
-        bare: row.control.kind === "switch",
-        changed: rowChanged(settings, row),
-        help: row.help,
-        reset: { label: `Reset ${row.label} to its default, ${speedValueText(row, standard)}`, to: speedValueText(row, standard), onClick: () => set(null) },
+        id: `speed-${row3.id}`,
+        label: row3.label,
+        bare: row3.control.kind === "switch",
+        changed: rowChanged(settings, row3),
+        help: row3.help,
+        reset: { label: `Reset ${row3.label} to its default, ${speedValueText(row3, standard)}`, to: speedValueText(row3, standard), onClick: () => set(null) },
         busy,
         children: /* @__PURE__ */ u3(SpeedControlView, {
-          row,
-          value: rowValue(settings, row),
+          row: row3,
+          value: rowValue(settings, row3),
           busy,
           set
         }, undefined, false, undefined, this)
@@ -78534,9 +78673,9 @@ function SpeedRowView(props) {
         size: "sm",
         variant: "ghost",
         iconAfter: "chevron-right",
-        label: `Open ${row.page.label}, where ${row.label} also lives`,
-        onClick: () => props.go(row.page.route),
-        children: `Lives on ${row.page.label}`
+        label: `Open ${row3.page.label}, where ${row3.label} also lives`,
+        onClick: () => props.go(row3.page.route),
+        children: `Lives on ${row3.page.label}`
       }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
@@ -78613,8 +78752,8 @@ function Presets(props) {
   const current2 = currentSpeedPreset(props.settings);
   const pending = picked === null ? null : presetChanges(props.settings, picked);
   const off = PRESET_ROWS.some((id) => {
-    const row = speedRow(id);
-    return row !== undefined && rowDefault(row) !== undefined && rowChanged(props.settings, row);
+    const row3 = speedRow(id);
+    return row3 !== undefined && rowDefault(row3) !== undefined && rowChanged(props.settings, row3);
   });
   return /* @__PURE__ */ u3(Section, {
     title: "Presets",
@@ -78678,7 +78817,7 @@ function SpeedPage(props) {
         title: "Where the last turn's time went",
         children: chatId ? /* @__PURE__ */ u3(LastTurnTime, {
           chatId,
-          onControl: (row) => props.go({ page: "speed", at: row })
+          onControl: (row3) => props.go({ page: "speed", at: row3 })
         }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Empty, {
           icon: "clock",
           children: "Open a chat to see where its last turn's time went."
@@ -78692,13 +78831,13 @@ function SpeedPage(props) {
           children: /* @__PURE__ */ u3("div", {
             class: "lre-set-rows",
             "data-lre-speed-group": group,
-            children: rows2.map((row) => /* @__PURE__ */ u3(SpeedRowView, {
-              row,
+            children: rows2.map((row3) => /* @__PURE__ */ u3(SpeedRowView, {
+              row: row3,
               settings: props.settings,
               busy: props.busy,
               patch: props.patch,
               go: props.go
-            }, row.id, false, undefined, this))
+            }, row3.id, false, undefined, this))
           }, undefined, false, undefined, this)
         }, group, false, undefined, this);
       })
@@ -78761,10 +78900,10 @@ function turnGlance(agents, routes, connections) {
       const route = routeText({ connectionId: agents.main.connectionId, model: agents.main.model, from: agents.main.connectionId === null ? "default" : "role" }, connections);
       return { id: stage, number: 6, label: "Final review", mode: null, rows: agents.finalReview.on ? [{ roles: [MAIN_AGENT_ROLE], route, how: null }] : [], off: agents.finalReview.on ? null : "Off: the narrator gets the prompt as the engine made it" };
     }
-    const at2 = stageOf(stage);
+    const at4 = stageOf(stage);
     const rows2 = [];
     for (const id of ROLE_IDS) {
-      const tasks = ROLE_TASK_ROUTES[id].filter((t3) => t3.stage === at2);
+      const tasks = ROLE_TASK_ROUTES[id].filter((t3) => t3.stage === at4);
       if (tasks.length === 0 || agents.roles[id].run === "off" || id === "curator" && !agents.pipeline.curator)
         continue;
       const places2 = [...new Set(tasks.map((t3) => routeText(taskRoute(routes, id, agents.roles[id], t3), connections)))];
@@ -78777,7 +78916,7 @@ function turnGlance(agents, routes, connections) {
         rows2.push({ roles: [id], route, how });
     }
     const label = STAGE_LABEL[stage];
-    return { id: stage, number: label.number, label: label.label, mode: main ? agents.main.stages[at2] : null, rows: rows2, off: rows2.length === 0 ? "Nothing runs" : null };
+    return { id: stage, number: label.number, label: label.label, mode: main ? agents.main.stages[at4] : null, rows: rows2, off: rows2.length === 0 ? "Nothing runs" : null };
   });
 }
 function TurnGlance(props) {
@@ -78834,11 +78973,11 @@ function TurnGlance(props) {
                     class: "lre-set-glance-row lre-muted",
                     children: s3.off
                   }, undefined, false, undefined, this) : null,
-                  s3.rows.map((row) => /* @__PURE__ */ u3("span", {
+                  s3.rows.map((row3) => /* @__PURE__ */ u3("span", {
                     class: "lre-set-glance-row",
-                    "data-lre-glance-row": row.roles.join(","),
+                    "data-lre-glance-row": row3.roles.join(","),
                     children: [
-                      row.roles.map((role, i3) => /* @__PURE__ */ u3("span", {
+                      row3.roles.map((role, i3) => /* @__PURE__ */ u3("span", {
                         children: [
                           i3 > 0 ? ", " : "",
                           /* @__PURE__ */ u3("button", {
@@ -78851,10 +78990,10 @@ function TurnGlance(props) {
                       }, role, true, undefined, this)),
                       /* @__PURE__ */ u3("span", {
                         class: "lre-set-glance-route",
-                        children: ` · ${row.route}${row.how ? ` · ${row.how}` : ""}`
+                        children: ` · ${row3.route}${row3.how ? ` · ${row3.how}` : ""}`
                       }, undefined, false, undefined, this)
                     ]
-                  }, row.roles.join(","), true, undefined, this))
+                  }, row3.roles.join(","), true, undefined, this))
                 ]
               }, undefined, true, undefined, this)
             ]
@@ -80938,25 +81077,25 @@ function retentionSummary(r3) {
   return `Transcripts: ${kept2.length === 0 ? "all" : kept2.join(", ")} · call texts ${texts} · unused ${count4(r3.unreferencedDays, "day")} · ${sweep}`;
 }
 function RetentionRow(props) {
-  const { row, value } = props;
-  const fallback = RETENTION_DEFAULTS[row.id];
-  const fallbackText = fallback === "none" ? row.none?.word ?? "none" : count4(fallback, row.unit);
+  const { row: row3, value } = props;
+  const fallback = RETENTION_DEFAULTS[row3.id];
+  const fallbackText = fallback === "none" ? row3.none?.word ?? "none" : count4(fallback, row3.unit);
   return /* @__PURE__ */ u3("div", {
     class: "lre-set-ext lre-set-timeout",
-    "data-lre-retention": row.id,
+    "data-lre-retention": row3.id,
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-set-ext-head",
         children: [
           /* @__PURE__ */ u3("span", {
             class: "lre-set-ext-title",
-            children: row.title
+            children: row3.title
           }, undefined, false, undefined, this),
           value === fallback ? null : /* @__PURE__ */ u3(Button, {
             size: "sm",
             variant: "ghost",
             icon: "undo",
-            label: `Reset ${row.title} to its default, ${fallbackText}`,
+            label: `Reset ${row3.title} to its default, ${fallbackText}`,
             disabled: props.busy,
             onClick: () => props.set(null),
             children: "Default"
@@ -80965,18 +81104,18 @@ function RetentionRow(props) {
       }, undefined, true, undefined, this),
       /* @__PURE__ */ u3("span", {
         class: "lre-set-timeout-text",
-        children: row.does
+        children: row3.does
       }, undefined, false, undefined, this),
-      row.none ? /* @__PURE__ */ u3(HostSwitch, {
-        label: `${row.title}: ${row.none.word.toLowerCase()}`,
+      row3.none ? /* @__PURE__ */ u3(HostSwitch, {
+        label: `${row3.title}: ${row3.none.word.toLowerCase()}`,
         checked: value === "none",
         disabled: props.busy,
-        onChange: (none) => props.set(none ? "none" : typeof fallback === "number" ? fallback : row.start ?? row.min)
+        onChange: (none) => props.set(none ? "none" : typeof fallback === "number" ? fallback : row3.start ?? row3.min)
       }, undefined, false, undefined, this) : null,
       value === "none" ? null : /* @__PURE__ */ u3(NumberStepper, {
-        label: `${row.title} (${row.unit}s)`,
+        label: `${row3.title} (${row3.unit}s)`,
         value,
-        min: row.min,
+        min: row3.min,
         integer: true,
         disabled: props.busy,
         onChange: props.set
@@ -80986,8 +81125,8 @@ function RetentionRow(props) {
         children: [
           "Default ",
           fallbackText,
-          row.zero ? `; 0 means ${row.zero}` : "",
-          value === "none" && row.none ? `; ${row.none.word.toLowerCase()}: ${row.none.means}` : "",
+          row3.zero ? `; 0 means ${row3.zero}` : "",
+          value === "none" && row3.none ? `; ${row3.none.word.toLowerCase()}: ${row3.none.means}` : "",
           "."
         ]
       }, undefined, true, undefined, this)
@@ -80998,12 +81137,12 @@ function RetentionPage(props) {
   const set = (id) => (value) => props.patch({ retention: { [id]: value } });
   const rows2 = (defs) => /* @__PURE__ */ u3("div", {
     class: "lre-set-rows",
-    children: defs.map((row) => /* @__PURE__ */ u3(RetentionRow, {
-      row,
-      value: props.retention[row.id],
+    children: defs.map((row3) => /* @__PURE__ */ u3(RetentionRow, {
+      row: row3,
+      value: props.retention[row3.id],
       busy: props.busy,
-      set: set(row.id)
-    }, row.id, false, undefined, this))
+      set: set(row3.id)
+    }, row3.id, false, undefined, this))
   }, undefined, false, undefined, this);
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
@@ -81581,7 +81720,7 @@ function findTexts(query, filter, prompts) {
   const terms = query.toLowerCase().split(/\s+/).filter((t3) => t3 !== "");
   const phrase = terms.join(" ");
   const found = [];
-  for (const [at2, def2] of PROMPTS.entries()) {
+  for (const [at4, def2] of PROMPTS.entries()) {
     const own2 = hasOwn(prompts.texts, def2.id) ? prompts.texts[def2.id] : undefined;
     if (filter === "yours" && own2 === undefined)
       continue;
@@ -81602,7 +81741,7 @@ function findTexts(query, filter, prompts) {
     }
     if (score < 0)
       continue;
-    found.push({ def: def2, score: terms.length > 1 && hay.label.includes(phrase) ? score + 200 : score, at: at2 });
+    found.push({ def: def2, score: terms.length > 1 && hay.label.includes(phrase) ? score + 200 : score, at: at4 });
   }
   return found.sort((x2, y3) => y3.score - x2.score || x2.at - y3.at).map((f3) => f3.def);
 }
@@ -81940,9 +82079,9 @@ function PromptsPage(props) {
       back?.focus({ preventScroll: true });
       revealInScroller(back?.closest("[data-lre-prompt-page]") ?? null, "start");
     } else if (left.current !== null) {
-      const row = el.querySelector(`[data-lre-row="${left.current}"] button`);
-      row?.focus({ preventScroll: true });
-      revealInScroller(row ?? null, "nearest");
+      const row3 = el.querySelector(`[data-lre-row="${left.current}"] button`);
+      row3?.focus({ preventScroll: true });
+      revealInScroller(row3 ?? null, "nearest");
       left.current = null;
     }
   }, [pageId]);
@@ -82035,13 +82174,13 @@ var CHECK_WORDS = {
 };
 var DIRECT_LINE_WORDS = { own: "Their own", narrated: "The narrator's" };
 var NARRATION_WORDS = {
-  revisions: { label: "Revisions", help: "How many times the narrator may draft a passage again when the check finds a fault. Each revision is one more draft and one more check.", unit: "revisions", step: 1 },
-  changes: { label: "Changes a check may ask", help: "The most changes one check may ask of a draft.", unit: "changes", step: 1 },
-  changeChars: { label: "Longest change", help: "How long each change a check asks for may be.", unit: "characters", step: 50 },
-  replyChars: { label: "The reply so far", help: "How much of the end of the reply so far the narrator is given, so the next passage carries on from it. 0: none.", unit: "characters", step: 250 },
-  recentChars: { label: "The chat's recent prose", help: "How much of the chat's prose before this turn the narrator is given, to keep its voice. 0: none.", unit: "characters", step: 500 },
-  passageChars: { label: "Longest passage", help: "The longest passage the narrator may draft at once.", unit: "characters", step: 500 },
-  ownChars: { label: "Released unchecked", help: "How much the author may release in its own words with no check, such as a line for an extra or an answer out of character. 0: nothing.", unit: "characters", step: 100 }
+  revisions: { help: "How many times the narrator may draft a passage again when the check finds a fault. Each revision is one more draft and one more check.", unit: "revisions", step: 1 },
+  changes: { help: "The most changes one check may ask of a draft.", unit: "changes", step: 1 },
+  changeChars: { help: "How long each change a check asks for may be.", unit: "characters", step: 50 },
+  replyChars: { help: "How much of the end of the reply so far the narrator is given, so the next passage carries on from it. 0: none.", unit: "characters", step: 250 },
+  recentChars: { help: "How much of the chat's prose before this turn the narrator is given, to keep its voice. 0: none.", unit: "characters", step: 500 },
+  passageChars: { help: "The longest passage the narrator may draft at once.", unit: "characters", step: 500 },
+  ownChars: { help: "How much the author may release in its own words with no check, such as a line for an extra or an answer out of character. 0: nothing.", unit: "characters", step: 100 }
 };
 function narrationSummary(n6) {
   return n6.check === "none" ? CHECK_WORDS.none.summary : `${CHECK_WORDS[n6.check].summary} · ${n6.revisions} ${n6.revisions === 1 ? "revision" : "revisions"}`;
@@ -82050,32 +82189,32 @@ function narrationChanged(n6) {
   return Object.keys(NARRATION_DEFAULTS).filter((key) => n6[key] !== NARRATION_DEFAULTS[key]).length;
 }
 var LIMIT_WORDS = {
-  beatChars: { label: "A beat's text", help: "What a beat says happened, what anyone there could tell of it, and what someone got of it.", unit: "characters" },
-  quoteChars: { label: "One quote", help: "Each quote of words spoken in a beat.", unit: "characters" },
-  quotes: { label: "Quotes in a beat", help: "How many quotes one beat holds.", unit: "quotes" },
-  people: { label: "People in a beat", help: "People one beat is addressed to or reached, or one draft names.", unit: "people" },
-  beatsPerTurn: { label: "Beats in a turn", help: "Beats one turn's record holds, with what its jobs write after the reply.", unit: "beats" },
-  draftChars: { label: "A draft's text", help: "What a draft kept for later says, and its notes.", unit: "characters" },
-  draftsPerTurn: { label: "Drafts in a turn", help: "Drafts one turn's record opens, with its jobs'.", unit: "drafts" },
-  whyChars: { label: "A reason", help: "Why someone is cast as they are, or why a beat is struck.", unit: "characters" },
-  beatsRead: { label: "Beats in one read", help: "Beats the author or the game master reads of the record at once.", unit: "beats" },
-  feedItems: { label: "Beats taken in at once", help: "Beats one character's agent is given of what reached them, at once.", unit: "beats" },
-  openingChars: { label: "The moment, as a turn begins", help: "What the author is told of the moment before it acts: the time, the place, who is there, the last beats and the quests. The oldest beats go first when it is longer.", unit: "characters" }
+  beatChars: { help: "What a beat says happened, what anyone there could tell of it, and what someone got of it.", unit: "characters" },
+  quoteChars: { help: "Each quote of words spoken in a beat.", unit: "characters" },
+  quotes: { help: "How many quotes one beat holds.", unit: "quotes" },
+  people: { help: "People one beat is addressed to or reached, or one draft names.", unit: "people" },
+  beatsPerTurn: { help: "Beats one turn's record holds, with what its jobs write after the reply.", unit: "beats" },
+  draftChars: { help: "What a draft kept for later says, and its notes.", unit: "characters" },
+  draftsPerTurn: { help: "Drafts one turn's record opens, with its jobs'.", unit: "drafts" },
+  whyChars: { help: "Why someone is cast as they are, or why a beat is struck.", unit: "characters" },
+  beatsRead: { help: "Beats the author or the game master reads of the record at once.", unit: "beats" },
+  feedItems: { help: "Beats one character's agent is given of what reached them, at once.", unit: "beats" },
+  openingChars: { help: "What the author is told of the moment before it acts: the time, the place, who is there, the last beats and the quests. The oldest beats go first when it is longer.", unit: "characters" }
 };
 var PREPARE_WORDS = {
-  stretchMessages: { label: "Messages in a stretch", help: "The most messages one run of the historian reads. A longer stretch of the chat is planned as several.", unit: "messages", step: 5 },
-  askAboveTokens: { label: "Ask first above", help: "A plan reckoned to cost more than this in all, the author's own work included, waits for your word before anything is relived. 0: every plan waits.", unit: "tokens", step: 1e4 },
-  reliveAtOnce: { label: "Principals reliving at once", help: "How many principals may have moments to relive at the same time.", unit: "principals", step: 1 },
-  beatsPerStretch: { label: "Beats in a stretch", help: "The most beats the historian records for one stretch.", unit: "beats", step: 5 },
-  readChars: { label: "One read of a stretch", help: "The most of the chat one read of a stretch gives the historian, whole. Larger means fewer reads, so fewer model calls, but each read stays in the historian's prompt and is sent again with every later call. 60,000 characters is about 19,000 tokens. Lower it for a model with a short context; raise it for one with a long context. The historian's prompt stops at its Prompt per call, under Harness → Agents: 160,000 tokens as shipped, for a model that reads 200,000. Set it about 40,000 under what your model reads. At that limit a read is cut to the room left, the historian is told, and it records what it has and ends its run.", unit: "characters", step: 1000 },
-  textChars: { label: "Each text of the plan", help: "What the story is, why a stretch or a principal, what is filled from summaries.", unit: "characters", step: 100 },
-  callTokens: { label: "A model call, before one is measured", help: "Every call of the preparation sends its agent's whole prompt again, so a plan is reckoned at its calls times what one weighs. That weight is measured from the preparation's own calls, or from this chat's last author run; until either is known, it is this.", unit: "tokens", step: 5000 },
-  surveyChars: { label: "One answer of the survey", help: "The most one answer gives the author, whole, when it surveys the story: the summaries' own text and the lore's, the rest named with how to read it. Larger means fewer answers, so fewer model calls, but each answer stays in the author's prompt and is sent again with every later call. 60,000 characters is about 19,000 tokens. Lower it for a model with a short context; raise it for one with a long context. The author's prompt stops at its Prompt per call, under Harness → Agents: 160,000 tokens as shipped, for a model that reads 200,000. Set it about 40,000 under what your model reads. At that limit an answer is cut to the room left, the author is told, and it writes what it has to its files and ends its run.", unit: "characters", step: 1000 },
-  watchSeconds: { label: "The live view asks every", help: "While a run of the preparation is at work, the view of it on Play → Now asks how it stands this often. It stops asking once nothing runs.", unit: "seconds", step: 1 },
-  watchRuns: { label: "Runs the live view looks through", help: "The most of this chat's latest runs the live view reads each time it asks. Each principal relives in runs of their own, so a long preparation starts many: past this many, its oldest runs aren't shown.", unit: "runs", step: 10 },
-  runMinutes: { label: "Time for one run", help: "How long one run of the preparation may work. When a run ends with work left, the next one starts by itself, as long as the plan has your word, nothing waits for you, you haven't paused or cancelled it, and your cap allows. A run has no token limit of its own: your cap holds what the whole preparation spends.", unit: "minutes", step: 5 },
-  runRounds: { label: "Rounds for one run", help: "How many rounds of tool calls one run of the preparation has: the author's and those of the agents it starts, together. Each agent's own limits in LumiAH still stand.", unit: "rounds", step: 10 },
-  idleRuns: { label: "Runs without progress", help: "When this many runs it started on its own end in a row without moving the preparation forward, it stops carrying on by itself and says why. Carry on starts it again.", unit: "runs", step: 1 }
+  stretchMessages: { label: PREPARE_LABELS.stretchMessages, help: "The most messages one run of the historian reads. A longer stretch of the chat is planned as several.", unit: "messages", step: 5 },
+  askAboveTokens: { label: PREPARE_LABELS.askAboveTokens, help: "A plan reckoned to cost more than this in all, the author's own work included, waits for your word before anything is relived. 0: every plan waits.", unit: "tokens", step: 1e4 },
+  reliveAtOnce: { label: PREPARE_LABELS.reliveAtOnce, help: "How many principals may have moments to relive at the same time.", unit: "principals", step: 1 },
+  beatsPerStretch: { label: PREPARE_LABELS.beatsPerStretch, help: "The most beats the historian records for one stretch.", unit: "beats", step: 5 },
+  readChars: { label: PREPARE_LABELS.readChars, help: "The most of the chat one read of a stretch gives the historian, whole. Larger means fewer reads, so fewer model calls, but each read stays in the historian's prompt and is sent again with every later call. 60,000 characters is about 19,000 tokens. Lower it for a model with a short context; raise it for one with a long context. The historian's prompt stops at its Prompt per call, under Harness → Agents: 160,000 tokens as shipped, for a model that reads 200,000. Set it about 40,000 under what your model reads. At that limit a read is cut to the room left, the historian is told, and it records what it has and ends its run.", unit: "characters", step: 1000 },
+  textChars: { label: PREPARE_LABELS.textChars, help: "What the story is, why a stretch or a principal, what is filled from summaries.", unit: "characters", step: 100 },
+  callTokens: { label: PREPARE_LABELS.callTokens, help: "Every call of the preparation sends its agent's whole prompt again, so a plan is reckoned at its calls times what one weighs. That weight is measured from the preparation's own calls, or from this chat's last author run; until either is known, it is this.", unit: "tokens", step: 5000 },
+  surveyChars: { label: PREPARE_LABELS.surveyChars, help: "The most one answer gives the author, whole, when it surveys the story: the summaries' own text and the lore's, the rest named with how to read it. Larger means fewer answers, so fewer model calls, but each answer stays in the author's prompt and is sent again with every later call. 60,000 characters is about 19,000 tokens. Lower it for a model with a short context; raise it for one with a long context. The author's prompt stops at its Prompt per call, under Harness → Agents: 160,000 tokens as shipped, for a model that reads 200,000. Set it about 40,000 under what your model reads. At that limit an answer is cut to the room left, the author is told, and it writes what it has to its files and ends its run.", unit: "characters", step: 1000 },
+  watchSeconds: { label: PREPARE_LABELS.watchSeconds, help: "While a run of the preparation is at work, the view of it on Play → Now asks how it stands this often. It stops asking once nothing runs.", unit: "seconds", step: 1 },
+  watchRuns: { label: PREPARE_LABELS.watchRuns, help: "The most of this chat's latest runs the live view reads each time it asks. Each principal relives in runs of their own, so a long preparation starts many: past this many, its oldest runs aren't shown.", unit: "runs", step: 10 },
+  runMinutes: { label: PREPARE_LABELS.runMinutes, help: "How long one run of the preparation may work. When a run ends with work left, the next one starts by itself, as long as the plan has your word, nothing waits for you, you haven't paused or cancelled it, and your cap allows. A run has no token limit of its own: your cap holds what the whole preparation spends.", unit: "minutes", step: 5 },
+  runRounds: { label: PREPARE_LABELS.runRounds, help: "How many rounds of tool calls one run of the preparation has: the author's and those of the agents it starts, together. Each agent's own limits in LumiAH still stand.", unit: "rounds", step: 10 },
+  idleRuns: { label: PREPARE_LABELS.idleRuns, help: "When this many runs it started on its own end in a row without moving the preparation forward, it stops carrying on by itself and says why. Carry on starts it again.", unit: "runs", step: 1 }
 };
 function storyChanged(story) {
   const d3 = STORY_DEFAULTS;
@@ -82146,7 +82285,7 @@ function StoryHub(props) {
           }, undefined, false, undefined, this),
           Object.keys(LIMIT_WORDS).map((key) => /* @__PURE__ */ u3(NumberRow, {
             id: `limit-${key}`,
-            label: LIMIT_WORDS[key].label,
+            label: STORY_LIMIT_LABELS[key],
             help: LIMIT_WORDS[key].help,
             unit: LIMIT_WORDS[key].unit,
             value: story.limits[key],
@@ -82220,7 +82359,7 @@ function NarrationPage(props) {
   const set = (fields) => props.patch({ narration: fields });
   const number = (key) => /* @__PURE__ */ u3(NumberRow, {
     id: `narration-${key}`,
-    label: NARRATION_WORDS[key].label,
+    label: NARRATION_LABELS[key],
     help: NARRATION_WORDS[key].help,
     unit: NARRATION_WORDS[key].unit,
     value: n6[key],
@@ -85480,24 +85619,24 @@ function Health(props) {
   }, undefined, false, undefined, this) : null;
 }
 function Fighter(props) {
-  const { row } = props;
-  const side = row.you ? row.name.toLowerCase() === "you" ? null : "You" : row.side === "party" ? "Ally" : "Foe";
+  const { row: row3 } = props;
+  const side = row3.you ? row3.name.toLowerCase() === "you" ? null : "You" : row3.side === "party" ? "Ally" : "Foe";
   return /* @__PURE__ */ u3("div", {
-    class: row.current ? "lre-world-fighter current" : "lre-world-fighter",
+    class: row3.current ? "lre-world-fighter current" : "lre-world-fighter",
     role: "listitem",
-    "aria-current": row.current ? "true" : undefined,
-    "data-lre-fighter": row.id ?? "unseen",
+    "aria-current": row3.current ? "true" : undefined,
+    "data-lre-fighter": row3.id ?? "unseen",
     children: [
       /* @__PURE__ */ u3("span", {
         class: "lre-world-fighter-turn",
-        children: row.current ? /* @__PURE__ */ u3(Icon, {
+        children: row3.current ? /* @__PURE__ */ u3(Icon, {
           name: "play",
           size: 16,
           label: "Their turn"
-        }, undefined, false, undefined, this) : row.init !== null ? /* @__PURE__ */ u3("span", {
+        }, undefined, false, undefined, this) : row3.init !== null ? /* @__PURE__ */ u3("span", {
           class: "lre-world-init",
           title: "Initiative",
-          children: row.init
+          children: row3.init
         }, undefined, false, undefined, this) : null
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("span", {
@@ -85505,23 +85644,23 @@ function Fighter(props) {
         children: [
           /* @__PURE__ */ u3("span", {
             class: "lre-world-fighter-name",
-            children: row.name
+            children: row3.name
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("span", {
             class: "lre-world-badges start",
             children: [
               side ? /* @__PURE__ */ u3(Badge, {
-                tone: row.you ? "accent" : "neutral",
+                tone: row3.you ? "accent" : "neutral",
                 children: side
               }, undefined, false, undefined, this) : null,
-              row.down ? /* @__PURE__ */ u3(Badge, {
+              row3.down ? /* @__PURE__ */ u3(Badge, {
                 tone: "neg",
                 children: "down"
               }, undefined, false, undefined, this) : null,
-              row.out ? /* @__PURE__ */ u3(Badge, {
+              row3.out ? /* @__PURE__ */ u3(Badge, {
                 children: "out of the fight"
               }, undefined, false, undefined, this) : null,
-              row.conditions.map((c3) => /* @__PURE__ */ u3(Badge, {
+              row3.conditions.map((c3) => /* @__PURE__ */ u3(Badge, {
                 tone: "warn",
                 children: c3
               }, c3, false, undefined, this))
@@ -85532,7 +85671,7 @@ function Fighter(props) {
       /* @__PURE__ */ u3("span", {
         class: "lre-world-fighter-hp",
         children: /* @__PURE__ */ u3(Health, {
-          row
+          row: row3
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this)
     ]
@@ -85579,9 +85718,9 @@ function EncounterCard(props) {
             class: "lre-world-fighters",
             role: "list",
             "aria-label": "Turn order",
-            children: view.order.map((row, i3) => /* @__PURE__ */ u3(Fighter, {
-              row
-            }, `${row.id ?? "unseen"}:${i3}`, false, undefined, this))
+            children: view.order.map((row3, i3) => /* @__PURE__ */ u3(Fighter, {
+              row: row3
+            }, `${row3.id ?? "unseen"}:${i3}`, false, undefined, this))
           }, undefined, false, undefined, this),
           !view.gm && view.economy.length > 0 ? /* @__PURE__ */ u3("div", {
             class: "lre-world-budgets",
@@ -85878,7 +86017,7 @@ function CastPanel(props) {
     const tree = parentsOf(facet);
     return facet.values.filter((v7) => view.people.some((p3) => (p3.classes[facet.id] ?? []).some((x2) => withinValue(tree, x2, v7.id)))).map((v7) => ({ id: v7.id, label: v7.label }));
   };
-  const row = (p3) => {
+  const row3 = (p3) => {
     const pending = props.state.pending.some((mark) => mark.entity === p3.id);
     const regard = p3.regard[0];
     const badges = [
@@ -86017,7 +86156,7 @@ function CastPanel(props) {
           }, undefined, false, undefined, this) : undefined,
           flush: true,
           children: /* @__PURE__ */ u3(List, {
-            children: s3.people.map(row)
+            children: s3.people.map(row3)
           }, undefined, false, undefined, this)
         }, undefined, false, undefined, this)
       }, s3.key || "rest", false, undefined, this)),
@@ -86643,13 +86782,13 @@ function CharacterRows(props) {
   }, undefined, false, undefined, this);
 }
 function CharacterPages(props) {
-  const { ctx, row } = props;
+  const { ctx, row: row3 } = props;
   const changes = usePages();
   const [view, setView] = d2(null);
   const [error, setError] = d2(null);
   A(() => {
     let live = true;
-    ctx.send({ type: "lre.routine", chatId: ctx.chatId, op: "day", entity: row.entity, view: "gm" }).then((m2) => {
+    ctx.send({ type: "lre.routine", chatId: ctx.chatId, op: "day", entity: row3.entity, view: "gm" }).then((m2) => {
       if (!live)
         return;
       if (m2.type === "lre.error")
@@ -86662,7 +86801,7 @@ function CharacterPages(props) {
     return () => {
       live = false;
     };
-  }, [ctx.chatId, row.entity, ctx.reloadKey]);
+  }, [ctx.chatId, row3.entity, ctx.reloadKey]);
   const change = changes.page;
   const block = change?.kind === "block" && change.id !== null ? view?.blocks.find((b3) => b3.block.id === change.id) : undefined;
   const schedule = change?.kind === "schedule" ? view?.schedules.find((s3) => s3.schedule === change.id) : undefined;
@@ -86680,7 +86819,7 @@ function CharacterPages(props) {
       return;
     root.querySelector(".lre-page-header button")?.focus();
   }, [change]);
-  const binding = view ? bindingOf(view.follow.role, view.follow.mode, view.planned) : row.binding;
+  const binding = view ? bindingOf(view.follow.role, view.follow.mode, view.planned) : row3.binding;
   return /* @__PURE__ */ u3("div", {
     ref: changes.host.ref,
     class: "lre-gm-page lre-gm-pages lre-gm-routines-pages",
@@ -86691,20 +86830,20 @@ function CharacterPages(props) {
         hidden: change !== null,
         children: /* @__PURE__ */ u3(GmPage, {
           name: "routine",
-          title: row.name,
+          title: row3.name,
           subtitle: /* @__PURE__ */ u3(M, {
             children: [
-              TIER_LABEL[row.tier],
+              TIER_LABEL[row3.tier],
               " · ",
               BINDING_LABEL[binding],
               /* @__PURE__ */ u3(IdText, {
-                id: row.entity
+                id: row3.entity
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this),
           backLabel: "Routines",
           actions: /* @__PURE__ */ u3(SheetLink, {
-            entity: row.entity
+            entity: row3.entity
           }, undefined, false, undefined, this),
           onBack: props.onBack,
           children: [
@@ -87721,7 +87860,7 @@ function withToggle(config, feature, state) {
 }
 function regionChoices(world) {
   const rows2 = world.tables["economy.regions"]?.rows ?? {};
-  const choices = Object.entries(rows2).map(([id, row]) => ({ value: id, label: typeof row.name === "string" && row.name !== "" ? row.name : id, national: row.scope === "national" }));
+  const choices = Object.entries(rows2).map(([id, row3]) => ({ value: id, label: typeof row3.name === "string" && row3.name !== "" ? row3.name : id, national: row3.scope === "national" }));
   choices.sort((a3, b3) => Number(b3.national) - Number(a3.national) || a3.label.localeCompare(b3.label));
   return choices.map(({ value, label }) => ({ value, label }));
 }
@@ -87749,7 +87888,7 @@ function withTax(config, key, value) {
 }
 function exemptChoices(world, exempt) {
   const rows2 = world.tables["economy.categories"]?.rows ?? {};
-  const known = Object.entries(rows2).map(([id, row]) => ({ value: id, label: typeof row.name === "string" && row.name !== "" ? row.name : id }));
+  const known = Object.entries(rows2).map(([id, row3]) => ({ value: id, label: typeof row3.name === "string" && row3.name !== "" ? row3.name : id }));
   return [...known, ...exempt.filter((c3) => !hasOwn(rows2, c3)).map((c3) => ({ value: c3, label: `${c3} (not in the categories table)` }))];
 }
 var CONFIG = "packs.economy.config";
@@ -88855,7 +88994,7 @@ function PickField(props) {
   }, undefined, true, undefined, this);
 }
 function entriesOf(value) {
-  return Array.isArray(value) ? value.flatMap((item2, at2) => isObject2(item2) ? [{ item: item2, at: at2 }] : []) : [];
+  return Array.isArray(value) ? value.flatMap((item2, at4) => isObject2(item2) ? [{ item: item2, at: at4 }] : []) : [];
 }
 function RecordsField(props) {
   const { p: p3, entries, noun } = props;
@@ -89319,7 +89458,7 @@ function LotsField(p3) {
           value: textOf3(l3.at).slice(0, 10),
           calendar: p3.doc.calendar,
           issues: lintAt(p3.lint, `${path2}.at`),
-          onChange: (at2) => set({ ...l3, at: textOf3(at2) })
+          onChange: (at4) => set({ ...l3, at: textOf3(at4) })
         }, undefined, false, undefined, this)
       ]
     }, undefined, true, undefined, this),
@@ -89475,7 +89614,7 @@ function PayPrefsField(p3) {
   const ways = [...PAY_METHODS.map((m2) => ({ value: m2.value, label: m2.label })), ...mine.map((e3) => ({ value: e3.id, label: e3.name, sublabel: kindIs(p3.doc, e3.kind, "card") ? "Their card" : "Their account" }))];
   const categories = Object.keys(p3.doc.tables["economy.categories"]?.rows ?? {}).sort();
   const currency = p3.doc.currency;
-  const entries = Array.isArray(p3.value) ? p3.value.flatMap((t3, at2) => isObject2(t3) && typeof t3.use === "string" ? [{ item: tierOf2(t3, t3.use), at: at2 }] : []) : [];
+  const entries = Array.isArray(p3.value) ? p3.value.flatMap((t3, at4) => isObject2(t3) && typeof t3.use === "string" ? [{ item: tierOf2(t3, t3.use), at: at4 }] : []) : [];
   return /* @__PURE__ */ u3("div", {
     "data-lre-pay-prefs": true,
     children: /* @__PURE__ */ u3(RecordsField, {
@@ -90819,10 +90958,10 @@ function routineStanding(role, held, blockPlace, place2, places2) {
     return "living";
   const parent = new Map(places2.map((p3) => [p3.id, p3.parent]));
   const seen = new Set;
-  for (let at2 = place2;at2 !== null && !seen.has(at2); at2 = parent.get(at2) ?? null) {
-    if (at2 === blockPlace)
+  for (let at4 = place2;at4 !== null && !seen.has(at4); at4 = parent.get(at4) ?? null) {
+    if (at4 === blockPlace)
       return "living";
-    seen.add(at2);
+    seen.add(at4);
   }
   return "elsewhere";
 }
@@ -91171,34 +91310,34 @@ function AddToValue(props) {
   }, undefined, true, undefined, this);
 }
 function SheetRow2(props) {
-  const { row } = props;
-  const meter = row.pool && row.pool.max !== null ? /* @__PURE__ */ u3(Meter, {
-    label: row.label,
-    value: row.pool.current,
-    min: row.pool.min,
-    max: row.pool.max,
+  const { row: row3 } = props;
+  const meter = row3.pool && row3.pool.max !== null ? /* @__PURE__ */ u3(Meter, {
+    label: row3.label,
+    value: row3.pool.current,
+    min: row3.pool.min,
+    max: row3.pool.max,
     showValue: true
-  }, undefined, false, undefined, this) : row.progress && row.progress.next !== null ? /* @__PURE__ */ u3(Meter, {
-    label: `${row.label} ${row.value}`,
-    value: row.progress.xp,
-    min: row.progress.from,
-    max: row.progress.next,
+  }, undefined, false, undefined, this) : row3.progress && row3.progress.next !== null ? /* @__PURE__ */ u3(Meter, {
+    label: `${row3.label} ${row3.value}`,
+    value: row3.progress.xp,
+    min: row3.progress.from,
+    max: row3.progress.next,
     showValue: true
   }, undefined, false, undefined, this) : null;
   if (!meter)
     return /* @__PURE__ */ u3(ActionRow, {
-      title: row.label,
-      subtitle: row.detail,
-      value: row.value
+      title: row3.label,
+      subtitle: row3.detail,
+      value: row3.value
     }, undefined, false, undefined, this);
   return /* @__PURE__ */ u3("div", {
     class: "lre-gm-row lre-gm-meterrow",
     role: "listitem",
     children: [
       meter,
-      row.detail ? /* @__PURE__ */ u3("span", {
+      row3.detail ? /* @__PURE__ */ u3("span", {
         class: "lre-gm-row-sub",
-        children: row.detail
+        children: row3.detail
       }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
@@ -91715,9 +91854,9 @@ function EntityPage(props) {
           title: section.title,
           children: /* @__PURE__ */ u3(ActionRows, {
             label: section.title,
-            children: section.rows.map((row) => /* @__PURE__ */ u3(SheetRow2, {
-              row
-            }, row.label, false, undefined, this))
+            children: section.rows.map((row3) => /* @__PURE__ */ u3(SheetRow2, {
+              row: row3
+            }, row3.label, false, undefined, this))
           }, undefined, false, undefined, this)
         }, section.title, false, undefined, this)),
         /* @__PURE__ */ u3(Placement, {
@@ -91768,7 +91907,7 @@ function EntityPage(props) {
 // src/packs/economy/ui/lines.tsx
 function OwnerRows(props) {
   const roles = OWNER_ROLES.filter((role) => props.owners.some((o4) => o4.role === role));
-  const row = (o4, i3) => /* @__PURE__ */ u3(ListRow, {
+  const row3 = (o4, i3) => /* @__PURE__ */ u3(ListRow, {
     icon: props.icon,
     title: o4.name,
     subtitle: OWNER_ROLE_LABELS[o4.role].one,
@@ -91776,7 +91915,7 @@ function OwnerRows(props) {
   }, o4.party || `someone:${i3}`, false, undefined, this);
   if (roles.length < 2)
     return /* @__PURE__ */ u3(M, {
-      children: props.owners.map(row)
+      children: props.owners.map(row3)
     }, undefined, false, undefined, this);
   return /* @__PURE__ */ u3(M, {
     children: roles.map((role) => /* @__PURE__ */ u3("div", {
@@ -91787,7 +91926,7 @@ function OwnerRows(props) {
           class: "lre-money-owner-role",
           children: OWNER_ROLE_LABELS[role].many
         }, undefined, false, undefined, this),
-        props.owners.map((o4, i3) => o4.role === role ? row(o4, i3) : null)
+        props.owners.map((o4, i3) => o4.role === role ? row3(o4, i3) : null)
       ]
     }, role, true, undefined, this))
   }, undefined, false, undefined, this);
@@ -92544,7 +92683,7 @@ function AccountPage(props) {
       chevron: autopayOpens,
       onClick: autopayOpens ? () => act("autopay") : undefined
     }, "autopay", false, undefined, this) : null
-  ].filter((row) => row !== null);
+  ].filter((row3) => row3 !== null);
   const lines4 = a3.transactions.filter((line3) => line3.accountId === a3.id);
   return /* @__PURE__ */ u3(MoneyPage, {
     nav,
@@ -93811,7 +93950,7 @@ function FlowFormPage(props) {
         label: "At (time of day)",
         type: "time",
         value: form.at,
-        onInput: (at2) => set({ at: at2 })
+        onInput: (at4) => set({ at: at4 })
       }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(Disclosure, {
         summary: "More options",
@@ -93828,7 +93967,7 @@ function FlowFormPage(props) {
                 label: "At (time of day)",
                 type: "time",
                 value: form.at,
-                onInput: (at2) => set({ at: at2 })
+                onInput: (at4) => set({ at: at4 })
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3(TextField3, {
                 label: "Ends",
@@ -94694,8 +94833,8 @@ function NewPropertyPage(props) {
   const cents2 = amountOf(value, controls.currency);
   const taken2 = new Set(controls.gm.entities.flatMap((e3) => e3.kind === "property" && !e3.gone && e3.place !== null ? [e3.place] : []));
   const places2 = controls.gm.places.filter((p3) => !taken2.has(p3.id) || p3.id === place2).sort((a3, b3) => a3.name.localeCompare(b3.name) || a3.id.localeCompare(b3.id));
-  const at2 = places2.find((p3) => p3.id === place2) ?? null;
-  const problem = name2.trim() === "" && at2 === null ? "Give it a name, or pick the place it is." : amountProblem(value, controls.currency, "its value");
+  const at4 = places2.find((p3) => p3.id === place2) ?? null;
+  const problem = name2.trim() === "" && at4 === null ? "Give it a name, or pick the place it is." : amountProblem(value, controls.currency, "its value");
   return /* @__PURE__ */ u3(ActionPage, {
     nav,
     controls,
@@ -94704,7 +94843,7 @@ function NewPropertyPage(props) {
     subtitle: view.name,
     go: "Add the property",
     problem,
-    submit: () => problem !== null || cents2 === null ? Promise.resolve(false) : controls.edit(at2 !== null ? propertyMakeOps(at2.id, { name: name2, value: cents2, owner: view.party }) : propertySpawnOps(newIdFor("prop", name2, new Set(controls.gm.entities.map((e3) => e3.id))), name2.trim(), view.party, cents2)),
+    submit: () => problem !== null || cents2 === null ? Promise.resolve(false) : controls.edit(at4 !== null ? propertyMakeOps(at4.id, { name: name2, value: cents2, owner: view.party }) : propertySpawnOps(newIdFor("prop", name2, new Set(controls.gm.entities.map((e3) => e3.id))), name2.trim(), view.party, cents2)),
     children: [
       /* @__PURE__ */ u3(SelectField, {
         label: "At",
@@ -94714,10 +94853,10 @@ function NewPropertyPage(props) {
         onChange: setPlace
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(TextField3, {
-        label: at2 !== null ? "Name (empty: the place's)" : "Name",
+        label: at4 !== null ? "Name (empty: the place's)" : "Name",
         value: name2,
         onInput: setName,
-        placeholder: at2?.name ?? "The lake cabin"
+        placeholder: at4?.name ?? "The lake cabin"
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(AmountField, {
         label: "Value",
@@ -94727,7 +94866,7 @@ function NewPropertyPage(props) {
         invalid: value.trim() !== "" && cents2 === null
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3(Note, {
-        children: at2 !== null ? `${at2.name} becomes a property, and ${view.name} owns it whole.` : `${view.name} owns it whole.`
+        children: at4 !== null ? `${at4.name} becomes a property, and ${view.name} owns it whole.` : `${view.name} owns it whole.`
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
@@ -99120,15 +99259,15 @@ function AtOnceNotice(props) {
 
 // src/packs/economy/ui/place-part.tsx
 function propertyHereOf(map, money3, place2, claims) {
-  const at2 = mapPlaceOf(map, place2);
+  const at4 = mapPlaceOf(map, place2);
   const view = money3 === undefined || money3 === null ? null : decodeFinanceView(money3);
-  if (!at2?.known || !view || !view.features.includes("property"))
+  if (!at4?.known || !view || !view.features.includes("property"))
     return null;
-  const property2 = at2.property === undefined ? null : view.properties.find((p3) => p3.id === at2.property) ?? null;
+  const property2 = at4.property === undefined ? null : view.properties.find((p3) => p3.id === at4.property) ?? null;
   const make = property2 !== null ? null : claims === null || claims.mode === "real" ? "real" : claims.mode === "ask" ? "ask" : null;
   if (property2 === null && make === null)
     return null;
-  return { place: place2, name: at2.name, mark: at2.mark ?? null, property: property2, party: view.party, buy: property2 !== null && propertyControls(view, property2).includes("buy"), make };
+  return { place: place2, name: at4.name, mark: at4.mark ?? null, property: property2, party: view.party, buy: property2 !== null && propertyControls(view, property2).includes("buy"), make };
 }
 var NEW_PROPERTY = { name: "", value: "", whose: "for_sale", asking: "" };
 var WHOSE_CHOICES = [
@@ -99434,11 +99573,11 @@ function carryTypeChoices(world) {
   const out = [];
   const seen = new Set;
   for (const table of TYPE_TABLES) {
-    for (const [id, row] of Object.entries(world.tables[table.id]?.rows ?? {}).sort(([a3], [b3]) => a3.localeCompare(b3))) {
+    for (const [id, row3] of Object.entries(world.tables[table.id]?.rows ?? {}).sort(([a3], [b3]) => a3.localeCompare(b3))) {
       if (seen.has(id))
         continue;
       seen.add(id);
-      out.push({ value: id, label: typeof row.name === "string" && row.name !== "" ? row.name : id, sublabel: table.label });
+      out.push({ value: id, label: typeof row3.name === "string" && row3.name !== "" ? row3.name : id, sublabel: table.label });
     }
   }
   return out;
@@ -100045,9 +100184,9 @@ function playWhere(input) {
   const placePath = (id) => {
     const out2 = [];
     const seen = new Set;
-    for (let at2 = id === null ? undefined : places2.get(id);at2 && !seen.has(at2.id); at2 = at2.parent === null ? undefined : places2.get(at2.parent)) {
-      seen.add(at2.id);
-      out2.unshift({ id: at2.id, name: at2.name, is: "place" });
+    for (let at4 = id === null ? undefined : places2.get(id);at4 && !seen.has(at4.id); at4 = at4.parent === null ? undefined : places2.get(at4.parent)) {
+      seen.add(at4.id);
+      out2.unshift({ id: at4.id, name: at4.name, is: "place" });
     }
     return out2;
   };
@@ -100111,7 +100250,7 @@ var pageStore = {
     } catch {}
   }
 };
-function moveSuggestions(choices, at2) {
+function moveSuggestions(choices, at4) {
   const byId = new Map(choices.map((c3) => [c3.id, c3]));
   const out = [];
   const seen = new Set;
@@ -100122,11 +100261,11 @@ function moveSuggestions(choices, at2) {
     seen.add(choice2.id);
     out.push({ label, choice: choice2 });
   };
-  for (const id of at2.recent)
+  for (const id of at4.recent)
     add(`Recent: ${byId.get(id)?.name ?? id}`, id);
-  add("On you", at2.pov);
-  add(`Here: ${byId.get(at2.here ?? "")?.name ?? ""}`, at2.here);
-  add(`Home: ${byId.get(at2.home ?? "")?.name ?? ""}`, at2.home);
+  add("On you", at4.pov);
+  add(`Here: ${byId.get(at4.here ?? "")?.name ?? ""}`, at4.here);
+  add(`Home: ${byId.get(at4.home ?? "")?.name ?? ""}`, at4.home);
   return out;
 }
 
@@ -100420,21 +100559,21 @@ function AddThingSheet(props) {
   const [kind, setKind] = d2(props.start?.kind ?? "item");
   const [what, setWhat] = d2(null);
   const [qty, setQty] = d2(1);
-  const [at2, setAt] = d2(props.start?.at ?? null);
+  const [at4, setAt] = d2(props.start?.at ?? null);
   const [choosing, setChoosing] = d2(false);
   const [asking, setAsking] = d2(null);
   const nameId = P2();
   const vehicle = kind === "vehicle";
   const choices = vehicle ? props.choices.filter((c3) => c3.is === "place") : props.choices;
-  const why3 = addBlocked({ name: name2, kind, what, at: at2, blocked: at2 ? props.blocked?.(at2) ?? null : null });
-  const draft2 = why3 === null && at2 !== null ? { name: name2.trim(), kind, what, qty: vehicle ? 1 : qty, at: at2 } : null;
+  const why3 = addBlocked({ name: name2, kind, what, at: at4, blocked: at4 ? props.blocked?.(at4) ?? null : null });
+  const draft2 = why3 === null && at4 !== null ? { name: name2.trim(), kind, what, qty: vehicle ? 1 : qty, at: at4 } : null;
   const pickKind = (next) => {
     if (next === kind)
       return;
     setKind(next);
     setWhat(null);
     setAsking(null);
-    if (next === "vehicle" && at2 !== null && at2.is !== "place")
+    if (next === "vehicle" && at4 !== null && at4.is !== "place")
       setAt(null);
   };
   const pick = (next) => {
@@ -100572,12 +100711,12 @@ function AddThingSheet(props) {
           /* @__PURE__ */ u3(WherePicker, {
             title: "Where is it?",
             choices,
-            value: at2 ? { choice: at2 } : null,
+            value: at4 ? { choice: at4 } : null,
             size: sizeOfWhat(what),
             blocked: props.blocked,
             suggestions: props.suggestions,
             onPick: (next) => setAt(next && "choice" in next ? next.choice : null),
-            action: at2 ? "Change…" : "Pick…",
+            action: at4 ? "Change…" : "Pick…",
             empty: "Not picked yet",
             help: vehicle ? "A place it stands at." : "On you, in something that holds it, or at a place."
           }, undefined, false, undefined, this),
@@ -100679,8 +100818,8 @@ function addAsk(claims, draft2, opts) {
 }
 function playMake(draft2) {
   const what = draft2.what;
-  const at2 = draft2.at.is === "place" ? { place: draft2.at.id } : { in: draft2.at.id };
-  const base = { do: "make", name: draft2.name, at: at2, ...draft2.qty !== 1 ? { qty: draft2.qty } : {} };
+  const at4 = draft2.at.is === "place" ? { place: draft2.at.id } : { in: draft2.at.id };
+  const base = { do: "make", name: draft2.name, at: at4, ...draft2.qty !== 1 ? { qty: draft2.qty } : {} };
   if (what !== null && "vehicle" in what)
     return { ...base, class: what.vehicle.id, details: { make: what.vehicle.make, model: what.vehicle.model, year: what.vehicle.year } };
   if (what !== null && "type" in what)
@@ -101032,15 +101171,15 @@ var ACTION_LABEL = {
 function readies(item2) {
   return item2.category === "weapon" && item2.wearable === true;
 }
-function mainVerb(item2, at2, ctx) {
-  if (at2 === "borrowed")
+function mainVerb(item2, at4, ctx) {
+  if (at4 === "borrowed")
     return "give_back";
-  if (at2 === "lent")
+  if (at4 === "lent")
     return "take_back";
   if (item2.mine !== true)
     return null;
   const worn = ctx.level >= 3 && item2.wearable === true;
-  switch (at2) {
+  switch (at4) {
     case "wearing":
       return readies(item2) ? item2.as === "hand" ? "stow" : "ready" : "take_off";
     case "carried":
@@ -101053,12 +101192,12 @@ function mainVerb(item2, at2, ctx) {
       return null;
   }
 }
-function rowActions(item2, at2, ctx) {
+function rowActions(item2, at4, ctx) {
   if (item2.mine !== true)
     return [];
-  const main = mainVerb(item2, at2, ctx);
-  const onYou = at2 === "wearing" || at2 === "carried";
-  const wearVerbs = ctx.level < 3 || item2.wearable !== true ? [] : at2 === "wearing" ? readies(item2) ? ["stow", "ready", "take_off"] : ["take_off"] : readies(item2) ? ["ready", "wear"] : ["wear"];
+  const main = mainVerb(item2, at4, ctx);
+  const onYou = at4 === "wearing" || at4 === "carried";
+  const wearVerbs = ctx.level < 3 || item2.wearable !== true ? [] : at4 === "wearing" ? readies(item2) ? ["stow", "ready", "take_off"] : ["take_off"] : readies(item2) ? ["ready", "wear"] : ["wear"];
   const all = ["move", ...ctx.canPutIn && onYou ? ["put_in"] : [], "away", ...onYou && ctx.here !== null ? ["drop"] : [], ...wearVerbs, "owner", "rename", "size"];
   return [...new Set(all)].filter((a3) => a3 !== main && !(a3 === "stow" && item2.as !== "hand") && !(a3 === "ready" && item2.as === "hand"));
 }
@@ -101170,28 +101309,28 @@ function itemBadge(item2) {
     }, undefined, false, undefined, this);
   return null;
 }
-function rowSub2(item2, at2) {
+function rowSub2(item2, at4) {
   const whose = item2.whose !== undefined && item2.whose !== "yours" && !item2.lent && !item2.borrowed ? item2.whose : null;
   const how = item2.as ? AS_LABEL[item2.as] : null;
-  const parts = [at2 === "wearing" ? item2.slot ?? null : null, how !== "worn" ? how : null, whose, at2 === "elsewhere" || at2 === "lent" || at2 === "borrowed" ? item2.where ?? null : null, item2.lent ? lentText(item2.lent) : null, item2.borrowed ? borrowedText(item2.borrowed) : null, item2.kit && !item2.kit.complete && item2.kit.missing.length > 0 ? `missing ${item2.kit.missing.join(", ")}` : null];
+  const parts = [at4 === "wearing" ? item2.slot ?? null : null, how !== "worn" ? how : null, whose, at4 === "elsewhere" || at4 === "lent" || at4 === "borrowed" ? item2.where ?? null : null, item2.lent ? lentText(item2.lent) : null, item2.borrowed ? borrowedText(item2.borrowed) : null, item2.kit && !item2.kit.complete && item2.kit.missing.length > 0 ? `missing ${item2.kit.missing.join(", ")}` : null];
   return parts.filter((p3) => p3 !== null && p3 !== "").join(" · ");
 }
 function BelongingsRow(props) {
-  const { item: item2, at: at2, ctx } = props;
+  const { item: item2, at: at4, ctx } = props;
   const children = item2.children ?? [];
   const open = ctx.open.has(item2.id);
-  const main = ctx.picking ? null : mainVerb(item2, at2, ctx);
-  const more = ctx.picking ? [] : rowActions(item2, at2, ctx);
+  const main = ctx.picking ? null : mainVerb(item2, at4, ctx);
+  const more = ctx.picking ? [] : rowActions(item2, at4, ctx);
   const pickable = ctx.picking && item2.mine === true;
   const picked = ctx.picked.has(item2.id);
-  const sub2 = rowSub2(item2, at2);
+  const sub2 = rowSub2(item2, at4);
   const title = item2.qty !== undefined && item2.qty !== 1 ? `${item2.name} ×${item2.qty}` : item2.name;
-  const menu = more.map((action2) => ({ label: ACTION_LABEL[action2], disabled: ctx.busy, onSelect: () => ctx.onAction(action2, item2, at2) }));
+  const menu = more.map((action2) => ({ label: ACTION_LABEL[action2], disabled: ctx.busy, onSelect: () => ctx.onAction(action2, item2, at4) }));
   return /* @__PURE__ */ u3("div", {
     class: picked ? "lre-bel-item picked" : "lre-bel-item",
     role: "listitem",
     "data-lre-bel-row": item2.id,
-    "data-lre-bel-at": at2,
+    "data-lre-bel-at": at4,
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-bel-line",
@@ -101246,7 +101385,7 @@ function BelongingsRow(props) {
             size: "sm",
             variant: "secondary",
             disabled: ctx.busy,
-            onClick: () => ctx.onAction(main, item2, at2),
+            onClick: () => ctx.onAction(main, item2, at4),
             children: ACTION_LABEL[main]
           }, undefined, false, undefined, this) : null,
           menu.length > 0 ? /* @__PURE__ */ u3(OverflowMenu, {
@@ -101256,7 +101395,7 @@ function BelongingsRow(props) {
           }, undefined, false, undefined, this) : null
         ]
       }, undefined, true, undefined, this),
-      item2.load && (at2 === "carried" || at2 === "wearing" || at2 === "home") ? /* @__PURE__ */ u3("div", {
+      item2.load && (at4 === "carried" || at4 === "wearing" || at4 === "home") ? /* @__PURE__ */ u3("div", {
         class: "lre-bel-load",
         style: { "--lre-depth": String(Math.min(props.depth, 4)) },
         children: /* @__PURE__ */ u3(Meter, {
@@ -101272,7 +101411,7 @@ function BelongingsRow(props) {
         "aria-label": `In ${item2.name}`,
         children: children.map((child) => /* @__PURE__ */ u3(BelongingsRow, {
           item: child,
-          at: at2,
+          at: at4,
           depth: props.depth + 1,
           ctx
         }, child.id, false, undefined, this))
@@ -103101,8 +103240,8 @@ function RunCard(props) {
 }
 function placesOf3(gm, place2) {
   const out = [];
-  for (let at2 = place2;at2 !== null && !out.includes(at2) && out.length < 16; at2 = gm.places.find((p3) => p3.id === at2)?.parent ?? null)
-    out.push(at2);
+  for (let at4 = place2;at4 !== null && !out.includes(at4) && out.length < 16; at4 = gm.places.find((p3) => p3.id === at4)?.parent ?? null)
+    out.push(at4);
   return out;
 }
 function PinnedLore(props) {
@@ -103119,7 +103258,7 @@ function PinnedLore(props) {
   const everyMind = (pins?.steps.mind ?? []).map((p3) => ({ ...p3, at: "every mind" }));
   const place2 = props.gm.entities.find((e3) => e3.id === props.who)?.place ?? null;
   const there = placesOf3(props.gm, place2).flatMap((id) => (pins?.places[id] ?? []).map((p3) => ({ ...p3, at: props.gm.places.find((x2) => x2.id === id)?.name ?? id })));
-  const row = (p3) => /* @__PURE__ */ u3(ListRow, {
+  const row3 = (p3) => /* @__PURE__ */ u3(ListRow, {
     icon: "pin",
     title: p3.title,
     subtitle: [p3.at ? `Pinned to ${p3.at}` : "Pinned to them", p3.source].join(" · "),
@@ -103153,7 +103292,7 @@ function PinnedLore(props) {
       class: "lre-gm-minds-none",
       children: "Nothing is pinned to them, to every mind or to where they are. Pins are the world's: Build → Entities or Places, Pinned lore, or the Pinned lore page's Character minds. Commit, then Upgrade this chat, to use them here."
     }, undefined, false, undefined, this) : /* @__PURE__ */ u3(List, {
-      children: [...own2.map((p3) => row(p3)), ...everyMind.map((p3) => row(p3)), ...there.map((p3) => row(p3))]
+      children: [...own2.map((p3) => row3(p3)), ...everyMind.map((p3) => row3(p3)), ...there.map((p3) => row3(p3))]
     }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
 }
@@ -105343,7 +105482,7 @@ function decodeOrgPage(pages, id) {
   const page9 = isRecord(pages) ? decodeOrgView(pages[id]) : null;
   return page9?.id === id ? page9 : null;
 }
-function row(r3) {
+function row3(r3) {
   return typeof r3.id === "string" ? { id: r3.id, name: str(r3.name, r3.id), type: oneOf(r3.type, ORG_TYPES, "group"), kind: str(r3.kind), title: text2(r3.title), figure: text2(r3.figure), under: text2(r3.under), via: isRecord(r3.via) ? link(r3.via) : null } : null;
 }
 function founding(v7, off) {
@@ -105369,9 +105508,9 @@ function decodeOrgList(value) {
   const members = list(party.members, (m2) => typeof m2.id === "string" && isPartyTier(m2.tier) ? { id: m2.id, name: str(m2.name, m2.id), tier: m2.tier, here: m2.here === true } : null);
   return {
     party: { id: party.id, name: str(party.name, "Your party"), exists: party.exists === true, members, hidden: num2(party.hidden), purse: text2(party.purse) },
-    belong: list(value.belong, row),
+    belong: list(value.belong, row3),
     known: list(value.known, (k2) => {
-      const r3 = row(k2);
+      const r3 = row3(k2);
       return r3 ? { ...r3, whom: list(k2.whom, ref) } : null;
     }),
     start: start(value.start)
@@ -105986,8 +106125,8 @@ function treeRows2(nodes, open, depth = 1, parent = null) {
   return nodes.flatMap((n7, i3) => {
     const deep = depth >= CHART_DEPTH && n7.children.length > 0;
     const isOpen = !deep && n7.children.length > 0 && open.has(n7.key);
-    const row2 = { node: n7, depth, parent, setSize: nodes.length, posInSet: i3 + 1, open: isOpen, deep };
-    return [row2, ...isOpen ? treeRows2(n7.children, open, depth + 1, n7.key) : []];
+    const row4 = { node: n7, depth, parent, setSize: nodes.length, posInSet: i3 + 1, open: isOpen, deep };
+    return [row4, ...isOpen ? treeRows2(n7.children, open, depth + 1, n7.key) : []];
   });
 }
 function pathTo(nodes, key) {
@@ -106004,22 +106143,22 @@ function rerooted(nodes, root) {
   if (root === null)
     return { nodes, path: [] };
   const path2 = pathTo(nodes, root);
-  const at2 = path2.at(-1);
-  return at2 ? { nodes: [at2], path: path2 } : { nodes, path: [] };
+  const at4 = path2.at(-1);
+  return at4 ? { nodes: [at4], path: path2 } : { nodes, path: [] };
 }
-function rowPress(row2) {
-  const n7 = row2.node;
+function rowPress(row4) {
+  const n7 = row4.node;
   if (n7.open !== null && n7.actions.length === 0)
     return "open";
   if (n7.actions.length > 0 || n7.open !== null)
     return "menu";
-  if (row2.deep)
+  if (row4.deep)
     return "reroot";
   return n7.children.length > 0 ? "toggle" : null;
 }
-function rowMenu(row2) {
-  const n7 = row2.node;
-  return [...n7.open !== null ? [{ id: "open", label: "Open", icon: "chevron-right", route: n7.open }] : [], ...n7.actions, ...row2.deep ? [{ id: "reroot", label: "Show from here", icon: "branch", reroot: true }] : []];
+function rowMenu(row4) {
+  const n7 = row4.node;
+  return [...n7.open !== null ? [{ id: "open", label: "Open", icon: "chevron-right", route: n7.open }] : [], ...n7.actions, ...row4.deep ? [{ id: "reroot", label: "Show from here", icon: "branch", reroot: true }] : []];
 }
 function reportingParents(positions) {
   const ids = new Set(positions.map((p3) => p3.id));
@@ -106027,15 +106166,15 @@ function reportingParents(positions) {
   const loops = new Set;
   for (const p3 of positions) {
     const seen = [];
-    let at2 = p3.id;
-    while (at2 !== null && !seen.includes(at2)) {
-      seen.push(at2);
-      at2 = parent.get(at2) ?? null;
+    let at4 = p3.id;
+    while (at4 !== null && !seen.includes(at4)) {
+      seen.push(at4);
+      at4 = parent.get(at4) ?? null;
     }
-    if (at2 === null)
+    if (at4 === null)
       continue;
-    const cycle = seen.slice(seen.indexOf(at2));
-    const first = positions.find((q2) => cycle.includes(q2.id))?.id ?? at2;
+    const cycle = seen.slice(seen.indexOf(at4));
+    const first = positions.find((q2) => cycle.includes(q2.id))?.id ?? at4;
     parent.set(first, null);
     loops.add(first);
   }
@@ -106149,13 +106288,13 @@ function mainHolder(above) {
 }
 function controlChain(org, pageOf2) {
   const chain = [{ id: org.id, name: org.name }];
-  let at2 = org;
-  while (at2 && chain.length <= CONTROL_DEPTH2) {
-    const up = mainHolder(at2.above);
+  let at4 = org;
+  while (at4 && chain.length <= CONTROL_DEPTH2) {
+    const up = mainHolder(at4.above);
     if (!up || chain.some((c3) => c3.id === up.id))
       break;
     chain.unshift({ id: up.id, name: up.name });
-    at2 = pageOf2(up.id);
+    at4 = pageOf2(up.id);
   }
   return chain;
 }
@@ -106764,10 +106903,10 @@ function itemOf2(tree, key) {
   return null;
 }
 function TreeItem(props) {
-  const { row: row2, state } = props;
-  const n7 = row2.node;
-  const press = rowPress(row2);
-  const menu = state.menu === n7.key ? rowMenu(row2) : null;
+  const { row: row4, state } = props;
+  const n7 = row4.node;
+  const press = rowPress(row4);
+  const menu = state.menu === n7.key ? rowMenu(row4) : null;
   const kids = props.rows.filter((r3) => r3.parent === n7.key);
   const set = (patch) => props.onState({ ...state, ...patch });
   const toggle = () => {
@@ -106792,11 +106931,11 @@ function TreeItem(props) {
   return /* @__PURE__ */ u3("li", {
     role: "treeitem",
     class: n7.muted ? "lre-tree-item muted" : "lre-tree-item",
-    style: { "--lre-tree-indent": `${(row2.depth - 1) * 12}px` },
-    "aria-level": row2.depth,
-    "aria-setsize": row2.setSize,
-    "aria-posinset": row2.posInSet,
-    "aria-expanded": n7.children.length > 0 && !row2.deep ? row2.open : undefined,
+    style: { "--lre-tree-indent": `${(row4.depth - 1) * 12}px` },
+    "aria-level": row4.depth,
+    "aria-setsize": row4.setSize,
+    "aria-posinset": row4.posInSet,
+    "aria-expanded": n7.children.length > 0 && !row4.deep ? row4.open : undefined,
     "aria-current": n7.current ? "true" : undefined,
     "aria-label": [n7.label, n7.detail, n7.value, ...n7.badges.map((b3) => b3.text)].filter((part) => part).join(", "),
     tabIndex: props.tabStop === n7.key ? 0 : -1,
@@ -106813,16 +106952,16 @@ function TreeItem(props) {
           n7.children.length > 0 ? /* @__PURE__ */ u3("span", {
             class: "lre-tree-toggle",
             "aria-hidden": "true",
-            title: row2.deep ? "Show from here" : row2.open ? "Close" : "Open",
+            title: row4.deep ? "Show from here" : row4.open ? "Close" : "Open",
             onClick: (event) => {
               event.stopPropagation();
-              if (row2.deep)
+              if (row4.deep)
                 set({ root: n7.key, focus: n7.key, menu: null });
               else
                 toggle();
             },
             children: /* @__PURE__ */ u3(Icon, {
-              name: row2.deep ? "branch" : row2.open ? "chevron-down" : "chevron-right",
+              name: row4.deep ? "branch" : row4.open ? "chevron-down" : "chevron-right",
               size: 16
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
@@ -106903,7 +107042,7 @@ function TreeItem(props) {
           ]
         }, action2.id, true, undefined, this))
       }, undefined, false, undefined, this) : null,
-      row2.open && kids.length > 0 ? /* @__PURE__ */ u3("ul", {
+      row4.open && kids.length > 0 ? /* @__PURE__ */ u3("ul", {
         role: "group",
         class: "lre-tree-group",
         children: kids.map((kid) => /* @__PURE__ */ u3(TreeItem, {
@@ -106922,9 +107061,9 @@ function TreeView(props) {
   const set = (patch) => props.onState({ ...state, ...patch });
   const onKeyDown = (event) => {
     const tree = event.currentTarget;
-    const at2 = rows2.findIndex((r3) => r3.node.key === tabStop);
-    const row2 = rows2[at2];
-    if (!row2)
+    const at4 = rows2.findIndex((r3) => r3.node.key === tabStop);
+    const row4 = rows2[at4];
+    if (!row4)
       return;
     const move = (to) => {
       if (!to)
@@ -106943,29 +107082,29 @@ function TreeView(props) {
     if (inMenu)
       return;
     const keys = {
-      ArrowDown: () => move(rows2[at2 + 1]),
-      ArrowUp: () => move(rows2[at2 - 1]),
+      ArrowDown: () => move(rows2[at4 + 1]),
+      ArrowUp: () => move(rows2[at4 - 1]),
       Home: () => move(rows2[0]),
       End: () => move(rows2.at(-1)),
       ArrowRight: () => {
-        if (row2.deep)
-          set({ root: row2.node.key, focus: row2.node.key, menu: null });
-        else if (row2.node.children.length > 0 && !row2.open)
-          set({ open: new Set([...state.open, row2.node.key]) });
-        else if (row2.open)
-          move(rows2[at2 + 1]);
+        if (row4.deep)
+          set({ root: row4.node.key, focus: row4.node.key, menu: null });
+        else if (row4.node.children.length > 0 && !row4.open)
+          set({ open: new Set([...state.open, row4.node.key]) });
+        else if (row4.open)
+          move(rows2[at4 + 1]);
       },
       ArrowLeft: () => {
-        if (row2.open)
-          set({ open: new Set([...state.open].filter((k2) => k2 !== row2.node.key)) });
+        if (row4.open)
+          set({ open: new Set([...state.open].filter((k2) => k2 !== row4.node.key)) });
         else
-          move(rows2.find((r3) => r3.node.key === row2.parent));
+          move(rows2.find((r3) => r3.node.key === row4.parent));
       },
-      Enter: () => (itemOf2(tree, row2.node.key)?.querySelector(".lre-tree-row") ?? null)?.click(),
-      " ": () => (itemOf2(tree, row2.node.key)?.querySelector(".lre-tree-row") ?? null)?.click()
+      Enter: () => (itemOf2(tree, row4.node.key)?.querySelector(".lre-tree-row") ?? null)?.click(),
+      " ": () => (itemOf2(tree, row4.node.key)?.querySelector(".lre-tree-row") ?? null)?.click()
     };
     const go2 = keys[event.key];
-    if (!go2 || event.target !== itemOf2(tree, row2.node.key))
+    if (!go2 || event.target !== itemOf2(tree, row4.node.key))
       return;
     event.preventDefault();
     go2();
@@ -108350,7 +108489,7 @@ function memberOps(org, who3, form) {
 function memberRemoveOps(org, who3) {
   return [{ op: "unlink", rel: "member_of", from: who3, to: org }];
 }
-function ownerOps(org, owners, at2, role, share2, rows2 = {}) {
+function ownerOps(org, owners, at4, role, share2, rows2 = {}) {
   const write = (o4) => {
     const out = { ...o4, role, share: share2 };
     for (const key of ["units", "class"]) {
@@ -108362,8 +108501,8 @@ function ownerOps(org, owners, at2, role, share2, rows2 = {}) {
     }
     return out;
   };
-  const index = owners.findIndex((o4) => o4.party === at2.party && ownerClassOf(o4) === at2.class);
-  const next = index < 0 ? [...owners, write({ party: at2.party })] : owners.map((o4, i3) => i3 === index ? write(o4) : o4);
+  const index = owners.findIndex((o4) => o4.party === at4.party && ownerClassOf(o4) === at4.class);
+  const next = index < 0 ? [...owners, write({ party: at4.party })] : owners.map((o4, i3) => i3 === index ? write(o4) : o4);
   return [{ op: "set", entity: org, field: "owners", value: next }];
 }
 function ownerRemoveOps(org, owners, party) {
@@ -109515,8 +109654,8 @@ function GmOrgsSection(props) {
   const panelId = P2();
   const pages = usePages();
   const sheets = usePages();
-  const openOrg = (id, at2 = null) => {
-    setTab(at2 ?? "overview");
+  const openOrg = (id, at4 = null) => {
+    setTab(at4 ?? "overview");
     sheets.back();
     pages.open(id);
   };
@@ -109625,8 +109764,8 @@ var BELONG_GROUPS = [
   { type: "group", label: "Groups" },
   { type: "trust", label: "Trusts" }
 ];
-function typeWord(row2) {
-  return row2.type === "group" ? row2.kind || "Group" : row2.type === "company" ? "Company" : row2.type === "household" ? "Household" : row2.type === "trust" ? "Trust" : "Party";
+function typeWord(row4) {
+  return row4.type === "group" ? row4.kind || "Group" : row4.type === "company" ? "Company" : row4.type === "household" ? "Household" : row4.type === "trust" ? "Trust" : "Party";
 }
 function homeTree(rows2, needs) {
   const ids = new Set(rows2.map((r3) => r3.id));
@@ -109634,12 +109773,12 @@ function homeTree(rows2, needs) {
   for (const r3 of rows2) {
     const seen = new Set([r3.id]);
     let up = r3.under !== null && ids.has(r3.under) ? r3.under : null;
-    for (let at2 = up;at2 !== null; at2 = parent.get(at2) ?? null) {
-      if (seen.has(at2)) {
+    for (let at4 = up;at4 !== null; at4 = parent.get(at4) ?? null) {
+      if (seen.has(at4)) {
         up = null;
         break;
       }
-      seen.add(at2);
+      seen.add(at4);
     }
     parent.set(r3.id, up);
   }
@@ -111065,8 +111204,8 @@ class GestureTracker {
   constructor(transform = IDENTITY) {
     this.transform = transform;
   }
-  down(id, p3, at2) {
-    this.contacts.set(id, { start: p3, last: p3, at: at2 });
+  down(id, p3, at4) {
+    this.contacts.set(id, { start: p3, last: p3, at: at4 });
     this.tapEligible = this.contacts.size === 1;
     return { transform: this.transform, tap: null };
   }
@@ -111086,12 +111225,12 @@ class GestureTracker {
     contact.last = p3;
     return { transform: this.transform, tap: null };
   }
-  up(id, p3, at2) {
+  up(id, p3, at4) {
     const contact = this.contacts.get(id);
     if (!contact)
       return { transform: this.transform, tap: null };
     this.contacts.delete(id);
-    const tapped = this.tapEligible && this.contacts.size === 0 && at2 - contact.at <= TAP_MS && Math.hypot(p3.x - contact.start.x, p3.y - contact.start.y) <= TAP_SLOP;
+    const tapped = this.tapEligible && this.contacts.size === 0 && at4 - contact.at <= TAP_MS && Math.hypot(p3.x - contact.start.x, p3.y - contact.start.y) <= TAP_SLOP;
     if (this.contacts.size === 0)
       this.tapEligible = false;
     return { transform: this.transform, tap: tapped ? p3 : null };
@@ -111343,8 +111482,8 @@ function placeLabels(items, opts) {
   };
   const first = opts.first ?? [];
   const rank = (i3) => {
-    const at2 = first.indexOf(i3.id);
-    return at2 < 0 ? first.length : at2;
+    const at4 = first.indexOf(i3.id);
+    return at4 < 0 ? first.length : at4;
   };
   const straightness = (i3) => {
     const len = Math.hypot(i3.x - centre.x, i3.y - centre.y);
@@ -111606,10 +111745,10 @@ function wallPlan(grid) {
   const { doors, loose } = doorGaps(grid);
   return { width: grid.width, ...wallStrokes(grid, doors), doors, loose };
 }
-function paintWalls(g2, plan2, at2, size2, dpr, palette) {
+function paintWalls(g2, plan2, at4, size2, dpr, palette) {
   const w3 = wallWidth(size2, dpr);
   const half = w3 / 2;
-  const cellPoint = (cell, dx, dy) => at2({ x: cell % plan2.width + dx, y: Math.floor(cell / plan2.width) + dy });
+  const cellPoint = (cell, dx, dy) => at4({ x: cell % plan2.width + dx, y: Math.floor(cell / plan2.width) + dy });
   g2.save();
   g2.globalAlpha = 0.82;
   g2.strokeStyle = palette.ink;
@@ -111620,8 +111759,8 @@ function paintWalls(g2, plan2, at2, size2, dpr, palette) {
   g2.setLineDash([]);
   g2.beginPath();
   for (const s3 of plan2.segments) {
-    const a3 = at2(s3.from);
-    const b3 = at2(s3.to);
+    const a3 = at4(s3.from);
+    const b3 = at4(s3.to);
     const len = Math.hypot(b3.x - a3.x, b3.y - a3.y) || 1;
     const ux = (b3.x - a3.x) / len;
     const uy = (b3.y - a3.y) / len;
@@ -111631,7 +111770,7 @@ function paintWalls(g2, plan2, at2, size2, dpr, palette) {
   const tick = Math.max(w3, size2 * 0.14);
   for (const d3 of plan2.doors) {
     for (const j3 of [d3.hinge, d3.latch]) {
-      const p3 = at2(j3);
+      const p3 = at4(j3);
       g2.moveTo(d3.axis === "h" ? p3.x : p3.x - tick, d3.axis === "h" ? p3.y - tick : p3.y);
       g2.lineTo(d3.axis === "h" ? p3.x : p3.x + tick, d3.axis === "h" ? p3.y + tick : p3.y);
     }
@@ -111653,8 +111792,8 @@ function paintWalls(g2, plan2, at2, size2, dpr, palette) {
   g2.lineWidth = Math.max(1, half);
   g2.beginPath();
   for (const d3 of plan2.doors) {
-    const hinge = at2(d3.hinge);
-    const latch = at2(d3.latch);
+    const hinge = at4(d3.hinge);
+    const latch = at4(d3.latch);
     if (size2 < DOOR_SWING_CELL) {
       g2.moveTo(hinge.x, hinge.y);
       g2.lineTo(latch.x, latch.y);
@@ -112227,9 +112366,9 @@ function EditCanvas(props) {
           const first = held.current;
           if (first !== null) {
             held.current = null;
-            const at2 = points.current.get(first) ?? p3;
-            tool6.release?.(at2, tracker.current.transform);
-            tracker.current.down(first, at2, event.timeStamp);
+            const at4 = points.current.get(first) ?? p3;
+            tool6.release?.(at4, tracker.current.transform);
+            tracker.current.down(first, at4, event.timeStamp);
           }
           tracker.current.down(event.pointerId, p3, event.timeStamp);
         },
@@ -112264,12 +112403,12 @@ function EditCanvas(props) {
             latest.current.tool.tap?.(result.tap, tracker.current.transform);
         },
         onPointerCancel: (event) => {
-          const at2 = points.current.get(event.pointerId);
+          const at4 = points.current.get(event.pointerId);
           points.current.delete(event.pointerId);
           if (event.pointerId === held.current) {
             held.current = null;
-            if (at2)
-              latest.current.tool.release?.(at2, tracker.current.transform);
+            if (at4)
+              latest.current.tool.release?.(at4, tracker.current.transform);
             return;
           }
           tracker.current.cancel(event.pointerId);
@@ -112361,7 +112500,7 @@ function GridCanvas(props) {
     draw: (g2, t3, width, height, palette) => drawGrid(g2, grid, t3, width, height, palette, props.marker)
   }, undefined, false, undefined, this);
 }
-var TOOLS3 = [
+var TOOLS4 = [
   { value: "pan", label: "Pan" },
   { value: "paint", label: "Terrain" },
   { value: "block", label: "Blocked" },
@@ -112514,7 +112653,7 @@ function GridEditor(props) {
             /* @__PURE__ */ u3(Seg, {
               label: "Tool",
               value: tool6,
-              options: TOOLS3,
+              options: TOOLS4,
               onChange: setTool
             }, undefined, false, undefined, this),
             tool6 === "paint" ? /* @__PURE__ */ u3("div", {
@@ -113483,8 +113622,8 @@ function childOf(world, scope, place2) {
   const path2 = placePath(world, place2);
   if (scope === null)
     return path2[0] ?? null;
-  const at2 = path2.indexOf(scope);
-  return at2 >= 0 ? path2[at2 + 1] ?? null : null;
+  const at4 = path2.indexOf(scope);
+  return at4 >= 0 ? path2[at4 + 1] ?? null : null;
 }
 function ring(ids, frame) {
   const step = Math.min(frame.width, frame.height) / 100;
@@ -113499,18 +113638,18 @@ function scopeView(world, scope, filter, opts) {
   const kids = ((opts.children ?? placeChildren(world)).get(scope) ?? []).filter(filter.drawn).sort(byShownId(filter));
   const def2 = scope === null ? undefined : own(world.places, scope);
   const grid = def2?.grid ? own(world.grids, def2.grid) : undefined;
-  const at2 = new Map;
+  const at4 = new Map;
   let frame = { width: NODE_FRAME, height: NODE_FRAME };
   if (grid) {
     const off = [];
     for (const id of kids) {
       const cell = own(world.places, id)?.cell;
       if (cell && cell.x >= 0 && cell.y >= 0 && cell.x < grid.width && cell.y < grid.height)
-        at2.set(id, { x: cell.x + 0.5, y: cell.y + 0.5 });
+        at4.set(id, { x: cell.x + 0.5, y: cell.y + 0.5 });
       else
         off.push(id);
     }
-    off.forEach((id, i3) => at2.set(id, { x: Math.round((i3 + 1) * grid.width * 10 / (off.length + 1)) / 10, y: grid.height + 1.5 }));
+    off.forEach((id, i3) => at4.set(id, { x: Math.round((i3 + 1) * grid.width * 10 / (off.length + 1)) / 10, y: grid.height + 1.5 }));
     frame = { width: grid.width, height: grid.height + (off.length > 0 ? 3 : 0) };
   } else {
     const placed = kids.flatMap((id) => {
@@ -113523,14 +113662,14 @@ function scopeView(world, scope, filter, opts) {
     else if (placed.length > 0)
       frame = { width: Math.max(1, ...placed.map(([, p3]) => p3.x)), height: Math.max(1, ...placed.map(([, p3]) => p3.y)) };
     for (const [id, p3] of placed)
-      at2.set(id, p3);
-    const rest = kids.filter((id) => !at2.has(id));
+      at4.set(id, p3);
+    const rest = kids.filter((id) => !at4.has(id));
     for (const [id, p3] of ring(rest, frame))
-      at2.set(id, p3);
+      at4.set(id, p3);
   }
   const places2 = kids.map((id) => {
     const p3 = own(world.places, id);
-    const pos = at2.get(id) ?? { x: 0, y: 0 };
+    const pos = at4.get(id) ?? { x: 0, y: 0 };
     const known = filter.known(id);
     const marked2 = known ? filter.mark?.(id) : undefined;
     return { id: filter.shown(id), name: shownName(world, filter, id), x: pos.x, y: pos.y, ...known && p3?.sceneType ? { kind: p3.sceneType } : {}, known, visited: filter.visited(id), ...marked2?.mark ? { mark: marked2.mark } : {}, ...marked2?.mark && marked2.property ? { property: marked2.property } : {} };
@@ -113598,15 +113737,15 @@ function previewScope(world, key, map) {
   return scopeView(doc, map.scope, { drawn: () => true, known: () => true, visited: () => true, shown: (id) => id, routeOpen: () => true }, { level: 4, trail: [], items });
 }
 function layoutCells(layout) {
-  const rows2 = layout.map((row2) => [...row2]);
+  const rows2 = layout.map((row4) => [...row4]);
   return { rows: rows2, width: Math.max(0, ...rows2.map((r3) => r3.length)), height: rows2.length };
 }
 function badCells(layout, legend) {
   const { rows: rows2, width } = layoutCells(layout);
   const out = [];
-  rows2.forEach((row2, y3) => {
+  rows2.forEach((row4, y3) => {
     for (let x2 = 0;x2 < width; x2 += 1) {
-      const ch = row2[x2];
+      const ch = row4[x2];
       if (ch === undefined || !(hasOwn(legend, ch) || hasOwn(DEFAULT_LEGEND, ch)))
         out.push(y3 * width + x2);
     }
@@ -113614,21 +113753,21 @@ function badCells(layout, legend) {
   return out;
 }
 function markOf(path2) {
-  const [head, at2] = path2;
-  if (head === "layout" && typeof at2 === "number")
-    return { kind: "row", y: at2 };
-  if (head === "legend" && typeof at2 === "string")
-    return { kind: "char", ch: at2 };
-  if (head === "places" && typeof at2 === "number")
-    return { kind: "place", index: at2 };
-  if (head === "links" && typeof at2 === "number")
-    return { kind: "link", index: at2 };
+  const [head, at4] = path2;
+  if (head === "layout" && typeof at4 === "number")
+    return { kind: "row", y: at4 };
+  if (head === "legend" && typeof at4 === "string")
+    return { kind: "char", ch: at4 };
+  if (head === "places" && typeof at4 === "number")
+    return { kind: "place", index: at4 };
+  if (head === "links" && typeof at4 === "number")
+    return { kind: "link", index: at4 };
   return { kind: "map" };
 }
 function previewMarks(value, problems) {
   if (!isRecord(value))
     return [];
-  const layout = Array.isArray(value.layout) && value.layout.every((row2) => typeof row2 === "string") ? value.layout.filter((row2) => typeof row2 === "string") : [];
+  const layout = Array.isArray(value.layout) && value.layout.every((row4) => typeof row4 === "string") ? value.layout.filter((row4) => typeof row4 === "string") : [];
   const legend = isRecord(value.legend) ? value.legend : {};
   const places2 = Array.isArray(value.places) ? value.places : [];
   const links = Array.isArray(value.links) ? value.links : [];
@@ -113638,12 +113777,12 @@ function previewMarks(value, problems) {
   for (const p3 of problems) {
     const mark = markOf(p3.path);
     if (mark.kind === "row" && mark.y < rows2.length) {
-      const row2 = Array.from({ length: width }, (_3, x2) => mark.y * width + x2);
-      const flagged = row2.filter((cell) => bad.has(cell));
-      out.push({ severity: p3.severity, cells: flagged.length > 0 ? flagged : row2 });
+      const row4 = Array.from({ length: width }, (_3, x2) => mark.y * width + x2);
+      const flagged = row4.filter((cell) => bad.has(cell));
+      out.push({ severity: p3.severity, cells: flagged.length > 0 ? flagged : row4 });
     } else if (mark.kind === "char") {
       const cells = [];
-      rows2.forEach((row2, y3) => row2.forEach((ch, x2) => ch === mark.ch ? cells.push(y3 * width + x2) : undefined));
+      rows2.forEach((row4, y3) => row4.forEach((ch, x2) => ch === mark.ch ? cells.push(y3 * width + x2) : undefined));
       if (cells.length > 0)
         out.push({ severity: p3.severity, cells });
     } else if (mark.kind === "place") {
@@ -113694,7 +113833,7 @@ function paintMarks(canvas, scope, t3, marks) {
   const unit2 = unitOf(scope);
   const size2 = unit2 * t3.k;
   const columns = scope.grid?.width ?? 0;
-  const at2 = (id) => {
+  const at4 = (id) => {
     const place2 = scope.places.find((p3) => p3.id === id);
     return place2 ? toScreen(t3, placePoint(scope, place2)) : null;
   };
@@ -113709,7 +113848,7 @@ function paintMarks(canvas, scope, t3, marks) {
       }
     }
     if (mark.place) {
-      const p3 = at2(mark.place);
+      const p3 = at4(mark.place);
       if (p3) {
         g2.lineWidth = 3;
         g2.beginPath();
@@ -113718,8 +113857,8 @@ function paintMarks(canvas, scope, t3, marks) {
       }
     }
     if (mark.link) {
-      const a3 = at2(mark.link[0]);
-      const b3 = at2(mark.link[1]);
+      const a3 = at4(mark.link[0]);
+      const b3 = at4(mark.link[1]);
       if (a3 && b3) {
         g2.lineWidth = 4;
         g2.globalAlpha = 0.85;
@@ -113817,7 +113956,7 @@ function pairOf(value) {
 }
 function readModel(value) {
   const { layout, legend, places: places2, links } = value;
-  if (layout !== undefined && !(Array.isArray(layout) && layout.every((row2) => typeof row2 === "string")))
+  if (layout !== undefined && !(Array.isArray(layout) && layout.every((row4) => typeof row4 === "string")))
     return "The layout isn't a list of rows of text.";
   if (legend !== undefined && !isRecord(legend))
     return "The legend isn't an object.";
@@ -113825,7 +113964,7 @@ function readModel(value) {
     return "The places aren't a list.";
   if (links !== undefined && !Array.isArray(links))
     return "The links aren't a list.";
-  const rows2 = Array.isArray(layout) ? layout.filter((row2) => typeof row2 === "string") : [];
+  const rows2 = Array.isArray(layout) ? layout.filter((row4) => typeof row4 === "string") : [];
   const placeList = [];
   (Array.isArray(places2) ? places2 : []).forEach((p3, index) => {
     if (!isRecord(p3) || typeof p3.id !== "string")
@@ -113851,7 +113990,7 @@ function readModel(value) {
   return { kind, layout: [], width: frame.x, height: frame.y, legend: isRecord(legend) ? legend : {}, places: placeList, links: linkList };
 }
 function layoutSize(layout) {
-  return { width: Math.max(0, ...layout.map((row2) => [...row2].length)), height: layout.length };
+  return { width: Math.max(0, ...layout.map((row4) => [...row4].length)), height: layout.length };
 }
 function cellMeaning(legend, ch) {
   const cell = hasOwn(legend, ch) ? legend[ch] : hasOwn(DEFAULT_LEGEND, ch) ? DEFAULT_LEGEND[ch] : undefined;
@@ -113872,24 +114011,24 @@ function cellMeaning(legend, ch) {
   return { kind: "unknown" };
 }
 function paintLayout(layout, cells, ch) {
-  const rows2 = layout.map((row2) => [...row2]);
+  const rows2 = layout.map((row4) => [...row4]);
   for (const { x: x2, y: y3 } of cells) {
-    const row2 = rows2[y3];
-    if (!row2 || x2 < 0)
+    const row4 = rows2[y3];
+    if (!row4 || x2 < 0)
       continue;
-    while (row2.length < x2)
-      row2.push(" ");
-    row2[x2] = ch;
+    while (row4.length < x2)
+      row4.push(" ");
+    row4[x2] = ch;
   }
-  return rows2.map((row2) => row2.join(""));
+  return rows2.map((row4) => row4.join(""));
 }
 function fillCells(layout, start2) {
-  const rows2 = layout.map((row2) => [...row2]);
+  const rows2 = layout.map((row4) => [...row4]);
   const { width, height } = layoutSize(layout);
-  const at2 = (c3) => rows2[c3.y]?.[c3.x] ?? " ";
+  const at4 = (c3) => rows2[c3.y]?.[c3.x] ?? " ";
   if (start2.x < 0 || start2.y < 0 || start2.x >= width || start2.y >= height)
     return [];
-  const ch = at2(start2);
+  const ch = at4(start2);
   const seen = new Set([start2.y * width + start2.x]);
   const out = [];
   const queue = [start2];
@@ -113897,7 +114036,7 @@ function fillCells(layout, start2) {
     out.push(next);
     for (const n7 of [{ x: next.x + 1, y: next.y }, { x: next.x - 1, y: next.y }, { x: next.x, y: next.y + 1 }, { x: next.x, y: next.y - 1 }]) {
       const index = n7.y * width + n7.x;
-      if (n7.x < 0 || n7.y < 0 || n7.x >= width || n7.y >= height || seen.has(index) || at2(n7) !== ch)
+      if (n7.x < 0 || n7.y < 0 || n7.x >= width || n7.y >= height || seen.has(index) || at4(n7) !== ch)
         continue;
       seen.add(index);
       queue.push(n7);
@@ -113907,15 +114046,15 @@ function fillCells(layout, start2) {
 }
 function resizeLayout(layout, width, height, fill2) {
   return Array.from({ length: height }, (_3, y3) => {
-    const row2 = [...layout[y3] ?? ""].slice(0, width);
-    while (row2.length < width)
-      row2.push(fill2);
-    return row2.join("");
+    const row4 = [...layout[y3] ?? ""].slice(0, width);
+    while (row4.length < width)
+      row4.push(fill2);
+    return row4.join("");
   });
 }
 var SPARE_CHARS = [..."abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789*=~^%&@$!?:;<>/|"];
 function freeChar(legend, layout, name2) {
-  const used2 = new Set([...Object.keys(legend), ...Object.keys(DEFAULT_LEGEND), ...layout.flatMap((row2) => [...row2])]);
+  const used2 = new Set([...Object.keys(legend), ...Object.keys(DEFAULT_LEGEND), ...layout.flatMap((row4) => [...row4])]);
   const letters = [...name2.toLowerCase()].filter((ch) => /[a-z0-9]/.test(ch));
   return [...letters, ...letters.map((ch) => ch.toUpperCase()), ...SPARE_CHARS].find((ch) => !used2.has(ch)) ?? null;
 }
@@ -113961,7 +114100,7 @@ function removePlace(value, id) {
       continue;
     nextLegend[ch] = isRecord(cell) && cell.item !== undefined && cell.place === id ? patched(cell, { place: undefined }) : cell;
   }
-  const layout = Array.isArray(value.layout) ? value.layout.map((row2) => typeof row2 === "string" ? [...row2].map((ch) => rooms.includes(ch) ? "." : ch).join("") : row2) : undefined;
+  const layout = Array.isArray(value.layout) ? value.layout.map((row4) => typeof row4 === "string" ? [...row4].map((ch) => rooms.includes(ch) ? "." : ch).join("") : row4) : undefined;
   return patched(value, {
     places: listOf2(value, "places").filter((p3) => !(isRecord(p3) && p3.id === id)),
     links: value.links === undefined ? undefined : listOf2(value, "links").filter((l3) => !(isRecord(l3) && (l3.from === id || l3.to === id))),
@@ -113971,21 +114110,21 @@ function removePlace(value, id) {
 }
 function setLegend(value, ch, cell, fill2 = ".") {
   const legend = patched(isRecord(value.legend) ? value.legend : {}, { [ch]: cell });
-  const layout = cell === undefined && Array.isArray(value.layout) ? value.layout.map((row2) => typeof row2 === "string" ? [...row2].map((c3) => c3 === ch ? fill2 : c3).join("") : row2) : value.layout;
+  const layout = cell === undefined && Array.isArray(value.layout) ? value.layout.map((row4) => typeof row4 === "string" ? [...row4].map((c3) => c3 === ch ? fill2 : c3).join("") : row4) : value.layout;
   return patched(value, { legend, layout });
 }
 function moveLegendChar(value, from, to) {
   const legend = {};
   for (const [ch, cell] of Object.entries(isRecord(value.legend) ? value.legend : {}))
     legend[ch === from ? to : ch] = cell;
-  const layout = Array.isArray(value.layout) ? value.layout.map((row2) => typeof row2 === "string" ? [...row2].map((c3) => c3 === from ? to : c3).join("") : row2) : value.layout;
+  const layout = Array.isArray(value.layout) ? value.layout.map((row4) => typeof row4 === "string" ? [...row4].map((c3) => c3 === from ? to : c3).join("") : row4) : value.layout;
   return patched(value, { legend, layout });
 }
 function gridPlaceCells(model, areas) {
   const out = new Map;
   for (const p3 of model.places) {
-    const at2 = p3.at && p3.at.x < model.width && p3.at.y < model.height ? p3.at : null;
-    out.set(p3.id, at2 ?? nearestMiddle(areas.get(p3.id) ?? [], model.width));
+    const at4 = p3.at && p3.at.x < model.width && p3.at.y < model.height ? p3.at : null;
+    out.set(p3.id, at4 ?? nearestMiddle(areas.get(p3.id) ?? [], model.width));
   }
   return out;
 }
@@ -114018,8 +114157,8 @@ function layoutFacts(model) {
   const meaning = new Map;
   const areas = new Map;
   const counts = new Map;
-  model.layout.forEach((row2, y3) => {
-    [...row2].forEach((ch, x2) => {
+  model.layout.forEach((row4, y3) => {
+    [...row4].forEach((ch, x2) => {
       counts.set(ch, (counts.get(ch) ?? 0) + 1);
       let m2 = meaning.get(ch);
       if (!m2) {
@@ -114150,9 +114289,9 @@ function layoutWalls(model, facts) {
     return kept2;
   const cells = [];
   for (let y3 = 0;y3 < model.height; y3++) {
-    const row2 = [...model.layout[y3] ?? ""];
+    const row4 = [...model.layout[y3] ?? ""];
     for (let x2 = 0;x2 < model.width; x2++) {
-      const ch = row2[x2];
+      const ch = row4[x2];
       cells.push(ch === undefined ? "solid" : wallCellOf(facts.meaning.get(ch) ?? { kind: "unknown" }));
     }
   }
@@ -114170,8 +114309,8 @@ function drawGridMap(g2, model, facts, view, width, height, palette, overlay) {
   const walls = thinWalls(t3.k) ? layoutWalls(model, facts) : null;
   const gaps = new Set(walls?.doors.map((d3) => d3.cell));
   const floor = terrainFill("floor", palette);
-  model.layout.forEach((row2, y3) => {
-    [...row2].forEach((ch, x2) => {
+  model.layout.forEach((row4, y3) => {
+    [...row4].forEach((ch, x2) => {
       const p3 = toScreen(t3, { x: x2, y: y3 });
       if (p3.x > width || p3.y > height || p3.x + t3.k < 0 || p3.y + t3.k < 0)
         return;
@@ -114263,14 +114402,14 @@ function drawNodeMap(g2, model, view, width, height, palette, overlay) {
   g2.strokeStyle = palette.line;
   g2.lineWidth = 1.5;
   g2.strokeRect(a3.x, a3.y, b3.x - a3.x, b3.y - a3.y);
-  const at2 = (id) => {
+  const at4 = (id) => {
     const p3 = positions.get(id);
     return p3 ? screen(p3) : null;
   };
   g2.font = `11px ${palette.font}`;
   for (const link2 of model.links) {
-    const pa = at2(link2.from);
-    const pb = at2(link2.to);
+    const pa = at4(link2.from);
+    const pb = at4(link2.to);
     if (!pa || !pb)
       continue;
     const isSelected = overlay.selected?.kind === "link" && overlay.selected.index === link2.index;
@@ -114299,7 +114438,7 @@ function drawNodeMap(g2, model, view, width, height, palette, overlay) {
     }
   }
   if (overlay.band) {
-    const from = at2(overlay.band.from);
+    const from = at4(overlay.band.from);
     if (from) {
       g2.strokeStyle = palette.pov;
       g2.lineWidth = 2;
@@ -114311,9 +114450,9 @@ function drawNodeMap(g2, model, view, width, height, palette, overlay) {
       g2.setLineDash([]);
     }
   }
-  drawMarks(g2, overlay.marks, palette, () => null, 0, at2);
+  drawMarks(g2, overlay.marks, palette, () => null, 0, at4);
   const placed = model.places.flatMap((p3) => {
-    const s3 = at2(p3.id);
+    const s3 = at4(p3.id);
     return s3 ? [{ id: p3.id, name: p3.name, at: s3 }] : [];
   });
   drawPlaces(g2, placed, overlay.selected?.kind === "place" ? overlay.selected.id : null, width, height, palette);
@@ -114455,7 +114594,7 @@ function MapEditor(props) {
       return;
     const rows2 = text4.split(`
 `);
-    const start2 = rows2.slice(0, line3 - 1).reduce((at2, row2) => at2 + row2.length + 1, 0);
+    const start2 = rows2.slice(0, line3 - 1).reduce((at4, row4) => at4 + row4.length + 1, 0);
     el.focus();
     el.setSelectionRange(start2, start2 + (rows2[line3 - 1]?.length ?? 0));
     el.scrollTop = Math.max(0, (line3 - 3) * LINE_PX);
@@ -114491,17 +114630,17 @@ function MapEditor(props) {
     await deleteItem(app, props.send, { worldId: props.world.id, collection: "maps", id, message: `Delete the map “${id}”? The places, grid and routes it draws go with it.` });
   });
   const openProblem = (p3) => {
-    const [head, at2] = p3.path;
+    const [head, at4] = p3.path;
     const m3 = model && typeof model !== "string" ? model : null;
-    if (tab !== "json" && m3 && head === "places" && typeof at2 === "number") {
-      const place2 = m3.places.find((entry) => entry.index === at2);
+    if (tab !== "json" && m3 && head === "places" && typeof at4 === "number") {
+      const place2 = m3.places.find((entry) => entry.index === at4);
       if (place2)
         return setSheet({ kind: "place", id: place2.id });
     }
-    if (tab !== "json" && m3 && head === "links" && typeof at2 === "number" && m3.links.some((l3) => l3.index === at2))
-      return setSheet({ kind: "link", index: at2 });
-    if (tab !== "json" && m3 && head === "legend" && typeof at2 === "string" && hasOwn(m3.legend, at2))
-      return setSheet({ kind: "legend", ch: at2 });
+    if (tab !== "json" && m3 && head === "links" && typeof at4 === "number" && m3.links.some((l3) => l3.index === at4))
+      return setSheet({ kind: "link", index: at4 });
+    if (tab !== "json" && m3 && head === "legend" && typeof at4 === "string" && hasOwn(m3.legend, at4))
+      return setSheet({ kind: "legend", ch: at4 });
     if (tab !== "json" && m3 && head === "layout")
       return setTab("draw");
     setTab("json");
@@ -114821,7 +114960,7 @@ function MapEditor(props) {
           if (!s3 || !cell || cell.x === s3.last.x && cell.y === s3.last.y)
             return;
           const cells = strokeCells(s3.last, cell).slice(1);
-          apply((map) => withLayout(map, paintLayout(Array.isArray(map.layout) ? map.layout.filter((row2) => typeof row2 === "string") : [], cells, brush)));
+          apply((map) => withLayout(map, paintLayout(Array.isArray(map.layout) ? map.layout.filter((row4) => typeof row4 === "string") : [], cells, brush)));
           s3.last = cell;
         },
         release: () => {
@@ -114880,8 +115019,8 @@ function MapEditor(props) {
     const unit2 = FRAME_UNITS / Math.max(1, model2.width, model2.height);
     const positions = nodePositions(model2);
     const dots = model2.places.flatMap((p3) => {
-      const at2 = positions.get(p3.id);
-      return at2 ? [{ id: p3.id, x: at2.x * unit2, y: at2.y * unit2 }] : [];
+      const at4 = positions.get(p3.id);
+      return at4 ? [{ id: p3.id, x: at4.x * unit2, y: at4.y * unit2 }] : [];
     });
     const placeUnder = (p3, t3) => hitTest(t3, dots, p3, 24)?.id ?? null;
     const linkUnder = (p3, t3) => {
@@ -114954,15 +115093,15 @@ function MapEditor(props) {
         const entry = model2.places.find((e3) => e3.id === s3.place);
         if (!entry)
           return;
-        const at2 = framePosition(toWorld(t3, p3), unit2, model2);
-        if (s3.moved && at2.x === s3.last.x && at2.y === s3.last.y)
+        const at4 = framePosition(toWorld(t3, p3), unit2, model2);
+        if (s3.moved && at4.x === s3.last.x && at4.y === s3.last.y)
           return;
         if (!s3.moved)
           record();
         s3.moved = true;
-        s3.last = at2;
+        s3.last = at4;
         setSelected({ kind: "place", id: entry.id });
-        apply((map) => patchPlace(map, entry.index, { at: [at2.x, at2.y] }));
+        apply((map) => patchPlace(map, entry.index, { at: [at4.x, at4.y] }));
       },
       release: (p3, t3) => {
         const s3 = stroke.current;
@@ -115641,7 +115780,7 @@ function PlaceSheet3(props) {
   const cells = props.facts?.areas.get(place2.id)?.length ?? 0;
   const maps = Object.entries(props.world.maps).filter(([key]) => key !== props.mapId).map(([key, map]) => ({ value: key, label: map.title ?? nameOfId(key), sublabel: map.scope === place2.id ? "draws this place" : `draws ${props.world.places[map.scope]?.name ?? map.scope}` }));
   const idProblem5 = idText === place2.id ? null : !ID_PATTERN.test(idText) ? "Letters, digits, _ and -, starting with a letter or digit." : props.taken.has(idText) ? "Another place has this id." : null;
-  const setAt = (at2) => props.edit((map) => patchPlace(map, place2.index, { at: at2 ? [at2.x, at2.y] : undefined }));
+  const setAt = (at4) => props.edit((map) => patchPlace(map, place2.index, { at: at4 ? [at4.x, at4.y] : undefined }));
   return /* @__PURE__ */ u3(FormSheet, {
     title: place2.name,
     subtitle: grid ? cells > 0 ? `Room · ${cells} cells` : "Place" : "Place",
@@ -116335,9 +116474,9 @@ function layoutTrack(track3) {
   const nodes = Object.keys(track3.stages).map((id) => {
     const reachable = layer.has(id);
     const l3 = reachable ? layer.get(id) ?? 0 : last;
-    const row2 = rows2.get(l3) ?? 0;
-    rows2.set(l3, row2 + 1);
-    return { id, layer: l3, row: row2, reachable };
+    const row4 = rows2.get(l3) ?? 0;
+    rows2.set(l3, row4 + 1);
+    return { id, layer: l3, row: row4, reachable };
   });
   return { nodes, edges };
 }
@@ -116587,7 +116726,7 @@ function StageSheet(props) {
   const stages = Object.entries(track3.stages).map(([sid, s3]) => ({ value: sid, label: s3.label || nameOfId(sid), ...sid === track3.start ? { sublabel: "the start" } : {} }));
   const others = stages.filter((s3) => s3.value !== id);
   const path2 = `${props.path}.stages.${id}`;
-  const exprLint = (at2) => lintAt(props.lint, at2);
+  const exprLint = (at4) => lintAt(props.lint, at4);
   const move = (i3, delta) => {
     const next = [...stage.next];
     const [item2] = next.splice(i3, 1);
@@ -117723,18 +117862,18 @@ function markdownBlocks(text4, depth = 0) {
   const lines4 = text4.replace(/\r\n?/g, `
 `).split(`
 `);
-  for (let at2 = 0;at2 < lines4.length; at2 += 1) {
-    const raw = lines4[at2] ?? "";
+  for (let at4 = 0;at4 < lines4.length; at4 += 1) {
+    const raw = lines4[at4] ?? "";
     const fence = FENCE2.exec(raw);
     if (fence) {
       const indent = new RegExp(`^ {0,${fence[1]?.length ?? 0}}`);
       const mark = fence[2] ?? "```";
       const body = [];
-      for (at2 += 1;at2 < lines4.length; at2 += 1) {
-        const close = CLOSING.exec(lines4[at2] ?? "")?.[1];
+      for (at4 += 1;at4 < lines4.length; at4 += 1) {
+        const close = CLOSING.exec(lines4[at4] ?? "")?.[1];
         if (close !== undefined && close[0] === mark[0] && close.length >= mark.length)
           break;
-        body.push((lines4[at2] ?? "").replace(indent, ""));
+        body.push((lines4[at4] ?? "").replace(indent, ""));
       }
       blocks.push({ kind: "code", text: body.join(`
 `) });
@@ -117749,12 +117888,12 @@ function markdownBlocks(text4, depth = 0) {
     const quoted2 = depth < QUOTE_DEPTH ? QUOTED.exec(line3) : null;
     if (quoted2) {
       const inner = [quoted2[1] ?? ""];
-      while (at2 + 1 < lines4.length) {
-        const more = QUOTED.exec((lines4[at2 + 1] ?? "").trimEnd());
+      while (at4 + 1 < lines4.length) {
+        const more = QUOTED.exec((lines4[at4 + 1] ?? "").trimEnd());
         if (!more)
           break;
         inner.push(more[1] ?? "");
-        at2 += 1;
+        at4 += 1;
       }
       blocks.push({ kind: "quote", blocks: markdownBlocks(inner.join(`
 `), depth + 1) });
@@ -117809,8 +117948,8 @@ var IMAGE = /!\[([^\]]*)\]\(([^)]*)\)/y;
 var LINK = /\[([^\]]+)\]\(\s*([^)\s]*)(?:\s+"[^"]*")?\s*\)/y;
 var WORD2 = /[\p{L}\p{N}]/u;
 var DEPTH = 4;
-function readAt(pattern, text4, at2) {
-  pattern.lastIndex = at2;
+function readAt(pattern, text4, at4) {
+  pattern.lastIndex = at4;
   return pattern.exec(text4);
 }
 function inlineMarkdown(text4) {
@@ -117890,43 +118029,43 @@ function inline(text4, depth) {
   return out;
 }
 function blocksView(blocks) {
-  return blocks.map((b3, at2) => {
+  return blocks.map((b3, at4) => {
     switch (b3.kind) {
       case "p":
         return /* @__PURE__ */ u3("p", {
           children: inlineMarkdown(b3.lines.join(`
 `))
-        }, at2, false, undefined, this);
+        }, at4, false, undefined, this);
       case "h":
         return /* @__PURE__ */ u3("p", {
           class: "lre-md-h",
           role: "heading",
           "aria-level": b3.level,
           children: inlineMarkdown(b3.text)
-        }, at2, false, undefined, this);
+        }, at4, false, undefined, this);
       case "ul":
         return /* @__PURE__ */ u3("ul", {
           children: b3.items.map((item2, n7) => /* @__PURE__ */ u3("li", {
             children: inlineMarkdown(item2)
           }, n7, false, undefined, this))
-        }, at2, false, undefined, this);
+        }, at4, false, undefined, this);
       case "ol":
         return /* @__PURE__ */ u3("ol", {
           ...b3.start !== 1 ? { start: b3.start } : {},
           children: b3.items.map((item2, n7) => /* @__PURE__ */ u3("li", {
             children: inlineMarkdown(item2)
           }, n7, false, undefined, this))
-        }, at2, false, undefined, this);
+        }, at4, false, undefined, this);
       case "code":
         return /* @__PURE__ */ u3("pre", {
           children: /* @__PURE__ */ u3("code", {
             children: b3.text
           }, undefined, false, undefined, this)
-        }, at2, false, undefined, this);
+        }, at4, false, undefined, this);
       case "quote":
         return /* @__PURE__ */ u3("blockquote", {
           children: blocksView(b3.blocks)
-        }, at2, false, undefined, this);
+        }, at4, false, undefined, this);
     }
   });
 }
@@ -118381,13 +118520,13 @@ function AssistantSection(props) {
       pushes.current += 1;
       setView(update.view);
     });
-    const at2 = pushes.current;
+    const at4 = pushes.current;
     app.request({ type: "lre.assistant", op: "get", chatId: props.chatId }).then((next) => {
       if (!live)
         return;
       if (next === null)
-        setFailed(pushes.current === at2);
-      else if (pushes.current === at2)
+        setFailed(pushes.current === at4);
+      else if (pushes.current === at4)
         setView(next);
     });
     return () => {
@@ -118411,11 +118550,11 @@ function AssistantSection(props) {
   }, [count5, answering]);
   const on = assistantHandlers(props.chatId, {
     ask: async (body) => {
-      const at2 = pushes.current;
+      const at4 = pushes.current;
       const next = await app.request(body);
       if (next === null)
         return false;
-      if (pushes.current === at2)
+      if (pushes.current === at4)
         setView(next);
       return true;
     },
@@ -118609,8 +118748,8 @@ function usageWords(u4) {
 
 // src/frontend/to-top.tsx
 var TO_TOP_SCREENS2 = 1.5;
-function showsToTop2(at2) {
-  return at2.scrollable && at2.height > 0 && at2.top >= at2.height * TO_TOP_SCREENS2;
+function showsToTop2(at4) {
+  return at4.scrollable && at4.height > 0 && at4.top >= at4.height * TO_TOP_SCREENS2;
 }
 function useToTop2(root, key) {
   const [shown2, setShown] = d2(false);
@@ -119278,7 +119417,7 @@ function LiveSection(props) {
         busy: busy || props.busy,
         now,
         timeline,
-        onControl: (row2) => openSpeed(app, row2),
+        onControl: (row4) => openSpeed(app, row4),
         open: (key, open) => toggled[key] ?? open,
         onToggle: (key, open) => setToggled((t3) => t3[key] === open ? t3 : { ...t3, [key]: open }),
         onRole: setRole,
@@ -119374,11 +119513,11 @@ function writerWords2(file2) {
 function systemWords(path2) {
   if (!isSystemPath(path2))
     return null;
-  const at2 = levelPath(path2);
+  const at4 = levelPath(path2);
   const where = isGlobalPath(path2) ? "in every chat of yours" : "in this chat";
-  if (!at2.startsWith(ROLES_DIR))
+  if (!at4.startsWith(ROLES_DIR))
     return `System instructions for every agent, ${where}`;
-  const role = at2.slice(ROLES_DIR.length, -".md".length);
+  const role = at4.slice(ROLES_DIR.length, -".md".length);
   return `System instructions for ${AGENT_ROLES.find((r3) => r3.id === role)?.label ?? humanize(role)} alone, ${where}`;
 }
 function fileChips(file2) {
@@ -120756,8 +120895,8 @@ class GmParts {
         byKey.set(key, [...byKey.get(key) ?? [], id]);
       }
       for (const [key, group] of byKey) {
-        for (let at2 = 0;at2 < group.length; at2 += GM_IDS_MAX) {
-          const chunk = group.slice(at2, at2 + GM_IDS_MAX);
+        for (let at4 = 0;at4 < group.length; at4 += GM_IDS_MAX) {
+          const chunk = group.slice(at4, at4 + GM_IDS_MAX);
           ask(part, chunk, chunk.map((id) => `${prefix}${id}`), key === "" ? undefined : key);
         }
       }
@@ -121127,12 +121266,12 @@ function useGmThings(chatId, read, reloadKey) {
   return { body: mine ? state.body : null, failed: mine && state.failed, set: (body) => setState({ key, body, failed: false }) };
 }
 function isThingKind(kinds, kind) {
-  let at2 = kind;
-  for (let guard = 0;at2 !== null && guard < 32; guard++) {
-    if (at2 === "item")
+  let at4 = kind;
+  for (let guard = 0;at4 !== null && guard < 32; guard++) {
+    if (at4 === "item")
       return true;
-    const id = at2;
-    at2 = kinds.find((k2) => k2.id === id)?.extends ?? null;
+    const id = at4;
+    at4 = kinds.find((k2) => k2.id === id)?.extends ?? null;
   }
   return false;
 }
@@ -121446,7 +121585,7 @@ var PLACE_AS = { room: "A room", spot: "A spot", venue: "A venue" };
 var keepKey = (kind, id) => `${kind}:${id}`;
 function KeepList(props) {
   const { made, kept: kept2 } = props;
-  const row2 = (key, title, subtitle, inDraft) => {
+  const row4 = (key, title, subtitle, inDraft) => {
     const on = props.picked.has(key);
     return /* @__PURE__ */ u3(ListRow, {
       title,
@@ -121483,7 +121622,7 @@ function KeepList(props) {
               children: "Places"
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(List, {
-              children: made.places.map((p3) => row2(keepKey("place", p3.id), p3.name, `${PLACE_AS[p3.as]} in ${pathText2(p3.path) || "nowhere"}`, p3.inDraft))
+              children: made.places.map((p3) => row4(keepKey("place", p3.id), p3.name, `${PLACE_AS[p3.as]} in ${pathText2(p3.path) || "nowhere"}`, p3.inDraft))
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this) : null,
@@ -121496,9 +121635,9 @@ function KeepList(props) {
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3(List, {
               children: made.things.map((t3) => {
-                const at2 = t3.where.at(-1);
-                const words3 = at2 ? stepWords(at2) : "nowhere";
-                return row2(keepKey("thing", t3.id), t3.name, `${words3.charAt(0).toUpperCase()}${words3.slice(1)}`, t3.inDraft);
+                const at4 = t3.where.at(-1);
+                const words3 = at4 ? stepWords(at4) : "nowhere";
+                return row4(keepKey("thing", t3.id), t3.name, `${words3.charAt(0).toUpperCase()}${words3.slice(1)}`, t3.inDraft);
               })
             }, undefined, false, undefined, this)
           ]
@@ -121631,9 +121770,9 @@ function named4(rows2, verb) {
   return `${namesOf(rows2)} ${rows2.length === 1 ? verb.one : verb.many}`;
 }
 var IS = { one: "is", many: "are" };
-function isAt(row2, spot) {
-  const at2 = row2.where.at(-1);
-  return "place" in spot ? at2?.is === "place" && at2.id === spot.place : at2?.id === spot.in;
+function isAt(row4, spot) {
+  const at4 = row4.where.at(-1);
+  return "place" in spot ? at4?.is === "place" && at4.id === spot.place : at4?.id === spot.in;
 }
 function allWorn(rows2) {
   return rows2.length > 0 && rows2.every((r3) => r3.worn !== null && r3.with !== null);
@@ -121689,9 +121828,9 @@ function bulkEdit(change, rows2) {
       return { ops: granting.map((r3) => item2({ do: "grant", item: r3.id, who: change.who, basis: until2 ? "loan" : "assign", ...until2 ? { until: until2.until } : {} })), done: `${change.whom} may use ${namesOf(granting)} ${until2 ? `${until2.label.charAt(0).toLowerCase()}${until2.label.slice(1)}` : "now"}.` };
     }
     case "rename": {
-      const row2 = rows2.length === 1 ? rows2[0] : undefined;
+      const row4 = rows2.length === 1 ? rows2[0] : undefined;
       const name2 = change.name.trim();
-      return !row2 || name2 === "" || name2 === row2.name ? null : { ops: [item2({ do: "label", item: row2.id, name: name2 })], done: `${row2.name} is called ${name2} now.` };
+      return !row4 || name2 === "" || name2 === row4.name ? null : { ops: [item2({ do: "label", item: row4.id, name: name2 })], done: `${row4.name} is called ${name2} now.` };
     }
     case "size": {
       const changing = rows2.filter((r3) => r3.size !== change.size);
@@ -121935,9 +122074,9 @@ function treeIds(nodes) {
 }
 function addEdit(draft2) {
   const what = draft2.what;
-  const at2 = draft2.at.is === "place" ? { place: draft2.at.id } : { in: draft2.at.id };
+  const at4 = draft2.at.is === "place" ? { place: draft2.at.id } : { in: draft2.at.id };
   const said = what !== null && "vehicle" in what ? { class: what.vehicle.id, details: { make: what.vehicle.make, model: what.vehicle.model, year: what.vehicle.year } } : what !== null && ("type" in what) ? { type: what.type.id } : { ...draft2.kind !== "vehicle" ? makeFieldsOf(draft2.kind) : {}, ...what !== null && "size" in what ? { size: what.size } : {} };
-  const op = item2({ do: "make", name: draft2.name, at: at2, ...said, ...draft2.qty !== 1 ? { qty: draft2.qty } : {}, why: "The GM put it there" });
+  const op = item2({ do: "make", name: draft2.name, at: at4, ...said, ...draft2.qty !== 1 ? { qty: draft2.qty } : {}, why: "The GM put it there" });
   return { ops: [op], done: `${draft2.name}${draft2.qty !== 1 ? ` ×${draft2.qty}` : ""} is ${stepWords({ id: draft2.at.id, name: draft2.at.name, is: draft2.at.is })} now.` };
 }
 function GmAddSheet(props) {
@@ -122128,12 +122267,12 @@ function ThingsSection(props) {
               class: "lre-thing-tree",
               role: "list",
               "data-lre-found": "",
-              children: results.map((row2) => /* @__PURE__ */ u3(ThingRowView, {
-                row: row2,
-                sub: whereWords(row2),
-                picked: picked?.has(row2.id),
+              children: results.map((row4) => /* @__PURE__ */ u3(ThingRowView, {
+                row: row4,
+                sub: whereWords(row4),
+                picked: picked?.has(row4.id),
                 onOpen: tap
-              }, row2.id, false, undefined, this))
+              }, row4.id, false, undefined, this))
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
             children: [
@@ -122317,20 +122456,20 @@ function fieldOf(entity2, id) {
 var item2 = (change) => ({ op: "item", change });
 function GmThingBody(props) {
   const { page: page9, gm, pick, editor, entity: entity2 } = props;
-  const row2 = page9.row;
-  const id = row2.id;
-  const name2 = row2.name;
+  const row4 = page9.row;
+  const id = row4.id;
+  const name2 = row4.name;
   const busy = editor.busy;
   const pov2 = editor.gm.entities.find((e3) => e3.id === gm.pov);
-  const owner = row2.whose.presumed === null && row2.whose.owners.length === 1 ? row2.whose.owners[0] ?? null : null;
+  const owner = row4.whose.presumed === null && row4.whose.owners.length === 1 ? row4.whose.owners[0] ?? null : null;
   const granted = new Set(page9.grants.map((g2) => g2.who.id));
   const people2 = pick.parties.filter((p3) => p3.is === "person" && !granted.has(p3.id)).map((p3) => ({ value: p3.id, label: p3.name }));
   const parties = pick.parties.map((p3) => ({ value: p3.id, label: p3.name, ...p3.is !== "person" ? { sublabel: p3.is === "company" ? "a business" : `a ${p3.is}` } : {} }));
   const partyName = (who3) => pick.parties.find((p3) => p3.id === who3)?.name ?? who3;
-  const presumes = presumedLine(row2.whose);
-  const hiddenWords = row2.hidden ? gm.found ? "Hidden until searched; the player character has found it" : "Hidden until searched" : row2.secret ? gm.found ? "Secret; the player character knows of it" : "Secret" : "Public: anyone may know of it";
+  const presumes = presumedLine(row4.whose);
+  const hiddenWords = row4.hidden ? gm.found ? "Hidden until searched; the player character has found it" : "Hidden until searched" : row4.secret ? gm.found ? "Secret; the player character knows of it" : "Secret" : "Public: anyone may know of it";
   const putAway = gm.putAway;
-  const holder = row2.with;
+  const holder = row4.with;
   const holderName = holder !== null ? pick.where.find((c3) => c3.id === holder)?.name ?? partyName(holder) : null;
   return /* @__PURE__ */ u3("div", {
     class: "lre-gm-entity lre-gm-thing",
@@ -122349,7 +122488,7 @@ function GmThingBody(props) {
             children: [
               /* @__PURE__ */ u3(ActionRow, {
                 title: "Is",
-                value: whereWords(row2),
+                value: whereWords(row4),
                 subtitle: gm.why ?? undefined
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3(ActionRow, {
@@ -122397,20 +122536,20 @@ function GmThingBody(props) {
                 onClick: () => props.onSheet("kept"),
                 children: "Kept at…"
               }, undefined, false, undefined, this),
-              row2.worn !== null && holder !== null ? /* @__PURE__ */ u3(Button, {
+              row4.worn !== null && holder !== null ? /* @__PURE__ */ u3(Button, {
                 size: "sm",
                 icon: "close",
                 disabled: busy,
                 onClick: () => void editor.edit([item2({ do: "wear", item: id, who: holder, off: true })], `${holderName ?? holder} takes off ${name2}; it stays with them.`),
                 children: "Take off"
-              }, undefined, false, undefined, this) : row2.slot !== null && holder !== null ? /* @__PURE__ */ u3(Button, {
+              }, undefined, false, undefined, this) : row4.slot !== null && holder !== null ? /* @__PURE__ */ u3(Button, {
                 size: "sm",
                 icon: "shield",
                 disabled: busy,
                 title: `Put it on ${holderName ?? holder}`,
                 onClick: () => void editor.edit([item2({ do: "wear", item: id, who: holder })], `${holderName ?? holder} wears ${name2} now.`),
                 children: "Wear"
-              }, undefined, false, undefined, this) : row2.slot !== null ? /* @__PURE__ */ u3(Button, {
+              }, undefined, false, undefined, this) : row4.slot !== null ? /* @__PURE__ */ u3(Button, {
                 size: "sm",
                 icon: "shield",
                 disabled: busy,
@@ -122428,7 +122567,7 @@ function GmThingBody(props) {
             label: "Whose",
             children: /* @__PURE__ */ u3(ActionRow, {
               title: "Owner",
-              value: whoseWords(row2.whose),
+              value: whoseWords(row4.whose),
               subtitle: presumes ?? undefined
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
@@ -122496,7 +122635,7 @@ function GmThingBody(props) {
             class: "lre-small",
             "data-lre-what": "",
             children: [
-              [row2.type, page9.kindLabel, `${sizeLabel(row2.size)}, ${SIZE_FROM_WORDS[page9.sizeFrom]}`].filter((p3) => p3 !== null && p3 !== "").join(" · "),
+              [row4.type, page9.kindLabel, `${sizeLabel(row4.size)}, ${SIZE_FROM_WORDS[page9.sizeFrom]}`].filter((p3) => p3 !== null && p3 !== "").join(" · "),
               gm.made ? " · made in play" : ""
             ]
           }, undefined, true, undefined, this),
@@ -122504,12 +122643,12 @@ function GmThingBody(props) {
             id,
             name: name2,
             entity: entity2,
-            size: row2.size,
+            size: row4.size,
             editor
           }, JSON.stringify([name2, fieldOf(entity2, "aliases"), fieldOf(entity2, "description"), fieldOf(entity2, "size"), fieldOf(entity2, "consumable"), fieldOf(entity2, "sleep"), fieldOf(entity2, "qty"), fieldOf(entity2, "condition")]), false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      row2.kind === "vehicle" ? /* @__PURE__ */ u3(Section, {
+      row4.kind === "vehicle" ? /* @__PURE__ */ u3(Section, {
         title: "Specs",
         children: /* @__PURE__ */ u3(GmSpecs, {
           id,
@@ -122518,8 +122657,8 @@ function GmThingBody(props) {
           editor
         }, JSON.stringify(fieldOf(entity2, "specs")), false, undefined, this)
       }, undefined, false, undefined, this) : null,
-      row2.holds !== null ? /* @__PURE__ */ u3(HoldsSection, {
-        holds: row2.holds,
+      row4.holds !== null ? /* @__PURE__ */ u3(HoldsSection, {
+        holds: row4.holds,
         contents: page9.contents,
         problems: NO_PROBLEMS,
         onOpen: props.onOpen,
@@ -122532,7 +122671,7 @@ function GmThingBody(props) {
           children: /* @__PURE__ */ u3(ActionRow, {
             title: "Who may know of it",
             value: hiddenWords,
-            actions: (row2.hidden || row2.secret) && !gm.found ? /* @__PURE__ */ u3(Button, {
+            actions: (row4.hidden || row4.secret) && !gm.found ? /* @__PURE__ */ u3(Button, {
               size: "sm",
               icon: "eye",
               disabled: busy,
@@ -122810,11 +122949,11 @@ function HandSheet(props) {
         }, undefined, false, undefined, this) : null,
         /* @__PURE__ */ u3(List, {
           children: props.people.map((p3) => {
-            const at2 = p3.path.at(-1);
+            const at4 = p3.path.at(-1);
             return /* @__PURE__ */ u3(ListRow, {
               icon: "user",
               title: p3.name,
-              subtitle: cannotHold(p3, props.size) ?? (at2 ? stepWords(at2) : undefined),
+              subtitle: cannotHold(p3, props.size) ?? (at4 ? stepWords(at4) : undefined),
               chevron: true,
               onClick: () => props.onHand(p3.id, basis, basis === "loan" ? until2 : undefined)
             }, p3.id, false, undefined, this);
@@ -122886,8 +123025,8 @@ function GmThingPage(props) {
   const page9 = body?.thing ?? null;
   const gm = body?.gm ?? null;
   const pick = body?.pick ?? null;
-  const row2 = page9?.row ?? null;
-  const name2 = row2?.name ?? entity2?.name ?? id;
+  const row4 = page9?.row ?? null;
+  const name2 = row4?.name ?? entity2?.name ?? id;
   const close = () => setSheet(null);
   const send2 = (ops, done) => void editor.edit(ops, done).then((ok) => ok && close());
   const lyingAt = page9 ? pick?.where.find((c3) => c3.is === "place" && c3.id === page9.row.where.at(-1)?.id) : undefined;
@@ -122900,8 +123039,8 @@ function GmThingPage(props) {
     title: name2,
     subtitle: /* @__PURE__ */ u3(M, {
       children: [
-        row2 ? /* @__PURE__ */ u3(ThingChips, {
-          row: row2,
+        row4 ? /* @__PURE__ */ u3(ThingChips, {
+          row: row4,
           whose: false
         }, undefined, false, undefined, this) : null,
         gm?.made ? /* @__PURE__ */ u3(Badge, {
@@ -122997,11 +123136,11 @@ function GmThingPage(props) {
         onClose: close,
         children: /* @__PURE__ */ u3(List, {
           children: pick.where.filter((c3) => c3.is === "person").map((p3) => {
-            const at2 = p3.path.at(-1);
+            const at4 = p3.path.at(-1);
             return /* @__PURE__ */ u3(ListRow, {
               icon: "user",
               title: p3.name,
-              subtitle: cannotHold(p3, page9.row.size) ?? (at2 ? stepWords(at2) : undefined),
+              subtitle: cannotHold(p3, page9.row.size) ?? (at4 ? stepWords(at4) : undefined),
               chevron: true,
               onClick: () => send2([item2({ do: "wear", item: id, who: p3.id })], `${p3.name} wears ${name2} now.`)
             }, p3.id, false, undefined, this);
@@ -123011,13 +123150,13 @@ function GmThingPage(props) {
     ]
   }, undefined, true, undefined, this);
 }
-function personThingMenu(row2, bucket, person4, editor) {
+function personThingMenu(row4, bucket, person4, editor) {
   const out = [];
   if (bucket === "outfit")
-    out.push({ label: "Take off", icon: "close", disabled: editor.busy, onSelect: () => void editor.edit([item2({ do: "wear", item: row2.id, who: person4.id, off: true })], `${person4.name} takes off ${row2.name}; it stays with them.`) });
-  else if (row2.slot !== null && (bucket === "carried" || bucket === "wardrobe" || bucket === "holding"))
-    out.push({ label: "Wear", icon: "shield", disabled: editor.busy, onSelect: () => void editor.edit([item2({ do: "wear", item: row2.id, who: person4.id })], `${person4.name} wears ${row2.name} now.`) });
-  const away = bulkEdit({ do: "away" }, [row2]);
+    out.push({ label: "Take off", icon: "close", disabled: editor.busy, onSelect: () => void editor.edit([item2({ do: "wear", item: row4.id, who: person4.id, off: true })], `${person4.name} takes off ${row4.name}; it stays with them.`) });
+  else if (row4.slot !== null && (bucket === "carried" || bucket === "wardrobe" || bucket === "holding"))
+    out.push({ label: "Wear", icon: "shield", disabled: editor.busy, onSelect: () => void editor.edit([item2({ do: "wear", item: row4.id, who: person4.id })], `${person4.name} wears ${row4.name} now.`) });
+  const away = bulkEdit({ do: "away" }, [row4]);
   if (away)
     out.push({ label: "Put it away", icon: "home", disabled: editor.busy, onSelect: () => void editor.edit(away.ops, away.done) });
   return out;
@@ -123028,8 +123167,8 @@ function gmSets(person4, outfit, entities) {
   return Object.entries(setsOf({ sets: person4.fields.find((f3) => f3.id === "sets")?.value })).map(([id, set]) => {
     const reached = set.pieces.filter((p3) => byId.get(p3.item)?.gone === false);
     const on = reached.length > 0 && reached.every((p3) => {
-      const row2 = worn.get(p3.item);
-      return row2 !== undefined && row2.worn !== null && row2.worn === (p3.slot ?? row2.slot);
+      const row4 = worn.get(p3.item);
+      return row4 !== undefined && row4.worn !== null && row4.worn === (p3.slot ?? row4.slot);
     });
     const pieces = set.pieces.map((p3) => ({ item: p3.item, name: byId.get(p3.item)?.name ?? p3.item, ...p3.slot !== undefined ? { slot: p3.slot.replace(/_/g, " ") } : {}, ...reached.includes(p3) ? {} : { missing: true } }));
     return { id, name: set.name, kind: set.kind, pieces, ...on ? { on: true } : {} };
@@ -123136,7 +123275,7 @@ function GmPersonThings(props) {
           person: props.person.id,
           groups,
           problems: NO_PROBLEMS,
-          menu: (row2, bucket) => personThingMenu(row2, bucket, props.person, props.editor),
+          menu: (row4, bucket) => personThingMenu(row4, bucket, props.person, props.editor),
           onOpen: props.onOpen
         }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
           class: "lre-small lre-muted",
@@ -124051,7 +124190,7 @@ function CharacterSheet(props) {
 // src/frontend/gm/world.tsx
 function FightCard(props) {
   const { fight } = props;
-  const standing2 = fight.order.filter((row2) => !row2.down && !row2.out).length;
+  const standing2 = fight.order.filter((row4) => !row4.down && !row4.out).length;
   return /* @__PURE__ */ u3(Section, {
     title: "Fight under way",
     flush: true,
@@ -124891,8 +125030,8 @@ function spanText(ms) {
   const days = Math.floor(hours / 24);
   return hours % 24 === 0 ? plural(days, "day", "days") : `${plural(days, "day", "days")} ${hours % 24} h`;
 }
-function clockText2(at2, now) {
-  const when2 = new Date(at2);
+function clockText2(at4, now) {
+  const when2 = new Date(at4);
   const time = when2.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
   return when2.toDateString() === new Date(now).toDateString() ? time : `${when2.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}, ${time}`;
 }
@@ -129205,8 +129344,8 @@ function setup2(ctx) {
   window.addEventListener(OPEN_DIAGNOSTICS_EVENT, showDiagnostics);
   cleanups.push(() => window.removeEventListener(OPEN_DIAGNOSTICS_EVENT, showDiagnostics));
   const showRecord = (event) => {
-    const at2 = event.detail;
-    ui.update((state) => atTurnRecord(state, at2));
+    const at4 = event.detail;
+    ui.update((state) => atTurnRecord(state, at4));
     tab.activate();
   };
   window.addEventListener(OPEN_TURN_RECORD_EVENT, showRecord);
@@ -129231,8 +129370,8 @@ function setup2(ctx) {
                 return;
               size2 = next;
               widget.setSize(next.width, next.height);
-              const at2 = widget.getPosition();
-              if (at2.x !== placed.x || at2.y !== placed.y)
+              const at4 = widget.getPosition();
+              if (at4.x !== placed.x || at4.y !== placed.y)
                 return;
               placed = { x: hudCentreX(host.viewport.get(), next.width), y: placed.y };
               widget.moveTo(placed.x, placed.y);
