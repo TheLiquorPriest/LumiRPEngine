@@ -87,8 +87,12 @@ import { type AnchorRow, anchorsOf, findTurn, recHarnessOf, unplayedOf } from ".
 import type { AgentModelAsk, AgentModelChoice, ChatClaim, ClaimAsk, DefinitionsAsk, ExtensionDefinitions, GuidanceLevel, HarnessExtension, HeldTools, JobView, ReleaseVerdict, RemoteTool, RemoteToolCall, ReplyRelease, ReplyUnreleased, ReplyWritten, RunBegan, RunEnded, StorySetting, ToolsPort } from "./shapes";
 import { Cast, type Ceiling, closedAnswer, OpenTurn, reach, type Standing, standingOf, toolRefusal, type TurnCall } from "./turn";
 import { chooseAgentModel } from "../../shared/story-models";
+import { feedItem } from "../../engine/story/feed";
+import { turnBeats } from "../story/feed";
+import { PLAYER } from "../story/minds";
 import { shapeNotebook } from "../story/notebook";
 import { directLineGuidance, narrationGuidance, releaseGate, releaseNoted, replyTool, unreleasedReply } from "../story/narration";
+import { turnStoryPort } from "../story/record";
 import { authorOpening } from "../story/opening";
 import { prepareEnv } from "../story/prepare";
 import { preparationRunEnded } from "../story/prepare-carry";
@@ -1212,7 +1216,7 @@ export class HarnessEngine implements HarnessHooks {
     return releaseGate(open.stageBook, open.frame.settings, { role: release.agent.role, args: release.args });
   }
 
-  /** The reply went out, or a handed-on stream ended (LumiAH's `released`): the turn's stage book marks each passage the call named as out. */
+  /** The reply went out, or a handed-on stream ended (LumiAH's `released`): the turn's stage book marks each passage the call named as out, or, where the call names nothing after the engine offered a reply in the author's place, each passage it offered (`releaseNoted`). */
   private released(release: ReplyRelease): Promise<void> {
     const open = this.turns.get(release.turn);
     if (open) releaseNoted(open.stageBook, release.args);
@@ -1221,13 +1225,17 @@ export class HarnessEngine implements HarnessHooks {
 
   /**
    * The reply of a turn whose author's run ended with nothing released (LumiAH's `unreleased`: at a
-   * limit, after a failed call, or by its own end; never after the player's Stop): what the turn's
-   * telling settled, from passage 1 on, up to the first not ready (`unreleasedReply`), so work that
-   * passed its checks still reaches the player. Null where none did, and the turn fails as before.
+   * limit, after a failed call, or by its own end; never after the player's Stop): the turn's telling,
+   * only where it is complete and settled (`unreleasedReply`: every passage passed its check, and every
+   * beat of the turn that reached the player's character is told), so the turn commits exactly what
+   * the chat tells. Each passage of it is marked out only when LumiAH says it went (`released`). Null
+   * otherwise, and the turn fails as before, with nothing kept.
    */
-  private unreleased(turn: ReplyUnreleased): Promise<{ text: string } | null> {
+  private async unreleased(turn: ReplyUnreleased): Promise<{ text: string } | null> {
     const open = this.turns.get(turn.turn);
-    return Promise.resolve(open && !open.closed ? unreleasedReply(open.stageBook, open.frame.settings.narration) : null);
+    if (!open || open.closed) return null;
+    const beats = (await turnBeats({ turn: { story: turnStoryPort(this.rt, { chatId: open.chatId, userId: open.userId, turn: open.generationId }) } })) ?? [];
+    return unreleasedReply(open.stageBook, open.frame.settings.narration, beats.filter((b) => feedItem(b, PLAYER) !== null).map((b) => b.id));
   }
 
   // ---------------------------------------------------------------- LumiAH's records in the ledger

@@ -360,4 +360,46 @@ describe("the story engine in the runtime", () => {
     expect(String(lastResult(play.calls("narrator-next")[1]).recent)).toContain(`${FIRST}\n\n${KETTLE}`);
     noModelCalls(rig);
   });
+
+  test("a narrator asked for passage 2 before its beats are recorded names the passage that told everything, and once they are recorded it tells them: no beat struck, and the reply is both", async () => {
+    const { bed, rig, chatId } = await storyChat();
+    const again = "Tell passage 2 now: the kettle, as Jordan hears it.";
+    const play = cast(
+      {
+        name: "author",
+        is: offers("reply_write"),
+        lines: [
+          { toolCalls: [rentBeat(), toolCall("commit", {})] },
+          { toolCalls: [toolCall("delegate", { agent: "narrator", task: NARRATE_FIRST })] },
+          { toolCalls: [toolCall("delegate", { agent: "game_master", task: CHECK_FIRST })] },
+          { toolCalls: [toolCall("delegate", { agent: "narrator", task: NARRATE_KETTLE })] },
+          { toolCalls: [kettleBeat(), toolCall("commit", {})] },
+          { toolCalls: [toolCall("delegate", { agent: "narrator", task: again })] },
+          { toolCalls: [toolCall("delegate", { agent: "game_master", task: CHECK_KETTLE })] },
+          { toolCalls: [toolCall("reply_write", { pieces: [1, 2] })] },
+          "Told.",
+        ],
+      },
+      { name: "narrator-first", is: told(NARRATE_FIRST), lines: [{ toolCalls: [toolCall("narration_read", { passage: 1 })] }, { toolCalls: [toolCall("passage_draft", { passage: 1, text: FIRST })] }, `Passage 1, ${FIRST.length} characters, waiting for its check.`] },
+      // It hands back what its read said, as told to.
+      { name: "narrator-early", is: told(NARRATE_KETTLE), lines: [{ toolCalls: [toolCall("narration_read", { passage: 2 })] }, (request) => results(request).at(-1) ?? ""] },
+      { name: "narrator-again", is: told(again), lines: [{ toolCalls: [toolCall("narration_read", { passage: 2 })] }, { toolCalls: [toolCall("passage_draft", { passage: 2, text: KETTLE })] }, `Passage 2, ${KETTLE.length} characters, waiting for its check.`] },
+      { name: "gm-first", is: told(CHECK_FIRST), lines: [{ toolCalls: [toolCall("passage_read", { passage: 1 })] }, { toolCalls: [toolCall("passage_check", { passage: 1, holds: true })] }, "It holds."] },
+      { name: "gm-kettle", is: told(CHECK_KETTLE), lines: [{ toolCalls: [toolCall("passage_read", { passage: 2 })] }, { toolCalls: [toolCall("passage_check", { passage: 2, holds: true })] }, "It holds."] },
+    );
+    bed.script = play.script;
+    rig.host.sendUser(chatId, RENT);
+    await rig.host.settle();
+
+    const replied = await bed.reply(chatId);
+
+    expect(replied.error).toBeNull();
+    expect(replied.content).toBe(`${FIRST}\n\n${KETTLE}`);
+    // The early read named passage 1 as the one that told everything that had reached Jordan, and that answer reached the author.
+    const pov = String(lastResult(play.calls("narrator-first")[1]).pov);
+    const early = renderPrompt(STAGE_NOTE.toldAlready, {}, { pov, n: "2", told: "1" });
+    expect(results(play.calls("narrator-early")[1]).at(-1)).toBe(early);
+    expect(results(play.calls("author")[4]).at(-1)).toContain(early);
+    noModelCalls(rig);
+  });
 });

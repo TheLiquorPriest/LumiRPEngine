@@ -124,10 +124,10 @@ describe("each passage by its number", () => {
     expect(await refusal(third, READ, { passage: 3 })).toBe(note(STAGE_NOTE.passageNext, { n: "3", next: "1" }));
     expect(await refusal(second, READ, { passage: 2 })).toBe(note(STAGE_NOTE.passageNext, { n: "2", next: "1" }));
     expect((await answer(first, READ, { passage: 1 })).passage).toBe(1);
-    // Every beat that had reached Jordan is passage 1's: passage 2 has nothing to tell yet, and 3 is still past the next.
-    expect(await refusal(second, READ, { passage: 2 })).toBe(note(STAGE_NOTE.nothing, { pov: "Jordan Ellis" }));
+    // Every beat that had reached Jordan is passage 1's: passage 2 is told so, naming passage 1, and 3 is still past the next.
+    expect(await refusal(second, READ, { passage: 2 })).toBe(note(STAGE_NOTE.toldAlready, { pov: "Jordan Ellis", n: "2", told: "1" }));
     expect(await refusal(third, READ, { passage: 3 })).toBe(note(STAGE_NOTE.passageNext, { n: "3", next: "2" }));
-    expect(await refusal(third, DRAFT, { passage: 3, text: "The kettle shrieks." })).toBe(note(STAGE_NOTE.passageNext, { n: "3", next: "2" }));
+    expect(await refusal(third, DRAFT, { passage: 3, text: "The kettle shrieks." })).toBe(note(STAGE_NOTE.readFirst, { n: "3" }));
     expect(await refusal(second, DRAFT, { passage: 2, text: "The kettle shrieks." })).toBe(note(STAGE_NOTE.readFirst, { n: "2" }));
     expect(await refusal(second, DRAFT, { text: "The kettle shrieks." })).toBe(note(STAGE_NOTE.passageNeeded));
     await answer(first, DRAFT, { passage: 1, text: "Mara shrugs." });
@@ -151,14 +151,14 @@ describe("each passage by its number", () => {
       [1, ["Mara shrugs.", "Mara shrugs. “The rent's covered, don't worry.”"]],
       [2, ["The kettle shrieks.", "The kettle shrieks on the stove."]],
     ]);
-    // A narrator started as someone else is never handed, nor drafts, a passage seen through Jordan's eyes.
-    const joss = await as(HARNESS_AGENT.narrator, false, JOSS);
+    // A narrator started as someone else is never handed a passage seen through Jordan's eyes, so it has none to draft.
+    const joss = another(await as(HARNESS_AGENT.narrator, false, JOSS), "agent_narrator_joss");
     expect(await refusal(joss, READ, { passage: 1 })).toBe(note(STAGE_NOTE.passageEyes, { n: "1" }));
-    expect(await refusal(joss, DRAFT, { passage: 2, text: "The kettle." })).toBe(note(STAGE_NOTE.passageEyes, { n: "2" }));
+    expect(await refusal(joss, DRAFT, { passage: 2, text: "The kettle." })).toBe(note(STAGE_NOTE.readFirst, { n: "2" }));
   });
 
-  test("a narrator sent on to tell more opens the next passage with only what is new, whether its passage passed, waits for its check, or no one checks; it never writes over the telling it gave", async () => {
-    // Its passage passed: the follow-up opens passage 2 with the new beat alone, and passage 1 can't be drafted again.
+  test("a narrator sent on to tell more opens the next passage with only what is new, whether its passage passed, waits for its check, or no one checks; it drafts only the passage it last read, and never writes over the telling it gave", async () => {
+    // Its passage passed: the follow-up opens passage 2 with the new beat alone, and a draft under its old number is refused, naming the passage it read.
     const passed = await stage();
     const narrator = await passed.as(HARNESS_AGENT.narrator, false);
     await answer(narrator, READ);
@@ -167,21 +167,22 @@ describe("each passage by its number", () => {
     await passed.story.write({ beats: [KETTLE] });
     const more = await answer(narrator, READ);
     expect({ passage: more.passage, happened: more.happened }).toEqual({ passage: 2, happened: [expect.objectContaining({ reach: "whole", sensed: "The kettle shrieks." })] });
-    expect(await refusal(narrator, DRAFT, { passage: 1, text: "The kettle shrieks." })).toBe(note(STAGE_NOTE.draftPassed, { n: "1", next: "3" }));
+    expect(await refusal(narrator, DRAFT, { passage: 1, text: "The kettle shrieks." })).toBe(note(STAGE_NOTE.draftNotRead, { n: "1", read: "2" }));
     await answer(narrator, DRAFT, { passage: 2, text: "The kettle shrieks." });
     expect(drafts(passed.book)).toEqual([
       [1, ["Mara shrugs."]],
       [2, ["The kettle shrieks."]],
     ]);
-    // Its passage waits for its check, or no one checks: a draft of passage 1 telling the new beat is refused, and passage 1's telling stands.
+    // Its passage waits for its check, or no one checks: a draft of passage 1 telling the new beat, unread, is refused; read as passage 2, a draft under the old number is too; passage 1's telling stands.
     for (const check of ["gm", "none"] as const) {
       const waiting = await stage({ check });
       const told = await waiting.as(HARNESS_AGENT.narrator, false);
       await answer(told, READ);
       await answer(told, DRAFT, { passage: 1, text: "Mara shrugs." });
       await waiting.story.write({ beats: [KETTLE] });
-      expect({ check, refused: await refusal(told, DRAFT, { passage: 1, text: "The kettle shrieks." }) }).toEqual({ check, refused: note(STAGE_NOTE.draftWaits, { n: "1", next: "2" }) });
+      expect({ check, refused: await refusal(told, DRAFT, { passage: 1, text: "The kettle shrieks." }) }).toEqual({ check, refused: note(STAGE_NOTE.draftWaits, { n: "1" }) });
       expect({ check, passage: (await answer(told, READ)).passage }).toEqual({ check, passage: 2 });
+      expect({ check, refused: await refusal(told, DRAFT, { passage: 1, text: "The kettle shrieks." }) }).toEqual({ check, refused: note(STAGE_NOTE.draftNotRead, { n: "1", read: "2" }) });
       await answer(told, DRAFT, { passage: 2, text: "The kettle shrieks." });
       expect({ check, drafts: drafts(waiting.book) }).toEqual({
         check,
@@ -207,6 +208,21 @@ describe("each passage by its number", () => {
     await answer(narrator, READ, { passage: 1 });
     await answer(narrator, DRAFT, { passage: 1, text: "Mara shrugs. “The rent's covered, don't worry.”" });
     expect((await answer(gm, CHECK, { passage: 1, holds: false, changes: ["Keep her shrug."] })).next).toBe(note(STAGE_NOTE.checkedSpent, { n: "1" }));
+  });
+
+  test("a change to a waiting draft goes through where what no passage tells yet had reached its eyes before the narrator read it", async () => {
+    const { book, story, as, another } = await stage();
+    const first = await as(HARNESS_AGENT.narrator, false);
+    await answer(first, READ);
+    await answer(first, DRAFT, { passage: 1, text: "Mara shrugs." });
+    await answer(await as(HARNESS_AGENT.gm, false), CHECK, { passage: 1, holds: false, changes: ["Give her words."] });
+    // The next passage's beat is recorded, then a reviser reads passage 1 and drafts, and fixes its own draft before the check.
+    await story.write({ beats: [KETTLE] });
+    const reviser = another(first, "agent_narrator_2");
+    await answer(reviser, READ, { passage: 1 });
+    await answer(reviser, DRAFT, { passage: 1, text: "Mara shrugs. “The rent's covered.”" });
+    await answer(reviser, DRAFT, { passage: 1, text: "Mara shrugs. “The rent's covered, don't worry.”" });
+    expect(drafts(book)).toEqual([[1, ["Mara shrugs.", "Mara shrugs. “The rent's covered, don't worry.”"]]]);
   });
 });
 
@@ -330,7 +346,7 @@ describe("the check and the release gate", () => {
     expect(spent).toBe(note(STAGE_NOTE.draftSpent, { n: "1", made: "1" }));
     expect(spent).toContain(NARRATION_LABELS.revisions);
     // A spent passage is the author's to release or leave out: a new narrator for the same eyes opens nothing, as nothing new reached them.
-    expect(await refusal(byAuthor.another(narrator, "agent_narrator_2"), READ)).toBe(note(STAGE_NOTE.nothing, { pov: "Jordan Ellis" }));
+    expect(await refusal(byAuthor.another(narrator, "agent_narrator_2"), READ)).toBe(note(STAGE_NOTE.toldAlready, { pov: "Jordan Ellis", n: "2", told: "1" }));
     // Its drafts spent, the last one goes out as it stands, if the author lets it.
     expect(released(byAuthor.book, byAuthor.settings, { pieces: [1] })).toEqual({ text: "Mara shrugs." });
 
@@ -364,11 +380,13 @@ describe("where the telling stands, and what goes out when the author stops shor
     expect(JSON.stringify(list)).not.toContain("Mara shrugs");
   });
 
-  test("the author's run ending with nothing released sends what passed, from passage 1 up to the first not ready, and marks it out; with passage 1 not ready, nothing", async () => {
+  test("the author's run ending with nothing released offers the whole telling only where every passage is settled and every beat that reached the player's character is told, marked out only once LumiAH says it went; else nothing", async () => {
     const { book, settings, story, as } = await stage();
     const narrator = await as(HARNESS_AGENT.narrator, false);
     const gm = await as(HARNESS_AGENT.gm, false);
-    expect(unreleasedReply(book, settings.narration)).toBeNull();
+    /** The beats of the turn that reached Jordan, as the engine finds them when LumiAH asks. */
+    const jordans = ["b1", "b2", "b5", "b6"];
+    expect(unreleasedReply(book, settings.narration, jordans)).toBeNull();
     await answer(narrator, READ);
     await answer(narrator, DRAFT, { passage: 1, text: "Mara shrugs." });
     await answer(gm, CHECK, { passage: 1, holds: true });
@@ -379,20 +397,52 @@ describe("where the telling stands, and what goes out when the author stops shor
     await story.write({ beats: [DOOR] });
     await answer(narrator, READ);
     await answer(narrator, DRAFT, { passage: 3, text: "The front door bangs." });
-    expect(unreleasedReply(book, settings.narration)).toEqual({ text: "Mara shrugs.\n\nThe kettle shrieks." });
-    expect(book.opened.map((p) => p.released)).toEqual([true, true, false]);
+    const all = [...jordans, KETTLE.id, DOOR.id];
+    // Passage 3 waits for its check: nothing goes, not even what passed before it.
+    expect(unreleasedReply(book, settings.narration, all)).toBeNull();
+    await answer(gm, CHECK, { passage: 3, holds: true });
+    // A beat that reached Jordan and no passage tells: nothing goes.
+    expect(unreleasedReply(book, settings.narration, [...all, "b9"])).toBeNull();
+    expect(unreleasedReply(book, settings.narration, all)).toEqual({ text: "Mara shrugs.\n\nThe kettle shrieks.\n\nThe front door bangs." });
+    // Offered, not yet sent: LumiAH may still send nothing (its wait ran out, the player stopped the turn), and then nothing is out.
+    expect(book.opened.map((p) => p.released)).toEqual([false, false, false]);
+    // LumiAH says it went, with no arguments: what was offered is out.
+    releaseNoted(book, {});
+    expect(book.opened.map((p) => p.released)).toEqual([true, true, true]);
 
-    // Passage 1 waits for its check: what passed after it isn't the reply's start, and nothing goes.
-    const first = await stage();
-    const told = await first.as(HARNESS_AGENT.narrator, false);
+    // A passage found at fault with no drafts left is one no one named: nothing goes, though the passage after it passed.
+    const spent = await stage({ revisions: 0 });
+    const told = await spent.as(HARNESS_AGENT.narrator, false);
+    const checker = await spent.as(HARNESS_AGENT.gm, false);
     await answer(told, READ);
-    await answer(told, DRAFT, { passage: 1, text: "Mara shrugs." });
-    await first.story.write({ beats: [KETTLE] });
+    await answer(told, DRAFT, { passage: 1, text: "Mara shrugs and pours a glass of wine." });
+    await answer(checker, CHECK, { passage: 1, holds: false, changes: ["She pours nothing: drop the wine."] });
+    await spent.story.write({ beats: [KETTLE] });
     await answer(told, READ);
     await answer(told, DRAFT, { passage: 2, text: "The kettle shrieks." });
-    await answer(await first.as(HARNESS_AGENT.gm, false), CHECK, { passage: 2, holds: true });
-    expect(unreleasedReply(first.book, first.settings.narration)).toBeNull();
-    expect(first.book.opened.map((p) => p.released)).toEqual([false, false]);
+    await answer(checker, CHECK, { passage: 2, holds: true });
+    expect(unreleasedReply(spent.book, spent.settings.narration, [...jordans, KETTLE.id])).toBeNull();
+    expect(spent.book.opened.map((p) => p.released)).toEqual([false, false]);
+  });
+});
+
+describe("a new passage with nothing left to tell", () => {
+  test("names the passage that told the last of what reached its eyes, so its own beats are recorded after it; with no beat reaching those eyes, says that", async () => {
+    const { story, as, another } = await stage();
+    const first = await as(HARNESS_AGENT.narrator, false);
+    await answer(first, READ);
+    await answer(first, DRAFT, { passage: 1, text: "Mara shrugs." });
+    const second = another(first, "agent_narrator_2");
+    const told = await refusal(second, READ, { passage: 2 });
+    expect(told).toBe(note(STAGE_NOTE.toldAlready, { pov: "Jordan Ellis", n: "2", told: "1" }));
+    expect(await refusal(second, READ)).toBe(told);
+    // Recorded after passage 1, the next passage's beats are its own.
+    await story.write({ beats: [KETTLE] });
+    const read = await answer(second, READ, { passage: 2 });
+    expect({ passage: read.passage, happened: read.happened }).toEqual({ passage: 2, happened: [expect.objectContaining({ sensed: "The kettle shrieks." })] });
+    // No beat on the record reached these eyes: nothing is named as told.
+    const empty = await stage({}, () => []);
+    expect(await refusal(await empty.as(HARNESS_AGENT.narrator, false), READ)).toBe(note(STAGE_NOTE.nothing, { pov: "Jordan Ellis" }));
   });
 });
 

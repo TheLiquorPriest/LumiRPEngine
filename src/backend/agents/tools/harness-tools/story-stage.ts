@@ -146,11 +146,15 @@ export const STAGE_TOOLS: readonly HarnessToolDefinition[] = [
       const asks = [...new Set(named.flatMap((m) => (m.module ? [m.module.name] : [])))];
       const beats = (await turnBeats(env)) ?? [];
       const reaching = beats.filter((b) => feedItem(b, eyes) !== null).map((b) => b.id);
-      // The narrator's passage by its number, the next new one where it names none; the author's read is of a passage not opened.
-      const taken = narrator ? book.take(intArg(args, "passage") ?? book.next(), eyes, reaching, asks) : { n: null, pov: eyes, beats: book.untold(reaching), drafts: [], modules: asks };
+      // The narrator's passage by its number, the next new one where it names none, which becomes the one it drafts; the author's read is of a passage not opened.
+      const taken = narrator ? book.take(env.agent.id, intArg(args, "passage") ?? book.next(), eyes, reaching, asks) : { n: null, pov: eyes, beats: book.untold(reaching), drafts: [], modules: asks };
       if (taken !== null && "note" in taken) return view.refuse(taken.note, taken.vars);
       const scene = sceneOf({ registry: view.registry, world: view.world, state: turn.whole?.() ?? view.state, pov: eyes, texts: view.texts });
-      if (taken === null || taken.beats.length === 0) return view.refuse(STAGE_NOTE.nothing, { pov: scene.pov });
+      if (taken === null || taken.beats.length === 0) {
+        // Everything that reached these eyes is told: the passage that told the last of it is named, so the author records this one's beats after it rather than striking any.
+        const teller = book.opened.findLast((p) => p.beats.some((b) => reaching.includes(b)));
+        return teller ? view.refuse(STAGE_NOTE.toldAlready, { pov: scene.pov, n: String(taken?.n ?? book.next()), told: String(teller.n) }) : view.refuse(STAGE_NOTE.nothing, { pov: scene.pov });
+      }
       const presentation = preset
         ? taken.modules.flatMap((name) => {
             const m = findModule(preset, name);
@@ -181,9 +185,8 @@ export const STAGE_TOOLS: readonly HarnessToolDefinition[] = [
       if (typeof eyes !== "string") return eyes;
       const s = turn.settings.narration;
       const beats = (await turnBeats(env)) ?? [];
-      // What reached these eyes that no passage tells yet: the next passage's, never written over a draft that waits for its check.
-      const untold = book.untold(beats.filter((b) => feedItem(b, eyes) !== null).map((b) => b.id));
-      const out = book.draft(n, eyes, typeof args.text === "string" ? args.text : "", s, untold);
+      const reaching = beats.filter((b) => feedItem(b, eyes) !== null).map((b) => b.id);
+      const out = book.draft(env.agent.id, n, typeof args.text === "string" ? args.text : "", s, reaching);
       if ("note" in out) return view.refuse(out.note, out.vars);
       const { passage, draft } = out;
       const recorded = passage.drafts.at(-1)?.text ?? "";

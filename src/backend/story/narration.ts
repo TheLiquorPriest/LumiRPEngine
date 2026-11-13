@@ -11,9 +11,10 @@
 //   (`HarnessTurn.stageBook`): each passage, by its number, with its beats, drafts and checks, and
 //   whether it went out. Nothing of it is written to the record: what reached the player is the reply.
 // - Each passage is numbered 1, 2, 3 in the order told, and a narrator names its passage by its
-//   number: a read of the next number opens a new passage, a read or a draft of an open one works on
-//   that one. Which passage a draft is of is said, never guessed, so several narrators at work at once
-//   each keep to their own, and a narrator sent on to tell more opens the next one.
+//   number: a read of the next number opens a new passage, a read of an open one gives it again, and
+//   a narrator drafts only the passage its last read gave it. Which passage a draft is of is said,
+//   never guessed, so several narrators at work at once each keep to their own, and a narrator sent
+//   on to tell more opens the next one and never drafts over the one before.
 // - A passage holds the beats of the turn that reached its point of view and no earlier passage
 //   holds, as they stood when it opened; beats decided later are the next passage's. A revision is
 //   given its own passage's beats again. Only a check that finds a draft at fault opens a revision: a
@@ -28,8 +29,10 @@
 //   before or after them up to a length (`narration.ownChars`): alone, those are a line for an extra
 //   or an answer out of character. Nothing goes out from an agent but the author. A character's
 //   stream on the direct line is never asked about (AH6 §8): it is the turn's one release, and is
-//   only told. Where the author's run ends with nothing released, what passed its checks still goes
-//   out (`unreleasedReply`): each passage the gate would let go, from the first, up to one it wouldn't.
+//   only told. Where the author's run ends with nothing released, a telling that is complete and
+//   settled still goes out (`unreleasedReply`): every passage passed its check and every beat that
+//   reached the reply's eyes is told; else nothing does. Each passage of it is marked as out only once
+//   LumiAH says it went (`released` with no arguments, `releaseNoted`).
 // - The settings (`UserSettings.narration`) say who checks, how many drafts a passage may have, how
 //   much prose the narrator is handed for its voice, and what the author may release in its own words.
 //
@@ -110,6 +113,10 @@ function settled(p: Passage, s: Pick<NarrationSettings, "check">): boolean {
 /** Each passage of the reply one turn is writing, by its number in the order told, and whether it went out. */
 export class StageBook {
   readonly opened: Passage[] = [];
+  /** The number of each passage the engine offered as the reply in the author's place (`unreleasedReply`), until LumiAH says it went out: an offer it never sent marks nothing. */
+  offered: number[] = [];
+  /** Each narrator's last read, by its agent's id in the run: the passage it was given, and the beats that had reached its eyes then. A narrator drafts only the passage it last read. */
+  private readonly reads = new Map<string, { passage: Passage; seen: ReadonlySet<string> }>();
   private presetRead: Promise<StoryPresetRead | null> | null = null;
 
   /** `preset` reads the chat's preset (`readStoryPreset`), at most once for the turn; left out, the turn has none to give the narrator. */
@@ -152,17 +159,19 @@ export class StageBook {
   }
 
   /**
-   * Passage `n` as a narrator that sees through the eyes of `pov` reads it: the one of that number,
-   * as it opened, `modules` given becoming its own; else, where `n` is the next number, a new one of
-   * the beats of `reaching` (those that reached `pov`, in order) that no passage holds yet, and null
-   * where none is left to tell. A number past the next is refused, naming the next; so is a passage
-   * seen through other eyes, which a narrator is never handed.
+   * Passage `n` as `reader`, a narrator that sees through the eyes of `pov`, reads it: the one of that
+   * number, as it opened, `modules` given becoming its own; else, where `n` is the next number, a new
+   * one of the beats of `reaching` (those that reached `pov`, in order) that no passage holds yet, and
+   * null where none is left to tell. A number past the next is refused, naming the next; so is a
+   * passage seen through other eyes, which a narrator is never handed. What it was given becomes the
+   * passage it drafts (`draft`).
    */
-  take(n: number, pov: string, reaching: readonly string[], modules: readonly string[]): Passage | StageRefusal | null {
+  take(reader: string, n: number, pov: string, reaching: readonly string[], modules: readonly string[]): Passage | StageRefusal | null {
     const known = this.passage(n);
     if (known) {
       if (known.pov !== pov) return { note: STAGE_NOTE.passageEyes, vars: { n: String(n) } };
       if (modules.length > 0) known.modules = [...modules];
+      this.reads.set(reader, { passage: known, seen: new Set(reaching) });
       return known;
     }
     if (n !== this.next()) return { note: STAGE_NOTE.passageNext, vars: { n: String(n), next: String(this.next()) } };
@@ -170,22 +179,26 @@ export class StageBook {
     if (beats.length === 0) return null;
     const p: Passage = { n, pov, beats, modules: [...modules], drafts: [], released: false };
     this.opened.push(p);
+    this.reads.set(reader, { passage: p, seen: new Set(reaching) });
     return p;
   }
 
   /**
-   * Records `text` as a draft of passage `n`, within the drafts and the length the settings allow.
-   * Only a check that finds a draft at fault opens a revision: a draft made while the latest still
-   * waits for its check takes its place and spends nothing, so a narrator that drafts again of itself
-   * leaves the revisions to the check. It takes its place only while nothing reached the passage's
-   * eyes that no passage tells (`untold`): that is the next passage's, and a narrator sent on to tell
-   * it never writes over the telling it gave before.
+   * Records `text` as `reader`'s draft of passage `n`, within the drafts and the length the settings
+   * allow. A narrator drafts only the passage its last read gave it (`take`), revisions included, so
+   * one sent on to read a further passage never drafts over the one before. Only a check that finds a
+   * draft at fault opens a revision: a draft made while the latest still waits for its check takes its
+   * place and spends nothing, so a narrator that drafts again of itself leaves the revisions to the
+   * check. It takes its place only while nothing that no passage tells reached the passage's eyes
+   * (`reaching`: the beats that reached them now) since the narrator read it: that is a further
+   * passage's, and a narrator sent on to tell it without reading never writes over the telling it gave.
    */
-  draft(n: number, pov: string, text: string, s: NarrationSettings, untold: readonly string[]): { passage: Passage; draft: number } | StageRefusal {
-    const p = this.passage(n);
+  draft(reader: string, n: number, text: string, s: NarrationSettings, reaching: readonly string[]): { passage: Passage; draft: number } | StageRefusal {
+    const read = this.reads.get(reader);
+    if (!read) return { note: STAGE_NOTE.readFirst, vars: { n: String(n) } };
+    if (read.passage.n !== n) return { note: STAGE_NOTE.draftNotRead, vars: { n: String(n), read: String(read.passage.n) } };
+    const p = read.passage;
     const vars = { n: String(n), next: String(this.next()) };
-    if (!p) return { note: n === this.next() ? STAGE_NOTE.readFirst : STAGE_NOTE.passageNext, vars };
-    if (p.pov !== pov) return { note: STAGE_NOTE.passageEyes, vars: { n: String(n) } };
     const body = text.trim();
     if (body === "") return { note: STAGE_NOTE.draftEmpty };
     if (body.length > s.passageChars) return { note: STAGE_NOTE.draftLong, vars: { chars: String(s.passageChars) } };
@@ -193,7 +206,7 @@ export class StageBook {
     const last = p.drafts.at(-1);
     if (last?.check?.holds === true) return { note: STAGE_NOTE.draftPassed, vars };
     if (last && last.check === null) {
-      if (untold.length > 0) return { note: STAGE_NOTE.draftWaits, vars };
+      if (this.untold(reaching).some((id) => !read.seen.has(id))) return { note: STAGE_NOTE.draftWaits, vars: { n: String(n) } };
       p.drafts[p.drafts.length - 1] = { text: body, check: null };
       return { passage: p, draft: p.drafts.length };
     }
@@ -318,25 +331,37 @@ export function releaseGate(book: StageBook, settings: UserSettings, release: { 
   return { text: parts.join(JOIN) };
 }
 
-/** What went out (LumiAH's `released`, `args` the reply tool's as the author gave them): each passage they name is out. A character's stream on the direct line names none, nor does a reply sent for the author (`unreleasedReply`), which marks its own. */
+/**
+ * What went out (LumiAH's `released`, `args` the reply tool's as the author gave them): each passage
+ * they name is out. A call with no arguments is a character's stream on the direct line, which names
+ * none, or the reply the engine offered in the author's place (`unreleasedReply`), each passage of
+ * which is out now that LumiAH says it went.
+ */
 export function releaseNoted(book: StageBook, args: Readonly<Record<string, unknown>>): void {
+  if (Object.keys(args).length === 0) {
+    book.released(book.offered);
+    book.offered = [];
+    return;
+  }
   const ask = askOf(args);
   if (!("note" in ask)) book.released(ask.pieces.flatMap((piece) => pieceOf(book, piece)?.n ?? []));
 }
 
 /**
  * The reply a turn's telling makes where the author's run ended with nothing released (LumiAH's
- * `unreleased`: a limit, a failed call, or its own end): each passage the gate would let go as it
- * stands, from passage 1 on, in order, up to the first it wouldn't, joined as a release joins them,
- * and marked as gone out. Null where passage 1 isn't ready, or there is none: what passed its checks
- * is never lost because the author stopped short of naming it.
+ * `unreleased`: a limit, a failed call, or its own end): only a telling that is complete and settled,
+ * or nothing. Every passage opened this turn must be settled (`settled`: its latest draft passed its
+ * check, or is drafted where no one checks; never a draft at fault, even with no drafts left, as no
+ * one named it), and every beat of `reaching` (those that reached the reply's eyes this turn) must
+ * be held by a passage: then what the turn commits is exactly what the chat tells. They go out in
+ * order, joined as a release joins them, kept as offered and marked as out only when LumiAH says the
+ * text went (`releaseNoted`): it may still send nothing (its wait ran out, the player stopped the
+ * turn, the reply closed). Null otherwise: the turn fails as it would without this, with nothing kept.
  */
-export function unreleasedReply(book: StageBook, s: Pick<NarrationSettings, "check" | "revisions">): { text: string } | null {
-  const stop = book.opened.findIndex((p) => heldBack(p, s) !== null);
-  const ready = stop < 0 ? book.opened : book.opened.slice(0, stop);
-  if (ready.length === 0) return null;
-  book.released(ready.map((p) => p.n));
-  return { text: ready.map((p) => p.drafts.at(-1)?.text ?? "").join(JOIN) };
+export function unreleasedReply(book: StageBook, s: Pick<NarrationSettings, "check">, reaching: readonly string[]): { text: string } | null {
+  if (book.opened.length === 0 || !book.opened.every((p) => settled(p, s)) || book.untold(reaching).length > 0) return null;
+  book.offered = book.opened.map((p) => p.n);
+  return { text: book.opened.map((p) => p.drafts.at(-1)?.text ?? "").join(JOIN) };
 }
 
 /**

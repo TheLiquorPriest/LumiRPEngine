@@ -6,6 +6,7 @@
 import type { Beat } from "../../shared/ledger";
 import { castOn } from "../../engine/story/record";
 import { type Feed, feedOf, storyName } from "../../engine/story/feed";
+import type { HarnessTurn } from "../agents/tools/harness-turn";
 import type { ToolEnv } from "../agents/tools/registry";
 
 /**
@@ -27,7 +28,7 @@ export async function feedFor(env: Pick<ToolEnv, "turn" | "reader">, entity: str
  * in a turn, what it staged (after a Continue's reply's own); in a job, its turn's record's. Null
  * where the call reaches no story record.
  */
-export async function turnBeats(env: Pick<ToolEnv, "turn">): Promise<Beat[] | null> {
+export async function turnBeats(env: { turn?: Pick<HarnessTurn, "story"> }): Promise<Beat[] | null> {
   const read = env.turn?.story ? await env.turn.story.read() : null;
   if (!read) return null;
   const own = new Set(read.own.beats.map((b) => b.id));

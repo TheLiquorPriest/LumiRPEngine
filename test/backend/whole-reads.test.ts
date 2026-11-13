@@ -102,19 +102,29 @@ describe("a read of the story record stays within what it states, and reads on w
     expect(read.earlier).toBeUndefined();
   });
 
-  test("feed_read with long quotes: each read within its size, last and the note first, every item read whole after last", async () => {
-    const { rig, chatId, turn, beats, fed } = await longRecord({ quotes: 10, quoteChars: 2000, feedItems: 4 }, 6);
+  test("feed_read with quotes at their limit: a read holds back what its size can't, last is the last item given, more counts what waits, and after gives each held item once", async () => {
+    // One item is about 97,000 characters as JSON writes it, so one read holds one, though the setting allows four.
+    const { rig, chatId, turn, beats, fed, settings } = await longRecord({ quotes: 40, quoteChars: 2000, feedItems: 4 }, 5);
     const mara = castEnv(rig, chatId, turn, HARNESS_AGENT.character, null, MARA);
     const items: JsonObject[] = [];
     let after: string | undefined;
+    let heldBySize = false;
     for (;;) {
       const { read, keys } = await within(mara, RECORD_TOOL.feedRead, after !== undefined ? { after } : {}, fed);
-      items.push(...(read.items as JsonObject[]));
+      const given = read.items as JsonObject[];
+      items.push(...given);
       for (const key of ["last", "note"]) if (keys.includes(key)) expect({ key, first: keys.indexOf(key) < keys.indexOf("items") }).toEqual({ key, first: true });
+      // last is the beat of the last item given, never one past it; more is every beat still waiting.
+      expect(read.last).toBe(given.at(-1)?.beat);
+      const waiting = beats.length - items.length;
+      expect(read.more).toBe(waiting > 0 ? waiting : undefined);
+      if (waiting > 0 && given.length < settings.story.limits.feedItems) heldBySize = true;
       if (read.more === undefined) break;
       expect(String(read.note)).toContain(STORY_LIMIT_LABELS.feedItems);
       after = String(read.last);
     }
+    expect(heldBySize).toBe(true);
+    // Each beat once, in order, whole.
     expect(items.map((i) => i.beat)).toEqual(beats.map((b) => b.id));
     expect(items.map((i) => [i.surface, i.quotes])).toEqual(beats.map((b) => [b.surface, b.quotes ?? []]));
   });
