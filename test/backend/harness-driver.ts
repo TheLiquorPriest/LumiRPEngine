@@ -1,7 +1,7 @@
 // A small driver that plays LumiAH's runtime against the harness engine, on the fake host: what the
 // runtime does at its side of the boundary (`backend/harness/shapes.ts`), in the order it does it.
 // It asks what the engine claims of a chat, begins a run, sends tool calls as named agents, releases
-// the reply passage by passage, says the reply was written, and ends the run. The host plays Lumiverse as
+// the reply once, whole, says the reply was written, and ends the run. The host plays Lumiverse as
 // it does for every other test: the generation, its prompt, the reply saved or stopped.
 //
 // Nothing here is a model, and no test that uses it scripts one: the fake host's helper throws, and
@@ -155,10 +155,9 @@ export class Run {
     await this.rig.host.settle();
   }
 
-  /** The rest of a turn as it usually goes: the author releases the reply piece by piece (`released`, in order; the reply is what was released), Lumiverse saves it, and the run ends with its record. */
-  async finish(...released: string[]): Promise<void> {
+  /** The rest of a turn as it usually goes: the author releases the reply once, whole, Lumiverse saves it, and the run ends with its record. */
+  async finish(reply: string): Promise<void> {
     if (!this.generation) throw new Error("only a turn has a reply");
-    const reply = released.join("");
     await this.written(reply);
     await this.rig.host.finish(this.generation, reply);
     await this.end("done", { reply });

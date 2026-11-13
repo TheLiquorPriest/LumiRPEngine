@@ -1228,11 +1228,11 @@ describe("usage", () => {
 describe("the settings", () => {
   test("a new user's agent settings are §15's defaults, each one the reader keeps or falls back from", () => {
     const d = defaultAgentSettings();
-    expect(d).toMatchObject({ thinkingInToolLoops: false, stream: true, turn: { tokensIn: "none", tokensOut: "none", toolTurns: "none", wallMs: "none" }, budget: { toolTurns: 10, revisions: 2, tokensIn: "none", tokensOut: "none", wallMs: "none" }, loopRepeats: 3, clipChars: 4000, throttles: [], caching: { on: true } });
+    expect(d).toMatchObject({ thinkingInToolLoops: false, stream: true, turn: { tokensIn: "none", tokensOut: "none", toolTurns: "none", wallMs: "none" }, budget: { toolTurns: 10, revisions: 2, tokensIn: "none", tokensOut: "none", wallMs: "none" }, loopRepeats: 3, clipChars: 8000, throttles: [], caching: { on: true } });
     expect(d.acceptance).toEqual({ connections: [], estimateFactor: 2 });
     expect(agentSettingsOf(undefined)).toEqual(d);
     const read = agentSettingsOf({ stream: "no", loopRepeats: 1, clipChars: 0, budget: { revisions: -1, toolTurns: "none", concurrency: 0 }, turn: { tokensIn: "none" }, acceptance: { estimateFactor: 0, connections: [{ id: "__proto__" }, { id: "c1", only: false, tokensIn: 5, tokensOut: "none" }] }, throttles: [{ id: "c1", requestsPerMinute: 0, tokensPerMinute: 9000 }] });
-    expect(read).toMatchObject({ stream: true, loopRepeats: 3, clipChars: 4000, budget: { revisions: 2, toolTurns: "none", concurrency: 4 }, turn: { tokensIn: "none" }, acceptance: { estimateFactor: 2, connections: [{ id: "c1", only: false, tokensIn: 5, tokensOut: "none" }] }, throttles: [{ id: "c1", requestsPerMinute: "none", tokensPerMinute: 9000 }] });
+    expect(read).toMatchObject({ stream: true, loopRepeats: 3, clipChars: 8000, budget: { revisions: 2, toolTurns: "none", concurrency: 4 }, turn: { tokensIn: "none" }, acceptance: { estimateFactor: 2, connections: [{ id: "c1", only: false, tokensIn: 5, tokensOut: "none" }] }, throttles: [{ id: "c1", requestsPerMinute: "none", tokensPerMinute: 9000 }] });
     expect(agentSettingsOf({ stream: false }).stream).toBe(false);
   });
 

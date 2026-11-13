@@ -10,6 +10,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ToolWriter } from "../../src/backend/agents/tools/writer";
 import { renderPrompt } from "../../src/backend/prompts";
+import { HARNESS_TIME_PASS_DEF } from "../../src/shared/agent-settings";
 import { WRITE_NOTE } from "../../src/shared/agent-tools-write";
 import { HARNESS_AGENT, HARNESS_NOTE } from "../../src/shared/harness-texts";
 import type { JsonObject } from "../../src/shared/json";
@@ -68,8 +69,10 @@ describe("time", () => {
     const unreadable: JsonObject[] = [{}, { minutes: -5 }, { minutes: 2.5 }, { minutes: "soon" }];
     for (const args of unreadable) expect(await refusal(author, "time_pass", args)).toBe(note(HARNESS_NOTE.timeMinutes));
     for (const until of ["1999-01-01 00:00", "next Tuesday"]) expect(await refusal(author, "time_pass", { until })).toBe(note(HARNESS_NOTE.timeUntil, { now: "2026-09-14 06:15" }));
-    // The farthest one call moves the clock is the player's to set (Settings → Agents), never past the engine's own reach.
-    expect(await refusal(author, "time_pass", { minutes: TIME_LIMITS.timelapseMinutes + 1 })).toBe(note(HARNESS_NOTE.timeTooLong, { minutes: String(TIME_LIMITS.timelapseMinutes) }));
+    // The farthest one call moves the clock is the player's to set (GM → This chat → Engine → Time passed in one call), never past the engine's own reach; the refusal names that row.
+    const far = await refusal(author, "time_pass", { minutes: TIME_LIMITS.timelapseMinutes + 1 });
+    expect(far).toBe(note(HARNESS_NOTE.timeTooLong, { minutes: String(TIME_LIMITS.timelapseMinutes) }));
+    expect(far).toContain(HARNESS_TIME_PASS_DEF.label);
     const agents = turn.settings.agents;
     const brief = await castTurn(rig, chatId, { settings: { ...turn.settings, agents: { ...agents, harnessLimits: { ...agents.harnessLimits, timePassMinutes: 60 } } } });
     expect(await refusal(castEnv(rig, chatId, brief), "time_pass", { minutes: 61 })).toBe(note(HARNESS_NOTE.timeTooLong, { minutes: "60" }));

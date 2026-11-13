@@ -1,10 +1,10 @@
 // What a beat, a draft or a reason may hold as it is written (DEPTH2-PLAN §4), against the player's
 // limits (`StorySettings.limits`), and whom staging puts in reach of a beat. Pure. A problem is a
-// code with what its text names, so the tool that writes says it in the player's own words
-// (`shared/harness-texts-record.ts`).
+// code with what its text names, the limit's row by its label among them, so the tool that writes
+// says it in the player's own words (`shared/harness-texts-record.ts`).
 
 import type { Beat, Draft, Exposure } from "../../shared/ledger";
-import type { StoryLimits } from "../../shared/settings";
+import { STORY_LIMIT_LABELS, type StoryLimits } from "../../shared/settings";
 import type { WorldDoc } from "../../shared/world";
 import { acts } from "../life";
 import { together } from "../presence";
@@ -20,12 +20,12 @@ export interface StoryProblem {
   vars: Record<string, string>;
 }
 
-const long = (field: string, size: number, max: number): StoryProblem => ({ code: "long", vars: { field, size: String(size), max: String(max) } });
-const many = (field: string, count: number, max: number): StoryProblem => ({ code: "many", vars: { field, count: String(count), max: String(max) } });
+const long = (field: string, size: number, max: number, limit: keyof StoryLimits): StoryProblem => ({ code: "long", vars: { field, size: String(size), max: String(max), row: STORY_LIMIT_LABELS[limit] } });
+const many = (field: string, count: number, limits: StoryLimits, limit: keyof StoryLimits): StoryProblem => ({ code: "many", vars: { field, count: String(count), max: String(limits[limit]), row: STORY_LIMIT_LABELS[limit] } });
 
-/** `text` past `max` characters, as a problem of `field`; null where it fits. */
-export function lengthProblem(field: string, text: string, max: number): StoryProblem | null {
-  return text.length > max ? long(field, text.length, max) : null;
+/** `text` past what the player's limit `limit` allows, as a problem of `field`; null where it fits. */
+export function lengthProblem(field: string, text: string, limits: StoryLimits, limit: keyof StoryLimits): StoryProblem | null {
+  return text.length > limits[limit] ? long(field, text.length, limits[limit], limit) : null;
 }
 
 /**
@@ -37,12 +37,12 @@ export function beatProblem(beat: Beat, limits: StoryLimits): StoryProblem | nul
   if (beat.what.trim() === "") return { code: "blank", vars: { field: "what" } };
   if (beat.kind !== "inner" && beat.surface.trim() === "") return { code: "blank", vars: { field: "surface" } };
   const quotes = beat.quotes ?? [];
-  if (quotes.length > limits.quotes) return many("quotes", quotes.length, limits.quotes);
-  if ((beat.to ?? []).length > limits.people) return many("to", beat.to?.length ?? 0, limits.people);
-  if (beat.exposure.length > limits.people) return many("exposure", beat.exposure.length, limits.people);
-  const texts: [string, string, number][] = [["what", beat.what, limits.beatChars], ["surface", beat.surface, limits.beatChars], ...quotes.map((q, i): [string, string, number] => [`quote ${i + 1}`, q, limits.quoteChars]), ...beat.exposure.map((e): [string, string, number] => [`what ${e.who} got`, e.got ?? "", limits.beatChars])];
-  for (const [field, text, max] of texts) {
-    const problem = lengthProblem(field, text, max);
+  if (quotes.length > limits.quotes) return many("quotes", quotes.length, limits, "quotes");
+  if ((beat.to ?? []).length > limits.people) return many("to", beat.to?.length ?? 0, limits, "people");
+  if (beat.exposure.length > limits.people) return many("exposure", beat.exposure.length, limits, "people");
+  const texts: [string, string, keyof StoryLimits][] = [["what", beat.what, "beatChars"], ["surface", beat.surface, "beatChars"], ...quotes.map((q, i): [string, string, keyof StoryLimits] => [`quote ${i + 1}`, q, "quoteChars"]), ...beat.exposure.map((e): [string, string, keyof StoryLimits] => [`what ${e.who} got`, e.got ?? "", "beatChars"])];
+  for (const [field, text, limit] of texts) {
+    const problem = lengthProblem(field, text, limits, limit);
     if (problem) return problem;
   }
   if (beat.kind === "inner" && beat.exposure.length > 0) return { code: "inner_reach", vars: {} };
@@ -59,9 +59,9 @@ export function beatProblem(beat: Beat, limits: StoryLimits): StoryProblem | nul
 /** Why `draft` can't be written, against `limits`; null where it can. */
 export function draftProblem(draft: Draft, limits: StoryLimits): StoryProblem | null {
   if (draft.what.trim() === "") return { code: "blank", vars: { field: "what" } };
-  if (draft.who.length > limits.people) return many("who", draft.who.length, limits.people);
-  if ((draft.where ?? []).length > limits.people) return many("where", draft.where?.length ?? 0, limits.people);
-  return lengthProblem("what", draft.what, limits.draftChars) ?? lengthProblem("notes", draft.notes ?? "", limits.draftChars);
+  if (draft.who.length > limits.people) return many("who", draft.who.length, limits, "people");
+  if ((draft.where ?? []).length > limits.people) return many("where", draft.where?.length ?? 0, limits, "people");
+  return lengthProblem("what", draft.what, limits, "draftChars") ?? lengthProblem("notes", draft.notes ?? "", limits, "draftChars");
 }
 
 /**

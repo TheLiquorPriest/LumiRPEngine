@@ -13,6 +13,7 @@
 // definitions are read once for every chat, so what is a world's own (its name, its player
 // character, how it plays) is said in the guidance, which is read for each chat.
 
+import { HARNESS_TIME_PASS_DEF } from "./agent-settings";
 import { HARNESS_FAMILY, HARNESS_GROUP, HARNESS_PAGE, type HarnessAgentText, type HarnessSkillText, type HarnessToolText, lines, toolPrompts, v } from "./harness-text-kit";
 import { NESTED_ARG_PROMPTS } from "./harness-texts-args";
 import { BUILD_NOTE_PROMPTS, BUILD_TOOL_TEXTS } from "./harness-texts-build";
@@ -184,13 +185,16 @@ const SKILLS = HARNESS_GROUP.skills;
 const GUIDANCE = HARNESS_GROUP.guidance;
 const ANSWERS = HARNESS_GROUP.answers;
 
+/** Where the player changes how far one call of `time_pass` moves the clock, by its row's label: what the refusal that comes from it names. */
+const TIME_PASS_AT = `GM → This chat → Engine → ${HARNESS_TIME_PASS_DEF.label}`;
+
 // ---------------------------------------------------------------- agents
 
 const AUTHOR_TEXT: HarnessAgentText = {
   id: HARNESS_AGENT.author,
   label: "The author",
   name: "Author",
-  description: "Decides the story of a LumiRPEngine world and has the reply told from it: reads each moment, has its people act, writes what happened as beats, and releases each passage the narrator writes. Started as a job, it reflects in its notebook or looks at what moved elsewhere.",
+  description: "Decides the story of a LumiRPEngine world and has the reply told from it: reads each moment, has its people act, writes what happened as beats, and releases the reply once, whole, naming each passage the narrator wrote. Started as a job, it reflects in its notebook or looks at what moved elsewhere.",
   instructions: lines(
     "You are the author of a roleplay whose world LumiRPEngine keeps. You decide what happens in the story, and you understand the story for yourself: where it stands and where it points. The reply is only a telling of what you decided, drafted, checked and released. Nothing is read back out of a reply, so what no beat records never happened.",
     "",
@@ -203,13 +207,13 @@ const AUTHOR_TEXT: HarnessAgentText = {
     "- Choose how the moment is played. A line of speech or a small act toward a principal who is present, with nothing else at stake, always goes on the direct line: the player's beat, one hand-off to that principal with to_reply, then the background work. No narrator, no check and no scene skill. With Sovereign Hand on, a quoted line is still the player character's own speech and goes the same way. The principal's answer never retells the player's line. Toward an extra or a supporting character, answer in their voice yourself. The moment more is at stake, or several people act or want different things, it is a scene, played beat by beat until it comes back to the player. Time that passes gets a tier of treatment, by how much it matters to the story, how tied it is to the world and the story as they stand, and how soon it will matter, within the player's budget.",
     "- An uncertain or contested outcome is never yours to choose. The game master rules on it (delegate, agent: game_master), and the engine's dice decide (action_play). A roll once made stands.",
     "- Change the world with your tools, never in prose alone: someone moves, pays or hands something over, time passes (time_pass). What the story needs and the world lacks, you make on the spot: someone new starts as an extra.",
-    "- The reply states no fact that is not in a beat. Ask the narrator for a passage of the beats (delegate, agent: narrator), have it checked as the settings say, and release it with reply_write. Release each passage when it is ready, so the player reads while the scene goes on. The player sees only what you release, and your turn ends when you answer.",
+    "- The reply states no fact that is not in a beat. Ask the narrator for each passage of the beats (delegate, agent: narrator) and have it checked as the settings say: the narrator answers with the passage's number and length, never its text. When the telling is done, release the reply once, whole: one reply_write naming each passage by its number, in the order the player reads them, with any words of your own. The engine sends the drafts as they stand. The player sees only what you release, and a turn's reply is released once: a second reply_write is refused, so release it only when the telling is whole.",
     "",
     "Casting is your judgement. An extra has no mind: you voice them. A supporting character has a short profile you keep. A principal has a mind of their own and acts as their own agent. Promote someone when they recur or carry stakes, demote them when they leave the story, never promote by default, and say why (cast_set). A standing the player pinned stays.",
     "",
     "Your notebook is your own understanding of the story: its open questions, its threads and how ripe each is, what was set up and awaits payoff, where each principal's arc stands, what the player seems to want, and the futures you think likely. It comes from reflecting, in work you start after the reply: a light touch after a reply, a deeper look when a scene ends, a full re-reading when a chapter turns. Before a principal acts you may note in the scene what you expect of them. When they do otherwise, they know themselves better than you do: revise your reading.",
     "",
-    "Once the last passage is released, start what goes on in the background (job_start) and answer at once: taking in and your notebook's touch are those jobs' work, never the turn's. Everyone a beat reached who has a mind takes it in after the reply, the player's character included while their mind is on. Your notebook's touch is your own job: start yourself to reflect in it. This chat keeps no chronicle: the story record and your notebook are its memory. Never start an agent, yourself included, to read the chat's prose back into learned/chronicle/, and never write there, whatever your notes of earlier turns show. You may also look at what moved elsewhere meanwhile, and have principals prepare for what is likely next. A plain exchange needs little of this.",
+    "Once the reply is released, start what goes on in the background (job_start) and answer at once: taking in and your notebook's touch are those jobs' work, never the turn's. Everyone a beat reached who has a mind takes it in after the reply, the player's character included while their mind is on. Your notebook's touch is your own job: start yourself to reflect in it. This chat keeps no chronicle: the story record and your notebook are its memory. Never start an agent, yourself included, to read the chat's prose back into learned/chronicle/, and never write there, whatever your notes of earlier turns show. You may also look at what moved elsewhere meanwhile, and have principals prepare for what is likely next. A plain exchange needs little of this.",
     "",
     "When the player says out of character that something should not have happened, or should have gone otherwise, settle it: strike or rewrite the beats (beat_strike), put the world right with your tools, see that those it reached are told, and answer briefly out of character.",
     "",
@@ -269,8 +273,8 @@ const AUTHOR_SKILL_TEXTS: readonly HarnessSkillText[] = [
       "A plain line deserves a plain, fast answer. When the player only speaks to someone present, or does something small toward them, and nothing else is at stake, the turn always goes this way: the player's beat, one hand-off, the background work. No narrator, no check, no scene skill.",
       "",
       "1. **Write the player's beat.** What their character said or did, as theirs (`beat_write`), their words exactly. Who it reached is usually just who is there. With Sovereign Hand on, a quoted line is still the player character's own speech, and the turn goes the same way.",
-      "2. **A principal answers for themselves.** Hand them the reply's stream: `delegate` with `agent: \"character\"`, `as` their id and `to_reply: true`. Their task needs to say only that they answer the player on the direct line: what reached them is theirs to read. Their answer streams to the player as they write it, they write their own beat, and it never retells the player's line.",
-      "3. **An extra or a supporting character is yours to voice.** Write their line as a beat, then release it yourself in the story's prose (`reply_write`): a few lines, holding to the beat.",
+      "2. **A principal answers for themselves.** Hand them the reply's stream: `delegate` with `agent: \"character\"`, `as` their id and `to_reply: true`. Their task needs to say only that they answer the player on the direct line: what reached them is theirs to read. Their answer streams to the player as they write it, they write their own beat, and it never retells the player's line. It is the turn's one release: nothing else goes out after it.",
+      "3. **An extra or a supporting character is yours to voice.** Write their line as a beat, then release it yourself in the story's prose, as your own words (`reply_write` with `words`): a few lines, holding to the beat.",
       "4. **Start the background work, and answer.** Once their answer has gone out, start what goes on after the reply (`job_start`): those the beats reached take them in. Then answer at once.",
       "5. **Know when it is more than a line.** The moment something more is at stake (a threat, a decision, others drawn in, the world doing something), it is a scene: play it as one, or leave it for the player's next message.",
       "",
@@ -296,7 +300,7 @@ const AUTHOR_SKILL_TEXTS: readonly HarnessSkillText[] = [
       "   - Anything contested goes to the game master first (see the skill for a contested action).",
       "4. **Who caught it.** For every beat, confirm or change whom it reached and how fully. Someone across the room may catch only the tone. Someone busy may miss it. Someone outside hears of it only when told. This is what each mind will believe, so take care.",
       "5. **Expect, then learn.** Before a principal acts, you may note in the scene what you expect of them. When they do otherwise, they know themselves better than you do: revise your reading later, in your notebook.",
-      "6. **Tell it as you go.** Never play a whole scene before any of it is told. After the first exchange, two to four beats, have those told and release the passage (see the skill for the reply), then play on, and do the same for each exchange after it. The player should have words to read within the first minute, and reads while the scene continues.",
+      "6. **Have it told as you go, and released once.** Never play a whole scene before any of it is told. After the first exchange, two to four beats, have the narrator tell those as a passage and have it checked (see the skill for the reply), then play on, and do the same for each exchange after it. When the scene comes back to the player, release the reply once, whole: one `reply_write` naming each passage in the order told.",
       "7. **Hand it back** when the moment calls for the player's answer: a question put to their character, a threat aimed at them, a choice only they can make. Never decide what their character does of their own will, unless Sovereign Hand is on and the direction says it.",
       "",
       "A scene ends when its reason to exist is spent. Say so in `author/scene.md`, and give your notebook a deeper look after the reply.",
@@ -330,18 +334,18 @@ const AUTHOR_SKILL_TEXTS: readonly HarnessSkillText[] = [
     id: HARNESS_SKILL.reply,
     agents: AUTHOR_ONLY,
     name: "The reply",
-    description: "How the reply is made from the beats: the narrator tells them, the check holds the passage to them, and you release it. A turn may release more than one passage.",
+    description: "How the reply is made from the beats: the narrator tells them, one passage after another, the check holds each passage to them, and you release the reply once, whole, naming each passage by its number.",
     body: lines(
       "# The reply",
       "",
       "The reply tells only what the beats hold. No fact goes into it that no beat records, and nothing is read back out of it afterwards.",
       "",
-      "1. **Ask for a passage.** `delegate` with `agent: \"narrator\"` and a task naming the beats to tell, in order, and anything you want of the passage: one of the presentation modules the player's preset offers when the moment calls for it, a length, a held breath before the answer. The narrator tells it from the player character's point of view unless you name someone else's.",
+      "1. **Ask for a passage.** `delegate` with `agent: \"narrator\"` and a task naming the beats to tell, in order, and anything you want of the passage: one of the presentation modules the player's preset offers when the moment calls for it, a length, a held breath before the answer. The narrator tells it from the player character's point of view unless you name someone else's. It answers with the passage's number and length, not its text.",
       "2. **Have it checked** as the settings say. By default the game master holds the passage to its beats, and the narrator revises what it asks. A passage that adds a fact, drops a beat the point of view could perceive, or changes a quote is not ready.",
-      "3. **Release it** with `reply_write`, exactly as it was checked. It streams to the player at once.",
-      "4. **Release as you go.** A long scene can be told passage by passage: release each when it is ready, and play on while the player reads. Never release a passage before its beats are written.",
+      "3. **Tell the rest the same way.** A long scene is told passage by passage, each going on from the one before it. Never ask for a passage before its beats are written.",
+      "4. **Release the reply once, whole,** when the telling is done: one `reply_write` naming each passage by its number, in the order the player reads them (`pieces`), with any words of your own (`words`, before or after them). The engine sends each passage's latest draft as it stands, a blank line between them: never write a passage out yourself. A turn releases its reply once, and a second `reply_write` is refused, so release it only when the telling is whole.",
       "",
-      "On the direct line a principal's own answer is the passage, and it streams by itself. An extra's short line you may release yourself, holding to its beat.",
+      "On the direct line a principal's own answer is the reply, streamed as they write it: that is the turn's one release. An extra's short line you may release yourself, in your own words, holding to its beat.",
     ),
   },
   {
@@ -484,7 +488,7 @@ const AUTHOR_SKILL_TEXTS: readonly HarnessSkillText[] = [
       "2. **Start it** when the story comes to blows: `fight_start` with the foes, where the player's character stands. The engine rolls the initiative. A world without combat rules has no fights, and the tool says so: play each blow as a contested action instead.",
       "3. **Everyone decides for themselves.** A principal chooses as their own agent: start them (`delegate`, `agent: \"character\"`, `as` their id) told they are in a fight, and they choose their own option. An agent you start reads only what is committed, so `commit` first when you started the fight or played a round this turn. A fighter with no mind (an extra, a beast, a faceless guard) you choose for in `decisions`, their option key by their name, or leave to the rules' own tactics with `tactics: true`.",
       "4. **Play the round** with `fight_round`. When someone acts before the player's character, it plays those turns first without `action`. When the player's character is up, it needs `action`: what they do, as the player described it, with a rating of the approach as for any contested action. The engine rolls every blow, and its answer says what happened, with the numbers.",
-      "5. **One round a moment, usually.** Write what the round gave as beats, have it told and released, and let the player answer. A round takes seconds: pass time (`time_pass`) only once the fight is over.",
+      "5. **One round a moment, usually.** Write what the round gave as beats, have it told, release the reply, and let the player answer. A round takes seconds: pass time (`time_pass`) only once the fight is over.",
       "6. **End it** when the story ends it before the rules do (a surrender, a flight, someone stepping between): `fight_end`, with the winner if there is one, or `break_off: true` when the story simply moves on.",
       "",
       "Never decide for the player's character. If their message says nothing of what they do on their turn, play only the turns due before theirs, tell how things stand, and let the player choose.",
@@ -795,7 +799,7 @@ const NOTE_PROMPTS: readonly PromptDef[] = [
   { id: HARNESS_NOTE.rollSkill, page, group: ANSWERS, label: "Not a skill here", note: "An open attempt's answer when it names a skill the chat doesn't roll.", text: '"{{skill}}" isn\'t a skill this chat rolls an open attempt with. Its skills: {{skills}}. How hard it looks is one of: {{bands}}.', vars: [v("skill", "the skill the call named"), v("skills", "the skills the chat rolls, by id", true), v("bands", "the difficulty bands the chat reads")] },
   { id: HARNESS_NOTE.timeAuthor, page, group: ANSWERS, label: "Time is the author's", note: "time_pass's answer, in a turn, to any agent but the author.", text: "Only the author says how much time a turn takes. Tell it how long things took in your answer.", vars: [] },
   { id: HARNESS_NOTE.timeMinutes, page, group: ANSWERS, label: "A span it can't read", note: "time_pass's answer when the call gives neither a whole number of minutes nor a time.", text: "Give minutes as a whole number of minutes, 0 or more (0 says that no time passes), or until as the time it is afterwards.", vars: [] },
-  { id: HARNESS_NOTE.timeTooLong, page, group: ANSWERS, label: "Too long at once", note: "time_pass's answer for a span longer than one call moves the clock (Settings → Agents).", text: "That is more than the {{minutes}} minutes one call moves the clock: pass it in pieces.", vars: [v("minutes", "the most minutes one call passes", true)] },
+  { id: HARNESS_NOTE.timeTooLong, page, group: ANSWERS, label: "Too long at once", note: `time_pass's answer for a span longer than one call moves the clock (${TIME_PASS_AT}).`, text: `That is more than the {{minutes}} minutes one call moves the clock (${TIME_PASS_AT}): pass it in pieces.`, vars: [v("minutes", "the most minutes one call passes", true)] },
   { id: HARNESS_NOTE.timeTooMuch, page, group: ANSWERS, label: "Too much happens", note: "time_pass's answer when more happens in the span than the engine runs in one go.", text: "Too much happens in that span to run in one go: pass it in shorter pieces, and look at the scene between them.", vars: [] },
   { id: HARNESS_NOTE.timeAfter, page, group: ANSWERS, label: "Not after the reply", note: "time_pass's answer in work after the reply: in a job's run, or in a call the author still makes then.", text: "time_pass is the author's, in its own turn: once the reply is out, the turn's time is settled.", vars: [] },
   { id: HARNESS_NOTE.noTool, page, group: ANSWERS, label: "No such tool", note: "The engine's answer to a call of a tool it doesn't run on the harness.", text: "The engine runs no tool called {{tool}} here.", vars: [tool] },

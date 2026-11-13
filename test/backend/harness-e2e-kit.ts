@@ -66,8 +66,8 @@ export async function say(bed: RuntimeBed, rig: Rig, chatId: string, text: strin
   return bed.reply(chatId);
 }
 
-/** The author releases this as the reply. */
-export const release = (text: string): Answer => ({ toolCalls: [toolCall("reply_write", { text })] });
+/** The author releases this as the reply, in its own words: the reply tool names no passage of the narrator's. */
+export const release = (text: string): Answer => ({ toolCalls: [toolCall("reply_write", { words: text })] });
 
 /** One answer that calls one tool. */
 export const calls = (name: string, args: Record<string, unknown> = {}): Answer => ({ toolCalls: [toolCall(name, args as never)] });

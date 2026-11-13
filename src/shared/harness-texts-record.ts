@@ -55,6 +55,7 @@ export const RECORD_NOTE = {
   badWhen: "harness.note.record.bad_when",
   feedNone: "harness.note.record.feed_none",
   feedMore: "harness.note.record.feed_more",
+  beatsEarlier: "harness.note.record.beats_earlier",
   noAfter: "harness.note.record.no_after",
   noDue: "harness.note.record.no_due",
   stale: "harness.note.record.stale",
@@ -93,12 +94,13 @@ export const RECORD_TOOL_TEXTS: readonly HarnessToolText[] = [
     family: HARNESS_FAMILY.story,
     tier: "read",
     note: "Reads the beats on the chat's path, by person, place or time.",
-    text: "Read the beats on the chat's path, oldest first: what happened as true, who did it, where and when, whom each reached and how, and why one that was struck no longer stands. Narrow them by a person (beats by them, to them, or that reached them), by a place, or by a time to start from. It gives the latest that fit, as many as the player allows, and says how many earlier ones it left out. The author and the game master read it; a character's agent never does.",
+    text: "Read the beats on the chat's path, oldest first: what happened as true, who did it, where and when, whom each reached and how, and why one that was struck no longer stands. Narrow them by a person (beats by them, to them, or that reached them), by a place, or by a time to start from. It gives the latest that fit, each whole, as many as the player allows, and says how many earlier ones it left out and how to read them. The author and the game master read it; a character's agent never does.",
     args: [
       { path: "who", text: "Only beats by this person, addressed to them, or that reached them: an id or a name, or player." },
       { path: "where", text: "Only beats at this place: an id or a name." },
       { path: "since", text: `Only beats from this time on: ${STAMP}.` },
       { path: "struck", text: "false: leave out beats that no longer stand. Left out, they are listed, each with why." },
+      { path: "before", text: "Only beats before this one on the path: a beat's id, as an earlier answer names the oldest it gave. Left out: up to the newest." },
     ],
   },
   {
@@ -189,6 +191,8 @@ export const RECORD_TOOL_TEXTS: readonly HarnessToolText[] = [
 
 const tool = v("tool", "the tool called", true);
 const field = v("field", "what was too long, or listed too many", true);
+// Not required: a user's own wording saved before the row was named still loads, only without it (`promptSettingsOf` drops a text missing a required placeholder).
+const row = v("row", "the label of the player's row that sets the limit, under Settings → Story → The record's limits");
 const who = v("who", "the person's id, or player", true);
 
 export const RECORD_NOTE_PROMPTS: readonly PromptDef[] = [
@@ -199,8 +203,8 @@ export const RECORD_NOTE_PROMPTS: readonly PromptDef[] = [
   answerPrompt(RECORD_NOTE.noSelf, "A character with no person", "beat_write's and feed_read's answer to a character's agent that runs as no one.", "Your agent runs as no one, so it has no person of its own to read or write for. The author starts a character's agent as the person it is. Nothing was read or written."),
   answerPrompt(RECORD_NOTE.notOwn, "Someone else's act", "beat_write's answer when a character's agent writes a beat by someone other than the person it is.", "You are {{self}}, so you write only your own acts: what you say, do or think. {{other}} is someone else to write. Nothing was written.", [v("self", "the person the agent is", true), v("other", "who the call said did it", true)]),
   answerPrompt(RECORD_NOTE.notOwnKind, "Not a character's to write", "beat_write's answer when a character's agent writes something the world does.", "A character writes only what they say, do or think. What the world does is the author's to write. Nothing was written."),
-  answerPrompt(RECORD_NOTE.long, "Too long", "A story tool's answer when a text is longer than the player's limit (Settings → Story).", "{{field}} is {{size}} characters long, and holds at most {{max}} (the player's limit, Settings → Story). Say it in fewer words and call again. Nothing was written.", [field, v("size", "how long it is"), v("max", "the most it holds", true)]),
-  answerPrompt(RECORD_NOTE.many, "Too many", "A story tool's answer when a list holds more than the player's limit (Settings → Story).", "{{field}} lists {{count}}, and holds at most {{max}} (the player's limit, Settings → Story). Keep the ones that matter and call again. Nothing was written.", [field, v("count", "how many the call gave"), v("max", "the most it holds", true)]),
+  answerPrompt(RECORD_NOTE.long, "Too long", "A story tool's answer when a text is longer than the player's limit, named by its row (Settings → Story → The record's limits).", "{{field}} is {{size}} characters long, and holds at most {{max}} (the player's limit: {{row}}, in Settings → Story → The record's limits). Say it in fewer words and call again. Nothing was written.", [field, v("size", "how long it is"), v("max", "the most it holds", true), row]),
+  answerPrompt(RECORD_NOTE.many, "Too many", "A story tool's answer when a list holds more than the player's limit, named by its row (Settings → Story → The record's limits).", "{{field}} lists {{count}}, and holds at most {{max}} (the player's limit: {{row}}, in Settings → Story → The record's limits). Keep the ones that matter and call again. Nothing was written.", [field, v("count", "how many the call gave"), v("max", "the most it holds", true), row]),
   answerPrompt(RECORD_NOTE.blank, "Can't be blank", "A story tool's answer when a text it needs is blank.", "{{field}} can't be blank. Nothing was written.", [field]),
   answerPrompt(RECORD_NOTE.innerReach, "A thought reaches no one", "beat_write's answer when an inner beat is given exposure.", "A thought reaches no one but its owner, so give no exposure for an inner beat. Nothing was written."),
   answerPrompt(RECORD_NOTE.reachActor, "The one who did it", "beat_write's answer when exposure names whoever did the beat.", "{{who}} did it, so it is theirs, not something that reached them. Leave them out of exposure. Nothing was written.", [who]),
@@ -209,7 +213,7 @@ export const RECORD_NOTE_PROMPTS: readonly PromptDef[] = [
   answerPrompt(RECORD_NOTE.proposed, "Exposure proposed", "What beat_write says when exposure was left out and it proposes it from who is there.", "Nothing was written yet. exposure is who is there: each as having taken in all of it. Call beat_write again with the same beat and exposure, as proposed or adjusted."),
   answerPrompt(RECORD_NOTE.staged, "Staged with the turn", "Where a story change stands in a turn.", "Staged with the turn: it is kept when the turn commits, and goes if the turn doesn't stand."),
   answerPrompt(RECORD_NOTE.written, "Written on the record", "Where a story change stands after the reply.", "Written on the record of the turn this job belongs to."),
-  answerPrompt(RECORD_NOTE.full, "The turn's record holds enough", "A story tool's answer when the turn's record would hold more beats or drafts than the player allows (Settings → Story).", "This turn's record holds {{count}} {{what}} already, the most it keeps (the player's limit, Settings → Story). Nothing was written.", [v("count", "how many it holds", true), v("what", "beats or drafts", true)]),
+  answerPrompt(RECORD_NOTE.full, "The turn's record holds enough", "A story tool's answer when the turn's record would hold more beats or drafts than the player allows, named by its row (Settings → Story → The record's limits).", "This turn's record holds {{count}} {{what}} already, the most it keeps (the player's limit: {{row}}, in Settings → Story → The record's limits). Nothing was written.", [v("count", "how many it holds", true), v("what", "beats or drafts", true), row]),
   answerPrompt(RECORD_NOTE.closed, "The turn is over", "A story tool's answer when the turn it was called in is over.", "The turn is over, so nothing more is staged with it. Nothing was written."),
   answerPrompt(RECORD_NOTE.offPath, "Off the chat's path", "A story tool's answer in a job whose turn's record left the chat's path.", "The turn this job belongs to is no longer on the chat's path: its reply was swiped away, deleted, or something before it was edited. Nothing was written. Stop here."),
   answerPrompt(RECORD_NOTE.noBasis, "No record to write on", "A story tool's answer in a run whose turn never wrote its record.", "The turn this run belongs to left no record on the chat to write on. Nothing was written."),
@@ -229,7 +233,8 @@ export const RECORD_NOTE_PROMPTS: readonly PromptDef[] = [
   answerPrompt(RECORD_NOTE.playerCast, "The player's character", "cast_set's answer for the player's character.", "{{name}} is the player's character. Whether they have a mind is the player's setting, so they aren't cast. Nothing was changed.", [v("name", "the player's character", true)]),
   answerPrompt(RECORD_NOTE.badWhen, "A time it can't read", "A story tool's answer when a time isn't one the world's calendar reads.", "{{arg}} isn't a time the world's calendar reads. Write it as {{now}} is written: a date and a time, YYYY-MM-DD HH:MM.", [v("arg", "the argument", true), v("now", "the time now, as it is written", true)]),
   answerPrompt(RECORD_NOTE.feedNone, "Nothing new", "What feed_read says when nothing reached the person since they last took things in.", "Nothing new reached you since you last took things in."),
-  answerPrompt(RECORD_NOTE.feedMore, "More wait", "What feed_read says when more items wait past those it gave.", "{{more}} more wait after these. Read on with after set to last.", [v("more", "how many more", true)]),
+  answerPrompt(RECORD_NOTE.feedMore, "More wait", "What feed_read says when more items wait past those it gave: how many, the setting that bounds one read (Settings → Story → The record's limits), and how to read on.", "{{more}} more wait after these: {{setting}} (Settings → Story → The record's limits) gives at most {{most}} at once. Read on with after set to last.", [v("more", "how many more", true), v("setting", "the setting's label", true), v("most", "the most one read gives", true)]),
+  answerPrompt(RECORD_NOTE.beatsEarlier, "Earlier beats left out", "What beats_read says when earlier beats that fit were left out: how many, the setting that bounds one read (Settings → Story → The record's limits), and how to read them.", "{{earlier}} earlier beats that fit are left out: {{setting}} (Settings → Story → The record's limits) gives at most {{most}} in one read. Read them with before set to {{first}}.", [v("earlier", "how many are left out", true), v("setting", "the setting's label", true), v("most", "the most one read gives", true), v("first", "the id of the oldest beat given", true)]),
   answerPrompt(RECORD_NOTE.noAfter, "Not a beat to read past", "feed_read's answer when after names no beat on the chat's path.", "No beat {{beat}} is on the chat's path. Leave after out to read from the last beat you took in.", [v("beat", "the id the call gave", true)]),
   answerPrompt(RECORD_NOTE.noDue, "Nothing due", "What drafts_due says when no open draft is due or stale.", "No open draft is due or stale now."),
   answerPrompt(RECORD_NOTE.stale, "Stale", "What drafts_due says of a stale draft.", "The story moved since this draft was opened. Judge whether it still holds: settle it, drop it, or open it again as it now stands."),

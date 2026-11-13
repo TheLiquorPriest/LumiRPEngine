@@ -174,17 +174,12 @@ export interface ReviewSettings {
 }
 
 /**
- * What one call of a harness tool may write or span at most (`docs/harness-tools.md`). Each is a
- * setting, so a world that needs more room can be given it; a call past one is refused with the
- * bound in its reason.
+ * What one call of a harness tool may span at most (`docs/harness-tools.md`). A setting, so a world
+ * that needs more room can be given it; a call past it is refused with the bound in its reason.
  */
 export interface HarnessLimits {
   /** The farthest one `time_pass` moves the clock, in minutes; never past the engine's own reach for a timelapse. */
   timePassMinutes: number;
-  /** How many examples of a collection a world tool lists where it shows what an item looks like. */
-  worldExamples: number;
-  /** The longest text a world tool writes into one field of the world's draft (a description, a lore entry's body), in characters. */
-  worldTextChars: number;
 }
 
 /**
@@ -342,7 +337,7 @@ export interface AgentSettings {
   turn: TurnBudget;
   /** The loop detector: the same tool call with the same arguments this many times in a row stops the agent. */
   loopRepeats: number;
-  /** A tool result longer than this, in characters, reaches the model clipped; the rest waits in scratch for `scratch_read`. */
+  /** How much of one answer of the engine's own tools an agent is shown whole, in characters: on the harness the world tools' answers (a longer value as an outline, a list cut to half of it); on the agents engine any tool result, clipped past it with the rest in scratch for `scratch_read`. LumiAH's own clip is LumiAH's setting. */
   clipChars: number;
   /** Per connection; a connection not listed has none. */
   throttles: ConnectionThrottle[];
@@ -405,7 +400,8 @@ export function defaultAgentSettings(): AgentSettings {
     // No turn-wide limit: a fixed pipeline on a long chat sends well past any number that fits a short one, and each agent's own limits stand.
     turn: { tokensIn: "none", tokensOut: "none", toolTurns: "none", wallMs: "none" },
     loopRepeats: 3,
-    clipChars: 4000,
+    // 8,000 characters: one long lore entry or a world document's larger part is 6,000 to 12,000, and every outline or cut list here costs the agent another round to read on.
+    clipChars: 8000,
     throttles: [],
     callsAtOnce: "none",
     caching: { on: true, nonce: "", roles: {} },
@@ -434,8 +430,8 @@ export function defaultAgentSettings(): AgentSettings {
     systemTokens: 8000,
     // A turn takes its scene's time unless its author said otherwise, as every other engine's turn does. Recording a turn takes well under a second: five is room for a slow host, inside LumiAH's own ten for any one answer of the engine's. A run remembered is a few short strings: a thousand of them is weeks of play in a megabyte, and far more than any late call needs. Sovereign Hand is the player's switch in Lumiverse until they set it here, and the author is given the direction they wrote unless their preset carries it.
     harness: { defaultTick: true, commitWaitMs: 5000, runsRemembered: 1024, sovereignHand: "follow", newestMessage: "direction" },
-    // A day-long file or a novel in one field is a mistake or an attack, never a turn's work: room for a long lore entry, and no more. A mind's files have their own sizes (`StoryMinds.chars`).
-    harnessLimits: { timePassMinutes: TIMELAPSE_REACH_MINUTES, worldExamples: 3, worldTextChars: 20000 },
+    // One call may pass as far as a timelapse reaches: the author passes a span in steps only where the world's own work in it is too much at once.
+    harnessLimits: { timePassMinutes: TIMELAPSE_REACH_MINUTES },
   };
 }
 
@@ -494,8 +490,8 @@ export function agentLabel(role: string): string {
 
 // ---------------------------------------------------------------- the page's words
 
-/** How a limit is set: tokens, milliseconds (shown in seconds), a count, or characters. */
-export type AgentLimitUnit = "tokens" | "ms" | "count" | "chars";
+/** How a limit is set: tokens, milliseconds (shown in seconds), a count, characters, or minutes. */
+export type AgentLimitUnit = "tokens" | "ms" | "count" | "chars" | "minutes";
 
 export interface AgentLimitDef {
   /** Its name on the page, and in a refusal. */
@@ -538,7 +534,7 @@ export const TURN_DEFS: Readonly<Record<keyof TurnBudget, AgentLimitDef>> = {
 
 export const LOOP_DEFS: Readonly<Record<"loopRepeats" | "clipChars", AgentLimitDef>> = {
   loopRepeats: { label: "Loop detector", limits: "The same tool call, with the same arguments, this many times in a row.", fires: "That call isn't run, and the agent stops.", unit: "count", min: 2, none: null },
-  clipChars: { label: "Tool results clipped past", limits: "How much of one tool result reaches the model at once.", fires: "The rest goes to scratch, which the model reads with scratch_read.", unit: "chars", min: 1, none: null },
+  clipChars: { label: "Engine answers shown whole", limits: "How much of one answer of the engine's own tools an agent is shown whole: on the harness, the world tools' answers; on the agents engine, any tool result. LumiAH's Tool results clipped past is LumiAH's own setting.", fires: "On the harness a longer value is answered as an outline to read further into, and a list of names or issues is cut to half of this, saying how many more. On the agents engine the rest goes to scratch, which the model reads with scratch_read.", unit: "chars", min: 1, none: null },
 };
 
 /** The words for how the GM assistant's changes land. */
@@ -592,6 +588,9 @@ export const HARNESS_COMMIT_WAIT_DEF: AgentLimitDef = { label: "Wait for the las
 
 /** GM → This chat → Engine, on a chat the harness plays: how many runs that are over the engine keeps track of. At least room for one turn and the jobs it starts. */
 export const HARNESS_REMEMBERED_DEF: AgentLimitDef = { label: "Finished runs remembered", limits: "How many runs that are over the engine keeps track of: each turn that was recorded or let go, each job's run, and who the agents of each were.", fires: "The oldest is forgotten: a call that still comes from it is answered that no turn is open. Shared by every user of this Lumiverse: the number in force is the last one read.", unit: "count", min: 16, none: null };
+
+/** GM → This chat → Engine, on a chat the harness plays: the farthest one `time_pass` moves the clock. Never past a timelapse's reach. */
+export const HARNESS_TIME_PASS_DEF: AgentLimitDef = { label: "Time passed in one call", limits: "The farthest the author moves the scene's clock with one call of time_pass, and never past a timelapse's reach.", fires: "The call is refused and passes nothing; the author is told the most one call passes, and passes the span in steps.", unit: "minutes", min: 1, none: null };
 
 /** Settings → Agents → Pipeline's words for each choice. */
 export const PIPELINE_MODE_LABELS: Readonly<Record<PipelineMode, string>> = { fixed: "A fixed pipeline", main: "A main agent decides" };
@@ -832,11 +831,7 @@ export function agentSettingsOf(raw: unknown, d: Readonly<AgentSettings> = defau
       sovereignHand: oneOf(harness.sovereignHand, SOVEREIGN_HANDS, d.harness.sovereignHand),
       newestMessage: oneOf(harness.newestMessage, NEWEST_MESSAGES, d.harness.newestMessage),
     },
-    harnessLimits: {
-      timePassMinutes: Math.min(whole(limits.timePassMinutes, 1) ?? d.harnessLimits.timePassMinutes, TIMELAPSE_REACH_MINUTES),
-      worldExamples: whole(limits.worldExamples, 1) ?? d.harnessLimits.worldExamples,
-      worldTextChars: whole(limits.worldTextChars, 1) ?? d.harnessLimits.worldTextChars,
-    },
+    harnessLimits: { timePassMinutes: Math.min(whole(limits.timePassMinutes, HARNESS_TIME_PASS_DEF.min) ?? d.harnessLimits.timePassMinutes, TIMELAPSE_REACH_MINUTES) },
   };
 }
 

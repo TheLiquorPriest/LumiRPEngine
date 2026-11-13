@@ -17,7 +17,7 @@ const NEWEST = "Your newest message, with Sovereign Hand on";
 /** The harness's rows for `harness` (the defaults where it says nothing), and the patches they send. */
 function rows(harness: Partial<HarnessSettings> = {}): { tree: unknown; patches: JsonObject[] } {
   const patches: JsonObject[] = [];
-  return { tree: HarnessRows({ harness: { ...defaultAgentSettings().harness, ...harness }, busy: false, patch: (patch) => void patches.push(patch) }), patches };
+  return { tree: HarnessRows({ harness: { ...defaultAgentSettings().harness, ...harness }, limits: defaultAgentSettings().harnessLimits, busy: false, patch: (patch) => void patches.push(patch) }), patches };
 }
 
 /** The row of the setting `id`. */

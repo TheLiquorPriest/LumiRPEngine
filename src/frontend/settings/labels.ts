@@ -271,7 +271,7 @@ export function engineNote(kind: EngineNoteKind): { title: string; text: string 
     case "minds":
       return { title: "This chat uses some of these", text: `On the harness, Character minds, Lengths, Knowledge and What a mind reads apply; the rest set up minds on the classic and agents engines. Each character's agent is set up ${HARNESS_AT}.` };
     case "agents":
-      return { title: "This chat uses some of these", text: `On the harness, Review card applies, and under Budgets Tool results clipped past and Agent turns under way; the rest set up the agents engine. The harness's own agents are set up ${HARNESS_AT}.` };
+      return { title: "This chat uses some of these", text: `On the harness, Review card applies, and under Budgets ${LOOP_DEFS.clipChars.label}, which bounds the world tools' answers, and ${KEPT_DEFS.runs.label}; the rest set up the agents engine. The harness's own agents, and what their other tools give at once, are set up ${HARNESS_AT}.` };
     case "assistant":
       return { title: "This chat uses one of these", text: `On the harness the GM assistant is one of the harness's agents: How its changes land applies here. Where it runs, its effort and its limits are set ${HARNESS_AT}, and its texts on the page ${HARNESS_PAGE.label} in Prompts.` };
     case "timeouts": {

@@ -142,14 +142,15 @@ export const READER_PROMPT_TOKENS = 160_000;
  * without bound in one run: each is held to its rounds, and each read to its own size.
  */
 const BUDGETS: Readonly<Record<HarnessAgentId, AgentBudget>> = {
-  // A call's answer room holds the model's reasoning too, and a strong reasoning model can spend several thousand tokens deciding before it writes or calls anything: with too little room the answer is cut mid-thought and the run ends with nothing. So every agent's room is generous; rounds enough for a scene of several beats, its rulings, each passage released, and the jobs it starts.
+  // A call's answer room holds the model's reasoning too, and a strong reasoning model can spend several thousand tokens deciding before it writes or calls anything: with too little room the answer is cut mid-thought and the run ends with nothing. So every agent's room is generous; rounds enough for a scene of several beats, its rulings, each passage told and checked, the reply released once, and the jobs it starts.
   [HARNESS_AGENT.author]: { ...UNLIMITED, callTokensIn: READER_PROMPT_TOKENS, callTokensOut: 32_000, toolTurns: 40, revisions: 2, concurrency: 4 },
   // What reached them, a file or two of their own mind, their act, and a passage when the reply is theirs: a mind still calling tools after that has left its task.
   [HARNESS_AGENT.character]: { ...UNLIMITED, callTokensOut: 16_000, toolTurns: 12, revisions: 2, concurrency: 2 },
   // The odds, what the ruling turns on, what is at stake, the beat it writes; or a passage held to its beats, and held again after each redraft.
   [HARNESS_AGENT.gm]: { ...UNLIMITED, callTokensOut: 16_000, toolTurns: 12, revisions: 2, concurrency: 2 },
   // What reached the point of view, then the passage, and a round for each redraft the check asks: six rounds ran out mid-revision in a live scene, and its last draft was refused.
-  [HARNESS_AGENT.narrator]: { ...UNLIMITED, callTokensOut: 16_000, toolTurns: 12, revisions: 3, concurrency: 1 },
+  // Its answer room holds the longest passage once, as passage_draft's argument (24,000 characters as shipped: about 7,500 tokens at LumiAH's 3.2 characters a token, more with the quotation marks and line breaks the call escapes), and the thinking before it, in which a reasoning model may draft the passage once more: at 16,000 the two together could pass the room, and the call be cut before the draft was recorded.
+  [HARNESS_AGENT.narrator]: { ...UNLIMITED, callTokensOut: 24_000, toolTurns: 12, revisions: 3, concurrency: 1 },
   // One stretch read whole, its beats recorded a few calls at a time, and the stretch closed.
   [HARNESS_AGENT.historian]: { ...UNLIMITED, callTokensIn: READER_PROMPT_TOKENS, callTokensOut: 16_000, toolTurns: 16, revisions: 1, concurrency: 2 },
   // A question read from several sides, then the changes it asked for, each checked.

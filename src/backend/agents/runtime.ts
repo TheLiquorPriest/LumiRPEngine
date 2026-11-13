@@ -516,7 +516,7 @@ class Agent implements AgentHandle {
     return { call, text, error: outcome.error === true };
   }
 
-  /** A result past Tool results clipped past: its start for the model, the whole in scratch. */
+  /** A result past Engine answers shown whole (`agents.clipChars`): its start for the model, the whole in scratch. */
   private clip(text: string): { text: string; handle: string } | null {
     const max = this.deps.settings.clipChars;
     if (text.length <= max) return null;
@@ -526,7 +526,7 @@ class Agent implements AgentHandle {
     return { text: `${text.slice(0, shown)}\n${this.text(RUNTIME_TEXT.clipped, { shown: String(shown), total: String(text.length), handle })}`, handle };
   }
 
-  /** The built-in `scratch_read`: the next part of a clipped result, at most Tool results clipped past at a time. */
+  /** The built-in `scratch_read`: the next part of a clipped result, at most Engine answers shown whole at a time. */
   private scratchRead(): AgentTool {
     const max = this.deps.settings.clipChars;
     return {

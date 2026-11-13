@@ -13,12 +13,13 @@
 // the same for a chat on the harness (`EngineBlocked`): such a chat plays nothing until then, and no
 // other engine stands in. Play also says when the runtime keeps no connection yet
 // (`NoConnectionNotice`), with the way to Harness → System → Runtime → Connections.
-// A chat on the harness also shows the harness engine's own settings (Settings: `agents.harness`),
-// which are the user's for every chat. `EngineSwitch`, `EngineBlocked`, `NoConnectionNotice`,
-// `HarnessRows` and `engineRequest` are hook-free, so tests press them without a DOM.
+// A chat on the harness also shows the harness engine's own settings (Settings: `agents.harness`,
+// and `agents.harnessLimits` for what one call of its tools may span), which are the user's for
+// every chat. `EngineSwitch`, `EngineBlocked`, `NoConnectionNotice`, `HarnessRows` and
+// `engineRequest` are hook-free, so tests press them without a DOM.
 
 import { useEffect, useState } from "preact/hooks";
-import { defaultAgentSettings, HARNESS_COMMIT_WAIT_DEF, HARNESS_REMEMBERED_DEF, type HarnessSettings, NEWEST_MESSAGES, type NewestMessage, SOVEREIGN_HANDS, type SovereignHand } from "../../shared/agent-settings";
+import { defaultAgentSettings, HARNESS_COMMIT_WAIT_DEF, HARNESS_REMEMBERED_DEF, HARNESS_TIME_PASS_DEF, type HarnessLimits, type HarnessSettings, NEWEST_MESSAGES, type NewestMessage, SOVEREIGN_HANDS, type SovereignHand } from "../../shared/agent-settings";
 import type { ChatId } from "../../shared/ids";
 import type { JsonObject } from "../../shared/json";
 import { useApp, useView } from "../app";
@@ -40,7 +41,7 @@ export const ENGINE_HELP: Record<ChatEngine, readonly string[]> = {
   classic: ["Each turn runs the engine's classic steps, as Settings → Steps and connections sets them."],
   agents: ["Each turn's steps are worked out by agents, as Settings → Agents, Roles and Main agent set them; the gates, cards and chips stay as they are."],
   harness: [
-    "An AI author plays each turn and writes the reply itself: it reads the world, lets each character think for themselves, rolls what needs a roll, records what changed, and releases the reply a passage at a time.",
+    "An AI author plays each turn and writes the reply itself: it reads the world, lets each character think for themselves, rolls what needs a roll, records what changed, and releases the reply once, whole, at the end of the telling.",
     "It runs in LumiRPEngine's runtime, a program you start beside Lumiverse (the drawer's Harness tab, then System, then Runtime), and its agents call your providers from there, on the runtime's own connections (the same page, under Connections). While the runtime is down this chat plays nothing until it is back. Changes you set to ask first still ask.",
   ],
 };
@@ -54,6 +55,7 @@ const ENGINE_SWITCHED: Record<ChatEngine, string> = {
 
 /** The defaults the harness rows' Default goes back to. */
 const HARNESS_DEFAULTS = defaultAgentSettings().harness;
+const HARNESS_LIMIT_DEFAULTS = defaultAgentSettings().harnessLimits;
 
 const TICK_HELP = {
   on: "A turn whose author never says how much time it took takes the scene's usual time for a turn, as a turn on the other engines does.",
@@ -197,7 +199,7 @@ export function useHarnessBlocked(chatId: ChatId, engine: ChatEngine): string | 
 }
 
 /** The harness engine's own settings, without hooks: the user's, for every chat they play on the harness. A Default sends null, as every setting's does. */
-export function HarnessRows(props: { harness: HarnessSettings; busy: boolean; patch(patch: JsonObject): void }) {
+export function HarnessRows(props: { harness: HarnessSettings; limits: HarnessLimits; busy: boolean; patch(patch: JsonObject): void }) {
   const on = props.harness.defaultTick;
   const standard = HARNESS_DEFAULTS.defaultTick;
   const hand = props.harness.sovereignHand;
@@ -218,6 +220,7 @@ export function HarnessRows(props: { harness: HarnessSettings; busy: boolean; pa
       ) : null}
       <LimitRow id="harness-commit-wait" def={HARNESS_COMMIT_WAIT_DEF} value={props.harness.commitWaitMs} standard={HARNESS_DEFAULTS.commitWaitMs} busy={props.busy} set={(commitWaitMs) => props.patch({ agents: { harness: { commitWaitMs } } })} />
       <LimitRow id="harness-runs-remembered" def={HARNESS_REMEMBERED_DEF} value={props.harness.runsRemembered} standard={HARNESS_DEFAULTS.runsRemembered} busy={props.busy} set={(runsRemembered) => props.patch({ agents: { harness: { runsRemembered } } })} />
+      <LimitRow id="harness-time-pass" def={HARNESS_TIME_PASS_DEF} value={props.limits.timePassMinutes} standard={HARNESS_LIMIT_DEFAULTS.timePassMinutes} busy={props.busy} set={(timePassMinutes) => props.patch({ agents: { harnessLimits: { timePassMinutes } } })} />
     </div>
   );
 }
@@ -251,7 +254,7 @@ export function EngineThisChat(props: { chatId: ChatId }) {
   const [engine, setEngine] = useState<ChatEngine | null>(null);
   const [blocked, setBlocked] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const [harness, setHarness] = useState<HarnessSettings | null>(null);
+  const [harness, setHarness] = useState<{ harness: HarnessSettings; limits: HarnessLimits } | null>(null);
   useEffect(() => readEngine(() => app.request<"lre.chat.knowledge">({ type: "lre.chat.knowledge", chatId: props.chatId, engines: true }), { engine: setEngine, failed: setFailed, blocked: setBlocked }), [props.chatId]);
   // The harness's settings are the user's, read once a chat on the harness shows them.
   const shows = engine === "harness" && harness === null;
@@ -259,7 +262,7 @@ export function EngineThisChat(props: { chatId: ChatId }) {
     if (!shows) return;
     let live = true;
     void app.request({ type: "lre.settings.get" }).then((result) => {
-      if (live && result) setHarness(result.settings.agents.harness);
+      if (live && result) setHarness({ harness: result.settings.agents.harness, limits: result.settings.agents.harnessLimits });
     });
     return () => {
       live = false;
@@ -283,12 +286,13 @@ export function EngineThisChat(props: { chatId: ChatId }) {
       />
       {engine === "harness" && harness !== null ? (
         <HarnessRows
-          harness={harness}
+          harness={harness.harness}
+          limits={harness.limits}
           busy={busy}
           patch={(patch) =>
             run(async () => {
               const result = await app.request({ type: "lre.settings.set", patch });
-              if (result) setHarness(result.settings.agents.harness);
+              if (result) setHarness({ harness: result.settings.agents.harness, limits: result.settings.agents.harnessLimits });
             })
           }
         />

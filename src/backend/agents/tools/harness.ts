@@ -91,7 +91,7 @@ export interface HarnessListed {
 interface Entry extends HarnessListed {
   args: readonly { path: string }[];
   parameters(world: WorldDoc): JsonObject;
-  /** What of its answer reaches the model whole under the player's settings (`HarnessToolDefinition.wholeChars`); absent: LumiAH's Tool results clipped past. */
+  /** What of its answer reaches the model whole under the player's settings (`HarnessToolDefinition.wholeChars`, `ToolDefinition.wholeChars`); absent: LumiAH's Tool results clipped past. */
   wholeChars?: (settings: UserSettings) => number;
   run: Run;
 }
@@ -131,7 +131,7 @@ export const HARNESS_OWN_NEEDS: ReadonlyMap<string, HarnessNeeds> = new Map(
 
 const ENTRIES: readonly Entry[] = [
   // An argument below the top level that the old engines leave to the description above it is described here too (`NESTED_ARG_TEXTS`): on the harness every argument has a text of its own.
-  ...TOOL_DEFINITIONS.filter((def) => !hasOwn(HARNESS_SUPERSEDED, def.name)).map((def): Entry => ({ name: def.name, family: def.family, tier: def.tier === "read" ? "read" : "write", writer: def.tier, needs: def.tier, args: [...(toolText(def.name)?.args ?? []), ...NESTED_ARG_TEXTS.filter((a) => a.tool === def.name)], parameters: (world) => def.parameters(world), run: (args, env) => def.run(args, env) })),
+  ...TOOL_DEFINITIONS.filter((def) => !hasOwn(HARNESS_SUPERSEDED, def.name)).map((def): Entry => ({ name: def.name, family: def.family, tier: def.tier === "read" ? "read" : "write", writer: def.tier, needs: def.tier, args: [...(toolText(def.name)?.args ?? []), ...NESTED_ARG_TEXTS.filter((a) => a.tool === def.name)], parameters: (world) => def.parameters(world), ...(def.wholeChars ? { wholeChars: def.wholeChars } : {}), run: (args, env) => def.run(args, env) })),
   ...HARNESS_TOOL_DEFINITIONS.map((def): Entry => ({ name: def.name, family: def.family, tier: def.tier, writer: null, needs: HARNESS_OWN_NEEDS.get(def.name) ?? (def.tier === "read" ? "read" : "gm"), args: harnessToolText(def.name)?.args ?? [], parameters: (world) => def.parameters(world), ...(def.wholeChars ? { wholeChars: def.wholeChars } : {}), run: (args, env) => def.run(args, env) })),
 ];
 

@@ -41,13 +41,13 @@ describe("the harness on LumiAH's runtime", () => {
     noModelCalls(rig);
   });
 
-  test("what was released, passage by passage, is the reply, and the turn's record is written when it ends", async () => {
+  test("what was released, once and whole, is the reply, and the turn's record is written when it ends", async () => {
     const { rig, chatId } = await harnessChat();
     const clock = (await stateOf(rig, chatId)).clock;
     const run = await beginTurn(rig, chatId, "I ask whether Okoro is coming by.");
     await run.answer(AUTHOR, "time_pass", { minutes: 10 });
     await run.answer(AUTHOR, "commit");
-    await run.finish("Okoro is on the step. ", "He knocks twice.");
+    await run.finish("Okoro is on the step. He knocks twice.");
     const reply = rig.host.chat(chatId).messages.at(-1);
     expect(reply?.swipes[reply.swipeId]).toBe("Okoro is on the step. He knocks twice.");
     const rec = reply ? await recordOn(rig, chatId, reply.id) : null;

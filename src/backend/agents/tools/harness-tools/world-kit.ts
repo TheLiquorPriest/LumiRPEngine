@@ -89,7 +89,7 @@ const sameIssue = (i: LintIssue): string => `${i.severity}\u0000${i.path}\u0000$
 
 /**
  * `issues` as an answer lists them, errors first, as many as fit in what one tool result may hold
- * (Settings → Agents, Tool results clipped past: half of it, so the rest of the answer fits too),
+ * (Settings → Agents, Engine answers shown whole: half of it, so the rest of the answer fits too),
  * with how many more there are.
  */
 export function lintLines(turn: HarnessTurn, issues: readonly LintIssue[]): { lines: LintLine[]; more: number } {

@@ -266,7 +266,7 @@ describe("the tools the harness lists", () => {
     expect([...HARNESS_OWN_NEEDS.keys()].sort()).toEqual(HARNESS_TOOL_DEFINITIONS.map((d) => d.name).sort());
   });
 
-  test("a tool read whole names how much of its answer reaches the model so, from the player's settings, and no other tool names any", async () => {
+  test("each read that must come back whole names how much of its answer reaches the model so, from the player's settings", async () => {
     const whole = (tools: readonly RemoteTool[]) => Object.fromEntries(tools.flatMap((t) => (t.wholeChars === undefined ? [] : [[t.name, t.wholeChars]])));
     const shipped = whole((await listed()).tools);
     const { prepare, minds } = defaultSettings().story;
@@ -276,7 +276,15 @@ describe("the tools the harness lists", () => {
     const files = Object.values(minds.chars).reduce((sum, n) => sum + n, 0);
     expect(shipped[MINDS_TOOL.read]).toBeGreaterThan(files);
     expect(shipped[MINDS_TOOL.read]).toBeLessThan(files + 4000);
-    expect(Object.keys(shipped).sort()).toEqual([MINDS_TOOL.read, PREPARE_TOOL.survey, PREPARE_TOOL.read].sort());
+    // A read of the story record holds its setting's number of beats, each as long as the record's limits let one be; a lore read, a page of the engine's own size for a tool result; mind_seed, the same files as mind_read.
+    const reads = [RECORD_TOOL.beatsRead, RECORD_TOOL.feedRead, MINDS_TOOL.seed];
+    const lore = ["lore_index", "lore_search", "lore_grep", "lore_read"];
+    for (const name of [...reads, ...lore]) expect({ name, states: (shipped[name] ?? 0) > 0 }).toEqual({ name, states: true });
+    for (const name of lore) expect({ name, whole: shipped[name] }).toEqual({ name, whole: defaultSettings().agents.clipChars });
+    expect(shipped[MINDS_TOOL.seed]).toBeGreaterThan(shipped[MINDS_TOOL.read] ?? 0);
+    // The narration reads hold the longest passage the settings allow, as JSON may write it, with all its check may ask and the beats of a turn beside it.
+    const narration = [STAGE_TOOL.narrationRead, STAGE_TOOL.passageRead];
+    for (const name of narration) expect({ name, holds: (shipped[name] ?? 0) > 2 * defaultSettings().narration.passageChars }).toEqual({ name, holds: true });
     // Changed in Settings, the bounds follow.
     const changed = whole(
       (
@@ -284,12 +292,21 @@ describe("the tools the harness lists", () => {
           s.story.prepare.readChars = 9000;
           s.story.prepare.surveyChars = 7000;
           s.story.minds.chars.memory += 10_000;
+          s.story.limits.beatsRead = 12;
+          s.story.limits.feedItems = 12;
+          s.agents.clipChars = 5000;
+          s.narration.passageChars += 10_000;
         })
       ).tools,
     );
     expect([changed[PREPARE_TOOL.read], changed[PREPARE_TOOL.survey]]).toEqual([9000, 7000]);
+    for (const name of lore) expect({ name, whole: changed[name] }).toEqual({ name, whole: 5000 });
+    // Half the beats, about half the size.
+    for (const name of [RECORD_TOOL.beatsRead, RECORD_TOOL.feedRead]) expect({ name, half: Math.round(((changed[name] ?? 0) / (shipped[name] ?? 1)) * 10) }).toEqual({ name, half: 5 });
     // The memory file's 10,000 more, and its head's longer figures.
     const grown = (changed[MINDS_TOOL.read] ?? 0) - (shipped[MINDS_TOOL.read] ?? 0);
     expect(grown >= 10_000 && grown < 10_010).toBe(true);
+    // A passage 10,000 characters longer: each narration read states at least twice that more, as JSON may write it.
+    for (const name of narration) expect({ name, grown: (changed[name] ?? 0) - (shipped[name] ?? 0) >= 20_000 }).toEqual({ name, grown: true });
   });
 });

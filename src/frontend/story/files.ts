@@ -7,7 +7,7 @@
 
 import { AUTHOR_FILE, HARNESS_AGENT } from "../../shared/harness-texts";
 import { PREPARE_PATH } from "../../shared/harness-texts-prepare";
-import { MIND_FILE_IDS, type MindFileId } from "../../shared/settings";
+import { MIND_FILE_IDS, MIND_FILE_TITLES, type MindFileId } from "../../shared/settings";
 
 /** A file of the chat's area, as the pages show it: who last wrote it (the player, or an agent by its definition's id) and its version, which a write names. */
 export interface StoryFile {
@@ -33,16 +33,16 @@ export interface StoryFiles {
   write(chatId: string, path: string, text: string, base: string | null): Promise<{ file: StoryFile } | FilesFailed>;
 }
 
-/** What a mind's file holds, in the pages' words. */
+/** What a mind's file holds, in the pages' words; its title is `MIND_FILE_TITLES`', which labels its size's row and the refusals past it too. */
 export const MIND_FILE_LABEL: Readonly<Record<MindFileId, { title: string; note: string }>> = {
-  core: { title: "Who they are", note: "Their heart and history. The author writes it, and so can you." },
-  now: { title: "Right now", note: "Where they are and what fills their mind at this moment." },
-  memory: { title: "Memory", note: "What they remember, in their own words." },
-  beliefs: { title: "Beliefs", note: "What they hold true, rightly or not." },
-  people: { title: "People", note: "How they see the people in their life." },
-  plans: { title: "Plans", note: "What they mean to do." },
-  outline: { title: "Their past in outline", note: "What they know only in outline of a past they didn't relive." },
-  profile: { title: "Profile", note: "All a supporting character has: the author keeps it short." },
+  core: { title: MIND_FILE_TITLES.core, note: "Their heart and history. The author writes it, and so can you." },
+  now: { title: MIND_FILE_TITLES.now, note: "Where they are and what fills their mind at this moment." },
+  memory: { title: MIND_FILE_TITLES.memory, note: "What they remember, in their own words." },
+  beliefs: { title: MIND_FILE_TITLES.beliefs, note: "What they hold true, rightly or not." },
+  people: { title: MIND_FILE_TITLES.people, note: "How they see the people in their life." },
+  plans: { title: MIND_FILE_TITLES.plans, note: "What they mean to do." },
+  outline: { title: MIND_FILE_TITLES.outline, note: "What they know only in outline of a past they didn't relive." },
+  profile: { title: MIND_FILE_TITLES.profile, note: "All a supporting character has: the author keeps it short." },
 };
 
 /** A file of a mind's folder: the known ones by id, in order, then any other the folder holds. */

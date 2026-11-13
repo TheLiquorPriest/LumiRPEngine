@@ -13,6 +13,7 @@ import { guidesOf, toolArgTextId, toolGuideId, toolText, toolTextId } from "../.
 import type { ChatId, UserId } from "../../../shared/ids";
 import { isRecord, type JsonObject } from "../../../shared/json";
 import type { PromptTexts } from "../../../shared/prompts";
+import type { UserSettings } from "../../../shared/settings";
 import type { WorldDoc } from "../../../shared/world";
 import { renderPrompt } from "../../prompts";
 import type { AgentTool, ToolOutcome } from "../runtime";
@@ -89,6 +90,8 @@ export interface ToolDefinition {
   notes?: true;
   /** Its description is the registry text `tool.<name>` (R5, Every agent page, group "Tools"): editable, with a reset. */
   parameters(world: WorldDoc): JsonObject; // hand-written JSON Schema, with the world's enums filled in
+  /** For a tool that holds each answer to one of the player's settings and is meant to be read in one go: that bound, in characters, under `settings`. On the harness LumiAH gives its answer whole up to it (its `wholeChars`) instead of clipping it at Tool results clipped past. */
+  wholeChars?: (settings: UserSettings) => number;
   run(args: JsonObject, env: ToolEnv): Promise<ToolOutcome>;
 }
 

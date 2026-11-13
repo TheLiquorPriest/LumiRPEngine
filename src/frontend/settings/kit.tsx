@@ -14,17 +14,18 @@ import { Badge, Button, Disclosure, HostSwitch, ListRow, NumberStepper, Section 
 import type { IconName } from "../icons";
 
 /** The −/+ step of each unit, in what the stepper shows (seconds for "ms"): a convenience, not a limit; typing takes any value. */
-export const STEP: Readonly<Record<AgentLimitUnit, number>> = { tokens: 1000, ms: 5, count: 1, chars: 500 };
+export const STEP: Readonly<Record<AgentLimitUnit, number>> = { tokens: 1000, ms: 5, count: 1, chars: 500, minutes: 60 };
 
 /** Where a limit of an agent's own starts when the one it follows is none: a number its unit commonly takes. */
-const PICK_START: Readonly<Record<AgentLimitUnit, number>> = { tokens: 100_000, ms: 60_000, count: 10, chars: 4000 };
+const PICK_START: Readonly<Record<AgentLimitUnit, number>> = { tokens: 100_000, ms: 60_000, count: 10, chars: 4000, minutes: 60 };
 
 const n = (value: number): string => value.toLocaleString("en-US");
 
-/** A limit as the pages say it: "100,000 tokens", "2 min", "4,000 characters", or "No limit". */
+/** A limit as the pages say it: "100,000 tokens", "2 min", "4,000 characters", "1,440 minutes", or "No limit". */
 export function amountText(value: Limit, unit: AgentLimitUnit): string {
   if (value === "none") return "No limit";
   if (unit === "ms") return formatMs(value);
+  if (unit === "minutes") return `${n(value)} ${nounFor(value, "minute", "minutes")}`;
   return unit === "tokens" ? `${n(value)} ${nounFor(value, "token", "tokens")}` : unit === "chars" ? `${n(value)} ${nounFor(value, "character", "characters")}` : n(value);
 }
 
@@ -108,7 +109,7 @@ export function FoldRow(props: { id: string; label: string; value: ComponentChil
 function LimitControls(props: { def: AgentLimitDef; value: Limit; onValue: number; busy: boolean; set(value: Limit): void }) {
   const { def, value } = props;
   const seconds = def.unit === "ms";
-  const unitLabel = seconds ? "seconds" : def.unit === "tokens" ? "tokens" : def.unit === "chars" ? "characters" : null;
+  const unitLabel = seconds ? "seconds" : def.unit === "tokens" ? "tokens" : def.unit === "chars" ? "characters" : def.unit === "minutes" ? "minutes" : null;
   return (
     <>
       {def.none !== null ? <HostSwitch label={`${def.label}: no limit`} checked={value === "none"} disabled={props.busy} onChange={(none) => props.set(none ? "none" : props.onValue)} /> : null}

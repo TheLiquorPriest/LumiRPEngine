@@ -799,6 +799,9 @@ export interface StoryLimits {
 export const MIND_FILE_IDS = ["core", "now", "memory", "beliefs", "people", "plans", "outline", "profile"] as const;
 export type MindFileId = (typeof MIND_FILE_IDS)[number];
 
+/** Each file of a mind by its title: the story pages show it, its size's row under Settings → Story → Minds is labelled by it, and a refusal past that size names it. */
+export const MIND_FILE_TITLES: Readonly<Record<MindFileId, string>> = Object.freeze({ core: "Who they are", now: "Right now", memory: "Memory", beliefs: "Beliefs", people: "People", plans: "Plans", outline: "Their past in outline", profile: "Profile" });
+
 /** What the story engine keeps of minds: how long each file may be, in characters, and whether the player's character has a mind while Sovereign Hand is on (the direction says what happens; the mind gives his voice and inner life). */
 export interface StoryMinds {
   chars: Record<MindFileId, number>;
@@ -878,7 +881,8 @@ export interface StoryPrepare {
 export const STORY_DEFAULTS: Readonly<StorySettings> = Object.freeze({
   budget: Object.freeze({ stretchMinutes: 1440, t1: 1, t2: 2, t3: 4 }),
   // A beat's text and a quote are roomy: in live play a model put a whole speech in one quote and a full sentence or three in the event, and every refusal for length cost the turn another round.
-  limits: Object.freeze({ beatChars: 800, quoteChars: 600, quotes: 6, people: 24, beatsPerTurn: 40, draftChars: 600, draftsPerTurn: 12, whyChars: 300, beatsRead: 40, feedItems: 40, openingChars: 4000 }),
+  // A read of the record and what a character takes in at once hold 24 beats: forty whole beats ran far past what one tool result carries, and twenty-four fit one call whole and still cover a scene.
+  limits: Object.freeze({ beatChars: 800, quoteChars: 600, quotes: 6, people: 24, beatsPerTurn: 40, draftChars: 600, draftsPerTurn: 12, whyChars: 300, beatsRead: 24, feedItems: 24, openingChars: 4000 }),
   // A mind holds what a person carries; past its size the character condenses, as memory does. The player's character has a mind under Sovereign Hand as shipped.
   minds: Object.freeze({ chars: Object.freeze({ core: 4000, now: 2000, memory: 8000, beliefs: 4000, people: 4000, plans: 2000, outline: 6000, profile: 1500 }), playerMind: true }),
   // Nothing picked: every agent runs on its own connection, model and effort until the user picks.
@@ -901,6 +905,38 @@ export const STORY_BOUNDS = Object.freeze({
   modelChars: 200,
   /** The prepared start: a stretch from a few messages to a long scene; a ceiling from none to a hundred million tokens; a handful of principals at once; a read of a stretch and a survey answer from a page, for a small local model, to a million characters, for a model with a very long context; a call from a thousand tokens to two million; the live view asking from every two seconds to every five minutes, through ten to five hundred runs; a run from five minutes to a day, with ten to five thousand rounds; one to twenty runs without progress. */
   prepare: Object.freeze({ stretchMessages: [5, 400], askAboveTokens: [0, 100_000_000], reliveAtOnce: [1, 24], beatsPerStretch: [1, 200], readChars: [2000, 1_000_000], textChars: [200, 8000], callTokens: [1000, 2_000_000], surveyChars: [2000, 1_000_000], watchSeconds: [2, 300], watchRuns: [10, 500], runMinutes: [5, 1440], runRounds: [10, 5000], idleRuns: [1, 20] } satisfies Record<keyof StoryPrepare, readonly [number, number]>),
+});
+
+/** Each limit of the story record by the label of its row (Settings → Story → The record's limits): the page shows it, and a refusal that comes from the limit names it. */
+export const STORY_LIMIT_LABELS: Readonly<Record<keyof StoryLimits, string>> = Object.freeze({
+  beatChars: "A beat's text",
+  quoteChars: "One quote",
+  quotes: "Quotes in a beat",
+  people: "People in a beat",
+  beatsPerTurn: "Beats in a turn",
+  draftChars: "A draft's text",
+  draftsPerTurn: "Drafts in a turn",
+  whyChars: "A reason",
+  beatsRead: "Beats in one read",
+  feedItems: "Beats taken in at once",
+  openingChars: "The moment, as a turn begins",
+});
+
+/** Each dial of the prepared start by the label of its row (Settings → Story → Preparing): the page shows it, and a refusal or a note that comes from the dial names it. */
+export const PREPARE_LABELS: Readonly<Record<keyof StoryPrepare, string>> = Object.freeze({
+  stretchMessages: "Messages in a stretch",
+  askAboveTokens: "Ask first above",
+  reliveAtOnce: "Principals reliving at once",
+  beatsPerStretch: "Beats in a stretch",
+  readChars: "One read of a stretch",
+  textChars: "Each text of the plan",
+  callTokens: "A model call, before one is measured",
+  surveyChars: "One answer of the survey",
+  watchSeconds: "The live view asks every",
+  watchRuns: "Runs the live view looks through",
+  runMinutes: "Time for one run",
+  runRounds: "Rounds for one run",
+  idleRuns: "Runs without progress",
 });
 
 /** One level of the model ladder as the engine reads it: each member kept where it is one it takes, else left out. */
@@ -1066,13 +1102,26 @@ export interface NarrationSettings {
   directLine: DirectLinePassage;
 }
 
-type NarrationNumber = { [K in keyof NarrationSettings]: NarrationSettings[K] extends number ? K : never }[keyof NarrationSettings];
+/** The narration's numbers, by their keys in `NarrationSettings`. */
+export type NarrationNumber = { [K in keyof NarrationSettings]: NarrationSettings[K] extends number ? K : never }[keyof NarrationSettings];
 
-/** As shipped: the game master checks; two revisions; the narrator handed the reply's last 1,500 characters and the chat's last 4,000; a passage of up to 12,000 characters; up to 12 changes of 400 characters a check; 600 characters in the author's own words; the direct line's passage the character's own. */
-export const NARRATION_DEFAULTS: Readonly<NarrationSettings> = Object.freeze({ check: "gm", revisions: 2, replyChars: 1500, recentChars: 4000, passageChars: 12_000, changes: 12, changeChars: 400, ownChars: 600, directLine: "own" });
+/** As shipped: the game master checks; two revisions; the narrator handed the reply's last 1,500 characters and the chat's last 4,000; a passage of up to 24,000 characters; up to 12 changes of 400 characters a check; 600 characters in the author's own words; the direct line's passage the character's own. */
+// A passage of 24,000 characters: a long-form reply's told part runs to 3,000 words and more, and a player met the refusal at 12,000 in play.
+export const NARRATION_DEFAULTS: Readonly<NarrationSettings> = Object.freeze({ check: "gm", revisions: 2, replyChars: 1500, recentChars: 4000, passageChars: 24_000, changes: 12, changeChars: 400, ownChars: 600, directLine: "own" });
 
 /** Each number's bounds: up to ten revisions; prose windows up to a long chapter; a passage from a paragraph to a chapter; a check's changes from one to forty, each a sentence to a page. */
 export const NARRATION_BOUNDS: Readonly<Record<NarrationNumber, readonly [number, number]>> = Object.freeze({ revisions: [0, 10], replyChars: [0, 20_000], recentChars: [0, 40_000], passageChars: [200, 60_000], changes: [1, 40], changeChars: [40, 2000], ownChars: [0, 4000] });
+
+/** Each number of the narration by the label of its row (Settings → Story → Narration): the page shows it, and a refusal that comes from the number names it. */
+export const NARRATION_LABELS: Readonly<Record<NarrationNumber, string>> = Object.freeze({
+  revisions: "Revisions",
+  changes: "Changes a check may ask",
+  changeChars: "Longest change",
+  replyChars: "The reply so far",
+  recentChars: "The chat's recent prose",
+  passageChars: "Longest passage",
+  ownChars: "Released unchecked",
+});
 
 /** `UserSettings.narration` as the engine reads it: each choice one it takes and each number a whole one in its bounds, else `base`'s; a file from before it reads as shipped. */
 export function narrationSettingsOf(raw: unknown, base: Readonly<NarrationSettings> = NARRATION_DEFAULTS): NarrationSettings {
@@ -1096,7 +1145,7 @@ export function narrationSettingsOf(raw: unknown, base: Readonly<NarrationSettin
 }
 
 /** The shipped defaults' revision (`UserSettings.defaults`). */
-export const SETTINGS_DEFAULTS_REV = 9;
+export const SETTINGS_DEFAULTS_REV = 10;
 
 /** Build's jobs (DESIGN §13.1): the user's own, which no preset sets. */
 export interface JobSettings {

@@ -116,8 +116,8 @@ export interface HarnessTurn {
   story?: StoryPort;
   /**
    * Each passage of the reply this turn is writing (`backend/story/narration.ts`): what the narrator
-   * was handed, its drafts and their checks, and what the reply released so far. Only a turn that
-   * writes a reply has one; a job's run has none, and the narration tools say so.
+   * was handed, its drafts and their checks, and whether it went out with the turn's one release.
+   * Only a turn that writes a reply has one; a job's run has none, and the narration tools say so.
    */
   stageBook?: StageBook;
 }

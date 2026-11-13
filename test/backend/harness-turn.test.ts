@@ -88,7 +88,7 @@ describe("a turn on the harness engine", () => {
     expect(placeOfEntity(await stateOf(rig, chatId), OKORO)).toBeNull();
     expect((await stateOf(rig, chatId)).clock).toBe(clock);
 
-    await run.finish("Mara glances at the door. ", "Okoro is already on the step.");
+    await run.finish("Mara glances at the door. Okoro is already on the step.");
     const state = await stateOf(rig, chatId);
     expect(placeOfEntity(state, OKORO)).toBe(HOME);
     expect(state.clock).toBe(clock + 10);

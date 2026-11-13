@@ -11,8 +11,8 @@
 // checks refuse the same writes. The draft is then committed as the world's next revision, and the
 // chat brought to it. None of these tools decides anything: each reads or writes what its call names.
 //
-// What an answer may hold is the one limit a tool result has (Settings → Agents, Tool results
-// clipped past): a value longer than that is answered as an outline to read further into, and a list
+// What an answer may hold is the one limit a tool result has (Settings → Agents, Engine answers
+// shown whole): a value longer than that is answered as an outline to read further into, and a list
 // of names is cut to half of it, as the lint issues are (`lintLines`).
 
 import { HARNESS_FAMILY } from "../../../../shared/harness-text-kit";

@@ -24,8 +24,8 @@
 
 import { useEffect, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
-import type { DirectLinePassage, MindFileId, NarrationCheck, NarrationSettings, StoryLimits, StoryModels, StoryPrepare, StorySettings } from "../../shared/settings";
-import { AGENT_STANDINGS, CHARACTER_RUNS, MIND_FILE_IDS, NARRATION_BOUNDS, NARRATION_CHECKS, NARRATION_DEFAULTS, STORY_BOUNDS, STORY_DEFAULTS } from "../../shared/settings";
+import type { DirectLinePassage, MindFileId, NarrationCheck, NarrationNumber, NarrationSettings, StoryLimits, StoryModels, StoryPrepare, StorySettings } from "../../shared/settings";
+import { AGENT_STANDINGS, CHARACTER_RUNS, MIND_FILE_IDS, NARRATION_BOUNDS, NARRATION_CHECKS, NARRATION_DEFAULTS, NARRATION_LABELS, PREPARE_LABELS, STORY_BOUNDS, STORY_DEFAULTS, STORY_LIMIT_LABELS } from "../../shared/settings";
 import type { BudgetUseView, StoryNames } from "../../shared/story-pages";
 import type { StateView } from "../../shared/state-view";
 import type { SettingsRoute } from "../app";
@@ -50,9 +50,6 @@ export const STORY_SUB: Readonly<Record<StorySub, { title: string; subtitle: str
   preparing: { title: "Preparing", subtitle: "How the prepared start plans and what it may spend", icon: "scroll" },
 };
 
-/** A number of `settings.narration`. */
-type NarrationNumber = keyof typeof NARRATION_BOUNDS;
-
 /** Who checks a passage, in the page's words: the choice, and what the Story page's row says of it. */
 const CHECK_WORDS: Readonly<Record<NarrationCheck, { label: string; summary: string }>> = {
   gm: { label: "Game master", summary: "The game master checks" },
@@ -63,15 +60,15 @@ const CHECK_WORDS: Readonly<Record<NarrationCheck, { label: string; summary: str
 /** Whose the direct line's answer is, in the page's words, in the order offered. */
 const DIRECT_LINE_WORDS: Readonly<Record<DirectLinePassage, string>> = { own: "Their own", narrated: "The narrator's" };
 
-/** Each number of the narration, in the page's words. */
-const NARRATION_WORDS: Readonly<Record<NarrationNumber, { label: string; help: string; unit: string; step: number }>> = {
-  revisions: { label: "Revisions", help: "How many times the narrator may draft a passage again when the check finds a fault. Each revision is one more draft and one more check.", unit: "revisions", step: 1 },
-  changes: { label: "Changes a check may ask", help: "The most changes one check may ask of a draft.", unit: "changes", step: 1 },
-  changeChars: { label: "Longest change", help: "How long each change a check asks for may be.", unit: "characters", step: 50 },
-  replyChars: { label: "The reply so far", help: "How much of the end of the reply so far the narrator is given, so the next passage carries on from it. 0: none.", unit: "characters", step: 250 },
-  recentChars: { label: "The chat's recent prose", help: "How much of the chat's prose before this turn the narrator is given, to keep its voice. 0: none.", unit: "characters", step: 500 },
-  passageChars: { label: "Longest passage", help: "The longest passage the narrator may draft at once.", unit: "characters", step: 500 },
-  ownChars: { label: "Released unchecked", help: "How much the author may release in its own words with no check, such as a line for an extra or an answer out of character. 0: nothing.", unit: "characters", step: 100 },
+/** Each number of the narration, in the page's words; its label is `NARRATION_LABELS`', which its refusals name too. */
+const NARRATION_WORDS: Readonly<Record<NarrationNumber, { help: string; unit: string; step: number }>> = {
+  revisions: { help: "How many times the narrator may draft a passage again when the check finds a fault. Each revision is one more draft and one more check.", unit: "revisions", step: 1 },
+  changes: { help: "The most changes one check may ask of a draft.", unit: "changes", step: 1 },
+  changeChars: { help: "How long each change a check asks for may be.", unit: "characters", step: 50 },
+  replyChars: { help: "How much of the end of the reply so far the narrator is given, so the next passage carries on from it. 0: none.", unit: "characters", step: 250 },
+  recentChars: { help: "How much of the chat's prose before this turn the narrator is given, to keep its voice. 0: none.", unit: "characters", step: 500 },
+  passageChars: { help: "The longest passage the narrator may draft at once.", unit: "characters", step: 500 },
+  ownChars: { help: "How much the author may release in its own words with no check, such as a line for an extra or an answer out of character. 0: nothing.", unit: "characters", step: 100 },
 };
 
 /** The Story page's row for Narration: who checks, and how many revisions where someone does. */
@@ -84,36 +81,36 @@ export function narrationChanged(n: NarrationSettings): number {
   return (Object.keys(NARRATION_DEFAULTS) as (keyof NarrationSettings)[]).filter((key) => n[key] !== NARRATION_DEFAULTS[key]).length;
 }
 
-/** Each limit of the story record, in the page's words. */
-const LIMIT_WORDS: Readonly<Record<keyof StoryLimits, { label: string; help: string; unit: string }>> = {
-  beatChars: { label: "A beat's text", help: "What a beat says happened, what anyone there could tell of it, and what someone got of it.", unit: "characters" },
-  quoteChars: { label: "One quote", help: "Each quote of words spoken in a beat.", unit: "characters" },
-  quotes: { label: "Quotes in a beat", help: "How many quotes one beat holds.", unit: "quotes" },
-  people: { label: "People in a beat", help: "People one beat is addressed to or reached, or one draft names.", unit: "people" },
-  beatsPerTurn: { label: "Beats in a turn", help: "Beats one turn's record holds, with what its jobs write after the reply.", unit: "beats" },
-  draftChars: { label: "A draft's text", help: "What a draft kept for later says, and its notes.", unit: "characters" },
-  draftsPerTurn: { label: "Drafts in a turn", help: "Drafts one turn's record opens, with its jobs'.", unit: "drafts" },
-  whyChars: { label: "A reason", help: "Why someone is cast as they are, or why a beat is struck.", unit: "characters" },
-  beatsRead: { label: "Beats in one read", help: "Beats the author or the game master reads of the record at once.", unit: "beats" },
-  feedItems: { label: "Beats taken in at once", help: "Beats one character's agent is given of what reached them, at once.", unit: "beats" },
-  openingChars: { label: "The moment, as a turn begins", help: "What the author is told of the moment before it acts: the time, the place, who is there, the last beats and the quests. The oldest beats go first when it is longer.", unit: "characters" },
+/** Each limit of the story record, in the page's words; its label is `STORY_LIMIT_LABELS`', which its refusals name too. */
+const LIMIT_WORDS: Readonly<Record<keyof StoryLimits, { help: string; unit: string }>> = {
+  beatChars: { help: "What a beat says happened, what anyone there could tell of it, and what someone got of it.", unit: "characters" },
+  quoteChars: { help: "Each quote of words spoken in a beat.", unit: "characters" },
+  quotes: { help: "How many quotes one beat holds.", unit: "quotes" },
+  people: { help: "People one beat is addressed to or reached, or one draft names.", unit: "people" },
+  beatsPerTurn: { help: "Beats one turn's record holds, with what its jobs write after the reply.", unit: "beats" },
+  draftChars: { help: "What a draft kept for later says, and its notes.", unit: "characters" },
+  draftsPerTurn: { help: "Drafts one turn's record opens, with its jobs'.", unit: "drafts" },
+  whyChars: { help: "Why someone is cast as they are, or why a beat is struck.", unit: "characters" },
+  beatsRead: { help: "Beats the author or the game master reads of the record at once.", unit: "beats" },
+  feedItems: { help: "Beats one character's agent is given of what reached them, at once.", unit: "beats" },
+  openingChars: { help: "What the author is told of the moment before it acts: the time, the place, who is there, the last beats and the quests. The oldest beats go first when it is longer.", unit: "characters" },
 };
 
-/** Each dial of the prepared start, in the page's words. */
+/** Each dial of the prepared start, in the page's words; its label is `PREPARE_LABELS`', which the preparing tools' refusals name too. */
 const PREPARE_WORDS: Readonly<Record<keyof StoryPrepare, { label: string; help: string; unit: string; step: number }>> = {
-  stretchMessages: { label: "Messages in a stretch", help: "The most messages one run of the historian reads. A longer stretch of the chat is planned as several.", unit: "messages", step: 5 },
-  askAboveTokens: { label: "Ask first above", help: "A plan reckoned to cost more than this in all, the author's own work included, waits for your word before anything is relived. 0: every plan waits.", unit: "tokens", step: 10_000 },
-  reliveAtOnce: { label: "Principals reliving at once", help: "How many principals may have moments to relive at the same time.", unit: "principals", step: 1 },
-  beatsPerStretch: { label: "Beats in a stretch", help: "The most beats the historian records for one stretch.", unit: "beats", step: 5 },
-  readChars: { label: "One read of a stretch", help: "The most of the chat one read of a stretch gives the historian, whole. Larger means fewer reads, so fewer model calls, but each read stays in the historian's prompt and is sent again with every later call. 60,000 characters is about 19,000 tokens. Lower it for a model with a short context; raise it for one with a long context. The historian's prompt stops at its Prompt per call, under Harness → Agents: 160,000 tokens as shipped, for a model that reads 200,000. Set it about 40,000 under what your model reads. At that limit a read is cut to the room left, the historian is told, and it records what it has and ends its run.", unit: "characters", step: 1000 },
-  textChars: { label: "Each text of the plan", help: "What the story is, why a stretch or a principal, what is filled from summaries.", unit: "characters", step: 100 },
-  callTokens: { label: "A model call, before one is measured", help: "Every call of the preparation sends its agent's whole prompt again, so a plan is reckoned at its calls times what one weighs. That weight is measured from the preparation's own calls, or from this chat's last author run; until either is known, it is this.", unit: "tokens", step: 5000 },
-  surveyChars: { label: "One answer of the survey", help: "The most one answer gives the author, whole, when it surveys the story: the summaries' own text and the lore's, the rest named with how to read it. Larger means fewer answers, so fewer model calls, but each answer stays in the author's prompt and is sent again with every later call. 60,000 characters is about 19,000 tokens. Lower it for a model with a short context; raise it for one with a long context. The author's prompt stops at its Prompt per call, under Harness → Agents: 160,000 tokens as shipped, for a model that reads 200,000. Set it about 40,000 under what your model reads. At that limit an answer is cut to the room left, the author is told, and it writes what it has to its files and ends its run.", unit: "characters", step: 1000 },
-  watchSeconds: { label: "The live view asks every", help: "While a run of the preparation is at work, the view of it on Play → Now asks how it stands this often. It stops asking once nothing runs.", unit: "seconds", step: 1 },
-  watchRuns: { label: "Runs the live view looks through", help: "The most of this chat's latest runs the live view reads each time it asks. Each principal relives in runs of their own, so a long preparation starts many: past this many, its oldest runs aren't shown.", unit: "runs", step: 10 },
-  runMinutes: { label: "Time for one run", help: "How long one run of the preparation may work. When a run ends with work left, the next one starts by itself, as long as the plan has your word, nothing waits for you, you haven't paused or cancelled it, and your cap allows. A run has no token limit of its own: your cap holds what the whole preparation spends.", unit: "minutes", step: 5 },
-  runRounds: { label: "Rounds for one run", help: "How many rounds of tool calls one run of the preparation has: the author's and those of the agents it starts, together. Each agent's own limits in LumiAH still stand.", unit: "rounds", step: 10 },
-  idleRuns: { label: "Runs without progress", help: "When this many runs it started on its own end in a row without moving the preparation forward, it stops carrying on by itself and says why. Carry on starts it again.", unit: "runs", step: 1 },
+  stretchMessages: { label: PREPARE_LABELS.stretchMessages, help: "The most messages one run of the historian reads. A longer stretch of the chat is planned as several.", unit: "messages", step: 5 },
+  askAboveTokens: { label: PREPARE_LABELS.askAboveTokens, help: "A plan reckoned to cost more than this in all, the author's own work included, waits for your word before anything is relived. 0: every plan waits.", unit: "tokens", step: 10_000 },
+  reliveAtOnce: { label: PREPARE_LABELS.reliveAtOnce, help: "How many principals may have moments to relive at the same time.", unit: "principals", step: 1 },
+  beatsPerStretch: { label: PREPARE_LABELS.beatsPerStretch, help: "The most beats the historian records for one stretch.", unit: "beats", step: 5 },
+  readChars: { label: PREPARE_LABELS.readChars, help: "The most of the chat one read of a stretch gives the historian, whole. Larger means fewer reads, so fewer model calls, but each read stays in the historian's prompt and is sent again with every later call. 60,000 characters is about 19,000 tokens. Lower it for a model with a short context; raise it for one with a long context. The historian's prompt stops at its Prompt per call, under Harness → Agents: 160,000 tokens as shipped, for a model that reads 200,000. Set it about 40,000 under what your model reads. At that limit a read is cut to the room left, the historian is told, and it records what it has and ends its run.", unit: "characters", step: 1000 },
+  textChars: { label: PREPARE_LABELS.textChars, help: "What the story is, why a stretch or a principal, what is filled from summaries.", unit: "characters", step: 100 },
+  callTokens: { label: PREPARE_LABELS.callTokens, help: "Every call of the preparation sends its agent's whole prompt again, so a plan is reckoned at its calls times what one weighs. That weight is measured from the preparation's own calls, or from this chat's last author run; until either is known, it is this.", unit: "tokens", step: 5000 },
+  surveyChars: { label: PREPARE_LABELS.surveyChars, help: "The most one answer gives the author, whole, when it surveys the story: the summaries' own text and the lore's, the rest named with how to read it. Larger means fewer answers, so fewer model calls, but each answer stays in the author's prompt and is sent again with every later call. 60,000 characters is about 19,000 tokens. Lower it for a model with a short context; raise it for one with a long context. The author's prompt stops at its Prompt per call, under Harness → Agents: 160,000 tokens as shipped, for a model that reads 200,000. Set it about 40,000 under what your model reads. At that limit an answer is cut to the room left, the author is told, and it writes what it has to its files and ends its run.", unit: "characters", step: 1000 },
+  watchSeconds: { label: PREPARE_LABELS.watchSeconds, help: "While a run of the preparation is at work, the view of it on Play → Now asks how it stands this often. It stops asking once nothing runs.", unit: "seconds", step: 1 },
+  watchRuns: { label: PREPARE_LABELS.watchRuns, help: "The most of this chat's latest runs the live view reads each time it asks. Each principal relives in runs of their own, so a long preparation starts many: past this many, its oldest runs aren't shown.", unit: "runs", step: 10 },
+  runMinutes: { label: PREPARE_LABELS.runMinutes, help: "How long one run of the preparation may work. When a run ends with work left, the next one starts by itself, as long as the plan has your word, nothing waits for you, you haven't paused or cancelled it, and your cap allows. A run has no token limit of its own: your cap holds what the whole preparation spends.", unit: "minutes", step: 5 },
+  runRounds: { label: PREPARE_LABELS.runRounds, help: "How many rounds of tool calls one run of the preparation has: the author's and those of the agents it starts, together. Each agent's own limits in LumiAH still stand.", unit: "rounds", step: 10 },
+  idleRuns: { label: PREPARE_LABELS.idleRuns, help: "When this many runs it started on its own end in a row without moving the preparation forward, it stops carrying on by itself and says why. Carry on starts it again.", unit: "runs", step: 1 },
 };
 
 /** How many of the story's settings differ from their defaults: each level of the ladder set, each number or switch changed. */
@@ -160,7 +157,7 @@ export function StoryHub(props: { story: StorySettings; narration: NarrationSett
       <Section title="The record's limits">
         <p class="lre-set-note">How much the story record takes at once. A tool asked for more is refused, and the agent says it in fewer words.</p>
         {(Object.keys(LIMIT_WORDS) as (keyof StoryLimits)[]).map((key) => (
-          <NumberRow key={key} id={`limit-${key}`} label={LIMIT_WORDS[key].label} help={LIMIT_WORDS[key].help} unit={LIMIT_WORDS[key].unit} value={story.limits[key]} standard={STORY_DEFAULTS.limits[key]} bounds={STORY_BOUNDS.limits[key]} step={LIMIT_WORDS[key].unit === "characters" ? 50 : 1} busy={busy} set={(v) => set(key, v)} />
+          <NumberRow key={key} id={`limit-${key}`} label={STORY_LIMIT_LABELS[key]} help={LIMIT_WORDS[key].help} unit={LIMIT_WORDS[key].unit} value={story.limits[key]} standard={STORY_DEFAULTS.limits[key]} bounds={STORY_BOUNDS.limits[key]} step={LIMIT_WORDS[key].unit === "characters" ? 50 : 1} busy={busy} set={(v) => set(key, v)} />
         ))}
       </Section>
     </div>
@@ -195,7 +192,7 @@ function NarrationPage(props: { narration: NarrationSettings; busy: boolean; pat
   const n = props.narration;
   const d = NARRATION_DEFAULTS;
   const set = (fields: JsonObject) => props.patch({ narration: fields });
-  const number = (key: NarrationNumber) => <NumberRow key={key} id={`narration-${key}`} label={NARRATION_WORDS[key].label} help={NARRATION_WORDS[key].help} unit={NARRATION_WORDS[key].unit} value={n[key]} standard={d[key]} bounds={NARRATION_BOUNDS[key]} step={NARRATION_WORDS[key].step} busy={props.busy} set={(v) => set({ [key]: v })} />;
+  const number = (key: NarrationNumber) => <NumberRow key={key} id={`narration-${key}`} label={NARRATION_LABELS[key]} help={NARRATION_WORDS[key].help} unit={NARRATION_WORDS[key].unit} value={n[key]} standard={d[key]} bounds={NARRATION_BOUNDS[key]} step={NARRATION_WORDS[key].step} busy={props.busy} set={(v) => set({ [key]: v })} />;
   return (
     <div class="lre-stack" data-lre-settings-page="story-narration">
       <p class="lre-set-lead">How the reply is told: who checks each passage against what happened, how often it may be drafted again, and what the narrator is given to write it. Every draft and every check adds to how long a reply takes.</p>

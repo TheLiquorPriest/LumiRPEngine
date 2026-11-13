@@ -17,6 +17,8 @@ const relation = "The relation type's id: knows, owns, member_of, regard, in, or
 const path = "The workspace file's path: names joined by /, such as notes/marcus.md; start it with ~/ for the global workspace, which every chat shares, such as ~/notes/style.md.";
 const under = "Only files under this folder, such as notes/; leave it out for every file.";
 const lore = "The lore entry's id, as lore_index, lore_search or lore_grep gives it: a short id such as lr0101, a World Info entry as bookId/entryId, or a world entry's own id.";
+/** The `cursor` of a lore read that pages its answer. */
+const pageCursor = "Where to read on: the cursor the answer before ended with. Leave it out to start from the beginning.";
 const proposes = "The answer is the change in plain words, its change type and its mode. Working a turn, the change is staged at once: it lands when the turn commits, or, when its mode is confirm, waits for the game master's Apply on the turn's review card. Otherwise nothing changes until the game master applies it.";
 /** A change tool's `dry`: what dry does is told once, with what a change does (the `changes` guide). */
 const dry = "true: check only; nothing is staged.";
@@ -800,32 +802,44 @@ export const WRITE_TOOL_TEXTS: readonly ToolText[] = [
     family: "lore",
     tier: "read",
     note: "Gives the lore index: every entry of the chat's World Info books by its id and title.",
-    text: "The lore index: every lore entry of the World Info books this chat reads, book by book, each by its short id and title, with a line of what it holds where the title doesn't say; or, where the game master keeps an index of their own, that index as they wrote it. Read an entry whole with lore_read and its id.",
-    args: [{ path: "book", text: "Only this book's entries: its name or id; leave it out for every book." }],
+    text: "The lore index: every lore entry of the World Info books this chat reads, book by book, each by its short id and title, with a line of what it holds where the title doesn't say; or, where the game master keeps an index of their own, that index as they wrote it. Read an entry whole with lore_read and its id. An index longer than one answer comes in pages, each ending with the cursor that reads on.",
+    args: [
+      { path: "book", text: "Only this book's entries: its name or id; leave it out for every book." },
+      { path: "cursor", text: pageCursor },
+    ],
   },
   {
     name: "lore_search",
     family: "lore",
     tier: "read",
     note: "Searches the world's lore and the chat's World Info books.",
-    text: "Search the lore: the world's own entries and those of the World Info books this chat reads, best matches first. Gives each match's id, title and why it matched, with its secret marker when it is a secret or a mark in a book (who knows it, whom it is kept from). Read one whole with lore_read.",
-    args: [{ path: "query", text: "Words or names to look for." }],
+    text: "Search the lore: the world's own entries and those of the World Info books this chat reads, best matches first. Gives each match's id, title and why it matched, with its secret marker when it is a secret or a mark in a book (who knows it, whom it is kept from). Read one whole with lore_read. More matches than one answer holds come in pages, each ending with the cursor that reads on.",
+    args: [
+      { path: "query", text: "Words or names to look for." },
+      { path: "cursor", text: pageCursor },
+    ],
   },
   {
     name: "lore_grep",
     family: "lore",
     tier: "read",
     note: "Finds lore entries that hold some text.",
-    text: "Find the lore entries whose text holds some text, in any case: each entry's id and title, its secret marker, and the lines that hold it.",
-    args: [{ path: "text", text: "What to look for." }],
+    text: "Find the lore entries whose text holds some text, in any case: each entry's id and title, its secret marker, and the lines that hold it. More lines than one answer holds come in pages, each ending with the cursor that reads on.",
+    args: [
+      { path: "text", text: "What to look for." },
+      { path: "cursor", text: pageCursor },
+    ],
   },
   {
     name: "lore_read",
     family: "lore",
     tier: "read",
     note: "Reads one lore entry, by its id.",
-    text: "Read one lore entry whole, by its id, as your knowledge has it: a secret in its text is marked with who knows it, or left out where your knowledge doesn't reach.",
-    args: [{ path: "id", text: lore }],
+    text: "Read one lore entry whole, by its id, as your knowledge has it: a secret in its text is marked with who knows it, or left out where your knowledge doesn't reach. An entry longer than one answer comes in pages, each ending with the cursor that reads on: read them all, nothing is left out or given twice.",
+    args: [
+      { path: "id", text: lore },
+      { path: "cursor", text: pageCursor },
+    ],
   },
   {
     name: "lore_load",
@@ -877,6 +891,10 @@ export const WRITE_NOTE = {
   noLore: "tool.note.no_lore",
   draftPath: "tool.note.draft_path",
   loreLate: "tool.note.lore_late",
+  badCursor: "tool.note.bad_cursor",
+  pageMore: "tool.note.page_more",
+  pageEnd: "tool.note.page_end",
+  lineCut: "tool.note.line_cut",
   noBook: "tool.note.no_book",
   cancelled: "tool.note.cancelled",
   paused: "tool.note.paused",
@@ -918,6 +936,24 @@ export const WRITE_TOOL_NOTES: readonly ToolNote[] = [
   { id: WRITE_NOTE.draftPath, label: "A draft outside lore-drafts/", note: "lore_draft's answer when the path it was given isn't under lore-drafts/.", text: "A lore draft goes under lore-drafts/, and {{path}} isn't there.", vars: [filePath] },
   { id: WRITE_NOTE.loreLate, label: "Lore loaded after the reply", note: "lore_load's answer once the reply its turn was writing has gone out: it loads lore only while the turn is still being prepared.", text: "This turn's reply is written already, so {{id}} isn't loaded: load lore while a turn is being prepared.", vars: [{ name: "id", text: "the entry id the call gave" }] },
   { id: WRITE_NOTE.noBook, label: "No such book", note: "lore_index's answer when no World Info book read here has the name or id it was given.", text: "No World Info book {{book}} is read here.", vars: [{ name: "book", text: "the book's name or id the call gave" }] },
+  { id: WRITE_NOTE.badCursor, label: "Not a cursor", note: "A lore read's answer when its cursor isn't one an answer of that read gave.", text: "{{cursor}} isn't a cursor {{tool}} gave here. Leave cursor out to start from the beginning, or give the one the answer before ended with.", vars: [{ name: "cursor", text: "the cursor the call gave", required: true }, { name: "tool", text: "the tool called" }] },
+  {
+    id: WRITE_NOTE.pageMore,
+    label: "A page, more to come",
+    note: "Ends a page of a lore read whose answer is longer than one tool result may be (the setting named, Settings → Agents → Budgets): what this page gives, and the cursor that reads on.",
+    text: "This gives {{from}} to {{to}} of {{total}} {{what}}: one answer holds at most {{chars}} characters ({{setting}}, Settings → Agents → Budgets). Read on: the same call with cursor {{cursor}}.",
+    vars: [
+      { name: "from", text: "where this page starts, counted from 1", required: true },
+      { name: "to", text: "where it ends", required: true },
+      { name: "total", text: "how many there are in all", required: true },
+      { name: "what", text: "characters, matches or results" },
+      { name: "chars", text: "the most one answer holds", required: true },
+      { name: "setting", text: "the setting's label" },
+      { name: "cursor", text: "the cursor that reads on", required: true },
+    ],
+  },
+  { id: WRITE_NOTE.pageEnd, label: "The last page", note: "Ends the last page of a lore read that came in pages.", text: "This gives {{from}} to {{to}} of {{total}} {{what}}: the last of them.", vars: [{ name: "from", text: "where this page starts, counted from 1", required: true }, { name: "to", text: "where it ends", required: true }, { name: "total", text: "how many there are in all", required: true }, { name: "what", text: "characters, matches or results" }] },
+  { id: WRITE_NOTE.lineCut, label: "A line cut to fit", note: "Stands beside a line lore_grep found that is longer than one answer may be on its own (the setting named, Settings → Agents → Budgets): what was left out, and how to read it.", text: "This line is {{size}} characters, and only its first {{shown}} fit one answer ({{setting}}, Settings → Agents → Budgets): lore_read {{id}} reads the entry whole, in pages.", vars: [{ name: "size", text: "the line's length", required: true }, { name: "shown", text: "how much of it is given", required: true }, { name: "setting", text: "the setting's label" }, { name: "id", text: "the entry's id", required: true }] },
   { id: WRITE_NOTE.cancelled, label: "Cancelled", note: "A write's answer when the agent's work was cancelled before it ran.", text: "The agent's work was cancelled, so nothing was checked or written.", vars: [] },
   { id: WRITE_NOTE.paused, label: "The chat is paused", note: "An apply's answer while an earlier message's edit waits for Keep or Discard.", text: "An earlier message was edited: Keep or Discard it first, under that message.", vars: [] },
   { id: WRITE_NOTE.noWorld, label: "No world", note: "A write's answer when the chat plays no LumiRPEngine world, or its world isn't loaded.", text: "This chat plays no LumiRPEngine world, or its world isn't loaded.", vars: [] },

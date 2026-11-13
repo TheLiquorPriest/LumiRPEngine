@@ -52,7 +52,7 @@ export function StatusBanners(props: { state: StateView }) {
 
 /**
  * A turn under way, without hooks. On the harness the author works in LumiRPEngine's runtime and
- * writes the reply itself, a passage at a time, while the activity line says only that the reply
+ * sends the reply itself, once and whole when it is told, while the activity line says only that the reply
  * is awaited: the banner says who is at work and gives the way to watch it (the Harness tab, which
  * opens on Live).
  */

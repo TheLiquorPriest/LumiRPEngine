@@ -25,12 +25,14 @@ import { RECORD_NOTE, RECORD_TOOL } from "../../../../shared/harness-texts-recor
 import { hashParts } from "../../../../shared/hash";
 import { isRecord, type JsonObject } from "../../../../shared/json";
 import { BEAT_KINDS, BEAT_REACHES, type Beat, CAST_STANDINGS, type Draft, DRAFT_TIERS, type Exposure } from "../../../../shared/ledger";
+import { STORY_LIMIT_LABELS, type StoryLimits, type UserSettings } from "../../../../shared/settings";
 import { calendarOf, clockOfStamp, formatStamp, placeOffset } from "../../../../engine/calendar";
 import { placeOfEntity } from "../../../../engine/scope";
 import { beatProblem, draftProblem, inReach, lengthProblem, type StoryProblem, type StoryProblemCode } from "../../../../engine/story/checks";
 import { draftsDue } from "../../../../engine/story/drafts";
-import { storyName } from "../../../../engine/story/feed";
+import { feedItem, storyName } from "../../../../engine/story/feed";
 import { beatOn, castOn, draftOn } from "../../../../engine/story/record";
+import { renderPrompt } from "../../../prompts";
 import { budgetRefusal, overBudget } from "../../../story/budget";
 import { feedFor } from "../../../story/feed";
 import { characterSelf } from "../../../story/minds";
@@ -152,6 +154,79 @@ function beatShown(view: ToolReadView, beat: Beat): Record<string, unknown> {
   return { ...beat, time: stampOf(view, beat.at) };
 }
 
+/** How long an id, a name or a time written in a read may run, for its bound: far longer than any the engine or a world makes. */
+const ID_ROOM = 200;
+
+/** The longest of `words`. */
+const longest = (words: readonly string[]): string => words.reduce((a, b) => (b.length > a.length ? b : a), "");
+
+/** An id `ID_ROOM` long, a different one for each `n`: a beat's people are each named once. */
+const roomId = (n: number): string => String(n).padStart(ID_ROOM, "x");
+
+/**
+ * A beat as long as `limits` let one be written (`beatProblem`): its text, its surface and every
+ * quote full, every person it names named, each reach with what they got, every id and reason at
+ * its longest. What the reads' bounds are worked out from, so the number a setting promises is what
+ * one read gives whole. `by` is its own person, the first that it reached took all of it in, the
+ * second only part: one beat as each of them is fed it.
+ */
+function longestBeat(limits: StoryLimits): Beat {
+  const id = roomId(0);
+  const people = Array.from({ length: limits.people }, (_, i) => roomId(i + 1));
+  return {
+    id,
+    turn: id,
+    at: Number.MAX_SAFE_INTEGER,
+    where: id,
+    by: id,
+    kind: BEAT_KINDS.reduce((a, b) => (b.length > a.length ? b : a)),
+    what: "x".repeat(limits.beatChars),
+    surface: "x".repeat(limits.beatChars),
+    quotes: Array.from({ length: limits.quotes }, () => "x".repeat(limits.quoteChars)),
+    to: people,
+    exposure: people.map((who, i): Exposure => ({ who, reach: i === 0 ? "whole" : longest(BEAT_REACHES.filter((r) => r !== "whole")) as Exposure["reach"], got: "x".repeat(limits.beatChars), from: id })),
+    decidedBy: { agent: id, as: id },
+    settles: id,
+    struck: "x".repeat(limits.whyChars),
+    past: { from: id, to: id },
+  };
+}
+
+/** The length of a JSON answer that holds `count` items of `item` characters each where `frame` holds none. */
+const listed = (frame: object, count: number, item: number): number => JSON.stringify(frame).length + count * item + Math.max(0, count - 1);
+
+/**
+ * The most one `beats_read` gives under `settings`: as many beats as Beats in one read allows, each
+ * at its longest (`longestBeat`), with the note on earlier ones. LumiAH gives up to this whole (its
+ * `wholeChars`). Every text is counted as written: a quote mark or a line break JSON escapes takes
+ * two characters, which the room every id is given far more than covers in a beat as written.
+ */
+export function beatsReadChars(settings: UserSettings): number {
+  const { limits } = settings.story;
+  const id = roomId(0);
+  const beat = JSON.stringify({ ...longestBeat(limits), time: id }).length;
+  const note = renderPrompt(RECORD_NOTE.beatsEarlier, settings.prompts.texts, { earlier: String(Number.MAX_SAFE_INTEGER), setting: STORY_LIMIT_LABELS.beatsRead, most: String(limits.beatsRead), first: id });
+  return listed({ now: id, beats: [], earlier: Number.MAX_SAFE_INTEGER, note }, limits.beatsRead, beat);
+}
+
+/**
+ * The most one `feed_read` gives under `settings`: as many items as Beats taken in at once allows,
+ * each the longest a person is fed of a beat at its longest (their own, one they took in whole, one
+ * they got part of: `feedItem` itself makes each), with the longer note. LumiAH gives up to this
+ * whole (its `wholeChars`); a text is counted as `beatsReadChars` counts one.
+ */
+export function feedReadChars(settings: UserSettings): number {
+  const { limits } = settings.story;
+  // A beat that no longer stands is fed to no one.
+  const { struck: _, ...beat } = longestBeat(limits);
+  const id = roomId(0);
+  const fed = [beat.by, ...beat.exposure.slice(0, 2).map((e) => e.who)].map((who) => feedItem(beat, who)).filter((item) => item !== null);
+  const item = Math.max(...fed.map((f) => JSON.stringify({ ...f, time: id }).length));
+  const { texts } = settings.prompts;
+  const note = longest([renderPrompt(RECORD_NOTE.feedMore, texts, { more: String(Number.MAX_SAFE_INTEGER), setting: STORY_LIMIT_LABELS.feedItems, most: String(limits.feedItems) }), renderPrompt(RECORD_NOTE.feedNone, texts, {})]);
+  return listed({ who: id, items: [], last: id, more: Number.MAX_SAFE_INTEGER, note }, limits.feedItems, item);
+}
+
 /** Settles or drops the draft a call names: only an open one (or one gone stale). */
 async function closeDraft(view: ToolReadView, env: ToolEnv, tool: string, args: JsonObject, state: "settled" | "dropped"): Promise<ToolOutcome> {
   const held = authorOrGm(view, env, tool);
@@ -166,7 +241,7 @@ async function closeDraft(view: ToolReadView, env: ToolEnv, tool: string, args: 
   const said = state === "dropped" ? needText(view, tool, args, "why") : (textArg(args, "notes") ?? "");
   if (typeof said !== "string") return said;
   const limits = story.turn.settings.story.limits;
-  const long = lengthProblem(state === "dropped" ? "why" : "notes", said, state === "dropped" ? limits.whyChars : limits.draftChars);
+  const long = state === "dropped" ? lengthProblem("why", said, limits, "whyChars") : lengthProblem("notes", said, limits, "draftChars");
   if (long) return problemAnswer(view, long);
   const lands = landed(view, story.port, await story.port.write({ drafts: [{ ...on.draft, state, ...(said !== "" ? { notes: said } : {}) }] }));
   if (typeof lands !== "string") return lands;
@@ -265,7 +340,7 @@ export const RECORD_TOOLS: readonly HarnessToolDefinition[] = [
       const problem = beatProblem(beat, limits);
       if (problem) return problemAnswer(view, problem);
       const own = read.own.beats;
-      if (!own.some((b) => b.id === id) && own.length >= limits.beatsPerTurn) return view.refuse(RECORD_NOTE.full, { count: String(own.length), what: "beats" });
+      if (!own.some((b) => b.id === id) && own.length >= limits.beatsPerTurn) return view.refuse(RECORD_NOTE.full, { count: String(own.length), what: "beats", row: STORY_LIMIT_LABELS.beatsPerTurn });
       const lands = landed(view, port, await port.write({ beats: [beat] }));
       if (typeof lands !== "string") return lands;
       return view.answer({ written: { beat: id, by, kind, where, time: stampOf(view, at), exposure, lands } });
@@ -275,7 +350,9 @@ export const RECORD_TOOLS: readonly HarnessToolDefinition[] = [
     name: T.beatsRead,
     family: HARNESS_FAMILY.story,
     tier: "read",
-    parameters: () => objectSchema({ who: text(), where: text(), since: text(), struck: { type: "boolean" } }),
+    parameters: () => objectSchema({ who: text(), where: text(), since: text(), struck: { type: "boolean" }, before: text() }),
+    // A read reaches its reader whole: it is held to Beats in one read, each beat to the record's limits.
+    wholeChars: beatsReadChars,
     async run(args, env) {
       const view = await env.reader.view();
       const held = authorOrGm(view, env, T.beatsRead);
@@ -292,11 +369,20 @@ export const RECORD_TOOLS: readonly HarnessToolDefinition[] = [
       const since = timeArg(view, args, "since", now);
       if (since !== null && typeof since !== "number") return since;
       const struck = boolArg(args, "struck") !== false;
-      const fit = story.read.path.beats
+      // Before a beat: the way on to what one read left out, the same filters held.
+      const beforeSaid = textArg(args, "before");
+      const path = story.read.path.beats;
+      const end = beforeSaid === null ? path.length : path.findIndex(({ beat }) => beat.id === beforeSaid);
+      if (end < 0) return view.refuse(RECORD_NOTE.noBeat, { beat: beforeSaid ?? "" });
+      const fit = path
+        .slice(0, end)
         .map(({ beat }) => beat)
         .filter((b) => (who === null || b.by === who.id || (b.to ?? []).includes(who.id) || b.exposure.some((e) => e.who === who.id)) && (place === null || b.where === place.id) && (since === null || b.at >= since) && (struck || b.struck === undefined));
-      const shown = fit.slice(-story.turn.settings.story.limits.beatsRead);
-      return view.answer({ now: stampOf(view, now), beats: shown.map((b) => beatShown(view, b)), ...(fit.length > shown.length ? { earlier: fit.length - shown.length } : {}) });
+      const most = story.turn.settings.story.limits.beatsRead;
+      const shown = fit.slice(-most);
+      const earlier = fit.length - shown.length;
+      const left = earlier > 0 ? { earlier, note: view.text(RECORD_NOTE.beatsEarlier, { earlier: String(earlier), setting: STORY_LIMIT_LABELS.beatsRead, most: String(most), first: shown[0]?.id ?? "" }) } : {};
+      return view.answer({ now: stampOf(view, now), beats: shown.map((b) => beatShown(view, b)), ...left });
     },
   },
   {
@@ -317,7 +403,7 @@ export const RECORD_TOOLS: readonly HarnessToolDefinition[] = [
       const on = beatOn(story.read.path, id);
       if (!on) return view.refuse(RECORD_NOTE.noBeat, { beat: id });
       if (on.beat.struck !== undefined) return view.refuse(RECORD_NOTE.struckAlready, { beat: id, why: on.beat.struck });
-      const long = lengthProblem("why", why, story.turn.settings.story.limits.whyChars);
+      const long = lengthProblem("why", why, story.turn.settings.story.limits, "whyChars");
       if (long) return problemAnswer(view, long);
       const lands = landed(view, story.port, await story.port.write({ struck: [{ beat: id, why }] }));
       if (typeof lands !== "string") return lands;
@@ -329,6 +415,8 @@ export const RECORD_TOOLS: readonly HarnessToolDefinition[] = [
     family: HARNESS_FAMILY.mind,
     tier: "read",
     parameters: () => objectSchema({ after: text() }),
+    // What reached a person reaches them whole: it is held to Beats taken in at once, each beat to the record's limits.
+    wholeChars: feedReadChars,
     async run(args, env) {
       const view = await env.reader.view();
       // A character's agent alone, for the person it runs as, as their casting allows.
@@ -340,7 +428,7 @@ export const RECORD_TOOLS: readonly HarnessToolDefinition[] = [
       if (after !== null && !beatOn(story.read.path, after)) return view.refuse(RECORD_NOTE.noAfter, { beat: after });
       const feed = await feedFor(env, self.who, after ?? undefined);
       if (!feed) return view.refuse(RECORD_NOTE.noRecord);
-      const note = feed.more > 0 ? view.text(RECORD_NOTE.feedMore, { more: String(feed.more) }) : feed.items.length === 0 ? view.text(RECORD_NOTE.feedNone) : undefined;
+      const note = feed.more > 0 ? view.text(RECORD_NOTE.feedMore, { more: String(feed.more), setting: STORY_LIMIT_LABELS.feedItems, most: String(story.turn.settings.story.limits.feedItems) }) : feed.items.length === 0 ? view.text(RECORD_NOTE.feedNone) : undefined;
       return view.answer({ who: self.who, items: feed.items.map((item) => ({ ...item, time: stampOf(view, item.at) })), last: feed.last, ...(feed.more > 0 ? { more: feed.more } : {}), ...(note !== undefined ? { note } : {}) });
     },
   },
@@ -365,7 +453,7 @@ export const RECORD_TOOLS: readonly HarnessToolDefinition[] = [
       if (standing === undefined) return badValue(view, T.castSet, "standing", standingSaid, CAST_STANDINGS);
       const why = needText(view, T.castSet, args, "why");
       if (typeof why !== "string") return why;
-      const long = lengthProblem("why", why, story.turn.settings.story.limits.whyChars);
+      const long = lengthProblem("why", why, story.turn.settings.story.limits, "whyChars");
       if (long) return problemAnswer(view, long);
       const cast = castOn(story.read.path, who.id);
       if (cast?.pinned === true) return view.refuse(RECORD_NOTE.pinned, { name: nameOf(view, who.id), standing: cast.standing });
@@ -426,7 +514,7 @@ export const RECORD_TOOLS: readonly HarnessToolDefinition[] = [
       const problem = draftProblem(draft, limits);
       if (problem) return problemAnswer(view, problem);
       const own = read.own.drafts;
-      if (!own.some((d) => d.id === draft.id) && own.length >= limits.draftsPerTurn) return view.refuse(RECORD_NOTE.full, { count: String(own.length), what: "drafts" });
+      if (!own.some((d) => d.id === draft.id) && own.length >= limits.draftsPerTurn) return view.refuse(RECORD_NOTE.full, { count: String(own.length), what: "drafts", row: STORY_LIMIT_LABELS.draftsPerTurn });
       // The same draft opened again in this turn is the one opened: it is counted once.
       const spent = overBudget({ ...read, path: { ...read.path, drafts: read.path.drafts.filter((d) => d.draft.id !== draft.id) } }, budget, { tier, at: when });
       if (spent) return budgetRefusal(view, spent);

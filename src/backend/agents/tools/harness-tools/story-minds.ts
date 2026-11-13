@@ -22,7 +22,7 @@ import { WRITE_NOTE } from "../../../../shared/agent-tools-write";
 import { HARNESS_AGENT, HARNESS_FAMILY, HARNESS_NOTE } from "../../../../shared/harness-texts";
 import { MINDS_NOTE, MINDS_TOOL } from "../../../../shared/harness-texts-minds";
 import type { JsonObject } from "../../../../shared/json";
-import { AGENT_CHANGE_LABEL, MIND_FILE_IDS, type MindFileId, type UserSettings } from "../../../../shared/settings";
+import { AGENT_CHANGE_LABEL, MIND_FILE_IDS, MIND_FILE_TITLES, type MindFileId, type UserSettings } from "../../../../shared/settings";
 import { castOn } from "../../../../engine/story/record";
 import { renderPrompt } from "../../../prompts";
 import { effectiveMode } from "../../../settings-store";
@@ -47,18 +47,38 @@ function shown(view: ToolReadView, id: MindFileId, file: HarnessFile | null, max
 /** How long a person's name, their standing and a file's version may run in a read's heads, for its bound: far longer than any. */
 const HEAD_ROOM = 200;
 
+/** Every file of a mind full to its size, each under its head, as `shown` writes them and a read joins them. */
+function filesChars(settings: UserSettings): number {
+  const { texts } = settings.prompts;
+  const max = settings.story.minds.chars;
+  const long = "x".repeat(HEAD_ROOM);
+  // Each file: "### ", its head, a line break, its text, and the blank line before the next.
+  return MIND_FILE_IDS.reduce((sum, id) => sum + 7 + renderPrompt(MINDS_NOTE.fileHead, texts, { file: `${id}.md`, version: long, size: count(max[id]), max: count(max[id]) }).length + max[id], 0);
+}
+
 /**
  * The most `mind_read` gives under `settings`: every file full to its size, each under its head,
  * after the read's own head. A mind is read whole, so LumiAH gives up to this whole (its
  * `wholeChars`); what is past it reaches the reader clipped, the rest kept for scratch_read.
  */
 function mindReadChars(settings: UserSettings): number {
-  const { texts } = settings.prompts;
-  const max = settings.story.minds.chars;
   const long = "x".repeat(HEAD_ROOM);
-  const head = renderPrompt(MINDS_NOTE.readHead, texts, { name: long, standing: long }).length;
-  // Each file: "### ", its head, a line break, its text, and the blank line before the next.
-  return MIND_FILE_IDS.reduce((sum, id) => sum + 7 + renderPrompt(MINDS_NOTE.fileHead, texts, { file: `${id}.md`, version: long, size: count(max[id]), max: count(max[id]) }).length + max[id], head);
+  return renderPrompt(MINDS_NOTE.readHead, settings.prompts.texts, { name: long, standing: long }).length + filesChars(settings);
+}
+
+/**
+ * The most `mind_seed` gives whole under `settings`: its head and each part's, the person's record
+ * in three parts, then the same files `mind_read` gives, full to their sizes. Each part of the
+ * record is one of the old engines' read tools' answers, which nothing of the record bounds: each is
+ * given room up to the engine's own size for one tool result (`agents.clipChars`, the size those
+ * engines read one at), so a record that size and a mind full to its sizes come back whole together.
+ */
+function mindSeedChars(settings: UserSettings): number {
+  const { texts } = settings.prompts;
+  const long = "x".repeat(HEAD_ROOM);
+  const heads = [renderPrompt(MINDS_NOTE.seedHead, texts, { name: long, standing: long }), ...[MINDS_NOTE.seedSheet, MINDS_NOTE.seedMind, MINDS_NOTE.seedKnows, MINDS_NOTE.seedFiles].map((id) => renderPrompt(id, texts, {}))];
+  // Each head with the blank line after it, and the record's three parts.
+  return heads.reduce((sum, head) => sum + head.length + 2, 0) + 3 * settings.agents.clipChars + filesChars(settings);
 }
 
 /** The old engines' read tools by name: `mind_seed` reads a person with them, as the game master's tools read one. */
@@ -132,11 +152,11 @@ export const MIND_FILE_TOOLS: readonly HarnessToolDefinition[] = [
       const max = turn.settings.story.minds.chars[file];
       if (boolArg(args, "append") === true) {
         const added = await appendTo(env.files, path, args.text, max);
-        if ("long" in added) return view.refuse(MINDS_NOTE.appendLong, { file: named, size: count(added.long), max: count(max) });
+        if ("long" in added) return view.refuse(MINDS_NOTE.appendLong, { file: named, size: count(added.long), max: count(max), row: MIND_FILE_TITLES[file] });
         if ("refused" in added) return view.refuse(MINDS_NOTE.writeRefused, { file: named, reason: added.refused.reason });
         return view.answer({ written: { file: named, size: added.size, version: added.version }, note: view.text(MINDS_NOTE.written) });
       }
-      if (args.text.length > max) return view.refuse(MINDS_NOTE.fileLong, { file: named, size: count(args.text.length), max: count(max) });
+      if (args.text.length > max) return view.refuse(MINDS_NOTE.fileLong, { file: named, size: count(args.text.length), max: count(max), row: MIND_FILE_TITLES[file] });
       const { given, base } = await baseOf(env.files, path, args);
       const wrote = await env.files.write(path, args.text, base);
       if (!("refused" in wrote)) return view.answer({ written: { file: named, size: args.text.length, version: wrote.version }, note: view.text(MINDS_NOTE.written) });
@@ -176,6 +196,8 @@ export const MIND_FILE_TOOLS: readonly HarnessToolDefinition[] = [
     family: "minds",
     tier: "read",
     parameters: () => objectSchema({ who: text() }, ["who"]),
+    // What is held of a person is read in one go, to write who they are from: the same files as mind_read, whole.
+    wholeChars: mindSeedChars,
     async run(args, env) {
       const view = await env.reader.view();
       const turn = env.turn;

@@ -1,20 +1,27 @@
 // A passage of the reply on its way out, on the harness engine (DEPTH2-PLAN §3.3). The author
 // decides what happened as beats. The narrator, an agent, is handed only what of them reached one
 // person, the point-of-view character, and drafts a passage. Whoever the settings name checks it
-// against the beats whole. The author releases it with LumiAH's `reply_write`, which asks this
-// file's gate first (`releaseGate`, AH6 §8) and tells it what went out (`releaseNoted`).
+// against the beats whole. A turn's reply is released once, whole: the author calls LumiAH's
+// `reply_write` in the shape this engine gives it (`replyTool`), naming each passage to release by
+// its number, in order, with any words of its own, and never types a passage out again. LumiAH asks
+// this file's gate what goes out (`releaseGate`, AH6 §8), which answers with the text itself, and
+// tells it what went out (`releaseNoted`).
 //
 // - `StageBook` is a turn's own, in memory, one for each turn that writes a reply
-//   (`HarnessTurn.stageBook`): each passage opened, with its beats, drafts and checks, and what the reply
-//   released so far. Nothing of it is written to the record: what reached the player is the reply.
+//   (`HarnessTurn.stageBook`): each passage opened, with its beats, drafts and checks, and whether it
+//   went out. Nothing of it is written to the record: what reached the player is the reply.
 // - A passage holds the beats of the turn that reached its point of view and no earlier passage
 //   holds, as they stood when it opened; beats decided later are the next passage's. A narrator keeps
 //   its passage through its revisions. A new narrator for the same eyes takes over one that waits for
-//   a draft or a revision, and otherwise opens the next.
-// - The gate lets out a passage whose latest draft passed its check, or whose drafts are spent once
-//   checked; text of the author's own up to a length; and, where no one checks, anything the author
-//   releases. Nothing else, and nothing from an agent but the author. A character's stream on the
-//   direct line is never asked about (AH6 §8): it is told, and kept as the reply so far.
+//   a draft or a revision, and otherwise opens the next. The reply as told so far, which a narrator
+//   goes on from, is the latest draft of each passage opened before its own.
+// - The gate holds each passage named to what the turn decided: its latest draft goes out once it
+//   passed its check, or failed it with its drafts spent; where no one checks, once drafted. Each
+//   goes out in the order named, a blank line between one and the next, with the author's own words
+//   before or after them up to a length (`narration.ownChars`): alone, those are a line for an extra
+//   or an answer out of character. Nothing goes out from an agent but the author. A character's
+//   stream on the direct line is never asked about (AH6 §8): it is the turn's one release, and is
+//   only told.
 // - The settings (`UserSettings.narration`) say who checks, how many drafts a passage may have, how
 //   much prose the narrator is handed for its voice, and what the author may release in its own words.
 //
@@ -30,8 +37,9 @@ import type { WorldState } from "../../engine/state";
 import { feedItem } from "../../engine/story/feed";
 import { canSeeEntity, canSeePlace } from "../../engine/visibility";
 import { HARNESS_AGENT } from "../../shared/harness-texts";
-import { STAGE_NOTE, STAGE_TEXT } from "../../shared/harness-texts-stage";
+import { REPLY_ARG, REPLY_PLACES, type ReplyPlace, STAGE_NOTE, STAGE_TEXT } from "../../shared/harness-texts-stage";
 import type { EntityId } from "../../shared/ids";
+import type { JsonObject } from "../../shared/json";
 import type { Beat } from "../../shared/ledger";
 import type { PromptTexts } from "../../shared/prompts";
 import type { NarrationSettings, UserSettings } from "../../shared/settings";
@@ -68,19 +76,14 @@ export interface Passage {
   released: boolean;
 }
 
-/** What went out into the reply, in order: a passage (its number), or text that is none (the author's own words, a character's stream on the direct line). */
-export interface Release {
-  text: string;
-  /** The definition of the agent that released it. */
-  by: string;
-  passage: number | null;
-}
-
 /** Why a narration tool or the gate says no: the note that says it, and what fills it. */
 export interface StageRefusal {
   note: string;
   vars?: Record<string, string>;
 }
+
+/** What stands between one passage and the next as the reply holds them, and between what the narrator wrote and the author's own words: a blank line. */
+const JOIN = "\n\n";
 
 /** The drafts a passage may have: its first, and one for each revision the settings allow. */
 export function draftsAllowed(s: Pick<NarrationSettings, "revisions">): number {
@@ -92,10 +95,9 @@ function draftsLeft(p: Passage, s: Pick<NarrationSettings, "revisions">): number
   return Math.max(0, draftsAllowed(s) - p.drafts.length);
 }
 
-/** Each passage of the reply one turn is writing, in the order opened, and what it released so far. */
+/** Each passage of the reply one turn is writing, in the order opened, and whether it went out. */
 export class StageBook {
   readonly opened: Passage[] = [];
-  readonly releases: Release[] = [];
   private presetRead: Promise<StoryPresetRead | null> | null = null;
 
   /** `preset` reads the chat's preset (`readStoryPreset`), at most once for the turn; left out, the turn has none to give the narrator. */
@@ -107,9 +109,17 @@ export class StageBook {
     return this.presetRead;
   }
 
-  /** The reply as released so far. */
-  reply(): string {
-    return this.releases.map((r) => r.text).join("");
+  /**
+   * The reply as told before passage `n`, which its narrator goes on from: the latest draft of each
+   * passage opened before it, in order, joined as a release joins them. Every drafted passage's for
+   * null (what the author would see of a passage it hasn't opened). The reply goes out once, at the
+   * turn's end, so nothing released is ever told before it.
+   */
+  toldBefore(n: number | null): string {
+    return this.opened
+      .filter((p) => n === null || p.n < n)
+      .flatMap((p) => p.drafts.slice(-1).map((d) => d.text))
+      .join(JOIN);
   }
 
   passage(n: number): Passage | null {
@@ -173,76 +183,112 @@ export class StageBook {
     return { passage: p, left: draftsLeft(p, s) };
   }
 
-  /** The passage one of whose drafts is `text` (the newest such), and which draft; null where none is. */
-  find(text: string): { passage: Passage; index: number } | null {
-    const said = plainText(text);
-    if (said === "") return null;
-    for (const p of [...this.opened].reverse()) {
-      const index = p.drafts.findLastIndex((d) => plainText(d.text) === said);
-      if (index >= 0) return { passage: p, index };
+  /** Marks each passage of `pieces`, by its number, as gone out. */
+  released(pieces: readonly number[]): void {
+    for (const n of pieces) {
+      const p = this.passage(n);
+      if (p) p.released = true;
     }
-    return null;
-  }
-
-  /** The passage still to be released whose latest draft `text` is close to (most of their words shared); null where none is. */
-  closest(text: string): Passage | null {
-    let best: { p: Passage; score: number } | null = null;
-    for (const p of this.opened) {
-      const latest = p.drafts.at(-1);
-      if (p.released || !latest) continue;
-      const score = likeness(text, latest.text);
-      if (score >= CLOSE && (best === null || score > best.score)) best = { p, score };
-    }
-    return best?.p ?? null;
-  }
-
-  /** What went out: the passage it is the latest draft of, released now, or text that is none. */
-  note(release: { role: string; text: string }): void {
-    const found = this.find(release.text);
-    const p = found && !found.passage.released && found.index === found.passage.drafts.length - 1 ? found.passage : null;
-    if (p) p.released = true;
-    this.releases.push({ text: release.text, by: release.role, passage: p ? p.n : null });
   }
 }
 
-// ---------------------------------------------------------------- the gate (AH6 §8)
+// ---------------------------------------------------------------- the reply tool and its gate (AH6 §8)
 
 /**
- * Whether `release`, about to go out by `reply_write`, may: null lets it go; else the words the
- * agent is told. Only the author releases. A passage goes out as its latest draft: where each passage
- * is checked, once that draft passed, or failed with its drafts spent; where no one checks, as it is.
- * Text that is no passage goes out where no one checks, or where it is no longer than the author may
- * release in its own words (`narration.ownChars`): a line for an extra, an answer out of character.
+ * LumiAH's `reply_write` as the author is given it in a chat this engine plays (`ChatClaim.replyTool`):
+ * each passage to release by its number, in order (`pieces`), and the author's own words (`words`)
+ * with where they go beside the narrator's (`place`). Nothing is typed out again: the gate sends the
+ * drafts the book holds. Described in the user's own words where they wrote them.
  */
-export function releaseGate(book: StageBook, settings: UserSettings, release: { role: string; text: string }): { refused: string } | null {
-  const say = (note: string, vars: Readonly<Record<string, string>> = {}): { refused: string } => ({ refused: renderPrompt(note, settings.prompts.texts, vars) });
-  if (release.role !== HARNESS_AGENT.author) return say(STAGE_NOTE.gateAuthor);
-  const s = settings.narration;
-  const found = book.find(release.text);
-  if (found) {
-    const { passage: p, index } = found;
-    const n = String(p.n);
-    if (p.released) return say(STAGE_NOTE.gateTwice, { n });
-    if (index < p.drafts.length - 1) return say(STAGE_NOTE.gateEarlier, { n, draft: String(p.drafts.length) });
-    if (s.check === "none") return null;
-    const check = p.drafts[index]?.check ?? null;
-    if (check === null) return say(STAGE_NOTE.gateUnchecked, { n });
-    const left = draftsLeft(p, s);
-    return !check.holds && left > 0 ? say(STAGE_NOTE.gateFault, { n, left: String(left) }) : null;
-  }
-  if (s.check === "none" || plainText(release.text).length <= s.ownChars) return null;
-  const close = book.closest(release.text);
-  return close ? say(STAGE_NOTE.gateClose, { n: String(close.n) }) : say(STAGE_NOTE.gateUnknown, { chars: String(s.ownChars) });
+export function replyTool(settings: Pick<UserSettings, "prompts">): { description: string; parameters: JsonObject } {
+  const say = (id: string): string => renderPrompt(id, settings.prompts.texts, {});
+  return {
+    description: say(STAGE_TEXT.replyTool),
+    parameters: {
+      type: "object",
+      properties: {
+        [REPLY_ARG.pieces]: { type: "array", items: { type: "integer", minimum: 1 }, description: say(STAGE_TEXT.replyArg(REPLY_ARG.pieces)) },
+        [REPLY_ARG.words]: { type: "string", description: say(STAGE_TEXT.replyArg(REPLY_ARG.words)) },
+        [REPLY_ARG.place]: { type: "string", enum: [...REPLY_PLACES], description: say(STAGE_TEXT.replyArg(REPLY_ARG.place)) },
+      },
+    },
+  };
 }
 
-/** What went out into the reply (`reply_write`, or a character's whole stream on the direct line): the reply so far, and the passage it released. */
-export function releaseNoted(book: StageBook, release: { role: string; text: string }): void {
-  book.note(release);
+/** The reply tool's arguments as the gate reads them: each passage as it was named, in order, the author's own words, and where they go. */
+interface ReleaseAsk {
+  pieces: readonly unknown[];
+  words: string;
+  place: ReplyPlace;
+}
+
+/** `args` as the reply tool takes them: `pieces` a list (one number or numeral alone, a list of it), `words` text, `place` before or after (after where left out); else which of them isn't so. */
+function askOf(args: Readonly<Record<string, unknown>>): ReleaseAsk | StageRefusal {
+  const pieces = args[REPLY_ARG.pieces] ?? [];
+  const words = args[REPLY_ARG.words] ?? "";
+  const said = args[REPLY_ARG.place] ?? "after";
+  const place = REPLY_PLACES.find((p) => typeof said === "string" && said.trim().toLowerCase() === p);
+  if (!Array.isArray(pieces) && typeof pieces !== "number" && typeof pieces !== "string") return { note: STAGE_NOTE.gateArgs, vars: { arg: REPLY_ARG.pieces } };
+  if (typeof words !== "string") return { note: STAGE_NOTE.gateArgs, vars: { arg: REPLY_ARG.words } };
+  if (place === undefined) return { note: STAGE_NOTE.gateArgs, vars: { arg: REPLY_ARG.place } };
+  return { pieces: Array.isArray(pieces) ? pieces : [pieces], words: words.trim(), place };
+}
+
+/** The passage of `book` a release names: by a whole number, or a numeral read as one; null where the turn holds none of it. */
+function pieceOf(book: StageBook, named: unknown): Passage | null {
+  const n = typeof named === "string" && named.trim() !== "" ? Number(named) : named;
+  return typeof n === "number" && Number.isInteger(n) ? book.passage(n) : null;
+}
+
+/**
+ * What goes out when an agent calls the reply tool with `args` (LumiAH's `releasing`): the text, or
+ * the words it is told instead, and then nothing goes out. Only the author releases. Each passage named
+ * goes out as its latest draft, in the order named, where the turn holds it, it is drafted, it isn't
+ * out already and it is named once; and, where each passage is checked, where that draft passed its
+ * check, or failed it with the passage's drafts spent. The first that doesn't is named in the refusal.
+ * The author's own words go before or after them, where anything is checked no longer than it may
+ * release with no check (`narration.ownChars`). A blank line stands between each part and the next.
+ */
+export function releaseGate(book: StageBook, settings: UserSettings, release: { role: string; args: Readonly<Record<string, unknown>> }): { text: string } | { refused: string } {
+  const say = (note: string, vars: Readonly<Record<string, string>> = {}): { refused: string } => ({ refused: renderPrompt(note, settings.prompts.texts, vars) });
+  if (release.role !== HARNESS_AGENT.author) return say(STAGE_NOTE.gateAuthor);
+  const ask = askOf(release.args);
+  if ("note" in ask) return say(ask.note, ask.vars);
+  if (ask.pieces.length === 0 && ask.words === "") return say(STAGE_NOTE.gateNothing);
+  const s = settings.narration;
+  const drafts: string[] = [];
+  const seen = new Set<number>();
+  for (const piece of ask.pieces) {
+    const p = pieceOf(book, piece);
+    if (!p) return say(STAGE_NOTE.noPassage, { n: typeof piece === "string" ? piece : JSON.stringify(piece) });
+    const n = String(p.n);
+    if (seen.has(p.n)) return say(STAGE_NOTE.gateRepeated, { n });
+    seen.add(p.n);
+    if (p.released) return say(STAGE_NOTE.gateTwice, { n });
+    const latest = p.drafts.at(-1);
+    if (!latest) return say(STAGE_NOTE.gateUndrafted, { n });
+    if (s.check !== "none") {
+      if (latest.check === null) return say(STAGE_NOTE.gateUnchecked, { n });
+      const left = draftsLeft(p, s);
+      if (!latest.check.holds && left > 0) return say(STAGE_NOTE.gateFault, { n, left: String(left) });
+    }
+    drafts.push(latest.text);
+  }
+  const size = plainText(ask.words).length;
+  if (s.check !== "none" && size > s.ownChars) return say(STAGE_NOTE.gateWords, { size: String(size), chars: String(s.ownChars) });
+  const parts = ask.words === "" ? drafts : ask.place === "before" ? [ask.words, ...drafts] : [...drafts, ask.words];
+  return { text: parts.join(JOIN) };
+}
+
+/** What went out (LumiAH's `released`, `args` the reply tool's as the author gave them): each passage they name is out. A character's stream on the direct line names none. */
+export function releaseNoted(book: StageBook, args: Readonly<Record<string, unknown>>): void {
+  const ask = askOf(args);
+  if (!("note" in ask)) book.released(ask.pieces.flatMap((piece) => pieceOf(book, piece)?.n ?? []));
 }
 
 // ---------------------------------------------------------------- text
 
-/** Text as a release is matched to a draft: compatibility forms folded, typographic quotes, apostrophes and dashes made plain, every run of space one. */
+/** Text as the gate measures the author's own words, and as a draft's quotes are matched: compatibility forms folded, typographic quotes, apostrophes and dashes made plain, every run of space one. */
 export function plainText(text: string): string {
   return text
     .normalize("NFKC")
@@ -263,19 +309,6 @@ function holdsRun(words: readonly string[], run: readonly string[]): boolean {
   if (run.length === 0) return true;
   for (let i = 0; i + run.length <= words.length; i++) if (run.every((w, j) => words[i + j] === w)) return true;
   return false;
-}
-
-/** How close a release must be to a draft for the gate to name it: most words in common. */
-const CLOSE = 0.85;
-
-/** How much of their words two texts share (Dice's measure on their words, each counted once): 1 for the same words, 0 for none in common. */
-function likeness(a: string, b: string): number {
-  const x = new Set(wordsOf(a));
-  const y = new Set(wordsOf(b));
-  if (x.size + y.size === 0) return 1;
-  let shared = 0;
-  for (const w of x) if (y.has(w)) shared++;
-  return (2 * shared) / (x.size + y.size);
 }
 
 /** The words a passage speaks: what stands between quotation marks, each span as it is written. */
@@ -362,6 +395,7 @@ export interface NarrationInput {
   /** The turn's beats: the passage's are taken from them by id. */
   beats: readonly Beat[];
   scene: SceneView;
+  /** The end of the reply as told before the passage (`StageBook.toldBefore`). */
   reply: string;
   recent: string;
   presentation: readonly { name: string; text: string }[];
@@ -371,10 +405,11 @@ export interface NarrationInput {
 }
 
 /**
- * The narrator's material: the passage's beats as they reached its point of view, in order (a
- * place named where it changes), and never more of a beat than reached them; where they are and who
- * is plainly there; the end of the reply so far and the story's recent prose; the presentation the
- * author asked for; and, while revising, its last draft with the changes its check asked for.
+ * The narrator's material, what it acts on first: while revising, its last draft with the changes its
+ * check asked for; the passage's beats as they reached its point of view, in order (a place named
+ * where it changes), and never more of a beat than reached them; where they are and who is plainly
+ * there; the presentation the author asked for and how to write; and last, for its voice, the end of
+ * the reply as told so far and the story's recent prose.
  */
 export function narrationOf(input: NarrationInput): Record<string, unknown> {
   const { passage, scene } = input;
@@ -400,17 +435,16 @@ export function narrationOf(input: NarrationInput): Record<string, unknown> {
   }
   const last = passage.drafts.at(-1);
   return {
-    ...(passage.n !== null ? { passage: passage.n } : {}),
+    ...(passage.n !== null ? { passage: passage.n, drafts: { made: passage.drafts.length, allowed: input.allowed } } : {}),
+    ...(last?.check?.holds === false ? { revise: { draft: last.text, changes: last.check.changes } } : {}),
     pov: scene.pov,
     ...(scene.where !== null ? { where: scene.where } : {}),
     ...(scene.present.length > 0 ? { present: scene.present } : {}),
     happened,
-    ...(input.reply !== "" ? { reply: input.reply } : {}),
-    ...(input.recent !== "" ? { recent: input.recent } : {}),
     ...(input.presentation.length > 0 ? { presentation: input.presentation } : {}),
     ...(input.prose !== null ? { prose: input.prose } : {}),
-    ...(last?.check?.holds === false ? { revise: { draft: last.text, changes: last.check.changes } } : {}),
-    ...(passage.n !== null ? { drafts: { made: passage.drafts.length, allowed: input.allowed } } : {}),
+    ...(input.reply !== "" ? { reply: input.reply } : {}),
+    ...(input.recent !== "" ? { recent: input.recent } : {}),
   };
 }
 
@@ -425,9 +459,9 @@ export function quotesReaching(beats: readonly Beat[], ids: readonly string[], p
 }
 
 /**
- * A passage as whoever checks it reads it: its latest draft with what its quotes come to, each beat
- * it tells whole (what happened, what could be sensed of it, the words spoken) with how it reached
- * the point of view, the beats of the turn that never reached them, and the checks so far.
+ * A passage as whoever checks it reads it, what it is held to first: each beat it tells whole (what
+ * happened, what could be sensed of it, the words spoken) with how it reached the point of view, the
+ * beats of the turn that never reached them, and the checks so far; then its latest draft.
  */
 export function passageView(input: { passage: Passage; beats: readonly Beat[]; label(who: string): string; scene: SceneView; allowed: number }): Record<string, unknown> {
   const { passage: p, label } = input;
@@ -447,10 +481,10 @@ export function passageView(input: { passage: Passage; beats: readonly Beat[]; l
     ...(input.scene.where !== null ? { where: input.scene.where } : {}),
     ...(input.scene.present.length > 0 ? { present: input.scene.present } : {}),
     ...(p.modules.length > 0 ? { presentation: p.modules } : {}),
-    draft: latest ? { number: p.drafts.length, of: input.allowed, text: latest.text, checked: latest.check !== null } : null,
-    ...(checks.length > 0 ? { checks } : {}),
     beats,
     ...(notGiven.length > 0 ? { notGiven } : {}),
+    ...(checks.length > 0 ? { checks } : {}),
+    draft: latest ? { number: p.drafts.length, of: input.allowed, text: latest.text, checked: latest.check !== null } : null,
     ...(p.released ? { released: true } : {}),
   };
 }

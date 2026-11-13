@@ -52,7 +52,7 @@ type Said = Pick<WorldTarget, "view" | "turn" | "in">;
 
 /**
  * `items` as a refusal lists them: as many as fit in half of what one tool result may hold
- * (Settings → Agents, Tool results clipped past; as `lintLines` fits its issues), then how many more.
+ * (Settings → Agents, Engine answers shown whole; as `lintLines` fits its issues), then how many more.
  */
 function fitted(t: Said, items: readonly string[]): string[] {
   const room = Math.floor(t.turn.settings.agents.clipChars / 2);

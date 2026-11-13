@@ -27,10 +27,11 @@
 //    bookkeeping as its plan. Nothing is simulated: no action is read, no time passes, no one acts.
 // 3. Each tool call runs with the calling agent's view, writer and tier (`OpenTurn.env`), once the
 //    one gate every call enters by has seen that the tool is the caller's to call (`toolRefusal`).
-// 4. The author writes the reply: each passage it releases, in order (`reply_write`), or a character's
-//    answer it hands the stream to (`delegate` with `to_reply`). LumiAH's runtime streams them to
-//    Lumiverse as one reply, and no writer writes any of it (`ChatClaim.reply`). The engine reads
-//    nothing out of the reply.
+// 4. The author releases the reply once, whole: one `reply_write` naming each passage to release by
+//    its number, with any words of its own (`ChatClaim.replyTool`: the engine sends the drafts it
+//    holds), or a character's answer it hands the stream to (`delegate` with `to_reply`). LumiAH's
+//    runtime streams it to Lumiverse, and no writer writes any of it (`ChatClaim.reply`). The engine
+//    reads nothing out of the reply.
 // 5. The reply ends. Saved whole (`GENERATION_ENDED`): what is still staged is committed, what the
 //    turn landed joins its planned events, the core commits the turn, and its record takes LumiAH's
 //    own record of the turn. Stopped once something was released: the turn keeps what it had
@@ -87,7 +88,7 @@ import type { AgentModelAsk, AgentModelChoice, ChatClaim, ClaimAsk, DefinitionsA
 import { Cast, type Ceiling, closedAnswer, OpenTurn, reach, type Standing, standingOf, toolRefusal, type TurnCall } from "./turn";
 import { chooseAgentModel } from "../../shared/story-models";
 import { shapeNotebook } from "../story/notebook";
-import { directLineGuidance, narrationGuidance, releaseGate, releaseNoted } from "../story/narration";
+import { directLineGuidance, narrationGuidance, releaseGate, releaseNoted, replyTool } from "../story/narration";
 import { authorOpening } from "../story/opening";
 import { prepareEnv } from "../story/prepare";
 import { preparationRunEnded } from "../story/prepare-carry";
@@ -697,8 +698,10 @@ export class HarnessEngine implements HarnessHooks {
   /**
    * What the engine supplies for a chat: for a world chat on the harness, its author as the main
    * agent and the world's guidance, and its word that the author is shown only the player's newest
-   * message of what Lumiverse assembled (`request`), and that the reply is only what the chat's
-   * agents release (`reply`). Every turn of it runs in LumiAH's runtime, as every chat LumiAH answers.
+   * message of what Lumiverse assembled (`request`), that the reply is only what the chat's agents
+   * release (`reply`), and the reply tool the author releases it with, once and whole, naming each
+   * passage by its number (`replyTool`). Every turn of it runs in LumiAH's runtime, as every chat
+   * LumiAH answers.
    * Nothing for a chat on another engine, which LumiAH answers itself. LumiAH's own lore tools give
    * way to the engine's there, and those the engine has none of its own name for are withdrawn
    * (`LUMIAH_WITHDRAWN`).
@@ -754,6 +757,8 @@ export class HarnessEngine implements HarnessHooks {
       story: { from: SOVEREIGN_FROM[settings.agents.harness.sovereignHand], newest: NEWEST_GIVEN[settings.agents.harness.newestMessage] },
       request: "newest",
       reply: "released",
+      // The reply tool names each passage to release by its number, and the engine sends the drafts it holds (`releasing`): nothing the narrator wrote is typed out again.
+      replyTool: replyTool(settings),
     });
     try {
       userId = await this.userOf(chatId, ask.userId);
@@ -1195,20 +1200,21 @@ export class HarnessEngine implements HarnessHooks {
   }
 
   /**
-   * Whether a passage an agent of a turn releases may go out (LumiAH's `releasing`): the turn's
-   * stage book holds it to what the turn decided (`releaseGate`). A passage of no open turn of the
+   * What goes out when an agent of a turn calls the reply tool (LumiAH's `releasing`): the turn's
+   * stage book gives the text of each passage the call names, held to what the turn decided, with the
+   * author's own words (`releaseGate`), or says why nothing goes. A call of no open turn of the
    * engine's is refused: nothing of it is the engine's to tell.
    */
   private async releasing(release: ReplyRelease): Promise<ReleaseVerdict> {
     const open = this.turns.get(release.turn);
     if (!open || open.closed) return { refused: renderPrompt(HARNESS_NOTE.noTurn, release.userId !== "" ? (await this.rt.settings.get(release.userId)).prompts.texts : {}, {}) };
-    return releaseGate(open.stageBook, open.frame.settings, { role: release.agent.role, text: release.text });
+    return releaseGate(open.stageBook, open.frame.settings, { role: release.agent.role, args: release.args });
   }
 
-  /** A passage went out, or a handed-on stream ended (LumiAH's `released`): the turn's stage book notes what reached the player. */
+  /** The reply went out, or a handed-on stream ended (LumiAH's `released`): the turn's stage book marks each passage the call named as out. */
   private released(release: ReplyRelease): Promise<void> {
     const open = this.turns.get(release.turn);
-    if (open) releaseNoted(open.stageBook, { role: release.agent.role, text: release.text });
+    if (open) releaseNoted(open.stageBook, release.args);
     return Promise.resolve();
   }
 

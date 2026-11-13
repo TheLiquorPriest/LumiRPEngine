@@ -17,6 +17,8 @@ import type { ActivityAgent } from "../../src/shared/diagnostics";
 import type { GenerateAs, ReviewCardView, SessionView } from "../../src/shared/protocol";
 import { LimitRow, SettingRow } from "../../src/frontend/settings/kit";
 import type { JsonObject } from "../../src/shared/json";
+import { HARNESS_TIME_PASS_DEF } from "../../src/shared/agent-settings";
+import { TIMELAPSE_REACH_MINUTES } from "../../src/shared/settings";
 import { labelled, press, propsOf, type Props } from "../support/tree";
 
 const CHAT = "chat-port-alder";
@@ -125,9 +127,9 @@ describe("GM → This chat: the Engine switch", () => {
     expect(waiting).not.toContain("a reason");
   });
 
-  test("a chat on the harness shows the harness's settings: the time for a turn whose author says none, the wait for the last turn, and the finished runs remembered, each with its Default", () => {
+  test("a chat on the harness shows the harness's settings: the time for a turn whose author says none, the wait for the last turn, the finished runs remembered and the time one call passes, each with its Default", () => {
     const patches: JsonObject[] = [];
-    const rows = (defaultTick: boolean, commitWaitMs = 5000, runsRemembered = 1024) => HarnessRows({ harness: { defaultTick, commitWaitMs, runsRemembered, sovereignHand: "follow", newestMessage: "direction" }, busy: false, patch: (patch) => void patches.push(patch) });
+    const rows = (defaultTick: boolean, commitWaitMs = 5000, runsRemembered = 1024, timePassMinutes = TIMELAPSE_REACH_MINUTES) => HarnessRows({ harness: { defaultTick, commitWaitMs, runsRemembered, sovereignHand: "follow", newestMessage: "direction" }, limits: { timePassMinutes }, busy: false, patch: (patch) => void patches.push(patch) });
     const on = rows(true);
     expect(textOf(on)).toContain("for every chat you play on it");
     const row = propsOf(on, SettingRow)[0] ?? {};
@@ -154,6 +156,13 @@ describe("GM → This chat: the Engine switch", () => {
     kept.set(256);
     kept.set(null);
     expect(patches.slice(4)).toEqual([{ agents: { harness: { runsRemembered: 256 } } }, { agents: { harness: { runsRemembered: null } } }]);
+    // The farthest one time_pass moves the clock has its row with the others, by its own label.
+    const pass = propsOf(rows(true, 5000, 1024, 60), LimitRow).find((p) => p.id === "harness-time-pass") ?? {};
+    expect([(pass.def as { label?: string } | undefined)?.label, pass.value, pass.standard]).toEqual([HARNESS_TIME_PASS_DEF.label, 60, TIMELAPSE_REACH_MINUTES]);
+    if (typeof pass.set !== "function") throw new Error("the time one call passes has no control");
+    pass.set(120);
+    pass.set(null);
+    expect(patches.slice(6)).toEqual([{ agents: { harnessLimits: { timePassMinutes: 120 } } }, { agents: { harnessLimits: { timePassMinutes: null } } }]);
   });
 });
 

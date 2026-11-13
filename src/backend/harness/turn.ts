@@ -357,7 +357,7 @@ export class OpenTurn {
   readonly loads: string[] = [];
   /** The player directs the story in this turn (`OpenTurnInit.directed`). */
   readonly directed: boolean;
-  /** What each passage of the turn is held to as it is released, and what of the reply went out (`releaseGate`, `releaseNoted`), with the chat's preset read once for the turn when the narrator asks for a module of it. */
+  /** Each passage of the turn, what it is held to as the turn's one release names it, and whether it went out (`releaseGate`, `releaseNoted`), with the chat's preset read once for the turn when the narrator asks for a module of it. */
   readonly stageBook: StageBook;
   /** Ends when the turn is let go: every call still working for it stops. */
   private readonly stop = new AbortController();

@@ -7,6 +7,7 @@
 // agent", which also holds the texts every agent's tools are sent with (`TOOL_PROMPTS`) and the lore
 // index's.
 
+import { LOOP_DEFS } from "./agent-settings";
 import { TOOL_GUIDE_TEXTS, toolGuideId } from "./agent-tools";
 import type { PromptDef, PromptPage } from "./prompts";
 
@@ -44,7 +45,7 @@ export const RUNTIME_PROMPTS: readonly PromptDef[] = [
   { id: RUNTIME_TEXT.scratchRead, page, label: "scratch_read: what it does", note: "The description of the built-in tool that reads the rest of a clipped tool result.", text: "Read more of a tool result that came back clipped. Give the scratch handle the clipped result names and where to start; you get the next part.", vars: [] },
   { id: RUNTIME_TEXT.scratchHandle, page, label: "scratch_read: handle", note: "The description of scratch_read's handle argument.", text: "The scratch handle the clipped result names, such as s1.", vars: [] },
   { id: RUNTIME_TEXT.scratchOffset, page, label: "scratch_read: offset", note: "The description of scratch_read's offset argument.", text: "The character to start from; 0 is the start.", vars: [] },
-  { id: RUNTIME_TEXT.scratchLength, page, label: "scratch_read: length", note: "The description of scratch_read's length argument.", text: "How many characters to read, at most {{max}}.", vars: [{ name: "max", text: "the most one read returns: Tool results clipped past, in Settings → Agents" }] },
+  { id: RUNTIME_TEXT.scratchLength, page, label: "scratch_read: length", note: "The description of scratch_read's length argument.", text: "How many characters to read, at most {{max}}.", vars: [{ name: "max", text: `the most one read returns: ${LOOP_DEFS.clipChars.label}, in Settings → Agents → Budgets` }] },
   {
     id: RUNTIME_TEXT.scratchPart,
     page,
