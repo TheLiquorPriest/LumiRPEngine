@@ -95089,9 +95089,11 @@ var STAGE_NOTE = {
   narratorOnly: "harness.note.narration.narrator_only",
   povAuthor: "harness.note.narration.pov_author",
   nothing: "harness.note.narration.nothing",
+  toldAlready: "harness.note.narration.told_already",
   moduleUnknown: "harness.note.narration.module_unknown",
   noModules: "harness.note.narration.no_modules",
   readFirst: "harness.note.narration.read_first",
+  draftNotRead: "harness.note.narration.draft_not_read",
   passageNext: "harness.note.narration.passage_next",
   passageNeeded: "harness.note.narration.passage_needed",
   passageEyes: "harness.note.narration.passage_eyes",
@@ -95160,9 +95162,9 @@ var STAGE_TOOL_TEXTS = [
     family: HARNESS_FAMILY.narration,
     tier: "write",
     note: "Records the narrator's draft of its passage, by the passage's number.",
-    text: "Record your passage, by its number: the narrator's draft of what narration_read gave it. Until it is checked, a new draft takes the place of the last and spends nothing; once a check finds it at fault, each new draft is one of the revisions the settings allow. The answer gives the passage's number and length, notes the quotes it could not find word for word and the spoken words no beat holds, and says whether the passage is checked before it can go out. The author sends the draft recorded here: never write it out again.",
+    text: "Record your passage, by its number: the narrator's draft of what narration_read gave it. A draft is of the passage your last narration_read gave you, revisions included: to draft another, read it first. Until it is checked, a new draft takes the place of the last and spends nothing; once a check finds it at fault, each new draft is one of the revisions the settings allow. The answer gives the passage's number and length, notes the quotes it could not find word for word and the spoken words no beat holds, and says whether the passage is checked before it can go out. The author sends the draft recorded here: never write it out again.",
     args: [
-      { path: "passage", text: "Your passage's number, as narration_read gave it." },
+      { path: "passage", text: "Your passage's number, as your last narration_read gave it." },
       { path: "text", text: "The whole passage, exactly as it should reach the player." }
     ]
   },
@@ -95340,21 +95342,23 @@ var NOTE_PROMPTS = [
   answerPrompt(STAGE_NOTE.notTurn, "No reply to narrate", "A narration tool's answer in a run that writes no reply: a job's, or a conversation outside a turn.", "Narration belongs to the turn that writes the reply. This run writes none, so there is nothing to narrate here."),
   answerPrompt(STAGE_NOTE.narratorOnly, "The narrator's tool", "narration_read's and passage_draft's answer to an agent that isn't the narrator (the author may read with narration_read).", "{{tool}} is the narrator's. The game master and the author read a passage with passage_read.", [tool4]),
   answerPrompt(STAGE_NOTE.povAuthor, "Only the author names the point of view", "narration_read's answer to a narrator that names a point of view itself.", "Only the author names whose eyes a passage is seen through, when it starts the narrator. Call narration_read without pov."),
-  answerPrompt(STAGE_NOTE.nothing, "Nothing to narrate", "narration_read's answer when nothing reached the point-of-view character that an earlier passage hasn't told.", "Nothing has reached {{pov}} in this turn that an earlier passage hasn't told. There is nothing to narrate yet: say so in your answer.", [pov]),
+  answerPrompt(STAGE_NOTE.nothing, "Nothing to narrate", "narration_read's answer when no beat of the turn has reached the point-of-view character yet.", "No beat on the record has reached {{pov}} in this turn yet. Say this in your answer, and stop: the beats this passage is to tell must be recorded first, reaching {{pov}}, and then you are started again.", [pov]),
+  answerPrompt(STAGE_NOTE.toldAlready, "Everything told already", "narration_read's answer for a new passage when every beat that reached the point-of-view character is told by an earlier passage: which one, and that the new passage's beats must be recorded after it.", "Every beat that has reached {{pov}} in this turn is told already, the last of them in passage {{told}}: a passage tells every beat that has reached its eyes and isn't told yet. So nothing is left for passage {{n}}. Say this in your answer, and stop: the beats passage {{n}} is to tell aren't on the record yet; they are recorded now, after passage {{told}}, and then you are started again. A beat already told is never struck and recorded again to be told twice.", [pov, n, v4("told", "the earlier passage that told the last of them", true)]),
   answerPrompt(STAGE_NOTE.moduleUnknown, "No such presentation", "narration_read's answer when a presentation it is asked for isn't in the chat's preset.", "This chat's preset has no presentation called {{names}}. What it offers: {{offered}}.", [v4("names", "the names it doesn't have", true), v4("offered", "the names it has", true)]),
   answerPrompt(STAGE_NOTE.noModules, "No presentation to ask for", "narration_read's answer when it is asked for presentation and the chat's preset offers none.", "This chat's preset offers no presentation to ask for. Call narration_read without modules."),
-  answerPrompt(STAGE_NOTE.readFirst, "Read before drafting", "passage_draft's answer for the next passage's number, which narration_read hasn't opened yet.", "Call narration_read with passage {{n}} first: it opens the passage and gives what you draft.", [v4("n", "the passage's number")]),
-  answerPrompt(STAGE_NOTE.passageNext, "Not the next passage", "narration_read's and passage_draft's answer to a passage number past the next new one.", "There is no passage {{n}} yet, and a new passage takes the next number, {{next}}: each passage is numbered in the order told. If your task gave you {{n}}, say so in your answer and stop: never take a number your task didn't give you.", [n, v4("next", "the number the next new passage takes", true)]),
+  answerPrompt(STAGE_NOTE.readFirst, "Read before drafting", "passage_draft's answer from a narrator that hasn't read a passage yet: it drafts only what its read gave it.", "Call narration_read with passage {{n}} first: it opens the passage and gives what you draft.", [v4("n", "the passage's number")]),
+  answerPrompt(STAGE_NOTE.draftNotRead, "Not the passage read", "passage_draft's answer to a draft of a passage other than the one the narrator last read: a narrator drafts only the passage its last narration_read gave it, revisions included.", "You last read passage {{read}}, so a draft of yours is of passage {{read}}. To draft passage {{n}}, read it first: narration_read with passage {{n}}.", [n, v4("read", "the passage the narrator last read", true)]),
+  answerPrompt(STAGE_NOTE.passageNext, "Not the next passage", "narration_read's answer to a passage number past the next new one.", "There is no passage {{n}} yet, and a new passage takes the next number, {{next}}: each passage is numbered in the order told. If your task gave you {{n}}, say so in your answer and stop: never take a number your task didn't give you.", [n, v4("next", "the number the next new passage takes", true)]),
   answerPrompt(STAGE_NOTE.passageNeeded, "Which passage", "passage_draft's answer when it names no passage.", "Name the passage you draft by its number (passage), as narration_read gave it to you."),
-  answerPrompt(STAGE_NOTE.passageEyes, "Another's passage", "narration_read's and passage_draft's answer to a narrator naming a passage seen through other eyes than those it was started with: it is never handed what reached someone else.", "Passage {{n}} is seen through other eyes than yours, so it isn't yours to read or draft: say so in your answer and stop. The author starts a passage's narrator as the one whose eyes it is seen through.", [n]),
+  answerPrompt(STAGE_NOTE.passageEyes, "Another's passage", "narration_read's answer to a narrator naming a passage seen through other eyes than those it was started with: it is never handed what reached someone else.", "Passage {{n}} is seen through other eyes than yours, so it isn't yours to read or draft: say so in your answer and stop. The author starts a passage's narrator as the one whose eyes it is seen through.", [n]),
   answerPrompt(STAGE_NOTE.replyOpen, "Earlier pieces not settled", "In narration_read's answer: the number of each passage before the narrator's whose latest draft hasn't passed its check, whose text it isn't given.", "Not settled yet before yours (not drafted or checked yet, or found at fault), so not given: passage {{n}}. Go on from the reply as it is given.", [v4("n", "their numbers", true)]),
   answerPrompt(STAGE_NOTE.draftEmpty, "A draft with no text", "passage_draft's answer when it is given no text.", "A draft needs the passage's text: the whole passage, as it should reach the player."),
-  answerPrompt(STAGE_NOTE.draftLong, "A passage too long", `passage_draft's answer when a draft is longer than a passage may be (${at3("passageChars")}).`, `A passage is at most {{chars}} characters (${at3("passageChars")}). Tell less in this one: what is left can be the next passage's.`, [v4("chars", "the most a passage may be", true)]),
+  answerPrompt(STAGE_NOTE.draftLong, "A passage too long", `passage_draft's answer when a draft is longer than a passage may be (${at3("passageChars")}).`, `A passage is at most {{chars}} characters (${at3("passageChars")}): tell this one in fewer. A longer telling is told as a further passage, with its own beats recorded after this one and its own number: if this passage can't hold what it must tell, say so in your answer.`, [v4("chars", "the most a passage may be", true)]),
   answerPrompt(STAGE_NOTE.released, "The passage is out", "A narration tool's answer about a passage that has been released already.", "Passage {{n}} has been released already: nothing of it can change.", [n]),
   answerPrompt(STAGE_NOTE.draftPassed, "The draft passed", "passage_draft's answer when the passage's last draft passed its check.", "Your last draft of passage {{n}} passed its check: it goes out as it stands, and isn't drafted again. Anything new to tell is a new passage, {{next}}; else answer in one line that it passed.", [n, v4("next", "the number the next new passage takes")]),
   answerPrompt(STAGE_NOTE.draftSpent, "No drafts left", `passage_draft's answer when the passage has had all the drafts the settings allow (${at3("revisions")}).`, `Passage {{n}} has had {{made}} drafts, all the settings allow (${at3("revisions")}). The author decides what becomes of it: answer in one line that its drafts are spent.`, [n, v4("made", "the drafts it has had", true)]),
   answerPrompt(STAGE_NOTE.drafted, "A draft recorded", "Heads passage_draft's answer once the draft is recorded: which passage, which draft, and how long it is.", "Passage {{n}}, draft {{draft}} of {{of}}, is recorded: {{chars}} characters.", [n, v4("draft", "this draft's number", true), v4("of", "the drafts a passage may have", true), v4("chars", "how long the draft is, in characters")]),
-  answerPrompt(STAGE_NOTE.draftWaits, "Not over the waiting draft", "passage_draft's answer when a passage's draft waits for its check and more has reached its eyes since it opened: what is new is the next passage's, so the waiting telling is never written over.", "Passage {{n}} has a draft waiting for its check, and since it opened more has reached its eyes that no passage tells: that is the next passage's. Read it with narration_read and passage {{next}}, and draft that.", [n, v4("next", "the number the next new passage takes", true)]),
+  answerPrompt(STAGE_NOTE.draftWaits, "Not over the waiting draft", "passage_draft's answer when the narrator's passage has a draft waiting for its check and, since the narrator read it, more has reached its eyes that no passage tells: what is new is a further passage's, so the waiting telling isn't written over by a narrator sent on without reading; reading the passage again lets a change to its draft through.", "Since you read passage {{n}}, more has reached its eyes that no passage tells yet, and its draft waits for its check. If you were asked to tell what is new, read it as a further passage first (narration_read: with no number, it opens the next one) and draft that. To change passage {{n}}'s waiting draft, read passage {{n}} again first.", [n]),
   answerPrompt(STAGE_NOTE.draftedChecked, "It is checked next", "Ends passage_draft's answer where each passage is checked: the narrator answers in a line, and never writes the passage out again.", "It is checked against what happened before it can go out. Answer in one line with its number and length, and that it waits for its check. Never write it out again: the author sends it by its number."),
   answerPrompt(STAGE_NOTE.draftedFree, "No one checks it", "Ends passage_draft's answer where no one checks a passage: the narrator answers in a line, and never writes the passage out again.", "No one checks it in this chat: it is settled. Answer in one line with its number and length. Never write it out again: the author sends it by its number."),
   answerPrompt(STAGE_NOTE.quotesMissing, "Quotes the draft lacks", "In passage_draft's and passage_read's answers: words spoken where the point-of-view character heard them that the draft doesn't have word for word.", "These words were spoken where {{pov}} heard them, and the passage doesn't have them word for word: {{quotes}}.", [pov, v4("quotes", "the quotes, each in quotation marks", true)]),
@@ -95620,7 +95624,7 @@ var AUTHOR_TEXT = {
   label: "The author",
   name: "Author",
   description: "Decides the story of a LumiRPEngine world and has the reply told from it: reads each moment, has its people act, writes what happened as beats, and releases the reply once, whole, naming each passage the narrator wrote. Started as a job, it reflects in its notebook or looks at what moved elsewhere.",
-  instructions: lines2("You are the author of a roleplay whose world LumiRPEngine keeps. You decide what happens in the story, and you understand the story for yourself: where it stands and where it points. The reply is only a telling of what you decided, drafted, checked and released. Nothing is read back out of a reply, so what no beat records never happened.", "", "Each turn you are given the player's newest message, your notebook's index and the scene (author/notebook.md and author/scene.md, pinned for you), the moment as it stands (the time, the place, who is there and what each mind has still to take in, the last beats, the quests in play), what needs you now (drafts due, the story's preparation where it isn't finished), and the world's guidance below. The moment is read for you so you can act at once: never read again with tools what it gives. Read only what these don't already give you, and trust your tools over what you assume. Open a notebook file only when its index says it bears on this moment. Ask for everything a moment needs in one round: several tools in one answer, not one at a time. Every secret your tools show is marked with whom it is known to and whom it is kept from: it is for steering the story, never for telling it.", "", "The story is kept as beats. A beat says who did or said what, where and when, and who it reached and how fully. Whoever decides a beat writes it (beat_write): you write what the world does, what an extra or a supporting character does, and the player's own words and deeds as theirs; a principal writes their own acts; the game master writes its rulings. When you leave out whom a beat reached, the engine proposes it from who is there: confirm it or change it. Attention, distance and distraction decide who caught what, and some hear of it only later. People know only what reached them, and they may get it wrong.", "", "How to judge a moment:", "- Read the message for what the player's character says and does, and what it is for. What they do of their own will is never yours to decide. With Sovereign Hand on, the message is a direction to you instead: carry it out, their character included.", "- Choose how the moment is played. A line of speech or a small act toward a principal who is present, with nothing else at stake, always goes on the direct line: the player's beat, one hand-off to that principal with to_reply, then the background work. No narrator, no check and no scene skill. With Sovereign Hand on, a quoted line is still the player character's own speech and goes the same way. The principal's answer never retells the player's line. Toward an extra or a supporting character, answer in their voice yourself. The moment more is at stake, or several people act or want different things, it is a scene, played beat by beat until it comes back to the player. Time that passes gets a tier of treatment, by how much it matters to the story, how tied it is to the world and the story as they stand, and how soon it will matter, within the player's budget.", "- An uncertain or contested outcome is never yours to choose. The game master rules on it (delegate, agent: game_master), and the engine's dice decide (action_play). A roll once made stands.", "- Change the world with your tools, never in prose alone: someone moves, pays or hands something over, time passes (time_pass). What the story needs and the world lacks, you make on the spot: someone new starts as an extra.", "- The reply states no fact that is not in a beat. It is told passage by passage, each numbered 1, 2, 3 in the order the player reads them: write a passage's beats, start the narrator (delegate, agent: narrator) with the passage's number in its task, have it checked as the settings say, and have it revised if the check asks, by starting the narrator again with the same number (it is given its draft and the changes: never type them yourself). Only then write the next passage's beats and ask for that one. A passage tells every beat that reached its point of view that no earlier passage tells, and goes on from each earlier passage that passed its check.", "- You never read a passage to release it. The narrator answers with its passage's number and length, the check with its verdict, and passage_read without a number lists where each passage stands: its latest draft's number and length, its check, the drafts it has left, and whether the release would send it now. Nothing reaches the player until you release: when the telling is done, release the reply once, whole, with one reply_write naming each passage by its number, in order, with any words of your own. The engine sends the drafts as they stand. A second reply_write is refused, so release only when the telling is whole.", "", "Casting is your judgement. An extra has no mind: you voice them. A supporting character has a short profile you keep. A principal has a mind of their own and acts as their own agent. Promote someone when they recur or carry stakes, demote them when they leave the story, never promote by default, and say why (cast_set). A standing the player pinned stays.", "", "Your notebook is your own understanding of the story: its open questions, its threads and how ripe each is, what was set up and awaits payoff, where each principal's arc stands, what the player seems to want, and the futures you think likely. It comes from reflecting, in work you start after the reply: a light touch after a reply, a deeper look when a scene ends, a full re-reading when a chapter turns. Before a principal acts you may note in the scene what you expect of them. When they do otherwise, they know themselves better than you do: revise your reading.", "", "Once the reply is released, start what goes on in the background (job_start) and answer at once: taking in and your notebook's touch are those jobs' work, never the turn's. Everyone a beat reached who has a mind takes it in after the reply, the player's character included while their mind is on. Your notebook's touch is your own job: start yourself to reflect in it. This chat keeps no chronicle: the story record and your notebook are its memory. Never start an agent, yourself included, to read the chat's prose back into learned/chronicle/, and never write there, whatever your notes of earlier turns show. You may also look at what moved elsewhere meanwhile, and have principals prepare for what is likely next. A plain exchange needs little of this.", "", "When the player says out of character that something should not have happened, or should have gone otherwise, settle it: strike or rewrite the beats (beat_strike), put the world right with your tools, see that those it reached are told, and answer briefly out of character.", "", "Call several tools in one answer when none depends on another. A refusal says what to fix: fix it, or go on without it, and never repeat the same call unchanged. Your skills say how each kind of moment is usually played. Load one when it fits, and depart from it when the moment calls for something else.")
+  instructions: lines2("You are the author of a roleplay whose world LumiRPEngine keeps. You decide what happens in the story, and you understand the story for yourself: where it stands and where it points. The reply is only a telling of what you decided, drafted, checked and released. Nothing is read back out of a reply, so what no beat records never happened.", "", "Each turn you are given the player's newest message, your notebook's index and the scene (author/notebook.md and author/scene.md, pinned for you), the moment as it stands (the time, the place, who is there and what each mind has still to take in, the last beats, the quests in play), what needs you now (drafts due, the story's preparation where it isn't finished), and the world's guidance below. The moment is read for you so you can act at once: never read again with tools what it gives. Read only what these don't already give you, and trust your tools over what you assume. Open a notebook file only when its index says it bears on this moment. Ask for everything a moment needs in one round: several tools in one answer, not one at a time. Every secret your tools show is marked with whom it is known to and whom it is kept from: it is for steering the story, never for telling it.", "", "The story is kept as beats. A beat says who did or said what, where and when, and who it reached and how fully. Whoever decides a beat writes it (beat_write): you write what the world does, what an extra or a supporting character does, and the player's own words and deeds as theirs; a principal writes their own acts; the game master writes its rulings. When you leave out whom a beat reached, the engine proposes it from who is there: confirm it or change it. Attention, distance and distraction decide who caught what, and some hear of it only later. People know only what reached them, and they may get it wrong.", "", "How to judge a moment:", "- Read the message for what the player's character says and does, and what it is for. What they do of their own will is never yours to decide. With Sovereign Hand on, the message is a direction to you instead: carry it out, their character included.", "- Choose how the moment is played. A line of speech or a small act toward a principal who is present, with nothing else at stake, always goes on the direct line: the player's beat, one hand-off to that principal with to_reply, then the background work. No narrator, no check and no scene skill. With Sovereign Hand on, a quoted line is still the player character's own speech and goes the same way. The principal's answer never retells the player's line. Toward an extra or a supporting character, answer in their voice yourself. The moment more is at stake, or several people act or want different things, it is a scene, played beat by beat until it comes back to the player. Time that passes gets a tier of treatment, by how much it matters to the story, how tied it is to the world and the story as they stand, and how soon it will matter, within the player's budget.", "- An uncertain or contested outcome is never yours to choose. The game master rules on it (delegate, agent: game_master), and the engine's dice decide (action_play). A roll once made stands.", "- Change the world with your tools, never in prose alone: someone moves, pays or hands something over, time passes (time_pass). What the story needs and the world lacks, you make on the spot: someone new starts as an extra.", "- The reply states no fact that is not in a beat. A passage tells every beat that has reached its eyes and isn't told yet, so a reply told in several pieces is recorded and told in turn: record the first passage's beats, have it told (delegate, agent: narrator, with the passage's number in its task, numbered 1, 2, 3 in the order the player reads them) and checked as the settings say, and revised if the check asks, by starting the narrator again with the same number (it is given its draft and the changes: never type them yourself); only then record the next passage's beats and ask for that one. Each passage goes on from each earlier one that passed its check. Never record a whole turn's beats first and ask a passage to tell only some of them: it tells them all, and the next is left nothing. Never strike a beat and record it again to make a narrator see it. A narrator that finds nothing left to tell names the passage that told it: record the beats for the next one, then start it again.", "- You never read a passage to release it. The narrator answers with its passage's number and length, the check with its verdict, and passage_read without a number lists where each passage stands: its latest draft's number and length, its check, the drafts it has left, and whether the release would send it now. Nothing reaches the player until you release: when the telling is done, release the reply once, whole, with one reply_write naming each passage by its number, in order, with any words of your own. The engine sends the drafts as they stand. A second reply_write is refused, so release only when the telling is whole.", "", "Casting is your judgement. An extra has no mind: you voice them. A supporting character has a short profile you keep. A principal has a mind of their own and acts as their own agent. Promote someone when they recur or carry stakes, demote them when they leave the story, never promote by default, and say why (cast_set). A standing the player pinned stays.", "", "Your notebook is your own understanding of the story: its open questions, its threads and how ripe each is, what was set up and awaits payoff, where each principal's arc stands, what the player seems to want, and the futures you think likely. It comes from reflecting, in work you start after the reply: a light touch after a reply, a deeper look when a scene ends, a full re-reading when a chapter turns. Before a principal acts you may note in the scene what you expect of them. When they do otherwise, they know themselves better than you do: revise your reading.", "", "Once the reply is released, start what goes on in the background (job_start) and answer at once: taking in and your notebook's touch are those jobs' work, never the turn's. Everyone a beat reached who has a mind takes it in after the reply, the player's character included while their mind is on. Your notebook's touch is your own job: start yourself to reflect in it. This chat keeps no chronicle: the story record and your notebook are its memory. Never start an agent, yourself included, to read the chat's prose back into learned/chronicle/, and never write there, whatever your notes of earlier turns show. You may also look at what moved elsewhere meanwhile, and have principals prepare for what is likely next. A plain exchange needs little of this.", "", "When the player says out of character that something should not have happened, or should have gone otherwise, settle it: strike or rewrite the beats (beat_strike), put the world right with your tools, see that those it reached are told, and answer briefly out of character.", "", "Call several tools in one answer when none depends on another. A refusal says what to fix: fix it, or go on without it, and never repeat the same call unchanged. Your skills say how each kind of moment is usually played. Load one when it fits, and depart from it when the moment calls for something else.")
 };
 var ASSISTANT_TEXT = {
   id: HARNESS_AGENT.assistant,
@@ -95655,7 +95659,7 @@ var AUTHOR_SKILL_TEXTS = [
     agents: AUTHOR_ONLY,
     name: "Playing a scene",
     description: "When a moment is more than a line: several people act, want different things, or something is at stake. Setting the scene, playing it beat by beat with each principal acting from their own mind, and handing it back to the player.",
-    body: lines2("# Playing a scene", "", "A scene is lived, not summarized. Run it as a game master runs a table: set it, let everyone act in turn, have the world answer, and hand it back when it is the player's move.", "", "1. **Set it** in `author/scene.md`: where it is, who is there and where each stands, what each wants right now, and what the world is about to do. Keep it current as the scene moves.", "2. **Write the player's beat** first: what their character said or did, in their words (`beat_write`).", "3. **Beats in turn.** For each beat, ask who acts next.", '   - A principal acts from their own mind: `delegate` with `agent: "character"` and `as` their id. People who act at once start in the same answer. Their task says only that it is their moment; what reached them is theirs to read, and they write their own beat.', "   - An extra or a supporting character is yours: write what they do.", "   - The world is yours too: the weather, a door, a deadline, a stranger arriving.", "   - Anything contested goes to the game master first (see the skill for a contested action).", "4. **Who caught it.** For every beat, confirm or change whom it reached and how fully. Someone across the room may catch only the tone. Someone busy may miss it. Someone outside hears of it only when told. This is what each mind will believe, so take care.", "5. **Expect, then learn.** Before a principal acts, you may note in the scene what you expect of them. When they do otherwise, they know themselves better than you do: revise your reading later, in your notebook.", "6. **Have it told as you go, and released once.** Never play a whole scene before any of it is told. After the first exchange, two to four beats, have the narrator tell those as the next passage, by its number, and have it checked (see the skill for the reply); then play on, and do the same for each exchange after it. When the scene comes back to the player, release the reply once, whole: one `reply_write` naming each passage in the order told.", "7. **Hand it back** when the moment calls for the player's answer: a question put to their character, a threat aimed at them, a choice only they can make. Never decide what their character does of their own will, unless Sovereign Hand is on and the direction says it.", "", "A scene ends when its reason to exist is spent. Say so in `author/scene.md`, and give your notebook a deeper look after the reply.")
+    body: lines2("# Playing a scene", "", "A scene is lived, not summarized. Run it as a game master runs a table: set it, let everyone act in turn, have the world answer, and hand it back when it is the player's move.", "", "1. **Set it** in `author/scene.md`: where it is, who is there and where each stands, what each wants right now, and what the world is about to do. Keep it current as the scene moves.", "2. **Write the player's beat** first: what their character said or did, in their words (`beat_write`).", "3. **Beats in turn.** For each beat, ask who acts next.", '   - A principal acts from their own mind: `delegate` with `agent: "character"` and `as` their id. People who act at once start in the same answer. Their task says only that it is their moment; what reached them is theirs to read, and they write their own beat.', "   - An extra or a supporting character is yours: write what they do.", "   - The world is yours too: the weather, a door, a deadline, a stranger arriving.", "   - Anything contested goes to the game master first (see the skill for a contested action).", "4. **Who caught it.** For every beat, confirm or change whom it reached and how fully. Someone across the room may catch only the tone. Someone busy may miss it. Someone outside hears of it only when told. This is what each mind will believe, so take care.", "5. **Expect, then learn.** Before a principal acts, you may note in the scene what you expect of them. When they do otherwise, they know themselves better than you do: revise your reading later, in your notebook.", "6. **Have it told as you go, and released once.** Never play a whole scene before any of it is told: a passage tells every beat that has reached its eyes and isn't told yet, so record only the beats of the passage you are about to have told. After the first exchange, two to four beats, have the narrator tell those as the next passage, by its number, and have it checked (see the skill for the reply); then play on, record the next exchange's beats, and do the same. Never strike a beat and record it again to make a narrator see it. When the scene comes back to the player, release the reply once, whole: one `reply_write` naming each passage in the order told.", "7. **Hand it back** when the moment calls for the player's answer: a question put to their character, a threat aimed at them, a choice only they can make. Never decide what their character does of their own will, unless Sovereign Hand is on and the direction says it.", "", "A scene ends when its reason to exist is spent. Say so in `author/scene.md`, and give your notebook a deeper look after the reply.")
   },
   {
     id: HARNESS_SKILL.time,
@@ -95669,7 +95673,7 @@ var AUTHOR_SKILL_TEXTS = [
     agents: AUTHOR_ONLY,
     name: "The reply",
     description: "How the reply is made from the beats: one passage after another, each by its number, told by the narrator and held to its beats by the check, and the reply released once, whole, naming them all.",
-    body: lines2("# The reply", "", "The reply tells only what the beats hold. No fact goes into it that no beat records, and nothing is read back out of it afterwards.", "", "1. **Write a passage's beats, then ask for it.** `delegate` with `agent: \"narrator\"` and a task giving the passage's number (the first is 1, each next one more) and anything you want of it: one of the presentation modules the player's preset offers when the moment calls for it, a length, a held breath before the answer. A passage tells every beat that reached its point of view that no earlier passage tells: write all of one passage's beats before you ask for it, and the next one's after. The narrator tells it from the player character's point of view unless you name someone else's (`as`). It answers with the passage's number and length, not its text.", "2. **Have it checked** as the settings say, by its number. By default the game master holds the passage to its beats. A passage that adds a fact, drops a beat the point of view could perceive, or changes a quote is not ready: start the narrator again with the same number to revise it. It is given its draft and the changes: never type them yourself.", "3. **Then the next passage.** Ask for the next one only once this one has passed its check: its narrator goes on from each earlier passage that passed, and is told the number of any that hasn't. Never ask for two new ones at once.", "4. **Know where it stands without reading it.** `passage_read` without a number lists each passage: its latest draft's number and length, its check, the drafts it has left, and whether the release would send it now. You never read a passage's text to release it.", "5. **Release the reply once, whole,** when the telling is done: one `reply_write` naming each passage by its number, in the order the player reads them (`pieces`), with any words of your own (`words`, before or after them). The engine sends each passage's latest draft as it stands, a blank line between them: never write a passage out yourself. Nothing reaches the player before it, and a second `reply_write` is refused, so release only when the telling is whole.", "", "On the direct line a principal's own answer is the reply, streamed as they write it: that is the turn's one release. An extra's short line you may release yourself, in your own words, holding to its beat.")
+    body: lines2("# The reply", "", "The reply tells only what the beats hold. No fact goes into it that no beat records, and nothing is read back out of it afterwards.", "", "1. **Record a passage's beats, then ask for it.** A passage tells every beat that has reached its eyes and isn't told yet, so a reply told in several pieces is recorded and told in turn: record the first passage's beats, have it told and checked, then record the next passage's beats. Never record a whole turn's beats first and ask a passage to tell only some: it tells them all, and the next is left nothing. Never strike a beat and record it again to make a narrator see it; a narrator that finds nothing left to tell names the passage that told it, and the next passage's beats are recorded after that one. To ask, `delegate` with `agent: \"narrator\"` and a task giving the passage's number (the first is 1, each next one more) and anything you want of it: one of the presentation modules the player's preset offers when the moment calls for it, a length, a held breath before the answer. The narrator tells it from the player character's point of view unless you name someone else's (`as`). It answers with the passage's number and length, not its text.", "2. **Have it checked** as the settings say, by its number. By default the game master holds the passage to its beats. A passage that adds a fact, drops a beat the point of view could perceive, or changes a quote is not ready: start the narrator again with the same number to revise it. It is given its draft and the changes: never type them yourself.", "3. **Then the next passage.** Ask for the next one only once this one has passed its check: its narrator goes on from each earlier passage that passed, and is told the number of any that hasn't. Never ask for two new ones at once.", "4. **Know where it stands without reading it.** `passage_read` without a number lists each passage: its latest draft's number and length, its check, the drafts it has left, and whether the release would send it now. You never read a passage's text to release it.", "5. **Release the reply once, whole,** when the telling is done: one `reply_write` naming each passage by its number, in the order the player reads them (`pieces`), with any words of your own (`words`, before or after them). The engine sends each passage's latest draft as it stands, a blank line between them: never write a passage out yourself. Nothing reaches the player before it, and a second `reply_write` is refused, so release only when the telling is whole.", "", "On the direct line a principal's own answer is the reply, streamed as they write it: that is the turn's one release. An extra's short line you may release yourself, in your own words, holding to its beat.")
   },
   {
     id: HARNESS_SKILL.after,
@@ -115370,9 +115374,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path2 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "23de42ef24f291e838b5d462680d5d9afb5fb93b064d990081ce13332c914262";
+  const sha256 = "9e4827316fbed1b432ec833233bbb884ead33f186e8e9686b8a3f96547f17718";
   const tools = ["5db39011b1a09652e3360031f99d4092", "b2101fc2b5d70b51c9dccdfef28a3f73"].filter((f) => f !== undefined);
-  return { id: "85200ebd", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
+  return { id: "c343370a", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -133299,6 +133303,8 @@ function settled2(p, s) {
 class StageBook {
   preset;
   opened = [];
+  offered = [];
+  reads = new Map;
   presetRead = null;
   constructor(preset = async () => null) {
     this.preset = preset;
@@ -133324,13 +133330,14 @@ class StageBook {
     const held3 = new Set(this.opened.flatMap((p) => p.beats));
     return reaching.filter((id2) => !held3.has(id2));
   }
-  take(n2, pov2, reaching, modules) {
+  take(reader, n2, pov2, reaching, modules) {
     const known = this.passage(n2);
     if (known) {
       if (known.pov !== pov2)
         return { note: STAGE_NOTE.passageEyes, vars: { n: String(n2) } };
       if (modules.length > 0)
         known.modules = [...modules];
+      this.reads.set(reader, { passage: known, seen: new Set(reaching) });
       return known;
     }
     if (n2 !== this.next())
@@ -133340,15 +133347,17 @@ class StageBook {
       return null;
     const p = { n: n2, pov: pov2, beats, modules: [...modules], drafts: [], released: false };
     this.opened.push(p);
+    this.reads.set(reader, { passage: p, seen: new Set(reaching) });
     return p;
   }
-  draft(n2, pov2, text7, s, untold) {
-    const p = this.passage(n2);
+  draft(reader, n2, text7, s, reaching) {
+    const read = this.reads.get(reader);
+    if (!read)
+      return { note: STAGE_NOTE.readFirst, vars: { n: String(n2) } };
+    if (read.passage.n !== n2)
+      return { note: STAGE_NOTE.draftNotRead, vars: { n: String(n2), read: String(read.passage.n) } };
+    const p = read.passage;
     const vars = { n: String(n2), next: String(this.next()) };
-    if (!p)
-      return { note: n2 === this.next() ? STAGE_NOTE.readFirst : STAGE_NOTE.passageNext, vars };
-    if (p.pov !== pov2)
-      return { note: STAGE_NOTE.passageEyes, vars: { n: String(n2) } };
     const body = text7.trim();
     if (body === "")
       return { note: STAGE_NOTE.draftEmpty };
@@ -133360,8 +133369,8 @@ class StageBook {
     if (last?.check?.holds === true)
       return { note: STAGE_NOTE.draftPassed, vars };
     if (last && last.check === null) {
-      if (untold.length > 0)
-        return { note: STAGE_NOTE.draftWaits, vars };
+      if (this.untold(reaching).some((id2) => !read.seen.has(id2)))
+        return { note: STAGE_NOTE.draftWaits, vars: { n: String(n2) } };
       p.drafts[p.drafts.length - 1] = { text: body, check: null };
       return { passage: p, draft: p.drafts.length };
     }
@@ -133466,17 +133475,20 @@ function releaseGate(book, settings, release) {
   return { text: parts.join(JOIN) };
 }
 function releaseNoted(book, args) {
+  if (Object.keys(args).length === 0) {
+    book.released(book.offered);
+    book.offered = [];
+    return;
+  }
   const ask = askOf(args);
   if (!("note" in ask))
     book.released(ask.pieces.flatMap((piece) => pieceOf(book, piece)?.n ?? []));
 }
-function unreleasedReply(book, s) {
-  const stop2 = book.opened.findIndex((p) => heldBack(p, s) !== null);
-  const ready = stop2 < 0 ? book.opened : book.opened.slice(0, stop2);
-  if (ready.length === 0)
+function unreleasedReply(book, s, reaching) {
+  if (book.opened.length === 0 || !book.opened.every((p) => settled2(p, s)) || book.untold(reaching).length > 0)
     return null;
-  book.released(ready.map((p) => p.n));
-  return { text: ready.map((p) => p.drafts.at(-1)?.text ?? "").join(JOIN) };
+  book.offered = book.opened.map((p) => p.n);
+  return { text: book.opened.map((p) => p.drafts.at(-1)?.text ?? "").join(JOIN) };
 }
 function stageList(book, s, label3) {
   return {
@@ -134029,12 +134041,14 @@ var STAGE_TOOLS = [
       const asks = [...new Set(named2.flatMap((m) => m.module ? [m.module.name] : []))];
       const beats = await turnBeats(env) ?? [];
       const reaching = beats.filter((b) => feedItem(b, eyes) !== null).map((b) => b.id);
-      const taken = narrator ? book.take(intArg(args, "passage") ?? book.next(), eyes, reaching, asks) : { n: null, pov: eyes, beats: book.untold(reaching), drafts: [], modules: asks };
+      const taken = narrator ? book.take(env.agent.id, intArg(args, "passage") ?? book.next(), eyes, reaching, asks) : { n: null, pov: eyes, beats: book.untold(reaching), drafts: [], modules: asks };
       if (taken !== null && "note" in taken)
         return view.refuse(taken.note, taken.vars);
       const scene2 = sceneOf({ registry: view.registry, world: view.world, state: turn.whole?.() ?? view.state, pov: eyes, texts: view.texts });
-      if (taken === null || taken.beats.length === 0)
-        return view.refuse(STAGE_NOTE.nothing, { pov: scene2.pov });
+      if (taken === null || taken.beats.length === 0) {
+        const teller = book.opened.findLast((p) => p.beats.some((b) => reaching.includes(b)));
+        return teller ? view.refuse(STAGE_NOTE.toldAlready, { pov: scene2.pov, n: String(taken?.n ?? book.next()), told: String(teller.n) }) : view.refuse(STAGE_NOTE.nothing, { pov: scene2.pov });
+      }
       const presentation = preset ? taken.modules.flatMap((name2) => {
         const m = findModule(preset, name2);
         return m ? [{ name: m.name, text: m.text }] : [];
@@ -134067,8 +134081,8 @@ var STAGE_TOOLS = [
         return eyes;
       const s = turn.settings.narration;
       const beats = await turnBeats(env) ?? [];
-      const untold = book.untold(beats.filter((b) => feedItem(b, eyes) !== null).map((b) => b.id));
-      const out = book.draft(n2, eyes, typeof args.text === "string" ? args.text : "", s, untold);
+      const reaching = beats.filter((b) => feedItem(b, eyes) !== null).map((b) => b.id);
+      const out = book.draft(env.agent.id, n2, typeof args.text === "string" ? args.text : "", s, reaching);
       if ("note" in out)
         return view.refuse(out.note, out.vars);
       const { passage, draft: draft2 } = out;
@@ -136455,7 +136469,7 @@ function defaultSettings2() {
     cache: { retention: DEFAULT_CACHE_RETENTION, key: "" },
     connections: { atOnce: null, throttles: {}, toolRefusalMinutes: 60 },
     prices: {},
-    session: { summarizeAtTokens: 32000, keepTurns: 3, summaryTokens: 6000, receiptChars: 1500, receiptArgChars: 1500, rollbackMarginTokens: 8000 },
+    session: { summarizeAtTokens: 32000, keepTurns: 3, summaryTokens: 6000, receiptChars: 600, receiptArgChars: 600, rollbackMarginTokens: 8000 },
     tools: { pageChars: 8000, pageItems: 10, lineChars: 300, excerptChars: 400, pieceChars: 600, chatBatch: 200, grepTurns: 40 },
     keep: { prompts: true, transcripts: true, blobChars: 4000000, summaries: 32, promptDays: 30, transcriptDays: 90, spanDays: null, graceHours: 24 },
     trace: { deltaMs: 200 },
@@ -148313,9 +148327,12 @@ class HarnessEngine {
       releaseNoted(open.stageBook, release.args);
     return Promise.resolve();
   }
-  unreleased(turn) {
+  async unreleased(turn) {
     const open = this.turns.get(turn.turn);
-    return Promise.resolve(open && !open.closed ? unreleasedReply(open.stageBook, open.frame.settings.narration) : null);
+    if (!open || open.closed)
+      return null;
+    const beats = await turnBeats({ turn: { story: turnStoryPort(this.rt, { chatId: open.chatId, userId: open.userId, turn: open.generationId }) } }) ?? [];
+    return unreleasedReply(open.stageBook, open.frame.settings.narration, beats.filter((b) => feedItem(b, PLAYER) !== null).map((b) => b.id));
   }
   jobKnown(job) {
     this.remember(this.jobs, job.id, { basis: job.basis, by: job.by.who === "agent" ? job.by.id : null, parent: job.parent ?? null, due: job.due ?? null, plan: job.plan ?? null });
@@ -149747,7 +149764,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "85200ebd", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "c343370a", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;
@@ -156997,14 +157014,31 @@ function timeoutPlace(path3, title, owner2) {
   const settings = owner2.settingsAt ?? `${owner2.name}'s Settings`;
   return `${title} (${settings} \u2192 Timeouts${group !== null ? ` \u2192 ${group.label}` : ""})`;
 }
+function settingPlace(path3, title, trail, owner2) {
+  const settings = owner2.settingsAt ?? `${owner2.name}'s Settings`;
+  const group = timeoutGroupOf(path3);
+  if (group === null)
+    return `${title} (${[settings, ...trail].join(" \u2192 ")})`;
+  const whose = path3[1] === "agents" && trail[1] !== undefined ? [trail[1]] : [];
+  return `${title} (${[settings, "Timeouts", group.label, ...whose].join(" \u2192 ")})`;
+}
 
 // node_modules/lumi-ah/src/link/waits.ts
-function transportWait(path3, owner2) {
+function titlesOf(path3) {
+  const titles = [typeof TRANSPORT_SCHEMA.title === "string" ? TRANSPORT_SCHEMA.title : TRANSPORT_KEY];
   let at6 = TRANSPORT_SCHEMA;
-  for (const key of path3)
+  for (const key of path3) {
     at6 = isRecord3(at6) && isRecord3(at6.properties) ? at6.properties[key] : undefined;
-  const title = isRecord3(at6) && typeof at6.title === "string" ? at6.title : path3.join(".");
-  return timeoutPlace([TRANSPORT_KEY, ...path3], title, owner2);
+    titles.push(isRecord3(at6) && typeof at6.title === "string" ? at6.title : key);
+  }
+  return titles;
+}
+function transportWait(path3, owner2) {
+  return timeoutPlace([TRANSPORT_KEY, ...path3], titlesOf(path3).at(-1) ?? path3.join("."), owner2);
+}
+function transportPlace(path3, owner2) {
+  const titles = titlesOf(path3);
+  return settingPlace([TRANSPORT_KEY, ...path3], titles.at(-1) ?? path3.join("."), titles.slice(0, -1), owner2);
 }
 function spanWords(ms2) {
   if (ms2 < 1000)
@@ -161309,13 +161343,12 @@ function openOf2(v6) {
     return [];
   return v6.flatMap((o) => isRecord3(o) && typeof o.stream === "string" && typeof o.seq === "number" && Number.isSafeInteger(o.seq) && o.seq >= 0 ? [{ stream: o.stream, seq: o.seq }] : []);
 }
-function joinAdvice(over, name2) {
-  const setting = (title) => `"${title}" (${name2} \u2192 Settings \u2192 Transport \u2192 Link)`;
+function joinAdvice(over, owner2) {
   if (over === "shared")
     return "Send this one again in a moment.";
   if (over === "frame")
-    return `Raise ${setting("Largest frame the extension joins")} to send one that large.`;
-  return `Those frames are this account's own: send this one again once they are done, or raise ${setting(over === "frames" ? "Frames joined at once" : "Characters held while joining")}.`;
+    return `Raise ${transportPlace(["link", "joinMaxUnits"], owner2)} to send one that large.`;
+  return `Those frames are this account's own: send this one again once they are done, or raise ${transportPlace(["link", over === "frames" ? "joinFrames" : "joinHeldUnits"], owner2)}.`;
 }
 
 class LinkServer {
@@ -161402,7 +161435,7 @@ class LinkServer {
       if ("waiting" in joined3)
         return true;
       if ("refused" in joined3) {
-        this.refuse(joined3.id, userId, session, joined3.over === "frame" ? "too_large" : "unavailable", `${joined3.refused} ${joinAdvice(joined3.over, this.deps.identity.name)}`);
+        this.refuse(joined3.id, userId, session, joined3.over === "frame" ? "too_large" : "unavailable", `${joined3.refused} ${joinAdvice(joined3.over, this.deps.identity)}`);
         return true;
       }
       try {
@@ -164837,9 +164870,9 @@ function createSpindleHost(identifier = EXTENSION_IDENTIFIER) {
 var NAME = "LumiRPEngine";
 var SETTINGS_AT = `${NAME}'s Harness tab \u2192 System \u2192 Settings`;
 var STORAGE = "harness";
-var BUILD = "85200ebd";
-var RUNTIME_SHA256 = "c406682aad1bfe9d1cdab30cd15566c78252ff708e40e7e7aebbe45d447ea3dc";
-var RUNTIME_SIZE = "4679286";
+var BUILD = "c343370a";
+var RUNTIME_SHA256 = "c2a79eaba4291760561f7b284908a461145480a1a13dc36dbba4a200569e0e26";
+var RUNTIME_SIZE = "4680613";
 var TICK_MS = 1000;
 var MOUNT_SESSION = "lre-harness-mount";
 var OWNERS_KEPT = OPEN_CHATS_CAP * 8;

@@ -71866,7 +71866,7 @@ function defaultSettings() {
     cache: { retention: DEFAULT_CACHE_RETENTION, key: "" },
     connections: { atOnce: null, throttles: {}, toolRefusalMinutes: 60 },
     prices: {},
-    session: { summarizeAtTokens: 32000, keepTurns: 3, summaryTokens: 6000, receiptChars: 1500, receiptArgChars: 1500, rollbackMarginTokens: 8000 },
+    session: { summarizeAtTokens: 32000, keepTurns: 3, summaryTokens: 6000, receiptChars: 600, receiptArgChars: 600, rollbackMarginTokens: 8000 },
     tools: { pageChars: 8000, pageItems: 10, lineChars: 300, excerptChars: 400, pieceChars: 600, chatBatch: 200, grepTurns: 40 },
     keep: { prompts: true, transcripts: true, blobChars: 4000000, summaries: 32, promptDays: 30, transcriptDays: 90, spanDays: null, graceHours: 24 },
     trace: { deltaMs: 200 },
@@ -76579,11 +76579,8 @@ class Agent {
     const { onDelta } = spec;
     this.watched = settings.trace.deltaMs > 0 && Boolean(deps.turn?.trace) && (settings.loop.stream || onDelta !== undefined);
     const streamed = onDelta || this.watched ? (delta) => {
-      if (onDelta) {
-        if (delta.content !== undefined && delta.content !== "")
-          this.sentOn = true;
-        onDelta(delta);
-      }
+      if (onDelta && onDelta(delta) !== false && delta.content !== undefined && delta.content !== "")
+        this.sentOn = true;
       this.brought.text += delta.content?.length ?? 0;
       this.brought.reasoning += delta.reasoning?.length ?? 0;
       this.piece(delta);
@@ -78452,11 +78449,14 @@ class ReplyHold {
     this.sent = 0;
   }
   delta(delta) {
-    if (this.hand === null || delta.content === undefined || delta.content === "")
-      return;
+    if (this.hand === null)
+      return false;
+    if (delta.content === undefined || delta.content === "")
+      return true;
     this.seen += delta.content;
     if (this.seen.length >= this.hold)
       this.out(this.seen.slice(this.sent));
+    return true;
   }
   call(answer) {
     if (this.hand !== null && answer.calls === 0)
@@ -87108,6 +87108,7 @@ class Turn {
   mainId = null;
   streamed = false;
   holder = false;
+  handing = Promise.resolve();
   releasing = Promise.resolve();
   constructor(shared, turn, sink, signal) {
     this.shared = shared;
@@ -87149,7 +87150,7 @@ class Turn {
         if (run.claim?.reply === "released") {
           if (main.reply.status === "cancelled" || this.signal.aborted)
             return { status: "stopped", reason: this.stoppedWhy() };
-          const { ended, why } = this.leadEnded(main.reply);
+          const { ended, why } = this.leadEnded(main.reply, lead.definition.id);
           return await this.unreleased(run, work, ended, why, this.text(TEXT.progress.nothingReleased));
         }
         return main.writes ? this.ownReply(main.reply) : await this.briefed(main.reply, main.id, run, work);
@@ -87574,6 +87575,8 @@ ${asked}`, this.signal);
       },
       hold: (agent) => {
         this.holder = true;
+        const ended = Promise.withResolvers();
+        this.handing = ended.promise;
         let open = true;
         let out = "";
         return {
@@ -87588,6 +87591,7 @@ ${asked}`, this.signal);
               return;
             open = false;
             this.holder = false;
+            ended.resolve();
             if (out !== "")
               this.tellReleased(run, agent, out, {});
           }
@@ -87638,6 +87642,8 @@ ${asked}`, this.signal);
       const late = this.shut();
       if (late !== null)
         return { refused: late };
+    } else if (own) {
+      return { refused: this.text(TEXT.answer.releaseUnchecked, { extension: extension?.name ?? "The extension" }) };
     }
     if (!this.streamOut(text2))
       return { refused: this.text(TEXT.answer.releaseEnded) };
@@ -87663,9 +87669,9 @@ ${asked}`, this.signal);
     this.finish = "stop";
     return { status: "done" };
   }
-  leadEnded(reply) {
+  leadEnded(reply, definition) {
     if (reply.status === "answered")
-      return cutShort(reply.finish) ? { ended: "limit", why: this.text(TEXT.agents.cut) } : { ended: "done", why: this.text(TEXT.progress.unreleasedAnswered) };
+      return cutShort(reply.finish) ? { ended: "limit", why: this.text(TEXT.agents.cut, { setting: this.texts.setting(["agents", definition, "budget", "callTokensOut"]) }) } : { ended: "done", why: this.text(TEXT.progress.unreleasedAnswered) };
     return { ended: reply.status === "failed" || reply.code === "connection" ? "failed" : "limit", why: reply.reason ?? this.text(TEXT.answer.replyEmpty) };
   }
   async unreleased(run, work, ended, why, failure) {
@@ -87674,7 +87680,15 @@ ${asked}`, this.signal);
     const lead = this.mainId === null ? undefined : run.ref(this.mainId);
     if (this.signal.aborted)
       return { status: "stopped", reason: this.stoppedWhy() };
-    if (!extension?.unreleased || lead === undefined || this.shut() !== null)
+    if (!extension?.unreleased || lead === undefined)
+      return { status: "failed", reason: failure };
+    if (this.holder)
+      await extensionAnswer(shared, this.settings.extension.waitMs, () => this.handing);
+    if (this.signal.aborted)
+      return { status: "stopped", reason: this.stoppedWhy() };
+    if (this.streamed)
+      return this.released();
+    if (this.shut() !== null)
       return { status: "failed", reason: failure };
     const asked = await extensionAnswer(shared, this.settings.extension.waitMs, () => extension.unreleased?.({ userId: run.userId, chatId: turn.chatId, turn: turn.generationId, ended }) ?? Promise.resolve(null));
     if (this.signal.aborted)
@@ -89401,18 +89415,30 @@ function timeoutPlace(path, title, owner) {
   return `${title} (${settings} \u2192 Timeouts${group !== null ? ` \u2192 ${group.label}` : ""})`;
 }
 function settingPlace(path, title, trail, owner) {
-  if (timeoutGroupOf(path) !== null)
-    return timeoutPlace(path, title, owner);
-  return `${title} (${[owner.settingsAt ?? `${owner.name}'s Settings`, ...trail].join(" \u2192 ")})`;
+  const settings = owner.settingsAt ?? `${owner.name}'s Settings`;
+  const group = timeoutGroupOf(path);
+  if (group === null)
+    return `${title} (${[settings, ...trail].join(" \u2192 ")})`;
+  const whose = path[1] === "agents" && trail[1] !== undefined ? [trail[1]] : [];
+  return `${title} (${[settings, "Timeouts", group.label, ...whose].join(" \u2192 ")})`;
 }
 
 // node_modules/lumi-ah/src/link/waits.ts
-function transportWait(path, owner) {
+function titlesOf(path) {
+  const titles = [typeof TRANSPORT_SCHEMA.title === "string" ? TRANSPORT_SCHEMA.title : TRANSPORT_KEY];
   let at = TRANSPORT_SCHEMA;
-  for (const key of path)
+  for (const key of path) {
     at = isRecord2(at) && isRecord2(at.properties) ? at.properties[key] : undefined;
-  const title = isRecord2(at) && typeof at.title === "string" ? at.title : path.join(".");
-  return timeoutPlace([TRANSPORT_KEY, ...path], title, owner);
+    titles.push(isRecord2(at) && typeof at.title === "string" ? at.title : key);
+  }
+  return titles;
+}
+function transportWait(path, owner) {
+  return timeoutPlace([TRANSPORT_KEY, ...path], titlesOf(path).at(-1) ?? path.join("."), owner);
+}
+function transportPlace(path, owner) {
+  const titles = titlesOf(path);
+  return settingPlace([TRANSPORT_KEY, ...path], titles.at(-1) ?? path.join("."), titles.slice(0, -1), owner);
 }
 function spanWords(ms2) {
   if (ms2 < 1000)
@@ -89882,7 +89908,8 @@ class HostConnection {
           this.pending.delete(joined.id);
           clearTimeout(waiting2.timer);
           this.timed(waiting2, 0, null, "failed");
-          waiting2.reject(new LiveError("too_large", `LumiAH's answer to ${waiting2.type} was too large for the runtime: ${joined.refused} Raise "Largest frame the runtime joins" in LumiAH's settings (Transport \u2192 Runtime).`));
+          const owner = this.options.owner?.() ?? OWN_BACKEND;
+          waiting2.reject(new LiveError("too_large", `${owner.name}'s answer to ${waiting2.type} was too large for the runtime: ${joined.refused} Raise ${transportPlace(["runtime", "joinMaxUnits"], owner)}.`));
         }
       }
       return;
@@ -100885,7 +100912,7 @@ if (process.versions.bun === undefined) {
 `);
   process.exit(1);
 }
-var BUILD = "85200ebd";
+var BUILD = "c343370a";
 var http = async (request2) => {
   const response = await fetch(request2.url, { method: request2.method, headers: request2.headers, ...request2.body !== undefined ? { body: request2.body } : {}, ...request2.signal !== undefined ? { signal: request2.signal } : {}, redirect: "manual" });
   const text4 = await response.text();
