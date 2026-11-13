@@ -100693,7 +100693,7 @@ if (process.versions.bun === undefined) {
 `);
   process.exit(1);
 }
-var BUILD = "a4ba5134";
+var BUILD = "5f5a0bb1";
 var http = async (request2) => {
   const response = await fetch(request2.url, { method: request2.method, headers: request2.headers, ...request2.body !== undefined ? { body: request2.body } : {}, ...request2.signal !== undefined ? { signal: request2.signal } : {}, redirect: "manual" });
   const text4 = await response.text();
