@@ -3,6 +3,7 @@
 // page "Harness engine", gathered by `harness-texts.ts`.
 
 import { answerPrompt, HARNESS_FAMILY, type HarnessToolText, v } from "./harness-text-kit";
+import { CUT_AT } from "./harness-texts-world";
 import type { PromptDef } from "./prompts";
 
 /** The tools, by name. */
@@ -180,7 +181,7 @@ export const BUILD_NOTE_PROMPTS: readonly PromptDef[] = [
   answerPrompt(BUILD_NOTE.aLink, "A map's link, named", "How a building tool's answer names a link of a map.", "the link between {{from}} and {{to}} on the map {{map}}", [v("from", "the id of one end", true), v("to", "the id of the other", true), v("map", "the map's id", true)]),
   answerPrompt(BUILD_NOTE.settings, "The map settings, named", "How world_map_settings's answer names what it changed.", "the map settings"),
   answerPrompt(BUILD_NOTE.none, "None", "Stands in a building tool's refusal for a list with nothing in it.", "none"),
-  answerPrompt(BUILD_NOTE.moreIds, "More than fit", "Ends a list of ids in a building tool's refusal that was cut to fit one answer.", "and {{count}} more", [v("count", "how many more", true)]),
+  answerPrompt(BUILD_NOTE.moreIds, "More than fit", "Ends a list of ids in a building tool's refusal that was cut to fit one answer.", `and {{count}} more past what one answer shows (${CUT_AT})`, [v("count", "how many more", true)]),
   answerPrompt(BUILD_NOTE.noPlace, "No such place", "A building tool's answer when a place it was given is not in the world the call writes: this chat's own, or the world's draft.", "There is no place with the id or exact name {{name}} {{where}}. Its places, by id: {{places}}. Give one of these, or make the place first (world_place).", [v("name", "what the call gave"), v("where", "the world the call writes, as the two texts below say it", true), v("places", "the ids of that world's places", true)]),
   answerPrompt(BUILD_NOTE.placeExists, "A place of that name exists", "world_place's answer to a new place whose name a place of that world already has.", "There is a place called {{name}} ({{id}}) already. To change it, name it in place; to make another of the same name, give id.", [v("name", "the place's name", true), v("id", "its id", true)]),
   answerPrompt(BUILD_NOTE.idTaken, "That id is taken", "A building tool's answer to a new place or map whose id is already in use.", "The id {{id}} is taken: {{by}}. To change that one, name it in {{arg}}; to make a new one, give another id.", [v("id", "the id", true), v("by", "what has it", true), v("arg", "the argument that names an existing one", true)]),

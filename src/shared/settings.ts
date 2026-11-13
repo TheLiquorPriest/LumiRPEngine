@@ -1145,7 +1145,7 @@ export function narrationSettingsOf(raw: unknown, base: Readonly<NarrationSettin
 }
 
 /** The shipped defaults' revision (`UserSettings.defaults`). */
-export const SETTINGS_DEFAULTS_REV = 10;
+export const SETTINGS_DEFAULTS_REV = 11;
 
 /** Build's jobs (DESIGN §13.1): the user's own, which no preset sets. */
 export interface JobSettings {

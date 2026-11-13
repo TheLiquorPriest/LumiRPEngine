@@ -357,6 +357,7 @@ export function mountHarness(rt: Runtime, base: BackendHost, env: BackendEnv): M
       agentModel: (ask, userId) => extension.agentModel?.({ ...ask, userId }) ?? Promise.resolve(null),
       releasing: (release, userId) => extension.releasing?.({ ...release, userId }) ?? Promise.resolve(null),
       released: (release, userId) => extension.released?.({ ...release, userId }) ?? Promise.resolve(),
+      unreleased: (turn, userId) => extension.unreleased?.({ ...turn, userId }) ?? Promise.resolve(null),
       replyWritten: (reply, userId) => extension.replyWritten?.({ ...reply, userId }) ?? Promise.resolve(),
       runEnded: (run, userId) => extension.runEnded?.({ ...run, userId }) ?? Promise.resolve(),
     },

@@ -34,7 +34,7 @@ import { boolArg, missing, refusedAnswer } from "../propose";
 import { READ_TOOLS } from "../read";
 import type { ToolReadView } from "../read-view";
 import { argGiven, needText, objectSchema, text } from "../schema";
-import type { HarnessToolDefinition } from "./kit";
+import { type HarnessToolDefinition, WHOLE_READ_MOST } from "./kit";
 
 const count = (n: number): string => n.toLocaleString("en-US");
 
@@ -58,27 +58,13 @@ function filesChars(settings: UserSettings): number {
 
 /**
  * The most `mind_read` gives under `settings`: every file full to its size, each under its head,
- * after the read's own head. A mind is read whole, so LumiAH gives up to this whole (its
- * `wholeChars`); what is past it reaches the reader clipped, the rest kept for scratch_read.
+ * after the read's own head; never past `WHOLE_READ_MOST`. A mind is read whole, so LumiAH gives up
+ * to this whole (its `wholeChars`); what is past it reaches the reader clipped, the rest kept for
+ * scratch_read.
  */
 function mindReadChars(settings: UserSettings): number {
   const long = "x".repeat(HEAD_ROOM);
-  return renderPrompt(MINDS_NOTE.readHead, settings.prompts.texts, { name: long, standing: long }).length + filesChars(settings);
-}
-
-/**
- * The most `mind_seed` gives whole under `settings`: its head and each part's, the person's record
- * in three parts, then the same files `mind_read` gives, full to their sizes. Each part of the
- * record is one of the old engines' read tools' answers, which nothing of the record bounds: each is
- * given room up to the engine's own size for one tool result (`agents.clipChars`, the size those
- * engines read one at), so a record that size and a mind full to its sizes come back whole together.
- */
-function mindSeedChars(settings: UserSettings): number {
-  const { texts } = settings.prompts;
-  const long = "x".repeat(HEAD_ROOM);
-  const heads = [renderPrompt(MINDS_NOTE.seedHead, texts, { name: long, standing: long }), ...[MINDS_NOTE.seedSheet, MINDS_NOTE.seedMind, MINDS_NOTE.seedKnows, MINDS_NOTE.seedFiles].map((id) => renderPrompt(id, texts, {}))];
-  // Each head with the blank line after it, and the record's three parts.
-  return heads.reduce((sum, head) => sum + head.length + 2, 0) + 3 * settings.agents.clipChars + filesChars(settings);
+  return Math.min(WHOLE_READ_MOST, renderPrompt(MINDS_NOTE.readHead, settings.prompts.texts, { name: long, standing: long }).length + filesChars(settings));
 }
 
 /** The old engines' read tools by name: `mind_seed` reads a person with them, as the game master's tools read one. */
@@ -196,8 +182,8 @@ export const MIND_FILE_TOOLS: readonly HarnessToolDefinition[] = [
     family: "minds",
     tier: "read",
     parameters: () => objectSchema({ who: text() }, ["who"]),
-    // What is held of a person is read in one go, to write who they are from: the same files as mind_read, whole.
-    wholeChars: mindSeedChars,
+    // What is held of a person is read in one go, to write who they are from. Its record has no bound of its own (a sheet carries every lore entry linked to them whole), so it states the most any read does; the mind's files come first, so a clip takes the record's end, never a file.
+    wholeChars: () => WHOLE_READ_MOST,
     async run(args, env) {
       const view = await env.reader.view();
       const turn = env.turn;
@@ -213,13 +199,14 @@ export const MIND_FILE_TOOLS: readonly HarnessToolDefinition[] = [
       const person: JsonObject = { person: entity };
       const reads = await Promise.all(["people_sheet", "minds_read", "knowledge_what_knows"].map(async (name): Promise<ToolOutcome | null> => (await READS.get(name)?.run(person, env)) ?? null));
       const [sheet, mind, knows] = reads.map((out) => out?.text ?? "");
-      const parts = [view.text(MINDS_NOTE.seedHead, { name: view.name(entity), standing: standingWords(view, standing) }), `${view.text(MINDS_NOTE.seedSheet)}\n${sheet}`, `${view.text(MINDS_NOTE.seedMind)}\n${mind}`, `${view.text(MINDS_NOTE.seedKnows)}\n${knows}`];
+      const parts = [view.text(MINDS_NOTE.seedHead, { name: view.name(entity), standing: standingWords(view, standing) })];
       if (env.files) {
         const max = turn.settings.story.minds.chars;
         const written = (await readMind(env.files, entity, MIND_FILE_IDS)).filter((r) => r.file !== null);
         const files = written.length > 0 ? written : [{ id: "core" as const, file: null }];
         parts.push([view.text(MINDS_NOTE.seedFiles), ...files.map((r) => shown(view, r.id, r.file, max[r.id]))].join("\n\n"));
       }
+      parts.push(`${view.text(MINDS_NOTE.seedSheet)}\n${sheet}`, `${view.text(MINDS_NOTE.seedMind)}\n${mind}`, `${view.text(MINDS_NOTE.seedKnows)}\n${knows}`);
       return { text: parts.join("\n\n") };
     },
   },

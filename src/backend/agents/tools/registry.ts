@@ -60,6 +60,8 @@ export interface ToolEnv {
   build?: WorldBuild | null;
   /** The chat's area of LumiAH's workspace (`tools/harness-ports.ts`): where a tool that keeps a file writes it on the harness; absent or null until the harness gives one. */
   files?: HarnessFiles | null;
+  /** True for a call the harness's bridge runs (`runHarnessTool`), in a turn or in a conversation tied to none: a read that pages its answer there does so (`ToolDefinition.pages`). Absent on the classic and agents engines. */
+  harness?: true;
 }
 
 /**
@@ -90,8 +92,8 @@ export interface ToolDefinition {
   notes?: true;
   /** Its description is the registry text `tool.<name>` (R5, Every agent page, group "Tools"): editable, with a reset. */
   parameters(world: WorldDoc): JsonObject; // hand-written JSON Schema, with the world's enums filled in
-  /** For a tool that holds each answer to one of the player's settings and is meant to be read in one go: that bound, in characters, under `settings`. On the harness LumiAH gives its answer whole up to it (its `wholeChars`) instead of clipping it at Tool results clipped past. */
-  wholeChars?: (settings: UserSettings) => number;
+  /** For a read that pages a long answer on the harness: the most one page holds under `settings`, in characters. The harness gives it a `cursor` to read on with, and states one page as what LumiAH gives whole (its `wholeChars`); the classic and agents engines get its answer whole, as ever. */
+  pages?: (settings: UserSettings) => number;
   run(args: JsonObject, env: ToolEnv): Promise<ToolOutcome>;
 }
 

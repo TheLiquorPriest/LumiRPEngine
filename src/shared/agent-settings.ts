@@ -381,7 +381,7 @@ export interface AgentSettings {
   systemTokens: number;
   /** What the engine still does by itself on a turn the harness plays (GM → This chat → Engine: Harness; HARNESS-SLICE3). */
   harness: HarnessSettings;
-  /** What one call of a harness tool may write or span at most, on a chat the harness plays. */
+  /** How far one call of a harness tool may span at most, on a chat the harness plays: one `time_pass`'s time. */
   harnessLimits: HarnessLimits;
 }
 

@@ -24,8 +24,15 @@ export const SURFACE_NOTE = {
 
 const filed = "The file is a workspace note, under the mode the player set for those (Settings → Changes from the reply). As shipped it is written to the workspace at once, and the answer says where: workspace_read reads it. Set to Confirm, it waits for the player's Apply on the review card; set to Never, it is refused. On a chat with no workspace connected it is staged with the turn instead, and kept when the turn commits.";
 
-/** The old engines' tools the harness words itself, as shipped, each with the id of its text there: on the harness a lore file goes to the harness's workspace, and only under its own folder. */
+/** What a lore read says of its pages on the harness, where an answer longer than one is paged (`tools/lore.ts`). */
+const pages = (what: string): string => `${what} longer than one answer comes in pages: each says what it gives, and the cursor that reads on. Read every page, and nothing is left out or given twice; should what you read change between two pages, the answer says so, and you read it again from the first.`;
+
+/** The old engines' tools the harness words itself, as shipped, each with the id of its text there: on the harness a lore file goes to the harness's workspace, and only under its own folder, and a long answer of a lore read comes in pages. */
 const DESCRIBED: readonly { name: string; id: string; text: string }[] = [
+  { name: "lore_index", id: "harness.tool.lore_index", text: `The lore index: every lore entry of the World Info books this chat reads, book by book, each by its short id and title, with a line of what it holds where the title doesn't say; or, where the game master keeps an index of their own, that index as they wrote it. Read an entry whole with lore_read and its id. ${pages("An index")}` },
+  { name: "lore_search", id: "harness.tool.lore_search", text: `Search the lore: the world's own entries and those of the World Info books this chat reads, best matches first. Gives each match's id, title and why it matched, with its secret marker when it is a secret or a mark in a book (who knows it, whom it is kept from). Read one whole with lore_read. ${pages("A list of matches")}` },
+  { name: "lore_grep", id: "harness.tool.lore_grep", text: `Find the lore entries whose text holds some text, in any case: each entry's id and title, its secret marker, and the lines that hold it. ${pages("A list of lines")}` },
+  { name: "lore_read", id: "harness.tool.lore_read", text: `Read one lore entry whole, by its id, as your knowledge has it: a secret in its text is marked with who knows it, or left out where your knowledge doesn't reach. ${pages("An entry")}` },
   { name: "lore_save", id: "harness.tool.lore_save", text: `Save a lore entry's text, as you read it, as a file of the workspace under lore/: one named after the entry, or the file path names there. A path anywhere else is refused. ${filed} Nothing here writes a book or the world's lore.` },
   { name: "lore_draft", id: "harness.tool.lore_draft", text: `Draft an edit to a lore entry, or a new entry, as a file of the workspace under lore-drafts/ that names the entry and holds your text. Nothing writes a book or the world's lore from it: the game master applies it in Build, on their own press. A new entry takes an id of your own: lower case letters, digits and _. ${filed}` },
 ];

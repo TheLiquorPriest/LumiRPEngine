@@ -15,7 +15,7 @@
 //   it on the review card. Saying that no time passes changes nothing in the chat's record, so it is
 //   under no mode: it only tells the turn to add no tick of its own.
 // - The player's pause of the scene's clock holds it, and one call moves the clock no farther than
-//   the player allows (Settings → Agents: `harnessLimits.timePassMinutes`).
+//   the player allows (GM → This chat → Engine → Time passed in one call: `harnessLimits.timePassMinutes`).
 
 import { HARNESS_FAMILY, HARNESS_NOTE, HARNESS_TOOL } from "../../../../shared/harness-texts";
 import { hashJson, hashParts } from "../../../../shared/hash";

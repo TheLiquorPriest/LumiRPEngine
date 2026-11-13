@@ -173,7 +173,7 @@ const LIFTED = {
   swipeDefault: "rerun",
   /** The knowledge limits before revision 9, when claims, and what minds and the narrator read of them, were shorter: each old default with its new one (`KNOWLEDGE_DEFAULTS`). */
   knowledge: { claimChars: [240, KNOWLEDGE_DEFAULTS.claimChars], mindTokens: [400, KNOWLEDGE_DEFAULTS.mindTokens], narratorTokens: [600, KNOWLEDGE_DEFAULTS.narratorTokens] } as const,
-  /** The harness's sizes before revision 10, sized for long-form play: the longest passage, the beats in one read and taken in at once, and the engine's answers shown whole; each old default with its new one. */
+  /** The harness's sizes before revision 11, sized for long-form play: the longest passage, the beats in one read and taken in at once, and the engine's answers shown whole; each old default with its new one. Revision 10 was an earlier build's, which wrote it with the old numbers. */
   longForm: {
     passageChars: [12_000, NARRATION_DEFAULTS.passageChars],
     beatsRead: [40, STORY_DEFAULTS.limits.beatsRead],
@@ -196,8 +196,9 @@ const LIFTED = {
  * from before revision 7 has the final review's time still at its old 2 minutes lifted to its new
  * default, which a main agent's review of a long session on a large model needs; one from before
  * revision 8 has a swipe default of Re-run lifted to Re-narrate, the new default (a swipe tells the
- * turn again; the head reply's chip still re-runs it); and one from before revision 10 has the
- * longest passage, the beats in one read and taken in at once, and the engine's answers shown whole
+ * turn again; the head reply's chip still re-runs it); and one from before revision 11 (10 was an
+ * earlier build's, written with the old sizes) has the longest passage, the beats in one read and
+ * taken in at once, and the engine's answers shown whole
  * still at their old defaults lifted to the ones sized for long-form play (`LIFTED.longForm`). Each
  * once: a file saved at a revision keeps either. Only plain values are touched; anything malformed
  * is left to `conform`.
@@ -252,7 +253,7 @@ function lifted(raw: Readonly<Record<string, unknown>>): JsonObject {
   // Revision 9: a knowledge limit still at its old default rises with the longer claims and what reads them.
   const knowledge = isRecord(out.minds) && isRecord(out.minds.knowledge) ? out.minds.knowledge : null;
   if (rev < 9 && knowledge) for (const [key, [was, now]] of Object.entries(LIFTED.knowledge)) if (knowledge[key] === was) knowledge[key] = now;
-  if (rev < 10) {
+  if (rev < 11) {
     const { passageChars, beatsRead, feedItems, clipChars } = LIFTED.longForm;
     const narration = isRecord(out.narration) ? out.narration : null;
     if (narration?.passageChars === passageChars[0]) narration.passageChars = passageChars[1];
@@ -392,9 +393,7 @@ function storedForm(settings: UserSettings): unknown {
  * had what they read takes the limits its reply allowance and its mind card's lore set
  * (`migrateMindReads`), after `lifted` has raised that lore's old defaults. A step's route is the
  * file's own where it has one: an effort or sampling parameter it leaves out is the helper model's,
- * never the preset's (a preset sets the effort of the steps that don't reason). The story preset's
- * category mapping is the file's own where it has one, whole, as its reader means it: a shipped name
- * the user took out stays out.
+ * never the preset's (a preset sets the effort of the steps that don't reason).
  */
 function normalize(raw: unknown): UserSettings {
   if (!isRecord(raw)) return defaultSettings();
@@ -421,8 +420,6 @@ function normalize(raw: unknown): UserSettings {
       if (isRecord(s) && isRecord(s.route) && isRecord(step)) step.route = s.route;
     }
   }
-  const ownPreset = isRecord(own.storyPreset) ? own.storyPreset : null;
-  if (ownPreset && isRecord(ownPreset.categories) && isRecord(merged) && isRecord(merged.storyPreset)) merged.storyPreset.categories = ownPreset.categories;
   return isRecord(merged) && merged.v === 1 ? conform(merged, fill) : defaultSettings();
 }
 

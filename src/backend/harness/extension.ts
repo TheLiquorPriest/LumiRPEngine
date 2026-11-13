@@ -84,11 +84,11 @@ import { harnessDefinitions, harnessRole, worldGuidance } from "./definitions";
 import { LUMIAH_TOOL } from "./definitions/lumiah";
 import { jobEnv } from "./jobs";
 import { type AnchorRow, anchorsOf, findTurn, recHarnessOf, unplayedOf } from "./record";
-import type { AgentModelAsk, AgentModelChoice, ChatClaim, ClaimAsk, DefinitionsAsk, ExtensionDefinitions, GuidanceLevel, HarnessExtension, HeldTools, JobView, ReleaseVerdict, RemoteTool, RemoteToolCall, ReplyRelease, ReplyWritten, RunBegan, RunEnded, StorySetting, ToolsPort } from "./shapes";
+import type { AgentModelAsk, AgentModelChoice, ChatClaim, ClaimAsk, DefinitionsAsk, ExtensionDefinitions, GuidanceLevel, HarnessExtension, HeldTools, JobView, ReleaseVerdict, RemoteTool, RemoteToolCall, ReplyRelease, ReplyUnreleased, ReplyWritten, RunBegan, RunEnded, StorySetting, ToolsPort } from "./shapes";
 import { Cast, type Ceiling, closedAnswer, OpenTurn, reach, type Standing, standingOf, toolRefusal, type TurnCall } from "./turn";
 import { chooseAgentModel } from "../../shared/story-models";
 import { shapeNotebook } from "../story/notebook";
-import { directLineGuidance, narrationGuidance, releaseGate, releaseNoted, replyTool } from "../story/narration";
+import { directLineGuidance, narrationGuidance, releaseGate, releaseNoted, replyTool, unreleasedReply } from "../story/narration";
 import { authorOpening } from "../story/opening";
 import { prepareEnv } from "../story/prepare";
 import { preparationRunEnded } from "../story/prepare-carry";
@@ -469,6 +469,7 @@ export class HarnessEngine implements HarnessHooks {
       agentModel: (ask) => this.agentModel(ask),
       releasing: (release) => this.releasing(release),
       released: (release) => this.released(release),
+      unreleased: (turn) => this.unreleased(turn),
       replyWritten: (reply) => this.replyWritten(reply),
       runEnded: (run) => this.runEnded(run),
     };
@@ -1216,6 +1217,17 @@ export class HarnessEngine implements HarnessHooks {
     const open = this.turns.get(release.turn);
     if (open) releaseNoted(open.stageBook, release.args);
     return Promise.resolve();
+  }
+
+  /**
+   * The reply of a turn whose author's run ended with nothing released (LumiAH's `unreleased`: at a
+   * limit, after a failed call, or by its own end; never after the player's Stop): what the turn's
+   * telling settled, from passage 1 on, up to the first not ready (`unreleasedReply`), so work that
+   * passed its checks still reaches the player. Null where none did, and the turn fails as before.
+   */
+  private unreleased(turn: ReplyUnreleased): Promise<{ text: string } | null> {
+    const open = this.turns.get(turn.turn);
+    return Promise.resolve(open && !open.closed ? unreleasedReply(open.stageBook, open.frame.settings.narration) : null);
   }
 
   // ---------------------------------------------------------------- LumiAH's records in the ledger

@@ -20,10 +20,23 @@ export interface HarnessToolDefinition {
   family: string;
   tier: HarnessToolTier;
   parameters(world: WorldDoc): JsonObject; // hand-written JSON Schema, with the world's enums filled in
-  /** For a tool that bounds its own answer by one of the player's settings and is meant to be read in one go: that bound, in characters, under `settings`. LumiAH gives its answer whole up to it (its `wholeChars`) instead of clipping it at Tool results clipped past. */
+  /** For a tool that bounds its own answer by one of the player's settings and is meant to be read in one go: that bound, in characters, under `settings`, never past `WHOLE_READ_MOST`. LumiAH gives its answer whole up to it (its `wholeChars`) instead of clipping it at Tool results clipped past. */
   wholeChars?: (settings: UserSettings) => number;
   run(args: JsonObject, env: ToolEnv): Promise<ToolOutcome>;
 }
+
+/**
+ * The most any read of the engine's states it gives whole (`wholeChars`), in characters: each states
+ * the smaller of this and the size its own settings work out. About 30,000 tokens: whole for anything
+ * a writer may write in a turn (the longest passage, a mind full to its sizes, a scene's beats), and
+ * small enough that one read can never take an agent's window, which the settings alone would let it
+ * (a read of the record's beats at its limits' maximum works out to hundreds of millions). Past it,
+ * LumiAH clips as it does any result, and each read says how to read on.
+ */
+export const WHOLE_READ_MOST = 120_000;
+
+/** How many characters JSON may write for one character of an agent's text: a quote mark, a backslash, a tab or a line break is escaped in two, and the control characters JSON writes in six never reach a text (`neutralizeMacros` drops them). */
+export const JSON_CHAR_MOST = 2;
 
 // A schema's nodes, each made afresh where it is used. A tool's arguments are described in place
 // once its schema is copied, and a copy keeps a node used twice as one node: a shared one would

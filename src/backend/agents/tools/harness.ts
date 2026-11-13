@@ -24,7 +24,7 @@ import { HARNESS_NOTE, harnessToolText } from "../../../shared/harness-texts";
 import { NESTED_ARG_TEXTS } from "../../../shared/harness-texts-args";
 import { HARNESS_DESCRIBED } from "../../../shared/harness-texts-surfaces";
 import { hashJson, hashParts } from "../../../shared/hash";
-import { hasOwn, type JsonObject, type JsonValue } from "../../../shared/json";
+import { hasOwn, isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import { neutralizeMacros } from "../../../shared/macros";
 import { CHANGE_TYPES, type UserSettings } from "../../../shared/settings";
 import type { WorldDoc } from "../../../shared/world";
@@ -40,7 +40,7 @@ import { stageChange } from "./harness-tools/kit";
 import type { HarnessTurn } from "./harness-turn";
 import type { ToolReadView } from "./read-view";
 import { describedSchema, type ReadNotes, TOOL_DEFINITIONS, type ToolEnv } from "./registry";
-import { schemaWorld } from "./schema";
+import { schemaWorld, text } from "./schema";
 import type { ToolWriter } from "./writer";
 
 const WORKSPACE = "the workspace is LumiAH's on the harness: its own tool of this name reads and writes it";
@@ -91,7 +91,7 @@ export interface HarnessListed {
 interface Entry extends HarnessListed {
   args: readonly { path: string }[];
   parameters(world: WorldDoc): JsonObject;
-  /** What of its answer reaches the model whole under the player's settings (`HarnessToolDefinition.wholeChars`, `ToolDefinition.wholeChars`); absent: LumiAH's Tool results clipped past. */
+  /** What of its answer reaches the model whole under the player's settings (`HarnessToolDefinition.wholeChars`, or one page of a read that pages, `ToolDefinition.pages`); absent: LumiAH's Tool results clipped past. */
   wholeChars?: (settings: UserSettings) => number;
   run: Run;
 }
@@ -129,9 +129,14 @@ export const HARNESS_OWN_NEEDS: ReadonlyMap<string, HarnessNeeds> = new Map(
   ).flatMap(([needs, tools]) => tools.map((name): [string, HarnessNeeds] => [name, needs])),
 );
 
+/** A paged read's schema with the cursor it reads on with (`ToolDefinition.pages`), which only the harness gives it. */
+function withCursor(schema: JsonObject): JsonObject {
+  return { ...schema, properties: { ...(isRecord(schema.properties) ? schema.properties : {}), cursor: text() } };
+}
+
 const ENTRIES: readonly Entry[] = [
-  // An argument below the top level that the old engines leave to the description above it is described here too (`NESTED_ARG_TEXTS`): on the harness every argument has a text of its own.
-  ...TOOL_DEFINITIONS.filter((def) => !hasOwn(HARNESS_SUPERSEDED, def.name)).map((def): Entry => ({ name: def.name, family: def.family, tier: def.tier === "read" ? "read" : "write", writer: def.tier, needs: def.tier, args: [...(toolText(def.name)?.args ?? []), ...NESTED_ARG_TEXTS.filter((a) => a.tool === def.name)], parameters: (world) => def.parameters(world), ...(def.wholeChars ? { wholeChars: def.wholeChars } : {}), run: (args, env) => def.run(args, env) })),
+  // An argument below the top level that the old engines leave to the description above it is described here too (`NESTED_ARG_TEXTS`): on the harness every argument has a text of its own. A read that pages its answer here is given its cursor, and states one page as its whole.
+  ...TOOL_DEFINITIONS.filter((def) => !hasOwn(HARNESS_SUPERSEDED, def.name)).map((def): Entry => ({ name: def.name, family: def.family, tier: def.tier === "read" ? "read" : "write", writer: def.tier, needs: def.tier, args: [...(toolText(def.name)?.args ?? []), ...NESTED_ARG_TEXTS.filter((a) => a.tool === def.name)], parameters: (world) => (def.pages ? withCursor(def.parameters(world)) : def.parameters(world)), ...(def.pages ? { wholeChars: def.pages } : {}), run: (args, env) => def.run(args, env) })),
   ...HARNESS_TOOL_DEFINITIONS.map((def): Entry => ({ name: def.name, family: def.family, tier: def.tier, writer: null, needs: HARNESS_OWN_NEEDS.get(def.name) ?? (def.tier === "read" ? "read" : "gm"), args: harnessToolText(def.name)?.args ?? [], parameters: (world) => def.parameters(world), ...(def.wholeChars ? { wholeChars: def.wholeChars } : {}), run: (args, env) => def.run(args, env) })),
 ];
 
@@ -252,7 +257,7 @@ export async function runHarnessTool(env: ToolEnv, name: string, args: JsonObjec
   const turn = env.turn;
   const noted: JsonObject[] = [];
   const notes: ReadNotes | undefined = env.notes ?? (turn ? { add: (fact) => !noted.some((n) => hashJson(n) === hashJson(fact)) && noted.push(fact) > 0 } : undefined);
-  const out = await run(neutralized(args) as JsonObject, { ...env, writer: writerOf(env), ...(notes ? { notes } : {}) });
+  const out = await run(neutralized(args) as JsonObject, { ...env, writer: writerOf(env), ...(notes ? { notes } : {}), harness: true });
   const answer = turn && noted.length > 0 && out.error !== true ? await stageNotes(await env.reader.view(), turn, noted) : out;
   return answer.error === true ? { text: answer.text, error: true } : { text: answer.text };
 }

@@ -44,7 +44,7 @@ import type { ToolReadView } from "../read-view";
 import type { ToolEnv } from "../registry";
 import { resolvePerson, resolvePlace } from "../resolve";
 import { argGiven, badValue, integer, intArg, jsonTextOf, needText, objectSchema, text, textArg } from "../schema";
-import { type HarnessToolDefinition, list, words } from "./kit";
+import { type HarnessToolDefinition, JSON_CHAR_MOST, list, WHOLE_READ_MOST, words } from "./kit";
 
 const T = RECORD_TOOL;
 
@@ -163,12 +163,15 @@ const longest = (words: readonly string[]): string => words.reduce((a, b) => (b.
 /** An id `ID_ROOM` long, a different one for each `n`: a beat's people are each named once. */
 const roomId = (n: number): string => String(n).padStart(ID_ROOM, "x");
 
+/** A stand-in for an agent's text of `n` characters as long as JSON may write it (`JSON_CHAR_MOST` each). */
+const widest = (n: number): string => "x".repeat(n * JSON_CHAR_MOST);
+
 /**
  * A beat as long as `limits` let one be written (`beatProblem`): its text, its surface and every
  * quote full, every person it names named, each reach with what they got, every id and reason at
- * its longest. What the reads' bounds are worked out from, so the number a setting promises is what
- * one read gives whole. `by` is its own person, the first that it reached took all of it in, the
- * second only part: one beat as each of them is fed it.
+ * its longest, and every text at the widest JSON writes it. What the reads' bounds are worked out
+ * from. `by` is its own person, the first that it reached took all of it in, the second only part:
+ * one beat as each of them is fed it.
  */
 function longestBeat(limits: StoryLimits): Beat {
   const id = roomId(0);
@@ -180,14 +183,14 @@ function longestBeat(limits: StoryLimits): Beat {
     where: id,
     by: id,
     kind: BEAT_KINDS.reduce((a, b) => (b.length > a.length ? b : a)),
-    what: "x".repeat(limits.beatChars),
-    surface: "x".repeat(limits.beatChars),
-    quotes: Array.from({ length: limits.quotes }, () => "x".repeat(limits.quoteChars)),
+    what: widest(limits.beatChars),
+    surface: widest(limits.beatChars),
+    quotes: Array.from({ length: limits.quotes }, () => widest(limits.quoteChars)),
     to: people,
-    exposure: people.map((who, i): Exposure => ({ who, reach: i === 0 ? "whole" : longest(BEAT_REACHES.filter((r) => r !== "whole")) as Exposure["reach"], got: "x".repeat(limits.beatChars), from: id })),
+    exposure: people.map((who, i): Exposure => ({ who, reach: i === 0 ? "whole" : longest(BEAT_REACHES.filter((r) => r !== "whole")) as Exposure["reach"], got: widest(limits.beatChars), from: id })),
     decidedBy: { agent: id, as: id },
     settles: id,
-    struck: "x".repeat(limits.whyChars),
+    struck: widest(limits.whyChars),
     past: { from: id, to: id },
   };
 }
@@ -196,24 +199,25 @@ function longestBeat(limits: StoryLimits): Beat {
 const listed = (frame: object, count: number, item: number): number => JSON.stringify(frame).length + count * item + Math.max(0, count - 1);
 
 /**
- * The most one `beats_read` gives under `settings`: as many beats as Beats in one read allows, each
- * at its longest (`longestBeat`), with the note on earlier ones. LumiAH gives up to this whole (its
- * `wholeChars`). Every text is counted as written: a quote mark or a line break JSON escapes takes
- * two characters, which the room every id is given far more than covers in a beat as written.
+ * The most one `beats_read` gives whole under `settings`: as many beats as Beats in one read allows,
+ * each at its longest (`longestBeat`), with the note on earlier ones; never past `WHOLE_READ_MOST`.
+ * LumiAH gives up to this whole (its `wholeChars`), and the read gives no more than this but for one
+ * beat longer on its own.
  */
 export function beatsReadChars(settings: UserSettings): number {
   const { limits } = settings.story;
   const id = roomId(0);
   const beat = JSON.stringify({ ...longestBeat(limits), time: id }).length;
-  const note = renderPrompt(RECORD_NOTE.beatsEarlier, settings.prompts.texts, { earlier: String(Number.MAX_SAFE_INTEGER), setting: STORY_LIMIT_LABELS.beatsRead, most: String(limits.beatsRead), first: id });
-  return listed({ now: id, beats: [], earlier: Number.MAX_SAFE_INTEGER, note }, limits.beatsRead, beat);
+  const note = renderPrompt(RECORD_NOTE.beatsEarlier, settings.prompts.texts, { earlier: String(Number.MAX_SAFE_INTEGER), setting: STORY_LIMIT_LABELS.beatsRead, most: String(limits.beatsRead), chars: String(WHOLE_READ_MOST), first: id });
+  return Math.min(WHOLE_READ_MOST, listed({ now: id, earlier: Number.MAX_SAFE_INTEGER, note, beats: [] }, limits.beatsRead, beat));
 }
 
 /**
- * The most one `feed_read` gives under `settings`: as many items as Beats taken in at once allows,
- * each the longest a person is fed of a beat at its longest (their own, one they took in whole, one
- * they got part of: `feedItem` itself makes each), with the longer note. LumiAH gives up to this
- * whole (its `wholeChars`); a text is counted as `beatsReadChars` counts one.
+ * The most one `feed_read` gives whole under `settings`: as many items as Beats taken in at once
+ * allows, each the longest a person is fed of a beat at its longest (their own, one they took in
+ * whole, one they got part of: `feedItem` itself makes each), with the longer note; never past
+ * `WHOLE_READ_MOST`. LumiAH gives up to this whole, and the read gives no more but for one item
+ * longer on its own.
  */
 export function feedReadChars(settings: UserSettings): number {
   const { limits } = settings.story;
@@ -223,8 +227,26 @@ export function feedReadChars(settings: UserSettings): number {
   const fed = [beat.by, ...beat.exposure.slice(0, 2).map((e) => e.who)].map((who) => feedItem(beat, who)).filter((item) => item !== null);
   const item = Math.max(...fed.map((f) => JSON.stringify({ ...f, time: id }).length));
   const { texts } = settings.prompts;
-  const note = longest([renderPrompt(RECORD_NOTE.feedMore, texts, { more: String(Number.MAX_SAFE_INTEGER), setting: STORY_LIMIT_LABELS.feedItems, most: String(limits.feedItems) }), renderPrompt(RECORD_NOTE.feedNone, texts, {})]);
-  return listed({ who: id, items: [], last: id, more: Number.MAX_SAFE_INTEGER, note }, limits.feedItems, item);
+  const note = longest([renderPrompt(RECORD_NOTE.feedMore, texts, { more: String(Number.MAX_SAFE_INTEGER), setting: STORY_LIMIT_LABELS.feedItems, most: String(limits.feedItems), chars: String(WHOLE_READ_MOST) }), renderPrompt(RECORD_NOTE.feedNone, texts, {})]);
+  return Math.min(WHOLE_READ_MOST, listed({ who: id, last: id, more: Number.MAX_SAFE_INTEGER, note, items: [] }, limits.feedItems, item));
+}
+
+/**
+ * How many of `items` (rendered by `shown`) an answer of `frame` characters holds within `size`, with
+ * at most `most` of them: taken from the end (`newest`) or the start, each whole, and at least one,
+ * so a read always moves on.
+ */
+function fitting<T>(items: readonly T[], shown: (item: T) => object, frame: number, size: number, most: number, newest: boolean): number {
+  let used = frame;
+  let n = 0;
+  while (n < items.length && n < most) {
+    const item = items[newest ? items.length - 1 - n : n] as T;
+    const add = JSON.stringify(shown(item)).length + (n > 0 ? 1 : 0);
+    if (n > 0 && used + add > size) break;
+    used += add;
+    n++;
+  }
+  return n;
 }
 
 /** Settles or drops the draft a call names: only an open one (or one gone stale). */
@@ -378,11 +400,16 @@ export const RECORD_TOOLS: readonly HarnessToolDefinition[] = [
         .slice(0, end)
         .map(({ beat }) => beat)
         .filter((b) => (who === null || b.by === who.id || (b.to ?? []).includes(who.id) || b.exposure.some((e) => e.who === who.id)) && (place === null || b.where === place.id) && (since === null || b.at >= since) && (struck || b.struck === undefined));
-      const most = story.turn.settings.story.limits.beatsRead;
-      const shown = fit.slice(-most);
+      const settings = story.turn.settings;
+      const most = settings.story.limits.beatsRead;
+      const size = beatsReadChars(settings);
+      const stamp = stampOf(view, now);
+      const note = (earlier: number, first: string): string => view.text(RECORD_NOTE.beatsEarlier, { earlier: String(earlier), setting: STORY_LIMIT_LABELS.beatsRead, most: String(most), chars: String(size), first });
+      // The newest that fit, as many as the setting allows and the size holds; what bounds them and the way on come first, so a clip of a beat longer than the whole can't take them.
+      const frame = JSON.stringify({ now: stamp, earlier: fit.length, note: note(fit.length, longest(fit.map((b) => b.id))), beats: [] }).length;
+      const shown = fit.slice(fit.length - fitting(fit, (b) => beatShown(view, b), frame, size, most, true));
       const earlier = fit.length - shown.length;
-      const left = earlier > 0 ? { earlier, note: view.text(RECORD_NOTE.beatsEarlier, { earlier: String(earlier), setting: STORY_LIMIT_LABELS.beatsRead, most: String(most), first: shown[0]?.id ?? "" }) } : {};
-      return view.answer({ now: stampOf(view, now), beats: shown.map((b) => beatShown(view, b)), ...left });
+      return view.answer({ now: stamp, ...(earlier > 0 ? { earlier, note: note(earlier, shown[0]?.id ?? "") } : {}), beats: shown.map((b) => beatShown(view, b)) });
     },
   },
   {
@@ -428,8 +455,17 @@ export const RECORD_TOOLS: readonly HarnessToolDefinition[] = [
       if (after !== null && !beatOn(story.read.path, after)) return view.refuse(RECORD_NOTE.noAfter, { beat: after });
       const feed = await feedFor(env, self.who, after ?? undefined);
       if (!feed) return view.refuse(RECORD_NOTE.noRecord);
-      const note = feed.more > 0 ? view.text(RECORD_NOTE.feedMore, { more: String(feed.more), setting: STORY_LIMIT_LABELS.feedItems, most: String(story.turn.settings.story.limits.feedItems) }) : feed.items.length === 0 ? view.text(RECORD_NOTE.feedNone) : undefined;
-      return view.answer({ who: self.who, items: feed.items.map((item) => ({ ...item, time: stampOf(view, item.at) })), last: feed.last, ...(feed.more > 0 ? { more: feed.more } : {}), ...(note !== undefined ? { note } : {}) });
+      const { limits } = story.turn.settings.story;
+      const size = feedReadChars(story.turn.settings);
+      const items = feed.items.map((item) => ({ ...item, time: stampOf(view, item.at) }));
+      const note = (more: number): string => view.text(RECORD_NOTE.feedMore, { more: String(more), setting: STORY_LIMIT_LABELS.feedItems, most: String(limits.feedItems), chars: String(size) });
+      // The oldest that fit within the size; those it holds back wait with the rest, and last is the beat of the last given, so nothing is marked taken in that wasn't read. What it reads on with comes first, so a clip of an item longer than the whole can't take it.
+      const frame = JSON.stringify({ who: self.who, last: longest([...items.map((i) => i.beat), feed.last ?? ""]), more: feed.more + items.length, note: note(feed.more + items.length), items: [] }).length;
+      const given = fitting(items, (item) => item, frame, size, items.length, false);
+      const more = feed.more + items.length - given;
+      const last = given < items.length ? (items[given - 1]?.beat ?? feed.last) : feed.last;
+      const said = more > 0 ? note(more) : items.length === 0 ? view.text(RECORD_NOTE.feedNone) : undefined;
+      return view.answer({ who: self.who, last, ...(more > 0 ? { more } : {}), ...(said !== undefined ? { note: said } : {}), items: items.slice(0, given) });
     },
   },
   {

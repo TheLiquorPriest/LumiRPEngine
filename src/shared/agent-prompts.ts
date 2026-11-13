@@ -76,7 +76,7 @@ export const RUNTIME_PROMPTS: readonly PromptDef[] = [
     page,
     label: "A clipped tool result",
     note: "Follows the part of a long tool result that reaches the model.",
-    text: "[Clipped: the first {{shown}} of {{total}} characters. The rest is in scratch {{handle}}; read it with scratch_read from offset {{shown}}.]",
+    text: `[Clipped: the first {{shown}} of {{total}} characters, at ${LOOP_DEFS.clipChars.label} (Settings → Agents → Budgets). The rest is in scratch {{handle}}; read it with scratch_read from offset {{shown}}.]`,
     vars: [
       { name: "shown", text: "the characters shown" },
       { name: "total", text: "the result's length" },

@@ -76,7 +76,7 @@ describe("the cast the harness engine registers", () => {
     expect(author.tools).not.toContain(`@${HARNESS_FAMILY.mind}`);
     for (const name of [RECORD_TOOL.feedRead, MINDS_TOOL.digested, PLAY_TOOL.mindFight]) expect(given(author)).not.toContain(name);
     for (const name of [HARNESS_TOOL.commit, HARNESS_TOOL.grant, HARNESS_TOOL.timePass, HARNESS_TOOL.checksStakes, RECORD_TOOL.beatWrite, RECORD_TOOL.beatStrike, RECORD_TOOL.castSet, RECORD_TOOL.draftOpen, RECORD_TOOL.draftsDue, MINDS_TOOL.seed, STAGE_TOOL.narrationRead, STAGE_TOOL.passageRead, STAGE_TOOL.passageCheck, "gm_spawn", "person_make", "action_play", "fight_start", "fight_round", "world_place", "world_path", "world_keep"]) expect(given(author)).toContain(name);
-    // LumiAH's families but the reply's (no writer writes the reply on the harness), the preset's and the web; and the one tool of the reply's it needs, which releases a passage.
+    // LumiAH's families but the reply's (no writer writes the reply on the harness), the preset's and the web; and the one tool of the reply's it needs, which releases the reply once, whole.
     for (const f of Object.values(LUMIAH_FAMILY)) expect({ family: f, given: author.tools.includes(`@${f}`) }).toEqual({ family: f, given: f !== LUMIAH_FAMILY.reply && f !== LUMIAH_FAMILY.preset && f !== LUMIAH_FAMILY.web });
     expect(author.tools).toContain(LUMIAH_TOOL.replyWrite);
     expect(author.tools).not.toContain(LUMIAH_TOOL.writeReply);

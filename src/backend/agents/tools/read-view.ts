@@ -31,7 +31,7 @@ import type { EntityId, PlaceId, TrackId, UserId } from "../../../shared/ids";
 import { hasOwn } from "../../../shared/json";
 import { engineWroteEntry, loreIsSecret, loreSourceOf } from "../../../shared/lore";
 import type { RoutingIndex } from "../../../shared/lore-routing";
-import type { LoreIndexSettings } from "../../../shared/settings";
+import type { LoreIndexSettings, UserSettings } from "../../../shared/settings";
 import { effectiveMemory, type FactId, type FidelityTexts, type MindsMemoryConfig } from "../../../shared/minds";
 import type { PromptTexts } from "../../../shared/prompts";
 import { applyMarks, type SecretMarkWording, secretMarkText } from "../../../shared/secret-marks";
@@ -54,6 +54,8 @@ export interface ToolReader {
   readonly registry: Registry;
   /** The chat as the tools read it now; each call reads it afresh, so a turn that lands in between is seen. */
   view(): Promise<ToolReadView>;
+  /** The player's settings as they stand now: what a read is held to where no turn carries them (the harness's conversations with an agent). */
+  settings(): Promise<UserSettings>;
 }
 
 /** Who knows a restricted thing besides the GM, by name, and whom it is kept from: `"everyone"`, every one else. */
@@ -454,5 +456,6 @@ export function outsideReader(rt: Runtime, env: Pick<ToolEnv, "userId" | "chatId
         routing: viewRouting(rt, env.userId, settings.loreIndex),
       });
     },
+    settings: () => rt.settings.get(env.userId),
   };
 }

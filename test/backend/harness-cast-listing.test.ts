@@ -6,6 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { HARNESS_LISTED, HARNESS_OWN_NEEDS, HARNESS_SUPERSEDED, type HarnessNeeds, harnessTools } from "../../src/backend/agents/tools/harness";
 import { HARNESS_TOOL_DEFINITIONS } from "../../src/backend/agents/tools/harness-tools";
+import { WHOLE_READ_MOST } from "../../src/backend/agents/tools/harness-tools/kit";
 import { describedSchema, TOOL_DEFINITIONS, toolsFor } from "../../src/backend/agents/tools/registry";
 import type { RemoteTool } from "../../src/backend/harness/shapes";
 import { TOOL_TEXTS, toolArgTextId, toolText, toolTextId } from "../../src/shared/agent-tools";
@@ -81,9 +82,10 @@ describe("the tools the harness lists", () => {
       // Its description is the old engines' own, but for a tool that works otherwise on the harness (a lore file goes to the harness's workspace), which is described for it in a text of its own.
       expect({ name: tool.name, description: tool.description }).toEqual({ name: def.name, description: promptDef(hasOwn(HARNESS_DESCRIBED, def.name) ? HARNESS_DESCRIBED[def.name] : toolTextId(def.name))?.text ?? "" });
       if (hasOwn(HARNESS_DESCRIBED, def.name)) expect({ name: def.name, own: tool.description !== (promptDef(toolTextId(def.name))?.text ?? "") }).toEqual({ name: def.name, own: true });
-      // The same arguments, described the same, as an agent of the old engines is given; and, on the harness alone, a description for each argument below the top level that the old engines tell in the one above it.
+      // The same arguments, described the same, as an agent of the old engines is given; and, on the harness alone, a description for each argument below the top level that the old engines tell in the one above it, and the cursor of a read the harness pages.
       const given = old.find((t) => t.name === def.name);
-      if (given) expect({ name: tool.name, parameters: tool.parameters }).toEqual({ name: def.name, parameters: describedSchema(def.name, NESTED_ARG_TEXTS.filter((a) => a.tool === def.name), given.parameters, {}) });
+      const paged = given && def.pages ? { ...given.parameters, properties: { ...(isRecord(given.parameters.properties) ? given.parameters.properties : {}), cursor: { type: "string" } } } : given?.parameters;
+      if (given && paged) expect({ name: tool.name, parameters: tool.parameters }).toEqual({ name: def.name, parameters: describedSchema(def.name, NESTED_ARG_TEXTS.filter((a) => a.tool === def.name), paged, {}) });
     }
     // What the harness doesn't list, and why each: the workspace's tools, which are LumiAH's there, and the one that makes a model call of the engine's own.
     expect(Object.keys(HARNESS_SUPERSEDED).sort()).toEqual(["condense", "workspace_delete", "workspace_edit", "workspace_grep", "workspace_list", "workspace_move", "workspace_pin", "workspace_read", "workspace_write"]);
@@ -103,7 +105,8 @@ describe("the tools the harness lists", () => {
       expect({ name: tool.name, texts: text !== undefined }).toEqual({ name: tool.name, texts: true });
       for (const arg of text?.args ?? []) expect({ arg: `${tool.name}.${arg.path}`, description: at(tool.parameters, arg.path)?.description }).toEqual({ arg: `${tool.name}.${arg.path}`, description: arg.text });
       const top = Object.keys(isRecord(tool.parameters.properties) ? tool.parameters.properties : {});
-      expect({ name: tool.name, undescribed: top.filter((key) => !(text?.args ?? []).some((a) => a.path === key)) }).toEqual({ name: tool.name, undescribed: [] });
+      const args = [...(text?.args ?? []), ...NESTED_ARG_TEXTS.filter((a) => a.tool === tool.name)];
+      expect({ name: tool.name, undescribed: top.filter((key) => !args.some((a) => a.path === key)) }).toEqual({ name: tool.name, undescribed: [] });
     }
     // The four that once carried `dry`'s description, the node their schema shared with it.
     const described = (name: string, path: string): unknown => at(tools.find((t) => t.name === name)?.parameters ?? {}, path)?.description;
@@ -130,9 +133,10 @@ describe("the tools the harness lists", () => {
     }
     expect(undescribed).toEqual([]);
     expect(unregistered).toEqual([]);
-    // The nineteen the old engines tell in the description above them, described for the harness alone.
+    // The nineteen the old engines tell in the description above them, and the cursor of each lore read the harness pages, described for the harness alone.
     const nested = ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets"].map((d) => `gm_set_entity.levels.${d}`);
     nested.push(...["make", "model", "year", "colour", "plate", "specs", "specs.label", "specs.value"].map((p) => `item_make.details.${p}`), "item_label.specs.label", "item_label.specs.value");
+    nested.push(...["lore_index", "lore_search", "lore_grep", "lore_read"].map((t) => `${t}.cursor`));
     expect(NESTED_ARG_TEXTS.map((a) => `${a.tool}.${a.path}`)).toEqual(nested);
   });
 
@@ -276,15 +280,25 @@ describe("the tools the harness lists", () => {
     const files = Object.values(minds.chars).reduce((sum, n) => sum + n, 0);
     expect(shipped[MINDS_TOOL.read]).toBeGreaterThan(files);
     expect(shipped[MINDS_TOOL.read]).toBeLessThan(files + 4000);
-    // A read of the story record holds its setting's number of beats, each as long as the record's limits let one be; a lore read, a page of the engine's own size for a tool result; mind_seed, the same files as mind_read.
+    // A read of the story record holds its setting's number of beats, each as long as the record's limits let one be; a lore read, a page of the engine's own size for a tool result; mind_seed, the same files as mind_read and a record nothing bounds. Each never past the one ceiling of every whole read.
     const reads = [RECORD_TOOL.beatsRead, RECORD_TOOL.feedRead, MINDS_TOOL.seed];
     const lore = ["lore_index", "lore_search", "lore_grep", "lore_read"];
-    for (const name of [...reads, ...lore]) expect({ name, states: (shipped[name] ?? 0) > 0 }).toEqual({ name, states: true });
+    // These and no other tool state a whole size.
+    expect(Object.keys(shipped).sort()).toEqual([PREPARE_TOOL.read, PREPARE_TOOL.survey, MINDS_TOOL.read, STAGE_TOOL.narrationRead, STAGE_TOOL.passageRead, ...reads, ...lore].sort());
+    for (const name of [...reads, ...lore]) expect({ name, within: (shipped[name] ?? 0) > 0 && (shipped[name] ?? 0) <= WHOLE_READ_MOST }).toEqual({ name, within: true });
     for (const name of lore) expect({ name, whole: shipped[name] }).toEqual({ name, whole: defaultSettings().agents.clipChars });
-    expect(shipped[MINDS_TOOL.seed]).toBeGreaterThan(shipped[MINDS_TOOL.read] ?? 0);
-    // The narration reads hold the longest passage the settings allow, as JSON may write it, with all its check may ask and the beats of a turn beside it.
+    // Twenty-four beats at the record's limits work out far past the ceiling, and a person's record has no bound: each states the ceiling.
+    for (const name of reads) expect({ name, whole: shipped[name] }).toEqual({ name, whole: WHOLE_READ_MOST });
+    // The narration reads hold the longest passage the settings allow, as JSON may write it, with all its check may ask, the beats of a turn and every presentation module a call may name beside it: at the shipped settings that works out past the ceiling, and each states the ceiling.
     const narration = [STAGE_TOOL.narrationRead, STAGE_TOOL.passageRead];
-    for (const name of narration) expect({ name, holds: (shipped[name] ?? 0) > 2 * defaultSettings().narration.passageChars }).toEqual({ name, holds: true });
+    for (const name of narration) expect({ name, whole: shipped[name] }).toEqual({ name, whole: WHOLE_READ_MOST });
+    /** Fewer beats a turn, two presentation modules at most and short ones, and a short passage: what the narration reads work out comes under the ceiling. */
+    const narrower = (s: UserSettings): void => {
+      s.story.limits.beatsPerTurn = 2;
+      s.storyPreset.limits.list = 8;
+      s.storyPreset.limits.module = 1000;
+      s.narration.passageChars = 4000;
+    };
     // Changed in Settings, the bounds follow.
     const changed = whole(
       (
@@ -292,21 +306,40 @@ describe("the tools the harness lists", () => {
           s.story.prepare.readChars = 9000;
           s.story.prepare.surveyChars = 7000;
           s.story.minds.chars.memory += 10_000;
-          s.story.limits.beatsRead = 12;
-          s.story.limits.feedItems = 12;
+          s.story.limits.people = 1;
+          s.story.limits.beatsRead = 2;
+          s.story.limits.feedItems = 2;
           s.agents.clipChars = 5000;
-          s.narration.passageChars += 10_000;
+          narrower(s);
         })
       ).tools,
     );
     expect([changed[PREPARE_TOOL.read], changed[PREPARE_TOOL.survey]]).toEqual([9000, 7000]);
     for (const name of lore) expect({ name, whole: changed[name] }).toEqual({ name, whole: 5000 });
-    // Half the beats, about half the size.
-    for (const name of [RECORD_TOOL.beatsRead, RECORD_TOOL.feedRead]) expect({ name, half: Math.round(((changed[name] ?? 0) / (shipped[name] ?? 1)) * 10) }).toEqual({ name, half: 5 });
+    // Fewer people a beat, and two beats a read: under the ceiling, worked out from the limits.
+    for (const name of [RECORD_TOOL.beatsRead, RECORD_TOOL.feedRead]) expect({ name, under: (changed[name] ?? 0) < WHOLE_READ_MOST }).toEqual({ name, under: true });
     // The memory file's 10,000 more, and its head's longer figures.
     const grown = (changed[MINDS_TOOL.read] ?? 0) - (shipped[MINDS_TOOL.read] ?? 0);
     expect(grown >= 10_000 && grown < 10_010).toBe(true);
-    // A passage 10,000 characters longer: each narration read states at least twice that more, as JSON may write it.
-    for (const name of narration) expect({ name, grown: (changed[name] ?? 0) - (shipped[name] ?? 0) >= 20_000 }).toEqual({ name, grown: true });
+    // Under the ceiling, each narration read states what it works out; a passage 2,000 characters longer, at least twice that more, as JSON may write it.
+    const longer = whole(
+      (
+        await listed({}, (s) => {
+          narrower(s);
+          s.narration.passageChars += 2000;
+        })
+      ).tools,
+    );
+    for (const name of narration) expect({ name, under: (changed[name] ?? 0) < WHOLE_READ_MOST, grown: (longer[name] ?? 0) - (changed[name] ?? 0) >= 4000 }).toEqual({ name, under: true, grown: true });
+    // A list of modules twice as long names two more modules a call may ask for: narration_read states room for both, whole, as JSON may write them.
+    const listedMore = whole(
+      (
+        await listed({}, (s) => {
+          narrower(s);
+          s.storyPreset.limits.list = 16;
+        })
+      ).tools,
+    );
+    expect((listedMore[STAGE_TOOL.narrationRead] ?? 0) - (changed[STAGE_TOOL.narrationRead] ?? 0)).toBeGreaterThanOrEqual(2 * 2 * 1000);
   });
 });

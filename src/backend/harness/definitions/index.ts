@@ -78,7 +78,7 @@ const NOT_IN_CONVERSATION: readonly string[] = ["person_add", "purchase", "reven
  * - The author: every family of the engine's but a person's own mind (it knows what no one person
  *   does), with the mind tools it needs by name (it reads any mind, and writes who a principal is
  *   and a supporting character's profile); LumiAH's families but the reply's, the preset's and the
- *   web; and `reply_write`, which releases a passage.
+ *   web; and `reply_write`, which releases the turn's reply once, whole, naming each passage.
  * - A character: what reached it (`feed_read`), its own acts (`beat_write`), its own mind, its
  *   choice in a fight, and its skills. Nothing that reads the world as the game master does. On the
  *   direct line its answer is the reply: the author hands it the reply's stream (`delegate` with

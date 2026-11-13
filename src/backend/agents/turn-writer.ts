@@ -288,6 +288,7 @@ export function turnReader(rt: Runtime, base: TurnBase, env: { userId: UserId; c
         routing: viewRouting(rt, env.userId, settings.loreIndex),
       });
     },
+    settings: () => rt.settings.get(env.userId),
   };
 }
 

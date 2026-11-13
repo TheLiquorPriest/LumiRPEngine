@@ -3,7 +3,8 @@
 // told in the description above it, and goes out with none of its own. On the harness every
 // argument a model is sent has a text of its own, at every depth, which the user may replace
 // (Prompts → Harness engine). They are added for the harness alone (`tools/harness.ts`): the
-// classic and agents engines send exactly what they sent.
+// classic and agents engines send exactly what they sent. So is the argument the harness adds to a
+// read it pages (`ToolDefinition.pages`): its cursor.
 
 import { toolArgTextId } from "./agent-tools";
 import { HARNESS_GROUP, HARNESS_PAGE } from "./harness-text-kit";
@@ -26,6 +27,8 @@ export const NESTED_ARG_TEXTS: readonly { tool: string; path: string; text: stri
   { tool: "item_make", path: "details.specs.value", text: SPEC_VALUE },
   { tool: "item_label", path: "specs.label", text: SPEC_LABEL },
   { tool: "item_label", path: "specs.value", text: SPEC_VALUE },
+  // The cursor of each read the harness pages (`tools/lore.ts`).
+  ...["lore_index", "lore_search", "lore_grep", "lore_read"].map((tool) => ({ tool, path: "cursor", text: "Where to read on: the cursor the page before ended with. Leave it out to start from the first page." })),
 ];
 
 /** Their registry texts, listed with the harness engine's tools. */
@@ -35,7 +38,7 @@ export const NESTED_ARG_PROMPTS: readonly PromptDef[] = NESTED_ARG_TEXTS.map(
     page: HARNESS_PAGE.id,
     group: HARNESS_GROUP.tools,
     label: `${a.tool}: ${a.path}`,
-    note: `The description of ${a.tool}'s ${a.path} argument. Harness engine only: the classic and agents engines tell it in the description of the argument above it.`,
+    note: `The description of ${a.tool}'s ${a.path} argument. Harness engine only: the classic and agents engines send no text of their own for it.`,
     text: a.text,
     vars: [],
   }),

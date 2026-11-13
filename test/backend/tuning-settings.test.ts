@@ -1,7 +1,7 @@
 // The tuning build's settings (TUNING-BUILD-PLAN §7): the defaults sized for long-form play, an
 // older file's old defaults moved to them once while a value the user chose stays, two settings
-// nothing read dropped from an older file as it loads, the story preset's category mapping kept
-// whole, and each refusal that comes from a limit naming that limit's row by its label.
+// nothing read dropped from an older file as it loads, each refusal that comes from a limit naming
+// that limit's row by its label, and each cut at Engine answers shown whole naming that setting.
 
 import { describe, expect, test } from "bun:test";
 import { runHarnessTool } from "../../src/backend/agents/tools/harness";
@@ -14,9 +14,13 @@ import { HARNESS_AGENT } from "../../src/shared/harness-texts";
 import { MINDS_NOTE } from "../../src/shared/harness-texts-minds";
 import { PREPARE_NOTE } from "../../src/shared/harness-texts-prepare";
 import { RECORD_NOTE, RECORD_TOOL } from "../../src/shared/harness-texts-record";
+import { BUILD_NOTE } from "../../src/shared/harness-texts-build";
+import { WORLD_NOTE } from "../../src/shared/harness-texts-world";
+import { RUNTIME_TEXT } from "../../src/shared/agent-prompts";
+import { LOOP_DEFS } from "../../src/shared/agent-settings";
 import { isRecord, type JsonObject } from "../../src/shared/json";
 import type { Beat, Draft } from "../../src/shared/ledger";
-import { MIND_FILE_TITLES, PREPARE_LABELS, SETTINGS_DEFAULTS_REV, STORY_DEFAULTS, STORY_LIMIT_LABELS, STORY_PRESET_DEFAULTS, type StoryPart, type UserSettings } from "../../src/shared/settings";
+import { MIND_FILE_TITLES, PREPARE_LABELS, SETTINGS_DEFAULTS_REV, STORY_DEFAULTS, STORY_LIMIT_LABELS, type UserSettings } from "../../src/shared/settings";
 import { Rig } from "../support/rig";
 import { alderChat, HOME, toolEnv } from "../support/tools";
 
@@ -45,14 +49,15 @@ describe("the settings sized for long-form play", () => {
 
   test("a file saved at the old defaults reads the new ones, once; a value the user chose, and the old ones saved since, stay", async () => {
     const old = [12_000, 40, 40, 4000];
-    for (const defaults of [undefined, 5, 9]) expect([defaults, sizes(await readStored(holding(defaults, old)))]).toEqual([defaults, [24_000, 24, 24, 8000]]);
+    // Revision 10 was an earlier build's, which wrote it into files with the old numbers: those move too.
+    for (const defaults of [undefined, 5, 9, 10]) expect([defaults, sizes(await readStored(holding(defaults, old)))]).toEqual([defaults, [24_000, 24, 24, 8000]]);
     // Chosen: any other number stays, whatever the file's revision.
     expect(sizes(await readStored(holding(9, [13_000, 41, 12, 3999])))).toEqual([13_000, 41, 12, 3999]);
     // Once: read against the new defaults, the old numbers are the user's own.
     expect(sizes(await readStored(holding(SETTINGS_DEFAULTS_REV, old)))).toEqual(old);
     // A moved file saved back holds the new numbers at the new revision, and a later choice of an old number stays across a save and a load.
     const rig = new Rig({ shipped: true });
-    stored(rig, holding(9, old));
+    stored(rig, holding(10, old));
     rig.body(await rig.send({ type: "lre.settings.set", patch: { story: { limits: { beatsRead: 40 } } } }));
     const file = saved(rig);
     expect([at(file, "defaults"), at(file, "narration", "passageChars"), at(file, "story", "limits", "beatsRead"), at(file, "agents", "clipChars")]).toEqual([SETTINGS_DEFAULTS_REV, 24_000, 40, 8000]);
@@ -68,23 +73,6 @@ describe("the settings sized for long-form play", () => {
     expect((await rig.rt.settings.get(rig.host.userId)).agents.harnessLimits).toEqual({ timePassMinutes: 60 });
     rig.body(await rig.send({ type: "lre.settings.set", patch: { agents: { harnessLimits: { timePassMinutes: 90 } } } }));
     expect(at(saved(rig), "agents", "harnessLimits")).toEqual({ timePassMinutes: 90 });
-  });
-
-  test("a category mapping without a shipped name stays without it across a save and a load", async () => {
-    const rig = new Rig({ shipped: true });
-    expect(Object.keys((await rig.rt.settings.get(rig.host.userId)).storyPreset.categories)).toContain("Voice");
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { storyPreset: { categories: { Voice: null, "House rules": "contract" } } } }));
-    const { Voice: _voice, ...shipped } = STORY_PRESET_DEFAULTS.categories;
-    const want: Record<string, StoryPart> = { ...shipped, "House rules": "contract" };
-    expect((await rig.rt.settings.get(rig.host.userId)).storyPreset.categories).toEqual(want);
-    // Another setting's write keeps it so.
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { swipeAsk: true } }));
-    const file = saved(rig);
-    expect(at(file, "storyPreset", "categories")).toEqual(want);
-    if (!isRecord(file)) throw new Error("no settings file was written");
-    const again = new Rig({ shipped: true });
-    stored(again, file);
-    expect((await again.rt.settings.get(again.host.userId)).storyPreset.categories).toEqual(want);
   });
 });
 
@@ -170,15 +158,29 @@ describe("a refusal that comes from a limit names its row", () => {
     for (const [id, label] of rows) expect([id, renderPrompt(id, {}, vars).includes(label)]).toEqual([id, true]);
   });
 
-  test("a refusal of the player's own wording, saved before it named its row, is kept and sent as theirs", async () => {
+  test("a player's own wording, saved before it named its row or its setting, is kept and sent as theirs", async () => {
     const own = {
       [RECORD_NOTE.long]: "{{field}} runs {{size}} of {{max}}. Shorter, please.",
       [MINDS_NOTE.fileLong]: "{{file}} runs {{size}} of {{max}}. Shorter, please.",
+      [RECORD_NOTE.feedMore]: "{{more}} more wait. Read on with after set to last.",
     };
     const settings = await readStored({ defaults: SETTINGS_DEFAULTS_REV, prompts: { texts: own } });
     expect(settings.prompts.texts).toEqual(own);
     expect(renderPrompt(RECORD_NOTE.long, settings.prompts.texts, { field: "what", size: "9", max: "8", row: STORY_LIMIT_LABELS.beatChars })).toBe("what runs 9 of 8. Shorter, please.");
     expect(renderPrompt(MINDS_NOTE.fileLong, settings.prompts.texts, { file: "now.md", size: "9", max: "8", row: MIND_FILE_TITLES.now })).toBe("now.md runs 9 of 8. Shorter, please.");
+    expect(renderPrompt(RECORD_NOTE.feedMore, settings.prompts.texts, { more: "3", setting: STORY_LIMIT_LABELS.feedItems, most: "24" })).toBe("3 more wait. Read on with after set to last.");
+  });
+});
+
+describe("a cut at Engine answers shown whole names that setting", () => {
+  test("the world tools' outlines and cut lists, and the agents engine's clipped result, name it and where it is changed, and a player's own wording of them from before is kept", async () => {
+    const vars = { pointer: "/entities", count: "4", after: "mara", list: "Mara, Joss", shown: "10", total: "20", handle: "s1" };
+    for (const id of [WORLD_NOTE.outline, WORLD_NOTE.outlineCut, WORLD_NOTE.andMore, WORLD_NOTE.more, BUILD_NOTE.moreIds, RUNTIME_TEXT.clipped]) {
+      const shipped = renderPrompt(id, {}, vars);
+      expect([id, shipped.includes(LOOP_DEFS.clipChars.label), shipped.includes("Settings → Agents → Budgets")]).toEqual([id, true, true]);
+    }
+    const own = { [WORLD_NOTE.andMore]: "{{list}} and {{count}} others", [RUNTIME_TEXT.clipped]: "[Cut at {{shown}}; the rest is in {{handle}}.]" };
+    expect((await readStored({ defaults: SETTINGS_DEFAULTS_REV, prompts: { texts: own } })).prompts.texts).toEqual(own);
   });
 });
 

@@ -43,6 +43,7 @@ export type {
   RemoteTool,
   RemoteToolCall,
   ReplyRelease,
+  ReplyUnreleased,
   ReplyWritten,
   RunBegan,
   RunEnded,

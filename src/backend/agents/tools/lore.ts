@@ -25,6 +25,7 @@
 import { LOOP_DEFS } from "../../../shared/agent-settings";
 import { WRITE_NOTE } from "../../../shared/agent-tools-write";
 import { SURFACE_NOTE } from "../../../shared/harness-texts-surfaces";
+import { hash32 } from "../../../shared/hash";
 import type { JsonObject } from "../../../shared/json";
 import { loreSourceOf } from "../../../shared/lore";
 import { LORE_INDEX_TEXT } from "../../../shared/lore-routing";
@@ -38,6 +39,7 @@ import { bookLoreId } from "../../book-lore";
 import { tokensOf } from "../../book";
 import { renderIndex } from "../../lore-routing";
 import type { ToolOutcome } from "../runtime";
+import { WHOLE_READ_MOST } from "./harness-tools/kit";
 import { propose } from "./propose";
 import type { ToolReadView, ViewLore } from "./read-view";
 import type { ToolDefinition, ToolEnv } from "./registry";
@@ -163,29 +165,38 @@ async function namedLore(view: ToolReadView, tool: string, args: JsonObject): Pr
 // so a whole entry, index or list is read across pages with nothing left out or given twice. One
 // that fits one answer is given as ever, with no cursor.
 
-/** A cursor as these reads write one, as LumiAH's own tools write theirs: one whole number, where the next page starts (a place in a text, or an item of a list). At most 15 digits, which a JavaScript number holds exactly. */
-const CURSOR = /^\d{1,15}$/;
+/** A cursor as these reads write one, in LumiAH's own tools' form: where the next page starts (a place in a text, or an item of a list), then, after a colon, a stamp of what was paged, so a page asked of a text or a list that changed since is noticed. At most 15 digits each, which a JavaScript number holds exactly. */
+const CURSOR = /^(\d{1,15}):(\d{1,15})$/;
 
-/** Where the call's page starts, by its `cursor` (none: the beginning); or the answer that says it isn't one. */
-function cursorOf(view: ToolReadView, tool: string, args: JsonObject): number | ToolOutcome {
-  const raw = args.cursor;
-  if (raw === undefined || raw === null || raw === "") return 0;
-  const said = typeof raw === "number" ? String(raw) : typeof raw === "string" ? raw.trim() : "";
-  return CURSOR.test(said) ? Number(said) : view.refuse(WRITE_NOTE.badCursor, { cursor: (typeof raw === "string" ? raw : JSON.stringify(raw)).slice(0, 64), tool });
+/** Where a call's page starts, and the stamp of what the page before it paged; none given, the beginning. */
+interface Cursor {
+  at: number;
+  stamp: number | null;
 }
+
+/** The call's `cursor`, read; or the answer that says it isn't one. */
+function cursorOf(view: ToolReadView, tool: string, args: JsonObject): Cursor | ToolOutcome {
+  const raw = args.cursor;
+  if (raw === undefined || raw === null || raw === "") return { at: 0, stamp: null };
+  const match = typeof raw === "string" ? CURSOR.exec(raw.trim()) : null;
+  return match ? { at: Number(match[1]), stamp: Number(match[2]) } : view.refuse(WRITE_NOTE.badCursor, { cursor: (typeof raw === "string" ? raw : JSON.stringify(raw)).slice(0, 64), tool });
+}
+
+/** What a cursor stamps a text or a list with: 32 bits of its hash, which an edit between two pages changes but for one chance in four billion. */
+const stampOf = (whole: string): number => hash32("lre.lore.page", whole);
 
 /**
- * The most one answer of these reads holds, in characters: the engine's own size for one tool
- * result (`agents.clipChars`), which the harness states as their whole (`wholePage`), so a page
- * reaches the agent whole. Only a harness call carries the player's settings (its turn); elsewhere
- * an answer goes whole, and the old engines' runtime clips it at that same setting itself.
+ * The most one answer of these reads holds on the harness, in characters: the engine's own size for
+ * one tool result (`agents.clipChars`), never past `WHOLE_READ_MOST`, which the harness states as
+ * each one's whole (`wholePage`), so a page reaches the agent whole.
  */
-function pageOf(env: ToolEnv): number | null {
-  return env.turn?.settings.agents.clipChars ?? null;
-}
+const wholePage = (settings: UserSettings): number => Math.min(settings.agents.clipChars, WHOLE_READ_MOST);
 
-/** What the harness gives whole of each of these reads: one page. */
-const wholePage = (settings: UserSettings): number => settings.agents.clipChars;
+/** The page size of a call (`wholePage`): on the harness, from the turn's settings or, in a conversation tied to no turn, the player's; null on the old engines, whose runtime clips a long answer at that same setting itself and keeps the rest. */
+async function pageOf(env: ToolEnv): Promise<number | null> {
+  if (env.harness !== true) return null;
+  return wholePage(env.turn?.settings ?? (await env.reader.settings()));
+}
 
 /** Where a page of `room` characters, as JSON writes them, that starts at `from` ends in `text`: never inside a character, and at least one character on, so a page always moves. */
 function pageEnd(text: string, from: number, room: number): number {
@@ -201,43 +212,54 @@ function pageEnd(text: string, from: number, room: number): number {
   return end;
 }
 
-/** The note that ends a page from `from` (counted from 0) to `to` of `total` `what`, and its longest form for those `total`, which a page's room is measured with. */
-function pageNotes(view: ToolReadView, page: number | null, total: number, what: string): { note: (from: number, to: number) => string; longest: string } {
+/** The note that ends a page from `from` (counted from 0) to `to` of `total` `what`, its cursor stamped `stamp`, and its longest form for those `total`, which a page's room is measured with. */
+function pageNotes(view: ToolReadView, page: number, total: number, what: string, stamp: number): { note: (from: number, to: number) => string; longest: string } {
   const note = (from: number, to: number): string => {
     const at = { from: String(from + 1), to: String(to), total: String(total), what };
-    return to < total ? view.text(WRITE_NOTE.pageMore, { ...at, chars: String(page ?? total), setting: LOOP_DEFS.clipChars.label, cursor: String(to) }) : view.text(WRITE_NOTE.pageEnd, at);
+    return to < total ? view.text(WRITE_NOTE.pageMore, { ...at, chars: String(page), setting: LOOP_DEFS.clipChars.label, cursor: `${to}:${stamp}` }) : view.text(WRITE_NOTE.pageEnd, at);
   };
   // Every figure as long as the longest it can be: the room left for a page is never too much.
   const longest = [note(total - 1, total - 1), note(total - 1, total)].reduce((a, b) => (b.length > a.length ? b : a));
   return { note, longest };
 }
 
-/**
- * One page of `text` from `from`, in the answer `frame` makes of a part of it and the note that
- * ends the page. The whole, as ever, where it fits one answer (`page`) and no cursor moved it.
- */
-function textPage(view: ToolReadView, tool: string, page: number | null, text: string, from: number, what: string, frame: (part: string, note?: string) => object): ToolOutcome {
-  if (from > text.length) return view.refuse(WRITE_NOTE.badCursor, { cursor: String(from), tool });
-  if (from === 0 && (page === null || JSON.stringify(frame(text)).length <= page)) return view.answer(frame(text));
-  const { note, longest } = pageNotes(view, page, text.length, what);
-  const to = page === null ? text.length : pageEnd(text, from, page - JSON.stringify(frame("", longest)).length);
-  return view.answer(frame(text.slice(from, to), note(from, to)));
+/** Why a cursor reads on from nothing: a place past the end (`end`, where the last page may start), or a stamp of what was paged that isn't what is paged now. Null where it reads on. */
+function cursorProblem(view: ToolReadView, tool: string, cursor: Cursor, end: number, stamp: number): ToolOutcome | null {
+  if (cursor.stamp !== null && cursor.stamp !== stamp) return view.refuse(WRITE_NOTE.pageStale, { tool });
+  return cursor.at > end ? view.refuse(WRITE_NOTE.badCursor, { cursor: `${cursor.at}:${cursor.stamp ?? ""}`, tool }) : null;
 }
 
 /**
- * One page of `items` from `from`, in the answer `frame` makes of some of them and the note that
- * ends the page: as many whole items as fit, and an item too long for a page of its own as `fit`
- * cuts it to the room there is, so the list moves on. The whole, as ever, where it fits one answer
- * (`page`) and no cursor moved it.
+ * One page of `text` from the call's cursor, in the answer `frame` makes of a part of it and the
+ * note that ends the page. The whole, as ever, where it fits one answer (`page`) and no cursor moved
+ * it.
  */
-function listPage<T>(view: ToolReadView, tool: string, page: number | null, items: readonly T[], from: number, what: string, frame: (shown: T[], note?: string) => object, fit: (item: T, room: number) => T = (item) => item): ToolOutcome {
-  if (from > 0 && from >= items.length) return view.refuse(WRITE_NOTE.badCursor, { cursor: String(from), tool });
-  if (from === 0 && (page === null || JSON.stringify(frame([...items])).length <= page)) return view.answer(frame([...items]));
-  const { note, longest } = pageNotes(view, page, items.length, what);
+function textPage(view: ToolReadView, tool: string, page: number | null, text: string, cursor: Cursor, what: string, frame: (part: string, note?: string) => object): ToolOutcome {
+  const stamp = stampOf(text);
+  const problem = cursorProblem(view, tool, cursor, text.length, stamp);
+  if (problem) return problem;
+  if (cursor.stamp === null && (page === null || JSON.stringify(frame(text)).length <= page)) return view.answer(frame(text));
+  const { note, longest } = pageNotes(view, page ?? text.length, text.length, what, stamp);
+  const to = page === null ? text.length : pageEnd(text, cursor.at, page - JSON.stringify(frame("", longest)).length);
+  return view.answer(frame(text.slice(cursor.at, to), note(cursor.at, to)));
+}
+
+/**
+ * One page of `items` from the call's cursor, in the answer `frame` makes of some of them and the
+ * note that ends the page: as many whole items as fit, and an item too long for a page of its own as
+ * `fit` cuts it to the room there is, so the list moves on. The whole, as ever, where it fits one
+ * answer (`page`) and no cursor moved it.
+ */
+function listPage<T>(view: ToolReadView, tool: string, page: number | null, items: readonly T[], cursor: Cursor, what: string, frame: (shown: T[], note?: string) => object, fit: (item: T, room: number) => T = (item) => item): ToolOutcome {
+  const stamp = stampOf(JSON.stringify(items));
+  const problem = cursorProblem(view, tool, cursor, Math.max(0, items.length - 1), stamp);
+  if (problem) return problem;
+  if (cursor.stamp === null && (page === null || JSON.stringify(frame([...items])).length <= page)) return view.answer(frame([...items]));
+  const { note, longest } = pageNotes(view, page ?? Number.MAX_SAFE_INTEGER, items.length, what, stamp);
   const room = page === null ? Number.POSITIVE_INFINITY : page - JSON.stringify(frame([], longest)).length;
   const shown: T[] = [];
   let used = 0;
-  let at = from;
+  let at = cursor.at;
   for (; at < items.length; at++) {
     const item = items[at] as T;
     const size = JSON.stringify(item).length + (shown.length > 0 ? 1 : 0);
@@ -250,10 +272,10 @@ function listPage<T>(view: ToolReadView, tool: string, page: number | null, item
     shown.push(item);
     used += size;
   }
-  return view.answer(frame(shown, note(from, at)));
+  return view.answer(frame(shown, note(cursor.at, at)));
 }
 
-/** A page's note, where the answer has one, as the answer's last part. */
+/** A page's note, where the answer has one: first in the answer, before what it gives. */
 const paged = (note: string | undefined): { page?: string } => (note !== undefined ? { page: note } : {});
 
 /** The entry `ref` names (any id the lore tools take), as the view gives it, with the id the tools name it by; null for none. The condense tool reads a lore source by it. */
@@ -309,29 +331,29 @@ export const LORE_TOOLS: readonly ToolDefinition[] = [
     name: "lore_index",
     family: "lore",
     tier: "read",
-    parameters: () => objectSchema({ book: text(), cursor: text() }, []),
-    wholeChars: wholePage,
+    parameters: () => objectSchema({ book: text() }, []),
+    pages: wholePage,
     async run(args, env) {
       const view = await env.reader.view();
-      const from = cursorOf(view, "lore_index", args);
-      if (typeof from !== "number") return from;
+      const cursor = cursorOf(view, "lore_index", args);
+      if ("text" in cursor) return cursor;
       const book = textArg(args, "book");
       const index = await loreIndexText(view, book !== null ? { book } : {});
-      return typeof index === "string" ? textPage(view, "lore_index", pageOf(env), index, from, "characters", (part, note) => ({ index: part, ...paged(note) })) : index;
+      return typeof index === "string" ? textPage(view, "lore_index", await pageOf(env), index, cursor, "characters", (part, note) => ({ ...paged(note), index: part })) : index;
     },
   },
   {
     name: "lore_search",
     family: "lore",
     tier: "read",
-    parameters: () => objectSchema({ query: text(), cursor: text() }, ["query"]),
-    wholeChars: wholePage,
+    parameters: () => objectSchema({ query: text() }, ["query"]),
+    pages: wholePage,
     async run(args, env) {
       const view = await env.reader.view();
       const query = needText(view, "lore_search", args, "query");
       if (typeof query !== "string") return query;
-      const from = cursorOf(view, "lore_search", args);
-      if (typeof from !== "number") return from;
+      const cursor = cursorOf(view, "lore_search", args);
+      if ("text" in cursor) return cursor;
       const corpus = await readableLore(view);
       const byId = new Map(corpus.map((r) => [r.lore.id, r]));
       const world = { ...view.world, lore: Object.fromEntries(corpus.map((r) => [r.lore.id, r.entry])) };
@@ -342,21 +364,21 @@ export const LORE_TOOLS: readonly ToolDefinition[] = [
         const r = byId.get(hit.id);
         return r ? [{ id: named(hit.id), title: r.lore.title, why: hit.why, ...(view.loreSecrecy(r.entry) !== null ? { secret: true as const } : {}) }] : [];
       });
-      return listPage(view, "lore_search", pageOf(env), results, from, "results", (shown, note) => ({ results: shown, ...paged(note) }));
+      return listPage(view, "lore_search", await pageOf(env), results, cursor, "results", (shown, note) => ({ ...paged(note), results: shown }));
     },
   },
   {
     name: "lore_grep",
     family: "lore",
     tier: "read",
-    parameters: () => objectSchema({ text: text(), cursor: text() }, ["text"]),
-    wholeChars: wholePage,
+    parameters: () => objectSchema({ text: text() }, ["text"]),
+    pages: wholePage,
     async run(args, env) {
       const view = await env.reader.view();
       const needle = needText(view, "lore_grep", args, "text");
       if (typeof needle !== "string") return needle;
-      const from = cursorOf(view, "lore_grep", args);
-      if (typeof from !== "number") return from;
+      const cursor = cursorOf(view, "lore_grep", args);
+      if ("text" in cursor) return cursor;
       const lower = needle.toLowerCase();
       const named = await shownIds(view);
       const matches: GrepMatch[] = [];
@@ -372,22 +394,22 @@ export const LORE_TOOLS: readonly ToolDefinition[] = [
         const end = pageEnd(m.text, 0, room - JSON.stringify({ ...m, text: "", cut: cut(m.text.length) }).length);
         return { ...m, text: m.text.slice(0, end), cut: cut(end) };
       };
-      return listPage(view, "lore_grep", pageOf(env), matches, from, "matches", (shown, note) => ({ matches: shown, ...paged(note) }), fit);
+      return listPage(view, "lore_grep", await pageOf(env), matches, cursor, "matches", (shown, note) => ({ ...paged(note), matches: shown }), fit);
     },
   },
   {
     name: "lore_read",
     family: "lore",
     tier: "read",
-    parameters: () => objectSchema({ id: text(), cursor: text() }, ["id"]),
-    wholeChars: wholePage,
+    parameters: () => objectSchema({ id: text() }, ["id"]),
+    pages: wholePage,
     async run(args, env) {
       const view = await env.reader.view();
       const found = await namedLore(view, "lore_read", args);
       if (!("lore" in found)) return found;
-      const from = cursorOf(view, "lore_read", args);
-      if (typeof from !== "number") return from;
-      return textPage(view, "lore_read", pageOf(env), found.lore.text, from, "characters", (part, note) => ({ ...found.lore, id: found.id, text: part, ...paged(note) }));
+      const cursor = cursorOf(view, "lore_read", args);
+      if ("text" in cursor) return cursor;
+      return textPage(view, "lore_read", await pageOf(env), found.lore.text, cursor, "characters", (part, note) => ({ ...paged(note), ...found.lore, id: found.id, text: part }));
     },
   },
   {
