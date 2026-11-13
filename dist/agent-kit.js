@@ -10947,7 +10947,6 @@ var relation = "The relation type's id: knows, owns, member_of, regard, in, or o
 var path = "The workspace file's path: names joined by /, such as notes/marcus.md; start it with ~/ for the global workspace, which every chat shares, such as ~/notes/style.md.";
 var under = "Only files under this folder, such as notes/; leave it out for every file.";
 var lore = "The lore entry's id, as lore_index, lore_search or lore_grep gives it: a short id such as lr0101, a World Info entry as bookId/entryId, or a world entry's own id.";
-var pageCursor = "Where to read on: the cursor the answer before ended with. Leave it out to start from the beginning.";
 var proposes = "The answer is the change in plain words, its change type and its mode. Working a turn, the change is staged at once: it lands when the turn commits, or, when its mode is confirm, waits for the game master's Apply on the turn's review card. Otherwise nothing changes until the game master applies it.";
 var dry = "true: check only; nothing is staged.";
 var dryWhole = "true: only check the change and say what it would do; nothing is staged.";
@@ -11709,44 +11708,32 @@ var WRITE_TOOL_TEXTS = [
     family: "lore",
     tier: "read",
     note: "Gives the lore index: every entry of the chat's World Info books by its id and title.",
-    text: "The lore index: every lore entry of the World Info books this chat reads, book by book, each by its short id and title, with a line of what it holds where the title doesn't say; or, where the game master keeps an index of their own, that index as they wrote it. Read an entry whole with lore_read and its id. An index longer than one answer comes in pages, each ending with the cursor that reads on.",
-    args: [
-      { path: "book", text: "Only this book's entries: its name or id; leave it out for every book." },
-      { path: "cursor", text: pageCursor }
-    ]
+    text: "The lore index: every lore entry of the World Info books this chat reads, book by book, each by its short id and title, with a line of what it holds where the title doesn't say; or, where the game master keeps an index of their own, that index as they wrote it. Read an entry whole with lore_read and its id.",
+    args: [{ path: "book", text: "Only this book's entries: its name or id; leave it out for every book." }]
   },
   {
     name: "lore_search",
     family: "lore",
     tier: "read",
     note: "Searches the world's lore and the chat's World Info books.",
-    text: "Search the lore: the world's own entries and those of the World Info books this chat reads, best matches first. Gives each match's id, title and why it matched, with its secret marker when it is a secret or a mark in a book (who knows it, whom it is kept from). Read one whole with lore_read. More matches than one answer holds come in pages, each ending with the cursor that reads on.",
-    args: [
-      { path: "query", text: "Words or names to look for." },
-      { path: "cursor", text: pageCursor }
-    ]
+    text: "Search the lore: the world's own entries and those of the World Info books this chat reads, best matches first. Gives each match's id, title and why it matched, with its secret marker when it is a secret or a mark in a book (who knows it, whom it is kept from). Read one whole with lore_read.",
+    args: [{ path: "query", text: "Words or names to look for." }]
   },
   {
     name: "lore_grep",
     family: "lore",
     tier: "read",
     note: "Finds lore entries that hold some text.",
-    text: "Find the lore entries whose text holds some text, in any case: each entry's id and title, its secret marker, and the lines that hold it. More lines than one answer holds come in pages, each ending with the cursor that reads on.",
-    args: [
-      { path: "text", text: "What to look for." },
-      { path: "cursor", text: pageCursor }
-    ]
+    text: "Find the lore entries whose text holds some text, in any case: each entry's id and title, its secret marker, and the lines that hold it.",
+    args: [{ path: "text", text: "What to look for." }]
   },
   {
     name: "lore_read",
     family: "lore",
     tier: "read",
     note: "Reads one lore entry, by its id.",
-    text: "Read one lore entry whole, by its id, as your knowledge has it: a secret in its text is marked with who knows it, or left out where your knowledge doesn't reach. An entry longer than one answer comes in pages, each ending with the cursor that reads on: read them all, nothing is left out or given twice.",
-    args: [
-      { path: "id", text: lore },
-      { path: "cursor", text: pageCursor }
-    ]
+    text: "Read one lore entry whole, by its id, as your knowledge has it: a secret in its text is marked with who knows it, or left out where your knowledge doesn't reach.",
+    args: [{ path: "id", text: lore }]
   },
   {
     name: "lore_load",
@@ -11800,6 +11787,7 @@ var WRITE_NOTE = {
   pageMore: "tool.note.page_more",
   pageEnd: "tool.note.page_end",
   lineCut: "tool.note.line_cut",
+  pageStale: "tool.note.page_stale",
   noBook: "tool.note.no_book",
   cancelled: "tool.note.cancelled",
   paused: "tool.note.paused",
@@ -11855,6 +11843,7 @@ var WRITE_TOOL_NOTES = [
     ]
   },
   { id: WRITE_NOTE.pageEnd, label: "The last page", note: "Ends the last page of a lore read that came in pages.", text: "This gives {{from}} to {{to}} of {{total}} {{what}}: the last of them.", vars: [{ name: "from", text: "where this page starts, counted from 1", required: true }, { name: "to", text: "where it ends", required: true }, { name: "total", text: "how many there are in all", required: true }, { name: "what", text: "characters, matches or results" }] },
+  { id: WRITE_NOTE.pageStale, label: "Changed since the page before", note: "A lore read's answer when its cursor came from a page of a text or a list that has changed since: reading on would skip or repeat some of it.", text: "What {{tool}} gives changed since the page before was read, so its cursor no longer reads on where that page ended. Read it again from the first page: leave cursor out.", vars: [{ name: "tool", text: "the tool called", required: true }] },
   { id: WRITE_NOTE.lineCut, label: "A line cut to fit", note: "Stands beside a line lore_grep found that is longer than one answer may be on its own (the setting named, Settings → Agents → Budgets): what was left out, and how to read it.", text: "This line is {{size}} characters, and only its first {{shown}} fit one answer ({{setting}}, Settings → Agents → Budgets): lore_read {{id}} reads the entry whole, in pages.", vars: [{ name: "size", text: "the line's length", required: true }, { name: "shown", text: "how much of it is given", required: true }, { name: "setting", text: "the setting's label" }, { name: "id", text: "the entry's id", required: true }] },
   { id: WRITE_NOTE.cancelled, label: "Cancelled", note: "A write's answer when the agent's work was cancelled before it ran.", text: "The agent's work was cancelled, so nothing was checked or written.", vars: [] },
   { id: WRITE_NOTE.paused, label: "The chat is paused", note: "An apply's answer while an earlier message's edit waits for Keep or Discard.", text: "An earlier message was edited: Keep or Discard it first, under that message.", vars: [] },
@@ -91990,7 +91979,7 @@ Six concepts plus one pipeline.
   - Writes are atomic (temp file, then \`storage.move\`). Pinned revisions are never garbage-collected automatically.
   - Edits in Build go to a **draft**; **Commit** makes a new revision and **Discard** throws the draft away.
   - Revisions are cached per user, world and revision (an LRU of 128, never replaced in place). A read or export needs a revision the world's index lists. An open chat pins only the revisions its ledger references (its run's, the targets of its migrate markers on the chain or in held writes, and the revisions its records were planned under), loading each before a fold can need it, so evicting a cache entry never breaks a fold and a world's long commit history stays out of memory.
-- **User-owned settings** (\`userStorage/settings.json\`): the helper model (\`helper\`: connection, model, reasoning effort, max tokens and sampling parameters, apart from the presets), model-use preset, per-step provider, connection, model and parameters, budgets, realism and time controls (§9.1, §9.2). Realism and time **seed new chats only**, filling in what the world's own defaults leave out (or replacing them, with "Use my settings instead of a world's defaults for new chats" on); a running chat changes through markers. Imports never change them. A settings file is conformed field by field to its schema when read (types, enums, ranges; open maps keep safe keys only; a bad value falls back to its default); a step's route is the file's own where it has one, so an effort or parameter it leaves out is the helper model's, never its preset's, and so is the story preset's category mapping (\`storyPreset.categories\`), whole: a shipped name the user took out stays out across a save and a load. A file without \`defaults\`, saved before the defaults rose for reasoning models, has each value still at an old default read as its new one: a step's 2,000 max tokens is dropped so the step follows the helper model, and the old lore tokens, lookup counts, section and Minds budgets rise. A file before \`defaults: 3\`, saved before memory, consolidation and the time skip's steps stopped reasoning (§5.3), has those steps' effort set to Off where it left it to a helper model at its default effort (Inherit). A file at \`defaults: 2\` or \`3\`, saved before the sections told their facts whole (§6.11), has a section budget still at Standard's old 4,000 or Full's old 8,000 read as that preset's new one (8,000, 12,000). A file before \`defaults: 10\`, saved before the harness's sizes were set for long-form play, has the longest passage still at 12,000 characters read as 24,000, the beats in one read and taken in at once still at 40 read as 24, and the engine's answers shown whole (\`agents.clipChars\`) still at 4,000 characters read as 8,000. Any other value is the user's and stays. An older file's \`agents.harnessLimits.worldExamples\` and \`worldTextChars\`, which nothing read, are dropped as it loads.
+- **User-owned settings** (\`userStorage/settings.json\`): the helper model (\`helper\`: connection, model, reasoning effort, max tokens and sampling parameters, apart from the presets), model-use preset, per-step provider, connection, model and parameters, budgets, realism and time controls (§9.1, §9.2). Realism and time **seed new chats only**, filling in what the world's own defaults leave out (or replacing them, with "Use my settings instead of a world's defaults for new chats" on); a running chat changes through markers. Imports never change them. A settings file is conformed field by field to its schema when read (types, enums, ranges; open maps keep safe keys only; a bad value falls back to its default); a step's route is the file's own where it has one, so an effort or parameter it leaves out is the helper model's, never its preset's. A file without \`defaults\`, saved before the defaults rose for reasoning models, has each value still at an old default read as its new one: a step's 2,000 max tokens is dropped so the step follows the helper model, and the old lore tokens, lookup counts, section and Minds budgets rise. A file before \`defaults: 3\`, saved before memory, consolidation and the time skip's steps stopped reasoning (§5.3), has those steps' effort set to Off where it left it to a helper model at its default effort (Inherit). A file at \`defaults: 2\` or \`3\`, saved before the sections told their facts whole (§6.11), has a section budget still at Standard's old 4,000 or Full's old 8,000 read as that preset's new one (8,000, 12,000). A file before \`defaults: 11\` (10 was an earlier build's, written with the old sizes), saved before the harness's sizes were set for long-form play, has the longest passage still at 12,000 characters read as 24,000, the beats in one read and taken in at once still at 40 read as 24, and the engine's answers shown whole (\`agents.clipChars\`) still at 4,000 characters read as 8,000. Any other value is the user's and stays. An older file's \`agents.harnessLimits.worldExamples\` and \`worldTextChars\`, which nothing read, are dropped as it loads.
 
 ### 4.2 Engine-managed lore book (D11)
 
@@ -92593,7 +92582,7 @@ Every change an agent makes goes through one writer (\`backend/agents/tools/writ
 - **The lore's tools** (family \`lore\`, \`backend/agents/tools/lore.ts\` \`LORE_TOOLS\`), over the view's live lore: the world's lore and the World Info books the chat reads, as the helpers read them live (§5.4); an entry the view gives nothing of reads as one that doesn't exist.
   - Read tier: \`lore_search\` gives ids, titles and why each matched; \`lore_grep\`, the lines holding a text (each with its entry's id, title and line number). Both mark a secret entry (\`secret\`).
   - Read tier: \`lore_read\`, one entry whole by id, its text through \`applyMarks\`, every mark marked; a secret entry marked with who knows it.
-  - Paging (read tier, \`lore_index\`, \`lore_search\`, \`lore_grep\`, \`lore_read\`): on the harness an answer longer than the engine's own size for one tool result (\`agents.clipChars\`, which the harness lists as each one's \`wholeChars\`) comes in pages, as LumiAH's own tools page theirs: each page ends with what it gives, the setting that bounds it and the cursor the same call reads on with (\`tool.note.page_more\`, \`tool.note.page_end\`), so a long entry is read whole across pages with nothing left out or given twice; a grep's line too long for a page of its own gives its start and says so (\`tool.note.line_cut\`). Elsewhere an answer goes whole, and the runtime clips it at that same setting.
+  - Paging (read tier, \`lore_index\`, \`lore_search\`, \`lore_grep\`, \`lore_read\`; \`ToolDefinition.pages\`): on the harness, every call the bridge runs (\`ToolEnv.harness\`), in a turn or in a conversation tied to none, an answer longer than the engine's own size for one tool result (\`agents.clipChars\`, never past \`WHOLE_READ_MOST\`, which the harness lists as each one's \`wholeChars\`) comes in pages, as LumiAH's own tools page theirs. The harness alone gives these reads their \`cursor\` argument and describes them in words of its own that say so (\`HARNESS_DESCRIBED\`). Each page starts with what it gives, the setting that bounds it and the cursor the same call reads on with (\`tool.note.page_more\`, \`tool.note.page_end\`), so a long entry is read whole across pages with nothing left out or given twice. A cursor is the place to read on from and a stamp of what was paged: a text or a list changed since the page before is refused in words that say to read it again from the first page (\`tool.note.page_stale\`). A grep's line too long for a page of its own gives its start and says so (\`tool.note.line_cut\`). On the classic and agents engines an answer goes whole, as ever, and their runtime clips it at that same setting.
   - GM tier: \`lore_save\` proposes the entry's text as read to a workspace file (\`lore/<id>.md\` by default), and \`lore_draft\` proposes a draft under \`lore-drafts/\` (\`lore-drafts/<id>.md\` by default; a path elsewhere is refused, \`tool.note.draft_path\`): a front matter naming the entry (\`lore:\` its id, \`title:\` its title, or the id when the view can't read it), then the text. Both are \`ws_write\` operations.
 - **No tool writes lore:** no tool writes a user's book or the world's lore. The user applies a draft in Build, on their own press (Build's own Save).
 
@@ -99041,7 +99030,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "c52acae6";
+var BUILD = "85200ebd";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

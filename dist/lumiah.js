@@ -71866,7 +71866,7 @@ function defaultSettings() {
     cache: { retention: DEFAULT_CACHE_RETENTION, key: "" },
     connections: { atOnce: null, throttles: {}, toolRefusalMinutes: 60 },
     prices: {},
-    session: { summarizeAtTokens: 48000, keepTurns: 4, summaryTokens: 6000, receiptChars: 1500, receiptArgChars: 1500, rollbackMarginTokens: 8000 },
+    session: { summarizeAtTokens: 32000, keepTurns: 3, summaryTokens: 6000, receiptChars: 1500, receiptArgChars: 1500, rollbackMarginTokens: 8000 },
     tools: { pageChars: 8000, pageItems: 10, lineChars: 300, excerptChars: 400, pieceChars: 600, chatBatch: 200, grepTurns: 40 },
     keep: { prompts: true, transcripts: true, blobChars: 4000000, summaries: 32, promptDays: 30, transcriptDays: 90, spanDays: null, graceHours: 24 },
     trace: { deltaMs: 200 },
@@ -72480,7 +72480,7 @@ The agents you can delegate to:
   { id: toolArgId(TOOL.delegate, "task"), group: GROUP.tools, label: "delegate: task", note: "The description of delegate's task argument.", text: "What it is to do and what you want back, in full. It knows nothing you don't write here.", vars: [] },
   { id: toolArgId(TOOL.delegate, "files"), group: GROUP.tools, label: "delegate: files", note: "The description of delegate's files argument.", text: "Workspace files to give it with the task, by path. Leave it out for none.", vars: [] },
   { id: toolArgId(TOOL.delegate, "as"), group: GROUP.tools, label: "delegate: as", note: "The description of delegate's as argument, offered where an extension builds LumiAH in.", text: "Which one this agent is to be, where its kind stands for many (a character's id, for one): what it may read and the model it runs on follow from it. Leave it out for none.", vars: [] },
-  { id: toolArgId(TOOL.delegate, "to_reply"), group: GROUP.tools, label: "delegate: to_reply", note: "The description of delegate's to_reply argument, offered to an agent that may write the reply itself. A turn's reply is released once, whole.", text: "true: its answer is this turn's whole reply, streaming to the user as it is written; this call's result is that answer too. A turn's reply is released once: hand it on only for an answer that is the whole reply, and never after reply_write. Leave it out for an answer only you read.", vars: [] },
+  { id: toolArgId(TOOL.delegate, "to_reply"), group: GROUP.tools, label: "delegate: to_reply", note: "The description of delegate's to_reply argument, offered to an agent that may write the reply itself. A turn's reply is released once, whole.", text: "true: its answer is this turn's whole reply, streaming to the user as it is written; this call's result is that answer too, and what it says to agent_message after comes back to you alone. A turn's reply is released once: hand it on only for an answer that is the whole reply, and never after reply_write. Leave it out for an answer only you read.", vars: [] },
   ...toolTexts(TOOL.agentMessage, "Send a follow-up to an agent you delegated to this turn. It goes on from where it left off, with everything it had read, and its answer is this tool's result.", {
     handle: "The handle that agent's answer named, such as agent_1a2b3c4d.",
     text: "What you want of it now."
@@ -72504,7 +72504,7 @@ For reference, the user's newest message:
 {{request}}`, vars: [v("request", "the user's newest message, as the main agent reads it", true)] },
   { id: AGENTS_TEXT.file, group: AGENTS, label: "A file in context", note: "One workspace file put in an agent's context whole: given with a task, or pinned.", text: `[{{path}}: {{chars}} characters, version {{version}}]
 {{text}}`, vars: [v("path", "the file's path", true), v("chars", "its length"), v("version", "its version, which a write or an edit of it names"), v("text", "its text", true)] },
-  { id: AGENTS_TEXT.fileNamed, group: AGENTS, label: "A file named, not included", note: "Stands for a file given with a task that didn't fit the room Files given with a task leaves.", text: "[{{path}}: {{chars}} characters, not included here. workspace_read reads it.]", vars: [v("path", "the file's path", true), v("chars", "its length")] },
+  { id: AGENTS_TEXT.fileNamed, group: AGENTS, label: "A file named, not included", note: "Stands for a file given with a task that didn't fit the room Files given with a task leaves.", text: "[{{path}}: {{chars}} characters, not included here: past the room {{setting}} leaves. workspace_read reads it.]", vars: [v("path", "the file's path", true), v("chars", "its length"), SETTING_VAR], setting: ["delegation", "fileChars"] },
   { id: AGENTS_TEXT.pinnedNamed, group: AGENTS, label: "A pinned file named, not included", note: "Stands for a pinned file that didn't fit the room Pinned files in context leaves.", text: "[{{path}}: {{chars}} characters, not included here: past the room {{setting}} leaves. workspace_read reads it.]", vars: [v("path", "the file's path", true), v("chars", "its length"), SETTING_VAR], setting: ["workspace", "pinChars"] },
   { id: AGENTS_TEXT.pinned, group: AGENTS, label: "Pinned files", note: "Leads what an agent is sent first with the workspace files pinned for it.", text: `Your pinned workspace files, as they stand now:
 
@@ -72521,7 +72521,7 @@ agent_message with this handle has it go on, if it still may; or go on without i
   { id: AGENTS_TEXT.noHandle, group: ANSWERS, label: "agent_message: no such handle", note: "agent_message's answer to a handle that names none of this turn's agents it started.", text: "There's no agent with the handle {{handle}} among those you started this turn. Your handles: {{handles}}.", vars: [v("handle", "the handle asked for"), v("handles", "the handles there are", true)] },
   { id: AGENTS_TEXT.noHandles, group: ANSWERS, label: "agent_message: nobody to message", note: "agent_message's answer when the agent has delegated to nobody this turn.", text: "You haven't delegated to anyone this turn, so there is nobody to message. delegate starts an agent.", vars: [] },
   { id: AGENTS_TEXT.stoppedSaid, group: ANSWERS, label: "delegate: what a stopped agent had written", note: "Fills {{said}} for an agent that stopped after it had written something.", text: " It had last written: {{text}}", vars: [v("text", "what it had last written", true)] },
-  { id: AGENTS_TEXT.cut, group: AGENTS, label: "Why: an answer cut at its length", note: "Why an agent's answer isn't taken as one, when its model stopped at the answer's token limit: the main agent's without write_reply, a sub-agent's.", text: "its answer was cut at its length limit (Answer per call), so it isn't the whole of what it meant to say", vars: [] },
+  { id: AGENTS_TEXT.cut, group: AGENTS, label: "Why: an answer cut at its length", note: "Why an agent's answer isn't taken as one, when its model stopped at the answer's token limit: the main agent's without write_reply, a sub-agent's.", text: "its answer was cut at its length limit, {{setting}}, so it isn't the whole of what it meant to say", vars: [{ ...SETTING_VAR, text: "Answer per call, the agent's, and where it is changed" }] },
   { id: AGENTS_TEXT.note, group: AGENTS, label: "A note from the user", note: "How something the user says while an agent works reaches it, at the start of its next round.", text: `[The user says, while you work:]
 {{text}}`, vars: [v("text", "the user's words", true)] },
   word(AGENTS_TEXT.wordSkill, "skill", "skills"),
@@ -72711,6 +72711,7 @@ var JOBS_TEXT = {
   stopOut: "stop.job_tokens_out",
   stopRounds: "stop.job_tool_turns",
   stopTime: "stop.job_time",
+  stopAllowance: "stop.job_allowance",
   word: "word.job",
   wordCall: "word.call"
 };
@@ -72889,7 +72890,7 @@ It has no report.`, vars: [v("head", "the heading, as job_read: a job writes it"
   state(JOBS_TEXT.state.off_path, "off the path", "stopped: off the chat's path"),
   state(JOBS_TEXT.state.spent, "stopped at its allowance", "stopped at its allowance"),
   state(JOBS_TEXT.spentDay, "stopped at a day's limit", "stopped at a day's limit, with nothing lost"),
-  { id: JOBS_TEXT.whyCutThinking, group: JOBS, label: "Why: its answer ran out while it was thinking", note: "A job's reason when its agent's model used all its answer room on thinking and wrote no report.", text: "its agent ran out of answer room while it was still thinking, so it wrote no report (Answer per call, in the agent's settings, is that room). Raise it for this agent, or lower its effort, then run the job again", vars: [] },
+  { id: JOBS_TEXT.whyCutThinking, group: JOBS, label: "Why: its answer ran out while it was thinking", note: "A job's reason when its agent's model used all its answer room on thinking and wrote no report.", text: "its agent ran out of answer room while it was still thinking, so it wrote no report ({{setting}} is that room). Raise it for this agent, or lower its effort, then run the job again", vars: [{ ...SETTING_VAR, text: "Answer per call, the job's agent's, and where it is changed" }] },
   state(JOBS_TEXT.state.paused, "paused, with no run under way", "paused by the user"),
   state(JOBS_TEXT.paused, "paused", "running, paused by the user"),
   { id: JOBS_TEXT.whyCancelledByAgent, group: JOBS, label: "Why: cancelled by an agent", note: "A job's reason when an agent's job_cancel ended it.", text: "the {{role}} agent cancelled it", vars: [v("role", "the definition of the agent that cancelled it", true)] },
@@ -72902,12 +72903,13 @@ It has no report.`, vars: [v("head", "the heading, as job_read: a job writes it"
   { id: JOBS_TEXT.whyNoRecord, group: JOBS, label: "Why: its turn left no record", note: "A job's reason when the turn that started it ended without leaving a record on its reply (it was stopped, or failed), so the job has no turn to belong to.", text: "the turn that started it left no record on its reply (it was stopped or failed), so the job has no turn to belong to", vars: [] },
   { id: JOBS_TEXT.whyGone, group: JOBS, label: "Why: its agent is gone", note: "A job's reason when the agent definition it runs as was removed or switched off before it ran.", text: "the agent {{agent}} it was to run as is gone or switched off", vars: [v("agent", "the agent definition's id", true)] },
   stopText(JOBS_TEXT.stopOffPath, "A job off the path", "The turn a job belongs to left the chat's active path, so the job stopped.", "the turn this job belongs to is no longer on the chat's active path"),
-  stopText(JOBS_TEXT.stopJobTokens, "Job tokens per day spent", "A job's call once the jobs' calls together have sent and written all Job tokens per day allows.", "what jobs sent and wrote in the last 24 hours is counted as {{tokens}} of the {{limit}} Job tokens per day allows (a cached re-read counts as {{weight}} of a token)", [v("tokens", 'what jobs spent in the last 24 hours as the limit counts it, with the word: "3000000 tokens"', true), v("limit", "Job tokens per day", true), v("weight", "What a cached re-read counts as")]),
-  stopText(JOBS_TEXT.stopJobTokensCall, "Job tokens per day: the call would pass it", "A job's call whose own prompt would take the jobs' calls past Job tokens per day, though they are under it so far.", "the call would take what jobs sent and wrote in the last 24 hours past Job tokens per day: counted as {{counted}} with it, of the {{limit}} allowed (a cached re-read counts as {{weight}} of a token)", [v("counted", `what jobs spent in the last 24 hours as the limit counts it, with this call's prompt as estimated and the calls under way, with the word: "3004000 tokens"`, true), v("limit", "Job tokens per day", true), v("weight", "What a cached re-read counts as")]),
+  { ...stopText(JOBS_TEXT.stopJobTokens, "Job tokens per day spent", "A job's call once the jobs' calls together have sent and written all Job tokens per day allows.", "what jobs sent and wrote in the last 24 hours is counted as {{tokens}} of the {{limit}} {{setting}} allows (a cached re-read counts as {{weight}} of a token)", [v("tokens", 'what jobs spent in the last 24 hours as the limit counts it, with the word: "3000000 tokens"', true), v("limit", "Job tokens per day", true), v("weight", "What a cached re-read counts as"), SETTING_VAR]), setting: ["jobs", "tokensPerDay"] },
+  { ...stopText(JOBS_TEXT.stopJobTokensCall, "Job tokens per day: the call would pass it", "A job's call whose own prompt would take the jobs' calls past Job tokens per day, though they are under it so far.", "the call would take what jobs sent and wrote in the last 24 hours past {{setting}}: counted as {{counted}} with it, of the {{limit}} allowed (a cached re-read counts as {{weight}} of a token)", [v("counted", `what jobs spent in the last 24 hours as the limit counts it, with this call's prompt as estimated and the calls under way, with the word: "3004000 tokens"`, true), v("limit", "Job tokens per day", true), v("weight", "What a cached re-read counts as"), SETTING_VAR]), setting: ["jobs", "tokensPerDay"] },
   { ...stopText(JOBS_TEXT.stopIn, "The job's prompt tokens spent", "A call that would take the job's prompt tokens past Prompt tokens per job.", "the call would take the job's prompt tokens past {{setting}}: counted as {{counted}} of the {{limit}} allowed (a cached re-read counts as {{weight}} of a token)", [v("counted", "the prompt tokens with this call, as the limit counts them"), v("weight", "What a cached re-read counts as"), v("limit", "Prompt tokens per job", true), SETTING_VAR]), setting: ["jobs", "budget", "tokensIn"] },
   { ...stopText(JOBS_TEXT.stopOut, "The job's answer tokens spent", "The job's agents have written all Answer tokens per job allows.", "the job's agents have written its {{tokens}}, all that {{setting}} allows", [v("tokens", 'Answer tokens per job, with the word: "60000 tokens"', true), SETTING_VAR]), setting: ["jobs", "budget", "tokensOut"] },
   { ...stopText(JOBS_TEXT.stopRounds, "The job's tool rounds spent", "The job's agents have had every round of tool calls Tool rounds per job allows.", "the job's agents have had its {{rounds}} of tool calls, all that {{setting}} allows", [v("rounds", 'Tool rounds per job, with the word: "60 rounds"', true), SETTING_VAR]), setting: ["jobs", "budget", "toolTurns"] },
   { ...stopText(JOBS_TEXT.stopTime, "The job out of time", "The job's time ran out (Time per job).", "the job's agents have worked all the time {{setting}} allows", [SETTING_VAR]), setting: ["jobs", "budget", "wallMs"] },
+  { id: JOBS_TEXT.stopAllowance, group: GROUP.stops, label: "A job's own allowance", note: "Fills {{setting}} in a job's stop where the limit that stopped it is the allowance the job was started with (by you on the Jobs page, by the agent or job that started it, or by the extension), not the setting for each job.", text: "the allowance it was started with", vars: [] },
   word(JOBS_TEXT.word, "job", "jobs"),
   word(JOBS_TEXT.wordCall, "call", "calls")
 ];
@@ -73712,24 +73714,40 @@ var SPEND_TEXT = {
   stopCostCall: "stop.spend_cost_call"
 };
 var SPEND_TEXTS = [
-  stopText(SPEND_TEXT.stopTokens, "Tokens per day spent", "A call once every agent's calls together have sent and written all Tokens per day allows.", "what every agent's calls sent and wrote in the last 24 hours is counted as {{tokens}} of the {{limit}} Tokens per day allows (a cached re-read counts as {{weight}} of a token)", [
-    v("tokens", `what every agent's calls sent and wrote in the last 24 hours as the limit counts it, with the word: "5000000 tokens"`, true),
-    v("limit", "Tokens per day", true),
-    v("weight", "What a cached re-read counts as")
-  ]),
-  stopText(SPEND_TEXT.stopTokensCall, "Tokens per day: the call would pass it", "A call whose own prompt would take every agent's calls past Tokens per day, though they are under it so far.", "the call would take what every agent's calls sent and wrote in the last 24 hours past Tokens per day: counted as {{counted}} with it, of the {{limit}} allowed (a cached re-read counts as {{weight}} of a token)", [
-    v("counted", `what every agent's calls spent in the last 24 hours as the limit counts it, with this call's prompt as estimated and the calls under way, with the word: "5004000 tokens"`, true),
-    v("limit", "Tokens per day", true),
-    v("weight", "What a cached re-read counts as")
-  ]),
-  stopText(SPEND_TEXT.stopCost, "Cost per day spent", "A call once every agent's calls together have cost all Cost per day allows.", "every agent's calls together have cost ${{cost}} in the last 24 hours, and Cost per day allows ${{limit}}", [
-    v("cost", `what every agent's calls cost in the last 24 hours, in US dollars: "5.02"`, true),
-    v("limit", 'Cost per day, in US dollars: "5.00"', true)
-  ]),
-  stopText(SPEND_TEXT.stopCostCall, "Cost per day: the call would pass it", "A call whose own prompt, at your price for its model, would take every agent's calls past Cost per day, though they are under it so far.", "the call would take what every agent's calls cost in the last 24 hours past Cost per day: about ${{cost}} with it, and Cost per day allows ${{limit}}", [
-    v("cost", `what every agent's calls cost in the last 24 hours with this call's prompt as estimated and the calls under way, in US dollars: "5.02"`, true),
-    v("limit", 'Cost per day, in US dollars: "5.00"', true)
-  ])
+  {
+    ...stopText(SPEND_TEXT.stopTokens, "Tokens per day spent", "A call once every agent's calls together have sent and written all Tokens per day allows.", "what every agent's calls sent and wrote in the last 24 hours is counted as {{tokens}} of the {{limit}} {{setting}} allows (a cached re-read counts as {{weight}} of a token)", [
+      v("tokens", `what every agent's calls sent and wrote in the last 24 hours as the limit counts it, with the word: "5000000 tokens"`, true),
+      v("limit", "Tokens per day", true),
+      v("weight", "What a cached re-read counts as"),
+      SETTING_VAR
+    ]),
+    setting: ["spend", "tokensPerDay"]
+  },
+  {
+    ...stopText(SPEND_TEXT.stopTokensCall, "Tokens per day: the call would pass it", "A call whose own prompt would take every agent's calls past Tokens per day, though they are under it so far.", "the call would take what every agent's calls sent and wrote in the last 24 hours past {{setting}}: counted as {{counted}} with it, of the {{limit}} allowed (a cached re-read counts as {{weight}} of a token)", [
+      v("counted", `what every agent's calls spent in the last 24 hours as the limit counts it, with this call's prompt as estimated and the calls under way, with the word: "5004000 tokens"`, true),
+      v("limit", "Tokens per day", true),
+      v("weight", "What a cached re-read counts as"),
+      SETTING_VAR
+    ]),
+    setting: ["spend", "tokensPerDay"]
+  },
+  {
+    ...stopText(SPEND_TEXT.stopCost, "Cost per day spent", "A call once every agent's calls together have cost all Cost per day allows.", "every agent's calls together have cost ${{cost}} in the last 24 hours, and {{setting}} allows ${{limit}}", [
+      v("cost", `what every agent's calls cost in the last 24 hours, in US dollars: "5.02"`, true),
+      v("limit", 'Cost per day, in US dollars: "5.00"', true),
+      SETTING_VAR
+    ]),
+    setting: ["spend", "costPerDay"]
+  },
+  {
+    ...stopText(SPEND_TEXT.stopCostCall, "Cost per day: the call would pass it", "A call whose own prompt, at your price for its model, would take every agent's calls past Cost per day, though they are under it so far.", "the call would take what every agent's calls cost in the last 24 hours past {{setting}}: about ${{cost}} with it, and it allows ${{limit}}", [
+      v("cost", `what every agent's calls cost in the last 24 hours with this call's prompt as estimated and the calls under way, in US dollars: "5.02"`, true),
+      v("limit", 'Cost per day, in US dollars: "5.00"', true),
+      SETTING_VAR
+    ]),
+    setting: ["spend", "costPerDay"]
+  }
 ];
 
 // node_modules/lumi-ah/src/core/texts/workspace.ts
@@ -73891,7 +73909,9 @@ var TEXT = {
     clippedLost: "runtime.clipped_lost",
     scratchLost: "runtime.scratch_lost",
     windowCut: "runtime.window_cut",
-    scratchFull: "runtime.scratch_full"
+    scratchFull: "runtime.scratch_full",
+    clippedWhole: "runtime.clipped_whole",
+    wholeSize: "runtime.whole_size"
   },
   stop: {
     cancelled: "stop.cancelled",
@@ -74011,6 +74031,7 @@ var TEXT = {
     released: "tool.answer.released_whole",
     releaseWriter: "tool.answer.release_writer",
     releaseAgain: "tool.answer.release_again",
+    releaseWait: "tool.answer.release_wait",
     releaseLate: "tool.answer.release_late",
     releaseFailed: "tool.answer.release_failed",
     releaseUnchecked: "tool.answer.release_unchecked",
@@ -74036,6 +74057,9 @@ var TEXT = {
     turnStopped: "progress.turn_stopped",
     dueWait: "progress.due_wait",
     nothingReleased: "progress.nothing_released",
+    unreleasedSent: "progress.unreleased_sent",
+    unreleasedAnswered: "progress.unreleased_answered",
+    unreleasedLate: "progress.unreleased_late",
     leadMissing: "progress.lead_missing",
     leadOff: "progress.lead_off",
     leadLate: "progress.lead_late",
@@ -74103,6 +74127,15 @@ var RUNTIME_TEXTS = [
     vars: [v("shown", "the characters shown"), v("total", "the result's length"), v("handle", "where the whole result waits", true), v("per", "the most characters one scratch_read gives of this result"), SETTING_VAR],
     setting: ["loop", "clipChars"]
   },
+  {
+    id: TEXT.runtime.clippedWhole,
+    group: RUNTIME,
+    label: "A tool result clipped at its tool's own size",
+    note: "Follows the part of a long tool result that reaches the model, where its tool gives more whole than Tool results clipped past and the result is longer still: no setting clipped it, so none is named.",
+    text: "[Clipped: the first {{shown}} of {{total}} characters; this tool gives up to {{per}} characters whole. The rest is in scratch {{handle}}: scratch_read gives it from offset {{shown}}, {{per}} characters a read at most.]",
+    vars: [v("shown", "the characters shown"), v("total", "the result's length"), v("handle", "where the whole result waits", true), v("per", "the most its tool gives whole, and the most one scratch_read gives of it", true)]
+  },
+  { id: TEXT.runtime.wholeSize, group: RUNTIME, label: "A tool's own whole size", note: "Fills {{setting}} in A clipped tool result whose rest couldn't be kept, where the result was clipped at the length its tool gives whole and not at Tool results clipped past.", text: "this tool, which gives up to {{per}} characters whole,", vars: [v("per", "the most its tool gives whole", true)] },
   { id: TEXT.runtime.unknownTool, group: RUNTIME, label: "A tool that doesn't exist", note: "The result of a call to a tool the agent wasn't given.", text: "There's no tool {{name}}. The tools are: {{tools}}. Call one of those.", vars: [v("name", "the name the model called"), v("tools", "the agent's tools")] },
   { id: TEXT.runtime.toolFailed, group: RUNTIME, label: "A tool that failed", note: "The result of a tool call that failed.", text: "{{name}} failed: {{error}}", vars: [v("name", "the tool"), v("error", "why", true)] },
   {
@@ -74110,8 +74143,8 @@ var RUNTIME_TEXTS = [
     group: RUNTIME,
     label: "Too many calls in one answer",
     note: "The result of each call past Tool calls per answer.",
-    text: "Not run: one answer may call at most {{limit}} {{tools}}. Call {{name}} again in your next answer if you still need it.",
-    vars: [v("limit", "Tool calls per answer"), v("tools", '"tool" for 1, else "tools"'), v("name", "the tool not run")]
+    text: "Not run: one answer may call at most {{limit}} {{tools}} ({{setting}}). Call {{name}} again in your next answer if you still need it.",
+    vars: [v("limit", "Tool calls per answer"), v("tools", '"tool" for 1, else "tools"'), v("name", "the tool not run"), { ...SETTING_VAR, text: "Tool calls per answer, the agent's, and where it is changed" }]
   },
   {
     id: TEXT.runtime.toolsInText,
@@ -74158,13 +74191,13 @@ Arguments (JSON Schema): {{parameters}}`, vars: [v("name", "the tool's name", tr
 var STOP_TEXTS = [
   stopText(TEXT.stop.cancelled, "Cancelled", "The agent was cancelled: the turn was stopped, or whoever started it stopped it.", "the agent was cancelled"),
   stopText(TEXT.stop.busy, "Still working", "A message sent while the agent still works on its last one.", "the agent is still working on its last message"),
-  stopText(TEXT.stop.revisions, "Out of revisions", "A message after its first answer, once it has had every revision its budget allows (Revisions).", "it has had the {{revisions}} it may have after its first answer (Revisions)", [v("revisions", 'the revisions it may have, with the word: "2 revisions"', true)]),
+  stopText(TEXT.stop.revisions, "Out of revisions", "A message after its first answer, once it has had every revision its budget allows (Revisions).", "it has had the {{revisions}} it may have after its first answer, all that {{setting}} allows", [v("revisions", 'the revisions it may have, with the word: "2 revisions"', true), { ...SETTING_VAR, text: "Revisions, the agent's, and where it is changed" }]),
   stopText(TEXT.stop.wallTime, "Out of time", "The agent's own time ran out (Time per agent).", "the agent has worked all the time {{setting}} allows", [{ ...SETTING_VAR, text: "Time per agent, the agent's, and where it is changed" }]),
   { ...stopText(TEXT.stop.turnTime, "The turn out of time", "The turn's time ran out (Time per turn).", "the turn's agents have worked all the time {{setting}} allows", [SETTING_VAR]), setting: ["turn", "wallMs"] },
-  stopText(TEXT.stop.callTime, "A call too slow", "One call took longer than Time per call.", "the call took longer than Time per call"),
+  stopText(TEXT.stop.callTime, "A call too slow", "One call took longer than Time per call.", "the call took longer than {{setting}} allows", [{ ...SETTING_VAR, text: "Time per call, the agent's, and where it is changed" }]),
   stopText(TEXT.stop.callTokensIn, "A prompt too long", "A call whose prompt, as estimated, is past Prompt per call.", "the call's prompt, about {{tokens}}, is past the {{limit}} tokens {{setting}} allows", [v("tokens", `the prompt's estimate, with the word: "9000 tokens"`, true), v("limit", "Prompt per call", true), { ...SETTING_VAR, text: "Prompt per call, the agent's, and where it is changed" }]),
-  stopText(TEXT.stop.tokensIn, "The agent's prompt tokens spent", "A call that would take the agent's prompt tokens past Prompt tokens per agent.", "the call would take the agent's prompt tokens past Prompt tokens per agent: counted as {{counted}} of the {{limit}} allowed (a cached re-read counts as {{weight}} of a token)", [v("counted", "the prompt tokens with this call, as the limit counts them"), v("weight", "What a cached re-read counts as"), v("limit", "Prompt tokens per agent", true)]),
-  stopText(TEXT.stop.tokensOut, "The agent's answer tokens spent", "The agent has written all Answer tokens per agent allows.", "the agent has written its {{tokens}} (Answer tokens per agent)", [v("tokens", 'Answer tokens per agent, with the word: "4000 tokens"', true)]),
+  stopText(TEXT.stop.tokensIn, "The agent's prompt tokens spent", "A call that would take the agent's prompt tokens past Prompt tokens per agent.", "the call would take the agent's prompt tokens past {{setting}}: counted as {{counted}} of the {{limit}} allowed (a cached re-read counts as {{weight}} of a token)", [v("counted", "the prompt tokens with this call, as the limit counts them"), v("weight", "What a cached re-read counts as"), v("limit", "Prompt tokens per agent", true), { ...SETTING_VAR, text: "Prompt tokens per agent, the agent's, and where it is changed" }]),
+  stopText(TEXT.stop.tokensOut, "The agent's answer tokens spent", "The agent has written all Answer tokens per agent allows.", "the agent has written its {{tokens}}, all that {{setting}} allows", [v("tokens", 'Answer tokens per agent, with the word: "4000 tokens"', true), { ...SETTING_VAR, text: "Answer tokens per agent, the agent's, and where it is changed" }]),
   { ...stopText(TEXT.stop.turnTokensIn, "The turn's prompt tokens spent", "A call that would take the turn's prompt tokens past Prompt tokens per turn.", "the call would take the turn's prompt tokens past {{setting}}: counted as {{counted}} of the {{limit}} allowed (a cached re-read counts as {{weight}} of a token)", [v("counted", "the prompt tokens with this call, as the limit counts them"), v("weight", "What a cached re-read counts as"), v("limit", "Prompt tokens per turn", true), SETTING_VAR]), setting: ["turn", "tokensIn"] },
   { ...stopText(TEXT.stop.turnTokensOut, "The turn's answer tokens spent", "The turn's agents have written all Answer tokens per turn allows.", "the turn's agents have written its {{tokens}}, all that {{setting}} allows", [v("tokens", 'Answer tokens per turn, with the word: "20000 tokens"', true), SETTING_VAR]), setting: ["turn", "tokensOut"] },
   { ...stopText(TEXT.stop.loop, "The loop detector", "The agent called one tool with the same arguments, and got the same result, as many times in a row as the loop detector allows.", "the agent called {{tool}} with the same arguments {{times}} in a row and got the same result each time, as many as {{setting}} allows", [v("tool", "the tool's name", true), v("times", 'how many times, with the word: "3 times"', true), SETTING_VAR]), setting: ["loop", "repeats"] },
@@ -74175,7 +74208,7 @@ var STOP_TEXTS = [
   stopText(TEXT.stop.connectionUnread, "A connection that couldn't be read", "The runtime couldn't read its connections to find the agent's.", "the connection {{connection}} couldn't be read ({{error}})", [v("connection", "the connection's id; empty for the default connection"), v("error", "why", true)]),
   stopText(TEXT.stop.noDefault, "No connection to run on", "An agent with no connection of its own runs on the runtime's default connection, and there is none.", "there is no connection to run this agent on: it has none of its own, and the runtime has no default connection. Add one, or make one the default, on LumiAH's Runtime page under Connections"),
   stopText(TEXT.stop.noConnection, "A connection that is gone, and no default", "The agent's connection isn't one of the runtime's any more, and the runtime has no default connection to run it on instead.", "the connection {{connection}} is no longer one of the runtime's, and the runtime has no default connection to run this agent on instead: give it another in LumiAH's Settings, or make one the default on LumiAH's Runtime page under Connections", [v("connection", "the connection's id", true)]),
-  stopText(TEXT.stop.answerRoom, "Too little room left for an answer", "A call that would have fewer answer tokens than Least answer room, because the agent's or its turn's answer tokens are nearly spent.", "only {{left}} are left of its answer tokens, fewer than Least answer room ({{floor}}): an answer written in them would be cut", [v("left", 'the answer tokens left, with the word: "40 tokens"', true), v("floor", "Least answer room", true)])
+  { ...stopText(TEXT.stop.answerRoom, "Too little room left for an answer", "A call that would have fewer answer tokens than Least answer room, because the agent's or its turn's answer tokens are nearly spent.", "only {{left}} are left of its answer tokens, fewer than the {{floor}} {{setting}} asks for: an answer written in them would be cut", [v("left", 'the answer tokens left, with the word: "40 tokens"', true), v("floor", "Least answer room", true), SETTING_VAR]), setting: ["loop", "answerFloor"] }
 ];
 var MAIN_TEXTS = [
   {
@@ -74344,7 +74377,7 @@ The turns to fold into it, oldest first:
 {{receipt}}`, vars: [v("told", "what the turn was for", true), v("receipt", "its receipt", true)] },
   { id: TEXT.session.none, group: SESSION, label: "Nothing", note: "Stands in for a part that is empty.", text: "(none)", vars: [] },
   { id: TEXT.session.failedNothing, group: SESSION, label: "No summary: nothing answered", note: "Why the main agent's notes weren't summarized, when the summarizing call answered nothing.", text: "the summarizing call answered nothing", vars: [] },
-  { id: TEXT.session.failedCut, group: SESSION, label: "No summary: cut off", note: "Why the notes weren't summarized, when the summary stopped at its limit.", text: "its summary was cut off at its limit (the summarizer's Answer per call)", vars: [] }
+  { id: TEXT.session.failedCut, group: SESSION, label: "No summary: cut off", note: "Why the notes weren't summarized, when the summary stopped at its limit.", text: "its summary was cut off at its limit, the summarizer's {{setting}}", vars: [SETTING_VAR], setting: ["agents", "summarizer", "budget", "callTokensOut"] }
 ];
 var TOOL_TEXTS = [
   ...toolTexts(TOOL.presetInstructions, "List the active preset's instruction blocks in order, those switched off marked: what the preset's author tells the model, as written in the preset, before Lumiverse fills in its macros. Give block to read one whole.", { block: "A block's id or name, to read that block whole.", cursor: CURSOR_ARG }),
@@ -74391,7 +74424,8 @@ Its steps, in full as they were; read one whole with step:`, vars: [v("told", "w
   { id: TEXT.answer.replyReleased, group: ANSWERS6, label: "write_reply: the reply was released already", note: "write_reply's answer once the turn's reply was released with reply_write, or while an agent's answer goes out as it (delegate with to_reply): no writer writes after it.", text: "Not handed to the writer: this turn's reply went out already, or is going out now as another agent's answer, and a turn's reply is written once. Nothing more goes into it: finish your turn.", vars: [] },
   { id: TEXT.answer.released, group: ANSWERS6, label: "reply_write: released", note: "reply_write's answer once the turn's reply reached the user. A turn's reply is released once, whole.", text: "Released: the reply, {{chars}} characters, reached the user. A turn's reply is released once, so nothing more goes into it. Finish your turn: call what else you still need, then answer.", vars: [v("chars", "the reply's length", true)] },
   { id: TEXT.answer.releaseWriter, group: ANSWERS6, label: "reply_write: the writer has the reply", note: "The answer of reply_write, and of delegate with to_reply, once the writer is writing the reply or has written it.", text: "Not released: the writer is writing this reply, or has written it, so nothing more can go into it.", vars: [] },
-  { id: TEXT.answer.releaseAgain, group: ANSWERS6, label: "reply_write and to_reply: the reply was released already", note: "The answer of reply_write, and of delegate with to_reply, once the turn's reply went out, or while another agent's answer goes out as it: a turn's reply is released once, whole.", text: "Not released: this turn's reply went out already, or is going out now as another agent's answer, and a turn's reply is written once, whole. Nothing more goes into it: finish your turn.", vars: [] },
+  { id: TEXT.answer.releaseAgain, group: ANSWERS6, label: "reply_write and to_reply: the reply was released already", note: "The answer of reply_write, and of delegate with to_reply, once the turn's reply went out, or began to go out as another agent's answer: a turn's reply is released once, whole.", text: "Not released: this turn's reply went out already, or is going out now as another agent's answer, and a turn's reply is written once, whole. Nothing more goes into it: finish your turn.", vars: [] },
+  { id: TEXT.answer.releaseWait, group: ANSWERS6, label: "reply_write, write_reply and to_reply: another agent's answer may be the reply", note: "The answer of reply_write, write_reply, and of delegate with to_reply, while another agent's answer is about to go out as the turn's reply (delegate with to_reply) and none of it has yet: should it end without sending anything, the reply is still to be released.", text: "Not now: another agent's answer is going out as this turn's reply, and none of it has reached the user yet. Wait for that call to end: if it sends nothing, the reply is still yours to release; if it sends its answer, that is the turn's reply, and nothing more goes into it.", vars: [] },
   { id: TEXT.answer.releaseLate, group: ANSWERS6, label: "reply_write: the extension didn't answer in time", note: "reply_write's answer when the extension that checks the reply gave no word on it within Wait for the extension: nothing goes out unchecked, and the reply is still to be released.", text: "Not released: {{extension}} gave no word on the reply within {{wait}} ({{setting}}), so nothing was sent and the reply is still yours to release. Try again.", vars: [v("extension", "the extension's name"), v("wait", 'how long it was waited for: "10 seconds"'), v("setting", "Wait for the extension, with where it is changed", true)] },
   { id: TEXT.answer.releaseFailed, group: ANSWERS6, label: "reply_write: the extension's check failed", note: "reply_write's answer when asking the extension that checks the reply failed: nothing goes out unchecked, and the reply is still to be released.", text: "Not released: {{extension}}'s check on the reply failed ({{error}}), so nothing was sent and the reply is still yours to release. Try again.", vars: [v("extension", "the extension's name"), v("error", "why it failed", true)] },
   { id: TEXT.answer.releaseUnchecked, group: ANSWERS6, label: "reply_write: the extension gave no text", note: "reply_write's answer when the extension that checks the reply answered with neither a reason to keep it back nor a text that can go out (where the chat's reply_write is the extension's own, only a text lets anything go): nothing goes out, and the reply is still to be released.", text: "Not released: {{extension}} gave neither the reply's text nor a reason to keep it back, so nothing was sent and the reply is still yours to release. Try again.", vars: [v("extension", "the extension's name")] },
@@ -74417,6 +74451,9 @@ var PROGRESS_TEXTS = [
   { id: TEXT.progress.turnStopped, group: PROGRESS, label: "Why: the turn was stopped", note: "The reason a turn gives when it was stopped before its agents could say why.", text: "the turn was stopped", vars: [] },
   { id: TEXT.progress.dueWait, group: PROGRESS, label: "Waiting for jobs due", note: "A line when a turn waits at its start for the jobs started as due by it.", text: "Waiting for {{jobs}} due by this turn\u2026", vars: [v("jobs", 'how many, with the word: "2 jobs"', true)] },
   { id: TEXT.progress.nothingReleased, group: PROGRESS, label: "Why: nothing was released", note: "Why a turn failed in a chat whose reply is only what its agents release, when they released none of it. No writer writes in their place there.", text: "the agents ended without releasing any of the reply, and in this chat no writer writes it in their place", vars: [] },
+  { id: TEXT.progress.unreleasedSent, group: PROGRESS, label: "The extension released what the agents had ready", note: "A line in the reply's thinking block, a notice in the live view and a step in the main agent's notes, when the agent that leads ended with none of the reply released and the extension gave what its agents had ready, which went out as the turn's reply.", text: "{{extension}} released what its agents had ready as the reply: {{agent}} ended without releasing it ({{why}}).", vars: [v("extension", "the extension's name"), v("agent", "the agent that leads, by its id"), v("why", "how it ended, as its stop says it", true)] },
+  { id: TEXT.progress.unreleasedAnswered, group: PROGRESS, label: "Why: the agent that leads answered", note: "Fills {{why}} in The extension released what the agents had ready, where the agent that leads answered without releasing the reply.", text: "it answered instead", vars: [] },
+  { id: TEXT.progress.unreleasedLate, group: PROGRESS, label: "Why: nothing released, and the extension gave no word in time", note: "Why a turn failed in a chat whose reply is only what its agents release, when they released none of it and the extension, asked for what its agents had ready, didn't answer within Wait for the extension.", text: "{{reason}}; {{extension}} was asked for what its agents had ready and gave no word within {{wait}}. If it keeps happening, give it longer with {{setting}}", vars: [v("reason", "why the turn failed, as it would without that ask", true), v("extension", "the extension's name"), v("wait", 'how long it was waited for: "10 seconds"'), v("setting", "Wait for the extension, with where it is changed", true)] },
   { id: TEXT.progress.leadMissing, group: PROGRESS, label: "Why: the agent that leads isn't there", note: "Why a turn didn't start in a chat whose extension names the agent that leads its replies, when there is no such agent. No other agent leads in its place.", text: "{{extension}} names {{agent}} to lead this chat's replies, and there is no such agent, so this reply wasn't started. {{extension}} has to supply it: update it, or tell its author", vars: [v("extension", "the extension's name"), v("agent", "the agent's id", true)] },
   { id: TEXT.progress.leadOff, group: PROGRESS, label: "Why: the agent that leads is switched off", note: "Why a turn didn't start in a chat whose extension names the agent that leads its replies, when that agent is switched off. No other agent leads in its place.", text: "{{extension}} names {{agent}} to lead this chat's replies, and it is switched off, so this reply wasn't started. Switch it on on the Agents page, then try again", vars: [v("extension", "the extension's name"), v("agent", 'the agent, by its name and its id: "Author (author)"', true)] },
   { id: TEXT.progress.leadLate, group: PROGRESS, label: "Why: the agent that leads wasn't given in time", note: "Why a turn didn't start in a chat whose extension names the agent that leads its replies, when the extension didn't give its agents within Wait for the extension. No other agent leads in its place.", text: "{{extension}} names {{agent}} to lead this chat's replies, and it isn't in this run: {{extension}} didn't give its agents within {{wait}}, so this reply wasn't started. Try again; if it keeps happening, give {{extension}} longer with {{setting}}", vars: [v("extension", "the extension's name"), v("agent", "the agent's id", true), v("wait", 'how long it was waited for: "10 seconds"'), v("setting", "Wait for the extension, with where it is changed", true)] },
@@ -76430,6 +76467,10 @@ function cutShort(finish) {
   const f = finish?.toLowerCase();
   return f === "length" || f === "max_tokens" || f === "max_output_tokens";
 }
+function allowanceSaid(words, key) {
+  const said = words.allowance?.[key];
+  return said !== undefined ? { setting: said } : {};
+}
 var TURN_WORDS = { tokensIn: TEXT.stop.turnTokensIn, tokensOut: TEXT.stop.turnTokensOut, toolTurns: TEXT.stop.turnToolTurns, time: TEXT.stop.turnTime };
 var STILL_MS = 250;
 
@@ -76592,7 +76633,7 @@ class Agent {
       return this.end(used, new AgentStop("busy", { id: TEXT.stop.busy }));
     if (this.answered) {
       if (this.revisions >= this.spec.budget.revisions)
-        return this.end(used, new AgentStop("revisions", { id: TEXT.stop.revisions, vars: { revisions: this.deps.texts.counted(this.spec.budget.revisions, TEXT.word.revision) } }));
+        return this.end(used, new AgentStop("revisions", { id: TEXT.stop.revisions, vars: { revisions: this.deps.texts.counted(this.spec.budget.revisions, TEXT.word.revision), setting: this.budgetSetting("revisions") } }));
       this.revisions += 1;
     }
     this.busy = true;
@@ -76863,7 +76904,7 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
       return new AgentStop("wall_time", { id: TEXT.stop.wallTime, vars: { setting: this.budgetSetting("wallMs") } });
     const turn = this.deps.turn;
     if (turn && now - turn.startedAt - turn.held(now) >= limitOf(turn.budget.wallMs))
-      return new AgentStop("turn_time", { id: turn.words.time });
+      return new AgentStop("turn_time", { id: turn.words.time, vars: allowanceSaid(turn.words, "time") });
     return null;
   }
   overBudget(p) {
@@ -76876,19 +76917,19 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
     const weight = String(cachedWeight);
     const own = countedIn(this.total, cachedWeight) + p.estimate;
     if (own > limitOf(budget.tokensIn))
-      return new AgentStop("tokens_in", { id: TEXT.stop.tokensIn, vars: { limit: String(budget.tokensIn), counted: String(own), weight } });
+      return new AgentStop("tokens_in", { id: TEXT.stop.tokensIn, vars: { limit: String(budget.tokensIn), counted: String(own), weight, setting: this.budgetSetting("tokensIn") } });
     const floor = Math.min(this.deps.settings.loop.answerFloor, budget.callTokensOut);
     const ownLeft = limitOf(budget.tokensOut) - this.total.out;
     if (ownLeft <= 0)
-      return new AgentStop("tokens_out", { id: TEXT.stop.tokensOut, vars: { tokens: texts.counted(limitOf(budget.tokensOut), TEXT.word.token) } });
+      return new AgentStop("tokens_out", { id: TEXT.stop.tokensOut, vars: { tokens: texts.counted(limitOf(budget.tokensOut), TEXT.word.token), setting: this.budgetSetting("tokensOut") } });
     if (ownLeft < floor)
       return new AgentStop("tokens_out", { id: TEXT.stop.answerRoom, vars: { left: texts.counted(ownLeft, TEXT.word.token), floor: String(floor) } });
     const all = turn ? countedIn(turn.usage, cachedWeight) + p.estimate : 0;
     if (turn && all > limitOf(turn.budget.tokensIn))
-      return new AgentStop("turn_tokens_in", { id: turn.words.tokensIn, vars: { limit: String(turn.budget.tokensIn), counted: String(all), weight } });
+      return new AgentStop("turn_tokens_in", { id: turn.words.tokensIn, vars: { limit: String(turn.budget.tokensIn), counted: String(all), weight, ...allowanceSaid(turn.words, "tokensIn") } });
     const runLeft = turn ? limitOf(turn.budget.tokensOut) - turn.usage.out : Number.POSITIVE_INFINITY;
     if (turn && runLeft <= 0)
-      return new AgentStop("turn_tokens_out", { id: turn.words.tokensOut, vars: { tokens: texts.counted(limitOf(turn.budget.tokensOut), TEXT.word.token) } });
+      return new AgentStop("turn_tokens_out", { id: turn.words.tokensOut, vars: { tokens: texts.counted(limitOf(turn.budget.tokensOut), TEXT.word.token), ...allowanceSaid(turn.words, "tokensOut") } });
     if (runLeft < floor)
       return new AgentStop("turn_tokens_out", { id: TEXT.stop.answerRoom, vars: { left: texts.counted(runLeft, TEXT.word.token), floor: String(floor) } });
     return null;
@@ -76904,7 +76945,7 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
     if (this.total.toolTurns >= limitOf(this.spec.budget.toolTurns))
       return new AgentStop("tool_turns", { id: TEXT.stop.toolTurns, vars: { rounds: this.deps.texts.counted(limitOf(this.spec.budget.toolTurns), TEXT.word.round), setting: this.budgetSetting("toolTurns") } });
     if (turn && turn.usage.toolTurns >= limitOf(turn.budget.toolTurns))
-      return new AgentStop("turn_tool_turns", { id: turn.words.toolTurns, vars: { rounds: this.deps.texts.counted(limitOf(turn.budget.toolTurns), TEXT.word.round) } });
+      return new AgentStop("turn_tool_turns", { id: turn.words.toolTurns, vars: { rounds: this.deps.texts.counted(limitOf(turn.budget.toolTurns), TEXT.word.round), ...allowanceSaid(turn.words, "toolTurns") } });
     return null;
   }
   looped(round, repeat) {
@@ -76947,11 +76988,11 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
       deadline(() => {
         const now = this.now();
         return limitOf(turn.budget.wallMs) - (now - turn.startedAt - turn.held(now));
-      }, new AgentStop("turn_time", { id: turn.words.time }));
+      }, new AgentStop("turn_time", { id: turn.words.time, vars: allowanceSaid(turn.words, "time") }));
     }
     if (call) {
       const until = this.now() + limitOf(this.spec.budget.callMs);
-      deadline(() => until - this.now(), new AgentStop("call_time", { id: TEXT.stop.callTime }));
+      deadline(() => until - this.now(), new AgentStop("call_time", { id: TEXT.stop.callTime, vars: { setting: this.budgetSetting("callMs") } }));
     }
     return { signal: AbortSignal.any(sources), clear: () => over.abort() };
   }
@@ -77032,7 +77073,7 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
     if (signal.aborted)
       outcome = this.notBegun(call, this.why(signal.reason, signal));
     else if (!how.allowed)
-      outcome = { text: this.text(TEXT.runtime.tooManyCalls, { limit: String(this.spec.budget.callTools), tools: this.deps.texts.noun(limitOf(this.spec.budget.callTools), TEXT.word.tool), name: call.name }), error: true };
+      outcome = { text: this.text(TEXT.runtime.tooManyCalls, { limit: String(this.spec.budget.callTools), tools: this.deps.texts.noun(limitOf(this.spec.budget.callTools), TEXT.word.tool), name: call.name, setting: this.budgetSetting("callTools") }), error: true };
     else if (!tool)
       outcome = { text: this.text(TEXT.runtime.unknownTool, { name: call.name, tools: [...this.tools.keys()].join(", ") }), error: true };
     else if (how.ended)
@@ -77125,10 +77166,11 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
       return null;
     }
     const total = String(text.length);
-    const said = (id2) => id2 === TEXT.runtime.clipped ? { per: String(max) } : { setting: this.budgetSetting("callTokensIn") };
+    const clipId = (wholeChars ?? 0) > this.deps.settings.loop.clipChars ? TEXT.runtime.clippedWhole : TEXT.runtime.clipped;
+    const said = (id2) => id2 === clipId ? { per: String(max) } : { setting: this.budgetSetting("callTokensIn") };
     const words = (id2) => this.text(id2, { shown: total, total, handle: "s000000", ...said(id2) }).length + 1;
-    const fits = text.length > max && max + words(TEXT.runtime.clipped) <= room;
-    const id = fits ? TEXT.runtime.clipped : TEXT.runtime.windowCut;
+    const fits = text.length > max && max + words(clipId) <= room;
+    const id = fits ? clipId : TEXT.runtime.windowCut;
     const shown = cutAt(text, fits ? max : Math.max(0, room - words(TEXT.runtime.windowCut)));
     this.room = Math.max(0, room - shown - words(id));
     const sizes = { shown: String(shown), total };
@@ -77143,7 +77185,8 @@ ${this.text(TEXT.runtime.budget, { rounds: this.deps.texts.counted(rounds, TEXT.
         const stopped = signal.aborted ? this.why(error, signal) : null;
         if (!stopped)
           this.deps.host.log("warn", `[LumiAH] the whole of a clipped tool result couldn't be stored (${errorText(error)}): the model has its start alone`);
-        return { text: `${start}${this.text(TEXT.runtime.clippedLost, { ...sizes, error: stopped ? this.text(stopped.text.id, stopped.text.vars) : errorText(error) })}`, whole: null };
+        const lost = { ...sizes, error: stopped ? this.text(stopped.text.id, stopped.text.vars) : errorText(error), ...clipId === TEXT.runtime.clippedWhole ? { setting: this.text(TEXT.runtime.wholeSize, { per: String(max) }) } : {} };
+        return { text: `${start}${this.text(TEXT.runtime.clippedLost, lost)}`, whole: null };
       }
     }
     const handle = `s${this.scratch.size + 1}`;
@@ -78391,33 +78434,41 @@ function resolveSettings(definition, settings) {
 
 // node_modules/lumi-ah/src/core/delegation.ts
 class ReplyHold {
-  reply;
   hold;
   seen = "";
   sent = 0;
+  hand = null;
   released = "";
-  constructor(reply, hold) {
-    this.reply = reply;
+  constructor(hold) {
     this.hold = hold;
   }
+  begin(hand) {
+    this.hand = hand;
+  }
+  end() {
+    this.hand?.end();
+    this.hand = null;
+    this.seen = "";
+    this.sent = 0;
+  }
   delta(delta) {
-    if (delta.content === undefined || delta.content === "")
+    if (this.hand === null || delta.content === undefined || delta.content === "")
       return;
     this.seen += delta.content;
     if (this.seen.length >= this.hold)
       this.out(this.seen.slice(this.sent));
   }
   call(answer) {
-    if (answer.calls === 0)
+    if (this.hand !== null && answer.calls === 0)
       this.out((answer.text.startsWith(this.seen) ? answer.text : this.seen).slice(this.sent));
     this.seen = "";
     this.sent = 0;
   }
   out(text2) {
-    if (text2 === "")
+    if (text2 === "" || this.hand === null)
       return;
     this.sent += text2.length;
-    if (this.reply.stream(text2))
+    if (this.hand.stream(text2))
       this.released += text2;
   }
 }
@@ -78487,7 +78538,7 @@ class Delegator {
     try {
       const leave = await this.gate.enter(ctx.signal);
       try {
-        const hold = reply ? new ReplyHold(reply, settings.delegation.replyHoldChars) : null;
+        const hold = reply ? new ReplyHold(settings.delegation.replyHoldChars) : null;
         const { agent, lead } = await run.agent(resolved, {
           depth: from.depth + 1,
           parent: ctx.agentId,
@@ -78516,12 +78567,12 @@ ${task}`;
         const late = reply.refused();
         if (late !== null)
           return { text: late, error: true };
-        const letGo = reply.hold(run.ref(agent.id) ?? { agentId: agent.id, role: resolved.definition.id, ...input.as !== undefined ? { as: input.as } : {} });
+        hold.begin(reply.hold(run.ref(agent.id) ?? { agentId: agent.id, role: resolved.definition.id, ...input.as !== undefined ? { as: input.as } : {} }));
         try {
           const answer = await agent.send(sent, ctx.signal);
           return this.answered(resolved.definition.id, agent.id, hold.released === "" ? answer : { ...answer, text: hold.released });
         } finally {
-          letGo(hold.released);
+          hold.end();
         }
       } finally {
         leave();
@@ -78552,7 +78603,7 @@ ${task}`;
       return { text: `${texts.render(TEXT.agents.from, { agent: definition, handle })}
 
 ${reply.text}` };
-    const reason = cut ? texts.render(TEXT.agents.cut) : reply.reason ?? texts.render(TEXT.answer.replyEmpty);
+    const reason = cut ? texts.render(TEXT.agents.cut, { setting: texts.setting(["agents", definition, "budget", "callTokensOut"]) }) : reply.reason ?? texts.render(TEXT.answer.replyEmpty);
     return { text: texts.render(TEXT.agents.stopped, { agent: definition, handle, reason, said: reply.text.trim() === "" ? "" : texts.render(TEXT.agents.stoppedSaid, { text: reply.text }) }), error: true };
   }
 }
@@ -80599,10 +80650,12 @@ function waitWords(ms) {
 function extensionWait(options) {
   return settingPlaceOf(undefined, options.place)(["extension", "waitMs"]);
 }
+function lateWords(ms, late, texts, options, vars = {}) {
+  return texts.render(late, { extension: options.extension?.name ?? "The extension", ...vars, wait: waitWords(ms), setting: extensionWait(options) });
+}
 function unansweredWords(input) {
   const { why, texts, options } = input;
-  const vars = { extension: options.extension?.name ?? "The extension", ...input.vars };
-  return "ms" in why ? texts.render(input.late, { ...vars, wait: waitWords(why.ms), setting: extensionWait(options) }) : texts.render(input.failed, { ...vars, error: why.error });
+  return "ms" in why ? lateWords(why.ms, input.late, texts, options, input.vars) : texts.render(input.failed, { extension: options.extension?.name ?? "The extension", ...input.vars, error: why.error });
 }
 function agentsMissing(why, texts, options) {
   return unansweredWords({ why, late: TEXT.progress.agentsLate, failed: TEXT.progress.agentsUnread, texts, options });
@@ -81076,7 +81129,20 @@ class Run {
 }
 
 // node_modules/lumi-ah/src/core/jobs.ts
-var JOB_WORDS = { tokensIn: TEXT.jobs.stopIn, tokensOut: TEXT.jobs.stopOut, toolTurns: TEXT.jobs.stopRounds, time: TEXT.jobs.stopTime };
+function jobWords(job, texts) {
+  const own = job.allowance ?? {};
+  const said = texts.render(TEXT.jobs.stopAllowance);
+  const allowance = {};
+  if (own.tokensIn !== undefined)
+    allowance.tokensIn = said;
+  if (own.tokensOut !== undefined)
+    allowance.tokensOut = said;
+  if (own.toolTurns !== undefined)
+    allowance.toolTurns = said;
+  if (own.wallMs !== undefined)
+    allowance.time = said;
+  return { tokensIn: TEXT.jobs.stopIn, tokensOut: TEXT.jobs.stopOut, toolTurns: TEXT.jobs.stopRounds, time: TEXT.jobs.stopTime, allowance };
+}
 var ALLOWANCE_STOPS = ["turn_tokens_in", "turn_tokens_out", "turn_tool_turns", "turn_time"];
 var DAY_STOP = "spend";
 var RECORD_LOOKS = 40;
@@ -81558,7 +81624,7 @@ class Jobs {
       const run = new Run(shared, setup, {
         info: { id: job.id, kind: "job", chatId: job.chatId },
         budget: jobBudget(job, settings),
-        words: JOB_WORDS,
+        words: jobWords(job, texts),
         startedAt,
         messageId: null,
         job: job.id,
@@ -81653,7 +81719,7 @@ ${message}`, signal);
           return { state: "spent", ...reply.reason !== undefined ? { reason: reply.reason } : {}, stoppedAt: day ? "day" : "allowance", report: report2, at: at2 };
         }
         if (!whole3)
-          return { state: "failed", reason: reply.status === "answered" && cutShort(reply.finish) ? texts.render(said === "" ? TEXT.jobs.whyCutThinking : TEXT.agents.cut) : reply.reason ?? texts.render(TEXT.jobs.whyNoAnswer), report: told, at: at2, ...reply.code === "connection" || reply.code === "failed" && isLasting(reply.reason ?? "") ? { lasting: true } : {} };
+          return { state: "failed", reason: reply.status === "answered" && cutShort(reply.finish) ? texts.render(said === "" ? TEXT.jobs.whyCutThinking : TEXT.agents.cut, { setting: texts.setting(["agents", resolved.definition.id, "budget", "callTokensOut"]) }) : reply.reason ?? texts.render(TEXT.jobs.whyNoAnswer), report: told, at: at2, ...reply.code === "connection" || reply.code === "failed" && isLasting(reply.reason ?? "") ? { lasting: true } : {} };
         if (await this.stands(job, settings.jobs.recordWaitMs, hostSignal).catch(() => true))
           return { state: "done", report: told, at: at2 };
         return { state: "off_path", reason: texts.render(TEXT.jobs.whyOffPath), report: told, at: at2 };
@@ -83259,7 +83325,7 @@ class Sides {
         } else
           reason = answered.reason ?? texts.render(TEXT.answer.replyEmpty);
         if (status === "done" && cutShort(finish))
-          reason = texts.render(TEXT.agents.cut);
+          reason = texts.render(TEXT.agents.cut, { setting: texts.setting(["agents", resolved.definition.id, "budget", "callTokensOut"]) });
       } catch (error) {
         status = signal.aborted ? "stopped" : "failed";
         reason = errorText(error);
@@ -87021,6 +87087,7 @@ class Work {
   heard = null;
   equipped = false;
   failed = null;
+  took = null;
 }
 
 class Turn {
@@ -87079,8 +87146,12 @@ class Turn {
         const main = await this.runMain(work, run, lead);
         if (this.streamed)
           return this.released();
-        if (run.claim?.reply === "released")
-          return main.reply.status === "cancelled" || this.signal.aborted ? { status: "stopped", reason: this.stoppedWhy() } : { status: "failed", reason: this.text(TEXT.progress.nothingReleased) };
+        if (run.claim?.reply === "released") {
+          if (main.reply.status === "cancelled" || this.signal.aborted)
+            return { status: "stopped", reason: this.stoppedWhy() };
+          const { ended, why } = this.leadEnded(main.reply);
+          return await this.unreleased(run, work, ended, why, this.text(TEXT.progress.nothingReleased));
+        }
         return main.writes ? this.ownReply(main.reply) : await this.briefed(main.reply, main.id, run, work);
       } catch (error) {
         if (error instanceof Stopped || this.signal.aborted)
@@ -87336,7 +87407,7 @@ ${asked}`, this.signal);
         return { status: "done" };
       return wrote2.stopped ? { status: "stopped", reason: this.stoppedWhy() } : { status: "failed", reason: wrote2.reason };
     }
-    const short = cut ? this.text(TEXT.agents.cut) : reply.reason ?? this.text(TEXT.answer.replyEmpty);
+    const short = cut ? this.text(TEXT.agents.cut, { setting: this.texts.setting(["agents", run.ref(mainId)?.role ?? AGENT.main, "budget", "callTokensOut"]) }) : reply.reason ?? this.text(TEXT.answer.replyEmpty);
     if (this.settings.reply.withoutBrief === "fail")
       return { status: "failed", reason: short };
     this.progress(TEXT.progress.writingAlone, { reason: short });
@@ -87353,7 +87424,7 @@ ${asked}`, this.signal);
       return this.released();
     }
     if (run.claim?.reply === "released")
-      return { status: "failed", reason };
+      return await this.unreleased(run, work, "failed", reason, reason);
     if (this.written) {
       this.host.log("warn", `[LumiAH] the turn's work failed after its reply was written (${reason}): the reply stands`);
       return { status: "done" };
@@ -87405,8 +87476,10 @@ ${asked}`, this.signal);
     }
   }
   async writeReply(brief, mainId, run) {
-    if (this.streamed || this.holder)
+    if (this.streamed)
       return { text: this.text(TEXT.answer.replyReleased), error: true };
+    if (this.holder)
+      return { text: this.text(TEXT.answer.releaseWait), error: true };
     if (this.writing || this.written || this.broken !== null)
       return { text: this.text(TEXT.answer.replyBusy), error: true };
     this.progress(TEXT.progress.writing);
@@ -87489,20 +87562,11 @@ ${asked}`, this.signal);
     this.closed = true;
   }
   replyStream(run) {
-    const shut = () => {
-      if (this.closed || this.signal.aborted)
-        return this.text(TEXT.answer.releaseEnded);
-      if (this.writing || this.written || this.broken !== null)
-        return this.text(TEXT.answer.releaseWriter);
-      if (this.streamed || this.holder)
-        return this.text(TEXT.answer.releaseAgain);
-      return null;
-    };
     return {
       tool: run.claim?.replyTool ?? null,
-      refused: shut,
+      refused: () => this.shut(),
       write: (args, ctx) => {
-        const next = this.releasing.then(() => this.release(args, ctx, run, shut));
+        const next = this.releasing.then(() => this.release(args, ctx, run));
         this.releasing = next.catch(() => {
           return;
         });
@@ -87510,21 +87574,40 @@ ${asked}`, this.signal);
       },
       hold: (agent) => {
         this.holder = true;
-        let given2 = false;
-        return (released) => {
-          if (given2)
-            return;
-          given2 = true;
-          this.holder = false;
-          if (released !== "")
-            this.tellReleased(run, agent, released, {});
+        let open = true;
+        let out = "";
+        return {
+          stream: (text2) => {
+            if (!open || !this.streamOut(text2))
+              return false;
+            out += text2;
+            return true;
+          },
+          end: () => {
+            if (!open)
+              return;
+            open = false;
+            this.holder = false;
+            if (out !== "")
+              this.tellReleased(run, agent, out, {});
+          }
         };
-      },
-      stream: (text2) => this.streamOut(text2)
+      }
     };
   }
-  async release(args, ctx, run, shut) {
-    const first = shut();
+  shut() {
+    if (this.closed || this.signal.aborted)
+      return this.text(TEXT.answer.releaseEnded);
+    if (this.writing || this.written || this.broken !== null)
+      return this.text(TEXT.answer.releaseWriter);
+    if (this.streamed)
+      return this.text(TEXT.answer.releaseAgain);
+    if (this.holder)
+      return this.text(TEXT.answer.releaseWait);
+    return null;
+  }
+  async release(args, ctx, run) {
+    const first = this.shut();
     if (first !== null)
       return { refused: first };
     const { turn, shared, texts } = this;
@@ -87552,7 +87635,7 @@ ${asked}`, this.signal);
         text2 = given2;
       else if (own || verdict !== null && verdict !== undefined)
         return { refused: this.text(TEXT.answer.releaseUnchecked, { extension: extension.name }) };
-      const late = shut();
+      const late = this.shut();
       if (late !== null)
         return { refused: late };
     }
@@ -87579,6 +87662,38 @@ ${asked}`, this.signal);
     this.written = true;
     this.finish = "stop";
     return { status: "done" };
+  }
+  leadEnded(reply) {
+    if (reply.status === "answered")
+      return cutShort(reply.finish) ? { ended: "limit", why: this.text(TEXT.agents.cut) } : { ended: "done", why: this.text(TEXT.progress.unreleasedAnswered) };
+    return { ended: reply.status === "failed" || reply.code === "connection" ? "failed" : "limit", why: reply.reason ?? this.text(TEXT.answer.replyEmpty) };
+  }
+  async unreleased(run, work, ended, why, failure) {
+    const { shared, turn, texts } = this;
+    const extension = shared.options.extension;
+    const lead = this.mainId === null ? undefined : run.ref(this.mainId);
+    if (this.signal.aborted)
+      return { status: "stopped", reason: this.stoppedWhy() };
+    if (!extension?.unreleased || lead === undefined || this.shut() !== null)
+      return { status: "failed", reason: failure };
+    const asked = await extensionAnswer(shared, this.settings.extension.waitMs, () => extension.unreleased?.({ userId: run.userId, chatId: turn.chatId, turn: turn.generationId, ended }) ?? Promise.resolve(null));
+    if (this.signal.aborted)
+      return { status: "stopped", reason: this.stoppedWhy() };
+    if ("unanswered" in asked) {
+      const why2 = asked.unanswered;
+      this.host.log("warn", `[LumiAH] ${extension.name} gave no word on what its agents had ready (${unansweredLog(why2)}): the turn ends with none of its reply released`);
+      return { status: "failed", reason: "ms" in why2 ? lateWords(why2.ms, TEXT.progress.unreleasedLate, texts, shared.options, { reason: failure }) : failure };
+    }
+    const { answer } = asked;
+    const given2 = isRecord(answer) && typeof answer.text === "string" && answer.text.trim() !== "" ? answer.text : null;
+    if (given2 === null || this.shut() !== null || !this.streamOut(given2))
+      return { status: "failed", reason: failure };
+    this.tellReleased(run, lead, given2, {});
+    const said = { agent: lead.role, why, extension: extension.name };
+    this.progress(TEXT.progress.unreleasedSent, said);
+    work.took = this.text(TEXT.progress.unreleasedSent, said);
+    run.trace.emit({ kind: "notice", text: work.took, at: this.host.clock.now() });
+    return this.released();
   }
   async dueJobs(session) {
     const { host, turn, settings, texts, shared } = this;
@@ -87638,7 +87753,7 @@ ${asked}`, this.signal);
     if (this.reply === "" || !session)
       return null;
     try {
-      const own = finishedSteps(draftOf(work), { reply: String(session.reply), chars: String(this.reply.length), texts: this.texts, failed: work.failed, stopped: ended.reason, written: this.written });
+      const own = finishedSteps(draftOf(work), { reply: String(session.reply), chars: String(this.reply.length), texts: this.texts, failed: work.failed, took: work.took, stopped: ended.reason, written: this.written });
       const segment = { v: 1, kind: "segment", reply: session.reply, generationId: turn.generationId, turn: turn.kind, at: ended.at, request: work.request, steps: [...session.continued?.segment.steps ?? [], ...own] };
       return await shared.sessions.segment(segment);
     } catch (error) {
@@ -87729,6 +87844,8 @@ function finishedSteps(draft, input) {
     steps.splice(draft.asBrief, 0, { kind: "stop", reason: texts.render(TEXT.session.answerAsBrief, { chars: input.chars, reply: input.reply }) });
   if (input.failed !== null)
     steps.push({ kind: "stop", reason: texts.render(TEXT.session.unbriefed, { reason: input.failed }) });
+  if (input.took !== null)
+    steps.push({ kind: "stop", reason: input.took });
   if (input.stopped !== undefined && !steps.some((step) => step.kind === "stop"))
     steps.push({ kind: "stop", reason: input.stopped });
   return steps;
@@ -88452,7 +88569,7 @@ var DOC_PATH = /^(?!.*(?:^|\/)\.{1,2}(?:\/|$))[A-Za-z0-9._-]{1,128}(?:\/[A-Za-z0
 var DOC_PREFIX = /^(?!.*(?:^|\/)\.{1,2}(?:\/|$))(?:[A-Za-z0-9._-]{1,128}\/){0,7}[A-Za-z0-9._-]{0,128}$/;
 var MARK_PATH = "mirror.json";
 var FRAME_LIMIT = 4 * 1024 * 1024;
-var EXTENSION_MEMBERS = ["definitions", "claim", "writerRequest", "runBegan", "agentModel", "releasing", "released", "replyWritten", "runEnded"];
+var EXTENSION_MEMBERS = ["definitions", "claim", "writerRequest", "runBegan", "agentModel", "releasing", "released", "unreleased", "replyWritten", "runEnded"];
 var OWN_BACKEND = { name: "LumiAH", connection: "LumiAH" };
 var COPY_PERMISSIONS = ["chats", "chat_mutation", "world_books"];
 function versionWords(runtime, extension, name = "LumiAH") {
@@ -88828,10 +88945,10 @@ var TRANSPORT_SCHEMA = {
         quietMs: ms("Quiet after", "How long without a word from a runtime before the Runtime page shows it as quiet.", 1e4, DAY_MS4),
         relays: whole3("Runtimes per account", "The runtimes one account may have registered at once.", 1, 64, "runtimes"),
         connectionMs: ms("Wait for the connection", "How long minting a key waits for your linked runtime to make the loopback connection.", 1000, 5 * 60000),
-        joinMaxUnits: whole3("Largest frame joined", "The largest frame the extension puts together from parts: a stored transcript or a model call's prompt may be this long.", MI, CEILINGS.joinMaxUnits, "characters"),
-        partStaleMs: ms("Parts kept", "How long the first parts of a frame wait for the rest.", 1000, CEILINGS.partStaleMs),
+        joinMaxUnits: whole3("Largest frame the extension joins", "The largest frame the extension puts together from parts: a stored transcript or a model call's prompt may be this long.", MI, CEILINGS.joinMaxUnits, "characters"),
+        partStaleMs: ms("Parts the extension keeps", "How long the first parts of a frame the extension puts together wait for the rest.", 1000, CEILINGS.partStaleMs),
         joinFrames: whole3("Frames joined at once", "The most frames sent in parts that the extension puts together at once for one account. A runtime sends a large frame's parts one after another, so only frames left unfinished add up: a frame begun past this is refused.", 1, CEILINGS.joinFrames, "frames"),
-        joinHeldUnits: whole3("Characters held while joining", "The most characters the extension holds, for one account, of frames still coming in parts. A frame that would pass it is refused. Keep it at least as large as the largest frame joined.", MI, CEILINGS.joinHeldUnits, "characters")
+        joinHeldUnits: whole3("Characters held while joining", "The most characters the extension holds, for one account, of frames still coming in parts. A frame that would pass it is refused. Keep it at least as large as Largest frame the extension joins.", MI, CEILINGS.joinHeldUnits, "characters")
       }
     },
     live: {
@@ -88897,8 +89014,8 @@ var TRANSPORT_SCHEMA = {
         traceHeld: whole3("Trace events held", "The most trace events held while they can't be sent; past it a reply's later events stay out of the Live page (its stored transcript is whole all the same).", 100, 1e6, "events"),
         turnWaitMs: ms("Wait for the earlier reply", "How long a new reply waits for the chat's earlier one to stop before it is refused.", 1000, 10 * 60000),
         stopAskMs: ms("Wait for Lumiverse's Stop", "How long Lumiverse may take to answer when the runtime asks it to stop a reply you stopped in the Live page, before the runtime ends the reply itself.", 500, 60000),
-        joinMaxUnits: whole3("Largest frame joined", "The largest frame the runtime puts together from parts.", 1024 * 1024, 256 * 1024 * 1024, "characters"),
-        partStaleMs: ms("Parts kept", "How long the first parts of a frame wait for the rest.", 1000, 60 * 60000),
+        joinMaxUnits: whole3("Largest frame the runtime joins", "The largest frame the runtime puts together from parts.", 1024 * 1024, 256 * 1024 * 1024, "characters"),
+        partStaleMs: ms("Parts the runtime keeps", "How long the first parts of a frame the runtime puts together wait for the rest.", 1000, 60 * 60000),
         storeWaitMs: ms("Storage wait", "How long the runtime waits for this extension's storage to take what it saved, wherever something waits on it: a reply's record, a page that reads it, the runtime stopping. Past it that goes on without it. Nothing is lost: it stays on the runtime's disk and goes to the storage as soon as it can.", 1000, 60 * 60000),
         lumiverseMs: ms("Lumiverse wait", "How long each request the runtime makes to Lumiverse over HTTP waits for its answer: finding this extension, opening its link, putting the key in the loopback connection, asking Lumiverse to stop a reply. Past it the request fails, and says so.", 1000, 10 * 60000),
         copyReadMs: ms("Chat data wait", "How long each request the runtime makes to Lumiverse for its own copy of your chats and world books waits for its answer: a page of a chat's messages or of a book's entries, a check of a chat before an agent reads it. Past it that read is given up, and the agent's read is asked of this extension instead.", 1000, 10 * 60000),
@@ -89765,7 +89882,7 @@ class HostConnection {
           this.pending.delete(joined.id);
           clearTimeout(waiting2.timer);
           this.timed(waiting2, 0, null, "failed");
-          waiting2.reject(new LiveError("too_large", `LumiAH's answer to ${waiting2.type} was too large for the runtime: ${joined.refused} Raise the runtime's "Largest frame joined" in LumiAH's settings.`));
+          waiting2.reject(new LiveError("too_large", `LumiAH's answer to ${waiting2.type} was too large for the runtime: ${joined.refused} Raise "Largest frame the runtime joins" in LumiAH's settings (Transport \u2192 Runtime).`));
         }
       }
       return;
@@ -94120,10 +94237,7 @@ function linkExtension(deps) {
     await once2(member, arg2);
   }
   const json4 = (value) => value;
-  return {
-    get name() {
-      return deps.offer()?.name ?? "LumiAH";
-    },
+  const members = {
     definitions: async (ask3) => {
       const value = await read2("definitions", json4(ask3));
       return isRecord2(value) ? value : {};
@@ -94145,9 +94259,21 @@ function linkExtension(deps) {
       return isRecord2(value) && typeof value.text === "string" ? { text: value.text } : null;
     },
     released: (release) => tell("released", json4(release)),
+    unreleased: async (turn) => {
+      const value = await once2("unreleased", json4(turn));
+      return isRecord2(value) && typeof value.text === "string" ? { text: value.text } : null;
+    },
     replyWritten: (reply) => tell("replyWritten", json4(reply)),
     runEnded: (run) => tell("runEnded", json4(run))
   };
+  const extension = {
+    get name() {
+      return deps.offer()?.name ?? "LumiAH";
+    }
+  };
+  for (const member of EXTENSION_MEMBERS)
+    Object.defineProperty(extension, member, { get: () => has3(member) ? members[member] : undefined, enumerable: true });
+  return extension;
 }
 
 // node_modules/lumi-ah/src/host/refused.ts
@@ -100759,7 +100885,7 @@ if (process.versions.bun === undefined) {
 `);
   process.exit(1);
 }
-var BUILD = "c52acae6";
+var BUILD = "85200ebd";
 var http = async (request2) => {
   const response = await fetch(request2.url, { method: request2.method, headers: request2.headers, ...request2.body !== undefined ? { body: request2.body } : {}, ...request2.signal !== undefined ? { signal: request2.signal } : {}, redirect: "manual" });
   const text4 = await response.text();

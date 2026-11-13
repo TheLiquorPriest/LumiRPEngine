@@ -16633,7 +16633,6 @@ var relation = "The relation type's id: knows, owns, member_of, regard, in, or o
 var path = "The workspace file's path: names joined by /, such as notes/marcus.md; start it with ~/ for the global workspace, which every chat shares, such as ~/notes/style.md.";
 var under = "Only files under this folder, such as notes/; leave it out for every file.";
 var lore = "The lore entry's id, as lore_index, lore_search or lore_grep gives it: a short id such as lr0101, a World Info entry as bookId/entryId, or a world entry's own id.";
-var pageCursor = "Where to read on: the cursor the answer before ended with. Leave it out to start from the beginning.";
 var proposes = "The answer is the change in plain words, its change type and its mode. Working a turn, the change is staged at once: it lands when the turn commits, or, when its mode is confirm, waits for the game master's Apply on the turn's review card. Otherwise nothing changes until the game master applies it.";
 var dry = "true: check only; nothing is staged.";
 var dryWhole = "true: only check the change and say what it would do; nothing is staged.";
@@ -17395,44 +17394,32 @@ var WRITE_TOOL_TEXTS = [
     family: "lore",
     tier: "read",
     note: "Gives the lore index: every entry of the chat's World Info books by its id and title.",
-    text: "The lore index: every lore entry of the World Info books this chat reads, book by book, each by its short id and title, with a line of what it holds where the title doesn't say; or, where the game master keeps an index of their own, that index as they wrote it. Read an entry whole with lore_read and its id. An index longer than one answer comes in pages, each ending with the cursor that reads on.",
-    args: [
-      { path: "book", text: "Only this book's entries: its name or id; leave it out for every book." },
-      { path: "cursor", text: pageCursor }
-    ]
+    text: "The lore index: every lore entry of the World Info books this chat reads, book by book, each by its short id and title, with a line of what it holds where the title doesn't say; or, where the game master keeps an index of their own, that index as they wrote it. Read an entry whole with lore_read and its id.",
+    args: [{ path: "book", text: "Only this book's entries: its name or id; leave it out for every book." }]
   },
   {
     name: "lore_search",
     family: "lore",
     tier: "read",
     note: "Searches the world's lore and the chat's World Info books.",
-    text: "Search the lore: the world's own entries and those of the World Info books this chat reads, best matches first. Gives each match's id, title and why it matched, with its secret marker when it is a secret or a mark in a book (who knows it, whom it is kept from). Read one whole with lore_read. More matches than one answer holds come in pages, each ending with the cursor that reads on.",
-    args: [
-      { path: "query", text: "Words or names to look for." },
-      { path: "cursor", text: pageCursor }
-    ]
+    text: "Search the lore: the world's own entries and those of the World Info books this chat reads, best matches first. Gives each match's id, title and why it matched, with its secret marker when it is a secret or a mark in a book (who knows it, whom it is kept from). Read one whole with lore_read.",
+    args: [{ path: "query", text: "Words or names to look for." }]
   },
   {
     name: "lore_grep",
     family: "lore",
     tier: "read",
     note: "Finds lore entries that hold some text.",
-    text: "Find the lore entries whose text holds some text, in any case: each entry's id and title, its secret marker, and the lines that hold it. More lines than one answer holds come in pages, each ending with the cursor that reads on.",
-    args: [
-      { path: "text", text: "What to look for." },
-      { path: "cursor", text: pageCursor }
-    ]
+    text: "Find the lore entries whose text holds some text, in any case: each entry's id and title, its secret marker, and the lines that hold it.",
+    args: [{ path: "text", text: "What to look for." }]
   },
   {
     name: "lore_read",
     family: "lore",
     tier: "read",
     note: "Reads one lore entry, by its id.",
-    text: "Read one lore entry whole, by its id, as your knowledge has it: a secret in its text is marked with who knows it, or left out where your knowledge doesn't reach. An entry longer than one answer comes in pages, each ending with the cursor that reads on: read them all, nothing is left out or given twice.",
-    args: [
-      { path: "id", text: lore },
-      { path: "cursor", text: pageCursor }
-    ]
+    text: "Read one lore entry whole, by its id, as your knowledge has it: a secret in its text is marked with who knows it, or left out where your knowledge doesn't reach.",
+    args: [{ path: "id", text: lore }]
   },
   {
     name: "lore_load",
@@ -17486,6 +17473,7 @@ var WRITE_NOTE = {
   pageMore: "tool.note.page_more",
   pageEnd: "tool.note.page_end",
   lineCut: "tool.note.line_cut",
+  pageStale: "tool.note.page_stale",
   noBook: "tool.note.no_book",
   cancelled: "tool.note.cancelled",
   paused: "tool.note.paused",
@@ -17541,6 +17529,7 @@ var WRITE_TOOL_NOTES = [
     ]
   },
   { id: WRITE_NOTE.pageEnd, label: "The last page", note: "Ends the last page of a lore read that came in pages.", text: "This gives {{from}} to {{to}} of {{total}} {{what}}: the last of them.", vars: [{ name: "from", text: "where this page starts, counted from 1", required: true }, { name: "to", text: "where it ends", required: true }, { name: "total", text: "how many there are in all", required: true }, { name: "what", text: "characters, matches or results" }] },
+  { id: WRITE_NOTE.pageStale, label: "Changed since the page before", note: "A lore read's answer when its cursor came from a page of a text or a list that has changed since: reading on would skip or repeat some of it.", text: "What {{tool}} gives changed since the page before was read, so its cursor no longer reads on where that page ended. Read it again from the first page: leave cursor out.", vars: [{ name: "tool", text: "the tool called", required: true }] },
   { id: WRITE_NOTE.lineCut, label: "A line cut to fit", note: "Stands beside a line lore_grep found that is longer than one answer may be on its own (the setting named, Settings → Agents → Budgets): what was left out, and how to read it.", text: "This line is {{size}} characters, and only its first {{shown}} fit one answer ({{setting}}, Settings → Agents → Budgets): lore_read {{id}} reads the entry whole, in pages.", vars: [{ name: "size", text: "the line's length", required: true }, { name: "shown", text: "how much of it is given", required: true }, { name: "setting", text: "the setting's label" }, { name: "id", text: "the entry's id", required: true }] },
   { id: WRITE_NOTE.cancelled, label: "Cancelled", note: "A write's answer when the agent's work was cancelled before it ran.", text: "The agent's work was cancelled, so nothing was checked or written.", vars: [] },
   { id: WRITE_NOTE.paused, label: "The chat is paused", note: "An apply's answer while an earlier message's edit waits for Keep or Discard.", text: "An earlier message was edited: Keep or Discard it first, under that message.", vars: [] },
@@ -33238,7 +33227,7 @@ var RUNTIME_PROMPTS = [
     page: page4,
     label: "A clipped tool result",
     note: "Follows the part of a long tool result that reaches the model.",
-    text: "[Clipped: the first {{shown}} of {{total}} characters. The rest is in scratch {{handle}}; read it with scratch_read from offset {{shown}}.]",
+    text: `[Clipped: the first {{shown}} of {{total}} characters, at ${LOOP_DEFS.clipChars.label} (Settings → Agents → Budgets). The rest is in scratch {{handle}}; read it with scratch_read from offset {{shown}}.]`,
     vars: [
       { name: "shown", text: "the characters shown" },
       { name: "total", text: "the result's length" },
@@ -33521,17 +33510,388 @@ var NESTED_ARG_TEXTS = [
   { tool: "item_make", path: "details.specs.label", text: SPEC_LABEL },
   { tool: "item_make", path: "details.specs.value", text: SPEC_VALUE },
   { tool: "item_label", path: "specs.label", text: SPEC_LABEL },
-  { tool: "item_label", path: "specs.value", text: SPEC_VALUE }
+  { tool: "item_label", path: "specs.value", text: SPEC_VALUE },
+  ...["lore_index", "lore_search", "lore_grep", "lore_read"].map((tool) => ({ tool, path: "cursor", text: "Where to read on: the cursor the page before ended with. Leave it out to start from the first page." }))
 ];
 var NESTED_ARG_PROMPTS = NESTED_ARG_TEXTS.map((a3) => ({
   id: toolArgTextId(a3.tool, a3.path),
   page: HARNESS_PAGE.id,
   group: HARNESS_GROUP.tools,
   label: `${a3.tool}: ${a3.path}`,
-  note: `The description of ${a3.tool}'s ${a3.path} argument. Harness engine only: the classic and agents engines tell it in the description of the argument above it.`,
+  note: `The description of ${a3.tool}'s ${a3.path} argument. Harness engine only: the classic and agents engines send no text of their own for it.`,
   text: a3.text,
   vars: []
 }));
+
+// src/shared/harness-texts-shapes.ts
+var shapeTextId = (of) => `harness.shape.${of}`;
+var COLLECTION_SHAPES = {
+  kinds: lines2("A kind of entity, keyed by its id. Required: `id`, `label`, `fields`. Optional: `extends` (the kind whose fields it also has).", "`fields` is an object, field id to field. A field needs `type` (number, text, bool, enum, ref, list, dice, money, date or duration) and may have `label`, `default`, `min`, `max`, `values` (what an enum takes), `ref` (the kind a ref names), `of` (what a list holds), `derived` (an expression that computes it), `visibility` (public, known_by or secret) and `knownBy`."),
+  relations: "A type of relation between entities, keyed by its id. Required: `id`, `label`, `from` and `to` (the kinds it joins), `cardinality` (one_one, one_many, many_one or many_many), `symmetric` (true or false), `fields` (field id to field, as a kind's; {} for none). Optional: `inverse` (the relation type read from the other side).",
+  entities: lines2("A person, a thing or anything else the world holds, keyed by its id. Required: `id`, `kind` (a kind's id), `name`, `tier` (a tier's id), `fields` (field id to value, as its kind defines them; the field named place is where it is), `relations` (a list, [] for none: each `type`, `to` and optional `fields`).", "Optional: `agent` (true: it acts on its own), `visibility` (public, known_by, secret or discoverable) with `knownBy` (a selector such as `ids`), `tags`, `characterId` (the host's character it is), `cues`, `levels`."),
+  places: lines2("A place, keyed by its id. Required: `id`, `name`, `fields` ({} for none). Optional: `parent` (the place it is inside), `timeZone`, `sceneType`, `grid` with `cell` (`x`, `y`: where on that grid it is), `visibility` (public, known_by, secret or discoverable) with `knownBy`, `adjudicate`.", "`map` is written only by a map: a place a map draws is changed in its map, and a write to it here is refused. A place also has a tool of its own, which needs no hand-written JSON."),
+  routes: lines2("A path between two places, keyed by its id. Required: `id`, `from` and `to` (place ids), `modes`, `bidirectional` (true: it is travelled both ways).", "`modes` has a leg for each way the path is travelled, any of `walk`, `road`, `offroad` and `water`: a leg needs `minutes` and may have `distanceKm` and `terrain`. `map` is written only by a map that draws the path."),
+  grids: lines2("A grid of cells a place is drawn on, keyed by its id. Required: `id`, `width`, `height`, `terrain` (one terrain code for each cell, row by row: width times height of them), `blocked` (the indexes of the cells nothing crosses), `zones` (zone id to cell indexes; {} for none).", "Optional: `cellMeters`, `items` (thing id to the index of the cell it starts on). `map` is written only by a map: a grid a map draws is changed in its map."),
+  maps: lines2("A map of one place, keyed by its id: the store compiles it into the places inside its `scope`, their paths and a grid, which the map then owns. Required: `id`, `scope` (the id of the place it draws).", "A grid map draws an interior: `layout` (rows of characters, top first, one character for each cell, every row the same length), `legend` (what each character stands for), `size`, `cellMeters`. A node map draws a town or a region: `places` (each `id`, `name`, `at`) and `links` (each `from`, `to`, `minutes`, optional `mode`). A map also has a tool of its own, which needs no hand-written JSON."),
+  rules: lines2("A rule the engine runs by itself, keyed by its id. Required: `id`, `on` (what fires it, an object with one of `event` (an event type), `tick` (turn, slot or day), `enter` (a place id) or `at` (an expression)), `do` (a list of effects, each `type` and `args`).", "Optional: `when` (an expression that must hold), `once`, `cooldownMinutes`, `interrupt` (true: it stops a timelapse), `beat` (`hint`, `weight`: an outline hint offered when it fires)."),
+  actions: lines2('Something a character can do, keyed by its id. Required: `id`, `label`, `params` (name to `type`, with `ref` or `optional`; {} for none), `requires` (expressions that must hold; [] for none), `outcomes` (outcome name to a list of effects, each `type` and `args`; the outcome named default when there is no check), `duration` (minutes, as an expression: "5").', "Optional: `description`, `check` (a check's id, or a check written in place with its `dice` and `dc`), `activity`, `lexicon` (ways a player says it), `observable` (what others see of it), `adjudicate`."),
+  checks: lines2("A roll, keyed by its id. Required: `id`, `dice` (d20, 2d6). Optional: `modifier` and `dc` (expressions), `advantage` (-1, 0 or 1), `vs` (an opposed roll: `who`, `check`), `bands` (each `outcome` with the `min` and `max` of its margin), `pass` (the outcomes that count as a success), `auto`.", "With `dc` and no `bands` the outcomes are failure and success."),
+  schedules: lines2("A recurring timetable that sets a field, keyed by its id: shifts, weather, bills. Required: `id`, `target` (the field it sets: place, activity, weather), `recurrence` (`every`: day, week, month or year; `weekdays`, 0 for Sunday; `days` of the month; `except`: holiday ids), `slots` (each `start` and `end` as HH:MM, with `value` or `weighted`, a list of `value` and `weight`).", "Optional: `owner` (whose it is: an entity's id, a kind's id or a selector; none for the world's own, such as weather)."),
+  tracks: lines2("A quest, a secret, a puzzle or an agenda, keyed by its id. Required: `id`, `kind` (quest, secret, puzzle or agenda), `label`, `start` (the id of its first stage), `stages` (stage id to stage), `visibility` (public, known_by or secret).", "A stage needs `label` and `next` (a list of `to`, a stage id, and `when`, an expression; [] for a last stage), and may have `objectives`, `effects`, `rewards`, `gate`, `fail`, `cue` (what the player is told), `truth` (the game master's only) and `hints`. Optional on the track: `owner`, `knownBy`."),
+  tables: lines2("A data table, keyed by its id. Required: `id`, `pack` (the pack that owns it), `schema` (the row layout that pack reads: lre-table/<table id>/v1), `revision` (worked out from the table, never authored: keep the one a table has), `label`, `columns` (column id to `type`: int, number, text, bool, band, enum, ref, list or json; with `unit`, `values`, `optional`, `doc`), `rows` (row id to an object, column id to value).", "Optional: `source` (where shipped data came from). Read a table the draft has before writing one."),
+  sections: lines2("A section of what the reply's writer is given of the world, keyed by its id. Required: `id`, `label`, `rank` (its order, lowest first), `template` (its text), `position` (`type` native; or outlet with `name`; or chat_depth with `role`, `depth` and `direction`).", "Optional: `enabled`, `maxTokens`, `maxLines`, `include`, `scope` (player, scene or gm: whose knowledge it reads)."),
+  steps: "The world's own text for one of the engine's steps, keyed by its id. Required: `id`, `purpose` (interpret, npc.choose, puzzle.answer, brief, outline, extract, choices, judge, mind, memory, skip, consolidate or knowledge), `template`, `output` (text, effects or decision), `signals` (a list of names; [] for none).",
+  packs: "A pack the world plays with, keyed by the pack's id. Required: `version` (a whole number) and `config` (the pack's own settings, an object; {} for its defaults). Read one the draft has before writing one.",
+  lore: lines2("A lore entry of the world's own, keyed by its id. Required: `id`, `title`, `content` (its text), `keys` (words that bring it up; [] for none), `links` (the ids of the entities and places it is about; [] for none).", "Optional: `aliases`, `topics`, `group`, `priority`, `visibility` (public or known_by) with `holders` (who knows it), `secret`, `gate` (an expression), `audience`, `source` (`kind` authored for the world's own; never book: World Info is read live, and a copy of it is refused)."),
+  classifications: "A way of classifying entities (story role, disposition), keyed by its id. Required: `id`, `label`, `multiple` (true: an entity may hold several values), `values` (value id to `label`, with optional `parent` and `description`). Optional: `order`, `shown`.",
+  routines: lines2("A routine of a person or a group, keyed by its id. Required: `id`, `blocks` (a list; each block needs an `id` of its own). Optional on the routine: `label`, `owner` (an entity's id, a kind's id or a selector), `inherit`.", "A block may have `label`, `activity`, `kind` (fixed, flexible or optional), `at` (HH:MM) or `window` (`from`, `to`), `minutes`, `perWeek`, `chance`, `priority`, `days` (`weekdays`, 0 for Sunday; `holidays`; `seasons`), `place` (home, work, here, with, or an object with `place` or `nearest`), `company`, `needs`, `private`.")
+};
+var PART_SHAPES = {
+  calendar: lines2("The world's calendar. Required: `system` (gregorian or custom), `epoch` (when the story's clock starts, a local date and time: 2026-10-16T06:00), `timeZone`, `dayParts` (a list of `id`, `label` and `start` as HH:MM), `holidays` (a list of `id`, `label`, `rule` and `dayOff`; [] for none).", "A holiday's `rule` has `type` fixed with `month` and `day`; nth_weekday with `month`, `weekday` and `n`; relative with `to` (a holiday's id) and `days`; or easter with `days`. A custom calendar also needs `custom`: `monthLengths`, `monthNames`, `weekdayNames`."),
+  realism: lines2("How closely the world is simulated. Required: `preset` (story, grounded, simulation or custom), `levels` (a whole number for each of `money`, `gear`, `vehicles`, `castlife`, `relationships`, `space`, `calendar`, `weather` and `sheets`), `tierCaps` (the most each band is simulated: `principal`, `supporting`, `background`, each an object of those same domains).", "Optional: `claims` (how what the player claims is taken: `mode` real, ask or hold; `capped`)."),
+  time: "How time passes. Required: `sceneTicks` (scene type to the minutes a turn of it takes), `interrupts` (stop, note or ignore for each of `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`, `arrival`, `overdue`, `needs` and `weather`), `speedThrough` (name to `mode`, offer or auto, and `thresholdMinutes`), `montage` (key, day or week), `unitCap` (`agentDays`, `events`).",
+  meta: lines2("The world's own settings, which sit at the root of the document; a write changes only the members it gives. `name`, `pov` (the player character's id), `start` (`place` and `at`, a local date and time), `seedMode` (fresh or same_roll), `lenientPricing`, `currency` (`code`, `symbol`, `minorUnit`, `decimals`, `format`), `narrator` (`knowledge` scene or pov, `secrets` marked or omit; null for none).", "Also `spawnCap`, `placeCap`, `placesPerTurn`, `lifeStates` (state id to `label`, `acts`, `reads`), `mapSettings` and `loreBooks` (the World Info books the world reads lore from)."),
+  tiers: lines2("The tiers entities sit in, and the tier a newcomer gets: an object with `tiers` (tier id to tier) and optional `spawnTier` (a tier's id).", "A tier needs `label`, `band` (principal, supporting or background) and `order` (its place in lists, lowest first), and may have `agentDefault` and `description`."),
+  ruleset: lines2("The world's ruleset, optional: {} removes it. `progression` (id to `label`, `xpField`, `levelField`, `thresholds`), `sheet` (`sections`, each `id`, `label`, `rows`), `minLevels`, `adjudication` (when a check is rolled: `preset`, `checks`, `authority`, `retry` and its numbers), `inferred` (`mode` off, suggest or auto), `combat` (`stalemate`), `profile`.", "Read the draft's own before writing it: its adjudication is written with every member it has."),
+  loreIndex: "The lore lookup table. Required: `terms` (a word to the ids of the lore entries it brings up; {} for none), `topics` (topic id to `label` and `entries`, lore entry ids; {} for none).",
+  minds: "How the world's characters think, optional: only what is given is kept, and {} removes it. `secrecy` (full or brief), `thresholds` (`live`, `near`, `far`: numbers), `always` and `never` (a selector such as `ids`, or null), `weights`, `memory`, `holdings`.",
+  lorePins: "Lore pinned to a character, a place or a step: pins that pin nothing remove it. `characters`, `places` and `steps` are each an object, id to a list of pins. A pin is `lore` (a lore entry's id), or `book` with `entry` (a World Info entry), or `book` alone (the whole book), each with optional `keep` (start or end).",
+  routineSettings: "How routines bear on play: the defaults remove it. `awareness` (story_first, balanced or routine_first), `invitations` (off, player or everyone), `sociability` (reserved, usual or outgoing), `planBend` (must, strong, standard or ordinary), `roles` (informative, enforced or off) and `skips` (stay, routine or model), each for `live`, `near`, `far` and `background`, `narrator`, `paletteFollowsRoutine`.",
+  needs: "The needs characters feel: only what differs from the defaults is kept. `hunger`, `fatigue`, `social` and `fun`, each with `on` (true or false), `rate`, `tell` and `alert` (numbers)."
+};
+var SHAPE_PROMPTS = [
+  ...Object.entries(COLLECTION_SHAPES).map(([name, text]) => answerPrompt(shapeTextId(name), `Shape: one of ${name}`, `world_shape's answer for the collection ${name}: what one item of it looks like. Member names stay between backticks, exactly as the document has them.`, text)),
+  ...Object.entries(PART_SHAPES).map(([name, text]) => answerPrompt(shapeTextId(name), `Shape: the ${name} part`, `world_shape's answer for the part ${name}: what world_set takes for it. Member names stay between backticks, exactly as the document has them.`, text))
+];
+
+// src/shared/harness-texts-world.ts
+var CUT_AT = `${LOOP_DEFS.clipChars.label}, Settings → Agents → Budgets`;
+var WORLD_TOOL = {
+  status: "world_status",
+  read: "world_read",
+  shape: "world_shape",
+  put: "world_put",
+  remove: "world_remove",
+  set: "world_set",
+  patch: "world_patch",
+  discard: "world_discard",
+  commit: "world_commit",
+  upgrade: "world_upgrade",
+  history: "world_history",
+  restore: "world_restore",
+  made: "world_made",
+  keep: "world_keep"
+};
+var WORLD_NOTE = {
+  noBuild: "harness.note.world.no_build",
+  needsGm: "harness.note.world.needs_gm",
+  refused: "harness.note.world.refused",
+  refusedLint: "harness.note.world.refused_lint",
+  more: "harness.note.world.more",
+  unchanged: "harness.note.world.unchanged",
+  next: "harness.note.world.next",
+  behind: "harness.note.world.behind",
+  staleDraft: "harness.note.world.stale_draft",
+  outline: "harness.note.world.outline",
+  outlineCut: "harness.note.world.outline_cut",
+  badPointer: "harness.note.world.bad_pointer",
+  noMember: "harness.note.world.no_member",
+  noIndex: "harness.note.world.no_index",
+  noBelow: "harness.note.world.no_below",
+  andMore: "harness.note.world.and_more",
+  none: "harness.note.world.none",
+  shapeCollection: "harness.note.world.shape_collection",
+  shapePart: "harness.note.world.shape_part",
+  shapeHint: "harness.note.world.shape_hint",
+  shapeHintAny: "harness.note.world.shape_hint_any",
+  needsObject: "harness.note.world.needs_object",
+  needsOps: "harness.note.world.needs_ops",
+  noItem: "harness.note.world.no_item",
+  added: "harness.note.world.added",
+  replaced: "harness.note.world.replaced",
+  removed: "harness.note.world.removed",
+  wrotePart: "harness.note.world.wrote_part",
+  patched: "harness.note.world.patched",
+  nothingToDiscard: "harness.note.world.nothing_to_discard",
+  draftMoved: "harness.note.world.draft_moved",
+  discarded: "harness.note.world.discarded",
+  nothingToCommit: "harness.note.world.nothing_to_commit",
+  committed: "harness.note.world.committed",
+  upgradeNext: "harness.note.world.upgrade_next",
+  hasErrors: "harness.note.world.has_errors",
+  noRevision: "harness.note.world.no_revision",
+  askCommit: "harness.note.world.ask_commit",
+  askCommitNoted: "harness.note.world.ask_commit_noted",
+  askUpgrade: "harness.note.world.ask_upgrade",
+  askUpgradeHead: "harness.note.world.ask_upgrade_head",
+  askDiscard: "harness.note.world.ask_discard",
+  askRestore: "harness.note.world.ask_restore",
+  alreadyPlays: "harness.note.world.already_plays",
+  upgradeLanded: "harness.note.world.upgrade_landed",
+  upgradePending: "harness.note.world.upgrade_pending",
+  revisionHint: "harness.note.world.revision_hint",
+  restored: "harness.note.world.restored",
+  nothingMade: "harness.note.world.nothing_made",
+  madeNext: "harness.note.world.made_next",
+  keepNames: "harness.note.world.keep_names",
+  keptNothing: "harness.note.world.kept_nothing",
+  kept: "harness.note.world.kept",
+  notCommitted: "harness.note.world.not_committed",
+  badMerge: "harness.note.world.bad_merge",
+  closed: "harness.note.world.closed",
+  closedCommit: "harness.note.world.closed_commit",
+  closedRestore: "harness.note.world.closed_restore",
+  closedUpgrade: "harness.note.world.closed_upgrade",
+  changesCommit: "harness.note.world.changes_commit",
+  changesRestore: "harness.note.world.changes_restore",
+  changesUpgrade: "harness.note.world.changes_upgrade",
+  changesNone: "harness.note.world.changes_none",
+  changeItems: "harness.note.world.change_items",
+  changeParts: "harness.note.world.change_parts",
+  changeAdded: "harness.note.world.change_added",
+  changeChanged: "harness.note.world.change_changed",
+  changeRemoved: "harness.note.world.change_removed",
+  changesHidden: "harness.note.world.changes_hidden",
+  changesMore: "harness.note.world.changes_more",
+  theirEdits: "harness.note.world.their_edits",
+  followsCommit: "harness.note.world.follows_commit",
+  unchangedChat: "harness.note.world.unchanged_chat",
+  chatRefused: "harness.note.world.chat_refused",
+  chatNext: "harness.note.world.chat_next",
+  notCarried: "harness.note.world.not_carried",
+  chatChanges: "harness.note.world.chat_changes",
+  notChanged: "harness.note.world.not_changed",
+  inDraftAlready: "harness.note.world.in_draft_already"
+};
+var DRAFT = "It changes the world's draft, which nobody plays yet: world_commit makes the draft the world's next revision, then world_upgrade brings this chat to it. Only the game master's tier may call it, and while the player has the world's document set to Never (Settings → Changes from the reply) it is refused like every other write of the document. Who the player's character is and what the engine holds agents to are closed to every agent: a write that would change one is refused, with the paths it names.";
+var JSON_TEXT = "written as JSON text";
+var CARRIED = "A place, a path (routes) or a map is written to this chat's own world unless in says document: staged with your turn like any change, played at once, gone with the turn if it is undone, and kept into the world's document by world_keep. Every other collection is the world's document's alone, and what follows is said of it.";
+var IN_ARG = { path: "in", text: "For places, routes and maps: chat (the default), this chat's own world, played at once; document, the world's draft. Every other collection is the world's draft's: in: chat is refused for it." };
+var LISTED = "Its answer lists what it would change in the world's document, by collection. The player is shown the same where it waits on the review card, and a commit's on the reply once it is made, with what the world keeps from the player's character counted, never named. Set to Never the world's document refuses it. What is closed to agents (who the player's character is, what the engine holds agents to) no agent changes this way either: where it would, the call is refused with the paths, and it is the user's to do in Build.";
+var WORLD_TOOL_TEXTS = [
+  {
+    name: WORLD_TOOL.status,
+    family: HARNESS_FAMILY.world,
+    tier: "read",
+    note: "Says which revision of the world this chat plays, the world's head, and how the draft stands.",
+    text: "Read where the world stands for this chat. A chat plays one revision of its world's document, with what it made or changed of its places, paths and maps in play laid over: this chat's own world. The world's head is the document's newest revision; its draft is the working copy every world_ write with in: document changes, which nobody plays until it is committed. The answer gives the revision this chat plays, the head, whether the chat is behind the head (world_upgrade brings it there), how many changes of this chat's own world the document doesn't have (world_made lists them), whether a draft is stored with its version and the revision it began on, and the draft's lint: how many errors, warnings and infos, and the issues themselves, errors first, each with the pointer it is at. A draft with errors can't be committed. The draft is the same working copy the user edits in Build: one that is stored before you wrote anything holds someone's unfinished work, so add to it only what you mean to. Call it before you edit the world and before world_commit.",
+    args: [{ path: "issues", text: "Which of the draft's issues to list: all, or errors for only what stops a commit. All when left out; the counts are of all of them either way." }]
+  },
+  {
+    name: WORLD_TOOL.read,
+    family: HARNESS_FAMILY.world,
+    tier: "read",
+    note: "Reads the world's document, or any part of it, by JSON Pointer.",
+    text: "Read the world's document: everything the world is made of, including what no other tool reaches (the calendar, schedules, routines, kinds, actions, checks, tracks, lore, tables, rules, sections). Give pointer to read one part of it: /calendar, /entities/mara, /tracks/harbour_debt/stages. Without it you get the document's root. A value too long for one answer comes back as an outline instead: each member with what it holds, so you read on with a longer pointer. It reads the draft unless source says playing, which is the revision this chat plays. The value is the document's own, unmarked; what it shows that is kept from the player's character (a restricted person, thing, place or track, secret lore, a field that isn't everyone's to see) is listed beside it under secret, each by its pointer, marked as a secret is marked in every read. Read a thing before you change it (world_put, world_set, world_patch), and use world_shape for what one item of a collection must look like.",
+    args: [
+      { path: "pointer", text: `Where in the document, as a JSON Pointer: "" or left out for the whole document, else /member/member, such as /entities/mara/fields. In a member's name write ~1 for / and ~0 for ~.` },
+      { path: "source", text: "draft (the default): the world's draft, the working copy the world_ writes with in: document change. playing: this chat's own world as it plays, the revision it plays with what this chat made or changed in play laid over." },
+      { path: "after", text: "Only for an outline that was cut short: the last member it showed (a list's index), to go on from the one after it." }
+    ]
+  },
+  {
+    name: WORLD_TOOL.shape,
+    family: HARNESS_FAMILY.world,
+    tier: "read",
+    note: "Says what one item of a collection, or a part, of the world's document looks like.",
+    text: "Read what one item of a collection of the world's document looks like (entities, tracks, schedules, lore and the rest), or one of its parts (calendar, realism, time and the rest): its members by their exact names, which are required, and the values a member takes. For a collection the answer also gives how many items the draft has and pointers to a few of them, to read as examples with world_read; for a part, where it is read. Call it before you write an item or a part you haven't written before (world_put, world_set, world_patch).",
+    args: [{ path: "of", text: "A collection (for one item of it) or a part of the world's document." }]
+  },
+  {
+    name: WORLD_TOOL.put,
+    family: HARNESS_FAMILY.world,
+    tier: "write",
+    note: "Writes one item of a collection of the world, whole: a place, a path or a map in this chat's world, anything else in the world's draft.",
+    text: `Write one item of a collection of the world, whole: a new one, or one that replaces the item of that id. The item is ${JSON_TEXT}; world_shape says what the collection's items look like, and world_read gives an existing one to start from. To change only part of an item in the world's draft, use world_patch. ${CARRIED} The answer says what changed; in the world's draft, also the draft's version and the lint issues the write brought: fix an error before you commit. ${DRAFT}`,
+    args: [
+      { path: "collection", text: "The collection the item belongs to." },
+      { path: "id", text: "The item's id: its key in the collection. Letters, digits, _ and -." },
+      { path: "value", text: `The whole item, a JSON object ${JSON_TEXT}: {"id": "night_shift", "target": "place", ...}. A new item written without id takes the one given here.` },
+      IN_ARG
+    ]
+  },
+  {
+    name: WORLD_TOOL.remove,
+    family: HARNESS_FAMILY.world,
+    tier: "write",
+    note: "Takes one item out of a collection of the world: a place, a path or a map in this chat's world, anything else in the world's draft.",
+    text: `Take one item out of a collection of the world. ${CARRIED} In this chat's world a place someone or something is at, or that holds other places or a path, isn't taken out: the refusal says what still needs it. In the world's draft, what still names it (an entity's place, a schedule's owner, a stage of a track) shows in the answer's lint as an issue to fix. A place, a path or a grid that a map draws is removed in its map instead. ${DRAFT}`,
+    args: [
+      { path: "collection", text: "The collection the item is in." },
+      { path: "id", text: "The item's id: its key in the collection." },
+      IN_ARG
+    ]
+  },
+  {
+    name: WORLD_TOOL.set,
+    family: HARNESS_FAMILY.world,
+    tier: "write",
+    note: "Writes one part of the world's draft, whole.",
+    text: `Write one part of the world's document, whole: the calendar, realism, time, the tiers, the ruleset, the lore index, the minds' settings, the lore pins, the routine settings, the needs, or meta (the world's name, player character, start, currency and the like, of which only the members you give change). The part is ${JSON_TEXT}; world_shape says what it looks like, and world_read gives the one the draft has, to start from. To change one member inside a part, world_patch is shorter. ${DRAFT}`,
+    args: [
+      { path: "part", text: "The part to write." },
+      { path: "value", text: `The whole part, a JSON object ${JSON_TEXT}.` }
+    ]
+  },
+  {
+    name: WORLD_TOOL.patch,
+    family: HARNESS_FAMILY.world,
+    tier: "write",
+    note: "Changes the world's draft in place with JSON Patch operations.",
+    text: `Change the world's document in place, for a change smaller than a whole item or part: a list of JSON Patch operations (RFC 6902), applied all together or not at all. Each operation has op (add, remove, replace, move, copy or test), path (a JSON Pointer into the whole document, as world_read takes) and, by its op, value or from. add puts a member in or inserts into a list (/- appends); replace needs the member to be there; test refuses the whole patch unless the value there equals value, which guards a change against the draft having moved. The document's id, format, engine version and pins can't be patched, nor what a map draws. ${DRAFT}`,
+    args: [{ path: "ops", text: `The operations, a JSON array ${JSON_TEXT}: [{"op": "replace", "path": "/calendar/timeZone", "value": "Europe/Lisbon"}, {"op": "add", "path": "/lore/old_pier/keys/-", "value": "pier"}].` }]
+  },
+  {
+    name: WORLD_TOOL.discard,
+    family: HARNESS_FAMILY.world,
+    tier: "write",
+    note: "Drops the world's draft.",
+    text: "Ask for the world's draft to be dropped: every change written to it since the last commit goes, and the working copy is the world's head again. Use it to start over on a draft you wrote, or when world_status says the draft began on an older head. It can't be undone, and the draft is the same working copy the user edits in Build: never drop one that was stored before you wrote to it unless the user asked. What is committed already stays. Like every other change it is staged with the turn and decided when you commit, under the mode the player set for the world's document (Settings → Changes from the reply): as shipped it is dropped when you commit. A draft that holds edits no agent of your turn wrote (the user's own, from Build) is dropped only on the player's word: the drop goes to the reply's review card, and your commit's answer says so. So does every drop where the player set the world's document to ask first; then say what you asked for, and don't go on as if it were done. Only the game master's tier may call it.",
+    args: [{ path: "version", text: "The draft's version, as world_status or your last write gave it: the draft is dropped only while it is still at that version, so nothing written since goes unseen." }]
+  },
+  {
+    name: WORLD_TOOL.commit,
+    family: HARNESS_FAMILY.world,
+    tier: "write",
+    note: "Makes the world's draft its next revision.",
+    text: `Ask for the world's draft to become its next revision, which becomes the world's head: what new chats start from, and what world_upgrade brings a chat to. A draft with lint errors is refused, with the errors to fix; warnings and infos don't stop it. So is a draft that began on an older head. Everything the draft holds is committed, what was in it before you wrote to it too: check world_status first. Like every other change it is staged with the turn and decided when you commit, under the mode the player set for the world's document (Settings → Changes from the reply). As shipped it is made when you commit: the commit's answer gives the new revision, and the player is told after, on the reply, where they can undo it. A draft that holds edits no agent of your turn wrote (the user's own unfinished work in Build) is never committed by itself: the commit goes to the reply's review card and waits for the player's Apply, and your commit's answer says so. So does every commit where the player set the world's document to ask first; then say what you wrote and that it waits for their word, and don't go on as if it were committed. It commits the draft as it stood when you asked: written to since, the commit is refused, and you ask again. This chat keeps playing the revision it plays until an Upgrade: call world_upgrade after this, in the same turn, and this chat plays the new revision from the next turn. ${LISTED} Only the game master's tier may call it.`,
+    args: [
+      { path: "note", text: "A line for the world's history saying what this revision changed: at most 200 characters are kept." },
+      { path: "version", text: "The draft's version, as your last write gave it. With it, the commit is refused when the draft changed since, so that nothing someone else wrote meanwhile is committed unseen. Leave it out to commit the draft as it stands." }
+    ]
+  },
+  {
+    name: WORLD_TOOL.upgrade,
+    family: HARNESS_FAMILY.world,
+    tier: "write",
+    note: "Brings this chat to the world's head, or to another revision.",
+    text: `Ask for this chat to be brought to another revision of its world (an Upgrade): the world's head unless to names one. What play changed in this chat is kept; what the new revision adds, changes or removes in the world's document arrives. Like every other change it is staged with the turn and decided when you commit, under the mode the player set for the world's document (Settings → Changes from the reply). As shipped it is made when you commit: the commit's answer says the move waits for this turn's end, this chat plays the new revision from the next turn, and until then reads of the world stay as they were. It waits on the reply's review card instead where the commit it follows waits there, or where the player set the world's document to ask first: then the chat plays what it played until the player applies it. With no revision named the move is to the world's head as it is when the move is made, so called after world_commit in the same turn it follows that commit, and one Apply or one commit makes both. Only a committed revision can be played. ${LISTED} Only the game master's tier may call it.`,
+    args: [{ path: "to", text: "The revision to bring the chat to: one of world_history's. Leave it out for the world's head, as it is when the move is made." }]
+  },
+  {
+    name: WORLD_TOOL.history,
+    family: HARNESS_FAMILY.world,
+    tier: "read",
+    note: "Lists the world's revisions: when each became head, by what, and its note.",
+    text: "List the world's revisions, newest first: each one's id, when it became the world's head, what made it so (create: the world was made; build: a commit from the Build page; agent: a commit by an agent; import), and the note given with it. The head and the revision this chat plays are marked. Use it to find a revision for world_restore or world_upgrade.",
+    args: [{ path: "limit", text: "How many of the newest revisions to list. As many as fit in one answer when left out." }]
+  },
+  {
+    name: WORLD_TOOL.restore,
+    family: HARNESS_FAMILY.world,
+    tier: "write",
+    note: "Makes the world's draft a copy of an earlier revision.",
+    text: `Ask for the world's draft to be made a copy of one of the world's earlier revisions, to bring that content back: the draft's own changes are replaced by it, and nothing is played or committed by it. Like every other change it is staged with the turn and decided when you commit, under the mode the player set for the world's document (Settings → Changes from the reply): as shipped it is replaced when you commit. A draft that holds edits no agent of your turn wrote (the user's own, from Build) is replaced only on the player's word: the restore goes to the reply's review card, and your commit's answer says so. So does every restore where the player set the world's document to ask first. It replaces the draft as it stood when you asked: written to since, it is refused. After that world_commit makes it the head again, as a new entry of the history, and world_upgrade brings this chat to it. world_history lists the revisions. ${LISTED} Only the game master's tier may call it.`,
+    args: [{ path: "revision", text: "The revision to copy: its id, as world_history gives it." }]
+  },
+  {
+    name: WORLD_TOOL.made,
+    family: HARNESS_FAMILY.world,
+    tier: "read",
+    note: "Lists what this chat made or changed in play that the world's document doesn't have.",
+    text: "List what this chat made or changed in play that its world's document doesn't have: the things and places made in play, each with its id, its name and where it is; and this chat's own changes to the world's places, paths, maps and map settings (world), each with what it is and whether it was made, changed or taken out. Each says whether the world's draft has it already. What was made or changed in play exists only in this chat; world_keep copies it into the world's document, so other chats of the world have it too.",
+    args: [{ path: "kind", text: "Only the things, only the places made in play, or only this chat's changes to the world (world). All when left out." }]
+  },
+  {
+    name: WORLD_TOOL.keep,
+    family: HARNESS_FAMILY.world,
+    tier: "write",
+    note: "Copies what this chat made or changed in play into the world's draft.",
+    text: `Copy what this chat made or changed in play into the world's document, each under its own id: the things and places made in play, places first, so a thing kept with the place it lies at lies there; and this chat's own changes to the world's places, paths and maps and to its map settings, each written into the draft as this chat has it (one taken out is taken out of the draft too). The answer says what was kept, what was skipped and why, and what a kept thing lost on the way. world_made lists what there is to keep. Committing the draft is a separate act (world_commit). ${DRAFT}`,
+    args: [
+      { path: "things", text: "The things made in play to keep, each by id or name." },
+      { path: "places", text: "The places to keep, each by id or name: a place made in play, or a place of the world this chat made, changed or took out." },
+      { path: "paths", text: "The paths this chat made, changed or took out to keep, each by its id (world_made lists them)." },
+      { path: "maps", text: "The maps this chat made, changed or took out to keep, each by its id or title." },
+      { path: "settings", text: "true to keep this chat's map settings." }
+    ]
+  }
+];
+var WORLD_NOTE_PROMPTS = [
+  answerPrompt(WORLD_NOTE.noBuild, "The world's document can't be reached", "A world tool's answer when its call has no way to the world's document: the chat plays no world, or the call was made where the document isn't offered.", "The world's document can't be reached from this call, so nothing was read or written."),
+  answerPrompt(WORLD_NOTE.needsGm, "Only the game master's tier edits the world", "A world tool's answer to a write by an agent below the game master's tier.", "Only the game master's tier edits the world, this chat's own or its document. The author holds it and may grant it to an agent it started (grant_writes, tier gm): ask the author, or tell it in your answer what should change."),
+  answerPrompt(WORLD_NOTE.refused, "The world's document refused it", "A world tool's answer when the world's store refuses the read or the write, with the store's own reason.", "The world's document refused it: {{reason}}. Nothing was written.", [v6("reason", "why, in the store's words, which say what to fix", true)]),
+  answerPrompt(WORLD_NOTE.refusedLint, "The world's document refused it, with its errors", "A world tool's answer when the store's checks refuse a write, with the errors they found.", `The world's document refused it: {{reason}}. Nothing was written. Fix these and write it again:
+{{errors}}`, [v6("reason", "why, in the store's words", true), v6("errors", "the errors the checks found, one to a line", true)]),
+  answerPrompt(WORLD_NOTE.more, "More issues than fit", "Ends a list of lint issues that was cut to fit one answer.", `and {{count}} more past what one answer shows (${CUT_AT}): world_status lists them.`, [v6("count", "how many more", true)]),
+  answerPrompt(WORLD_NOTE.unchanged, "Nothing changed", "A world tool's answer for a write that left the draft as it was.", "The draft already says so: nothing was written."),
+  answerPrompt(WORLD_NOTE.unchangedChat, "Nothing changed in this chat's world", "A world tool's answer for a write of this chat's own world that leaves it as it plays.", "This chat's world already has it so: nothing was staged."),
+  answerPrompt(WORLD_NOTE.chatRefused, "This chat's world can't take it", "A world tool's answer when the engine's own checks refuse a change of this chat's world, with its reason.", "That can't be made in this chat's world: {{reason}}. Nothing was staged.", [v6("reason", "why, in the engine's words", true)]),
+  answerPrompt(WORLD_NOTE.chatNext, "This chat's world plays it", "Ends every write of this chat's own world: where it stands and how it is kept.", "This is this chat's own world: your next call plays it, everyone's once you commit, and it goes with this turn if the turn is undone. world_keep copies it into the world's document, so other chats have it too; world_commit then makes that a revision."),
+  answerPrompt(WORLD_NOTE.notCarried, "Not a part of this chat's world", "world_put's and world_remove's answer to in: chat for a collection only the world's document holds.", "This chat's own world holds its places, paths (routes) and maps; {{collection}} is the world's document's alone. Leave in out, or give in: document.", [v6("collection", "the collection the call named", true)]),
+  answerPrompt(WORLD_NOTE.chatChanges, "This chat changed its world", "Part of world_status's answer when this chat holds changes of its own to its world that the world's document doesn't have.", "This chat has {{count}} changes of its own to its world's places, paths, maps or map settings that the world's document doesn't have: world_made lists them, world_keep copies them into the world's draft.", [v6("count", "how many changes", true)]),
+  answerPrompt(WORLD_NOTE.next, "The draft isn't played yet", "Ends every write of the world's document: the draft reaches the chat only once it is committed and the chat brought to it.", "This is the world's draft. This chat still plays revision {{revision}}: world_commit makes the draft the world's next revision, then world_upgrade brings this chat to it.", [v6("revision", "the revision the chat plays", true)]),
+  answerPrompt(WORLD_NOTE.behind, "The chat is behind the world's head", "Part of world_status's answer when the chat plays another revision than the world's head.", "This chat doesn't play the world's head ({{head}}): world_upgrade brings it there.", [v6("head", "the world's head revision", true)]),
+  answerPrompt(WORLD_NOTE.staleDraft, "The draft began on an older head", "world_status's and world_commit's answer when the stored draft began on a revision that is no longer the world's head, so a commit of it is refused.", "The draft began on revision {{base}}, which is no longer the world's head: it can't be committed. Drop it with world_discard and make its changes again, on the head.", [v6("base", "the revision the draft began on", true)]),
+  answerPrompt(WORLD_NOTE.outline, "An outline, not the value", "Part of world_read's answer when the value is too long for one answer.", `The value is longer than one answer shows (${CUT_AT}), so this is its outline: each member with what it holds, as {"object": how many members}, {"list": how many items} or {"text": how many characters}; a number, true, false and null as they are. Read a member with a longer pointer: {{pointer}}/<member>.`, [v6("pointer", "the pointer that was read")]),
+  answerPrompt(WORLD_NOTE.outlineCut, "The outline was cut short", "Part of world_read's answer when the outline itself is too long for one answer.", `{{count}} more members aren't shown, past what one answer shows (${CUT_AT}). Call world_read again with the same pointer and after: {{after}}.`, [v6("count", "how many members aren't shown", true), v6("after", "the last member shown", true)]),
+  answerPrompt(WORLD_NOTE.badPointer, "Not a JSON Pointer", "world_read's answer when pointer isn't a JSON Pointer.", `{{pointer}} isn't a JSON Pointer. A pointer is "" for the whole document, else it starts with / and goes member by member: /entities/mara/name. In a member's name ~1 stands for / and ~0 for ~.`, [v6("pointer", "what the call gave", true)]),
+  answerPrompt(WORLD_NOTE.noMember, "Nothing at that pointer: no such member", "world_read's answer when a step of the pointer names a member the object there doesn't have.", 'Nothing is at {{pointer}}: what is at "{{at}}" has no member {{step}}. Its members: {{keys}}.', [v6("pointer", "the pointer the call gave", true), v6("at", 'the pointer up to its last step that names something ("" is the whole document)'), v6("step", "the step that names nothing", true), v6("keys", "the members there are", true)]),
+  answerPrompt(WORLD_NOTE.noIndex, "Nothing at that pointer: no such item", "world_read's answer when a step of the pointer names an item the list there doesn't have.", `Nothing is at {{pointer}}: what is at "{{at}}" is a list of {{count}}, read by index from 0, and {{step}} isn't one of them.`, [v6("pointer", "the pointer the call gave", true), v6("at", "the pointer up to its last step that names something"), v6("step", "the step that names nothing", true), v6("count", "how many items the list has", true)]),
+  answerPrompt(WORLD_NOTE.noBelow, "Nothing at that pointer: nothing is below a value", "world_read's answer when the pointer goes on past a text, a number, true, false or null.", 'Nothing is at {{pointer}}: what is at "{{at}}" is a single value, with nothing below it. Read it at {{at}}.', [v6("pointer", "the pointer the call gave", true), v6("at", "the pointer up to its last step that names something", true)]),
+  answerPrompt(WORLD_NOTE.andMore, "A list that was cut", "A list of names that was cut to fit one answer.", `{{list}}, and {{count}} more past what one answer shows (${CUT_AT})`, [v6("list", "the names shown", true), v6("count", "how many more there are", true)]),
+  answerPrompt(WORLD_NOTE.none, "A list with nothing in it", "Stands where a list of names would be when there are none.", "none"),
+  answerPrompt(WORLD_NOTE.shapeCollection, "What to do with a collection's shape", "Ends world_shape's answer for a collection.", "Read an example with world_read at its pointer. Write one item whole with world_put (collection {{of}}, its id, the item as JSON text), change part of one with world_patch, take one out with world_remove.", [v6("of", "the collection", true)]),
+  answerPrompt(WORLD_NOTE.shapePart, "What to do with a part's shape", "Ends world_shape's answer for a part.", "Read the draft's own with world_read at the pointer given. Write it whole with world_set (part {{of}}, the part as JSON text), or change one member of it with world_patch.", [v6("of", "the part", true)]),
+  answerPrompt(WORLD_NOTE.shapeHint, "Where the shape is found", "Added to a refused world_put or world_set.", "world_shape (of: {{of}}) gives the shape it takes.", [v6("of", "the collection or part that was written", true)]),
+  answerPrompt(WORLD_NOTE.shapeHintAny, "Where a shape is found", "Added to a refused world_patch.", "world_read shows what is at a path; world_shape gives the shape of a collection's item or of a part."),
+  answerPrompt(WORLD_NOTE.needsObject, "The value isn't a JSON object", "world_put's and world_set's answer when value isn't a JSON object.", `{{tool}} takes {{arg}} as a JSON object written as text, such as {"label": "..."}, and what was given isn't one. world_shape gives the shape it takes.`, [v6("tool", "the tool", true), v6("arg", "the argument", true)]),
+  answerPrompt(WORLD_NOTE.needsOps, "The operations aren't a JSON array", "world_patch's answer when ops isn't a JSON array.", `world_patch takes ops as a JSON array of operations written as text, such as [{"op": "replace", "path": "/calendar/timeZone", "value": "Europe/Lisbon"}], and what was given isn't one.`),
+  answerPrompt(WORLD_NOTE.noItem, "No such item in the collection", "world_remove's answer when the collection, in the world the call writes, has no item of that id.", "There is no {{id}} in {{collection}} {{where}}. It has: {{ids}}.", [v6("collection", "the collection", true), v6("id", "the id the call gave", true), v6("where", "the world the call writes: in this chat's world, or in the world's draft", true), v6("ids", "the ids the collection has, or that it has none", true)]),
+  answerPrompt(WORLD_NOTE.added, "An item was added", "What world_put's answer says changed, for a new item.", "Added {{id}} to {{collection}} {{where}}.", [v6("collection", "the collection", true), v6("id", "the item's id", true), v6("where", "the world the call writes: in this chat's world, or in the world's draft", true)]),
+  answerPrompt(WORLD_NOTE.replaced, "An item was replaced", "What world_put's answer says changed, for an item that was there.", "Replaced {{id}} in {{collection}} {{where}}.", [v6("collection", "the collection", true), v6("id", "the item's id", true), v6("where", "the world the call writes: in this chat's world, or in the world's draft", true)]),
+  answerPrompt(WORLD_NOTE.removed, "An item was removed", "What world_remove's answer says changed.", "Removed {{id}} from {{collection}} {{where}}.", [v6("collection", "the collection", true), v6("id", "the item's id", true), v6("where", "the world the call writes: in this chat's world, or in the world's draft", true)]),
+  answerPrompt(WORLD_NOTE.wrotePart, "A part was written", "What world_set's answer says changed.", "Wrote the draft's {{part}} part.", [v6("part", "the part", true)]),
+  answerPrompt(WORLD_NOTE.patched, "A patch was applied", "What world_patch's answer says changed.", "Applied the patch to the draft: {{count}} operations.", [v6("count", "how many operations the patch had", true)]),
+  answerPrompt(WORLD_NOTE.nothingToDiscard, "No draft to drop", "world_discard's answer when no draft is stored.", "No draft is stored, so there is nothing to drop: the world's document stands as its head has it."),
+  answerPrompt(WORLD_NOTE.draftMoved, "The draft moved on", "world_discard's and world_commit's answer when the draft is no longer at the version the call named.", "The draft is at version {{version}} now, not {{given}}: it was written to since you read it, so nothing was done. Read it again (world_status, world_read), and call again with version {{version}} if that is still what you mean.", [v6("given", "the version the call named"), v6("version", "the draft's version now", true)]),
+  answerPrompt(WORLD_NOTE.discarded, "The draft was dropped", "What a world_discard came to once it was made: told to the author with the commit that made it.", "The draft is dropped: the world's document stands as its head has it."),
+  answerPrompt(WORLD_NOTE.nothingToCommit, "No draft to commit", "world_commit's answer when no draft is stored.", "No draft is stored, so there is nothing to commit. Write the change first (world_put, world_set, world_patch, world_keep or world_restore), then commit."),
+  answerPrompt(WORLD_NOTE.committed, "The draft was committed", "What a world_commit came to once it was made: told to the author with the commit that made it.", "The draft is the world's revision {{revision}} now, and the world's head.", [v6("revision", "the new revision", true)]),
+  answerPrompt(WORLD_NOTE.upgradeNext, "The chat doesn't play the new revision yet", "Ends what a world_commit came to when the chat plays another revision than the one committed.", "This chat still plays revision {{playing}}: world_upgrade brings it to the new one.", [v6("playing", "the revision the chat plays", true)]),
+  answerPrompt(WORLD_NOTE.hasErrors, "The draft has errors", "world_commit's reason when the draft's own checks find errors, which stop a commit.", "the world's draft has errors"),
+  answerPrompt(WORLD_NOTE.noRevision, "No such revision", "world_upgrade's and world_restore's reason when the world has no revision of that id.", "the world has no revision {{revision}}", [v6("revision", "the revision the call named", true)]),
+  answerPrompt(WORLD_NOTE.askCommit, "Asks to commit the world's draft", "How a world_commit is told wherever it stands: in its own answer, on the review card where it waits for the player's Apply, and in the answer of the commit that makes it (Settings → Changes from the reply, The world's document).", "Commit the world's draft as the world's next revision: every new chat of this world starts from it."),
+  answerPrompt(WORLD_NOTE.askCommitNoted, "Asks to commit the world's draft, with its note", "The same, when the commit carries a note for the world's history.", "Commit the world's draft as the world's next revision ({{note}}): every new chat of this world starts from it.", [v6("note", "the note given with the commit", true)]),
+  answerPrompt(WORLD_NOTE.askUpgrade, "Asks to bring the chat to a revision", "How a world_upgrade that names a revision is told wherever it stands.", "Bring this chat to revision {{revision}} of its world (an Upgrade).", [v6("revision", "the revision the chat would play", true)]),
+  answerPrompt(WORLD_NOTE.askUpgradeHead, "Asks to bring the chat to the world's head", "How a world_upgrade that names no revision is told wherever it stands: the move is to the world's head as it is when the move is made.", "Bring this chat to the head of its world, as it is when this is made (an Upgrade)."),
+  answerPrompt(WORLD_NOTE.askDiscard, "Asks to drop the world's draft", "How a world_discard is told wherever it stands.", "Drop the world's draft (version {{version}}): everything written to it since the last commit goes, Build's own edits too.", [v6("version", "the draft's version", true)]),
+  answerPrompt(WORLD_NOTE.askRestore, "Asks to restore a revision into the draft", "How a world_restore is told wherever it stands.", "Make the world's draft a copy of revision {{revision}}: what the draft holds now is replaced.", [v6("revision", "the revision to copy", true)]),
+  answerPrompt(WORLD_NOTE.alreadyPlays, "The chat plays that revision already", "world_upgrade's answer when the chat plays the revision asked for.", "This chat plays revision {{revision}} already: there is nothing to bring it to. A change still in the draft reaches play only after world_commit.", [v6("revision", "the revision asked for", true)]),
+  answerPrompt(WORLD_NOTE.upgradeLanded, "The Upgrade landed", "What a world_upgrade came to once it was made, when the chat was moved at once.", "It landed: this chat plays revision {{revision}} now, and every read of the world from here on shows it.", [v6("revision", "the revision the chat plays now", true)]),
+  answerPrompt(WORLD_NOTE.upgradePending, "The Upgrade waits for the turn's end", "What a world_upgrade came to once it was made, when the move waits for the turn that is running.", "It is pending: the move to revision {{revision}} waits for this turn's end. Until then this chat plays the revision it played, and reads of the world show that one.", [v6("revision", "the revision the chat will play", true)]),
+  answerPrompt(WORLD_NOTE.revisionHint, "Where the revisions are listed", "Added to a refused world_upgrade or world_restore.", "world_history lists the world's revisions."),
+  answerPrompt(WORLD_NOTE.restored, "The draft is a copy of a revision", "What a world_restore came to once it was made: told to the author with the commit that made it.", "The draft is a copy of revision {{revision}} now.", [v6("revision", "the revision copied", true)]),
+  answerPrompt(WORLD_NOTE.nothingMade, "Nothing was made in play", "world_made's answer when the chat made or changed nothing its world's document lacks.", "This chat has made or changed nothing in play that its world's document doesn't have."),
+  answerPrompt(WORLD_NOTE.madeNext, "How what was made is kept", "Ends world_made's answer.", "world_keep copies any of these into the world's draft: things and places by id or name, paths and maps by id, the map settings with settings: true. One marked inDraft is in the draft already."),
+  answerPrompt(WORLD_NOTE.keepNames, "Nothing was named to keep", "world_keep's answer when it names nothing to keep.", "Name what to keep: things, places, paths or maps, each a list of ids or names, or settings: true. world_made lists what this chat made or changed in play."),
+  answerPrompt(WORLD_NOTE.keptNothing, "Nothing could be kept", "world_keep's answer when nothing named could be copied into the draft.", `Nothing was kept:
+{{skipped}}
+world_made lists what this chat made in play and what the draft has already.`, [v6("skipped", "what was skipped and why, one to a line", true)]),
+  answerPrompt(WORLD_NOTE.kept, "What was kept", "What world_keep's answer says changed.", "Copied into the world's draft: {{count}} of what was named.", [v6("count", "how many were kept", true)]),
+  answerPrompt(WORLD_NOTE.notChanged, "Not one of this chat's changes", "Why world_keep skips a path, a map, a place or the map settings this chat didn't make, change or take out.", "this chat made, changed and took out nothing of that name in its world (world_made lists what it did)"),
+  answerPrompt(WORLD_NOTE.inDraftAlready, "The draft has it so already", "Why world_keep skips one of this chat's changes that the world's draft already holds as this chat has it.", "the world's draft has it so already"),
+  answerPrompt(WORLD_NOTE.notCommitted, "The draft's commit wasn't made", "What a world_upgrade asked right after a world_commit came to when that commit wasn't made, so the revision it was to bring the chat to doesn't exist.", "the world has no revision {{revision}}: it is the one the draft at version {{version}} was to become, and that commit wasn't made", [v6("revision", "the revision the draft's commit would have made", true), v6("version", "the draft's version when the Upgrade was asked")]),
+  answerPrompt(WORLD_NOTE.badMerge, "Picks it can't read", "world_upgrade's reason when an Upgrade's picks aren't ones the engine reads.", "an Upgrade's picks say take or keep for each part of an entity, by the entity's id, and these can't be read as that"),
+  answerPrompt(WORLD_NOTE.closed, "Closed to agents", "A world tool's answer when a write of the draft would change something only the user sets, whatever the mode: who the player's character is, or what the engine holds agents to.", "That would change {{paths}}, which no agent writes, whatever the mode. Who the player's character is, and what the engine holds agents to (how many people and places the story may bring in, what it may make real of what the player says, what a thing made for the story may cost, what the narrator is told, which of the user's own books the world reads), are the user's to set, in Build. Nothing was written. Write the rest without it, and say in your answer what you would have changed.", [v6("paths", "the closed paths the write would change, as JSON Pointers", true)]),
+  answerPrompt(WORLD_NOTE.closedCommit, "A draft that changes what only the user sets", "world_commit's answer, when it is asked and when it would be made, for a draft that differs from the world's head at something only the user sets: it holds the user's own edit of it.", "The draft differs from the world's head at {{paths}}, which no agent commits: it holds the user's own edit of what only they set, and committing it is theirs, in Build. Nothing was committed.", [v6("paths", "the closed paths the draft changes, as JSON Pointers", true)]),
+  answerPrompt(WORLD_NOTE.closedRestore, "A revision that differs where agents don't write", "world_restore's answer, when it is asked and when it would be made, for a revision that differs from the draft at something only the user sets.", "Revision {{revision}} differs from the draft at {{paths}}, which no agent writes: restoring it is the user's, in Build. The draft stands as it was.", [v6("revision", "the revision the call named", true), v6("paths", "the closed paths that differ, as JSON Pointers", true)]),
+  answerPrompt(WORLD_NOTE.closedUpgrade, "An Upgrade that changes what only the user sets", "world_upgrade's answer, when it is asked and when it would be made, for a revision that differs from the one the chat plays at something only the user sets.", "Revision {{revision}} differs at {{paths}} from the one this chat plays, which no agent brings into play: that Upgrade is the user's to make, in Build. The chat plays what it played.", [v6("revision", "the revision the chat would have been brought to", true), v6("paths", "the closed paths that differ, as JSON Pointers", true)]),
+  answerPrompt(WORLD_NOTE.changesCommit, "What a commit changes", "Heads the list of what a world_commit would change, on the review card and in the tool's answer: the draft against the world's head, the user's own unsaved edits included.", "What it commits, against the world's head ({{count}}):", [v6("count", "how many items and parts differ", true)]),
+  answerPrompt(WORLD_NOTE.changesRestore, "What a restore changes", "Heads the list of what a world_restore would change: the revision against the world's head.", "What the draft would then hold, against the world's head ({{count}}):", [v6("count", "how many items and parts differ", true)]),
+  answerPrompt(WORLD_NOTE.changesUpgrade, "What an Upgrade changes", "Heads the list of what a world_upgrade would change: the revision the chat is brought to against the one it plays.", "What it brings of the world's document, against revision {{playing}}, which this chat plays ({{count}}):", [v6("playing", "the revision the chat plays", true), v6("count", "how many items and parts differ", true)]),
+  answerPrompt(WORLD_NOTE.changesNone, "Nothing changes", "Stands where the list of what a world_commit, world_restore or world_upgrade would change is empty.", "Nothing in the world's document differs."),
+  answerPrompt(WORLD_NOTE.changeItems, "A collection's changes", "One line of the list of what a write of the world's document changes: one collection's items.", "{{collection}}: {{changes}}", [v6("collection", "the collection", true), v6("changes", "what was added, changed and removed in it", true)]),
+  answerPrompt(WORLD_NOTE.changeParts, "The parts that change", "Names the line of the world's parts (its calendar, its realism and the like) in the list of what a write changes.", "its parts"),
+  answerPrompt(WORLD_NOTE.changeAdded, "Items added", "Part of a collection's line: the items a write adds.", "added {{items}}", [v6("items", "the items, each by name and id", true)]),
+  answerPrompt(WORLD_NOTE.changeChanged, "Items changed", "Part of a collection's line: the items a write changes.", "changed {{items}}", [v6("items", "the items, each by name and id", true)]),
+  answerPrompt(WORLD_NOTE.changeRemoved, "Items removed", "Part of a collection's line: the items a write removes.", "removed {{items}}", [v6("items", "the items, each by name and id", true)]),
+  answerPrompt(WORLD_NOTE.changesHidden, "Changes kept from the player's character", "Ends the list on the review card: how many of the changes are to something the document keeps from the player's character, which the card counts and never names.", "and {{count}} more to what the world keeps from your character", [v6("count", "how many such changes", true)]),
+  answerPrompt(WORLD_NOTE.changesMore, "A list of changes that was cut", "Ends a list of changes too long for one answer or one card.", "and {{count}} more lines: world_read reads the draft, world_history lists the revisions", [v6("count", "how many lines aren't shown", true)]),
+  answerPrompt(WORLD_NOTE.theirEdits, "Waits for the user's own edits", "Ends a world_commit, world_discard or world_restore in the commit's answer when it went to the review card whatever the mode: the draft holds edits no agent of the turn wrote.", "It waits for the player's Apply on the review card: the draft holds edits no agent of this turn wrote (the user's own, from Build), and no agent publishes or throws away someone's unfinished work by itself. Say so in your reply, and don't go on as if it were done."),
+  answerPrompt(WORLD_NOTE.followsCommit, "An Upgrade that waits with its commit", "Ends a world_upgrade in the commit's answer when it went to the review card because the commit it follows waits there.", "It waits on the review card with the commit before it, which it follows: one Apply makes both."),
+  ...SHAPE_PROMPTS
+];
 
 // src/shared/harness-texts-build.ts
 var BUILD_TOOL = { place: "world_place", path: "world_path", map: "world_map", mapPlace: "world_map_place", mapLink: "world_map_link", mapSettings: "world_map_settings" };
@@ -33699,7 +34059,7 @@ var BUILD_NOTE_PROMPTS = [
   answerPrompt(BUILD_NOTE.aLink, "A map's link, named", "How a building tool's answer names a link of a map.", "the link between {{from}} and {{to}} on the map {{map}}", [v6("from", "the id of one end", true), v6("to", "the id of the other", true), v6("map", "the map's id", true)]),
   answerPrompt(BUILD_NOTE.settings, "The map settings, named", "How world_map_settings's answer names what it changed.", "the map settings"),
   answerPrompt(BUILD_NOTE.none, "None", "Stands in a building tool's refusal for a list with nothing in it.", "none"),
-  answerPrompt(BUILD_NOTE.moreIds, "More than fit", "Ends a list of ids in a building tool's refusal that was cut to fit one answer.", "and {{count}} more", [v6("count", "how many more", true)]),
+  answerPrompt(BUILD_NOTE.moreIds, "More than fit", "Ends a list of ids in a building tool's refusal that was cut to fit one answer.", `and {{count}} more past what one answer shows (${CUT_AT})`, [v6("count", "how many more", true)]),
   answerPrompt(BUILD_NOTE.noPlace, "No such place", "A building tool's answer when a place it was given is not in the world the call writes: this chat's own, or the world's draft.", "There is no place with the id or exact name {{name}} {{where}}. Its places, by id: {{places}}. Give one of these, or make the place first (world_place).", [v6("name", "what the call gave"), v6("where", "the world the call writes, as the two texts below say it", true), v6("places", "the ids of that world's places", true)]),
   answerPrompt(BUILD_NOTE.placeExists, "A place of that name exists", "world_place's answer to a new place whose name a place of that world already has.", "There is a place called {{name}} ({{id}}) already. To change it, name it in place; to make another of the same name, give id.", [v6("name", "the place's name", true), v6("id", "its id", true)]),
   answerPrompt(BUILD_NOTE.idTaken, "That id is taken", "A building tool's answer to a new place or map whose id is already in use.", "The id {{id}} is taken: {{by}}. To change that one, name it in {{arg}}; to make a new one, give another id.", [v6("id", "the id", true), v6("by", "what has it", true), v6("arg", "the argument that names an existing one", true)]),
@@ -34782,8 +35142,8 @@ var RECORD_NOTE_PROMPTS = [
   answerPrompt(RECORD_NOTE.playerCast, "The player's character", "cast_set's answer for the player's character.", "{{name}} is the player's character. Whether they have a mind is the player's setting, so they aren't cast. Nothing was changed.", [v6("name", "the player's character", true)]),
   answerPrompt(RECORD_NOTE.badWhen, "A time it can't read", "A story tool's answer when a time isn't one the world's calendar reads.", "{{arg}} isn't a time the world's calendar reads. Write it as {{now}} is written: a date and a time, YYYY-MM-DD HH:MM.", [v6("arg", "the argument", true), v6("now", "the time now, as it is written", true)]),
   answerPrompt(RECORD_NOTE.feedNone, "Nothing new", "What feed_read says when nothing reached the person since they last took things in.", "Nothing new reached you since you last took things in."),
-  answerPrompt(RECORD_NOTE.feedMore, "More wait", "What feed_read says when more items wait past those it gave: how many, the setting that bounds one read (Settings → Story → The record's limits), and how to read on.", "{{more}} more wait after these: {{setting}} (Settings → Story → The record's limits) gives at most {{most}} at once. Read on with after set to last.", [v6("more", "how many more", true), v6("setting", "the setting's label", true), v6("most", "the most one read gives", true)]),
-  answerPrompt(RECORD_NOTE.beatsEarlier, "Earlier beats left out", "What beats_read says when earlier beats that fit were left out: how many, the setting that bounds one read (Settings → Story → The record's limits), and how to read them.", "{{earlier}} earlier beats that fit are left out: {{setting}} (Settings → Story → The record's limits) gives at most {{most}} in one read. Read them with before set to {{first}}.", [v6("earlier", "how many are left out", true), v6("setting", "the setting's label", true), v6("most", "the most one read gives", true), v6("first", "the id of the oldest beat given", true)]),
+  answerPrompt(RECORD_NOTE.feedMore, "More wait", "What feed_read says when more items wait past those it gave: how many, what bounds one read (the setting, Settings → Story → The record's limits, and the characters one read gives whole), and how to read on.", "{{more}} more wait after these: one read gives at most {{most}} ({{setting}}, Settings → Story → The record's limits) and {{chars}} characters. Read on with after set to last.", [v6("more", "how many more", true), v6("setting", "the setting's label"), v6("most", "the most one read gives"), v6("chars", "the most characters one read gives whole")]),
+  answerPrompt(RECORD_NOTE.beatsEarlier, "Earlier beats left out", "What beats_read says when earlier beats that fit were left out: how many, what bounds one read (the setting, Settings → Story → The record's limits, and the characters one read gives whole), and how to read them.", "{{earlier}} earlier beats that fit are left out: one read gives at most {{most}} ({{setting}}, Settings → Story → The record's limits) and {{chars}} characters. Read them with before set to {{first}}.", [v6("earlier", "how many are left out", true), v6("setting", "the setting's label", true), v6("most", "the most one read gives", true), v6("chars", "the most characters one read gives whole", true), v6("first", "the id of the oldest beat given", true)]),
   answerPrompt(RECORD_NOTE.noAfter, "Not a beat to read past", "feed_read's answer when after names no beat on the chat's path.", "No beat {{beat}} is on the chat's path. Leave after out to read from the last beat you took in.", [v6("beat", "the id the call gave", true)]),
   answerPrompt(RECORD_NOTE.noDue, "Nothing due", "What drafts_due says when no open draft is due or stale.", "No open draft is due or stale now."),
   answerPrompt(RECORD_NOTE.stale, "Stale", "What drafts_due says of a stale draft.", "The story moved since this draft was opened. Judge whether it still holds: settle it, drop it, or open it again as it now stands.")
@@ -34813,19 +35173,23 @@ var STAGE_NOTE = {
   moduleUnknown: "harness.note.narration.module_unknown",
   noModules: "harness.note.narration.no_modules",
   readFirst: "harness.note.narration.read_first",
+  passageNext: "harness.note.narration.passage_next",
+  passageNeeded: "harness.note.narration.passage_needed",
+  passageEyes: "harness.note.narration.passage_eyes",
+  replyOpen: "harness.note.narration.reply_open",
   draftEmpty: "harness.note.narration.draft_empty",
   draftLong: "harness.note.narration.draft_long",
   released: "harness.note.narration.released",
   draftPassed: "harness.note.narration.draft_passed",
   draftSpent: "harness.note.narration.draft_spent",
   drafted: "harness.note.narration.drafted",
+  draftWaits: "harness.note.narration.draft_waits",
   draftedChecked: "harness.note.narration.drafted_checked",
   draftedFree: "harness.note.narration.drafted_free",
   quotesMissing: "harness.note.narration.quotes_missing",
   quotesUnheld: "harness.note.narration.quotes_unheld",
   readWho: "harness.note.narration.read_who",
   noPassage: "harness.note.narration.no_passage",
-  noneYet: "harness.note.narration.none_yet",
   checkNone: "harness.note.narration.check_none",
   checkWho: "harness.note.narration.check_who",
   checkNothing: "harness.note.narration.check_nothing",
@@ -34849,14 +35213,14 @@ var STAGE_AGENT_TEXTS = [
     label: "The game master",
     name: "Game master",
     description: "Rules on what the world's rules leave open, checks each passage of the narrator's against what happened before it is released, and settles what happened with you when you ask. Give it what is attempted and how (in the player's own words where it is the player's), or the number of the passage to check. It rolls nothing and writes no prose.",
-    instructions: lines2("You are the game master of a roleplay world that LumiRPEngine keeps. The author starts you for a ruling, for a check of a passage before it reaches the player, or to settle what happened. You never roll: the engine's dice fall when the author plays an attempt. You never write the story's prose.", "", "A ruling. The author says what someone attempts and how they go about it.", "- Find the action the attempt is, and read its odds with checks_odds: whether it can be tried now, the chance of each outcome, and what this world's policy makes of it. An attempt of the player character's that no action covers is the open attempt: checks_stakes with action try, the skill that fits, how hard it looks, and whom it is against.", "- Look up only what the ruling turns on: the people involved, what they carry, where they are.", "- Judge the approach: how well what was described suits what is attempted, from 0 to the top the policy gives, with a reason in one plain line. A clever, prepared approach that fits the moment rates high. None, or one that works against them, rates 0.", "- Read the attempt with checks_stakes, with the same action, actor and arguments and your rating. Where the policy leaves the outcome to the story, give each outcome its odds: start from the dice's own, and move them toward success for a strong approach and away from it for a weak one.", "- Answer in a few lines: what is attempted; the action, who acts and its arguments exactly as you read them; your rating and why; the odds; what each outcome does. Never say how it turns out: the roll is the author's to play.", "", "A check. The author asks you to hold a passage to what happened.", "- Read it with passage_read. It gives every beat the passage tells as it truly happened and as it reached the point-of-view character, and the beats of the turn that never reached them, then the latest draft.", "- Judge the passage against the beats passage_read shows you. Look into the world (places, people, things) only for a fact the passage states that no beat holds.", "- The passage holds when every act and every word that reached the point-of-view character is in it, every quote is word for word, and it adds nothing anyone could later notice: no act, word, outcome, injury, object, name or fact that the beats don't hold. It shows nothing the point-of-view character could not perceive, and other people's minds only through what they do and say. The rhythm, the voice, what the point-of-view character dwells on, and the presentation the author asked for are the narrator's.", "- passage_read also lists the quotes it could not find word for word and the spoken words no beat holds. Judge each one: a quote broken up by narration is still exact.", "- Record your verdict with passage_check: it holds, or it doesn't, with each change the narrator must make, exactly: the words at fault and what to put instead. Judge against the beats, never against your own taste.", "- Answer in a line: the verdict, and the changes if there are any.", "", "Settling what happened. When the author works something out with you (a contested outcome, a stretch of time decided between you), read the beats so far with beats_read, then write each thing that happened as a beat with beat_write, with whom it reached and how fully. Nothing you write may contradict a beat that stands.", "", "A tool's refusal says what to fix: fix it, or go on without it. Never repeat the same call unchanged.")
+    instructions: lines2("You are the game master of a roleplay world that LumiRPEngine keeps. The author starts you for a ruling, for a check of a passage before it reaches the player, or to settle what happened. You never roll: the engine's dice fall when the author plays an attempt. You never write the story's prose.", "", "A ruling. The author says what someone attempts and how they go about it.", "- Find the action the attempt is, and read its odds with checks_odds: whether it can be tried now, the chance of each outcome, and what this world's policy makes of it. An attempt of the player character's that no action covers is the open attempt: checks_stakes with action try, the skill that fits, how hard it looks, and whom it is against.", "- Look up only what the ruling turns on: the people involved, what they carry, where they are.", "- Judge the approach: how well what was described suits what is attempted, from 0 to the top the policy gives, with a reason in one plain line. A clever, prepared approach that fits the moment rates high. None, or one that works against them, rates 0.", "- Read the attempt with checks_stakes, with the same action, actor and arguments and your rating. Where the policy leaves the outcome to the story, give each outcome its odds: start from the dice's own, and move them toward success for a strong approach and away from it for a weak one.", "- Answer in a few lines: what is attempted; the action, who acts and its arguments exactly as you read them; your rating and why; the odds; what each outcome does. Never say how it turns out: the roll is the author's to play.", "", "A check. The author asks you to hold a passage to what happened.", "- Read it with passage_read and the passage's number your task gives. It gives every beat the passage tells as it truly happened and as it reached the point-of-view character, and the beats of the turn that never reached them, then the latest draft.", "- Judge the passage against the beats passage_read shows you. Look into the world (places, people, things) only for a fact the passage states that no beat holds.", "- The passage holds when every act and every word that reached the point-of-view character is in it, every quote is word for word, and it adds nothing anyone could later notice: no act, word, outcome, injury, object, name or fact that the beats don't hold. It shows nothing the point-of-view character could not perceive, and other people's minds only through what they do and say. The rhythm, the voice, what the point-of-view character dwells on, and the presentation the author asked for are the narrator's.", "- passage_read also lists the quotes it could not find word for word and the spoken words no beat holds. Judge each one: a quote broken up by narration is still exact.", "- Record your verdict with passage_check: it holds, or it doesn't, with each change the narrator must make, exactly: the words at fault and what to put instead. Judge against the beats, never against your own taste.", "- Answer in a line: the passage's number, the verdict, and the changes if there are any.", "", "Settling what happened. When the author works something out with you (a contested outcome, a stretch of time decided between you), read the beats so far with beats_read, then write each thing that happened as a beat with beat_write, with whom it reached and how fully. Nothing you write may contradict a beat that stands.", "", "A tool's refusal says what to fix: fix it, or go on without it. Never repeat the same call unchanged.")
   },
   {
     id: "narrator",
     label: "The narrator",
     name: "Narrator",
-    description: "Tells what happened: turns what reached the point-of-view character into a passage of the reply, in the voice this story is written in. Start it once a moment is decided. Name a point of view other than the player character's with as, and any presentation the preset offers in its task. Its passage is checked before you release it. It answers with the passage's number and length, never its text: you release the passage by that number.",
-    instructions: lines2("You are the narrator of a roleplay. The author decides what happens; you tell it. You turn what reached one person, the point-of-view character, into a passage of the story, in the voice the story is written in. Before the author releases your passage to the player, it is checked against what happened.", "", "How to work:", "- Call narration_read first. It gives what reached the point-of-view character, in the order it happened: what they saw and heard whole, what they caught only in part or were told, and their own acts and words. It says where they are and who is plainly there, and gives the presentation the author asked for, the end of the reply as told so far (each passage before yours) and the story's recent prose. If your task names presentation, pass those names in modules.", "- Write no fact of your own. Every act and every word you show is one you were given. Quote spoken words exactly. Show nothing the point-of-view character could not see, hear or know, and other people's minds only through what they do and say. Call someone by name only where you were given the name.", "- The telling is yours: its rhythm, its voice, what the point-of-view character dwells on. Nothing you add may be something anyone could later notice.", "- Go on from the reply so far without repeating it. Your passage follows the one before it after a blank line: start where that one leaves off.", "- Record the passage with passage_draft. If it notes a quote you missed, draft again with the quote in it.", "- When narration_read gives your last draft with the changes a check asks for (it gives them first), make exactly those changes and keep the rest.", "- Then answer in one line, as passage_draft's answer says: which passage you drafted and how long it is. Never write the passage out again: the author releases it by its number, exactly as you drafted it.")
+    description: "Tells what happened: turns what reached the point-of-view character into a passage of the reply, in the voice this story is written in. Start it once a passage's beats are written, with the passage's number in its task. Name a point of view other than the player character's with as, and any presentation the preset offers in its task. Its passage is checked before it can go out. It answers with the passage's number and length, never its text.",
+    instructions: lines2("You are the narrator of a roleplay. The author decides what happens; you tell it. You turn what reached one person, the point-of-view character, into a passage of the story, in the voice the story is written in. Before your passage reaches the player, it is checked against what happened.", "", "How to work:", "- Your task gives your passage's number. Call narration_read first, with that number as passage. A new passage takes the next number, and narration_read opens it with what reached the point-of-view character that no earlier passage tells: what they saw and heard whole, what they caught only in part or were told, and their own acts and words, in the order it happened. A revision takes the number of the passage it revises, and narration_read gives it with your last draft and the changes its check asks for first. It also says where they are and who is plainly there, and gives the presentation the author asked for, the end of the reply as far as it is settled, and the story's recent prose. If your task names presentation, pass those names in modules.", "- If narration_read says your number isn't the next one, answer the author with what it says, and stop. Never take a number your task didn't give you.", "- Write no fact of your own. Every act and every word you show is one you were given. Quote spoken words exactly. Show nothing the point-of-view character could not see, hear or know, and other people's minds only through what they do and say. Call someone by name only where you were given the name.", "- The telling is yours: its rhythm, its voice, what the point-of-view character dwells on. Nothing you add may be something anyone could later notice.", "- Go on from the reply so far without repeating it: your passage follows it after a blank line. Where narration_read says an earlier passage isn't settled yet, you aren't given its text: go on from the reply as it is given.", "- Record the passage with passage_draft and its number, once. If its answer notes a quote you missed, draft again with the quote in it: until the passage is checked, a new draft takes the place of the last and spends nothing.", "- When narration_read gives your last draft with the changes a check asks for, make exactly those changes and keep the rest.", "- Then answer in one line, as passage_draft's answer says: your passage's number and how long it is. Never write the passage out again: the author sends it by its number, exactly as you drafted it.")
   }
 ];
 var STAGE_TOOL_TEXTS = [
@@ -34864,9 +35228,10 @@ var STAGE_TOOL_TEXTS = [
     name: STAGE_TOOL.narrationRead,
     family: HARNESS_FAMILY.narration,
     tier: "read",
-    note: "Gives the narrator what reached the point-of-view character in this turn that no passage has told yet.",
-    text: "The narrator's first call: what it is given to tell. It answers with what reached the point-of-view character in this turn that no earlier passage has told, in the order it happened (seen and heard whole, caught in part, told by someone, or their own act), where they are and who is plainly there, the presentation the author asked for, and, for its voice, the end of the reply as told so far and the story's recent prose. It never gives what reached no one, or more of what happened than reached them. The point of view is the player character's unless the author named someone else when it started you. Called again while you revise, it gives the same passage with your last draft and the changes a check asked for first. The author may call it with pov to see what a narrator would be given.",
+    note: "Gives the narrator its passage: what reached the point-of-view character in this turn that no earlier passage tells, or the passage it revises.",
+    text: "The narrator's first call: its passage, by its number. The next number opens a new passage with what reached the point-of-view character in this turn that no earlier passage tells, in the order it happened (seen and heard whole, caught in part, told by someone, or their own act); a passage's own number gives it again as it opened, with your last draft and the changes a check asked for first, while you revise. It says where they are and who is plainly there, and gives the presentation the author asked for and, for your voice, the number of each earlier passage not settled yet, the end of the reply as far as it is settled, and the story's recent prose. It never gives what reached no one, or more of what happened than reached them. The point of view is the player character's unless the author named someone else when it started you. The author may call it with pov to see what a narrator of a new passage would be given.",
     args: [
+      { path: "passage", text: "Your passage's number, as your task gives it: a new passage takes the next number, a revision the number of the passage it revises. Left out, the next new passage. The author leaves it out." },
       { path: "pov", text: "The author's only: whose eyes to see through, a person's id or name. A narrator reads without it: the author names the point of view when it starts you." },
       { path: "modules", text: "The names of the presentation the author asked for in your task, if any." }
     ]
@@ -34875,24 +35240,27 @@ var STAGE_TOOL_TEXTS = [
     name: STAGE_TOOL.passageDraft,
     family: HARNESS_FAMILY.narration,
     tier: "write",
-    note: "Records the narrator's draft of its passage.",
-    text: "Record your passage: the narrator's draft of what narration_read gave it. Each call is a new draft of the same passage, and a passage has a set number of drafts. The answer gives the passage's number and length, notes the quotes it could not find word for word and the spoken words no beat holds, and says whether the passage is checked before the author releases it. The author releases the draft recorded here: never write it out again.",
-    args: [{ path: "text", text: "The whole passage, exactly as it should reach the player." }]
+    note: "Records the narrator's draft of its passage, by the passage's number.",
+    text: "Record your passage, by its number: the narrator's draft of what narration_read gave it. Until it is checked, a new draft takes the place of the last and spends nothing; once a check finds it at fault, each new draft is one of the revisions the settings allow. The answer gives the passage's number and length, notes the quotes it could not find word for word and the spoken words no beat holds, and says whether the passage is checked before it can go out. The author sends the draft recorded here: never write it out again.",
+    args: [
+      { path: "passage", text: "Your passage's number, as narration_read gave it." },
+      { path: "text", text: "The whole passage, exactly as it should reach the player." }
+    ]
   },
   {
     name: STAGE_TOOL.passageRead,
     family: HARNESS_FAMILY.narration,
     tier: "read",
-    note: "Reads a passage for its check: the beats it tells, whole, then its latest draft.",
-    text: "Read a passage for its check: every beat it tells as it truly happened and as it reached the point-of-view character, the beats of the turn that never reached them and the checks made so far, then its latest draft, with the quotes the draft lacks and the spoken words no beat holds. The game master and the author read with it; a narrator never does.",
-    args: [{ path: "passage", text: "The passage's number; leave it out for the latest one waiting for a check." }]
+    note: "Reads a passage for its check: the beats it tells, whole, then its latest draft. Without a number, where each passage stands.",
+    text: "Read a passage for its check: every beat it tells as it truly happened and as it reached the point-of-view character, the beats of the turn that never reached them and the checks made so far, then its latest draft, with the quotes the draft lacks and the spoken words no beat holds. Without a number, it lists each passage of the turn and where it stands, and gives no text: its number, whose eyes, its latest draft's number and length, its check (waits, holds or at fault), the drafts it has left, and whether the release would send it now; and the number the next new passage takes. The game master and the author read with it; a narrator never does.",
+    args: [{ path: "passage", text: "The passage's number; leave it out for where each passage stands." }]
   },
   {
     name: STAGE_TOOL.passageCheck,
     family: HARNESS_FAMILY.narration,
     tier: "write",
     note: "Records a check of a passage's latest draft: whether it holds to its beats, and what to change.",
-    text: "Record your check of a passage's latest draft: whether it holds to its beats, and if not, each change the narrator must make. Only the one the settings name checks: the game master, or the author. A draft at fault goes back to the narrator; one that holds may be released.",
+    text: "Record your check of a passage's latest draft: whether it holds to its beats, and if not, each change the narrator must make. Only the one the settings name checks: the game master, or the author. A draft at fault goes back to the narrator; one that holds is ready for the turn's release.",
     args: [
       { path: "passage", text: "The passage's number." },
       { path: "holds", text: "Whether the draft holds to its beats: true or false." },
@@ -34991,7 +35359,7 @@ var TEXT_PROMPTS = [
     group: GUIDANCE,
     label: "Each passage: the game master checks",
     note: "The author's guidance when the game master checks each passage (the narration setting Who checks).",
-    text: "Each passage is checked by the game master in this chat: once the narrator has drafted one, start the game master to check it. A passage at fault goes back to the narrator with the changes, up to {{revisions}} times; then you may release its last draft as it stands, or leave it out. reply_write refuses a passage that hasn't passed its check.",
+    text: "Each passage is checked by the game master in this chat: once the narrator has drafted one, start the game master with its number to check it, before you ask for the next passage. A passage at fault goes back to the narrator with the changes, up to {{revisions}} times; then its last draft goes out as it stands if you name it in the release, or you leave it out. reply_write refuses a passage that hasn't passed its check.",
     vars: [v6("revisions", "the revisions a passage is allowed", true)]
   },
   {
@@ -35000,7 +35368,7 @@ var TEXT_PROMPTS = [
     group: GUIDANCE,
     label: "Each passage: the author checks",
     note: "The author's guidance when it checks each passage itself (the narration setting Who checks).",
-    text: "You check each passage of the narrator's yourself in this chat: once the narrator has drafted one, read it against its beats with passage_read and give your verdict with passage_check. A passage at fault goes back to the narrator with the changes, up to {{revisions}} times; then you may release its last draft as it stands, or leave it out. reply_write refuses a passage that hasn't passed its check.",
+    text: "You check each passage of the narrator's yourself in this chat: once the narrator has drafted one, read it against its beats with passage_read and its number, and give your verdict with passage_check, before you ask for the next passage. A passage at fault goes back to the narrator with the changes, up to {{revisions}} times; then its last draft goes out as it stands if you name it in the release, or you leave it out. reply_write refuses a passage that hasn't passed its check.",
     vars: [v6("revisions", "the revisions a passage is allowed", true)]
   },
   {
@@ -35009,7 +35377,7 @@ var TEXT_PROMPTS = [
     group: GUIDANCE,
     label: "Each passage: no one checks",
     note: "The author's guidance when no one checks a passage (the narration setting Who checks).",
-    text: "No one checks a passage of the narrator's in this chat: each is ready once it is drafted, and goes out with the reply as drafted.",
+    text: "No one checks a passage of the narrator's in this chat: each is settled once it is drafted, and goes out as drafted when you name it in the release.",
     vars: []
   },
   {
@@ -35056,27 +35424,31 @@ var NOTE_PROMPTS = [
   answerPrompt(STAGE_NOTE.nothing, "Nothing to narrate", "narration_read's answer when nothing reached the point-of-view character that an earlier passage hasn't told.", "Nothing has reached {{pov}} in this turn that an earlier passage hasn't told. There is nothing to narrate yet: say so in your answer.", [pov]),
   answerPrompt(STAGE_NOTE.moduleUnknown, "No such presentation", "narration_read's answer when a presentation it is asked for isn't in the chat's preset.", "This chat's preset has no presentation called {{names}}. What it offers: {{offered}}.", [v6("names", "the names it doesn't have", true), v6("offered", "the names it has", true)]),
   answerPrompt(STAGE_NOTE.noModules, "No presentation to ask for", "narration_read's answer when it is asked for presentation and the chat's preset offers none.", "This chat's preset offers no presentation to ask for. Call narration_read without modules."),
-  answerPrompt(STAGE_NOTE.readFirst, "Read before drafting", "passage_draft's answer to a narrator that hasn't been given its passage yet.", "Call narration_read first: it gives the passage you draft."),
+  answerPrompt(STAGE_NOTE.readFirst, "Read before drafting", "passage_draft's answer for the next passage's number, which narration_read hasn't opened yet.", "Call narration_read with passage {{n}} first: it opens the passage and gives what you draft.", [v6("n", "the passage's number")]),
+  answerPrompt(STAGE_NOTE.passageNext, "Not the next passage", "narration_read's and passage_draft's answer to a passage number past the next new one.", "There is no passage {{n}} yet, and a new passage takes the next number, {{next}}: each passage is numbered in the order told. If your task gave you {{n}}, say so in your answer and stop: never take a number your task didn't give you.", [n3, v6("next", "the number the next new passage takes", true)]),
+  answerPrompt(STAGE_NOTE.passageNeeded, "Which passage", "passage_draft's answer when it names no passage.", "Name the passage you draft by its number (passage), as narration_read gave it to you."),
+  answerPrompt(STAGE_NOTE.passageEyes, "Another's passage", "narration_read's and passage_draft's answer to a narrator naming a passage seen through other eyes than those it was started with: it is never handed what reached someone else.", "Passage {{n}} is seen through other eyes than yours, so it isn't yours to read or draft: say so in your answer and stop. The author starts a passage's narrator as the one whose eyes it is seen through.", [n3]),
+  answerPrompt(STAGE_NOTE.replyOpen, "Earlier pieces not settled", "In narration_read's answer: the number of each passage before the narrator's whose latest draft hasn't passed its check, whose text it isn't given.", "Not settled yet before yours (not drafted or checked yet, or found at fault), so not given: passage {{n}}. Go on from the reply as it is given.", [v6("n", "their numbers", true)]),
   answerPrompt(STAGE_NOTE.draftEmpty, "A draft with no text", "passage_draft's answer when it is given no text.", "A draft needs the passage's text: the whole passage, as it should reach the player."),
   answerPrompt(STAGE_NOTE.draftLong, "A passage too long", `passage_draft's answer when a draft is longer than a passage may be (${at3("passageChars")}).`, `A passage is at most {{chars}} characters (${at3("passageChars")}). Tell less in this one: what is left can be the next passage's.`, [v6("chars", "the most a passage may be", true)]),
   answerPrompt(STAGE_NOTE.released, "The passage is out", "A narration tool's answer about a passage that has been released already.", "Passage {{n}} has been released already: nothing of it can change.", [n3]),
-  answerPrompt(STAGE_NOTE.draftPassed, "The draft passed", "passage_draft's answer when the passage's last draft passed its check.", "Your last draft of passage {{n}} passed its check, and the author releases it as it stands. Answer in one line that it passed: never write it out again.", [n3]),
+  answerPrompt(STAGE_NOTE.draftPassed, "The draft passed", "passage_draft's answer when the passage's last draft passed its check.", "Your last draft of passage {{n}} passed its check: it goes out as it stands, and isn't drafted again. Anything new to tell is a new passage, {{next}}; else answer in one line that it passed.", [n3, v6("next", "the number the next new passage takes")]),
   answerPrompt(STAGE_NOTE.draftSpent, "No drafts left", `passage_draft's answer when the passage has had all the drafts the settings allow (${at3("revisions")}).`, `Passage {{n}} has had {{made}} drafts, all the settings allow (${at3("revisions")}). The author decides what becomes of it: answer in one line that its drafts are spent.`, [n3, v6("made", "the drafts it has had", true)]),
-  answerPrompt(STAGE_NOTE.drafted, "A draft recorded", "Heads passage_draft's answer once the draft is recorded: which passage, which draft, and how long it is.", "Passage {{n}}, draft {{draft}} of {{of}}, is recorded: {{chars}} characters.", [n3, v6("draft", "this draft's number", true), v6("of", "the drafts a passage may have", true), v6("chars", "how long the draft is, in characters", true)]),
-  answerPrompt(STAGE_NOTE.draftedChecked, "It is checked next", "Ends passage_draft's answer where each passage is checked: the narrator answers in a line, and never writes the passage out again.", "It is checked against what happened before the author releases it. Answer in one line with its number and length, and that it waits for its check. Never write it out again: the author releases it by its number."),
-  answerPrompt(STAGE_NOTE.draftedFree, "No one checks it", "Ends passage_draft's answer where no one checks a passage: the narrator answers in a line, and never writes the passage out again.", "No one checks it in this chat: it is ready to release. Answer in one line with its number and length. Never write it out again: the author releases it by its number."),
+  answerPrompt(STAGE_NOTE.drafted, "A draft recorded", "Heads passage_draft's answer once the draft is recorded: which passage, which draft, and how long it is.", "Passage {{n}}, draft {{draft}} of {{of}}, is recorded: {{chars}} characters.", [n3, v6("draft", "this draft's number", true), v6("of", "the drafts a passage may have", true), v6("chars", "how long the draft is, in characters")]),
+  answerPrompt(STAGE_NOTE.draftWaits, "Not over the waiting draft", "passage_draft's answer when a passage's draft waits for its check and more has reached its eyes since it opened: what is new is the next passage's, so the waiting telling is never written over.", "Passage {{n}} has a draft waiting for its check, and since it opened more has reached its eyes that no passage tells: that is the next passage's. Read it with narration_read and passage {{next}}, and draft that.", [n3, v6("next", "the number the next new passage takes", true)]),
+  answerPrompt(STAGE_NOTE.draftedChecked, "It is checked next", "Ends passage_draft's answer where each passage is checked: the narrator answers in a line, and never writes the passage out again.", "It is checked against what happened before it can go out. Answer in one line with its number and length, and that it waits for its check. Never write it out again: the author sends it by its number."),
+  answerPrompt(STAGE_NOTE.draftedFree, "No one checks it", "Ends passage_draft's answer where no one checks a passage: the narrator answers in a line, and never writes the passage out again.", "No one checks it in this chat: it is settled. Answer in one line with its number and length. Never write it out again: the author sends it by its number."),
   answerPrompt(STAGE_NOTE.quotesMissing, "Quotes the draft lacks", "In passage_draft's and passage_read's answers: words spoken where the point-of-view character heard them that the draft doesn't have word for word.", "These words were spoken where {{pov}} heard them, and the passage doesn't have them word for word: {{quotes}}.", [pov, v6("quotes", "the quotes, each in quotation marks", true)]),
   answerPrompt(STAGE_NOTE.quotesUnheld, "Spoken words no beat holds", "In passage_draft's and passage_read's answers: words spoken in the draft that no beat holds.", "These words are spoken in the passage, and no beat holds them: {{quotes}}.", [v6("quotes", "the words, each in quotation marks", true)]),
   answerPrompt(STAGE_NOTE.readWho, "Not for the narrator", "passage_read's answer to an agent that doesn't check a passage.", "passage_read is for whoever checks a passage, the game master or the author. A narrator is given only what narration_read gives."),
   answerPrompt(STAGE_NOTE.noPassage, "No such passage", "A narration tool's answer, and reply_write's, when the turn has no passage of that number.", "This turn has no passage {{n}}.", [n3]),
-  answerPrompt(STAGE_NOTE.noneYet, "No passage yet", "passage_read's answer when no passage of the turn has been drafted yet.", "No passage has been drafted in this turn yet: the narrator drafts one first."),
   answerPrompt(STAGE_NOTE.checkNone, "No one checks", "passage_check's answer where the settings have no one check a passage.", "No one checks a passage in this chat: what the narrator drafts goes out as it stands."),
   answerPrompt(STAGE_NOTE.checkWho, "Not yours to check", "passage_check's answer to an agent the settings don't name to check a passage.", "Checking a passage isn't yours in this chat: the settings give it to another."),
   answerPrompt(STAGE_NOTE.checkNothing, "Nothing to check", "passage_check's answer when the passage has no draft waiting for a check.", "Passage {{n}} has no draft waiting for a check: the narrator drafts it first, or its latest draft was checked already.", [n3]),
   answerPrompt(STAGE_NOTE.checkChanges, "What to change", `passage_check's answer when a draft that doesn't hold comes with no changes, or with too many or too long (${at3("changes")}; ${at3("changeChars")}).`, `A draft that doesn't hold needs the changes the narrator must make: at least one and at most {{most}} (${at3("changes")}), each at most {{chars}} characters (${at3("changeChars")}).`, [v6("most", "the most changes a check gives", true), v6("chars", "the longest change", true)]),
-  answerPrompt(STAGE_NOTE.checkedHolds, "It holds", "passage_check's answer when the draft holds.", "Passage {{n}} holds: the author may release it as drafted, by naming it in reply_write.", [n3]),
+  answerPrompt(STAGE_NOTE.checkedHolds, "It holds", "passage_check's answer when the draft holds.", "Passage {{n}} holds: it is settled, and goes out as drafted when the author names it in the turn's release.", [n3]),
   answerPrompt(STAGE_NOTE.checkedRevise, "It goes back", "passage_check's answer when the draft doesn't hold and the passage may be drafted again.", "Passage {{n}} doesn't hold. It goes back to the narrator with your changes: {{left}} more drafts allowed.", [n3, v6("left", "the drafts still allowed", true)]),
-  answerPrompt(STAGE_NOTE.checkedSpent, "It doesn't hold, and no drafts are left", "passage_check's answer when the draft doesn't hold and the passage has had all its drafts.", "Passage {{n}} doesn't hold, and its drafts are spent. The author may release its last draft as it stands, or leave it out.", [n3]),
+  answerPrompt(STAGE_NOTE.checkedSpent, "It doesn't hold, and no drafts are left", "passage_check's answer when the draft doesn't hold and the passage has had all its drafts.", "Passage {{n}} doesn't hold, and its drafts are spent. Its last draft goes out as it stands if the author names it in the release; else it is left out.", [n3]),
   answerPrompt(STAGE_NOTE.gateAuthor, "Release is the author's", "reply_write's answer to an agent other than the author.", "Only the author releases text into the reply."),
   answerPrompt(STAGE_NOTE.gateNothing, "Nothing named", "reply_write's answer when it names no passage and gives no words of the author's own.", "Nothing to release: name each passage to release by its number (pieces), or give words of your own (words)."),
   answerPrompt(STAGE_NOTE.gateArgs, "Not as reply_write takes it", "reply_write's answer when one of its arguments isn't of the kind it takes.", "{{arg}} isn't as reply_write takes it: pieces is a list of passage numbers, words is your own text, and place is before or after.", [v6("arg", "the argument", true)]),
@@ -35134,7 +35506,12 @@ var SURFACE_NOTE = {
   loreId: "harness.note.surface.lore_id"
 };
 var filed = "The file is a workspace note, under the mode the player set for those (Settings → Changes from the reply). As shipped it is written to the workspace at once, and the answer says where: workspace_read reads it. Set to Confirm, it waits for the player's Apply on the review card; set to Never, it is refused. On a chat with no workspace connected it is staged with the turn instead, and kept when the turn commits.";
+var pages = (what) => `${what} longer than one answer comes in pages: each says what it gives, and the cursor that reads on. Read every page, and nothing is left out or given twice; should what you read change between two pages, the answer says so, and you read it again from the first.`;
 var DESCRIBED = [
+  { name: "lore_index", id: "harness.tool.lore_index", text: `The lore index: every lore entry of the World Info books this chat reads, book by book, each by its short id and title, with a line of what it holds where the title doesn't say; or, where the game master keeps an index of their own, that index as they wrote it. Read an entry whole with lore_read and its id. ${pages("An index")}` },
+  { name: "lore_search", id: "harness.tool.lore_search", text: `Search the lore: the world's own entries and those of the World Info books this chat reads, best matches first. Gives each match's id, title and why it matched, with its secret marker when it is a secret or a mark in a book (who knows it, whom it is kept from). Read one whole with lore_read. ${pages("A list of matches")}` },
+  { name: "lore_grep", id: "harness.tool.lore_grep", text: `Find the lore entries whose text holds some text, in any case: each entry's id and title, its secret marker, and the lines that hold it. ${pages("A list of lines")}` },
+  { name: "lore_read", id: "harness.tool.lore_read", text: `Read one lore entry whole, by its id, as your knowledge has it: a secret in its text is marked with who knows it, or left out where your knowledge doesn't reach. ${pages("An entry")}` },
   { name: "lore_save", id: "harness.tool.lore_save", text: `Save a lore entry's text, as you read it, as a file of the workspace under lore/: one named after the entry, or the file path names there. A path anywhere else is refused. ${filed} Nothing here writes a book or the world's lore.` },
   { name: "lore_draft", id: "harness.tool.lore_draft", text: `Draft an edit to a lore entry, or a new entry, as a file of the workspace under lore-drafts/ that names the entry and holds your text. Nothing writes a book or the world's lore from it: the game master applies it in Build, on their own press. A new entry takes an id of your own: lower case letters, digits and _. ${filed}` }
 ];
@@ -35191,375 +35568,6 @@ var SURFACE_NOTE_PROMPTS = [
   answerPrompt(SURFACE_NOTE.lorePath, "A lore file outside lore/", "lore_save's answer on the harness when path isn't under lore/.", "A lore entry is saved under lore/, and {{path}} isn't there, so nothing was written. Give a path under lore/, or leave path out for a file named after the entry.", [v6("path", "the path the call gave", true)]),
   answerPrompt(SURFACE_NOTE.loreId, "An id a new entry can't have", "lore_draft's answer on the harness when id names no entry the agent may read and isn't an id a new one may have.", "No lore entry {{id}} here, and a new entry's id is lower case letters, digits and _, so nothing was written. Give an entry's id as lore_index, lore_search or lore_grep gives it, or an id of that form for a new entry.", [v6("id", "the id the call gave", true)]),
   ...DESCRIBED.map((d3) => ({ id: d3.id, page: HARNESS_PAGE.id, group: HARNESS_GROUP.tools, label: `${d3.name}: what it does on the harness`, note: `What a harness chat sends as ${d3.name}'s description, in place of the old engines' own text for it (Every agent → Tools).`, text: d3.text, vars: [] }))
-];
-
-// src/shared/harness-texts-shapes.ts
-var shapeTextId = (of) => `harness.shape.${of}`;
-var COLLECTION_SHAPES = {
-  kinds: lines2("A kind of entity, keyed by its id. Required: `id`, `label`, `fields`. Optional: `extends` (the kind whose fields it also has).", "`fields` is an object, field id to field. A field needs `type` (number, text, bool, enum, ref, list, dice, money, date or duration) and may have `label`, `default`, `min`, `max`, `values` (what an enum takes), `ref` (the kind a ref names), `of` (what a list holds), `derived` (an expression that computes it), `visibility` (public, known_by or secret) and `knownBy`."),
-  relations: "A type of relation between entities, keyed by its id. Required: `id`, `label`, `from` and `to` (the kinds it joins), `cardinality` (one_one, one_many, many_one or many_many), `symmetric` (true or false), `fields` (field id to field, as a kind's; {} for none). Optional: `inverse` (the relation type read from the other side).",
-  entities: lines2("A person, a thing or anything else the world holds, keyed by its id. Required: `id`, `kind` (a kind's id), `name`, `tier` (a tier's id), `fields` (field id to value, as its kind defines them; the field named place is where it is), `relations` (a list, [] for none: each `type`, `to` and optional `fields`).", "Optional: `agent` (true: it acts on its own), `visibility` (public, known_by, secret or discoverable) with `knownBy` (a selector such as `ids`), `tags`, `characterId` (the host's character it is), `cues`, `levels`."),
-  places: lines2("A place, keyed by its id. Required: `id`, `name`, `fields` ({} for none). Optional: `parent` (the place it is inside), `timeZone`, `sceneType`, `grid` with `cell` (`x`, `y`: where on that grid it is), `visibility` (public, known_by, secret or discoverable) with `knownBy`, `adjudicate`.", "`map` is written only by a map: a place a map draws is changed in its map, and a write to it here is refused. A place also has a tool of its own, which needs no hand-written JSON."),
-  routes: lines2("A path between two places, keyed by its id. Required: `id`, `from` and `to` (place ids), `modes`, `bidirectional` (true: it is travelled both ways).", "`modes` has a leg for each way the path is travelled, any of `walk`, `road`, `offroad` and `water`: a leg needs `minutes` and may have `distanceKm` and `terrain`. `map` is written only by a map that draws the path."),
-  grids: lines2("A grid of cells a place is drawn on, keyed by its id. Required: `id`, `width`, `height`, `terrain` (one terrain code for each cell, row by row: width times height of them), `blocked` (the indexes of the cells nothing crosses), `zones` (zone id to cell indexes; {} for none).", "Optional: `cellMeters`, `items` (thing id to the index of the cell it starts on). `map` is written only by a map: a grid a map draws is changed in its map."),
-  maps: lines2("A map of one place, keyed by its id: the store compiles it into the places inside its `scope`, their paths and a grid, which the map then owns. Required: `id`, `scope` (the id of the place it draws).", "A grid map draws an interior: `layout` (rows of characters, top first, one character for each cell, every row the same length), `legend` (what each character stands for), `size`, `cellMeters`. A node map draws a town or a region: `places` (each `id`, `name`, `at`) and `links` (each `from`, `to`, `minutes`, optional `mode`). A map also has a tool of its own, which needs no hand-written JSON."),
-  rules: lines2("A rule the engine runs by itself, keyed by its id. Required: `id`, `on` (what fires it, an object with one of `event` (an event type), `tick` (turn, slot or day), `enter` (a place id) or `at` (an expression)), `do` (a list of effects, each `type` and `args`).", "Optional: `when` (an expression that must hold), `once`, `cooldownMinutes`, `interrupt` (true: it stops a timelapse), `beat` (`hint`, `weight`: an outline hint offered when it fires)."),
-  actions: lines2('Something a character can do, keyed by its id. Required: `id`, `label`, `params` (name to `type`, with `ref` or `optional`; {} for none), `requires` (expressions that must hold; [] for none), `outcomes` (outcome name to a list of effects, each `type` and `args`; the outcome named default when there is no check), `duration` (minutes, as an expression: "5").', "Optional: `description`, `check` (a check's id, or a check written in place with its `dice` and `dc`), `activity`, `lexicon` (ways a player says it), `observable` (what others see of it), `adjudicate`."),
-  checks: lines2("A roll, keyed by its id. Required: `id`, `dice` (d20, 2d6). Optional: `modifier` and `dc` (expressions), `advantage` (-1, 0 or 1), `vs` (an opposed roll: `who`, `check`), `bands` (each `outcome` with the `min` and `max` of its margin), `pass` (the outcomes that count as a success), `auto`.", "With `dc` and no `bands` the outcomes are failure and success."),
-  schedules: lines2("A recurring timetable that sets a field, keyed by its id: shifts, weather, bills. Required: `id`, `target` (the field it sets: place, activity, weather), `recurrence` (`every`: day, week, month or year; `weekdays`, 0 for Sunday; `days` of the month; `except`: holiday ids), `slots` (each `start` and `end` as HH:MM, with `value` or `weighted`, a list of `value` and `weight`).", "Optional: `owner` (whose it is: an entity's id, a kind's id or a selector; none for the world's own, such as weather)."),
-  tracks: lines2("A quest, a secret, a puzzle or an agenda, keyed by its id. Required: `id`, `kind` (quest, secret, puzzle or agenda), `label`, `start` (the id of its first stage), `stages` (stage id to stage), `visibility` (public, known_by or secret).", "A stage needs `label` and `next` (a list of `to`, a stage id, and `when`, an expression; [] for a last stage), and may have `objectives`, `effects`, `rewards`, `gate`, `fail`, `cue` (what the player is told), `truth` (the game master's only) and `hints`. Optional on the track: `owner`, `knownBy`."),
-  tables: lines2("A data table, keyed by its id. Required: `id`, `pack` (the pack that owns it), `schema` (the row layout that pack reads: lre-table/<table id>/v1), `revision` (worked out from the table, never authored: keep the one a table has), `label`, `columns` (column id to `type`: int, number, text, bool, band, enum, ref, list or json; with `unit`, `values`, `optional`, `doc`), `rows` (row id to an object, column id to value).", "Optional: `source` (where shipped data came from). Read a table the draft has before writing one."),
-  sections: lines2("A section of what the reply's writer is given of the world, keyed by its id. Required: `id`, `label`, `rank` (its order, lowest first), `template` (its text), `position` (`type` native; or outlet with `name`; or chat_depth with `role`, `depth` and `direction`).", "Optional: `enabled`, `maxTokens`, `maxLines`, `include`, `scope` (player, scene or gm: whose knowledge it reads)."),
-  steps: "The world's own text for one of the engine's steps, keyed by its id. Required: `id`, `purpose` (interpret, npc.choose, puzzle.answer, brief, outline, extract, choices, judge, mind, memory, skip, consolidate or knowledge), `template`, `output` (text, effects or decision), `signals` (a list of names; [] for none).",
-  packs: "A pack the world plays with, keyed by the pack's id. Required: `version` (a whole number) and `config` (the pack's own settings, an object; {} for its defaults). Read one the draft has before writing one.",
-  lore: lines2("A lore entry of the world's own, keyed by its id. Required: `id`, `title`, `content` (its text), `keys` (words that bring it up; [] for none), `links` (the ids of the entities and places it is about; [] for none).", "Optional: `aliases`, `topics`, `group`, `priority`, `visibility` (public or known_by) with `holders` (who knows it), `secret`, `gate` (an expression), `audience`, `source` (`kind` authored for the world's own; never book: World Info is read live, and a copy of it is refused)."),
-  classifications: "A way of classifying entities (story role, disposition), keyed by its id. Required: `id`, `label`, `multiple` (true: an entity may hold several values), `values` (value id to `label`, with optional `parent` and `description`). Optional: `order`, `shown`.",
-  routines: lines2("A routine of a person or a group, keyed by its id. Required: `id`, `blocks` (a list; each block needs an `id` of its own). Optional on the routine: `label`, `owner` (an entity's id, a kind's id or a selector), `inherit`.", "A block may have `label`, `activity`, `kind` (fixed, flexible or optional), `at` (HH:MM) or `window` (`from`, `to`), `minutes`, `perWeek`, `chance`, `priority`, `days` (`weekdays`, 0 for Sunday; `holidays`; `seasons`), `place` (home, work, here, with, or an object with `place` or `nearest`), `company`, `needs`, `private`.")
-};
-var PART_SHAPES = {
-  calendar: lines2("The world's calendar. Required: `system` (gregorian or custom), `epoch` (when the story's clock starts, a local date and time: 2026-10-16T06:00), `timeZone`, `dayParts` (a list of `id`, `label` and `start` as HH:MM), `holidays` (a list of `id`, `label`, `rule` and `dayOff`; [] for none).", "A holiday's `rule` has `type` fixed with `month` and `day`; nth_weekday with `month`, `weekday` and `n`; relative with `to` (a holiday's id) and `days`; or easter with `days`. A custom calendar also needs `custom`: `monthLengths`, `monthNames`, `weekdayNames`."),
-  realism: lines2("How closely the world is simulated. Required: `preset` (story, grounded, simulation or custom), `levels` (a whole number for each of `money`, `gear`, `vehicles`, `castlife`, `relationships`, `space`, `calendar`, `weather` and `sheets`), `tierCaps` (the most each band is simulated: `principal`, `supporting`, `background`, each an object of those same domains).", "Optional: `claims` (how what the player claims is taken: `mode` real, ask or hold; `capped`)."),
-  time: "How time passes. Required: `sceneTicks` (scene type to the minutes a turn of it takes), `interrupts` (stop, note or ignore for each of `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`, `arrival`, `overdue`, `needs` and `weather`), `speedThrough` (name to `mode`, offer or auto, and `thresholdMinutes`), `montage` (key, day or week), `unitCap` (`agentDays`, `events`).",
-  meta: lines2("The world's own settings, which sit at the root of the document; a write changes only the members it gives. `name`, `pov` (the player character's id), `start` (`place` and `at`, a local date and time), `seedMode` (fresh or same_roll), `lenientPricing`, `currency` (`code`, `symbol`, `minorUnit`, `decimals`, `format`), `narrator` (`knowledge` scene or pov, `secrets` marked or omit; null for none).", "Also `spawnCap`, `placeCap`, `placesPerTurn`, `lifeStates` (state id to `label`, `acts`, `reads`), `mapSettings` and `loreBooks` (the World Info books the world reads lore from)."),
-  tiers: lines2("The tiers entities sit in, and the tier a newcomer gets: an object with `tiers` (tier id to tier) and optional `spawnTier` (a tier's id).", "A tier needs `label`, `band` (principal, supporting or background) and `order` (its place in lists, lowest first), and may have `agentDefault` and `description`."),
-  ruleset: lines2("The world's ruleset, optional: {} removes it. `progression` (id to `label`, `xpField`, `levelField`, `thresholds`), `sheet` (`sections`, each `id`, `label`, `rows`), `minLevels`, `adjudication` (when a check is rolled: `preset`, `checks`, `authority`, `retry` and its numbers), `inferred` (`mode` off, suggest or auto), `combat` (`stalemate`), `profile`.", "Read the draft's own before writing it: its adjudication is written with every member it has."),
-  loreIndex: "The lore lookup table. Required: `terms` (a word to the ids of the lore entries it brings up; {} for none), `topics` (topic id to `label` and `entries`, lore entry ids; {} for none).",
-  minds: "How the world's characters think, optional: only what is given is kept, and {} removes it. `secrecy` (full or brief), `thresholds` (`live`, `near`, `far`: numbers), `always` and `never` (a selector such as `ids`, or null), `weights`, `memory`, `holdings`.",
-  lorePins: "Lore pinned to a character, a place or a step: pins that pin nothing remove it. `characters`, `places` and `steps` are each an object, id to a list of pins. A pin is `lore` (a lore entry's id), or `book` with `entry` (a World Info entry), or `book` alone (the whole book), each with optional `keep` (start or end).",
-  routineSettings: "How routines bear on play: the defaults remove it. `awareness` (story_first, balanced or routine_first), `invitations` (off, player or everyone), `sociability` (reserved, usual or outgoing), `planBend` (must, strong, standard or ordinary), `roles` (informative, enforced or off) and `skips` (stay, routine or model), each for `live`, `near`, `far` and `background`, `narrator`, `paletteFollowsRoutine`.",
-  needs: "The needs characters feel: only what differs from the defaults is kept. `hunger`, `fatigue`, `social` and `fun`, each with `on` (true or false), `rate`, `tell` and `alert` (numbers)."
-};
-var SHAPE_PROMPTS = [
-  ...Object.entries(COLLECTION_SHAPES).map(([name2, text]) => answerPrompt(shapeTextId(name2), `Shape: one of ${name2}`, `world_shape's answer for the collection ${name2}: what one item of it looks like. Member names stay between backticks, exactly as the document has them.`, text)),
-  ...Object.entries(PART_SHAPES).map(([name2, text]) => answerPrompt(shapeTextId(name2), `Shape: the ${name2} part`, `world_shape's answer for the part ${name2}: what world_set takes for it. Member names stay between backticks, exactly as the document has them.`, text))
-];
-
-// src/shared/harness-texts-world.ts
-var WORLD_TOOL = {
-  status: "world_status",
-  read: "world_read",
-  shape: "world_shape",
-  put: "world_put",
-  remove: "world_remove",
-  set: "world_set",
-  patch: "world_patch",
-  discard: "world_discard",
-  commit: "world_commit",
-  upgrade: "world_upgrade",
-  history: "world_history",
-  restore: "world_restore",
-  made: "world_made",
-  keep: "world_keep"
-};
-var WORLD_NOTE = {
-  noBuild: "harness.note.world.no_build",
-  needsGm: "harness.note.world.needs_gm",
-  refused: "harness.note.world.refused",
-  refusedLint: "harness.note.world.refused_lint",
-  more: "harness.note.world.more",
-  unchanged: "harness.note.world.unchanged",
-  next: "harness.note.world.next",
-  behind: "harness.note.world.behind",
-  staleDraft: "harness.note.world.stale_draft",
-  outline: "harness.note.world.outline",
-  outlineCut: "harness.note.world.outline_cut",
-  badPointer: "harness.note.world.bad_pointer",
-  noMember: "harness.note.world.no_member",
-  noIndex: "harness.note.world.no_index",
-  noBelow: "harness.note.world.no_below",
-  andMore: "harness.note.world.and_more",
-  none: "harness.note.world.none",
-  shapeCollection: "harness.note.world.shape_collection",
-  shapePart: "harness.note.world.shape_part",
-  shapeHint: "harness.note.world.shape_hint",
-  shapeHintAny: "harness.note.world.shape_hint_any",
-  needsObject: "harness.note.world.needs_object",
-  needsOps: "harness.note.world.needs_ops",
-  noItem: "harness.note.world.no_item",
-  added: "harness.note.world.added",
-  replaced: "harness.note.world.replaced",
-  removed: "harness.note.world.removed",
-  wrotePart: "harness.note.world.wrote_part",
-  patched: "harness.note.world.patched",
-  nothingToDiscard: "harness.note.world.nothing_to_discard",
-  draftMoved: "harness.note.world.draft_moved",
-  discarded: "harness.note.world.discarded",
-  nothingToCommit: "harness.note.world.nothing_to_commit",
-  committed: "harness.note.world.committed",
-  upgradeNext: "harness.note.world.upgrade_next",
-  hasErrors: "harness.note.world.has_errors",
-  noRevision: "harness.note.world.no_revision",
-  askCommit: "harness.note.world.ask_commit",
-  askCommitNoted: "harness.note.world.ask_commit_noted",
-  askUpgrade: "harness.note.world.ask_upgrade",
-  askUpgradeHead: "harness.note.world.ask_upgrade_head",
-  askDiscard: "harness.note.world.ask_discard",
-  askRestore: "harness.note.world.ask_restore",
-  alreadyPlays: "harness.note.world.already_plays",
-  upgradeLanded: "harness.note.world.upgrade_landed",
-  upgradePending: "harness.note.world.upgrade_pending",
-  revisionHint: "harness.note.world.revision_hint",
-  restored: "harness.note.world.restored",
-  nothingMade: "harness.note.world.nothing_made",
-  madeNext: "harness.note.world.made_next",
-  keepNames: "harness.note.world.keep_names",
-  keptNothing: "harness.note.world.kept_nothing",
-  kept: "harness.note.world.kept",
-  notCommitted: "harness.note.world.not_committed",
-  badMerge: "harness.note.world.bad_merge",
-  closed: "harness.note.world.closed",
-  closedCommit: "harness.note.world.closed_commit",
-  closedRestore: "harness.note.world.closed_restore",
-  closedUpgrade: "harness.note.world.closed_upgrade",
-  changesCommit: "harness.note.world.changes_commit",
-  changesRestore: "harness.note.world.changes_restore",
-  changesUpgrade: "harness.note.world.changes_upgrade",
-  changesNone: "harness.note.world.changes_none",
-  changeItems: "harness.note.world.change_items",
-  changeParts: "harness.note.world.change_parts",
-  changeAdded: "harness.note.world.change_added",
-  changeChanged: "harness.note.world.change_changed",
-  changeRemoved: "harness.note.world.change_removed",
-  changesHidden: "harness.note.world.changes_hidden",
-  changesMore: "harness.note.world.changes_more",
-  theirEdits: "harness.note.world.their_edits",
-  followsCommit: "harness.note.world.follows_commit",
-  unchangedChat: "harness.note.world.unchanged_chat",
-  chatRefused: "harness.note.world.chat_refused",
-  chatNext: "harness.note.world.chat_next",
-  notCarried: "harness.note.world.not_carried",
-  chatChanges: "harness.note.world.chat_changes",
-  notChanged: "harness.note.world.not_changed",
-  inDraftAlready: "harness.note.world.in_draft_already"
-};
-var DRAFT = "It changes the world's draft, which nobody plays yet: world_commit makes the draft the world's next revision, then world_upgrade brings this chat to it. Only the game master's tier may call it, and while the player has the world's document set to Never (Settings → Changes from the reply) it is refused like every other write of the document. Who the player's character is and what the engine holds agents to are closed to every agent: a write that would change one is refused, with the paths it names.";
-var JSON_TEXT = "written as JSON text";
-var CARRIED = "A place, a path (routes) or a map is written to this chat's own world unless in says document: staged with your turn like any change, played at once, gone with the turn if it is undone, and kept into the world's document by world_keep. Every other collection is the world's document's alone, and what follows is said of it.";
-var IN_ARG = { path: "in", text: "For places, routes and maps: chat (the default), this chat's own world, played at once; document, the world's draft. Every other collection is the world's draft's: in: chat is refused for it." };
-var LISTED = "Its answer lists what it would change in the world's document, by collection. The player is shown the same where it waits on the review card, and a commit's on the reply once it is made, with what the world keeps from the player's character counted, never named. Set to Never the world's document refuses it. What is closed to agents (who the player's character is, what the engine holds agents to) no agent changes this way either: where it would, the call is refused with the paths, and it is the user's to do in Build.";
-var WORLD_TOOL_TEXTS = [
-  {
-    name: WORLD_TOOL.status,
-    family: HARNESS_FAMILY.world,
-    tier: "read",
-    note: "Says which revision of the world this chat plays, the world's head, and how the draft stands.",
-    text: "Read where the world stands for this chat. A chat plays one revision of its world's document, with what it made or changed of its places, paths and maps in play laid over: this chat's own world. The world's head is the document's newest revision; its draft is the working copy every world_ write with in: document changes, which nobody plays until it is committed. The answer gives the revision this chat plays, the head, whether the chat is behind the head (world_upgrade brings it there), how many changes of this chat's own world the document doesn't have (world_made lists them), whether a draft is stored with its version and the revision it began on, and the draft's lint: how many errors, warnings and infos, and the issues themselves, errors first, each with the pointer it is at. A draft with errors can't be committed. The draft is the same working copy the user edits in Build: one that is stored before you wrote anything holds someone's unfinished work, so add to it only what you mean to. Call it before you edit the world and before world_commit.",
-    args: [{ path: "issues", text: "Which of the draft's issues to list: all, or errors for only what stops a commit. All when left out; the counts are of all of them either way." }]
-  },
-  {
-    name: WORLD_TOOL.read,
-    family: HARNESS_FAMILY.world,
-    tier: "read",
-    note: "Reads the world's document, or any part of it, by JSON Pointer.",
-    text: "Read the world's document: everything the world is made of, including what no other tool reaches (the calendar, schedules, routines, kinds, actions, checks, tracks, lore, tables, rules, sections). Give pointer to read one part of it: /calendar, /entities/mara, /tracks/harbour_debt/stages. Without it you get the document's root. A value too long for one answer comes back as an outline instead: each member with what it holds, so you read on with a longer pointer. It reads the draft unless source says playing, which is the revision this chat plays. The value is the document's own, unmarked; what it shows that is kept from the player's character (a restricted person, thing, place or track, secret lore, a field that isn't everyone's to see) is listed beside it under secret, each by its pointer, marked as a secret is marked in every read. Read a thing before you change it (world_put, world_set, world_patch), and use world_shape for what one item of a collection must look like.",
-    args: [
-      { path: "pointer", text: `Where in the document, as a JSON Pointer: "" or left out for the whole document, else /member/member, such as /entities/mara/fields. In a member's name write ~1 for / and ~0 for ~.` },
-      { path: "source", text: "draft (the default): the world's draft, the working copy the world_ writes with in: document change. playing: this chat's own world as it plays, the revision it plays with what this chat made or changed in play laid over." },
-      { path: "after", text: "Only for an outline that was cut short: the last member it showed (a list's index), to go on from the one after it." }
-    ]
-  },
-  {
-    name: WORLD_TOOL.shape,
-    family: HARNESS_FAMILY.world,
-    tier: "read",
-    note: "Says what one item of a collection, or a part, of the world's document looks like.",
-    text: "Read what one item of a collection of the world's document looks like (entities, tracks, schedules, lore and the rest), or one of its parts (calendar, realism, time and the rest): its members by their exact names, which are required, and the values a member takes. For a collection the answer also gives how many items the draft has and pointers to a few of them, to read as examples with world_read; for a part, where it is read. Call it before you write an item or a part you haven't written before (world_put, world_set, world_patch).",
-    args: [{ path: "of", text: "A collection (for one item of it) or a part of the world's document." }]
-  },
-  {
-    name: WORLD_TOOL.put,
-    family: HARNESS_FAMILY.world,
-    tier: "write",
-    note: "Writes one item of a collection of the world, whole: a place, a path or a map in this chat's world, anything else in the world's draft.",
-    text: `Write one item of a collection of the world, whole: a new one, or one that replaces the item of that id. The item is ${JSON_TEXT}; world_shape says what the collection's items look like, and world_read gives an existing one to start from. To change only part of an item in the world's draft, use world_patch. ${CARRIED} The answer says what changed; in the world's draft, also the draft's version and the lint issues the write brought: fix an error before you commit. ${DRAFT}`,
-    args: [
-      { path: "collection", text: "The collection the item belongs to." },
-      { path: "id", text: "The item's id: its key in the collection. Letters, digits, _ and -." },
-      { path: "value", text: `The whole item, a JSON object ${JSON_TEXT}: {"id": "night_shift", "target": "place", ...}. A new item written without id takes the one given here.` },
-      IN_ARG
-    ]
-  },
-  {
-    name: WORLD_TOOL.remove,
-    family: HARNESS_FAMILY.world,
-    tier: "write",
-    note: "Takes one item out of a collection of the world: a place, a path or a map in this chat's world, anything else in the world's draft.",
-    text: `Take one item out of a collection of the world. ${CARRIED} In this chat's world a place someone or something is at, or that holds other places or a path, isn't taken out: the refusal says what still needs it. In the world's draft, what still names it (an entity's place, a schedule's owner, a stage of a track) shows in the answer's lint as an issue to fix. A place, a path or a grid that a map draws is removed in its map instead. ${DRAFT}`,
-    args: [
-      { path: "collection", text: "The collection the item is in." },
-      { path: "id", text: "The item's id: its key in the collection." },
-      IN_ARG
-    ]
-  },
-  {
-    name: WORLD_TOOL.set,
-    family: HARNESS_FAMILY.world,
-    tier: "write",
-    note: "Writes one part of the world's draft, whole.",
-    text: `Write one part of the world's document, whole: the calendar, realism, time, the tiers, the ruleset, the lore index, the minds' settings, the lore pins, the routine settings, the needs, or meta (the world's name, player character, start, currency and the like, of which only the members you give change). The part is ${JSON_TEXT}; world_shape says what it looks like, and world_read gives the one the draft has, to start from. To change one member inside a part, world_patch is shorter. ${DRAFT}`,
-    args: [
-      { path: "part", text: "The part to write." },
-      { path: "value", text: `The whole part, a JSON object ${JSON_TEXT}.` }
-    ]
-  },
-  {
-    name: WORLD_TOOL.patch,
-    family: HARNESS_FAMILY.world,
-    tier: "write",
-    note: "Changes the world's draft in place with JSON Patch operations.",
-    text: `Change the world's document in place, for a change smaller than a whole item or part: a list of JSON Patch operations (RFC 6902), applied all together or not at all. Each operation has op (add, remove, replace, move, copy or test), path (a JSON Pointer into the whole document, as world_read takes) and, by its op, value or from. add puts a member in or inserts into a list (/- appends); replace needs the member to be there; test refuses the whole patch unless the value there equals value, which guards a change against the draft having moved. The document's id, format, engine version and pins can't be patched, nor what a map draws. ${DRAFT}`,
-    args: [{ path: "ops", text: `The operations, a JSON array ${JSON_TEXT}: [{"op": "replace", "path": "/calendar/timeZone", "value": "Europe/Lisbon"}, {"op": "add", "path": "/lore/old_pier/keys/-", "value": "pier"}].` }]
-  },
-  {
-    name: WORLD_TOOL.discard,
-    family: HARNESS_FAMILY.world,
-    tier: "write",
-    note: "Drops the world's draft.",
-    text: "Ask for the world's draft to be dropped: every change written to it since the last commit goes, and the working copy is the world's head again. Use it to start over on a draft you wrote, or when world_status says the draft began on an older head. It can't be undone, and the draft is the same working copy the user edits in Build: never drop one that was stored before you wrote to it unless the user asked. What is committed already stays. Like every other change it is staged with the turn and decided when you commit, under the mode the player set for the world's document (Settings → Changes from the reply): as shipped it is dropped when you commit. A draft that holds edits no agent of your turn wrote (the user's own, from Build) is dropped only on the player's word: the drop goes to the reply's review card, and your commit's answer says so. So does every drop where the player set the world's document to ask first; then say what you asked for, and don't go on as if it were done. Only the game master's tier may call it.",
-    args: [{ path: "version", text: "The draft's version, as world_status or your last write gave it: the draft is dropped only while it is still at that version, so nothing written since goes unseen." }]
-  },
-  {
-    name: WORLD_TOOL.commit,
-    family: HARNESS_FAMILY.world,
-    tier: "write",
-    note: "Makes the world's draft its next revision.",
-    text: `Ask for the world's draft to become its next revision, which becomes the world's head: what new chats start from, and what world_upgrade brings a chat to. A draft with lint errors is refused, with the errors to fix; warnings and infos don't stop it. So is a draft that began on an older head. Everything the draft holds is committed, what was in it before you wrote to it too: check world_status first. Like every other change it is staged with the turn and decided when you commit, under the mode the player set for the world's document (Settings → Changes from the reply). As shipped it is made when you commit: the commit's answer gives the new revision, and the player is told after, on the reply, where they can undo it. A draft that holds edits no agent of your turn wrote (the user's own unfinished work in Build) is never committed by itself: the commit goes to the reply's review card and waits for the player's Apply, and your commit's answer says so. So does every commit where the player set the world's document to ask first; then say what you wrote and that it waits for their word, and don't go on as if it were committed. It commits the draft as it stood when you asked: written to since, the commit is refused, and you ask again. This chat keeps playing the revision it plays until an Upgrade: call world_upgrade after this, in the same turn, and this chat plays the new revision from the next turn. ${LISTED} Only the game master's tier may call it.`,
-    args: [
-      { path: "note", text: "A line for the world's history saying what this revision changed: at most 200 characters are kept." },
-      { path: "version", text: "The draft's version, as your last write gave it. With it, the commit is refused when the draft changed since, so that nothing someone else wrote meanwhile is committed unseen. Leave it out to commit the draft as it stands." }
-    ]
-  },
-  {
-    name: WORLD_TOOL.upgrade,
-    family: HARNESS_FAMILY.world,
-    tier: "write",
-    note: "Brings this chat to the world's head, or to another revision.",
-    text: `Ask for this chat to be brought to another revision of its world (an Upgrade): the world's head unless to names one. What play changed in this chat is kept; what the new revision adds, changes or removes in the world's document arrives. Like every other change it is staged with the turn and decided when you commit, under the mode the player set for the world's document (Settings → Changes from the reply). As shipped it is made when you commit: the commit's answer says the move waits for this turn's end, this chat plays the new revision from the next turn, and until then reads of the world stay as they were. It waits on the reply's review card instead where the commit it follows waits there, or where the player set the world's document to ask first: then the chat plays what it played until the player applies it. With no revision named the move is to the world's head as it is when the move is made, so called after world_commit in the same turn it follows that commit, and one Apply or one commit makes both. Only a committed revision can be played. ${LISTED} Only the game master's tier may call it.`,
-    args: [{ path: "to", text: "The revision to bring the chat to: one of world_history's. Leave it out for the world's head, as it is when the move is made." }]
-  },
-  {
-    name: WORLD_TOOL.history,
-    family: HARNESS_FAMILY.world,
-    tier: "read",
-    note: "Lists the world's revisions: when each became head, by what, and its note.",
-    text: "List the world's revisions, newest first: each one's id, when it became the world's head, what made it so (create: the world was made; build: a commit from the Build page; agent: a commit by an agent; import), and the note given with it. The head and the revision this chat plays are marked. Use it to find a revision for world_restore or world_upgrade.",
-    args: [{ path: "limit", text: "How many of the newest revisions to list. As many as fit in one answer when left out." }]
-  },
-  {
-    name: WORLD_TOOL.restore,
-    family: HARNESS_FAMILY.world,
-    tier: "write",
-    note: "Makes the world's draft a copy of an earlier revision.",
-    text: `Ask for the world's draft to be made a copy of one of the world's earlier revisions, to bring that content back: the draft's own changes are replaced by it, and nothing is played or committed by it. Like every other change it is staged with the turn and decided when you commit, under the mode the player set for the world's document (Settings → Changes from the reply): as shipped it is replaced when you commit. A draft that holds edits no agent of your turn wrote (the user's own, from Build) is replaced only on the player's word: the restore goes to the reply's review card, and your commit's answer says so. So does every restore where the player set the world's document to ask first. It replaces the draft as it stood when you asked: written to since, it is refused. After that world_commit makes it the head again, as a new entry of the history, and world_upgrade brings this chat to it. world_history lists the revisions. ${LISTED} Only the game master's tier may call it.`,
-    args: [{ path: "revision", text: "The revision to copy: its id, as world_history gives it." }]
-  },
-  {
-    name: WORLD_TOOL.made,
-    family: HARNESS_FAMILY.world,
-    tier: "read",
-    note: "Lists what this chat made or changed in play that the world's document doesn't have.",
-    text: "List what this chat made or changed in play that its world's document doesn't have: the things and places made in play, each with its id, its name and where it is; and this chat's own changes to the world's places, paths, maps and map settings (world), each with what it is and whether it was made, changed or taken out. Each says whether the world's draft has it already. What was made or changed in play exists only in this chat; world_keep copies it into the world's document, so other chats of the world have it too.",
-    args: [{ path: "kind", text: "Only the things, only the places made in play, or only this chat's changes to the world (world). All when left out." }]
-  },
-  {
-    name: WORLD_TOOL.keep,
-    family: HARNESS_FAMILY.world,
-    tier: "write",
-    note: "Copies what this chat made or changed in play into the world's draft.",
-    text: `Copy what this chat made or changed in play into the world's document, each under its own id: the things and places made in play, places first, so a thing kept with the place it lies at lies there; and this chat's own changes to the world's places, paths and maps and to its map settings, each written into the draft as this chat has it (one taken out is taken out of the draft too). The answer says what was kept, what was skipped and why, and what a kept thing lost on the way. world_made lists what there is to keep. Committing the draft is a separate act (world_commit). ${DRAFT}`,
-    args: [
-      { path: "things", text: "The things made in play to keep, each by id or name." },
-      { path: "places", text: "The places to keep, each by id or name: a place made in play, or a place of the world this chat made, changed or took out." },
-      { path: "paths", text: "The paths this chat made, changed or took out to keep, each by its id (world_made lists them)." },
-      { path: "maps", text: "The maps this chat made, changed or took out to keep, each by its id or title." },
-      { path: "settings", text: "true to keep this chat's map settings." }
-    ]
-  }
-];
-var WORLD_NOTE_PROMPTS = [
-  answerPrompt(WORLD_NOTE.noBuild, "The world's document can't be reached", "A world tool's answer when its call has no way to the world's document: the chat plays no world, or the call was made where the document isn't offered.", "The world's document can't be reached from this call, so nothing was read or written."),
-  answerPrompt(WORLD_NOTE.needsGm, "Only the game master's tier edits the world", "A world tool's answer to a write by an agent below the game master's tier.", "Only the game master's tier edits the world, this chat's own or its document. The author holds it and may grant it to an agent it started (grant_writes, tier gm): ask the author, or tell it in your answer what should change."),
-  answerPrompt(WORLD_NOTE.refused, "The world's document refused it", "A world tool's answer when the world's store refuses the read or the write, with the store's own reason.", "The world's document refused it: {{reason}}. Nothing was written.", [v6("reason", "why, in the store's words, which say what to fix", true)]),
-  answerPrompt(WORLD_NOTE.refusedLint, "The world's document refused it, with its errors", "A world tool's answer when the store's checks refuse a write, with the errors they found.", `The world's document refused it: {{reason}}. Nothing was written. Fix these and write it again:
-{{errors}}`, [v6("reason", "why, in the store's words", true), v6("errors", "the errors the checks found, one to a line", true)]),
-  answerPrompt(WORLD_NOTE.more, "More issues than fit", "Ends a list of lint issues that was cut to fit one answer.", "and {{count}} more: world_status lists them.", [v6("count", "how many more", true)]),
-  answerPrompt(WORLD_NOTE.unchanged, "Nothing changed", "A world tool's answer for a write that left the draft as it was.", "The draft already says so: nothing was written."),
-  answerPrompt(WORLD_NOTE.unchangedChat, "Nothing changed in this chat's world", "A world tool's answer for a write of this chat's own world that leaves it as it plays.", "This chat's world already has it so: nothing was staged."),
-  answerPrompt(WORLD_NOTE.chatRefused, "This chat's world can't take it", "A world tool's answer when the engine's own checks refuse a change of this chat's world, with its reason.", "That can't be made in this chat's world: {{reason}}. Nothing was staged.", [v6("reason", "why, in the engine's words", true)]),
-  answerPrompt(WORLD_NOTE.chatNext, "This chat's world plays it", "Ends every write of this chat's own world: where it stands and how it is kept.", "This is this chat's own world: your next call plays it, everyone's once you commit, and it goes with this turn if the turn is undone. world_keep copies it into the world's document, so other chats have it too; world_commit then makes that a revision."),
-  answerPrompt(WORLD_NOTE.notCarried, "Not a part of this chat's world", "world_put's and world_remove's answer to in: chat for a collection only the world's document holds.", "This chat's own world holds its places, paths (routes) and maps; {{collection}} is the world's document's alone. Leave in out, or give in: document.", [v6("collection", "the collection the call named", true)]),
-  answerPrompt(WORLD_NOTE.chatChanges, "This chat changed its world", "Part of world_status's answer when this chat holds changes of its own to its world that the world's document doesn't have.", "This chat has {{count}} changes of its own to its world's places, paths, maps or map settings that the world's document doesn't have: world_made lists them, world_keep copies them into the world's draft.", [v6("count", "how many changes", true)]),
-  answerPrompt(WORLD_NOTE.next, "The draft isn't played yet", "Ends every write of the world's document: the draft reaches the chat only once it is committed and the chat brought to it.", "This is the world's draft. This chat still plays revision {{revision}}: world_commit makes the draft the world's next revision, then world_upgrade brings this chat to it.", [v6("revision", "the revision the chat plays", true)]),
-  answerPrompt(WORLD_NOTE.behind, "The chat is behind the world's head", "Part of world_status's answer when the chat plays another revision than the world's head.", "This chat doesn't play the world's head ({{head}}): world_upgrade brings it there.", [v6("head", "the world's head revision", true)]),
-  answerPrompt(WORLD_NOTE.staleDraft, "The draft began on an older head", "world_status's and world_commit's answer when the stored draft began on a revision that is no longer the world's head, so a commit of it is refused.", "The draft began on revision {{base}}, which is no longer the world's head: it can't be committed. Drop it with world_discard and make its changes again, on the head.", [v6("base", "the revision the draft began on", true)]),
-  answerPrompt(WORLD_NOTE.outline, "An outline, not the value", "Part of world_read's answer when the value is too long for one answer.", 'The value is too long for one answer, so this is its outline: each member with what it holds, as {"object": how many members}, {"list": how many items} or {"text": how many characters}; a number, true, false and null as they are. Read a member with a longer pointer: {{pointer}}/<member>.', [v6("pointer", "the pointer that was read")]),
-  answerPrompt(WORLD_NOTE.outlineCut, "The outline was cut short", "Part of world_read's answer when the outline itself is too long for one answer.", "{{count}} more members aren't shown. Call world_read again with the same pointer and after: {{after}}.", [v6("count", "how many members aren't shown", true), v6("after", "the last member shown", true)]),
-  answerPrompt(WORLD_NOTE.badPointer, "Not a JSON Pointer", "world_read's answer when pointer isn't a JSON Pointer.", `{{pointer}} isn't a JSON Pointer. A pointer is "" for the whole document, else it starts with / and goes member by member: /entities/mara/name. In a member's name ~1 stands for / and ~0 for ~.`, [v6("pointer", "what the call gave", true)]),
-  answerPrompt(WORLD_NOTE.noMember, "Nothing at that pointer: no such member", "world_read's answer when a step of the pointer names a member the object there doesn't have.", 'Nothing is at {{pointer}}: what is at "{{at}}" has no member {{step}}. Its members: {{keys}}.', [v6("pointer", "the pointer the call gave", true), v6("at", 'the pointer up to its last step that names something ("" is the whole document)'), v6("step", "the step that names nothing", true), v6("keys", "the members there are", true)]),
-  answerPrompt(WORLD_NOTE.noIndex, "Nothing at that pointer: no such item", "world_read's answer when a step of the pointer names an item the list there doesn't have.", `Nothing is at {{pointer}}: what is at "{{at}}" is a list of {{count}}, read by index from 0, and {{step}} isn't one of them.`, [v6("pointer", "the pointer the call gave", true), v6("at", "the pointer up to its last step that names something"), v6("step", "the step that names nothing", true), v6("count", "how many items the list has", true)]),
-  answerPrompt(WORLD_NOTE.noBelow, "Nothing at that pointer: nothing is below a value", "world_read's answer when the pointer goes on past a text, a number, true, false or null.", 'Nothing is at {{pointer}}: what is at "{{at}}" is a single value, with nothing below it. Read it at {{at}}.', [v6("pointer", "the pointer the call gave", true), v6("at", "the pointer up to its last step that names something", true)]),
-  answerPrompt(WORLD_NOTE.andMore, "A list that was cut", "A list of names that was cut to fit one answer.", "{{list}}, and {{count}} more", [v6("list", "the names shown", true), v6("count", "how many more there are", true)]),
-  answerPrompt(WORLD_NOTE.none, "A list with nothing in it", "Stands where a list of names would be when there are none.", "none"),
-  answerPrompt(WORLD_NOTE.shapeCollection, "What to do with a collection's shape", "Ends world_shape's answer for a collection.", "Read an example with world_read at its pointer. Write one item whole with world_put (collection {{of}}, its id, the item as JSON text), change part of one with world_patch, take one out with world_remove.", [v6("of", "the collection", true)]),
-  answerPrompt(WORLD_NOTE.shapePart, "What to do with a part's shape", "Ends world_shape's answer for a part.", "Read the draft's own with world_read at the pointer given. Write it whole with world_set (part {{of}}, the part as JSON text), or change one member of it with world_patch.", [v6("of", "the part", true)]),
-  answerPrompt(WORLD_NOTE.shapeHint, "Where the shape is found", "Added to a refused world_put or world_set.", "world_shape (of: {{of}}) gives the shape it takes.", [v6("of", "the collection or part that was written", true)]),
-  answerPrompt(WORLD_NOTE.shapeHintAny, "Where a shape is found", "Added to a refused world_patch.", "world_read shows what is at a path; world_shape gives the shape of a collection's item or of a part."),
-  answerPrompt(WORLD_NOTE.needsObject, "The value isn't a JSON object", "world_put's and world_set's answer when value isn't a JSON object.", `{{tool}} takes {{arg}} as a JSON object written as text, such as {"label": "..."}, and what was given isn't one. world_shape gives the shape it takes.`, [v6("tool", "the tool", true), v6("arg", "the argument", true)]),
-  answerPrompt(WORLD_NOTE.needsOps, "The operations aren't a JSON array", "world_patch's answer when ops isn't a JSON array.", `world_patch takes ops as a JSON array of operations written as text, such as [{"op": "replace", "path": "/calendar/timeZone", "value": "Europe/Lisbon"}], and what was given isn't one.`),
-  answerPrompt(WORLD_NOTE.noItem, "No such item in the collection", "world_remove's answer when the collection, in the world the call writes, has no item of that id.", "There is no {{id}} in {{collection}} {{where}}. It has: {{ids}}.", [v6("collection", "the collection", true), v6("id", "the id the call gave", true), v6("where", "the world the call writes: in this chat's world, or in the world's draft", true), v6("ids", "the ids the collection has, or that it has none", true)]),
-  answerPrompt(WORLD_NOTE.added, "An item was added", "What world_put's answer says changed, for a new item.", "Added {{id}} to {{collection}} {{where}}.", [v6("collection", "the collection", true), v6("id", "the item's id", true), v6("where", "the world the call writes: in this chat's world, or in the world's draft", true)]),
-  answerPrompt(WORLD_NOTE.replaced, "An item was replaced", "What world_put's answer says changed, for an item that was there.", "Replaced {{id}} in {{collection}} {{where}}.", [v6("collection", "the collection", true), v6("id", "the item's id", true), v6("where", "the world the call writes: in this chat's world, or in the world's draft", true)]),
-  answerPrompt(WORLD_NOTE.removed, "An item was removed", "What world_remove's answer says changed.", "Removed {{id}} from {{collection}} {{where}}.", [v6("collection", "the collection", true), v6("id", "the item's id", true), v6("where", "the world the call writes: in this chat's world, or in the world's draft", true)]),
-  answerPrompt(WORLD_NOTE.wrotePart, "A part was written", "What world_set's answer says changed.", "Wrote the draft's {{part}} part.", [v6("part", "the part", true)]),
-  answerPrompt(WORLD_NOTE.patched, "A patch was applied", "What world_patch's answer says changed.", "Applied the patch to the draft: {{count}} operations.", [v6("count", "how many operations the patch had", true)]),
-  answerPrompt(WORLD_NOTE.nothingToDiscard, "No draft to drop", "world_discard's answer when no draft is stored.", "No draft is stored, so there is nothing to drop: the world's document stands as its head has it."),
-  answerPrompt(WORLD_NOTE.draftMoved, "The draft moved on", "world_discard's and world_commit's answer when the draft is no longer at the version the call named.", "The draft is at version {{version}} now, not {{given}}: it was written to since you read it, so nothing was done. Read it again (world_status, world_read), and call again with version {{version}} if that is still what you mean.", [v6("given", "the version the call named"), v6("version", "the draft's version now", true)]),
-  answerPrompt(WORLD_NOTE.discarded, "The draft was dropped", "What a world_discard came to once it was made: told to the author with the commit that made it.", "The draft is dropped: the world's document stands as its head has it."),
-  answerPrompt(WORLD_NOTE.nothingToCommit, "No draft to commit", "world_commit's answer when no draft is stored.", "No draft is stored, so there is nothing to commit. Write the change first (world_put, world_set, world_patch, world_keep or world_restore), then commit."),
-  answerPrompt(WORLD_NOTE.committed, "The draft was committed", "What a world_commit came to once it was made: told to the author with the commit that made it.", "The draft is the world's revision {{revision}} now, and the world's head.", [v6("revision", "the new revision", true)]),
-  answerPrompt(WORLD_NOTE.upgradeNext, "The chat doesn't play the new revision yet", "Ends what a world_commit came to when the chat plays another revision than the one committed.", "This chat still plays revision {{playing}}: world_upgrade brings it to the new one.", [v6("playing", "the revision the chat plays", true)]),
-  answerPrompt(WORLD_NOTE.hasErrors, "The draft has errors", "world_commit's reason when the draft's own checks find errors, which stop a commit.", "the world's draft has errors"),
-  answerPrompt(WORLD_NOTE.noRevision, "No such revision", "world_upgrade's and world_restore's reason when the world has no revision of that id.", "the world has no revision {{revision}}", [v6("revision", "the revision the call named", true)]),
-  answerPrompt(WORLD_NOTE.askCommit, "Asks to commit the world's draft", "How a world_commit is told wherever it stands: in its own answer, on the review card where it waits for the player's Apply, and in the answer of the commit that makes it (Settings → Changes from the reply, The world's document).", "Commit the world's draft as the world's next revision: every new chat of this world starts from it."),
-  answerPrompt(WORLD_NOTE.askCommitNoted, "Asks to commit the world's draft, with its note", "The same, when the commit carries a note for the world's history.", "Commit the world's draft as the world's next revision ({{note}}): every new chat of this world starts from it.", [v6("note", "the note given with the commit", true)]),
-  answerPrompt(WORLD_NOTE.askUpgrade, "Asks to bring the chat to a revision", "How a world_upgrade that names a revision is told wherever it stands.", "Bring this chat to revision {{revision}} of its world (an Upgrade).", [v6("revision", "the revision the chat would play", true)]),
-  answerPrompt(WORLD_NOTE.askUpgradeHead, "Asks to bring the chat to the world's head", "How a world_upgrade that names no revision is told wherever it stands: the move is to the world's head as it is when the move is made.", "Bring this chat to the head of its world, as it is when this is made (an Upgrade)."),
-  answerPrompt(WORLD_NOTE.askDiscard, "Asks to drop the world's draft", "How a world_discard is told wherever it stands.", "Drop the world's draft (version {{version}}): everything written to it since the last commit goes, Build's own edits too.", [v6("version", "the draft's version", true)]),
-  answerPrompt(WORLD_NOTE.askRestore, "Asks to restore a revision into the draft", "How a world_restore is told wherever it stands.", "Make the world's draft a copy of revision {{revision}}: what the draft holds now is replaced.", [v6("revision", "the revision to copy", true)]),
-  answerPrompt(WORLD_NOTE.alreadyPlays, "The chat plays that revision already", "world_upgrade's answer when the chat plays the revision asked for.", "This chat plays revision {{revision}} already: there is nothing to bring it to. A change still in the draft reaches play only after world_commit.", [v6("revision", "the revision asked for", true)]),
-  answerPrompt(WORLD_NOTE.upgradeLanded, "The Upgrade landed", "What a world_upgrade came to once it was made, when the chat was moved at once.", "It landed: this chat plays revision {{revision}} now, and every read of the world from here on shows it.", [v6("revision", "the revision the chat plays now", true)]),
-  answerPrompt(WORLD_NOTE.upgradePending, "The Upgrade waits for the turn's end", "What a world_upgrade came to once it was made, when the move waits for the turn that is running.", "It is pending: the move to revision {{revision}} waits for this turn's end. Until then this chat plays the revision it played, and reads of the world show that one.", [v6("revision", "the revision the chat will play", true)]),
-  answerPrompt(WORLD_NOTE.revisionHint, "Where the revisions are listed", "Added to a refused world_upgrade or world_restore.", "world_history lists the world's revisions."),
-  answerPrompt(WORLD_NOTE.restored, "The draft is a copy of a revision", "What a world_restore came to once it was made: told to the author with the commit that made it.", "The draft is a copy of revision {{revision}} now.", [v6("revision", "the revision copied", true)]),
-  answerPrompt(WORLD_NOTE.nothingMade, "Nothing was made in play", "world_made's answer when the chat made or changed nothing its world's document lacks.", "This chat has made or changed nothing in play that its world's document doesn't have."),
-  answerPrompt(WORLD_NOTE.madeNext, "How what was made is kept", "Ends world_made's answer.", "world_keep copies any of these into the world's draft: things and places by id or name, paths and maps by id, the map settings with settings: true. One marked inDraft is in the draft already."),
-  answerPrompt(WORLD_NOTE.keepNames, "Nothing was named to keep", "world_keep's answer when it names nothing to keep.", "Name what to keep: things, places, paths or maps, each a list of ids or names, or settings: true. world_made lists what this chat made or changed in play."),
-  answerPrompt(WORLD_NOTE.keptNothing, "Nothing could be kept", "world_keep's answer when nothing named could be copied into the draft.", `Nothing was kept:
-{{skipped}}
-world_made lists what this chat made in play and what the draft has already.`, [v6("skipped", "what was skipped and why, one to a line", true)]),
-  answerPrompt(WORLD_NOTE.kept, "What was kept", "What world_keep's answer says changed.", "Copied into the world's draft: {{count}} of what was named.", [v6("count", "how many were kept", true)]),
-  answerPrompt(WORLD_NOTE.notChanged, "Not one of this chat's changes", "Why world_keep skips a path, a map, a place or the map settings this chat didn't make, change or take out.", "this chat made, changed and took out nothing of that name in its world (world_made lists what it did)"),
-  answerPrompt(WORLD_NOTE.inDraftAlready, "The draft has it so already", "Why world_keep skips one of this chat's changes that the world's draft already holds as this chat has it.", "the world's draft has it so already"),
-  answerPrompt(WORLD_NOTE.notCommitted, "The draft's commit wasn't made", "What a world_upgrade asked right after a world_commit came to when that commit wasn't made, so the revision it was to bring the chat to doesn't exist.", "the world has no revision {{revision}}: it is the one the draft at version {{version}} was to become, and that commit wasn't made", [v6("revision", "the revision the draft's commit would have made", true), v6("version", "the draft's version when the Upgrade was asked")]),
-  answerPrompt(WORLD_NOTE.badMerge, "Picks it can't read", "world_upgrade's reason when an Upgrade's picks aren't ones the engine reads.", "an Upgrade's picks say take or keep for each part of an entity, by the entity's id, and these can't be read as that"),
-  answerPrompt(WORLD_NOTE.closed, "Closed to agents", "A world tool's answer when a write of the draft would change something only the user sets, whatever the mode: who the player's character is, or what the engine holds agents to.", "That would change {{paths}}, which no agent writes, whatever the mode. Who the player's character is, and what the engine holds agents to (how many people and places the story may bring in, what it may make real of what the player says, what a thing made for the story may cost, what the narrator is told, which of the user's own books the world reads), are the user's to set, in Build. Nothing was written. Write the rest without it, and say in your answer what you would have changed.", [v6("paths", "the closed paths the write would change, as JSON Pointers", true)]),
-  answerPrompt(WORLD_NOTE.closedCommit, "A draft that changes what only the user sets", "world_commit's answer, when it is asked and when it would be made, for a draft that differs from the world's head at something only the user sets: it holds the user's own edit of it.", "The draft differs from the world's head at {{paths}}, which no agent commits: it holds the user's own edit of what only they set, and committing it is theirs, in Build. Nothing was committed.", [v6("paths", "the closed paths the draft changes, as JSON Pointers", true)]),
-  answerPrompt(WORLD_NOTE.closedRestore, "A revision that differs where agents don't write", "world_restore's answer, when it is asked and when it would be made, for a revision that differs from the draft at something only the user sets.", "Revision {{revision}} differs from the draft at {{paths}}, which no agent writes: restoring it is the user's, in Build. The draft stands as it was.", [v6("revision", "the revision the call named", true), v6("paths", "the closed paths that differ, as JSON Pointers", true)]),
-  answerPrompt(WORLD_NOTE.closedUpgrade, "An Upgrade that changes what only the user sets", "world_upgrade's answer, when it is asked and when it would be made, for a revision that differs from the one the chat plays at something only the user sets.", "Revision {{revision}} differs at {{paths}} from the one this chat plays, which no agent brings into play: that Upgrade is the user's to make, in Build. The chat plays what it played.", [v6("revision", "the revision the chat would have been brought to", true), v6("paths", "the closed paths that differ, as JSON Pointers", true)]),
-  answerPrompt(WORLD_NOTE.changesCommit, "What a commit changes", "Heads the list of what a world_commit would change, on the review card and in the tool's answer: the draft against the world's head, the user's own unsaved edits included.", "What it commits, against the world's head ({{count}}):", [v6("count", "how many items and parts differ", true)]),
-  answerPrompt(WORLD_NOTE.changesRestore, "What a restore changes", "Heads the list of what a world_restore would change: the revision against the world's head.", "What the draft would then hold, against the world's head ({{count}}):", [v6("count", "how many items and parts differ", true)]),
-  answerPrompt(WORLD_NOTE.changesUpgrade, "What an Upgrade changes", "Heads the list of what a world_upgrade would change: the revision the chat is brought to against the one it plays.", "What it brings of the world's document, against revision {{playing}}, which this chat plays ({{count}}):", [v6("playing", "the revision the chat plays", true), v6("count", "how many items and parts differ", true)]),
-  answerPrompt(WORLD_NOTE.changesNone, "Nothing changes", "Stands where the list of what a world_commit, world_restore or world_upgrade would change is empty.", "Nothing in the world's document differs."),
-  answerPrompt(WORLD_NOTE.changeItems, "A collection's changes", "One line of the list of what a write of the world's document changes: one collection's items.", "{{collection}}: {{changes}}", [v6("collection", "the collection", true), v6("changes", "what was added, changed and removed in it", true)]),
-  answerPrompt(WORLD_NOTE.changeParts, "The parts that change", "Names the line of the world's parts (its calendar, its realism and the like) in the list of what a write changes.", "its parts"),
-  answerPrompt(WORLD_NOTE.changeAdded, "Items added", "Part of a collection's line: the items a write adds.", "added {{items}}", [v6("items", "the items, each by name and id", true)]),
-  answerPrompt(WORLD_NOTE.changeChanged, "Items changed", "Part of a collection's line: the items a write changes.", "changed {{items}}", [v6("items", "the items, each by name and id", true)]),
-  answerPrompt(WORLD_NOTE.changeRemoved, "Items removed", "Part of a collection's line: the items a write removes.", "removed {{items}}", [v6("items", "the items, each by name and id", true)]),
-  answerPrompt(WORLD_NOTE.changesHidden, "Changes kept from the player's character", "Ends the list on the review card: how many of the changes are to something the document keeps from the player's character, which the card counts and never names.", "and {{count}} more to what the world keeps from your character", [v6("count", "how many such changes", true)]),
-  answerPrompt(WORLD_NOTE.changesMore, "A list of changes that was cut", "Ends a list of changes too long for one answer or one card.", "and {{count}} more lines: world_read reads the draft, world_history lists the revisions", [v6("count", "how many lines aren't shown", true)]),
-  answerPrompt(WORLD_NOTE.theirEdits, "Waits for the user's own edits", "Ends a world_commit, world_discard or world_restore in the commit's answer when it went to the review card whatever the mode: the draft holds edits no agent of the turn wrote.", "It waits for the player's Apply on the review card: the draft holds edits no agent of this turn wrote (the user's own, from Build), and no agent publishes or throws away someone's unfinished work by itself. Say so in your reply, and don't go on as if it were done."),
-  answerPrompt(WORLD_NOTE.followsCommit, "An Upgrade that waits with its commit", "Ends a world_upgrade in the commit's answer when it went to the review card because the commit it follows waits there.", "It waits on the review card with the commit before it, which it follows: one Apply makes both."),
-  ...SHAPE_PROMPTS
 ];
 
 // src/shared/harness-texts.ts
@@ -35693,7 +35701,7 @@ var AUTHOR_TEXT = {
   label: "The author",
   name: "Author",
   description: "Decides the story of a LumiRPEngine world and has the reply told from it: reads each moment, has its people act, writes what happened as beats, and releases the reply once, whole, naming each passage the narrator wrote. Started as a job, it reflects in its notebook or looks at what moved elsewhere.",
-  instructions: lines2("You are the author of a roleplay whose world LumiRPEngine keeps. You decide what happens in the story, and you understand the story for yourself: where it stands and where it points. The reply is only a telling of what you decided, drafted, checked and released. Nothing is read back out of a reply, so what no beat records never happened.", "", "Each turn you are given the player's newest message, your notebook's index and the scene (author/notebook.md and author/scene.md, pinned for you), the moment as it stands (the time, the place, who is there and what each mind has still to take in, the last beats, the quests in play), what needs you now (drafts due, the story's preparation where it isn't finished), and the world's guidance below. The moment is read for you so you can act at once: never read again with tools what it gives. Read only what these don't already give you, and trust your tools over what you assume. Open a notebook file only when its index says it bears on this moment. Ask for everything a moment needs in one round: several tools in one answer, not one at a time. Every secret your tools show is marked with whom it is known to and whom it is kept from: it is for steering the story, never for telling it.", "", "The story is kept as beats. A beat says who did or said what, where and when, and who it reached and how fully. Whoever decides a beat writes it (beat_write): you write what the world does, what an extra or a supporting character does, and the player's own words and deeds as theirs; a principal writes their own acts; the game master writes its rulings. When you leave out whom a beat reached, the engine proposes it from who is there: confirm it or change it. Attention, distance and distraction decide who caught what, and some hear of it only later. People know only what reached them, and they may get it wrong.", "", "How to judge a moment:", "- Read the message for what the player's character says and does, and what it is for. What they do of their own will is never yours to decide. With Sovereign Hand on, the message is a direction to you instead: carry it out, their character included.", "- Choose how the moment is played. A line of speech or a small act toward a principal who is present, with nothing else at stake, always goes on the direct line: the player's beat, one hand-off to that principal with to_reply, then the background work. No narrator, no check and no scene skill. With Sovereign Hand on, a quoted line is still the player character's own speech and goes the same way. The principal's answer never retells the player's line. Toward an extra or a supporting character, answer in their voice yourself. The moment more is at stake, or several people act or want different things, it is a scene, played beat by beat until it comes back to the player. Time that passes gets a tier of treatment, by how much it matters to the story, how tied it is to the world and the story as they stand, and how soon it will matter, within the player's budget.", "- An uncertain or contested outcome is never yours to choose. The game master rules on it (delegate, agent: game_master), and the engine's dice decide (action_play). A roll once made stands.", "- Change the world with your tools, never in prose alone: someone moves, pays or hands something over, time passes (time_pass). What the story needs and the world lacks, you make on the spot: someone new starts as an extra.", "- The reply states no fact that is not in a beat. Ask the narrator for each passage of the beats (delegate, agent: narrator) and have it checked as the settings say: the narrator answers with the passage's number and length, never its text. When the telling is done, release the reply once, whole: one reply_write naming each passage by its number, in the order the player reads them, with any words of your own. The engine sends the drafts as they stand. The player sees only what you release, and a turn's reply is released once: a second reply_write is refused, so release it only when the telling is whole.", "", "Casting is your judgement. An extra has no mind: you voice them. A supporting character has a short profile you keep. A principal has a mind of their own and acts as their own agent. Promote someone when they recur or carry stakes, demote them when they leave the story, never promote by default, and say why (cast_set). A standing the player pinned stays.", "", "Your notebook is your own understanding of the story: its open questions, its threads and how ripe each is, what was set up and awaits payoff, where each principal's arc stands, what the player seems to want, and the futures you think likely. It comes from reflecting, in work you start after the reply: a light touch after a reply, a deeper look when a scene ends, a full re-reading when a chapter turns. Before a principal acts you may note in the scene what you expect of them. When they do otherwise, they know themselves better than you do: revise your reading.", "", "Once the reply is released, start what goes on in the background (job_start) and answer at once: taking in and your notebook's touch are those jobs' work, never the turn's. Everyone a beat reached who has a mind takes it in after the reply, the player's character included while their mind is on. Your notebook's touch is your own job: start yourself to reflect in it. This chat keeps no chronicle: the story record and your notebook are its memory. Never start an agent, yourself included, to read the chat's prose back into learned/chronicle/, and never write there, whatever your notes of earlier turns show. You may also look at what moved elsewhere meanwhile, and have principals prepare for what is likely next. A plain exchange needs little of this.", "", "When the player says out of character that something should not have happened, or should have gone otherwise, settle it: strike or rewrite the beats (beat_strike), put the world right with your tools, see that those it reached are told, and answer briefly out of character.", "", "Call several tools in one answer when none depends on another. A refusal says what to fix: fix it, or go on without it, and never repeat the same call unchanged. Your skills say how each kind of moment is usually played. Load one when it fits, and depart from it when the moment calls for something else.")
+  instructions: lines2("You are the author of a roleplay whose world LumiRPEngine keeps. You decide what happens in the story, and you understand the story for yourself: where it stands and where it points. The reply is only a telling of what you decided, drafted, checked and released. Nothing is read back out of a reply, so what no beat records never happened.", "", "Each turn you are given the player's newest message, your notebook's index and the scene (author/notebook.md and author/scene.md, pinned for you), the moment as it stands (the time, the place, who is there and what each mind has still to take in, the last beats, the quests in play), what needs you now (drafts due, the story's preparation where it isn't finished), and the world's guidance below. The moment is read for you so you can act at once: never read again with tools what it gives. Read only what these don't already give you, and trust your tools over what you assume. Open a notebook file only when its index says it bears on this moment. Ask for everything a moment needs in one round: several tools in one answer, not one at a time. Every secret your tools show is marked with whom it is known to and whom it is kept from: it is for steering the story, never for telling it.", "", "The story is kept as beats. A beat says who did or said what, where and when, and who it reached and how fully. Whoever decides a beat writes it (beat_write): you write what the world does, what an extra or a supporting character does, and the player's own words and deeds as theirs; a principal writes their own acts; the game master writes its rulings. When you leave out whom a beat reached, the engine proposes it from who is there: confirm it or change it. Attention, distance and distraction decide who caught what, and some hear of it only later. People know only what reached them, and they may get it wrong.", "", "How to judge a moment:", "- Read the message for what the player's character says and does, and what it is for. What they do of their own will is never yours to decide. With Sovereign Hand on, the message is a direction to you instead: carry it out, their character included.", "- Choose how the moment is played. A line of speech or a small act toward a principal who is present, with nothing else at stake, always goes on the direct line: the player's beat, one hand-off to that principal with to_reply, then the background work. No narrator, no check and no scene skill. With Sovereign Hand on, a quoted line is still the player character's own speech and goes the same way. The principal's answer never retells the player's line. Toward an extra or a supporting character, answer in their voice yourself. The moment more is at stake, or several people act or want different things, it is a scene, played beat by beat until it comes back to the player. Time that passes gets a tier of treatment, by how much it matters to the story, how tied it is to the world and the story as they stand, and how soon it will matter, within the player's budget.", "- An uncertain or contested outcome is never yours to choose. The game master rules on it (delegate, agent: game_master), and the engine's dice decide (action_play). A roll once made stands.", "- Change the world with your tools, never in prose alone: someone moves, pays or hands something over, time passes (time_pass). What the story needs and the world lacks, you make on the spot: someone new starts as an extra.", "- The reply states no fact that is not in a beat. It is told passage by passage, each numbered 1, 2, 3 in the order the player reads them: write a passage's beats, start the narrator (delegate, agent: narrator) with the passage's number in its task, have it checked as the settings say, and have it revised if the check asks, by starting the narrator again with the same number (it is given its draft and the changes: never type them yourself). Only then write the next passage's beats and ask for that one. A passage tells every beat that reached its point of view that no earlier passage tells, and goes on from each earlier passage that passed its check.", "- You never read a passage to release it. The narrator answers with its passage's number and length, the check with its verdict, and passage_read without a number lists where each passage stands: its latest draft's number and length, its check, the drafts it has left, and whether the release would send it now. Nothing reaches the player until you release: when the telling is done, release the reply once, whole, with one reply_write naming each passage by its number, in order, with any words of your own. The engine sends the drafts as they stand. A second reply_write is refused, so release only when the telling is whole.", "", "Casting is your judgement. An extra has no mind: you voice them. A supporting character has a short profile you keep. A principal has a mind of their own and acts as their own agent. Promote someone when they recur or carry stakes, demote them when they leave the story, never promote by default, and say why (cast_set). A standing the player pinned stays.", "", "Your notebook is your own understanding of the story: its open questions, its threads and how ripe each is, what was set up and awaits payoff, where each principal's arc stands, what the player seems to want, and the futures you think likely. It comes from reflecting, in work you start after the reply: a light touch after a reply, a deeper look when a scene ends, a full re-reading when a chapter turns. Before a principal acts you may note in the scene what you expect of them. When they do otherwise, they know themselves better than you do: revise your reading.", "", "Once the reply is released, start what goes on in the background (job_start) and answer at once: taking in and your notebook's touch are those jobs' work, never the turn's. Everyone a beat reached who has a mind takes it in after the reply, the player's character included while their mind is on. Your notebook's touch is your own job: start yourself to reflect in it. This chat keeps no chronicle: the story record and your notebook are its memory. Never start an agent, yourself included, to read the chat's prose back into learned/chronicle/, and never write there, whatever your notes of earlier turns show. You may also look at what moved elsewhere meanwhile, and have principals prepare for what is likely next. A plain exchange needs little of this.", "", "When the player says out of character that something should not have happened, or should have gone otherwise, settle it: strike or rewrite the beats (beat_strike), put the world right with your tools, see that those it reached are told, and answer briefly out of character.", "", "Call several tools in one answer when none depends on another. A refusal says what to fix: fix it, or go on without it, and never repeat the same call unchanged. Your skills say how each kind of moment is usually played. Load one when it fits, and depart from it when the moment calls for something else.")
 };
 var ASSISTANT_TEXT = {
   id: HARNESS_AGENT.assistant,
@@ -35728,7 +35736,7 @@ var AUTHOR_SKILL_TEXTS = [
     agents: AUTHOR_ONLY,
     name: "Playing a scene",
     description: "When a moment is more than a line: several people act, want different things, or something is at stake. Setting the scene, playing it beat by beat with each principal acting from their own mind, and handing it back to the player.",
-    body: lines2("# Playing a scene", "", "A scene is lived, not summarized. Run it as a game master runs a table: set it, let everyone act in turn, have the world answer, and hand it back when it is the player's move.", "", "1. **Set it** in `author/scene.md`: where it is, who is there and where each stands, what each wants right now, and what the world is about to do. Keep it current as the scene moves.", "2. **Write the player's beat** first: what their character said or did, in their words (`beat_write`).", "3. **Beats in turn.** For each beat, ask who acts next.", '   - A principal acts from their own mind: `delegate` with `agent: "character"` and `as` their id. People who act at once start in the same answer. Their task says only that it is their moment; what reached them is theirs to read, and they write their own beat.', "   - An extra or a supporting character is yours: write what they do.", "   - The world is yours too: the weather, a door, a deadline, a stranger arriving.", "   - Anything contested goes to the game master first (see the skill for a contested action).", "4. **Who caught it.** For every beat, confirm or change whom it reached and how fully. Someone across the room may catch only the tone. Someone busy may miss it. Someone outside hears of it only when told. This is what each mind will believe, so take care.", "5. **Expect, then learn.** Before a principal acts, you may note in the scene what you expect of them. When they do otherwise, they know themselves better than you do: revise your reading later, in your notebook.", "6. **Have it told as you go, and released once.** Never play a whole scene before any of it is told. After the first exchange, two to four beats, have the narrator tell those as a passage and have it checked (see the skill for the reply), then play on, and do the same for each exchange after it. When the scene comes back to the player, release the reply once, whole: one `reply_write` naming each passage in the order told.", "7. **Hand it back** when the moment calls for the player's answer: a question put to their character, a threat aimed at them, a choice only they can make. Never decide what their character does of their own will, unless Sovereign Hand is on and the direction says it.", "", "A scene ends when its reason to exist is spent. Say so in `author/scene.md`, and give your notebook a deeper look after the reply.")
+    body: lines2("# Playing a scene", "", "A scene is lived, not summarized. Run it as a game master runs a table: set it, let everyone act in turn, have the world answer, and hand it back when it is the player's move.", "", "1. **Set it** in `author/scene.md`: where it is, who is there and where each stands, what each wants right now, and what the world is about to do. Keep it current as the scene moves.", "2. **Write the player's beat** first: what their character said or did, in their words (`beat_write`).", "3. **Beats in turn.** For each beat, ask who acts next.", '   - A principal acts from their own mind: `delegate` with `agent: "character"` and `as` their id. People who act at once start in the same answer. Their task says only that it is their moment; what reached them is theirs to read, and they write their own beat.', "   - An extra or a supporting character is yours: write what they do.", "   - The world is yours too: the weather, a door, a deadline, a stranger arriving.", "   - Anything contested goes to the game master first (see the skill for a contested action).", "4. **Who caught it.** For every beat, confirm or change whom it reached and how fully. Someone across the room may catch only the tone. Someone busy may miss it. Someone outside hears of it only when told. This is what each mind will believe, so take care.", "5. **Expect, then learn.** Before a principal acts, you may note in the scene what you expect of them. When they do otherwise, they know themselves better than you do: revise your reading later, in your notebook.", "6. **Have it told as you go, and released once.** Never play a whole scene before any of it is told. After the first exchange, two to four beats, have the narrator tell those as the next passage, by its number, and have it checked (see the skill for the reply); then play on, and do the same for each exchange after it. When the scene comes back to the player, release the reply once, whole: one `reply_write` naming each passage in the order told.", "7. **Hand it back** when the moment calls for the player's answer: a question put to their character, a threat aimed at them, a choice only they can make. Never decide what their character does of their own will, unless Sovereign Hand is on and the direction says it.", "", "A scene ends when its reason to exist is spent. Say so in `author/scene.md`, and give your notebook a deeper look after the reply.")
   },
   {
     id: HARNESS_SKILL.time,
@@ -35741,8 +35749,8 @@ var AUTHOR_SKILL_TEXTS = [
     id: HARNESS_SKILL.reply,
     agents: AUTHOR_ONLY,
     name: "The reply",
-    description: "How the reply is made from the beats: the narrator tells them, one passage after another, the check holds each passage to them, and you release the reply once, whole, naming each passage by its number.",
-    body: lines2("# The reply", "", "The reply tells only what the beats hold. No fact goes into it that no beat records, and nothing is read back out of it afterwards.", "", "1. **Ask for a passage.** `delegate` with `agent: \"narrator\"` and a task naming the beats to tell, in order, and anything you want of the passage: one of the presentation modules the player's preset offers when the moment calls for it, a length, a held breath before the answer. The narrator tells it from the player character's point of view unless you name someone else's. It answers with the passage's number and length, not its text.", "2. **Have it checked** as the settings say. By default the game master holds the passage to its beats, and the narrator revises what it asks. A passage that adds a fact, drops a beat the point of view could perceive, or changes a quote is not ready.", "3. **Tell the rest the same way.** A long scene is told passage by passage, each going on from the one before it. Never ask for a passage before its beats are written.", "4. **Release the reply once, whole,** when the telling is done: one `reply_write` naming each passage by its number, in the order the player reads them (`pieces`), with any words of your own (`words`, before or after them). The engine sends each passage's latest draft as it stands, a blank line between them: never write a passage out yourself. A turn releases its reply once, and a second `reply_write` is refused, so release it only when the telling is whole.", "", "On the direct line a principal's own answer is the reply, streamed as they write it: that is the turn's one release. An extra's short line you may release yourself, in your own words, holding to its beat.")
+    description: "How the reply is made from the beats: one passage after another, each by its number, told by the narrator and held to its beats by the check, and the reply released once, whole, naming them all.",
+    body: lines2("# The reply", "", "The reply tells only what the beats hold. No fact goes into it that no beat records, and nothing is read back out of it afterwards.", "", "1. **Write a passage's beats, then ask for it.** `delegate` with `agent: \"narrator\"` and a task giving the passage's number (the first is 1, each next one more) and anything you want of it: one of the presentation modules the player's preset offers when the moment calls for it, a length, a held breath before the answer. A passage tells every beat that reached its point of view that no earlier passage tells: write all of one passage's beats before you ask for it, and the next one's after. The narrator tells it from the player character's point of view unless you name someone else's (`as`). It answers with the passage's number and length, not its text.", "2. **Have it checked** as the settings say, by its number. By default the game master holds the passage to its beats. A passage that adds a fact, drops a beat the point of view could perceive, or changes a quote is not ready: start the narrator again with the same number to revise it. It is given its draft and the changes: never type them yourself.", "3. **Then the next passage.** Ask for the next one only once this one has passed its check: its narrator goes on from each earlier passage that passed, and is told the number of any that hasn't. Never ask for two new ones at once.", "4. **Know where it stands without reading it.** `passage_read` without a number lists each passage: its latest draft's number and length, its check, the drafts it has left, and whether the release would send it now. You never read a passage's text to release it.", "5. **Release the reply once, whole,** when the telling is done: one `reply_write` naming each passage by its number, in the order the player reads them (`pieces`), with any words of your own (`words`, before or after them). The engine sends each passage's latest draft as it stands, a blank line between them: never write a passage out yourself. Nothing reaches the player before it, and a second `reply_write` is refused, so release only when the telling is whole.", "", "On the direct line a principal's own answer is the reply, streamed as they write it: that is the turn's one release. An extra's short line you may release yourself, in your own words, holding to its beat.")
   },
   {
     id: HARNESS_SKILL.after,
@@ -47311,7 +47319,7 @@ function SectionFeedForm(props) {
 var PREVIEW_ALL = "\x00preview";
 function FeedThisChat(props) {
   const app = useApp();
-  const pages = usePages();
+  const pages2 = usePages();
   const [notice, setNotice] = d2(null);
   const [busy, run] = useBusy();
   const { preview, failed: failed2 } = useSectionsPreview(props.chatId, props.controls);
@@ -47321,7 +47329,7 @@ function FeedThisChat(props) {
       icon: "scroll",
       children: "Section settings appear once the chat has started."
     }, undefined, false, undefined, this);
-  const row3 = rows2.find((r3) => r3.id === pages.page);
+  const row3 = rows2.find((r3) => r3.id === pages2.page);
   const holds2 = preview?.sections.find((s3) => s3.slot === row3?.id);
   const shown = notice && feedNoticeStands(notice, props.chips) ? notice : null;
   const undo = (chips) => run(async () => {
@@ -47337,14 +47345,14 @@ function FeedThisChat(props) {
     setNotice(null);
   });
   return /* @__PURE__ */ u3("div", {
-    ref: pages.host.ref,
+    ref: pages2.host.ref,
     class: "lre-gm-pages",
-    onKeyDown: pages.host.onKeyDown,
+    onKeyDown: pages2.host.onKeyDown,
     "data-lre-gm-feed": true,
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-stack lre-gm-list",
-        hidden: pages.page !== null,
+        hidden: pages2.page !== null,
         children: [
           /* @__PURE__ */ u3("span", {
             class: "lre-small lre-muted",
@@ -47355,7 +47363,7 @@ function FeedThisChat(props) {
             children: /* @__PURE__ */ u3(Button, {
               variant: "secondary",
               icon: "eye",
-              onClick: () => pages.open(PREVIEW_ALL),
+              onClick: () => pages2.open(PREVIEW_ALL),
               children: "Preview all"
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this),
@@ -47367,18 +47375,18 @@ function FeedThisChat(props) {
                 title: r3.label,
                 subtitle: `${r3.chat ? "This chat" : "The world's"}: ${feedSummary(r3.chat ?? r3.world)}`,
                 chevron: true,
-                onClick: () => pages.open(r3.id)
+                onClick: () => pages2.open(r3.id)
               }, r3.id, false, undefined, this))
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
-      pages.page === PREVIEW_ALL ? /* @__PURE__ */ u3(GmPage, {
+      pages2.page === PREVIEW_ALL ? /* @__PURE__ */ u3(GmPage, {
         name: "sections-preview",
         title: "Preview all",
         subtitle: "What the narrator would get next turn",
         backLabel: "Sections",
-        onBack: pages.back,
+        onBack: pages2.back,
         children: /* @__PURE__ */ u3(PreviewAll, {
           preview,
           failed: failed2
@@ -47389,7 +47397,7 @@ function FeedThisChat(props) {
         title: row3.label,
         subtitle: "Section, this chat",
         backLabel: "Sections",
-        onBack: pages.back,
+        onBack: pages2.back,
         children: [
           holds2 && preview ? /* @__PURE__ */ u3(SectionHolds, {
             section: holds2,
@@ -47405,7 +47413,7 @@ function FeedThisChat(props) {
             narrator: props.controls ? narratorInForce(props.controls.knowledge) : null,
             onDone: (made) => {
               setNotice(made);
-              pages.back();
+              pages2.back();
             }
           }, row3.id, false, undefined, this)
         ]
@@ -50465,15 +50473,15 @@ function ThisChat(props) {
   const { view } = props;
   const app = useApp();
   const revealed = useUi((ui) => ui.gm.revealed);
-  const pages = usePages();
-  const page9 = pages.page;
+  const pages2 = usePages();
+  const page9 = pages2.page;
   const controls = view.controls;
   const panelProps = (panel) => ({ chatId: view.chatId, view: view.panels[panel.id] ?? null, state: view, send: app.send });
   const dot = (panel) => view.pending.some((mark) => mark.panel === panel.id);
   return /* @__PURE__ */ u3("div", {
-    ref: pages.host.ref,
+    ref: pages2.host.ref,
     class: "lre-gm-pages",
-    onKeyDown: pages.host.onKeyDown,
+    onKeyDown: pages2.host.onKeyDown,
     "data-lre-gm-chat": true,
     children: [
       /* @__PURE__ */ u3("div", {
@@ -50490,63 +50498,63 @@ function ThisChat(props) {
                   title: "Engine",
                   subtitle: `${ENGINE_LABEL[view.engine ?? "classic"]} · which engine plays this chat's turns`,
                   chevron: true,
-                  onClick: () => pages.open("engine")
+                  onClick: () => pages2.open("engine")
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3(ListRow, {
                   icon: "sliders",
                   title: "Realism",
                   subtitle: controls ? `${humanize(controls.realism.preset)} · how deeply each part of the world is simulated` : "How deeply each part of the world is simulated",
                   chevron: true,
-                  onClick: () => pages.open("realism")
+                  onClick: () => pages2.open("realism")
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3(ListRow, {
                   icon: "dice",
                   title: "Checks",
                   subtitle: controls ? `${ADJUDICATION_PRESET_LABEL[controls.adjudication.preset]} · inferred checks: ${INFER_MODE_LABEL[controls.inferred.mode].toLowerCase()}` : "How checks are decided",
                   chevron: true,
-                  onClick: () => pages.open("checks")
+                  onClick: () => pages2.open("checks")
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3(ListRow, {
                   icon: "clock",
                   title: "Time",
                   subtitle: controls ? `${controls.time.scale}× time scale · montage ${controls.time.montage === "key" ? "by key events" : `per ${controls.time.montage}`}${controls.time.paused ? " · clock paused" : ""}` : "Ticks, interrupts, Speed through, Montage",
                   chevron: true,
-                  onClick: () => pages.open("time")
+                  onClick: () => pages2.open("time")
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3(ListRow, {
                   icon: "scroll",
                   title: "Sections",
                   subtitle: "What goes into each section the narrator reads, and whose knowledge",
                   chevron: true,
-                  onClick: () => pages.open("sections")
+                  onClick: () => pages2.open("sections")
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3(ListRow, {
                   icon: "eye",
                   title: "Knowledge",
                   subtitle: controls ? knowledgeSummary(controls.knowledge) : "Knowledge tracking, and what the narrator knows",
                   chevron: true,
-                  onClick: () => pages.open("knowledge")
+                  onClick: () => pages2.open("knowledge")
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ u3(ListRow, {
                   icon: "box",
                   title: "Things",
                   subtitle: controls ? thingsSummary(controls.things.tidy) : "Whether impossible holds are tidied every turn",
                   chevron: true,
-                  onClick: () => pages.open("things")
+                  onClick: () => pages2.open("things")
                 }, undefined, false, undefined, this),
                 controls?.cash ? /* @__PURE__ */ u3(ListRow, {
                   icon: "coins",
                   title: "Money",
                   subtitle: cashSummary(controls.cash),
                   chevron: true,
-                  onClick: () => pages.open("money")
+                  onClick: () => pages2.open("money")
                 }, undefined, false, undefined, this) : null,
                 /* @__PURE__ */ u3(ListRow, {
                   icon: "layers",
                   title: "Pins and upgrade",
                   subtitle: "World revision, tables and generators",
                   chevron: true,
-                  onClick: () => pages.open("pins")
+                  onClick: () => pages2.open("pins")
                 }, undefined, false, undefined, this)
               ]
             }, undefined, true, undefined, this)
@@ -50560,7 +50568,7 @@ function ThisChat(props) {
                 title: "Edits",
                 subtitle: revealed ? "Corrections in force on this chat's path" : "Corrections in force, behind the gate",
                 chevron: true,
-                onClick: () => pages.open("edits")
+                onClick: () => pages2.open("edits")
               }, undefined, false, undefined, this)
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this) : null,
@@ -50578,7 +50586,7 @@ function ThisChat(props) {
                   "aria-label": "pending"
                 }, undefined, false, undefined, this) : undefined,
                 chevron: true,
-                onClick: () => pages.open({ panel })
+                onClick: () => pages2.open({ panel })
               }, panel.id, false, undefined, this))
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this) : null
@@ -50589,7 +50597,7 @@ function ThisChat(props) {
         title: "Engine",
         subtitle: "This chat",
         backLabel: "This chat",
-        onBack: pages.back,
+        onBack: pages2.back,
         children: /* @__PURE__ */ u3(EngineThisChat, {
           chatId: view.chatId
         }, undefined, false, undefined, this)
@@ -50598,7 +50606,7 @@ function ThisChat(props) {
         title: "Realism",
         subtitle: "This chat",
         backLabel: "This chat",
-        onBack: pages.back,
+        onBack: pages2.back,
         children: /* @__PURE__ */ u3(RealismThisChat, {
           chatId: view.chatId,
           controls
@@ -50608,7 +50616,7 @@ function ThisChat(props) {
         title: "Checks",
         subtitle: "This chat",
         backLabel: "This chat",
-        onBack: pages.back,
+        onBack: pages2.back,
         children: [
           /* @__PURE__ */ u3(AdjudicationThisChat, {
             chatId: view.chatId,
@@ -50624,7 +50632,7 @@ function ThisChat(props) {
         title: "Time",
         subtitle: "This chat",
         backLabel: "This chat",
-        onBack: pages.back,
+        onBack: pages2.back,
         children: /* @__PURE__ */ u3(TimeThisChat, {
           view
         }, undefined, false, undefined, this)
@@ -50633,7 +50641,7 @@ function ThisChat(props) {
         title: "Sections",
         subtitle: "This chat",
         backLabel: "This chat",
-        onBack: pages.back,
+        onBack: pages2.back,
         children: /* @__PURE__ */ u3(FeedThisChat, {
           chatId: view.chatId,
           controls,
@@ -50644,7 +50652,7 @@ function ThisChat(props) {
         title: "Knowledge",
         subtitle: "This chat",
         backLabel: "This chat",
-        onBack: pages.back,
+        onBack: pages2.back,
         children: /* @__PURE__ */ u3(KnowledgeThisChat, {
           chatId: view.chatId,
           controls
@@ -50654,7 +50662,7 @@ function ThisChat(props) {
         title: "Things",
         subtitle: "This chat",
         backLabel: "This chat",
-        onBack: pages.back,
+        onBack: pages2.back,
         children: /* @__PURE__ */ u3(ThingsThisChat, {
           chatId: view.chatId,
           controls
@@ -50664,7 +50672,7 @@ function ThisChat(props) {
         title: "Money",
         subtitle: "This chat",
         backLabel: "This chat",
-        onBack: pages.back,
+        onBack: pages2.back,
         children: /* @__PURE__ */ u3(MoneyThisChat, {
           chatId: view.chatId,
           controls
@@ -50674,7 +50682,7 @@ function ThisChat(props) {
         title: "Pins and upgrade",
         subtitle: "This chat",
         backLabel: "This chat",
-        onBack: pages.back,
+        onBack: pages2.back,
         children: /* @__PURE__ */ u3(PinsAndUpgrade, {
           view
         }, undefined, false, undefined, this)
@@ -50683,7 +50691,7 @@ function ThisChat(props) {
         title: "Edits",
         subtitle: "Corrections in force, newest first",
         backLabel: "This chat",
-        onBack: pages.back,
+        onBack: pages2.back,
         children: /* @__PURE__ */ u3(props.truth.component, {
           ...panelProps(props.truth)
         }, undefined, false, undefined, this)
@@ -50692,7 +50700,7 @@ function ThisChat(props) {
         title: page9.panel.label,
         subtitle: "This chat",
         backLabel: "This chat",
-        onBack: pages.back,
+        onBack: pages2.back,
         children: /* @__PURE__ */ u3(page9.panel.component, {
           ...panelProps(page9.panel)
         }, undefined, false, undefined, this)
@@ -56591,10 +56599,10 @@ function pageOfStream(kind) {
   return kind === undefined || isReply(kind) ? "live" : kind === "job" ? "jobs" : "talk";
 }
 function groupMark(group, marks, groups = GROUPS4) {
-  const pages = groups.find((g2) => g2.id === group)?.pages ?? [];
-  if (pages.some((p3) => marks[p3.id] === "needs"))
+  const pages2 = groups.find((g2) => g2.id === group)?.pages ?? [];
+  if (pages2.some((p3) => marks[p3.id] === "needs"))
     return "needs";
-  return pages.some((p3) => marks[p3.id] === "busy") ? "busy" : null;
+  return pages2.some((p3) => marks[p3.id] === "busy") ? "busy" : null;
 }
 function stripOver(page9) {
   return page9 !== "home";
@@ -66661,9 +66669,9 @@ function learnOf(state, chat, story) {
   const title = story.covered > 0 ? `The chronicle is ${counted2(story.estimate.messages, "message")} behind this chat` : `This chat's ${counted2(story.messages, "message")} haven't been learned`;
   return { title, text: `Until they are, the agents know the earlier story only by what they look up reply by reply. ${estimateWords(story.estimate)}` };
 }
-function waysOf(state, pages) {
+function waysOf(state, pages2) {
   const marks = pageMarks(state);
-  const shown = PAGES.filter((p3) => p3.id !== "home" && (pages === null || pages === undefined || pages.includes(p3.id)));
+  const shown = PAGES.filter((p3) => p3.id !== "home" && (pages2 === null || pages2 === undefined || pages2.includes(p3.id)));
   const way = (p3) => ({ id: p3.id, label: p3.label, about: p3.about, mark: marks[p3.id] ?? null });
   return { main: shown.filter((p3) => p3.far !== true).map(way), more: shown.filter((p3) => p3.far === true).map(way) };
 }
@@ -66728,7 +66736,7 @@ function HomePage() {
   const app = useApp2();
   const state = useSelect2(app.client.state, (s3) => s3);
   const active = useSelect2(app.host.activeChat, (c3) => c3);
-  const pages = w2(ShownPagesContext);
+  const pages2 = w2(ShownPagesContext);
   const running = useSelect2(app.client.state, (s3) => s3?.running.find((r3) => isReply(r3.kind) && r3.chatId === active)?.turn ?? "");
   const [home, setHome] = d2(null);
   const [failed2, setFailed] = d2(null);
@@ -66769,7 +66777,7 @@ function HomePage() {
   if (state === null)
     return null;
   const now = app.now();
-  const model = homeOf({ state, home, story, active, now, pages });
+  const model = homeOf({ state, home, story, active, now, pages: pages2 });
   const dismiss = (id) => run(async () => {
     try {
       await app.client.request("lah.notice.dismiss", { id });
@@ -74459,11 +74467,11 @@ function Shell(props) {
   const lastOf = T2({});
   lastOf.current[group] = page9;
   const select = (next) => app.nav.update((n5) => ({ ...n5, page: next }));
-  const pages = groups.find((g2) => g2.id === group)?.pages ?? [];
+  const pages2 = groups.find((g2) => g2.id === group)?.pages ?? [];
   const onKeyDown = (event, index) => {
-    const last = pages.length - 1;
+    const last = pages2.length - 1;
     const next = event.key === "ArrowRight" ? index === last ? 0 : index + 1 : event.key === "ArrowLeft" ? index === 0 ? last : index - 1 : event.key === "Home" ? 0 : event.key === "End" ? last : -1;
-    const target = pages[next];
+    const target = pages2[next];
     if (!target)
       return;
     event.preventDefault();
@@ -74471,7 +74479,7 @@ function Shell(props) {
     tabs.current?.querySelectorAll('[role="tab"]')[next]?.focus();
   };
   const View = PAGE_VIEW[page9];
-  const tabbed = pages.length > 1;
+  const tabbed = pages2.length > 1;
   return /* @__PURE__ */ u3("div", {
     ref: root,
     class: "lah lah-root",
@@ -74515,7 +74523,7 @@ function Shell(props) {
               class: "lah-pages lah-subpages",
               role: "tablist",
               "aria-label": `${groups.find((g2) => g2.id === group)?.label ?? ""} pages`,
-              children: pages.map((entry, index) => /* @__PURE__ */ u3("button", {
+              children: pages2.map((entry, index) => /* @__PURE__ */ u3("button", {
                 type: "button",
                 role: "tab",
                 id: `${bodyId}-tab-${entry.id}`,
@@ -74568,7 +74576,7 @@ function Shell(props) {
             page9 !== "home" ? /* @__PURE__ */ u3("p", {
               class: "lah-page-lead",
               "data-lah-page-lead": true,
-              children: pages.find((p3) => p3.id === page9)?.about ?? null
+              children: pages2.find((p3) => p3.id === page9)?.about ?? null
             }, undefined, false, undefined, this) : null,
             /* @__PURE__ */ u3(View, {}, undefined, false, undefined, this)
           ]
@@ -76115,7 +76123,7 @@ function CastPage(props) {
   const [failed2, setFailed] = d2(false);
   const [settings, setSettings] = d2(null);
   const connections = useAgentConnections(props.chatId);
-  const pages = usePages();
+  const pages2 = usePages();
   A(() => {
     let live = true;
     setView(null);
@@ -76138,7 +76146,7 @@ function CastPage(props) {
   }, [props.chatId]);
   A(() => {
     if (props.open !== undefined && view !== null)
-      pages.open(props.open);
+      pages2.open(props.open);
   }, [props.open, view !== null]);
   if (failed2)
     return /* @__PURE__ */ u3(Empty, {
@@ -76150,17 +76158,17 @@ function CastPage(props) {
       icon: "hourglass",
       children: "Reading the cast…"
     }, undefined, false, undefined, this);
-  const row3 = pages.page === null ? undefined : view.cast.find((c3) => c3.entity === pages.page);
+  const row3 = pages2.page === null ? undefined : view.cast.find((c3) => c3.entity === pages2.page);
   const patch = async (body) => {
     const result = await app.request({ type: "lre.settings.set", patch: body });
     if (result)
       setSettings(result);
   };
   return /* @__PURE__ */ u3("div", {
-    ref: pages.host.ref,
+    ref: pages2.host.ref,
     class: "lre-gm-pages lre-story-page",
     "data-lre-story-page": "cast",
-    onKeyDown: pages.host.onKeyDown,
+    onKeyDown: pages2.host.onKeyDown,
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-stack lre-gm-list",
@@ -76172,7 +76180,7 @@ function CastPage(props) {
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3(CastList, {
             view,
-            onOpen: (entity2) => pages.open(entity2)
+            onOpen: (entity2) => pages2.open(entity2)
           }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this),
@@ -76185,7 +76193,7 @@ function CastPage(props) {
         connections,
         patch,
         onCast: setView,
-        onBack: pages.back
+        onBack: pages2.back
       }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
@@ -76530,7 +76538,7 @@ function NotebookPage(props) {
   const app = useApp();
   const [files, setFiles] = d2(null);
   const [failed2, setFailed] = d2(null);
-  const pages = usePages();
+  const pages2 = usePages();
   const dirty = T2(false);
   const read = async () => {
     const listed5 = await props.files.list(props.chatId, "author/");
@@ -76549,7 +76557,7 @@ function NotebookPage(props) {
     if (dirty.current && !await app.host.confirm("Leave without saving?", "What you typed in this page isn't saved.", "warning", "Leave"))
       return;
     dirty.current = false;
-    pages.back();
+    pages2.back();
   };
   if (failed2 !== null) {
     return /* @__PURE__ */ u3(Empty, {
@@ -76567,19 +76575,19 @@ function NotebookPage(props) {
       icon: "hourglass",
       children: "Reading the notebook…"
     }, undefined, false, undefined, this);
-  const open = pages.page;
+  const open = pages2.page;
   return /* @__PURE__ */ u3("div", {
-    ref: pages.host.ref,
+    ref: pages2.host.ref,
     class: "lre-gm-pages lre-story-page",
     "data-lre-story-page": "notebook",
-    onKeyDown: pages.host.onKeyDown,
+    onKeyDown: pages2.host.onKeyDown,
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-stack lre-gm-list",
         hidden: open !== null,
         children: /* @__PURE__ */ u3(NotebookList, {
           files,
-          onOpen: (path2) => pages.open(path2)
+          onOpen: (path2) => pages2.open(path2)
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
       open !== null ? /* @__PURE__ */ u3(GmPage, {
@@ -77028,8 +77036,8 @@ function waitingOf(state) {
 var NO_STATE = { get: () => null, subscribe: () => () => {
   return;
 } };
-function useWaiting(pages) {
-  return useSelect(pages?.app.client.state ?? NO_STATE, waitingOf);
+function useWaiting(pages2) {
+  return useSelect(pages2?.app.client.state ?? NO_STATE, waitingOf);
 }
 function HarnessReach(props) {
   if (props.pages === null)
@@ -81897,16 +81905,16 @@ function foundView(found, props) {
       children: query !== "" ? `No text matches “${query}”${among}.` : props.filter === "fix" ? "None of your own texts needs a fix." : "No texts of your own yet: every text is as shipped."
     }, undefined, false, undefined, this);
   }
-  const pages = byPage(found);
+  const pages2 = byPage(found);
   return /* @__PURE__ */ u3(M, {
     children: [
       /* @__PURE__ */ u3("p", {
         class: "lre-minds-note",
         "aria-hidden": "true",
         "data-lre-prompts-found": found.length,
-        children: `${textsWord(found.length)} found, on ${pages.length === 1 ? "1 page" : `${pages.length} pages`}.`
+        children: `${textsWord(found.length)} found, on ${pages2.length === 1 ? "1 page" : `${pages2.length} pages`}.`
       }, undefined, false, undefined, this),
-      pages.map((p3) => textGroup({ key: `found/${p3.page.id}`, title: p3.page.label, defs: p3.defs, only: pages.length === 1, where: true }, props))
+      pages2.map((p3) => textGroup({ key: `found/${p3.page.id}`, title: p3.page.label, defs: p3.defs, only: pages2.length === 1, where: true }, props))
     ]
   }, undefined, true, undefined, this);
 }
@@ -83455,12 +83463,12 @@ function ModeBody(props) {
 function Drawer(props) {
   const app = useApp();
   const chosen = useUi((ui) => ui.mode);
-  const pages = props.harness ?? null;
+  const pages2 = props.harness ?? null;
   const harness = useSelect(app.sync, harnessChat);
-  const offered = pages !== null && harnessOffered(harness, chosen);
+  const offered = pages2 !== null && harnessOffered(harness, chosen);
   const mode = shownMode(chosen, offered);
   const modes = drawerModes(offered);
-  const waiting = useWaiting(pages);
+  const waiting = useWaiting(pages2);
   A(() => {
     if (chosen === HARNESS_MODE.id && !offered)
       app.ui.update((ui) => ui.mode === HARNESS_MODE.id ? { ...ui, mode: "play" } : ui);
@@ -83565,11 +83573,11 @@ function Drawer(props) {
         role: "tabpanel",
         "aria-labelledby": `${bodyId}-tab-${mode}`,
         children: /* @__PURE__ */ u3(HarnessReach, {
-          pages,
+          pages: pages2,
           children: /* @__PURE__ */ u3(ModeBody, {
             mode,
-            harness: pages !== null ? /* @__PURE__ */ u3(HarnessTab, {
-              pages
+            harness: pages2 !== null ? /* @__PURE__ */ u3(HarnessTab, {
+              pages: pages2
             }, undefined, false, undefined, this) : null
           }, undefined, false, undefined, this)
         }, undefined, false, undefined, this)
@@ -86169,13 +86177,13 @@ function CastPanel(props) {
   }, undefined, true, undefined, this);
 }
 function YourGroups(props) {
-  const pages = isRecord(props.pages) ? props.pages : {};
+  const pages2 = isRecord(props.pages) ? props.pages : {};
   return /* @__PURE__ */ u3(Section, {
     title: "Your groups",
     flush: true,
     children: /* @__PURE__ */ u3(List, {
       children: props.groups.map((g2) => {
-        const page9 = pages[g2.id];
+        const page9 = pages2[g2.id];
         const titled = isRecord(page9) && isRecord(page9.you) && typeof page9.you.title === "string" && page9.you.title !== "" ? page9.you.title : null;
         return /* @__PURE__ */ u3(ListRow, {
           id: g2.id,
@@ -86350,10 +86358,10 @@ function classLabel(view, facetId, valueId) {
     parts.unshift(v7.label);
   return parts.join(" › ") || valueId;
 }
-function personOrgs(pages, who3) {
-  if (!isRecord(pages))
+function personOrgs(pages2, who3) {
+  if (!isRecord(pages2))
     return [];
-  return Object.values(pages).flatMap((page9) => {
+  return Object.values(pages2).flatMap((page9) => {
     if (!isRecord(page9) || typeof page9.id !== "string")
       return [];
     const them = list(page9.people, (p3) => p3.id === who3 ? p3 : null)[0];
@@ -86606,8 +86614,8 @@ function None(props) {
 function GmRoutinesSection(props) {
   const app = useApp();
   const worldId = useView()?.worldId ?? null;
-  const pages = usePages();
-  useGmFocus((id) => pages.open(id));
+  const pages2 = usePages();
+  useGmFocus((id) => pages2.open(id));
   const [query, setQuery] = d2("");
   const [filter, setFilter] = d2("");
   const [changed, setChanged] = d2(null);
@@ -86624,19 +86632,19 @@ function GmRoutinesSection(props) {
   const ctx = { chatId: props.chatId, gm: props.gm, reloadKey: props.reloadKey, busy: props.busy, send: props.send, edit: props.edit };
   const roles = routineSettingsOf(useChatWorld(props.send) ?? {}).roles;
   const rows2 = routineRows(props.gm.minds.characters, props.gm.entities, changed ?? [], roles);
-  const page9 = pages.page;
+  const page9 = pages2.page;
   const selected = page9 === null ? undefined : rows2.find((r3) => r3.entity === page9);
   A(() => {
     if (page9 !== null && selected === undefined)
-      pages.back();
+      pages2.back();
   });
   const q2 = query.trim().toLowerCase();
   const list2 = rows2.filter((r3) => (filter === "" || (filter === "changed" ? r3.changed !== null : r3.binding === filter)) && (q2 === "" || r3.name.toLowerCase().includes(q2)));
   const changedCount2 = rows2.filter((r3) => r3.changed !== null).length;
   return /* @__PURE__ */ u3("div", {
-    ref: pages.host.ref,
+    ref: pages2.host.ref,
     class: "lre-gm-pages",
-    onKeyDown: pages.host.onKeyDown,
+    onKeyDown: pages2.host.onKeyDown,
     "data-lre-gm-section": "routines",
     children: [
       /* @__PURE__ */ u3("div", {
@@ -86738,7 +86746,7 @@ function GmRoutinesSection(props) {
               children: "No one matches."
             }, undefined, false, undefined, this) : /* @__PURE__ */ u3(CharacterRows, {
               rows: list2,
-              onOpen: pages.open
+              onOpen: pages2.open
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this)
         ]
@@ -86747,7 +86755,7 @@ function GmRoutinesSection(props) {
         ctx,
         row: selected,
         summary: changed?.find((s3) => s3.entity === selected.entity),
-        onBack: pages.back
+        onBack: pages2.back
       }, selected.entity, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
@@ -97049,24 +97057,24 @@ function GmHub(props) {
   const { view, controls } = props;
   const app = useApp();
   const now = useView()?.hud?.clock.minutes ?? null;
-  const pages = usePageStack();
+  const pages2 = usePageStack();
   const [segment, setSegment] = d2("summary");
   const [filter, setFilter] = d2(ALL_ACTIVITY);
   const panelId = P2();
   const label = `${possessive2(view.name, view.partyKind === "household")} money`;
-  const top = pages.stack.length;
+  const top = pages2.stack.length;
   const elsewhere = (to) => {
     if ("org" in to)
       app.ui.update((ui) => to.org === null ? { ...ui, gm: { ...ui.gm, section: GM_ORGS } } : gmOpen(ui, GM_ORGS, to.org));
   };
   const navAt = (level) => {
-    const under3 = level >= 2 ? pages.stack[level - 2] : undefined;
-    return { page: pages.stack[level - 1] ?? null, open: pages.open, back: () => pages.backFrom(level), elsewhere, frame: "gm", backLabel: under3 ? pageLabel(view, under3) : label };
+    const under3 = level >= 2 ? pages2.stack[level - 2] : undefined;
+    return { page: pages2.stack[level - 1] ?? null, open: pages2.open, back: () => pages2.backFrom(level), elsewhere, frame: "gm", backLabel: under3 ? pageLabel(view, under3) : label };
   };
   return /* @__PURE__ */ u3("div", {
-    ref: pages.ref,
+    ref: pages2.ref,
     class: "lre-gm-pages lre-money-root",
-    onKeyDown: pages.onKeyDown,
+    onKeyDown: pages2.onKeyDown,
     "data-lre-gm-money": view.party,
     children: [
       /* @__PURE__ */ u3("div", {
@@ -97089,7 +97097,7 @@ function GmHub(props) {
           props.below
         ]
       }, undefined, true, undefined, this),
-      pages.stack.map((page9, i3) => /* @__PURE__ */ u3("div", {
+      pages2.stack.map((page9, i3) => /* @__PURE__ */ u3("div", {
         class: "lre-money-level",
         "data-lre-money-level": i3 + 1,
         hidden: i3 !== top - 1,
@@ -99463,8 +99471,8 @@ function PropertyHereSection(props) {
 
 // src/packs/economy/ui/sheet.tsx
 function orgMoney(state, org) {
-  const pages = state.panels[ORGS_ORG_PANEL];
-  const page9 = isRecord(pages) ? pages[org] : undefined;
+  const pages2 = state.panels[ORGS_ORG_PANEL];
+  const page9 = isRecord(pages2) ? pages2[org] : undefined;
   const sections = isRecord(page9) ? page9.sections : undefined;
   return isRecord(sections) ? decodeFinanceView(sections.money) : null;
 }
@@ -103401,8 +103409,8 @@ function RunEveryone(props) {
 }
 function GmMindsSection(props) {
   const view = props.gm.minds;
-  const pages = usePages();
-  useGmFocus((id) => pages.open(id));
+  const pages2 = usePages();
+  useGmFocus((id) => pages2.open(id));
   const [query, setQuery] = d2("");
   const [level, setLevel] = d2("");
   const picking = useSelection();
@@ -103422,22 +103430,22 @@ function GmMindsSection(props) {
     gm: props.gm
   };
   const liveNear = view.characters.filter((c3) => c3.fidelity.level === "live" || c3.fidelity.level === "near").length;
-  const page9 = pages.page;
+  const page9 = pages2.page;
   const selected = page9 === null ? undefined : view.characters.find((c3) => c3.entity === page9);
   const knower = view.knowledge.pov;
   const povKnows = knower !== null && page9 === knower.entity ? knower : undefined;
   A(() => {
     if (page9 !== null && selected === undefined && povKnows === undefined)
-      pages.back();
+      pages2.back();
   });
   const q2 = query.trim().toLowerCase();
   const list2 = view.characters.filter((c3) => (level === "" || c3.fidelity.level === level) && (q2 === "" || c3.name.toLowerCase().includes(q2)));
   const chosen = view.characters.filter((c3) => picking.ids.includes(c3.entity)).map((c3) => c3.entity);
   const secrecy = SECRECY[view.secrecy];
   return /* @__PURE__ */ u3("div", {
-    ref: pages.host.ref,
+    ref: pages2.host.ref,
     class: "lre-gm-pages",
-    onKeyDown: pages.host.onKeyDown,
+    onKeyDown: pages2.host.onKeyDown,
     "data-lre-gm-section": "minds",
     children: [
       /* @__PURE__ */ u3("div", {
@@ -103480,7 +103488,7 @@ function GmMindsSection(props) {
                 subtitle: "What they know; the player decides for them, so they have no mind",
                 value: `${knower.holdings.length} held`,
                 chevron: true,
-                onClick: () => pages.open(knower.entity)
+                onClick: () => pages2.open(knower.entity)
               }, undefined, false, undefined, this)
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this) : null,
@@ -103589,7 +103597,7 @@ function GmMindsSection(props) {
                     ]
                   }, undefined, true, undefined, this),
                   chevron: !picking.on,
-                  onClick: () => picking.on ? picking.toggle(c3.entity) : pages.open(c3.entity)
+                  onClick: () => picking.on ? picking.toggle(c3.entity) : pages2.open(c3.entity)
                 }, c3.entity, false, undefined, this))
               }, undefined, false, undefined, this)
             }, undefined, false, undefined, this)
@@ -103614,12 +103622,12 @@ function GmMindsSection(props) {
       selected ? /* @__PURE__ */ u3(CharacterPages2, {
         ctx,
         c: selected,
-        onBack: pages.back
+        onBack: pages2.back
       }, undefined, false, undefined, this) : null,
       povKnows ? /* @__PURE__ */ u3(KnowerPages, {
         ctx,
         who: { ...povKnows, witness: [] },
-        onBack: pages.back
+        onBack: pages2.back
       }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
@@ -105478,8 +105486,8 @@ function decodeOrgView(value) {
     nonprofit: value.nonprofit === true
   };
 }
-function decodeOrgPage(pages, id) {
-  const page9 = isRecord(pages) ? decodeOrgView(pages[id]) : null;
+function decodeOrgPage(pages2, id) {
+  const page9 = isRecord(pages2) ? decodeOrgView(pages2[id]) : null;
   return page9?.id === id ? page9 : null;
 }
 function row3(r3) {
@@ -107377,11 +107385,11 @@ function ComingUp(props) {
     }, undefined, false, undefined, this)
   }, undefined, false, undefined, this);
 }
-function needsYouOf(pages) {
-  if (!isRecord(pages))
+function needsYouOf(pages2) {
+  if (!isRecord(pages2))
     return [];
   const out = [];
-  for (const [org, page9] of Object.entries(pages)) {
+  for (const [org, page9] of Object.entries(pages2)) {
     if (!isRecord(page9) || !isRecord(page9.sections))
       continue;
     const name2 = typeof page9.name === "string" ? page9.name : org;
@@ -107431,10 +107439,10 @@ function OrgsGlanceCard(props) {
 }
 function OrgsGlance(props) {
   const app = useApp();
-  const pages = props.state.panels[ORGS_ORG_PANEL];
-  const needs = needsYouOf(pages);
+  const pages2 = props.state.panels[ORGS_ORG_PANEL];
+  const needs = needsYouOf(pages2);
   const party = decodeOrgList(props.view)?.party.id;
-  const page9 = party === undefined ? null : decodeOrgPage(pages, party);
+  const page9 = party === undefined ? null : decodeOrgPage(pages2, party);
   const line3 = page9 ? planGlanceLine(page9) : null;
   if (needs.length === 0 && line3 === null)
     return null;
@@ -108380,11 +108388,11 @@ function OrgSheet(props) {
     onSave: (name2) => act(ORG_ACTIONS.rename, { org: org.id, name: name2 }, () => setRenaming(false)),
     onCancel: () => setRenaming(false)
   }, undefined, false, undefined, this) : null;
-  const pages = new Map;
+  const pages2 = new Map;
   const pageOf2 = (id) => {
-    if (!pages.has(id))
-      pages.set(id, decodeOrgPage(props.state.panels[ORGS_ORG_PANEL], id));
-    return pages.get(id) ?? null;
+    if (!pages2.has(id))
+      pages2.set(id, decodeOrgPage(props.state.panels[ORGS_ORG_PANEL], id));
+    return pages2.get(id) ?? null;
   };
   return /* @__PURE__ */ u3(OrgPage, {
     org,
@@ -109652,12 +109660,12 @@ function GmOrgsSection(props) {
   const [person4, setPerson] = d2(null);
   const [tab, setTab] = d2("overview");
   const panelId = P2();
-  const pages = usePages();
+  const pages2 = usePages();
   const sheets = usePages();
   const openOrg = (id, at4 = null) => {
     setTab(at4 ?? "overview");
     sheets.back();
-    pages.open(id);
+    pages2.open(id);
   };
   useGmFocus((id) => {
     const target = orgRouteOf(id);
@@ -109666,11 +109674,11 @@ function GmOrgsSection(props) {
     else
       setPerson(id);
   });
-  const entry = pages.page === null ? null : orgs.find((o4) => o4.page.id === pages.page) ?? null;
+  const entry = pages2.page === null ? null : orgs.find((o4) => o4.page.id === pages2.page) ?? null;
   const personRef = person4 === null ? null : { id: person4, name: props.gm.entities.find((e3) => e3.id === person4)?.name ?? person4 };
   const back = () => {
     sheets.back();
-    pages.back();
+    pages2.back();
   };
   const open = (route) => {
     const target = route.kind === "org" ? orgRouteOf(route.id) : null;
@@ -109685,14 +109693,14 @@ function GmOrgsSection(props) {
       app.ui.update((ui) => pushSheet(ui, route));
   };
   return /* @__PURE__ */ u3("div", {
-    ref: pages.host.ref,
+    ref: pages2.host.ref,
     class: "lre-gm-pages",
-    onKeyDown: pages.host.onKeyDown,
+    onKeyDown: pages2.host.onKeyDown,
     "data-lre-gm-orgs": true,
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-stack lre-gm-list",
-        hidden: pages.page !== null,
+        hidden: pages2.page !== null,
         children: /* @__PURE__ */ u3(GmOrgsList, {
           orgs,
           query,
@@ -109704,7 +109712,7 @@ function GmOrgsSection(props) {
           onOpen: openOrg
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
-      pages.page !== null ? /* @__PURE__ */ u3("div", {
+      pages2.page !== null ? /* @__PURE__ */ u3("div", {
         class: "lre-gm-page",
         "data-lre-gm-page": "org",
         children: entry && state ? /* @__PURE__ */ u3("div", {
@@ -119629,7 +119637,7 @@ async function guardDraft(dirty, confirm, next) {
 }
 function WorkspaceSection(props) {
   const app = useApp();
-  const pages = usePages();
+  const pages2 = usePages();
   const [working, run] = useBusy();
   const [files, setFiles] = d2(null);
   const [session, setSession] = d2(undefined);
@@ -119653,7 +119661,7 @@ function WorkspaceSection(props) {
       live = false;
     };
   }, workspaceReadKeys(props));
-  const page9 = pages.page;
+  const page9 = pages2.page;
   const onSession = page9 === SESSION_PAGE2;
   const selected = paneFile(page9, files, heldNote);
   const waiting = heldNote !== null && page9 === heldNote && selected?.hash === "";
@@ -119661,7 +119669,7 @@ function WorkspaceSection(props) {
   const dirty = typeof text4 === "string" && draft2 !== text4;
   A(() => {
     if (page9 !== null && !onSession && files !== null && selected === undefined)
-      pages.back();
+      pages2.back();
     if (heldNote !== null && files?.some((f3) => f3.path === heldNote))
       setHeldNote(null);
   });
@@ -119681,7 +119689,7 @@ function WorkspaceSection(props) {
         return;
       if (read === undefined) {
         if (held === null)
-          pages.back();
+          pages2.back();
         return;
       }
       setOpened({ path: page9, text: read });
@@ -119700,7 +119708,7 @@ function WorkspaceSection(props) {
   };
   const open = (next) => {
     if (next !== page9)
-      leave(() => pages.open(next));
+      leave(() => pages2.open(next));
   };
   const busy = props.busy || working;
   const paths = (files ?? []).map((f3) => f3.path);
@@ -119720,15 +119728,15 @@ function WorkspaceSection(props) {
     onDeleted: () => {
       setOpened(null);
       setDraft("");
-      pages.back();
+      pages2.back();
     },
-    onBack: () => leave(pages.back)
+    onBack: () => leave(pages2.back)
   }, undefined, false, undefined, this) : onSession ? /* @__PURE__ */ u3(GmPage, {
     name: "workspace-session",
     title: "The main agent's session",
     subtitle: "What it holds, and what of it the main agent is sent",
     backLabel: "Workspace",
-    onBack: pages.back,
+    onBack: pages2.back,
     children: /* @__PURE__ */ u3(SessionPanel, {
       session,
       busy,
@@ -119759,7 +119767,7 @@ function WorkspaceSection(props) {
           setHeldNote(heldCreate(path2, result));
           setOpened({ path: path2, text: "" });
           setDraft("");
-          pages.open(path2);
+          pages2.open(path2);
         });
         if (made)
           setDialog(null);
@@ -119769,7 +119777,7 @@ function WorkspaceSection(props) {
       run(async () => {
         const moved2 = await controls.move(from, state.value, () => {
           setOpened((o4) => o4 === null ? null : { path: state.value, text: o4.text });
-          pages.open(state.value);
+          pages2.open(state.value);
         });
         if (moved2)
           setDialog(null);
@@ -119780,16 +119788,16 @@ function WorkspaceSection(props) {
     class: "lre-ws-wrap",
     children: [
       /* @__PURE__ */ u3("div", {
-        ref: pages.host.ref,
+        ref: pages2.host.ref,
         class: page9 !== null ? "lre-gm-pages lre-ws has-preview" : "lre-gm-pages lre-ws",
         onKeyDown: (event) => {
           if (event.key === "Escape" && dirty && page9 !== null && !event.defaultPrevented) {
             event.preventDefault();
             event.stopPropagation();
-            leave(pages.back);
+            leave(pages2.back);
             return;
           }
-          pages.host.onKeyDown(event);
+          pages2.host.onKeyDown(event);
         },
         "data-lre-gm-section": "workspace",
         children: [
@@ -121080,24 +121088,24 @@ function PlaceEntryPage(props) {
 }
 function PlacesSection(props) {
   const { editor } = props;
-  const pages = usePages();
+  const pages2 = usePages();
   const [draft2, setDraft] = d2(null);
-  const open = pages.page === null ? undefined : editor.gm.places.find((p3) => p3.id === pages.page);
+  const open = pages2.page === null ? undefined : editor.gm.places.find((p3) => p3.id === pages2.page);
   const entry = open?.entry;
   const current2 = entry && draft2?.place === entry.id ? draft2 : entry ? entryDraft(entry) : null;
   return /* @__PURE__ */ u3("div", {
-    ref: pages.host.ref,
+    ref: pages2.host.ref,
     class: "lre-gm-pages",
-    onKeyDown: pages.host.onKeyDown,
+    onKeyDown: pages2.host.onKeyDown,
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-stack lre-gm-list",
-        hidden: pages.page !== null,
+        hidden: pages2.page !== null,
         children: /* @__PURE__ */ u3(PlacesList, {
           gm: editor.gm,
           onOpen: (id) => {
             setDraft(null);
-            pages.open(id);
+            pages2.open(id);
           }
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
@@ -121112,7 +121120,7 @@ function PlacesSection(props) {
           if (ops.length > 0)
             editor.edit(ops).then((ok) => ok && setDraft(null));
         },
-        onBack: pages.back
+        onBack: pages2.back
       }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
@@ -122127,7 +122135,7 @@ function GmAddThing(props) {
 function ThingsSection(props) {
   const app = useApp();
   const { editor, chatId } = props;
-  const pages = usePages();
+  const pages2 = usePages();
   const { body, failed: failed2 } = useGmThings(chatId, { op: "list" }, editor.reloadKey);
   const [view, setView] = d2("here");
   const [query, setQuery] = d2("");
@@ -122160,7 +122168,7 @@ function ThingsSection(props) {
   const names = b2(() => new Map((list2?.rows ?? []).map((r3) => [r3.id, r3.name])), [list2]);
   const sections = b2(() => list2 ? placeSections(list2.rows) : [], [list2]);
   const hereAt = b2(() => list2 && here?.here ? hereSections(list2.rows, here.here) : [], [list2, here]);
-  const page9 = pages.page;
+  const page9 = pages2.page;
   const toggle = (set, id) => {
     const next = new Set(set);
     if (next.has(id))
@@ -122169,7 +122177,7 @@ function ThingsSection(props) {
       next.add(id);
     return next;
   };
-  const openThing = (id) => pages.open({ thing: id });
+  const openThing = (id) => pages2.open({ thing: id });
   const openPerson = (id) => app.ui.update((ui) => gmOpen(ui, "world", id));
   const ownersOpen = owners ?? new Set([editor.gm.entities.find((e3) => e3.pov)?.id ?? ""]);
   const results = found && found.words === words3 ? found.ids.flatMap((id) => rows2.get(id) ?? []) : null;
@@ -122200,9 +122208,9 @@ function ThingsSection(props) {
     });
   };
   return /* @__PURE__ */ u3("div", {
-    ref: pages.host.ref,
+    ref: pages2.host.ref,
     class: "lre-gm-pages",
-    onKeyDown: pages.host.onKeyDown,
+    onKeyDown: pages2.host.onKeyDown,
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-stack lre-gm-list lre-gm-things",
@@ -122422,7 +122430,7 @@ function ThingsSection(props) {
         id: page9.thing,
         editor,
         backLabel: "Things",
-        onBack: pages.back,
+        onBack: pages2.back,
         onOpen: (id) => isThingKind(editor.gm.kinds, editor.gm.entities.find((e3) => e3.id === id)?.kind ?? "") ? openThing(id) : openPerson(id)
       }, page9.thing, false, undefined, this) : null
     ]
@@ -124311,18 +124319,18 @@ function WorldSection(props) {
   const { editor } = props;
   const [query, setQuery] = d2("");
   const [kind, setKind] = d2("");
-  const pages = usePages();
-  useGmFocus((id) => pages.open({ entity: id }));
+  const pages2 = usePages();
+  useGmFocus((id) => pages2.open({ entity: id }));
   const selection = useSelection();
   const fight = editor.gm.encounter === null ? null : decodeEncounterView(editor.gm.encounter);
   const turn = fight === null ? "" : fight.yours ? "Your turn" : `${fight.turn.charAt(0).toUpperCase()}${fight.turn.slice(1)}'s turn`;
-  const page9 = pages.page;
+  const page9 = pages2.page;
   const entity2 = page9 !== null && typeof page9 === "object" ? editor.gm.entities.find((e3) => e3.id === page9.entity) : undefined;
   const chosen = editor.gm.entities.filter((e3) => selection.ids.includes(e3.id)).map((e3) => e3.id);
   const open = page9 === "spawn" || page9 === "fight" && fight !== null || page9 === "batch" && chosen.length > 0 || entity2 !== undefined;
   A(() => {
     if (page9 !== null && !open)
-      pages.back();
+      pages2.back();
   });
   const opened = entity2?.id ?? null;
   const person4 = entity2?.person === true;
@@ -124334,9 +124342,9 @@ function WorldSection(props) {
   const claimed = claimedThings(editor.gm);
   const levels = new Map(editor.gm.minds.characters.map((c3) => [c3.entity, FIDELITY_LABEL[c3.fidelity.level]]));
   return /* @__PURE__ */ u3("div", {
-    ref: pages.host.ref,
+    ref: pages2.host.ref,
     class: "lre-gm-pages",
-    onKeyDown: pages.host.onKeyDown,
+    onKeyDown: pages2.host.onKeyDown,
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-stack lre-gm-list",
@@ -124345,7 +124353,7 @@ function WorldSection(props) {
           fight ? /* @__PURE__ */ u3(FightCard, {
             fight,
             turn,
-            onOpen: () => pages.open("fight")
+            onOpen: () => pages2.open("fight")
           }, undefined, false, undefined, this) : null,
           claimed.length > 0 ? /* @__PURE__ */ u3(Section, {
             title: "Claimed by the player",
@@ -124361,7 +124369,7 @@ function WorldSection(props) {
                     entity: e3
                   }, undefined, false, undefined, this),
                   chevron: true,
-                  onClick: () => pages.open({ entity: e3.id })
+                  onClick: () => pages2.open({ entity: e3.id })
                 }, e3.id, false, undefined, this))
               }, undefined, false, undefined, this)
             }, undefined, false, undefined, this)
@@ -124404,7 +124412,7 @@ function WorldSection(props) {
               }, undefined, true, undefined, this),
               /* @__PURE__ */ u3(Button, {
                 icon: "user-plus",
-                onClick: () => pages.open("spawn"),
+                onClick: () => pages2.open("spawn"),
                 children: "Spawn"
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3(Button, {
@@ -124436,7 +124444,7 @@ function WorldSection(props) {
                     entity: e3
                   }, undefined, false, undefined, this),
                   chevron: !selection.on,
-                  onClick: () => selection.on ? selection.toggle(e3.id) : pages.open({ entity: e3.id })
+                  onClick: () => selection.on ? selection.toggle(e3.id) : pages2.open({ entity: e3.id })
                 }, e3.id, false, undefined, this))
               }, undefined, false, undefined, this)
             }, undefined, false, undefined, this)
@@ -124452,7 +124460,7 @@ function WorldSection(props) {
               variant: "primary",
               icon: "edit",
               disabled: chosen.length === 0 || editor.busy,
-              onClick: () => pages.open("batch"),
+              onClick: () => pages2.open("batch"),
               children: chosen.length === 1 ? "Change 1…" : `Change ${chosen.length}…`
             }, undefined, false, undefined, this)
           }, undefined, false, undefined, this) : /* @__PURE__ */ u3(BuildLink, {}, undefined, false, undefined, this)
@@ -124460,14 +124468,14 @@ function WorldSection(props) {
       }, undefined, true, undefined, this),
       page9 === "spawn" ? /* @__PURE__ */ u3(SpawnPage, {
         editor,
-        onBack: pages.back
+        onBack: pages2.back
       }, undefined, false, undefined, this) : null,
       page9 === "fight" && fight ? /* @__PURE__ */ u3(GmPage, {
         name: "fight",
         title: "Fight",
         subtitle: `Round ${fight.round} · ${turn}`,
         backLabel: "World",
-        onBack: pages.back,
+        onBack: pages2.back,
         children: /* @__PURE__ */ u3(EncounterCard, {
           view: fight
         }, undefined, false, undefined, this)
@@ -124476,7 +124484,7 @@ function WorldSection(props) {
         name: "loading",
         title: entity2.name,
         backLabel: "World",
-        onBack: pages.back,
+        onBack: pages2.back,
         children: /* @__PURE__ */ u3(Empty, {
           icon: "hourglass",
           children: "Loading…"
@@ -124485,25 +124493,25 @@ function WorldSection(props) {
         entity: entity2,
         editor,
         chatId: props.chatId,
-        onBack: pages.back,
-        onOpen: (id) => pages.open({ entity: id })
+        onBack: pages2.back,
+        onOpen: (id) => pages2.open({ entity: id })
       }, undefined, false, undefined, this) : isThingKind(editor.gm.kinds, entity2.kind) && !entity2.gone ? /* @__PURE__ */ u3(GmThingPage, {
         chatId: props.chatId,
         id: entity2.id,
         editor,
         backLabel: "World",
-        onBack: pages.back,
-        onOpen: (id) => pages.open({ entity: id })
+        onBack: pages2.back,
+        onOpen: (id) => pages2.open({ entity: id })
       }, entity2.id, false, undefined, this) : /* @__PURE__ */ u3(EntityPage, {
         entity: entity2,
         editor,
-        onBack: pages.back
+        onBack: pages2.back
       }, undefined, false, undefined, this) : null,
       page9 === "batch" && chosen.length > 0 ? editor.gm.entities.some((e3) => thinEntity(e3) && chosen.includes(e3.id)) ? /* @__PURE__ */ u3(GmPage, {
         name: "loading",
         title: chosen.length === 1 ? "Change 1 selected" : `Change ${chosen.length} selected`,
         backLabel: "World",
-        onBack: pages.back,
+        onBack: pages2.back,
         children: /* @__PURE__ */ u3(Empty, {
           icon: "hourglass",
           children: "Loading…"
@@ -124511,7 +124519,7 @@ function WorldSection(props) {
       }, undefined, false, undefined, this) : /* @__PURE__ */ u3(BatchPage, {
         editor,
         ids: chosen,
-        onBack: pages.back
+        onBack: pages2.back
       }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
