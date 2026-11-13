@@ -99022,7 +99022,7 @@ var package_default = {
     typescript: "7.0.2"
   },
   dependencies: {
-    "lumi-ah": "github:TheLiquorPriest/LumiAH#5dbcf44fd9fb552ca7516670093b3da0c7890323",
+    "lumi-ah": "github:TheLiquorPriest/LumiAH#6a38779a5e33fe563f0c8c617640343473617569",
     preact: "^11.0.1"
   }
 };
@@ -99030,7 +99030,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "c343370a";
+var BUILD = "71e30e33";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

@@ -115374,9 +115374,9 @@ function thisBuild(moduleUrl = import.meta.url) {
   const dir = moduleUrl.replace(/[^/]*$/, "");
   const path2 = pathOfFileUrl(`${dir}${KIT_FILE}`);
   const core = pathOfFileUrl(`${dir}${CORE_FILE}`);
-  const sha256 = "9e4827316fbed1b432ec833233bbb884ead33f186e8e9686b8a3f96547f17718";
+  const sha256 = "637b5c6493b134dc6b159d112aff1d8eb01eb979cdd7a96fa1d1caa5bc06c235";
   const tools = ["5db39011b1a09652e3360031f99d4092", "b2101fc2b5d70b51c9dccdfef28a3f73"].filter((f) => f !== undefined);
-  return { id: "c343370a", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
+  return { id: "71e30e33", kit: sha256 !== undefined && path2 !== null && core !== null ? { path: path2, core, sha256, api: KIT_API } : null, tools };
 }
 var BUILD_FILE = "agents/build.json";
 var USER_FILE = "agents.json";
@@ -149764,7 +149764,7 @@ class Runtime {
   foldOf(userId) {
     let fold = this.folds.get(userId);
     if (!fold) {
-      fold = new LedgerFold(this.registry, { fingerprint: "c343370a", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
+      fold = new LedgerFold(this.registry, { fingerprint: "71e30e33", keep: () => this.settings.known(userId)?.agents.kept.folds ?? KEPT_FOLDS_DEFAULT });
       this.folds.set(userId, fold);
     }
     return fold;
@@ -164870,8 +164870,8 @@ function createSpindleHost(identifier = EXTENSION_IDENTIFIER) {
 var NAME = "LumiRPEngine";
 var SETTINGS_AT = `${NAME}'s Harness tab \u2192 System \u2192 Settings`;
 var STORAGE = "harness";
-var BUILD = "c343370a";
-var RUNTIME_SHA256 = "c2a79eaba4291760561f7b284908a461145480a1a13dc36dbba4a200569e0e26";
+var BUILD = "71e30e33";
+var RUNTIME_SHA256 = "6a62a7e42f7e5940b0d81ed5871e1d8877f823b5137aba9286a7fa9b8c464864";
 var RUNTIME_SIZE = "4680613";
 var TICK_MS = 1000;
 var MOUNT_SESSION = "lre-harness-mount";
