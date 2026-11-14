@@ -1,0 +1,214 @@
+// The story record (plan §8.1): the Author's understanding of the story, as items of eleven parts.
+// Every write is a row of the item it touches, tied to the turn that wrote it, holding only what that
+// write said. An item as it stands is its rows on the reading's path, merged in order; its history is
+// those rows. Code merges and counts; it never judges what an item says.
+//
+// Where an item stands in the chat comes from the records alone: a beat lies at the message it names,
+// or at its turn's reply; a scene or a chapter runs from the message it names, or from the first
+// message its opening turn answered, to the message it names, or its closing turn's reply, and never
+// past the start of the next one.
+
+import type { Database } from "bun:sqlite";
+import type { JsonObject, JsonValue } from "rp-harness/contract";
+import type { StoryAt } from "./path";
+
+/** The parts of the record, as the plan names them (§8.1). */
+export const STORY_PARTS = ["premise", "chapter", "scene", "beat", "thread", "arc", "player", "future", "canon", "retcon", "record"] as const;
+export type StoryPart = (typeof STORY_PARTS)[number];
+
+/** The parts of the timeline that span messages. */
+export type SpanPart = "chapter" | "scene";
+
+/** What an item's id starts with, so that an id says its part. */
+const PREFIX: Readonly<Record<StoryPart, string>> = { premise: "premise", chapter: "ch", scene: "sc", beat: "b", thread: "th", arc: "arc", player: "pm", future: "fu", canon: "ca", retcon: "rc", record: "rec" };
+
+/** One write of an item, as stored. */
+export interface StoryRow {
+  id: number;
+  turn: string;
+  ord: number;
+  part: StoryPart;
+  item: string;
+  /** What this write said: the fields it set, `close` and `drop` among them. */
+  value: JsonObject;
+  /** The agent's definition that wrote it, or the player. */
+  by: string | null;
+  /** The agent's handle in its run. */
+  agent: string | null;
+  job: string | null;
+  created: number;
+}
+
+/** An item as it stands on a path. */
+export interface StoryItem {
+  part: StoryPart;
+  id: string;
+  /** Every field its writes set, the latest of each. */
+  fields: JsonObject;
+  /** The turn that first wrote it, and the one that wrote it last. */
+  opened: string;
+  touched: string;
+  /** The turn whose write closed it; null while it is open. */
+  closedBy: string | null;
+  dropped: boolean;
+  /** Its writes on the path, oldest first. */
+  rows: StoryRow[];
+}
+
+/** Messages by number, both ends kept; an end is null where the record cannot place it. */
+export interface Span {
+  from: number | null;
+  to: number | null;
+}
+
+interface RowDb {
+  id: number;
+  turn: string;
+  ord: number;
+  part: string;
+  item: string;
+  value: string;
+  by: string | null;
+  agent: string | null;
+  job: string | null;
+  created: number;
+}
+
+/** The record as one reading sees it. */
+export class StoryRecord {
+  readonly items = new Map<string, StoryItem>();
+
+  constructor(readonly at: StoryAt) {}
+
+  /** The record at `at`: the rows of the turns on its path, in the path's order. */
+  static read(db: Database, user: string, at: StoryAt): StoryRecord {
+    const rows = db
+      .query<RowDb, [string, string]>("SELECT * FROM story_entry WHERE user = ?1 AND turn IN (SELECT value FROM json_each(?2))")
+      .all(user, JSON.stringify(at.turns))
+      .sort((a, b) => (at.order.get(a.turn) ?? 0) - (at.order.get(b.turn) ?? 0) || a.ord - b.ord);
+    const record = new StoryRecord(at);
+    for (const r of rows) record.apply({ ...r, part: r.part as StoryPart, value: JSON.parse(r.value) as JsonObject });
+    return record;
+  }
+
+  /** Merges one write in: the item's fields, whether it is closed or dropped, and when it was touched. */
+  apply(row: StoryRow): StoryItem {
+    let item = this.items.get(row.item);
+    if (item === undefined) {
+      item = { part: row.part, id: row.item, fields: {}, opened: row.turn, touched: row.turn, closedBy: null, dropped: false, rows: [] };
+      this.items.set(row.item, item);
+    }
+    for (const [key, value] of Object.entries(row.value)) {
+      if (key === "close") item.closedBy = value === true ? row.turn : null;
+      else if (key === "drop") item.dropped = value === true;
+      else item.fields[key] = value;
+    }
+    item.touched = row.turn;
+    item.rows.push(row);
+    return item;
+  }
+
+  /** A part's items in the order they were first written; those dropped only when asked. */
+  of(part: StoryPart, dropped = false): StoryItem[] {
+    return [...this.items.values()].filter((i) => i.part === part && (dropped || !i.dropped));
+  }
+
+  /** The number of the message a field holds the id of; null when it holds none or it is not on the chat's path. */
+  numberOf(field: JsonValue | undefined): number | null {
+    return typeof field === "string" ? this.at.number(field) : null;
+  }
+
+  /** Where a beat lies: the message it names, or its turn's reply. */
+  beatAt(beat: StoryItem): number | null {
+    return beat.fields.message !== undefined ? this.numberOf(beat.fields.message) : this.at.replyOf(beat.opened);
+  }
+
+  /** Where a scene or a chapter starts: the message it names, or the first message its opening turn answered. */
+  startOf(item: StoryItem): number | null {
+    return item.fields.first !== undefined ? this.numberOf(item.fields.first) : this.at.startOf(item.opened);
+  }
+
+  /** Each scene's or chapter's messages (see the header), by id; dropped ones have none. */
+  spans(part: SpanPart): Map<string, Span> {
+    const known = this.of(part).map((item, made) => ({ item, made, from: this.startOf(item) }));
+    // Placed by where each starts, one that cannot be placed after every other; then by when it was made.
+    known.sort((a, b) => (a.from ?? Number.POSITIVE_INFINITY) - (b.from ?? Number.POSITIVE_INFINITY) || a.made - b.made);
+    const last = this.at.messages.length - 1;
+    const out = new Map<string, Span>();
+    known.forEach(({ item, from }, i) => {
+      if (from === null) {
+        out.set(item.id, { from: null, to: null });
+        return;
+      }
+      if (item.fields.last !== undefined) {
+        out.set(item.id, { from, to: this.numberOf(item.fields.last) });
+        return;
+      }
+      // One placed by the messages it names may start where this one does; the next to start later bounds it.
+      const next = known.slice(i + 1).find((k) => k.from !== null && k.from > from)?.from ?? null;
+      const stop = item.closedBy === null ? last : (this.at.replyOf(item.closedBy) ?? last);
+      out.set(item.id, { from, to: next === null ? stop : Math.min(stop, next - 1) });
+    });
+    return out;
+  }
+
+  /** The scene or chapter the chat is in now: the one that starts last, one still being placed counting as last. Null when there is none. */
+  current(part: SpanPart): StoryItem | null {
+    let best: { item: StoryItem; from: number } | null = null;
+    for (const item of this.of(part)) {
+      const from = this.startOf(item) ?? Number.POSITIVE_INFINITY;
+      if (best === null || from >= best.from) best = { item, from };
+    }
+    return best?.item ?? null;
+  }
+}
+
+/** One write a call asks for: of an item already there (`item`), or of a new one (`item` null). */
+export interface StoryWrite {
+  part: StoryPart;
+  item: string | null;
+  value: JsonObject;
+}
+
+/** Who writes, on which turn, and when. */
+export interface StoryWriter {
+  user: string;
+  turn: string;
+  by: string | null;
+  agent: string | null;
+  job: string | null;
+  now: number;
+}
+
+/** The id a new item of `part` is given from its first row's id. */
+export function newItemId(part: StoryPart, row: number): string {
+  return `${PREFIX[part]}-${row}`;
+}
+
+/** A name as the record compares names: trimmed, spaces folded, case ignored. */
+export function nameKey(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** The id of the one item of a part there is per key: the premise, a person's arc, a turn's record. */
+export function keyedItemId(part: "premise" | "arc" | "record", key: string): string {
+  return part === "premise" ? PREFIX.premise : `${PREFIX[part]}:${nameKey(key)}`;
+}
+
+/**
+ * Records `writes` on the writer's turn, in order, inside the caller's queued write: the rows as
+ * stored, a new item's id given from its first row.
+ */
+export function writeStory(db: Database, writer: StoryWriter, writes: readonly StoryWrite[]): StoryRow[] {
+  let ord = (db.query<{ n: number | null }, [string, string]>("SELECT max(ord) AS n FROM story_entry WHERE user = ? AND turn = ?").get(writer.user, writer.turn)?.n ?? -1) + 1;
+  const put = db.query<unknown, [string, string, number, string, string, string, string | null, string | null, string | null, number]>(
+    "INSERT INTO story_entry (user, turn, ord, part, item, value, by, agent, job, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  );
+  const name = db.query<unknown, [string, number]>("UPDATE story_entry SET item = ? WHERE id = ?");
+  return writes.map((w) => {
+    const id = Number(put.run(writer.user, writer.turn, ord, w.part, w.item ?? "", JSON.stringify(w.value), writer.by, writer.agent, writer.job, writer.now).lastInsertRowid);
+    const item = w.item ?? newItemId(w.part, id);
+    if (w.item === null) name.run(item, id);
+    return { id, turn: writer.turn, ord: ord++, part: w.part, item, value: w.value, by: writer.by, agent: writer.agent, job: writer.job, created: writer.now };
+  });
+}
