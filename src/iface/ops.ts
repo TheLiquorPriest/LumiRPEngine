@@ -23,8 +23,10 @@ export interface OpContext {
   draft: Draft;
   reply: Reply;
   call: Call;
-  /** The draft as it stands when the operation starts. */
+  /** The draft as it stands when the operation starts, read again once it has made a thing it names. */
   reading: Reading;
+  /** The operations after it in the call, as sent: a name one of them spawns is theirs to make. */
+  later: readonly JsonObject[];
   /** Adds to the operation's entry in the answer, from the state as recorded (what a span of time brings due). */
   after(add: (state: StoreState) => JsonObject): void;
 }

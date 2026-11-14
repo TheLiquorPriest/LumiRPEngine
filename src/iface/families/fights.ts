@@ -1,7 +1,7 @@
 // Fights (the skill `combat`): an encounter started with its foes, read, and ended, as today's fight
 // tools do through the combat pack (`packs/combat`): its effects start and end an encounter, the
 // initiative it rolls sets the order, and a world rule hears both. Nothing here rolls or rules. A
-// fight started while one is on, or ended when none is, changes nothing and is reported.
+// fight started while one is on, or ended when none is, changes nothing and the answer says so.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { applyEffects } from "../../engine/effects";
@@ -52,7 +52,7 @@ const start: WriteDef = {
     const from = w.events.length;
     o.after(fightAfter(o));
     if (encounterOf(w.state) !== null) {
-      o.reply.report("already_so", { n: o.n, op: o.op, what: named(o.reading, pov) });
+      o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, pov) });
       o.draft.record(o.n, o.op, "engine", o.prov, from);
       return undefined;
     }
@@ -82,7 +82,7 @@ const end: WriteDef = {
     const from = w.events.length;
     o.after(fightAfter(o));
     if (encounterOf(w.state) === null) {
-      o.reply.report("already_so", { n: o.n, op: o.op, what: named(o.reading, w.world.pov) });
+      o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, w.world.pov) });
       o.draft.record(o.n, o.op, "engine", o.prov, from);
       return undefined;
     }

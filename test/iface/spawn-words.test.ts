@@ -50,7 +50,8 @@ describe("spawn somewhere given in words", () => {
     wordsFromFiles(r);
     const kitchen = String(entityNamed(t, "Ida Pell").fields.place);
     const shed = String(entityNamed(t, "Ada Lorne").fields.place);
-    expect(r.reports).toEqual([
+    expect(r.reports).toBeUndefined();
+    expect(texts(r).filter((x) => x.includes("nothing goes by"))).toEqual([
       `Operation 5 (spawn): nothing goes by peg by the stove, so Wet coat was made at Keeper's kitchen [${kitchen}], and those words are kept on it as where it was said to be.`,
       `Operation 6 (spawn): nothing goes by the hat box by the door, so Oilskin hat was made at Boat shed [${shed}], and those words are kept on it as where it was said to be.`,
     ]);

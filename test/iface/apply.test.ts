@@ -115,7 +115,8 @@ describe("a world with nothing in it", () => {
     // Made again, a place of that name in the same place stands for it, and no second one is made.
     const again = await t.call("world_apply", { operations: [{ op: "spawn", kind: "place", name: "Gull Skerry", source: src }] });
     expect(again.error).toBeUndefined();
-    expect((again.reports ?? []).some((x) => x.startsWith("Operation 1 (spawn): Gull Skerry") && x.includes("is there already"))).toBe(true);
+    expect(again.reports).toBeUndefined();
+    expect(texts(again).some((x) => x.startsWith("Operation 1 (spawn): Gull Skerry") && x.includes("is there already"))).toBe(true);
     const after = t.s.stateAt(t.turn.id).state;
     expect(Object.values(playedWorld(doc, after.world).places).filter((p) => p.name === "Gull Skerry")).toHaveLength(1);
   });

@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "rp-harness/contract";
 import type { WorldDoc } from "../../../src/shared/world";
 import { FIGHT_TOOLS } from "../../../src/iface/families/fights";
-import { dataOf } from "../rig";
+import { dataOf, saidNotReported } from "../rig";
 import { appliedInFull, descriptions, eachFoundByItsWords, familyRig, opOf, searchByWords, SRC, wordsFromFiles } from "./kit";
 
 const NAMES = FIGHT_TOOLS.map((t) => t.name);
@@ -50,13 +50,13 @@ describe("fights", () => {
     expect(t.s.changes(t.turn.id).length).toBeGreaterThan(changes);
   });
 
-  test("a fight started while one is on is applied as nothing and reported", async () => {
+  test("a fight started while one is on is applied as nothing and said, with no report", async () => {
     const t = await familyRig(fightWorld);
     await t.call("fight_start", { foes: ["wolf"], ...SRC });
     const changes = t.s.changes(t.turn.id).length;
     const again = await t.call("fight_start", { foes: ["wolf"], ...SRC });
     appliedInFull(again, "engine", false);
-    expect((again.reports ?? []).some((x) => x.includes("was already so"))).toBe(true);
+    saidNotReported(again, "was already so");
     expect(t.s.changes(t.turn.id).length).toBe(changes);
     expect((opOf(again).fight as JsonObject | null) !== null).toBe(true);
   });

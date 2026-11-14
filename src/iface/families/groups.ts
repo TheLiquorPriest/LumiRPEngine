@@ -2,7 +2,7 @@
 // founded, members admitted or removed, positions and titles, powers delegated, people hired, fired
 // and paid, shares, dues, rules, votes, a group wound up or merged), as today's `gm_org` sends it,
 // which the orgs pack compiles to the packs' own effects. Names in it are found as the call says
-// them. A change that is so already (a member admitted twice) changes nothing and is reported.
+// them. A change that is so already (a member admitted twice) changes nothing and the answer says so.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { hasOwn, isRecord } from "../../shared/json";
@@ -70,7 +70,7 @@ const org: WriteDef = {
     const refused = editChange(o, { op: "org", change: op });
     if (refused !== null) {
       if (!isAlready(refused.code)) return notApplicable(o, refused.code);
-      o.reply.report("already_so", { n: o.n, op: o.op, what: named(o.reading, typeof change.who === "string" ? change.who : typeof change.org === "string" ? change.org : o.op) });
+      o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, typeof change.who === "string" ? change.who : typeof change.org === "string" ? change.org : o.op) });
     }
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;

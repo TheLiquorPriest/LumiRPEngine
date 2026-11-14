@@ -101,7 +101,7 @@ Lane: engine. Needs: `what`, `to`, `how`. Takes its provenance.
 | `to` | text | move: the place. give: who receives it. pay: who is paid; leave it out for no one in the world. relate: whom they regard. |
 | `from` | text | give: who gives it. |
 | `how` | text | give: handed (to hold), lent, returned, given, sold, traded or stolen. Given, sold and traded change whose it is. |
-| `until` | text | give: when a loan ends. pass_time: the time to pass until. A date and time (YYYY-MM-DD HH:MM) or words (two days, until dawn). |
+| `until` | text | give: when a loan ends. pass_time: the time to pass until. A date and time (YYYY-MM-DD HH:MM), a time of day (midnight, dawn, 22:00: the next time the clock shows it), or words (two days). |
 | `why` | text | move, place, give, store, quest, relate: the reason, kept with the change. |
 
 Worked example:
@@ -238,7 +238,7 @@ Lane: engine. Takes its provenance.
 |---|---|---|
 | `minutes` | number | pass_time: how many minutes pass. |
 | `for` | text | pay: what the payment was for. pass_time: how long, in words (two hours). |
-| `until` | text | give: when a loan ends. pass_time: the time to pass until. A date and time (YYYY-MM-DD HH:MM) or words (two days, until dawn). |
+| `until` | text | give: when a loan ends. pass_time: the time to pass until. A date and time (YYYY-MM-DD HH:MM), a time of day (midnight, dawn, 22:00: the next time the clock shows it), or words (two days). |
 | `at` | text | place: the place. spawn: the place it is made at; for a place, the place it is inside. set: someone, something, a place, or world for the time. |
 
 Worked example:

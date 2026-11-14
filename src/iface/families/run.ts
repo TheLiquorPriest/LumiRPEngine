@@ -95,7 +95,7 @@ export function readTool(def: ReadDef): ToolSpec {
 
 // ---------------------------------------------------------------- today's engine, called
 
-/** The refusals that mean what was asked is so already: applied as nothing, and reported. */
+/** The refusals that mean what was asked is so already: applied as nothing, and said in the answer. */
 const ALREADY: Readonly<Record<string, true>> = { no_change: true, not_worn: true, already_lost: true, missing_relation: true, gone: true, not_gone: true, already_inside: true, not_inside: true, already_member: true, not_member: true };
 
 export function isAlready(code: string): boolean {
@@ -118,7 +118,7 @@ export function itemChange(o: OpContext, op: Exclude<ItemOp, { do: "remove" }>, 
   const from = w.events.length;
   const out = applyItemOp(w, op, itemOptions(o));
   if ("code" in out) {
-    if (isAlready(out.code)) o.reply.report("already_so", { n: o.n, op: o.op, what: named(o.reading, what) });
+    if (isAlready(out.code)) o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, what) });
     else {
       const bent = more.bend !== undefined ? more.bend(out.code) : null;
       if (bent !== undefined) return bent ?? notApplicable(o, out.code);
@@ -215,7 +215,7 @@ export function effectTool(def: EffectDef): ToolSpec {
       }
       const refused = effectChange(o, { type: def.effect, args });
       if (refused !== null) {
-        if (isAlready(refused.code)) o.reply.report("already_so", { n: o.n, op: o.op, what: what !== undefined ? named(o.reading, what) : o.op });
+        if (isAlready(refused.code)) o.reply.line("already_so", { n: o.n, op: o.op, what: what !== undefined ? named(o.reading, what) : o.op });
         else {
           const bent = def.bend !== undefined ? def.bend(o, refused.code, args) : null;
           if (bent !== undefined) return bent ?? notApplicable(o, refused.code);
@@ -261,7 +261,7 @@ export function editTool(def: EditDef): ToolSpec {
       const refused = editChange(o, asked.op);
       if (refused !== null) {
         if (!isAlready(refused.code)) return notApplicable(o, refused.code);
-        o.reply.report("already_so", { n: o.n, op: o.op, what: named(o.reading, asked.what) });
+        o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, asked.what) });
       }
       o.draft.record(o.n, o.op, def.lane, o.prov, from);
       return undefined;

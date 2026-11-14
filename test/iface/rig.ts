@@ -111,3 +111,9 @@ export function wordsFromFiles(r: ToolResult): void {
   });
   for (const rep of r.reports ?? []) expect(answerPatterns.some((p) => p.test(rep))).toBe(true);
 }
+
+/** The answer says `words` in its text and reports nothing, so a closing call that came back so ends the turn. */
+export function saidNotReported(r: ToolResult, words: string): void {
+  expect(r.reports).toBeUndefined();
+  expect(texts(r).some((x) => x.includes(words))).toBe(true);
+}

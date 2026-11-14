@@ -2,7 +2,7 @@
 // or something taken out of the world or brought back, classes and tags, tier and simulation detail,
 // and any relation made or ended. Each is today's GM edit (`engine/edits`) as today's tool sends it;
 // the everyday ones (a value set, someone moved, made, or their regard) are `world_apply`'s. A change
-// that is so already (someone taken out twice) changes nothing and is reported.
+// that is so already (someone taken out twice) changes nothing and the answer says so.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";

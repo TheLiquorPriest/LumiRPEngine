@@ -4,6 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { PEOPLE_TOOLS } from "../../../src/iface/families/people";
+import { saidNotReported } from "../rig";
 import { appliedInFull, eachFoundByItsWords, familyRig, opOf, SRC } from "./kit";
 
 const NAMES = PEOPLE_TOOLS.map((t) => t.name);
@@ -39,13 +40,13 @@ describe("people", () => {
     expect(world().entities.tam?.relations.some((r) => r.type === "member_of" && r.to === "lamplighters")).toBe(false);
   });
 
-  test("something taken out of the world twice changes nothing the second time, and is reported", async () => {
+  test("something taken out of the world twice changes nothing the second time, and says so with no report", async () => {
     const t = await familyRig();
     await t.call("gm_despawn", { entity: "bell", ...SRC });
     const changes = t.s.changes(t.turn.id).length;
     const r = await t.call("gm_despawn", { entity: "bell", ...SRC });
     appliedInFull(r, "engine", false);
-    expect((r.reports ?? []).some((x) => x.includes("was already so"))).toBe(true);
+    saidNotReported(r, "was already so");
     expect(t.s.changes(t.turn.id).length).toBe(changes);
   });
 });

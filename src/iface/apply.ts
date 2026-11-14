@@ -109,7 +109,8 @@ function attempt(call: Call, base: Reading, asked: readonly Asked[], skip: Reado
   const afters = new Map<number, (state: StoreState) => JsonObject>();
   for (const a of asked) {
     if (skip.has(a.n)) continue;
-    const o: OpContext = { n: a.n, op: a.def.name, args: a.args, prov: a.prov, draft, reply, call, reading: draft.reading(), after: (add) => afters.set(a.n, add) };
+    const later = asked.filter((x) => x.n > a.n).map((x) => x.args);
+    const o: OpContext = { n: a.n, op: a.def.name, args: a.args, prov: a.prov, draft, reply, call, reading: draft.reading(), later, after: (add) => afters.set(a.n, add) };
     const unread = a.def.run(o);
     if (unread) return { reply, draft, afters, unread };
   }

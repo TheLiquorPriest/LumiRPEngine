@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "rp-harness/contract";
 import { GROUP_TOOLS } from "../../../src/iface/families/groups";
-import { dataOf } from "../rig";
+import { dataOf, saidNotReported } from "../rig";
 import { appliedInFull, descriptions, eachFoundByItsWords, familyRig, searchByWords, SRC, wordsFromFiles } from "./kit";
 
 const NAMES = GROUP_TOOLS.map((t) => t.name);
@@ -38,10 +38,10 @@ describe("groups", () => {
     wordsFromFiles(asked);
   });
 
-  test("a member admitted twice is applied as nothing and reported", async () => {
+  test("a member admitted twice is applied as nothing and said, with no report", async () => {
     const t = await familyRig();
     const r = await t.call("gm_org", { change: { do: "admit", org: "lamplighters", who: "bram", why: "again" }, ...SRC });
     appliedInFull(r, "engine", false);
-    expect((r.reports ?? []).some((x) => x.includes("was already so"))).toBe(true);
+    saidNotReported(r, "was already so");
   });
 });

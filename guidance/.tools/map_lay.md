@@ -7,7 +7,7 @@ arguments:
   width: "Without rows: a walled room this many squares wide, floor inside."
   height: "Without rows: how many squares high the room is."
   doors: "Without rows: the squares of the room's walls that are doors, each [column, row]; one outside the room is reported and not drawn."
-  legend: "What the rows' other symbols stand for, such as {\"T\": {\"terrain\": \"table\", \"blocked\": true}}, {\"c\": {\"item\": \"chest\"}} or {\"z\": {\"zone\": \"dais\"}}."
+  legend: "What the rows' other symbols stand for: wall, floor, door, or words, read as floor named by them ({\"~\": \"shallow water\"}); with \"blocks\": true a square nobody walks through ({\"T\": {\"terrain\": \"table\", \"blocks\": true}}); or {\"c\": {\"item\": \"chest\"}}, {\"z\": {\"zone\": \"dais\"}}."
   feet: "How wide a square is, in feet; the usual 5 ft when left out."
   title: "The map's title."
   over: "The place whose coarser map this one lies over one square of: a building on a town's map."

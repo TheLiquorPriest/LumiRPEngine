@@ -28,7 +28,8 @@ describe("the horizon", () => {
     const r = await t.call("world_apply", asHarnessPasses(tool, call));
     expect(r.error).toBeUndefined();
     wordsFromFiles(r);
-    expect(r.reports).toEqual(["Operation 8 (horizon): kept on the horizon as words, naming no place, person or thing: the tower and its lamp, the storm."]);
+    expect(r.reports).toBeUndefined();
+    expect(texts(r)).toContain("Operation 8 (horizon): kept on the horizon as words, naming no place, person or thing: the tower and its lamp, the storm.");
     const state = t.s.stateAt(t.turn.id).state;
     const kitchen = state.horizon[0] ?? "";
     expect(kitchen.startsWith("place:")).toBe(true);

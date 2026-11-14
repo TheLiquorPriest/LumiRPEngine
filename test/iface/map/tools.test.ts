@@ -278,7 +278,8 @@ describe("map_lay and map_edit", () => {
     wordsFromFiles(laid);
 
     const brought = await t.call("map_place", { at: "The Far Road", pieces: [{ who: "Tam", square: [2, 2] }], ...SRC });
-    expect(brought.reports ?? []).toEqual(["map_place: Tam [tam] was at Market Square [market_square], and was brought to The Far Road [far_road] first."]);
+    expect(brought.reports).toBeUndefined();
+    expect(texts(brought)).toContain("map_place: Tam [tam] was at Market Square [market_square], and was brought to The Far Road [far_road] first.");
     const run = await t.call("map_measure", { from: "Tam", to: [11, 7] });
     expect(dataOf(run)).toMatchObject({ way: { distance: 9, rounds: 2, seconds: 12 } });
     expect(texts(await t.call("map_lay", { place: "The Far Road", width: 4, height: 4, ...SRC }))[0]).toBe("map_lay: The Far Road [far_road] has a map already (far_road_map).");
@@ -304,7 +305,8 @@ describe("map_lay and map_edit", () => {
     const edited = await t.call("map_edit", { at: "The Cellar", strokes: [{ symbol: "b", line: [[6, 2], [6, 4]] }, { symbol: "?", squares: [[8, 2]] }], legend: { b: { terrain: "bar", blocked: true, seeThrough: true } }, ...SRC });
     expect(edited.error).toBeUndefined();
     expect(texts(edited)).toContain("4 squares of the map of The Cellar [cellar] were drawn anew, and its legend changed for b.");
-    expect(edited.reports ?? []).toEqual(["map_edit: no legend names ?, so it reads as floor."]);
+    expect(edited.reports).toBeUndefined();
+    expect(texts(edited)).toContain("map_edit: no legend names ?, so it reads as floor.");
     expect(t.s.changes(t.first.id).map((c) => c.op)).toEqual(["space.squares"]);
     wordsFromFiles(edited);
     // Through the open door and over the bar: seen, and no way across.

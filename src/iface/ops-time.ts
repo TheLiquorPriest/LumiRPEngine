@@ -1,31 +1,57 @@
 // Time (the time skill): `pass_time` moves the clock and answers with what the span brings due, from
 // the state lane's list; it applies none of it, and runs nothing of today's simulation across the
 // span (plan §6.1: code lists what is due when time passes, and never decides what it did). A time
-// is read as today's engine reads one: a date and time of day in the world's calendar, or words for
-// a span ("two hours", "until dawn").
+// is read as today's engine reads one: a date and time of day in the world's calendar, words for a
+// span ("two hours", "until dawn"), or the words of a day's clock ("midnight", "22:00", "dusk") as
+// the next time the clock shows them.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
-import { calendarOf, clockOfStamp, formatClock, placeOffset } from "../engine/calendar";
+import { type Calendar, calendarOf, clockOfPhrase, clockOfStamp, formatClock, nextTimeOfDay, parseHHMM, placeOffset } from "../engine/calendar";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { placeOfEntity } from "../engine/scope";
 import { resolveTarget, typedSpan } from "../engine/time";
 import { minutesBetween } from "../engine/world-state";
 import type { WorldState } from "../engine/state";
 import type { Reading } from "./reading";
-import { findOptional, isUnread, notAs, numberArg, type OpContext, type OpDef, textArg, type Unread } from "./ops";
+import { findOptional, isUnread, notAs, type OpContext, type OpDef, type Unread } from "./ops";
+
+/** Words for a turn of the day that the calendar may name no part by, each read as the start of the part it falls in, where the calendar has that part. */
+const TURNS_OF_DAY: Readonly<Record<string, string>> = { dawn: "morning", dusk: "evening" };
+
+/**
+ * The words of a day's clock as the next time the clock shows them, read as today's engine reads a
+ * loan's end (noon, midnight, a part of the world's day, 22:00, 10pm, tomorrow), and dawn and dusk
+ * where the calendar names no part so. Null when the words read as none of them.
+ */
+function clockOfDay(cal: Calendar, now: number, said: string): number | null {
+  const read = clockOfPhrase(cal, now, said);
+  if (read !== null) return read;
+  const words = ` ${said.toLowerCase().replace(/[^a-z]+/g, " ")} `;
+  for (const [turn, part] of Object.entries(TURNS_OF_DAY)) {
+    const start = words.includes(` ${turn} `) ? cal.dayParts.find((p) => p.id === part)?.start : undefined;
+    if (start !== undefined) return nextTimeOfDay(cal, now, parseHHMM(start));
+  }
+  return null;
+}
 
 /**
  * A time as today's engine reads one, in minutes since the world's epoch: a date and time of day at
- * the scene's place (`YYYY-MM-DD HH:MM`), or words for a span from now ("two hours", "until dawn").
- * Null when it reads as neither.
+ * the scene's place (`YYYY-MM-DD HH:MM`), words for a span from now ("two hours", "until dawn"), or
+ * the words of a day's clock at the scene's place ("midnight", "22:00") as the next time it shows
+ * them. Null when it reads as none of these.
  */
 export function timeFrom(reading: Reading, state: Readonly<WorldState>, said: string): number | null {
   const world = reading.registry.context(reading.doc, state).world;
   const cal = calendarOf(world);
+  const place = placeOfEntity(state, world.pov);
   const stamp = clockOfStamp(cal, said.trim());
-  if (stamp !== null) return stamp - placeOffset(world, stamp, placeOfEntity(state, world.pov));
+  if (stamp !== null) return stamp - placeOffset(world, stamp, place);
   const target = typedSpan(cal, state.clock, ` ${said.trim()} `);
-  if (target === null) return null;
+  if (target === null) {
+    const offset = placeOffset(world, state.clock, place);
+    const local = clockOfDay(cal, state.clock + offset, said);
+    return local === null ? null : local - offset;
+  }
   if (target.type === "duration") return state.clock + target.minutes;
   const resolved = resolveTarget(reading.registry, reading.doc, state, target);
   return "code" in resolved ? null : resolved.to;
@@ -54,7 +80,7 @@ export function setClock(o: OpContext, to: number): Unread | undefined {
   const w = o.draft.w;
   const now = w.state.clock;
   if (to === now) {
-    o.reply.report("already_so", { n: o.n, op: o.op, what: clockText(o, now) });
+    o.reply.line("already_so", { n: o.n, op: o.op, what: clockText(o, now) });
     return undefined;
   }
   if (to > now) {
@@ -80,19 +106,23 @@ const passTime: OpDef = {
   run(o) {
     const w = o.draft.w;
     const now = w.state.clock;
-    const minutes = numberArg(o.args, "minutes");
-    const span = textArg(o.args, "for");
-    const until = timeArg(o, "until");
-    if (isUnread(until)) return until;
-    const given = [minutes, span, until].filter((x) => x !== undefined).length;
-    if (given !== 1) return { line: "needs_one", fields: { n: o.n, op: o.op, fields: ["minutes", "for", "until"] } };
-    let to: number;
-    if (minutes !== undefined) to = now + Math.round(minutes);
-    else if (span !== undefined) {
-      const read = timeArg({ ...o, args: { ...o.args, for: span } }, "for");
-      if (read === undefined || isUnread(read)) return read ?? { line: "needs", fields: { n: o.n, op: o.op, fields: ["for"] } };
-      to = read;
-    } else to = until as number;
+    // Each way of saying how far the clock goes that the call gives, read; the end it names first, then a count, then words for a span.
+    const read: { field: string; to: number }[] = [];
+    const unread: Unread[] = [];
+    for (const field of ["until", "minutes", "for"]) {
+      const said = o.args[field];
+      if (said === undefined || said === null || said === "") continue;
+      const to = field !== "minutes" ? timeArg(o, field) : typeof said === "number" && Number.isFinite(said) ? now + Math.round(said) : notAs(o, field, said, "minutes");
+      if (to === undefined) continue;
+      if (isUnread(to)) unread.push(to);
+      else read.push({ field, to });
+    }
+    const [used, ...others] = read;
+    if (used === undefined) return unread[0] ?? { line: "needs_any", fields: { n: o.n, op: o.op, fields: ["minutes", "for", "until"] } };
+    // What could be read is applied; what could not, or reads as another time, is reported with what was applied.
+    for (const u of unread) o.reply.report("time_left_out", { ...u.fields, used: used.field });
+    for (const other of others) if (other.to !== used.to) o.reply.report("time_differs", { n: o.n, op: o.op, field: other.field, other: clockText(o, other.to), used: used.field, to: clockText(o, used.to) });
+    const to = used.to;
     const at = findOptional(o, "at", "point");
     if (isUnread(at)) return at;
     const from = w.events.length;

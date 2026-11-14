@@ -14,7 +14,7 @@ arguments:
   operations.in: "store: the bag, drawer, vehicle or room it goes into. spawn: the place it is made in, or who or what holds it."
   operations.with: "move: others who go along."
   operations.how: "give: handed (to hold), lent, returned, given, sold, traded or stolen. Given, sold and traded change whose it is."
-  operations.until: "give: when a loan ends. pass_time: the time to pass until. A date and time (YYYY-MM-DD HH:MM) or words (two days, until dawn)."
+  operations.until: "give: when a loan ends. pass_time: the time to pass until. A date and time (YYYY-MM-DD HH:MM), a time of day (midnight, dawn, 22:00: the next time the clock shows it), or words (two days)."
   operations.off: "wear: true to take it off."
   operations.slot: "wear: where it goes: ready for in hand, or a slot such as holster, sheath or back."
   operations.away: "store: true to put it back where it is kept."
@@ -55,7 +55,7 @@ arguments:
   operations.precision: "How exact: exact, approximate, vague or unknown."
   operations.standing: "How it stands: established, proposed or assumed."
 ---
-Applies a list of operations to the world's recorded state, in order, each on the state the ones before it left, and answers with each operation's lane, what changed (each touched thing as it was and as it is now), how each touched thing now stands, and reports of anything that does not add up. Move, place, give, wear, store, pay, pass_time, set, fact, quest and spawn write the engine lane; relate and horizon the story lane. A name that is not there, or a value that is none of the choices, answers the whole call with what would work, and nothing is recorded. Two things are kept as your words instead: a horizon entry that names nothing, and where a new thing was put when that names nothing (it is made where its owner is).
+Applies a list of operations to the world's recorded state, in order, each on the state the ones before it left, and answers with each operation's lane, what changed (each touched thing as it was and as it is now), how each touched thing now stands, and reports of anything that does not add up. Move, place, give, wear, store, pay, pass_time, set, fact, quest and spawn write the engine lane; relate and horizon the story lane. A name that is not there, or a value that is none of the choices, answers the whole call with what would work, and nothing is recorded; but a thing that move, place, give, wear or store names, with no recorded name near it, is made where the one who acts is. Words that name nothing are kept as your words: a horizon entry, and where a thing was said to be.
 
 - move: someone or something goes to a place, with others along.
 - place: a thing set down or picked up; a person set down out of what holds them.

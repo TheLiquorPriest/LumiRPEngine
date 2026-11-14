@@ -48,7 +48,7 @@ const drive: WriteDef = {
     const from = w.events.length;
     const refused = effectChange(o, { type: "vehicles.drive", args: { vehicle: vehicle.id, to: to.id, driver, riders } });
     if (refused !== null) {
-      if (refused.code === "already_there" || isAlready(refused.code)) o.reply.report("already_so", { n: o.n, op: o.op, what: named(o.reading, vehicle.id) });
+      if (refused.code === "already_there" || isAlready(refused.code)) o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, vehicle.id) });
       else if (DRIVEN_ANYWAY[refused.code]) {
         // There all the same: the vehicle parked at the place, its driver and riders arrived by the one move path.
         const events: LedgerEvent[] = [{ type: "set", entity: vehicle.id, field: "place", value: to.id }];

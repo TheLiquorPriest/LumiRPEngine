@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "rp-harness/contract";
 import type { WorldDoc } from "../../../src/shared/world";
 import { TIME_TOOLS } from "../../../src/iface/families/time";
-import { dataOf } from "../rig";
+import { dataOf, saidNotReported } from "../rig";
 import { appliedInFull, descriptions, eachFoundByItsWords, familyRig, opOf, searchByWords, SRC, wordsFromFiles } from "./kit";
 
 const NAMES = TIME_TOOLS.map((t) => t.name);
@@ -57,11 +57,11 @@ describe("time", () => {
     wordsFromFiles(read);
   });
 
-  test("taking someone off a schedule they do not follow is applied as nothing and reported", async () => {
+  test("taking someone off a schedule they do not follow is applied as nothing and said, with no report", async () => {
     const t = await familyRig(marketHours);
     const r = await t.call("gm_routine_edit", { op: "schedule_override", person: "tam", schedule: "market_days", value: { off: true, until: null }, ...SRC });
     appliedInFull(r, "engine", false);
-    expect((r.reports ?? []).some((x) => x.includes("was already so"))).toBe(true);
+    saidNotReported(r, "was already so");
     expect(t.s.changes(t.turn.id).length).toBe(0);
   });
 });

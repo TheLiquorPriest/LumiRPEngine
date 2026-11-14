@@ -35,7 +35,8 @@ want_track: a quest
 want_bestiary: a row of the world's bestiary
 want_check: a check of the world's
 want_schedule: a schedule of the world's
-wants_time: a date and time, YYYY-MM-DD HH:MM, or words for a span, such as two hours or until dawn
+wants_time: a date and time, YYYY-MM-DD HH:MM; a time of day, such as midnight, dawn or 22:00, as the next time the clock shows it; or words for a span, such as two hours
+wants_minutes: a number of minutes
 wants_dice: dice such as 1d20+3 or 2d6
 wants_square: [column, row], two whole numbers counted from 1 at the top left, as the map prints them
 wants_fields: an object of field: value
@@ -63,6 +64,8 @@ already_so: Operation {{n}} ({{op}}): {{what}} was already so; nothing changed.
 placed_instead: Operation {{n}} ({{op}}): {{what}} was put at {{where}}, not {{asked}}, by the size of things.
 rule_bent: Operation {{n}} ({{op}}): {{what}} was put with {{where}} although the world's rules for things say otherwise ({{code}}).
 made_where_said: Operation {{n}} ({{op}}): nothing goes by {{said}}, so {{what}} was made at {{where}}, and those words are kept on it as where it was said to be.
+made_unrecorded: Operation {{n}} ({{op}}): nothing recorded went by {{name}}, so it was made as a thing, {{made}}.
+said_where: Operation {{n}} ({{op}}): nothing goes by {{said}}, so those words are kept on {{what}} as where it was said to be.
 horizon_words: Operation {{n}} ({{op}}): kept on the horizon as words, naming no place, person or thing: {{words}}.
 against_rules: Operation {{n}} ({{op}}): {{#what}}{{what}}: {{/what}}applied although the world's rules would refuse it ({{code}}).
 past_until: Operation {{n}} ({{op}}): {{until}} is not after now, so the loan was recorded with no end.
@@ -71,7 +74,7 @@ not_owner: Operation {{n}} ({{op}}): {{to}} is not among the owners of {{what}},
 not_wearable: Operation {{n}} ({{op}}): {{what}} has no place to be worn ({{code}}), so {{who}} carries it.
 not_to_hand: Operation {{n}} ({{op}}): {{what}} was not to hand{{#brought}}, and was put on {{who}} all the same{{/brought}}{{^brought}} and is gone or lost, so {{who}} went without it{{/brought}}.
 used_past_held: Operation {{n}} ({{op}}): {{qty}} of {{what}} were used and there were only {{held}}; all of it is used up.
-kept_nowhere: Operation {{n}} ({{op}}): nothing says where {{what}} is kept, or it is there already; nothing moved.
+kept_nowhere: Operation {{n}} ({{op}}): nothing says where {{what}} is kept, so nothing moved.
 exists: Operation {{n}} ({{op}}): {{name}} is there already and stands for it; no second one was made.
 paid_past_held: Operation {{n}} ({{op}}): {{payer}} paid {{amount}} and could pay at most {{held}} from any one way; the payment is recorded all the same.
 money_untracked: Operation {{n}} ({{op}}): this world keeps no money for {{payer}}, so no money moved.
@@ -83,6 +86,8 @@ no_grid: Operation {{n}} ({{op}}): this host keeps no squares on maps yet, so a 
 on_map: Operation {{n}} ({{op}}): {{said}}
 off_path: Operation {{n}} ({{op}}): {{quest}} went from {{from}} to {{to}}, which is not one of the ways on from {{from}}.
 time_back: Operation {{n}} ({{op}}): the clock was set back from {{from}} to {{to}}.
+time_left_out: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}, so it was left out and {{used}} was applied.{{#wants}} It takes {{wants}}.{{/wants}}
+time_differs: Operation {{n}} ({{op}}): {{field}} reads as {{other}} and {{used}} as {{to}}; the clock was set by {{used}}.
 before_start: Operation {{n}} ({{op}}): the story starts at {{start}}, so the clock went back no further.
 due_unlisted: {{#n}}Operation {{n}} ({{op}}): {{/n}}what this span of time brings due is not listed by this host.
 no_map: {{at}} has no map to show.

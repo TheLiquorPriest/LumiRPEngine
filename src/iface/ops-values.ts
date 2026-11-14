@@ -267,7 +267,7 @@ const quest: OpDef = {
     const from = w.events.length;
     const events: LedgerEvent[] = [];
     if (stage !== undefined) {
-      if (stage === current) o.reply.report("already_so", { n: o.n, op: o.op, what: `${def.label} [${track.id}]` });
+      if (stage === current) o.reply.line("already_so", { n: o.n, op: o.op, what: `${def.label} [${track.id}]` });
       else {
         const why = textArg(o.args, "why");
         // The reason and how it went are kept with the move; the move holds only where the quest stands now, as today's stage moves do.
@@ -335,7 +335,7 @@ const horizon: OpDef = {
       if (isUnread(r)) return r;
       refs.push(r.ref);
     }
-    if (words.length > 0) o.reply.report("horizon_words", { n: o.n, op: o.op, words: textOf(words) });
+    if (words.length > 0) o.reply.line("horizon_words", { n: o.n, op: o.op, words: textOf(words) });
     o.draft.recordStoreOp(o.n, o.op, "story", o.prov, { op: STORE_OPS.horizon, value: { list: refs } });
     o.draft.storeState.horizon = refs;
     return undefined;

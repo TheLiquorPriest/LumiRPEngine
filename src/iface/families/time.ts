@@ -2,7 +2,7 @@
 // time and setting the clock (`world_apply` `pass_time`, `set`): how someone follows their routine,
 // a block of it, one of their schedules overridden, the weather of a region set or cleared, and
 // someone's day read. Each runs today's Cast life and weather (`packs/castlife`, `packs/weather`).
-// Taking someone off a schedule they do not follow changes nothing and is reported.
+// Taking someone off a schedule they do not follow changes nothing and the answer says so.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
@@ -73,7 +73,7 @@ const routine: WriteDef = {
       if (refused.code === "bad_value") return notOneOf(o, "value", o.args.value ?? null, []);
       // Taken off a schedule they do not follow: so already, and said.
       if (refused.code !== "not_owner") return notApplicable(o, refused.code);
-      o.reply.report("already_so", { n: o.n, op: o.op, what: named(o.reading, person.id) });
+      o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, person.id) });
     }
     // How they follow their routine is kept apart from them: the answer shows it as it now stands.
     o.after((state) => ({ routine: followOf(o.reading.registry.context(o.reading.doc, state.world), person.id) as unknown as JsonObject, asked: edit as unknown as JsonObject }));

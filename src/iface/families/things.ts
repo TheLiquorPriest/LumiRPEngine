@@ -177,7 +177,7 @@ const permit: WriteDef = {
     if (isUnread(until)) return until;
     // Leave of one's own things changes nothing.
     if (from.id === to.id) {
-      o.reply.report("already_so", { n: o.n, op: o.op, what: named(o.reading, from.id) });
+      o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, from.id) });
       o.draft.record(o.n, o.op, "engine", o.prov, o.draft.w.events.length);
       return undefined;
     }
@@ -330,7 +330,7 @@ const remove: WriteDef = {
     const refused = editChange(o, { op: "item", change: { do: "remove", item: item.id, why: textArg(o.args, "why") ?? "" } });
     if (refused !== null) {
       if (!isAlready(refused.code)) return notApplicable(o, refused.code);
-      o.reply.report("already_so", { n: o.n, op: o.op, what: named(o.reading, item.id) });
+      o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, item.id) });
     }
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
@@ -407,7 +407,7 @@ const setApply: WriteDef = {
     // None of it to hand now: every piece is gone or lost, each reported, and nothing else changes.
     if ("code" in out && out.code !== "none_to_hand") {
       if (!isAlready(out.code)) return notApplicable(o, out.code);
-      o.reply.report("already_so", { n: o.n, op: o.op, what: named(o.reading, who.id) });
+      o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, who.id) });
     }
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;

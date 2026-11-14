@@ -18,6 +18,7 @@ import type { EntityId, PlaceId } from "../shared/ids";
 import { hasOwn, isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import { standingGrid } from "../shared/grid";
+import { readMap } from "../shared/maps";
 import type { MapCellDef } from "../shared/world";
 import { own } from "../engine/pack-kit";
 import { relocate } from "../engine/relocate";
@@ -117,9 +118,83 @@ function applied(o: OpContext, events: readonly JsonObject[]): Unread | undefine
   return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
 }
 
-/** Each report of the grid's, as its line (`grid_<code>`), with the operation's number and name. */
+/** What the grid says that only tells how something was read or done as asked (brought to the place first, a symbol no legend names read as floor): part of the answer, not a report. */
+const GRID_SAID: Readonly<Record<string, true>> = { brought: true, not_in_legend: true };
+
+/** Each of the grid's reports as its line (`grid_<code>`), with the operation's number and name: in the answer for what `GRID_SAID` names, a report for what does not add up. */
 function reportAll(o: OpContext, say: Say, reports: readonly Report[]): void {
-  for (const r of reports) o.reply.report(`grid_${r.code}`, { n: o.n, op: o.op, ...reportFields(say, r.values) });
+  for (const r of reports) {
+    const fields = { n: o.n, op: o.op, ...reportFields(say, r.values) };
+    if (Object.hasOwn(GRID_SAID, r.code)) o.reply.line(`grid_${r.code}`, fields);
+    else o.reply.report(`grid_${r.code}`, fields);
+  }
+}
+
+/** The kinds of square a legend entry may name in words. */
+const SQUARE_KINDS: readonly string[] = ["wall", "floor", "door"];
+
+/** Whether the map's format holds `cell` as what `symbol` stands for. */
+function formatHolds(symbol: string, cell: unknown): boolean {
+  return readMap({ id: "legend", scope: "legend", legend: { [symbol]: cell } }).problems.length === 0;
+}
+
+/** A legend entry read from words: what the format holds for it, and the words it was named by, when it was, with whether it blocks. */
+interface WordsRead {
+  symbol: string;
+  words: string;
+  blocks: boolean;
+}
+
+/**
+ * A legend entry the format does not hold as given, read: a kind of square named (wall, floor,
+ * door); words, as a square of floor named by them, or one nobody walks through where the entry says
+ * `blocks: true` or names a wall as its kind. Whether words say it blocks is never judged from them.
+ * Null when it reads as none of these.
+ */
+function cellFrom(value: JsonValue): { cell: MapCellDef; words?: string; blocks: boolean } | null {
+  const text = (v: JsonValue | undefined): string => (typeof v === "string" ? v.trim() : "");
+  if (typeof value === "string") {
+    const kind = text(value).toLowerCase();
+    if (SQUARE_KINDS.includes(kind)) return { cell: kind as MapCellDef, blocks: false };
+    return text(value) === "" ? null : { cell: { terrain: text(value) }, words: text(value), blocks: false };
+  }
+  if (!isRecord(value)) return null;
+  const kind = text(value.kind).toLowerCase();
+  const words = text(value.terrain) || text(value.name);
+  const blocks = value.blocks === true || value.blocked === true || kind === "wall";
+  if (kind === "door" || (words === "" && SQUARE_KINDS.includes(kind))) return { cell: kind as MapCellDef, blocks };
+  if (words === "") return null;
+  const cell = { terrain: words, ...(blocks ? { blocked: true } : {}), ...(blocks && value.seeThrough === true ? { seeThrough: true } : {}) };
+  return { cell, words, blocks };
+}
+
+/**
+ * A legend as a call gives it, entry by entry: what the map's format holds kept as it is, the rest
+ * read by `cellFrom`, and the entries read from words listed so the answer says how. A symbol of
+ * more than one character, or an entry that reads as nothing the format holds, is answered with
+ * what a legend entry holds. A null takes a symbol out, where the tool can (`out`).
+ */
+function legendGiven(o: OpContext, raw: JsonValue | undefined, out: boolean): { legend: Record<string, MapCellDef | null>; read: WordsRead[] } | Unread {
+  const legend: Record<string, MapCellDef | null> = {};
+  const read: WordsRead[] = [];
+  if (raw === undefined || raw === null) return { legend, read };
+  if (!isRecord(raw)) return { line: "legend_unreadable", fields: { n: o.n, op: o.op, value: JSON.stringify(raw) } };
+  for (const [symbol, value] of Object.entries(raw)) {
+    if (value === null) {
+      if (out) legend[symbol] = null;
+      continue;
+    }
+    const got = [...symbol].length !== 1 ? null : formatHolds(symbol, value) ? { cell: value as MapCellDef, blocks: false } : cellFrom(value);
+    if (got === null || !formatHolds(symbol, got.cell)) return { line: "legend_unreadable", fields: { n: o.n, op: o.op, symbol, value: JSON.stringify(value) } };
+    legend[symbol] = got.cell;
+    if ("words" in got && got.words !== undefined) read.push({ symbol, words: got.words, blocks: got.blocks });
+  }
+  return { legend, read };
+}
+
+/** How each legend entry given in words was read, as the map's lines say it. */
+function sayRead(o: OpContext, read: readonly WordsRead[]): void {
+  for (const r of read) o.reply.line(r.blocks ? "legend_read_blocks" : "legend_read_floor", { op: o.op, symbol: r.symbol, words: r.words });
 }
 
 // ---------------------------------------------------------------- map_view
@@ -305,7 +380,7 @@ function placePiece(o: OpContext, at: Found, p: PieceAsk, why: string, out: Json
       const bad = applied(o, [positionEvent(layers.drawn, id, null, was)]);
       if (bad) return bad;
       o.reply.line("piece_lifted", { what: whoIs(say(), id), square: spotText(say(), was) });
-    } else o.reply.report("already_so", { n: o.n, op: o.op, what: whoIs(say(), id) });
+    } else o.reply.line("already_so", { n: o.n, op: o.op, what: whoIs(say(), id) });
     entry.at = null;
   } else if (p.square || p.near || p.zone !== undefined) {
     let to: Square | null = p.square ?? null;
@@ -426,7 +501,7 @@ const doorDef: WriteDef = {
     if (!drawn.doors.has(i)) return { line: "not_a_door", fields: { n: o.n, op: o.op, square: spotText(say, square), place: whoIs(say, drawn.scope), doors: textOf([...drawn.doors].sort((a, b) => a - b).map((d) => spotText(say, squareAt(drawn, d)))) } };
     const was = doorState(drawn, moving, i);
     const from = o.draft.w.events.length;
-    if (was === now) o.reply.report("door_already", { n: o.n, op: o.op, square: spotText(say, square), state: now });
+    if (was === now) o.reply.line("door_already", { n: o.n, op: o.op, square: spotText(say, square), state: now });
     else {
       reportAll(o, say, setDoor(drawn, moving, square, now).reports);
       const bad = applied(o, [doorEvent(drawn, square, now)]);
@@ -483,15 +558,15 @@ const layDef: WriteDef = {
     const r = o.reading;
     const rows = rowsOf(o);
     if (isUnread(rows)) return rows;
-    const legend = o.args.legend;
-    if (legend !== undefined && legend !== null && !isRecord(legend)) return { line: "unreadable_op", fields: { n: o.n, op: o.op, field: "legend", value: JSON.stringify(legend) } };
+    const given = legendGiven(o, o.args.legend, false);
+    if (isUnread(given)) return given;
     const feet = numberArg(o.args, "feet");
     if (feet !== undefined && !(feet > 0)) return { line: "unreadable_op", fields: { n: o.n, op: o.op, field: "feet", value: JSON.stringify(feet) } };
     const played = r.world;
     const laying = (scope: string): Laying => ({
       id: freshId(`${scope}_map`, (id) => hasOwn(played.maps, id) || hasOwn(played.grids, id)),
       rows,
-      ...(isRecord(legend) ? { legend: legend as Record<string, MapCellDef> } : {}),
+      ...(Object.keys(given.legend).length > 0 ? { legend: given.legend as Record<string, MapCellDef> } : {}),
       ...(textArg(o.args, "title") !== undefined ? { title: textArg(o.args, "title") ?? "" } : {}),
       metres: feet !== undefined ? feet * METRES_PER_FOOT : laidMetres(GRID_DEFAULTS),
     });
@@ -520,12 +595,14 @@ const layDef: WriteDef = {
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     const scope = laid.scope;
     const now = layersAt(r.registry, r.doc, w.state, scope, GRID_DEFAULTS);
-    if (now === null) return undefined;
-    const after: Say = { lines: o.call.lines, world: now.world, state: w.state };
-    const off = laid.changes.filter((c) => c.op === "space.pos").map((c) => (isRecord(c.value) && isRecord(c.value.data) && typeof c.value.data.entity === "string" ? whoIs(after, c.value.data.entity) : ""));
-    o.reply.line("laid", { place: whoIs(after, scope), width: now.drawn.width, height: now.drawn.height, feet: feetOf(now.drawn, 1), ...stepFields(now.drawn) });
-    if (off.length > 0) o.reply.line("laid_off", { who: off });
-    o.after(() => ({ laid: { map: now.drawn.id, place: whoIs(after, scope), width: now.drawn.width, height: now.drawn.height, feet: feetOf(now.drawn, 1), step: { ...now.drawn.scale.step } } }));
+    if (now !== null) {
+      const after: Say = { lines: o.call.lines, world: now.world, state: w.state };
+      const off = laid.changes.filter((c) => c.op === "space.pos").map((c) => (isRecord(c.value) && isRecord(c.value.data) && typeof c.value.data.entity === "string" ? whoIs(after, c.value.data.entity) : ""));
+      o.reply.line("laid", { place: whoIs(after, scope), width: now.drawn.width, height: now.drawn.height, feet: feetOf(now.drawn, 1), ...stepFields(now.drawn) });
+      if (off.length > 0) o.reply.line("laid_off", { who: off });
+      o.after(() => ({ laid: { map: now.drawn.id, place: whoIs(after, scope), width: now.drawn.width, height: now.drawn.height, feet: feetOf(now.drawn, 1), step: { ...now.drawn.scale.step } } }));
+    }
+    sayRead(o, given.read);
     return undefined;
   },
 };
@@ -579,10 +656,11 @@ const editDef: WriteDef = {
     if (isUnread(layers)) return layers;
     const strokes = strokesOf(o);
     if (isUnread(strokes)) return strokes;
-    const legend = o.args.legend ?? {};
-    if (!isRecord(legend)) return { line: "unreadable_op", fields: { n: o.n, op: o.op, field: "legend", value: JSON.stringify(legend) } };
+    const given = legendGiven(o, o.args.legend, true);
+    if (isUnread(given)) return given;
+    const legend = given.legend;
     const say: Say = { lines: o.call.lines, world: layers.world, state: w.state };
-    const done = editMap(o.reading.doc, w.state, layers.drawn.scope, strokes, legend as Record<string, MapCellDef | null>);
+    const done = editMap(o.reading.doc, w.state, layers.drawn.scope, strokes, legend);
     const refusal = done.reports.find((rep) => EDIT_REFUSALS[rep.code]);
     if (done.changes.length === 0 || refusal) {
       const why = refusal?.code === "nothing_drawn" ? (done.reports.find((rep) => STROKE_LOST[rep.code]) ?? refusal) : (refusal ?? done.reports[0]);
@@ -597,6 +675,7 @@ const editDef: WriteDef = {
     const count = isRecord(value) && isRecord(value.data) && Array.isArray(value.data.squares) ? value.data.squares.length : 0;
     o.reply.line("edited", { place: whoIs(say, layers.drawn.scope), count, symbols: textOf(Object.keys(legend)) });
     o.after(() => ({ edited: { map: layers.drawn.map ?? layers.drawn.id, squares: count, legend: Object.keys(legend) } }));
+    sayRead(o, given.read);
     return undefined;
   },
 };
