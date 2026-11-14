@@ -206,6 +206,8 @@ async function run(env: TestbedEnv, pairs: number, only: Measured["arm"] | null)
   if (only !== "plain") arms.push({ arm: "rpe", connection: await connectionId(host, need("FLOOR_RPE_CONNECTION")) });
   if (pairs * arms.length > LINES.length) throw new Error(`${pairs} pairs need ${pairs * arms.length} lines and the script has ${LINES.length}`);
   const socket = await EngineSocket.open(host, "", { page: false });
+  // Reply text is streamed only to a socket that says it is showing this chat.
+  socket.focus(chatId);
   const persona = process.env.FLOOR_PERSONA?.trim() || "Traveller";
   const all: Measured[] = [];
   try {

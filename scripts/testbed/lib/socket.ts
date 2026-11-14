@@ -184,6 +184,14 @@ export class EngineSocket {
     this.waiting.clear();
   }
 
+  /**
+   * Asks Lumiverse for one chat's reply stream, as the page showing that chat does: stream tokens
+   * go only to a socket that has said which chat it is looking at.
+   */
+  focus(chatId: string | null): void {
+    this.socket?.send(JSON.stringify({ type: "stream_focus", chatId }));
+  }
+
   close(): void {
     const socket = this.socket;
     this.closed("closed by the script");
