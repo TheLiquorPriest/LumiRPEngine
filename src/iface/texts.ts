@@ -198,15 +198,30 @@ function renderNodes(nodes: readonly Node[], contexts: readonly unknown[], out: 
 export interface ToolText {
   description: string;
   arguments: Readonly<Record<string, string>>;
+  /** What of the file could not be read; the description is then the file's own words as written. */
+  problem?: string;
 }
 
-/** A tool's file read: its body filled with its header's fields, and its `arguments:` map. */
+/**
+ * A tool's file read: its body filled with its header's fields, and its `arguments:` map. A file a
+ * user edited must never end a turn: where its header or a tag in its body cannot be read, the
+ * description is the text as written (the body, where the header reads) and `problem` says what.
+ */
 export function toolText(text: string, what: string): ToolText {
-  const { header, body } = splitFile(text, what);
-  const given = header.arguments;
+  let file: { header: Record<string, unknown>; body: string };
+  try {
+    file = splitFile(text, what);
+  } catch (error) {
+    return { description: text.trim(), arguments: {}, problem: error instanceof Error ? error.message : String(error) };
+  }
+  const given = file.header.arguments;
   const args: Record<string, string> = {};
   if (isObject(given)) for (const [name, said] of Object.entries(given)) if (typeof said === "string") args[name] = said.trim();
-  return { description: Template.parse(body, what).render(header).trim(), arguments: args };
+  try {
+    return { description: Template.parse(file.body, what).render(file.header).trim(), arguments: args };
+  } catch (error) {
+    return { description: file.body.trim(), arguments: args, problem: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 /** A `format: lines` part: each named line a template, filled with the header's fields and the caller's. */
@@ -216,25 +231,44 @@ export class Lines {
     private readonly templates: ReadonlyMap<string, Template>,
     /** Each line's template as written, by name. */
     readonly source: ReadonlyMap<string, string>,
+    /** What of the file could not be read, each said once: those lines are left out, and the rest stands. */
+    readonly problems: readonly string[] = [],
   ) {}
 
-  /** The lines of a part's text; a line that is not `name: text` throws, saying which. */
+  /**
+   * The lines of a part's text. A file a user edited must never end a turn: a line that is not
+   * `name: text`, or whose text is no template, is left out and said in `problems`; a file whose
+   * header cannot be read gives no lines at all (every answer is then given with no words), and says so.
+   */
   static parse(text: string, what: string): Lines {
-    const { header, body } = splitFile(text, what);
-    if (header.format !== "lines") throw new Error(`${what}: its header does not say format: lines`);
+    const problems: string[] = [];
+    let file: { header: Record<string, unknown>; body: string };
+    try {
+      file = splitFile(text, what);
+      if (file.header.format !== "lines") throw new Error(`${what}: its header does not say format: lines`);
+    } catch (error) {
+      return new Lines({}, new Map(), new Map(), [error instanceof Error ? error.message : String(error)]);
+    }
     const templates = new Map<string, Template>();
     const source = new Map<string, string>();
-    for (const [i, raw] of body.split("\n").entries()) {
+    for (const [i, raw] of file.body.split("\n").entries()) {
       if (raw.trim() === "") continue;
       const m = /^([A-Za-z0-9_-]+):[ \t]?(.*)$/.exec(raw);
-      if (m === null) throw new Error(`${what}: body line ${i + 1} is not name: text`);
+      if (m === null) {
+        problems.push(`${what}: body line ${i + 1} is not name: text`);
+        continue;
+      }
       const name = m[1] ?? "";
       if (templates.has(name)) continue;
       const said = (m[2] ?? "").trimEnd();
-      templates.set(name, Template.parse(said, `${what} (${name})`));
-      source.set(name, said);
+      try {
+        templates.set(name, Template.parse(said, `${what} (${name})`));
+        source.set(name, said);
+      } catch (error) {
+        problems.push(error instanceof Error ? error.message : String(error));
+      }
     }
-    return new Lines(header, templates, source);
+    return new Lines(file.header, templates, source, problems);
   }
 
   /** A part with no lines: every answer is given with no words. */
