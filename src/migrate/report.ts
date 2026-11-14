@@ -5,6 +5,7 @@
 // today's own readers; the disk the real run will take. A run may be compared with the one before
 // it, since each is a full read of today's data: what was added, changed and gone since.
 
+import type { WorldsSeeded } from "../build/seed";
 import type { AttemptedWrite } from "./stand-in";
 import type { Unreadable } from "./inside";
 import type { LumiverseMarks } from "./lumiverse-db";
@@ -203,6 +204,8 @@ export interface MigrationReport {
    * for a rehearsal.
    */
   worldsInStore: { added: number; held: number; unreadable: number } | null;
+  /** What became of each carried world in Build's own table, by world id (`seedCarriedWorlds`); absent for a rehearsal. */
+  worldsInBuild?: WorldsSeeded;
   changes: Changes | null;
   /** Why the real run won't start on this report; none: it may. */
   refusals: string[];

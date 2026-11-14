@@ -15,6 +15,8 @@ import { existsSync } from "node:fs";
 import { dataPaths, type Env, loadConfig, prepareDataFolder } from "../app/config";
 import { openDatabase } from "../app/database";
 import { migrate as migrateTables, Migrations } from "../app/migrations";
+import { BUILD_MIGRATIONS } from "../build/schema";
+import { seedCarriedWorlds } from "../build/seed";
 import { CAST_MIGRATIONS } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { ALL_PACKS } from "../packs/index";
@@ -95,6 +97,8 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       migrations.add("cast", CAST_MIGRATIONS);
       migrations.add("story", STORY_MIGRATIONS);
       migrations.add("migrate", MIGRATE_TABLES);
+      // Build keeps the worlds as it edits them in a table of its own, which a run fills with what it carried.
+      migrations.add("build", BUILD_MIGRATIONS);
       // A chat's folders are chosen once and kept in the tree's tables, which the server reads as well.
       if (options.tree) migrations.add(options.tree.tables.area, options.tree.tables.migrations);
       migrateTables(db, migrations, { version: options.version ?? "dev", backups: paths.backups, now: () => now().getTime() });
@@ -123,6 +127,8 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       const kept = s.copyMigratedWorlds();
       report.worldsInStore = { added: kept.added, held: kept.held, unreadable: kept.unreadable.length };
       for (const u of kept.unreadable) report.unreadable.push({ path: `RPE's database: world_file ${u.world}/rev/${u.revision}.json`, why: "a world revision the run carried that doesn't read as a world document, so RPE's store doesn't keep it" });
+      // Build's own copy of each carried world: copied in, replaced where it is still what an earlier run put there, and kept where it was changed in RPE since.
+      report.worldsInBuild = seedCarriedWorlds(db, sources.userId);
       keepRun(db, sources.userId, run, report, (row) => report.landed?.[row as keyof typeof report.landed] ?? (Object.hasOwn(NO_PLACE_YET, row) ? BACKUP_ONLY : ""));
     } finally {
       db.close();

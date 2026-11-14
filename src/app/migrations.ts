@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { OWNER_ONLY_FILE, OWNER_ONLY_FOLDER } from "./disk";
 
 /** The areas that bring tables, in the order their migrations run. */
-export const MIGRATION_AREAS = ["app", "store", "cast", "story", "lore", "prompt", "files", "harness", "migrate"] as const;
+export const MIGRATION_AREAS = ["app", "store", "cast", "story", "lore", "prompt", "files", "harness", "migrate", "build"] as const;
 export type MigrationArea = (typeof MIGRATION_AREAS)[number];
 
 /**
