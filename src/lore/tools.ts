@@ -1,5 +1,5 @@
 // The lore's tools as the host hands them to RPH (plan §6.8, Appendix A `ToolsPort`), and the batch an
-// indexing run is given by name (`lore:batch`, the indexer's `given:`). As with the engine's and the
+// indexing run is given by name (`index:batch`, the indexer's `given:`). As with the engine's and the
 // story's tools, code holds a tool's name, family, tier, lane and the shape of its arguments; its
 // description and each argument's text are its file in `.tools/`, and every sentence of an answer is
 // a line of `.prompts/lore-answers.md`. An answer is data plus those lines. The lore may not reach the
@@ -18,8 +18,8 @@ import type { LoreAt } from "./lore";
 /** The prompt part every lore answer, the batch, the readable index and the lore map's lines are worded by. */
 export const LORE_ANSWERS = "lore-answers";
 
-/** The name an agent is given the next batch by. */
-export const LORE_BATCH = "lore:batch";
+/** The name an agent is given the next batch by: a host's name, since RPH reads every `lore:` name as a lore entry. */
+export const LORE_BATCH = "index:batch";
 
 /** The lore's lane, under which the user's Auto / Confirm / Never applies to its writes. */
 export const LORE_LANE = "lore";
@@ -85,7 +85,7 @@ export function batchText(lines: LinesPart | undefined, batch: { entries: readon
   return out.join("\n\n");
 }
 
-/** The `lore:batch` block for a scope: the next batch of the chat's lore, worded by the lines in force. */
+/** The `index:batch` block for a scope: the next batch of the chat's lore, worded by the lines in force. */
 export async function loreBatchBlock(index: LoreIndex, at: LoreAt, guidance: Guidance): Promise<string> {
   return batchText(await loreLines(guidance), await index.batch(at));
 }

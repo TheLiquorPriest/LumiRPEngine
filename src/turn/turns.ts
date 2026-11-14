@@ -18,7 +18,7 @@
 // no state. If the event was missed, the next intake ties it the same way.
 
 import { type Fields, loadGuidance, type Guidance, type LinesPart, type TemplatePart } from "rp-harness";
-import type { Clock, ContextBlock, Harness, JobView, JsonObject, Log, ReplyError, ReplySink, Scope, SinceItem, TurnRequest, Usage } from "rp-harness/contract";
+import type { Clock, ContextBlock, Harness, JobState, JsonObject, Log, ReplyError, ReplySink, Scope, SinceItem, TurnRequest, Usage } from "rp-harness/contract";
 import { forkOf, reconcile, type ChatChange, type ChatChanges } from "../adapter/lumiverse/events";
 import type { TaggedTurn, TurnPlayer } from "../adapter/lumiverse/provider";
 import type { LumiverseReads, LvStep } from "../adapter/lumiverse/reads";
@@ -29,13 +29,14 @@ import type { LiveHub } from "../app";
 import { castMark, takeBackCast } from "../cast";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { mapLines, mapView } from "../iface";
-import { type Lore, loreMapFields } from "../lore";
-import { type DueSource, type PathEntry, type PathReport, type ShownMessage, type Store, type TurnRow, worldState } from "../store";
+import { type Lore, type LoreIndex, loreLines, loreMapFields } from "../lore";
+import { type DueSource, type PathEntry, type PathReport, type ShownMessage, type Store, type TurnRow, type UserStore, worldState } from "../store";
 import { sceneSession, storyBrief, storyMark, storyRecordParts, takeBackStory } from "../story";
 import { storyAt } from "../story/path";
 import { STORY_SO_FAR_DEFAULTS, storySoFar } from "../story/sofar";
 import { type Pruned, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName } from "../tree";
 import { type Attempt, writeTurnFolder } from "./folder";
+import { jobsEndedBetween } from "./jobs";
 import type { Writes } from "./kv";
 import type { PlayerSide } from "./player";
 import type { TurnPrompts } from "./prompt";
@@ -71,6 +72,9 @@ export const NO_SESSION = "none";
 /** How a run RPE stopped during ended, as the Turn page shows it: no agent is told it. */
 const STOPPED_MID_RUN: ReplyError = { code: "failed", detail: "RPE stopped while this run was going on." };
 
+/** The notice that tells each way a job can end (plan §13.5): a job that did not finish is never told as finished. */
+const JOB_ENDS: Readonly<Partial<Record<JobState, string>>> = { done: "job_finished", failed: "job_failed", cancelled: "job_cancelled", interrupted: "job_interrupted", "off-path": "job_off_path" };
+
 export interface TurnLaneDeps {
   store: Store;
   writes: Writes;
@@ -78,6 +82,8 @@ export interface TurnLaneDeps {
   chats: TreeChats;
   prompts: TurnPrompts;
   lore: Lore;
+  /** The lore index, whose full lore map the briefing holds. */
+  loreIndex: LoreIndex;
   runs: Runs;
   /** The player's messages as RPE read them, and their requests through a panel. */
   player: PlayerSide;
@@ -125,6 +131,15 @@ function lines(part: TemplatePart | LinesPart | undefined): LinesPart | undefine
 
 function words(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Whether the turn `before` is on `turn`'s own line ahead of it: among the turns it was made after. */
+function madeAfter(store: UserStore, turn: TurnRow, before: string): boolean {
+  const ahead = store.turn(before);
+  if (ahead === null) return false;
+  let at: TurnRow | null = turn;
+  while (at !== null && at.depth > ahead.depth) at = at.parent === null ? null : store.turn(at.parent);
+  return at !== null && at.id === ahead.id && at.id !== turn.id;
 }
 
 /**
@@ -523,7 +538,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   /**
    * Turns that left the path since it was last compared: their work is cancelled (plan §10.9 "This work belongs to its turn"). The
    * attempt a swipe or regenerate replaces (`replacing`, the turn the path held at its message) is among them, with any run still
-   * writing to that message.
+   * writing to that message. Then each earlier attempt a flipped swipe shows again, on the newest reply or an earlier one: RPH is told
+   * it is on the path again in their place, so the session carries its work (plan §6.3, §11).
    */
   async #left(user: string, chat: string, report: PathReport, replaced: string | null, replacing: string | null): Promise<void> {
     const gone = new Set<string>();
@@ -537,6 +553,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const told = this.#deletedTold.get(chatKey);
     this.#deletedTold.delete(chatKey);
     await Promise.all([...gone].filter((turn) => told?.has(turn) !== true).map((turn) => this.#cancel(user, chat, turn)));
+    const shown = [report.swiped?.to ?? null, ...report.flipped.map((f) => f.to)].filter((turn): turn is string => turn !== null);
+    for (const turn of shown) await this.#d.harness().turnShown({ user, chat, session: this.#d.runs.record(user, turn)?.session ?? NO_SESSION, turn });
   }
 
   /** A turn off the path: its run, if it goes on, stopped, and RPH told. */
@@ -612,9 +630,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const first = scanned[0] === undefined ? -1 : steps.indexOf(scanned[0]);
     const ids = new Set(scanned.map((s) => s.id));
     const texts = first < 0 ? [] : (await reads.messages(scope.chat, { from: first, to: steps.length })).filter((m) => ids.has(m.id)).map((m) => maskWorldInfoScanExclusions(m.text));
-    const map = await this.#d.lore.loreMap({ user: scope.user, chat: scope.chat, turn: scope.turn, messages: texts, ...(scan !== null ? { matching: scan.matching } : {}) });
+    const map = await this.#d.loreIndex.loreMap({ user: scope.user, chat: scope.chat, turn: scope.turn, messages: texts, ...(scan !== null ? { matching: scan.matching } : {}) });
     if (mapPart?.format === "template") {
-      const laid = mapPart.render({ ...loreMapFields(map) }).text;
+      const laid = mapPart.render({ ...loreMapFields(map, await loreLines(guidance)) }).text;
       if (laid.trim() !== "") blocks.push({ name: BLOCKS.loreMap, text: laid.trimEnd() });
     }
     // The world state (plan §6.9), compiled by the store and worded by the layout file in force for the chat, read whole, with each
@@ -647,7 +665,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const brief = storyBrief({ ...point, layout: briefPart });
       if (brief.text.trim() !== "") blocks.push({ name: BLOCKS.storyBrief, text: brief.text });
     }
-    return { blocks, loreMap: [...map.inPrompt, ...map.world].map((line) => line.id) };
+    return { blocks, loreMap: [...new Set([...map.inPrompt, ...map.world, ...(map.bound ?? [])].map((line) => line.id))] };
   }
 
   /**
@@ -686,7 +704,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    * for this turn (`#keptFor`: turns gone, another swipe showing on the newest reply or on an earlier one, a reply edited since its
    * turn was tied, with the text it was tied to and the text it has now, the player's own edits of their messages since RPE last read
    * them); replies made without a turn; the last turn's reply cut short, or saved otherwise than it was released (`last`, as kept
-   * before this turn began); what jobs recorded that takes effect at this turn; the runs this turn stopped at their limit
+   * before this turn began); the jobs that ended since, each by how it ended; the runs this turn stopped at their limit
    * (`stopped`); and what the player asked for through a panel. A continue of a turn (`again`) is not told again what that turn's
    * first run was told: its jobs and requests. `told`: what of the kept things this turn's telling is to be kept for.
    */
@@ -759,7 +777,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       if (tied.status === "cut") add("cut-short", notices?.line("cut_short", { message: tied.message }), { turn: last.turn });
       if (last.saved !== null) add("saved-differs", notices?.line("saved_differs", { message: tied.message, released: last.base + last.reply, saved: last.saved }), { turn: last.turn });
     }
-    if (!again) for (const job of await this.#jobsBefore(user, turn)) add("job", notices?.line(job.interrupted ? "job_interrupted" : "job_finished", job.fields), { turn: job.turn });
+    if (!again) for (const job of this.#jobsEnded(user, turn)) add("job", notices?.line(job.line, job.fields), job.turn === null ? {} : { turn: job.turn });
     // The run after a reply is the turn's own work done late (plan §10.9): one stopped at its limit is told as a job is, with what it recorded kept.
     for (const r of stopped) add("job", notices?.line("previous_run_stopped"), { turn: r.turn });
     // What the player asked for through a panel, as part of the message this turn answers (plan §10.10 "A panel action"): a swipe or a
@@ -789,30 +807,34 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   }
 
   /**
-   * What jobs recorded that takes effect at a turn (plan §10.9: just before the first turn to begin after the job ended), by job, as
-   * data for its notice: the operations that took effect and those that did not, and the job as the harness lists it, where it does.
+   * The jobs whose end a turn is told (plan §10.9, §13.5): each job of the chat whose end the store recorded after the turn before it
+   * on its own line began, and before it began itself, so that it is the first turn to begin after the job ended, where what the job
+   * recorded takes effect; one a turn started, only on a line that holds that turn. Each with the notice of how it ended and that
+   * notice's data: the job, the definition it ran as, its brief, its report, and of what it recorded the operations that took effect
+   * here and those that did not.
    */
-  async #jobsBefore(user: string, turn: TurnRow): Promise<{ turn: string; interrupted: boolean; fields: JsonObject }[]> {
-    const jobs = new Map<string, { turn: string; applied: string[]; notApplied: string[] }>();
-    for (const placed of this.#d.store.user(user).jobsBefore(turn.id)) {
-      const { job, turn: started, op } = placed.change;
+  #jobsEnded(user: string, turn: TurnRow): { turn: string | null; line: string; fields: JsonObject }[] {
+    const store = this.#d.store.user(user);
+    const parent = turn.parent === null ? null : store.turn(turn.parent);
+    const ended = jobsEndedBetween(this.#d.store.db, user, turn.chat, parent?.created ?? Number.MIN_SAFE_INTEGER, turn.created);
+    if (ended.length === 0) return [];
+    const did = new Map<string, { applied: string[]; notApplied: string[] }>();
+    for (const placed of store.jobsBefore(turn.id)) {
+      const { job, op } = placed.change;
       if (job === null) continue;
-      const did = jobs.get(job) ?? { turn: started, applied: [], notApplied: [] };
-      (placed.applied ? did.applied : did.notApplied).push(op);
-      jobs.set(job, did);
+      const ops = did.get(job) ?? { applied: [], notApplied: [] };
+      (placed.applied ? ops.applied : ops.notApplied).push(op);
+      did.set(job, ops);
     }
-    const out: { turn: string; interrupted: boolean; fields: JsonObject }[] = [];
-    for (const [job, did] of jobs) {
-      let view: JobView | undefined;
-      try {
-        view = await this.#d.harness().jobs?.get(job);
-      } catch (error) {
-        this.#d.log.warn("A job the harness ran could not be read; it is told without what the harness keeps of it.", { turn: turn.id, job, error: words(error) });
-      }
-      const known = view === undefined ? {} : { agent: view.agent, brief: view.brief, ...(view.report !== undefined ? { outcome: view.report, done: view.report } : {}) };
-      out.push({ turn: did.turn, interrupted: view?.state === "interrupted", fields: { job, ...known, applied: did.applied, not_applied: did.notApplied } });
-    }
-    return out;
+    return ended.flatMap(({ view }) => {
+      const started = view.scope.turn ?? null;
+      const line = JOB_ENDS[view.state];
+      if (line === undefined || (started !== null && !madeAfter(store, turn, started))) return [];
+      const ops = did.get(view.id);
+      // A list put in whole, shown once by a block on it (the templates' own value under ".").
+      const fields = { job: view.id, agent: view.agent, brief: view.brief, ...(view.report !== undefined ? { report: view.report } : {}), applied: { ".": ops?.applied ?? [] }, not_applied: { ".": ops?.notApplied ?? [] } };
+      return [{ turn: started, line, fields }];
+    });
   }
 
   // ---------------------------------------------------------------- the run

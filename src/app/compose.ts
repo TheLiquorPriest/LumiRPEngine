@@ -1,7 +1,8 @@
 // RPE put together (plan §4.1): every area, in the order it is mounted, over one application. The store,
-// the cast, the story record, the migration and the lore bring their tables; the tree lays out the
-// shipped level of the agents' files, keeping what an update changed of it; the turn lane builds RPH's
-// environment and the harness, and adds the connections', the Turn page's and the Files page's routes;
+// the cast, the story record, the migration and the lore bring their tables, and the migration its
+// page's route; the tree lays out the shipped level of the agents' files, keeping what an update
+// changed of it; the turn lane builds RPH's environment and the harness, and adds the connections', the
+// Turn page's and the Files page's routes; Build serves its page's messages over the turn lane's store;
 // the door to Lumiverse mounts last, playing each tagged reply through the turn lane, and opens its
 // sockets once the server listens.
 //
@@ -17,10 +18,13 @@ import { SHIPPED_GUIDANCE } from "rp-harness";
 import type { Clock, CreateHarnessOptions } from "rp-harness";
 import { loreBooks } from "../adapter/lumiverse/books";
 import { lumiverseDoor, type AdapterDeps, type LumiverseDoor } from "../adapter/lumiverse/mount";
+import { EXTENSION_IDENTIFIER } from "../adapter/lumiverse/pipe-wire";
 import { bunSocket } from "../adapter/lumiverse/socket";
+import { BUILD_MIGRATIONS, buildRoutes, BuildService } from "../build";
 import { CAST_MIGRATIONS } from "../cast";
 import { type LoreBooks, LORE_MIGRATIONS } from "../lore";
 import { MIGRATED_NOTICE, MIGRATED_PART, migratedChat } from "../migrate/briefing";
+import { migrateRoutes } from "../migrate/routes";
 import { MIGRATE_TABLES } from "../migrate/tables";
 import { STORE_MIGRATIONS } from "../store";
 import { STORY_MIGRATIONS, storyCoverage } from "../story";
@@ -109,7 +113,7 @@ export function compose(options: ComposeOptions = {}): Composition {
     { name: "store", tables: { area: "store", migrations: STORE_MIGRATIONS } },
     { name: "cast", tables: { area: "cast", migrations: CAST_MIGRATIONS } },
     { name: "story", tables: { area: "story", migrations: STORY_MIGRATIONS } },
-    { name: "migrate", tables: { area: "migrate", migrations: MIGRATE_TABLES } },
+    { name: "migrate", tables: { area: "migrate", migrations: MIGRATE_TABLES }, mount: (at) => at.routes.add("migration", migrateRoutes({ db: at.db, identifier: EXTENSION_IDENTIFIER })) },
     { name: "lore", tables: { area: "lore", migrations: LORE_MIGRATIONS } },
     { name: "prompt", tables: { area: "prompt", migrations: PROMPT_MIGRATIONS } },
     {
@@ -176,6 +180,12 @@ export function compose(options: ComposeOptions = {}): Composition {
         await turns.lane.preload();
       },
       stopping: () => turns?.harness.close(),
+    },
+    // After the turn lane: Attach goes through its store, so the folds it holds are dropped.
+    {
+      name: "build",
+      tables: { area: "build", migrations: BUILD_MIGRATIONS },
+      mount: (at) => at.routes.add("build", buildRoutes(new BuildService({ db: at.db, writes: at.writes, store: made().store, log: at.log, guidance: RPE_GUIDANCE }))),
     },
     door.area,
   ];

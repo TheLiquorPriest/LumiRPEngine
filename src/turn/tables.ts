@@ -9,8 +9,8 @@
 // page shows it (`turn_run`: where it stands, its timings and usage, what went to the chat), what RPH
 // told RPE about the run (`turn_told`: rules that fired, consents, gap checks, suggestions, attachments
 // asked for), the player's messages as RPE read them (`player_text`), what the player asked for
-// through a panel (`panel_request`), what a comparison of a chat's path found (`since_found`), and which
-// of these a turn was told (`since_told`).
+// through a panel (`panel_request`), what a comparison of a chat's path found (`since_found`), which
+// of these a turn was told (`since_told`), and each job as RPH last told of it (`turn_job`).
 
 export type TableStep = { readonly version: number; readonly name: string; readonly sql: string };
 
@@ -212,6 +212,23 @@ CREATE INDEX since_told_item ON since_told (user, item);
 DROP INDEX panel_request_after;
 ALTER TABLE panel_request DROP COLUMN after;
 CREATE INDEX panel_request_chat ON panel_request (user, chat, at);
+`,
+  },
+  {
+    version: 7,
+    name: "each job as RPH last told of it",
+    // `turn_job`: a job's view as the harness last told it (`TurnEvents.job`), with its chat and the turn that started it (null for one
+    // the user started). When it ended is the store's record of it (`job_end`, an earlier area's table).
+    sql: `
+CREATE TABLE turn_job (
+  user TEXT NOT NULL,
+  job TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  turn TEXT,
+  view TEXT NOT NULL,
+  PRIMARY KEY (user, job)
+);
+CREATE INDEX turn_job_chat ON turn_job (user, chat);
 `,
   },
 ];

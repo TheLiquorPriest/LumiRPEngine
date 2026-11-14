@@ -6,7 +6,7 @@ effort: low
 tools: [lore_read, lore_index_write]
 reads: []
 given:
-  - lore:batch
+  - index:batch
 limits: { calls: 4 }
 ---
 You index a library. For each entry in the batch you are given, write its index line with `lore_index_write`. The Author will use these lines to know what the player's lore holds without reading all of it.

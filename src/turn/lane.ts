@@ -2,7 +2,8 @@
 // it, with the turn lane that plays each tagged reply. What each port is, and who gives it:
 //
 //   files    the tree (`src/tree/`)                 prompt   this lane: the layout each request carried, maps by preset
-//   chat     the adapter's chat port                lore     the lore lane's `Lore`, through its port
+//   chat     the adapter's chat port                lore     the lore lane's `Lore`, through its port; its index, its tool
+//                                                            (`lore_index_write`) and the next batch given by name (`index:batch`)
 //   tools    the engine's (`src/iface/`), the cast's (`src/cast/`) and the story's (`src/story/`), each
 //            worded by its file in force for the chat, each writing through the write queue under the
 //            environment's approvals
@@ -14,7 +15,8 @@
 // Left out, as the contract allows: `approvals` (every lane is Auto) and `switches` (everything that
 // runs a command or calls out is off), and `stores` (RPE reaches no other stores yet).
 
-import { createHarness, type CreateHarnessOptions } from "rp-harness";
+import { join } from "node:path";
+import { createHarness, type CreateHarnessOptions, loadGuidance } from "rp-harness";
 import type { Clock, Environment, Harness, HostTool, Scope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
@@ -22,12 +24,12 @@ import type { App } from "../app";
 import { castFacts, castTools, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapLines, mapView, stateScan } from "../iface";
-import { EntryNumbers, Lore, type LoreBooks, lorePort, storeWorlds } from "../lore";
+import { EntryNumbers, Lore, type LoreBooks, LoreIndex, loreLines, lorePort, loreTools, overlayWrite, storePath, storeWorlds } from "../lore";
 import { ALL_PACKS } from "../packs/index";
 import { hashJson } from "../shared/hash";
 import { openStore, type Store, storedWorlds, timeDue } from "../store";
 import { storyFacts, storyTools } from "../story";
-import { pruneChat, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
+import { CHATS_FOLDER, pruneChat, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
 import { turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
 import { kvStore, servedUser } from "./kv";
@@ -40,7 +42,7 @@ import { SinceKept } from "./since";
 import { stagesAt } from "./stage";
 import { guidanceTexts } from "./texts";
 import { type TurnTrace, turnTrace } from "./trace";
-import { type MigratedSource, TurnLane } from "./turns";
+import { type MigratedSource, NO_SESSION, TurnLane } from "./turns";
 
 /**
  * RPE's file port for the one user it serves, that user read each time the port is asked, since it may
@@ -159,6 +161,8 @@ export interface Turns {
   player: PlayerSide;
   trace: TurnTrace;
   lore: Lore;
+  /** The lore index: what indexing runs wrote of each entry of a chat's lore, beside what the database holds. */
+  loreIndex: LoreIndex;
   /** The notes agents write, which follow the turn. */
   notes: TreeNotes;
   /** The suggestions agents file of the tree's files. */
@@ -189,33 +193,32 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const runs = new Runs(app.db, app.writes);
   const player = new PlayerSide(app.db, app.writes);
   const since = new SinceKept(app.db);
-  const lore = new Lore({ books: options.books, worlds: storeWorlds(store), turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes) });
+  const worlds = storeWorlds(store);
+  const lore = new Lore({ books: options.books, worlds, turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes) });
+  // The index's readable file is written at the top of the chat's folder, worded by the lore's lines in force for the chat.
+  const loreIndex = new LoreIndex({
+    lore,
+    db: app.db,
+    writes: app.writes,
+    path: storePath(store),
+    file: {
+      folder: (user, chat) => {
+        const folders = chats.folders(user, chat);
+        return folders === null ? null : join(app.paths.files, CHATS_FOLDER, folders.character, folders.chat);
+      },
+      lines: (at) => loreLines(loadGuidance(files, { ...at, session: NO_SESSION })),
+    },
+    now: () => clock.now(),
+  });
+  const overlay = overlayWrite(worlds, () => clock.now());
   const facts = new FactsRegistry();
   facts.add(turnFacts(store, (user, turn) => runs.record(user, turn)));
+  facts.add(loreIndex.facts());
   // Who was on stage at each turn the cast counts: the open scene there, as the story record holds it; a turn with none, nobody.
   facts.add(castFacts({ store, onStage: async ({ user, chat }, turns) => new Map([...stagesAt(store, user, chat, turns)].map(([turn, stage]) => [turn, stage.who])) }));
   // The story's counts work out the history window as the prompt's is cut, on the chat's own settings.
   facts.add(storyFacts({ store, window: async (scope) => (await turnSettings(files, scope, app.log)).window }));
-  const traced = turnTrace({ live: app.live, files, chatOfRun: (run) => runs.chatOfRun(run), log: app.log });
-  const trace: TurnTrace = {
-    ...traced,
-    event(record) {
-      traced.event(record);
-      const { event } = record;
-      if (event.kind !== "job" || event.job.ended === undefined) return;
-      // A job that has ended records nothing more, and what it recorded takes effect before the next turn to begin (plan §10.9). Its
-      // writes may also have opened or closed a scene of the turn that started it (plan §11).
-      const { id: job, scope } = event.job;
-      const ended = app.writes.run(() => store.user(scope.user).endJob(job), "recording that a job ended").catch((error: unknown) => {
-        app.log.error("A job's end could not be recorded, so what it changed does not take effect.", { job, error: error instanceof Error ? error.message : String(error) });
-      });
-      const turn = scope.turn;
-      if (turn === undefined) return;
-      void ended
-        .then(() => lane.sessionsAfter(scope.user, scope.chat, turn))
-        .catch((error: unknown) => app.log.error("The sessions of a job's scene could not be brought up to date.", { turn, error: error instanceof Error ? error.message : String(error) }));
-    },
-  };
+  const trace = turnTrace({ live: app.live, files, chatOfRun: (run) => runs.chatOfRun(run), log: app.log });
   const chatNow = (): ChatReads => {
     const parts = options.lumiverse();
     if (parts === null) throw new Error("RPE is not set up for a Lumiverse, so it has no chat to read.");
@@ -227,18 +230,19 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   /**
    * The host's tools for a scope: one list for its session (the contract's `ToolsPort`), every family's in it. The engine's are given
    * squares on a map for the operations that name one, and the map that `world_query` shows, both worded by the map's lines in force,
-   * and what time brings due.
+   * and what time brings due; the story's `overlay` operation writes the lore's overlays.
    */
   const hostTools = async (scope: Scope): Promise<HostTool[]> => {
     const texts = guidanceTexts(files, scope);
     const asked = env.approvals === undefined ? {} : { approvals: env.approvals };
     const lines = await mapLines(texts);
-    const [engine, cast, story] = await Promise.all([
+    const [engine, cast, story, indexing] = await Promise.all([
       engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: stateScan, grid: gridMoves(lines), map: mapView(lines), due, ...asked }),
       castTools({ store, writes: app.writes, files: texts, sources, now: () => clock.now() }),
-      storyTools({ store, writes: app.writes, files: texts, now: () => clock.now() }),
+      storyTools({ store, writes: app.writes, files: texts, overlay, now: () => clock.now() }),
+      loreTools({ index: loreIndex, guidance: loadGuidance(files, scope) }),
     ]);
-    return [...engine, ...cast, ...story];
+    return [...engine, ...cast, ...story, ...indexing];
   };
   const env: Environment = {
     id: "rpe",
@@ -257,7 +261,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     models: app.models,
     store: kvStore(app.db, app.writes, owner),
     trace,
-    events: turnEvents({ db: app.db, writes: app.writes, store, runs, files, sources, notes, suggestions, now: () => clock.now(), log: app.log }),
+    // A job's end is told through `events.job`, which keeps it; the lane, made below, brings the sessions of its turn up to date.
+    events: turnEvents({ db: app.db, writes: app.writes, store, runs, files, sources, loreIndex, notes, suggestions, now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), log: app.log }),
     clock,
     log: app.log,
   };
@@ -269,6 +274,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     chats,
     prompts,
     lore,
+    loreIndex,
     runs,
     player,
     since,
@@ -284,5 +290,5 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     clock,
     log: app.log,
   });
-  return { lane, store, harness, env, facts, files, chats, prompts, runs, player, trace, lore, notes, suggestions };
+  return { lane, store, harness, env, facts, files, chats, prompts, runs, player, trace, lore, loreIndex, notes, suggestions };
 }

@@ -1,15 +1,18 @@
 // A job's work as the turn lane hears of it (plan §10.9, §13.5): what a job records, with the turn that
 // started it, takes effect just before the first turn to begin after the harness says the job ended, and
-// no turn begun before that has its state changed; that turn is told the job finished. And an engine
-// handler that throws, on such a change or while `world_apply` works out a call, is an error for
-// people, not for a model. Played through the stand-in Lumiverse on the scripted model, on a chat that
-// plays an invented world; the job's end is told as the harness tells it, through the trace. Every name
-// is invented.
+// no turn begun before that has its state changed; that turn is told how the job ended, finished or not,
+// with its brief, its report and what of it took effect. Jobs the Author starts with `job_start` run on
+// after the reply, and the next turn is told how each ended. And an engine handler that throws, on such
+// a change or while `world_apply` works out a call, is an error for people, not for a model. Played
+// through the stand-in Lumiverse on the scripted model, on a chat that plays an invented world. Every
+// name is invented.
 
 import { afterEach, expect, test } from "bun:test";
-import type { TraceRecord } from "rp-harness/contract";
+import type { JobState } from "rp-harness/contract";
+import { type Answer, gate } from "rp-harness/testing/rig";
 import type { LiveEvent } from "../../src/app/live";
 import type { ChangeInput } from "../../src/store";
+import { jobsEndedBetween } from "../../src/turn/jobs";
 import { world } from "../iface/rig";
 import { CHAT, CONNECTION, openTurnBed, playsWorld, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
 
@@ -38,21 +41,12 @@ const JOB = "job-ledger";
 /** What a job's agent records, as the engine's tools record it for a job: with the turn that started the job. */
 const sourMood: ChangeInput = { lane: "engine", op: "set", value: { type: "set", entity: "bram", field: "mood", value: "sour" }, by: "steward", source: "gm", job: JOB };
 
-/** The harness telling the host that the job `turn` started has ended, as its trace does. */
-function jobEnded(b: TurnBed, turn: string, session: string): void {
+/** The harness telling the host that the job `turn` started has ended (`TurnEvents.job`), as it does when a job ends. */
+async function jobEnded(b: TurnBed, turn: string, session: string): Promise<void> {
   const now = Date.now();
-  const record: TraceRecord = {
-    seq: 1,
-    run: JOB,
-    scope: { user: USER, chat: CHAT, session, turn },
-    at: now,
-    agent: { id: "a1", definition: "steward", job: JOB },
-    event: {
-      kind: "job",
-      job: { id: JOB, agent: "steward", brief: "Tally the bar's stock.", state: "done", scope: { user: USER, chat: CHAT, session, turn }, startedBy: { id: "a0", definition: "author" }, started: now - 5, ended: now, usage: { calls: 1, input: 10, cacheRead: 0, cacheWrite: 0, output: 5 } },
-    },
-  };
-  b.turns.env.trace.event(record);
+  const scope = { user: USER, chat: CHAT, session, turn };
+  const usage = { calls: 1, input: 10, cacheRead: 0, cacheWrite: 0, output: 5 };
+  await b.turns.env.events.job?.(scope, { id: JOB, agent: "steward", brief: "Tally the bar's stock.", state: "done", scope, startedBy: { id: "a0", definition: "author" }, started: now - 5, ended: now, usage, report: "The stock is short by a cask." });
 }
 
 test("a job's change takes effect at the first turn to begin after the harness says the job ended, and changes no turn begun before", async () => {
@@ -65,28 +59,79 @@ test("a job's change takes effect at the first turn to begin after the harness s
   const second = await play(b, "I order a drink.");
   expect(mood(second)).toBe("steady");
 
-  jobEnded(b, first, b.turns.runs.record(USER, first)!.session);
+  await jobEnded(b, first, b.turns.runs.record(USER, first)!.session);
   const third = await play(b, "I wait for the change.");
   expect(mood(third)).toBe("sour");
   expect(mood(second)).toBe("steady");
 });
 
-test("the turn a job's changes take effect at is told the job finished, once, and a swipe of it is told again", async () => {
+test("the turn a job's changes take effect at is told the job finished, with its brief, its report and what took effect, once; a swipe of it is told again", async () => {
   const b = await worldBed({ answers: [replying("Bram wipes the bar."), replying("Bram scowls at the till."), replying("Bram sighs at the till."), replying("Bram counts coins.")] });
   const store = b.turns.store.user(USER);
   const first = await play(b, "I sit at the bar.");
   await b.app.writes.run(() => store.addChanges(first, [sourMood]));
-  jobEnded(b, first, b.turns.runs.record(USER, first)!.session);
+  await jobEnded(b, first, b.turns.runs.record(USER, first)!.session);
 
   await play(b, "I order a drink.");
   await play(b, null);
   await play(b, "I count my coins.");
   const sent = b.model.requests.map((r) => JSON.stringify(r.messages));
-  const told = `A job finished: ${JOB}.`;
+  const told = `A job finished: ${JOB} (steward). Its brief: Tally the bar's stock. Its report: The stock is short by a cask. Of what it recorded, these took effect now: set.`;
   expect(sent[0]).not.toContain(told);
   expect(sent[1]).toContain(told);
   expect(sent[2]).toContain(told);
-  expect(sent[3]).not.toContain(told);
+  expect(sent[3]).not.toContain(`A job finished: ${JOB}`);
+});
+
+test("jobs the Author starts run on after the reply, and the next turn is told how each ended: finished, failed or cancelled", async () => {
+  const briefs = { done: "Note that Bram has soured.", failed: "Count the bar's stock.", cancelled: "List the inn's regulars." };
+  const held = { done: gate(), failed: gate(), cancelled: gate() };
+  const setMood = { op: "set", at: "bram", key: "mood", value: "sour", source: { from: "prose" } };
+  const author: Answer[] = [
+    { pieces: [{ text: "<intent>Set the bookkeeping going.</intent>" }, ...Object.values(briefs).map((brief) => ({ call: "job_start", args: { agent: "historian", brief } }))] },
+    { pieces: [{ text: "<reply>Bram wipes the bar.</reply>" }] },
+    replying("Bram pours."),
+    replying("Bram counts coins."),
+  ];
+  const jobs: Record<string, Answer[]> = {
+    [briefs.done]: [{ pieces: [{ hold: held.done }, { call: "world_apply", args: { operations: [setMood] } }] }, { pieces: [{ text: "Bram's mood is recorded as sour." }] }],
+    [briefs.failed]: [{ pieces: [{ hold: held.failed }], end: { error: "The provider refused the call." } }],
+    [briefs.cancelled]: [{ pieces: [{ hold: held.cancelled }, { text: "The regulars are Tam and Odile." }] }],
+  };
+  // Each call answered from its own agent's list, whatever order the Author's and the jobs' calls come in: the Author holds job_start.
+  const route: Answer = (request) => {
+    const brief = request.tools.some((t) => t.name === "job_start") ? null : Object.keys(jobs).find((b) => JSON.stringify(request.messages).includes(b));
+    const next = (brief === null ? author : jobs[brief ?? ""])?.shift();
+    if (next === undefined) throw new Error("the script has no answer left for this call");
+    return typeof next === "function" ? next(request) : next;
+  };
+  const b = await worldBed({ answers: Array.from({ length: 8 }, () => route) });
+  const first = await play(b, "I sit at the bar.");
+
+  // Two jobs run at once by default, so the third to begin waits for a place. The player cancels one, wherever it stands; the other two
+  // go on after the reply.
+  const views = (await b.turns.harness.jobs?.list({ user: USER, chat: CHAT })) ?? [];
+  const id = (brief: string): string => views.find((v) => v.brief === brief)?.id ?? "";
+  expect(views.map((v) => [v.brief, v.scope.turn, v.ended]).sort()).toEqual(Object.values(briefs).map((brief) => [brief, first, undefined]).sort());
+  expect(views.map((v) => v.state).sort()).toEqual(["queued", "running", "running"]);
+  expect((await b.turns.harness.jobs?.cancel(id(briefs.cancelled)))?.state).toBe("cancelled");
+  held.done.open();
+  held.failed.open();
+  const states: JobState[] = ["done", "failed", "cancelled"];
+  await b.until("each job's end to be kept", () => jobsEndedBetween(b.app.db, USER, CHAT, 0, Number.MAX_SAFE_INTEGER).filter((j) => states.includes(j.view.state)).length === 3);
+
+  const second = await play(b, "I order a drink.");
+  await play(b, "I count my coins.");
+  const told = JSON.stringify(b.model.requests.at(-2)?.messages);
+  expect(told).toContain(`A job finished: ${id(briefs.done)} (historian). Its brief: ${briefs.done} Its report: Bram's mood is recorded as sour. Of what it recorded, these took effect now: set.`);
+  expect(told).toContain(`A job failed before it finished: ${id(briefs.failed)} (historian). Its brief: ${briefs.failed}`);
+  expect(told).toContain(`A job was cancelled before it finished: ${id(briefs.cancelled)} (historian). Its brief: ${briefs.cancelled}`);
+  expect(told.match(/A job finished/g)).toHaveLength(1);
+  // What the finished job recorded takes effect at the turn it is told to; the turn after is told nothing of any of them again.
+  const store = b.turns.store.user(USER);
+  expect([store.stateAt(first).state.world.entities.bram?.fields.mood, store.stateAt(second).state.world.entities.bram?.fields.mood]).toEqual(["steady", "sour"]);
+  const after = JSON.stringify(b.model.requests.at(-1)?.messages);
+  for (const line of [`A job finished: ${id(briefs.done)}`, `A job failed before it finished: ${id(briefs.failed)}`, `A job was cancelled before it finished: ${id(briefs.cancelled)}`]) expect(after).not.toContain(line);
 });
 
 /**
@@ -123,7 +168,7 @@ test("an engine handler that throws is told to the log and to the live view of t
   const first = await play(b, "I sit at the bar.");
   await b.app.writes.run(() => store.addChanges(first, [sourMood]));
   const published = breakSetHandler(b);
-  jobEnded(b, first, b.turns.runs.record(USER, first)!.session);
+  await jobEnded(b, first, b.turns.runs.record(USER, first)!.session);
   const second = await play(b, "I wait.");
 
   expect(store.stateAt(second).state.world.entities.bram?.fields.mood).toBe("steady");
