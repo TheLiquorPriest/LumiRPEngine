@@ -7,7 +7,7 @@ file_off: {{path}} has been switched off since this session opened. The copy in 
 prompt_unmapped: This preset's prompt has not been mapped yet. The whole prompt is in front of you as always. Its parts cannot be named until it is mapped.
 prompt_shape: The prompt's shape has changed since it was mapped: {{what}}. Nothing is stopped by this.
 migrated_chat: This chat was carried over from the earlier build. Its state, cast and story record are as that build left them. {{carried}}
-unplayed: Messages {{range}} were added to the chat without a turn of yours.
+unplayed: Without a turn of yours, the chat gained the messages numbered {{range}}, counting its first message as 0. They are part of the chat history already in front of you, as far back as that history reaches.
 edited: Message {{message}} was edited after its turn.
 deleted: {{count}} turn(s) were deleted since the last one.
 swipe_flipped: An earlier reply ({{message}}) was changed to another of its swipes. The turns after it were applied again on it. {{dropped}}
