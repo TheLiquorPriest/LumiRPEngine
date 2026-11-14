@@ -25,9 +25,10 @@ arguments:
   operations.respect: "relationship: from -100 to 100, when useful."
   operations.fear: "relationship: from -100 to 100, when useful."
   operations.how: "knowledge: how they learned it."
+  operations.secret: "knowledge: a secret the lore marks that they hold, by the id the lore map shows. It is theirs from now on, as when a perception names it; given in place of another, the other is theirs no longer, unless other knowledge of theirs still gives it. A new entry needs text, a secret, or both."
   operations.files: "filed: the old mind files carried over from the earlier build that have been filed into the record, by name (core.md). From then on their agent is no longer given them; they stay on the record."
   operations.accept: "growth: true to accept a change a character's reflection proposed, by its id; false to set it back to proposed."
   operations.drop: "bind: true to take the source away. growth, history, relationship, knowledge: true to strike it; say why. Struck knowledge of a secret takes the secret back from them, unless other knowledge of theirs still gives it."
   operations.why: "cast: why this casting. With drop: why it goes."
 ---
-Writes a character's record, as many operations as you need in one call: their casting, the sources bound to them, their base, their growth, history, relationships and knowledge, and which of their old mind files have been filed. Casting, growth, history, relationships, knowledge and filing belong to this turn: if the turn is swiped or deleted, they go with it. The sources and the base stand outside turns, and every version of the base is kept. The answer gives what each operation wrote and how that part of the record now stands.
+Writes a character's record, as many operations as you need in one call: their casting, the sources bound to them, their base, their growth, history, relationships and knowledge, and which of their old mind files have been filed. Casting, growth, history, relationships, knowledge and filing belong to this turn: if the turn is swiped or deleted, they go with it, and so do the secrets their knowledge made theirs. The sources and the base stand outside turns, and every version of the base is kept. The answer gives what each operation wrote and how that part of the record now stands, with the secrets knowledge made theirs and those it let go.

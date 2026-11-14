@@ -58,6 +58,6 @@ test("a turn whose Author ends with no reply is given the rule's text and one mo
   const turn = await settledTurn(b, out.generationId!);
 
   const sent = b.model.requests.map((r) => JSON.stringify(r.messages));
-  expect(sent.map((text) => text.includes("You are about to end the turn and the player has no reply."))).toEqual([false, true]);
+  expect(sent.map((text) => text.includes("This turn is about to end, and the player has no reply. The reply is still owed"))).toEqual([false, true]);
   expect(b.turns.runs.record(USER, turn.id)).toMatchObject({ status: "released", reply: "The lamp turns." });
 });

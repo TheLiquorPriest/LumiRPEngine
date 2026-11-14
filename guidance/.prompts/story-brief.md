@@ -1,6 +1,9 @@
 ---
-description: The layout of the story brief the Author is given at the start of every turn. The current scene, the threads held hot, the arcs of those the scene has on stage, the futures whose time has come, and the player model, each as the story record holds it, with its id. Each part appears only when there is something in it. It lays out what the record holds; it asks for nothing.
+description: The layout of the story brief the Author is given at the start of every turn. The current scene, the threads held hot, the arcs of those the scene has on stage, the futures whose time has come, and the player model, each as the story record holds it, with its id. Each part appears only when there is something in it. An agent given the brief by name (story:brief) when nothing is in it is given the none part, which says so. It lays out what the record holds; it asks for nothing.
 ---
+{{#none}}
+Nothing to brief: no scene is open, no thread is held hot, no future's time has come, and nothing is recorded of the player.
+{{/none}}
 {{#scene}}
 ### The scene [{{scene.id}}]{{#scene.title}}: {{scene.title}}{{/scene.title}}
 

@@ -1,0 +1,122 @@
+// A continue as Lumiverse makes one (plan §10.8, §10.10 "Continue": the same turn, extended; its changes are added to). Lumiverse
+// announces a continue naming the swipe it goes on and no message, and saves the text that swipe held, the preset's continue postfix,
+// then the new text. RPE goes on with the turn the message is tied to, ties it again to the joined text, and tells the next turn
+// nothing of the join; a continue that saved only the join saved nothing new. And a continue plays in the session its turn played in,
+// even where that turn moved the story on to a new scene. Played through the stand-in Lumiverse, which makes a continue as Lumiverse
+// does (its postfix one space unless the preset says otherwise), on the scripted model. Every name is invented.
+
+import { afterEach, expect, test } from "bun:test";
+import { type Answer, gate } from "rp-harness/testing/rig";
+import { textHash } from "../../src/adapter/lumiverse/wire";
+import type { StopAnswer, TurnList } from "../../src/ui/api";
+import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
+
+const beds: TurnBed[] = [];
+afterEach(async () => {
+  for (const b of beds.splice(0)) await b.close();
+});
+
+async function bed(options: TurnBedOptions): Promise<TurnBed> {
+  const b = await openTurnBed(options);
+  beds.push(b);
+  return b;
+}
+
+async function play(b: TurnBed, type: "normal" | "continue", said?: string): Promise<string> {
+  if (said !== undefined) b.host.send(CHAT, said);
+  const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET, type });
+  expect(out.error).toBeNull();
+  return out.generationId!;
+}
+
+/** The Author's first call in a continue: its intent, then thirty minutes passed in the world, recorded on the turn. */
+const PASS_TIME: Answer = { pieces: [{ text: "<intent>Then the storm.</intent>" }, { call: "world_apply", args: { operations: [{ op: "pass_time", minutes: 30, source: { from: "prose" } }] } }] };
+
+/** The kinds of what the harness was told had happened since the last turn, in its `n`th request. */
+const toldKinds = (b: TurnBed, n: number): string[] => b.requests[n]!.since.map((s) => s.kind);
+
+test("a continue as Lumiverse announces and saves it extends the turn its reply is tied to: the same turn, on the path, tied to the joined text, with what it recorded; the next turn is told nothing of the join", async () => {
+  const b = await bed({ answers: [replying("The lamp turns."), PASS_TIME, replying("And the sea calms."), replying("Wren nods.")] });
+  const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+  const store = b.turns.store.user(USER);
+  const before = store.changes(turn.id);
+
+  const generation = await play(b, "continue");
+  await b.until("the continue's end to be recorded", () => (b.turns.runs.byGeneration(USER, generation)?.settled ?? null) !== null && b.turns.runs.ofChat(USER, CHAT).length === 0);
+  expect(String(b.db.rows("SELECT content FROM messages WHERE id = ?", turn.message!)[0]!.content)).toBe("The lamp turns. And the sea calms.");
+  expect(b.turns.runs.byGeneration(USER, generation)).toMatchObject({ turn: turn.id, target: turn.message, saved: null });
+  expect(store.turn(turn.id)).toMatchObject({ status: "done", message: turn.message, hash: textHash("The lamp turns. And the sea calms.") });
+  expect(store.changes(turn.id).slice(before.length).map((c) => [c.lane, c.applied])).toEqual([["engine", true]]);
+  const list = (await b.page<TurnList>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
+  expect(list.map((t) => [t.id, t.kind, t.onPath])).toEqual([[turn.id, "continue", true]]);
+
+  const next = await settledTurn(b, await play(b, "normal", "I wait for the dawn."));
+  expect(next.parent).toBe(turn.id);
+  expect(toldKinds(b, 2)).not.toContain("saved-differs");
+});
+
+test("a continue Lumiverse saved with the preset's join is not told as saved otherwise than released", async () => {
+  const b = await bed({ answers: [replying("The lamp turns."), replying("And the sea calms."), replying("Wren nods.")] });
+  b.host.presets.get(PRESET)!.continuePostfix = "\n\n";
+  const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+  await settledTurn(b, await play(b, "continue"));
+  expect(b.turns.store.user(USER).turn(turn.id)).toMatchObject({ status: "done", hash: textHash("The lamp turns.\n\nAnd the sea calms.") });
+  await settledTurn(b, await play(b, "normal", "I wait for the dawn."));
+  expect(toldKinds(b, 2)).not.toContain("saved-differs");
+});
+
+test("a continue stopped before its first word, which Lumiverse saved as the text and the preset's join, saved nothing new: what it recorded is taken back, and the next turn is told nothing of it", async () => {
+  const b = await bed({ answers: [replying("The lamp turns."), PASS_TIME, { pieces: [{ hold: gate() }, { text: "<reply> Then it stops.</reply>" }] }, replying("Wren nods.")] });
+  const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+  const store = b.turns.store.user(USER);
+  const before = store.changes(turn.id);
+  const continuing = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET, type: "continue" });
+  await b.until("the continue to record its change on the turn", () => store.changes(turn.id).length > before.length);
+  expect((await b.page<StopAnswer>("POST", `/api/v1/chats/${CHAT}/turns/${turn.id}/stop`)).body).toEqual({ stopped: true });
+  const out = await continuing;
+  expect(out.stopped).toBe(true);
+  await b.until("the continue's end to be recorded", () => (b.turns.runs.byGeneration(USER, out.generationId!)?.settled ?? null) !== null);
+  // Lumiverse kept the stopped continue, its thinking block holding RPE's progress line: the text and its join, nothing more.
+  expect(String(b.db.rows("SELECT content FROM messages WHERE id = ?", turn.message!)[0]!.content)).toBe("The lamp turns. ");
+  expect(store.changes(turn.id)).toEqual(before);
+  expect(store.turn(turn.id)).toMatchObject({ status: "done", message: turn.message, hash: textHash("The lamp turns. ") });
+
+  await settledTurn(b, await play(b, "normal", "I wait for the dawn."));
+  const told = toldKinds(b, 2);
+  for (const kind of ["cut-short", "saved-differs", "edit"]) expect(told).not.toContain(kind);
+});
+
+test("a continue of the turn that moved the story on to a new scene plays in the session that turn played in, with that turn's own work", async () => {
+  const b = await bed({
+    answers: [
+      // The first turn opens the watch with `story_record`, after its intent record; the second closes it and opens the dawn.
+      { pieces: [{ text: "<intent>The watch begins.</intent>" }, { call: "story_record", args: { operations: [{ op: "scene", new: true, title: "Night watch", place: "the lamp room", who: ["Wren Hale"] }] } }] },
+      { pieces: [{ text: "<reply>Wren trims the wick.</reply>" }] },
+      {
+        pieces: [
+          { text: "<intent>INTENT-MORNING Morning comes.</intent>" },
+          {
+            call: "story_record",
+            args: {
+              operations: [
+                { op: "scene", close: true, summary: "Wren kept the light burning through the storm." },
+                { op: "scene", new: true, title: "Dawn", place: "the gallery", who: ["Wren Hale"] },
+              ],
+            },
+          },
+        ],
+      },
+      { pieces: [{ text: "<reply>The sky greys over the sea.</reply>" }] },
+      replying(" The gulls wake."),
+    ],
+  });
+  await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+  const moved = await settledTurn(b, await play(b, "normal", "I wait for the light."));
+  const played = b.requests[1]!.scope.session;
+  // The turn closed the watch's session and opened the dawn's, as its work.
+  expect(b.turns.store.user(USER).sessions(CHAT).map((s) => [s.openedBy === moved.id, s.closedBy === moved.id])).toContainEqual([true, false]);
+
+  await settledTurn(b, await play(b, "continue"));
+  expect(b.requests[2]).toMatchObject({ kind: "continue", scope: { turn: moved.id, session: played } });
+  expect(JSON.stringify(b.model.requests.at(-1)!.messages)).toContain("INTENT-MORNING");
+});

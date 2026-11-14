@@ -10,6 +10,7 @@ lines:
   not_world: "This chat does not play a world in RPE."
   no_revision: "The revision of the world this chat plays is not in RPE, so nothing can be changed in it."
   no_turn: "This chat has no turn yet, and a change made from a panel is kept with the chat's newest turn: nothing was changed."
+  branch_no_turn: "This chat was branched from another and has no turn of its own yet. A change made from a panel is kept with this chat's newest turn, and the newest one here is the other chat's, so nothing was changed. It can be made once a turn has been played in this chat."
   unknown_action: "unknown action {{action}}"
   not_known: "{{action}}: it names no one and nothing you know"
   not_payable: "{{action}}: {{why}}"
@@ -31,4 +32,5 @@ keys:
   engine.hint: "a hint opened"
   spawn: "something made"
   economy.txn: "a line in the money's journal"
+  materialize: "accounts the world gave, opened"
 ---

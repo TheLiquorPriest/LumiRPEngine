@@ -16,6 +16,9 @@
 //     step: null                 lets the window grow by this many before it is cut back to its size; null is off
 //     hold: false                keeps a message the story record does not cover in the prompt: true or false,
 //                                or { on: true, cap: 40 }, cap being the most messages it holds past the window
+//   since:
+//     editedBudget: 4000         tokens the briefing's "Since the last turn" spends on replies edited after their
+//                                turns, told in full, the newest first; the rest named in one line; null tells all
 //   passConnection: <name>       the connection a request with no tag is passed on to (global level only;
 //                                absent: the default connection)
 //
@@ -42,6 +45,8 @@ export interface TurnSettings {
   /** How long a turn waits for the previous turn's run, in milliseconds. */
   previousRunMs: number;
   hiddenReadable: boolean;
+  /** Tokens the replies edited after their turns may take in full in a briefing; null for no bound. */
+  editedBudget: number | null;
   /** The history window (`src/story/window`). */
   window: WindowSettings;
   /** The cast's tools and views, for the chat. */
@@ -66,6 +71,9 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   previousRunMs: 20_000,
   // Appendix D.1: as today's setting, which is off.
   hiddenReadable: false,
+  // Plan §6.3 tells an edited reply with its old and new text. A carried chat may find hundreds at its first turn: the bound keeps that
+  // block within what the world state is given (`worldState.budget`), room for about three ordinary replies with both their texts.
+  editedBudget: 4000,
   // Appendix D.1, as the window's own module keeps them.
   window: WINDOW_DEFAULTS,
   // Appendix D.1, as each area keeps its own.
@@ -84,6 +92,7 @@ const DEFS = {
   carry: { key: "carry", default: TURN_DEFAULTS.carry, takes: { type: "oneOf", values: CARRIES }, perConnection: false },
   previousRun: { key: "limits.previousRun", default: TURN_DEFAULTS.previousRunMs / 1000, takes: { type: "number", least: 0 }, perConnection: false },
   hiddenReadable: { key: "chat.hiddenReadable", default: TURN_DEFAULTS.hiddenReadable, takes: { type: "yesNo" }, perConnection: false },
+  editedBudget: { key: "since.editedBudget", default: TURN_DEFAULTS.editedBudget, takes: { type: "whole", least: 0 }, orNone: true, none: "every one in full", perConnection: false },
   window: { key: "history.window", default: TURN_DEFAULTS.window.size, takes: { type: "whole", least: 1 }, orNone: true, none: "every message kept", perConnection: false },
   step: { key: "history.step", default: TURN_DEFAULTS.window.step, takes: { type: "whole", least: 1 }, orNone: true, none: "off", perConnection: false },
   // `hold: true` is `hold: { on: true }`, its cap the default.
@@ -150,6 +159,7 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
     carry: value(DEFS.carry) as Carry,
     previousRunMs: (value(DEFS.previousRun) as number) * 1000,
     hiddenReadable: value(DEFS.hiddenReadable) as boolean,
+    editedBudget: value(DEFS.editedBudget) as number | null,
     window: {
       size: value(DEFS.window) as number | null,
       step: value(DEFS.step) as number | null,

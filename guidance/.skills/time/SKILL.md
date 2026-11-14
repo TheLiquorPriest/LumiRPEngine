@@ -37,6 +37,8 @@ When the story jumps days or weeks:
 
 If the clock is wrong (the story says dusk and the clock says noon), set it with a `set` operation on the time. The prose is its source. Time set backwards is reported; say in your answer that you did it and why.
 
+In a chat with no world the clock has no date until you set one: nobody chose its start, so no date is shown to anyone, and times are given as how long from now. `set` the time, or `pass_time` `until`, with a date and a time (YYYY-MM-DD HH:MM), once the story says when it is. A span or a time of day alone only moves the clock.
+
 ## The rest
 
 The calendar's holidays, a person's routine, schedules, the weather: each has a tool of its own, found with `tool_search`.

@@ -70,6 +70,34 @@ describe("RPE restarted mid-turn", () => {
     ]);
   });
 
+  test("stopped while its run went on after the reply was saved and its turn tied: the next start closes the run as stopped mid-run, and the chat can be settled", async () => {
+    const after = gate();
+    const b = await bed({
+      answers: [
+        // The reply, then work after it that holds until RPE stops.
+        { pieces: [{ text: "<intent>One exchange, then a note.</intent>" }, { text: "<reply>The lamp turns.</reply>" }, { call: "todo", args: { items: [{ text: "note the storm", done: false }] } }] },
+        { pieces: [{ hold: after }, { text: "Noted." }] },
+        // The Settle now run, after the start.
+        { pieces: [{ text: "Nothing more to settle." }] },
+      ],
+    });
+    const first = await play(b, "I climb the stairs.");
+    const run = await b.until("the turn to be tied with its run still at work", () => {
+      const r = b.turns.runs.byGeneration(USER, first);
+      const tied = r === null ? null : b.turns.store.user(USER).turn(r.turn);
+      return r !== null && r.settled !== null && tied?.status === "done" && b.turns.runs.running(USER, r.turn) !== undefined ? r : null;
+    });
+    await b.restart();
+
+    // Before any turn of the chat: the run's own record and the pages say it ended, when, and how; the turn stays tied, on the path.
+    expect(b.turns.runs.ofTurn(USER, run.turn).map((r) => [r.status, r.released !== null, r.ended !== null, r.error?.detail])).toEqual([["failed", true, true, "RPE stopped while this run was going on."]]);
+    const list = (await b.page<TurnList>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
+    expect(list.map((t) => [t.id, t.status, t.onPath])).toEqual([[run.turn, "failed", true]]);
+    expect(b.turns.store.user(USER).turn(run.turn)).toMatchObject({ status: "done", hash: textHash("The lamp turns.") });
+    const settling = await b.page<{ turn: string; run: string }>("POST", `/api/v1/chats/${CHAT}/settle`, {});
+    expect(settling).toEqual({ status: 200, body: { turn: run.turn, run: expect.any(String) } });
+  });
+
   test("stopped while its reply was being written: Lumiverse keeps nothing, and the next turn ends the run, in the words of the user's turn-errors part, and drops the turn", async () => {
     const hold = gate();
     const b = await bed({ answers: [{ pieces: [{ text: "<intent>One exchange.</intent>" }, { text: "<reply>The lamp turns, and" }, { hold }, { text: " then dims.</reply>" }] }, replying("Wren relights it.")] });

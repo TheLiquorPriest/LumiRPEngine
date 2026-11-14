@@ -1,5 +1,5 @@
 ---
-description: The sentences the engine's tools answer with (world_query, world_search, world_apply, roll and the tools found by search). A tool's answer is data from the store and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words. The lines named want_ (what a name was looked for as) and wants_ (what an argument takes) are words put inside the other lines.
+description: The sentences the engine's tools answer with (world_query, world_search, world_apply, roll and the tools found by search). A tool's answer is data from the store and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words. The lines named want_ (what a name was looked for as) and wants_ (what an argument takes) are words put inside the other lines. So is time_from_now, a time in a chat whose date nobody has set (a chat with no world, until the story sets the clock to a date and time), told as how long it is from now; with ahead or ago in minutes, or now.
 format: lines
 ---
 no_chat: There is no chat {{id}} in the engine's records.
@@ -53,6 +53,7 @@ wants_qty: a whole number of at least 1
 wants_specs: a list of { label, value }
 wants_object_or_null: an object, or null
 wants_day: a whole number of days from today: 0 today, 1 tomorrow, -1 yesterday
+time_from_now: {{#ahead}}{{ahead}} {{#one}}minute{{/one}}{{^one}}minutes{{/one}} from now{{/ahead}}{{#ago}}{{ago}} {{#one}}minute{{/one}}{{^one}}minutes{{/one}} before now{{/ago}}{{#now}}the time now{{/now}}
 not_applicable: {{#n}}Operation {{n}} ({{op}}): {{/n}}the engine cannot apply this at all ({{code}}).
 not_open: Operation {{n}} ({{op}}): {{what}} is {{status}}, and the books take no money out of an account that is not open, on any path.
 nothing_recorded: Nothing was recorded. Send the call again with that put right.
@@ -96,6 +97,7 @@ time_differs: Operation {{n}} ({{op}}): {{field}} reads as {{other}} and {{used}
 before_start: Operation {{n}} ({{op}}): the story starts at {{start}}, so the clock went back no further.
 due_unlisted: {{#n}}Operation {{n}} ({{op}}): {{/n}}what this span of time brings due is not listed by this host.
 due_more: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; {{more}} more fall due later in it.
+due_more_uncounted: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; more fall due later in it.
 no_map: {{at}} has no map to show.
 none_found: Nothing found for {{words}}.
 store_failed: {{#n}}Operation {{n}} ({{op}}): {{/n}}the engine failed while applying it, so it did not apply. The error is in RPE's log.

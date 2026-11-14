@@ -9,13 +9,13 @@ intent_file: scratch/intent.md
 
 {{#form.tags}}
 - **The reply:** whatever the player should see goes between `<{{tags.reply}}>` and `</{{tags.reply}}>`. Nothing else you write reaches the chat.
-- **An intent record,** when your instructions ask for one: between `<{{tags.intent}}>` and `</{{tags.intent}}>`, at the very start of your first message.
+- **An intent record,** when your instructions ask for one: between `<{{tags.intent}}>` and `</{{tags.intent}}>`.
 - Tool calls may come before the reply, after it, or both. One reply per turn.
 {{/form.tags}}
 {{#form.two_step}}
-- **Working text goes in files, never in a message.** An intent record, when your instructions ask for one: written first to `{{intent_file}}` in the turn's folder with `file_write`.
+- **Working text goes in files, never in a message.** An intent record, when your instructions ask for one: written to `{{intent_file}}` in the turn's folder with `file_write`.
 - **The reply:** the plain text of a message of its own. One reply per turn.
-- **What follows the reply rides with it.** A message with no call ends the turn. So whatever is to be recorded after the reply is called in the reply's own message, each call marked `closing: true` and no other call with them. They run once the reply is out.
+- **Calls in the reply's own message** run once the reply is out. A message with no call ends the turn.
 {{/form.two_step}}
 
 ## Closing calls

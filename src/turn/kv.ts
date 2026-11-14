@@ -26,7 +26,7 @@ export function servedUser(owner: () => string | null): string {
   return user;
 }
 
-/** The store port for the one user this RPE serves, that user read at each call. */
+/** The store port for the one user this RPE serves, that user read at each call: before one is set, a listing finds nothing, and anything else is refused. */
 export function kvStore(db: Database, writes: Writes, owner: () => string | null): StorePort {
   const read = (from: Database, user: string, key: string): JsonValue | undefined => {
     const row = from.query<{ value: string }, [string, string]>("SELECT value FROM kv WHERE user = ? AND key = ?").get(user, key);
@@ -60,9 +60,12 @@ export function kvStore(db: Database, writes: Writes, owner: () => string | null
       await writes.run((into) => put(into, user, key, undefined), "removing the harness's state");
     },
     async list(prefix) {
+      // An RPE that belongs to no one yet (a fresh install, before `rpe up`) keeps nothing for anyone: there is nothing to list.
+      const user = owner();
+      if (user === null || user === "") return [];
       return db
         .query<{ key: string }, [string, number, string]>("SELECT key FROM kv WHERE user = ? AND substr(key, 1, ?) = ?")
-        .all(servedUser(owner), prefix.length, prefix)
+        .all(user, prefix.length, prefix)
         .map((r) => r.key);
     },
   };

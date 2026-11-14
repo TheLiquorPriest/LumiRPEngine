@@ -50,7 +50,7 @@ If the place is named in the lore and described there, follow the description.
 
 ## Measure, do not guess
 
-Use `map_measure` for distance, for the path and how long it takes, for whether one square can see another, for cover, and for who is inside an area. A closed door blocks the way and the view. Give the Author the numbers.
+Use `map_measure` for distance, for the path and how long it takes, for whether one square can see another, and for who is inside an area. A closed door blocks the way and the view. Give the Author the numbers.
 
 ## What a tool tells you
 

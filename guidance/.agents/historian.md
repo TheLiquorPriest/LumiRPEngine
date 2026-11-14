@@ -6,8 +6,6 @@ effort: medium
 tools: [chat_read, chat_search, prompt, lore_read, lore_search, archive_search, story_record, world_apply, cast_update, perceive, gap_check, file_write, ask_author]
 reads: [ALL-AGENTS, rules]
 given:
-  - task:range
-  - task:purpose
   - story:brief
 limits: { calls: 30 }
 ---

@@ -8,9 +8,12 @@
 import { afterEach, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { AgentRef } from "rp-harness/contract";
 import type { RecordedRequest } from "rp-harness/testing/rig";
+import { addCharacter } from "../../src/cast";
 import { CHATS_FOLDER } from "../../src/tree";
 import { world } from "../iface/rig";
+import { coastWorld } from "../lore/fixtures";
 import { CHAT, CONNECTION, openTurnBed, playsWorld, PRESET, replying, settledTurn, type TurnBed, USER } from "./bed";
 
 let bed: TurnBed | null = null;
@@ -29,11 +32,11 @@ function textsOf(r: RecordedRequest | undefined): string {
   return (r?.messages ?? []).flatMap((m) => (typeof m.content === "string" ? [m.content] : m.content.flatMap((c) => (c.type === "text" ? [c.text] : [])))).join("\n");
 }
 
-/** The id the batch shows an entry by: `### [e-1] The oil store`. */
-function idOf(batch: string, title: string): string {
-  const id = new RegExp(`### \\[(e-\\d+)\\] ${title} `).exec(batch)?.[1];
-  if (id === undefined) throw new Error(`the batch does not show ${title}`);
-  return id;
+/** The id and the revision the batch shows an entry by: `### [e-1] The oil store (from Keeper's Book; revision 1; …)`. */
+function shownOf(batch: string, title: string): { id: string; revision: string } {
+  const shown = new RegExp(`### \\[(e-\\d+)\\] ${title} \\(from [^;]+; revision (\\d+)`).exec(batch);
+  if (shown?.[1] === undefined || shown[2] === undefined) throw new Error(`the batch does not show ${title}`);
+  return { id: shown[1], revision: shown[2] };
 }
 
 /** The player says something and asks for a reply; gives the turn's id once it is settled. */
@@ -49,15 +52,16 @@ test("an indexing run is given the next batch by name and answered with the batc
   const b = (bed = await openTurnBed({
     answers: [
       { pieces: [{ text: "<intent>Have the keeper's book indexed first.</intent>" }, { call: "delegate", args: { agent: "indexer", brief: "Index the batch you are given." } }] },
-      // The indexer keeps the lines of two of the three entries it was given.
+      // The indexer keeps the lines of two of the three entries it was given, each for the revision its batch showed.
       (request) => {
         const given = textsOf(request);
-        ids.oil = idOf(given, OIL.title);
-        ids.oath = idOf(given, OATH.title);
-        ids.bell = idOf(given, BELL.title);
+        const [oil, oath, bell] = [OIL, OATH, BELL].map((e) => shownOf(given, e.title));
+        ids.oil = oil?.id ?? "";
+        ids.oath = oath?.id ?? "";
+        ids.bell = bell?.id ?? "";
         const entries = [
-          { id: ids.oil, kind: "place", line: "Where the lamp oil is kept.", defines: [{ what: "the oil store", aspect: "layout" }], related: [] },
-          { id: ids.oath, kind: "rule", line: "What every courier swears.", defines: [{ what: "Wren", aspect: "background" }], related: [] },
+          { id: ids.oil, revision: oil?.revision, kind: "place", line: "Where the lamp oil is kept.", defines: [{ what: "the oil store", aspect: "layout" }], related: [] },
+          { id: ids.oath, revision: oath?.revision, kind: "rule", line: "What every courier swears.", defines: [{ what: "Wren", aspect: "background" }], related: [] },
         ];
         return { pieces: [{ call: "lore_index_write", args: { entries } }] };
       },
@@ -80,11 +84,11 @@ test("an indexing run is given the next batch by name and answered with the batc
   // Nothing was indexed yet: the Author's map shows the oil store by its keys, and counts what no run has indexed.
   expect(textsOf(author)).toContain(`- [${ids.oil}] The oil store (not indexed yet; keys: oil)`);
   expect(textsOf(author)).toContain("3 attached entries are not indexed yet.");
-  // The indexer is given every entry with its text; the tool answers with what it kept, then the one entry left, with its text.
-  expect(textsOf(indexer)).toContain(`### [${ids.oil}] The oil store (from Keeper's Book; keys: oil)\n${OIL.content}`);
+  // The indexer is given every entry with its revision, Lumiverse's own (a new entry's is 1), and its text; the tool answers with what it kept, then the one entry left, with its text.
+  expect(textsOf(indexer)).toContain(`### [${ids.oil}] The oil store (from Keeper's Book; revision 1; keys: oil)\n${OIL.content}`);
   const answer = textsOf(answered === undefined ? undefined : { ...answered, messages: answered.messages.slice(-1) });
   expect(answer).toContain("Kept the lines of 2 entries. 1 entries are not indexed yet.");
-  expect(answer).toContain(`### [${ids.bell}] The market bell (from Keeper's Book; keys: bell)\n${BELL.content}`);
+  expect(answer).toContain(`### [${ids.bell}] The market bell (from Keeper's Book; revision 1; keys: bell)\n${BELL.content}`);
   expect(answer).not.toContain(OIL.content);
   expect(await b.turns.facts.read({ user: USER, chat: CHAT, session: "none" }, ["lore.unindexed"])).toEqual({ "lore.unindexed": { count: 1 } });
   const folders = b.turns.chats.folders(USER, CHAT)!;
@@ -96,4 +100,18 @@ test("an indexing run is given the next batch by name and answered with the batc
   expect(map).toContain(`### Changed by the story\n\n- [${ids.oil}] The oil store: The flood moved the barrels to the boathouse.`);
   expect(map).toContain(`### Not in the prompt, but bound to who and what is at hand\n\n- [${ids.oath}] The courier's oath (rule): What every courier swears. Bound to Wren.`);
   expect(map).toContain("1 attached entries are not indexed yet.");
+});
+
+test("a character's agent started with the cast's id for its character reads the lore that character may know, and no one else's", async () => {
+  const b = (bed = await openTurnBed({ answers: [] }));
+  // The coast's crown is a secret Orrin holds; the cast knows him by his full name, under an id of its own.
+  await playsWorld(b, coastWorld());
+  const [orrin, tobin] = await b.app.writes.run((db) => [addCharacter(db, USER, CHAT, "Orrin Pell", 1).id, addCharacter(db, USER, CHAT, "Tobin Reed", 2).id]);
+  const scope = { user: USER, chat: CHAT, session: "none" };
+  const reader = (plays: string): AgentRef => ({ id: "character-1", definition: "character", plays });
+  const crown = ["w-drowned_crown"];
+  // Through the lore RPH reads for an agent: its `lore:` attachment and its lore tools.
+  expect((await b.turns.env.lore!.read(scope, crown, reader(orrin))).map((e) => e.id)).toEqual(crown);
+  expect((await b.turns.env.lore!.search(scope, { text: "crown" }, reader(orrin))).map((e) => e.id)).toEqual(crown);
+  expect(await b.turns.env.lore!.read(scope, crown, reader(tobin))).toEqual([]);
 });

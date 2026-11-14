@@ -216,11 +216,34 @@ describe("a turn's runs, its folder, and the world", () => {
     expect((await b.page("GET", `/api/v1/chats/chat-elsewhere/turns/${turn}/files`)).status).toBe(404);
   });
 
+  test("a transcript line torn by a crash costs that line, not the turn's page: the page still shows every whole record", async () => {
+    const b = await openTurnBed({ answers: [replying("The lamp turns.")] });
+    beds.push(b);
+    const turn = await played(b, "I climb the stairs.");
+    await b.until("no run of the chat to go on", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
+    const whole = (await b.page<Detail>("GET", `/api/v1/chats/${CHAT}/turns/${turn}`)).body.trace;
+    expect(whole.length).toBeGreaterThan(0);
+
+    // A record cut off where the process ended, then a later record whole, as an append after a restart leaves them.
+    const run = b.turns.runs.record(USER, turn)!;
+    const disk = (await b.turns.files.turnDisk({ user: USER, chat: CHAT, session: run.session, turn }))!;
+    const glob = new Bun.Glob("transcripts/*.jsonl");
+    const [transcript] = await Array.fromAsync(glob.scan({ cwd: disk }));
+    const file = join(disk, transcript!);
+    const kept = await Bun.file(file).text();
+    const [first, ...rest] = kept.split("\n");
+    await Bun.write(file, [first, `${JSON.stringify(whole[0]).slice(0, 40)}`, ...rest].join("\n"));
+
+    const page = await b.page<Detail>("GET", `/api/v1/chats/${CHAT}/turns/${turn}`);
+    expect(page.status).toBe(200);
+    expect(page.body.trace).toEqual(whole);
+  });
+
   test("the world's tree is read at the chat's head or at a turn, to a depth, with the values asked for", async () => {
     const b = await openTurnBed({
       answers: [
         replying("The lamp turns."),
-        { pieces: [{ text: "<intent>Half an hour goes by.</intent>" }, { call: "world_apply", args: { operations: [{ op: "pass_time", minutes: 30, source: { from: "prose" } }] } }] },
+        { pieces: [{ text: "<intent>The clock strikes half past eight.</intent>" }, { call: "world_apply", args: { operations: [{ op: "pass_time", until: "2026-01-01 08:30", source: { from: "prose" } }] } }] },
         { pieces: [{ text: "<reply>The tide turns.</reply>" }] },
       ],
     });
@@ -230,7 +253,7 @@ describe("a turn's runs, its folder, and the world", () => {
     type World = { at: string; nodes: NodeView[] };
     const world = async (query: string) => b.page<World>("GET", `/api/v1/chats/${CHAT}/world${query}`);
 
-    // At the head, the world with its own values: the time the second turn moved on, kept by the calendar.
+    // At the head, the world with its own values: the time the second turn set the clock to, kept by the calendar.
     const head = await world("");
     expect(head.status).toBe(200);
     expect(head.body.at).toBe("world");

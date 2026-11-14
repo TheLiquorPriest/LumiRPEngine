@@ -137,12 +137,14 @@ describe("the turn's folder", () => {
     b.host.chats.get(CHAT)!.books = [{ id: "wbe-oil", book: "wb-keep", content, comment: "The oil store", keys: ["oil"] }];
     b.db.run("INSERT INTO world_books (id, name, user_id) VALUES (?, ?, ?)", "wb-keep", "Keeper's Book", USER);
     b.db.run("INSERT INTO world_book_entries (id, world_book_id, uid, key, content, comment) VALUES (?, ?, ?, ?, ?, ?)", "wbe-oil", "wb-keep", "1", JSON.stringify(["oil"]), content, "The oil store");
+    // Lumiverse activates an entry only from a book the chat reads: here the chat's own.
+    b.db.run("UPDATE chats SET metadata = ? WHERE id = ?", JSON.stringify({ chat_world_book_ids: ["wb-keep"] }), CHAT);
     const turn = await settledTurn(b, await play(b, "normal", "I ask where the oil is kept."));
 
     const { scope, folder } = await folderOf(b, turn.id);
     const lore = await text(b, scope, `${folder}${TURN_FILES.lore}`);
-    const id = /^- \[(e-\d+)\] The oil store$/m.exec(lore)?.[1];
+    const id = /^- \[(e-\d+)\] The oil store \(not indexed yet; keys: oil\)$/m.exec(lore)?.[1];
     expect(id).toBeDefined();
-    inOrder(lore, ["# Lore map", "### In the prompt", `- [${id}] The oil store`, `## [${id}] The oil store, from Keeper's Book, activated by keyword\n\n${content}\n`]);
+    inOrder(lore, ["# Lore map", "### In the prompt", `- [${id}] The oil store (not indexed yet; keys: oil)`, `## [${id}] The oil store, from Keeper's Book, activated by keyword\n\n${content}\n`]);
   });
 });

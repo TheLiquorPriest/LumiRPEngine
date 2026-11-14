@@ -1,6 +1,6 @@
 ---
 name: mapper
-description: Maps an assembled prompt into named slices on a first pass, so that the Author can recall any part by name and hand parts to other agents. Started as a job when a preset's prompt has no map yet, or when its shape has changed.
+description: Maps an assembled prompt into named slices on a first pass, so that the Author can recall any part by name and hand parts to other agents. Delegated within a turn, after its reply, when a preset's prompt has no map yet, or when its shape has changed.
 model: default
 effort: medium
 tools: [prompt, prompt_map_write, file_read]

@@ -114,6 +114,28 @@ describe("the provider endpoint", () => {
     const quiet = await endpoint(async (_turn, out) => out.content("Done."))(request({ model: "rpe", messages, stream: true, [TAG_FIELD]: tag }));
     expect(await readStream(quiet)).toMatchObject({ content: "Done.", finishReason: "stop" });
   });
+
+  // Lumiverse keeps a failed generation's message when it streamed any text or thinking and drops it
+  // when it streamed none (`services/generate.service.ts`, `persistPartialContent`).
+  test("a turn that ends with no reply after its progress line puts its line for the kept message in the thinking too, so the empty message Lumiverse keeps says why; the detail goes in the error alone", async () => {
+    const line = "The model's provider failed before a reply was written: the gateway answered 502.";
+    const kept = "The model's provider failed before a reply was written.";
+    const res = await endpoint(async (_turn, out) => {
+      out.progress("Reading the scene.");
+      out.error(line, kept);
+    })(request({ model: "rpe", messages, stream: true, [TAG_FIELD]: tag }));
+    const seen = { content: "", reasoning: "" };
+    await expect(readStream(res, seen)).rejects.toThrow(line);
+    expect(seen).toEqual({ content: "", reasoning: `Reading the scene.\n${kept}\n` });
+  });
+
+  test("a turn that ends with no reply before anything was streamed ends with the error alone, and Lumiverse keeps no message", async () => {
+    const line = "The turn could not be played: no connection.";
+    const res = await endpoint(async (_turn, out) => out.error(line))(request({ model: "rpe", messages, stream: true, [TAG_FIELD]: tag }));
+    const seen = { content: "", reasoning: "" };
+    await expect(readStream(res, seen)).rejects.toThrow(line);
+    expect(seen).toEqual({ content: "", reasoning: "" });
+  });
 });
 
 describe("a long silent turn", () => {

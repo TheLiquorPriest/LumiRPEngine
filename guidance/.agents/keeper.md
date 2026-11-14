@@ -6,7 +6,6 @@ effort: low
 tools: [world_query, world_apply, story_query, story_record, cast_query, chat_read, file_read, tool_search, tool_use, ask_author]
 reads: [ALL-AGENTS, rules, SIMULATION]
 given:
-  - turn:result
   - turn:reply(saved)
   - world:scene(full)
   - story:brief

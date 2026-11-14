@@ -37,7 +37,12 @@ export interface ReplyStream {
   progress(line: string): void;
   toolCalls(calls: readonly ToolCall[]): void;
   finish(end?: { reason?: string; usage?: Usage }): void;
-  error(message: string): void;
+  /**
+   * Ends the reply with `message`, which the player's notice shows. Once thinking has gone out, Lumiverse keeps the empty message after
+   * the notice is gone, and `kept` goes into its thinking, where the message shows why: a line with no error's or provider's words in
+   * it, since what is kept in the thinking can reach a later prompt. Without `kept`, nothing more goes into the thinking.
+   */
+  error(message: string, kept?: string): void;
 }
 
 export interface ReplyMeta {
@@ -84,6 +89,8 @@ export function streamedReply(run: ReplyRun, meta: ReplyMeta, signal: AbortSigna
   let control: ReadableStreamDefaultController<Uint8Array> | null = null;
   /** Whether the thinking written so far ends a line: a progress line starts on a line of its own. */
   let lineEnded = true;
+  /** Whether thinking text went out: Lumiverse then keeps the message even when the reply ends in an error. */
+  let thought = false;
   let latest: string | null = null;
   let silence: unknown = null;
   let idle: unknown = null;
@@ -115,9 +122,16 @@ export function streamedReply(run: ReplyRun, meta: ReplyMeta, signal: AbortSigna
   }
   function thinking(text: string): void {
     lineEnded = text.endsWith("\n");
+    thought = true;
     send(chunk({ reasoning_content: text }, null));
     armSilence();
   }
+  /** Ends the reply with an error Lumiverse shows. */
+  const fail = (message: string): void => {
+    if (ended) return;
+    send(`data: ${JSON.stringify({ error: { message, type: "server_error" } })}\n\n`);
+    end();
+  };
   const end = (): void => {
     ended = true;
     for (const t of [silence, idle]) if (t !== null) clock.clearTimeout(t);
@@ -154,10 +168,11 @@ export function streamedReply(run: ReplyRun, meta: ReplyMeta, signal: AbortSigna
       send("data: [DONE]\n\n");
       end();
     },
-    error(message) {
+    error(message, kept) {
       if (ended) return;
-      send(`data: ${JSON.stringify({ error: { message, type: "server_error" } })}\n\n`);
-      end();
+      const text = oneLine(kept ?? "");
+      if (thought && life.keepAlive !== null && text !== "") thinking(`${lineEnded ? "" : "\n"}${text}\n`);
+      fail(message);
     },
   };
   const body = new ReadableStream<Uint8Array>({
@@ -167,7 +182,7 @@ export function streamedReply(run: ReplyRun, meta: ReplyMeta, signal: AbortSigna
       armSilence();
       void run(out, both).then(
         () => out.finish(),
-        (error: unknown) => out.error(error instanceof Error ? error.message : String(error)),
+        (error: unknown) => fail(error instanceof Error ? error.message : String(error)),
       );
     },
     cancel() {

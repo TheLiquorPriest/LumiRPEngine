@@ -132,13 +132,16 @@ describe("what a continue recorded", () => {
     return { b, turn, before, continuing };
   }
 
-  /** The continue's end is recorded, and what it saved nothing of is gone: the turn as it was before it, on the text it was tied to. */
-  async function asBefore(b: TurnBed, turn: TurnRow, before: ChangeRow[], generation: string): Promise<void> {
+  /**
+   * The continue's end is recorded, and what it saved nothing of is gone: the turn as it was before it, tied to what Lumiverse stored,
+   * `saved`, which is the text it was tied to, or that text and the preset's join.
+   */
+  async function asBefore(b: TurnBed, turn: TurnRow, before: ChangeRow[], generation: string, saved: string): Promise<void> {
     await b.until("the continue's end to be recorded", () => (b.turns.runs.byGeneration(USER, generation)?.settled ?? null) !== null);
-    expect(String(b.db.rows("SELECT content FROM messages WHERE id = ?", turn.message!)[0]!.content)).toBe("The lamp turns.");
+    expect(String(b.db.rows("SELECT content FROM messages WHERE id = ?", turn.message!)[0]!.content)).toBe(saved);
     const store = b.turns.store.user(USER);
     expect(store.changes(turn.id)).toEqual(before);
-    expect(store.turn(turn.id)).toMatchObject({ status: "done", message: turn.message, hash: textHash("The lamp turns.") });
+    expect(store.turn(turn.id)).toMatchObject({ status: "done", message: turn.message, hash: textHash(saved) });
   }
 
   test("a continue stopped before it wrote anything saves nothing new, and what it recorded on its turn is taken back", async () => {
@@ -146,27 +149,28 @@ describe("what a continue recorded", () => {
     expect((await b.page<StopAnswer>("POST", `/api/v1/chats/${CHAT}/turns/${turn.id}/stop`)).body).toEqual({ stopped: true });
     const out = await continuing;
     expect(out.stopped).toBe(true);
-    await asBefore(b, turn, before, out.generationId!);
+    // Lumiverse keeps a stopped continue with a thinking block, here RPE's progress line: the text and the preset's join.
+    await asBefore(b, turn, before, out.generationId!, "The lamp turns. ");
   });
 
   test("a continue whose model fails saves nothing new, and what it recorded on its turn is taken back", async () => {
     const { b, turn, before, continuing } = await continued({ pieces: [], end: { error: "The provider went away." } });
     const out = await continuing;
     expect(out.error).not.toBeNull();
-    await asBefore(b, turn, before, out.generationId!);
+    await asBefore(b, turn, before, out.generationId!, "The lamp turns.");
   });
 
   test("a page following the chat is told its state changed once what a continue that saved nothing recorded is taken back", async () => {
     const { b, turn, before, continuing } = await continued({ pieces: [], end: { error: "The provider went away." } });
     const store = b.turns.store.user(USER);
     const found = onStatePush(b, () => store.changes(turn.id));
-    await asBefore(b, turn, before, (await continuing).generationId!);
+    await asBefore(b, turn, before, (await continuing).generationId!, "The lamp turns.");
     expect(found.length).toBeGreaterThan(0);
     expect(found.at(-1)).toEqual(before);
   });
 
   test("a continue that saves its text keeps what it recorded", async () => {
-    const b = await bed({ answers: [replying("The lamp turns."), PASS_TIME, replying(" Then it stops.")] });
+    const b = await bed({ answers: [replying("The lamp turns."), PASS_TIME, replying("Then it stops.")] });
     const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
     const store = b.turns.store.user(USER);
     const before = store.changes(turn.id);

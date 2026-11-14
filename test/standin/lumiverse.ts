@@ -71,6 +71,11 @@ export interface Preset {
   /** Ends the prompt as an assistant message the reply continues. */
   prefill?: string;
   parameters?: Record<string, unknown>;
+  /**
+   * Put between a continued message's text and the new text when a continue is saved (`prompts.completionSettings.continuePostfix`);
+   * absent, Lumiverse's default preset's, one space (`auth/default-preset.ts:316`).
+   */
+  continuePostfix?: string;
 }
 
 export type Server = (request: Request) => Promise<Response>;
@@ -676,8 +681,9 @@ export class StandIn {
     let staged: string | null = null;
     /** A swipe or a regenerate: the swipe made for the reply. */
     let swipeAt: number | null = null;
-    /** A continue: the text the message held. */
+    /** A continue: the text the message held, and what joins the new text to it. */
     let original: string | null = null;
+    let postfix = "";
     const stop = new AbortController();
     if (!dryRun) {
       if (type === "normal") {
@@ -702,11 +708,16 @@ export class StandIn {
         if (last) {
           target = { message: last.id, swipe: last.swipeId ?? 0 };
           original = last.content;
+          // The preset's postfix, left out where the text already ends with it (`:1969-1978`, `prompt-assembly.service.ts:662-670`).
+          const configured = preset.continuePostfix ?? " ";
+          postfix = configured === "" || original.endsWith(configured) ? "" : configured;
         }
       }
       this.going.set(generationId!, { user: chat.user, chat: chat.id, stop });
-      // Announced before the prompt is assembled (`:2036-2055`), and the assembly starts on a later task (`:2068-2073`, `:1059`).
-      this.emit("GENERATION_STARTED", { generationId, chatId: chat.id, model: connection.model, targetMessageId: target.message, targetSwipeId: target.swipe, backgroundSwipe: false, characterId: chat.character.id, characterName: chat.character.name, generationType: type, frontendSessionId: undefined }, chat.user);
+      // Announced before the prompt is assembled (`:2036-2055`), and the assembly starts on a later task (`:2068-2073`, `:1059`). A continue
+      // names the swipe it goes on and no message: only a swipe, a regenerate and a new reply's staged message set `targetMessageId`
+      // (`:1924-1966`, `:1996-2003`).
+      this.emit("GENERATION_STARTED", { generationId, chatId: chat.id, model: connection.model, targetMessageId: type === "continue" ? undefined : target.message, targetSwipeId: target.swipe, backgroundSwipe: false, characterId: chat.character.id, characterName: chat.character.name, generationType: type, frontendSessionId: undefined }, chat.user);
     }
     // Two later tasks, as the continuation and the pipeline each wait for one.
     for (let i = 0; i < 2; i++) await new Promise((resolve) => setTimeout(resolve, 0));
@@ -800,7 +811,7 @@ export class StandIn {
       } catch (error) {
         if (!stop.signal.aborted) throw error;
         // Stopped by the user: what was streamed is saved, and the stop told (`:4502-4537`, `persistPartialContent` `:3565-3660`).
-        const savedText = this.saveStopped(chat, { staged, swipeAt, original, target: target.message, swipe: target.swipe }, seen);
+        const savedText = this.saveStopped(chat, { staged, swipeAt, original, postfix, target: target.message, swipe: target.swipe }, seen);
         this.going.delete(generationId!);
         this.emit("GENERATION_STOPPED", { generationId, chatId: chat.id, content: savedText }, chat.user);
         return { generationId, error: null, stopped: true, prompt: sent, body, reply: { content: seen.content, reasoning: seen.reasoning, finishReason: "", usage: null }, parameters, stored: null, worldInfo };
@@ -816,9 +827,9 @@ export class StandIn {
         this.saveSwipe(chat, target.message, swipeAt, reply.content);
         messageId = target.message;
       } else if (original !== null && target.message !== null) {
-        // A continue: the new text joined to what the message held, with no separator configured (`:4129-4147`, `prompt-assembly.service.ts:662-670`),
-        // into the swipe it continued, which the player may have flipped away from (`contentSwipeId`).
-        savedText = original + reply.content;
+        // A continue: the text the message held, the preset's postfix, then the new text (`:4129-4147`), into the swipe it continued,
+        // which the player may have flipped away from (`contentSwipeId`).
+        savedText = original + postfix + reply.content;
         const m = shown(target.message);
         if (m && (m.swipeId ?? 0) === target.swipe) m.content = savedText;
         this.saveText(chat, target.message, savedText, target.swipe ?? undefined);
@@ -870,7 +881,7 @@ export class StandIn {
   }
 
   /** What a stopped generation saves (`persistPartialContent`, `services/generate.service.ts:3565-3660`), and the text it saved. */
-  private saveStopped(chat: Chat, at: { staged: string | null; swipeAt: number | null; original: string | null; target: string | null; swipe: number | null }, seen: StreamSeen): string {
+  private saveStopped(chat: Chat, at: { staged: string | null; swipeAt: number | null; original: string | null; postfix: string; target: string | null; swipe: number | null }, seen: StreamSeen): string {
     const shown = (id: string): ChatMessage | undefined => chat.messages.find((m) => m.id === id);
     if (at.swipeAt !== null && at.target !== null) {
       const m = shown(at.target);
@@ -885,7 +896,8 @@ export class StandIn {
         this.saveText(chat, at.staged, seen.content);
       }
     } else if (at.original !== null && at.target !== null && (seen.content !== "" || seen.reasoning !== "")) {
-      const joined = at.original + seen.content;
+      // As at the end, joined by the preset's postfix (`:3638-3650`).
+      const joined = at.original + at.postfix + seen.content;
       const m = shown(at.target);
       if (m && (m.swipeId ?? 0) === at.swipe) m.content = joined;
       this.saveText(chat, at.target, joined, at.swipe ?? undefined);

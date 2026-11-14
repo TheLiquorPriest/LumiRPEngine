@@ -1,14 +1,16 @@
 // Taking on a story with a past as a job the player starts (plan §12, §13.5). Its lead is the agent that
 // leads the chat's turns (the Author, as shipped); its brief is the `bootstrap` skill's own text as the
 // chat's file tree gives it, so the player's edit of the skill is the next job's brief. It is given by
-// name what the player chose when starting it, with its token limit (`bootstrap:job`), and the six
-// facts of "done enough" (`bootstrap:facts`); any agent of it can be given the facts again by that name.
-// The relive word is passed through as the player chose it and changes nothing else: what it means is
-// the skill's to say. Nothing starts the job but the player: no turn, no timer, no migration. A start is
-// refused, in words for the page, only while a bootstrap job of the chat is under way, for a chat
-// Lumiverse does not hold, where the skill is switched off, or where RPH refuses it; RPH holds the job
-// to the user's limits on jobs. Which of a chat's jobs are its bootstrap jobs, with what each was given,
-// is kept in RPH's store beside RPH's own record of its jobs.
+// name what the player chose when starting it, with its token limit (`bootstrap:job`), and the counts of
+// the six facts of "done enough" (`bootstrap:facts`); any agent of it can be given the facts again by
+// that name. The relive word is passed through as the player chose it and changes nothing else: what it
+// means is the skill's to say. The token limit is the player's setting, and RPH holds the job to it (and
+// to the user's limits on jobs where they are tighter): the job ends at it with what it has, and its
+// record says which limit stopped it. Nothing starts the job but the player: no turn, no timer, no
+// migration. A start is refused, in words for the page, only while a bootstrap job of the chat is under
+// way, for a chat Lumiverse does not hold, where the skill is switched off, or where RPH refuses it.
+// Which of a chat's jobs are its bootstrap jobs, with what each was given, is kept in RPH's store beside
+// RPH's own record of its jobs.
 
 import { loadGuidance } from "rp-harness";
 import type { AgentRef, JobState, JobView, JsonValue, Scope } from "rp-harness/contract";
@@ -168,7 +170,7 @@ export class BootstrapJobs {
     try {
       let view: JobView;
       try {
-        view = await jobs.start(scope, { agent: lead, brief: skill.body, attach: [BOOTSTRAP_JOB, BOOTSTRAP_FACTS] });
+        view = await jobs.start(scope, { agent: lead, brief: skill.body, attach: [BOOTSTRAP_JOB, BOOTSTRAP_FACTS], limits: { tokens: tokenLimit } });
       } catch (error) {
         return refused(409, error instanceof Error ? error.message : String(error));
       }

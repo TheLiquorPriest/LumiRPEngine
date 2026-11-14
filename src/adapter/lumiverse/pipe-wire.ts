@@ -270,7 +270,11 @@ export function readStartFacts(v: unknown): StartFacts | null {
   return { token: v.token, expiresAt: v.expiresAt, expiresInMs: v.expiresInMs, addresses: [...v.addresses], build: v.build };
 }
 
-/** Whether an address is on this machine's loopback: the only kind the extension's road goes to (§4.3). */
+/**
+ * Whether an address is a bare origin on this machine's loopback: the only kind the extension's road
+ * goes to (§4.3). Bare, since the extension adds its paths to it: a path, query, fragment or name in it
+ * would turn the confirming call into a POST to any path of any loopback port.
+ */
 export function onLoopback(base: string): boolean {
   let url: URL;
   try {
@@ -279,6 +283,7 @@ export function onLoopback(base: string): boolean {
     return false;
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  if (url.username !== "" || url.password !== "" || url.pathname !== "/" || /[?#]/.test(base)) return false;
   const host = url.hostname;
   return host === "localhost" || host === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(host);
 }

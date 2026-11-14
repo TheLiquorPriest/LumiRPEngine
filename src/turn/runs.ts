@@ -268,4 +268,16 @@ export class Runs {
       .filter((r) => this.running(user, r.turn)?.id !== r.id)
       .map((r) => recordOf(user, r));
   }
+
+  /**
+   * Every run kept as going on that this process does not hold, whoever's and whatever became of its generation, oldest first: at a
+   * start, the runs RPE stopped during.
+   */
+  leftGoing(): RunRecord[] {
+    return this.db
+      .query<RunRow & { user: string }, []>("SELECT * FROM turn_run WHERE status = 'running' ORDER BY received, rowid")
+      .all()
+      .filter((r) => this.running(r.user, r.turn)?.id !== r.id)
+      .map((r) => recordOf(r.user, r));
+  }
 }

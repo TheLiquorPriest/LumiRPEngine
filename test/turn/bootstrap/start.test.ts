@@ -97,3 +97,25 @@ test("a start is refused in words for a chat Lumiverse does not hold, and where 
   expect(await boot.call("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, { relive: 3 })).toEqual({ status: 400, body: { error: "relive, when given, is one of the words the bootstrap skill offers for reliving the past, as text." } });
   expect(await boot.b.turns.harness.jobs?.list({ user: USER })).toEqual([]);
 });
+
+test("the job is stopped at the token limit the player set: it ends with what it has, and its record says which limit stopped it", async () => {
+  const boot = await openBootBed({
+    global: "bootstrap:\n  tokenLimit: 1000\n",
+    answers: [
+      // One call that sends and writes past the player's limit between them, though neither alone does.
+      { pieces: [{ text: "Recorded the premise." }, { call: "chat_read", args: { from: 0, to: 1 } }], usage: { input: 800, output: 300 } },
+      { pieces: [{ text: "Read on past the limit." }] },
+    ],
+  });
+  beds.push(boot);
+  const { b, call } = boot;
+  const started = await call<JobView>("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, {});
+  expect(started.status).toBe(200);
+  const ended = await b.until("the job to end", async () => {
+    const page = await call<BootstrapChat>("GET", BOOTSTRAP_CHAT_PATH, { chat: CHAT });
+    const view = page.body.jobs[0]?.view;
+    return view !== null && view !== undefined && view.state !== "running" && view.state !== "queued" ? page.body.jobs[0] : null;
+  });
+  expect([ended?.tokenLimit, ended?.view?.limit]).toEqual([1000, { limit: "tokens", per: "job", max: 1000, value: 1100 }]);
+  expect(b.model.requests).toHaveLength(1);
+});

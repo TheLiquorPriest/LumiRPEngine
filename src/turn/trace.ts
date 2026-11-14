@@ -92,7 +92,17 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
       }
       for (const name of names) {
         const text = await Bun.file(join(folder, TRANSCRIPTS, name)).text();
-        for (const line of text.split("\n")) if (line.trim() !== "") out.push(JSON.parse(line) as TraceRecord);
+        // A line torn by a crash, or written over, costs that line: the rest of the trace is read.
+        let unreadable = 0;
+        for (const line of text.split("\n")) {
+          if (line.trim() === "") continue;
+          try {
+            out.push(JSON.parse(line) as TraceRecord);
+          } catch {
+            unreadable++;
+          }
+        }
+        if (unreadable > 0) deps.log.warn("Lines of a turn's transcript could not be read and were left out of its trace.", { file: join(TRANSCRIPTS, name), lines: unreadable });
       }
       return out.sort((a, b) => a.at - b.at || a.seq - b.seq);
     },

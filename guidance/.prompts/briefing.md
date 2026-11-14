@@ -29,10 +29,6 @@ The reply already begins with these words. The chat application puts them in fro
 - {{.}}
 {{/since.items}}
 {{/since}}
-{{#last_reply_without_intent}}
-
-Your last turn's reply went out with no intent record written before it.
-{{/last_reply_without_intent}}
 {{#files_changed}}
 
 ## Files changed since this session opened

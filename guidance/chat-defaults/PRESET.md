@@ -22,4 +22,4 @@ You are given the raw layout: every message with its role and size, which messag
 
 ## When the briefing says the prompt's shape changed
 
-Carry on. You still hold the whole prompt. A part that is new, gone or moved cannot be handed out by name until the prompt is mapped again; `TURN.md` says when that job is started.
+Carry on. You still hold the whole prompt. A part that is new, gone or moved cannot be handed out by name until the prompt is mapped again; `TURN.md` says when the mapper is called.

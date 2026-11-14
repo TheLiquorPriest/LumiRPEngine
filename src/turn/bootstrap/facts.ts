@@ -1,10 +1,10 @@
-// The six things the bootstrap skill names as "done enough" (plan §12), as neutral facts with their
-// numbers, in the order the work is done: the lore index; the messages the history window leaves out,
-// covered by the story record and summarized (§8.1 "Covered"); the cast and its castings; the parts of
-// the story model; the horizon; and each principal's base and memories. Each is read from the area
-// that keeps it, at the chat's head, and reads true exactly when its records exist; one that cannot be
-// read is "not known", with the words of what failed. Code decides nothing with them: whether the work
-// is done enough is the job's to say, and the page shows them.
+// The six things the bootstrap skill names as "done enough" (plan §12), as neutral counts and names, in
+// the order the work is done: the lore index; the messages the history window leaves out, covered by the
+// story record and summarized (§8.1 "Covered"); the cast and its castings; the parts of the story model;
+// the horizon; and each principal's base and memories. Each is read from the area that keeps it, at the
+// chat's head. Code says nothing of whether any of them holds: that is the skill's to define and the
+// job's to judge, and the page shows the counts as they are. One that cannot be read is given as a code
+// the skill words, never as the words of what failed, which go to the log alone.
 
 import type { ChatPort, FilesPort, Log, Scope } from "rp-harness/contract";
 import { type Casting, type Character, chatLine } from "../../cast";
@@ -21,14 +21,17 @@ import { namesOf } from "../../story/kit";
 import { storyAt } from "../../story/path";
 import { nameKey, StoryRecord } from "../../story/record";
 
-/** A fact that could not be read, and why, in the words of what failed. */
+/** Why a fact is not known, as a code: `unreadable`, its records could not be read (the log has what failed). */
+export type NotKnownWhy = "unreadable";
+
+/** A fact that could not be read, and why, as a code. */
 export interface NotKnown {
   known: false;
-  why: string;
+  why: NotKnownWhy;
 }
 
-/** A fact read from its records: whether they exist, with its numbers. */
-export type Fact<T> = ({ known: true; holds: boolean } & T) | NotKnown;
+/** A fact read from its records: its counts and names. */
+export type Fact<T> = ({ known: true } & T) | NotKnown;
 
 /** 1. The lore index: the entries of the chat's lore, those a run has written lines for as they stand now, and those whose lines are of an earlier revision. */
 export interface LoreIndexFact {
@@ -119,8 +122,6 @@ export interface DoneEnoughDeps {
   log: Log;
 }
 
-type Held<T> = { holds: boolean } & T;
-
 /** The cast at the chat's head: every character the chat knows, each with the casting in force there (null: none), and the principals among them. */
 interface CastNow {
   record: CastRecord | null;
@@ -137,10 +138,9 @@ function castNow(deps: DoneEnoughDeps, user: string, chat: string): CastNow {
   return { record, cast, principals: cast.filter((c) => c.as === "principal").map((c) => c.character) };
 }
 
-async function loreFact(deps: DoneEnoughDeps, user: string, chat: string): Promise<Held<LoreIndexFact>> {
+async function loreFact(deps: DoneEnoughDeps, user: string, chat: string): Promise<LoreIndexFact> {
   const entries = await deps.loreIndex.entries({ user, chat });
-  const indexed = entries.filter((e) => e.indexed).length;
-  return { holds: indexed === entries.length, entries: entries.length, indexed, stale: entries.filter((e) => e.stale).length };
+  return { entries: entries.length, indexed: entries.filter((e) => e.indexed).length, stale: entries.filter((e) => e.stale).length };
 }
 
 /** The maximal runs of places below `count` where `at` holds. */
@@ -155,14 +155,14 @@ function runs(count: number, at: (place: number) => boolean): Stretch[] {
   return out;
 }
 
-async function historyFact(deps: DoneEnoughDeps, scope: Scope): Promise<Held<HistoryFact>> {
+async function historyFact(deps: DoneEnoughDeps, scope: Scope): Promise<HistoryFact> {
   const store = deps.store.user(scope.user);
   const { window } = await turnSettings(deps.files, scope, deps.log);
   // A chat the store has not met is covered nowhere: its length is Lumiverse's.
   if (store.chat(scope.chat) === null) {
     const { length } = await deps.chat.info(scope);
     const leftOut = windowStart(length, window, () => false);
-    return { holds: leftOut === 0, messages: length, leftOut, covered: 0, stretches: 0, summarized: 0, nearestUncovered: runs(leftOut, () => true).at(-1) ?? null, nearestUnsummarized: null };
+    return { messages: length, leftOut, covered: 0, stretches: 0, summarized: 0, nearestUncovered: runs(leftOut, () => true).at(-1) ?? null, nearestUnsummarized: null };
   }
   const messages = store.path(scope.chat);
   const { covered, unsummarized } = storyCoverage({ store: deps.store, user: scope.user, chat: scope.chat, turn: null });
@@ -176,7 +176,6 @@ async function historyFact(deps: DoneEnoughDeps, scope: Scope): Promise<Held<His
   }).length;
   const coveredCount = stretches.reduce((n, s) => n + s.to - s.from + 1, 0);
   return {
-    holds: coveredCount === leftOut && summarized === stretches.length,
     messages: messages.length,
     leftOut,
     covered: coveredCount,
@@ -187,19 +186,19 @@ async function historyFact(deps: DoneEnoughDeps, scope: Scope): Promise<Held<His
   };
 }
 
-function castFact(now: CastNow): Held<CastFact> {
+function castFact(now: CastNow): CastFact {
   const uncast = now.cast.filter((c) => c.as === null).map((c) => c.character.name);
-  return { holds: now.cast.length > 0 && uncast.length === 0, listed: now.cast.length, cast: now.cast.length - uncast.length, uncast };
+  return { listed: now.cast.length, cast: now.cast.length - uncast.length, uncast };
 }
 
-function storyFact(deps: DoneEnoughDeps, user: string, chat: string, principals: readonly Character[]): Held<StoryModelFact> {
+function storyFact(deps: DoneEnoughDeps, user: string, chat: string, principals: readonly Character[]): StoryModelFact {
   const store = deps.store.user(user);
   const record = store.chat(chat) === null ? null : StoryRecord.read(deps.store.db, user, storyAt(store, chat, null));
   const of = (part: Parameters<StoryRecord["of"]>[0]) => record?.of(part) ?? [];
   const threads = of("thread");
   const arcs = of("arc");
   const arcFor = new Set(arcs.flatMap((a) => namesOf(a).map(nameKey)));
-  const fact: StoryModelFact = {
+  return {
     premise: of("premise").length,
     chapters: of("chapter").length,
     scenes: of("scene").length,
@@ -211,32 +210,28 @@ function storyFact(deps: DoneEnoughDeps, user: string, chat: string, principals:
     principalsWithArc: principals.filter((p) => arcFor.has(nameKey(p.name))).length,
     player: of("player").length,
   };
-  const holds = fact.premise > 0 && fact.chapters + fact.scenes > 0 && fact.threads > 0 && fact.principalsWithArc === fact.principals && fact.player > 0;
-  return { holds, ...fact };
 }
 
-function horizonFact(deps: DoneEnoughDeps, user: string, chat: string): Held<HorizonFact> {
+function horizonFact(deps: DoneEnoughDeps, user: string, chat: string): HorizonFact {
   const store = deps.store.user(user);
-  if (store.chat(chat) === null) return { holds: false, entries: 0, named: 0, clock: false };
+  if (store.chat(chat) === null) return { entries: 0, named: 0, clock: false };
   const entries = store.view(chat).horizon();
-  return { holds: entries.length > 0, entries: entries.length, named: entries.filter((e) => e.ref !== null).length, clock: clockRecorded(store.headState(chat).state) };
+  return { entries: entries.length, named: entries.filter((e) => e.ref !== null).length, clock: clockRecorded(store.headState(chat).state) };
 }
 
-function principalsFact(deps: DoneEnoughDeps, user: string, now: CastNow): Held<PrincipalsFact> {
-  const principals = now.principals.map((c) => ({ id: c.id, name: c.name, base: [...baseOf(deps.store.db, user, c.id).keys()], memories: now.record?.of(c.id, "memory").length ?? 0 }));
-  return { holds: principals.length > 0 && principals.every((p) => p.base.length > 0 && p.memories > 0), principals };
+function principalsFact(deps: DoneEnoughDeps, user: string, now: CastNow): PrincipalsFact {
+  return { principals: now.principals.map((c) => ({ id: c.id, name: c.name, base: [...baseOf(deps.store.db, user, c.id).keys()], memories: now.record?.of(c.id, "memory").length ?? 0 })) };
 }
 
 /** The six facts for one chat, at its head. */
 export async function doneEnough(deps: DoneEnoughDeps, user: string, chat: string): Promise<DoneEnough> {
   const scope: Scope = { user, chat, session: NO_SESSION };
-  const known = async <T extends object>(name: string, read: () => Held<T> | Promise<Held<T>>): Promise<Fact<T>> => {
+  const known = async <T extends object>(name: string, read: () => T | Promise<T>): Promise<Fact<T>> => {
     try {
       return { known: true, ...(await read()) };
     } catch (error) {
-      const why = error instanceof Error ? error.message : String(error);
-      deps.log.warn("A fact of the bootstrap could not be read; it is given as not known.", { chat, fact: name, error: why });
-      return { known: false, why };
+      deps.log.warn("A fact of the bootstrap could not be read; it is given as not known.", { chat, fact: name, error: error instanceof Error ? error.message : String(error) });
+      return { known: false, why: "unreadable" };
     }
   };
   const [lore, history] = await Promise.all([known("lore", () => loreFact(deps, user, chat)), known("history", () => historyFact(deps, scope))]);

@@ -73,14 +73,19 @@ test("Settle now runs on the newest turn after an edit: told the edit and the as
   expect(first.body).toEqual({ turn: turn.id, run: expect.any(String) });
   await b.until("the Settle now run to end", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
 
-  // What the run was asked: no prompt, the turn's own session going on, the edit and the ask among what happened since.
+  // What the run was asked: no prompt, the turn's own session going on, no reply owed, the edit and the ask among what happened since.
   const asked = b.requests[1]!;
-  expect(asked).toMatchObject({ kind: "continue", prompt: [], parent: turn.parent, scope: { turn: turn.id, session: b.turns.runs.ofTurn(USER, turn.id)[0]!.session } });
+  expect(asked).toMatchObject({ kind: "continue", owesReply: false, prompt: [], parent: turn.parent, scope: { turn: turn.id, session: b.turns.runs.ofTurn(USER, turn.id)[0]!.session } });
+  // Every turn a generation plays owes the player its reply.
+  expect(b.requests[0]!.owesReply).toBeUndefined();
   expect(asked.since.map((s) => [s.kind, s.text])).toEqual([
     ["edit", `Message ${turn.message} was edited after its turn. Before: The lamp turns. Now: The lamp turns, and an hour slips by.`],
     ["request", "The player asked, from the Turn page, for this turn to be settled now against the chat as it reads. This run writes no reply, and nothing of it reaches the chat."],
   ]);
   expect(sent(b, 2)).toContain("The lamp turns, and an hour slips by.");
+  // Its briefing's turn facts say what the run is; an ordinary turn's do not.
+  expect(sent(b, 2)).toContain("- This run is a Settle now of the turn, which the player asked for from the Turn page. It writes no reply.");
+  expect(sent(b, 0)).not.toContain("This run is a Settle now");
   // Its writes are the turn's: the world shows the hour at once.
   expect(clock()).toBe(before + 60);
   expect(store.changes(turn.id).filter((c) => c.lane === "engine")).toHaveLength(2);

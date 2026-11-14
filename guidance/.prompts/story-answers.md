@@ -1,5 +1,5 @@
 ---
-description: The sentences the story tools answer with (story_query, story_record). A tool's answer is data from the story record and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words. The lines named wants_ (what an argument takes) are words put inside the other lines.
+description: The sentences the story tools answer with (story_query, story_record). A tool's answer is data from the story record and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words. The lines named wants_ (what an argument takes) are words put inside the other lines. The Story page is told in these words too when it is refused (no_chat, no_turn, unknown_id, unreadable, and the lines named page_, which only the page uses).
 format: lines
 ---
 no_chat: There is no chat {{id}} in the engine's records.
@@ -24,8 +24,11 @@ current_closed: Operation {{n}} ({{op}}): the current {{part}}, {{id}}, is close
 nothing_recorded: Nothing was recorded. Send the call again with that put right.
 already_closed: Operation {{n}} ({{op}}): {{id}} was already closed.
 due_now: Operation {{n}} ({{op}}): it falls due at {{due}}, which is not after now ({{now}}), so it is due at once.
+due_now_undated: Operation {{n}} ({{op}}): it falls due no later than now, so it is due at once.
 no_overlays: Operation {{n}} ({{op}}): this host keeps no lore overlays yet, so none was written.
 overlay_unknown: Operation {{n}} (overlay): there is no lore entry {{entry}}.{{#near}} Near: {{near}}.{{/near}}
 none: Nothing in the story record matches.
 no_clock_due: This chat keeps no story time, so nothing falls due.
 more: {{count}} more match. Ask again with a part, a range or a name to see them; the next is {{next}}.
+page_turning: A turn of this chat is going on: nothing is struck or restored until it is over.
+page_branch_no_turn: This chat was branched from another and has no turn of its own yet. A strike is kept with this chat's newest turn, and the newest one here is the other chat's, so a strike here would change that chat too: nothing was struck or restored. It can be done once a turn has been played in this chat.

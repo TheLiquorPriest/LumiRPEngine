@@ -13,7 +13,7 @@ description: Run a moment with the characters and the GM. Stage it, let each act
    - the moments, if the player's message covers a stretch.
 
 2. **For each moment:**
-   - Give each acting principal the moment as that character perceives it, and call their agents together with `delegate`. Each already has who it is, what comes to mind, where it is, what it wears and carries, and the lore it would know. Add what it could perceive of the moment and nothing it could not. (What to record of that is in the perceptions rule.)
+   - Give each acting principal the moment as that character perceives it, and call their agents together with `delegate`. Each already has who it is, what comes to mind, where it is, what it wears and carries, and the entries of the world's own lore that the lore index binds to that character and it may know; it is given nothing from a lore book. Add what it could perceive of the moment and nothing it could not. (What to record of that is in the perceptions rule.)
    - Give the GM its questions in the same breath if they do not depend on the characters' answers. Otherwise ask after.
    - Read what came back. If someone asked you something, answer it with `agent_message` before going on.
    - Resolve the moment into beats: what happened, in order, as true.

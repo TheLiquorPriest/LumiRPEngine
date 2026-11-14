@@ -5,11 +5,12 @@
 // and each of its runs (the first, each continue, each Settle now) with its own trace and the request
 // files the harness kept for it; the Stop of a turn going on now; Settle now, a run on the chat's newest
 // turn that writes nothing into the chat; the files of a turn's folder, listed and read, none outside it;
-// the world's tree for a chat, at its head or at a turn, from the store's own view; and a panel's
-// request, held as part of the player's next message. Every route is a page's: it answers only for the
-// user this RPE belongs to.
+// the world's tree for a chat, at its head or at a turn, from the store's own view; a panel's request,
+// held as part of the player's next message; and the jobs (plan §13.5), of the user or of one chat, each
+// as RPH last kept it (how it stands, what started it, what it spent), and the cancel of one. Every
+// route is a page's: it answers only for the user this RPE belongs to.
 
-import type { ReplyError, Scope, TraceRecord, Usage } from "rp-harness/contract";
+import type { JobsApi, JobView, ReplyError, Scope, TraceRecord, Usage } from "rp-harness/contract";
 import { rawRoute, route, RouteError } from "../app";
 import { isRecord } from "../shared/json";
 import type { NodeView, ValuesShown } from "../store";
@@ -138,6 +139,18 @@ export function turnRoutes(deps: TurnRoutesDeps) {
   const folderOf = async (r: RunRecord): Promise<{ scope: Scope & { turn: string }; folder: string | null }> => {
     const scope = { user: r.user, chat: r.chat, session: r.session, turn: r.turn };
     return { scope, folder: (await turns.files.places(scope)).turn ?? null };
+  };
+
+  /** RPH's jobs; a 503 where this RPE runs none. */
+  const jobsApi = (): JobsApi => {
+    if (turns.harness.jobs === undefined) throw new RouteError(503, "This RPE runs no jobs.");
+    return turns.harness.jobs;
+  };
+
+  /** The user's jobs as RPH last kept each, of one chat or of every chat, the newest started first. */
+  const jobsOf = async (user: string, chat?: string): Promise<{ jobs: JobView[] }> => {
+    const jobs = await jobsApi().list({ user, ...(chat !== undefined ? { chat } : {}) });
+    return { jobs: jobs.sort((a, b) => b.started - a.started || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)) };
   };
 
   /**
@@ -275,7 +288,11 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       path: "/api/v1/chats/:chat/requests",
       access: "page",
       body: panelAsk,
-      handle: async ({ user, params, body }) => ({ request: await turns.player.hold(user, params.chat, body, Date.now()) }),
+      handle: async ({ user, params, body }) => {
+        // A panel acts on a chat RPE plays: a request for one RPE does not hold is refused, and nothing of it is kept.
+        if (turns.store.user(user).chat(params.chat) === null) throw new RouteError(404, `RPE holds no chat ${params.chat}.`);
+        return { request: await turns.player.hold(user, params.chat, body, Date.now()) };
+      },
     }),
     route({
       method: "POST",
@@ -344,6 +361,30 @@ export function turnRoutes(deps: TurnRoutesDeps) {
         };
         walk(ref, 0);
         return { at: ref, nodes };
+      },
+    }),
+    route({
+      method: "GET",
+      path: "/api/v1/jobs",
+      access: "page",
+      handle: ({ user }) => jobsOf(user),
+    }),
+    route({
+      method: "GET",
+      path: "/api/v1/chats/:chat/jobs",
+      access: "page",
+      handle: ({ user, params }) => jobsOf(user, params.chat),
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/jobs/:job/cancel",
+      access: "page",
+      // A job that has ended already is given as it ended: nothing of it is cancelled.
+      handle: async ({ user, params }) => {
+        const jobs = jobsApi();
+        const job = await jobs.get(params.job);
+        if (job === undefined || job.scope.user !== user) throw new RouteError(404, `There is no job ${params.job}.`);
+        return { job: (await jobs.cancel(job.id)) ?? job };
       },
     }),
   ] as const;

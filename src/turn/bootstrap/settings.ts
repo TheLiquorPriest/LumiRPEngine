@@ -2,7 +2,7 @@
 // token limit a bootstrap job is given, read for its chat from the config files of the chat's levels
 // (`RPE-global.yml` shipped and global, the chat's `RPE.yml`), the nearer level's value over the
 // farther one's, as the turn lane reads its own and as RPH reads the limits it holds a job's run to
-// (`jobs.run.*`). The job is told the limit; what it does as it nears it is the skill's to say.
+// (`jobs.run.*`). RPH holds the job to it: the job ends at it with what it has.
 
 import type { FilesPort, Log, Scope } from "rp-harness/contract";
 import { isMapping, type Mapping, mergedConfig, type NumberSettings, type SettingDef } from "../../app/setting-list";
@@ -10,7 +10,7 @@ import { type ConfigRead, numbersOf } from "../settings";
 
 /** Every fixed value of the bootstrap, each a setting with this default. */
 export const BOOTSTRAP_DEFAULTS = Object.freeze({
-  /** Tokens a bootstrap job is told it may spend (Appendix D.1). */
+  /** Tokens sent and written together, by every agent of a bootstrap job, at which RPH ends the job (Appendix D.1). */
   tokenLimit: 200_000,
 });
 

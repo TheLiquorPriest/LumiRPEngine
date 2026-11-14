@@ -9,19 +9,20 @@
 //            environment's approvals
 //   facts    a registry each area adds to; this lane's own counts are in it
 //   models   the app's connections                  store    this lane: `kv` in RPE's database
-//   trace    the live hub and the turn's folder     events   this lane: kept with the turn; the cast's views given
+//   trace    the live hub and the turn's folder     events   this lane: kept with the turn; the turn's own views,
+//                                                            a host's and the cast's given by name
 //   clock    the machine's                          log      the app's
 //
-// Left out, as the contract allows: `approvals` (every lane is Auto) and `switches` (everything that
-// runs a command or calls out is off), and `stores` (RPE reaches no other stores yet).
+// Left out, as the contract allows: `approvals` (every lane is Auto), `switches` (everything that runs a
+// command or calls out is off), and `stores` (RPE reaches no store but its own).
 
 import { join } from "node:path";
 import { createHarness, type CreateHarnessOptions, loadGuidance } from "rp-harness";
-import type { Clock, Environment, Harness, HostTool, Scope } from "rp-harness/contract";
+import type { AgentRef, Clock, Environment, Harness, HostTool, Scope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { App } from "../app";
-import { type BookReader, castFacts, castTools, type SourceReader } from "../cast";
+import { type BookReader, castFacts, castTools, chatLine, findCharacter, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapLines, mapView, stateScan } from "../iface";
 import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTING_DEFS, loreLines, lorePort, loreTools, overlayWrite, storePath, storeWorlds } from "../lore";
@@ -40,7 +41,7 @@ import { Runs } from "./runs";
 import { globalConfig, numbersOf, turnSettings } from "./settings";
 import { SinceKept } from "./since";
 import { stagesAt } from "./stage";
-import { guidanceTexts } from "./texts";
+import { guidanceTexts, logProblems } from "./texts";
 import { type TurnTrace, turnTrace } from "./trace";
 import { type MigratedSource, NO_SESSION, turnErrorWords, TurnLane } from "./turns";
 
@@ -159,6 +160,8 @@ export interface TurnsOptions {
   books: LoreBooks;
   /** What a migration carried of a chat, for its first briefing on RPE. */
   migrated: MigratedSource;
+  /** A view of the host's that an agent is given by name, beyond the turn's own: its text; null for a name that is none of its own. */
+  views?: (scope: Scope, agent: AgentRef, ref: string) => Promise<string | null>;
   /** In tests: the models agents run on, in place of the model layer's, and RPH's ids. */
   harness?: Pick<CreateHarnessOptions, "models" | "ids">;
   clock?: Clock;
@@ -210,7 +213,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const runs = new Runs(app.db, app.writes);
   const player = new PlayerSide(app.db, app.writes);
   const since = new SinceKept(app.db);
-  const worlds = storeWorlds(store);
+  // The lore may not reach the cast: a character's agent named by the cast's id is found in the world by the cast's name for it.
+  const worlds = storeWorlds(store, (user, chat, said) => findCharacter(store.db, user, chatLine(store.user(user), chat), said)?.name ?? null);
   // What is made once for every chat takes its limits from the global level's settings, read once.
   const global = globalConfig(app.paths.files, app.log);
   const lore = new Lore({ books: options.books, worlds, turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes), settings: numbersOf(global, LORE_SETTING_DEFS, app.log) });
@@ -264,7 +268,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const hostTools = async (scope: Scope): Promise<HostTool[]> => {
     const texts = guidanceTexts(files, scope);
     const asked = env.approvals === undefined ? {} : { approvals: env.approvals };
-    const [lines, settings] = await Promise.all([mapLines(texts), turnSettings(files, scope, app.log)]);
+    const [lines, settings] = await Promise.all([mapLines(texts).then((read) => logProblems(read, app.log)), turnSettings(files, scope, app.log)]);
     const [engine, cast, story, indexing] = await Promise.all([
       engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: stateScan, grid: gridMoves(lines), map: mapView(lines), due, settings: settings.engine, ...asked }),
       castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), now: () => clock.now(), settings: settings.cast }),
@@ -291,7 +295,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     store: kvStore(app.db, app.writes, owner),
     trace,
     // A job's end is told through `events.job`, which keeps it; the lane, made below, brings the sessions of its turn up to date.
-    events: turnEvents({ db: app.db, writes: app.writes, store, runs, files, sources, loreIndex, notes, suggestions, now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), log: app.log }),
+    events: turnEvents({ db: app.db, writes: app.writes, store, runs, files, sources, loreIndex, notes, suggestions, due, ...(options.views !== undefined ? { views: options.views } : {}), now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), log: app.log }),
     clock,
     log: app.log,
   };

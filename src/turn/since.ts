@@ -1,15 +1,19 @@
 // What a comparison of a chat's path found (plan §6.3, §10.10), kept with the chat so it reaches each
 // turn it is for, whatever becomes of the intake that found it: turns deleted, another swipe showing,
-// a reply or a player's message edited. Each is kept as data, filed under the turn at the head of the
-// chat's path when it was found, which is the turn the next one follows; its words are the notices
-// part's, given when it is told. A turn is told what was filed under the turn it follows, so an intake
-// that ends before the harness takes its request leaves it for the next one, and a swipe of a turn that
-// was told it is told it too. What a turn was told is kept where it decides something: a continue's, so
-// the turns after the turn it continues are not told it again.
+// a reply or a player's message edited, replies written in the chat without a turn. Each is kept as
+// data, filed under the turn at the head of the chat's path when it was found, which is the turn the
+// next one follows; its words are the notices part's, given when it is told. A turn is told what was
+// filed under the turn it follows, so an intake that ends before the harness takes its request leaves it
+// for the next one, and a swipe of a turn that was told it is told it too. What a turn was told is kept
+// where it decides something: a continue's, so the turns after the turn it continues are not told it again.
 
 import type { Database } from "bun:sqlite";
 import type { LvStep } from "../adapter/lumiverse/reads";
+import { textHash } from "../adapter/lumiverse/wire";
 import type { PathEntry, PathReport } from "../store";
+
+/** How Lumiverse's text of a message with nothing written in it reads as a hash. */
+const NOTHING_WRITTEN = textHash("");
 
 /** One thing a comparison found, as data. */
 export type FoundItem =
@@ -22,7 +26,9 @@ export type FoundItem =
   /** A reply edited after its turn was tied. */
   | { kind: "edited"; message: string; turn: string }
   /** A player's message edited since RPE last read it: `had` is the hash it had then. */
-  | { kind: "player_edited"; message: string; had: string };
+  | { kind: "player_edited"; message: string; had: string }
+  /** Replies no turn is tied to, from the first to the last, as one stretch of the chat. */
+  | { kind: "unplayed"; from: string; to: string };
 
 /** A found thing as kept: when it was found. */
 export interface KeptItem {
@@ -32,8 +38,11 @@ export interface KeptItem {
 }
 
 /**
- * What a comparison found that is told once: not the replies played without a turn, which every comparison finds again. `was` is the
- * path as RPE held it before the comparison, for the player's own messages (the store compares replies).
+ * What a comparison found, each thing found once. `was` is the path as RPE held it before the comparison, for the player's own messages
+ * (the store compares replies) and for the replies no turn is tied to: the store's comparison finds every one of those again, so only
+ * those `was` did not hold as they read now, new since or changed since, are found, in stretches broken by a played reply or by one
+ * found before. A message with nothing written in it (what Lumiverse keeps of a generation stopped or failed before its first word) is
+ * no reply anyone wrote, and is not found.
  */
 export function foundItems(report: PathReport, was: readonly PathEntry[], steps: readonly LvStep[]): FoundItem[] {
   const items: FoundItem[] = [];
@@ -47,6 +56,25 @@ export function foundItems(report: PathReport, was: readonly PathEntry[], steps:
   for (const s of steps) {
     const had = heard.get(s.id);
     if (s.role === "user" && had !== undefined && had !== s.shown.hash) items.push({ kind: "player_edited", message: s.id, had });
+  }
+  const read = new Map(was.flatMap((e) => (e.user ? [] : [[e.message, e.hash] as const])));
+  const at = new Map(steps.map((s, i) => [s.id, i]));
+  for (const run of report.unplayed) {
+    const from = at.get(run.from);
+    const to = at.get(run.to);
+    if (from === undefined || to === undefined) continue;
+    let stretch: { from: string; to: string } | null = null;
+    for (const s of steps.slice(from, to + 1)) {
+      if (s.role !== "assistant") continue;
+      if (s.shown.hash !== NOTHING_WRITTEN && read.get(s.id) !== s.shown.hash) {
+        if (stretch === null) stretch = { from: s.id, to: s.id };
+        else stretch.to = s.id;
+        continue;
+      }
+      if (stretch !== null) items.push({ kind: "unplayed", ...stretch });
+      stretch = null;
+    }
+    if (stretch !== null) items.push({ kind: "unplayed", ...stretch });
   }
   return items;
 }

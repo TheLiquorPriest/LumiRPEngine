@@ -11,8 +11,10 @@
 //   turn.owes.reply            1 while the run owes the player a reply it has not released; 0 for a run that owes none (Settle now)
 //   turn.owes.record           1 while the run owes the player a reply and has recorded nothing (`turn.recorded` is 0); 0 for a run
 //                              that owes no reply
+//   turn.last.without.intent   1 when the last reply RPE released on the turn before on that line (a continue's: on its own turn)
+//                              went out with no intent record taken before it, as RPH told it (`TurnEvents.released`); else 0
 
-import type { FactDef, FactsPort, FactValue, Scope } from "rp-harness/contract";
+import type { FactDef, FactsPort, FactValue, Release, Scope } from "rp-harness/contract";
 import type { Store } from "../store";
 import { storyAt } from "../story/path";
 import type { RunRecord } from "./runs";
@@ -86,6 +88,7 @@ export function turnFacts(store: Store, run: (user: string, turn: string) => Fac
       { name: "turn.recorded", counts: "Things this turn has recorded so far in any lane: the engine's changes, and the story's and the cast's records; for a continue, since it began. A job's are its own." },
       { name: "turn.owes.reply", counts: "1 while this run owes the player a reply it has not released; 0 once it has, and for a run that owes none (a Settle now run)." },
       { name: "turn.owes.record", counts: "1 while this run owes the player a reply and has recorded nothing in any lane (turn.recorded is 0); 0 once it has, and for a run that owes no reply." },
+      { name: "turn.last.without.intent", counts: "1 when the last reply released on the turn before this one on its line (for a continue, on the turn it goes on with) went out with no intent record taken before it; 0 otherwise, and where no reply was released on that turn." },
     ],
     async read(scope, names) {
       const user = store.user(scope.user);
@@ -124,6 +127,12 @@ export function turnFacts(store: Store, run: (user: string, turn: string) => Fac
       if (names.includes("turn.owes.reply")) {
         if (owes && runNow.released === null) await heard();
         out["turn.owes.reply"] = { count: owes && runNow.released === null ? 1 : 0 };
+      }
+      if (names.includes("turn.last.without.intent")) {
+        // What RPH told of the turn's releases is kept with it (`events.ts`, kind `released`); the latest stands for the turn.
+        const before = turns.at(-1);
+        const told = before === undefined ? null : store.db.query<{ body: string }, [string, string]>("SELECT body FROM turn_told WHERE user = ? AND turn = ? AND kind = 'released' ORDER BY id DESC LIMIT 1").get(scope.user, before);
+        out["turn.last.without.intent"] = { count: told !== null && (JSON.parse(told.body) as Release).withoutIntent === true ? 1 : 0 };
       }
       return out;
     },

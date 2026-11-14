@@ -12,6 +12,7 @@ import { type Gate, gate } from "rp-harness/testing/rig";
 import type { StopAnswer, TurnList } from "../../src/ui/api";
 import { textHash } from "../../src/adapter/lumiverse/wire";
 import { NO_SESSION } from "../../src/turn";
+import type { ChatMessage } from "../standin/lumiverse";
 import { CHAT, CONNECTION, GREETING, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
 
 const beds: TurnBed[] = [];
@@ -62,6 +63,26 @@ describe("the turn before, told and kept", () => {
     await settledTurn(b, await play(b, "normal", "I wait in the dark."));
     expect(sent(b, 1)).toContain(`The reply in message ${cut.message} was stopped before it was finished.`);
     expect(sent(b, 0)).not.toContain("was stopped before it was finished");
+  });
+
+  test("after a Settle now on a reply cut short, which is told the cut, the next turn is not told it again", async () => {
+    const hold: Gate = gate();
+    const b = await bed({ answers: [{ pieces: [{ text: "<intent>One exchange.</intent>" }, { text: "<reply>The lamp turns, and" }, { hold }, { text: " then dims.</reply>" }] }, { pieces: [{ text: "Nothing to settle." }] }, replying("Wren relights it.")] });
+    b.host.send(CHAT, "I climb the stairs.");
+    const generating = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+    const turn = await b.until("the reply's first words", () => {
+      const run = b.turns.runs.ofChat(USER, CHAT)[0];
+      return run !== undefined && run.reply.includes("The lamp turns") ? run.turn : null;
+    });
+    await b.page<StopAnswer>("POST", `/api/v1/chats/${CHAT}/turns/${turn}/stop`);
+    const cut = await settledTurn(b, (await generating).generationId!);
+    expect(cut.status).toBe("cut");
+
+    expect((await b.page("POST", `/api/v1/chats/${CHAT}/settle`, {})).status).toBe(200);
+    await b.until("the Settle now run to end", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
+    expect(sent(b, 1)).toContain(`The reply in message ${cut.message} was stopped before it was finished.`);
+    await settledTurn(b, await play(b, "normal", "I wait in the dark."));
+    expect(sent(b, 2)).not.toContain("was stopped before it was finished");
   });
 
   test("a run still at work after its reply, stopped at its limit by the next turn, is told to the Author", async () => {
@@ -123,6 +144,39 @@ describe("the turn before, told and kept", () => {
     b.host.reply(CHAT, "The keeper's dog barks at the door.");
     await settledTurn(b, await play(b, "normal", "I let the dog in."));
     expect(sent(b, 1)).toContain("replies were written in this chat without a turn of yours (messages 3, counting the chat's first message as 0)");
+  });
+
+  test("a reply written without a turn is told to the turn after it, and not again to the two after that", async () => {
+    const b = await bed({ answers: [replying("The lamp turns."), replying("Wren lets the dog in."), replying("The dog shakes off the rain."), replying("Wren laughs.")] });
+    await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    b.host.reply(CHAT, "The keeper's dog barks at the door.");
+    for (const said of ["I let the dog in.", "I dry the dog.", "I sit by the fire."]) await settledTurn(b, await play(b, "normal", said));
+    const unplayed = (n: number): string[] => b.requests[n]!.since.flatMap((s) => (s.kind === "unplayed" ? [s.text] : []));
+    expect([1, 2, 3].map((n) => unplayed(n).length)).toEqual([1, 0, 0]);
+    expect(unplayed(1)[0]).toContain("(messages 3, counting the chat's first message as 0)");
+  });
+
+  test("the empty message Lumiverse keeps of a generation stopped before its first word is no reply, and is never told as one", async () => {
+    const hold = gate();
+    const b = await bed({ answers: [replying("The lamp turns."), { pieces: [{ hold }, { text: "<reply>Too late.</reply>" }] }, replying("Wren looks up."), replying("Wren nods.")] });
+    await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    b.host.send(CHAT, "I listen at the door.");
+    const generating = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+    // Lumiverse keeps a stopped generation's message once its thinking block shows something: here RPE's progress line. The Author's
+    // call is held, so the stop comes before the reply's first word.
+    await b.until("RPE's progress line in the thinking block, and the Author's call held", () => {
+      const started = b.host.events.findLast((e) => e.event === "GENERATION_STARTED")?.payload as { generationId: string } | undefined;
+      return started !== undefined && (b.host.streams.get(started.generationId)?.reasoning ?? "") !== "" && b.model.requests.length === 2;
+    });
+    b.host.stop(USER, { chat: CHAT });
+    const out = await generating;
+    expect(out.stopped).toBe(true);
+    expect((await settledTurn(b, out.generationId!)).status).toBe("dropped");
+    const kept = b.host.chats.get(CHAT)!.messages.at(-1)!;
+    expect([kept.role, kept.content]).toEqual(["assistant", ""]);
+
+    for (const said of ["I open the door.", "I step out."]) await settledTurn(b, await play(b, "normal", said));
+    expect(b.requests.slice(2).map((r) => r.since.filter((s) => s.kind === "unplayed").length)).toEqual([0, 0]);
   });
 });
 
@@ -199,6 +253,15 @@ describe("what has happened in the chat since the last turn", () => {
     expect(sent(b, 1)).toContain(told);
     expect(sent(b, 2)).toContain(told);
     expect(sent(b, 3)).not.toContain(told);
+  });
+
+  test("a request from a panel for a chat RPE does not hold is refused, and nothing of it is kept", async () => {
+    const b = await bed({ answers: [replying("The lamp turns.")] });
+    await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    const refused = await b.page<{ error: string }>("POST", "/api/v1/chats/chat-elsewhere/requests", { what: "Walk here", on: "the harbour steps" });
+    expect(refused.status).toBe(404);
+    expect(b.app.db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM panel_request WHERE chat = ?").get("chat-elsewhere")?.n).toBe(0);
+    expect((await b.page("POST", `/api/v1/chats/${CHAT}/requests`, { what: "Walk here" })).status).toBe(200);
   });
 
   test("a request made while a reply is written, or after the newest reply flipped to another swipe, reaches the turn that answers the next message", async () => {
@@ -285,6 +348,35 @@ describe("what has happened in the chat since the last turn", () => {
     await settledTurn(b, await play(b, "normal", "I wave."));
     expect(sent(b, 0)).toContain(CARRIED);
     expect(sent(b, 1)).not.toContain(CARRIED);
+  });
+
+  test("a carried chat whose first comparison finds more replies edited after their turns than the briefing's bound: the newest are told in full, the rest in one line by their messages' numbers, and the next turn is told none of them again", async () => {
+    // Seven replies the earlier build played, each touched up by the player since it last read them: the chat shows the new text, and
+    // each carried turn is tied to the old one, as the migration ties it.
+    const reply = (i: number, how: string): string => `Reply ${i}, ${how}: ${"the lamp turns and the sea runs high under the rock, ".repeat(6)}`;
+    const messages: ChatMessage[] = Array.from({ length: 13 }, (_, i) => (i % 2 === 0 ? { id: `m${i}`, role: "assistant", content: reply(i, "touched up") } : { id: `m${i}`, role: "user", content: `Line ${i}.` }));
+    const b = await bed({ answers: [replying("Wren looks up."), replying("Wren nods.")], messages, global: "since:\n  editedBudget: 250\n" });
+    await carriedOver(b);
+    const store = b.turns.store.user(USER);
+    await b.app.writes.run(() => {
+      store.createChat({ id: CHAT });
+      for (const [i, m] of messages.entries()) {
+        if (m.role !== "assistant") continue;
+        const [date] = JSON.parse(String(b.db.rows("SELECT swipe_dates FROM messages WHERE id = ?", m.id)[0]!.swipe_dates)) as number[];
+        const carried = store.beginTurn({ chat: CHAT, kind: "new", imported: true });
+        store.tieTurn(carried.id, { message: m.id, hash: textHash(reply(i, "as first written")), date: date ?? null });
+      }
+    });
+
+    await settledTurn(b, await play(b, "normal", "I wave."));
+    // Each reply told in full is about 120 tokens: the newest two fit in 250, and the five before them are named by number.
+    expect(b.requests[0]!.since.filter((s) => s.kind === "edit").map((s) => s.text)).toEqual([
+      "5 replies were edited after their turns and are not given in full here: messages 0, 2, 4, 6, 8, counting the chat's first message as 0. chat_read reads any of them.",
+      `Message m10 was edited after its turn. Now: ${reply(10, "touched up")}`,
+      `Message m12 was edited after its turn. Now: ${reply(12, "touched up")}`,
+    ]);
+    await settledTurn(b, await play(b, "normal", "I wave again."));
+    expect(b.requests[1]!.since.filter((s) => s.kind === "edit")).toEqual([]);
   });
 });
 

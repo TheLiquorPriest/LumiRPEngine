@@ -15,9 +15,14 @@ How you go about it is yours to judge. The chat can be played while you work, an
 - **Summaries and memories that already exist.** Search the archive with `archive_search` before you read raw messages. Where the player kept a book of summaries, start there, and check a summary against the messages only where the next turns will lean on it.
 - **For a chat carried over from the earlier build:** the state, the cast and the beats it left, its notebook, and each character's old mind files. Trust the carried state. Your work there is filing, below.
 
+## What you are given
+
+- **`bootstrap:job`:** what the player chose when starting this job: `relive`, how much of the past to relive (below; absent when the player chose none), and `tokenLimit`, the limit the player set (below).
+- **`bootstrap:facts`:** where the six things below stand when you are given it, as counts and names: the lore index's entries and how many are indexed, the messages the history window leaves out and how many the story record covers and summarizes, the cast and who has no casting, the story model's parts, the horizon's entries, and each principal's base and memories. The counts say what there is, not whether it is enough: that is yours to judge against the six. Hand it on by name to any agent you delegate to. A fact given as `"known": false` with `"why": "unreadable"` is one whose records could not be read; read what you need of it with your own tools.
+
 ## Done enough
 
-Stop when all six hold. They are in the order to do them. Say which hold when you report.
+Stop when all six hold. They are in the order to do them. Whether each holds is yours to judge, from the records and against the words here. Say which hold when you report.
 
 1. The lore index exists.
 2. Every message the history window leaves out is covered by the story record, and every covered stretch has its summary. Do the stretch nearest the window first.
@@ -33,9 +38,18 @@ Stop when all six hold. They are in the order to do them. Say which hold when yo
 - **Marking files filed:** until a character's old mind files are marked filed, they are given whole every turn: to its own agent, or to you while a supporting character is on stage. Once what matters in them is filed, mark those files filed with `cast_update`'s `filed` operation, naming each file (`core.md`). They stay on the character's record.
 - **Beats without scenes:** the earlier build recorded beats and no scenes. Group them into scenes and chapters, and summarize each. The skills `scene-end` and `chapter-pass` say what a summary holds.
 
+## Reliving
+
+To relive a stretch of the past is to have a principal's own agent take it in as that principal lived it, from perceptions you give it, in the order it happened, and record it in its own words. Relive no more than the player asked for:
+
+- **No choice:** do what "Done enough" asks and nothing more. Later turns read the rest closely when they touch it.
+- **`outline`:** every principal knows the past in outline, and nothing is relived beyond the memories of the sixth thing above.
+- **`key moments`:** the key moments are relived as well: each principal relives the moments of the past that mattered most to it.
+- **`all`:** every stretch of the past is relived, by each principal it reached.
+
 ## Limits
 
-The player set a token limit for this job. Before you pass it, stop and say what is done and what is left. Do not relive the whole story unless the player asked for that.
+The player set a token limit for this job (`tokenLimit`): tokens sent and written together, by every agent of the job. The job is stopped when it reaches it, and ends with what is recorded by then. So record as you go: write each thing where it belongs as soon as you have settled it, not at the end.
 
 ## What you end with
 

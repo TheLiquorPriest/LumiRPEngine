@@ -1,5 +1,5 @@
 ---
-description: The sentences the cast tools answer with (cast_query, cast_update, perceive, recall, remember, reflect, dream, mind_set, relate). A tool's answer is data from the cast and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words. The lines named wants_ (what an argument takes) are words put inside the other lines.
+description: The sentences the cast tools answer with (cast_query, cast_update, perceive, recall, remember, reflect, dream, mind_set, relate). A tool's answer is data from the cast and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words. The lines named wants_ (what an argument takes) are words put inside the other lines. The Cast page is told in these words too when it is refused (no_chat, no_turn, no_character, unreadable, and the lines named page_, which only the page uses).
 format: lines
 ---
 no_chat: There is no chat {{id}} in the engine's records.
@@ -46,3 +46,7 @@ no_memories: Nothing comes back for {{cue}}.
 more_memories: {{count}} more memories touch {{cue}}. Recall again with skip {{skip}} to bring them back.
 no_entries_sent: entries cannot be read: send what is on your mind as a list of entries.
 no_relationships_sent: relationships cannot be read: send a list of the people you feel something about.
+page_turning: A turn of this chat is going on: nothing is struck or restored until it is over.
+page_no_entry: {{who}} has no entry {{id}} on this chat's record.
+page_branch_no_turn: This chat was branched from another and has no turn of its own yet. A strike is kept with this chat's newest turn, and the newest one here is the other chat's, so a strike here would change that chat too: nothing was struck or restored. It can be done once a turn has been played in this chat.
+page_still_struck: {{id}}{{#text}} ({{text}}){{/text}} stays struck: it was struck apart from {{from}}, so taking that strike back leaves it as it is.{{#secret}} The secret it gave, {{secret}}, is not held again.{{/secret}}
