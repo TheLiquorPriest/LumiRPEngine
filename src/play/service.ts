@@ -3,12 +3,18 @@
 // tap that manages (money, a group, gear, with no words: today's `lre.action` done off screen, and
 // each `lre.fix`) is resolved with today's pure resolvers and recorded in RPE's store as the player's
 // own changes on the chat's newest turn, the turn the next one follows: the next turn's world state
-// shows their values and lists them among what the turn before changed. Its Undo records their
-// reversal (`UserStore.undo`). A chat's own choices (today's `lre.chat.knowledge`) read as RPE has
-// them: it keeps none. A tap that goes with the next message, a tap that plays now, setting a chat's
-// own choice, the things browser and the map's walk and display are not served here, and say so in
-// words from `.prompts/play-answers.md`. After each change the chat's followers are told its state
-// changed.
+// shows their values and lists them among what the turn before changed. A tap records what the player
+// did and nothing code made up (plan §6.1, §6.4): nothing is drawn from the world's tables; the
+// accounts the world gave those it names open first, each a change of its own from the world's
+// defaults that stands as assumed, as the engine's own tools record them; and the clock's ✎ moves the
+// clock without deciding what the time between did. While a turn of the chat runs, a tap and an Undo
+// wait for it to be over (plan §10.9: no turn has its starting state changed under it). An Undo
+// records the reversal of all of the player's changes of a tap (`UserStore.undo`), or of none and says
+// what has no undo; the accounts that opened with it stay, and its answer says so. A chat's own
+// choices (today's `lre.chat.knowledge`) read as RPE has them: it keeps none. A tap that goes with the
+// next message, a tap that plays now, setting a chat's own choice, the things browser and the map's
+// walk and display are not served here, and say so in words from `.prompts/play-answers.md`. After
+// each change the chat's followers are told its state changed.
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -17,26 +23,30 @@ import { type LiveHub, RouteError, type WriteQueue } from "../app";
 import { playerReason } from "../backend/requirement-words";
 import { unfitRef } from "../backend/turn-steps";
 import { TIMELAPSE_ACTION } from "../backend/view";
+import { calendarOf, clockOfStamp, placeOffset } from "../engine/calendar";
 import { resolveEdit } from "../engine/edits";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
+import { materializeIfNeeded } from "../engine/materialize";
 import { optionalQuery, own } from "../engine/pack-kit";
 import { playedWorld } from "../engine/places-in-play";
 import type { Registry } from "../engine/registry-impl";
 import { resolveAction } from "../engine/resolve";
 import { createRng } from "../engine/rng";
+import { placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { clockFix } from "../engine/time";
 import { currentStage } from "../engine/tracks";
 import { canSeeEntity, canSeePlace, findLeaks, playerTrack, shownTrackId, unrevealedSecrets } from "../engine/visibility";
 import { Working } from "../engine/working";
+import { hasLedger } from "../packs/economy/core/model";
 import { hashParts } from "../shared/hash";
-import { isRecord, type JsonValue } from "../shared/json";
+import { isRecord, type JsonObject, type JsonValue } from "../shared/json";
 import type { FixOp, LedgerEvent } from "../shared/ledger";
 import { OFFSTAGE_ORIGIN, ORIGIN_FIELD, playsOffstage } from "../shared/offstage";
 import { type ErrorCode, type ErrorMessage, FIX_THINGS_MAX, type FrontendToBackend, PROTOCOL_VERSION, type ResultBodies, type ResultMessage } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
 import { type ItemFix, parseItemFix } from "../shared/things";
-import type { WorldDoc } from "../shared/world";
+import type { ParamDef, WorldDoc } from "../shared/world";
 import { type ChangeInput, readPart, type Report, type Store } from "../store";
 import { RunEnds, stateChanged } from "./live";
 import { chatView, headTurn } from "./view";
@@ -52,6 +62,9 @@ const SEED = "rpe.play";
 
 /** The id a tap's Undo takes: `tap:<turn>:<tap>`. */
 const UNDO_ID = /^tap:([^:]+):([^:]+)$/;
+
+/** The economy's domain, whose materializer opens the accounts the world gave a party that holds some. */
+const MONEY = "money";
 
 export interface PlayDeps {
   /** RPE's store, which holds each chat's state. */
@@ -69,11 +82,14 @@ export interface PlayDeps {
 
 type Request<T extends FrontendToBackend["type"]> = Extract<FrontendToBackend, { type: T }>;
 
-/** Why a request is not done: today's error code, with the line of this area's words that says so, or the words today's own code gives. */
+/**
+ * Why a request is not done: today's error code, with the line of this area's words that says so, or the words today's own code
+ * gives. `codes` are fields given as codes, each said in the words the file has for it (`keys`).
+ */
 class Refused extends Error {
   constructor(
     readonly code: ErrorCode,
-    readonly why: { line: string; fields?: Record<string, unknown> } | { words: string },
+    readonly why: { line: string; fields?: Record<string, unknown>; codes?: Record<string, readonly string[]> } | { words: string },
   ) {
     super("line" in why ? why.line : why.words);
   }
@@ -87,8 +103,64 @@ interface Head {
   seed: string;
 }
 
+/** What a tap comes to: what the player did, and the accounts the world gave that opened for it first. */
+interface Tapped {
+  /** Each account's authored opening (`openGiven`): the world's, not the player's. */
+  opened: LedgerEvent[];
+  /** What the player did. */
+  events: LedgerEvent[];
+}
+
 function reply<K extends keyof ResultBodies>(r: FrontendToBackend, request: K, body: ResultBodies[K]): ResultMessage {
   return { lre: PROTOCOL_VERSION, type: "lre.result", reqId: r.reqId, request, body } as ResultMessage;
+}
+
+/** A tap of the player's alone, which opens nothing of the world's. */
+function played(events: LedgerEvent[]): Tapped {
+  return { opened: [], events };
+}
+
+/**
+ * Opens on `w` the accounts the world gave each of `parties` that nobody has opened yet, as the engine's own tools open them
+ * before a sum (`openAuthored`, `src/iface/ops-values.ts`), so a sum starts from what the world gave: for a party that holds
+ * accounts, the money materializer posts their authored openings and draws nothing. Someone the world gave no accounts is
+ * given none. Each opening, in order.
+ */
+function openGiven(registry: Registry, w: Working, parties: readonly string[], seed: string): LedgerEvent[] {
+  const opened: LedgerEvent[] = [];
+  for (const id of new Set(parties)) {
+    if (!hasLedger(w.ctx, id)) continue;
+    const event = materializeIfNeeded(registry, w, id, MONEY, seed);
+    if (event !== null) opened.push(event);
+  }
+  return opened;
+}
+
+/** Who an action names: the one acting, and whoever its references name, as today's resolver takes them in. */
+function partiesOf(params: Readonly<Record<string, ParamDef>>, actor: string, given: JsonObject): string[] {
+  return [
+    actor,
+    ...Object.entries(params).flatMap(([name, def]) => {
+      const named = own(given, name);
+      return def.type === "ref" && typeof named === "string" ? [named] : [];
+    }),
+  ];
+}
+
+/**
+ * The clock's ✎ (DESIGN §12): the clock set to `local`, a date and time of day as the HUD reads it, local to the player
+ * character's place. A later time is one move of the clock, as the engine's own `pass_time` records it (`setClock`,
+ * `src/iface/ops-time.ts`): what the time between did to anyone is not decided here, and what fell due in it is the Author's at
+ * the next turn, which its world state lists (plan §6.1, §6.4). An earlier time, one that does not read, or a world without its
+ * calendar is today's ✎ (`clockFix`): its set-back, or the words it refuses with.
+ */
+function clockSet(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, local: string, seed: string): LedgerEvent[] {
+  const at = clockOfStamp(calendarOf(world), local);
+  const to = at === null ? null : at - placeOffset(world, at, placeOfEntity(state, world.pov));
+  if (to !== null && to > state.clock && registry.context(world, state).levelOf(world.pov, "calendar") >= 1) return [{ type: "clock", minutes: to - state.clock, cause: "advance" }];
+  const fixed = clockFix(registry, world, state, local, seed);
+  if ("code" in fixed) throw new Refused("validation", { words: fixed.reason });
+  return fixed.events;
 }
 
 export class PlayService {
@@ -138,12 +210,13 @@ export class PlayService {
     }
   }
 
-  /** Undoes a tap this area recorded, by the id its answer gave, as today's Undo chip is sent. */
+  /** Undoes a tap this area recorded, by the id its answer gave, as today's Undo chip is sent; when accounts opened with it stay, the answer says so (`said`). */
   async undo(user: string, chat: string, r: Request<"lre.chip">): Promise<ResultMessage | ErrorMessage> {
     try {
-      const applied = await this.undone(user, chat, r.chip);
+      const { applied, kept } = await this.undone(user, chat, r.chip);
       if (applied) stateChanged(this.deps.live, chat);
-      return reply(r, "lre.chip", { applied, pending: false });
+      const said = kept ? await this.words("opened_stay") : "";
+      return reply(r, "lre.chip", { applied, pending: false, ...(said === "" ? {} : { said }) });
     } catch (error) {
       return this.failed(r, error);
     }
@@ -168,21 +241,24 @@ export class PlayService {
       const w = new Working(registry, world, state);
       const absent = optionalQuery(w.ctx, "economy.offstage_refusal")?.(w.ctx, r.action, r.params, world.pov) ?? optionalQuery(w.ctx, "gear.offstage_refusal")?.(w.ctx, r.action, r.params, world.pov) ?? null;
       if (absent !== null) throw new Refused("validation", { words: absent });
-      const res = resolveAction(registry, w, { action, actor: world.pov, params: r.params }, createRng(hashParts(seed, r.action, JSON.stringify(r.params))), { runSeed: seed });
+      // What the world gave those the action names opens first, so a sum starts from it. Nothing is drawn for anyone from the
+      // world's tables (filling in detail is the GM's and the Author's, plan §6.4), so the resolver is given no seed to draw with.
+      const opened = openGiven(registry, w, partiesOf(action.params, world.pov, r.params), seed);
+      const res = resolveAction(registry, w, { action, actor: world.pov, params: r.params }, createRng(hashParts(seed, r.action, JSON.stringify(r.params))));
       if (!res.ok && res.failed) throw new Refused("validation", { words: playerReason(res.failed) });
       const rejected = res.rejected[0];
       if (rejected !== undefined) throw new Refused("validation", { words: rejected.rejection.reason });
       if (res.events.length === 0) throw new Refused("validation", { line: "changes_nothing" });
       // A standing payment set up here says, when it pays, that it was set up off screen.
-      return res.events.map((e) => (e.type === "spawn" && e.entity.kind === "flow" ? { ...e, entity: { ...e.entity, fields: { ...e.entity.fields, [ORIGIN_FIELD]: OFFSTAGE_ORIGIN } } } : e));
+      return { opened, events: res.events.map((e) => (e.type === "spawn" && e.entity.kind === "flow" ? { ...e, entity: { ...e.entity, fields: { ...e.entity.fields, [ORIGIN_FIELD]: OFFSTAGE_ORIGIN } } } : e)) };
     });
   }
 
   private fix(user: string, chat: string, r: Request<"lre.fix">): Promise<string | null> {
     return this.tap(user, chat, r, ({ registry, world, state, seed }) => {
       // Under the player's rules: a locked field is refused, as on today's ✎.
-      const edited = (ops: FixOp[]): LedgerEvent[] => {
-        const edit = resolveEdit(registry, world, state, ops, { gm: false, runSeed: seed });
+      const edited = (ops: FixOp[], on: Readonly<WorldState> = state): LedgerEvent[] => {
+        const edit = resolveEdit(registry, world, on, ops, { gm: false, runSeed: seed });
         if ("rejection" in edit) throw new Refused("validation", { words: edit.rejection.reason });
         return edit.events;
       };
@@ -193,25 +269,22 @@ export class PlayService {
         const stage = id === undefined ? null : currentStage(world, state, id);
         if (id === undefined || shown === null || stage === null) throw new Refused("validation", { line: "no_quest" });
         if (shown.opened >= shown.hints.length) throw new Refused("validation", { line: "no_hint" });
-        return [{ type: ENGINE_EVENTS.hint, data: { track: id, stage, n: shown.opened + 1 } }];
+        return played([{ type: ENGINE_EVENTS.hint, data: { track: id, stage, n: shown.opened + 1 } }]);
       }
       if ("time" in r) {
-        // The clock's ✎: a later time runs the time between as an applied advance, an earlier one sets the clock back.
         if (typeof r.time !== "string") throw new Refused("bad_request", { line: "bad_time" });
-        const fixed = clockFix(registry, world, state, r.time, seed);
-        if ("code" in fixed) throw new Refused("validation", { words: fixed.reason });
-        return fixed.events;
+        return played(clockSet(registry, world, state, r.time, seed));
       }
       if ("thing" in r) {
         const change = parseItemFix(r.thing);
         if (change === null) throw new Refused("bad_request", { line: "not_thing" });
-        return edited([{ op: "fix_item", change }]);
+        return played(edited([{ op: "fix_item", change }]));
       }
       if ("things" in r) {
         // Belongings' changes to the player's things: all or none, one unit with one Undo.
         const changes = Array.isArray(r.things) ? r.things.map(parseItemFix) : [];
         if (changes.length === 0 || changes.length > FIX_THINGS_MAX || changes.some((c) => c === null) || typeof r.label !== "string") throw new Refused("bad_request", { line: "things_count", fields: { most: FIX_THINGS_MAX } });
-        return edited((changes as ItemFix[]).map((change): FixOp => ({ op: "fix_item", change })));
+        return played(edited((changes as ItemFix[]).map((change): FixOp => ({ op: "fix_item", change }))));
       }
       // A field's ✎. A place fixed so is a real move, through the one move path, and leaves the activity behind; only a place the
       // player character may know, for someone it can see: anything else reads as no place at all, as the ✎ never offered it.
@@ -220,26 +293,35 @@ export class PlayService {
       const was = own(state.entities, r.entity);
       const doing = was?.fields.activity;
       const moved = r.field === "place" && r.value !== was?.fields.place;
-      return edited(moved && doing !== undefined && doing !== "idle" ? [set, { op: "set", entity: r.entity, field: "activity", value: "idle" }] : [set]);
+      const ops: FixOp[] = moved && doing !== undefined && doing !== "idle" ? [set, { op: "set", entity: r.entity, field: "activity", value: "idle" }] : [set];
+      if (r.field !== "cash") return played(edited(ops));
+      // Cash corrected is measured from what the world gave them, which opens first as the world's own, not inside the player's correction.
+      const w = new Working(registry, world, state);
+      const opened = openGiven(registry, w, [r.entity], seed);
+      return { opened, events: edited(ops, w.state) };
     });
   }
 
   /**
-   * Records what a tap comes to as the player's own changes on the chat's newest turn, in one write, so the state it is resolved
-   * on is the one it lands on. `resolve` gives its events from the chat's head; with none, nothing is recorded. The id its Undo
-   * takes; null when nothing was recorded.
+   * Records what a tap comes to on the chat's newest turn, in one write, so the state it is resolved on is the one it lands on:
+   * the accounts the world gave that opened for it, each a change of its own from the world's defaults that stands as assumed
+   * (as the engine's own tools record them, `FILLED_IN` in `src/iface/source.ts`) and cites only the tap, so its Undo can tell
+   * them from the player's own changes, which follow. `resolve` gives both from the chat's head; when the player did nothing,
+   * nothing is recorded. Nothing is while a turn of the chat runs: that turn works on the state it started from, and a continue
+   * that saves nothing takes back what lands on its turn. The id its Undo takes; null when nothing was recorded.
    */
-  private async tap(user: string, chat: string, r: Request<"lre.action"> | Request<"lre.fix">, resolve: (head: Head) => LedgerEvent[]): Promise<string | null> {
+  private async tap(user: string, chat: string, r: Request<"lre.action"> | Request<"lre.fix">, resolve: (head: Head) => Tapped): Promise<string | null> {
     const s = this.deps.store.user(user);
     const { env } = this.deps.store;
     const tap = crypto.randomUUID();
     const turn = await this.deps.writes.run(() => {
       const row = s.chat(chat);
       if (row === null || row.world === null) throw new Refused("not_world_chat", { line: "not_world" });
+      if (this.deps.turning(user, chat)) throw new Refused("conflict", { line: "turn_running" });
       const state = s.headState(chat).state.world;
       const doc = env.worlds(state.revision);
       if (doc === undefined) throw new Refused("unavailable", { line: "no_revision" });
-      const events = resolve({ registry: env.registry, world: playedWorld(doc, state), state, seed: hashParts(SEED, chat, tap) });
+      const { opened, events } = resolve({ registry: env.registry, world: playedWorld(doc, state), state, seed: hashParts(SEED, chat, tap) });
       if (events.length === 0) return null;
       const on = headTurn(s, chat);
       if (on === null) throw new Refused("unavailable", { line: "no_turn" });
@@ -247,10 +329,10 @@ export class PlayService {
       const group = events.length > 1 && events.every((e) => e.group === undefined) ? `tap:${tap}` : undefined;
       const { lre: _lre, reqId: _reqId, chatId: _chatId, ...request } = r;
       const cite = { tap, request } as unknown as JsonValue;
-      s.addChanges(
-        on,
-        events.map((e): ChangeInput => ({ lane: "engine", op: e.type, value: (group === undefined ? e : { ...e, group }) as unknown as JsonValue, by: PLAYER, source: PLAYER, cite })),
-      );
+      s.addChanges(on, [
+        ...opened.map((e): ChangeInput => ({ lane: "engine", op: e.type, value: e as unknown as JsonValue, by: PLAYER, source: "default", standing: "assumed", precision: null, cite: { tap } })),
+        ...events.map((e): ChangeInput => ({ lane: "engine", op: e.type, value: (group === undefined ? e : { ...e, group }) as unknown as JsonValue, by: PLAYER, source: PLAYER, cite })),
+      ]);
       return on;
     }, "recording a tap on a panel");
     if (turn === null) return null;
@@ -258,20 +340,27 @@ export class PlayService {
     return `tap:${turn}:${tap}`;
   }
 
-  /** Records the reversal of each unit of a tap, the last first. Whether anything was recorded: nothing, once the tap is undone already. */
-  private undone(user: string, chat: string, chip: string): Promise<boolean> {
+  /**
+   * Records the reversal of the player's changes of a tap, each unit the last first, in one write: all of them or none, so an
+   * Undo never leaves half a tap. A unit that would leave a part (one written since, or one the store keeps no reverse for)
+   * takes the whole write back, and the answer says which. Whether anything was recorded (nothing once the tap is undone), and
+   * whether accounts the world gave opened with the tap: the world's, which stay. Nothing is recorded while a turn of the chat runs.
+   */
+  private undone(user: string, chat: string, chip: string): Promise<{ applied: boolean; kept: boolean }> {
     const s = this.deps.store.user(user);
     return this.deps.writes.run(() => {
       const [, turn = "", tap = ""] = UNDO_ID.exec(chip) ?? [];
-      const mine = s.turn(turn)?.chat === chat ? s.changes(turn).filter((c) => isRecord(c.cite) && c.cite.tap === tap) : [];
+      const all = s.turn(turn)?.chat === chat ? s.changes(turn).filter((c) => isRecord(c.cite) && c.cite.tap === tap) : [];
+      const mine = all.filter((c) => c.source === PLAYER);
       if (mine.length === 0) throw new Refused("not_found", { line: "no_undo" });
+      if (this.deps.turning(user, chat)) throw new Refused("conflict", { line: "turn_running" });
       const path = s.path(chat);
       const from = path.findIndex((e) => e.turn === turn);
       if (from < 0) throw new Refused("conflict", { line: "off_path" });
       // Undone already where the chat's story now goes: a change from its turn on cites one of the tap's as the one it undoes.
       const ids = new Set(mine.map((c) => c.id));
       const since = path.slice(from).flatMap((e) => (e.turn === null ? [] : s.changes(e.turn)));
-      if (since.some((c) => isRecord(c.cite) && typeof c.cite.undoes === "number" && ids.has(c.cite.undoes))) return false;
+      if (since.some((c) => isRecord(c.cite) && typeof c.cite.undoes === "number" && ids.has(c.cite.undoes))) return { applied: false, kept: false };
       // The store undoes a change with the rest of its unit: one change of each unit is enough.
       const units = new Map<string, number>();
       for (const c of mine) {
@@ -285,23 +374,26 @@ export class PlayService {
         recorded += out.changes.length;
         left.push(...out.left);
       }
-      if (recorded === 0 && left.some((l) => l.code === "changed_since")) throw new Refused("conflict", { line: "changed_since" });
-      return recorded > 0;
+      // Refused inside the write, which takes back what the units before recorded.
+      if (left.some((l) => l.code === "changed_since")) throw new Refused("conflict", { line: "changed_since" });
+      if (left.length > 0) throw new Refused("conflict", { line: "no_undo_for", codes: { parts: left.map((l) => String(l.values?.op ?? "")) } });
+      return { applied: recorded > 0, kept: recorded > 0 && all.length > mine.length };
     }, "undoing a tap on a panel");
   }
 
   private async failed(r: FrontendToBackend, error: unknown): Promise<ErrorMessage> {
     const fail = (code: ErrorCode, message: string): ErrorMessage => ({ lre: PROTOCOL_VERSION, type: "lre.error", reqId: r.reqId, code, message });
-    if (error instanceof Refused) return fail(error.code, "words" in error.why ? error.why.words : await this.words(error.why.line, error.why.fields));
+    if (error instanceof Refused) return fail(error.code, "words" in error.why ? error.why.words : await this.words(error.why.line, error.why.fields, error.why.codes));
     const message = error instanceof Error ? error.message : String(error);
     this.deps.log.error("A play page's request failed inside RPE.", { request: r.type, error: message });
     return fail("internal", message);
   }
 
-  /** A line of this area's words, filled with `fields`; none when the user deleted the line. */
-  private async words(line: string, fields: Record<string, unknown> = {}): Promise<string> {
+  /** A line of this area's words, filled with `fields` and with `codes` in the file's words for them (`keys`), each once; none when the user deleted the line. */
+  private async words(line: string, fields: Record<string, unknown> = {}, codes: Readonly<Record<string, readonly string[]>> = {}): Promise<string> {
     const what = `.prompts/${PLAY_ANSWERS}.md`;
     const part = readPart(await readFile(join(this.deps.guidance, ".prompts", `${PLAY_ANSWERS}.md`), "utf8"), what);
-    return part.lines.get(line)?.render(part.header, fields) ?? "";
+    const said = Object.fromEntries(Object.entries(codes).map(([name, list]) => [name, [...new Set(list.map((code) => own(part.keys, code) ?? code))]]));
+    return part.lines.get(line)?.render(part.header, { ...fields, ...said }) ?? "";
   }
 }

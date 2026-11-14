@@ -1,5 +1,5 @@
 ---
-description: The words RPE answers a play page with when it does not do what a panel asked of it. Each line is the message of one answer, shown to you as it is; the names in double braces are filled with the request's own values. Change the words freely. Delete a line and that answer comes with no words. They say what is so; they ask for nothing.
+description: The words RPE answers a play page with when it does not do what a panel asked of it, or does it and leaves something as it was. Each line is the message of one answer, shown to you as it is; the names in double braces are filled with the request's own values, and the keys give the words for what an answer names by a code. Change the words freely. Delete a line and that answer comes with no words. They say what is so; they ask for nothing. A tap that manages keeps the rules its action has in this world, so one they turn down (paying more than you can afford, say) is answered in their words and changes nothing.
 lines:
   next_message: "A tap that goes with your next message is not kept by this build of RPE from this page yet."
   plays_now: "A tap that plays at once as your message is not served by this build of RPE yet: it writes no message to the chat and starts no reply from this page."
@@ -23,4 +23,11 @@ lines:
   no_undo: "There is no such change to undo in this chat."
   off_path: "Nothing was undone: the turn this change was kept with is no longer part of this chat's story."
   changed_since: "Nothing was undone: something has changed it since."
+  no_undo_for: "Nothing was undone: this build keeps no undo for {{parts}}."
+  turn_running: "A turn of this chat is running, and a change from a panel is kept only between turns: nothing was changed. It can be made once the turn is over."
+  opened_stay: "The accounts this world gave, which opened when the money first moved, stay open as the world gave them."
+keys:
+  engine.hint: "a hint opened"
+  spawn: "something made"
+  economy.txn: "a line in the money's journal"
 ---

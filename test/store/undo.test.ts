@@ -4,13 +4,25 @@
 
 import { describe, expect, test } from "bun:test";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../src/engine/events";
+import { BANK_PREFIX } from "../../src/packs/economy/core/model";
+import { asUnit, posting, txn } from "../../src/packs/economy/core/pay";
+import type { JsonValue } from "../../src/shared/json";
 import { factStore, standing } from "../../src/store/facts";
+import type { UserStore } from "../../src/store/store";
 import { engine, goTo, hand, make, pay, play, POV, testStore, tick } from "./fixtures";
 
 function chat() {
   const ts = testStore();
   ts.s.createChat({ id: "c", revision: ts.revision });
   return ts;
+}
+
+/** An account's journal at the chat's head, as the money panel lists it: each line's memo, amount, kind and category. */
+function journal(s: UserStore, account: string): { memo: JsonValue; cents: JsonValue; kind: JsonValue; category: JsonValue }[] {
+  const economy = s.headState("c").state.world.packs.economy;
+  const lines: JsonValue | undefined = typeof economy === "object" && economy !== null && !Array.isArray(economy) && typeof economy.journal === "object" && economy.journal !== null && !Array.isArray(economy.journal) ? economy.journal[account] : undefined;
+  if (!Array.isArray(lines)) return [];
+  return lines.flatMap((l) => (typeof l === "object" && l !== null && !Array.isArray(l) ? [{ memo: l.memo ?? null, cents: l.cents ?? null, kind: l.kind ?? null, category: l.category ?? null }] : []));
 }
 
 describe("undo of one change", () => {
@@ -70,5 +82,31 @@ describe("undo of one change", () => {
     expect(s.undo(made.id)).toEqual({ changes: [], left: [{ code: "not_reversible", values: { change: made.id, op: "spawn" } }] });
     expect(s.changes(t2.id)).toHaveLength(1);
     expect(s.headState("c").state.world.entities[POV]?.fields.place).toBe("market_square");
+  });
+
+  test("a journal line is taken back as the economy takes one back: its posting's lines the other way, named reversed, or refunded where the bank was paid", () => {
+    const { s } = chat();
+    const market = `${EXTERNAL_ACCOUNT_PREFIX}market`;
+    const lodging = asUnit(posting([{ account: "acct_wren", amount: -250 }, { account: market, amount: 250 }], { memo: "Two nights", kind: "payment", category: "lodging" }));
+    const fee = asUnit(posting([{ account: "acct_wren", amount: -35 }, { account: `${BANK_PREFIX}fees`, amount: 35 }], { memo: "Overdraft fee", kind: "fee", category: "fees" }));
+    // A journal line recorded without its posting: nothing says what it moved.
+    const alone = txn([{ account: "acct_wren", amount: -10 }], { memo: "Tip", kind: "payment" });
+    const t1 = play(s, "c", "m1", "Wren pays for two nights, and the bank charges her.", 1, engine(...lodging, ...fee, alone));
+    play(s, "c", "m2", "She settles in.", 2, engine(tick(30)));
+    const start = s.startOf(t1.id).state.world.accounts.acct_wren ?? 0;
+    const [, lodgingLine, , feeLine, aloneLine] = s.changes(t1.id);
+    if (!lodgingLine || !feeLine || !aloneLine) throw new Error("missing changes");
+
+    const undone = s.undo(lodgingLine.id);
+    expect(undone.left).toEqual([]);
+    expect(undone.changes.map((c) => c.op)).toEqual(["economy.txn", "post"]);
+    const refunded = s.undo(feeLine.id);
+    expect(refunded.left).toEqual([]);
+    expect(s.headState("c").state.world.accounts.acct_wren ?? 0).toBe(start);
+    expect(journal(s, "acct_wren").slice(-2)).toEqual([
+      { memo: "Two nights reversed", cents: 250, kind: "transfer", category: "lodging" },
+      { memo: "Overdraft fee refunded", cents: 35, kind: "refund", category: "fees" },
+    ]);
+    expect(s.undo(aloneLine.id)).toEqual({ changes: [], left: [{ code: "not_reversible", values: { change: aloneLine.id, op: "economy.txn" } }] });
   });
 });

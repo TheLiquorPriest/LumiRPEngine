@@ -43,6 +43,13 @@ export function words(name: string, fields: Record<string, unknown> = {}): strin
   return template.render(part.header, fields);
 }
 
+/** The words the play panels' file gives a code an answer names (`keys`), as the shipped file has them. */
+export function keyed(code: string): string {
+  const said = readPart(readFileSync(join(GUIDANCE, ".prompts", "play-answers.md"), "utf8")).keys[code];
+  if (said === undefined) throw new Error(`no key ${code}`);
+  return said;
+}
+
 export interface Bed {
   store: Store;
   writes: WriteQueue;

@@ -1336,7 +1336,7 @@ export interface ResultBodies {
   /** The player's message the action plays as; for an action done at once, off screen (DESIGN §11), its bookkeeping recorded on the head with no message and no reply (`pending` while a reply is in flight, `queued` what the held write waits on; `undo` its chip, null while pending); or, staged for the next message, whether it is staged now (false: the same tap cleared it). */
   "lre.action": { messageId: MessageId } | { applied: true; pending: boolean; queued?: QueuedOn; undo?: string | null } | { staged: boolean };
   /** With `pending`, `queued` says what the held write waits on (engine, page or reply), as on every write's answer. */
-  "lre.chip": { applied: boolean; pending: boolean; queued?: QueuedOn };
+  "lre.chip": { applied: boolean; pending: boolean; queued?: QueuedOn; said?: string };
   "lre.view.open": { materialized: boolean; pending: boolean; queued?: QueuedOn };
   "lre.fix": { pending: boolean; queued?: QueuedOn; undo?: string | null };
   /** `undo`: the chip that undoes the edit just written (the chat's GM edit chip for it), null while it waits for a reply in flight or when it changed nothing. */

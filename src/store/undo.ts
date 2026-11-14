@@ -5,13 +5,18 @@
 //
 // What would be left is said as codes with values. A part a later change has written since is not
 // the change's to take back: then nothing of the unit is undone. A part the store keeps no reverse for
-// (a journal entry, something made) stays, and the rest of the unit is undone.
+// (something made, a journal line whose posting is not in its unit) stays, and the rest of the unit is
+// undone. A journal line is taken back as the economy takes one back (`reverseLine`).
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import { jsonEqual } from "../shared/json-patch";
+import { FINANCE_EVENTS } from "../shared/finance";
+import type { LedgerEvent, PostEvent } from "../shared/ledger";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
-import { own } from "../engine/pack-kit";
+import { own, strOf } from "../engine/pack-kit";
+import { BANK_PREFIX } from "../packs/economy/core/model";
+import { txn } from "../packs/economy/core/pay";
 import { factStore, standing } from "./facts";
 import { eventOf } from "./fold";
 import { STORE_OPS, type ChangeInput, type ChangeRow, type Report, type StoreState } from "./types";
@@ -26,8 +31,25 @@ export interface UndoPlan {
 
 const leftOf = (code: "changed_since" | "not_reversible", c: ChangeRow): Report => ({ code, values: { change: c.id, op: c.op } });
 
-/** The reverse of one change, read against the state just before its unit and the state now; or why it has none. */
-function reverseOne(c: ChangeRow, before: StoreState, now: StoreState, group: string): { op: string; value: JsonValue } | Report {
+/**
+ * A journal line taken back the way the economy takes back what a payment brought when it is paid
+ * another way (`otherWay`, `packs/economy/core/pay.ts`): the lines of its posting, the one of its unit
+ * with the same memo, the other way, filed as a line that names it reversed, or refunded where the
+ * bank was paid, in its category. None when its posting is not in its unit.
+ */
+function reverseLine(data: JsonObject, unit: readonly ChangeRow[]): LedgerEvent | null {
+  const memo = strOf(data.memo);
+  const paid = unit.filter((u) => u.applied).map((u) => eventOf(u.op, u.value)).find((e): e is PostEvent => e?.type === "post" && e.memo === memo);
+  if (paid === undefined) return null;
+  const fee = paid.lines.some((l) => l.account.startsWith(BANK_PREFIX));
+  const reversed = paid.lines.map((l) => ({ account: l.account, amount: -l.amount }));
+  const note = `${memo} ${fee ? "refunded" : "reversed"}`;
+  const category = strOf(data.category);
+  return txn(reversed, { memo: note, kind: fee ? "refund" : "transfer", ...(category ? { category } : {}) });
+}
+
+/** The reverse of one change of `unit`, read against the state just before the unit and the state now; or why it has none. */
+function reverseOne(c: ChangeRow, unit: readonly ChangeRow[], before: StoreState, now: StoreState, group: string): { op: string; value: JsonValue } | Report {
   const ev = eventOf(c.op, c.value);
   const grouped = (e: JsonObject): { op: string; value: JsonValue } => ({ op: String(e.type), value: { ...e, group } });
   if (ev) {
@@ -47,9 +69,11 @@ function reverseOne(c: ChangeRow, before: StoreState, now: StoreState, group: st
         return grouped({ type: "set", entity: ev.entity, field: ev.field, value: own(before.world.entities, ev.entity)?.fields[ev.field] ?? null });
       case "clock":
         return ev.minutes > 0 ? grouped({ type: ENGINE_EVENTS.rewind, data: { minutes: ev.minutes } }) : leftOf("not_reversible", c);
-      default:
+      default: {
         if (ev.type === ENGINE_EVENTS.rewind && "data" in ev && typeof ev.data.minutes === "number") return grouped({ type: "clock", minutes: ev.data.minutes, cause: "advance" });
-        return leftOf("not_reversible", c);
+        const line = ev.type === FINANCE_EVENTS.txn && "data" in ev ? reverseLine(ev.data, unit) : null;
+        return line === null ? leftOf("not_reversible", c) : grouped(line as unknown as JsonObject);
+      }
     }
   }
   const v = isRecord(c.value) ? c.value : {};
@@ -91,7 +115,7 @@ export function reversal(unit: readonly ChangeRow[], before: StoreState, now: St
   const out: UndoPlan = { inputs: [], left: [] };
   for (const c of [...unit].reverse()) {
     if (!c.applied) continue;
-    const r = c.op === STORE_OPS.fact ? reverseFact(c, now) : reverseOne(c, before, now, group);
+    const r = c.op === STORE_OPS.fact ? reverseFact(c, now) : reverseOne(c, unit, before, now, group);
     if (Array.isArray(r)) out.inputs.push(...r);
     else if ("code" in r) out.left.push(r);
     else out.inputs.push({ lane: c.lane, op: r.op, value: r.value, precision: c.precision, standing: c.standing });
