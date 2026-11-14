@@ -60,4 +60,14 @@ describe("fights", () => {
     expect(t.s.changes(t.turn.id).length).toBe(changes);
     expect((opOf(again).fight as JsonObject | null) !== null).toBe(true);
   });
+
+  test("a fight takes its fighters in as recorded: no money or things are made up for them", async () => {
+    const t = await familyRig(fightWorld);
+    const before = Object.keys(t.s.stateAt(t.turn.id).state.world.entities).sort();
+    appliedInFull(await t.call("fight_start", { foes: ["Grey wolf"], ...SRC }), "engine", false);
+    const rows = t.s.changes(t.turn.id);
+    expect(rows.some((r) => r.op === "materialize")).toBe(false);
+    expect(Object.keys(t.s.stateAt(t.turn.id).state.world.entities).sort()).toEqual(before);
+    expect(rows.every((r) => r.source === "prose")).toBe(true);
+  });
 });

@@ -183,26 +183,6 @@ describe("world_apply", () => {
     expect(t.s.changes(t.turn.id)).toEqual([]);
     wordsFromFiles(r);
   });
-
-  test("a searchable write is asked about as its own call, and one the player declines is left out", async () => {
-    const asked: JsonObject[] = [];
-    const t = await rig({
-      approvals: {
-        permission: async () => "confirm",
-        ask: async (_s, ask) => {
-          asked.push(ask.args as JsonObject);
-          return { go: false, reason: "not now" };
-        },
-      },
-    });
-    const args = { item: "knife", delta: -10, source: { from: "prose", message: "m-8" } };
-    const r = await t.call("item_condition", args);
-    expect(asked).toEqual([args]);
-    expect(ops(r)[0]).toMatchObject({ op: "item_condition", lane: "engine", applied: false, held: "declined" });
-    expect(texts(r).some((x) => x.includes("Their reason: not now"))).toBe(true);
-    expect(t.s.changes(t.turn.id)).toEqual([]);
-    wordsFromFiles(r);
-  });
 });
 
 describe("world_query, world_search and roll", () => {

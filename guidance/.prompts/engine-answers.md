@@ -56,6 +56,7 @@ not_applicable: {{#n}}Operation {{n}} ({{op}}): {{/n}}the engine cannot apply th
 nothing_recorded: Nothing was recorded. Send the call again with that put right.
 never: Operation {{n}} ({{op}}) was not applied: it writes to the {{lane}} lane, where the player allows no writes.
 declined: Operation {{n}} ({{op}}) was not applied: the player said no.{{#reason}} Their reason: {{reason}}{{/reason}}
+needs_held: Nothing was recorded: operation {{n}} ({{op}}) needs what the player held back, so the call cannot go ahead as it is.
 unsourced: Operation {{n}} ({{op}}) names no source, so it is marked unsourced.
 invented_unchecked: Operation {{n}} ({{op}}) is recorded as invented and names no gap check, so it is marked so.
 invented_unconsented: Operation {{n}} ({{op}}) is recorded as invented and names no consent, so it is marked so.
@@ -76,7 +77,9 @@ not_to_hand: Operation {{n}} ({{op}}): {{what}} was not to hand{{#brought}}, and
 used_past_held: Operation {{n}} ({{op}}): {{qty}} of {{what}} were used and there were only {{held}}; all of it is used up.
 kept_nowhere: Operation {{n}} ({{op}}): nothing says where {{what}} is kept, so nothing moved.
 exists: Operation {{n}} ({{op}}): {{name}} is there already and stands for it; no second one was made.
+nothing_filled: Operation {{n}} ({{op}}): nothing was filled in for {{what}}: it was filled in before, or the world keeps no more detail of it at its level.
 paid_past_held: Operation {{n}} ({{op}}): {{payer}} paid {{amount}} and could pay at most {{held}} from any one way; the payment is recorded all the same.
+paid_from_outside: Operation {{n}} ({{op}}): the world keeps no accounts for {{payer}}, so it was paid from their money outside the world's accounts.
 money_untracked: Operation {{n}} ({{op}}): this world keeps no money for {{payer}}, so no money moved.
 closed_with_money: Operation {{n}} ({{op}}): {{what}} was closed with {{amount}} still on it.
 derived: Operation {{n}} ({{op}}): {{key}} is worked out from other values and is not set itself.

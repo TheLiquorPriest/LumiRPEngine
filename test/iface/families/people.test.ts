@@ -11,7 +11,7 @@ const NAMES = PEOPLE_TOOLS.map((t) => t.name);
 
 describe("people", () => {
   test("every tool is found by a search on its own words", async () => {
-    expect(NAMES).toEqual(["gm_set_life", "gm_despawn", "gm_restore", "gm_classify", "gm_set_entity", "gm_link", "gm_unlink"]);
+    expect(NAMES).toEqual(["gm_set_life", "gm_despawn", "gm_restore", "gm_classify", "gm_set_entity", "gm_link", "gm_unlink", "fill_in_detail"]);
     await eachFoundByItsWords(NAMES);
   });
 

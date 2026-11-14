@@ -6,11 +6,12 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { hashParts } from "../shared/hash";
-import type { EntityId } from "../shared/ids";
+import type { DomainId, EntityId } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import { formatMoney, type PlaceDef, type WorldDoc } from "../shared/world";
 import { calendarOf, formatClock } from "../engine/calendar";
+import { materializeIfNeeded } from "../engine/materialize";
 import { own } from "../engine/pack-kit";
 import { playedWorld } from "../engine/places-in-play";
 import type { Rejection } from "../engine/registry";
@@ -19,7 +20,7 @@ import { Working } from "../engine/working";
 import type { ChangeInput, ChangeRow, Lane, StoreState } from "../store/types";
 import type { Call, Reply } from "./kit";
 import { Reading } from "./reading";
-import { citeOf, type Provenance, provenanceData } from "./source";
+import { citeOf, FILLED_IN, type Provenance, provenanceData } from "./source";
 
 /** One operation's part of a draft: what it is, its lane and provenance, and where its changes sit among the draft's. */
 export interface Recorded {
@@ -40,6 +41,8 @@ export class Draft {
   readonly recorded: Recorded[] = [];
   /** Store operations worked out beside the engine's state (the horizon), in order. */
   readonly storeState: { horizon: string[] };
+  /** The events the engine filled in from the world itself (`fill`), by identity: recorded with `FILLED_IN`, whichever operation records them. */
+  private readonly filled = new Set<LedgerEvent>();
 
   constructor(
     readonly base: Reading,
@@ -79,16 +82,40 @@ export class Draft {
   }
 
   /**
+   * Fills in a part of someone's or something's detail from the world itself, as today's engine
+   * does where nobody has yet (`materializeIfNeeded`: an account's authored opening, or values drawn
+   * from the world's tables): no call said any of it, so each of its events is recorded as a change
+   * of its own, with `FILLED_IN`, whichever operation records it. A handler that throws is met as in
+   * `applyAll`.
+   */
+  fill(n: number, entity: EntityId, domain: DomainId): Rejection | null {
+    const mark = this.w.lightMark();
+    try {
+      materializeIfNeeded(this.base.registry, this.w, entity, domain, this.seed(n));
+    } catch (error) {
+      this.w.restore(mark);
+      this.call.deps.env.failed?.({ op: "materialize", error });
+      return { code: "failed", reason: "" };
+    }
+    for (const ev of this.w.events.slice(mark.events)) this.filled.add(ev);
+    return null;
+  }
+
+  /**
    * Records the events applied since `from` as one operation's changes. Events that came with no
    * unit of their own become one unit, so a later path keeps or drops the operation whole, as
-   * today's GM edits are.
+   * today's GM edits are; what was filled in (`fill`) stays a change of its own, out of that unit.
    */
   record(n: number, op: string, lane: Lane, prov: Provenance, from: number, extra: { made?: string } = {}): Recorded {
     const events = this.w.events.slice(from);
-    const loose = events.length > 1 && events.every((e) => e.group === undefined);
-    const group = loose ? `op:${hashParts(this.call.callId, String(n), JSON.stringify(events)).slice(0, 10)}` : undefined;
+    const own = events.filter((e) => !this.filled.has(e));
+    const loose = own.length > 1 && own.every((e) => e.group === undefined);
+    const group = loose ? `op:${hashParts(this.call.callId, String(n), JSON.stringify(own)).slice(0, 10)}` : undefined;
     const rec: Recorded = { n, op, lane, prov, inputs: [], ...(extra.made !== undefined ? { made: extra.made } : {}) };
-    for (const ev of events) this.push(rec, lane, prov, { op: ev.type, value: (group ? { ...ev, group } : ev) as unknown as JsonValue });
+    for (const ev of events) {
+      if (this.filled.has(ev)) this.push(rec, lane, FILLED_IN, { op: ev.type, value: ev as unknown as JsonValue });
+      else this.push(rec, lane, prov, { op: ev.type, value: (group ? { ...ev, group } : ev) as unknown as JsonValue });
+    }
     this.recorded.push(rec);
     return rec;
   }
@@ -119,14 +146,29 @@ export interface Committed {
   state: StoreState;
 }
 
-/** Records a draft's changes on the call's turn, in one write through the queue. */
-export async function commit(draft: Draft): Promise<Committed> {
-  const turn = draft.base.turn;
-  if (turn === null) throw new Error("a draft is recorded only on a turn");
-  const { store, writes } = draft.call.deps;
-  if (draft.inputs.length === 0) return { rows: [], state: store.stateAt(turn.id).state };
-  const { changes, state } = await writes.run(() => store.addChanges(turn.id, draft.inputs), draft.call.tool);
-  return { rows: changes, state };
+/** What working a call out inside its write came to: what the work gave, and what was recorded (null when it gave nothing to record). */
+export interface Worked<T> {
+  out: T;
+  done: Committed | null;
+}
+
+/**
+ * Works a call out and records it in one write through the queue, which runs one write at a time.
+ * `work` runs inside the write, so it reads the state as it stands then: a call made at the same
+ * time as another of the turn is worked out on what the other left, never on the state both read
+ * before either was recorded. The draft it gives is recorded on that same state; none records nothing.
+ */
+export async function commit<T>(call: Call, work: () => { out: T; draft: Draft | null }): Promise<Worked<T>> {
+  const { store, writes } = call.deps;
+  return writes.run((): Worked<T> => {
+    const { out, draft } = work();
+    if (draft === null) return { out, done: null };
+    const turn = draft.base.turn;
+    if (turn === null) throw new Error("a draft is recorded only on a turn");
+    if (draft.inputs.length === 0) return { out, done: { rows: [], state: store.stateAt(turn.id).state } };
+    const { changes, state } = store.addChanges(turn.id, draft.inputs);
+    return { out, done: { rows: changes, state } };
+  }, call.tool);
 }
 
 // ---------------------------------------------------------------- what changed

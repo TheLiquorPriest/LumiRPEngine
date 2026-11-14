@@ -49,6 +49,14 @@ export interface Provenance {
   consent?: "cited" | "own-write" | "none";
 }
 
+/**
+ * The provenance of what the engine fills in from the world itself (an account's authored opening, a
+ * value drawn from the world's tables): no call said it, so it never carries a call's provenance. It
+ * comes from the world's defaults and stands as assumed (plan §6.6), so the world state counts it
+ * among what is not settled.
+ */
+export const FILLED_IN: Provenance = { source: { from: "default" }, precision: null, standing: "assumed", marks: [] };
+
 /** Why provenance could not be read: which argument, and what it may be. */
 export interface Unreadable {
   field: string;

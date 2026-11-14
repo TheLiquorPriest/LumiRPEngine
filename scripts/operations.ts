@@ -98,7 +98,8 @@ function everydaySection(apply: ToolText, said: ReadonlyMap<string, string>): st
 
 function toolEntry(spec: ToolSpec, text: ToolText): string[] {
   const own = Object.entries(spec.properties).filter(([arg]) => !(spec.tier === "write" && Object.hasOwn(PROVENANCE_PROPERTIES, arg)));
-  const lines = [`#### ${spec.name}`, "", text.description, "", spec.tier === "write" ? `Writes the ${spec.lane ?? "engine"} lane.` : "Reads; changes nothing.", ""];
+  const sourced = Object.keys(PROVENANCE_PROPERTIES).every((arg) => Object.hasOwn(spec.properties, arg));
+  const lines = [`#### ${spec.name}`, "", text.description, "", spec.tier === "write" ? `Writes the ${spec.lane ?? "engine"} lane.${sourced ? "" : " Takes no provenance."}` : "Reads; changes nothing.", ""];
   if (own.length > 0) {
     lines.push("| Argument | Shape | Needed | What it is |", "|---|---|---|---|");
     for (const [arg, schema] of own) lines.push(`| \`${arg}\` | ${cell(shapeOf(schema))} | ${spec.required.includes(arg) ? "yes" : ""} | ${cell(text.arguments[arg] ?? "")} |`);
@@ -108,7 +109,7 @@ function toolEntry(spec: ToolSpec, text: ToolText): string[] {
 }
 
 function searchableSection(texts: ReadonlyMap<string, ToolText>): string[] {
-  const lines = ["## Searchable tools", "", "Found by `tool_search` and called through `tool_use`, family by family. Every write also takes the provenance of an everyday operation (`source`, `precision`, `standing`).", ""];
+  const lines = ["## Searchable tools", "", "Found by `tool_search` and called through `tool_use`, family by family. Every write also takes the provenance of an everyday operation (`source`, `precision`, `standing`), unless its entry says it takes none.", ""];
   const families = [...new Set(SEARCHABLE_TOOLS.map((t) => t.family))];
   for (const family of families) {
     lines.push(`### ${family}`, "");

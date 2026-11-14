@@ -11,17 +11,16 @@ import type { LedgerEvent } from "../../shared/ledger";
 import { formatMoney } from "../../shared/world";
 import { labelOf, numOf, optionalService, own, rowOf, strOf } from "../../engine/pack-kit";
 import { calendarOf, dateAt } from "../../engine/calendar";
-import { materializeIfNeeded } from "../../engine/materialize";
 import { placeOfEntity } from "../../engine/scope";
 import { openAccount as openProductAccount } from "../../packs/economy/core/actions";
 import { aprFor, currentScore, decide } from "../../packs/economy/core/credit";
 import { DONATION, exemptStatusOf, foundationTerms } from "../../packs/economy/core/exempt";
 import { matchCatalog, placeTrade } from "../../packs/economy/core/index";
 import { balance, dayPriceOf, priceOf, statusOf, worldProducts } from "../../packs/economy/core/model";
-import { cardsOn, featureFor, mostPayable, NO_WAY_TO_PAY } from "../../packs/economy/core/pay";
+import { cardsOn, featureFor, NO_WAY_TO_PAY } from "../../packs/economy/core/pay";
 import { NUMBER, TEXT, WHOLE } from "../kit";
 import { find, isUnread, minorUnits, missed, named, notAs, notOneOf, numberArg, textArg } from "../ops";
-import { payPastCover } from "../ops-values";
+import { openAuthored, paidLines, payPastCover } from "../ops-values";
 import type { Reading } from "../reading";
 import { editChange, effectChange, effectTool, notApplicable, optionalId, readTool, type WriteDef, writeTool } from "./run";
 
@@ -69,7 +68,7 @@ const openAccount = effectTool({
   family: FAMILY,
   lane: "engine",
   effect: "economy.open_account",
-  materialize: "money",
+  opensMoney: true,
   args: [{ field: "who", arg: "party", want: "entity" }, { field: "product" }, { field: "name" }],
   properties: { who: TEXT, product: TEXT, name: TEXT },
   required: ["who"],
@@ -81,7 +80,6 @@ const closeAccount = effectTool({
   family: FAMILY,
   lane: "engine",
   effect: "economy.close_account",
-  materialize: "money",
   args: [{ field: "account", want: "thing" }],
   shows: (_o, state, args) => ({ status: statusOf(state.world, String(args.account)) }),
   properties: { account: TEXT },
@@ -129,7 +127,8 @@ const applyCredit: WriteDef = {
     if (isUnread(secured)) return secured;
     const w = o.draft.w;
     const from = w.events.length;
-    materializeIfNeeded(o.reading.registry, w, who.id, "money", o.draft.seed(o.n));
+    const unopened = openAuthored(o, [who.id]);
+    if (unopened) return unopened;
     const ctx = w.ctx;
     const reports = featureFor(ctx, who.id, "credit");
     const decision = decide(ctx, who.id, { product, ...(cents !== undefined ? { cents } : {}), ...(term !== undefined ? { term_months: term } : {}), ...(secured !== undefined ? { secured_by: secured } : {}) }, reports);
@@ -168,14 +167,14 @@ const donate = effectTool({
   family: FAMILY,
   lane: "engine",
   effect: "economy.donate",
-  materialize: "money",
+  opensMoney: true,
   args: [{ field: "to", want: "entity" }, { field: "amount", arg: "cents", money: true }, { field: "from", want: "entity" }, { field: "method" }],
   properties: { to: TEXT, amount: NUMBER, from: TEXT, method: TEXT },
   required: ["to", "amount"],
   example: { to: "The Lamplighters", amount: 5, from: "wren", source: { from: "prose", message: "m-0204" } },
   // Past what the giver has to hand, today's economy declines it: the gift (or an exempt group's
   // grant to a person) is posted all the same from the giver's own money, as a payment past cover
-  // is (`payPastCover`), with today's record of it, and reported.
+  // is (`payPastCover`), with today's record of it, and what did not add up is reported (`paidLines`).
   bend(o, code, args) {
     if (code !== "declined" && code !== NO_WAY_TO_PAY) return null;
     const ctx = o.draft.w.ctx;
@@ -183,13 +182,13 @@ const donate = effectTool({
     const from = typeof args.from === "string" ? args.from : ctx.world.pov;
     const cents = Number(args.cents);
     const grant = o.reading.isPerson(to);
-    const held = mostPayable(ctx, from, cents, { till: false, overdraft: true });
     const deductible = !grant && o.reading.isPerson(from) && exemptStatusOf(ctx, to)?.deductible === true;
     const pf = deductible && foundationTerms(ctx, to) !== null;
     const record: LedgerEvent = { type: DONATION, data: { donor: from, org: to, cents, year: dateAt(calendarOf(ctx.world), ctx.state.clock).year, deductible, ...(pf ? { pf: true } : {}) } };
+    const before = o.draft.w.events.length;
     const failed = payPastCover(o, { payer: from, payee: to, cents, memo: `${grant ? "Grant" : "Donation"} to ${labelOf(ctx, to)}`, kind: "payment", category: "donations", with: [record] });
     if (failed) return failed;
-    o.reply.report("paid_past_held", { n: o.n, op: o.op, payer: named(o.reading, from), amount: formatMoney(cents, o.reading.doc.currency), held: formatMoney(Math.max(0, held), o.reading.doc.currency) });
+    paidLines(o, from, cents, before);
     return undefined;
   },
 });

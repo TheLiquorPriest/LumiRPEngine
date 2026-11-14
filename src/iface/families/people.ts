@@ -1,17 +1,19 @@
 // People and what they are (the rest of today's long tail of people tools): a life state set, someone
 // or something taken out of the world or brought back, classes and tags, tier and simulation detail,
-// and any relation made or ended. Each is today's GM edit (`engine/edits`) as today's tool sends it;
-// the everyday ones (a value set, someone moved, made, or their regard) are `world_apply`'s. A change
-// that is so already (someone taken out twice) changes nothing and the answer says so.
+// any relation made or ended, and detail the world's tables fill in. Each but the last is today's GM
+// edit (`engine/edits`) as today's tool sends it; the everyday ones (a value set, someone moved, made,
+// or their regard) are `world_apply`'s. A change that is so already (someone taken out twice) changes
+// nothing and the answer says so.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
 import type { FixOp } from "../../shared/ledger";
 import { OBJECT, TEXT, TEXTS, YES_NO } from "../kit";
-import { find, isUnread, notOneOf, textArg, type OpContext, type Unread } from "../ops";
+import { find, isUnread, named, notOneOf, textArg, type OpContext, type Unread } from "../ops";
 import { timeArg } from "../ops-time";
+import { FILLED_IN } from "../source";
 import { tagsOf } from "../../engine/selector";
-import { editTool } from "./run";
+import { editTool, type WriteDef, writeTool } from "./run";
 
 const FAMILY = "people";
 
@@ -148,5 +150,38 @@ const unlink = editTool({
   },
 });
 
+/**
+ * Detail the world's tables give someone or something that nobody has recorded, filled in when an
+ * agent asks for it (plan §6.4, coming into view), part by part as today's engine samples it
+ * (`engine/materialize`: a person's money, the everyday things they carry, a vehicle's fuel and
+ * wear). Nothing else fills these in. No call says the values, so they are recorded with
+ * `FILLED_IN`, and the tool takes no provenance.
+ */
+const fillIn: WriteDef = {
+  name: "fill_in_detail",
+  family: FAMILY,
+  lane: "engine",
+  provenance: false,
+  properties: { who: TEXT, part: TEXT },
+  required: ["who"],
+  example: { who: "tam", part: "money" },
+  run(o) {
+    const who = find(o, "who", "entity");
+    if (isUnread(who)) return who;
+    const parts = [...o.reading.registry.materializers.keys()].sort();
+    const said = textArg(o.args, "part");
+    const part = parts.find((p) => p === said?.toLowerCase());
+    if (said !== undefined && part === undefined) return notOneOf(o, "part", said, parts);
+    const from = o.draft.w.events.length;
+    for (const domain of part !== undefined ? [part] : parts) {
+      const bad = o.draft.fill(o.n, who.id, domain);
+      if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
+    }
+    if (o.draft.w.events.length === from) o.reply.line("nothing_filled", { n: o.n, op: o.op, what: named(o.reading, who.id) });
+    o.draft.record(o.n, o.op, "engine", FILLED_IN, from);
+    return undefined;
+  },
+};
+
 /** The family's tools, as RPH's search finds them. */
-export const PEOPLE_TOOLS = [life, despawn, restore, classify, entity, link, unlink];
+export const PEOPLE_TOOLS = [life, despawn, restore, classify, entity, link, unlink, writeTool(fillIn)];

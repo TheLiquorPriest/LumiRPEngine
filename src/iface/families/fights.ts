@@ -5,7 +5,6 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { applyEffects } from "../../engine/effects";
-import { materializeAll } from "../../engine/materialize";
 import { optionalService } from "../../engine/pack-kit";
 import type { ReadContext } from "../../engine/registry";
 import { createRng } from "../../engine/rng";
@@ -57,8 +56,7 @@ const start: WriteDef = {
       return undefined;
     }
     const seed = o.draft.seed(o.n);
-    // Whoever the fight takes in is given their detail first, as the action that starts one does: initiative reads the sheet the fight will.
-    for (const id of [pov, ...foes]) materializeAll(o.reading.registry, w, id, seed);
+    // Whoever the fight takes in fights as recorded: detail nobody recorded is filled in only when an agent asks for it (`fill_in_detail`).
     const out = applyEffects(o.reading.registry, w, [{ type: "combat.start", args: { foes } }], { bindings: { self: pov }, rng: createRng(seed), literal: true });
     const refused = out.rejected[0]?.rejection;
     if (refused !== undefined) return notApplicable(o, refused.code);

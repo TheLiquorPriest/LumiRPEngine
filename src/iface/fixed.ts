@@ -7,13 +7,14 @@
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { hashParts } from "../shared/hash";
 import { isRecord } from "../shared/json";
+import type { CheckDef } from "../shared/world";
 import { checkOf, readyCheck, rollCheck } from "../engine/checks";
 import { DiceError, rollDice } from "../engine/dice";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { createRng } from "../engine/rng";
 import { renderView } from "../store/words";
 import { rulesetData } from "./bestiary";
-import { type Call, oneOf, type Reply, SEARCH_KINDS, type SearchKind, TEXT, type ToolSpec, WHOLE, YES_NO } from "./kit";
+import { type Call, oneOf, Reply, SEARCH_KINDS, type SearchKind, TEXT, type ToolSpec, WHOLE, YES_NO } from "./kit";
 import { clockText, timeFrom } from "./ops-time";
 import { missed, unknownFields } from "./ops";
 import { type Found, isFound, Reading } from "./reading";
@@ -106,9 +107,42 @@ export const WORLD_SEARCH: ToolSpec = {
   },
 };
 
-/** How many rolls the turn has recorded for someone: the next of theirs is drawn after these. */
+/** How many rolls the turn has recorded for someone: the next of theirs is drawn after these. Read inside the write that records the next, so two rolls made at once are counted apart. */
 function rollsBefore(call: Call, turn: string, who: string): number {
   return call.deps.store.changes(turn).filter((c) => c.op === ENGINE_EVENTS.check && isRecord(c.value) && isRecord(c.value.data) && c.value.data.actor === who).length;
+}
+
+/** How a roll is made: dice by their notation, or a check of the world's by the id it was asked by. */
+type RollBy = { dice: string } | { check: string; def: CheckDef };
+
+/** A roll drawn and drafted on the state as it stands: what it came to, or the reply that says why it could not be made. */
+function drawRoll(call: Call, reading: Reading, who: Found, purpose: string, by: RollBy, against: number | null): { out: JsonObject | Reply; draft: Draft | null } {
+  const reply = call.reply();
+  const turn = reading.turn;
+  if (turn === null) return { out: reply.line("turn_needed", {}).fail(), draft: null };
+  // A roll is drawn from the turn, who rolls and how many rolls the turn has recorded for them: no wording moves it.
+  const rng = createRng(hashParts("rpe.roll", turn.id, who.id, String(rollsBefore(call, turn.id, who.id))));
+  const data: JsonObject = { actor: who.id, for: purpose };
+  if ("dice" in by) {
+    let rolled;
+    try {
+      rolled = rollDice(by.dice, rng);
+    } catch (error) {
+      if (!(error instanceof DiceError)) throw error;
+      return { out: reply.line("unreadable", { field: "dice", value: JSON.stringify(by.dice), wants: call.lines.line("wants_dice") ?? "" }).fail(), draft: null };
+    }
+    Object.assign(data, { check: "", notation: rolled.notation, dice: rolled.dice.filter((d) => d.kept).map((d) => d.value), natural: rolled.natural, total: rolled.total, dc: against, outcome: against === null ? "rolled" : rolled.total >= against ? "success" : "failure" });
+  } else {
+    const ready = readyCheck(reading.registry, reading.ctx, against === null ? by.def : { ...by.def, dc: String(against) }, { self: who.id, actor: who.id });
+    if ("code" in ready) return { out: reply.line("not_applicable", { n: 1, op: "roll", code: ready.code }).fail(), draft: null };
+    const rolled = rollCheck(ready, rng);
+    Object.assign(data, { check: by.check, notation: ready.notation, dice: rolled.roll.dice.filter((d) => d.kept).map((d) => d.value), natural: rolled.natural, total: rolled.total, dc: ready.dc, outcome: rolled.outcome });
+  }
+  const draft = new Draft(reading, call);
+  const bad = draft.applyAll([{ type: ENGINE_EVENTS.check, data }]);
+  if (bad) return { out: reply.line("not_applicable", { n: 1, op: "roll", code: bad.code }).fail(), draft: null };
+  draft.record(1, "roll", "engine", { source: null, precision: null, standing: null, marks: [] }, 0);
+  return { out: data, draft };
 }
 
 export const ROLL: ToolSpec = {
@@ -123,8 +157,7 @@ export const ROLL: ToolSpec = {
     const reply = call.reply();
     const reading = readingOr(call, reply);
     if (reading === null) return reply;
-    const turn = reading.turn;
-    if (turn === null) return reply.line("turn_needed", {}).fail();
+    if (reading.turn === null) return reply.line("turn_needed", {}).fail();
     const who = foundOr(reading, reply, "who", args.who, "entity");
     if (who === null) return reply;
     const purpose = typeof args.for === "string" ? args.for.trim() : "";
@@ -133,32 +166,17 @@ export const ROLL: ToolSpec = {
     const checkId = typeof args.check === "string" && args.check.trim() !== "" ? args.check.trim() : undefined;
     if ((dice === undefined) === (checkId === undefined)) return reply.line("needs_one_field", { fields: ["dice", "check"] }).fail();
     const against = typeof args.against === "number" && Number.isFinite(args.against) ? Math.round(args.against) : null;
-    // A roll is drawn from the turn, who rolls and how many rolls the turn has recorded for them: no wording moves it.
-    const rng = createRng(hashParts("rpe.roll", turn.id, who.id, String(rollsBefore(call, turn.id, who.id))));
-    const data: JsonObject = { actor: who.id, for: purpose };
-    if (dice !== undefined) {
-      let rolled;
-      try {
-        rolled = rollDice(dice, rng);
-      } catch (error) {
-        if (!(error instanceof DiceError)) throw error;
-        return reply.line("unreadable", { field: "dice", value: JSON.stringify(dice), wants: call.lines.line("wants_dice") ?? "" }).fail();
-      }
-      Object.assign(data, { check: "", notation: rolled.notation, dice: rolled.dice.filter((d) => d.kept).map((d) => d.value), natural: rolled.natural, total: rolled.total, dc: against, outcome: against === null ? "rolled" : rolled.total >= against ? "success" : "failure" });
-    } else {
-      const check = checkOf(reading.doc, checkId);
-      if (check === null) return reply.line("unknown", unknownFields(call.lines, "check", "check", checkId ?? "", Object.keys(reading.doc.checks).slice(0, call.settings.nearMatches))).fail();
-      const ready = readyCheck(reading.registry, reading.ctx, against === null ? check : { ...check, dc: String(against) }, { self: who.id, actor: who.id });
-      if ("code" in ready) return reply.line("not_applicable", { n: 1, op: "roll", code: ready.code }).fail();
-      const rolled = rollCheck(ready, rng);
-      Object.assign(data, { check: checkId ?? "", notation: ready.notation, dice: rolled.roll.dice.filter((d) => d.kept).map((d) => d.value), natural: rolled.natural, total: rolled.total, dc: ready.dc, outcome: rolled.outcome });
-    }
-    const draft = new Draft(reading, call);
-    const bad = draft.applyAll([{ type: ENGINE_EVENTS.check, data }]);
-    if (bad) return reply.line("not_applicable", { n: 1, op: "roll", code: bad.code }).fail();
-    draft.record(1, "roll", "engine", { source: null, precision: null, standing: null, marks: [] }, 0);
-    const done = await commit(draft);
-    const id = done.rows[0]?.id;
-    return reply.data({ roll: { ...(id !== undefined ? { id: String(id) } : {}), who: `${who.name} [${who.id}]`, ...data } });
+    const def = checkId === undefined ? null : checkOf(reading.doc, checkId);
+    const by: RollBy | null = dice !== undefined ? { dice } : checkId !== undefined && def !== null ? { check: checkId, def } : null;
+    if (by === null) return reply.line("unknown", unknownFields(call.lines, "check", "check", checkId ?? "", Object.keys(reading.doc.checks).slice(0, call.settings.nearMatches))).fail();
+    // Drawn inside the write that records it, on the state as it stands then, so a roll made at the same time for the same person is counted before this one and draws other dice.
+    const worked = await commit(call, () => {
+      const missing = call.reply();
+      const now = readingOr(call, missing);
+      return now === null ? { out: missing, draft: null } : drawRoll(call, now, who, purpose, by, against);
+    });
+    if (worked.out instanceof Reply) return worked.out;
+    const id = worked.done?.rows[0]?.id;
+    return reply.data({ roll: { ...(id !== undefined ? { id: String(id) } : {}), who: `${who.name} [${who.id}]`, ...worked.out } });
   },
 };

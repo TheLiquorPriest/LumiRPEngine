@@ -12,14 +12,13 @@ import { fieldBounds, levelsFollowXp, applyEffects } from "../engine/effects";
 import { valueProblem } from "../engine/edits";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../engine/events";
-import { materializeIfNeeded } from "../engine/materialize";
 import { optionalService, own } from "../engine/pack-kit";
 import { baseWorld } from "../engine/places-in-play";
 import { createRng } from "../engine/rng";
 import { fieldDef, GONE_FIELD } from "../engine/scope";
 import { chatDraftOf, draftEvent } from "../engine/world-draft";
-import { accountsOf, external, hasLedger, statusOf } from "../packs/economy/core/model";
-import { asUnit, cashAccount, mostPayable, NO_WAY_TO_PAY, payeeSide, posting } from "../packs/economy/core/pay";
+import { accountsOf, availableOf, balance, classOf, external, hasLedger, statusOf } from "../packs/economy/core/model";
+import { asUnit, cashAccount, NO_WAY_TO_PAY, overdraftRoom, payeeSide, posting } from "../packs/economy/core/pay";
 import { axesOf } from "../packs/relationships/core/index";
 import { FACT_ABOUT, factStore } from "../store/facts";
 import { STORE_OPS } from "../store/types";
@@ -32,9 +31,21 @@ import { setClock, timeArg } from "./ops-time";
 /** The fact store every `fact` is recorded through: the store's own. */
 const FACTS: FactStore = factStore;
 
-/** Whose money a payment moves: the payer's and the payee's, sampled first where the world has not yet, as today's purchases do. */
-function materializeMoney(o: OpContext, ids: readonly string[]): void {
-  for (const id of ids) materializeIfNeeded(o.reading.registry, o.draft.w, id, "money", o.draft.seed(o.n));
+/**
+ * Opens the accounts the world gave each of `ids` that nobody has opened yet, so a sum starts from
+ * what the world gave: for a party that holds accounts, the world's money opens them by posting
+ * their authored openings (`openingBalances`) and nothing else. Someone the world gave no accounts
+ * is given none here; the world's tables fill those in only when an agent asks (`fill_in_detail`).
+ * What is opened is no part of what the call said, so it is a change of its own (`Draft.fill`).
+ * What could not be applied, when something could not.
+ */
+export function openAuthored(o: OpContext, ids: readonly string[]): Unread | undefined {
+  for (const id of ids) {
+    if (!hasLedger(o.draft.w.ctx, id)) continue;
+    const bad = o.draft.fill(o.n, id, "money");
+    if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
+  }
+  return undefined;
 }
 
 /** A payment past what the payer's money covers: who pays whom (no payee: no one in the world), how much, and how today's journal files it. */
@@ -70,6 +81,32 @@ export function payPastCover(o: OpContext, p: PastCover): Unread | undefined {
   return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
 }
 
+/**
+ * What a payment of `cents` by `payer` came to, from the state after it (its events from `from`
+ * on): from the payer's money outside the world's accounts, when the world keeps none for them,
+ * is said; past what an account it took from allows (below nothing, past a card's limit or an
+ * overdraft), or from outside money though the payer holds accounts none of which could pay, is
+ * reported, with what that way could have paid. A payment covered in full says nothing.
+ */
+export function paidLines(o: OpContext, payer: string, cents: number, from: number): void {
+  const ctx = o.draft.w.ctx;
+  const lines = o.draft.w.events.slice(from).flatMap((e) => (e.type === "post" ? e.lines : []));
+  const outside = external(payer);
+  const fromOutside = lines.some((l) => l.account === outside && l.amount < 0);
+  const fields = { n: o.n, op: o.op, payer: named(o.reading, payer) };
+  if (fromOutside && !hasLedger(ctx, payer)) {
+    o.reply.line("paid_from_outside", fields);
+    return;
+  }
+  const taken = new Map<string, number>();
+  for (const l of lines) if (l.amount < 0 && !l.account.startsWith(EXTERNAL_ACCOUNT_PREFIX)) taken.set(l.account, (taken.get(l.account) ?? 0) - l.amount);
+  const room = (account: string): number => availableOf(ctx, account) + overdraftRoom(ctx, account);
+  const past = [...taken].find(([account]) => room(account) < 0);
+  if (past === undefined && !fromOutside) return;
+  const held = past === undefined ? 0 : Math.max(0, room(past[0]) + past[1]);
+  o.reply.report("paid_past_held", { ...fields, amount: formatMoney(cents, o.reading.doc.currency), held: formatMoney(held, o.reading.doc.currency) });
+}
+
 const pay: OpDef = {
   name: "pay",
   lane: "engine",
@@ -90,32 +127,27 @@ const pay: OpDef = {
     const reason = textArg(o.args, "reason");
     const w = o.draft.w;
     const from = w.events.length;
-    materializeMoney(o, [payer.id, ...(payee ? [payee.id] : [])]);
-    const ctx = w.ctx;
-    const ledger = hasLedger(ctx, payer.id);
-    const held = ledger ? mostPayable(ctx, payer.id, cents, { till: false, overdraft: true }) : null;
+    const unopened = openAuthored(o, [payer.id, ...(payee ? [payee.id] : [])]);
+    if (unopened) return unopened;
     const qty = typeof o.args.qty === "number" && Number.isInteger(o.args.qty) && o.args.qty > 0 ? o.args.qty : 1;
-    // Money and goods as one change: today's purchase, the seller's own thing changing hands, or a new one made.
+    // Money and goods as one change: today's purchase, the seller's own thing changing hands, or a new one made; the money goes to the one named in `to` either way.
     const spec = goods !== undefined
-      ? { type: "economy.buy", args: { payer: payer.id, item: goods, qty, price: cents, exact: true, story: true, ...(payee ? { seller: payee.id } : {}), ...(method !== undefined ? { method } : {}), ...(reason !== undefined ? { category: reason } : {}) } as Record<string, JsonValue> }
+      ? { type: "economy.buy", args: { payer: payer.id, item: goods, qty, price: cents, exact: true, story: true, ...(payee ? { seller: payee.id, payee: payee.id } : {}), ...(method !== undefined ? { method } : {}), ...(reason !== undefined ? { category: reason } : {}) } as Record<string, JsonValue> }
       : { type: "economy.transfer", args: { from: payer.id, to: payee?.id ?? `${EXTERNAL_ACCOUNT_PREFIX}world`, cents, memo, story: true, ...(method !== undefined ? { method } : {}) } as Record<string, JsonValue> };
     const before = w.events.length;
     const out = applyEffects(o.reading.registry, w, [spec], { bindings: {}, rng: createRng(o.draft.seed(o.n)), literal: true });
     const refused = out.rejected[0]?.rejection;
     const unpaid = w.events.slice(before).find((e) => e.type === "economy.txn" && "data" in e && isRecord(e.data) && typeof e.data.unpaid === "number");
-    let short = false;
     if (refused !== undefined) {
       if (refused.code !== NO_WAY_TO_PAY && refused.code !== "declined") return { line: "not_applicable", fields: { n: o.n, op: o.op, code: refused.code } };
       const failed = payPastCover(o, { payer: payer.id, ...(payee ? { payee: payee.id } : {}), cents, memo, kind: "payment" });
       if (failed) return failed;
-      short = true;
     } else if (unpaid !== undefined) {
       const failed = payPastCover(o, { payer: payer.id, ...(payee ? { payee: payee.id } : {}), cents, memo, kind: "purchase" });
       if (failed) return failed;
-      short = true;
     }
-    if (short || (held !== null && held < cents)) o.reply.report("paid_past_held", { n: o.n, op: o.op, payer: named(o.reading, payer.id), amount: formatMoney(cents, o.reading.doc.currency), held: formatMoney(Math.max(0, held ?? 0), o.reading.doc.currency) });
-    if (w.events.length === from) o.reply.report("money_untracked", { n: o.n, op: o.op, payer: named(o.reading, payer.id) });
+    if (w.events.length === before) o.reply.report("money_untracked", { n: o.n, op: o.op, payer: named(o.reading, payer.id) });
+    else paidLines(o, payer.id, cents, before);
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
   },
@@ -131,6 +163,40 @@ function offSheet(o: OpContext, entity: string, key: string, value: JsonValue): 
   return { n: o.n, op: o.op, name: named(o.reading, entity), key, value: JSON.stringify(value), type: def.type, ...(bounds.min !== undefined ? { min: bounds.min } : {}), ...(bounds.max !== undefined ? { max: bounds.max } : {}), ...(def.values ? { choices: textOf(def.values) } : {}) };
 }
 
+/** A sum in the world's main coin as an argument gives it: a number, or a number sent as text ("40"); anything else is none. */
+function amountOf(v: JsonValue | undefined): number | undefined {
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v.trim()) : Number.NaN;
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * Corrects someone's cash as the GM's edit corrects it: a balanced posting against the outside
+ * correction account that brings what their cash accounts hold `to` a sum, or moves it `by` one.
+ * Past nothing, the rest comes off their carried cash all the same, below nothing, and is reported.
+ * Null when they keep no cash account: their cash is then a field like any other.
+ */
+function correctCash(o: OpContext, entity: string, change: { to: number } | { by: number }): Unread | undefined | null {
+  const unopened = openAuthored(o, [entity]);
+  if (unopened) return unopened;
+  const ctx = o.draft.w.ctx;
+  const wallet = cashAccount(ctx, entity);
+  if (wallet === null) return null;
+  const held = accountsOf(ctx, entity, "spend").filter((id) => classOf(ctx, id) === "cash").reduce((sum, id) => sum + balance(ctx.state, id), 0);
+  const target = "by" in change ? held + minorUnits(o.reading, change.by) : minorUnits(o.reading, change.to);
+  const corrected = optionalService(ctx, "economy.set_cash")?.(ctx, entity, Math.max(0, target)) ?? null;
+  if (corrected === null) return null;
+  const bad = Array.isArray(corrected) ? o.draft.applyAll(corrected) : corrected;
+  if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
+  if (target >= 0) return undefined;
+  // Marked as a correction past cover is (`overdraw`), as `gm_adjust_money` takes an account below nothing.
+  const rest = optionalService(ctx, "economy.adjust")?.(ctx, wallet, target);
+  if (!Array.isArray(rest)) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: rest?.code ?? "no_handler" } };
+  const worse = o.draft.applyAll(rest.map((e): LedgerEvent => (e.type === "post" ? { ...e, overdraw: true } : e)));
+  if (worse) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: worse.code } };
+  o.reply.report("paid_past_held", { n: o.n, op: o.op, payer: named(o.reading, entity), amount: formatMoney(held - target, o.reading.doc.currency), held: formatMoney(Math.max(0, held), o.reading.doc.currency) });
+  return undefined;
+}
+
 /** Sets a field of someone or something: today's `set`, or `add` for a number, with a level following its experience as today's progressions have it. */
 function setField(o: OpContext, entity: string, key: string, value: JsonValue | undefined, add: number | undefined): Unread | undefined {
   const reg = o.reading.registry;
@@ -142,14 +208,14 @@ function setField(o: OpContext, entity: string, key: string, value: JsonValue | 
   if (def?.derived !== undefined) return { line: "derived", fields: { n: o.n, op: o.op, key } };
   const levelOf = Object.values(w.ctx.world.ruleset?.progression ?? {}).find((p) => p.levelField === key);
   if (levelOf !== undefined) return { line: "follows_xp", fields: { n: o.n, op: o.op, key, xp: levelOf.xpField } };
-  if (key === "cash" && typeof value === "number") {
-    // Cash is corrected by a balanced posting against the outside correction account, as the GM's edit corrects it.
-    materializeMoney(o, [entity]);
-    const corrected = optionalService(w.ctx, "economy.set_cash")?.(w.ctx, entity, minorUnits(o.reading, value)) ?? null;
-    if (corrected !== null) {
-      const bad = Array.isArray(corrected) ? o.draft.applyAll(corrected) : corrected;
-      return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
-    }
+  if (key === "cash") {
+    // Cash is a sum, set to one or moved by one; a number sent as text is that number.
+    const to = amountOf(value);
+    const change = add !== undefined ? { by: add } : to !== undefined ? { to } : undefined;
+    if (change === undefined) return notAs(o, "value", value ?? null, "amount_any");
+    const corrected = correctCash(o, entity, change);
+    if (corrected !== null) return corrected;
+    if (to !== undefined) value = to;
   }
   const event: LedgerEvent = add !== undefined ? { type: "add", entity, field: key, delta: add } : { type: "set", entity, field: key, value: value ?? null };
   const bad = o.draft.applyAll([event]);
@@ -311,6 +377,9 @@ const relate: OpDef = {
   },
 };
 
+/** An entry written as a tree reference, the way the tree names a place, someone or something. */
+const REF = /^(?:place|entity):/;
+
 // The Author's own note of what it expects to matter: it changes nothing in the world, so it takes no provenance.
 const horizon: OpDef = {
   name: "horizon",
@@ -327,7 +396,8 @@ const horizon: OpDef = {
     for (const said of given) {
       const r = find(o, "list", "point", false, said);
       // Words that name no place, person or thing are kept as they were given: a note of what the Author expects to matter.
-      if (isUnread(r) && r.line === "unknown" && typeof said === "string") {
+      // An entry written as a reference (`place:…`, `entity:…`) is a name, not words: one that names nothing is not there, with its near names.
+      if (isUnread(r) && r.line === "unknown" && typeof said === "string" && !REF.test(said.trim())) {
         refs.push(said.trim());
         words.push(said.trim());
         continue;

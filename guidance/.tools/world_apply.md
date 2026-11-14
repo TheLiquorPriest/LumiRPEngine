@@ -37,7 +37,7 @@ arguments:
   operations.reveal: "quest: true to show the player the stage."
   operations.axis: "relate: the regard that changes (trust, liking); leave it out for all of them."
   operations.change: "relate: how much it changes, up or down."
-  operations.list: "horizon: the whole list of what the next turn is expected to need: places, people and things by name; anything else in your own words, kept as words."
+  operations.list: "horizon: the whole list of what the next turn is expected to need: places, people and things by name, or by place: or entity: and the id, which must name one that is there; anything else in your own words, kept as words."
   operations.name: "spawn: its name."
   operations.kind: "spawn: its kind: person (or the world's own kind of person), item, container, a vehicle kind, a group's kind. Or a place: place needs only its name, and is inside the place at names or in none, as the first place of an empty world is; room, spot or venue needs at, the place it is inside."
   operations.tier: "spawn: its tier."

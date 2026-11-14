@@ -135,9 +135,14 @@ function keepWords(o: OpContext, id: EntityId, said: readonly SaidWhere[]): Unre
   return undefined;
 }
 
+/** A place where code chooses one, kept only when the world as the chat plays it has that place: nothing is ever put somewhere that does not exist. */
+function placeThere(o: OpContext, place: string | null): string | null {
+  return place !== null && own(o.draft.w.world.places, place) !== undefined ? place : null;
+}
+
 /** Where someone acts when an operation names no one: the scene's place, else where the player character is. */
 function actingPlace(o: OpContext): string | null {
-  return scenePlace(o) ?? placeOfEntity(o.draft.w.state, o.draft.w.world.pov);
+  return scenePlace(o) ?? placeThere(o, placeOfEntity(o.draft.w.state, o.draft.w.world.pov));
 }
 
 /**
@@ -277,7 +282,7 @@ const give: OpDef = {
       if (giver !== undefined) return { in: giver.id };
       const to = find(o, "to", "person");
       if (isUnread(to)) return to;
-      const there = placeOfEntity(w.state, to.id) ?? actingPlace(o);
+      const there = placeThere(o, placeOfEntity(w.state, to.id)) ?? actingPlace(o);
       return there === null ? null : { place: there };
     });
     if (isUnread(what)) return what;
@@ -472,8 +477,7 @@ function spawnSpot(o: OpContext): SpawnSpot | Unread {
 /** The scene's place, as the horizon stands when the operation runs: where its first entry that names a place, someone or something is. */
 function scenePlace(o: OpContext): string | null {
   for (const ref of o.draft.storeState.horizon) {
-    if (ref.startsWith("place:")) return ref.slice("place:".length);
-    const place = ref.startsWith("entity:") ? placeOfEntity(o.draft.w.state, ref.slice("entity:".length)) : null;
+    const place = placeThere(o, ref.startsWith("place:") ? ref.slice("place:".length) : ref.startsWith("entity:") ? placeOfEntity(o.draft.w.state, ref.slice("entity:".length)) : null);
     if (place !== null) return place;
   }
   return null;
@@ -578,7 +582,7 @@ const spawn: OpDef = {
     let spot = where.spot;
     const [first] = where.said;
     if (spot === null && first !== undefined) {
-      const place = (owner ? placeOfEntity(w.state, owner.id) : null) ?? scenePlace(o);
+      const place = placeThere(o, owner ? placeOfEntity(w.state, owner.id) : null) ?? scenePlace(o);
       if (place === null) return first.unread;
       spot = { place };
     }

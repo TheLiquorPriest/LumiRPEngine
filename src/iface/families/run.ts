@@ -1,20 +1,19 @@
 // What every searchable tool is made of (plan §6.8). A write is one operation of today's engine (an
 // item op, a GM edit, a pack's effect), run as `world_apply` runs its operations, as a call of one
 // (`runOperations`): worked out on a copy of the state at the call's turn; what it cannot read
-// refuses it before anything is recorded; the user's setting for its lane is asked through the
-// contract's approvals, never decided here; then it is recorded in one write through the queue and
-// answered with what changed, how it now stands, and what did not add up. A read answers with the
-// store's data. Every sentence of an answer is a line of the answers' file; a tool's own words are
-// its file in `.tools/`.
+// refuses it before anything is recorded; the user's setting for its lane is asked by RPH's gate
+// before the tool runs, since the tool names its lane, and never decided here; then it is recorded
+// in one write through the queue and answered with what changed, how it now stands, and what did
+// not add up. A read answers with the store's data. Every sentence of an answer is a line of the
+// answers' file; a tool's own words are its file in `.tools/`.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
-import type { DomainId, EntityId } from "../../shared/ids";
+import type { EntityId } from "../../shared/ids";
 import type { FixOp } from "../../shared/ledger";
 import type { ItemOp } from "../../shared/things";
 import type { EffectSpec } from "../../shared/world";
 import { resolveEdit } from "../../engine/edits";
 import { applyEffects } from "../../engine/effects";
-import { materializeIfNeeded } from "../../engine/materialize";
 import type { Rejection } from "../../engine/registry";
 import { createRng } from "../../engine/rng";
 import { applyItemOp } from "../../engine/thing-ops";
@@ -23,6 +22,7 @@ import { readOperation, runOperations } from "../apply";
 import { readingOr } from "../fixed";
 import type { Call, Reply, ToolSpec } from "../kit";
 import { find, isUnread, itemOptions, minorUnits, missed, named, type OpContext, type Unread } from "../ops";
+import { openAuthored } from "../ops-values";
 import type { Found, Reading, Want } from "../reading";
 import { PROVENANCE_PROPERTIES } from "../source";
 import { textOf } from "../texts";
@@ -33,10 +33,12 @@ export interface WriteDef {
   family: string;
   /** The lane all of its changes go to. */
   lane: Lane;
-  /** Its own arguments; the three of provenance are added to every write. */
+  /** Its own arguments; the three of provenance are added to every write that takes them. */
   properties: Record<string, JsonObject>;
   required: readonly string[];
   example: JsonObject;
+  /** False for a write whose provenance is what it does, never what the call says (detail the world's tables fill in): it takes none. */
+  provenance?: false;
   /** Works the call out on the draft and records it (`record`); what it could not read, when it could not. */
   run(o: OpContext): Unread | undefined;
 }
@@ -54,20 +56,20 @@ export interface ReadDef {
 
 /** A write as RPH holds it: its arguments with the three of provenance, run as a call of one operation. */
 export function writeTool(def: WriteDef): ToolSpec {
-  const op = { name: def.name, lane: def.lane, needs: def.required, takes: Object.keys(def.properties), example: def.example, run: def.run };
+  const op = { name: def.name, lane: def.lane, needs: def.required, takes: Object.keys(def.properties), example: def.example, run: def.run, ...(def.provenance === false ? { provenance: false as const } : {}) };
   return {
     name: def.name,
     family: def.family,
     tier: "write",
     lane: def.lane,
-    properties: { ...def.properties, ...PROVENANCE_PROPERTIES },
+    properties: def.provenance === false ? def.properties : { ...def.properties, ...PROVENANCE_PROPERTIES },
     required: def.required,
     example: def.example,
     async run(args, call) {
       const read = readOperation(1, op, args, call);
       if ("line" in read) return call.reply().line(read.line, read.fields).line("nothing_recorded", {}).fail();
-      // The player is asked about the tool's own call, as they would see it made.
-      return runOperations(call, [read], () => args);
+      // The tool names its lane, so RPH's gate has asked the player about this very call before it ran: asking here would ask twice.
+      return runOperations(call, [read]);
     },
   };
 }
@@ -174,8 +176,8 @@ export interface EffectDef {
   bend?(o: OpContext, code: string, args: Record<string, JsonValue>): Unread | null | undefined;
   /** Called before the effect runs; what it returns is called once the effect has applied, to report what did not add up. */
   watch?(o: OpContext, args: Record<string, JsonValue>): (() => void) | undefined;
-  /** A domain whose detail each entity the call names is sampled in first, where the world has not yet, as today's purchases sample money. */
-  materialize?: DomainId;
+  /** Each party the call names has the accounts the world gave them opened first, so the sums start from what the world gave (`openAuthored`). */
+  opensMoney?: true;
   /** What the answer shows besides the things it touched, from the state as recorded: a value a pack keeps apart from them (an account's status). */
   shows?(o: OpContext, state: StoreState, args: Record<string, JsonValue>): JsonObject;
 }
@@ -207,7 +209,8 @@ export function effectTool(def: EffectDef): ToolSpec {
         } else args[a.arg ?? a.field] = said;
       }
       const from = o.draft.w.events.length;
-      if (def.materialize !== undefined) for (const id of ids) materializeIfNeeded(o.reading.registry, o.draft.w, id, def.materialize, o.draft.seed(o.n));
+      const unopened = def.opensMoney === true ? openAuthored(o, ids) : undefined;
+      if (unopened) return unopened;
       const watched = def.watch?.(o, args);
       if (def.shows !== undefined) {
         const shows = def.shows;

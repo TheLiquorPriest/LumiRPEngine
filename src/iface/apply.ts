@@ -5,12 +5,13 @@
 // never decided here: an operation whose lane is Never, or that the user declines, is left out, and
 // the rest are worked out again without it. What is left is recorded in one write, and the answer
 // says what changed, how it now stands, and what did not add up. A searchable tool that writes is
-// run the same way, as a call of one operation (`readOperation`, `runOperations`).
+// run the same way, as a call of one operation (`readOperation`, `runOperations`); it names its
+// lane, so RPH's gate asks the user's setting for it before it runs, and it is not asked again here.
 
 import type { ApprovalAsk, JsonObject, JsonValue } from "rp-harness/contract";
 import { isRecord } from "../shared/json";
 import type { StoreState } from "../store/types";
-import { type Call, NUMBER, OBJECT, type Reply, TEXT, TEXTS, type ToolSpec, WHOLE, YES_NO } from "./kit";
+import { type Call, NUMBER, OBJECT, Reply, TEXT, TEXTS, type ToolSpec, WHOLE, YES_NO } from "./kit";
 import type { OpContext, OpDef, Unread } from "./ops";
 import { THING_OPS } from "./ops-things";
 import { TIME_OPS } from "./ops-time";
@@ -117,9 +118,12 @@ function attempt(call: Call, base: Reading, asked: readonly Asked[], skip: Reado
   return { reply, draft, afters };
 }
 
+/** Why the player's setting or answer held an operation back: its lane is Never, or they said no (with their reason, when they gave one). */
+type Held = "never" | { declined: string | undefined };
+
 /** Asks the user's setting for each lane the operations write, and the user where a lane is Confirm, showing them what `askArgs` gives: which operations may not go ahead, and why. */
-async function approved(call: Call, asked: readonly Asked[], askArgs: (mine: readonly Asked[]) => JsonObject): Promise<Map<number, "never" | { declined: string | undefined }>> {
-  const out = new Map<number, "never" | { declined: string | undefined }>();
+async function approved(call: Call, asked: readonly Asked[], askArgs: (mine: readonly Asked[]) => JsonObject): Promise<Map<number, Held>> {
+  const out = new Map<number, Held>();
   const approvals = call.deps.approvals;
   if (approvals === undefined) return out;
   const lanes = [...new Set(asked.map((a) => a.def.lane))];
@@ -199,44 +203,76 @@ function provenanceLines(reply: Reply, a: Asked): void {
   if (a.prov.marks.includes(MARKS.noConsent)) reply.line("invented_unconsented", fields);
 }
 
+/** A call refused: only what could not be read, and what `explain` adds; what the operations before it reported never stands, since nothing is recorded. */
+function refusal(call: Call, unread: Unread, explain?: (reply: Reply, unread: Unread) => void): Reply {
+  const refused = call.reply().line(unread.line, unread.fields);
+  explain?.(refused, unread);
+  return refused.line("nothing_recorded", {}).fail();
+}
+
+/** Says why an operation the player held back was not applied; its entry for the answer's data. */
+function heldBack(reply: Reply, a: Asked, why: Held): JsonObject {
+  const lane = a.def.lane;
+  if (why === "never") reply.line("never", { n: a.n, op: a.def.name, lane });
+  else reply.line("declined", { n: a.n, op: a.def.name, ...(why.declined !== undefined ? { reason: why.declined } : {}) });
+  return { n: a.n, op: a.def.name, lane, applied: false, held: why === "never" ? "never" : "declined" };
+}
+
+/**
+ * A call refused because a later operation needs what one the player held back would have done:
+ * what could not be read, each held operation with why it was held, and that the call cannot go
+ * ahead as it is (sent again, it would be held again). Nothing is recorded.
+ */
+function heldRefusal(call: Call, unread: Unread, asked: readonly Asked[], held: ReadonlyMap<number, Held>): Reply {
+  const refused = call.reply().line(unread.line, unread.fields);
+  for (const a of asked) {
+    const why = held.get(a.n);
+    if (why !== undefined) heldBack(refused, a, why);
+  }
+  return refused.line("needs_held", { n: unread.fields.n ?? null, op: unread.fields.op ?? null }).fail();
+}
+
 /**
  * Runs a call's operations, read for their shape: worked out in order on a copy of the state (one
  * that cannot read its names refuses the whole call, and nothing is recorded; `explain` adds to what
- * the refusal says); each lane's setting asked, an approval showing what `askArgs` gives; what may
- * go ahead recorded in one write through the queue; and answered with what changed, how it now
- * stands, and the reports.
+ * the refusal says); each lane's setting asked, an approval showing what `askArgs` gives (none for a
+ * tool that names its lane: RPH's gate asked by it before the tool ran, and the player is asked
+ * once); then what may go ahead worked out again inside its write, on the state as it stands when
+ * the write runs, and recorded there; and answered with what changed, how it now stands, and the
+ * reports.
  */
-export async function runOperations(call: Call, asked: readonly Asked[], askArgs: (mine: readonly Asked[]) => JsonObject, explain?: (reply: Reply, unread: Unread) => void): Promise<Reply> {
+export async function runOperations(call: Call, asked: readonly Asked[], askArgs?: (mine: readonly Asked[]) => JsonObject, explain?: (reply: Reply, unread: Unread) => void): Promise<Reply> {
   const first = call.reply();
   const base = readingOr(call, first);
   if (base === null) return first;
   if (base.turn === null) return first.line("turn_needed", {}).fail();
-  let held = new Map<number, "never" | { declined: string | undefined }>();
-  let run = attempt(call, base, asked, new Set());
-  if (!run.unread) {
-    held = await approved(call, asked, askArgs);
-    if (held.size > 0) run = attempt(call, base, asked, new Set(held.keys()));
-  }
-  // A refusal says only what could not be read: what the operations before it reported never stands, since nothing is recorded.
-  if (run.unread) {
-    const refused = call.reply().line(run.unread.line, run.unread.fields);
-    explain?.(refused, run.unread);
-    return refused.line("nothing_recorded", {}).fail();
-  }
+  // Read first on the state as it stands, so the player is asked nothing about a call that cannot be read.
+  const tried = attempt(call, base, asked, new Set());
+  if (tried.unread) return refusal(call, tried.unread, explain);
+  const held = askArgs === undefined ? new Map<number, Held>() : await approved(call, asked, askArgs);
+  const skip = new Set(held.keys());
+  // Another call of the turn may be recorded while the player is asked, or at the same moment: the call is worked out again on what it left.
+  const worked = await commit<{ run: Attempt; needsHeld: boolean } | Reply>(call, () => {
+    const missing = call.reply();
+    const now = readingOr(call, missing);
+    if (now === null) return { out: missing, draft: null };
+    const run = attempt(call, now, asked, skip);
+    // If the whole call reads on this same state, what could not be read is what the player held back.
+    const needsHeld = run.unread !== undefined && skip.size > 0 && attempt(call, now, asked, new Set()).unread === undefined;
+    return { out: { run, needsHeld }, draft: run.unread ? null : run.draft };
+  });
+  if (worked.out instanceof Reply) return worked.out;
+  const { run, needsHeld } = worked.out;
+  if (run.unread) return needsHeld ? heldRefusal(call, run.unread, asked, held) : refusal(call, run.unread, explain);
+  const done = worked.done;
+  if (done === null) throw new Error("a call worked out in full is recorded");
   const reply = run.reply;
   const left: JsonObject[] = [];
   for (const a of asked) {
     const why = held.get(a.n);
-    if (why === undefined) {
-      provenanceLines(reply, a);
-      continue;
-    }
-    const lane = a.def.lane;
-    if (why === "never") reply.line("never", { n: a.n, op: a.def.name, lane });
-    else reply.line("declined", { n: a.n, op: a.def.name, ...(why.declined !== undefined ? { reason: why.declined } : {}) });
-    left.push({ n: a.n, op: a.def.name, lane, applied: false, held: why === "never" ? "never" : "declined" });
+    if (why === undefined) provenanceLines(reply, a);
+    else left.push(heldBack(reply, a, why));
   }
-  const done = await commit(run.draft);
   const added = new Map<number, JsonObject>();
   for (const [n, add] of run.afters) added.set(n, add(done.state));
   return answerDraft(run.draft, done, reply, { operations: left, added });
