@@ -9,6 +9,7 @@
 import type { AgentRef, ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, FileKind, LayerLevel, ModelLimits, ReplyError, RunStatus, StackPart, TraceDelta, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
 import type { JsonValue } from "../shared/json";
 import type { DraftChanged, ErrorMessage, FrontendToBackend, ResultMessage } from "../shared/protocol";
+import type { StateView } from "../shared/state-view";
 
 // ---------------------------------------------------------------- the app's own
 
@@ -67,10 +68,14 @@ export interface ChatSummary {
   id: string;
   /** The chat's name in Lumiverse. */
   name: string;
-  /** When its newest turn began: RPE lists a chat once it has played a turn of it. */
-  lastTurnAt: number;
+  /** When its newest turn on RPE began; null for a chat RPE holds and has not played yet (one a migration imported). */
+  lastTurnAt: number | null;
   /** Whether a turn of it runs now. */
   running: boolean;
+  /** Whether RPE has played a turn of it. */
+  played: boolean;
+  /** Whether RPE's store has a world for it. */
+  world: boolean;
 }
 
 /** `GET /api/v1/chats`: the chats of the user RPE belongs to, the most recently played first. */
@@ -555,6 +560,9 @@ export interface Routes {
   "PUT /api/v1/connections/:id/default": RouteShape<void>;
   "POST /api/v1/connections/:id/test": RouteShape<ConnectionTested>;
   "POST /api/v1/build": RouteShape<{ result: ResultMessage | ErrorMessage; pushes: DraftChanged[] }, Record<string, never>, FrontendToBackend>;
+  "GET /api/v1/chats/:chat/state": RouteShape<StateView, { turn?: string }>;
+  "POST /api/v1/chats/:chat/actions": RouteShape<ResultMessage | ErrorMessage, Record<string, never>, FrontendToBackend>;
+  "POST /api/v1/chats/:chat/actions/undo": RouteShape<ResultMessage | ErrorMessage, Record<string, never>, FrontendToBackend>;
   "GET /api/v1/files": RouteShape<TreeListing, { chat?: string }>;
   "GET /api/v1/files/*": RouteShape<TreeFileText, { chat?: string }>;
   "PUT /api/v1/files/*": RouteShape<FileWritten, Record<string, never>, FileWrite>;

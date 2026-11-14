@@ -11,8 +11,9 @@
 // - `/preview/migration?run=yes|no`: whether a migration has run (mock-migration.ts).
 //
 // Connections are kept in memory while the preview runs, so the Connections page can add, change and
-// remove them; a key sent is never kept, only that one was. So are the worlds Build makes and edits, and
-// the agents' files and settings the Files and Settings pages change (mock-tree.ts, mock-settings.ts).
+// remove them; a key sent is never kept, only that one was. So are the worlds Build makes and edits, the
+// agents' files and settings the Files and Settings pages change (mock-tree.ts, mock-settings.ts), and
+// what the Play page's taps change of a chat's state (mock-play.ts).
 
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { ConnectionView, ModelLimit, ProviderOffer, TraceDelta, TraceRecord } from "rp-harness/contract";
@@ -21,6 +22,7 @@ import type { ConnectionShown, ExtensionStatus, LiveEvent, ReplyPiece, SaveConne
 import { buildAnswer, buildControl } from "./mock-build";
 import { CHATS, CONTINUED, earlierTurn, EARLIER, RECORDED, RUN, summaryOf, T0, turnOf, worldAt } from "../../../test/ui/recorded";
 import { migrationAnswer, migrationControl } from "./mock-migration";
+import { playAnswer } from "./mock-play";
 import { settingsAnswer } from "./mock-settings";
 import { treeAnswer } from "./mock-tree";
 
@@ -61,6 +63,13 @@ let standing: ExtensionStatus = STANDINGS.well as ExtensionStatus;
 function publish(event: LiveEvent): void {
   const text = JSON.stringify({ type: "events", chat: event.chat, events: [event] });
   for (const ws of sockets) if (ws.data.follows.has(event.chat)) ws.send(text);
+}
+
+/** Tells a chat's followers that its state changed, as RPE's hub does after a change made from a panel (mock-play.ts). */
+function stateChanged(chat: string): void {
+  const seq = (seqs.get(chat) ?? 0) + 1;
+  seqs.set(chat, seq);
+  publish({ chat, seq, kind: "state", key: "state", at: Date.now(), data: {} });
 }
 
 /** An event of a recording, as it is played for `chat` now: its chat, its run and its times moved on by `shift`. */
@@ -280,6 +289,11 @@ export function rpeAnswer(request: Request, server: Server<PreviewSocket>): Resp
   if (path === "/api/v1/migration") return migrationAnswer(request);
   if (path === "/api/v1/build") return buildAnswer(request);
   if (path === "/api/v1/chats") return answer(200, { chats: CHATS.chats.map((c) => ({ ...c, running: playing.get(c.id)?.done === false })) });
+  const play = /^\/api\/v1\/chats\/([^/]+)\/(state|actions|actions\/undo)$/.exec(path);
+  if (play !== null) {
+    const chat = decodeURIComponent(play[1] as string);
+    return playAnswer(request, chat, play[2] as string, () => stateChanged(chat));
+  }
   const turns = /^\/api\/v1\/chats\/([^/]+)\/turns$/.exec(path);
   if (turns !== null && request.method === "GET") {
     const chat = decodeURIComponent(turns[1] as string);

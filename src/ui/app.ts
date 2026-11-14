@@ -18,7 +18,7 @@ export type Shell = "web" | "drawer";
  * Settings show the shipped and your own levels with no chat, and the chat's own with one; Storage shows
  * every chat, and the notes of the chat it is given. The rest are about no chat.
  */
-export type Route = { page: "chats" } | { page: "build" } | { page: "connections" } | { page: "migration" } | { page: "live" | "turns" | "world" | "files" | "settings" | "storage"; chat: string | null } | { page: "turn"; chat: string; turn: string };
+export type Route = { page: "chats" } | { page: "build" } | { page: "connections" } | { page: "migration" } | { page: "live" | "turns" | "world" | "play" | "files" | "settings" | "storage"; chat: string | null } | { page: "turn"; chat: string; turn: string };
 
 export interface UiApp {
   readonly shell: Shell;

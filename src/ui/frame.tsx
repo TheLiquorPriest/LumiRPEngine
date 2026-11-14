@@ -11,6 +11,7 @@ import { chatOf, type Route, type Shell, useApp } from "./app";
 import { Badge, Banner, Button, Empty, Fold } from "./atoms";
 import type { ClientState, RpeClient } from "./client";
 import { BuildPage } from "./kept/page";
+import { PlayPage } from "./kept/play/page";
 import { ChatsPage } from "./pages/chats";
 import { ConnectionsPage } from "./pages/connections";
 import { FilesPage } from "./pages/files";
@@ -22,7 +23,7 @@ import { TurnPage, TurnsPage } from "./pages/turns";
 import { WorldPage } from "./pages/world";
 import { errorWords } from "./words";
 
-export type NavId = "chats" | "live" | "turns" | "world" | "build" | "files" | "connections" | "settings" | "storage" | "migration";
+export type NavId = "chats" | "live" | "turns" | "world" | "play" | "build" | "files" | "connections" | "settings" | "storage" | "migration";
 
 export interface NavItem {
   id: NavId;
@@ -39,6 +40,7 @@ export const NAV: readonly NavItem[] = [
   { id: "live", title: "Live", icon: "pulse", shells: ["web", "drawer"], needsChat: true },
   { id: "turns", title: "Turns", icon: "list", shells: ["web", "drawer"], needsChat: true },
   { id: "world", title: "World", icon: "globe", shells: ["web", "drawer"], needsChat: true },
+  { id: "play", title: "Play", icon: "dice", shells: ["web", "drawer"], needsChat: true },
   { id: "build", title: "Build", icon: "hammer", shells: ["web", "drawer"], needsChat: false },
   { id: "files", title: "Files", icon: "folder", shells: ["web", "drawer"], needsChat: false },
   { id: "connections", title: "Connections", icon: "link", shells: ["web", "drawer"], needsChat: false },
@@ -81,6 +83,7 @@ export function PageFor(props: { route: Route }) {
   }
   if (route.page === "turn") return <TurnPage chat={chat} turn={route.turn} />;
   if (route.page === "world") return <WorldPage chat={chat} />;
+  if (route.page === "play") return <PlayPage chat={chat} />;
   return route.page === "live" ? <LivePage chat={chat} /> : <TurnsPage chat={chat} />;
 }
 

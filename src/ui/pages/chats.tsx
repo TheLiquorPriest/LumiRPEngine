@@ -11,6 +11,8 @@ export interface ChatsViewProps {
   chats: readonly ChatSummary[] | null;
   problem: string | null;
   onOpen(chat: string): void;
+  /** The chat's panels, on the Play page: offered beside every chat the list does not say has no world (Play says so of one that has none). */
+  onPlay(chat: string): void;
   onRead(): void;
 }
 
@@ -38,11 +40,18 @@ export function ChatsView(props: ChatsViewProps) {
                   <span class="lre-listrow-content">
                     <span class="lre-listrow-text">
                       <span class="lre-listrow-title">{chat.name}</span>
-                      <span class="lre-listrow-sub">Last turn {when(chat.lastTurnAt)}</span>
+                      <span class="lre-listrow-sub">{chat.lastTurnAt === null ? "Imported, not played on RPE yet" : `Last turn ${when(chat.lastTurnAt)}`}</span>
                     </span>
                     {chat.running ? <Badge tone="accent">running</Badge> : null}
                   </span>
                 </button>
+                {chat.world === false ? null : (
+                  <div class="lre-inline">
+                    <Button small kind="ghost" title={`Play ${chat.name}`} onClick={() => props.onPlay(chat.id)}>
+                      Play
+                    </Button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -69,5 +78,5 @@ export function ChatsPage() {
       alive = false;
     };
   }, [state.reads]);
-  return <ChatsView chats={state.chats} problem={state.problem} onOpen={(chat) => app.go({ page: "live", chat })} onRead={() => setState((s) => ({ ...s, reads: s.reads + 1 }))} />;
+  return <ChatsView chats={state.chats} problem={state.problem} onOpen={(chat) => app.go({ page: "live", chat })} onPlay={(chat) => app.go({ page: "play", chat })} onRead={() => setState((s) => ({ ...s, reads: s.reads + 1 }))} />;
 }

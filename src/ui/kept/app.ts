@@ -24,11 +24,11 @@ import type { KeptHost } from "./host";
 import type { BuildTransport } from "./transport";
 
 /** As today's setup shows toasts: the newest three, an error for 6 s and anything else for 3.5 s. */
-const TOASTS_SHOWN = 3;
-const TOAST_MS: Readonly<Record<Toast["tone"], number>> = { error: 6000, info: 3500 };
+export const TOASTS_SHOWN = 3;
+export const TOAST_MS: Readonly<Record<Toast["tone"], number>> = { error: 6000, info: 3500 };
 
 /** Only Play's map, place sheet, calendar and combat panels open an overlay; Build opens none, and this build has none to open. */
-const NO_OVERLAYS: Overlays = {
+export const NO_OVERLAYS: Overlays = {
   openMap: () => Promise.resolve(),
   closeMap: () => undefined,
   openPalette: () => Promise.resolve(),
@@ -53,7 +53,7 @@ export interface Kept {
 }
 
 /** Show ids, as this device last chose it in today's Settings → Display; hidden where storage is refused. */
-function showIdsChosen(): boolean {
+export function showIdsChosen(): boolean {
   try {
     return localStorage.getItem(SHOW_IDS_KEY) === "true";
   } catch {

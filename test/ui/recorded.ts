@@ -304,8 +304,9 @@ export function turnListAt(count: number = RECORDED.length, chat = CHAT): TurnLi
 
 export const CHATS: ChatList = {
   chats: [
-    { id: CHAT, name: "Calder Point", lastTurnAt: T0, running: false },
-    { id: "chat-orchard", name: "The orchard war", lastTurnAt: T0 - 3 * 86_400_000, running: false },
+    { id: CHAT, name: "Calder Point", lastTurnAt: T0, running: false, played: true, world: true },
+    { id: "chat-orchard", name: "The orchard war", lastTurnAt: T0 - 3 * 86_400_000, running: false, played: true, world: false },
+    { id: "chat-harbour", name: "The harbour master's ledger", lastTurnAt: null, running: false, played: false, world: true },
   ],
 };
 
