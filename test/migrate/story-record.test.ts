@@ -1,7 +1,7 @@
 // Today's story record as RPE's (STANDALONE-PLAN §15.2, story record row; §8.1): a beat recorded from a
-// stretch of the chat's past covers the whole stretch, as the history window's cover; each version of
-// a draft or a casting stands as that version says it, a field it no longer has gone with it; and a
-// place made in play is named as the world in play names it.
+// stretch of the chat's past covers the whole stretch, as the history window's cover; a beat keeps its
+// story time; each version of a draft or a casting stands as that version says it, a field it no
+// longer has gone with it; and a place made in play is named as the world in play names it.
 
 import { describe, expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
@@ -11,6 +11,7 @@ import { CastRecord, castingItemId, chatLine, findCharacter } from "../../src/ca
 import { migrate } from "../../src/migrate/migrate";
 import type { Beat, Draft, LedgerEvent, Rec } from "../../src/shared/ledger";
 import { storyCoverage } from "../../src/story/index";
+import { storyClock } from "../../src/story/kit";
 import { storyAt } from "../../src/story/path";
 import { StoryRecord } from "../../src/story/record";
 import { buildFixture, CHAT, PEOPLE, STRAY, USER, type Fixture } from "./fixture";
@@ -45,6 +46,21 @@ describe("today's story record as RPE's", () => {
         const covered = look(data, (_db, _s, store) => storyCoverage({ store, user: USER, chat: CHAT.harness, turn: null }).covered);
         expect([...covered].sort()).toEqual(["m-h1", "m-h2", "m-h3", "m-h4", "m-h5", "m-h6"]);
       },
+    );
+  });
+
+  test("a beat keeps today's story time for it, as the chat's story clock shows a time", async () => {
+    await migrated(
+      () => undefined,
+      (data) =>
+        look(data, (db, s, store) => {
+          const beats = StoryRecord.read(db, USER, storyAt(s, CHAT.harness, null)).items;
+          const clock = storyClock(store, USER, CHAT.harness, null);
+          // The fog came at the story's start, and the lamp stayed dark half an hour on: each beat its own time.
+          expect(typeof beats.get("b:b1")?.fields.time).toBe("string");
+          expect(beats.get("b:b1")?.fields.time).toBe(clock?.text(0) ?? "no clock");
+          expect(beats.get("b:b3")?.fields.time).toBe(clock?.text(30) ?? "no clock");
+        }),
     );
   });
 

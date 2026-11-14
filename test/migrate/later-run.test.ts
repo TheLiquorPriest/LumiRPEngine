@@ -1,18 +1,24 @@
 // A later run over today's data changed since the last (STANDALONE-PLAN §15.3: a run "replaces what an
 // earlier run imported with what today's side holds now"): what an earlier run wrote into the file
 // tree and today's side no longer has is gone, unless it was changed in RPE since; a version folder
-// numbered by a message today's side deleted is gone with it; and each pin is as the chat shows it now.
+// numbered by a message today's side deleted is gone with it; each pin is as the chat shows it now;
+// and a carried connection, the default and a carried setting take today's changes only while RPE's
+// copy is still what a run put there.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { ConnectionsDoc, StoredConnection } from "rp-harness/contract";
 import { dataPaths } from "../../src/app/config";
+import { modelsPort } from "../../src/app/connections";
+import { SecretsFile } from "../../src/app/secrets";
+import { withTopLevelKey } from "../../src/app/yaml";
 import { charactersOf, chatLine } from "../../src/cast/record";
 import { migrate } from "../../src/migrate/migrate";
-import type { MigrationReport } from "../../src/migrate/report";
+import { reportText, type MigrationReport } from "../../src/migrate/report";
 import type { Rec } from "../../src/shared/ledger";
-import { AREAS, buildFixture, CHAT, PEOPLE, STRAY, USER, type Fixture } from "./fixture";
+import { AREAS, buildFixture, CHAT, PEOPLE, RUNTIME, SECRETS, STRAY, USER, type Fixture } from "./fixture";
 import { look, notesOf } from "./look";
 import { deleteMessage, editRecord, putArea, showSwipe } from "./today-edits";
 import { TREE as tree } from "./tree";
@@ -87,6 +93,47 @@ describe("a later run over today's data changed since", () => {
       showSwipe(fixture, "m-h6", 0);
       await migrated(fixture, data, 11);
       expect(pins(data)).toEqual({ [PEOPLE.ada.name]: "supporting", [PEOPLE.bo.name]: null });
+    });
+  });
+
+  test("a carried connection, the default and a carried setting take today's changes while RPE's copy is what a run put there, and are kept, and said so, once the user changed them in RPE", async () => {
+    await withFixture(async (fixture, data) => {
+      const paths = dataPaths(data);
+      const port = modelsPort(paths, new SecretsFile(paths.secrets));
+      const conn = async (): Promise<StoredConnection | undefined> => ((await port.loadConnections()) as ConnectionsDoc).connections.find((c) => c.id === "conn-1");
+      const todaysBook = join(fixture.sources.runtime?.dataDir ?? "", "runtimes", RUNTIME, "connections.json");
+      const changeToday = async (change: (c: Record<string, unknown>) => void): Promise<void> => {
+        const book = JSON.parse(await readFile(todaysBook, "utf8")) as { connections: Record<string, unknown>[] };
+        change(book.connections[0] ?? {});
+        await writeFile(todaysBook, JSON.stringify(book));
+      };
+      await migrated(fixture, data, 9);
+
+      // On today's side since: the connection's model. RPE's copy is still the first run's: today's is taken.
+      await changeToday((c) => (c.model = "deepseek-reasoner"));
+      const second = await migrated(fixture, data, 10);
+      expect((await conn())?.model).toBe("deepseek-reasoner");
+      expect(second.carried?.connections).toMatchObject({ connections: ["conn-1"], changedInRpe: [], default: "conn-1", defaultKept: false });
+
+      // In RPE: the model's limits and the retries entered on the connection, a connection of the user's own made the default, and hidden messages kept from agents.
+      const ours: StoredConnection = { ...((await conn()) as StoredConnection), limits: { "deepseek-reasoner": { contextWindow: 128000, maxTokens: 8192 } }, retries: 5 };
+      await port.saveConnections({ v: 1, default: "conn-own", connections: [{ id: "conn-own", name: "Mine", provider: "anthropic", auth: "signin" }, ours] });
+      await writeFile(paths.globalConfig, withTopLevelKey(await readFile(paths.globalConfig, "utf8"), "chat", { hiddenReadable: false }, paths.globalConfig));
+      // On today's side since: the connection renamed.
+      await changeToday((c) => (c.name = "Main, renamed today"));
+      const third = await migrated(fixture, data, 11);
+
+      expect(await conn()).toEqual(ours);
+      expect(await port.loadConnections()).toMatchObject({ default: "conn-own" });
+      expect(Bun.YAML.parse(await readFile(paths.globalConfig, "utf8"))).toMatchObject({ chat: { hiddenReadable: false } });
+      expect(third.carried?.connections).toMatchObject({ connections: [], changedInRpe: ["conn-1"], default: "conn-own", defaultKept: true });
+      expect(third.carried?.settings.keptInRpe).toEqual([{ from: "harness/settings.json: core.story.hidden", to: "RPE-global.yml: chat.hiddenReadable" }]);
+      const text = reportText(third);
+      expect(text).toContain("the default conn-own (chosen in RPE: kept over today's)");
+      expect(text).toContain("Connections changed or removed in RPE since a run carried them, left as RPE has them (today's copy not taken): conn-1.");
+      expect(text).toContain("  RPE-global.yml: chat.hiddenReadable (today's harness/settings.json: core.story.hidden)");
+      // Its key, which RPE held as today's had it, stays.
+      expect(await port.loadSecrets()).toMatchObject({ keys: { "conn-1": SECRETS.key } });
     });
   });
 });

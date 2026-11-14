@@ -19,6 +19,7 @@ import { BUILD_MIGRATIONS } from "../build/schema";
 import { seedCarriedWorlds } from "../build/seed";
 import { CAST_MIGRATIONS } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
+import { LORE_MIGRATIONS } from "../lore";
 import { ALL_PACKS } from "../packs/index";
 import type { WorldDoc } from "../shared/world";
 import { openStore, STORE_MIGRATIONS } from "../store";
@@ -98,6 +99,7 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       // The cast and the story record take what today's build recorded beside each turn: the mind files, the beats, the castings and the drafts.
       migrations.add("cast", CAST_MIGRATIONS);
       migrations.add("story", STORY_MIGRATIONS);
+      migrations.add("lore", LORE_MIGRATIONS);
       migrations.add("migrate", MIGRATE_TABLES);
       // Build keeps the worlds as it edits them in a table of its own, which a run fills with what it carried.
       migrations.add("build", BUILD_MIGRATIONS);

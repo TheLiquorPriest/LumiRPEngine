@@ -119,8 +119,9 @@ describe("what the real run carries besides the chats", () => {
     const paths = dataPaths(data);
     const port = modelsPort(paths, new SecretsFile(paths.secrets));
     expect(await port.loadConnections()).toEqual({ v: 1, default: "conn-1", connections: [{ id: "conn-1", name: "Main", provider: "deepseek", auth: "key", model: "deepseek-chat", effort: "high", headers: ["X-Team", "X-Gone"], serialTools: true }] });
-    expect(await port.loadSecrets()).toEqual({ v: 1, keys: { "conn-1": SECRETS.key }, signins: { anthropic: { type: "oauth", access: SECRETS.access, refresh: SECRETS.refresh, expires: 1 } }, headers: { "conn-1": { "X-Team": SECRETS.header } }, device: "device-0001" });
-    expect(report.carried?.connections).toEqual({ runtime: "home", connections: ["conn-1"], leftOut: 1, keys: 1, signins: 1, headerValues: 1, kept: 0, default: "conn-1" });
+    // Beside the key and the header's value, the place they were given for, in the model layer's own form (key-places.test.ts plays it through a start).
+    expect(await port.loadSecrets()).toEqual({ v: 1, keys: { "conn-1": SECRETS.key }, signins: { anthropic: { type: "oauth", access: SECRETS.access, refresh: SECRETS.refresh, expires: 1 } }, headers: { "conn-1": { "X-Team": SECRETS.header } }, places: { "conn-1": expect.any(String) }, device: "device-0001" });
+    expect(report.carried?.connections).toEqual({ runtime: "home", connections: ["conn-1"], leftOut: 1, keys: 1, signins: 1, headerValues: 1, kept: 0, default: "conn-1", changedInRpe: [], defaultKept: false });
     // The backup is today's data as it was, kept by its owner alone; outside it and the secrets file, no secret is anywhere in RPE's data folder.
     const holding: string[] = [];
     for (const f of await walk(data)) {
@@ -133,15 +134,16 @@ describe("what the real run carries besides the chats", () => {
 
   test("a setting with one of the same meaning in RPE is in RPE-global.yml; the rest are listed by name, and those naming a Lumiverse connection are listed for the user", async () => {
     const config = Bun.YAML.parse(await readFile(dataPaths(data).globalConfig, "utf8")) as Record<string, unknown>;
-    expect(config.chat).toEqual({ hiddenReadable: true });
+    // Today's history cutoff becomes the history window, with the number it keeps now; the runtime's update choice is RPE's own.
+    expect({ chat: config.chat, history: config.history, update: config.update }).toEqual({ chat: { hiddenReadable: true }, history: { window: 30 }, update: { restart: true } });
     const settings = report.carried?.settings;
-    expect(settings?.carried.map((s) => s.from).sort()).toEqual(["harness/settings.json: core.story.hidden", "harness/settings.json: transport.connections.oneToolAtATime"]);
+    expect(settings?.carried.map((s) => s.from).sort()).toEqual(["harness/settings.json: core.story.hidden", "harness/settings.json: transport.connections.oneToolAtATime", "harness/settings.json: transport.history.count", "harness/settings.json: transport.history.keep", "runtime home: autoUpdate"]);
     expect(settings?.lumiverseConnections).toEqual([
       { setting: "settings.json: helper.connectionId", connection: "conn-helper" },
       { setting: "settings.json: agents.main.connectionId", connection: "conn-main" },
       { setting: "settings.json: story.models.standing.connectionId", connection: "conn-story" },
     ]);
-    expect(settings?.noHome).toEqual(expect.arrayContaining(["settings.json: helper", "settings.json: prompts", "harness/settings.json: core.agents.main.effort", "harness/settings.json: transport.history.keep", "harness/settings.json: transport.history.count", `runs/${CHAT.classic}/prefs.json: mapDisplay`, "harness/story.json: jobs", "runtime home: tuning", "runtime home: memory", "runtime home: autoUpdate"]));
+    expect(settings?.noHome).toEqual(expect.arrayContaining(["settings.json: helper", "settings.json: prompts", "harness/settings.json: core.agents.main.effort", `runs/${CHAT.classic}/prefs.json: mapDisplay`, "harness/story.json: jobs", "runtime home: tuning", "runtime home: memory"]));
     const text = reportText(report);
     expect(text).toContain("settings.json: story.models.standing.connectionId (connection conn-story in Lumiverse)");
     expect(text).not.toContain(SECRETS.key);

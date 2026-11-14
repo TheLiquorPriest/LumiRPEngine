@@ -2,13 +2,15 @@
 // each world the run copied into `world_file` is Build's to edit, as it was today's. A world Build has
 // no files of is copied in. One whose files are still what an earlier run put there is replaced by
 // this run's. One changed in RPE since (edited, committed or removed there) is kept as it is, and said
-// so: a later run never undoes what was done in RPE.
+// so: a later run never undoes what was done in RPE. Where today's side changed such a world too,
+// today's newer files are not in Build, and the run says that as well.
 //
 // What "what an earlier run put there" is: each world's files as a run copied them in, kept as one
 // fingerprint in `build_seed`.
 
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
+import { isRecord } from "../shared/json";
 
 /** What became of each world the run carried, by world id. */
 export interface WorldsSeeded {
@@ -20,6 +22,10 @@ export interface WorldsSeeded {
   unchanged: string[];
   /** Changed in RPE since an earlier run put it there, or made in RPE (removed there too): kept as it is, this run's files not taken. */
   kept: string[];
+  /** Of those kept, the ones whose files on today's side are not the ones a run last put into Build: today's newer files are in the run's copy of today's worlds (`world_file`) and in its backup, not in Build. Absent from a report kept before runs told them apart. */
+  newer?: string[];
+  /** Each carried world's name, as today's index of it gives one. Absent from a report kept before runs named them. */
+  names?: Record<string, string>;
 }
 
 interface File {
@@ -46,13 +52,15 @@ export function seedCarriedWorlds(db: Database, user: string): WorldsSeeded {
     at.files.push({ path: `worlds/${row.world}/${row.file}`, body: decoder.decode(row.bytes) });
     carried.set(row.world, at);
   }
-  const out: WorldsSeeded = { copied: [], replaced: [], unchanged: [], kept: [] };
+  const out: Required<WorldsSeeded> = { copied: [], replaced: [], unchanged: [], kept: [], newer: [], names: {} };
   db.transaction(() => {
     const mine = db.query<File, [string, string]>("SELECT path, body FROM build_file WHERE user = ?1 AND substr(path, 1, length(?2)) = ?2");
     const seeded = db.query<{ files: string }, [string, string]>("SELECT files FROM build_seed WHERE user = ? AND world = ?");
     const put = db.query("INSERT INTO build_file (user, path, body) VALUES (?, ?, ?)");
     const seed = db.query("INSERT INTO build_seed (user, world, files, run) VALUES (?, ?, ?, ?) ON CONFLICT (user, world) DO UPDATE SET files = excluded.files, run = excluded.run");
     for (const [world, { run, files }] of carried) {
+      const name = nameOf(files.find((f) => f.path === `worlds/${world}/index.json`)?.body ?? null);
+      if (name !== null) out.names[world] = name;
       const folder = `worlds/${world}/`;
       const held = mine.all(user, folder);
       const earlier = seeded.get(user, world)?.files ?? null;
@@ -62,6 +70,7 @@ export function seedCarriedWorlds(db: Database, user: string): WorldsSeeded {
       else if (fingerprint(held) !== earlier) into = "kept";
       else into = now === earlier ? "unchanged" : "replaced";
       out[into].push(world);
+      if (into === "kept" && now !== earlier) out.newer.push(world);
       if (into !== "copied" && into !== "replaced") continue;
       db.run("DELETE FROM build_file WHERE user = ?1 AND substr(path, 1, length(?2)) = ?2", [user, folder]);
       for (const f of files) put.run(user, f.path, f.body);
@@ -69,4 +78,14 @@ export function seedCarriedWorlds(db: Database, user: string): WorldsSeeded {
     }
   })();
   return out;
+}
+
+/** The name a world's index gives it; null where it gives none or doesn't parse. */
+function nameOf(index: string | null): string | null {
+  try {
+    const raw: unknown = JSON.parse(index ?? "null");
+    return isRecord(raw) && typeof raw.name === "string" ? raw.name : null;
+  } catch {
+    return null;
+  }
 }

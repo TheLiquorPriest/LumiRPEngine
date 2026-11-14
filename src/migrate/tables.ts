@@ -113,6 +113,19 @@ CREATE TABLE migration_file (
 );
 `,
   },
+  {
+    version: 7,
+    name: "what a run put into RPE's own documents",
+    // A later run replaces a carried connection, the default or a carried setting only where RPE's copy is still what a run put there: what the user changed in RPE stays.
+    sql: `
+CREATE TABLE migration_put (
+  user TEXT NOT NULL,
+  what TEXT NOT NULL,
+  print TEXT NOT NULL,
+  PRIMARY KEY (user, what)
+);
+`,
+  },
 ];
 
 /** Whether the database holds the migration's tables yet. */
@@ -164,6 +177,23 @@ export function keepWritten(db: Database, user: string, files: readonly WrittenF
     db.run("DELETE FROM migration_file WHERE user = ?", [user]);
     const put = db.query("INSERT OR REPLACE INTO migration_file (user, chat, base, path, sha256) VALUES (?, ?, ?, ?, ?)");
     for (const f of files) put.run(user, f.chat, f.base, f.path, f.sha256);
+  })();
+}
+
+/**
+ * What the user's earlier runs put into RPE's own documents, each as the last of them put it there:
+ * by what it is (`connection <id>`, `default`, `setting <key>`), the fingerprint (`hashJson`) of
+ * the value put.
+ */
+export function putPrints(db: Database, user: string): Map<string, string> {
+  return new Map(db.query<{ what: string; print: string }, [string]>("SELECT what, print FROM migration_put WHERE user = ?").all(user).map((r) => [r.what, r.print]));
+}
+
+/** Keeps what a run put into RPE's own documents, over what an earlier run put of the same. */
+export function keepPutPrints(db: Database, user: string, prints: ReadonlyMap<string, string>): void {
+  db.transaction(() => {
+    const put = db.query("INSERT INTO migration_put (user, what, print) VALUES (?, ?, ?) ON CONFLICT (user, what) DO UPDATE SET print = excluded.print");
+    for (const [what, print] of prints) put.run(user, what, print);
   })();
 }
 

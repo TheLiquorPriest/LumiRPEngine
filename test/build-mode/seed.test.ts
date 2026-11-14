@@ -48,22 +48,22 @@ describe("the worlds a migration carried", () => {
     const quay = todays("w_quay", "Saltquay");
 
     await carry(bed, "run-1", [{ id: "w_mill", name: "Millbrook", docs: [mill.first] }]);
-    expect(await seed()).toEqual({ copied: ["w_mill"], replaced: [], unchanged: [], kept: [] });
+    expect(await seed()).toEqual({ copied: ["w_mill"], replaced: [], unchanged: [], kept: [], newer: [], names: { w_mill: "Millbrook" } });
     const listed = body(await page.send({ type: "lre.world", op: "list" }), "lre.world").worlds ?? [];
     expect(listed.map((w) => [w.id, w.name, w.head])).toEqual([["w_mill", "Millbrook", revisionOf(mill.first)]]);
     expect(body(await page.send({ type: "lre.world", op: "get", worldId: "w_mill" }), "lre.world").world?.name).toBe("Millbrook");
 
     // The same run again changes nothing; a later run with a newer revision replaces a copy Build left as it was.
-    expect(await seed()).toEqual({ copied: [], replaced: [], unchanged: ["w_mill"], kept: [] });
+    expect(await seed()).toEqual({ copied: [], replaced: [], unchanged: ["w_mill"], kept: [], newer: [], names: { w_mill: "Millbrook" } });
     await carry(bed, "run-2", [
       { id: "w_mill", name: "Millbrook", docs: [mill.first, mill.second] },
       { id: "w_quay", name: "Saltquay", docs: [quay.first] },
     ]);
-    expect(await seed()).toEqual({ copied: ["w_quay"], replaced: ["w_mill"], unchanged: [], kept: [] });
+    expect(await seed()).toEqual({ copied: ["w_quay"], replaced: ["w_mill"], unchanged: [], kept: [], newer: [], names: { w_mill: "Millbrook", w_quay: "Saltquay" } });
     const millHead = revisionOf(mill.second);
     expect(body(await page.send({ type: "lre.world", op: "get", worldId: "w_mill" }), "lre.world").revision).toBe(millHead);
 
-    // Changed in RPE: Millbrook edited and committed, Saltquay removed. A later run takes neither back.
+    // Changed in RPE: Millbrook edited and committed, Saltquay removed. A later run takes neither back, and says that Millbrook's newer files from today's side are not in Build; Saltquay's are as they were.
     await page.send({ type: "lre.editor", op: "put", worldId: "w_mill", base: millHead, collection: "kinds", id: "lamplighter", value: { id: "lamplighter", label: "Lamplighter", extends: "person", fields: {} } });
     const committed = body(await page.send({ type: "lre.world", op: "commit", worldId: "w_mill", base: millHead }), "lre.world").revision ?? "";
     await page.send({ type: "lre.world", op: "delete", worldId: "w_quay" });
@@ -72,7 +72,7 @@ describe("the worlds a migration carried", () => {
       { id: "w_mill", name: "Millbrook-on-Wend", docs: [mill.first, mill.second, later] },
       { id: "w_quay", name: "Saltquay", docs: [quay.first] },
     ]);
-    expect(await seed()).toEqual({ copied: [], replaced: [], unchanged: [], kept: ["w_mill", "w_quay"] });
+    expect(await seed()).toEqual({ copied: [], replaced: [], unchanged: [], kept: ["w_mill", "w_quay"], newer: ["w_mill"], names: { w_mill: "Millbrook-on-Wend", w_quay: "Saltquay" } });
     const after = body(await page.send({ type: "lre.world", op: "list" }), "lre.world").worlds ?? [];
     expect(after.map((w) => [w.id, w.name, w.head])).toEqual([["w_mill", "Millbrook", committed]]);
     expect(after[0]?.revisions).not.toContain(revisionOf(later));

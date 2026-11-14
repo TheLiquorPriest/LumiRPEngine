@@ -1,7 +1,7 @@
 // Changes to the migration fixture's "today's data", as today's build and Lumiverse would make them
 // between two runs: a swipe's record written again (its harness and story parts lie outside every
-// hash), the swipe a reply shows, a message deleted, a chat branched, an area LumiAH wrote. Holds no
-// tests.
+// hash), the swipe a reply shows, a reply's text edited, a message deleted, a chat branched, an area
+// LumiAH wrote. Holds no tests.
 
 import { Database } from "bun:sqlite";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -44,6 +44,17 @@ export function showSwipe(fixture: Fixture, message: string, swipe: number): voi
     const text = (JSON.parse(row?.swipes ?? "[]") as string[])[swipe];
     if (text === undefined) throw new Error(`no swipe ${swipe} of ${message}`);
     db.query("UPDATE messages SET swipe_id = ?, content = ? WHERE id = ?").run(swipe, text, message);
+  });
+}
+
+/** The player edits a reply's text in Lumiverse after its turn, as Lumiverse saves an edit: the swipe's text, the message's own where that swipe shows, and its revision raised. Its record, today's, keeps what the turn read. */
+export function editReply(fixture: Fixture, message: string, swipe: number, text: string): void {
+  lumiverse(fixture, (db) => {
+    const row = db.query<{ swipes: string }, [string]>("SELECT swipes FROM messages WHERE id = ?").get(message);
+    const swipes = JSON.parse(row?.swipes ?? "[]") as string[];
+    if (swipes[swipe] === undefined) throw new Error(`no swipe ${swipe} of ${message}`);
+    swipes[swipe] = text;
+    db.query("UPDATE messages SET swipes = ?, content = CASE WHEN swipe_id = ? THEN ? ELSE content END, revision = revision + 1 WHERE id = ?").run(JSON.stringify(swipes), swipe, text, message);
   });
 }
 

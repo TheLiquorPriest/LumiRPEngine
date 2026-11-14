@@ -24,6 +24,7 @@ import { apartText, type ChatFate, type Item, type MigrationReport } from "./rep
 import { NO_PLACE_YET, type RowId } from "./rows";
 import { carrySettings, lumiahSettings, oneToolAtATime, type SettingsCarried } from "./settings";
 import { carryStory, type StoryCarried } from "./story-record";
+import { keepPutPrints, putPrints } from "./tables";
 import type { Today } from "./today";
 import { carryWorlds, type WorldsCarried } from "./worlds";
 
@@ -100,11 +101,16 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
   const user = today.sources.userId;
   const worlds = await carryWorlds(db, user, today.user, report.items, run);
 
-  // The connections of the runtime the run took, the user's, through the models port the app gives RPH.
+  // The connections of the runtime the run took, the user's, through the models port the app gives RPH; each, the default and each setting replaced only where RPE's copy is still what a run put there.
+  const earlier = putPrints(db, user);
   const runtime = today.runtime.runtimes[0]?.name ?? null;
   const serial = oneToolAtATime(await lumiahSettings(today));
-  const connections = runtime === null ? null : await carryConnections(modelsPort(paths, new SecretsFile(paths.secrets)), runtime, today.runtime.files, serial);
-  const settings = await carrySettings(today, report.items, paths.globalConfig);
+  const carriedConnections = runtime === null ? null : await carryConnections(modelsPort(paths, new SecretsFile(paths.secrets)), runtime, today.runtime.files, serial, earlier);
+  const connections = carriedConnections === null || "why" in carriedConnections ? carriedConnections : carriedConnections.carried;
+  if (carriedConnections !== null && !("why" in carriedConnections)) keepPutPrints(db, user, carriedConnections.put);
+  const carriedSettings = await carrySettings(today, report.items, paths.globalConfig, earlier);
+  keepPutPrints(db, user, carriedSettings.put);
+  const settings = carriedSettings.carried;
   // Each chat the import carried; and each chat's area as each turn left it, read once for its notes and its characters' mind files.
   const chats = (report.imports ?? []).filter((c) => c.outcome === "imported" || c.outcome === "replaced").map((c) => c.chatId);
   const turnAreas = new TurnAreas(today, db, s, report.items);
@@ -133,9 +139,9 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
     worlds: `RPE's database (world_file): ${worlds.worlds} world(s) with ${worlds.revisions} revision(s), ${worlds.drafts} draft(s) and ${worlds.histories} history file(s), byte for byte, each with its checksum`,
     "world-contents": "Inside the world documents, as they were: RPE reads them with today's world store, so each world holds what it held",
     pins: "Inside the world documents they pin, carried with them",
-    settings: `RPE-global.yml: ${settings.carried.length} setting(s) carried; ${settings.noHome.length} with no setting of the same meaning in RPE yet, listed by name`,
+    settings: `RPE-global.yml: ${settings.carried.length} setting(s) carried; ${(settings.notCarried ?? []).length > 0 ? `${(settings.notCarried ?? []).length} not carried, as RPE's like setting means something else or takes no such value; ` : ""}${settings.noHome.length} with no setting of the same meaning in RPE yet, listed by name`,
     "model-choices": `Listed for you: ${settings.lumiverseConnections.length} setting(s) name a connection that lives in Lumiverse, which RPE can't use; that work uses RPE's default connection until you pick one of RPE's`,
-    "runtime-settings": "Listed by name: RPE's config has no setting for the runtime's tuning, memory limit or update choice yet",
+    "runtime-settings": "Listed by name with your settings: RPE's config has no setting for the runtime's tuning or memory limit yet; its update choice is RPE's update.restart, carried with them",
     loopback: "At the swap (rpe up): the hash of its key among RPE's provider keys, RPE answering at today's address under today's model name; the connection in Lumiverse is left as it is",
     // What this run carried, against what the rehearsal found, and where the rest is: each part named.
     "mind-files": [

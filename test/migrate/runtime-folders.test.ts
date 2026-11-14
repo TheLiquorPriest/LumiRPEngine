@@ -79,7 +79,7 @@ describe("the runtime's folders", () => {
     expect(read.files.some((f) => f.path.startsWith("runtimes/"))).toBe(false);
     expect(read.undecided).toBe("Several runtimes of today's build are registered with this Lumiverse for this user (away, home): say which one this run takes with --runtime <name>.");
     const named = await readRuntimeFolders(folders, IDENT, player(both, "away"), null);
-    expect(named.runtimes.map((r) => [r.name, r.why])).toEqual([["away", "named with --runtime"]]);
+    expect(named.runtimes.map((r) => [r.name, r.why])).toEqual([["away", "named with --runtime, and registered with this Lumiverse for this user"]]);
     expect(named.undecided).toBeNull();
   });
 

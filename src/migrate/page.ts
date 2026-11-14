@@ -39,7 +39,9 @@ export type Waiting =
   /** Their own agents, skills and texts, attached under `imported/` and switched off: one press switches one on. */
   | { kind: "own"; agents: number; skills: number; texts: number }
   /** A chat whose characters' mind files and notes are attached and not yet filed: the filing job is the user's to start. */
-  | { kind: "filing"; chat: string; characters: number; notes: boolean };
+  | { kind: "filing"; chat: string; characters: number; notes: boolean }
+  /** A world changed in RPE's Build and on today's side too since a run put it into Build: Build keeps its own, and today's newer files are in RPE's copy of today's worlds and in the backup, not in Build. Its name as today's index gives it, null where it gives none. */
+  | { kind: "world"; world: string; name: string | null };
 
 export interface MigrationPage {
   /** The user's last real run's report, whole (counts and checksums, never content), and its text as the run printed it; null before any run. */
@@ -85,6 +87,7 @@ export function migrationPage(input: { db: Database; user: string; identifier: s
     const carried = c.carried;
     if (carried !== null && (carried.characters.length > 0 || carried.notes !== null)) waiting.push({ kind: "filing", chat: c.chat, characters: carried.characters.length, notes: carried.notes !== null });
   }
+  for (const world of report.worldsInBuild?.newer ?? []) waiting.push({ kind: "world", world, name: report.worldsInBuild?.names?.[world] ?? null });
   const b = report.backup;
   const backup = b === null ? null : { ...b, present: existsSync(b.path) && statSync(b.path).size === b.bytes };
   return { report, text: reportText(report), chats, backup, waiting, goingBack: going, lumiverse: report.lumiverse };

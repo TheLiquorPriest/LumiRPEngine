@@ -64,6 +64,22 @@ export function runtimeUnit(config: SavedRuntime, folders: RuntimeFolders): Save
   return existsSync(file) ? { unit, file, script: installedScript(folders.dataDir, config.extension) } : null;
 }
 
+/** The config of this extension's runtime `name` in `folders`, as today's runtime reads it, with the unit that keeps it running (`runtimeUnit`); null where no config there reads as that runtime. */
+export async function runtimeConfig(folders: RuntimeFolders, identifier: string, name: string): Promise<SavedRuntime | null> {
+  for (const f of (await walk(folders.configDir)).filter((f) => !f.path.includes("/") && f.path.endsWith(".json"))) {
+    const disk = join(folders.configDir, f.path);
+    let config: SavedRuntime;
+    try {
+      config = configOf(await readText(disk), disk);
+    } catch {
+      // A config that doesn't read is no runtime's here.
+      continue;
+    }
+    if (config.name === name && config.extension === identifier) return { ...config, service: runtimeUnit(config, folders) };
+  }
+  return null;
+}
+
 /** A working copy's folder for one user's data of one extension on one Lumiverse (`H/runtime/store/index.ts:307`, `runtime.ts:223-224`). */
 export function copyFolderOf(base: string, username: string, identifier: string): string {
   return sha256(JSON.stringify([base, username, identifier])).slice(0, 32);
@@ -216,7 +232,9 @@ export async function readRuntimeFolders(folders: RuntimeFolders, identifier: st
     const found = ours.find((c) => c.name === named);
     if (found === undefined) out.undecided = unreadable.includes(named) ? `The config of the runtime ${named} can't be read, so this run can't take it: set it up again with today's install line, or run with --no-runtime.` : `There is no runtime ${named} of this extension in ${folders.configDir}${ours.length > 0 ? `: there are ${ours.map((c) => c.name).join(", ")}` : ""}.`;
     else if (!sameUser(found)) out.undecided = `The runtime ${named} signs in to Lumiverse as another user, so its connections and keys are not this user's: this run doesn't take it.`;
-    else [taken, why] = [found, "named with --runtime"];
+    // A name the user shares on another Lumiverse is no proof: where their storage keeps registrations, a runtime named is taken only as one of them, as one found by itself is. Where it keeps none, the name is all there is to tell it by, and the line names it.
+    else if (regs !== null && !registered(found)) out.undecided = `The runtime ${named} signs in as this user's name, but is not registered with this Lumiverse for this user (another Lumiverse's runtime, or one whose registration was replaced), so its connections and keys may be another's: this run doesn't take it. Register it with this Lumiverse with today's install line, or run with --no-runtime.`;
+    else [taken, why] = [found, regs === null ? "named with --runtime; this user's storage holds no registration of a runtime to tell it by" : "named with --runtime, and registered with this Lumiverse for this user"];
   } else {
     const registeredHere = ours.filter(registered);
     const [only] = registeredHere;

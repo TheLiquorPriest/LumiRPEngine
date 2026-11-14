@@ -5,7 +5,7 @@
 // held it, so that a migrated chat's story so far and story brief begin where today's build left them
 // and a swipe takes its writes with it:
 //
-//   a beat     story part `beat`, item `b:<today's beat id>`: { text: what, who: [names], place, kind, surface, quotes, message, last }
+//   a beat     story part `beat`, item `b:<today's beat id>`: { text: what, who: [names], place, kind, surface, quotes, time, message, last }
 //   a strike   the same item, on the turn that struck it: { drop: true, why }
 //   a draft    story part `future`, item `fu:<today's draft id>`: { text: what, tier, due: when, who: [names], place, notes, state, close, drop }
 //   a casting  the cast's casting of the person's character: { as: standing, why }; the player's pin of
@@ -28,6 +28,7 @@ import type { JsonObject } from "../shared/json";
 import type { Beat, CastStanding, Draft, Rec } from "../shared/ledger";
 import type { Store, TurnRow, UserStore } from "../store";
 import { type StoryWrite, writeStory } from "../story";
+import { type StoryClock, storyClock } from "../story/kit";
 import { importedTurns, pathTurns, recordOf } from "./history";
 import { MIGRATION_WRITER } from "./minds";
 import type { People } from "./people";
@@ -111,8 +112,8 @@ function namesAt(store: Store, s: UserStore, turn: TurnRow): Names {
   };
 }
 
-// Every field each time, empty where a version has none: both records merge a write over the last field by field, so a field left out would stand from an earlier version. A beat's message is left out where it names none, as its turn's reply then places it.
-function beatValue(beat: Beat, names: Names): JsonObject {
+// Every field each time, empty where a version has none: both records merge a write over the last field by field, so a field left out would stand from an earlier version. A beat's message is left out where it names none, as its turn's reply then places it. Its time is today's story time for it, as the chat's story clock shows a time.
+function beatValue(beat: Beat, names: Names, clock: StoryClock | null): JsonObject {
   return {
     text: beat.what,
     who: [...new Set([beat.by, ...(beat.to ?? [])].map(names.person).filter((n): n is string => n !== null))],
@@ -120,6 +121,7 @@ function beatValue(beat: Beat, names: Names): JsonObject {
     kind: beat.kind,
     surface: beat.surface !== "" && beat.surface !== beat.what ? beat.surface : null,
     quotes: beat.quotes ?? [],
+    time: clock?.text(beat.at) ?? null,
     ...(beat.past !== undefined ? { message: beat.past.from, last: beat.past.to } : {}),
   };
 }
@@ -160,8 +162,14 @@ export function carryStory(input: { db: Database; store: Store; s: UserStore; ch
       out.leftOut += stored(record) - kept;
       if (kept === 0) continue;
       const names = namesAt(store, s, turn);
+      let clock: StoryClock | null = null;
+      try {
+        if (part.beats.length > 0) clock = storyClock(store, s.id, chat, turn.id);
+      } catch {
+        // A state that can't be folded shows no time, as it names nobody by name (`namesAt`).
+      }
       const story: StoryWrite[] = [
-        ...part.beats.map((b): StoryWrite => ({ part: "beat", item: beatItem(b.id), value: beatValue(b, names) })),
+        ...part.beats.map((b): StoryWrite => ({ part: "beat", item: beatItem(b.id), value: beatValue(b, names, clock) })),
         ...part.struck.map((x): StoryWrite => ({ part: "beat", item: beatItem(x.beat), value: { drop: true, why: x.why } })),
         ...part.drafts.map((d): StoryWrite => ({ part: "future", item: futureItem(d.id), value: futureValue(d, names) })),
       ];

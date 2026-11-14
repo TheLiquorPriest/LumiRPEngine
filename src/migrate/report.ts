@@ -157,6 +157,12 @@ export interface ChatImportReport {
   /** Events today's fold dropped on rebased views, and on-path events that failed to apply again, over its swipes. */
   dropped: number;
   violations: number;
+  /**
+   * Swipes it carried that were edited after today's build read them: each is tied to what that build
+   * read, so the first turn on RPE that finds it showing tells the chat's agents it was edited after its
+   * turn. Absent from a report kept before runs counted them.
+   */
+  edited?: number;
 }
 
 export interface MigrationReport {
@@ -329,6 +335,7 @@ export function reportText(report: MigrationReport): string {
       const check = `matched at the head ${c.matched.head ? "yes" : "no"}, at ${c.matched.swipes} of ${c.matched.of} swipes`;
       lines.push(`  ${c.chatId}: ${c.outcome}, ${c.turns} turns (${where})${c.shares ? `; shares ${c.shares.messages} message(s) with ${c.shares.chat}` : ""}; ${check}${c.differences.length > 0 ? "; MARKED: today's state is kept as the start where they differ" : ""}`);
       for (const d of c.differences) lines.push(`    ${d.kept ? "differs" : "going back differs (not kept)"} at ${d.at === "head" ? "the head" : `message ${d.at.message}, swipe ${d.at.swipe}`}: ${d.values.join(", ")}`);
+      if ((c.edited ?? 0) > 0) lines.push(`    ${c.edited} swipe(s) edited since today's build read them: each is told to the chat's agents as a reply edited after its turn, at the first turn on RPE that finds it showing`);
     }
   }
   if (report.unreadable.length > 0) {
@@ -363,6 +370,17 @@ export function reportText(report: MigrationReport): string {
     const w = report.worldsInStore;
     lines.push("", `World revisions RPE's store keeps for the imported chats: ${w.added} added, ${w.held} kept already, ${w.unreadable} left out as not a world document${w.unreadable > 0 ? " (listed under what could not be read)" : ""}.`);
   }
+  if (report.worldsInBuild) {
+    const w = report.worldsInBuild;
+    const named = (id: string): string => (w.names?.[id] === undefined ? id : `${w.names[id]} (${id})`);
+    lines.push("", "Worlds in Build, which edits RPE's own copy of each:");
+    for (const id of w.copied) lines.push(`  ${named(id)}: copied in`);
+    for (const id of w.replaced) lines.push(`  ${named(id)}: replaced by this run's files, as Build's copy was still the one a run put there`);
+    for (const id of w.unchanged) lines.push(`  ${named(id)}: unchanged, as Build's copy is this run's files already`);
+    for (const id of w.kept) lines.push(`  ${named(id)}: changed or removed in RPE since a run put it there, so kept as RPE has it`);
+    if (w.copied.length + w.replaced.length + w.unchanged.length + w.kept.length === 0) lines.push("  none");
+    for (const id of w.newer ?? []) lines.push("", `Waiting on you: the world ${named(id)} was changed in RPE's Build, and on today's side too, since a run put it into Build. Build keeps its own; today's newer files are in RPE's copy of today's worlds and in the backup, not in Build.`);
+  }
   if (report.carried) {
     const { settings, connections, ownFiles } = report.carried;
     // Waiting on you, first: your GUIDANCE.md, switched off; then the settings naming a connection RPE can't use.
@@ -374,10 +392,19 @@ export function reportText(report: MigrationReport): string {
       lines.push("", "Settings that name a connection living in Lumiverse, which RPE can't use: pick one of RPE's connections for each; until you do, that work uses RPE's default connection.");
       for (const c of settings.lumiverseConnections) lines.push(`  ${c.setting} (connection ${c.connection} in Lumiverse)`);
     }
-    if (connections !== null) lines.push("", "why" in connections ? `Connections: none carried, as ${connections.why}.` : `Connections carried from runtime ${connections.runtime}: ${connections.connections.join(", ") || "none"}; ${connections.keys} key(s), ${connections.signins} sign-in(s), ${connections.headerValues} header value(s); the default ${connections.default ?? "not set"}${connections.kept > 0 ? `; ${connections.kept} key(s), sign-in(s) and header value(s) RPE already held, which differ from today's, kept as RPE's` : ""}${connections.leftOut > 0 ? `; ${connections.leftOut} entry(s) left out, as today's runtime leaves them out` : ""}.`);
+    if (connections !== null) lines.push("", "why" in connections ? `Connections: none carried, as ${connections.why}.` : `Connections carried from runtime ${connections.runtime}: ${connections.connections.join(", ") || "none"}; ${connections.keys} key(s), ${connections.signins} sign-in(s), ${connections.headerValues} header value(s); the default ${connections.default ?? "not set"}${connections.defaultKept === true ? " (chosen in RPE: kept over today's)" : ""}${connections.kept > 0 ? `; ${connections.kept} key(s), sign-in(s) and header value(s) RPE already held, which differ from today's, kept as RPE's` : ""}${connections.leftOut > 0 ? `; ${connections.leftOut} entry(s) left out, as today's runtime leaves them out` : ""}.`);
+    if (connections !== null && !("why" in connections) && (connections.changedInRpe ?? []).length > 0) lines.push(`Connections changed or removed in RPE since a run carried them, left as RPE has them (today's copy not taken): ${(connections.changedInRpe ?? []).join(", ")}.`);
     lines.push("", "Settings carried into RPE's config:");
     for (const s of settings.carried) lines.push(`  ${s.from} → ${s.to}`);
     if (settings.carried.length === 0) lines.push("  none");
+    if ((settings.keptInRpe ?? []).length > 0) {
+      lines.push("", "Settings a run carried before and changed in RPE since, left as RPE has them (today's value not taken):");
+      for (const s of settings.keptInRpe ?? []) lines.push(`  ${s.to} (today's ${s.from})`);
+    }
+    if ((settings.notCarried ?? []).length > 0) {
+      lines.push("", "Settings RPE has a like setting for that means something else or takes no such value, not carried (kept in the backup):");
+      for (const s of settings.notCarried ?? []) lines.push(`  ${s.from} (RPE's ${s.to}: ${s.why})`);
+    }
     lines.push("", "Settings with no setting of the same meaning in RPE yet (kept in the backup):");
     for (const s of settings.noHome) lines.push(`  ${s}`);
   }

@@ -22,7 +22,7 @@ export interface GoingBackFacts {
 }
 
 /** A word of a shell line, quoted where it must be. */
-function shellWord(word: string): string {
+export function shellWord(word: string): string {
   return /^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`;
 }
 

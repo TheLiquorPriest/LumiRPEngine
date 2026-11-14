@@ -69,10 +69,22 @@ describe("several runtimes under one account", () => {
       expect(existsSync(data)).toBe(false);
       out.length = 0;
       expect(await migrateCli([...line, "--rehearse", "--runtime", RUNTIME], io, TREE)).toBe(0);
-      expect(out.join("")).toContain(`Today's runtime: took ${RUNTIME}, named with --runtime.`);
+      expect(out.join("")).toContain(`Today's runtime: took ${RUNTIME}, named with --runtime, and registered with this Lumiverse for this user.`);
       expect(await migrateCli([...line, "--runtime", RUNTIME, "--no-runtime"], io, TREE)).toBe(2);
     } finally {
       await writeFile(registry, original);
     }
+  });
+
+  test("named with --runtime, a runtime this user's storage holds no registration of is not taken, though it signs in as their name: the run refuses before writing", async () => {
+    const out: string[] = [];
+    const io = { out: (t: string) => out.push(t), err: (t: string) => out.push(t), env: {}, home: fixture.root };
+    const data = join(fixture.root, "named-away");
+    const before = await todays(fixture);
+    // `away` is this user's name on another Lumiverse: its keys are not this Lumiverse's user's.
+    expect(await migrateCli(["--lumiverse", fixture.sources.lumiverse, "--user", USER, "--runtime-config", fixture.sources.runtime?.configDir ?? "", "--runtime-data", fixture.sources.runtime?.dataDir ?? "", "--data", data, "--runtime", "away"], io, TREE)).toBe(1);
+    expect(out.join("")).toContain("The runtime away signs in as this user's name, but is not registered with this Lumiverse for this user (another Lumiverse's runtime, or one whose registration was replaced), so its connections and keys may be another's: this run doesn't take it.");
+    expect(existsSync(data)).toBe(false);
+    expect(await todays(fixture)).toEqual(before);
   });
 });

@@ -93,5 +93,5 @@ export const NO_PLACE_YET: Readonly<Partial<Record<RowId, string>>> = {
   "chips-staged": "the pages lane",
   "approvals-jobs": "the jobs lane",
   sessions: "the pages lane: beside the turns they belong to",
-  "runtime-settings": "the jobs lane: RPE's config has no setting for the runtime's tuning, memory limit or update choice yet",
+  "runtime-settings": "the jobs lane: RPE's config has no setting for the runtime's tuning or memory limit yet (its update choice is carried as a setting)",
 };

@@ -5,11 +5,21 @@
 // every key, sign-in and header value into the secrets file and nowhere else. RPH's model layer holds
 // the rules for what a connection may say and checks both documents as it reads them, so each
 // connection is carried as today's runtime stored it, in RPH's shape. A connection RPE has of its
-// own is left as it is; one carried before is replaced by today's. Its secrets are not: a key or a
-// header value RPE already holds stays, and so does a sign-in RPE holds that runs out later than
-// today's, so a later run never puts a retired runtime's credential over one RPE uses.
+// own is left as it is. One a run carried before is replaced by today's only while RPE's copy is
+// still what a run put there (its fingerprint, kept by the run), as Build's worlds are: one the user
+// changed in RPE (its limits, retries, name, model or effort) or removed there is left as RPE has
+// it, and the report says so. So is RPE's default where the user chose another there. The secrets
+// are kept likewise: a key or a header value RPE already holds stays, and so does a sign-in RPE
+// holds that runs out later than today's, so a later run never puts a retired runtime's credential
+// over one RPE uses. Beside each connection's key and headers' values the secrets keep the place
+// they were given for, which the model layer compares at every read, the first after a start too:
+// the run is that document's second writer, so it keeps RPE's places with RPE's secrets and writes
+// today's where today's build sends them. One place stands for a connection's key and values
+// together, so where RPE's were given for another place than today's the two are not mixed: a
+// connection left as RPE has it keeps RPE's, and one taken from today's takes today's whole.
 
 import type { ConnectionsDoc, ModelsPort, SecretsDoc, SignInToken, StoredConnection } from "rp-harness/contract";
+import { hashJson } from "../shared/hash";
 import { isRecord } from "../shared/json";
 import { readText } from "./files";
 import type { RuntimeFile } from "./runtime-folders";
@@ -18,6 +28,7 @@ import type { RuntimeFile } from "./runtime-folders";
 export interface ConnectionsCarried {
   /** The runtime they came from. */
   runtime: string;
+  /** Today's connections RPE holds as today's runtime has them now. */
   connections: string[];
   /** Entries today's runtime would leave out as well, as they don't read as a connection. */
   leftOut: number;
@@ -27,7 +38,14 @@ export interface ConnectionsCarried {
   /** Keys, sign-ins and header values RPE already held that differ from today's, kept as RPE's. */
   kept: number;
   default: string | null;
+  /** Today's connections changed or removed in RPE since a run carried them, left as RPE has them: today's copy not taken. Absent from a report kept before runs told them apart. */
+  changedInRpe?: string[];
+  /** Whether the default is one the user chose in RPE, kept over today's. Absent from a report kept before runs told them apart. */
+  defaultKept?: boolean;
 }
+
+/** What a run put into RPE's own documents, by what it is, as `migration_put` keeps it: the fingerprint of each. */
+export type PutPrints = ReadonlyMap<string, string>;
 
 /** Today's book as its two files hold it, or why it can't be read. */
 type Book = { connections: StoredConnection[]; values: Record<string, Record<string, string>>; leftOut: number; default: string | null; secrets: { keys: Record<string, string>; signins: Record<string, SignInToken>; device?: string } } | { why: string };
@@ -75,6 +93,25 @@ function connectionOf(raw: unknown, serial: ReadonlySet<string>): { connection: 
 
 function isSignIn(value: unknown): value is SignInToken {
   return isRecord(value) && value.type === "oauth" && typeof value.access === "string" && typeof value.refresh === "string" && typeof value.expires === "number";
+}
+
+/**
+ * Where a connection's key and headers' values go, in the form RPH's model layer keeps beside them
+ * in the secrets (`SecretsDoc.places`, made by `placeOf` in RPH's `src/model/book.ts`): its provider
+ * and its address's origin, null for the provider's own address. The layer compares it at every
+ * read, the first after a start too, and sends them to no other place. Undefined for an entry that
+ * names no provider or address as a connection does.
+ */
+function placeOf(c: { provider?: unknown; baseUrl?: unknown }): string | undefined {
+  const { provider, baseUrl } = c;
+  if (typeof provider !== "string" || (baseUrl !== undefined && typeof baseUrl !== "string")) return undefined;
+  if (baseUrl === undefined || baseUrl.trim() === "") return JSON.stringify([provider, null]);
+  try {
+    return JSON.stringify([provider, new URL(baseUrl.trim()).origin]);
+  } catch {
+    // What isn't an address is a place of its own, as the layer has it.
+    return JSON.stringify([provider, baseUrl]);
+  }
 }
 
 async function readBook(connectionsFile: string, secretsFile: string | undefined, serial: ReadonlySet<string>): Promise<Book> {
@@ -132,24 +169,83 @@ export async function bookTrouble(runtime: string, files: readonly RuntimeFile[]
 /**
  * Carries the runtime's connections and keys into RPE's two documents through `port`: the secrets
  * first, as the model layer saves them, then the connections. `files` are the runtime's files the
- * migration found; `runtime` the runtime it took, the one this user registered. Null when that runtime keeps no
- * connections; `{ why }` when its files can't be read, and nothing is carried.
+ * migration found; `runtime` the runtime it took, the one this user registered; `earlier` what
+ * earlier runs put into RPE's documents (`migration_put`). Null when that runtime keeps no
+ * connections; `{ why }` when its files can't be read, and nothing is carried. Else what was carried,
+ * and what this run put there, by what it is, to be kept for the next run.
  */
-export async function carryConnections(port: ModelsPort, runtime: string, files: readonly RuntimeFile[], serial: ReadonlySet<string>): Promise<ConnectionsCarried | { why: string } | null> {
+export async function carryConnections(port: ModelsPort, runtime: string, files: readonly RuntimeFile[], serial: ReadonlySet<string>, earlier: PutPrints): Promise<{ carried: ConnectionsCarried; put: Map<string, string> } | { why: string } | null> {
   const book = await bookOf(runtime, files, serial);
   if (book === null || "why" in book) return book;
   const ids = new Set(book.connections.map((c) => c.id));
+  const put = new Map<string, string>();
+
+  // Each of today's connections against RPE's copy: taken where RPE holds none and no run put one there, or where RPE's is still what a run put there; else RPE's stands.
+  const hadDoc = await port.loadConnections();
+  const held = (isRecord(hadDoc) && Array.isArray(hadDoc.connections) ? hadDoc.connections : []).filter((c: unknown): c is StoredConnection => isRecord(c) && typeof c.id === "string");
+  const own = held.filter((c) => !ids.has(c.id));
+  const taken: StoredConnection[] = [];
+  const changedInRpe: string[] = [];
+  for (const c of book.connections) {
+    const what = `connection ${c.id}`;
+    const print = hashJson(c);
+    const ours = held.find((h) => h.id === c.id);
+    const was = earlier.get(what);
+    if (ours === undefined ? was === undefined : hashJson(ours) === print || hashJson(ours) === was) {
+      taken.push(c);
+      put.set(what, print);
+    } else {
+      if (ours !== undefined) taken.push(ours);
+      changedInRpe.push(c.id);
+    }
+  }
+  const kept = new Set(changedInRpe);
+  const result = [...own, ...taken];
+  const there = new Set(result.map((c) => c.id));
 
   const hadSecrets = await port.loadSecrets();
   const had = isRecord(hadSecrets) ? hadSecrets : {};
   const carried = { keys: 0, signins: 0, headerValues: 0, kept: 0 };
   const keys = strings(had.keys, isString);
-  for (const [id, key] of Object.entries(book.secrets.keys)) {
-    if (keys[id] !== undefined && keys[id] !== key) carried.kept++;
-    else {
-      keys[id] = key;
-      carried.keys++;
+  const headers = strings(had.headers, isValues);
+  // Beside each connection's key and headers' values, the place they were given for: RPE's stay with RPE's, today's go with the place today's build sends them to.
+  const places = strings(had.places, isString);
+  for (const c of book.connections) {
+    // A connection removed in RPE takes no key back.
+    if (!there.has(c.id)) continue;
+    const given = placeOf(c);
+    // RPE's were given where the secrets say; ones kept before places were, where RPE's copy went before this run, as the layer would have taken it.
+    const ourPlace = places[c.id] ?? placeOf(held.find((h) => h.id === c.id) ?? {});
+    // One place stands for a connection's key and values together, so RPE's and today's, given for different places, are never mixed: where RPE's copy of the connection stays, RPE's stay and none of today's joins them; where today's copy is taken, today's replace RPE's.
+    const apart = (Object.hasOwn(keys, c.id) || Object.hasOwn(headers, c.id)) && ourPlace !== given;
+    const joins = !apart || !kept.has(c.id);
+    if (apart && joins) {
+      delete keys[c.id];
+      delete headers[c.id];
     }
+    const key = book.secrets.keys[c.id];
+    if (key !== undefined) {
+      if (keys[c.id] !== undefined && keys[c.id] !== key) carried.kept++;
+      else if (joins) {
+        keys[c.id] = key;
+        carried.keys++;
+      }
+    }
+    const values = book.values[c.id];
+    if (values !== undefined) {
+      const ours = { ...headers[c.id] };
+      for (const [name, value] of Object.entries(values)) {
+        if (ours[name] !== undefined && ours[name] !== value) carried.kept++;
+        else if (joins) {
+          ours[name] = value;
+          carried.headerValues++;
+        }
+      }
+      if (joins) headers[c.id] = ours;
+    }
+    if (!joins) continue;
+    if ((Object.hasOwn(keys, c.id) || Object.hasOwn(headers, c.id)) && given !== undefined) places[c.id] = given;
+    else delete places[c.id];
   }
   // A sign-in RPE refreshed runs out later than the one today's runtime last saved.
   const signins = strings(had.signins, isSignIn);
@@ -161,40 +257,36 @@ export async function carryConnections(port: ModelsPort, runtime: string, files:
       carried.signins++;
     }
   }
-  const headers = strings(had.headers, isValues);
-  for (const [id, values] of Object.entries(book.values)) {
-    const ours = { ...headers[id] };
-    for (const [name, value] of Object.entries(values)) {
-      if (ours[name] !== undefined && ours[name] !== value) carried.kept++;
-      else {
-        ours[name] = value;
-        carried.headerValues++;
-      }
-    }
-    headers[id] = ours;
-  }
   const device = text(had.device) ?? book.secrets.device;
   const secrets: SecretsDoc = {
     v: 1,
     keys,
     signins,
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    ...(Object.keys(places).length > 0 ? { places } : {}),
     ...(device !== undefined ? { device } : {}),
   };
   await port.saveSecrets(secrets);
 
-  const hadDoc = await port.loadConnections();
-  const own = (isRecord(hadDoc) && Array.isArray(hadDoc.connections) ? hadDoc.connections : []).filter((c: unknown): c is StoredConnection => isRecord(c) && typeof c.id === "string" && !ids.has(c.id));
-  const ownDefault = isRecord(hadDoc) ? text(hadDoc.default) : undefined;
-  // RPE's own choice of default stands; one a run carried is today's choice again.
-  const chosen = ownDefault !== undefined && own.some((c) => c.id === ownDefault) ? ownDefault : book.default;
-  const doc: ConnectionsDoc = { v: 1, default: chosen, connections: [...own, ...book.connections] };
+  // The default as the connections: today's where RPE's is still what a run put there, or where no run put one and RPE has none of its own choosing; else RPE's stands.
+  const ourDefault = (isRecord(hadDoc) ? text(hadDoc.default) : undefined) ?? null;
+  const todays = book.default !== null && there.has(book.default) ? book.default : null;
+  const was = earlier.get("default");
+  const takeTodays = ourDefault === todays || (was === undefined ? ourDefault === null || !there.has(ourDefault) : hashJson(ourDefault) === was || (ourDefault !== null && !there.has(ourDefault)));
+  const chosen = takeTodays ? todays : ourDefault;
+  if (takeTodays) put.set("default", hashJson(todays));
+  const doc: ConnectionsDoc = { v: 1, default: chosen, connections: result };
   await port.saveConnections(doc);
   return {
-    runtime,
-    connections: book.connections.map((c) => c.id),
-    leftOut: book.leftOut,
-    ...carried,
-    default: chosen,
+    carried: {
+      runtime,
+      connections: taken.filter((c) => !kept.has(c.id)).map((c) => c.id),
+      leftOut: book.leftOut,
+      ...carried,
+      default: chosen,
+      changedInRpe,
+      defaultKept: !takeTodays,
+    },
+    put,
   };
 }
