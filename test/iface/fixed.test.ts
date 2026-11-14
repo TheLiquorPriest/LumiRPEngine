@@ -8,10 +8,13 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { JsonObject, ToolResult } from "rp-harness/contract";
 import { ENGINE_TOOLS, Lines, SHIPPED_GUIDANCE } from "../../src/iface/index";
+import { splitFile } from "../../src/iface/texts";
+import { readPart, renderView } from "../../src/store/words";
 import { CHAT, dataOf, rig, texts } from "./rig";
 
 const lines = Lines.parse(await Bun.file(join(SHIPPED_GUIDANCE, ".prompts", "engine-answers.md")).text(), "engine-answers");
 const patterns = lines.patterns();
+const treePart = readPart(await Bun.file(join(SHIPPED_GUIDANCE, ".prompts", "world-state.md")).text(), "world-state");
 
 /** Every part of an answer is data (JSON or the store's tree) or a line of the answers' file, and every report a line. */
 function wordsFromFiles(r: ToolResult, trees: readonly string[] = []): void {
@@ -69,16 +72,35 @@ describe("world_apply", () => {
     expect(changed.some((c) => c.at === "track:errand")).toBe(true);
     expect(changed.some((c) => c.at === "horizon")).toBe(true);
     expect((data.now as JsonObject[]).length).toBeGreaterThan(0);
-    const state = t.s.stateAt(t.turn.id).state.world;
+    const stored = t.s.stateAt(t.turn.id).state;
+    const state = stored.world;
     expect(state.entities.knife?.relations.some((x) => x.type === "in" && x.to === "odile")).toBe(true);
     expect(state.entities.bram?.fields.mood).toBe("wary");
-    expect(state.entities.wren?.fields.fact_boots).toBe("muddy to the knee");
+    expect(stored.facts["entity:wren"]?.map((f) => [f.key, f.value, f.precision])).toEqual([["boots", "muddy to the knee", "exact"]]);
     expect(Object.values(state.entities).some((e) => e.name === "Gate guard" && e.fields.mood === "bored")).toBe(true);
     expect(r.marks ?? []).not.toContain("unsourced");
     wordsFromFiles(r);
     const rows = t.s.changes(t.turn.id);
     expect(rows.some((c) => c.lane === "story")).toBe(true);
     expect(rows.find((c) => c.op === "set" && c.source === "prose")?.cite).toEqual({ message: "m-1" });
+  });
+
+  test("a fact replaces the one it names, and one that names no standing fact is applied and reported", async () => {
+    const t = await rig();
+    const src = { from: "prose", message: "m-5" };
+    const first = await t.call("world_apply", { operations: [{ op: "fact", about: "wren", key: "boots", value: "muddy to the knee", source: src }] });
+    const written = (ops(first)[0]?.facts as JsonObject[])[0];
+    expect(written?.value).toBe("muddy to the knee");
+    const second = await t.call("world_apply", { operations: [{ op: "fact", about: "wren", key: "footwear", value: "barefoot now", replaces: written?.id as string, source: src }] });
+    expect(second.error).toBeUndefined();
+    expect((ops(second)[0]?.facts as JsonObject[]).map((f) => f.value)).toEqual(["barefoot now"]);
+    expect(second.reports ?? []).toEqual([]);
+    const third = await t.call("world_apply", { operations: [{ op: "fact", about: "wren", key: "hat", value: "a wide straw hat", replaces: "f-000000000000", source: src }] });
+    expect(third.error).toBeUndefined();
+    expect(ops(third)[0]?.applied).toBe(true);
+    expect((third.reports ?? []).some((x) => x.includes("f-000000000000"))).toBe(true);
+    expect(t.s.stateAt(t.turn.id).state.facts["entity:wren"]?.filter((f) => f.replacedBy === undefined).map((f) => f.key)).toEqual(["footwear", "hat"]);
+    wordsFromFiles(third);
   });
 
   test("a payment of more than is held is applied and reported", async () => {
@@ -151,6 +173,36 @@ describe("world_apply", () => {
     expect(texts(r).some((x) => x.includes("where the player allows no writes"))).toBe(true);
     wordsFromFiles(r);
   });
+
+  test("a call refused for a later operation carries no report of an earlier one, and records nothing", async () => {
+    const t = await rig();
+    const r = await t.call("world_apply", { operations: [{ op: "pay", who: "wren", to: "bram", amount: 50, source: { from: "prose", message: "m-7" } }, { op: "move", who: "brom", to: "cellar" }] });
+    expect(r.error).toBe(true);
+    expect(r.reports).toBeUndefined();
+    expect(texts(r).some((x) => x.includes("Bram [bram]"))).toBe(true);
+    expect(t.s.changes(t.turn.id)).toEqual([]);
+    wordsFromFiles(r);
+  });
+
+  test("a searchable write is asked about as its own call, and one the player declines is left out", async () => {
+    const asked: JsonObject[] = [];
+    const t = await rig({
+      approvals: {
+        permission: async () => "confirm",
+        ask: async (_s, ask) => {
+          asked.push(ask.args as JsonObject);
+          return { go: false, reason: "not now" };
+        },
+      },
+    });
+    const args = { item: "knife", delta: -10, source: { from: "prose", message: "m-8" } };
+    const r = await t.call("item_condition", args);
+    expect(asked).toEqual([args]);
+    expect(ops(r)[0]).toMatchObject({ op: "item_condition", lane: "engine", applied: false, held: "declined" });
+    expect(texts(r).some((x) => x.includes("Their reason: not now"))).toBe(true);
+    expect(t.s.changes(t.turn.id)).toEqual([]);
+    wordsFromFiles(r);
+  });
 });
 
 describe("world_query, world_search and roll", () => {
@@ -158,7 +210,8 @@ describe("world_query, world_search and roll", () => {
     const t = await rig();
     const r = await t.call("world_query", { at: "Thornbury", depth: 1, due: "six hours" });
     expect(r.error).toBeUndefined();
-    const tree = t.s.view(CHAT).query("place:thornbury", 1);
+    const tree = renderView(t.s.view(CHAT).query("place:thornbury", 1) ?? { lines: [] }, treePart);
+    expect(tree).toContain("Thornbury [thornbury] (place)");
     expect(texts(r)[0]).toBe(tree);
     expect((dataOf(r).due as JsonObject[])[0]?.where).toBe("place:thornbury");
     wordsFromFiles(r, [tree]);
@@ -197,10 +250,15 @@ describe("world_query, world_search and roll", () => {
 });
 
 describe("the tools' files", () => {
-  test("every registered tool has a file, and every file names a registered tool", () => {
-    const files = readdirSync(join(SHIPPED_GUIDANCE, ".tools")).filter((f) => f.endsWith(".md")).map((f) => f.slice(0, -3));
-    const names = ENGINE_TOOLS.map((t) => t.name);
-    expect(names.filter((n) => !files.includes(n))).toEqual([]);
-    expect(files.filter((f) => !names.includes(f))).toEqual([]);
+  // `.tools/` holds every lane's tool files (the story's, the cast's, the maps'): an engine tool's file
+  // says its family in its header, and only the files of the engine's families are held to its tools.
+  test("every engine tool has its file in its family, and every file of an engine family names an engine tool", async () => {
+    const dir = join(SHIPPED_GUIDANCE, ".tools");
+    const familyOf = new Map<string, unknown>();
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".md"))) familyOf.set(file.slice(0, -3), splitFile(await Bun.file(join(dir, file)).text(), file).header.family);
+    expect(ENGINE_TOOLS.filter((t) => familyOf.get(t.name) !== t.family).map((t) => t.name)).toEqual([]);
+    const families = new Set<unknown>(ENGINE_TOOLS.map((t) => t.family));
+    const names = new Set(ENGINE_TOOLS.map((t) => t.name));
+    expect([...familyOf].filter(([name, family]) => families.has(family) && !names.has(name)).map(([name]) => name)).toEqual([]);
   });
 });

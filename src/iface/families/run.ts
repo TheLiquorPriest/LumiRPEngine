@@ -1,12 +1,13 @@
 // What every searchable tool is made of (plan §6.8). A write is one operation of today's engine (an
-// item op, a GM edit, a pack's effect), worked out on a copy of the state at the call's turn; what it
-// cannot read refuses it before anything is recorded; then the user's setting for its lane is asked
-// through the contract's approvals, never decided here; then it is recorded in one write through the
-// queue and answered as `world_apply` answers: what changed, how it now stands, what did not add
-// up. A read answers with the store's data. Every sentence of an answer is a line of the answers'
-// file; a tool's own words are its file in `.tools/`.
+// item op, a GM edit, a pack's effect), run as `world_apply` runs its operations, as a call of one
+// (`runOperations`): worked out on a copy of the state at the call's turn; what it cannot read
+// refuses it before anything is recorded; the user's setting for its lane is asked through the
+// contract's approvals, never decided here; then it is recorded in one write through the queue and
+// answered with what changed, how it now stands, and what did not add up. A read answers with the
+// store's data. Every sentence of an answer is a line of the answers' file; a tool's own words are
+// its file in `.tools/`.
 
-import type { ApprovalAsk, JsonObject, JsonValue } from "rp-harness/contract";
+import type { JsonObject, JsonValue } from "rp-harness/contract";
 import type { DomainId, EntityId } from "../../shared/ids";
 import type { FixOp } from "../../shared/ledger";
 import type { ItemOp } from "../../shared/things";
@@ -18,12 +19,12 @@ import type { Rejection } from "../../engine/registry";
 import { createRng } from "../../engine/rng";
 import { applyItemOp } from "../../engine/thing-ops";
 import type { Lane, StoreState } from "../../store/types";
+import { readOperation, runOperations } from "../apply";
 import { readingOr } from "../fixed";
 import type { Call, Reply, ToolSpec } from "../kit";
-import { find, isUnread, itemOptions, named, type OpContext, type Unread } from "../ops";
-import type { Reading, Want } from "../reading";
-import { MARKS, PROVENANCE_PROPERTIES, provenanceOf } from "../source";
-import { answerDraft, commit, Draft } from "../writing";
+import { find, isUnread, itemOptions, minorUnits, named, type OpContext, type Unread } from "../ops";
+import type { Found, Reading, Want } from "../reading";
+import { PROVENANCE_PROPERTIES } from "../source";
 
 /** A searchable tool that writes: everything but its words, and its work on the draft. */
 export interface WriteDef {
@@ -50,56 +51,9 @@ export interface ReadDef {
   read(r: Reading, args: JsonObject, reply: Reply, call: Call): Unread | undefined;
 }
 
-/** The fields every line of a one-operation answer starts with. */
-function opFields(name: string): { n: number; op: string } {
-  return { n: 1, op: name };
-}
-
-/** The user's setting for the lane, asked; null when the write may go ahead. */
-async function laneSays(call: Call, lane: Lane, args: JsonObject): Promise<"never" | { declined: string | undefined } | null> {
-  const approvals = call.deps.approvals;
-  if (approvals === undefined) return null;
-  const permission = await approvals.permission(call.scope, lane);
-  if (permission === "auto") return null;
-  if (permission === "never") return "never";
-  const ask: ApprovalAsk = { agent: call.agent, callId: call.callId, tool: call.tool, lane, args, at: (call.deps.now ?? Date.now)() };
-  const said = await approvals.ask(call.scope, ask, call.signal);
-  return said.go ? null : { declined: said.reason };
-}
-
-async function runWrite(def: WriteDef, args: JsonObject, call: Call): Promise<Reply> {
-  const first = call.reply();
-  const fields = opFields(def.name);
-  const missing = def.required.filter((f) => args[f] === undefined || args[f] === null || args[f] === "");
-  if (missing.length > 0) return first.line("needs", { ...fields, fields: missing }).line("nothing_recorded", {}).fail();
-  const prov = provenanceOf(args, call.agent);
-  if ("field" in prov) return first.line("unreadable_op", { ...fields, field: prov.field, value: JSON.stringify(prov.value), choices: [...prov.choices] }).line("nothing_recorded", {}).fail();
-  const base = readingOr(call, first);
-  if (base === null) return first;
-  if (base.turn === null) return first.line("turn_needed", {}).fail();
-  const draft = new Draft(base, call);
-  const reply = call.reply();
-  let added: ((state: StoreState) => JsonObject) | undefined;
-  const unread = def.run({ ...fields, args, prov, draft, reply, call, reading: draft.reading(), after: (add) => (added = add) });
-  if (unread) return reply.line(unread.line, unread.fields).line("nothing_recorded", {}).fail();
-  const held = await laneSays(call, def.lane, args);
-  if (held !== null) {
-    const out = call.reply();
-    if (held === "never") out.line("never", { ...fields, lane: def.lane });
-    else out.line("declined", { ...fields, ...(held.declined !== undefined ? { reason: held.declined } : {}) });
-    const none = new Draft(base, call);
-    return answerDraft(none, await commit(none), out, { operations: [{ ...fields, lane: def.lane, applied: false, held: held === "never" ? "never" : "declined" }] });
-  }
-  for (const mark of prov.marks) reply.mark(mark);
-  if (prov.marks.includes(MARKS.unsourced)) reply.line("unsourced", fields);
-  if (prov.marks.includes(MARKS.noGapCheck)) reply.line("invented_unchecked", fields);
-  if (prov.marks.includes(MARKS.noConsent)) reply.line("invented_unconsented", fields);
-  const done = await commit(draft);
-  return answerDraft(draft, done, reply, added !== undefined ? { added: new Map([[1, added(done.state)]]) } : {});
-}
-
-/** A write as RPH holds it: its arguments with the three of provenance. */
+/** A write as RPH holds it: its arguments with the three of provenance, run as a call of one operation. */
 export function writeTool(def: WriteDef): ToolSpec {
+  const op = { name: def.name, lane: def.lane, needs: def.required, takes: Object.keys(def.properties), example: def.example, run: def.run };
   return {
     name: def.name,
     family: def.family,
@@ -108,7 +62,12 @@ export function writeTool(def: WriteDef): ToolSpec {
     properties: { ...def.properties, ...PROVENANCE_PROPERTIES },
     required: def.required,
     example: def.example,
-    run: (args, call) => runWrite(def, args, call),
+    async run(args, call) {
+      const read = readOperation(1, op, args, call);
+      if ("line" in read) return call.reply().line(read.line, read.fields).line("nothing_recorded", {}).fail();
+      // The player is asked about the tool's own call, as they would see it made.
+      return runOperations(call, [read], () => args);
+    },
   };
 }
 
@@ -124,7 +83,7 @@ export function readTool(def: ReadDef): ToolSpec {
     async run(args, call) {
       const reply = call.reply();
       const missing = def.required.filter((f) => args[f] === undefined || args[f] === null || args[f] === "");
-      if (missing.length > 0) return reply.line("needs", { ...opFields(def.name), fields: missing }).fail();
+      if (missing.length > 0) return reply.line("needs", { n: 1, op: def.name, fields: missing }).fail();
       const r = readingOr(call, reply);
       if (r === null) return reply;
       const unread = def.read(r, args, reply, call);
@@ -317,9 +276,13 @@ export function optionalId(o: OpContext, field: string, want: Want): string | Un
   return isUnread(r) ? r : r.id;
 }
 
-/** An amount in the world's main coin in its smallest unit, as the economy counts money. */
-export function minorUnits(reading: Reading, amount: number): number {
-  return Math.round(amount * 10 ** reading.doc.currency.decimals);
+/** A name a read's argument gives, found as wanted; or the line that says it is not there or fits several. */
+export function foundIn(r: Reading, field: string, said: JsonValue | undefined, want: Want): Found | Unread {
+  if (typeof said !== "string" || said.trim() === "") return { line: "needs_field", fields: { field } };
+  const f = r.find(said, want);
+  if ("id" in f) return f;
+  if (f.several.length > 0) return { line: "several", fields: { field, name: f.name, several: f.several.map((x) => `${x.name} [${x.id}]`) } };
+  return { line: "unknown", fields: { field, name: f.name, wanted: want, near: f.near.map((x) => `${x.name} [${x.id}]`) } };
 }
 
 /** A value an answer's data carries as it was given, for a report's field. */

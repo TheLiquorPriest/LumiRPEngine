@@ -211,12 +211,20 @@ export function answerDraft(draft: Draft, done: Committed, reply: Reply, extra: 
     Object.assign(entry, extra.added?.get(rec.n) ?? {});
     if (rows.length > 0) entry.changes = rows.map((r) => r.id);
     operations.push(entry);
-    for (const r of rows) for (const rep of r.reports) reply.report("not_applied", { n: rec.n, op: rec.op, code: rep.code });
+    for (const r of rows) {
+      for (const rep of r.reports) {
+        // The store's own codes are said by their own lines (`store_<code>`), with their values; a
+        // code of today's engine's checks says why the change did not apply.
+        const line = `store_${rep.code}`;
+        if (reply.says(line)) reply.report(line, { n: rec.n, op: rec.op, ...(rep.values ?? {}) });
+        else if (!r.applied) reply.report("not_applied", { n: rec.n, op: rec.op, code: rep.code });
+      }
+    }
   }
   operations.sort((a, b) => Number(a.n) - Number(b.n));
   const now = touchedRefs(changed).flatMap((ref) => {
     const node = view.node(ref);
-    return node ? [{ ref: node.ref, name: node.name, what: node.what, ...(node.reflection !== "" ? { reflection: node.reflection } : {}), values: node.values.map((v) => ({ key: v.key, value: v.value, ...(v.from !== undefined ? { from: v.from } : {}) })) } as JsonObject] : [];
+    return node ? [{ ref: node.ref, name: node.name, what: node.what, reflection: node.reflection, values: node.values.map((v) => ({ key: v.key, value: v.value, ...(v.from !== undefined ? { from: v.from } : {}) })) } as unknown as JsonObject] : [];
   });
   reply.data({ operations, changed, now });
   reply.details = { ...reply.details, changes: done.rows.map((r) => r.id) };

@@ -1,5 +1,6 @@
 ---
 description: donate as the model is told it - what the tool does, and what each of its arguments is.
+family: money
 arguments:
   to: "The organization given to, or the person an exempt organization grants to."
   amount: "How much, in the world's main coin."

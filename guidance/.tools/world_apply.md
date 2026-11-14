@@ -1,5 +1,6 @@
 ---
 description: world_apply as the model is told it - what the tool does, and what each of its arguments is.
+family: state
 arguments:
   operations: The operations, applied in order. A later one may name what an earlier one made.
   operations.op: "The operation: move, place, give, wear, store, pay, pass_time, set, fact, quest, relate, spawn or horizon."
@@ -28,6 +29,7 @@ arguments:
   operations.about: "fact: who, what or which place the statement is about."
   operations.key: "set: the value's name (hp, mood, curfew; time on the world). fact: a key of your choosing; the same key replaces."
   operations.value: "set: the new value. fact: the statement in words."
+  operations.replaces: "fact: the id of a standing fact this one replaces, whatever its key."
   operations.add: "set: a number to add (negative to take away)."
   operations.quest: "quest: the quest, secret, puzzle or agenda."
   operations.stage: "quest: the stage it moves to."

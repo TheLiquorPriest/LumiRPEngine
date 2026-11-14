@@ -1,11 +1,13 @@
 // Time on an invented world: each tool is found by its own words, is called, applies and answers in
-// full; taking someone off a schedule they do not follow is applied as nothing and reported.
+// full (someone's day is read and changes nothing); taking someone off a schedule they do not follow
+// is applied as nothing and reported.
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "rp-harness/contract";
 import type { WorldDoc } from "../../../src/shared/world";
 import { TIME_TOOLS } from "../../../src/iface/families/time";
-import { appliedInFull, descriptions, eachFoundByItsWords, familyRig, opOf, searchByWords, SRC } from "./kit";
+import { dataOf } from "../rig";
+import { appliedInFull, descriptions, eachFoundByItsWords, familyRig, opOf, searchByWords, SRC, wordsFromFiles } from "./kit";
 
 const NAMES = TIME_TOOLS.map((t) => t.name);
 
@@ -16,12 +18,13 @@ function marketHours(w: WorldDoc): void {
 
 describe("time", () => {
   test("every tool is found by a search on its own words, and the weather and a routine by the word", async () => {
-    expect(NAMES).toEqual(["gm_routine_edit", "weather_set", "weather_clear"]);
+    expect(NAMES).toEqual(["gm_routine_edit", "weather_set", "weather_clear", "time_day"]);
     await eachFoundByItsWords(NAMES);
     const docs = await descriptions();
     expect(searchByWords("weather", docs)).toContain("weather_set");
     expect(searchByWords("routine", docs)).toContain("gm_routine_edit");
     expect(searchByWords("schedules", docs)).toContain("gm_routine_edit");
+    expect(searchByWords("day", docs)).toContain("time_day");
   });
 
   test("each tool is called, applies, and answers with what changed and how it stands", async () => {
@@ -43,6 +46,15 @@ describe("time", () => {
 
     appliedInFull(await t.call("weather_clear", { region: "region_vale", state: "clear", ...SRC }), "engine");
     expect(world().entities.region_vale?.fields.weather).toBe("clear");
+
+    const changes = t.s.changes(t.turn.id).length;
+    const read = await t.call("time_day", { person: "Bram", day: 1 });
+    expect(read.error).toBeUndefined();
+    const day = dataOf(read);
+    expect([day.person, day.day]).toEqual(["Bram [bram]", "Sun 2 Mar 2031"]);
+    expect((day.blocks as JsonObject[]).some((b) => b.label === "Sleep" && (b.origin as JsonObject).type === "routine")).toBe(true);
+    expect(t.s.changes(t.turn.id).length).toBe(changes);
+    wordsFromFiles(read);
   });
 
   test("taking someone off a schedule they do not follow is applied as nothing and reported", async () => {

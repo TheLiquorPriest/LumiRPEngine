@@ -8,6 +8,7 @@ import type { AgentRef, ApprovalsPort, HostTool, JsonObject, JsonSchema, JsonVal
 import type { UserStore } from "../store/store";
 import type { FoldEnv } from "../store/fold";
 import type { ChangeInput, Lane, StoreState } from "../store/types";
+import type { Part } from "../store/words";
 import type { Fields, GuidanceFiles, Lines, ToolText } from "./texts";
 
 /** Every fixed value of the engine's tools, each a setting with this default. */
@@ -67,7 +68,7 @@ export interface StateSearch {
 export const SEARCH_KINDS = ["person", "thing", "place", "group"] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
 
-/** A statement about a thing for the fact store (plan §6.6): the state lane's. */
+/** A statement about a thing, as the `fact` operation gives it to the fact store (plan §6.6). */
 export interface FactWrite {
   /** The tree ref of what it is about. */
   about: string;
@@ -75,13 +76,15 @@ export interface FactWrite {
   key: string;
   /** The value in words. */
   value: string;
+  /** The id of a standing fact this one replaces, whatever its key. */
+  replaces?: string;
 }
 
-/** The fact store (plan §6.6, the state lane's): what records a fact, and what a thing's facts are now. */
+/** The fact store as the engine's tools hold it (the store's `factStore`): what records a fact, and what a thing's facts are now. */
 export interface FactStore {
   /** The change that records `fact` (the store operation and its value). */
   change(fact: FactWrite): Pick<ChangeInput, "op" | "value">;
-  /** The facts recorded on `about` in this state, as data. */
+  /** The facts standing on `about` in this state, as data. */
   of(state: StoreState, about: string): JsonValue[];
 }
 
@@ -111,8 +114,6 @@ export interface EngineDeps {
   approvals?: ApprovalsPort;
   /** What time brings due; absent, an answer that lets time pass says that it is not listed. */
   due?: DueList;
-  /** The fact store; absent, a `fact` operation is answered that there is none. */
-  facts?: FactStore;
   /** Squares on a map; absent, an operation that names a square is answered that there are none. */
   grid?: GridMoves;
   /** A place's map as text; absent, `world_query` answers that it has none to show. */
@@ -149,11 +150,17 @@ export class Reply {
     return this;
   }
 
-  /** The store's tree as it prints it. */
+  /** The store's tree as the tree's part words it; nothing when it words to nothing. */
   tree(text: string): this {
+    if (text.trim() === "") return this;
     this.parts.push({ type: "text", text });
     this.kinds.push("tree");
     return this;
+  }
+
+  /** Whether the answers' file has a line called `name`. */
+  says(name: string): boolean {
+    return this.lines.has(name);
   }
 
   /** A line of the answers' file, filled; nothing when the file has no such line. */
@@ -208,7 +215,15 @@ export interface Call {
   deps: EngineDeps;
   settings: IfaceSettings;
   lines: Lines;
+  /** The words of the world's tree (the world state's part), for an answer that shows part of the tree. */
+  tree: Part;
   reply(): Reply;
+}
+
+/** The words every answer is given in, read once for the list of tools: the answers' lines and the tree's part. */
+export interface Words {
+  lines: Lines;
+  tree: Part;
 }
 
 /** A tool as code holds it: everything but its words. */
@@ -252,7 +267,7 @@ export function described(properties: Readonly<Record<string, JsonObject>>, requ
 }
 
 /** A tool as RPH holds it: its spec with its file's words, run with the call's context. */
-export function hostTool(spec: ToolSpec, text: ToolText, lines: Lines, deps: EngineDeps): HostTool {
+export function hostTool(spec: ToolSpec, text: ToolText, words: Words, deps: EngineDeps): HostTool {
   const settings: IfaceSettings = { ...IFACE_DEFAULTS, ...(deps.settings ?? {}) };
   return {
     name: spec.name,
@@ -263,7 +278,7 @@ export function hostTool(spec: ToolSpec, text: ToolText, lines: Lines, deps: Eng
     parameters: described(spec.properties, spec.required, text),
     async run(args: JsonValue, ctx: ToolCtx): Promise<ToolResult> {
       const given = typeof args === "object" && args !== null && !Array.isArray(args) ? args : {};
-      const call: Call = { scope: ctx.scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines, reply: () => new Reply(lines) };
+      const call: Call = { scope: ctx.scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines: words.lines, tree: words.tree, reply: () => new Reply(words.lines) };
       return (await spec.run(given, call)).result();
     },
   };

@@ -1,5 +1,6 @@
 ---
 description: gm_unlink as the model is told it - what the tool does, and what each of its arguments is.
+family: people
 arguments:
   relation: "The relation, as the world names its relation types."
   from: "Whose relation."

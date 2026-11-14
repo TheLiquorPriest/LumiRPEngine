@@ -1,6 +1,7 @@
 // Money on an invented world: each tool is found by its own words, is called, applies and answers in
-// full (a price is read and changes nothing); a correction that takes an account below nothing is
-// applied and reported.
+// full (a price is read and changes nothing); a correction that takes an account below nothing, an
+// account closed with money on it, credit the lending rules turn down, and a grant past what the
+// giver holds are applied and reported.
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "rp-harness/contract";
@@ -61,5 +62,40 @@ describe("money", () => {
     appliedInFull(r, "engine");
     expect((r.reports ?? []).some((x) => x.includes("could pay at most"))).toBe(true);
     expect(t.s.stateAt(t.turn.id).state.world.accounts.acct_wren ?? 0).toBeLessThan(0);
+  });
+
+  test("an account with money on it is closed all the same, and reported", async () => {
+    const t = await familyRig(BANKED);
+    const r = await t.call("close_account", { account: "acct_wren", ...SRC });
+    appliedInFull(r, "engine", false);
+    expect(opOf(r).status).toBe("closed");
+    expect(r.reports ?? []).toEqual([expect.stringContaining("Wren's coin [acct_wren] was closed with")]);
+  });
+
+  test("a payment once the payer's account is closed is posted from their outside money, and reported", async () => {
+    const t = await familyRig(BANKED);
+    await t.call("close_account", { account: "acct_wren", ...SRC });
+    const r = await t.call("world_apply", { operations: [{ op: "pay", who: "wren", to: "bram", amount: 3, for: "a pie", ...SRC }] });
+    expect(r.error).toBeUndefined();
+    expect(opOf(r).applied).toBe(true);
+    expect((r.reports ?? []).some((x) => x.includes("Wren [wren] paid") && x.includes("recorded all the same"))).toBe(true);
+    wordsFromFiles(r);
+  });
+
+  test("credit the lending rules turn down is opened all the same, and reported", async () => {
+    const t = await familyRig(BANKED);
+    const r = await t.call("apply_credit", { who: "wren", product: "loan", amount: 10_000_000, term: 12, ...SRC });
+    const data = appliedInFull(r, "engine");
+    expect(r.reports ?? []).toEqual([expect.stringContaining("applied although the world's rules would refuse it (declined)")]);
+    expect((data.changed as JsonObject[]).some((c) => c.new === true && (c.now as JsonObject).product === "loan")).toBe(true);
+  });
+
+  test("a group's grant to a person past what it holds is posted all the same, and reported", async () => {
+    const t = await familyRig(BANKED);
+    appliedInFull(await t.call("tax_status", { org: "lamplighters", status: "charity", ...SRC }), "engine");
+    appliedInFull(await t.call("open_account", { who: "lamplighters", product: "checking", name: "Lamplighters' fund", ...SRC }), "engine");
+    const r = await t.call("donate", { to: "wren", amount: 500, from: "lamplighters", ...SRC });
+    appliedInFull(r, "engine");
+    expect((r.reports ?? []).some((x) => x.includes("The Lamplighters [lamplighters] paid") && x.includes("recorded all the same"))).toBe(true);
   });
 });

@@ -3,19 +3,21 @@
 // kept, its names, two records merged, a thing lost or removed) and a person's saved outfits and
 // loadouts. Each keeps today's tool name and runs today's things model (`engine/thing-ops`, the gear
 // pack's sets). Where today's rules would refuse a change for what it means (a grant that ends in
-// the past, a thing merged into what it holds, specs on what is not a vehicle, a set with no piece
-// to hand), it is applied all the same and the answer reports it.
+// the past, a thing merged into what it holds, specs on what is not a vehicle, a set piece not to
+// hand, more used than there is), it is applied all the same and the answer reports it.
 
 import type { EntityId } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
 import { GRANT_BASES, type ItemOp, nameKey, PERMIT_SCOPES, type Rest, SET_KINDS, type SetKind, type SetPiece, setsOf, SIZES, type Size } from "../../shared/things";
 import { vehicleSpecsOf } from "../../shared/vehicles";
 import { isGone, kindDef } from "../../engine/scope";
-import { applyItemOp, locate } from "../../engine/thing-ops";
+import { applyItemOp } from "../../engine/thing-ops";
 import { slotOf, spotOf } from "../../engine/things";
 import { own } from "../../engine/pack-kit";
+import { pieceProblem } from "../../packs/gear/core/sets";
 import { oneOf, TEXT, TEXTS, WHOLE, YES_NO } from "../kit";
 import { find, isUnread, itemOptions, named, notOneOf, type OpContext, textArg, type Unread } from "../ops";
+import { BENT_RULES, putThing } from "../ops-things";
 import { timeArg } from "../ops-time";
 import { editChange, isAlready, itemChange, notApplicable, optionalId, shownValue, type WriteDef, writeTool } from "./run";
 
@@ -83,15 +85,18 @@ const use: WriteDef = {
     if (isUnread(item)) return item;
     const qty = o.args.qty;
     if (qty !== undefined && qty !== null && !(typeof qty === "number" && Number.isInteger(qty) && qty >= 1)) return notOneOf(o, "qty", qty, ["a whole number of at least 1"]);
-    return itemChange(o, { do: "use", item: item.id, ...(typeof qty === "number" ? { qty } : {}) }, "engine", item.id);
+    const stored = own(o.draft.w.state.entities, item.id)?.fields.qty;
+    const held = typeof stored === "number" ? stored : 1;
+    const used = typeof qty === "number" ? qty : 1;
+    const failed = itemChange(o, { do: "use", item: item.id, ...(typeof qty === "number" ? { qty } : {}) }, "engine", item.id);
+    // More used than there was: today's use takes the last of it out of the world, and says nothing.
+    if (failed === undefined && used > held) o.reply.report("used_past_held", { n: o.n, op: o.op, what: named(o.reading, item.id), qty: used, held });
+    return failed;
   },
 };
 
 /** The words that make a thing no one's (today's `item_own`). */
 const NOBODY: Readonly<Record<string, true>> = { nobody: true, "no one": true, none: true, null: true };
-
-/** Today's refusals of `wear` for a thing with no place on the body: it is carried instead, as the `wear` operation does. */
-const UNWORN: Readonly<Record<string, true>> = { no_slot: true, too_big: true, bad_slot: true, cant_hold: true };
 
 const ownership: WriteDef = {
   name: "item_own",
@@ -278,14 +283,14 @@ const merge: WriteDef = {
     if (isUnread(drop)) return drop;
     const op: ItemOp = { do: "merge", keep: keep.id, drop: drop.id };
     return itemChange(o, op, "engine", keep.id, {
-      // The one kept is inside the one dropped: it comes out to where that one is, and they merge.
+      // The one kept is inside the one dropped: it comes out to where that one is, as a thing is put anywhere, and they merge.
       bend: (code) => {
         if (code !== "cycle") return null;
         const w = o.draft.w;
         const spot = spotOf(w.state, drop.id);
         if (spot === null) return null;
-        const bad = o.draft.applyAll(locate(w.ctx, keep.id, spot));
-        if (bad) return notApplicable(o, bad.code);
+        const failed = putThing(o, keep.id, spot, "");
+        if (failed) return failed;
         const out = applyItemOp(w, op, itemOptions(o));
         if ("code" in out) return notApplicable(o, out.code);
         o.reply.report("rule_bent", { n: o.n, op: o.op, what: named(o.reading, keep.id), where: named(o.reading, "place" in spot ? spot.place : spot.in), code });
@@ -354,6 +359,23 @@ const setSave: WriteDef = {
   },
 };
 
+/**
+ * A piece of a set not to hand put on them all the same, brought from wherever it is, as `wear`
+ * brings it; one with no place on the body (or a slot the world no longer has) is carried, as the
+ * `wear` operation carries it.
+ */
+function putOn(o: OpContext, piece: SetPiece, who: EntityId): Unread | undefined {
+  const w = o.draft.w;
+  const slot = piece.slot ?? slotOf(w.ctx, own(w.state.entities, piece.item)?.fields ?? {});
+  const out = applyItemOp(w, { do: "wear", item: piece.item, who, ...(slot !== null ? { slot } : {}) }, itemOptions(o));
+  if (!("code" in out) || isAlready(out.code)) return undefined;
+  if (!BENT_RULES[out.code] && out.code !== "bad_slot") return notApplicable(o, out.code);
+  const failed = putThing(o, piece.item, { in: who }, "");
+  if (failed) return failed;
+  o.reply.report("not_wearable", { n: o.n, op: o.op, what: named(o.reading, piece.item), who: named(o.reading, who), code: out.code });
+  return undefined;
+}
+
 const setApply: WriteDef = {
   name: "set_apply",
   family: FAMILY,
@@ -366,27 +388,29 @@ const setApply: WriteDef = {
     if (isUnread(who)) return who;
     const set = setOf(o, who.id);
     if (isUnread(set)) return set;
-    return itemChange(o, { do: "set_apply", who: who.id, set }, "engine", who.id, {
-      // None of it to hand: each piece that is still in the world is put on them all the same,
-      // brought from wherever it is; one with no place to be worn is carried, as `wear` does.
-      bend: (code) => {
-        if (code !== "none_to_hand") return null;
-        const w = o.draft.w;
-        const pieces = (setsOf(own(w.state.entities, who.id)?.fields)[set]?.pieces ?? []).filter((p) => own(w.state.entities, p.item) !== undefined && !isGone(w.state, p.item));
-        if (pieces.length === 0) return null;
-        for (const piece of pieces) {
-          const slot = piece.slot ?? slotOf(w.ctx, own(w.state.entities, piece.item)?.fields ?? {});
-          const out = applyItemOp(w, { do: "wear", item: piece.item, who: who.id, ...(slot !== null ? { slot } : {}) }, itemOptions(o));
-          if (!("code" in out)) o.reply.report("rule_bent", { n: o.n, op: o.op, what: named(o.reading, piece.item), where: named(o.reading, who.id), code });
-          else if (UNWORN[out.code]) {
-            const bad = o.draft.applyAll(locate(w.ctx, piece.item, { in: who.id }));
-            if (bad) return notApplicable(o, bad.code);
-            o.reply.report("not_wearable", { n: o.n, op: o.op, what: named(o.reading, piece.item), who: named(o.reading, who.id), code: out.code });
-          } else if (!isAlready(out.code)) return notApplicable(o, out.code);
-        }
-        return undefined;
-      },
-    });
+    const w = o.draft.w;
+    const from = w.events.length;
+    // Today's change of clothes leaves out each piece not to hand, by today's own test of it, and
+    // only writes it in a note: each is put on them first, and reported; one gone or lost cannot
+    // be, and that is reported too.
+    for (const piece of setsOf(own(w.state.entities, who.id)?.fields)[set]?.pieces ?? []) {
+      if (pieceProblem(w.ctx, who.id, piece.item) === null) continue;
+      const thing = own(w.state.entities, piece.item);
+      const there = thing !== undefined && !isGone(w.state, piece.item) && thing.fields.lost !== true;
+      if (there) {
+        const failed = putOn(o, piece, who.id);
+        if (failed) return failed;
+      }
+      o.reply.report("not_to_hand", { n: o.n, op: o.op, what: named(o.reading, piece.item), who: named(o.reading, who.id), brought: there });
+    }
+    const out = applyItemOp(w, { do: "set_apply", who: who.id, set }, itemOptions(o));
+    // None of it to hand now: every piece is gone or lost, each reported, and nothing else changes.
+    if ("code" in out && out.code !== "none_to_hand") {
+      if (!isAlready(out.code)) return notApplicable(o, out.code);
+      o.reply.report("already_so", { n: o.n, op: o.op, what: named(o.reading, who.id) });
+    }
+    o.draft.record(o.n, o.op, "engine", o.prov, from);
+    return undefined;
   },
 };
 

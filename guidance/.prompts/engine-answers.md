@@ -25,18 +25,21 @@ not_applied: Operation {{n}} ({{op}}) was recorded and did not apply ({{code}}).
 already_so: Operation {{n}} ({{op}}): {{what}} was already so; nothing changed.
 placed_instead: Operation {{n}} ({{op}}): {{what}} was put at {{where}}, not {{asked}}, by the size of things.
 rule_bent: Operation {{n}} ({{op}}): {{what}} was put with {{where}} although the world's rules for things say otherwise ({{code}}).
+against_rules: Operation {{n}} ({{op}}): {{#what}}{{what}}: {{/what}}applied although the world's rules would refuse it ({{code}}).
 past_until: Operation {{n}} ({{op}}): {{until}} is not after now, so the loan was recorded with no end.
 not_holding: Operation {{n}} ({{op}}): {{from}} did not hold {{what}}{{#holder}}; {{holder}} did{{/holder}}. It was given all the same.
 not_owner: Operation {{n}} ({{op}}): {{to}} is not among the owners of {{what}}, so it was handed over to hold and whose it is did not change.
 not_wearable: Operation {{n}} ({{op}}): {{what}} has no place to be worn ({{code}}), so {{who}} carries it.
+not_to_hand: Operation {{n}} ({{op}}): {{what}} was not to hand{{#brought}}, and was put on {{who}} all the same{{/brought}}{{^brought}} and is gone or lost, so {{who}} went without it{{/brought}}.
+used_past_held: Operation {{n}} ({{op}}): {{qty}} of {{what}} were used and there were only {{held}}; all of it is used up.
 kept_nowhere: Operation {{n}} ({{op}}): nothing says where {{what}} is kept, or it is there already; nothing moved.
 exists: Operation {{n}} ({{op}}): {{name}} is there already and stands for it; no second one was made.
 paid_past_held: Operation {{n}} ({{op}}): {{payer}} paid {{amount}} and could pay at most {{held}} from any one way; the payment is recorded all the same.
 money_untracked: Operation {{n}} ({{op}}): this world keeps no money for {{payer}}, so no money moved.
+closed_with_money: Operation {{n}} ({{op}}): {{what}} was closed with {{amount}} still on it.
 derived: Operation {{n}} ({{op}}): {{key}} is worked out from other values and is not set itself.
 follows_xp: Operation {{n}} ({{op}}): {{key}} follows {{xp}}; set {{xp}} instead.
 off_the_sheet: Operation {{n}} ({{op}}): {{key}} of {{name}} is now {{value}}, outside what its sheet allows ({{type}}{{#min}}, at least {{min}}{{/min}}{{#max}}, at most {{max}}{{/max}}{{#choices}}, one of {{choices}}{{/choices}}).
-no_fact_store: Operation {{n}} ({{op}}): this host keeps no statements about things yet, so nothing was recorded.
 no_grid: Operation {{n}} ({{op}}): this host keeps no squares on maps yet, so a square, a neighbour or a zone cannot be given.
 off_path: Operation {{n}} ({{op}}): {{quest}} went from {{from}} to {{to}}, which is not one of the ways on from {{from}}.
 time_back: Operation {{n}} ({{op}}): the clock was set back from {{from}} to {{to}}.
@@ -44,10 +47,10 @@ before_start: Operation {{n}} ({{op}}): the story starts at {{start}}, so the cl
 due_unlisted: {{#n}}Operation {{n}} ({{op}}): {{/n}}what this span of time brings due is not listed by this host.
 no_map: {{at}} has no map to show.
 none_found: Nothing found for {{words}}.
-failed: {{#n}}Operation {{n}} ({{op}}): {{/n}}its handler failed ({{error}}), so it did not apply.
-unknown_revision: {{#n}}Operation {{n}} ({{op}}): {{/n}}the world revision {{revision}} is not to hand, so it did not apply.
-bad_marker: {{#n}}Operation {{n}} ({{op}}): {{/n}}this is not a marker the engine can read, so it did not apply.
-no_handler: {{#n}}Operation {{n}} ({{op}}): {{/n}}nothing in the engine applies {{op}}.
-tied: {{#n}}Operation {{n}} ({{op}}): {{/n}}it was tied to an operation that did not apply, so it did not apply either.
-marker_note: {{#n}}Operation {{n}} ({{op}}): {{/n}}{{note}}
-replaces_none: {{#n}}Operation {{n}} ({{op}}): {{/n}}no standing fact {{id}} was found to replace, so the fact was recorded beside the others.
+store_failed: {{#n}}Operation {{n}} ({{op}}): {{/n}}its handler failed ({{error}}), so it did not apply.
+store_unknown_revision: {{#n}}Operation {{n}} ({{op}}): {{/n}}the world revision {{revision}} is not to hand, so it did not apply.
+store_bad_marker: {{#n}}Operation {{n}} ({{op}}): {{/n}}this is not a marker the engine can read, so it did not apply.
+store_no_handler: {{#n}}Operation {{n}}: {{/n}}nothing in the engine applies {{op}}, so it did not apply.
+store_tied: {{#n}}Operation {{n}} ({{op}}): {{/n}}it was tied to an operation that did not apply, so it did not apply either.
+store_marker_note: {{#n}}Operation {{n}} ({{op}}): {{/n}}{{note}}
+store_replaces_none: {{#n}}Operation {{n}} ({{op}}): {{/n}}no standing fact {{id}} was found to replace, so the fact was recorded beside the others.

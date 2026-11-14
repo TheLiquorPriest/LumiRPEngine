@@ -18,41 +18,54 @@ import { baseWorld } from "../engine/places-in-play";
 import { createRng } from "../engine/rng";
 import { fieldDef, GONE_FIELD } from "../engine/scope";
 import { chatDraftOf, draftEvent } from "../engine/world-draft";
-import { accountsOf, external, hasLedger } from "../packs/economy/core/model";
+import { accountsOf, external, hasLedger, statusOf } from "../packs/economy/core/model";
 import { asUnit, cashAccount, mostPayable, NO_WAY_TO_PAY, payeeSide, posting } from "../packs/economy/core/pay";
 import { axesOf } from "../packs/relationships/core/index";
+import { FACT_ABOUT, factStore } from "../store/facts";
 import { STORE_OPS } from "../store/types";
-import { find, findOptional, isUnread, named, notOneOf, numberArg, type OpContext, type OpDef, textArg, type Unread } from "./ops";
+import type { FactStore } from "./kit";
+import { find, findOptional, isUnread, minorUnits, named, notOneOf, numberArg, type OpContext, type OpDef, textArg, type Unread } from "./ops";
 import { moveTo } from "./ops-things";
 import { setClock, timeArg } from "./ops-time";
 
-/** An amount in the world's main coin (12.5 is twelve and a half) in its smallest unit, as the economy counts money. */
-function minorUnits(o: OpContext, amount: number): number {
-  return Math.round(amount * 10 ** o.reading.doc.currency.decimals);
-}
+/** The fact store every `fact` is recorded through: the store's own. */
+const FACTS: FactStore = factStore;
 
 /** Whose money a payment moves: the payer's and the payee's, sampled first where the world has not yet, as today's purchases do. */
 function materializeMoney(o: OpContext, ids: readonly string[]): void {
   for (const id of ids) materializeIfNeeded(o.reading.registry, o.draft.w, id, "money", o.draft.seed(o.n));
 }
 
+/** A payment past what the payer's money covers: who pays whom (no payee: no one in the world), how much, and how today's journal files it. */
+export interface PastCover {
+  payer: string;
+  payee?: string;
+  cents: number;
+  memo: string;
+  kind: "payment" | "purchase";
+  category?: string;
+  /** Records made with the payment, in its unit (a donation's). */
+  with?: readonly LedgerEvent[];
+}
+
 /**
- * The payment made from the payer's own money whatever it holds, when the economy's own way found
- * nothing that covers it (`NO_WAY_TO_PAY`): out of their cash, else the first account they spend
- * from, else their outside account, into the payee's side, as one unit with its journal lines.
+ * A payment made from the payer's own money whatever it holds, where today's economy found nothing
+ * that covers it (`NO_WAY_TO_PAY`) or declined it: out of their cash, else the first account they
+ * spend from, of those still open (today's guard declines a posting from one that is not, past
+ * cover or not), else their outside account; into the payee's side; as one unit with its journal
+ * lines and what is made with it.
  */
-function payAnyway(o: OpContext, payer: string, payee: string | undefined, cents: number, memo: string, kind: "payment" | "purchase"): Unread | undefined {
+export function payPastCover(o: OpContext, p: PastCover): Unread | undefined {
   const ctx = o.draft.w.ctx;
-  const source = cashAccount(ctx, payer) ?? accountsOf(ctx, payer, "spend")[0] ?? external(payer);
-  const dest = payee !== undefined ? payeeSide(ctx, { payee }, cents) : { account: `${EXTERNAL_ACCOUNT_PREFIX}world`, extra: [] };
+  const open = [cashAccount(ctx, p.payer), ...accountsOf(ctx, p.payer, "spend")].find((a): a is string => a !== null && statusOf(ctx.state, a) === "open");
+  const dest = p.payee !== undefined ? payeeSide(ctx, { payee: p.payee }, p.cents) : { account: `${EXTERNAL_ACCOUNT_PREFIX}world`, extra: [] };
   const lines = [
-    { account: source, amount: -cents },
-    { account: dest.account, amount: cents },
+    { account: open ?? external(p.payer), amount: -p.cents },
+    { account: dest.account, amount: p.cents },
   ];
   // Marked as today's story payments past cover are (`overdraw`): it stands past what the accounts cover, on any path.
-  const paid = posting(lines, { memo, kind, payer, ...(payee !== undefined ? { counterparty: payee } : {}), story: true }).map((e): LedgerEvent => (e.type === "post" ? { ...e, overdraw: true } : e));
-  const events = asUnit([...paid, ...dest.extra]);
-  const bad = o.draft.applyAll(events);
+  const paid = posting(lines, { memo: p.memo, kind: p.kind, payer: p.payer, ...(p.payee !== undefined ? { counterparty: p.payee } : {}), ...(p.category !== undefined ? { category: p.category } : {}), story: true }).map((e): LedgerEvent => (e.type === "post" ? { ...e, overdraw: true } : e));
+  const bad = o.draft.applyAll(asUnit([...paid, ...dest.extra, ...(p.with ?? [])]));
   return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
 }
 
@@ -69,7 +82,7 @@ const pay: OpDef = {
     if (isUnread(payee)) return payee;
     const amount = numberArg(o.args, "amount");
     if (amount === undefined || !(amount > 0)) return notOneOf(o, "amount", o.args.amount ?? null, ["a number above 0, in the world's main coin"]);
-    const cents = minorUnits(o, amount);
+    const cents = minorUnits(o.reading, amount);
     const goods = textArg(o.args, "goods");
     const memo = textArg(o.args, "for") ?? textArg(o.args, "reason") ?? textArg(o.args, "goods") ?? "Payment";
     const method = textArg(o.args, "method");
@@ -92,11 +105,11 @@ const pay: OpDef = {
     let short = false;
     if (refused !== undefined) {
       if (refused.code !== NO_WAY_TO_PAY && refused.code !== "declined") return { line: "not_applicable", fields: { n: o.n, op: o.op, code: refused.code } };
-      const failed = payAnyway(o, payer.id, payee?.id, cents, memo, "payment");
+      const failed = payPastCover(o, { payer: payer.id, ...(payee ? { payee: payee.id } : {}), cents, memo, kind: "payment" });
       if (failed) return failed;
       short = true;
     } else if (unpaid !== undefined) {
-      const failed = payAnyway(o, payer.id, payee?.id, cents, memo, "purchase");
+      const failed = payPastCover(o, { payer: payer.id, ...(payee ? { payee: payee.id } : {}), cents, memo, kind: "purchase" });
       if (failed) return failed;
       short = true;
     }
@@ -131,7 +144,7 @@ function setField(o: OpContext, entity: string, key: string, value: JsonValue | 
   if (key === "cash" && typeof value === "number") {
     // Cash is corrected by a balanced posting against the outside correction account, as the GM's edit corrects it.
     materializeMoney(o, [entity]);
-    const corrected = optionalService(w.ctx, "economy.set_cash")?.(w.ctx, entity, minorUnits(o, value)) ?? null;
+    const corrected = optionalService(w.ctx, "economy.set_cash")?.(w.ctx, entity, minorUnits(o.reading, value)) ?? null;
     if (corrected !== null) {
       const bad = Array.isArray(corrected) ? o.draft.applyAll(corrected) : corrected;
       return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
@@ -209,18 +222,18 @@ const fact: OpDef = {
   name: "fact",
   lane: "engine",
   needs: ["about", "key", "value"],
-  takes: ["about", "key", "value"],
+  takes: ["about", "key", "value", "replaces"],
   example: { op: "fact", about: "wren", key: "coin", value: "spent most of what she had", precision: "vague", source: { from: "prose", message: "m-0019" } },
   run(o) {
     const about = find(o, "about", "point");
     if (isUnread(about)) return about;
+    if (!FACT_ABOUT.test(about.ref)) return notOneOf(o, "about", o.args.about ?? null, ["world", "a place", "someone or something"]);
     const key = textArg(o.args, "key");
     const value = textArg(o.args, "value");
     if (key === undefined || value === undefined) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["key", "value"] } };
-    const store = o.call.deps.facts;
-    if (store === undefined) return { line: "no_fact_store", fields: { n: o.n, op: o.op } };
-    o.draft.recordStoreOp(o.n, o.op, "engine", o.prov, store.change({ about: about.ref, key, value }));
-    o.after((state) => ({ facts: store.of(state, about.ref) }));
+    const replaces = textArg(o.args, "replaces");
+    o.draft.recordStoreOp(o.n, o.op, "engine", o.prov, FACTS.change({ about: about.ref, key, value, ...(replaces !== undefined ? { replaces } : {}) }));
+    o.after((state) => ({ facts: FACTS.of(state, about.ref) }));
     return undefined;
   },
 };

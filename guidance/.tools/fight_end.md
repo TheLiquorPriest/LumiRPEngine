@@ -1,5 +1,6 @@
 ---
 description: fight_end as the model is told it - what the tool does, and what each of its arguments is.
+family: fights
 arguments:
   winner: "party or foes: the side that won."
   break_off: "true when the fight is broken off rather than won."

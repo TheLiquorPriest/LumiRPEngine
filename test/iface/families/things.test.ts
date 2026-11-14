@@ -1,5 +1,6 @@
 // Things and gear on an invented world: each tool is found by its own words, is called, applies and
-// answers in full; a grant that ends in the past is applied with no end and reported.
+// answers in full; a grant that ends in the past, more used than there is, and a set piece not to
+// hand are applied and reported.
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject, ToolResult } from "rp-harness/contract";
@@ -79,6 +80,29 @@ describe("things and gear", () => {
     const uses = t.s.stateAt(t.turn.id).state.world.entities.odile?.relations.find((x) => x.type === "uses" && x.to === "knife");
     expect(uses).toBeDefined();
     expect(uses?.until).toBeUndefined();
+  });
+
+  test("more used than there is uses it up, and is reported", async () => {
+    const t = await familyRig();
+    const r = await t.call("item_use", { item: "bell", qty: 3, ...SRC });
+    appliedInFull(r, "engine");
+    expect(r.reports ?? []).toEqual([expect.stringContaining("3 of Market bell [bell] were used and there were only 1")]);
+    expect(t.s.stateAt(t.turn.id).state.world.entities.bell?.fields.gone).toBe(true);
+  });
+
+  test("a set piece not to hand is put on all the same, and reported", async () => {
+    const t = await familyRig((w) => {
+      w.realism.levels.gear = 3;
+      w.entities.cloak = { ...w.entities.cloak, fields: { ...w.entities.cloak?.fields, slot: "torso_outer" } } as WorldDoc["entities"][string];
+      w.entities.hat = { id: "hat", kind: "item", name: "Straw hat", tier: "background", fields: { slot: "head", place: "market_square" }, relations: [] } as WorldDoc["entities"][string];
+    });
+    appliedInFull(await t.call("set_save", { who: "wren", name: "Travelling", kind: "outfit", pieces: ["cloak", "hat"], ...SRC }), "engine");
+    const r = await t.call("set_apply", { who: "wren", set: "Travelling", ...SRC });
+    appliedInFull(r, "engine");
+    expect(r.reports ?? []).toEqual([expect.stringContaining("Straw hat [hat] was not to hand, and was put on Wren [wren] all the same")]);
+    const world = t.s.stateAt(t.turn.id).state.world;
+    expect(world.entities.hat?.relations.some((x) => x.type === "worn_by" && x.to === "wren")).toBe(true);
+    expect(world.entities.cloak?.relations.some((x) => x.type === "worn_by" && x.to === "wren")).toBe(true);
   });
 
   test("a name that is not there is refused with the near matches, and nothing is recorded", async () => {

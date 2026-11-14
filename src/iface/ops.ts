@@ -90,6 +90,11 @@ export function itemOptions(o: OpContext): ItemOpOptions {
   return { by: o.call.agent.definition, confirmed: true, gm: true, salt: o.draft.seed(o.n) };
 }
 
+/** An amount in the world's main coin (12.5 is twelve and a half) in its smallest unit, as the economy counts money. */
+export function minorUnits(reading: Reading, amount: number): number {
+  return Math.round(amount * 10 ** reading.doc.currency.decimals);
+}
+
 /** A name for an answer's fields: the thing's name with its id. */
 export function named(reading: Reading, id: string): string {
   return `${reading.nameOf(id)} [${id}]`;

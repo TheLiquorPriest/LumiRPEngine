@@ -1,5 +1,6 @@
 ---
 description: item_home as the model is told it - what the tool does, and what each of its arguments is.
+family: things
 arguments:
   item: "The thing."
   in: "The container it is kept in: a wardrobe, a drawer, a gun safe, a bag."

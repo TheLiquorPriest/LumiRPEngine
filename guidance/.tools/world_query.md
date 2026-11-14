@@ -1,5 +1,6 @@
 ---
 description: world_query as the model is told it - what the tool does, and what each of its arguments is.
+family: state
 arguments:
   at: "The point of the tree: a place, someone or something (by name or id), world, groups or elsewhere; or ruleset for the world's ruleset and its bestiary."
   depth: "How many levels below the point to show, or full for everything beneath it."

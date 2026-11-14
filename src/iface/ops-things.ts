@@ -9,7 +9,7 @@ import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { ownersIn } from "../shared/finance";
 import type { EntityId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
-import { HANDOVER_BASES, type HandoverBasis, type ItemOp, type Spot } from "../shared/things";
+import type { HandoverBasis, ItemOp, Spot } from "../shared/things";
 import { applyEffects } from "../engine/effects";
 import { own } from "../engine/pack-kit";
 import { relocate } from "../engine/relocate";
@@ -25,8 +25,8 @@ import { timeArg } from "./ops-time";
 /** How a thing passed from one person to another, as the skill says it, to today's handover bases. */
 export const HOW_GIVEN: Readonly<Record<string, HandoverBasis>> = { handed: "hold", lent: "loan", returned: "return", given: "gift", sold: "sale", traded: "trade", stolen: "theft" };
 
-/** The refusals of today's things model that are about what a change means, never about whether it can be read: applied all the same, and reported. */
-const BENT_RULES: Readonly<Record<string, true>> = { part: true, builtin: true, cant_hold: true, too_big: true, too_deep: true, no_room: true, cycle: true, not_owner: true, no_slot: true };
+/** The refusals of today's things model that are about what a change means (its size rules, a part or a built-in, a cycle, an owner), never about whether it can be read: applied all the same, and reported. */
+export const BENT_RULES: Readonly<Record<string, true>> = { part: true, builtin: true, cant_hold: true, too_big: true, too_deep: true, no_room: true, cycle: true, not_owner: true, no_slot: true };
 
 /** Where a spot is, for an answer: a place's or a holder's name with its id. */
 function spotName(o: OpContext, spot: Spot): string {
@@ -39,7 +39,7 @@ function spotName(o: OpContext, spot: Spot): string {
  * all the same and the answer reports which rule it bent. A thing already there changes nothing,
  * and that is reported too.
  */
-function putThing(o: OpContext, thing: EntityId, to: Spot, why: string): Unread | undefined {
+export function putThing(o: OpContext, thing: EntityId, to: Spot, why: string): Unread | undefined {
   const w = o.draft.w;
   const out = applyItemOp(w, { do: "move", item: thing, to, why }, itemOptions(o));
   if (!("code" in out)) {

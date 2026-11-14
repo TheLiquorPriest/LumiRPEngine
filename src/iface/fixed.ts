@@ -11,6 +11,7 @@ import { checkOf, readyCheck, rollCheck } from "../engine/checks";
 import { DiceError, rollDice } from "../engine/dice";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { createRng } from "../engine/rng";
+import { renderView } from "../store/words";
 import { rulesetData } from "./bestiary";
 import { type Call, oneOf, type Reply, SEARCH_KINDS, type SearchKind, TEXT, type ToolSpec, WHOLE, YES_NO } from "./kit";
 import { clockText, TIME_FORMS, timeFrom } from "./ops-time";
@@ -57,7 +58,8 @@ export const WORLD_QUERY: ToolSpec = {
     const at = foundOr(reading, reply, "at", args.at, "point");
     if (at === null) return reply;
     const depth = args.depth === "full" ? "full" : typeof args.depth === "number" && Number.isInteger(args.depth) && args.depth >= 0 ? args.depth : call.settings.queryDepth;
-    reply.tree(reading.view().query(at.ref, depth));
+    const view = reading.view().query(at.ref, depth);
+    if (view !== null) reply.tree(renderView(view, call.tree));
     if (typeof args.due === "string") {
       const to = timeFrom(reading, reading.state.world, args.due);
       if (to === null) return reply.line("unreadable", { field: "due", value: JSON.stringify(args.due), choices: TIME_FORMS }).fail();

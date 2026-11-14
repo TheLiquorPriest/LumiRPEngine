@@ -4,11 +4,12 @@
 // is recorded. Then the user's setting for each lane is asked through the contract's approvals and
 // never decided here: an operation whose lane is Never, or that the user declines, is left out, and
 // the rest are worked out again without it. What is left is recorded in one write, and the answer
-// says what changed, how it now stands, and what did not add up.
+// says what changed, how it now stands, and what did not add up. A searchable tool that writes is
+// run the same way, as a call of one operation (`readOperation`, `runOperations`).
 
 import type { ApprovalAsk, JsonObject, JsonValue } from "rp-harness/contract";
 import { isRecord } from "../shared/json";
-import type { Lane, StoreState } from "../store/types";
+import type { StoreState } from "../store/types";
 import { type Call, NUMBER, OBJECT, oneOf, type Reply, TEXT, TEXTS, type ToolSpec, WHOLE, YES_NO } from "./kit";
 import type { OpContext, OpDef, Unread } from "./ops";
 import { HOW_GIVEN, THING_OPS } from "./ops-things";
@@ -59,6 +60,7 @@ export const OPERATION_PROPERTIES: Record<string, JsonObject> = {
   about: TEXT,
   key: TEXT,
   value: {},
+  replaces: TEXT,
   add: NUMBER,
   quest: TEXT,
   stage: TEXT,
@@ -83,7 +85,8 @@ export const OPERATION_PROPERTIES: Record<string, JsonObject> = {
   ...PROVENANCE_PROPERTIES,
 };
 
-interface Asked {
+/** One operation a call asks for, read for its shape: its place in the call, what works it out, its arguments and its provenance. */
+export interface Asked {
   n: number;
   def: OpDef;
   args: JsonObject;
@@ -112,8 +115,8 @@ function attempt(call: Call, base: Reading, asked: readonly Asked[], skip: Reado
   return { reply, draft, afters };
 }
 
-/** Asks the user's setting for each lane the operations write, and the user where a lane is Confirm: which operations may not go ahead, and why. */
-async function approved(call: Call, asked: readonly Asked[]): Promise<Map<number, "never" | { declined: string | undefined }>> {
+/** Asks the user's setting for each lane the operations write, and the user where a lane is Confirm, showing them what `askArgs` gives: which operations may not go ahead, and why. */
+async function approved(call: Call, asked: readonly Asked[], askArgs: (mine: readonly Asked[]) => JsonObject): Promise<Map<number, "never" | { declined: string | undefined }>> {
   const out = new Map<number, "never" | { declined: string | undefined }>();
   const approvals = call.deps.approvals;
   if (approvals === undefined) return out;
@@ -126,11 +129,20 @@ async function approved(call: Call, asked: readonly Asked[]): Promise<Map<number
       for (const a of mine) out.set(a.n, "never");
       continue;
     }
-    const ask: ApprovalAsk = { agent: call.agent, callId: call.callId, tool: call.tool, lane, args: { operations: mine.map((a) => a.args) as JsonValue[] }, at: (call.deps.now ?? Date.now)() };
+    const ask: ApprovalAsk = { agent: call.agent, callId: call.callId, tool: call.tool, lane, args: askArgs(mine), at: (call.deps.now ?? Date.now)() };
     const said = await approvals.ask(call.scope, ask, call.signal);
     if (!said.go) for (const a of mine) out.set(a.n, { declined: said.reason });
   }
   return out;
+}
+
+/** An operation read for its shape: what it needs is there and its provenance reads; or what is wrong with it. */
+export function readOperation(n: number, def: OpDef, args: JsonObject, call: Call): Asked | Unread {
+  const missing = def.needs.filter((f) => args[f] === undefined || args[f] === null || args[f] === "");
+  if (missing.length > 0) return { line: "needs", fields: { n, op: def.name, fields: missing } };
+  const prov = provenanceOf(args, call.agent);
+  if ("field" in prov) return { line: "unreadable_op", fields: { n, op: def.name, field: prov.field, value: JSON.stringify(prov.value), choices: [...prov.choices] } };
+  return { n, def, args, prov };
 }
 
 /** The call's operations read for their shape: each a known operation with what it needs and readable provenance; or what is wrong with each that is not. */
@@ -151,19 +163,13 @@ function readCall(args: JsonObject, call: Call, reply: Reply): Asked[] | null {
       bad = true;
       continue;
     }
-    const missing = def.needs.filter((f) => raw[f] === undefined || raw[f] === null || raw[f] === "");
-    if (missing.length > 0) {
-      reply.line("needs", { n, op: def.name, fields: missing });
+    const read = readOperation(n, def, raw as JsonObject, call);
+    if ("line" in read) {
+      reply.line(read.line, read.fields);
       bad = true;
       continue;
     }
-    const prov = provenanceOf(raw as JsonObject, call.agent);
-    if ("field" in prov) {
-      reply.line("unreadable_op", { n, op: def.name, field: prov.field, value: JSON.stringify(prov.value), choices: [...prov.choices] });
-      bad = true;
-      continue;
-    }
-    asked.push({ n, def, args: raw as JsonObject, prov });
+    asked.push(read);
   }
   if (bad) {
     reply.line("nothing_recorded", {}).fail();
@@ -181,24 +187,25 @@ function provenanceLines(reply: Reply, a: Asked): void {
   if (a.prov.marks.includes(MARKS.noConsent)) reply.line("invented_unconsented", fields);
 }
 
-async function applyOperations(args: JsonObject, call: Call): Promise<Reply> {
+/**
+ * Runs a call's operations, read for their shape: worked out in order on a copy of the state (one
+ * that cannot read its names refuses the whole call, and nothing is recorded); each lane's setting
+ * asked, an approval showing what `askArgs` gives; what may go ahead recorded in one write through
+ * the queue; and answered with what changed, how it now stands, and the reports.
+ */
+export async function runOperations(call: Call, asked: readonly Asked[], askArgs: (mine: readonly Asked[]) => JsonObject): Promise<Reply> {
   const first = call.reply();
-  const asked = readCall(args, call, first);
-  if (asked === null) return first;
   const base = readingOr(call, first);
   if (base === null) return first;
   if (base.turn === null) return first.line("turn_needed", {}).fail();
-  const refuse = (a: Attempt): Reply => {
-    a.reply.line((a.unread as Unread).line, (a.unread as Unread).fields).line("nothing_recorded", {});
-    return a.reply.fail();
-  };
+  let held = new Map<number, "never" | { declined: string | undefined }>();
   let run = attempt(call, base, asked, new Set());
-  if (run.unread) return refuse(run);
-  const held = await approved(call, asked);
-  if (held.size > 0) {
-    run = attempt(call, base, asked, new Set(held.keys()));
-    if (run.unread) return refuse(run);
+  if (!run.unread) {
+    held = await approved(call, asked, askArgs);
+    if (held.size > 0) run = attempt(call, base, asked, new Set(held.keys()));
   }
+  // A refusal says only what could not be read: what the operations before it reported never stands, since nothing is recorded.
+  if (run.unread) return call.reply().line(run.unread.line, run.unread.fields).line("nothing_recorded", {}).fail();
   const reply = run.reply;
   const left: JsonObject[] = [];
   for (const a of asked) {
@@ -207,7 +214,7 @@ async function applyOperations(args: JsonObject, call: Call): Promise<Reply> {
       provenanceLines(reply, a);
       continue;
     }
-    const lane: Lane = a.def.lane;
+    const lane = a.def.lane;
     if (why === "never") reply.line("never", { n: a.n, op: a.def.name, lane });
     else reply.line("declined", { n: a.n, op: a.def.name, ...(why.declined !== undefined ? { reason: why.declined } : {}) });
     left.push({ n: a.n, op: a.def.name, lane, applied: false, held: why === "never" ? "never" : "declined" });
@@ -216,6 +223,13 @@ async function applyOperations(args: JsonObject, call: Call): Promise<Reply> {
   const added = new Map<number, JsonObject>();
   for (const [n, add] of run.afters) added.set(n, add(done.state));
   return answerDraft(run.draft, done, reply, { operations: left, added });
+}
+
+async function applyOperations(args: JsonObject, call: Call): Promise<Reply> {
+  const first = call.reply();
+  const asked = readCall(args, call, first);
+  if (asked === null) return first;
+  return runOperations(call, asked, (mine) => ({ operations: mine.map((a) => a.args) as JsonValue[] }));
 }
 
 export const WORLD_APPLY: ToolSpec = {

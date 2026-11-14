@@ -1,5 +1,6 @@
 ---
 description: vehicles_drive as the model is told it - what the tool does, and what each of its arguments is.
+family: vehicles
 arguments:
   vehicle: "The vehicle."
   to: "The place it is driven to."

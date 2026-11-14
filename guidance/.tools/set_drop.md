@@ -1,5 +1,6 @@
 ---
 description: set_drop as the model is told it - what the tool does, and what each of its arguments is.
+family: things
 arguments:
   who: "Whose outfit or loadout."
   set: "The saved outfit or loadout, by its name."

@@ -1,17 +1,19 @@
 // Time (the skill `time`): what today's time tools and the weather's own effects do besides passing
 // time and setting the clock (`world_apply` `pass_time`, `set`): how someone follows their routine,
-// a block of it, one of their schedules overridden, and the weather of a region set or cleared. Each
-// runs today's Cast life and weather (`packs/castlife`, `packs/weather`). Taking someone off a
-// schedule they do not follow changes nothing and is reported.
+// a block of it, one of their schedules overridden, the weather of a region set or cleared, and
+// someone's day read. Each runs today's Cast life and weather (`packs/castlife`, `packs/weather`).
+// Taking someone off a schedule they do not follow changes nothing and is reported.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
 import type { FixOp } from "../../shared/ledger";
 import { ROUTINE_AWARENESS, ROUTINE_MODES, ROUTINE_ROLES, SKIP_LIVES } from "../../shared/routines";
+import { calendarOf, clockAt, dateAt, formatClock } from "../../engine/calendar";
 import { followOf } from "../../packs/castlife/core/routines";
-import { NUMBER, OBJECT, oneOf, TEXT } from "../kit";
+import { routineGmView } from "../../packs/castlife/core/view";
+import { NUMBER, OBJECT, oneOf, TEXT, WHOLE } from "../kit";
 import { find, isUnread, named, notOneOf, type OpContext, textArg, type Unread } from "../ops";
-import { editChange, effectTool, notApplicable, type WriteDef, writeTool } from "./run";
+import { editChange, effectTool, foundIn, notApplicable, readTool, type WriteDef, writeTool } from "./run";
 
 const FAMILY = "time";
 
@@ -103,5 +105,29 @@ const weatherClear = effectTool({
   example: { region: "Thornbury", source: { from: "prose", message: "m-0303" } },
 });
 
+/**
+ * Someone's day (today's `time_day`), as the GM's view of their routine lays it (`routineGmView`):
+ * each block with when it runs, what it is, where, the kind of time it is and where it comes from
+ * (a block of their routine, a schedule, a plan, an agenda, an invitation).
+ */
+const day = readTool({
+  name: "time_day",
+  family: FAMILY,
+  properties: { person: TEXT, day: WHOLE },
+  required: ["person"],
+  example: { person: "bram", day: 1 },
+  read(r, args, reply) {
+    const who = foundIn(r, "person", args.person, "person");
+    if (isUnread(who)) return who;
+    const offset = args.day ?? 0;
+    if (typeof offset !== "number" || !Number.isInteger(offset)) return { line: "unreadable", fields: { field: "day", value: JSON.stringify(offset), choices: ["a whole number of days from today: 0 today, 1 tomorrow, -1 yesterday"] } };
+    const cal = calendarOf(r.world);
+    const index = dateAt(cal, r.state.world.clock).dayIndex + offset;
+    const blocks = routineGmView(r.ctx, who.id, index).day.blocks.map((b) => ({ from: b.from, to: b.to, label: b.label, activity: b.activity, place: b.place === null ? null : `${r.nameOf(b.place)} [${b.place}]`, kind: b.kind, reasons: b.reasons, origin: b.origin }) as unknown as JsonObject);
+    reply.data({ person: `${who.name} [${who.id}]`, day: formatClock(cal, clockAt(cal, index, 0)).split(",")[0] ?? "", blocks });
+    return undefined;
+  },
+});
+
 /** The family's tools, as RPH's search finds them. */
-export const TIME_TOOLS = [writeTool(routine), weatherSet, weatherClear];
+export const TIME_TOOLS = [writeTool(routine), weatherSet, weatherClear, day];

@@ -12,8 +12,8 @@ import { mayAct } from "../../engine/org";
 import { buildOrgsGm } from "../../packs/orgs/core/gm";
 import { OBJECT, oneOf, TEXT } from "../kit";
 import { find, isUnread, named, notOneOf, type OpContext, type Unread } from "../ops";
-import type { Found, Reading, Want } from "../reading";
-import { editChange, isAlready, notApplicable, readTool, type WriteDef, writeTool } from "./run";
+import type { Want } from "../reading";
+import { editChange, foundIn, isAlready, notApplicable, readTool, type WriteDef, writeTool } from "./run";
 
 const FAMILY = "groups";
 
@@ -76,15 +76,6 @@ const org: WriteDef = {
   },
 };
 
-/** A name a read's argument gives, found as wanted; or the line that says it is not there or fits several. */
-function foundOr(r: Reading, field: string, said: JsonValue | undefined, want: Want): Found | Unread {
-  if (typeof said !== "string" || said.trim() === "") return { line: "needs_field", fields: { field } };
-  const f = r.find(said, want);
-  if ("id" in f) return f;
-  if (f.several.length > 0) return { line: "several", fields: { field, name: f.name, several: f.several.map((x) => `${x.name} [${x.id}]`) } };
-  return { line: "unknown", fields: { field, name: f.name, wanted: want, near: f.near.map((x) => `${x.name} [${x.id}]`) } };
-}
-
 /** Who may use a power in an organization (today's `orgs_who_may`): every holder with the basis it rests on, as GM → Orgs lists them; or whether one person may. */
 const whoMay = readTool({
   name: "orgs_who_may",
@@ -93,7 +84,7 @@ const whoMay = readTool({
   required: ["org", "power"],
   example: { org: "The Lamplighters", power: "org.govern", who: "bram" },
   read(r, args, reply) {
-    const group = foundOr(r, "org", args.org, "entity");
+    const group = foundIn(r, "org", args.org, "entity");
     if (isUnread(group)) return group;
     const power = String(args.power).trim().toLowerCase();
     if (!isOrgPower(power)) return { line: "unreadable", fields: { field: "power", value: JSON.stringify(args.power), choices: [...ORG_POWERS] } };
@@ -107,7 +98,7 @@ const whoMay = readTool({
       reply.data({ org, power, holders });
       return undefined;
     }
-    const who = foundOr(r, "who", args.who, "person");
+    const who = foundIn(r, "who", args.who, "person");
     if (isUnread(who)) return who;
     const may = mayAct(r.ctx, who.id, group.id, power);
     reply.data({ org, power, who: `${who.name} [${who.id}]`, may: may.ok, ...(may.ok ? { basis: may.grant.basis } : {}), holders });

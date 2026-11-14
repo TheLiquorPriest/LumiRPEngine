@@ -13,7 +13,7 @@ import { migrateStore } from "../../../src/store/schema";
 import { openStore } from "../../../src/store/store";
 import { type EngineDeps, engineTools, Lines, SHIPPED_GUIDANCE, shippedTexts, stateScan, toolText } from "../../../src/iface/index";
 import { SEARCHABLE_TOOLS } from "../../../src/iface/searchable";
-import { CHAT, DUE, dataOf, FACTS, type Rig, registry, texts, USER, world } from "../rig";
+import { CHAT, DUE, dataOf, type Rig, registry, texts, USER, world } from "../rig";
 
 /** The rig over its invented world, changed first by `edit`. */
 export async function familyRig(edit: (w: WorldDoc) => void = () => undefined): Promise<Rig> {
@@ -28,7 +28,7 @@ export async function familyRig(edit: (w: WorldDoc) => void = () => undefined): 
   const s = store.user(USER);
   await writes.run(() => s.createChat({ id: CHAT, world: doc.id, revision }));
   const turn = await writes.run(() => s.beginTurn({ chat: CHAT, kind: "new" }));
-  const deps: EngineDeps = { store: s, env, writes, files: shippedTexts(), search: stateScan, due: DUE, facts: FACTS };
+  const deps: EngineDeps = { store: s, env, writes, files: shippedTexts(), search: stateScan, due: DUE };
   const tools = new Map<string, HostTool>((await engineTools(deps)).map((t) => [t.name, t]));
   const call = async (name: string, args: JsonObject, agent = { id: "gm-1", definition: "gm", parent: "author-1" }): Promise<ToolResult> => {
     const tool = tools.get(name);

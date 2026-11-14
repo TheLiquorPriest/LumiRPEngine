@@ -1,5 +1,6 @@
 ---
 description: tax_status as the model is told it - what the tool does, and what each of its arguments is.
+family: money
 arguments:
   org: "The organization."
   status: "Its exemption, as the world's table of exempt statuses names it; left out, no longer exempt."

@@ -1,5 +1,6 @@
 ---
 description: item_unpermit as the model is told it - what the tool does, and what each of its arguments is.
+family: things
 arguments:
   from: "Whose things."
   to: "Whose standing permission ends."
