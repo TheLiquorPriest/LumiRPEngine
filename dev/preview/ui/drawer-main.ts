@@ -2,7 +2,8 @@
 // with the light extension's real loader (`src/ext/loader.ts`) mounting the shell (`src/ui/extension.tsx`)
 // in its drawer, and the extension's backend stood in for by `pipe.ts`, against the stand-in RPE.
 // URL: /ui-drawer?road=relay|direct (default relay: the page cannot reach RPE itself and goes through the
-//   extension) &missing (the extension says it lacks two permissions) &theme=dark|light &drawer=open|closed
+//   extension) &missing (the extension says it lacks two permissions) &chat=none (Lumiverse has no chat
+//   open) &theme=dark|light &drawer=open|closed
 
 import { loader } from "../../../src/ext/loader";
 import { mount } from "../../../src/ui/extension";
@@ -15,7 +16,7 @@ const light = params.get("theme") === "light";
 for (const [name, value] of Object.entries(light ? LIGHT_THEME : DARK_THEME)) document.documentElement.style.setProperty(name, value);
 document.documentElement.style.colorScheme = light ? "light" : "dark";
 
-const host = createMockHost({ drawerOpen: params.get("drawer") !== "closed", heads: false });
+const host = createMockHost({ drawerOpen: params.get("drawer") !== "closed", heads: false, chat: params.get("chat") === "none" ? null : "chat-1" });
 const missing = params.has("missing")
   ? [
       { permission: "interceptor", why: "to tag each reply RPE plays with its chat and its turn" },

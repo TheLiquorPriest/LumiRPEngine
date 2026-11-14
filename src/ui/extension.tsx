@@ -55,6 +55,8 @@ export function mount(shell: ShellMount, deps: RoadDeps = browserDeps()): () => 
   const { root, ctx } = shell;
   const removeStyle = ctx.dom.addStyle(UI_CSS);
   const client = createClient(extensionConnector(shell.road, deps));
+  // At once, not when a page first asks: with no chat open no page asks, and the drawer should still say how RPE stands.
+  client.connect();
   const gate = createGate();
   const route = createStore<Route>({ page: "live", chat: ctx.getActiveChat().chatId });
   // Another chat: the same page for it (a turn's page becomes its list), and the spoiler gate shut.

@@ -7,8 +7,8 @@
 
 import { createStore, type Readable } from "../frontend/store";
 import { isRecord } from "../shared/json";
-import type { LiveEvent, RouteKey, Routes } from "./api";
-import { directRoad, type LiveUpdate, type MissingPermission, probeDirect, type RelayChannel, relayRoad, type Road, type RoadAnswer, type RoadDeps, type SocketSettings, type StartFacts } from "./roads";
+import type { LiveEvent, MissingPermission, RouteKey, Routes } from "./api";
+import { directRoad, type LiveUpdate, probeDirect, type RelayChannel, relayRoad, type Road, type RoadAnswer, type RoadDeps, type SocketSettings, type StartFacts } from "./roads";
 import { errorWords } from "./words";
 
 /** RPE refused a call, in its own words; `status` 0 when RPE was not reached at all. */
@@ -23,8 +23,12 @@ export class RpeError extends Error {
   }
 }
 
-/** Where the client stands: finding a road, on one (and for the relay, why), unable to reach RPE, or waiting for the web UI's token. */
+/**
+ * Where the client stands: nothing asked of RPE yet, finding a road, on one (and for the relay, why),
+ * unable to reach RPE, or waiting for the web UI's token.
+ */
 export type ClientState =
+  | { phase: "idle" }
   | { phase: "connecting" }
   | { phase: "direct"; address: string }
   | { phase: "relay"; why: string }
@@ -54,11 +58,13 @@ export interface LiveListener {
 
 export interface RpeClient {
   readonly state: Readable<ClientState>;
-  /** What the extension lacks to do its part: empty in the web shell. */
-  readonly missing: Readable<readonly MissingPermission[]>;
+  /** What the extension says it lacks, in its own word (the drawer); null where the page has none (the web shell: RPE's status route says it). */
+  readonly missing: Readable<readonly MissingPermission[] | null>;
   call<K extends RouteKey>(key: K, params: ParamsOf<K>, options?: CallOptions<K>): Promise<Routes[K]["reply"]>;
   /** Follows a chat's live events; the returned function stops. */
   follow(chat: string, listener: LiveListener): () => void;
+  /** Finds a road now, unless one is found or being found: a shell does at its start, so the page says where it stands before any page asks. */
+  connect(): void;
   /** Finds a road again: after a failure, or once the web UI's token is given. */
   reconnect(): void;
   close(): void;
@@ -90,7 +96,7 @@ export interface Connector {
   connect(): Promise<Connection>;
   /** Another road may answer when the direct one stops answering (the drawer: the relay). */
   readonly canSwitch: boolean;
-  readonly missing: Readable<readonly MissingPermission[]>;
+  readonly missing: Readable<readonly MissingPermission[] | null>;
   close(): void;
 }
 
@@ -134,7 +140,7 @@ function readAnswer(answer: RoadAnswer): unknown {
 }
 
 export function createClient(connector: Connector): RpeClient {
-  const state = createStore<ClientState>({ phase: "connecting" });
+  const state = createStore<ClientState>({ phase: "idle" });
   const listeners = new Map<string, Set<LiveListener>>();
   /** Chats the road in use follows now. */
   const following = new Set<string>();
@@ -255,6 +261,9 @@ export function createClient(connector: Connector): RpeClient {
         void road?.unfollow(chat).catch(() => undefined);
       };
     },
+    connect() {
+      if (!closed) void connect().catch(() => undefined);
+    },
     reconnect() {
       if (closed) return;
       drop();
@@ -295,7 +304,7 @@ export function webConnector(base: string, tokens: TokenStore, deps: RoadDeps, s
   const token = (): string => tokens.get() ?? "";
   return {
     canSwitch: false,
-    missing: createStore<readonly MissingPermission[]>([]),
+    missing: createStore<readonly MissingPermission[] | null>(null),
     async connect() {
       if (tokens.get() === null) throw new ConnectFailure({ phase: "signed-out", error: null });
       return { road: directRoad(base, token, deps, settings), credential: { token, renew: async () => false }, state: { phase: "direct", address: base } };
@@ -310,7 +319,7 @@ export function webConnector(base: string, tokens: TokenStore, deps: RoadDeps, s
  * before it runs out, and again when RPE refuses it.
  */
 export function extensionConnector(channel: RelayChannel, deps: RoadDeps, settings: ConnectSettings = CONNECT_DEFAULTS): Connector {
-  const missing = createStore<readonly MissingPermission[]>([]);
+  const missing = createStore<readonly MissingPermission[] | null>(null);
   let facts: StartFacts | null = null;
   let timer: unknown = null;
   let closed = false;
@@ -337,11 +346,12 @@ export function extensionConnector(channel: RelayChannel, deps: RoadDeps, settin
     return got;
   }
 
+  /** Renews the token before its life runs out, counted from now, when its facts reached the page: never from a time RPE's clock named. */
   function schedule(got: StartFacts): void {
     deps.timers.clearTimeout(timer);
     timer = null;
     if (closed) return;
-    const life = got.expiresAt - deps.timers.now();
+    const life = got.expiresInMs;
     timer = deps.timers.setTimeout(() => {
       timer = null;
       void start().catch(() => undefined);

@@ -1,15 +1,17 @@
-// Watching a chat for the Live page: it reads the chat's latest turn at once and again once following
-// begins; what came live while a read was out and what the read gave become one turn; what the hub
-// dropped is read again; and the page is redrawn at most once each `renderMs` while events stream.
+// Watching a chat for its pages. For the Live page: it reads the chat's latest turn at once and again
+// once following begins; what came live while a read was out and what the read gave become one turn;
+// what the hub dropped is read again; and the page is redrawn at most once each `renderMs` while events
+// stream. For the Turn page: one turn, kept up to date live, read again when a run of it begins or ends.
 
 import { describe, expect, test } from "bun:test";
 import { createStore } from "../../src/frontend/store";
-import type { RouteKey, TurnDetail, TurnList } from "../../src/ui/api";
+import type { JsonValue } from "../../src/shared/json";
+import type { LiveEvent, MissingPermission, RouteKey, TurnDetail, TurnList } from "../../src/ui/api";
 import type { ClientState, LiveListener, RpeClient } from "../../src/ui/client";
 import { applyLive, EMPTY_LIVE, type RunNode } from "../../src/ui/live-model";
-import { watchChat, type Watched } from "../../src/ui/live-watch";
-import type { MissingPermission, Timers } from "../../src/ui/roads";
-import { CHAT, RECORDED, RECORDS, RUN, turnAt, turnListAt } from "./recorded";
+import { watchChat, watchTurn, type Watched } from "../../src/ui/live-watch";
+import type { Timers } from "../../src/ui/roads";
+import { CHAT, CONTINUED, continuedTurn, RECORDED, RECORDS, RUN, turnAt, turnListAt } from "./recorded";
 
 /** A clock the test moves by hand. */
 function manualTimers(): Timers & { advance(ms: number): void } {
@@ -50,7 +52,7 @@ function heldClient(): RpeClient & { asked: Asked[]; listener(): LiveListener; c
   let listener: LiveListener | null = null;
   return {
     state: createStore<ClientState>({ phase: "relay", why: "the test" }),
-    missing: createStore<readonly MissingPermission[]>([]),
+    missing: createStore<readonly MissingPermission[] | null>(null),
     call(key, params, options) {
       const { promise, resolve } = Promise.withResolvers<never>();
       asked.push({ key, params: params as Record<string, string>, query: (options?.query ?? {}) as Record<string, unknown>, answer: (value) => resolve(value as never) });
@@ -63,6 +65,7 @@ function heldClient(): RpeClient & { asked: Asked[]; listener(): LiveListener; c
         listener = null;
       };
     },
+    connect: () => undefined,
     reconnect: () => undefined,
     close: () => undefined,
     asked,
@@ -167,6 +170,64 @@ describe("watching a chat", () => {
     timers.advance(1);
     expect(seen.length).toBe(before + 1);
     expect(seen.at(-1)?.model.runs[0]?.seq).toBe(recordsIn(20));
+    stop();
+  });
+});
+
+describe("watching one turn, for its page", () => {
+  test("it is read whole at once, its live events keep it up to date, other turns' are let be, and it is read again when its run ends", async () => {
+    const client = heldClient();
+    const timers = manualTimers();
+    const seen: Watched[] = [];
+    const stop = watchTurn(client, CHAT, RUN, timers, (w) => seen.push(w), 50);
+    const first = await client.call_(0);
+    expect(first.key).toBe("GET /api/v1/chats/:chat/turns/:turn");
+    expect(first.query).toEqual({ from: 1 });
+    first.answer(turnAt(30) satisfies TurnDetail);
+    await flush();
+    expect(seen.at(-1)?.detail?.status).toBe("running");
+    // Following begins: the turn is read on from what the page has.
+    client.listener().reset();
+    const caught = await client.call_(1);
+    expect(caught.query).toEqual({ from: recordsIn(30) + 1 });
+    caught.answer(turnAt(30, recordsIn(30) + 1));
+    await flush();
+    // Its events, and one of another turn of the chat.
+    const elsewhere = { ...(RECORDED[0] as LiveEvent), seq: 9_999, data: { ...(RECORDED[0]?.data as object), run: "turn-99" } as JsonValue };
+    client.listener().events([...RECORDED.slice(30, 60), elsewhere], null);
+    timers.advance(50);
+    expect(seen.at(-1)?.model.runs.map((r) => r.run)).toEqual([RUN]);
+    expect(seen.at(-1)?.model.runs[0]?.seq).toBe(recordsIn(60));
+    // Its run ends live: the turn is read again, for how it ended.
+    client.listener().events(RECORDED.slice(60), null);
+    const after = await client.call_(2);
+    expect(after.query).toEqual({ from: RECORDS.length + 1 });
+    after.answer(turnAt(RECORDED.length, RECORDS.length + 1));
+    await flush();
+    expect(seen.at(-1)?.detail?.status).toBe("released");
+    expect(seen.at(-1)?.model.runs[0]?.outcome?.status).toBe("released");
+    expect(client.asked.length).toBe(3);
+    stop();
+  });
+
+  test("a continue that begins while its page is open shows as a run of its own, and the turn is read again", async () => {
+    const client = heldClient();
+    const timers = manualTimers();
+    const seen: Watched[] = [];
+    const stop = watchTurn(client, CHAT, RUN, timers, (w) => seen.push(w), 50);
+    (await client.call_(0)).answer(turnAt());
+    await flush();
+    client.listener().events(CONTINUED.slice(0, 3), null);
+    const again = await client.call_(1);
+    expect(again.query).toEqual({ from: 4 });
+    again.answer({ ...continuedTurn(), status: "running", trace: [] });
+    timers.advance(50);
+    await flush();
+    expect(seen.at(-1)?.model.runs.map((r) => [r.run, r.nth, r.seq])).toEqual([
+      [RUN, 1, RECORDS.length],
+      [RUN, 2, 3],
+    ]);
+    expect(seen.at(-1)?.detail?.kind).toBe("continue");
     stop();
   });
 });

@@ -3,15 +3,17 @@
 // lacks and what went wrong. A new page is an entry in `NAV` and a case in `PageFor`, and both shells
 // offer it.
 
+import { useEffect, useState } from "preact/hooks";
 import type { IconName } from "../frontend/icons";
 import { useSelect } from "../frontend/store";
+import type { ExtensionStatus, MissingPermission } from "./api";
 import { chatOf, type Route, type Shell, useApp } from "./app";
 import { Badge, Banner, Button, Empty, Fold } from "./atoms";
 import type { ClientState } from "./client";
 import { ChatsPage } from "./pages/chats";
 import { LivePage } from "./pages/live";
 import { TurnPage, TurnsPage } from "./pages/turns";
-import type { MissingPermission } from "./roads";
+import { errorWords } from "./words";
 
 export type NavId = "chats" | "live" | "turns";
 
@@ -63,6 +65,8 @@ export function PageFor(props: { route: Route }) {
 export function RoadLine(props: { state: ClientState; onRetry: () => void }) {
   const { state } = props;
   switch (state.phase) {
+    case "idle":
+      return null;
     case "connecting":
       return (
         <div class="rpe-road" data-road="none">
@@ -98,32 +102,84 @@ export function RoadLine(props: { state: ClientState; onRetry: () => void }) {
   }
 }
 
-/** What the extension lacks: until it is granted, chats on RPE's connection are not played (plan §4.2). */
-export function MissingNotice(props: { missing: readonly MissingPermission[] }) {
-  if (props.missing.length === 0) return null;
+/** What a page has heard of RPE's extension in Lumiverse. */
+export interface ExtensionWord {
+  /** RPE's word, from its status route; null until it has come. */
+  rpe: ExtensionStatus | null;
+  /** The extension's own word on what it lacks, fresher than RPE's, where the page has one (the drawer); null where it has none. */
+  own: readonly MissingPermission[] | null;
+  /** Why RPE's word could not be read; null when it was. */
+  problem: string | null;
+}
+
+/**
+ * Why chats on RPE's connection are not being played (plan §4.2), until it is put right: the extension
+ * in Lumiverse does not hold RPE's registration, in RPE's words, or it lacks permissions, each named with
+ * why it is needed. Nothing while all is well.
+ */
+export function ExtensionNotice(props: { word: ExtensionWord; onCheck: () => void }) {
+  const { rpe, own, problem } = props.word;
+  const missing = own ?? rpe?.missing ?? [];
+  const check = <Button onClick={props.onCheck}>Check again</Button>;
   return (
-    <Banner tone="neg" icon="lock" title="RPE's extension is missing permissions">
-      <span>Until an admin grants them in Lumiverse, chats on RPE's connection are not played.</span>
-      <ul class="rpe-reports">
-        {props.missing.map((m) => (
-          <li key={m.permission}>
-            <strong>{m.permission}</strong>: {m.why}
-          </li>
-        ))}
-      </ul>
-    </Banner>
+    <>
+      {rpe === null || rpe.registered ? null : (
+        <Banner tone="neg" icon="alert" title="Chats on RPE's connection are not being played" actions={check}>
+          <span>RPE's extension in Lumiverse does not hold RPE's registration.</span>
+          {rpe.why === null ? null : <span>{rpe.why}</span>}
+        </Banner>
+      )}
+      {missing.length === 0 ? null : (
+        <Banner tone="neg" icon="lock" title="RPE's extension is missing permissions" actions={check}>
+          <span>Until an admin grants them in Lumiverse, chats on RPE's connection are not played.</span>
+          <ul class="rpe-reports">
+            {missing.map((m) => (
+              <li key={m.permission}>
+                <strong>{m.permission}</strong>: {m.why}
+              </li>
+            ))}
+          </ul>
+        </Banner>
+      )}
+      {problem === null ? null : (
+        <Banner tone="warn" icon="alert" title="RPE did not say how its extension in Lumiverse stands" actions={check}>
+          <span>{problem}</span>
+        </Banner>
+      )}
+    </>
   );
 }
 
-/** The road line and the extension's missing permissions, as the client says them now. */
+/**
+ * The road line, and how RPE's extension stands: RPE is asked each time the page reaches it, and again
+ * on "Check again"; in the drawer the extension's own list of what it lacks comes as it changes.
+ */
 export function Notices() {
   const app = useApp();
   const state = useSelect(app.client.state, (s) => s);
-  const missing = useSelect(app.client.missing, (m) => m);
+  const own = useSelect(app.client.missing, (m) => m);
+  const [heard, setHeard] = useState<{ rpe: ExtensionStatus | null; problem: string | null }>({ rpe: null, problem: null });
+  const [checks, setChecks] = useState(0);
+  const reached = state.phase === "direct" || state.phase === "relay";
+  useEffect(() => {
+    if (!reached) return;
+    let alive = true;
+    app.client.call("GET /api/v1/status/extension", {}).then(
+      (rpe) => {
+        if (alive) setHeard({ rpe, problem: null });
+      },
+      (error: unknown) => {
+        if (alive) setHeard((h) => ({ rpe: h.rpe, problem: errorWords(error) }));
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [state, checks]);
   return (
     <div class="lre-stack rpe-notices">
       <RoadLine state={state} onRetry={() => app.client.reconnect()} />
-      <MissingNotice missing={missing} />
+      <ExtensionNotice word={{ rpe: reached ? heard.rpe : null, own, problem: reached ? heard.problem : null }} onCheck={() => setChecks((n) => n + 1)} />
     </div>
   );
 }

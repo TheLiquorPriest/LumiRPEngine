@@ -6,7 +6,7 @@
 
 import type { Clock } from "rp-harness/contract";
 import { isRecord } from "../shared/json";
-import { type LiveBatch, type LiveEvent, LIVE_PATH, LIVE_PROTOCOL, STATUS_PATH, TOKEN_PROTOCOL_PREFIX } from "./api";
+import { type LiveBatch, type LiveEvent, LIVE_PATH, LIVE_PROTOCOL, type MissingPermission, STATUS_PATH, TOKEN_PROTOCOL_PREFIX } from "./api";
 import { errorWords } from "./words";
 
 /** What a road hands on from RPE's live hub: a chat's events, a loss the page must read past, or RPE's refusal. */
@@ -308,16 +308,14 @@ export function directRoad(base: string, token: () => string, deps: RoadDeps, se
 
 // ---------------------------------------------------------------- relay
 
-/** A permission the extension lacks, and why it needs it. */
-export interface MissingPermission {
-  permission: string;
-  why: string;
-}
-
-/** What the extension hands a page when it starts: a short-lived page token, RPE's addresses best first, RPE's build. */
+/** What the extension hands a page when it starts: a short-lived page token, how long it still works, RPE's addresses best first, RPE's build. */
 export interface StartFacts {
   token: string;
-  expiresAt: number;
+  /**
+   * How long the token still works, in milliseconds, as RPE answered. The page counts it from when the
+   * facts reach it, on its own clock: the browser's clock and RPE's need not agree.
+   */
+  expiresInMs: number;
   addresses: string[];
   build: string;
 }

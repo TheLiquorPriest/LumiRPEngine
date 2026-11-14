@@ -1,8 +1,27 @@
 // A turn's timings as the Turn page says them: each moment with the time since the one before it, and
 // the spans between them that tell where the time went. The span before the first words is what writing
-// the intent record costs before the reply begins (plan §10.3), shown beside the gate.
+// the intent record costs before the reply begins (plan §10.3), shown beside the gate. And the turn as
+// its page shows it while it runs: its last read, with what the live road has said since.
 
-import type { TurnTimings } from "./api";
+import type { TurnDetail, TurnTimings } from "./api";
+import { type RunNode, runTotals } from "./live-model";
+
+/**
+ * The turn as its page shows it: its last read, with what its latest run has said on the live road
+ * since: how it stands, when it began, released and ended, and while it runs, what it has spent so far.
+ */
+export function liveTurn(detail: TurnDetail, run: RunNode | undefined): TurnDetail {
+  if (run === undefined) return detail;
+  const { timings } = detail;
+  return {
+    ...detail,
+    status: run.outcome?.status ?? detail.status,
+    timings: { ...timings, started: timings.started ?? run.startedAt, released: timings.released ?? run.releasedAt, ended: timings.ended ?? run.endedAt },
+    usage: detail.status === "running" ? (run.outcome?.usage ?? runTotals(run).usage) : detail.usage,
+    intent: detail.intent ?? run.intent,
+    error: detail.error ?? run.outcome?.error ?? null,
+  };
+}
 
 export interface Moment {
   label: string;

@@ -34,6 +34,8 @@ export interface MockHostOptions {
   drawerOpen: boolean;
   /** Draw three host chat heads (`data-head-idx`) at the right edge, above the drawer. */
   heads: boolean;
+  /** The chat Lumiverse has open: "chat-1" when not given; null for none. */
+  chat?: string | null;
 }
 
 export function createMockHost(options: MockHostOptions): MockHost {
@@ -326,13 +328,13 @@ export function createMockHost(options: MockHostOptions): MockHost {
       },
     },
     state: {
-      get: () => ({ chatId: "chat-1" }),
+      get: () => ({ chatId: options.chat === undefined ? "chat-1" : options.chat }),
       subscribe(_selector: string, listener: Listener<{ chatId: string | null }>) {
         activeListeners.add(listener);
         return () => activeListeners.delete(listener);
       },
     },
-    getActiveChat: () => ({ chatId: "chat-1", characterId: "maple" }),
+    getActiveChat: () => ({ chatId: options.chat === undefined ? "chat-1" : options.chat, characterId: "maple" }),
     sendToBackend: (payload: unknown) => host.onSend(structuredClone(payload)),
     onBackendMessage(listener: Listener<unknown>) {
       backendListeners.add(listener);

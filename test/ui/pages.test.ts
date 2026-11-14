@@ -5,11 +5,12 @@
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
 import type { Route } from "../../src/ui/app";
-import { applyLive, EMPTY_LIVE, latestRun, type RunNode, runOf } from "../../src/ui/live-model";
+import { applyLive, applyRead, EMPTY_LIVE, lastRunOf, latestRun, type RunNode, runsOf } from "../../src/ui/live-model";
 import { LiveView, type LiveViewProps } from "../../src/ui/pages/live";
 import { TURN_SECTIONS, TurnView, type TurnViewProps } from "../../src/ui/pages/turns";
-import { hashOf, routeOfHash, tokenInHash } from "../../src/ui/web";
-import { CHAT, INTENT, RECORDED, REPLY, turnAt } from "./recorded";
+import { hashOf, routeOfHash } from "../../src/ui/web";
+import { liveTurn } from "../../src/ui/turn-model";
+import { CHAT, CONTINUED_REPLY, continuedTurn, INTENT, RECORDED, RECORDS, REPLY, RUN, TOTAL, turnAt } from "./recorded";
 import { elements, expand, press, textOf } from "./vnodes";
 
 const RULING = "Ruling: her story does not hold.";
@@ -17,10 +18,11 @@ const THINKING = "She lied to the harbourmaster";
 
 function turnView(over: Partial<TurnViewProps> = {}): { text: string; tree: unknown; pressed: string[] } {
   const pressed: string[] = [];
-  const turn = turnAt();
+  const turn = over.turn ?? turnAt();
   const props: TurnViewProps = {
     turn,
-    run: runOf(turn),
+    runs: runsOf(applyRead(EMPTY_LIVE, turn), turn.id),
+    problem: null,
     now: turn.timings.ended ?? 0,
     gateOpen: false,
     onOpenGate: () => pressed.push("open"),
@@ -60,6 +62,19 @@ describe("the Turn page", () => {
     expect(text).toContain(REPLY.split("\n")[0] as string);
   });
 
+  test("behind the gate: what the Author was given by name, and the turn's folder named as not available, with no route to open it", () => {
+    const shut = turnView({ gateOpen: false });
+    expect(shut.text).not.toContain("prompt:all");
+    expect(shut.text).not.toContain("world-state.md");
+    const open = turnView({ gateOpen: true });
+    expect(open.text).toContain("What the Author was given");
+    expect(open.text).toContain("author was given: prompt:all, story:brief, world:scene.");
+    expect(open.text).toContain("Not available here yet: RPE has no route that lists a turn's folder or opens its files");
+    for (const name of ["briefing.md", "world-state.md", "active-wi-content.md", "transcripts/"]) expect(open.text).toContain(name);
+    // Each agent's model calls with their tools and results are drawn too.
+    expect(open.text).toContain("2d6 = 4 + 1 = 5 against 8: it does not hold.");
+  });
+
   test("with the gate open, every agent of the run is drawn, with its tokens", () => {
     const { text, tree } = turnView({ gateOpen: true });
     const agents = elements(tree).filter((e) => e.type === "details" && typeof e.props["data-agent"] === "string").map((e) => e.props["data-agent"]);
@@ -73,6 +88,40 @@ describe("the Turn page", () => {
     const sections = [...TURN_SECTIONS, { id: "lanes", title: "Changes in each lane", spoiler: true, body: () => "The lamp room's door: shut to open." }];
     expect(turnView({ sections, gateOpen: false }).text).not.toContain("The lamp room's door");
     expect(turnView({ sections, gateOpen: true }).text).toContain("The lamp room's door");
+  });
+
+  test("a turn a continue ran again shows each of its runs, what the latest sent, and each run's agents behind the gate", () => {
+    const turn = continuedTurn();
+    const shut = turnView({ turn, gateOpen: false });
+    expect(shut.text).toContain("Its runs");
+    expect(shut.text).toContain("Run 1 of 2: New reply, led by author");
+    expect(shut.text).toContain("Run 2 of 2: Continue, led by author");
+    expect(shut.text).toContain(`It released ${REPLY.length.toLocaleString("en")} characters.`);
+    expect(shut.text).toContain(CONTINUED_REPLY);
+    expect(shut.text).not.toContain(REPLY.split("\n")[0] as string);
+    const open = turnView({ turn, gateOpen: true });
+    const byRun = elements(open.tree)
+      .filter((e) => e.props["data-run-nth"] !== undefined && elements(e.props.children).some((c) => c.props["data-agent"] !== undefined))
+      .map((e) => [e.props["data-run-nth"], elements(e.props.children).flatMap((c) => (c.type === "details" && typeof c.props["data-agent"] === "string" ? [c.props["data-agent"]] : []))]);
+    expect(byRun).toEqual([
+      [1, ["a1", "a2", "a3"]],
+      [2, ["a1"]],
+    ]);
+  });
+
+  test("while it runs, the page shows what the live road has said since the turn was read", () => {
+    const read = turnAt(20);
+    expect(read.status).toBe("running");
+    const heard = RECORDED.slice(20).reduce(applyLive, applyRead(EMPTY_LIVE, read));
+    const shown = liveTurn(read, lastRunOf(heard, RUN));
+    expect(shown.status).toBe("released");
+    expect(shown.usage).toEqual(TOTAL);
+    expect(shown.timings.released).toBe(RECORDS.find((r) => r.event.kind === "released")?.at as number);
+    expect(shown.timings.ended).toBe(RECORDS.at(-1)?.at as number);
+    const midway = liveTurn(read, lastRunOf(RECORDED.slice(20, 54).reduce(applyLive, applyRead(EMPTY_LIVE, read)), RUN));
+    expect(midway.status).toBe("running");
+    expect(midway.usage.calls).toBe(4);
+    expect(turnView({ turn: shown, gateOpen: false }).text).toContain("Reply released");
   });
 });
 
@@ -134,10 +183,5 @@ describe("the web shell's addresses", () => {
     for (const route of routes) expect(routeOfHash(hashOf(route))).toEqual(route);
     expect(routeOfHash("")).toEqual({ page: "chats" });
     expect(routeOfHash("#/chats/x/nowhere/at/all")).toEqual({ page: "live", chat: "x" });
-  });
-
-  test("an address that brings the web UI's token gives it up", () => {
-    expect(tokenInHash("#token=rpw_abc")).toBe("rpw_abc");
-    expect(tokenInHash("#/chats")).toBeNull();
   });
 });

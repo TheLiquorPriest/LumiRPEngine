@@ -1,8 +1,9 @@
 // The web shell (plan §14): RPE's pages in any browser, served by RPE at `/ui/`, always on the direct
 // road. Its own navigation: a bar across the top, which moves to the bottom of the screen at phone
 // width. The route lives in the address's fragment (`#/chats/<chat>/live`), so the back button and a
-// reload keep the page. RPE takes the web UI's token (`rpe key web`), which this browser keeps until
-// the player signs out; an address ending `#token=<token>` signs in with it.
+// reload keep the page. RPE takes the web UI's token (`rpe key web`), asked for once in the sign-in
+// field and kept by this browser until the player signs out. It never goes in an address: the token
+// does not expire, and an address is kept in the history, bookmarked and shared.
 
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
@@ -42,17 +43,6 @@ export function hashOf(route: Route): string {
   const at = `#/chats/${encodeURIComponent(chat)}`;
   if (route.page === "turn") return `${at}/turns/${encodeURIComponent(route.turn)}`;
   return `${at}/${route.page}`;
-}
-
-/** A token the address brings (`#token=…`), or null. */
-export function tokenInHash(hash: string): string | null {
-  const found = /^#token=([^&]+)$/.exec(hash)?.[1];
-  if (found === undefined) return null;
-  try {
-    return decodeURIComponent(found);
-  } catch {
-    return null;
-  }
 }
 
 /** The token kept in `storage`; in memory alone where the browser keeps nothing (a private window may refuse). */
@@ -137,7 +127,7 @@ function WebShell(props: { tokens: TokenStore }) {
     if (chat !== null) setLastChat(chat);
   }, [chat]);
   const signedIn = state.phase !== "signed-out";
-  const name = useChatName(chat, signedIn && state.phase !== "connecting");
+  const name = useChatName(chat, state.phase === "direct");
   const current = navOf(route);
   const target = chat ?? lastChat;
   const links = NAV.filter((item) => item.shells.includes("web")).map((item) => (
@@ -204,12 +194,8 @@ export interface WebOptions {
 export function startWeb(root: HTMLElement, options: WebOptions): () => void {
   const deps = options.deps ?? browserDeps();
   const tokens = storedTokens(options.storage);
-  const given = tokenInHash(location.hash);
-  if (given !== null) {
-    tokens.set(given);
-    history.replaceState(null, "", `${location.pathname}${location.search}`);
-  }
   const client = createClient(webConnector(options.base, tokens, deps));
+  client.connect();
   const gate = createGate();
   const route = createStore<Route>(routeOfHash(location.hash));
   const onHash = (): void => {

@@ -61,7 +61,7 @@ export function previewPipe(deliver: (payload: unknown) => void, options: Option
       const message = payload as { rpe?: string; id?: string; method?: string; path?: string; headers?: Record<string, string>; body?: string; chat?: string };
       switch (message.rpe) {
         case "start":
-          deliver({ rpe: "start", facts: { token: TOKEN, expiresAt: Date.now() + 30 * 60_000, addresses: options.road === "direct" ? [location.origin] : [NOWHERE], build: "preview" }, missing: options.missing });
+          deliver({ rpe: "start", facts: { token: TOKEN, expiresAt: Date.now() + 30 * 60_000, expiresInMs: 30 * 60_000, addresses: options.road === "direct" ? [location.origin] : [NOWHERE], build: "preview" }, missing: options.missing });
           return;
         case "request":
           fetch(message.path ?? "/", { method: message.method, headers: message.headers, ...(message.body === undefined ? {} : { body: message.body }) }).then(

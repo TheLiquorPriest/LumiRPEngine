@@ -169,6 +169,44 @@ export const RECORDED: readonly LiveEvent[] = record();
 /** Its trace records alone, in order. */
 export const RECORDS: readonly TraceRecord[] = RECORDED.filter((e) => e.kind === "trace").map((e) => e.data as unknown as TraceRecord);
 
+export const CONTINUED_REPLY = 'She closes the logbook. "Ask the harbourmaster, then, if you think I lie."';
+const CONTINUED_USAGE = usage(1, 14_900, 12_288, 61);
+
+/** The recorded turn continued half a minute after its run ended: a second run of it, under the same run id, its records numbered from 1 again. */
+function continued(): LiveEvent[] {
+  const events: LiveEvent[] = [];
+  let seq = 0;
+  let now = (RECORDS.at(-1)?.at ?? T0) + 30_000;
+  const push = (kind: string, data: unknown): void => {
+    events.push({ chat: CHAT, seq: RECORDED.length + events.length + 1, kind, at: now, data: data as JsonValue });
+  };
+  const trace = (ms: number, event: TraceEvent): void => {
+    now += ms;
+    const rec: TraceRecord = { seq: ++seq, run: RUN, scope, at: now, agent: AUTHOR, event };
+    push("trace", rec);
+  };
+  trace(0, { kind: "run_started", run: "turn", turn: "continue", lead: "author" });
+  trace(5, { kind: "agent_started", definition: "author", connection: "Deepseek", model: "deepseek-v4-flash", effort: "medium", session: SESSION, given: ["prompt:all", "story:brief"] });
+  trace(4, { kind: "call_started", call: 1, connection: "Deepseek", model: "deepseek-v4-flash", messages: 20, tools: 30 });
+  now += 900;
+  push("reply", { run: RUN, from: 0, text: CONTINUED_REPLY } satisfies ReplyPiece);
+  trace(40, { kind: "call_ended", call: 1, model: "deepseek-v4-flash", text: `<reply>\n${CONTINUED_REPLY}\n</reply>`, toolCalls: [], stop: "stop", usage: CONTINUED_USAGE, ms: 950 });
+  trace(2, { kind: "released", release: { by: AUTHOR, form: "tags", length: CONTINUED_REPLY.length } });
+  trace(2, { kind: "agent_ended", status: "done", usage: CONTINUED_USAGE });
+  trace(1, { kind: "run_ended", outcome: { status: "released", released: true, usage: CONTINUED_USAGE } });
+  return events;
+}
+
+/** The continue's run as the hub carries it, after the whole recording. */
+export const CONTINUED: readonly LiveEvent[] = continued();
+export const CONTINUED_RECORDS: readonly TraceRecord[] = CONTINUED.filter((e) => e.kind === "trace").map((e) => e.data as unknown as TraceRecord);
+
+/** The recorded turn once continued, as a read of it answers: what its latest run (the continue) says, and the records of both its runs, in time order. */
+export function continuedTurn(): TurnDetail {
+  const latest = turnOf(CONTINUED, { run: RUN, chat: CHAT, received: (CONTINUED_RECORDS[0]?.at ?? T0) - INTAKE_MS });
+  return { ...latest, kind: "continue", trace: [...RECORDS, ...latest.trace] };
+}
+
 /** A turn as a read of it answers, from the live events of its run heard so far, with its trace from record `from`. */
 export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat: string; received: number; from?: number }): TurnDetail {
   const records = seen.filter((e) => e.kind === "trace").map((e) => e.data as unknown as TraceRecord);

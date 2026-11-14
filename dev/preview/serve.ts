@@ -7,12 +7,13 @@
 //
 // The new pages (src/ui/) are served beside it, against a stand-in RPE (ui/mock-rpe.ts) that answers
 // `/api/v1/` and plays an invented recorded turn on the live socket:
-// - `/ui/`: the web shell, built from src/ui/index.html as RPE serves it. Open `/ui/#token=preview`
-//   once to sign in (any token is taken), then e.g. `/ui/#/chats/chat-calder/live`.
+// - `/ui/`: the web shell, built from src/ui/index.html as RPE serves it. Sign in once with any token in
+//   its field, then e.g. `/ui/#/chats/chat-calder/live`.
 // - `/ui-drawer`: the extension shell in the fake Lumiverse page (ui/drawer-main.ts has its parameters).
+// - `/preview/…`: the stand-in's controls (ui/mock-rpe.ts lists them).
 
 import type { BuildArtifact, BunPlugin } from "bun";
-import { type PreviewSocket, rpeAnswer, rpeSockets } from "./ui/mock-rpe";
+import { type PreviewSocket, previewControl, rpeAnswer, rpeSockets } from "./ui/mock-rpe";
 
 const port = Number(process.argv[2] ?? 7891);
 const dir = import.meta.dir;
@@ -59,6 +60,7 @@ Bun.serve<PreviewSocket>({
     }
     if (pathname === "/" || pathname === "/index.html") return new Response(Bun.file(`${dir}/index.html`), { headers: { "content-type": "text/html" } });
     if (pathname.startsWith("/api/v1/")) return rpeAnswer(request, server);
+    if (pathname.startsWith("/preview/")) return previewControl(new URL(request.url));
     if (pathname === "/ui") return Response.redirect("/ui/", 308);
     if (pathname.startsWith("/ui/")) {
       const name = pathname.slice("/ui/".length) || "index.html";

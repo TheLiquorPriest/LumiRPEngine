@@ -58,7 +58,7 @@ class Channel implements RelayChannel {
 
   constructor(
     private readonly answer: (sent: Sent) => { status: number; body: unknown },
-    private readonly facts: (start: number) => StartAnswer = (n) => ({ facts: { token: `rpp_page${n}`, expiresAt: Date.UTC(2026, 10, 12, 20, 30, 0), addresses: [ADDRESS], build: "b-1" }, missing: [] }),
+    private readonly facts: (start: number) => StartAnswer = (n) => ({ facts: { token: `rpp_page${n}`, expiresInMs: 30 * 60_000, addresses: [ADDRESS], build: "b-1" }, missing: [] }),
   ) {}
 
   async start(): Promise<StartAnswer> {
@@ -124,6 +124,35 @@ function browser(fetch: (url: string, init: FetchInit) => Promise<{ status: numb
   return { deps, fetched, opened, nextSocket };
 }
 
+/**
+ * The extension's backend, standing in: it answers the page as `src/ext/pipe.ts` does, on the wire as
+ * the extension sends it, with `facts()` for each start; `asked` keeps what the page sent it.
+ */
+function extensionBackend(timers: Timers, facts: () => Record<string, unknown>) {
+  const handlers = new Set<(payload: unknown) => void>();
+  const deliver = (payload: unknown): void => {
+    for (const handler of handlers) handler(structuredClone(payload));
+  };
+  const asked: { rpe: string; id?: string; chat?: string }[] = [];
+  const road = pageRoad(
+    {
+      sendToBackend(payload) {
+        const message = payload as { rpe: string; id?: string; chat?: string };
+        asked.push(message);
+        if (message.rpe === "start") queueMicrotask(() => deliver({ rpe: "start", facts: facts(), missing: [] }));
+        if (message.rpe === "request") queueMicrotask(() => deliver({ rpe: "response", id: message.id, status: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(turnListAt()) }));
+        if (message.rpe === "follow") queueMicrotask(() => deliver({ rpe: "following", chat: message.chat }));
+      },
+      onBackendMessage(handler) {
+        handlers.add(handler);
+        return () => handlers.delete(handler);
+      },
+    },
+    { timers },
+  );
+  return { road, deliver, asked };
+}
+
 const refused = async (): Promise<never> => {
   throw new TypeError("Failed to fetch");
 };
@@ -143,7 +172,7 @@ function track(client: RpeClient): RpeClient {
 function settled(client: RpeClient): Promise<ClientState> {
   const { promise, resolve } = Promise.withResolvers<ClientState>();
   const check = (state: ClientState): void => {
-    if (state.phase === "connecting") return;
+    if (state.phase === "connecting" || state.phase === "idle") return;
     off();
     resolve(state);
   };
@@ -181,6 +210,19 @@ function follower(): LiveListener & { got: LiveEvent[]; missed: ({ from: number;
 }
 
 describe("which road the drawer's client takes", () => {
+  test("before anything is asked of RPE the page shows no connecting line, and the drawer's start reaches RPE with no page asking", async () => {
+    const channel = new Channel(() => ({ status: 200, body: {} }));
+    const client = track(createClient(extensionConnector(channel, browser(refused).deps)));
+    expect(client.state.get()).toEqual({ phase: "idle" });
+    expect(textOf(expand(h(RoadLine, { state: client.state.get(), onRetry: () => undefined })))).toBe("");
+    // What the drawer does when it is mounted, with no chat open and so no page asking anything.
+    client.connect();
+    const state = await settled(client);
+    expect(state.phase).toBe("relay");
+    expect(channel.starts).toBe(1);
+    expect(textOf(expand(h(RoadLine, { state, onRetry: () => undefined })))).toContain("Through Lumiverse");
+  });
+
   test("when the page cannot reach RPE itself, it takes the relay, and says why", async () => {
     const channel = new Channel(() => ({ status: 200, body: turnListAt() }));
     const { deps, fetched } = browser(refused);
@@ -245,7 +287,7 @@ describe("which road the drawer's client takes", () => {
 
   test("a page token is renewed before it runs out", async () => {
     const timers = new ManualTimers();
-    const channel = new Channel(() => ({ status: 200, body: turnListAt() }), (n) => ({ facts: { token: `rpp_page${n}`, expiresAt: timers.now() + 30 * 60_000, addresses: [], build: "b-1" }, missing: [] }));
+    const channel = new Channel(() => ({ status: 200, body: turnListAt() }), (n) => ({ facts: { token: `rpp_page${n}`, expiresInMs: 30 * 60_000, addresses: [], build: "b-1" }, missing: [] }));
     const client = track(createClient(extensionConnector(channel, browser(refused, "open", timers).deps)));
     await client.call("GET /api/v1/chats", {});
     timers.advance(28 * 60_000);
@@ -255,6 +297,26 @@ describe("which road the drawer's client takes", () => {
     await Promise.resolve();
     await client.call("GET /api/v1/chats", {});
     expect(channel.requests.at(-1)?.headers.authorization).toBe("Bearer rpp_page2");
+  });
+
+  test("a page token's life is counted on the page's own clock, so a browser clock far ahead of RPE's renews it no sooner", async () => {
+    const timers = new ManualTimers();
+    // RPE's clock is two hours behind the browser's: by the browser's clock, the time RPE names has long passed.
+    const rpeNow = timers.now() - 2 * 3_600_000;
+    const backend = extensionBackend(timers, () => ({ token: "rpp_x", expiresAt: rpeNow + 30 * 60_000, expiresInMs: 30 * 60_000, addresses: [], build: "b-1" }));
+    try {
+      const client = track(createClient(extensionConnector(backend.road, browser(refused, "open", timers).deps)));
+      await client.call("GET /api/v1/chats", {});
+      const starts = (): number => backend.asked.filter((m) => m.rpe === "start").length;
+      expect(starts()).toBe(1);
+      timers.advance(60_000);
+      await Promise.resolve();
+      expect(starts()).toBe(1);
+      timers.advance(28 * 60_000);
+      expect(starts()).toBe(2);
+    } finally {
+      backend.road.stop();
+    }
   });
 
   test("RPE's refusal reaches the page in RPE's own words", async () => {
@@ -285,29 +347,8 @@ describe("a chat's live updates", () => {
   });
 
   test("through the extension's own page road: the start, a request, and a live list in two parts all reach the page", async () => {
-    // The extension's backend, standing in: it answers the page as `src/ext/pipe.ts` does.
-    const handlers = new Set<(payload: unknown) => void>();
-    const deliver = (payload: unknown): void => {
-      for (const handler of handlers) handler(structuredClone(payload));
-    };
-    const asked: unknown[] = [];
     const timers = new ManualTimers();
-    const road = pageRoad(
-      {
-        sendToBackend(payload) {
-          asked.push(payload);
-          const message = payload as { rpe: string; id?: string; chat?: string };
-          if (message.rpe === "start") queueMicrotask(() => deliver({ rpe: "start", facts: { token: "rpp_x", expiresAt: timers.now() + 1_800_000, addresses: [ADDRESS], build: "b-1" }, missing: [] }));
-          if (message.rpe === "request") queueMicrotask(() => deliver({ rpe: "response", id: message.id, status: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(turnListAt()) }));
-          if (message.rpe === "follow") queueMicrotask(() => deliver({ rpe: "following", chat: message.chat }));
-        },
-        onBackendMessage(handler) {
-          handlers.add(handler);
-          return () => handlers.delete(handler);
-        },
-      },
-      { timers },
-    );
+    const { road, deliver, asked } = extensionBackend(timers, () => ({ token: "rpp_x", expiresAt: timers.now() + 1_800_000, expiresInMs: 1_800_000, addresses: [ADDRESS], build: "b-1" }));
     try {
       const client = track(createClient(extensionConnector(road, browser(refused, "open", timers).deps)));
       const list = await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT });

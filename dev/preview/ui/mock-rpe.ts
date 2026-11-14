@@ -2,12 +2,17 @@
 // recorded turn (test/ui/recorded.ts), and the live socket, which plays that turn as it was recorded,
 // in real time, each time a page follows a chat that has no turn playing. Any chat id is served the same
 // turn. Any bearer is taken: the preview proves the pages, not RPE's auth. Nothing is kept.
+//
+// Preview controls, outside RPE's API (`previewControl`):
+// - `/preview/extension?state=well|unregistered|missing`: how RPE says its extension in Lumiverse stands.
+// - `/preview/continue?chat=<chat>`: continues the turn played last in the chat, as RPE runs a continue:
+//   the same turn run again under the same run id, its records numbered from 1 again.
 
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { TraceDelta, TraceRecord } from "rp-harness/contract";
 import type { JsonValue } from "../../../src/shared/json";
-import type { LiveEvent, ReplyPiece } from "../../../src/ui/api";
-import { CHATS, earlierTurn, EARLIER, RECORDED, RUN, summaryOf, T0, turnOf } from "../../../test/ui/recorded";
+import type { ExtensionStatus, LiveEvent, ReplyPiece, TurnDetail } from "../../../src/ui/api";
+import { CHATS, CONTINUED, earlierTurn, EARLIER, RECORDED, RUN, summaryOf, T0, turnOf } from "../../../test/ui/recorded";
 
 /** How long before the run began the request reached RPE, as the recorded turn has it. */
 const INTAKE_MS = 240;
@@ -15,8 +20,10 @@ const INTAKE_MS = 240;
 interface Playing {
   chat: string;
   run: string;
-  /** The recording's T0 is moved to this moment. */
-  started: number;
+  /** Where each run of the turn begins in `events`: a continue plays it again. */
+  starts: number[];
+  /** When the request for the run playing last reached RPE. */
+  received: number;
   /** The events played so far, as the hub sent them. */
   events: LiveEvent[];
   timers: ReturnType<typeof setTimeout>[];
@@ -32,14 +39,20 @@ const seqs = new Map<string, number>();
 const playing = new Map<string, Playing>();
 let runs = 30;
 
+const STANDINGS: Readonly<Record<string, ExtensionStatus>> = {
+  well: { registered: true, why: null, missing: [] },
+  unregistered: { registered: false, why: "RPE has not heard from its extension in Lumiverse since it started.", missing: null },
+  missing: { registered: true, why: null, missing: [{ permission: "interceptor", why: "to tag each reply RPE plays with its chat and its turn" }] },
+};
+let standing: ExtensionStatus = STANDINGS.well as ExtensionStatus;
+
 function publish(event: LiveEvent): void {
   const text = JSON.stringify({ type: "events", chat: event.chat, events: [event] });
   for (const ws of sockets) if (ws.data.follows.has(event.chat)) ws.send(text);
 }
 
-/** An event of the recording, as it is played for `chat` now: its chat, its run and its times moved. */
-function retarget(event: LiveEvent, play: Playing): LiveEvent {
-  const shift = play.started - T0;
+/** An event of a recording, as it is played for `chat` now: its chat, its run and its times moved on by `shift`. */
+function retarget(event: LiveEvent, play: Playing, shift: number): LiveEvent {
   const seq = (seqs.get(play.chat) ?? 0) + 1;
   seqs.set(play.chat, seq);
   let data: unknown = event.data;
@@ -54,22 +67,48 @@ function retarget(event: LiveEvent, play: Playing): LiveEvent {
   return { chat: play.chat, seq, kind: event.kind, at: event.at + shift, data: data as JsonValue };
 }
 
+/** Plays `recording` for the play from `begins`, in real time. */
+function schedule(p: Playing, recording: readonly LiveEvent[], begins: number): void {
+  const now = Date.now();
+  const first = recording[0]?.at ?? 0;
+  for (const event of recording) {
+    p.timers.push(
+      setTimeout(() => {
+        const out = retarget(event, p, begins - first);
+        p.events.push(out);
+        publish(out);
+        if (event === recording.at(-1)) p.done = true;
+      }, begins - now + (event.at - first)),
+    );
+  }
+}
+
 function play(chat: string): void {
   const current = playing.get(chat);
   if (current !== undefined && !current.done) return;
-  const now = Date.now();
-  const p: Playing = { chat, run: `turn-${++runs}`, started: now + 1000, events: [], timers: [], done: false };
+  const begins = Date.now() + 1000;
+  const p: Playing = { chat, run: `turn-${++runs}`, starts: [0], received: begins - INTAKE_MS, events: [], timers: [], done: false };
   playing.set(chat, p);
-  for (const event of RECORDED) {
-    p.timers.push(
-      setTimeout(() => {
-        const out = retarget(event, p);
-        p.events.push(out);
-        publish(out);
-        if (event === RECORDED.at(-1)) p.done = true;
-      }, p.started - now + (event.at - T0)),
-    );
-  }
+  schedule(p, RECORDED, begins);
+}
+
+/** Continues the turn played last in `chat`, once it has ended: false when none has. */
+function playContinue(chat: string): boolean {
+  const p = playing.get(chat);
+  if (p === undefined || !p.done) return false;
+  const begins = Date.now() + 1000;
+  p.starts.push(p.events.length);
+  p.received = begins - INTAKE_MS;
+  p.done = false;
+  schedule(p, CONTINUED, begins);
+  return true;
+}
+
+/** The turn played in a chat as RPE's route answers it: what its latest run says, and the records of all its runs from `from`. */
+function playedTurn(p: Playing, from = 1): TurnDetail {
+  const latest = turnOf(p.events.slice(p.starts.at(-1) ?? 0), { run: p.run, chat: p.chat, received: p.received });
+  const records = p.events.filter((e) => e.kind === "trace").map((e) => e.data as unknown as TraceRecord);
+  return { ...latest, kind: p.starts.length > 1 ? "continue" : latest.kind, trace: records.filter((r) => r.seq >= from) };
 }
 
 /** Stops the turn playing for `chat`: what is left is not played, and the run ends stopped. */
@@ -78,10 +117,9 @@ function stop(chat: string, run: string): boolean {
   if (p === undefined || p.done || p.run !== run) return false;
   for (const timer of p.timers) clearTimeout(timer);
   p.done = true;
-  const records = p.events.filter((e) => e.kind === "trace").map((e) => e.data as unknown as TraceRecord);
+  const records = p.events.slice(p.starts.at(-1) ?? 0).filter((e) => e.kind === "trace").map((e) => e.data as unknown as TraceRecord);
   const last = records.at(-1);
-  const detail = turnOf(p.events, { run: p.run, chat, received: p.started - INTAKE_MS });
-  const record: TraceRecord = { seq: (last?.seq ?? 0) + 1, run: p.run, scope: { user: "user-1", chat, session: "session-4", turn: p.run }, at: Date.now(), agent: { id: "a1", definition: "author" }, event: { kind: "run_ended", outcome: { status: "stopped", released: false, usage: detail.usage, error: { code: "stopped" } } } };
+  const record: TraceRecord = { seq: (last?.seq ?? 0) + 1, run: p.run, scope: { user: "user-1", chat, session: "session-4", turn: p.run }, at: Date.now(), agent: { id: "a1", definition: "author" }, event: { kind: "run_ended", outcome: { status: "stopped", released: false, usage: playedTurn(p).usage, error: { code: "stopped" } } } };
   const seq = (seqs.get(chat) ?? 0) + 1;
   seqs.set(chat, seq);
   const event: LiveEvent = { chat, seq, kind: "trace", at: record.at, data: record as unknown as JsonValue };
@@ -90,14 +128,29 @@ function stop(chat: string, run: string): boolean {
   return true;
 }
 
-function detailOf(chat: string, turn: string, from: number) {
+function detailOf(chat: string, turn: string, from: number): TurnDetail | null {
   const p = playing.get(chat);
-  if (p !== undefined && p.run === turn) return turnOf(p.events, { run: p.run, chat, received: p.started - INTAKE_MS, from });
+  if (p !== undefined && p.run === turn) return playedTurn(p, from);
   if (p === undefined && turn === RUN) return turnOf(RECORDED, { run: RUN, chat, received: T0 - INTAKE_MS, from });
   return earlierTurn(turn, chat);
 }
 
 const answer = (status: number, body: unknown): Response => Response.json(body, { status, headers: { "cache-control": "no-store" } });
+
+/** The preview's controls: how RPE says its extension stands, and a continue of a chat's last turn. */
+export function previewControl(url: URL): Response {
+  if (url.pathname === "/preview/extension") {
+    const next = STANDINGS[url.searchParams.get("state") ?? ""];
+    if (next === undefined) return answer(400, { error: `state is one of ${Object.keys(STANDINGS).join(", ")}.` });
+    standing = next;
+    return answer(200, standing);
+  }
+  if (url.pathname === "/preview/continue") {
+    const chat = url.searchParams.get("chat") ?? "";
+    return playContinue(chat) ? answer(200, { continued: playing.get(chat)?.run }) : answer(409, { error: `No turn of ${chat} has ended to continue.` });
+  }
+  return answer(404, { error: `The preview has no ${url.pathname}.` });
+}
 
 /** The stand-in's answer to a request under `/api/v1/`, or undefined when it became the live socket. */
 export function rpeAnswer(request: Request, server: Server<PreviewSocket>): Response | undefined {
@@ -110,12 +163,13 @@ export function rpeAnswer(request: Request, server: Server<PreviewSocket>): Resp
   }
   const credential = /^Bearer\s+\S+/i.test(request.headers.get("authorization") ?? "");
   if (!credential) return answer(401, { error: "This needs a page token or the web UI's token." });
+  if (path === "/api/v1/status/extension") return answer(200, standing);
   if (path === "/api/v1/chats") return answer(200, { chats: CHATS.chats.map((c) => ({ ...c, running: playing.get(c.id)?.done === false })) });
   const turns = /^\/api\/v1\/chats\/([^/]+)\/turns$/.exec(path);
   if (turns !== null && request.method === "GET") {
     const chat = decodeURIComponent(turns[1] as string);
     const p = playing.get(chat);
-    const latest = p === undefined ? turnOf(RECORDED, { run: RUN, chat, received: T0 - INTAKE_MS }) : turnOf(p.events, { run: p.run, chat, received: p.started - INTAKE_MS });
+    const latest = p === undefined ? turnOf(RECORDED, { run: RUN, chat, received: T0 - INTAKE_MS }) : playedTurn(p);
     const all = [...(p === undefined || p.events.length > 0 ? [summaryOf(latest)] : []), ...EARLIER];
     const limit = Number(url.searchParams.get("limit") ?? all.length);
     return answer(200, { turns: all.slice(0, limit), more: limit < all.length });

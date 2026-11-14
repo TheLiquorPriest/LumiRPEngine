@@ -8,8 +8,8 @@ import { useEffect, useState } from "preact/hooks";
 import { useSelect } from "../../frontend/store";
 import { useApp, useNow } from "../app";
 import { Banner, Button, Empty, Gated, PageHeader, Pre, Section } from "../atoms";
-import { EMPTY_LIVE, latestRun, type RunNode } from "../live-model";
-import { watchChat, type Watched } from "../live-watch";
+import { latestRun, type RunNode } from "../live-model";
+import { NOTHING_WATCHED, watchChat, type Watched } from "../live-watch";
 import { AgentTree, ReplyBox, RunHead } from "../trace-view";
 import { errorWords } from "../words";
 
@@ -87,11 +87,11 @@ export function LiveView(props: LiveViewProps) {
 export function LivePage(props: { chat: string }) {
   const app = useApp();
   const { chat } = props;
-  const [watched, setWatched] = useState<Watched>({ model: EMPTY_LIVE, loading: true, problem: null });
+  const [watched, setWatched] = useState<Watched>(NOTHING_WATCHED);
   const [stop, setStop] = useState<{ run: string; problem: string | null } | null>(null);
   const gateOpen = useSelect(app.gate, (opened) => opened.has(chat));
   useEffect(() => {
-    setWatched({ model: EMPTY_LIVE, loading: true, problem: null });
+    setWatched(NOTHING_WATCHED);
     setStop(null);
     return watchChat(app.client, chat, app.timers, setWatched);
   }, [chat]);

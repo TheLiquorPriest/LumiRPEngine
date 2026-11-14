@@ -18,6 +18,22 @@ export interface Status {
   belongsToUser: boolean;
 }
 
+/** A permission RPE's extension in Lumiverse lacks, and why it needs it. */
+export interface MissingPermission {
+  permission: string;
+  why: string;
+}
+
+/** `GET /api/v1/status/extension` (page): how RPE's extension in Lumiverse last said it stands with RPE. */
+export interface ExtensionStatus {
+  /** Whether the extension holds RPE's registration, and so marks the replies RPE plays. */
+  registered: boolean;
+  /** Why it does not, in words a user is shown; null when it does. */
+  why: string | null;
+  /** The permissions it says it lacks, and why it needs each; null until it has said. */
+  missing: MissingPermission[] | null;
+}
+
 /** The live socket (`src/app/live.ts`): its path, its protocol, and how a page gives its token as a protocol. */
 export const LIVE_PATH = "/api/v1/live";
 export const LIVE_PROTOCOL = "rpe.live";
@@ -116,6 +132,24 @@ export interface StopAnswer {
   stopped: boolean;
 }
 
+/**
+ * A turn's folder as RPE writes it (plan §5.3: `TURN_FILES` in `src/turn/folder.ts`, and `transcripts/`
+ * in `src/turn/trace.ts`), kept here by hand as the routes are. No route lists a turn's folder or opens
+ * one of its files yet, so the Turn page names them and says they cannot be opened.
+ */
+export const TURN_FOLDER: readonly { name: string; holds: string }[] = [
+  { name: "briefing.md", holds: "the Author's briefing: the turn's facts, the lore map and the world state" },
+  { name: "world-state.md", holds: "the world state" },
+  { name: "assembled-preset-prompt.md", holds: "the prompt Lumiverse assembled" },
+  { name: "visible-chat-history.md", holds: "the chat's history the prompt carried" },
+  { name: "active-wi-content.md", holds: "the lore entries that activated" },
+  { name: "persona.md", holds: "the persona" },
+  { name: "character.md", holds: "the character card" },
+  { name: "turn.json", holds: "the turn's facts, as data" },
+  { name: "previous-attempts/", holds: "the earlier attempts at this reply, for a swipe or a regenerate" },
+  { name: "transcripts/", holds: "each agent's records" },
+];
+
 // ---------------------------------------------------------------- the route map the client is typed by
 
 /** A route's reply, its query and its body. */
@@ -128,6 +162,7 @@ export interface RouteShape<Reply, Query extends Record<string, string | number 
 /** Every route the pages call, by method and path pattern, as the route table writes them. */
 export interface Routes {
   "GET /api/v1/status": RouteShape<Status>;
+  "GET /api/v1/status/extension": RouteShape<ExtensionStatus>;
   "GET /api/v1/chats": RouteShape<ChatList>;
   "GET /api/v1/chats/:chat/turns": RouteShape<TurnList, { limit?: number; before?: string }>;
   "GET /api/v1/chats/:chat/turns/:turn": RouteShape<TurnDetail, { from?: number }>;
