@@ -63,13 +63,14 @@ Shipped rules in force:
 | `guidance/.rules/history-leaving.md` | Warns the Author when messages are about to leave the prompt and the story record does not cover them. |
 | `guidance/.rules/unsourced.md` | Points out a write that named no source. |
 | `guidance/.rules/reply-missing.md` | Catches a turn that is about to end without a reply. |
+| `guidance/.rules/intent-missing.md` | Tells the Author, at a turn's start, when the last turn's reply went out with no intent record written before it. |
 | `guidance/.rules/save-before-compaction.md` | Gives the Author one call to save what matters before a session's earlier turns are summarized. |
 
 Examples to copy from are in `guidance/.rules/examples/`. Nothing there is in force.
 
 ### Skills
 
-A skill is a folder in `.skills/` with a `SKILL.md`: a name, a description, and a body. Only the names and descriptions are in front of an agent. It loads a body when it needs it (`skill_load`). The shipped skills cover combat, time, economy, places and maps, quests, casting and more: see `guidance/.skills/`. For example, `guidance/.skills/time/SKILL.md` says how to let time pass.
+A skill is a folder in `.skills/` with a `SKILL.md`: a name, a description, and a body. Every agent that holds `skill_load` is shown the list of skills in force, each by its name and description: the lead at the end of its opening block, any other agent at the end of its instructions. A skill switched off is not listed, and one replaced at a nearer level is listed as that file has it. When the list changes during a session, the next briefing says so and gives the list as it stands. The list is laid out by `files/defaults/.prompts/skills.md`, which is the harness's own; take it out and no list is given. An agent loads a skill's body when it needs it (`skill_load`). As shipped, the Author, the game master, a character and the assistant hold `skill_load`. The shipped skills cover combat, time, economy, places and maps, quests, casting and more: see `guidance/.skills/`. For example, `guidance/.skills/time/SKILL.md` says how to let time pass.
 
 ### Agent definitions
 
@@ -79,10 +80,10 @@ Each agent is a file in `.agents/` (yours and the shipped ones) or `agents/` (a 
 - `effort`: how hard its model thinks;
 - `tools`: the tools it holds; with `tool_search` and `tool_use` it can reach the rest;
 - `reads`: which instruction files it reads;
-- `given`: what it is handed at the start of a run (the prompt or parts of it, the briefing, ranges of the chat, views of the world);
+- `given`: what it is handed at the start of a run (the prompt or parts of it, the briefing, ranges of the chat, views of the world and of its character). The lead's names are found the same way a sub-agent's are, and laid out after its briefing by `files/defaults/.prompts/given.md`; a name nothing could be found for gets one line saying so;
 - `limits`: how many calls it may make.
 
-Its text is its instructions. The shipped agents are the Author, who leads (`guidance/.agents/author.md`); the game master (`guidance/.agents/gm.md`); a character, one run per principal character (`guidance/.agents/character.md`); the narrator (`guidance/.agents/narrator.md`); the keeper, for bookkeeping after the reply (`guidance/.agents/keeper.md`); the historian, the indexer and the mapper, which run as jobs; and the assistant you can talk to outside the story (`guidance/.agents/assistant.md`). The agent that leads a turn is the setting `lead`.
+Its text is its instructions. The shipped agents are the Author, who leads (`guidance/.agents/author.md`); the game master (`guidance/.agents/gm.md`); a character, one run per principal character (`guidance/.agents/character.md`); the narrator (`guidance/.agents/narrator.md`); the keeper, for bookkeeping after the reply (`guidance/.agents/keeper.md`); the historian and the indexer, which run as jobs; the mapper, which the Author delegates within a turn; and the assistant you can talk to outside the story (`guidance/.agents/assistant.md`). The agent that leads a turn is the setting `lead`.
 
 ### Tool descriptions
 
@@ -90,13 +91,29 @@ What each tool is said to do, and what each of its arguments means, is a file in
 
 ### Prompt parts
 
-The files in `.prompts/` lay out what the agents are given: the briefing (`guidance/.prompts/briefing.md`), the world state (`guidance/.prompts/world-state.md`), the reply's contract (`guidance/.prompts/reply-contract.md`), the brief a sub-agent is sent (`guidance/.prompts/delegate-brief.md`), the answers the engine's tools give, and the compaction prompt. They lay facts out; they ask for no behaviour. Take a part out of the briefing's layout and it is no longer shown.
+The files in `.prompts/` lay out what the agents are given, and word what RPE answers. They lay facts out; they ask for no behaviour. Replace one, as any shipped file, to change it. Among them:
+
+| File | What it holds |
+|---|---|
+| `guidance/.prompts/briefing.md` | The briefing the Author is given at the start of every turn. Take a part out of its layout and it is no longer shown. Its header's `on_stage_views` names which views of the characters on stage it shows (see the fourth example below). |
+| `guidance/.prompts/world-state.md` | The world state, and the words of each line of the world's tree. |
+| `guidance/.prompts/reply-contract.md` | How a reply, an intent record and a closing call are marked. |
+| `guidance/.prompts/delegate-brief.md` | The frame around every brief a sub-agent is sent. |
+| `guidance/.prompts/compaction.md` | What a summary of a session's earlier turns keeps and drops. |
+| `guidance/.prompts/notices.md` | Every notice an agent can be shown. |
+| `guidance/.prompts/engine-answers.md`, `guidance/.prompts/cast-answers.md`, `guidance/.prompts/story-answers.md`, `guidance/.prompts/lore-answers.md`, `guidance/.prompts/map-answers.md` | The sentences the engine's, the cast's, the story record's, the lore's and the map's tools answer agents with. The Cast and Story pages answer you in the words of the cast's and the story's files too. |
+| `guidance/.prompts/reply-errors.md` | The plain line the chat shows when a turn ends without a reply. Where the turn had already shown its progress in the message's thinking block, the line goes there too, so that the message Lumiverse keeps says why. |
+| `guidance/.prompts/turn-errors.md` | The words a turn gives when it cannot be played, when it is stopped, when an agent's read of Lumiverse cannot be made, and when a Settle now is refused. |
+| `guidance/.prompts/play-answers.md` | What the Play page's panels are told when RPE does not do what they asked, or leaves something as it was. |
+| `guidance/.prompts/build-answers.md` | What the Build page is told when RPE does not do what it asked. |
+
+A chat with no world plays on a blank world. Its clock starts at a date nobody set, so no date is shown (in the briefing, the world state, the engine's answers, the cast's views and the story record) until a change in the story sets the clock to a date and a time. A span or a time of day only moves the clock, and until it is set the engine's answers give a time as how long from now. Memories are still timed, and fade all the same. The time skill tells the agents how a date is set.
 
 ### Notes, and what the agents may write
 
 The agents read your files and never write them. They write their notes in the chat's `persistent-workspace/` folder, and their working files in the turn's folder. Notes follow the turn: a swipe or a deleted turn takes back that turn's notes, and your own edits to notes are kept. When an agent thinks one of your files should change, it files a suggestion, which you accept, edit or dismiss on the Files page.
 
-## Three examples
+## Four examples
 
 ### Hand the prose to the narrator
 
@@ -136,3 +153,27 @@ off: [rules/engine-silent]
 ```
 
 For one chat only, put the same line in that chat's `RPE.yml`. Take the name out of the list to switch it on again. A rule tied to a file with `needs:` goes off with that file: switch off `rules/perceptions` and `perceptions-owed` and `perceptions-missing` go off with it.
+
+### Change what the Author is shown of the characters on stage
+
+At the start of every turn, the Author's briefing has an **On stage** part: views of the characters on stage, from the cast's records. Which views, of which characters, is the `on_stage_views` list in the header of `briefing.md` ([shipped](../guidance/.prompts/briefing.md)):
+
+```
+on_stage_views:
+  - history:principal
+  - imported:supporting
+```
+
+As shipped, that is the history of each principal character on stage, and the old mind files, carried from the previous build and not yet filed, of each supporting one. A name alone (`history`) gives that view of everyone on stage the cast holds; a name and a casting (`history:principal`) gives it of those cast so (`principal`, `supporting` or `extra`).
+
+To be shown the history of supporting characters too, and what is on a principal's mind now, copy `files/defaults/.prompts/briefing.md` to `files/.prompts/briefing.md` and change the list to:
+
+```
+on_stage_views:
+  - history:principal
+  - history:supporting
+  - mind:principal
+  - imported:supporting
+```
+
+The views it can name are the cast's: `base`, `growth`, `mind`, `what-comes-to-mind`, `relationships:present`, `unprocessed-perceptions`, `imported`, `game-side` and `history`, each laid out by its own file in `.prompts/` (`guidance/.prompts/cast-mind.md` for `mind`, and so on). A name that is none of these is passed over. Take a name out and that view is no longer given.

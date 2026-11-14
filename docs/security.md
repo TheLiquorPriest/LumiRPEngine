@@ -4,24 +4,32 @@
 
 RPE listens on `127.0.0.1` unless you set `address` in its `config.json`. It checks every request before any route runs: the `Host` it was sent to (its own address, or a name in `hosts`), a page's origin (its own, Lumiverse's, or one in `origins`), the key or token it carries, and its size.
 
+One route answers anyone who reaches RPE: its status, `/api/v1/status`, which says only that RPE answers and which build it runs. Which builds run and what RPE will do about a new one (`/api/v1/status/builds`) is told only with a page token or a web key.
+
 ## Keys and tokens
 
 Each key is random, shown once when it is made, and kept only as a hash. A new key of a kind stops the one before it at once. `rpe status` shows the last four characters of each and when it was made. Each kind starts alike, so you can tell which you hold.
 
 | Key | Starts with | What it opens | How it is made |
 |---|---|---|---|
-| Provider key | `rpe_` | RPE's provider endpoint (`/v1/chat/completions` and `/v1/models`): the replies Lumiverse asks for on RPE's connection. Nothing else. | `rpe up` makes it and gives it to RPE's connection in Lumiverse. `rpe key provider` makes a new one; put it in that connection as its API key. |
-| Extension key | `rpx_` | The routes only RPE's extension calls: the questions before each reply, the page tokens, and the confirmation of RPE's registration. | RPE makes a new one at every start and hands it to its extension. You never need to make one. |
-| Web key | `rpw_` | RPE's web app and its API, as you. | `rpe key web`, on the machine RPE runs on. |
+| Provider key | `rpe_` | RPE's provider endpoint (`/v1/chat/completions` and `/v1/models`): the replies Lumiverse asks for on RPE's connection. Nothing else. | `rpe up` makes it and gives it to RPE's connection in Lumiverse. `rpe key provider` makes a new one; put it in that connection as its API key. After the switch from the previous build, the connection RPE took over keeps the key it had, which a new provider key leaves working: `rpe status` lists it as taken from today's connection. `rpe key provider all` makes a new one and stops that one too: put the new one in that connection, and to go back, put its earlier key back in it. |
+| Extension key | `rpx_` | The routes only RPE's extension calls: the questions before each reply, the page tokens, and the confirmation of RPE's registration. | RPE makes a new one at every start and hands it to its extension. You never need to make one: one made by hand with `rpe key extension` cuts the extension off until RPE starts again. |
+| Web key | `rpw_` | RPE's web app and its API, as you. | `rpe key web`, on the machine RPE runs on. As shipped it has no end, and works until a new one replaces it. With `auth.webKeyDays` set, it runs out that many days after it is made: `rpe key web` prints when, and `rpe status` lists it. |
 | Page token | `rpp_` | RPE's API, as you, for 30 minutes (`auth.pageTokenMinutes`). | The extension asks RPE for one for a page in Lumiverse, and only for the Lumiverse user this RPE belongs to. Another user of the same Lumiverse gets none. |
 
-The command line makes its own short-lived token when it calls the running RPE (`rpe connection`), and lets it go after.
+The command line makes its own short-lived token when it calls the running RPE (`rpe connection`, `rpe status`), and lets it go after.
+
+A page's live socket holds its key or token for as long as it is open: it is checked when the socket opens and at every message, and the socket is closed once the page token or the web key runs out, or the web key is replaced. One socket follows at most `live.follows` chats.
+
+The extension takes RPE's registration only at a bare address on this machine (a scheme, a loopback host and a port, nothing more); any other is refused before a call goes out.
 
 **One RPE serves one Lumiverse user.** A sign-in as another user is refused before anything is written.
 
 ## Secrets
 
 Your model providers' keys, sign-ins to providers, and RPE's sign-in to Lumiverse are in `secrets.json` in RPE's data folder, which only your account can read. They are never in the files agents see, never in a transcript or a turn's folder, and never sent to a page. Your Lumiverse password is asked for when RPE signs in, and is not kept.
+
+Each provider key, and each header value a connection sends, is kept with the place it was given for: the connection's provider and the server its address names (its scheme, host and port). When a connection is moved to another server, on the Connections page, by a setting or by hand while RPE was stopped, they are dropped rather than sent there, and you give them again. This holds across a restart too, and across a run of the migration: the run keeps that place beside each key RPE already holds, and a key it takes from the previous build goes only where the previous build sends it.
 
 ## What RPE reads and writes
 

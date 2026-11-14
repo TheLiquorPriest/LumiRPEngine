@@ -82,3 +82,12 @@ bun floor.ts say "I pay her two coins for the oil."   # one line of your own on 
 The floor plays under a fixture of its own, consistent with itself, so that a simple turn asks nothing the chat cannot answer: the card (Marta Venn), a persona named as the card's scenario names the player ("Traveller", in the persona folder "Floor test (invented)") and a preset "Floor test (invented)" whose blocks are plain instructions naming nobody, the card, the scenario, the persona and the chat's history. Neither the persona nor the preset is made default or active: `run` names both on every generation it starts, plain and RPE alike (`preset_id` with `force_preset_id`, and `persona_id`, on `POST /api/v1/generate`), so no setting changes and every other chat keeps its own. The preset and the persona carry `lumirpengine_floor_test` in their metadata; `remove` deletes those, the card's chats named "Floor test", and the card when no other chat uses it.
 
 `--form` names the form RPE's connection replies in (plan §10.7). The table is judged by that form's pass values, and a turn whose release the trace names in the other form leaves every gate not judged. What each of RPE's numbers is read from is said beside its field of `RpeTurn` in `floor-measure.ts`; what the script cannot measure yet is printed as such, with what RPE would have to give for it.
+
+## A replay of turn kinds (`recheck.ts`)
+
+For checking a build after fixes: one line, a continue of its reply and two swipes in a chat you name, each started through Lumiverse as a player would, with what Lumiverse saved and what RPE recorded of each printed side by side (a turn tied to its message, whether it is on the chat's path, its status and calls). It takes the floor test's environment for RPE's address, page token and connection.
+
+```sh
+bun recheck.ts edit <chat>          # before a cutover: appends one sentence to the newest reply in Lumiverse
+bun recheck.ts play <chat> [line]   # on RPE: a line, a continue, two swipes
+```

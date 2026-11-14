@@ -35,6 +35,7 @@ The files are read again at every turn, so a change holds from the next turn on.
 | `history.step` | none (off) | Lets the window grow by this many messages before it is cut back to its size. |
 | `history.hold.on` | `false` | Keeps a message in the prompt past the window while the story record does not cover it. `hold: true` is short for this. |
 | `history.hold.cap` | `40` | The most messages held past the window. |
+| `since.editedBudget` | `4000` | Tokens the briefing's "Since the last turn" may spend telling replies edited after their turns in full, each with its text before and after, the newest first. The rest are named in one line by their message numbers. `~` tells every one in full. |
 | `passConnection` | none (the default connection) | The connection a request that is not a turn of RPE's is passed on to. Global file only. |
 
 ## Limits of a turn
@@ -93,18 +94,22 @@ The files are read again at every turn, so a change holds from the next turn on.
 
 ## Jobs
 
-Jobs are runs that go on after the reply, such as indexing lore or summarizing a stretch of the chat.
+Jobs are runs that go on after the reply, such as indexing lore or summarizing a stretch of the chat. `jobs.perRun` and `jobs.tokensPerDay` are the previous build's own limits on jobs, kept with the defaults it had.
 
 | Setting | Default | What it does |
 |---|---|---|
 | `jobs.atOnce` | `2` | Jobs running at once, across all your chats. One started past it waits. |
 | `jobs.perDay` | none (no limit) | Jobs that may start in a day. |
+| `jobs.perRun` | `6` | Jobs the agents of one run, a turn's or a job's, may start. A start past it is answered, and nothing is started. `0` starts no job; `~` for no limit. |
+| `jobs.tokensPerDay` | `12000000` | Tokens, sent and written, all your jobs may spend in a day. Past it no job starts, and a running job is stopped at its next call. `~` for no limit. |
+| `jobs.cachedWeight` | `0.1` | What a token read again from the provider's cache counts for against the day's job tokens: a tenth, as the previous build counts it. `1` counts it in full. |
 | `jobs.connections.<connection>.atOnce` | none (no limit of its own) | Jobs at once whose agent runs on one connection. |
 | `jobs.connections.<connection>.perDay` | none (no limit of its own) | Jobs a day whose agent runs on one connection. |
 | `jobs.run.calls` | `60` | Model calls in one job's run. `~` for no limit. |
 | `jobs.run.tokensIn` | `600000` | Tokens read in one job's run. `~` for no limit. |
 | `jobs.run.tokensOut` | `60000` | Tokens written in one job's run. `~` for no limit. |
 | `jobs.run.time` | `900` | Seconds for one job's run. `~` for no limit. |
+| `bootstrap.tokenLimit` | `200000` | Tokens a bootstrap job (taking on a chat that has a past) may send and write together, across all its agents, a cached re-read counted at `jobs.cachedWeight`. The job ends at it with what it has recorded, and its record says this limit stopped it. A tighter `jobs.run.*` limit stops it first. |
 
 ## Updates
 
@@ -115,6 +120,9 @@ Global file only.
 | `update.restart` | `true` | Restart onto a new build of RPE's file, once no turn or job is running. |
 | `update.versionWait` | `10` | Seconds a new file has to say its build before it counts as one that does not start. |
 | `update.lookEvery` | `2` | Seconds between looks for running turns and jobs while a restart waits. |
+| `update.checkWait` | `120` | Seconds a new build has to check that it starts on this RPE's data before it counts as one that does not start. |
+| `update.startTries` | `5` | Starts of RPE's service within `update.startWindow` before its unit stops starting it: a build that cannot serve is left stopped. `rpe up` writes it into the unit. |
+| `update.startWindow` | `60` | Seconds over which `update.startTries` counts starts. `rpe up` writes it into the unit. |
 
 ## Characters and their memories
 
@@ -131,8 +139,8 @@ What the cast's tools and views give agents of each character.
 | `cast.faintBelow` | `0.25` | The strength, from 0 to 1, under which a memory is faint and is shown by its gist. |
 | `cast.memoryWeight` | `1` | The weight of a memory written with none. |
 | `cast.weightMax` | `5` | The highest weight a memory can have. Weights run from 1. |
-| `cast.secretConfidence` | `1` | How sure, from 0 to 1, a character is of a secret a perception says they now know. |
-| `cast.charsPerToken` | `3.2` | Characters counted as one token when what comes to mind is measured, where the model's own count is not at hand. |
+| `cast.secretConfidence` | `1` | How sure, from 0 to 1, a character is of a secret a perception, or a `cast_update`, says they now know. |
+| `cast.charsPerToken` | `3.2` | Listed, and not in force in this build: what comes to a character's mind is always measured at 3.2 characters to a token, RPH's own estimate, whatever this says. |
 
 ## The story record
 
@@ -161,7 +169,7 @@ Global file only, read when RPE starts.
 |---|---|---|
 | `worldState.budget` | `4000` | Tokens the world state's parts other than the horizon share in the briefing. The horizon is shown whole. |
 | `worldState.charsPerToken` | `4` | Characters counted as one token when that budget is measured. |
-| `worldState.dueAhead` | `360` | Minutes of story time ahead that the list of what falls due covers. |
+| `worldState.dueAhead` | `360` | Minutes of story time ahead that the list of what falls due covers. The list shows what the budget fits and counts the rest. After a turn that moved the clock, the world state also lists what fell due in the time that passed, within the same budget. |
 
 ## The engine's tools
 
@@ -188,9 +196,10 @@ Global file only, read when RPE starts.
 | Setting | Default | What it does |
 |---|---|---|
 | `retention.turnFolders` | `50` | How many of a chat's newest turn folders are kept whole. Older ones keep `turn.json`, `output/` and `transcripts/`. |
-| `files.findLimit` | `200` | The most entries a listing, a glob or a grep of the files gives when it names no number: an agent's, or RPH's own as it reads the files in force. |
+| `files.findLimit` | `200` | The most entries a listing, a glob or a grep of the files gives when it names no number: an agent's, or RPH's own as it reads the files in force. A number an agent names is held to `tools.perCall` instead. A number RPE or RPH names for its own work, such as the list of a turn's folder on the Turn page, is given whole. |
 | `files.grepBytes` | `1048576` | Files larger than this many bytes are passed over by a grep. |
-| `files.grepLineChars` | `1000` | Characters of its line a grep hit shows. |
+| `files.grepLineChars` | `1000` | Characters of each line a grep tests, and of the line a hit shows. |
+| `files.grepMs` | `2000` | Milliseconds a grep runs before it stops with what it found so far. |
 | `files.diffCells` | `4000000` | The most line pairs the Files page compares one by one to show what changed. Past it, the changed part is shown removed, then added whole. |
 | `notes.listed` | `20` | Note files each of the Storage page's lists shows when it names no number. |
 | `notes.most` | `200` | The most note files each of those lists shows. |
@@ -227,7 +236,9 @@ These are in `config.json` in RPE's data folder, not in the YAML files: they are
 | `server.preflightSeconds` | `600` | How long a browser may keep RPE's answer to a page's preflight. |
 | `auth.pageTokenMinutes` | `30` | How long a page token holds. |
 | `auth.commandLineSeconds` | `60` | How long the token the command line makes to call the running RPE holds. |
+| `auth.webKeyDays` | none | Days the web UI's key works after it is made. With none it has no end: it works until a new web key replaces it. |
 | `live.queueEvents` | `512` | Events held for one slow page of one chat. Past it the oldest are dropped, and the page is told which. |
+| `live.follows` | `64` | The most chats one live socket may follow at once. A follow past it is refused, and the page is told so. |
 | `live.messageBytes` | `65536` | The largest message a page may send on the live socket. |
 | `database.busyMs` | `5000` | Milliseconds a write waits for another program's write to the database to finish. |
 | `database.sliceMs` | `10` | Milliseconds the write queue runs writes before it lets other work in. |

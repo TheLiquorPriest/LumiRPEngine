@@ -1,12 +1,14 @@
 // The docs of the standalone build (README.md and docs/), held to what they name: every `rpe` command
 // and flag they show is one the command line's own usage text has; every setting they name or write
-// in a YAML example is one a reader of the code takes; every shipped file they name is in `guidance/`;
+// in a YAML example is one a reader of the code takes; every shipped file they name is in `guidance/`
+// or, under `files/defaults/`, among the harness's own shipped files;
 // every link between them reaches a page and a heading that exist. A name renamed or removed in the
 // code fails here, where a reader would otherwise copy a line that no longer works.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { SHIPPED_GUIDANCE } from "rp-harness";
 import { runCli } from "../../src/app/cli";
 import { CONFIG_DEFAULTS } from "../../src/app/config";
 import { HARNESS_SETTINGS } from "../../src/app/harness-settings";
@@ -19,11 +21,12 @@ import { STORE_SETTINGS } from "../../src/store";
 import { STORY_SETTINGS } from "../../src/story";
 import { CHAT_DEFAULTS } from "../../src/tree/shipped";
 import { TREE_SETTINGS } from "../../src/tree/settings";
+import { BOOTSTRAP_SETTINGS } from "../../src/turn/bootstrap/settings";
 import { TURN_SETTINGS } from "../../src/turn/settings";
 
 const ROOT = join(import.meta.dir, "../..");
 const DOCS = ["README.md", "docs/install.md", "docs/migration.md", "docs/behaviour.md", "docs/settings.md", "docs/security.md", "docs/troubleshooting.md"];
-const SETTINGS: readonly SettingDef[] = [...HARNESS_SETTINGS, ...TURN_SETTINGS, ...UPDATE_SETTINGS, ...TREE_SETTINGS, ...CAST_SETTINGS, ...STORY_SETTINGS, ...LORE_SETTINGS, ...STORE_SETTINGS, ...IFACE_SETTINGS];
+const SETTINGS: readonly SettingDef[] = [...HARNESS_SETTINGS, ...TURN_SETTINGS, ...BOOTSTRAP_SETTINGS, ...UPDATE_SETTINGS, ...TREE_SETTINGS, ...CAST_SETTINGS, ...STORY_SETTINGS, ...LORE_SETTINGS, ...STORE_SETTINGS, ...IFACE_SETTINGS];
 /** The shipped config file. Beside settings, it holds the keys RPH's files layer reads (`off`, `layered`, `added`), which are in no settings list. */
 const SHIPPED_CONFIG = Bun.YAML.parse(readFileSync(join(ROOT, "guidance/RPE-global.yml"), "utf8")) as Record<string, unknown>;
 
@@ -175,6 +178,13 @@ describe("the standalone docs", () => {
     expect(wrong).toEqual([]);
   });
 
+  test("the install page names every command the command line has", async () => {
+    const commands = [...sections(await printed(["--help"])).keys()];
+    expect(commands.length).toBeGreaterThan(10);
+    const named = new Set(commandLines().filter((l) => l.path === "docs/install.md").map((l) => l.words[1]));
+    expect(commands.filter((c) => !named.has(c))).toEqual([]);
+  });
+
   test("every setting they name is one RPE or its harness reads, or a key of RPE's config file", () => {
     const wrong: string[] = [];
     // A dotted name in code is a setting, unless it is a file's name.
@@ -192,14 +202,15 @@ describe("the standalone docs", () => {
     expect(wrong).toEqual([]);
   });
 
-  test("every shipped file they name is in guidance/", () => {
-    // Named as in the repository (`guidance/…`) or as laid out in a data folder (`files/defaults/…`, the chat defaults at its root).
+  test("every shipped file they name is in guidance/, or in the harness's own shipped files under files/defaults/", () => {
+    // Named as in the repository (`guidance/…`) or as laid out in a data folder (`files/defaults/…`: RPH's own shipped files, with
+    // RPE's laid over them and the chat defaults at its root, as `layShipped` lays them).
     const named = SPANS.filter(({ span }) => span.startsWith("guidance/") || span.startsWith("files/defaults/"));
     const places = (span: string): string[] => {
       const path = span.replace(/[#:].*$/, "");
       if (path.startsWith("guidance/")) return [join(ROOT, path)];
       const below = path.slice("files/defaults/".length);
-      return [join(ROOT, "guidance", below), join(ROOT, "guidance", CHAT_DEFAULTS, below)];
+      return [join(ROOT, "guidance", below), join(ROOT, "guidance", CHAT_DEFAULTS, below), join(SHIPPED_GUIDANCE, below)];
     };
     const missing = named.filter(({ span }) => !places(span).some((at) => existsSync(at)));
     expect(missing.map(({ path, span }) => `${path}: ${span}`)).toEqual([]);

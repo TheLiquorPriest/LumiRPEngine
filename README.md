@@ -39,25 +39,33 @@ In these steps, `rpe` stands for `bun <the folder of this repository>/dist/rpe.j
 
 `rpe status` says whether RPE answers, which builds are running, and which keys are set. If a reply fails, see [Troubleshooting](docs/troubleshooting.md).
 
+## The pages
+
+RPE's pages are in a tab of Lumiverse's drawer called **RPE**, and in RPE's own web app. The pages of one chat: **Live** (what the agents are doing now), **Turns** (each turn and what its agents did; **Settle now**), **World** (the world's state at any turn), **Cast** (each character's whole record), **Story** (the story record, and bootstrap: setting RPE's agents to go over a chat's past) and **Play** (the previous build's play panels and HUD, running against RPE). The pages for everything: **Build** (the previous build's world builder, running against RPE), **Files**, **Connections**, **Settings**, **Storage** and **Migration**. The web app also has **Chats**. What each does, and what Play and Build cannot do yet, is in [Install and run](docs/install.md#the-pages).
+
 ## Already using the previous build?
 
-Do not install over it. Read [Moving from the previous build](docs/migration.md) first. You rehearse the move, run it for real, and only then switch the extension over. Your chats and their connection keep working, and you can go back.
+Do not install over it. Read [Moving from the previous build](docs/migration.md) first. You rehearse the move, run it for real, and only then switch the extension over with Lumiverse's own "switch branch". Your chats and their connection keep working, and you can go back.
 
 ## What this build does not have yet
 
-- **The play panels and the HUD in the chat** (the status pill, the map, the action palette, the chips). They are not in this build.
+- **The HUD inside the chat** (the floating status pill and its sheets). The previous build's panels are on the Play page instead.
+- **On the Play page:** a tap that goes with your next message or plays at once as your message; the journal and the chips; the map full screen, the actions sheet (Act, Actions, Timelapse) and the World sheet; the things browser; walking on the map; a chat's own choices (knowledge tracking, what the narrator knows).
+- **On the Build page:** its background jobs, lore and secrecy tools.
 - **The `lumirpengine` command line and MCP server for outside harnesses do not work after the switch.** They still talk to the previous build's extension, which the new one replaces.
-- The Cast, Story, Places, Quests, Rules, Lore and Prompt pages.
-- Talk, and panel actions.
+- The Places, Quests, Rules, Lore, Prompt, Agents, Sessions and Runtime pages, and a Jobs page of its own: a chat's jobs are listed on its Turns page and all of yours on Chats, each with Cancel while it is queued or running.
+- On the pages there are: Live's pause and "say something to the Author"; the Turn page's lanes, perceptions, gap checks, consents, unsourced items, open items, and a migrated turn's old record; editing the world, and a value's history; the Story page's beats beside the prose, its uncovered stretches and its story so far; the Cast page's game side, lore bindings and setting a casting.
+- Anything RPE adds to the chat itself in Lumiverse.
+- Signing in to the web app with your Lumiverse account: it takes a web key.
+- Talk.
 - Tools that run a command or call out: command tools, HTTP tools, MCP servers and hooks.
-- Starting a running story over from its history (bootstrap).
 - Writing to your Lumiverse lore books.
 
 The previous build stays on its own branch of this repository for anyone who needs these.
 
 ## Where to go next
 
-- [Install and run](docs/install.md): the service, the extension, RPE's connection in Lumiverse, the web app and its key, updating.
+- [Install and run](docs/install.md): the service, the extension, RPE's connection in Lumiverse, the pages, the web app and its key, updating, and every `rpe` command.
 - [Moving from the previous build](docs/migration.md): the rehearsal, the real run, the switch, the report, and going back.
 - [How behaviour lives in files](docs/behaviour.md): the files the agents read, and how to change what they do.
 - [Settings](docs/settings.md): every setting, its default and what it does.
@@ -67,7 +75,7 @@ The previous build stays on its own branch of this repository for anyone who nee
 
 ## Building and testing
 
-`bun run build` builds everything into `dist/`. `bun run test` runs the tests of this build, and `bun run typecheck` checks the types.
+The built files in `dist/` are part of the repository, so installing the extension or running `dist/rpe.js` needs no build. To build from a clone: `bun install`, then `bun run build`, which builds everything into `dist/`. `bun run test` runs the tests of this build, and `bun run typecheck` checks the types.
 
 ## Credits
 

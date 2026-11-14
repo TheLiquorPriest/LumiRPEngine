@@ -20,7 +20,7 @@
     "tables": "bun scripts/tables/build.ts",
     "templates": "bun scripts/templates/build.ts",
     "reference": "bun scripts/reference/build.ts",
-    "test": "\"$npm_execpath\" test ./test/app ./test/adapter ./test/store ./test/iface ./test/cast ./test/story ./test/lore ./test/turn ./test/tree ./test/ui ./test/ext ./test/migrate ./test/guidance ./test/build ./test/docs-standalone ./test/standalone-boundaries.test.ts",
+    "test": "\"$npm_execpath\" test ./test/app ./test/adapter ./test/store ./test/iface ./test/cast ./test/story ./test/lore ./test/play ./test/turn ./test/tree ./test/ui ./test/ext ./test/migrate ./test/guidance ./test/build ./test/build-mode ./test/docs-standalone ./test/standalone-boundaries.test.ts",
     "test:old": "bun scripts/test/run.ts",
     "check": "bun scripts/test/run.ts --check",
     "test:all": "bun scripts/test-all.ts",

@@ -37,7 +37,7 @@ rpe up --url <Lumiverse's address> --user <your Lumiverse username> --systemd
 
 `rpe up` does all of this:
 
-- It signs in to Lumiverse as you. It asks for your password and does not keep it; it keeps the sign-in Lumiverse gives back, in RPE's secrets file. A later run reuses that sign-in while Lumiverse still accepts it.
+- It signs in to Lumiverse as you. It asks for your password and does not keep it; it keeps the sign-in Lumiverse gives back, in RPE's secrets file. A later run reuses that sign-in while Lumiverse still accepts it. With no terminal, as from a script, it reads the password from the first line piped into it.
 - It makes RPE's connection in Lumiverse, called "RPE", or brings it up to date (see below).
 - With `--systemd`, it installs and starts RPE as a service of your account, named `rpe-<name>.service`. `--name <name>` chooses the name; without it, the name comes from your username. This needs Linux with systemd.
 - Last, it prints a numbered list of what is left for you to do.
@@ -48,13 +48,20 @@ Without `--systemd`, run RPE in the foreground with `rpe serve`, and keep it run
 
 One RPE serves one Lumiverse user. A sign-in as another user is refused before anything is written.
 
-Other commands for the service:
+Every command `rpe` has:
 
+- `rpe up`: the above. With `--lumiverse`, the switch from the previous build: see [Moving from the previous build](migration.md#3-the-switch).
+- `rpe serve`: runs RPE in the foreground.
 - `rpe status`: the build, the data folder, where RPE listens and whether it answers, the builds that run, the Lumiverse it belongs to, its keys, and anything waiting to be switched on.
 - `rpe down`: stops and removes RPE's service. Its data stays where it is.
-- `rpe lumiverse`: which Lumiverse this RPE belongs to, and its sign-in. With `--url` and `--user` it signs in again.
+- `rpe lumiverse`: which Lumiverse this RPE belongs to, and its sign-in. With `--url` and `--user` it signs in again; `--database <file>` reads Lumiverse's database file directly, and `--connection <id>` names RPE's connection in Lumiverse.
 - `rpe version`: this build's id.
+- `rpe key provider` and `rpe key web`: a new key, shown once; the one before it stops working. See [Security](security.md#keys-and-tokens).
+- `rpe connection list`, `rpe connection add` and `rpe connection remove`: RPE's model connections (below).
+- `rpe allow <name>` and `rpe deny <name>`: switch on, or off, something that runs a command or calls out. See [Security](security.md#what-rpe-never-does-by-itself).
 - `rpe backup`: one archive of RPE's database and file tree. `--out <file>` says where to write it.
+- `rpe migrate`: carries the previous build's data into RPE. See [Moving from the previous build](migration.md).
+- `rpe check`: whether this build starts on the data folder: its config read, and its changes to the database tried on a copy, made under `--into <folder>` (a temporary folder where none is given) and removed when it ends. RPE runs it on a new build before it restarts onto it (see [Updating](#updating)).
 
 ### The data folder
 
@@ -106,9 +113,32 @@ effort:
 
 `reply.forms.<connection>` and `effort.connections.<connection>` are set per connection, by its name or its id. See [Settings](settings.md).
 
+## The pages
+
+RPE's pages are in a tab of Lumiverse's drawer called **RPE**, for the chat Lumiverse has open, and in RPE's web app (below), where you choose the chat on **Chats**. On a narrow screen, the pages used less often are behind **More**. Where RPE refuses something, a page shows it in RPE's own words.
+
+For one chat:
+
+- **Live**: the turn running now, or the last one: what went to the chat as it streams, and, behind a spoiler gate, the intent record and every agent with its calls and the rules that fired. **Stop** ends it.
+- **Turns**: the chat's turns and each one's runs, and a turn's own page with what each agent did. **Settle now** runs the Author on the chat's newest turn against the chat as it reads now, for instance after you edited a reply in Lumiverse: it writes no reply and adds nothing to the chat. It is not offered while a turn of the chat runs, and it is refused in a branch whose newest turn is still the one it shares with the chat it was branched from: play a turn in the branch first. The chat's jobs (runs that go on after a reply, and bootstrap jobs) are listed here with what each spent and reported, and **Cancel** while one is queued or running; **Chats** lists your jobs of every chat.
+- **World**: the world's state as one tree, at the chat's head or at any turn, with where each value comes from.
+- **Cast**: the characters, each with their kind of casting, and, behind a spoiler gate, the Author's casting line and one character's whole record: base, growth, mind, memories, relationships, knowledge, history, perceptions, and the mind files carried from the previous build. An entry can be struck, and the strike taken back, which also stands again what the strike struck with it; that is your change, on the chat's newest turn. In a branch that has no turn of its own yet, a strike is refused until one has been played there.
+- **Story**: the story record: chapters, scenes and beats, with what is current, and behind a spoiler gate the story's threads, arcs, horizon and futures. An item can be struck, and the strike taken back. The Story page also has **bootstrap**: a job that sets RPE's agents to go over a chat's past and fill in its records. It shows what the records hold so far as counts (lore, history, cast, story, horizon, the principal characters; whether that is enough is the job's to judge, by the bootstrap skill) and the chat's bootstrap jobs, and starts one, for the outline, the key moments, all of it, or as the bootstrap skill decides. Nothing starts one by itself.
+- **Play**: the previous build's own play panels and HUD strip, running against RPE: the scene, the map's Places, money, gear, vehicles, the cast, sheets, quests, what is known, and more, each as its world has them. A tap that manages (taking a thing off, paying, moving the clock) is kept as your change on the chat's newest turn, with an Undo. A chat with no world shows the previous build's world picker: **Attach** gives the chat a world from Build. What Play cannot do in this build: a tap that goes with your next message or plays now; the journal and the chips; the map full screen, the actions sheet (Act, Actions, Timelapse) and the World sheet, which say once that they do not open here; the things browser; walking on the map; a chat's own choices. A tap or an Undo is refused while a turn of the chat runs, and an Undo is refused where a part of it has no undo. After an Attach, a note may say the chat "plays its classic steps": those are the previous build's words, and RPE plays it.
+
+For everything:
+
+- **Build**: the previous build's own world builder, running against RPE: the worlds RPE keeps, opened, edited (the map editor among them) and saved. What Build cannot do in this build: its background jobs, its lore and secrecy tools, which say once that RPE does not serve them; "Attach to this chat" (Play's picker attaches); in the web app, Lumiverse's books and connections, and Regenerate, Continue and showing a reply in a chat. Build's place in a world is not kept in the web address.
+- **Files**: the agents' files, level by level, each with whether it is in force; open, edit and save one at a level, delete or reset one, switch a shipped one off or on, compare with the default. The agents' suggestions, to accept, edit or dismiss. An agent's stack: every part it is given, in order. See [How behaviour lives in files](behaviour.md).
+- **Connections**: RPE's model connections, each model's limits and where each comes from, **Test it**, and your own context window and longest reply for a model.
+- **Settings**: every setting with its value, its default and the file that decides it, changed at a level of your choice. It also shows the `Builds:` line, and **Update now** when a new build waits (see [Updating](#updating)).
+- **Storage**: what RPE's files take, chat by chat; a chat's largest notes; pruning a chat's old turn folders.
+- **Migration**: the last migration's report, each chat's outcome, the backup, the worlds put into Build, what waits on you, the steps of going back, and a bootstrap job for every chat the migration carried.
+- **Chats** (web app only): the chats, those RPE has played and those the migration carried, with a way to each one's pages and to Play.
+
 ## The web app and its key
 
-RPE serves the same pages as the drawer tab at its own address, under `/ui/`: by default `http://127.0.0.1:7871/ui/`. The web app also has a **Chats** page.
+RPE serves the same pages as the drawer tab at its own address, under `/ui/`: by default `http://127.0.0.1:7871/ui/`. The web app also has the **Chats** page.
 
 The web app asks for a key once. Make one on the machine RPE runs on:
 
@@ -116,19 +146,20 @@ The web app asks for a key once. Make one on the machine RPE runs on:
 rpe key web
 ```
 
-It is shown once. The browser keeps it until you sign out. A new one makes the one before it stop working.
+It is shown once. The browser keeps it until you sign out, or until RPE stops taking it. A new one makes the one before it stop working. As shipped a web key has no end; with `auth.webKeyDays` set, it runs out that many days after it is made, and `rpe key web` prints when.
 
 RPE listens only on this machine unless you change that. To open the web app from another device, publish RPE's address over HTTPS (with a reverse proxy, for example), then list that address in `config.json`: its origin in `origins`, and its host name in `hosts`. Setting `address` makes RPE listen on another address as well; it always listens on `127.0.0.1` too, which the extension uses.
 
 ## Updating
 
-Update the extension in Lumiverse, as with any extension. Lumiverse replaces the files in the extension's folder, `dist/rpe.js` among them.
+Update the extension in Lumiverse, as with any extension. Lumiverse replaces the files in the extension's folder, `dist/rpe.js` among them. The built files are part of the repository, so Lumiverse builds nothing and installs nothing. (Moving onto this build from the previous one is not an update: it is Lumiverse's "switch branch", in [Moving from the previous build](migration.md#3-the-switch).)
 
-RPE notices the new file. It checks that the file starts, waits until no turn and no job is running, and then restarts onto it. Its service starts it again. This is the setting `update.restart`, on by default.
+RPE notices the new file. Before it restarts onto it, it has the new build check that it starts on RPE's data (`rpe check`), within `update.checkWait` seconds. Then it waits until no turn and no job is running, and restarts onto it, and its service starts it again. This is the setting `update.restart`, on by default.
 
-- `rpe status` has a `Builds:` line: the build RPE runs, the build of its file on disk, the extension's build, and what RPE will do about a difference.
-- A new file that does not start is never restarted onto. `rpe status` says so, and RPE goes on with the build it runs.
+- `rpe status` has a `Builds:` line: the build RPE runs, the build of its file on disk, the extension's build, and what RPE will do about a difference. The **Settings** page shows the same line.
+- A new build that fails the check, or does not say its build within `update.versionWait` seconds, is never restarted onto. `rpe status` says so and why, and RPE goes on with the build it runs.
+- A build that starts and then keeps failing all the same is left stopped: the service `rpe up` writes stops starting RPE after `update.startTries` starts within `update.startWindow` seconds.
 - RPE run by hand (`rpe serve`) never restarts by itself: stop it and start it again.
-- With `update.restart` off, restart RPE's service yourself.
+- With `update.restart` off, RPE waits for you: **Update now** on the Settings page restarts it onto the new build, or restart RPE's service yourself.
 
 Your files in RPE's data folder are never changed by an update. When an update changes a shipped file you replaced with your own, RPE records it, and the **Files** page shows the difference.
