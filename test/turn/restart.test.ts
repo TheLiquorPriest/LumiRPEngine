@@ -4,6 +4,8 @@
 // would, with RPE stopped as a process ends: it records nothing more. Every name is invented.
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { gate } from "rp-harness/testing/rig";
 import { textHash } from "../../src/adapter/lumiverse/wire";
 import type { TurnList } from "../../src/ui/api";
@@ -68,9 +70,12 @@ describe("RPE restarted mid-turn", () => {
     ]);
   });
 
-  test("stopped while its reply was being written: Lumiverse keeps nothing, and the next turn ends the run and drops the turn", async () => {
+  test("stopped while its reply was being written: Lumiverse keeps nothing, and the next turn ends the run, in the words of the user's turn-errors part, and drops the turn", async () => {
     const hold = gate();
     const b = await bed({ answers: [{ pieces: [{ text: "<intent>One exchange.</intent>" }, { text: "<reply>The lamp turns, and" }, { hold }, { text: " then dims.</reply>" }] }, replying("Wren relights it.")] });
+    // The user's own wording of the turn's failures, over the shipped part.
+    await mkdir(join(b.app.paths.files, ".prompts"), { recursive: true });
+    await writeFile(join(b.app.paths.files, ".prompts", "turn-errors.md"), "---\ndescription: Our own words.\nformat: lines\n---\nstopped_mid_run: RPE went down in the middle of this one.\n", "utf8");
     b.host.send(CHAT, "I climb the stairs.");
     const generating = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
     const turn = await b.until("the reply's first words", () => {
@@ -83,7 +88,7 @@ describe("RPE restarted mid-turn", () => {
 
     const next = await settledTurn(b, await play(b, "I wait in the dark."));
     expect(b.turns.store.user(USER).turn(turn)).toMatchObject({ status: "dropped", message: null });
-    expect(b.turns.runs.ofTurn(USER, turn).map((r) => [r.status, r.released])).toEqual([["failed", null]]);
+    expect(b.turns.runs.ofTurn(USER, turn).map((r) => [r.status, r.released, r.error?.detail])).toEqual([["failed", null, "RPE went down in the middle of this one."]]);
     expect(next.parent).toBeNull();
     const list = (await b.page<TurnList>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
     expect(list.map((t) => [t.id, t.status, t.onPath])).toEqual([

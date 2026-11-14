@@ -59,7 +59,7 @@ describe("one normal turn, end to end", () => {
     // The Turn page: the chat with its name, its one turn on the path, and the turn with its intent, its reply and its trace.
     const chats = await b.page<ChatList>("GET", "/api/v1/chats");
     expect(chats.status).toBe(200);
-    expect(chats.body.chats).toEqual([{ id: CHAT, name: "The lighthouse", lastTurnAt: expect.any(Number), running: false }]);
+    expect(chats.body.chats).toEqual([{ id: CHAT, name: "The lighthouse", lastTurnAt: expect.any(Number), running: false, played: true, world: false }]);
     const list = await b.page<TurnList>("GET", `/api/v1/chats/${CHAT}/turns`);
     expect(list.body.more).toBe(false);
     expect(list.body.turns).toHaveLength(1);

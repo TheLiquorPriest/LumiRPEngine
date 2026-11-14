@@ -1,5 +1,8 @@
 ---
-description: The layout of the briefing the Author is given at the start of every turn. Each part appears only when there is something to show. Take a part out and it is no longer shown. It lays facts out; it asks for nothing.
+description: The layout of the briefing the Author is given at the start of every turn. Each part appears only when there is something to show. Take a part out and it is no longer shown. It lays facts out; it asks for nothing. Its header's on_stage_views names which of the cast's views of the characters on stage are shown under On stage, in that order - a view by its name (history), or a view of one casting (history:principal); take a name out and that view is no longer given.
+on_stage_views:
+  - history:principal
+  - imported:supporting
 ---
 # Briefing for this turn
 
@@ -54,6 +57,12 @@ Your last turn's reply went out with no intent record written before it.
 
 {{world_state}}
 {{/world_state}}
+{{#on_stage}}
+
+## On stage
+
+{{on_stage}}
+{{/on_stage}}
 {{#lore_map}}
 
 ## Lore map

@@ -18,7 +18,7 @@
 // no state. If the event was missed, the next intake ties it the same way.
 
 import { type Fields, loadGuidance, type Guidance, type LinesPart, type TemplatePart } from "rp-harness";
-import type { Clock, ContextBlock, Harness, JobState, JsonObject, Log, ReplyError, ReplySink, Scope, SinceItem, TurnRequest, Usage } from "rp-harness/contract";
+import type { Clock, ContextBlock, FilesPort, Harness, JobState, JsonObject, Log, ReplyError, ReplySink, Scope, SinceItem, TurnRequest, Usage } from "rp-harness/contract";
 import { forkOf, reconcile, type ChatChange, type ChatChanges } from "../adapter/lumiverse/events";
 import type { TaggedTurn, TurnPlayer } from "../adapter/lumiverse/provider";
 import type { LumiverseReads, LvStep } from "../adapter/lumiverse/reads";
@@ -26,12 +26,12 @@ import type { LvMessage } from "../adapter/lumiverse/rows";
 import type { ReplyStream } from "../adapter/lumiverse/stream";
 import { textHash } from "../adapter/lumiverse/wire";
 import type { LiveHub } from "../app";
-import { castMark, takeBackCast } from "../cast";
+import { CAST_VIEWS, castMark, castPresentViews, type CastViewName, type SourceReader, takeBackCast } from "../cast";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { mapLines, mapView } from "../iface";
 import { type Lore, type LoreIndex, loreLines, loreMapFields } from "../lore";
 import { type DueSource, type PathEntry, type PathReport, type ShownMessage, type Store, type TurnRow, type UserStore, worldState } from "../store";
-import { sceneSession, storyBrief, storyMark, storyRecordParts, takeBackStory } from "../story";
+import { type SceneSession, sceneSession, storyBrief, storyMark, storyRecordParts, takeBackStory } from "../story";
 import { storyAt } from "../story/path";
 import { STORY_SO_FAR_DEFAULTS, storySoFar } from "../story/sofar";
 import { type Pruned, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName } from "../tree";
@@ -46,6 +46,7 @@ import type { Run, RunRecord, Runs } from "./runs";
 import { maskWorldInfoScanExclusions, SCAN_SETTING, scannedSteps, scanSettingsOf } from "./scan";
 import { type TurnSettings, turnSettings } from "./settings";
 import { type FoundItem, foundItems, type KeptItem, type SinceKept } from "./since";
+import { stageAt } from "./stage";
 import { guidanceTexts } from "./texts";
 
 /** The prompt parts the turn lane lays its texts out by (each under `.prompts/`). */
@@ -58,19 +59,53 @@ export const PARTS = {
   worldState: "world-state",
   storySoFar: "story-so-far",
   storyBrief: "story-brief",
+  briefing: "briefing",
+  turnErrors: "turn-errors",
 } as const;
 
 /** The names the briefing's template places the host's blocks by. */
-export const BLOCKS = { turnFacts: "turn-facts", loreMap: "lore-map", worldState: "world-state", storySoFar: "story-so-far", storyBrief: "story-brief" } as const;
+export const BLOCKS = { turnFacts: "turn-facts", loreMap: "lore-map", worldState: "world-state", storySoFar: "story-so-far", storyBrief: "story-brief", onStage: "on-stage" } as const;
 
-/** Characters to a token, for measuring the story so far against its share of the Author's window: the figure RPH's own estimates use. */
+/** The briefing's header field that names the cast's views of the characters on stage the Author is given (`castPresentViews`). */
+export const ON_STAGE_VIEWS = "on_stage_views";
+
+/** Characters to a token, for measuring what the turn gives the Author against a budget: the figure RPH's own estimates use. */
 const CHARS_PER_TOKEN = 3.2;
+
+/** A text's tokens as the turn counts what it gives against a budget (the story so far, what comes to mind): RPH's own estimate. */
+export function turnTokens(text: string): number {
+  return Math.ceil(text.length / CHARS_PER_TOKEN);
+}
+
+/**
+ * The parts in force that lay out the cast's views `names` names, by view: a view by its own name, or a view of one casting
+ * (`history:principal`). A view whose part is switched off has none, and is given no text.
+ */
+export async function castLayouts(guidance: Pick<Guidance, "part">, names: readonly string[]): Promise<Partial<Record<CastViewName, TemplatePart>>> {
+  const layouts: Partial<Record<CastViewName, TemplatePart>> = {};
+  for (const view of Object.keys(CAST_VIEWS) as CastViewName[]) {
+    if (!names.some((name) => name === view || name.startsWith(`${view}:`))) continue;
+    const part = await guidance.part(CAST_VIEWS[view]);
+    if (part?.format === "template") layouts[view] = part;
+  }
+  return layouts;
+}
 
 /** A session's id while a chat has none yet: the settings are read before the turn that opens one, and no file of theirs is a session's. */
 export const NO_SESSION = "none";
 
-/** How a run RPE stopped during ended, as the Turn page shows it: no agent is told it. */
-const STOPPED_MID_RUN: ReplyError = { code: "failed", detail: "RPE stopped while this run was going on." };
+/**
+ * One of the turn's own failures, refusals and stops (a turn RPE cannot play, a run stopped, a read of Lumiverse it cannot make) in the
+ * words of the turn-errors part in force for the chat; the case's name alone where the part has no line for it or cannot be read, so
+ * that a stop is never held up by its words.
+ */
+export async function turnErrorWords(files: FilesPort, at: { user: string; chat: string }, name: string, fields: Fields = {}): Promise<string> {
+  try {
+    return lines(await loadGuidance(files, { user: at.user, chat: at.chat, session: NO_SESSION }).part(PARTS.turnErrors))?.line(name, fields) ?? name;
+  } catch {
+    return name;
+  }
+}
 
 /** The notice that tells each way a job can end (plan §13.5): a job that did not finish is never told as finished. */
 const JOB_ENDS: Readonly<Partial<Record<JobState, string>>> = { done: "job_finished", failed: "job_failed", cancelled: "job_cancelled", interrupted: "job_interrupted", "off-path": "job_off_path" };
@@ -97,6 +132,8 @@ export interface TurnLaneDeps {
   due: DueSource;
   /** What a migration carried of a chat, for its first briefing on RPE. */
   migrated: MigratedSource;
+  /** A character's sources read live, for a view of those on stage that shows them (`base`). */
+  sources: SourceReader;
   live: LiveHub;
   /** The adapter's reads of Lumiverse; null before it is mounted, or when RPE is not set up for a Lumiverse. */
   reads(): LumiverseReads | null;
@@ -236,10 +273,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       took[step] = Math.round((now - mark) * 100) / 100;
       mark = now;
     };
-    const reads = this.#d.reads();
-    if (reads === null) throw new Error("RPE is not set up for a Lumiverse, so it cannot play this chat.");
     const { tag } = tagged;
     const { user, chat } = tag;
+    const reads = this.#d.reads();
+    if (reads === null) throw new Error(await turnErrorWords(this.#d.files, tag, "no_lumiverse"));
     const store = this.#d.store.user(user);
     // One intake at a time for a chat (plan §10.1): from here until its run is held, which the next one then waits for as the turn
     // before. A request Lumiverse stops listening to before its turn begins ends there, having begun nothing.
@@ -267,7 +304,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       // reply: a new reply's message is left out, and the message a swipe or a regenerate writes a new swipe of is compared as it
       // showed before, held by the attempt being replaced. Its empty new swipe, which may bear the same date, is no edit of that attempt.
       const steps = await reads.path(chat);
-      if (steps === null) throw new Error(`Lumiverse has no chat ${chat} for this RPE's user.`);
+      if (steps === null) throw new Error(await turnErrorWords(this.#d.files, tag, "no_chat", { chat }));
       lap("path");
       const writing = tag.kind === "new" ? tag.target.message : null;
       const replaced = tag.kind === "swipe" || tag.kind === "regenerate" ? tag.target.message : null;
@@ -306,9 +343,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       // The turn: a new attempt, or for a continue the turn its message is tied to (plan §10.10).
       const continued = tag.kind === "continue" && tag.target.message !== null ? this.#tiedTo(user, chat, tag.target.message) : null;
       const begun = continued ?? (await this.#d.writes.run(() => store.beginTurn({ chat, kind: tag.kind, generation: tag.generation, target: replaced }), "beginning a turn"));
-      // The session the turn plays in (plan §11): the one the story record's open scene has on the turn's path, or one opened now for that
-      // scene (or for none), starting from the summary of the scene before it.
-      const inForce = sceneSession(this.#d.store, user, chat, begun.id);
+      // The session the turn plays in (plan §11): the one in force at it (`#sessionAt`), or one opened now for the scene the story record
+      // holds open there (or for none), starting from the summary of the scene before it. A swipe or a regenerate may play on in the
+      // session an earlier attempt at its message played in, a continue in its own turn's, any turn in the turn it follows.
+      const earlierAttempts = replaced === null ? [] : store.swipes(chat, replaced).flatMap((t) => (t.id === begun.id ? [] : [t.id]));
+      const inForce = this.#sessionAt(user, chat, begun.id, [begun.id, begun.parent, ...earlierAttempts]);
       const session = inForce.session ?? (await this.#d.writes.run(() => store.openSession({ chat, scene: inForce.scene, turn: begun.id }), "opening a session"));
       const scope = { user, chat, session: session.id, turn: begun.id };
       if (inForce.session === null) await this.#d.harness().sessions?.open(scope, inForce.summary === null ? {} : { summary: inForce.summary });
@@ -454,7 +493,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const generation = run.generation;
       await this.#d.stopGeneration(generation).catch((error: unknown) => this.#d.log.warn("Lumiverse could not be told to stop this turn's generation; the turn is stopped on RPE's side.", { turn, generation, error: words(error) }));
     }
-    run.stop.abort(new Error("The player stopped the turn."));
+    run.stop.abort(new Error(await turnErrorWords(this.#d.files, run, "player_stopped")));
     return true;
   }
 
@@ -468,7 +507,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const played = this.#d.runs.record(user, turn)?.session;
     const row = store.turn(turn);
     if (played === undefined || row === null || row.status === "dropped") return;
-    const now = sceneSession(this.#d.store, user, chat, turn);
+    const now = this.#sessionAt(user, chat, turn, [turn]);
     if (now.session?.id === played) return;
     const sessions = this.#d.harness().sessions;
     await this.#d.writes.run(() => store.closeSession(played, turn), "closing the session of a scene that ended");
@@ -476,6 +515,25 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     if (now.session !== null || now.scene === "") return;
     const opened = await this.#d.writes.run(() => store.openSession({ chat, scene: now.scene, turn }), "opening the session of a scene that began");
     await sessions?.open({ user, chat, session: opened.id, turn }, now.summary === null ? {} : { summary: now.summary });
+  }
+
+  /**
+   * The session in force at a turn (plan §11): the one the story record's open scene has on the turn's line (`sceneSession`). Where no
+   * session opened on that line is for the scene, the first that a turn of `on` played in and that is the chat's, for the same scene. A
+   * session opened at a turn's start (the chat's first, or the first after a scene ended with none open) is that place's, not that
+   * attempt's: a swipe of the turn is a branch of the same session file, and the turns after it follow it there, so an earlier attempt
+   * shown again finds in that file what followed the attempt it replaces.
+   */
+  #sessionAt(user: string, chat: string, turn: string, on: readonly (string | null)[]): SceneSession {
+    const at = sceneSession(this.#d.store, user, chat, turn);
+    if (at.session !== null) return at;
+    const store = this.#d.store.user(user);
+    for (const t of on) {
+      const played = t === null ? undefined : this.#d.runs.record(user, t)?.session;
+      const session = played === undefined ? null : store.session(played);
+      if (session !== null && session.chat === chat && session.scene === at.scene) return { ...at, session: { ...session, closedBy: null } };
+    }
+    return at;
   }
 
   // ---------------------------------------------------------------- intake
@@ -527,7 +585,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const awaiting = this.#d.runs.unsettled(user, chat);
     if (awaiting.length === 0) return;
     const left = awaiting.filter((r) => r.status === "running");
-    if (left.length > 0) await this.#d.writes.run((db) => left.forEach((r) => this.#d.runs.put(db, { ...r, status: "failed", error: STOPPED_MID_RUN })), "ending the runs RPE stopped during");
+    if (left.length > 0) {
+      const stopped: ReplyError = { code: "failed", detail: await turnErrorWords(this.#d.files, { user, chat }, "stopped_mid_run") };
+      await this.#d.writes.run((db) => left.forEach((r) => this.#d.runs.put(db, { ...r, status: "failed", error: stopped })), "ending the runs RPE stopped during");
+    }
     const found = await reconcile(reads, { chat, messages: [], awaiting: awaiting.map((r) => ({ generation: r.generation ?? "", message: r.target })) });
     for (const change of found) {
       if (change.kind !== "generation-ended") continue;
@@ -560,7 +621,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   /** A turn off the path: its run, if it goes on, stopped, and RPH told. */
   async #cancel(user: string, chat: string, turn: string): Promise<void> {
     const run = this.#d.runs.running(user, turn);
-    run?.stop.abort(new Error("The turn left the chat's path."));
+    if (run !== undefined) run.stop.abort(new Error(await turnErrorWords(this.#d.files, { user, chat }, "left_path")));
     await this.#d.harness().turnLeft({ user, chat, session: run?.session ?? this.#d.runs.record(user, turn)?.session ?? NO_SESSION, turn });
     await run?.over;
   }
@@ -585,7 +646,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       this.#d.clock.clearTimeout(timer);
     }
     const stopped = [...going];
-    for (const r of before) r.stop.abort(new Error("The next turn began, and this run had used the time it was given."));
+    const limit = new Error(await turnErrorWords(this.#d.files, { user, chat }, "previous_run_limit"));
+    for (const r of before) r.stop.abort(limit);
     await Promise.all(before.map((r) => r.over));
     return stopped;
   }
@@ -609,8 +671,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   }
 
   /**
-   * The briefing's blocks (plan §10.2 block 4): the turn's facts, the lore map, the world state, the story so far and the story brief,
-   * each laid out by its part; and the ids of the entries the lore map names, for the turn's folder.
+   * The briefing's blocks (plan §10.2 block 4): the turn's facts, the lore map, the world state, the cast's views of those on stage,
+   * the story so far and the story brief, each laid out by its part; and the ids of the entries the lore map names, for the turn's
+   * folder.
    */
   async #briefing(reads: LumiverseReads, guidance: Guidance, scope: Scope & { turn: string }, tagged: TaggedTurn, steps: readonly LvStep[], lead: string): Promise<{ blocks: ContextBlock[]; loreMap: string[] }> {
     const { tag } = tagged;
@@ -649,6 +712,22 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         this.#d.log.error("The world state could not be compiled for this turn's briefing.", { turn: scope.turn, error: words(error) });
       }
     }
+    // The cast's views of the characters on stage (plan §7.1, §15.2): which views, of which castings, is what the briefing's header names
+    // (`on_stage_views`), each character's laid out by its part, one after another in the order named. Nobody is on stage where the story
+    // record holds no scene open at the turn. Views that cannot be read are left out of this turn's briefing, and the log says why.
+    const said = (await guidance.part(PARTS.briefing))?.header[ON_STAGE_VIEWS];
+    const named = Array.isArray(said) ? said.flatMap((name) => (typeof name === "string" && name.trim() !== "" ? [name.trim()] : [])) : [];
+    const stage = named.length === 0 ? null : stageAt(this.#d.store, scope.user, scope.chat, scope.turn);
+    if (stage !== null && stage.who.length > 0) {
+      try {
+        const input = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn, present: stage.who, sources: this.#d.sources, layouts: await castLayouts(guidance, named), tokens: turnTokens };
+        const views = await castPresentViews(named, stage.place === null ? input : { ...input, cues: [stage.place] });
+        const text = views.flatMap((view) => (view.text.trim() === "" ? [] : [view.text.trimEnd()])).join("\n\n");
+        if (text !== "") blocks.push({ name: BLOCKS.onStage, text });
+      } catch (error) {
+        this.#d.log.error("The cast's views of those on stage could not be read for this turn's briefing.", { turn: scope.turn, error: words(error) });
+      }
+    }
     // The story so far, for the history the window left out of the prompt, and the story brief (plan §8.1): drawn from the story
     // record as this turn's path holds it, each laid out by its part.
     const point = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn };
@@ -658,7 +737,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const soFar =
         keptFrom === null
           ? null
-          : storySoFar({ record: storyRecordParts(point), keptFrom, contextWindow: await this.#authorWindow(guidance, lead, scope.turn), settings: STORY_SO_FAR_DEFAULTS, tokens: (text) => Math.ceil(text.length / CHARS_PER_TOKEN), layout: soFarPart });
+          : storySoFar({ record: storyRecordParts(point), keptFrom, contextWindow: await this.#authorWindow(guidance, lead, scope.turn), settings: STORY_SO_FAR_DEFAULTS, tokens: turnTokens, layout: soFarPart });
       if (soFar !== null && soFar.text.trim() !== "") blocks.push({ name: BLOCKS.storySoFar, text: soFar.text.trimEnd() });
     }
     if (briefPart?.format === "template") {

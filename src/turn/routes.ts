@@ -1,5 +1,6 @@
 // The routes the Turn and World pages read (plan §14), in the shapes the pages' client is typed by
-// (`src/ui/api.ts`): the chats RPE plays; a chat's turns newest first, each with what its runs spent
+// (`src/ui/api.ts`): the chats RPE played, then those its store holds that it has not (a migration's);
+// a chat's turns newest first, each with what its runs spent
 // together; one turn with its intent record, what went to the chat, the lore of its prompt, its trace,
 // and each of its runs (the first, then each continue) with its own trace and the request files the
 // harness kept for it; the Stop of a turn going on now; the files of a turn's folder, listed and read,
@@ -209,11 +210,24 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       method: "GET",
       path: "/api/v1/chats",
       access: "page",
-      handle: async ({ user }) => ({
-        chats: await Promise.all(
-          turns.runs.chats(user).map(async (c) => ({ id: c.chat, name: (await deps.chatName(c.chat)) ?? "", lastTurnAt: c.last, running: turns.runs.ofChat(user, c.chat).length > 0 })),
-        ),
-      }),
+      handle: async ({ user }) => {
+        // The chats played on RPE, newest first; then each chat the store holds with no run yet (one a migration imported), by name.
+        // Each says whether it was played, and whether the store has a world for it, so a page offers a world's panels only there.
+        const store = turns.store.user(user);
+        const played = turns.runs.chats(user);
+        const ran = new Set(played.map((c) => c.chat));
+        const row = async (chat: string, last: number | null) => ({
+          id: chat,
+          name: (await deps.chatName(chat)) ?? "",
+          lastTurnAt: last,
+          running: turns.runs.ofChat(user, chat).length > 0,
+          played: last !== null,
+          world: (store.chat(chat)?.revision ?? null) !== null,
+        });
+        const unplayed = await Promise.all(store.chats().flatMap((c) => (ran.has(c.id) ? [] : [row(c.id, null)])));
+        unplayed.sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        return { chats: [...(await Promise.all(played.map((c) => row(c.chat, c.last)))), ...unplayed] };
+      },
     }),
     route({
       method: "GET",

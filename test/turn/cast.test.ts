@@ -1,15 +1,18 @@
 // The cast, plugged into the turn (plan §7.1, §7.3, §5.4): the Author writes a character's record with
 // `cast_update`, and an agent that plays that character is given its views by the name its definition
-// lists (`cast:self(…)`), laid out by their parts; the cast's facts count who the open scene has on
-// stage; and what a sub-agent the lead drops, or a continue that saves nothing, wrote to the cast and
-// the story is taken back with its changes. Played through the stand-in Lumiverse on the scripted
-// model. Every name is invented.
+// lists (`cast:self(…)`), laid out by their parts; the Author's briefing holds the views of those on
+// stage that the briefing's header names; a secret a book attached to the chat marks can be held; the
+// cast's facts count who the open scene has on stage; and what a sub-agent the lead drops, or a continue
+// that saves nothing, wrote to the cast and the story is taken back with its changes. Played through the
+// stand-in Lumiverse on the scripted model. Every name is invented.
 
 import { afterEach, expect, test } from "bun:test";
 import type { JsonObject } from "rp-harness/contract";
 import { type Answer, gate } from "rp-harness/testing/rig";
+import { knowersOf } from "../../src/packs/minds/core/knowledge";
 import type { TurnRow } from "../../src/store";
-import { CHAT, CONNECTION, openTurnBed, PRESET, settledTurn, type TurnBed, USER } from "./bed";
+import { world } from "../iface/rig";
+import { CHAT, CONNECTION, openTurnBed, playsWorld, PRESET, replying, settledTurn, type TurnBed, USER } from "./bed";
 
 const beds: TurnBed[] = [];
 afterEach(async () => {
@@ -160,4 +163,66 @@ test("a continue that saves nothing new takes back what it wrote to the cast and
   await b.until("the continue's end to be recorded", () => (b.turns.runs.byGeneration(USER, out.generationId!)?.settled ?? null) !== null);
 
   expect(rowsOf(b, turn.id)).toEqual(before);
+});
+
+test("the Author's briefing holds the views of those on stage its header names: the history of a principal, not of a supporting character", async () => {
+  // The rules that ask for the perceptions of those on stage would ask for calls this test does not script.
+  const b = await openTurnBed({
+    off: ["rules/turn-unrecorded", "rules/perceptions-missing", "rules/perceptions-owed"],
+    answers: [
+      calling(
+        "cast_update",
+        {
+          operations: [
+            { op: "cast", who: "Wren Hale", as: "principal" },
+            { op: "history", who: "Wren Hale", text: "HISTORY-WREN She lit the lamp the night the Mary Bell went down." },
+            { op: "cast", who: "Bram Coyle", as: "supporting" },
+            { op: "history", who: "Bram Coyle", text: "HISTORY-BRAM He rowed out for the drowned." },
+          ],
+        },
+        "The two at the light are cast.",
+      ),
+      calling("story_record", { operations: [{ op: "scene", new: true, title: "Night watch", place: "the lamp room", who: ["Wren Hale", "Bram Coyle"] }] }),
+      { pieces: [{ text: "<reply>The lamp turns.</reply>" }] },
+      replying("Wren trims the wick."),
+    ],
+  });
+  beds.push(b);
+  await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+  await settledTurn(b, await play(b, "normal", "I watch them work."));
+
+  // The first turn began with no scene open, so nobody was on stage; the second has both, and is given Wren's history alone.
+  const onStage = b.requests.map((r) => r.briefing.find((block) => block.name === "on-stage")?.text ?? null);
+  expect(onStage[0]).toBeNull();
+  expect(onStage[1]).toBe("### Wren Hale's history in the story\n- HISTORY-WREN She lit the lamp the night the Mary Bell went down.");
+  const seen = JSON.stringify(b.model.requests.at(-1)?.messages);
+  expect(seen).toContain("## On stage");
+  expect(seen).toContain("HISTORY-WREN");
+  expect(seen).not.toContain("HISTORY-BRAM");
+});
+
+test("a secret a book attached to the chat marks is held once perceived; one of a book the chat does not have is not", async () => {
+  const attached = "wi:wb-vale:wbe-cellar:0";
+  const elsewhere = "wi:wb-other:wbe-well:0";
+  const b = await openTurnBed({
+    answers: [
+      calling("cast_update", { operations: [{ op: "cast", who: "Odile", as: "principal" }] }, "Odile goes down to the cellar."),
+      calling("perceive", { perceptions: [{ who: "Odile", reach: "whole", content: "She finds the seal in the cellar, and it is wrong.", secrets: [attached, elsewhere] }] }),
+      { pieces: [{ text: "<reply>Odile holds the seal to the lamp.</reply>" }] },
+    ],
+  });
+  beds.push(b);
+  await playsWorld(b, world());
+  b.db.run("INSERT INTO world_books (id, name, user_id) VALUES (?, ?, ?)", "wb-vale", "Vale Book", USER);
+  b.db.run("INSERT INTO world_books (id, name, user_id) VALUES (?, ?, ?)", "wb-other", "Other Book", USER);
+  b.db.run("INSERT INTO world_book_entries (id, world_book_id, uid, key, content, comment) VALUES (?, ?, ?, ?, ?, ?)", "wbe-cellar", "wb-vale", "1", "[]", "The cellar runs under the square.\n{{// Secret: The reeve   forged the seal.}}", "The cellar");
+  b.db.run("INSERT INTO world_book_entries (id, world_book_id, uid, key, content, comment) VALUES (?, ?, ?, ?, ?, ?)", "wbe-well", "wb-other", "1", "[]", "The well is dry.\n{{// Secret: The well hides the bell.}}", "The well");
+  b.db.run("UPDATE chats SET metadata = ? WHERE id = ?", JSON.stringify({ chat_world_book_ids: ["wb-vale"] }), CHAT);
+  await settledTurn(b, await play(b, "normal", "I send Odile down to the cellar."));
+
+  const minds = (b.turns.store.user(USER).headState(CHAT).state.world.packs.minds ?? {}) as { knowledge?: { facts: Record<string, JsonObject> } };
+  expect(minds.knowledge?.facts[attached]).toMatchObject({ id: attached, kind: "wi", claim: "The reeve forged the seal.", truth: "true" });
+  expect(knowersOf(minds as never, attached)).toEqual(["odile"]);
+  expect(minds.knowledge?.facts[elsewhere]).toBeUndefined();
+  expect(knowersOf(minds as never, elsewhere)).toEqual([]);
 });

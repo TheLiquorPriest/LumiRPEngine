@@ -15,9 +15,9 @@
 // holds it.
 
 import type { Database } from "bun:sqlite";
-import { loadGuidance, type TemplatePart } from "rp-harness";
+import { loadGuidance } from "rp-harness";
 import type { AgentRef, ContextBlock, FilesPort, Log, Scope, TurnEvents } from "rp-harness/contract";
-import { CAST_VIEWS, castViews, type CastViewName, dropCastStaged, type SourceReader } from "../cast";
+import { castViews, dropCastStaged, type SourceReader } from "../cast";
 import { LORE_BATCH, type LoreIndex, loreBatchBlock } from "../lore";
 import type { Store } from "../store";
 import { dropStoryStaged } from "../story";
@@ -26,6 +26,7 @@ import { keepJob } from "./jobs";
 import type { Writes } from "./kv";
 import type { Runs } from "./runs";
 import { stageAt } from "./stage";
+import { castLayouts, turnTokens } from "./turns";
 
 export interface EventsDeps {
   db: Database;
@@ -62,13 +63,7 @@ async function castSelf(deps: EventsDeps, scope: Scope, agent: AgentRef, ref: st
     .split(",")
     .map((name) => name.trim())
     .filter((name) => name !== "");
-  const guidance = loadGuidance(deps.files, scope);
-  const layouts: Partial<Record<CastViewName, TemplatePart>> = {};
-  for (const name of names) {
-    if (!Object.hasOwn(CAST_VIEWS, name)) continue;
-    const part = await guidance.part(CAST_VIEWS[name as CastViewName]);
-    if (part?.format === "template") layouts[name as CastViewName] = part;
-  }
+  const layouts = await castLayouts(loadGuidance(deps.files, scope), names);
   const turn = scope.turn ?? null;
   const stage = stageAt(deps.store, scope.user, scope.chat, turn);
   const views = await castViews(names, {
@@ -81,6 +76,7 @@ async function castSelf(deps: EventsDeps, scope: Scope, agent: AgentRef, ref: st
     ...(stage?.place != null ? { cues: [stage.place] } : {}),
     sources: deps.sources,
     layouts,
+    tokens: turnTokens,
   });
   return views
     .map((view) => view.text)

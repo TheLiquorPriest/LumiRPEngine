@@ -163,4 +163,20 @@ describe("the turn tree", () => {
     const left = (table: string) => store.db.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get()?.n;
     for (const table of ["message_link", "chat", "turn", "change", "path_node"]) expect([table, left(table)]).toEqual([table, 0]);
   });
+
+  test("a user's chats are listed oldest first: not a chat deleted while a branch still shares its turns, nor another user's", () => {
+    const { s, store, revision } = testStore();
+    s.createChat({ id: "source", revision });
+    play(s, "source", "m1", "Into the inn.", 1, engine(goTo(POV, "cellar")));
+    s.createChat({ id: "plain" });
+    s.branchChat({ id: "branch", from: "source", map: { m1: "b-m1" } });
+    store.user("user-b").createChat({ id: "theirs" });
+    expect(s.chats().map((c) => [c.id, c.revision])).toEqual([
+      ["source", revision],
+      ["plain", null],
+      ["branch", revision],
+    ]);
+    expect(s.deleteChat("source")).toEqual({ kept: true });
+    expect(s.chats().map((c) => c.id)).toEqual(["plain", "branch"]);
+  });
 });

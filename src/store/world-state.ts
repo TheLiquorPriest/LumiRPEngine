@@ -110,8 +110,10 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
   const placed = new Set(part.body.fields);
   const want = (s: WorldStateSection): boolean => placed.has(s);
 
-  // The horizon as the Author left it; an entry inside another is shown with it.
-  const listed = [...new Set(view.horizon().flatMap((h) => (h.ref === null ? [] : [h.ref])))];
+  // The horizon as the Author left it, in its order; an entry inside another is shown with it, and one that names nothing in the
+  // world is shown as the Author's own words, once.
+  const entries = view.horizon();
+  const listed = [...new Set(entries.flatMap((h) => (h.ref === null ? [] : [h.ref])))];
   const ancestors = (ref: string): string[] => {
     const out: string[] = [];
     for (let at = view.parentOf(ref); at !== null; at = view.parentOf(at)) out.push(at);
@@ -130,7 +132,16 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
   const nameOf = (ref: string): string => view.nameOf(ref) ?? ref.replace(/^(place|entity):/, "");
 
   const sections: Partial<Record<WorldStateSection, ViewLine[]>> = {};
-  if (want("horizon")) sections.horizon = horizon.flatMap((ref) => horizonLines(view, ref, input.map));
+  if (want("horizon")) {
+    const left = new Set<string>(horizon);
+    const said = new Set<string>();
+    sections.horizon = entries.flatMap((h): ViewLine[] => {
+      if (h.ref !== null) return left.delete(h.ref) ? horizonLines(view, h.ref, input.map) : [];
+      if (said.has(h.at)) return [];
+      said.add(h.at);
+      return [{ kind: "horizon_words", depth: 0, fields: { text: h.at } }];
+    });
+  }
   if (want("above")) sections.above = chain.flatMap((ref) => view.level(ref, 0, "own") ?? []);
   if (want("around")) sections.around = around(view, scenePlace, new Set([...within, ...chain])).flatMap((ref) => view.level(ref, 0, "none") ?? []);
   if (want("due")) {

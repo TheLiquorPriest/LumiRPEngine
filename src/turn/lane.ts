@@ -21,7 +21,7 @@ import type { Clock, Environment, Harness, HostTool, Scope } from "rp-harness/co
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { App } from "../app";
-import { castFacts, castTools, type SourceReader } from "../cast";
+import { type BookReader, castFacts, castTools, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapLines, mapView, stateScan } from "../iface";
 import { EntryNumbers, Lore, type LoreBooks, LoreIndex, loreLines, lorePort, loreTools, overlayWrite, storePath, storeWorlds } from "../lore";
@@ -42,7 +42,7 @@ import { SinceKept } from "./since";
 import { stagesAt } from "./stage";
 import { guidanceTexts } from "./texts";
 import { type TurnTrace, turnTrace } from "./trace";
-import { type MigratedSource, NO_SESSION, TurnLane } from "./turns";
+import { type MigratedSource, NO_SESSION, turnErrorWords, TurnLane } from "./turns";
 
 /**
  * RPE's file port for the one user it serves, that user read each time the port is asked, since it may
@@ -76,11 +76,12 @@ function servedFiles(owner: () => string | null, make: (user: string) => TreeFil
  * A character's sources as Lumiverse holds them now (the cast's `SourceReader`): a card or a persona
  * through the adapter's reads, a lore entry through the lore, each with a revision that changes
  * whenever its text does. RPE has no read of Lumiverse's memory entities, so a memory source fails.
+ * A read that cannot be made fails in the words of the turn-errors part in force for the chat.
  */
-function liveSources(reads: () => LumiverseReads | null, lore: Lore): SourceReader {
-  const lumiverse = (): LumiverseReads => {
+function liveSources(reads: () => LumiverseReads | null, lore: Lore, files: TreeFiles): SourceReader {
+  const lumiverse = async (scope: { user: string; chat: string }): Promise<LumiverseReads> => {
     const now = reads();
-    if (now === null) throw new Error("RPE is not set up for a Lumiverse, so it cannot read a character's sources.");
+    if (now === null) throw new Error(await turnErrorWords(files, scope, "no_lumiverse_sources"));
     return now;
   };
   return async (scope, source) => {
@@ -90,16 +91,29 @@ function liveSources(reads: () => LumiverseReads | null, lore: Lore): SourceRead
         return entry === undefined ? null : { title: entry.title, revision: entry.revision ?? hashJson([entry.title, entry.keys, entry.text]) };
       }
       case "card": {
-        const card = await lumiverse().character(source.ref);
+        const card = await (await lumiverse(scope)).character(source.ref);
         return card === null ? null : { title: card.name, revision: hashJson([card.name, card.description, card.personality, card.scenario, card.firstMessage, card.exampleMessages, card.systemPrompt, card.postHistoryInstructions]) };
       }
       case "persona": {
-        const persona = await lumiverse().persona(source.ref);
+        const persona = await (await lumiverse(scope)).persona(source.ref);
         return persona === null ? null : { title: persona.name, revision: hashJson([persona.name, persona.title, persona.description]) };
       }
       case "memory":
-        throw new Error("RPE cannot read Lumiverse's memory entities yet, so a memory source cannot be read.");
+        throw new Error(await turnErrorWords(files, scope, "memory_source"));
     }
+  };
+}
+
+/**
+ * A Lumiverse book entry's text as its book holds it, its secret marks in it (the cast's `BookReader`, for a secret a book marks), read
+ * through the lore's reader of the user's books: only of a book the chat has attached, as Lumiverse scans them for it, so a secret is
+ * read from no book the chat does not have. Null when the chat has no such book, or the book no such entry.
+ */
+function bookTexts(books: LoreBooks): BookReader {
+  return async ({ user, chat }, book, entry) => {
+    if (!(await books.attached(user, chat)).includes(book)) return null;
+    const found = await books.entry(user, entry);
+    return found === null || found.book !== book ? null : found.content;
   };
 }
 
@@ -219,12 +233,13 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   // The story's counts work out the history window as the prompt's is cut, on the chat's own settings.
   facts.add(storyFacts({ store, window: async (scope) => (await turnSettings(files, scope, app.log)).window }));
   const trace = turnTrace({ live: app.live, files, chatOfRun: (run) => runs.chatOfRun(run), log: app.log });
-  const chatNow = (): ChatReads => {
+  // The chat port's reads of Lumiverse; one that cannot be made fails in the words of the turn-errors part in force for the chat.
+  const chatNow = async (scope: Scope): Promise<ChatReads> => {
     const parts = options.lumiverse();
-    if (parts === null) throw new Error("RPE is not set up for a Lumiverse, so it has no chat to read.");
+    if (parts === null) throw new Error(await turnErrorWords(files, scope, "no_lumiverse_chat"));
     return parts.chat;
   };
-  const sources = liveSources(() => options.lumiverse()?.reads ?? null, lore);
+  const sources = liveSources(() => options.lumiverse()?.reads ?? null, lore, files);
   // What time brings due over the store's states: listed by the world state's due section and by an answer that lets time pass.
   const due = timeDue(store);
   /**
@@ -238,7 +253,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     const lines = await mapLines(texts);
     const [engine, cast, story, indexing] = await Promise.all([
       engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: stateScan, grid: gridMoves(lines), map: mapView(lines), due, ...asked }),
-      castTools({ store, writes: app.writes, files: texts, sources, now: () => clock.now() }),
+      castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), now: () => clock.now() }),
       storyTools({ store, writes: app.writes, files: texts, overlay, now: () => clock.now() }),
       loreTools({ index: loreIndex, guidance: loadGuidance(files, scope) }),
     ]);
@@ -249,9 +264,9 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     version: app.version,
     files,
     chat: {
-      info: (scope) => chatNow().info(scope),
-      read: (scope, range) => chatNow().read(scope, range),
-      search: (scope, query) => chatNow().search(scope, query),
+      info: async (scope) => (await chatNow(scope)).info(scope),
+      read: async (scope, range) => (await chatNow(scope)).read(scope, range),
+      search: async (scope, query) => (await chatNow(scope)).search(scope, query),
     },
     lore: lorePort(lore),
     prompt: prompts,
@@ -282,6 +297,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     pruneTurns: (user, chat, spare) => pruneChat({ files: app.paths.files, chats }, user, chat, spare),
     due,
     migrated: options.migrated,
+    sources,
     live: app.live,
     reads: () => options.lumiverse()?.reads ?? null,
     stopGeneration: async (generation) => (await options.lumiverse()?.stopGeneration(generation)) ?? false,

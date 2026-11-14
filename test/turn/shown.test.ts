@@ -42,3 +42,25 @@ test("after an earlier reply is flipped back to its first attempt, the next turn
   expect(carried).toContain("Wait for the light.");
   expect(carried).not.toContain("SECOND-ATTEMPT");
 });
+
+test("after the chat's first reply is flipped back to the attempt that opened its session, the next turn carries that attempt's work and what followed, not the other's", async () => {
+  const b = (bed = await openTurnBed({
+    answers: [
+      replying("Wren trims the wick.", "FIRST-ATTEMPT Show her hands."),
+      replying("Wren lets the wick smoke.", "SECOND-ATTEMPT Show her tired."),
+      replying("Wren waits with you.", "Wait for the light."),
+      replying("The sea is grey.", "Watch the sea."),
+    ],
+  }));
+  // No scene is recorded, so the chat's first turn opens a session at its start, and its swipe is a second attempt at that place.
+  const attempt = await settledTurn(b, await play(b, "normal", "I trim the wick."));
+  await settledTurn(b, await play(b, "swipe"));
+  await settledTurn(b, await play(b, "normal", "I wait for the light."));
+
+  b.host.cycleSwipe(CHAT, attempt.message!, "left");
+  await settledTurn(b, await play(b, "normal", "I watch the sea."));
+  const carried = JSON.stringify(b.model.requests.at(-1)?.messages);
+  expect(carried).toContain("FIRST-ATTEMPT Show her hands.");
+  expect(carried).toContain("Wait for the light.");
+  expect(carried).not.toContain("SECOND-ATTEMPT");
+});

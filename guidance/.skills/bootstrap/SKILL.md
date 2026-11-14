@@ -30,6 +30,7 @@ Stop when all six hold. They are in the order to do them. Say which hold when yo
 
 - **The notebook** (threads, questions, setups, arcs, the player, futures, the scene): move each note into its place in the story model with `story_record`. Keep the note's own words.
 - **Mind files:** hand each principal's files to its own agent, and have it file them into its mind, its memories and its relationships, in its own voice. File a supporting character's files yourself, into its base, relationships and knowledge.
+- **Marking files filed:** until a character's old mind files are marked filed, they are given whole every turn: to its own agent, or to you while a supporting character is on stage. Once what matters in them is filed, mark those files filed with `cast_update`'s `filed` operation, naming each file (`core.md`). They stay on the character's record.
 - **Beats without scenes:** the earlier build recorded beats and no scenes. Group them into scenes and chapters, and summarize each. The skills `scene-end` and `chapter-pass` say what a summary holds.
 
 ## Limits

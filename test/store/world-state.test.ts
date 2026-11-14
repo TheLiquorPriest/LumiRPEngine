@@ -69,6 +69,21 @@ describe("the world state", () => {
     expect(block.tokens).toBeLessThanOrEqual(WORLD_STATE_DEFAULTS.budget);
   });
 
+  test("a horizon entry that names nothing in the world is shown in the Author's own words, in its place, once", () => {
+    const ts = testStore();
+    const { s } = ts;
+    s.createChat({ id: "c", revision: ts.revision });
+    const storm = "the storm coming in off the sea";
+    play(s, "c", "m1", "Wren looks to the door.", 1, [{ lane: "story", op: "store.horizon", value: { list: [storm, "common_room", storm] }, by: "author", source: "author" }]);
+    const t2 = s.beginTurn({ chat: "c", kind: "normal" });
+    const block = worldState(s, { chat: "c", turn: t2.id, layout: SHIPPED_LAYOUT, map: MAP });
+    const lines = block.text.split("\n");
+    const words = `${storm} (on the horizon in your own words: nothing in the world is called that)`;
+    expect(lines.filter((l) => l === words)).toHaveLength(1);
+    expect(lines.indexOf(words)).toBeLessThan(lines.findIndex((l) => l.startsWith("The Common Room [common_room] (place)")));
+    expect(block.sections.horizon?.[0]).toEqual({ kind: "horizon_words", depth: 0, fields: { text: storm } });
+  });
+
   test("a section switched off is absent, a moved one moves, and with no map or due list to hand the layout says so", () => {
     const { s, t2 } = played();
     const off = SHIPPED_LAYOUT.replace(/\{\{#due\}\}[\s\S]*?\{\{\/due\}\}\n/, "");

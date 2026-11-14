@@ -401,6 +401,14 @@ export class UserStore {
     return r ? chatOf(r) : null;
   }
 
+  /** The user's chats, oldest first; a chat deleted while a branch still shares its turns is left out. Each chat's path is not read. */
+  chats(): ChatRow[] {
+    return this.db
+      .query<ChatDb, [string]>("SELECT id, world, revision, source_chat, source_message, head, '' AS path, created, deleted FROM chat WHERE user = ? AND deleted IS NULL ORDER BY created, rowid")
+      .all(this.id)
+      .map(chatOf);
+  }
+
   /**
    * Attaches a chat to a world revision (Build's Attach): a chat that plays no world yet plays
    * `revision` of `world` from its start, at once. One the store has not seen is made so; one that

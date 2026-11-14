@@ -18,6 +18,7 @@ lines:
   fact: '· {{key}}: "{{value}}" ({{#precision}}{{precision}}, {{/precision}}{{#standing}}{{standing}}, {{/standing}}turn {{turn}}) [{{id}}]'
   map: '{{text}}'
   map_unavailable: 'No map is drawn here: this world state has no maps to hand.'
+  horizon_words: '{{text}} (on the horizon in your own words: nothing in the world is called that)'
   due: '{{#when}}{{when}}{{/when}}{{^when}}in {{after}} minutes{{/when}}: {{kind}}{{#where}} at {{where}}{{/where}}{{#who}}, {{who}}{{/who}}{{#what}} ({{what}}){{/what}}'
   due_unlisted: 'What falls due is not listed here.'
   quest: '{{label}} [{{id}}] ({{kind}}): {{stage}}{{#owner}}, {{owner}}''s{{/owner}}'

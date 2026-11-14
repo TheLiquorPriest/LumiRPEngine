@@ -10,8 +10,10 @@ import type { RouteReply } from "../../src/app";
 import { insertPageToken } from "../../src/app/auth";
 import type { NodeView } from "../../src/store";
 import { type RunView, type TurnFileEntry, turnRoutes } from "../../src/turn";
+import { hashJson } from "../../src/shared/hash";
 import type { ChatList, ChatSummary, Routes, StopAnswer, TurnDetail, TurnList, TurnSummary } from "../../src/ui/api";
-import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, USER } from "./bed";
+import { world } from "../iface/rig";
+import { CHARACTER, CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, USER } from "./bed";
 
 const beds: TurnBed[] = [];
 afterEach(async () => {
@@ -19,7 +21,7 @@ afterEach(async () => {
 });
 
 /** Every field of a page's type, once: a field added to the type or left out of here does not compile. */
-const CHAT_FIELDS: Record<keyof ChatSummary, true> = { id: true, name: true, lastTurnAt: true, running: true };
+const CHAT_FIELDS: Record<keyof ChatSummary, true> = { id: true, name: true, lastTurnAt: true, running: true, played: true, world: true };
 const SUMMARY_FIELDS: Record<keyof TurnSummary, true> = { id: true, kind: true, onPath: true, message: true, status: true, timings: true, usage: true };
 const DETAIL_FIELDS: Record<keyof TurnDetail | "runs", true> = { ...SUMMARY_FIELDS, chat: true, intent: true, reply: true, error: true, trace: true, lore: true, runs: true };
 const RUN_FIELDS: Record<keyof RunView, true> = { id: true, nth: true, kind: true, status: true, timings: true, usage: true, reply: true, error: true, trace: true, requests: true };
@@ -86,6 +88,32 @@ describe("the Turn page's routes", () => {
     expect((await b.page("POST", `/api/v1/chats/chat-elsewhere/turns/${turn.id}/stop`)).status).toBe(404);
     expect((await b.page("GET", `/api/v1/chats/${CHAT}/turns/turn-none`)).status).toBe(404);
     expect((await fetch(`${b.listening.url}/api/v1/chats/${CHAT}/turns`)).status).toBe(401);
+  });
+
+  test("the chats the store holds that RPE never played follow the played ones, by name, each saying it was not played and whether it has a world", async () => {
+    const b = await openTurnBed({ answers: [replying("The lamp turns.")] });
+    beds.push(b);
+    b.host.send(CHAT, "I climb the stairs.");
+    await settledTurn(b, (await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET })).generationId!);
+    // Two chats a migration put in the store: one playing a world, one with none. Lumiverse holds both.
+    const doc = world();
+    const revision = hashJson(doc);
+    for (const [id, name] of [["chat-quay", "The quay"], ["chat-attic", "An attic"]] as const) b.host.addChat({ id, user: USER, name, character: CHARACTER, messages: [], books: [] });
+    await b.app.writes.run(() => {
+      const store = b.turns.store.user(USER);
+      store.putWorld(revision, doc);
+      store.createChat({ id: "chat-quay", world: doc.id, revision });
+      store.createChat({ id: "chat-attic" });
+    });
+
+    // Each as [id, name, whether a turn of it was played (a time of its newest), running, played, world].
+    const listed = await b.page<ChatList>("GET", "/api/v1/chats");
+    expect(listed.body.chats.map((c) => [c.id, c.name, typeof c.lastTurnAt === "number", c.running, c.played, c.world])).toEqual([
+      [CHAT, "The lighthouse", true, false, true, false],
+      ["chat-attic", "An attic", false, false, false, false],
+      ["chat-quay", "The quay", false, false, false, true],
+    ]);
+    expect(listed.body.chats.slice(1).map((c) => c.lastTurnAt)).toEqual([null, null]);
   });
 
   test("a turn's detail names the lore of its prompt: the entries Lumiverse activated for it, and those the Author's lore map named", async () => {
