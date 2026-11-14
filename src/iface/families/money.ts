@@ -20,7 +20,7 @@ import { matchCatalog, placeTrade } from "../../packs/economy/core/index";
 import { balance, dayPriceOf, priceOf, statusOf, worldProducts } from "../../packs/economy/core/model";
 import { cardsOn, featureFor, mostPayable, NO_WAY_TO_PAY } from "../../packs/economy/core/pay";
 import { NUMBER, TEXT, WHOLE } from "../kit";
-import { find, isUnread, minorUnits, named, notOneOf, numberArg, textArg } from "../ops";
+import { find, isUnread, minorUnits, missed, named, notAs, notOneOf, numberArg, textArg } from "../ops";
 import { payPastCover } from "../ops-values";
 import type { Reading } from "../reading";
 import { editChange, effectChange, effectTool, notApplicable, optionalId, readTool, type WriteDef, writeTool } from "./run";
@@ -44,7 +44,7 @@ const adjust: WriteDef = {
     if (isUnread(account)) return account;
     const given = numberArg(o.args, "amount");
     const cents = given === undefined ? 0 : minorUnits(o.reading, given);
-    if (cents === 0) return notOneOf(o, "amount", o.args.amount ?? null, ["a number other than 0, in the world's main coin"]);
+    if (cents === 0) return notAs(o, "amount", o.args.amount ?? null, "amount_not_zero");
     const w = o.draft.w;
     const from = w.events.length;
     const refused = editChange(o, { op: "adjust", account: account.id, cents });
@@ -121,7 +121,7 @@ const applyCredit: WriteDef = {
     if (isUnread(who)) return who;
     const product = textArg(o.args, "product") ?? "";
     const amount = o.args.amount;
-    if (amount !== undefined && amount !== null && numberArg(o.args, "amount") === undefined) return notOneOf(o, "amount", amount, ["a number, in the world's main coin"]);
+    if (amount !== undefined && amount !== null && numberArg(o.args, "amount") === undefined) return notAs(o, "amount", amount, "amount_any");
     const given = numberArg(o.args, "amount");
     const cents = given !== undefined && given > 0 ? minorUnits(o.reading, given) : undefined;
     const term = typeof o.args.term === "number" && o.args.term > 0 ? Math.round(o.args.term) : undefined;
@@ -247,7 +247,7 @@ const prices = readTool({
     let place: string | null = placeOfEntity(r.state.world, r.doc.pov);
     if (textArg(args, "place") !== undefined) {
       const found = r.find(textArg(args, "place") ?? "", "place");
-      if (!("id" in found)) return { line: "unknown", fields: { field: "place", name: found.name, wanted: "place", near: found.near.map((x) => `${x.name} [${x.id}]`) } };
+      if (!("id" in found)) return { line: "unknown", fields: missed(r.lines, "place", found, "place") };
       place = found.id;
     }
     const at: JsonValue = place === null ? null : { ref: `place:${place}`, name: r.nameOf(place) };

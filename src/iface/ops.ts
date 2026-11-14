@@ -8,8 +8,8 @@ import type { JsonObject, JsonValue } from "rp-harness/contract";
 import type { Lane, StoreState } from "../store/types";
 import type { ItemOpOptions } from "../engine/thing-ops";
 import type { Call, Reply } from "./kit";
-import { type Found, isFound, type Reading, type Want } from "./reading";
-import type { Fields } from "./texts";
+import { type Found, isFound, type Missed, type Reading, type Want } from "./reading";
+import { type Fields, type Lines, textOf } from "./texts";
 import type { Draft } from "./writing";
 import type { Provenance } from "./source";
 
@@ -29,10 +29,11 @@ export interface OpContext {
   after(add: (state: StoreState) => JsonObject): void;
 }
 
-/** What an operation could not read: the line of the answers' file that says so, and its fields. */
+/** What an operation could not read: the line of the answers' file that says so, and its fields; for a name not found, what it was wanted as. */
 export interface Unread {
   line: string;
   fields: Fields;
+  want?: Want;
 }
 
 /** One everyday operation (plan §6.8): its name, the lane it writes, the arguments it needs, and its work. */
@@ -66,9 +67,28 @@ export function numberArg(args: JsonObject, field: string): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 
-/** What an argument that is not one of the choices reads as. */
+/** What an argument that is not one of the choices reads as: the whole list, put in as one text so the answer says it once. */
 export function notOneOf(o: OpContext, field: string, value: JsonValue, choices: readonly string[]): Unread {
-  return { line: "unreadable_op", fields: { n: o.n, op: o.op, field, value: JSON.stringify(value), choices: [...choices] } };
+  return { line: "unreadable_op", fields: { n: o.n, op: o.op, field, value: JSON.stringify(value), choices: textOf(choices) } };
+}
+
+/** What an argument that is not of the shape it takes reads as: the shape in the answers' words, its `wants_<shape>` line. */
+export function notAs(o: OpContext, field: string, value: JsonValue, shape: string): Unread {
+  return { line: "unreadable_op", fields: { n: o.n, op: o.op, field, value: JSON.stringify(value), wants: o.call.lines.line(`wants_${shape}`) ?? "" } };
+}
+
+/**
+ * A name not found, as an answer's fields give it: what was wanted (`wanted`, the code's own name
+ * for it, and `sought`, the answers' `want_<wanted>` line), the near names of that kind, and those
+ * of another kind that go by that very name; each list put in as one text, so it is said once.
+ */
+export function unknownFields(lines: Lines, field: string, wanted: string, name: string, near: readonly string[], other: readonly string[] = []): Fields {
+  return { field, name, wanted, sought: lines.line(`want_${wanted}`) ?? "", near: textOf(near), other: textOf(other) };
+}
+
+/** A name that was not found as wanted, as `unknownFields` gives it: each near or other one by its name and id, the other with what it is. */
+export function missed(lines: Lines, field: string, r: Missed, want: Want): Fields {
+  return unknownFields(lines, field, want, r.name, r.near.map((x) => `${x.name} [${x.id}]`), r.other.map((x) => `${x.name} [${x.id}] (${x.what})`));
 }
 
 /** The name an argument gives (or `said`, one item of a list argument), found as wanted on the draft; or what says it is not there (with the near matches) or fits several. */
@@ -76,8 +96,8 @@ export function find(o: OpContext, field: string, want: Want, gone = false, said
   if (typeof said !== "string" || said.trim() === "") return { line: "needs", fields: { n: o.n, op: o.op, fields: [field] } };
   const r = o.reading.find(said, want, gone);
   if (isFound(r)) return r;
-  if (r.several.length > 0) return { line: "several", fields: { n: o.n, op: o.op, field, name: r.name, several: r.several.map((x) => `${x.name} [${x.id}]`) } };
-  return { line: "unknown", fields: { n: o.n, op: o.op, field, name: r.name, wanted: want, near: r.near.map((x) => `${x.name} [${x.id}]`) } };
+  if (r.several.length > 0) return { line: "several", fields: { n: o.n, op: o.op, field, name: r.name, several: textOf(r.several.map((x) => `${x.name} [${x.id}]`)) } };
+  return { line: "unknown", fields: { n: o.n, op: o.op, ...missed(o.call.lines, field, r, want) }, want };
 }
 
 /** A name argument that may be left out: undefined when it is. */

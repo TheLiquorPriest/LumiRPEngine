@@ -24,7 +24,8 @@ import { axesOf } from "../packs/relationships/core/index";
 import { FACT_ABOUT, factStore } from "../store/facts";
 import { STORE_OPS } from "../store/types";
 import type { FactStore } from "./kit";
-import { find, findOptional, isUnread, minorUnits, named, notOneOf, numberArg, type OpContext, type OpDef, textArg, type Unread } from "./ops";
+import { find, findOptional, isUnread, minorUnits, named, notAs, notOneOf, numberArg, type OpContext, type OpDef, textArg, type Unread } from "./ops";
+import { textOf } from "./texts";
 import { moveTo } from "./ops-things";
 import { setClock, timeArg } from "./ops-time";
 
@@ -81,7 +82,7 @@ const pay: OpDef = {
     const payee = findOptional(o, "to", "entity");
     if (isUnread(payee)) return payee;
     const amount = numberArg(o.args, "amount");
-    if (amount === undefined || !(amount > 0)) return notOneOf(o, "amount", o.args.amount ?? null, ["a number above 0, in the world's main coin"]);
+    if (amount === undefined || !(amount > 0)) return notAs(o, "amount", o.args.amount ?? null, "amount");
     const cents = minorUnits(o.reading, amount);
     const goods = textArg(o.args, "goods");
     const memo = textArg(o.args, "for") ?? textArg(o.args, "reason") ?? textArg(o.args, "goods") ?? "Payment";
@@ -127,7 +128,7 @@ function offSheet(o: OpContext, entity: string, key: string, value: JsonValue): 
   const def = e ? fieldDef(o.reading.registry, w.ctx.world, e.kind, key) : undefined;
   if (def === undefined || valueProblem(o.reading.registry, w, entity, def, value) === null) return null;
   const bounds = fieldBounds(o.reading.registry, w.ctx, entity, def);
-  return { n: o.n, op: o.op, name: named(o.reading, entity), key, value: JSON.stringify(value), type: def.type, ...(bounds.min !== undefined ? { min: bounds.min } : {}), ...(bounds.max !== undefined ? { max: bounds.max } : {}), ...(def.values ? { choices: def.values } : {}) };
+  return { n: o.n, op: o.op, name: named(o.reading, entity), key, value: JSON.stringify(value), type: def.type, ...(bounds.min !== undefined ? { min: bounds.min } : {}), ...(bounds.max !== undefined ? { max: bounds.max } : {}), ...(def.values ? { choices: textOf(def.values) } : {}) };
 }
 
 /** Sets a field of someone or something: today's `set`, or `add` for a number, with a level following its experience as today's progressions have it. */
@@ -136,7 +137,7 @@ function setField(o: OpContext, entity: string, key: string, value: JsonValue | 
   const w = o.draft.w;
   const e = own(w.state.entities, entity);
   if (!e) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: "missing_entity" } };
-  if (!safeKey(key) || key === GONE_FIELD) return notOneOf(o, "key", key, ["a field name"]);
+  if (!safeKey(key) || key === GONE_FIELD) return notAs(o, "key", key, "key");
   const def = fieldDef(reg, w.ctx.world, e.kind, key);
   if (def?.derived !== undefined) return { line: "derived", fields: { n: o.n, op: o.op, key } };
   const levelOf = Object.values(w.ctx.world.ruleset?.progression ?? {}).find((p) => p.levelField === key);
@@ -166,7 +167,7 @@ function setPlaceField(o: OpContext, placeId: string, key: string, value: JsonVa
   const played = w.ctx.world;
   const def = own(played.places, placeId);
   if (!def) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: "missing_place" } };
-  if (!safeKey(key)) return notOneOf(o, "key", key, ["a field name"]);
+  if (!safeKey(key)) return notAs(o, "key", key, "key");
   const fields: JsonObject = { ...def.fields };
   if (add !== undefined) {
     const cur = fields[key];
@@ -211,7 +212,7 @@ const set: OpDef = {
         if (isUnread(to)) return to;
         failed = moveTo(o, at.id, to.id);
       } else failed = setField(o, at.id, key, value as JsonValue | undefined, add);
-    } else return notOneOf(o, "at", o.args.at ?? null, ["world", "a place", "someone or something"]);
+    } else return notAs(o, "at", o.args.at ?? null, "point");
     if (failed) return failed;
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
@@ -227,7 +228,7 @@ const fact: OpDef = {
   run(o) {
     const about = find(o, "about", "point");
     if (isUnread(about)) return about;
-    if (!FACT_ABOUT.test(about.ref)) return notOneOf(o, "about", o.args.about ?? null, ["world", "a place", "someone or something"]);
+    if (!FACT_ABOUT.test(about.ref)) return notAs(o, "about", o.args.about ?? null, "point");
     const key = textArg(o.args, "key");
     const value = textArg(o.args, "value");
     if (key === undefined || value === undefined) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["key", "value"] } };
@@ -256,7 +257,7 @@ const quest: OpDef = {
     const said = textArg(o.args, "stage");
     const outcome = textArg(o.args, "outcome");
     if (outcome !== undefined && !(OUTCOMES as readonly string[]).includes(outcome)) return notOneOf(o, "outcome", outcome, OUTCOMES);
-    if (said === undefined && o.args.reveal !== true) return { line: "needs_one", fields: { n: o.n, op: o.op, fields: ["stage", "reveal"] } };
+    if (said === undefined && o.args.reveal !== true) return { line: "needs_any", fields: { n: o.n, op: o.op, fields: ["stage", "reveal"] } };
     let stage: string | undefined;
     if (said !== undefined) {
       const lower = said.toLowerCase();
@@ -295,7 +296,7 @@ const relate: OpDef = {
     const to = find(o, "to", "entity");
     if (isUnread(to)) return to;
     const change = numberArg(o.args, "change");
-    if (change === undefined || change === 0) return notOneOf(o, "change", o.args.change ?? null, ["a number other than 0"]);
+    if (change === undefined || change === 0) return notAs(o, "change", o.args.change ?? null, "change");
     const w = o.draft.w;
     const axes = axesOf(w.ctx);
     const axis = textArg(o.args, "axis");
@@ -318,7 +319,7 @@ const horizon: OpDef = {
   example: { op: "horizon", list: ["common_room", "market_square", "odile"], source: { from: "author" } },
   run(o) {
     const given = o.args.list;
-    if (!Array.isArray(given)) return notOneOf(o, "list", given ?? null, ["a list of places and people in the tree"]);
+    if (!Array.isArray(given)) return notAs(o, "list", given ?? null, "list");
     const refs: string[] = [];
     for (const said of given) {
       const r = find(o, "list", "point", false, said);

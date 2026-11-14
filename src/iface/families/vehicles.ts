@@ -13,6 +13,7 @@ import { relocate } from "../../engine/relocate";
 import { oneOf, TEXT, TEXTS } from "../kit";
 import { find, isUnread, named, textArg } from "../ops";
 import { effectChange, isAlready, notApplicable, readTool, type WriteDef, writeTool } from "./run";
+import { textOf } from "../texts";
 
 const FAMILY = "vehicles";
 
@@ -79,7 +80,7 @@ const classes = readTool({
   example: { domain: "road", search: "van" },
   read(r, args, reply) {
     const domain = textArg(args, "domain");
-    if (domain !== undefined && !VEHICLE_DOMAINS.some((d) => d === domain)) return { line: "unreadable", fields: { field: "domain", value: JSON.stringify(args.domain), choices: [...VEHICLE_DOMAINS] } };
+    if (domain !== undefined && !VEHICLE_DOMAINS.some((d) => d === domain)) return { line: "unreadable", fields: { field: "domain", value: JSON.stringify(args.domain), choices: textOf(VEHICLE_DOMAINS) } };
     const search = (textArg(args, "search") ?? "").toLowerCase();
     const air = worldHasAir(r.world);
     const rows = r.ctx.tables.get("vehicles.classes")?.rows ?? {};

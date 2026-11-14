@@ -14,6 +14,7 @@ import { OBJECT, oneOf, TEXT } from "../kit";
 import { find, isUnread, named, notOneOf, type OpContext, type Unread } from "../ops";
 import type { Want } from "../reading";
 import { editChange, foundIn, isAlready, notApplicable, readTool, type WriteDef, writeTool } from "./run";
+import { textOf } from "../texts";
 
 const FAMILY = "groups";
 
@@ -87,7 +88,7 @@ const whoMay = readTool({
     const group = foundIn(r, "org", args.org, "entity");
     if (isUnread(group)) return group;
     const power = String(args.power).trim().toLowerCase();
-    if (!isOrgPower(power)) return { line: "unreadable", fields: { field: "power", value: JSON.stringify(args.power), choices: [...ORG_POWERS] } };
+    if (!isOrgPower(power)) return { line: "unreadable", fields: { field: "power", value: JSON.stringify(args.power), choices: textOf(ORG_POWERS) } };
     const page = buildOrgsGm(r.ctx).find((g) => g.page.id === group.id);
     const holders = (page?.may ?? []).flatMap((m) => {
       const held = m.powers.find((p) => p.power === power);

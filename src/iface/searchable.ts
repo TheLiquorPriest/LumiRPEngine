@@ -3,6 +3,7 @@
 // it reads or writes and its lane. They are added family by family (`families/`).
 
 import type { ToolSpec } from "./kit";
+import { CHECK_TOOLS } from "./families/checks";
 import { FIGHT_TOOLS } from "./families/fights";
 import { GROUP_TOOLS } from "./families/groups";
 import { MONEY_TOOLS } from "./families/money";
@@ -11,4 +12,4 @@ import { THING_TOOLS } from "./families/things";
 import { TIME_TOOLS } from "./families/time";
 import { VEHICLE_TOOLS } from "./families/vehicles";
 
-export const SEARCHABLE_TOOLS: readonly ToolSpec[] = [...THING_TOOLS, ...MONEY_TOOLS, ...TIME_TOOLS, ...GROUP_TOOLS, ...FIGHT_TOOLS, ...VEHICLE_TOOLS, ...PEOPLE_TOOLS];
+export const SEARCHABLE_TOOLS: readonly ToolSpec[] = [...THING_TOOLS, ...MONEY_TOOLS, ...TIME_TOOLS, ...GROUP_TOOLS, ...FIGHT_TOOLS, ...VEHICLE_TOOLS, ...PEOPLE_TOOLS, ...CHECK_TOOLS];

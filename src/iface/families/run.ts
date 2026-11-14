@@ -22,9 +22,10 @@ import type { Lane, StoreState } from "../../store/types";
 import { readOperation, runOperations } from "../apply";
 import { readingOr } from "../fixed";
 import type { Call, Reply, ToolSpec } from "../kit";
-import { find, isUnread, itemOptions, minorUnits, named, type OpContext, type Unread } from "../ops";
+import { find, isUnread, itemOptions, minorUnits, missed, named, type OpContext, type Unread } from "../ops";
 import type { Found, Reading, Want } from "../reading";
 import { PROVENANCE_PROPERTIES } from "../source";
+import { textOf } from "../texts";
 
 /** A searchable tool that writes: everything but its words, and its work on the draft. */
 export interface WriteDef {
@@ -281,8 +282,8 @@ export function foundIn(r: Reading, field: string, said: JsonValue | undefined, 
   if (typeof said !== "string" || said.trim() === "") return { line: "needs_field", fields: { field } };
   const f = r.find(said, want);
   if ("id" in f) return f;
-  if (f.several.length > 0) return { line: "several", fields: { field, name: f.name, several: f.several.map((x) => `${x.name} [${x.id}]`) } };
-  return { line: "unknown", fields: { field, name: f.name, wanted: want, near: f.near.map((x) => `${x.name} [${x.id}]`) } };
+  if (f.several.length > 0) return { line: "several", fields: { field, name: f.name, several: textOf(f.several.map((x) => `${x.name} [${x.id}]`)) } };
+  return { line: "unknown", fields: missed(r.lines, field, f, want) };
 }
 
 /** A value an answer's data carries as it was given, for a report's field. */

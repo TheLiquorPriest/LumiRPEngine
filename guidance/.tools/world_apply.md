@@ -8,10 +8,10 @@ arguments:
   operations.what: "place, give, wear, store: the thing (or, for place and store, the person)."
   operations.to: "move: the place. give: who receives it. pay: who is paid; leave it out for no one in the world. relate: whom they regard."
   operations.from: "give: who gives it."
-  operations.at: "place, spawn: the place. set: someone, something, a place, or world for the time."
-  operations.on: "place: the thing it is set on, a table or a shelf."
+  operations.at: "place: the place. spawn: the place it is made at; for a place, the place it is inside. set: someone, something, a place, or world for the time."
+  operations.on: "place, spawn: the thing it is set on, a table or a shelf."
   operations.by: "place: who picks it up."
-  operations.in: "store: the bag, drawer, vehicle or room it goes into. spawn: the holder it is made in."
+  operations.in: "store: the bag, drawer, vehicle or room it goes into. spawn: the place it is made in, or who or what holds it."
   operations.with: "move: others who go along."
   operations.how: "give: handed (to hold), lent, returned, given, sold, traded or stolen. Given, sold and traded change whose it is."
   operations.until: "give: when a loan ends. pass_time: the time to pass until. A date and time (YYYY-MM-DD HH:MM) or words (two days, until dawn)."
@@ -39,7 +39,7 @@ arguments:
   operations.change: "relate: how much it changes, up or down."
   operations.list: "horizon: the whole list of places, people and things the next turn is expected to need."
   operations.name: "spawn: its name."
-  operations.kind: "spawn: its kind (character, item, container, a vehicle kind, a group's kind)."
+  operations.kind: "spawn: its kind: person (or the world's own kind of person), item, container, a vehicle kind, a group's kind. Or a place: place needs only its name, and is inside the place at names or in none, as the first place of an empty world is; room, spot or venue needs at, the place it is inside."
   operations.tier: "spawn: its tier."
   operations.fields: "spawn: its sheet values, as field: value."
   operations.bestiary: "spawn: a row of the world's bestiary to take the sheet from."
@@ -47,7 +47,7 @@ arguments:
   operations.class: "spawn: a vehicle's class."
   operations.owner: "spawn: whose it is."
   operations.description: "spawn: what it looks like."
-  operations.square: "move, place: the square on the place's map, as [column, row] from the top left."
+  operations.square: "move, place: the square on the place's map, as [column, row], counted from 1 at the top left as the map prints it."
   operations.near: "move, place: someone or something to stand beside on the place's map."
   operations.zone: "move, place: a zone of the place's map."
   operations.why: "move, place, give, store, quest, relate: the reason, kept with the change."
@@ -55,7 +55,7 @@ arguments:
   operations.precision: "How exact: exact, approximate, vague or unknown."
   operations.standing: "How it stands: established, proposed or assumed."
 ---
-Applies a list of operations to the world's recorded state, in order, and answers with each operation's lane, what changed (each touched thing as it was and as it is now), how each touched thing now stands, and reports of anything that does not add up. Move, place, give, wear, store, pay, pass_time, set, fact, quest and spawn write the engine lane; relate and horizon the story lane. A name that is not there, or a value that is none of the choices, answers the whole call with the near matches, and nothing is recorded.
+Applies a list of operations to the world's recorded state, in order, each on the state the ones before it left, and answers with each operation's lane, what changed (each touched thing as it was and as it is now), how each touched thing now stands, and reports of anything that does not add up. Move, place, give, wear, store, pay, pass_time, set, fact, quest and spawn write the engine lane; relate and horizon the story lane. A name that is not there, or a value that is none of the choices, answers the whole call with what would work, and nothing is recorded.
 
 - move: someone or something goes to a place, with others along.
 - place: a thing set down or picked up; a person set down out of what holds them.
@@ -68,5 +68,8 @@ Applies a list of operations to the world's recorded state, in order, and answer
 - fact: a statement in words about someone, something or a place.
 - quest: a quest moves to a stage, or a stage is shown.
 - relate: how someone regards another changes.
-- spawn: someone or something new comes into the world.
+- spawn: someone, something or a place comes into the world.
 - horizon: the list of what the next turn is expected to need.
+
+A scene set from nothing in one call (an island, a kitchen on it, two people there, a lamp):
+{"operations":[{"op":"spawn","kind":"place","name":"Gull Skerry","source":{"from":"prose","message":"m-1"}},{"op":"spawn","kind":"place","name":"Keeper's kitchen","at":"Gull Skerry","source":{"from":"prose","message":"m-1"}},{"op":"spawn","kind":"person","name":"Ada Lorne","at":"Keeper's kitchen","source":{"from":"prose","message":"m-1"}},{"op":"spawn","kind":"person","name":"Tobin Lorne","at":"Keeper's kitchen","source":{"from":"prose","message":"m-1"}},{"op":"spawn","name":"Oil lamp","at":"Keeper's kitchen","source":{"from":"prose","message":"m-1"}}]}

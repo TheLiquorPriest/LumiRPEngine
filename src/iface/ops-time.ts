@@ -12,10 +12,7 @@ import { resolveTarget, typedSpan } from "../engine/time";
 import { minutesBetween } from "../engine/world-state";
 import type { WorldState } from "../engine/state";
 import type { Reading } from "./reading";
-import { findOptional, isUnread, numberArg, type OpContext, type OpDef, textArg, type Unread } from "./ops";
-
-/** How a time may be written, for an answer that could not read one. */
-export const TIME_FORMS = ["YYYY-MM-DD HH:MM", "words for a span, such as two hours or until dawn"];
+import { findOptional, isUnread, notAs, numberArg, type OpContext, type OpDef, textArg, type Unread } from "./ops";
 
 /**
  * A time as today's engine reads one, in minutes since the world's epoch: a date and time of day at
@@ -39,7 +36,7 @@ export function timeArg(o: OpContext, field: string): number | Unread | undefine
   const said = o.args[field];
   if (said === undefined || said === null) return undefined;
   const at = typeof said === "string" ? timeFrom(o.reading, o.draft.w.state, said) : null;
-  return at ?? { line: "unreadable_op", fields: { n: o.n, op: o.op, field, value: JSON.stringify(said), choices: TIME_FORMS } };
+  return at ?? notAs(o, field, said, "time");
 }
 
 /** A clock reading as an answer shows it: the date and time of day at the scene's place. */

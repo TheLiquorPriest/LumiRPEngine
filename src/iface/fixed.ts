@@ -14,8 +14,10 @@ import { createRng } from "../engine/rng";
 import { renderView } from "../store/words";
 import { rulesetData } from "./bestiary";
 import { type Call, oneOf, type Reply, SEARCH_KINDS, type SearchKind, TEXT, type ToolSpec, WHOLE, YES_NO } from "./kit";
-import { clockText, TIME_FORMS, timeFrom } from "./ops-time";
+import { clockText, timeFrom } from "./ops-time";
+import { missed, unknownFields } from "./ops";
 import { type Found, isFound, Reading } from "./reading";
+import { textOf } from "./texts";
 import { commit, Draft } from "./writing";
 
 /** A reading for the call, or the reply that says why there is none. */
@@ -34,8 +36,8 @@ export function foundOr(reading: Reading, reply: Reply, field: string, said: Jso
   }
   const r = reading.find(said, want);
   if (isFound(r)) return r;
-  if (r.several.length > 0) reply.line("several", { field, name: r.name, several: r.several.map((x) => `${x.name} [${x.id}]`) });
-  else reply.line("unknown", { field, name: r.name, wanted: want, near: r.near.map((x) => `${x.name} [${x.id}]`) });
+  if (r.several.length > 0) reply.line("several", { field, name: r.name, several: textOf(r.several.map((x) => `${x.name} [${x.id}]`)) });
+  else reply.line("unknown", missed(reading.lines, field, r, want));
   reply.fail();
   return null;
 }
@@ -62,7 +64,7 @@ export const WORLD_QUERY: ToolSpec = {
     if (view !== null) reply.tree(renderView(view, call.tree));
     if (typeof args.due === "string") {
       const to = timeFrom(reading, reading.state.world, args.due);
-      if (to === null) return reply.line("unreadable", { field: "due", value: JSON.stringify(args.due), choices: TIME_FORMS }).fail();
+      if (to === null) return reply.line("unreadable", { field: "due", value: JSON.stringify(args.due), wants: reading.lines.line("wants_time") ?? "" }).fail();
       const from = reading.state.world.clock;
       const span = { from: clockText({ reading }, Math.min(from, to)), to: clockText({ reading }, Math.max(from, to)) };
       const due = call.deps.due;
@@ -96,7 +98,7 @@ export const WORLD_SEARCH: ToolSpec = {
     if (reading === null) return reply;
     const words = typeof args.words === "string" ? args.words.trim() : "";
     if (words === "") return reply.line("needs_field", { field: "words" }).fail();
-    if (args.kind !== undefined && !(SEARCH_KINDS as readonly JsonValue[]).includes(args.kind)) return reply.line("unreadable", { field: "kind", value: JSON.stringify(args.kind), choices: [...SEARCH_KINDS] }).fail();
+    if (args.kind !== undefined && !(SEARCH_KINDS as readonly JsonValue[]).includes(args.kind)) return reply.line("unreadable", { field: "kind", value: JSON.stringify(args.kind), choices: textOf(SEARCH_KINDS) }).fail();
     const asked = typeof args.limit === "number" && Number.isInteger(args.limit) && args.limit > 0 ? args.limit : call.settings.searchHits;
     const hits = call.deps.search.search(reading.state, call.deps.env, words, { ...(args.kind !== undefined ? { kind: args.kind as SearchKind } : {}), limit: Math.min(asked, call.settings.searchHits) });
     if (hits.length === 0) return reply.line("none_found", { words });
@@ -140,12 +142,12 @@ export const ROLL: ToolSpec = {
         rolled = rollDice(dice, rng);
       } catch (error) {
         if (!(error instanceof DiceError)) throw error;
-        return reply.line("unreadable", { field: "dice", value: JSON.stringify(dice), choices: ["dice such as 1d20+3 or 2d6"] }).fail();
+        return reply.line("unreadable", { field: "dice", value: JSON.stringify(dice), wants: call.lines.line("wants_dice") ?? "" }).fail();
       }
       Object.assign(data, { check: "", notation: rolled.notation, dice: rolled.dice.filter((d) => d.kept).map((d) => d.value), natural: rolled.natural, total: rolled.total, dc: against, outcome: against === null ? "rolled" : rolled.total >= against ? "success" : "failure" });
     } else {
       const check = checkOf(reading.doc, checkId);
-      if (check === null) return reply.line("unknown", { field: "check", name: checkId ?? "", wanted: "check", near: Object.keys(reading.doc.checks).slice(0, call.settings.nearMatches) }).fail();
+      if (check === null) return reply.line("unknown", unknownFields(call.lines, "check", "check", checkId ?? "", Object.keys(reading.doc.checks).slice(0, call.settings.nearMatches))).fail();
       const ready = readyCheck(reading.registry, reading.ctx, against === null ? check : { ...check, dc: String(against) }, { self: who.id, actor: who.id });
       if ("code" in ready) return reply.line("not_applicable", { n: 1, op: "roll", code: ready.code }).fail();
       const rolled = rollCheck(ready, rng);

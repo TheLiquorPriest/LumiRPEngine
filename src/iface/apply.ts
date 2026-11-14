@@ -10,14 +10,15 @@
 import type { ApprovalAsk, JsonObject, JsonValue } from "rp-harness/contract";
 import { isRecord } from "../shared/json";
 import type { StoreState } from "../store/types";
-import { type Call, NUMBER, OBJECT, oneOf, type Reply, TEXT, TEXTS, type ToolSpec, WHOLE, YES_NO } from "./kit";
+import { type Call, NUMBER, OBJECT, type Reply, TEXT, TEXTS, type ToolSpec, WHOLE, YES_NO } from "./kit";
 import type { OpContext, OpDef, Unread } from "./ops";
-import { HOW_GIVEN, THING_OPS } from "./ops-things";
+import { THING_OPS } from "./ops-things";
 import { TIME_OPS } from "./ops-time";
 import { VALUE_OPS } from "./ops-values";
 import { readingOr } from "./fixed";
 import type { Reading } from "./reading";
 import { MARKS, PROVENANCE_PROPERTIES, type Provenance, provenanceOf } from "./source";
+import { textOf } from "./texts";
 import { answerDraft, commit, Draft } from "./writing";
 
 /** The everyday operations, in the order the plan names them. */
@@ -34,7 +35,7 @@ export const OPERATIONS: readonly OpDef[] = OPERATION_NAMES.map((name) => {
 
 /** The arguments an operation may carry, each once, whichever operations read it: the file says what each is. */
 export const OPERATION_PROPERTIES: Record<string, JsonObject> = {
-  op: oneOf(OPERATION_NAMES),
+  op: TEXT,
   who: TEXT,
   what: TEXT,
   to: TEXT,
@@ -44,7 +45,7 @@ export const OPERATION_PROPERTIES: Record<string, JsonObject> = {
   by: TEXT,
   in: TEXT,
   with: TEXTS,
-  how: oneOf(Object.keys(HOW_GIVEN)),
+  how: TEXT,
   until: TEXT,
   off: YES_NO,
   slot: TEXT,
@@ -64,7 +65,7 @@ export const OPERATION_PROPERTIES: Record<string, JsonObject> = {
   add: NUMBER,
   quest: TEXT,
   stage: TEXT,
-  outcome: oneOf(["met", "failed"]),
+  outcome: TEXT,
   reveal: YES_NO,
   axis: TEXT,
   change: NUMBER,
@@ -78,7 +79,7 @@ export const OPERATION_PROPERTIES: Record<string, JsonObject> = {
   class: TEXT,
   owner: TEXT,
   description: TEXT,
-  square: { type: "array", items: { type: "integer", minimum: 0 }, minItems: 2, maxItems: 2 },
+  square: { type: "array", items: { type: "integer" } },
   near: TEXT,
   zone: TEXT,
   why: TEXT,
@@ -141,15 +142,21 @@ export function readOperation(n: number, def: OpDef, args: JsonObject, call: Cal
   const missing = def.needs.filter((f) => args[f] === undefined || args[f] === null || args[f] === "");
   if (missing.length > 0) return { line: "needs", fields: { n, op: def.name, fields: missing } };
   const prov = provenanceOf(args, call.agent);
-  if ("field" in prov) return { line: "unreadable_op", fields: { n, op: def.name, field: prov.field, value: JSON.stringify(prov.value), choices: [...prov.choices] } };
+  if ("field" in prov) return { line: "unreadable_op", fields: { n, op: def.name, field: prov.field, value: JSON.stringify(prov.value), choices: textOf(prov.choices) } };
   return { n, def, args, prov };
 }
 
-/** The call's operations read for their shape: each a known operation with what it needs and readable provenance; or what is wrong with each that is not. */
+/** What a kind of operation needs and takes, and which of the arguments it was sent it does not read: said after anything about it that could not be read. */
+function takesLine(reply: Reply, def: OpDef, args: JsonObject): void {
+  const read = new Set(["op", ...def.needs, ...def.takes, ...Object.keys(PROVENANCE_PROPERTIES)]);
+  reply.line("op_takes", { op: def.name, needs: textOf(def.needs), takes: textOf(def.takes.filter((f) => !def.needs.includes(f))), ignored: textOf(Object.keys(args).filter((k) => !read.has(k))) });
+}
+
+/** The call's operations read for their shape: each a known operation with what it needs and readable provenance; or what is wrong with each that is not, with what that kind of operation takes. */
 function readCall(args: JsonObject, call: Call, reply: Reply): Asked[] | null {
   const list = args.operations;
   if (!Array.isArray(list) || list.length === 0) {
-    reply.line("unreadable", { field: "operations", value: JSON.stringify(list ?? null), choices: ["a list of operations"] }).fail();
+    reply.line("no_operations", { ...(list !== undefined ? { value: JSON.stringify(list) } : {}), ops: textOf(OPERATION_NAMES) }).fail();
     return null;
   }
   const asked: Asked[] = [];
@@ -159,13 +166,14 @@ function readCall(args: JsonObject, call: Call, reply: Reply): Asked[] | null {
     const op = isRecord(raw) ? raw.op : undefined;
     const def = typeof op === "string" ? BY_NAME.get(op) : undefined;
     if (!isRecord(raw) || def === undefined) {
-      reply.line("unreadable_op", { n, field: "op", value: JSON.stringify(op ?? null), choices: [...OPERATION_NAMES] });
+      reply.line("unreadable_op", { n, field: "op", value: JSON.stringify(op ?? null), choices: textOf(OPERATION_NAMES) });
       bad = true;
       continue;
     }
     const read = readOperation(n, def, raw as JsonObject, call);
     if ("line" in read) {
       reply.line(read.line, read.fields);
+      takesLine(reply, def, raw as JsonObject);
       bad = true;
       continue;
     }
@@ -189,11 +197,12 @@ function provenanceLines(reply: Reply, a: Asked): void {
 
 /**
  * Runs a call's operations, read for their shape: worked out in order on a copy of the state (one
- * that cannot read its names refuses the whole call, and nothing is recorded); each lane's setting
- * asked, an approval showing what `askArgs` gives; what may go ahead recorded in one write through
- * the queue; and answered with what changed, how it now stands, and the reports.
+ * that cannot read its names refuses the whole call, and nothing is recorded; `explain` adds to what
+ * the refusal says); each lane's setting asked, an approval showing what `askArgs` gives; what may
+ * go ahead recorded in one write through the queue; and answered with what changed, how it now
+ * stands, and the reports.
  */
-export async function runOperations(call: Call, asked: readonly Asked[], askArgs: (mine: readonly Asked[]) => JsonObject): Promise<Reply> {
+export async function runOperations(call: Call, asked: readonly Asked[], askArgs: (mine: readonly Asked[]) => JsonObject, explain?: (reply: Reply, unread: Unread) => void): Promise<Reply> {
   const first = call.reply();
   const base = readingOr(call, first);
   if (base === null) return first;
@@ -205,7 +214,11 @@ export async function runOperations(call: Call, asked: readonly Asked[], askArgs
     if (held.size > 0) run = attempt(call, base, asked, new Set(held.keys()));
   }
   // A refusal says only what could not be read: what the operations before it reported never stands, since nothing is recorded.
-  if (run.unread) return call.reply().line(run.unread.line, run.unread.fields).line("nothing_recorded", {}).fail();
+  if (run.unread) {
+    const refused = call.reply().line(run.unread.line, run.unread.fields);
+    explain?.(refused, run.unread);
+    return refused.line("nothing_recorded", {}).fail();
+  }
   const reply = run.reply;
   const left: JsonObject[] = [];
   for (const a of asked) {
@@ -229,15 +242,22 @@ async function applyOperations(args: JsonObject, call: Call): Promise<Reply> {
   const first = call.reply();
   const asked = readCall(args, call, first);
   if (asked === null) return first;
-  return runOperations(call, asked, (mine) => ({ operations: mine.map((a) => a.args) as JsonValue[] }));
+  // A name not there may be made by an operation earlier in this same call; and the operation that could not read it takes what it takes.
+  const explain = (reply: Reply, unread: Unread): void => {
+    if (unread.want !== undefined) reply.line(`make_${unread.want}`, {});
+    const a = asked.find((x) => x.n === unread.fields.n);
+    if (a) takesLine(reply, a.def, a.args);
+  };
+  return runOperations(call, asked, (mine) => ({ operations: mine.map((a) => a.args) as JsonValue[] }), explain);
 }
 
 export const WORLD_APPLY: ToolSpec = {
   name: "world_apply",
   family: "state",
   tier: "write",
-  properties: { operations: { type: "array", items: { type: "object", properties: OPERATION_PROPERTIES, required: ["op"] }, minItems: 1 } },
-  required: ["operations"],
+  // Nothing the code reads is held back by the schema (no required argument, no list of choices): a call it cannot read is answered in the answers' words, with what would work.
+  properties: { operations: { type: "array", items: { type: "object", properties: OPERATION_PROPERTIES } } },
+  required: [],
   example: { operations: [OPERATIONS[2]?.example ?? {}, OPERATIONS[5]?.example ?? {}] },
   run: applyOperations,
 };

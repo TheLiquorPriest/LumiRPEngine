@@ -16,6 +16,7 @@ import { holdsOf, isThing } from "../engine/things";
 import type { TreeView } from "../store/view";
 import type { StoreState, TurnRow } from "../store/types";
 import type { Call } from "./kit";
+import type { Lines } from "./texts";
 
 /** What a name is wanted as. */
 export type Want = "entity" | "person" | "thing" | "holder" | "place" | "point" | "track";
@@ -34,11 +35,12 @@ export interface Near {
   what: string;
 }
 
-/** A name that was not found as wanted: the near matches, or each of the several it fits. */
+/** A name that was not found as wanted: the near matches, each of the several it fits, and what goes by that very name but is not what was wanted. */
 export interface Missed {
   name: string;
   near: Near[];
   several: Near[];
+  other: Near[];
 }
 
 interface Candidate {
@@ -97,6 +99,11 @@ export class Reading {
 
   get registry(): Registry {
     return this.call.deps.env.registry;
+  }
+
+  /** The answers' lines the call is worded in. */
+  get lines(): Lines {
+    return this.call.lines;
   }
 
   /** The world as the chat plays it: its own places and those play made or changed. */
@@ -166,7 +173,7 @@ export class Reading {
     for (const rule of rules) {
       const hits = all.filter(rule);
       if (hits.length === 1 && hits[0]) return this.found(hits[0]);
-      if (hits.length > 1) return { name: said, near: [], several: hits.map((c) => this.near(c)) };
+      if (hits.length > 1) return { name: said, near: [], several: hits.map((c) => this.near(c)), other: [] };
     }
     if (want === "thing" || want === "holder") {
       const pov = this.doc.pov;
@@ -177,14 +184,17 @@ export class Reading {
       }
       if ("ambiguous" in words) {
         const several = all.filter((c) => words.ambiguous.includes(c.id));
-        if (several.length > 1) return { name: said, near: [], several: several.map((c) => this.near(c)) };
+        if (several.length > 1) return { name: said, near: [], several: several.map((c) => this.near(c)), other: [] };
       }
     }
     const saidWords = wordsOf(bare);
     const byWords = saidWords.length === 0 ? [] : all.filter((c) => c.names.some((n) => saidWords.every((w) => wordsOf(n).includes(w))));
     if (byWords.length === 1 && byWords[0]) return this.found(byWords[0]);
-    if (byWords.length > 1) return { name: said, near: [], several: byWords.map((c) => this.near(c)) };
-    return { name: said, near: this.nearest(bare, all), several: [] };
+    if (byWords.length > 1) return { name: said, near: [], several: byWords.map((c) => this.near(c)), other: [] };
+    // What goes by that very name but is not what was wanted (a weather region named as a place), so the answer can say what it is.
+    const wanted = new Set(all.map((c) => c.ref));
+    const other = this.candidates("point", gone).filter((c) => !wanted.has(c.ref) && rules.slice(0, 3).some((rule) => rule(c)));
+    return { name: said, near: this.nearest(bare, all), several: [], other: other.map((c) => this.near(c)) };
   }
 
   private found(c: Candidate): Found {

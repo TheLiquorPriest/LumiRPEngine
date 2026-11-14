@@ -1,18 +1,21 @@
 // An invented world on the shipped packs, a store on its own database behind the application's
 // write queue, and the engine's tools over the shipped guidance. Every name here is made up.
 
+import { expect } from "bun:test";
 import { Database } from "bun:sqlite";
+import { join } from "node:path";
 import type { HostTool, JsonObject, JsonValue, ToolCtx, ToolResult } from "rp-harness/contract";
 import { WriteQueue } from "../../src/app/database";
 import { hashJson } from "../../src/shared/hash";
 import type { WorldDoc } from "../../src/shared/world";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
+import { BLANK_REVISION } from "../../src/store/blank";
 import { migrateStore } from "../../src/store/schema";
 import { openStore } from "../../src/store/store";
 import type { UserStore } from "../../src/store/store";
 import type { TurnRow } from "../../src/store/types";
-import { BESTIARY_SCHEMA, BESTIARY_TABLE, type DueList, type EngineDeps, engineTools, shippedTexts, stateScan } from "../../src/iface/index";
+import { BESTIARY_SCHEMA, BESTIARY_TABLE, type DueList, type EngineDeps, engineTools, Lines, SHIPPED_GUIDANCE, shippedTexts, stateScan } from "../../src/iface/index";
 import { inventedWorld } from "../store/fixtures";
 
 export const USER = "user-a";
@@ -58,18 +61,17 @@ export interface Rig {
   call(name: string, args: JsonObject, agent?: { id: string; definition: string; parent?: string }): Promise<ToolResult>;
 }
 
-export async function rig(more: Partial<EngineDeps> = {}): Promise<Rig> {
-  const doc = world();
-  const revision = hashJson(doc);
+/** The tools on a chat of `doc`, or of the blank world a chat that names none plays (`"blank"`). */
+export async function rig(more: Partial<EngineDeps> = {}, doc: WorldDoc | "blank" = world()): Promise<Rig> {
+  const revision = doc === "blank" ? BLANK_REVISION : hashJson(doc);
   const db = new Database(":memory:");
   migrateStore(db);
-  const env = { registry: registry(), worlds: (r: string) => (r === revision ? doc : undefined) };
-  const store = openStore({ db, ...env });
+  const store = openStore({ db, registry: registry(), worlds: (r: string) => (doc !== "blank" && r === revision ? doc : undefined) });
   const writes = new WriteQueue(db, 10);
   const s = store.user(USER);
-  await writes.run(() => s.createChat({ id: CHAT, world: doc.id, revision }));
+  await writes.run(() => s.createChat(doc === "blank" ? { id: CHAT } : { id: CHAT, world: doc.id, revision }));
   const turn = await writes.run(() => s.beginTurn({ chat: CHAT, kind: "new" }));
-  const deps: EngineDeps = { store: s, env, writes, files: shippedTexts(), search: stateScan, due: DUE, ...more };
+  const deps: EngineDeps = { store: s, env: store.env, writes, files: shippedTexts(), search: stateScan, due: DUE, ...more };
   const tools = new Map((await engineTools(deps)).map((t) => [t.name, t]));
   const call = async (name: string, args: JsonObject, agent = { id: "gm-1", definition: "gm", parent: "author-1" }): Promise<ToolResult> => {
     const tool = tools.get(name);
@@ -96,4 +98,16 @@ export function dataOf(r: ToolResult): JsonObject {
 
 export function texts(r: ToolResult): string[] {
   return r.content.flatMap((p) => (p.type === "text" ? [p.text] : []));
+}
+
+const answerPatterns = Lines.parse(await Bun.file(join(SHIPPED_GUIDANCE, ".prompts", "engine-answers.md")).text(), "engine-answers").patterns();
+
+/** Every part of an answer is data (JSON or the store's tree) or a line of the answers' file, and every report a line. */
+export function wordsFromFiles(r: ToolResult): void {
+  const kinds = (r.details as { parts?: string[] } | undefined)?.parts ?? [];
+  texts(r).forEach((text, i) => {
+    if (kinds[i] === "data" || kinds[i] === "tree") return;
+    expect(answerPatterns.some((p) => p.test(text))).toBe(true);
+  });
+  for (const rep of r.reports ?? []) expect(answerPatterns.some((p) => p.test(rep))).toBe(true);
 }

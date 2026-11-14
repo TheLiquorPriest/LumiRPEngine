@@ -12,7 +12,7 @@ import { calendarOf, clockAt, dateAt, formatClock } from "../../engine/calendar"
 import { followOf } from "../../packs/castlife/core/routines";
 import { routineGmView } from "../../packs/castlife/core/view";
 import { NUMBER, OBJECT, oneOf, TEXT, WHOLE } from "../kit";
-import { find, isUnread, named, notOneOf, type OpContext, textArg, type Unread } from "../ops";
+import { find, isUnread, named, notAs, notOneOf, type OpContext, textArg, type Unread, unknownFields } from "../ops";
 import { editChange, effectTool, foundIn, notApplicable, readTool, type WriteDef, writeTool } from "./run";
 
 const FAMILY = "time";
@@ -50,7 +50,7 @@ function routineEdit(o: OpContext, person: string): FixOp | Unread {
   const value = o.args.value;
   const missing = [...(id === undefined ? [key] : []), ...(value === undefined ? ["value"] : [])];
   if (missing.length > 0) return { line: "needs", fields: { n: o.n, op: o.op, fields: missing } };
-  if (value !== null && !isRecord(value)) return notOneOf(o, "value", value ?? null, ["an object, or null"]);
+  if (value !== null && !isRecord(value)) return notAs(o, "value", value ?? null, "object_or_null");
   return { op, entity: person, [key]: id, value } as unknown as FixOp;
 }
 
@@ -69,7 +69,7 @@ const routine: WriteDef = {
     const from = o.draft.w.events.length;
     const refused = editChange(o, edit);
     if (refused !== null) {
-      if (refused.code === "missing_schedule") return { line: "unknown", fields: { n: o.n, op: o.op, field: "schedule", name: String(o.args.schedule), wanted: "schedule", near: Object.keys(o.reading.doc.schedules) } };
+      if (refused.code === "missing_schedule") return { line: "unknown", fields: { n: o.n, op: o.op, ...unknownFields(o.call.lines, "schedule", "schedule", String(o.args.schedule), Object.keys(o.reading.doc.schedules)) } };
       if (refused.code === "bad_value") return notOneOf(o, "value", o.args.value ?? null, []);
       // Taken off a schedule they do not follow: so already, and said.
       if (refused.code !== "not_owner") return notApplicable(o, refused.code);
@@ -120,7 +120,7 @@ const day = readTool({
     const who = foundIn(r, "person", args.person, "person");
     if (isUnread(who)) return who;
     const offset = args.day ?? 0;
-    if (typeof offset !== "number" || !Number.isInteger(offset)) return { line: "unreadable", fields: { field: "day", value: JSON.stringify(offset), choices: ["a whole number of days from today: 0 today, 1 tomorrow, -1 yesterday"] } };
+    if (typeof offset !== "number" || !Number.isInteger(offset)) return { line: "unreadable", fields: { field: "day", value: JSON.stringify(offset), wants: r.lines.line("wants_day") ?? "" } };
     const cal = calendarOf(r.world);
     const index = dateAt(cal, r.state.world.clock).dayIndex + offset;
     const blocks = routineGmView(r.ctx, who.id, index).day.blocks.map((b) => ({ from: b.from, to: b.to, label: b.label, activity: b.activity, place: b.place === null ? null : `${r.nameOf(b.place)} [${b.place}]`, kind: b.kind, reasons: b.reasons, origin: b.origin }) as unknown as JsonObject);

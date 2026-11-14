@@ -9,9 +9,10 @@ import { hashParts } from "../shared/hash";
 import type { EntityId } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import { formatMoney, type WorldDoc } from "../shared/world";
+import { formatMoney, type PlaceDef, type WorldDoc } from "../shared/world";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { own } from "../engine/pack-kit";
+import { playedWorld } from "../engine/places-in-play";
 import type { Rejection } from "../engine/registry";
 import type { EntityState, WorldState } from "../engine/state";
 import { Working } from "../engine/working";
@@ -154,10 +155,30 @@ function aspects(id: string, state: WorldState, doc: WorldDoc, name: (id: string
   return out;
 }
 
+/** What a place is, as a diff compares it: its name, the place it is in, and its fields. */
+function placeAspects(def: PlaceDef | undefined, name: (id: string) => string): Record<string, JsonValue> {
+  if (!def) return {};
+  const out: Record<string, JsonValue> = { name: def.name };
+  if (def.parent !== undefined) out.in = name(def.parent);
+  for (const [k, v] of Object.entries(def.fields)) out[k] = shown(v);
+  return out;
+}
+
+/** What changed of one thing or place, by the keys that differ: null when none does. */
+function diffEntry(at: string, name: string, was: Record<string, JsonValue>, now: Record<string, JsonValue>, isNew: boolean): JsonObject | null {
+  const keys = [...new Set([...Object.keys(was), ...Object.keys(now)])].filter((k) => JSON.stringify(was[k] ?? null) !== JSON.stringify(now[k] ?? null));
+  if (keys.length === 0) return null;
+  const entry: JsonObject = { at, name };
+  if (isNew) entry.new = true;
+  else entry.was = Object.fromEntries(keys.map((k) => [k, was[k] ?? null]));
+  entry.now = Object.fromEntries(keys.map((k) => [k, now[k] ?? null]));
+  return entry;
+}
+
 /**
  * What the call changed, from the state it started on to the state recorded: each touched thing
- * with the keys that changed, as they were and as they are now; the clock; quests' stages; the
- * horizon.
+ * with the keys that changed, as they were and as they are now; each place made or changed in the
+ * world as the chat plays it; the clock; quests' stages; the horizon.
  */
 export function changedBetween(before: StoreState, after: StoreState, doc: WorldDoc, events: readonly JsonValue[]): JsonObject[] {
   const out: JsonObject[] = [];
@@ -166,17 +187,18 @@ export function changedBetween(before: StoreState, after: StoreState, doc: World
     idsIn(ev, before.world.entities, ids);
     idsIn(ev, after.world.entities, ids);
   }
-  const name = (id: string): string => own(after.world.entities, id)?.name ?? own(before.world.entities, id)?.name ?? own(doc.places, id)?.name ?? id;
+  const placesBefore = playedWorld(doc, before.world).places;
+  const placesAfter = playedWorld(doc, after.world).places;
+  const name = (id: string): string => own(after.world.entities, id)?.name ?? own(before.world.entities, id)?.name ?? own(placesAfter, id)?.name ?? own(placesBefore, id)?.name ?? id;
   for (const id of [...ids].sort()) {
-    const was = aspects(id, before.world, doc, name);
-    const now = aspects(id, after.world, doc, name);
-    const keys = [...new Set([...Object.keys(was), ...Object.keys(now)])].filter((k) => JSON.stringify(was[k] ?? null) !== JSON.stringify(now[k] ?? null));
-    if (keys.length === 0) continue;
-    const entry: JsonObject = { at: `entity:${id}`, name: name(id) };
-    if (own(before.world.entities, id) === undefined) entry.new = true;
-    else entry.was = Object.fromEntries(keys.map((k) => [k, was[k] ?? null]));
-    entry.now = Object.fromEntries(keys.map((k) => [k, now[k] ?? null]));
-    out.push(entry);
+    const entry = diffEntry(`entity:${id}`, name(id), aspects(id, before.world, doc, name), aspects(id, after.world, doc, name), own(before.world.entities, id) === undefined);
+    if (entry) out.push(entry);
+  }
+  for (const id of [...new Set([...Object.keys(placesBefore), ...Object.keys(placesAfter)])].sort()) {
+    // A place neither the draft nor play touched is the same object in both.
+    if (own(placesBefore, id) === own(placesAfter, id)) continue;
+    const entry = diffEntry(`place:${id}`, name(id), placeAspects(own(placesBefore, id), name), placeAspects(own(placesAfter, id), name), own(placesBefore, id) === undefined);
+    if (entry) out.push(entry);
   }
   if (before.world.clock !== after.world.clock) {
     const cal = calendarOf(doc);
@@ -193,9 +215,9 @@ export function changedBetween(before: StoreState, after: StoreState, doc: World
   return out;
 }
 
-/** The tree refs an answer shows as they now stand: each touched thing, and the place a moved one is at. */
+/** The tree refs an answer shows as they now stand: each touched thing and place. */
 export function touchedRefs(changed: readonly JsonObject[]): string[] {
-  return changed.flatMap((c) => (typeof c.at === "string" && c.at.startsWith("entity:") ? [c.at] : []));
+  return changed.flatMap((c) => (typeof c.at === "string" && (c.at.startsWith("entity:") || c.at.startsWith("place:")) ? [c.at] : []));
 }
 
 /** The answer to a draft recorded: each operation with its lane and provenance, what changed, how it now stands, and what did not apply. */

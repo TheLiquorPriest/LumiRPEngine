@@ -16,7 +16,7 @@ import { slotOf, spotOf } from "../../engine/things";
 import { own } from "../../engine/pack-kit";
 import { pieceProblem } from "../../packs/gear/core/sets";
 import { oneOf, TEXT, TEXTS, WHOLE, YES_NO } from "../kit";
-import { find, isUnread, itemOptions, named, notOneOf, type OpContext, textArg, type Unread } from "../ops";
+import { find, isUnread, itemOptions, named, notAs, notOneOf, type OpContext, textArg, type Unread } from "../ops";
 import { BENT_RULES, putThing } from "../ops-things";
 import { timeArg } from "../ops-time";
 import { editChange, isAlready, itemChange, notApplicable, optionalId, shownValue, type WriteDef, writeTool } from "./run";
@@ -68,7 +68,7 @@ const condition: WriteDef = {
     const item = find(o, "item", "thing");
     if (isUnread(item)) return item;
     const delta = o.args.delta;
-    if (typeof delta !== "number" || !Number.isInteger(delta)) return notOneOf(o, "delta", delta ?? null, ["a whole number, below 0 for wear and damage, above 0 for mending"]);
+    if (typeof delta !== "number" || !Number.isInteger(delta)) return notAs(o, "delta", delta ?? null, "delta");
     return itemChange(o, { do: "condition", item: item.id, delta }, "engine", item.id);
   },
 };
@@ -84,7 +84,7 @@ const use: WriteDef = {
     const item = find(o, "item", "thing");
     if (isUnread(item)) return item;
     const qty = o.args.qty;
-    if (qty !== undefined && qty !== null && !(typeof qty === "number" && Number.isInteger(qty) && qty >= 1)) return notOneOf(o, "qty", qty, ["a whole number of at least 1"]);
+    if (qty !== undefined && qty !== null && !(typeof qty === "number" && Number.isInteger(qty) && qty >= 1)) return notAs(o, "qty", qty, "qty");
     const stored = own(o.draft.w.state.entities, item.id)?.fields.qty;
     const held = typeof stored === "number" ? stored : 1;
     const used = typeof qty === "number" ? qty : 1;
@@ -246,7 +246,7 @@ const label: WriteDef = {
     const aliases = Array.isArray(o.args.aliases) ? o.args.aliases.filter((a): a is string => typeof a === "string") : undefined;
     const description = typeof o.args.description === "string" ? o.args.description : undefined;
     const specs = o.args.specs === undefined ? null : vehicleSpecsOf(o.args.specs);
-    if (o.args.specs !== undefined && specs === null) return notOneOf(o, "specs", o.args.specs, ["a list of { label, value }"]);
+    if (o.args.specs !== undefined && specs === null) return notAs(o, "specs", o.args.specs, "specs");
     const rest = { item: item.id, ...(name !== undefined ? { name } : {}), ...(aliases !== undefined ? { aliases } : {}), ...(description !== undefined ? { description } : {}), ...(size !== undefined ? { size } : {}) };
     const op: ItemOp = { do: "label", ...rest, ...(specs !== null ? { specs } : {}) };
     return itemChange(o, op, "engine", item.id, {
