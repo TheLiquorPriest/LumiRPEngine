@@ -159,8 +159,15 @@ const SPINDLE_GLOBAL = new Set(["backend.ts", "backend/spindle-host.ts"]);
 /** What the CLI may import from outside src, by path from the repo root: the docs it serves, the schemas, its version. */
 const CLI_BUNDLED = /^(docs\/[A-Z-]+\.md|schemas\/[a-z0-9-]+\.schema\.json|package\.json)$/;
 
+/**
+ * The standalone application's folders. They are a different tree with rules of their own
+ * (`test/standalone-boundaries.test.ts`); this file goes on checking the code they are replacing
+ * until that code is removed.
+ */
+const STANDALONE = new Set(["app", "adapter", "store", "iface", "cast", "story", "lore", "turn", "ui", "ext", "migrate", "tree"]);
+
 describe("module boundaries", () => {
-  const all = files(SRC);
+  const all = files(SRC).filter((file) => !STANDALONE.has(relative(SRC, file).split(/[\\/]/)[0] ?? ""));
 
   test("every import crosses only an allowed boundary", () => {
     const violations: string[] = [];
