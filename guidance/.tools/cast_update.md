@@ -25,6 +25,7 @@ arguments:
   operations.respect: "relationship: from -100 to 100, when useful."
   operations.fear: "relationship: from -100 to 100, when useful."
   operations.how: "knowledge: how they learned it."
+  operations.accept: "growth: true to accept a change a character's reflection proposed, by its id; false to set it back to proposed."
   operations.drop: "bind: true to take the source away. growth, history, relationship, knowledge: true to strike it; say why."
   operations.why: "cast: why this casting. With drop: why it goes."
 ---

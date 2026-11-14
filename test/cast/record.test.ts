@@ -26,6 +26,8 @@ function everyRowPart(c: string): CastWrite[] {
     { character: c, part: "relationship", item: relationshipItemId(c, "Wren"), value: { with: "Wren", text: "She pays on time. I would not cross her.", trust: 40, warmth: 20, respect: 60, fear: 10 } },
     { character: c, part: "knowledge", item: null, value: { text: "The reeve's seal has a chipped corner.", how: "He saw it on the letter." } },
     { character: c, part: "history", item: null, value: { text: "Handed Wren the sealed letter and would not meet her eye.", beats: ["b-3"] } },
+    { character: c, part: "perception", item: null, value: { reach: "part", moment: "Wren opens the letter", content: "From behind the bar: she goes pale.", missed: "What it says.", knows: ["Wren has a sealed letter."] } },
+    { character: c, part: "memory", item: null, value: { text: "She went pale at my letter and I said nothing.", gist: "Said nothing when she went pale.", weight: 3, who: ["Wren"], about: ["the letter"], from: ["p-1"] } },
   ];
 }
 

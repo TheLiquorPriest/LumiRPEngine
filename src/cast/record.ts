@@ -13,7 +13,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { JsonObject } from "rp-harness/contract";
-import type { UserStore } from "../store";
+import { type Store, StoreInputError, type UserStore } from "../store";
 import type { CastAt } from "./path";
 
 /** How large a part a character plays (§7.2). What each has is the casting skill's to say. */
@@ -29,7 +29,7 @@ export const BASE_PARTS = ["seed", "soul", "inner_voice", "background"] as const
 export type BasePart = (typeof BASE_PARTS)[number];
 
 /** The parts kept as rows tied to turns. */
-export const ROW_PARTS = ["casting", "growth", "mind", "relationship", "knowledge", "history"] as const;
+export const ROW_PARTS = ["casting", "growth", "mind", "relationship", "knowledge", "history", "perception", "memory"] as const;
 export type RowPart = (typeof ROW_PARTS)[number];
 
 /** What a mind row holds, by kind, as the plan names them (§7.1): attention, feeling, beliefs, wants, plans, what they hide. */
@@ -39,7 +39,7 @@ export const MIND_KINDS = ["attention", "feeling", "belief", "want", "plan", "hi
 export const RELATIONSHIP_DIMENSIONS = ["trust", "warmth", "respect", "fear"] as const;
 
 /** What an item's id starts with, for the parts that hold many items per character. */
-const PREFIX: Readonly<Record<"growth" | "mind" | "knowledge" | "history", string>> = { growth: "g", mind: "m", knowledge: "k", history: "h" };
+const PREFIX: Readonly<Record<"growth" | "mind" | "knowledge" | "history" | "perception" | "memory", string>> = { growth: "g", mind: "m", knowledge: "k", history: "h", perception: "p", memory: "mem" };
 
 /** A name as the cast compares names: trimmed, spaces folded, case ignored (the story record's rule). */
 export function nameKey(name: string): string {
@@ -399,4 +399,31 @@ export function writeCast(db: Database, writer: CastWriter, writes: readonly Cas
     }
     return { id, turn: writer.turn, ord: ord++, character: w.character, part: w.part, item, value: w.value, at: writer.at, by: writer.by, agent: writer.agent, job: writer.job, created: writer.now };
   });
+}
+
+/**
+ * Takes back one agent's cast rows on an open turn (every agent's when none is named), inside the
+ * caller's queued write, beside the store's `dropStaged`: the lead dropping a sub-agent's writes. How
+ * many went. A turn that is not open has nothing staged, and is refused as the store refuses it.
+ */
+export function dropCastStaged(store: Store, user: string, turn: string, agent?: string): number {
+  const row = store.user(user).turn(turn);
+  if (row === null) throw new StoreInputError(`turn ${turn} is not there`);
+  if (row.status !== "open") throw new StoreInputError(`turn ${turn} is ${row.status}: only an open turn's staged cast rows can be taken back`);
+  const gone = agent === undefined ? store.db.run("DELETE FROM cast_entry WHERE user = ? AND turn = ?", [user, turn]) : store.db.run("DELETE FROM cast_entry WHERE user = ? AND turn = ? AND agent = ?", [user, turn, agent]);
+  return gone.changes;
+}
+
+/** The cast's mark on a turn now: the place of its last row, -1 when it has none. A continue takes it as it begins, beside the store's mark. */
+export function castMark(db: Database, user: string, turn: string): number {
+  return db.query<{ n: number | null }, [string, string]>("SELECT max(ord) AS n FROM cast_entry WHERE user = ? AND turn = ?").get(user, turn)?.n ?? -1;
+}
+
+/**
+ * Takes back a turn's cast rows written after `after` (a `castMark`), tied or not, inside the
+ * caller's queued write, beside the store's `takeBack`: what a continue wrote when it saved nothing.
+ * A job's rows are the job's and stay, as the store keeps a job's changes. How many went.
+ */
+export function takeBackCast(db: Database, user: string, turn: string, after: number): number {
+  return db.run("DELETE FROM cast_entry WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL", [user, turn, after]).changes;
 }

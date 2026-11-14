@@ -4,7 +4,7 @@
 // every sentence of an answer from `.prompts/cast-answers.md`). An answer is data from the record
 // plus those lines, made with the engine's own answer builder, so every lane answers in one shape.
 
-import type { AgentRef, ApprovalsPort, HostTool, JsonObject, JsonValue, Scope, ToolCtx, ToolResult, ToolTier } from "rp-harness/contract";
+import type { AgentRef, HostTool, JsonObject, JsonValue, Scope, ToolCtx, ToolResult, ToolTier } from "rp-harness/contract";
 import { calendarOf, formatClock, placeOffset } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
 import { described, Reply, type Writes } from "../iface/kit";
@@ -18,6 +18,30 @@ import type { SourceReader, SourceState } from "./sources";
 export const CAST_DEFAULTS = Object.freeze({
   /** The most items of one part one `cast_query` answers with; the answer says how many more there are. */
   queryItems: 50,
+  /**
+   * How sure, from 0 to 1, a character is of a secret a perception says they now know: the
+   * confidence of the holding written for it. 1, the confidence today's build gives a holding whose
+   * confidence is unset (`src/shared/minds.ts:293`).
+   */
+  secretConfidence: 1,
+  /** The most memories a character holds at top of mind (plan §7.4, Appendix D.1). */
+  topOfMind: 9,
+  /** Story days a memory stays short term, unless a dream settles it sooner (plan §7.4, Appendix D.1). */
+  shortTermDays: 3,
+  /** Story days in which a memory of weight 1, never recalled, falls to half its strength. Each point of weight doubles it; each recall adds as much again. */
+  fadeDays: 3,
+  /** The strength, from 0 to 1, under which a memory is faint, and is shown as its gist. */
+  faintBelow: 0.25,
+  /** The weight of a memory given none. */
+  memoryWeight: 1,
+  /** The highest weight a memory can have; weights run from 1. */
+  weightMax: 5,
+  /** What comes to mind for a scene, in tokens (plan §7.4, Appendix D.1). */
+  comesToMindTokens: 2000,
+  /** Characters per token, for a budget counted before a model sees the text: RPH's own estimate. */
+  charsPerToken: 3.2,
+  /** The most memories one recall brings back; the answer says how many more touch the cue. */
+  recallItems: 10,
 });
 
 export type CastSettings = { -readonly [K in keyof typeof CAST_DEFAULTS]: number };
@@ -35,11 +59,9 @@ export interface CastDeps {
   files: GuidanceFiles;
   /** Reads a bound source live in Lumiverse. */
   sources: SourceReader;
-  /** The user's Auto / Confirm / Never per lane; absent, every lane is Auto (Appendix D.1). */
-  approvals?: ApprovalsPort;
   /** Settings over `CAST_DEFAULTS`. */
   settings?: Partial<CastSettings>;
-  /** Milliseconds since 1970, for an approval's question and a row's time; `Date.now` when absent. */
+  /** Milliseconds since 1970, for a row's time; `Date.now` when absent. */
   now?: () => number;
 }
 

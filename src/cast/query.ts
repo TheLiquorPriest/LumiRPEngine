@@ -6,15 +6,16 @@
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { oneOf, type Reply, TEXT, WHOLE, YES_NO } from "../iface/kit";
 import { baseView, type CastCall, type CastReading, type CastToolSpec, itemView, readingOr, sourceView, whoView } from "./kit";
+import { perceptionView } from "./perceive";
 import { baseHistory, baseOf, bindingsOf, type CastItem, castingInForce, castingItemId, castOn, charactersOf, findCharacter, nameKey, type RowPart } from "./record";
 import { sourcesNow } from "./sources";
 
 /** The parts a query can ask for, as the record's table names them. */
-export const QUERY_PARTS = ["sources", "base", "casting", "growth", "mind", "relationships", "knowledge", "history"] as const;
+export const QUERY_PARTS = ["sources", "base", "casting", "growth", "mind", "relationships", "knowledge", "history", "perceptions"] as const;
 type QueryPart = (typeof QUERY_PARTS)[number];
 
 /** The parts kept as rows, by the name a query gives them. */
-const ROWS: Readonly<Partial<Record<QueryPart, RowPart>>> = { growth: "growth", mind: "mind", relationships: "relationship", knowledge: "knowledge", history: "history" };
+const ROWS: Readonly<Partial<Record<QueryPart, RowPart>>> = { growth: "growth", mind: "mind", relationships: "relationship", knowledge: "knowledge", history: "history", perceptions: "perception" };
 
 const QUERY_PROPERTIES: Record<string, JsonObject> = {
   who: TEXT,
@@ -90,7 +91,7 @@ async function query(args: JsonObject, call: CastCall): Promise<Reply> {
       .of(character.id, rowPart, history)
       .filter((item) => (toward === null || rowPart !== "relationship" || nameKey(String(item.fields.with ?? "")) === toward) && says(item, words));
     const shown = matches.slice(skip, skip + call.settings.queryItems);
-    data[name] = shown.map((item) => itemView(reading, item, history));
+    data[name] = shown.map((item) => (rowPart === "perception" ? { ...perceptionView(reading, item), ...(history ? { history: itemView(reading, item, true).history ?? [] } : {}) } : itemView(reading, item, history)));
     const rest = matches.length - skip - shown.length;
     if (rest > 0) more.push({ count: rest, part: name, skip: skip + shown.length });
   }

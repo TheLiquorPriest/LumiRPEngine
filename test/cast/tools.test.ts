@@ -57,13 +57,18 @@ async function bench(more: Partial<CastDeps> = {}): Promise<Bench> {
   return { t, tools, call };
 }
 
-/** Approvals as the user set them, with every question asked kept. */
-function approvals(permission: LanePermission, answer: ApprovalAnswer = { go: true }): { port: NonNullable<CastDeps["approvals"]>; asked: ApprovalAsk[] } {
+/** An approvals port as the user set it, with every question it was asked and every lane it was asked about kept. */
+function approvals(permission: LanePermission, answer: ApprovalAnswer = { go: true }): { port: { permission(scope: unknown, lane: string): Promise<LanePermission>; ask(scope: unknown, ask: ApprovalAsk): Promise<ApprovalAnswer> }; asked: ApprovalAsk[]; lanes: string[] } {
   const asked: ApprovalAsk[] = [];
+  const lanes: string[] = [];
   return {
     asked,
+    lanes,
     port: {
-      permission: async () => permission,
+      permission: async (_scope, lane) => {
+        lanes.push(lane);
+        return permission;
+      },
       ask: async (_scope, ask) => {
         asked.push(ask);
         return answer;
@@ -202,32 +207,19 @@ describe("cast_update", () => {
     expect(back.knowledge).toEqual([expect.objectContaining({ text: "Wren can pick a lock." })]);
   });
 
-  test("asks the story lane's permission: never writes nothing; confirm asks once with the operations, and a no writes nothing", async () => {
-    const never = approvals("never");
-    const b = await bench({ approvals: never.port });
-    const turn = await b.t.begin();
-    const r = await b.call("cast_update", MAKE_BRAM, turn.id);
-    wordsFromFiles(r);
-    expect(texts(r).join("\n")).toContain("it writes to the story lane, where the player allows no writes");
-    expect(ops(r).every((o) => o.recorded === false && o.held === "never")).toBe(true);
-    expect(charactersOf(b.t.db, USER, [CHAT])).toEqual([]);
-    expect(never.asked).toEqual([]);
-
-    const confirm = approvals("confirm", { go: false, reason: "Not yet." });
-    const c = await bench({ approvals: confirm.port });
-    const t2 = await c.t.begin();
-    const r2 = await c.call("cast_update", MAKE_BRAM, t2.id);
-    wordsFromFiles(r2);
-    expect(confirm.asked).toHaveLength(1);
-    expect(confirm.asked[0]).toMatchObject({ tool: "cast_update", lane: "story", args: { operations: MAKE_BRAM.operations ?? [] } });
-    expect(texts(r2).join("\n")).toContain("the player said no. Their reason: Not yet.");
-    expect(charactersOf(c.t.db, USER, [CHAT])).toEqual([]);
-
-    const yes = approvals("confirm");
-    const d = await bench({ approvals: yes.port });
-    const t3 = await d.t.begin();
-    expect((await d.call("cast_update", MAKE_BRAM, t3.id)).error).toBeUndefined();
-    expect(charactersOf(d.t.db, USER, [CHAT]).map((x) => x.name)).toEqual(["Bram"]);
+  test("the tool asks the user nothing and reads no permission: the harness's gate holds the story lane before the call, once", async () => {
+    // Handed an approvals port anyway (as a host might), under Confirm with a no, and under Never.
+    for (const permission of ["confirm", "never"] as const) {
+      const user = approvals(permission, { go: false, reason: "Not yet." });
+      const b = await bench({ ...({ approvals: user.port } as object) });
+      const turn = await b.t.begin();
+      const r = await b.call("cast_update", MAKE_BRAM, turn.id);
+      wordsFromFiles(r);
+      expect(r.error).toBeUndefined();
+      expect(user.asked).toEqual([]);
+      expect(user.lanes).toEqual([]);
+      expect(charactersOf(b.t.db, USER, [CHAT]).map((x) => x.name)).toEqual(["Bram"]);
+    }
   });
 
   test("a casting the player pinned stands: the Author's is kept, and the answer says the pin stands", async () => {

@@ -2,13 +2,14 @@
 // operations, applied in order, one call writing many: casting, the sources bound, the base, growth,
 // history, relationships and knowledge. The call is read whole first: anything it cannot read (an
 // operation that is none of the list, a character the cast does not hold, a source Lumiverse does
-// not hold, an item the path does not hold) answers the whole call, and nothing is written. Then the
-// user's setting for the story lane is asked through the contract's approvals, never decided here.
-// What goes ahead is written in one queued write, and the answer says what each operation wrote and
-// how its part of the record now stands. A character a call casts is known to all its operations,
-// whatever their order, so a call can bind, draw and cast someone new at once.
+// not hold, an item the path does not hold) answers the whole call, and nothing is written. The
+// user's setting for the story lane is held by the harness's gate before the call ever runs (the
+// spec's tier and lane), so the tool asks nothing itself. What goes ahead is written in one queued
+// write, and the answer says what each operation wrote and how its part of the record now stands. A
+// character a call casts is known to all its operations, whatever their order, so a call can bind,
+// draw and cast someone new at once.
 
-import type { ApprovalAsk, JsonObject, JsonValue } from "rp-harness/contract";
+import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { oneOf, type Reply, TEXT, TEXTS, YES_NO } from "../iface/kit";
 import type { Fields } from "../iface/texts";
 import type { Lane } from "../store";
@@ -51,18 +52,18 @@ const OUTSIDE_TURNS: Readonly<Partial<Record<Op, true>>> = { bind: true, base: t
 /** The scale a relationship's dimensions are given on: the one today's regard is kept on (`src/packs/relationships/core/index.ts:41-45`). */
 export const DIMENSION_RANGE = Object.freeze({ min: -100, max: 100 });
 
-/** How an argument is read: words; a list of words; true or false; a dimension; one of a list. */
-type Kind = "text" | "texts" | "flag" | "dimension" | readonly string[];
+/** How an argument is read: words; a list of words; true or false; a whole number from 0; a number in a range; one of a list. */
+export type Kind = "text" | "texts" | "flag" | "whole" | Readonly<{ min: number; max: number }> | readonly string[];
 
 const DROP = { drop: "flag", why: "text" } as const;
-const DIMENSIONS = Object.fromEntries(RELATIONSHIP_DIMENSIONS.map((d) => [d, "dimension"])) as Record<(typeof RELATIONSHIP_DIMENSIONS)[number], "dimension">;
+const DIMENSIONS = Object.fromEntries(RELATIONSHIP_DIMENSIONS.map((d) => [d, DIMENSION_RANGE])) as Record<(typeof RELATIONSHIP_DIMENSIONS)[number], typeof DIMENSION_RANGE>;
 
 /** The arguments each operation takes besides `op` and `who`, each read as its kind. */
 const ARGS: Readonly<Record<Op, Readonly<Record<string, Kind>>>> = {
   cast: { as: CASTINGS, line: "text", why: "text" },
   bind: { card: "text", persona: "text", entry: "text", memory: "text", defines: "text", drop: "flag" },
   base: { seed: "text", soul: "text", inner_voice: "text", background: "text" },
-  growth: { id: "text", text: "text", cause: "text", ...DROP },
+  growth: { id: "text", text: "text", cause: "text", accept: "flag", ...DROP },
   history: { id: "text", text: "text", beats: "texts", ...DROP },
   relationship: { with: "text", text: "text", ...DIMENSIONS, ...DROP },
   knowledge: { id: "text", text: "text", how: "text", ...DROP },
@@ -92,17 +93,18 @@ export const UPDATE_PROPERTIES: Record<string, JsonObject> = {
   with: TEXT,
   ...Object.fromEntries(RELATIONSHIP_DIMENSIONS.map((d) => [d, DIMENSION])),
   how: TEXT,
+  accept: YES_NO,
   drop: YES_NO,
   why: TEXT,
 };
 
-/** Something an operation says that cannot be read: the answers' line that says so, and its fields. */
-interface Unread {
+/** Something a call says that cannot be read: the answers' line that says so, and its fields. */
+export interface Unread {
   line: string;
   fields: Fields;
 }
 
-function isUnread(v: unknown): v is Unread {
+export function isUnread(v: unknown): v is Unread {
   return typeof v === "object" && v !== null && "line" in v;
 }
 
@@ -123,11 +125,15 @@ interface Planned {
   seen?: Record<string, string>;
 }
 
-/** One argument read as its kind; undefined when it is not given. */
-function readArg(n: number, op: string, field: string, kind: Kind, said: JsonValue | undefined): JsonValue | Unread | undefined {
+/** One argument of the `n`th item of a call (`op` names what kind of item) read as its kind; undefined when it is not given. */
+export function readArg(n: number, op: string, field: string, kind: Kind, said: JsonValue | undefined): JsonValue | Unread | undefined {
   if (said === undefined || said === null) return undefined;
   const unreadable = (choices: readonly JsonValue[] = []): Unread => ({ line: "unreadable_op", fields: { n, op, field, value: JSON.stringify(said), choices } });
   if (Array.isArray(kind)) return typeof said === "string" && kind.includes(said) ? said : unreadable(kind);
+  if (typeof kind === "object") {
+    const range = kind as Readonly<{ min: number; max: number }>;
+    return typeof said === "number" && Number.isFinite(said) && said >= range.min && said <= range.max ? said : { line: "out_of_range", fields: { n, op, field, value: JSON.stringify(said), min: range.min, max: range.max } };
+  }
   switch (kind) {
     case "text": {
       if (typeof said !== "string") return unreadable();
@@ -141,10 +147,8 @@ function readArg(n: number, op: string, field: string, kind: Kind, said: JsonVal
     }
     case "flag":
       return typeof said === "boolean" ? said : unreadable([true, false]);
-    case "dimension":
-      return typeof said === "number" && Number.isFinite(said) && said >= DIMENSION_RANGE.min && said <= DIMENSION_RANGE.max
-        ? said
-        : { line: "out_of_range", fields: { n, op, field, value: JSON.stringify(said), ...DIMENSION_RANGE } };
+    case "whole":
+      return typeof said === "number" && Number.isInteger(said) && said >= 0 ? said : unreadable();
   }
   return unreadable();
 }
@@ -248,8 +252,9 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<Planned | 
     case "history":
     case "knowledge": {
       planned.part = name;
-      const { id, ...fields } = value;
-      planned.value = fields;
+      const { id, accept, ...fields } = value;
+      // Accepting a growth a character's reflection proposed: it is growth from now on.
+      planned.value = accept === undefined ? fields : { ...fields, proposed: accept !== true };
       if (id === undefined) {
         if (fields.text === undefined) return [{ line: "needs", fields: { n, op, fields: ["text"] } }];
         planned.item = null;
@@ -257,23 +262,11 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<Planned | 
       }
       const item = r.cast.record.items.get(id as string);
       if (item === undefined || item.part !== name || item.character !== character.id) return [{ line: "unknown_id", fields: { n, op, who: character.name, part: name, id: JSON.stringify(id) } }];
-      if (Object.keys(fields).length === 0) return [{ line: "needs_one", fields: { n, op, fields: Object.keys(ARGS[name]).filter((f) => f !== "id") } }];
+      if (Object.keys(planned.value).length === 0) return [{ line: "needs_one", fields: { n, op, fields: Object.keys(ARGS[name]).filter((f) => f !== "id") } }];
       planned.item = id as string;
       return planned;
     }
   }
-}
-
-/** The user's word for the story lane: null to go ahead; else why the call's operations may not. */
-async function approval(call: CastCall, operations: JsonValue[]): Promise<"never" | { declined: string | undefined } | null> {
-  const approvals = call.deps.approvals;
-  if (approvals === undefined) return null;
-  const permission = await approvals.permission(call.scope, CAST_LANE);
-  if (permission === "auto") return null;
-  if (permission === "never") return "never";
-  const ask: ApprovalAsk = { agent: call.agent, callId: call.callId, tool: call.tool, lane: CAST_LANE, args: { operations }, at: (call.deps.now ?? Date.now)() };
-  const said = await approvals.ask(call.scope, ask, call.signal);
-  return said.go ? null : { declined: said.reason };
 }
 
 /** A reader that asks Lumiverse once per source for the whole call. */
@@ -317,15 +310,6 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
   if (unread.length > 0) {
     for (const u of unread) reply.line(u.line, u.fields);
     return reply.line("nothing_recorded", {}).fail();
-  }
-
-  const held = await approval(call, list);
-  if (held !== null) {
-    for (const p of planned) {
-      if (held === "never") reply.line("never", { n: p.n, op: p.op, lane: CAST_LANE });
-      else reply.line("declined", { n: p.n, op: p.op, ...(held.declined !== undefined ? { reason: held.declined } : {}) });
-    }
-    return reply.data({ operations: planned.map((p) => ({ n: p.n, op: p.op, recorded: false, held: held === "never" ? "never" : "declined" })) });
   }
 
   const now = (call.deps.now ?? Date.now)();

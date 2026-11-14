@@ -4,11 +4,16 @@
 // an invented shelf whose revisions a test can change. Every name here is made up.
 
 import { Database } from "bun:sqlite";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { AgentRef, HostTool, JsonObject, ToolResult } from "rp-harness/contract";
 import { WriteQueue } from "../../src/app/database";
+import { castTools, type CastDeps } from "../../src/cast/index";
 import { castAt } from "../../src/cast/path";
 import { CastRecord, type CastRow, type CastWrite, type SourceKind, writeCast } from "../../src/cast/record";
 import { CAST_MIGRATIONS } from "../../src/cast/schema";
 import type { SourceNow, SourceReader } from "../../src/cast/sources";
+import { Lines, SHIPPED_GUIDANCE, shippedTexts } from "../../src/iface/texts";
 import { hashJson } from "../../src/shared/hash";
 import { migrateStore, openStore, type ShownMessage, type Store, type TurnRow, type UserStore } from "../../src/store";
 import { hashOf, inventedWorld, registry } from "../store/fixtures";
@@ -126,4 +131,57 @@ export async function openTable(): Promise<Table> {
     },
   };
   return table;
+}
+
+// ---------------------------------------------------------------- the tools, as an agent calls them
+
+const PATTERNS = Lines.parse(readFileSync(join(SHIPPED_GUIDANCE, ".prompts", "cast-answers.md"), "utf8"), "cast-answers.md").patterns();
+
+export function texts(r: ToolResult): string[] {
+  return r.content.flatMap((p) => (p.type === "text" ? [p.text] : []));
+}
+
+function isJson(text: string): boolean {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Every sentence of an answer is a line of the answers' file: none is written in code. */
+export function wordsFromFiles(r: ToolResult): boolean {
+  return [...texts(r).filter((text) => !isJson(text)), ...(r.reports ?? [])].every((text) => PATTERNS.some((p) => p.test(text)));
+}
+
+export function dataOf(r: ToolResult): JsonObject {
+  const found = texts(r).find(isJson);
+  if (found === undefined) throw new Error(`no data in ${JSON.stringify(r.content)}`);
+  return JSON.parse(found) as JsonObject;
+}
+
+export interface Bench {
+  t: Table;
+  tools: Map<string, HostTool>;
+  /** A call of a cast tool on a turn (null: none), by the Author unless another agent is named. */
+  call(name: string, args: JsonObject, turn: string | null, agent?: AgentRef): Promise<ToolResult>;
+}
+
+/** The cast's tools over a fresh table, with the shipped words. */
+export async function openBench(more: Partial<CastDeps> = {}): Promise<Bench> {
+  const t = await openTable();
+  const deps: CastDeps = { store: t.store, writes: t.writes, files: shippedTexts(), sources: t.shelf.reader, now: () => 7, ...more };
+  const tools = new Map((await castTools(deps)).map((x) => [x.name, x]));
+  let calls = 0;
+  return {
+    t,
+    tools,
+    call(name, args, turn, agent = { id: "author-1", definition: "author" }) {
+      const tool = tools.get(name);
+      if (tool === undefined) throw new Error(`no tool ${name}`);
+      const scope = { user: USER, chat: CHAT, session: "s-1", ...(turn !== null ? { turn } : {}) };
+      return tool.run(args, { scope, agent, run: "run-1", callId: `call-${++calls}`, signal: new AbortController().signal, onUpdate: () => undefined });
+    },
+  };
 }
