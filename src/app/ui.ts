@@ -14,6 +14,12 @@ export const RPE_UI: string | null = process.env.RPE_UI_DIR === undefined ? null
 export const UI_PREFIX = "/ui/";
 /** What `/ui/` itself serves. */
 const INDEX = "index.html";
+/**
+ * The web app signs itself in from this browser's storage when it loads, so a page of another site
+ * that could frame it could have its buttons clicked for it. No other site may frame it. Lumiverse
+ * never does: its drawer runs the extension's own bundle, not these files.
+ */
+const NO_FRAMING = { "x-frame-options": "DENY", "content-security-policy": "frame-ancestors 'none'" } as const;
 
 function notFound(words: string): Response {
   return new Response(words, { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
@@ -68,7 +74,7 @@ export function uiRoute(folder: string | null) {
       const real = parts === null ? null : await fileInside(base, join(base, ...parts));
       if (real === null) return notFound(`The web app has no file at ${pathname}.`);
       const file = Bun.file(real);
-      return new Response(file, { headers: { "content-type": file.type } });
+      return new Response(file, { headers: { "content-type": file.type, ...NO_FRAMING } });
     },
   });
 }

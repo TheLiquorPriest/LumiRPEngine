@@ -48,6 +48,16 @@ describe("the web app at /ui/", () => {
     expect(bare.headers.get("location")).toBe(`${server.url}/ui/`);
   });
 
+  test("tells the browser that no other site may show it in a frame", async () => {
+    const server = await serve(built);
+    for (const path of ["/ui/", "/ui/assets/app.js"]) {
+      const res = await fetch(`${server.url}${path}`);
+      expect(res.headers.get("x-frame-options")).toBe("DENY");
+      expect(res.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+      await res.text();
+    }
+  });
+
   test("serves nothing outside its folder, and nothing it does not have", async () => {
     const server = await serve(built);
     for (const path of ["/ui/..%2Fsecret.txt", "/ui/assets/..%2F..%2Fsecret.txt", "/ui/assets/link.txt", "/ui/assets", "/ui/assets/", "/ui/missing.js", "/ui/%E0%A4%A"]) {
