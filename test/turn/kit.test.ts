@@ -74,8 +74,8 @@ runKitPart("RPE's prompt port", "prompt", async (seed, place) => {
 runKitPart("RPE's turn facts", "facts", async (_seed, place) => {
   const { db, close } = database(place);
   const facts = new FactsRegistry();
-  // The kit's turns have no runs: what a turn recorded is counted whole.
-  facts.add(turnFacts(openStore({ db, registry: createRegistry(ALL_PACKS), worlds: () => undefined, fingerprint: "turn-kit" }), () => null));
+  // The kit's turns have no runs: what a turn recorded is counted whole, and none owes anything.
+  facts.add(turnFacts(openStore({ db, registry: createRegistry(ALL_PACKS), worlds: () => undefined, fingerprint: "turn-kit" }), () => null, async () => undefined));
   return { facts, close };
 });
 

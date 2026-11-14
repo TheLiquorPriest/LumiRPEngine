@@ -1,7 +1,8 @@
 // A stand-in RPE for the preview of the new pages: the routes they call, answered from the invented
 // recorded turn (test/ui/recorded.ts), and the live socket, which plays that turn as it was recorded,
 // in real time, each time a page follows a chat that has no turn playing. Any chat id is served the same
-// turn. Any bearer is taken: the preview proves the pages, not RPE's auth. Nothing is kept.
+// turn, but for a chat the list says RPE has not played yet (one a migration imported), which has none.
+// Any bearer is taken: the preview proves the pages, not RPE's auth. Nothing is kept.
 //
 // Preview controls, outside RPE's API (`previewControl`):
 // - `/preview/extension?state=well|unregistered|missing`: how RPE says its extension in Lumiverse stands.
@@ -104,9 +105,12 @@ function schedule(p: Playing, recording: readonly LiveEvent[], begins: number): 
   }
 }
 
+/** The chats the list says RPE has not played yet: no turn of theirs is listed or played. */
+const UNPLAYED: ReadonlySet<string> = new Set(CHATS.chats.flatMap((c) => (c.played ? [] : [c.id])));
+
 function play(chat: string): void {
   const current = playing.get(chat);
-  if (current !== undefined && !current.done) return;
+  if (UNPLAYED.has(chat) || (current !== undefined && !current.done)) return;
   const begins = Date.now() + 1000;
   const p: Playing = { chat, run: `turn-${++runs}`, starts: [0], received: begins - INTAKE_MS, events: [], timers: [], done: false };
   playing.set(chat, p);
@@ -297,6 +301,7 @@ export function rpeAnswer(request: Request, server: Server<PreviewSocket>): Resp
   const turns = /^\/api\/v1\/chats\/([^/]+)\/turns$/.exec(path);
   if (turns !== null && request.method === "GET") {
     const chat = decodeURIComponent(turns[1] as string);
+    if (UNPLAYED.has(chat)) return answer(200, { turns: [], more: false });
     const p = playing.get(chat);
     const latest = p === undefined ? turnOf(RECORDED, { run: RUN, chat, received: T0 - INTAKE_MS }) : playedTurn(p);
     const all = [...(p === undefined || p.events.length > 0 ? [summaryOf(latest)] : []), ...EARLIER];

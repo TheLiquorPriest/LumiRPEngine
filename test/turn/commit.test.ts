@@ -46,6 +46,21 @@ function swipesOf(b: TurnBed, message: string): { texts: string[]; dates: number
   return { texts: JSON.parse(String(row.swipes)) as string[], dates: JSON.parse(String(row.swipe_dates)) as number[], shown: Number(row.swipe_id) };
 }
 
+/**
+ * Follows the chat on RPE's live hub as a page does, and gives what a page that reads again at each `state` push would find then:
+ * `read` of the moment, once for each push.
+ */
+function onStatePush<T>(b: TurnBed, read: () => T): T[] {
+  const found: T[] = [];
+  b.app.live.follow(CHAT, {
+    take: (batch) => {
+      for (const event of batch.events) if (event.kind === "state") found.push(read());
+      return true;
+    },
+  });
+  return found;
+}
+
 /** What the Author was sent in the model's `n`th request, as one text. */
 const sent = (b: TurnBed, n: number): string => JSON.stringify(b.model.requests[n]!.messages);
 
@@ -91,6 +106,15 @@ describe("a turn is tied to the swipe its generation wrote", () => {
     expect(store.path(CHAT).find((e) => e.message === first.message)?.turn).toBe(first.id);
     expect(sent(b, 2)).not.toContain("was edited after its turn");
   });
+
+  test("a page following the chat is told its state changed once the turn is tied, and reading again then finds the turn on the chat's path", async () => {
+    const b = await bed({ answers: [replying("The lamp turns.")] });
+    const store = b.turns.store.user(USER);
+    const found = onStatePush(b, () => store.path(CHAT).flatMap((e) => (e.turn === null ? [] : [e.turn])));
+    const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    expect(found.length).toBeGreaterThan(0);
+    expect(found.at(-1)).toEqual([turn.id]);
+  });
 });
 
 /** The Author's first call in a continue: its intent, then thirty minutes passed in the world, recorded on the turn. */
@@ -130,6 +154,15 @@ describe("what a continue recorded", () => {
     const out = await continuing;
     expect(out.error).not.toBeNull();
     await asBefore(b, turn, before, out.generationId!);
+  });
+
+  test("a page following the chat is told its state changed once what a continue that saved nothing recorded is taken back", async () => {
+    const { b, turn, before, continuing } = await continued({ pieces: [], end: { error: "The provider went away." } });
+    const store = b.turns.store.user(USER);
+    const found = onStatePush(b, () => store.changes(turn.id));
+    await asBefore(b, turn, before, (await continuing).generationId!);
+    expect(found.length).toBeGreaterThan(0);
+    expect(found.at(-1)).toEqual(before);
   });
 
   test("a continue that saves its text keeps what it recorded", async () => {

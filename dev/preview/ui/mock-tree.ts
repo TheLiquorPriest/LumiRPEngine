@@ -2,7 +2,8 @@
 // suggestions and sizes (test/ui/tree-recorded.ts), kept in memory while the preview runs, so a file can
 // be written, deleted and switched off, a suggestion accepted or dismissed, and a chat's turn folders
 // pruned (each prune takes nine parts in ten of what they still take). Of each name the nearest file is
-// in force; a name in the `off:` list is in force nowhere. Every chat is served the same tree.
+// in force; a name in the `off:` list is in force nowhere. Every chat is served the same tree, with what
+// an invented migration put under `imported/` at the user's level, which RPH loads by no name.
 
 import type { LayerLevel } from "rp-harness/contract";
 import type { DiffLine, TreeFileDiff, TreeFileEntry, TreeStorage, TreeSuggestionView } from "../../../src/ui/api";
@@ -10,9 +11,19 @@ import { FILES, NOTES, STACKS, STORAGE, SUGGESTIONS, TEXTS, TURN_DIFF } from "..
 
 const answer = (status: number, body: unknown): Response => Response.json(body, { status, headers: { "cache-control": "no-store" } });
 
-const texts = new Map(Object.entries(TEXTS));
+/** What an invented migration attached under `imported/`: an agent of the user's with its original beside it, and their GUIDANCE.md. */
+const IMPORTED: Readonly<Record<string, string>> = {
+  "@global/imported/.agents/lamplighter.md": "---\nname: lamplighter\ndescription: Keeps the lamp's log.\n---\nWrite down when the lamp was lit and when it went dark.\n",
+  "@global/imported/.agents/lamplighter.original.json": '{\n  "id": "lamplighter",\n  "instructions": "Write down when the lamp was lit and when it went dark."\n}\n',
+  "@global/imported/GUIDANCE.md": "# My guidance\n\nKeep the keeper's secrets until the story earns them.\n",
+};
+
+const texts = new Map([...Object.entries(TEXTS), ...Object.entries(IMPORTED)]);
 let storage: TreeStorage = structuredClone(STORAGE);
-let files: TreeFileEntry[] = FILES.map((f) => ({ ...f }));
+let files: TreeFileEntry[] = [
+  ...FILES.map((f) => ({ ...f })),
+  ...Object.entries(IMPORTED).map(([path, text]): TreeFileEntry => ({ path, level: "global", kind: "yours", bytes: new TextEncoder().encode(text).length, item: null, applies: true, replacedBy: null, off: false, editable: true, shipped: null, defaultChanged: null })),
+];
 const offNames = new Set(FILES.flatMap((f) => (f.off && f.item !== null ? [f.item] : [])));
 const suggestions: TreeSuggestionView[] = SUGGESTIONS.map((s) => ({ ...s }));
 

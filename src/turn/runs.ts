@@ -12,6 +12,9 @@ import type { Writes } from "./kv";
 /** Where a run stands: going on, or how it ended. */
 export type RunState = RunStatus | "running";
 
+/** A run's kind: the kind of turn Lumiverse asked for, or a Settle now run (`TurnLane.settle`), which writes nothing into the chat. */
+export type RunKind = TurnKind | "settle";
+
 /** A run as it is kept. */
 export interface RunRecord {
   /** The run's own id: a continue runs its turn again under a new one. */
@@ -28,7 +31,7 @@ export interface RunRecord {
    * first. Lumiverse writes it there whichever swipe the player looks at by then (`chats.service.ts:3346-3362`). Null with no target.
    */
   swipe: number | null;
-  kind: TurnKind;
+  kind: RunKind;
   status: RunState;
   received: number;
   started: number | null;
@@ -104,7 +107,7 @@ function recordOf(user: string, r: RunRow): RunRecord {
     generation: r.generation,
     target: r.target,
     swipe: r.swipe,
-    kind: r.kind as TurnKind,
+    kind: r.kind as RunKind,
     status: r.status as RunState,
     received: r.received,
     started: r.started,

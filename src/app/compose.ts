@@ -22,6 +22,7 @@ import { EXTENSION_IDENTIFIER } from "../adapter/lumiverse/pipe-wire";
 import { bunSocket } from "../adapter/lumiverse/socket";
 import { BUILD_MIGRATIONS, buildRoutes, BuildService } from "../build";
 import { CAST_MIGRATIONS, CAST_SETTINGS } from "../cast";
+import { IFACE_SETTINGS } from "../iface";
 import { type LoreBooks, LORE_MIGRATIONS, LORE_SETTINGS } from "../lore";
 import { MIGRATED_NOTICE, MIGRATED_PART, migratedChat } from "../migrate/briefing";
 import { migrateRoutes } from "../migrate/routes";
@@ -147,7 +148,7 @@ export function compose(options: ComposeOptions = {}): Composition {
         at.routes.add(
           "settings",
           settingsRoutes({
-            settings: [...HARNESS_SETTINGS, ...TURN_SETTINGS, ...UPDATE_SETTINGS, ...TREE_SETTINGS, ...CAST_SETTINGS, ...STORY_SETTINGS, ...LORE_SETTINGS, ...STORE_SETTINGS],
+            settings: [...HARNESS_SETTINGS, ...TURN_SETTINGS, ...UPDATE_SETTINGS, ...TREE_SETTINGS, ...CAST_SETTINGS, ...STORY_SETTINGS, ...LORE_SETTINGS, ...STORE_SETTINGS, ...IFACE_SETTINGS],
             // The levels of the agents' tree that have a config file, where they are on disk; a chat's own once it has its folder.
             levels: async (chat): Promise<LevelFile[]> => {
               const folders = chat === null ? null : chats.folders(owner(), chat);

@@ -5,6 +5,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { AgentRef, ApprovalsPort, HostTool, JsonObject, JsonSchema, JsonValue, Scope, ToolContent, ToolCtx, ToolResult, ToolTier } from "rp-harness/contract";
+import type { NumberSettings, SettingDef } from "../app/setting-list";
 import type { UserStore } from "../store/store";
 import type { FoldEnv } from "../store/fold";
 import type { ChangeInput, Lane, StoreState } from "../store/types";
@@ -24,6 +25,21 @@ export const IFACE_DEFAULTS = Object.freeze({
 });
 
 export type IfaceSettings = { -readonly [K in keyof typeof IFACE_DEFAULTS]: number };
+
+/**
+ * Each of the engine tools' settings as a config file writes it, under `engine:`, read at every level and
+ * taken in by the host (the turn lane) for the chat a call is in.
+ */
+export const IFACE_SETTING_DEFS = {
+  nearMatches: { key: "engine.nearMatches", default: IFACE_DEFAULTS.nearMatches, takes: { type: "whole", least: 0 }, perConnection: false },
+  queryDepth: { key: "engine.queryDepth", default: IFACE_DEFAULTS.queryDepth, takes: { type: "whole", least: 0 }, perConnection: false },
+  // A search that may give no hit at all would answer nothing whatever it was asked.
+  searchHits: { key: "engine.searchHits", default: IFACE_DEFAULTS.searchHits, takes: { type: "whole", least: 1 }, perConnection: false },
+  dueItems: { key: "engine.dueItems", default: IFACE_DEFAULTS.dueItems, takes: { type: "whole", least: 0 }, perConnection: false },
+} as const satisfies NumberSettings<keyof IfaceSettings>;
+
+/** Every setting the engine's tools read, as a config file writes it. */
+export const IFACE_SETTINGS: readonly SettingDef[] = Object.values(IFACE_SETTING_DEFS);
 
 /** The application's one write queue (`App.writes`): every change the tools record goes through it. */
 export interface Writes {

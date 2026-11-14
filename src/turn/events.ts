@@ -25,6 +25,7 @@ import type { TreeNotes, TreeSuggestions } from "../tree";
 import { keepJob } from "./jobs";
 import type { Writes } from "./kv";
 import type { Runs } from "./runs";
+import { turnSettings } from "./settings";
 import { stageAt } from "./stage";
 import { castLayouts, turnTokens } from "./turns";
 
@@ -63,7 +64,7 @@ async function castSelf(deps: EventsDeps, scope: Scope, agent: AgentRef, ref: st
     .split(",")
     .map((name) => name.trim())
     .filter((name) => name !== "");
-  const layouts = await castLayouts(loadGuidance(deps.files, scope), names);
+  const [layouts, settings] = await Promise.all([castLayouts(loadGuidance(deps.files, scope), names), turnSettings(deps.files, scope, deps.log)]);
   const turn = scope.turn ?? null;
   const stage = stageAt(deps.store, scope.user, scope.chat, turn);
   const views = await castViews(names, {
@@ -77,6 +78,7 @@ async function castSelf(deps: EventsDeps, scope: Scope, agent: AgentRef, ref: st
     sources: deps.sources,
     layouts,
     tokens: turnTokens,
+    settings: settings.cast,
   });
   return views
     .map((view) => view.text)

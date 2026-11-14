@@ -2,19 +2,20 @@
 // (`src/ui/api.ts`): the chats RPE played, then those its store holds that it has not (a migration's);
 // a chat's turns newest first, each with what its runs spent
 // together; one turn with its intent record, what went to the chat, the lore of its prompt, its trace,
-// and each of its runs (the first, then each continue) with its own trace and the request files the
-// harness kept for it; the Stop of a turn going on now; the files of a turn's folder, listed and read,
-// none outside it; the world's tree for a chat, at its head or at a turn, from the store's own view; and
-// a panel's request, held as part of the player's next message. Every route is a page's: it answers
-// only for the user this RPE belongs to.
+// and each of its runs (the first, each continue, each Settle now) with its own trace and the request
+// files the harness kept for it; the Stop of a turn going on now; Settle now, a run on the chat's newest
+// turn that writes nothing into the chat; the files of a turn's folder, listed and read, none outside it;
+// the world's tree for a chat, at its head or at a turn, from the store's own view; and a panel's
+// request, held as part of the player's next message. Every route is a page's: it answers only for the
+// user this RPE belongs to.
 
-import type { ReplyError, Scope, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
+import type { ReplyError, Scope, TraceRecord, Usage } from "rp-harness/contract";
 import { rawRoute, route, RouteError } from "../app";
 import { isRecord } from "../shared/json";
 import type { NodeView, ValuesShown } from "../store";
 import { TURN_FILES } from "./folder";
 import type { Turns } from "./lane";
-import type { RunRecord, RunState } from "./runs";
+import type { RunKind, RunRecord, RunState } from "./runs";
 
 /** Fixed: turns a chat's list gives when the page names no limit, and the most it gives. */
 export const TURN_LIST = { limit: 50, most: 500 } as const;
@@ -37,12 +38,12 @@ export interface TurnRoutesDeps {
   chatName(chat: string): Promise<string | null>;
 }
 
-/** A turn's run as the Turn page shows it: its first, or a continue of it. */
+/** A turn's run as the Turn page shows it: its first, a continue of it, or a Settle now run on it. */
 export interface RunView {
   id: string;
   /** Its place among the turn's runs, from 1. */
   nth: number;
-  kind: TurnKind;
+  kind: RunKind;
   status: RunState;
   timings: { received: number; started: number | null; firstWord: number | null; released: number | null; ended: number | null };
   usage: Usage;
@@ -275,6 +276,17 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       access: "page",
       body: panelAsk,
       handle: async ({ user, params, body }) => ({ request: await turns.player.hold(user, params.chat, body, Date.now()) }),
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/chats/:chat/settle",
+      access: "page",
+      // The run begins and goes on after the answer, which names it; a refusal is told in the turn-errors part's words.
+      handle: async ({ user, params }) => {
+        const settling = await turns.lane.settle(user, params.chat);
+        if ("refused" in settling) throw new RouteError(409, settling.refused);
+        return settling;
+      },
     }),
     route({
       method: "GET",

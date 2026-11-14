@@ -24,11 +24,11 @@ import type { App } from "../app";
 import { type BookReader, castFacts, castTools, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapLines, mapView, stateScan } from "../iface";
-import { EntryNumbers, Lore, type LoreBooks, LoreIndex, loreLines, lorePort, loreTools, overlayWrite, storePath, storeWorlds } from "../lore";
+import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTING_DEFS, loreLines, lorePort, loreTools, overlayWrite, storePath, storeWorlds } from "../lore";
 import { ALL_PACKS } from "../packs/index";
 import { hashJson } from "../shared/hash";
-import { openStore, type Store, storedWorlds, timeDue } from "../store";
-import { storyFacts, storyTools } from "../story";
+import { openStore, type Store, STORE_SETTING_DEFS, storedWorlds, timeDue, WORLD_DOCS_SETTING_DEFS } from "../store";
+import { STORY_FACT_SETTING_DEFS, storyFacts, storyTools } from "../story";
 import { CHATS_FOLDER, pruneChat, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
 import { turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
@@ -37,7 +37,7 @@ import { riskyPattern } from "./pattern";
 import { PlayerSide } from "./player";
 import { type TurnPrompts, turnPrompts } from "./prompt";
 import { Runs } from "./runs";
-import { turnSettings } from "./settings";
+import { globalConfig, numbersOf, turnSettings } from "./settings";
 import { SinceKept } from "./since";
 import { stagesAt } from "./stage";
 import { guidanceTexts } from "./texts";
@@ -133,15 +133,18 @@ export const MACHINE_CLOCK: Clock = {
  * real world folds over the revision's document the store keeps, and its snapshots are this build's. A
  * handler that throws is an error in the engine, not in the story: its text goes to the log, and to the
  * live view of each chat with a run going on (`going`), the one place a player watches RPE work; the
- * change's report, all a model is shown, says only that it failed.
+ * change's report, all a model is shown, says only that it failed. Its limits are the global level's
+ * settings, read once: the store is made once for every chat.
  */
-export function openAppStore(app: Pick<App, "db" | "version" | "log" | "live">, going: () => readonly string[]): Store {
+export function openAppStore(app: Pick<App, "db" | "version" | "log" | "live" | "paths">, going: () => readonly string[]): Store {
   const handlerFailed = ({ op, error }: { op: string; error: unknown }): void => {
     const text = error instanceof Error ? error.message : String(error);
     app.log.error("An engine handler failed on a change, which is recorded as not applied.", { op, error: text });
     for (const chat of going()) app.live.publish(chat, { kind: "handler_failed", data: { op, error: text } });
   };
-  return openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds: storedWorlds(app.db), fingerprint: app.version, handlerFailed });
+  const global = globalConfig(app.paths.files, app.log);
+  const worlds = storedWorlds(app.db, numbersOf(global, WORLD_DOCS_SETTING_DEFS, app.log));
+  return openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds, fingerprint: app.version, handlerFailed, ...numbersOf(global, STORE_SETTING_DEFS, app.log) });
 }
 
 export interface TurnsOptions {
@@ -208,13 +211,16 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const player = new PlayerSide(app.db, app.writes);
   const since = new SinceKept(app.db);
   const worlds = storeWorlds(store);
-  const lore = new Lore({ books: options.books, worlds, turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes) });
+  // What is made once for every chat takes its limits from the global level's settings, read once.
+  const global = globalConfig(app.paths.files, app.log);
+  const lore = new Lore({ books: options.books, worlds, turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes), settings: numbersOf(global, LORE_SETTING_DEFS, app.log) });
   // The index's readable file is written at the top of the chat's folder, worded by the lore's lines in force for the chat.
   const loreIndex = new LoreIndex({
     lore,
     db: app.db,
     writes: app.writes,
     path: storePath(store),
+    settings: numbersOf(global, LORE_INDEX_SETTING_DEFS, app.log),
     file: {
       folder: (user, chat) => {
         const folders = chats.folders(user, chat);
@@ -226,12 +232,20 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   });
   const overlay = overlayWrite(worlds, () => clock.now());
   const facts = new FactsRegistry();
-  facts.add(turnFacts(store, (user, turn) => runs.record(user, turn)));
+  // What RPE was told of a run is in its record once the writes queued so far have run (an intent record among them), and a turn of the
+  // event loop has let RPH pass on the reply it held for them.
+  const heard = async (): Promise<void> => {
+    await app.writes.settled();
+    const turned = Promise.withResolvers<void>();
+    setImmediate(turned.resolve);
+    await turned.promise;
+  };
+  facts.add(turnFacts(store, (user, turn) => runs.record(user, turn), heard));
   facts.add(loreIndex.facts());
   // Who was on stage at each turn the cast counts: the open scene there, as the story record holds it; a turn with none, nobody.
   facts.add(castFacts({ store, onStage: async ({ user, chat }, turns) => new Map([...stagesAt(store, user, chat, turns)].map(([turn, stage]) => [turn, stage.who])) }));
   // The story's counts work out the history window as the prompt's is cut, on the chat's own settings.
-  facts.add(storyFacts({ store, window: async (scope) => (await turnSettings(files, scope, app.log)).window }));
+  facts.add(storyFacts({ store, window: async (scope) => (await turnSettings(files, scope, app.log)).window, settings: numbersOf(global, STORY_FACT_SETTING_DEFS, app.log) }));
   const trace = turnTrace({ live: app.live, files, chatOfRun: (run) => runs.chatOfRun(run), log: app.log });
   // The chat port's reads of Lumiverse; one that cannot be made fails in the words of the turn-errors part in force for the chat.
   const chatNow = async (scope: Scope): Promise<ChatReads> => {
@@ -243,18 +257,18 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   // What time brings due over the store's states: listed by the world state's due section and by an answer that lets time pass.
   const due = timeDue(store);
   /**
-   * The host's tools for a scope: one list for its session (the contract's `ToolsPort`), every family's in it. The engine's are given
-   * squares on a map for the operations that name one, and the map that `world_query` shows, both worded by the map's lines in force,
-   * and what time brings due; the story's `overlay` operation writes the lore's overlays.
+   * The host's tools for a scope: one list for its session (the contract's `ToolsPort`), every family's in it, each on the chat's own
+   * settings. The engine's are given squares on a map for the operations that name one, and the map that `world_query` shows, both
+   * worded by the map's lines in force, and what time brings due; the story's `overlay` operation writes the lore's overlays.
    */
   const hostTools = async (scope: Scope): Promise<HostTool[]> => {
     const texts = guidanceTexts(files, scope);
     const asked = env.approvals === undefined ? {} : { approvals: env.approvals };
-    const lines = await mapLines(texts);
+    const [lines, settings] = await Promise.all([mapLines(texts), turnSettings(files, scope, app.log)]);
     const [engine, cast, story, indexing] = await Promise.all([
-      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: stateScan, grid: gridMoves(lines), map: mapView(lines), due, ...asked }),
-      castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), now: () => clock.now() }),
-      storyTools({ store, writes: app.writes, files: texts, overlay, now: () => clock.now() }),
+      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: stateScan, grid: gridMoves(lines), map: mapView(lines), due, settings: settings.engine, ...asked }),
+      castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), now: () => clock.now(), settings: settings.cast }),
+      storyTools({ store, writes: app.writes, files: texts, overlay, now: () => clock.now(), settings: settings.story }),
       loreTools({ index: loreIndex, guidance: loadGuidance(files, scope) }),
     ]);
     return [...engine, ...cast, ...story, ...indexing];

@@ -8,7 +8,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionStatus as SentExtensionStatus } from "../../src/adapter/lumiverse/pipe-wire";
-import { type App, dataPaths, lineLog, openApp, route, type RouteBody, type RouteReply } from "../../src/app";
+import { type App, appRoutes, dataPaths, lineLog, openApp, route, type RouteBody, type RouteReply } from "../../src/app";
 import { configOf } from "../../src/app/config";
 import { connectionRoutes } from "../../src/app/connections";
 import { settingsRoutes } from "../../src/app/settings-routes";
@@ -112,6 +112,11 @@ const settings: [
 type SentMigration = RouteReply<ReturnType<typeof migrateRoutes>[0]>;
 const migration: [Same<Routes["GET /api/v1/migration"]["reply"], Omit<SentMigration, "report" | "lumiverse" | "chats"> & { chats: Omit<SentMigration["chats"][number], "carried">[] }>] = [true];
 
+/** The app's own routes the pages call, by their place in its table: its status, with its builds, and "Update now". The status handler's `name` comes out as any string, where the page holds it to "rpe". */
+type AppTable = ReturnType<typeof appRoutes>;
+const APP_KEYS = ["GET /api/v1/status", "POST /api/v1/update"] as const satisfies readonly (keyof Routes)[];
+const appReplies: [Same<Omit<Routes["GET /api/v1/status"]["reply"], "name">, Omit<RouteReply<AppTable[0]>, "name">>, Same<Routes["POST /api/v1/update"]["reply"], RouteReply<AppTable[1]>>] = [true, true];
+
 const turnsRoute = route({
   method: "GET",
   path: "/api/v1/chats/:chat/turns",
@@ -183,6 +188,13 @@ describe("the pages' route map, against the routes themselves", () => {
     const table = migrateRoutes({ db: undefined as never, identifier: "lumi_rp_engine" }).map((r) => `${r.method} ${r.path}`);
     expect(table).toEqual(["GET /api/v1/migration"]);
     expect(migration.every((same) => same)).toBe(true);
+  });
+
+  test("the app's status and its \"Update now\" sit at their places in its table, with the method and path the pages call them by", () => {
+    // The handlers reach the auth and the builds only when a request comes.
+    const table = appRoutes("1.0.0", 0, undefined as never, null, undefined as never).map((r) => `${r.method} ${r.path}`);
+    expect(table.slice(0, 2)).toEqual([...APP_KEYS]);
+    expect(appReplies.every((same) => same)).toBe(true);
   });
 });
 

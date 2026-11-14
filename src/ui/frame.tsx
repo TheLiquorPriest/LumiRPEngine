@@ -1,10 +1,10 @@
-// The frame both shells put the pages in: which pages the navigation offers (`NAV`), which page a route
-// shows (`PageFor`), and the line that says which road the page reaches RPE by, with what the extension
-// lacks and what went wrong. A new page is an entry in `NAV` and a case in `PageFor`, and both shells
-// offer it.
+// The frame both shells put the pages in: which pages the navigation offers (`NAV`), the bars that offer
+// them (`PagesBar`), which page a route shows (`PageFor`), and the line that says which road the page
+// reaches RPE by, with what the extension lacks and what went wrong. A new page is an entry in `NAV` and
+// a case in `PageFor`, and both shells offer it.
 
-import { useEffect, useRef, useState } from "preact/hooks";
-import type { IconName } from "../frontend/icons";
+import { useEffect, useId, useRef, useState } from "preact/hooks";
+import { Icon, type IconName } from "../frontend/icons";
 import { useSelect } from "../frontend/store";
 import type { ExtensionStatus, MissingPermission } from "./api";
 import { chatOf, type Route, type Shell, useApp } from "./app";
@@ -32,21 +32,23 @@ export interface NavItem {
   shells: readonly Shell[];
   /** It shows a chat, so there is nothing to show until one is open. */
   needsChat: boolean;
+  /** It stays in a narrow bar (a phone's, the drawer's); the rest are behind its More. */
+  often: boolean;
 }
 
-/** The pages the navigation offers, in order. */
+/** The pages the navigation offers, in order. A narrow bar keeps the chat's own pages, and the way to a chat in the web shell. */
 export const NAV: readonly NavItem[] = [
-  { id: "chats", title: "Chats", icon: "message", shells: ["web"], needsChat: false },
-  { id: "live", title: "Live", icon: "pulse", shells: ["web", "drawer"], needsChat: true },
-  { id: "turns", title: "Turns", icon: "list", shells: ["web", "drawer"], needsChat: true },
-  { id: "world", title: "World", icon: "globe", shells: ["web", "drawer"], needsChat: true },
-  { id: "play", title: "Play", icon: "dice", shells: ["web", "drawer"], needsChat: true },
-  { id: "build", title: "Build", icon: "hammer", shells: ["web", "drawer"], needsChat: false },
-  { id: "files", title: "Files", icon: "folder", shells: ["web", "drawer"], needsChat: false },
-  { id: "connections", title: "Connections", icon: "link", shells: ["web", "drawer"], needsChat: false },
-  { id: "settings", title: "Settings", icon: "sliders", shells: ["web", "drawer"], needsChat: false },
-  { id: "storage", title: "Storage", icon: "box", shells: ["web", "drawer"], needsChat: false },
-  { id: "migration", title: "Migration", icon: "download", shells: ["web", "drawer"], needsChat: false },
+  { id: "chats", title: "Chats", icon: "message", shells: ["web"], needsChat: false, often: true },
+  { id: "live", title: "Live", icon: "pulse", shells: ["web", "drawer"], needsChat: true, often: true },
+  { id: "turns", title: "Turns", icon: "list", shells: ["web", "drawer"], needsChat: true, often: true },
+  { id: "world", title: "World", icon: "globe", shells: ["web", "drawer"], needsChat: true, often: true },
+  { id: "play", title: "Play", icon: "dice", shells: ["web", "drawer"], needsChat: true, often: true },
+  { id: "build", title: "Build", icon: "hammer", shells: ["web", "drawer"], needsChat: false, often: false },
+  { id: "files", title: "Files", icon: "folder", shells: ["web", "drawer"], needsChat: false, often: false },
+  { id: "connections", title: "Connections", icon: "link", shells: ["web", "drawer"], needsChat: false, often: false },
+  { id: "settings", title: "Settings", icon: "sliders", shells: ["web", "drawer"], needsChat: false, often: false },
+  { id: "storage", title: "Storage", icon: "box", shells: ["web", "drawer"], needsChat: false, often: false },
+  { id: "migration", title: "Migration", icon: "download", shells: ["web", "drawer"], needsChat: false, often: false },
 ];
 
 /** The navigation entry a route is under: one turn is under Turns. */
@@ -57,6 +59,99 @@ export function navOf(route: Route): NavId {
 /** Where a navigation entry goes, for the chat the page is on. */
 export function routeFor(id: NavId, chat: string | null): Route {
   return id === "chats" || id === "build" || id === "connections" || id === "migration" ? { page: id } : { page: id, chat };
+}
+
+/** Where a bar of pages is: across the top of the web shell, at its foot at phone width, or atop the drawer. */
+export type BarPlace = "top" | "foot" | "drawer";
+
+export interface PagesBarProps {
+  place: BarPlace;
+  current: NavId;
+  disabled(item: NavItem): boolean;
+  go(id: NavId): void;
+}
+
+/**
+ * A shell's bar of pages. Where room is short (at the foot of the web shell at phone width, atop the
+ * drawer, and across the top of the web shell where its every page would not fit) it keeps the pages
+ * used most, then More, which opens a list of the rest and shows as current while one of them is. The
+ * top bar holds every page, and the width rule in styles.ts decides whether the rest or More shows.
+ * Choosing a page, More again, Escape (which gives More the focus back), a tap anywhere else or another
+ * page coming up closes the list.
+ */
+export function PagesBar(props: PagesBarProps) {
+  const { place, current } = props;
+  const [open, setOpen] = useState(false);
+  const more = useRef<HTMLButtonElement>(null);
+  const listId = useId();
+  useEffect(() => setOpen(false), [current]);
+  const items = NAV.filter((item) => item.shells.includes(place === "drawer" ? "drawer" : "web"));
+  const rest = items.filter((item) => !item.often);
+  const go = (id: NavId): void => {
+    setOpen(false);
+    props.go(id);
+  };
+  /** An entry's words: its icon and title in the web shell, its title alone among the drawer's tabs. */
+  const face = (icon: IconName, title: string) =>
+    place === "drawer" ? (
+      title
+    ) : (
+      <>
+        <Icon name={icon} size={18} />
+        <span class="lre-bottomnav-label">{title}</span>
+      </>
+    );
+  const entries = items
+    .filter((item) => place === "top" || item.often)
+    .map((item) => (
+      <button key={item.id} type="button" class={item.often ? undefined : "rpe-spare"} aria-current={item.id === current ? "page" : undefined} disabled={props.disabled(item)} onClick={() => go(item.id)}>
+        {face(item.icon, item.title)}
+      </button>
+    ));
+  const moreButton = (
+    <button ref={more} type="button" class="rpe-more" aria-expanded={open ? "true" : "false"} aria-controls={open ? listId : undefined} aria-current={rest.some((item) => item.id === current) ? "page" : undefined} disabled={rest.every((item) => props.disabled(item))} onClick={() => setOpen(!open)}>
+      {face("more", "More")}
+    </button>
+  );
+  const list = open ? (
+    <>
+      <div class="rpe-more-away" onClick={() => setOpen(false)} />
+      <div id={listId} class="rpe-more-list" role="group" aria-label="More pages">
+        {rest.map((item) => (
+          <button key={item.id} type="button" aria-current={item.id === current ? "page" : undefined} disabled={props.disabled(item)} onClick={() => go(item.id)}>
+            <Icon name={item.icon} size={16} />
+            <span>{item.title}</span>
+          </button>
+        ))}
+      </div>
+    </>
+  ) : null;
+  const onKeyDown = (event: KeyboardEvent): void => {
+    if (!open || event.key !== "Escape") return;
+    // Kept from the page around it (Lumiverse's drawer): Escape here closes only the list.
+    event.preventDefault();
+    event.stopPropagation();
+    setOpen(false);
+    more.current?.focus();
+  };
+  if (place === "drawer") {
+    return (
+      <nav class="rpe-drawer-nav" aria-label="RPE's pages" onKeyDown={onKeyDown}>
+        <div class="lre-tabs">
+          {entries}
+          {moreButton}
+        </div>
+        {list}
+      </nav>
+    );
+  }
+  return (
+    <nav class={place === "top" ? "rpe-web-nav" : "lre-bottomnav rpe-web-bottom"} aria-label="Pages" onKeyDown={onKeyDown}>
+      {entries}
+      {moreButton}
+      {list}
+    </nav>
+  );
 }
 
 export function PageFor(props: { route: Route }) {

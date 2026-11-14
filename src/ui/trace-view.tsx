@@ -4,14 +4,15 @@
 // Every kind of record has its own words here; a kind this build does not know is drawn as it came.
 
 import type { ComponentChildren } from "preact";
-import type { PromptNotice, ReleaseForm, ReplyError, RunStatus, ToolResult, TraceRecord, TurnKind } from "rp-harness/contract";
+import type { PromptNotice, ReleaseForm, ReplyError, RunStatus, ToolResult, TraceRecord } from "rp-harness/contract";
 import { Icon, type IconName } from "../frontend/icons";
 import { markdown } from "../frontend/markdown";
+import type { RunKind } from "./api";
 import { Badge, Fold, Pre, type Tone } from "./atoms";
 import { type AgentNode, type AgentState, agentState, agentUsage, type CallStep, type NoteStep, type RunNode, runTotals, type Step, type ToolStep } from "./live-model";
 import { counted, duration, json, num, tokenWords } from "./words";
 
-export const TURN_KIND_WORDS: Readonly<Record<TurnKind, string>> = { new: "New reply", swipe: "Swipe", regenerate: "Regenerate", continue: "Continue", impersonate: "Impersonation" };
+export const TURN_KIND_WORDS: Readonly<Record<RunKind, string>> = { new: "New reply", swipe: "Swipe", regenerate: "Regenerate", continue: "Continue", impersonate: "Impersonation", settle: "Settle an edit" };
 
 const RUN_WORDS: Readonly<Record<"turn" | "job" | "talk", string>> = { turn: "Turn", job: "Job", talk: "Talk with an agent" };
 

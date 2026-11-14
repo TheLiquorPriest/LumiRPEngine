@@ -1,8 +1,9 @@
-// The fact `turn.recorded` (plan §5.4 "Facts"): what a turn has recorded so far in any lane, which the
-// shipped rule `turn-unrecorded` names at the end of the Author's run. A turn that recorded nothing is
-// given the rule's text and one more call; one that called `story_record` or `world_apply` is not.
-// Played through the composed application on the stand-in Lumiverse and the scripted model. Every name
-// is invented.
+// The facts `turn.owes.record` and `turn.owes.reply` (plan §5.4 "Facts"): what a run that owes the player a
+// reply still owes at the end of the Author's run, which the shipped rules `turn-unrecorded` and
+// `reply-missing` name. A turn that recorded nothing is given the first rule's text and one more call; one
+// that called `story_record` or `world_apply` is not. A turn whose Author ends with no reply is given the
+// second's, and writes its reply in the call after. Played through the composed application on the
+// stand-in Lumiverse and the scripted model. Every name is invented.
 
 import { afterEach, expect, test } from "bun:test";
 import type { Answer } from "rp-harness/testing/rig";
@@ -46,4 +47,17 @@ test("a turn that records nothing is given the rule's text and one more call at 
   const sent = b.model.requests.map((r) => JSON.stringify(r.messages));
   expect(sent).toHaveLength(6);
   expect(sent.map((text) => text.includes(RULE))).toEqual([false, true, false, false, false, false]);
+});
+
+test("a turn whose Author ends with no reply is given the rule's text and one more call, and its reply then reaches the chat", async () => {
+  const b = await openTurnBed({ answers: [say("<intent>One exchange.</intent>The lamp is lit; now the reply."), say("<reply>The lamp turns.</reply>")] });
+  beds.push(b);
+  b.host.send(CHAT, "I climb the stairs.");
+  const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+  expect(out.error).toBeNull();
+  const turn = await settledTurn(b, out.generationId!);
+
+  const sent = b.model.requests.map((r) => JSON.stringify(r.messages));
+  expect(sent.map((text) => text.includes("You are about to end the turn and the player has no reply."))).toEqual([false, true]);
+  expect(b.turns.runs.record(USER, turn.id)).toMatchObject({ status: "released", reply: "The lamp turns." });
 });

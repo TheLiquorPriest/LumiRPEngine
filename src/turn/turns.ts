@@ -33,7 +33,7 @@ import { type Lore, type LoreIndex, loreLines, loreMapFields } from "../lore";
 import { type DueSource, type PathEntry, type PathReport, type ShownMessage, type Store, type TurnRow, type UserStore, worldState } from "../store";
 import { type SceneSession, sceneSession, storyBrief, storyMark, storyRecordParts, takeBackStory } from "../story";
 import { storyAt } from "../story/path";
-import { STORY_SO_FAR_DEFAULTS, storySoFar } from "../story/sofar";
+import { storySoFar } from "../story/sofar";
 import { type Pruned, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName } from "../tree";
 import { type Attempt, writeTurnFolder } from "./folder";
 import { jobsEndedBetween } from "./jobs";
@@ -109,6 +109,9 @@ export async function turnErrorWords(files: FilesPort, at: { user: string; chat:
 
 /** The notice that tells each way a job can end (plan §13.5): a job that did not finish is never told as finished. */
 const JOB_ENDS: Readonly<Partial<Record<JobState, string>>> = { done: "job_finished", failed: "job_failed", cancelled: "job_cancelled", interrupted: "job_interrupted", "off-path": "job_off_path" };
+
+/** The live kind, and its key, that tells a chat's followers its state changed; a page answers it by reading the chat's state again (plan §4.4). The Play page's server publishes the same. */
+const STATE_KIND = "state";
 
 export interface TurnLaneDeps {
   store: Store;
@@ -213,6 +216,24 @@ interface Found {
   hiddenReadable: boolean;
 }
 
+/**
+ * What a briefing is built for: the kind its turn's facts give, who speaks, the message the reply is saved to, the message being
+ * written now (left out of the lore scan), and the first history message the prompt kept (the story so far tells what is before it).
+ */
+interface BriefingFor {
+  kind: string;
+  speaker: string | null;
+  message: string | null;
+  writing: string | null;
+  keep: string | null;
+}
+
+/** What a Settle now gives back: the turn its run is on and the run's id, or the words it was refused in. */
+export type Settling = { turn: string; run: string } | { refused: string };
+
+/** Where a Settle now run's reply would go: nowhere, since nothing of it is written into the chat. Its run's record keeps what it wrote. */
+const NO_CHAT: ReplyStream = { reasoning: () => undefined, content: () => undefined, progress: () => undefined, toolCalls: () => undefined, finish: () => undefined, error: () => undefined };
+
 /** Waits for `ready`; false, at once, when `signal` aborts first. */
 async function unlessAborted(ready: Promise<unknown>, signal: AbortSignal): Promise<boolean> {
   if (signal.aborted) return false;
@@ -300,29 +321,13 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       await this.#catchUp(reads, user, chat);
       lap("chat");
 
-      // The chat's path compared with the turn tree (plan §6.3). The message a reply is being written to is the turn at hand, not yet a
-      // reply: a new reply's message is left out, and the message a swipe or a regenerate writes a new swipe of is compared as it
-      // showed before, held by the attempt being replaced. Its empty new swipe, which may bear the same date, is no edit of that attempt.
+      // The chat's path compared with the turn tree, what it found kept with the chat, and the turns that left it told (`#compare`). A
+      // new reply's message is the turn at hand; a swipe or a regenerate writes a new swipe of the message its attempts were tied to.
       const steps = await reads.path(chat);
       if (steps === null) throw new Error(await turnErrorWords(this.#d.files, tag, "no_chat", { chat }));
       lap("path");
-      const writing = tag.kind === "new" ? tag.target.message : null;
       const replaced = tag.kind === "swipe" || tag.kind === "regenerate" ? tag.target.message : null;
-      // The path as RPE last held it, for the player's own edits since (the store's comparison is of replies).
-      const was = store.path(chat);
-      const before = replaced === null ? undefined : was.find((e) => e.message === replaced);
-      const shown: ShownMessage[] = steps
-        .filter((s) => s.id !== writing)
-        .map((s) => (s.id === replaced && before !== undefined ? { id: s.id, user: false, hash: before.hash, date: before.date } : { id: s.id, user: s.role !== "assistant", hash: s.shown.hash, date: s.shown.date }));
-      // What the comparison found is kept with the chat in the same write, under the turn then at the head of its path (`since.ts`):
-      // should this intake end before the harness takes its request, the next turn is told it.
-      const report = await this.#d.writes.run((db) => {
-        const compared = store.sync(chat, shown);
-        const head = store.path(chat).findLast((e) => e.turn !== null)?.turn ?? null;
-        this.#d.since.keep(db, user, chat, head, foundItems(compared, was, steps), this.#d.store.now());
-        return compared;
-      }, "comparing the chat's path with its turns");
-      await this.#left(user, chat, report, replaced, before?.turn ?? null);
+      const report = await this.#compare(user, chat, steps, tag.kind === "new" ? tag.target.message : null, replaced);
       lap("compare");
 
       // The chat's settings and texts, read before the turn is made: they are its levels' files, whatever session the turn plays in.
@@ -409,7 +414,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       try {
         // The briefing's blocks, and what has happened since the last turn.
         const found = { report, steps, notices: lines(notices), guidance, last, stopped, again: continued !== null, replaced, hiddenReadable: settings.hiddenReadable };
-        const [{ blocks: briefing, loreMap }, { items: since, told }] = await Promise.all([this.#briefing(reads, guidance, scope, tagged, steps, settings.lead), this.#since(reads, user, begun, found)]);
+        const writes = tag.target.message !== null && (tag.kind === "new" || tag.kind === "swipe" || tag.kind === "regenerate");
+        const at: BriefingFor = { kind: tag.kind, speaker: tag.speaker.name, message: tag.target.message, writing: writes ? tag.target.message : null, keep: tagged.cut.keep?.id ?? null };
+        const [{ blocks: briefing, loreMap }, { items: since, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, begun, found)]);
         lap("briefing");
         const sampling = samplingOf(tagged.parameters);
         const maxTokens = maxTokensOf(tagged.parameters);
@@ -495,6 +502,113 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     }
     run.stop.abort(new Error(await turnErrorWords(this.#d.files, run, "player_stopped")));
     return true;
+  }
+
+  /**
+   * Settle now (plan §10.10 "Edit of a reply", §14 the Turn page): the chat's path compared as a turn's intake compares it, then a run
+   * on the newest turn of the path, in the session that turn played in, which holds the scene so far. The run is given no prompt; the
+   * briefing a turn is given; what was found since that turn's runs were told, as a continue of it is; and what the player asked, in
+   * the words of the notices part (`settle_asked`). Its writes are that turn's, so the World page shows them at once, and nothing of it
+   * is written into the chat. It holds the chat's intake until its run is held, and the next turn waits for it as for any run of the
+   * turn before it. Refused, in the words of the turn-errors part, while a turn of the chat goes on, and where no turn RPE played or
+   * carried is on the chat's path.
+   */
+  async settle(user: string, chat: string): Promise<Settling> {
+    const refused = async (name: string, fields: Fields = {}): Promise<Settling> => ({ refused: await turnErrorWords(this.#d.files, { user, chat }, name, fields) });
+    const reads = this.#d.reads();
+    if (reads === null) return await refused("no_lumiverse");
+    const intake = this.#queue(user, chat);
+    try {
+      if (intake.waiting || this.#d.runs.ofChat(user, chat).length > 0) return await refused("settle_running");
+      await this.#chat(reads, user, chat);
+      await this.#catchUp(reads, user, chat);
+      const steps = await reads.path(chat);
+      if (steps === null) return await refused("no_chat", { chat });
+      const report = await this.#compare(user, chat, steps, null, null);
+      const store = this.#d.store.user(user);
+      const onPath = store.path(chat).flatMap((e) => (e.turn === null ? [] : [e.turn]));
+      const newest = onPath.at(-1);
+      const turn = newest === undefined ? null : store.turn(newest);
+      if (turn === null) return await refused("settle_nothing");
+
+      const base: Scope = { user, chat, session: NO_SESSION };
+      const guidance = loadGuidance(this.#d.files, base);
+      const [settings, notices, errors] = await Promise.all([turnSettings(this.#d.files, base, this.#d.log), guidance.part(PARTS.notices), guidance.part(PARTS.errors)]);
+      const last = this.#d.runs.ofChatKept(user, chat, 1)[0] ?? null;
+      const inForce = this.#sessionAt(user, chat, turn.id, [turn.id]);
+      const session = inForce.session ?? (await this.#d.writes.run(() => store.openSession({ chat, scene: inForce.scene, turn: turn.id }), "opening a session"));
+      const scope = { user, chat, session: session.id, turn: turn.id };
+      if (inForce.session === null) await this.#d.harness().sessions?.open(scope, inForce.summary === null ? {} : { summary: inForce.summary });
+      await this.#d.notes.follow(user, chat, { turns: onPath, branchOf: store.chat(chat)?.sourceChat ?? null }).catch((error: unknown) =>
+        this.#d.log.error("The chat's notes could not be put as they stand at this turn's start.", { turn: turn.id, error: words(error) }),
+      );
+
+      const over = Promise.withResolvers<void>();
+      const run: Run = {
+        id: crypto.randomUUID(),
+        user,
+        turn: turn.id,
+        chat,
+        session: session.id,
+        generation: null,
+        target: null,
+        swipe: null,
+        kind: "settle",
+        status: "running",
+        received: this.#d.clock.now(),
+        started: null,
+        firstWord: null,
+        released: null,
+        ended: null,
+        usage: null,
+        reply: "",
+        progress: [],
+        error: null,
+        base: "",
+        saved: null,
+        settled: null,
+        // What it records is the turn's, counted from here as a continue's is.
+        mark: store.changes(turn.id).at(-1)?.ord ?? -1,
+        castMark: castMark(this.#d.store.db, user, turn.id),
+        storyMark: storyMark(this.#d.store.db, user, turn.id),
+        stop: new AbortController(),
+        over: over.promise,
+      };
+      await this.#d.writes.run((db) => this.#d.runs.put(db, run), "keeping a Settle now run");
+      this.#d.runs.hold(run);
+      intake.done();
+
+      let request: TurnRequest;
+      try {
+        const found = { report, steps, notices: lines(notices), guidance, last, stopped: [], again: true, replaced: null, hiddenReadable: settings.hiddenReadable };
+        const at: BriefingFor = { kind: run.kind, speaker: null, message: null, writing: null, keep: this.#d.prompts.keptFrom(user, turn.id) };
+        const [{ blocks: briefing }, { items, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, turn, found)]);
+        const asked = lines(notices)?.line("settle_asked");
+        request = {
+          scope,
+          parent: turn.parent,
+          // To the harness the run goes on with the turn, as a continue does: its work goes on from the turn's newest entry in the session.
+          kind: "continue",
+          lead: settings.lead,
+          prompt: [],
+          briefing,
+          carry: settings.carry,
+          since: asked === undefined || asked.trim() === "" ? items : [...items, { kind: "request", text: asked }],
+        };
+        if (told.length > 0) await this.#d.writes.run((db) => this.#d.since.told(db, user, turn.id, told), "keeping what a turn was told");
+      } catch (error) {
+        run.status = "failed";
+        run.error = { code: "failed", detail: words(error) };
+        run.ended = this.#d.clock.now();
+        await this.#d.runs.save(run, "keeping a Settle now run that never began").catch((e: unknown) => this.#d.log.error("A turn's run could not be kept.", { turn: run.turn, error: words(e) }));
+        over.resolve();
+        throw error;
+      }
+      void this.#run(run, request, NO_CHAT, new AbortController().signal, lines(errors), over).catch((error: unknown) => this.#d.log.error("A Settle now run failed.", { turn: run.turn, error: words(error) }));
+      return { turn: turn.id, run: run.id };
+    } finally {
+      intake.done();
+    }
   }
 
   /**
@@ -618,6 +732,31 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     for (const turn of shown) await this.#d.harness().turnShown({ user, chat, session: this.#d.runs.record(user, turn)?.session ?? NO_SESSION, turn });
   }
 
+  /**
+   * The chat's path compared with the turn tree (plan §6.3). The message a reply is being written to (`writing`) is the turn at hand,
+   * not yet a reply, and is left out; the message a swipe or a regenerate writes a new swipe of (`replaced`) is compared as it showed
+   * before, held by the attempt being replaced: its empty new swipe, which may bear the same date, is no edit of that attempt. What the
+   * comparison found is kept with the chat in the same write, under the turn then at the head of its path (`since.ts`): should the
+   * intake end before the harness takes its request, the next turn is told it. Then the turns that left the path are told (`#left`).
+   */
+  async #compare(user: string, chat: string, steps: readonly LvStep[], writing: string | null, replaced: string | null): Promise<PathReport> {
+    const store = this.#d.store.user(user);
+    // The path as RPE last held it, for the player's own edits since (the store's comparison is of replies).
+    const was = store.path(chat);
+    const before = replaced === null ? undefined : was.find((e) => e.message === replaced);
+    const shown: ShownMessage[] = steps
+      .filter((s) => s.id !== writing)
+      .map((s) => (s.id === replaced && before !== undefined ? { id: s.id, user: false, hash: before.hash, date: before.date } : { id: s.id, user: s.role !== "assistant", hash: s.shown.hash, date: s.shown.date }));
+    const report = await this.#d.writes.run((db) => {
+      const compared = store.sync(chat, shown);
+      const head = store.path(chat).findLast((e) => e.turn !== null)?.turn ?? null;
+      this.#d.since.keep(db, user, chat, head, foundItems(compared, was, steps), this.#d.store.now());
+      return compared;
+    }, "comparing the chat's path with its turns");
+    await this.#left(user, chat, report, replaced, before?.turn ?? null);
+    return report;
+  }
+
   /** A turn off the path: its run, if it goes on, stopped, and RPH told. */
   async #cancel(user: string, chat: string, turn: string): Promise<void> {
     const run = this.#d.runs.running(user, turn);
@@ -672,15 +811,14 @@ export class TurnLane implements TurnPlayer, ChatChanges {
 
   /**
    * The briefing's blocks (plan §10.2 block 4): the turn's facts, the lore map, the world state, the cast's views of those on stage,
-   * the story so far and the story brief, each laid out by its part; and the ids of the entries the lore map names, for the turn's
-   * folder.
+   * the story so far and the story brief, each laid out by its part and measured by the chat's settings; and the ids of the entries
+   * the lore map names, for the turn's folder.
    */
-  async #briefing(reads: LumiverseReads, guidance: Guidance, scope: Scope & { turn: string }, tagged: TaggedTurn, steps: readonly LvStep[], lead: string): Promise<{ blocks: ContextBlock[]; loreMap: string[] }> {
-    const { tag } = tagged;
+  async #briefing(reads: LumiverseReads, guidance: Guidance, scope: Scope & { turn: string }, at: BriefingFor, steps: readonly LvStep[], settings: TurnSettings): Promise<{ blocks: ContextBlock[]; loreMap: string[] }> {
     const blocks: ContextBlock[] = [];
     const [factsPart, mapPart] = await Promise.all([guidance.part(PARTS.turnFacts), guidance.part(PARTS.loreMap)]);
     if (factsPart?.format === "template") {
-      const facts = factsPart.render({ kind: tag.kind, ...(tag.speaker.name !== null ? { speaker: tag.speaker.name } : {}), ...(tag.target.message !== null ? { message: tag.target.message } : {}), ...this.#storyTime(scope.user, scope.chat, scope.turn) }).text;
+      const facts = factsPart.render({ kind: at.kind, ...(at.speaker !== null ? { speaker: at.speaker } : {}), ...(at.message !== null ? { message: at.message } : {}), ...this.#storyTime(scope.user, scope.chat, scope.turn) }).text;
       if (facts.trim() !== "") blocks.push({ name: BLOCKS.turnFacts, text: facts.trimEnd() });
     }
     // The world's own keys are looked for in what Lumiverse scans of the chat for lore, by the user's own scan settings (`scan.ts`):
@@ -688,7 +826,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     // A chat with no world has no keys of its own to look for, so nothing is read for it.
     const world = this.#d.store.user(scope.user).chat(scope.chat)?.revision ?? null;
     const scan = world === null ? null : scanSettingsOf((await reads.setting(SCAN_SETTING))?.value);
-    const writing = new Set(tag.target.message !== null && (tag.kind === "new" || tag.kind === "swipe" || tag.kind === "regenerate") ? [tag.target.message] : []);
+    const writing = new Set(at.writing === null ? [] : [at.writing]);
     const scanned = scan === null ? [] : scannedSteps(steps, writing, scan.depth);
     const first = scanned[0] === undefined ? -1 : steps.indexOf(scanned[0]);
     const ids = new Set(scanned.map((s) => s.id));
@@ -706,7 +844,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     if (layout?.status === "read") {
       const maps = mapView(await mapLines(guidanceTexts(this.#d.files, scope)));
       try {
-        const state = worldState(this.#d.store.user(scope.user), { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, due: this.#d.due });
+        const state = worldState(this.#d.store.user(scope.user), { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, due: this.#d.due, settings: settings.worldState });
         if (state.text.trim() !== "") blocks.push({ name: BLOCKS.worldState, text: state.text.trimEnd() });
       } catch (error) {
         this.#d.log.error("The world state could not be compiled for this turn's briefing.", { turn: scope.turn, error: words(error) });
@@ -720,7 +858,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const stage = named.length === 0 ? null : stageAt(this.#d.store, scope.user, scope.chat, scope.turn);
     if (stage !== null && stage.who.length > 0) {
       try {
-        const input = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn, present: stage.who, sources: this.#d.sources, layouts: await castLayouts(guidance, named), tokens: turnTokens };
+        const input = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn, present: stage.who, sources: this.#d.sources, layouts: await castLayouts(guidance, named), tokens: turnTokens, settings: settings.cast };
         const views = await castPresentViews(named, stage.place === null ? input : { ...input, cues: [stage.place] });
         const text = views.flatMap((view) => (view.text.trim() === "" ? [] : [view.text.trimEnd()])).join("\n\n");
         if (text !== "") blocks.push({ name: BLOCKS.onStage, text });
@@ -733,11 +871,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const point = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn };
     const [soFarPart, briefPart] = await Promise.all([guidance.part(PARTS.storySoFar), guidance.part(PARTS.storyBrief)]);
     if (soFarPart?.format === "template") {
-      const keptFrom = leftOutOf(tagged.cut.keep, steps.map((s) => s.id))[0]?.to ?? null;
+      const keptFrom = leftOutOf(at.keep === null ? null : { id: at.keep }, steps.map((s) => s.id))[0]?.to ?? null;
       const soFar =
         keptFrom === null
           ? null
-          : storySoFar({ record: storyRecordParts(point), keptFrom, contextWindow: await this.#authorWindow(guidance, lead, scope.turn), settings: STORY_SO_FAR_DEFAULTS, tokens: turnTokens, layout: soFarPart });
+          : storySoFar({ record: storyRecordParts(point), keptFrom, contextWindow: await this.#authorWindow(guidance, settings.lead, scope.turn), settings: settings.storySoFar, tokens: turnTokens, layout: soFarPart });
       if (soFar !== null && soFar.text.trim() !== "") blocks.push({ name: BLOCKS.storySoFar, text: soFar.text.trimEnd() });
     }
     if (briefPart?.format === "template") {
@@ -785,7 +923,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    * them); replies made without a turn; the last turn's reply cut short, or saved otherwise than it was released (`last`, as kept
    * before this turn began); the jobs that ended since, each by how it ended; the runs this turn stopped at their limit
    * (`stopped`); and what the player asked for through a panel. A continue of a turn (`again`) is not told again what that turn's
-   * first run was told: its jobs and requests. `told`: what of the kept things this turn's telling is to be kept for.
+   * first run was told: its jobs and requests. `told`: what of the kept things this turn's telling is to be kept for. Each item goes
+   * under its kind as the contract defines it (`SinceItem`), since RPH makes each kind a situation: the files a config adds for it
+   * and the rules whose `turns:` name it are given for this turn.
    */
   async #since(reads: LumiverseReads, user: string, turn: TurnRow, found: Found): Promise<{ items: SinceItem[]; told: string[] }> {
     const { report, steps, notices, guidance, last, stopped, again, replaced, hiddenReadable } = found;
@@ -803,7 +943,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const played = this.#d.runs.countOf(user, before) > 0 || (again && this.#d.runs.countOf(user, [turn.id]) > 1);
     const carried = played ? null : migrated.fields(user, chat);
     const carriedPart = carried === null ? undefined : await guidance.part(migrated.part);
-    if (carried !== null && carriedPart?.format === "template") add("unplayed", notices?.line(migrated.notice, { carried: carriedPart.render(carried).text.trim() }));
+    if (carried !== null && carriedPart?.format === "template") add("migrated", notices?.line(migrated.notice, { carried: carriedPart.render(carried).text.trim() }));
     // A swipe or a regenerate stands in for the earlier attempts at its message, the ones tied to it.
     const attempts = replaced === null ? [] : store.swipes(chat, replaced).filter((t) => t.id !== turn.id);
     const kept = this.#keptFor(user, turn, again, attempts);
@@ -812,7 +952,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const gone = new Set(of("deleted").flatMap((d) => d.turns));
     if (gone.size > 0) add("delete", notices?.line("deleted", { count: gone.size }));
     // Another swipe showing on the newest reply: its turn (none, for a swipe made without RPE) is the path now, with its own changes.
-    for (const s of of("swiped")) add("restacked", notices?.line("swipe_shown", { message: s.message }), s.to !== null ? { turn: s.to } : {});
+    for (const s of of("swiped")) add("swiped", notices?.line("swipe_shown", { message: s.message }), s.to !== null ? { turn: s.to } : {});
+    // Another swipe showing on an earlier reply: the turns after it stand with their changes applied again on it.
     // What no longer applies, as data: the operations by name. Why each does not is a code the store's own wording gives words to.
     for (const f of of("flipped")) add("restacked", notices?.line("swipe_flipped", { message: f.message, dropped: f.dropped }), f.to !== null ? { turn: f.to } : {});
 
@@ -832,8 +973,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       return m === undefined ? {} : { new: shownText(m) };
     };
     for (const e of edited) {
-      // What its turn was tied to: what Lumiverse saved, where that is not what was released.
-      const run = hidden.has(e.message) ? null : this.#d.runs.record(user, e.turn);
+      // What its turn was tied to: what Lumiverse saved, where that is not what was released, by the turn's latest run that wrote into
+      // the chat (a Settle now run writes nothing there).
+      const run = hidden.has(e.message) ? null : (this.#d.runs.ofTurn(user, e.turn).findLast((r) => r.kind !== "settle") ?? null);
       add("edit", notices?.line("edited", { message: e.message, ...(run !== null ? { old: run.saved ?? run.base + run.reply } : {}), ...textNow(e.message) }), { turn: e.turn });
     }
     for (const e of edits) {
@@ -862,7 +1004,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     // What the player asked for through a panel, as part of the message this turn answers (plan §10.10 "A panel action"): a swipe or a
     // regenerate answers the message its earlier attempts answered, and is told what they were told.
     const requests = again ? [] : this.#d.player.requestsFor(user, chat, replaced === null ? null : attempts.map((a) => a.id));
-    for (const r of requests) add("player-edit", notices?.line("panel_request", { what: r.what, ...(r.on !== null ? { on: r.on } : {}) }));
+    for (const r of requests) add("request", notices?.line("panel_request", { what: r.what, ...(r.on !== null ? { on: r.on } : {}) }));
     // What this turn was told that decides what later turns are: a continue's found things, so the turns after the turn it continues
     // are not told them again; the requests, so a request is told once, and again only to a swipe of the turn told it.
     return { items, told: [...(again ? kept.map((k) => k.id) : []), ...requests.map((r) => r.id)] };
@@ -1058,6 +1200,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         }
         this.#d.runs.put(db, record);
       }, "taking back an attempt that saved nothing");
+      this.#stateChanged(run.chat);
       return;
     }
     const record = settle({ saved: written.text === run.base + run.reply ? null : written.text });
@@ -1065,7 +1208,16 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       store.tieTurn(run.turn, { message: saved.id, hash: textHash(written.text), date: written.date, status: cut ? "cut" : "done" });
       this.#d.runs.put(db, record);
     }, "tying a turn to its saved message");
+    this.#stateChanged(run.chat);
     await this.#keepRecord(record);
+  }
+
+  /**
+   * Tells the chat's followers that its state changed: a turn joins the chat, or what an attempt recorded is taken back, only when
+   * Lumiverse's end of its reply is heard, which can come after its run has ended.
+   */
+  #stateChanged(chat: string): void {
+    this.#d.live.publish(chat, { kind: STATE_KIND, key: STATE_KIND, data: {} });
   }
 
   /**

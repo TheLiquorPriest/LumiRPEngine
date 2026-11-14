@@ -87,6 +87,31 @@ describe("the Files page", () => {
     expect(listed.asked).toEqual([{ open: "WORLD.md" }]);
   });
 
+  test("a file no agent reads, such as what the migration put under imported/, is said to be kept, and opened it says how it comes into force; a config, notes and a skill's own files are not", () => {
+    const file = (path: string, over: Partial<TreeFileEntry> = {}): TreeFileEntry => ({ path, level: "global", kind: "yours", bytes: 64, item: null, applies: true, replacedBy: null, off: false, editable: true, shipped: null, defaultChanged: null, ...over });
+    const files = [
+      ...FILES,
+      file("@global/imported/.agents/lamplighter.md"),
+      file("@global/imported/.agents/lamplighter.original.json"),
+      file("@global/imported/GUIDANCE.md"),
+      file("@global/.skills/tides/SKILL.md", { item: "skills/tides" }),
+      file("@global/.skills/tides/table.md"),
+      file("RPE.yml", { level: "chat" }),
+    ];
+    const kept = (tree: unknown) => files.filter((f) => textOf(rowOf(tree, f.path).props.children).includes("kept, read by no agent")).map((f) => f.path);
+    const listed = view({ files });
+    expect(kept(listed.tree)).toEqual(["@global/imported/.agents/lamplighter.md", "@global/imported/.agents/lamplighter.original.json", "@global/imported/GUIDANCE.md"]);
+    // None of them is said to be in force; the configs and a skill's own file, which are read by their place, still are.
+    for (const path of kept(listed.tree)) expect(textOf(rowOf(listed.tree, path).props.children)).not.toContain("in force");
+    for (const path of ["@global/RPE-global.yml", "RPE.yml", "@global/.skills/tides/table.md"]) expect(textOf(rowOf(listed.tree, path).props.children)).toContain("in force");
+
+    const how = "To put it in force, move it to where its kind is read from at the same level, or copy from it.";
+    const path = "@global/imported/.agents/lamplighter.md";
+    const open = view({ files, open: { path, file: { path, level: "global", kind: "yours", bytes: 64, editable: true, text: "---\nname: lamplighter\n---\nKeep the lamp.\n" }, problem: null, mode: "read", draft: { text: "", level: "global" }, diff: null } });
+    expect(textOf(rowOf(open.tree, path).props.children)).toContain(how);
+    expect(textOf(rowOf(view({ files, open: opened("@global/TURN.md") }).tree, "@global/TURN.md").props.children)).not.toContain(how);
+  });
+
   test("a file of yours opens as text, never as markup, with the update under it said; it is edited, compared with the default, and deleting it is the reset, which the page says", () => {
     const shown = view({ open: opened("@global/TURN.md") });
     const panel = rowOf(shown.tree, "@global/TURN.md");

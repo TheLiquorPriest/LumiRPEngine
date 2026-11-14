@@ -2,9 +2,9 @@
 // live events a turn publishes on its chat. The route table is where these come from: the plan has the
 // UI client's types generated from it. Until a generator exists they are kept here by hand, because the
 // zone rules keep the pages from importing the server's code, its types included; `test/ui/direct.test.ts`
-// holds each one to the route itself. The app's own routes (its status, the live socket) are mirrored
-// from `src/app/`; the turn routes and the live kinds are what the turn lane implements; a connection's
-// shapes are RPH's contract's own.
+// holds each one to the route itself. The app's own routes (its status with its builds, "Update now",
+// the live socket) are mirrored from `src/app/`; the turn routes and the live kinds are what the turn
+// lane implements; a connection's shapes are RPH's contract's own.
 
 import type { AgentRef, ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, FileKind, LayerLevel, ModelLimits, ReplyError, RunStatus, StackPart, TraceDelta, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
 import type { JsonValue } from "../shared/json";
@@ -13,12 +13,32 @@ import type { StateView } from "../shared/state-view";
 
 // ---------------------------------------------------------------- the app's own
 
-/** `GET /api/v1/status` (public): which RPE answers, and whether it belongs to a Lumiverse user yet. */
+/** `GET /api/v1/status` (public): which RPE answers, whether it belongs to a Lumiverse user yet, and the builds that meet at it. */
 export interface Status {
   name: "rpe";
   version: string;
   started: number;
   belongsToUser: boolean;
+  builds: BuildsStatus;
+}
+
+/** Where a restart onto RPE's app file on disk stands (`src/app/update.ts`): nothing to restart onto, waiting for the turns and jobs running, restarting, needed and not made while `update.restart` is off, or needed and not possible, RPE having been started by hand. */
+export type RestartState = "none" | "waiting" | "restarting" | "off" | "by hand";
+
+/**
+ * The builds that meet at RPE, as its status and "Update now" (`POST /api/v1/update`) give them: the
+ * build it runs; its app file's on disk (null: no single file, or one that gives none); why the file on
+ * disk gave none; the extension's, as it last said (null: not yet); whether all agree; where a restart
+ * stands; and all of it in RPE's own words.
+ */
+export interface BuildsStatus {
+  running: string;
+  disk: string | null;
+  broken: string | null;
+  extension: string | null;
+  agree: boolean;
+  restart: RestartState;
+  words: string;
 }
 
 /** A permission RPE's extension in Lumiverse lacks, and why it needs it. */
@@ -86,6 +106,9 @@ export interface ChatList {
 /** Where a turn stands: running, or how its run ended. */
 export type TurnStatus = RunStatus | "running";
 
+/** A run's kind (the turn lane's `RunKind`): the kind of turn Lumiverse asked for, or a settle run, where the player asked the Author to settle an edit now and nothing is written to the chat. */
+export type RunKind = TurnKind | "settle";
+
 /** When a turn's moments happened, in milliseconds since 1970; null for one that has not happened. */
 export interface TurnTimings {
   /** The request reached RPE. */
@@ -103,7 +126,7 @@ export interface TurnTimings {
 /** A turn as a chat's list shows it. */
 export interface TurnSummary {
   id: string;
-  kind: TurnKind;
+  kind: RunKind;
   /** On the chat's path; false once a swipe or a regenerate put a sibling in its place, or its message was deleted. */
   onPath: boolean;
   /** The Lumiverse message it is tied to (plan §10.8); null until it is. */
@@ -126,7 +149,7 @@ export interface TurnRun {
   id: string;
   /** Its place among the turn's runs, from 1. */
   nth: number;
-  kind: TurnKind;
+  kind: RunKind;
   status: TurnStatus;
   timings: TurnTimings;
   usage: Usage;
@@ -545,6 +568,7 @@ export type ConnectionTested = ConnectionTest & { limits: ModelLimits | null };
 /** Every route the pages call, by method and path pattern, as the route table writes them; `*` stands for the rest of the path. */
 export interface Routes {
   "GET /api/v1/status": RouteShape<Status>;
+  "POST /api/v1/update": RouteShape<BuildsStatus>;
   "GET /api/v1/status/extension": RouteShape<ExtensionStatus>;
   "GET /api/v1/chats": RouteShape<ChatList>;
   "GET /api/v1/chats/:chat/turns": RouteShape<TurnList, { limit?: number; before?: string }>;
@@ -592,12 +616,14 @@ export type RouteKey = keyof Routes & string;
 export type ReplyPiece = { run: string; from: number; text: string } | { run: string; line: number; progress: string };
 
 /**
- * The live kinds a turn publishes (`app.live.publish(chat, { kind, data })`), each without a key, so
- * none replaces another: every event of a run as RPH traced it, the text of a model call as it streams,
- * and what went to the chat.
+ * The live kinds published on a chat (`app.live.publish(chat, { kind, key?, data })`). A turn's come
+ * without a key, so none replaces another: every event of a run as RPH traced it, the text of a model
+ * call as it streams, and what went to the chat. The play area's `state` comes with the key `state` and
+ * no data, once the chat's state changed (`src/play/live.ts`), so a page that fell behind is given one.
  */
 export interface LiveKinds {
   trace: TraceRecord;
   delta: TraceDelta;
   reply: ReplyPiece;
+  state: Record<string, never>;
 }

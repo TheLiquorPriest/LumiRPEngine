@@ -61,7 +61,7 @@ export interface TurnsViewProps {
 export function TurnsView(props: TurnsViewProps) {
   return (
     <div class="lre-stack rpe-page" data-page="turns">
-      <PageHeader title="Turns" sub="Every turn of this chat, newest first." />
+      <PageHeader title="Turns" sub="Every turn RPE has played in this chat, newest first." />
       {props.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="The turns could not be read">
           <span>{props.problem}</span>
@@ -71,7 +71,7 @@ export function TurnsView(props: TurnsViewProps) {
         props.loading ? (
           <p class="lre-muted rpe-line">Reading this chat's turns…</p>
         ) : props.problem === null ? (
-          <Empty icon="list" title="No turns yet">
+          <Empty icon="list" title="No turn played on RPE yet">
             <span>A turn shows here once RPE plays a reply in this chat.</span>
           </Empty>
         ) : null

@@ -163,6 +163,15 @@ Global file only, read when RPE starts.
 | `worldState.charsPerToken` | `4` | Characters counted as one token when that budget is measured. |
 | `worldState.dueAhead` | `360` | Minutes of story time ahead that the list of what falls due covers. |
 
+## The engine's tools
+
+| Setting | Default | What it does |
+|---|---|---|
+| `engine.nearMatches` | `5` | How many near matches an answer lists when a name a call gave is not there. |
+| `engine.queryDepth` | `1` | How many levels below its point `world_query` shows when the call names no depth. |
+| `engine.searchHits` | `10` | The most things one `world_search` answers with, and how many it gives when the call names no number. |
+| `engine.dueItems` | `50` | The most things falling due in a span that an answer lists, soonest first. The answer says how many more fall in the span. |
+
 ## The store
 
 Global file only, read when RPE starts.

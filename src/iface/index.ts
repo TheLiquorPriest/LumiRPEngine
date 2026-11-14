@@ -9,6 +9,8 @@ export { OPERATIONS, OPERATION_NAMES } from "./apply";
 export { shippedTexts, SHIPPED_GUIDANCE, Lines, Template, toolText, type GuidanceFiles, type TextKind, type ToolText } from "./texts";
 export {
   IFACE_DEFAULTS,
+  IFACE_SETTING_DEFS,
+  IFACE_SETTINGS,
   type DueItem,
   type DueList,
   type EngineDeps,

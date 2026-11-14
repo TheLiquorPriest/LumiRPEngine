@@ -2,7 +2,7 @@
 description: Tells the Author when a turn is about to end with nothing recorded in either lane. A reminder of what `TURN.md` asks right after the reply. Delete this file and a turn may end unrecorded without a word.
 agents: [author]
 needs: TURN
-fact: turn.recorded == 0
+fact: turn.owes.record > 0
 at: run-end
 repeat: once per turn
 ---

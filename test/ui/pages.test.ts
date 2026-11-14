@@ -9,11 +9,12 @@ import type { TurnList } from "../../src/ui/api";
 import type { Route } from "../../src/ui/app";
 import type { RpeClient } from "../../src/ui/client";
 import { applyLive, applyRead, EMPTY_LIVE, lastRunOf, latestRun, type RunNode, runsOf } from "../../src/ui/live-model";
+import { ChatsView } from "../../src/ui/pages/chats";
 import { LiveView, type LiveViewProps, type StopPress } from "../../src/ui/pages/live";
 import { type FolderShown, NO_FOLDER, readFolder, readTurns, TURN_SECTIONS, TurnsView, TurnView, type TurnsRead, type TurnViewProps } from "../../src/ui/pages/turns";
 import { hashOf, routeOfHash, siteStorage, storedTokens } from "../../src/ui/web";
 import { liveTurn } from "../../src/ui/turn-model";
-import { AUTHOR, CHAT, CONTINUED, CONTINUED_REPLY, continuedTurn, EARLIER, earlierTurn, GM, INTENT, LORE, MOIRA, RECORDED, RECORDS, REPLY, requestFile, RUN, TOTAL, turnAt } from "./recorded";
+import { AUTHOR, CHAT, CHATS, CONTINUED, CONTINUED_REPLY, continuedTurn, EARLIER, earlierTurn, GM, INTENT, LORE, MOIRA, RECORDED, RECORDS, REPLY, requestFile, RUN, TOTAL, turnAt } from "./recorded";
 import { banners, elements, expand, press, textOf } from "./vnodes";
 
 const RULING = "Ruling: her story does not hold.";
@@ -274,8 +275,8 @@ describe("the Live page", () => {
     expect(elements(tree).some((e) => e.type === "button" && textOf(e.props.children) === "Stop")).toBe(false);
   });
 
-  test("a chat with no turn yet says so", () => {
-    expect(liveView(null).text).toContain("No turn has run in this chat yet");
+  test("a chat with no turn on RPE yet says so", () => {
+    expect(liveView(null).text).toContain("No turn has run on RPE in this chat yet");
     expect(liveView(null, { loading: true }).text).toContain("Reading this chat's turns");
   });
 
@@ -290,7 +291,21 @@ describe("the Turns page", () => {
   test("when the turns could not be read, it says so, and not that there are none", () => {
     const text = textOf(expand(h(TurnsView, { turns: [], more: false, loading: false, problem: "RPE did not answer: Failed to fetch", onOpen: () => undefined, onMore: () => undefined })));
     expect(text).toContain("RPE did not answer: Failed to fetch");
-    expect(text).not.toContain("No turns yet");
+    expect(text).not.toContain("No turn played");
+  });
+
+  test("a chat a migration imported and RPE has not played: the Chats page says so where a last turn's time would be and opens it, and its Turns page says no turn of it was played on RPE", () => {
+    const unplayed = CHATS.chats.find((c) => !c.played);
+    if (unplayed === undefined) throw new Error("the recorded chats hold no unplayed chat");
+    const opened: string[] = [];
+    const list = expand(h(ChatsView, { chats: CHATS.chats, problem: null, onOpen: (chat) => opened.push(chat), onPlay: () => undefined, onRead: () => undefined }));
+    const row = elements(list).find((e) => e.props["data-chat"] === unplayed.id);
+    expect(textOf(row?.props.children)).toBe(`${unplayed.name}Imported, not played on RPE yet`);
+    (row?.props.onClick as () => void)();
+    expect(opened).toEqual([unplayed.id]);
+    const text = textOf(expand(h(TurnsView, { turns: [], more: false, loading: false, problem: null, onOpen: () => undefined, onMore: () => undefined })));
+    expect(text).toContain("No turn played on RPE yet");
+    expect(text).toContain("A turn shows here once RPE plays a reply in this chat.");
   });
 
   test("older turns asked for in one chat never show in the chat the page has moved to", async () => {

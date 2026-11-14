@@ -1,7 +1,7 @@
 ---
 description: Catches a turn that is about to end without a reply.
 agents: [author]
-fact: reply.released == false
+fact: turn.owes.reply > 0
 at: run-end
 repeat: once per turn
 ---

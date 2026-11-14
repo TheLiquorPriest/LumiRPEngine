@@ -189,7 +189,7 @@ export interface WorldViewProps {
   loading: boolean;
   /** RPE's refusal of the last read, in its words; null when it answered. */
   problem: string | null;
-  /** The chat's turns, newest first, to see the world as it stood at one; null until read. */
+  /** The chat's turns on RPE, newest first, to see the world as it stood at one; null until read. */
   turns: readonly TurnSummary[] | null;
   onQuery(next: WorldQuery): void;
 }
@@ -247,17 +247,23 @@ export function WorldView(props: WorldViewProps) {
             </button>
           ))}
         </div>
-        <label class="lre-field">
-          <span class="label">As it stood</span>
-          <select class="lre-input" value={query.turn ?? ""} onChange={(event) => props.onQuery({ ...query, turn: event.currentTarget.value === "" ? null : event.currentTarget.value })}>
-            <option value="">Now, at the chat's head</option>
-            {(props.turns ?? []).map((turn) => (
-              <option key={turn.id} value={turn.id}>
-                {`After the turn of ${when(turn.timings.received)} (${TURN_KIND_WORDS[turn.kind]})`}
-              </option>
-            ))}
-          </select>
-        </label>
+        {props.turns !== null && props.turns.length === 0 ? (
+          <p class="rpe-meta" data-as-it-stood="none">
+            No turn of this chat has been played on RPE yet, so its world is shown as it stands now.
+          </p>
+        ) : (
+          <label class="lre-field">
+            <span class="label">As it stood</span>
+            <select class="lre-input" value={query.turn ?? ""} onChange={(event) => props.onQuery({ ...query, turn: event.currentTarget.value === "" ? null : event.currentTarget.value })}>
+              <option value="">Now, at the chat's head</option>
+              {(props.turns ?? []).map((turn) => (
+                <option key={turn.id} value={turn.id}>
+                  {`After the turn of ${when(turn.timings.received)} (${TURN_KIND_WORDS[turn.kind]})`}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
       {props.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="The world could not be read">
@@ -283,8 +289,9 @@ export function WorldPage(props: { chat: string }) {
     setQuery(WORLD_START);
     setShown({ answer: null, loading: true, problem: null });
     setTurns(null);
+    // A read that failed leaves them unknown: the page then says nothing of whether any turn was played.
     return readTurns(app.client, chat, (read) => {
-      if (!read.loading) setTurns(read.turns);
+      if (!read.loading && read.problem === null) setTurns(read.turns);
     }).stop;
   }, [chat]);
   useEffect(() => {

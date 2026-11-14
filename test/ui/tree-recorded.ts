@@ -62,7 +62,7 @@ export const FILES: TreeFileEntry[] = [
   file("@shipped/WORLD.md", "shipped", { item: "WORLD", applies: false, replacedBy: "WORLD.md" }),
   file("@shipped/WRITING.md", "shipped", { item: "WRITING" }),
   file("@shipped/rules/perceptions.md", "shipped", { item: "rules/perceptions", applies: false, off: true }),
-  file("@shipped/rules/examples/weather.md", "shipped", { applies: false }),
+  file("@shipped/rules/examples/weather.md", "shipped", { item: "rules/examples/weather", applies: false }),
   file("@shipped/.agents/author.md", "shipped", { item: "agents/author" }),
   file("@shipped/.agents/gm.md", "shipped", { item: "agents/gm" }),
   file("@global/TURN.md", "global", { item: "TURN", shipped: "@shipped/TURN.md", defaultChanged: UPDATED }),

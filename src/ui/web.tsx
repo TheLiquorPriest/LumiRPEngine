@@ -1,18 +1,18 @@
 // The web shell (plan §14): RPE's pages in any browser, served by RPE at `/ui/`, always on the direct
-// road. Its own navigation: a bar across the top, which moves to the bottom of the screen at phone
-// width. The route lives in the address's fragment (`#/chats/<chat>/live`), so the back button and a
-// reload keep the page. RPE takes the web UI's token (`rpe key web`), asked for once in the sign-in
-// field and kept by this browser until the player signs out. It never goes in an address: the token
-// does not expire, and an address is kept in the history, bookmarked and shared.
+// road. Its own navigation: a bar across the top with every page, which at phone width gives way to a
+// bar at the bottom of the screen with the pages used most and More for the rest (frame.tsx). The route
+// lives in the address's fragment (`#/chats/<chat>/live`), so the back button and a reload keep the
+// page. RPE takes the web UI's token (`rpe key web`), asked for once in the sign-in field and kept by
+// this browser until the player signs out. It never goes in an address: the token does not expire, and
+// an address is kept in the history, bookmarked and shared.
 
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
-import { Icon } from "../frontend/icons";
 import { createStore, useSelect } from "../frontend/store";
 import { AppContext, chatOf, type Route, type UiApp, useApp } from "./app";
 import { Banner, Button, PageHeader } from "./atoms";
 import { createClient, type TokenStore, webConnector } from "./client";
-import { NAV, type NavId, navOf, Notices, PageFor, routeFor } from "./frame";
+import { type NavId, type NavItem, navOf, Notices, PageFor, PagesBar, routeFor } from "./frame";
 import { webHost } from "./kept/host";
 import { createGate } from "./gate";
 import { browserDeps, type RoadDeps } from "./roads";
@@ -142,19 +142,13 @@ function WebShell(props: { tokens: TokenStore }) {
   const name = useChatName(chat, state.phase === "direct");
   const current = navOf(route);
   const target = chat ?? lastChat;
-  const links = NAV.filter((item) => item.shells.includes("web")).map((item) => (
-    <button key={item.id} type="button" aria-current={item.id === current ? "page" : undefined} disabled={!signedIn || (item.needsChat && target === null)} onClick={() => app.go(routeFor(item.id, target))}>
-      <Icon name={item.icon} size={18} />
-      <span class="lre-bottomnav-label">{item.title}</span>
-    </button>
-  ));
+  const disabled = (item: NavItem): boolean => !signedIn || (item.needsChat && target === null);
+  const go = (id: NavId): void => app.go(routeFor(id, target));
   return (
     <div class="lre rpe rpe-web">
       <header class="rpe-web-top">
         <span class="rpe-web-brand">RPE</span>
-        <nav class="rpe-web-nav" aria-label="Pages">
-          {links}
-        </nav>
+        <PagesBar place="top" current={current} disabled={disabled} go={go} />
         <span class="rpe-web-chat">{name ?? ""}</span>
         {signedIn ? (
           <Button
@@ -185,11 +179,7 @@ function WebShell(props: { tokens: TokenStore }) {
           </>
         )}
       </main>
-      {signedIn ? (
-        <nav class="lre-bottomnav rpe-web-bottom" aria-label="Pages">
-          {links}
-        </nav>
-      ) : null}
+      {signedIn ? <PagesBar place="foot" current={current} disabled={disabled} go={go} /> : null}
     </div>
   );
 }

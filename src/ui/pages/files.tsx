@@ -1,11 +1,12 @@
 // Files (plan §14, §5.1, §5.2, §5.4): the agents' files level by level (shipped, yours, this character's,
 // this chat's), each with its kind and whether RPH takes it, takes a nearer file of its name in its
-// place, or has its name switched off. A file opens as text. It is saved as yours at a level (a file of
-// another level becomes your own file of its name there); a file of yours is deleted, which for one in
-// place of a shipped default is the reset; a name is switched off and on again; a file of yours shows how
-// it differs from the shipped default, and what an update changed of that default under it. The agents'
-// suggestions are listed with what each would change, and accepted as proposed or edited, or dismissed.
-// What RPE refuses is shown in its words.
+// place, or has its name switched off; or, for a file no agent reads (what the migration put under
+// `imported/`, say), that it is kept, with how it comes into force. A file opens as text. It is saved as
+// yours at a level (a file of another level becomes your own file of its name there); a file of yours is
+// deleted, which for one in place of a shipped default is the reset; a name is switched off and on again;
+// a file of yours shows how it differs from the shipped default, and what an update changed of that
+// default under it. The agents' suggestions are listed with what each would change, and accepted as
+// proposed or edited, or dismissed. What RPE refuses is shown in its words.
 
 import type { FileKind, LayerLevel, StackLeft } from "rp-harness/contract";
 import { useEffect, useState } from "preact/hooks";
@@ -43,8 +44,26 @@ export function suggestedLevel(path: string): WriteLevel {
   return path.startsWith("@character/") ? "character" : "chat";
 }
 
-/** Whether RPH takes a file, as the listing says, in words. */
-export function standingOf(entry: TreeFileEntry): { words: string; tone: Tone | undefined } {
+/**
+ * The files no agent reads, by path: guidance RPH loads by no name (the listing's `item` is null), other
+ * than the files RPE and RPH read by place, which are a level's config (a file at the level's root that
+ * is not markdown, as every markdown file there is loaded by its name) and what sits in a skill's folder
+ * beside its SKILL.md, which the skill may send an agent to.
+ */
+export function unreadFiles(files: readonly TreeFileEntry[]): Set<string> {
+  const skills = files.flatMap((f) => (f.item?.startsWith("skills/") === true ? [f.path.slice(0, f.path.lastIndexOf("/") + 1)] : []));
+  return new Set(
+    files
+      .filter((f) => f.kind === "yours" && f.item === null)
+      .filter((f) => (f.level === "chat" ? f.path : f.path.slice(f.path.indexOf("/") + 1)).includes("/"))
+      .filter((f) => !skills.some((folder) => f.path.startsWith(folder)))
+      .map((f) => f.path),
+  );
+}
+
+/** Whether RPH takes a file, as the listing says, in words; a file no agent reads (`unreadFiles`) is said to be kept. */
+export function standingOf(entry: TreeFileEntry, unread: boolean): { words: string; tone: Tone | undefined } {
+  if (unread) return { words: "kept, read by no agent", tone: undefined };
   if (entry.off) return { words: "switched off", tone: "warn" };
   if (entry.replacedBy !== null) return { words: `replaced by ${entry.replacedBy}`, tone: undefined };
   return entry.applies ? { words: "in force", tone: "pos" } : { words: "not in force", tone: undefined };
@@ -406,8 +425,8 @@ function SwitchButtons(props: { entry: TreeFileEntry; chat: string | null; busy:
   );
 }
 
-/** The file open, under its row: its text, and what can be done with it. */
-function OpenPanel(props: FilesViewProps & { open: OpenFile; entry: TreeFileEntry | undefined }) {
+/** The file open, under its row: its text, and what can be done with it; for a file no agent reads, how it comes into force. */
+function OpenPanel(props: FilesViewProps & { open: OpenFile; entry: TreeFileEntry | undefined; unread: boolean }) {
   const { open, entry, shown } = props;
   const file = open.file;
   const levels = writeLevels(props.chat);
@@ -421,6 +440,11 @@ function OpenPanel(props: FilesViewProps & { open: OpenFile; entry: TreeFileEntr
           An update changed the shipped default on {when(entry.defaultChanged)}, after this file was last written. Your file is as you left it.
         </p>
       )}
+      {props.unread ? (
+        <p class="rpe-line" data-unread="true">
+          To put it in force, move it to where its kind is read from at the same level, or copy from it.
+        </p>
+      ) : null}
       {shown.refusal === null || shown.refusal.at !== "file" ? null : (
         <Banner tone="neg" icon="alert" title="RPE did not make that change">
           <span>{shown.refusal.words}</span>
@@ -504,9 +528,9 @@ function OpenPanel(props: FilesViewProps & { open: OpenFile; entry: TreeFileEntr
   );
 }
 
-function FileRow(props: FilesViewProps & { entry: TreeFileEntry }) {
+function FileRow(props: FilesViewProps & { entry: TreeFileEntry; unread: boolean }) {
   const { entry, shown } = props;
-  const standing = standingOf(entry);
+  const standing = standingOf(entry, props.unread);
   const open = shown.open !== null && shown.open.path === entry.path ? shown.open : null;
   return (
     <li class="rpe-file" data-file={entry.path}>
@@ -519,7 +543,7 @@ function FileRow(props: FilesViewProps & { entry: TreeFileEntry }) {
         {entry.defaultChanged === null ? null : <Badge tone="warn">the default changed</Badge>}
         <span class="rpe-meta">{bytesWords(entry.bytes)}</span>
       </div>
-      {open === null ? null : <OpenPanel {...props} open={open} entry={entry} />}
+      {open === null ? null : <OpenPanel {...props} open={open} entry={entry} unread={props.unread} />}
     </li>
   );
 }
@@ -663,6 +687,7 @@ function SuggestionsSection(props: FilesViewProps) {
 export function FilesView(props: FilesViewProps) {
   const { shown } = props;
   const files = shown.files;
+  const unread = unreadFiles(files ?? []);
   // A file opened that the listing no longer holds (it was just deleted, or is not listed) is still shown, apart.
   const unlisted = shown.open !== null && files !== null && !files.some((f) => f.path === shown.open?.path) ? shown.open : null;
   return (
@@ -675,7 +700,7 @@ export function FilesView(props: FilesViewProps) {
       )}
       <SuggestionsSection {...props} />
       <StackSection {...props} />
-      {unlisted === null ? null : <OpenPanel {...props} open={unlisted} entry={undefined} />}
+      {unlisted === null ? null : <OpenPanel {...props} open={unlisted} entry={undefined} unread={false} />}
       {files === null ? (
         shown.loading ? (
           <p class="lre-muted rpe-line">Reading the files…</p>
@@ -692,7 +717,7 @@ export function FilesView(props: FilesViewProps) {
             <Fold key={level} open={level !== "shipped" || shown.open?.path.startsWith("@shipped/") === true} summary={`${LEVEL_WORDS[level]} (${at.length})`}>
               <ul class="lre-stack rpe-plain" data-level={level}>
                 {at.map((entry) => (
-                  <FileRow key={entry.path} {...props} entry={entry} />
+                  <FileRow key={entry.path} {...props} entry={entry} unread={unread.has(entry.path)} />
                 ))}
               </ul>
             </Fold>

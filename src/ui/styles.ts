@@ -1,7 +1,8 @@
 // The pages' styles: today's design tokens and atoms (`src/frontend/styles/`), which follow Lumiverse's
 // theme inside its drawer and fall back to their own dark values in the web shell, then the new pages'
-// own rules, all under `rpe-`. One width rule decides the web shell's navigation: at 640 px and below the
-// pages move to a bar at the bottom.
+// own rules, all under `rpe-`. Two width rules decide the web shell's navigation (frame.tsx's bars): below
+// 1280 px, where the bar across the top cannot hold every page, it keeps the pages used most and More; at
+// 640 px and below it gives way to the bar at the bottom. The drawer always has its own.
 
 import { COMPONENTS_CSS } from "../frontend/styles/components";
 import { TOKENS_CSS } from "../frontend/styles/tokens";
@@ -68,13 +69,19 @@ const OWN_CSS = `
 .rpe-web{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;background:var(--lre-surface)}
 .rpe-web-top{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:var(--lre-s2) var(--lre-s3);padding:calc(var(--lre-s2) + env(safe-area-inset-top,0px)) var(--lre-s4) var(--lre-s2);background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline);min-width:0}
 .rpe-web-brand{flex:none;font-weight:700;font-size:var(--lre-fs-lg);letter-spacing:.02em}
-.rpe-web-nav{display:flex;gap:var(--lre-s1)}
+.rpe-web-nav{position:relative;display:flex;gap:var(--lre-s1)}
 .rpe-web-nav>button{display:inline-flex;align-items:center;gap:var(--lre-s2);min-height:var(--lre-tap);padding:0 var(--lre-s3);border:0;border-radius:var(--lre-r-lg);background:transparent;color:var(--lre-muted);font-weight:500;transition:background-color var(--lre-fast),color var(--lre-fast)}
 .rpe-web-nav>button:hover:not(:disabled){background:var(--lre-hover);color:var(--lre-fg)}
 .rpe-web-nav>button[aria-current=page]{background:var(--lre-accent-soft);color:var(--lre-accent-text);font-weight:600}
 .rpe-web-chat{flex:1;min-width:0;text-align:right;font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rpe-web-main{flex:1;width:100%;max-width:1040px;margin:0 auto;padding:var(--lre-s4);display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
+.rpe-web-nav>button.rpe-more{display:none}
 .rpe-web-bottom{display:none}
+@media (max-width:1279px){
+.rpe-web-nav>button{padding:0 var(--lre-s2)}
+.rpe-web-nav>button.rpe-spare{display:none}
+.rpe-web-nav>button.rpe-more{display:inline-flex}
+}
 @media (max-width:640px){
 .rpe-web-top{padding-left:var(--lre-s3);padding-right:var(--lre-s3)}
 .rpe-web-nav{display:none}
@@ -84,6 +91,15 @@ const OWN_CSS = `
 
 .rpe-drawer{display:flex;flex-direction:column;gap:var(--lre-s3);padding-bottom:var(--lre-s4);min-width:0}
 .rpe-drawer-bar{display:flex;flex-direction:column;gap:var(--lre-s1);padding:var(--lre-s1) 0 0}
+.rpe-drawer-nav{position:relative;z-index:20;min-width:0}
+.rpe-drawer-nav .lre-tabs>button[aria-current=page]{background:var(--lre-accent-soft);color:var(--lre-accent-text);border-color:color-mix(in srgb,var(--lre-accent) 35%,transparent);font-weight:600}
+
+.rpe-more-away{position:fixed;inset:0;z-index:-1}
+.rpe-more-list{position:absolute;right:0;top:calc(100% + var(--lre-s1));z-index:1;display:flex;flex-direction:column;min-width:200px;max-width:calc(100vw - 2 * var(--lre-s2));padding:var(--lre-s1);border:1px solid var(--lre-border);border-radius:var(--lre-r-lg);background:var(--lre-bar-bg);box-shadow:var(--lre-shadow-lg)}
+.rpe-web-bottom>.rpe-more-list{top:auto;right:var(--lre-s1);bottom:calc(100% + var(--lre-s1))}
+.rpe-more-list>button{display:flex;align-items:center;gap:var(--lre-s2);min-height:var(--lre-tap-lg);padding:0 var(--lre-s3);border:0;border-radius:var(--lre-r);background:transparent;color:inherit;font-weight:500;text-align:left;transition:background-color var(--lre-fast)}
+.rpe-more-list>button:hover:not(:disabled){background:var(--lre-hover)}
+.rpe-more-list>button[aria-current=page]{background:var(--lre-accent-soft);color:var(--lre-accent-text);font-weight:600}
 `;
 
 export const UI_CSS = [TOKENS_CSS, COMPONENTS_CSS, OWN_CSS].join("\n");

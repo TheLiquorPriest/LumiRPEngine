@@ -6,6 +6,7 @@
 import type { Database } from "bun:sqlite";
 import type { AgentRef, LocatedSlices, PromptMap, PromptPort, RawLayout, Scope } from "rp-harness/contract";
 import type { ActivatedEntry, LoreTurns } from "../lore";
+import { isRecord } from "../shared/json";
 import type { Writes } from "./kv";
 
 /** What a turn's request carried that the prompt port and the lore keep: its layout, the lore that activated, and the window's cut. */
@@ -26,6 +27,8 @@ export interface TurnPrompts extends PromptPort {
   keep(db: Database, received: Received): void;
   /** The messages Lumiverse's memory stands in for with a summary in the chat's latest prompt. */
   summarized(user: string, chat: string): ReadonlySet<string>;
+  /** The first history message a turn's prompt kept, by the cut its request carried; null where the window cut nothing, or none was kept. */
+  keptFrom(user: string, turn: string): string | null;
   /** The lore that activated for each turn's prompt, as the lore lane asks for it. */
   readonly lore: LoreTurns;
 }
@@ -61,6 +64,12 @@ export function turnPrompts(db: Database, writes: Writes, now: () => number): Tu
     summarized(user, chat) {
       const row = db.query<{ summarized: string }, [string, string]>("SELECT summarized FROM turn_prompt WHERE user = ? AND chat = ? ORDER BY received DESC LIMIT 1").get(user, chat);
       return new Set(row === null ? [] : (JSON.parse(row.summarized) as string[]));
+    },
+
+    keptFrom(user, turn) {
+      const row = db.query<{ cut: string }, [string, string]>("SELECT cut FROM turn_prompt WHERE user = ? AND turn = ?").get(user, turn);
+      const cut: unknown = row === null ? null : JSON.parse(row.cut);
+      return isRecord(cut) && isRecord(cut.keep) && typeof cut.keep.id === "string" ? cut.keep.id : null;
     },
 
     async layout(scope) {

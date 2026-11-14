@@ -58,7 +58,7 @@ export function LiveView(props: LiveViewProps) {
         props.loading ? (
           <p class="lre-muted rpe-line">Reading this chat's turns…</p>
         ) : props.problem === null ? (
-          <Empty icon="pulse" title="No turn has run in this chat yet">
+          <Empty icon="pulse" title="No turn has run on RPE in this chat yet">
             <span>When one starts, it shows here as it runs.</span>
           </Empty>
         ) : null

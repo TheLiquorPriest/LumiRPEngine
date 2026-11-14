@@ -1,12 +1,17 @@
 // The World page, read from its view as drawn: the tree at any level and depth, each value with where it
 // comes from and the change that wrote it, the facts recorded under a value's key beside that value and
-// apart from it; and the reads behind it, which ask what the page shows and nothing after it has moved on.
+// apart from it; for a chat RPE has not played, that its world is shown as it stands now; and the reads
+// behind it, which ask what the page shows and nothing after it has moved on.
 
 import { describe, expect, test } from "bun:test";
-import { h } from "preact";
+import { h, render } from "preact";
+import { act } from "preact/test-utils";
 import type { WorldAnswer } from "../../src/ui/api";
+import { AppContext, type UiApp } from "../../src/ui/app";
 import type { RpeClient } from "../../src/ui/client";
-import { readWorld, WORLD_START, type WorldQuery, type WorldResult, WorldView, type WorldViewProps } from "../../src/ui/pages/world";
+import { readWorld, WORLD_START, WorldPage, type WorldQuery, type WorldResult, WorldView, type WorldViewProps } from "../../src/ui/pages/world";
+import { settle } from "./asking";
+import { openPage, type PageElement } from "./kept/dom";
 import { CHAT, EARLIER, worldAt } from "./recorded";
 import { elements, expand, press, textOf } from "./vnodes";
 
@@ -70,6 +75,21 @@ describe("the World page", () => {
     expect(top.text).not.toContain("Up a level");
   });
 
+  test("for a chat no turn of which RPE has played (one a migration imported), it says its world is shown as it stands now, in place of the turns to see it at", () => {
+    const none = "No turn of this chat has been played on RPE yet, so its world is shown as it stands now.";
+    const unplayed = worldView(worldAt("world", 1), { turns: [] });
+    expect(unplayed.text).toContain(none);
+    expect(elements(unplayed.tree).some((e) => e.type === "select")).toBe(false);
+    // The world itself is shown all the same.
+    expect(elements(unplayed.tree).some((e) => e.props["data-node"] === "place:calder-point")).toBe(true);
+    // Turns not read yet, or not read at all, say nothing of whether any was played.
+    for (const turns of [null, EARLIER]) {
+      const shown = worldView(worldAt("world", 1), { turns });
+      expect(shown.text).not.toContain(none);
+      expect(elements(shown.tree).filter((e) => e.type === "option").length).toBe(1 + (turns?.length ?? 0));
+    }
+  });
+
   test("the reads behind it ask for what the page shows, as it stood at a turn when one is chosen; an answer after the page asked again is let go, and RPE's refusal is said in its words", async () => {
     const asked: { params: Readonly<Record<string, string>>; query: unknown; answer(value: unknown): void; fail(error: Error): void }[] = [];
     const client: Pick<RpeClient, "call"> = {
@@ -91,5 +111,29 @@ describe("the World page", () => {
     await Promise.resolve();
     expect(results).toEqual([{ answer: null, problem: "Nothing in the world of chat chat-calder is called world." }]);
     expect(worldView(null, { problem: results[0]?.problem ?? null }).text).toContain("The world could not be read");
+  });
+});
+
+describe("the World page as it reads the chat's turns", () => {
+  test("it says no turn of the chat was played on RPE only once RPE answered with none; when the turns could not be read, it says nothing of it", async () => {
+    const page = openPage();
+    try {
+      for (const [turns, said] of [[{ turns: [], more: false }, true], [new Error("RPE did not answer: Failed to fetch"), false]] as const) {
+        const client = {
+          call: ((key: string) => (key === "GET /api/v1/chats/:chat/turns" ? (turns instanceof Error ? Promise.reject(turns) : Promise.resolve(turns)) : Promise.resolve(worldAt("world", 1)))) as RpeClient["call"],
+        };
+        const root = page.document.createElement("div") as PageElement;
+        await act(() => {
+          render(h(AppContext.Provider, { value: { client } as unknown as UiApp }, h(WorldPage, { chat: CHAT })), root as unknown as HTMLElement);
+        });
+        // The reads begin once the page is drawn; their answers are drawn once they are in.
+        await act(() => settle());
+        expect(root.textContent).toContain("Calder Point");
+        expect(root.textContent.includes("No turn of this chat has been played on RPE yet")).toBe(said);
+        await act(() => render(null, root as unknown as HTMLElement));
+      }
+    } finally {
+      page.close();
+    }
   });
 });

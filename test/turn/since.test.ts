@@ -6,6 +6,8 @@
 // serve, read when they are asked. Every name is invented.
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { type Gate, gate } from "rp-harness/testing/rig";
 import type { StopAnswer, TurnList } from "../../src/ui/api";
 import { textHash } from "../../src/adapter/lumiverse/wire";
@@ -337,6 +339,32 @@ describe("what a comparison of the path found, kept with the chat", () => {
     for (const n of [2, 3]) expect(told(n)).toEqual(expect.arrayContaining([edited, deleted]));
     expect(told(4)).not.toContain(edited);
     expect(told(4)).not.toContain(deleted);
+  });
+});
+
+describe("the kinds of what happened since", () => {
+  test("each item goes under its kind as the harness's contract has it, so a file the user's config adds for that kind is given to that turn", async () => {
+    // The user's own files at the global level, each added for one kind by the user's own config.
+    const b = await bed({
+      global: "added:\n  migrated: [CARRIED]\n  swiped: [SHOWN]\n  request: [ASKED]\n",
+      answers: [replying("The lamp turns."), replying("The lamp gutters."), replying("Wren trims the wick.")],
+    });
+    const files = { CARRIED: "FILE-CARRIED Mind what was carried.", SHOWN: "FILE-SHOWN Mind the swipe the player chose.", ASKED: "FILE-ASKED Mind what was asked from a panel." };
+    for (const [name, text] of Object.entries(files)) await writeFile(join(b.app.paths.files, `${name}.md`), `${text}\n`);
+    await carriedOver(b);
+
+    const first = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    await settledTurn(b, await play(b, "swipe"));
+    b.host.cycleSwipe(CHAT, first.message!, "left");
+    expect((await b.page("POST", `/api/v1/chats/${CHAT}/requests`, { what: "Walk here" })).status).toBe(200);
+    await settledTurn(b, await play(b, "normal", "I trim the wick."));
+
+    // The request each turn's run was asked, by kind.
+    expect(b.requests.map((r) => r.since.map((s) => s.kind))).toEqual([["migrated"], ["migrated"], ["swiped", "request"]]);
+    // What the Author was given for each turn: the messages after its last answer.
+    const given = b.model.requests.map((r) => JSON.stringify(r.messages.slice(r.messages.findLastIndex((m) => m.role === "assistant") + 1)));
+    const held = given.map((text) => Object.entries(files).flatMap(([name, line]) => (text.includes(line) ? [name] : [])));
+    expect(held).toEqual([["CARRIED"], ["CARRIED"], ["SHOWN", "ASKED"]]);
   });
 });
 

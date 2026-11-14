@@ -13,6 +13,7 @@ import { HARNESS_SETTINGS } from "../../src/app/harness-settings";
 import { CONNECTION_PART, type SettingDef } from "../../src/app/setting-list";
 import { UPDATE_SETTINGS } from "../../src/app/update";
 import { CAST_SETTINGS } from "../../src/cast";
+import { IFACE_SETTINGS } from "../../src/iface";
 import { LORE_SETTINGS } from "../../src/lore";
 import { STORE_SETTINGS } from "../../src/store";
 import { STORY_SETTINGS } from "../../src/story";
@@ -22,7 +23,7 @@ import { TURN_SETTINGS } from "../../src/turn/settings";
 
 const ROOT = join(import.meta.dir, "../..");
 const DOCS = ["README.md", "docs/install.md", "docs/migration.md", "docs/behaviour.md", "docs/settings.md", "docs/security.md", "docs/troubleshooting.md"];
-const SETTINGS: readonly SettingDef[] = [...HARNESS_SETTINGS, ...TURN_SETTINGS, ...UPDATE_SETTINGS, ...TREE_SETTINGS, ...CAST_SETTINGS, ...STORY_SETTINGS, ...LORE_SETTINGS, ...STORE_SETTINGS];
+const SETTINGS: readonly SettingDef[] = [...HARNESS_SETTINGS, ...TURN_SETTINGS, ...UPDATE_SETTINGS, ...TREE_SETTINGS, ...CAST_SETTINGS, ...STORY_SETTINGS, ...LORE_SETTINGS, ...STORE_SETTINGS, ...IFACE_SETTINGS];
 /** The shipped config file. Beside settings, it holds the keys RPH's files layer reads (`off`, `layered`, `added`), which are in no settings list. */
 const SHIPPED_CONFIG = Bun.YAML.parse(readFileSync(join(ROOT, "guidance/RPE-global.yml"), "utf8")) as Record<string, unknown>;
 
