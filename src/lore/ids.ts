@@ -30,21 +30,6 @@ export function loreRefOf(id: string): LoreRef | null {
   return null;
 }
 
-/** The lore area's tables, as steps for the application's migration runner (its area `lore`). */
-export const LORE_MIGRATIONS: readonly { readonly version: number; readonly name: string; readonly sql: string }[] = [
-  {
-    version: 1,
-    name: "book entry numbers",
-    sql: `CREATE TABLE lore_entry_number (
-  user TEXT NOT NULL,
-  n INTEGER NOT NULL,
-  entry TEXT NOT NULL,
-  PRIMARY KEY (user, n),
-  UNIQUE (user, entry)
-)`,
-  },
-];
-
 /**
  * How RPE's database takes a write: queued behind every write asked for before it, run alone inside
  * a transaction of its own (the application's write queue). Outside it the database takes no writes.

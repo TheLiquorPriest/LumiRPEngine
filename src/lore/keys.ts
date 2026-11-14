@@ -68,3 +68,11 @@ export function keysIn(messages: readonly string[], how: KeyMatching): (key: str
     return false;
   };
 }
+
+/**
+ * A name as the lore matches names it does not read as keys (a binding's record, an overlay's entry
+ * given by its title): case folded, runs of white space made one space, trimmed.
+ */
+export function foldName(text: string): string {
+  return text.replace(/\s+/g, " ").trim().toLowerCase();
+}

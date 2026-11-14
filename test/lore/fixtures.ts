@@ -107,7 +107,7 @@ export function startingWorlds(world: WorldDoc = coastWorld()): LoreWorlds {
   return { registry: reg, at: (user, chat) => (user === USER && chat === CHAT ? at : null) };
 }
 
-const row = (book: string, id: string, comment: string, keys: string[], content: string, more: Partial<LoreBookEntry> = {}): LoreBookEntry => ({ id, book, comment, keys, content, secondaryKeys: [], disabled: false, extensions: {}, ...more });
+const row = (book: string, id: string, comment: string, keys: string[], content: string, more: Partial<LoreBookEntry> = {}): LoreBookEntry => ({ id, book, comment, keys, content, secondaryKeys: [], disabled: false, constant: false, vectorized: false, extensions: {}, revision: 1, ...more });
 
 /** The engine's own mark on an entry it wrote into a book, as today's build left them. */
 const ENGINE_WROTE: JsonObject = { lumi_rp_engine: { slot: "scene" } };

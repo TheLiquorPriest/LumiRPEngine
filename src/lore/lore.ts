@@ -168,6 +168,43 @@ function snippetOf(text: string, words: readonly string[], room: number): string
 /** What a search found, before its book entries are numbered. */
 type Found = { kind: "world"; id: string; source: string; title: string; text: string } | { kind: "book"; entry: string; source: string; title: string; text: string };
 
+/** An entry of the chat's lore as today's lore reads it, with what any reader may read of its text. */
+type Gathered = { kind: "world"; key: string; entry: LoreEntryDef; source: string; title: string; text: string } | { kind: "book"; book: LoreBook; row: LoreBookEntry; title: string; text: string };
+
+/**
+ * How an entry comes into play by itself: a book entry by Lumiverse's ways (always, by its keys, by
+ * meaning); a world entry by its keys, in the lore map. None for one that never does (switched off,
+ * or a world entry with no keys).
+ */
+export type LoreActivation = "constant" | "keyword" | "vector";
+
+/** An entry of a chat's lore as the database holds it now (plan §9.1): read at once, never by a run. */
+export interface LoreCatalogEntry {
+  /** RPE's id: `e-` and its number, or `w-` and its key. */
+  id: string;
+  /** For a world entry, its world's id, which its key is unique in; '' for a book entry, whose number is the user's for good. */
+  world: string;
+  /** Its book's name, or its world's. */
+  source: string;
+  /** Its book's id in Lumiverse; null for a world entry. */
+  book: string | null;
+  title: string;
+  keys: string[];
+  /** Characters in its text as Lumiverse holds it. */
+  size: number;
+  activation: LoreActivation[];
+  /** Lumiverse's revision of a book entry; for a world entry, a hash of its title, keys and text. */
+  revision: string;
+  /** What any reader may read of its text. */
+  text: string;
+}
+
+function bookActivation(row: LoreBookEntry): LoreActivation[] {
+  if (row.disabled) return [];
+  if (row.constant) return ["constant"];
+  return [...(row.keys.some((k) => k.trim() !== "") ? (["keyword"] as const) : []), ...(row.vectorized ? (["vector"] as const) : [])];
+}
+
 export class Lore {
   private readonly books: LoreBooks;
   private readonly worlds: LoreWorlds;
@@ -211,7 +248,11 @@ export class Lore {
     return entries === null ? [] : this.named(at.user, entries);
   }
 
-  /** The lore map for a turn (`map.ts`): what activated for its prompt, and the world's entries whose keys come up in `ask.messages`, matched as Lumiverse matches keys. */
+  /**
+   * The lore map's first form for a turn (`map.ts`): what activated for its prompt, and the world's
+   * entries whose keys come up in `ask.messages`, matched as Lumiverse matches keys. The index's
+   * `LoreIndex.loreMap` builds the map in full on it.
+   */
   async loreMap(ask: LoreMapAsk): Promise<LoreMap> {
     const activated = (await this.turns.activated(ask.user, ask.chat, ask.turn)) ?? [];
     const inPrompt = (await this.named(ask.user, activated)).map(({ id, title }): LoreMapLine => ({ id, title }));
@@ -220,6 +261,11 @@ export class Lore {
     const said = keysIn(ask.messages, ask.matching ?? LUMIVERSE_KEY_MATCHING);
     const world = Object.entries(at.world.lore).flatMap(([key, entry]): LoreMapLine[] => (hasOwn(at.world.lore, key) && !isCopy(entry) && Array.isArray(entry.keys) && entry.keys.some((k) => typeof k === "string" && said(k)) ? [{ id: worldEntryId(key), title: worldTitle(entry, key) }] : []));
     return { inPrompt, world };
+  }
+
+  /** The chat's world where `at` stands, with the Author's horizon there; null for a chat with no world. */
+  worldAt(at: LoreAt): WorldAt | null {
+    return this.worlds.at(at.user, at.chat, at.turn);
   }
 
   private async entries(at: LoreAt, ids: readonly string[], as?: EntityId): Promise<LoreEntry[]> {
@@ -253,34 +299,15 @@ export class Lore {
     const asked = (source: string): boolean => query.sources === undefined || query.sources.includes(source);
     const lore: Record<string, LoreEntryDef> = {};
     const found = new Map<string, Found>();
-    const texts = new Set<string>();
-    if (world !== null && asked(world.world.name)) {
-      for (const [key, entry] of Object.entries(world.world.lore)) {
-        if (!hasOwn(world.world.lore, key) || isCopy(entry)) continue;
-        const text = publicText(typeof entry.content === "string" ? entry.content : "");
-        lore[key] = text === entry.content ? entry : { ...entry, content: text };
-        found.set(key, { kind: "world", id: worldEntryId(key), source: world.world.name, title: worldTitle(entry, key), text });
-        // Twins are told apart as today's lore tells them (`backend/lore-secrets.ts:23-26`): white space aside.
-        texts.add(text.replace(/\s+/g, " ").trim());
-      }
-    }
-    if (as === undefined) {
-      const books = (await this.booksOf(at, world)).filter((book) => asked(book.name));
-      const rows = await Promise.all(books.map((book) => this.books.entries(at.user, book.id)));
-      for (const [i, book] of books.entries()) {
-        for (const row of rows[i] ?? []) {
-          if (!isLore(row)) continue;
-          const text = publicText(row.content);
-          const twin = text.replace(/\s+/g, " ").trim();
-          // A text read already is read once, where it first came, as today's lore reads its books (`backend/book-lore.ts:342-350`).
-          if (twin === "" || texts.has(twin)) continue;
-          texts.add(twin);
-          // Today's id of a book entry read as lore (`backend/book-lore.ts:42`): the world's lookup table may lead a term to one by it.
-          const key = `book:${book.id}/${row.id}`;
-          const title = bookTitle(row, this.settings.titleWords);
-          lore[key] = searchDef(key, row, title, text);
-          found.set(key, { kind: "book", entry: row.id, source: book.name, title, text });
-        }
+    for (const g of await this.gather(at, world, asked, as === undefined)) {
+      if (g.kind === "world") {
+        lore[g.key] = g.text === g.entry.content ? g.entry : { ...g.entry, content: g.text };
+        found.set(g.key, { kind: "world", id: worldEntryId(g.key), source: g.source, title: g.title, text: g.text });
+      } else {
+        // Today's id of a book entry read as lore (`backend/book-lore.ts:42`): the world's lookup table may lead a term to one by it.
+        const key = `book:${g.book.id}/${g.row.id}`;
+        lore[key] = searchDef(key, g.row, g.title, g.text);
+        found.set(key, { kind: "book", entry: g.row.id, source: g.book.name, title: g.title, text: g.text });
       }
     }
     const base = world ?? this.noWorld();
@@ -294,6 +321,63 @@ export class Lore {
       const id = f.kind === "world" ? f.id : n === undefined ? null : bookEntryId(n);
       return id === null ? [] : [{ id, source: f.source, title: f.title, snippet: snippetOf(f.text, words, this.settings.snippetChars) || f.title, how: "words" }];
     });
+  }
+
+  /**
+   * Every entry of the chat's lore as the database holds it now (plan §9.1), as search reads it: the
+   * world's own entries, then those of the books the chat reads. A book entry is numbered the first
+   * time it is seen.
+   */
+  async catalog(at: LoreAt): Promise<LoreCatalogEntry[]> {
+    const world = this.worlds.at(at.user, at.chat, at.turn);
+    const gathered = await this.gather(at, world, () => true, true);
+    const numbers = await this.numbers.of(at.user, gathered.flatMap((g) => (g.kind === "book" ? [g.row.id] : [])));
+    return gathered.flatMap((g): LoreCatalogEntry[] => {
+      if (g.kind === "world") {
+        const keys = Array.isArray(g.entry.keys) ? g.entry.keys.filter((k): k is string => typeof k === "string") : [];
+        const content = typeof g.entry.content === "string" ? g.entry.content : "";
+        const activation: LoreActivation[] = keys.some((k) => k !== "") ? ["keyword"] : [];
+        // The revision `lore_read` gives the same entry (`worldEntry`).
+        return [{ id: worldEntryId(g.key), world: world?.world.id ?? "", source: g.source, book: null, title: g.title, keys, size: content.length, activation, revision: hashJson([g.title, keys, content]), text: g.text }];
+      }
+      const n = numbers.get(g.row.id);
+      if (n === undefined) return [];
+      return [{ id: bookEntryId(n), world: "", source: g.book.name, book: g.book.id, title: g.title, keys: g.row.keys.filter((k) => k.trim() !== ""), size: g.row.content.length, activation: bookActivation(g.row), revision: String(g.row.revision), text: g.text }];
+    });
+  }
+
+  /**
+   * The entries of the chat's lore of the sources `asked` names, as today's lore reads them: the
+   * world's own, then (with `books`) its books', each in its source's order. A book entry that is not
+   * lore is passed over, and a text read already is read once, where it first came
+   * (`backend/book-lore.ts:342-350`).
+   */
+  private async gather(at: LoreAt, world: WorldAt | null, asked: (source: string) => boolean, books: boolean): Promise<Gathered[]> {
+    const out: Gathered[] = [];
+    const texts = new Set<string>();
+    if (world !== null && asked(world.world.name)) {
+      for (const [key, entry] of Object.entries(world.world.lore)) {
+        if (!hasOwn(world.world.lore, key) || isCopy(entry)) continue;
+        const text = publicText(typeof entry.content === "string" ? entry.content : "");
+        out.push({ kind: "world", key, entry, source: world.world.name, title: worldTitle(entry, key), text });
+        // Twins are told apart as today's lore tells them (`backend/lore-secrets.ts:23-26`): white space aside.
+        texts.add(text.replace(/\s+/g, " ").trim());
+      }
+    }
+    if (!books) return out;
+    const read = (await this.booksOf(at, world)).filter((book) => asked(book.name));
+    const rows = await Promise.all(read.map((book) => this.books.entries(at.user, book.id)));
+    for (const [i, book] of read.entries()) {
+      for (const row of rows[i] ?? []) {
+        if (!isLore(row)) continue;
+        const text = publicText(row.content);
+        const twin = text.replace(/\s+/g, " ").trim();
+        if (twin === "" || texts.has(twin)) continue;
+        texts.add(twin);
+        out.push({ kind: "book", book, row, title: bookTitle(row, this.settings.titleWords), text });
+      }
+    }
+    return out;
   }
 
   /**

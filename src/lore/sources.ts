@@ -30,8 +30,14 @@ export interface LoreBookEntry {
   /** The keys Lumiverse checks beside them. */
   secondaryKeys: string[];
   disabled: boolean;
+  /** Lumiverse activates it whatever the chat says. */
+  constant: boolean;
+  /** Lumiverse may activate it by meaning as well as by its keys. */
+  vectorized: boolean;
   /** Its extension data, where today's build kept fields of its own. */
   extensions: JsonObject;
+  /** Lumiverse's revision of it, raised by every change to it: what an index line and a write are checked against. */
+  revision: number;
 }
 
 /** The user's Lumiverse books, read-only: every call reads that user's rows and no other's. */
@@ -55,6 +61,8 @@ export interface WorldAt {
   world: WorldDoc;
   /** Read it, never change it: it may be the store's own. */
   state: Readonly<WorldState>;
+  /** The Author's horizon there (plan §6.4), as tree refs, in its order; absent where the reader keeps none. */
+  horizon?: readonly string[];
 }
 
 /** The chats' worlds. */
@@ -83,7 +91,7 @@ export interface LoreTurns {
   activated(user: string, chat: string, turn: string): Promise<readonly ActivatedEntry[] | null>;
 }
 
-/** The chats' worlds as the store folds them: the world document in force and the state, at a turn or at the head. */
+/** The chats' worlds as the store folds them: the world document in force, the state and the horizon, at a turn or at the head. */
 export function storeWorlds(store: Store): LoreWorlds {
   const registry = store.env.registry;
   return {
@@ -93,10 +101,43 @@ export function storeWorlds(store: Store): LoreWorlds {
       const row = s.chat(chat);
       if (row === null || row.revision === null) return null;
       if (turn !== undefined && s.turn(turn)?.chat !== chat) throw new StoreInputError(`turn ${turn} is not one of chat ${chat}'s`);
-      const state = (turn === undefined ? s.headState(chat) : s.stateAt(turn)).state.world;
+      const folded = (turn === undefined ? s.headState(chat) : s.stateAt(turn)).state;
+      const state = folded.world;
       const world = store.env.worlds(state.revision);
       if (world === undefined) throw new Error(`The world revision ${state.revision} that chat ${chat} stands on is not available, so its lore cannot be read.`);
-      return { registry, world, state };
+      return { registry, world, state, horizon: folded.horizon };
+    },
+  };
+}
+
+/** Which turns a reading of what RPE keeps beside the lore sees: what a swipe or a delete takes off a chat's path goes with its turn. */
+export interface LorePath {
+  /**
+   * The turns on the chat's path, oldest first: at its head, the turns on the path as the store last
+   * compared it; at `turn`, the turns it was made after and the turn itself, so a turn sees what it
+   * wrote before its reply is tied.
+   */
+  turns(user: string, chat: string, turn?: string): readonly string[];
+}
+
+/** The chats' paths as the store keeps them, read as the story record reads its own (plan §6.3). */
+export function storePath(store: Store): LorePath {
+  return {
+    turns(user, chat, turn) {
+      const s = store.user(user);
+      if (s.chat(chat) === null) return [];
+      const onPath = s.path(chat).flatMap((m) => (m.turn === null ? [] : [m.turn]));
+      if (turn === undefined) return onPath;
+      const at = onPath.indexOf(turn);
+      if (at >= 0) return onPath.slice(0, at + 1);
+      // A turn not on the path (open, or left behind): the turns it was made after, back to one that is.
+      const chain: string[] = [];
+      let id: string | null = turn;
+      while (id !== null && !onPath.includes(id)) {
+        chain.push(id);
+        id = s.turn(id)?.parent ?? null;
+      }
+      return [...(id === null ? [] : onPath.slice(0, onPath.indexOf(id) + 1)), ...chain.reverse()];
     },
   };
 }

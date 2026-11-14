@@ -26,7 +26,7 @@ async function laid(seed: KitSeed, place: string): Promise<KitPorts<"lore">> {
     if (ref?.kind === "book") {
       const book = books.get(e.source) ?? { id: `kit-book-${books.size + 1}`, name: e.source };
       books.set(e.source, book);
-      entries.push({ id: `kit-entry-${ref.n}`, book: book.id, comment: e.title, content: e.text, keys: e.keys, secondaryKeys: [], disabled: false, extensions: {} });
+      entries.push({ id: `kit-entry-${ref.n}`, book: book.id, comment: e.title, content: e.text, keys: e.keys, secondaryKeys: [], disabled: false, constant: false, vectorized: false, extensions: {}, revision: 1 });
       numbered.push([ref.n, `kit-entry-${ref.n}`]);
     } else if (ref?.kind === "world") {
       worldName = e.source;

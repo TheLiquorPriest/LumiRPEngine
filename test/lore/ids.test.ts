@@ -39,7 +39,7 @@ describe("lore ids", () => {
 
     // The next run: the atlas has gained an entry, and a later turn's tag lists them the other way round.
     const shelf = new Shelf();
-    shelf.users.get(USER)?.entries.unshift({ id: "entry-net", book: ATLAS.id, comment: "The net lofts", content: "Nets hang drying above the lamp room's yard.", keys: ["net lofts"], secondaryKeys: [], disabled: false, extensions: {} });
+    shelf.users.get(USER)?.entries.unshift({ id: "entry-net", book: ATLAS.id, comment: "The net lofts", content: "Nets hang drying above the lamp room's yard.", keys: ["net lofts"], secondaryKeys: [], disabled: false, constant: false, vectorized: false, extensions: {}, revision: 1 });
     tags.set(USER, CHAT, "turn-2", [
       { id: "entry-net", book: ATLAS.id, title: "The net lofts", how: "keyword" },
       { id: "entry-shanty", book: SONGS.id, title: "The Lamplighter's Shanty", how: "constant" },

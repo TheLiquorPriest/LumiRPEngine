@@ -1,6 +1,14 @@
-export { bookEntryId, EntryNumbers, LORE_MIGRATIONS, type LoreRef, loreRefOf, type LoreWrites, worldEntryId } from "./ids";
-export { type KeyMatching, keysIn, LUMIVERSE_KEY_MATCHING } from "./keys";
-export { Lore, type LoreAt, LORE_DEFAULTS, type LoreMapAsk, type LoreOptions, type LoreSettings } from "./lore";
+export { bookEntryId, EntryNumbers, type LoreRef, loreRefOf, type LoreWrites, worldEntryId } from "./ids";
+export { LORE_MIGRATIONS } from "./schema";
+export { foldName, type KeyMatching, keysIn, LUMIVERSE_KEY_MATCHING } from "./keys";
+export { Lore, type LoreActivation, type LoreAt, type LoreCatalogEntry, LORE_DEFAULTS, type LoreMapAsk, type LoreOptions, type LoreSettings } from "./lore";
+export { type IndexedEntry, type LoreBinding, LORE_INDEX_DEFAULTS, LORE_INDEX_FIELDS, LoreIndex, type LoreIndexDeps, type LoreIndexEdit, type LoreIndexField, type LoreIndexInput, type LoreIndexLines, type LoreIndexOutcome, type LoreIndexSettings } from "./indexing";
+export { LORE_ANSWERS, LORE_BATCH, LORE_INDEX_WRITE, LORE_LANE, LORE_TOOLS, loreBatchBlock, loreLines, type LoreToolDeps, loreTools } from "./tools";
+export { LORE_INDEX_FILE, type LoreIndexFile, loreIndexText } from "./index-file";
+export { type OverlayInput, overlayNotes, type OverlayWrite, overlayWrite } from "./overlays";
+export { type HorizonRecord, horizonRecords } from "./horizon";
+export { type ApprovalEdit, type ApprovalOutcome, type LoreBookWrites, type LoreEntryFields, LoreProposals, type LoreProposalsDeps, type LoreProposalView, type LoreWriteView, type ProposalStatus, type PutBackOutcome, type Refusal } from "./proposals";
+export { LoreProjection, type LoreProjectionDeps, type ProjectionBooks, type ProjectionOutcome } from "./projection";
 export { type LoreMap, type LoreMapFields, loreMapFields, type LoreMapLine } from "./map";
 export { lorePort } from "./port";
-export { type ActivatedEntry, type LoreBook, type LoreBookEntry, type LoreBooks, type LoreTurns, type LoreWorlds, storeWorlds, type WorldAt } from "./sources";
+export { type ActivatedEntry, type LoreBook, type LoreBookEntry, type LoreBooks, type LorePath, type LoreTurns, type LoreWorlds, storePath, storeWorlds, type WorldAt } from "./sources";
