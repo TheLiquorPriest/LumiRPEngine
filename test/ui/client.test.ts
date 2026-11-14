@@ -1,0 +1,365 @@
+// The client in Lumiverse's drawer: it asks the extension for its start-up facts, tries RPE's address
+// from the page, and takes the relay when the page cannot reach RPE itself, saying so; a refused page
+// token is renewed; a chat's live updates reach whoever follows it, in order, through either road.
+
+import { afterEach, describe, expect, test } from "bun:test";
+import { h } from "preact";
+import { pageRoad } from "../../src/ext/page";
+import type { LiveEvent } from "../../src/ui/api";
+import { type ClientState, createClient, extensionConnector, type LiveListener, pathOf, type RpeClient, RpeError } from "../../src/ui/client";
+import { RoadLine } from "../../src/ui/frame";
+import type { FetchInit, RelayChannel, RoadDeps, SocketHandlers, StartAnswer, Timers } from "../../src/ui/roads";
+import { CHAT, RECORDED, turnListAt } from "./recorded";
+import { expand, textOf } from "./vnodes";
+
+const ADDRESS = "http://127.0.0.1:7871";
+
+/** A clock the test moves by hand: nothing waits on the wall clock. */
+class ManualTimers implements Timers {
+  private readonly due = new Map<number, { at: number; run: () => void }>();
+  private ids = 0;
+  private time = Date.UTC(2026, 10, 12, 20, 0, 0);
+  now = (): number => this.time;
+  setTimeout = (run: () => void, ms: number): unknown => {
+    const id = ++this.ids;
+    this.due.set(id, { at: this.time + ms, run });
+    return id;
+  };
+  clearTimeout = (handle: unknown): void => {
+    this.due.delete(handle as number);
+  };
+  /** Moves the clock on by `ms`, running what falls due, in order. */
+  advance(ms: number): void {
+    const until = this.time + ms;
+    for (;;) {
+      const next = [...this.due].filter(([, t]) => t.at <= until).sort((a, b) => a[1].at - b[1].at)[0];
+      if (next === undefined) break;
+      this.due.delete(next[0]);
+      this.time = next[1].at;
+      next[1].run();
+    }
+    this.time = until;
+  }
+}
+
+interface Sent {
+  method: string;
+  path: string;
+  headers: Record<string, string>;
+  body?: string;
+}
+
+/** The extension's end of the pipe, standing in for it: RPE's answers come from `answer`. */
+class Channel implements RelayChannel {
+  readonly requests: Sent[] = [];
+  readonly followed: string[] = [];
+  starts = 0;
+  private readonly handlers = new Set<(updates: unknown[], reset: boolean) => void>();
+
+  constructor(
+    private readonly answer: (sent: Sent) => { status: number; body: unknown },
+    private readonly facts: (start: number) => StartAnswer = (n) => ({ facts: { token: `rpp_page${n}`, expiresAt: Date.UTC(2026, 10, 12, 20, 30, 0), addresses: [ADDRESS], build: "b-1" }, missing: [] }),
+  ) {}
+
+  async start(): Promise<StartAnswer> {
+    return this.facts(++this.starts);
+  }
+  async request(sent: { method: string; path: string; headers?: Record<string, string>; body?: string }) {
+    const full = { ...sent, headers: sent.headers ?? {} };
+    this.requests.push(full);
+    const { status, body } = this.answer(full);
+    return { status, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
+  }
+  async follow(chat: string): Promise<void> {
+    this.followed.push(chat);
+  }
+  async unfollow(): Promise<void> {}
+  onUpdates(handler: (updates: unknown[], reset: boolean) => void): () => void {
+    this.handlers.add(handler);
+    return () => this.handlers.delete(handler);
+  }
+  onPermissions(): () => void {
+    return () => undefined;
+  }
+  send(updates: unknown[], reset = false): void {
+    for (const handler of this.handlers) handler(updates, reset);
+  }
+}
+
+interface FakeSocket {
+  url: string;
+  protocols: string[];
+  handlers: SocketHandlers;
+  sent: string[];
+}
+
+/** The browser's fetch and socket, standing in: `fetch` answers as given; each socket opens, or is refused, as `sockets` says. */
+function browser(fetch: (url: string, init: FetchInit) => Promise<{ status: number; text(): Promise<string> }>, sockets: "open" | "refuse" = "open", timers: Timers = new ManualTimers()) {
+  const fetched: { url: string; init: FetchInit }[] = [];
+  const opened: FakeSocket[] = [];
+  const waiting: ((socket: FakeSocket) => void)[] = [];
+  const deps: RoadDeps = {
+    fetch: (url, init) => {
+      fetched.push({ url, init });
+      return fetch(url, init);
+    },
+    openSocket(url, protocols, handlers) {
+      const socket: FakeSocket = { url, protocols, handlers, sent: [] };
+      opened.push(socket);
+      queueMicrotask(() => {
+        if (sockets === "open") handlers.open();
+        else handlers.close();
+        for (const resolve of waiting.splice(0)) resolve(socket);
+      });
+      return { send: (text) => socket.sent.push(text), close: () => undefined };
+    },
+    timers,
+  };
+  /** The next socket opened, once its opening has been told. */
+  const nextSocket = (): Promise<FakeSocket> => {
+    const { promise, resolve } = Promise.withResolvers<FakeSocket>();
+    waiting.push(resolve);
+    return promise;
+  };
+  return { deps, fetched, opened, nextSocket };
+}
+
+const refused = async (): Promise<never> => {
+  throw new TypeError("Failed to fetch");
+};
+const json = (status: number, body: unknown) => async () => ({ status, text: async () => JSON.stringify(body) });
+const rpeStatus = json(200, { name: "rpe", version: "1.0.0", started: 0, belongsToUser: true });
+
+const clients: RpeClient[] = [];
+afterEach(() => {
+  for (const client of clients.splice(0)) client.close();
+});
+function track(client: RpeClient): RpeClient {
+  clients.push(client);
+  return client;
+}
+
+/** The client's state once it is past connecting. */
+function settled(client: RpeClient): Promise<ClientState> {
+  const { promise, resolve } = Promise.withResolvers<ClientState>();
+  const check = (state: ClientState): void => {
+    if (state.phase === "connecting") return;
+    off();
+    resolve(state);
+  };
+  const off = client.state.subscribe(check);
+  check(client.state.get());
+  return promise;
+}
+
+/** A follower that keeps what it is told; `resets(n)` waits for its nth reset. */
+function follower(): LiveListener & { got: LiveEvent[]; missed: ({ from: number; to: number } | null)[]; resetCount: number; resets(n: number): Promise<void> } {
+  const waiting: { n: number; resolve: () => void }[] = [];
+  const out = {
+    got: [] as LiveEvent[],
+    missed: [] as ({ from: number; to: number } | null)[],
+    resetCount: 0,
+    events(events: readonly LiveEvent[], missed: { from: number; to: number } | null) {
+      out.got.push(...events);
+      out.missed.push(missed);
+    },
+    reset() {
+      out.resetCount++;
+      for (const w of waiting.filter((x) => x.n <= out.resetCount)) w.resolve();
+    },
+    refused(words: string) {
+      throw new Error(words);
+    },
+    resets(n: number): Promise<void> {
+      if (out.resetCount >= n) return Promise.resolve();
+      const { promise, resolve } = Promise.withResolvers<void>();
+      waiting.push({ n, resolve });
+      return promise;
+    },
+  };
+  return out;
+}
+
+describe("which road the drawer's client takes", () => {
+  test("when the page cannot reach RPE itself, it takes the relay, and says why", async () => {
+    const channel = new Channel(() => ({ status: 200, body: turnListAt() }));
+    const { deps, fetched } = browser(refused);
+    const client = track(createClient(extensionConnector(channel, deps)));
+    const list = await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT }, { query: { limit: 1 } });
+    expect(list).toEqual(turnListAt());
+    expect(fetched.map((f) => f.url)).toEqual([`${ADDRESS}/api/v1/status`]);
+    expect(channel.requests).toEqual([{ method: "GET", path: `/api/v1/chats/${CHAT}/turns?limit=1`, headers: { authorization: "Bearer rpp_page1", accept: "application/json" } }]);
+    const state = client.state.get();
+    expect(state.phase).toBe("relay");
+    const why = state.phase === "relay" ? state.why : "";
+    expect(why).toContain(ADDRESS);
+    expect(why).toContain("Failed to fetch");
+    // The page says which road it is on, and why.
+    const line = textOf(expand(h(RoadLine, { state, onRetry: () => undefined })));
+    expect(line).toContain("Through Lumiverse");
+    expect(line).toContain(why);
+  });
+
+  test("when RPE answers the page and its live socket opens, it goes directly, and the relay carries nothing", async () => {
+    const channel = new Channel(() => ({ status: 500, body: { error: "not this way" } }));
+    const { deps, fetched, opened } = browser(async (url) => (url.endsWith("/api/v1/status") ? rpeStatus() : json(200, turnListAt())()));
+    const client = track(createClient(extensionConnector(channel, deps)));
+    const list = await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT }, { query: { limit: 1 } });
+    expect(list.turns.length).toBe(4);
+    expect(client.state.get()).toEqual({ phase: "direct", address: ADDRESS });
+    expect(channel.requests).toEqual([]);
+    expect(fetched.at(-1)).toEqual({ url: `${ADDRESS}/api/v1/chats/${CHAT}/turns?limit=1`, init: { method: "GET", headers: { authorization: "Bearer rpp_page1", accept: "application/json" } } });
+    expect(opened[0]?.url).toBe("ws://127.0.0.1:7871/api/v1/live");
+    expect(opened[0]?.protocols).toEqual(["rpe.live", "rpe.token.rpp_page1"]);
+    expect(textOf(expand(h(RoadLine, { state: client.state.get(), onRetry: () => undefined })))).toContain("Direct");
+  });
+
+  test("when RPE answers but the browser refuses the page its live socket, it takes the relay, and says so", async () => {
+    const channel = new Channel(() => ({ status: 200, body: turnListAt() }));
+    const client = track(createClient(extensionConnector(channel, browser(rpeStatus, "refuse").deps)));
+    await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT });
+    const state = client.state.get();
+    expect(state.phase === "relay" ? state.why : "").toContain("did not let this page open its live socket");
+  });
+
+  test("when the extension cannot reach RPE, the page says so in the extension's words", async () => {
+    const channel = new Channel(
+      () => ({ status: 200, body: {} }),
+      () => ({ facts: null, error: "RPE has not connected to Lumiverse yet.", missing: [{ permission: "interceptor", why: "to tag a chat's request" }] }),
+    );
+    const client = track(createClient(extensionConnector(channel, browser(refused).deps)));
+    const error = await client.call("GET /api/v1/chats", {}).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RpeError);
+    expect(client.state.get()).toEqual({ phase: "failed", error: "RPE has not connected to Lumiverse yet." });
+    expect(client.missing.get()).toEqual([{ permission: "interceptor", why: "to tag a chat's request" }]);
+  });
+
+  test("a page token RPE refuses is renewed, and the call made once more with the new one", async () => {
+    const channel = new Channel((sent) => (sent.headers.authorization === "Bearer rpp_page2" ? { status: 200, body: turnListAt() } : { status: 401, body: { error: "This needs a page token or the web UI's token." } }));
+    const client = track(createClient(extensionConnector(channel, browser(refused).deps)));
+    const list = await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT });
+    expect(list.turns[0]?.id).toBe("turn-31");
+    expect(channel.starts).toBe(2);
+    expect(channel.requests.map((r) => r.headers.authorization)).toEqual(["Bearer rpp_page1", "Bearer rpp_page2"]);
+  });
+
+  test("a page token is renewed before it runs out", async () => {
+    const timers = new ManualTimers();
+    const channel = new Channel(() => ({ status: 200, body: turnListAt() }), (n) => ({ facts: { token: `rpp_page${n}`, expiresAt: timers.now() + 30 * 60_000, addresses: [], build: "b-1" }, missing: [] }));
+    const client = track(createClient(extensionConnector(channel, browser(refused, "open", timers).deps)));
+    await client.call("GET /api/v1/chats", {});
+    timers.advance(28 * 60_000);
+    expect(channel.starts).toBe(1);
+    timers.advance(60_000);
+    expect(channel.starts).toBe(2);
+    await Promise.resolve();
+    await client.call("GET /api/v1/chats", {});
+    expect(channel.requests.at(-1)?.headers.authorization).toBe("Bearer rpp_page2");
+  });
+
+  test("RPE's refusal reaches the page in RPE's own words", async () => {
+    const channel = new Channel(() => ({ status: 404, body: { error: "RPE has no turn turn-99 in this chat." } }));
+    const client = track(createClient(extensionConnector(channel, browser(refused).deps)));
+    const error = await client.call("GET /api/v1/chats/:chat/turns/:turn", { chat: CHAT, turn: "turn-99" }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RpeError);
+    expect((error as RpeError).status).toBe(404);
+    expect((error as RpeError).message).toBe("RPE has no turn turn-99 in this chat.");
+  });
+});
+
+describe("a chat's live updates", () => {
+  test("through the relay: in order, to the chat's follower alone, and a lost frame tells it to read afresh", async () => {
+    const channel = new Channel(() => ({ status: 200, body: {} }));
+    const client = track(createClient(extensionConnector(channel, browser(refused).deps)));
+    const mine = follower();
+    client.follow(CHAT, mine);
+    await mine.resets(1);
+    expect(channel.followed).toEqual([CHAT]);
+    const first = RECORDED.slice(0, 5);
+    const second = RECORDED.slice(5, 9);
+    channel.send([{ type: "events", chat: CHAT, events: first }, { type: "events", chat: "chat-other", events: RECORDED.slice(0, 2) }, { type: "events", chat: CHAT, events: second, missed: { from: 3, to: 4 } }]);
+    expect(mine.got).toEqual([...first, ...second]);
+    expect(mine.missed).toEqual([null, { from: 3, to: 4 }]);
+    channel.send([], true);
+    expect(mine.resetCount).toBe(2);
+  });
+
+  test("through the extension's own page road: the start, a request, and a live list in two parts all reach the page", async () => {
+    // The extension's backend, standing in: it answers the page as `src/ext/pipe.ts` does.
+    const handlers = new Set<(payload: unknown) => void>();
+    const deliver = (payload: unknown): void => {
+      for (const handler of handlers) handler(structuredClone(payload));
+    };
+    const asked: unknown[] = [];
+    const timers = new ManualTimers();
+    const road = pageRoad(
+      {
+        sendToBackend(payload) {
+          asked.push(payload);
+          const message = payload as { rpe: string; id?: string; chat?: string };
+          if (message.rpe === "start") queueMicrotask(() => deliver({ rpe: "start", facts: { token: "rpp_x", expiresAt: timers.now() + 1_800_000, addresses: [ADDRESS], build: "b-1" }, missing: [] }));
+          if (message.rpe === "request") queueMicrotask(() => deliver({ rpe: "response", id: message.id, status: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(turnListAt()) }));
+          if (message.rpe === "follow") queueMicrotask(() => deliver({ rpe: "following", chat: message.chat }));
+        },
+        onBackendMessage(handler) {
+          handlers.add(handler);
+          return () => handlers.delete(handler);
+        },
+      },
+      { timers },
+    );
+    try {
+      const client = track(createClient(extensionConnector(road, browser(refused, "open", timers).deps)));
+      const list = await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT });
+      expect(list).toEqual(turnListAt());
+      expect(asked[1]).toMatchObject({ rpe: "request", method: "GET", path: `/api/v1/chats/${CHAT}/turns`, headers: { authorization: "Bearer rpp_x" } });
+      const mine = follower();
+      client.follow(CHAT, mine);
+      await mine.resets(1);
+      const data = JSON.stringify([{ type: "events", chat: CHAT, events: RECORDED.slice(0, 30) }]);
+      const half = Math.ceil(data.length / 2);
+      deliver({ rpe: "live", seq: 1, data: data.slice(0, half), part: { index: 0, count: 2 } });
+      deliver({ rpe: "live", seq: 1, data: data.slice(half), part: { index: 1, count: 2 } });
+      expect(mine.got).toEqual(RECORDED.slice(0, 30));
+      // The list numbered 2 never came: the next one tells the page to read afresh, and is delivered too.
+      deliver({ rpe: "live", seq: 3, data: JSON.stringify([{ type: "events", chat: CHAT, events: RECORDED.slice(30, 31) }]) });
+      expect(mine.resetCount).toBe(2);
+      expect(mine.got).toEqual(RECORDED.slice(0, 31));
+    } finally {
+      road.stop();
+    }
+  });
+
+  test("directly: when the live socket closes, it opens again, follows again, and tells the follower to read afresh", async () => {
+    const timers = new ManualTimers();
+    const channel = new Channel(() => ({ status: 200, body: {} }));
+    const { deps, nextSocket } = browser(rpeStatus, "open", timers);
+    const client = track(createClient(extensionConnector(channel, deps)));
+    const mine = follower();
+    const probe = nextSocket();
+    client.follow(CHAT, mine);
+    await probe;
+    const live = await nextSocket();
+    expect(await settled(client)).toEqual({ phase: "direct", address: ADDRESS });
+    expect(live.sent).toEqual([JSON.stringify({ op: "follow", chat: CHAT })]);
+    live.handlers.message(JSON.stringify({ type: "following", chat: CHAT, seq: 0 }));
+    await mine.resets(1);
+    live.handlers.message(JSON.stringify({ type: "events", chat: CHAT, events: RECORDED.slice(0, 3) }));
+    expect(mine.got).toEqual(RECORDED.slice(0, 3));
+    live.handlers.close();
+    const reopened = nextSocket();
+    timers.advance(1000);
+    const again = await reopened;
+    expect(again.sent).toEqual([JSON.stringify({ op: "follow", chat: CHAT })]);
+    expect(mine.resetCount).toBe(1);
+    again.handlers.message(JSON.stringify({ type: "following", chat: CHAT, seq: 3 }));
+    expect(mine.resetCount).toBe(2);
+  });
+});
+
+describe("a call's path", () => {
+  test("its params go in their places, encoded, and its query after", () => {
+    expect(pathOf("/api/v1/chats/:chat/turns/:turn", { chat: "chat a/b", turn: "t#1" }, { from: 4, before: undefined })).toBe("/api/v1/chats/chat%20a%2Fb/turns/t%231?from=4");
+    expect(() => pathOf("/api/v1/chats/:chat/turns", {})).toThrow("needs its chat");
+  });
+});
