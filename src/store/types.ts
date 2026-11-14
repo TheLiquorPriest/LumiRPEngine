@@ -57,6 +57,11 @@ export interface ChangeInput {
   precision?: Precision | null;
   /** Null or absent: unsourced. */
   source?: Source | null;
+  /**
+   * What the source cites (plan §10.5), as its writer gives it: a lore entry, a message, a roll or a
+   * ruling; for an invention, its gap check and its consent. Kept as given; null or absent: none.
+   */
+  cite?: JsonValue | null;
   /** The job that made it, when a job did. */
   job?: string | null;
 }
@@ -73,6 +78,7 @@ export interface ChangeRow {
   standing: Standing | null;
   precision: Precision | null;
   source: Source | null;
+  cite: JsonValue | null;
   job: string | null;
   applied: boolean;
   reports: Report[];

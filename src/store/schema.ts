@@ -97,6 +97,7 @@ CREATE TABLE change (
   standing TEXT,
   precision TEXT,
   source TEXT,
+  cite TEXT,
   job TEXT,
   applied INTEGER NOT NULL,
   reports TEXT,

@@ -128,6 +128,7 @@ interface ChangeDb {
   standing: string | null;
   precision: string | null;
   source: string | null;
+  cite: string | null;
   job: string | null;
   applied: number;
   reports: string | null;
@@ -195,6 +196,7 @@ function changeOf(r: ChangeDb): ChangeRow {
     standing: r.standing as Standing | null,
     precision: r.precision as Precision | null,
     source: r.source as Source | null,
+    cite: r.cite === null ? null : (JSON.parse(r.cite) as JsonValue),
     job: r.job,
     applied: r.applied === 1,
     reports: r.reports === null ? [] : (JSON.parse(r.reports) as Report[]),
@@ -760,10 +762,11 @@ export class UserStore {
     const now = this.store.now();
     let ord = (existing.at(-1)?.ord ?? -1) + 1;
     const ids = this.write(true, () => {
-      const put = this.db.query("INSERT INTO change (user, turn, ord, lane, op, value, by, standing, precision, source, job, applied, reports, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      const put = this.db.query("INSERT INTO change (user, turn, ord, lane, op, value, by, standing, precision, source, cite, job, applied, reports, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
       const made = inputs.map((c, i) => {
         const o = outcomes[i] ?? { applied: false, reports: [] };
-        return Number(put.run(this.id, turnId, ord++, c.lane, c.op, JSON.stringify(c.value), c.by ?? null, c.standing ?? null, c.precision ?? null, c.source ?? null, c.job ?? null, o.applied ? 1 : 0, o.reports.length > 0 ? JSON.stringify(o.reports) : null, now).lastInsertRowid);
+        const cite = c.cite === undefined || c.cite === null ? null : JSON.stringify(c.cite);
+        return Number(put.run(this.id, turnId, ord++, c.lane, c.op, JSON.stringify(c.value), c.by ?? null, c.standing ?? null, c.precision ?? null, c.source ?? null, cite, c.job ?? null, o.applied ? 1 : 0, o.reports.length > 0 ? JSON.stringify(o.reports) : null, now).lastInsertRowid);
       });
       this.dropSnapshotsThrough(turnId);
       return made;

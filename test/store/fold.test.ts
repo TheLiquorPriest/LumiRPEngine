@@ -10,7 +10,7 @@ import type { PackDef } from "../../src/engine/registry";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { initialState } from "../../src/engine/world-state";
 import { ALL_PACKS } from "../../src/packs/index";
-import { StoreInputError } from "../../src/store/types";
+import { StoreInputError, type ChangeInput } from "../../src/store/types";
 import { carried, engine, goTo, hand, make, pay, play, POV, registry, testStore, tick } from "./fixtures";
 
 describe("the new fold", () => {
@@ -55,6 +55,29 @@ describe("the new fold", () => {
     expect(changes[1]?.reports[0]?.text).toBe("posting sums to -10");
     expect(state.world.clock - s.headState("c").state.world.clock).toBe(20);
     expect(state.world.accounts).toEqual({});
+  });
+
+  test("a change keeps what its source cites, as its writer gave it, and none when it gives none", () => {
+    const { s, store, revision } = testStore();
+    s.createChat({ id: "c", revision });
+    const t = s.beginTurn({ chat: "c", kind: "normal" });
+    const invented = { gapCheck: "gap-7", consent: "msg-12", searched: ["lamp", "lantern"] };
+    const { changes } = s.addChanges(t.id, [
+      { ...(engine(make("lamp", "Lamp", POV))[0] as ChangeInput), source: "invented", cite: invented },
+      { ...(engine(goTo(POV, "cellar"))[0] as ChangeInput), source: "player", cite: "msg-3" },
+      ...engine(tick(5)),
+    ]);
+    expect(changes.map((c) => c.cite)).toEqual([invented, "msg-3", null]);
+    expect(s.changes(t.id).map((c) => c.cite)).toEqual([invented, "msg-3", null]);
+    // What it cites is kept beside the change and never folded: the state is the same without it.
+    const plain = testStore();
+    plain.s.createChat({ id: "c", revision: plain.revision });
+    const p = plain.s.beginTurn({ chat: "c", kind: "normal" });
+    plain.s.addChanges(p.id, engine(make("lamp", "Lamp", POV), goTo(POV, "cellar"), tick(5)));
+    expect(hashJson(s.stateAt(t.id).state.world)).toBe(hashJson(plain.s.stateAt(p.id).state.world));
+    // A cite that is not JSON is the one thing refused, and nothing is recorded.
+    expect(() => s.addChanges(t.id, [{ ...(engine(tick(1))[0] as ChangeInput), cite: (() => "a function") as unknown as ChangeInput["cite"] }])).toThrow(StoreInputError);
+    expect(store.db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM change WHERE turn = ?").get(t.id)?.n).toBe(3);
   });
 
   test("a unit of grouped events lands whole or not at all", () => {

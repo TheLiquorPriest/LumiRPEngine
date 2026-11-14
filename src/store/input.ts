@@ -19,6 +19,7 @@ export function checkChange(c: ChangeInput, index: number): void {
   if (!oneOf(SOURCES, c.source)) throw new StoreInputError(`${at}: source must be one of ${SOURCES.join(", ")}, or none`);
   if (!text(c.by) || !text(c.job)) throw new StoreInputError(`${at}: by and job are text`);
   if (JSON.stringify(c.value) === undefined) throw new StoreInputError(`${at}: value is not JSON`);
+  if (c.cite !== undefined && c.cite !== null && JSON.stringify(c.cite) === undefined) throw new StoreInputError(`${at}: cite is not JSON`);
   const v = c.value;
   if (!c.op.startsWith("store.")) {
     if (!isRecord(v) || v.type !== c.op) throw new StoreInputError(`${at}: an event's value is the event, with type ${c.op}`);
