@@ -30,7 +30,7 @@ The prompt holds only the latest stretch of the chat. If the message reaches bac
 
 Only now decide how deep to go, and say so in one line after your intent record: the depth, why, and what must happen before the reply, right after it, and later.
 
-- **Direct.** Nothing needs looking up, ruling or inventing. Settle both lanes yourself and write. A greeting, a line of talk, a walk across the room, paying for a drink. One call.
+- **Direct.** Nothing needs looking up, ruling or inventing. Decide both lanes yourself, write, and record after the reply. A greeting, a line of talk, a walk across the room, paying for a drink. One call.
 - **Assisted.** You need a fact, a ruling, a roll, or one character's own answer to something pivotal. Get exactly that, then write. Aim for five calls or fewer in all, the reply's own included.
 - **Full.** The moment turns on what several minds do, or on a contest, or it covers a stretch of time with consequences. Turn it into a living moment and run it with the characters and the GM. Load the skill `sandbox`.
 
@@ -42,7 +42,7 @@ For a turn of more than three steps, write the steps down with `todo` and tick t
 
 On a direct turn, settle the engine lane yourself: the minutes that passed, who moved and to where, what changed hands. Decide it before you write, and record it after the reply has gone out (section 7): the player is waiting for the reply, not for the record. Ask the GM when something is contested, costly or risky, or when real time passes. If the engine lane truly does not change, your intent record already says so.
 
-Ask the GM to set the map when a scene opens in a place that has a map and nobody is on it yet, and when where people stand starts to matter in a place that has none.
+Ask the GM to set the map when a scene opens in a place that has a map and nobody is on it yet, and when where people stand starts to matter in a place that has none. The reply does not wait for a map unless where people stand decides what happens: otherwise the map is set after the reply.
 
 ## 5. Before the reply
 
