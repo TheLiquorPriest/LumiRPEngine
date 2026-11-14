@@ -7,7 +7,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { h } from "preact";
 import { pageRoad } from "../../src/ext/page";
 import type { ExtensionStatus, LiveEvent } from "../../src/ui/api";
-import { type ClientState, createClient, extensionConnector, type LiveListener, pathOf, type RpeClient, RpeError } from "../../src/ui/client";
+import { type ClientState, createClient, extensionConnector, KEY_LET_GO, type LiveListener, pathOf, type RpeClient, RpeError, webConnector } from "../../src/ui/client";
 import { type ExtensionHeard, RoadLine, watchExtension } from "../../src/ui/frame";
 import type { FetchInit, RelayChannel, RoadDeps, SocketHandlers, StartAnswer, Timers } from "../../src/ui/roads";
 import { CHAT, RECORDED, turnListAt } from "./recorded";
@@ -94,6 +94,8 @@ interface FakeSocket {
   sent: string[];
   /** Whether RPE let it open. */
   accepted: boolean;
+  /** Whether the page closed it. */
+  closedByPage: boolean;
 }
 
 /** Whether RPE lets a socket offering `protocols` open: always, never, or as the test decides. */
@@ -111,14 +113,19 @@ function browser(fetch: (url: string, init: FetchInit) => Promise<{ status: numb
     },
     openSocket(url, protocols, handlers) {
       const accepted = sockets === "open" || (sockets !== "refuse" && sockets(protocols));
-      const socket: FakeSocket = { url, protocols, handlers, sent: [], accepted };
+      const socket: FakeSocket = { url, protocols, handlers, sent: [], accepted, closedByPage: false };
       opened.push(socket);
       queueMicrotask(() => {
         if (accepted) handlers.open();
         else handlers.close();
         for (const resolve of waiting.splice(0)) resolve(socket);
       });
-      return { send: (text) => socket.sent.push(text), close: () => undefined };
+      return {
+        send: (text) => socket.sent.push(text),
+        close: () => {
+          socket.closedByPage = true;
+        },
+      };
     },
     timers,
   };
@@ -493,17 +500,16 @@ describe("the page token, renewed while the drawer stays open", () => {
     await settle();
     expect(channel.starts).toBe(2);
     ext.away = false;
+    const reopened = nextSocket();
     timers.advance(1000);
     await settle();
     expect(channel.starts).toBe(3);
-    // The first token runs out, and then the live socket closes under the page: it opens again with the new one.
-    timers.advance(2 * 60_000);
-    live.handlers.close();
-    const reopened = nextSocket();
-    timers.advance(1000);
+    // The new token's socket opens beside the old one; the first token runs out, its socket closes, and the new one is used.
     const again = await reopened;
     expect(again.protocols).toEqual(["rpe.live", "rpe.token.rpp_page3"]);
     expect(again.accepted).toBe(true);
+    timers.advance(2 * 60_000);
+    live.handlers.close(4401);
     again.handlers.message(JSON.stringify({ type: "following", chat: CHAT, seq: 0 }));
     expect(mine.resetCount).toBe(2);
     expect(mine.refusals).toEqual([]);
@@ -533,6 +539,118 @@ describe("the page token, renewed while the drawer stays open", () => {
     expect(back?.accepted).toBe(true);
     back?.handlers.message(JSON.stringify({ type: "following", chat: CHAT, seq: 0 }));
     expect(mine.resetCount).toBe(2);
+  });
+
+  test("a token renewed while the live socket is open: the next socket opens with it and takes over before the old one's end, so nothing published between is lost or given twice", async () => {
+    const timers = new ManualTimers();
+    const SHORT = 2 * 60_000;
+    const channel = new Channel(
+      () => ({ status: 200, body: {} }),
+      (n) => ({ facts: { token: `rpp_page${n}`, expiresInMs: SHORT, addresses: [ADDRESS], build: "b-1" }, missing: [] }),
+    );
+    const { live, opened, nextSocket, mine } = await following(timers, channel, "open");
+    const batch = (...seqs: number[]): string => JSON.stringify({ type: "events", chat: CHAT, events: seqs.map((seq) => ({ ...RECORDED[0], chat: CHAT, seq })) });
+    const seqs = (): number[] => mine.got.map((e) => e.seq);
+    live.handlers.message(batch(1));
+    // The renewal is due a minute before the token runs out: the next socket opens with the new token and follows the chat.
+    const coming = nextSocket();
+    timers.advance(60_000);
+    const fresh = await coming;
+    expect(fresh.protocols).toEqual(["rpe.live", "rpe.token.rpp_page2"]);
+    expect(fresh.sent.map((s) => JSON.parse(s))).toEqual([{ op: "follow", chat: CHAT }]);
+    // Its following begins past event 3, which the old socket has not given yet: what it gives meanwhile waits for the old one.
+    fresh.handlers.message(JSON.stringify({ type: "following", chat: CHAT, seq: 3 }));
+    fresh.handlers.message(batch(4));
+    expect(seqs()).toEqual([1]);
+    live.handlers.message(batch(2, 3));
+    expect(seqs()).toEqual([1, 2, 3, 4]);
+    expect(live.closedByPage).toBe(true);
+    // The old token's end closes the old socket with RPE's code: the page no longer hears it, and asks for nothing.
+    const sockets = opened.length;
+    const starts = channel.starts;
+    live.handlers.close(4401);
+    live.handlers.message(batch(5));
+    fresh.handlers.message(batch(5, 6));
+    await settle();
+    expect(seqs()).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(mine.resetCount).toBe(1);
+    expect(mine.refusals).toEqual([]);
+    expect(opened.length).toBe(sockets);
+    expect(channel.starts).toBe(starts);
+    expect(fresh.closedByPage).toBe(false);
+  });
+
+  test("when the old socket ends before the next one caught up, the next one takes over at once and the chat is told it lost what came between", async () => {
+    const timers = new ManualTimers();
+    const channel = new Channel(
+      () => ({ status: 200, body: {} }),
+      (n) => ({ facts: { token: `rpp_page${n}`, expiresInMs: 2 * 60_000, addresses: [ADDRESS], build: "b-1" }, missing: [] }),
+    );
+    const { live, opened, nextSocket, mine } = await following(timers, channel, "open");
+    const coming = nextSocket();
+    timers.advance(60_000);
+    const fresh = await coming;
+    fresh.handlers.message(JSON.stringify({ type: "following", chat: CHAT, seq: 7 }));
+    fresh.handlers.message(JSON.stringify({ type: "events", chat: CHAT, events: [{ ...RECORDED[0], chat: CHAT, seq: 8 }] }));
+    const sockets = opened.length;
+    live.handlers.close(4401);
+    await settle();
+    expect(mine.resetCount).toBe(2);
+    expect(mine.got.map((e) => e.seq)).toEqual([8]);
+    expect(opened.length).toBe(sockets);
+    expect(mine.refusals).toEqual([]);
+  });
+});
+
+describe("the web shell's live socket", () => {
+  test("a restart of RPE is waited out with no word to the page and the key kept; a key RPE refuses on the session route signs the browser out", async () => {
+    const timers = new ManualTimers();
+    const rpe = { up: true, retired: false };
+    const fetch = async (): Promise<{ status: number; text(): Promise<string> }> => {
+      if (!rpe.up) throw new TypeError("Failed to fetch");
+      return rpe.retired ? { status: 401, text: async () => JSON.stringify({ error: "unauthorized", message: "This needs a page token or the web UI's token." }) } : { status: 200, text: async () => "{}" };
+    };
+    const { deps, opened, nextSocket } = browser(fetch, () => rpe.up, timers);
+    let key: string | null = "rpw_web-key";
+    const client = track(createClient(webConnector(ADDRESS, { get: () => key, set: (next) => (key = next) }, deps)));
+    const mine = follower(true);
+    const first = nextSocket();
+    client.follow(CHAT, mine);
+    (await first).handlers.message(JSON.stringify({ type: "following", chat: CHAT, seq: 0 }));
+    await mine.resets(1);
+
+    // RPE stops: the socket closes under the page, and neither the socket nor the session route answers while it is down.
+    rpe.up = false;
+    opened.at(-1)?.handlers.close();
+    for (let waited = 0; waited < 8000; waited += 1000) {
+      timers.advance(1000);
+      await settle();
+      await settle();
+    }
+    expect(opened.filter((s) => !s.accepted).length).toBeGreaterThan(1);
+    expect(mine.refusals).toEqual([]);
+    expect(key).toBe("rpw_web-key");
+
+    // RPE is back: within the longest wait the socket opens again with the same key, and the page reads afresh.
+    rpe.up = true;
+    for (let waited = 0; waited < 35_000 && opened.at(-1)?.accepted !== true; waited += 1000) {
+      timers.advance(1000);
+      await settle();
+    }
+    const back = opened.at(-1);
+    expect(back?.protocols).toEqual(["rpe.live", "rpe.token.rpw_web-key"]);
+    back?.handlers.message(JSON.stringify({ type: "following", chat: CHAT, seq: 0 }));
+    expect(mine.resetCount).toBe(2);
+    expect(mine.refusals).toEqual([]);
+    expect(client.state.get().phase).not.toBe("signed-out");
+
+    // A new web key was made: RPE closes the socket with its code for an ended credential, and refuses the key on the session route.
+    rpe.retired = true;
+    back?.handlers.close(4401);
+    await settle();
+    await settle();
+    expect(key).toBeNull();
+    expect(client.state.get()).toEqual({ phase: "signed-out", error: KEY_LET_GO });
   });
 });
 

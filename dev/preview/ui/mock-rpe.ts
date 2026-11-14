@@ -1,15 +1,18 @@
 // A stand-in RPE for the preview of the new pages: the routes they call, answered from the invented
 // recorded turn (test/ui/recorded.ts), and the live socket, which plays that turn as it was recorded,
-// in real time, each time a page follows a chat that has no turn playing. Any chat id is served the same
+// in real time, the first time a page follows a chat (and again on `/preview/play`). Any chat id is served the same
 // turn, but for a chat the list says RPE has not played yet (one a migration imported), which has none.
 // Any bearer is taken: the preview proves the pages, not RPE's auth. Nothing is kept.
 //
 // Preview controls, outside RPE's API (`previewControl`):
 // - `/preview/extension?state=well|unregistered|missing`: how RPE says its extension in Lumiverse stands.
+// - `/preview/play?chat=<chat>`: plays the recorded turn again in the chat as a new turn, once the last has ended.
 // - `/preview/continue?chat=<chat>`: continues the turn played last in the chat, as RPE runs a continue:
 //   the same turn run again under the same run id, its records numbered from 1 again.
 // - `/preview/build?backend=rpe|stand-in`: who answers Build's route (mock-build.ts).
 // - `/preview/migration?run=yes|no`: whether a migration has run (mock-migration.ts).
+// - `/preview/session?ends=none|soon|later` and `/preview/builds?disk=same|newer`: the web key's end and
+//   the builds line (mock-records.ts, which also answers Cast, Story, Settle now, the bootstrap and jobs).
 //
 // Connections are kept in memory while the preview runs, so the Connections page can add, change and
 // remove them; a key sent is never kept, only that one was. So are the worlds Build makes and edits, the
@@ -24,6 +27,7 @@ import { buildAnswer, buildControl } from "./mock-build";
 import { CHATS, CONTINUED, earlierTurn, EARLIER, RECORDED, RUN, summaryOf, T0, turnOf, worldAt } from "../../../test/ui/recorded";
 import { migrationAnswer, migrationControl } from "./mock-migration";
 import { playAnswer } from "./mock-play";
+import { recordsAnswer, recordsControl } from "./mock-records";
 import { settingsAnswer } from "./mock-settings";
 import { treeAnswer } from "./mock-tree";
 
@@ -108,14 +112,16 @@ function schedule(p: Playing, recording: readonly LiveEvent[], begins: number): 
 /** The chats the list says RPE has not played yet: no turn of theirs is listed or played. */
 const UNPLAYED: ReadonlySet<string> = new Set(CHATS.chats.flatMap((c) => (c.played ? [] : [c.id])));
 
-function play(chat: string): void {
+/** Plays the recorded turn in `chat` as a new turn: on the chat's first follow, or `again` once its last turn has ended. False when it plays nothing. */
+function play(chat: string, again = false): boolean {
   const current = playing.get(chat);
-  if (UNPLAYED.has(chat) || (current !== undefined && !current.done)) return;
+  if (UNPLAYED.has(chat) || (current !== undefined && (!current.done || !again))) return false;
   const begins = Date.now() + 1000;
   const p: Playing = { chat, run: `turn-${++runs}`, starts: [0], received: begins - INTAKE_MS, events: [], timers: [], done: false };
   playing.set(chat, p);
   played.set(p.run, p);
   schedule(p, RECORDED, begins);
+  return true;
 }
 
 /** Continues the turn played last in `chat`, once it has ended: false when none has. */
@@ -203,24 +209,33 @@ export function previewControl(url: URL): Response {
     standing = next;
     return answer(200, standing);
   }
+  if (url.pathname === "/preview/play") {
+    const chat = url.searchParams.get("chat") ?? "";
+    return play(chat, true) ? answer(200, { playing: playing.get(chat)?.run }) : answer(409, { error: `Chat ${chat} has a turn playing, or is one RPE has not played.` });
+  }
   if (url.pathname === "/preview/continue") {
     const chat = url.searchParams.get("chat") ?? "";
     return playContinue(chat) ? answer(200, { continued: playing.get(chat)?.run }) : answer(409, { error: `No turn of ${chat} has ended to continue.` });
   }
   if (url.pathname === "/preview/build") return buildControl(url);
   if (url.pathname === "/preview/migration") return migrationControl(url);
-  return answer(404, { error: `The preview has no ${url.pathname}.` });
+  return recordsControl(url) ?? answer(404, { error: `The preview has no ${url.pathname}.` });
 }
 
 const PROVIDERS: ProviderOffer[] = [
   { id: "deepseek", name: "DeepSeek", auth: ["key"], apis: [], needsBaseUrl: false },
   { id: "openai-compatible", name: "A compatible server", auth: ["key", "none"], apis: ["openai-completions"], needsBaseUrl: true },
 ];
-let connections: ConnectionView[] = [{ id: "c-flash", name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", effort: "high", default: true, key: { set: true, last4: null } }];
-let madeConnections = 1;
+let connections: ConnectionView[] = [
+  { id: "c-flash", name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", effort: "high", default: true, key: { set: true, last4: null } },
+  { id: "c-pro", name: "Pro", provider: "deepseek", auth: "key", model: "deepseek-v4-pro", default: false, key: { set: true, last4: null } },
+];
+let madeConnections = 2;
 
-/** What pi's catalog says of the preview's one known model: invented figures. */
-const PI_LIMITS: Readonly<Record<string, { contextWindow: number; maxTokens: number }>> = { "deepseek-v4-flash": { contextWindow: 128_000, maxTokens: 8_192 } };
+/** What pi's catalog says of the preview's known models: invented figures. */
+const PI_LIMITS: Readonly<Record<string, { contextWindow: number; maxTokens: number }>> = { "deepseek-v4-flash": { contextWindow: 128_000, maxTokens: 8_192 }, "deepseek-flash": { contextWindow: 1_000_000, maxTokens: 384_000 } };
+/** The provider has no model of the Pro connection's name, and answers its calls as another of its models. */
+const ANSWERS_AS: Readonly<Record<string, string>> = { "deepseek-v4-pro": "deepseek-flash" };
 
 /** A connection as the routes show it: nothing of its key, and its model's limits in force, the user's own over pi's. */
 function shown(c: ConnectionView): ConnectionShown {
@@ -231,7 +246,7 @@ function shown(c: ConnectionView): ConnectionShown {
   return { ...rest, key: key === null ? null : { set: key.set }, limitsInForce: c.model === undefined ? null : { contextWindow: limit(own?.contextWindow, pi?.contextWindow), maxTokens: limit(own?.maxTokens, pi?.maxTokens) } };
 }
 
-/** The connection routes, over the list in memory: what the pages send, answered in the shapes the routes answer in. A test answers at once: as the model when a key is set, else as a provider that refuses. */
+/** The connection routes, over the list in memory: what the pages send, answered in the shapes the routes answer in. A test answers at once: as the model the provider answers to (with that model's limits, as the route gives them) when a key is set, else as a provider that refuses. */
 async function connectionsAnswer(request: Request, path: string): Promise<Response> {
   if (path === "/api/v1/connections" && request.method === "GET") return answer(200, { connections: connections.map(shown), default: connections.find((c) => c.default)?.id ?? null, providers: PROVIDERS });
   const at = /^\/api\/v1\/connections(?:\/([^/]+))?(\/default|\/test)?$/.exec(path);
@@ -239,8 +254,9 @@ async function connectionsAnswer(request: Request, path: string): Promise<Respon
   const was = connections.find((c) => c.id === id);
   if (at === null || (id !== null && was === undefined)) return answer(404, { error: `RPE has no ${request.method} ${path}.` });
   if (at[2] === "/test" && was !== undefined && request.method === "POST") {
-    const limits = shown(was).limitsInForce;
-    return answer(200, was.auth === "key" && was.key?.set !== true ? { ok: false, ms: 96, error: "401: no key was given for this connection.", limits } : { ok: true, ms: 640, model: was.model ?? "the provider's own", limits });
+    if (was.auth === "key" && was.key?.set !== true) return answer(200, { ok: false, ms: 96, error: "401: no key was given for this connection.", limits: null });
+    const model = was.model === undefined ? "the provider's own" : (ANSWERS_AS[was.model] ?? was.model);
+    return answer(200, { ok: true, ms: 640, model, limits: shown({ ...was, model }).limitsInForce });
   }
   if (at[2] === "/default" && request.method === "PUT") {
     connections = connections.map((c) => ({ ...c, default: c.id === id }));
@@ -279,7 +295,7 @@ async function connectionsAnswer(request: Request, path: string): Promise<Respon
 export function rpeAnswer(request: Request, server: Server<PreviewSocket>): Response | undefined | Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
-  if (path === "/api/v1/status") return answer(200, { name: "rpe", version: "preview", started: T0, belongsToUser: true });
+  if (path === "/api/v1/status") return answer(200, { name: "rpe", version: "preview" });
   if (path === "/api/v1/live") {
     if (server.upgrade(request, { data: { follows: new Set<string>() }, headers: { "Sec-WebSocket-Protocol": "rpe.live" } })) return undefined;
     return answer(426, { error: "This is the live socket: open it as a WebSocket." });
@@ -292,6 +308,8 @@ export function rpeAnswer(request: Request, server: Server<PreviewSocket>): Resp
   if (path === "/api/v1/settings") return settingsAnswer(request, url);
   if (path === "/api/v1/migration") return migrationAnswer(request);
   if (path === "/api/v1/build") return buildAnswer(request);
+  const records = recordsAnswer(request, url, (chat) => ({ going: playing.get(chat)?.done === false, latest: UNPLAYED.has(chat) ? null : (playing.get(chat)?.run ?? RUN) }));
+  if (records !== null) return records;
   if (path === "/api/v1/chats") return answer(200, { chats: CHATS.chats.map((c) => ({ ...c, running: playing.get(c.id)?.done === false })) });
   const play = /^\/api\/v1\/chats\/([^/]+)\/(state|actions|actions\/undo)$/.exec(path);
   if (play !== null) {

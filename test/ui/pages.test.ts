@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { TurnList } from "../../src/ui/api";
+import type { TurnList, TurnSummary } from "../../src/ui/api";
 import type { Route } from "../../src/ui/app";
 import type { RpeClient } from "../../src/ui/client";
 import { applyLive, applyRead, EMPTY_LIVE, lastRunOf, latestRun, type RunNode, runsOf } from "../../src/ui/live-model";
@@ -335,6 +335,52 @@ describe("the Turns page", () => {
     await settle();
     expect(inFirst.length).toBe(shownBefore);
     expect(inSecond.at(-1)?.turns.map((t) => t.id)).toEqual(["turn-o1"]);
+  });
+
+  test("a run that begins or ends reads the newest turns again and puts them in front of those held: the list never empties while it reads, older turns read further back stay, a turn run again moves up, and a page that does not reach the turns held stands alone", async () => {
+    const asked: { before: string | undefined; answer(list: TurnList): void }[] = [];
+    const client: Pick<RpeClient, "call"> = {
+      call: ((_key: string, _params: { chat: string }, options?: { query?: { before?: string } }) => {
+        const { promise, resolve } = Promise.withResolvers<TurnList>();
+        asked.push({ before: options?.query?.before, answer: resolve });
+        return promise;
+      }) as RpeClient["call"],
+    };
+    const [t30, t29, t28] = EARLIER as [TurnSummary, TurnSummary, TurnSummary];
+    const t31: TurnSummary = { ...t30, id: "turn-31" };
+    const shown: TurnsRead[] = [];
+    const reader = readTurns(client, CHAT, (read) => shown.push(read));
+    asked[0]?.answer({ turns: [t30, t29], more: true });
+    await settle();
+    reader.more();
+    expect(asked[1]?.before).toBe("turn-29");
+    asked[1]?.answer({ turns: [t28], more: false });
+    await settle();
+    const ids = (): string[] | undefined => shown.at(-1)?.turns.map((t) => t.id);
+    expect(ids()).toEqual(["turn-30", "turn-29", "turn-28"]);
+    const held = shown.length;
+
+    reader.refresh();
+    expect(asked[2]?.before).toBeUndefined();
+    // Nothing is shown while it reads: the list stands as it was.
+    expect(shown.length).toBe(held);
+    asked[2]?.answer({ turns: [t31, t30], more: true });
+    await settle();
+    expect(ids()).toEqual(["turn-31", "turn-30", "turn-29", "turn-28"]);
+    expect(shown.at(-1)).toMatchObject({ more: false, loading: false });
+
+    reader.refresh();
+    asked[3]?.answer({ turns: [t29, t31], more: true });
+    await settle();
+    expect(ids()).toEqual(["turn-29", "turn-31", "turn-30", "turn-28"]);
+
+    reader.refresh();
+    asked[4]?.answer({ turns: [{ ...t30, id: "turn-90" }, { ...t30, id: "turn-89" }], more: true });
+    await settle();
+    expect(ids()).toEqual(["turn-90", "turn-89"]);
+    expect(shown.at(-1)?.more).toBe(true);
+    expect(shown.slice(held).every((read) => read.turns.length > 0 && !read.loading)).toBe(true);
+    reader.stop();
   });
 });
 

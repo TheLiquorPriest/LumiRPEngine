@@ -56,6 +56,21 @@ function turning(event: LiveEvent): boolean {
   return event.data.event.kind === "run_started" || event.data.event.kind === "run_ended";
 }
 
+/**
+ * Calls `onChange` each time what a page shows of a chat beside its turns may have changed: a run of it
+ * began or ended, the chat's state changed, or the page is told to read afresh (following began, or
+ * events were lost on the way). The Cast, Story and Turns pages read again then; nothing polls.
+ */
+export function onChatChange(client: Pick<RpeClient, "follow">, chat: string, onChange: () => void): () => void {
+  return client.follow(chat, {
+    events(events, missed) {
+      if (missed !== null || events.some((event) => event.kind === "state" || turning(event))) onChange();
+    },
+    reset: onChange,
+    refused: () => undefined,
+  });
+}
+
 /** Watches a chat's latest turn, whichever it is, for the Live page. */
 export function watchChat(client: RpeClient, chat: string, timers: Timers, onChange: (watched: Watched) => void, renderMs: number = WATCH_RENDER_MS): () => void {
   return watch(client, chat, null, timers, onChange, renderMs);

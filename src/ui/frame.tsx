@@ -12,6 +12,7 @@ import { Badge, Banner, Button, Empty, Fold } from "./atoms";
 import type { ClientState, RpeClient } from "./client";
 import { BuildPage } from "./kept/page";
 import { PlayPage } from "./kept/play/page";
+import { CastPage } from "./pages/cast";
 import { ChatsPage } from "./pages/chats";
 import { ConnectionsPage } from "./pages/connections";
 import { FilesPage } from "./pages/files";
@@ -19,11 +20,12 @@ import { LivePage } from "./pages/live";
 import { MigrationPage } from "./pages/migration";
 import { SettingsPage } from "./pages/settings";
 import { StoragePage } from "./pages/storage";
+import { StoryPage } from "./pages/story";
 import { TurnPage, TurnsPage } from "./pages/turns";
 import { WorldPage } from "./pages/world";
 import { errorWords } from "./words";
 
-export type NavId = "chats" | "live" | "turns" | "world" | "play" | "build" | "files" | "connections" | "settings" | "storage" | "migration";
+export type NavId = "chats" | "live" | "turns" | "world" | "cast" | "story" | "play" | "build" | "files" | "connections" | "settings" | "storage" | "migration";
 
 export interface NavItem {
   id: NavId;
@@ -42,6 +44,8 @@ export const NAV: readonly NavItem[] = [
   { id: "live", title: "Live", icon: "pulse", shells: ["web", "drawer"], needsChat: true, often: true },
   { id: "turns", title: "Turns", icon: "list", shells: ["web", "drawer"], needsChat: true, often: true },
   { id: "world", title: "World", icon: "globe", shells: ["web", "drawer"], needsChat: true, often: true },
+  { id: "cast", title: "Cast", icon: "users", shells: ["web", "drawer"], needsChat: true, often: false },
+  { id: "story", title: "Story", icon: "book", shells: ["web", "drawer"], needsChat: true, often: false },
   { id: "play", title: "Play", icon: "dice", shells: ["web", "drawer"], needsChat: true, often: true },
   { id: "build", title: "Build", icon: "hammer", shells: ["web", "drawer"], needsChat: false, often: false },
   { id: "files", title: "Files", icon: "folder", shells: ["web", "drawer"], needsChat: false, often: false },
@@ -178,6 +182,8 @@ export function PageFor(props: { route: Route }) {
   }
   if (route.page === "turn") return <TurnPage chat={chat} turn={route.turn} />;
   if (route.page === "world") return <WorldPage chat={chat} />;
+  if (route.page === "cast") return <CastPage chat={chat} />;
+  if (route.page === "story") return <StoryPage chat={chat} />;
   if (route.page === "play") return <PlayPage chat={chat} />;
   return route.page === "live" ? <LivePage chat={chat} /> : <TurnsPage chat={chat} />;
 }

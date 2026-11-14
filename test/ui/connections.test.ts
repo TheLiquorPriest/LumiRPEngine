@@ -118,4 +118,38 @@ describe("the Connections page", () => {
     await settle();
     expect(await done).toEqual({ busy: false, tested: null, problem: "RPE has no connection c-flash." });
   });
+
+  test("a test that answers as another model than the connection names, with limits the catalogue lists, says so in one sentence and offers them; taking them opens the form with them filled in and writes nothing", () => {
+    const tested = { ok: true as const, ms: 900, model: "deepseek-flash", limits: { contextWindow: { tokens: 1_000_000, from: "pi" as const }, maxTokens: { tokens: 384_000, from: "pi" as const } } };
+    const other = view({ tests: { "c-flash": { busy: false, tested, problem: null } } });
+    const offer = elements(other.tree).find((e) => e.props["data-offer"] === "limits");
+    expect(textOf(offer?.props.children)).toBe("The provider answered as deepseek-flash, not deepseek-v4-flash, so RPH does not use these figures for this connection unless you take them as its own.Take these limits");
+    press(offer, "Take these limits");
+    expect(other.asked).toEqual([{ kind: "form", id: "c-flash", fill: { contextWindow: 1_000_000, maxTokens: 384_000 } }]);
+    // The same model, or a catalogue with nothing for it: no offer.
+    expect(elements(view({ tests: { "c-flash": { busy: false, tested: { ...tested, model: "deepseek-v4-flash" }, problem: null } } }).tree).some((e) => e.props["data-offer"] === "limits")).toBe(false);
+    expect(elements(view({ tests: { "c-flash": { busy: false, tested: { ...tested, limits: { contextWindow: null, maxTokens: null } }, problem: null } } }).tree).some((e) => e.props["data-offer"] === "limits")).toBe(false);
+    // The form opens with the figures filled in, says nothing is written until saved, and saving sends them as the connection's model's own.
+    const form = view({ action: { kind: "form", id: "c-flash", fill: { contextWindow: 1_000_000, maxTokens: 384_000 } } });
+    const field = (name: string) => elements(form.tree).find((e) => e.type === "input" && e.props.name === name)?.props.defaultValue;
+    expect([field("contextWindow"), field("maxTokens")]).toEqual(["1000000", "384000"]);
+    expect(elements(form.tree).some((e) => e.props["data-filled"] === "true")).toBe(true);
+    expect(form.asked).toEqual([]);
+    const save = draftOf(entries({ name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", contextWindow: "1000000", maxTokens: "384000" }), KEYED);
+    expect(save.connection.limits).toEqual({ "deepseek-v4-flash": { contextWindow: 1_000_000, maxTokens: 384_000 } });
+  });
+
+  test("changing the form's model fills the two limit fields with that model's own figures, or empties them, so one model's figures never go under another's name", () => {
+    const withTwo: ConnectionShown = { ...KEYED, limits: { "deepseek-v4-flash": { contextWindow: 64_000 }, "deepseek-v4-pro": { maxTokens: 16_000 } } };
+    const form = view({ list: { ...LIST, connections: [withTwo, SIGNED] }, action: { kind: "form", id: "c-flash" } });
+    const values: Record<string, { value: string }> = { contextWindow: { value: "64000" }, maxTokens: { value: "" } };
+    const model = elements(form.tree).find((e) => e.type === "input" && e.props.name === "model");
+    const type = (value: string): void => (model?.props.onInput as (event: unknown) => void)({ currentTarget: { value, form: { elements: { namedItem: (name: string) => values[name] } } } });
+    type("deepseek-v4-pro");
+    expect([values.contextWindow?.value, values.maxTokens?.value]).toEqual(["", "16000"]);
+    type("some-other-model");
+    expect([values.contextWindow?.value, values.maxTokens?.value]).toEqual(["", ""]);
+    type("deepseek-v4-flash");
+    expect([values.contextWindow?.value, values.maxTokens?.value]).toEqual(["64000", ""]);
+  });
 });

@@ -11,9 +11,10 @@ const STEPS = goingBack({ identifier: "lumi_rp_engine", runtime: { name: "lamp-h
   .slice(1)
   .map((step) => step.trim());
 
-export const NOT_RUN: MigrationShown = { text: null, chats: [], backup: null, waiting: [], goingBack: { steps: STEPS, permissions: [...PREVIOUS_PERMISSIONS] } };
+export const NOT_RUN: MigrationShown = { report: null, text: null, chats: [], backup: null, waiting: [], goingBack: { steps: STEPS, permissions: [...PREVIOUS_PERMISSIONS] } };
 
 export const MIGRATED: MigrationShown = {
+  report: { worldsInBuild: { copied: ["w-harbour"], replaced: ["w-moor"], unchanged: [], kept: ["w-isle", "w-old"], newer: ["w-isle"], names: { "w-harbour": "Harbour Town", "w-isle": "The Isle" } } },
   text: [
     "Migration report: the real run of 13 Nov 2026, 21:04.",
     "Chats:",
@@ -50,6 +51,7 @@ export const MIGRATED: MigrationShown = {
     { kind: "chat", chat: "chat-harbour", questions: 1, staged: 2, chips: 0, reviewCards: 1, rollback: true },
     { kind: "own", agents: 2, skills: 1, texts: 3 },
     { kind: "filing", chat: "chat-calder", characters: 2, notes: true },
+    { kind: "world", world: "w-isle", name: "The Isle" },
   ],
   goingBack: { steps: STEPS, permissions: [...PREVIOUS_PERMISSIONS] },
 };

@@ -52,17 +52,29 @@ describe("the Migration page", () => {
     expect(section(tree, "backup")).toBe(`The backupWhere/srv/rpe/backups/before-migration.tar.gzSize46.1 MBSHA-256${MIGRATED.backup?.sha256}Still there, at that sizeyes`);
     expect(section(view({ shown: { ...MIGRATED, backup: { ...(MIGRATED.backup ?? { path: "", bytes: 0, sha256: "" }), present: false } } }).tree, "backup")).toContain("Still there, at that sizeno");
     const waiting = section(tree, "waiting");
-    expect(waiting).toContain("Waiting on you (5)");
+    expect(waiting).toContain("Waiting on you (6)");
     expect(waiting).toContain("Your GUIDANCE.md is at imported/GUIDANCE.md, switched off.");
     expect(waiting).toContain("The setting jobs.connections.Harbour Flash.atOnce names Harbour Flash, a connection in Lumiverse: pick one of RPE's for it.");
     expect(waiting).toContain("Chat chat-harbour: 1 edit waiting on keep or discard, 2 staged actions, 1 review card and a rollback never applied.");
     expect(waiting).toContain("Your own 2 agents, 1 skill and 3 texts are attached and switched off.");
     expect(waiting).toContain("Chat chat-calder: the mind files of 2 characters, and its notes, are attached and not yet filed.");
+    expect(waiting).toContain("The world The Isle was changed in Build and on today's side since a run put it into Build: Build keeps its own, and today's newer files are in RPE's copy of today's worlds and in the backup.");
+    expect(waiting).not.toContain("undefined");
     const back = section(tree, "going-back");
     for (const step of MIGRATED.goingBack.steps) expect(back).toContain(step);
     const permissions = elements(tree).find((e) => e.props["data-permissions"] === "true");
     expect(elements(permissions?.props.children).filter((e) => e.type === "code").map((e) => textOf(e.props.children))).toEqual(MIGRATED.goingBack.permissions);
     expect(back).toContain(`to approve again (${MIGRATED.goingBack.permissions.length})`);
+  });
+
+  test("what became of each world the run carried into Build, by name where it has one, in the report's own words", () => {
+    const worlds = section(view({ shown: MIGRATED }).tree, "worlds");
+    expect(worlds).toContain("Harbour Town (w-harbour)copied in");
+    expect(worlds).toContain("w-moorreplaced by this run's files, as Build's copy was still the one a run put there");
+    expect(worlds).toContain("The Isle (w-isle)kept as RPE has it, though changed on today's side too");
+    expect(worlds).toContain("w-oldchanged or removed in RPE since a run put it there, so kept as RPE has it");
+    expect(section(view({ shown: { ...MIGRATED, report: { worldsInBuild: { copied: [], replaced: [], unchanged: [], kept: [] } } } }).tree, "worlds")).toContain("The run carried no world.");
+    expect(section(view({ shown: { ...MIGRATED, report: {} } }).tree, "worlds")).toBe("");
   });
 
   test("it reads RPE's migration route once; RPE's refusal is said in its words; what comes after the page has left is let go; the page has its place in both shells and in the address", async () => {

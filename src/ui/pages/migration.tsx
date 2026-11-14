@@ -1,14 +1,17 @@
 // Migration (plan §14, §15.5, §15.6): what the last run of the migration left, once one has run: its
 // report as the run printed it, each chat with what came of it and its check against today's fold, the
 // backup and whether it is still there, what is waiting on the user, and the steps of going back with
-// the permissions the previous build asks for, in RPE's own words. Before any run, one line says none has.
+// the permissions the previous build asks for, in RPE's own words; what became of each world it carried
+// into Build; and the offer to start the bootstrap for every chat it carried. Before any run, one line
+// says none has.
 
 import { useEffect, useState } from "preact/hooks";
-import type { MigrationChat, MigrationShown, MigrationWaiting } from "../api";
+import type { MigrationChat, MigrationShown, MigrationWaiting, WorldsInBuild } from "../api";
 import { useApp } from "../app";
 import { Badge, Banner, Fold, PageHeader, Pre, Row, Section } from "../atoms";
 import type { RpeClient } from "../client";
 import { bytesWords, counted, errorWords } from "../words";
+import { BatchOffer, type BatchShown, NO_BATCH, type Relive, startCarried } from "./bootstrap";
 
 /** The page's one read: RPE's answer, or its refusal in its own words. */
 export interface MigrationRead {
@@ -45,6 +48,7 @@ export function waitingWords(w: MigrationWaiting): string {
   if (w.kind === "guidance") return `Your GUIDANCE.md is at ${w.path}, switched off.`;
   if (w.kind === "connection") return `The setting ${w.setting} names ${w.connection}, a connection in Lumiverse: pick one of RPE's for it.`;
   if (w.kind === "own") return `Your own ${andList([counted(w.agents, "agent"), counted(w.skills, "skill"), counted(w.texts, "text")])} are attached and switched off.`;
+  if (w.kind === "world") return `The world ${w.name ?? w.world} was changed in Build and on today's side since a run put it into Build: Build keeps its own, and today's newer files are in RPE's copy of today's worlds and in the backup.`;
   if (w.kind === "filing") return `Chat ${w.chat}: the mind files of ${counted(w.characters, "character")}${w.notes ? ", and its notes," : ""} are attached and not yet filed.`;
   const parts = [
     w.questions > 0 ? counted(w.questions, "edit waiting on keep or discard", "edits waiting on keep or discard") : null,
@@ -54,6 +58,21 @@ export function waitingWords(w: MigrationWaiting): string {
     w.rollback ? "a rollback never applied" : null,
   ].filter((part) => part !== null);
   return `Chat ${w.chat}: ${andList(parts)}.`;
+}
+
+/** What became of each world a run carried into Build, by name where today's index gives one, in the report's own words. */
+export function worldLines(w: WorldsInBuild): { world: string; words: string }[] {
+  const named = (id: string): string => (w.names?.[id] === undefined ? id : `${w.names[id]} (${id})`);
+  const newer = new Set(w.newer ?? []);
+  return [
+    ...w.copied.map((id) => ({ world: named(id), words: "copied in" })),
+    ...w.replaced.map((id) => ({ world: named(id), words: "replaced by this run's files, as Build's copy was still the one a run put there" })),
+    ...w.unchanged.map((id) => ({ world: named(id), words: "unchanged, as Build's copy is this run's files already" })),
+    ...w.kept.map((id) => ({
+      world: named(id),
+      words: newer.has(id) ? "kept as RPE has it, though changed on today's side too: today's newer files are in RPE's copy of today's worlds and in the backup" : "changed or removed in RPE since a run put it there, so kept as RPE has it",
+    })),
+  ];
 }
 
 /** A chat as the last run left it: what came of it, and for one it imported, its turns and its check, each place it differed in the report's own words. */
@@ -88,7 +107,7 @@ function ChatItem(props: { chat: MigrationChat }) {
   );
 }
 
-export function MigrationView(props: { read: MigrationRead }) {
+export function MigrationView(props: { read: MigrationRead; batch?: { shown: BatchShown; onStart(relive: Relive): void } }) {
   const { shown, loading, problem } = props.read;
   return (
     <div class="lre-stack rpe-page" data-page="migration">
@@ -120,6 +139,17 @@ export function MigrationView(props: { read: MigrationRead }) {
               </ul>
             )}
           </Section>
+          {shown.report?.worldsInBuild === undefined ? null : (
+            <Section title="Worlds in Build" id="worlds">
+              <p class="rpe-meta">Build edits RPE's own copy of each world the run carried.</p>
+              {worldLines(shown.report.worldsInBuild).length === 0 ? (
+                <p class="lre-muted rpe-line">The run carried no world.</p>
+              ) : (
+                worldLines(shown.report.worldsInBuild).map((line, i) => <Row key={i} label={line.world} value={line.words} />)
+              )}
+            </Section>
+          )}
+          {props.batch === undefined || !shown.chats.some((c) => c.outcome === "imported" || c.outcome === "replaced") ? null : <BatchOffer {...props.batch} />}
           <Section title="The backup" id="backup">
             {shown.backup === null ? (
               <p class="lre-muted rpe-line">The report names no backup.</p>
@@ -169,6 +199,7 @@ export function MigrationView(props: { read: MigrationRead }) {
 export function MigrationPage() {
   const app = useApp();
   const [read, setRead] = useState<MigrationRead>(NO_MIGRATION);
+  const [batch, setBatch] = useState<BatchShown>(NO_BATCH);
   useEffect(() => readMigration(app.client, setRead), []);
-  return <MigrationView read={read} />;
+  return <MigrationView read={read} batch={{ shown: batch, onStart: (relive) => startCarried(app.client, relive, setBatch) }} />;
 }

@@ -88,7 +88,7 @@ describe("the Files page", () => {
   });
 
   test("a file no agent reads, such as what the migration put under imported/, is said to be kept, and opened it says how it comes into force; a config, notes and a skill's own files are not", () => {
-    const file = (path: string, over: Partial<TreeFileEntry> = {}): TreeFileEntry => ({ path, level: "global", kind: "yours", bytes: 64, item: null, applies: true, replacedBy: null, off: false, editable: true, shipped: null, defaultChanged: null, ...over });
+    const file = (path: string, over: Partial<TreeFileEntry> = {}): TreeFileEntry => ({ path, level: "global", kind: "yours", bytes: 64, item: null, applies: true, replacedBy: null, off: false, offIn: [], editable: true, shipped: null, defaultChanged: null, ...over });
     const files = [
       ...FILES,
       file("@global/imported/.agents/lamplighter.md"),
@@ -147,12 +147,32 @@ describe("the Files page", () => {
       { switch: "@shipped/WRITING.md", level: "global", off: true },
       { switch: "@shipped/WRITING.md", level: "chat", off: true },
     ]);
+    // Your own config's `off:` list names it: only that Switch on is offered.
     const off = view({ open: opened("@shipped/rules/perceptions.md") });
-    press(off.tree, "Switch on in this chat");
-    expect(off.asked).toEqual([{ switch: "@shipped/rules/perceptions.md", level: "chat", off: false }]);
+    expect(buttonsOf(rowOf(off.tree, "@shipped/rules/perceptions.md").props.children)).toEqual(["@shipped/rules/perceptions.md", "Edit as yours", "Switch on for every chat", "Close"]);
+    press(off.tree, "Switch on for every chat");
+    expect(off.asked).toEqual([{ switch: "@shipped/rules/perceptions.md", level: "global", off: false }]);
     const alone = view({ files: FILES_NO_CHAT, open: opened("@shipped/WRITING.md") }, null);
     expect(buttonsOf(rowOf(alone.tree, "@shipped/WRITING.md").props.children)).toEqual(["@shipped/WRITING.md", "Edit as yours", "Switch off", "Close"]);
     expect(elements(alone.tree).filter((e) => e.type === "summary").map((e) => textOf(e.props.children))).toEqual(["Shipped (7)", "Yours (2)"]);
+  });
+
+  test("a name switched off is offered Switch on only at a level whose off: list names it, since anywhere else it changes nothing; where two lists name it, or one this page does not write, the page says so", () => {
+    const PERCEPTIONS = "@shipped/rules/perceptions.md";
+    const offIn = (levels: TreeFileEntry["offIn"], chat: string | null = CHAT) => {
+      const files = (chat === null ? FILES_NO_CHAT : FILES).map((f) => (f.path === PERCEPTIONS ? { ...f, offIn: levels } : f));
+      const shown = view({ files, open: opened(PERCEPTIONS) }, chat);
+      const row = rowOf(shown.tree, PERCEPTIONS);
+      return { buttons: buttonsOf(row.props.children).filter((b) => b.startsWith("Switch")), words: elements(row).filter((e) => e.props["data-off-in"] !== undefined).map((e) => textOf(e.props.children)), shown };
+    };
+    expect(offIn(["chat"])).toMatchObject({ buttons: ["Switch on in this chat"], words: [] });
+    expect(offIn(["global"], null)).toMatchObject({ buttons: ["Switch on"], words: [] });
+    const both = offIn(["global", "chat"]);
+    expect(both).toMatchObject({ buttons: ["Switch on for every chat", "Switch on in this chat"], words: ["The off: list of your own config and this chat's config names it. It is on again once no list does."] });
+    press(both.shown.tree, "Switch on in this chat");
+    expect(both.shown.asked).toEqual([{ switch: PERCEPTIONS, level: "chat", off: false }]);
+    expect(offIn(["shipped"])).toMatchObject({ buttons: [], words: ["The off: list of the shipped config names it. It is on again once no list does, and this page does not change the shipped config."] });
+    expect(offIn(["character", "chat"])).toMatchObject({ buttons: ["Switch on in this chat"], words: ["The off: list of this character's config and this chat's config names it. It is on again once no list does, and this page does not change this character's config."] });
   });
 
   test("editing shows the text and where it is to be saved; saving, and how the file differs from the default and what the update changed of it", () => {

@@ -75,6 +75,17 @@ describe("the World page", () => {
     expect(top.text).not.toContain("Up a level");
   });
 
+  test("no section stands in for what the page does not show, and older turns are read for \"As it stood\" while there are more", () => {
+    const { tree, text } = worldView(point);
+    expect(elements(tree).some((e) => e.props["data-section"] === "map")).toBe(false);
+    expect(text).not.toContain("cannot show");
+    expect(text).not.toContain("Older turns");
+    let more = 0;
+    const longer = worldView(point, { moreTurns: { more: true, onMore: () => more++ } });
+    press(longer.tree, "Older turns");
+    expect(more).toBe(1);
+  });
+
   test("for a chat no turn of which RPE has played (one a migration imported), it says its world is shown as it stands now, in place of the turns to see it at", () => {
     const none = "No turn of this chat has been played on RPE yet, so its world is shown as it stands now.";
     const unplayed = worldView(worldAt("world", 1), { turns: [] });

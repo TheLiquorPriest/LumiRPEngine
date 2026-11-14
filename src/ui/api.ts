@@ -6,27 +6,36 @@
 // the live socket) are mirrored from `src/app/`; the turn routes and the live kinds are what the turn
 // lane implements; a connection's shapes are RPH's contract's own.
 
-import type { AgentRef, ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, FileKind, LayerLevel, ModelLimits, ReplyError, RunStatus, StackPart, TraceDelta, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
+import type { AgentRef, ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, FileKind, JobView, JsonObject, LayerLevel, ModelLimits, ReplyError, RunStatus, StackPart, TraceDelta, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
 import type { JsonValue } from "../shared/json";
-import type { DraftChanged, ErrorMessage, FrontendToBackend, ResultMessage } from "../shared/protocol";
+import type { ChipRequest, DraftChanged, ErrorMessage, FrontendToBackend, ResultMessage } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
 
 // ---------------------------------------------------------------- the app's own
 
-/** `GET /api/v1/status` (public): which RPE answers, whether it belongs to a Lumiverse user yet, and the builds that meet at it. */
+/** `GET /api/v1/status` (public): that RPE answers here, and its build; nothing more. */
 export interface Status {
   name: "rpe";
   version: string;
+}
+
+/** `GET /api/v1/status/builds` (page): when RPE started, and the builds that meet at it, read again from its app file. */
+export interface BuildsReply extends Status {
   started: number;
-  belongsToUser: boolean;
   builds: BuildsStatus;
+}
+
+/** `GET /api/v1/status/session` (page): whose the credential the page holds is, and when it runs out (epoch milliseconds; null: it has no end). */
+export interface SessionReply {
+  user: string;
+  ends: number | null;
 }
 
 /** Where a restart onto RPE's app file on disk stands (`src/app/update.ts`): nothing to restart onto, waiting for the turns and jobs running, restarting, needed and not made while `update.restart` is off, or needed and not possible, RPE having been started by hand. */
 export type RestartState = "none" | "waiting" | "restarting" | "off" | "by hand";
 
 /**
- * The builds that meet at RPE, as its status and "Update now" (`POST /api/v1/update`) give them: the
+ * The builds that meet at RPE, as its builds route and "Update now" (`POST /api/v1/update`) give them: the
  * build it runs; its app file's on disk (null: no single file, or one that gives none); why the file on
  * disk gave none; the extension's, as it last said (null: not yet); whether all agree; where a restart
  * stands; and all of it in RPE's own words.
@@ -57,11 +66,13 @@ export interface ExtensionStatus {
   missing: MissingPermission[] | null;
 }
 
-/** The live socket (`src/app/live.ts`): its path, its protocol, and how a page gives its token as a protocol. */
+/** The live socket (`src/app/live.ts`): its path, its protocol, how a page gives its token as a protocol, and the code it closes with when that token runs out or is replaced. */
 export const LIVE_PATH = "/api/v1/live";
 export const LIVE_PROTOCOL = "rpe.live";
 export const TOKEN_PROTOCOL_PREFIX = "rpe.token.";
+export const LIVE_TOKEN_ENDED = 4401;
 export const STATUS_PATH = "/api/v1/status";
+export const SESSION_PATH = "/api/v1/status/session";
 
 /** One event of a chat as the live hub sends it: numbered from 1 per chat, with what happened in the publishing area's words. */
 export interface LiveEvent {
@@ -288,7 +299,8 @@ export interface WorldAnswer {
  * One file of the agents' tree as the Files page lists it: its path in the chat's view, as the file
  * routes take it (`@shipped/…`, `@global/…`, `@character/…`, or below the chat's folder), its level and
  * kind, its size; the name RPH loads it by and an `off:` list names it by (null: none); whether RPH
- * takes it; the nearer file taken in its place; whether its name is switched off; whether the user may
+ * takes it; the nearer file taken in its place; whether its name is switched off, and the levels whose
+ * `off:` list names it (only switching it on at one of those changes anything); whether the user may
  * write it where it is; the shipped file of its name, for a file of another level; and when an update
  * changed that shipped file since this one was last written.
  */
@@ -301,6 +313,7 @@ export interface TreeFileEntry {
   applies: boolean;
   replacedBy: string | null;
   off: boolean;
+  offIn: LayerLevel[];
   editable: boolean;
   shipped: string | null;
   defaultChanged: number | null;
@@ -522,21 +535,324 @@ export type MigrationWaiting =
   | { kind: "connection"; setting: string; connection: string }
   | { kind: "chat"; chat: string; questions: number; staged: number; chips: number; reviewCards: number; rollback: boolean }
   | { kind: "own"; agents: number; skills: number; texts: number }
-  | { kind: "filing"; chat: string; characters: number; notes: boolean };
+  | { kind: "filing"; chat: string; characters: number; notes: boolean }
+  | { kind: "world"; world: string; name: string | null };
+
+/**
+ * What a run did with each world it carried into Build's own copy, by the world's id: copied in, replaced
+ * (Build's copy was still a run's), unchanged, or kept as RPE has it (changed or made there); of those
+ * kept, which are newer on today's side too; and each world's name as today's index gives it. The last
+ * two are absent from a report kept before runs told them.
+ */
+export interface WorldsInBuild {
+  copied: string[];
+  replaced: string[];
+  unchanged: string[];
+  kept: string[];
+  newer?: string[];
+  names?: Record<string, string>;
+}
 
 /**
  * `GET /api/v1/migration`, as far as the page reads it: the last run's report as the run printed it
- * (null before any run), each chat, the backup (where, its size and checksum, whether a file of that
- * size is still there), what is waiting on the user, and the steps of going back with the permissions
- * the previous build asks for. The route also sends the report whole and what was carried of each chat;
- * the page shows the report as its printed text.
+ * (null before any run), and of the report whole, what became of each world in Build; each chat, the
+ * backup (where, its size and checksum, whether a file of that size is still there), what is waiting on
+ * the user, and the steps of going back with the permissions the previous build asks for. The route
+ * also sends the rest of the report and what was carried of each chat; the page shows the report as its
+ * printed text.
  */
 export interface MigrationShown {
+  report: { worldsInBuild?: WorldsInBuild } | null;
   text: string | null;
   chats: MigrationChat[];
   backup: { path: string; bytes: number; sha256: string; present: boolean } | null;
   waiting: MigrationWaiting[];
   goingBack: { steps: string[]; permissions: string[] };
+}
+
+// ---------------------------------------------------------------- the cast (the cast's, plan §7, §14 Cast)
+
+/** How large a part a character plays. */
+export type Casting = "principal" | "supporting" | "extra";
+/** A memory's tier: top of mind, short term, long term. */
+export type MemoryTier = "top" | "short" | "long";
+/** The base's four documents. */
+export type BasePart = "seed" | "soul" | "inner_voice" | "background";
+/** What a source bound to a character points at. */
+export type CastSourceKind = "card" | "persona" | "entry" | "memory";
+/** The parts of a character's record kept as rows tied to turns, the casting aside. */
+export type CastEntryPart = "growth" | "mind" | "relationship" | "knowledge" | "history" | "perception" | "memory";
+/** The parts of a character's record that hold entries, as the cast counts them. */
+export type CastKind = "growth" | "mind" | "memories" | "relationships" | "knowledge" | "history" | "perceptions" | "files";
+
+/** How many entries of a kind a character holds on the path read: standing, and struck. */
+export interface CastHeld {
+  held: number;
+  struck: number;
+}
+
+/** Each kind's counts; the carried mind files with how many of those standing are marked filed. */
+export type CastCounts = Record<Exclude<CastKind, "files">, CastHeld> & { files: CastHeld & { filed: number } };
+
+/** A casting in force: the player's pin, else the Author's; with the Author's line for the character, where it wrote one. */
+export interface CastingShown {
+  as: Casting;
+  pinned: boolean;
+  line: string | null;
+}
+
+/** A character as the cast lists it: its casting (null: none yet), where its record came from (carried by a migration, played on RPE), and its counts. */
+export interface CastMemberShown {
+  id: string;
+  name: string;
+  chat: string;
+  casting: CastingShown | null;
+  from: { carried: boolean; played: boolean };
+  counts: CastCounts;
+}
+
+/** `GET /api/v1/chats/:chat/cast?turn=`: every character the chat knows; `turn` null: at the chat's newest. */
+export interface CastList {
+  chat: string;
+  turn: string | null;
+  characters: CastMemberShown[];
+}
+
+/** One write of an entry: its turn, that turn's reply on the path (null: on none), whether a migration wrote that turn, who wrote it, and what it said. */
+export interface CastWriteShown {
+  turn: string;
+  message: number | null;
+  imported: boolean;
+  by: string | null;
+  wrote: JsonObject;
+}
+
+/** An entry of a character's record as it stands on the path read: its fields, story time of its first write, its first write, whether it is struck, and every write of it. */
+export interface CastEntryShown {
+  id: string;
+  part: CastEntryPart;
+  fields: JsonObject;
+  date: string | null;
+  turn: string;
+  message: number | null;
+  imported: boolean;
+  by: string | null;
+  struck: boolean;
+  writes: CastWriteShown[];
+}
+
+/** A memory, with its tier, strength (0 to 1) and whether it has faded to its gist; none while struck. */
+export interface CastMemoryShown extends CastEntryShown {
+  tier: MemoryTier | null;
+  strength: number | null;
+  faint: boolean;
+}
+
+/** A perception, with the turn it is of and that turn's reply. */
+export interface CastPerceptionShown extends CastEntryShown {
+  of: { turn: string; message: number | null };
+}
+
+/** A mind file a migration carried, word for word (null: its row holds no text), with its filed mark. */
+export interface CastFileShown extends CastEntryShown {
+  file: string;
+  text: string | null;
+  filed: boolean;
+}
+
+/** A version of a part of the base; `standing` marks the one in force. */
+export interface CastBaseShown {
+  part: BasePart;
+  version: number;
+  text: string;
+  standing: boolean;
+  turn: string | null;
+  by: string | null;
+  created: number;
+}
+
+/** A source bound to the character, as recorded. */
+export interface CastSourceShown {
+  kind: CastSourceKind;
+  ref: string;
+  defines: string | null;
+  created: number;
+}
+
+/** `GET /api/v1/chats/:chat/cast/:character?turn=`: everything on one character's record, by kind. */
+export interface CastCharacter {
+  chat: string;
+  turn: string | null;
+  character: CastMemberShown;
+  sources: CastSourceShown[];
+  base: CastBaseShown[];
+  castings: CastWriteShown[];
+  growth: CastEntryShown[];
+  mind: CastEntryShown[];
+  memories: CastMemoryShown[];
+  relationships: CastEntryShown[];
+  knowledge: CastEntryShown[];
+  history: CastEntryShown[];
+  perceptions: CastPerceptionShown[];
+  files: CastFileShown[];
+}
+
+/** `POST /api/v1/chats/:chat/cast/:character/strike`: an entry struck (true) or its strike taken back (false), with why where the player says. */
+export interface CastStrike {
+  id: string;
+  struck: boolean;
+  why?: string;
+}
+
+/**
+ * What a strike, or taking one back, did: whether anything was recorded, the entry now, the knowledge struck with it, the secrets let
+ * go (by their fact's id); for a strike taken back, the knowledge standing again with it and the secrets held again; and what it
+ * could not do, in the cast's words.
+ */
+export interface CastStruck {
+  changed: boolean;
+  entry: CastEntryShown;
+  alsoStruck: string[];
+  letGo: string[];
+  alsoStood: string[];
+  heldAgain: string[];
+  notes: string[];
+}
+
+// ---------------------------------------------------------------- the story record (the story's, plan §8.1, §14 Story)
+
+/** The parts of the story record. */
+export type StoryPart = "premise" | "chapter" | "scene" | "beat" | "thread" | "arc" | "player" | "future" | "canon" | "retcon" | "record";
+/** The parts the story route gives as bounded lists: every part but the one premise. */
+export type StoryListPart = Exclude<StoryPart, "premise">;
+
+/** One write of an item: as a cast entry's write. */
+export interface StoryWriteShown {
+  turn: string;
+  message: number | null;
+  imported: boolean;
+  by: string | null;
+  wrote: JsonObject;
+}
+
+/** An item of the story record on the path read: its fields, where it lies in the chat by message number (null: nowhere, or an end the record cannot place), its first write, whether it is closed or struck, and every write. */
+export interface StoryItemShown {
+  id: string;
+  part: StoryPart;
+  fields: JsonObject;
+  from: number | null;
+  to: number | null;
+  turn: string;
+  message: number | null;
+  imported: boolean;
+  by: string | null;
+  closed: boolean;
+  struck: boolean;
+  writes: StoryWriteShown[];
+}
+
+/** A bounded list: what it gives, how many it holds in all, and how many it left out before and after what it gives. */
+export interface StoryList {
+  items: StoryItemShown[];
+  total: number;
+  before: number;
+  after: number;
+}
+
+/** An entry of the Author's horizon: as written, with the level of the world it names now (null: none). */
+export interface StoryHorizonEntry {
+  at: string;
+  ref: string | null;
+  name: string | null;
+}
+
+/** `GET /api/v1/chats/:chat/story?turn=&part=&skip=`: the story record of a chat; `listed` is the most one list gives at once, `skip` counts back from each list's newest end. */
+export interface StoryAnswer {
+  chat: string;
+  turn: string | null;
+  now: string | null;
+  listed: number;
+  timeline: { chapter: StoryList; scene: StoryList; beat: StoryList };
+  current: { chapter: string | null; scene: string | null };
+  model: { premise: StoryItemShown | null; thread: StoryList; arc: StoryList; player: StoryList; canon: StoryList; retcon: StoryList; record: StoryList };
+  horizon: StoryHorizonEntry[];
+  futures: StoryList;
+}
+
+/** `POST /api/v1/chats/:chat/story/strike`: an item struck (true) or its strike taken back (false). */
+export interface StoryStrike {
+  id: string;
+  struck: boolean;
+  why?: string;
+}
+
+export interface StoryStruck {
+  changed: boolean;
+  item: StoryItemShown;
+}
+
+// ---------------------------------------------------------------- Settle now and the bootstrap (the turn lane's, plan §10, §12)
+
+/** `POST /api/v1/chats/:chat/settle` (no body): the newest turn, and the settle run begun on it; a refusal comes in the turn's own words. */
+export interface SettleAnswer {
+  turn: string;
+  run: string;
+}
+
+/** `GET /api/v1/jobs` and `GET /api/v1/chats/:chat/jobs`: the user's jobs (of every chat, or of one) as RPH last kept each, the newest started first; a refusal ("This RPE runs no jobs.") comes in RPE's words. */
+export interface JobList {
+  jobs: JobView[];
+}
+
+/** `POST /api/v1/jobs/:job/cancel` (no body): the job as it stands after; one that had already ended comes back as it ended. */
+export interface JobCancelled {
+  job: JobView;
+}
+
+/** A fact of "done enough" that could not be read, and why, as a code: `unreadable`, its records could not be read (RPE's log has what failed). */
+export interface NotKnown {
+  known: false;
+  why: "unreadable";
+}
+
+/** A fact read from its records: its counts and names. Whether it holds is the bootstrap skill's to say, never the route's. */
+export type BootstrapFact<T> = ({ known: true } & T) | NotKnown;
+
+/** Messages from `from` to `to`, both kept, numbered from 0. */
+export interface Stretch {
+  from: number;
+  to: number;
+}
+
+/** The six facts of "done enough", in the order the bootstrap skill names them. */
+export interface DoneEnough {
+  lore: BootstrapFact<{ entries: number; indexed: number; stale: number }>;
+  history: BootstrapFact<{ messages: number; leftOut: number; covered: number; stretches: number; summarized: number; nearestUncovered: Stretch | null; nearestUnsummarized: Stretch | null }>;
+  cast: BootstrapFact<{ listed: number; cast: number; uncast: string[] }>;
+  story: BootstrapFact<{ premise: number; chapters: number; scenes: number; beats: number; threads: number; openThreads: number; arcs: number; principals: number; principalsWithArc: number; player: number }>;
+  horizon: BootstrapFact<{ entries: number; named: number; clock: boolean }>;
+  principals: BootstrapFact<{ principals: { id: string; name: string; base: string[]; memories: number }[] }>;
+}
+
+/** A bootstrap job of a chat: what it was given (the player's relive word, the token limit), and its view as RPH gives it (null: RPH no longer holds it). */
+export interface BootstrapJob {
+  id: string;
+  relive: string | null;
+  tokenLimit: number;
+  view: JobView | null;
+}
+
+/** `GET /api/v1/chats/:chat/bootstrap`: the six facts, and the chat's bootstrap jobs, oldest first. */
+export interface BootstrapChat {
+  chat: string;
+  facts: DoneEnough;
+  jobs: BootstrapJob[];
+}
+
+/** `POST /api/v1/bootstrap`: each chat started, with its job's view, and each refused, with why. */
+export interface BootstrapBatch {
+  started: { chat: string; job: JobView }[];
+  refused: { chat: string; why: string }[];
 }
 
 // ---------------------------------------------------------------- the route map the client is typed by
@@ -569,6 +885,8 @@ export type ConnectionTested = ConnectionTest & { limits: ModelLimits | null };
 export interface Routes {
   "GET /api/v1/status": RouteShape<Status>;
   "POST /api/v1/update": RouteShape<BuildsStatus>;
+  "GET /api/v1/status/builds": RouteShape<BuildsReply>;
+  "GET /api/v1/status/session": RouteShape<SessionReply>;
   "GET /api/v1/status/extension": RouteShape<ExtensionStatus>;
   "GET /api/v1/chats": RouteShape<ChatList>;
   "GET /api/v1/chats/:chat/turns": RouteShape<TurnList, { limit?: number; before?: string }>;
@@ -586,7 +904,7 @@ export interface Routes {
   "POST /api/v1/build": RouteShape<{ result: ResultMessage | ErrorMessage; pushes: DraftChanged[] }, Record<string, never>, FrontendToBackend>;
   "GET /api/v1/chats/:chat/state": RouteShape<StateView, { turn?: string }>;
   "POST /api/v1/chats/:chat/actions": RouteShape<ResultMessage | ErrorMessage, Record<string, never>, FrontendToBackend>;
-  "POST /api/v1/chats/:chat/actions/undo": RouteShape<ResultMessage | ErrorMessage, Record<string, never>, FrontendToBackend>;
+  "POST /api/v1/chats/:chat/actions/undo": RouteShape<ResultMessage | ErrorMessage, Record<string, never>, ChipRequest>;
   "GET /api/v1/files": RouteShape<TreeListing, { chat?: string }>;
   "GET /api/v1/files/*": RouteShape<TreeFileText, { chat?: string }>;
   "PUT /api/v1/files/*": RouteShape<FileWritten, Record<string, never>, FileWrite>;
@@ -603,6 +921,18 @@ export interface Routes {
   "GET /api/v1/storage/notes": RouteShape<NoteFiles, { chat: string; limit?: number }>;
   "POST /api/v1/files-prune": RouteShape<{ pruned: Pruned }, Record<string, never>, { chat: string }>;
   "GET /api/v1/files-stack": RouteShape<AgentStack, { chat: string; agent: string }>;
+  "GET /api/v1/chats/:chat/cast": RouteShape<CastList, { turn?: string }>;
+  "GET /api/v1/chats/:chat/cast/:character": RouteShape<CastCharacter, { turn?: string }>;
+  "POST /api/v1/chats/:chat/cast/:character/strike": RouteShape<CastStruck, Record<string, never>, CastStrike>;
+  "GET /api/v1/chats/:chat/story": RouteShape<StoryAnswer, { turn?: string; part?: StoryListPart; skip?: number }>;
+  "POST /api/v1/chats/:chat/story/strike": RouteShape<StoryStruck, Record<string, never>, StoryStrike>;
+  "POST /api/v1/chats/:chat/settle": RouteShape<SettleAnswer>;
+  "GET /api/v1/chats/:chat/bootstrap": RouteShape<BootstrapChat>;
+  "POST /api/v1/chats/:chat/bootstrap": RouteShape<JobView, Record<string, never>, { relive?: string }>;
+  "POST /api/v1/bootstrap": RouteShape<BootstrapBatch, Record<string, never>, { chats: string[] | "migrated"; relive?: string }>;
+  "GET /api/v1/jobs": RouteShape<JobList>;
+  "GET /api/v1/chats/:chat/jobs": RouteShape<JobList>;
+  "POST /api/v1/jobs/:job/cancel": RouteShape<JobCancelled>;
 }
 
 export type RouteKey = keyof Routes & string;

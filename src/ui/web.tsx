@@ -35,7 +35,7 @@ export function routeOfHash(hash: string): Route {
   if ((head === "files" || head === "settings" || head === "storage") && parts.length === 1) return { page: head, chat: null };
   if (head !== "chats" || chat === undefined) return { page: "chats" };
   if (page === "turns" && turn !== undefined && parts.length === 4) return { page: "turn", chat, turn };
-  if ((page === "turns" || page === "world" || page === "play" || page === "files" || page === "settings" || page === "storage") && parts.length === 3) return { page, chat };
+  if ((page === "turns" || page === "world" || page === "cast" || page === "story" || page === "play" || page === "files" || page === "settings" || page === "storage") && parts.length === 3) return { page, chat };
   return { page: "live", chat };
 }
 

@@ -1,11 +1,12 @@
 // The chat's state, from RPE (plan §14, "What happens to today's UI"). Today's panels and HUD render
 // the `StateView` today's state sync put in `App.sync`; here it is read from RPE's state route for one
 // chat and put in the same place. It is read again whenever the chat's live view says the state may
-// have changed: RPE says so (its `state` kind, which it publishes after a change made from a panel and
-// when a run of the chat ends), events were lost on the way, or following the chat began (again); and
-// when the page's own tap changed it. Nothing is read on a timer, and at most one read is out at a
-// time: what asks meanwhile is answered by one read after it. A read that fails, or live updates RPE
-// stops, is said in the client's own words until a read succeeds, and the last state read stays shown.
+// have changed: RPE says so (its `state` kind, which it publishes after a change made from a panel,
+// when a run of the chat ends, and when a turn joins the chat), events were lost on the way, or
+// following the chat began (again); and when today's page asks for the chat's view afresh, as it does
+// once it attached a world. Nothing is read on a timer, and at most one read is out at a time: what
+// asks meanwhile is answered by one read after it. A read that fails, or live updates RPE stops, is
+// said in the client's own words until a read succeeds, and the last state read stays shown.
 
 import type { SyncState } from "../../../frontend/protocol-client";
 import { createStore, type Readable } from "../../../frontend/store";
@@ -16,6 +17,8 @@ import { errorWords } from "../../words";
 export const STATE_CHANGED = "state";
 
 export interface ChatState extends Readable<SyncState> {
+  /** Reads the chat's state again. */
+  read(): void;
   /** Stops following the chat; a read still out changes nothing once it is back. */
   stop(): void;
 }
@@ -72,6 +75,7 @@ export function chatState(client: Pick<RpeClient, "call" | "follow">, chat: stri
   return {
     get: () => state.get(),
     subscribe: (listener) => state.subscribe(listener),
+    read,
     stop() {
       if (!alive) return;
       alive = false;

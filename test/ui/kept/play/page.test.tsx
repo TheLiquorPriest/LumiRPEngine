@@ -2,26 +2,23 @@
 // against recorded answers of RPE's routes (recorded.ts, bed.ts): today's HUD strip and today's Play
 // with every pack's panel, on the chat's state as RPE gives it; a newer state after the chat's live
 // view says it changed; a managing tap and its Undo, posted as today's messages; RPE's word on a tap it
-// does not serve, said once and not asked again; and nothing left behind once the page is left.
+// does not serve, said once and not asked again; an Undo's own sentence, said once; a tap or an Undo
+// refused while a turn runs, its words shown and the tap free to be made again; and nothing left
+// behind once the page is left. On RPE's own routes: served.test.tsx.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { render } from "preact";
 import { act } from "preact/test-utils";
 import { cashText } from "../../../../src/frontend/hud";
 import { UI_PACKS } from "../../../../src/frontend/packs";
-import { createStore } from "../../../../src/frontend/store";
 import { buildCatalog } from "../../../../src/frontend/ui-registry";
-import type { FrontendToBackend } from "../../../../src/shared/protocol";
+import type { ErrorMessage, FrontendToBackend } from "../../../../src/shared/protocol";
 import type { StateView } from "../../../../src/shared/state-view";
-import { AppContext, type Route, type UiApp } from "../../../../src/ui/app";
-import type { RpeClient } from "../../../../src/ui/client";
-import { PageFor } from "../../../../src/ui/frame";
-import { createGate } from "../../../../src/ui/gate";
-import { webHost } from "../../../../src/ui/kept/host";
+import { words as playWords } from "../../../play/bed";
 import { type HandTimers, handTimers } from "../bed";
 import { openPage, type Page, PageElement } from "../dom";
 import { type RecordedRpe, recordedRpe } from "./bed";
-import { appliedFix, CHAT, LATER, NO_WORLD_CHAT, recordedNoWorld, recordedView, refused, undone } from "./recorded";
+import { button, leave, openPlay, said, until, words } from "./mount";
+import { appliedFix, CHAT, LATER, recordedView, refused, undone } from "./recorded";
 
 let page: Page;
 beforeAll(() => {
@@ -34,51 +31,9 @@ afterAll(() => {
   page.close();
 });
 
-/** Lets the page draw and the recorded RPE answer until `check` holds; RPE answers in promises alone, so their turns are enough. */
-async function until(what: string, check: () => boolean): Promise<void> {
-  for (let tries = 0; tries < 60; tries++) {
-    await act(async () => {
-      for (let i = 0; i < 20; i++) await Promise.resolve();
-    });
-    if (check()) return;
-  }
-  throw new Error(`The page never showed ${what}.`);
-}
-
-const words = (el: PageElement | null): string => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
-
-/** The one enabled button in `root` that says `text`. */
-function button(root: PageElement, text: string): PageElement {
-  const found = root.querySelectorAll("button").filter((b) => words(b) === text && !b.disabled);
-  const [only] = found;
-  if (found.length !== 1 || only === undefined) throw new Error(`${found.length} buttons say “${text}”`);
-  return only;
-}
-
-function webApp(rpe: RecordedRpe, timers: HandTimers, chat: string): UiApp {
-  const route = createStore<Route>({ page: "play", chat });
-  // The page calls only `call` and `follow` of the client.
-  return { shell: "web", client: rpe.client as RpeClient, gate: createGate(), route, timers, keptHost: webHost, go: (next) => route.set(next) };
-}
-
 /** The Play page for `chat` in a fresh root, as the page switch shows it. */
 async function open(rpe: RecordedRpe, timers: HandTimers, chat = CHAT): Promise<PageElement> {
-  const root = page.document.createElement("div");
-  page.document.body.append(root);
-  await act(() => {
-    render(
-      <AppContext.Provider value={webApp(rpe, timers, chat)}>
-        <PageFor route={{ page: "play", chat }} />
-      </AppContext.Provider>,
-      root as unknown as HTMLElement,
-    );
-  });
-  return root;
-}
-
-async function leave(root: PageElement): Promise<void> {
-  await act(() => render(null, root as unknown as HTMLElement));
-  root.remove();
+  return (await openPlay(page.document, rpe.client, timers, chat)).root;
 }
 
 /** Goes to a destination of Play's bar, and to one of its tabs where it has several. */
@@ -217,12 +172,85 @@ describe("the Play page", () => {
     await leave(root);
   });
 
-  test("a chat RPE plays with no world says so in one sentence", async () => {
-    const rpe = recordedRpe(NO_WORLD_CHAT, recordedNoWorld());
-    const root = await open(rpe, handTimers(), NO_WORLD_CHAT);
-    await until("the sentence", () => root.querySelector(".lre-empty") !== null);
-    expect(words(root.querySelector(".lre-empty"))).toBe("This chat has no world to play.");
-    expect(root.querySelector(".lre-play")).toBeNull();
+  test("an Undo whose answer says what it left as it was shows that sentence once, in the page's notice line, and as no toast", async () => {
+    const worn = recordedView({ gear: 3 });
+    const takenOff = recordedView({ gear: 3, off: ["leather_boots"] });
+    const rpe = recordedRpe(CHAT, worn);
+    const left = playWords("opened_stay");
+    const changeTo = (next: StateView): void => {
+      rpe.state = next;
+      queueMicrotask(() => rpe.publish([{ kind: "state", data: {} }]));
+    };
+    let taps = 0;
+    rpe.answer = (route, message) => {
+      if (route === ACTIONS && message.type === "lre.fix") {
+        changeTo(takenOff);
+        taps += 1;
+        return appliedFix(message.reqId, `tap:turn-1:${taps}`);
+      }
+      if (route === UNDO) {
+        changeTo(worn);
+        return { ...undone(message.reqId), body: { applied: true, pending: false, said: left } };
+      }
+      return refused(message.reqId, NOT_SERVED);
+    };
+    const root = await open(rpe, handTimers());
+    await until("Play", () => root.querySelector(".lre-play .lre-bottomnav") !== null);
+    await goTo(root, "Me", "Belongings");
+    const boots = (): PageElement | null => root.querySelector('[data-lre-bel-row="leather_boots"]');
+    for (let round = 0; round < 2; round++) {
+      await until("the boots, worn", () => boots()?.getAttribute("data-lre-bel-at") === "wearing");
+      await act(() => button(boots() as PageElement, "Take off").click());
+      await until("the Undo", () => root.querySelectorAll("button").some((b) => words(b) === "Undo"));
+      await act(() => button(root, "Undo").click());
+      await until("the Undo's sentence and the boots worn again", () => said(root).includes(left) && boots()?.getAttribute("data-lre-bel-at") === "wearing");
+    }
+    expect(sent(rpe, UNDO)).toHaveLength(2);
+    expect(said(root).filter((sentence) => sentence === left)).toHaveLength(1);
+    expect(root.querySelectorAll(".lre-toast")).toHaveLength(0);
+    await leave(root);
+  });
+
+  test("a tap or an Undo refused while a turn runs or as not whole shows RPE's words, and the same tap can be made again", async () => {
+    const worn = recordedView({ gear: 3 });
+    const takenOff = recordedView({ gear: 3, off: ["leather_boots"] });
+    const rpe = recordedRpe(CHAT, worn);
+    const running = playWords("turn_running");
+    const notWhole = playWords("no_undo_for", { parts: "economy.txn" });
+    const conflict = (reqId: string, message: string): ErrorMessage => ({ lre: 1, type: "lre.error", reqId, code: "conflict", message });
+    let turning = true;
+    rpe.answer = (route, message) => {
+      if (route === ACTIONS && message.type === "lre.fix") {
+        if (turning) return conflict(message.reqId, running);
+        rpe.state = takenOff;
+        queueMicrotask(() => rpe.publish([{ kind: "state", data: {} }]));
+        return appliedFix(message.reqId, "tap:turn-2:1");
+      }
+      if (route === UNDO) return conflict(message.reqId, notWhole);
+      return refused(message.reqId, NOT_SERVED);
+    };
+    const root = await open(rpe, handTimers());
+    const toasts = (): string[] => root.querySelectorAll(".lre-toast").map(words);
+    await until("Play", () => root.querySelector(".lre-play .lre-bottomnav") !== null);
+    await goTo(root, "Me", "Belongings");
+    const boots = (): PageElement | null => root.querySelector('[data-lre-bel-row="leather_boots"]');
+    await until("the boots, worn", () => boots() !== null);
+    await act(() => button(boots() as PageElement, "Take off").click());
+    await until("RPE's words on the running turn", () => toasts().some((text) => text.includes(running)));
+    expect(boots()?.getAttribute("data-lre-bel-at")).toBe("wearing");
+
+    turning = false;
+    await until("Take off, free again", () => boots()?.querySelectorAll("button").some((b) => words(b) === "Take off" && !b.disabled) === true);
+    await act(() => button(boots() as PageElement, "Take off").click());
+    await until("the boots taken off, and the Undo", () => boots()?.getAttribute("data-lre-bel-at") === "carried" && root.querySelectorAll("button").some((b) => words(b) === "Undo"));
+    expect(sent(rpe, ACTIONS).filter((message) => message.type === "lre.fix")).toHaveLength(2);
+    await act(() => button(root, "Undo").click());
+    await until("RPE's words on the Undo", () => toasts().some((text) => text.includes(notWhole)));
+    // Nothing was undone: the boots stay off, and the Undo stays offered.
+    expect(boots()?.getAttribute("data-lre-bel-at")).toBe("carried");
+    expect(root.querySelectorAll("button").some((b) => words(b) === "Undo")).toBe(true);
+    // Neither is taken for something RPE does not serve.
+    expect(said(root).filter((sentence) => sentence === running || sentence === notWhole)).toEqual([]);
     await leave(root);
   });
 

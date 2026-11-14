@@ -53,7 +53,7 @@ export const TEXTS: Readonly<Record<string, string>> = {
 const bytes = (path: string): number => new TextEncoder().encode(TEXTS[path] ?? "").length;
 
 function file(path: string, level: LayerLevel, over: Partial<TreeFileEntry> = {}): TreeFileEntry {
-  return { path, level, kind: "yours", bytes: bytes(path), item: null, applies: true, replacedBy: null, off: false, editable: level !== "shipped", shipped: null, defaultChanged: null, ...over };
+  return { path, level, kind: "yours", bytes: bytes(path), item: null, applies: true, replacedBy: null, off: false, offIn: [], editable: level !== "shipped", shipped: null, defaultChanged: null, ...over };
 }
 
 /** The chat's view of the tree, as `GET /api/v1/files?chat=` lists it. */
@@ -61,7 +61,7 @@ export const FILES: TreeFileEntry[] = [
   file("@shipped/TURN.md", "shipped", { item: "TURN", applies: false, replacedBy: "@global/TURN.md" }),
   file("@shipped/WORLD.md", "shipped", { item: "WORLD", applies: false, replacedBy: "WORLD.md" }),
   file("@shipped/WRITING.md", "shipped", { item: "WRITING" }),
-  file("@shipped/rules/perceptions.md", "shipped", { item: "rules/perceptions", applies: false, off: true }),
+  file("@shipped/rules/perceptions.md", "shipped", { item: "rules/perceptions", applies: false, off: true, offIn: ["global"] }),
   file("@shipped/rules/examples/weather.md", "shipped", { item: "rules/examples/weather", applies: false }),
   file("@shipped/.agents/author.md", "shipped", { item: "agents/author" }),
   file("@shipped/.agents/gm.md", "shipped", { item: "agents/gm" }),

@@ -1,11 +1,13 @@
-// The web shell's first page: the chats RPE plays, the most recently played first. In Lumiverse's drawer
-// the chat is the one Lumiverse shows, so this page is the web shell's alone.
+// The web shell's first page: the chats RPE plays, the most recently played first, and the user's jobs
+// of every chat, with Cancel. In Lumiverse's drawer the chat is the one Lumiverse shows, so this page is
+// the web shell's alone.
 
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { ChatSummary } from "../api";
 import { useApp } from "../app";
 import { Badge, Banner, Button, Empty, PageHeader } from "../atoms";
 import { errorWords, when } from "../words";
+import { type JobsReader, type JobsShown, JobsView, NO_JOBS, readJobs } from "./jobs";
 
 export interface ChatsViewProps {
   chats: readonly ChatSummary[] | null;
@@ -14,6 +16,8 @@ export interface ChatsViewProps {
   /** The chat's panels, on the Play page: offered beside every chat the list does not say has no world (Play says so of one that has none). */
   onPlay(chat: string): void;
   onRead(): void;
+  /** The user's jobs of every chat, with Cancel. */
+  jobs?: { shown: JobsShown; onCancel(job: string): void };
 }
 
 export function ChatsView(props: ChatsViewProps) {
@@ -57,6 +61,7 @@ export function ChatsView(props: ChatsViewProps) {
           </ul>
         </div>
       )}
+      {props.jobs === undefined ? null : <JobsView shown={props.jobs.shown} everyChat onCancel={props.jobs.onCancel} />}
     </div>
   );
 }
@@ -78,5 +83,22 @@ export function ChatsPage() {
       alive = false;
     };
   }, [state.reads]);
-  return <ChatsView chats={state.chats} problem={state.problem} onOpen={(chat) => app.go({ page: "live", chat })} onPlay={(chat) => app.go({ page: "play", chat })} onRead={() => setState((s) => ({ ...s, reads: s.reads + 1 }))} />;
+  const [jobs, setJobs] = useState<JobsShown>(NO_JOBS);
+  const jobsReader = useRef<JobsReader | null>(null);
+  useEffect(() => {
+    // Read when the page opens, again on Try again, and after a Cancel.
+    const reading = readJobs(app.client, null, setJobs);
+    jobsReader.current = reading;
+    return () => reading.stop();
+  }, [state.reads]);
+  return (
+    <ChatsView
+      chats={state.chats}
+      problem={state.problem}
+      onOpen={(chat) => app.go({ page: "live", chat })}
+      onPlay={(chat) => app.go({ page: "play", chat })}
+      onRead={() => setState((s) => ({ ...s, reads: s.reads + 1 }))}
+      jobs={{ shown: jobs, onCancel: (job) => jobsReader.current?.cancel(job) }}
+    />
+  );
 }

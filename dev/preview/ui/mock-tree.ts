@@ -22,9 +22,10 @@ const texts = new Map([...Object.entries(TEXTS), ...Object.entries(IMPORTED)]);
 let storage: TreeStorage = structuredClone(STORAGE);
 let files: TreeFileEntry[] = [
   ...FILES.map((f) => ({ ...f })),
-  ...Object.entries(IMPORTED).map(([path, text]): TreeFileEntry => ({ path, level: "global", kind: "yours", bytes: new TextEncoder().encode(text).length, item: null, applies: true, replacedBy: null, off: false, editable: true, shipped: null, defaultChanged: null })),
+  ...Object.entries(IMPORTED).map(([path, text]): TreeFileEntry => ({ path, level: "global", kind: "yours", bytes: new TextEncoder().encode(text).length, item: null, applies: true, replacedBy: null, off: false, offIn: [], editable: true, shipped: null, defaultChanged: null })),
 ];
-const offNames = new Set(FILES.flatMap((f) => (f.off && f.item !== null ? [f.item] : [])));
+/** Each name switched off, with the levels whose `off:` list names it. */
+const offNames = new Map<string, LayerLevel[]>(FILES.flatMap((f) => (f.off && f.item !== null ? [[f.item, [...f.offIn]] as const] : [])));
 const suggestions: TreeSuggestionView[] = SUGGESTIONS.map((s) => ({ ...s }));
 
 /** Where a level's files sit in the chat's view; the chat's own sit at its top. */
@@ -41,9 +42,10 @@ function relist(): void {
   files = files.map((f) => {
     if (f.item === null) return f;
     const nearest = files.filter((g) => g.item === f.item).sort((a, b) => NEAREST_FIRST.indexOf(a.level) - NEAREST_FIRST.indexOf(b.level))[0];
-    const off = offNames.has(f.item);
+    const offIn = offNames.get(f.item) ?? [];
+    const off = offIn.length > 0;
     const shipped = `${PREFIXES.shipped}${placeOf(f.path).rest}`;
-    return { ...f, off, applies: !off && nearest?.path === f.path, replacedBy: nearest === undefined || nearest.path === f.path ? null : nearest.path, shipped: f.level !== "shipped" && texts.has(shipped) ? shipped : null };
+    return { ...f, off, offIn, applies: !off && nearest?.path === f.path, replacedBy: nearest === undefined || nearest.path === f.path ? null : nearest.path, shipped: f.level !== "shipped" && texts.has(shipped) ? shipped : null };
   });
 }
 
@@ -121,13 +123,15 @@ export async function treeAnswer(request: Request, url: URL): Promise<Response |
   }
   if (path.startsWith("/api/v1/files-off/") && method === "PUT") {
     const at = pathAfter(path, "/api/v1/files-off/");
-    const body = (await request.json().catch(() => null)) as { off?: unknown } | null;
+    const body = (await request.json().catch(() => null)) as { off?: unknown; level?: unknown } | null;
     const entry = files.find((f) => f.path === at);
     if (entry === undefined) return answer(404, { error: `The tree has no file ${at}.` });
     if (typeof body?.off !== "boolean") return answer(400, { error: "`off` is true to switch the file off, false to switch it on again." });
     if (entry.item === null) return answer(400, { error: `${at} is not a file RPH takes by its name, so no \`off:\` list can name it.` });
-    if (body.off) offNames.add(entry.item);
-    else offNames.delete(entry.item);
+    const level = body.level === "chat" ? "chat" : "global";
+    // As RPE's route: the level's own list gains or loses the name; another level's list is left as it is.
+    const lists = (offNames.get(entry.item) ?? []).filter((l) => l !== level);
+    offNames.set(entry.item, body.off ? [...lists, level] : lists);
     relist();
     return answer(200, { file: files.find((f) => f.path === at) ?? null });
   }

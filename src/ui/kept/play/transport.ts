@@ -1,10 +1,12 @@
 // Today's frontend reaches its backend through two calls, send a message and hear messages
 // (`frontend/protocol-client.ts`, `Transport`). On the Play page they reach RPE's routes for the
 // chat the page shows, by whichever road the page's client is on: an Undo (`lre.chip` with the
-// choice `undo`) is posted to `POST /api/v1/chats/:chat/actions/undo`, every other message to
-// `POST /api/v1/chats/:chat/actions`, each as it is; what RPE answers, today's `lre.result` or
-// `lre.error`, is handed to whoever hears. A call the client could not make is answered as today's
-// backend answers what it cannot do: an `lre.error` coded `unavailable`, in the client's own words.
+// choice `undo`) is posted to `POST /api/v1/chats/:chat/actions/undo`, a world's message (`lre.world`:
+// the worlds a chat with none can be given, and Attach) to Build's route `POST /api/v1/build`, which
+// serves them, every other message to `POST /api/v1/chats/:chat/actions`, each as it is; what RPE
+// answers, today's `lre.result` or `lre.error`, is handed to whoever hears. A call the client could
+// not make is answered as today's backend answers what it cannot do: an `lre.error` coded
+// `unavailable`, in the client's own words.
 //
 // What RPE answers `unavailable` it does not serve: the same message is not sent again while the
 // page shows, and the transport answers it with RPE's own answer. What a done tap changed comes as the
@@ -43,8 +45,9 @@ export function playTransport(client: Pick<RpeClient, "call">, chat: string): Pl
         });
         return;
       }
-      const route = message.type === "lre.chip" && message.choice === "undo" ? "POST /api/v1/chats/:chat/actions/undo" : "POST /api/v1/chats/:chat/actions";
-      client.call(route, { chat }, { body: message }).then(
+      // Build's route answers with the pushes the request caused too: drafts' changes, which Play does not show.
+      const answered = message.type === "lre.world" ? client.call("POST /api/v1/build", {}, { body: message }).then((answer) => answer.result) : client.call(message.type === "lre.chip" && message.choice === "undo" ? "POST /api/v1/chats/:chat/actions/undo" : "POST /api/v1/chats/:chat/actions", { chat }, { body: message });
+      answered.then(
         (answer) => {
           if (closed) return;
           if (answer.type === "lre.error" && answer.code === "unavailable") refusals.set(key, answer);

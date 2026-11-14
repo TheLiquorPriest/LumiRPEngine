@@ -83,9 +83,16 @@ function limitsOf(field: ReadonlyMap<string, string>, model: string | null, was:
   return Object.keys(own).length === 0 ? null : own;
 }
 
-/** The form that adds a connection (`was` null) or changes one. Its key field starts empty: RPE never sends a key back. */
-function ConnectionForm(props: { was: ConnectionShown | null; providers: readonly ProviderOffer[]; saving: boolean; refusal: string | null; onSave(save: SaveConnection): void; onCancel(): void }) {
-  const { was } = props;
+/** The limit fields' text for `model`: the user's own entry for it on the connection, else empty. */
+export function limitFieldsFor(was: ConnectionShown | null, model: string): { contextWindow: string; maxTokens: string } {
+  const entry = model === "" ? undefined : was?.limits?.[model];
+  return { contextWindow: String(entry?.contextWindow ?? ""), maxTokens: String(entry?.maxTokens ?? "") };
+}
+
+/** The form that adds a connection (`was` null) or changes one. Its key field starts empty: RPE never sends a key back. `fill` starts the limit fields with figures a test found, for the player to save or not. */
+function ConnectionForm(props: { was: ConnectionShown | null; fill?: ModelLimitsEntry; providers: readonly ProviderOffer[]; saving: boolean; refusal: string | null; onSave(save: SaveConnection): void; onCancel(): void }) {
+  const { was, fill } = props;
+  const start = limitFieldsFor(was, was?.model ?? "");
   return (
     <form
       class="lre-section lre-stack rpe-form"
@@ -130,7 +137,22 @@ function ConnectionForm(props: { was: ConnectionShown | null; providers: readonl
         </label>
         <label class="lre-field">
           <span class="label">Model</span>
-          <input name="model" class="lre-input" defaultValue={was?.model ?? ""} autoComplete="off" spellcheck={false} />
+          <input
+            name="model"
+            class="lre-input"
+            defaultValue={was?.model ?? ""}
+            autoComplete="off"
+            spellcheck={false}
+            onInput={(event) => {
+              // The limit fields are for the model named here: another model's figures are not carried over to it.
+              const input = event.currentTarget;
+              const fields = limitFieldsFor(was, input.value.trim());
+              for (const name of ["contextWindow", "maxTokens"] as const) {
+                const field = input.form?.elements.namedItem(name) as HTMLInputElement | null | undefined;
+                if (field != null) field.value = fields[name];
+              }
+            }}
+          />
           <span class="lre-field-help">For an agent whose definition names none.</span>
         </label>
         <label class="lre-field">
@@ -160,14 +182,15 @@ function ConnectionForm(props: { was: ConnectionShown | null; providers: readonl
         </label>
         <label class="lre-field">
           <span class="label">Context window</span>
-          <input name="contextWindow" class="lre-input" type="number" inputMode="numeric" defaultValue={String(was?.model === undefined ? "" : (was.limits?.[was.model]?.contextWindow ?? ""))} autoComplete="off" />
+          <input name="contextWindow" class="lre-input" type="number" inputMode="numeric" defaultValue={fill?.contextWindow === undefined ? start.contextWindow : String(fill.contextWindow)} autoComplete="off" />
           <span class="lre-field-help">In tokens, for its model, in place of the figure RPH would use. Leave it empty to use that figure.</span>
         </label>
         <label class="lre-field">
           <span class="label">Longest reply</span>
-          <input name="maxTokens" class="lre-input" type="number" inputMode="numeric" defaultValue={String(was?.model === undefined ? "" : (was.limits?.[was.model]?.maxTokens ?? ""))} autoComplete="off" />
+          <input name="maxTokens" class="lre-input" type="number" inputMode="numeric" defaultValue={fill?.maxTokens === undefined ? start.maxTokens : String(fill.maxTokens)} autoComplete="off" />
           <span class="lre-field-help">In tokens, for its model, in place of the figure RPH would use. Leave it empty to use that figure.</span>
         </label>
+        {fill === undefined ? null : <p class="rpe-meta" data-filled="true">The two limits are filled in from the test. Save to take them as this connection's own; nothing is written until you do.</p>}
         <label class="lre-field">
           <span class="label">Key</span>
           <input name="key" class="lre-input" type="password" defaultValue="" autoComplete="off" spellcheck={false} />
@@ -193,7 +216,7 @@ function ConnectionForm(props: { was: ConnectionShown | null; providers: readonl
 }
 
 /** What the page is doing besides showing the list: a form open (adding when its id is null), a removal waiting for its yes. */
-export type ConnectionsAction = { kind: "none" } | { kind: "form"; id: string | null } | { kind: "remove"; id: string };
+export type ConnectionsAction = { kind: "none" } | { kind: "form"; id: string | null; fill?: ModelLimitsEntry } | { kind: "remove"; id: string };
 
 /** A connection's test: under way, what came of it, or RPE's refusal to make it, in its words. */
 export type ConnectionTestShown = { busy: true } | { busy: false; tested: ConnectionTested; problem: null } | { busy: false; tested: null; problem: string };
@@ -225,9 +248,14 @@ export interface ConnectionsViewProps {
   onTest(id: string): void;
 }
 
-/** What came of a connection's test: the model that answered and its limits, or the provider's words. */
-function TestShown(props: { test: ConnectionTestShown }) {
-  const { test } = props;
+/**
+ * What came of a connection's test: the model that answered and its limits, or the provider's words.
+ * Where the provider answered as another model than the connection names, and the catalogue lists
+ * limits for it, it says so and offers them as the connection's own: `onTake` opens the form with them
+ * filled in, and writes nothing.
+ */
+function TestShown(props: { test: ConnectionTestShown; view: ConnectionShown; onTake(fill: ModelLimitsEntry): void }) {
+  const { test, view } = props;
   if (test.busy) return <p class="lre-muted rpe-line">Testing…</p>;
   if (test.problem !== null) {
     return (
@@ -244,7 +272,22 @@ function TestShown(props: { test: ConnectionTestShown }) {
       </Banner>
     );
   }
-  return <p class="rpe-line" data-tested="ok">{`It answered in ${duration(tested.ms)}, as ${tested.model}. ${limitsWords(tested.limits)}.`}</p>;
+  const limits = tested.limits;
+  const fill: ModelLimitsEntry = { ...(limits?.contextWindow == null ? {} : { contextWindow: limits.contextWindow.tokens }), ...(limits?.maxTokens == null ? {} : { maxTokens: limits.maxTokens.tokens }) };
+  const other = view.model !== undefined && view.model !== null && tested.model !== view.model && Object.keys(fill).length > 0;
+  return (
+    <div class="lre-stack">
+      <p class="rpe-line" data-tested="ok">{`It answered in ${duration(tested.ms)}, as ${tested.model}. ${limitsWords(tested.limits)}.`}</p>
+      {other ? (
+        <div class="lre-inline rpe-wrap" data-offer="limits">
+          <span class="rpe-meta">{`The provider answered as ${tested.model}, not ${view.model}, so RPH does not use these figures for this connection unless you take them as its own.`}</span>
+          <Button small onClick={() => props.onTake(fill)}>
+            Take these limits
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function ConnectionRow(props: { view: ConnectionShown; action: ConnectionsAction; test: ConnectionTestShown | undefined; onAction(action: ConnectionsAction): void; onRemove(id: string): void; onDefault(id: string): void; onTest(id: string): void }) {
@@ -288,7 +331,7 @@ function ConnectionRow(props: { view: ConnectionShown; action: ConnectionsAction
             </Button>
           </div>
         )}
-        {props.test === undefined ? null : <TestShown test={props.test} />}
+        {props.test === undefined ? null : <TestShown test={props.test} view={view} onTake={(fill) => props.onAction({ kind: "form", id: view.id, fill })} />}
       </div>
     </li>
   );
@@ -321,7 +364,7 @@ export function ConnectionsView(props: ConnectionsViewProps) {
           <span>{props.refusal}</span>
         </Banner>
       )}
-      {editing === null || list === null ? null : <ConnectionForm key={editing.id ?? "new"} was={was} providers={list.providers} saving={props.saving} refusal={props.refusal} onSave={(save) => props.onSave(save, editing.id)} onCancel={() => props.onAction({ kind: "none" })} />}
+      {editing === null || list === null ? null : <ConnectionForm key={`${editing.id ?? "new"}:${JSON.stringify(editing.fill ?? null)}`} was={was} fill={editing.fill} providers={list.providers} saving={props.saving} refusal={props.refusal} onSave={(save) => props.onSave(save, editing.id)} onCancel={() => props.onAction({ kind: "none" })} />}
       {list === null ? (
         props.loading ? (
           <p class="lre-muted rpe-line">Reading the connections…</p>

@@ -8,16 +8,22 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionStatus as SentExtensionStatus } from "../../src/adapter/lumiverse/pipe-wire";
-import { type App, appRoutes, dataPaths, lineLog, openApp, route, type RouteBody, type RouteReply } from "../../src/app";
+import { type App, appRoutes, dataPaths, LIVE_TOKEN_ENDED as SENT_TOKEN_ENDED, lineLog, openApp, route, type RouteBody, type RouteReply, SESSION_PATH as SENT_SESSION_PATH } from "../../src/app";
 import { configOf } from "../../src/app/config";
 import { connectionRoutes } from "../../src/app/connections";
 import { settingsRoutes } from "../../src/app/settings-routes";
+import { buildRoutes } from "../../src/build/routes";
+import { castRoutes } from "../../src/cast";
 import { migrateRoutes } from "../../src/migrate/routes";
+import { playRoutes } from "../../src/play/routes";
+import { storyRoutes } from "../../src/story";
+import { type BootstrapChat, type BootstrapStart, bootstrapRoutes } from "../../src/turn/bootstrap";
 import { turnRoutes } from "../../src/turn/routes";
 import { type TreeFileDiff as SentFileDiff, type TreeFileEntry as SentFileEntry, type TreeFileText as SentFileText, treeRoutes } from "../../src/tree";
-import type { LiveEvent, Routes, TurnList } from "../../src/ui/api";
-import { createClient, type RpeClient, RpeError, webConnector } from "../../src/ui/client";
+import { type LiveEvent, LIVE_TOKEN_ENDED, type Routes, SESSION_PATH, type TurnList } from "../../src/ui/api";
+import { createClient, KEY_LET_GO, type RpeClient, RpeError, webConnector } from "../../src/ui/client";
 import { applyLive, EMPTY_LIVE } from "../../src/ui/live-model";
+import { readSession } from "../../src/ui/pages/builds";
 import { browserDeps, probeDirect } from "../../src/ui/roads";
 import { CHAT, RECORDED, RECORDS, turnListAt, USER } from "./recorded";
 
@@ -38,7 +44,10 @@ const replies: [
   Same<Routes["GET /api/v1/chats/:chat/turns/:turn/files"]["reply"], TurnReply<"/api/v1/chats/:chat/turns/:turn/files">>,
   Same<Routes["GET /api/v1/chats/:chat/world"]["reply"], TurnReply<"/api/v1/chats/:chat/world">>,
   Same<Routes["GET /api/v1/status/extension"]["reply"], SentExtensionStatus>,
-] = [true, true, true, true, true, true, true];
+  Same<Routes["GET /api/v1/jobs"]["reply"], TurnReply<"/api/v1/jobs">>,
+  Same<Routes["GET /api/v1/chats/:chat/jobs"]["reply"], TurnReply<"/api/v1/chats/:chat/jobs">>,
+  Same<Routes["POST /api/v1/jobs/:job/cancel"]["reply"], TurnReply<"/api/v1/jobs/:job/cancel">>,
+] = [true, true, true, true, true, true, true, true, true, true];
 /** The routes of the turn lane's the pages call. */
 const TURN_KEYS = [
   "GET /api/v1/chats",
@@ -48,6 +57,9 @@ const TURN_KEYS = [
   "GET /api/v1/chats/:chat/turns/:turn/files",
   "GET /api/v1/chats/:chat/turns/:turn/files/*",
   "GET /api/v1/chats/:chat/world",
+  "GET /api/v1/jobs",
+  "GET /api/v1/chats/:chat/jobs",
+  "POST /api/v1/jobs/:job/cancel",
 ] as const satisfies readonly (keyof Routes)[];
 
 /** The connection routes, by their place in their table: two share a path there, so the test below holds each place to its method and path. */
@@ -108,14 +120,60 @@ const settings: [
   Same<Routes["PUT /api/v1/settings"]["body"], RouteBody<SettingsTable[1]>>,
 ] = [true, true, true];
 
-/** The migration's route, and what the page reads of its reply: all of it but the report whole (shown as its printed text), what today's build put in Lumiverse, and what was carried of each chat. */
+/** The migration's route, and what the page reads of its reply: all of it but the rest of the report (shown as its printed text) beside what became of each world in Build, what today's build put in Lumiverse, and what was carried of each chat. */
 type SentMigration = RouteReply<ReturnType<typeof migrateRoutes>[0]>;
-const migration: [Same<Routes["GET /api/v1/migration"]["reply"], Omit<SentMigration, "report" | "lumiverse" | "chats"> & { chats: Omit<SentMigration["chats"][number], "carried">[] }>] = [true];
+const migration: [
+  Same<Routes["GET /api/v1/migration"]["reply"], Omit<SentMigration, "report" | "lumiverse" | "chats"> & { report: Pick<NonNullable<SentMigration["report"]>, "worldsInBuild"> | null; chats: Omit<SentMigration["chats"][number], "carried">[] }>,
+] = [true];
 
-/** The app's own routes the pages call, by their place in its table: its status, with its builds, and "Update now". The status handler's `name` comes out as any string, where the page holds it to "rpe". */
+/** The app's own routes the pages call, by their place in its table: its public status, "Update now", its builds, and the page's session. The handlers' `name` comes out as any string, where the page holds it to "rpe". */
 type AppTable = ReturnType<typeof appRoutes>;
-const APP_KEYS = ["GET /api/v1/status", "POST /api/v1/update"] as const satisfies readonly (keyof Routes)[];
-const appReplies: [Same<Omit<Routes["GET /api/v1/status"]["reply"], "name">, Omit<RouteReply<AppTable[0]>, "name">>, Same<Routes["POST /api/v1/update"]["reply"], RouteReply<AppTable[1]>>] = [true, true];
+const APP_KEYS = ["GET /api/v1/status", "POST /api/v1/update", "GET /api/v1/status/builds", "GET /api/v1/status/session"] as const satisfies readonly (keyof Routes)[];
+const appReplies: [
+  Same<Omit<Routes["GET /api/v1/status"]["reply"], "name">, Omit<RouteReply<AppTable[0]>, "name">>,
+  Same<Routes["POST /api/v1/update"]["reply"], RouteReply<AppTable[1]>>,
+  Same<Omit<Routes["GET /api/v1/status/builds"]["reply"], "name">, Omit<RouteReply<AppTable[2]>, "name">>,
+  Same<Routes["GET /api/v1/status/session"]["reply"], RouteReply<AppTable[3]>>,
+] = [true, true, true, true];
+
+/** The Cast and Story pages' routes, by their place in their tables; the strike routes read their bodies in the handler, so only the replies compare. */
+type CastTable = ReturnType<typeof castRoutes>;
+type StoryTable = ReturnType<typeof storyRoutes>;
+const CAST_KEYS = ["GET /api/v1/chats/:chat/cast", "GET /api/v1/chats/:chat/cast/:character", "POST /api/v1/chats/:chat/cast/:character/strike"] as const satisfies readonly (keyof Routes)[];
+const STORY_KEYS = ["GET /api/v1/chats/:chat/story", "POST /api/v1/chats/:chat/story/strike"] as const satisfies readonly (keyof Routes)[];
+const records: [
+  Same<Routes["GET /api/v1/chats/:chat/cast"]["reply"], RouteReply<CastTable[0]>>,
+  Same<Routes["GET /api/v1/chats/:chat/cast/:character"]["reply"], RouteReply<CastTable[1]>>,
+  Same<Routes["POST /api/v1/chats/:chat/cast/:character/strike"]["reply"], RouteReply<CastTable[2]>>,
+  Same<Routes["GET /api/v1/chats/:chat/story"]["reply"], RouteReply<StoryTable[0]>>,
+  Same<Routes["POST /api/v1/chats/:chat/story/strike"]["reply"], RouteReply<StoryTable[1]>>,
+  Same<Routes["POST /api/v1/chats/:chat/settle"]["reply"], TurnReply<"/api/v1/chats/:chat/settle">>,
+] = [true, true, true, true, true, true];
+
+/** The bootstrap's routes: its table is not a tuple and its route's method is not kept as a literal, so they are found by path; two share one, and each of those is held to the jobs' own type as well. */
+type BootstrapReply<P extends string> = RouteReply<Extract<ReturnType<typeof bootstrapRoutes>[number], { path: P }>>;
+const BOOTSTRAP_KEYS = ["POST /api/v1/chats/:chat/bootstrap", "GET /api/v1/chats/:chat/bootstrap", "POST /api/v1/bootstrap"] as const satisfies readonly (keyof Routes)[];
+const bootstrap: [
+  Same<Routes["POST /api/v1/chats/:chat/bootstrap"]["reply"] | Routes["GET /api/v1/chats/:chat/bootstrap"]["reply"], BootstrapReply<"/api/v1/chats/:chat/bootstrap">>,
+  Same<Routes["POST /api/v1/chats/:chat/bootstrap"]["reply"], Extract<BootstrapStart, { started: unknown }>["started"]>,
+  Same<Routes["GET /api/v1/chats/:chat/bootstrap"]["reply"], BootstrapChat>,
+  Same<Routes["POST /api/v1/bootstrap"]["reply"], BootstrapReply<"/api/v1/bootstrap">>,
+] = [true, true, true, true];
+
+/** Build's route and the Play page's three, by their place in their tables: the kept pages send today's messages whole and take today's answers, so the pages' types are held to what the routes take and give. */
+type BuildTable = ReturnType<typeof buildRoutes>;
+type PlayTable = ReturnType<typeof playRoutes>;
+const BUILD_KEYS = ["POST /api/v1/build"] as const satisfies readonly (keyof Routes)[];
+const PLAY_KEYS = ["GET /api/v1/chats/:chat/state", "POST /api/v1/chats/:chat/actions", "POST /api/v1/chats/:chat/actions/undo"] as const satisfies readonly (keyof Routes)[];
+const kept: [
+  Same<Routes["POST /api/v1/build"]["reply"], RouteReply<BuildTable[0]>>,
+  Same<Routes["POST /api/v1/build"]["body"], RouteBody<BuildTable[0]>>,
+  Same<Routes["GET /api/v1/chats/:chat/state"]["reply"], RouteReply<PlayTable[0]>>,
+  Same<Routes["POST /api/v1/chats/:chat/actions"]["reply"], RouteReply<PlayTable[1]>>,
+  Same<Routes["POST /api/v1/chats/:chat/actions"]["body"], RouteBody<PlayTable[1]>>,
+  Same<Routes["POST /api/v1/chats/:chat/actions/undo"]["reply"], RouteReply<PlayTable[2]>>,
+  Same<Routes["POST /api/v1/chats/:chat/actions/undo"]["body"], RouteBody<PlayTable[2]>>,
+] = [true, true, true, true, true, true, true];
 
 const turnsRoute = route({
   method: "GET",
@@ -190,11 +248,28 @@ describe("the pages' route map, against the routes themselves", () => {
     expect(migration.every((same) => same)).toBe(true);
   });
 
-  test("the app's status and its \"Update now\" sit at their places in its table, with the method and path the pages call them by", () => {
+  test("the app's status, its \"Update now\", its builds and the page's session sit at their places in its table, with the method and path the pages call them by", () => {
     // The handlers reach the auth and the builds only when a request comes.
     const table = appRoutes("1.0.0", 0, undefined as never, null, undefined as never).map((r) => `${r.method} ${r.path}`);
-    expect(table.slice(0, 2)).toEqual([...APP_KEYS]);
+    expect(table.slice(0, 4)).toEqual([...APP_KEYS]);
     expect(appReplies.every((same) => same)).toBe(true);
+  });
+
+  test("the Cast, Story, Settle now and bootstrap routes sit at their places in their tables, with the methods and paths the pages call them by", () => {
+    // The handlers reach the store, the turn lane and the jobs only when a request comes.
+    expect(castRoutes(undefined as never).map((r) => `${r.method} ${r.path}`)).toEqual([...CAST_KEYS]);
+    expect(storyRoutes(undefined as never).map((r) => `${r.method} ${r.path}`)).toEqual([...STORY_KEYS]);
+    const turns = turnRoutes({ turns: undefined as never, chatName: async () => null }).map((r) => `${r.method} ${r.path}`);
+    expect(turns.filter((at) => at.endsWith(" /api/v1/chats/:chat/settle"))).toEqual(["POST /api/v1/chats/:chat/settle"]);
+    expect(bootstrapRoutes(undefined as never).map((r) => `${r.method} ${r.path}`)).toEqual([...BOOTSTRAP_KEYS]);
+    expect(records.every((same) => same) && bootstrap.every((same) => same)).toBe(true);
+  });
+
+  test("Build's route and the Play page's three sit at their places in their tables, with the methods and paths the kept pages call them by", () => {
+    // The handlers reach Build's service and the play service only when a request comes.
+    expect(buildRoutes(undefined as never).map((r) => `${r.method} ${r.path}`)).toEqual([...BUILD_KEYS]);
+    expect(playRoutes(undefined as never).map((r) => `${r.method} ${r.path}`)).toEqual([...PLAY_KEYS]);
+    expect(kept.every((same) => same)).toBe(true);
   });
 });
 
@@ -217,12 +292,26 @@ describe("the direct road, against RPE's own server", () => {
     expect(client.state.get()).toEqual({ phase: "direct", address: base });
   });
 
-  test("a token RPE does not take signs the web shell out, in RPE's words", async () => {
-    const client = webClient("rpw_not-a-key");
+  test("a key RPE does not take signs the web shell out, in RPE's words and with why, and this browser lets it go", async () => {
+    let held: string | null = "rpw_not-a-key";
+    const client = createClient(webConnector(base, { get: () => held, set: (next) => (held = next) }, browserDeps()));
+    clients.push(client);
     const error = await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(RpeError);
     expect((error as RpeError).status).toBe(401);
-    expect(client.state.get()).toEqual({ phase: "signed-out", error: "This needs a page token or the web UI's token." });
+    expect(client.state.get()).toEqual({ phase: "signed-out", error: `This needs a page token or the web UI's token. ${KEY_LET_GO}` });
+    expect(held).toBeNull();
+  });
+
+  test("the page's session says whose its credential is and when it ends, and the pages' copies of the live socket's close code and the session's path are the app's", async () => {
+    const client = webClient(token);
+    const session = await client.call("GET /api/v1/status/session", {});
+    expect(session).toEqual({ user: USER, ends: expect.any(Number) });
+    // Settings' line reads the end the route gives.
+    const heard = Promise.withResolvers<number | null>();
+    readSession(client, heard.resolve);
+    expect(await heard.promise).toBe(session.ends);
+    expect([LIVE_TOKEN_ENDED, SESSION_PATH]).toEqual([SENT_TOKEN_ENDED, SENT_SESSION_PATH]);
   });
 
   test("with no token the web shell asks for one before it calls", async () => {

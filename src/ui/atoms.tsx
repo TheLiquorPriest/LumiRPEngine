@@ -113,14 +113,15 @@ export function Pre(props: { text: string; mono?: boolean; live?: boolean }) {
 
 /**
  * What sits behind the spoiler gate (gate.ts): while it is shut, a notice and the one button that opens
- * it, and nothing of what it holds; once open, what it holds, and a way to shut it again.
+ * it, and nothing of what it holds; once open, what it holds, and a way to shut it again. `why` says what
+ * it hides could give away; the Turn and Live pages' sentence when absent.
  */
-export function Gated(props: { open: boolean; onOpen: () => void; onClose: () => void; children: ComponentChildren }) {
+export function Gated(props: { open: boolean; onOpen: () => void; onClose: () => void; why?: string; children: ComponentChildren }) {
   if (!props.open) {
     return (
       <div data-gate="shut">
         <Banner tone="gm" icon="eye-off" title="Spoilers are hidden" actions={<Button onClick={props.onOpen}>Show them for this chat</Button>}>
-          <span>The intent record and what the agents planned and did can give away what comes next.</span>
+          <span>{props.why ?? "The intent record and what the agents planned and did can give away what comes next."}</span>
         </Banner>
       </div>
     );

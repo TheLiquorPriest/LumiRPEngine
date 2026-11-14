@@ -1,7 +1,9 @@
 // The Play page's routes in the preview (`GET /api/v1/chats/:chat/state`, `POST …/actions`,
 // `POST …/actions/undo`), answered from recorded answers (test/ui/kept/play/recorded.ts). Every chat
 // plays the invented Fernwick world from a starter template, its Gear level raised so Me → Belongings
-// lists what the player wears with its verbs; "The orchard war" (`chat-orchard`) plays no world. Taking
+// lists what the player wears with its verbs; "The orchard war" (`chat-orchard`) plays no world until
+// the Play page's picker attaches one through Build's route, and from then on is RPE's own view of that
+// world in Build's store (mock-build.ts), its taps not served. Taking
 // a thing off or putting it on is applied to the recorded state, kept while the preview runs, and
 // answered as today's backend answers `lre.fix`, with its Undo; every other message is answered
 // `unavailable` with a sentence of the stand-in's own. After each change the chat's followers are told
@@ -10,6 +12,7 @@
 import type { FrontendToBackend } from "../../../src/shared/protocol";
 import type { ItemFix } from "../../../src/shared/things";
 import { appliedFix, recordedNoWorld, recordedView, refused, undone } from "../../../test/ui/kept/play/recorded";
+import { attachedView } from "./mock-build";
 
 /** The preview's chat that plays no world. */
 const NO_WORLD = "chat-orchard";
@@ -46,7 +49,7 @@ function wearing(message: FrontendToBackend): Extract<ItemFix, { do: "wear" }> |
 export async function playAnswer(request: Request, chat: string, part: string, changed: () => void): Promise<Response> {
   if (part === "state") {
     if (request.method !== "GET") return answer(405, { error: "The state takes GET." });
-    return answer(200, chat === NO_WORLD ? recordedNoWorld(chat) : recordedView({ chat, gear: 3, off: [...offIn(chat)] }));
+    return answer(200, chat === NO_WORLD ? ((await attachedView(chat)) ?? recordedNoWorld(chat)) : recordedView({ chat, gear: 3, off: [...offIn(chat)] }));
   }
   if (request.method !== "POST") return answer(405, { error: "Actions take POST." });
   const message = (await request.json().catch(() => null)) as FrontendToBackend | null;

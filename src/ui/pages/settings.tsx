@@ -11,6 +11,7 @@ import { useApp } from "../app";
 import { Banner, Button, Fold, PageHeader } from "../atoms";
 import type { RpeClient } from "../client";
 import { errorWords, LEVEL_WORDS, num } from "../words";
+import { type BuildsReader, type BuildsShown, BuildsView, NO_BUILDS, readBuilds, readSession, SessionLine } from "./builds";
 
 // ---------------------------------------------------------------- the calls
 
@@ -154,6 +155,10 @@ export interface SettingsViewProps {
   onSave(): void;
   onNone(): void;
   onTakeAway(key: string, level: LayerLevel): void;
+  /** The builds that meet at RPE, and "Update now". */
+  builds?: { shown: BuildsShown; onUpdate(): void };
+  /** When the web key this browser holds ends (null: it has no end, or this is not the web shell). */
+  sessionEnds?: number | null;
 }
 
 /** The field a setting's value is typed in, by what it takes. */
@@ -272,6 +277,8 @@ export function SettingsView(props: SettingsViewProps) {
   return (
     <div class="lre-stack rpe-page" data-page="settings" data-chat={props.chat ?? undefined}>
       <PageHeader title="Settings" sub={props.chat === null ? "The settings RPE's agents run under, at your own level." : "The settings RPE's agents run under in this chat."} />
+      <SessionLine ends={props.sessionEnds ?? null} />
+      {props.builds === undefined ? null : <BuildsView {...props.builds} />}
       {shown.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="The settings could not be read">
           <span>{shown.problem}</span>
@@ -313,12 +320,24 @@ export function SettingsPage(props: { chat: string | null }) {
   const { chat } = props;
   const [shown, setShown] = useState<SettingsShown>(NO_SETTINGS);
   const [control, setControl] = useState<SettingsControl | null>(null);
+  const [builds, setBuilds] = useState<BuildsShown>(NO_BUILDS);
+  const [buildsReader, setBuildsReader] = useState<BuildsReader | null>(null);
+  const [sessionEnds, setSessionEnds] = useState<number | null>(null);
   useEffect(() => {
     setShown(NO_SETTINGS);
     const made = settingsControl(settingsCalls(app.client, chat), setShown);
     setControl(made);
     return () => made.stop();
   }, [chat]);
+  useEffect(() => {
+    const reading = readBuilds(app.client, setBuilds);
+    setBuildsReader(reading);
+    const forget = app.shell === "web" ? readSession(app.client, setSessionEnds) : () => undefined;
+    return () => {
+      reading.stop();
+      forget();
+    };
+  }, []);
   return (
     <SettingsView
       chat={chat}
@@ -328,6 +347,8 @@ export function SettingsPage(props: { chat: string | null }) {
       onSave={() => control?.save()}
       onNone={() => control?.none()}
       onTakeAway={(key, level) => control?.takeAway(key, level)}
+      builds={{ shown: builds, onUpdate: () => buildsReader?.update() }}
+      sessionEnds={sessionEnds}
     />
   );
 }

@@ -4,7 +4,7 @@
 // change that last wrote it; beside each value stand the facts recorded on the level with the same key,
 // which never overwrite it (plan §6.6). Everything shown is what RPE's world route answers.
 
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { TurnSummary, ValueLine, ValueMark, ValuesShown, ValueSource, WorldAnswer, WorldFact, WorldNode, WorldNodeKind } from "../api";
 import { useApp } from "../app";
 import { Badge, Banner, Button, PageHeader, Row, Section } from "../atoms";
@@ -191,6 +191,8 @@ export interface WorldViewProps {
   problem: string | null;
   /** The chat's turns on RPE, newest first, to see the world as it stood at one; null until read. */
   turns: readonly TurnSummary[] | null;
+  /** Older turns remain to be read for "As it stood", and the way to read them. */
+  moreTurns?: { more: boolean; onMore(): void };
   onQuery(next: WorldQuery): void;
 }
 
@@ -264,6 +266,11 @@ export function WorldView(props: WorldViewProps) {
             </select>
           </label>
         )}
+        {props.moreTurns?.more === true ? (
+          <Button small kind="ghost" onClick={props.moreTurns.onMore}>
+            Older turns
+          </Button>
+        ) : null}
       </div>
       {props.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="The world could not be read">
@@ -271,9 +278,6 @@ export function WorldView(props: WorldViewProps) {
         </Banner>
       )}
       {root === undefined ? props.loading ? <p class="lre-muted rpe-line">Reading the world…</p> : null : <NodeTree node={root} byRef={byRef} root query={query} onQuery={props.onQuery} />}
-      <Section id="map" title="The map of the scene's place">
-        <p class="rpe-meta">This page cannot show a place's map yet.</p>
-      </Section>
     </div>
   );
 }
@@ -285,18 +289,25 @@ export function WorldPage(props: { chat: string }) {
   const [query, setQuery] = useState<WorldQuery>(WORLD_START);
   const [shown, setShown] = useState<{ answer: WorldAnswer | null; loading: boolean; problem: string | null }>({ answer: null, loading: true, problem: null });
   const [turns, setTurns] = useState<readonly TurnSummary[] | null>(null);
+  const [more, setMore] = useState(false);
+  const reader = useRef<{ more(): void } | null>(null);
   useEffect(() => {
     setQuery(WORLD_START);
     setShown({ answer: null, loading: true, problem: null });
     setTurns(null);
+    setMore(false);
     // A read that failed leaves them unknown: the page then says nothing of whether any turn was played.
-    return readTurns(app.client, chat, (read) => {
-      if (!read.loading && read.problem === null) setTurns(read.turns);
-    }).stop;
+    const reading = readTurns(app.client, chat, (read) => {
+      if (read.loading || read.problem !== null) return;
+      setTurns(read.turns);
+      setMore(read.more);
+    });
+    reader.current = reading;
+    return reading.stop;
   }, [chat]);
   useEffect(() => {
     setShown((held) => ({ ...held, loading: true }));
     return readWorld(app.client, chat, query, (result) => setShown((held) => ({ answer: result.answer ?? held.answer, loading: false, problem: result.problem })));
   }, [chat, query]);
-  return <WorldView query={query} {...shown} turns={turns} onQuery={setQuery} />;
+  return <WorldView query={query} {...shown} turns={turns} moreTurns={{ more, onMore: () => reader.current?.more() }} onQuery={setQuery} />;
 }

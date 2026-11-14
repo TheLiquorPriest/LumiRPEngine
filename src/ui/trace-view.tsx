@@ -25,6 +25,11 @@ export const STATUS_WORDS: Readonly<Record<RunStatus | "running", { words: strin
   failed: { words: "Failed", tone: "neg" },
 };
 
+/** How a run of `kind` stands, in words: a settle run writes nothing to the chat, so its ending with no reply is how it is meant to end. */
+export function statusWords(kind: RunKind | undefined, status: RunStatus | "running"): { words: string; tone: Tone } {
+  return kind === "settle" && status === "no-reply" ? { words: "Settled, no reply: as a settle run ends", tone: "pos" } : STATUS_WORDS[status];
+}
+
 const AGENT_WORDS: Readonly<Record<AgentState, { words: string; tone?: Tone }>> = {
   working: { words: "working", tone: "accent" },
   done: { words: "done", tone: "pos" },
@@ -67,16 +72,18 @@ export function runSpan(run: RunNode, now: number): number | null {
   return (run.endedAt ?? (run.outcome === null ? now : run.lastAt ?? from)) - from;
 }
 
-export function RunHead(props: { run: RunNode; now: number }) {
-  const { run } = props;
-  const status = STATUS_WORDS[run.outcome?.status ?? "running"];
+/** A run's head; `kind`, where the page knows it from RPE, names a settle run as one (the harness runs it as a continue) and its ending with no reply as normal. */
+export function RunHead(props: { run: RunNode; now: number; kind?: RunKind }) {
+  const { run, kind } = props;
+  const outcome = run.outcome?.status ?? "running";
+  const status = statusWords(kind, outcome);
   const span = runSpan(run, props.now);
   const totals = runTotals(run);
-  const failure = run.outcome?.error === undefined ? null : replyErrorWords(run.outcome.error, run.outcome.status);
+  const failure = run.outcome?.error === undefined || (kind === "settle" && outcome === "no-reply") ? null : replyErrorWords(run.outcome.error, run.outcome.status);
   return (
     <div class="rpe-runhead" data-run={run.run}>
       <div class="lre-spread">
-        <strong class="rpe-runhead-title">{runTitle(run)}</strong>
+        <strong class="rpe-runhead-title">{kind === "settle" && run.started !== null ? `${TURN_KIND_WORDS.settle}, led by ${run.started.lead}` : runTitle(run)}</strong>
         <span class="lre-inline">
           <Badge tone={status.tone}>{status.words}</Badge>
           {span === null ? null : <span class="lre-muted lre-num">{run.outcome === null ? `for ${duration(span)}` : `in ${duration(span)}`}</span>}

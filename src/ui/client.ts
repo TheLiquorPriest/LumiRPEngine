@@ -7,7 +7,7 @@
 
 import { createStore, type Readable } from "../frontend/store";
 import { isRecord } from "../shared/json";
-import type { LiveEvent, MissingPermission, RouteKey, Routes } from "./api";
+import { type LiveEvent, type MissingPermission, type RouteKey, type Routes, SESSION_PATH } from "./api";
 import { type Credential, directRoad, type LiveUpdate, probeDirect, type RelayChannel, relayRoad, type Road, type RoadAnswer, type RoadDeps, type SocketSettings, type StartFacts } from "./roads";
 import { errorWords } from "./words";
 
@@ -157,11 +157,22 @@ export function createClient(connector: Connector): RpeClient {
     for (const listener of [...resets]) listener();
   };
 
+  /** The web UI's key no longer holds and this browser has let it go: the shell asks for another, and every call waits for it. */
+  function signOut(refused: RpeError): void {
+    drop();
+    current = Promise.reject(refused);
+    current.catch(() => undefined);
+    state.set({ phase: "signed-out", error: refused.message });
+  }
+
   function deliver(update: LiveUpdate): void {
     if (update.type === "events") each(update.chat, (l) => l.events(update.events, update.missed ?? null));
     else if (update.type === "reset") {
       each(update.chat, (l) => l.reset());
       toldToReadAfresh();
+    } else if (update.type === "ended") {
+      if (connector.canSwitch) each(undefined, (l) => l.refused("RPE's live updates stopped: the page's token no longer holds, and no other could be had."));
+      else signOut(new RpeError(401, KEY_LET_GO));
     } else each(undefined, (l) => l.refused(update.message));
   }
 
@@ -241,12 +252,8 @@ export function createClient(connector: Connector): RpeClient {
       }
       if (answer.status === 401 && (await connection.credential.renew().catch(() => false))) answer = await send(connection, method, path, body);
       if (answer.status === 401 && !connector.canSwitch) {
-        // The web UI's token was refused: the shell asks for another, and every call waits for it.
-        const refused = refusalOf(answer);
-        drop();
-        current = Promise.reject(refused);
-        current.catch(() => undefined);
-        state.set({ phase: "signed-out", error: refused.message });
+        const refused = new RpeError(401, `${refusalOf(answer).message} ${KEY_LET_GO}`);
+        signOut(refused);
         throw refused;
       }
       return readAnswer(answer) as Routes[typeof key]["reply"];
@@ -311,9 +318,27 @@ export interface TokenStore {
   set(token: string | null): void;
 }
 
-/** The web shell's connector: RPE served the page, so the road is direct to the page's own origin, with the web UI's token. */
+/** Why the web shell asks for its key again, in a sentence. */
+export const KEY_LET_GO = "This browser has let go of the key it kept: a key stops when it runs out, or when rpe key web makes a new one. Give the current one.";
+
+/**
+ * The web shell's connector: RPE served the page, so the road is direct to the page's own origin, with the
+ * web UI's key. When RPE refuses it, RPE's session route says whether the key itself is refused: then it
+ * is let go, and there is no other to take its place. A session route that does not answer is RPE not
+ * running (a restart, say): that says nothing of the key, so the socket is simply tried again.
+ */
 export function webConnector(base: string, tokens: TokenStore, deps: RoadDeps, settings: ConnectSettings = CONNECT_DEFAULTS): Connector {
-  const credential: Credential = { token: () => tokens.get() ?? "", renew: async () => false };
+  const credential: Credential = {
+    token: () => tokens.get() ?? "",
+    async renew() {
+      const held = tokens.get();
+      if (held === null) return false;
+      const answer = await deps.fetch(new URL(SESSION_PATH, base).toString(), { method: "GET", headers: { authorization: `Bearer ${held}`, accept: "application/json" } }).catch(() => null);
+      if (answer === null || answer.status !== 401) return true;
+      tokens.set(null);
+      return false;
+    },
+  };
   return {
     canSwitch: false,
     missing: createStore<readonly MissingPermission[] | null>(null),
@@ -365,6 +390,9 @@ export function extensionConnector(channel: RelayChannel, deps: RoadDeps, settin
     renewIn(Math.max(0, Math.max(life / 2, life - settings.renewAheadMs)), settings.reconnectMs);
   }
 
+  /** Hears each token renewed ahead of the old one's end: the live socket opens its next one with it before the old one is closed. */
+  const renewed = new Set<() => void>();
+
   /** Asks for a new token in `ms`; one that cannot be had is asked for again after `retryMs`, twice as long each time after, up to `reconnectMaxMs`. */
   function renewIn(ms: number, retryMs: number): void {
     deps.timers.clearTimeout(timer);
@@ -372,16 +400,25 @@ export function extensionConnector(channel: RelayChannel, deps: RoadDeps, settin
     if (closed) return;
     timer = deps.timers.setTimeout(() => {
       timer = null;
-      start().catch(() => {
-        // Another renewal may have come in meanwhile and set the next one.
-        if (timer === null) renewIn(retryMs, Math.min(retryMs * 2, settings.reconnectMaxMs));
-      });
+      start().then(
+        () => {
+          for (const listener of [...renewed]) listener();
+        },
+        () => {
+          // Another renewal may have come in meanwhile and set the next one.
+          if (timer === null) renewIn(retryMs, Math.min(retryMs * 2, settings.reconnectMaxMs));
+        },
+      );
     }, ms);
   }
 
   const credential: Credential = {
     token: () => facts?.token ?? "",
     renew: () => start().then(() => true),
+    onFresh(listener) {
+      renewed.add(listener);
+      return () => renewed.delete(listener);
+    },
   };
 
   return {

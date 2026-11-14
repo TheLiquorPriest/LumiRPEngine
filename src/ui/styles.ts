@@ -1,8 +1,8 @@
 // The pages' styles: today's design tokens and atoms (`src/frontend/styles/`), which follow Lumiverse's
 // theme inside its drawer and fall back to their own dark values in the web shell, then the new pages'
 // own rules, all under `rpe-`. Two width rules decide the web shell's navigation (frame.tsx's bars): below
-// 1280 px, where the bar across the top cannot hold every page, it keeps the pages used most and More; at
-// 640 px and below it gives way to the bar at the bottom. The drawer always has its own.
+// 1400 px, where the bar across the top cannot hold every page and still name the chat, it keeps the pages
+// used most and More; at 640 px and below it gives way to the bar at the bottom. The drawer always has its own.
 
 import { COMPONENTS_CSS } from "../frontend/styles/components";
 import { TOKENS_CSS } from "../frontend/styles/tokens";
@@ -65,20 +65,27 @@ const OWN_CSS = `
 .rpe-migrated{border-top:1px solid var(--lre-hairline);padding-top:var(--lre-s2);min-width:0}
 .rpe-migrated:first-child{border-top:0;padding-top:0}
 .rpe-hash{font-size:var(--lre-fs-xs);overflow-wrap:anywhere;word-break:break-all}
+.rpe-entry{border-top:1px solid var(--lre-hairline);padding-top:var(--lre-s2);min-width:0}
+.rpe-entry:first-child{border-top:0;padding-top:0}
+.rpe-struck{text-decoration:line-through;color:var(--lre-muted)}
+.rpe-fields{margin:0;display:flex;flex-direction:column;gap:var(--lre-s1);font-size:var(--lre-fs-sm);min-width:0}
+.rpe-field{display:flex;flex-wrap:wrap;gap:0 var(--lre-s2);min-width:0}
+.rpe-field>dt{flex:none;color:var(--lre-muted);font-weight:600}
+.rpe-field>dd{margin:0;flex:1 1 12em;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
 
 .rpe-web{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;background:var(--lre-surface)}
 .rpe-web-top{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:var(--lre-s2) var(--lre-s3);padding:calc(var(--lre-s2) + env(safe-area-inset-top,0px)) var(--lre-s4) var(--lre-s2);background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline);min-width:0}
 .rpe-web-brand{flex:none;font-weight:700;font-size:var(--lre-fs-lg);letter-spacing:.02em}
-.rpe-web-nav{position:relative;display:flex;gap:var(--lre-s1)}
-.rpe-web-nav>button{display:inline-flex;align-items:center;gap:var(--lre-s2);min-height:var(--lre-tap);padding:0 var(--lre-s3);border:0;border-radius:var(--lre-r-lg);background:transparent;color:var(--lre-muted);font-weight:500;transition:background-color var(--lre-fast),color var(--lre-fast)}
+.rpe-web-nav{position:relative;flex:none;display:flex;gap:var(--lre-s1)}
+.rpe-web-nav>button{display:inline-flex;align-items:center;gap:var(--lre-s1);min-height:var(--lre-tap);padding:0 var(--lre-s2);border:0;border-radius:var(--lre-r-lg);background:transparent;color:var(--lre-muted);font-weight:500;white-space:nowrap;transition:background-color var(--lre-fast),color var(--lre-fast)}
 .rpe-web-nav>button:hover:not(:disabled){background:var(--lre-hover);color:var(--lre-fg)}
 .rpe-web-nav>button[aria-current=page]{background:var(--lre-accent-soft);color:var(--lre-accent-text);font-weight:600}
 .rpe-web-chat{flex:1;min-width:0;text-align:right;font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rpe-web-top>.lre-btn{flex:none;white-space:nowrap}
 .rpe-web-main{flex:1;width:100%;max-width:1040px;margin:0 auto;padding:var(--lre-s4);display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0}
 .rpe-web-nav>button.rpe-more{display:none}
 .rpe-web-bottom{display:none}
-@media (max-width:1279px){
-.rpe-web-nav>button{padding:0 var(--lre-s2)}
+@media (max-width:1399px){
 .rpe-web-nav>button.rpe-spare{display:none}
 .rpe-web-nav>button.rpe-more{display:inline-flex}
 }

@@ -3,28 +3,31 @@
 // intent record, the trace of each run, what each agent's first call was sent, and the turn's folder,
 // each file opened on demand; kept up to date while it runs. The Turn page is a list of sections
 // (`TURN_SECTIONS`): what later lanes add (the prompt by slice, the changes in each lane, perceptions)
-// are sections of their own in that list, behind the gate or not as each says.
+// are sections of their own in that list, behind the gate or not as each says. Both pages offer Settle
+// now, the Turn page on the newest turn of the chat's path, which is the turn the settle route takes:
+// the Author settles an edit then, and nothing is written to the chat.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useSelect } from "../../frontend/store";
 import { isRecord } from "../../shared/json";
-import type { TurnDetail, TurnFileEntry, TurnRun, TurnSummary } from "../api";
+import type { SettleAnswer, TurnDetail, TurnFileEntry, TurnRun, TurnSummary } from "../api";
 import { useApp, useNow } from "../app";
 import type { RpeClient } from "../client";
 import { Badge, Banner, Button, Empty, Gated, PageHeader, Pre, Row, Section } from "../atoms";
 import { agentUsage, type RunNode, runsOf } from "../live-model";
-import { NOTHING_WATCHED, watchTurn, type Watched } from "../live-watch";
-import { AgentTree, ReplyBox, replyErrorWords, RunHead, runTitle, STATUS_WORDS, TURN_KIND_WORDS } from "../trace-view";
+import { NOTHING_WATCHED, onChatChange, watchTurn, type Watched } from "../live-watch";
+import { AgentTree, ReplyBox, replyErrorWords, RunHead, runTitle, statusWords, TURN_KIND_WORDS } from "../trace-view";
 import { liveTurn, momentsOf, spansOf } from "../turn-model";
 import { bytesWords, clock, counted, duration, errorWords, tokenWords, when } from "../words";
+import { type JobsReader, type JobsShown, JobsView, NO_JOBS, readJobs } from "./jobs";
 
 /** Fixed: how many turns the list reads at a time. */
 export const TURNS_PAGE = 30;
 
 function TurnLine(props: { turn: TurnSummary; onOpen: () => void }) {
   const { turn } = props;
-  const status = STATUS_WORDS[turn.status];
+  const status = statusWords(turn.kind, turn.status);
   const end = turn.timings.ended ?? turn.timings.released;
   return (
     <li class="lre-listrow">
@@ -49,19 +52,91 @@ function TurnLine(props: { turn: TurnSummary; onOpen: () => void }) {
   );
 }
 
+/** Settle now as a page holds it: a request out, the run it began, or RPE's refusal in its own words. */
+export interface SettleShown {
+  busy: boolean;
+  started: SettleAnswer | null;
+  problem: string | null;
+}
+
+export const NO_SETTLE: SettleShown = { busy: false, started: null, problem: null };
+
+/** Asks RPE to settle the newest turn of the chat's path now; `onChange` hears the request go out and what came of it. */
+export function settleNow(client: Pick<RpeClient, "call">, chat: string, onChange: (shown: SettleShown) => void): void {
+  onChange({ busy: true, started: null, problem: null });
+  client.call("POST /api/v1/chats/:chat/settle", { chat }).then(
+    (started) => onChange({ busy: false, started, problem: null }),
+    (error: unknown) => onChange({ busy: false, started: null, problem: errorWords(error) }),
+  );
+}
+
+/**
+ * The newest turn on the chat's path, the one Settle now settles; null where the list holds none. The list is newest run first, and
+ * after a swipe back to an earlier swipe its first turns are off the path: it is read a page at a time past them.
+ */
+export async function newestOnPath(client: Pick<RpeClient, "call">, chat: string): Promise<TurnSummary | null> {
+  let before: string | undefined;
+  for (;;) {
+    const list = await client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit: TURNS_PAGE, ...(before === undefined ? {} : { before }) } });
+    const found = list.turns.find((t) => t.onPath);
+    if (found !== undefined) return found;
+    before = list.turns.at(-1)?.id;
+    if (!list.more || before === undefined) return null;
+  }
+}
+
+/** Settle now: the button, disabled while a run of the chat goes on, and what came of the last press. */
+export function SettleControl(props: { shown: SettleShown; running: boolean; onSettle(): void }) {
+  return (
+    <Button small busy={props.shown.busy} disabled={props.running} title={props.running ? "A run of this chat is going on." : "The Author settles the newest turn's edit now; nothing is written to the chat."} onClick={props.onSettle}>
+      Settle now
+    </Button>
+  );
+}
+
+/** What came of the last Settle now: the run it began, or RPE's refusal in its own words. */
+export function SettleNotice(props: { shown: SettleShown; onOpen?(turn: string): void }) {
+  const { started, problem } = props.shown;
+  if (problem !== null) {
+    return (
+      <Banner tone="neg" icon="alert" title="Not settled">
+        <span>{problem}</span>
+      </Banner>
+    );
+  }
+  if (started === null) return null;
+  const open = props.onOpen;
+  return (
+    <Banner tone="info" icon="check" title="A settle run began" actions={open === undefined ? undefined : <Button onClick={() => open(started.turn)}>Watch it</Button>}>
+      <span>
+        Run {started.run} on turn {started.turn}. It writes nothing to the chat.
+      </span>
+    </Banner>
+  );
+}
+
 export interface TurnsViewProps {
   turns: readonly TurnSummary[];
   more: boolean;
   loading: boolean;
   problem: string | null;
+  /** How many turns of this chat the last migration carried from today's build; null where it carried none, or that is not known. */
+  carried?: number | null;
+  settle?: { shown: SettleShown; onSettle(): void };
+  /** The chat's jobs, with Cancel. */
+  jobs?: { shown: JobsShown; onCancel(job: string): void };
   onOpen(turn: string): void;
   onMore(): void;
 }
 
 export function TurnsView(props: TurnsViewProps) {
+  const { settle } = props;
+  const running = props.turns.some((turn) => turn.status === "running");
+  const carried = props.carried ?? null;
   return (
     <div class="lre-stack rpe-page" data-page="turns">
-      <PageHeader title="Turns" sub="Every turn RPE has played in this chat, newest first." />
+      <PageHeader title="Turns" sub="Every turn RPE has played in this chat, newest first." actions={settle === undefined || (props.turns.length === 0 && carried === null) ? undefined : <SettleControl shown={settle.shown} running={running} onSettle={settle.onSettle} />} />
+      {settle === undefined ? null : <SettleNotice shown={settle.shown} onOpen={props.onOpen} />}
       {props.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="The turns could not be read">
           <span>{props.problem}</span>
@@ -73,6 +148,7 @@ export function TurnsView(props: TurnsViewProps) {
         ) : props.problem === null ? (
           <Empty icon="list" title="No turn played on RPE yet">
             <span>A turn shows here once RPE plays a reply in this chat.</span>
+            {carried === null ? null : <span>The migration carried {counted(carried, "turn")} of it from today's build: they made its world, cast and story as they stand, and are not runs of RPE's, so none is listed here.</span>}
           </Empty>
         ) : null
       ) : (
@@ -89,6 +165,7 @@ export function TurnsView(props: TurnsViewProps) {
           Older turns
         </Button>
       ) : null}
+      {props.jobs === undefined ? null : <JobsView shown={props.jobs.shown} everyChat={false} onCancel={props.jobs.onCancel} />}
     </div>
   );
 }
@@ -103,29 +180,59 @@ export interface TurnsRead {
 }
 
 /**
- * Reads a chat's turns, newest first, and older ones on `more()`. Every answer is for this chat alone:
- * once `stop()` is called (the page has left the chat), what comes back is let go.
+ * The newest page of a chat's turns put in front of those held: a turn run again since moves up, and what was read further back
+ * stays. A page that does not reach back to the turns held (more turns came meanwhile than a page holds) leaves a gap between
+ * them, so it stands alone, and older turns are read from it.
  */
-export function readTurns(client: Pick<RpeClient, "call">, chat: string, onChange: (read: TurnsRead) => void): { more(): void; stop(): void } {
+export function withNewest(held: TurnsRead, page: { turns: readonly TurnSummary[]; more: boolean }): Pick<TurnsRead, "turns" | "more"> {
+  const oldest = page.turns.at(-1);
+  const reached = oldest === undefined ? -1 : held.turns.findIndex((t) => t.id === oldest.id);
+  if (!page.more || reached < 0) return { turns: [...page.turns], more: page.more };
+  const fresh = new Set(page.turns.map((t) => t.id));
+  const tail = held.turns.slice(reached + 1).filter((t) => !fresh.has(t.id));
+  return { turns: [...page.turns, ...tail], more: tail.length === 0 ? page.more : held.more };
+}
+
+/**
+ * Reads a chat's turns, newest first, older ones on `more()`, and the newest again on `refresh()`, merged in front of those held
+ * (`withNewest`) so the list never empties while it reads. Every answer is for this chat alone: once `stop()` is called (the page
+ * has left the chat), what comes back is let go.
+ */
+export function readTurns(client: Pick<RpeClient, "call">, chat: string, onChange: (read: TurnsRead) => void): { more(): void; refresh(): void; stop(): void } {
   let read: TurnsRead = { turns: [], more: false, loading: true, problem: null };
   let alive = true;
-  const show = (next: TurnsRead): void => {
+  const show = (next: Partial<TurnsRead>): void => {
     if (!alive) return;
-    read = next;
-    onChange(next);
+    read = { ...read, ...next };
+    onChange(read);
   };
-  const load = (before: string | undefined): void => {
-    const kept = read.turns;
-    show({ turns: kept, more: false, loading: true, problem: null });
-    client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit: TURNS_PAGE, ...(before === undefined ? {} : { before }) } }).then(
-      (list) => show({ turns: [...kept, ...list.turns], more: list.more, loading: false, problem: null }),
-      (error: unknown) => show({ turns: kept, more: before !== undefined, loading: false, problem: errorWords(error) }),
+  const page = (before: string | undefined) => client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit: TURNS_PAGE, ...(before === undefined ? {} : { before }) } });
+  /** `first`: the first read, the one `loading` waits for before any turn is held. */
+  const newest = (first: boolean): void => {
+    page(undefined).then(
+      (list) => show({ ...withNewest(read, list), problem: null, ...(first ? { loading: false } : {}) }),
+      (error: unknown) => show({ problem: errorWords(error), ...(first ? { loading: false } : {}) }),
     );
   };
-  load(undefined);
+  // A page moving to this chat shows it as unread at once, not the last chat's turns.
+  onChange(read);
+  newest(true);
   return {
     more() {
-      if (!read.loading) load(read.turns.at(-1)?.id);
+      const last = read.turns.at(-1);
+      if (read.loading || last === undefined) return;
+      show({ loading: true, problem: null });
+      page(last.id).then(
+        (list) => {
+          // A refresh may have come back meanwhile: the older turns go after whatever is held now.
+          const held = new Set(read.turns.map((t) => t.id));
+          show({ turns: [...read.turns, ...list.turns.filter((t) => !held.has(t.id))], more: list.more, loading: false, problem: null });
+        },
+        (error: unknown) => show({ loading: false, problem: errorWords(error) }),
+      );
+    },
+    refresh() {
+      newest(false);
     },
     stop() {
       alive = false;
@@ -137,13 +244,56 @@ export function TurnsPage(props: { chat: string }) {
   const app = useApp();
   const { chat } = props;
   const [read, setRead] = useState<TurnsRead>({ turns: [], more: false, loading: true, problem: null });
+  const [settle, setSettle] = useState<SettleShown>(NO_SETTLE);
+  const [carried, setCarried] = useState<number | null>(null);
   const reader = useRef<{ more(): void } | null>(null);
+  const [jobs, setJobs] = useState<JobsShown>(NO_JOBS);
+  const jobsReader = useRef<JobsReader | null>(null);
   useEffect(() => {
+    setSettle(NO_SETTLE);
+    setJobs(NO_JOBS);
     const reading = readTurns(app.client, chat, setRead);
     reader.current = reading;
-    return reading.stop;
+    const jobsReading = readJobs(app.client, chat, setJobs);
+    jobsReader.current = jobsReading;
+    // A run that begins or ends changes the list, whether Settle now can be pressed, and how the chat's jobs stand: they are read again then.
+    const off = onChatChange(app.client, chat, () => {
+      reading.refresh();
+      jobsReading.refresh();
+    });
+    return () => {
+      off();
+      reading.stop();
+      jobsReading.stop();
+    };
   }, [chat]);
-  return <TurnsView {...read} onOpen={(turn) => app.go({ page: "turn", chat, turn })} onMore={() => reader.current?.more()} />;
+  const none = !read.loading && read.problem === null && read.turns.length === 0;
+  useEffect(() => {
+    setCarried(null);
+    if (!none) return;
+    // A chat with no run of RPE's yet may have come with a migration: what it carried of it is said, not "no turns".
+    let alive = true;
+    app.client.call("GET /api/v1/migration", {}).then(
+      (shown) => {
+        const turns = shown.chats.find((c) => c.chat === chat && (c.outcome === "imported" || c.outcome === "replaced"))?.turns ?? 0;
+        if (alive) setCarried(turns > 0 ? turns : null);
+      },
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [chat, none]);
+  return (
+    <TurnsView
+      {...read}
+      carried={carried}
+      settle={{ shown: settle, onSettle: () => settleNow(app.client, chat, setSettle) }}
+      jobs={{ shown: jobs, onCancel: (job) => jobsReader.current?.cancel(job) }}
+      onOpen={(turn) => app.go({ page: "turn", chat, turn })}
+      onMore={() => reader.current?.more()}
+    />
+  );
 }
 
 // ---------------------------------------------------------------- one turn's folder
@@ -261,7 +411,7 @@ function EachRun(props: { runs: readonly RunNode[]; views: readonly TurnRun[]; p
         const view = started[run.nth - 1];
         return (
           <div key={run.nth} class="lre-stack" data-run-nth={run.nth}>
-            <RunCaption nth={view?.nth ?? run.nth} of={of} id={view?.id ?? null} title={runTitle(run)} />
+            <RunCaption nth={view?.nth ?? run.nth} of={of} id={view?.id ?? null} title={view?.kind === "settle" ? TURN_KIND_WORDS.settle : runTitle(run)} />
             {props.part(run, view)}
           </div>
         );
@@ -317,16 +467,16 @@ function Runs(props: { views: readonly TurnRun[]; runs: readonly RunNode[]; now:
       {props.views.map((view) => {
         const at = started.indexOf(view);
         const run = at < 0 ? undefined : props.runs.find((r) => r.nth === at + 1);
-        const status = STATUS_WORDS[view.status];
+        const status = statusWords(view.kind, view.status);
         return (
           <div key={view.id} class="lre-stack" data-run={view.id}>
-            <RunCaption nth={view.nth} of={props.views.length} id={view.id} title={run === undefined ? TURN_KIND_WORDS[view.kind] : runTitle(run)} />
+            <RunCaption nth={view.nth} of={props.views.length} id={view.id} title={run === undefined || view.kind === "settle" ? TURN_KIND_WORDS[view.kind] : runTitle(run)} />
             {run === undefined ? (
               <span class="lre-inline">
                 <Badge tone={status.tone}>{status.words}</Badge>
               </span>
             ) : (
-              <RunHead run={run} now={props.now} />
+              <RunHead run={run} now={props.now} kind={view.kind} />
             )}
             {view === latest ? null : view.reply.text === "" ? <p class="rpe-meta">It sent nothing to the chat.</p> : <Pre text={view.reply.text} mono={false} />}
           </div>
@@ -525,13 +675,17 @@ export interface TurnViewProps {
   onOpenFile(name: string): void;
   onCloseFile(): void;
   sections?: readonly TurnSection[];
+  /** Settle now, where this turn is the newest on the chat's path: what came of the last press, and whether a run of the chat goes on. */
+  settle?: { shown: SettleShown; running: boolean; onSettle(): void };
 }
 
 export function TurnView(props: TurnViewProps) {
-  const { turn } = props;
+  const { turn, settle } = props;
   const sections = props.sections ?? TURN_SECTIONS;
-  const status = STATUS_WORDS[turn.status];
-  const failure = turn.error === null ? null : replyErrorWords(turn.error, turn.status);
+  // How it stands is its latest run's: a settle run's ending with no reply is how it is meant to end.
+  const kind = turn.runs.at(-1)?.kind ?? turn.kind;
+  const status = statusWords(kind, turn.status);
+  const failure = turn.error === null || (kind === "settle" && turn.status === "no-reply") ? null : replyErrorWords(turn.error, turn.status);
   const parts: TurnParts = { turn, runs: props.runs, now: props.now, folder: props.folder, onOpenFile: props.onOpenFile, onCloseFile: props.onCloseFile };
   return (
     <div class="lre-stack rpe-page" data-page="turn" data-turn={turn.id}>
@@ -546,17 +700,21 @@ export function TurnView(props: TurnViewProps) {
         }
         back={{ label: "Back to the turns", go: props.onBack }}
         actions={
-          turn.status === "running" ? (
-            <Button small onClick={props.onLive}>
-              Watch it live
-            </Button>
-          ) : (
-            <Button small kind="ghost" onClick={props.onRead}>
-              Read again
-            </Button>
-          )
+          <>
+            {settle === undefined ? null : <SettleControl shown={settle.shown} running={settle.running} onSettle={settle.onSettle} />}
+            {turn.status === "running" ? (
+              <Button small onClick={props.onLive}>
+                Watch it live
+              </Button>
+            ) : (
+              <Button small kind="ghost" onClick={props.onRead}>
+                Read again
+              </Button>
+            )}
+          </>
         }
       />
+      {settle === undefined ? null : <SettleNotice shown={settle.shown} />}
       {props.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="Part of this turn could not be read">
           <span>{props.problem}</span>
@@ -584,10 +742,32 @@ export function TurnPage(props: { chat: string; turn: string }) {
   const [folder, setFolder] = useState<FolderShown>(NO_FOLDER);
   const reader = useRef<{ open(name: string): void; close(): void } | null>(null);
   const gateOpen = useSelect(app.gate, (opened) => opened.has(chat));
+  const [newest, setNewest] = useState<TurnSummary | null>(null);
+  const [settle, setSettle] = useState<SettleShown>(NO_SETTLE);
   useEffect(() => {
     setWatched(NOTHING_WATCHED);
     return watchTurn(app.client, chat, turn, app.timers, setWatched);
   }, [chat, turn, reads]);
+  useEffect(() => {
+    setSettle(NO_SETTLE);
+    setNewest(null);
+    // Which turn is the newest on the chat's path, and whether a run of it goes on: Settle now is offered on that turn alone. Read again when a run begins or ends.
+    let alive = true;
+    const read = (): void => {
+      newestOnPath(app.client, chat).then(
+        (found) => {
+          if (alive) setNewest(found);
+        },
+        () => undefined,
+      );
+    };
+    read();
+    const off = onChatChange(app.client, chat, read);
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [chat, turn]);
   useEffect(() => {
     setFolder(NO_FOLDER);
     if (!gateOpen) return;
@@ -632,6 +812,20 @@ export function TurnPage(props: { chat: string; turn: string }) {
       onRead={() => setReads((n) => n + 1)}
       onOpenFile={(name) => reader.current?.open(name)}
       onCloseFile={() => reader.current?.close()}
+      settle={
+        newest?.id !== turn
+          ? undefined
+          : {
+              shown: settle,
+              running: newest.status === "running",
+              onSettle: () =>
+                settleNow(app.client, chat, (shown) => {
+                  setSettle(shown);
+                  // The settle run is the turn's latest run: the page reads the turn again to follow it.
+                  if (shown.started !== null) setReads((n) => n + 1);
+                }),
+            }
+      }
     />
   );
 }

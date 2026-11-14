@@ -401,27 +401,43 @@ export interface FilesViewProps {
   onStack(agent: string): void;
 }
 
-/** Switching a name off or on: in the user's own config with no chat open, and in theirs or the chat's with one. */
+/** Whose `off:` list a level's is, as a sentence names it. */
+const OFF_LIST_WORDS: Readonly<Record<LayerLevel, string>> = { shipped: "the shipped config", global: "your own config", character: "this character's config", chat: "this chat's config" };
+
+/** The levels whose `off:` list this page writes: the user's own, and the chat's with one open. */
+const switchLevels = (chat: string | null): FileSwitch["level"][] => (chat === null ? ["global"] : ["global", "chat"]);
+
+/**
+ * Switching a name off, in the user's own config with no chat open and in theirs or the chat's with one;
+ * and on again where an `off:` list names it, and only there: at a level whose list does not name it,
+ * the route writes nothing and the name stays off.
+ */
 function SwitchButtons(props: { entry: TreeFileEntry; chat: string | null; busy: boolean; onSwitch: FilesViewProps["onSwitch"] }) {
   const { entry } = props;
-  const off = !entry.off;
-  const verb = off ? "Switch off" : "Switch on";
-  if (props.chat === null) {
-    return (
-      <Button small busy={props.busy} onClick={() => props.onSwitch(entry.path, "global", off)}>
-        {verb}
-      </Button>
-    );
-  }
+  const levels = entry.off ? switchLevels(props.chat).filter((level) => entry.offIn.includes(level)) : switchLevels(props.chat);
+  const verb = entry.off ? "Switch on" : "Switch off";
   return (
     <>
-      <Button small busy={props.busy} onClick={() => props.onSwitch(entry.path, "global", off)}>
-        {`${verb} for every chat`}
-      </Button>
-      <Button small busy={props.busy} onClick={() => props.onSwitch(entry.path, "chat", off)}>
-        {`${verb} in this chat`}
-      </Button>
+      {levels.map((level) => (
+        <Button key={level} small busy={props.busy} onClick={() => props.onSwitch(entry.path, level, !entry.off)}>
+          {props.chat === null ? verb : level === "global" ? `${verb} for every chat` : `${verb} in this chat`}
+        </Button>
+      ))}
     </>
+  );
+}
+
+/** For a name switched off: which lists name it, where more than one does or one this page does not write does, so that a Switch on that leaves it off is not a surprise. */
+function OffWhere(props: { entry: TreeFileEntry; chat: string | null }) {
+  const { offIn } = props.entry;
+  const here = switchLevels(props.chat);
+  const elsewhere = offIn.filter((level) => !here.some((l) => l === level));
+  if (offIn.length < 2 && elsewhere.length === 0) return null;
+  const named = offIn.map((level) => OFF_LIST_WORDS[level]).join(" and ");
+  return (
+    <p class="rpe-meta" data-off-in={offIn.join(" ")}>
+      {`The off: list of ${named} names it. It is on again once no list does${elsewhere.length === 0 ? "" : `, and this page does not change ${elsewhere.map((level) => OFF_LIST_WORDS[level]).join(" or ")}`}.`}
+    </p>
   );
 }
 
@@ -523,6 +539,7 @@ function OpenPanel(props: FilesViewProps & { open: OpenFile; entry: TreeFileEntr
           </Button>
         </div>
       ) : null}
+      {open.mode === "read" && switchable && entry !== undefined && entry.off ? <OffWhere entry={entry} chat={props.chat} /> : null}
       {open.diff === null ? null : <DiffShown diff={open.diff} />}
     </div>
   );
