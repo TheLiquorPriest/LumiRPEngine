@@ -65,6 +65,7 @@ function heldClient(): RpeClient & { asked: Asked[]; listener(): LiveListener; c
         listener = null;
       };
     },
+    onReset: () => () => undefined,
     connect: () => undefined,
     reconnect: () => undefined,
     close: () => undefined,

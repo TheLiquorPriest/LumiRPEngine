@@ -5,8 +5,8 @@
 // client reaches RPE directly when the page can, else through the extension (client.ts).
 
 import { render } from "preact";
-import { createStore, useSelect } from "../frontend/store";
-import { AppContext, chatOf, type Route, type UiApp, useApp } from "./app";
+import { createStore, type Readable, useSelect } from "../frontend/store";
+import { AppContext, type Route, type UiApp, useApp } from "./app";
 import { createClient, extensionConnector } from "./client";
 import { NAV, navOf, Notices, PageFor, routeFor } from "./frame";
 import { createGate } from "./gate";
@@ -29,16 +29,18 @@ export interface ShellMount {
   road: RelayChannel;
 }
 
-function DrawerShell() {
+/** The drawer's tabs and the page they show; a tab goes to the chat Lumiverse has open, whatever the page now shows. */
+function DrawerShell(props: { active: Readable<string | null> }) {
   const app = useApp();
   const route = useSelect(app.route, (r) => r);
+  const active = useSelect(props.active, (chat) => chat);
   const current = navOf(route);
   return (
     <div class="lre rpe rpe-drawer">
       <div class="rpe-drawer-bar">
         <div class="lre-tabs" role="tablist" aria-label="RPE's pages">
           {NAV.filter((item) => item.shells.includes("drawer")).map((item) => (
-            <button key={item.id} type="button" role="tab" aria-selected={item.id === current ? "true" : "false"} onClick={() => app.go(routeFor(item.id, chatOf(route)))}>
+            <button key={item.id} type="button" role="tab" aria-selected={item.id === current ? "true" : "false"} onClick={() => app.go(routeFor(item.id, active))}>
               {item.title}
             </button>
           ))}
@@ -58,13 +60,16 @@ export function mount(shell: ShellMount, deps: RoadDeps = browserDeps()): () => 
   // At once, not when a page first asks: with no chat open no page asks, and the drawer should still say how RPE stands.
   client.connect();
   const gate = createGate();
-  const route = createStore<Route>({ page: "live", chat: ctx.getActiveChat().chatId });
-  // Another chat: the same page for it (a turn's page becomes its list), and the spoiler gate shut.
+  const active = createStore<string | null>(ctx.getActiveChat().chatId);
+  const route = createStore<Route>({ page: "live", chat: active.get() });
+  // Another chat: the same page for it (a turn's page becomes its list), and the spoiler gate shut. A page about no chat stays.
   const place = (chat: string | null): void => {
-    const current = route.get();
-    if (chatOf(current) === chat) return;
+    if (active.get() === chat) return;
+    active.set(chat);
     gate.closeAll();
-    route.set({ page: current.page === "live" ? "live" : "turns", chat });
+    const current = route.get();
+    if (current.page === "turn") route.set({ page: "turns", chat });
+    else if ("chat" in current) route.set({ page: current.page, chat });
   };
   const offs: (() => void)[] = [];
   if (ctx.state !== undefined) offs.push(ctx.state.subscribe<{ chatId?: string | null } | null>("chat.active", (value) => place(value?.chatId ?? null)));
@@ -72,7 +77,7 @@ export function mount(shell: ShellMount, deps: RoadDeps = browserDeps()): () => 
   const app: UiApp = { shell: "drawer", client, gate, route, timers: deps.timers, go: (next) => route.set(next) };
   render(
     <AppContext.Provider value={app}>
-      <DrawerShell />
+      <DrawerShell active={active} />
     </AppContext.Provider>,
     root,
   );

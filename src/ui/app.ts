@@ -12,8 +12,11 @@ import type { Timers } from "./roads";
 /** The web shell, served by RPE at `/ui/`, or the drawer in Lumiverse. */
 export type Shell = "web" | "drawer";
 
-/** Where a page stands. A chat's pages have no chat in the drawer while Lumiverse shows none. */
-export type Route = { page: "chats" } | { page: "live" | "turns"; chat: string | null } | { page: "turn"; chat: string; turn: string };
+/**
+ * Where a page stands. A chat's pages have no chat in the drawer while Lumiverse shows none; Files shows
+ * the shipped and your own levels with no chat, and the chat's own with one. The rest are about no chat.
+ */
+export type Route = { page: "chats" } | { page: "connections" } | { page: "settings" } | { page: "live" | "turns" | "world" | "files"; chat: string | null } | { page: "turn"; chat: string; turn: string };
 
 export interface UiApp {
   readonly shell: Shell;
@@ -34,7 +37,7 @@ export function useApp(): UiApp {
 
 /** The chat a route is about, if any. */
 export function chatOf(route: Route): string | null {
-  return route.page === "chats" ? null : route.chat;
+  return "chat" in route ? route.chat : null;
 }
 
 /** Now, ticking each second while `ticking`, for the times of what still runs. */

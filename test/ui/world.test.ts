@@ -1,0 +1,95 @@
+// The World page, read from its view as drawn: the tree at any level and depth, each value with where it
+// comes from and the change that wrote it, the facts recorded under a value's key beside that value and
+// apart from it; and the reads behind it, which ask what the page shows and nothing after it has moved on.
+
+import { describe, expect, test } from "bun:test";
+import { h } from "preact";
+import type { WorldAnswer } from "../../src/ui/api";
+import type { RpeClient } from "../../src/ui/client";
+import { readWorld, WORLD_START, type WorldQuery, type WorldResult, WorldView, type WorldViewProps } from "../../src/ui/pages/world";
+import { CHAT, EARLIER, worldAt } from "./recorded";
+import { elements, expand, press, textOf } from "./vnodes";
+
+function worldView(answer: WorldAnswer | null, over: Partial<WorldViewProps> = {}): { text: string; tree: unknown; asked: WorldQuery[] } {
+  const asked: WorldQuery[] = [];
+  const props: WorldViewProps = { query: { ...WORLD_START, at: answer?.at ?? "world" }, answer, loading: false, problem: null, turns: EARLIER, onQuery: (next) => asked.push(next), ...over };
+  const tree = expand(h(WorldView, props));
+  return { text: textOf(tree), tree, asked };
+}
+
+/** The element of the tree that holds a level, and its parts by mark. */
+function partOf(tree: unknown, mark: string, value: string) {
+  const found = elements(tree).find((e) => e.props[mark] === value);
+  if (found === undefined) throw new Error(`no ${mark}=${value}`);
+  return found;
+}
+
+describe("the World page", () => {
+  const point = worldAt("place:calder-point", 1);
+
+  test("each value says where it comes from and what wrote it, and the facts under its key stand beside it, not in its place", () => {
+    const { tree } = worldView(point);
+    const lamp = partOf(partOf(tree, "data-node", "place:lamp-room").props.children, "data-key", "lamp");
+    // A row reads its key, then where the value comes from, then the value.
+    expect(textOf(lamp.props.children)).toContain("lampits own; exact, proposed, by the GM, turn 31dark");
+    // The fact is shown beside the value it bears on; the value stays as recorded.
+    expect(textOf(lamp.props.children)).toContain("fact lamp: the chimney glass cracked in the cold (vague, assumed, by a character, turn 31, by a3)");
+    const room = textOf(partOf(tree, "data-node", "place:lamp-room").props.children);
+    expect(room).toContain("keeperinherited from Calder PointMoira Vell");
+    expect(room).toContain("weatherkept by the weather systemnorth wind, sleet");
+    // A fact under a key no value has stands on its own.
+    expect(room).toContain("Facts on it");
+    expect(room).toContain("smell: paraffin and cold brass (exact, established, from the prose, turn 30)");
+    expect(room).toContain("2 people · 2 things · 1 open · last changed on turn 31");
+    expect(room).toContain("Ash will not leave until the lamp is explained.");
+  });
+
+  test("it opens any level, up or down, to any depth, with each level's own values or what it inherits too", () => {
+    const shown = worldView(point);
+    press(shown.tree, "Up a level");
+    press(shown.tree, "The whole world");
+    press(shown.tree, "More levels");
+    press(shown.tree, "Fewer levels");
+    press(shown.tree, "Its own");
+    // A level below whose own levels the answer does not hold offers to open them.
+    press(partOf(shown.tree, "data-node", "place:lamp-room"), "2 levels below");
+    press(partOf(shown.tree, "data-node", "place:lamp-room"), "Open");
+    expect(shown.asked).toEqual([
+      { ...WORLD_START, at: "world" },
+      { ...WORLD_START, at: "world" },
+      { ...WORLD_START, at: "place:calder-point", depth: 2 },
+      { ...WORLD_START, at: "place:calder-point", depth: 0 },
+      { ...WORLD_START, at: "place:calder-point", values: "own" },
+      { ...WORLD_START, at: "place:lamp-room" },
+      { ...WORLD_START, at: "place:lamp-room" },
+    ]);
+    // The world, one level in: Calder Point holds a level the answer leaves out, the groups and what is elsewhere none.
+    const top = worldView(worldAt("world", 1));
+    expect(elements(top.tree).filter((e) => typeof e.props["data-node"] === "string").map((e) => e.props["data-node"])).toEqual(["world", "place:calder-point", "groups", "elsewhere"]);
+    expect(top.text).toContain("1 level below");
+    expect(top.text).not.toContain("Up a level");
+  });
+
+  test("the reads behind it ask for what the page shows, as it stood at a turn when one is chosen; an answer after the page asked again is let go, and RPE's refusal is said in its words", async () => {
+    const asked: { params: Readonly<Record<string, string>>; query: unknown; answer(value: unknown): void; fail(error: Error): void }[] = [];
+    const client: Pick<RpeClient, "call"> = {
+      call: ((_key: string, params: Readonly<Record<string, string>>, options?: { query?: unknown }) => {
+        const { promise, resolve, reject } = Promise.withResolvers<unknown>();
+        asked.push({ params, query: options?.query, answer: resolve, fail: reject });
+        return promise;
+      }) as RpeClient["call"],
+    };
+    const results: WorldResult[] = [];
+    const stop = readWorld(client, CHAT, { at: "place:lamp-room", depth: 2, values: "own", turn: "turn-30" }, (r) => results.push(r));
+    expect(asked[0]).toMatchObject({ params: { chat: CHAT }, query: { at: "place:lamp-room", depth: 2, values: "own", turn: "turn-30" } });
+    stop();
+    asked[0]?.answer(worldAt("place:lamp-room", 2));
+    readWorld(client, CHAT, WORLD_START, (r) => results.push(r));
+    expect(asked[1]?.query).toEqual({ at: "world", depth: 1, values: "all" });
+    asked[1]?.fail(new Error("Nothing in the world of chat chat-calder is called world."));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(results).toEqual([{ answer: null, problem: "Nothing in the world of chat chat-calder is called world." }]);
+    expect(worldView(null, { problem: results[0]?.problem ?? null }).text).toContain("The world could not be read");
+  });
+});

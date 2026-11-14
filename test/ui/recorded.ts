@@ -5,7 +5,7 @@
 // the chat before the Author's closing calls. Every name, id and number here is made up.
 
 import type { AgentRef, TraceDelta, TraceEvent, TraceRecord, Usage } from "rp-harness/contract";
-import type { ChatList, LiveEvent, ReplyPiece, TurnDetail, TurnList, TurnSummary } from "../../src/ui/api";
+import type { ChatList, LiveEvent, ReplyPiece, Reflection, TurnDetail, TurnList, TurnRun, TurnSummary, ValuesShown, WorldAnswer, WorldNode } from "../../src/ui/api";
 import type { JsonValue } from "../../src/shared/json";
 
 export const USER = "user-1";
@@ -204,10 +204,17 @@ function continued(): LiveEvent[] {
 export const CONTINUED: readonly LiveEvent[] = continued();
 export const CONTINUED_RECORDS: readonly TraceRecord[] = CONTINUED.filter((e) => e.kind === "trace").map((e) => e.data as unknown as TraceRecord);
 
-/** The recorded turn once continued, as a read of it answers: what its latest run (the continue) says, and the records of both its runs, in time order. */
+/** The recorded turn once continued, as a read of it answers: what its latest run (the continue) says, the records of both its runs in time order, and each run. */
 export function continuedTurn(): TurnDetail {
   const latest = turnOf(CONTINUED, { run: RUN, chat: CHAT, received: (CONTINUED_RECORDS[0]?.at ?? T0) - INTAKE_MS });
-  return { ...latest, kind: "continue", trace: [...RECORDS, ...latest.trace] };
+  const first = turnAt().runs;
+  const again = latest.runs.map((run): TurnRun => ({ ...run, id: `${RUN}.2`, nth: 2, kind: "continue" }));
+  return { ...latest, kind: "continue", trace: [...RECORDS, ...latest.trace], runs: [...first, ...again] };
+}
+
+/** Where the harness keeps what one model call was sent, below the turn's folder. */
+export function requestFile(agent: AgentRef, call: number): string {
+  return `transcripts/${agent.definition}-${agent.id}.call-${call}.json`;
 }
 
 /** A turn as a read of it answers, from the live events of its run heard so far, with its trace from record `from`. */
@@ -223,27 +230,43 @@ export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat:
   const intent = records.find((r) => r.event.kind === "intent")?.event;
   const spent = records.flatMap((r) => (r.event.kind === "call_ended" ? [r.event.usage] : []));
   const sum = spent.reduce<Usage>((a, b) => ({ calls: a.calls + b.calls, input: a.input + b.input, cacheRead: a.cacheRead + b.cacheRead, cacheWrite: a.cacheWrite + b.cacheWrite, output: a.output + b.output, reasoning: (a.reasoning ?? 0) + (b.reasoning ?? 0) }), { calls: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, reasoning: 0 });
+  const status = outcome?.status ?? "running";
+  const timings = { received: options.received, started: at("run_started"), firstWord, released: at("released"), ended: at("run_ended") };
+  const trace = records.filter((r) => r.seq >= (options.from ?? 1));
+  const run: TurnRun = {
+    id: `${options.run}.1`,
+    nth: 1,
+    kind: "new",
+    status,
+    timings,
+    usage: outcome?.usage ?? sum,
+    reply: { text, progress },
+    error: outcome?.error ?? null,
+    trace,
+    requests: records.flatMap((r) => (r.event.kind === "call_started" ? [{ agent: r.agent.id, definition: r.agent.definition, call: r.event.call, file: requestFile(r.agent, r.event.call) }] : [])),
+  };
   return {
     id: options.run,
     chat: options.chat,
     kind: "new",
     onPath: true,
     message: outcome?.released === true ? "msg-0412" : null,
-    status: outcome?.status ?? "running",
-    timings: { received: options.received, started: at("run_started"), firstWord, released: at("released"), ended: at("run_ended") },
+    status,
+    timings,
     usage: outcome?.usage ?? sum,
     intent: intent?.kind === "intent" ? intent.text : null,
     reply: { text, progress },
     error: outcome?.error ?? null,
-    trace: records.filter((r) => r.seq >= (options.from ?? 1)),
+    trace,
     lore: { activated: [...LORE.activated], map: [...LORE.map] },
+    runs: [run],
   };
 }
 
 /** The recorded turn as a read of it answers once the hub had sent its first `count` events (all of them when absent), with its trace from record `from`. */
 export function turnAt(count: number = RECORDED.length, from = 1, chat = CHAT): TurnDetail {
   const detail = turnOf(RECORDED.slice(0, count), { run: RUN, chat, received: T0 - INTAKE_MS, from });
-  return chat === CHAT ? detail : { ...detail, trace: detail.trace.map((r) => ({ ...r, scope: { ...r.scope, chat } })) };
+  return chat === CHAT ? detail : { ...detail, trace: detail.trace.map((r) => ({ ...r, scope: { ...r.scope, chat } })), runs: detail.runs.map((run) => ({ ...run, trace: run.trace.map((r) => ({ ...r, scope: { ...r.scope, chat } })) })) };
 }
 
 export function summaryOf(detail: TurnDetail): TurnSummary {
@@ -268,7 +291,10 @@ export function earlierTurn(id: string, chat = CHAT): TurnDetail | null {
   const summary = EARLIER.find((t) => t.id === id);
   const words = EARLIER_WORDS[id];
   if (summary === undefined || words === undefined) return null;
-  return { ...summary, chat, intent: words.intent, reply: { text: words.reply, progress: [] }, error: summary.status === "stopped" ? { code: "stopped" } : null, trace: [], lore: { activated: [], map: [] } };
+  const error = summary.status === "stopped" ? { code: "stopped" as const } : null;
+  const reply = { text: words.reply, progress: [] };
+  const run: TurnRun = { id: `${id}.1`, nth: 1, kind: summary.kind, status: summary.status, timings: summary.timings, usage: summary.usage, reply, error, trace: [], requests: [] };
+  return { ...summary, chat, intent: words.intent, reply, error, trace: [], lore: { activated: [], map: [] }, runs: [run] };
 }
 
 /** A chat's list of turns, newest first: the recorded one as it stands after `count` events, then the earlier ones. */
@@ -282,3 +308,74 @@ export const CHATS: ChatList = {
     { id: "chat-orchard", name: "The orchard war", lastTurnAt: T0 - 3 * 86_400_000, running: false },
   ],
 };
+
+const quiet = (over: Partial<Reflection> = {}): Reflection => ({ people: 0, things: 0, places: 0, groups: 0, records: 0, notable: [], open: 0, changed: null, note: null, ...over });
+
+/** The story's world as the store's tree holds it, every level with all its values (what it inherits among them). */
+export const WORLD: readonly WorldNode[] = [
+  {
+    ref: "world",
+    kind: "world",
+    name: "The Calder coast",
+    what: null,
+    reflection: quiet({ people: 2, things: 2, places: 2, changed: 31 }),
+    values: [
+      { key: "time", value: "12 Nov, 21:40", from: { system: "calendar" } },
+      { key: "currency", value: "crowns", mark: { turn: "turn-28", n: 28, precision: "exact", standing: "established", source: "import" } },
+    ],
+    facts: [],
+    children: ["place:calder-point", "groups", "elsewhere"],
+    parent: null,
+  },
+  {
+    ref: "place:calder-point",
+    kind: "place",
+    name: "Calder Point",
+    what: null,
+    reflection: quiet({ people: 2, things: 2, places: 1, notable: ["Moira Vell"], changed: 31 }),
+    values: [
+      { key: "weather", value: "north wind, sleet", from: { system: "weather" } },
+      { key: "keeper", value: "Moira Vell", mark: { turn: "turn-30", n: 30, precision: "exact", standing: "established", source: "lore" } },
+    ],
+    facts: [{ id: "f-1", about: "place:calder-point", key: "keeper", value: "Moira has kept the light for forty years", precision: "approximate", standing: "established", source: "lore", by: "a1", turn: "turn-30", n: 30 }],
+    children: ["place:lamp-room"],
+    parent: "world",
+  },
+  {
+    ref: "place:lamp-room",
+    kind: "place",
+    name: "The lamp room",
+    what: null,
+    reflection: quiet({ people: 2, things: 2, notable: ["Moira Vell", "Ash"], open: 1, changed: 31, note: "Ash will not leave until the lamp is explained." }),
+    values: [
+      { key: "weather", value: "north wind, sleet", from: { system: "weather" } },
+      { key: "keeper", value: "Moira Vell", from: { ref: "place:calder-point", name: "Calder Point" } },
+      { key: "lamp", value: "dark", mark: { turn: "turn-31", n: 31, precision: "exact", standing: "proposed", source: "gm" } },
+    ],
+    facts: [
+      { id: "f-2", about: "place:lamp-room", key: "lamp", value: "the chimney glass cracked in the cold", precision: "vague", standing: "assumed", source: "character", by: "a3", turn: "turn-31", n: 31 },
+      { id: "f-3", about: "place:lamp-room", key: "smell", value: "paraffin and cold brass", precision: "exact", standing: "established", source: "prose", by: null, turn: "turn-30", n: 30 },
+    ],
+    children: ["entity:moira", "entity:logbook"],
+    parent: "place:calder-point",
+  },
+  { ref: "entity:moira", kind: "entity", name: "Moira Vell", what: "person", reflection: quiet(), values: [{ key: "holding", value: "the logbook" }], facts: [], children: [], parent: "place:lamp-room" },
+  { ref: "entity:logbook", kind: "entity", name: "The keeper's logbook", what: "thing", reflection: quiet(), values: [], facts: [], children: [], parent: "place:lamp-room" },
+  { ref: "groups", kind: "groups", name: null, what: null, reflection: quiet(), values: [], facts: [], children: [], parent: "world" },
+  { ref: "elsewhere", kind: "elsewhere", name: null, what: null, reflection: quiet(), values: [], facts: [], children: [], parent: "world" },
+];
+
+/** The world as its route answers for a level, to a depth, with the values asked for: the level, then each level below in order. */
+export function worldAt(at: string, depth: number, values: ValuesShown = "all"): WorldAnswer | null {
+  const byRef = new Map(WORLD.map((node) => [node.ref, node]));
+  if (!byRef.has(at)) return null;
+  const nodes: WorldNode[] = [];
+  const walk = (ref: string, down: number): void => {
+    const node = byRef.get(ref);
+    if (node === undefined) return;
+    nodes.push({ ...node, values: values === "none" ? [] : values === "own" ? node.values.filter((v) => v.from?.ref === undefined) : node.values });
+    if (down < depth) for (const child of node.children) walk(child, down + 1);
+  };
+  walk(at, 0);
+  return { at, nodes };
+}

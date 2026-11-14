@@ -13,14 +13,27 @@ import { NOTHING_WATCHED, watchChat, type Watched } from "../live-watch";
 import { AgentTree, ReplyBox, RunHead } from "../trace-view";
 import { errorWords } from "../words";
 
+/**
+ * A Stop pressed on the Live page: the chat and the run it was pressed for, that run by its place among
+ * its turn's runs too (a continue runs a turn again under the same id), and why it did not go through,
+ * in RPE's words, once that is known.
+ */
+export interface StopPress {
+  chat: string;
+  run: string;
+  nth: number;
+  problem: string | null;
+}
+
 export interface LiveViewProps {
+  chat: string;
   run: RunNode | null;
   loading: boolean;
   problem: string | null;
   now: number;
   gateOpen: boolean;
-  /** Stop was pressed for this run and it has not ended yet. */
-  stopping: boolean;
+  /** The last Stop pressed on the page: it counts only for the run it was pressed for, in its chat, while that run goes on. */
+  stop: StopPress | null;
   onStop(): void;
   onOpenGate(): void;
   onCloseGate(): void;
@@ -30,6 +43,9 @@ export interface LiveViewProps {
 export function LiveView(props: LiveViewProps) {
   const { run } = props;
   const running = run !== null && run.outcome === null;
+  const pressed = props.stop;
+  const stop = running && pressed !== null && pressed.chat === props.chat && pressed.run === run.run && pressed.nth === run.nth ? pressed : null;
+  const stopping = stop !== null && stop.problem === null;
   return (
     <div class="lre-stack rpe-page" data-page="live">
       <PageHeader title="Live" sub="Watch a turn as it runs." />
@@ -41,11 +57,11 @@ export function LiveView(props: LiveViewProps) {
       {run === null ? (
         props.loading ? (
           <p class="lre-muted rpe-line">Reading this chat's turns…</p>
-        ) : (
+        ) : props.problem === null ? (
           <Empty icon="pulse" title="No turn has run in this chat yet">
             <span>When one starts, it shows here as it runs.</span>
           </Empty>
-        )
+        ) : null
       ) : (
         <>
           <Section
@@ -53,8 +69,8 @@ export function LiveView(props: LiveViewProps) {
             title={running ? "Running now" : "The last turn"}
             actions={
               running ? (
-                <Button kind="danger" small busy={props.stopping} onClick={props.onStop}>
-                  {props.stopping ? "Stopping…" : "Stop"}
+                <Button kind="danger" small busy={stopping} onClick={props.onStop}>
+                  {stopping ? "Stopping…" : "Stop"}
                 </Button>
               ) : (
                 <Button small kind="ghost" onClick={props.onOpenTurn}>
@@ -63,6 +79,11 @@ export function LiveView(props: LiveViewProps) {
               )
             }
           >
+            {stop?.problem == null ? null : (
+              <Banner tone="neg" icon="alert" title="Stop did not go through">
+                <span>{stop.problem}</span>
+              </Banner>
+            )}
             <RunHead run={run} now={props.now} />
           </Section>
           <Section id="reply" title="What went to the chat">
@@ -88,7 +109,7 @@ export function LivePage(props: { chat: string }) {
   const app = useApp();
   const { chat } = props;
   const [watched, setWatched] = useState<Watched>(NOTHING_WATCHED);
-  const [stop, setStop] = useState<{ run: string; problem: string | null } | null>(null);
+  const [stop, setStop] = useState<StopPress | null>(null);
   const gateOpen = useSelect(app.gate, (opened) => opened.has(chat));
   useEffect(() => {
     setWatched(NOTHING_WATCHED);
@@ -100,24 +121,27 @@ export function LivePage(props: { chat: string }) {
 
   const pressStop = (): void => {
     if (run === null) return;
-    const turn = run.run;
-    setStop({ run: turn, problem: null });
-    app.client.call("POST /api/v1/chats/:chat/turns/:turn/stop", { chat, turn }).then(
+    const press: StopPress = { chat, run: run.run, nth: run.nth, problem: null };
+    setStop(press);
+    // RPE's answer counts only while this press is the page's own: not once it has left the chat, or Stop was pressed again.
+    const answered = (next: StopPress | null): void => setStop((held) => (held === press ? next : held));
+    app.client.call("POST /api/v1/chats/:chat/turns/:turn/stop", { chat, turn: run.run }).then(
       (answer) => {
-        if (!answer.stopped) setStop(null);
+        if (!answer.stopped) answered(null);
       },
-      (error: unknown) => setStop({ run: turn, problem: errorWords(error) }),
+      (error: unknown) => answered({ ...press, problem: errorWords(error) }),
     );
   };
 
   return (
     <LiveView
+      chat={chat}
       run={run}
       loading={watched.loading}
-      problem={stop?.problem ?? watched.problem}
+      problem={watched.problem}
       now={Math.max(now, run?.lastAt ?? 0)}
       gateOpen={gateOpen}
-      stopping={stop !== null && stop.problem === null && run !== null && stop.run === run.run && run.outcome === null}
+      stop={stop}
       onStop={pressStop}
       onOpenGate={() => app.gate.open(chat)}
       onCloseGate={() => app.gate.close(chat)}

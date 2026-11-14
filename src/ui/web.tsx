@@ -30,19 +30,30 @@ export function routeOfHash(hash: string): Route {
     }
   });
   const [head, chat, page, turn] = parts;
+  if ((head === "connections" || head === "settings") && parts.length === 1) return { page: head };
+  if (head === "files" && parts.length === 1) return { page: "files", chat: null };
   if (head !== "chats" || chat === undefined) return { page: "chats" };
   if (page === "turns" && turn !== undefined && parts.length === 4) return { page: "turn", chat, turn };
-  if (page === "turns" && parts.length === 3) return { page: "turns", chat };
+  if ((page === "turns" || page === "world" || page === "files") && parts.length === 3) return { page, chat };
   return { page: "live", chat };
 }
 
 /** The fragment that names a route. */
 export function hashOf(route: Route): string {
-  const chat = chatOf(route);
-  if (route.page === "chats" || chat === null) return "#/chats";
-  const at = `#/chats/${encodeURIComponent(chat)}`;
+  if (route.page === "chats" || route.page === "connections" || route.page === "settings") return `#/${route.page}`;
+  if (route.chat === null) return route.page === "files" ? "#/files" : "#/chats";
+  const at = `#/chats/${encodeURIComponent(route.chat)}`;
   if (route.page === "turn") return `${at}/turns/${encodeURIComponent(route.turn)}`;
   return `${at}/${route.page}`;
+}
+
+/** The browser's storage for this site, read through `open`; null where the browser refuses it (one that blocks site data throws on the very read). */
+export function siteStorage(open: () => Storage): Storage | null {
+  try {
+    return open();
+  } catch {
+    return null;
+  }
 }
 
 /** The token kept in `storage`; in memory alone where the browser keeps nothing (a private window may refuse). */
@@ -131,7 +142,7 @@ function WebShell(props: { tokens: TokenStore }) {
   const current = navOf(route);
   const target = chat ?? lastChat;
   const links = NAV.filter((item) => item.shells.includes("web")).map((item) => (
-    <button key={item.id} type="button" aria-current={item.id === current ? "page" : undefined} disabled={!signedIn || (item.id !== "chats" && target === null)} onClick={() => app.go(routeFor(item.id as NavId, target))}>
+    <button key={item.id} type="button" aria-current={item.id === current ? "page" : undefined} disabled={!signedIn || (item.needsChat && target === null)} onClick={() => app.go(routeFor(item.id, target))}>
       <Icon name={item.icon} size={18} />
       <span class="lre-bottomnav-label">{item.title}</span>
     </button>

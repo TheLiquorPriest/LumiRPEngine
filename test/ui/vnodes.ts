@@ -31,6 +31,13 @@ export function elements(node: unknown): { type: string; props: Props }[] {
   return [{ type: String(vnode.type), props: vnode.props }, ...elements(vnode.props.children)];
 }
 
+/** Each banner a view shows, in order: its title, and everything it says, its title included. */
+export function banners(tree: unknown): { title: string; text: string }[] {
+  return elements(tree)
+    .filter((e) => typeof e.props.class === "string" && e.props.class.startsWith("lre-banner ") && e.props.role !== undefined)
+    .map((e) => ({ title: textOf(elements(e.props.children).find((c) => c.props.class === "lre-banner-title")?.props.children), text: textOf(e.props.children) }));
+}
+
 /** Presses the one button whose words are `text`. */
 export function press(tree: unknown, text: string): void {
   const found = elements(tree).filter((e) => e.type === "button" && textOf(e.props.children) === text);

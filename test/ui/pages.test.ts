@@ -1,20 +1,30 @@
-// What the Turn and Live pages show, read from their views as drawn: the intent record and the agents'
-// work stay behind the spoiler gate until the player opens it; the timings, the token counts and what
-// went to the chat do not; Stop is there while a turn runs. And the web shell's addresses.
+// What the pages show, read from their views as drawn: on Turn and Live the intent record and the
+// agents' work stay behind the spoiler gate until the player opens it; the timings, the token counts and
+// what went to the chat do not; Stop is there while a turn runs, for that run alone. The Turns list
+// keeps to its chat. And the web shell's addresses.
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
+import type { TurnList } from "../../src/ui/api";
 import type { Route } from "../../src/ui/app";
+import type { RpeClient } from "../../src/ui/client";
 import { applyLive, applyRead, EMPTY_LIVE, lastRunOf, latestRun, type RunNode, runsOf } from "../../src/ui/live-model";
-import { LiveView, type LiveViewProps } from "../../src/ui/pages/live";
-import { TURN_SECTIONS, TurnView, type TurnViewProps } from "../../src/ui/pages/turns";
-import { hashOf, routeOfHash } from "../../src/ui/web";
+import { LiveView, type LiveViewProps, type StopPress } from "../../src/ui/pages/live";
+import { type FolderShown, NO_FOLDER, readFolder, readTurns, TURN_SECTIONS, TurnsView, TurnView, type TurnsRead, type TurnViewProps } from "../../src/ui/pages/turns";
+import { hashOf, routeOfHash, siteStorage, storedTokens } from "../../src/ui/web";
 import { liveTurn } from "../../src/ui/turn-model";
-import { CHAT, CONTINUED_REPLY, continuedTurn, earlierTurn, INTENT, LORE, RECORDED, RECORDS, REPLY, RUN, TOTAL, turnAt } from "./recorded";
-import { elements, expand, press, textOf } from "./vnodes";
+import { AUTHOR, CHAT, CONTINUED, CONTINUED_REPLY, continuedTurn, EARLIER, earlierTurn, GM, INTENT, LORE, MOIRA, RECORDED, RECORDS, REPLY, requestFile, RUN, TOTAL, turnAt } from "./recorded";
+import { banners, elements, expand, press, textOf } from "./vnodes";
 
 const RULING = "Ruling: her story does not hold.";
 const THINKING = "She lied to the harbourmaster";
+
+/** Lets everything the page has waiting on a promise run. */
+function settle(): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setImmediate(resolve);
+  return promise;
+}
 
 function turnView(over: Partial<TurnViewProps> = {}): { text: string; tree: unknown; pressed: string[] } {
   const pressed: string[] = [];
@@ -25,11 +35,14 @@ function turnView(over: Partial<TurnViewProps> = {}): { text: string; tree: unkn
     problem: null,
     now: turn.timings.ended ?? 0,
     gateOpen: false,
+    folder: NO_FOLDER,
     onOpenGate: () => pressed.push("open"),
     onCloseGate: () => pressed.push("close"),
     onBack: () => pressed.push("back"),
     onLive: () => pressed.push("live"),
     onRead: () => pressed.push("read"),
+    onOpenFile: (name) => pressed.push(`file:${name}`),
+    onCloseFile: () => pressed.push("close-file"),
     ...over,
   };
   const tree = expand(h(TurnView, props));
@@ -62,7 +75,20 @@ describe("the Turn page", () => {
     expect(text).toContain(REPLY.split("\n")[0] as string);
   });
 
-  test("behind the gate: what the Author was given by name, its prompt's lore by id, and the turn's folder named as not available, with no route to open it", () => {
+  test("a turn tied to no message says why: not yet while it may still be, and no message once it ended with nothing released", () => {
+    const stopped = earlierTurn("turn-28");
+    if (stopped === null) throw new Error("the fixture has no turn-28");
+    const untied = { ...stopped, message: null };
+    expect([untied.status, untied.timings.released]).toEqual(["stopped", null]);
+    const done = turnView({ turn: untied }).text;
+    expect(done).toContain("no message");
+    expect(done).not.toContain("not tied to a message yet");
+    // Released, and not yet tied: Lumiverse has yet to say which message it saved.
+    expect(turnView({ turn: { ...turnAt(), message: null } }).text).toContain("not tied to a message yet");
+    expect(turnView({ turn: { ...turnAt(40), message: null } }).text).toContain("not tied to a message yet");
+  });
+
+  test("behind the gate: what the Author was given by name and its prompt's lore by id; nothing the page says of RPE's routes", () => {
     const shut = turnView({ gateOpen: false });
     expect(shut.text).not.toContain("prompt:all");
     expect(shut.text).not.toContain(LORE.map[1]);
@@ -72,8 +98,9 @@ describe("the Turn page", () => {
     expect(open.text).toContain("author was given: prompt:all, story:brief, world:scene.");
     expect(open.text).toContain(`Lumiverse activated for its prompt: ${LORE.activated.join(", ")}`);
     expect(open.text).toContain(`Its lore map showed the Author: ${LORE.map.join(", ")}`);
-    expect(open.text).toContain("Not available here yet: RPE has no route that lists a turn's folder or opens its files");
-    for (const name of ["briefing.md", "world-state.md", "active-wi-content.md", "transcripts/"]) expect(open.text).toContain(name);
+    // The page makes no claim of its own about which routes RPE has.
+    expect(open.text).not.toContain("Not available here yet");
+    expect(open.text).not.toContain("has no route");
     // Each agent's model calls with their tools and results are drawn too.
     expect(open.text).toContain("2d6 = 4 + 1 = 5 against 8: it does not hold.");
     // A turn whose prompt had no lore says so.
@@ -99,15 +126,16 @@ describe("the Turn page", () => {
     expect(turnView({ sections, gateOpen: true }).text).toContain("The lamp room's door");
   });
 
-  test("a turn a continue ran again shows each of its runs, what the latest sent, and each run's agents behind the gate", () => {
+  test("a turn a continue ran again shows each of its runs by its own id, what each sent to the chat, and each run's agents behind the gate", () => {
     const turn = continuedTurn();
     const shut = turnView({ turn, gateOpen: false });
     expect(shut.text).toContain("Its runs");
-    expect(shut.text).toContain("Run 1 of 2: New reply, led by author");
-    expect(shut.text).toContain("Run 2 of 2: Continue, led by author");
-    expect(shut.text).toContain(`It released ${REPLY.length.toLocaleString("en")} characters.`);
+    expect(shut.text).toContain(`Run 1 of 2, ${RUN}.1: New reply, led by author`);
+    expect(shut.text).toContain(`Run 2 of 2, ${RUN}.2: Continue, led by author`);
+    // What the first run sent, from its own reply, and what the latest sent.
+    expect(shut.text).toContain(REPLY.split("\n")[0] as string);
     expect(shut.text).toContain(CONTINUED_REPLY);
-    expect(shut.text).not.toContain(REPLY.split("\n")[0] as string);
+    expect(shut.text).not.toContain("is not shown");
     const open = turnView({ turn, gateOpen: true });
     const byRun = elements(open.tree)
       .filter((e) => e.props["data-run-nth"] !== undefined && elements(e.props.children).some((c) => c.props["data-agent"] !== undefined))
@@ -116,6 +144,71 @@ describe("the Turn page", () => {
       [1, ["a1", "a2", "a3"]],
       [2, ["a1"]],
     ]);
+  });
+
+  test("behind the gate: the turn's folder as RPE lists it, each file opened on demand, and what each agent's first call was sent", () => {
+    const files = [
+      { name: "briefing.md", bytes: 2_048, folder: false },
+      { name: "transcripts", bytes: 900, folder: true },
+      { name: requestFile(AUTHOR, 1), bytes: 900, folder: false },
+      { name: "world-state.md", bytes: 512, folder: false },
+    ];
+    const folder: FolderShown = { files, problem: null, open: null };
+    expect(turnView({ folder, gateOpen: false }).text).not.toContain("world-state.md");
+    const open = turnView({ folder, gateOpen: true });
+    for (const name of ["briefing.md", "world-state.md", requestFile(AUTHOR, 1)]) expect(open.text).toContain(name);
+    press(open.tree, "world-state.md");
+    // Each agent's first call, by the request file the run names for it.
+    for (const agent of [AUTHOR, GM, MOIRA]) press(open.tree, `${agent.definition} (${agent.id}), call 1`);
+    expect(open.pressed).toEqual(["file:world-state.md", ...[AUTHOR, GM, MOIRA].map((a) => `file:${requestFile(a, 1)}`)]);
+
+    // A request kept as the harness writes it is laid out as its messages, in order.
+    const request = { messages: [{ role: "system", text: "You are the Author of this story." }, { role: "user", text: "Ash: Why did the lamp go dark?" }] };
+    const sent = turnView({ gateOpen: true, folder: { ...folder, open: { name: requestFile(AUTHOR, 1), text: JSON.stringify(request), problem: null } } });
+    expect(sent.text).toContain("systemYou are the Author of this story.");
+    expect(sent.text).toContain("userAsh: Why did the lamp go dark?");
+    // Any other file is its text as written; one RPE would not give says why in its words.
+    const state = turnView({ gateOpen: true, folder: { ...folder, open: { name: "world-state.md", text: "## The lamp room\nDusk; wind from the north.", problem: null } } });
+    expect(state.text).toContain("## The lamp room\nDusk; wind from the north.");
+    press(state.tree, "Close");
+    expect(state.pressed).toEqual(["close-file"]);
+    const refused = "Turn turn-31's folder has no file notes.md.";
+    expect(turnView({ gateOpen: true, folder: { ...folder, open: { name: "notes.md", text: null, problem: refused } } }).text).toContain(refused);
+  });
+
+  test("the turn's folder is read when asked for, a file by its path; only the file open now is shown, and nothing once the page has left", async () => {
+    const asked: { key: string; params: Readonly<Record<string, string>>; answer(value: unknown): void; fail(error: Error): void }[] = [];
+    const client: Pick<RpeClient, "call"> = {
+      call: ((key: string, params: Readonly<Record<string, string>>) => {
+        const { promise, resolve, reject } = Promise.withResolvers<unknown>();
+        asked.push({ key, params, answer: resolve, fail: reject });
+        return promise;
+      }) as RpeClient["call"],
+    };
+    const shown: FolderShown[] = [];
+    const folder = readFolder(client, CHAT, RUN, (now) => shown.push(now));
+    expect(asked[0]).toMatchObject({ key: "GET /api/v1/chats/:chat/turns/:turn/files", params: { chat: CHAT, turn: RUN } });
+    asked[0]?.answer({ files: [{ name: "world-state.md", bytes: 512, folder: false }] });
+    await settle();
+    expect(shown.at(-1)).toEqual({ files: [{ name: "world-state.md", bytes: 512, folder: false }], problem: null, open: null });
+    folder.open("world-state.md");
+    expect(asked[1]).toMatchObject({ key: "GET /api/v1/chats/:chat/turns/:turn/files/*", params: { chat: CHAT, turn: RUN, "*": "world-state.md" } });
+    // Another file is opened before the first comes: the first's answer is let go.
+    folder.open("briefing.md");
+    asked[1]?.answer({ name: "world-state.md", text: "Dusk." });
+    await settle();
+    expect(shown.at(-1)?.open).toEqual({ name: "briefing.md", text: null, problem: null });
+    asked[2]?.fail(new Error("Turn turn-31's folder has no file briefing.md."));
+    await settle();
+    expect(shown.at(-1)?.open).toEqual({ name: "briefing.md", text: null, problem: "Turn turn-31's folder has no file briefing.md." });
+    folder.close();
+    expect(shown.at(-1)?.open).toBeNull();
+    folder.open("turn.json");
+    folder.stop();
+    const told = shown.length;
+    asked[3]?.answer({ name: "turn.json", text: "{}" });
+    await settle();
+    expect(shown.length).toBe(told);
   });
 
   test("while it runs, the page shows what the live road has said since the turn was read", () => {
@@ -137,12 +230,13 @@ describe("the Turn page", () => {
 function liveView(run: RunNode | null, over: Partial<LiveViewProps> = {}): { text: string; tree: unknown; pressed: string[] } {
   const pressed: string[] = [];
   const props: LiveViewProps = {
+    chat: CHAT,
     run,
     loading: false,
     problem: null,
     now: run?.lastAt ?? 0,
     gateOpen: false,
-    stopping: false,
+    stop: null,
     onStop: () => pressed.push("stop"),
     onOpenGate: () => pressed.push("open"),
     onCloseGate: () => pressed.push("close"),
@@ -165,7 +259,7 @@ describe("the Live page", () => {
     expect(shut.text).not.toContain(INTENT.split("\n")[0] as string);
     press(shut.tree, "Stop");
     expect(shut.pressed).toEqual(["stop"]);
-    expect(liveView(midway, { stopping: true }).text).toContain("Stopping…");
+    expect(liveView(midway, { stop: { chat: CHAT, run: RUN, nth: 1, problem: null } }).text).toContain("Stopping…");
 
     const open = liveView(midway, { gateOpen: true });
     expect(open.text).toContain(INTENT.split("\n")[0] as string);
@@ -184,6 +278,86 @@ describe("the Live page", () => {
     expect(liveView(null).text).toContain("No turn has run in this chat yet");
     expect(liveView(null, { loading: true }).text).toContain("Reading this chat's turns");
   });
+
+  test("when the chat's turns could not be read, it says so, and not that none has run", () => {
+    const { text } = liveView(null, { problem: "RPE did not answer: Failed to fetch" });
+    expect(text).toContain("RPE did not answer: Failed to fetch");
+    expect(text).not.toContain("No turn has run");
+  });
+});
+
+describe("the Turns page", () => {
+  test("when the turns could not be read, it says so, and not that there are none", () => {
+    const text = textOf(expand(h(TurnsView, { turns: [], more: false, loading: false, problem: "RPE did not answer: Failed to fetch", onOpen: () => undefined, onMore: () => undefined })));
+    expect(text).toContain("RPE did not answer: Failed to fetch");
+    expect(text).not.toContain("No turns yet");
+  });
+
+  test("older turns asked for in one chat never show in the chat the page has moved to", async () => {
+    const asked: { chat: string; before: string | undefined; answer(list: TurnList): void }[] = [];
+    const client: Pick<RpeClient, "call"> = {
+      call: ((_key: string, params: { chat: string }, options?: { query?: { before?: string } }) => {
+        const { promise, resolve } = Promise.withResolvers<TurnList>();
+        asked.push({ chat: params.chat, before: options?.query?.before, answer: resolve });
+        return promise;
+      }) as RpeClient["call"],
+    };
+    const inFirst: TurnsRead[] = [];
+    const first = readTurns(client, CHAT, (read) => inFirst.push(read));
+    asked[0]?.answer({ turns: EARLIER.slice(0, 2), more: true });
+    await settle();
+    expect(inFirst.at(-1)?.turns.map((t) => t.id)).toEqual(["turn-30", "turn-29"]);
+    first.more();
+    expect(asked[1]).toMatchObject({ chat: CHAT, before: "turn-29" });
+    // Lumiverse opens another chat before the older turns come: the page reads that chat's turns instead.
+    first.stop();
+    const shownBefore = inFirst.length;
+    const inSecond: TurnsRead[] = [];
+    readTurns(client, "chat-orchard", (read) => inSecond.push(read));
+    asked[2]?.answer({ turns: [{ ...EARLIER[0], id: "turn-o1" } as (typeof EARLIER)[number]], more: false });
+    await settle();
+    asked[1]?.answer({ turns: EARLIER.slice(2), more: false });
+    await settle();
+    expect(inFirst.length).toBe(shownBefore);
+    expect(inSecond.at(-1)?.turns.map((t) => t.id)).toEqual(["turn-o1"]);
+  });
+});
+
+describe("the Live page's Stop", () => {
+  const first = latestRun(RECORDED.slice(0, 54).reduce(applyLive, EMPTY_LIVE));
+  // The same turn, continued: a second run under the same id, going on now.
+  const continuing = latestRun([...RECORDED, ...CONTINUED.slice(0, 4)].reduce(applyLive, EMPTY_LIVE));
+  const ended = latestRun(RECORDED.reduce(applyLive, EMPTY_LIVE));
+  const pressed = (over: Partial<StopPress> = {}): StopPress => ({ chat: CHAT, run: RUN, nth: 1, problem: null, ...over });
+  /** The Stop button's words, and whether it can be pressed. */
+  const stopButton = (tree: unknown) =>
+    elements(tree)
+      .filter((e) => e.type === "button" && ["Stop", "Stopping…"].includes(textOf(e.props.children)))
+      .map((e) => ({ words: textOf(e.props.children), disabled: e.props.disabled === true }));
+
+  test("it says Stopping… only for the run it was pressed for, in its chat: a continue of the same turn can be stopped again", () => {
+    expect([first?.run, first?.nth, first?.outcome]).toEqual([RUN, 1, null]);
+    expect([continuing?.run, continuing?.nth, continuing?.outcome]).toEqual([RUN, 2, null]);
+    expect(stopButton(liveView(first, { stop: pressed() }).tree)).toEqual([{ words: "Stopping…", disabled: true }]);
+    expect(stopButton(liveView(continuing, { stop: pressed() }).tree)).toEqual([{ words: "Stop", disabled: false }]);
+    // A Stop pressed in another chat counts for nothing here.
+    expect(stopButton(liveView(first, { stop: pressed({ chat: "chat-orchard" }) }).tree)).toEqual([{ words: "Stop", disabled: false }]);
+  });
+
+  test("a Stop that did not go through says why in RPE's words, under its own title and not as a read problem, and can be pressed again", () => {
+    const refusal = "RPE answered 503.";
+    const unread = "RPE has no turn turn-31 in this chat.";
+    const shown = liveView(first, { stop: pressed({ problem: refusal }), problem: unread });
+    const said = banners(shown.tree).filter((b) => b.title !== "Spoilers are hidden");
+    expect(said.map((b) => [b.title, b.text.includes(refusal), b.text.includes(unread)])).toEqual([
+      ["Part of this chat could not be read", false, true],
+      ["Stop did not go through", true, false],
+    ]);
+    expect(stopButton(shown.tree)).toEqual([{ words: "Stop", disabled: false }]);
+    // It goes with the run it was pressed for: once that run has ended, or the turn runs again, it is not shown.
+    expect(liveView(ended, { stop: pressed({ problem: refusal }) }).text).not.toContain(refusal);
+    expect(liveView(continuing, { stop: pressed({ problem: refusal }) }).text).not.toContain(refusal);
+  });
 });
 
 describe("the web shell's addresses", () => {
@@ -192,5 +366,18 @@ describe("the web shell's addresses", () => {
     for (const route of routes) expect(routeOfHash(hashOf(route))).toEqual(route);
     expect(routeOfHash("")).toEqual({ page: "chats" });
     expect(routeOfHash("#/chats/x/nowhere/at/all")).toEqual({ page: "live", chat: "x" });
+  });
+});
+
+describe("the web shell's storage", () => {
+  test("where the browser refuses the site its storage, the shell still starts, and keeps the token for the page alone", () => {
+    const refusing = (): Storage => {
+      throw new DOMException("The operation is insecure.", "SecurityError");
+    };
+    expect(siteStorage(refusing)).toBeNull();
+    const tokens = storedTokens(siteStorage(refusing));
+    expect(tokens.get()).toBeNull();
+    tokens.set("rpw_kept-here");
+    expect(tokens.get()).toBe("rpw_kept-here");
   });
 });

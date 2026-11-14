@@ -24,6 +24,15 @@ const OWN_CSS = `
 @keyframes rpe-caret{to{visibility:hidden}}
 .rpe-progress,.rpe-reports{margin:0;padding-left:1.2em;font-size:var(--lre-fs-sm);overflow-wrap:anywhere}
 .rpe-progress{color:var(--lre-muted)}
+.rpe-files{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:var(--lre-s1) var(--lre-s2);min-width:0}
+.rpe-files>li{display:inline-flex;align-items:center;gap:var(--lre-s1);min-width:0;max-width:100%}
+.rpe-files .lre-btn{max-width:100%;overflow-wrap:anywhere;text-align:left;height:auto}
+.rpe-point{display:flex;align-items:flex-end;gap:var(--lre-s2);min-width:0}
+.rpe-point>.lre-field{flex:1}
+.rpe-wrap{flex-wrap:wrap}
+.rpe-note{font-style:italic}
+.rpe-fact{padding-left:var(--lre-s3);font-size:var(--lre-fs-sm)}
+.rpe-plain{list-style:none;margin:0;padding:0}
 .rpe-gatebar{padding:0 var(--lre-s1)}
 .rpe-tree{display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0}
 .rpe-agent{border:1px solid var(--lre-hairline);border-radius:var(--lre-r-lg);background:var(--lre-surface);min-width:0}

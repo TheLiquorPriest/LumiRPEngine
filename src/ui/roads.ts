@@ -9,7 +9,7 @@ import { isRecord } from "../shared/json";
 import { type LiveBatch, type LiveEvent, LIVE_PATH, LIVE_PROTOCOL, type MissingPermission, STATUS_PATH, TOKEN_PROTOCOL_PREFIX } from "./api";
 import { errorWords } from "./words";
 
-/** What a road hands on from RPE's live hub: a chat's events, a loss the page must read past, or RPE's refusal. */
+/** What a road hands on from RPE's live hub: a chat's events, a loss the page must read past, or RPE's refusal (or why the live updates stopped). */
 export type LiveUpdate =
   | ({ type: "events" } & LiveBatch)
   /** Updates were lost that no batch names: for one chat after its socket came back, or for every chat followed. */
@@ -65,8 +65,15 @@ export interface RoadDeps {
   timers: Timers;
 }
 
+/** What proves the page to RPE, and how to get another after RPE refused it. */
+export interface Credential {
+  token(): string;
+  /** A fresh credential; false when there is none to get. Rejects, in the words of whoever gives it, when one could not be had. */
+  renew(): Promise<boolean>;
+}
+
 export interface SocketSettings {
-  /** How long the live socket waits before it opens again after it closed; the wait doubles each time, up to `reconnectMaxMs`. */
+  /** How long the page waits before it tries again: the live socket after it closed, a page token that could not be had. The wait doubles each time, up to `reconnectMaxMs`. */
   reconnectMs: number;
   reconnectMaxMs: number;
 }
@@ -175,9 +182,11 @@ export async function probeDirect(base: string, token: string, deps: RoadDeps, t
 /**
  * The direct road to RPE at `base`. Requests go by HTTP; the live socket opens with the first chat
  * followed, follows every chat again when it comes back after closing, and tells the page that each of
- * those chats lost what came while it was away.
+ * those chats lost what came while it was away. A socket that closed without ever opening may have
+ * offered a token that ran out, so a fresh one is asked for before the next try; when none can be had,
+ * the page is told why, so its live view does not stop unsaid.
  */
-export function directRoad(base: string, token: () => string, deps: RoadDeps, settings: SocketSettings): Road {
+export function directRoad(base: string, credential: Credential, deps: RoadDeps, settings: SocketSettings): Road {
   const url = socketUrl(base);
   const listeners = new Set<(update: LiveUpdate) => void>();
   const followed = new Set<string>();
@@ -189,6 +198,8 @@ export function directRoad(base: string, token: () => string, deps: RoadDeps, se
   let socket: SocketHandle | null = null;
   let isOpen = false;
   let retry: unknown = null;
+  /** A fresh credential is being asked for: the socket is tried again once it is in. */
+  let renewing = false;
   let delay = settings.reconnectMs;
   let closed = false;
 
@@ -235,12 +246,9 @@ export function directRoad(base: string, token: () => string, deps: RoadDeps, se
     }
   }
 
-  function closedUnder(): void {
-    socket = null;
-    isOpen = false;
-    for (const chat of confirmed) lost.add(chat);
-    confirmed.clear();
-    if (closed || followed.size === 0) return;
+  /** The next try at the socket, after a wait that doubles each time, up to `reconnectMaxMs`. */
+  function later(): void {
+    if (closed || followed.size === 0 || retry !== null || renewing) return;
     retry = deps.timers.setTimeout(() => {
       retry = null;
       connect();
@@ -248,10 +256,36 @@ export function directRoad(base: string, token: () => string, deps: RoadDeps, se
     delay = Math.min(delay * 2, settings.reconnectMaxMs);
   }
 
+  function closedUnder(): void {
+    const opened = isOpen;
+    socket = null;
+    isOpen = false;
+    for (const chat of confirmed) lost.add(chat);
+    confirmed.clear();
+    if (closed || followed.size === 0) return;
+    if (opened) {
+      later();
+      return;
+    }
+    renewing = true;
+    void credential
+      .renew()
+      .then(
+        () => undefined,
+        (error: unknown) => {
+          if (!closed) emit({ type: "refused", message: `RPE's live updates stopped, and no new page token could be had: ${errorWords(error)}` });
+        },
+      )
+      .finally(() => {
+        renewing = false;
+        later();
+      });
+  }
+
   function connect(): void {
-    if (closed || socket !== null || retry !== null) return;
+    if (closed || socket !== null || retry !== null || renewing) return;
     try {
-      socket = deps.openSocket(url, [LIVE_PROTOCOL, `${TOKEN_PROTOCOL_PREFIX}${token()}`], {
+      socket = deps.openSocket(url, [LIVE_PROTOCOL, `${TOKEN_PROTOCOL_PREFIX}${credential.token()}`], {
         open: () => {
           isOpen = true;
           delay = settings.reconnectMs;
@@ -267,8 +301,8 @@ export function directRoad(base: string, token: () => string, deps: RoadDeps, se
 
   return {
     kind: "direct",
-    async request(method, path, body, credential) {
-      const answer = await deps.fetch(new URL(path, base).toString(), { method, headers: headersFor(credential, body), ...(body === undefined ? {} : { body }) });
+    async request(method, path, body, token) {
+      const answer = await deps.fetch(new URL(path, base).toString(), { method, headers: headersFor(token, body), ...(body === undefined ? {} : { body }) });
       return { status: answer.status, text: await answer.text() };
     },
     follow(chat) {

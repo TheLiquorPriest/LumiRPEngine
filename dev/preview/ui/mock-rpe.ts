@@ -7,12 +7,15 @@
 // - `/preview/extension?state=well|unregistered|missing`: how RPE says its extension in Lumiverse stands.
 // - `/preview/continue?chat=<chat>`: continues the turn played last in the chat, as RPE runs a continue:
 //   the same turn run again under the same run id, its records numbered from 1 again.
+//
+// Connections are kept in memory while the preview runs, so the Connections page can add, change and
+// remove them; a key sent is never kept, only that one was.
 
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
-import type { TraceDelta, TraceRecord } from "rp-harness/contract";
+import type { ConnectionView, ProviderOffer, TraceDelta, TraceRecord } from "rp-harness/contract";
 import type { JsonValue } from "../../../src/shared/json";
-import type { ExtensionStatus, LiveEvent, ReplyPiece, TurnDetail } from "../../../src/ui/api";
-import { CHATS, CONTINUED, earlierTurn, EARLIER, RECORDED, RUN, summaryOf, T0, turnOf } from "../../../test/ui/recorded";
+import type { ExtensionStatus, LiveEvent, ReplyPiece, SaveConnection, TurnDetail, TurnRun } from "../../../src/ui/api";
+import { CHATS, CONTINUED, earlierTurn, EARLIER, RECORDED, RUN, summaryOf, T0, turnOf, worldAt } from "../../../test/ui/recorded";
 
 /** How long before the run began the request reached RPE, as the recorded turn has it. */
 const INTAKE_MS = 240;
@@ -37,6 +40,8 @@ export interface PreviewSocket {
 const sockets = new Set<ServerWebSocket<PreviewSocket>>();
 const seqs = new Map<string, number>();
 const playing = new Map<string, Playing>();
+/** Every turn played while the preview runs, by its id: one played before stays readable once another plays. */
+const played = new Map<string, Playing>();
 let runs = 30;
 
 const STANDINGS: Readonly<Record<string, ExtensionStatus>> = {
@@ -89,6 +94,7 @@ function play(chat: string): void {
   const begins = Date.now() + 1000;
   const p: Playing = { chat, run: `turn-${++runs}`, starts: [0], received: begins - INTAKE_MS, events: [], timers: [], done: false };
   playing.set(chat, p);
+  played.set(p.run, p);
   schedule(p, RECORDED, begins);
 }
 
@@ -104,11 +110,42 @@ function playContinue(chat: string): boolean {
   return true;
 }
 
-/** The turn played in a chat as RPE's route answers it: what its latest run says, and the records of all its runs from `from`. */
+/** The turn played in a chat as RPE's route answers it: what its latest run says, the records of all its runs from `from`, each run by its own id, and what all its runs spent. */
 function playedTurn(p: Playing, from = 1): TurnDetail {
+  const runs = p.starts.map((start, i) => {
+    const [run] = turnOf(p.events.slice(start, p.starts[i + 1]), { run: p.run, chat: p.chat, received: p.received, from }).runs;
+    return { ...(run as TurnRun), id: `${p.run}.${i + 1}`, nth: i + 1, kind: i === 0 ? ("new" as const) : ("continue" as const) };
+  });
   const latest = turnOf(p.events.slice(p.starts.at(-1) ?? 0), { run: p.run, chat: p.chat, received: p.received });
   const records = p.events.filter((e) => e.kind === "trace").map((e) => e.data as unknown as TraceRecord);
-  return { ...latest, kind: p.starts.length > 1 ? "continue" : latest.kind, trace: records.filter((r) => r.seq >= from) };
+  const usage = runs.map((r) => r.usage).reduce((a, b) => ({ calls: a.calls + b.calls, input: a.input + b.input, cacheRead: a.cacheRead + b.cacheRead, cacheWrite: a.cacheWrite + b.cacheWrite, output: a.output + b.output }));
+  return { ...latest, kind: p.starts.length > 1 ? "continue" : latest.kind, usage, trace: records.filter((r) => r.seq >= from), runs };
+}
+
+/** An invented turn folder, as RPE writes one (plan §5.3): the file's path below the folder, and its text. */
+function folderOf(detail: TurnDetail): Map<string, string> {
+  const files = new Map<string, string>(Object.entries(FOLDER));
+  for (const run of detail.runs) {
+    for (const request of run.requests) {
+      const asked = request.definition === "author" ? "Ash asks Moira why the lamp went dark last night." : `The Author asks the ${request.definition} for its part in the lamp room.`;
+      files.set(request.file, JSON.stringify({ messages: [{ role: "system", text: `You are the ${request.definition} of a story set on a lighthouse at Calder Point.` }, { role: "user", text: asked }] }));
+    }
+  }
+  return files;
+}
+
+const FOLDER: Readonly<Record<string, string>> = {
+  "briefing.md": "## Turn facts\nA new reply. The player's character, Ash, speaks to Moira in the lamp room.\n\n## Lore map\n- [e-12] Calder Point lighthouse: place; defines the tower and its lamp.\n- [e-31] Moira Vell: character; defines her years as keeper.\n- [e-40] The wreck of the Saltmarsh: event; defines the night the lamp went dark.\n",
+  "world-state.md": "## The horizon: the lamp room, Calder Point lighthouse\nDate and time: 12 Nov, late evening (from the region).\nWeather: north wind and sleet (from the coast).\n\nMap, 5 by 3 squares:\n. . L . .\n. A . M .\n. . s . .\nA: Ash, by the stairs. M: Moira, at the logbook. L: the lamp, dark. s: the stair head.\n\n## The chain above\n- Calder Point: a headland, the village below it.\n",
+  "active-wi-content.md": "## Lore map\n- [e-12] Calder Point lighthouse\n- [e-31] Moira Vell\n- [e-40] The wreck of the Saltmarsh\n\n## [e-12] Calder Point lighthouse\nA white tower on the headland; its lamp has burned every night for forty years.\n",
+  "turn.json": `${JSON.stringify({ kind: "new", lore: ["wbe-0071", "wbe-0102"], loreMap: ["e-12", "e-31", "e-40"] }, null, 2)}\n`,
+};
+
+/** A turn's folder as the files route lists it: each file, and each folder with what its files hold. */
+function folderList(files: Map<string, string>): { name: string; bytes: number; folder: boolean }[] {
+  const entries = [...files].map(([name, text]) => ({ name, bytes: new TextEncoder().encode(text).length, folder: false }));
+  const folders = [...new Set(entries.flatMap((e) => (e.name.includes("/") ? [e.name.slice(0, e.name.lastIndexOf("/"))] : [])))];
+  return [...folders.map((name) => ({ name, bytes: entries.filter((e) => e.name.startsWith(`${name}/`)).reduce((n, e) => n + e.bytes, 0), folder: true })), ...entries].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Stops the turn playing for `chat`: what is left is not played, and the run ends stopped. */
@@ -130,7 +167,8 @@ function stop(chat: string, run: string): boolean {
 
 function detailOf(chat: string, turn: string, from: number): TurnDetail | null {
   const p = playing.get(chat);
-  if (p !== undefined && p.run === turn) return playedTurn(p, from);
+  const was = played.get(turn);
+  if (was !== undefined && was.chat === chat) return playedTurn(was, from);
   if (p === undefined && turn === RUN) return turnOf(RECORDED, { run: RUN, chat, received: T0 - INTAKE_MS, from });
   return earlierTurn(turn, chat);
 }
@@ -152,8 +190,54 @@ export function previewControl(url: URL): Response {
   return answer(404, { error: `The preview has no ${url.pathname}.` });
 }
 
+const PROVIDERS: ProviderOffer[] = [
+  { id: "deepseek", name: "DeepSeek", auth: ["key"], apis: [], needsBaseUrl: false },
+  { id: "openai-compatible", name: "A compatible server", auth: ["key", "none"], apis: ["openai-completions"], needsBaseUrl: true },
+];
+let connections: ConnectionView[] = [{ id: "c-flash", name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", effort: "high", default: true, key: { set: true, last4: null } }];
+let madeConnections = 1;
+
+/** The connection routes, over the list in memory: what the pages send, answered in the shapes the model layer answers in. */
+async function connectionsAnswer(request: Request, path: string): Promise<Response> {
+  if (path === "/api/v1/connections" && request.method === "GET") return answer(200, { connections, default: connections.find((c) => c.default)?.id ?? null, providers: PROVIDERS });
+  const at = /^\/api\/v1\/connections(?:\/([^/]+))?(\/default)?$/.exec(path);
+  const id = at?.[1] === undefined ? null : decodeURIComponent(at[1]);
+  const was = connections.find((c) => c.id === id);
+  if (at === null || (id !== null && was === undefined)) return answer(404, { error: `RPE has no ${request.method} ${path}.` });
+  if (at[2] !== undefined && request.method === "PUT") {
+    connections = connections.map((c) => ({ ...c, default: c.id === id }));
+    return new Response(null, { status: 204 });
+  }
+  if (id !== null && request.method === "DELETE") {
+    connections = connections.filter((c) => c.id !== id);
+    return new Response(null, { status: 204 });
+  }
+  if ((id === null && request.method === "POST") || (id !== null && request.method === "PUT")) {
+    const body = (await request.json().catch(() => null)) as SaveConnection | null;
+    const input = body?.connection;
+    if (body === null || input === undefined || typeof input.name !== "string" || input.name.trim() === "") return answer(400, { error: "A connection needs a name." });
+    const keySet = body.key === undefined ? (was?.key?.set ?? false) : body.key !== null;
+    const view: ConnectionView = {
+      id: id ?? `c-${++madeConnections}`,
+      name: input.name,
+      provider: input.provider,
+      auth: input.auth,
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.effort ? { effort: input.effort } : {}),
+      ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
+      ...(input.api ? { api: input.api } : {}),
+      default: was?.default ?? connections.length === 0,
+      key: input.auth === "key" ? { set: keySet, last4: null } : null,
+      ...(input.auth === "signin" ? { signedIn: false } : {}),
+    };
+    connections = was === undefined ? [...connections, view] : connections.map((c) => (c.id === id ? view : c));
+    return answer(200, view);
+  }
+  return answer(405, { error: `RPE has no ${request.method} ${path}.` });
+}
+
 /** The stand-in's answer to a request under `/api/v1/`, or undefined when it became the live socket. */
-export function rpeAnswer(request: Request, server: Server<PreviewSocket>): Response | undefined {
+export function rpeAnswer(request: Request, server: Server<PreviewSocket>): Response | undefined | Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
   if (path === "/api/v1/status") return answer(200, { name: "rpe", version: "preview", started: T0, belongsToUser: true });
@@ -164,6 +248,7 @@ export function rpeAnswer(request: Request, server: Server<PreviewSocket>): Resp
   const credential = /^Bearer\s+\S+/i.test(request.headers.get("authorization") ?? "");
   if (!credential) return answer(401, { error: "This needs a page token or the web UI's token." });
   if (path === "/api/v1/status/extension") return answer(200, standing);
+  if (path.startsWith("/api/v1/connections")) return connectionsAnswer(request, path);
   if (path === "/api/v1/chats") return answer(200, { chats: CHATS.chats.map((c) => ({ ...c, running: playing.get(c.id)?.done === false })) });
   const turns = /^\/api\/v1\/chats\/([^/]+)\/turns$/.exec(path);
   if (turns !== null && request.method === "GET") {
@@ -173,6 +258,27 @@ export function rpeAnswer(request: Request, server: Server<PreviewSocket>): Resp
     const all = [...(p === undefined || p.events.length > 0 ? [summaryOf(latest)] : []), ...EARLIER];
     const limit = Number(url.searchParams.get("limit") ?? all.length);
     return answer(200, { turns: all.slice(0, limit), more: limit < all.length });
+  }
+  const world = /^\/api\/v1\/chats\/([^/]+)\/world$/.exec(path);
+  if (world !== null && request.method === "GET") {
+    const chat = decodeURIComponent(world[1] as string);
+    const at = url.searchParams.get("at") ?? "world";
+    const values = url.searchParams.get("values") ?? "own";
+    if (values !== "none" && values !== "own" && values !== "all") return answer(400, { error: "values is one of none, own, all." });
+    const found = worldAt(at, Number(url.searchParams.get("depth") ?? 1), values);
+    return found === null ? answer(404, { error: `Nothing in the world of chat ${chat} is called ${at}.` }) : answer(200, found);
+  }
+  const files = /^\/api\/v1\/chats\/([^/]+)\/turns\/([^/]+)\/files(?:\/(.+))?$/.exec(path);
+  if (files !== null && request.method === "GET") {
+    const chat = decodeURIComponent(files[1] as string);
+    const turn = decodeURIComponent(files[2] as string);
+    const detail = detailOf(chat, turn, 1);
+    if (detail === null) return answer(404, { error: `Chat ${chat} has no turn ${turn}.` });
+    const folder = folderOf(detail);
+    if (files[3] === undefined) return answer(200, { files: folderList(folder) });
+    const name = files[3].split("/").map(decodeURIComponent).join("/");
+    const text = folder.get(name);
+    return text === undefined ? answer(404, { error: `Turn ${turn}'s folder has no file ${name}.` }) : answer(200, { name, text });
   }
   const one = /^\/api\/v1\/chats\/([^/]+)\/turns\/([^/]+)(\/stop)?$/.exec(path);
   if (one !== null) {

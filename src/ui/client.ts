@@ -8,7 +8,7 @@
 import { createStore, type Readable } from "../frontend/store";
 import { isRecord } from "../shared/json";
 import type { LiveEvent, MissingPermission, RouteKey, Routes } from "./api";
-import { directRoad, type LiveUpdate, probeDirect, type RelayChannel, relayRoad, type Road, type RoadAnswer, type RoadDeps, type SocketSettings, type StartFacts } from "./roads";
+import { type Credential, directRoad, type LiveUpdate, probeDirect, type RelayChannel, relayRoad, type Road, type RoadAnswer, type RoadDeps, type SocketSettings, type StartFacts } from "./roads";
 import { errorWords } from "./words";
 
 /** RPE refused a call, in its own words; `status` 0 when RPE was not reached at all. */
@@ -36,7 +36,8 @@ export type ClientState =
   | { phase: "signed-out"; error: string | null };
 
 type PathOf<K extends string> = K extends `${string} ${infer P}` ? P : never;
-type ParamName<S extends string> = S extends `:${infer N}` ? N : never;
+/** A segment's param name: `:chat` names `chat`; the last segment `*`, the rest of the path, is named `*`. */
+type ParamName<S extends string> = S extends `:${infer N}` ? N : S extends "*" ? "*" : never;
 type ParamNames<P extends string> = P extends `${infer Head}/${infer Tail}` ? ParamName<Head> | ParamNames<Tail> : ParamName<P>;
 /** A route's path params, by the names its pattern gives them. */
 export type ParamsOf<K extends RouteKey> = { readonly [N in ParamNames<PathOf<K>>]: string };
@@ -52,7 +53,7 @@ export interface LiveListener {
   events(events: readonly LiveEvent[], missed: { from: number; to: number } | null): void;
   /** Following has begun, or begun again after events were lost on the way: read afresh what the page shows. */
   reset(): void;
-  /** RPE refused to follow the chat, in its words. */
+  /** RPE refused to follow the chat, or its live updates stopped and could not be had again: why, in the words of whoever said. */
   refused(words: string): void;
 }
 
@@ -63,18 +64,16 @@ export interface RpeClient {
   call<K extends RouteKey>(key: K, params: ParamsOf<K>, options?: CallOptions<K>): Promise<Routes[K]["reply"]>;
   /** Follows a chat's live events; the returned function stops. */
   follow(chat: string, listener: LiveListener): () => void;
+  /**
+   * Calls `listener` each time the page is told to read afresh, for any chat: following one began, or
+   * updates were lost on the way. What a page shows of RPE outside a chat's events is read again then.
+   */
+  onReset(listener: () => void): () => void;
   /** Finds a road now, unless one is found or being found: a shell does at its start, so the page says where it stands before any page asks. */
   connect(): void;
   /** Finds a road again: after a failure, or once the web UI's token is given. */
   reconnect(): void;
   close(): void;
-}
-
-/** What proves the page to RPE, and how to get another after RPE refused it. */
-export interface Credential {
-  token(): string;
-  /** A fresh credential; false when there is none to get. */
-  renew(): Promise<boolean>;
 }
 
 export interface Connection {
@@ -100,15 +99,16 @@ export interface Connector {
   close(): void;
 }
 
-/** `pattern` with its params put in, each encoded, and the query after it. */
+/** `pattern` with its params put in, each encoded, and the query after it. The rest of the path (`*`) is put in segment by segment, its slashes kept. */
 export function pathOf(pattern: string, params: Readonly<Record<string, string>>, query?: Readonly<Record<string, string | number | undefined>>): string {
   const path = pattern
     .split("/")
     .map((segment) => {
-      if (!segment.startsWith(":")) return segment;
-      const value = params[segment.slice(1)];
-      if (value === undefined || value === "") throw new Error(`${pattern} needs its ${segment.slice(1)}.`);
-      return encodeURIComponent(value);
+      if (segment !== "*" && !segment.startsWith(":")) return segment;
+      const name = segment === "*" ? "*" : segment.slice(1);
+      const value = params[name];
+      if (value === undefined || value === "") throw new Error(`${pattern} needs its ${name}.`);
+      return segment === "*" ? value.split("/").map(encodeURIComponent).join("/") : encodeURIComponent(value);
     })
     .join("/");
   const search = new URLSearchParams();
@@ -148,15 +148,21 @@ export function createClient(connector: Connector): RpeClient {
   let road: Road | null = null;
   let offLive: (() => void) | null = null;
   let closed = false;
+  const resets = new Set<() => void>();
 
   const each = (chat: string | undefined, act: (listener: LiveListener) => void): void => {
     for (const [at, set] of listeners) if (chat === undefined || chat === at) for (const listener of [...set]) act(listener);
   };
+  const toldToReadAfresh = (): void => {
+    for (const listener of [...resets]) listener();
+  };
 
   function deliver(update: LiveUpdate): void {
     if (update.type === "events") each(update.chat, (l) => l.events(update.events, update.missed ?? null));
-    else if (update.type === "reset") each(update.chat, (l) => l.reset());
-    else each(undefined, (l) => l.refused(update.message));
+    else if (update.type === "reset") {
+      each(update.chat, (l) => l.reset());
+      toldToReadAfresh();
+    } else each(undefined, (l) => l.refused(update.message));
   }
 
   function followOn(on: Road, chat: string): void {
@@ -165,6 +171,7 @@ export function createClient(connector: Connector): RpeClient {
         if (road !== on || !listeners.has(chat)) return;
         following.add(chat);
         each(chat, (l) => l.reset());
+        toldToReadAfresh();
       },
       (error: unknown) => {
         if (road === on) each(chat, (l) => l.refused(errorWords(error)));
@@ -261,6 +268,10 @@ export function createClient(connector: Connector): RpeClient {
         void road?.unfollow(chat).catch(() => undefined);
       };
     },
+    onReset(listener) {
+      resets.add(listener);
+      return () => resets.delete(listener);
+    },
     connect() {
       if (!closed) void connect().catch(() => undefined);
     },
@@ -273,6 +284,7 @@ export function createClient(connector: Connector): RpeClient {
       closed = true;
       drop();
       listeners.clear();
+      resets.clear();
       connector.close();
     },
   };
@@ -301,13 +313,13 @@ export interface TokenStore {
 
 /** The web shell's connector: RPE served the page, so the road is direct to the page's own origin, with the web UI's token. */
 export function webConnector(base: string, tokens: TokenStore, deps: RoadDeps, settings: ConnectSettings = CONNECT_DEFAULTS): Connector {
-  const token = (): string => tokens.get() ?? "";
+  const credential: Credential = { token: () => tokens.get() ?? "", renew: async () => false };
   return {
     canSwitch: false,
     missing: createStore<readonly MissingPermission[] | null>(null),
     async connect() {
       if (tokens.get() === null) throw new ConnectFailure({ phase: "signed-out", error: null });
-      return { road: directRoad(base, token, deps, settings), credential: { token, renew: async () => false }, state: { phase: "direct", address: base } };
+      return { road: directRoad(base, credential, deps, settings), credential, state: { phase: "direct", address: base } };
     },
     close: () => undefined,
   };
@@ -316,7 +328,8 @@ export function webConnector(base: string, tokens: TokenStore, deps: RoadDeps, s
 /**
  * The drawer's connector: the extension's start-up facts (a page token, RPE's addresses, its build),
  * then each address tried from the page, and the relay when none answers. The page token is renewed
- * before it runs out, and again when RPE refuses it.
+ * before it runs out, asked for again until it comes when the extension cannot give it, and renewed
+ * again when RPE refuses it.
  */
 export function extensionConnector(channel: RelayChannel, deps: RoadDeps, settings: ConnectSettings = CONNECT_DEFAULTS): Connector {
   const missing = createStore<readonly MissingPermission[] | null>(null);
@@ -348,14 +361,22 @@ export function extensionConnector(channel: RelayChannel, deps: RoadDeps, settin
 
   /** Renews the token before its life runs out, counted from now, when its facts reached the page: never from a time RPE's clock named. */
   function schedule(got: StartFacts): void {
+    const life = got.expiresInMs;
+    renewIn(Math.max(0, Math.max(life / 2, life - settings.renewAheadMs)), settings.reconnectMs);
+  }
+
+  /** Asks for a new token in `ms`; one that cannot be had is asked for again after `retryMs`, twice as long each time after, up to `reconnectMaxMs`. */
+  function renewIn(ms: number, retryMs: number): void {
     deps.timers.clearTimeout(timer);
     timer = null;
     if (closed) return;
-    const life = got.expiresInMs;
     timer = deps.timers.setTimeout(() => {
       timer = null;
-      void start().catch(() => undefined);
-    }, Math.max(0, Math.max(life / 2, life - settings.renewAheadMs)));
+      start().catch(() => {
+        // Another renewal may have come in meanwhile and set the next one.
+        if (timer === null) renewIn(retryMs, Math.min(retryMs * 2, settings.reconnectMaxMs));
+      });
+    }, ms);
   }
 
   const credential: Credential = {
@@ -371,7 +392,7 @@ export function extensionConnector(channel: RelayChannel, deps: RoadDeps, settin
       const tried: string[] = [];
       for (const address of got.addresses) {
         const probe = await probeDirect(address, got.token, deps, settings.probeMs);
-        if (probe.ok) return { road: directRoad(address, credential.token, deps, settings), credential, state: { phase: "direct", address } };
+        if (probe.ok) return { road: directRoad(address, credential, deps, settings), credential, state: { phase: "direct", address } };
         tried.push(`${address}: ${probe.why}`);
       }
       const why = tried.length === 0 ? "RPE gave no address this page could try directly." : `This page could not reach RPE directly (${tried.join("; ")}).`;

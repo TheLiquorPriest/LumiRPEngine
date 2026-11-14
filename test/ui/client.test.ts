@@ -1,13 +1,14 @@
 // The client in Lumiverse's drawer: it asks the extension for its start-up facts, tries RPE's address
 // from the page, and takes the relay when the page cannot reach RPE itself, saying so; a refused page
-// token is renewed; a chat's live updates reach whoever follows it, in order, through either road.
+// token is renewed; a chat's live updates reach whoever follows it, in order, through either road; and
+// RPE's word on its extension is read again whenever the page is told to read afresh.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { h } from "preact";
 import { pageRoad } from "../../src/ext/page";
-import type { LiveEvent } from "../../src/ui/api";
+import type { ExtensionStatus, LiveEvent } from "../../src/ui/api";
 import { type ClientState, createClient, extensionConnector, type LiveListener, pathOf, type RpeClient, RpeError } from "../../src/ui/client";
-import { RoadLine } from "../../src/ui/frame";
+import { type ExtensionHeard, RoadLine, watchExtension } from "../../src/ui/frame";
 import type { FetchInit, RelayChannel, RoadDeps, SocketHandlers, StartAnswer, Timers } from "../../src/ui/roads";
 import { CHAT, RECORDED, turnListAt } from "./recorded";
 import { expand, textOf } from "./vnodes";
@@ -91,10 +92,15 @@ interface FakeSocket {
   protocols: string[];
   handlers: SocketHandlers;
   sent: string[];
+  /** Whether RPE let it open. */
+  accepted: boolean;
 }
 
+/** Whether RPE lets a socket offering `protocols` open: always, never, or as the test decides. */
+type Sockets = "open" | "refuse" | ((protocols: readonly string[]) => boolean);
+
 /** The browser's fetch and socket, standing in: `fetch` answers as given; each socket opens, or is refused, as `sockets` says. */
-function browser(fetch: (url: string, init: FetchInit) => Promise<{ status: number; text(): Promise<string> }>, sockets: "open" | "refuse" = "open", timers: Timers = new ManualTimers()) {
+function browser(fetch: (url: string, init: FetchInit) => Promise<{ status: number; text(): Promise<string> }>, sockets: Sockets = "open", timers: Timers = new ManualTimers()) {
   const fetched: { url: string; init: FetchInit }[] = [];
   const opened: FakeSocket[] = [];
   const waiting: ((socket: FakeSocket) => void)[] = [];
@@ -104,10 +110,11 @@ function browser(fetch: (url: string, init: FetchInit) => Promise<{ status: numb
       return fetch(url, init);
     },
     openSocket(url, protocols, handlers) {
-      const socket: FakeSocket = { url, protocols, handlers, sent: [] };
+      const accepted = sockets === "open" || (sockets !== "refuse" && sockets(protocols));
+      const socket: FakeSocket = { url, protocols, handlers, sent: [], accepted };
       opened.push(socket);
       queueMicrotask(() => {
-        if (sockets === "open") handlers.open();
+        if (accepted) handlers.open();
         else handlers.close();
         for (const resolve of waiting.splice(0)) resolve(socket);
       });
@@ -158,6 +165,12 @@ const refused = async (): Promise<never> => {
 };
 const json = (status: number, body: unknown) => async () => ({ status, text: async () => JSON.stringify(body) });
 const rpeStatus = json(200, { name: "rpe", version: "1.0.0", started: 0, belongsToUser: true });
+/** Lets everything the page has waiting on a promise run: the test's own timers stay where they are. */
+function settle(): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setImmediate(resolve);
+  return promise;
+}
 
 const clients: RpeClient[] = [];
 afterEach(() => {
@@ -181,12 +194,13 @@ function settled(client: RpeClient): Promise<ClientState> {
   return promise;
 }
 
-/** A follower that keeps what it is told; `resets(n)` waits for its nth reset. */
-function follower(): LiveListener & { got: LiveEvent[]; missed: ({ from: number; to: number } | null)[]; resetCount: number; resets(n: number): Promise<void> } {
+/** A follower that keeps what it is told; `resets(n)` waits for its nth reset. A refusal fails the test, unless the follower keeps them. */
+function follower(keepRefusals = false): LiveListener & { got: LiveEvent[]; missed: ({ from: number; to: number } | null)[]; refusals: string[]; resetCount: number; resets(n: number): Promise<void> } {
   const waiting: { n: number; resolve: () => void }[] = [];
   const out = {
     got: [] as LiveEvent[],
     missed: [] as ({ from: number; to: number } | null)[],
+    refusals: [] as string[],
     resetCount: 0,
     events(events: readonly LiveEvent[], missed: { from: number; to: number } | null) {
       out.got.push(...events);
@@ -197,7 +211,8 @@ function follower(): LiveListener & { got: LiveEvent[]; missed: ({ from: number;
       for (const w of waiting.filter((x) => x.n <= out.resetCount)) w.resolve();
     },
     refused(words: string) {
-      throw new Error(words);
+      if (!keepRefusals) throw new Error(words);
+      out.refusals.push(words);
     },
     resets(n: number): Promise<void> {
       if (out.resetCount >= n) return Promise.resolve();
@@ -398,9 +413,137 @@ describe("a chat's live updates", () => {
   });
 });
 
+describe("how RPE's extension stands, as the page hears it", () => {
+  test("RPE's word on its extension is read again each time the page is told to read afresh, so a registration lost while the page is open shows", async () => {
+    let said: ExtensionStatus = { registered: true, why: null, missing: [] };
+    const channel = new Channel((sent) => (sent.path === "/api/v1/status/extension" ? { status: 200, body: said } : { status: 200, body: turnListAt() }));
+    const client = track(createClient(extensionConnector(channel, browser(refused).deps)));
+    const heard: ExtensionHeard[] = [];
+    const watcher = watchExtension(client, (word) => heard.push(word));
+    try {
+      client.connect();
+      await settled(client);
+      await settle();
+      expect(heard.at(-1)).toEqual({ rpe: said, problem: null });
+      said = { registered: false, why: "Another install of the extension took RPE's registration.", missing: null };
+      // Updates were lost on the way: the page reads afresh, this word among the rest.
+      channel.send([], true);
+      await settle();
+      expect(heard.at(-1)).toEqual({ rpe: said, problem: null });
+      // A page that begins to follow a chat reads it afresh too.
+      said = { registered: true, why: null, missing: [{ permission: "interceptor", why: "to tag each reply RPE plays" }] };
+      const mine = follower();
+      client.follow(CHAT, mine);
+      await mine.resets(1);
+      await settle();
+      expect(heard.at(-1)).toEqual({ rpe: said, problem: null });
+    } finally {
+      watcher.stop();
+    }
+  });
+});
+
+describe("the page token, renewed while the drawer stays open", () => {
+  const LIFE = 30 * 60_000;
+  const AWAY = "The extension's worker is restarting.";
+
+  /**
+   * The extension's start, standing in, and RPE's rule for the live socket: a token works for 30 minutes
+   * from when it was minted. While `away`, the extension answers no start.
+   */
+  function mintingChannel(timers: ManualTimers) {
+    const minted = new Map<string, number>();
+    const ext = { away: false };
+    const channel = new Channel(
+      () => ({ status: 200, body: {} }),
+      (n) => {
+        if (ext.away) return { facts: null, error: AWAY, missing: [] };
+        minted.set(`rpp_page${n}`, timers.now());
+        return { facts: { token: `rpp_page${n}`, expiresInMs: LIFE, addresses: [ADDRESS], build: "b-1" }, missing: [] };
+      },
+    );
+    const takes = (protocols: readonly string[]): boolean => {
+      const at = minted.get(protocols[1]?.slice("rpe.token.".length) ?? "");
+      return at !== undefined && timers.now() < at + LIFE;
+    };
+    return { channel, ext, takes };
+  }
+
+  /** A drawer on the direct road, following the chat. */
+  async function following(timers: ManualTimers, channel: Channel, takes: Sockets) {
+    const { deps, opened, nextSocket } = browser(rpeStatus, takes, timers);
+    const client = track(createClient(extensionConnector(channel, deps)));
+    const mine = follower(true);
+    const probe = nextSocket();
+    client.follow(CHAT, mine);
+    await probe;
+    const live = await nextSocket();
+    live.handlers.message(JSON.stringify({ type: "following", chat: CHAT, seq: 0 }));
+    await mine.resets(1);
+    return { live, opened, nextSocket, mine };
+  }
+
+  test("a renewal that fails is asked for again, and the live socket opens again with the new token, not the one that ran out", async () => {
+    const timers = new ManualTimers();
+    const { channel, ext, takes } = mintingChannel(timers);
+    const { live, nextSocket, mine } = await following(timers, channel, takes);
+    // The renewal is due a minute before the token runs out, and the extension does not answer it.
+    ext.away = true;
+    timers.advance(29 * 60_000);
+    await settle();
+    expect(channel.starts).toBe(2);
+    ext.away = false;
+    timers.advance(1000);
+    await settle();
+    expect(channel.starts).toBe(3);
+    // The first token runs out, and then the live socket closes under the page: it opens again with the new one.
+    timers.advance(2 * 60_000);
+    live.handlers.close();
+    const reopened = nextSocket();
+    timers.advance(1000);
+    const again = await reopened;
+    expect(again.protocols).toEqual(["rpe.live", "rpe.token.rpp_page3"]);
+    expect(again.accepted).toBe(true);
+    again.handlers.message(JSON.stringify({ type: "following", chat: CHAT, seq: 0 }));
+    expect(mine.resetCount).toBe(2);
+    expect(mine.refusals).toEqual([]);
+  });
+
+  test("when the live socket cannot open again and no new token can be had, its follower is told so in the extension's words; once one can, the socket opens with it", async () => {
+    const timers = new ManualTimers();
+    const { channel, ext, takes } = mintingChannel(timers);
+    const { live, opened, mine } = await following(timers, channel, takes);
+    ext.away = true;
+    timers.advance(31 * 60_000);
+    await settle();
+    // The token has run out; the socket closes, and RPE refuses the one it would open again with.
+    live.handlers.close();
+    timers.advance(1000);
+    await settle();
+    await settle();
+    expect(opened.at(-1)?.accepted).toBe(false);
+    expect(mine.refusals.at(-1) ?? "").toContain(AWAY);
+    // The extension answers again: within the longest wait, the socket opens with a token RPE takes, and the page reads afresh.
+    ext.away = false;
+    for (let waited = 0; waited < 35_000 && opened.at(-1)?.accepted !== true; waited += 1000) {
+      timers.advance(1000);
+      await settle();
+    }
+    const back = opened.at(-1);
+    expect(back?.accepted).toBe(true);
+    back?.handlers.message(JSON.stringify({ type: "following", chat: CHAT, seq: 0 }));
+    expect(mine.resetCount).toBe(2);
+  });
+});
+
 describe("a call's path", () => {
   test("its params go in their places, encoded, and its query after", () => {
     expect(pathOf("/api/v1/chats/:chat/turns/:turn", { chat: "chat a/b", turn: "t#1" }, { from: 4, before: undefined })).toBe("/api/v1/chats/chat%20a%2Fb/turns/t%231?from=4");
     expect(() => pathOf("/api/v1/chats/:chat/turns", {})).toThrow("needs its chat");
+  });
+
+  test("the rest of a path goes in segment by segment, each encoded, its slashes kept", () => {
+    expect(pathOf("/api/v1/chats/:chat/turns/:turn/files/*", { chat: "c1", turn: "t1", "*": "transcripts/author a1.call-1.json" })).toBe("/api/v1/chats/c1/turns/t1/files/transcripts/author%20a1.call-1.json");
+    expect(() => pathOf("/api/v1/chats/:chat/turns/:turn/files/*", { chat: "c1", turn: "t1" })).toThrow("needs its *");
   });
 });

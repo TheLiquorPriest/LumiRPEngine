@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
 import type { ExtensionStatus, MissingPermission } from "../../src/ui/api";
-import { ExtensionNotice, type ExtensionWord } from "../../src/ui/frame";
+import { ExtensionNotice, type ExtensionWord, RoadLine } from "../../src/ui/frame";
 import { expand, press, textOf } from "./vnodes";
 
 const NOT_HEARD = "RPE has not heard from its extension in Lumiverse since it started.";
@@ -47,5 +47,23 @@ describe("the notice of RPE's extension in Lumiverse", () => {
     expect(notice({ rpe: held(null) }).text).toBe("");
     expect(notice({}).text).toBe("");
     expect(notice({ problem: "RPE has no GET /api/v1/status/extension." }).text).toContain("RPE has no GET /api/v1/status/extension.");
+  });
+
+  test("each missing permission is said with the extension's own reason for it, and nothing the page adds of its own about what follows", () => {
+    const panels: MissingPermission = { permission: "ui_panels", why: "to show RPE's pages in the drawer" };
+    const { text } = notice({ own: [panels] });
+    expect(text).toContain(`${panels.permission}: ${panels.why}`);
+    expect(text).not.toContain("not played");
+    expect(text).not.toContain("admin");
+  });
+});
+
+describe("the road line", () => {
+  test("a road that could not be found is said under a neutral title, with the reason below in the words it came in", () => {
+    const refusal = "RPE refused the extension's start: this Lumiverse user is not the one RPE belongs to.";
+    const text = textOf(expand(h(RoadLine, { state: { phase: "failed", error: refusal }, onRetry: () => undefined })));
+    expect(text).toContain(refusal);
+    expect(text).toContain("Not connected to RPE");
+    expect(text).not.toContain("could not be reached");
   });
 });

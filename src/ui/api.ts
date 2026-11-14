@@ -1,11 +1,12 @@
 // What the pages read from RPE (plan §4.4, §14): the routes they call, with what each answers, and the
 // live events a turn publishes on its chat. The route table is where these come from: the plan has the
 // UI client's types generated from it. Until a generator exists they are kept here by hand, because the
-// zone rules keep the pages from importing the server's code, its types included. The app's own routes
-// (its status, the live socket) are mirrored from `src/app/`; the turn routes and the live kinds are
-// what the turn lane implements, in exactly these shapes.
+// zone rules keep the pages from importing the server's code, its types included; `test/ui/direct.test.ts`
+// holds each one to the route itself. The app's own routes (its status, the live socket) are mirrored
+// from `src/app/`; the turn routes and the live kinds are what the turn lane implements; a connection's
+// shapes are RPH's contract's own.
 
-import type { ReplyError, RunStatus, TraceDelta, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
+import type { ConnectionInput, ConnectionList, ConnectionView, ReplyError, RunStatus, TraceDelta, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
 import type { JsonValue } from "../shared/json";
 
 // ---------------------------------------------------------------- the app's own
@@ -65,8 +66,8 @@ export interface ChatSummary {
   id: string;
   /** The chat's name in Lumiverse. */
   name: string;
-  /** When its newest turn began; null before its first. */
-  lastTurnAt: number | null;
+  /** When its newest turn began: RPE lists a chat once it has played a turn of it. */
+  lastTurnAt: number;
   /** Whether a turn of it runs now. */
   running: boolean;
 }
@@ -114,19 +115,39 @@ export interface TurnList {
   more: boolean;
 }
 
+/** One run of a turn: its first, or a continue of it, which runs the turn again under a run id of its own. */
+export interface TurnRun {
+  id: string;
+  /** Its place among the turn's runs, from 1. */
+  nth: number;
+  kind: TurnKind;
+  status: TurnStatus;
+  timings: TurnTimings;
+  usage: Usage;
+  /** What this run sent to the chat: the reply's text, and the progress lines of its thinking block. */
+  reply: { text: string; progress: string[] };
+  error: ReplyError | null;
+  /** Its own trace records, numbered from 1 within the run, from the record numbered `from`. */
+  trace: TraceRecord[];
+  /** The files of the turn's folder that hold its model calls' requests as sent, where the harness kept them: by agent and call, each named by its path below the folder. */
+  requests: { agent: string; definition: string; call: number; file: string }[];
+}
+
 /** `GET /api/v1/chats/:chat/turns/:turn?from=`: one turn, with its trace from the record numbered `from` (1 when absent). */
 export interface TurnDetail extends TurnSummary {
   chat: string;
   /** The lead's intent record as it was written (plan §10.3); null when it wrote none. Shown behind the spoiler gate. */
   intent: string | null;
-  /** What went to the chat so far: the reply's text, and the progress lines of its thinking block. */
+  /** What its latest run sent to the chat so far: the reply's text, and the progress lines of its thinking block. */
   reply: { text: string; progress: string[] };
   /** Why the reply failed, when it did. */
   error: ReplyError | null;
-  /** The events of the turn's run, numbered from `from`, in order. */
+  /** The events of all its runs, each run's numbered from `from`, in order. */
   trace: TraceRecord[];
   /** The lore of the turn's prompt, by id, as its intake kept it: the entries Lumiverse activated for it (Lumiverse's ids), and the entries its lore map showed the Author (RPE's ids, as the map writes them). */
   lore: { activated: string[]; map: string[] };
+  /** Each of its runs, the first first. */
+  runs: TurnRun[];
 }
 
 /** `POST /api/v1/chats/:chat/turns/:turn/stop` (no body): true when the turn was running and is being stopped, false when it had already ended. */
@@ -134,23 +155,103 @@ export interface StopAnswer {
   stopped: boolean;
 }
 
-/**
- * A turn's folder as RPE writes it (plan §5.3: `TURN_FILES` in `src/turn/folder.ts`, and `transcripts/`
- * in `src/turn/trace.ts`), kept here by hand as the routes are. No route lists a turn's folder or opens
- * one of its files yet, so the Turn page names them and says they cannot be opened.
- */
-export const TURN_FOLDER: readonly { name: string; holds: string }[] = [
-  { name: "briefing.md", holds: "the Author's briefing: the turn's facts, the lore map and the world state" },
-  { name: "world-state.md", holds: "the world state" },
-  { name: "assembled-preset-prompt.md", holds: "the prompt Lumiverse assembled" },
-  { name: "visible-chat-history.md", holds: "the chat's history the prompt carried" },
-  { name: "active-wi-content.md", holds: "the lore entries that activated" },
-  { name: "persona.md", holds: "the persona" },
-  { name: "character.md", holds: "the character card" },
-  { name: "turn.json", holds: "the turn's facts, as data" },
-  { name: "previous-attempts/", holds: "the earlier attempts at this reply, for a swipe or a regenerate" },
-  { name: "transcripts/", holds: "each agent's records" },
-];
+/** One entry of a turn's folder: its path below the folder, its size (a folder's is what its files hold), and whether it is a folder. */
+export interface TurnFileEntry {
+  name: string;
+  bytes: number;
+  folder: boolean;
+}
+
+/** `GET /api/v1/chats/:chat/turns/:turn/files`: the whole of a turn's folder, every level down; none for a turn that has no folder. */
+export interface TurnFiles {
+  files: TurnFileEntry[];
+}
+
+/** `GET /api/v1/chats/:chat/turns/:turn/files/*`: one file of a turn's folder, by its path below the folder, as text. */
+export interface TurnFile {
+  name: string;
+  text: string;
+}
+
+// ---------------------------------------------------------------- the world (the store's tree, plan §6.4, §6.6)
+
+/** What a level of the world's tree is: the world, a place, an entity, or one of the two levels the tree adds (the groups, and what is elsewhere). */
+export type WorldNodeKind = "world" | "place" | "entity" | "groups" | "elsewhere";
+export type Precision = "exact" | "approximate" | "vague" | "unknown";
+export type Standing = "established" | "proposed" | "assumed";
+export type ValueSource = "prose" | "lore" | "author" | "gm" | "character" | "player" | "import" | "default" | "invented";
+
+/** The change that last wrote a value: its turn, by id and by its number on the chat's path, and how exact, how sure and from where. */
+export interface ValueMark {
+  turn: string;
+  n: number;
+  precision: Precision | null;
+  standing: Standing | null;
+  source: ValueSource | null;
+}
+
+/** One value of a level: its key, its value as text (null: none), where it comes from when it is not the level's own (a game system that keeps it, or the level above that sets it), and the change that last wrote it. */
+export interface ValueLine {
+  key: string;
+  value: string | null;
+  from?: { system?: string; ref?: string; name?: string };
+  mark?: ValueMark;
+}
+
+/** What is beneath a level, made from recorded values. */
+export interface Reflection {
+  people: number;
+  things: number;
+  places: number;
+  groups: number;
+  records: number;
+  notable: string[];
+  open: number;
+  /** The number of the last turn that changed something there. */
+  changed: number | null;
+  /** An agent's own line on the level. */
+  note: string | null;
+}
+
+/** A plain statement recorded about a level, with how exact and how sure it is and where it came from; never merged into the level's values. */
+export interface WorldFact {
+  id: string;
+  about: string;
+  key: string;
+  value: string;
+  precision: Precision | null;
+  standing: Standing | null;
+  source: ValueSource | null;
+  by: string | null;
+  turn: string;
+  n: number;
+  replacedBy?: string;
+  replacedAt?: number;
+}
+
+/** A level of the world's tree as the world route shows it. */
+export interface WorldNode {
+  ref: string;
+  kind: WorldNodeKind;
+  /** Its name in the data; null for the groups and for what is elsewhere. */
+  name: string | null;
+  /** An entity's kind, by its label; null for any other level. */
+  what: string | null;
+  reflection: Reflection;
+  values: ValueLine[];
+  facts: WorldFact[];
+  children: string[];
+  parent: string | null;
+}
+
+/** Which values each level carries: none, its own (with what game systems keep), or all (with what it inherits). */
+export type ValuesShown = "none" | "own" | "all";
+
+/** `GET /api/v1/chats/:chat/world?at=&depth=&values=&turn=`: the level asked for, then each level below it to the depth asked for, at the chat's head or as it stood at a turn. */
+export interface WorldAnswer {
+  at: string;
+  nodes: WorldNode[];
+}
 
 // ---------------------------------------------------------------- the route map the client is typed by
 
@@ -161,7 +262,13 @@ export interface RouteShape<Reply, Query extends Record<string, string | number 
   body: Body;
 }
 
-/** Every route the pages call, by method and path pattern, as the route table writes them. */
+/** What saving a connection sends (`POST /api/v1/connections`, `PUT /api/v1/connections/:id`): the connection whole, and its key: absent keeps the one there is, null takes it away. */
+export interface SaveConnection {
+  connection: ConnectionInput;
+  key?: string | null;
+}
+
+/** Every route the pages call, by method and path pattern, as the route table writes them; `*` stands for the rest of the path. */
 export interface Routes {
   "GET /api/v1/status": RouteShape<Status>;
   "GET /api/v1/status/extension": RouteShape<ExtensionStatus>;
@@ -169,6 +276,14 @@ export interface Routes {
   "GET /api/v1/chats/:chat/turns": RouteShape<TurnList, { limit?: number; before?: string }>;
   "GET /api/v1/chats/:chat/turns/:turn": RouteShape<TurnDetail, { from?: number }>;
   "POST /api/v1/chats/:chat/turns/:turn/stop": RouteShape<StopAnswer>;
+  "GET /api/v1/chats/:chat/turns/:turn/files": RouteShape<TurnFiles>;
+  "GET /api/v1/chats/:chat/turns/:turn/files/*": RouteShape<TurnFile>;
+  "GET /api/v1/chats/:chat/world": RouteShape<WorldAnswer, { at?: string; depth?: number; values?: ValuesShown; turn?: string }>;
+  "GET /api/v1/connections": RouteShape<ConnectionList>;
+  "POST /api/v1/connections": RouteShape<ConnectionView, Record<string, never>, SaveConnection>;
+  "PUT /api/v1/connections/:id": RouteShape<ConnectionView, Record<string, never>, SaveConnection>;
+  "DELETE /api/v1/connections/:id": RouteShape<void>;
+  "PUT /api/v1/connections/:id/default": RouteShape<void>;
 }
 
 export type RouteKey = keyof Routes & string;

@@ -1,19 +1,64 @@
 // The direct road against RPE's own server, in this process on a free loopback port: the client's
 // calls and its live socket speak what the app's route table, auth and live hub answer. A stand-in for
-// the turn lane's list of turns is mounted as an area, typed from the route as the turn lane's own
-// route will be.
+// the turn lane's list of turns is mounted as an area, so that the server can be tested without a turn
+// lane. What the pages expect of each route they call is checked against the route itself, below.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type App, dataPaths, lineLog, openApp, route, type RouteReply } from "../../src/app";
+import type { ExtensionStatus as SentExtensionStatus } from "../../src/adapter/lumiverse/pipe-wire";
+import { type App, dataPaths, lineLog, openApp, route, type RouteBody, type RouteReply } from "../../src/app";
 import { configOf } from "../../src/app/config";
+import { connectionRoutes } from "../../src/app/connections";
+import { turnRoutes } from "../../src/turn/routes";
 import type { LiveEvent, Routes, TurnList } from "../../src/ui/api";
 import { createClient, type RpeClient, RpeError, webConnector } from "../../src/ui/client";
 import { applyLive, EMPTY_LIVE } from "../../src/ui/live-model";
 import { browserDeps, probeDirect } from "../../src/ui/roads";
 import { CHAT, RECORDED, RECORDS, turnListAt, USER } from "./recorded";
+
+/** True when each of A and B is assignable to the other: a field one has and the other lacks parts them. */
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+/** The turn lane's route at a path pattern (one method per path there, which the test below holds), and the reply its handler gives. */
+type TurnReply<P extends string> = RouteReply<Extract<ReturnType<typeof turnRoutes>[number], { path: P }>>;
+
+// What the pages' route map (`src/ui/api.ts`) expects each route to answer, against what the route's
+// own handler gives (plan §4.4). Each line stops compiling when the two part, either way. The test
+// below holds each route named here to the method the pages call it by. A raw route (a file of a turn's
+// folder) makes its own response, so no type of its reply exists to compare.
+const replies: [
+  Same<Routes["GET /api/v1/chats"]["reply"], TurnReply<"/api/v1/chats">>,
+  Same<Routes["GET /api/v1/chats/:chat/turns"]["reply"], TurnReply<"/api/v1/chats/:chat/turns">>,
+  Same<Routes["GET /api/v1/chats/:chat/turns/:turn"]["reply"], TurnReply<"/api/v1/chats/:chat/turns/:turn">>,
+  Same<Routes["POST /api/v1/chats/:chat/turns/:turn/stop"]["reply"], TurnReply<"/api/v1/chats/:chat/turns/:turn/stop">>,
+  Same<Routes["GET /api/v1/chats/:chat/turns/:turn/files"]["reply"], TurnReply<"/api/v1/chats/:chat/turns/:turn/files">>,
+  Same<Routes["GET /api/v1/chats/:chat/world"]["reply"], TurnReply<"/api/v1/chats/:chat/world">>,
+  Same<Routes["GET /api/v1/status/extension"]["reply"], SentExtensionStatus>,
+] = [true, true, true, true, true, true, true];
+/** The routes of the turn lane's the pages call. */
+const TURN_KEYS = [
+  "GET /api/v1/chats",
+  "GET /api/v1/chats/:chat/turns",
+  "GET /api/v1/chats/:chat/turns/:turn",
+  "POST /api/v1/chats/:chat/turns/:turn/stop",
+  "GET /api/v1/chats/:chat/turns/:turn/files",
+  "GET /api/v1/chats/:chat/turns/:turn/files/*",
+  "GET /api/v1/chats/:chat/world",
+] as const satisfies readonly (keyof Routes)[];
+
+/** The connection routes, by their place in their table: two share a path there, so the test below holds each place to its method and path. */
+type ConnectionTable = ReturnType<typeof connectionRoutes>;
+const CONNECTION_KEYS = ["GET /api/v1/connections", "POST /api/v1/connections", "PUT /api/v1/connections/:id", "DELETE /api/v1/connections/:id", "PUT /api/v1/connections/:id/default"] as const satisfies readonly (keyof Routes)[];
+const connections: [
+  Same<Routes["GET /api/v1/connections"]["reply"], RouteReply<ConnectionTable[0]>>,
+  Same<Routes["POST /api/v1/connections"]["reply"], RouteReply<ConnectionTable[1]>>,
+  Same<Routes["POST /api/v1/connections"]["body"], RouteBody<ConnectionTable[1]>>,
+  Same<Routes["PUT /api/v1/connections/:id"]["reply"], RouteReply<ConnectionTable[2]>>,
+  Same<Routes["PUT /api/v1/connections/:id"]["body"], RouteBody<ConnectionTable[2]>>,
+  Same<Routes["DELETE /api/v1/connections/:id"]["reply"], RouteReply<ConnectionTable[3]>>,
+  Same<Routes["PUT /api/v1/connections/:id/default"]["reply"], RouteReply<ConnectionTable[4]>>,
+] = [true, true, true, true, true, true, true];
 
 const turnsRoute = route({
   method: "GET",
@@ -21,8 +66,6 @@ const turnsRoute = route({
   access: "page",
   handle: ({ params, query }): TurnList & { asked: { chat: string; limit: string | null } } => ({ ...turnListAt(), asked: { chat: params.chat, limit: query.get("limit") } }),
 });
-// The client's shape of the route's reply is what the route gives: this line does not compile when they part.
-const sameReply: Routes["GET /api/v1/chats/:chat/turns"]["reply"] = null as unknown as RouteReply<typeof turnsRoute>;
 
 let root = "";
 let app: App;
@@ -56,6 +99,21 @@ function webClient(held: string | null): RpeClient {
   return client;
 }
 
+describe("the pages' route map, against the routes themselves", () => {
+  test("each route the type checks above compare is in the turn lane's table under the method the pages call it by, the only route at its path", () => {
+    // The handlers reach the turn lane only when a request comes, so the table can be made without one.
+    const table = turnRoutes({ turns: undefined as never, chatName: async () => null }).map((r) => `${r.method} ${r.path}`);
+    for (const key of TURN_KEYS) expect(table.filter((at) => at.split(" ")[1] === key.split(" ")[1])).toEqual([key]);
+    expect(replies.every((same) => same)).toBe(true);
+  });
+
+  test("each connection route the type checks above compare sits at its place in its table, with the method and path the pages call it by", () => {
+    const table = connectionRoutes({ list: async () => ({ connections: [], default: null, providers: [] }), save: async () => undefined as never, remove: async () => undefined, setDefault: async () => undefined }).map((r) => `${r.method} ${r.path}`);
+    expect(table).toEqual([...CONNECTION_KEYS]);
+    expect(connections.every((same) => same)).toBe(true);
+  });
+});
+
 describe("the direct road, against RPE's own server", () => {
   test("RPE answers the page at its address; nothing answers at a closed one, and the page is told why", async () => {
     expect(await probeDirect(base, token, browserDeps(), 3000)).toEqual({ ok: true });
@@ -71,7 +129,7 @@ describe("the direct road, against RPE's own server", () => {
     const client = webClient(token);
     const list = await client.call("GET /api/v1/chats/:chat/turns", { chat: CHAT }, { query: { limit: 5 } });
     expect(list.turns.map((t) => t.id)).toEqual(turnListAt().turns.map((t) => t.id));
-    expect((list as typeof sameReply & { asked: unknown }).asked).toEqual({ chat: CHAT, limit: "5" });
+    expect((list as TurnList & { asked: unknown }).asked).toEqual({ chat: CHAT, limit: "5" });
     expect(client.state.get()).toEqual({ phase: "direct", address: base });
   });
 

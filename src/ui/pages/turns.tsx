@@ -1,20 +1,23 @@
-// A chat's turns, and one turn (plan §14, Turn): its timings and token counts, what went to the chat,
-// and behind the spoiler gate its intent record and the trace of each of its runs (a continue runs a
-// turn again), kept up to date while it runs. The Turn page is a list of sections (`TURN_SECTIONS`):
-// what later lanes add (the prompt by slice, the changes in each lane, perceptions) are sections of
-// their own in that list, behind the gate or not as each says.
+// A chat's turns, and one turn (plan §14, Turn): its timings and token counts, each of its runs by its
+// own id (a continue runs a turn again) and what each sent to the chat, and behind the spoiler gate its
+// intent record, the trace of each run, what each agent's first call was sent, and the turn's folder,
+// each file opened on demand; kept up to date while it runs. The Turn page is a list of sections
+// (`TURN_SECTIONS`): what later lanes add (the prompt by slice, the changes in each lane, perceptions)
+// are sections of their own in that list, behind the gate or not as each says.
 
 import type { ComponentChildren } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { useSelect } from "../../frontend/store";
-import { type TurnDetail, TURN_FOLDER, type TurnSummary } from "../api";
+import { isRecord } from "../../shared/json";
+import type { TurnDetail, TurnFileEntry, TurnRun, TurnSummary } from "../api";
 import { useApp, useNow } from "../app";
+import type { RpeClient } from "../client";
 import { Badge, Banner, Button, Empty, Gated, PageHeader, Pre, Row, Section } from "../atoms";
-import { addUsage, agentUsage, type RunNode, runsOf, runTotals } from "../live-model";
+import { agentUsage, type RunNode, runsOf } from "../live-model";
 import { NOTHING_WATCHED, watchTurn, type Watched } from "../live-watch";
 import { AgentTree, ReplyBox, replyErrorWords, RunHead, runTitle, STATUS_WORDS, TURN_KIND_WORDS } from "../trace-view";
 import { liveTurn, momentsOf, spansOf } from "../turn-model";
-import { clock, counted, duration, errorWords, tokenWords, when } from "../words";
+import { bytesWords, clock, counted, duration, errorWords, tokenWords, when } from "../words";
 
 /** Fixed: how many turns the list reads at a time. */
 export const TURNS_PAGE = 30;
@@ -67,11 +70,11 @@ export function TurnsView(props: TurnsViewProps) {
       {props.turns.length === 0 ? (
         props.loading ? (
           <p class="lre-muted rpe-line">Reading this chat's turns…</p>
-        ) : (
+        ) : props.problem === null ? (
           <Empty icon="list" title="No turns yet">
             <span>A turn shows here once RPE plays a reply in this chat.</span>
           </Empty>
-        )
+        ) : null
       ) : (
         <div class="lre-section flush">
           <ul class="lre-section-body lre-rowlist rpe-turns">
@@ -90,74 +93,189 @@ export function TurnsView(props: TurnsViewProps) {
   );
 }
 
+/** A chat's turns as read so far, newest first. */
+export interface TurnsRead {
+  turns: TurnSummary[];
+  /** Older turns remain to be read. */
+  more: boolean;
+  loading: boolean;
+  problem: string | null;
+}
+
+/**
+ * Reads a chat's turns, newest first, and older ones on `more()`. Every answer is for this chat alone:
+ * once `stop()` is called (the page has left the chat), what comes back is let go.
+ */
+export function readTurns(client: Pick<RpeClient, "call">, chat: string, onChange: (read: TurnsRead) => void): { more(): void; stop(): void } {
+  let read: TurnsRead = { turns: [], more: false, loading: true, problem: null };
+  let alive = true;
+  const show = (next: TurnsRead): void => {
+    if (!alive) return;
+    read = next;
+    onChange(next);
+  };
+  const load = (before: string | undefined): void => {
+    const kept = read.turns;
+    show({ turns: kept, more: false, loading: true, problem: null });
+    client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit: TURNS_PAGE, ...(before === undefined ? {} : { before }) } }).then(
+      (list) => show({ turns: [...kept, ...list.turns], more: list.more, loading: false, problem: null }),
+      (error: unknown) => show({ turns: kept, more: before !== undefined, loading: false, problem: errorWords(error) }),
+    );
+  };
+  load(undefined);
+  return {
+    more() {
+      if (!read.loading) load(read.turns.at(-1)?.id);
+    },
+    stop() {
+      alive = false;
+    },
+  };
+}
+
 export function TurnsPage(props: { chat: string }) {
   const app = useApp();
   const { chat } = props;
-  const [state, setState] = useState<{ turns: TurnSummary[]; more: boolean; loading: boolean; problem: string | null }>({ turns: [], more: false, loading: true, problem: null });
-  const load = (before: string | undefined, kept: TurnSummary[], alive: () => boolean = () => true): void => {
-    setState({ turns: kept, more: false, loading: true, problem: null });
-    app.client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit: TURNS_PAGE, ...(before === undefined ? {} : { before }) } }).then(
-      (list) => {
-        if (alive()) setState({ turns: [...kept, ...list.turns], more: list.more, loading: false, problem: null });
-      },
-      (error: unknown) => {
-        if (alive()) setState({ turns: kept, more: before !== undefined, loading: false, problem: errorWords(error) });
-      },
-    );
-  };
+  const [read, setRead] = useState<TurnsRead>({ turns: [], more: false, loading: true, problem: null });
+  const reader = useRef<{ more(): void } | null>(null);
   useEffect(() => {
-    let alive = true;
-    load(undefined, [], () => alive);
-    return () => {
-      alive = false;
-    };
+    const reading = readTurns(app.client, chat, setRead);
+    reader.current = reading;
+    return reading.stop;
   }, [chat]);
-  return <TurnsView {...state} onOpen={(turn) => app.go({ page: "turn", chat, turn })} onMore={() => load(state.turns.at(-1)?.id, state.turns)} />;
+  return <TurnsView {...read} onOpen={(turn) => app.go({ page: "turn", chat, turn })} onMore={() => reader.current?.more()} />;
+}
+
+// ---------------------------------------------------------------- one turn's folder
+
+/**
+ * A turn's folder as the page has read it: its entries as RPE lists them (null until read), why the
+ * list could not be read, and the file open, with its text once read or RPE's reason it gave none.
+ */
+export interface FolderShown {
+  files: TurnFileEntry[] | null;
+  problem: string | null;
+  open: { name: string; text: string | null; problem: string | null } | null;
+}
+
+export const NO_FOLDER: FolderShown = { files: null, problem: null, open: null };
+
+/**
+ * Reads a turn's folder: its list at once, and a file each time one is opened, by its path below the
+ * folder. Only the file open now is shown: the answer for one opened before it is let go, and so is all
+ * that comes back once `stop()` is called (the page has left the turn, or shut the spoiler gate).
+ */
+export function readFolder(client: Pick<RpeClient, "call">, chat: string, turn: string, onChange: (folder: FolderShown) => void): { open(name: string): void; close(): void; stop(): void } {
+  let shown = NO_FOLDER;
+  let alive = true;
+  const show = (next: FolderShown): void => {
+    if (!alive) return;
+    shown = next;
+    onChange(next);
+  };
+  client.call("GET /api/v1/chats/:chat/turns/:turn/files", { chat, turn }).then(
+    (list) => show({ ...shown, files: list.files, problem: null }),
+    (error: unknown) => show({ ...shown, problem: errorWords(error) }),
+  );
+  return {
+    open(name) {
+      const opening = { name, text: null, problem: null };
+      show({ ...shown, open: opening });
+      const answered = (open: FolderShown["open"]): void => {
+        if (shown.open === opening) show({ ...shown, open });
+      };
+      client.call("GET /api/v1/chats/:chat/turns/:turn/files/*", { chat, turn, "*": name }).then(
+        (file) => answered({ name, text: file.text, problem: null }),
+        (error: unknown) => answered({ name, text: null, problem: errorWords(error) }),
+      );
+    },
+    close() {
+      show({ ...shown, open: null });
+    },
+    stop() {
+      alive = false;
+    },
+  };
+}
+
+/** The messages of a model call's request as the harness keeps it (`{"messages":[{"role","text"}]}`), in order; null for a file that is not one. */
+export function requestMessages(text: string): { role: string; text: string }[] | null {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!isRecord(data) || !Array.isArray(data.messages)) return null;
+  const messages: { role: string; text: string }[] = [];
+  for (const m of data.messages) {
+    if (!isRecord(m) || typeof m.role !== "string" || typeof m.text !== "string") return null;
+    messages.push({ role: m.role, text: m.text });
+  }
+  return messages;
 }
 
 // ---------------------------------------------------------------- one turn
 
-/**
- * One part of the Turn page: its title, whether it sits behind the spoiler gate, and its body for a turn
- * and its runs, the first first (null when the turn has nothing for it).
- */
+/** What a part of the Turn page is drawn from: the turn as last read, its runs as the page holds them (the first first), now, and its folder. */
+export interface TurnParts {
+  turn: TurnDetail;
+  runs: readonly RunNode[];
+  now: number;
+  folder: FolderShown;
+  onOpenFile(name: string): void;
+  onCloseFile(): void;
+}
+
+/** One part of the Turn page: its title, whether it sits behind the spoiler gate, and its body (null when the turn has nothing for it). */
 export interface TurnSection {
   id: string;
   title: string;
   spoiler: boolean;
-  body(turn: TurnDetail, runs: readonly RunNode[], now: number): ComponentChildren | null;
+  body(parts: TurnParts): ComponentChildren | null;
 }
 
-/** Which run a part is of, where the turn has run more than once (a continue runs it again). */
-function RunCaption(props: { run: RunNode; of: number }) {
+/** A turn's runs that began, in order. The page's runs are made of the records each run wrote, so the one it numbers n is the nth of these. */
+function begun(views: readonly TurnRun[]): TurnRun[] {
+  return views.filter((view) => view.timings.started !== null);
+}
+
+/** Which run a part is of, where the turn has run more than once (a continue runs it again under an id of its own). */
+function RunCaption(props: { nth: number; of: number; id: string | null; title: string }) {
   if (props.of < 2) return null;
   return (
     <p class="rpe-caption">
-      Run {props.run.nth} of {props.of}: {runTitle(props.run)}
+      Run {props.nth} of {props.of}
+      {props.id === null ? "" : `, ${props.id}`}: {props.title}
     </p>
   );
 }
 
 /** Each run's own part, under its caption where there are several. */
-function EachRun(props: { runs: readonly RunNode[]; part: (run: RunNode) => ComponentChildren }) {
+function EachRun(props: { runs: readonly RunNode[]; views: readonly TurnRun[]; part: (run: RunNode, view: TurnRun | undefined) => ComponentChildren }) {
+  const started = begun(props.views);
+  const of = Math.max(props.views.length, props.runs.length);
   return (
     <div class="lre-stack">
-      {props.runs.map((run) => (
-        <div key={run.nth} class="lre-stack" data-run-nth={run.nth}>
-          <RunCaption run={run} of={props.runs.length} />
-          {props.part(run)}
-        </div>
-      ))}
+      {props.runs.map((run) => {
+        const view = started[run.nth - 1];
+        return (
+          <div key={run.nth} class="lre-stack" data-run-nth={run.nth}>
+            <RunCaption nth={view?.nth ?? run.nth} of={of} id={view?.id ?? null} title={runTitle(run)} />
+            {props.part(run, view)}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function Timings(props: { turn: TurnDetail; runs: number }) {
+function Timings(props: { turn: TurnDetail }) {
   const moments = momentsOf(props.turn.timings);
   const spans = spansOf(props.turn.timings);
   return (
     <div class="lre-stack">
-      {props.runs > 1 ? <p class="rpe-meta">Of its latest run.</p> : null}
+      {props.turn.runs.length > 1 ? <p class="rpe-meta">Of its latest run.</p> : null}
       <div>
         {moments.map((m) => (
           <Row key={m.label} label={m.label} value={<span class="lre-num">{clock(m.at)}</span>} sub={m.since === null ? undefined : `${duration(m.since)} after the moment before`} />
@@ -176,37 +294,45 @@ function Timings(props: { turn: TurnDetail; runs: number }) {
   );
 }
 
-function Tokens(props: { turn: TurnDetail; runs: readonly RunNode[] }) {
-  const { usage } = props.turn;
-  const all = props.runs.length > 1 ? props.runs.map((run) => runTotals(run).usage).reduce(addUsage) : null;
+/** What the turn spent, all its runs together, and each run's own where there are several. */
+function Tokens(props: { turn: TurnDetail }) {
+  const { usage, runs } = props.turn;
   return (
     <div>
-      {all === null ? null : <p class="rpe-meta">Of its latest run; all its runs together are below.</p>}
+      {runs.length > 1 ? <p class="rpe-meta">All its runs together; each run's own is below.</p> : null}
       <Row label="Model calls" value={<span class="lre-num">{usage.calls}</span>} />
       <Row label="Tokens sent" value={<span class="lre-num">{usage.input.toLocaleString("en")}</span>} sub={`${usage.cacheRead.toLocaleString("en")} read from the provider's cache, ${usage.cacheWrite.toLocaleString("en")} written to it`} />
       <Row label="Tokens written" value={<span class="lre-num">{usage.output.toLocaleString("en")}</span>} sub={usage.reasoning === undefined ? undefined : `${usage.reasoning.toLocaleString("en")} of them reasoning`} />
-      {all === null ? null : <Row label={`All ${props.runs.length} runs`} value={<span class="lre-num">{counted(all.calls, "call")}</span>} sub={tokenWords(all)} />}
+      {runs.length > 1 ? runs.map((run) => <Row key={run.id} label={`Run ${run.nth}, ${run.id}`} value={<span class="lre-num">{counted(run.usage.calls, "call")}</span>} sub={tokenWords(run.usage)} />) : null}
     </div>
   );
 }
 
-/** Each run of a turn run more than once: how it went, and what it released. */
-function Runs(props: { runs: readonly RunNode[]; now: number }) {
-  const latest = props.runs.at(-1);
+/** Each run of a turn run more than once, by its own id: how it went, and what it sent to the chat (the latest's is below, as it streams). */
+function Runs(props: { views: readonly TurnRun[]; runs: readonly RunNode[]; now: number }) {
+  const started = begun(props.views);
+  const latest = props.views.at(-1);
   return (
-    <EachRun
-      runs={props.runs}
-      part={(run) => (
-        <>
-          <RunHead run={run} now={props.now} />
-          {run === latest ? null : (
-            <p class="rpe-meta">
-              {run.released === null ? "It released no reply." : `It released ${counted(run.released.length, "character")}.`} What it sent to the chat is not shown: RPE's turn route gives the latest run's reply alone.
-            </p>
-          )}
-        </>
-      )}
-    />
+    <div class="lre-stack">
+      {props.views.map((view) => {
+        const at = started.indexOf(view);
+        const run = at < 0 ? undefined : props.runs.find((r) => r.nth === at + 1);
+        const status = STATUS_WORDS[view.status];
+        return (
+          <div key={view.id} class="lre-stack" data-run={view.id}>
+            <RunCaption nth={view.nth} of={props.views.length} id={view.id} title={run === undefined ? TURN_KIND_WORDS[view.kind] : runTitle(run)} />
+            {run === undefined ? (
+              <span class="lre-inline">
+                <Badge tone={status.tone}>{status.words}</Badge>
+              </span>
+            ) : (
+              <RunHead run={run} now={props.now} />
+            )}
+            {view === latest ? null : view.reply.text === "" ? <p class="rpe-meta">It sent nothing to the chat.</p> : <Pre text={view.reply.text} mono={false} />}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -231,6 +357,28 @@ function Given(props: { run: RunNode }) {
   return <p class="rpe-line">{info.given.length === 0 ? `${info.definition} was given nothing by name.` : `${info.definition} was given: ${info.given.join(", ")}.`}</p>;
 }
 
+/** What each agent of a run was sent on its first model call, where the harness kept it: a file of the turn's folder each, opened on demand. */
+function FirstCalls(props: { view: TurnRun | undefined; onOpenFile(name: string): void }) {
+  const first = new Map<string, TurnRun["requests"][number]>();
+  for (const request of props.view?.requests ?? []) {
+    const held = first.get(request.agent);
+    if (held === undefined || request.call < held.call) first.set(request.agent, request);
+  }
+  if (first.size === 0) return null;
+  return (
+    <div class="lre-stack" data-first-calls>
+      <span class="rpe-caption">What each agent was sent first</span>
+      <div class="rpe-files">
+        {[...first.values()].map((r) => (
+          <Button key={r.agent} small kind="ghost" onClick={() => props.onOpenFile(r.file)}>
+            {`${r.definition} (${r.agent}), call ${r.call}`}
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** The lore of the turn's prompt, by id, as its intake kept it: what Lumiverse activated for it, and what its lore map showed the Author. */
 function TurnLore(props: { lore: TurnDetail["lore"] }) {
   const { activated, map } = props.lore;
@@ -247,51 +395,108 @@ function TurnLore(props: { lore: TurnDetail["lore"] }) {
   );
 }
 
-/** The turn's folder, by its files' names: none can be opened here, since no route serves them. */
-function TurnFolder() {
+/** The file open: a kept request laid out as its messages, any other file as its text. */
+function OpenFile(props: { open: FolderShown["open"]; onClose(): void }) {
+  const { open } = props;
+  if (open === null) return null;
+  const messages = open.text === null ? null : requestMessages(open.text);
   return (
-    <div class="lre-stack" data-folder="unavailable">
+    <div class="lre-stack" data-file={open.name}>
+      <div class="lre-spread">
+        <code class="lre-id">{open.name}</code>
+        <Button small kind="ghost" onClick={props.onClose}>
+          Close
+        </Button>
+      </div>
+      {open.problem !== null ? (
+        <Banner tone="neg" icon="alert" title="The file could not be read">
+          <span>{open.problem}</span>
+        </Banner>
+      ) : open.text === null ? (
+        <p class="lre-muted rpe-line">Reading the file…</p>
+      ) : messages === null ? (
+        <Pre text={open.text} />
+      ) : (
+        messages.map((m, i) => (
+          <div key={i} class="lre-stack">
+            <span class="rpe-caption">{m.role}</span>
+            <Pre text={m.text} mono={false} />
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+/** The turn's folder as RPE lists it, each file opened here on demand: its world state, its briefing with the lore map, the prompt and the rest. */
+function Folder(props: { folder: FolderShown; onOpenFile(name: string): void; onCloseFile(): void }) {
+  const { files, problem, open } = props.folder;
+  const shown = (files ?? []).filter((f) => !f.folder);
+  return (
+    <div class="lre-stack" data-folder>
       <span class="rpe-caption">The turn's folder</span>
-      <p class="rpe-meta">Not available here yet: RPE has no route that lists a turn's folder or opens its files, so the words of its lore map, its world state and the rest cannot be read on this page.</p>
-      <ul class="rpe-reports">
-        {TURN_FOLDER.map((file) => (
-          <li key={file.name}>
-            <code class="lre-id">{file.name}</code>: {file.holds}
-          </li>
-        ))}
-      </ul>
+      {problem !== null ? (
+        <Banner tone="neg" icon="alert" title="The turn's folder could not be read">
+          <span>{problem}</span>
+        </Banner>
+      ) : files === null ? (
+        <p class="lre-muted rpe-line">Reading the turn's folder…</p>
+      ) : shown.length === 0 ? (
+        <p class="rpe-meta">RPE lists no file in it.</p>
+      ) : (
+        <ul class="rpe-files">
+          {shown.map((f) => (
+            <li key={f.name}>
+              <Button small kind="ghost" current={open?.name === f.name} onClick={() => props.onOpenFile(f.name)}>
+                {f.name}
+              </Button>
+              <span class="rpe-meta lre-num">{bytesWords(f.bytes)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <OpenFile open={open} onClose={props.onCloseFile} />
     </div>
   );
 }
 
 /** The Turn page's sections, in order. */
 export const TURN_SECTIONS: readonly TurnSection[] = [
-  { id: "timings", title: "Timings", spoiler: false, body: (turn, runs) => <Timings turn={turn} runs={runs.length} /> },
-  { id: "tokens", title: "Tokens", spoiler: false, body: (turn, runs) => <Tokens turn={turn} runs={runs} /> },
-  { id: "runs", title: "Its runs", spoiler: false, body: (_turn, runs, now) => (runs.length < 2 ? null : <Runs runs={runs} now={now} />) },
-  { id: "reply", title: "What went to the chat", spoiler: false, body: (_turn, runs) => runs.slice(-1).map((latest) => <ReplyBox key={latest.nth} run={latest} />) },
+  { id: "timings", title: "Timings", spoiler: false, body: ({ turn }) => <Timings turn={turn} /> },
+  { id: "tokens", title: "Tokens", spoiler: false, body: ({ turn }) => <Tokens turn={turn} /> },
+  { id: "runs", title: "Its runs", spoiler: false, body: ({ turn, runs, now }) => (turn.runs.length < 2 ? null : <Runs views={turn.runs} runs={runs} now={now} />) },
+  { id: "reply", title: "What went to the chat", spoiler: false, body: ({ runs }) => runs.slice(-1).map((latest) => <ReplyBox key={latest.nth} run={latest} />) },
   {
     id: "given",
     title: "What the Author was given",
     spoiler: true,
-    body: (turn, runs) => (
+    body: ({ turn, runs, folder, onOpenFile, onCloseFile }) => (
       <div class="lre-stack">
-        <EachRun runs={runs} part={(run) => <Given run={run} />} />
+        <EachRun
+          runs={runs}
+          views={turn.runs}
+          part={(run, view) => (
+            <>
+              <Given run={run} />
+              <FirstCalls view={view} onOpenFile={onOpenFile} />
+            </>
+          )}
+        />
         <TurnLore lore={turn.lore} />
-        <TurnFolder />
+        <Folder folder={folder} onOpenFile={onOpenFile} onCloseFile={onCloseFile} />
       </div>
     ),
   },
-  { id: "intent", title: "Intent record", spoiler: true, body: (turn) => (turn.intent === null ? null : <Pre text={turn.intent} mono={false} />) },
-  { id: "agent-tokens", title: "Tokens by agent", spoiler: true, body: (_turn, runs) => (runs.some((run) => run.agents.size > 0) ? <EachRun runs={runs} part={(run) => <TokensByAgent run={run} />} /> : null) },
-  { id: "trace", title: "The run, step by step", spoiler: true, body: (_turn, runs, now) => (runs.some((run) => run.agents.size > 0) ? <EachRun runs={runs} part={(run) => <AgentTree run={run} now={now} />} /> : null) },
+  { id: "intent", title: "Intent record", spoiler: true, body: ({ turn }) => (turn.intent === null ? null : <Pre text={turn.intent} mono={false} />) },
+  { id: "agent-tokens", title: "Tokens by agent", spoiler: true, body: ({ turn, runs }) => (runs.some((run) => run.agents.size > 0) ? <EachRun runs={runs} views={turn.runs} part={(run) => <TokensByAgent run={run} />} /> : null) },
+  { id: "trace", title: "The run, step by step", spoiler: true, body: ({ turn, runs, now }) => (runs.some((run) => run.agents.size > 0) ? <EachRun runs={runs} views={turn.runs} part={(run) => <AgentTree run={run} now={now} />} /> : null) },
 ];
 
-function SectionsOf(props: { turn: TurnDetail; runs: readonly RunNode[]; now: number; sections: readonly TurnSection[] }) {
+function SectionsOf(props: { parts: TurnParts; sections: readonly TurnSection[] }) {
   return (
     <>
       {props.sections.map((section) => {
-        const body = section.body(props.turn, props.runs, props.now);
+        const body = section.body(props.parts);
         return body === null ? null : (
           <Section key={section.id} id={section.id} title={section.title}>
             {body}
@@ -310,11 +515,15 @@ export interface TurnViewProps {
   /** What a later read could not read, in RPE's words; null when all was. */
   problem: string | null;
   gateOpen: boolean;
+  /** The turn's folder, read once the spoiler gate is open. */
+  folder: FolderShown;
   onOpenGate(): void;
   onCloseGate(): void;
   onBack(): void;
   onLive(): void;
   onRead(): void;
+  onOpenFile(name: string): void;
+  onCloseFile(): void;
   sections?: readonly TurnSection[];
 }
 
@@ -323,6 +532,7 @@ export function TurnView(props: TurnViewProps) {
   const sections = props.sections ?? TURN_SECTIONS;
   const status = STATUS_WORDS[turn.status];
   const failure = turn.error === null ? null : replyErrorWords(turn.error, turn.status);
+  const parts: TurnParts = { turn, runs: props.runs, now: props.now, folder: props.folder, onOpenFile: props.onOpenFile, onCloseFile: props.onCloseFile };
   return (
     <div class="lre-stack rpe-page" data-page="turn" data-turn={turn.id}>
       <PageHeader
@@ -331,7 +541,7 @@ export function TurnView(props: TurnViewProps) {
           <span class="lre-inline">
             <span class={`lre-badge ${status.tone}`}>{status.words}</span>
             {turn.onPath ? null : <span class="lre-badge">off the path</span>}
-            {turn.message === null ? <span>not tied to a message yet</span> : <span class="lre-id">message {turn.message}</span>}
+            {turn.message !== null ? <span class="lre-id">message {turn.message}</span> : turn.status === "running" || turn.timings.released !== null ? <span>not tied to a message yet</span> : <span>no message</span>}
           </span>
         }
         back={{ label: "Back to the turns", go: props.onBack }}
@@ -357,25 +567,37 @@ export function TurnView(props: TurnViewProps) {
           <span>{failure}</span>
         </Banner>
       )}
-      <SectionsOf turn={turn} runs={props.runs} now={props.now} sections={sections.filter((s) => !s.spoiler)} />
+      <SectionsOf parts={parts} sections={sections.filter((s) => !s.spoiler)} />
       <Gated open={props.gateOpen} onOpen={props.onOpenGate} onClose={props.onCloseGate}>
-        <SectionsOf turn={turn} runs={props.runs} now={props.now} sections={sections.filter((s) => s.spoiler)} />
+        <SectionsOf parts={parts} sections={sections.filter((s) => s.spoiler)} />
       </Gated>
     </div>
   );
 }
 
-/** One turn, kept up to date while it runs, and while a continue runs it again. */
+/** One turn, kept up to date while it runs, and while a continue runs it again; its folder is read once the spoiler gate is open. */
 export function TurnPage(props: { chat: string; turn: string }) {
   const app = useApp();
   const { chat, turn } = props;
   const [watched, setWatched] = useState<Watched>(NOTHING_WATCHED);
   const [reads, setReads] = useState(0);
+  const [folder, setFolder] = useState<FolderShown>(NO_FOLDER);
+  const reader = useRef<{ open(name: string): void; close(): void } | null>(null);
   const gateOpen = useSelect(app.gate, (opened) => opened.has(chat));
   useEffect(() => {
     setWatched(NOTHING_WATCHED);
     return watchTurn(app.client, chat, turn, app.timers, setWatched);
   }, [chat, turn, reads]);
+  useEffect(() => {
+    setFolder(NO_FOLDER);
+    if (!gateOpen) return;
+    const reading = readFolder(app.client, chat, turn, setFolder);
+    reader.current = reading;
+    return () => {
+      reading.stop();
+      reader.current = null;
+    };
+  }, [chat, turn, reads, gateOpen]);
   const runs = runsOf(watched.model, turn);
   const latest = runs.at(-1);
   const detail = watched.detail === null ? null : liveTurn(watched.detail, latest);
@@ -402,11 +624,14 @@ export function TurnPage(props: { chat: string; turn: string }) {
       now={Math.max(now, latest?.lastAt ?? 0)}
       problem={watched.problem}
       gateOpen={gateOpen}
+      folder={folder}
       onOpenGate={() => app.gate.open(chat)}
       onCloseGate={() => app.gate.close(chat)}
       onBack={back}
       onLive={() => app.go({ page: "live", chat })}
       onRead={() => setReads((n) => n + 1)}
+      onOpenFile={(name) => reader.current?.open(name)}
+      onCloseFile={() => reader.current?.close()}
     />
   );
 }

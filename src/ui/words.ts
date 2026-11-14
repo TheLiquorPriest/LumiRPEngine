@@ -13,6 +13,13 @@ export function counted(n: number, one: string, many = `${one}s`): string {
   return `${num(n)} ${n === 1 ? one : many}`;
 }
 
+/** A file's size: "512 bytes", "2.0 KB", "1.4 MB". */
+export function bytesWords(n: number): string {
+  if (n < 1024) return counted(n, "byte");
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 /** A length of time: "850 ms", "12.4 s", "3 min 05 s", "1 h 02 min". */
 export function duration(ms: number): string {
   const whole = Math.max(0, ms);

@@ -38,7 +38,7 @@ export function ChatsView(props: ChatsViewProps) {
                   <span class="lre-listrow-content">
                     <span class="lre-listrow-text">
                       <span class="lre-listrow-title">{chat.name}</span>
-                      <span class="lre-listrow-sub">{chat.lastTurnAt === null ? "No turn yet" : `Last turn ${when(chat.lastTurnAt)}`}</span>
+                      <span class="lre-listrow-sub">Last turn {when(chat.lastTurnAt)}</span>
                     </span>
                     {chat.running ? <Badge tone="accent">running</Badge> : null}
                   </span>
