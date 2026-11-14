@@ -63,6 +63,14 @@ const PREFS_KEYS: Readonly<Record<string, true>> = { knowledge: true, narrator: 
 const AGENTS_KEYS: Readonly<Record<string, true>> = { learned: true, assistant: true, rollback: true };
 
 /**
+ * `prefs.engineFrom: "default"`: that the chat's engine was the user's New chats start on, recorded at
+ * its first turn rather than chosen by the chat. Only the depth build wrote and read it (a54b3987,
+ * `src/backend/chat-knowledge-prefs.ts:41,78,192-193`); today's reader keeps the engine alone
+ * (`chat-knowledge-prefs.ts:61-62`), so it steers nothing now.
+ */
+const ENGINE_FROM = "which engine the chat plays came from your default for new chats, as a build with the depth engine marked it; today's build reads the engine alone, so nothing reads this now";
+
+/**
  * The engine's entries in a chat's metadata, each its own item: the run, the engine chosen, the
  * chat's own settings, the agents' learned area, the assistant thread, a rollback never applied;
  * and LumiAH's switch for the chat. A key the engine doesn't write is found, not classified.
@@ -78,6 +86,10 @@ function chatEntries(chat: ChatRow, identifier: string): Item[] {
       if (Object.hasOwn(RUN_KEYS, key)) continue;
       if (key === "prefs" && isRecord(value)) {
         for (const [pref, v] of Object.entries(value)) {
+          if (pref === "engineFrom") {
+            out.push(itemOf("Lumiverse database", at(`${LEDGER_NAMESPACE}/prefs/${pref}`), measured(v), { row: "chat-switch", fate: "archived", note: ENGINE_FROM }));
+            continue;
+          }
           const row = !Object.hasOwn(PREFS_KEYS, pref) ? null : pref === "engine" ? "chat-switch" : "settings";
           out.push(itemOf("Lumiverse database", at(`${LEDGER_NAMESPACE}/prefs/${pref}`), measured(v), row === null ? null : { row, fate: "carried" }));
         }

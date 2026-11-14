@@ -117,6 +117,8 @@ const STORAGE_RULES: readonly Rule[] = [
   depth(`runs/${SAFE}/layer/seg-\\d+\\.json`, "what the depth engine landed for the chat, which only its own fold read"), // layer-store.ts:5,131
   depth(`runs/${SAFE}/archive/shard-\\d+\\.json`, "the depth engine's search index of the chat's messages, made from them"), // archive-index.ts:29,144,210
   depth("loopback/registry\\.json", "the depth engine's loopback registry: its keys' and relays' hashes"), // loopback/store.ts:47
+  // RPE's own: the new light extension's registration with RPE (`src/adapter/lumiverse/pipe-wire.ts:24`, written by `src/ext/registration.ts:39`).
+  rule("rpe/registration\\.json", "rpe-own", undefined, "RPE's own: the light extension's registration with RPE, which the migration leaves as it is"),
 ];
 
 /** The chat a per-chat path is kept for, and whose store keeps it: `runs/<chat>/` names it as it is, LumiAH's `chats/<key>/` as its document key (`docKey`, `H/core/paths.ts:12`). */

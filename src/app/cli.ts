@@ -15,6 +15,7 @@ import { EXTENSION_IDENTIFIER } from "../adapter/lumiverse/pipe-wire";
 import { LumiverseError, LumiverseSession, type StoredSignIn } from "../adapter/lumiverse/session";
 import { migrateCli } from "../migrate/cli";
 import { isRecord } from "../shared/json";
+import { GLOBAL_FOLDERS, NOTES_FOLDER } from "../tree/layout";
 import type { Area } from "./app";
 import { lineLog, openApp, STATUS_PATH } from "./app";
 import type { KeyKind } from "./auth";
@@ -471,11 +472,12 @@ async function connectionCommand(words: readonly string[], flags: Flags, paths: 
   throw new UsageError("rpe connection takes list, add or remove <name or id>.");
 }
 
-/** `rpe migrate`: the migration's own command line (src/migrate/cli.ts), into RPE's data folder unless the line names another. */
+/** `rpe migrate`: the migration's own command line (src/migrate/cli.ts), into RPE's data folder unless the line names another, the user's own files into the folders the file tree's layout gives them. */
 async function migrateCommand(rest: readonly string[], io: CliIO, version: string): Promise<number> {
   const line = rest.includes("--data") ? rest : [...rest, "--data", defaultDataFolder(io.env, io.home)];
+  const tree = { agents: GLOBAL_FOLDERS.agents, skills: GLOBAL_FOLDERS.skills, prompts: GLOBAL_FOLDERS.prompts, notes: NOTES_FOLDER };
   // Its output is whole texts, this one's lines; and it reads the build's id from the environment, where a built `rpe` does not put it.
-  return await migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home });
+  return await migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, tree);
 }
 
 async function serveCommand(paths: DataPaths, config: AppConfig, io: CliIO, options: CliOptions): Promise<number> {

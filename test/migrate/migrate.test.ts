@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { migrateCli } from "../../src/migrate/cli";
 import { migrate } from "../../src/migrate/migrate";
 import type { MigrationReport } from "../../src/migrate/report";
+import { GLOBAL_FOLDERS, NOTES_FOLDER } from "../../src/tree/layout";
 import { buildFixture, STRAY, treeSums, USER, type Fixture } from "./fixture";
 import { addPlayedChats, PLAYED } from "./played";
 
@@ -78,18 +79,22 @@ describe("migrate", () => {
     expect(report.backup?.path).not.toBe(first.backup?.path);
   });
 
-  test("the command line runs the rehearsal and the real run, and says why a run was refused", async () => {
+  test("the command line runs the rehearsal and the real run, carries the user's own files where the tree's layout says, and says why a run was refused", async () => {
     const out: string[] = [];
     const io = { out: (t: string) => out.push(t), err: (t: string) => out.push(t), env: {}, home: fixture.root };
+    const tree = { agents: GLOBAL_FOLDERS.agents, skills: GLOBAL_FOLDERS.skills, prompts: GLOBAL_FOLDERS.prompts, notes: NOTES_FOLDER };
     const args = ["--lumiverse", fixture.sources.lumiverse, "--user", USER, "--runtime-config", fixture.sources.runtime?.configDir ?? "", "--runtime-data", fixture.sources.runtime?.dataDir ?? "", "--data", data];
-    expect(await migrateCli(["--rehearse", ...args], io)).toBe(0);
+    expect(await migrateCli(["--rehearse", ...args], io, tree)).toBe(0);
     expect(out.join("")).toContain("Migration rehearsal");
-    expect(await migrateCli(args, io)).toBe(0);
+    expect(await migrateCli(args, io, tree)).toBe(0);
     expect(out.join("")).toContain("Migration real run");
+    expect(await readFile(join(data, "files", "imported", "GUIDANCE.md"), "utf8")).toBe("Keep the fog grey.");
+    expect(existsSync(join(data, "files", "imported", GLOBAL_FOLDERS.agents, "scout.md"))).toBe(true);
     await writeFile(join(fixture.userFolder, STRAY), "Back again.");
     out.length = 0;
-    expect(await migrateCli(args, io)).toBe(1);
+    expect(await migrateCli(args, io, tree)).toBe(1);
     expect(out.join("")).toContain(STRAY);
-    expect(await migrateCli(["--lumiverse", fixture.sources.lumiverse], io)).toBe(2);
+    expect(await migrateCli(["--lumiverse", fixture.sources.lumiverse], io, tree)).toBe(2);
+    expect(out.join("")).toContain("rpe migrate [--rehearse]");
   });
 });

@@ -150,7 +150,8 @@ function chatsOf(worldId: string, rev: string, blobs: { agents: string[]; harnes
   return {
     chats: [
       { id: CHAT.classic, user: USER, name: "Harbour (classic)", meta: run("seed-classic", { prefs: { knowledge: true, narrator: "player" } }) },
-      { id: CHAT.agents, user: USER, name: "Gate (agents)", meta: run("seed-agents", { prefs: { engine: "agents" }, agents: { learned: { "learned/notes.md": { hash: blobs.agents[1] ?? "" } }, assistant: { messages: [blobs.agents[2] ?? ""], proposals: {} }, rollback: { base: blobs.agents[0] ?? "", archived: blobs.agents[1] ?? "" } } }) },
+      // Its engine came from the user's New chats start on, as a build with the depth engine marked it at the chat's first turn.
+      { id: CHAT.agents, user: USER, name: "Gate (agents)", meta: run("seed-agents", { prefs: { engine: "agents", engineFrom: "default" }, agents: { learned: { "learned/notes.md": { hash: blobs.agents[1] ?? "" } }, assistant: { messages: [blobs.agents[2] ?? ""], proposals: {} }, rollback: { base: blobs.agents[0] ?? "", archived: blobs.agents[1] ?? "" } } }) },
       { id: CHAT.harness, user: USER, name: "Fog (harness)", meta: { ...run("seed-harness", { prefs: { engine: "harness" } }), [`lumiah_chat_${IDENT}`]: { v: 1, chat: CHAT.harness, name: "LumiRPEngine", since: 1 }, chat_world_book_ids: ["book-engine"] } },
       { id: CHAT.branch, user: USER, name: "Harbour (branch)", meta: { ...run("seed-classic", { prefs: { knowledge: true } }), branched_from: CHAT.classic } },
       { id: CHAT.fresh, user: USER, name: "Lighthouse (no journal yet)", meta: run("seed-fresh") },
@@ -350,6 +351,8 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
   await user(`prompts/sets/${blobHash("set")}.json`, JSON.stringify({ v: 1, texts: {} }));
   await user(`secrecy/${blobHash("book-own")}.json`, JSON.stringify({ v: 1, bookId: "book-own", name: "My lore", moves: [] }));
   await user(STRAY, "Who put this here?");
+  // RPE's own: the new light extension's registration with RPE, there once the new extension has run.
+  await user("rpe/registration.json", JSON.stringify({ v: 1, base: "http://127.0.0.1:7871", key: "invented-extension-key", connection: null, relay: "relay-session-1", build: "dev" }));
 
   // Each chat's run data.
   const journal = (chatId: string, seed: string, extra: Partial<Journal> = {}): string =>

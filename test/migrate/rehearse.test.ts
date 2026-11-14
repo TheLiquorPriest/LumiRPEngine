@@ -71,6 +71,12 @@ describe("the rehearsal, extension installed for everyone", () => {
     expect(reportText(report)).toContain(STRAY);
   });
 
+  test("classifies RPE's own registration and a chat's mark of where its engine came from: neither is carried, neither stops the real run", () => {
+    expect(report.items.find((i) => i.where === "user storage" && i.path === "rpe/registration.json")).toMatchObject({ row: "rpe-own", fate: "archived" });
+    expect(report.items.find((i) => i.where === "Lumiverse database" && i.path === `chats/${CHAT.agents}/${IDENT}/prefs/engineFrom`)).toMatchObject({ row: "chat-switch", fate: "archived", bytes: 9, note: expect.stringContaining("default for new chats") });
+    expect(report.refusals.every((r) => !r.includes("registration") && !r.includes("engineFrom"))).toBe(true);
+  });
+
   test("every row's found equals carried plus attached plus archived", () => {
     for (const row of report.rows) expect(row.count.found).toBe(row.count.carried + row.count.attached + row.count.archived);
     const classified = report.items.filter((i) => i.row !== null).length;
