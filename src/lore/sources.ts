@@ -1,0 +1,102 @@
+// What the lore reads, and from where (plan §9.1, §4.2): the user's Lumiverse books, read-only and
+// only that user's rows, through the adapter; the world's own lore and who knows what, in the chat's
+// world as its path stands, from the store; and which entries Lumiverse activated for a turn, which
+// the turn's tag carried. Each is an interface here, so the lore holds no knowledge of Lumiverse.
+
+import type { Registry } from "../engine/registry-impl";
+import type { WorldState } from "../engine/state";
+import type { JsonObject } from "../shared/json";
+import type { WorldDoc } from "../shared/world";
+import type { Store } from "../store/store";
+import { StoreInputError } from "../store/types";
+
+/** A Lumiverse book, as the lore names it. */
+export interface LoreBook {
+  id: string;
+  name: string;
+}
+
+/** A Lumiverse book entry, as the lore reads it. */
+export interface LoreBookEntry {
+  /** Lumiverse's id of the entry. */
+  id: string;
+  /** Its book's id. */
+  book: string;
+  /** What Lumiverse's editor shows as the entry's title. */
+  comment: string;
+  content: string;
+  /** The keys that activate it. */
+  keys: string[];
+  /** The keys Lumiverse checks beside them. */
+  secondaryKeys: string[];
+  disabled: boolean;
+  /** Its extension data, where today's build kept fields of its own. */
+  extensions: JsonObject;
+}
+
+/** The user's Lumiverse books, read-only: every call reads that user's rows and no other's. */
+export interface LoreBooks {
+  /**
+   * The books attached to the chat, as Lumiverse scans them for it: its character's, its persona's,
+   * the chat's own and the user's global ones; a group chat's members' too, by its setting and mutes.
+   */
+  attached(user: string, chat: string): Promise<string[]>;
+  /** One of the user's books; null when the user has none by that id. */
+  book(user: string, id: string): Promise<LoreBook | null>;
+  /** A book's entries, in Lumiverse's order; none for a book that is not the user's. */
+  entries(user: string, book: string): Promise<LoreBookEntry[]>;
+  /** One entry of any of the user's books; null when the user has none by that id. */
+  entry(user: string, id: string): Promise<LoreBookEntry | null>;
+}
+
+/** A chat's world where a point of its path stands. */
+export interface WorldAt {
+  registry: Registry;
+  world: WorldDoc;
+  /** Read it, never change it: it may be the store's own. */
+  state: Readonly<WorldState>;
+}
+
+/** The chats' worlds. */
+export interface LoreWorlds {
+  /** The registry every world is read with. */
+  readonly registry: Registry;
+  /** The chat's world at `turn`, with what that turn has staged, else at the head of its path; null when the chat has no world. */
+  at(user: string, chat: string, turn?: string): WorldAt | null;
+}
+
+/** An entry Lumiverse activated for a turn's prompt, as the turn's tag carries it. */
+export interface ActivatedEntry {
+  /** Lumiverse's id of the entry. */
+  id: string;
+  /** Its book's id, where Lumiverse said. */
+  book: string | null;
+  /** Its title as Lumiverse gave it. */
+  title: string;
+  /** How it activated, in Lumiverse's word, where Lumiverse said. */
+  how: string | null;
+}
+
+/** What activated for each turn's prompt. */
+export interface LoreTurns {
+  /** The entries activated for the prompt of `turn`, in the tag's order; null when RPE holds no tag for that turn. */
+  activated(user: string, chat: string, turn: string): Promise<readonly ActivatedEntry[] | null>;
+}
+
+/** The chats' worlds as the store folds them: the world document in force and the state, at a turn or at the head. */
+export function storeWorlds(store: Store): LoreWorlds {
+  const registry = store.env.registry;
+  return {
+    registry,
+    at(user, chat, turn) {
+      const s = store.user(user);
+      const row = s.chat(chat);
+      if (row === null || row.revision === null) return null;
+      if (turn !== undefined && s.turn(turn)?.chat !== chat) throw new StoreInputError(`turn ${turn} is not one of chat ${chat}'s`);
+      const state = (turn === undefined ? s.headState(chat) : s.stateAt(turn)).state.world;
+      const world = store.env.worlds(state.revision);
+      if (world === undefined) throw new Error(`The world revision ${state.revision} that chat ${chat} stands on is not available, so its lore cannot be read.`);
+      return { registry, world, state };
+    },
+  };
+}
