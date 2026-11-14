@@ -1339,7 +1339,7 @@ Extends `thing`.
 
 ### Events
 
-Its own: `space.place`, `space.pos`, `space.route`.
+Its own: `space.door`, `space.place`, `space.pos`, `space.route`, `space.shape`, `space.squares`.
 
 ### Proposals
 
