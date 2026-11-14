@@ -20,6 +20,13 @@ export const USER_HEADER = "x-rpe-user";
 /** RPE's routes for the extension, under its own API. */
 export const START_PATH = "/api/v1/ext/start";
 export const LIVE_PATH = "/api/v1/ext/live";
+/**
+ * Where the extension asks RPE to confirm a registration before it keeps it: only the key in force
+ * opens it (the registration's own, as the bearer), and only for the user RPE belongs to (`USER_HEADER`).
+ */
+export const CONFIRM_PATH = "/api/v1/ext/confirm";
+/** RPE's page route that says how its extension in Lumiverse stands with it (`ExtensionStatus`). */
+export const EXTENSION_STATUS_PATH = "/api/v1/status/extension";
 /** Where the extension keeps the registration of the user RPE belongs to, in that user's storage: a folder today's build never used. */
 export const REGISTRATION_FILE = "rpe/registration.json";
 
@@ -38,11 +45,29 @@ export interface Registration {
   build: string;
 }
 
+/** What the extension asks RPE to confirm of a registration besides its key, which is the ask's bearer: the relay socket and the connection the extension would act on. */
+export interface ConfirmAsk {
+  relay: string;
+  connection: string | null;
+}
+
+/** RPE's confirmation of a registration: the user and the relay socket it registered for. */
+export interface Confirmed {
+  rpe: "confirmed";
+  user: string;
+  relay: string;
+}
+
 /** What a page is handed when it starts: where it may reach RPE directly, RPE's build, and a page token. */
 export interface StartFacts {
   token: string;
-  /** When the token stops working, in milliseconds since 1970. */
+  /** When the token stops working, in milliseconds since 1970, by RPE's clock. */
   expiresAt: number;
+  /**
+   * How long the token still works, in milliseconds, as RPE answered: a page schedules its renewal
+   * from when the facts reach it, so a page whose clock is not RPE's never renews too soon or too late.
+   */
+  expiresInMs: number;
   /** RPE's addresses a browser may try directly, best first. */
   addresses: string[];
   build: string;
@@ -52,6 +77,16 @@ export interface StartFacts {
 export interface MissingPermission {
   permission: string;
   why: string;
+}
+
+/** How RPE's extension in Lumiverse last said it stands with RPE: what RPE's own pages show. */
+export interface ExtensionStatus {
+  /** Whether the extension holds RPE's registration, and so marks the replies RPE plays. */
+  registered: boolean;
+  /** Why it does not, in words a user is shown; null when it does. */
+  why: string | null;
+  /** The permissions it says it is missing, and why it needs each; null until it has said. */
+  missing: MissingPermission[] | null;
 }
 
 /** A page's request carried to RPE: one request, one whole answer (Spindle's proxy: 30 s, 25 MB). */
@@ -87,8 +122,8 @@ export interface LiveFrame {
 /** RPE to the extension, on the relay socket. */
 export type FromRpe = { rpe: "register"; registration: Registration } | ({ rpe: "live"; key: string } & LiveFrame);
 
-/** The extension to RPE's relay socket. */
-export type ToRpe = { rpe: "registered"; missing: MissingPermission[] } | { rpe: "permissions"; missing: MissingPermission[] };
+/** The extension to RPE's relay socket: it took RPE's registration, or refused it and why; and what it is missing, each time that changes. */
+export type ToRpe = { rpe: "registered"; missing: MissingPermission[] } | { rpe: "refused"; why: string; missing: MissingPermission[] } | { rpe: "permissions"; missing: MissingPermission[] };
 
 /** A page to the extension (`ctx.sendToBackend`). */
 export type FromPage = { rpe: "start" } | ({ rpe: "request" } & PipeRequest) | { rpe: "follow"; chat: string } | { rpe: "unfollow"; chat: string };
@@ -124,6 +159,16 @@ export function readRegistration(v: unknown): Registration | null {
   return { v: 1, base: v.base, key: v.key, connection: v.connection, relay: v.relay, build: v.build };
 }
 
+/** What the extension asks RPE to confirm, or null. */
+export function readConfirmAsk(v: unknown): ConfirmAsk | null {
+  return isRecord(v) && str(v.relay) && (v.connection === null || str(v.connection)) ? { relay: v.relay, connection: v.connection } : null;
+}
+
+/** RPE's confirmation as its route answers it, or null when what answered is not RPE. */
+export function readConfirmed(v: unknown): Confirmed | null {
+  return isRecord(v) && v.rpe === "confirmed" && str(v.user) && str(v.relay) ? { rpe: "confirmed", user: v.user, relay: v.relay } : null;
+}
+
 /** A frame from RPE, or null when it is none this build reads. */
 export function readFromRpe(v: unknown): FromRpe | null {
   if (!isRecord(v)) return null;
@@ -147,13 +192,26 @@ function partOf(v: unknown): { index: number; count: number } | undefined | null
   return count(index) && count(total) && index < total ? { index, count: total } : null;
 }
 
+/** A list of missing permissions as sent, or null when it is not one. */
+function missingOf(m: unknown): MissingPermission[] | null {
+  return Array.isArray(m) && m.every((x) => isRecord(x) && str(x.permission) && typeof x.why === "string") ? m.map((x) => ({ permission: String(x.permission), why: String(x.why) })) : null;
+}
+
+/** A message from the extension to RPE's relay socket, or null when it is none this build reads. */
+export function readToRpe(v: unknown): ToRpe | null {
+  if (!isRecord(v)) return null;
+  const missing = missingOf(v.missing);
+  if (missing === null) return null;
+  if (v.rpe === "registered" || v.rpe === "permissions") return { rpe: v.rpe, missing };
+  return v.rpe === "refused" && str(v.why) ? { rpe: "refused", why: v.why, missing } : null;
+}
+
 /** A message from the extension to a page, or null when it is none this build reads. */
 export function readToPage(v: unknown): ToPage | null {
   if (!isRecord(v)) return null;
-  const missing = (m: unknown): MissingPermission[] | null => (Array.isArray(m) && m.every((x) => isRecord(x) && str(x.permission) && typeof x.why === "string") ? m.map((x) => ({ permission: String(x.permission), why: String(x.why) })) : null);
   switch (v.rpe) {
     case "start": {
-      const lacking = missing(v.missing);
+      const lacking = missingOf(v.missing);
       const facts = v.facts === null ? null : readStartFacts(v.facts);
       if (lacking === null || (v.facts !== null && facts === null)) return null;
       return { rpe: "start", facts, ...(typeof v.error === "string" ? { error: v.error } : {}), missing: lacking };
@@ -170,7 +228,7 @@ export function readToPage(v: unknown): ToPage | null {
     case "following":
       return str(v.chat) ? { rpe: "following", chat: v.chat, ...(typeof v.error === "string" ? { error: v.error } : {}) } : null;
     case "permissions": {
-      const lacking = missing(v.missing);
+      const lacking = missingOf(v.missing);
       return lacking === null ? null : { rpe: "permissions", missing: lacking };
     }
     default:
@@ -206,8 +264,8 @@ export function readLiveAsk(v: unknown): LiveAsk | null {
 
 /** RPE's start-up facts as its route answers them, or null. */
 export function readStartFacts(v: unknown): StartFacts | null {
-  if (!isRecord(v) || !str(v.token) || typeof v.expiresAt !== "number" || !Array.isArray(v.addresses) || !v.addresses.every(str) || typeof v.build !== "string") return null;
-  return { token: v.token, expiresAt: v.expiresAt, addresses: [...v.addresses], build: v.build };
+  if (!isRecord(v) || !str(v.token) || typeof v.expiresAt !== "number" || !count(v.expiresInMs) || !Array.isArray(v.addresses) || !v.addresses.every(str) || typeof v.build !== "string") return null;
+  return { token: v.token, expiresAt: v.expiresAt, expiresInMs: v.expiresInMs, addresses: [...v.addresses], build: v.build };
 }
 
 /** Whether an address is on this machine's loopback: the only kind the extension's road goes to (§4.3). */

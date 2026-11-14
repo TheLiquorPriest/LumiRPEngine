@@ -109,6 +109,19 @@ test("gives each message's showing swipe as the importer tied it: its saved text
   expect(((await reader.path("chat-a")) ?? []).slice(1).map((s) => s.shown)).toEqual(expected);
 });
 
+test("gives every swipe of a message as saved, in order, with its stored date: a generation writes into its own swipe, not always the one shown", async () => {
+  const { reader } = readerFor("user-a");
+  expect((await reader.messagesById("chat-a", ["ma2", "ma3", "ma4"])).map((m) => m.saves)).toEqual([
+    [{ text: "Hi.", date: null }],
+    [
+      { text: "First.", date: 1700000000 },
+      { text: "Second.", date: 1700000060 },
+    ],
+    // A list Lumiverse's mapper cannot read: the one `content`, with no date.
+    [{ text: "Broken.", date: null }],
+  ]);
+});
+
 test("finds the books a chat reads in Lumiverse's order, each once; a group chat's unmuted members'", async () => {
   const { reader } = readerFor("user-a");
   expect(await attachedBooks(reader, "chat-a")).toEqual(["book-char", "book-persona", "book-chat", "book-global"]);

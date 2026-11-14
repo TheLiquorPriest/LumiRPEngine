@@ -1,6 +1,7 @@
 // The web app is served at `/ui/` from the folder the build made, with each file's own type, to
-// anyone, and nothing outside that folder is: not by a step up, an encoded slash, or a link. Run from
-// source, where nothing is built, `/ui/` says so.
+// anyone, and nothing outside that folder is: not by a step up, an encoded slash, a link, or dot
+// segments sent as they are, past any client's tidying. Run from source, where nothing is built,
+// `/ui/` says so.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, symlink, writeFile } from "node:fs/promises";
@@ -49,11 +50,38 @@ describe("the web app at /ui/", () => {
 
   test("serves nothing outside its folder, and nothing it does not have", async () => {
     const server = await serve(built);
-    for (const path of ["/ui/..%2Fsecret.txt", "/ui/assets/..%2F..%2Fsecret.txt", "/ui/%2e%2e/secret.txt", "/ui/assets/link.txt", "/ui/assets", "/ui/assets/", "/ui/missing.js", "/ui/%E0%A4%A"]) {
+    for (const path of ["/ui/..%2Fsecret.txt", "/ui/assets/..%2F..%2Fsecret.txt", "/ui/assets/link.txt", "/ui/assets", "/ui/assets/", "/ui/missing.js", "/ui/%E0%A4%A"]) {
       const res = await fetch(`${server.url}${path}`);
       expect(res.status, path).toBe(404);
       expect(await res.text(), path).not.toContain("not for pages");
     }
+  });
+
+  test("dot segments sent as they are reach the web app's route, and it serves nothing for a path they take out of /ui/", async () => {
+    const server = await serve(built);
+    // `fetch` tidies dot segments away before it sends; a raw request line keeps them, and Bun routes it by them.
+    const raw = async (path: string): Promise<string> => {
+      const { promise, resolve } = Promise.withResolvers<string>();
+      let got = "";
+      await Bun.connect({
+        hostname: "127.0.0.1",
+        port: server.port,
+        socket: {
+          open: (socket) => void socket.write(`GET ${path} HTTP/1.1\r\nHost: 127.0.0.1:${server.port}\r\nConnection: close\r\n\r\n`),
+          data: (_socket, bytes) => void (got += new TextDecoder().decode(bytes)),
+          close: () => resolve(got),
+          error: () => resolve(got),
+        },
+      });
+      return await promise;
+    };
+    for (const path of ["/ui/%2e%2e/secret.txt", "/ui/../secret.txt", "/ui/assets/%2e%2e/%2e%2e/secret.txt", "/ui/..", "/ui/%2e%2e/"]) {
+      const answer = await raw(path);
+      expect(answer.split("\r\n")[0], path).toBe("HTTP/1.1 404 Not Found");
+      expect(answer, path).not.toContain("not for pages");
+      expect(answer, path).not.toContain("<title>RPE</title>");
+    }
+    expect((await raw("/ui/assets/../index.html")).split("\r\n")[0]).toBe("HTTP/1.1 200 OK");
   });
 
   test("run from source, with no built folder, /ui/ answers 404 in one plain sentence", async () => {

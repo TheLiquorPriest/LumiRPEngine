@@ -1,8 +1,8 @@
 // What the door's end-to-end tests share: the stand-in Lumiverse (`test/standin/http.ts`) with the
 // light extension installed and running in it, RPE signed in as `rpe lumiverse` leaves it, and RPE's
-// app (`openApp`) with the door mounted, listening on a free loopback port. Lumiverse's requests to RPE
-// (the extension's road, the chat connection) go over the real network to that port; everything else
-// runs on the clock the test gives. Every name is invented.
+// app (`openApp`) with the door mounted, listening on a free port (loopback unless the test sets an
+// address). Lumiverse's requests to RPE (the extension's road, the chat connection) go over the real
+// network to that port; everything else runs on the clock the test gives. Every name is invented.
 
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -12,7 +12,7 @@ import { dataPaths, lineLog, openApp, SecretsFile, type App, type RunningServer 
 import { configOf, prepareDataFolder } from "../../src/app/config";
 import type { SecrecyAsk, WindowAsk } from "../../src/adapter/lumiverse/answer";
 import { lumiverseDoor, type AdapterLanes, type LumiverseDoor } from "../../src/adapter/lumiverse/mount";
-import { EXTENSION_IDENTIFIER, readRegistration, REGISTRATION_FILE, type MissingPermission, type Registration } from "../../src/adapter/lumiverse/pipe-wire";
+import { EXTENSION_IDENTIFIER, readRegistration, REGISTRATION_FILE, type Registration } from "../../src/adapter/lumiverse/pipe-wire";
 import type { TaggedTurn } from "../../src/adapter/lumiverse/provider";
 import type { RelaySettings } from "../../src/adapter/lumiverse/relay";
 import { LumiverseSession } from "../../src/adapter/lumiverse/session";
@@ -20,7 +20,7 @@ import { startExtension } from "../../src/ext/start";
 import { ALL } from "../ext/rig";
 import { StandInDb } from "../standin/db";
 import { LumiverseServer } from "../standin/http";
-import { StandIn } from "../standin/lumiverse";
+import { StandIn, type Installed } from "../standin/lumiverse";
 
 export const USER = "user-tamsin";
 const PASSWORD = "salt and lantern";
@@ -34,11 +34,18 @@ export interface DoorBed {
   door: LumiverseDoor;
   host: StandIn;
   server: LumiverseServer;
+  /** The extension as installed in the stand-in: Spindle's API as its worker sees it. */
+  installed: Installed;
   /** Lumiverse's id for the extension. */
   extension: string;
   providerKey: string;
+  /** What RPE told its extension of itself. */
   registration: Registration;
-  heard: { turns: TaggedTurn[]; passed: PassRequest[]; questions: SecrecyAsk[]; windows: WindowAsk[]; permissions: MissingPermission[][] };
+  /** The registration the extension keeps for RPE's user now; null when it keeps none. */
+  kept(): Registration | null;
+  /** RPE's log, a line each. */
+  logs: string[];
+  heard: { turns: TaggedTurn[]; passed: PassRequest[]; questions: SecrecyAsk[]; windows: WindowAsk[] };
   /**
    * Waits until `check` gives something: moving the test's clock where it has one, and letting
    * Lumiverse's requests to RPE, which go over the real network, finish in real time.
@@ -49,7 +56,17 @@ export interface DoorBed {
   close(): Promise<void>;
 }
 
-export async function openDoor(options: { clock: BedClock; handlerMs?: number; relay?: Partial<RelaySettings> }): Promise<DoorBed> {
+export interface DoorOptions {
+  clock: BedClock;
+  handlerMs?: number;
+  relay?: Partial<RelaySettings>;
+  /** RPE's config over the bed's own. */
+  config?: Record<string, unknown>;
+  /** What the extension is granted; all it asks for unless said. */
+  granted?: readonly string[];
+}
+
+export async function openDoor(options: DoorOptions): Promise<DoorBed> {
   const { clock } = options;
   const cleanups: (() => Promise<void> | void)[] = [];
   const close = async (): Promise<void> => {
@@ -64,7 +81,7 @@ export async function openDoor(options: { clock: BedClock; handlerMs?: number; r
     const host = new StandIn();
     const server = new LumiverseServer({ clock, db, host, accounts: [{ id: USER, username: "tamsin", password: PASSWORD }], ...(options.handlerMs !== undefined ? { handlerMs: options.handlerMs } : {}) });
     cleanups.push(() => server.stop());
-    const installed = server.install(EXTENSION_IDENTIFIER, ALL);
+    const installed = server.install(EXTENSION_IDENTIFIER, options.granted ?? ALL);
     const running = await startExtension(installed);
     cleanups.push(() => running.stop());
 
@@ -74,7 +91,7 @@ export async function openDoor(options: { clock: BedClock; handlerMs?: number; r
     const signIn = await new LumiverseSession({ base: server.base, fetch: server.fetch, signIn: null, save: async () => undefined, owner: () => USER, clock, log: () => undefined }).signIn("tamsin", PASSWORD);
     await new SecretsFile(paths.secrets).write("lumiverse", { ...signIn });
 
-    const heard: DoorBed["heard"] = { turns: [], passed: [], questions: [], windows: [], permissions: [] };
+    const heard: DoorBed["heard"] = { turns: [], passed: [], questions: [], windows: [] };
     const lanes: AdapterLanes = {
       turns: {
         play: async (turn, out) => {
@@ -104,11 +121,11 @@ export async function openDoor(options: { clock: BedClock; handlerMs?: number; r
         },
       },
       passConnection: () => "conn-author",
-      permissions: (missing) => void heard.permissions.push(missing),
     };
     const door = lumiverseDoor(lanes, { fetch: server.fetch, open: server.open, clock, sleep: (ms) => Bun.sleep(ms), ...(options.relay ? { relay: options.relay } : {}) });
-    const config = configOf({ port: 0, lumiverse: { url: server.base, user: USER, database: db.path, connection: "conn-rpe" } }, {}, "the test's config");
-    const app = await openApp({ paths, config, version: "build-7", areas: [door.area], now: () => clock.now(), log: lineLog(() => undefined) });
+    const config = configOf({ port: 0, lumiverse: { url: server.base, user: USER, database: db.path, connection: "conn-rpe" }, ...options.config }, {}, "the test's config");
+    const logs: string[] = [];
+    const app = await openApp({ paths, config, version: "build-7", areas: [door.area], now: () => clock.now(), log: lineLog((line) => logs.push(line), () => clock.now()) });
     cleanups.push(() => app.close());
     const providerKey = (await app.auth.makeKey("provider")).key;
 
@@ -133,20 +150,24 @@ export async function openDoor(options: { clock: BedClock; handlerMs?: number; r
       }
     };
 
-    // Listening starts the door: its sockets open, and its relay socket registers with the extension.
+    // Listening starts the door: its sockets open, and its relay socket registers with the extension,
+    // which reaches RPE on loopback; Lumiverse's chat connection reaches it at its address.
     const listening = await app.start();
-    host.servers.set(new URL(listening.url).origin, async (request) => {
+    const forward = async (request: Request): Promise<Response> => {
       inflight++;
       try {
         return await fetch(request);
       } finally {
         inflight--;
       }
-    });
-    await until("the extension's answer to RPE's registration", () => heard.permissions.length > 0);
-    const registration = readRegistration(JSON.parse(host.storage.get(`${USER}\u0000${REGISTRATION_FILE}`) ?? "null"));
-    if (registration === null) throw new Error("the extension kept no registration");
-    return { app, listening, door, host, server, extension: installed.id, providerKey, registration, heard, until, run, close };
+    };
+    for (const at of new Set([listening.url, listening.loopback])) host.servers.set(new URL(at).origin, forward);
+    // Taken or refused, the extension's answer says what it is missing.
+    await until("the extension's answer to RPE's registration", () => door.extension().missing !== null);
+    const registration = door.registration();
+    if (registration === null) throw new Error("RPE made no registration");
+    const kept = (): Registration | null => readRegistration(JSON.parse(host.storage.get(`${USER}\u0000${REGISTRATION_FILE}`) ?? "null"));
+    return { app, listening, door, host, server, installed, extension: installed.id, providerKey, registration, kept, logs, heard, until, run, close };
   } catch (error) {
     await close();
     throw error;

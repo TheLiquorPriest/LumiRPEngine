@@ -19,8 +19,13 @@ function notFound(words: string): Response {
   return new Response(words, { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
 }
 
-/** The path's parts below `/ui/`, decoded; null when one could step out of its folder or name something no file is named. */
+/**
+ * The path's parts below `/ui/`, decoded; null when one could step out of its folder or name something
+ * no file is named. Bun routes a request by its path as sent, and hands the route that path with its dot
+ * segments resolved, which may then lie outside `/ui/`: such a path is none of the web app's.
+ */
 function partsOf(pathname: string): string[] | null {
+  if (!pathname.startsWith(UI_PREFIX)) return null;
   const rest = pathname.slice(UI_PREFIX.length);
   if (rest === "") return [INDEX];
   const parts: string[] = [];

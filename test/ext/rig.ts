@@ -5,7 +5,7 @@
 
 import { questionRoute, type HistoryWindow, type SecrecyAsk } from "../../src/adapter/lumiverse/answer";
 import { readBlocksHint } from "../../src/adapter/lumiverse/layout";
-import { USER_HEADER, type Registration } from "../../src/adapter/lumiverse/pipe-wire";
+import { CONFIRM_PATH, readConfirmAsk, USER_HEADER, type Registration } from "../../src/adapter/lumiverse/pipe-wire";
 import { providerEndpoint, type TaggedTurn } from "../../src/adapter/lumiverse/provider";
 import { streamedReply, wholeReply } from "../../src/adapter/lumiverse/stream";
 import { QUESTION_PATH, readQuestion, type Question, type SecrecyVerdict } from "../../src/adapter/lumiverse/wire";
@@ -142,6 +142,7 @@ export class Rig {
         },
       },
       passConnection: () => null,
+      unpassable: () => null,
       modelNames: () => ["rpe"],
       turns: {
         play: async (turn, out) => {
@@ -168,6 +169,14 @@ export class Rig {
         return await question(request);
       }
       if (path === "/v1/chat/completions") return await provider(request);
+      if (path === CONFIRM_PATH) {
+        // As RPE's own route: the key it made, for its own user, naming its relay socket and connection.
+        if (request.headers.get("authorization") !== `Bearer ${EXTENSION_KEY}`) return Response.json({ error: "This needs the extension's registration with this RPE." }, { status: 401 });
+        if (request.headers.get(USER_HEADER) !== USER) return Response.json({ error: "This RPE belongs to another Lumiverse user." }, { status: 403 });
+        const asked = readConfirmAsk(await request.json());
+        if (asked?.relay !== RELAY_SESSION || asked.connection !== "conn-rpe") return Response.json({ error: "That is not the registration this RPE made." }, { status: 409 });
+        return Response.json({ rpe: "confirmed", user: USER, relay: RELAY_SESSION });
+      }
       return new Response("not found", { status: 404 });
     };
     this.lv.servers.set(RPE, this.rpe);

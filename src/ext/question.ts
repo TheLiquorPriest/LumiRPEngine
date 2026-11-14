@@ -6,7 +6,9 @@
 // on the secrets; and holds RPE's answer on the history cut for the prompt interceptor of the same
 // generation. With no answer in time it applies the fail-closed verdict (`fail-closed.ts`) and holds
 // only the cut RPE last gave the chat; when RPE answers that it could not work the secrets out, it
-// applies the same verdict and holds RPE's cut. Lumiverse gives it ten seconds and then forwards the
+// applies the same verdict and holds RPE's cut. For a user it holds no registration of RPE's for, it
+// asks nothing and applies that verdict alone, which needs nothing but the entries and touches only
+// those that carry RPE's marks or fields. Lumiverse gives it ten seconds and then forwards the
 // entries unchanged (`worker-host.ts:4936-4943`), and does the same when it throws (`worker-runtime.ts:
 // 4979-4989`, `world-info-interceptor.ts:384-392`), so it never throws and its deadline is well inside
 // that.
@@ -23,7 +25,7 @@ import { ask, type Road } from "./road";
 import type { ExtSpindle, WorldInfoReturn } from "./spindle";
 
 export interface QuestionDeps {
-  /** This user's RPE; null where none belongs to them, and then the extension leaves their prompts alone. */
+  /** This user's RPE; null where none is registered for them, and then the fail-closed verdict alone applies. */
   road(user: string): Promise<Road | null>;
   proxy: ExtSpindle["cors"];
   generations: Generations;
@@ -88,7 +90,8 @@ export function worldInfoInterceptor(deps: QuestionDeps): (ctx: unknown) => Prom
     };
     try {
       const road = await deps.road(ctx.user);
-      if (road === null) return {};
+      // Before RPE first registers, or where it is not this user's: nothing to ask, and the marks still hold.
+      if (road === null) return failClosed(ctx.candidates, deps.keptOut.of(ctx.user, ctx.chat));
       const generation = ctx.purpose === "prompt" ? deps.generations.pending(ctx.user, ctx.chat) : null;
       const question: Question = { v: 1, user: ctx.user, chat: ctx.chat, purpose: ctx.purpose, generation, path: ctx.path, entries: ctx.candidates.map(entryOf) };
       const reply = await ask(deps.proxy, road, question, deps.deadlineMs);

@@ -2,16 +2,19 @@
 // session as RPE's user, the reads (the database file where RPE runs beside Lumiverse, its HTTP routes
 // otherwise), the chat port, the event socket and the changes it hears, the relay socket and the relay,
 // and the routes: the provider endpoint and its model list, which the app holds to the provider key;
-// and the routes only the extension calls (its question, a page's start-up facts, a page's follows),
-// which the app holds to the extension's registration key, and which serve only the Lumiverse user RPE
-// belongs to.
+// the routes only the extension calls (its question, a page's start-up facts, a page's follows), which
+// the app holds to the extension's registration key, and which serve only the Lumiverse user RPE
+// belongs to; and the page route that says how the extension stands with RPE.
 //
 // The app (`src/app/`) mounts it as an area. Its sockets open, and it registers with the extension,
-// only once the server listens (the area's `started`): the registration carries RPE's address, and a
-// new registration key, made then and handed to the extension at once, the app keeping only its hash.
+// only once the server listens (the area's `started`): the registration carries RPE's address on this
+// machine's loopback, where the server listens whatever address pages reach it by, and a new
+// registration key, made then and handed to the extension at once, the app keeping only its hash.
+// What the extension says back (it took the registration, or refused it and why, and what it is
+// missing) is logged once each time it changes, and kept for RPE's pages.
 
 import type { Clock, HistoryRange, ModelsApi } from "rp-harness/contract";
-import { AuthRefused, bearerOf, rawRoute, type App, type Area } from "../../app";
+import { AuthRefused, bearerOf, rawRoute, route, type App, type Area } from "../../app";
 import { isRecord } from "../../shared/json";
 import { questionRoute, type HistoryWindow, type SecrecyRules } from "./answer";
 import { createChatReads, type ChatReads } from "./chat";
@@ -19,7 +22,7 @@ import { createDbReader, type DbReader } from "./db";
 import { followChanges, type ChatChanges } from "./events";
 import { blocksHint } from "./hint";
 import { createHttpReads } from "./http-reads";
-import { EXTENSION_IDENTIFIER, LIVE_PATH, readLiveAsk, START_PATH, USER_HEADER, type MissingPermission, type Registration, type StartFacts } from "./pipe-wire";
+import { CONFIRM_PATH, EXTENSION_IDENTIFIER, EXTENSION_STATUS_PATH, LIVE_PATH, readConfirmAsk, readLiveAsk, START_PATH, USER_HEADER, type Confirmed, type ExtensionStatus, type Registration, type StartFacts } from "./pipe-wire";
 import { modelsEndpoint, providerEndpoint, type TurnPlayer } from "./provider";
 import { preferDatabase, type LumiverseReads } from "./reads";
 import { Relay, type RelaySettings } from "./relay";
@@ -47,8 +50,6 @@ export interface AdapterLanes {
   models: Pick<ModelsApi, "pass">;
   /** The connection a request with no tag goes on; null for RPH's default (a user's choice, kept with RPE's global settings). */
   passConnection(): string | null;
-  /** What the extension says it is missing, for RPE's UI. */
-  permissions(missing: MissingPermission[]): void;
 }
 
 export interface AdapterDeps {
@@ -94,12 +95,17 @@ export interface LumiverseDoor {
   readonly area: Area;
   /** The parts, once the area is mounted in an app set up for a Lumiverse user; null before. */
   lumiverse(): Lumiverse | null;
+  /** How the extension stands with RPE now, as `EXTENSION_STATUS_PATH` gives it. */
+  extension(): ExtensionStatus;
+  /** What RPE tells the extension of itself; null until the server listens. */
+  registration(): Registration | null;
 }
 
 /** Fixed: a question carries the chat's whole path and the marked lore's text, past the app's 1 MiB for other bodies. */
 export const QUESTION_BODY_BYTES = 8 * 1024 * 1024;
 
 const NOT_SET_UP = "RPE is not set up for a Lumiverse yet: give it Lumiverse's address and your Lumiverse user (rpe up).";
+const NOT_HEARD = "RPE has not heard from its extension in Lumiverse since it started.";
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
@@ -111,9 +117,6 @@ function storedSignIn(value: unknown): StoredSignIn | null {
   return { username: value.username, token: value.token, user: value.user, savedAt: value.savedAt };
 }
 
-const LOOPBACK = /^(?:127(?:\.\d{1,3}){3}|localhost|\[::1\]|::1)$/;
-const WILDCARD = /^(?:0\.0\.0\.0|::|\[::\])$/;
-
 export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): LumiverseDoor {
   let app: App | null = null;
   let parts: Lumiverse | null = null;
@@ -121,18 +124,20 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
   let offChanges: (() => void) | null = null;
   const relaySession = newFrontendSession();
   const log = (message: string): void => app?.log.warn(`[lumiverse] ${message}`);
+  /** How the extension stands with RPE: until it answers, RPE is not registered. */
+  const status: ExtensionStatus = { registered: false, why: NOT_HEARD, missing: null };
+  /** The status as handed out: a copy, so nobody it is handed to changes RPE's. */
+  const extension = (): ExtensionStatus => ({ registered: status.registered, why: status.why, missing: status.missing === null ? null : status.missing.map((m) => ({ ...m })) });
 
-  /** RPE's address for the extension's road: on loopback, which a wildcard listen includes. */
-  const base = (): string | null => {
-    const listening = app?.listening();
-    if (app === null || listening === null || listening === undefined) return null;
-    const address = app.config.address.toLowerCase();
-    return LOOPBACK.test(address) || WILDCARD.test(address) ? `http://127.0.0.1:${listening.port}` : listening.url;
-  };
-  /** Where a browser may reach RPE directly: this machine's loopback, then every name RPE is published at. */
+  /** Where a browser may reach RPE directly: this machine's loopback, RPE's own address, then every name RPE is published at. */
   const addresses = (): string[] => {
-    const own = base();
-    return [...(own === null ? [] : [own]), ...(app?.config.hosts ?? []).map((host) => `https://${host}`)];
+    const listening = app?.listening() ?? null;
+    return [...new Set([...(listening === null ? [] : [listening.loopback, listening.url]), ...(app?.config.hosts ?? []).map((host) => `https://${host}`)])];
+  };
+  /** What RPE tells the extension of itself: its address for the extension's road, on loopback, where RPE listens whatever its address; null until the server listens. */
+  const registration = (): Registration | null => {
+    const listening = app?.listening() ?? null;
+    return app === null || listening === null || key === null ? null : { v: 1, base: listening.loopback, key, connection: app.config.lumiverse.connection, relay: relaySession, build: app.version };
   };
 
   function build(at: App, user: string, url: string, signIn: StoredSignIn | null): Lumiverse {
@@ -145,10 +150,6 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
     const settings = deps.socket ? { settings: deps.socket } : {};
     const events = new LumiverseSocket({ session, open: deps.open, clock: deps.clock, log: (m) => log(`event socket: ${m}`), ...settings });
     const relaySocket = new LumiverseSocket({ session, open: deps.open, clock: deps.clock, log: (m) => log(`relay socket: ${m}`), frontendSession: relaySession, ...settings });
-    const registration = (): Registration | null => {
-      const road = base();
-      return road === null || key === null ? null : { v: 1, base: road, key, connection: at.config.lumiverse.connection, relay: relaySession, build: at.version };
-    };
     const relay = new Relay({
       socket: relaySocket,
       extension: async () => {
@@ -161,8 +162,19 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       registration,
       follow: (chatId, take) => at.live.follow(chatId, { take: (_batch, text) => take(text) }),
       clock: deps.clock,
-      log: (m) => log(`relay: ${m}`),
-      permissions: lanes.permissions,
+      held: (why) => {
+        const was = status.why;
+        status.registered = why === null;
+        status.why = why;
+        if (why !== null && why !== was) log(why);
+        // After a refusal the log said, it says the end of it too.
+        else if (why === null && was !== null && was !== NOT_HEARD) at.log.info("[lumiverse] RPE's extension in Lumiverse took its registration again.");
+      },
+      permissions: (missing) => {
+        const was = status.missing;
+        status.missing = missing;
+        if (missing.length > 0 && JSON.stringify(missing) !== JSON.stringify(was)) at.log.warn("RPE's extension in Lumiverse is missing permissions it needs.", { missing: missing.map((m) => m.permission) });
+      },
       ...(deps.relay ? { settings: deps.relay } : {}),
     });
     const stopGeneration = async (generation: string): Promise<boolean> => {
@@ -216,6 +228,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             blocks: blocksHint({ reads: p.reads, session: p.session, log }),
             models: lanes.models,
             passConnection: lanes.passConnection,
+            unpassable: () => (status.registered ? null : status.why),
             modelNames,
             turns: lanes.turns,
             clock: deps.clock,
@@ -224,11 +237,25 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
           }),
           question: questionRoute({ secrecy: lanes.secrecy, window: lanes.window, allowed: (request) => request.headers.get(USER_HEADER) === user, log }),
         };
-      }
+      } else status.why = NOT_SET_UP;
       at.routes.add("lumiverse", [
         rawRoute({ method: "POST", path: "/v1/chat/completions", access: "provider", raw: (request) => (handlers === null ? notSetUp() : handlers.provider(request)) }),
         rawRoute({ method: "GET", path: "/v1/models", access: "provider", raw: modelsEndpoint({ allowed: providerKey, modelNames }) }),
+        route({ method: "GET", path: EXTENSION_STATUS_PATH, access: "page", handle: extension }),
         rawRoute({ method: "POST", path: QUESTION_PATH, access: "extension", maxBody: QUESTION_BODY_BYTES, raw: (request) => (handlers === null ? notSetUp() : handlers.question(request)) }),
+        rawRoute({
+          method: "POST",
+          path: CONFIRM_PATH,
+          access: "extension",
+          // The server has held the ask to the key in force and this to RPE's own user: what is left is that it names RPE's own relay socket and connection.
+          raw: forOwner(async (body, owner) => {
+            const asked = readConfirmAsk(body);
+            const own = registration();
+            if (asked === null || own === null || asked.relay !== own.relay || asked.connection !== own.connection) return json(409, { error: "That is not the registration this RPE made." });
+            const confirmed: Confirmed = { rpe: "confirmed", user: owner, relay: own.relay };
+            return json(200, confirmed);
+          }),
+        }),
         rawRoute({
           method: "POST",
           path: START_PATH,
@@ -236,7 +263,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
           raw: forOwner(async (_body, owner) => {
             try {
               const minted = await at.auth.mintPageToken(owner, "extension");
-              const facts: StartFacts = { token: minted.token, expiresAt: minted.expires, addresses: addresses(), build: at.version };
+              const facts: StartFacts = { token: minted.token, expiresAt: minted.expires, expiresInMs: Math.max(0, minted.expires - at.now()), addresses: addresses(), build: at.version };
               return json(200, facts);
             } catch (error) {
               if (error instanceof AuthRefused) return json(error.status, { error: error.message });
@@ -279,5 +306,5 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
     },
   };
 
-  return { area, lumiverse: () => parts };
+  return { area, lumiverse: () => parts, extension, registration };
 }

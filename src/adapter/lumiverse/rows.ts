@@ -52,6 +52,12 @@ export interface LvMessage {
    * date as Lumiverse stores it (`swipe_dates[swipe]`, the raw number; null where the list has none).
    */
   shown: { hash: string; date: number | null };
+  /**
+   * Every swipe as saved, in order: its text (`swipes[i]`; "" where that is not text) and its date as
+   * Lumiverse stores it (`swipe_dates[i]`; null where the list has none). A generation writes into its
+   * own swipe, which need not be the one shown. One, the message's `content`, where `swipes` is no list.
+   */
+  saves: { text: string; date: number | null }[];
 }
 
 export interface LvBook {
@@ -221,6 +227,12 @@ export function messageFrom(row: Record<string, unknown>): LvMessage {
     sentAt: num(row.send_date) * 1000,
     revision: num(row.revision),
     shown: { hash: textHash(typeof saved === "string" ? saved : str(row.content)), date: typeof date === "number" ? date : null },
+    saves: Array.isArray(swipes)
+      ? (swipes as unknown[]).map((text, i) => {
+          const at: unknown = Array.isArray(dates) ? (dates as unknown[])[i] : undefined;
+          return { text: typeof text === "string" ? text : "", date: typeof at === "number" ? at : null };
+        })
+      : [{ text: str(row.content), date: null }],
   };
 }
 

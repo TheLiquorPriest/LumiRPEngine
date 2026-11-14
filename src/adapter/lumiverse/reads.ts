@@ -7,8 +7,8 @@
 import type { JsonValue } from "../../shared/json";
 import type { LvBook, LvCharacter, LvChat, LvEntry, LvMessage, LvPersona, LvPreset, LvSetting } from "./rows";
 
-/** A message as the chat's path lists it: everything but its text. */
-export type LvStep = Omit<LvMessage, "text" | "name" | "sentAt">;
+/** A message as the chat's path lists it: everything but its texts. */
+export type LvStep = Omit<LvMessage, "text" | "name" | "sentAt" | "saves">;
 
 /** A stretch of a chat's messages by their place on its path, from 0: `from` up to but not including `to`. */
 export interface Places {

@@ -129,3 +129,42 @@ describe("the server", () => {
     expect(() => app.routes.add("late", [rawRoute({ method: "GET", path: "/ui/*", access: "public", raw: () => new Response("ui") })])).toThrow("after the server started");
   });
 });
+
+describe("where the server listens", () => {
+  let bed: Bed;
+
+  beforeEach(async () => {
+    bed = await makeBed();
+  });
+
+  afterEach(async () => {
+    await bed.remove();
+  });
+
+  test("set to an address other than 127.0.0.1, it answers there and on 127.0.0.1 at the same port, where its extension in Lumiverse reaches it", async () => {
+    const server = await (await bed.open({ config: { address: "::1" } })).start();
+    expect(server.url).toBe(`http://[::1]:${server.port}`);
+    expect(server.loopback).toBe(`http://127.0.0.1:${server.port}`);
+    for (const at of [server.url, server.loopback]) expect({ at, status: (await fetch(`${at}/api/v1/status`)).status }).toEqual({ at, status: 200 });
+  });
+
+  test("when another program holds 127.0.0.1 at its port, it does not start, and says why in one plain sentence", async () => {
+    const taken = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("another program") });
+    try {
+      const app = await bed.open({ config: { address: "::1", port: taken.port } });
+      const refused: unknown = await app.start().then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(refused).toBeInstanceOf(Error);
+      const words = (refused as Error).message;
+      expect(words).toMatch(/^[A-Z][^\n]*\.$/);
+      expect(words).toContain(`127.0.0.1:${taken.port}`);
+      expect(app.listening()).toBeNull();
+      // Nothing is left listening on the address it was set to.
+      await expect(fetch(`http://[::1]:${taken.port}/api/v1/status`)).rejects.toThrow();
+    } finally {
+      void taken.stop(true);
+    }
+  });
+});

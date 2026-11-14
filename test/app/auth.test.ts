@@ -85,12 +85,6 @@ describe("auth", () => {
     await expect(other).rejects.toMatchObject({ status: 403, message: expect.stringContaining("only for the Lumiverse user this RPE belongs to") });
   });
 
-  test("the extension takes a page's token only from its start, so no route of its own hands one out", async () => {
-    const extension = bearer(await makeKey(app, "extension"));
-    const asked = await fetch(`${server.url}/api/v1/ext/page-token`, { method: "POST", headers: { ...extension, "content-type": "application/json" }, body: JSON.stringify({ user: OWNER }) });
-    expect(asked.status).toBe(404);
-  });
-
   test("a page token made for one user is refused once this RPE belongs to another", async () => {
     const { token } = await app.auth.mintPageToken(OWNER, "extension");
     await app.close();

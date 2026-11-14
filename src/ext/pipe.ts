@@ -1,7 +1,8 @@
 // The extension's pipe between RPE and a Lumiverse page that cannot reach RPE directly (STANDALONE-PLAN
 // §4.3): it holds no logic of its own. What it carries:
-// - RPE's registration, sent on RPE's relay socket each time it opens: kept (`registration.ts`), and
-//   answered with what the extension is missing;
+// - RPE's registration, sent on RPE's relay socket each time it opens: kept once RPE confirms it
+//   (`registration.ts`), and answered to the socket it came from: taken, with what the extension is
+//   missing, or refused and why;
 // - a page's start: RPE's start-up facts (its addresses, its build, a short-lived page token), asked of
 //   RPE's start route and handed to that page alone;
 // - a page's request: carried to RPE's API through Spindle's proxy (one request, one whole answer, 30 s,
@@ -32,6 +33,8 @@ export interface PipeDeps {
   log(message: string): void;
   /** RPE registered for this user. */
   registered(user: string): void;
+  /** A registration from this user's socket was refused. */
+  refused(user: string): void;
 }
 
 export interface Pipe {
@@ -127,8 +130,15 @@ export function startPipe(deps: PipeDeps): Pipe {
     if (fromRpe !== null) {
       void (async () => {
         if (fromRpe.rpe === "register") {
-          if (session === undefined || session !== fromRpe.registration.relay) return;
-          if (!(await deps.registrations.keep(user, fromRpe.registration))) return;
+          // Answered to the socket it came from, whatever it is: a refusal tells RPE why, and nothing to anyone else.
+          if (session === undefined) return;
+          const refused = session !== fromRpe.registration.relay ? "it came from another socket than the one it names as RPE's." : await deps.registrations.keep(user, fromRpe.registration);
+          if (refused !== null) {
+            deps.log(`a registration for user ${user} was refused: ${refused}`);
+            spindle.sendToFrontend({ rpe: "refused", why: refused, missing: deps.missing() } satisfies ToRpe, user, { frontendSessionId: session });
+            deps.refused(user);
+            return;
+          }
           await toRpe(user, { rpe: "registered", missing: deps.missing() });
           deps.registered(user);
           return;

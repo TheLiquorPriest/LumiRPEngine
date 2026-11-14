@@ -111,6 +111,18 @@ describe("the question before lore activates", () => {
     expect(text).not.toContain(FERRY_SECRET);
   });
 
+  test("for a user with no registration (RPE has not registered yet, or is not theirs), RPE is not asked, and every marked passage and every copy of one still stays out of the prompt", async () => {
+    const rig = await new Rig().start();
+    rig.lv.chats.set("chat-wren", { ...rig.chat, id: "chat-wren", user: "user-wren" });
+    const out = await rig.lv.generate({ chat: "chat-wren", connection: "conn-other", preset: PRESET.id });
+    expect(out.error).toBeNull();
+    expect(rig.questions).toEqual([]);
+    const text = bodyText(rig.otherBodies[0]!);
+    for (const kept of [FERRY_SECRET, VAULT_SECRET]) expect(text).not.toContain(kept);
+    // Only RPE knows that one is secret, and nothing marks it.
+    for (const shown of [PUBLIC_LORE, INDEXED_SECRET, "The ferry crosses the bay at dawn."]) expect(text).toContain(shown);
+  });
+
   test("what RPE last kept out of a chat stays out when RPE stops answering, though no mark says it is secret; a restarted extension knows only the marks", async () => {
     const rig = await new Rig().start();
     await rig.generate("conn-rpe");

@@ -48,18 +48,34 @@ export async function startExtension(spindle: ExtSpindle, options: ExtensionOpti
   const log = (message: string): void => spindle.log.warn(`[RPE] ${message}`);
   const generations = new Generations(chats);
   const keptOut = new KeptOut(chats);
-  const registrations = new Registrations(spindle.userStorage, log);
+  const registrations = new Registrations(spindle.userStorage, (url, init) => spindle.cors(url, init));
   let granted: readonly string[] = await spindle.permissions.getGranted();
   const lacking = (): MissingPermission[] => missing(granted);
+  /**
+   * Users whose RPE the extension refused while it lacked a permission (it cannot confirm a
+   * registration without its proxy): they are shown the notice too, though no registration is kept.
+   */
+  const waiting = new Set<string>();
   // RPE's registration is heard after the start: the notice goes to its user then.
-  const pipe = startPipe({ spindle, registrations, missing: lacking, log, registered: () => notice() });
+  const pipe = startPipe({
+    spindle,
+    registrations,
+    missing: lacking,
+    log,
+    registered: () => notice(),
+    refused: (user) => {
+      if (lacking().length === 0) return;
+      waiting.add(user);
+      notice();
+    },
+  });
 
   /** What each user was last shown, so a notice is not stacked on one that says the same. */
   const shown = new Map<string, string>();
   const notice = (): void => {
     const now = lacking();
     const said = JSON.stringify(now);
-    for (const user of registrations.users()) {
+    for (const user of new Set([...registrations.users(), ...waiting])) {
       if (shown.get(user) === said) continue;
       const was = shown.get(user);
       shown.set(user, said);

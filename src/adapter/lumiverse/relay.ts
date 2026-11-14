@@ -18,7 +18,7 @@
 
 import type { Clock } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
-import type { LiveAsk, LiveFrame, MissingPermission, Registration } from "./pipe-wire";
+import { readToRpe, type LiveAsk, type LiveFrame, type MissingPermission, type Registration } from "./pipe-wire";
 import type { LumiverseSocket } from "./socket";
 
 export interface RelaySettings {
@@ -30,10 +30,12 @@ export interface RelaySettings {
   leaseMs: number;
   /** How much a page may have waiting, in characters, before the hub is asked to hold its chats' events. */
   holdChars: number;
+  /** How long after the extension refused RPE's registration, or RPE could not send it, RPE registers again. */
+  retryMs: number;
 }
 
-/** Fixed defaults: four frames a second per page; frames far under Lumiverse's 1 MiB; a follow the page renews every 20 s outlives two missed renewals; a second's worth of frames waiting. */
-export const RELAY_DEFAULTS: RelaySettings = { flushMs: 250, frameChars: 256 * 1024, leaseMs: 60_000, holdChars: 1024 * 1024 };
+/** Fixed defaults: four frames a second per page; frames far under Lumiverse's 1 MiB; a follow the page renews every 20 s outlives two missed renewals; a second's worth of frames waiting; a refused registration tried again twice a minute. */
+export const RELAY_DEFAULTS: RelaySettings = { flushMs: 250, frameChars: 256 * 1024, leaseMs: 60_000, holdChars: 1024 * 1024, retryMs: 30_000 };
 
 /** A chat followed in RPE's live hub for a page. */
 export interface LiveFollowing {
@@ -52,7 +54,8 @@ export interface RelayDeps {
   /** RPE's live hub: a chat's batches as their JSON text, in order, from now; `take` answers false when the page is full. */
   follow(chat: string, take: (text: string) => boolean): LiveFollowing;
   clock: Pick<Clock, "now" | "setTimeout" | "clearTimeout">;
-  log(message: string): void;
+  /** Whether the extension holds RPE's registration, each time that is known: null when it took it; else why not, in words a user is shown. */
+  held(why: string | null): void;
   /** What the extension says it is missing, each time it says so: RPE's UI shows it. */
   permissions(missing: MissingPermission[]): void;
   settings?: Partial<RelaySettings>;
@@ -75,6 +78,8 @@ export class Relay {
   private readonly settings: RelaySettings;
   private readonly pages = new Map<string, Page>();
   private timer: unknown = null;
+  /** The next registration, armed while the extension does not hold RPE's. */
+  private retry: unknown = null;
   private extensionId: string | null = null;
   private offs: (() => void)[] = [];
 
@@ -85,7 +90,9 @@ export class Relay {
   /**
    * Registers with the extension each time the relay socket opens, and each time Lumiverse starts the
    * extension again (`SPINDLE_EXTENSION_LOADED`, sent to every socket), since a restarted worker
-   * knows only what its storage holds; and hears what the extension says back.
+   * knows only what its storage holds; and hears what the extension says back. While the extension
+   * refuses RPE's registration, or RPE cannot send it, RPE sends it again every `retryMs`: a grant
+   * the extension was waiting for, or an extension installed only now, needs nothing more.
    */
   start(): void {
     this.offs.push(
@@ -96,11 +103,12 @@ export class Relay {
           void this.register();
           return;
         }
-        if (event !== "SPINDLE_FRONTEND_MSG" || !isRecord(payload.data)) return;
-        const data = payload.data;
-        if ((data.rpe === "registered" || data.rpe === "permissions") && Array.isArray(data.missing)) {
-          this.deps.permissions(data.missing.filter((m): m is MissingPermission => isRecord(m) && typeof m.permission === "string" && typeof m.why === "string"));
-        }
+        if (event !== "SPINDLE_FRONTEND_MSG") return;
+        const said = readToRpe(payload.data);
+        if (said === null) return;
+        if (said.rpe === "registered") this.held(null);
+        else if (said.rpe === "refused") this.held(`RPE's extension in Lumiverse refused RPE's registration: ${said.why}`);
+        this.deps.permissions(said.missing);
       }),
     );
   }
@@ -111,6 +119,8 @@ export class Relay {
     for (const page of [...this.pages.keys()]) this.drop(page);
     if (this.timer !== null) this.deps.clock.clearTimeout(this.timer);
     this.timer = null;
+    if (this.retry !== null) this.deps.clock.clearTimeout(this.retry);
+    this.retry = null;
   }
 
   private async register(): Promise<void> {
@@ -118,14 +128,31 @@ export class Relay {
       this.extensionId ??= await this.deps.extension();
       const registration = this.deps.registration();
       if (registration === null) {
-        this.deps.log("RPE did not register with its extension yet: its server is not listening");
+        this.held("RPE did not register with its extension in Lumiverse yet: its server is not listening.");
         return;
       }
       this.deps.socket.send({ type: "SPINDLE_BACKEND_MSG", extensionId: this.extensionId, payload: { rpe: "register", registration } });
       // What was queued while the socket was closed goes now.
       if ([...this.pages.values()].some((p) => p.queue.length > 0 || p.outbox.length > 0)) this.arm();
     } catch (error) {
-      this.deps.log(`RPE could not register with its extension in Lumiverse: ${error instanceof Error ? error.message : String(error)}`);
+      this.held(`RPE could not register with its extension in Lumiverse: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** Whether the extension holds RPE's registration now, said on; while it does not, RPE registers again in `retryMs`. */
+  private held(why: string | null): void {
+    // A word that comes after the relay stopped is no one's to hear.
+    if (this.offs.length === 0) return;
+    this.deps.held(why);
+    if (why === null) {
+      if (this.retry !== null) this.deps.clock.clearTimeout(this.retry);
+      this.retry = null;
+    } else if (this.retry === null) {
+      this.retry = this.deps.clock.setTimeout(() => {
+        this.retry = null;
+        // A closed socket registers when it opens again.
+        if (this.deps.socket.open) void this.register();
+      }, this.settings.retryMs);
     }
   }
 

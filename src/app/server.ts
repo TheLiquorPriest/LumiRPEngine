@@ -7,6 +7,7 @@
 
 import type { BunRequest, Server } from "bun";
 import type { Log } from "rp-harness/contract";
+import { isRecord } from "../shared/json";
 import type { Auth } from "./auth";
 import { AuthRefused, bearerOf, NO_OWNER } from "./auth";
 import type { AppConfig } from "./config";
@@ -27,6 +28,8 @@ export interface RunningServer {
   readonly port: number;
   /** Where RPE answers: `http://<address>:<port>`. */
   readonly url: string;
+  /** Where RPE answers on this machine's loopback, whatever its address: `http://127.0.0.1:<port>`, its extension's road to it. */
+  readonly loopback: string;
   /** Stops listening and closes every connection and socket. */
   stop(): Promise<void>;
 }
@@ -227,26 +230,45 @@ export function startServer(parts: ServerParts): RunningServer {
 
   const routes: Record<string, (request: BunRequest, server: Server<LiveSocketData>) => Promise<Response | undefined>> = {};
   for (const [pattern, byMethod] of table) routes[pattern] = (request, server) => answer(request, server, byMethod, request.params);
-  const server = Bun.serve<LiveSocketData>({
-    hostname: config.address,
-    port: config.port,
-    // A turn can stay silent for minutes (plan §10.7 keeps it alive inside ten), longer than Bun's longest idle limit.
-    idleTimeout: 0,
-    // Above every route's own limit, so that each route refuses in its own words first.
-    maxRequestBodySize: Math.max(...limits) + 1024 * 1024,
-    routes,
-    fetch: (request, server) => answer(request, server, null, {}),
-    websocket: liveSockets(parts.live, config.live.messageBytes),
-    error(error) {
-      log.error("a request failed before its route answered", { error: error.message });
-      return Response.json({ error: "RPE could not answer this request; its log says why." }, { status: 500 });
-    },
-  });
+  const websocket = liveSockets(parts.live, config.live.messageBytes);
+  const serve = (hostname: string, port: number): Server<LiveSocketData> =>
+    Bun.serve<LiveSocketData>({
+      hostname,
+      port,
+      // A turn can stay silent for minutes (plan §10.7 keeps it alive inside ten), longer than Bun's longest idle limit.
+      idleTimeout: 0,
+      // Above every route's own limit, so that each route refuses in its own words first.
+      maxRequestBodySize: Math.max(...limits) + 1024 * 1024,
+      routes,
+      fetch: (request, server) => answer(request, server, null, {}),
+      websocket,
+      error(error) {
+        log.error("a request failed before its route answered", { error: error.message });
+        return Response.json({ error: "RPE could not answer this request; its log says why." }, { status: 500 });
+      },
+    });
+  const server = serve(config.address, config.port);
   listening = server.port ?? config.port;
-  const shown = Object.hasOwn(WILDCARD, splitHost(config.address).name) ? "127.0.0.1" : config.address.includes(":") ? `[${config.address}]` : config.address;
+  // The extension's road to RPE is loopback (plan §4.3), whatever address pages reach RPE by: set to
+  // any other, RPE listens on 127.0.0.1 as well, at the same port. A wildcard address takes it in.
+  const own = splitHost(config.address).name;
+  let beside: Server<LiveSocketData> | null = null;
+  if (own !== "127.0.0.1" && !Object.hasOwn(WILDCARD, own)) {
+    try {
+      beside = serve("127.0.0.1", listening);
+    } catch (error) {
+      void server.stop(true);
+      const taken = isRecord(error) && error.code === "EADDRINUSE";
+      throw new Error(`RPE did not start: its extension in Lumiverse reaches it on 127.0.0.1:${listening}, and ${taken ? "another program holds that address" : `RPE could not listen there (${error instanceof Error ? error.message : String(error)})`}; give RPE another port.`);
+    }
+  }
+  const shown = Object.hasOwn(WILDCARD, own) ? "127.0.0.1" : config.address.includes(":") ? `[${config.address}]` : config.address;
   return {
     port: listening,
     url: `http://${shown}:${listening}`,
-    stop: () => server.stop(true),
+    loopback: `http://127.0.0.1:${listening}`,
+    stop: async () => {
+      await Promise.all([server.stop(true), beside?.stop(true)]);
+    },
   };
 }

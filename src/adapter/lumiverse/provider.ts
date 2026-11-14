@@ -1,9 +1,10 @@
 // The provider endpoint Lumiverse calls on RPE's connection (STANDALONE-PLAN §4.2, §4.4): `POST
 // /v1/chat/completions` and `GET /v1/models`, behind RPE's provider key. A request with no tag (a title,
 // a summary, a quiet call, another extension's) is passed on as it came to the model set for such
-// requests, through RPH's model layer: RPE never calls a model itself. A tagged chat reply is read, its
-// history window checked or made, its prompt laid out, and handed to the turn lane, which writes the
-// reply to the response as the turn goes, streamed or whole as the request asked.
+// requests, through RPH's model layer: RPE never calls a model itself. While RPE's extension does not
+// hold RPE's registration none is passed on, since a chat reply then comes with no tag too. A tagged
+// chat reply is read, its history window checked or made, its prompt laid out, and handed to the turn
+// lane, which writes the reply to the response as the turn goes, streamed or whole as the request asked.
 
 import type { Clock, ModelsApi, PassError, Usage as PassUsage } from "rp-harness/contract";
 import { isRecord, type JsonObject } from "../../shared/json";
@@ -52,6 +53,13 @@ export interface ProviderDeps {
   models: Pick<ModelsApi, "pass">;
   /** The connection a request with no tag is passed on to; null for RPH's default. */
   passConnection(): string | null;
+  /**
+   * Why no request with no tag may be passed on now, in words a user is shown; null when one may.
+   * Not while RPE's extension in Lumiverse does not hold RPE's registration: it then cannot tell
+   * RPE's connection, so a chat reply on it comes untagged, and another model would play it with its
+   * secrets unchecked (§4.2, Permissions: no reply is passed through unplayed).
+   */
+  unpassable(): string | null;
   /** The model names `GET /v1/models` lists: those RPE's connection in Lumiverse may name. */
   modelNames(): string[];
   turns: TurnPlayer;
@@ -99,7 +107,10 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request) => Prom
     if (!isRecord(body)) return error(400, "The request is not a chat completion.");
     const now = deps.clock.now();
     const read = readTag(body);
-    if ("absent" in read) return passThrough(deps, body as JsonObject, request.signal, now);
+    if ("absent" in read) {
+      const why = deps.unpassable();
+      return why === null ? passThrough(deps, body as JsonObject, request.signal, now) : error(503, `RPE answered nothing: it cannot tell a chat reply from other requests on its connection now. ${why}`);
+    }
     if ("invalid" in read) return error(400, `RPE could not read this reply's tag (${read.invalid}). Update the extension and RPE to the same build.`);
     let received;
     try {

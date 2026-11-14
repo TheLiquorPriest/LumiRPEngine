@@ -47,6 +47,7 @@ function endpoint(play: TurnPlayer["play"], options: { passed?: PassRequest[]; c
       },
     },
     passConnection: () => "conn-author",
+    unpassable: () => null,
     modelNames: () => ["rpe"],
     turns: { play, standbyLine: () => "Working on the scene." },
     clock,
