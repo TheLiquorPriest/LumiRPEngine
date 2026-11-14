@@ -231,12 +231,28 @@ function Given(props: { run: RunNode }) {
   return <p class="rpe-line">{info.given.length === 0 ? `${info.definition} was given nothing by name.` : `${info.definition} was given: ${info.given.join(", ")}.`}</p>;
 }
 
+/** The lore of the turn's prompt, by id, as its intake kept it: what Lumiverse activated for it, and what its lore map showed the Author. */
+function TurnLore(props: { lore: TurnDetail["lore"] }) {
+  const { activated, map } = props.lore;
+  return (
+    <div class="lre-stack" data-lore>
+      <span class="rpe-caption">Its lore, by id</span>
+      <p class="rpe-line">
+        Lumiverse activated for its prompt: {activated.length === 0 ? "no entry." : <span class="lre-id">{activated.join(", ")}</span>}
+      </p>
+      <p class="rpe-line">
+        Its lore map showed the Author: {map.length === 0 ? "no entry." : <span class="lre-id">{map.join(", ")}</span>}
+      </p>
+    </div>
+  );
+}
+
 /** The turn's folder, by its files' names: none can be opened here, since no route serves them. */
 function TurnFolder() {
   return (
     <div class="lre-stack" data-folder="unavailable">
       <span class="rpe-caption">The turn's folder</span>
-      <p class="rpe-meta">Not available here yet: RPE has no route that lists a turn's folder or opens its files, so its world state, lore map and the rest cannot be read on this page.</p>
+      <p class="rpe-meta">Not available here yet: RPE has no route that lists a turn's folder or opens its files, so the words of its lore map, its world state and the rest cannot be read on this page.</p>
       <ul class="rpe-reports">
         {TURN_FOLDER.map((file) => (
           <li key={file.name}>
@@ -258,9 +274,10 @@ export const TURN_SECTIONS: readonly TurnSection[] = [
     id: "given",
     title: "What the Author was given",
     spoiler: true,
-    body: (_turn, runs) => (
+    body: (turn, runs) => (
       <div class="lre-stack">
         <EachRun runs={runs} part={(run) => <Given run={run} />} />
+        <TurnLore lore={turn.lore} />
         <TurnFolder />
       </div>
     ),

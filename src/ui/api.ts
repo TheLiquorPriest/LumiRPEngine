@@ -125,6 +125,8 @@ export interface TurnDetail extends TurnSummary {
   error: ReplyError | null;
   /** The events of the turn's run, numbered from `from`, in order. */
   trace: TraceRecord[];
+  /** The lore of the turn's prompt, by id, as its intake kept it: the entries Lumiverse activated for it (Lumiverse's ids), and the entries its lore map showed the Author (RPE's ids, as the map writes them). */
+  lore: { activated: string[]; map: string[] };
 }
 
 /** `POST /api/v1/chats/:chat/turns/:turn/stop` (no body): true when the turn was running and is being stopped, false when it had already ended. */
