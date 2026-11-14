@@ -12,7 +12,7 @@ An operation whose entry says it takes its provenance takes these three argument
 
 | Argument | Shape | What it is |
 |---|---|---|
-| `source` | object: from, lore, message, roll, gap_check, consent | Where it comes from: from is prose, lore, author, gm, character, player, default or invented; lore, message and roll cite an entry, a message or a roll by id; an invention cites its gap_check and consent. |
+| `source` | object: from, lore, message, roll, gap_check, consent | Where it comes from (horizon takes none): from is prose, lore, author, gm, character, player, default or invented; lore, message and roll cite an entry, a message or a roll by id; an invention cites its gap_check and consent. |
 | `precision` | one of exact, approximate, vague, unknown | How exact: exact, approximate, vague or unknown. |
 | `standing` | one of established, proposed, assumed | How it stands: established, proposed or assumed. |
 
@@ -445,7 +445,7 @@ Lane: story. Needs: `list`.
 
 | Argument | Shape | What it is |
 |---|---|---|
-| `list` | list of text | horizon: the whole list of places, people and things the next turn is expected to need. |
+| `list` | list of text | horizon: the whole list of what the next turn is expected to need: places, people and things by name; anything else in your own words, kept as words. |
 
 Worked example:
 
