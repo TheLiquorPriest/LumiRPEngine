@@ -6,7 +6,7 @@ arguments:
   rows: "The map's rows, top first, one symbol to a square: # wall, . floor, + door, a space nothing, and the legend's own symbols."
   width: "Without rows: a walled room this many squares wide, floor inside."
   height: "Without rows: how many squares high the room is."
-  doors: "Without rows: the squares of the room's walls that are doors, each [column, row]."
+  doors: "Without rows: the squares of the room's walls that are doors, each [column, row]; one outside the room is reported and not drawn."
   legend: "What the rows' other symbols stand for, such as {\"T\": {\"terrain\": \"table\", \"blocked\": true}}, {\"c\": {\"item\": \"chest\"}} or {\"z\": {\"zone\": \"dais\"}}."
   feet: "How wide a square is, in feet; the usual 5 ft when left out."
   title: "The map's title."

@@ -12,6 +12,7 @@ import { hasOwn, isRecord, safeKey } from "../../../shared/json";
 import type { PackEvent } from "../../../shared/ledger";
 import type { EntityId, MapId, PlaceId } from "../../../shared/ids";
 import { readMap } from "../../../shared/maps";
+import mapFormat from "../../../shared/lre-map-v1.schema.json";
 import type { MapCellDef, MapDoc } from "../../../shared/world";
 import { labelOf, mutableSlice, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef, Rejection } from "../../../engine/registry";
@@ -24,8 +25,12 @@ export const SQUARES_EVENT = "space.squares";
 export const DOOR_STATES = ["open", "closed", "locked"] as const;
 export type DoorState = (typeof DOOR_STATES)[number];
 
-/** A footprint is at most this many squares a side: the most a map's layout can draw (`lre-map-v1`). */
-export const FOOTPRINT_MAX = 64;
+/**
+ * The most squares a side of a map can have: the rows of its layout, and the squares of a row, as
+ * the format's schema bounds them (`lre-map-v1`), read from it so the two cannot part. The largest
+ * grid, and the largest footprint on one.
+ */
+export const MAP_SIDE_MAX: number = Math.min(mapFormat.properties.layout.maxItems, mapFormat.properties.layout.items.maxLength);
 
 /** A thing's footprint in squares, [columns, rows], and whether it blocks the way and the view. */
 export interface Shape {
@@ -151,7 +156,7 @@ export const shapeEventDef: EventTypeDef<PackEvent> = {
     const entity = strOf(e.data.entity);
     if (!safeKey(entity) || !own(ctx.state.entities, entity)) return reject("missing_entity", `no entity ${labelOf(ctx, entity)}`);
     const size = e.data.size;
-    if (!Array.isArray(size) || size.length !== 2 || !size.every((n) => fromZero(n) && n >= 1 && n <= FOOTPRINT_MAX)) return reject("bad_size", `a footprint is [columns, rows], each from 1 to ${FOOTPRINT_MAX}`);
+    if (!Array.isArray(size) || size.length !== 2 || !size.every((n) => fromZero(n) && n >= 1 && n <= MAP_SIDE_MAX)) return reject("bad_size", `a footprint is [columns, rows], each from 1 to ${MAP_SIDE_MAX}`);
     return typeof e.data.way === "boolean" && typeof e.data.view === "boolean" ? null : reject("bad_blocks", "way and view are true or false");
   },
   apply(e, state) {

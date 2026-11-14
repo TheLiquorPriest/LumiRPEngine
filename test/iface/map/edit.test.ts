@@ -37,7 +37,7 @@ describe("changing part of a grid", () => {
     );
     expect(edited.reports).toEqual([
       { code: "not_in_legend", values: { symbol: "?" } },
-      { code: "off_grid", values: { square: [12, 1], width: 9, height: 5 } },
+      { code: "fell_off", values: { stroke: 5, symbol: "#", count: 1, width: 9, height: 5 } },
     ]);
     const { changes, state } = s.addChanges(turn.id, edited.changes.map((c) => ({ ...c, by: "gm", source: "gm" as const })));
     expect(changes.map((c) => [c.op, c.applied, c.reports])).toEqual([["space.squares", true, []]]);

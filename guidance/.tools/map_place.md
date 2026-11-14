@@ -13,7 +13,7 @@ arguments:
   pieces.walk: "true when it walks to the square from where it stands: the answer gives the way and the time it took."
   pieces.size: "Its footprint, [columns, rows], for what covers more than one square."
   pieces.blocks: "What its footprint blocks: way, view, both or none."
-  why: "The reason, kept with the change."
+  why: "Why a thing comes to someone by this, kept with it as how they came to have it. A square, a footprint or where someone stands keeps no reason."
   source: "Where it comes from: from is prose, lore, author, gm, character, player, default or invented; lore, message and roll cite an entry, a message or a roll by id; an invention cites its gap_check and consent."
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."

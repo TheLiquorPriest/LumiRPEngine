@@ -1,5 +1,5 @@
 ---
-description: The words of the map tools' answers (map_view, map_measure, map_place, map_door, map_lay, map_edit), and of a map wherever one is shown (the world state, world_query, map_view). An answer is data from the store and these lines, filled with that data; a map is its picture (the column and row numbers and the map's own symbols) and the map_ and legend_ lines, shown in that order. One line per name, a name, a colon, then its text; spaces after the first one are kept. Change the words freely. Delete a line, or leave it empty, and that part is given with no words.
+description: The words of the map tools' answers (map_view, map_measure, map_place, map_door, map_lay, map_edit), and of a map wherever one is shown (the world state, world_query, map_view). An answer is data from the store and these lines, filled with that data; a map is its picture (the column and row numbers and the map's own symbols) and the map_ and legend_ lines, shown in that order. One line per name, a name, a colon, then its text; spaces after the first one are kept. Change the words freely. Delete a line, or leave it empty, and that part is given with no words. The lines named want_ (what a name was looked for as) are words put inside the unknown line.
 format: lines
 ---
 no_chat: There is no chat {{id}} in the engine's records.
@@ -11,9 +11,14 @@ needs: {{op}} needs {{fields}}.
 needs_any: This call needs at least one of {{fields}}.
 needs_one: {{op}}: {{who}} needs one of {{fields}}, and only one.
 needs_rows: {{op}} needs rows, or a width and a height.
+too_large: {{op}}: a map is at most {{most}} by {{most}} squares, and this one would be {{width}} by {{height}}.
 unreadable: {{field}} cannot be read{{#value}}: you sent {{value}}{{/value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}
 unreadable_op: {{op}}: {{field}} cannot be read{{#value}}, you sent {{value}}{{/value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}
-unknown: {{#op}}{{op}}: {{/op}}there is nothing called {{name}} that is a {{wanted}}.{{#near}} Near: {{near}}.{{/near}}
+unknown: {{#op}}{{op}}: {{/op}}there is nothing called {{name}} that is {{sought}}.{{#near}} Near: {{near}}.{{/near}}
+want_entity: a person or a thing
+want_thing: a thing
+want_place: a place
+want_point: a place, a person or a thing
 several: {{#op}}{{op}}: {{/op}}{{name}} fits more than one: {{several}}. Name one by its id.
 not_applicable: {{op}}: the engine cannot apply this at all ({{code}}).
 nothing_recorded: Nothing was recorded. Send the call again with that put right.
@@ -83,6 +88,8 @@ laid: {{place}} has a map now: {{width}} by {{height}} squares of {{feet}} ft{{#
 laid_off: {{who}} stood on the square the map was laid over, and stand on no square of the new map yet.
 edited: {{count}} squares of the map of {{place}} were drawn anew{{#symbols}}, and its legend changed for {{symbols}}{{/symbols}}.
 grid_off_grid: {{#op}}{{op}}: {{/op}}{{#what}}{{what}}: {{/what}}square {{square}} is off the map, which is {{width}} by {{height}} squares.
+grid_fell_off: {{#op}}{{op}}: {{/op}}{{count}} squares of stroke {{stroke}} ({{symbol}}) are off the map, which is {{width}} by {{height}} squares, and were not drawn.
+grid_door_off: {{#op}}{{op}}: {{/op}}the door at {{square}} is outside the room, which is {{width}} by {{height}} squares, and was not drawn.
 grid_stands_nowhere: {{#op}}{{op}}: {{/op}}{{what}} stands on no square.
 grid_off_edge: {{#op}}{{op}}: {{/op}}{{what}} at {{square}} reaches past the edge of the map.
 grid_in_wall: {{#op}}{{op}}: {{/op}}{{what}} stands on {{squares}}, which block the way; it was put there all the same.

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { blockersOf, GRID_DEFAULTS, indexOf, NOTHING_MOVES, place, setDoor, standsAt, type Drawn, type Moving, type Square } from "../../../src/iface/map/grid";
 import { move, walk, type Walk } from "../../../src/iface/map/path";
 import type { MapDoc } from "../../../src/shared/world";
-import { CELLAR, drawn, OPEN, PILLAR, SEALED } from "./fixtures";
+import { CELLAR, drawn, HALL, OPEN, PILLAR, SEALED } from "./fixtures";
 
 /** Whether every step of a way goes to a square beside the last, never into something that blocks, and never across a blocked corner. */
 function honest(d: Drawn, moving: Moving, way: Walk): boolean {
@@ -98,6 +98,17 @@ describe("paths in eight directions", () => {
       [3, 4],
       [2, 4],
     ]);
+  });
+
+  test("a footprint twenty squares a side finds there is no way across a map as large as can be in a few milliseconds, and finds the way there is", () => {
+    const d = drawn(HALL);
+    const { moving } = place(d, NOTHING_MOVES, "wagon", [1, 1], { size: [20, 20] });
+    const started = performance.now();
+    expect(walk(d, moving, [1, 1], [43, 1], "wagon")).toBeNull();
+    expect(performance.now() - started).toBeLessThan(50);
+    const way = walk(d, moving, [1, 1], [21, 45], "wagon");
+    expect([way?.distance, way?.cost]).toEqual([44, 44]);
+    expect(way && honest(d, moving, way)).toBe(true);
   });
 });
 

@@ -2,7 +2,8 @@
 // is within a range, the squares an area covers (a burst, a cone, a line) and who stands in it,
 // and line of sight. What blocks is worked out as play stands (`blockersOf`): walls, every door
 // that is not open, and the footprints that block. Something bigger than a square is measured
-// from its nearest square, and is seen when any square of it is.
+// from its nearest square, and is seen when a square along its edge is (a line out of it crosses
+// its edge), so sight between two footprints follows no more lines than the map's sides allow.
 
 import type { EntityId } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
@@ -57,77 +58,97 @@ export function within(drawn: Drawn, moving: Moving, from: Spot, range: number):
 }
 
 /**
- * The squares a straight line from the middle of `from` toward the middle of `toward` passes
- * through, in order, on past `toward` for as long as the caller reads. Where it passes exactly
- * through a corner it goes on diagonally, and names the two squares that meet there.
+ * Follows a straight line from the middle of `from` toward the middle of `toward`, square by
+ * square, on past `toward` for as long as `step` returns true. Where it passes exactly through a
+ * corner it goes on diagonally, and `step` is told so: the two squares that meet there are the
+ * ones beside it back along each way it went. No square is made as it goes, since sight between
+ * two footprints follows many lines.
  */
-function* trace(from: Square, toward: Square): Generator<{ at: Square; corner?: readonly [Square, Square] }> {
-  const dx = toward[0] - from[0];
-  const dy = toward[1] - from[1];
-  const nx = Math.abs(dx);
-  const ny = Math.abs(dy);
-  const sx = Math.sign(dx);
-  const sy = Math.sign(dy);
+function follow(from: Square, toward: Square, step: (c: number, r: number, corner: boolean) => boolean): void {
+  const nx = Math.abs(toward[0] - from[0]);
+  const ny = Math.abs(toward[1] - from[1]);
+  const sx = Math.sign(toward[0] - from[0]);
+  const sy = Math.sign(toward[1] - from[1]);
   if (nx === 0 && ny === 0) return;
   let [c, r] = from;
-  let ix = 0;
-  let iy = 0;
-  for (;;) {
+  for (let ix = 0, iy = 0, on = true; on; ) {
     // Which grid line the line crosses next, compared without division: (½ + ix) / nx against (½ + iy) / ny.
     const next = (1 + 2 * ix) * ny - (1 + 2 * iy) * nx;
     if (next === 0) {
-      const corner = [[c + sx, r], [c, r + sy]] as const;
       c += sx;
       r += sy;
       ix++;
       iy++;
-      yield { at: [c, r], corner };
     } else if (next < 0) {
       c += sx;
       ix++;
-      yield { at: [c, r] };
     } else {
       r += sy;
       iy++;
-      yield { at: [c, r] };
     }
+    on = step(c, r, next === 0);
   }
 }
 
-function blocks(drawn: Drawn, set: ReadonlySet<number>, s: Square): boolean {
-  const i = indexOf(drawn, s);
-  return i !== null && set.has(i);
+/** The squares of a set, by index, as one byte each: sight between footprints asks of them on every step of many lines. */
+function maskOf(drawn: Drawn, set: ReadonlySet<number>): Uint8Array {
+  const mask = new Uint8Array(drawn.width * drawn.height);
+  for (const i of set) mask[i] = 1;
+  return mask;
+}
+
+function blocks(drawn: Drawn, mask: Uint8Array, c: number, r: number): boolean {
+  return c >= 1 && r >= 1 && c <= drawn.width && r <= drawn.height && mask[(r - 1) * drawn.width + (c - 1)] === 1;
 }
 
 /** Whether nothing in `blocked` stands between two squares. The ends don't count; a corner shuts the view only where both squares at it block. */
-function clear(drawn: Drawn, blocked: ReadonlySet<number>, a: Square, b: Square): boolean {
-  if (a[0] === b[0] && a[1] === b[1]) return true;
-  for (const step of trace(a, b)) {
-    if (step.corner && blocks(drawn, blocked, step.corner[0]) && blocks(drawn, blocked, step.corner[1])) return false;
-    if (step.at[0] === b[0] && step.at[1] === b[1]) return true;
-    if (blocks(drawn, blocked, step.at)) return false;
-  }
-  return true;
+function clear(drawn: Drawn, blocked: Uint8Array, a: Square, b: Square): boolean {
+  const sx = Math.sign(b[0] - a[0]);
+  const sy = Math.sign(b[1] - a[1]);
+  let seen = true;
+  follow(a, b, (c, r, corner) => {
+    if (corner && blocks(drawn, blocked, c, r - sy) && blocks(drawn, blocked, c - sx, r)) seen = false;
+    else if (c === b[0] && r === b[1]) return false;
+    else if (blocks(drawn, blocked, c, r)) seen = false;
+    return seen;
+  });
+  return seen;
 }
 
-function squaresIn(r: Rect): Square[] {
+/**
+ * The squares along the edge of a rectangle, the part of it on the grid: every line out of it
+ * leaves through one of them, and however large it is they are no more than the map's own edge.
+ */
+function edgeOf(drawn: Drawn, r: Rect): Square[] {
+  const c0 = Math.max(1, r.c0);
+  const r0 = Math.max(1, r.r0);
+  const c1 = Math.min(drawn.width, r.c1);
+  const r1 = Math.min(drawn.height, r.r1);
   const out: Square[] = [];
-  for (let row = r.r0; row <= r.r1; row++) for (let col = r.c0; col <= r.c1; col++) out.push([col, row]);
+  for (let row = r0; row <= r1; row++) {
+    if (row === r0 || row === r1) for (let col = c0; col <= c1; col++) out.push([col, row]);
+    else {
+      out.push([c0, row]);
+      if (c1 > c0) out.push([c1, row]);
+    }
+  }
   return out;
 }
 
 /**
- * Whether one spot can see the other: a straight line from some square of one to some square of
- * the other that walls, doors not open and footprints that block the view leave clear. The two
- * spots' own footprints never block. Null when one stands nowhere.
+ * Whether one spot can see the other: a straight line from some square along the edge of one to
+ * some square along the edge of the other that walls, doors not open and footprints that block the
+ * view leave clear. The two spots' own footprints never block, and a line out of a footprint
+ * crosses its edge, so its edge is where it is seen from; only what lies on the grid sees. Null when
+ * one stands nowhere.
  */
 export function sees(drawn: Drawn, moving: Moving, a: Spot, b: Spot): boolean | null {
   const ra = rectOf(moving, a);
   const rb = rectOf(moving, b);
   if (!ra || !rb) return null;
-  const view = blockersOf(drawn, moving, [a, b].filter((s): s is EntityId => typeof s === "string")).view;
-  const to = squaresIn(rb);
-  return squaresIn(ra).some((sa) => to.some((sb) => clear(drawn, view, sa, sb)));
+  const view = maskOf(drawn, blockersOf(drawn, moving, [a, b].filter((s): s is EntityId => typeof s === "string")).view);
+  const to = edgeOf(drawn, rb);
+  return edgeOf(drawn, ra).some((sa) => to.some((sb) => clear(drawn, view, sa, sb)));
 }
 
 /** The squares an area covers, and who and what stands in it. */
@@ -151,7 +172,7 @@ function covering(drawn: Drawn, moving: Moving, picked: ReadonlySet<number>): Ar
  * an area does not pass).
  */
 function areaFrom(drawn: Drawn, moving: Moving, origin: Square, chosen: (s: Square) => boolean): Area {
-  const view = blockersOf(drawn, moving).view;
+  const view = maskOf(drawn, blockersOf(drawn, moving).view);
   const shut = blockersOf(drawn, { ...moving, pieces: {} }).view;
   const picked = new Set<number>();
   for (let i = 0; i < drawn.width * drawn.height; i++) {
@@ -191,14 +212,16 @@ export function cone(drawn: Drawn, moving: Moving, origin: Square, toward: Squar
  */
 export function line(drawn: Drawn, moving: Moving, origin: Square, toward: Square, length: number): Area {
   const view = blockersOf(drawn, moving).view;
-  const shut = blockersOf(drawn, { ...moving, pieces: {} }).view;
+  const shut = maskOf(drawn, blockersOf(drawn, { ...moving, pieces: {} }).view);
   const picked = new Set<number>();
-  for (const step of trace(origin, toward)) {
-    const i = indexOf(drawn, step.at);
-    if (i === null || shut.has(i) || distance(drawn.scale.diagonal, origin, step.at) > length) break;
-    if (step.corner && blocks(drawn, shut, step.corner[0]) && blocks(drawn, shut, step.corner[1])) break;
+  const sx = Math.sign(toward[0] - origin[0]);
+  const sy = Math.sign(toward[1] - origin[1]);
+  follow(origin, toward, (c, r, corner) => {
+    const i = indexOf(drawn, [c, r]);
+    if (i === null || shut[i] === 1 || distance(drawn.scale.diagonal, origin, [c, r]) > length) return false;
+    if (corner && blocks(drawn, shut, c, r - sy) && blocks(drawn, shut, c - sx, r)) return false;
     picked.add(i);
-    if (view.has(i)) break;
-  }
+    return !view.has(i);
+  });
   return covering(drawn, moving, picked);
 }

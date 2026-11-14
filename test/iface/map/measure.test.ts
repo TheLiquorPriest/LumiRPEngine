@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { GRID_DEFAULTS, NOTHING_MOVES, place, setDoor, type Drawn, type Moving, type Piece, type Square } from "../../../src/iface/map/grid";
 import { between, burst, cone, distance, line, sees, within } from "../../../src/iface/map/measure";
-import { CELLAR, drawn, INN, OPEN, PILLAR, SEALED } from "./fixtures";
+import { CELLAR, drawn, HALL, INN, OPEN, PILLAR, SEALED } from "./fixtures";
 
 /** Where to stand: a square, or a square with a footprint and what it blocks. */
 type Stand = Square | (Pick<Piece, "size" | "blocks"> & { square: Square });
@@ -81,6 +81,15 @@ describe("line of sight", () => {
     expect(sees(d, wagon, "wren", "wagon")).toBe(true);
     const fence = stand(d, { wren: [1, 3], tam: [5, 3], fence: { square: [3, 2], size: [1, 3], blocks: { way: true } } });
     expect(sees(d, fence, "wren", "tam")).toBe(true);
+  });
+
+  test("two footprints as large as a map holds, a wall between them, are measured in a few milliseconds", () => {
+    const d = drawn(HALL);
+    const moving = stand(d, { crowd: { square: [1, 1], size: [40, 64] }, wagons: { square: [42, 1], size: [23, 64] }, herd: { square: [1, 41], size: [30, 24] } });
+    const started = performance.now();
+    expect(sees(d, moving, "crowd", "wagons")).toBe(false);
+    expect(performance.now() - started).toBeLessThan(50);
+    expect(sees(d, moving, "crowd", "herd")).toBe(true);
   });
 });
 

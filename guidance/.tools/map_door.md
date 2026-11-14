@@ -5,7 +5,6 @@ arguments:
   at: "The place whose map the door is on."
   door: "The door's square, [column, row] from the top left."
   state: "open, closed or locked."
-  why: "The reason, kept with the change."
   source: "Where it comes from: from is prose, lore, author, gm, character, player, default or invented; lore, message and roll cite an entry, a message or a roll by id; an invention cites its gap_check and consent."
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."

@@ -13,4 +13,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Changes part of a place's map of squares without redrawing it: squares, rectangles and lines drawn with a symbol, and its legend added to or changed, for a wall, a door, a fixture, terrain or a zone. The change is kept square by square over the map, so a later change to the world's own map still shows through. It reports squares off the map and symbols no legend names.
+Changes part of a place's map of squares without redrawing it: squares, rectangles and lines drawn with a symbol, and its legend added to or changed, for a wall, a door, a fixture, terrain or a zone. The change is kept square by square over the map, so a later change to the world's own map still shows through. What a stroke reaches off the map is left out, and the answer says once for each such stroke how many of its squares that was; it also reports symbols no legend names.

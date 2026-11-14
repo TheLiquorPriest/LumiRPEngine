@@ -59,6 +59,9 @@ export const PILLAR: MapDoc = { id: "road_pillar", scope: "far_road", layout: ["
 /** Two walls that meet at a corner, in the vale. */
 export const SEALED: MapDoc = { id: "vale_corner", scope: "vale", layout: [".#", "#."], cellMeters: 1.524 };
 
+/** The great hall on the far road, as large as a map can be (64 by 64 squares), parted by a wall the whole height of column 41. */
+export const HALL: MapDoc = { id: "great_hall", scope: "far_road", layout: Array.from({ length: 64 }, () => `${".".repeat(40)}#${".".repeat(23)}`), cellMeters: 1.524 };
+
 /** The invented world with the long table, the chest and a lantern on the table, and `maps` compiled. */
 export function worldWith(...maps: MapDoc[]): WorldDoc {
   const w = inventedWorld();

@@ -24,7 +24,7 @@ import { relocate } from "../engine/relocate";
 import { placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { isThing } from "../engine/things";
-import { DOOR_STATES, FOOTPRINT_MAX, type DoorState } from "../packs/space/core/grid-play";
+import { DOOR_STATES, MAP_SIDE_MAX, type DoorState } from "../packs/space/core/grid-play";
 import type { Report } from "../store/types";
 import { foundIn, readTool, writeTool, type ReadDef, type WriteDef } from "./families/run";
 import { NUMBER, OBJECT, oneOf, Reply, TEXT, TEXTS, WHOLE, YES_NO, type ToolSpec } from "./kit";
@@ -40,6 +40,7 @@ import { feetOf, layersAt, mapLines, mapWords, reportFields, type Say, spotText,
 import { find, isUnread, notOneOf, numberArg, textArg, type OpContext, type Unread } from "./ops";
 import { putThing } from "./ops-things";
 import { type Found, isFound, type Reading } from "./reading";
+import { textOf } from "./texts";
 
 const FAMILY = "map";
 
@@ -166,7 +167,8 @@ const measure: ReadDef = {
     const range = args.within;
     if (range !== undefined && range !== null && !(typeof range === "number" && Number.isInteger(range) && range >= 0)) return { line: "unreadable", fields: { field: "within", value: JSON.stringify(range) } };
     const area = args.area;
-    if (area !== undefined && area !== null && !(AREAS as readonly unknown[]).includes(area)) return { line: "unreadable", fields: { field: "area", value: JSON.stringify(area), choices: [...AREAS] } };
+    // A list a line both tests and says is given as one text, so the line says it once (`notOneOf`).
+    if (area !== undefined && area !== null && !(AREAS as readonly unknown[]).includes(area)) return { line: "unreadable", fields: { field: "area", value: JSON.stringify(area), choices: textOf(AREAS) } };
     const size = args.size;
     if (area !== undefined && area !== null && !(typeof size === "number" && Number.isInteger(size) && size >= 0)) return { line: "needs_field", fields: { field: "size" } };
     const toward = area === "cone" || area === "line" ? spotOn(say, layers, "toward", args.toward ?? undefined, named("toward")) : undefined;
@@ -181,7 +183,7 @@ const measure: ReadDef = {
       const toText = spotText(say, to.square, to.id);
       const squares = between(drawn, moving, spot(from), spot(to)) ?? 0;
       const seen = sees(drawn, moving, spot(from), spot(to)) === true;
-      const way = walk(drawn, moving, from.square, to.square, from.id);
+      const way = walk(drawn, moving, from.square, to.square, from.id, to.id);
       reply.line("measure_distance", { from: fromText, to: toText, squares, feet: feetOf(drawn, squares) });
       reply.line(seen ? "measure_sees" : "measure_blind", { from: fromText, to: toText });
       const took = way ? moveTime(drawn.scale, way.cost, speed !== undefined && speed > 0 ? speed : undefined) : null;
@@ -197,7 +199,7 @@ const measure: ReadDef = {
     if ((area === "burst" || area === "cone" || area === "line") && typeof size === "number") {
       const covered = area === "burst" ? burst(drawn, moving, from.square, size) : area === "cone" ? cone(drawn, moving, from.square, toward?.square ?? from.square, size) : line(drawn, moving, from.square, toward?.square ?? from.square, size);
       const who = covered.who.map((id) => whoIs(say, id));
-      reply.line("measure_area", { area, from: fromText, ...(toward ? { toward: spotText(say, toward.square, toward.id) } : {}), size, feet: feetOf(drawn, size), count: covered.squares.length, who });
+      reply.line("measure_area", { area, from: fromText, ...(toward ? { toward: spotText(say, toward.square, toward.id) } : {}), size, feet: feetOf(drawn, size), count: covered.squares.length, who: textOf(who) });
       data.area = { kind: area, size, squares: covered.squares.map((s) => [...s]), who };
     }
     reply.data(data);
@@ -233,7 +235,7 @@ function readPiece(o: OpContext, raw: JsonValue): PieceAsk | Unread {
   const square = raw.square === undefined || raw.square === null ? undefined : squareGiven(raw.square);
   if (square === null) return { line: "bad_square", fields: { n: o.n, op: o.op, field: "square", value: JSON.stringify(raw.square) } };
   const size = raw.size === undefined || raw.size === null ? undefined : squareGiven(raw.size);
-  if (size === null || (size && (size[0] > FOOTPRINT_MAX || size[1] > FOOTPRINT_MAX))) return { line: "bad_size", fields: { n: o.n, op: o.op, value: JSON.stringify(raw.size), most: FOOTPRINT_MAX } };
+  if (size === null || (size && (size[0] > MAP_SIDE_MAX || size[1] > MAP_SIDE_MAX))) return { line: "bad_size", fields: { n: o.n, op: o.op, value: JSON.stringify(raw.size), most: MAP_SIDE_MAX } };
   const blocks = raw.blocks;
   if (blocks !== undefined && blocks !== null && !(BLOCKS as readonly unknown[]).includes(blocks)) return notOneOf(o, "blocks", blocks, BLOCKS);
   const zone = typeof raw.zone === "string" && raw.zone.trim() !== "" ? raw.zone.trim() : undefined;
@@ -311,7 +313,7 @@ function placePiece(o: OpContext, at: Found, p: PieceAsk, why: string, out: Json
       to = beside(layers.drawn, lift(layers.moving, id), p.near.id);
       if (to === null) return { line: "no_square_near", fields: { n: o.n, op: o.op, what: whoIs(say(), id), near: whoIs(say(), p.near.id) } };
     } else if (p.zone !== undefined) {
-      if (!hasOwn(layers.drawn.zones, p.zone)) return { line: "no_zone", fields: { n: o.n, op: o.op, zone: p.zone, zones: Object.keys(layers.drawn.zones).sort() } };
+      if (!hasOwn(layers.drawn.zones, p.zone)) return { line: "no_zone", fields: { n: o.n, op: o.op, zone: p.zone, zones: textOf(Object.keys(layers.drawn.zones).sort()) } };
       to = inZone(layers.drawn, lift(layers.moving, id), p.zone);
       if (to === null) return { line: "no_square_free", fields: { n: o.n, op: o.op, zone: p.zone } };
     }
@@ -405,9 +407,9 @@ const doorDef: WriteDef = {
   name: "map_door",
   family: FAMILY,
   lane: "engine",
-  properties: { at: TEXT, door: SQUARE, state: oneOf(DOOR_STATES), why: TEXT },
+  properties: { at: TEXT, door: SQUARE, state: oneOf(DOOR_STATES) },
   required: ["at", "door", "state"],
-  example: { at: "The Cellar", door: [5, 3], state: "locked", why: "Odile turns the key", source: { from: "prose", message: "m-0041" } },
+  example: { at: "The Cellar", door: [5, 3], state: "locked", source: { from: "prose", message: "m-0041" } },
   run(o) {
     const at = find(o, "at", "point");
     if (isUnread(at)) return at;
@@ -421,7 +423,7 @@ const doorDef: WriteDef = {
     if (isUnread(square)) return square;
     const { drawn, moving } = layers;
     const i = indexOf(drawn, square) ?? -1;
-    if (!drawn.doors.has(i)) return { line: "not_a_door", fields: { n: o.n, op: o.op, square: spotText(say, square), place: whoIs(say, drawn.scope), doors: [...drawn.doors].sort((a, b) => a - b).map((d) => spotText(say, squareAt(drawn, d))) } };
+    if (!drawn.doors.has(i)) return { line: "not_a_door", fields: { n: o.n, op: o.op, square: spotText(say, square), place: whoIs(say, drawn.scope), doors: textOf([...drawn.doors].sort((a, b) => a - b).map((d) => spotText(say, squareAt(drawn, d)))) } };
     const was = doorState(drawn, moving, i);
     const from = o.draft.w.events.length;
     if (was === now) o.reply.report("door_already", { n: o.n, op: o.op, square: spotText(say, square), state: now });
@@ -455,12 +457,17 @@ function rowsOf(o: OpContext): string[] | Unread {
   const width = o.args.width;
   const height = o.args.height;
   if (!(typeof width === "number" && Number.isInteger(width) && width >= 1 && typeof height === "number" && Number.isInteger(height) && height >= 1)) return { line: "needs_rows", fields: { n: o.n, op: o.op } };
+  // The room is built square by square, so a size the format cannot hold is refused before any is.
+  if (width > MAP_SIDE_MAX || height > MAP_SIDE_MAX) return { line: "too_large", fields: { n: o.n, op: o.op, width, height, most: MAP_SIDE_MAX } };
   const doors: Square[] = [];
+  const outside: Report[] = [];
   for (const d of Array.isArray(o.args.doors) ? o.args.doors : []) {
     const s = squareGiven(d);
     if (s === null) return { line: "bad_square", fields: { n: o.n, op: o.op, field: "doors", value: JSON.stringify(d) } };
-    doors.push(s);
+    if (s[0] > width || s[1] > height) outside.push({ code: "door_off", values: { square: [...s], width, height } });
+    else doors.push(s);
   }
+  reportAll(o, { lines: o.call.lines, world: o.reading.world, state: o.draft.w.state }, outside);
   return plainRows(width, height, doors);
 }
 
@@ -554,6 +561,8 @@ function strokesOf(o: OpContext): Stroke[] | Unread {
 
 /** What an edit could not do at all, as the map's lines say it: the codes that leave nothing drawn. */
 const EDIT_REFUSALS: Readonly<Record<string, true>> = { no_map: true, nothing_drawn: true, bad_map: true };
+/** Why a stroke drew nothing: when no stroke drew anything, the first of these says more than that nothing was drawn. */
+const STROKE_LOST: Readonly<Record<string, true>> = { fell_off: true, bad_symbol: true };
 
 const editDef: WriteDef = {
   name: "map_edit",
@@ -576,7 +585,7 @@ const editDef: WriteDef = {
     const done = editMap(o.reading.doc, w.state, layers.drawn.scope, strokes, legend as Record<string, MapCellDef | null>);
     const refusal = done.reports.find((rep) => EDIT_REFUSALS[rep.code]);
     if (done.changes.length === 0 || refusal) {
-      const why = refusal ?? done.reports[0];
+      const why = refusal?.code === "nothing_drawn" ? (done.reports.find((rep) => STROKE_LOST[rep.code]) ?? refusal) : (refusal ?? done.reports[0]);
       return why ? { line: `grid_${why.code}`, fields: { n: o.n, op: o.op, ...reportFields(say, why.values) } } : { line: "nothing_recorded", fields: {} };
     }
     reportAll(o, say, done.reports);
@@ -586,7 +595,7 @@ const editDef: WriteDef = {
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     const value = done.changes[0]?.value;
     const count = isRecord(value) && isRecord(value.data) && Array.isArray(value.data.squares) ? value.data.squares.length : 0;
-    o.reply.line("edited", { place: whoIs(say, layers.drawn.scope), count, symbols: Object.keys(legend) });
+    o.reply.line("edited", { place: whoIs(say, layers.drawn.scope), count, symbols: textOf(Object.keys(legend)) });
     o.after(() => ({ edited: { map: layers.drawn.map ?? layers.drawn.id, squares: count, legend: Object.keys(legend) } }));
     return undefined;
   },

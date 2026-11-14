@@ -34,27 +34,40 @@ const STEPS = [
 /**
  * The cheapest way from `from` to `to`, or null when there is none (the end blocked, walls and
  * shut doors between, or a search past today's cap). For `mover`, its whole footprint stands on
- * each square of the way, and its own footprint never blocks it. A diagonal step needs both
+ * each square of the way, and its own footprint never blocks it; nor does that of `target`, the
+ * someone or something the way goes to, as sight leaves out both ends. A diagonal step needs both
  * squares beside it clear. Under the alternating rule, which diagonal is the second counts, so
  * each square is searched twice: after an even and after an odd number of diagonals.
  */
-export function walk(drawn: Drawn, moving: Moving, from: Square, to: Square, mover?: EntityId): Walk | null {
-  const way = blockersOf(drawn, moving, mover !== undefined ? [mover] : []).way;
+export function walk(drawn: Drawn, moving: Moving, from: Square, to: Square, mover?: EntityId, target?: EntityId): Walk | null {
+  const way = blockersOf(drawn, moving, [mover, target].filter((id): id is EntityId => id !== undefined)).way;
   const [w, h] = (mover !== undefined && hasOwn(moving.pieces, mover) ? moving.pieces[mover]?.size : undefined) ?? [1, 1];
+  // Whether the footprint fits with its top left on a square, and what entering there costs, is
+  // worked out once for each square, so a footprint's size adds no more to the search than the map holds.
+  const known = new Uint8Array(drawn.width * drawn.height);
+  const costs = new Float64Array(drawn.width * drawn.height);
   const fits = (c: number, r: number): boolean => {
-    for (let dr = 0; dr < h; dr++) {
-      for (let dc = 0; dc < w; dc++) {
-        const i = indexOf(drawn, [c + dc, r + dr]);
-        if (i === null || way.has(i)) return false;
+    if (c < 1 || r < 1 || c + w - 1 > drawn.width || r + h - 1 > drawn.height) return false;
+    const at = (r - 1) * drawn.width + (c - 1);
+    if (known[at] === 0) {
+      let most = 1;
+      let clear = true;
+      for (let dr = 0; dr < h && clear; dr++) {
+        for (let dc = 0; dc < w; dc++) {
+          const i = at + dr * drawn.width + dc;
+          if (way.has(i)) {
+            clear = false;
+            break;
+          }
+          most = Math.max(most, cellCost(drawn, i));
+        }
       }
+      known[at] = clear ? 1 : 2;
+      costs[at] = most;
     }
-    return true;
+    return known[at] === 1;
   };
-  const enters = (c: number, r: number): number => {
-    let most = 1;
-    for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) most = Math.max(most, cellCost(drawn, indexOf(drawn, [c + dc, r + dr]) ?? -1));
-    return most;
-  };
+  const enters = (c: number, r: number): number => costs[(r - 1) * drawn.width + (c - 1)] ?? 1;
   const start = indexOf(drawn, from);
   const goal = indexOf(drawn, to);
   if (start === null || goal === null || !fits(to[0], to[1])) return null;

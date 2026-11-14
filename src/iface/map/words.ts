@@ -85,9 +85,9 @@ export function timeText(say: Say, took: Took): string {
   return say.lines.line("time", fields) ?? "";
 }
 
-/** A square as an argument or a report gives it, when it is one: [column, row], each a whole number from 1. */
+/** A square as an argument or a report gives it, when it is one: [column, row], each a whole number from 1 that a number holds exactly. */
 export function squareGiven(v: unknown): Square | null {
-  return Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === "number" && Number.isInteger(n) && n >= 1) ? [Number(v[0]), Number(v[1])] : null;
+  return Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === "number" && Number.isSafeInteger(n) && n >= 1) ? [Number(v[0]), Number(v[1])] : null;
 }
 
 /** A report of the grid's, its values worded: an id by its name, a square and a list of squares by the `spot` line. */
