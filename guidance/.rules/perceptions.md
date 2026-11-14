@@ -36,4 +36,4 @@ When the player covers hours in one message, write perceptions per moment, in or
 
 ## If one is missing
 
-If you are told that characters were on stage in an earlier turn and have nothing recorded for it, write those first, before those characters act again.
+If you are told that characters were on stage in an earlier turn and have nothing recorded for it, those are owed like this turn's. A character who is about to act through its own agent needs them first: write them before you delegate to it. On a turn you settle yourself, the reply does not wait for them: write them right after it, with this turn's.
