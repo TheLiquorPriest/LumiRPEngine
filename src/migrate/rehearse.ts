@@ -11,6 +11,7 @@
 import { existsSync } from "node:fs";
 import { statfs } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { walk } from "../app/archive";
 import { agentMetaOf } from "../backend/chat-agent-meta";
 import { decodeLedger } from "../backend/ledger-io";
 import { readRun } from "../backend/runtime";
@@ -19,32 +20,13 @@ import type { ChatId, UserId, WorldId } from "../shared/ids";
 import { isRecord, type JsonObject } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { backupSize, backupSources, makeBackup, type BackupChat, type BackupResult } from "./backup";
-import { ChatReader } from "./chats";
 import { classifyRuntime, classifyStorage, type Classified, type ClassifyContext } from "./classify";
-import { readBytes, readText, sha256, walk } from "./files";
+import { readBytes, sha256 } from "./files";
 import { areaFiles, areaHead, countLedgers, countLink, countSettings, countWorldDoc, INSIDE_UNIT, MIND_FILE, recordBlobs, Tally, type Unreadable } from "./inside";
-import { LumiverseDb, type ChatRow, type Install } from "./lumiverse-db";
+import type { ChatRow, LumiverseDb } from "./lumiverse-db";
 import { changesSince, refusalsOf, type ChatReport, type Item, type MigrationReport, REPORT_FORMAT, type RowReport, type Where } from "./report";
-import { ROWS, type RowId } from "./rows";
-import { readRuntimeFolders, type RuntimeFolders, type RuntimeRead } from "./runtime-folders";
-import { StandIn, StorageView, type AttemptedWrite } from "./stand-in";
-
-/** Where today's data is: Lumiverse's data folder, the extension's identifier there, the one user whose data migrates, and the runtime's folders (null: the server runs none). */
-export interface Sources {
-  lumiverse: string;
-  identifier: string;
-  userId: string;
-  runtime: RuntimeFolders | null;
-}
-
-/**
- * The extension's two storage folders in Lumiverse's data folder (`src/auth/provision.ts:47-50`,
- * `src/spindle/manager.service.ts:719-721`): the user's own, which is also the extension's storage
- * when it is installed for one user, and the extension's, when it is installed for everyone.
- */
-export function storageFolders(sources: Pick<Sources, "lumiverse" | "identifier" | "userId">): { user: string; extension: string } {
-  return { user: join(sources.lumiverse, "users", sources.userId, "extensions", sources.identifier), extension: join(sources.lumiverse, "extensions", sources.identifier, "storage") };
-}
+import { ROWS } from "./rows";
+import { openToday, type Sources, type Today } from "./today";
 
 export interface RehearseOptions {
   mode?: "rehearsal" | "real run";
@@ -54,8 +36,6 @@ export interface RehearseOptions {
   target?: string;
   now?: () => Date;
 }
-
-const EMPTY_RUNTIME: RuntimeRead = { runtimes: [], files: [], unreadable: [], unsent: [] };
 
 function json(text: string | null): unknown {
   if (text === null) return null;
@@ -198,46 +178,40 @@ function engineChats(db: LumiverseDb, chats: readonly ChatRow[], userId: string,
   });
 }
 
-/** The one survey both the rehearsal and the backup start from: the database, the folders, the runtime. */
-async function survey(sources: Sources, db: LumiverseDb): Promise<{ username: string | null; install: Install | null; user: string | null; extension: string | null; runtime: RuntimeRead }> {
-  const username = db.username(sources.userId);
-  const install = db.install(sources.identifier);
-  const folders = storageFolders(sources);
-  const user = existsSync(folders.user) ? folders.user : null;
-  const extension = existsSync(folders.extension) ? folders.extension : null;
-  const mark = user === null ? null : await readText(join(user, "harness", "docs", "mirror.json"));
-  const runtime = sources.runtime === null ? EMPTY_RUNTIME : await readRuntimeFolders(sources.runtime, sources.identifier, username, mark);
-  return { username, install, user, extension, runtime };
-}
-
 /** Takes the backup of today's data into `dest`: a new archive each time. */
 export async function backup(sources: Sources, dest: string, now?: () => Date): Promise<BackupResult> {
-  const db = LumiverseDb.open(sources.lumiverse);
+  const today = await openToday(sources);
   try {
-    const found = await survey(sources, db);
-    const chats = engineChats(db, db.chats(sources.userId), sources.userId, sources.identifier);
-    return await makeBackup({ dest, sources: await backupSources({ user: found.user, extension: found.extension }, found.runtime.files), chats, roots: { user: found.user, extension: found.extension, runtime: sources.runtime }, ...(now ? { now } : {}) });
+    return await backupOf(today, dest, now);
   } finally {
-    db.close();
+    today.close();
   }
 }
 
-export async function rehearse(sources: Sources, options: RehearseOptions = {}): Promise<MigrationReport> {
-  const at = (options.now?.() ?? new Date()).toISOString();
-  const db = LumiverseDb.open(sources.lumiverse);
-  try {
-    const userId = sources.userId as UserId;
-    const found = await survey(sources, db);
-    const chatRows = db.chats(sources.userId);
-    const pending = new Map<string, string | null>();
-    for (const u of found.runtime.unsent) if (u.kept) for (const [path, text] of u.files) pending.set(path, text);
+/** The backup of an open read of today's data: its storage folders, its runtime's files and the chats with engine records. */
+export async function backupOf(today: Today, dest: string, now?: () => Date): Promise<BackupResult> {
+  const chats = engineChats(today.db, today.chats, today.sources.userId, today.sources.identifier);
+  const sources = await backupSources({ user: today.user, extension: today.extension }, today.runtime.files);
+  return makeBackup({ dest, sources, chats, roots: { user: today.user, extension: today.extension, runtime: today.sources.runtime }, ...(now ? { now } : {}) });
+}
 
-    // Today's own readers run over the stand-in: what they write stays in memory, listed in `writes`.
-    const writes: AttemptedWrite[] = [];
-    const userView = new StorageView("user storage", found.user, writes, pending);
-    const oneFolder = found.install?.scope === "user" && found.install.owner === sources.userId;
-    const extensionView = oneFolder ? userView : new StorageView("extension storage", found.extension, writes);
-    const standIn = new StandIn({ userId: sources.userId, user: userView, extension: extensionView, db }, writes);
+export async function rehearse(sources: Sources, options: RehearseOptions = {}): Promise<MigrationReport> {
+  const today = await openToday(sources);
+  try {
+    return await reportOf(today, options);
+  } finally {
+    today.close();
+  }
+}
+
+/** The report on an open read of today's data: every file and database entry found, classified and counted, and every chat read by today's readers. */
+export async function reportOf(today: Today, options: RehearseOptions = {}): Promise<MigrationReport> {
+  const at = (options.now?.() ?? new Date()).toISOString();
+  const { sources, db, pending, writes, userView, standIn, reader } = today;
+  const found = today;
+  {
+    const userId = sources.userId as UserId;
+    const chatRows = today.chats;
     const context: ClassifyContext = { chats: new Set(chatRows.map((c) => c.id)), forgotten: forgottenOf(await userView.read("harness/forget.json")) };
 
     const unreadable: Unreadable[] = [];
@@ -262,7 +236,7 @@ export async function rehearse(sources: Sources, options: RehearseOptions = {}):
       const chat = /^chats\/([^/]+)\//.exec(i.path)?.[1] ?? /^runs\/([^/]+)\//.exec(i.path)?.[1] ?? null;
       if (chat !== null && context.chats.has(chat)) engine.add(chat);
     }
-    const reader = new ChatReader(standIn.host);
+    // Today's settings reader runs first, as the runtime's does: it sets a damaged settings file aside.
     await reader.userSettings(userId);
     const tally = new Tally();
     const chats: ChatReport[] = [];
@@ -319,8 +293,9 @@ export async function rehearse(sources: Sources, options: RehearseOptions = {}):
         await reader.worldStore.history(id as WorldId, userId);
         const draft = json(await userView.read(`worlds/${id}/draft.json`));
         if (isRecord(draft)) countWorldDoc(draft.doc, false, tally);
-      } catch (error) {
-        unreadable.push({ path: `user storage: worlds/${id}/index.json`, why: `today's world store can't read it (${error instanceof Error ? error.message : String(error)})` });
+      } catch {
+        // A fixed reason: the store's own words can quote the file's text, and the report holds no content.
+        unreadable.push({ path: `user storage: worlds/${id}/index.json`, why: "today's world store can't read it" });
       }
     }
 
@@ -403,13 +378,14 @@ export async function rehearse(sources: Sources, options: RehearseOptions = {}):
       lumiverse: db.marks(sources.userId, chatRows),
       disk,
       underWay: chats.reduce((n, c) => n + c.underWay, 0),
+      imports: null,
+      backup: null,
+      landed: null,
       changes: null,
       refusals: [],
     };
     report.refusals = refusalsOf(report, found.username !== null);
     if (options.previous) report.changes = changesSince(options.previous, report);
     return report;
-  } finally {
-    db.close();
   }
 }

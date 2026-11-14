@@ -187,3 +187,23 @@ describe("the rehearsal, extension installed for one user", () => {
     for (const row of report.rows) expect(row.count.found).toBe(row.count.carried + row.count.attached + row.count.archived);
   });
 });
+
+describe("the report, on a file today's readers can't parse", () => {
+  test("names it by path in fixed words, and never quotes what it holds", async () => {
+    const fixture = await buildFixture("operator");
+    try {
+      // The revision every chat of the fixture plays, and its world's index, damaged: a parser's own error would quote these words.
+      await writeFile(join(fixture.userFolder, "worlds", fixture.worldId, "rev", `${fixture.revisions[0]}.json`), `{ "name": Ostrichfeather }`);
+      await writeFile(join(fixture.userFolder, "worlds", fixture.worldId, "index.json"), `{ "name": Saltpetrel }`);
+      const report = await rehearse(fixture.sources);
+      expect(report.unreadable).toContainEqual({ path: `user storage: worlds/${fixture.worldId}/index.json`, why: "today's world store can't read it" });
+      expect(report.chats.find((c) => c.chatId === CHAT.classic)?.notOpened).toBe(`its world ${fixture.worldId} at revision ${fixture.revisions[0]} can't be read by today's world store`);
+      for (const word of ["Ostrichfeather", "Saltpetrel"]) {
+        expect(JSON.stringify(report)).not.toContain(word);
+        expect(reportText(report)).not.toContain(word);
+      }
+    } finally {
+      await fixture.remove();
+    }
+  });
+});

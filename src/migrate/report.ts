@@ -65,6 +65,54 @@ export interface Changes {
   chats: { chatId: string; turns: number; was: number | null }[];
 }
 
+/** Where RPE's fold of a chat's imported changes differs from today's fold: at a swipe (its message and number) or at the chat's head; the values that differ, by path, never their content. */
+export interface Difference {
+  at: { message: string; swipe: number } | "head";
+  turn: string;
+  values: string[];
+  /**
+   * Whether today's state there is now the turn's starting state, so nothing is lost. False only for
+   * a swipe's own path in a chat whose showing replies were placed where they stand: going back to
+   * that swipe in RPE gives RPE's own fold there, and this lists how it differs from today's.
+   */
+  kept: boolean;
+}
+
+/** What the real run did with one chat (§15.5: its turns found and imported, and whether its state matched at the head and at every swipe). */
+export interface ChatImportReport {
+  chatId: string;
+  outcome:
+    | "imported"
+    | "replaced"
+    | "played on RPE: left alone"
+    | "a chat made from it was played on RPE: left alone"
+    | "gone from Lumiverse: removed"
+    | "gone from Lumiverse, played on RPE: left alone"
+    | "gone from Lumiverse, a chat made from it was played on RPE: left alone"
+    | "not imported";
+  /** Why a chat was not imported, in fixed words. */
+  why?: string;
+  /** Turns imported: one per swipe of every reply the chat holds itself. */
+  turns: number;
+  /**
+   * Where its swipes were folded: on their own recorded path (`own`); where they show now, having no
+   * turn path of their own (`shown`) or one an edit or a deletion made impossible to rebuild (`lost`);
+   * a showing reply placed where it stands (`head`, when `placedAsShown`).
+   */
+  placed: { own: number; shown: number; lost: number; head: number };
+  /** A branch's messages that share the turns of the chat it was made from. */
+  shares: { chat: string; messages: number } | null;
+  /** Its head stood rebased and differed, so its showing replies were placed where they stand. */
+  placedAsShown: boolean;
+  /** Whether RPE's fold matched today's before any starting state was kept: at the head, and at how many of its swipes. */
+  matched: { head: boolean; swipes: number; of: number };
+  /** Where it didn't: the chat is marked, and today's state there is the turn's starting state. */
+  differences: Difference[];
+  /** Events today's fold dropped on rebased views, and on-path events that failed to apply again, over its swipes. */
+  dropped: number;
+  violations: number;
+}
+
 export interface MigrationReport {
   format: typeof REPORT_FORMAT;
   /** When the run read today's data. */
@@ -89,6 +137,12 @@ export interface MigrationReport {
   disk: { backup: number; import: number; total: number; free: number | null };
   /** Turns under way in today's build as the run read it, over every chat. */
   underWay: number;
+  /** What the real run did with each chat; null for a rehearsal. */
+  imports: ChatImportReport[] | null;
+  /** The backup the real run took before it wrote anything: where, its size and its checksum; null for a rehearsal. */
+  backup: { path: string; bytes: number; sha256: string } | null;
+  /** Where each row's things now are in RPE, by row; null for a rehearsal (`carry.ts`). */
+  landed: Partial<Record<RowId, string>> | null;
   changes: Changes | null;
   /** Why the real run won't start on this report; none: it may. */
   refusals: string[];
@@ -155,6 +209,20 @@ export function reportText(report: MigrationReport): string {
     const waits = [c.waiting.questions > 0 ? `${c.waiting.questions} keep-or-discard question(s)` : "", c.waiting.staged > 0 ? "a staged action" : "", c.waiting.chips > 0 ? `${c.waiting.chips} chip(s), ${c.waiting.reviewCards} of them review cards` : "", c.waiting.rollback ? "a rollback that was never applied" : ""].filter((w) => w !== "");
     lines.push(`  ${c.chatId} (${c.engine ?? "no world"}): ${c.turns} turns over ${c.replies} replies; journal ${c.journal}${c.underWay > 0 ? `; ${c.underWay} turn(s) under way` : ""}${waits.length > 0 ? `; waiting: ${waits.join(", ")}` : ""}`);
   }
+  if (report.imports !== null) {
+    lines.push("", "Chats into RPE: turns, where each swipe was folded, and the check against today's fold");
+    for (const c of report.imports) {
+      if (c.outcome !== "imported" && c.outcome !== "replaced") {
+        lines.push(`  ${c.chatId}: ${c.outcome}${c.why ? ` (${c.why})` : ""}`);
+        continue;
+      }
+      const p = c.placed;
+      const where = `${p.own} on their own path, ${p.shown} where they show (no turn path of their own), ${p.lost} where they show (their own path lost to an edit or a deletion)${p.head > 0 ? `, ${p.head} showing replies where they stand` : ""}`;
+      const check = `matched at the head ${c.matched.head ? "yes" : "no"}, at ${c.matched.swipes} of ${c.matched.of} swipes`;
+      lines.push(`  ${c.chatId}: ${c.outcome}, ${c.turns} turns (${where})${c.shares ? `; shares ${c.shares.messages} message(s) with ${c.shares.chat}` : ""}; ${check}${c.differences.length > 0 ? "; MARKED: today's state is kept as the start where they differ" : ""}`);
+      for (const d of c.differences) lines.push(`    ${d.kept ? "differs" : "going back differs (not kept)"} at ${d.at === "head" ? "the head" : `message ${d.at.message}, swipe ${d.at.swipe}`}: ${d.values.join(", ")}`);
+    }
+  }
   if (report.unreadable.length > 0) {
     lines.push("", "Could not be read:");
     for (const u of report.unreadable) lines.push(`  ${u.path}: ${u.why}`);
@@ -168,6 +236,14 @@ export function reportText(report: MigrationReport): string {
   const m = report.lumiverse;
   lines.push("", `In Lumiverse, left as they are: ${m.engineBooks} engine book(s) with ${m.engineEntries} entries, attached to ${m.chatsWithEngineBook} chat(s); ${m.markedEntries} entries of your own books with engine fields; ${m.regexScripts} regex script(s); ${m.presetBlocks} preset block(s) and ${m.outletReferences} outlet reference(s).`);
   lines.push("", `Disk: the backup takes ${report.disk.backup} bytes and the import ${report.disk.import}, ${report.disk.total} in all${report.disk.free === null ? "" : `; ${report.disk.free} are free`}.`);
+  if (report.backup) lines.push(`Backup taken: ${report.backup.path} (${report.backup.bytes} bytes, sha256 ${report.backup.sha256}).`);
+  if (report.landed) {
+    lines.push("", "Where each row's things are now in RPE:");
+    for (const r of report.rows) {
+      const at = report.landed[r.row];
+      if (at !== undefined) lines.push(`  ${r.what}: ${at}`);
+    }
+  }
   if (report.changes) {
     const c = report.changes;
     lines.push("", `Since the run of ${c.since}: ${c.added.length} added, ${c.changed.length} changed, ${c.gone.length} gone; ${c.rows.length} row(s) and ${c.chats.length} chat(s) differ.`);

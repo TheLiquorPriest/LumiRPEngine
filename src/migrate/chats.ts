@@ -20,12 +20,12 @@ import { StagedActions } from "../backend/staged";
 import { startMarkersFrom } from "../backend/start-markers";
 import { WorldStore } from "../backend/worlds";
 import { resolveFix } from "../engine/edits";
-import type { ChainMessage } from "../engine/ledger/chain";
+import type { ChainMessage, FoldInput } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import { createRegistry } from "../engine/registry-impl";
 import { ALL_PACKS, STARTER_TABLES } from "../packs/index";
 import type { ChatId, RevisionId, UserId } from "../shared/ids";
-import type { Journal, MessageLedger } from "../shared/ledger";
+import type { ChatRun, Journal, MessageLedger } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
 import type { UserSettings } from "../shared/settings";
 import type { Unreadable } from "./inside";
@@ -91,8 +91,9 @@ export class ChatReader {
     let world: WorldDoc;
     try {
       world = (await this.worlds.get(run.worldId, userId, run.revision)).world;
-    } catch (error) {
-      this.why.set(chatId, new NotOpened(`its world ${run.worldId} at revision ${run.revision} can't be read (${error instanceof Error ? error.message : String(error)})`));
+    } catch {
+      // A fixed reason: the reader's own words can quote the file's text, and the report holds no content.
+      this.why.set(chatId, new NotOpened(`its world ${run.worldId} at revision ${run.revision} can't be read by today's world store`));
       return null;
     }
     const pinned = new Map<RevisionId, WorldDoc>([[run.revision, world]]);
@@ -147,8 +148,8 @@ export class ChatReader {
         journal = structuredClone(core.journal);
         chain = core.chain(seen);
       });
-      // The service logs what fails on a chat's queue rather than throwing it: each failure is one this read met.
-      for (const error of this.ledger.errors.slice(failed)) unreadable.push({ path: `chats/${chatId}`, why: `today's ledger reader failed: ${error.split("\n")[0] ?? ""}` });
+      // The service logs what fails on a chat's queue rather than throwing it: each failure is one this read met. Its words are left out: they can quote the chat.
+      for (let i = failed; i < this.ledger.errors.length; i++) unreadable.push({ path: `chats/${chatId}`, why: "today's ledger reader failed on this chat" });
       if (journal === null) {
         state = "not opened";
         notOpened = this.why.get(chatId)?.why ?? "today's reader didn't open it";
@@ -180,6 +181,25 @@ export class ChatReader {
       },
       unreadable,
     };
+  }
+
+  /**
+   * The chat as today's fold reads it (`LedgerCore.foldInput`): its messages with the journal's records
+   * over theirs, the journal's pauses and tombstones, its world revisions (each one its records, markers
+   * and run name, pinned), and how to work a GM edit or ✎ fix out again. Null for a chat that plays no
+   * world, or that today's reader can't open.
+   */
+  async today(chatId: ChatId, userId: UserId): Promise<{ input: FoldInput; revisions: Set<RevisionId>; run: ChatRun } | null> {
+    const run = readRun(await this.host.chats.chatMetadata(chatId, userId));
+    if (!run) return null;
+    let found: { input: FoldInput; revisions: Set<RevisionId> } | null = null;
+    await this.ledger.with(chatId, userId, async (core, seen) => {
+      // A copy: the importer's folds read it after the reader is done with the chat.
+      const input = core.foldInput(seen);
+      found = { input: { ...input, chain: structuredClone(input.chain), pauses: structuredClone(input.pauses), tombstones: structuredClone(input.tombstones) }, revisions: core.revisionsIn(seen) };
+    });
+    const opened = found as { input: FoldInput; revisions: Set<RevisionId> } | null;
+    return opened === null ? null : { ...opened, run };
   }
 
   /** Today's settings reader over the stand-in: the user's settings as today's build reads them. */

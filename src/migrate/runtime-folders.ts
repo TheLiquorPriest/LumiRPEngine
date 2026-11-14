@@ -15,7 +15,8 @@ import { basename, dirname, join } from "node:path";
 import { BLOB_HASH, DOC_PATH, EXTENSION_IDENTIFIER, MARK_PATH, RUNTIME_NAME } from "lumi-ah/link";
 import { configDir, configOf, type RuntimeConfig } from "lumi-ah/runtime";
 import { isRecord } from "../shared/json";
-import { missing, readText, sha256, walk, type FoundFile } from "./files";
+import { walk, type FoundFile } from "../app/archive";
+import { missing, readText, sha256 } from "./files";
 
 /** Where the runtimes keep their configs and their data. */
 export interface RuntimeFolders {

@@ -1,16 +1,19 @@
 // The backup the real run takes before anything else (STANDALONE-PLAN §15.3 step 4), and again at
 // the swap: one archive of today's extension storage (the user's folder, and the extension's own
 // where it is another), the runtime's own files with its installed copy and its service unit, and
-// the list of chats with engine records. Each file is read once, hashed as it goes into the archive,
-// and its checksum kept in the archive's manifest, which comes last; the archive's own checksum is
-// reported beside it. Each run makes a new archive and never writes over one.
+// the list of chats with engine records. It holds keys and session tokens, so it is readable by its
+// owner alone (§16), made in a folder only its owner may enter, and created anew each time: never
+// over another archive, even one that appears while this one is being named. Each file is read
+// once, whole, hashed as it goes into the archive (a log today's build appends to while it runs is
+// taken as it stood when read), and its checksum kept in the archive's manifest, which comes last;
+// the archive's own checksum is reported beside it.
 
-import { existsSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
+import { open, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { readBytes, sha256, walk } from "./files";
+import { tarEntrySize, TAR_END_BYTES, TarWriter, walk } from "../app/archive";
+import { OWNER_ONLY_FILE, ownerOnlyFolder } from "../app/disk";
+import { readBytes, sha256 } from "./files";
 import type { RuntimeFile } from "./runtime-folders";
-import { TAR_END_BYTES, tarEntrySize, TarWriter } from "./tar";
 
 export const BACKUP_FORMAT = "rpe-migration-backup-v1";
 const MANIFEST = "MANIFEST.json";
@@ -66,28 +69,38 @@ export function backupSize(files: readonly { name: string; bytes: number }[], ch
   return files.reduce((n, f) => n + tarEntrySize(f.name, f.bytes), 0) + tarEntrySize(CHATS, chatsBytes) + tarEntrySize(MANIFEST, manifestBytes) + TAR_END_BYTES;
 }
 
-/** Makes the backup in `dest` (made if missing); never over an archive already there. */
+/** Makes the backup in `dest` (made if missing, its owner's alone); never over an archive already there. */
 export async function makeBackup(input: { dest: string; sources: readonly BackupSource[]; chats: readonly BackupChat[]; roots: BackupManifest["roots"]; now?: () => Date }): Promise<BackupResult> {
   const made = (input.now?.() ?? new Date()).toISOString();
-  await mkdir(input.dest, { recursive: true });
+  await ownerOnlyFolder(input.dest);
   const path = join(input.dest, `rpe-migration-backup-${made.replace(/[:.]/g, "-")}.tar`);
-  if (existsSync(path)) throw new Error(`A backup is already at ${path}; the migration never writes over one.`);
-  const tar = TarWriter.open(path);
-  const files: BackupManifest["files"] = [];
-  for (const source of input.sources) {
-    const data = await readBytes(source.disk);
-    // A file gone since it was listed (today's build moved it into place, or removed it) is no file of the backup's.
-    if (data === null) continue;
-    const info = Bun.file(source.disk);
-    await tar.add(source.name, data, info.lastModified / 1000, 0o600);
-    files.push({ name: source.name, bytes: data.length, sha256: sha256(data) });
+  // Made first, empty and private, failing where any file is there: the writer then fills this one.
+  try {
+    await (await open(path, "wx", OWNER_ONLY_FILE)).close();
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "EEXIST") throw new Error(`A backup is already at ${path}; the migration never writes over one.`);
+    throw error;
   }
-  const chatsText = new TextEncoder().encode(JSON.stringify(input.chats, null, 2));
-  await tar.add(CHATS, chatsText, Date.parse(made) / 1000, 0o600);
-  const manifest: BackupManifest = { format: BACKUP_FORMAT, made, roots: input.roots, files, chats: { bytes: chatsText.length, sha256: sha256(chatsText) } };
-  await tar.add(MANIFEST, new TextEncoder().encode(JSON.stringify(manifest, null, 2)), Date.parse(made) / 1000, 0o600);
-  const { bytes, sha256: sum } = await tar.close();
-  return { path, bytes, sha256: sum, manifest };
+  const tar = TarWriter.open(path);
+  try {
+    const files: BackupManifest["files"] = [];
+    for (const source of input.sources) {
+      const data = await readBytes(source.disk);
+      // A file gone since it was listed (today's build moved it into place, or removed it) is no file of the backup's.
+      if (data === null) continue;
+      await tar.add(source.name, data, Bun.file(source.disk).lastModified / 1000, OWNER_ONLY_FILE);
+      files.push({ name: source.name, bytes: data.length, sha256: sha256(data) });
+    }
+    const chatsText = new TextEncoder().encode(JSON.stringify(input.chats, null, 2));
+    await tar.add(CHATS, chatsText, Date.parse(made) / 1000, OWNER_ONLY_FILE);
+    const manifest: BackupManifest = { format: BACKUP_FORMAT, made, roots: input.roots, files, chats: { bytes: chatsText.length, sha256: sha256(chatsText) } };
+    await tar.add(MANIFEST, new TextEncoder().encode(JSON.stringify(manifest, null, 2)), Date.parse(made) / 1000, OWNER_ONLY_FILE);
+    const { bytes, sha256: sum } = await tar.close();
+    return { path, bytes, sha256: sum, manifest };
+  } catch (error) {
+    await tar.discard();
+    throw error;
+  }
 }
 
 /**

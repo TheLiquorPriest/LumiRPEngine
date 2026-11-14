@@ -21,9 +21,10 @@ import type { UserId } from "../../src/shared/ids";
 import type { JsonObject } from "../../src/shared/json";
 import type { Journal, MessageLedger, Rec } from "../../src/shared/ledger";
 import { blobHash } from "../../src/shared/stores";
-import { readBytes, sha256 as sha, walk } from "../../src/migrate/files";
+import { readBytes, sha256 as sha } from "../../src/migrate/files";
+import { walk } from "../../src/app/archive";
 import { copyFolderOf } from "../../src/migrate/runtime-folders";
-import type { Sources } from "../../src/migrate/rehearse";
+import type { Sources } from "../../src/migrate/today";
 import { FakeHost } from "../support/fake-host";
 
 export const IDENT = "lumi_rp_engine";

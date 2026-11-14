@@ -1,0 +1,332 @@
+// Each chat into RPE's store (STANDALONE-PLAN §15.3 item 7, §6.3). Today's own reader reads the chat
+// as today's fold does (the journal's records over the messages', its pauses and tombstones), and
+// every reply and every swipe becomes a turn tied to its message by the saved text's hash and the
+// swipe's date. Each swipe is folded by today's fold where it was played (`own-path.ts`), and what
+// the fold applied at that step becomes the turn's changes, each with the source `import`, so the
+// chat reads as not yet played on RPE. What an old engine recorded for the swipe is kept beside the
+// turn, read-only.
+//
+// The check: RPE's fold over the imported changes is compared, value for value, with today's state at
+// every swipe and at the chat's head. Where they differ, today's state there is kept as the starting
+// state of that turn (`setBase`), so nothing is lost, and the values that differ are listed by path.
+// A base can only stand on a turn's own path; a chat whose head stands rebased (an earlier swipe
+// flipped after later replies were played) and differs there is imported again with the replies it
+// shows placed where they stand, so its head is a turn's own path, and the check holds there too.
+//
+// A branch shares the turns of the chat it was made from for the messages it copied, as long as the
+// copies are still the same (its texts, records, pauses and discards); after that it has its own.
+//
+// A run imports every chat again from the start (§15.3): a chat not yet played on RPE is removed with
+// its branches and imported afresh; a chat played on RPE, or one a played branch shares turns with, is
+// left as it is, and the report says so. A chat an earlier run imported that Lumiverse no longer has is
+// removed, unless it was played on RPE.
+
+import type { Database } from "bun:sqlite";
+import { readRun } from "../backend/runtime";
+import type { ChainMessage, FoldInput } from "../engine/ledger/chain";
+import { activeText } from "../engine/ledger/path";
+import type { Registry } from "../engine/registry-impl";
+import { hashJson } from "../shared/hash";
+import type { ChatId, RevisionId, UserId, WorldId } from "../shared/ids";
+import { isRecord } from "../shared/json";
+import type { ChatRun, Tombstone } from "../shared/ledger";
+import { matchTurn, StoreInputError, type ShownMessage, type Store, type UserStore } from "../store";
+import { CapturingFold, foldToday } from "./capture";
+import { textHash, type SwipeFacts } from "./lumiverse-db";
+import { chainOf, placements, type Pick, type Placement } from "./own-path";
+import type { ChatImportReport, Difference } from "./report";
+import { forgetChats, keepChat, keepRecord } from "./tables";
+import type { Today } from "./today";
+
+/** A chat as the importer takes it: today's fold input for it as it stands, its swipes' hashes and dates, and the chat it was branched from. */
+export interface ChatToImport {
+  chatId: string;
+  run: ChatRun;
+  input: FoldInput;
+  /** Every world revision its folds may ask for. */
+  revisions: ReadonlySet<RevisionId>;
+  swipes: ReadonlyMap<string, SwipeFacts>;
+  /** Lumiverse's own note on a branch: the chat it was made from, and the message it was made at. */
+  branch: { from: string; at: string } | null;
+}
+
+/** Every chat of the user's that plays a world, read by today's reader; and those today's reader can't open, with why (fixed words). */
+export async function chatsToImport(today: Today): Promise<{ chats: ChatToImport[]; notOpened: { chatId: string; why: string }[] }> {
+  const user = today.sources.userId as UserId;
+  const chats: ChatToImport[] = [];
+  const notOpened: { chatId: string; why: string }[] = [];
+  for (const row of today.chats) {
+    const run = readRun(row.metadata);
+    if (!run) continue;
+    const read = await today.reader.today(row.id as ChatId, user);
+    if (!read) {
+      notOpened.push({ chatId: row.id, why: "today's reader can't open it: its world can't be read" });
+      continue;
+    }
+    const from = row.metadata.branched_from;
+    const at = row.metadata.branch_at_message;
+    chats.push({ chatId: row.id, run: read.run, input: read.input, revisions: read.revisions, swipes: today.db.swipeFacts(row.id, today.sources.userId), branch: typeof from === "string" && typeof at === "string" ? { from, at } : null });
+  }
+  return { chats, notOpened };
+}
+
+/** The chats in an order where each comes after the chat it was branched from. */
+function sourcesFirst(chats: readonly ChatToImport[]): ChatToImport[] {
+  const byId = new Map(chats.map((c) => [c.chatId, c]));
+  const out: ChatToImport[] = [];
+  const placed = new Set<string>();
+  const visit = (c: ChatToImport, seen: Set<string>): void => {
+    if (placed.has(c.chatId) || seen.has(c.chatId)) return;
+    seen.add(c.chatId);
+    const source = c.branch ? byId.get(c.branch.from) : undefined;
+    if (source) visit(source, seen);
+    placed.add(c.chatId);
+    out.push(c);
+  };
+  for (const c of chats) visit(c, new Set());
+  return out;
+}
+
+/** A branch's messages that share the turns of the chat it was made from: by the branch's index, with the source's message. */
+interface Link {
+  from: string;
+  at: string;
+  /** The source's message id to the branch's, for the store's branch. */
+  map: Record<string, string>;
+  /** The source's message at each shared index of the branch's chain. */
+  shared: Map<number, string>;
+}
+
+const json = (v: unknown): string => JSON.stringify(v) ?? "";
+
+/**
+ * Where a branch shares its source's turns: from its first message, as long as each message is
+ * still the same in both (texts, swipe dates, records, and the journal's pauses and discards naming
+ * it), up to the message it was made at. None when no reply is shared, or the two play other runs.
+ */
+function linkOf(chat: ChatToImport, source: ChatToImport | undefined): Link | null {
+  if (!chat.branch || !source || chat.run.worldId !== source.run.worldId || chat.run.revision !== source.run.revision) return null;
+  const sc = source.input.chain;
+  const bc = chat.input.chain;
+  const at = sc.findIndex((m) => m.id === chat.branch?.at);
+  if (at < 0) return null;
+  const naming = (input: FoldInput, id: string): string => json([input.pauses.filter((p) => p.messageId === id), input.tombstones.filter((t: Tombstone) => t.messageId === id)]);
+  const map: Record<string, string> = {};
+  const shared = new Map<number, string>();
+  let replies = 0;
+  for (let i = 0; i <= at && i < bc.length; i++) {
+    const a = sc[i] as ChainMessage;
+    const b = bc[i] as ChainMessage;
+    const same = a.isUser === b.isUser && json(a.swipes) === json(b.swipes) && json(a.ledger) === json(b.ledger) && json(source.swipes.get(a.id)) === json(chat.swipes.get(b.id)) && naming(source.input, a.id) === naming(chat.input, b.id);
+    if (!same) break;
+    map[a.id] = b.id;
+    shared.set(i, a.id);
+    if (!a.isUser) replies++;
+  }
+  return replies === 0 ? null : { from: source.chatId, at: chat.branch.at, map, shared };
+}
+
+/** A chat whose head stands rebased and differs from today's: it is imported again with the replies it shows placed where they stand. */
+class HeadRebased extends Error {}
+
+/** The paths of the values two states differ in (`clock`, `entities/<id>/fields/<field>`): never the values. */
+export function stateDifferences(a: unknown, b: unknown): string[] {
+  const out: string[] = [];
+  const walk = (x: unknown, y: unknown, at: string): void => {
+    if (json(x) === json(y)) return;
+    if (Array.isArray(x) && Array.isArray(y) && x.length === y.length) {
+      x.forEach((v, i) => walk(v, y[i], `${at}/${i}`));
+      return;
+    }
+    if (isRecord(x) && isRecord(y) && !Array.isArray(x) && !Array.isArray(y)) {
+      for (const k of [...new Set([...Object.keys(x), ...Object.keys(y)])].sort()) walk(x[k], y[k], at === "" ? k : `${at}/${k}`);
+      return;
+    }
+    out.push(at === "" ? "(the whole state)" : at);
+  };
+  walk(JSON.parse(json(a)) as unknown, JSON.parse(json(b)) as unknown, "");
+  return out;
+}
+
+/** One chat's import, as far as its turns go. */
+interface Imported {
+  turns: number;
+  placed: ChatImportReport["placed"];
+  shared: number;
+  matched: { head: boolean; swipes: number; of: number };
+  differences: Difference[];
+  dropped: number;
+  violations: number;
+}
+
+/** Imports one chat into the store; throws `HeadRebased` when its head stands rebased and differs from today's. */
+function importOne(s: UserStore, db: Database, registry: Registry, chat: ChatToImport, link: Link | null, headShown: boolean, turnOfShared: (link: Link, index: number, swipe: number) => string | null): Imported {
+  const chain = chat.input.chain;
+  const id = chat.chatId;
+  if (link) s.branchChat({ id, from: link.from, map: link.map, at: link.at });
+  else s.createChat({ id, world: chat.run.worldId as WorldId, revision: chat.run.revision });
+  const facts = (m: ChainMessage): SwipeFacts | undefined => chat.swipes.get(m.id);
+  const hashOf = (m: ChainMessage, swipe: number): string => facts(m)?.hashes[swipe] ?? textHash(m.swipes[swipe] ?? "");
+  const dateOf = (m: ChainMessage, swipe: number): number | null => facts(m)?.dates[swipe] ?? null;
+  const own = new Map<string, string>();
+  const turnOf = (at: number, swipe: number): string | null => (link?.shared.has(at) ? turnOfShared(link, at, swipe) : (own.get(`${at}:${swipe}`) ?? null));
+  // A chain's prefix is folded before the chain: replies in order, the swipe each shows last, since the next reply's own path most often runs through it.
+  const order = placements(chain, chat.input.tombstones, { headShown }).sort((a, b) => a.at - b.at || Number(a.swipe === (chain[a.at] as ChainMessage).swipeId) - Number(b.swipe === (chain[b.at] as ChainMessage).swipeId) || a.swipe - b.swipe);
+  const capture = new CapturingFold(registry);
+  const out: Imported = { turns: 0, placed: { own: 0, shown: 0, lost: 0, head: 0 }, shared: 0, matched: { head: true, swipes: 0, of: 0 }, differences: [], dropped: 0, violations: 0 };
+  const nodeOf = (picks: Pick | null): string | null => {
+    const list: Pick[] = [];
+    for (let p = picks; p !== null; p = p.prev) list.push(p);
+    let on: string | null = null;
+    for (const p of list.reverse()) {
+      const turn = turnOf(p.at, p.swipe);
+      if (turn === null) throw new StoreInputError(`no turn for swipe ${p.swipe} of message ${(chain[p.at] as ChainMessage).id}`);
+      on = s.extendPath(on, turn);
+    }
+    return on;
+  };
+  for (const p of order as Placement[]) {
+    if (link?.shared.has(p.at)) {
+      out.shared++;
+      continue;
+    }
+    const m = chain[p.at] as ChainMessage;
+    const on = nodeOf(p.picks);
+    const step = capture.last({ ...chat.input, chain: chainOf(chain, p) });
+    const turn = s.beginTurn({ chat: id, kind: p.swipe === 0 ? "normal" : "swipe", imported: true, on });
+    // Changes before the tie: both orders give the same state, and this one writes no snapshot twice.
+    if (step.changes.length > 0) s.addChanges(turn.id, step.changes);
+    s.tieTurn(turn.id, { message: m.id, hash: hashOf(m, p.swipe), date: dateOf(m, p.swipe) });
+    if (step.clock !== null) s.updateTurn(turn.id, { storyTime: step.clock });
+    own.set(`${p.at}:${p.swipe}`, turn.id);
+    const rec = m.ledger?.swipes[String(p.swipe)];
+    if (rec) keepRecord(db, s.id, { chat: id, turn: turn.id, message: m.id, swipe: p.swipe, record: rec });
+    out.turns++;
+    out.placed[p.how === "shown" && p.lost ? "lost" : p.how]++;
+    out.dropped += step.dropped;
+    out.violations += step.violations;
+    // The check at this swipe: RPE's fold of its changes against today's state where it was folded.
+    out.matched.of++;
+    const ours = s.stateAt(turn.id).state.world;
+    if (hashJson(ours) === hashJson(step.state)) out.matched.swipes++;
+    else {
+      out.differences.push({ at: { message: m.id, swipe: p.swipe }, turn: turn.id, values: stateDifferences(step.state, ours), kept: true });
+      s.setBase(turn.id, step.state);
+    }
+  }
+  // The chat as it stands: its path, and the check at its head against today's fold of it.
+  const shownOf = (messages: readonly ChainMessage[]): ShownMessage[] => messages.map((m) => (m.isUser ? { id: m.id, user: true, hash: hashOf(m, m.swipeId) } : { id: m.id, user: false, hash: hashOf(m, m.swipeId), date: dateOf(m, m.swipeId) }));
+  const shown = shownOf(chain);
+  s.sync(id, shown);
+  const today = foldToday(registry, chat.input);
+  const head = s.headState(id).state.world;
+  if (hashJson(head) !== hashJson(today.state)) {
+    out.matched.head = false;
+    const last = s.path(id).findLast((e) => e.turn !== null);
+    const turn = last?.turn ?? null;
+    if (turn === null || last?.own !== true || s.turn(turn)?.chat !== id) throw new HeadRebased();
+    out.differences.push({ at: "head", turn, values: stateDifferences(today.state, head), kept: true });
+    s.setBase(turn, today.state);
+  }
+  if (headShown) {
+    // Each showing reply placed where it stands that has an own path elsewhere: going back to that path
+    // in RPE folds its changes there again, and no starting state can stand there; how it differs is listed.
+    for (const p of placements(chain, chat.input.tombstones)) {
+      const m = chain[p.at] as ChainMessage;
+      const ownChain = chainOf(chain, p);
+      if (p.how !== "own" || p.swipe !== m.swipeId || ownChain.every((x, i) => x.swipeId === (chain[i] as ChainMessage).swipeId)) continue;
+      s.sync(id, shownOf(ownChain));
+      const theirs = foldToday(registry, { ...chat.input, chain: ownChain }).state;
+      const ours = s.headState(id).state.world;
+      const turn = own.get(`${p.at}:${p.swipe}`);
+      if (turn !== undefined && hashJson(ours) !== hashJson(theirs)) out.differences.push({ at: { message: m.id, swipe: p.swipe }, turn, values: stateDifferences(theirs, ours), kept: false });
+    }
+    s.sync(id, shown);
+  }
+  return out;
+}
+
+/** Fixed words for why a chat couldn't be imported: an error's own words can quote the chat. */
+function whyNot(error: unknown): string {
+  if (error instanceof StoreInputError) return "the store refused what today's fold gave for it";
+  return "today's fold could not fold it";
+}
+
+/**
+ * Imports every chat into the store for one run. A chat's replacing and its import are one
+ * transaction: a chat that fails leaves nothing of the attempt behind, and what an earlier run
+ * imported of it stands. `earlier` lists the chats earlier runs imported.
+ */
+export function importChats(input: { store: Store; s: UserStore; db: Database; registry: Registry; chats: readonly ChatToImport[]; earlier: readonly { chat: string; source: string | null }[]; run: string }): ChatImportReport[] {
+  const { store, s, db, registry, run } = input;
+  const reports: ChatImportReport[] = [];
+  const wasImported = new Set(input.earlier.map((e) => e.chat));
+  const byId = new Map(input.chats.map((c) => [c.chatId, c]));
+  const sharedTurns = new Map<string, string | null>();
+  const turnOfShared = (link: Link, index: number, swipe: number): string | null => {
+    const sourceMessage = link.shared.get(index);
+    const source = byId.get(link.from);
+    const m = source?.input.chain[index];
+    if (sourceMessage === undefined || source === undefined || m === undefined) return null;
+    const key = `${link.from}\u0000${sourceMessage}\u0000${swipe}`;
+    if (!sharedTurns.has(key)) {
+      const f = source.swipes.get(sourceMessage);
+      const found = matchTurn(s.swipes(link.from, sourceMessage), { hash: f?.hashes[swipe] ?? textHash(m.swipes[swipe] ?? ""), date: f?.dates[swipe] ?? null });
+      sharedTurns.set(key, found.turn?.id ?? null);
+    }
+    return sharedTurns.get(key) ?? null;
+  };
+  const blank = { turns: 0, placed: { own: 0, shown: 0, lost: 0, head: 0 }, shares: null, placedAsShown: false, matched: { head: true, swipes: 0, of: 0 }, differences: [], dropped: 0, violations: 0 };
+  for (const chat of sourcesFirst(input.chats)) {
+    const id = chat.chatId;
+    const earlier = s.chat(id) !== null;
+    let outcome: { left: ChatImportReport["outcome"] } | { done: Imported; asShown: boolean; link: Link | null; replaced: boolean };
+    try {
+      outcome = db.transaction(() => {
+        if (earlier) {
+          if (s.isPlayed(id)) return { left: "played on RPE: left alone" as const };
+          const forgot = s.forgetImport(id);
+          if (forgot.played.length > 0) return { left: "a chat made from it was played on RPE: left alone" as const };
+          forgetChats(db, s.id, forgot.removed);
+        }
+        const source = chat.branch ? byId.get(chat.branch.from) : undefined;
+        const link = source && s.chat(source.chatId) ? linkOf(chat, source) : null;
+        try {
+          return { done: db.transaction(() => importOne(s, db, registry, chat, link, false, turnOfShared))(), asShown: false, link, replaced: earlier || wasImported.has(id) };
+        } catch (error) {
+          if (!(error instanceof HeadRebased)) throw error;
+          store.dropCaches();
+          return { done: db.transaction(() => importOne(s, db, registry, chat, null, true, turnOfShared))(), asShown: true, link: null, replaced: earlier || wasImported.has(id) };
+        }
+      })();
+    } catch (error) {
+      store.dropCaches();
+      reports.push({ chatId: id, outcome: "not imported", why: earlier ? `${whyNot(error)}; what an earlier run imported of it stands` : whyNot(error), ...blank });
+      continue;
+    }
+    if ("left" in outcome) {
+      reports.push({ chatId: id, outcome: outcome.left, ...blank });
+      continue;
+    }
+    const { done, asShown, link, replaced } = outcome;
+    const shares = link ? { chat: link.from, messages: Object.keys(link.map).length } : null;
+    reports.push({ chatId: id, outcome: replaced ? "replaced" : "imported", turns: done.turns, placed: done.placed, shares, placedAsShown: asShown, matched: done.matched, differences: done.differences, dropped: done.dropped, violations: done.violations });
+    keepChat(db, s.id, id, run, shares?.chat ?? null, replaced ? "replaced" : "imported", done.differences.length > 0);
+  }
+  // Chats an earlier run imported that Lumiverse no longer has.
+  for (const gone of input.earlier) {
+    if (byId.has(gone.chat) || !s.chat(gone.chat)) continue;
+    if (s.isPlayed(gone.chat)) {
+      reports.push({ chatId: gone.chat, outcome: "gone from Lumiverse, played on RPE: left alone", ...blank });
+      continue;
+    }
+    const forgot = s.forgetImport(gone.chat);
+    if (forgot.played.length > 0) {
+      reports.push({ chatId: gone.chat, outcome: "gone from Lumiverse, a chat made from it was played on RPE: left alone", ...blank });
+      continue;
+    }
+    forgetChats(db, s.id, forgot.removed);
+    reports.push({ chatId: gone.chat, outcome: "gone from Lumiverse: removed", ...blank });
+  }
+  return reports;
+}

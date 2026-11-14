@@ -20,6 +20,21 @@ import { isRecord, type JsonObject } from "../shared/json";
 /** The database's file in Lumiverse's data folder (`src/db/connection.ts`). */
 export const DATABASE_FILE = "lumiverse.db";
 
+/**
+ * The hash RPE gives a message's text, to tie a turn to the reply as saved and to find it again
+ * (STANDALONE-PLAN §6.3): the contract's text hash, the first 32 hex digits of the SHA-256 of its
+ * UTF-8, as the adapter gives each message it reads from Lumiverse.
+ */
+export function textHash(text: string): string {
+  return new Bun.CryptoHasher("sha256").update(text).digest("hex").slice(0, 32);
+}
+
+/** A message's swipes as RPE knows them: each one's text hash (null for one with no text) and its date, as Lumiverse keeps them. */
+export interface SwipeFacts {
+  hashes: (string | null)[];
+  dates: (number | null)[];
+}
+
 export interface ChatRow {
   id: string;
   name: string;
@@ -146,6 +161,34 @@ export class LumiverseDb {
         chatId,
       );
       if (message) out.push(message);
+    }
+    return out;
+  }
+
+  /**
+   * Each of a chat's messages' swipes as RPE's adapter reads them, by message id: a swipe's hash is
+   * that of its text in `swipes` (of `content` for the showing one when `swipes` holds no text for
+   * it, as Lumiverse falls back to it), and its date is `swipe_dates` at its place, a number or none.
+   */
+  swipeFacts(chatId: string, userId: string): Map<string, SwipeFacts> {
+    const rows = this.db
+      .query<{ id: string; content: string; swipe_id: number | null; swipes: string | null; swipe_dates: string | null }, [string, string]>(
+        "SELECT m.id, m.content, m.swipe_id, m.swipes, m.swipe_dates FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.chat_id = ? AND c.user_id = ? ORDER BY m.index_in_chat ASC",
+      )
+      .all(chatId, userId);
+    const out = new Map<string, SwipeFacts>();
+    for (const r of rows) {
+      const raw = parsed(r.swipes);
+      const swipes: unknown[] = Array.isArray(raw) ? raw : [r.content];
+      const shown = r.swipe_id ?? 0;
+      const dates = parsed(r.swipe_dates);
+      out.set(r.id, {
+        hashes: swipes.map((s, i) => (typeof s === "string" ? textHash(s) : i === shown ? textHash(r.content) : null)),
+        dates: swipes.map((_, i) => {
+          const d = Array.isArray(dates) ? (dates[i] as unknown) : undefined;
+          return typeof d === "number" && Number.isFinite(d) ? d : null;
+        }),
+      });
     }
     return out;
   }
