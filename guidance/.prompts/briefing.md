@@ -6,6 +6,9 @@ description: The layout of the briefing the Author is given at the start of ever
 {{#turn}}
 - This turn: {{turn.kind}}{{#turn.speaker}}, replying as {{turn.speaker}}{{/turn.speaker}}{{#turn.story_time}}. Story time: {{turn.story_time}}{{/turn.story_time}}.
 {{/turn}}
+{{#turn_facts}}
+{{turn_facts}}
+{{/turn_facts}}
 {{#asked}}
 - The player asked for: {{.}}
 {{/asked}}

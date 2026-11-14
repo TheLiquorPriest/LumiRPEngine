@@ -4,6 +4,7 @@
 
 import { homedir } from "node:os";
 import { runCli } from "./cli";
+import { compose } from "./compose";
 
 /** A secret from the user: the first line piped in, or typed at the terminal without being shown. */
 async function secret(question: string): Promise<string | null> {
@@ -56,5 +57,5 @@ process.exitCode = await runCli(
     fetch: (url, init) => fetch(url, init),
   },
   // The build stamps its id here (scripts/build.ts); run from source, it is the development build.
-  { version: process.env.LRE_BUILD_ID ?? "dev" },
+  { version: process.env.LRE_BUILD_ID ?? "dev", areas: compose().areas },
 );

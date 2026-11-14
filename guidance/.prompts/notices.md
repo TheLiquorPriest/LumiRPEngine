@@ -19,3 +19,4 @@ depth_asked: The player asked for this turn to be played {{depth}}.
 pictures_left_out: The prompt held {{count}} picture(s). This model does not take pictures, so they were left out.
 history_trimmed: Messages {{range}} did not fit this model's window and were left out. {{covered}}
 previous_run_stopped: The last turn's work was still going when this one began, and was stopped where it stood. What it had recorded is kept.
+saved_differs: What the chat saved as message {{message}} is not what was released. Released: {{released}} Saved: {{saved}}
