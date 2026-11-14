@@ -1,0 +1,30 @@
+# What is in force, and when, as RPE ships it.
+#
+# This is the shipped copy. Your own RPE-global.yml, and each chat's RPE.yml, are read after it:
+# what they say wins. Nothing here is an instruction to an agent. It only says which agent leads
+# and which of the instruction files are read.
+
+# The agent that leads a turn: the name of a definition under agents/. As shipped, the Author.
+lead: author
+
+# Instruction files that are read at every level that has one, the farther level first, instead of
+# the nearest one alone. As shipped: a character's AGENTS.md and a chat's AGENTS.md both apply.
+layered:
+  - AGENTS
+
+# Instruction files added to the briefing for a kind of turn. They are read with TURN.md, not in
+# place of it. Add a file, several, or none.
+added:
+  swipe: [SWIPE]
+  regenerate: [SWIPE]
+  delete: [DELETE]
+
+# Files switched off, by name: an instruction file by its own name (WORLD), anything else by its
+# folder and name (rules/perceptions-owed). "Delete" on a shipped file in the Files page writes
+# its name here, in your own copy of this file. Nothing ships switched off.
+off: []
+
+# How many of a chat's newest turn folders are kept whole. Each older one keeps its turn.json,
+# its output/ and its transcripts/, and lets go of the rest.
+retention:
+  turnFolders: 50

@@ -949,8 +949,19 @@ class KitFollower {
 var package_default = {
   name: "lumi-rp-engine",
   version: "0.0.1",
-  private: true,
-  type: "module",
+  devDependencies: {
+    "@earendil-works/pi-ai": "1.5.2",
+    "bun-types": "^1.4.2",
+    "lumi-ah": "github:TheLiquorPriest/LumiAH#6a38779a5e33fe563f0c8c617640343473617569",
+    "lumiverse-spindle-types": "0.6.79",
+    preact: "11.0.1",
+    "rp-harness": "github:TheLiquorPriest/RPHarness#8ba60ec15ce27ddc682af918df81ef20d0811a2f",
+    typescript: "7.0.2"
+  },
+  exports: {
+    "./schemas/lre-world-v1.schema.json": "./schemas/lre-world-v1.schema.json",
+    "./schemas/lre-map-v1.schema.json": "./src/shared/lre-map-v1.schema.json"
+  },
   bin: {
     lumirpengine: "dist/lumirpengine.js"
   },
@@ -958,33 +969,22 @@ var package_default = {
     bun: ">=1.4",
     node: ">=22"
   },
-  exports: {
-    "./schemas/lre-world-v1.schema.json": "./schemas/lre-world-v1.schema.json",
-    "./schemas/lre-map-v1.schema.json": "./src/shared/lre-map-v1.schema.json"
-  },
+  private: true,
   scripts: {
-    build: "bun scripts/build.ts",
+    build: '"$npm_execpath" scripts/build.ts',
     typecheck: "tsc --noEmit -p . && tsc --noEmit -p dev/preview",
     tables: "bun scripts/tables/build.ts",
     templates: "bun scripts/templates/build.ts",
     reference: "bun scripts/reference/build.ts",
-    test: "bun scripts/test/run.ts",
+    test: '"$npm_execpath" test ./test/app ./test/adapter ./test/store ./test/iface ./test/cast ./test/story ./test/lore ./test/play ./test/turn ./test/tree ./test/ui ./test/ext ./test/migrate ./test/guidance ./test/build ./test/build-mode ./test/docs-standalone ./test/standalone-boundaries.test.ts',
+    "test:old": "bun scripts/test/run.ts",
     check: "bun scripts/test/run.ts --check",
     "test:all": "bun scripts/test-all.ts",
     "test:release": "bun scripts/test/run.ts --release",
     "test:properties": "bun scripts/test/run.ts --properties",
     "test:timings": "bun scripts/test-all.ts --record"
   },
-  devDependencies: {
-    "@earendil-works/pi-ai": "1.5.2",
-    "bun-types": "^1.4.2",
-    "lumiverse-spindle-types": "0.6.79",
-    typescript: "7.0.2"
-  },
-  dependencies: {
-    "lumi-ah": "github:TheLiquorPriest/LumiAH#6a38779a5e33fe563f0c8c617640343473617569",
-    preact: "^11.0.1"
-  }
+  type: "module"
 };
 
 // src/shared/world.ts
@@ -998,7 +998,7 @@ var DEFAULT_PLACE_CAPS = Object.freeze({ turn: 2, chat: 64 });
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "71e30e33";
+var BUILD = "7f5bce6e";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

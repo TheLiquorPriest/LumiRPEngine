@@ -1,0 +1,52 @@
+---
+description: The sentences the cast tools answer with (cast_query, cast_update, perceive, recall, remember, reflect, dream, mind_set, relate). A tool's answer is data from the cast and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words. The lines named wants_ (what an argument takes) are words put inside the other lines. The Cast page is told in these words too when it is refused (no_chat, no_turn, no_character, unreadable, and the lines named page_, which only the page uses).
+format: lines
+---
+no_chat: There is no chat {{id}} in the engine's records.
+no_turn: There is no turn {{id}} in this chat.
+no_operations: operations cannot be read: send a list of operations.
+unknown_op: Operation {{n}}: op cannot be read, you sent {{value}}. It is one of: {{choices}}.
+unreadable: {{field}} cannot be read{{#value}}: you sent {{value}}{{/value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}
+unreadable_op: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}{{#wants}} It takes {{wants}}.{{/wants}}
+wants_name: a name or an id
+wants_texts: a text, or a list of texts
+wants_whole: a whole number from 0
+op_takes: {{op}} reads {{reads}}{{#needs}}, and needs {{needs}}{{/needs}}{{#new_needs}}, and a new one needs {{new_needs}}{{/new_needs}}.{{#ignored}} It does not read {{ignored}}.{{/ignored}}
+not_read: Operation {{n}} ({{op}}) was written without {{left}}. It reads {{reads}}.
+out_of_range: Operation {{n}} ({{op}}): {{field}} runs from {{min}} to {{max}}, and you sent {{value}}.
+needs: Operation {{n}} ({{op}}) needs {{fields}}.
+needs_one: Operation {{n}} ({{op}}) needs at least one of {{fields}}.
+turn_needed_op: Operation {{n}} ({{op}}) is kept with a turn, and this call belongs to none.
+added: {{who}} was not in the cast, so they were added to it, not yet cast.
+one_source: Operation {{n}} ({{op}}) binds one source: one of {{choices}}.
+no_source: Operation {{n}} ({{op}}): Lumiverse holds no {{kind}} {{id}}.
+not_bound: Operation {{n}} ({{op}}): {{who}} has no {{kind}} {{id}} bound.
+unknown_id: Operation {{n}} ({{op}}): {{who}} has no {{part}} {{id}} on this path.
+no_file: Operation {{n}} ({{op}}): {{who}} has no old mind file {{file}} on this path.{{#files}} Theirs are: {{files}}.{{/files}}
+nothing_recorded: Nothing was written. Send the call again with that put right.
+pinned: Operation {{n}} (cast): the player pinned {{who}} as {{as}}, and that stands. Your casting is kept for when the pin is taken away.
+no_cast: No one is cast on this path yet.
+no_character: There is no {{who}} in the cast.
+not_cast: {{who}} has no casting on this path.
+more: {{count}} more in {{part}}. Ask again with skip {{skip}} to see them.
+no_perceptions: perceptions cannot be read: send a list of perceptions.
+perceive_turn: A perception is kept with a turn, and this call belongs to none.
+no_message: Operation {{n}} ({{op}}): there is no reply {{message}} on this path.
+not_secret: Operation {{n}} ({{op}}): {{value}} is not a secret's id. A secret is named by the id the lore map shows it with.
+no_world_secret: Operation {{n}} ({{op}}): this chat plays no world the engine can read, so it holds no secrets.
+no_holder: Operation {{n}} ({{op}}): no one in the world is named {{who}}, so a secret cannot be held by them.
+no_teller: Operation {{n}} ({{op}}): a secret someone was told is held with its teller, and no one in the world is named {{who}}.
+many_named: Operation {{n}} ({{op}}): {{count}} people in the world are named {{who}}: {{ids}}.
+unknown_secret: Operation {{n}} ({{op}}): this chat holds no secret {{secret}}.
+secret_refused: Operation {{n}} ({{op}}): the secret {{secret}} cannot be held by {{who}} ({{code}}).
+own_turn: What {{tool}} writes is kept with a turn, and this call belongs to none.
+plays_none: {{tool}} is a character's own, and this agent plays no one.
+no_memories_sent: memories cannot be read: send a list of memories.
+no_memories: Nothing comes back for {{cue}}.
+more_memories: {{count}} more memories touch {{cue}}. Recall again with skip {{skip}} to bring them back.
+no_entries_sent: entries cannot be read: send what is on your mind as a list of entries.
+no_relationships_sent: relationships cannot be read: send a list of the people you feel something about.
+page_turning: A turn of this chat is going on: nothing is struck or restored until it is over.
+page_no_entry: {{who}} has no entry {{id}} on this chat's record.
+page_branch_no_turn: This chat was branched from another and has no turn of its own yet. A strike is kept with this chat's newest turn, and the newest one here is the other chat's, so a strike here would change that chat too: nothing was struck or restored. It can be done once a turn has been played in this chat.
+page_still_struck: {{id}}{{#text}} ({{text}}){{/text}} stays struck: it was struck apart from {{from}}, so taking that strike back leaves it as it is.{{#secret}} The secret it gave, {{secret}}, is not held again.{{/secret}}
