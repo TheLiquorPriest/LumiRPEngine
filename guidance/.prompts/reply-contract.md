@@ -19,4 +19,4 @@ intent_file: scratch/intent.md
 
 ## Closing calls
 
-A call marked `closing: true` is one that needs no answer. When every closing call of a message comes back clean, and nothing else is due, the turn ends there, with no further call. If one comes back with a report, you get another call to read it.
+A call marked `closing: true` is one that needs no answer and after which nothing is left to do this turn. When every closing call of a message comes back clean, and nothing else is due, the turn ends there, with no further call. If one comes back with a report, you get another call to read it. A call made before the reply has gone out is not a closing call: marked so, it would end the turn with no reply.

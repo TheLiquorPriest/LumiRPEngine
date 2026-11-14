@@ -91,4 +91,8 @@ The same material is on disk for agents you delegate to: {{turn_files}}
 ## How what you write now is marked
 
 {{reply_contract}}
+{{#turn_files}}
+
+This turn's folder: `{{turn_files}}`
+{{/turn_files}}
 {{/reply_contract}}
