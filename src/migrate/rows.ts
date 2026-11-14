@@ -92,7 +92,6 @@ export const NO_PLACE_YET: Readonly<Partial<Record<RowId, string>>> = {
   "assistant-threads": "the pages lane",
   "chips-staged": "the pages lane",
   "approvals-jobs": "the jobs lane",
-  loopback: "the swap (`rpe up`): RPE's own connection in Lumiverse takes the loopback's place",
   sessions: "the pages lane: beside the turns they belong to",
   "runtime-settings": "the jobs lane: RPE's config has no setting for the runtime's tuning, memory limit or update choice yet",
 };

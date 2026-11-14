@@ -112,6 +112,21 @@ describe("the runtime's folders", () => {
     }
   });
 
+  test("for a config written before today's runtime recorded its unit, the unit its install line made is the one that keeps it running, and it is read with the rest", async () => {
+    // `lumiah up --systemd` puts it in the account's user units, beside the configs' folder; such a config's memory cap is in it alone.
+    const unit = join(root, "systemd", "user", "lumiah-home.service");
+    await put(unit, "[Service]\nExecStart=/opt/bun/bin/bun lumiah.js serve\nMemoryMax=3G\n");
+    try {
+      const read = await readRuntimeFolders(folders, IDENT, player(mine), null);
+      expect(read.runtimes[0]?.config.service).toEqual({ unit: "lumiah-home.service", file: unit, script: join(folders.dataDir, IDENT, "lumiah.js") });
+      expect(read.files.filter((f) => f.path.startsWith("unit/")).map((f) => [f.path, f.disk])).toEqual([["unit/lumiah-home.service", unit]]);
+    } finally {
+      await rm(join(root, "systemd"), { recursive: true });
+    }
+    // With no unit there, nothing keeps it running.
+    expect((await readRuntimeFolders(folders, IDENT, player(mine), null)).runtimes[0]?.config.service).toBeNull();
+  });
+
   test("send what the copy hasn't sent when the storage's mark names it and it isn't behind", async () => {
     const read = await readRuntimeFolders(folders, IDENT, player(mine), mark("copy-a", 3));
     expect(read.unsent.map((u) => [u.kept, [...u.files.keys()]])).toEqual([[true, ["harness/docs/upkeep.json"]]]);

@@ -155,6 +155,14 @@ describe("rpe up", () => {
     expect(first.out + first.err).not.toContain(made.key ?? "-");
   });
 
+  test("`rpe down` after an install on a connection of RPE's own says to give the chats moved to it the connection they had", async () => {
+    await up(ACCOUNT.password);
+    const made = only();
+    const io = cliIo();
+    expect(await runCli(["down", "--data", bed.paths.root], io, { version: "1.0.0" })).toBe(0);
+    expect(io.outs.join("\n")).toContain(`  5. In Lumiverse, give every chat you moved to RPE's connection ${made.id} the connection it had before: RPE no longer answers there.`);
+  });
+
   test("a second run asks for nothing and changes nothing", async () => {
     expect((await up(ACCOUNT.password)).code).toBe(0);
     lumiverse.extensions.push({ identifier: "lumi_rp_engine", enabled: true });

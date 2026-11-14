@@ -3,7 +3,9 @@
 // `/api/v1/connections`). It is an OpenAI-compatible connection pointed at this RPE's `/v1` with the
 // provider key. Whatever already matches is left as it is, so running `rpe up` again changes nothing.
 // The connection today's build made for its runtime is never changed (§15.6: going back needs it as
-// it is): where RPE's config names that one, RPE makes a connection of its own beside it.
+// it is). At the swap RPE takes it over as it is (§15.2): RPE answers where today's runtime did,
+// under its model name and with its key. Where RPE's config names it and RPE has not taken it over,
+// RPE makes a connection of its own beside it.
 //
 // And RPE's service, which `rpe up` installs and `rpe down` removes: a systemd user unit of the
 // account, as today's runtime runs under one (LumiAH `runtime/update/service.ts`), found again by the
@@ -21,7 +23,7 @@ export const OPENAI_COMPATIBLE = "custom";
 export const CONNECTION_NAME = "RPE";
 const CONNECTIONS = "/api/v1/connections";
 /** The model of the connection today's build made for its runtime: LumiAH's own, or one that starts with it (LumiAH `link/contract.ts`, `loopbackModel`). */
-const TODAYS_MODEL = /^lumiah(-|$)/;
+export const TODAYS_MODEL = /^lumiah(-|$)/;
 
 /** One call to Lumiverse as the signed-in user: a path under its address, a JSON body. */
 export type LumiverseCall = (method: string, path: string, body?: unknown) => Promise<Response>;
@@ -71,15 +73,22 @@ interface Profile {
   has_api_key: boolean;
 }
 
-function profileOf(value: unknown, what: string): Profile {
-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string" || typeof value.provider !== "string" || typeof value.api_url !== "string" || typeof value.model !== "string" || typeof value.has_api_key !== "boolean") throw new Error(`Lumiverse answered ${what} with something that is not a connection.`);
+function readProfile(value: unknown): Profile | null {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string" || typeof value.provider !== "string" || typeof value.api_url !== "string" || typeof value.model !== "string" || typeof value.has_api_key !== "boolean") return null;
   return { id: value.id, name: value.name, provider: value.provider, api_url: value.api_url, model: value.model, has_api_key: value.has_api_key };
+}
+
+function profileOf(value: unknown, what: string): Profile {
+  const profile = readProfile(value);
+  if (profile === null) throw new Error(`Lumiverse answered ${what} with something that is not a connection.`);
+  return profile;
 }
 
 /**
  * Makes RPE's connection in Lumiverse, or brings the one `known` names into line: Lumiverse's
  * OpenAI-compatible provider, this RPE's `/v1`, one of RPE's model names, and a key RPE takes. A
- * `known` that is today's build's connection is never changed: RPE makes its own instead.
+ * `known` that is today's build's connection is never changed: it is RPE's as it is where RPE answers
+ * to its model name, which RPE does once the swap has taken it over; else RPE makes its own instead.
  */
 export async function settleConnection(call: LumiverseCall, known: string | null, wanted: WantedConnection): Promise<SettledConnection> {
   const model = wanted.models[0];
@@ -91,7 +100,10 @@ export async function settleConnection(call: LumiverseCall, known: string | null
     const res = await call("GET", `${CONNECTIONS}/${encodeURIComponent(known)}`);
     // Removed in Lumiverse since: it is made again.
     if (res.status !== 404) found = profileOf(await answer(res, `the question about ${what}`), what);
-    if (found !== null && TODAYS_MODEL.test(found.model)) [todays, found] = [found.id, null];
+    if (found !== null && TODAYS_MODEL.test(found.model)) {
+      if (wanted.models.includes(found.model)) return { id: found.id, name: found.name, made: false, changed: [], newKey: false, todays: null };
+      [todays, found] = [found.id, null];
+    }
   }
   if (found === null) {
     const key = wanted.makeKey();
@@ -109,12 +121,37 @@ export async function settleConnection(call: LumiverseCall, known: string | null
   return { id: found.id, name: found.name, made: false, changed, newKey, todays };
 }
 
-/** Whether the extension `identifier` is installed for the signed-in user, and switched on (Lumiverse's `GET /api/v1/spindle`). */
-export async function extensionState(call: LumiverseCall, identifier: string): Promise<"missing" | "off" | "on"> {
+/**
+ * The user's connections in Lumiverse that `is` takes for today's loopback, newest first, read as
+ * today's runtime reads them (LumiAH `connectionProfiles`, `loopbackProfile`): Lumiverse's
+ * OpenAI-compatible ones, up to `limit` (today's runtime's own "connections read" setting).
+ */
+export async function connectionsWhere(call: LumiverseCall, limit: number, is: (connection: { model: string; url: string }) => boolean): Promise<{ id: string; name: string }[]> {
+  const body = await answer(await call("GET", `${CONNECTIONS}?limit=${limit}`), "the question about your connections");
+  // Paged in Lumiverse's answer (`{ data }`); a bare list in one from before it was paged.
+  const rows = isRecord(body) && Array.isArray(body.data) ? body.data : Array.isArray(body) ? body : [];
+  return rows.flatMap((row) => {
+    const p = readProfile(row);
+    return p !== null && p.provider === OPENAI_COMPATIBLE && is({ model: p.model, url: p.api_url }) ? [{ id: p.id, name: p.name }] : [];
+  });
+}
+
+/** Where a program on this machine reaches what listens on `address` at `port`: an address that takes every one of the machine's is reached on its loopback. */
+export function localUrl(address: string, port: number): string {
+  const host = address === "0.0.0.0" ? "127.0.0.1" : address === "::" ? "[::1]" : address.includes(":") ? `[${address}]` : address;
+  return `http://${host}:${port}`;
+}
+
+/**
+ * The extension `identifier` as Lumiverse lists it for the signed-in user (`GET /api/v1/spindle`):
+ * whether it is switched on, and the permissions its installed manifest asks for (null where
+ * Lumiverse doesn't say); null where it isn't installed.
+ */
+export async function installedExtension(call: LumiverseCall, identifier: string): Promise<{ on: boolean; permissions: string[] | null } | null> {
   const body = await answer(await call("GET", "/api/v1/spindle"), "the list of its extensions");
   const found = isRecord(body) && Array.isArray(body.extensions) ? body.extensions.find((e) => isRecord(e) && e.identifier === identifier) : undefined;
-  if (!isRecord(found)) return "missing";
-  return found.enabled === true ? "on" : "off";
+  if (!isRecord(found)) return null;
+  return { on: found.enabled === true, permissions: Array.isArray(found.permissions) ? found.permissions.filter((p): p is string => typeof p === "string") : null };
 }
 
 /** What a run of systemctl gave. */

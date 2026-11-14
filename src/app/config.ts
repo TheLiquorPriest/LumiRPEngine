@@ -106,6 +106,8 @@ export interface AppConfig {
     waitMs: number;
     /** How long `rpe lumiverse` waits for Lumiverse to answer its sign-in, in milliseconds. */
     signInMs: number;
+    /** How long `rpe up` waits for RPE to answer once it has started RPE's service, before it puts back what it did, in milliseconds. */
+    startMs: number;
   };
 }
 
@@ -119,7 +121,7 @@ export const CONFIG_DEFAULTS: Readonly<AppConfig> = Object.freeze({
   auth: { pageTokenMinutes: 30, commandLineSeconds: 60 },
   live: { queueEvents: 512, messageBytes: 64 * 1024 },
   database: { busyMs: 5000, sliceMs: 10 },
-  commandLine: { waitMs: 3000, signInMs: 30_000 },
+  commandLine: { waitMs: 3000, signInMs: 30_000, startMs: 30_000 },
 });
 
 /** The environment's names for the values it may set. */
@@ -254,6 +256,7 @@ export function configOf(raw: unknown, env: Env, where: string): AppConfig {
         readGroup(value, at, {
           waitMs: [wholeIn(100, 600_000), d.commandLine.waitMs],
           signInMs: [wholeIn(1000, 600_000), d.commandLine.signInMs],
+          startMs: [wholeIn(1000, 600_000), d.commandLine.startMs],
         }),
       d.commandLine,
     ],

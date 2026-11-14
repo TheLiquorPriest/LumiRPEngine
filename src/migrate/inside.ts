@@ -155,10 +155,21 @@ export function countSettings(engine: unknown, harness: unknown, tally: Tally): 
   }
 }
 
+/**
+ * The loopback key's hash, as today's extension reads it from the user's registry (`registryOf`,
+ * LumiAH `extension/backend/registry.ts:53-58`): the SHA-256 of the key, hex, which RPE takes at the
+ * swap as one of its provider keys. Null where the registry holds no key today's extension reads.
+ */
+export function loopbackKeyHash(registry: unknown): string | null {
+  if (!isRecord(registry) || registry.v !== 1 || !isRecord(registry.key)) return null;
+  const { hash, print, at } = registry.key;
+  return typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash) && typeof print === "string" && typeof at === "number" ? hash : null;
+}
+
 /** The old link's credentials: each config's session token and relay secret, and the relay secrets' hashes the registry keeps; and the loopback key's hash. */
 export function countLink(configs: number, registry: unknown, tally: Tally): void {
   tally.add("link-credentials", configs * 2);
   if (!isRecord(registry)) return;
   tally.add("link-credentials", sizeOf(registry.relays));
-  if (isRecord(registry.key)) tally.add("loopback");
+  if (loopbackKeyHash(registry) !== null) tally.add("loopback");
 }

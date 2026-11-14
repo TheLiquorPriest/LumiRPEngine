@@ -73,6 +73,16 @@ export function insertKey(db: Database, kind: KeyKind, now: number, key: string 
   return { kind, key, last4: key.slice(-4), made: now };
 }
 
+/**
+ * Puts in force, beside the key of `kind` in force, a key RPE holds only as its SHA-256: the key
+ * today's build gave its connection in Lumiverse, which RPE takes at the swap (plan §15.2) so that
+ * connection goes on working as it is. Its last four characters were never known. A key taken once is
+ * left as it is: taking it again doesn't put back one a new key retired. Runs inside a transaction.
+ */
+export function takeKeyHash(db: Database, kind: KeyKind, hash: string, now: number): void {
+  db.run("INSERT OR IGNORE INTO app_key (hash, kind, last4, made) VALUES (?, ?, ?, ?)", [hash, kind, "", now]);
+}
+
 /** The key of each kind in force. */
 export function currentKeys(db: Database): KeyFacts[] {
   return db.query<KeyFacts, []>("SELECT kind, last4, made FROM app_key WHERE retired IS NULL ORDER BY kind").all();

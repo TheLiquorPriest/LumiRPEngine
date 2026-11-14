@@ -1,22 +1,28 @@
-// The swap (STANDALONE-PLAN §15.3 step 10, §4.6): run by `rpe up` on the owner's word, once the
+// The swap (STANDALONE-PLAN §15.3 step 10, §4.6, §15.2): run by `rpe up` on the owner's word, once the
 // installed extension has been switched to the new build. It reads first, as the rehearsal does, and
-// stops nothing where the run would be refused. Then it waits for today's runtime to be idle, as
-// today's own `lumiah up` waits before it restarts one (its "Wait before restart" and "Restart poll"
-// settings), stops today's service, and runs the migration again from the start: a fresh backup,
-// every chat not yet played on RPE imported again, the check, the report. Only once that run went
-// through is today's service removed; a run that didn't go through starts again what it stopped.
-// Of today's it removes the unit alone: the runtime's config and folders stay as they were, so its
-// own install line brings it back (§15.6 step 4); and it never calls Lumiverse.
+// stops nothing where the run would be refused (`swapCheck`). Then (`swapRun`) it waits for today's
+// runtime to be idle, as today's own `lumiah up` waits before it restarts one (its "Wait before
+// restart" and "Restart poll" settings), stops today's service, and runs the migration again from the
+// start: a fresh backup, every chat not yet played on RPE imported again, the check, the report.
+// Once that run went through, RPE takes today's loopback (§15.2): it listens where today's runtime
+// listened, answers to the model name today's connection in Lumiverse names, and holds that
+// connection's key's hash, so the connection, which nobody changes, and every chat pinned to it go on
+// working. RPE's service is started in the old one's place, and only once RPE answers is today's
+// service switched off. A failure anywhere from the stop on puts back what was done, in reverse:
+// RPE's service stopped, its config as it was, what was stopped running again.
+// Of today's it switches off the unit alone: the runtime's config and folders stay as they were, so
+// its own install line brings it back (§15.6 step 4); and it never calls Lumiverse.
 
 import { existsSync } from "node:fs";
-import { rm } from "node:fs/promises";
-import { runtimeBase, unitName } from "lumi-ah/link";
-import { unitPath } from "lumi-ah/runtime";
-import type { Env } from "../app/config";
-import { mustRun, type Systemctl } from "../app/up";
+import { loopbackModel, loopsBack, runtimeBase } from "lumi-ah/link";
+import { STATUS_PATH } from "../app/app";
+import { dataPaths } from "../app/config";
+import { localUrl, mustRun, removeRpeService, type RpeService, startRpeService, type Systemctl } from "../app/up";
 import { isRecord } from "../shared/json";
-import { migrate, type MigrateOptions, type MigrateResult } from "./migrate";
-import { reportText } from "./report";
+import { PREVIOUS_PERMISSIONS } from "./going-back";
+import { loopbackKeyHash } from "./inside";
+import { earlierRuns, migrate, type MigrateOptions, type MigrateResult } from "./migrate";
+import { refusalsOf, reportText } from "./report";
 import type { SavedRuntime } from "./runtime-folders";
 import { openToday, type Sources } from "./today";
 
@@ -26,38 +32,57 @@ export interface SwapIo {
   now(): number;
   sleep(ms: number): Promise<void>;
   systemctl: Systemctl;
-  env: Env;
-  home: string;
 }
 
-export interface SwapInput {
+/** Where a program listens. */
+export interface Place {
+  address: string;
+  port: number;
+}
+
+/**
+ * Today's loopback, which RPE takes at the swap (§15.2): where today's runtime listened, the model
+ * name its connection in Lumiverse names (`loopbackModel`), and the hash of the key that connection
+ * holds (null: the user's registry holds none).
+ */
+export interface Loopback {
+  at: Place;
+  model: string;
+  keyHash: string | null;
+  /** Whether a connection in Lumiverse is today's loopback, by today's own rule (`loopsBack`): it names the loopback model, or it sits at the runtime's address and names no other extension's. */
+  is(connection: { model: string; url: string }): boolean;
+}
+
+/** What the swap found before stopping anything. */
+export interface SwapPlan {
   sources: Sources;
   /** The real run's options: RPE's data folder, the build, the file tree's layout. */
   options: MigrateOptions;
-  /** RPE's own unit on that data folder, where one is installed: stopped while the run writes, the run being the data folder's one writer. */
-  rpeUnit: string | null;
+  /** Today's runtime the run takes: its name and config, the unit that runs it (null: none rpe up can stop), and its loopback. Null where the run takes none. */
+  took: { name: string; config: SavedRuntime; unit: string | null; loopback: Loopback } | null;
+  /** Where RPE answers once swapped: where today's runtime listened, else where RPE's config says. */
+  at: Place;
 }
 
-export interface SwapResult {
-  /** The run went through, and today's service is gone. */
-  ok: boolean;
-  /** Today's runtime the run took, and the unit that ran it, removed once the run went through. */
-  took: { name: string; unit: string | null } | null;
-  /** The real run, where it was made. */
-  run: MigrateResult | null;
+/** RPE's side of the swap, which the command line gives. */
+export interface RpeStart {
+  /** RPE's service: its unit and the unit's text. */
+  service: RpeService;
+  text: string;
+  /** Whether that unit was there before this swap: it is then stopped while the run writes, the run being the data folder's one writer. */
+  installed: boolean;
+  /** Writes into RPE's own config and keys what RPE takes of today's; resolves to what puts them back as they were. */
+  takeOver(): Promise<() => Promise<void>>;
+  /** How long RPE's service is given to answer once started, and each ask (RPE's config, `commandLine`). */
+  startMs: number;
+  waitMs: number;
 }
 
-/** What today's runtime has under way: its turns and its calls; null where nothing answers; "unknown" where what answers doesn't say. */
+/** Fixed: how often RPE is asked whether it answers yet, once its service is started. */
+const ASK_EVERY_MS = 250;
+
+/** What today's runtime has under way: its turns and its calls; null where nothing of today's answers; "unknown" where what answers doesn't say. */
 type UnderWay = { turns: number; requests: number } | "unknown" | null;
-
-/**
- * The unit that runs a runtime, as today's build finds it (`unitRunning`, `H/runtime/update/service.ts:78-93`):
- * the one its config names, else the one `lumiah up --systemd` names for it; null where its file isn't there.
- */
-function unitOf(config: SavedRuntime, env: Env, home: string): { unit: string; file: string } | null {
-  const unit = config.service ?? { unit: unitName(config.name), file: unitPath(env, home, unitName(config.name)) };
-  return existsSync(unit.file) ? { unit: unit.unit, file: unit.file } : null;
-}
 
 /**
  * The proof `GET /healthz` takes that the asker holds the runtime's config (LumiAH `runtime/proof.ts`,
@@ -69,16 +94,34 @@ function healthProof(secret: string, at: number): string {
   return `${at}.${nonce}.${new Bun.CryptoHasher("sha256", secret).update(`lumiah healthz\n${at}\n${nonce}`).digest("hex")}`;
 }
 
-/** What today's runtime says it has under way (`GET /healthz`, LumiAH `runtime/relay.ts:179-192`). Each ask is given until the next is due; one that gets no answer in that time is from a runtime that is there and doesn't say. */
+/** What answers at `base`: RPE (its status says so), something else, or nothing within `ms`. */
+async function answering(base: string, ms: number, io: SwapIo): Promise<"rpe" | "other" | null> {
+  try {
+    const res = await io.fetch(`${base}${STATUS_PATH}`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(ms) });
+    const body: unknown = await res.json().catch(() => null);
+    return res.ok && isRecord(body) && body.name === "rpe" ? "rpe" : "other";
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What today's runtime says it has under way (`GET /healthz`, LumiAH `runtime/relay.ts:179-192`).
+ * Each ask is given until the next is due; one that gets no answer in that time is from a runtime
+ * that is there and doesn't say. RPE answering there, where it took today's runtime's place at an
+ * earlier swap, is nothing of today's.
+ */
 async function underWay(config: SavedRuntime, io: SwapIo): Promise<UnderWay> {
+  const base = runtimeBase(config.listen, config.port).replace(/\/v1$/, "");
   let res: Response;
   try {
-    res = await io.fetch(`${runtimeBase(config.listen, config.port).replace(/\/v1$/, "")}/healthz`, { headers: { Accept: "application/json", Authorization: `Bearer ${healthProof(config.secret, io.now())}` }, signal: AbortSignal.timeout(config.tuning.drainPollMs) });
+    res = await io.fetch(`${base}/healthz`, { headers: { Accept: "application/json", Authorization: `Bearer ${healthProof(config.secret, io.now())}` }, signal: AbortSignal.timeout(config.tuning.drainPollMs) });
   } catch (error) {
     return error instanceof Error && error.name === "TimeoutError" ? "unknown" : null;
   }
   const body: unknown = await res.json().catch(() => null);
-  return isRecord(body) && typeof body.turns === "number" && typeof body.requests === "number" ? { turns: body.turns, requests: body.requests } : "unknown";
+  if (isRecord(body) && typeof body.turns === "number" && typeof body.requests === "number") return { turns: body.turns, requests: body.requests };
+  return (await answering(base, config.tuning.drainPollMs, io)) === "rpe" ? null : "unknown";
 }
 
 const busy = (u: UnderWay): boolean => u === "unknown" || (u !== null && u.turns + u.requests > 0);
@@ -98,52 +141,144 @@ async function idle(name: string, config: SavedRuntime, io: SwapIo): Promise<boo
   return !busy(now);
 }
 
-export async function swap(input: SwapInput, io: SwapIo): Promise<SwapResult> {
+/** Waits for RPE to answer at `base` once its service is started, up to `rpe.startMs` by the clock; whether it did. */
+async function cameUp(base: string, rpe: RpeStart, io: SwapIo): Promise<boolean> {
+  const until = performance.now() + rpe.startMs;
+  for (;;) {
+    if ((await answering(base, rpe.waitMs, io)) === "rpe") return true;
+    if (performance.now() >= until) return false;
+    await io.sleep(ASK_EVERY_MS);
+  }
+}
+
+/**
+ * What would stop `user`'s swap into the data folder `data` for whose it is, by the gate's own two
+ * checks (`refusalsOf`): the Lumiverse user RPE's config names (`owner`), and the users earlier runs
+ * carried there. Asked once Lumiverse has taken the password and before anything is written, so
+ * another user's sign-in, keys or connection never reach an RPE that is not theirs.
+ */
+export function whoseRefusals(data: string, owner: string | null, user: string): string[] {
+  const { users } = earlierRuns(dataPaths(data).database, user);
+  return refusalsOf({ rows: [], notClassified: [], disk: { backup: 0, import: 0, total: 0, free: null } }, { user, known: true, owner, earlier: users }, { missing: null, undecided: null });
+}
+
+/**
+ * Whether the extension Lumiverse has installed is still today's build, by the permissions its
+ * manifest asks for: every one the previous build asks for (`PREVIOUS_PERMISSIONS`), twelve of which
+ * the light build doesn't. Swapped while it is installed, today's build would go on running in
+ * Lumiverse and writing today's storage after the run had read it (§15.3 step 10: the extension is
+ * switched first). False where Lumiverse doesn't say what the manifest asks for (`null`).
+ */
+export function todaysBuildInstalled(permissions: readonly string[] | null): boolean {
+  return permissions !== null && PREVIOUS_PERMISSIONS.every((p) => permissions.includes(p));
+}
+
+/**
+ * The swap's reading, before anything is stopped or changed: the gate (a full rehearsal with the
+ * real run's refusals), the runtime the run takes and its loopback, and where RPE answers once
+ * swapped (`rpe`: where RPE's config says now). Null where the swap stops here, having said why.
+ */
+export async function swapCheck(input: { sources: Sources; options: MigrateOptions; rpe: Place; waitMs: number }, io: SwapIo): Promise<SwapPlan | null> {
   const { sources, options } = input;
   // Read first: a run the gate would refuse stops nothing, and today's build goes on answering.
   const gate = await migrate(sources, { ...options, rehearse: true });
   if (gate.report.refusals.length > 0) {
     io.out(reportText(gate.report).replace(/\n$/, ""));
     io.out("The swap stopped before anything was stopped or changed: the run would be refused, as the report says.");
-    return { ok: false, took: null, run: null };
+    return null;
   }
   const today = await openToday(sources);
-  const taken = today.runtime.runtimes[0] ?? null;
-  today.close();
-  const service = taken === null ? null : unitOf(taken.config, io.env, io.home);
-  const took = taken === null ? null : { name: taken.name, unit: service?.unit ?? null };
-  if (taken !== null) {
-    if (!(await idle(taken.name, taken.config, io))) return { ok: false, took, run: null };
-    if (service === null && (await underWay(taken.config, io)) !== null) {
-      io.out(`Today's runtime ${taken.name} answers at ${taken.config.listen}:${taken.config.port}, but runs under no unit rpe up can stop: stop it where it runs, then run rpe up again. Nothing was stopped or changed.`);
-      return { ok: false, took, run: null };
-    }
-  }
-
-  const stopped: string[] = [];
-  let run: MigrateResult | null = null;
+  let registry: unknown = null;
   try {
-    for (const unit of [input.rpeUnit, service?.unit]) {
-      if (unit === null || unit === undefined) continue;
-      await mustRun(io.systemctl, ["stop", unit]);
-      stopped.push(unit);
+    const text = await today.userView.read("harness/registry.json");
+    registry = text === null ? null : JSON.parse(text);
+  } catch {
+    // A registry today's extension can't read holds no key it reads either.
+  } finally {
+    today.close();
+  }
+  const taken = today.runtime.runtimes[0] ?? null;
+  let took: SwapPlan["took"] = null;
+  if (taken !== null) {
+    const { name, config } = taken;
+    const model = loopbackModel(sources.identifier);
+    const base = runtimeBase(config.listen, config.port);
+    // The unit that keeps it running, as the run read it (`runtimeUnit`), where its file is there.
+    const unit = config.service !== null && existsSync(config.service.file) ? config.service.unit : null;
+    took = { name, config, unit, loopback: { at: { address: config.listen, port: config.port }, model, keyHash: loopbackKeyHash(registry), is: (c) => loopsBack(c, model, [base]) } };
+  }
+  const at = took?.loopback.at ?? input.rpe;
+  // Where no runtime of today's is taken, RPE answers where its config says, and nothing of today's frees that place: whatever else answers there would keep RPE from starting.
+  const base = localUrl(at.address, at.port);
+  if (took === null && (await answering(base, input.waitMs, io)) === "other") {
+    io.out(`Something other than RPE answers at ${base}, where RPE's config has it answer: give RPE a free port ("port" in its config, or RPE_PORT), and run rpe up again. Nothing was stopped or changed.`);
+    return null;
+  }
+  return { sources, options, took, at };
+}
+
+/**
+ * The swap itself, on what `swapCheck` found: waits for today's runtime to be idle, stops it (and
+ * RPE's own service, where one runs on this data folder), runs the migration, has RPE take today's
+ * loopback, starts RPE's service and waits for RPE to answer where today's runtime did, and only
+ * then switches today's service off. Any failure from the first stop on puts back what was done.
+ * Whether it went through.
+ */
+export async function swapRun(plan: SwapPlan, rpe: RpeStart, io: SwapIo): Promise<boolean> {
+  const { took } = plan;
+  if (took !== null) {
+    if (!(await idle(took.name, took.config, io))) return false;
+    if (took.unit === null && (await underWay(took.config, io)) !== null) {
+      io.out(`Today's runtime ${took.name} answers at ${took.config.listen}:${took.config.port}, but runs under no unit rpe up can stop: stop it where it runs, then run rpe up again. Nothing was stopped or changed.`);
+      return false;
     }
-    run = await migrate(sources, options);
+  }
+  const base = localUrl(plan.at.address, plan.at.port);
+  // What puts back each step done, in the order done; run in reverse on a failure.
+  const undo: { what: string; run: () => Promise<void> }[] = [];
+  try {
+    // Only a unit that runs is stopped, and started again on a failure: one stopped already (today's, after an earlier swap) stays so. systemctl says 3 for a unit that doesn't run.
+    for (const unit of [rpe.installed ? rpe.service.unit : null, took?.unit ?? null]) {
+      if (unit === null) continue;
+      const active = await io.systemctl(["is-active", "--quiet", unit]);
+      if (active.code === 3) continue;
+      if (active.code !== 0) throw new Error(`systemctl --user is-active ${unit} failed (${active.code})${active.err.trim() === "" ? "" : `: ${active.err.trim()}`}`);
+      await mustRun(io.systemctl, ["stop", unit]);
+      undo.push({ what: `${unit} runs again`, run: () => mustRun(io.systemctl, ["start", unit]) });
+    }
+    let run: MigrateResult;
+    try {
+      run = await migrate(plan.sources, plan.options);
+    } catch (error) {
+      throw new Error(`the migration stopped: ${error instanceof Error ? error.message : String(error)}`);
+    }
     io.out(reportText(run.report).replace(/\n$/, ""));
+    if (!run.ran) throw new Error("the run was refused, as the report says");
+    const putBack = await rpe.takeOver();
+    undo.push({ what: "RPE's config is as it was", run: putBack });
+    // Stopped again before the units stopped above start again: RPE's own, with its config put back, and today's.
+    undo.push(rpe.installed ? { what: `${rpe.service.unit} is stopped`, run: () => mustRun(io.systemctl, ["stop", rpe.service.unit]) } : { what: `${rpe.service.unit} is removed`, run: () => removeRpeService(rpe.service, io.systemctl) });
+    await startRpeService(rpe.service, rpe.text, io.systemctl);
+    if (!(await cameUp(base, rpe, io))) throw new Error(`RPE did not answer at ${base} within ${Math.round(rpe.startMs / 1000)} seconds of its service starting (its log: journalctl --user -u ${rpe.service.unit})`);
+    if (took?.unit) await mustRun(io.systemctl, ["disable", took.unit]);
   } catch (error) {
-    io.out(`The migration stopped: ${error instanceof Error ? error.message : String(error)}`);
+    io.out(`The swap did not go through: ${error instanceof Error ? error.message : String(error)}.`);
+    const putBack: string[] = [];
+    const failed: string[] = [];
+    for (const step of undo.reverse()) {
+      try {
+        await step.run();
+        putBack.push(step.what);
+      } catch (why) {
+        failed.push(`${step.what}: ${why instanceof Error ? why.message : String(why)}`);
+      }
+    }
+    io.out(putBack.length > 0 ? `Put back as it was: ${putBack.join("; ")}.` : "Nothing was stopped.");
+    for (const line of failed) io.out(`Could not be put back, do it by hand: ${line}.`);
+    if (failed.length === 0) io.out("Nothing of today's was changed.");
+    return false;
   }
-  if (run?.ran !== true) {
-    // As it was: what was stopped runs again.
-    for (const unit of stopped) await mustRun(io.systemctl, ["start", unit]);
-    io.out(`The swap did not go through. ${stopped.length > 0 ? `${stopped.join(" and ")} run(s) again, as before.` : "Nothing was stopped."} Nothing of today's was changed.`);
-    return { ok: false, took, run };
-  }
-  if (service !== null) {
-    await mustRun(io.systemctl, ["disable", service.unit]);
-    await rm(service.file, { force: true });
-    await mustRun(io.systemctl, ["daemon-reload"]);
-    io.out(`Stopped and removed ${service.unit}, today's service. Today's runtime's config and folders stay as they were, for going back.`);
-  }
-  return { ok: true, took, run };
+  io.out(`Started ${rpe.service.unit}, RPE's service: RPE answers at ${base}${took === null ? "" : `, where today's runtime ${took.name} did, under its model name (${took.loopback.model})${took.loopback.keyHash === null ? "" : " and with its key"}`}.`);
+  if (took?.unit) io.out(`Stopped and switched off ${took.unit}, today's service. Its unit, and today's runtime's config and folders, stay as they were, for going back.`);
+  return true;
 }

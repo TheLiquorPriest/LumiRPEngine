@@ -14,9 +14,10 @@
 // runtime would throw it away at its next start: a copy the storage's mark doesn't name while the
 // storage names none, or one behind the count the mark took from it (a copy restored or moved).
 
+import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { BLOB_HASH, DOC_PATH, EXTENSION_IDENTIFIER, MARK_PATH, RUNTIME_NAME } from "lumi-ah/link";
+import { BLOB_HASH, DOC_PATH, EXTENSION_IDENTIFIER, MARK_PATH, RUNTIME_NAME, unitName } from "lumi-ah/link";
 import { configDir, configOf, type RuntimeConfig } from "lumi-ah/runtime";
 import { isRecord } from "../shared/json";
 import { walk, type FoundFile } from "../app/archive";
@@ -37,8 +38,31 @@ export function runtimeFoldersOf(env: Readonly<Record<string, string | undefined
   return { configDir: configDir(env, home), dataDir: `${data !== undefined && data.startsWith("/") ? data : `${home}/.local/share`}/lumiah` };
 }
 
-/** A runtime's config as today's runtime reads it (`configOf`, `H/runtime/config.ts:138-165`): what it runs with, the file it was set up from, and the unit that keeps it running. */
-export type SavedRuntime = RuntimeConfig & { source: string | null; service: { unit: string; file: string; bun: string; script: string } | null };
+/**
+ * A runtime's config as today's runtime reads it (`configOf`, `H/runtime/config.ts:138-165`): what it
+ * runs with, the file it was set up from, and the unit that keeps it running (`runtimeUnit`).
+ */
+export type SavedRuntime = RuntimeConfig & { source: string | null; service: { unit: string; file: string; script: string } | null };
+
+/** The copy of the runtime a unit of this extension runs where no unit names another: the one `lumiah up --systemd` installs (`installedPath`, `H/runtime/config.ts:98`). */
+function installedScript(dataDir: string, identifier: string): string {
+  return join(dataDir, identifier === EXTENSION_IDENTIFIER ? "" : identifier, "lumiah.js");
+}
+
+/**
+ * The unit that keeps a runtime running, as today's build finds it (`unitRunning`,
+ * `H/runtime/update/service.ts:70-93`): the one its config names; else, for a config written before
+ * `lumiah up --systemd` recorded its unit, the one that line installs for it (`lumiah-<name>.service`,
+ * running the copy it installs), in the account's user units, which sit beside the configs' folder
+ * (`unitPath`, `configDir`: both under `$XDG_CONFIG_HOME`, else `~/.config`), where its file is there.
+ * Such a config's memory cap is in that unit alone, which is why the unit is kept and backed up.
+ */
+export function runtimeUnit(config: SavedRuntime, folders: RuntimeFolders): SavedRuntime["service"] {
+  if (config.service !== null) return config.service;
+  const unit = unitName(config.name);
+  const file = join(dirname(folders.configDir), "systemd", "user", unit);
+  return existsSync(file) ? { unit, file, script: installedScript(folders.dataDir, config.extension) } : null;
+}
 
 /** A working copy's folder for one user's data of one extension on one Lumiverse (`H/runtime/store/index.ts:307`, `runtime.ts:223-224`). */
 export function copyFolderOf(base: string, username: string, identifier: string): string {
@@ -220,16 +244,19 @@ export async function readRuntimeFolders(folders: RuntimeFolders, identifier: st
   out.leftAlone.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
   if (taken !== null) {
-    const { name, config, file } = taken;
+    const { name, file } = taken;
+    // The unit that keeps it running: the one its config names, or the one its install line made for a config that names none.
+    const config = { ...taken.config, service: runtimeUnit(taken.config, folders) };
+    taken = { name, config, file };
     out.runtimes.push({ name, config, why });
     out.files.push(...(await beside(folders.configDir, file, "config")));
     const root = join(folders.dataDir, "runtimes", name);
     out.files.push(...(await walk(root)).map((f) => ({ ...f, path: `runtimes/${name}/${f.path}`, disk: join(root, f.path) })));
   }
   // The copy of the runtime its service runs (`installedCopy`, `H/runtime/update/service.ts:100`), with what a write left beside it: the one every runtime of this extension here runs where no unit names another.
-  const script = taken?.config.service?.script ?? (taken !== null || identifier !== EXTENSION_IDENTIFIER ? join(folders.dataDir, identifier === EXTENSION_IDENTIFIER ? "" : identifier, "lumiah.js") : null);
+  const script = taken?.config.service?.script ?? (taken !== null || identifier !== EXTENSION_IDENTIFIER ? installedScript(folders.dataDir, identifier) : null);
   if (script !== null) out.files.push(...(await beside(dirname(script), basename(script), "installed")));
-  // The service unit its config names, with what a rewrite left beside it.
+  // The unit that keeps it running, with what a rewrite left beside it.
   const unit = taken?.config.service;
   if (unit) out.files.push(...(await beside(dirname(unit.file), basename(unit.file), "unit")));
   // What its working copy of this user's data hasn't sent, and whether today's runtime would send it. The copy is the runtime's own for its Lumiverse, the user it signs in as, and the extension (`H/runtime/runtime.ts:224`).
