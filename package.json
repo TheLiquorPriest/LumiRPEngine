@@ -15,12 +15,13 @@
     "./schemas/lre-map-v1.schema.json": "./src/shared/lre-map-v1.schema.json"
   },
   "scripts": {
-    "build": "bun scripts/build.ts",
+    "build": "\"$npm_execpath\" scripts/build.ts",
     "typecheck": "tsc --noEmit -p . && tsc --noEmit -p dev/preview",
     "tables": "bun scripts/tables/build.ts",
     "templates": "bun scripts/templates/build.ts",
     "reference": "bun scripts/reference/build.ts",
-    "test": "bun scripts/test/run.ts",
+    "test": "\"$npm_execpath\" test ./test/app ./test/adapter ./test/store ./test/iface ./test/cast ./test/story ./test/lore ./test/turn ./test/tree ./test/ui ./test/ext ./test/migrate ./test/guidance ./test/build ./test/standalone-boundaries.test.ts",
+    "test:old": "bun scripts/test/run.ts",
     "check": "bun scripts/test/run.ts --check",
     "test:all": "bun scripts/test-all.ts",
     "test:release": "bun scripts/test/run.ts --release",

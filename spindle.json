@@ -7,23 +7,11 @@
   "homepage": "https://github.com/TheLiquorPriest/LumiRPEngine",
   "description": "Persistent world simulation and roleplay engine for Lumiverse.",
   "permissions": [
-    "generation",
-    "context_handler",
-    "chats",
-    "chat_mutation",
-    "world_books",
-    "presets",
-    "regex_scripts",
-    "decisions",
-    "ui_panels",
-    "mcp_servers",
     "interceptor",
-    "embeddings",
-    "memories",
-    "databanks",
-    "web_search",
     "generation_parameters",
-    "cors_proxy"
+    "generation",
+    "cors_proxy",
+    "ui_panels"
   ],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js"

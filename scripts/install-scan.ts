@@ -1,16 +1,19 @@
 // Lumiverse's install scan, run here before anything ships. Lumiverse refuses to load an extension
 // whose backend bundle uses what its worker may not: the filesystem, subprocesses, sockets, workers,
-// SQLite, Bun's system APIs, the process's environment, dynamic code and base64 decoding. The build
-// fails on any of them, and a test holds the built bundle to the same.
+// SQLite, Bun's system APIs and Bun's own module, the process's environment, a fetch of its own (the
+// worker's road out is Spindle's proxy), dynamic code and base64 decoding. The build fails on any of
+// them, and a test holds the built bundle to the same.
 //
 // This follows the host's own scan step by step (Lumiverse's `detectDangerousBackendCapabilities`,
-// `src/spindle/manager.service.ts`), so that what passes here passes there: the bundle is read as it
-// is and as Bun's transpiler rewrites it; comments, string and template text and regex literals are
-// left out; and what remains is matched. Where the host's reading of a template or a regex is
-// simple, this one is simple the same way: the two must agree, not improve on each other.
+// `src/spindle/manager.service.ts`, read at staging a70f4ed2), so that what passes here passes there:
+// the bundle is read as it is and as Bun's transpiler rewrites it; comments, string and template text
+// and regex literals are left out; and what remains is matched. Where the host's reading of a template
+// or a regex is simple, this one is simple the same way: the two must agree, not improve on each
+// other. A manifest may ask for capabilities that let two of these through (`requested_capabilities`:
+// dynamic code, base64 decoding); RPE's asks for none, so here none is let through.
 //
-// Two checks are stricter than the host's, because the backend carries LumiAH's, whose own contract
-// they are (its DESIGN §1): no `node:` import of any module, and no call of the global `fetch`.
+// One check is stricter than the host's, because the light extension holds nothing but what Spindle
+// gives it (STANDALONE-PLAN §4.3): no `node:` import of any module.
 
 type Span = readonly [start: number, end: number];
 
@@ -52,12 +55,20 @@ const MODULES: ReadonlyMap<string, string> = new Map([
   ["node:cluster", "worker or cluster module access"],
   ["bun:sqlite", "direct SQLite module access"],
   ["node:sqlite", "direct SQLite module access"],
+  ["bun", "dangerous Bun system API usage"],
+  ["node-fetch", "direct fetch API usage"],
+  ["undici", "direct fetch API usage"],
+  ["cross-fetch", "direct fetch API usage"],
 ]);
 
-const BUN_PROPERTIES: ReadonlySet<string> = new Set(["file", "write", "spawn", "spawnSync", "serve", "connect", "listen"]);
+const BUN_PROPERTIES: ReadonlySet<string> = new Set(["file", "write", "spawn", "spawnSync", "serve", "connect", "listen", "fetch"]);
 const PROCESS_PROPERTIES: ReadonlySet<string> = new Set(["env", "exit", "kill", "chdir", "dlopen"]);
+const FETCH_PROPERTIES: ReadonlySet<string> = new Set(["fetch"]);
+/** The globals the worker's own `fetch` hangs on, besides the bare name. */
+const FETCH_GLOBALS = ["globalThis", "global", "self"] as const;
 const BUN_USE = "dangerous Bun system API usage";
 const PROCESS_USE = "dangerous process API usage";
+const FETCH_USE = "direct fetch API usage";
 
 /** A module named by a literal after `from`, `require(` or `import(`. */
 const loads = (names: string): RegExp => new RegExp(`(?:from\\s*["'\`](?:node:)?(?:${names})["'\`]|require\\s*\\(\\s*["'\`](?:node:)?(?:${names})["'\`]\\s*\\)|import\\s*\\(\\s*["'\`](?:node:)?(?:${names})["'\`]\\s*\\))`);
@@ -72,9 +83,12 @@ const CHECKS: readonly (readonly [what: string, pattern: RegExp])[] = [
   [PROCESS_USE, /\bprocess\.(?:env|exit|kill|chdir|dlopen)\b/],
   [PROCESS_USE, /\bObject\.getOwnPropertyDescriptor\s*\(\s*process\s*,\s*["'`]env["'`]/],
   ["base64 decoding", /\bBuffer\.from\s*\([^)]*["'`]base64["'`]/],
-  // Stricter than the host, as LumiAH's contract is.
+  [FETCH_USE, /(?<![.\w$])fetch\s*(?:\?\.\s*)?\(|\b(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*fetch\b|(?<![.\w$])fetch\s*\.\s*(?:call|apply|bind)\s*\(/],
+  [FETCH_USE, /(?:from\s*["'`](?:node-fetch|undici|cross-fetch)["'`]|import\s*["'`](?:node-fetch|undici|cross-fetch)["'`])/],
+  // Bun's own module hands out its fetch, which the worker's guard on the global one does not reach.
+  [BUN_USE, /(?:from\s*["'`]bun["'`]|import\s*["'`]bun["'`])/],
+  // Stricter than the host: the light extension holds nothing but what Spindle gives it.
   ["a node: module", /(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*\(\s*|\bimport\s*)["'`]node:/],
-  ["a network call (fetch)", /(?<![.\w$])fetch\s*\(|\b(?:globalThis|self|window)\s*\.\s*fetch\b/],
 ];
 
 /** The characters and words after which a `/` starts a regex literal rather than a division. */
@@ -264,6 +278,10 @@ function scan(source: Scannable): Map<string, RegExpMatchArray> {
   for (const [object, properties, what] of [["Bun", BUN_PROPERTIES, BUN_USE], ["process", PROCESS_PROPERTIES, PROCESS_USE]] as const) {
     hit(what, outside(source, new RegExp(`\\b(?:const|let|var)\\s*\\{([^}]+)\\}\\s*=\\s*${object}\\b`)).filter((m) => (m[1] ?? "").split(",").some((part) => properties.has(part.trim().split(/\s*:/, 1)[0]?.trim() ?? ""))));
   }
+  // The worker's own `fetch` on a global: by a dot or a computed name, through a name given the global, or taken out of it.
+  for (const global of FETCH_GLOBALS) hit(FETCH_USE, propertyUses(source, global, FETCH_PROPERTIES));
+  for (const alias of outside(source, /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:globalThis|global|self)\b/)) hit(FETCH_USE, propertyUses(source, alias[1] ?? "", FETCH_PROPERTIES));
+  hit(FETCH_USE, outside(source, /\b(?:const|let|var)\s*\{([^}]+)\}\s*=\s*(?:globalThis|global|self)\b/).filter((m) => (m[1] ?? "").split(",").some((part) => part.trim().split(/\s*:/, 1)[0]?.trim() === "fetch")));
   // `eval(` and `Function(`, but for the feature probe that builds an empty function (`new Function("")`), which runs nothing.
   hit("dynamic code execution", outside(source, /\beval\s*\(|\bFunction\s*\(/).filter((m) => !/^Function\s*\(\s*(?:""|''|``|)\s*\)/.test(source.text.slice(m.index ?? 0))));
   return hits;
