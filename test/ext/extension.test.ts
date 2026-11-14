@@ -285,3 +285,18 @@ describe("the prompt interceptor's own faults, dry runs and permissions", () => 
     expect(rig.turns[0]!.cut.byExtension).toBe(7);
   });
 });
+
+describe("a reply asked for whole", () => {
+  test("with the preset's streaming switch off, a reply on RPE's connection still comes to RPE as a stream, so a long turn can be kept alive; one on another connection keeps the switch", async () => {
+    const rig = await new Rig({ streaming: false }).start();
+    const ours = await rig.generate("conn-rpe");
+    expect(ours.error).toBeNull();
+    expect(ours.body?.stream).toBe(true);
+    expect(ours.body?._streaming).toBeUndefined();
+    expect(rig.turns[0]?.stream).toBe(true);
+    expect(ours.reply).toMatchObject({ content: "The tide turns.", reasoning: "Thinking about the bay." });
+    const theirs = await rig.generate("conn-other");
+    expect(theirs.body?.stream).toBe(false);
+    expect(theirs.reply?.content).toBe("Another model's reply.");
+  });
+});

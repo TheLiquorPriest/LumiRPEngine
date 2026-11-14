@@ -11,6 +11,15 @@
 // connection goes back untouched whatever went wrong, and one on RPE's connection is stopped with a
 // line saying why rather than sent on untagged. What it cannot hold is its worker being stopped
 // mid-generation: Lumiverse then fails the pending call for any chat (`worker-host.ts:1572-1575`).
+//
+// It also has the reply streamed, whatever the preset's streaming switch says. A reply asked for whole
+// cannot be kept alive: Lumiverse awaits the whole answer in one call (`generate.service.ts:3793-
+// 3815`), touches the generation only when that answer is in (`:3870-3873`), and ends a generation
+// untouched for ten minutes (`generation/active-generation-registry.ts:140-153`), so a turn silent
+// that long would be cut off however RPE kept its connection busy. Streaming is a parameter
+// (`_streaming`, set false by the preset's switch, `prompt-assembly.service.ts:7743-7745`, read at
+// `generate.service.ts:3725-3726`), and the interceptor's parameters are laid over the preset's
+// (`:1436-1441`); only a request's own parameters, which Lumiverse's own page never sets there, win.
 
 import { isRecord } from "../shared/json";
 import { historyCut, replyKindOf, TAG_FIELD, textHash, type Role, type Tag, type TagLore, type TagMessage } from "../adapter/lumiverse/wire";
@@ -91,6 +100,7 @@ export function listedMessage(m: PromptMessageDTO): TagMessage {
     ...(m.__isChatHistory === true ? { history: true as const } : {}),
     ...(m.__isChatHistory === true && typeof m.sourceMessageId === "string" && typeof m.sourceIndexInChat === "number" ? { source: { id: m.sourceMessageId, index: m.sourceIndexInChat } } : {}),
     ...(m.__isWorldInfoEntry === true ? { lore: true as const } : {}),
+    ...(m.__isChatHistory === true && m.__cortexHistorySummary === true ? { summary: true as const } : {}),
     ...(m.partial === true ? { partial: true as const } : {}),
     ...(parts !== undefined ? { parts } : {}),
     ...(media > 0 ? { media } : {}),
@@ -131,7 +141,7 @@ export function promptInterceptor(deps: PromptDeps): (messages: PromptMessageDTO
         messages: kept.map(listedMessage),
         lore: ctx.lore,
       };
-      return { messages: kept, parameters: { [TAG_FIELD]: tag } };
+      return { messages: kept, parameters: { [TAG_FIELD]: tag, _streaming: true } };
     } catch (error) {
       if (!ours) {
         deps.log(`a prompt not on RPE's connection went on untouched after the extension failed: ${error instanceof Error ? error.message : String(error)}`);

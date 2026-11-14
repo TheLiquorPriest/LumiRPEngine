@@ -26,7 +26,8 @@ export interface StoredSignIn {
 
 export type SessionState =
   | { state: "signed-out" }
-  | { state: "signed-in"; user: string; username: string; checkedAt: number | null }
+  /** `signedInAt`: when this sign-in was made (`StoredSignIn.savedAt`), so a newer one can be told from a renewal. */
+  | { state: "signed-in"; user: string; username: string; signedInAt: number; checkedAt: number | null }
   /** Lumiverse no longer takes the token; `why` says so in words the user can act on. */
   | { state: "lost"; username: string; why: string; at: number };
 
@@ -85,7 +86,7 @@ export class LumiverseSession {
 
   constructor(private readonly deps: SessionDeps) {
     this.kept = deps.signIn;
-    this.current = this.kept === null ? { state: "signed-out" } : { state: "signed-in", user: this.kept.user, username: this.kept.username, checkedAt: null };
+    this.current = this.kept === null ? { state: "signed-out" } : { state: "signed-in", user: this.kept.user, username: this.kept.username, signedInAt: this.kept.savedAt, checkedAt: null };
   }
 
   get base(): string {
@@ -164,7 +165,7 @@ export class LumiverseSession {
     const signIn: StoredSignIn = { username, token, user, savedAt: this.deps.clock.now() };
     await this.deps.save(signIn);
     this.kept = signIn;
-    this.set({ state: "signed-in", user, username, checkedAt: this.deps.clock.now() });
+    this.set({ state: "signed-in", user, username, signedInAt: signIn.savedAt, checkedAt: this.deps.clock.now() });
     return signIn;
   }
 
@@ -176,7 +177,7 @@ export class LumiverseSession {
     const body = res.status === 200 ? parse(await res.text()) : null;
     if (res.status === 401 || (res.status === 200 && (!isRecord(body) || !isRecord(body.user)))) throw this.lost(kept);
     if (res.status !== 200) throw new LumiverseError("unreachable", `Lumiverse at ${this.deps.base} answered ${res.status} when RPE asked about its session.`, res.status);
-    this.set({ state: "signed-in", user: kept.user, username: kept.username, checkedAt: this.deps.clock.now() });
+    this.set({ state: "signed-in", user: kept.user, username: kept.username, signedInAt: kept.savedAt, checkedAt: this.deps.clock.now() });
     return this.current;
   }
 

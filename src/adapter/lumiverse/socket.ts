@@ -11,9 +11,12 @@
 // taking the browser's place as the session that runs extension frontends (`ws/handler.ts:200`).
 //
 // Kept open: Lumiverse closes a socket that has sent nothing for 120 seconds (`ws/bus.ts:17-18`,
-// `:457-466`), so it pings every 30 seconds as Lumiverse's own page does (`frontend/src/ws/client.ts:27`),
-// and takes a missing pong for a dead connection (`:37`). When it closes it is opened again after a
-// wait that grows, until RPE's session is lost: then it waits for a new sign-in.
+// `:457-466`), so it pings every 30 seconds as Lumiverse's own page does, and takes a ping with no pong
+// within 15 seconds for a dead connection (`frontend/src/ws/client.ts:27`, `:37`). When it closes it is
+// opened again after a wait that grows. Two things stop it instead, each said in words: RPE's session
+// is lost (it opens again after a new sign-in), or Lumiverse refused the socket's own sign-in while the
+// session holds (it opens again after a new sign-in, or when RPE restarts), since opening again with a
+// fresh ticket would only be refused again.
 
 import type { Clock } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
@@ -73,10 +76,11 @@ export type SocketState =
   | { state: "stopped" }
   | { state: "opening"; since: number }
   | { state: "open"; since: number }
-  /** Closed, and opened again at `retryAt`. */
   | { state: "waiting"; since: number; retryAt: number; why: string }
   /** RPE's session is lost: it opens again after a new sign-in. */
-  | { state: "lost"; since: number; why: string };
+  | { state: "lost"; since: number; why: string }
+  /** Lumiverse refused the socket though the session signed in at `under` holds: it opens again after a newer sign-in. */
+  | { state: "refused"; since: number; why: string; under: number };
 
 /** A frontend session id as Lumiverse takes one (`spindle/frontend-session.ts:1-5`). */
 export function newFrontendSession(): string {
@@ -142,6 +146,8 @@ export class LumiverseSocket {
   private clearTimers(): void {
     for (const t of this.timers) this.deps.clock.clearTimeout(t);
     this.timers = [];
+    if (this.pongTimer !== null) this.deps.clock.clearTimeout(this.pongTimer);
+    this.pongTimer = null;
   }
 
   /** Opens it and keeps it open until `stop`. */
@@ -149,8 +155,10 @@ export class LumiverseSocket {
     if (this.running) return;
     this.running = true;
     this.offSession = this.deps.session.onChange((s) => {
-      // A new sign-in after a loss: open again at once.
-      if (s.state === "signed-in" && this.current.state === "lost") void this.connect();
+      // A new sign-in after a loss, or after a refusal under the sign-in before: open again at once.
+      if (s.state !== "signed-in") return;
+      const now = this.current;
+      if (now.state === "lost" || (now.state === "refused" && s.signedInAt !== now.under)) void this.connect();
     });
     void this.connect();
   }
@@ -196,6 +204,7 @@ export class LumiverseSocket {
   private async connect(): Promise<void> {
     if (!this.running) return;
     this.clearTimers();
+    this.authError = null;
     this.set({ state: "opening", since: this.deps.clock.now() });
     let ticket: string;
     try {
@@ -215,7 +224,8 @@ export class LumiverseSocket {
       close: (code, reason) => {
         if (this.socket !== socket) return;
         this.socket = null;
-        this.closed(code === 1008 ? `Lumiverse refused the socket's ticket (${reason || code})` : `Lumiverse closed the socket (${code}${reason ? ` ${reason}` : ""})`);
+        if (code === 1008) void this.refused(this.authError ?? (reason || "no reason given"));
+        else this.closed(`Lumiverse closed the socket (${code}${reason ? ` ${reason}` : ""})`);
       },
     });
     this.socket = socket;
@@ -237,43 +247,77 @@ export class LumiverseSocket {
     }
     if (!isRecord(frame)) return;
     if (frame.type === "pong") {
-      this.pongDue = null;
+      if (this.pongTimer !== null) this.deps.clock.clearTimeout(this.pongTimer);
+      this.pongTimer = null;
       return;
     }
     if (typeof frame.event !== "string") return;
     if (frame.event === "CONNECTED") {
       this.failures = 0;
+      this.authError = null;
       this.set({ state: "open", since: this.deps.clock.now() });
       this.ping();
       for (const handler of this.opened) handler();
       return;
     }
-    if (frame.event === "AUTH_ERROR") return;
+    if (frame.event === "AUTH_ERROR") {
+      // The close with 1008 follows (`ws/handler.ts:128-135`); its words are these.
+      this.authError = isRecord(frame.payload) && typeof frame.payload.message === "string" ? frame.payload.message : null;
+      return;
+    }
     for (const handler of this.handlers) handler(frame.event, frame.payload);
   }
 
-  /** When the last ping's pong is due; null when none is awaited. */
-  private pongDue: number | null = null;
+  /** The words of Lumiverse's last `AUTH_ERROR` on the socket opening now. */
+  private authError: string | null = null;
+  /** The pong awaited for the last ping; null when none is. */
+  private pongTimer: unknown = null;
 
   private ping(): void {
     this.later(this.settings.pingMs, () => {
-      if (this.socket === null || this.current.state !== "open") return;
-      if (this.pongDue !== null && this.deps.clock.now() >= this.pongDue) {
-        // The last ping went unanswered: the connection is dead though no close came.
-        const socket = this.socket;
+      const socket = this.socket;
+      if (socket === null || this.current.state !== "open") return;
+      socket.send(JSON.stringify({ type: "ping" }));
+      // The connection is dead though no close came: the earliest unanswered ping says so.
+      this.pongTimer ??= this.deps.clock.setTimeout(() => {
+        this.pongTimer = null;
+        if (this.socket !== socket) return;
         this.socket = null;
         socket.close(4000, "no pong");
         this.closed("Lumiverse stopped answering the socket's pings");
-        return;
-      }
-      this.socket.send(JSON.stringify({ type: "ping" }));
-      this.pongDue = this.deps.clock.now() + this.settings.pongMs;
+      }, this.settings.pongMs);
       this.ping();
     });
   }
 
+  /**
+   * Lumiverse refused the socket's sign-in (`AUTH_ERROR` and a close with 1008, `ws/handler.ts:124-137`;
+   * or a frontend session it does not take, `:206-209`). A fresh ticket would be refused alike, so it
+   * does not open again by itself: it asks whether RPE's session holds, and says which it is.
+   */
+  private async refused(why: string): Promise<void> {
+    this.clearTimers();
+    if (!this.running) return;
+    let state;
+    try {
+      state = await this.deps.session.check();
+    } catch (error) {
+      if (!this.running) return;
+      if (error instanceof LumiverseError && error.problem === "lost") this.set({ state: "lost", since: this.deps.clock.now(), why: error.message });
+      else this.retry(`Lumiverse refused the socket (${why}), and RPE could not ask it about its session: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    if (!this.running) return;
+    if (state.state !== "signed-in") {
+      this.set({ state: "lost", since: this.deps.clock.now(), why: state.state === "lost" ? state.why : `RPE is not signed in to Lumiverse at ${this.deps.session.base}.` });
+      return;
+    }
+    const words = `Lumiverse refused this socket's sign-in (${why}), though RPE's session holds. RPE does not open it again by itself: it does when RPE signs in to Lumiverse again, or restarts. Until then it does not hear your chats' changes as they happen.`;
+    this.deps.log(words);
+    this.set({ state: "refused", since: this.deps.clock.now(), why: words, under: state.signedInAt });
+  }
+
   private closed(why: string): void {
-    this.pongDue = null;
     if (!this.running) return;
     this.retry(why);
   }

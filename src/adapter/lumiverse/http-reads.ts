@@ -71,7 +71,7 @@ export function createHttpReads(session: LumiverseSession): LumiverseReads {
     }
   }
 
-  const step = (m: LvMessage): LvStep => ({ id: m.id, chat: m.chat, index: m.index, role: m.role, swipe: m.swipe, swipes: m.swipes, hidden: m.hidden, revision: m.revision });
+  const step = (m: LvMessage): LvStep => ({ id: m.id, chat: m.chat, index: m.index, role: m.role, swipe: m.swipe, swipes: m.swipes, hidden: m.hidden, revision: m.revision, shown: m.shown });
 
   /** Every row of a paged list, in Lumiverse's order. */
   async function everyRow(path: string, asked: string): Promise<Record<string, unknown>[]> {

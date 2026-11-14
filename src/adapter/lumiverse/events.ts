@@ -14,10 +14,8 @@
 // `:3369`, `:3439`, `:3478`); `CHAT_FORKED` `{sourceChatId, forkedChatId, messageIdMap}` (`:3604-3616`).
 
 import { isRecord } from "../../shared/json";
-import type { LumiverseReads } from "./reads";
-import type { LvMessage } from "./rows";
+import type { LumiverseReads, LvStep } from "./reads";
 import type { LumiverseSocket } from "./socket";
-import { textHash } from "./wire";
 
 export type ChatChange =
   /** A generation is over. `message`: the message it saved to; null when it saved none (it failed before writing, or the event did not say). */
@@ -103,13 +101,13 @@ export interface KnownMessage {
   id: string;
   swipe: number;
   swipes: number;
-  /** The text hash (`wire.ts`) of its shown swipe's text. */
+  /** The hash of its showing swipe's saved text, as RPE's store and the importer give it (`LvMessage.shown`). */
   hash: string;
   hidden: boolean;
 }
 
-export function knownOf(m: LvMessage): KnownMessage {
-  return { id: m.id, swipe: m.swipe, swipes: m.swipes, hash: textHash(m.text), hidden: m.hidden };
+export function knownOf(m: LvStep): KnownMessage {
+  return { id: m.id, swipe: m.swipe, swipes: m.swipes, hash: m.shown.hash, hidden: m.hidden };
 }
 
 /** What the turn lane knew of a chat: the messages its turns are tied to, and the generations it played whose end it has not heard. */
@@ -135,7 +133,7 @@ export async function reconcile(reads: LumiverseReads, known: KnownChat): Promis
     const m = now.get(k.id);
     if (m === undefined) changes.push({ kind: "message-deleted", chat: known.chat, message: k.id });
     else if (m.swipe !== k.swipe || m.swipes !== k.swipes) changes.push({ kind: "message-swiped", chat: known.chat, message: k.id, swipe: m.swipe });
-    else if (m.hidden !== k.hidden || textHash(m.text) !== k.hash) changes.push({ kind: "message-edited", chat: known.chat, message: k.id });
+    else if (m.hidden !== k.hidden || m.shown.hash !== k.hash) changes.push({ kind: "message-edited", chat: known.chat, message: k.id });
   }
   return changes;
 }

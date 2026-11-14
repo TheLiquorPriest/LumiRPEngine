@@ -3,7 +3,12 @@
 // interceptor's context is read as unknown because core fills fewer fields than those types name
 // (`generate.service.ts:1063-1072`, `:1217-1231`; it says `dryRun`, the types say `isDryRun`).
 
-/** A prompt message as an interceptor is handed it (`worker-host.ts:3184-3198`): the host adds the history and lore flags, and the source of a history message. */
+/**
+ * A prompt message as an interceptor is handed it (`worker-host.ts:3184-3198`): the host adds the
+ * history and lore flags, and the source of a history message; every key Lumiverse put on the message
+ * comes along, among them the mark on a summary its memory put in place of history
+ * (`prompt-assembly.service.ts:3286-3292`).
+ */
 export interface PromptMessageDTO {
   role: string;
   content: unknown;
@@ -11,6 +16,7 @@ export interface PromptMessageDTO {
   partial?: boolean;
   __isChatHistory?: boolean;
   __isWorldInfoEntry?: boolean;
+  __cortexHistorySummary?: boolean;
   sourceMessageId?: string;
   sourceIndexInChat?: number;
 }

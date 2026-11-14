@@ -7,10 +7,10 @@
 // belongs to.
 //
 // The app (`src/app/`) mounts it as an area. Its sockets open, and it registers with the extension,
-// only once the server listens (`start`): the registration carries RPE's address, and a new
-// registration key, made then and handed to the extension at once, the app keeping only its hash.
+// only once the server listens (the area's `started`): the registration carries RPE's address, and a
+// new registration key, made then and handed to the extension at once, the app keeping only its hash.
 
-import type { Clock, ModelsApi } from "rp-harness/contract";
+import type { Clock, HistoryRange, ModelsApi } from "rp-harness/contract";
 import { AuthRefused, bearerOf, rawRoute, type App, type Area } from "../../app";
 import { isRecord } from "../../shared/json";
 import { questionRoute, type HistoryWindow, type SecrecyRules } from "./answer";
@@ -39,6 +39,10 @@ export interface AdapterLanes {
   secrecy: SecrecyRules;
   /** A chat's setting: agents may read the messages the user hid. */
   hiddenReadable(chat: string): Promise<boolean>;
+  /** The story lane: the stretches a chat names (`scene`, since the scene opened). */
+  ranges(chat: string): Promise<Record<string, HistoryRange>>;
+  /** The turn lane: the messages Lumiverse's memory stands in for with a summary in the chat's prompt, from the tag's `summary` marks. */
+  summarized(chat: string): Promise<ReadonlySet<string>>;
   /** RPH's model layer, for requests passed through. */
   models: Pick<ModelsApi, "pass">;
   /** The connection a request with no tag goes on; null for RPH's default (a user's choice, kept with RPE's global settings). */
@@ -73,13 +77,14 @@ export interface Lumiverse {
 }
 
 export interface LumiverseDoor {
-  /** The app's area: the adapter's routes, and its parts made from the app's config and secrets. */
+  /**
+   * The app's area: the adapter's routes and its parts, made from the app's config and secrets when
+   * mounted; its sockets open, the session is kept and RPE registers with the extension once the
+   * server listens (`started`), and all of it stops when the app closes (`stopping`).
+   */
   readonly area: Area;
   /** The parts, once the area is mounted in an app set up for a Lumiverse user; null before. */
   lumiverse(): Lumiverse | null;
-  /** Once the server listens: opens the sockets, keeps the session, and registers with the extension. */
-  start(): Promise<void>;
-  stop(): void;
 }
 
 /** Fixed: a question carries the chat's whole path and the marked lore's text, past the app's 1 MiB for other bodies. */
@@ -127,7 +132,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
     const http = createHttpReads(session);
     const database = cfg.database === null ? null : createDbReader({ path: cfg.database, user, sleep: deps.sleep, log });
     const reads = database === null ? http : preferDatabase(database, http);
-    const chat = createChatReads({ reads, user, hiddenReadable: lanes.hiddenReadable });
+    const chat = createChatReads({ reads, user, hiddenReadable: lanes.hiddenReadable, ranges: lanes.ranges, summarized: lanes.summarized });
     const settings = deps.socket ? { settings: deps.socket } : {};
     const events = new LumiverseSocket({ session, open: deps.open, clock: deps.clock, log: (m) => log(`event socket: ${m}`), ...settings });
     const relaySocket = new LumiverseSocket({ session, open: deps.open, clock: deps.clock, log: (m) => log(`relay socket: ${m}`), frontendSession: relaySession, ...settings });
@@ -238,22 +243,17 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
         }),
       ]);
     },
-  };
-
-  return {
-    area,
-    lumiverse: () => parts,
-    async start() {
-      if (app === null || parts === null) return;
+    async started(at) {
+      if (parts === null) return;
       // A new key at each start, handed to the extension in the registration: the one before it is retired.
-      key = (await app.auth.makeKey("extension")).key;
+      key = (await at.auth.makeKey("extension")).key;
       offChanges = followChanges(parts.events, lanes.changes);
       parts.relay.start();
       parts.session.keep();
       parts.events.start();
       parts.relaySocket.start();
     },
-    stop() {
+    stopping() {
       offChanges?.();
       offChanges = null;
       if (parts === null) return;
@@ -264,4 +264,6 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       parts.database?.close();
     },
   };
+
+  return { area, lumiverse: () => parts };
 }

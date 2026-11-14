@@ -7,6 +7,7 @@ import { afterEach, expect, test } from "bun:test";
 import { attachedBooks, loreBooks } from "../../src/adapter/lumiverse/books";
 import { createDbReader, type DbReader } from "../../src/adapter/lumiverse/db";
 import { preferDatabase, SourceOff } from "../../src/adapter/lumiverse/reads";
+import { textHash } from "../../src/adapter/lumiverse/wire";
 import { StandInDb, type Rows } from "../standin/db";
 
 const json = (value: unknown): string => JSON.stringify(value);
@@ -29,6 +30,8 @@ function rows(): Rows {
     messages: [
       { id: "ma1", chat_id: "chat-a", index_in_chat: 0, is_user: 1, name: "Me", content: "Hello.", swipes: json(["Hello."]) },
       { id: "ma2", chat_id: "chat-a", index_in_chat: 1, is_user: 0, name: "Mara", content: "Hi.", swipes: json(["Hi."]) },
+      { id: "ma3", chat_id: "chat-a", index_in_chat: 2, is_user: 0, name: "Mara", content: "The second reply.", swipe_id: 1, swipes: json(["First.", "Second."]), swipe_dates: json([1700000000, 1700000060]) },
+      { id: "ma4", chat_id: "chat-a", index_in_chat: 3, is_user: 0, name: "Mara", content: "Broken.", swipes: "not a list", swipe_dates: "not a list" },
       { id: "mb1", chat_id: "chat-b", index_in_chat: 0, is_user: 1, name: "Them", content: "Not yours.", swipes: json(["Not yours."]) },
     ],
     world_book_entries: [
@@ -90,6 +93,20 @@ test("refuses a file whose tables it does not know, says why, and the reads go o
   const fallback = readerFor("user-a").reader;
   const reads = preferDatabase(reader, fallback);
   expect((await reads.messagesById("chat-a", ["ma1"])).map((m) => m.id)).toEqual(["ma1"]);
+});
+
+test("gives each message's showing swipe as the importer tied it: its saved text's hash and its stored date, alike from a step and a whole message", async () => {
+  const { reader } = readerFor("user-a");
+  const expected = [
+    // No dates stored: none.
+    { hash: textHash("Hi."), date: null },
+    // The saved swipe's text is hashed, not `content`; its date is the stored number as it is.
+    { hash: textHash("Second."), date: 1700000060 },
+    // Lists Lumiverse's mapper cannot read: `content`, and no date.
+    { hash: textHash("Broken."), date: null },
+  ];
+  expect((await reader.messagesById("chat-a", ["ma2", "ma3", "ma4"])).map((m) => m.shown)).toEqual(expected);
+  expect(((await reader.path("chat-a")) ?? []).slice(1).map((s) => s.shown)).toEqual(expected);
 });
 
 test("finds the books a chat reads in Lumiverse's order, each once; a group chat's unmuted members'", async () => {

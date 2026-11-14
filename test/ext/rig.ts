@@ -7,7 +7,7 @@ import { questionRoute, type HistoryWindow, type SecrecyAsk } from "../../src/ad
 import { readBlocksHint } from "../../src/adapter/lumiverse/layout";
 import { USER_HEADER, type Registration } from "../../src/adapter/lumiverse/pipe-wire";
 import { providerEndpoint, type TaggedTurn } from "../../src/adapter/lumiverse/provider";
-import { streamedReply } from "../../src/adapter/lumiverse/stream";
+import { streamedReply, wholeReply } from "../../src/adapter/lumiverse/stream";
 import { QUESTION_PATH, readQuestion, type Question, type SecrecyVerdict } from "../../src/adapter/lumiverse/wire";
 import { NEEDS } from "../../src/ext/permissions";
 import { NOTICE_ID, startExtension, type RunningExtension } from "../../src/ext/start";
@@ -74,6 +74,8 @@ export interface RigOptions {
   prefill?: string;
   /** A picture on the player's last message but one. */
   picture?: boolean;
+  /** The preset's streaming switch (`prompt-assembly.service.ts:7743-7745`); on unless said. */
+  streaming?: false;
 }
 
 /** RPE's scripted secrecy rules: the ferry's mark shown as RPE words it; the vault (a whole-entry secret), its unmarked copy and the entry a world secret was indexed from kept out. */
@@ -160,13 +162,16 @@ export class Rig {
     };
     this.lv.servers.set(RPE, this.rpe);
     this.lv.servers.set(OTHER, async (request) => {
-      this.otherBodies.push((await request.json()) as Record<string, unknown>);
-      return streamedReply(async (out) => out.content("Another model's reply."), { id: "other", model: "other", created: 0 }, request.signal, { clock: REAL_CLOCK, keepAlive: null });
+      const body = (await request.json()) as Record<string, unknown>;
+      this.otherBodies.push(body);
+      const meta = { id: "other", model: "other", created: 0 };
+      const run = async (out: { content(text: string): void }): Promise<void> => out.content("Another model's reply.");
+      return body.stream === false ? await wholeReply(run, meta, request.signal) : streamedReply(run, meta, request.signal, { clock: REAL_CLOCK, keepAlive: null });
     });
     this.lv.postProcessing = options.postProcessing ?? "";
     this.lv.connections.set("conn-rpe", { id: "conn-rpe", base: `${RPE}/v1`, key: PROVIDER_KEY, model: "rpe" });
     this.lv.connections.set("conn-other", { id: "conn-other", base: `${OTHER}/v1`, key: "other-key", model: "other" });
-    this.lv.presets.set(PRESET.id, { ...PRESET, ...(options.collapse ? { collapse: true } : {}), ...(options.prefill !== undefined ? { prefill: options.prefill } : {}) });
+    this.lv.presets.set(PRESET.id, { ...PRESET, ...(options.collapse ? { collapse: true } : {}), ...(options.prefill !== undefined ? { prefill: options.prefill } : {}), ...(options.streaming === false ? { parameters: { ...PRESET.parameters, _streaming: false } } : {}) });
     const messages = harborMessages();
     if (options.picture) messages[10] = { ...messages[10]!, images: [{ data: "aGFyYm9y", mime_type: "image/png" }] };
     this.chat = {

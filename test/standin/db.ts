@@ -189,8 +189,13 @@ export class StandInDb {
   }
 
   /** One statement of the stand-in's own, for a test that changes the file under the reader. */
-  run(sql: string): void {
-    this.db.run(sql);
+  run(sql: string, ...params: (string | number | null)[]): void {
+    this.db.query(sql).run(...params);
+  }
+
+  /** The rows a statement of the stand-in's own gives: what its HTTP routes answer from. */
+  rows(sql: string, ...params: (string | number | null)[]): Record<string, unknown>[] {
+    return this.db.query(sql).all(...params) as Record<string, unknown>[];
   }
 
   close(): void {

@@ -107,6 +107,8 @@ export interface TagMessage {
   source?: { id: string; index: number };
   /** Lumiverse's flag for a lore entry standing as a message of its own. */
   lore?: true;
+  /** A history message Lumiverse's memory put in place of the messages it summarizes, this one the last of them (`__cortexHistorySummary`, `prompt-assembly.service.ts:3286-3292`). */
+  summary?: true;
   /** A trailing assistant message the reply continues (a prefill). */
   partial?: true;
   /** The lengths of its text parts, when its content was a list of parts rather than one text. */
@@ -255,7 +257,7 @@ export function readAnswer(value: unknown): Answer | null {
 function tagMessage(v: unknown): TagMessage | null {
   if (!isRecord(v) || !str(v.role) || !ROLES.includes(v.role) || !int(v.length) || !str(v.hash)) return null;
   const out: TagMessage = { role: v.role as Role, length: v.length, hash: v.hash };
-  for (const flag of ["blank", "history", "lore", "partial"] as const) {
+  for (const flag of ["blank", "history", "lore", "summary", "partial"] as const) {
     if (v[flag] === undefined) continue;
     if (v[flag] !== true) return null;
     out[flag] = true;

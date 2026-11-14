@@ -6,7 +6,7 @@
 // server does.
 
 import type { ExtSpindle, InterceptorReturn, PermissionChange, PromptMessageDTO, ProxyAnswer, WorldInfoReturn } from "../../src/ext/spindle";
-import { applyPostProcessing, buildBody, collapse, dropBlank, providerHeaders, readStream, stripClosingTags, textOf, type LlmMessage, type LlmPart, type Role, type StreamedReply } from "./steps";
+import { applyPostProcessing, buildBody, collapse, dropBlank, providerHeaders, readStream, readWhole, stripClosingTags, textOf, type LlmMessage, type LlmPart, type Role, type StreamedReply } from "./steps";
 
 export interface Entry {
   id: string;
@@ -174,6 +174,8 @@ export class StandIn {
     return this.frontends?.(message) ?? false;
   }
   private readonly installed: Ext[] = [];
+  /** How a later task is run: on the process's own timers unless a test runs a clock of its own. */
+  later: (run: () => void) => void = (run) => void setTimeout(run, 0);
   /** The user's `promptPostProcessing` setting (`services/generate.service.ts:1250-1256`). */
   postProcessing = "";
   /** `DEFAULT_INTERCEPTOR_TIMEOUT_MS` (`services/spindle-settings.service.ts:6`). */
@@ -208,9 +210,9 @@ export class StandIn {
       fromFrontend(payload, user, session) {
         // The host posts it to the worker, which runs its handlers on a later task (`spindle/worker-host.ts:1611-1613`).
         const copy = structuredClone(payload);
-        setTimeout(() => {
+        host.later(() => {
           for (const handler of ext.frontend) handler(copy, user, session);
-        }, 0);
+        });
       },
       sendToFrontend(payload, user, options) {
         const session = options?.frontendSessionId;
@@ -320,9 +322,9 @@ export class StandIn {
     for (const ext of this.installed) {
       if (!ext.forwarded.has(event)) continue;
       const copy = structuredClone(payload);
-      setTimeout(() => {
+      this.later(() => {
         for (const handler of ext.handlers.get(event) ?? []) handler(copy, userId);
-      }, 0);
+      });
     }
   }
 
@@ -574,10 +576,14 @@ export class StandIn {
       const parameters: Record<string, unknown> = { ...preset.parameters, ...intercepted.parameters, ...input.parameters };
       if (dryRun) return { generationId: null, error: null, prompt: sent, body: null, reply: null, parameters, stored: null, worldInfo };
       this.emit("WORLD_INFO_ACTIVATED", { chatId: chat.id, entries: context.activatedWorldInfo }, chat.user);
-      body = buildBody(connection.model, sent, parameters, true);
+      // The streaming switch decides the call and is never sent (`generate.service.ts:3725-3726`): a stream,
+      // or one whole answer in one call (`:3793-3815`).
+      const streaming = parameters._streaming !== false;
+      delete parameters._streaming;
+      body = buildBody(connection.model, sent, parameters, streaming);
       const base = connection.base.replace(/\/+$/, "").replace(/\/chat\/completions$/, "").replace(/\/models$/, "");
       const res = await this.fetch(`${base}/chat/completions`, { method: "POST", headers: providerHeaders(connection.key), body: JSON.stringify(body) });
-      const reply = await readStream(res);
+      const reply = streaming ? await readStream(res) : await readWhole(res);
       const messageId = target.message ?? crypto.randomUUID();
       const saved = chat.messages.find((m) => m.id === messageId);
       if (saved) saved.content = reply.content;

@@ -163,6 +163,24 @@ export async function readStream(res: Response): Promise<StreamedReply> {
 }
 
 /**
+ * What Lumiverse reads of a reply asked for whole (`OpenAICompatibleProvider.generate`,
+ * `llm/providers/openai-compatible.ts:146-205`): the first choice's text and its reasoning, the finish
+ * reason (`stop` when none is given), and the usage.
+ */
+export async function readWhole(res: Response): Promise<StreamedReply> {
+  if (!res.ok) throw new Error(`Provider error ${res.status}: ${await res.text()}`);
+  const data = (await res.json()) as { choices?: { message?: { content?: unknown; reasoning?: unknown; reasoning_content?: unknown }; finish_reason?: unknown }[]; usage?: unknown };
+  const choice = data.choices?.[0];
+  const reasoning = choice?.message?.reasoning ?? choice?.message?.reasoning_content;
+  return {
+    content: typeof choice?.message?.content === "string" ? choice.message.content : "",
+    reasoning: typeof reasoning === "string" ? reasoning : "",
+    finishReason: typeof choice?.finish_reason === "string" && choice.finish_reason !== "" ? choice.finish_reason : "stop",
+    usage: typeof data.usage === "object" && data.usage !== null ? (data.usage as Record<string, unknown>) : null,
+  };
+}
+
+/**
  * Lumiverse strips a secret mark when it puts an entry into a prompt: its lexer reads each `/` after
  * `{{` as a closing flag (`macros/MacroLexer.ts:53-76`), so `{{// Secret: …}}` is the closing tag of a
  * macro named `Secret`, and its parser drops a closing tag that closes nothing

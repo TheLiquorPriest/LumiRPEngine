@@ -5,6 +5,7 @@
 // Paths below are Lumiverse's `src/`.
 
 import { isRecord, type JsonObject, type JsonValue } from "../../shared/json";
+import { textHash } from "./wire";
 
 /** A row Lumiverse's own mapper fails on, and why. */
 export class Unreadable extends Error {
@@ -45,6 +46,12 @@ export interface LvMessage {
   sentAt: number;
   /** Lumiverse's revision: an edit raises it, a hidden mark or an assistant's swipe flip does not (`chats.service.ts:3016`, `:3095`, `:3292-3297`). */
   revision: number;
+  /**
+   * The showing swipe as RPE's store ties a played turn to it, and as the importer tied a migrated one:
+   * the hash of its saved text (`swipes[swipe]`; `content` where the list has no text there) and its
+   * date as Lumiverse stores it (`swipe_dates[swipe]`, the raw number; null where the list has none).
+   */
+  shown: { hash: string; date: number | null };
 }
 
 export interface LvBook {
@@ -188,7 +195,19 @@ export function messageFrom(row: Record<string, unknown>): LvMessage {
     }
   }
   const ex = object(extra);
+  // Lumiverse's mapper reads `swipe_dates` that are not JSON as none (`chats.service.ts:589-592`).
+  let dates: unknown = row.swipe_dates;
+  if (typeof dates === "string") {
+    try {
+      dates = JSON.parse(dates);
+    } catch {
+      dates = [];
+    }
+  }
   const isUser = flag(row.is_user);
+  const swipe = num(row.swipe_id);
+  const saved: unknown = Array.isArray(swipes) ? (swipes as unknown[])[swipe] : undefined;
+  const date: unknown = Array.isArray(dates) ? (dates as unknown[])[swipe] : undefined;
   return {
     id: id(row.id),
     chat: str(row.chat_id),
@@ -196,11 +215,12 @@ export function messageFrom(row: Record<string, unknown>): LvMessage {
     role: isUser ? "user" : ex.spindle_role === "system" ? "system" : "assistant",
     name: str(row.name),
     text: str(row.content),
-    swipe: num(row.swipe_id),
+    swipe,
     swipes: Array.isArray(swipes) ? swipes.length : 1,
     hidden: ex.hidden === true,
     sentAt: num(row.send_date) * 1000,
     revision: num(row.revision),
+    shown: { hash: textHash(typeof saved === "string" ? saved : str(row.content)), date: typeof date === "number" ? date : null },
   };
 }
 

@@ -19,6 +19,7 @@ import { closeSync, openSync, readSync, statSync, type Stats } from "node:fs";
 import type { JsonValue } from "../../shared/json";
 import { SourceOff, type LumiverseReads, type LvStep, type Places } from "./reads";
 import { bookFrom, characterFrom, chatFrom, entryFrom, messageFrom, personaFrom, presetFrom, settingFrom, Unreadable, type LvMessage } from "./rows";
+import { textHash } from "./wire";
 
 /**
  * Each table read and each column of it read, with the type `db/baseline.sql` declares it with:
@@ -28,7 +29,7 @@ import { bookFrom, characterFrom, chatFrom, entryFrom, messageFrom, personaFrom,
  */
 export const READ_COLUMNS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   chats: { id: "TEXT", user_id: "TEXT", character_id: "TEXT", name: "TEXT", metadata: "TEXT", updated_at: "INTEGER" },
-  messages: { id: "TEXT", chat_id: "TEXT", index_in_chat: "INTEGER", is_user: "INTEGER", name: "TEXT", content: "TEXT", send_date: "INTEGER", swipe_id: "INTEGER", swipes: "TEXT", extra: "TEXT", revision: "INTEGER" },
+  messages: { id: "TEXT", chat_id: "TEXT", index_in_chat: "INTEGER", is_user: "INTEGER", name: "TEXT", content: "TEXT", send_date: "INTEGER", swipe_id: "INTEGER", swipes: "TEXT", swipe_dates: "TEXT", extra: "TEXT", revision: "INTEGER" },
   world_books: { id: "TEXT", user_id: "TEXT", name: "TEXT", description: "TEXT", metadata: "TEXT", updated_at: "INTEGER" },
   world_book_entries: {
     id: "TEXT",
@@ -100,15 +101,23 @@ export function schemaDifference(db: Database): string | null {
 }
 
 // The statements. A chat's messages in Lumiverse's order: by place, then as they were stored.
-const MESSAGE = "m.id, m.chat_id, m.index_in_chat, m.is_user, m.name, m.content, m.send_date, m.swipe_id, m.swipes, m.extra, m.revision";
+const MESSAGE = "m.id, m.chat_id, m.index_in_chat, m.is_user, m.name, m.content, m.send_date, m.swipe_id, m.swipes, m.swipe_dates, m.extra, m.revision";
 const OF_CHAT = "FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.chat_id = ? AND c.user_id = ?";
 const ORDER = "ORDER BY m.index_in_chat, m.rowid";
-// A step's swipe count and marks read in SQL, so a long chat's texts are not read to list it. Lumiverse's
-// mapper falls back to one swipe where `swipes` is not a JSON list, and to no marks where `extra` is not JSON.
+// A step's swipe count, marks and showing swipe read in SQL, so listing a long chat reads one text per
+// message and not every swipe of it. As `messageFrom` in `rows.ts`, after Lumiverse's mapper: one swipe
+// where `swipes` is not a JSON list, no marks where `extra` is not JSON, no dates where `swipe_dates` is
+// not (`chats.service.ts:589-592`), and `content` where the list has no text at the showing swipe.
 const STEP = `m.id, m.chat_id, m.index_in_chat, m.is_user, m.swipe_id, m.revision,
   CASE WHEN json_valid(m.swipes) AND json_type(m.swipes) = 'array' THEN json_array_length(m.swipes) ELSE 1 END AS swipe_count,
   CASE WHEN json_valid(m.extra) THEN coalesce(json_type(m.extra, '$.hidden') = 'true', 0) ELSE 0 END AS hidden,
-  CASE WHEN json_valid(m.extra) THEN coalesce(json_extract(m.extra, '$.spindle_role') = 'system', 0) ELSE 0 END AS system`;
+  CASE WHEN json_valid(m.extra) THEN coalesce(json_extract(m.extra, '$.spindle_role') = 'system', 0) ELSE 0 END AS system,
+  CASE WHEN m.swipe_id < 0 OR NOT json_valid(m.swipes) THEN m.content
+    WHEN json_type(m.swipes, '$[' || m.swipe_id || ']') = 'text' THEN json_extract(m.swipes, '$[' || m.swipe_id || ']')
+    ELSE m.content END AS shown_text,
+  CASE WHEN m.swipe_id < 0 OR NOT json_valid(m.swipe_dates) THEN NULL
+    WHEN json_type(m.swipe_dates, '$[' || m.swipe_id || ']') IN ('integer', 'real') THEN json_extract(m.swipe_dates, '$[' || m.swipe_id || ']')
+    END AS shown_date`;
 const Q = {
   chat: "SELECT id, user_id, character_id, name, metadata, updated_at FROM chats WHERE id = ? AND user_id = ?",
   path: `SELECT ${STEP} ${OF_CHAT} ${ORDER}`,
@@ -318,6 +327,7 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
               swipes: Number(s.swipe_count),
               hidden: s.hidden === 1,
               revision: Number(s.revision),
+              shown: { hash: textHash(String(s.shown_text)), date: typeof s.shown_date === "number" ? s.shown_date : null },
             };
           });
         })();
