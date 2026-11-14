@@ -1,0 +1,131 @@
+// What the turn lane tells the Author of the turn before, and keeps of it (plan §6.3, §10.9, §10.10),
+// played through the stand-in Lumiverse: a reply cut short by a stop, a run stopped at its limit, a
+// continue's run kept beside the one it continues, a deleted turn told to the harness once; and the user
+// the files and the harness's state serve, read when they are asked. Every name is invented.
+
+import { afterEach, describe, expect, test } from "bun:test";
+import { type Gate, gate } from "rp-harness/testing/rig";
+import type { StopAnswer, TurnList } from "../../src/ui/api";
+import { NO_SESSION } from "../../src/turn";
+import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
+
+const beds: TurnBed[] = [];
+afterEach(async () => {
+  for (const b of beds.splice(0)) await b.close();
+});
+
+async function bed(options: TurnBedOptions): Promise<TurnBed> {
+  const b = await openTurnBed(options);
+  beds.push(b);
+  return b;
+}
+
+async function play(b: TurnBed, type: "normal" | "continue", said?: string): Promise<string> {
+  if (said !== undefined) b.host.send(CHAT, said);
+  const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET, type });
+  expect(out.error).toBeNull();
+  return out.generationId!;
+}
+
+/** What the Author was sent in the model's `n`th request, as one text. */
+const sent = (b: TurnBed, n: number): string => JSON.stringify(b.model.requests[n]!.messages);
+
+describe("the turn before, told and kept", () => {
+  test("a reply cut short by a stop is tied as cut, and the next turn tells the Author", async () => {
+    const hold: Gate = gate();
+    const b = await bed({ answers: [{ pieces: [{ text: "<intent>One exchange.</intent>" }, { text: "<reply>The lamp turns, and" }, { hold }, { text: " then dims.</reply>" }] }, replying("Wren relights it.")] });
+    b.host.send(CHAT, "I climb the stairs.");
+    const generating = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+    const turn = await b.until("the reply's first words", () => {
+      const run = b.turns.runs.ofChat(USER, CHAT)[0];
+      return run !== undefined && run.reply.includes("The lamp turns") ? run.turn : null;
+    });
+    expect((await b.page<StopAnswer>("POST", `/api/v1/chats/${CHAT}/turns/${turn}/stop`)).body).toEqual({ stopped: true });
+    const out = await generating;
+    expect(out.stopped).toBe(true);
+    const cut = await settledTurn(b, out.generationId!);
+    expect(cut).toMatchObject({ id: turn, status: "cut" });
+
+    await settledTurn(b, await play(b, "normal", "I wait in the dark."));
+    expect(sent(b, 1)).toContain(`The reply in message ${cut.message} was stopped before it was finished.`);
+    expect(sent(b, 0)).not.toContain("was stopped before it was finished");
+  });
+
+  test("a run still at work after its reply, stopped at its limit by the next turn, is told to the Author", async () => {
+    const after = gate();
+    const b = await bed({
+      answers: [
+        { pieces: [{ text: "<intent>One exchange, then a note.</intent>" }, { text: "<reply>The lamp turns.</reply>" }, { call: "todo", args: { items: [{ text: "note the storm", done: false }] } }] },
+        { pieces: [{ hold: after }, { text: "Noted." }] },
+        replying("Wren looks up."),
+        replying("Wren looks away."),
+      ],
+      global: "limits:\n  previousRun: 0.2\n",
+    });
+    const first = await play(b, "normal", "I climb the stairs.");
+    await b.until("the first turn to be tied while its run goes on", () => {
+      const run = b.turns.runs.byGeneration(USER, first);
+      return run !== null && b.turns.store.user(USER).turn(run.turn)?.status === "done" && b.turns.runs.running(USER, run.turn) !== undefined;
+    });
+    await settledTurn(b, await play(b, "normal", "I ask about the boat."));
+    const told = "The last turn's work was still going when this one began, and was stopped where it stood.";
+    expect(sent(b, 2)).toContain(told);
+    // Told once: the turn after that stopped nothing.
+    await settledTurn(b, await play(b, "normal", "I ask about the oil."));
+    expect(sent(b, 3)).not.toContain(told);
+  });
+
+  test("a continue's run is kept beside the run it continues, and the turn is listed once, as its latest run", async () => {
+    const b = await bed({ answers: [replying("The lamp turns."), replying("Then it stops, and Wren swears.")] });
+    const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    const generation = await play(b, "continue");
+    await b.until("the continue's run to be over", () => b.turns.runs.byGeneration(USER, generation)?.status === "released" || null);
+    await b.until("no run of the chat to go on", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
+
+    const runs = b.turns.runs.ofTurn(USER, turn.id);
+    expect(runs.map((r) => [r.kind, r.reply])).toEqual([
+      ["new", "The lamp turns."],
+      ["continue", "Then it stops, and Wren swears."],
+    ]);
+    expect(new Set(runs.map((r) => r.id)).size).toBe(2);
+    expect(b.turns.runs.record(USER, turn.id)?.kind).toBe("continue");
+    const list = (await b.page<TurnList>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
+    expect(list.map((t) => [t.id, t.kind])).toEqual([[turn.id, "continue"]]);
+  });
+
+  test("a turn whose message is deleted is told to the harness once, when the delete is heard", async () => {
+    const b = await bed({ answers: [replying("The lamp turns."), replying("Wren looks up from the brass.")] });
+    const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    b.host.deleteMessage(CHAT, turn.message!);
+    await b.until("the harness to be told", () => b.left.some((s) => s.turn === turn.id));
+    await settledTurn(b, await play(b, "normal", "I climb the stairs again."));
+    expect(b.left.filter((s) => s.turn === turn.id)).toHaveLength(1);
+    expect(sent(b, 1)).toContain("1 turn(s) were deleted since the last one.");
+  });
+});
+
+describe("the user served", () => {
+  test("the files and the harness's state serve the user set when they are asked, and refuse a scope of anyone else or of no user", async () => {
+    const b = await bed({ answers: [] });
+    const config = b.app.config.lumiverse as { user: string | null };
+    const scope = { user: USER, chat: CHAT, session: NO_SESSION };
+    try {
+      expect((await b.turns.files.places(scope)).notes).toBe("persistent-workspace/");
+      await expect(b.turns.files.places({ ...scope, user: "" })).rejects.toThrow();
+      await b.turns.env.store.set("kit/count", 3);
+
+      config.user = null;
+      await expect(b.turns.files.places(scope)).rejects.toThrow("belongs to no Lumiverse user yet");
+      await expect(b.turns.env.store.get("kit/count")).rejects.toThrow("belongs to no Lumiverse user yet");
+
+      // A user set after the lane was built is the one served from then on.
+      config.user = "user-tamsin";
+      await expect(b.turns.files.places(scope)).rejects.toThrow();
+      expect((await b.turns.files.places({ ...scope, user: "user-tamsin" })).notes).toBe("persistent-workspace/");
+      expect(await b.turns.env.store.get("kit/count")).toBeUndefined();
+    } finally {
+      config.user = USER;
+    }
+    expect(await b.turns.env.store.get("kit/count")).toBe(3);
+  });
+});

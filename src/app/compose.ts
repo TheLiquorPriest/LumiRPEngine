@@ -15,7 +15,6 @@ import { loreBooks } from "../adapter/lumiverse/books";
 import { lumiverseDoor, type AdapterDeps, type LumiverseDoor } from "../adapter/lumiverse/mount";
 import { bunSocket } from "../adapter/lumiverse/socket";
 import { type LoreBooks, LORE_MIGRATIONS } from "../lore";
-import { isRecord } from "../shared/json";
 import { STORE_MIGRATIONS } from "../store";
 import { historyWindow } from "../story/window";
 import { layShipped, RPE_GUIDANCE, TREE_MIGRATIONS } from "../tree";
@@ -113,13 +112,7 @@ export function compose(options: ComposeOptions = {}): Composition {
           store: openAppStore(at),
           lumiverse: () => {
             const parts = door.lumiverse();
-            if (parts === null) return null;
-            // Lumiverse's Stop (`routes/generate.routes.ts:45-65`), as the signed-in user, for the generation named alone: a newer one of the chat is never stopped by it.
-            const stopGeneration = async (generation: string): Promise<boolean> => {
-              const answer = await parts.session.json("POST", "/api/v1/generate/stop", { generation_id: generation });
-              return isRecord(answer) && answer.stopped === true;
-            };
-            return { reads: parts.reads, chat: parts.chat, stopGeneration };
+            return parts === null ? null : { reads: parts.reads, chat: parts.chat, stopGeneration: parts.stopGeneration };
           },
           books,
           clock,

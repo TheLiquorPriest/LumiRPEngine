@@ -2,6 +2,8 @@
 // moments happened, what it spent, and what went to the chat (its reply's text and the progress lines
 // of the thinking block). A run going on now is held in memory, with what stops it; every run is kept
 // in RPE's database (`turn_run`), written when it begins, when its reply is released and when it ends.
+// A turn has one run, or more when it is continued: each continue is a run of its own, kept beside the
+// earlier ones, and the turn as the pages show it is its latest run.
 
 import type { Database } from "bun:sqlite";
 import type { ReplyError, RunStatus, TurnKind, Usage } from "rp-harness/contract";
@@ -12,6 +14,8 @@ export type RunState = RunStatus | "running";
 
 /** A run as it is kept. */
 export interface RunRecord {
+  /** The run's own id: a continue runs its turn again under a new one. */
+  id: string;
   user: string;
   turn: string;
   chat: string;
@@ -46,6 +50,7 @@ export interface Run extends RunRecord {
 }
 
 interface RunRow {
+  id: string;
   turn: string;
   chat: string;
   session: string;
@@ -68,6 +73,7 @@ interface RunRow {
 
 function recordOf(user: string, r: RunRow): RunRecord {
   return {
+    id: r.id,
     user,
     turn: r.turn,
     chat: r.chat,
@@ -104,13 +110,14 @@ export class Runs {
   /** Keeps a run's record as it stands; inside a queued write. */
   put(into: Database, r: RunRecord): void {
     into.run(
-      `INSERT INTO turn_run (user, turn, chat, session, generation, target, kind, status, received, started, first_word, released, ended, usage, reply, progress, error, base, saved)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (user, turn) DO UPDATE SET session = excluded.session, generation = excluded.generation, target = excluded.target, kind = excluded.kind, status = excluded.status,
+      `INSERT INTO turn_run (user, id, turn, chat, session, generation, target, kind, status, received, started, first_word, released, ended, usage, reply, progress, error, base, saved)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (user, id) DO UPDATE SET session = excluded.session, generation = excluded.generation, target = excluded.target, kind = excluded.kind, status = excluded.status,
          received = excluded.received, started = excluded.started, first_word = excluded.first_word, released = excluded.released, ended = excluded.ended,
          usage = excluded.usage, reply = excluded.reply, progress = excluded.progress, error = excluded.error, base = excluded.base, saved = excluded.saved`,
       [
         r.user,
+        r.id,
         r.turn,
         r.chat,
         r.session,
@@ -163,12 +170,21 @@ export class Runs {
     return null;
   }
 
-  /** A turn's run as it stands: the one going on now, else as kept. */
+  /** A turn's run as it stands: the one going on now, else its latest as kept. */
   record(user: string, turn: string): RunRecord | null {
     const live = this.running(user, turn);
     if (live !== undefined) return live;
-    const row = this.db.query<RunRow, [string, string]>("SELECT * FROM turn_run WHERE user = ? AND turn = ?").get(user, turn);
+    const row = this.db.query<RunRow, [string, string]>("SELECT * FROM turn_run WHERE user = ? AND turn = ? ORDER BY received DESC, rowid DESC LIMIT 1").get(user, turn);
     return row === null ? null : recordOf(user, row);
+  }
+
+  /** Every run of a turn, oldest first: its first, then each continue's; the one going on now as it stands. */
+  ofTurn(user: string, turn: string): RunRecord[] {
+    const live = this.running(user, turn);
+    return this.db
+      .query<RunRow, [string, string]>("SELECT * FROM turn_run WHERE user = ? AND turn = ? ORDER BY received, rowid")
+      .all(user, turn)
+      .map((r) => (live !== undefined && live.id === r.id ? live : recordOf(user, r)));
   }
 
   /** The run a generation was played by, as kept. */
@@ -178,13 +194,14 @@ export class Runs {
     return row === null ? null : recordOf(user, row);
   }
 
-  /** A chat's runs as kept, newest first: `limit` of them, older than the turn `before` when one is named. */
+  /** A chat's turns as kept, each as its latest run, newest first: `limit` of them, older than the turn `before` when one is named. */
   ofChatKept(user: string, chat: string, limit: number, before?: string): RunRecord[] {
-    const from = before === undefined ? null : this.db.query<{ received: number }, [string, string, string]>("SELECT received FROM turn_run WHERE user = ? AND chat = ? AND turn = ?").get(user, chat, before);
+    const from = before === undefined ? null : this.db.query<{ received: number | null }, [string, string, string]>("SELECT max(received) AS received FROM turn_run WHERE user = ? AND chat = ? AND turn = ?").get(user, chat, before);
+    const latest = "NOT EXISTS (SELECT 1 FROM turn_run n WHERE n.user = r.user AND n.turn = r.turn AND (n.received > r.received OR (n.received = r.received AND n.rowid > r.rowid)))";
     const rows =
-      from === null
-        ? this.db.query<RunRow, [string, string, number]>("SELECT * FROM turn_run WHERE user = ? AND chat = ? ORDER BY received DESC, rowid DESC LIMIT ?").all(user, chat, limit)
-        : this.db.query<RunRow, [string, string, number, number]>("SELECT * FROM turn_run WHERE user = ? AND chat = ? AND received < ? ORDER BY received DESC, rowid DESC LIMIT ?").all(user, chat, from.received, limit);
+      from === null || from.received === null
+        ? this.db.query<RunRow, [string, string, number]>(`SELECT * FROM turn_run r WHERE user = ? AND chat = ? AND ${latest} ORDER BY received DESC, rowid DESC LIMIT ?`).all(user, chat, limit)
+        : this.db.query<RunRow, [string, string, number, number]>(`SELECT * FROM turn_run r WHERE user = ? AND chat = ? AND received < ? AND ${latest} ORDER BY received DESC, rowid DESC LIMIT ?`).all(user, chat, from.received, limit);
     return rows.map((r) => this.running(user, r.turn) ?? recordOf(user, r));
   }
 

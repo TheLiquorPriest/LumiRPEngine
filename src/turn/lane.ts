@@ -25,7 +25,7 @@ import { openStore, type Store } from "../store";
 import { TreeChats, type TreeFiles, treeFiles, turnFolderName } from "../tree";
 import { turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
-import { kvStore } from "./kv";
+import { kvStore, servedUser } from "./kv";
 import { type TurnPrompts, turnPrompts } from "./prompt";
 import { Runs } from "./runs";
 import { type TurnTrace, turnTrace } from "./trace";
@@ -44,6 +44,29 @@ function guidanceTexts(files: FilesPort, scope: Scope): GuidanceFiles {
       const read = await files.read(scope, part.source.path);
       return read.status === "read" ? read.text : undefined;
     },
+  };
+}
+
+/**
+ * RPE's file port for the one user it serves, that user read each time the port is asked, since it may
+ * be set after the lane is built: before one is set every call is refused, and the tree's own port
+ * refuses a scope of anyone else, an empty user's included.
+ */
+function servedFiles(owner: () => string | null, make: (user: string) => TreeFiles): TreeFiles {
+  let made: { user: string; files: TreeFiles } | null = null;
+  const now = (): TreeFiles => {
+    const user = servedUser(owner);
+    if (made === null || made.user !== user) made = { user, files: make(user) };
+    return made.files;
+  };
+  return {
+    layers: async (scope) => now().layers(scope),
+    places: async (scope) => now().places(scope),
+    read: async (scope, path, range) => now().read(scope, path, range),
+    find: async (scope, query) => now().find(scope, query),
+    write: async (scope, path, op, by) => now().write(scope, path, op, by),
+    turnDisk: async (scope) => now().turnDisk(scope),
+    sessionDisk: async (scope) => now().sessionDisk(scope),
   };
 }
 
@@ -99,17 +122,19 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const clock = options.clock ?? MACHINE_CLOCK;
   const { store } = options;
   const chats = new TreeChats(app.db, app.writes, app.paths.files);
-  const files = treeFiles({
-    files: app.paths.files,
-    user: owner() ?? "",
-    chats,
-    async turnFolder(scope) {
-      const turn = scope.turn === undefined ? null : store.user(scope.user).turn(scope.turn);
-      return turn === null || turn.chat !== scope.chat ? null : turnFolderName(turn.depth + 1, turn.id);
-    },
-    writes: app.writes,
-    now: () => clock.now(),
-  });
+  const files = servedFiles(owner, (user) =>
+    treeFiles({
+      files: app.paths.files,
+      user,
+      chats,
+      async turnFolder(scope) {
+        const turn = scope.turn === undefined ? null : store.user(scope.user).turn(scope.turn);
+        return turn === null || turn.chat !== scope.chat ? null : turnFolderName(turn.depth + 1, turn.id);
+      },
+      writes: app.writes,
+      now: () => clock.now(),
+    }),
+  );
   const prompts = turnPrompts(app.db, app.writes, () => clock.now());
   const runs = new Runs(app.db, app.writes);
   const lore = new Lore({ books: options.books, worlds: storeWorlds(store), turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes) });
@@ -136,7 +161,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     searchers: [],
     facts,
     models: app.models,
-    store: kvStore(app.db, app.writes, owner() ?? ""),
+    store: kvStore(app.db, app.writes, owner),
     trace,
     events: turnEvents({ db: app.db, writes: app.writes, store, runs, now: () => clock.now(), log: app.log }),
     clock,

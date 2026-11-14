@@ -95,4 +95,40 @@ CREATE TABLE turn_told (
 CREATE INDEX turn_told_turn ON turn_told (user, turn);
 `,
   },
+  {
+    version: 2,
+    name: "a run of its own for each continue of a turn",
+    sql: `
+CREATE TABLE turn_run_by_id (
+  user TEXT NOT NULL,
+  id TEXT NOT NULL,
+  turn TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  session TEXT NOT NULL,
+  generation TEXT,
+  target TEXT,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL,
+  received INTEGER NOT NULL,
+  started INTEGER,
+  first_word INTEGER,
+  released INTEGER,
+  ended INTEGER,
+  usage TEXT,
+  reply TEXT NOT NULL DEFAULT '',
+  progress TEXT NOT NULL DEFAULT '[]',
+  error TEXT,
+  base TEXT NOT NULL DEFAULT '',
+  saved TEXT,
+  PRIMARY KEY (user, id)
+);
+INSERT INTO turn_run_by_id (user, id, turn, chat, session, generation, target, kind, status, received, started, first_word, released, ended, usage, reply, progress, error, base, saved)
+  SELECT user, turn, turn, chat, session, generation, target, kind, status, received, started, first_word, released, ended, usage, reply, progress, error, base, saved FROM turn_run ORDER BY rowid;
+DROP TABLE turn_run;
+ALTER TABLE turn_run_by_id RENAME TO turn_run;
+CREATE INDEX turn_run_chat ON turn_run (user, chat, received);
+CREATE INDEX turn_run_generation ON turn_run (user, generation);
+CREATE INDEX turn_run_turn ON turn_run (user, turn, received);
+`,
+  },
 ];

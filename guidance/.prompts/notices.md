@@ -20,3 +20,4 @@ pictures_left_out: The prompt held {{count}} picture(s). This model does not tak
 history_trimmed: Messages {{range}} did not fit this model's window and were left out. {{covered}}
 previous_run_stopped: The last turn's work was still going when this one began, and was stopped where it stood. What it had recorded is kept.
 saved_differs: What the chat saved as message {{message}} is not what was released. Released: {{released}} Saved: {{saved}}
+cut_short: The reply in message {{message}} was stopped before it was finished. The chat kept only the part written by then.

@@ -65,8 +65,8 @@ export function turnFacts(store: Store): FactSource {
     ],
     async read(scope, names) {
       const user = store.user(scope.user);
-      if (user.chat(scope.chat) === null) return {};
-      const turns = user.path(scope.chat).flatMap((e) => (e.turn === null ? [] : [e.turn]));
+      // A chat RPE has not met yet has no turns on its path: every count is 0.
+      const turns = user.chat(scope.chat) === null ? [] : user.path(scope.chat).flatMap((e) => (e.turn === null ? [] : [e.turn]));
       const out: Record<string, FactValue> = {};
       if (names.includes("turns.since.engine.change")) {
         let count = 0;

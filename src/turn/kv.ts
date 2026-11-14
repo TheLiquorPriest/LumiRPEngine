@@ -19,40 +19,50 @@ function checked(key: string): string {
   return key;
 }
 
-/** The store port for the one user this RPE serves. */
-export function kvStore(db: Database, writes: Writes, user: string): StorePort {
-  const read = (from: Database, key: string): JsonValue | undefined => {
+/** The user this RPE serves, read when asked: none yet (null or empty) refuses the call, as the file port does. */
+export function servedUser(owner: () => string | null): string {
+  const user = owner();
+  if (user === null || user === "") throw new Error("This RPE belongs to no Lumiverse user yet: set lumiverse.user in its config.json.");
+  return user;
+}
+
+/** The store port for the one user this RPE serves, that user read at each call. */
+export function kvStore(db: Database, writes: Writes, owner: () => string | null): StorePort {
+  const read = (from: Database, user: string, key: string): JsonValue | undefined => {
     const row = from.query<{ value: string }, [string, string]>("SELECT value FROM kv WHERE user = ? AND key = ?").get(user, key);
     return row === null ? undefined : (JSON.parse(row.value) as JsonValue);
   };
-  const put = (into: Database, key: string, value: JsonValue | undefined): void => {
+  const put = (into: Database, user: string, key: string, value: JsonValue | undefined): void => {
     if (value === undefined) into.run("DELETE FROM kv WHERE user = ? AND key = ?", [user, key]);
     else into.run("INSERT INTO kv (user, key, value) VALUES (?, ?, ?) ON CONFLICT (user, key) DO UPDATE SET value = excluded.value", [user, key, JSON.stringify(value)]);
   };
   return {
     async get(key) {
-      return read(db, checked(key));
+      return read(db, servedUser(owner), checked(key));
     },
     async set(key, value) {
+      const user = servedUser(owner);
       checked(key);
-      await writes.run((into) => put(into, key, value), "keeping the harness's state");
+      await writes.run((into) => put(into, user, key, value), "keeping the harness's state");
     },
     async update(key, change) {
+      const user = servedUser(owner);
       checked(key);
       return await writes.run((into) => {
-        const next = change(read(into, key));
-        put(into, key, next);
+        const next = change(read(into, user, key));
+        put(into, user, key, next);
         return next;
       }, "changing the harness's state");
     },
     async delete(key) {
+      const user = servedUser(owner);
       checked(key);
-      await writes.run((into) => put(into, key, undefined), "removing the harness's state");
+      await writes.run((into) => put(into, user, key, undefined), "removing the harness's state");
     },
     async list(prefix) {
       return db
         .query<{ key: string }, [string, number, string]>("SELECT key FROM kv WHERE user = ? AND substr(key, 1, ?) = ?")
-        .all(user, prefix.length, prefix)
+        .all(servedUser(owner), prefix.length, prefix)
         .map((r) => r.key);
     },
   };
