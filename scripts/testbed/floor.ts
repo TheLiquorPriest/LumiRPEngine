@@ -1,26 +1,38 @@
-// The floor test, as the player's screen sees it: the same chat, the same preset and the same
-// model, played turn about on a plain connection and on RPE's, each turn sent after the one before
-// has finished. For every turn it records when the request left, when the first thinking and the
-// first word of the reply reached the page, when the last word did, and how many tokens Lumiverse
-// counted in the reply. From those: time to the first word, thinking time, and time per output
-// token, as medians per connection and side by side.
-//
-//   bun scripts/testbed/floor.ts setup                  make the invented card and chat; prints their ids
-//   bun scripts/testbed/floor.ts run [--pairs 10] [--only plain|rpe]
-//
-// Environment (besides what scripts/testbed/README.md lists for every script):
-//   FLOOR_CHAT              the chat to play in (printed by `setup`)
-//   FLOOR_PLAIN_CONNECTION  the name of the Lumiverse connection that calls the model directly
-//   FLOOR_RPE_CONNECTION    the name of the Lumiverse connection that points at RPE
-//   FLOOR_OUT               where the measurements are written as JSON (optional)
-//
-// What only RPE knows about its own turns (model calls before the reply, the intent record's time,
-// what the model was sent) is read from RPE's turn record by the proof that calls this script; this
-// file measures what the player sees, the same way for both connections.
+// The floor test (STANDALONE-PLAN §17.1): the same chat, the same preset and the same model, played
+// turn about on a plain connection and on RPE's, each turn sent after the one before has finished
+// (on RPE, after its run has ended too, which can be after its reply). For every turn it records, as
+// the player's screen sees it, when the request left, when the first thinking and the first word of
+// the reply reached the page, when the last word did, and how many tokens Lumiverse counted. For an
+// RPE turn it then reads RPE's own record of the turn (`floor-measure.ts` says what is taken from
+// it). It prints the §17.1 table and writes every turn's raw numbers to FLOOR_OUT.
 
+import { type Form, floorTable, type Measured, median, perToken, printRpeTurns, printTable, rpeSide } from "./floor-measure";
 import { guard, readEnv, type TestbedEnv } from "./lib/env";
 import { Lumiverse, savedToken } from "./lib/lumiverse";
+import { RpeApi, RpeLive } from "./lib/rpe";
 import { EngineSocket, type HostEvent } from "./lib/socket";
+
+const USAGE = `usage:
+  floor.ts setup
+      make the invented card and chat; prints the chat's id
+  floor.ts run [--pairs N] [--only plain|rpe] [--form tag|two-step]
+      play N pairs (default 10), plain then RPE, and print the §17.1 table;
+      --form names the form RPE's connection replies in (required unless --only plain)
+  floor.ts table <file> [--form tag|two-step]
+      the table again from a run's FLOOR_OUT file (its own form unless --form is given)
+
+environment, besides what scripts/testbed/README.md lists for every script:
+  FLOOR_CHAT              the chat to play in (printed by setup)
+  FLOOR_PLAIN_CONNECTION  the Lumiverse connection that calls the model directly, by name
+  FLOOR_RPE_CONNECTION    the Lumiverse connection that points at RPE, by name
+  FLOOR_RPE_URL           RPE's address, as its server listens (rpe status prints it)
+  FLOOR_RPE_TOKEN         a token RPE's pages are let in with (rpe key web)
+  FLOOR_PERSONA           the name the player's messages are sent under (default Traveller)
+  FLOOR_OUT               where every turn's numbers and the table are written as JSON (optional)`;
+
+/** How long RPE may take to tie a reply to its turn after Lumiverse saved it, and to end its run after the reply. */
+const TIE_MS = 60_000;
+const RUN_END_MS = 15 * 60_000;
 
 /** The player's lines: short, ordinary turns in one place, none of which needs a ruling or a roll. */
 const LINES: readonly string[] = [
@@ -56,36 +68,10 @@ const CARD = {
     "The kitchen is small and warm, and smells of lamp oil and peat. Marta shuts the door against the wind and nods at the bench by the stove.\n\n\"You'll not be leaving tonight,\" she says. \"Sit. There's tea.\"",
 };
 
-interface Measured {
-  pair: number;
-  arm: "plain" | "rpe";
-  line: string;
-  messageId: string | null;
-  /** Milliseconds from the request leaving to each moment; null when it never came. */
-  toStarted: number | null;
-  toFirstThinking: number | null;
-  toFirstWord: number | null;
-  toLastWord: number | null;
-  toEnded: number | null;
-  /** Characters of thinking and of reply text the page was streamed. */
-  thinkingChars: number;
-  replyChars: number;
-  /** Lumiverse's own count of the reply's tokens, when it reported one. */
-  tokens: number | null;
-  error: string | null;
-}
-
 function need(name: string): string {
   const value = process.env[name];
   if (value === undefined || value.trim() === "") throw new Error(`set ${name}`);
   return value.trim();
-}
-
-function median(values: readonly number[]): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = sorted.length >> 1;
-  return sorted.length % 2 === 1 ? (sorted[mid] as number) : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
 }
 
 const seconds = (ms: number | null): string => (ms === null ? "—" : (ms / 1000).toFixed(2));
@@ -98,7 +84,7 @@ async function connectionId(host: Lumiverse, name: string): Promise<string> {
 
 /** One turn: the player's line, then Send on the given connection, timed from the page's side. */
 async function turn(host: Lumiverse, socket: EngineSocket, chatId: string, connection: string, pair: number, arm: Measured["arm"], line: string, persona: string): Promise<Measured> {
-  const out: Measured = { pair, arm, line, messageId: null, toStarted: null, toFirstThinking: null, toFirstWord: null, toLastWord: null, toEnded: null, thinkingChars: 0, replyChars: 0, tokens: null, error: null };
+  const out: Measured = { pair, arm, line, messageId: null, toStarted: null, toFirstThinking: null, toFirstWord: null, toLastWord: null, toEnded: null, thinkingChars: 0, replyChars: 0, tokens: null, error: null, rpe: null, rpeError: null };
   await host.send(chatId, persona, line);
   let sent = 0;
   const { promise: ended, resolve } = Promise.withResolvers<void>();
@@ -151,39 +137,25 @@ async function turn(host: Lumiverse, socket: EngineSocket, chatId: string, conne
   return out;
 }
 
-function perToken(m: Measured): number | null {
-  if (m.tokens === null || m.tokens < 2 || m.toFirstWord === null || m.toLastWord === null) return null;
-  return (m.toLastWord - m.toFirstWord) / (m.tokens - 1);
-}
-
+/** The page's side of every turn, as medians per connection. */
 function report(all: readonly Measured[]): void {
-  const rows: { arm: Measured["arm"]; n: number; failed: number; firstWord: number | null; thinking: number | null; perToken: number | null; whole: number | null }[] = [];
+  console.log("\narm    turns  failed  first word (s)  thinking before it (s)  ms per token  whole reply (s)");
   for (const arm of ["plain", "rpe"] as const) {
     const of = all.filter((m) => m.arm === arm);
     if (of.length === 0) continue;
     const good = of.filter((m) => m.error === null && m.toFirstWord !== null);
-    rows.push({
-      arm,
-      n: of.length,
-      failed: of.length - good.length,
-      firstWord: median(good.map((m) => m.toFirstWord as number)),
-      thinking: median(good.filter((m) => m.toFirstThinking !== null).map((m) => (m.toFirstWord as number) - (m.toFirstThinking as number))),
-      perToken: median(good.map(perToken).filter((v): v is number => v !== null)),
-      whole: median(good.filter((m) => m.toEnded !== null).map((m) => m.toEnded as number)),
-    });
+    const firstWord = median(good.map((m) => m.toFirstWord as number));
+    const thinking = median(good.filter((m) => m.toFirstThinking !== null).map((m) => (m.toFirstWord as number) - (m.toFirstThinking as number)));
+    const tokenMs = median(good.map(perToken).filter((v): v is number => v !== null));
+    const whole = median(good.filter((m) => m.toEnded !== null).map((m) => m.toEnded as number));
+    console.log(`${arm.padEnd(6)} ${String(of.length).padStart(5)}  ${String(of.length - good.length).padStart(6)}  ${seconds(firstWord).padStart(14)}  ${seconds(thinking).padStart(22)}  ${(tokenMs === null ? "—" : tokenMs.toFixed(1)).padStart(12)}  ${seconds(whole).padStart(15)}`);
   }
-  console.log("\narm    turns  failed  first word (s)  thinking before it (s)  ms per token  whole reply (s)");
-  for (const r of rows) {
-    console.log(`${r.arm.padEnd(6)} ${String(r.n).padStart(5)}  ${String(r.failed).padStart(6)}  ${seconds(r.firstWord).padStart(14)}  ${seconds(r.thinking).padStart(22)}  ${(r.perToken === null ? "—" : r.perToken.toFixed(1)).padStart(12)}  ${seconds(r.whole).padStart(15)}`);
-  }
-  const plain = rows.find((r) => r.arm === "plain");
-  const rpe = rows.find((r) => r.arm === "rpe");
-  if (plain?.firstWord != null && rpe?.firstWord != null) {
-    console.log(`\nfirst word, RPE less plain: ${seconds(rpe.firstWord - plain.firstWord)} s (the intent record's own time is taken off this by the proof, from RPE's turn record)`);
-  }
-  if (plain?.perToken != null && rpe?.perToken != null) {
-    console.log(`time per token, RPE over plain: ${((rpe.perToken / plain.perToken - 1) * 100).toFixed(1)}% (pass: within 15%)`);
-  }
+}
+
+function printAll(all: readonly Measured[], form: Form | null): void {
+  report(all);
+  printRpeTurns(all);
+  if (form !== null) printTable(floorTable(all, form));
 }
 
 async function open(env: TestbedEnv): Promise<Lumiverse> {
@@ -198,13 +170,36 @@ async function setup(env: TestbedEnv): Promise<void> {
   console.log(`character ${character.id}${existing ? " (already there)" : ""}\nchat ${chat.id}\nexport FLOOR_CHAT=${chat.id}`);
 }
 
-async function run(env: TestbedEnv, pairs: number, only: Measured["arm"] | null): Promise<void> {
+/** RPE's side of an RPE turn: the turn tied to the reply's message, read once its run has ended. */
+async function readRpe(api: RpeApi, live: RpeLive, chatId: string, measured: Measured, missedBefore: number): Promise<void> {
+  if (measured.messageId === null) {
+    measured.rpeError = "the generation named no message to match an RPE turn by";
+    return;
+  }
+  try {
+    const tied = await api.tiedTo(chatId, measured.messageId, TIE_MS);
+    if (tied === null) {
+      measured.rpeError = `no RPE turn of this chat was tied to message ${measured.messageId} within ${TIE_MS / 1000} s`;
+      return;
+    }
+    const detail = await api.ended(chatId, tied.id, RUN_END_MS);
+    if (detail.status === "running") measured.rpeError = `RPE's run was still going ${RUN_END_MS / 60_000} min after the reply`;
+    measured.rpe = rpeSide(detail, live.deltas, live.missed.length > missedBefore || live.closed);
+  } catch (error) {
+    measured.rpeError = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function run(env: TestbedEnv, pairs: number, only: Measured["arm"] | null, form: Form | null): Promise<void> {
   const host = await open(env);
   const chatId = guard(env, need("FLOOR_CHAT"));
   const arms: { arm: Measured["arm"]; connection: string }[] = [];
   if (only !== "rpe") arms.push({ arm: "plain", connection: await connectionId(host, need("FLOOR_PLAIN_CONNECTION")) });
   if (only !== "plain") arms.push({ arm: "rpe", connection: await connectionId(host, need("FLOOR_RPE_CONNECTION")) });
   if (pairs * arms.length > LINES.length) throw new Error(`${pairs} pairs need ${pairs * arms.length} lines and the script has ${LINES.length}`);
+  const api = only === "plain" ? null : new RpeApi(need("FLOOR_RPE_URL").replace(/\/+$/, ""), need("FLOOR_RPE_TOKEN"));
+  // Followed before the first turn: the live socket is the only place the start of a call's text is told.
+  const live = api === null ? null : await RpeLive.follow(api, chatId);
   const socket = await EngineSocket.open(host, "", { page: false });
   // Reply text is streamed only to a socket that says it is showing this chat.
   socket.focus(chatId);
@@ -215,31 +210,92 @@ async function run(env: TestbedEnv, pairs: number, only: Measured["arm"] | null)
     for (let pair = 1; pair <= pairs; pair++) {
       for (const { arm, connection } of arms) {
         const line = LINES[next++] as string;
+        const missedBefore = live?.missed.length ?? 0;
         const measured = await turn(host, socket, chatId, connection, pair, arm, line, persona);
+        if (arm === "rpe" && api !== null && live !== null) await readRpe(api, live, chatId, measured, missedBefore);
         all.push(measured);
-        console.log(`pair ${pair} ${arm}: first word ${seconds(measured.toFirstWord)} s, whole ${seconds(measured.toEnded)} s, ${measured.tokens ?? "?"} tokens${measured.error ? `, FAILED: ${measured.error}` : ""}`);
+        const r = measured.rpe;
+        const rpeWords = arm !== "rpe" ? "" : r !== null ? `; RPE: ${r.callsOnPath ?? "?"} call(s) before the reply, run went on ${seconds(r.afterReplyMs)} s after it` : "";
+        const failed = [measured.error, measured.rpeError].filter((e) => e !== null).join("; ");
+        console.log(`pair ${pair} ${arm}: first word ${seconds(measured.toFirstWord)} s, whole ${seconds(measured.toEnded)} s, ${measured.tokens ?? "?"} tokens${rpeWords}${failed !== "" ? `, FAILED: ${failed}` : ""}`);
       }
     }
   } finally {
     socket.close();
+    live?.close();
   }
-  report(all);
+  printAll(all, form);
   const out = process.env.FLOOR_OUT?.trim();
-  if (out) await Bun.write(out, `${JSON.stringify({ at: new Date().toISOString(), chat: chatId, turns: all }, null, 2)}\n`);
+  if (out) {
+    const table = form === null ? null : floorTable(all, form);
+    await Bun.write(out, `${JSON.stringify({ at: new Date().toISOString(), chat: chatId, pairs, only, form, turns: all, table }, null, 2)}\n`);
+    console.log(`\nwritten to ${out}`);
+  }
 }
 
-const [command, ...rest] = process.argv.slice(2);
-const env = readEnv();
-if (command === "setup") await setup(env);
-else if (command === "run") {
-  const pairsAt = rest.indexOf("--pairs");
-  const onlyAt = rest.indexOf("--only");
-  const pairs = pairsAt >= 0 ? Number(rest[pairsAt + 1]) : 10;
-  const only = onlyAt >= 0 ? rest[onlyAt + 1] : null;
-  if (!Number.isInteger(pairs) || pairs < 1) throw new Error("--pairs takes a whole number, 1 or more");
-  if (only !== null && only !== "plain" && only !== "rpe") throw new Error("--only takes plain or rpe");
-  await run(env, pairs, only);
-} else {
-  console.error("usage: floor.ts setup | run [--pairs N] [--only plain|rpe]");
+async function table(file: string, form: Form | null): Promise<void> {
+  const saved = (await Bun.file(file).json()) as { form?: Form | null; turns?: Measured[] };
+  if (!Array.isArray(saved.turns)) throw new Error(`${file} holds no turns: is it a floor run's FLOOR_OUT file?`);
+  const use = form ?? saved.form ?? null;
+  if (use === null) throw new Error(`${file} names no form (it was an --only plain run): give --form`);
+  printAll(saved.turns, use);
+}
+
+type Command = { command: "help" } | { command: "setup" } | { command: "run"; pairs: number; only: Measured["arm"] | null; form: Form | null } | { command: "table"; file: string; form: Form | null };
+
+class UsageError extends Error {}
+
+/** The command line, checked before anything is read from the environment or the network. */
+function parse(argv: readonly string[]): Command {
+  const [command, ...rest] = argv;
+  if (command === undefined || command === "help" || command === "--help" || command === "-h") return { command: "help" };
+  const allowed: Readonly<Record<string, readonly string[]>> = { setup: [], run: ["--pairs", "--only", "--form"], table: ["--form"] };
+  const flags = allowed[command];
+  if (flags === undefined) throw new UsageError(`no command "${command}"`);
+  const given = new Map<string, string>();
+  const words: string[] = [];
+  for (let i = 0; i < rest.length; i++) {
+    const word = rest[i] as string;
+    if (!word.startsWith("--")) {
+      words.push(word);
+      continue;
+    }
+    if (word === "--help" || word === "-h") return { command: "help" };
+    if (!flags.includes(word)) throw new UsageError(`${command} takes no ${word}`);
+    if (given.has(word)) throw new UsageError(`${word} is given twice`);
+    const value = rest[++i];
+    if (value === undefined || value.startsWith("--")) throw new UsageError(`${word} needs a value`);
+    given.set(word, value);
+  }
+  const form = given.get("--form") ?? null;
+  if (form !== null && form !== "tag" && form !== "two-step") throw new UsageError("--form takes tag or two-step");
+  if (command === "setup") {
+    if (words.length > 0) throw new UsageError("setup takes nothing more");
+    return { command: "setup" };
+  }
+  if (command === "table") {
+    if (words.length !== 1) throw new UsageError("table takes one file: a run's FLOOR_OUT");
+    return { command: "table", file: words[0] as string, form };
+  }
+  if (words.length > 0) throw new UsageError(`run takes no "${words[0]}"`);
+  const pairs = given.has("--pairs") ? Number(given.get("--pairs")) : 10;
+  if (!Number.isInteger(pairs) || pairs < 1) throw new UsageError("--pairs takes a whole number, 1 or more");
+  const only = given.get("--only") ?? null;
+  if (only !== null && only !== "plain" && only !== "rpe") throw new UsageError("--only takes plain or rpe");
+  if (only !== "plain" && form === null) throw new UsageError("--form tag or --form two-step: say which form RPE's connection replies in");
+  if (only === "plain" && form !== null) throw new UsageError("--form names RPE's form, and --only plain plays no RPE turn");
+  return { command: "run", pairs, only, form };
+}
+
+let asked: Command;
+try {
+  asked = parse(process.argv.slice(2));
+} catch (error) {
+  if (!(error instanceof UsageError)) throw error;
+  console.error(`floor.ts: ${error.message}\n\n${USAGE}`);
   process.exit(2);
 }
+if (asked.command === "help") console.log(USAGE);
+else if (asked.command === "table") await table(asked.file, asked.form);
+else if (asked.command === "setup") await setup(readEnv());
+else await run(readEnv(), asked.pairs, asked.only, asked.form);

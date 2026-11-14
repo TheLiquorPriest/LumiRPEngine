@@ -52,3 +52,28 @@ Every change is logged with its id in `$LRE_INSTANCE_DIR/changes.jsonl`, one JSO
 | `harness` | The story prepared (cast, cores, notebook), two turns with the jobs after them (the principals' own mind files), one review-card change applied and the rest left, a GM assistant thread in a side session, and a palette tap left staged. |
 
 All of it is invented; the world starts from the engine's own shipped starter.
+
+## The floor test (`floor.ts`)
+
+STANDALONE-PLAN §17.1: the same chat played turn about on a plain Lumiverse connection and on RPE's, each turn sent once the one before has finished (on RPE, once its run has ended, which can be after its reply). Run it on the test bed, where Lumiverse and RPE both listen. It uses the `LRE_*` variables above for Lumiverse (the CLI's saved sign-in) and these of its own:
+
+```sh
+export FLOOR_PLAIN_CONNECTION="<the Lumiverse connection that calls the model directly>"
+export FLOOR_RPE_CONNECTION="<the Lumiverse connection that points at RPE>"
+export FLOOR_RPE_URL=http://127.0.0.1:<RPE's port>   # `rpe status` prints it as "Listens on"
+export FLOOR_RPE_TOKEN=<a web key, below>
+export FLOOR_OUT=<a file of your own>.json            # every turn's numbers and the table
+```
+
+RPE lets its Turn page's routes in with a page token or with its web key. The web key is the one to give the script: make it on the server with RPE's own command line, on RPE's data folder (from a checkout, `scripts/testbed/rpe-bed.sh rpe key web`; on the server itself, `rpe key web --data <RPE's data folder>`). It is shown once. Making it retires the web key made before it, so RPE's web UI is signed in again with the new one.
+
+```sh
+bun floor.ts --help
+bun floor.ts setup                                    # the invented card and chat; prints FLOOR_CHAT
+export FLOOR_CHAT=<the id it printed>
+bun floor.ts run --pairs 10 --form tag                # ten pairs; --form two-step on a connection that needs it
+bun floor.ts run --pairs 10 --only rpe --form tag     # RPE turns only: no comparison with plain is judged
+bun floor.ts table "$FLOOR_OUT"                       # the table again from a saved run
+```
+
+`--form` names the form RPE's connection replies in (plan §10.7). The table is judged by that form's pass values, and a turn whose release the trace names in the other form leaves every gate not judged. What each of RPE's numbers is read from is said beside its field of `RpeTurn` in `floor-measure.ts`; what the script cannot measure yet is printed as such, with what RPE would have to give for it.
