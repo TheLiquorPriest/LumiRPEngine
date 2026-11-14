@@ -4,7 +4,9 @@ export { openStore, Store, UserStore, STORE_DEFAULTS, type StoreOptions, type Se
 export { TreeView, type From, type NodeKind, type NodeView, type Reflection, type ValueLine, type ValuesShown, type ViewOptions } from "./view";
 export { readPart, renderView, wordLine, Template, type Part, type Piece, type View, type ViewLine } from "./words";
 export { factStore, standing, type FactInput } from "./facts";
-export { BLANK_REVISION, blankWorld } from "./blank";
+export { BLANK_REVISION, blankWorld, clockRecorded } from "./blank";
+export { storedWorlds, readWorldDoc, WORLD_DOCS_DEFAULTS, type WorldRevisionRow } from "./worlds";
+export { timeDue } from "./due";
 export {
   worldState,
   WORLD_STATE_DEFAULTS,

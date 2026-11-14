@@ -10,7 +10,8 @@ const places = ["cellar", "market_square", "far_road", "common_room"];
 
 /** `n` played turns, each passing time and moving Wren on. */
 function playMany(every: number, n: number) {
-  const ts = testStore({ snapshotEvery: every });
+  let at = 0;
+  const ts = testStore({ snapshotEvery: every, now: () => ++at });
   ts.s.createChat({ id: "c", revision: ts.revision });
   const turns = Array.from({ length: n }, (_, i) => play(ts.s, "c", `m${i + 1}`, `Reply ${i + 1}.`, i + 1, engine(tick(i + 1), goTo(POV, places[i % places.length] ?? "cellar"))));
   return { ...ts, turns };
@@ -53,17 +54,21 @@ describe("snapshots", () => {
     expect(reopened(ts).user(USER).headState("c").state.world.clock - cold.headState("c").state.world.clock).toBe(1000);
   });
 
-  test("a change added to an earlier turn drops the snapshots after it, and the next cold start includes it", () => {
+  test("a job's change on an earlier turn drops the snapshots after it, changes no turn played, and once the job ends the next turn starts with it, cold or warm", () => {
     const ts = playMany(4, 10);
     ts.s.headState("c");
     expect(snapshotDepths(ts.store)).toEqual([4, 8]);
     const second = ts.turns[1];
     if (!second) throw new Error("no second turn");
+    const head = hashJson(ts.s.headState("c").state.world);
     ts.s.addChanges(second.id, engine(...hand("knife", "satchel", "odile")).map((c) => ({ ...c, job: "late-job" })));
     expect(snapshotDepths(ts.store)).toEqual([]);
-    const cold = reopened(ts).user(USER).headState("c").state.world;
+    ts.s.endJob("late-job");
+    expect(hashJson(reopened(ts).user(USER).headState("c").state.world)).toBe(head);
+    const next = ts.s.beginTurn({ chat: "c", kind: "normal" });
+    const cold = reopened(ts).user(USER).stateAt(next.id).state.world;
     expect(carried(cold, "odile")).toEqual(["knife"]);
-    expect(hashJson(cold)).toBe(hashJson(reopened(ts, "other-build").user(USER).headState("c").state.world));
+    expect(hashJson(cold)).toBe(hashJson(ts.s.stateAt(next.id).state.world));
   });
 
   test("a read writes nothing: the snapshots its fold finds are stored by the user's next write", () => {

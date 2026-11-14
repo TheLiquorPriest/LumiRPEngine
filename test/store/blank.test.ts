@@ -8,7 +8,8 @@ import { draftEvent, NO_DRAFT } from "../../src/engine/world-draft";
 import { BLANK_REVISION } from "../../src/store/blank";
 import { factStore } from "../../src/store/facts";
 import type { ChangeInput } from "../../src/store/types";
-import { engine, goTo, hashOf, play, say, testStore } from "./fixtures";
+import { worldState } from "../../src/store/world-state";
+import { engine, goTo, hashOf, play, say, SHIPPED_LAYOUT, testStore, tick } from "./fixtures";
 
 function chat() {
   const ts = testStore();
@@ -63,5 +64,30 @@ describe("a chat with no world", () => {
     expect(view.node("wren")?.name).toBe("Wren");
     expect(view.node("mara")?.parent).toBe("place:loft");
     expect(view.node("mara")?.facts.map((f) => f.value)).toEqual(["cropped short"]);
+  });
+
+  test("is told no date, time zone or currency nobody set: the clock shows once play sets it, the rest once a world is attached", () => {
+    const { s, first, revision, world } = chat();
+    const horizon: ChangeInput = { lane: "story", op: "store.horizon", value: { list: ["loft"] }, by: "author", source: "author" };
+    play(s, "c", "m1", "Mara climbs into the hayloft.", 1, [...first, horizon]);
+    const keys = (ref: string): string[] => s.view("c").values(ref).map((v) => v.key);
+    const said = (): string => worldState(s, { chat: "c", turn: s.beginTurn({ chat: "c", kind: "normal" }).id, layout: SHIPPED_LAYOUT }).text;
+    expect(keys("world")).toEqual([]);
+    expect(keys("place:loft")).toEqual([]);
+    expect(said()).not.toMatch(/· (time|time zone|currency):/);
+
+    // Play sets the clock: the time shows, with the turn that set it; still no time zone or currency.
+    const t2 = play(s, "c", "m2", "Night falls on the farm.", 2, engine(tick(600)));
+    expect(s.view("c").values("world").map((v) => [v.key, v.mark?.turn])).toEqual([["time", t2.id]]);
+    expect(keys("place:loft")).toEqual(["time"]);
+    const text = said();
+    expect(text).toMatch(/· time: /);
+    expect(text).not.toMatch(/· (time zone|currency):/);
+
+    // A world attached: its time zone and currency are recorded values from then on.
+    const merge = Object.fromEntries(Object.keys(world.entities).map((id) => [id, { entity: "take" }]));
+    play(s, "c", "m3", "The vale comes into view.", 3, [{ lane: "engine", op: "store.marker", value: { kind: "migrate", to: revision, merge }, by: "player", source: "player" }]);
+    expect(keys("world")).toEqual(["time", "time_zone", "currency"]);
+    expect(keys("place:loft")).toContain("time_zone");
   });
 });

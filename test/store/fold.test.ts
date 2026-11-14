@@ -11,7 +11,7 @@ import { createRegistry } from "../../src/engine/registry-impl";
 import { initialState } from "../../src/engine/world-state";
 import { ALL_PACKS } from "../../src/packs/index";
 import { StoreInputError, type ChangeInput } from "../../src/store/types";
-import { carried, engine, goTo, hand, make, pay, play, POV, registry, testStore, tick } from "./fixtures";
+import { carried, engine, goTo, hand, hashOf, make, pay, play, POV, registry, testStore, tick } from "./fixtures";
 
 describe("the new fold", () => {
   test("changes fold through the packs' own handlers to the state today's handlers give, each marked with its lane", () => {
@@ -115,29 +115,34 @@ describe("the new fold", () => {
   });
 
   test("what a tied turn recorded after a mark is taken back, and the head state with it; what came before and a job's changes stay; a dropped turn is refused", () => {
-    const { s, revision } = testStore();
+    let at = 0;
+    const { s, revision } = testStore({ now: () => ++at });
     s.createChat({ id: "c", revision });
     const t = play(s, "c", "m1", "Morning.", 1, engine(goTo(POV, "cellar")));
     const mark = s.changes(t.id).at(-1)!.ord;
-    // What a continue of the turn records joins the path at once: the turn is tied. So does what a job of the turn records.
+    // What a continue of the turn records joins the path at once: the turn is tied. What a job of the turn records waits for the job to end.
     s.addChanges(t.id, engine(make("map", "Folded map", POV)));
     s.addChanges(t.id, engine(make("lamp", "Lamp", POV)).map((c) => ({ ...c, job: "job-1" })));
     expect(s.headState("c").state.world.entities.map).toBeDefined();
     expect(s.takeBack(t.id, mark)).toBe(1);
     const head = s.headState("c").state.world;
     expect(head.entities.map).toBeUndefined();
-    expect(head.entities.lamp).toBeDefined();
+    expect(head.entities.lamp).toBeUndefined();
     expect(head.entities[POV]?.fields.place).toBe("cellar");
     expect(s.changes(t.id).map((c) => [c.ord, c.job])).toEqual([
       [mark, null],
       [mark + 2, "job-1"],
     ]);
+    // Once the job has ended, its change is there from the start of the next turn to begin, even one dropped later.
+    s.endJob("job-1");
     const gone = s.beginTurn({ chat: "c", kind: "normal" });
+    expect(s.stateAt(gone.id).state.world.entities.lamp).toBeDefined();
     s.dropTurn(gone.id);
     expect(() => s.takeBack(gone.id, -1)).toThrow(StoreInputError);
+    expect(() => s.addChanges(t.id, engine(tick(1)).map((c) => ({ ...c, job: "job-1" })))).toThrow("job job-1 has ended");
   });
 
-  test("a handler that throws is reported on its change, and the fold goes on", () => {
+  test("a handler that throws is reported on its change by a code alone, its error goes to the log, and the fold goes on", () => {
     const fragile: PackDef = {
       id: "fragile",
       label: "A pack whose reducer fails",
@@ -155,32 +160,51 @@ describe("the new fold", () => {
         });
       },
     };
-    const { s, revision } = testStore({ registry: createRegistry([...ALL_PACKS, fragile]) });
+    const failures: { op: string; error: unknown }[] = [];
+    const { s, revision } = testStore({ registry: createRegistry([...ALL_PACKS, fragile]), handlerFailed: (f) => failures.push(f) });
     s.createChat({ id: "c", revision });
     const t = s.beginTurn({ chat: "c", kind: "normal" });
     const { changes, state } = s.addChanges(t.id, engine({ type: "fragile.break", data: {} }, tick(3)));
     expect(changes.map((c) => [c.applied, c.reports])).toEqual([
-      [false, [{ code: "failed", values: { error: "the reducer broke" } }]],
+      [false, [{ code: "failed" }]],
       [true, []],
     ]);
+    expect(failures.map((f) => [f.op, f.error instanceof Error ? f.error.message : String(f.error)])).toEqual([["fragile.break", "the reducer broke"]]);
     expect(state.world.clock - s.headState("c").state.world.clock).toBe(3);
   });
 
-  test("a change added to an earlier turn after later ones were made is checked where they stand, and what no longer applies is listed", () => {
-    const { s, revision } = testStore();
+  test("a job's change takes effect just before the first turn to begin after the job ended; where a later turn wrote the same part, its value stands and a report says so", () => {
+    let at = 0;
+    const { s, revision } = testStore({ now: () => ++at });
     s.createChat({ id: "c", revision });
     const t1 = play(s, "c", "m1", "She checks her satchel.", 1, engine(tick(5)));
     const t2 = play(s, "c", "m2", "She lends Bram her knife.", 2, engine(...hand("knife", "satchel", "bram")));
-    expect(carried(s.headState("c").state.world, "bram")).toEqual(["knife"]);
-    // A job tied to the first turn records, late, that Odile had taken the knife by then.
-    s.addChanges(t1.id, [...engine(...hand("knife", "satchel", "odile")).map((c) => ({ ...c, job: "job-7" }))]);
-    const head = s.headState("c");
-    expect(carried(head.state.world, "odile")).toEqual(["knife"]);
-    expect(carried(head.state.world, "bram")).toEqual([]);
-    expect(head.notApplied.map((n) => [n.turn, n.op])).toEqual([
-      [t2.id, "unlink"],
-      [t2.id, "link"],
+    // A job of the first turn records, late, that Odile had taken the knife, and that she had lit a lamp.
+    s.addChanges(t1.id, engine(...hand("knife", "satchel", "odile"), make("lamp", "Lamp", "odile")).map((c) => ({ ...c, job: "job-7" })));
+    // No turn begun before the job ended has its state changed, nor does the head.
+    const second = hashJson(s.stateAt(t2.id).state);
+    s.endJob("job-7");
+    expect(hashJson(s.stateAt(t2.id).state)).toBe(second);
+    expect(s.headState("c").state.world.entities.lamp).toBeUndefined();
+    // From the next turn's start: the lamp; the knife stays with Bram, whose turn wrote it after the job's own, and the report says which.
+    const t3 = s.beginTurn({ chat: "c", kind: "normal" });
+    const start = s.stateAt(t3.id);
+    expect(start.state.world.entities.lamp).toBeDefined();
+    expect(carried(start.state.world, "bram")).toEqual(["knife"]);
+    const later = [{ code: "later_value", values: { turn: 2 } }];
+    expect(start.notApplied.map((n) => [n.turn, n.op, n.reports])).toEqual([
+      [t1.id, "unlink", later],
+      [t1.id, "link", later],
     ]);
+    expect(s.jobsBefore(t3.id).map((j) => [j.change.op, j.change.job, j.applied])).toEqual([
+      ["unlink", "job-7", false],
+      ["link", "job-7", false],
+      ["spawn", "job-7", true],
+    ]);
+    // It keeps its place: another swipe of the third reply starts from the same state.
+    s.tieTurn(t3.id, { message: "m3", hash: hashOf("She waits."), date: 3 });
+    const swipe = s.beginTurn({ chat: "c", kind: "swipe", target: "m3" });
+    expect(hashJson(s.stateAt(swipe.id).state.world)).toBe(hashJson(start.state.world));
     expect(s.changes(t1.id).at(-1)?.job).toBe("job-7");
   });
 });

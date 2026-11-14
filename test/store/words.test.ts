@@ -5,13 +5,14 @@
 // clock, an amount), and to a short list of codes. A sentence written in the store's code fails it.
 
 import { describe, expect, test } from "bun:test";
+import { hashJson } from "../../src/shared/hash";
 import type { JsonValue } from "../../src/shared/json";
 import { kindDef } from "../../src/engine/scope";
 import { factStore } from "../../src/store/facts";
 import { LANES, PRECISIONS, SOURCES, STANDINGS, type ChangeInput } from "../../src/store/types";
 import { readPart, renderView } from "../../src/store/words";
 import { worldState } from "../../src/store/world-state";
-import { engine, hand, pay, play, POV, registry, say, SHIPPED_LAYOUT, SHIPPED_PART, testStore } from "./fixtures";
+import { engine, hand, inventedWorld, pay, play, POV, registry, say, SHIPPED_LAYOUT, SHIPPED_PART, testStore } from "./fixtures";
 
 /** The codes the store may give in place of words: systems, its own value keys, and how a value stands. */
 const CODES = new Set<string>(["calendar", "weather", "orgs", "economy", "time", "time_zone", "currency", "tier", "life", "coin", "posted", "members", "entry", "world", "groups", "elsewhere", ...PRECISIONS, ...STANDINGS, ...SOURCES, ...LANES]);
@@ -139,5 +140,19 @@ describe("no words of the store reach an agent", () => {
     for (const section of ["horizon", "above", "around", "outline", "due", "open", "changed", "unsettled"] as const) expect([section, (block.sections[section]?.length ?? 0) > 0]).toEqual([section, true]);
     expect(foreign(block.sections, vocabulary(world, changes, labels, t.id, "the bell rings", "#.#"))).toEqual([]);
     expect(worldState(s, { chat: "c", turn: next.id, layout: "", due }).text).toBe("");
+  });
+
+  test("what an Upgrade put back reaches a model as a code with values from the world, never in today's own words", () => {
+    // A second revision of the world in which the errand's stage "Asked" is gone: the Upgrade puts it back to its new start.
+    const base = inventedWorld();
+    const errand = base.tracks.errand as NonNullable<typeof base.tracks.errand>;
+    const second = { ...inventedWorld(), tracks: { errand: { ...errand, start: "sent", stages: { sent: { label: "Sent for", next: [{ to: "done", when: "false" }] }, done: { label: "Delivered", next: [] } } } } };
+    const ts = testStore({ world: base, more: [second] });
+    const { s } = ts;
+    s.createChat({ id: "c", revision: ts.revision });
+    const t = play(s, "c", "m1", "Word comes of the letter.", 1, [{ lane: "engine", op: "store.marker", value: { kind: "migrate", to: hashJson(second), merge: {} }, by: "player", source: "player" }]);
+    const reports = s.changes(t.id).flatMap((c) => c.reports);
+    expect(reports).toEqual([{ code: "track_reset", values: { track: "errand", label: "The sealed letter", from: "Asked", to: "Sent for" } }]);
+    expect(foreign(reports, vocabulary(base, second))).toEqual([]);
   });
 });

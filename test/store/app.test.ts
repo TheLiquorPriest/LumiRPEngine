@@ -169,9 +169,9 @@ describe("the store on RPE's database", () => {
     const bare = new Database(":memory:");
     try {
       expect(() => openStore({ db: bare, registry: registry(), worlds })).toThrow(StoreSchemaError);
-      expect(() => openStore({ db: bare, registry: registry(), worlds })).toThrow("chat, message_link, session, turn, path_node, change, snapshot, fold_mark missing");
-      expect(migrateStore(bare)).toBe(1);
-      expect(migrateStore(bare)).toBe(1);
+      expect(() => openStore({ db: bare, registry: registry(), worlds })).toThrow("chat, message_link, session, turn, path_node, change, snapshot, fold_mark, world_revision, job_end missing");
+      expect(migrateStore(bare)).toBe(2);
+      expect(migrateStore(bare)).toBe(2);
       expect(() => openStore({ db: bare, registry: registry(), worlds })).not.toThrow();
     } finally {
       bare.close();

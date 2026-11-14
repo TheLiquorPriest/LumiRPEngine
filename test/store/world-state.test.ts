@@ -8,9 +8,9 @@ import { hashJson } from "../../src/shared/hash";
 import { factStore } from "../../src/store/facts";
 import { openStore } from "../../src/store/store";
 import type { ChangeInput } from "../../src/store/types";
-import { renderView } from "../../src/store/words";
+import { renderView, wordLine, type ViewLine } from "../../src/store/words";
 import { WORLD_STATE_DEFAULTS, worldState, type DueSource, type MapText } from "../../src/store/world-state";
-import { engine, hashOf, pay, play, POV, registry, SHIPPED_LAYOUT, SHIPPED_PART, testStore, USER } from "./fixtures";
+import { engine, hand, hashOf, inventedWorld, make, pay, play, POV, registry, shown, SHIPPED_LAYOUT, SHIPPED_PART, testStore, tick, USER } from "./fixtures";
 import { bigWorld } from "./measure";
 
 const HEADINGS = ["### At hand", "### Above it", "### Around it", "### The rest of the world, in outline", "### Due", "### Open business here", "### Changed last turn", "### Unsettled"];
@@ -136,5 +136,54 @@ describe("the world state", () => {
     console.log(`world state on ${entities} entities: first ${first.toFixed(2)} ms (the tree built), then median ${median.toFixed(2)} ms over 9 runs; ${block.tokens} tokens besides the horizon, ${block.text.length} characters in all`);
     expect(median).toBeLessThan(100);
     store.close();
+  });
+
+  test("holds its budget: with 600 rooms beside the scene every section but the horizon fits, and a section cut short says how much it left out", () => {
+    const roomy = inventedWorld();
+    const inn = roomy.places.common_room?.parent ?? "";
+    for (let i = 1; i <= 600; i++) roomy.places[`room_${i}`] = { id: `room_${i}`, name: `Guest room ${i} on the upper landing`, parent: inn, fields: {} };
+    const ts = testStore({ world: roomy });
+    const { s } = ts;
+    s.createChat({ id: "c", revision: ts.revision });
+    play(s, "c", "m1", "Wren looks down the long landing.", 1, [
+      { lane: "story", op: "store.horizon", value: { list: ["common_room"] }, by: "author", source: "author" },
+      { lane: "engine", ...factStore.change({ about: `entity:${POV}`, key: "mood", value: "lost" }), by: "gm", precision: "vague" },
+    ]);
+    const t2 = s.beginTurn({ chat: "c", kind: "normal" });
+    const block = worldState(s, { chat: "c", turn: t2.id, layout: SHIPPED_LAYOUT, map: MAP, due: DUE });
+    expect(block.tokens).toBeLessThanOrEqual(WORLD_STATE_DEFAULTS.budget);
+    // The horizon whole, whatever the rest takes.
+    const whole = s.viewAt(t2.id).query("common_room", "full")?.lines ?? [];
+    expect(block.sections.horizon?.filter((l) => l.kind !== "map")).toEqual(whole);
+    // Around it: the rooms that fit, then the layout's line counting the rest.
+    const around = block.sections.around ?? [];
+    const last = around.at(-1);
+    const shownRooms = around.filter((l) => l.kind === "level_place").length;
+    expect(shownRooms).toBeGreaterThan(0);
+    expect([last?.kind, last?.fields.n]).toEqual(["left_out", 601 - shownRooms]);
+    expect(block.text.split("\n")).toContain(wordLine(SHIPPED_PART, last as ViewLine) ?? "the layout words a left_out line");
+    // The sections that fit whole are whole, and the outline keeps its share.
+    for (const section of ["above", "due", "changed", "unsettled"] as const) expect([section, block.sections[section]?.some((l) => l.kind === "left_out")]).toEqual([section, false]);
+    expect(block.sections.outline?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  test("a change that stopped applying is listed once, in the next briefing", () => {
+    const ts = testStore();
+    const { s } = ts;
+    s.createChat({ id: "c", revision: ts.revision });
+    play(s, "c", "m1", "Bram lends her a lantern.", 1, engine(make("lantern", "Lantern", POV)));
+    play(s, "c", "m2", "She sets it on the cask.", 2, engine(...hand("lantern", POV, "cask")));
+    // The other swipe of the first reply: no lantern was lent, so setting it down no longer applies.
+    const candle = s.beginTurn({ chat: "c", kind: "swipe", on: null });
+    s.tieTurn(candle.id, { message: "m1", hash: hashOf("No lantern tonight."), date: 11 });
+    const flipped = s.sync("c", shown(["u1", "light"], ["m1", "No lantern tonight.", 11], ["u2", "down"], ["m2", "She sets it on the cask.", 2]));
+    expect(flipped.notApplied.map((n) => n.op)).toEqual(["unlink", "link"]);
+    const reports = (turn: string): string[] =>
+      (worldState(s, { chat: "c", turn, layout: SHIPPED_LAYOUT }).sections.unsettled ?? []).filter((l) => l.kind === "unsettled_report").map((l) => `${String(l.fields.op)} ${String(l.fields.turn)}`);
+    const next = s.beginTurn({ chat: "c", kind: "normal" });
+    expect(reports(next.id)).toEqual(["unlink 2", "link 2"]);
+    s.addChanges(next.id, engine(tick(5)));
+    s.tieTurn(next.id, { message: "m3", hash: hashOf("She waits."), date: 3 });
+    expect(reports(s.beginTurn({ chat: "c", kind: "normal" }).id)).toEqual([]);
   });
 });

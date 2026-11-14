@@ -27,6 +27,10 @@ import { readPass } from "../engine/read-pass";
 import type { ReadContext } from "../engine/registry";
 import type { EntityState } from "../engine/state";
 import { isGone, kindDef, kindIs } from "../engine/scope";
+import { isOpened } from "../packs/economy/core/journal";
+import { openerOf } from "../packs/economy/core/model";
+import { cashAccount } from "../packs/economy/core/pay";
+import { BLANK_REVISION, clockRecorded } from "./blank";
 import { standing } from "./facts";
 import type { FoldEnv } from "./fold";
 import type { Fact, Mark, StoreState, Touched } from "./types";
@@ -438,16 +442,34 @@ export class TreeView {
     return out;
   }
 
-  /** What the game systems keep their own way, for a place: its local time, weather and entry. */
+  /** What the game systems keep their own way, for a place: its local time (at the query's own point, where the clock is a recorded value), weather and entry. */
   private placeSystems(id: string, root: boolean): ValueLine[] {
     const out: ValueLine[] = [];
     const clock = this.state.world.clock;
-    if (root) out.push({ key: "time", value: formatClock(calendarOf(this.doc), clock, placeOffset(this.doc, clock, id)), from: { system: "calendar" } });
+    if (root && clockRecorded(this.state)) out.push({ key: "time", value: formatClock(calendarOf(this.doc), clock, placeOffset(this.doc, clock, id)), from: { system: "calendar" }, ...this.timeMark() });
     const sky = optionalQuery(this.ctx, "weather.sky")?.(this.ctx, id) ?? null;
     if (sky !== null) out.push({ key: "weather", value: sky, from: { system: "weather" } });
     const entry = setEntryOf(this.ctx, id);
     if (entry) out.push({ key: "entry", value: entry.entry, from: entry.at === id ? { system: "orgs" } : { system: "orgs", ref: `place:${entry.at}`, name: own(this.doc.places, entry.at)?.name ?? entry.at } });
     return out;
+  }
+
+  /** The change that last set the clock, for a time line; none before one did. */
+  private timeMark(): { mark?: Mark } {
+    const mark = this.state.marks.world?.time;
+    return mark ? { mark } : {};
+  }
+
+  /**
+   * What last moved a person's coin: the economy reads it from the cash account they carry, its
+   * balance once the account is open (until then its opening amount, the world's own value, which no
+   * change wrote), so it is that account's posting mark, with the least exact precision of any posting.
+   */
+  private coinMark(who: string): { mark?: Mark } {
+    const account = cashAccount(this.ctx, who);
+    if (account === null || !isOpened(this.state.world, account, openerOf(this.state.world, account))) return {};
+    const mark = this.state.marks[`entity:${account}`]?.posted;
+    return mark ? { mark } : {};
   }
 
   /** A level's values: system values first, then its own, then (with `inherited`) what it takes from the levels above it. */
@@ -462,9 +484,13 @@ export class TreeView {
     const lines: ValueLine[] = [];
     let ownFields: Record<string, JsonValue> = {};
     if (node.kind === "world") {
-      lines.push({ key: "time", value: formatClock(calendarOf(doc), this.state.world.clock), from: { system: "calendar" } });
-      lines.push({ key: "time_zone", value: doc.calendar.timeZone });
-      lines.push({ key: "currency", value: `${doc.currency.code} (${doc.currency.symbol})` });
+      // The blank world's calendar and currency are the authoring template's, which nobody set: its
+      // time shows once play sets the clock, its time zone and currency once a world is attached.
+      if (clockRecorded(this.state)) lines.push({ key: "time", value: formatClock(calendarOf(doc), this.state.world.clock), from: { system: "calendar" }, ...this.timeMark() });
+      if (this.state.world.revision !== BLANK_REVISION) {
+        lines.push({ key: "time_zone", value: doc.calendar.timeZone });
+        lines.push({ key: "currency", value: `${doc.currency.code} (${doc.currency.symbol})` });
+      }
       return lines;
     }
     const marks = this.state.marks[node.ref] ?? {};
@@ -478,7 +504,8 @@ export class TreeView {
       else if (inherited) {
         const zone = placeZone(doc, node.id);
         const setter = this.placeChain(node.id).find((x) => own(doc.places, x.id)?.timeZone === zone);
-        lines.push({ key: "time_zone", value: zone, from: setter ? { ref: `place:${setter.id}`, name: setter.name } : { ref: "world", name: doc.name } });
+        if (setter) lines.push({ key: "time_zone", value: zone, from: { ref: `place:${setter.id}`, name: setter.name } });
+        else if (this.state.world.revision !== BLANK_REVISION) lines.push({ key: "time_zone", value: zone, from: { ref: "world", name: doc.name } });
       }
       if (inherited) above = this.placeChain(p?.parent ?? null);
     } else if (node.kind === "entity") {
@@ -487,7 +514,7 @@ export class TreeView {
       if (e.life !== undefined) lines.push({ key: "life", value: e.life, ...(marks.life ? { mark: marks.life } : {}) });
       if (node.category === "person" || node.category === "group") {
         const cash = optionalQuery(this.ctx, "economy.carried_cash")?.(this.ctx, node.id) ?? null;
-        if (cash !== null) lines.push({ key: "coin", value: formatMoney(cash, doc.currency), from: { system: "economy" } });
+        if (cash !== null) lines.push({ key: "coin", value: formatMoney(cash, doc.currency), from: { system: "economy" }, ...this.coinMark(node.id) });
       }
       const posted = this.state.world.accounts[node.id];
       if (posted !== undefined) lines.push({ key: "posted", value: formatMoney(posted, doc.currency), from: { system: "economy" }, ...(marks.posted ? { mark: marks.posted } : {}) });

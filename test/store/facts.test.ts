@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import type { FactStore } from "../../src/iface/kit";
 import { factStore } from "../../src/store/facts";
 import type { ChangeInput, Fact, Precision } from "../../src/store/types";
+import { EXTERNAL_ACCOUNT_PREFIX } from "../../src/engine/events";
 import { engine, hashOf, pay, play, POV, say, shown, testStore } from "./fixtures";
 
 /** The engine's tools hold a fact store by this interface: the store's must fit it as it is. */
@@ -96,5 +97,20 @@ describe("the fact store", () => {
     play(s, "c", "m4", "She tips the boy something.", 4, exact(50, "A tip", "approximate"));
     play(s, "c", "m5", "She buys bread.", 5, exact(20, "Bread"));
     expect(s.view("c").node("acct_wren")?.values.find((v) => v.key === "posted")?.mark).toMatchObject({ n: 5, precision: "approximate" });
+  });
+
+  test("a person's coin carries the turn and precision of what last moved it, so a fact beside it shows as older or newer", () => {
+    const { s } = chat();
+    // Her purse opens as the economy opens an account, its opening amount posted; then she pays about four silver from it.
+    const open = engine({ type: "post", lines: [{ account: "acct_wren", amount: 1200 }, { account: `${EXTERNAL_ACCOUNT_PREFIX}${POV}`, amount: -1200 }], memo: "Opening balances" }, { type: "economy.open", data: { accounts: ["acct_wren"] } });
+    play(s, "c", "m1", "Wren pays for a room, about four silver.", 1, [...open, ...engine(pay("acct_wren", 400, "A room")).map((c) => ({ ...c, precision: "approximate" as const }))]);
+    play(s, "c", "m2", "She spends most of what is left on drink.", 2, [fact(WREN, "coin", "spent most of it", { precision: "vague" })]);
+    const coin = s.view("c").node(POV)?.values.find((v) => v.key === "coin");
+    expect(coin).toMatchObject({ value: "$8.00", from: { system: "economy" }, mark: { n: 1, precision: "approximate" } });
+    // As an agent reads it: the coin with its turn, then the later fact beside it.
+    const text = say(s.view("c"), POV, 0).split("\n");
+    const at = text.findIndex((l) => l.startsWith("  · coin: $8.00"));
+    expect(text[at]).toBe("  · coin: $8.00 (economy) — approximate, turn 1");
+    expect(text[at + 1]).toMatch(/^ {2}· coin: "spent most of it" \(vague, turn 2\) \[f-[0-9a-f]{12}\]$/);
   });
 });

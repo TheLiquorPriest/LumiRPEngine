@@ -20,13 +20,17 @@ import type { RevisionId, WorldId } from "../shared/ids";
 import type { WorldDoc } from "../shared/world";
 import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
-import { applyChecked, foldSteps, initialStoreState, type FoldEnv, type FoldStep, type Item, type StoredChange } from "./fold";
+import { applyChecked, applyUnchecked, foldSteps, initialStoreState, type FoldEnv, type FoldStep, type Item, type JobChange, type StoredChange } from "./fold";
+import { reversal, type UndoPlan } from "./undo";
 import { checkChange } from "./input";
 import { comparePaths, matchTurn, nodeKey } from "./path";
 import { BLANK_REVISION, blankWorld } from "./blank";
+import { MIGRATED_REVISION, readWorldDoc, type WorldRevisionRow } from "./worlds";
+import { isWorldDoc } from "../engine/authoring";
 import { migrateStore, missingStoreTables } from "./schema";
 import { TreeView } from "./view";
 import {
+  LANES,
   StoreInputError,
   StoreSchemaError,
   type ChangeInput,
@@ -67,7 +71,7 @@ export const STORE_DEFAULTS = Object.freeze({
 });
 
 /** Bumped whenever this fold's output for the same changes would differ: snapshots made before are not used. */
-const FOLD_VERSION = 2;
+const FOLD_VERSION = 4;
 
 export interface StoreOptions {
   /**
@@ -86,6 +90,12 @@ export interface StoreOptions {
   ownOnly?: readonly string[];
   notable?: number;
   now?: () => number;
+  /**
+   * Told when an engine handler throws while the store applies or checks a change: an error in the
+   * engine, not in the story. Its text is for people (the log, the live view) and never reaches a
+   * model, whose report says only that the handler failed. Unset, it is written to standard error.
+   */
+  handlerFailed?: (failure: { op: string; error: unknown }) => void;
 }
 
 export interface SessionRow {
@@ -253,7 +263,8 @@ export class Store {
     }
     // A chat that names no world plays on the blank one, which the store answers for itself.
     const blank = blankWorld(options.registry);
-    this.env = { registry: options.registry, worlds: (revision) => (revision === BLANK_REVISION ? blank : options.worlds(revision)) };
+    const failed = options.handlerFailed ?? ((f: { op: string; error: unknown }) => console.error(`RPE's store: the handler for ${f.op} failed:`, f.error));
+    this.env = { registry: options.registry, worlds: (revision) => (revision === BLANK_REVISION ? blank : options.worlds(revision)), failed };
     this.snapshotEvery = Math.max(1, Math.floor(options.snapshotEvery ?? STORE_DEFAULTS.snapshotEvery));
     this.foldsKept = Math.max(1, Math.floor(options.foldsKept ?? STORE_DEFAULTS.foldsKept));
     this.fingerprint = options.fingerprint ?? hashParts("rpe.store", String(FOLD_VERSION), ...options.registry.packs.map((p) => `${p.id}@${p.version}`));
@@ -749,12 +760,17 @@ export class UserStore {
    * Nothing is refused for what it says: a change that does not apply is recorded with its report
    * and stays unapplied. Grouped events are one unit only within one call. A turn takes changes
    * while open, and after it is tied too (a job's, a correction's). The state returned is the
-   * store's own, held for the next call: read it, never change it.
+   * store's own, held for the next call: read it, never change it. A job's changes are recorded with
+   * the turn that started it and take effect once the job has ended (`endJob`), before the next turn
+   * to begin: the state returned for them is only the one they were checked on.
    */
   addChanges(turnId: string, inputs: readonly ChangeInput[]): { changes: ChangeRow[]; state: StoreState } {
     const turn = this.turnOrThrow(turnId);
     if (turn.status === "dropped") throw new StoreInputError(`turn ${turnId} was dropped`);
     inputs.forEach((c, i) => checkChange(c, i));
+    const jobs = [...new Set(inputs.flatMap((c) => (c.job ? [c.job] : [])))];
+    const ended = jobs.find((j) => this.db.query<{ job: string }, [string, string]>("SELECT job FROM job_end WHERE user = ? AND job = ?").get(this.id, j) !== null);
+    if (ended !== undefined) throw new StoreInputError(`job ${ended} has ended: it records nothing more`);
     const inside = this.foldNode(turn.node);
     const state = structuredClone(inside.folded.state);
     const existing = this.changes(turnId);
@@ -774,8 +790,8 @@ export class UserStore {
       this.dropSnapshotsThrough(turnId);
       return made;
     });
-    // The state inside the turn now, held under the mark the write left: it stands only if the write does.
-    this.store.keep(this.cacheKey(turn.node), { ...inside.folded, state }, Math.max(inside.upto, ...ids), this.store.markOf(this.id));
+    // The state inside the turn now, held under the mark the write left: it stands only if the write does. A job's changes are not the turn's.
+    if (jobs.length === 0) this.store.keep(this.cacheKey(turn.node), { ...inside.folded, state }, Math.max(inside.upto, ...ids), this.store.markOf(this.id));
     const rows = this.db.query<ChangeDb, [string, string]>("SELECT * FROM change WHERE user = ?1 AND id IN (SELECT value FROM json_each(?2)) ORDER BY ord").all(this.id, JSON.stringify(ids)).map(changeOf);
     return { changes: rows, state };
   }
@@ -822,6 +838,16 @@ export class UserStore {
   /** State at a turn, along the path it was made on; inside an open turn, with its staged changes. */
   stateAt(turnId: string): Folded {
     return this.foldNode(this.turnOrThrow(turnId).node).folded;
+  }
+
+  /**
+   * The state a turn started from, along the path it was made on: before any change of its own. What
+   * a briefing at its start was shown, whatever the turn recorded since.
+   */
+  startOf(turnId: string): Folded {
+    const t = this.turnOrThrow(turnId);
+    const prev = this.db.query<{ prev: string | null }, [string, string]>("SELECT prev FROM path_node WHERE user = ? AND key = ?").get(this.id, t.node)?.prev ?? null;
+    return prev === null ? this.initial(this.chatOrThrow(t.chat).revision) : this.foldNode(prev).folded;
   }
 
   /** State at the end of the chat's path: rebased turns' changes applied again where they now stand. */
@@ -934,7 +960,7 @@ export class UserStore {
     const byTurn = new Map<string, StoredChange[]>();
     for (const c of this.db
       .query<{ id: number; turn: string; op: string; lane: string; value: string; by: string | null; applied: number; precision: string | null; standing: string | null; source: string | null }, [string, string]>(
-        "SELECT c.id, c.turn, c.op, c.lane, c.value, c.by, c.applied, c.precision, c.standing, c.source FROM change c WHERE c.user = ?1 AND c.turn IN (SELECT value FROM json_each(?2)) ORDER BY c.turn, c.ord",
+        "SELECT c.id, c.turn, c.op, c.lane, c.value, c.by, c.applied, c.precision, c.standing, c.source FROM change c WHERE c.user = ?1 AND c.turn IN (SELECT value FROM json_each(?2)) AND c.job IS NULL ORDER BY c.turn, c.ord",
       )
       .all(this.id, ids)) {
       const list = byTurn.get(c.turn) ?? [];
@@ -942,7 +968,8 @@ export class UserStore {
       byTurn.set(c.turn, list);
     }
     const stepOf = (c: { key: string; turn: string; depth: number }, changes: StoredChange[]): FoldStep => ({ node: c.key, turn: c.turn, n: c.depth + 1, own: turns.get(c.turn)?.node === c.key, changes });
-    const steps = rest.map((c) => stepOf(c, byTurn.get(c.turn) ?? []));
+    const placed = this.jobsPlaced(node);
+    const steps = rest.map((c): FoldStep => ({ ...stepOf(c, byTurn.get(c.turn) ?? []), jobs: placed.get(c.key) ?? [] }));
     // Changes the snapshot's own turn took after it was stored (a correction after a starting state was set) go on top of it.
     const late = (byTurn.get(first.turn) ?? []).filter((c) => c.id > (stored ?? Number.POSITIVE_INFINITY));
     if (late.length > 0) steps.unshift(stepOf(first, late));
@@ -958,6 +985,61 @@ export class UserStore {
     const folded: Folded = { node, state: result.state, notApplied: [...start.notApplied, ...result.notApplied], rebased: [...start.rebased, ...result.rebased] };
     this.store.keep(this.cacheKey(node), folded, result.upto, mark);
     return { folded, upto: result.upto };
+  }
+
+  /**
+   * Jobs' changes along the path ending at `node`, by the node of the turn each takes effect just
+   * before (plan §10.9): the first turn after the one that started the job to have begun after the
+   * job ended. A job that has not ended, or that no turn on the path began after, has not taken effect.
+   */
+  private jobsPlaced(node: string): Map<string, JobChange[]> {
+    const out = new Map<string, JobChange[]>();
+    const path = this.db
+      .query<{ key: string; turn: string; depth: number; created: number }, [string, string]>(
+        `WITH RECURSIVE up(key, prev, turn, depth) AS (
+           SELECT key, prev, turn, depth FROM path_node WHERE user = ?1 AND key = ?2
+           UNION ALL SELECT n.key, n.prev, n.turn, n.depth FROM path_node n JOIN up ON n.user = ?1 AND n.key = up.prev)
+         SELECT up.key, up.turn, up.depth, t.created FROM up JOIN turn t ON t.user = ?1 AND t.id = up.turn ORDER BY up.depth`,
+      )
+      .all(this.id, node);
+    const jobs = this.db
+      .query<{ id: number; turn: string; op: string; lane: string; value: string; by: string | null; applied: number; precision: string | null; standing: string | null; source: string | null; ended: number }, [string, string]>(
+        `SELECT c.id, c.turn, c.op, c.lane, c.value, c.by, c.applied, c.precision, c.standing, c.source, e.ended FROM change c JOIN job_end e ON e.user = c.user AND e.job = c.job
+         WHERE c.user = ?1 AND c.job IS NOT NULL AND c.turn IN (SELECT value FROM json_each(?2)) ORDER BY c.id`,
+      )
+      .all(this.id, JSON.stringify(path.map((p) => p.turn)));
+    const index = new Map(path.map((p, i) => [p.turn, i]));
+    for (const c of jobs) {
+      const i = index.get(c.turn);
+      const started = i === undefined ? undefined : path[i];
+      const before = i === undefined ? undefined : path.slice(i + 1).find((p) => p.created > c.ended);
+      if (!started || !before) continue;
+      const change: JobChange = { id: c.id, turn: c.turn, from: started.depth + 1, op: c.op, lane: c.lane as Lane, value: JSON.parse(c.value) as JsonValue, by: c.by, applied: c.applied === 1, precision: c.precision as Precision | null, standing: c.standing as Standing | null, source: c.source as Source | null };
+      out.set(before.key, [...(out.get(before.key) ?? []), change]);
+    }
+    return out;
+  }
+
+  /**
+   * Notes that a job has ended (plan §10.9): its changes, recorded with the turn that started it, take
+   * effect just before the first turn that begins from now on, so no turn begun already has its state
+   * changed. A job ends once; one that has ended records nothing more.
+   */
+  endJob(job: string): void {
+    this.write(false, () => this.db.run("INSERT OR IGNORE INTO job_end (user, job, ended) VALUES (?, ?, ?)", [this.id, job, this.store.now()]));
+  }
+
+  /**
+   * What jobs changed at the start of a turn, for its briefing (plan §10.9): their changes placed just
+   * before it, on the path it was made on, each with whether it took effect and what was reported.
+   */
+  jobsBefore(turnId: string): { change: ChangeRow; applied: boolean; reports: Report[] }[] {
+    const t = this.turnOrThrow(turnId);
+    const placed = this.jobsPlaced(t.node).get(t.node) ?? [];
+    if (placed.length === 0) return [];
+    const missed = new Map(this.stateAt(t.id).notApplied.map((n) => [n.change, n.reports]));
+    const rows = new Map(placed.map((c) => [c.id, this.changeOrThrow(c.id)]));
+    return placed.map((c) => ({ change: rows.get(c.id) as ChangeRow, applied: !missed.has(c.id), reports: missed.get(c.id) ?? [] }));
   }
 
   // ------------------------------------------------------------ sessions
@@ -988,6 +1070,132 @@ export class UserStore {
       .query<{ id: string; chat: string; scene: string; opened_by: string; closed_by: string | null }, [string, string]>("SELECT id, chat, scene, opened_by, closed_by FROM session WHERE user = ? AND chat = ? ORDER BY rowid")
       .all(this.id, chat)
       .map((r) => ({ id: r.id, chat: r.chat, scene: r.scene, openedBy: r.opened_by, closedBy: r.closed_by }));
+  }
+
+  // ------------------------------------------------------------ worlds
+
+  /**
+   * Keeps a world revision's document (plan §4.5) for chats that play it, under the id chats and
+   * markers name it by. A revision's document never changes, so one already kept stays as it is.
+   * Whether it was added.
+   */
+  putWorld(revision: RevisionId, doc: WorldDoc): boolean {
+    if (revision === "" || revision === BLANK_REVISION) throw new StoreInputError(`"${revision}" cannot name a kept revision: the blank world is the store's own`);
+    if (!isWorldDoc(doc)) throw new StoreInputError(`revision ${revision} is not a world document`);
+    return this.write(false, () => this.db.run("INSERT INTO world_revision (user, revision, world, doc, created) VALUES (?, ?, ?, ?, ?) ON CONFLICT (user, revision) DO NOTHING", [this.id, revision, doc.id, JSON.stringify(doc), this.store.now()]).changes > 0);
+  }
+
+  /** A kept revision's document, read as today's world store reads one; null when this user keeps no such revision. */
+  worldDoc(revision: RevisionId): WorldDoc | null {
+    const row = this.db.query<{ doc: string }, [string, string]>("SELECT doc FROM world_revision WHERE user = ? AND revision = ?").get(this.id, revision);
+    return row ? readWorldDoc(row.doc) : null;
+  }
+
+  /** The revisions this user keeps, of one world or of all, oldest first. */
+  worldRevisions(world?: WorldId): WorldRevisionRow[] {
+    const rows =
+      world === undefined
+        ? this.db.query<WorldRevisionRow, [string]>("SELECT revision, world, created FROM world_revision WHERE user = ? ORDER BY created, rowid").all(this.id)
+        : this.db.query<WorldRevisionRow, [string, string]>("SELECT revision, world, created FROM world_revision WHERE user = ? AND world = ? ORDER BY created, rowid").all(this.id, world);
+    return rows.map((r) => ({ revision: r.revision, world: r.world, created: r.created }));
+  }
+
+  /**
+   * Keeps every world revision the migration carried for this user (its `world_file` table, plan
+   * §15.2), so the chats it imported play their worlds. A revision already kept stays as it is; a file
+   * that does not read as a world document is left out and listed. The migration calls it after a run.
+   */
+  copyMigratedWorlds(): { added: number; held: number; unreadable: { world: WorldId; revision: RevisionId }[] } {
+    if (!this.db.query<{ n: number }, []>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'world_file'").get()?.n) {
+      throw new StoreSchemaError("This database holds no world_file table: the migration's tables are not here, so it carried no worlds into it.");
+    }
+    const files = this.db.query<{ world: string; file: string; bytes: Uint8Array }, [string]>("SELECT world, file, bytes FROM world_file WHERE user = ? ORDER BY world, file").all(this.id);
+    const decoder = new TextDecoder();
+    const unreadable: { world: WorldId; revision: RevisionId }[] = [];
+    let added = 0;
+    let held = 0;
+    this.write(false, () => {
+      const put = this.db.query("INSERT INTO world_revision (user, revision, world, doc, created) VALUES (?, ?, ?, ?, ?) ON CONFLICT (user, revision) DO NOTHING");
+      const now = this.store.now();
+      for (const f of files) {
+        const revision = MIGRATED_REVISION.exec(f.file)?.[1];
+        if (revision === undefined) continue;
+        const text = decoder.decode(f.bytes);
+        if (!readWorldDoc(text)) {
+          unreadable.push({ world: f.world, revision });
+          continue;
+        }
+        if (put.run(this.id, revision, f.world, text, now).changes > 0) added++;
+        else held++;
+      }
+    });
+    return { added, held, unreadable };
+  }
+
+  // ------------------------------------------------------------ undo and the review card
+
+  private changeOrThrow(id: number): ChangeRow {
+    const r = this.db.query<ChangeDb, [string, number]>("SELECT * FROM change WHERE user = ? AND id = ?").get(this.id, id);
+    if (!r) throw new StoreInputError(`no change ${id}`);
+    return changeOf(r);
+  }
+
+  /**
+   * What undoing a change would record and leave, read against the chat's newest reply, with the turn
+   * of that reply, where the undo goes; none for a change no longer on the chat's path.
+   */
+  private undoPlan(c: ChangeRow, turn: TurnRow, own: readonly ChangeRow[]): { plan: UndoPlan; on: string | null } {
+    const chat = this.chatOrThrow(turn.chat);
+    const onPath = (JSON.parse(chat.path) as PathEntry[]).some((e) => e.turn === turn.id);
+    const head = chat.head === null ? null : (this.db.query<{ turn: string }, [string, string]>("SELECT turn FROM path_node WHERE user = ? AND key = ?").get(this.id, chat.head)?.turn ?? null);
+    if (!onPath || head === null) return { plan: { inputs: [], left: [{ code: "not_on_path", values: { change: c.id, op: c.op } }] }, on: null };
+    // The change with the rest of its unit: the changes of its turn that share its group.
+    const group = isRecord(c.value) && typeof c.value.group === "string" ? c.value.group : null;
+    const unit = group === null ? [c] : own.filter((x) => isRecord(x.value) && x.value.group === group);
+    const first = unit[0]?.ord ?? c.ord;
+    // The state just before the unit: the turn's start, and what the turn recorded before it.
+    const before = structuredClone(this.startOf(turn.id).state);
+    const earlier = own.filter((x) => x.applied && x.job === null && x.ord < first);
+    applyUnchecked(this.store.env, before, earlier.map((x): Item => ({ op: x.op, value: x.value, turn: turn.id, n: turn.depth + 1, by: x.by, precision: x.precision, standing: x.standing, source: x.source })));
+    return { plan: reversal(unit, before, this.headState(chat.id).state), on: head };
+  }
+
+  /**
+   * Undoes one change (plan §6.8): records the changes that reverse it after the chat's newest reply,
+   * with source `player`, each citing the change it undoes. Nothing recorded is taken away. What would
+   * be left is listed; when a later change has written the same part since, nothing is recorded. A
+   * change still staged in an open turn is taken back with `dropStaged` instead.
+   */
+  undo(changeId: number, by: string | null = "player"): { changes: ChangeRow[]; left: Report[] } {
+    const c = this.changeOrThrow(changeId);
+    const turn = this.turnOrThrow(c.turn);
+    if (turn.status === "open") throw new StoreInputError(`change ${changeId} is staged in an open turn: dropStaged takes it back`);
+    const { plan, on } = this.undoPlan(c, turn, this.changes(turn.id));
+    if (on === null || plan.inputs.length === 0) return { changes: [], left: plan.left };
+    const inputs = plan.inputs.map((i): ChangeInput => ({ ...i, by, source: "player", cite: { undoes: changeId } }));
+    return { changes: this.addChanges(on, inputs).changes, left: plan.left };
+  }
+
+  /**
+   * What the review card shows of a turn (plan §6.8): its changes by lane, each with its undo — the
+   * operations undoing it would record and what would be left — and the changes that already undid it.
+   */
+  reviewCard(turnId: string): { lane: Lane; changes: { change: ChangeRow; undo: { ops: string[]; left: Report[] }; undoneBy: number[] }[] }[] {
+    const turn = this.turnOrThrow(turnId);
+    const own = this.changes(turn.id);
+    const undone = new Map<number, number[]>();
+    for (const r of this.db.query<{ id: number; undoes: number }, [string, string]>("SELECT c.id, json_extract(c.cite, '$.undoes') AS undoes FROM change c JOIN turn t ON t.user = c.user AND t.id = c.turn WHERE c.user = ? AND t.chat = ? AND json_extract(c.cite, '$.undoes') IS NOT NULL ORDER BY c.id").all(this.id, turn.chat)) {
+      undone.set(r.undoes, [...(undone.get(r.undoes) ?? []), r.id]);
+    }
+    return LANES.map((lane) => ({
+      lane,
+      changes: own
+        .filter((c) => c.lane === lane)
+        .map((change) => {
+          const { plan } = turn.status === "open" ? { plan: { inputs: [], left: [{ code: "staged", values: { change: change.id, op: change.op } }] } } : this.undoPlan(change, turn, own);
+          return { change, undo: { ops: plan.inputs.map((i) => i.op), left: plan.left }, undoneBy: undone.get(change.id) ?? [] };
+        }),
+    })).filter((l) => l.changes.length > 0);
   }
 
   // ------------------------------------------------------------ the tree view

@@ -18,13 +18,14 @@ lines:
   fact: '· {{key}}: "{{value}}" ({{#precision}}{{precision}}, {{/precision}}{{#standing}}{{standing}}, {{/standing}}turn {{turn}}) [{{id}}]'
   map: '{{text}}'
   map_unavailable: 'No map is drawn here: this world state has no maps to hand.'
-  due: '{{when}}: {{kind}}{{#where}} at {{where}}{{/where}}{{#who}}, {{who}}{{/who}}{{#what}} ({{what}}){{/what}}'
+  due: '{{#when}}{{when}}{{/when}}{{^when}}in {{after}} minutes{{/when}}: {{kind}}{{#where}} at {{where}}{{/where}}{{#who}}, {{who}}{{/who}}{{#what}} ({{what}}){{/what}}'
   due_unlisted: 'What falls due is not listed here.'
   quest: '{{label}} [{{id}}] ({{kind}}): {{stage}}{{#owner}}, {{owner}}''s{{/owner}}'
   changed: '{{lane}}: {{n}} {{#one}}change{{/one}}{{^one}}changes{{/one}}{{#ops}} ({{list}}){{/ops}}{{#touched}}, to {{names}}{{/touched}}{{#unapplied}}; {{unapplied}} did not apply{{/unapplied}}'
   unsettled_fact: '{{at}}: {{key}}: "{{value}}" ({{#precision}}{{precision}}, {{/precision}}{{#standing}}{{standing}}, {{/standing}}{{#unsourced}}unsourced, {{/unsourced}}turn {{turn}}) [{{id}}]'
   unsettled_value: '{{at}}: {{key}}: {{#value}}{{value}}{{/value}}{{^value}}none{{/value}} ({{#precision}}{{precision}}, {{/precision}}{{#standing}}{{standing}}, {{/standing}}{{#unsourced}}unsourced, {{/unsourced}}turn {{turn}})'
   unsettled_report: '{{op}}, turn {{turn}}{{^applied}}, not applied{{/applied}}: {{codes}}'
+  left_out: '… and {{n}} more, left out to keep the world state within its budget (world_query opens any level)'
 keys:
   time_zone: time zone
 ---

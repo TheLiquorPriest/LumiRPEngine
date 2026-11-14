@@ -8,6 +8,7 @@ import type { RevisionId } from "../shared/ids";
 import type { WorldDoc } from "../shared/world";
 import { newBlankWorld } from "../engine/authoring";
 import type { Registry } from "../engine/registry-impl";
+import type { StoreState } from "./types";
 
 /** The revision a chat that names no world plays on. */
 export const BLANK_REVISION: RevisionId = "blank";
@@ -24,4 +25,13 @@ export function blankWorld(registry: Registry): WorldDoc {
     pov: "",
     start: { ...made.start, place: "" },
   };
+}
+
+/**
+ * Whether a state's clock is a recorded value. A real world's is: its author set the calendar. The
+ * blank world's starts from the authoring template, a date nobody set, so it is one only once a
+ * change has set the clock. Its time zone and currency are never one: only a world attached gives them.
+ */
+export function clockRecorded(state: StoreState): boolean {
+  return state.world.revision !== BLANK_REVISION || state.marks.world?.time !== undefined;
 }

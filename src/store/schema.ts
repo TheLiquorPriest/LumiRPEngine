@@ -123,10 +123,36 @@ CREATE TABLE fold_mark (
 );
 `,
   },
+  {
+    version: 2,
+    // A chat on a real world starts from, and folds over, the revision it plays. A revision's id is its
+    // document's content hash, so a revision once kept never changes and one id names one document.
+    // A job's changes take effect just before the first turn that begins after the job ended (plan
+    // §10.9), so when each job ended is kept.
+    sql: `
+CREATE TABLE world_revision (
+  user TEXT NOT NULL,
+  revision TEXT NOT NULL,
+  world TEXT NOT NULL,
+  doc TEXT NOT NULL,
+  created INTEGER NOT NULL,
+  PRIMARY KEY (user, revision)
+);
+CREATE INDEX world_revision_world ON world_revision (user, world);
+CREATE INDEX world_revision_id ON world_revision (revision);
+CREATE TABLE job_end (
+  user TEXT NOT NULL,
+  job TEXT NOT NULL,
+  ended INTEGER NOT NULL,
+  PRIMARY KEY (user, job)
+);
+CREATE INDEX change_job ON change (user, job) WHERE job IS NOT NULL;
+`,
+  },
 ];
 
 /** The tables the store reads and writes, all made by its migrations. */
-export const STORE_TABLES: readonly string[] = ["chat", "message_link", "session", "turn", "path_node", "change", "snapshot", "fold_mark"];
+export const STORE_TABLES: readonly string[] = ["chat", "message_link", "session", "turn", "path_node", "change", "snapshot", "fold_mark", "world_revision", "job_end"];
 
 /** The store's tables `db` does not hold. */
 export function missingStoreTables(db: Database): string[] {

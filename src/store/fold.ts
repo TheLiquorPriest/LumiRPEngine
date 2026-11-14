@@ -19,6 +19,7 @@ import type { RevisionId } from "../shared/ids";
 import type { WorldDoc } from "../shared/world";
 import { apartHost, applyEvent, applyMarker, tiesOf, validateEvent, validMarkerBody } from "../engine/events";
 import type { ReadContext } from "../engine/registry";
+import { own } from "../engine/pack-kit";
 import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
 import { initialState } from "../engine/world-state";
@@ -29,6 +30,8 @@ import { PRECISIONS, STORE_OPS, type Lane, type NotApplied, type Precision, type
 export interface FoldEnv {
   registry: Registry;
   worlds: (revision: RevisionId) => WorldDoc | undefined;
+  /** Told when an engine handler throws: an error in the engine, whose text is for people (the log, the live view), never for a model. */
+  failed?: (failure: { op: string; error: unknown }) => void;
 }
 
 /** How a change came to be, as its row records it: how exact, how sure, from where. Absent: none given. */
@@ -49,6 +52,13 @@ export interface StoredChange extends Provenance {
   applied: boolean;
 }
 
+/** A job's change, with the turn that started the job: recorded with that turn, it takes effect later (plan §10.9). */
+export interface JobChange extends StoredChange {
+  turn: string;
+  /** The number on the path of the turn that started the job. */
+  from: number;
+}
+
 /** One turn of a path to fold. */
 export interface FoldStep {
   node: string;
@@ -58,6 +68,8 @@ export interface FoldStep {
   /** Whether this node is the one the turn was made on. */
   own: boolean;
   changes: readonly StoredChange[];
+  /** Jobs' changes that take effect just before this turn: the first on the path to begin after their job ended. */
+  jobs?: readonly JobChange[];
 }
 
 /** What applying one change came to. */
@@ -90,8 +102,28 @@ export function eventOf(op: string, value: JsonValue): LedgerEvent | null {
   return value as unknown as LedgerEvent;
 }
 
-function failed(e: unknown): Report {
-  return { code: "failed", values: { error: e instanceof Error ? e.message : String(e) } };
+/** A handler that threw: the error goes to whoever keeps the log; the report says only that it failed. */
+function failed(env: FoldEnv, op: string, error: unknown): Report {
+  env.failed?.({ op, error });
+  return { code: "failed" };
+}
+
+/**
+ * The tracks a marker set back (an Upgrade to a revision that no longer has the stage one was at), as
+ * data: today's marker code journals the same in its own words, for public tracks only.
+ */
+function tracksReset(env: FoldEnv, was: RevisionId, world: WorldState, stages: Readonly<Record<string, string>>): Report[] {
+  const before = env.worlds(was);
+  const after = env.worlds(world.revision);
+  const out: Report[] = [];
+  for (const [id, t] of Object.entries(world.tracks)) {
+    const from = stages[id];
+    if (from === undefined || from === t.stage) continue;
+    const def = after ? own(after.tracks, id) : undefined;
+    const old = before ? own(before.tracks, id) : undefined;
+    out.push({ code: "track_reset", values: { track: id, label: def?.label ?? id, from: (old ? own(old.stages, from)?.label : undefined) ?? from, to: (def ? own(def.stages, t.stage)?.label : undefined) ?? t.stage } });
+  }
+  return out;
 }
 
 const noWorld = (revision: string): Report => ({ code: "unknown_revision", values: { revision } });
@@ -124,12 +156,17 @@ function lessExact(a: Precision | null, b: Precision | null): Precision | null {
 
 /**
  * Keeps which turn last touched what an applied event declares it writes (`touches`), and the world
- * for time; and, for each part it writes (a field, a relation type, an aspect), the change that
- * wrote it last. A balance sums every posting into it, so its precision is the least exact of them.
+ * when it moved the clock; and, for each part it writes (a field, a relation type, an aspect, the
+ * world's time), the change that wrote it last. A balance sums every posting into it, so its
+ * precision is the least exact of them.
  */
-function markTouched(env: FoldEnv, state: StoreState, ev: LedgerEvent, item: Item): void {
+function markTouched(env: FoldEnv, state: StoreState, ev: LedgerEvent, item: Item, clockMoved: boolean): void {
   const mark = { turn: item.turn, n: item.n };
-  if (ev.type === "clock" || ev.type === "timelapse") state.touched.world = mark;
+  const provenance = { standing: item.standing ?? null, source: item.source ?? null };
+  if (clockMoved) {
+    state.touched.world = mark;
+    (state.marks.world ??= {}).time = { ...mark, precision: item.precision ?? null, ...provenance };
+  }
   const touches = env.registry.get(ev.type)?.touches?.(ev) ?? [];
   for (const t of touches) {
     const ref = `entity:${t.entity}`;
@@ -137,7 +174,7 @@ function markTouched(env: FoldEnv, state: StoreState, ev: LedgerEvent, item: Ite
     const name = "field" in t ? t.field : "rel" in t ? t.rel : t.aspect;
     const marks = (state.marks[ref] ??= {});
     const precision = item.precision ?? null;
-    marks[name] = { ...mark, precision: name === "posted" ? lessExact(marks[name]?.precision ?? null, precision) : precision, standing: item.standing ?? null, source: item.source ?? null };
+    marks[name] = { ...mark, precision: name === "posted" ? lessExact(marks[name]?.precision ?? null, precision) : precision, ...provenance };
   }
 }
 
@@ -145,12 +182,13 @@ function markTouched(env: FoldEnv, state: StoreState, ev: LedgerEvent, item: Ite
 function applyOne(env: FoldEnv, state: StoreState, ev: LedgerEvent, item: Item): Outcome {
   const ctx = contextOf(env, state.world);
   if (!ctx) return { applied: false, reports: [noWorld(state.world.revision)] };
+  const clock = state.world.clock;
   try {
     applyEvent(env.registry, ev, state.world, ctx);
   } catch (e) {
-    return { applied: false, reports: [failed(e)] };
+    return { applied: false, reports: [failed(env, ev.type, e)] };
   }
-  markTouched(env, state, ev, item);
+  markTouched(env, state, ev, item, state.world.clock !== clock);
   return { applied: true, reports: [] };
 }
 
@@ -162,7 +200,7 @@ function checkOne(env: FoldEnv, world: WorldState, ev: LedgerEvent): Report | nu
     const r = validateEvent(env.registry, ev, ctx);
     return r ? { code: r.code } : null;
   } catch (e) {
-    return failed(e);
+    return failed(env, ev.type, e);
   }
 }
 
@@ -177,7 +215,7 @@ function trial(env: FoldEnv, state: StoreState, unit: readonly LedgerEvent[]): R
     try {
       applyEvent(env.registry, ev, scratch, ctx);
     } catch (e) {
-      return failed(e);
+      return failed(env, ev.type, e);
     }
   }
   return null;
@@ -201,14 +239,15 @@ function applyStoreOp(env: FoldEnv, state: StoreState, item: Item): Outcome {
       const body = validMarkerBody(item.value);
       if (!body) return { applied: false, reports: [{ code: "bad_marker" }] };
       if (body.kind === "migrate" && !env.worlds(body.to)) return { applied: false, reports: [noWorld(body.to)] };
+      const was = state.world.revision;
+      const stages = Object.fromEntries(Object.entries(state.world.tracks).map(([id, t]) => [id, t.stage]));
       try {
-        // Today's marker code says what it did in its own words: they are kept as its values.
-        const notes = applyMarker(state.world, body, { worlds: env.worlds, types: env.registry });
-        state.touched.world = { turn: item.turn, n: item.n };
-        return { applied: true, reports: notes.map((note) => ({ code: "marker_note", values: { note } })) };
+        applyMarker(state.world, body, { worlds: env.worlds, types: env.registry });
       } catch (e) {
-        return { applied: false, reports: [failed(e)] };
+        return { applied: false, reports: [failed(env, item.op, e)] };
       }
+      state.touched.world = { turn: item.turn, n: item.n };
+      return { applied: true, reports: tracksReset(env, was, state.world, stages) };
     }
     case STORE_OPS.fact: {
       const reports = applyFact(state, item.value, { turn: item.turn, n: item.n, by: item.by, precision: item.precision ?? null, standing: item.standing ?? null, source: item.source ?? null });
@@ -306,6 +345,51 @@ export interface FoldResult {
   rebased: string[];
 }
 
+/** The last change on record that wrote one of the parts a job's change writes, when a turn after the job's own wrote it: its value stands. */
+function laterWrite(env: FoldEnv, state: StoreState, c: JobChange): number | null {
+  const ev = eventOf(c.op, c.value);
+  const touched: { ref: string; part: string }[] = [];
+  if (ev) for (const t of env.registry.get(ev.type)?.touches?.(ev) ?? []) touched.push({ ref: `entity:${t.entity}`, part: "field" in t ? t.field : "rel" in t ? t.rel : t.aspect });
+  else if (c.op === STORE_OPS.fact && isRecord(c.value)) {
+    const { about, key } = c.value;
+    const later = (state.facts[String(about)] ?? []).filter((f) => f.key === key && f.replacedBy === undefined && f.n > c.from);
+    return later.length > 0 ? Math.max(...later.map((f) => f.n)) : null;
+  }
+  let latest: number | null = null;
+  for (const { ref, part } of touched) {
+    const n = state.marks[ref]?.[part]?.n;
+    if (n !== undefined && n > c.from && (latest === null || n > latest)) latest = n;
+  }
+  return latest;
+}
+
+/**
+ * Applies jobs' changes where they take effect, just before a turn (plan §10.9). A unit of them that
+ * a turn since the job's own has written a part of does not apply: the later value stands, and the
+ * report says which turn wrote it. The rest are checked as any change placed anew is, and are marked
+ * as the job's own turn's, so a job's later change is never taken for a later turn's.
+ */
+function applyJobs(env: FoldEnv, state: StoreState, jobs: readonly JobChange[]): Outcome[] {
+  const out: Outcome[] = new Array(jobs.length);
+  const unitOf = (c: JobChange): string => (isRecord(c.value) && typeof c.value.group === "string" ? `g:${c.value.group}` : `c:${c.id}`);
+  const later = new Map<string, number>();
+  for (const c of jobs) {
+    const at = laterWrite(env, state, c);
+    if (at !== null) later.set(unitOf(c), Math.max(at, later.get(unitOf(c)) ?? at));
+  }
+  const go: { k: number; item: Item }[] = [];
+  jobs.forEach((c, k) => {
+    const at = later.get(unitOf(c));
+    if (at !== undefined) out[k] = { applied: false, reports: [{ code: "later_value", values: { turn: at } }] };
+    else go.push({ k, item: { op: c.op, value: c.value, turn: c.turn, n: c.from, by: c.by, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null } });
+  });
+  applyChecked(env, state, go.map((g) => g.item), new Set()).forEach((o, i) => {
+    const k = go[i]?.k;
+    if (k !== undefined) out[k] = o;
+  });
+  return out;
+}
+
 /**
  * Folds `steps` onto `start` (whose state it changes: pass a copy of anything shared). `start.upto`
  * is the newest change id already folded into the start. `visit` sees each step's state, with what
@@ -318,6 +402,14 @@ export function foldSteps(env: FoldEnv, start: { state: StoreState; upto: number
   const rebased: string[] = [];
   for (const step of steps) {
     if (!step.own) rebased.push(step.turn);
+    const jobs = step.jobs ?? [];
+    if (jobs.length > 0) {
+      applyJobs(env, state, jobs).forEach((o, k) => {
+        const c = jobs[k];
+        if (!o.applied && c) notApplied.push({ change: c.id, turn: c.turn, op: c.op, lane: c.lane, reports: o.reports });
+      });
+      for (const c of jobs) if (c.id > upto) upto = c.id;
+    }
     const first = step.changes[0]?.id ?? Number.POSITIVE_INFINITY;
     // Recorded on this very path, after everything before it: it folds as it was recorded.
     const clean = step.own && upto < first;
