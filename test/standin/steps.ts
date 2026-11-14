@@ -109,31 +109,36 @@ export interface StreamedReply {
   usage: Record<string, unknown> | null;
 }
 
+/** What a stream has given so far, kept as it comes: what a stopped generation saves (`services/generate.service.ts:3565-3660`). */
+export interface StreamSeen {
+  content: string;
+  reasoning: string;
+}
+
 /**
  * What Lumiverse reads of a streamed reply: `readProviderSse` (`llm/provider-sse.ts:25-72`) and the
  * chunk handling of `generateStream` (`llm/providers/openai-compatible.ts:233-303`), including a
  * chunk that carries `error` (`provider-sse.ts:11-21`) and a stream that ends with no finish reason.
+ * Each line is read as it comes, into `seen`, so a generation stopped half way has what came before.
  */
-export async function readStream(res: Response): Promise<StreamedReply> {
+export async function readStream(res: Response, seen: StreamSeen = { content: "", reasoning: "" }): Promise<StreamedReply> {
   if (!res.ok) throw new Error(`Provider error ${res.status}: ${await res.text()}`);
-  const text = await res.text();
-  let content = "";
-  let reasoning = "";
   let reasoningKey: "reasoning" | "reasoning_content" | null = null;
   let finishReason: string | undefined;
   let usage: Record<string, unknown> | null = null;
   let dataLines: string[] = [];
-  for (const raw of text.split("\n")) {
+  /** One line of the stream; true once it is `[DONE]`. */
+  const take = (raw: string): boolean => {
     const line = raw.replace(/\r$/, "");
     if (line.startsWith("data:")) {
       dataLines.push(line.slice(5).replace(/^ /, ""));
       const payload = dataLines.join("\n");
-      if (payload.trim() === "[DONE]") break;
+      if (payload.trim() === "[DONE]") return true;
       let data: Record<string, unknown>;
       try {
         data = JSON.parse(payload) as Record<string, unknown>;
       } catch {
-        continue;
+        return false;
       }
       dataLines = [];
       if (data.error !== undefined) {
@@ -150,16 +155,35 @@ export async function readStream(res: Response): Promise<StreamedReply> {
       // `splitMirroredReasoning` (`openai-compatible.ts:80-106`): a delta whose content mirrors its reasoning is reasoning only.
       const c = typeof delta?.content === "string" ? delta.content : "";
       const r = reasoningKey && typeof delta?.[reasoningKey] === "string" && (delta[reasoningKey] as string).length > 0 ? (delta[reasoningKey] as string) : "";
-      if (r && c && (c === r || c.trim() === r.trim())) reasoning += r;
+      if (r && c && (c === r || c.trim() === r.trim())) seen.reasoning += r;
       else {
-        content += c;
-        reasoning += r;
+        seen.content += c;
+        seen.reasoning += r;
       }
       if (data.usage && typeof data.usage === "object") usage = data.usage as Record<string, unknown>;
     } else if (line === "" && dataLines.length) throw new Error("The provider sent an invalid JSON stream event.");
+    return false;
+  };
+  const reader = res.body?.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let over = false;
+  // The stream is read to its end, as `res.text()` would; nothing after `[DONE]` is taken. A chunk with an error ends the read there.
+  try {
+    for (;;) {
+      const next = reader === undefined ? { done: true as const, value: undefined } : await reader.read();
+      buffer += next.done ? decoder.decode() : decoder.decode(next.value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = next.done ? "" : (lines.pop() ?? "");
+      for (const line of lines) if (!over) over = take(line);
+      if (next.done) break;
+    }
+  } catch (error) {
+    await reader?.cancel().catch(() => undefined);
+    throw error;
   }
   if (!finishReason) throw new Error("The provider connection closed before a terminal response was received.");
-  return { content, reasoning, finishReason, usage };
+  return { content: seen.content, reasoning: seen.reasoning, finishReason, usage };
 }
 
 /**

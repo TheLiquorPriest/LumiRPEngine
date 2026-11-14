@@ -4,9 +4,15 @@
 // its own (assembling the prompt, activating lore, counting tokens) says so. Paths are Lumiverse's
 // `src/`. Its "network" is a table of handlers by origin: an address with none answers as a stopped
 // server does.
+//
+// Its chats are held in memory, which its prompts are assembled from. Given a database (`db`), it also
+// writes each chat's rows there as Lumiverse's chat service writes them, at the same moments: a chat
+// added, a message sent or deleted, a reply's message staged, its swipe added, and the reply saved.
+// Behind the stand-in server (`http.ts`), each event it emits also reaches the user's sockets.
 
 import type { ExtSpindle, InterceptorReturn, PermissionChange, PromptMessageDTO, ProxyAnswer, WorldInfoReturn } from "../../src/ext/spindle";
-import { applyPostProcessing, buildBody, collapse, dropBlank, providerHeaders, readStream, readWhole, stripClosingTags, textOf, type LlmMessage, type LlmPart, type Role, type StreamedReply } from "./steps";
+import type { StandInDb } from "./db";
+import { applyPostProcessing, buildBody, collapse, dropBlank, providerHeaders, readStream, readWhole, stripClosingTags, textOf, type LlmMessage, type LlmPart, type Role, type StreamSeen, type StreamedReply } from "./steps";
 
 export interface Entry {
   id: string;
@@ -35,6 +41,8 @@ export interface Chat {
   messages: ChatMessage[];
   books: Entry[];
   metadata?: Record<string, unknown>;
+  /** The chat's name (`chats.name`, empty unless named). */
+  name?: string;
 }
 
 export interface Connection {
@@ -75,6 +83,8 @@ export interface GenerateInput {
   dryRun?: boolean;
   persona?: string;
   parameters?: Record<string, unknown>;
+  /** An impersonation kept as a draft for the input box, saving no message (`impersonate_draft`, `services/generate.service.ts:1905`, `:4172-4175`). */
+  impersonateDraft?: boolean;
 }
 
 /** What Lumiverse stores beside a reply (`services/generate.service.ts:4448-4469`). */
@@ -97,6 +107,8 @@ export interface Outcome {
   generationId: string | null;
   /** The generation's error, as Lumiverse ends it with one. */
   error: string | null;
+  /** The user stopped it (`POST /api/v1/generate/stop`): what was streamed until then is saved, and is `reply`'s text. */
+  stopped: boolean;
   /** The prompt as Lumiverse finished it, after its interceptors, post-processing, the blank filter and collapse. */
   prompt: LlmMessage[];
   /** The request body sent to the connection; null when none was sent. */
@@ -164,6 +176,8 @@ export class StandIn {
   /** What Lumiverse stored beside each reply, by message id, with its chat (`services/breakdown.service.ts:3-12`). */
   readonly stored = new Map<string, { chatId: string; data: Stored }>();
   readonly events: { event: string; payload: unknown }[] = [];
+  /** What each generation's stream has shown the player so far, its reply and its thinking, by generation (the streaming bubble). */
+  readonly streams = new Map<string, StreamSeen>();
   readonly log: string[] = [];
   /** Each user's extension storage, by user and path (the stand-in's disk). */
   readonly storage = new Map<string, string>();
@@ -184,8 +198,16 @@ export class StandIn {
   worldInfoTimeoutMs = 10_000;
   /** Spindle's proxy limit (`spindle/worker-host.ts:771`). */
   proxyTimeoutMs = 30_000;
+  /** Where Lumiverse's event bus frames an event for the user's sockets (`ws/bus.ts:520-529`): the stand-in server's, when this host is behind one. */
+  sockets: ((event: string, payload: unknown, user: string) => void) | null = null;
+  /** The database Lumiverse's chat service writes the chats' rows to; with none, the chats are held in memory only. */
+  db: StandInDb | null = null;
+  /** The host's clock, for its rows' stamps: Lumiverse stamps seconds (`services/chats.service.ts:2640`). */
+  now: () => number = () => Date.now();
   private worldInfo: Registration<WorldInfoHandler>[] = [];
   private interceptors: Registration<PromptHandler>[] = [];
+  /** The generations going on, by id, with what stops each (`services/generation/active-generation-registry.ts`). */
+  private readonly going = new Map<string, { user: string; chat: string; stop: AbortController }>();
 
   // ---------------------------------------------------------------- extensions
 
@@ -217,8 +239,8 @@ export class StandIn {
       sendToFrontend(payload, user, options) {
         const session = options?.frontendSessionId;
         const delivered = host.frontendSent({ extension: ext.id, payload: structuredClone(payload), user, session });
-        // A message for a session that is gone tells the worker so (`spindle/worker-host.ts:2143-2149`).
-        if (!delivered && session !== undefined && user !== undefined) host.emit("FRONTEND_SESSION_CLOSED", { frontendSessionId: session }, user);
+        // A message for a session that is gone tells the worker so, and no socket (`spindle/worker-host.ts:2143-2149`).
+        if (!delivered && session !== undefined && user !== undefined) host.toWorkers("FRONTEND_SESSION_CLOSED", { frontendSessionId: session }, user);
       },
       onFrontendMessage(handler) {
         ext.frontend.add(handler);
@@ -316,9 +338,18 @@ export class StandIn {
     return api;
   }
 
-  /** `eventBus.emit` (`ws/bus.ts:502-544`): listeners run on a later task, never inline; the worker gets the payload and its user (`spindle/worker-host.ts:2917-2932`, `spindle/worker-runtime.ts:4773-4786`). */
+  /**
+   * `eventBus.emit` (`ws/bus.ts:502-544`): a frame to each of the user's sockets at once, through the
+   * server where one serves this host, and the event to the extensions' workers.
+   */
   emit(event: string, payload: unknown, userId: string): void {
     this.events.push({ event, payload });
+    this.sockets?.(event, payload, userId);
+    this.toWorkers(event, payload, userId);
+  }
+
+  /** An event for the extensions' workers alone: listeners run on a later task, never inline; the worker gets the payload and its user (`spindle/worker-host.ts:2917-2932`, `spindle/worker-runtime.ts:4773-4786`). */
+  toWorkers(event: string, payload: unknown, userId: string): void {
     for (const ext of this.installed) {
       if (!ext.forwarded.has(event)) continue;
       const copy = structuredClone(payload);
@@ -326,6 +357,120 @@ export class StandIn {
         for (const handler of ext.handlers.get(event) ?? []) handler(copy, userId);
       });
     }
+  }
+
+  // ---------------------------------------------------------------- the chats' rows
+
+  /** A message row as Lumiverse's `rowToMessage` gives it in an event (`services/chats.service.ts:587-605`). */
+  private messageRow(id: string): Record<string, unknown> | null {
+    const row = this.db?.rows("SELECT * FROM messages WHERE id = ?", id)[0];
+    if (row === undefined) return null;
+    return { ...row, is_user: row.is_user === 1, swipes: JSON.parse(String(row.swipes)) as unknown, swipe_dates: JSON.parse(String(row.swipe_dates)) as unknown, extra: JSON.parse(String(row.extra)) as unknown };
+  }
+
+  /** `createMessage` (`services/chats.service.ts:2638-2683`): the next place in the chat, its text its one swipe, dated now. */
+  private createRow(chat: Chat, m: ChatMessage, name: string, extra: Record<string, unknown> = {}): void {
+    if (this.db === null) return;
+    const now = Math.floor(this.now() / 1000);
+    const max = Number(this.db.rows("SELECT COALESCE(MAX(index_in_chat), -1) AS max_idx FROM messages WHERE chat_id = ?", chat.id)[0]?.max_idx ?? -1);
+    const marks = { ...extra, ...(m.hidden ? { hidden: true } : {}) };
+    this.db.run(
+      "INSERT INTO messages (id, chat_id, index_in_chat, is_user, name, content, send_date, swipe_id, swipes, swipe_dates, extra, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
+      m.id,
+      chat.id,
+      max + 1,
+      m.role === "user" ? 1 : 0,
+      name,
+      m.content,
+      now,
+      JSON.stringify([m.content]),
+      JSON.stringify([now]),
+      JSON.stringify(marks),
+      now,
+    );
+    this.db.run("UPDATE chats SET updated_at = ? WHERE id = ? AND user_id = ?", now, chat.id, chat.user);
+  }
+
+  /** `updateMessage` with new text (`services/chats.service.ts:2922-3023`): into the swipe it shows, the revision raised, and the edit told. */
+  private saveText(chat: Chat, id: string, text: string): void {
+    const row = this.messageRow(id);
+    if (this.db === null || row === null) return;
+    const swipes = [...(row.swipes as string[])];
+    swipes[Number(row.swipe_id)] = text;
+    this.db.run("UPDATE messages SET content = ?, swipes = ?, revision = revision + 1 WHERE id = ? AND chat_id = ?", text, JSON.stringify(swipes), id, chat.id);
+    this.emit("MESSAGE_EDITED", { chatId: chat.id, message: this.messageRow(id) }, chat.user);
+  }
+
+  /** `addSwipe` (`services/chats.service.ts:3301-3344`): a new swipe with this text, dated now and shown; an assistant's raises no revision. */
+  private addSwipeRow(chat: Chat, id: string, text: string): number | null {
+    const row = this.messageRow(id);
+    if (this.db === null || row === null) return null;
+    const swipes = [...(row.swipes as string[]), text];
+    const dates = [...(row.swipe_dates as number[]), Math.floor(this.now() / 1000)];
+    const swipe = swipes.length - 1;
+    this.db.run("UPDATE messages SET swipes = ?, swipe_dates = ?, swipe_id = ?, content = ? WHERE id = ? AND chat_id = ?", JSON.stringify(swipes), JSON.stringify(dates), swipe, text, id, chat.id);
+    this.emit("MESSAGE_SWIPED", { chatId: chat.id, message: this.messageRow(id), action: "added", swipeId: swipe }, chat.user);
+    return swipe;
+  }
+
+  /** `updateSwipe` (`services/chats.service.ts:3346-3400`): one swipe's text, and the message's own where it shows that swipe. */
+  private saveSwipe(chat: Chat, id: string, swipe: number, text: string): void {
+    const row = this.messageRow(id);
+    if (this.db === null || row === null) return;
+    const swipes = [...(row.swipes as string[])];
+    swipes[swipe] = text;
+    if (swipe === Number(row.swipe_id)) this.db.run("UPDATE messages SET swipes = ?, content = ? WHERE id = ? AND chat_id = ?", JSON.stringify(swipes), text, id, chat.id);
+    else this.db.run("UPDATE messages SET swipes = ? WHERE id = ? AND chat_id = ?", JSON.stringify(swipes), id, chat.id);
+    this.emit("MESSAGE_SWIPED", { chatId: chat.id, message: this.messageRow(id), action: "updated", swipeId: swipe }, chat.user);
+  }
+
+  /** A chat as Lumiverse holds one: its character's row, its own, and each message's in order. */
+  addChat(chat: Chat): void {
+    this.chats.set(chat.id, chat);
+    if (this.db === null) return;
+    this.db.run("INSERT OR IGNORE INTO characters (id, name, user_id) VALUES (?, ?, ?)", chat.character.id, chat.character.name, chat.user);
+    this.db.run("INSERT INTO chats (id, character_id, name, metadata, user_id) VALUES (?, ?, ?, ?, ?)", chat.id, chat.character.id, chat.name ?? "", JSON.stringify(chat.metadata ?? {}), chat.user);
+    for (const m of chat.messages) this.createRow(chat, m, m.role === "user" ? "User" : chat.character.name);
+  }
+
+  /** The user sends a message (`POST /api/v1/chats/:id/messages`, `createMessage`): saved, then told (`MESSAGE_SENT`, `chats.service.ts:2675-2678`). Gives its id. */
+  send(chatId: string, text: string): string {
+    const chat = this.chats.get(chatId);
+    if (!chat) throw new Error("the stand-in has no such chat");
+    const m: ChatMessage = { id: crypto.randomUUID(), role: "user", content: text };
+    chat.messages.push(m);
+    this.createRow(chat, m, "User");
+    this.emit("MESSAGE_SENT", { chatId, message: this.messageRow(m.id) ?? m }, chat.user);
+    return m.id;
+  }
+
+  /** `deleteMessage` (`services/chats.service.ts:3230-3270`): the row and its breakdown gone, then told (`MESSAGE_DELETED`). */
+  deleteMessage(chatId: string, id: string): void {
+    const chat = this.chats.get(chatId);
+    const at = chat?.messages.findIndex((m) => m.id === id) ?? -1;
+    if (!chat || at < 0) throw new Error("the stand-in has no such message");
+    chat.messages.splice(at, 1);
+    this.db?.run("DELETE FROM messages WHERE id = ? AND chat_id = ?", id, chatId);
+    this.db?.run("DELETE FROM message_breakdowns WHERE message_id = ?", id);
+    this.stored.delete(id);
+    this.emit("MESSAGE_DELETED", { chatId, messageId: id }, chat.user);
+  }
+
+  /** `POST /api/v1/generate/stop` (`routes/generate.routes.ts:45-65`): the generation named, else every one of the chat, else every one of the user's; whether any was. */
+  stop(user: string, ask: { generation?: string; chat?: string }): boolean {
+    const named = ask.generation === undefined ? undefined : this.going.get(ask.generation);
+    if (named !== undefined && named.user === user) {
+      named.stop.abort();
+      return true;
+    }
+    if (ask.generation !== undefined && ask.chat === undefined) return false;
+    let stopped = false;
+    for (const g of this.going.values()) {
+      if (g.user !== user || (ask.chat !== undefined && g.chat !== ask.chat)) continue;
+      g.stop.abort();
+      stopped = true;
+    }
+    return ask.chat === undefined ? true : stopped;
   }
 
   // ---------------------------------------------------------------- the network
@@ -478,25 +623,37 @@ export class StandIn {
     let target: { message: string | null; swipe: number | null } = { message: null, swipe: null };
     let excluded: string | null = null;
     let staged: string | null = null;
+    /** A swipe or a regenerate: the swipe made for the reply. */
+    let swipeAt: number | null = null;
+    /** A continue: the text the message held. */
+    let original: string | null = null;
+    const stop = new AbortController();
     if (!dryRun) {
       if (type === "normal") {
         // A new reply's message is made empty before the prompt, and left out of it (`:1988-2006`).
         staged = crypto.randomUUID();
-        chat.messages.push({ id: staged, role: "assistant", content: "" });
+        const m: ChatMessage = { id: staged, role: "assistant", content: "" };
+        chat.messages.push(m);
+        this.createRow(chat, m, chat.character.name, { character_id: chat.character.id });
         target = { message: staged, swipe: 0 };
         excluded = staged;
       } else if (type === "swipe" || type === "regenerate") {
-        // The reply being replaced gets a new empty swipe and is left out of the prompt (`:1699-1720`, `prompt-assembly.service.ts:1900-1904`).
+        // The reply being replaced gets a new empty swipe, shown, and is left out of the prompt (`:1699-1720`, `prompt-assembly.service.ts:1900-1904`).
         const last = [...chat.messages].reverse().find((m) => m.role === "assistant");
         if (last) {
-          last.swipeId = (last.swipeId ?? 0) + 1;
-          target = { message: last.id, swipe: last.swipeId };
+          swipeAt = this.addSwipeRow(chat, last.id, "") ?? (last.swipeId ?? 0) + 1;
+          last.swipeId = swipeAt;
+          target = { message: last.id, swipe: swipeAt };
           excluded = last.id;
         }
       } else if (type === "continue") {
         const last = chat.messages[chat.messages.length - 1];
-        if (last) target = { message: last.id, swipe: last.swipeId ?? 0 };
+        if (last) {
+          target = { message: last.id, swipe: last.swipeId ?? 0 };
+          original = last.content;
+        }
       }
+      this.going.set(generationId!, { user: chat.user, chat: chat.id, stop });
       // Announced before the prompt is assembled (`:2036-2055`), and the assembly starts on a later task (`:2068-2073`, `:1059`).
       this.emit("GENERATION_STARTED", { generationId, chatId: chat.id, model: connection.model, targetMessageId: target.message, targetSwipeId: target.swipe, backgroundSwipe: false, characterId: chat.character.id, characterName: chat.character.name, generationType: type, frontendSessionId: undefined }, chat.user);
     }
@@ -574,7 +731,7 @@ export class StandIn {
       sent = dropBlank(sent);
       if (preset.collapse === true) collapse(sent);
       const parameters: Record<string, unknown> = { ...preset.parameters, ...intercepted.parameters, ...input.parameters };
-      if (dryRun) return { generationId: null, error: null, prompt: sent, body: null, reply: null, parameters, stored: null, worldInfo };
+      if (dryRun) return { generationId: null, error: null, stopped: false, prompt: sent, body: null, reply: null, parameters, stored: null, worldInfo };
       this.emit("WORLD_INFO_ACTIVATED", { chatId: chat.id, entries: context.activatedWorldInfo }, chat.user);
       // The streaming switch decides the call and is never sent (`generate.service.ts:3725-3726`): a stream,
       // or one whole answer in one call (`:3793-3815`).
@@ -582,13 +739,54 @@ export class StandIn {
       delete parameters._streaming;
       body = buildBody(connection.model, sent, parameters, streaming);
       const base = connection.base.replace(/\/+$/, "").replace(/\/chat\/completions$/, "").replace(/\/models$/, "");
-      const res = await this.fetch(`${base}/chat/completions`, { method: "POST", headers: providerHeaders(connection.key), body: JSON.stringify(body) });
-      const reply = streaming ? await readStream(res) : await readWhole(res);
-      const messageId = target.message ?? crypto.randomUUID();
-      const saved = chat.messages.find((m) => m.id === messageId);
-      if (saved) saved.content = reply.content;
-      this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, messageId, content: reply.content, usage: reply.usage, generationType: type }, chat.user);
-      // Stored after the generation ends, beside the reply (`:4432-4476`); token counts are the stand-in's own.
+      const seen: StreamSeen = { content: "", reasoning: "" };
+      this.streams.set(generationId!, seen);
+      let reply: StreamedReply;
+      try {
+        const res = await this.fetch(`${base}/chat/completions`, { method: "POST", headers: providerHeaders(connection.key), body: JSON.stringify(body), signal: stop.signal });
+        reply = streaming ? await readStream(res, seen) : await readWhole(res);
+      } catch (error) {
+        if (!stop.signal.aborted) throw error;
+        // Stopped by the user: what was streamed is saved, and the stop told (`:4502-4537`, `persistPartialContent` `:3565-3660`).
+        const savedText = this.saveStopped(chat, { staged, swipeAt, original, target: target.message }, seen);
+        this.going.delete(generationId!);
+        this.emit("GENERATION_STOPPED", { generationId, chatId: chat.id, content: savedText }, chat.user);
+        return { generationId, error: null, stopped: true, prompt: sent, body, reply: { content: seen.content, reasoning: seen.reasoning, finishReason: "", usage: null }, parameters, stored: null, worldInfo };
+      }
+      this.going.delete(generationId!);
+      let messageId: string | undefined;
+      let savedText = reply.content;
+      const shown = (id: string): ChatMessage | undefined => chat.messages.find((m) => m.id === id);
+      if (swipeAt !== null && target.message !== null) {
+        // A swipe or a regenerate: the blank swipe made at the start filled in (`:4120-4128`).
+        const m = shown(target.message);
+        if (m) m.content = reply.content;
+        this.saveSwipe(chat, target.message, swipeAt, reply.content);
+        messageId = target.message;
+      } else if (original !== null && target.message !== null) {
+        // A continue: the new text joined to what the message held, with no separator configured (`:4129-4147`, `prompt-assembly.service.ts:662-670`).
+        savedText = original + reply.content;
+        const m = shown(target.message);
+        if (m) m.content = savedText;
+        this.saveText(chat, target.message, savedText);
+        messageId = target.message;
+      } else if (staged !== null) {
+        // The staged message filled in (`:4148-4166`).
+        const m = shown(staged);
+        if (m) m.content = reply.content;
+        this.saveText(chat, staged, reply.content);
+        messageId = staged;
+      } else if (!(type === "impersonate" && input.impersonateDraft === true)) {
+        // Anything else saves a new message: an impersonation as the user's (`:4172-4194`). A draft saves none (`:4167-4171`).
+        const m: ChatMessage = { id: crypto.randomUUID(), role: type === "impersonate" ? "user" : "assistant", content: reply.content };
+        chat.messages.push(m);
+        this.createRow(chat, m, type === "impersonate" ? "User" : chat.character.name);
+        this.emit("MESSAGE_SENT", { chatId: chat.id, message: this.messageRow(m.id) ?? m }, chat.user);
+        messageId = m.id;
+      }
+      this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, messageId, content: savedText, usage: reply.usage, generationType: type, ...(input.impersonateDraft === true && type === "impersonate" ? { impersonateDraft: true } : {}) }, chat.user);
+      if (messageId === undefined) return { generationId, error: null, stopped: false, prompt: sent, body, reply, parameters, stored: null, worldInfo };
+      // Stored after the generation ends, beside the reply (`:4432-4476`; `services/breakdown.service.ts:3-12`); token counts are the stand-in's own.
       const tokens = (text: string): number => Math.ceil(text.length / 4);
       const historyTokens = history.reduce((n, m) => n + tokens(textOf(m)), 0);
       const entriesStored = breakdown.map((e) => ({ name: e.name, type: e.type, tokens: e.type === "chat_history" ? historyTokens : tokens(e.content ?? ""), ...(e.role ? { role: e.role } : {}), ...(e.blockId ? { blockId: e.blockId } : {}), content: e.content }));
@@ -606,13 +804,40 @@ export class StandIn {
         presetId: preset.id,
       };
       this.stored.set(messageId, { chatId: chat.id, data: stored });
-      return { generationId, error: null, prompt: sent, body, reply, parameters, stored, worldInfo };
+      this.db?.run("INSERT INTO message_breakdowns (message_id, chat_id, user_id, data) VALUES (?, ?, ?, ?) ON CONFLICT(message_id) DO UPDATE SET data = excluded.data, chat_id = excluded.chat_id, user_id = excluded.user_id", messageId, chat.id, chat.user, JSON.stringify(stored));
+      return { generationId, error: null, stopped: false, prompt: sent, body, reply, parameters, stored, worldInfo };
     } catch (error) {
       // A failed setup or call ends the generation with its error, its empty message removed (`:2987-3048`).
       const message = error instanceof Error ? error.message : String(error);
-      if (staged !== null) chat.messages.splice(chat.messages.findIndex((m) => m.id === staged), 1);
+      if (generationId !== null) this.going.delete(generationId);
+      if (staged !== null) this.deleteMessage(chat.id, staged);
       if (!dryRun) this.emit("GENERATION_ENDED", { generationId, chatId: chat.id, error: message, generationType: type }, chat.user);
-      return { generationId, error: message, prompt: sent, body, reply: null, parameters: null, stored: null, worldInfo };
+      return { generationId, error: message, stopped: false, prompt: sent, body, reply: null, parameters: null, stored: null, worldInfo };
     }
+  }
+
+  /** What a stopped generation saves (`persistPartialContent`, `services/generate.service.ts:3565-3660`), and the text it saved. */
+  private saveStopped(chat: Chat, at: { staged: string | null; swipeAt: number | null; original: string | null; target: string | null }, seen: StreamSeen): string {
+    const shown = (id: string): ChatMessage | undefined => chat.messages.find((m) => m.id === id);
+    if (at.swipeAt !== null && at.target !== null) {
+      const m = shown(at.target);
+      if (m) m.content = seen.content;
+      this.saveSwipe(chat, at.target, at.swipeAt, seen.content);
+    } else if (at.staged !== null) {
+      // A staged message with nothing in it is removed.
+      if (seen.content === "" && seen.reasoning === "") this.deleteMessage(chat.id, at.staged);
+      else {
+        const m = shown(at.staged);
+        if (m) m.content = seen.content;
+        this.saveText(chat, at.staged, seen.content);
+      }
+    } else if (at.original !== null && at.target !== null && (seen.content !== "" || seen.reasoning !== "")) {
+      const joined = at.original + seen.content;
+      const m = shown(at.target);
+      if (m) m.content = joined;
+      this.saveText(chat, at.target, joined);
+      return joined;
+    }
+    return seen.content;
   }
 }

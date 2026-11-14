@@ -3,7 +3,7 @@
 //
 //   files    the tree (`src/tree/`)                 prompt   this lane: the layout each request carried, maps by preset
 //   chat     the adapter's chat port                lore     the lore lane's `Lore`, through its port
-//   tools    none yet (the engine's come with `src/iface/`)
+//   tools    the engine's (`src/iface/`), each worded by its file in force for the chat
 //   facts    a registry each area adds to; this lane's own counts are in it
 //   models   the app's connections                  store    this lane: `kv` in RPE's database
 //   trace    the live hub and the turn's folder     events   this lane: kept with the turn
@@ -12,12 +12,13 @@
 // Left out, as the contract allows: `approvals` (every lane is Auto) and `switches` (everything that
 // runs a command or calls out is off), and `stores` (RPE reaches no other stores yet).
 
-import { createHarness, type CreateHarnessOptions } from "rp-harness";
-import type { Clock, Environment, Harness } from "rp-harness/contract";
+import { createHarness, type CreateHarnessOptions, loadGuidance } from "rp-harness";
+import type { Clock, Environment, FilesPort, Harness, Scope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { App } from "../app";
 import { createRegistry } from "../engine/registry-impl";
+import { engineTools, type GuidanceFiles, stateScan } from "../iface";
 import { EntryNumbers, Lore, type LoreBooks, lorePort, storeWorlds } from "../lore";
 import { ALL_PACKS } from "../packs/index";
 import { openStore, type Store } from "../store";
@@ -29,6 +30,22 @@ import { type TurnPrompts, turnPrompts } from "./prompt";
 import { Runs } from "./runs";
 import { type TurnTrace, turnTrace } from "./trace";
 import { TurnLane } from "./turns";
+
+/**
+ * The engine's tools' files as they are in force for a scope: RPH's guidance finds the nearest level's
+ * file of the name, passing over one switched off, and its text is read as the agents would read it.
+ */
+function guidanceTexts(files: FilesPort, scope: Scope): GuidanceFiles {
+  const guidance = loadGuidance(files, scope);
+  return {
+    async read(kind, name) {
+      const part = kind === "tools" ? await guidance.tool(name) : await guidance.part(name);
+      if (part === undefined) return undefined;
+      const read = await files.read(scope, part.source.path);
+      return read.status === "read" ? read.text : undefined;
+    },
+  };
+}
 
 /** The machine's clock, its day in the machine's own time zone. */
 export const MACHINE_CLOCK: Clock = {
@@ -49,8 +66,12 @@ export function openAppStore(app: Pick<App, "db" | "version">): Store {
 
 export interface TurnsOptions {
   store: Store;
-  /** The adapter's reads of Lumiverse and its chat port; null before it is mounted, or when RPE is not set up for a Lumiverse. */
-  lumiverse(): { reads: LumiverseReads; chat: ChatReads } | null;
+  /**
+   * The adapter's reads of Lumiverse, its chat port, and Lumiverse's Stop of one generation of the
+   * user's (false when it was not going on); null before it is mounted, or when RPE is not set up for a
+   * Lumiverse.
+   */
+  lumiverse(): { reads: LumiverseReads; chat: ChatReads; stopGeneration(generation: string): Promise<boolean> } | null;
   /** The user's books, as the lore reads them. */
   books: LoreBooks;
   /** In tests: the models agents run on, in place of the model layer's, and RPH's ids. */
@@ -111,7 +132,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     },
     lore: lorePort(lore),
     prompt: prompts,
-    tools: { all: async () => [] },
+    tools: { all: (scope) => engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: guidanceTexts(files, scope), search: stateScan }) },
     searchers: [],
     facts,
     models: app.models,
@@ -132,6 +153,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     runs,
     live: app.live,
     reads: () => options.lumiverse()?.reads ?? null,
+    stopGeneration: async (generation) => (await options.lumiverse()?.stopGeneration(generation)) ?? false,
     harness: () => harness,
     owner,
     clock,

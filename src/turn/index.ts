@@ -11,4 +11,4 @@ export { type Run, type RunRecord, Runs, type RunState } from "./runs";
 export { passConnection, TURN_DEFAULTS, type TurnSettings, turnSettings } from "./settings";
 export { HARNESS_MIGRATIONS, PROMPT_MIGRATIONS } from "./tables";
 export { TRANSCRIPTS, transcriptName, type TurnTrace, turnTrace } from "./trace";
-export { BLOCKS, PARTS, TurnLane, type TurnLaneDeps } from "./turns";
+export { BLOCKS, NO_SESSION, PARTS, TurnLane, type TurnLaneDeps } from "./turns";

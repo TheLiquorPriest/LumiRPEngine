@@ -5,9 +5,9 @@
 // sockets once the server listens.
 //
 // Where a part another lane builds has not landed, the composition says so rather than stands in for it:
-// the history window keeps the whole history until the window lane gives its function; the secrecy of
-// lore entries is not worked out (the extension's own fail-closed verdict keeps every marked secret
-// out); and a chat names no stretches until the story lane does.
+// no story record covers a message yet, so the history window works on none covered; the secrecy of lore
+// entries is not worked out (the extension's own fail-closed verdict keeps every marked secret out); and
+// a chat names no stretches until the story lane does.
 
 import { SHIPPED_GUIDANCE } from "rp-harness";
 import type { Clock, CreateHarnessOptions } from "rp-harness";
@@ -15,9 +15,11 @@ import { loreBooks } from "../adapter/lumiverse/books";
 import { lumiverseDoor, type AdapterDeps, type LumiverseDoor } from "../adapter/lumiverse/mount";
 import { bunSocket } from "../adapter/lumiverse/socket";
 import { type LoreBooks, LORE_MIGRATIONS } from "../lore";
+import { isRecord } from "../shared/json";
 import { STORE_MIGRATIONS } from "../store";
+import { historyWindow } from "../story/window";
 import { layShipped, RPE_GUIDANCE, TREE_MIGRATIONS } from "../tree";
-import { buildTurns, HARNESS_MIGRATIONS, MACHINE_CLOCK, openAppStore, passConnection, PROMPT_MIGRATIONS, turnRoutes, turnSettings, type Turns } from "../turn";
+import { buildTurns, HARNESS_MIGRATIONS, MACHINE_CLOCK, NO_SESSION, openAppStore, passConnection, PROMPT_MIGRATIONS, turnRoutes, turnSettings, type Turns } from "../turn";
 import type { App, Area } from "./app";
 import { connectionRoutes } from "./connections";
 
@@ -48,22 +50,29 @@ export function compose(options: ComposeOptions = {}): Composition {
     return turns;
   };
   const owner = (): string => app?.config.lumiverse.user ?? "";
+  /** A chat's settings as its levels' config files set them, read outside any session. */
+  const chatSettings = (chat: string) => turnSettings(made().files, { user: owner(), chat, session: NO_SESSION }, made().env.log);
+  /** The messages a story record covers: none, until the records lane writes one. */
+  const covered: ReadonlySet<string> = new Set();
 
   const door = lumiverseDoor(
     {
       turns: { play: (turn, out, signal) => made().lane.play(turn, out, signal), standbyLine: (turn) => made().lane.standbyLine(turn) },
       changes: { changed: (change) => made().lane.changed(change), reopened: () => made().lane.reopened() },
-      // The history window's function comes with its lane (`src/story/window/`): until then the whole history is kept, and Lumiverse's own context size cuts it.
-      window: async () => null,
+      // The history window on the chat's settings: the first history message the prompt keeps.
+      window: async (ask) => historyWindow(ask.path, (await chatSettings(ask.chat)).window, covered).first,
       secrecy: async () => {
         throw new Error("RPE does not work out its lore's secrets yet, so the extension keeps every marked secret out.");
       },
-      hiddenReadable: async (chat) => (await turnSettings(made().files, { user: owner(), chat, session: "none" }, made().env.log)).hiddenReadable,
+      hiddenReadable: async (chat) => (await chatSettings(chat)).hiddenReadable,
       ranges: async () => ({}),
       summarized: async (chat) => made().prompts.summarized(owner(), chat),
       models: { pass: (request, sink, signal) => made().harness.models.pass(request, sink, signal) },
       passConnection: () => (app === null ? null : passConnection(app.paths.files, app.log)),
-      permissions: (missing) => app?.log.warn("RPE's extension in Lumiverse is missing permissions it needs.", { missing: missing.map((m) => m.permission) }),
+      // The extension tells RPE what it is missing each time it answers a registration, also when that is nothing.
+      permissions: (missing) => {
+        if (missing.length > 0) app?.log.warn("RPE's extension in Lumiverse is missing permissions it needs.", { missing: missing.map((m) => m.permission) });
+      },
     },
     {
       fetch: options.fetch ?? ((url, init) => fetch(url, init)),
@@ -104,7 +113,13 @@ export function compose(options: ComposeOptions = {}): Composition {
           store: openAppStore(at),
           lumiverse: () => {
             const parts = door.lumiverse();
-            return parts === null ? null : { reads: parts.reads, chat: parts.chat };
+            if (parts === null) return null;
+            // Lumiverse's Stop (`routes/generate.routes.ts:45-65`), as the signed-in user, for the generation named alone: a newer one of the chat is never stopped by it.
+            const stopGeneration = async (generation: string): Promise<boolean> => {
+              const answer = await parts.session.json("POST", "/api/v1/generate/stop", { generation_id: generation });
+              return isRecord(answer) && answer.stopped === true;
+            };
+            return { reads: parts.reads, chat: parts.chat, stopGeneration };
           },
           books,
           clock,

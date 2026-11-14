@@ -4,18 +4,24 @@
 // nowhere else. A value a setting does not take is logged with its file and passed over, and the
 // default holds; it never stops a turn.
 //
-//   lead: lead                   the agent definition that leads a turn
+//   lead: author                 the agent definition that leads a turn
 //   carry: continuing            what a session carries between turns: continuing, records or nothing
 //   limits:
 //     previousRun: 20            seconds a turn waits for the run of the turn before it; then that run is stopped
 //   chat:
 //     hiddenReadable: false      agents may read the messages the player hid from the prompt
+//   history:
+//     window: 40                 the latest this many of the chat's messages stay in the prompt; null keeps them all
+//     step: null                 lets the window grow by this many before it is cut back to its size; null is off
+//     hold: false                keeps a message the story record does not cover in the prompt: true or false,
+//                                or { on: true, cap: 40 }, cap being the most messages it holds past the window
 //   passConnection: <name>       the connection a request with no tag is passed on to (global level only;
 //                                absent: the default connection)
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Carry, FilesPort, JsonValue, Log, Scope } from "rp-harness/contract";
+import { WINDOW_DEFAULTS, type WindowSettings } from "../story/window";
 import { GLOBAL_CONFIG, SHIPPED_FOLDER } from "../tree";
 
 export interface TurnSettings {
@@ -24,18 +30,22 @@ export interface TurnSettings {
   /** How long a turn waits for the previous turn's run, in milliseconds. */
   previousRunMs: number;
   hiddenReadable: boolean;
+  /** The history window (`src/story/window`). */
+  window: WindowSettings;
 }
 
 /** The defaults, where no level sets a value. */
 export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
-  // The lead RPH ships (`guidance/.agents/lead.md`): RPE ships no definition of its own yet; plan §13.1's Author is named here once it does.
-  lead: "lead",
+  // Plan §13.1: the Author, as RPE ships it (`guidance/.agents/author.md`).
+  lead: "author",
   // Appendix D.1: continuing, until the session measurement says otherwise.
   carry: "continuing",
   // Appendix D.1: 20 s, then stop it.
   previousRunMs: 20_000,
   // Appendix D.1: as today's setting, which is off.
   hiddenReadable: false,
+  // Appendix D.1, as the window's own module keeps them.
+  window: WINDOW_DEFAULTS,
 });
 
 type Mapping = { [key: string]: JsonValue };
@@ -76,6 +86,20 @@ async function configOf(files: FilesPort, scope: Scope, log: Log): Promise<{ con
   return { config, from: paths.join(", ") };
 }
 
+/** A whole number of at least `least`. */
+function whole(value: JsonValue | undefined, least: number): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= least;
+}
+
+/** The window's hold as a level sets it: on or off with the default cap, or a mapping of either; undefined for a value it does not take. */
+function holdOf(value: JsonValue): WindowSettings["hold"] | undefined {
+  if (typeof value === "boolean") return { on: value, cap: TURN_DEFAULTS.window.hold.cap };
+  if (!isMapping(value)) return undefined;
+  const on = value["on"] ?? TURN_DEFAULTS.window.hold.on;
+  const cap = value["cap"] ?? TURN_DEFAULTS.window.hold.cap;
+  return typeof on === "boolean" && whole(cap, 0) ? { on, cap } : undefined;
+}
+
 /** The turn's settings for a scope, as its levels' config files set them over the defaults. */
 export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Promise<TurnSettings> {
   const { config, from } = await configOf(files, scope, log);
@@ -91,21 +115,35 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
   const carry = config["carry"];
   const seconds = section("limits")["previousRun"];
   const hidden = section("chat")["hiddenReadable"];
+  const history = section("history");
+  const size = history["window"];
+  const step = history["step"];
+  const hold = history["hold"] === undefined ? undefined : holdOf(history["hold"]);
   const valid = {
     lead: typeof lead === "string" && lead.trim() !== "",
     carry: carry === "continuing" || carry === "records" || carry === "nothing",
     seconds: typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0,
     hidden: typeof hidden === "boolean",
+    size: size === null || whole(size, 1),
+    step: step === null || whole(step, 1),
   };
   if (lead !== undefined && !valid.lead) passed("lead", lead);
   if (carry !== undefined && !valid.carry) passed("carry", carry);
   if (seconds !== undefined && !valid.seconds) passed("limits.previousRun", seconds);
   if (hidden !== undefined && !valid.hidden) passed("chat.hiddenReadable", hidden);
+  if (size !== undefined && !valid.size) passed("history.window", size);
+  if (step !== undefined && !valid.step) passed("history.step", step);
+  if (history["hold"] !== undefined && hold === undefined) passed("history.hold", history["hold"]);
   return {
     lead: valid.lead ? (lead as string).trim() : TURN_DEFAULTS.lead,
     carry: valid.carry ? (carry as Carry) : TURN_DEFAULTS.carry,
     previousRunMs: valid.seconds ? (seconds as number) * 1000 : TURN_DEFAULTS.previousRunMs,
     hiddenReadable: valid.hidden ? (hidden as boolean) : TURN_DEFAULTS.hiddenReadable,
+    window: {
+      size: valid.size && size !== undefined ? (size as number | null) : TURN_DEFAULTS.window.size,
+      step: valid.step && step !== undefined ? (step as number | null) : TURN_DEFAULTS.window.step,
+      hold: hold ?? TURN_DEFAULTS.window.hold,
+    },
   };
 }
 

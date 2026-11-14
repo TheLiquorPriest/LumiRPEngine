@@ -117,9 +117,11 @@ export class LumiverseServer {
     for (const a of options.accounts) this.accounts.set(a.username.toLowerCase(), a);
     if (options.host) {
       const host = options.host;
-      // A worker's later task, and a socket's delivery, both run on the test's clock.
+      // A worker's later task, a socket's delivery and the rows' stamps all run on the test's clock; the host's events reach the user's sockets.
       host.later = (run) => void this.clock.setTimeout(run, 0);
+      host.now = () => this.clock.now();
       host.frontends = (m) => this.toFrontend(m.extension, m.payload, m.user, m.session);
+      host.sockets = (event, payload, user) => this.frame(event, payload, user);
     }
     // The bus's sweep (`ws/bus.ts:17-18`, `:457-466`): every minute, a socket silent for two is closed.
     const sweep = (): void => {
@@ -167,12 +169,18 @@ export class LumiverseServer {
 
   /**
    * `eventBus.emit` (`ws/bus.ts:502-544`): one frame to every socket of the user, `{event, payload,
-   * timestamp, userId}`, and the event to the extensions' workers (`lumiverse.ts`).
+   * timestamp, userId}`, and the event to the extensions' workers (`lumiverse.ts`), through the host
+   * where there is one.
    */
   emit(event: string, payload: unknown, user?: string): void {
+    if (user !== undefined && this.options.host) this.options.host.emit(event, payload, user);
+    else this.frame(event, payload, user);
+  }
+
+  /** An event's frame, to every socket of the user (`ws/bus.ts:520-529`). */
+  private frame(event: string, payload: unknown, user?: string): void {
     const frame = JSON.stringify({ event, payload, timestamp: this.clock.now(), ...(user !== undefined ? { userId: user } : {}) });
     for (const s of this.sockets) if (s.closed === null && (user === undefined || s.user === user)) s.send(frame);
-    if (user !== undefined) this.options.host?.emit(event, payload, user);
   }
 
   // ---------------------------------------------------------------- HTTP
@@ -268,6 +276,13 @@ export class LumiverseServer {
       const limit = Math.min(PAGE_MAX, Math.max(1, Number(url.searchParams.get("limit") ?? 50)));
       const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0));
       return json(200, { data: all.slice(offset, offset + limit).map(lightMessage), total: all.length, limit, offset });
+    }
+
+    // `POST /api/v1/generate/stop` (`app.ts:443`, `routes/generate.routes.ts:45-65`): the generation named, else the chat's.
+    if (request.method === "POST" && path === "/api/v1/generate/stop" && this.options.host) {
+      const body = parsed(await request.text(), null) as { generation_id?: unknown; chat_id?: unknown } | null;
+      const ask = { ...(typeof body?.generation_id === "string" ? { generation: body.generation_id } : {}), ...(typeof body?.chat_id === "string" ? { chat: body.chat_id } : {}) };
+      return json(200, { stopped: this.options.host.stop(user, ask) });
     }
 
     return json(404, { error: "Not found" });

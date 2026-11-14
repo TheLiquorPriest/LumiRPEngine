@@ -40,7 +40,7 @@ export const PARTS = { progress: "progress", notices: "notices", errors: "reply-
 export const BLOCKS = { turnFacts: "turn-facts", loreMap: "lore-map" } as const;
 
 /** A session's id while a chat has none yet: the settings are read before the turn that opens one, and no file of theirs is a session's. */
-const NO_SESSION = "none";
+export const NO_SESSION = "none";
 
 export interface TurnLaneDeps {
   store: Store;
@@ -53,6 +53,8 @@ export interface TurnLaneDeps {
   live: LiveHub;
   /** The adapter's reads of Lumiverse; null before it is mounted, or when RPE is not set up for a Lumiverse. */
   reads(): LumiverseReads | null;
+  /** Stops a generation of the user's in Lumiverse, as the user's own Stop does; false when it was not going on. */
+  stopGeneration(generation: string): Promise<boolean>;
   /** The harness, once built. */
   harness(): Harness;
   /** The Lumiverse user this RPE plays for; null before one is set. */
@@ -117,14 +119,19 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     await this.#chat(reads, user, chat);
     await this.#catchUp(reads, user, chat);
 
-    // The chat's path compared with the turn tree (plan §6.3). The message a new reply is being written to is the turn at hand, not yet a reply.
+    // The chat's path compared with the turn tree (plan §6.3). The message a reply is being written to is the turn at hand, not yet a
+    // reply: a new reply's message is left out, and the message a swipe or a regenerate writes a new swipe of is compared as it
+    // showed before, held by the attempt being replaced. Its empty new swipe, which may bear the same date, is no edit of that attempt.
     const steps = await reads.path(chat);
     if (steps === null) throw new Error(`Lumiverse has no chat ${chat} for this RPE's user.`);
     const writing = tag.kind === "new" ? tag.target.message : null;
-    const shown: ShownMessage[] = steps.filter((s) => s.id !== writing).map((s) => ({ id: s.id, user: s.role !== "assistant", hash: s.shown.hash, date: s.shown.date }));
-    const report = await this.#d.writes.run(() => store.sync(chat, shown), "comparing the chat's path with its turns");
     const replaced = tag.kind === "swipe" || tag.kind === "regenerate" ? tag.target.message : null;
-    await this.#left(user, chat, report, replaced);
+    const before = replaced === null ? undefined : store.path(chat).find((e) => e.message === replaced);
+    const shown: ShownMessage[] = steps
+      .filter((s) => s.id !== writing)
+      .map((s) => (s.id === replaced && before !== undefined ? { id: s.id, user: false, hash: before.hash, date: before.date } : { id: s.id, user: s.role !== "assistant", hash: s.shown.hash, date: s.shown.date }));
+    const report = await this.#d.writes.run(() => store.sync(chat, shown), "comparing the chat's path with its turns");
+    await this.#left(user, chat, report, replaced, before?.turn ?? null);
 
     // The chat's settings and texts, read before the turn is made: its session is the chat's open one.
     const open = store.sessions(chat).findLast((s) => s.closedBy === null) ?? null;
@@ -229,10 +236,18 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     while (this.#recording.size > 0) await Promise.allSettled([...this.#recording]);
   }
 
-  /** Stops a turn's run where it stands; false when it is not going on. */
-  stop(user: string, turn: string): boolean {
+  /**
+   * Stops a turn's run where it stands (plan §10.10 "Stop"); false when it is not going on. While its
+   * reply is not out, Lumiverse is told first: its generation ends as stopped, keeping what it had, and
+   * the run stops with the request Lumiverse drops. The run is stopped here in any case.
+   */
+  async stop(user: string, turn: string): Promise<boolean> {
     const run = this.#d.runs.running(user, turn);
     if (run === undefined) return false;
+    if (run.released === null && run.generation !== null) {
+      const generation = run.generation;
+      await this.#d.stopGeneration(generation).catch((error: unknown) => this.#d.log.warn("Lumiverse could not be told to stop this turn's generation; the turn is stopped on RPE's side.", { turn, generation, error: words(error) }));
+    }
     run.stop.abort(new Error("The player stopped the turn."));
     return true;
   }
@@ -270,12 +285,17 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     for (const change of found) if (change.kind === "generation-ended") await this.#ended(user, change);
   }
 
-  /** Turns that left the path since it was last compared: their work is cancelled (plan §10.9 "This work belongs to its turn"). The attempt a swipe or regenerate replaces is among them. */
-  async #left(user: string, chat: string, report: PathReport, replaced: string | null): Promise<void> {
+  /**
+   * Turns that left the path since it was last compared: their work is cancelled (plan §10.9 "This work belongs to its turn"). The
+   * attempt a swipe or regenerate replaces (`replacing`, the turn the path held at its message) is among them, with any run still
+   * writing to that message.
+   */
+  async #left(user: string, chat: string, report: PathReport, replaced: string | null, replacing: string | null): Promise<void> {
     const gone = new Set<string>();
     for (const g of report.gone) if (g.turn !== null) gone.add(g.turn);
     if (report.swiped !== null && report.swiped.from !== null) gone.add(report.swiped.from);
     for (const f of report.flipped) if (f.from !== null) gone.add(f.from);
+    if (replacing !== null) gone.add(replacing);
     if (replaced !== null) for (const r of this.#d.runs.ofChat(user, chat)) if (r.target === replaced) gone.add(r.turn);
     await Promise.all([...gone].map((turn) => this.#cancel(user, chat, turn)));
   }
@@ -350,7 +370,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     };
     const gone = report.gone.filter((g) => g.turn !== null);
     if (gone.length > 0) add("delete", notices?.line("deleted", { count: gone.length }));
-    const dropped = report.notApplied.map((n) => `${n.op}: ${n.reason}`).join("; ");
+    // What no longer applies, as data: the operations by name. Why each does not is a code the store's own wording gives words to.
+    const dropped = report.notApplied.map((n) => n.op);
     for (const f of report.flipped) add("restacked", notices?.line("swipe_flipped", { message: f.message, dropped }), f.to !== null ? { turn: f.to } : {});
     for (const e of report.edited) add("edit", notices?.line("edited", { message: e.message }), { turn: e.turn });
     for (const u of report.unplayed) {

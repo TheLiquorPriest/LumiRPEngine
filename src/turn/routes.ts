@@ -88,10 +88,10 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       method: "POST",
       path: "/api/v1/chats/:chat/turns/:turn/stop",
       access: "page",
-      handle: ({ user, params }) => {
+      handle: async ({ user, params }) => {
         const r = turns.runs.record(user, params.turn);
         if (r === null || r.chat !== params.chat) throw new RouteError(404, `Chat ${params.chat} has no turn ${params.turn}.`);
-        return { stopped: turns.lane.stop(user, params.turn) };
+        return { stopped: await turns.lane.stop(user, params.turn) };
       },
     }),
   ] as const;
