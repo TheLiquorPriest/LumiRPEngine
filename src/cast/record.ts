@@ -111,6 +111,11 @@ export function pinCasting(db: Database, user: string, character: string, castin
   db.run("UPDATE cast_character SET pinned = ? WHERE user = ? AND id = ?", [casting, user, character]);
 }
 
+/** A character given another name, inside the caller's write: the migration names a person as the world now names it. The caller keeps the name free in the character's chat. */
+export function renameCharacter(db: Database, user: string, character: string, name: string): void {
+  db.run("UPDATE cast_character SET name = ?, name_key = ? WHERE user = ? AND id = ?", [name.trim(), nameKey(name), user, character]);
+}
+
 // ---------------------------------------------------------------- sources
 
 export interface Binding {

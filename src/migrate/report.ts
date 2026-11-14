@@ -61,11 +61,43 @@ export interface ChatReport {
   messages: number;
   replies: number;
   turns: number;
+  /** Entries its records' story parts hold, as stored: what the story-record row counts inside it. */
+  story: number;
   journal: JournalRead;
   notOpened: string | null;
   deletedTurns: number;
   underWay: number;
   waiting: { questions: number; staged: number; chips: number; reviewCards: number; rollback: boolean };
+}
+
+/** What came of a chat a run did not import, as the run's outcome for it says, and whether an earlier run's import of it stands in RPE. */
+export interface ChatFate {
+  why: string;
+  kept: boolean;
+}
+
+/** What of a row found inside chats' things a run did not carry for the chats it did not import, grouped by what came of them: kept from an earlier run where an earlier import of them stands, else in the backup only. */
+export interface Apart extends ChatFate {
+  chats: number;
+  count: number;
+}
+
+/** Counts by chat, grouped by what came of each chat (`fate`); a chat that counts none is left out. */
+export function apartBy(counts: Iterable<readonly [chat: string, count: number]>, fate: (chat: string) => ChatFate): Apart[] {
+  const out = new Map<string, Apart>();
+  for (const [chat, count] of counts) {
+    if (count === 0) continue;
+    const f = fate(chat);
+    const key = `${f.kept}\u0000${f.why}`;
+    const was = out.get(key) ?? { ...f, chats: 0, count: 0 };
+    out.set(key, { ...was, chats: was.chats + 1, count: was.count + count });
+  }
+  return [...out.values()];
+}
+
+/** Each group of what a run did not carry, in words: `unit` counted, of how many chats, what came of them, and where it is. */
+export function apartText(apart: readonly Apart[], unit: string): string[] {
+  return apart.map((a) => `${a.count} ${unit} of ${a.chats} chat(s) this run did not import (${a.why}): ${a.kept ? "kept from an earlier run" : "in the backup only"}`);
 }
 
 /** What changed since an earlier run: things by where and path, rows by their digest, chats by their turns. */
@@ -243,6 +275,23 @@ function keptOnly(r: RowReport): boolean {
   return r.count.backup > 0 || (r.found === "inside" && Object.hasOwn(NO_PLACE_YET, r.row) && (r.inside?.count ?? 0) > 0);
 }
 
+/**
+ * What of the rows found inside chats' things a real run keeps in the backup only, by row: what is of
+ * chats it did not import and no earlier run's import of which stands, and of the chats it did
+ * import, what no imported turn ended with or holds. (A report kept by an earlier build has none.)
+ */
+function keptInside(report: MigrationReport): { row: RowId; text: string }[] {
+  const c = report.carried;
+  if (c === null) return [];
+  const apart = (row: RowId, list: readonly Apart[] | undefined, unit: string) => (list ?? []).filter((a) => !a.kept).map((a) => ({ row, text: `${a.count} ${unit} of ${a.chats} chat(s) this run did not import (${a.why})` }));
+  return [
+    ...apart("mind-files", c.minds.apart, "version(s)"),
+    ...(c.minds.untied > 0 ? [{ row: "mind-files" as const, text: `${c.minds.untied} version(s) in areas no imported turn ended with` }] : []),
+    ...apart("story-record", c.story.apart, "entr(ies)"),
+    ...(c.story.unheld > 0 ? [{ row: "story-record" as const, text: `${c.story.unheld} entr(ies) on records no imported turn holds` }] : []),
+  ];
+}
+
 /** The report in plain words, as the rehearsal prints it. */
 export function reportText(report: MigrationReport): string {
   const lines: string[] = [];
@@ -317,6 +366,7 @@ export function reportText(report: MigrationReport): string {
     if (ownFiles !== null && ownFiles.guidance > 0) lines.push("", "Waiting on you: your GUIDANCE.md is in the file tree under imported/, switched off, since it was written for agents that are gone or changed. Switch it on as an AGENTS.md at the same level, or copy from it.");
     if (ownFiles === null) lines.push("", "Your own agents, skills, texts, GUIDANCE.md, notes and learned files were not carried: this run was not given the file tree's places. They are in the backup.");
     else if (ownFiles.leftOut > 0) lines.push("", `${ownFiles.leftOut} of your own file(s) have names that would leave the folder they go in: not written, in the backup.`);
+    if (ownFiles !== null && ownFiles.removed + ownFiles.changed > 0) lines.push("", `Files an earlier run wrote into the file tree that today's side no longer has: ${ownFiles.removed} removed${ownFiles.changed > 0 ? `; ${ownFiles.changed} changed in RPE since, left as they are` : ""}.`);
     if (settings.lumiverseConnections.length > 0) {
       lines.push("", "Settings that name a connection living in Lumiverse, which RPE can't use: pick one of RPE's connections for each; until you do, that work uses RPE's default connection.");
       for (const c of settings.lumiverseConnections) lines.push(`  ${c.setting} (connection ${c.connection} in Lumiverse)`);
@@ -332,12 +382,15 @@ export function reportText(report: MigrationReport): string {
     const c = report.changes;
     lines.push("", `Since the run of ${c.since}: ${c.added.length} added, ${c.changed.length} changed, ${c.gone.length} gone; ${c.rows.length} row(s) and ${c.chats.length} chat(s) differ.`);
   }
-  // Last, so that nobody reads such a run as complete: what it keeps in the backup only, by row.
+  // Last, so that nobody reads such a run as complete: what it keeps in the backup only, by row; and what of the rows found inside chats' things it did not carry.
   const kept = report.rows.filter(keptOnly);
-  if (kept.length > 0) {
+  const inside = keptInside(report);
+  if (kept.length + inside.length > 0) {
     const total = kept.reduce((n, r) => n + r.count.backup, 0);
-    lines.push("", report.mode === "real run" ? "Kept in the backup only, as this build has no place for them in RPE yet: this run did not carry everything. A later run carries them once it has a place for them." : "The real run will keep these in the backup only, as this build has no place for them in RPE yet:");
+    const header = report.mode !== "real run" ? "The real run will keep these in the backup only, as this build has no place for them in RPE yet:" : inside.length === 0 ? "Kept in the backup only, as this build has no place for them in RPE yet: this run did not carry everything. A later run carries them once it has a place for them." : "Kept in the backup only: this run did not carry everything. A later run carries them once this build has a place for them, or once it imports the chats they are in.";
+    lines.push("", header);
     for (const r of kept) lines.push(`  ${r.what}: ${r.count.backup > 0 ? `${r.count.backup} thing(s)` : `${r.inside?.count ?? 0} ${r.inside?.unit ?? ""}, inside other rows' things`}`);
+    for (const i of inside) lines.push(`  ${report.rows.find((r) => r.row === i.row)?.what ?? i.row}: ${i.text}, inside other rows' things`);
     lines.push(`  In all: ${total} thing(s), of ${kept.length} row(s).`);
   }
   return `${lines.join("\n")}\n`;

@@ -260,6 +260,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       if (!engine.has(chat.id)) continue;
       const read = await reader.read(chat.id as ChatId, userId);
       const before = tally.counts.get("ledger") ?? 0;
+      const stories = tally.counts.get("story-record") ?? 0;
       countLedgers(read.ledgers, tally);
       for (const ledger of read.ledgers) {
         for (const rec of Object.values(ledger?.swipes ?? {})) {
@@ -273,7 +274,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       tally.add("assistant-threads", meta.assistant.messages.length + Object.keys(meta.assistant.proposals).length);
       for (const h of [...Object.values(meta.learned).map((f) => f.hash), ...meta.assistant.messages, ...Object.values(meta.assistant.proposals)]) missingBlob(`agents/blobs/${h}`, `a file chat ${chat.id}'s agents kept; today's clean-up had removed it`);
       unreadable.push(...read.unreadable);
-      chats.push({ chatId: chat.id, engine: read.engine, worldId: read.worldId, messages: read.messages, replies: read.replies, turns: (tally.counts.get("ledger") ?? 0) - before, journal: read.journal, notOpened: read.notOpened, deletedTurns: read.deletedTurns, underWay: read.underWay, waiting: read.waiting });
+      chats.push({ chatId: chat.id, engine: read.engine, worldId: read.worldId, messages: read.messages, replies: read.replies, turns: (tally.counts.get("ledger") ?? 0) - before, story: (tally.counts.get("story-record") ?? 0) - stories, journal: read.journal, notOpened: read.notOpened, deletedTurns: read.deletedTurns, underWay: read.underWay, waiting: read.waiting });
     }
 
     // The agents engine's global workspace: its files, by the blobs they name.

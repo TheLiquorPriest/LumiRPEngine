@@ -18,10 +18,13 @@ export interface PageChat {
   chat: string;
   outcome: ChatImportReport["outcome"];
   why: string | null;
+  /** Turns imported of its own: one per swipe of every reply it holds itself. */
   turns: number;
+  /** A branch's messages that share the turns of the chat it was made from, and that chat; null for a chat that shares none. */
+  shares: ChatImportReport["shares"];
   /** Whether RPE's fold matched today's: at the head, and at how many of its swipes; where it differed, today's state is kept as the turn's start. */
   check: Pick<ChatImportReport, "matched" | "differences" | "placed">;
-  /** What the run that imported it carried of it; null for a chat no run of this build imported. */
+  /** What the run that imported it carried of it, over its whole path; null for a chat no run of this build imported. */
   carried: ChatCarried | null;
 }
 
@@ -65,6 +68,7 @@ export function migrationPage(input: { db: Database; user: string; identifier: s
     outcome: c.outcome,
     why: c.why ?? null,
     turns: c.turns,
+    shares: c.shares,
     check: { matched: c.matched, differences: c.differences, placed: c.placed },
     carried: chatRecord(input.db, input.user, c.chatId)?.carried ?? null,
   }));

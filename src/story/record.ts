@@ -124,6 +124,13 @@ export class StoryRecord {
     return beat.fields.message !== undefined ? this.numberOf(beat.fields.message) : this.at.replyOf(beat.opened);
   }
 
+  /** The messages a beat covers: from where it lies through the last message it names, where it names one (a beat recorded from a stretch of the chat's past); else where it lies alone. */
+  beatSpan(beat: StoryItem): Span {
+    const from = this.beatAt(beat);
+    const to = beat.fields.last !== undefined ? this.numberOf(beat.fields.last) : null;
+    return { from, to: from === null ? null : to !== null && to > from ? to : from };
+  }
+
   /** Where a scene or a chapter starts: the message it names, or the first message its opening turn answered. */
   startOf(item: StoryItem): number | null {
     return item.fields.first !== undefined ? this.numberOf(item.fields.first) : this.at.startOf(item.opened);

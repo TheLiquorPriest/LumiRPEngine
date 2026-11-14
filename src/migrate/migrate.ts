@@ -116,9 +116,9 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       const carried = await carry({ today, report, paths, db, store, s, run, now: now().getTime(), tree });
       report.landed = carried.landed;
       report.carried = carried.carried;
-      // What it carried of each chat it imported, for the chat's first briefing on RPE and the Migration page.
+      // What it carried of each chat it imported, over the chat's whole path, for the chat's first briefing on RPE and the Migration page.
       const notes = layout ? `${layout.notes}/${IMPORTED}` : null;
-      for (const c of report.imports) if (c.outcome === "imported" || c.outcome === "replaced") keepCarried(db, sources.userId, c.chatId, chatCarried(report, c.chatId, notes));
+      for (const c of report.imports) if (c.outcome === "imported" || c.outcome === "replaced") keepCarried(db, sources.userId, c.chatId, chatCarried({ report, db, s, chat: c.chatId, notes }));
       // The store keeps the world revisions the run carried (its `world_file` table, left as it is), so a migrated chat's world can be read and written to.
       const kept = s.copyMigratedWorlds();
       report.worldsInStore = { added: kept.added, held: kept.held, unreadable: kept.unreadable.length };

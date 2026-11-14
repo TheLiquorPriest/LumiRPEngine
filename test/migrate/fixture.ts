@@ -64,9 +64,9 @@ export const PEOPLE = { ada: { entity: "e-ada", name: "Ada Mirren" }, bo: { enti
 
 /**
  * The harness chat's area, turn by turn: at its first reply (`gen-1`, written after the area before
- * any turn, `root`), then at the two swipes of its last reply: the first (`gen-2`, not shown) changed
- * Ada's core and the notebook, the second (`gen-3`, shown, written last) changed Ada's core its own
- * way and removed Bo's profile.
+ * any turn, `root`), then at the two swipes of its last reply: the first (`gen-2`, not shown, its
+ * document written last, as when the player swiped back) changed Ada's core and the notebook, the
+ * second (`gen-3`, shown) changed Ada's core its own way and removed Bo's profile.
  */
 export const AREAS = {
   root: { "notebook.md": "Ada distrusts the guard." },
@@ -341,10 +341,10 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
   const blobs = new Map<string, string>();
   const userArea = area({ "GUIDANCE.md": "Keep the fog grey.", "style.md": "Short lines." }, blobs);
   const rootArea = area(AREAS.root, blobs);
-  // The chat's area at each turn, each written after the one before it (`root`, before any turn).
+  // The chat's area at each turn (`root`, before any turn); the swipe the chat doesn't show was written last, so the area the chat shows is not the one written last.
   const turnArea = area(AREAS["gen-1"], blobs, 2);
   const turnIndex = JSON.parse(turnArea).head as string;
-  const litArea = area(AREAS["gen-2"], blobs, 3);
+  const litArea = area(AREAS["gen-2"], blobs, 5);
   const darkArea = area(AREAS["gen-3"], blobs, 4);
   const learnedArea = area({ "notes.md": "The pier floods at high tide." }, blobs);
   const segment = "harness session segment";

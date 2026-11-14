@@ -16,11 +16,11 @@ import { dropLeftoverCast } from "../cast";
 import type { Store, UserStore } from "../store";
 import { dropLeftoverStory } from "../story";
 import { bookTrouble, carryConnections, type ConnectionsCarried } from "./connections";
-import { carriedAreas, TurnAreas } from "./history";
+import { TurnAreas } from "./history";
 import { carryMinds, type MindsCarried } from "./minds";
 import { carryOwnFiles, IMPORTED as IMPORTED_FOLDER, type OwnFilesCarried, PROMPT_SETS, type TreePlaces, VERSIONS } from "./own-files";
 import { People } from "./people";
-import type { Item, MigrationReport } from "./report";
+import { apartText, type ChatFate, type Item, type MigrationReport } from "./report";
 import { NO_PLACE_YET, type RowId } from "./rows";
 import { carrySettings, lumiahSettings, oneToolAtATime, type SettingsCarried } from "./settings";
 import { carryStory, type StoryCarried } from "./story-record";
@@ -105,20 +105,28 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
   const serial = oneToolAtATime(await lumiahSettings(today));
   const connections = runtime === null ? null : await carryConnections(modelsPort(paths, new SecretsFile(paths.secrets)), runtime, today.runtime.files, serial);
   const settings = await carrySettings(today, report.items, paths.globalConfig);
-  // Each chat's area as each turn left it, read once for its notes and its characters' mind files.
-  const areas = carriedAreas(report.items);
-  const turnAreas = new TurnAreas(today, db, s, areas);
-  const ownFiles = tree === null ? null : await carryOwnFiles(today, report.items, tree, { db, s, areas: turnAreas });
-
-  // Each chat the import carried: the earlier import's rows on the turns it replaced or removed go with those turns, as the cast's and the story's clean-up has it; then what today's build recorded beside each turn.
+  // Each chat the import carried; and each chat's area as each turn left it, read once for its notes and its characters' mind files.
   const chats = (report.imports ?? []).filter((c) => c.outcome === "imported" || c.outcome === "replaced").map((c) => c.chatId);
+  const turnAreas = new TurnAreas(today, db, s, report.items);
+  const ownFiles = tree === null ? null : await carryOwnFiles(today, report.items, tree, { db, s, areas: turnAreas, carried: new Set(chats) });
+
+  // The earlier import's rows on the turns it replaced or removed go with those turns, as the cast's and the story's clean-up has it; then what today's build recorded beside each turn.
   db.transaction(() => {
     dropLeftoverStory(store, s.id);
     dropLeftoverCast(store, s.id);
   })();
-  const people = new People(db, s, now);
-  const minds = await carryMinds({ today, db, s, chats, areas: turnAreas, people, carried: areas, now });
-  const story = db.transaction(() => carryStory({ db, store, s, chats, people, now }))();
+  const people = new People(db, store, s, now);
+  // What came of each chat this run did not import, for what of it the run did not carry: its outcome, and whether an earlier run's import of it stands.
+  const fate = (chat: string): ChatFate => {
+    const c = report.imports?.find((i) => i.chatId === chat);
+    const why = c !== undefined ? `${c.outcome}${c.why ? `: ${c.why}` : ""}` : today.chats.some((row) => row.id === chat) ? "not read: today's build plays no world in it" : "gone from Lumiverse";
+    return { why, kept: s.chat(chat) !== null };
+  };
+  const minds = await carryMinds({ db, s, chats, areas: turnAreas, people, now, fate });
+  const story = db.transaction(() => carryStory({ db, store, s, chats, people, now, inside: new Map(report.chats.map((c) => [c.chatId, c.story])), fate }))();
+  const [mindsFound, storyFound] = (["mind-files", "story-record"] as const).map((row) => report.rows.find((r) => r.row === row)?.inside?.count ?? 0);
+  const files = new Set(minds.characters.flatMap((c) => c.files.map((f) => `${c.character}\u0000${f}`))).size;
+  const characters = new Set(minds.characters.map((c) => c.character)).size;
 
   const landed: Partial<Record<RowId, string>> = {
     ...IMPORTED,
@@ -129,18 +137,31 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
     "model-choices": `Listed for you: ${settings.lumiverseConnections.length} setting(s) name a connection that lives in Lumiverse, which RPE can't use; that work uses RPE's default connection until you pick one of RPE's`,
     "runtime-settings": "Listed by name: RPE's config has no setting for the runtime's tuning, memory limit or update choice yet",
     loopback: "At the swap (rpe up): the hash of its key among RPE's provider keys, RPE answering at today's address under today's model name; the connection in Lumiverse is left as it is",
-    "mind-files": `On each character's record in the cast, word for word, per turn, marked imported and not yet filed (the cast's mind part): ${minds.versions} version(s) of ${minds.characters.reduce((n, c) => n + c.files.length, 0)} file(s) of ${minds.characters.length} character(s)${minds.untied > 0 ? `; ${minds.untied} version(s) in areas no imported turn names (before any turn, or a generation that left no reply) are in the backup only` : ""}`,
-    "story-record": `${IMPORTED["story-record"]}: ${story.beats} beat(s), ${story.struck} struck, ${story.futures} draft(s) as proposed futures, ${story.castings} casting(s) in the cast${story.pinned > 0 ? `, ${story.pinned} pinned as the player pinned them` : ""}${story.leftOut > 0 ? `; ${story.leftOut} damaged entr(ies) today's reader leaves out are in imported_record only` : ""}`,
+    // What this run carried, against what the rehearsal found, and where the rest is: each part named.
+    "mind-files": [
+      `On each character's record in the cast, word for word, per turn, marked imported and not yet filed (the cast's mind part): ${minds.versions} version(s) of ${files} file(s) of ${characters} character(s), ${minds.versions - minds.unlisted} of the ${mindsFound} found in today's areas${minds.unlisted > 0 ? ` and ${minds.unlisted} read from the area a turn's record names, which no area document of its chat holds` : ""}`,
+      ...(minds.untied > 0 ? [`${minds.untied} version(s) in areas no imported turn ended with (before any turn, a generation that left no reply, or a reply's that a Continue then changed) are in the backup only`] : []),
+      ...(minds.shared > 0 ? [`${minds.shared} version(s) in a branch's own areas, the same as the chat it was made from holds, are on the records of the turns the two share`] : []),
+      ...(minds.gone > 0 ? [`${minds.gone} version(s) whose text today's clean-up had removed are listed as not read`] : []),
+      ...apartText(minds.apart, "version(s)"),
+    ].join("; "),
+    "story-record": [
+      `${IMPORTED["story-record"]}: ${story.beats} beat(s), ${story.struck} struck, ${story.futures} draft(s) as proposed futures, ${story.castings} casting(s) in the cast${story.pinned > 0 ? `, ${story.pinned} pinned as the player pinned them` : ""}, ${story.beats + story.struck + story.futures + story.castings} of the ${storyFound} entr(ies) found in today's records`,
+      ...(story.leftOut > 0 ? [`${story.leftOut} damaged entr(ies) today's reader leaves out are in imported_record only`] : []),
+      ...(story.shared > 0 ? [`${story.shared} entr(ies) in the records a branch copied from the chat it was made from are carried once, with the turns the two share`] : []),
+      ...(story.unheld > 0 ? [`${story.unheld} entr(ies) on records no imported turn holds are in the backup only`] : []),
+      ...apartText(story.apart, "entr(ies)"),
+    ].join("; "),
   };
   if (connections !== null && !("why" in connections)) landed.connections = `RPH's two documents, through the models port: ${connections.connections.length} connection(s) in RPE-global.yml's models; ${connections.keys} key(s), ${connections.signins} sign-in(s) and ${connections.headerValues} header value(s) in the secrets file and nowhere else`;
   if (tree !== null && ownFiles !== null) {
     const at = `The user's level of the file tree, under ${IMPORTED_FOLDER}/, switched off`;
     const inChat = `that chat's own notes folder, under ${tree.notes}/${IMPORTED_FOLDER}/, which no other chat's agents read`;
-    const alone = ownFiles.leftAlone > 0 ? `; ${ownFiles.leftAlone} chat(s) played on RPE keep the notes they have` : "";
+    const alone = `${ownFiles.leftAlone > 0 ? `; ${ownFiles.leftAlone} chat(s) played on RPE keep the notes they have` : ""}${ownFiles.kept > 0 ? `; ${ownFiles.kept} chat(s) this run did not import keep the notes an earlier run wrote` : ""}`;
     landed["own-agents"] = `${at}: ${ownFiles.agents} agent(s) in ${tree.agents}/ and ${ownFiles.skills} skill(s) in ${tree.skills}/, each in the new header format with the original beside it`;
     landed.texts = `${at}: ${ownFiles.texts} edited text(s) in ${tree.prompts}/, each named for what it was; ${ownFiles.promptSets} prompt set(s) today's turns recorded, word for word, in ${PROMPT_SETS}/, each named by the hash the turns' records give it`;
     landed.guidance = `${at}: GUIDANCE.md (${ownFiles.guidance})`;
-    landed["author-notes"] = `Each chat's area at its latest turn, in ${inChat} (${ownFiles.notes} file(s)); every version before it, by the turn that wrote it, under ${VERSIONS}/ there (${ownFiles.versions} file(s))${alone}`;
+    landed["author-notes"] = `Each chat's area as the reply it shows left it, in ${inChat} (${ownFiles.notes} file(s)); every version before it, by the turn that wrote it, under ${VERSIONS}/ there (${ownFiles.versions} file(s)), with beside each the notes that turn removed or moved away (${ownFiles.removals})${alone}`;
     landed["learned-and-home"] = `${at}: your ~/ files in home/ (${ownFiles.home} file(s)); each chat's learned/ in ${inChat}, as learned/ (${ownFiles.learned} file(s))${alone}`;
   }
   return { landed, carried: { worlds, settings, connections, ownFiles, minds, story } };

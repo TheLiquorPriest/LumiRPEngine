@@ -1,6 +1,7 @@
 // Which of the chat's messages the story record covers (plan §8.1 "Covered"), told from the records
-// alone, never from what they say: a message is covered when it has a beat recorded, or lies in a
-// scene that has its summary; it is unsummarized when it has beats and lies in no such scene. A
+// alone, never from what they say: a message is covered when a beat recorded lies over it (at its
+// message, or over the stretch of the chat's past it was read from), or it lies in a scene that has its
+// summary; it is unsummarized when beats lie over it and it lies in no such scene. A
 // chapter's summary covers nothing here, as the plan words it. The history window's hold takes the
 // covered messages (`src/story/window`), and the story's facts count from both (`./facts`). Code
 // decides nothing with them.
@@ -31,8 +32,8 @@ export function storyCoverage(point: StoryPoint): StoryCoverage {
   }
   const beats = new Set<number>();
   for (const beat of record.of("beat")) {
-    const at = record.beatAt(beat);
-    if (at !== null) beats.add(at);
+    const { from, to } = record.beatSpan(beat);
+    if (from !== null && to !== null) for (let i = from; i <= to; i++) beats.add(i);
   }
   const covered = new Set<string>();
   const unsummarized = new Set<string>();

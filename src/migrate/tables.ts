@@ -83,6 +83,36 @@ CREATE TABLE world_file (
     // Read by the chat's first briefing on RPE and by the Migration page: counts and names, never content.
     sql: "ALTER TABLE migration_chat ADD COLUMN carried TEXT;",
   },
+  {
+    version: 5,
+    name: "which character each of today's people became",
+    // A later run finds a person's character here before any name, so a rename or a name two people share never makes a second one.
+    sql: `
+CREATE TABLE migration_person (
+  user TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  entity TEXT NOT NULL,
+  character TEXT NOT NULL,
+  PRIMARY KEY (user, chat, entity)
+);
+CREATE INDEX migration_person_character ON migration_person (user, character);
+`,
+  },
+  {
+    version: 6,
+    name: "the files a run wrote into the file tree",
+    // A later run removes what an earlier one wrote and today's side no longer has, where it is still as that run wrote it.
+    sql: `
+CREATE TABLE migration_file (
+  user TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  base TEXT NOT NULL,
+  path TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  PRIMARY KEY (user, base, path)
+);
+`,
+  },
 ];
 
 /** Whether the database holds the migration's tables yet. */
@@ -93,6 +123,48 @@ function hasTables(db: Database): boolean {
 /** Keeps what a run carried of a chat it imported, beside what it did with the chat. */
 export function keepCarried(db: Database, user: string, chat: string, carried: ChatCarried): void {
   db.run("UPDATE migration_chat SET carried = ? WHERE user = ? AND chat = ?", [JSON.stringify(carried), user, chat]);
+}
+
+/** The character one of today's people became in a chat (the one it was made in); null where no run made one. */
+export function personOf(db: Database, user: string, chat: string, entity: string): string | null {
+  return db.query<{ character: string }, [string, string, string]>("SELECT character FROM migration_person WHERE user = ? AND chat = ? AND entity = ?").get(user, chat, entity)?.character ?? null;
+}
+
+/** Whether a run made `character` of one of today's people. */
+export function isPerson(db: Database, user: string, character: string): boolean {
+  return db.query<{ n: number }, [string, string]>("SELECT count(*) AS n FROM migration_person WHERE user = ? AND character = ?").get(user, character)?.n !== 0;
+}
+
+/** Notes the character one of today's people became in a chat, inside the caller's write. */
+export function keepPerson(db: Database, user: string, chat: string, entity: string, character: string): void {
+  db.run("INSERT OR REPLACE INTO migration_person (user, chat, entity, character) VALUES (?, ?, ?, ?)", [user, chat, entity, character]);
+}
+
+/** Today's people of a chat and the characters they became there, as runs made them. */
+export function peopleOf(db: Database, user: string, chat: string): { entity: string; character: string }[] {
+  return db.query<{ entity: string; character: string }, [string, string]>("SELECT entity, character FROM migration_person WHERE user = ? AND chat = ? ORDER BY entity").all(user, chat);
+}
+
+/** A file a run wrote into the file tree, below its folder: the chat whose notes it is ("" at the user's level), the folder it was written under and its path there, and the SHA-256 of what was written. */
+export interface WrittenFile {
+  chat: string;
+  base: string;
+  path: string;
+  sha256: string;
+}
+
+/** The files the user's earlier runs wrote into the file tree, as the last run left the list. */
+export function writtenFiles(db: Database, user: string): WrittenFile[] {
+  return db.query<WrittenFile, [string]>("SELECT chat, base, path, sha256 FROM migration_file WHERE user = ? ORDER BY base, path").all(user);
+}
+
+/** Keeps the list of files in the file tree that are the migration's, in place of the last. */
+export function keepWritten(db: Database, user: string, files: readonly WrittenFile[]): void {
+  db.transaction(() => {
+    db.run("DELETE FROM migration_file WHERE user = ?", [user]);
+    const put = db.query("INSERT OR REPLACE INTO migration_file (user, chat, base, path, sha256) VALUES (?, ?, ?, ?, ?)");
+    for (const f of files) put.run(user, f.chat, f.base, f.path, f.sha256);
+  })();
 }
 
 /** What the last run that imported a chat did with it, and what it carried of it. */

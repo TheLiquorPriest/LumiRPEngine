@@ -1,8 +1,8 @@
 ---
-description: The layout of what the migration carried of a chat from the earlier build, given to the notice `migrated_chat` (in notices.md) as its `carried`, in the chat's first briefing on RPE. Which engine played it and how many turns were carried; each character's mind files, attached word for word and not yet filed; what the story record held; where the notes are. Each part appears only when there is something in it. It lays facts out; it asks for nothing.
+description: The layout of what the migration carried of a chat from the earlier build, given to the notice `migrated_chat` (in notices.md) as its `carried`, in the chat's first briefing on RPE. Which engine played it and how many turns its path holds, and how many of them it shares with the chat it was branched from; each character's mind files, attached word for word and not yet filed; what the story record held; where the notes are. Each part appears only when there is something in it. It lays facts out; it asks for nothing.
 ---
 {{#played}}
-It was played by the earlier build's {{played.engine}} engine; {{played.turns}} of its turns were carried, each with what it changed.
+It was played by the earlier build's {{played.engine}} engine; {{played.turns}} of its turns were carried, each with what it changed{{#played.shared}}, {{played.shared.turns}} of them shared with the chat it was branched from{{/played.shared}}.
 {{/played}}
 {{#marked}}
 Where RPE's reckoning of a turn's state differed from the earlier build's, the earlier build's state was kept as that turn's.
