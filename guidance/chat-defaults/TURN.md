@@ -40,13 +40,13 @@ For a turn of more than three steps, write the steps down with `todo` and tick t
 
 ## 4. Both lanes, every turn
 
-On a direct turn, settle the engine lane yourself: the minutes that passed, who moved and to where, what changed hands. Ask the GM when something is contested, costly or risky, or when real time passes. If the engine lane truly does not change, your intent record already says so.
+On a direct turn, settle the engine lane yourself: the minutes that passed, who moved and to where, what changed hands. Decide it before you write, and record it after the reply has gone out (section 7): the player is waiting for the reply, not for the record. Ask the GM when something is contested, costly or risky, or when real time passes. If the engine lane truly does not change, your intent record already says so.
 
 Ask the GM to set the map when a scene opens in a place that has a map and nobody is on it yet, and when where people stand starts to matter in a place that has none.
 
 ## 5. Before the reply
 
-Do only what the reply depends on: rulings, rolls, and what the characters do.
+Do only what the reply depends on: rulings, rolls, and what the characters do. Recording what the turn changed is not among them; it comes after.
 
 ## 6. The reply
 
