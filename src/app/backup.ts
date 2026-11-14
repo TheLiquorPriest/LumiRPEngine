@@ -1,16 +1,15 @@
 // `rpe backup` (plan §4.5): one archive of the database and the file tree, made while RPE runs. SQLite
 // copies the database itself, whole and consistent with the log's committed pages, and the copy and
-// every file of the tree go into one plain tar (the migration's own format, `src/migrate/tar.ts`),
-// which `tar -xf` restores on any machine. The archive is readable by its owner alone and is never
-// written over.
+// every file of the tree go into one plain tar (archive.ts), each streamed from the disk a piece at a
+// time, which `tar -xf` restores on any machine. The archive is readable by its owner alone and is
+// never written over.
 
 import { Database } from "bun:sqlite";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { chmod, open, rm, stat } from "node:fs/promises";
+import { open, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { walk } from "../migrate/files";
-import { TarWriter } from "../migrate/tar";
+import { TarWriter, walk } from "./archive";
 import type { DataPaths } from "./config";
 import { DATABASE_FILE, FILES_FOLDER } from "./config";
 import { OWNER_ONLY_FILE, ownerOnlyFolder } from "./disk";
@@ -39,6 +38,7 @@ export async function makeBackup(paths: DataPaths, now: number, out?: string): P
   const made = await open(path, "wx", OWNER_ONLY_FILE);
   await made.close();
   const copy = join(paths.backups, `.copy-${randomBytes(6).toString("hex")}.db`);
+  let tar: TarWriter | null = null;
   try {
     const db = new Database(paths.database, { readonly: true });
     try {
@@ -46,8 +46,8 @@ export async function makeBackup(paths: DataPaths, now: number, out?: string): P
     } finally {
       db.close();
     }
-    const tar = TarWriter.open(path);
-    await tar.add(DATABASE_FILE, await Bun.file(copy).bytes(), (await stat(copy)).mtimeMs / 1000, OWNER_ONLY_FILE);
+    tar = TarWriter.open(path);
+    await tar.addFile(DATABASE_FILE, copy);
     let files = 0;
     const skipped: string[] = [];
     for (const found of await walk(paths.files)) {
@@ -56,14 +56,15 @@ export async function makeBackup(paths: DataPaths, now: number, out?: string): P
         skipped.push(name);
         continue;
       }
-      await tar.add(name, await Bun.file(join(paths.files, found.path)).bytes(), found.mtimeMs / 1000, found.mode);
+      await tar.addFile(name, join(paths.files, found.path));
       files++;
     }
     const closed = await tar.close();
-    await chmod(path, OWNER_ONLY_FILE);
     return { path, bytes: closed.bytes, sha256: closed.sha256, files, skipped };
   } catch (error) {
-    await rm(path, { force: true });
+    // Given up whole: the writer is closed and what it wrote removed, or the empty file made above is.
+    if (tar === null) await rm(path, { force: true });
+    else await tar.discard();
     throw error;
   } finally {
     await rm(copy, { force: true });
