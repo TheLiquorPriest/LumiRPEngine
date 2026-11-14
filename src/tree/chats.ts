@@ -1,7 +1,8 @@
 // Which folders a chat's levels are (plan §5): chosen once, the first time RPE meets the chat, from its
 // character's name and its own, and kept in RPE's database, so a rename in Lumiverse moves nothing.
-// And the tree's tables (the application's migration area `files`): those folders, and every write an
-// agent made in a turn, so a swipe or a delete can put the turn's notes back (plan §5.1).
+// And the tree's tables (the application's migration area `files`): those folders; every write an agent
+// made to the notes in a turn, with what the file held before and after; which of those writes stand in
+// each chat's notes folder; and the turn each chat's notes were last put at (plan §5.1, `notes.ts`).
 
 import type { Database } from "bun:sqlite";
 import { mkdir } from "node:fs/promises";
@@ -47,6 +48,63 @@ CREATE INDEX tree_write_turn ON tree_write (user, turn);
     sql: `
 ALTER TABLE tree_chat ADD COLUMN owner TEXT;
 CREATE INDEX tree_chat_owner ON tree_chat (user, owner);
+`,
+  },
+  {
+    version: 3,
+    name: "notes that follow the turn",
+    // A write's text after it (`text`, null for a delete and for a write recorded before this), and whether the lead dropped it. Which
+    // writes stand in each chat's notes folder (`tree_applied`): every note write recorded so far stood there when it was made. The
+    // turn each chat's notes were last put at (`tree_notes`): a chat with none has not been put at a turn yet, so a branch is started.
+    sql: `
+ALTER TABLE tree_write ADD COLUMN text TEXT;
+ALTER TABLE tree_write ADD COLUMN dropped INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX tree_write_path ON tree_write (user, path);
+CREATE TABLE tree_applied (
+  user TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  write_id INTEGER NOT NULL,
+  PRIMARY KEY (user, chat, write_id)
+);
+INSERT INTO tree_applied (user, chat, write_id) SELECT user, chat, id FROM tree_write WHERE path LIKE 'persistent-workspace/%';
+CREATE TABLE tree_notes (
+  user TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  turn TEXT,
+  PRIMARY KEY (user, chat)
+);
+`,
+  },
+  {
+    version: 4,
+    name: "shipped defaults an update changed",
+    // By the file's path below the shipped level: its text before the update that last changed it, and when that update was laid out.
+    sql: `
+CREATE TABLE tree_default (
+  path TEXT PRIMARY KEY,
+  before TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+`,
+  },
+  {
+    version: 5,
+    name: "agents' suggestions",
+    sql: `
+CREATE TABLE tree_suggestion (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  turn TEXT,
+  agent TEXT NOT NULL,
+  path TEXT NOT NULL,
+  text TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  state TEXT NOT NULL,
+  decided INTEGER
+);
+CREATE INDEX tree_suggestion_chat ON tree_suggestion (user, chat, state);
 `,
   },
 ];

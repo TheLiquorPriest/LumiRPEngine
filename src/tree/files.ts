@@ -1,7 +1,7 @@
 // RPE's file port (plan §5, §5.1; `FilesPort` in `rp-harness/contract`): reads and finds over a chat's
-// view of the tree, and writes held to where each writer may write. Every write an agent makes in a
-// turn is recorded against that turn (`tree_write`), with what the file held before, so a swipe or a
-// delete can put the turn's notes back.
+// view of the tree, and writes held to where each writer may write. Every note an agent writes in a
+// turn is recorded against that turn (`tree_write`), with what the file held before and after, so a
+// swipe, a delete or a branch can put the notes back (`notes.ts`).
 
 import { appendFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -39,7 +39,8 @@ export interface TreeFiles extends FilesPort {
   sessionDisk(scope: Scope): Promise<string | null>;
 }
 
-function sha256(data: string | Uint8Array): string {
+/** A text's SHA-256, lower-case hex: how a write records what a file held. */
+export function sha256(data: string | Uint8Array): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
@@ -65,14 +66,14 @@ function byPath(a: { name: string; folder: boolean }, b: { name: string; folder:
   return ka < kb ? -1 : ka > kb ? 1 : 0;
 }
 
-interface Walked {
+export interface Walked {
   rest: string[];
   folder: boolean;
   disk: string;
 }
 
 /** Everything below a folder, `depth` folders deep, in the order of their paths: no links, nothing but files and folders, and at a mounted level's top only what is in the view. */
-async function* walk(loc: ChatLocation, level: LayerLevel, rest: readonly string[], disk: string, depth: number): AsyncGenerator<Walked> {
+export async function* walk(loc: ChatLocation, level: LayerLevel, rest: readonly string[], disk: string, depth: number): AsyncGenerator<Walked> {
   const entries = (await entriesOf(loc, level, rest, disk)).sort(byPath);
   for (const e of entries) {
     const below = [...rest, e.name];
@@ -105,10 +106,11 @@ function occurrences(text: string, old: string): number {
   return n;
 }
 
-/** Applies a change to a file the writer may write, and gives the result with the file's text before it (null: none). */
-async function apply(at: Located & { disk: string }, op: FileOp): Promise<{ result: Written | Unapplied; old: string | null }> {
-  if (at.is === "folder") return { result: { status: "unapplied", path: at.path, reason: "folder" }, old: null };
+/** Applies a change to a file the writer may write, and gives the result with the file's text before it and after it (null: none). */
+async function apply(at: Located & { disk: string }, op: FileOp): Promise<{ result: Written | Unapplied; old: string | null; after: string | null }> {
+  if (at.is === "folder") return { result: { status: "unapplied", path: at.path, reason: "folder" }, old: null, after: null };
   const old = at.is === "file" ? await readFile(at.disk, "utf8") : null;
+  const unapplied = (result: Unapplied) => ({ result, old, after: old });
   let after: string | null;
   switch (op.op) {
     case "write":
@@ -118,15 +120,15 @@ async function apply(at: Located & { disk: string }, op: FileOp): Promise<{ resu
       after = (old ?? "") + op.text;
       break;
     case "edit": {
-      if (old === null) return { result: { status: "unapplied", path: at.path, reason: "missing" }, old };
+      if (old === null) return unapplied({ status: "unapplied", path: at.path, reason: "missing" });
       const matches = op.old === "" ? 0 : occurrences(old, op.old);
-      if (matches === 0) return { result: { status: "unapplied", path: at.path, reason: "no-match" }, old };
-      if (matches > 1 && op.all !== true) return { result: { status: "unapplied", path: at.path, reason: "several", matches }, old };
+      if (matches === 0) return unapplied({ status: "unapplied", path: at.path, reason: "no-match" });
+      if (matches > 1 && op.all !== true) return unapplied({ status: "unapplied", path: at.path, reason: "several", matches });
       after = op.all === true ? old.split(op.old).join(op.new) : old.replace(op.old, () => op.new);
       break;
     }
     case "delete":
-      if (old === null) return { result: { status: "unapplied", path: at.path, reason: "missing" }, old };
+      if (old === null) return unapplied({ status: "unapplied", path: at.path, reason: "missing" });
       after = null;
       break;
   }
@@ -145,7 +147,7 @@ async function apply(at: Located & { disk: string }, op: FileOp): Promise<{ resu
     hash: after === null ? null : sha256(after),
     before: old === null ? null : sha256(old),
   };
-  return { result, old };
+  return { result, old, after };
 }
 
 /** Changes to one file run one at a time, so two changes to it both land. */
@@ -163,9 +165,15 @@ class Serial {
   }
 }
 
-export function treeFiles(deps: TreeFilesDeps): TreeFiles {
-  const serial = new Serial();
+/** One queue for every writer of a file, by its place on disk: an agent's write, the user's, and the notes put back for a turn. */
+const SERIAL = new Serial();
 
+/** Runs `task`, a change to the file at `disk`, after every change to it asked for before. */
+export function oneFileAtATime<T>(disk: string, task: () => Promise<T>): Promise<T> {
+  return SERIAL.run(disk, task);
+}
+
+export function treeFiles(deps: TreeFilesDeps): TreeFiles {
   function check(scope: Scope): void {
     if (scope.user !== deps.user) throw new Error(`This RPE belongs to the Lumiverse user ${JSON.stringify(deps.user)}, not ${JSON.stringify(scope.user)}.`);
     safeId("session", scope.session);
@@ -281,18 +289,20 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
       const writable = writableFor(await places(scope), by);
       const reason = lookup.at.disk === null ? "outside" : refusalFor(lookup.at, writable);
       if (reason !== undefined || lookup.at.disk === null) return await refusal(scope, lookup.at.path, reason ?? "outside", by);
-      return serial.run(lookup.at.disk, async () => {
+      return oneFileAtATime(lookup.at.disk, async () => {
         // Found again in this file's turn, so a write that waited sees what the one before it left.
         const again = await locate(loc, path);
         if (!again.ok) return await refusal(scope, again.path, again.reason, by);
         if (again.at.disk === null) return await refusal(scope, again.at.path, "outside", by);
-        const { result, old } = await apply({ ...again.at, disk: again.at.disk }, op);
-        if (result.status === "written" && by !== "harness" && scope.turn !== undefined) {
+        const { result, old, after } = await apply({ ...again.at, disk: again.at.disk }, op);
+        // A note written in a turn is recorded against it, with what the file held before and after, and stands in the chat's notes
+        // folder (`notes.ts`), so a swipe, a delete, a branch or the lead dropping a sub-agent's writes can put the notes back.
+        if (result.status === "written" && result.kind === "notes" && by !== "harness" && scope.turn !== undefined) {
           const turn = scope.turn;
-          await deps.writes.run(
-            (db) => db.run("INSERT INTO tree_write (user, chat, turn, agent, path, before, after, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [scope.user, scope.chat, turn, JSON.stringify(by), result.path, old, result.hash, deps.now()]),
-            "recording an agent's write",
-          );
+          await deps.writes.run((db) => {
+            const row = db.run("INSERT INTO tree_write (user, chat, turn, agent, path, before, after, text, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [scope.user, scope.chat, turn, JSON.stringify(by), result.path, old, result.hash, after, deps.now()]);
+            db.run("INSERT INTO tree_applied (user, chat, write_id) VALUES (?, ?, ?)", [scope.user, scope.chat, Number(row.lastInsertRowid)]);
+          }, "recording an agent's note");
         }
         return result;
       });

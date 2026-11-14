@@ -7,10 +7,11 @@
 //
 // It is laid out again at every start, so an update's defaults reach the tree; a file the user put at
 // another level is never touched. The new copy is made beside the data folder's tree, out of the
-// agents' view, and moved in whole.
+// agents' view, and moved in whole. What it changed of the files laid out before is given back, so the
+// Files page can say which default changed under the user's own file (`defaults.ts`).
 
-import { chmod, cp, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { chmod, cp, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SHIPPED_FOLDER } from "./layout";
 
@@ -52,11 +53,39 @@ async function exists(path: string): Promise<boolean> {
   );
 }
 
+/** A shipped file an update changed: its path below the shipped level, and its text before. */
+export interface ShippedChange {
+  path: string;
+  before: string;
+}
+
+/** Every file below a folder by its path below it ("/" between names), with its text; none for a folder that is not there. */
+async function textsBelow(folder: string): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  let found;
+  try {
+    found = await readdir(folder, { recursive: true, withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const d of found) {
+    if (!d.isFile()) continue;
+    const at = join(d.parentPath, d.name);
+    out.set(relative(folder, at).split(sep).join("/"), await readFile(at, "utf8"));
+  }
+  return out;
+}
+
 /**
  * Lays the shipped level of the tree at `files`: RPH's folder `rph`, then RPE's `rpe` over it.
  * `scratch` is a folder beside the tree, on the same disk, where the copy is made before it moves in.
  */
 export async function layShipped(files: string, scratch: string, sources: { rph: string; rpe: string }): Promise<void> {
+  await layShippedChanges(files, scratch, sources);
+}
+
+/** Lays the shipped level as `layShipped` does, and gives back each file laid out before whose text this copy changes. */
+export async function layShippedChanges(files: string, scratch: string, sources: { rph: string; rpe: string }): Promise<ShippedChange[]> {
   const next = join(scratch, "shipped.next");
   const old = join(scratch, "shipped.old");
   for (const left of [next, old]) {
@@ -71,9 +100,12 @@ export async function layShipped(files: string, scratch: string, sources: { rph:
   }
   await readOnly(next);
   const target = join(files, SHIPPED_FOLDER);
+  const [was, now] = await Promise.all([textsBelow(target), textsBelow(next)]);
+  const changed = [...was].flatMap(([path, before]) => (now.has(path) && now.get(path) !== before ? [{ path, before }] : []));
   await mkdir(files, { recursive: true });
   if (await exists(target)) await rename(target, old);
   await rename(next, target);
   await writable(old);
   await rm(old, { recursive: true, force: true });
+  return changed;
 }

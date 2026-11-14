@@ -3,6 +3,7 @@
 // real ones), and the kit's seed placed at each level as RPE keeps its chats. Every name and text
 // here is made up.
 
+import type { Database } from "bun:sqlite";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { LayerLevel, Scope } from "rp-harness/contract";
@@ -24,6 +25,9 @@ export interface LaidTree {
   folders: ChatFolders;
   chats: TreeChats;
   port: TreeFiles;
+  /** The tree's database, and its write queue. */
+  db: Database;
+  writes: WriteQueue;
   /** A level's folder on disk. */
   levelDir(level: LayerLevel): string;
   close(): Promise<void>;
@@ -83,6 +87,8 @@ export async function layTree(seed: KitSeed, place: string, options: { rpe?: rea
     folders,
     chats,
     port,
+    db,
+    writes,
     levelDir,
     async close() {
       await writes.close();
