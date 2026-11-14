@@ -18,8 +18,10 @@ export const TREE_DEFAULTS = Object.freeze({
   findLimit: 200,
   /** Files larger than this many bytes are passed over by a grep. */
   grepBytes: 1024 * 1024,
-  /** A grep hit's line is cut to this many UTF-16 code units. */
+  /** A grep hit's line is cut to this many UTF-16 code units, and a grep tests no more of a line than that. */
   grepLineChars: 1000,
+  /** A grep stops once it has run this many milliseconds, with the hits it found by then: a pattern can take long on long lines. */
+  grepMs: 2000,
   /** The most line pairs a difference the Files page shows compares one by one; past it, the changed middle is shown removed, then added whole. */
   diffCells: 4_000_000,
   /** How many note files each of the Storage page's lists gives when the page names no number. */
@@ -36,6 +38,7 @@ export const TREE_SETTING_DEFS = {
   findLimit: { key: "files.findLimit", default: TREE_DEFAULTS.findLimit, takes: { type: "whole", least: 1 }, perConnection: false },
   grepBytes: { key: "files.grepBytes", default: TREE_DEFAULTS.grepBytes, takes: { type: "whole", least: 0 }, perConnection: false },
   grepLineChars: { key: "files.grepLineChars", default: TREE_DEFAULTS.grepLineChars, takes: { type: "whole", least: 1 }, perConnection: false },
+  grepMs: { key: "files.grepMs", default: TREE_DEFAULTS.grepMs, takes: { type: "whole", least: 1 }, perConnection: false },
   diffCells: { key: "files.diffCells", default: TREE_DEFAULTS.diffCells, takes: { type: "whole", least: 0 }, perConnection: false },
   notesListed: { key: "notes.listed", default: TREE_DEFAULTS.notesListed, takes: { type: "whole", least: 1 }, perConnection: false },
   notesMost: { key: "notes.most", default: TREE_DEFAULTS.notesMost, takes: { type: "whole", least: 1 }, perConnection: false },

@@ -33,6 +33,23 @@ describe("a registration the extension refuses", () => {
     expect(out.error).toBeNull();
     expect(rig.turns).toHaveLength(1);
   });
+
+  test("is asked nowhere when its address is more than a bare origin on loopback: a path, a query, a fragment or a name in it would aim the confirming call elsewhere", async () => {
+    const rig = await new Rig().start();
+    const reached: string[] = [];
+    rig.lv.servers.set("http://127.0.0.1:11434", async (request) => {
+      reached.push(request.url);
+      return Response.json({});
+    });
+    const bases = ["http://127.0.0.1:11434/api/pull#", "http://127.0.0.1:11434?x=", "http://127.0.0.1:11434/#", "http://someone:pw@127.0.0.1:11434"];
+    for (const base of bases) rig.ext.fromFrontend({ rpe: "register", registration: { v: 1, base, key: "rpx-elsewhere", connection: "conn-other", relay: RELAY_SESSION, build: "test" } }, USER, RELAY_SESSION);
+    const refusals = await until("every refusal", () => {
+      const got = rig.toRpe.filter((m) => said(m, "refused"));
+      return got.length === bases.length ? got : null;
+    });
+    for (const refused of refusals) expect(refused).toMatchObject({ rpe: "refused", why: expect.stringContaining("bare address") });
+    expect(reached).toEqual([]);
+  });
 });
 
 describe("a page's request", () => {

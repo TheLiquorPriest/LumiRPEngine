@@ -230,6 +230,23 @@ describe("the Files page's routes", () => {
     expect((await call("PUT", "/api/v1/files-off/@shipped/RPE-global.yml", { level: "global", off: true })).status).toBe(400);
   });
 
+  test("the listing says which levels' off: lists name a file: switched on at a level whose list does not name it, it stays off; at the one that does, it is on", async () => {
+    await writeFile(app.paths.globalConfig, "off: [agents/gm]\n");
+    await writeFile(join(chatFolder, "RPE.yml"), "off:\n  - .agents/gm.md\n");
+    const gm = async () => (await listing()).get("@shipped/.agents/gm.md");
+    expect(await gm()).toMatchObject({ off: true, offIn: ["global", "chat"] });
+    expect((await listing()).get("@shipped/.rules/consent.md")).toMatchObject({ off: false, offIn: [] });
+
+    await call("PUT", "/api/v1/files-off/@shipped/.agents/gm.md", { level: "chat", chat: CHAT, off: false });
+    expect(await gm()).toMatchObject({ off: true, offIn: ["global"], applies: false });
+    // The chat's list no longer names it: switching it on there again writes nothing, and the listing says why it is still off.
+    const again = await call<{ file: TreeFileEntry }>("PUT", "/api/v1/files-off/@shipped/.agents/gm.md", { level: "chat", chat: CHAT, off: false });
+    expect(again.body.file).toMatchObject({ off: true, offIn: ["global"] });
+
+    await call("PUT", "/api/v1/files-off/@shipped/.agents/gm.md", { level: "global", off: false });
+    expect(await gm()).toMatchObject({ off: false, offIn: [], applies: true });
+  });
+
   test("a page reaches nothing outside the tree, writes no shipped or generated file, and without a page's token gets nothing", async () => {
     await writeFile(join(bed.root, "outside.md"), "Not the tree's.\n");
     await symlink(join(bed.root, "outside.md"), join(chatFolder, "linked.md"));

@@ -104,4 +104,13 @@ describe("the web app at /ui/", () => {
     expect(words).toMatch(/^[A-Z][^.\n]*\.$/);
     expect(words).toContain("web app");
   });
+
+  test("a built folder that has gone answers 404 without naming where it was on the server", async () => {
+    const server = await serve(join(bed.root, "gone-ui"));
+    const res = await fetch(`${server.url}/ui/`);
+    expect(res.status).toBe(404);
+    const words = await res.text();
+    expect(words).toContain("web app");
+    expect(words).not.toContain(bed.root);
+  });
 });

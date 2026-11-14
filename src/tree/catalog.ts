@@ -29,6 +29,8 @@ export interface TreeFileEntry {
   replacedBy: string | null;
   /** Its name is in a config's `off:` list, which switches it off at every level. */
   off: boolean;
+  /** The levels whose config's `off:` list names it, farthest first: switching it on at one of these takes the name out there; at any other level it changes nothing. Empty when it is not off. */
+  offIn: LayerLevel[];
   /** Whether the user may write it where it is: never a shipped file or a generated one. */
   editable: boolean;
   /** The shipped file of the same name, for a file of another level that has one; null otherwise. */
@@ -37,9 +39,9 @@ export interface TreeFileEntry {
   defaultChanged: number | null;
 }
 
-/** What the levels' config files say of the names in force (RPH's `off:` and `layered:`, `CONFIG_KEYS`). */
+/** What the levels' config files say of the names in force (RPH's `off:` and `layered:`, `CONFIG_KEYS`): each name switched off, with the levels whose list names it. */
 export interface NamesInForce {
-  off: Set<string>;
+  off: Map<string, LayerLevel[]>;
   layered: Set<string>;
 }
 
@@ -122,9 +124,9 @@ export async function configText(loc: ChatLocation, layer: Layer): Promise<strin
   return await readText(lookup.at.disk);
 }
 
-/** The names switched off and the names layered, from every level's config. A config that does not read as YAML, or a key that is not a list of names, says nothing here; RPH reports it. */
+/** The names switched off, with the levels that switch each off, and the names layered, from every level's config. A config that does not read as YAML, or a key that is not a list of names, says nothing here; RPH reports it. */
 export async function namesInForce(loc: ChatLocation, layers: readonly Layer[] = treeLayers()): Promise<NamesInForce> {
-  const names: NamesInForce = { off: new Set(), layered: new Set() };
+  const names: NamesInForce = { off: new Map(), layered: new Set() };
   for (const layer of layers) {
     const text = await configText(loc, layer);
     if (text === null) continue;
@@ -134,7 +136,11 @@ export async function namesInForce(loc: ChatLocation, layers: readonly Layer[] =
     } catch {
       continue;
     }
-    for (const name of nameList(doc[OFF_KEY]) ?? []) names.off.add(writtenItem(name, layers));
+    for (const name of nameList(doc[OFF_KEY]) ?? []) {
+      const item = writtenItem(name, layers);
+      const levels = names.off.get(item) ?? [];
+      if (!levels.includes(layer.level)) names.off.set(item, [...levels, layer.level]);
+    }
     for (const name of nameList(doc[LAYERED_KEY]) ?? []) names.layered.add(writtenItem(name, layers));
   }
   return names;
@@ -156,9 +162,9 @@ export async function treeListing(loc: ChatLocation, changed: ReadonlyMap<string
       if (e.folder) continue;
       const kind = kindOf(layer.level, e.rest);
       const item = itemOf(layer, e.rest, kind);
-      const off = item !== null && names.off.has(item);
+      const offIn = item === null ? [] : (names.off.get(item) ?? []);
       const info = await stat(e.disk);
-      const entry: TreeFileEntry = { path: viewPath(layer.level, e.rest), level: layer.level, kind, bytes: info.size, item, applies: true, replacedBy: null, off, editable: userMayWrite(layer.level, e.rest, kind), shipped: null, defaultChanged: null };
+      const entry: TreeFileEntry = { path: viewPath(layer.level, e.rest), level: layer.level, kind, bytes: info.size, item, applies: true, replacedBy: null, off: offIn.length > 0, offIn, editable: userMayWrite(layer.level, e.rest, kind), shipped: null, defaultChanged: null };
       found.push(entry);
       written.set(entry, info.mtimeMs);
     }

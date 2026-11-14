@@ -88,12 +88,16 @@ export interface AppConfig {
     pageTokenMinutes: number;
     /** How long the token the command line makes to call the running server holds, in seconds. */
     commandLineSeconds: number;
+    /** How long the web UI's key holds after it is made, in days; null: it has no end, and holds until a new one replaces it. */
+    webKeyDays: number | null;
   };
   live: {
     /** Events held for one slow reader of one chat; past it the oldest it has not taken are dropped, and it is told which. */
     queueEvents: number;
     /** The largest message a page may send on the live socket, in bytes. */
     messageBytes: number;
+    /** The most chats one live socket may follow at once. */
+    follows: number;
   };
   database: {
     /** How long a write waits for another program's write to the file (the command line's) to finish, in milliseconds. */
@@ -118,8 +122,8 @@ export const CONFIG_DEFAULTS: Readonly<AppConfig> = Object.freeze({
   origins: [],
   hosts: [],
   server: { bodyBytes: 1024 * 1024, providerBodyBytes: 32 * 1024 * 1024, preflightSeconds: 600 },
-  auth: { pageTokenMinutes: 30, commandLineSeconds: 60 },
-  live: { queueEvents: 512, messageBytes: 64 * 1024 },
+  auth: { pageTokenMinutes: 30, commandLineSeconds: 60, webKeyDays: null },
+  live: { queueEvents: 512, messageBytes: 64 * 1024, follows: 64 },
   database: { busyMs: 5000, sliceMs: 10 },
   commandLine: { waitMs: 3000, signInMs: 30_000, startMs: 30_000 },
 });
@@ -139,6 +143,12 @@ const wholeIn =
     if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) throw new ConfigError(`${where} must be a whole number from ${min} to ${max}.`);
     return value;
   };
+
+/** A value `read` takes, or null for none. */
+const orNull =
+  <T>(read: Reader<T>): Reader<T | null> =>
+  (value, where) =>
+    value === null ? null : read(value, where);
 
 /** One line of text with no space at either end. */
 export const plainText: Reader<string> = (value, where) => {
@@ -232,6 +242,7 @@ export function configOf(raw: unknown, env: Env, where: string): AppConfig {
         readGroup(value, at, {
           pageTokenMinutes: [wholeIn(1, 7 * 24 * 60), d.auth.pageTokenMinutes],
           commandLineSeconds: [wholeIn(5, 3600), d.auth.commandLineSeconds],
+          webKeyDays: [orNull(wholeIn(1, 36_500)), d.auth.webKeyDays],
         }),
       d.auth,
     ],
@@ -240,6 +251,7 @@ export function configOf(raw: unknown, env: Env, where: string): AppConfig {
         readGroup(value, at, {
           queueEvents: [wholeIn(1, 1_000_000), d.live.queueEvents],
           messageBytes: [wholeIn(256, 16 * 1024 * 1024), d.live.messageBytes],
+          follows: [wholeIn(1, 100_000), d.live.follows],
         }),
       d.live,
     ],

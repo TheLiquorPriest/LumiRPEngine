@@ -5,7 +5,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { JsonValue, Log, ModelsPort } from "rp-harness/contract";
-import { Auth } from "./auth";
+import { Auth, bearerOf } from "./auth";
 import type { AppConfig, DataPaths } from "./config";
 import { prepareDataFolder } from "./config";
 import { modelsPort } from "./connections";
@@ -13,7 +13,7 @@ import { openDatabase, WriteQueue } from "./database";
 import { LiveHub, liveRoute } from "./live";
 import type { Migration, MigrationArea, MigrationOutcome } from "./migrations";
 import { migrate, Migrations } from "./migrations";
-import { route, RouteTable } from "./routes";
+import { route, RouteError, RouteTable } from "./routes";
 import { APP_MIGRATIONS } from "./schema";
 import { SecretsFile } from "./secrets";
 import type { RunningServer } from "./server";
@@ -22,7 +22,12 @@ import { guardSwitches, Switches } from "./switches";
 import { RPE_UI, uiRoute } from "./ui";
 import { type AppFile, Builds } from "./update";
 
+/** Public: that RPE answers here, and its build; nothing more, and no work to say it. */
 export const STATUS_PATH = "/api/v1/status";
+/** A page's: when RPE started, and the builds that meet at it, read again from its app file. */
+export const BUILDS_PATH = "/api/v1/status/builds";
+/** A page's: whose its credential is, and when it ends (`ends`, epoch milliseconds; null: no end). */
+export const SESSION_PATH = "/api/v1/status/session";
 /** "Update now" (plan §4.6): RPE restarts onto its new app file once no turn or job runs, whatever `update.restart` says. */
 export const UPDATE_PATH = "/api/v1/update";
 
@@ -100,13 +105,25 @@ export function lineLog(write: (line: string) => void, now: () => number = Date.
 }
 
 /**
- * The app's own routes: its status, which reads the app file again each time it is asked; "Update
- * now", which answers what RPE will do; the live socket; and the web app.
+ * The app's own routes: its status to anyone, only that it answers and its build; its builds to a
+ * page, which reads the app file again each time it is asked; "Update now", which answers what RPE
+ * will do; when the page's own credential ends; the live socket; and the web app.
  */
 export function appRoutes(version: string, started: number, auth: Auth, ui: string | null, builds: Builds) {
   return [
-    route({ method: "GET", path: STATUS_PATH, access: "public", handle: async () => ({ name: "rpe", version, started, belongsToUser: auth.owner !== null, builds: await builds.check() }) }),
+    route({ method: "GET", path: STATUS_PATH, access: "public", handle: () => ({ name: "rpe", version }) }),
     route({ method: "POST", path: UPDATE_PATH, access: "page", handle: () => builds.now() }),
+    route({ method: "GET", path: BUILDS_PATH, access: "page", handle: async () => ({ name: "rpe", version, started, builds: await builds.check() }) }),
+    route({
+      method: "GET",
+      path: SESSION_PATH,
+      access: "page",
+      handle: ({ request }) => {
+        const hold = auth.pageHold(bearerOf(request));
+        if (hold === null) throw new RouteError(401, "This needs a page token or the web UI's token.");
+        return { user: hold.user, ends: hold.until };
+      },
+    }),
     liveRoute,
     uiRoute(ui),
   ] as const;
@@ -133,7 +150,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   if (migrated.backup !== null) log.info("the database was copied before this version's first migration", { copy: migrated.backup });
   for (const step of migrated.applied) log.info("migrated", { area: step.area, version: step.version });
   const writes = new WriteQueue(db, config.database.sliceMs);
-  const auth = new Auth({ db, writes, owner: config.lumiverse.user, now, pageTokenMs: config.auth.pageTokenMinutes * 60_000 });
+  const auth = new Auth({ db, writes, owner: config.lumiverse.user, now, pageTokenMs: config.auth.pageTokenMinutes * 60_000, webKeyMs: config.auth.webKeyDays === null ? null : config.auth.webKeyDays * 86_400_000 });
   const routes = new RouteTable();
   const live = new LiveHub({ queueEvents: config.live.queueEvents, now });
   const secrets = new SecretsFile(paths.secrets);
@@ -172,7 +189,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
       if (closing !== null) throw new Error("RPE is stopping, so its server was not started.");
       if (starting !== null) throw new Error("RPE's server is already started.");
       const run = (async () => {
-        const server = startServer({ config, routes, auth, live, log });
+        const server = startServer({ config, routes, auth, live, log, now });
         running = server;
         for (const area of mounted) await hook(area, "started");
         return server;

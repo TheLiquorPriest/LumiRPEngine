@@ -12,6 +12,8 @@
 //   began), `{"type":"events","chat":…,"events":[…],"missed":{"from":…,"to":…}}` (`missed` only when
 //   events between those numbers were dropped), `{"type":"refused","message":…}`.
 // A page that cannot set a header gives its token as a protocol: `["rpe.live", "rpe.token.<token>"]`.
+// A socket follows at most `live.follows` chats, and holds only while the token it opened with does:
+// once that runs out or is replaced, RPE closes it with code 4401 and a reason the page can show.
 
 import type { ServerWebSocket, WebSocketHandler } from "bun";
 import type { JsonValue } from "../shared/json";
@@ -184,22 +186,63 @@ export class LiveHub {
   }
 }
 
-/** What a live socket keeps: the chats it follows. */
+/** What a live socket keeps: the chats it follows, the credential it opened with, and the timer that closes it when that runs out. */
 export interface LiveSocketData {
   follows: Map<string, Following>;
+  credential: string | null;
+  ends: Timer | undefined;
+}
+
+/** The close code a page is given when the credential its socket opened with no longer holds (a code of an application's own: 4000-4999). */
+export const LIVE_TOKEN_ENDED = 4401;
+const TOKEN_ENDED_WORDS = "The page's token has run out or was replaced: open the live socket again with a new one.";
+/** Fixed: the longest delay a timer takes; a later end is looked at again then. */
+const LONGEST_TIMER_MS = 2_147_483_647;
+
+export interface LiveSocketOptions {
+  /** The largest message a page may send, in bytes (`live.messageBytes`). */
+  messageBytes: number;
+  /** The most chats one socket may follow at once (`live.follows`). */
+  follows: number;
+  /** When a credential runs out (null: no end), or false when it holds no longer: retired, run out, or never one. */
+  holds(credential: string | null): number | null | false;
+  now(): number;
 }
 
 function refuse(ws: ServerWebSocket<LiveSocketData>, message: string): void {
   ws.send(JSON.stringify({ type: "refused", message }));
 }
 
-/** The server's socket handlers for the live hub. */
-export function liveSockets(hub: LiveHub, messageBytes: number): WebSocketHandler<LiveSocketData> {
+/** The server's socket handlers for the live hub. A socket is held to the credential it opened with: once that no longer holds, it is closed, and sent nothing more. */
+export function liveSockets(hub: LiveHub, options: LiveSocketOptions): WebSocketHandler<LiveSocketData> {
+  /** Whether the socket's credential still holds; else the socket is closed. A credential's end does not move, so one timer looks again then. */
+  const holding = (ws: ServerWebSocket<LiveSocketData>): boolean => {
+    const until = options.holds(ws.data.credential);
+    if (until === false) {
+      clearTimeout(ws.data.ends);
+      ws.data.ends = undefined;
+      for (const following of ws.data.follows.values()) following.stop();
+      ws.data.follows.clear();
+      ws.close(LIVE_TOKEN_ENDED, TOKEN_ENDED_WORDS);
+      return false;
+    }
+    if (until !== null && ws.data.ends === undefined) {
+      ws.data.ends = setTimeout(() => {
+        ws.data.ends = undefined;
+        holding(ws);
+      }, Math.min(Math.max(until - options.now(), 1), LONGEST_TIMER_MS));
+    }
+    return true;
+  };
   return {
-    maxPayloadLength: messageBytes,
+    maxPayloadLength: options.messageBytes,
     // A page that falls behind is held to its batch by the hub, never cut off.
     closeOnBackpressureLimit: false,
+    open(ws) {
+      holding(ws);
+    },
     message(ws, message) {
+      if (!holding(ws)) return;
       let asked: unknown;
       try {
         asked = JSON.parse(typeof message === "string" ? message : new TextDecoder().decode(message));
@@ -219,14 +262,20 @@ export function liveSockets(hub: LiveHub, messageBytes: number): WebSocketHandle
         return;
       }
       if (follows.has(chat)) return;
+      if (follows.size >= options.follows) {
+        refuse(ws, `This socket follows ${follows.size} chats, the most one socket may (live.follows in RPE's config): unfollow one first.`);
+        return;
+      }
       ws.send(JSON.stringify({ type: "following", chat, seq: hub.seq(chat) }));
       // Bun takes a message it cannot write at once and says so (-1); 0 means the socket is going.
-      follows.set(chat, hub.follow(chat, { take: (_batch, text) => ws.send(text) > 0 }));
+      follows.set(chat, hub.follow(chat, { take: (_batch, text) => holding(ws) && ws.send(text) > 0 }));
     },
     drain(ws) {
       for (const following of ws.data.follows.values()) following.ready();
     },
     close(ws) {
+      clearTimeout(ws.data.ends);
+      ws.data.ends = undefined;
       for (const following of ws.data.follows.values()) following.stop();
       ws.data.follows.clear();
     },

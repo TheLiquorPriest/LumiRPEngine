@@ -70,6 +70,6 @@ test(`find and grep over a chat folder of ${FILES} files`, async () => {
   const every = await timed("grep, every line matching", { by: "grep", pattern: "tide", path: bulk, limit: ALL });
   expect(every).toHaveLength(FILES * 8 - FILES / 100);
 
-  const capped = await timed("grep at the default limit", { by: "grep", pattern: "tide", path: bulk });
+  const capped = await timed("grep at a limit of 200", { by: "grep", pattern: "tide", path: bulk, limit: 200 });
   expect(capped).toHaveLength(200);
 });

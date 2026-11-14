@@ -9,35 +9,36 @@
 
 import { Database } from "bun:sqlite";
 import { existsSync, statSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { ConnectionInput, Effort } from "rp-harness/contract";
+import type { ConnectionInput, Effort, Log } from "rp-harness/contract";
 import { EXTENSION_IDENTIFIER } from "../adapter/lumiverse/pipe-wire";
 import { LumiverseError, LumiverseSession, type StoredSignIn } from "../adapter/lumiverse/session";
-import { goingBack } from "../migrate/going-back";
+import { goingBack, shellWord } from "../migrate/going-back";
 import { earlierRuns } from "../migrate/migrate";
 import { migrateCli } from "../migrate/cli";
 import type { TreeLayout } from "../migrate/own-files";
 import { runtimeFoldersOf } from "../migrate/runtime-folders";
-import { type Loopback, swapCheck, swapRun, todaysBuildInstalled, whoseRefusals } from "../migrate/swap";
+import { type Loopback, otherBuildInstalled, swapCheck, swapRun, swapStands, whoseRefusals } from "../migrate/swap";
 import { isRecord } from "../shared/json";
 import { TREE_MIGRATIONS, TreeChats } from "../tree/chats";
 import { CHATS_FOLDER, GLOBAL_CONFIG, GLOBAL_FOLDERS, NOTES_FOLDER, SHIPPED_FOLDER } from "../tree/layout";
 import type { Area } from "./app";
-import { lineLog, openApp, STATUS_PATH } from "./app";
-import { type AppFile, updateSettings, versionOf } from "./update";
+import { BUILDS_PATH, lineLog, openApp, STATUS_PATH } from "./app";
+import { type AppFile, startCheck, updateSettings, type UpdateSettings, versionOf } from "./update";
 import type { KeyKind } from "./auth";
-import { currentKeys, insertKey, insertPageToken, newKeyText, NO_OWNER, secretHash, takeKeyHash } from "./auth";
+import { currentKeys, insertKey, insertPageToken, keyEnds, newKeyText, NO_OWNER, retireTakenKeys, secretHash, takeKeyHash } from "./auth";
 import { makeBackup } from "./backup";
 import type { AppConfig, DataPaths, Env } from "./config";
-import { CONFIG_ENV, dataPaths, defaultDataFolder, loadConfig, plainText, prepareDataFolder, updateConfigFile, webAddress } from "./config";
+import { BACKUPS_FOLDER, CONFIG_ENV, DATABASE_FILE, dataPaths, defaultDataFolder, loadConfig, plainText, prepareDataFolder, updateConfigFile, webAddress } from "./config";
 import { readText, writeWhole } from "./disk";
 import type { ConnectionShown, ConnectionsShown } from "./connections";
 import { openDatabase } from "./database";
 import { appliedMigrations, migrate, Migrations } from "./migrations";
 import { APP_MIGRATIONS } from "./schema";
 import { SecretsFile } from "./secrets";
-import { listSwitches, setSwitch } from "./switches";
+import { guardSwitches, listSwitches, setSwitch } from "./switches";
 import { accountSystemctl, connectionsWhere, installedExtension, localUrl, type LumiverseCall, removeRpeService, type RpeService, rpeService, rpeServiceOf, rpeUnitText, serviceNameOf, settleConnection, type SettledConnection, startRpeService, TODAYS_MODEL } from "./up";
 
 export interface CliIO {
@@ -83,8 +84,10 @@ const USAGE = [
   "  rpe lumiverse --url <address> --user <username> [--database <file>] [--connection <id>]",
   "                                 set it and sign in; the password is asked for (or read from the",
   "                                 first line piped in), never kept",
-  "  rpe key [provider|extension|web]",
+  "  rpe key [provider [all]|extension|web]",
   "                                 make a new key, shown once; the one before it stops working.",
+  "                                 all: the provider key taken from today's connection at the swap",
+  "                                 stops working too, and that connection needs the new one.",
   "                                 RPE makes the extension's key itself at every start and hands it",
   "                                 over: one made by hand cuts the extension off until RPE starts again",
   "  rpe connection list            the model connections",
@@ -99,6 +102,9 @@ const USAGE = [
   "  rpe migrate [--rehearse] --lumiverse <folder> --user <id> [...]",
   "                                 carry today's build's data into RPE; --rehearse writes nothing",
   "                                 (rpe migrate alone lists the rest)",
+  "  rpe check [--into <folder>]    whether this build starts on the data folder: its config read, and its",
+  "                                 migrations applied to a copy of its database, made under --into (a",
+  "                                 temporary folder where none is given) and removed once it ends",
   "",
   "Every command takes --data <folder>: the data folder (default: $RPE_DATA, else ~/.local/share/rpe).",
 ].join("\n");
@@ -113,6 +119,7 @@ const FLAGS: Readonly<Record<string, readonly string[]>> = {
   deny: ["data"],
   backup: ["data", "out"],
   connection: ["data", "name", "provider", "auth", "model", "effort", "base-url", "context-window", "max-tokens"],
+  check: ["data", "into"],
 };
 
 class UsageError extends Error {}
@@ -165,18 +172,32 @@ const KEY_WORDS: Readonly<Record<KeyKind, string>> = {
   web: "Sign in to RPE's web UI with it.",
 };
 
+/** A moment as the command line prints it: to the minute, in UTC. */
+const atWords = (at: number): string => `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+
+/** How long the web UI's key holds (`auth.webKeyDays`), in milliseconds; null: no end. */
+const webKeyMs = (config: AppConfig): number | null => (config.auth.webKeyDays === null ? null : config.auth.webKeyDays * 86_400_000);
+
 function keyCommand(words: readonly string[], paths: DataPaths, config: AppConfig, io: CliIO, version: string): number {
   const kind = words[0] ?? "provider";
-  if (!Object.hasOwn(KEY_WORDS, kind) || words.length > 1) throw new UsageError("rpe key takes provider, extension or web.");
+  // The provider key taken from today's connection is retired only when asked: going back needs that connection as it is.
+  const all = kind === "provider" && words[1] === "all";
+  if (!Object.hasOwn(KEY_WORDS, kind) || words.length > (all ? 2 : 1)) throw new UsageError("rpe key takes provider, extension or web, and provider may take all.");
   const db = commandLineDatabase(paths, config, version, io.now);
   try {
-    const made = db.transaction(() => insertKey(db, kind as KeyKind, io.now())).immediate();
+    const { made, retired } = db.transaction(() => ({ made: insertKey(db, kind as KeyKind, io.now()), retired: all ? retireTakenKeys(db, "provider", io.now()) : 0 })).immediate();
     io.out(`A new ${kind} key for this RPE. It is shown this once; RPE keeps only its hash.`);
     io.out("");
     io.out(`  ${made.key}`);
     io.out("");
     io.out(KEY_WORDS[kind as KeyKind]);
+    if (made.kind === "web") {
+      const ends = keyEnds("web", made.made, webKeyMs(config));
+      io.out(ends === null ? "It has no end: it works until a new web key replaces it." : `It works until ${atWords(ends)}.`);
+    }
     io.out(`The ${kind} key made before it, if there was one, no longer works.`);
+    if (retired > 0) io.out("Nor does the key of today's connection in Lumiverse, which RPE took over at the swap: that connection now needs this new key as its API key. Going back to the previous build then needs that connection's earlier key put back in it.");
+    else if (currentKeys(db).some((k) => k.kind === kind && k.last4 === "")) io.out(`Today's connection in Lumiverse, which RPE took over at the swap, keeps its own key, and it goes on working: leave that connection as it is, since going back needs it. To stop that key too, run rpe key provider all.`);
   } finally {
     db.close();
   }
@@ -200,16 +221,42 @@ function switchCommand(name: string, state: "on" | "off", paths: DataPaths, io: 
   }
 }
 
-/** What answers at RPE's own address now: RPE (with its version, and its builds in words), something else (with its status), or nothing. */
-async function serverAnswer(config: AppConfig, io: CliIO): Promise<{ rpe: string; builds: string | null } | { other: number } | null> {
+/** What answers at RPE's own address now: RPE (with its version), something else (with its status), or nothing. */
+async function serverAnswer(config: AppConfig, io: CliIO): Promise<{ rpe: string } | { other: number } | null> {
   try {
     const res = await io.fetch(`${serverUrl(config)}${STATUS_PATH}`, { signal: AbortSignal.timeout(config.commandLine.waitMs) });
     const body: unknown = await res.json().catch(() => null);
     if (!res.ok || !isRecord(body) || body.name !== "rpe") return { other: res.status };
-    return { rpe: String(body.version), builds: isRecord(body.builds) && typeof body.builds.words === "string" ? body.builds.words : null };
+    return { rpe: String(body.version) };
   } catch {
     // Not running, or not reachable.
     return null;
+  }
+}
+
+/**
+ * The running server's builds in its words, a page's to read: asked with a token the command line
+ * makes for this one call and lets go after. Null where none can be made (no database or owner yet) or
+ * the server does not say.
+ */
+async function buildsWords(paths: DataPaths, config: AppConfig, io: CliIO): Promise<string | null> {
+  const owner = config.lumiverse.user;
+  if (owner === null || !existsSync(paths.database)) return null;
+  const db = openDatabase(paths.database, config.database.busyMs);
+  try {
+    if (!(appliedMigrations(db).get("app")?.has(1) ?? false)) return null;
+    const token = db.transaction(() => insertPageToken(db, owner, "command line", config.auth.commandLineSeconds * 1000, io.now())).immediate();
+    try {
+      const res = await io.fetch(`${serverUrl(config)}${BUILDS_PATH}`, { headers: { authorization: `Bearer ${token.token}` }, signal: AbortSignal.timeout(config.commandLine.waitMs) });
+      const body: unknown = await res.json().catch(() => null);
+      return res.ok && isRecord(body) && isRecord(body.builds) && typeof body.builds.words === "string" ? body.builds.words : null;
+    } catch {
+      return null;
+    } finally {
+      db.run("DELETE FROM page_token WHERE hash = ?", [secretHash(token.token)]);
+    }
+  } finally {
+    db.close();
   }
 }
 
@@ -218,7 +265,8 @@ async function statusCommand(paths: DataPaths, config: AppConfig, io: CliIO, ver
   io.out(`Data folder: ${paths.root}`);
   const answer = await serverAnswer(config, io);
   io.out(`Listens on: ${serverUrl(config)}, ${answer === null ? "not answering" : "rpe" in answer ? `answering (RPE ${answer.rpe})` : `answering, but not as RPE (${answer.other})`}`);
-  if (answer !== null && "rpe" in answer && answer.builds !== null) io.out(`Builds: ${answer.builds}`);
+  const builds = answer !== null && "rpe" in answer ? await buildsWords(paths, config, io) : null;
+  if (builds !== null) io.out(`Builds: ${builds}`);
   io.out(`Lumiverse: ${config.lumiverse.url ?? "not set"}, for user ${config.lumiverse.user ?? "not set"}`);
   if (!existsSync(paths.database)) {
     io.out("Database: not made yet");
@@ -231,9 +279,15 @@ async function statusCommand(paths: DataPaths, config: AppConfig, io: CliIO, ver
     io.out(`Database: ${(statSync(paths.database).size / 1048576).toFixed(1)} MiB; tables at ${tables === "" ? "none" : tables}`);
     if (!(applied.get("app")?.has(1) ?? false)) return 0;
     const keys = currentKeys(db);
-    const keyLines = (["provider", "extension", "web"] as const).map((kind) => {
-      const key = keys.find((k) => k.kind === kind);
-      return key === undefined ? `${kind} none` : `${kind} ends ${key.last4} (made ${new Date(key.made).toISOString().slice(0, 10)})`;
+    const keyLines = (["provider", "extension", "web"] as const).flatMap((kind) => {
+      const ofKind = keys.filter((k) => k.kind === kind);
+      if (ofKind.length === 0) return [`${kind} none`];
+      return ofKind.map((key) => {
+        const made = new Date(key.made).toISOString().slice(0, 10);
+        if (key.last4 === "") return `${kind} taken from today's connection (taken ${made})`;
+        const ends = keyEnds(kind, key.made, webKeyMs(config));
+        return `${kind} ends ${key.last4} (made ${made}${kind !== "web" ? "" : ends === null ? ", no end" : `, runs out ${atWords(ends)}`})`;
+      });
     });
     io.out(`Keys: ${keyLines.join("; ")}`);
     const switches = listSwitches(db);
@@ -400,14 +454,16 @@ async function ownConnection(call: LumiverseCall, apiUrl: string, paths: DataPat
 /**
  * What RPE takes of today's at the swap (plan §15.2), written into its own config and keys: where
  * today's runtime listened, the model name today's connection in Lumiverse names and the hash of the
- * key it holds, and `connection` as RPE's connection there. Resolves to what puts RPE's config back
- * as it was; a key hash taken stays, since only today's connection holds that key, and it reaches
- * RPE only where today's runtime answered.
+ * key it holds, and `connection` as RPE's connection there. The model name is taken only with today's
+ * connection (`todays`): it is then what tells that RPE answers on today's connection rather than
+ * on one of its own (`rpe down`). Resolves to what puts RPE's config back as it was; a key hash taken
+ * stays, since only today's connection holds that key, and it reaches RPE only where today's runtime
+ * answered.
  */
-async function takeOver(paths: DataPaths, current: AppConfig, version: string, io: CliIO, loopback: Loopback | null, connection: string): Promise<() => Promise<void>> {
+async function takeOver(paths: DataPaths, current: AppConfig, version: string, io: CliIO, loopback: Loopback | null, connection: string, todays: boolean): Promise<() => Promise<void>> {
   const before = await readText(paths.config);
   await updateConfigFile(paths, (raw) => {
-    const models = loopback === null || current.lumiverse.models.includes(loopback.model) ? {} : { models: [...current.lumiverse.models, loopback.model] };
+    const models = loopback === null || !todays || current.lumiverse.models.includes(loopback.model) ? {} : { models: [...current.lumiverse.models, loopback.model] };
     raw.lumiverse = { ...(isRecord(raw.lumiverse) ? raw.lumiverse : {}), connection, ...models };
     if (loopback !== null) Object.assign(raw, { address: loopback.at.address, port: loopback.at.port });
   });
@@ -452,6 +508,28 @@ interface SwapLine {
   unitText: string;
 }
 
+/** The signals that end the process (Ctrl-C, a closed terminal, a kill): while the swap runs, each is told to it instead, so that it puts back what it did before it ends. */
+const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+
+/**
+ * Tells `stop` each stop signal the process gets, in place of ending it; returns what lets go of them.
+ * After a hang-up the terminal is gone and a write to it fails: that failure must not end the process
+ * before the swap has put back what it did, nor after it.
+ */
+function stopSignals(stop: (signal: string) => void): () => void {
+  const handlers = STOP_SIGNALS.map((signal) => {
+    const handler = (): void => {
+      if (signal === "SIGHUP") for (const stream of [process.stdout, process.stderr]) stream.on("error", () => {});
+      stop(signal);
+    };
+    process.on(signal, handler);
+    return [signal, handler] as const;
+  });
+  return () => {
+    for (const [signal, handler] of handlers) process.off(signal, handler);
+  };
+}
+
 /**
  * The swap (src/migrate/swap.ts), from the command line: it checks before stopping anything, settles
  * RPE's connection in Lumiverse (today's loopback, kept as it is, where Lumiverse holds one; else
@@ -473,14 +551,27 @@ async function swapUp(line: SwapLine, io: CliIO, version: string): Promise<numbe
   }
   // The extension is switched to the new build first (§15.3 step 10): today's, left running in Lumiverse, would go on writing today's storage after the run had read it.
   const identifier = flags.identifier ?? EXTENSION_IDENTIFIER;
-  if (todaysBuildInstalled((await installedExtension(call, identifier))?.permissions ?? null)) {
-    io.err(`Lumiverse still has today's build of the extension (${identifier}) installed: its manifest asks for the permissions the previous build asks for. Switch the installed extension to the new build's branch in Lumiverse and approve its permissions first, then run rpe up again. Nothing was stopped or changed.`);
+  const lumiverse = resolve(flags.lumiverse ?? "");
+  const other = await otherBuildInstalled({ lumiverse, identifier, version, installed: await installedExtension(call, identifier) });
+  if (other !== null) {
+    io.err(`${other} Nothing was stopped or changed.`);
     return 1;
   }
   const found = runtimeFoldersOf(io.env, io.home);
   const runtime = switches.has("no-runtime") ? null : { configDir: flags["runtime-config"] ?? found.configDir, dataDir: flags["runtime-data"] ?? found.dataDir };
-  const swapIo = { out: io.out, fetch: io.fetch, now: io.now, sleep: (ms: number) => Bun.sleep(ms), systemctl: accountSystemctl(io.env, process.getuid?.() ?? null) };
-  const sources = { lumiverse: resolve(flags.lumiverse ?? ""), identifier, userId: user, runtime, ...(flags.runtime !== undefined ? { runtimeName: flags.runtime } : {}) };
+  const swapIo = { out: io.out, fetch: io.fetch, now: io.now, sleep: (ms: number) => Bun.sleep(ms), systemctl: accountSystemctl(io.env, process.getuid?.() ?? null), onStop: stopSignals };
+  const sources = { lumiverse, identifier, userId: user, runtime, ...(flags.runtime !== undefined ? { runtimeName: flags.runtime } : {}) };
+  // A swap that stands already is left as it is: making the migration's run again is `rpe migrate`'s, with RPE's service stopped meanwhile.
+  const standing = existing === null ? null : await swapStands({ sources, data: paths.root, rpe: { address: current.address, port: current.port, unit: existing.unit }, waitMs: current.commandLine.waitMs }, swapIo);
+  if (standing !== null) {
+    const runtimeFlags = [...(switches.has("no-runtime") ? ["--no-runtime"] : []), ...(["runtime", "runtime-config", "runtime-data", "identifier"] as const).flatMap((flag) => (flags[flag] === undefined ? [] : [`--${flag}`, flags[flag]]))];
+    const migrateLine = ["rpe", "migrate", "--lumiverse", lumiverse, "--user", user, "--data", resolve(paths.root), ...runtimeFlags].map(shellWord).join(" ");
+    io.out(`The swap stands: RPE's service ${standing.unit} runs, and RPE answers at ${standing.at}, where today's runtime ${standing.runtime} answered${standing.todays === null ? "" : `; today's service ${standing.todays} is switched off`}; the extension Lumiverse has installed is this build (${version}). Nothing was stopped or changed, and the migration was not made again.`);
+    io.out(`rpe migrate carries what changed on today's side since the last run (read at ${standing.since}): stop RPE's service (systemctl --user stop ${standing.unit}), run ${migrateLine}, then start it again (systemctl --user start ${standing.unit}).`);
+    const left = await extensionLeft(call);
+    if (left.length > 0) sayLeft(left, io);
+    return 0;
+  }
   const plan = await swapCheck({ sources, options: { data: paths.root, version, env: io.env, tree: treeLayout() }, rpe: { address: current.address, port: current.port }, waitMs: current.commandLine.waitMs }, swapIo);
   if (plan === null) return 1;
 
@@ -490,11 +581,16 @@ async function swapUp(line: SwapLine, io: CliIO, version: string): Promise<numbe
   const connection = todays ?? (await ownConnection(call, `${localUrl(plan.at.address, plan.at.port)}/v1`, paths, current, version, io));
   if (todays !== undefined) io.out(`RPE's connection in Lumiverse is to be "${todays.name}" (${todays.id}), the one today's build made for its runtime: it is left as it is, and the chats that use it go on working once RPE answers in today's runtime's place.`);
   if (todays !== undefined && others.length > 0) io.out(`These connections in Lumiverse reach today's runtime too: ${others.map((c) => `"${c.name}" (${c.id})`).join(", ")}. RPE plays only the chats on "${todays.name}": choose it for the chats on those.`);
+  // A connection of RPE's own that its config named (an earlier plain `rpe up` made it) is RPE's no longer once today's is.
+  const before = current.lumiverse.connection;
+  const ownBefore = todays !== undefined && before !== null && before !== todays.id && !others.some((c) => c.id === before) ? before : null;
+  if (todays !== undefined && ownBefore !== null) io.out(`The connection ${ownBefore} in Lumiverse, RPE's own until now, is played no longer once RPE answers in today's runtime's place: the chats on it belong on "${todays.name}" (${todays.id}).`);
 
-  if (!(await swapRun(plan, { service, text: line.unitText, installed: existing !== null, startMs: current.commandLine.startMs, waitMs: current.commandLine.waitMs, takeOver: () => takeOver(paths, current, version, io, plan.took?.loopback ?? null, connection.id) }, swapIo))) return 1;
+  if (!(await swapRun(plan, { service, text: line.unitText, installed: existing !== null, startMs: current.commandLine.startMs, waitMs: current.commandLine.waitMs, takeOver: () => takeOver(paths, current, version, io, plan.took?.loopback ?? null, connection.id, todays !== undefined), todays: todays !== undefined }, swapIo))) return 1;
   const left = await extensionLeft(call);
   left.push(`RPE's service's own log, should you need it: journalctl --user -u ${service.unit}.`);
   if (todays === undefined) left.push(`In Lumiverse, choose the connection "${connection.name}" for the chats RPE should play.`);
+  else if (ownBefore !== null) left.push(`In Lumiverse, move the chats on the connection ${ownBefore} to "${todays.name}": RPE plays only the chats on it now.`);
   sayLeft(left, io);
   return 0;
 }
@@ -544,7 +640,8 @@ async function upCommand(argv: readonly string[], io: CliIO, version: string): P
     io.err(`${service.file} is a unit for something other than this RPE (another data folder's): give this RPE's service a name of its own with --name. Nothing was stopped or changed.`);
     return 1;
   }
-  const unitText = rpeUnitText({ name: service.name, bun: process.execPath, script: Bun.main, data });
+  const update = await updateSettingsOf(paths, lineLog(io.err, io.now));
+  const unitText = rpeUnitText({ name: service.name, bun: process.execPath, script: Bun.main, data, startLimit: { tries: update.startTries, windowMs: update.startWindowMs } });
   if (swapping) return await swapUp({ flags, switches, paths, current, call, service, existing, unitText }, io, version);
 
   const settled = await ownConnection(call, `${serverUrl(current)}/v1`, paths, current, version, io);
@@ -712,10 +809,24 @@ function treeLayout(): TreeLayout {
 /**
  * `rpe migrate`: the migration's own command line (src/migrate/cli.ts), into RPE's data folder unless
  * the line names another; the user's own files into the folders the file tree's layout gives them,
- * each chat's notes into that chat's own folder, placed as the tree places a chat.
+ * each chat's notes into that chat's own folder, placed as the tree places a chat. A real run is the
+ * data folder's one writer: while RPE answers at the address the folder's config gives it, it is
+ * refused, as the swap refuses a running RPE, since the running server would keep its own copy of
+ * the secrets and write it over what the run carried, and go on serving the chats the run replaces.
  */
 async function migrateCommand(rest: readonly string[], io: CliIO, version: string): Promise<number> {
   const line = rest.includes("--data") ? rest : [...rest, "--data", defaultDataFolder(io.env, io.home)];
+  const folder = line[line.indexOf("--data") + 1];
+  if (!rest.includes("--rehearse") && folder !== undefined && !folder.startsWith("--")) {
+    const paths = dataPaths(folder);
+    const config = await loadConfig(paths, io.env);
+    const answer = await serverAnswer(config, io);
+    if (answer !== null && "rpe" in answer) {
+      const service = await rpeServiceOf(resolve(paths.root), io.env, io.home);
+      io.err(`RPE is running at ${serverUrl(config)}, the address this data folder's config gives it: stop it (${service === null ? "rpe serve" : `systemctl --user stop ${service.unit}`}), then run rpe migrate again${service === null ? "" : `, and start it again after (systemctl --user start ${service.unit})`}. Nothing was read or changed.`);
+      return 1;
+    }
+  }
   // Its output is whole texts, this one's lines; and it reads the build's id from the environment, where a built `rpe` does not put it.
   return await migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, treeLayout());
 }
@@ -728,6 +839,49 @@ async function runByService(paths: DataPaths, io: CliIO): Promise<boolean> {
   return ran.code === 0 && Number(ran.out.trim()) === process.pid;
 }
 
+/** The update's settings as the global level's config files give them now: the shipped file's, and the user's own over it. */
+async function updateSettingsOf(paths: DataPaths, log: Log): Promise<UpdateSettings> {
+  return updateSettings(await Promise.all([join(paths.files, SHIPPED_FOLDER, GLOBAL_CONFIG), paths.globalConfig].map((file) => readText(file))), log);
+}
+
+/**
+ * `rpe check` (plan §4.6: RPE "tests that it starts" before it restarts onto a new build): what
+ * `serve` does with the data folder before it listens, short of listening and with nothing written
+ * there. The config is read (by `runCli`, which refuses one this build doesn't take), and this
+ * build's migrations, every area's, are applied to a copy of RPE's database, made in a folder of its
+ * own under `into` and removed once the check ends. A running RPE asks it of a new app file before it
+ * restarts onto it (update.ts), and removes `into` itself, however the check ended.
+ */
+async function checkCommand(paths: DataPaths, config: AppConfig, into: string | undefined, io: CliIO, options: CliOptions): Promise<number> {
+  const work = await mkdtemp(join(into ?? tmpdir(), "rpe-check-"));
+  try {
+    const copy = join(work, DATABASE_FILE);
+    // A database a running RPE has open has its log beside it: copied whole, under SQLite's locks. One without is the file alone.
+    if (existsSync(`${paths.database}-wal`) || existsSync(`${paths.database}-shm`)) {
+      const live = new Database(paths.database, { readonly: true });
+      try {
+        live.run("VACUUM INTO ?", [copy]);
+      } finally {
+        live.close();
+      }
+    } else if (existsSync(paths.database)) await copyFile(paths.database, copy);
+    const migrations = new Migrations();
+    migrations.add("app", APP_MIGRATIONS);
+    for (const area of options.areas ?? []) if (area.tables !== undefined) migrations.add(area.tables.area, area.tables.migrations);
+    const db = openDatabase(copy, config.database.busyMs);
+    try {
+      const done = migrate(db, migrations, { version: options.version, backups: join(work, BACKUPS_FOLDER), now: io.now });
+      guardSwitches(db);
+      io.out(`RPE ${options.version} starts on the data folder ${paths.root}: its config reads, and its database takes this build's tables (${done.applied.length} migration(s), applied to a copy that is gone again).`);
+    } finally {
+      db.close();
+    }
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+  return 0;
+}
+
 async function serveCommand(paths: DataPaths, config: AppConfig, io: CliIO, options: CliOptions): Promise<number> {
   const log = lineLog(io.err, io.now);
   // A restart onto a new build of the app file ends `serve` as a stop does, and RPE's service starts the new file.
@@ -738,7 +892,8 @@ async function serveCommand(paths: DataPaths, config: AppConfig, io: CliIO, opti
       : {
           path: options.appFile,
           buildOf: (path, waitMs) => versionOf(process.execPath, path, waitMs),
-          settings: async () => updateSettings(await Promise.all([join(paths.files, SHIPPED_FOLDER, GLOBAL_CONFIG), paths.globalConfig].map((file) => readText(file))), log),
+          startsOn: (path, waitMs) => startCheck(process.execPath, path, paths.root, waitMs),
+          settings: () => updateSettingsOf(paths, log),
           service: () => runByService(paths, io),
           restart: () => restart.resolve(),
           sleep: (ms) => Bun.sleep(ms),
@@ -746,14 +901,16 @@ async function serveCommand(paths: DataPaths, config: AppConfig, io: CliIO, opti
   const app = await openApp({ paths, config, version: options.version, areas: options.areas ?? [], now: io.now, log, appFile });
   try {
     const running = await app.start();
+    // Told to stop from here on, RPE closes and ends cleanly: the wait begins before anything else that takes time.
+    const stop = io.stopped();
     io.out(`RPE ${options.version} listens on ${running.url} (data folder: ${paths.root}).`);
     if (app.auth.owner === null) io.out(NO_OWNER);
     if (!currentKeys(app.db).some((k) => k.kind === "provider")) io.out("There is no provider key yet: make one with `rpe key`.");
     const waiting = app.switches.list().filter((s) => s.state === "waiting").length;
     if (waiting > 0) io.out(`${waiting} waiting to be switched on: \`rpe status\` lists them.`);
     // The file as it is once RPE listens: a build put there while it started is noticed now.
-    await app.builds.check();
-    await Promise.race([io.stopped(), restart.promise]);
+    await Promise.race([app.builds.check(), stop]);
+    await Promise.race([stop, restart.promise]);
   } finally {
     await app.close();
   }
@@ -783,10 +940,12 @@ export async function runCli(argv: readonly string[], io: CliIO, options: CliOpt
     const { words, flags } = parseArgs(rest, allowed);
     const paths = dataPaths(flags.data ?? defaultDataFolder(io.env, io.home));
     const config = await loadConfig(paths, io.env);
-    if ((command === "serve" || command === "status" || command === "backup" || command === "lumiverse") && words.length > 0) throw new UsageError(`rpe ${command} takes no words.`);
+    if ((command === "serve" || command === "status" || command === "backup" || command === "lumiverse" || command === "check") && words.length > 0) throw new UsageError(`rpe ${command} takes no words.`);
     switch (command) {
       case "serve":
         return await serveCommand(paths, config, io, options);
+      case "check":
+        return await checkCommand(paths, config, flags.into, io, options);
       case "status":
         return await statusCommand(paths, config, io, options.version);
       case "lumiverse":

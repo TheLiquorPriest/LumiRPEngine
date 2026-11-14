@@ -38,7 +38,7 @@ export class Registrations {
    * it is kept; else why it is not, in words RPE shows its user.
    */
   async keep(user: string, registration: Registration): Promise<string | null> {
-    if (!onLoopback(registration.base)) return `its address ${registration.base} is not on this machine's loopback, the only road the extension takes to RPE.`;
+    if (!onLoopback(registration.base)) return `its address ${registration.base} is not a bare address on this machine's loopback (a scheme, a host and a port, nothing more), the only road the extension takes to RPE.`;
     if (JSON.stringify(await this.of(user)) === JSON.stringify(registration)) return null;
     const doubt = await this.confirm(user, registration);
     if (doubt !== null) return doubt;

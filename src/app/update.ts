@@ -6,13 +6,19 @@
 //
 // The app keeps its file's hash from the start. When the extension registers as another build, and
 // whenever it is asked, it reads the file again; a file that has changed is asked its build
-// (`<file> --version`). Where the file is another build that starts, the app waits until no turn and
-// no job runs, closes as it does on a stop, and exits, and its service starts it again on the new
-// file. It never restarts onto a file that does not start, nor where nothing would start it again
-// (run by hand), nor, unless the user asks ("Update now"), with the setting `update.restart` off.
+// (`<file> --version`), and another build is asked whether it starts on this RPE's data (`<file>
+// check`: RPE's config read, the build's migrations applied to a copy of RPE's database). Where the
+// file is another build that starts, the app waits until no turn and no job runs, closes as it does
+// on a stop, and exits, and its service starts it again on the new file. It never restarts onto a
+// file that does not start, nor where nothing would start it again (run by hand), nor, unless the
+// user asks ("Update now"), with the setting `update.restart` off. Should a build start and then fail
+// all the same, the service's unit stops starting it after `update.startTries` starts within
+// `update.startWindow` seconds (`rpe up` writes them into it).
 
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { JsonValue, Log } from "rp-harness/contract";
 import { isMapping, type Mapping, mergedConfig, type SettingDef, settingIn } from "./setting-list";
 
@@ -24,6 +30,9 @@ const DEFS = {
   restart: { key: "update.restart", default: true, takes: { type: "yesNo" }, levels: ["shipped", "global"], perConnection: false },
   versionWait: { key: "update.versionWait", default: 10, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
   lookEvery: { key: "update.lookEvery", default: 2, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
+  startTries: { key: "update.startTries", default: 5, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
+  startWindow: { key: "update.startWindow", default: 60, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
+  checkWait: { key: "update.checkWait", default: 120, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
 } as const satisfies Record<string, SettingDef>;
 
 /** Every setting the update reads, as the global config file writes it. */
@@ -36,6 +45,11 @@ export interface UpdateSettings {
   versionWaitMs: number;
   /** How long a restart waits before it looks again whether turns or jobs still run, in milliseconds. */
   lookEveryMs: number;
+  /** How many starts of RPE's service its unit allows within `startWindowMs` before the account's service manager stops starting it: a build that cannot serve is not started over and over. `rpe up` writes it into the unit. */
+  startTries: number;
+  startWindowMs: number;
+  /** How long a new app file is given to check that it starts on this RPE's data, in milliseconds. */
+  checkWaitMs: number;
 }
 
 /** The update's settings from the global level's config files (YAML texts, farthest first; null for a file that is not there). */
@@ -56,7 +70,7 @@ export function updateSettings(texts: readonly (string | null)[], log: Log): Upd
     return read.value;
   };
   // Each value is one its setting takes, so of the type its `takes` says.
-  return { restart: value(DEFS.restart) as boolean, versionWaitMs: (value(DEFS.versionWait) as number) * 1000, lookEveryMs: (value(DEFS.lookEvery) as number) * 1000 };
+  return { restart: value(DEFS.restart) as boolean, versionWaitMs: (value(DEFS.versionWait) as number) * 1000, lookEveryMs: (value(DEFS.lookEvery) as number) * 1000, startTries: value(DEFS.startTries) as number, startWindowMs: (value(DEFS.startWindow) as number) * 1000, checkWaitMs: (value(DEFS.checkWait) as number) * 1000 };
 }
 
 /** `bun <file> --version`, as the build writes it (`rpe <build>`); a file that does not answer within `waitMs` is stopped and counts as not starting. */
@@ -73,6 +87,32 @@ export async function versionOf(bun: string, file: string, waitMs: number): Prom
     return { failed: code === 0 ? `it said "${out.trim()}" for its build` : `it exited with ${code}${why === "" ? "" : `: ${why}`}` };
   } catch (error) {
     return { failed: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Whether the app file `file` starts on RPE's data folder `data`, as far as can be told without
+ * serving: `bun <file> check`, which reads RPE's config and applies the file's migrations to a copy
+ * of RPE's database, in a folder made here for it and removed once it ends, whichever way it ends. A
+ * check that hasn't ended within `waitMs` is stopped, and counts as failed. Null where it starts;
+ * else why not.
+ */
+export async function startCheck(bun: string, file: string, data: string, waitMs: number): Promise<string | null> {
+  let into: string | null = null;
+  try {
+    into = await mkdtemp(join(tmpdir(), "rpe-check-"));
+    const proc = Bun.spawn([bun, file, "check", "--data", data, "--into", into], { stdout: "pipe", stderr: "pipe", stdin: "ignore", timeout: waitMs, killSignal: "SIGKILL" });
+    const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    if (code === 0) return null;
+    if (proc.signalCode !== null) return `it did not finish checking that it starts on this RPE's data within ${waitMs / 1000} s`;
+    // The command line writes its refusal first; Bun's own error line says why where it threw.
+    const lines = (err.trim() || out.trim()).split("\n").map((line) => line.trim()).filter((line) => line !== "");
+    const why = lines.find((line) => /^\w*error:/i.test(line)) ?? lines[0] ?? "";
+    return `it does not start on this RPE's data (its check exited with ${code}${why === "" ? "" : `: ${why}`})`;
+  } catch (error) {
+    return `its check that it starts on this RPE's data could not run: ${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    if (into !== null) await rm(into, { recursive: true, force: true });
   }
 }
 
@@ -118,6 +158,8 @@ export interface AppFile {
   path: string;
   /** Asks a file its build (`versionOf`), giving it `waitMs` to say it. */
   buildOf(path: string, waitMs: number): Promise<BuildOf>;
+  /** Asks a file whether it starts on this RPE's data (`startCheck`), giving it `waitMs`; null where it does, else why not. */
+  startsOn(path: string, waitMs: number): Promise<string | null>;
   /** The update's settings as they stand now. */
   settings(): Promise<UpdateSettings>;
   /** Whether this process runs as its service, which starts it again when it exits. */
@@ -177,6 +219,8 @@ export class Builds {
    * once no turn or job runs; what it will do. Run by hand, it cannot.
    */
   async now(): Promise<BuildsStatus> {
+    // Asked by the user, a file whose check failed is checked again: the check may have failed for a reason that has passed (a full temporary folder, a machine under load).
+    if (this.#seen !== null && "failed" in this.#seen.result) this.#seen = null;
     await this.check();
     return await this.#read(true);
   }
@@ -224,7 +268,12 @@ export class Builds {
       return;
     }
     if (this.#seen !== null && this.#seen.hash === hash) return;
-    const result: BuildOf = hash === null ? { failed: "the file is not there" } : await file.buildOf(file.path, settings.versionWaitMs);
+    let result: BuildOf = hash === null ? { failed: "the file is not there" } : await file.buildOf(file.path, settings.versionWaitMs);
+    // Another build is restarted onto only once it is known to start on this RPE's data: its config read, its migrations applied to a copy of the database.
+    if ("build" in result && result.build !== version) {
+      const why = await file.startsOn(file.path, settings.checkWaitMs);
+      if (why !== null) result = { failed: why };
+    }
     this.#seen = { hash, result };
     if ("failed" in result) log.warn("RPE's app file on disk was replaced by one that does not start; RPE goes on running its build and does not restart onto it.", { running: version, why: result.failed });
     else if (result.build !== version) log.info("RPE's app file on disk is another build.", { running: version, disk: result.build });

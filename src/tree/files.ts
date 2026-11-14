@@ -10,7 +10,7 @@ import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, LayerLevel, Place
 import { writeWhole } from "../app/disk";
 import type { TreeChats, TreeWrites } from "./chats";
 import { MOUNTS } from "./layout";
-import { type TreeSettings, treeSettingsOf } from "./settings";
+import { treeSettingsOf } from "./settings";
 import { type ChatLocation, entriesOf, kindOf, type Located, locate, placesOf, refusalFor, safeId, treeLayers, viewPath, writableFor } from "./view";
 
 export interface TreeFilesDeps {
@@ -200,10 +200,9 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
     const lookup = await locate(loc, query.path ?? "");
     if (!lookup.ok) return await refusal(scope, lookup.path, lookup.reason, undefined);
     const at = lookup.at;
-    // The chat's settings, read once a limit of theirs is wanted.
-    let read: Promise<TreeSettings> | undefined;
-    const settings = (): Promise<TreeSettings> => (read ??= treeSettingsOf(loc));
-    const limit = query.limit ?? (await settings()).findLimit;
+    // A find that names no limit gives at most the user's setting; one that names a limit gets that many. The port can't tell an agent's find from RPE's or RPH's own, which list a turn's folder or a chat's sessions whole, and RPH holds a limit an agent names to the user's `tools.perCall` before it asks.
+    const settings = await treeSettingsOf(loc);
+    const limit = query.limit ?? settings.findLimit;
     const hits: FileHit[] = [];
     const root = at.level === "chat" && at.rest.length === 0;
     if (limit <= 0) return hits;
@@ -241,9 +240,12 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
 
     const pattern = new RegExp(query.literal === true ? query.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : query.pattern, query.ignoreCase === true ? "i" : "");
     const only = query.glob === undefined ? undefined : new Bun.Glob(query.glob);
-    const { grepBytes, grepLineChars } = await settings();
+    const { grepBytes, grepLineChars, grepMs } = settings;
+    // A pattern may take time that grows with the cube of the text it is tested on, and the turn's folder holds lines of whole prompts:
+    // a grep tests no more of a line than a hit shows, and stops with what it found once it has run `grepMs`, so it never holds RPE's one thread long.
+    const stopAt = performance.now() + grepMs;
     for await (const f of filesAt(loc, found)) {
-      if (hits.length >= limit) break;
+      if (hits.length >= limit || performance.now() >= stopAt) break;
       if (only !== undefined && !only.match(below(at, f.rest))) continue;
       const bytes = (await stat(f.disk)).size;
       if (bytes > grepBytes) continue;
@@ -251,9 +253,10 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
       if (data.includes(0)) continue;
       const lines = data.toString("utf8").split("\n");
       if (lines.at(-1) === "") lines.pop();
-      for (const [i, line] of lines.entries()) {
-        if (hits.length >= limit) break;
-        if (pattern.test(line)) hits.push({ path: viewPath(at.level, f.rest), type: "file", level: at.level, kind: kindOf(at.level, f.rest), bytes, line: i + 1, text: line.slice(0, grepLineChars) });
+      for (const [i, whole] of lines.entries()) {
+        if (hits.length >= limit || performance.now() >= stopAt) break;
+        const line = whole.slice(0, grepLineChars);
+        if (pattern.test(line)) hits.push({ path: viewPath(at.level, f.rest), type: "file", level: at.level, kind: kindOf(at.level, f.rest), bytes, line: i + 1, text: line });
       }
     }
     return hits;

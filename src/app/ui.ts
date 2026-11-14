@@ -68,7 +68,8 @@ export function uiRoute(folder: string | null) {
       if (folder === null) return notFound("This RPE was run from its source, where the web app is not built, so there is no web app to show.");
       root ??= realpath(folder).catch(() => null);
       const base = await root;
-      if (base === null) return notFound(`The web app's folder ${folder} is missing, so there is no web app to show.`);
+      // Where the folder lies on the server is not a page's to know: anyone may ask `/ui/`.
+      if (base === null) return notFound("The web app's folder is missing beside RPE's app file, so there is no web app to show.");
       const { pathname } = new URL(request.url);
       const parts = partsOf(pathname);
       const real = parts === null ? null : await fileInside(base, join(base, ...parts));

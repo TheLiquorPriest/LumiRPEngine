@@ -1,8 +1,8 @@
 // The light extension's frontend (STANDALONE-PLAN §4.3, "Frontend"): a loader that puts RPE's shared UI
 // in Lumiverse's drawer and hands it what it needs, and nothing more. The UI's own `mount` (from
-// `src/ui/`, the extension shell) gets the drawer tab's root, Spindle's frontend context for the chat
-// adornments it registers, and the page's end of the pipe (`page.ts`) for when the browser cannot reach
-// RPE directly. Lumiverse calls the module's `setup(ctx)` and the cleanup it returns.
+// `src/ui/`, the extension shell) gets the drawer tab's root, Spindle's frontend context (for chat
+// adornments; this build registers none), and the page's end of the pipe (`page.ts`) for when the
+// browser cannot reach RPE directly. Lumiverse calls the module's `setup(ctx)` and the cleanup it returns.
 
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
 import { pageRoad, type PageRoad } from "./page";
@@ -11,7 +11,7 @@ import { pageRoad, type PageRoad } from "./page";
 export interface ShellMount {
   /** The drawer tab's root element: the UI renders into it. */
   root: HTMLElement;
-  /** Spindle's frontend context, for the chat adornments the UI registers. */
+  /** Spindle's frontend context, for chat adornments; this build registers none. */
   ctx: SpindleFrontendContext;
   /** RPE through the extension: start-up facts, requests, live updates. */
   road: PageRoad;

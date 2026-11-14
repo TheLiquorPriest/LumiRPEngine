@@ -4,7 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { App, LiveBatch, LiveEvent, RunningServer } from "../../src/app";
-import { LIVE_PATH, LIVE_PROTOCOL, LiveHub, TOKEN_PROTOCOL_PREFIX } from "../../src/app";
+import { LIVE_PATH, LIVE_PROTOCOL, LIVE_TOKEN_ENDED, LiveHub, TOKEN_PROTOCOL_PREFIX } from "../../src/app";
 import { type Bed, makeBed, makeKey, rawSocket } from "./helpers";
 
 /** A reader that takes what it is given until told it is full. */
@@ -143,5 +143,86 @@ describe("the live socket", () => {
     expect(new Set(seqs).size).toBe(seqs.length);
     // Publishing took no longer than the work of publishing: nothing waited on the page that stopped reading.
     expect(publishing).toBeLessThan(2000);
+  });
+});
+
+/** A page's live socket: what it was sent, and how it closed. */
+async function page(server: RunningServer, token: string): Promise<{ socket: WebSocket; messages: Record<string, unknown>[]; closed: Promise<{ code: number; reason: string }>; next(type: string): Promise<Record<string, unknown>> }> {
+  const socket = new WebSocket(`ws://127.0.0.1:${server.port}${LIVE_PATH}`, [LIVE_PROTOCOL, `${TOKEN_PROTOCOL_PREFIX}${token}`]);
+  const messages: Record<string, unknown>[] = [];
+  let waiting: { type: string; resolve: (m: Record<string, unknown>) => void }[] = [];
+  socket.addEventListener("message", (message) => {
+    const body = JSON.parse(String(message.data)) as Record<string, unknown>;
+    messages.push(body);
+    for (const w of waiting) if (w.type === body.type) w.resolve(body);
+    waiting = waiting.filter((w) => w.type !== body.type);
+  });
+  const closed = Promise.withResolvers<{ code: number; reason: string }>();
+  socket.addEventListener("close", (e) => closed.resolve({ code: e.code, reason: e.reason }));
+  const opened = Promise.withResolvers<void>();
+  socket.addEventListener("open", () => opened.resolve());
+  await opened.promise;
+  const next = (type: string): Promise<Record<string, unknown>> => {
+    const got = Promise.withResolvers<Record<string, unknown>>();
+    waiting.push({ type, resolve: got.resolve });
+    return got.promise;
+  };
+  return { socket, messages, closed: closed.promise, next };
+}
+
+describe("the live socket's bounds", () => {
+  let bed: Bed;
+
+  beforeEach(async () => {
+    bed = await makeBed();
+  });
+
+  afterEach(async () => {
+    await bed.remove();
+  });
+
+  test("a page follows at most live.follows chats at once: one more is refused in words that name the setting, and after an unfollow it may follow another", async () => {
+    const app = await bed.open({ config: { live: { follows: 2 } } });
+    const server = await app.start();
+    const p = await page(server, await makeKey(app, "web"));
+    for (const chat of ["chat-a", "chat-b"]) {
+      const following = p.next("following");
+      p.socket.send(JSON.stringify({ op: "follow", chat }));
+      expect(await following).toMatchObject({ chat });
+    }
+    const refused = p.next("refused");
+    p.socket.send(JSON.stringify({ op: "follow", chat: "chat-c" }));
+    expect(String((await refused).message)).toContain("live.follows");
+    p.socket.send(JSON.stringify({ op: "unfollow", chat: "chat-a" }));
+    const following = p.next("following");
+    p.socket.send(JSON.stringify({ op: "follow", chat: "chat-c" }));
+    expect(await following).toMatchObject({ chat: "chat-c" });
+    p.socket.close();
+  });
+
+  test("a socket whose page token has run out is closed with a reason the page can show, and is sent nothing more", async () => {
+    const app = await bed.open();
+    const server = await app.start();
+    const { token, expires } = await app.auth.mintPageToken("user-owner", "extension");
+    const p = await page(server, token);
+    const following = p.next("following");
+    p.socket.send(JSON.stringify({ op: "follow", chat: "chat-a" }));
+    await following;
+    bed.clock.now = expires;
+    app.live.publish("chat-a", { kind: "step", data: 1 });
+    const closed = await p.closed;
+    expect(closed.code).toBe(LIVE_TOKEN_ENDED);
+    expect(closed.reason).toContain("token");
+    expect(p.messages.filter((m) => m.type === "events")).toEqual([]);
+  });
+
+  test("a socket opened with a web key closes once that key is replaced", async () => {
+    const app = await bed.open();
+    const server = await app.start();
+    const p = await page(server, await makeKey(app, "web"));
+    await makeKey(app, "web");
+    p.socket.send(JSON.stringify({ op: "follow", chat: "chat-a" }));
+    expect((await p.closed).code).toBe(LIVE_TOKEN_ENDED);
+    expect(p.messages).toEqual([]);
   });
 });

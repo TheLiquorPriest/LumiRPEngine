@@ -101,6 +101,23 @@ describe("auth", () => {
     expect((await fetch(`${server.url}/api/v1/probe/me`, { headers: bearer(await makeKey(app, "extension")) })).status).toBe(401);
   });
 
+  test("the web UI's key has no end as shipped; with auth.webKeyDays it opens page routes until that many days after it was made; the session route tells the page when its credential ends", async () => {
+    const session = async (token: string) => (await fetch(`${server.url}/api/v1/status/session`, { headers: bearer(token) })).json();
+    const forever = await makeKey(app, "web");
+    expect(await session(forever)).toEqual({ user: OWNER, ends: null });
+    const page = await app.auth.mintPageToken(OWNER, "extension");
+    expect(await session(page.token)).toEqual({ user: OWNER, ends: page.expires });
+    const days = await bed.open({ areas: [probe], config: { port: 0, auth: { webKeyDays: 2 } } });
+    const other = await days.start();
+    const made = bed.clock.now;
+    const web = await makeKey(days, "web");
+    expect(await (await fetch(`${other.url}/api/v1/status/session`, { headers: bearer(web) })).json()).toEqual({ user: OWNER, ends: made + 2 * 86_400_000 });
+    bed.clock.now = made + 2 * 86_400_000 - 1;
+    expect((await fetch(`${other.url}/api/v1/probe/me`, { headers: bearer(web) })).status).toBe(200);
+    bed.clock.now = made + 2 * 86_400_000;
+    expect((await fetch(`${other.url}/api/v1/probe/me`, { headers: bearer(web) })).status).toBe(401);
+  });
+
   test("a page cannot open the live socket without a token", async () => {
     const refused = await fetch(`${server.url}/api/v1/live`, { headers: { upgrade: "websocket", connection: "Upgrade", "sec-websocket-version": "13", "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==" } });
     expect(refused.status).toBe(401);

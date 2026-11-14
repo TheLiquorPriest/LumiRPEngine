@@ -227,15 +227,22 @@ function unitWord(word: string): string {
   return /^[A-Za-z0-9_@%+=:,./$-]+$/.test(escaped) ? escaped : `"${escaped.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-/** RPE's unit: `rpe serve` on its data folder, by the Bun and the app file `rpe up` ran with, always restarted, as today's runtime's unit is. */
-export function rpeUnitText(u: { name: string; bun: string; script: string; data: string }): string {
+/**
+ * RPE's unit: `rpe serve` on its data folder, by the Bun and the app file `rpe up` ran with, always
+ * restarted, as today's runtime's unit is, but no more than `startLimit.tries` times within
+ * `startLimit.windowMs` (the settings `update.startTries` and `update.startWindow`): a build that
+ * cannot serve, such as one an update put in place, is then left stopped, and `systemctl --user
+ * status` says it failed, rather than started every two seconds for good.
+ */
+export function rpeUnitText(u: { name: string; bun: string; script: string; data: string; startLimit: { tries: number; windowMs: number } }): string {
   const exec = [u.bun, u.script, "serve", "--data", u.data].map(unitWord).join(" ");
   return [
     `# Written by \`rpe up\`: RPE's service. \`rpe down\` stops and removes it, and leaves RPE's data where it is.`,
     `${DATA_LINE}${u.data}`,
     "[Unit]",
     `Description=RPE (${u.name})`,
-    "StartLimitIntervalSec=0",
+    `StartLimitIntervalSec=${Math.round(u.startLimit.windowMs / 1000)}`,
+    `StartLimitBurst=${u.startLimit.tries}`,
     "",
     "[Service]",
     "Type=simple",

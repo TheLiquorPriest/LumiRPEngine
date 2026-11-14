@@ -21,19 +21,21 @@ import { lumiverseDoor, type AdapterDeps, type LumiverseDoor } from "../adapter/
 import { EXTENSION_IDENTIFIER } from "../adapter/lumiverse/pipe-wire";
 import { bunSocket } from "../adapter/lumiverse/socket";
 import { BUILD_MIGRATIONS, buildRoutes, BuildService } from "../build";
-import { CAST_MIGRATIONS, CAST_SETTINGS } from "../cast";
+import { CAST_MIGRATIONS, CAST_SETTINGS, castRoutes } from "../cast";
 import { IFACE_SETTINGS } from "../iface";
 import { type LoreBooks, LORE_MIGRATIONS, LORE_SETTINGS } from "../lore";
 import { MIGRATED_NOTICE, MIGRATED_PART, migratedChat } from "../migrate/briefing";
 import { migrateRoutes } from "../migrate/routes";
-import { MIGRATE_TABLES } from "../migrate/tables";
+import { lastReport, MIGRATE_TABLES } from "../migrate/tables";
 import { playRoutes, PlayService } from "../play";
 import { STORE_MIGRATIONS, STORE_SETTINGS } from "../store";
-import { STORY_MIGRATIONS, STORY_SETTINGS, storyCoverage } from "../story";
+import { STORY_MIGRATIONS, STORY_SETTINGS, storyCoverage, storyRoutes } from "../story";
 import { historyWindow } from "../story/window";
 import { layDefaults, RPE_GUIDANCE, TREE_MIGRATIONS, TREE_SETTINGS, treeLayers, treeRoutes } from "../tree";
 import { levelBase } from "../tree/view";
 import { buildTurns, HARNESS_MIGRATIONS, MACHINE_CLOCK, namedStretches, NO_SESSION, openAppStore, passConnection, PROMPT_MIGRATIONS, turnRoutes, TURN_SETTINGS, turnSettings, type Turns } from "../turn";
+import { BOOTSTRAP_SETTINGS, BootstrapJobs, bootstrapRoutes } from "../turn/bootstrap";
+import { guidanceTexts } from "../turn/texts";
 import type { App, Area } from "./app";
 import { connectionRoutes, storedKey } from "./connections";
 import { HARNESS_SETTINGS } from "./harness-settings";
@@ -66,6 +68,8 @@ export function compose(options: ComposeOptions = {}): Composition {
     if (turns === null) throw new Error("RPE's turn lane is not mounted yet.");
     return turns;
   };
+  /** Taking on a story with a past: the job the player starts, and what its agents are given. */
+  const bootstrap = new BootstrapJobs({ turns: made });
   const owner = (): string => app?.config.lumiverse.user ?? "";
   /** A chat's settings as its levels' config files set them, read outside any session. */
   const chatSettings = (chat: string) => turnSettings(made().files, { user: owner(), chat, session: NO_SESSION }, made().env.log);
@@ -139,16 +143,17 @@ export function compose(options: ComposeOptions = {}): Composition {
           books,
           migrated: { part: MIGRATED_PART, notice: MIGRATED_NOTICE, fields: (user, chat) => migratedChat({ db: at.db, store: made().store, user, chat }) },
           clock,
+          views: (scope, agent, ref) => bootstrap.view(scope, agent, ref),
           ...(options.harness !== undefined ? { harness: options.harness } : {}),
         });
         at.routes.add("connections", connectionRoutes(turns.harness.models, storedKey(at.models)));
-        const { chats, harness, runs } = turns;
-        // A restart onto a new app file waits for the turns and the jobs that run.
-        at.builds.counts(async () => runs.chatsGoing().length + ((await harness.jobs?.list({ user: owner(), states: ["running", "queued"] })) ?? []).length);
+        const { chats, harness, lane, runs } = turns;
+        // A restart onto a new app file waits for the turns and the jobs that run, and for a request whose turn is still being taken in.
+        at.builds.counts(async () => runs.chatsGoing().length + lane.intakesGoing() + ((await harness.jobs?.list({ user: owner(), states: ["running", "queued"] })) ?? []).length);
         at.routes.add(
           "settings",
           settingsRoutes({
-            settings: [...HARNESS_SETTINGS, ...TURN_SETTINGS, ...UPDATE_SETTINGS, ...TREE_SETTINGS, ...CAST_SETTINGS, ...STORY_SETTINGS, ...LORE_SETTINGS, ...STORE_SETTINGS, ...IFACE_SETTINGS],
+            settings: [...HARNESS_SETTINGS, ...TURN_SETTINGS, ...BOOTSTRAP_SETTINGS, ...UPDATE_SETTINGS, ...TREE_SETTINGS, ...CAST_SETTINGS, ...STORY_SETTINGS, ...LORE_SETTINGS, ...STORE_SETTINGS, ...IFACE_SETTINGS],
             // The levels of the agents' tree that have a config file, where they are on disk; a chat's own once it has its folder.
             levels: async (chat): Promise<LevelFile[]> => {
               const folders = chat === null ? null : chats.folders(owner(), chat);
@@ -166,6 +171,14 @@ export function compose(options: ComposeOptions = {}): Composition {
           turnRoutes({
             turns,
             chatName: async (chat) => (await door.lumiverse()?.reads.chat(chat))?.name ?? null,
+          }),
+        );
+        // The chats the last migration carried are the ones the Migration page offers a bootstrap for.
+        at.routes.add(
+          "bootstrap",
+          bootstrapRoutes({
+            jobs: bootstrap,
+            carried: async (user) => (lastReport(at.db, user)?.imports ?? []).filter((c) => c.outcome === "imported" || c.outcome === "replaced").map((c) => c.chatId),
           }),
         );
         at.routes.add(
@@ -194,6 +207,18 @@ export function compose(options: ComposeOptions = {}): Composition {
       name: "play",
       mount: (at) =>
         at.routes.add("play", playRoutes(new PlayService({ store: made().store, writes: at.writes, live: at.live, guidance: RPE_GUIDANCE, turning: (user, chat) => made().runs.ofChat(user, chat).length > 0, log: at.log }))),
+    },
+    // After the turn lane too: the Cast and Story pages read the records from its store, and a strike is the player's change on the chat's newest turn.
+    {
+      name: "records",
+      mount: (at) => {
+        const scope = (user: string, chat: string) => ({ user, chat, session: NO_SESSION });
+        const turning = (user: string, chat: string): boolean => made().runs.ofChat(user, chat).length > 0;
+        const files = (user: string, chat: string) => guidanceTexts(made().files, scope(user, chat));
+        const settings = (user: string, chat: string) => turnSettings(made().files, scope(user, chat), made().env.log);
+        at.routes.add("cast", castRoutes({ store: made().store, writes: at.writes, turning, files, settings: async (user, chat) => (await settings(user, chat)).cast }));
+        at.routes.add("story", storyRoutes({ store: made().store, writes: at.writes, turning, files, settings: async (user, chat) => (await settings(user, chat)).story }));
+      },
     },
     door.area,
   ];

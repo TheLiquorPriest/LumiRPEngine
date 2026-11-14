@@ -10,6 +10,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { App, RunningServer } from "../../src/app";
 import { connectionRoutes, rawRoute, storedKey } from "../../src/app";
+import { secretHash, takeKeyHash } from "../../src/app/auth";
 import { runCli } from "../../src/app/cli";
 import { bearer, type Bed, cliIo, freePort, LUMIVERSE, makeBed, OWNER, testModelLayer, writeConfig } from "./helpers";
 
@@ -79,6 +80,43 @@ describe("rpe", () => {
     expect((await completion(next)).status).toBe(200);
     expect((await rpe(["key", "extension"])).out).toMatch(/\brpx_[0-9a-f]{64}\b/);
     expect((await rpe(["key", "admin"])).code).toBe(2);
+  });
+
+  test("a new provider key leaves the key taken from today's connection working, and says that connection keeps its own key", async () => {
+    const today = "lumiah-key-of-todays-connection";
+    const { app, server } = await serving();
+    await app.writes.run((db) => takeKeyHash(db, "provider", secretHash(today), app.now()));
+    const made = await rpe(["key"]);
+    expect(made.out).toContain("keeps its own key");
+    const fresh = /\b(rpe_[0-9a-f]{64})\b/.exec(made.out)?.[1] ?? "";
+    const completion = (k: string) => fetch(`${server.url}/v1/chat/completions`, { method: "POST", headers: { ...bearer(k), "content-type": "application/json" }, body: "{}" });
+    expect((await completion(today)).status).toBe(200);
+    expect((await completion(fresh)).status).toBe(200);
+  });
+
+  test("key provider all also retires the key taken from today's connection, and says that connection now needs the new key; status lists only the new one", async () => {
+    const today = "lumiah-key-of-todays-connection";
+    const { app, server } = await serving();
+    await app.writes.run((db) => takeKeyHash(db, "provider", secretHash(today), app.now()));
+    const made = await rpe(["key", "provider", "all"]);
+    expect(made.code).toBe(0);
+    expect(made.out).toContain("now needs this new key");
+    const fresh = /\b(rpe_[0-9a-f]{64})\b/.exec(made.out)?.[1] ?? "";
+    const completion = (k: string) => fetch(`${server.url}/v1/chat/completions`, { method: "POST", headers: { ...bearer(k), "content-type": "application/json" }, body: "{}" });
+    expect((await completion(today)).status).toBe(401);
+    expect((await completion(fresh)).status).toBe(200);
+    const status = (await rpe(["status"])).out;
+    expect(status).toContain(`provider ends ${fresh.slice(-4)} (made `);
+    expect(status).not.toContain("taken from today's connection");
+    expect((await rpe(["key", "web", "all"])).code).toBe(2);
+  });
+
+  test("key web says when the key it prints runs out, and status lists it: no end as shipped, auth.webKeyDays after it is made when set", async () => {
+    expect((await rpe(["key", "web"])).out).toContain("It has no end: it works until a new web key replaces it.");
+    expect((await rpe(["status"])).out).toMatch(/web ends [0-9a-f]{4} \(made 2026-11-13, no end\)/);
+    await writeConfig(bed.paths, { port, lumiverse: { url: LUMIVERSE, user: OWNER }, auth: { webKeyDays: 30 } });
+    expect((await rpe(["key", "web"])).out).toContain("It works until 2026-12-13 12:00 UTC.");
+    expect((await rpe(["status"])).out).toMatch(/web ends [0-9a-f]{4} \(made 2026-11-13, runs out 2026-12-13 12:00 UTC\)/);
   });
 
   test("backup makes one private archive of the database and the file tree, and never writes over one", async () => {

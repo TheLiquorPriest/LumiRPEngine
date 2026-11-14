@@ -22,6 +22,7 @@ export interface ServerParts {
   auth: Auth;
   live: LiveHub;
   log: Log;
+  now: () => number;
 }
 
 export interface RunningServer {
@@ -202,7 +203,7 @@ export function startServer(parts: ServerParts): RunningServer {
     try {
       if ("raw" in route) {
         const given = bytes === null ? request : new Request(request.url, { method: request.method, headers: request.headers, body: bytes, signal: request.signal });
-        const openLiveSocket = (headers?: Record<string, string>): boolean => server.upgrade(request, { data: { follows: new Map() }, ...(headers === undefined ? {} : { headers }) });
+        const openLiveSocket = (headers?: Record<string, string>): boolean => server.upgrade(request, { data: { follows: new Map(), credential: credentialOf(request), ends: undefined }, ...(headers === undefined ? {} : { headers }) });
         const response = await route.raw(given, { params, user, openLiveSocket });
         return response === undefined ? undefined : withCors(response, origin);
       }
@@ -230,7 +231,15 @@ export function startServer(parts: ServerParts): RunningServer {
 
   const routes: Record<string, (request: BunRequest, server: Server<LiveSocketData>) => Promise<Response | undefined>> = {};
   for (const [pattern, byMethod] of table) routes[pattern] = (request, server) => answer(request, server, byMethod, request.params);
-  const websocket = liveSockets(parts.live, config.live.messageBytes);
+  const websocket = liveSockets(parts.live, {
+    messageBytes: config.live.messageBytes,
+    follows: config.live.follows,
+    holds: (credential) => {
+      const hold = auth.pageHold(credential);
+      return hold === null ? false : hold.until;
+    },
+    now: parts.now,
+  });
   const serve = (hostname: string, port: number): Server<LiveSocketData> =>
     Bun.serve<LiveSocketData>({
       hostname,
