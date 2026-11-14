@@ -7,15 +7,22 @@
 // - `/preview/extension?state=well|unregistered|missing`: how RPE says its extension in Lumiverse stands.
 // - `/preview/continue?chat=<chat>`: continues the turn played last in the chat, as RPE runs a continue:
 //   the same turn run again under the same run id, its records numbered from 1 again.
+// - `/preview/build?backend=rpe|stand-in`: who answers Build's route (mock-build.ts).
+// - `/preview/migration?run=yes|no`: whether a migration has run (mock-migration.ts).
 //
 // Connections are kept in memory while the preview runs, so the Connections page can add, change and
-// remove them; a key sent is never kept, only that one was.
+// remove them; a key sent is never kept, only that one was. So are the worlds Build makes and edits, and
+// the agents' files and settings the Files and Settings pages change (mock-tree.ts, mock-settings.ts).
 
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
-import type { ConnectionView, ProviderOffer, TraceDelta, TraceRecord } from "rp-harness/contract";
+import type { ConnectionView, ModelLimit, ProviderOffer, TraceDelta, TraceRecord } from "rp-harness/contract";
 import type { JsonValue } from "../../../src/shared/json";
-import type { ExtensionStatus, LiveEvent, ReplyPiece, SaveConnection, TurnDetail, TurnRun } from "../../../src/ui/api";
+import type { ConnectionShown, ExtensionStatus, LiveEvent, ReplyPiece, SaveConnection, TurnDetail, TurnRun } from "../../../src/ui/api";
+import { buildAnswer, buildControl } from "./mock-build";
 import { CHATS, CONTINUED, earlierTurn, EARLIER, RECORDED, RUN, summaryOf, T0, turnOf, worldAt } from "../../../test/ui/recorded";
+import { migrationAnswer, migrationControl } from "./mock-migration";
+import { settingsAnswer } from "./mock-settings";
+import { treeAnswer } from "./mock-tree";
 
 /** How long before the run began the request reached RPE, as the recorded turn has it. */
 const INTAKE_MS = 240;
@@ -187,6 +194,8 @@ export function previewControl(url: URL): Response {
     const chat = url.searchParams.get("chat") ?? "";
     return playContinue(chat) ? answer(200, { continued: playing.get(chat)?.run }) : answer(409, { error: `No turn of ${chat} has ended to continue.` });
   }
+  if (url.pathname === "/preview/build") return buildControl(url);
+  if (url.pathname === "/preview/migration") return migrationControl(url);
   return answer(404, { error: `The preview has no ${url.pathname}.` });
 }
 
@@ -197,14 +206,30 @@ const PROVIDERS: ProviderOffer[] = [
 let connections: ConnectionView[] = [{ id: "c-flash", name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", effort: "high", default: true, key: { set: true, last4: null } }];
 let madeConnections = 1;
 
-/** The connection routes, over the list in memory: what the pages send, answered in the shapes the model layer answers in. */
+/** What pi's catalog says of the preview's one known model: invented figures. */
+const PI_LIMITS: Readonly<Record<string, { contextWindow: number; maxTokens: number }>> = { "deepseek-v4-flash": { contextWindow: 128_000, maxTokens: 8_192 } };
+
+/** A connection as the routes show it: nothing of its key, and its model's limits in force, the user's own over pi's. */
+function shown(c: ConnectionView): ConnectionShown {
+  const { key, ...rest } = c;
+  const own = c.model === undefined ? undefined : c.limits?.[c.model];
+  const pi = c.model === undefined ? undefined : PI_LIMITS[c.model];
+  const limit = (mine: number | undefined, theirs: number | undefined): ModelLimit | null => (mine !== undefined ? { tokens: mine, from: "user" } : theirs !== undefined ? { tokens: theirs, from: "pi" } : null);
+  return { ...rest, key: key === null ? null : { set: key.set }, limitsInForce: c.model === undefined ? null : { contextWindow: limit(own?.contextWindow, pi?.contextWindow), maxTokens: limit(own?.maxTokens, pi?.maxTokens) } };
+}
+
+/** The connection routes, over the list in memory: what the pages send, answered in the shapes the routes answer in. A test answers at once: as the model when a key is set, else as a provider that refuses. */
 async function connectionsAnswer(request: Request, path: string): Promise<Response> {
-  if (path === "/api/v1/connections" && request.method === "GET") return answer(200, { connections, default: connections.find((c) => c.default)?.id ?? null, providers: PROVIDERS });
-  const at = /^\/api\/v1\/connections(?:\/([^/]+))?(\/default)?$/.exec(path);
+  if (path === "/api/v1/connections" && request.method === "GET") return answer(200, { connections: connections.map(shown), default: connections.find((c) => c.default)?.id ?? null, providers: PROVIDERS });
+  const at = /^\/api\/v1\/connections(?:\/([^/]+))?(\/default|\/test)?$/.exec(path);
   const id = at?.[1] === undefined ? null : decodeURIComponent(at[1]);
   const was = connections.find((c) => c.id === id);
   if (at === null || (id !== null && was === undefined)) return answer(404, { error: `RPE has no ${request.method} ${path}.` });
-  if (at[2] !== undefined && request.method === "PUT") {
+  if (at[2] === "/test" && was !== undefined && request.method === "POST") {
+    const limits = shown(was).limitsInForce;
+    return answer(200, was.auth === "key" && was.key?.set !== true ? { ok: false, ms: 96, error: "401: no key was given for this connection.", limits } : { ok: true, ms: 640, model: was.model ?? "the provider's own", limits });
+  }
+  if (at[2] === "/default" && request.method === "PUT") {
     connections = connections.map((c) => ({ ...c, default: c.id === id }));
     return new Response(null, { status: 204 });
   }
@@ -226,12 +251,13 @@ async function connectionsAnswer(request: Request, path: string): Promise<Respon
       ...(input.effort ? { effort: input.effort } : {}),
       ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
       ...(input.api ? { api: input.api } : {}),
+      ...(input.limits ? { limits: input.limits } : {}),
       default: was?.default ?? connections.length === 0,
       key: input.auth === "key" ? { set: keySet, last4: null } : null,
       ...(input.auth === "signin" ? { signedIn: false } : {}),
     };
     connections = was === undefined ? [...connections, view] : connections.map((c) => (c.id === id ? view : c));
-    return answer(200, view);
+    return answer(200, shown(view));
   }
   return answer(405, { error: `RPE has no ${request.method} ${path}.` });
 }
@@ -249,6 +275,10 @@ export function rpeAnswer(request: Request, server: Server<PreviewSocket>): Resp
   if (!credential) return answer(401, { error: "This needs a page token or the web UI's token." });
   if (path === "/api/v1/status/extension") return answer(200, standing);
   if (path.startsWith("/api/v1/connections")) return connectionsAnswer(request, path);
+  if (path.startsWith("/api/v1/files") || path.startsWith("/api/v1/suggestions") || path.startsWith("/api/v1/storage")) return treeAnswer(request, url).then((got) => got ?? answer(404, { error: `RPE has no ${request.method} ${path}.` }));
+  if (path === "/api/v1/settings") return settingsAnswer(request, url);
+  if (path === "/api/v1/migration") return migrationAnswer(request);
+  if (path === "/api/v1/build") return buildAnswer(request);
   if (path === "/api/v1/chats") return answer(200, { chats: CHATS.chats.map((c) => ({ ...c, running: playing.get(c.id)?.done === false })) });
   const turns = /^\/api\/v1\/chats\/([^/]+)\/turns$/.exec(path);
   if (turns !== null && request.method === "GET") {

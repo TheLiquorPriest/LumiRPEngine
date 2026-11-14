@@ -7,16 +7,18 @@ import { useContext, useEffect, useState } from "preact/hooks";
 import type { Readable } from "../frontend/store";
 import type { RpeClient } from "./client";
 import type { Gate } from "./gate";
+import type { KeptHost } from "./kept/host";
 import type { Timers } from "./roads";
 
 /** The web shell, served by RPE at `/ui/`, or the drawer in Lumiverse. */
 export type Shell = "web" | "drawer";
 
 /**
- * Where a page stands. A chat's pages have no chat in the drawer while Lumiverse shows none; Files shows
- * the shipped and your own levels with no chat, and the chat's own with one. The rest are about no chat.
+ * Where a page stands. A chat's pages have no chat in the drawer while Lumiverse shows none; Files and
+ * Settings show the shipped and your own levels with no chat, and the chat's own with one; Storage shows
+ * every chat, and the notes of the chat it is given. The rest are about no chat.
  */
-export type Route = { page: "chats" } | { page: "connections" } | { page: "settings" } | { page: "live" | "turns" | "world" | "files"; chat: string | null } | { page: "turn"; chat: string; turn: string };
+export type Route = { page: "chats" } | { page: "build" } | { page: "connections" } | { page: "migration" } | { page: "live" | "turns" | "world" | "files" | "settings" | "storage"; chat: string | null } | { page: "turn"; chat: string; turn: string };
 
 export interface UiApp {
   readonly shell: Shell;
@@ -24,6 +26,8 @@ export interface UiApp {
   readonly gate: Gate;
   readonly route: Readable<Route>;
   readonly timers: Timers;
+  /** What today's Build mode is given of the page it runs in, made fresh for each visit to Build (kept/host.ts): Lumiverse's own in the drawer, the page's own in the web shell. */
+  keptHost(): KeptHost;
   go(route: Route): void;
 }
 

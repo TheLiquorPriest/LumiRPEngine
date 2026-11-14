@@ -10,6 +10,7 @@ import { AppContext, type Route, type UiApp, useApp } from "./app";
 import { createClient, extensionConnector } from "./client";
 import { NAV, navOf, Notices, PageFor, routeFor } from "./frame";
 import { createGate } from "./gate";
+import { type LumiverseContext, lumiverseHost } from "./kept/host";
 import { browserDeps, type RelayChannel, type RoadDeps } from "./roads";
 import { UI_CSS } from "./styles";
 
@@ -22,10 +23,10 @@ export interface DrawerContext {
   dom: { addStyle(css: string): () => void };
 }
 
-/** What the loader hands the shell: the drawer tab's root, the frontend context, and the page's end of the pipe. */
+/** What the loader hands the shell: the drawer tab's root, the frontend context (all of it, which the Build page's bridge is made from), and the page's end of the pipe. */
 export interface ShellMount {
   root: HTMLElement;
-  ctx: DrawerContext;
+  ctx: DrawerContext & LumiverseContext;
   road: RelayChannel;
 }
 
@@ -74,7 +75,7 @@ export function mount(shell: ShellMount, deps: RoadDeps = browserDeps()): () => 
   const offs: (() => void)[] = [];
   if (ctx.state !== undefined) offs.push(ctx.state.subscribe<{ chatId?: string | null } | null>("chat.active", (value) => place(value?.chatId ?? null)));
   else for (const event of ["CHAT_CHANGED", "CHAT_SWITCHED"]) offs.push(ctx.events.on(event, () => place(ctx.getActiveChat().chatId)));
-  const app: UiApp = { shell: "drawer", client, gate, route, timers: deps.timers, go: (next) => route.set(next) };
+  const app: UiApp = { shell: "drawer", client, gate, route, timers: deps.timers, keptHost: () => lumiverseHost(ctx), go: (next) => route.set(next) };
   render(
     <AppContext.Provider value={app}>
       <DrawerShell active={active} />

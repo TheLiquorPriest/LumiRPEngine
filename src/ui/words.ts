@@ -1,6 +1,9 @@
-// Numbers, times and counts as the pages say them.
+// Numbers, times, counts and the tree's levels as the pages say them.
 
-import type { Usage } from "rp-harness/contract";
+import type { LayerLevel, Usage } from "rp-harness/contract";
+
+/** The levels of the agents' tree, as the Files and Settings pages name them. */
+export const LEVEL_WORDS: Readonly<Record<LayerLevel, string>> = { shipped: "Shipped", global: "Yours", character: "This character's", chat: "This chat's" };
 
 const NUMBER = new Intl.NumberFormat("en");
 

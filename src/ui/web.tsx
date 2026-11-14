@@ -13,6 +13,7 @@ import { AppContext, chatOf, type Route, type UiApp, useApp } from "./app";
 import { Banner, Button, PageHeader } from "./atoms";
 import { createClient, type TokenStore, webConnector } from "./client";
 import { NAV, type NavId, navOf, Notices, PageFor, routeFor } from "./frame";
+import { webHost } from "./kept/host";
 import { createGate } from "./gate";
 import { browserDeps, type RoadDeps } from "./roads";
 import { UI_CSS } from "./styles";
@@ -30,18 +31,18 @@ export function routeOfHash(hash: string): Route {
     }
   });
   const [head, chat, page, turn] = parts;
-  if ((head === "connections" || head === "settings") && parts.length === 1) return { page: head };
-  if (head === "files" && parts.length === 1) return { page: "files", chat: null };
+  if ((head === "build" || head === "connections" || head === "migration") && parts.length === 1) return { page: head };
+  if ((head === "files" || head === "settings" || head === "storage") && parts.length === 1) return { page: head, chat: null };
   if (head !== "chats" || chat === undefined) return { page: "chats" };
   if (page === "turns" && turn !== undefined && parts.length === 4) return { page: "turn", chat, turn };
-  if ((page === "turns" || page === "world" || page === "files") && parts.length === 3) return { page, chat };
+  if ((page === "turns" || page === "world" || page === "files" || page === "settings" || page === "storage") && parts.length === 3) return { page, chat };
   return { page: "live", chat };
 }
 
 /** The fragment that names a route. */
 export function hashOf(route: Route): string {
-  if (route.page === "chats" || route.page === "connections" || route.page === "settings") return `#/${route.page}`;
-  if (route.chat === null) return route.page === "files" ? "#/files" : "#/chats";
+  if (route.page === "chats" || route.page === "build" || route.page === "connections" || route.page === "migration") return `#/${route.page}`;
+  if (route.chat === null) return route.page === "files" || route.page === "settings" || route.page === "storage" ? `#/${route.page}` : "#/chats";
   const at = `#/chats/${encodeURIComponent(route.chat)}`;
   if (route.page === "turn") return `${at}/turns/${encodeURIComponent(route.turn)}`;
   return `${at}/${route.page}`;
@@ -222,6 +223,7 @@ export function startWeb(root: HTMLElement, options: WebOptions): () => void {
     gate,
     route,
     timers: deps.timers,
+    keptHost: webHost,
     go(next) {
       const hash = hashOf(next);
       if (location.hash === hash) onHash();

@@ -53,6 +53,17 @@ const OWN_CSS = `
 .rpe-todo li[data-done=true]{color:var(--lre-muted);text-decoration:line-through}
 .rpe-written{max-height:min(60vh,520px);overflow:auto;overscroll-behavior:contain}
 .rpe-signin{width:100%;max-width:440px;margin:var(--lre-s5) auto}
+.rpe-file .lre-btn{max-width:100%;overflow-wrap:anywhere;text-align:left;height:auto}
+.rpe-open{padding:var(--lre-s2) 0 var(--lre-s2) var(--lre-s3);border-left:2px solid var(--lre-accent-soft);min-width:0}
+.rpe-editor{min-height:min(50vh,420px)}
+.rpe-diff-added{color:var(--lre-pos)}
+.rpe-diff-removed{color:var(--lre-neg)}
+.rpe-strong{font-weight:600}
+.rpe-suggestion{border-top:1px solid var(--lre-hairline);padding-top:var(--lre-s3);min-width:0}
+.rpe-suggestion:first-child{border-top:0;padding-top:0}
+.rpe-migrated{border-top:1px solid var(--lre-hairline);padding-top:var(--lre-s2);min-width:0}
+.rpe-migrated:first-child{border-top:0;padding-top:0}
+.rpe-hash{font-size:var(--lre-fs-xs);overflow-wrap:anywhere;word-break:break-all}
 
 .rpe-web{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;background:var(--lre-surface)}
 .rpe-web-top{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:var(--lre-s2) var(--lre-s3);padding:calc(var(--lre-s2) + env(safe-area-inset-top,0px)) var(--lre-s4) var(--lre-s2);background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline);min-width:0}

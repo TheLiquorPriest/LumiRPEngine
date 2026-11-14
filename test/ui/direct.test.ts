@@ -11,7 +11,10 @@ import type { ExtensionStatus as SentExtensionStatus } from "../../src/adapter/l
 import { type App, dataPaths, lineLog, openApp, route, type RouteBody, type RouteReply } from "../../src/app";
 import { configOf } from "../../src/app/config";
 import { connectionRoutes } from "../../src/app/connections";
+import { settingsRoutes } from "../../src/app/settings-routes";
+import { migrateRoutes } from "../../src/migrate/routes";
 import { turnRoutes } from "../../src/turn/routes";
+import { type TreeFileDiff as SentFileDiff, type TreeFileEntry as SentFileEntry, type TreeFileText as SentFileText, treeRoutes } from "../../src/tree";
 import type { LiveEvent, Routes, TurnList } from "../../src/ui/api";
 import { createClient, type RpeClient, RpeError, webConnector } from "../../src/ui/client";
 import { applyLive, EMPTY_LIVE } from "../../src/ui/live-model";
@@ -60,6 +63,54 @@ const connections: [
   Same<Routes["PUT /api/v1/connections/:id/default"]["reply"], RouteReply<ConnectionTable[4]>>,
   Same<Routes["POST /api/v1/connections/:id/test"]["reply"], RouteReply<ConnectionTable[5]>>,
 ] = [true, true, true, true, true, true, true, true];
+
+/** The tree's route at a path pattern, and the reply its handler gives. A raw route (a file, its difference, a write, a switch) makes its own response; its page type is held to the types the route builds it from. */
+type TreeReply<P extends string> = RouteReply<Extract<ReturnType<typeof treeRoutes>[number], { path: P }>>;
+const TREE_KEYS = [
+  "GET /api/v1/files",
+  "GET /api/v1/files/*",
+  "PUT /api/v1/files/*",
+  "DELETE /api/v1/files/*",
+  "PUT /api/v1/files-off/*",
+  "GET /api/v1/files-diff/*",
+  "GET /api/v1/suggestions",
+  "POST /api/v1/suggestions/:id/accept",
+  "POST /api/v1/suggestions/:id/dismiss",
+  "GET /api/v1/storage",
+  "GET /api/v1/storage/notes",
+  "POST /api/v1/files-prune",
+  "GET /api/v1/files-stack",
+] as const satisfies readonly (keyof Routes)[];
+/** The prune's route, whose body the page sends as the route takes it. */
+type PruneRoute = Extract<ReturnType<typeof treeRoutes>[number], { path: "/api/v1/files-prune" }>;
+const tree: [
+  Same<Routes["GET /api/v1/files"]["reply"], TreeReply<"/api/v1/files">>,
+  Same<Routes["GET /api/v1/files/*"]["reply"], SentFileText>,
+  Same<Routes["PUT /api/v1/files/*"]["reply"], { file: SentFileEntry | null }>,
+  Same<Routes["PUT /api/v1/files-off/*"]["reply"], { file: SentFileEntry | null }>,
+  Same<Routes["GET /api/v1/files-diff/*"]["reply"], SentFileDiff>,
+  Same<Routes["GET /api/v1/suggestions"]["reply"], TreeReply<"/api/v1/suggestions">>,
+  Same<Routes["POST /api/v1/suggestions/:id/accept"]["reply"], TreeReply<"/api/v1/suggestions/:id/accept">>,
+  Same<Routes["POST /api/v1/suggestions/:id/dismiss"]["reply"], TreeReply<"/api/v1/suggestions/:id/dismiss">>,
+  Same<Routes["GET /api/v1/storage"]["reply"], TreeReply<"/api/v1/storage">>,
+  Same<Routes["GET /api/v1/storage/notes"]["reply"], TreeReply<"/api/v1/storage/notes">>,
+  Same<Routes["POST /api/v1/files-prune"]["reply"], RouteReply<PruneRoute>>,
+  Same<Routes["POST /api/v1/files-prune"]["body"], RouteBody<PruneRoute>>,
+  Same<Routes["GET /api/v1/files-stack"]["reply"], TreeReply<"/api/v1/files-stack">>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true];
+
+/** The settings routes, by their place in their table: both are at one path. */
+type SettingsTable = ReturnType<typeof settingsRoutes>;
+const SETTINGS_KEYS = ["GET /api/v1/settings", "PUT /api/v1/settings"] as const satisfies readonly (keyof Routes)[];
+const settings: [
+  Same<Routes["GET /api/v1/settings"]["reply"], RouteReply<SettingsTable[0]>>,
+  Same<Routes["PUT /api/v1/settings"]["reply"], RouteReply<SettingsTable[1]>>,
+  Same<Routes["PUT /api/v1/settings"]["body"], RouteBody<SettingsTable[1]>>,
+] = [true, true, true];
+
+/** The migration's route, and what the page reads of its reply: all of it but the report whole (shown as its printed text), what today's build put in Lumiverse, and what was carried of each chat. */
+type SentMigration = RouteReply<ReturnType<typeof migrateRoutes>[0]>;
+const migration: [Same<Routes["GET /api/v1/migration"]["reply"], Omit<SentMigration, "report" | "lumiverse" | "chats"> & { chats: Omit<SentMigration["chats"][number], "carried">[] }>] = [true];
 
 const turnsRoute = route({
   method: "GET",
@@ -113,6 +164,25 @@ describe("the pages' route map, against the routes themselves", () => {
     const table = connectionRoutes(layer, async () => null).map((r) => `${r.method} ${r.path}`);
     expect(table).toEqual([...CONNECTION_KEYS]);
     expect(connections.every((same) => same)).toBe(true);
+  });
+
+  test("each route of the tree's the type checks above compare is in its table, with the method and path the pages call it by", () => {
+    // The handlers reach the tree, its database and the harness only when a request comes.
+    const table = treeRoutes({ files: "", chats: undefined as never, db: undefined as never, suggestions: undefined as never, turning: () => false, stack: async () => [] }).map((r) => `${r.method} ${r.path}`);
+    for (const key of TREE_KEYS) expect(table).toContain(key);
+    expect(tree.every((same) => same)).toBe(true);
+  });
+
+  test("both settings routes sit at their places in their table, with the method and path the pages call them by", () => {
+    const table = settingsRoutes({ settings: [], levels: async () => [], connections: async () => [] }).map((r) => `${r.method} ${r.path}`);
+    expect(table).toEqual([...SETTINGS_KEYS]);
+    expect(settings.every((same) => same)).toBe(true);
+  });
+
+  test("the migration's route is in its table, with the method and path the page calls it by", () => {
+    const table = migrateRoutes({ db: undefined as never, identifier: "lumi_rp_engine" }).map((r) => `${r.method} ${r.path}`);
+    expect(table).toEqual(["GET /api/v1/migration"]);
+    expect(migration.every((same) => same)).toBe(true);
   });
 });
 

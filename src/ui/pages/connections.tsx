@@ -1,15 +1,24 @@
 // Connections (plan §14): the models RPE's agents call, as RPH's model layer keeps them: the list, which
-// one is the default, adding one, changing one, removing one. A key is typed once and sent to RPE; RPE
-// never sends one back, and this page shows only whether one is set. What the layer refuses is shown in
-// its own words.
+// one is the default, adding one, changing one, removing one, and testing one. A key is typed once and
+// sent to RPE; RPE never sends one back, and this page shows only whether one is set. Each connection's
+// model shows its limits as RPH uses them and where each comes from, and the form sets the user's own in
+// their place. What the layer or the provider refuses is shown in its own words.
 
-import type { ConnectionAuth, Effort, ProviderOffer } from "rp-harness/contract";
+import type { ConnectionAuth, Effort, ModelLimit, ModelLimits, ModelLimitsEntry, ProviderOffer } from "rp-harness/contract";
 import { useEffect, useState } from "preact/hooks";
-import type { ConnectionShown, ConnectionsShown, SaveConnection } from "../api";
+import type { ConnectionShown, ConnectionsShown, ConnectionTested, SaveConnection } from "../api";
 import { useApp } from "../app";
 import { Badge, Banner, Button, Empty, PageHeader } from "../atoms";
 import type { RpeClient } from "../client";
-import { errorWords } from "../words";
+import { duration, errorWords, num } from "../words";
+
+const FROM_WORDS: Readonly<Record<ModelLimit["from"], string>> = { user: "yours", pi: "as pi lists it", connection: "as its server reported" };
+
+/** A model's limits as RPH uses them, and where each comes from. */
+export function limitsWords(limits: ModelLimits | null): string {
+  const one = (label: string, limit: ModelLimit | null | undefined): string => (limit === null || limit === undefined ? `${label}: not known` : `${label}: ${num(limit.tokens)} tokens, ${FROM_WORDS[limit.from]}`);
+  return `${one("Context window", limits?.contextWindow)} · ${one("Longest reply", limits?.maxTokens)}`;
+}
 
 /** Every effort a connection may think at, as RPH's contract names them. */
 export const EFFORTS: readonly Effort[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -47,10 +56,31 @@ export function draftOf(form: Iterable<readonly [string, FormDataEntryValue]>, w
     serialTools: was?.serialTools ?? null,
     messageThreads: was?.messageThreads ?? null,
     retries: was?.retries ?? null,
-    limits: was?.limits ?? null,
+    limits: limitsOf(field, text("model"), was),
   };
   const key = field.get("key") ?? "";
   return { connection, ...(field.get("dropKey") === "on" ? { key: null } : key === "" ? {} : { key }) };
+}
+
+/**
+ * The user's own limits as the form leaves them: those of the connection's model as typed (a field left
+ * empty sets none), those of its other models as they were; null when none is set.
+ */
+function limitsOf(field: ReadonlyMap<string, string>, model: string | null, was: ConnectionShown | null): Record<string, ModelLimitsEntry> | null {
+  const own: Record<string, ModelLimitsEntry> = { ...(was?.limits ?? {}) };
+  if (model !== null) {
+    const typed = (name: string): number | undefined => {
+      const raw = field.get(name) ?? "";
+      const value = Number(raw);
+      return raw === "" || !Number.isFinite(value) ? undefined : value;
+    };
+    const contextWindow = typed("contextWindow");
+    const maxTokens = typed("maxTokens");
+    const entry: ModelLimitsEntry = { ...(contextWindow === undefined ? {} : { contextWindow }), ...(maxTokens === undefined ? {} : { maxTokens }) };
+    if (entry.contextWindow === undefined && entry.maxTokens === undefined) delete own[model];
+    else own[model] = entry;
+  }
+  return Object.keys(own).length === 0 ? null : own;
 }
 
 /** The form that adds a connection (`was` null) or changes one. Its key field starts empty: RPE never sends a key back. */
@@ -129,6 +159,16 @@ function ConnectionForm(props: { was: ConnectionShown | null; providers: readonl
           <span class="lre-field-help">The API a compatible server speaks, where it speaks more than one.</span>
         </label>
         <label class="lre-field">
+          <span class="label">Context window</span>
+          <input name="contextWindow" class="lre-input" type="number" inputMode="numeric" defaultValue={String(was?.model === undefined ? "" : (was.limits?.[was.model]?.contextWindow ?? ""))} autoComplete="off" />
+          <span class="lre-field-help">In tokens, for its model, in place of the figure RPH would use. Leave it empty to use that figure.</span>
+        </label>
+        <label class="lre-field">
+          <span class="label">Longest reply</span>
+          <input name="maxTokens" class="lre-input" type="number" inputMode="numeric" defaultValue={String(was?.model === undefined ? "" : (was.limits?.[was.model]?.maxTokens ?? ""))} autoComplete="off" />
+          <span class="lre-field-help">In tokens, for its model, in place of the figure RPH would use. Leave it empty to use that figure.</span>
+        </label>
+        <label class="lre-field">
           <span class="label">Key</span>
           <input name="key" class="lre-input" type="password" defaultValue="" autoComplete="off" spellcheck={false} />
           <span class="lre-field-help">{was === null ? "Sent to RPE once, and never shown again." : `${keyWords(was)} Type a new one to replace it, or leave it empty to keep it.`}</span>
@@ -155,6 +195,18 @@ function ConnectionForm(props: { was: ConnectionShown | null; providers: readonl
 /** What the page is doing besides showing the list: a form open (adding when its id is null), a removal waiting for its yes. */
 export type ConnectionsAction = { kind: "none" } | { kind: "form"; id: string | null } | { kind: "remove"; id: string };
 
+/** A connection's test: under way, what came of it, or RPE's refusal to make it, in its words. */
+export type ConnectionTestShown = { busy: true } | { busy: false; tested: ConnectionTested; problem: null } | { busy: false; tested: null; problem: string };
+
+/** Tests a connection with one small call. */
+export async function testConnection(client: Pick<RpeClient, "call">, id: string): Promise<ConnectionTestShown> {
+  try {
+    return { busy: false, tested: await client.call("POST /api/v1/connections/:id/test", { id }), problem: null };
+  } catch (error) {
+    return { busy: false, tested: null, problem: errorWords(error) };
+  }
+}
+
 export interface ConnectionsViewProps {
   list: ConnectionsShown | null;
   loading: boolean;
@@ -168,9 +220,34 @@ export interface ConnectionsViewProps {
   onSave(save: SaveConnection, id: string | null): void;
   onRemove(id: string): void;
   onDefault(id: string): void;
+  /** Each connection's last test, by its id. */
+  tests: Readonly<Record<string, ConnectionTestShown>>;
+  onTest(id: string): void;
 }
 
-function ConnectionRow(props: { view: ConnectionShown; action: ConnectionsAction; onAction(action: ConnectionsAction): void; onRemove(id: string): void; onDefault(id: string): void }) {
+/** What came of a connection's test: the model that answered and its limits, or the provider's words. */
+function TestShown(props: { test: ConnectionTestShown }) {
+  const { test } = props;
+  if (test.busy) return <p class="lre-muted rpe-line">Testing…</p>;
+  if (test.problem !== null) {
+    return (
+      <Banner tone="neg" icon="alert" title="The test could not be made">
+        <span>{test.problem}</span>
+      </Banner>
+    );
+  }
+  const tested = test.tested;
+  if (!tested.ok) {
+    return (
+      <Banner tone="warn" icon="alert" title="It did not answer">
+        <span>{`${tested.error} (${duration(tested.ms)})`}</span>
+      </Banner>
+    );
+  }
+  return <p class="rpe-line" data-tested="ok">{`It answered in ${duration(tested.ms)}, as ${tested.model}. ${limitsWords(tested.limits)}.`}</p>;
+}
+
+function ConnectionRow(props: { view: ConnectionShown; action: ConnectionsAction; test: ConnectionTestShown | undefined; onAction(action: ConnectionsAction): void; onRemove(id: string): void; onDefault(id: string): void; onTest(id: string): void }) {
   const { view, action } = props;
   const said = [view.provider, view.model, view.effort === undefined ? null : `thinks at ${view.effort}`].filter((part) => part !== null && part !== undefined).join(" · ");
   return (
@@ -182,6 +259,7 @@ function ConnectionRow(props: { view: ConnectionShown; action: ConnectionsAction
       <div class="lre-section-body lre-stack">
         <p class="rpe-line">{said}</p>
         <p class="rpe-meta">{keyWords(view)}</p>
+        <p class="rpe-meta" data-limits={view.id}>{`${limitsWords(view.limitsInForce)}.`}</p>
         {action.kind === "remove" && action.id === view.id ? (
           <div class="lre-inline rpe-wrap">
             <span>Remove {view.name}?</span>
@@ -205,8 +283,12 @@ function ConnectionRow(props: { view: ConnectionShown; action: ConnectionsAction
             <Button small kind="ghost" onClick={() => props.onAction({ kind: "remove", id: view.id })}>
               Remove
             </Button>
+            <Button small kind="ghost" busy={props.test?.busy === true} onClick={() => props.onTest(view.id)}>
+              Test it
+            </Button>
           </div>
         )}
+        {props.test === undefined ? null : <TestShown test={props.test} />}
       </div>
     </li>
   );
@@ -251,7 +333,7 @@ export function ConnectionsView(props: ConnectionsViewProps) {
       ) : (
         <ul class="lre-stack rpe-plain">
           {list.connections.map((view) => (
-            <ConnectionRow key={view.id} view={view} action={action} onAction={props.onAction} onRemove={props.onRemove} onDefault={props.onDefault} />
+            <ConnectionRow key={view.id} view={view} action={action} test={props.tests[view.id]} onAction={props.onAction} onRemove={props.onRemove} onDefault={props.onDefault} onTest={props.onTest} />
           ))}
         </ul>
       )}
@@ -276,6 +358,7 @@ export function ConnectionsPage() {
   const [action, setAction] = useState<ConnectionsAction>({ kind: "none" });
   const [saving, setSaving] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
+  const [tests, setTests] = useState<Readonly<Record<string, ConnectionTestShown>>>({});
   useEffect(() => {
     let alive = true;
     app.client.call("GET /api/v1/connections", {}).then(
@@ -325,6 +408,11 @@ export function ConnectionsPage() {
       onSave={(save, id) => ask(() => (id === null ? app.client.call("POST /api/v1/connections", {}, { body: save }) : app.client.call("PUT /api/v1/connections/:id", { id }, { body: save })), { kind: "none" })}
       onRemove={(id) => ask(() => app.client.call("DELETE /api/v1/connections/:id", { id }), { kind: "none" })}
       onDefault={(id) => ask(() => app.client.call("PUT /api/v1/connections/:id/default", { id }), action)}
+      tests={tests}
+      onTest={(id) => {
+        setTests((now) => ({ ...now, [id]: { busy: true } }));
+        testConnection(app.client, id).then((test) => setTests((now) => ({ ...now, [id]: test })));
+      }}
     />
   );
 }

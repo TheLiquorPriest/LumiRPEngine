@@ -6,8 +6,9 @@
 // from `src/app/`; the turn routes and the live kinds are what the turn lane implements; a connection's
 // shapes are RPH's contract's own.
 
-import type { ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, ModelLimits, ReplyError, RunStatus, TraceDelta, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
+import type { AgentRef, ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, FileKind, LayerLevel, ModelLimits, ReplyError, RunStatus, StackPart, TraceDelta, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
 import type { JsonValue } from "../shared/json";
+import type { DraftChanged, ErrorMessage, FrontendToBackend, ResultMessage } from "../shared/protocol";
 
 // ---------------------------------------------------------------- the app's own
 
@@ -253,6 +254,263 @@ export interface WorldAnswer {
   nodes: WorldNode[];
 }
 
+// ---------------------------------------------------------------- the agents' files (the tree lane's, plan §5)
+
+/**
+ * One file of the agents' tree as the Files page lists it: its path in the chat's view, as the file
+ * routes take it (`@shipped/…`, `@global/…`, `@character/…`, or below the chat's folder), its level and
+ * kind, its size; the name RPH loads it by and an `off:` list names it by (null: none); whether RPH
+ * takes it; the nearer file taken in its place; whether its name is switched off; whether the user may
+ * write it where it is; the shipped file of its name, for a file of another level; and when an update
+ * changed that shipped file since this one was last written.
+ */
+export interface TreeFileEntry {
+  path: string;
+  level: LayerLevel;
+  kind: FileKind;
+  bytes: number;
+  item: string | null;
+  applies: boolean;
+  replacedBy: string | null;
+  off: boolean;
+  editable: boolean;
+  shipped: string | null;
+  defaultChanged: number | null;
+}
+
+/** `GET /api/v1/files?chat=`: every file of the chat's view of the tree; with no chat, of the shipped level and the user's own. */
+export interface TreeListing {
+  files: TreeFileEntry[];
+}
+
+/** `GET /api/v1/files/*?chat=`: one file, as text. */
+export interface TreeFileText {
+  path: string;
+  level: LayerLevel;
+  kind: FileKind;
+  bytes: number;
+  editable: boolean;
+  text: string;
+}
+
+/** One line of a difference between two texts: in both, only in the second, or only in the first. */
+export interface DiffLine {
+  op: "same" | "added" | "removed";
+  text: string;
+}
+
+/** `GET /api/v1/files-diff/*?chat=`: from the shipped file of its name to this one; and what the update that changed the shipped file since this one was written changed of it. */
+export interface TreeFileDiff {
+  path: string;
+  shipped: string | null;
+  lines: DiffLine[];
+  update: { at: number; lines: DiffLine[] } | null;
+}
+
+/** `PUT /api/v1/files/*`: the whole text, written as the user's at a level (for a file of another level, the user's own file of its name there); a chat's level names the chat. */
+export interface FileWrite {
+  level: LayerLevel;
+  chat?: string;
+  text: string;
+}
+
+/** `PUT /api/v1/files-off/*`: a file's name switched off or on again in the `off:` list of a level's config. */
+export interface FileSwitch {
+  level: "global" | "chat";
+  chat?: string;
+  off: boolean;
+}
+
+/** What writing a file or switching its name answers: the file as the listing now shows it. */
+export interface FileWritten {
+  file: TreeFileEntry | null;
+}
+
+export type SuggestionState = "open" | "accepted" | "dismissed";
+
+/** An agent's suggestion for a file: the file as the agent named it in the chat's view, the text proposed whole, and why. */
+export interface TreeSuggestion {
+  id: number;
+  chat: string;
+  turn: string | null;
+  agent: AgentRef;
+  path: string;
+  text: string;
+  reason: string;
+  at: number;
+  state: SuggestionState;
+  decided: number | null;
+}
+
+/** A suggestion with what it would change: from the file as it is now to the text proposed. */
+export interface TreeSuggestionView extends TreeSuggestion {
+  lines: DiffLine[];
+}
+
+/** `GET /api/v1/suggestions?chat=&state=`: a chat's suggestions (every chat's when none is named), newest first. */
+export interface SuggestionList {
+  suggestions: TreeSuggestionView[];
+}
+
+/** `POST /api/v1/suggestions/:id/accept`: the text as accepted, when it was edited, and the level it is written at (absent: the file's own). */
+export interface SuggestionAccept {
+  text?: string;
+  level?: LayerLevel;
+}
+
+export interface SuggestionAccepted {
+  suggestion: TreeSuggestion | null;
+  file: TreeFileEntry | null;
+}
+
+export interface SuggestionDismissed {
+  suggestion: TreeSuggestion | null;
+}
+
+/** What a chat's folder takes in all, and by area: its notes, its turn folders, its sessions' own files, and the rest of its files. */
+export interface ChatStorage {
+  chat: string;
+  /** Its folder below the tree's `chats/`. */
+  folder: string;
+  bytes: number;
+  areas: { notes: number; turns: number; sessions: number; files: number };
+}
+
+/** `GET /api/v1/storage`: each chat's folder; the user's own level and the shipped level; and RPE's database file, with its write-ahead log. */
+export interface TreeStorage {
+  chats: ChatStorage[];
+  global: number;
+  shipped: number;
+  database: number;
+}
+
+/** A note file of a chat: its path in the chat's view, its size now (0 for one no longer there), and how many times agents wrote it in turns. */
+export interface NoteFile {
+  path: string;
+  bytes: number;
+  writes: number;
+}
+
+/** `GET /api/v1/storage/notes?chat=&limit=`: a chat's largest notes, and those agents rewrote most. */
+export interface NoteFiles {
+  largest: NoteFile[];
+  rewritten: NoteFile[];
+}
+
+/** What pruning a chat's old turn folders took away (`POST /api/v1/files-prune`): of how many folders, how many files, how many bytes. */
+export interface Pruned {
+  folders: number;
+  files: number;
+  bytes: number;
+}
+
+/** `GET /api/v1/files-stack?chat=&agent=`: the exact stack an agent gets in the chat, part by part in order, each with the file it comes from, its level, and whether it sits in the opening block or comes with the briefing; a part left out is listed with why. */
+export interface AgentStack {
+  agent: string;
+  parts: StackPart[];
+}
+
+// ---------------------------------------------------------------- settings (the app's, plan §5.4 "Config", §14)
+
+/** What a level may set a setting to: a whole number or a number at least `least`, one of `values`, yes or no, a line of text, or a list of names. */
+export type SettingTakes = { type: "whole"; least: number } | { type: "number"; least: number } | { type: "oneOf"; values: readonly string[] } | { type: "yesNo" } | { type: "text" } | { type: "texts" };
+
+/**
+ * A setting as the Settings page shows it: its key as a config file writes it (a per-connection one
+ * names its connection), the value in force, its default, the level whose file decides the value (null:
+ * no file does, and the default holds) and that file, what it takes and that in words, what no value
+ * means, whether `~` may be set, the levels it may be set at here, the connection it names (null: a name
+ * no connection has now), and a value a file sets that it does not take, with why.
+ */
+export interface SettingView {
+  key: string;
+  value: JsonValue;
+  default: JsonValue;
+  from: LayerLevel | null;
+  file: string | null;
+  takes: SettingTakes;
+  takesWords: string;
+  none: string | null;
+  orNone: boolean;
+  levels: LayerLevel[];
+  connection?: { id: string; name: string } | null;
+  passed: { value: JsonValue; why: string } | null;
+}
+
+/** `GET /api/v1/settings?chat=`, and what `PUT` answers: each level's config file, farthest first, with what is wrong with one that cannot be read; and every setting. */
+export interface SettingsReply {
+  chat: string | null;
+  files: { level: LayerLevel; file: string; problem: string | null }[];
+  settings: SettingView[];
+}
+
+/** `PUT /api/v1/settings`: a key written at a level, a chat's naming the chat; `value` null takes the key away there, and `none` sets `~`. */
+export interface SettingsWrite {
+  level: LayerLevel;
+  chat: string | null;
+  key: string;
+  value: JsonValue;
+  none: boolean;
+}
+
+// ---------------------------------------------------------------- the migration (the migration's, plan §15.5, §15.6)
+
+/** What came of a chat the last run looked at, in the run's own words. */
+export type ChatOutcome =
+  | "imported"
+  | "replaced"
+  | "played on RPE: left alone"
+  | "a chat made from it was played on RPE: left alone"
+  | "gone from Lumiverse: removed"
+  | "gone from Lumiverse, played on RPE: left alone"
+  | "gone from Lumiverse, a chat made from it was played on RPE: left alone"
+  | "not imported";
+
+/** Where RPE's fold of a chat differs from today's: at a swipe (its message and number) or at the chat's head; the values that differ, by path; and whether today's state there is kept as the turn's start. */
+export interface MigrationDifference {
+  at: { message: string; swipe: number } | "head";
+  turn: string;
+  values: string[];
+  kept: boolean;
+}
+
+/**
+ * One chat as the last run left it: what came of it and why it was not imported; the turns imported of
+ * its own; the messages it shares with the chat it was made from; and its check against today's fold
+ * (matched at the head and at how many swipes, where it differed, and where its swipes were placed).
+ */
+export interface MigrationChat {
+  chat: string;
+  outcome: ChatOutcome;
+  why: string | null;
+  turns: number;
+  shares: { chat: string; messages: number } | null;
+  check: { matched: { head: boolean; swipes: number; of: number }; differences: MigrationDifference[]; placed: { own: number; shown: number; lost: number; head: number } };
+}
+
+/** One thing the last run left waiting on the user, by what it is. */
+export type MigrationWaiting =
+  | { kind: "guidance"; path: string }
+  | { kind: "connection"; setting: string; connection: string }
+  | { kind: "chat"; chat: string; questions: number; staged: number; chips: number; reviewCards: number; rollback: boolean }
+  | { kind: "own"; agents: number; skills: number; texts: number }
+  | { kind: "filing"; chat: string; characters: number; notes: boolean };
+
+/**
+ * `GET /api/v1/migration`, as far as the page reads it: the last run's report as the run printed it
+ * (null before any run), each chat, the backup (where, its size and checksum, whether a file of that
+ * size is still there), what is waiting on the user, and the steps of going back with the permissions
+ * the previous build asks for. The route also sends the report whole and what was carried of each chat;
+ * the page shows the report as its printed text.
+ */
+export interface MigrationShown {
+  text: string | null;
+  chats: MigrationChat[];
+  backup: { path: string; bytes: number; sha256: string; present: boolean } | null;
+  waiting: MigrationWaiting[];
+  goingBack: { steps: string[]; permissions: string[] };
+}
+
 // ---------------------------------------------------------------- the route map the client is typed by
 
 /** A route's reply, its query and its body. */
@@ -296,6 +554,23 @@ export interface Routes {
   "DELETE /api/v1/connections/:id": RouteShape<void>;
   "PUT /api/v1/connections/:id/default": RouteShape<void>;
   "POST /api/v1/connections/:id/test": RouteShape<ConnectionTested>;
+  "POST /api/v1/build": RouteShape<{ result: ResultMessage | ErrorMessage; pushes: DraftChanged[] }, Record<string, never>, FrontendToBackend>;
+  "GET /api/v1/files": RouteShape<TreeListing, { chat?: string }>;
+  "GET /api/v1/files/*": RouteShape<TreeFileText, { chat?: string }>;
+  "PUT /api/v1/files/*": RouteShape<FileWritten, Record<string, never>, FileWrite>;
+  "DELETE /api/v1/files/*": RouteShape<{ removed: string }, { chat?: string }>;
+  "PUT /api/v1/files-off/*": RouteShape<FileWritten, Record<string, never>, FileSwitch>;
+  "GET /api/v1/files-diff/*": RouteShape<TreeFileDiff, { chat?: string }>;
+  "GET /api/v1/suggestions": RouteShape<SuggestionList, { chat?: string; state?: SuggestionState }>;
+  "POST /api/v1/suggestions/:id/accept": RouteShape<SuggestionAccepted, Record<string, never>, SuggestionAccept>;
+  "POST /api/v1/suggestions/:id/dismiss": RouteShape<SuggestionDismissed>;
+  "GET /api/v1/settings": RouteShape<SettingsReply, { chat?: string }>;
+  "PUT /api/v1/settings": RouteShape<SettingsReply, Record<string, never>, SettingsWrite>;
+  "GET /api/v1/migration": RouteShape<MigrationShown>;
+  "GET /api/v1/storage": RouteShape<TreeStorage>;
+  "GET /api/v1/storage/notes": RouteShape<NoteFiles, { chat: string; limit?: number }>;
+  "POST /api/v1/files-prune": RouteShape<{ pruned: Pruned }, Record<string, never>, { chat: string }>;
+  "GET /api/v1/files-stack": RouteShape<AgentStack, { chat: string; agent: string }>;
 }
 
 export type RouteKey = keyof Routes & string;

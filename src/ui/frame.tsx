@@ -10,16 +10,19 @@ import type { ExtensionStatus, MissingPermission } from "./api";
 import { chatOf, type Route, type Shell, useApp } from "./app";
 import { Badge, Banner, Button, Empty, Fold } from "./atoms";
 import type { ClientState, RpeClient } from "./client";
+import { BuildPage } from "./kept/page";
 import { ChatsPage } from "./pages/chats";
 import { ConnectionsPage } from "./pages/connections";
 import { FilesPage } from "./pages/files";
 import { LivePage } from "./pages/live";
+import { MigrationPage } from "./pages/migration";
 import { SettingsPage } from "./pages/settings";
+import { StoragePage } from "./pages/storage";
 import { TurnPage, TurnsPage } from "./pages/turns";
 import { WorldPage } from "./pages/world";
 import { errorWords } from "./words";
 
-export type NavId = "chats" | "live" | "turns" | "world" | "files" | "connections" | "settings";
+export type NavId = "chats" | "live" | "turns" | "world" | "build" | "files" | "connections" | "settings" | "storage" | "migration";
 
 export interface NavItem {
   id: NavId;
@@ -36,9 +39,12 @@ export const NAV: readonly NavItem[] = [
   { id: "live", title: "Live", icon: "pulse", shells: ["web", "drawer"], needsChat: true },
   { id: "turns", title: "Turns", icon: "list", shells: ["web", "drawer"], needsChat: true },
   { id: "world", title: "World", icon: "globe", shells: ["web", "drawer"], needsChat: true },
+  { id: "build", title: "Build", icon: "hammer", shells: ["web", "drawer"], needsChat: false },
   { id: "files", title: "Files", icon: "folder", shells: ["web", "drawer"], needsChat: false },
   { id: "connections", title: "Connections", icon: "link", shells: ["web", "drawer"], needsChat: false },
   { id: "settings", title: "Settings", icon: "sliders", shells: ["web", "drawer"], needsChat: false },
+  { id: "storage", title: "Storage", icon: "box", shells: ["web", "drawer"], needsChat: false },
+  { id: "migration", title: "Migration", icon: "download", shells: ["web", "drawer"], needsChat: false },
 ];
 
 /** The navigation entry a route is under: one turn is under Turns. */
@@ -48,16 +54,19 @@ export function navOf(route: Route): NavId {
 
 /** Where a navigation entry goes, for the chat the page is on. */
 export function routeFor(id: NavId, chat: string | null): Route {
-  return id === "chats" || id === "connections" || id === "settings" ? { page: id } : { page: id, chat };
+  return id === "chats" || id === "build" || id === "connections" || id === "migration" ? { page: id } : { page: id, chat };
 }
 
 export function PageFor(props: { route: Route }) {
   const app = useApp();
   const { route } = props;
   if (route.page === "chats") return <ChatsPage />;
+  if (route.page === "build") return <BuildPage />;
   if (route.page === "connections") return <ConnectionsPage />;
-  if (route.page === "settings") return <SettingsPage />;
+  if (route.page === "migration") return <MigrationPage />;
+  if (route.page === "settings") return <SettingsPage chat={route.chat} />;
   if (route.page === "files") return <FilesPage chat={route.chat} />;
+  if (route.page === "storage") return <StoragePage chat={route.chat} />;
   const chat = route.chat;
   if (chat === null) {
     return app.shell === "drawer" ? (
