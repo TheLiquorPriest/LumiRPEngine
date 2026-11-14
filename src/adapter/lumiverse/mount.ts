@@ -106,6 +106,8 @@ export const QUESTION_BODY_BYTES = 8 * 1024 * 1024;
 
 const NOT_SET_UP = "RPE is not set up for a Lumiverse yet: give it Lumiverse's address and your Lumiverse user (rpe up).";
 const NOT_HEARD = "RPE has not heard from its extension in Lumiverse since it started.";
+/** The permission without which the extension sees no prompt, and so marks no reply (`src/ext/permissions.ts`). */
+const MARKS_REPLIES = "interceptor";
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
@@ -228,7 +230,12 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             blocks: blocksHint({ reads: p.reads, session: p.session, log }),
             models: lanes.models,
             passConnection: lanes.passConnection,
-            unpassable: () => (status.registered ? null : status.why),
+            unpassable: () => {
+              if (!status.registered) return status.why;
+              // A chat reply comes as untagged as any other request while the extension may not see prompts.
+              const lacking = status.missing?.find((m) => m.permission === MARKS_REPLIES);
+              return lacking === undefined ? null : `RPE's extension in Lumiverse lacks the “${lacking.permission}” permission, which it needs ${lacking.why}.`;
+            },
             modelNames,
             turns: lanes.turns,
             clock: deps.clock,

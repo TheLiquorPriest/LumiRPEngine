@@ -295,4 +295,19 @@ describe("what the extension is missing, on RPE's own pages", () => {
     await b.until("RPE to hear the grant", () => b.door.extension().missing?.length === 0);
     expect(await status()).toEqual({ registered: true, why: null, missing: [] });
   });
+
+  test("while the extension says it lacks the interceptor permission, it marks no reply, so RPE passes no untagged request on and says which permission; once the grant is reported, it passes again", async () => {
+    const b = await bed({ granted: ALL.filter((p) => p !== "interceptor") });
+    const untitled = { model: "rpe", messages: [{ role: "user", content: "Name this chat." }], stream: false };
+    const untagged = (): Promise<Response> => fetch(`${b.listening.url}/v1/chat/completions`, { method: "POST", headers: bearer(b.providerKey), body: JSON.stringify(untitled) });
+    expect(b.door.extension()).toMatchObject({ registered: true, missing: [{ permission: "interceptor" }] });
+    const refused = await untagged();
+    expect(refused.status).toBe(503);
+    expect(await refusalWords(refused)).toContain("interceptor");
+    expect(b.heard.passed).toEqual([]);
+    b.installed.grant("interceptor");
+    await b.until("RPE to hear the grant", () => b.door.extension().missing?.length === 0);
+    expect((await untagged()).status).toBe(200);
+    expect(b.heard.passed).toHaveLength(1);
+  });
 });
