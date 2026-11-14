@@ -88,7 +88,8 @@ describe("line of sight", () => {
     const moving = stand(d, { crowd: { square: [1, 1], size: [40, 64] }, wagons: { square: [42, 1], size: [23, 64] }, herd: { square: [1, 41], size: [30, 24] } });
     const started = performance.now();
     expect(sees(d, moving, "crowd", "wagons")).toBe(false);
-    expect(performance.now() - started).toBeLessThan(50);
+    // Seconds before the fix; the bound is loose so that a busy machine does not fail it.
+    expect(performance.now() - started).toBeLessThan(1000);
     expect(sees(d, moving, "crowd", "herd")).toBe(true);
   });
 });

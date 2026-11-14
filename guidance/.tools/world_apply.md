@@ -37,7 +37,7 @@ arguments:
   operations.reveal: "quest: true to show the player the stage."
   operations.axis: "relate: the regard that changes (trust, liking); leave it out for all of them."
   operations.change: "relate: how much it changes, up or down."
-  operations.list: "horizon: the whole list of places, people and things the next turn is expected to need."
+  operations.list: "horizon: the whole list of what the next turn is expected to need: places, people and things by name; anything else in your own words, kept as words."
   operations.name: "spawn: its name."
   operations.kind: "spawn: its kind: person (or the world's own kind of person), item, container, a vehicle kind, a group's kind. Or a place: place needs only its name, and is inside the place at names or in none, as the first place of an empty world is; room, spot or venue needs at, the place it is inside."
   operations.tier: "spawn: its tier."
@@ -51,11 +51,11 @@ arguments:
   operations.near: "move, place: someone or something to stand beside on the place's map."
   operations.zone: "move, place: a zone of the place's map."
   operations.why: "move, place, give, store, quest, relate: the reason, kept with the change."
-  operations.source: "Where it comes from: from is prose, lore, author, gm, character, player, default or invented; lore, message and roll cite an entry, a message or a roll by id; an invention cites its gap_check and consent."
+  operations.source: "Where it comes from (horizon takes none): from is prose, lore, author, gm, character, player, default or invented; lore, message and roll cite an entry, a message or a roll by id; an invention cites its gap_check and consent."
   operations.precision: "How exact: exact, approximate, vague or unknown."
   operations.standing: "How it stands: established, proposed or assumed."
 ---
-Applies a list of operations to the world's recorded state, in order, each on the state the ones before it left, and answers with each operation's lane, what changed (each touched thing as it was and as it is now), how each touched thing now stands, and reports of anything that does not add up. Move, place, give, wear, store, pay, pass_time, set, fact, quest and spawn write the engine lane; relate and horizon the story lane. A name that is not there, or a value that is none of the choices, answers the whole call with what would work, and nothing is recorded.
+Applies a list of operations to the world's recorded state, in order, each on the state the ones before it left, and answers with each operation's lane, what changed (each touched thing as it was and as it is now), how each touched thing now stands, and reports of anything that does not add up. Move, place, give, wear, store, pay, pass_time, set, fact, quest and spawn write the engine lane; relate and horizon the story lane. A name that is not there, or a value that is none of the choices, answers the whole call with what would work, and nothing is recorded. Two things are kept as your words instead: a horizon entry that names nothing, and where a new thing was put when that names nothing (it is made where its owner is).
 
 - move: someone or something goes to a place, with others along.
 - place: a thing set down or picked up; a person set down out of what holds them.

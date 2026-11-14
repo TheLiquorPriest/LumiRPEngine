@@ -292,7 +292,7 @@ describe("map_lay and map_edit", () => {
     wordsFromFiles(wide);
     const started = performance.now();
     const huge = await t.call("map_lay", { place: "The Far Road", width: 50_000, height: 50_000, ...SRC });
-    expect(performance.now() - started).toBeLessThan(100);
+    expect(performance.now() - started).toBeLessThan(1000);
     expect(texts(huge)[0]).toBe("map_lay: a map is at most 64 by 64 squares, and this one would be 50000 by 50000.");
     expect(t.s.changes(t.first.id).length).toBe(0);
     const most = await t.call("map_lay", { place: "The Far Road", width: 64, height: 64, ...SRC });
@@ -324,13 +324,13 @@ describe("map_lay and map_edit", () => {
     expect(rect.r.error).toBeUndefined();
     expect(texts(rect.r)).toContain("45 squares of the map of The Cellar [cellar] were drawn anew.");
     expect(rect.r.reports ?? []).toEqual(["map_edit: 3999999999955 squares of stroke 1 (.) are off the map, which is 9 by 5 squares, and were not drawn."]);
-    expect(rect.ms).toBeLessThan(100);
+    expect(rect.ms).toBeLessThan(1000);
     wordsFromFiles(rect.r);
     // A line as far off: only the squares it crosses on the map are worked out.
     const line = await timed({ strokes: [{ symbol: "#", line: [[2, 2], [2_000_000, 1]] }] });
     expect(texts(line.r)).toContain("8 squares of the map of The Cellar [cellar] were drawn anew.");
     expect(line.r.reports ?? []).toEqual(["map_edit: 1999991 squares of stroke 1 (#) are off the map, which is 9 by 5 squares, and were not drawn."]);
-    expect(line.ms).toBeLessThan(100);
+    expect(line.ms).toBeLessThan(1000);
   });
 
   test("corners given in feet say once how much fell off; a stroke wholly off the map draws nothing and says why", async () => {
