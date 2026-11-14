@@ -11,6 +11,7 @@ A character's whole inner life is built from what it perceives. Its memories, it
 - Every principal and every supporting character who was on stage for a moment gets a perception of that moment. Extras do not.
 - A character who was present and noticed nothing still gets one, saying so.
 - The player's character is perceived like anyone else on stage, as it acts, unless you have a reason to keep it from someone.
+- The player's character gets no perception of its own, with one exception. When it learns a secret the lore marks, record that with `perceive`, naming the mark, so that the secret is no longer kept from the player.
 
 ## What goes in one
 
