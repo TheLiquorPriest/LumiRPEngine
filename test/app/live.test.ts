@@ -85,7 +85,7 @@ describe("the live socket", () => {
   beforeEach(async () => {
     bed = await makeBed();
     app = await bed.open();
-    server = app.start();
+    server = await app.start();
     token = await makeKey(app, "web");
   });
 

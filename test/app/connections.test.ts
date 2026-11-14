@@ -1,32 +1,31 @@
-// Connections: the model layer's documents kept where the plan puts them (names and models in the
-// global config, every key, sign-in and header value in the secrets file and nowhere else), the
-// user's own lines in the global config kept as they wrote them, and routes that add, change, list
-// and remove a connection without ever giving a key back. The route tests start the server
-// in-process on a free loopback port.
+// Connections: the model layer's two documents kept exactly as it gives them, where the plan puts
+// them (the connections, with their headers' names, in the global config; every key, sign-in and
+// header value in the secrets file and nowhere else); a file written the earlier way, with the
+// headers' values kept apart, read in the form the layer moves at its next save; the user's own lines
+// in the global config kept as they wrote them; and routes that add, change, list and remove a
+// connection without ever giving a key back. The route tests start the server in-process on a free
+// loopback port.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { YAML } from "bun";
 import type { ConnectionsDoc, SecretsDoc } from "rp-harness/contract";
 import type { App, RunningServer } from "../../src/app";
 import { connectionRoutes } from "../../src/app";
-import { walk } from "../../src/migrate/files";
+import { walk } from "../../src/app/archive";
 import { bearer, type Bed, makeBed, makeKey, testModelLayer } from "./helpers";
 
 const KEY = "sk-invented-key-0123456789abcdef";
 const HEADER_VALUE = "proxy-secret-value-fedcba9876543210";
 
-const DOC: ConnectionsDoc = {
-  v: 1,
-  default: "floor",
-  connections: [
-    { id: "floor", name: "Floor model", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", effort: "high", limits: { "deepseek-v4-flash": { contextWindow: 128_000 } }, headers: { "X-Proxy-Token": HEADER_VALUE, "X-Dropped": null } },
-    { id: "local", name: "Local server", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:1234/v1", reported: { "local-model": { maxTokens: 4096 } } },
-  ],
-};
-const SECRETS: SecretsDoc = { v: 1, keys: { floor: KEY }, signins: { anthropic: { type: "oauth", access: "invented-access", refresh: "invented-refresh", expires: 1 } } };
+const FLOOR = { id: "floor", name: "Floor model", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", effort: "high", limits: { "deepseek-v4-flash": { contextWindow: 128_000 } } };
+const LOCAL = { id: "local", name: "Local server", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:1234/v1", reported: { "local-model": { maxTokens: 4096 } } };
+const SIGNINS = { anthropic: { type: "oauth", access: "invented-access", refresh: "invented-refresh", expires: 1 } };
+// As the layer gives them (RPH `src/model/book.ts`): a connection's headers by name alone, their values with the secrets by the connection's id. The contract's document types do not say so yet.
+const DOC = { v: 1, default: "floor", connections: [{ ...FLOOR, headers: ["X-Proxy-Token", "X-Dropped"] }, LOCAL] } as unknown as ConnectionsDoc;
+const SECRETS = { v: 1, keys: { floor: KEY }, headers: { floor: { "X-Proxy-Token": HEADER_VALUE } }, signins: SIGNINS } as unknown as SecretsDoc;
 
 /** Every file of the tree agents see, as text. */
 async function treeText(app: App): Promise<string> {
@@ -47,20 +46,33 @@ describe("connections", () => {
     await bed.remove();
   });
 
-  test("names and models go to the global config; keys, sign-ins and header values to the secrets file alone", async () => {
-    await app.models.saveConnections(DOC);
+  test("each document is given back exactly as the layer gave it: the connections, with their headers' names, in the global config; keys, sign-ins and header values in the secrets file alone", async () => {
     await app.models.saveSecrets(SECRETS);
+    await app.models.saveConnections(DOC);
     expect(await app.models.loadConnections()).toEqual(DOC);
     expect(await app.models.loadSecrets()).toEqual(SECRETS);
     const global = await readFile(app.paths.globalConfig, "utf8");
-    expect(global).toContain("Floor model");
-    expect(global).toContain("deepseek-v4-flash");
+    for (const kept of ["Floor model", "deepseek-v4-flash", "X-Proxy-Token"]) expect(global).toContain(kept);
     const tree = await treeText(app);
     for (const secret of [KEY, HEADER_VALUE, "invented-refresh"]) expect(tree).not.toContain(secret);
     const secrets = await readFile(app.paths.secrets, "utf8");
     for (const secret of [KEY, HEADER_VALUE, "invented-refresh"]) expect(secrets).toContain(secret);
     expect(statSync(app.paths.secrets).mode & 0o777).toBe(0o600);
     expect(statSync(app.paths.root).mode & 0o777).toBe(0o700);
+  });
+
+  test("a file written the earlier way gives the headers' values back in the connections, and once the layer has saved, none are left in the old place", async () => {
+    // The earlier way: the connections without their headers, and the values apart, by connection id.
+    await writeFile(app.paths.globalConfig, YAML.stringify({ models: { v: 1, default: "floor", connections: [FLOOR, LOCAL] } }, null, 2));
+    await writeFile(app.paths.secrets, JSON.stringify({ v: 1, parts: { models: { v: 1, keys: { floor: KEY }, signins: SIGNINS }, headers: { floor: { "X-Proxy-Token": HEADER_VALUE, "X-Dropped": null } } } }));
+    expect(await app.models.loadConnections()).toEqual({ v: 1, default: "floor", connections: [{ ...FLOOR, headers: { "X-Proxy-Token": HEADER_VALUE, "X-Dropped": null } }, LOCAL] });
+    // The layer's next save moves them: its secrets first, the values with them, then the connections with the names alone.
+    await app.models.saveSecrets(SECRETS);
+    await app.models.saveConnections(DOC);
+    expect(await app.models.loadConnections()).toEqual(DOC);
+    expect(await app.models.loadSecrets()).toEqual(SECRETS);
+    expect(Object.keys(JSON.parse(await readFile(app.paths.secrets, "utf8")).parts)).toEqual(["models"]);
+    expect(await treeText(app)).not.toContain(HEADER_VALUE);
   });
 
   test("the user's own lines in the global config are kept as they wrote them", async () => {
@@ -82,7 +94,7 @@ describe("connections", () => {
     let page: Record<string, string>;
 
     beforeEach(async () => {
-      server = app.start();
+      server = await app.start();
       page = { ...bearer(await makeKey(app, "web")), "content-type": "application/json" };
     });
 

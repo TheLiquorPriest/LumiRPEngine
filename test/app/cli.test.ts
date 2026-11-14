@@ -47,7 +47,7 @@ describe("rpe", () => {
         },
       ],
     });
-    return { app, server: app.start() };
+    return { app, server: await app.start() };
   }
 
   test("serve runs RPE in the foreground until it is told to stop", async () => {
@@ -146,5 +146,17 @@ describe("rpe", () => {
     expect(flag.code).toBe(2);
     expect(flag.err).toContain("does not take --port");
     expect((await rpe(["allow"])).code).toBe(2);
+  });
+
+  test("version prints the build's id alone, reading no data folder and asking nothing over the network", async () => {
+    const nowhere = join(bed.root, "no-data-here");
+    for (const argv of [["version"], ["--version"]]) {
+      const io = { ...cliIo(), env: { RPE_DATA: nowhere }, fetch: (): Promise<Response> => Promise.reject(new Error("version asked over the network")) };
+      expect(await runCli(argv, io, { version: "a1b2c3d4" })).toBe(0);
+      expect(io.outs).toEqual(["rpe a1b2c3d4"]);
+      expect(io.errs).toEqual([]);
+    }
+    expect(existsSync(nowhere)).toBe(false);
+    expect((await rpe(["version"])).code).toBe(2);
   });
 });

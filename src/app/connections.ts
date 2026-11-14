@@ -1,16 +1,16 @@
 // The model layer's connections and their secrets, kept for RPH (plan §13.2; `ModelsPort` in
 // `rp-harness/contract`), and the routes the Connections page and `rpe connection` use.
 //
-// RPH's model layer holds the rules and writes both documents; RPE keeps them where the plan puts
-// them. The connections document (names, providers, models, efforts, limits) is the `models` key of
-// the file tree's `RPE-global.yml`, read and edited with the rest of the global config. Everything
-// secret is in the secrets file and nowhere else: each connection's key and the sign-ins (part
-// `models`), and the values of each connection's headers (part `headers`), which can carry a
-// credential and would otherwise sit in a file agents can read.
+// RPH's model layer holds the rules and writes both documents; RPE keeps each exactly as the layer
+// gives it, where the plan puts it. The connections document (names, providers, models, efforts,
+// limits, and the names of the headers each connection's calls send) is the `models` key of the file
+// tree's `RPE-global.yml`, read and edited with the rest of the global config, and read from the file
+// each time it is asked for, so a hand edit counts. The secrets document (each connection's key and
+// its headers' values, and the sign-ins) is part `models` of the secrets file and nowhere else.
 //
 // The routes go through the model layer (`ModelsApi`), never round it: it is the documents' one
-// writer and keeps them in memory, so a change made to the files beside it would be lost. A key is
-// written through them and never read back: what they return shows only whether a key is set.
+// writer. A key is written through them and never read back: what they return shows only whether a
+// key is set.
 
 import type { ConnectionInput, ConnectionList, ConnectionView, ModelsApi, ModelsPort } from "rp-harness/contract";
 import type { JsonValue } from "../shared/json";
@@ -24,14 +24,18 @@ import { withTopLevelKey, yamlMapping } from "./yaml";
 /** The key of `RPE-global.yml` the connections document is kept under. */
 export const MODELS_KEY = "models";
 const SECRETS_PART = "models";
-const HEADERS_PART = "headers";
+/**
+ * Where this port once kept the headers' values itself, by connection id, taking them out of the
+ * connections it wrote. Read until the layer's next save has moved them, then taken away.
+ */
+const EARLIER_HEADERS_PART = "headers";
 
-/** The connections document as the layer gave it, its headers' values back in place from the secrets file. */
-function withHeaders(doc: unknown, headers: JsonValue | null): unknown {
-  if (!isRecord(doc) || !Array.isArray(doc.connections) || !isRecord(headers)) return doc;
+/** The connections document as the file holds it; a connection written the earlier way gets its headers' values back, in the form the layer reads and moves at its next save. */
+function withEarlierHeaders(doc: unknown, earlier: JsonValue | null): unknown {
+  if (!isRecord(doc) || !Array.isArray(doc.connections) || !isRecord(earlier)) return doc;
   return {
     ...doc,
-    connections: doc.connections.map((c: unknown) => (isRecord(c) && typeof c.id === "string" && Object.hasOwn(headers, c.id) ? { ...c, headers: headers[c.id] } : c)),
+    connections: doc.connections.map((c: unknown) => (isRecord(c) && typeof c.id === "string" && c.headers === undefined && Object.hasOwn(earlier, c.id) ? { ...c, headers: earlier[c.id] } : c)),
   };
 }
 
@@ -42,19 +46,14 @@ export function modelsPort(paths: DataPaths, secrets: SecretsFile): ModelsPort {
     async loadConnections() {
       const text = await readText(paths.globalConfig);
       const doc = text === null ? undefined : yamlMapping(text, paths.globalConfig)[MODELS_KEY];
-      return doc === undefined ? null : withHeaders(doc, await secrets.read(HEADERS_PART));
+      return doc === undefined ? null : withEarlierHeaders(doc, await secrets.read(EARLIER_HEADERS_PART));
     },
     saveConnections(doc) {
       return writes.run(async () => {
-        const headers: Record<string, JsonValue> = {};
-        const connections = doc.connections.map(({ headers: values, ...connection }) => {
-          if (values !== undefined) headers[connection.id] = values;
-          return connection;
-        });
-        // The values first: a connection is never listed with headers whose values are missing.
-        await secrets.write(HEADERS_PART, headers);
         const text = (await readText(paths.globalConfig)) ?? "";
-        await writeWhole(paths.globalConfig, withTopLevelKey(text, MODELS_KEY, { ...doc, connections }, paths.globalConfig));
+        await writeWhole(paths.globalConfig, withTopLevelKey(text, MODELS_KEY, doc, paths.globalConfig));
+        // A save of the layer's has moved the earlier values, into its secrets (which it saves first) or, where it could not, into this document.
+        if ((await secrets.read(EARLIER_HEADERS_PART)) !== null) await secrets.write(EARLIER_HEADERS_PART, null);
       });
     },
     loadSecrets: () => secrets.read(SECRETS_PART),

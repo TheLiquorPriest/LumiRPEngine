@@ -37,7 +37,7 @@ describe("auth", () => {
   beforeEach(async () => {
     bed = await makeBed();
     app = await bed.open({ areas: [probe] });
-    server = app.start();
+    server = await app.start();
   });
 
   afterEach(async () => {
@@ -97,7 +97,7 @@ describe("auth", () => {
     const { token } = (await minted.json()) as { token: string };
     await app.close();
     const again = await bed.open({ areas: [probe], config: { lumiverse: { user: "user-next" } } });
-    const restarted = again.start();
+    const restarted = await again.start();
     expect((await fetch(`${restarted.url}/api/v1/probe/me`, { headers: bearer(token) })).status).toBe(401);
   });
 
@@ -117,7 +117,7 @@ describe("auth", () => {
   test("with no user to belong to, no page route opens and no page token is made", async () => {
     await app.close();
     const unowned = await bed.open({ areas: [probe], config: { lumiverse: { user: null } } });
-    const running = unowned.start();
+    const running = await unowned.start();
     const web = await makeKey(unowned, "web");
     const page = await fetch(`${running.url}/api/v1/probe/me`, { headers: bearer(web) });
     expect(page.status).toBe(503);

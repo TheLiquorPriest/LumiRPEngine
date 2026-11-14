@@ -3,11 +3,15 @@
 // `deny` and `backup` work on the data folder directly, so they work whether RPE runs or not; and
 // `connection` is a client of the running server's API, because the connections' one writer, RPH's
 // model layer, lives in that process. `allow` and `deny` are the one way anything that runs a command
-// or calls out is switched on or off: no route of the API can do it.
+// or calls out is switched on or off: no route of the API can do it. `lumiverse` says which Lumiverse
+// this RPE belongs to and signs in to it, writing the config and the secrets file itself, so a running
+// server takes it when it starts again.
 
 import { Database } from "bun:sqlite";
 import { existsSync, statSync } from "node:fs";
+import { resolve } from "node:path";
 import type { ConnectionInput, ConnectionList, ConnectionView, Effort } from "rp-harness/contract";
+import { LumiverseSession } from "../adapter/lumiverse/session";
 import { isRecord } from "../shared/json";
 import type { Area } from "./app";
 import { lineLog, openApp, STATUS_PATH } from "./app";
@@ -15,10 +19,11 @@ import type { KeyKind } from "./auth";
 import { currentKeys, insertKey, insertPageToken, NO_OWNER, secretHash } from "./auth";
 import { makeBackup } from "./backup";
 import type { AppConfig, DataPaths, Env } from "./config";
-import { dataPaths, defaultDataFolder, loadConfig, prepareDataFolder } from "./config";
+import { CONFIG_ENV, dataPaths, defaultDataFolder, loadConfig, plainText, prepareDataFolder, updateConfigFile, webAddress } from "./config";
 import { openDatabase } from "./database";
 import { appliedMigrations, migrate, Migrations } from "./migrations";
 import { APP_MIGRATIONS } from "./schema";
+import { SecretsFile } from "./secrets";
 import { listSwitches, setSwitch } from "./switches";
 
 export interface CliIO {
@@ -45,6 +50,10 @@ const USAGE = [
   "",
   "  rpe serve                      run RPE in the foreground",
   "  rpe status                     what this RPE is, and whether it answers",
+  "  rpe version                    this build's id (also rpe --version)",
+  "  rpe lumiverse                  which Lumiverse this RPE belongs to, and its sign-in",
+  "  rpe lumiverse --url <address> --user <username> [--database <file>] [--connection <id>]",
+  "                                 set it and sign in; the password is asked for, never kept",
   "  rpe key [provider|extension|web]",
   "                                 make a new key, shown once; the one before it stops working",
   "  rpe connection list            the model connections",
@@ -64,6 +73,7 @@ const USAGE = [
 const FLAGS: Readonly<Record<string, readonly string[]>> = {
   serve: ["data"],
   status: ["data"],
+  lumiverse: ["data", "url", "user", "database", "connection"],
   key: ["data"],
   allow: ["data"],
   deny: ["data"],
@@ -157,19 +167,23 @@ function switchCommand(name: string, state: "on" | "off", paths: DataPaths, io: 
   }
 }
 
+/** What answers at RPE's own address now: RPE (with its version), something else (with its status), or nothing. */
+async function serverAnswer(config: AppConfig, io: CliIO): Promise<{ rpe: string } | { other: number } | null> {
+  try {
+    const res = await io.fetch(`${serverUrl(config)}${STATUS_PATH}`, { signal: AbortSignal.timeout(config.commandLine.waitMs) });
+    const body: unknown = await res.json().catch(() => null);
+    return res.ok && isRecord(body) && body.name === "rpe" ? { rpe: String(body.version) } : { other: res.status };
+  } catch {
+    // Not running, or not reachable.
+    return null;
+  }
+}
+
 async function statusCommand(paths: DataPaths, config: AppConfig, io: CliIO, version: string): Promise<number> {
   io.out(`RPE ${version}`);
   io.out(`Data folder: ${paths.root}`);
-  const url = serverUrl(config);
-  let answer = "not answering";
-  try {
-    const res = await io.fetch(`${url}${STATUS_PATH}`, { signal: AbortSignal.timeout(config.commandLine.waitMs) });
-    const body: unknown = await res.json();
-    answer = res.ok && isRecord(body) && body.name === "rpe" ? `answering (RPE ${String(body.version)})` : `answering, but not as RPE (${res.status})`;
-  } catch {
-    // Not running, or not reachable: said as it is.
-  }
-  io.out(`Listens on: ${url}, ${answer}`);
+  const answer = await serverAnswer(config, io);
+  io.out(`Listens on: ${serverUrl(config)}, ${answer === null ? "not answering" : "rpe" in answer ? `answering (RPE ${answer.rpe})` : `answering, but not as RPE (${answer.other})`}`);
   io.out(`Lumiverse: ${config.lumiverse.url ?? "not set"}, for user ${config.lumiverse.user ?? "not set"}`);
   if (!existsSync(paths.database)) {
     io.out("Database: not made yet");
@@ -194,6 +208,75 @@ async function statusCommand(paths: DataPaths, config: AppConfig, io: CliIO, ver
   } finally {
     db.close();
   }
+  return 0;
+}
+
+/** The part of the secrets file the adapter keeps its sign-in to Lumiverse in (src/adapter/lumiverse/mount.ts). */
+const SIGN_IN_PART = "lumiverse";
+
+/** Which Lumiverse this RPE belongs to, and its sign-in: never the token. */
+async function showLumiverse(paths: DataPaths, config: AppConfig, io: CliIO): Promise<void> {
+  const { url, user, database, connection } = config.lumiverse;
+  const fromEnv = (name: string): string => (io.env[name]?.trim() ? ` (from ${name}, which wins over the config file)` : "");
+  io.out(`Lumiverse: ${url ?? "not set"}${fromEnv(CONFIG_ENV.lumiverseUrl)}`);
+  io.out(`User: ${user ?? "not set"}${fromEnv(CONFIG_ENV.lumiverseUser)}`);
+  io.out(`Database: ${database ?? "not set, so Lumiverse is read over HTTP"}`);
+  io.out(`RPE's connection in Lumiverse: ${connection ?? "not set"}`);
+  const kept = await new SecretsFile(paths.secrets).read(SIGN_IN_PART);
+  if (!isRecord(kept) || typeof kept.username !== "string" || typeof kept.user !== "string") {
+    io.out("Signed in: no");
+    return;
+  }
+  const since = typeof kept.savedAt === "number" ? ` since ${new Date(kept.savedAt).toISOString().slice(0, 10)}` : "";
+  io.out(`Signed in: as ${kept.username} (user ${kept.user})${since}${kept.user === user ? "" : ", which is not the user above: sign in again"}`);
+}
+
+/**
+ * `rpe lumiverse`: with no flags, what is set; with them, the sign-in first, and only once Lumiverse
+ * has taken the password are the sign-in kept and the config written, so a refusal changes nothing.
+ * The user written to the config is the id Lumiverse answers for `--user`, which is what pages and
+ * Lumiverse's rows name.
+ */
+async function lumiverseCommand(flags: Flags, paths: DataPaths, config: AppConfig, io: CliIO): Promise<number> {
+  if (flags.url === undefined && flags.user === undefined && flags.database === undefined && flags.connection === undefined) {
+    await showLumiverse(paths, config, io);
+    return 0;
+  }
+  const username = flags.user;
+  if (flags.url === undefined || username === undefined) throw new UsageError("rpe lumiverse needs --url and --user to sign in; with no flags it shows what is set.");
+  const url = webAddress(flags.url, "--url");
+  const connection = flags.connection === undefined ? undefined : plainText(flags.connection, "--connection");
+  const database = flags.database === undefined ? undefined : resolve(flags.database);
+  if (database !== undefined && !(existsSync(database) && statSync(database).isFile())) throw new Error(`There is no file at ${database}: give --database the path of Lumiverse's database file, or leave it out to read Lumiverse over HTTP.`);
+  const password = await io.secret(`The Lumiverse password of ${username} (it is not shown, and not kept): `);
+  if (password === null) throw new Error("Signing in needs the password.");
+  const secrets = new SecretsFile(paths.secrets);
+  const session = new LumiverseSession({
+    base: url,
+    // Past this the address counts as one that does not answer.
+    fetch: (address, init) => io.fetch(address, { ...init, signal: AbortSignal.timeout(config.commandLine.signInMs) }),
+    signIn: null,
+    // Called only once Lumiverse has taken the password.
+    async save(signIn) {
+      await prepareDataFolder(paths);
+      await secrets.write(SIGN_IN_PART, signIn === null ? null : { ...signIn });
+    },
+    // The server's own command line says whose RPE this is, so any account may sign in here.
+    owner: () => null,
+    // The handle is one this setTimeout gave.
+    clock: { now: io.now, setTimeout: (run, ms) => setTimeout(run, ms), clearTimeout: (handle) => clearTimeout(handle as Parameters<typeof clearTimeout>[0]) },
+    log: io.err,
+  });
+  const signedIn = await session.signIn(username, password);
+  await updateConfigFile(paths, (raw) => {
+    raw.lumiverse = { ...(isRecord(raw.lumiverse) ? raw.lumiverse : {}), url, user: signedIn.user, ...(database === undefined ? {} : { database }), ...(connection === undefined ? {} : { connection }) };
+  });
+  io.out(`Signed in to Lumiverse at ${url} as ${signedIn.username}. This RPE belongs to that Lumiverse user (${signedIn.user}).`);
+  const before = config.lumiverse.user;
+  if (before !== null && before !== signedIn.user) io.out(`It belonged to the user ${before} before: pages of that user no longer reach it, and the page tokens made for them no longer work.`);
+  await showLumiverse(paths, await loadConfig(paths, io.env), io);
+  const answer = await serverAnswer(config, io);
+  if (answer !== null && "rpe" in answer) io.out(`RPE is running at ${serverUrl(config)}: restart it (stop \`rpe serve\` and start it again) for it to take this.`);
   return 0;
 }
 
@@ -299,7 +382,7 @@ async function connectionCommand(words: readonly string[], flags: Flags, paths: 
 async function serveCommand(paths: DataPaths, config: AppConfig, io: CliIO, options: CliOptions): Promise<number> {
   const app = await openApp({ paths, config, version: options.version, areas: options.areas ?? [], now: io.now, log: lineLog(io.err, io.now) });
   try {
-    const running = app.start();
+    const running = await app.start();
     io.out(`RPE ${options.version} listens on ${running.url} (data folder: ${paths.root}).`);
     if (app.auth.owner === null) io.out(NO_OWNER);
     if (!currentKeys(app.db).some((k) => k.kind === "provider")) io.out("There is no provider key yet: make one with `rpe key`.");
@@ -320,17 +403,25 @@ export async function runCli(argv: readonly string[], io: CliIO, options: CliOpt
       io.out(USAGE);
       return command === undefined ? 2 : 0;
     }
+    // The build's id alone: no data folder is read and nothing is asked over the network.
+    if (command === "version" || command === "--version") {
+      if (rest.length > 0) throw new UsageError(`rpe ${command} takes nothing more.`);
+      io.out(`rpe ${options.version}`);
+      return 0;
+    }
     const allowed = FLAGS[command];
     if (allowed === undefined) throw new UsageError(`rpe has no command "${command}".`);
     const { words, flags } = parseArgs(rest, allowed);
     const paths = dataPaths(flags.data ?? defaultDataFolder(io.env, io.home));
     const config = await loadConfig(paths, io.env);
-    if ((command === "serve" || command === "status" || command === "backup") && words.length > 0) throw new UsageError(`rpe ${command} takes no words.`);
+    if ((command === "serve" || command === "status" || command === "backup" || command === "lumiverse") && words.length > 0) throw new UsageError(`rpe ${command} takes no words.`);
     switch (command) {
       case "serve":
         return await serveCommand(paths, config, io, options);
       case "status":
         return await statusCommand(paths, config, io, options.version);
+      case "lumiverse":
+        return await lumiverseCommand(flags, paths, config, io);
       case "backup": {
         const made = await makeBackup(paths, io.now(), flags.out);
         io.out(`Backed up the database and ${made.files} files of the tree to ${made.path} (${(made.bytes / 1048576).toFixed(1)} MiB, sha256 ${made.sha256}).`);

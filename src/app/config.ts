@@ -104,6 +104,8 @@ export interface AppConfig {
   commandLine: {
     /** How long `rpe status` and `rpe connection` wait for the running server, in milliseconds. */
     waitMs: number;
+    /** How long `rpe lumiverse` waits for Lumiverse to answer its sign-in, in milliseconds. */
+    signInMs: number;
   };
 }
 
@@ -117,7 +119,7 @@ export const CONFIG_DEFAULTS: Readonly<AppConfig> = Object.freeze({
   auth: { pageTokenMinutes: 30, commandLineSeconds: 60 },
   live: { queueEvents: 512, messageBytes: 64 * 1024 },
   database: { busyMs: 5000, sliceMs: 10 },
-  commandLine: { waitMs: 3000 },
+  commandLine: { waitMs: 3000, signInMs: 30_000 },
 });
 
 /** The environment's names for the values it may set. */
@@ -136,12 +138,14 @@ const wholeIn =
     return value;
   };
 
-const plainText: Reader<string> = (value, where) => {
+/** One line of text with no space at either end. */
+export const plainText: Reader<string> = (value, where) => {
   if (typeof value !== "string" || value.trim() === "" || value !== value.trim()) throw new ConfigError(`${where} must be text, with no space at either end.`);
   return value;
 };
 
-const webAddress: Reader<string> = (value, where) => {
+/** An http or https address, without the slashes it ends in. */
+export const webAddress: Reader<string> = (value, where) => {
   const text = plainText(value, where);
   let url: URL;
   try {
@@ -245,7 +249,14 @@ export function configOf(raw: unknown, env: Env, where: string): AppConfig {
         }),
       d.database,
     ],
-    commandLine: [(value, at) => readGroup(value, at, { waitMs: [wholeIn(100, 600_000), d.commandLine.waitMs] }), d.commandLine],
+    commandLine: [
+      (value, at) =>
+        readGroup(value, at, {
+          waitMs: [wholeIn(100, 600_000), d.commandLine.waitMs],
+          signInMs: [wholeIn(1000, 600_000), d.commandLine.signInMs],
+        }),
+      d.commandLine,
+    ],
   });
   const set = (name: string): string | undefined => {
     const value = env[name]?.trim();
@@ -262,18 +273,32 @@ export function configOf(raw: unknown, env: Env, where: string): AppConfig {
   return config;
 }
 
+/** The config file's JSON as it is; `{}` where there is none. */
+async function configFile(paths: DataPaths): Promise<unknown> {
+  const text = await readText(paths.config);
+  if (text === null) return {};
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new ConfigError(`${paths.config} is not JSON (${error instanceof Error ? error.message : String(error)}): fix it, or remove it to start from the defaults.`);
+  }
+}
+
 /** The config in the data folder, with the environment's values over it; the defaults where the folder has no config file. */
 export async function loadConfig(paths: DataPaths, env: Env): Promise<AppConfig> {
-  const text = await readText(paths.config);
-  let raw: unknown = {};
-  if (text !== null) {
-    try {
-      raw = JSON.parse(text);
-    } catch (error) {
-      throw new ConfigError(`${paths.config} is not JSON (${error instanceof Error ? error.message : String(error)}): fix it, or remove it to start from the defaults.`);
-    }
-  }
-  return configOf(raw, env, paths.config);
+  return configOf(await configFile(paths), env, paths.config);
+}
+
+/**
+ * Changes the config file in place: `change` is given its JSON, and everything else the file holds
+ * is kept as it was. The file is written only when RPE reads the result.
+ */
+export async function updateConfigFile(paths: DataPaths, change: (raw: Record<string, unknown>) => void): Promise<void> {
+  const raw = await configFile(paths);
+  if (!isRecord(raw)) throw new ConfigError(`${paths.config} must hold one JSON object.`);
+  change(raw);
+  configOf(raw, {}, paths.config);
+  await writeWhole(paths.config, `${JSON.stringify(raw, null, 2)}\n`);
 }
 
 /**

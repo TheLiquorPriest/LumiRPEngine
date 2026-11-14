@@ -44,7 +44,7 @@ describe("the write queue", () => {
   beforeEach(async () => {
     bed = await makeBed();
     app = await bed.open({ areas: [probe] });
-    server = app.start();
+    server = await app.start();
   });
 
   afterEach(async () => {

@@ -33,7 +33,7 @@ describe("the server", () => {
       config: { hosts: ["rpe.example"], origins: ["https://lumiverse.example"] },
       areas: [{ name: "probe", mount: (a) => a.routes.add("probe", [echo]) }],
     });
-    server = app.start();
+    server = await app.start();
     page = bearer(await makeKey(app, "web"));
   });
 

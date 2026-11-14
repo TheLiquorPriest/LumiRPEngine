@@ -52,7 +52,7 @@ describe("migrations", () => {
   /** Opens the app, starts its server, sees it answer, and closes it. */
   async function run(version: string, given: Area[]): Promise<App> {
     const app = await bed.open({ version, areas: given });
-    const server = app.start();
+    const server = await app.start();
     expect((await fetch(`${server.url}/api/v1/status`)).status).toBe(200);
     await app.close();
     return app;

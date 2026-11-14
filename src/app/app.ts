@@ -28,12 +28,23 @@ export const PAGE_TOKEN_PATH = "/api/v1/ext/page-token";
 /**
  * An area of RPE as the app mounts it: its tables, and what it adds once they are up to date (its
  * routes, its live events, its writers). Areas are mounted in the order given.
+ *
+ * Two moments besides: `started`, once the server listens (its address is then `app.listening()`),
+ * areas in order; and `stopping`, first thing when the app closes, areas in reverse order, while the
+ * server still answers and writes still land. `start()` waits for each `started`, so one that waits
+ * on the network starts its work and returns. A throw from either is logged, and RPE goes on.
+ * `stopping` runs for every area whose `mount` finished (one with no `mount` counts), also when the
+ * server never started or failed to, so it must be safe when `started` never ran.
  */
 export interface Area {
   readonly name: string;
   /** Its tables: the migration area they are kept under, and its migrations. */
   readonly tables?: { readonly area: MigrationArea; readonly migrations: readonly Migration[] };
   readonly mount?: (app: App) => void | Promise<void>;
+  /** Once the server listens. It cannot add routes: the table is fixed by then. */
+  readonly started?: (app: App) => void | Promise<void>;
+  /** First thing at close. */
+  readonly stopping?: (app: App) => void | Promise<void>;
 }
 
 export interface App {
@@ -54,11 +65,11 @@ export interface App {
   readonly now: () => number;
   /** What the migrations did when the app opened. */
   readonly migrated: MigrationOutcome;
-  /** Listens, with the route table as it stands; it takes no more routes after. */
-  start(): RunningServer;
+  /** Listens, with the route table as it stands (it takes no more routes after), then runs each area's `started`, in order. */
+  start(): Promise<RunningServer>;
   /** The server once it listens (its port and address, for the addresses a page is handed); null before. */
   listening(): RunningServer | null;
-  /** Stops listening, lets the writes already queued land, and closes the database. */
+  /** Runs each mounted area's `stopping`, in reverse order, then stops listening, lets the writes already queued land, and closes the database. */
   close(): Promise<void>;
 }
 
@@ -122,7 +133,17 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   const secrets = new SecretsFile(paths.secrets);
   routes.add("app", appRoutes(version, now(), auth));
   let running: RunningServer | null = null;
-  let closed = false;
+  let starting: Promise<RunningServer> | null = null;
+  let closing: Promise<void> | null = null;
+  const mounted: Area[] = [];
+  /** Runs one area's hook; a throw is logged, and the next goes on. */
+  const hook = async (area: Area, moment: "started" | "stopping"): Promise<void> => {
+    try {
+      await area[moment]?.(app);
+    } catch (error) {
+      log.error(moment === "started" ? "an area failed once RPE was listening; RPE goes on serving" : "an area failed as RPE was stopping; RPE goes on stopping", { area: area.name, error: error instanceof Error ? error.message : String(error) });
+    }
+  };
   const app: App = {
     version,
     config,
@@ -138,22 +159,44 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
     log,
     now,
     migrated,
-    start() {
-      if (running !== null) throw new Error("RPE's server is already listening.");
-      running = startServer({ config, routes, auth, live, log });
-      return running;
+    async start() {
+      if (closing !== null) throw new Error("RPE is stopping, so its server was not started.");
+      if (starting !== null) throw new Error("RPE's server is already started.");
+      const run = (async () => {
+        const server = startServer({ config, routes, auth, live, log });
+        running = server;
+        for (const area of mounted) await hook(area, "started");
+        return server;
+      })();
+      starting = run;
+      try {
+        return await run;
+      } catch (error) {
+        // It did not listen (its port taken, say): it may be started again.
+        starting = null;
+        throw error;
+      }
     },
     listening: () => running,
-    async close() {
-      if (closed) return;
-      closed = true;
-      await running?.stop();
-      await writes.close();
-      db.close();
+    close() {
+      closing ??= (async () => {
+        // A start under way finishes its areas' `started` first, so each `stopping` comes after.
+        await starting?.catch(() => undefined);
+        for (const area of [...mounted].reverse()) await hook(area, "stopping");
+        const server = running;
+        running = null;
+        await server?.stop();
+        await writes.close();
+        db.close();
+      })();
+      return closing;
     },
   };
   try {
-    for (const area of areas) await area.mount?.(app);
+    for (const area of areas) {
+      await area.mount?.(app);
+      mounted.push(area);
+    }
   } catch (error) {
     await app.close();
     throw error;

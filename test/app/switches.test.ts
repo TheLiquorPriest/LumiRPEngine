@@ -45,7 +45,7 @@ describe("the switches", () => {
         },
       ],
     });
-    server = app.start();
+    server = await app.start();
   });
 
   afterEach(async () => {
