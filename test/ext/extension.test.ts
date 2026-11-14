@@ -11,6 +11,7 @@ import { promptInterceptor } from "../../src/ext/prompt";
 import { worldInfoInterceptor } from "../../src/ext/question";
 import { PRIORITY } from "../../src/ext/start";
 import { ALL, FERRY_SECRET, FERRY_SHOWN, INDEXED_SECRET, PUBLIC_LORE, PRESET, promptText, Rig, RPE, USER, VAULT_SECRET } from "./rig";
+import { settle } from "../standin/clock";
 
 const label = (i: number): string => `HIST-${String(i).padStart(2, "0")}`;
 const WINDOW = [8, 9, 10, 11];
@@ -55,7 +56,7 @@ describe("the question before lore activates", () => {
     const turn = rig.turns[0]!;
     expect(turn.tag).toMatchObject({ user: USER, chat: "chat-harbor", generation: out.generationId!, kind: "new", connection: "conn-rpe", preset: PRESET.id, target: { message: announced.targetMessageId, swipe: 0 }, speaker: { id: "char-ilsa", name: "Ilsa" } });
     expect(turn.tag.lore.map((l) => l.id).sort()).toEqual(["e-ferry", "e-public"]);
-    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: 7, byRpe: 0 });
+    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: 7, remembered: false, byRpe: 0 });
     expect(turn.layout.complete).toBe(true);
     expect(historyOf(turn)).toEqual(["m8", "m9", "m10", "m11"]);
   });
@@ -90,8 +91,8 @@ describe("the question before lore activates", () => {
     for (const kept of [FERRY_SECRET, VAULT_SECRET]) expect(bodyText(out.body)).not.toContain(kept);
 
     const turn = rig.turns[0]!;
-    expect(turn.tag.cut).toEqual({ answered: false });
-    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: null, byRpe: 7 });
+    expect(turn.tag.cut).toEqual({ answered: false, remembered: null, removed: 0 });
+    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: null, remembered: false, byRpe: 7 });
     expect(historyOf(turn)).toEqual(["m8", "m9", "m10", "m11"]);
     const played = promptText(turn.prompt);
     for (const i of LEFT_OUT) expect(played).not.toContain(label(i));
@@ -173,7 +174,7 @@ describe("the request's parts, told apart", () => {
         await cutByRpe.generate("conn-rpe");
         const [a, b] = [cutByExtension.turns[0]!, cutByRpe.turns[0]!];
         expect(a.tag.cut).toMatchObject({ answered: true });
-        expect(b.tag.cut).toEqual({ answered: false });
+        expect(b.tag.cut).toEqual({ answered: false, remembered: null, removed: 0 });
         expect(b.cut.byRpe).toBe(7);
         expect(b.prompt).toEqual(a.prompt);
         expect(b.layout.messages.map((m) => m.parts.map((p) => [p.kind, p.source?.id ?? null, p.start, p.end]))).toEqual(a.layout.messages.map((m) => m.parts.map((p) => [p.kind, p.source?.id ?? null, p.start, p.end])));
@@ -250,12 +251,13 @@ describe("the prompt interceptor's own faults, dry runs and permissions", () => 
 
   test("without generation_parameters a notice says so and a reply on RPE's connection is stopped rather than sent untagged; the grant clears the notice and replies are played", async () => {
     const rig = await new Rig({ granted: ALL.filter((p) => p !== "generation_parameters") }).start();
-    expect(rig.notices.at(-1)?.map((n) => n.permission)).toEqual(["generation_parameters"]);
+    expect(rig.notice()).toEqual(["generation_parameters"]);
     const stopped = await rig.generate("conn-rpe");
     expect(stopped.error).toContain("generation_parameters");
     expect(stopped.body).toBeNull();
     rig.ext.grant("generation_parameters");
-    expect(rig.notices.at(-1)).toEqual([]);
+    await settle();
+    expect(rig.notice()).toBeNull();
     const played = await rig.generate("conn-rpe");
     expect(played.error).toBeNull();
     expect(rig.turns).toHaveLength(1);
@@ -263,7 +265,7 @@ describe("the prompt interceptor's own faults, dry runs and permissions", () => 
 
   test("without interceptor Lumiverse never calls the extension, so its notice stays up and a reply arrives untagged; the grant registers the interceptor", async () => {
     const rig = await new Rig({ granted: ALL.filter((p) => p !== "interceptor") }).start();
-    expect(rig.notices.at(-1)?.map((n) => n.permission)).toEqual(["interceptor"]);
+    expect(rig.notice()).toEqual(["interceptor"]);
     await rig.generate("conn-rpe");
     expect(rig.passed).toHaveLength(1);
     rig.ext.grant("interceptor");

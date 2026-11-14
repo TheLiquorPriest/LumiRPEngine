@@ -116,15 +116,23 @@ export interface Installed extends ExtSpindle {
   /** Its worker stopped: every registration of it goes, as Lumiverse drops them (`spindle/worker-host.ts:1563-1576`), and so does all it held in memory. */
   stop(): void;
   readonly logs: string[];
+  /** Lumiverse's id for it. */
+  readonly id: string;
+  /** A `SPINDLE_BACKEND_MSG` from one of a user's sockets (`ws/handler.ts:440-467`). */
+  fromFrontend(payload: unknown, user: string, session?: string): void;
+  /** The modals it opened and has not closed, by user. */
+  readonly modals: Map<string, { title: string; items: unknown[] }>;
 }
 
 interface Ext {
+  id: string;
   granted: Set<string>;
   changed: Set<(change: PermissionChange) => void>;
   /** The worker's handlers by event (`spindle/worker-runtime.ts:1747-1765`). */
   handlers: Map<string, Set<(payload: unknown, userId?: string) => void>>;
   /** The events the host forwards to it (`spindle/worker-host.ts:2885-2951`). */
   forwarded: Set<string>;
+  frontend: Set<(payload: unknown, userId: string, session?: string) => void>;
   logs: string[];
 }
 
@@ -157,6 +165,14 @@ export class StandIn {
   readonly stored = new Map<string, { chatId: string; data: Stored }>();
   readonly events: { event: string; payload: unknown }[] = [];
   readonly log: string[] = [];
+  /** Each user's extension storage, by user and path (the stand-in's disk). */
+  readonly storage = new Map<string, string>();
+  /** Where `sendToFrontend` delivers: a test's sockets say whether the session was there; with none, nothing is delivered. */
+  frontends: ((message: { extension: string; payload: unknown; user: string | undefined; session: string | undefined }) => boolean) | null = null;
+
+  frontendSent(message: { extension: string; payload: unknown; user: string | undefined; session: string | undefined }): boolean {
+    return this.frontends?.(message) ?? false;
+  }
   private readonly installed: Ext[] = [];
   /** The user's `promptPostProcessing` setting (`services/generate.service.ts:1250-1256`). */
   postProcessing = "";
@@ -173,7 +189,8 @@ export class StandIn {
 
   /** Installs an extension with these permissions granted, and gives its worker's view of Spindle. */
   install(granted: readonly string[]): Installed {
-    const ext: Ext = { granted: new Set(granted), changed: new Set(), handlers: new Map(), forwarded: new Set(), logs: [] };
+    const ext: Ext = { id: `ext-${this.installed.length + 1}`, granted: new Set(granted), changed: new Set(), handlers: new Map(), forwarded: new Set(), frontend: new Set(), logs: [] };
+    const modals = new Map<string, { title: string; items: unknown[] }>();
     const host = this;
     const change = (permission: string, granted: boolean): void => {
       if (granted) ext.granted.add(permission);
@@ -186,6 +203,50 @@ export class StandIn {
       [...list.filter((r) => r.ext !== ext), registration].sort((a, b) => a.priority - b.priority);
     const api: Installed = {
       logs: ext.logs,
+      id: ext.id,
+      modals,
+      fromFrontend(payload, user, session) {
+        // The host posts it to the worker, which runs its handlers on a later task (`spindle/worker-host.ts:1611-1613`).
+        const copy = structuredClone(payload);
+        setTimeout(() => {
+          for (const handler of ext.frontend) handler(copy, user, session);
+        }, 0);
+      },
+      sendToFrontend(payload, user, options) {
+        const session = options?.frontendSessionId;
+        const delivered = host.frontendSent({ extension: ext.id, payload: structuredClone(payload), user, session });
+        // A message for a session that is gone tells the worker so (`spindle/worker-host.ts:2143-2149`).
+        if (!delivered && session !== undefined && user !== undefined) host.emit("FRONTEND_SESSION_CLOSED", { frontendSessionId: session }, user);
+      },
+      onFrontendMessage(handler) {
+        ext.frontend.add(handler);
+        return () => ext.frontend.delete(handler);
+      },
+      userStorage: {
+        // `getJson` reads the fallback for a missing or unreadable file (`spindle/worker-runtime.ts:2198-2210`).
+        getJson: async <T>(path: string, options: { fallback: T; userId?: string }): Promise<T> => {
+          const text = host.storage.get(`${options.userId ?? ""}\u0000${path}`);
+          if (text === undefined) return options.fallback;
+          try {
+            return JSON.parse(text) as T;
+          } catch {
+            return options.fallback;
+          }
+        },
+        setJson: async (path, value, options) => {
+          host.storage.set(`${options?.userId ?? ""}\u0000${path}`, JSON.stringify(value, null, 2));
+        },
+      },
+      modal: {
+        // A modal opened with a request id of the caller's is closed by it (`spindle/worker-host-presentation-api.ts:486-554`).
+        open: async (options) => {
+          modals.set(`${options.userId ?? ""}\u0000${options.modalRequestId ?? ""}`, { title: options.title, items: options.items });
+          return { dismissedBy: "extension" };
+        },
+        close: async (id, user) => {
+          modals.delete(`${user ?? ""}\u0000${id}`);
+        },
+      },
       grant: (permission) => change(permission, true),
       revoke: (permission) => change(permission, false),
       stop() {
@@ -194,6 +255,7 @@ export class StandIn {
         ext.handlers.clear();
         ext.forwarded.clear();
         ext.changed.clear();
+        ext.frontend.clear();
       },
       registerWorldInfoInterceptor(handler, priority) {
         // `spindle/worker-host.ts:4909-4958`: needs `generation`; one per extension.
@@ -253,7 +315,7 @@ export class StandIn {
   }
 
   /** `eventBus.emit` (`ws/bus.ts:502-544`): listeners run on a later task, never inline; the worker gets the payload and its user (`spindle/worker-host.ts:2917-2932`, `spindle/worker-runtime.ts:4773-4786`). */
-  private emit(event: string, payload: unknown, userId: string): void {
+  emit(event: string, payload: unknown, userId: string): void {
     this.events.push({ event, payload });
     for (const ext of this.installed) {
       if (!ext.forwarded.has(event)) continue;
@@ -275,7 +337,7 @@ export class StandIn {
   }
 
   /** Spindle's proxy (`spindle/worker-host.ts:4641-4741`): needs `cors_proxy`; loopback allowed (`allowPrivate`, `utils/safe-fetch.ts:267-286`); 30 seconds; the body as text. */
-  private async proxy(ext: Ext, url: string, init: { method: string; headers: Record<string, string>; body: string }): Promise<ProxyAnswer> {
+  private async proxy(ext: Ext, url: string, init: { method: string; headers: Record<string, string>; body?: string }): Promise<ProxyAnswer> {
     if (!ext.granted.has("cors_proxy")) throw new Error("Permission denied: cors_proxy — CORS proxy permission not granted");
     const parsed = new URL(url);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error(`Only http and https URLs are allowed, got: ${parsed.protocol}`);

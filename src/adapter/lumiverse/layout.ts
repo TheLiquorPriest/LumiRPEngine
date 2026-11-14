@@ -2,55 +2,12 @@
 // judging them. Every message the model is sent, with its role, length and hash; the parts each is
 // made of, as the extension's interceptor listed them before Lumiverse joined any; which parts are
 // chat history and which standalone lore; and where the blocks of Lumiverse's own breakdown of the
-// prompt are found in it, as a hint for names. The shape is RPH's contract's (`RawLayout`, agreed
-// with its owner while `rp-harness/contract` is being written).
+// prompt are found in it, as a hint for names. The shape is RPH's contract's `RawLayout`.
 
+import type { RawBlock, RawLayout, RawMessage, RawPart } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
 import type { LaidMessage } from "./overlay";
 import { textHash, type Role, type Tag } from "./wire";
-
-export interface RawLayout {
-  preset: { id: string; name?: string; revision?: string } | null;
-  /** The prompt the model receives, in order, after the history window's cut. */
-  messages: RawMessage[];
-  /** False when some text could not be told apart: that way of joining is unsupported for slicing. */
-  complete: boolean;
-  /** Lumiverse's own breakdown of the prompt, in its order; none when it had none. */
-  blocks: RawBlock[];
-  blocksFrom: "breakdown" | "dry-run" | null;
-}
-
-export interface RawMessage {
-  role: Role;
-  length: number;
-  hash: string;
-  /** Its parts that are not text; `length` and `hash` are of its text. */
-  images?: number;
-  parts: RawPart[];
-}
-
-export interface RawPart {
-  /** UTF-16 offsets into the message's text; a gap between two parts is a separator Lumiverse put there when it joined them. */
-  start: number;
-  end: number;
-  /** The part's own role and hash, as the interceptor saw it. */
-  role: Role;
-  hash: string;
-  /** "unknown": no message of the interceptor's list accounts for it. */
-  kind: "history" | "lore" | "other" | "unknown";
-  /** For history: the chat message it is. */
-  source?: { id: string; index: number };
-  /** Where `blocks[block]`'s text was found inside this part (offsets into the message's text). */
-  blocks: { block: number; start: number; end: number }[];
-}
-
-export interface RawBlock {
-  name: string;
-  type: string;
-  role?: Role;
-  text: string;
-  id?: string;
-}
 
 /** Lumiverse's breakdown of a prompt: stored after a generation (`generate.service.ts:4432-4476`) or returned by a dry run (`generate.service.ts:424`). */
 export interface BlocksHint {

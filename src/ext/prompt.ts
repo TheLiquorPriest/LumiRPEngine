@@ -127,7 +127,7 @@ export function promptInterceptor(deps: PromptDeps): (messages: PromptMessageDTO
         connection: ctx.connection,
         preset: ctx.preset,
         persona: ctx.persona,
-        cut: cut === null ? { answered: false } : { answered: true, keep: cut.keep, removed: left.size },
+        cut: cut === null ? { answered: false, remembered: null, removed: 0 } : cut.by === "answer" ? { answered: true, keep: cut.keep, removed: left.size } : { answered: false, remembered: cut.keep, removed: left.size },
         messages: kept.map(listedMessage),
         lore: ctx.lore,
       };

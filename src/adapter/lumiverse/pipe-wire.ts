@@ -1,0 +1,224 @@
+// What RPE, its light extension and a Lumiverse page say to each other over the pipe (STANDALONE-PLAN
+// §4.3): RPE's registration, which tells the extension where RPE is and what proves the extension to
+// it; a page's start-up facts; a page's request carried to RPE and its answer carried back; and the
+// live updates a page follows, which RPE sends on its relay socket for the extension to hand on. Pure,
+// and free of anything Lumiverse scans an extension's backend for: the extension's bundle carries it.
+//
+// The roads: RPE to the extension is a `SPINDLE_BACKEND_MSG` frame on RPE's relay socket, which
+// Lumiverse hands to the extension's `onFrontendMessage` with the socket's user and frontend session
+// (`ws/handler.ts:440-467`). The extension to RPE's relay socket, or to a page, is `sendToFrontend`
+// addressed to that frontend session alone (`spindle/worker-host.ts:2129-2160`). The extension to RPE's
+// routes is HTTP through Spindle's proxy, with the registration's key as its bearer, which RPE's
+// server checks on every route under `/api/v1/ext/` (`src/app/routes.ts`, the `extension` access).
+
+import { isRecord } from "../../shared/json";
+
+/** The extension's identifier in Lumiverse, kept from today's build (§4.1). */
+export const EXTENSION_IDENTIFIER = "lumi_rp_engine";
+/** The header that says which Lumiverse user a call of the extension's is for: RPE serves its own user alone. */
+export const USER_HEADER = "x-rpe-user";
+/** RPE's routes for the extension, under its own API. */
+export const START_PATH = "/api/v1/ext/start";
+export const LIVE_PATH = "/api/v1/ext/live";
+/** Where the extension keeps the registration of the user RPE belongs to, in that user's storage: a folder today's build never used. */
+export const REGISTRATION_FILE = "rpe/registration.json";
+
+/** What RPE tells the extension of itself each time its relay socket opens. */
+export interface Registration {
+  v: 1;
+  /** RPE's address for the extension's road, on loopback: `http://127.0.0.1:7860`. */
+  base: string;
+  /** What proves the extension to RPE: its bearer on RPE's routes for it. */
+  key: string;
+  /** RPE's connection in Lumiverse: a reply on it is RPE's to play. Null before one is made. */
+  connection: string | null;
+  /** The frontend session of RPE's relay socket: what the extension addresses RPE by. */
+  relay: string;
+  /** RPE's build. */
+  build: string;
+}
+
+/** What a page is handed when it starts: where it may reach RPE directly, RPE's build, and a page token. */
+export interface StartFacts {
+  token: string;
+  /** When the token stops working, in milliseconds since 1970. */
+  expiresAt: number;
+  /** RPE's addresses a browser may try directly, best first. */
+  addresses: string[];
+  build: string;
+}
+
+/** A permission the extension is missing, and why it needs it. */
+export interface MissingPermission {
+  permission: string;
+  why: string;
+}
+
+/** A page's request carried to RPE: one request, one whole answer (Spindle's proxy: 30 s, 25 MB). */
+export interface PipeRequest {
+  id: string;
+  method: string;
+  /** Under RPE's API: `/api/v1/…`. */
+  path: string;
+  headers: Record<string, string>;
+  body?: string;
+}
+
+export interface PipeResponse {
+  id: string;
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+}
+
+/**
+ * A frame of live updates for one page: `data` is the JSON text of a list of the hub's batches, in
+ * order (each says what it missed, when the hub dropped events for a page that fell behind); a list
+ * too long for one frame comes in parts with one `seq`.
+ */
+export interface LiveFrame {
+  page: string;
+  /** Counts the page's lists from 1; a part shares its list's. */
+  seq: number;
+  data: string;
+  part?: { index: number; count: number };
+}
+
+/** RPE to the extension, on the relay socket. */
+export type FromRpe = { rpe: "register"; registration: Registration } | ({ rpe: "live"; key: string } & LiveFrame);
+
+/** The extension to RPE's relay socket. */
+export type ToRpe = { rpe: "registered"; missing: MissingPermission[] } | { rpe: "permissions"; missing: MissingPermission[] };
+
+/** A page to the extension (`ctx.sendToBackend`). */
+export type FromPage = { rpe: "start" } | ({ rpe: "request" } & PipeRequest) | { rpe: "follow"; chat: string } | { rpe: "unfollow"; chat: string };
+
+/** The extension to a page. */
+export type ToPage =
+  | { rpe: "start"; facts: StartFacts | null; error?: string; missing: MissingPermission[] }
+  | ({ rpe: "response" } & PipeResponse)
+  | ({ rpe: "live" } & Omit<LiveFrame, "page">)
+  | { rpe: "following"; chat: string; error?: string }
+  | { rpe: "permissions"; missing: MissingPermission[] };
+
+/** What RPE's live route is asked: a page follows a chat, stops following it, or is gone. */
+export type LiveAsk = { page: string; chat: string; follow: boolean } | { page: string; gone: true };
+
+const str = (v: unknown): v is string => typeof v === "string" && v !== "";
+const count = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+
+function headersOf(v: unknown): Record<string, string> | null {
+  if (v === undefined) return {};
+  if (!isRecord(v)) return null;
+  const out: Record<string, string> = {};
+  for (const [k, value] of Object.entries(v)) {
+    if (typeof value !== "string") return null;
+    out[k.toLowerCase()] = value;
+  }
+  return out;
+}
+
+/** A registration as RPE sends it and the extension keeps it, or null. */
+export function readRegistration(v: unknown): Registration | null {
+  if (!isRecord(v) || v.v !== 1 || !str(v.base) || !str(v.key) || !(v.connection === null || str(v.connection)) || !str(v.relay) || typeof v.build !== "string") return null;
+  return { v: 1, base: v.base, key: v.key, connection: v.connection, relay: v.relay, build: v.build };
+}
+
+/** A frame from RPE, or null when it is none this build reads. */
+export function readFromRpe(v: unknown): FromRpe | null {
+  if (!isRecord(v)) return null;
+  if (v.rpe === "register") {
+    const registration = readRegistration(v.registration);
+    return registration === null ? null : { rpe: "register", registration };
+  }
+  if (v.rpe === "live") {
+    const part = partOf(v.part);
+    if (!str(v.key) || !str(v.page) || !count(v.seq) || typeof v.data !== "string" || part === null) return null;
+    return { rpe: "live", key: v.key, page: v.page, seq: v.seq, data: v.data, ...(part !== undefined ? { part } : {}) };
+  }
+  return null;
+}
+
+/** A frame's part: absent, one this build reads, or null when malformed. */
+function partOf(v: unknown): { index: number; count: number } | undefined | null {
+  if (v === undefined) return undefined;
+  if (!isRecord(v)) return null;
+  const { index, count: total } = v;
+  return count(index) && count(total) && index < total ? { index, count: total } : null;
+}
+
+/** A message from the extension to a page, or null when it is none this build reads. */
+export function readToPage(v: unknown): ToPage | null {
+  if (!isRecord(v)) return null;
+  const missing = (m: unknown): MissingPermission[] | null => (Array.isArray(m) && m.every((x) => isRecord(x) && str(x.permission) && typeof x.why === "string") ? m.map((x) => ({ permission: String(x.permission), why: String(x.why) })) : null);
+  switch (v.rpe) {
+    case "start": {
+      const lacking = missing(v.missing);
+      const facts = v.facts === null ? null : readStartFacts(v.facts);
+      if (lacking === null || (v.facts !== null && facts === null)) return null;
+      return { rpe: "start", facts, ...(typeof v.error === "string" ? { error: v.error } : {}), missing: lacking };
+    }
+    case "response": {
+      const headers = headersOf(v.headers);
+      return str(v.id) && count(v.status) && headers !== null && typeof v.body === "string" ? { rpe: "response", id: v.id, status: v.status, headers, body: v.body } : null;
+    }
+    case "live": {
+      const part = partOf(v.part);
+      if (!count(v.seq) || typeof v.data !== "string" || part === null) return null;
+      return { rpe: "live", seq: v.seq, data: v.data, ...(part !== undefined ? { part } : {}) };
+    }
+    case "following":
+      return str(v.chat) ? { rpe: "following", chat: v.chat, ...(typeof v.error === "string" ? { error: v.error } : {}) } : null;
+    case "permissions": {
+      const lacking = missing(v.missing);
+      return lacking === null ? null : { rpe: "permissions", missing: lacking };
+    }
+    default:
+      return null;
+  }
+}
+
+/** A message from a page, or null when it is none this build reads. */
+export function readFromPage(v: unknown): FromPage | null {
+  if (!isRecord(v)) return null;
+  switch (v.rpe) {
+    case "start":
+      return { rpe: "start" };
+    case "request": {
+      const headers = headersOf(v.headers);
+      if (!str(v.id) || !str(v.method) || !str(v.path) || headers === null || (v.body !== undefined && typeof v.body !== "string")) return null;
+      return { rpe: "request", id: v.id, method: v.method.toUpperCase(), path: v.path, headers, ...(typeof v.body === "string" ? { body: v.body } : {}) };
+    }
+    case "follow":
+    case "unfollow":
+      return str(v.chat) ? { rpe: v.rpe, chat: v.chat } : null;
+    default:
+      return null;
+  }
+}
+
+/** What RPE's live route was asked, or null. */
+export function readLiveAsk(v: unknown): LiveAsk | null {
+  if (!isRecord(v) || !str(v.page)) return null;
+  if (v.gone === true) return { page: v.page, gone: true };
+  return str(v.chat) && typeof v.follow === "boolean" ? { page: v.page, chat: v.chat, follow: v.follow } : null;
+}
+
+/** RPE's start-up facts as its route answers them, or null. */
+export function readStartFacts(v: unknown): StartFacts | null {
+  if (!isRecord(v) || !str(v.token) || typeof v.expiresAt !== "number" || !Array.isArray(v.addresses) || !v.addresses.every(str) || typeof v.build !== "string") return null;
+  return { token: v.token, expiresAt: v.expiresAt, addresses: [...v.addresses], build: v.build };
+}
+
+/** Whether an address is on this machine's loopback: the only kind the extension's road goes to (§4.3). */
+export function onLoopback(base: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(base);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  const host = url.hostname;
+  return host === "localhost" || host === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(host);
+}

@@ -39,15 +39,32 @@ export interface PermissionChange {
   allGranted: string[];
 }
 
+/** A modal's body item (`SpindleModalItemDTO`); the notice uses text and headings. */
+export type ModalItem = { type: "text"; content: string; muted?: boolean } | { type: "heading"; content: string } | { type: "divider" };
+
 export interface ExtSpindle {
   /** One per extension; a second replaces the first (`worker-host.ts:4922`). Needs `generation` (`:4910-4919`). */
   registerWorldInfoInterceptor(handler: (ctx: unknown) => Promise<WorldInfoReturn>, priority?: number): void;
   /** One per extension; a second replaces the first (`worker-host.ts:3165`). Needs `interceptor` (`:3143-3153`). */
   registerInterceptor(handler: (messages: PromptMessageDTO[], context: unknown) => Promise<InterceptorReturn>, options: { priority?: number; required?: boolean }): () => void;
-  /** Generation events need `generation` (`worker-host.ts:2894-2907`); handlers get the payload and its user (`worker-runtime.ts:4773-4786`). */
+  /** Generation events need `generation` (`worker-host.ts:2876-2907`); handlers get the payload and its user (`worker-runtime.ts:4773-4786`). */
   on(event: string, handler: (payload: unknown, userId?: string) => void): () => void;
-  /** Through Lumiverse's server: loopback allowed, 30 s, 25 MB (`worker-host.ts:4641-4741`, `:771-772`). No way to cancel one. */
-  cors(url: string, init: { method: string; headers: Record<string, string>; body: string }): Promise<ProxyAnswer>;
+  /** Through Lumiverse's server: loopback allowed, 30 s, 25 MB (`worker-host.ts:4647-4741`, `:771-772`). No way to cancel one. */
+  cors(url: string, init: { method: string; headers: Record<string, string>; body?: string }): Promise<ProxyAnswer>;
+  /** To one frontend session alone when one is named, else to every socket of the user (`worker-host.ts:2129-2160`). */
+  sendToFrontend(payload: unknown, userId?: string, options?: { frontendSessionId?: string }): void;
+  /** A `SPINDLE_BACKEND_MSG` from any socket of a user: a page, or RPE's relay socket (`ws/handler.ts:440-467`). */
+  onFrontendMessage(handler: (payload: unknown, userId: string, frontendSessionId?: string) => void): () => void;
+  /** Each user's own storage of the extension (`worker-runtime.ts:2120-2224`): a missing or unreadable file reads as the fallback. */
+  userStorage: {
+    getJson<T>(path: string, options: { fallback: T; userId?: string }): Promise<T>;
+    setJson(path: string, value: unknown, options?: { userId?: string }): Promise<void>;
+  };
+  /** A modal in the user's Lumiverse page (`worker-host-presentation-api.ts:486-554`); `modalRequestId` lets `close` name it. */
+  modal: {
+    open(options: { title: string; items: ModalItem[]; persistent?: boolean; modalRequestId?: string; userId?: string }): Promise<unknown>;
+    close(openRequestId: string, userId?: string): Promise<void>;
+  };
   permissions: {
     has(permission: string): boolean;
     getGranted(): Promise<string[]>;

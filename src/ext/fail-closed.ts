@@ -2,12 +2,14 @@
 // today's fail-closed verdict, worked out from the candidate entries alone, together with what RPE
 // said to keep out of the chat's prompt the last time it did answer. The first holds every marked
 // passage, whole-entry secret, older build's secret and copy of a mark out; the second holds out what
-// only RPE knows is secret (a book entry a world's secret was indexed from carries no mark). That
-// memory is the extension's only one: per chat, in memory, lost when its worker restarts.
+// only RPE knows is secret (a book entry a world's secret was indexed from carries no mark). Beside it
+// is where RPE last said to cut the chat's history, which the prompt interceptor cuts at again while
+// that message is still on the path. That memory is the extension's only one: per chat, in memory,
+// lost when its worker restarts.
 
 import type { WorldInfoCandidate, WorldInfoVerdict } from "../backend/host";
 import { bookSecrecy, secretTexts, textOf } from "../backend/lore-secrets";
-import type { SecrecyVerdict } from "../adapter/lumiverse/wire";
+import type { Answer, KeepPoint } from "../adapter/lumiverse/wire";
 import { engineWroteEntry, loreIsSecret } from "../shared/lore";
 import { hasSecretMarks, publicText, unreadableMarks, wholeEntrySecret } from "../shared/secret-marks";
 
@@ -36,18 +38,19 @@ function blind(entries: readonly WorldInfoCandidate[]): WorldInfoVerdict {
   return out;
 }
 
-/** What RPE last said to keep out of each chat's prompt: the entries it switched off. */
+/** What RPE last said of each chat's prompt: the entries it switched off, and the first history message to keep (null: all). */
 export class KeptOut {
-  private readonly byChat = new Map<string, ReadonlySet<string>>();
+  private readonly byChat = new Map<string, { off: ReadonlySet<string>; keep: KeepPoint | null }>();
 
   /** `most`: how many chats are remembered; past it the one answered longest ago is forgotten. */
   constructor(private readonly most: number) {}
 
-  /** RPE answered for the chat: its answer replaces what was remembered. */
-  heard(user: string, chat: string, verdict: SecrecyVerdict): void {
+  /** RPE answered for the chat: its answer replaces what was remembered. Where it could not say where to cut, the cut it said last is kept. */
+  heard(user: string, chat: string, answer: Pick<Answer, "secrecy" | "cut">): void {
     const key = `${user}\u0000${chat}`;
+    const keep = answer.cut === null ? (this.byChat.get(key)?.keep ?? null) : answer.cut.keep;
     this.byChat.delete(key);
-    this.byChat.set(key, new Set(verdict.disabled));
+    this.byChat.set(key, { off: new Set(answer.secrecy.disabled), keep });
     for (const oldest of this.byChat.keys()) {
       if (this.byChat.size <= this.most) break;
       this.byChat.delete(oldest);
@@ -55,7 +58,12 @@ export class KeptOut {
   }
 
   of(user: string, chat: string): ReadonlySet<string> {
-    return this.byChat.get(`${user}\u0000${chat}`) ?? new Set();
+    return this.byChat.get(`${user}\u0000${chat}`)?.off ?? new Set();
+  }
+
+  /** Where RPE last said to cut the chat's history; null when it said to keep it all, or has said nothing. */
+  cutOf(user: string, chat: string): KeepPoint | null {
+    return this.byChat.get(`${user}\u0000${chat}`)?.keep ?? null;
   }
 }
 

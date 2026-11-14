@@ -21,8 +21,10 @@ export class Refused extends Error {
 /** The window's cut: where the kept history starts, and who left how many history messages out. */
 export interface Cut {
   keep: KeepPoint | null;
-  /** By the extension, on RPE's answer; null when it had no answer and cut nothing. */
+  /** By the extension: on RPE's answer, or where RPE last said to cut this chat (`remembered`); null when it cut nothing. */
   byExtension: number | null;
+  /** The extension had no answer and cut where RPE last said to: RPE worked the window out again here. */
+  remembered: boolean;
   /** Here, on receipt. */
   byRpe: number;
 }
@@ -41,9 +43,10 @@ const LUMIVERSE_TYPE: Record<Tag["kind"], string> = { new: "normal", swipe: "swi
 /**
  * The tag checked against RPE's own user and laid over the body, and the window applied. Where the
  * extension cut on RPE's answer, the cut is checked and any history it left before the first kept
- * message is cut here. Where it had no answer, the window is asked here, from the prompt's history,
- * and the cut made here. A cut made here needs every part of the body told apart; where they can't
- * be, the request is refused rather than sent with more history than the window allows.
+ * message is cut here. Where it had no answer, the window is asked here, from the prompt's history, and
+ * the cut made here; what the extension already cut where RPE last said to cannot be put back. A cut
+ * made here needs every part of the body told apart; where they can't be, the request is refused
+ * rather than sent with more history than the window allows.
  */
 export async function receive(tag: Tag, body: Record<string, unknown>, own: { user: string; window: HistoryWindow }, signal: AbortSignal): Promise<Received> {
   if (tag.user !== own.user) throw new Refused(403, "This reply's chat belongs to another Lumiverse user than the one this RPE plays for.");
@@ -58,7 +61,8 @@ export async function receive(tag: Tag, body: Record<string, unknown>, own: { us
     keep = await own.window({ user: tag.user, chat: tag.chat, generation, path }, signal);
   }
   const left = historyCut(tag.messages.map((m) => ({ history: m.history === true, index: m.source?.index ?? null })), keep);
-  const cut: Cut = { keep, byExtension: tag.cut.answered ? tag.cut.removed : null, byRpe: left.length };
+  const remembered = !tag.cut.answered && tag.cut.remembered !== null;
+  const cut: Cut = { keep, byExtension: tag.cut.answered || remembered ? tag.cut.removed : null, remembered, byRpe: left.length };
   if (left.length === 0) return { tag, overlay: laid, messages: laid.messages, cut };
   if (!laid.complete) throw new Refused(422, "RPE could not tell this prompt's parts apart, so it could not leave out the history beyond your window. Send the message again; if this keeps happening, turn off Lumiverse's prompt post-processing or Collapse for this chat.");
   return { tag, overlay: laid, messages: rebuild(laid, tag.messages, new Set(left)), cut };

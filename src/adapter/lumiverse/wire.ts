@@ -124,8 +124,11 @@ export interface TagLore {
   how: string | null;
 }
 
-/** The history cut the extension made: on RPE's answer, or none because no answer came in time. */
-export type TagCut = { answered: true; keep: KeepPoint | null; removed: number } | { answered: false };
+/**
+ * The history cut the extension made: on RPE's answer; or, with no answer in time, where RPE last said
+ * to cut this chat (`remembered`), if that message was still on the path, else nothing.
+ */
+export type TagCut = { answered: true; keep: KeepPoint | null; removed: number } | { answered: false; remembered: KeepPoint | null; removed: number };
 
 export interface Tag {
   v: 1;
@@ -282,14 +285,10 @@ export function readTag(body: unknown): { tag: Tag } | { absent: true } | { inva
   if (!str(v.user) || !str(v.chat) || !str(v.generation) || !str(kind) || !KINDS.includes(kind)) return { invalid: "the tag does not say whose reply, in which chat, of which kind" };
   if (!isRecord(v.target) || !strOrNull(v.target.message) || !intOrNull(v.target.swipe) || !isRecord(v.speaker) || !strOrNull(v.speaker.id) || !strOrNull(v.speaker.name)) return { invalid: "the tag's target or speaker is malformed" };
   if (!str(v.connection) || !strOrNull(v.preset) || !strOrNull(v.persona)) return { invalid: "the tag's connection, preset or persona is malformed" };
-  let cut: TagCut;
   if (!isRecord(v.cut)) return { invalid: "the tag does not say what was cut" };
-  if (v.cut.answered === false) cut = { answered: false };
-  else {
-    const keep = keepPoint(v.cut.keep);
-    if (v.cut.answered !== true || keep === undefined || !int(v.cut.removed)) return { invalid: "the tag's cut is malformed" };
-    cut = { answered: true, keep, removed: v.cut.removed };
-  }
+  const at = v.cut.answered === true ? keepPoint(v.cut.keep) : v.cut.answered === false ? keepPoint(v.cut.remembered) : undefined;
+  if (at === undefined || !int(v.cut.removed)) return { invalid: "the tag's cut is malformed" };
+  const cut: TagCut = v.cut.answered === true ? { answered: true, keep: at, removed: v.cut.removed } : { answered: false, remembered: at, removed: v.cut.removed };
   if (!Array.isArray(v.messages) || !Array.isArray(v.lore)) return { invalid: "the tag lists no messages or no lore" };
   const messages: TagMessage[] = [];
   for (const m of v.messages) {

@@ -1,14 +1,17 @@
-// The provider endpoint Lumiverse calls on RPE's connection (`/v1/chat/completions`, STANDALONE-PLAN
-// §4.2, §4.4): a request in, a reply out in the form Lumiverse reads from an OpenAI-compatible
-// connection. A request with no tag (a title, a summary, a quiet call, another extension's) is passed
-// on as it came. A tagged chat reply is read, its history window checked or made, its prompt laid out,
-// and played; the reply is written to the response as the turn writes it.
+// The provider endpoint Lumiverse calls on RPE's connection (STANDALONE-PLAN §4.2, §4.4): `POST
+// /v1/chat/completions` and `GET /v1/models`, behind RPE's provider key. A request with no tag (a title,
+// a summary, a quiet call, another extension's) is passed on as it came to the model set for such
+// requests, through RPH's model layer: RPE never calls a model itself. A tagged chat reply is read, its
+// history window checked or made, its prompt laid out, and handed to the turn lane, which writes the
+// reply to the response as the turn goes, streamed or whole as the request asked.
 
+import type { Clock, ModelsApi, PassError, Usage as PassUsage } from "rp-harness/contract";
 import { isRecord, type JsonObject } from "../../shared/json";
 import type { HistoryWindow } from "./answer";
-import { rawLayout, type BlocksHint, type RawLayout } from "./layout";
+import { rawLayout, type BlocksHint } from "./layout";
+import type { RawLayout } from "rp-harness/contract";
 import { receive, Refused, type Cut } from "./receipt";
-import { streamedReply, wholeReply, type ReplyStream } from "./stream";
+import { KEEP_ALIVE_MS, streamedReply, wholeReply, type ReplyStream, type Usage } from "./stream";
 import { readTag, TAG_FIELD, type Role, type Tag } from "./wire";
 
 /** A tagged chat reply, ready for a turn (§10.1). */
@@ -18,10 +21,23 @@ export interface TaggedTurn {
   prompt: { role: Role; content: string | unknown[] }[];
   layout: RawLayout;
   cut: Cut;
-  /** The request's other fields as Lumiverse sent them: the model's name, sampling, anything a preset or extension added. */
+  /** The model the request names: the connection's model in Lumiverse. */
   model: string | null;
   stream: boolean;
+  /** The request's other fields as Lumiverse sent them: sampling, anything a preset or extension added. */
   parameters: JsonObject;
+}
+
+/** What the turn lane (`src/turn/`) implements: one turn per tagged reply. */
+export interface TurnPlayer {
+  /**
+   * Plays the turn, writing the reply to `out` as it is written: thinking, progress lines, the reply's
+   * text, its end. `signal` aborts when Lumiverse stops listening (Stop, or the user left). Returning
+   * without ending the reply ends it; a throw ends it with the error's words.
+   */
+  play(turn: TaggedTurn, out: ReplyStream, signal: AbortSignal): Promise<void>;
+  /** The line the thinking block restates while the turn is silent and has given no progress line yet: from the shipped list of progress lines. */
+  standbyLine(turn: TaggedTurn): string;
 }
 
 export interface ProviderDeps {
@@ -30,13 +46,18 @@ export interface ProviderDeps {
   /** Whether the request carries RPE's provider key. */
   allowed(request: Request): boolean | Promise<boolean>;
   window: HistoryWindow;
-  /** Lumiverse's breakdown of the chat's last prompt, a hint for names; null when it has none. */
-  blocks(user: string, chat: string, signal: AbortSignal): Promise<BlocksHint | null>;
-  /** A request with no tag, passed on to the model set for such requests. */
-  passThrough(body: JsonObject, signal: AbortSignal): Promise<Response>;
-  /** A tagged reply played: the reply written to `out`. */
-  play(turn: TaggedTurn, out: ReplyStream, signal: AbortSignal): Promise<void>;
-  now(): number;
+  /** Lumiverse's breakdown of the chat's prompt, a hint for names (`hint.ts`); null when it has none. */
+  blocks(tag: Tag, signal: AbortSignal): Promise<BlocksHint | null>;
+  /** RPH's model layer, for requests passed through. */
+  models: Pick<ModelsApi, "pass">;
+  /** The connection a request with no tag is passed on to; null for RPH's default. */
+  passConnection(): string | null;
+  /** The model names `GET /v1/models` lists: those RPE's connection in Lumiverse may name. */
+  modelNames(): string[];
+  turns: TurnPlayer;
+  clock: Pick<Clock, "now" | "setTimeout" | "clearTimeout">;
+  /** How long a turn may be silent before its progress line is restated; `KEEP_ALIVE_MS` when not said. */
+  keepAliveMs?: number;
   log?(message: string): void;
 }
 
@@ -46,7 +67,25 @@ function error(status: number, message: string): Response {
 
 const ROLES: readonly string[] = ["system", "user", "assistant"];
 
-/** The endpoint as a handler from a request to its response. */
+/** RPH's tokens as an OpenAI-compatible usage. */
+const usageOf = (u: PassUsage): Usage => ({ prompt_tokens: u.input, completion_tokens: u.output, total_tokens: u.input + u.output });
+
+/** Why a passed request has no answer, in words Lumiverse shows. */
+function passWords(e: PassError): string {
+  const detail = e.detail ? `: ${e.detail}` : "";
+  switch (e.code) {
+    case "no-connection":
+      return `RPE has no connection to pass this request on to${detail}. Add one on RPE's Connections page.`;
+    case "not-carried":
+      return `RPE's connection for such requests cannot carry this request${detail}.`;
+    case "stopped":
+      return `The request was stopped${detail}.`;
+    case "provider":
+      return `The model's provider failed${detail}.`;
+  }
+}
+
+/** `POST /v1/chat/completions` as a handler from a request to its response. */
 export function providerEndpoint(deps: ProviderDeps): (request: Request) => Promise<Response> {
   return async (request) => {
     if (request.method !== "POST") return error(405, "Chat completions are asked for with POST.");
@@ -58,8 +97,9 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request) => Prom
       return error(400, "The request is not JSON.");
     }
     if (!isRecord(body)) return error(400, "The request is not a chat completion.");
+    const now = deps.clock.now();
     const read = readTag(body);
-    if ("absent" in read) return await deps.passThrough(body as JsonObject, request.signal);
+    if ("absent" in read) return passThrough(deps, body as JsonObject, request.signal, now);
     if ("invalid" in read) return error(400, `RPE could not read this reply's tag (${read.invalid}). Update the extension and RPE to the same build.`);
     let received;
     try {
@@ -68,7 +108,7 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request) => Prom
       // The window is the user's setting: a reply whose window RPE could not work out is not sent with more history than it allows.
       return e instanceof Refused ? error(e.status, e.message) : error(500, `RPE could not prepare this reply: ${e instanceof Error ? e.message : String(e)}`);
     }
-    const hint = await deps.blocks(read.tag.user, read.tag.chat, request.signal).catch((e: unknown) => {
+    const hint = await deps.blocks(read.tag, request.signal).catch((e: unknown) => {
       // Only a hint for names: without it the layout names parts by their place.
       deps.log?.(`Lumiverse's breakdown of chat ${read.tag.chat} was not read: ${e instanceof Error ? e.message : String(e)}`);
       return null;
@@ -83,8 +123,40 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request) => Prom
       stream: stream === true,
       parameters: parameters as JsonObject,
     };
-    const meta = { id: `rpe-${received.tag.generation}`, model: turn.model ?? "rpe", created: Math.floor(deps.now() / 1000) };
-    const run = (out: ReplyStream, signal: AbortSignal) => deps.play(turn, out, signal);
-    return turn.stream ? streamedReply(run, meta, request.signal) : await wholeReply(run, meta, request.signal);
+    const meta = { id: `rpe-${received.tag.generation}`, model: turn.model ?? "rpe", created: Math.floor(now / 1000) };
+    const run = (out: ReplyStream, signal: AbortSignal): Promise<void> => deps.turns.play(turn, out, signal);
+    if (!turn.stream) return await wholeReply(run, meta, request.signal);
+    return streamedReply(run, meta, request.signal, { clock: deps.clock, keepAlive: { everyMs: deps.keepAliveMs ?? KEEP_ALIVE_MS, line: deps.turns.standbyLine(turn) } });
+  };
+}
+
+/** A request with no tag, passed on untouched through RPH's model layer and answered in kind. */
+function passThrough(deps: ProviderDeps, body: JsonObject, signal: AbortSignal, now: number): Promise<Response> | Response {
+  const meta = { id: `rpe-pass-${now.toString(36)}`, model: typeof body.model === "string" ? body.model : "rpe", created: Math.floor(now / 1000) };
+  const run = async (out: ReplyStream, stop: AbortSignal): Promise<void> => {
+    await deps.models.pass(
+      { connection: deps.passConnection(), body },
+      {
+        content: (delta) => out.content(delta),
+        reasoning: (delta) => out.reasoning(delta),
+        finish: (result) => {
+          out.toolCalls((result.toolCalls ?? []).map((c) => ({ id: c.id, name: c.name, arguments: JSON.stringify(c.args) })));
+          out.finish({ reason: result.finishReason, usage: usageOf(result.usage) });
+        },
+        error: (e) => out.error(passWords(e)),
+      },
+      stop,
+    );
+  };
+  return body.stream === true ? streamedReply(run, meta, signal, { clock: deps.clock, keepAlive: null }) : wholeReply(run, meta, signal);
+}
+
+/** `GET /v1/models`: the names RPE's connection may name, as an OpenAI-compatible list (Lumiverse reads `data[].id`, `openai-compatible.ts:324-334`). */
+export function modelsEndpoint(deps: Pick<ProviderDeps, "allowed" | "modelNames">): (request: Request) => Promise<Response> {
+  return async (request) => {
+    if (request.method !== "GET") return error(405, "The model list is asked for with GET.");
+    if (!(await deps.allowed(request))) return error(401, "This connection's key is not RPE's.");
+    const data = deps.modelNames().map((id) => ({ id, object: "model", created: 0, owned_by: "rpe" }));
+    return new Response(JSON.stringify({ object: "list", data }), { status: 200, headers: { "content-type": "application/json" } });
   };
 }

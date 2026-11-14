@@ -9,7 +9,7 @@
 // the question is held here per chat from the first to the second. Nothing outlives a generation.
 
 import { isRecord } from "../shared/json";
-import type { Answer, GenerationFacts } from "../adapter/lumiverse/wire";
+import type { GenerationFacts, KeepPoint } from "../adapter/lumiverse/wire";
 
 interface Announced {
   facts: GenerationFacts;
@@ -17,10 +17,16 @@ interface Announced {
   taken: boolean;
 }
 
+/** A cut held for a generation's prompt: on RPE's answer, or where RPE last said to cut the chat when it gave no answer in time. */
+export interface HeldCut {
+  keep: KeepPoint | null;
+  by: "answer" | "memory";
+}
+
 interface Held {
   /** The generation announced for the chat when the question was asked; null when none was. */
   generation: string | null;
-  cut: Answer["cut"];
+  cut: HeldCut | null;
 }
 
 const str = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
@@ -87,8 +93,8 @@ export class Generations {
     return a !== undefined && !a.taken ? a.facts : null;
   }
 
-  /** The question's answer on the cut, held for the prompt interceptor of the generation it was asked for (null: no answer). */
-  hold(user: string, chat: string, generation: string | null, cut: Answer["cut"]): void {
+  /** The cut for the prompt interceptor of the generation the question was asked for (null: none to make). */
+  hold(user: string, chat: string, generation: string | null, cut: HeldCut | null): void {
     this.bound(this.held, `${user}\u0000${chat}`, { generation, cut });
   }
 
@@ -111,8 +117,8 @@ export class Generations {
     return a.facts;
   }
 
-  /** The cut RPE answered for this generation, once; null when it gave none. */
-  cutFor(user: string, chat: string, generation: string): Answer["cut"] {
+  /** The cut held for this generation, once; null when there is none to make. */
+  cutFor(user: string, chat: string, generation: string): HeldCut | null {
     const key = `${user}\u0000${chat}`;
     const h = this.held.get(key);
     if (h === undefined || h.generation !== generation) return null;

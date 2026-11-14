@@ -5,11 +5,12 @@
 
 import { questionRoute, type HistoryWindow, type SecrecyAsk } from "../../src/adapter/lumiverse/answer";
 import { readBlocksHint } from "../../src/adapter/lumiverse/layout";
+import { USER_HEADER, type Registration } from "../../src/adapter/lumiverse/pipe-wire";
 import { providerEndpoint, type TaggedTurn } from "../../src/adapter/lumiverse/provider";
 import { streamedReply } from "../../src/adapter/lumiverse/stream";
 import { QUESTION_PATH, readQuestion, type Question, type SecrecyVerdict } from "../../src/adapter/lumiverse/wire";
-import type { Need } from "../../src/ext/permissions";
-import { startExtension, type RunningExtension } from "../../src/ext/start";
+import { NEEDS } from "../../src/ext/permissions";
+import { NOTICE_ID, startExtension, type RunningExtension } from "../../src/ext/start";
 import { textOf as textKey } from "../../src/backend/lore-secrets";
 import type { JsonObject } from "../../src/shared/json";
 import { StandIn, type Chat, type ChatMessage, type Installed, type Outcome, type Preset } from "../standin/lumiverse";
@@ -84,6 +85,12 @@ function harborSecrecy(ask: SecrecyAsk): SecrecyVerdict {
   return { disabled, enabled: [], mutated };
 }
 
+/** A clock on the process's own timers, for tests that run in real time. */
+export const REAL_CLOCK = { now: (): number => Date.now(), setTimeout: (run: () => void, ms: number): unknown => setTimeout(run, ms), clearTimeout: (handle: unknown): void => clearTimeout(handle as Timer) };
+
+/** The frontend session of RPE's relay socket, as RPE's registration names it. */
+export const RELAY_SESSION = "0123456789abcdef0123456789abcdef";
+
 export class Rig {
   readonly lv = new StandIn();
   ext!: Installed;
@@ -91,7 +98,8 @@ export class Rig {
   readonly questions: Question[] = [];
   readonly turns: TaggedTurn[] = [];
   readonly passed: JsonObject[] = [];
-  readonly notices: Need[][] = [];
+  /** What the extension sent RPE's relay socket. */
+  readonly toRpe: unknown[] = [];
   readonly otherBodies: Record<string, unknown>[] = [];
   readonly chat: Chat;
   private readonly rpe: (request: Request) => Promise<Response>;
@@ -105,26 +113,34 @@ export class Rig {
       const first = visible[visible.length - keep];
       return visible.length <= keep || first === undefined ? null : { id: first.id, index: first.index };
     };
-    const question = questionRoute({ secrecy: async (ask) => harborSecrecy(ask), window, allowed: (r) => r.headers.get("x-rpe-extension") === EXTENSION_KEY });
+    const question = questionRoute({ secrecy: async (ask) => harborSecrecy(ask), window, allowed: (r) => r.headers.get("authorization") === `Bearer ${EXTENSION_KEY}` && r.headers.get(USER_HEADER) === USER });
     const provider = providerEndpoint({
       user: USER,
       allowed: (r) => r.headers.get("authorization") === `Bearer ${PROVIDER_KEY}`,
       window,
-      blocks: async (_user, chat) => {
-        const last = [...this.lv.stored.values()].filter((s) => s.chatId === chat).at(-1);
+      blocks: async (tag) => {
+        const last = [...this.lv.stored.values()].filter((s) => s.chatId === tag.chat).at(-1);
         return last === undefined ? null : readBlocksHint(last.data, "breakdown");
       },
-      passThrough: async (body, signal) => {
-        this.passed.push(body);
-        return streamedReply(async (out) => out.content("An untagged reply."), { id: "pass", model: "author", created: 0 }, signal);
+      models: {
+        pass: async (request, sink) => {
+          this.passed.push(request.body);
+          sink.content("An untagged reply.");
+          sink.finish({ content: "An untagged reply.", finishReason: "stop", usage: { calls: 1, input: 3, cacheRead: 0, cacheWrite: 0, output: 4 } });
+        },
       },
-      play: async (turn, out) => {
-        this.turns.push(turn);
-        out.reasoning("Thinking about the bay.");
-        out.content("The tide turns.");
-        out.finish({ prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 });
+      passConnection: () => null,
+      modelNames: () => ["rpe"],
+      turns: {
+        play: async (turn, out) => {
+          this.turns.push(turn);
+          out.reasoning("Thinking about the bay.");
+          out.content("The tide turns.");
+          out.finish({ usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 } });
+        },
+        standbyLine: () => "Still at the harbor.",
       },
-      now: () => Date.now(),
+      clock: REAL_CLOCK,
     });
     this.rpe = async (request) => {
       const path = new URL(request.url).pathname;
@@ -145,7 +161,7 @@ export class Rig {
     this.lv.servers.set(RPE, this.rpe);
     this.lv.servers.set(OTHER, async (request) => {
       this.otherBodies.push((await request.json()) as Record<string, unknown>);
-      return streamedReply(async (out) => out.content("Another model's reply."), { id: "other", model: "other", created: 0 }, request.signal);
+      return streamedReply(async (out) => out.content("Another model's reply."), { id: "other", model: "other", created: 0 }, request.signal, { clock: REAL_CLOCK, keepAlive: null });
     });
     this.lv.postProcessing = options.postProcessing ?? "";
     this.lv.connections.set("conn-rpe", { id: "conn-rpe", base: `${RPE}/v1`, key: PROVIDER_KEY, model: "rpe" });
@@ -169,16 +185,28 @@ export class Rig {
     this.lv.chats.set(this.chat.id, this.chat);
   }
 
-  /** Installs and starts the extension (again: a restarted worker remembers nothing). */
+  /** Installs and starts the extension (again: a restarted worker remembers only its storage), and RPE registers with it as its relay socket would. */
   async start(): Promise<this> {
     this.ext = this.lv.install(this.options.granted ?? ALL);
-    this.running = await startExtension(this.ext, {
-      road: async (user) => (user === USER ? { base: RPE, headers: { "x-rpe-extension": EXTENSION_KEY } } : null),
-      isRpe: (connection) => connection === "conn-rpe",
-      notice: (missing) => this.notices.push([...missing]),
-      ...(this.options.deadlineMs !== undefined ? { deadlineMs: this.options.deadlineMs } : {}),
-    });
+    const registered = Promise.withResolvers<void>();
+    this.lv.frontends = (m) => {
+      if (m.session !== RELAY_SESSION) return false;
+      this.toRpe.push(m.payload);
+      if (typeof m.payload === "object" && m.payload !== null && "rpe" in m.payload && m.payload.rpe === "registered") registered.resolve();
+      return true;
+    };
+    this.running = await startExtension(this.ext, this.options.deadlineMs !== undefined ? { deadlineMs: this.options.deadlineMs } : {});
+    const registration: Registration = { v: 1, base: RPE, key: EXTENSION_KEY, connection: "conn-rpe", relay: RELAY_SESSION, build: "test" };
+    this.ext.fromFrontend({ rpe: "register", registration }, USER, RELAY_SESSION);
+    await registered.promise;
     return this;
+  }
+
+  /** The permission notice the extension shows the user now: what it names as missing; null when none is up. */
+  notice(): string[] | null {
+    const shown = this.ext.modals.get(`${USER}\u0000${NOTICE_ID}`);
+    if (shown === undefined) return null;
+    return NEEDS.filter((n) => shown.items.some((i) => typeof i === "object" && i !== null && "content" in i && String(i.content).startsWith(`${n.permission}:`))).map((n) => n.permission);
   }
 
   restart(): Promise<this> {

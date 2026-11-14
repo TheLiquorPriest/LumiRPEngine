@@ -76,7 +76,12 @@ export function worldInfoInterceptor(deps: QuestionDeps): (ctx: unknown) => Prom
     if (ctx === null) return {};
     const fallBack = (why: string): WorldInfoReturn => {
       deps.log(`chat ${ctx.chat}: ${why}, so its secrets stay out of this prompt`);
-      if (ctx.purpose === "prompt") deps.generations.hold(ctx.user, ctx.chat, deps.generations.pending(ctx.user, ctx.chat)?.id ?? null, null);
+      if (ctx.purpose === "prompt") {
+        // Where RPE last said to cut this chat, while that message is still on the path, at its place now.
+        const remembered = deps.keptOut.cutOf(ctx.user, ctx.chat);
+        const at = remembered === null ? undefined : ctx.path.find((s) => s.id === remembered.id);
+        deps.generations.hold(ctx.user, ctx.chat, deps.generations.pending(ctx.user, ctx.chat)?.id ?? null, at === undefined ? null : { keep: { id: at.id, index: at.index }, by: "memory" });
+      }
       return failClosed(ctx.candidates, deps.keptOut.of(ctx.user, ctx.chat));
     };
     try {
@@ -86,8 +91,8 @@ export function worldInfoInterceptor(deps: QuestionDeps): (ctx: unknown) => Prom
       const question: Question = { v: 1, user: ctx.user, chat: ctx.chat, purpose: ctx.purpose, generation, path: ctx.path, entries: ctx.candidates.map(entryOf) };
       const reply = await ask(deps.proxy, road, question, deps.deadlineMs);
       if ("none" in reply) return fallBack(reply.none);
-      deps.keptOut.heard(ctx.user, ctx.chat, reply.answer.secrecy);
-      if (ctx.purpose === "prompt") deps.generations.hold(ctx.user, ctx.chat, generation?.id ?? null, reply.answer.cut);
+      deps.keptOut.heard(ctx.user, ctx.chat, reply.answer);
+      if (ctx.purpose === "prompt") deps.generations.hold(ctx.user, ctx.chat, generation?.id ?? null, reply.answer.cut === null ? null : { keep: reply.answer.cut.keep, by: "answer" });
       return reply.answer.secrecy;
     } catch (error) {
       return fallBack(`the extension failed (${error instanceof Error ? error.message : String(error)})`);

@@ -49,17 +49,28 @@ describe("the fail-closed answer", () => {
 
   test("adds what RPE last kept out of the chat, and only for this chat", () => {
     const kept = new KeptOut(8);
-    kept.heard("user-coast", "chat-coast", { disabled: ["plain"], enabled: [], mutated: [] });
+    kept.heard("user-coast", "chat-coast", { secrecy: { disabled: ["plain"], enabled: [], mutated: [] }, cut: null });
     expect(failClosed(ENTRIES, kept.of("user-coast", "chat-coast")).disabled).toContain("plain");
     expect(failClosed(ENTRIES, kept.of("user-coast", "chat-other")).disabled).not.toContain("plain");
     // The latest answer replaces the one before.
-    kept.heard("user-coast", "chat-coast", { disabled: [], enabled: [], mutated: [] });
+    kept.heard("user-coast", "chat-coast", { secrecy: { disabled: [], enabled: [], mutated: [] }, cut: null });
     expect(failClosed(ENTRIES, kept.of("user-coast", "chat-coast")).disabled).not.toContain("plain");
+  });
+
+  test("remembers where RPE last said to cut a chat, through an answer that could not say", () => {
+    const kept = new KeptOut(8);
+    const none = { disabled: [], enabled: [], mutated: [] };
+    kept.heard("u", "chat-coast", { secrecy: none, cut: { keep: { id: "m7", index: 7 } } });
+    kept.heard("u", "chat-coast", { secrecy: none, cut: null });
+    expect(kept.cutOf("u", "chat-coast")).toEqual({ id: "m7", index: 7 });
+    expect(kept.cutOf("u", "chat-other")).toBeNull();
+    kept.heard("u", "chat-coast", { secrecy: none, cut: { keep: null } });
+    expect(kept.cutOf("u", "chat-coast")).toBeNull();
   });
 
   test("remembers no more chats than it is given, forgetting the one answered longest ago", () => {
     const kept = new KeptOut(2);
-    for (const chat of ["a", "b", "c"]) kept.heard("u", chat, { disabled: [`${chat}-entry`], enabled: [], mutated: [] });
+    for (const chat of ["a", "b", "c"]) kept.heard("u", chat, { secrecy: { disabled: [`${chat}-entry`], enabled: [], mutated: [] }, cut: null });
     expect([...kept.of("u", "a")]).toEqual([]);
     expect([...kept.of("u", "b")]).toEqual(["b-entry"]);
     expect([...kept.of("u", "c")]).toEqual(["c-entry"]);
