@@ -83,3 +83,9 @@ The reply already begins with these words. The chat application puts them in fro
 
 The same material is on disk for agents you delegate to: {{turn_files}}
 {{/turn_files}}
+{{#reply_contract}}
+
+## How what you write now is marked
+
+{{reply_contract}}
+{{/reply_contract}}
