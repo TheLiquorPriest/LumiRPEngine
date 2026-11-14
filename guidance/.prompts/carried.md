@@ -18,7 +18,7 @@ Your records of this scene's earlier turns, oldest first.
 {{/summary}}
 {{#turns}}
 
-## Turn {{n}}{{#story_time}}, {{story_time}}{{/story_time}}
+## Turn {{n}}
 {{#text}}
 
 {{text}}
