@@ -26,11 +26,12 @@ import type { LvMessage } from "../adapter/lumiverse/rows";
 import type { ReplyStream } from "../adapter/lumiverse/stream";
 import { textHash } from "../adapter/lumiverse/wire";
 import type { LiveHub } from "../app";
+import { castMark, takeBackCast } from "../cast";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { mapLines, mapView } from "../iface";
 import { type Lore, loreMapFields } from "../lore";
 import { type PathReport, type ShownMessage, type Store, type TurnRow, worldState } from "../store";
-import { storyBrief, storyRecordParts } from "../story";
+import { sceneSession, storyBrief, storyMark, storyRecordParts, takeBackStory } from "../story";
 import { STORY_SO_FAR_DEFAULTS, storySoFar } from "../story/sofar";
 import type { TreeChats, TreeFiles } from "../tree";
 import { type Attempt, writeTurnFolder } from "./folder";
@@ -213,9 +214,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       await this.#left(user, chat, report, replaced, before?.turn ?? null);
       lap("compare");
 
-      // The chat's settings and texts, read before the turn is made: its session is the chat's open one.
-      const open = store.sessions(chat).findLast((s) => s.closedBy === null) ?? null;
-      const base: Scope = { user, chat, session: open?.id ?? NO_SESSION };
+      // The chat's settings and texts, read before the turn is made: they are its levels' files, whatever session the turn plays in.
+      const base: Scope = { user, chat, session: NO_SESSION };
       const guidance = loadGuidance(this.#d.files, base);
       const [settings, progress, notices, errors] = await Promise.all([turnSettings(this.#d.files, base, this.#d.log), guidance.part(PARTS.progress), guidance.part(PARTS.notices), guidance.part(PARTS.errors)]);
       const started = lines(progress)?.line("started");
@@ -232,8 +232,12 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       // The turn: a new attempt, or for a continue the turn its message is tied to (plan §10.10).
       const continued = tag.kind === "continue" && tag.target.message !== null ? this.#tiedTo(user, chat, tag.target.message) : null;
       const begun = continued ?? (await this.#d.writes.run(() => store.beginTurn({ chat, kind: tag.kind, generation: tag.generation, target: replaced }), "beginning a turn"));
-      const session = open ?? (await this.#d.writes.run(() => store.openSession({ chat, scene: "", turn: begun.id }), "opening a session"));
+      // The session the turn plays in (plan §11): the one the story record's open scene has on the turn's path, or one opened now for that
+      // scene (or for none), starting from the summary of the scene before it.
+      const inForce = sceneSession(this.#d.store, user, chat, begun.id);
+      const session = inForce.session ?? (await this.#d.writes.run(() => store.openSession({ chat, scene: inForce.scene, turn: begun.id }), "opening a session"));
       const scope = { user, chat, session: session.id, turn: begun.id };
+      if (inForce.session === null) await this.#d.harness().sessions?.open(scope, inForce.summary === null ? {} : { summary: inForce.summary });
 
       const { messages, left } = promptOf(tagged.prompt);
       if (left > 0) this.#d.log.warn("Parts of the prompt RPH cannot carry were left out.", { turn: begun.id, parts: left });
@@ -267,6 +271,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         saved: null,
         settled: null,
         mark: continued === null ? null : (store.changes(continued.id).at(-1)?.ord ?? -1),
+        castMark: continued === null ? null : castMark(this.#d.store.db, user, continued.id),
+        storyMark: continued === null ? null : storyMark(this.#d.store.db, user, continued.id),
         stop: new AbortController(),
         over: over.promise,
       };
@@ -366,6 +372,26 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     }
     run.stop.abort(new Error("The player stopped the turn."));
     return true;
+  }
+
+  /**
+   * After a turn's writes, or a job's for the turn that started it (plan §11): the scene the story record now holds open at the turn
+   * decides its session. When another session is in force there than the one the turn played in, that one is closed as the turn's
+   * work; and a scene that has no session yet has one opened as the turn's work, starting from the summary of the scene before it.
+   */
+  async sessionsAfter(user: string, chat: string, turn: string): Promise<void> {
+    const store = this.#d.store.user(user);
+    const played = this.#d.runs.record(user, turn)?.session;
+    const row = store.turn(turn);
+    if (played === undefined || row === null || row.status === "dropped") return;
+    const now = sceneSession(this.#d.store, user, chat, turn);
+    if (now.session?.id === played) return;
+    const sessions = this.#d.harness().sessions;
+    await this.#d.writes.run(() => store.closeSession(played, turn), "closing the session of a scene that ended");
+    await sessions?.close({ user, chat, session: played, turn });
+    if (now.session !== null || now.scene === "") return;
+    const opened = await this.#d.writes.run(() => store.openSession({ chat, scene: now.scene, turn }), "opening the session of a scene that began");
+    await sessions?.open({ user, chat, session: opened.id, turn }, now.summary === null ? {} : { summary: now.summary });
   }
 
   // ---------------------------------------------------------------- intake
@@ -674,12 +700,19 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         replied.resolve();
         try {
           await this.#d.runs.save(run, "keeping a turn's run");
-          const usage = run.usage;
+          // The turn's tokens are what all its runs spent: a continue adds to the runs before it (plan §10.10 "Continue").
+          const spent = this.#d.runs.ofTurn(run.user, run.turn).flatMap((r) => (r.usage === null ? [] : [r.usage]));
+          const tokens = spent.length === 0 ? {} : { tokensIn: spent.reduce((n, u) => n + u.input, 0), tokensOut: spent.reduce((n, u) => n + u.output, 0) };
           const timings = { received: run.received, started: run.started, firstWord: run.firstWord, released: run.released, ended: run.ended };
-          await this.#d.writes.run(() => this.#d.store.user(run.user).updateTurn(run.turn, { timings, ...(usage !== null ? { tokensIn: usage.input, tokensOut: usage.output } : {}) }), "keeping a turn's timings");
+          await this.#d.writes.run(() => this.#d.store.user(run.user).updateTurn(run.turn, { timings, ...tokens }), "keeping a turn's timings");
           await this.#keepRecord(run);
         } catch (error) {
           this.#d.log.error("A turn's run could not be kept.", { turn: run.turn, error: words(error) });
+        }
+        try {
+          await this.sessionsAfter(run.user, run.chat, run.turn);
+        } catch (error) {
+          this.#d.log.error("The sessions of a turn's scene could not be brought up to date.", { turn: run.turn, error: words(error) });
         } finally {
           over.resolve();
         }
@@ -736,7 +769,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       await this.#d.writes.run((db) => {
         const status = store.turn(run.turn)?.status;
         if (status === "open") store.dropTurn(run.turn);
-        else if (run.mark !== null && (status === "done" || status === "cut")) store.takeBack(run.turn, run.mark);
+        else if (run.mark !== null && (status === "done" || status === "cut")) {
+          store.takeBack(run.turn, run.mark);
+          if (run.castMark !== null) takeBackCast(db, user, run.turn, run.castMark);
+          if (run.storyMark !== null) takeBackStory(db, user, run.turn, run.storyMark);
+        }
         this.#d.runs.put(db, record);
       }, "taking back an attempt that saved nothing");
       return;

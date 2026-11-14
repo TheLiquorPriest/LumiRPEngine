@@ -1,11 +1,15 @@
-// The Turn page's routes (plan §14) answer in the shapes the pages' client is typed by (`src/ui/api.ts`):
+// The Turn and World pages' routes (plan §14) answer in the shapes the pages' client is typed by (`src/ui/api.ts`):
 // each route's reply is the client's at compile time, and each answer holds exactly the fields the page
-// reads, after turns played through the stand-in Lumiverse. Paging, the trace from a record on, and the
-// refusals a page can meet are checked as the page would meet them. Every name is invented.
+// reads, after turns played through the stand-in Lumiverse. Paging, the trace from a record on, a turn's
+// runs, its folder's files, the world's tree, and the refusals a page can meet are checked as the page
+// would meet them; a token of anyone but the user this RPE belongs to reads nothing. Every name is invented.
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import type { RouteReply } from "../../src/app";
-import { turnRoutes } from "../../src/turn";
+import { insertPageToken } from "../../src/app/auth";
+import type { NodeView } from "../../src/store";
+import { type RunView, type TurnFileEntry, turnRoutes } from "../../src/turn";
 import type { ChatList, ChatSummary, Routes, StopAnswer, TurnDetail, TurnList, TurnSummary } from "../../src/ui/api";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, USER } from "./bed";
 
@@ -17,14 +21,15 @@ afterEach(async () => {
 /** Every field of a page's type, once: a field added to the type or left out of here does not compile. */
 const CHAT_FIELDS: Record<keyof ChatSummary, true> = { id: true, name: true, lastTurnAt: true, running: true };
 const SUMMARY_FIELDS: Record<keyof TurnSummary, true> = { id: true, kind: true, onPath: true, message: true, status: true, timings: true, usage: true };
-const DETAIL_FIELDS: Record<keyof TurnDetail, true> = { ...SUMMARY_FIELDS, chat: true, intent: true, reply: true, error: true, trace: true, lore: true };
+const DETAIL_FIELDS: Record<keyof TurnDetail | "runs", true> = { ...SUMMARY_FIELDS, chat: true, intent: true, reply: true, error: true, trace: true, lore: true, runs: true };
+const RUN_FIELDS: Record<keyof RunView, true> = { id: true, nth: true, kind: true, status: true, timings: true, usage: true, reply: true, error: true, trace: true, requests: true };
 const fields = (shape: object): string[] => Object.keys(shape).sort();
 
 describe("the Turn page's routes", () => {
   test("each route's reply is the type the pages' client is written against, and each answer holds exactly its fields", async () => {
     const b = await openTurnBed({ answers: [replying("The lamp turns."), replying("Wren nods."), replying("Wren points at the sea.")] });
     beds.push(b);
-    const [chats, list, one, stop] = turnRoutes({ turns: b.turns, owner: () => USER, chatName: async () => null });
+    const [chats, list, one, stop] = turnRoutes({ turns: b.turns, chatName: async () => null });
     // The client's shape of each route's reply is what the route gives: these lines do not compile when they part.
     const replies: [Routes["GET /api/v1/chats"]["reply"], Routes["GET /api/v1/chats/:chat/turns"]["reply"], Routes["GET /api/v1/chats/:chat/turns/:turn"]["reply"], Routes["POST /api/v1/chats/:chat/turns/:turn/stop"]["reply"]] = [
       null as unknown as RouteReply<typeof chats>,
@@ -99,5 +104,134 @@ describe("the Turn page's routes", () => {
     const shown = /\[(e-\d+)\] The oil store/.exec(JSON.stringify(b.model.requests[0]!.messages))?.[1];
     expect(shown).toBeDefined();
     expect(detail.body.lore.map).toEqual([shown!]);
+  });
+});
+
+/** A turn's detail as the routes give it now: the page's type, and each of its runs. */
+type Detail = TurnDetail & { runs: RunView[] };
+
+/** A path below a turn's folder, as the file route takes it. */
+const filePath = (turn: string, name: string): string => `/api/v1/chats/${CHAT}/turns/${turn}/files/${name.split("/").map(encodeURIComponent).join("/")}`;
+
+/** The player says something and asks for a reply of this kind; gives the turn once its end is recorded. */
+async function played(b: TurnBed, said?: string, type: "normal" | "continue" = "normal"): Promise<string> {
+  if (said !== undefined) b.host.send(CHAT, said);
+  const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET, type });
+  expect(out.error).toBeNull();
+  return (await settledTurn(b, out.generationId!)).id;
+}
+
+describe("a turn's runs, its folder, and the world", () => {
+  test("a continued turn shows each of its runs with its own trace and request file, and what they spent together", async () => {
+    const b = await openTurnBed({ answers: [replying("The lamp turns."), replying(" Then it stops.")] });
+    beds.push(b);
+    const turn = await played(b, "I climb the stairs.");
+    await played(b, undefined, "continue");
+    await b.until("no run of the chat to go on", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
+
+    const detail = (await b.page<Detail>("GET", `/api/v1/chats/${CHAT}/turns/${turn}`)).body;
+    expect(detail.runs.map(fields)).toEqual([fields(RUN_FIELDS), fields(RUN_FIELDS)]);
+    expect(detail.runs.map((r) => [r.nth, r.kind, r.status, r.reply.text])).toEqual([
+      [1, "new", "released", "The lamp turns."],
+      [2, "continue", "released", " Then it stops."],
+    ]);
+    expect(new Set(detail.runs.map((r) => r.id)).size).toBe(2);
+    expect(new Set(detail.runs.map((r) => r.requests[0]?.file)).size).toBe(2);
+    // Each run's trace is its own, numbered from 1 with no gap, and ends with that run's end.
+    for (const run of detail.runs) {
+      expect(run.trace.map((t) => t.seq)).toEqual(run.trace.map((_, i) => i + 1));
+      expect(run.trace.at(-1)?.event.kind).toBe("run_ended");
+    }
+    expect(detail.runs[0]!.trace.length + detail.runs[1]!.trace.length).toBe(detail.trace.length);
+    // The turn's usage is both runs' together: one model call each.
+    expect(detail.usage.calls).toBe(2);
+    expect(detail.usage.output).toBe(detail.runs[0]!.usage.output + detail.runs[1]!.usage.output);
+
+    // Each run names the request its lead's first call sent, kept in the turn's folder, and the file route opens it.
+    for (const run of detail.runs) {
+      expect(run.requests).toEqual([expect.objectContaining({ definition: "author", call: 1, file: expect.stringMatching(/^transcripts\/.+\.call-1\.json$/) })]);
+      const kept = await b.page<{ name: string; text: string }>("GET", filePath(turn, run.requests[0]!.file));
+      expect(kept.status).toBe(200);
+      const request: unknown = JSON.parse(kept.body.text);
+      expect(request).toHaveProperty(["messages", 0, "role"], "system");
+    }
+  });
+
+  test("a turn's folder is listed whole, each file reads as the folder holds it, and no path leaves the folder", async () => {
+    const b = await openTurnBed({ answers: [replying("The lamp turns.")] });
+    beds.push(b);
+    const turn = await played(b, "I climb the stairs.");
+
+    const listing = await b.page<{ files: TurnFileEntry[] }>("GET", `/api/v1/chats/${CHAT}/turns/${turn}/files`);
+    expect(listing.status).toBe(200);
+    const byName = new Map(listing.body.files.map((f) => [f.name, f]));
+    expect(byName.get("briefing.md")).toMatchObject({ folder: false });
+    expect(byName.get("turn.json")).toMatchObject({ folder: false });
+    const inTranscripts = listing.body.files.filter((f) => !f.folder && f.name.startsWith("transcripts/"));
+    expect(inTranscripts.some((f) => f.name.endsWith(".jsonl"))).toBe(true);
+    expect(byName.get("transcripts")).toEqual({ name: "transcripts", folder: true, bytes: inTranscripts.reduce((n, f) => n + f.bytes, 0) });
+
+    // A file's text is what the turn's folder holds on disk, whole.
+    const run = b.turns.runs.record(USER, turn)!;
+    const disk = (await b.turns.files.turnDisk({ user: USER, chat: CHAT, session: run.session, turn }))!;
+    for (const name of ["briefing.md", inTranscripts[0]!.name]) {
+      const file = await b.page<{ name: string; text: string }>("GET", filePath(turn, name));
+      expect(file.body).toEqual({ name, text: await Bun.file(join(disk, name)).text() });
+      expect(Buffer.byteLength(file.body.text)).toBe(byName.get(name)!.bytes);
+    }
+
+    // Nothing outside it: an escaped way up, a folder, a file it does not hold, a turn of another chat.
+    expect((await b.page("GET", `/api/v1/chats/${CHAT}/turns/${turn}/files/..%2F..%2Fchat.yml`)).status).toBe(400);
+    expect((await b.page("GET", `/api/v1/chats/${CHAT}/turns/${turn}/files/transcripts%2F..%2F..%2Fsession.jsonl`)).status).toBe(400);
+    expect((await b.page("GET", filePath(turn, "transcripts"))).status).toBe(404);
+    expect((await b.page("GET", filePath(turn, "nothing.md"))).status).toBe(404);
+    expect((await b.page("GET", `/api/v1/chats/chat-elsewhere/turns/${turn}/files`)).status).toBe(404);
+  });
+
+  test("the world's tree is read at the chat's head or at a turn, to a depth, with the values asked for", async () => {
+    const b = await openTurnBed({
+      answers: [
+        replying("The lamp turns."),
+        { pieces: [{ text: "<intent>Half an hour goes by.</intent>" }, { call: "world_apply", args: { operations: [{ op: "pass_time", minutes: 30, source: { from: "prose" } }] } }] },
+        { pieces: [{ text: "<reply>The tide turns.</reply>" }] },
+      ],
+    });
+    beds.push(b);
+    const first = await played(b, "I climb the stairs.");
+    await played(b, "I wait.");
+    type World = { at: string; nodes: NodeView[] };
+    const world = async (query: string) => b.page<World>("GET", `/api/v1/chats/${CHAT}/world${query}`);
+
+    // At the head, the world with its own values: the time the second turn moved on, kept by the calendar.
+    const head = await world("");
+    expect(head.status).toBe(200);
+    expect(head.body.at).toBe("world");
+    expect(head.body.nodes[0]).toMatchObject({ ref: "world", kind: "world" });
+    expect(head.body.nodes[0]!.values.find((v) => v.key === "time")).toMatchObject({ from: { system: "calendar" } });
+    expect(head.body.nodes.slice(1).map((n) => n.ref)).toEqual(head.body.nodes[0]!.children);
+    // At the first turn the clock was not set yet; with no values, none; with no depth, the level alone.
+    expect((await world(`?turn=${first}`)).body.nodes[0]!.values.some((v) => v.key === "time")).toBe(false);
+    expect((await world("?values=none")).body.nodes.every((n) => n.values.length === 0)).toBe(true);
+    expect((await world("?depth=0")).body.nodes.map((n) => n.ref)).toEqual(["world"]);
+
+    expect((await world("?values=some")).status).toBe(400);
+    expect((await world("?depth=deep")).status).toBe(400);
+    expect((await world("?at=place-nowhere")).status).toBe(404);
+    expect((await world("?turn=turn-none")).status).toBe(404);
+    expect((await b.page("GET", "/api/v1/chats/chat-elsewhere/world")).status).toBe(404);
+  });
+
+  test("a token of anyone but the user this RPE belongs to reads nothing", async () => {
+    const b = await openTurnBed({ answers: [replying("The lamp turns.")] });
+    beds.push(b);
+    const turn = await played(b, "I climb the stairs.");
+    // A page token made for another user of the same Lumiverse, as one this RPE once belonged to would have left.
+    const other = await b.app.writes.run((db) => insertPageToken(db, "user-other", "extension", 60_000, Date.now()));
+    for (const path of [`/api/v1/chats/${CHAT}/turns/${turn}`, `/api/v1/chats/${CHAT}/turns/${turn}/files`, filePath(turn, "briefing.md"), `/api/v1/chats/${CHAT}/world`]) {
+      const res = await fetch(`${b.listening.url}${path}`, { headers: { authorization: `Bearer ${other.token}` } });
+      expect(res.status).toBe(401);
+      const body: unknown = await res.json();
+      for (const field of ["runs", "trace", "files", "text", "nodes"]) expect(body).not.toHaveProperty(field);
+    }
   });
 });

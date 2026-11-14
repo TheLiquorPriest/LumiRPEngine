@@ -19,20 +19,23 @@ import type { Clock, Environment, Harness, HostTool, Scope } from "rp-harness/co
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { App } from "../app";
-import { castTools, type SourceReader } from "../cast";
+import { castFacts, castTools, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapLines, mapView, stateScan } from "../iface";
 import { EntryNumbers, Lore, type LoreBooks, lorePort, storeWorlds } from "../lore";
 import { ALL_PACKS } from "../packs/index";
 import { hashJson } from "../shared/hash";
-import { openStore, type Store } from "../store";
-import { storyTools } from "../story";
+import { openStore, type Store, storedWorlds } from "../store";
+import { storyFacts, storyTools } from "../story";
 import { TreeChats, type TreeFiles, treeFiles, turnFolderName } from "../tree";
 import { turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
 import { kvStore, servedUser } from "./kv";
+import { riskyPattern } from "./pattern";
 import { type TurnPrompts, turnPrompts } from "./prompt";
 import { Runs } from "./runs";
+import { turnSettings } from "./settings";
+import { stagesAt } from "./stage";
 import { guidanceTexts } from "./texts";
 import { type TurnTrace, turnTrace } from "./trace";
 import { TurnLane } from "./turns";
@@ -40,7 +43,9 @@ import { TurnLane } from "./turns";
 /**
  * RPE's file port for the one user it serves, that user read each time the port is asked, since it may
  * be set after the lane is built: before one is set every call is refused, and the tree's own port
- * refuses a scope of anyone else, an empty user's included.
+ * refuses a scope of anyone else, an empty user's included. A search pattern that could take time
+ * without end on some text is refused as no pattern at all, which the harness words from its notice
+ * line: it would hold every chat and every Stop while it ran (`pattern.ts`).
  */
 function servedFiles(owner: () => string | null, make: (user: string) => TreeFiles): TreeFiles {
   let made: { user: string; files: TreeFiles } | null = null;
@@ -53,7 +58,10 @@ function servedFiles(owner: () => string | null, make: (user: string) => TreeFil
     layers: async (scope) => now().layers(scope),
     places: async (scope) => now().places(scope),
     read: async (scope, path, range) => now().read(scope, path, range),
-    find: async (scope, query) => now().find(scope, query),
+    find: async (scope, query) => {
+      if (query.by === "grep" && query.literal !== true && riskyPattern(query.pattern)) throw new SyntaxError(`The pattern ${query.pattern} could take time without end on some text.`);
+      return now().find(scope, query);
+    },
     write: async (scope, path, op, by) => now().write(scope, path, op, by),
     turnDisk: async (scope) => now().turnDisk(scope),
     sessionDisk: async (scope) => now().sessionDisk(scope),
@@ -102,10 +110,12 @@ export const MACHINE_CLOCK: Clock = {
   },
 };
 
-/** RPE's store over the application's database: the shipped packs' handlers fold its changes, and its snapshots are this build's. */
+/**
+ * RPE's store over the application's database: the shipped packs' handlers fold its changes, a chat on a
+ * real world folds over the revision's document the store keeps, and its snapshots are this build's.
+ */
 export function openAppStore(app: Pick<App, "db" | "version">): Store {
-  // No world documents are kept by RPE yet: a chat starts with no world, and its state has none to fold until the world lane gives them.
-  return openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds: () => undefined, fingerprint: app.version });
+  return openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds: storedWorlds(app.db), fingerprint: app.version });
 }
 
 export interface TurnsOptions {
@@ -160,8 +170,24 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const runs = new Runs(app.db, app.writes);
   const lore = new Lore({ books: options.books, worlds: storeWorlds(store), turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes) });
   const facts = new FactsRegistry();
-  facts.add(turnFacts(store));
-  const trace = turnTrace({ live: app.live, files, chatOfRun: (run) => runs.chatOfRun(run), log: app.log });
+  facts.add(turnFacts(store, (user, turn) => runs.record(user, turn)));
+  // Who was on stage at each turn the cast counts: the open scene there, as the story record holds it; a turn with none, nobody.
+  facts.add(castFacts({ store, onStage: async ({ user, chat }, turns) => new Map([...stagesAt(store, user, chat, turns)].map(([turn, stage]) => [turn, stage.who])) }));
+  // The story's counts work out the history window as the prompt's is cut, on the chat's own settings.
+  facts.add(storyFacts({ store, window: async (scope) => (await turnSettings(files, scope, app.log)).window }));
+  const traced = turnTrace({ live: app.live, files, chatOfRun: (run) => runs.chatOfRun(run), log: app.log });
+  const trace: TurnTrace = {
+    ...traced,
+    event(record) {
+      traced.event(record);
+      // A job's writes are in once it ends: they may have opened or closed a scene of the turn that started it (plan §11).
+      const { event } = record;
+      const scope = event.kind === "job" && event.job.ended !== undefined ? event.job.scope : undefined;
+      if (scope?.turn === undefined) return;
+      const turn = scope.turn;
+      void lane.sessionsAfter(scope.user, scope.chat, turn).catch((error: unknown) => app.log.error("The sessions of a job's scene could not be brought up to date.", { turn, error: error instanceof Error ? error.message : String(error) }));
+    },
+  };
   const chatNow = (): ChatReads => {
     const parts = options.lumiverse();
     if (parts === null) throw new Error("RPE is not set up for a Lumiverse, so it has no chat to read.");
@@ -178,8 +204,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     const lines = await mapLines(texts);
     const [engine, cast, story] = await Promise.all([
       engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: stateScan, grid: gridMoves(lines), map: mapView(lines), ...asked }),
-      castTools({ store, writes: app.writes, files: texts, sources, now: () => clock.now(), ...asked }),
-      storyTools({ store, writes: app.writes, files: texts, now: () => clock.now(), ...asked }),
+      castTools({ store, writes: app.writes, files: texts, sources, now: () => clock.now() }),
+      storyTools({ store, writes: app.writes, files: texts, now: () => clock.now() }),
     ]);
     return [...engine, ...cast, ...story];
   };

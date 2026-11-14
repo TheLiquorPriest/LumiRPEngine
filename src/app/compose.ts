@@ -4,10 +4,8 @@
 // the door to Lumiverse mounts last, playing each tagged reply through the turn lane, and opens its
 // sockets once the server listens.
 //
-// Where a part another lane builds has not landed, the composition says so rather than stands in for it:
-// the history window is not yet told which messages the story record covers, so it works on none covered; the secrecy of lore
-// entries is not worked out (the extension's own fail-closed verdict keeps every marked secret out); and
-// a chat names no stretches until the story lane does.
+// No lane works out the secrecy of lore entries: asked, the composition says so, and the extension's
+// own fail-closed verdict keeps every marked secret out.
 
 import { SHIPPED_GUIDANCE } from "rp-harness";
 import type { Clock, CreateHarnessOptions } from "rp-harness";
@@ -17,10 +15,10 @@ import { bunSocket } from "../adapter/lumiverse/socket";
 import { CAST_MIGRATIONS } from "../cast";
 import { type LoreBooks, LORE_MIGRATIONS } from "../lore";
 import { STORE_MIGRATIONS } from "../store";
-import { STORY_MIGRATIONS } from "../story";
+import { STORY_MIGRATIONS, storyCoverage } from "../story";
 import { historyWindow } from "../story/window";
 import { layShipped, RPE_GUIDANCE, TREE_MIGRATIONS } from "../tree";
-import { buildTurns, HARNESS_MIGRATIONS, MACHINE_CLOCK, NO_SESSION, openAppStore, passConnection, PROMPT_MIGRATIONS, turnRoutes, turnSettings, type Turns } from "../turn";
+import { buildTurns, HARNESS_MIGRATIONS, MACHINE_CLOCK, namedStretches, NO_SESSION, openAppStore, passConnection, PROMPT_MIGRATIONS, turnRoutes, turnSettings, type Turns } from "../turn";
 import type { App, Area } from "./app";
 import { connectionRoutes } from "./connections";
 
@@ -53,20 +51,23 @@ export function compose(options: ComposeOptions = {}): Composition {
   const owner = (): string => app?.config.lumiverse.user ?? "";
   /** A chat's settings as its levels' config files set them, read outside any session. */
   const chatSettings = (chat: string) => turnSettings(made().files, { user: owner(), chat, session: NO_SESSION }, made().env.log);
-  /** The messages the story record covers, for the window's hold: none, until what the record covers is worked out from it. */
-  const covered: ReadonlySet<string> = new Set();
+  /** The messages the story record covers at the chat's head, for the window's hold: none for a chat RPE has not played, which has no record. */
+  const covered = (chat: string): ReadonlySet<string> => {
+    const { store } = made();
+    return store.user(owner()).chat(chat) === null ? new Set() : storyCoverage({ store, user: owner(), chat, turn: null }).covered;
+  };
 
   const door = lumiverseDoor(
     {
       turns: { play: (turn, out, signal) => made().lane.play(turn, out, signal), standbyLine: (turn) => made().lane.standbyLine(turn) },
       changes: { changed: (change) => made().lane.changed(change), reopened: () => made().lane.reopened() },
       // The history window on the chat's settings: the first history message the prompt keeps.
-      window: async (ask) => historyWindow(ask.path, (await chatSettings(ask.chat)).window, covered).first,
+      window: async (ask) => historyWindow(ask.path, (await chatSettings(ask.chat)).window, covered(ask.chat)).first,
       secrecy: async () => {
-        throw new Error("RPE does not work out its lore's secrets yet, so the extension keeps every marked secret out.");
+        throw new Error("RPE works out no secrecy of its lore, so the extension keeps every marked secret out.");
       },
       hiddenReadable: async (chat) => (await chatSettings(chat)).hiddenReadable,
-      ranges: async () => ({}),
+      ranges: async (chat) => namedStretches(made().store, owner(), chat),
       summarized: async (chat) => made().prompts.summarized(owner(), chat),
       models: { pass: (request, sink, signal) => made().harness.models.pass(request, sink, signal) },
       passConnection: () => (app === null ? null : passConnection(app.paths.files, app.log)),
@@ -123,7 +124,6 @@ export function compose(options: ComposeOptions = {}): Composition {
           "turn",
           turnRoutes({
             turns,
-            owner,
             chatName: async (chat) => (await door.lumiverse()?.reads.chat(chat))?.name ?? null,
           }),
         );

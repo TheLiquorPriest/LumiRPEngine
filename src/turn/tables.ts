@@ -146,4 +146,13 @@ UPDATE turn_run SET settled = COALESCE(ended, received)
 CREATE INDEX turn_run_unsettled ON turn_run (user, chat) WHERE settled IS NULL AND generation IS NOT NULL;
 `,
   },
+  {
+    version: 4,
+    name: "where a continue's cast and story rows begin",
+    // A continue kept before has no such mark: should it save nothing, its store changes are taken back and its cast and story rows stay.
+    sql: `
+ALTER TABLE turn_run ADD COLUMN cast_mark INTEGER;
+ALTER TABLE turn_run ADD COLUMN story_mark INTEGER;
+`,
+  },
 ];

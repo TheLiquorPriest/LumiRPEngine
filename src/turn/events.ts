@@ -1,20 +1,20 @@
 // What RPH tells RPE as a turn goes (`TurnEvents` in `rp-harness/contract`). None of it returns a
 // decision: RPE records it with the turn and shows it. The intent record is kept on the turn as text and
 // never read by code (plan §10.3). A sub-agent's writes the lead drops are taken back from the turn's
-// staged changes. Rules that fired, consents, gap checks, suggestions and the attachments an agent was
-// given are kept with the turn (`turn_told`) for the Turn page. Of RPE's own spaces an agent can be
-// given by name, the cast's views of the character it plays are given (`cast:self(…)`).
+// staged changes, and from the cast's and the story's rows beside them. Rules that fired, consents, gap
+// checks, suggestions and the attachments an agent was given are kept with the turn (`turn_told`) for
+// the Turn page. Of RPE's own spaces an agent can be given by name, the cast's views of the character it
+// plays are given (`cast:self(…)`), with who the open scene has on stage and its place as what is present.
 
 import type { Database } from "bun:sqlite";
 import { loadGuidance, type TemplatePart } from "rp-harness";
 import type { AgentRef, ContextBlock, FilesPort, Log, Scope, TurnEvents } from "rp-harness/contract";
-import { CAST_VIEWS, castViews, type CastViewName, type SourceReader } from "../cast";
+import { CAST_VIEWS, castViews, type CastViewName, dropCastStaged, type SourceReader } from "../cast";
 import type { Store } from "../store";
-import { namesOf } from "../story/kit";
-import { storyAt } from "../story/path";
-import { StoryRecord } from "../story/record";
+import { dropStoryStaged } from "../story";
 import type { Writes } from "./kv";
 import type { Runs } from "./runs";
+import { stageAt } from "./stage";
 
 export interface EventsDeps {
   db: Database;
@@ -31,12 +31,6 @@ export interface EventsDeps {
 
 /** `cast:self(base, mind, …)`: views of the character the agent plays, by name. */
 const CAST_SELF = /^cast:self\((.*)\)$/;
-
-/** Who the open scene has on stage, as the story record holds it at the turn: the names the Author gave it. */
-function onStage(store: Store, user: string, chat: string, turn: string | null): string[] {
-  const scene = StoryRecord.read(store.db, user, storyAt(store.user(user), chat, turn)).current("scene");
-  return scene === null || scene.closedBy !== null ? [] : namesOf(scene);
-}
 
 /**
  * The cast's views that `ref` names of the character `agent` plays, each laid out by its part in force for the chat, one after
@@ -57,7 +51,18 @@ async function castSelf(deps: EventsDeps, scope: Scope, agent: AgentRef, ref: st
     if (part?.format === "template") layouts[name as CastViewName] = part;
   }
   const turn = scope.turn ?? null;
-  const views = await castViews(names, { store: deps.store, user: scope.user, chat: scope.chat, turn, character: agent.plays, present: onStage(deps.store, scope.user, scope.chat, turn), sources: deps.sources, layouts });
+  const stage = stageAt(deps.store, scope.user, scope.chat, turn);
+  const views = await castViews(names, {
+    store: deps.store,
+    user: scope.user,
+    chat: scope.chat,
+    turn,
+    character: agent.plays,
+    present: stage?.who ?? [],
+    ...(stage?.place != null ? { cues: [stage.place] } : {}),
+    sources: deps.sources,
+    layouts,
+  });
   return views
     .map((view) => view.text)
     .filter((text) => text.trim() !== "")
@@ -112,7 +117,11 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
     gapCheck: (scope, check) => tell(scope, "gap-check", check),
     async dropStaged(scope, agent) {
       const turn = turnOf(scope);
-      await deps.writes.run(() => deps.store.user(scope.user).dropStaged(turn, agent.id), "dropping a sub-agent's staged changes");
+      await deps.writes.run(() => {
+        deps.store.user(scope.user).dropStaged(turn, agent.id);
+        dropCastStaged(deps.store, scope.user, turn, agent.id);
+        dropStoryStaged(deps.store, scope.user, turn, agent.id);
+      }, "dropping a sub-agent's staged changes");
       await tell(scope, "dropped", { agent });
     },
     ruleFired: (scope, firing) => tell(scope, "rule", firing),

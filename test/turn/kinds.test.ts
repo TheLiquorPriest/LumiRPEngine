@@ -99,8 +99,9 @@ describe("the other kinds of turn", () => {
     expect(JSON.stringify(b.model.requests[1]!.messages)).not.toContain("INTENT-FIRST-ATTEMPT");
   });
 
-  test("a continue extends the turn its message is tied to: the same turn, tied again to the joined text", async () => {
-    const b = await bed({ answers: [replying("The lamp turns."), replying("Then it stops, and Wren swears.")] });
+  test("a continue extends the turn its message is tied to: the same turn, tied again to the joined text, its tokens added to the turn's", async () => {
+    const reply = (text: string, usage: { input: number; output: number }) => ({ pieces: [{ text: "<intent>One exchange.</intent>" }, { text: `<reply>${text}</reply>` }], usage });
+    const b = await bed({ answers: [reply("The lamp turns.", { input: 900, output: 40 }), reply("Then it stops, and Wren swears.", { input: 1100, output: 60 })] });
     const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
     const generation = await play(b, "continue");
 
@@ -113,6 +114,16 @@ describe("the other kinds of turn", () => {
     expect(store.turn(turn.id)).toMatchObject({ status: "done", message: turn.message, parent: null });
     expect(store.path(CHAT).filter((e) => e.turn !== null).map((e) => [e.message, e.turn])).toEqual([[turn.message, turn.id]]);
     expect(store.swipes(CHAT, turn.message!).map((t) => t.id)).toEqual([turn.id]);
+
+    // What the turn spent is both runs' together, not the continue's alone.
+    await b.until("the continue's run to be over", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
+    const usages = b.turns.runs.ofTurn(USER, turn.id).map((r) => r.usage!);
+    expect(usages).toHaveLength(2);
+    expect(usages.map((u) => [u.input, u.output])).toEqual([
+      [900, 40],
+      [1100, 60],
+    ]);
+    expect(store.turn(turn.id)).toMatchObject({ tokensIn: 2000, tokensOut: 100 });
   });
 
   test("an impersonation kept as a draft saves no message, so its attempt is dropped and the chat's path and head are as they were", async () => {

@@ -5,9 +5,12 @@
 // The turn lane's own facts:
 //   turns.since.engine.change  turns on the chat's path since the last one that recorded an engine-lane change
 //   session.turns              turns on the chat's path since this session opened
+//   turn.recorded              what this turn has recorded so far in any lane: the store's changes and the story's and the cast's
+//                              rows it wrote; a continue's, since it began (the marks its run took, as its take-back uses them)
 
 import type { FactDef, FactsPort, FactValue, Scope } from "rp-harness/contract";
 import type { Store } from "../store";
+import type { RunRecord } from "./runs";
 
 /** Facts one area counts. */
 export interface FactSource {
@@ -55,18 +58,28 @@ export class FactsRegistry implements FactsPort {
   }
 }
 
-/** The turn lane's own facts, counted from the store. */
-export function turnFacts(store: Store): FactSource {
+/** Rows a turn wrote to the cast's or the story's record after `after` (its `ord`), its jobs' left out as the take-back leaves them. */
+function rowsAfter(store: Store, table: "cast_entry" | "story_entry", user: string, turn: string, after: number): number {
+  return store.db.query<{ n: number }, [string, string, number]>(`SELECT count(*) AS n FROM ${table} WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL`).get(user, turn, after)?.n ?? 0;
+}
+
+/**
+ * The turn lane's own facts, counted from the store and, for what a turn recorded, from the run it is in: `run` gives a scope's turn's
+ * run as it stands (the one going on, else its latest), whose marks say where a continue's own writes begin.
+ */
+export function turnFacts(store: Store, run: (user: string, turn: string) => Pick<RunRecord, "mark" | "castMark" | "storyMark"> | null): FactSource {
   return {
     area: "turn",
     defs: [
       { name: "turns.since.engine.change", counts: "Turns on the chat's path since the last one that recorded a change in the engine lane; every turn on the path when none has." },
       { name: "session.turns", counts: "Turns on the chat's path since this session opened, the turn that opened it among them." },
+      { name: "turn.recorded", counts: "Things this turn has recorded so far in any lane: the engine's changes, and the story's and the cast's records; for a continue, since it began. A job's are its own." },
     ],
     async read(scope, names) {
       const user = store.user(scope.user);
       // A chat RPE has not met yet has no turns on its path: every count is 0.
-      const turns = user.chat(scope.chat) === null ? [] : user.path(scope.chat).flatMap((e) => (e.turn === null ? [] : [e.turn]));
+      const known = user.chat(scope.chat) !== null;
+      const turns = known ? user.path(scope.chat).flatMap((e) => (e.turn === null ? [] : [e.turn])) : [];
       const out: Record<string, FactValue> = {};
       if (names.includes("turns.since.engine.change")) {
         let count = 0;
@@ -81,6 +94,18 @@ export function turnFacts(store: Store): FactSource {
         const opener = user.session(scope.session)?.openedBy;
         const from = opener === undefined ? -1 : turns.indexOf(opener);
         out["session.turns"] = { count: from < 0 ? 0 : turns.length - from };
+      }
+      if (names.includes("turn.recorded")) {
+        const turn = known && scope.turn !== undefined && user.turn(scope.turn)?.chat === scope.chat ? scope.turn : null;
+        const marks = turn === null ? null : run(scope.user, turn);
+        out["turn.recorded"] = {
+          count:
+            turn === null
+              ? 0
+              : user.changes(turn).filter((c) => c.ord > (marks?.mark ?? -1) && c.job === null).length +
+                rowsAfter(store, "story_entry", scope.user, turn, marks?.storyMark ?? -1) +
+                rowsAfter(store, "cast_entry", scope.user, turn, marks?.castMark ?? -1),
+        };
       }
       return out;
     },

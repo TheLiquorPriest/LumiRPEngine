@@ -72,6 +72,11 @@ export interface TurnBedOptions {
   answers: Answer[];
   /** The user's own `RPE-global.yml`, over the shipped one. */
   global?: string;
+  /**
+   * What the user switched off in their own `RPE-global.yml` (`off:`). The shipped rule that tells the Author its turn is ending with
+   * nothing recorded asks one more call of every such turn, which the tests of anything else leave out; unless a test names its own.
+   */
+  off?: readonly string[];
   /** The chat's messages before the test plays: the character's greeting when not given. */
   messages?: ChatMessage[];
 }
@@ -121,7 +126,8 @@ export async function openTurnBed(options: TurnBedOptions): Promise<TurnBed> {
     await prepareDataFolder(paths);
     const signIn = await new LumiverseSession({ base: server.base, fetch: server.fetch, signIn: null, save: async () => undefined, owner: () => USER, clock: REAL_CLOCK, log: () => undefined }).signIn("marlow", PASSWORD);
     await new SecretsFile(paths.secrets).write("lumiverse", { ...signIn });
-    if (options.global !== undefined) await writeFile(paths.globalConfig, options.global, "utf8");
+    const off = options.off ?? ["rules/turn-unrecorded"];
+    await writeFile(paths.globalConfig, `off: [${off.join(", ")}]\n${options.global ?? ""}`, "utf8");
 
     const model = scriptedModel(options.answers, { contextWindow: 64_000, maxTokens: 4_000 });
     const logged: Logged[] = [];

@@ -55,6 +55,9 @@ export interface RunRecord {
    * turn records after it is the continue's, taken back if it saves nothing new (plan §6.3). Null for any other run.
    */
   mark: number | null;
+  /** The same for the cast's rows (`castMark`) and the story's (`storyMark`) on the turn; null for any other run, or a run kept before they were. */
+  castMark: number | null;
+  storyMark: number | null;
 }
 
 /** A run going on now: its record, what stops it, and when it is over. */
@@ -87,6 +90,8 @@ interface RunRow {
   saved: string | null;
   settled: number | null;
   mark: number | null;
+  cast_mark: number | null;
+  story_mark: number | null;
 }
 
 function recordOf(user: string, r: RunRow): RunRecord {
@@ -114,6 +119,8 @@ function recordOf(user: string, r: RunRow): RunRecord {
     saved: r.saved,
     settled: r.settled,
     mark: r.mark,
+    castMark: r.cast_mark,
+    storyMark: r.story_mark,
   };
 }
 
@@ -131,12 +138,12 @@ export class Runs {
   /** Keeps a run's record as it stands; inside a queued write. An end once recorded stays recorded, whatever copy is written after it. */
   put(into: Database, r: RunRecord): void {
     into.run(
-      `INSERT INTO turn_run (user, id, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, ended, usage, reply, progress, error, base, saved, settled, mark)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO turn_run (user, id, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, ended, usage, reply, progress, error, base, saved, settled, mark, cast_mark, story_mark)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (user, id) DO UPDATE SET session = excluded.session, generation = excluded.generation, target = excluded.target, swipe = excluded.swipe, kind = excluded.kind,
          status = excluded.status, received = excluded.received, started = excluded.started, first_word = excluded.first_word, released = excluded.released, ended = excluded.ended,
          usage = excluded.usage, reply = excluded.reply, progress = excluded.progress, error = excluded.error, base = excluded.base, saved = excluded.saved,
-         settled = COALESCE(turn_run.settled, excluded.settled), mark = excluded.mark`,
+         settled = COALESCE(turn_run.settled, excluded.settled), mark = excluded.mark, cast_mark = excluded.cast_mark, story_mark = excluded.story_mark`,
       [
         r.user,
         r.id,
@@ -161,6 +168,8 @@ export class Runs {
         r.saved,
         r.settled,
         r.mark,
+        r.castMark,
+        r.storyMark,
       ],
     );
   }
