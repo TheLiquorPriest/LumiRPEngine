@@ -4,8 +4,10 @@
 // the player's screen sees it, when the request left, when the first thinking and the first word of
 // the reply reached the page, when the last word did, and how many tokens Lumiverse counted. For an
 // RPE turn it then reads RPE's own record of the turn (`floor-measure.ts` says what is taken from
-// it). It prints the §17.1 table and writes every turn's raw numbers to FLOOR_OUT.
+// it). It prints the §17.1 table and writes every turn's raw numbers to FLOOR_OUT. Both connections
+// play under the floor's own preset and persona (`floor-fixture.ts`), named on every generation.
 
+import { findFixture, type Fixture, removeFixture, setupFixture } from "./floor-fixture";
 import { type Form, floorTable, type Measured, median, perToken, printRpeTurns, printTable, rpeSide } from "./floor-measure";
 import { guard, readEnv, type TestbedEnv } from "./lib/env";
 import { Lumiverse, savedToken } from "./lib/lumiverse";
@@ -14,7 +16,10 @@ import { EngineSocket, type HostEvent } from "./lib/socket";
 
 const USAGE = `usage:
   floor.ts setup
-      make the invented card and chat; prints the chat's id
+      make the floor's invented card, persona and preset (what is missing of them) and a new chat;
+      prints what it set and the chat's id
+  floor.ts remove
+      delete the floor chats, the card, the persona and the preset that setup made
   floor.ts run [--pairs N] [--only plain|rpe] [--form tag|two-step]
       play N pairs (default 10), plain then RPE, and print the §17.1 table;
       --form names the form RPE's connection replies in (required unless --only plain)
@@ -27,7 +32,6 @@ environment, besides what scripts/testbed/README.md lists for every script:
   FLOOR_RPE_CONNECTION    the Lumiverse connection that points at RPE, by name
   FLOOR_RPE_URL           RPE's address, as its server listens (rpe status prints it)
   FLOOR_RPE_TOKEN         a token RPE's pages are let in with (rpe key web)
-  FLOOR_PERSONA           the name the player's messages are sent under (default Traveller)
   FLOOR_OUT               where every turn's numbers and the table are written as JSON (optional)`;
 
 /** How long RPE may take to tie a reply to its turn after Lumiverse saved it, and to end its run after the reply. */
@@ -58,16 +62,6 @@ const LINES: readonly string[] = [
   "I say I should check on my boat once the wind drops, and ask if the path down is safe.",
 ];
 
-const CARD = {
-  name: "Marta Venn",
-  description:
-    "Marta Venn keeps the light on Skerry Rock, a day's sail from the nearest harbor. She is in her fifties, spare and weathered, slow to speak and exact when she does. She has kept the lamp for nineteen years and knows the water around the rock by sound.",
-  personality: "Dry, patient, observant. She answers what is asked and notices what is not.",
-  scenario: "A traveller's boat has put in at Skerry Rock ahead of a storm. Marta has let them into the keeper's kitchen at the foot of the tower.",
-  first_mes:
-    "The kitchen is small and warm, and smells of lamp oil and peat. Marta shuts the door against the wind and nods at the bench by the stove.\n\n\"You'll not be leaving tonight,\" she says. \"Sit. There's tea.\"",
-};
-
 function need(name: string): string {
   const value = process.env[name];
   if (value === undefined || value.trim() === "") throw new Error(`set ${name}`);
@@ -83,9 +77,9 @@ async function connectionId(host: Lumiverse, name: string): Promise<string> {
 }
 
 /** One turn: the player's line, then Send on the given connection, timed from the page's side. */
-async function turn(host: Lumiverse, socket: EngineSocket, chatId: string, connection: string, pair: number, arm: Measured["arm"], line: string, persona: string): Promise<Measured> {
+async function turn(host: Lumiverse, socket: EngineSocket, chatId: string, connection: string, pair: number, arm: Measured["arm"], line: string, fixture: Fixture): Promise<Measured> {
   const out: Measured = { pair, arm, line, messageId: null, toStarted: null, toFirstThinking: null, toFirstWord: null, toLastWord: null, toEnded: null, thinkingChars: 0, replyChars: 0, tokens: null, error: null, rpe: null, rpeError: null };
-  await host.send(chatId, persona, line);
+  await host.send(chatId, fixture.persona.name, line);
   let sent = 0;
   const { promise: ended, resolve } = Promise.withResolvers<void>();
   let endedAt: number | null = null;
@@ -120,7 +114,8 @@ async function turn(host: Lumiverse, socket: EngineSocket, chatId: string, conne
   }, 15 * 60_000);
   try {
     sent = Date.now();
-    await host.generate(chatId, "normal", connection);
+    // The floor's own preset and persona, forced, on both connections alike (floor-fixture.ts).
+    await host.call("POST", "/api/v1/generate", { chat_id: chatId, connection_id: connection, preset_id: fixture.preset.id, force_preset_id: true, persona_id: fixture.persona.id });
     await ended;
   } catch (error) {
     out.error = error instanceof Error ? error.message : String(error);
@@ -162,14 +157,6 @@ async function open(env: TestbedEnv): Promise<Lumiverse> {
   return new Lumiverse(env.hostUrl, savedToken(env));
 }
 
-async function setup(env: TestbedEnv): Promise<void> {
-  const host = await open(env);
-  const existing = (await host.characters()).find((c) => c.name === CARD.name);
-  const character = existing ?? (await host.createCharacter(CARD));
-  const chat = await host.createChat(character.id, "Floor test");
-  console.log(`character ${character.id}${existing ? " (already there)" : ""}\nchat ${chat.id}\nexport FLOOR_CHAT=${chat.id}`);
-}
-
 /** RPE's side of an RPE turn: the turn tied to the reply's message, read once its run has ended. */
 async function readRpe(api: RpeApi, live: RpeLive, chatId: string, measured: Measured, missedBefore: number): Promise<void> {
   if (measured.messageId === null) {
@@ -193,6 +180,7 @@ async function readRpe(api: RpeApi, live: RpeLive, chatId: string, measured: Mea
 async function run(env: TestbedEnv, pairs: number, only: Measured["arm"] | null, form: Form | null): Promise<void> {
   const host = await open(env);
   const chatId = guard(env, need("FLOOR_CHAT"));
+  const fixture = await findFixture(host);
   const arms: { arm: Measured["arm"]; connection: string }[] = [];
   if (only !== "rpe") arms.push({ arm: "plain", connection: await connectionId(host, need("FLOOR_PLAIN_CONNECTION")) });
   if (only !== "plain") arms.push({ arm: "rpe", connection: await connectionId(host, need("FLOOR_RPE_CONNECTION")) });
@@ -203,7 +191,6 @@ async function run(env: TestbedEnv, pairs: number, only: Measured["arm"] | null,
   const socket = await EngineSocket.open(host, "", { page: false });
   // Reply text is streamed only to a socket that says it is showing this chat.
   socket.focus(chatId);
-  const persona = process.env.FLOOR_PERSONA?.trim() || "Traveller";
   const all: Measured[] = [];
   try {
     let next = 0;
@@ -211,7 +198,7 @@ async function run(env: TestbedEnv, pairs: number, only: Measured["arm"] | null,
       for (const { arm, connection } of arms) {
         const line = LINES[next++] as string;
         const missedBefore = live?.missed.length ?? 0;
-        const measured = await turn(host, socket, chatId, connection, pair, arm, line, persona);
+        const measured = await turn(host, socket, chatId, connection, pair, arm, line, fixture);
         if (arm === "rpe" && api !== null && live !== null) await readRpe(api, live, chatId, measured, missedBefore);
         all.push(measured);
         const r = measured.rpe;
@@ -241,7 +228,7 @@ async function table(file: string, form: Form | null): Promise<void> {
   printAll(saved.turns, use);
 }
 
-type Command = { command: "help" } | { command: "setup" } | { command: "run"; pairs: number; only: Measured["arm"] | null; form: Form | null } | { command: "table"; file: string; form: Form | null };
+type Command = { command: "help" } | { command: "setup" } | { command: "remove" } | { command: "run"; pairs: number; only: Measured["arm"] | null; form: Form | null } | { command: "table"; file: string; form: Form | null };
 
 class UsageError extends Error {}
 
@@ -249,7 +236,7 @@ class UsageError extends Error {}
 function parse(argv: readonly string[]): Command {
   const [command, ...rest] = argv;
   if (command === undefined || command === "help" || command === "--help" || command === "-h") return { command: "help" };
-  const allowed: Readonly<Record<string, readonly string[]>> = { setup: [], run: ["--pairs", "--only", "--form"], table: ["--form"] };
+  const allowed: Readonly<Record<string, readonly string[]>> = { setup: [], remove: [], run: ["--pairs", "--only", "--form"], table: ["--form"] };
   const flags = allowed[command];
   if (flags === undefined) throw new UsageError(`no command "${command}"`);
   const given = new Map<string, string>();
@@ -269,9 +256,9 @@ function parse(argv: readonly string[]): Command {
   }
   const form = given.get("--form") ?? null;
   if (form !== null && form !== "tag" && form !== "two-step") throw new UsageError("--form takes tag or two-step");
-  if (command === "setup") {
-    if (words.length > 0) throw new UsageError("setup takes nothing more");
-    return { command: "setup" };
+  if (command === "setup" || command === "remove") {
+    if (words.length > 0) throw new UsageError(`${command} takes nothing more`);
+    return command === "setup" ? { command: "setup" } : { command: "remove" };
   }
   if (command === "table") {
     if (words.length !== 1) throw new UsageError("table takes one file: a run's FLOOR_OUT");
@@ -297,5 +284,8 @@ try {
 }
 if (asked.command === "help") console.log(USAGE);
 else if (asked.command === "table") await table(asked.file, asked.form);
-else if (asked.command === "setup") await setup(readEnv());
-else await run(readEnv(), asked.pairs, asked.only, asked.form);
+else if (asked.command === "setup") await setupFixture(await open(readEnv()));
+else if (asked.command === "remove") {
+  const env = readEnv();
+  await removeFixture(await open(env), env);
+} else await run(readEnv(), asked.pairs, asked.only, asked.form);

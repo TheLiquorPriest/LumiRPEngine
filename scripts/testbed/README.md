@@ -69,11 +69,14 @@ RPE lets its Turn page's routes in with a page token or with its web key. The we
 
 ```sh
 bun floor.ts --help
-bun floor.ts setup                                    # the invented card and chat; prints FLOOR_CHAT
+bun floor.ts setup                                    # the floor's card, persona, preset and a new chat; prints FLOOR_CHAT
 export FLOOR_CHAT=<the id it printed>
 bun floor.ts run --pairs 10 --form tag                # ten pairs; --form two-step on a connection that needs it
 bun floor.ts run --pairs 10 --only rpe --form tag     # RPE turns only: no comparison with plain is judged
 bun floor.ts table "$FLOOR_OUT"                       # the table again from a saved run
+bun floor.ts remove                                   # delete the floor chats, card, persona and preset
 ```
+
+The floor plays under a fixture of its own, consistent with itself, so that a simple turn asks nothing the chat cannot answer: the card (Marta Venn), a persona named as the card's scenario names the player ("Traveller", in the persona folder "Floor test (invented)") and a preset "Floor test (invented)" whose blocks are plain instructions naming nobody, the card, the scenario, the persona and the chat's history. Neither the persona nor the preset is made default or active: `run` names both on every generation it starts, plain and RPE alike (`preset_id` with `force_preset_id`, and `persona_id`, on `POST /api/v1/generate`), so no setting changes and every other chat keeps its own. The preset and the persona carry `lumirpengine_floor_test` in their metadata; `remove` deletes those, the card's chats named "Floor test", and the card when no other chat uses it.
 
 `--form` names the form RPE's connection replies in (plan §10.7). The table is judged by that form's pass values, and a turn whose release the trace names in the other form leaves every gate not judged. What each of RPE's numbers is read from is said beside its field of `RpeTurn` in `floor-measure.ts`; what the script cannot measure yet is printed as such, with what RPE would have to give for it.
