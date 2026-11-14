@@ -44,6 +44,9 @@ export const REPLY = [
 
 export const PROGRESS = ["Reading the scene", "Asking the GM", "Writing"];
 
+/** The lore of the recorded turn's prompt: the entries Lumiverse activated for it, by Lumiverse's ids, and those its lore map showed the Author, by RPE's. */
+export const LORE = { activated: ["wbe-0071", "wbe-0102"], map: ["e-12", "e-31", "e-40"] } as const;
+
 const scope = { user: USER, chat: CHAT, session: SESSION, turn: RUN };
 const usage = (calls: number, input: number, cacheRead: number, output: number, reasoning?: number): Usage => ({ calls, input, cacheRead, cacheWrite: 0, output, ...(reasoning === undefined ? {} : { reasoning }) });
 
@@ -233,6 +236,7 @@ export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat:
     reply: { text, progress },
     error: outcome?.error ?? null,
     trace: records.filter((r) => r.seq >= (options.from ?? 1)),
+    lore: { activated: [...LORE.activated], map: [...LORE.map] },
   };
 }
 
@@ -264,7 +268,7 @@ export function earlierTurn(id: string, chat = CHAT): TurnDetail | null {
   const summary = EARLIER.find((t) => t.id === id);
   const words = EARLIER_WORDS[id];
   if (summary === undefined || words === undefined) return null;
-  return { ...summary, chat, intent: words.intent, reply: { text: words.reply, progress: [] }, error: summary.status === "stopped" ? { code: "stopped" } : null, trace: [] };
+  return { ...summary, chat, intent: words.intent, reply: { text: words.reply, progress: [] }, error: summary.status === "stopped" ? { code: "stopped" } : null, trace: [], lore: { activated: [], map: [] } };
 }
 
 /** A chat's list of turns, newest first: the recorded one as it stands after `count` events, then the earlier ones. */

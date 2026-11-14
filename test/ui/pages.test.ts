@@ -10,7 +10,7 @@ import { LiveView, type LiveViewProps } from "../../src/ui/pages/live";
 import { TURN_SECTIONS, TurnView, type TurnViewProps } from "../../src/ui/pages/turns";
 import { hashOf, routeOfHash } from "../../src/ui/web";
 import { liveTurn } from "../../src/ui/turn-model";
-import { CHAT, CONTINUED_REPLY, continuedTurn, INTENT, RECORDED, RECORDS, REPLY, RUN, TOTAL, turnAt } from "./recorded";
+import { CHAT, CONTINUED_REPLY, continuedTurn, earlierTurn, INTENT, LORE, RECORDED, RECORDS, REPLY, RUN, TOTAL, turnAt } from "./recorded";
 import { elements, expand, press, textOf } from "./vnodes";
 
 const RULING = "Ruling: her story does not hold.";
@@ -62,17 +62,26 @@ describe("the Turn page", () => {
     expect(text).toContain(REPLY.split("\n")[0] as string);
   });
 
-  test("behind the gate: what the Author was given by name, and the turn's folder named as not available, with no route to open it", () => {
+  test("behind the gate: what the Author was given by name, its prompt's lore by id, and the turn's folder named as not available, with no route to open it", () => {
     const shut = turnView({ gateOpen: false });
     expect(shut.text).not.toContain("prompt:all");
+    expect(shut.text).not.toContain(LORE.map[1]);
     expect(shut.text).not.toContain("world-state.md");
     const open = turnView({ gateOpen: true });
     expect(open.text).toContain("What the Author was given");
     expect(open.text).toContain("author was given: prompt:all, story:brief, world:scene.");
+    expect(open.text).toContain(`Lumiverse activated for its prompt: ${LORE.activated.join(", ")}`);
+    expect(open.text).toContain(`Its lore map showed the Author: ${LORE.map.join(", ")}`);
     expect(open.text).toContain("Not available here yet: RPE has no route that lists a turn's folder or opens its files");
     for (const name of ["briefing.md", "world-state.md", "active-wi-content.md", "transcripts/"]) expect(open.text).toContain(name);
     // Each agent's model calls with their tools and results are drawn too.
     expect(open.text).toContain("2d6 = 4 + 1 = 5 against 8: it does not hold.");
+    // A turn whose prompt had no lore says so.
+    const earlier = earlierTurn("turn-30");
+    if (earlier === null) throw new Error("the fixture has no turn-30");
+    const bare = turnView({ turn: earlier, gateOpen: true }).text;
+    expect(bare).toContain("Lumiverse activated for its prompt: no entry.");
+    expect(bare).toContain("Its lore map showed the Author: no entry.");
   });
 
   test("with the gate open, every agent of the run is drawn, with its tokens", () => {
