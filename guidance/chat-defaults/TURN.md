@@ -31,7 +31,7 @@ The prompt holds only the latest stretch of the chat. If the message reaches bac
 Only now decide how deep to go, and say so in the last line of your intent record: the depth, why, and what must happen before the reply, right after it, and later.
 
 - **Direct.** Nothing needs looking up, ruling or inventing. Decide both lanes yourself, write, and record after the reply. A greeting, a line of talk, a walk across the room, paying for a drink. One call.
-- **Assisted.** You need a fact, a ruling, a roll, or one character's own answer to something pivotal. Get exactly that, then write. Aim for five calls or fewer in all, the reply's own included.
+- **Assisted.** You need a fact, a ruling, a roll, or one character's own answer to something pivotal. Get exactly that, then write. What you already know you need (a gap check, a read, a query), ask for in the same call as your intent record, so that your next call can be the reply. Aim for five calls or fewer in all, the reply's own included.
 - **Full.** The moment turns on what several minds do, or on a contest, or it covers a stretch of time with consequences. Turn it into a living moment and run it with the characters and the GM. Load the skill `sandbox`.
 
 Choose by what the turn needs, not by habit, and not to save effort.
