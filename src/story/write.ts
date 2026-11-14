@@ -2,12 +2,12 @@
 // in order, one call writing many. The call is read whole first, against the record as it stands with
 // each earlier operation of the call applied: anything it cannot read (an operation that is none of
 // the list, an id the record does not hold, a message the chat does not have, a time that is not one)
-// answers the whole call, and nothing is recorded. Then the user's setting for the story lane is asked
-// through the contract's approvals, never decided here. What goes ahead is recorded in one queued
-// write, the lore lane's overlays included, and the answer says what each operation wrote, how its
-// item now stands, and what did not add up.
+// answers the whole call, and nothing is recorded. The user's setting for the story lane is not asked
+// here: the tool is a write to that lane, so the harness's gate holds the call by it before it runs,
+// once. What goes ahead is recorded in one queued write, the lore lane's overlays included, and the
+// answer says what each operation wrote, how its item now stands, and what did not add up.
 
-import type { ApprovalAsk, JsonObject, JsonValue } from "rp-harness/contract";
+import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { oneOf, type Reply, TEXT, TEXTS, WHOLE, YES_NO } from "../iface/kit";
 import type { Fields } from "../iface/texts";
 import { DRAFT_TIERS } from "../shared/ledger";
@@ -199,7 +199,9 @@ function findItem(r: Reading, def: OpDef, n: number, raw: JsonObject, value: Jso
       if (raw.new === true) return { item: `new:${n}`, fresh: true };
       if (named !== undefined && named !== null) return byId();
       const current = r.record.current(def.part as "scene" | "chapter");
-      return current === null ? { line: "no_current", fields: { n, op: def.name, part: def.part } } : { item: current.id, fresh: false };
+      if (current === null) return { line: "no_current", fields: { n, op: def.name, part: def.part } };
+      // A closed one is not written to unless it is named: the operation may mean a new one.
+      return current.closedBy === null ? { item: current.id, fresh: false } : { line: "current_closed", fields: { n, op: def.name, part: def.part, id: current.id } };
     }
     case "arc": {
       const who = readArg(r, n, def.name, "who", "names", raw.who);
@@ -252,18 +254,6 @@ function readOp(r: Reading, n: number, raw: JsonValue): Read | Unread[] {
   return { n, op, part: def.part, item: found.item, fresh: found.fresh, value, reports };
 }
 
-/** The user's word for the story lane: null to go ahead; else why the call's operations may not. */
-async function approval(call: StoryCall, operations: JsonValue[]): Promise<"never" | { declined: string | undefined } | null> {
-  const approvals = call.deps.approvals;
-  if (approvals === undefined) return null;
-  const permission = await approvals.permission(call.scope, STORY_LANE);
-  if (permission === "auto") return null;
-  if (permission === "never") return "never";
-  const ask: ApprovalAsk = { agent: call.agent, callId: call.callId, tool: call.tool, lane: STORY_LANE, args: { operations }, at: (call.deps.now ?? Date.now)() };
-  const said = await approvals.ask(call.scope, ask, call.signal);
-  return said.go ? null : { declined: said.reason };
-}
-
 /** Raised inside the write when the lore lane does not know an entry: the write is undone and the answer says so. */
 class OverlayRefused extends Error {
   constructor(
@@ -295,15 +285,6 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
   if (unread.length > 0) {
     for (const u of unread) reply.line(u.line, u.fields);
     return reply.line("nothing_recorded", {}).fail();
-  }
-
-  const held = await approval(call, list);
-  if (held !== null) {
-    for (const r of read) {
-      if (held === "never") reply.line("never", { n: r.n, op: r.op, lane: STORY_LANE });
-      else reply.line("declined", { n: r.n, op: r.op, ...(held.declined !== undefined ? { reason: held.declined } : {}) });
-    }
-    return reply.data({ operations: read.map((r) => ({ n: r.n, op: r.op, recorded: false, held: held === "never" ? "never" : "declined" })) });
   }
 
   const writer = { user: call.scope.user, turn, by: call.agent.definition, agent: call.agent.id, job: call.agent.job ?? null, now: (call.deps.now ?? Date.now)() };

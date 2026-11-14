@@ -3,7 +3,7 @@ description: story_record as the model is told it - what the tool does, and what
 arguments:
   operations: The operations, recorded in order, in one write.
   operations.op: "The operation: premise, chapter, scene, beat, thread, arc, player, future, canon, retcon, record or overlay."
-  operations.id: "The item to change, by the id the record gave it. Leave it out to add a new beat, thread, player note, future, canon or retcon. A chapter or scene named by no id is the current one."
+  operations.id: "The item to change, by the id the record gave it. Leave it out to add a new beat, thread, player note, future, canon or retcon. A chapter or scene named by no id is the current one, while it is open; once it is closed, name it by its id."
   operations.new: "chapter, scene: true to open a new one."
   operations.text: "beat: what happened, as fact. thread: the open question, the promise or the setup. player: what you learned about the player. future: what is to happen. canon: what was established. retcon: what changed. premise: what this story is. overlay: what the story has changed in the entry."
   operations.title: "chapter, scene: its name."

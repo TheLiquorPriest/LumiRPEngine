@@ -10,6 +10,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { JsonObject, JsonValue } from "rp-harness/contract";
+import { type Store, StoreInputError } from "../store";
 import type { StoryAt } from "./path";
 
 /** The parts of the record, as the plan names them (§8.1). */
@@ -152,11 +153,17 @@ export class StoryRecord {
     return out;
   }
 
-  /** The scene or chapter the chat is in now: the one that starts last, one still being placed counting as last. Null when there is none. */
+  /**
+   * The scene or chapter the chat is in now: the one that starts last, one whose opening turn is not
+   * placed yet counting as last. One that names a first message the chat no longer has (deleted) is
+   * past, not current. Null when there is none. It may be closed: then the chat is in none.
+   */
   current(part: SpanPart): StoryItem | null {
     let best: { item: StoryItem; from: number } | null = null;
     for (const item of this.of(part)) {
-      const from = this.startOf(item) ?? Number.POSITIVE_INFINITY;
+      const placed = this.startOf(item);
+      if (placed === null && item.fields.first !== undefined) continue;
+      const from = placed ?? Number.POSITIVE_INFINITY;
       if (best === null || from >= best.from) best = { item, from };
     }
     return best?.item ?? null;
@@ -211,4 +218,46 @@ export function writeStory(db: Database, writer: StoryWriter, writes: readonly S
     if (w.item === null) name.run(item, id);
     return { id, turn: writer.turn, ord: ord++, part: w.part, item, value: w.value, by: writer.by, agent: writer.agent, job: writer.job, created: writer.now };
   });
+}
+
+/**
+ * Takes back one agent's story rows on an open turn (every agent's when none is named), by the
+ * agent's handle, inside the caller's queued write, beside the store's `dropStaged`: the lead
+ * dropping a sub-agent's writes. How many went. A turn that is not open has nothing staged, and is
+ * refused as the store refuses it.
+ */
+export function dropStoryStaged(store: Store, user: string, turn: string, agent?: string): number {
+  const row = store.user(user).turn(turn);
+  if (row === null) throw new StoreInputError(`turn ${turn} is not there`);
+  if (row.status !== "open") throw new StoreInputError(`turn ${turn} is ${row.status}: only an open turn's staged story rows can be taken back`);
+  const gone = agent === undefined ? store.db.run("DELETE FROM story_entry WHERE user = ? AND turn = ?", [user, turn]) : store.db.run("DELETE FROM story_entry WHERE user = ? AND turn = ? AND agent = ?", [user, turn, agent]);
+  return gone.changes;
+}
+
+/** The story's mark on a turn now: the place of its last row, -1 when it has none. A continue takes it as it begins, beside the store's mark. */
+export function storyMark(db: Database, user: string, turn: string): number {
+  return db.query<{ n: number | null }, [string, string]>("SELECT max(ord) AS n FROM story_entry WHERE user = ? AND turn = ?").get(user, turn)?.n ?? -1;
+}
+
+/**
+ * Takes back a turn's story rows written after `after` (a `storyMark`), tied or not, inside the
+ * caller's queued write, beside the store's `takeBack`: what a continue recorded when it saved
+ * nothing. A job's rows are the job's and stay, as the store keeps a job's changes. How many went.
+ */
+export function takeBackStory(db: Database, user: string, turn: string, after: number): number {
+  return db.run("DELETE FROM story_entry WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL", [user, turn, after]).changes;
+}
+
+/**
+ * Removes the story rows of turns the store no longer holds, inside the caller's queued write, right
+ * after the store removed them: a chat deleted (`UserStore.deleteChat` when it is not kept for a
+ * branch), or an import forgotten (`UserStore.forgetImport`). Rows of a turn a branch still shares
+ * stay with the turn. How many went.
+ */
+export function dropLeftoverStory(store: Store, user: string): number {
+  const u = store.user(user);
+  const turns = store.db.query<{ turn: string }, [string]>("SELECT DISTINCT turn FROM story_entry WHERE user = ?").all(user);
+  const gone = turns.flatMap((r) => (u.turn(r.turn) === null ? [r.turn] : []));
+  if (gone.length === 0) return 0;
+  return store.db.run("DELETE FROM story_entry WHERE user = ? AND turn IN (SELECT value FROM json_each(?))", [user, JSON.stringify(gone)]).changes;
 }

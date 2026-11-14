@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { loadGuidance, type TemplatePart } from "rp-harness";
 import { createFolderHost } from "rp-harness/hosts/folder";
-import { storyBrief, storyRecordParts } from "../../src/story/index";
+import { type StoryBrief, storyBrief, storyRecordParts } from "../../src/story/index";
 import { storyClock } from "../../src/story/kit";
 import { keyedItemId } from "../../src/story/record";
 import { STORY_SO_FAR_DEFAULTS, storySoFar } from "../../src/story/sofar/index";
@@ -92,6 +92,27 @@ describe("the story brief", () => {
     await t.play([{ part: "scene", item: mill, value: { close: true } }]);
     const brief = storyBrief({ store: t.store, user: USER, chat: CHAT, turn: null, layout: layouts["story-brief"] as TemplatePart });
     expect(brief).toEqual({ text: "", fields: {} });
+  });
+
+  test("deleting the first message, which a past scene names, leaves the open scene current and in the brief", async () => {
+    const t = await openTable();
+    await t.play();
+    await t.play([
+      { part: "scene", item: null, value: { title: "The mill", who: ["Mira"] } },
+      { part: "arc", item: keyedItemId("arc", "Mira"), value: { who: "Mira", stands: "Wary." } },
+      // A past scene the Author placed by the messages it names, closed as it was written.
+      { part: "scene", item: null, value: { title: "Recalled", first: "m0", last: "m1", close: true, summary: "Mira's father sold the mill." } },
+    ]);
+    const layout = layouts["story-brief"] as TemplatePart;
+    const brief = (): StoryBrief => storyBrief({ store: t.store, user: USER, chat: CHAT, turn: null, layout });
+    expect(brief().fields.scene).toMatchObject({ title: "The mill" });
+
+    await t.removeIds(["m0"]);
+    expect(t.record().current("scene")?.fields.title).toBe("The mill");
+    const after = brief();
+    expect(after.fields.scene).toMatchObject({ title: "The mill" });
+    expect(after.fields.arcs?.items.map((x) => x.who)).toEqual(["Mira"]);
+    expect(after.text).not.toContain("Recalled");
   });
 });
 

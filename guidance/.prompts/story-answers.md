@@ -17,9 +17,8 @@ no_clock: Operation {{n}} ({{op}}): this chat keeps no story time, so {{field}} 
 unreadable_time: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}. Write a date and time (YYYY-MM-DD HH:MM) or a span from now (two days, until dawn).
 unknown_id: {{#n}}Operation {{n}} ({{op}}): {{/n}}the story record on this path holds no {{#part}}{{part}} {{/part}}{{id}}.
 no_current: Operation {{n}} ({{op}}): there is no {{part}} yet. Open one with new.
+current_closed: Operation {{n}} ({{op}}): the current {{part}}, {{id}}, is closed. Open a new one with new, or name {{id}} to write to it.
 nothing_recorded: Nothing was recorded. Send the call again with that put right.
-never: Operation {{n}} ({{op}}) was not recorded: it writes to the {{lane}} lane, where the player allows no writes.
-declined: Operation {{n}} ({{op}}) was not recorded: the player said no.{{#reason}} Their reason: {{reason}}{{/reason}}
 already_closed: Operation {{n}} ({{op}}): {{id}} was already closed.
 due_now: Operation {{n}} ({{op}}): it falls due at {{due}}, which is not after now ({{now}}), so it is due at once.
 no_overlays: Operation {{n}} ({{op}}): this host keeps no lore overlays yet, so none was written.

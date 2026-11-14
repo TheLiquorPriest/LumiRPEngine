@@ -43,16 +43,15 @@ function wholeAtLeast(value: number, least: number, what: string): void {
 }
 
 /**
- * The window over the chat's messages on the path, oldest first. `covered` holds the ids of the
- * messages the story record covers; it matters only to the hold, and to how `left` is split.
+ * The place of the first message the window keeps among `count` messages (0: it keeps them all).
+ * `covered(place)` says whether the message at that place is covered; it matters only to the hold.
  */
-export function historyWindow(messages: readonly WindowMessage[], settings: WindowSettings, covered: ReadonlySet<string>): WindowCut {
+export function windowStart(count: number, settings: WindowSettings, covered: (place: number) => boolean): number {
   const { size, step, hold } = settings;
   if (size !== null) wholeAtLeast(size, 1, "size");
   if (step !== null) wholeAtLeast(step, 1, "step");
   wholeAtLeast(hold.cap, 0, "hold's cap");
 
-  const count = messages.length;
   let first = 0;
   if (size !== null && count > size) {
     // With a step, the cut moves only in whole steps, so the window runs from `size` to `size + step - 1`
@@ -63,14 +62,21 @@ export function historyWindow(messages: readonly WindowMessage[], settings: Wind
   if (hold.on && first > 0) {
     const reach = Math.max(0, first - hold.cap);
     for (let i = reach; i < first; i++) {
-      const message = messages[i];
-      if (message !== undefined && !covered.has(message.id)) {
+      if (!covered(i)) {
         first = i;
         break;
       }
     }
   }
+  return first;
+}
 
+/**
+ * The window over the chat's messages on the path, oldest first. `covered` holds the ids of the
+ * messages the story record covers; it matters only to the hold, and to how `left` is split.
+ */
+export function historyWindow(messages: readonly WindowMessage[], settings: WindowSettings, covered: ReadonlySet<string>): WindowCut {
+  const first = windowStart(messages.length, settings, (place) => covered.has(messages[place]?.id ?? ""));
   const left: LeftOutRange[] = [];
   for (let i = 0; i < first; i++) {
     const message = messages[i];

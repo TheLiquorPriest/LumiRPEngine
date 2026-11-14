@@ -95,8 +95,25 @@ export function storySoFarBudget(contextWindow: number, settings: StorySoFarSett
 
 function unitsOf(record: StoryRecordParts, keptFrom: number): Unit[] {
   const scenes = record.scenes.filter((s) => s.from < keptFrom);
-  // A beat inside a scene that has its summary is told by that summary.
-  const beats = record.beats.filter((b) => b.at < keptFrom && !scenes.some((s) => b.at >= s.from && b.at <= s.to));
+  // A beat inside a scene that has its summary is told by that summary. Scenes by where they start, each with the
+  // furthest any scene starting no later reaches: a beat is inside one when the last to start at or before it reaches it.
+  const byStart = [...scenes].sort((a, b) => a.from - b.from);
+  const reach: number[] = [];
+  for (const s of byStart) reach.push(Math.max(reach.at(-1) ?? Number.NEGATIVE_INFINITY, s.to));
+  const told = (at: number): boolean => {
+    let lo = 0;
+    let hi = byStart.length - 1;
+    let last = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if ((byStart[mid]?.from ?? Number.POSITIVE_INFINITY) <= at) {
+        last = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    return last >= 0 && (reach[last] ?? Number.NEGATIVE_INFINITY) >= at;
+  };
+  const beats = record.beats.filter((b) => b.at < keptFrom && !told(b.at));
   const items: Item[] = [
     ...scenes.map((summary): Item => ({ kind: "scene", summary, from: summary.from, to: summary.to })),
     ...beats.map((beat): Item => ({ kind: "beat", beat, from: beat.at, to: beat.at })),
@@ -104,8 +121,12 @@ function unitsOf(record: StoryRecordParts, keptFrom: number): Unit[] {
 
   const chapters = record.chapters.filter((c) => c.from < keptFrom).sort((a, b) => a.from - b.from);
   const units: Unit[] = chapters.map((chapter) => ({ chapter, items: [], from: chapter.from, to: chapter.to }));
+  // An item goes to the first chapter, by where chapters start, that holds where it starts. Items come in that order,
+  // so a chapter that ends before one item ends before every later one.
+  let open = 0;
   for (const item of items) {
-    const unit = units.find((u) => u.chapter !== null && item.from >= u.chapter.from && item.from <= u.chapter.to);
+    while (open < chapters.length && (chapters[open]?.to ?? Number.POSITIVE_INFINITY) < item.from) open++;
+    const unit = (chapters[open]?.from ?? Number.POSITIVE_INFINITY) <= item.from ? units[open] : undefined;
     if (unit !== undefined) unit.items.push(item);
     else units.push({ chapter: null, items: [item], from: item.from, to: item.to });
   }
@@ -151,11 +172,25 @@ function partsOf(units: readonly Unit[], levels: readonly Level[]): { parts: Sto
   return { parts, leftOut };
 }
 
+/** The greatest n from `low` to `high` for which `holds(n)`, given that it holds for `low` and, once it fails, fails for every greater n. */
+function furthest(low: number, high: number, holds: (n: number) => boolean): number {
+  let lo = low;
+  let hi = high;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (holds(mid)) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
 /**
  * The story so far for the history before `keptFrom`. Units are given a place newest first: each is
  * shown whole if the block still fits, else by its chapter's summary if it has one and that fits,
  * else counted as left out; once one is not whole, nothing older is, and once a chapter's summary
- * has no room, nothing older is shown at all.
+ * has no room, nothing older is shown at all. Showing more never takes less room, so how many of
+ * the newest units go whole, and then how many chapters go by their summary, are each found by
+ * halving: the block is laid out and counted a few times however long the chat, never once per unit.
  */
 export function storySoFar(input: StorySoFarInput): StorySoFar {
   const budget = storySoFarBudget(input.contextWindow, input.settings);
@@ -163,32 +198,38 @@ export function storySoFar(input: StorySoFarInput): StorySoFar {
   const units = unitsOf(input.record, input.keptFrom);
   if (units.length === 0) return { text: "", tokens: 0, budget, leftOut: [] };
 
-  const levels: Level[] = units.map(() => 0);
-  const lay = (): { text: string; tokens: number; leftOut: StorySoFarLeftOut[] } => {
-    const { parts, leftOut } = partsOf(units, levels);
-    const text = input.layout.render({ parts }).text;
-    return { text, tokens: input.tokens(text), leftOut };
-  };
-
-  let laid = lay();
-  let cap: Level = 2;
-  for (let i = units.length - 1; i >= 0 && cap > 0; i--) {
-    const unit = units[i];
-    if (unit === undefined) continue;
-    const tries: Level[] = unit.chapter === null ? [2] : [2, 1];
-    let placed: Level = 0;
-    for (const level of tries) {
-      if (level > cap) continue;
-      levels[i] = level;
-      const attempt = lay();
-      if (attempt.tokens <= budget) {
-        laid = attempt;
-        placed = level;
-        break;
-      }
+  const laidOut = new Map<string, { text: string; tokens: number; leftOut: StorySoFarLeftOut[] }>();
+  const lay = (levels: readonly Level[]): { text: string; tokens: number; leftOut: StorySoFarLeftOut[] } => {
+    const key = levels.join("");
+    let laid = laidOut.get(key);
+    if (laid === undefined) {
+      const { parts, leftOut } = partsOf(units, levels);
+      const text = input.layout.render({ parts }).text;
+      laid = { text, tokens: input.tokens(text), leftOut };
+      laidOut.set(key, laid);
     }
-    levels[i] = placed;
-    if (placed < 2) cap = unit.chapter === null ? (Math.min(cap, 1) as Level) : placed;
+    return laid;
+  };
+  const fits = (levels: readonly Level[]): boolean => lay(levels).tokens <= budget;
+
+  // The newest `count` units whole, the rest left out; with none whole, everything is left out, room or not.
+  const n = units.length;
+  const whole = (count: number): Level[] => units.map((_, i) => (i >= n - count ? 2 : 0));
+  // The last unit's step is apart: given whole, it takes the line for what is left out with it.
+  let count = furthest(0, n - 1, (c) => fits(whole(c)));
+  if (count === n - 1 && fits(whole(n))) count = n;
+  let levels = whole(count);
+  if (count < n) {
+    // The first unit that was not whole, and those older, with a chapter: newest first, by their summaries.
+    const chapters: number[] = [];
+    for (let i = n - count - 1; i >= 0; i--) if ((units[i]?.chapter ?? null) !== null) chapters.push(i);
+    const summed = (m: number): Level[] => {
+      const out = whole(count);
+      for (const i of chapters.slice(0, m)) out[i] = 1;
+      return out;
+    };
+    levels = summed(furthest(0, chapters.length, (m) => fits(summed(m))));
   }
+  const laid = lay(levels);
   return { text: laid.text, tokens: laid.tokens, budget, leftOut: laid.leftOut };
 }

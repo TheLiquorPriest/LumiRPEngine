@@ -4,7 +4,8 @@ import { join } from "node:path";
 import type { ApprovalAnswer, ApprovalAsk, HostTool, JsonObject, LanePermission, ToolResult } from "rp-harness/contract";
 import { Lines, SHIPPED_GUIDANCE, shippedTexts } from "../../src/iface/texts";
 import { type LoreOverlay, type StoryDeps, storyTools, STORY_TOOLS } from "../../src/story/index";
-import { CHAT, openTable, type Table, USER } from "./rig";
+import { storyClock } from "../../src/story/kit";
+import { CHAT, openTable, type Table, type TableOptions, USER } from "./rig";
 
 const patterns = Lines.parse(readFileSync(join(SHIPPED_GUIDANCE, ".prompts", "story-answers.md"), "utf8"), "story-answers.md").patterns();
 
@@ -47,8 +48,8 @@ interface Bench {
   call(name: string, args: JsonObject, turn?: string | null): Promise<ToolResult>;
 }
 
-async function bench(more: Partial<StoryDeps> = {}): Promise<Bench> {
-  const t = await openTable();
+async function bench(more: Partial<StoryDeps> = {}, table: TableOptions = {}): Promise<Bench> {
+  const t = await openTable(table);
   const deps: StoryDeps = { store: t.store, writes: t.writes, files: shippedTexts(), now: () => 7, ...more };
   const tools = new Map((await storyTools(deps)).map((x) => [x.name, x]));
   const call = async (name: string, args: JsonObject, turn: string | null = null): Promise<ToolResult> => {
@@ -60,13 +61,18 @@ async function bench(more: Partial<StoryDeps> = {}): Promise<Bench> {
   return { t, tools, call };
 }
 
-/** Approvals as the user set them, with every question asked kept. */
-function approvals(permission: LanePermission, answer: ApprovalAnswer = { go: true }): { port: NonNullable<StoryDeps["approvals"]>; asked: ApprovalAsk[] } {
+/** Approvals as the user set them, with every question asked and every lane whose permission was read kept. */
+function approvals(permission: LanePermission, answer: ApprovalAnswer = { go: true }): { port: { permission(scope: unknown, lane: string): Promise<LanePermission>; ask(scope: unknown, ask: ApprovalAsk): Promise<ApprovalAnswer> }; asked: ApprovalAsk[]; lanes: string[] } {
   const asked: ApprovalAsk[] = [];
+  const lanes: string[] = [];
   return {
     asked,
+    lanes,
     port: {
-      permission: async () => permission,
+      permission: async (_scope, lane) => {
+        lanes.push(lane);
+        return permission;
+      },
       ask: async (_scope, ask) => {
         asked.push(ask);
         return answer;
@@ -163,31 +169,48 @@ describe("story_record", () => {
     expect(scene).not.toHaveProperty("closed");
   });
 
-  test("asks the story lane's setting through the approvals: Never and a refusal record nothing, a yes records", async () => {
-    const never = approvals("never");
-    const b = await bench({ approvals: never.port });
-    const turn = await b.t.begin();
-    const operations = [{ op: "beat", text: "The lamp gutters." }];
-    const r = await b.call("story_record", { operations }, turn.id);
+  test("the tool asks the user nothing and reads no permission: the harness's gate holds the story lane before the call, once", async () => {
+    // Handed an approvals port anyway (as a host might), under Confirm with a no, and under Never.
+    for (const permission of ["confirm", "never"] as const) {
+      const user = approvals(permission, { go: false, reason: "Not yet." });
+      const b = await bench({ ...({ approvals: user.port } as object) });
+      // What the gate holds the call by: a write to the story lane.
+      const tool = b.tools.get("story_record");
+      expect([tool?.tier, tool?.lane]).toEqual(["write", "story"]);
+      const turn = await b.t.begin();
+      const r = await b.call("story_record", { operations: [{ op: "beat", text: "The lamp gutters." }] }, turn.id);
+      wordsFromFiles(r);
+      expect(r.error).toBeUndefined();
+      expect(user.asked).toEqual([]);
+      expect(user.lanes).toEqual([]);
+      expect(b.t.record(turn).of("beat").map((x) => x.fields.text)).toEqual(["The lamp gutters."]);
+    }
+  });
+
+  test("a scene operation that names no scene, when the current scene is closed, is refused and the closed scene is left as it was", async () => {
+    const b = await bench();
+    const first = await b.t.begin();
+    const ford = String(ops(await b.call("story_record", { operations: [{ op: "scene", new: true, title: "The ford", who: ["Corvin"] }] }, first.id))[0]?.id);
+    await b.t.tie(first);
+    const second = await b.t.begin();
+    await b.call("story_record", { operations: [{ op: "scene", summary: "Corvin is left at the ford.", close: true }] }, second.id);
+    await b.t.tie(second);
+
+    const third = await b.t.begin();
+    const r = await b.call("story_record", { operations: [{ op: "beat", text: "The mill wheel creaks." }, { op: "scene", title: "The mill", who: ["Mira"] }] }, third.id);
+    expect(r.error).toBe(true);
     wordsFromFiles(r);
-    expect(texts(r).join("\n")).toContain("story lane, where the player allows no writes");
-    expect(ops(r)).toEqual([{ n: 1, op: "beat", recorded: false, held: "never" }]);
-    expect(never.asked).toEqual([]);
+    const said = texts(r).join("\n");
+    expect(said).toContain(`Operation 2 (scene): the current scene, ${ford}, is closed.`);
+    expect(said).toContain("Nothing was recorded");
+    const record = b.t.record(third);
+    expect(record.of("beat")).toEqual([]);
+    expect(record.items.get(ford)?.fields).toEqual({ title: "The ford", who: ["Corvin"], summary: "Corvin is left at the ford." });
 
-    const no = approvals("confirm", { go: false, reason: "Not yet." });
-    const c = await bench({ approvals: no.port });
-    const t2 = await c.t.begin();
-    const declined = await c.call("story_record", { operations }, t2.id);
-    expect(texts(declined).join("\n")).toContain("Their reason: Not yet.");
-    expect(no.asked).toEqual([expect.objectContaining({ tool: "story_record", lane: "story", args: { operations }, at: 7 })]);
-    expect(c.t.record(t2).items.size).toBe(0);
-
-    const yes = approvals("confirm");
-    const d = await bench({ approvals: yes.port });
-    const t3 = await d.t.begin();
-    await d.call("story_record", { operations }, t3.id);
-    expect(yes.asked).toHaveLength(1);
-    expect(d.t.record(t3).of("beat")).toHaveLength(1);
+    // Named by its id, the closed scene can still be written to; opened with new, a scene is new.
+    const named = await b.call("story_record", { operations: [{ op: "scene", id: ford, summary: "Corvin waits at the ford." }, { op: "scene", new: true, title: "The mill" }] }, third.id);
+    expect(named.error).toBeUndefined();
+    expect(ops(named).map((o) => o.id)).toEqual([ford, expect.not.stringMatching(ford)]);
   });
 
   test("an overlay is the lore lane's write, made in the same write; an entry it does not know refuses the whole call", async () => {
@@ -227,6 +250,23 @@ describe("story_record", () => {
     expect(later?.now).toMatchObject({ due: "Sat 1 Mar 2031, 10:30 AM", tier: 2, standing: "proposed" });
     expect(r.reports).toEqual(["Operation 2 (future): it falls due at Sat 1 Mar 2031, 7:00 AM, which is not after now (Sat 1 Mar 2031, 8:00 AM), so it is due at once."]);
     expect(past?.now).toMatchObject({ due: "Sat 1 Mar 2031, 7:00 AM" });
+  });
+
+  test("a chat that started with no world keeps story time on the blank world it plays on: a due time is read, and a future falls due", async () => {
+    const b = await bench({}, { world: false });
+    const turn = await b.t.begin();
+    const r = await b.call("story_record", { operations: [{ op: "future", text: "The reeve's man calls.", due: "two hours" }] }, turn.id);
+    expect(r.error).toBeUndefined();
+    wordsFromFiles(r);
+    const clock = storyClock(b.t.store, USER, CHAT, turn.id);
+    if (clock === null) throw new Error("a chat with no world plays on the blank world, which keeps a clock");
+    expect(ops(r)[0]?.now).toMatchObject({ due: clock.text(clock.now + 120) });
+
+    await b.t.write(turn, [{ part: "future", item: null, value: { text: "The ice breaks.", due: clock.now - 30 } }]);
+    await b.t.tie(turn);
+    const due = dataOf(await b.call("story_query", { due: true }));
+    expect((due.future as JsonObject[]).map((x) => x.text)).toEqual(["The ice breaks."]);
+    expect(due.now).toBe(clock.text(clock.now));
   });
 
   test("writes every part, and story_query reads each back as it stands", async () => {

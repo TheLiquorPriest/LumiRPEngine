@@ -5,7 +5,7 @@
 // made with the engine's own answer builder, so both lanes answer in one shape.
 
 import type { Database } from "bun:sqlite";
-import type { AgentRef, ApprovalsPort, HostTool, JsonObject, JsonValue, Scope, ToolCtx, ToolResult, ToolTier } from "rp-harness/contract";
+import type { AgentRef, HostTool, JsonObject, JsonValue, Scope, ToolCtx, ToolResult, ToolTier } from "rp-harness/contract";
 import { calendarOf, clockOfStamp, formatClock, placeOffset } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
 import { resolveTarget, typedSpan } from "../engine/time";
@@ -42,13 +42,11 @@ export interface StoryDeps {
   writes: Writes;
   /** The guidance files in force for the chat: the tools' descriptions and the answers' lines. */
   files: GuidanceFiles;
-  /** The user's Auto / Confirm / Never per lane; absent, every lane is Auto (Appendix D.1). */
-  approvals?: ApprovalsPort;
   /** The lore lane's overlay; absent, an `overlay` operation is answered that there is none. */
   overlay?: LoreOverlay;
   /** Settings over `STORY_DEFAULTS`. */
   settings?: Partial<StorySettings>;
-  /** Milliseconds since 1970, for an approval's question and a row's time; `Date.now` when absent. */
+  /** Milliseconds since 1970, for a row's time; `Date.now` when absent. */
   now?: () => number;
 }
 
@@ -130,10 +128,15 @@ export interface StoryClock {
   text(at: number): string;
 }
 
-/** The chat's story time at a turn, or at its head; null for a chat that keeps none. Read exactly as the engine's own tools read a time. */
+/**
+ * The chat's story time at a turn, or at its head, read exactly as the engine's own tools read a time:
+ * from the world the state is played on, the blank one for a chat that names none, and a world
+ * attached later once the state is upgraded to it. Null for a chat the store does not hold, or a
+ * state whose world it cannot find.
+ */
 export function storyClock(store: Store, user: string, chat: string, turn: string | null): StoryClock | null {
   const u = store.user(user);
-  if ((u.chat(chat)?.revision ?? null) === null) return null;
+  if (u.chat(chat) === null) return null;
   const state = (turn === null ? u.headState(chat) : u.stateAt(turn)).state.world;
   const doc = store.env.worlds(state.revision);
   if (doc === undefined) return null;

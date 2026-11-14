@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { keyedItemId, STORY_PARTS, type StoryWrite } from "../../src/story/record";
-import { openTable } from "./rig";
+import { StoreInputError } from "../../src/store";
+import { dropLeftoverStory, dropStoryStaged, keyedItemId, STORY_PARTS, storyMark, type StoryWrite, takeBackStory, writeStory } from "../../src/story/record";
+import { CHAT, openTable, USER } from "./rig";
 
 /** One write of every part, as an invented story's first turn might hold them. */
 function everyPart(turn: string): StoryWrite[] {
@@ -137,5 +138,70 @@ describe("the story record", () => {
     expect(spans.get(recalled)).toEqual({ from: 0, to: 1 });
     expect(record.current("scene")?.id).toBe(road);
     expect([...record.spans("chapter").values()]).toEqual([{ from: 0, to: 7 }]);
+  });
+
+  test("when the lead drops a sub-agent's writes, that agent's story writes go with them, and the lead's stay", async () => {
+    const t = await openTable();
+    await t.play([{ part: "thread", item: null, value: { text: "Who sealed the letter?" } }]);
+    const thread = t.record().of("thread")[0]?.id ?? "";
+    const open = await t.begin();
+    await t.write(open, [{ part: "beat", item: null, value: { text: "Wren breaks the seal." } }], "author");
+    await t.write(open, [{ part: "beat", item: null, value: { text: "The keeper's beat." } }, { part: "thread", item: thread, value: { state: "Settled by the keeper.", close: true } }], "keeper");
+    expect(await t.writes.run(() => dropStoryStaged(t.store, USER, open.id, "keeper-1"))).toBe(2);
+    await t.tie(open);
+
+    const head = t.record();
+    expect(head.of("beat").map((b) => b.fields.text)).toEqual(["Wren breaks the seal."]);
+    expect(head.items.get(thread)?.fields).toEqual({ text: "Who sealed the letter?" });
+    expect(head.items.get(thread)?.closedBy).toBeNull();
+    // A tied turn has nothing staged: it is refused as the store refuses it.
+    await expect(t.writes.run(() => dropStoryStaged(t.store, USER, open.id, "author-1"))).rejects.toBeInstanceOf(StoreInputError);
+    expect(t.record().of("beat")).toHaveLength(1);
+  });
+
+  test("a continue that saved nothing takes back what it recorded after the mark it began at; a job's writes stay", async () => {
+    const t = await openTable();
+    const turn = await t.play([{ part: "beat", item: null, value: { text: "Wren pays the toll." } }]);
+    const mark = storyMark(t.db, USER, turn.id);
+    // The continue goes on the same turn; a job the turn started writes on it meanwhile.
+    await t.write(turn, [{ part: "beat", item: null, value: { text: "The continue's beat." } }]);
+    await t.writes.run((db) => writeStory(db, { user: USER, turn: turn.id, by: "historian", agent: "historian-1", job: "job-1", now: 9 }, [{ part: "beat", item: null, value: { text: "The job's beat.", message: "m0" } }]));
+    await t.write(turn, [{ part: "beat", item: null, value: { text: "Another of the continue's." } }]);
+
+    expect(await t.writes.run((db) => takeBackStory(db, USER, turn.id, mark))).toBe(2);
+    expect(t.record().of("beat").map((b) => b.fields.text)).toEqual(["Wren pays the toll.", "The job's beat."]);
+  });
+
+  test("story rows of a chat that was deleted, or of an import that was forgotten, are removed with it; a chat a branch still shares keeps them", async () => {
+    const t = await openTable();
+    await t.play([{ part: "beat", item: null, value: { text: "Wren pays the toll." } }]);
+    const rowsOf = (chat: string): number => t.db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM story_entry WHERE turn IN (SELECT id FROM turn WHERE chat = ?)").get(chat)?.n ?? 0;
+    const all = (): number => t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM story_entry").get()?.n ?? 0;
+    const elsewhere = async (chat: string, imported: boolean): Promise<void> => {
+      await t.writes.run((db) => {
+        t.s.createChat({ id: chat });
+        const turn = t.s.beginTurn({ chat, kind: "new", imported });
+        writeStory(db, { user: USER, turn: turn.id, by: "author", agent: "author-1", job: null, now: 5 }, [
+          { part: "beat", item: null, value: { text: `A beat in ${chat}.` } },
+          { part: "thread", item: null, value: { text: `A thread in ${chat}.` } },
+        ]);
+      });
+      expect(rowsOf(chat)).toBe(2);
+    };
+
+    await elsewhere("chat-deleted", false);
+    expect(await t.writes.run(() => t.s.deleteChat("chat-deleted"))).toEqual({ kept: false });
+    expect(await t.writes.run(() => dropLeftoverStory(t.store, USER))).toBe(2);
+
+    await elsewhere("chat-imported", true);
+    expect(await t.writes.run(() => t.s.forgetImport("chat-imported"))).toEqual({ removed: ["chat-imported"], played: [] });
+    expect(await t.writes.run(() => dropLeftoverStory(t.store, USER))).toBe(2);
+    expect(all()).toBe(1);
+
+    // Deleted while a branch still shares its turns: kept, and so are its story rows, which the branch reads.
+    await t.writes.run(() => t.s.branchChat({ id: "chat-branch", from: CHAT, map: Object.fromEntries(t.shown.map((m) => [m.id, `b-${m.id}`])) }));
+    expect(await t.writes.run(() => t.s.deleteChat(CHAT))).toEqual({ kept: true });
+    expect(await t.writes.run(() => dropLeftoverStory(t.store, USER))).toBe(0);
+    expect(rowsOf(CHAT)).toBe(1);
   });
 });

@@ -32,6 +32,8 @@ export interface Table {
   showSwipe(turn: TurnRow): Promise<void>;
   /** The last `count` messages are deleted. */
   remove(count: number): Promise<void>;
+  /** These messages are deleted, wherever they stand. */
+  removeIds(ids: readonly string[]): Promise<void>;
   /** A whole exchange: the player's message, a turn, `writes` recorded on it, its reply tied. */
   play(writes?: readonly StoryWrite[]): Promise<TurnRow>;
   write(turn: TurnRow, writes: readonly StoryWrite[], by?: string): Promise<StoryRow[]>;
@@ -39,7 +41,12 @@ export interface Table {
   record(turn?: TurnRow | null): StoryRecord;
 }
 
-export async function openTable(): Promise<Table> {
+export interface TableOptions {
+  /** The chat starts on the invented world; false: it names none, and plays on the blank world. */
+  world?: boolean;
+}
+
+export async function openTable(options: TableOptions = {}): Promise<Table> {
   const world = inventedWorld();
   const revision = hashJson(world);
   const db = new Database(":memory:");
@@ -48,7 +55,7 @@ export async function openTable(): Promise<Table> {
   const store = openStore({ db, registry: registry(), worlds: (r) => (r === revision ? world : undefined) });
   const writes = new WriteQueue(db, 10);
   const s = store.user(USER);
-  await writes.run(() => s.createChat({ id: CHAT, world: world.id, revision }));
+  await writes.run(() => s.createChat(options.world === false ? { id: CHAT } : { id: CHAT, world: world.id, revision }));
   const shown: ShownMessage[] = [];
   let n = 0;
   let date = 1_000;
@@ -89,6 +96,13 @@ export async function openTable(): Promise<Table> {
     },
     async remove(count) {
       shown.splice(shown.length - count, count);
+      await sync();
+    },
+    async removeIds(ids) {
+      for (const id of ids) {
+        const at = shown.findIndex((m) => m.id === id);
+        if (at >= 0) shown.splice(at, 1);
+      }
       await sync();
     },
     async play(list = []) {

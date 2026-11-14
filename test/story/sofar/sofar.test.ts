@@ -126,6 +126,34 @@ describe("the story so far", () => {
     expect(storySoFar({ record: record({ beats: beats(0, 9) }), keptFrom: 0, layout, ...roomy }).text).toBe("");
   });
 
+  test("on a long chat it counts the block a few times, not once for every stretch it places", () => {
+    // The caller's counter may be a real tokenizer: each count reads the whole block.
+    let counted = 0;
+    const counting = (text: string): number => {
+      counted++;
+      return tokens(text);
+    };
+    const few = (units: number): number => 2 * Math.ceil(Math.log2(units + 1)) + 4;
+
+    // A chat carried over from today's build: beats and no scenes, far more than fit.
+    const all = beats(0, 3999);
+    const out = storySoFar({ record: record({ beats: all }), keptFrom: 4000, layout, contextWindow: 1_000_000, settings: STORY_SO_FAR_DEFAULTS, tokens: counting });
+    expect(counted).toBeLessThanOrEqual(few(all.length));
+    expect(out.tokens).toBeLessThanOrEqual(out.budget);
+    const shown = all.filter((b) => out.text.includes(`- Message ${b.at}:`)).map((b) => b.at);
+    expect(shown.length).toBeGreaterThan(1000);
+    expect(shown).toEqual(Array.from({ length: shown.length }, (_, i) => 4000 - shown.length + i));
+
+    // Forty chapters, too long to give whole: they go by their summaries, newest first, as far as they fit.
+    counted = 0;
+    const chapters = Array.from({ length: 40 }, (_, c) => ({ from: c * 100, to: c * 100 + 99, text: `Chapter ${c}: the caravan's ${c}th week on the salt road, told short.` }));
+    const summed = storySoFar({ record: record({ chapters, beats: all }), keptFrom: 4000, layout, ...tight(400), tokens: counting });
+    expect(counted).toBeLessThanOrEqual(few(chapters.length));
+    expect(summed.tokens).toBeLessThanOrEqual(400);
+    expect(summed.text).toContain("Chapter summary, messages 3900 to 3999:\nChapter 39:");
+    expect(summed.leftOut).toEqual([expect.objectContaining({ from: 0, chapters: expect.any(Number) })]);
+  });
+
   test("its size is a share of the Author's window, never below the floor", () => {
     expect(storySoFarBudget(200_000, STORY_SO_FAR_DEFAULTS)).toBe(10_000);
     expect(storySoFarBudget(32_000, STORY_SO_FAR_DEFAULTS)).toBe(6_000);
