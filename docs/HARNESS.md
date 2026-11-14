@@ -1,5 +1,7 @@
 # The harness engine
 
+> This page describes the build before the standalone one. For RPE, start at the [README](../README.md).
+
 A world chat is played by one of three engines, chosen per chat in **GM → This chat → Engine**: the classic steps, agents, or the harness. This page is about the harness: first for someone playing on it, then for someone reading its code.
 
 On the harness an AI **author** plays each turn. Nothing about a turn is fixed in code: the author decides what the turn needs and does it by calling tools. LumiRPEngine supplies the tools, the agents' definitions, the skills and the rules of the world, and makes no model call of its own. The agents run in [LumiAH](https://github.com/TheLiquorPriest/LumiAH), an agent harness that is built into LumiRPEngine.

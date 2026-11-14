@@ -1,5 +1,7 @@
 # LumiRPEngine recipes
 
+> This page describes the build before the standalone one. The world format it describes is the engine's, which RPE keeps; the pages and tools it names are that build's.
+
 Small worlds that each show one thing working end to end. Every recipe here is a fragment of a world document: the parts it adds to a new world (Build's **Blank** template, or `lre_world_create` with no template). Merge it object by object: a collection gains the items shown, an item gains the fields shown, and a list replaces the one already there. In Build, enter each item in its editor; an agent merges the JSON with `lre_edit`. A new world carries every default data table, pinned as a template's are, so a recipe that needs a table of its own carries the whole table, rows and all, and it replaces the world's copy rather than merging into it; in Build, edit that copy in the **Data tables** editor. `test/docs/recipes.test.ts` builds every fragment on this page and plays it through the engine, so what each recipe says happens does happen.
 
 The formulas are explained in [EXPRESSIONS.md](EXPRESSIONS.md), and every effect, function and pack kind used here is listed in the [reference](REFERENCE.md). Fights are set up in the user guide's [Combat and encounters](USER-GUIDE.md#combat-and-encounters).

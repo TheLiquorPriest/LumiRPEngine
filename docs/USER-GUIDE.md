@@ -1,5 +1,7 @@
 # LumiRPEngine user guide
 
+> This page describes the build before the standalone one. For RPE, start at the [README](../README.md).
+
 This guide is for two kinds of people: players, who want to chat in a world that remembers, and authors, who build those worlds. If you only want to play, read the first part and dip into the rest when you need it. If you are installing for the first time, start with the [README](../README.md).
 
 - [How it works in one page](#how-it-works-in-one-page)

@@ -1,5 +1,7 @@
 # LumiRPEngine architecture
 
+> This page describes the build before the standalone one. For RPE, start at the [README](../README.md).
+
 This is the contract between the modules. Behavior is specified in [DESIGN.md](DESIGN.md); section numbers below that read `DESIGN §…` are its sections. This file fixes module boundaries, shared types, the protocol, the registries and the test layout. The TypeScript contract files listed in each section are normative. When this text and a contract file disagree, the file wins and this text is fixed.
 
 ## 1. Contract files

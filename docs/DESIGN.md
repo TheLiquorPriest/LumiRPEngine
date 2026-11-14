@@ -1,5 +1,7 @@
 # LumiRPEngine: design
 
+> This page describes the build before the standalone one. For RPE, start at the [README](../README.md).
+
 LumiRPEngine is an extension for [Lumiverse](https://github.com/prolix-oc/Lumiverse) that keeps a real, persistent world underneath a roleplay chat: places, people, belongings, money, vehicles, schedules, quests and the calendar. The engine settles what rules should settle (prices, travel times, dice odds, who is where at 3 a.m.), and the AI model spends its effort on writing. The player's directives and the story always win: the engine's state describes the world as it stands, and it follows them (D36).
 
 This document is the design behind it: what the engine is made of, the rules it follows, why, and where it stops. I wrote it as a plan before I built the extension and revised it while I built and measured, so this version describes the product as it ships. Where the build departed from the original plan, §20 says so. For how to use the extension, read the [README](../README.md), the [user guide](USER-GUIDE.md) and the [GM guide](GM-GUIDE.md); for the module contract, read [ARCHITECTURE](ARCHITECTURE.md). Authors will want the [formula language](EXPRESSIONS.md), the [reference](REFERENCE.md) generated from the registry and the [recipes](RECIPES.md).

@@ -1,5 +1,7 @@
 # Roadmap: the October 2026 review
 
+> This page describes the build before the standalone one. For RPE, start at the [README](../README.md).
+
 This records a review of LumiRPEngine after long play on a large world: about 700 entities, 320 places and 83 vehicles. It covers what the review found, the decisions I made, and the order the work goes in. The [user guide](USER-GUIDE.md) and [design](DESIGN.md) describe the engine as built; this page is the plan for changing it.
 
 ## What one turn showed

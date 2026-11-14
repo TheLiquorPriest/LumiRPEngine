@@ -1,5 +1,7 @@
 # LumiRPEngine GM guide
 
+> This page describes the build before the standalone one. For RPE, start at the [README](../README.md).
+
 This guide is for whoever runs the game: you, playing your own world as its GM, or a friend running one for you. The player's side of LumiRPEngine shows only what the point-of-view character knows or can see. The GM side sees everything, secrets included, and can change anything in a running chat. Here is how to use it without breaking the story: what the player sees and why, the GM view and its edits, fixes and Undo, the rules for checks, realism and time in one chat, moving a chat to a new revision of its world, and reading the Context inspector.
 
 Every button is described in the [user guide](USER-GUIDE.md); this guide is about using them well. Authors who build the secrets in the first place will want [RECIPES.md](RECIPES.md) and the [reference](REFERENCE.md).

@@ -1,5 +1,7 @@
 # What an agent can do on the harness engine
 
+> This page describes the build before the standalone one. For RPE, start at the [README](../README.md).
+
 On the harness engine nothing in LumiRPEngine plays a turn: the author and the agents it starts decide everything by calling tools, and the engine checks and records what they call for. This page lists every surface a game master can read or change in LumiRPEngine (the GM pages and the requests behind them, the change types, the packs) and says what an agent can do to it through a tool. Where a surface is not an agent's to change, the table says so and why.
 
 A test holds this page to the engine (`test/backend/harness-cast-docs.test.ts`). It fails when a tool named here doesn't exist, when a tool the harness lists is missing from the table, when a surface can be created on but not read, when a tier here is not the one the engine's registry gives the tool (`HARNESS_LISTED`, its `needs`), and when the bridge lets a call through that the tier closes: in a real turn it calls every listed tool as an agent that only reads, as one at the story's tier and as the author, and expects each call refused or let through as the tier says, before the tool runs. It also calls every tool once with no arguments, which proves only that each answers in words and reaches no model. What a tool does is proven in its family's own tests (`test/backend/harness-cast-*.test.ts`).

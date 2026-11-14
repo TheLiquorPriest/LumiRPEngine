@@ -1,5 +1,7 @@
 # Presets and RPEngine
 
+> This page describes the build before the standalone one. For RPE, start at the [README](../README.md).
+
 This page is for people who write Lumiverse presets and want them to play well with LumiRPEngine. A preset needs nothing special to work in a world chat: the engine puts its sections into the prompt where the world places them. What follows lets a preset place those sections itself, give the engine's helpers style and rules of its own, and give the narrator rules for world chats only. All of it applies while the preset is active, and only in world chats.
 
 The preset that counts is the one Lumiverse generates the chat with, as it picks it: the selected preset, else the one the chat's connection links, with the block states a preset profile binds to the chat, its character, persona or connection (a block switched off for the chat places nothing). When Lumiverse can't say which it is, the engine stops before the reply and the chat says why. Saving another preset changes nothing; saving this one makes the engine run again before the reply only when the save moves an outlet or changes a guidance block or the narrator rules. Prompt-activation regex scripts are invisible to the engine; the delivery check (below) catches a section they leave out. **Settings → Preset** shows which preset counts, what of the below it has, and a button that adds the guidance blocks for you.
