@@ -13,8 +13,8 @@ intent_file: scratch/intent.md
 - Tool calls may come before the reply, after it, or both. One reply per turn.
 {{/form.tags}}
 {{#form.two_step}}
-- **Working text goes in files, never in a message.** An intent record, when your instructions ask for one: written to `{{intent_file}}` in the turn's folder with `file_write`.
-- **The reply:** the plain text of a message of its own. One reply per turn.
+- **Working text goes in files, never in a message.** Whatever is written as the text of a message is the reply, and the player sees it: a plan, a note or a line about what comes next is working text. An intent record, when your instructions ask for one: written to `{{intent_file}}` in the turn's folder with `file_write`.
+- **The reply:** the plain text of a message of its own, written there directly and not into a file first. One reply per turn.
 - **Calls in the reply's own message** run once the reply is out. A message with no call ends the turn.
 {{/form.two_step}}
 

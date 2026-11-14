@@ -240332,4 +240332,4 @@ process.exitCode = await runCli(process.argv.slice(2), {
   secret,
   stopped,
   fetch: (url, init) => fetch(url, init)
-}, { version: "7f5bce6e", areas: compose().areas, appFile: Bun.main });
+}, { version: "b74300e3", areas: compose().areas, appFile: Bun.main });

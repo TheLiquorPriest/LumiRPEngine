@@ -28,7 +28,7 @@ The prompt holds only the latest stretch of the chat. If the message reaches bac
 
 ## 3. Decide how to run it
 
-Only now decide how deep to go, and say so in one line after your intent record: the depth, why, and what must happen before the reply, right after it, and later.
+Only now decide how deep to go, and say so in the last line of your intent record: the depth, why, and what must happen before the reply, right after it, and later.
 
 - **Direct.** Nothing needs looking up, ruling or inventing. Decide both lanes yourself, write, and record after the reply. A greeting, a line of talk, a walk across the room, paying for a drink. One call.
 - **Assisted.** You need a fact, a ruling, a roll, or one character's own answer to something pivotal. Get exactly that, then write. Aim for five calls or fewer in all, the reply's own included.
