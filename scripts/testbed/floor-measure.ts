@@ -154,6 +154,27 @@ export function rpeSide(detail: TurnDetail, deltas: readonly TraceDelta[], delta
   };
 }
 
+/** One tool call of a turn, from its trace: whether it began before the reply's first piece left RPE (or its release), and whether its answer came back clean (null: no answer was recorded). */
+export interface ToolCall {
+  tool: string;
+  via: string | null;
+  agent: string;
+  beforeReply: boolean;
+  clean: boolean | null;
+}
+
+/** Every tool call of a turn, in the order they began. */
+export function toolCalls(detail: TurnDetail): ToolCall[] {
+  const replyAt = detail.timings.firstWord ?? detail.timings.released ?? Number.POSITIVE_INFINITY;
+  const clean = new Map<string, boolean>();
+  for (const r of detail.trace) if (r.event.kind === "tool_ended") clean.set(`${r.agent.id}\u0000${r.event.callId}`, r.event.clean);
+  return detail.trace.flatMap((r) =>
+    r.event.kind === "tool_started"
+      ? [{ tool: r.event.tool, via: r.event.via ?? null, agent: r.agent.definition, beforeReply: r.at <= replyAt, clean: clean.get(`${r.agent.id}\u0000${r.event.callId}`) ?? null }]
+      : [],
+  );
+}
+
 // ---------------------------------------------------------------- the table
 
 export function median(values: readonly number[]): number | null {

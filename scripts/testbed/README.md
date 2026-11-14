@@ -75,6 +75,8 @@ bun floor.ts run --pairs 10 --form tag                # ten pairs; --form two-st
 bun floor.ts run --pairs 10 --only rpe --form tag     # RPE turns only: no comparison with plain is judged
 bun floor.ts table "$FLOOR_OUT"                       # the table again from a saved run
 bun floor.ts remove                                   # delete the floor chats, card, persona and preset
+bun floor.ts say "I pay her two coins for the oil."   # one line of your own on RPE (--arm plain for plain), under the floor's preset and persona;
+                                                      # prints the turn, RPE's tool calls before and after the reply (clean or not), the reply's start
 ```
 
 The floor plays under a fixture of its own, consistent with itself, so that a simple turn asks nothing the chat cannot answer: the card (Marta Venn), a persona named as the card's scenario names the player ("Traveller", in the persona folder "Floor test (invented)") and a preset "Floor test (invented)" whose blocks are plain instructions naming nobody, the card, the scenario, the persona and the chat's history. Neither the persona nor the preset is made default or active: `run` names both on every generation it starts, plain and RPE alike (`preset_id` with `force_preset_id`, and `persona_id`, on `POST /api/v1/generate`), so no setting changes and every other chat keeps its own. The preset and the persona carry `lumirpengine_floor_test` in their metadata; `remove` deletes those, the card's chats named "Floor test", and the card when no other chat uses it.

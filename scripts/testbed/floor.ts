@@ -8,9 +8,10 @@
 // play under the floor's own preset and persona (`floor-fixture.ts`), named on every generation.
 
 import { findFixture, type Fixture, removeFixture, setupFixture } from "./floor-fixture";
-import { type Form, floorTable, type Measured, median, perToken, printRpeTurns, printTable, rpeSide } from "./floor-measure";
+import { type Form, floorTable, type Measured, median, perToken, printRpeTurns, printTable, rpeSide, toolCalls } from "./floor-measure";
 import { guard, readEnv, type TestbedEnv } from "./lib/env";
 import { Lumiverse, savedToken } from "./lib/lumiverse";
+import type { TurnDetail } from "../../src/ui/api";
 import { RpeApi, RpeLive } from "./lib/rpe";
 import { EngineSocket, type HostEvent } from "./lib/socket";
 
@@ -20,6 +21,9 @@ const USAGE = `usage:
       prints what it set and the chat's id
   floor.ts remove
       delete the floor chats, the card, the persona and the preset that setup made
+  floor.ts say [--arm rpe|plain] "<the player's line>"
+      play that one line in FLOOR_CHAT on one arm (default rpe), as run does; prints the turn's line,
+      RPE's tool calls before and after the reply (clean or not) and the reply's first 300 characters
   floor.ts run [--pairs N] [--only plain|rpe] [--form tag|two-step]
       play N pairs (default 10), plain then RPE, and print the §17.1 table;
       --form names the form RPE's connection replies in (required unless --only plain)
@@ -157,23 +161,33 @@ async function open(env: TestbedEnv): Promise<Lumiverse> {
   return new Lumiverse(env.hostUrl, savedToken(env));
 }
 
-/** RPE's side of an RPE turn: the turn tied to the reply's message, read once its run has ended. */
-async function readRpe(api: RpeApi, live: RpeLive, chatId: string, measured: Measured, missedBefore: number): Promise<void> {
+/** The line printed after each turn: the page's times, and RPE's call count and run after the reply. */
+function turnLine(m: Measured, label: string): string {
+  const r = m.rpe;
+  const rpeWords = m.arm !== "rpe" ? "" : r !== null ? `; RPE: ${r.callsOnPath ?? "?"} call(s) before the reply, run went on ${seconds(r.afterReplyMs)} s after it` : "";
+  const failed = [m.error, m.rpeError].filter((e) => e !== null).join("; ");
+  return `${label}: first word ${seconds(m.toFirstWord)} s, whole ${seconds(m.toEnded)} s, ${m.tokens ?? "?"} tokens${rpeWords}${failed !== "" ? `, FAILED: ${failed}` : ""}`;
+}
+
+/** RPE's side of an RPE turn: the turn tied to the reply's message, read once its run has ended. Gives the turn as RPE's route gave it, or null with `rpeError` set. */
+async function readRpe(api: RpeApi, live: RpeLive, chatId: string, measured: Measured, missedBefore: number): Promise<TurnDetail | null> {
   if (measured.messageId === null) {
     measured.rpeError = "the generation named no message to match an RPE turn by";
-    return;
+    return null;
   }
   try {
     const tied = await api.tiedTo(chatId, measured.messageId, TIE_MS);
     if (tied === null) {
       measured.rpeError = `no RPE turn of this chat was tied to message ${measured.messageId} within ${TIE_MS / 1000} s`;
-      return;
+      return null;
     }
     const detail = await api.ended(chatId, tied.id, RUN_END_MS);
     if (detail.status === "running") measured.rpeError = `RPE's run was still going ${RUN_END_MS / 60_000} min after the reply`;
     measured.rpe = rpeSide(detail, live.deltas, live.missed.length > missedBefore || live.closed);
+    return detail;
   } catch (error) {
     measured.rpeError = error instanceof Error ? error.message : String(error);
+    return null;
   }
 }
 
@@ -201,10 +215,7 @@ async function run(env: TestbedEnv, pairs: number, only: Measured["arm"] | null,
         const measured = await turn(host, socket, chatId, connection, pair, arm, line, fixture);
         if (arm === "rpe" && api !== null && live !== null) await readRpe(api, live, chatId, measured, missedBefore);
         all.push(measured);
-        const r = measured.rpe;
-        const rpeWords = arm !== "rpe" ? "" : r !== null ? `; RPE: ${r.callsOnPath ?? "?"} call(s) before the reply, run went on ${seconds(r.afterReplyMs)} s after it` : "";
-        const failed = [measured.error, measured.rpeError].filter((e) => e !== null).join("; ");
-        console.log(`pair ${pair} ${arm}: first word ${seconds(measured.toFirstWord)} s, whole ${seconds(measured.toEnded)} s, ${measured.tokens ?? "?"} tokens${rpeWords}${failed !== "" ? `, FAILED: ${failed}` : ""}`);
+        console.log(turnLine(measured, `pair ${pair} ${arm}`));
       }
     }
   } finally {
@@ -228,7 +239,48 @@ async function table(file: string, form: Form | null): Promise<void> {
   printAll(saved.turns, use);
 }
 
-type Command = { command: "help" } | { command: "setup" } | { command: "remove" } | { command: "run"; pairs: number; only: Measured["arm"] | null; form: Form | null } | { command: "table"; file: string; form: Form | null };
+/** One line of the player's choosing, on one arm, under the floor's preset and persona: the turn's line, RPE's tool calls before and after the reply, and the reply's start. Writes nothing to FLOOR_OUT. */
+async function say(env: TestbedEnv, arm: Measured["arm"], line: string): Promise<void> {
+  const host = await open(env);
+  const chatId = guard(env, need("FLOOR_CHAT"));
+  const fixture = await findFixture(host);
+  const connection = await connectionId(host, need(arm === "rpe" ? "FLOOR_RPE_CONNECTION" : "FLOOR_PLAIN_CONNECTION"));
+  const api = arm === "rpe" ? new RpeApi(need("FLOOR_RPE_URL").replace(/\/+$/, ""), need("FLOOR_RPE_TOKEN")) : null;
+  const live = api === null ? null : await RpeLive.follow(api, chatId);
+  const socket = await EngineSocket.open(host, "", { page: false });
+  socket.focus(chatId);
+  let measured: Measured;
+  let detail: TurnDetail | null = null;
+  try {
+    measured = await turn(host, socket, chatId, connection, 1, arm, line, fixture);
+    if (api !== null && live !== null) detail = await readRpe(api, live, chatId, measured, 0);
+  } finally {
+    socket.close();
+    live?.close();
+  }
+  console.log(turnLine(measured, `say ${arm}`));
+  if (detail !== null) {
+    const calls = toolCalls(detail);
+    for (const [label, before] of [
+      ["before the reply", true],
+      ["after the reply", false],
+    ] as const) {
+      const of = calls.filter((c) => c.beforeReply === before);
+      console.log(`tools ${label}: ${of.length === 0 ? "none" : ""}`);
+      of.forEach((c, i) => console.log(`  ${i + 1}. ${c.tool}${c.via === null ? "" : ` (via ${c.via})`} by ${c.agent}: ${c.clean === null ? "no answer recorded" : c.clean ? "clean" : "not clean"}`));
+    }
+  }
+  const reply = measured.messageId === null ? undefined : (await host.messages(chatId)).find((m) => m.id === measured.messageId)?.content;
+  console.log(`reply: ${reply === undefined ? "(no saved message)" : `${reply.slice(0, 300)}${reply.length > 300 ? "…" : ""}`}`);
+}
+
+type Command =
+  | { command: "help" }
+  | { command: "setup" }
+  | { command: "remove" }
+  | { command: "run"; pairs: number; only: Measured["arm"] | null; form: Form | null }
+  | { command: "table"; file: string; form: Form | null }
+  | { command: "say"; arm: Measured["arm"]; line: string };
 
 class UsageError extends Error {}
 
@@ -236,7 +288,7 @@ class UsageError extends Error {}
 function parse(argv: readonly string[]): Command {
   const [command, ...rest] = argv;
   if (command === undefined || command === "help" || command === "--help" || command === "-h") return { command: "help" };
-  const allowed: Readonly<Record<string, readonly string[]>> = { setup: [], remove: [], run: ["--pairs", "--only", "--form"], table: ["--form"] };
+  const allowed: Readonly<Record<string, readonly string[]>> = { setup: [], remove: [], run: ["--pairs", "--only", "--form"], table: ["--form"], say: ["--arm"] };
   const flags = allowed[command];
   if (flags === undefined) throw new UsageError(`no command "${command}"`);
   const given = new Map<string, string>();
@@ -259,6 +311,12 @@ function parse(argv: readonly string[]): Command {
   if (command === "setup" || command === "remove") {
     if (words.length > 0) throw new UsageError(`${command} takes nothing more`);
     return command === "setup" ? { command: "setup" } : { command: "remove" };
+  }
+  if (command === "say") {
+    if (words.length !== 1 || (words[0] as string).trim() === "") throw new UsageError('say takes one line, in quotes: floor.ts say [--arm rpe|plain] "<the player\'s line>"');
+    const arm = given.get("--arm") ?? "rpe";
+    if (arm !== "rpe" && arm !== "plain") throw new UsageError("--arm takes rpe or plain");
+    return { command: "say", arm, line: words[0] as string };
   }
   if (command === "table") {
     if (words.length !== 1) throw new UsageError("table takes one file: a run's FLOOR_OUT");
@@ -288,4 +346,5 @@ else if (asked.command === "setup") await setupFixture(await open(readEnv()));
 else if (asked.command === "remove") {
   const env = readEnv();
   await removeFixture(await open(env), env);
-} else await run(readEnv(), asked.pairs, asked.only, asked.form);
+} else if (asked.command === "say") await say(readEnv(), asked.arm, asked.line);
+else await run(readEnv(), asked.pairs, asked.only, asked.form);
