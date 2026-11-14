@@ -5,9 +5,9 @@
 // ended unheard tied to what they saved, the chat's path compared with the turn tree, the turns that
 // left the path cancelled, the wait for the previous turn's run (a swipe or regenerate does not wait for
 // the attempt it replaces: it stops it), the new turn (a continue goes on with the turn its message is
-// tied to, as a run of its own), the chat's session, the briefing's blocks that exist so far (the turn's
-// facts, the lore map, the world state) with what has happened since the last turn, and the turn's
-// folder (`folder.ts`). The story so far waits on a story record: none is kept yet.
+// tied to, as a run of its own), the chat's session, the briefing's blocks (the turn's facts, the lore
+// map, the world state, and from the story record the story so far and the story brief) with what has
+// happened since the last turn, and the turn's folder (`folder.ts`).
 //
 // The run: RPH answers, its reply streamed to Lumiverse as it is written; the run may go on after the
 // reply is released, and Lumiverse stopping before the release stops it. A run that ends with no reply
@@ -27,22 +27,39 @@ import type { ReplyStream } from "../adapter/lumiverse/stream";
 import { textHash } from "../adapter/lumiverse/wire";
 import type { LiveHub } from "../app";
 import { calendarOf, formatClock } from "../engine/calendar";
+import { mapLines, mapView } from "../iface";
 import { type Lore, loreMapFields } from "../lore";
 import { type PathReport, type ShownMessage, type Store, type TurnRow, worldState } from "../store";
+import { storyBrief, storyRecordParts } from "../story";
+import { STORY_SO_FAR_DEFAULTS, storySoFar } from "../story/sofar";
 import type { TreeChats, TreeFiles } from "../tree";
 import { type Attempt, writeTurnFolder } from "./folder";
 import type { Writes } from "./kv";
 import type { TurnPrompts } from "./prompt";
+import { writeTurnRecord } from "./record";
 import { leftOutOf, maxTokensOf, prefillOf, promptOf, samplingOf, summarizedOf } from "./request";
 import type { Run, RunRecord, Runs } from "./runs";
 import { maskWorldInfoScanExclusions, SCAN_SETTING, scannedSteps, scanSettingsOf } from "./scan";
 import { type TurnSettings, turnSettings } from "./settings";
+import { guidanceTexts } from "./texts";
 
 /** The prompt parts the turn lane lays its texts out by (each under `.prompts/`). */
-export const PARTS = { progress: "progress", notices: "notices", errors: "reply-errors", turnFacts: "turn-facts", loreMap: "lore-map", worldState: "world-state" } as const;
+export const PARTS = {
+  progress: "progress",
+  notices: "notices",
+  errors: "reply-errors",
+  turnFacts: "turn-facts",
+  loreMap: "lore-map",
+  worldState: "world-state",
+  storySoFar: "story-so-far",
+  storyBrief: "story-brief",
+} as const;
 
 /** The names the briefing's template places the host's blocks by. */
-export const BLOCKS = { turnFacts: "turn-facts", loreMap: "lore-map", worldState: "world-state" } as const;
+export const BLOCKS = { turnFacts: "turn-facts", loreMap: "lore-map", worldState: "world-state", storySoFar: "story-so-far", storyBrief: "story-brief" } as const;
+
+/** Characters to a token, for measuring the story so far against its share of the Author's window: the figure RPH's own estimates use. */
+const CHARS_PER_TOKEN = 3.2;
 
 /** A session's id while a chat has none yet: the settings are read before the turn that opens one, and no file of theirs is a session's. */
 export const NO_SESSION = "none";
@@ -264,13 +281,14 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       let request: TurnRequest;
       try {
         // The briefing's blocks, and what has happened since the last turn.
-        const [briefing, since] = await Promise.all([this.#briefing(reads, guidance, scope, tagged, steps), this.#since(user, chat, report, steps, lines(notices), last, stopped)]);
+        const [{ blocks: briefing, loreMap }, since] = await Promise.all([this.#briefing(reads, guidance, scope, tagged, steps, settings.lead), this.#since(user, chat, report, steps, lines(notices), last, stopped)]);
         lap("briefing");
         const sampling = samplingOf(tagged.parameters);
         const maxTokens = maxTokensOf(tagged.parameters);
         request = {
           scope,
-          ...(begun.parent !== null ? { parent: begun.parent } : {}),
+          // RPE keeps a tree, so a turn always says what it follows: null, for a chat's first turn and a swipe of it, is no earlier turn.
+          parent: begun.parent,
           kind: tag.kind,
           ...(tag.speaker.name !== null ? { speaker: tag.speaker.name } : {}),
           lead: settings.lead,
@@ -285,7 +303,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         };
         // The turn's folder, for the agents it delegates to and for the player (plan §5.3): the Author has the same in its context.
         const attempts = replaced === null ? [] : this.#attempts(user, chat, replaced);
-        await writeTurnFolder({ files: this.#d.files, reads, lore: this.#d.lore }, { scope, guidance, tagged, messages, steps, request, attempts, received }).catch((error: unknown) =>
+        await writeTurnFolder({ files: this.#d.files, reads, lore: this.#d.lore }, { scope, guidance, tagged, messages, steps, request, loreMap, attempts, received }).catch((error: unknown) =>
           this.#d.log.error("The turn's folder could not be written in full.", { turn: begun.id, error: words(error) }),
         );
         lap("folder");
@@ -477,8 +495,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       });
   }
 
-  /** The briefing's blocks that exist so far (plan §10.2 block 4): the turn's facts and the lore map, each laid out by its part. */
-  async #briefing(reads: LumiverseReads, guidance: Guidance, scope: Scope & { turn: string }, tagged: TaggedTurn, steps: readonly LvStep[]): Promise<ContextBlock[]> {
+  /**
+   * The briefing's blocks (plan §10.2 block 4): the turn's facts, the lore map, the world state, the story so far and the story brief,
+   * each laid out by its part; and the ids of the entries the lore map names, for the turn's folder.
+   */
+  async #briefing(reads: LumiverseReads, guidance: Guidance, scope: Scope & { turn: string }, tagged: TaggedTurn, steps: readonly LvStep[], lead: string): Promise<{ blocks: ContextBlock[]; loreMap: string[] }> {
     const { tag } = tagged;
     const blocks: ContextBlock[] = [];
     const [factsPart, mapPart] = await Promise.all([guidance.part(PARTS.turnFacts), guidance.part(PARTS.loreMap)]);
@@ -501,19 +522,55 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const laid = mapPart.render({ ...loreMapFields(map) }).text;
       if (laid.trim() !== "") blocks.push({ name: BLOCKS.loreMap, text: laid.trimEnd() });
     }
-    // The world state (plan §6.9), compiled by the store and worded by the layout file in force for the chat, read whole. A world
-    // state that cannot be compiled is left out of this turn's briefing, and the log says why.
+    // The world state (plan §6.9), compiled by the store and worded by the layout file in force for the chat, read whole, with each
+    // place's map worded by the map's lines in force. A world state that cannot be compiled is left out of this turn's briefing, and
+    // the log says why.
     const statePart = await guidance.part(PARTS.worldState);
     const layout = statePart === undefined ? null : await this.#d.files.read(scope, statePart.source.path);
     if (layout?.status === "read") {
+      const maps = mapView(await mapLines(guidanceTexts(this.#d.files, scope)));
       try {
-        const state = worldState(this.#d.store.user(scope.user), { chat: scope.chat, turn: scope.turn, layout: layout.text });
+        const state = worldState(this.#d.store.user(scope.user), { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps });
         if (state.text.trim() !== "") blocks.push({ name: BLOCKS.worldState, text: state.text.trimEnd() });
       } catch (error) {
         this.#d.log.error("The world state could not be compiled for this turn's briefing.", { turn: scope.turn, error: words(error) });
       }
     }
-    return blocks;
+    // The story so far, for the history the window left out of the prompt, and the story brief (plan §8.1): drawn from the story
+    // record as this turn's path holds it, each laid out by its part.
+    const point = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn };
+    const [soFarPart, briefPart] = await Promise.all([guidance.part(PARTS.storySoFar), guidance.part(PARTS.storyBrief)]);
+    if (soFarPart?.format === "template") {
+      const keptFrom = leftOutOf(tagged.cut.keep, steps.map((s) => s.id))[0]?.to ?? null;
+      const soFar =
+        keptFrom === null
+          ? null
+          : storySoFar({ record: storyRecordParts(point), keptFrom, contextWindow: await this.#authorWindow(guidance, lead, scope.turn), settings: STORY_SO_FAR_DEFAULTS, tokens: (text) => Math.ceil(text.length / CHARS_PER_TOKEN), layout: soFarPart });
+      if (soFar !== null && soFar.text.trim() !== "") blocks.push({ name: BLOCKS.storySoFar, text: soFar.text.trimEnd() });
+    }
+    if (briefPart?.format === "template") {
+      const brief = storyBrief({ ...point, layout: briefPart });
+      if (brief.text.trim() !== "") blocks.push({ name: BLOCKS.storyBrief, text: brief.text });
+    }
+    return { blocks, loreMap: [...map.inPrompt, ...map.world].map((line) => line.id) };
+  }
+
+  /**
+   * The lead's window in tokens, as the model layer reports it for the connection its definition names (`default`, or none, is the
+   * default connection). Where the model layer cannot tell it, 0, so the story so far is given its floor; the log says so.
+   */
+  async #authorWindow(guidance: Guidance, lead: string, turn: string): Promise<number> {
+    try {
+      const named = (await guidance.definition(lead))?.model;
+      const models = this.#d.harness().models;
+      const connection = named === undefined || named === "default" ? null : ((await models.list()).connections.find((c) => c.id === named || c.name === named)?.id ?? named);
+      const window = (await models.limits(connection)).contextWindow;
+      if (window !== null) return window.tokens;
+      this.#d.log.info("The lead's window is not known, so the story so far is given its floor.", { turn, lead });
+    } catch (error) {
+      this.#d.log.info("The lead's window could not be read, so the story so far is given its floor.", { turn, lead, error: words(error) });
+    }
+    return 0;
   }
 
   /** The story's time where the chat's state keeps a clock, as the world's calendar writes it. */
@@ -541,11 +598,12 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const dropped = report.notApplied.map((n) => n.op);
     for (const f of report.flipped) add("restacked", notices?.line("swipe_flipped", { message: f.message, dropped }), f.to !== null ? { turn: f.to } : {});
     for (const e of report.edited) add("edit", notices?.line("edited", { message: e.message }), { turn: e.turn });
+    // Messages are numbered as `chat_read` numbers them, the chat's first message 0.
     for (const u of report.unplayed) {
       const from = place.get(u.from);
       const to = place.get(u.to);
       if (from === undefined || to === undefined) continue;
-      add("unplayed", notices?.line("unplayed", { range: from === to ? `${from + 1}` : `${from + 1}-${to + 1}` }), { range: { from, to: to + 1 } });
+      add("unplayed", notices?.line("unplayed", { range: from === to ? `${from}` : `${from}-${to}` }), { range: { from, to: to + 1 } });
     }
     // The last turn's reply: cut short by a stop, or saved by Lumiverse otherwise than it was released (plan §6.3, §10.8).
     const tied = last === null ? null : this.#d.store.user(user).turn(last.turn);
@@ -619,6 +677,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
           const usage = run.usage;
           const timings = { received: run.received, started: run.started, firstWord: run.firstWord, released: run.released, ended: run.ended };
           await this.#d.writes.run(() => this.#d.store.user(run.user).updateTurn(run.turn, { timings, ...(usage !== null ? { tokensIn: usage.input, tokensOut: usage.output } : {}) }), "keeping a turn's timings");
+          await this.#keepRecord(run);
         } catch (error) {
           this.#d.log.error("A turn's run could not be kept.", { turn: run.turn, error: words(error) });
         } finally {
@@ -687,6 +746,20 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       store.tieTurn(run.turn, { message: saved.id, hash: textHash(written.text), date: written.date, status: cut ? "cut" : "done" });
       this.#d.runs.put(db, record);
     }, "tying a turn to its saved message");
+    await this.#keepRecord(record);
+  }
+
+  /**
+   * The Author's record of a tied turn, written to the turn's folder for a later turn carried in the records mode (`record.ts`): when
+   * the turn is tied, and again when its run is over, since the run may record it after the reply. Either comes before the next turn of
+   * the chat is answered, which waits for both. A record that cannot be written is logged; the turn stands.
+   */
+  async #keepRecord(run: RunRecord): Promise<void> {
+    const status = this.#d.store.user(run.user).turn(run.turn)?.status;
+    if (status !== "done" && status !== "cut") return;
+    await writeTurnRecord(this.#d.files, this.#d.store, { user: run.user, chat: run.chat, session: run.session, turn: run.turn }).catch((error: unknown) =>
+      this.#d.log.error("A turn's record could not be written to its folder.", { turn: run.turn, error: words(error) }),
+    );
   }
 
   /**

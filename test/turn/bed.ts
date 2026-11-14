@@ -8,7 +8,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { JsonValue, Log, Scope } from "rp-harness/contract";
+import type { JsonValue, Log, Scope, TurnRequest } from "rp-harness/contract";
 import { type Answer, scriptedModel, type ScriptedModel } from "rp-harness/testing/rig";
 import { dataPaths, openApp, SecretsFile, type App, type RunningServer } from "../../src/app";
 import { compose, type Composition } from "../../src/app/compose";
@@ -53,6 +53,8 @@ export interface TurnBed {
   logged: Logged[];
   /** Each turn the harness was told left the chat's path (`Harness.turnLeft`), in order. */
   left: Scope[];
+  /** Each request the harness was asked to answer (`Harness.answer`), in order. */
+  requests: TurnRequest[];
   /** A Turn page's call to RPE, with a page token of RPE's user: its status and its JSON. */
   page<T>(method: "GET" | "POST", path: string): Promise<{ status: number; body: T }>;
   /** Waits until `check` gives something, in real time: Lumiverse's requests to RPE go over the network. */
@@ -124,8 +126,9 @@ export async function openTurnBed(options: TurnBedOptions): Promise<TurnBed> {
     const model = scriptedModel(options.answers, { contextWindow: 64_000, maxTokens: 4_000 });
     const logged: Logged[] = [];
     const config = configOf({ port: 0, lumiverse: { url: server.base, user: USER, database: db.path, connection: CONNECTION } }, {}, "the test's config");
-    // What the harness is told of turns that left the path, recorded on the way to it.
+    // What the harness is told of turns that left the path, and what it is asked to answer, recorded on the way to it.
     const left: Scope[] = [];
+    const requests: TurnRequest[] = [];
     let providerKey: string | null = null;
 
     const until = async <T>(what: string, check: () => T | null | undefined | false | Promise<T | null | undefined | false>): Promise<T> => {
@@ -149,6 +152,11 @@ export async function openTurnBed(options: TurnBedOptions): Promise<TurnBed> {
       turns.harness.turnLeft = (scope) => {
         left.push(scope);
         return turnLeft(scope);
+      };
+      const answer = turns.harness.answer.bind(turns.harness);
+      turns.harness.answer = (request, sink, signal) => {
+        requests.push(request);
+        return answer(request, sink, signal);
       };
       // The connection's key is kept in RPE's database, so an RPE started again on it takes the same one.
       providerKey ??= (await app.auth.makeKey("provider")).key;
@@ -203,6 +211,7 @@ export async function openTurnBed(options: TurnBedOptions): Promise<TurnBed> {
       model,
       logged,
       left,
+      requests,
       page,
       until,
       restart,

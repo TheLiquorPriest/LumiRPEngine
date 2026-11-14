@@ -63,6 +63,8 @@ export interface FolderAsk {
   /** The chat's path as Lumiverse shows it. */
   steps: readonly LvStep[];
   request: TurnRequest;
+  /** The ids of the entries the lore map named in the Author's briefing, as the map writes them. */
+  loreMap: readonly string[];
   attempts: readonly Attempt[];
   received: number;
 }
@@ -163,6 +165,7 @@ function turnData(ask: FolderAsk, written: readonly string[]): string {
     received: ask.received,
     prompt: { messages: ask.messages.length, keptFrom: cut.keep, leftOut: ask.request.leftOut ?? [] },
     lore: tag.lore.map((l) => l.id),
+    loreMap: ask.loreMap,
     files: written,
   };
   return `${JSON.stringify(data, null, 2)}\n`;

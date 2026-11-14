@@ -17,7 +17,7 @@ afterEach(async () => {
 /** Every field of a page's type, once: a field added to the type or left out of here does not compile. */
 const CHAT_FIELDS: Record<keyof ChatSummary, true> = { id: true, name: true, lastTurnAt: true, running: true };
 const SUMMARY_FIELDS: Record<keyof TurnSummary, true> = { id: true, kind: true, onPath: true, message: true, status: true, timings: true, usage: true };
-const DETAIL_FIELDS: Record<keyof TurnDetail, true> = { ...SUMMARY_FIELDS, chat: true, intent: true, reply: true, error: true, trace: true };
+const DETAIL_FIELDS: Record<keyof TurnDetail, true> = { ...SUMMARY_FIELDS, chat: true, intent: true, reply: true, error: true, trace: true, lore: true };
 const fields = (shape: object): string[] => Object.keys(shape).sort();
 
 describe("the Turn page's routes", () => {
@@ -81,5 +81,23 @@ describe("the Turn page's routes", () => {
     expect((await b.page("POST", `/api/v1/chats/chat-elsewhere/turns/${turn.id}/stop`)).status).toBe(404);
     expect((await b.page("GET", `/api/v1/chats/${CHAT}/turns/turn-none`)).status).toBe(404);
     expect((await fetch(`${b.listening.url}/api/v1/chats/${CHAT}/turns`)).status).toBe(401);
+  });
+
+  test("a turn's detail names the lore of its prompt: the entries Lumiverse activated for it, and those the Author's lore map named", async () => {
+    const b = await openTurnBed({ answers: [replying("Wren points down the stairs.")] });
+    beds.push(b);
+    const content = "Whale oil is kept in the cellar under the lamp room, six barrels.";
+    b.host.chats.get(CHAT)!.books = [{ id: "wbe-oil", book: "wb-keep", content, comment: "The oil store", keys: ["oil"] }];
+    b.db.run("INSERT INTO world_books (id, name, user_id) VALUES (?, ?, ?)", "wb-keep", "Keeper's Book", USER);
+    b.db.run("INSERT INTO world_book_entries (id, world_book_id, uid, key, content, comment) VALUES (?, ?, ?, ?, ?, ?)", "wbe-oil", "wb-keep", "1", JSON.stringify(["oil"]), content, "The oil store");
+    b.host.send(CHAT, "I ask where the oil is kept.");
+    const turn = await settledTurn(b, (await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET })).generationId!);
+
+    const detail = await b.page<TurnDetail>("GET", `/api/v1/chats/${CHAT}/turns/${turn.id}`);
+    expect(detail.body.lore.activated).toEqual(["wbe-oil"]);
+    // The map names it by the id the Author was shown it by.
+    const shown = /\[(e-\d+)\] The oil store/.exec(JSON.stringify(b.model.requests[0]!.messages))?.[1];
+    expect(shown).toBeDefined();
+    expect(detail.body.lore.map).toEqual([shown!]);
   });
 });

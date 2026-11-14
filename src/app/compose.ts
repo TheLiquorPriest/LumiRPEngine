@@ -1,11 +1,11 @@
-// RPE put together (plan §4.1): every area, in the order it is mounted, over one application. The store
-// and the lore bring their tables; the tree lays out the shipped level of the agents' files; the turn
+// RPE put together (plan §4.1): every area, in the order it is mounted, over one application. The store,
+// the cast, the story record and the lore bring their tables; the tree lays out the shipped level of the agents' files; the turn
 // lane builds RPH's environment and the harness, and adds the connections' and the Turn page's routes;
 // the door to Lumiverse mounts last, playing each tagged reply through the turn lane, and opens its
 // sockets once the server listens.
 //
 // Where a part another lane builds has not landed, the composition says so rather than stands in for it:
-// no story record covers a message yet, so the history window works on none covered; the secrecy of lore
+// the history window is not yet told which messages the story record covers, so it works on none covered; the secrecy of lore
 // entries is not worked out (the extension's own fail-closed verdict keeps every marked secret out); and
 // a chat names no stretches until the story lane does.
 
@@ -14,8 +14,10 @@ import type { Clock, CreateHarnessOptions } from "rp-harness";
 import { loreBooks } from "../adapter/lumiverse/books";
 import { lumiverseDoor, type AdapterDeps, type LumiverseDoor } from "../adapter/lumiverse/mount";
 import { bunSocket } from "../adapter/lumiverse/socket";
+import { CAST_MIGRATIONS } from "../cast";
 import { type LoreBooks, LORE_MIGRATIONS } from "../lore";
 import { STORE_MIGRATIONS } from "../store";
+import { STORY_MIGRATIONS } from "../story";
 import { historyWindow } from "../story/window";
 import { layShipped, RPE_GUIDANCE, TREE_MIGRATIONS } from "../tree";
 import { buildTurns, HARNESS_MIGRATIONS, MACHINE_CLOCK, NO_SESSION, openAppStore, passConnection, PROMPT_MIGRATIONS, turnRoutes, turnSettings, type Turns } from "../turn";
@@ -51,7 +53,7 @@ export function compose(options: ComposeOptions = {}): Composition {
   const owner = (): string => app?.config.lumiverse.user ?? "";
   /** A chat's settings as its levels' config files set them, read outside any session. */
   const chatSettings = (chat: string) => turnSettings(made().files, { user: owner(), chat, session: NO_SESSION }, made().env.log);
-  /** The messages a story record covers: none, until the records lane writes one. */
+  /** The messages the story record covers, for the window's hold: none, until what the record covers is worked out from it. */
   const covered: ReadonlySet<string> = new Set();
 
   const door = lumiverseDoor(
@@ -92,6 +94,8 @@ export function compose(options: ComposeOptions = {}): Composition {
 
   const areas: Area[] = [
     { name: "store", tables: { area: "store", migrations: STORE_MIGRATIONS } },
+    { name: "cast", tables: { area: "cast", migrations: CAST_MIGRATIONS } },
+    { name: "story", tables: { area: "story", migrations: STORY_MIGRATIONS } },
     { name: "lore", tables: { area: "lore", migrations: LORE_MIGRATIONS } },
     { name: "prompt", tables: { area: "prompt", migrations: PROMPT_MIGRATIONS } },
     {

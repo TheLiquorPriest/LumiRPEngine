@@ -3,49 +3,39 @@
 //
 //   files    the tree (`src/tree/`)                 prompt   this lane: the layout each request carried, maps by preset
 //   chat     the adapter's chat port                lore     the lore lane's `Lore`, through its port
-//   tools    the engine's (`src/iface/`), each worded by its file in force for the chat
+//   tools    the engine's (`src/iface/`), the cast's (`src/cast/`) and the story's (`src/story/`), each
+//            worded by its file in force for the chat, each writing through the write queue under the
+//            environment's approvals
 //   facts    a registry each area adds to; this lane's own counts are in it
 //   models   the app's connections                  store    this lane: `kv` in RPE's database
-//   trace    the live hub and the turn's folder     events   this lane: kept with the turn
+//   trace    the live hub and the turn's folder     events   this lane: kept with the turn; the cast's views given
 //   clock    the machine's                          log      the app's
 //
 // Left out, as the contract allows: `approvals` (every lane is Auto) and `switches` (everything that
 // runs a command or calls out is off), and `stores` (RPE reaches no other stores yet).
 
-import { createHarness, type CreateHarnessOptions, loadGuidance } from "rp-harness";
-import type { Clock, Environment, FilesPort, Harness, Scope } from "rp-harness/contract";
+import { createHarness, type CreateHarnessOptions } from "rp-harness";
+import type { Clock, Environment, Harness, HostTool, Scope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { App } from "../app";
+import { castTools, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
-import { engineTools, type GuidanceFiles, stateScan } from "../iface";
+import { engineTools, gridMoves, mapLines, mapView, stateScan } from "../iface";
 import { EntryNumbers, Lore, type LoreBooks, lorePort, storeWorlds } from "../lore";
 import { ALL_PACKS } from "../packs/index";
+import { hashJson } from "../shared/hash";
 import { openStore, type Store } from "../store";
+import { storyTools } from "../story";
 import { TreeChats, type TreeFiles, treeFiles, turnFolderName } from "../tree";
 import { turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
 import { kvStore, servedUser } from "./kv";
 import { type TurnPrompts, turnPrompts } from "./prompt";
 import { Runs } from "./runs";
+import { guidanceTexts } from "./texts";
 import { type TurnTrace, turnTrace } from "./trace";
 import { TurnLane } from "./turns";
-
-/**
- * The engine's tools' files as they are in force for a scope: RPH's guidance finds the nearest level's
- * file of the name, passing over one switched off, and its text is read as the agents would read it.
- */
-function guidanceTexts(files: FilesPort, scope: Scope): GuidanceFiles {
-  const guidance = loadGuidance(files, scope);
-  return {
-    async read(kind, name) {
-      const part = kind === "tools" ? await guidance.tool(name) : await guidance.part(name);
-      if (part === undefined) return undefined;
-      const read = await files.read(scope, part.source.path);
-      return read.status === "read" ? read.text : undefined;
-    },
-  };
-}
 
 /**
  * RPE's file port for the one user it serves, that user read each time the port is asked, since it may
@@ -67,6 +57,37 @@ function servedFiles(owner: () => string | null, make: (user: string) => TreeFil
     write: async (scope, path, op, by) => now().write(scope, path, op, by),
     turnDisk: async (scope) => now().turnDisk(scope),
     sessionDisk: async (scope) => now().sessionDisk(scope),
+  };
+}
+
+/**
+ * A character's sources as Lumiverse holds them now (the cast's `SourceReader`): a card or a persona
+ * through the adapter's reads, a lore entry through the lore, each with a revision that changes
+ * whenever its text does. RPE has no read of Lumiverse's memory entities, so a memory source fails.
+ */
+function liveSources(reads: () => LumiverseReads | null, lore: Lore): SourceReader {
+  const lumiverse = (): LumiverseReads => {
+    const now = reads();
+    if (now === null) throw new Error("RPE is not set up for a Lumiverse, so it cannot read a character's sources.");
+    return now;
+  };
+  return async (scope, source) => {
+    switch (source.kind) {
+      case "entry": {
+        const [entry] = await lore.read({ user: scope.user, chat: scope.chat }, [source.ref]);
+        return entry === undefined ? null : { title: entry.title, revision: entry.revision ?? hashJson([entry.title, entry.keys, entry.text]) };
+      }
+      case "card": {
+        const card = await lumiverse().character(source.ref);
+        return card === null ? null : { title: card.name, revision: hashJson([card.name, card.description, card.personality, card.scenario, card.firstMessage, card.exampleMessages, card.systemPrompt, card.postHistoryInstructions]) };
+      }
+      case "persona": {
+        const persona = await lumiverse().persona(source.ref);
+        return persona === null ? null : { title: persona.name, revision: hashJson([persona.name, persona.title, persona.description]) };
+      }
+      case "memory":
+        throw new Error("RPE cannot read Lumiverse's memory entities yet, so a memory source cannot be read.");
+    }
   };
 }
 
@@ -146,6 +167,22 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     if (parts === null) throw new Error("RPE is not set up for a Lumiverse, so it has no chat to read.");
     return parts.chat;
   };
+  const sources = liveSources(() => options.lumiverse()?.reads ?? null, lore);
+  /**
+   * The host's tools for a scope: one list for its session (the contract's `ToolsPort`), every family's in it. The engine's are given
+   * squares on a map for the operations that name one, and the map that `world_query` shows, both worded by the map's lines in force.
+   */
+  const hostTools = async (scope: Scope): Promise<HostTool[]> => {
+    const texts = guidanceTexts(files, scope);
+    const asked = env.approvals === undefined ? {} : { approvals: env.approvals };
+    const lines = await mapLines(texts);
+    const [engine, cast, story] = await Promise.all([
+      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: stateScan, grid: gridMoves(lines), map: mapView(lines), ...asked }),
+      castTools({ store, writes: app.writes, files: texts, sources, now: () => clock.now(), ...asked }),
+      storyTools({ store, writes: app.writes, files: texts, now: () => clock.now(), ...asked }),
+    ]);
+    return [...engine, ...cast, ...story];
+  };
   const env: Environment = {
     id: "rpe",
     version: app.version,
@@ -157,13 +194,13 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     },
     lore: lorePort(lore),
     prompt: prompts,
-    tools: { all: (scope) => engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: guidanceTexts(files, scope), search: stateScan }) },
+    tools: { all: hostTools },
     searchers: [],
     facts,
     models: app.models,
     store: kvStore(app.db, app.writes, owner),
     trace,
-    events: turnEvents({ db: app.db, writes: app.writes, store, runs, now: () => clock.now(), log: app.log }),
+    events: turnEvents({ db: app.db, writes: app.writes, store, runs, files, sources, now: () => clock.now(), log: app.log }),
     clock,
     log: app.log,
   };

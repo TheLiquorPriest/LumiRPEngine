@@ -89,6 +89,16 @@ describe("the other kinds of turn", () => {
     ]);
   });
 
+  test("a swipe of the chat's first turn follows no turn: RPH is asked with parent null, and carries nothing of the attempt it replaces", async () => {
+    const b = await bed({ answers: [replying("The lamp turns.", "INTENT-FIRST-ATTEMPT"), replying("Wren taps the barometer.")] });
+    const first = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    const made = await settledTurn(b, await play(b, "swipe"));
+
+    expect([first.parent, made.parent]).toEqual([null, null]);
+    expect(b.requests.map((r) => r.parent)).toEqual([null, null]);
+    expect(JSON.stringify(b.model.requests[1]!.messages)).not.toContain("INTENT-FIRST-ATTEMPT");
+  });
+
   test("a continue extends the turn its message is tied to: the same turn, tied again to the joined text", async () => {
     const b = await bed({ answers: [replying("The lamp turns."), replying("Then it stops, and Wren swears.")] });
     const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));

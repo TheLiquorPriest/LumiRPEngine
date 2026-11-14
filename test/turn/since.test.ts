@@ -102,6 +102,15 @@ describe("the turn before, told and kept", () => {
     expect(b.left.filter((s) => s.turn === turn.id)).toHaveLength(1);
     expect(sent(b, 1)).toContain("1 turn(s) were deleted since the last one.");
   });
+
+  test("a reply written in the chat without a turn is told by its number as chat_read counts it, the chat's first message 0", async () => {
+    const b = await bed({ answers: [replying("The lamp turns."), replying("Wren looks up from the brass.")] });
+    // The greeting is message 0; the player's first message 1 and the turn's reply 2; the reply written without a turn 3.
+    await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    b.host.reply(CHAT, "The keeper's dog barks at the door.");
+    await settledTurn(b, await play(b, "normal", "I let the dog in."));
+    expect(sent(b, 1)).toContain("replies were written in this chat without a turn of yours (messages 3, counting the chat's first message as 0)");
+  });
 });
 
 describe("the user served", () => {

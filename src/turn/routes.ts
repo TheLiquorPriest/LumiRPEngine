@@ -1,10 +1,12 @@
 // The routes the Turn page reads (plan §14), in the shapes the pages' client is typed by
 // (`src/ui/api.ts`): the chats RPE plays, a chat's turns newest first, one turn with its intent record,
-// its timings, its usage, what went to the chat and the trace of its run, and the Stop of a turn going
-// on now.
+// its timings, its usage, what went to the chat, the lore of its prompt and the trace of its run, and
+// the Stop of a turn going on now.
 
-import type { Usage } from "rp-harness/contract";
+import type { Scope, Usage } from "rp-harness/contract";
 import { route, RouteError } from "../app";
+import { isRecord } from "../shared/json";
+import { TURN_FILES } from "./folder";
 import type { RunRecord } from "./runs";
 import type { Turns } from "./lane";
 
@@ -25,6 +27,27 @@ function count(value: string | null, name: string, fallback: number, most: numbe
   if (value === null) return fallback;
   if (!/^\d+$/.test(value) || Number(value) < 1) throw new RouteError(400, `${name} is a whole number from 1.`);
   return Math.min(Number(value), most);
+}
+
+/** Strings among a value's items; none when it is no list. */
+function idsOf(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
+}
+
+/**
+ * The lore of a turn's prompt as its intake kept it in the turn's folder (`turn.json`): the ids of the entries Lumiverse activated
+ * for it, and of those the Author's lore map named. None where the folder holds no such file, or one that cannot be read.
+ */
+async function keptLore(turns: Turns, scope: Scope & { turn: string }): Promise<{ activated: string[]; map: string[] }> {
+  const folder = (await turns.files.places(scope)).turn;
+  const read = folder === undefined ? null : await turns.files.read(scope, `${folder}${TURN_FILES.turn}`);
+  let data: unknown = null;
+  try {
+    data = read?.status === "read" ? JSON.parse(read.text) : null;
+  } catch {
+    // A file that does not parse holds nothing the page can show.
+  }
+  return isRecord(data) ? { activated: idsOf(data.lore), map: idsOf(data.loreMap) } : { activated: [], map: [] };
 }
 
 export function turnRoutes(deps: TurnRoutesDeps) {
@@ -81,6 +104,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
           reply: { text: r.reply, progress: [...r.progress] },
           error: r.error,
           trace,
+          lore: await keptLore(turns, { user, chat: r.chat, session: r.session, turn: r.turn }),
         };
       },
     }),

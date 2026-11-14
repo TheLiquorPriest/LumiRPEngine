@@ -455,6 +455,17 @@ export class StandIn {
     return m.id;
   }
 
+  /** A reply saved in the chat with no generation (`createMessage` with `is_user` false), as the user's own hand or another app writes one: saved, then told. Gives its id. */
+  reply(chatId: string, text: string): string {
+    const chat = this.chats.get(chatId);
+    if (!chat) throw new Error("the stand-in has no such chat");
+    const m: ChatMessage = { id: crypto.randomUUID(), role: "assistant", content: text };
+    chat.messages.push(m);
+    this.createRow(chat, m, chat.character.name);
+    this.emit("MESSAGE_SENT", { chatId, message: this.messageRow(m.id) ?? m }, chat.user);
+    return m.id;
+  }
+
   /** `deleteMessage` (`services/chats.service.ts:3230-3270`): the row and its breakdown gone, then told (`MESSAGE_DELETED`). */
   deleteMessage(chatId: string, id: string): void {
     const chat = this.chats.get(chatId);

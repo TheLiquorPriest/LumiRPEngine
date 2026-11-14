@@ -2,11 +2,17 @@
 // decision: RPE records it with the turn and shows it. The intent record is kept on the turn as text and
 // never read by code (plan §10.3). A sub-agent's writes the lead drops are taken back from the turn's
 // staged changes. Rules that fired, consents, gap checks, suggestions and the attachments an agent was
-// given are kept with the turn (`turn_told`) for the Turn page.
+// given are kept with the turn (`turn_told`) for the Turn page. Of RPE's own spaces an agent can be
+// given by name, the cast's views of the character it plays are given (`cast:self(…)`).
 
 import type { Database } from "bun:sqlite";
-import type { Log, Scope, TurnEvents } from "rp-harness/contract";
+import { loadGuidance, type TemplatePart } from "rp-harness";
+import type { AgentRef, ContextBlock, FilesPort, Log, Scope, TurnEvents } from "rp-harness/contract";
+import { CAST_VIEWS, castViews, type CastViewName, type SourceReader } from "../cast";
 import type { Store } from "../store";
+import { namesOf } from "../story/kit";
+import { storyAt } from "../story/path";
+import { StoryRecord } from "../story/record";
 import type { Writes } from "./kv";
 import type { Runs } from "./runs";
 
@@ -15,8 +21,47 @@ export interface EventsDeps {
   writes: Writes;
   store: Store;
   runs: Runs;
+  /** The agents' files, for the parts the cast's views are laid out by. */
+  files: FilesPort;
+  /** A character's sources read live, shown with its base. */
+  sources: SourceReader;
   now(): number;
   log: Log;
+}
+
+/** `cast:self(base, mind, …)`: views of the character the agent plays, by name. */
+const CAST_SELF = /^cast:self\((.*)\)$/;
+
+/** Who the open scene has on stage, as the story record holds it at the turn: the names the Author gave it. */
+function onStage(store: Store, user: string, chat: string, turn: string | null): string[] {
+  const scene = StoryRecord.read(store.db, user, storyAt(store.user(user), chat, turn)).current("scene");
+  return scene === null || scene.closedBy !== null ? [] : namesOf(scene);
+}
+
+/**
+ * The cast's views that `ref` names of the character `agent` plays, each laid out by its part in force for the chat, one after
+ * another; null when the ref is not the cast's or the agent plays nobody. A name among them that is not the cast's is left out.
+ */
+async function castSelf(deps: EventsDeps, scope: Scope, agent: AgentRef, ref: string): Promise<string | null> {
+  const inner = CAST_SELF.exec(ref)?.[1];
+  if (inner === undefined || agent.plays === undefined) return null;
+  const names = inner
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name !== "");
+  const guidance = loadGuidance(deps.files, scope);
+  const layouts: Partial<Record<CastViewName, TemplatePart>> = {};
+  for (const name of names) {
+    if (!Object.hasOwn(CAST_VIEWS, name)) continue;
+    const part = await guidance.part(CAST_VIEWS[name as CastViewName]);
+    if (part?.format === "template") layouts[name as CastViewName] = part;
+  }
+  const turn = scope.turn ?? null;
+  const views = await castViews(names, { store: deps.store, user: scope.user, chat: scope.chat, turn, character: agent.plays, present: onStage(deps.store, scope.user, scope.chat, turn), sources: deps.sources, layouts });
+  return views
+    .map((view) => view.text)
+    .filter((text) => text.trim() !== "")
+    .join("\n\n");
 }
 
 /** One thing told, kept with its turn. */
@@ -49,8 +94,19 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
     },
     async attachments(scope, agent, refs) {
       await tell(scope, "attachments", { agent, refs });
-      // RPE resolves none of its own spaces yet (the world, the story, the cast come with their lanes): each is left out, and RPH says so.
-      return [];
+      // Of RPE's own spaces only the cast's views are given yet; every other name is left out, and RPH says so. A view that cannot be
+      // read leaves out its name alone.
+      const blocks: ContextBlock[] = [];
+      for (const { ref, own } of refs) {
+        if (own) continue;
+        try {
+          const text = await castSelf(deps, scope, agent, ref);
+          if (text !== null && text !== "") blocks.push({ name: ref, text });
+        } catch (error) {
+          deps.log.warn("The cast's views an agent was to be given could not be read.", { agent: agent.id, ref, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      return blocks;
     },
     consent: (scope, grant) => tell(scope, "consent", grant),
     gapCheck: (scope, check) => tell(scope, "gap-check", check),
