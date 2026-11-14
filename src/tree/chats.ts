@@ -40,7 +40,30 @@ CREATE TABLE tree_write (
 CREATE INDEX tree_write_turn ON tree_write (user, turn);
 `,
   },
+  {
+    version: 2,
+    name: "whose level a chat's character folder is",
+    // Null for a chat placed before: it neither keeps a folder for its owner nor keeps another owner out.
+    sql: `
+ALTER TABLE tree_chat ADD COLUMN owner TEXT;
+CREATE INDEX tree_chat_owner ON tree_chat (user, owner);
+`,
+  },
 ];
+
+/** An id as a folder name keeps it whole: its letters and digits, lower case. */
+function wholeId(id: string): string {
+  return id.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+}
+
+/** The first of `short`, `long`, `long-2`, `long-3` … that `taken` does not hold. */
+function firstFree(short: string, long: string, taken: (folder: string) => boolean): string {
+  if (!taken(short)) return short;
+  if (!taken(long)) return long;
+  let n = 2;
+  while (taken(`${long}-${n}`)) n++;
+  return `${long}-${n}`;
+}
 
 /** What a chat's folders are named for: its character (or group), and the chat itself. */
 export interface ChatNames {
@@ -69,9 +92,10 @@ export class TreeChats {
   }
 
   /**
-   * The chat's folders, chosen and made the first time it is placed. A chat with no character sits in a
-   * level of its own, named for the chat. Two chats whose names and ids' first letters agree are told
-   * apart by the whole id.
+   * The chat's folders, chosen and made the first time it is placed. A character's level is chosen
+   * once and kept, so its chats sit together after a rename; a chat with no character sits in a level
+   * of its own, named for the chat. Two characters, or two chats of a character, whose names and ids'
+   * first letters agree are told apart by the whole id.
    */
   async place(user: string, chat: string, names: ChatNames): Promise<ChatFolders> {
     const known = this.folders(user, chat);
@@ -79,14 +103,18 @@ export class TreeChats {
       await mkdir(join(this.files, CHATS_FOLDER, known.character, known.chat), { recursive: true });
       return known;
     }
-    const character = names.character === null ? folderFor(names.chat.name, chat) : folderFor(names.character.name, names.character.id);
+    const level = names.character ?? { id: chat, name: names.chat.name };
+    const owner = names.character === null ? `chat:${chat}` : `character:${names.character.id}`;
     const chosen = await this.writes.run((db) => {
       const again = db.query<{ character: string; folder: string }, [string, string]>("SELECT character, folder FROM tree_chat WHERE user = ? AND chat = ?").get(user, chat);
       if (again !== null) return { character: again.character, chat: again.folder };
+      const kept = db.query<{ character: string }, [string, string]>("SELECT character FROM tree_chat WHERE user = ? AND owner = ? LIMIT 1").get(user, owner);
+      const othersLevel = (folder: string): boolean => db.query<{ n: number }, [string, string, string]>("SELECT count(*) AS n FROM tree_chat WHERE user = ? AND character = ? AND owner IS NOT NULL AND owner <> ?").get(user, folder, owner)?.n !== 0;
+      const character = kept?.character ?? firstFree(folderFor(level.name, level.id), `${folderFor(level.name, level.id)}-${wholeId(level.id)}`, othersLevel);
       const taken = (folder: string): boolean => db.query<{ n: number }, [string, string, string]>("SELECT count(*) AS n FROM tree_chat WHERE user = ? AND character = ? AND folder = ?").get(user, character, folder)?.n !== 0;
       const short = folderFor(names.chat.name, chat);
-      const folder = taken(short) ? `${short}-${chat.replace(/[^A-Za-z0-9]/g, "").toLowerCase()}` : short;
-      db.run("INSERT INTO tree_chat (user, chat, character, folder) VALUES (?, ?, ?, ?)", [user, chat, character, folder]);
+      const folder = firstFree(short, `${short}-${wholeId(chat)}`, taken);
+      db.run("INSERT INTO tree_chat (user, chat, character, folder, owner) VALUES (?, ?, ?, ?, ?)", [user, chat, character, folder, owner]);
       return { character, chat: folder };
     }, "placing a chat's folders");
     await mkdir(join(this.files, CHATS_FOLDER, chosen.character, chosen.chat), { recursive: true });
