@@ -2,14 +2,16 @@
 // area adds its facts to while RPE starts, read as one port once the harness asks for them. A fact is a
 // neutral count drawn from RPE's records; the rule that names it says what matters.
 //
-// The turn lane's own facts:
-//   turns.since.engine.change  turns on the chat's path since the last one that recorded an engine-lane change
-//   session.turns              turns on the chat's path since this session opened
+// The turn lane's own facts, counted along the scope turn's own line (the turns it was made after, and
+// itself once its reply is tied), or along the chat's path for a scope with no turn:
+//   turns.since.engine.change  turns on that line since the last one that recorded an engine-lane change
+//   session.turns              turns on that line since this session opened
 //   turn.recorded              what this turn has recorded so far in any lane: the store's changes and the story's and the cast's
 //                              rows it wrote; a continue's, since it began (the marks its run took, as its take-back uses them)
 
 import type { FactDef, FactsPort, FactValue, Scope } from "rp-harness/contract";
 import type { Store } from "../store";
+import { storyAt } from "../story/path";
 import type { RunRecord } from "./runs";
 
 /** Facts one area counts. */
@@ -71,15 +73,17 @@ export function turnFacts(store: Store, run: (user: string, turn: string) => Pic
   return {
     area: "turn",
     defs: [
-      { name: "turns.since.engine.change", counts: "Turns on the chat's path since the last one that recorded a change in the engine lane; every turn on the path when none has." },
-      { name: "session.turns", counts: "Turns on the chat's path since this session opened, the turn that opened it among them." },
+      { name: "turns.since.engine.change", counts: "Turns on this turn's own line, this one once its reply is saved, since the last one that recorded a change in the engine lane; every turn on it when none has." },
+      { name: "session.turns", counts: "Turns on this turn's own line, this one once its reply is saved, since this session opened, the turn that opened it among them." },
       { name: "turn.recorded", counts: "Things this turn has recorded so far in any lane: the engine's changes, and the story's and the cast's records; for a continue, since it began. A job's are its own." },
     ],
     async read(scope, names) {
       const user = store.user(scope.user);
-      // A chat RPE has not met yet has no turns on its path: every count is 0.
+      // A chat RPE has not met yet has no turns on its path: every count is 0. A turn still open is not yet one of the turns counted,
+      // so a swipe counts the line it follows, not the attempt it replaces.
       const known = user.chat(scope.chat) !== null;
-      const turns = known ? user.path(scope.chat).flatMap((e) => (e.turn === null ? [] : [e.turn])) : [];
+      const line = known ? storyAt(user, scope.chat, scope.turn ?? null).turns : [];
+      const turns = scope.turn !== undefined && user.turn(scope.turn)?.status === "open" ? line.filter((t) => t !== scope.turn) : line;
       const out: Record<string, FactValue> = {};
       if (names.includes("turns.since.engine.change")) {
         let count = 0;

@@ -23,3 +23,8 @@ added:
 # folder and name (rules/perceptions-owed). "Delete" on a shipped file in the Files page writes
 # its name here, in your own copy of this file. Nothing ships switched off.
 off: []
+
+# How many of a chat's newest turn folders are kept whole. Each older one keeps its turn.json,
+# its output/ and its transcripts/, and lets go of the rest.
+retention:
+  turnFolders: 50

@@ -226,6 +226,11 @@ export class Runs {
       .map((r) => (live !== undefined && live.id === r.id ? live : recordOf(user, r)));
   }
 
+  /** How many runs RPE kept of these turns. */
+  countOf(user: string, turns: readonly string[]): number {
+    return this.db.query<{ n: number }, [string, string]>("SELECT count(*) AS n FROM turn_run WHERE user = ? AND turn IN (SELECT value FROM json_each(?))").get(user, JSON.stringify(turns))?.n ?? 0;
+  }
+
   /** The run a generation was played by, as kept. */
   byGeneration(user: string, generation: string): RunRecord | null {
     for (const r of this.#running.values()) if (r.user === user && r.generation === generation) return r;

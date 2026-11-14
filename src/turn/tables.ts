@@ -8,8 +8,9 @@
 // Area `harness` (Appendix B, "Harness"): RPH's small durable state (`kv`), each turn's run as the Turn
 // page shows it (`turn_run`: where it stands, its timings and usage, what went to the chat), what RPH
 // told RPE about the run (`turn_told`: rules that fired, consents, gap checks, suggestions, attachments
-// asked for), the player's messages as RPE read them (`player_text`), and what the player asked for
-// through a panel (`panel_request`).
+// asked for), the player's messages as RPE read them (`player_text`), what the player asked for
+// through a panel (`panel_request`), what a comparison of a chat's path found (`since_found`), and which
+// of these a turn was told (`since_told`).
 
 export type TableStep = { readonly version: number; readonly name: string; readonly sql: string };
 
@@ -182,6 +183,35 @@ CREATE TABLE panel_request (
   PRIMARY KEY (user, id)
 );
 CREATE INDEX panel_request_after ON panel_request (user, chat, after);
+`,
+  },
+  {
+    version: 6,
+    name: "what a comparison of a chat's path found, which turn was told what, and panel requests told by who was told them",
+    // `since_found`: one thing a comparison found, as data (`since.ts`), filed under the turn at the head of the chat's path when it
+    // was found (`after`; null while no turn is on it). `since_told`: a found thing or a panel request, and a turn it was told to. A
+    // panel request is told by who was told it, no longer by the turn noted when it was made, so `panel_request.after` goes.
+    sql: `
+CREATE TABLE since_found (
+  user TEXT NOT NULL,
+  id TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  after TEXT,
+  at INTEGER NOT NULL,
+  item TEXT NOT NULL,
+  PRIMARY KEY (user, id)
+);
+CREATE INDEX since_found_after ON since_found (user, chat, after);
+CREATE TABLE since_told (
+  user TEXT NOT NULL,
+  turn TEXT NOT NULL,
+  item TEXT NOT NULL,
+  PRIMARY KEY (user, turn, item)
+);
+CREATE INDEX since_told_item ON since_told (user, item);
+DROP INDEX panel_request_after;
+ALTER TABLE panel_request DROP COLUMN after;
+CREATE INDEX panel_request_chat ON panel_request (user, chat, at);
 `,
   },
 ];

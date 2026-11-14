@@ -27,7 +27,7 @@ import { ALL_PACKS } from "../packs/index";
 import { hashJson } from "../shared/hash";
 import { openStore, type Store, storedWorlds, timeDue } from "../store";
 import { storyFacts, storyTools } from "../story";
-import { TreeChats, type TreeFiles, treeFiles, turnFolderName } from "../tree";
+import { pruneChat, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
 import { turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
 import { kvStore, servedUser } from "./kv";
@@ -36,6 +36,7 @@ import { PlayerSide } from "./player";
 import { type TurnPrompts, turnPrompts } from "./prompt";
 import { Runs } from "./runs";
 import { turnSettings } from "./settings";
+import { SinceKept } from "./since";
 import { stagesAt } from "./stage";
 import { guidanceTexts } from "./texts";
 import { type TurnTrace, turnTrace } from "./trace";
@@ -158,6 +159,10 @@ export interface Turns {
   player: PlayerSide;
   trace: TurnTrace;
   lore: Lore;
+  /** The notes agents write, which follow the turn. */
+  notes: TreeNotes;
+  /** The suggestions agents file of the tree's files. */
+  suggestions: TreeSuggestions;
 }
 
 export function buildTurns(app: App, options: TurnsOptions): Turns {
@@ -165,6 +170,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const clock = options.clock ?? MACHINE_CLOCK;
   const { store } = options;
   const chats = new TreeChats(app.db, app.writes, app.paths.files);
+  const notes = new TreeNotes({ files: app.paths.files, db: app.db, writes: app.writes, chats });
+  const suggestions = new TreeSuggestions({ db: app.db, writes: app.writes, now: () => clock.now() });
   const files = servedFiles(owner, (user) =>
     treeFiles({
       files: app.paths.files,
@@ -181,6 +188,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const prompts = turnPrompts(app.db, app.writes, () => clock.now());
   const runs = new Runs(app.db, app.writes);
   const player = new PlayerSide(app.db, app.writes);
+  const since = new SinceKept(app.db);
   const lore = new Lore({ books: options.books, worlds: storeWorlds(store), turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes) });
   const facts = new FactsRegistry();
   facts.add(turnFacts(store, (user, turn) => runs.record(user, turn)));
@@ -249,7 +257,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     models: app.models,
     store: kvStore(app.db, app.writes, owner),
     trace,
-    events: turnEvents({ db: app.db, writes: app.writes, store, runs, files, sources, now: () => clock.now(), log: app.log }),
+    events: turnEvents({ db: app.db, writes: app.writes, store, runs, files, sources, notes, suggestions, now: () => clock.now(), log: app.log }),
     clock,
     log: app.log,
   };
@@ -263,6 +271,9 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     lore,
     runs,
     player,
+    since,
+    notes,
+    pruneTurns: (user, chat, spare) => pruneChat({ files: app.paths.files, chats }, user, chat, spare),
     due,
     migrated: options.migrated,
     live: app.live,
@@ -273,5 +284,5 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     clock,
     log: app.log,
   });
-  return { lane, store, harness, env, facts, files, chats, prompts, runs, player, trace, lore };
+  return { lane, store, harness, env, facts, files, chats, prompts, runs, player, trace, lore, notes, suggestions };
 }

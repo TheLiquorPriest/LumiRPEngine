@@ -1,6 +1,8 @@
 // The player's side of what has happened since the last turn (plan §6.3, §10.10): the player's messages
 // as RPE read them, so an edit of one can be told with the text it had before; and what the player
-// asked for through a panel, as part of their next message, held for the turns that answer it.
+// asked for through a panel, as part of their next message, told to the turn that answers it whatever
+// that turn follows, and again only to a swipe of that turn. Which turn was told which request is kept
+// beside what a comparison found (`since_told`, written through `SinceKept.told`).
 
 import type { Database } from "bun:sqlite";
 import type { Writes } from "./kv";
@@ -37,23 +39,34 @@ export class PlayerSide {
     for (const t of texts) put.run(user, chat, t.message, t.hash, t.text);
   }
 
-  /**
-   * Holds a panel request for every turn that follows `after`: the turn whose reply was the chat's newest when it was made, null
-   * before the chat's first turn. A swipe of such a turn answers the same message, so it is given the same requests.
-   */
-  async hold(user: string, chat: string, after: string | null, ask: { what: string; on: string | null }, at: number): Promise<PanelRequest> {
+  /** Holds a panel request: part of the player's next message, for the turn that answers it. */
+  async hold(user: string, chat: string, ask: { what: string; on: string | null }, at: number): Promise<PanelRequest> {
     const request: PanelRequest = { id: crypto.randomUUID(), what: ask.what, on: ask.on, at };
-    await this.writes.run(
-      (db) => db.run(`INSERT INTO panel_request (user, id, chat, after, what, "on", at) VALUES (?, ?, ?, ?, ?, ?, ?)`, [user, request.id, chat, after, request.what, request.on, request.at]),
-      "holding a request from a panel",
-    );
+    await this.writes.run((db) => db.run(`INSERT INTO panel_request (user, id, chat, what, "on", at) VALUES (?, ?, ?, ?, ?, ?)`, [user, request.id, chat, request.what, request.on, request.at]), "holding a request from a panel");
     return request;
   }
 
-  /** The requests held for a turn that follows `after`, oldest first. */
-  requests(user: string, chat: string, after: string | null): PanelRequest[] {
+  /**
+   * The requests a turn is told, oldest first. A turn that answers a new message (`attempts` null): the chat's requests that no turn
+   * standing was told, a turn dropped with nothing saved telling none. A swipe or a regenerate, which answers the message its earlier
+   * attempts answered (`attempts`): the requests they were told.
+   */
+  requestsFor(user: string, chat: string, attempts: readonly string[] | null): PanelRequest[] {
+    if (attempts === null) {
+      return this.db
+        .query<PanelRequest, [string, string]>(
+          `SELECT r.id, r.what, r."on" AS "on", r.at FROM panel_request r WHERE r.user = ?1 AND r.chat = ?2 AND NOT EXISTS (
+             SELECT 1 FROM since_told t JOIN turn u ON u.user = t.user AND u.id = t.turn WHERE t.user = ?1 AND t.item = r.id AND u.status <> 'dropped')
+           ORDER BY r.at, r.rowid`,
+        )
+        .all(user, chat);
+    }
     return this.db
-      .query<{ id: string; what: string; on: string | null; at: number }, [string, string, string | null]>(`SELECT id, what, "on" AS "on", at FROM panel_request WHERE user = ? AND chat = ? AND after IS ? ORDER BY at, rowid`)
-      .all(user, chat, after);
+      .query<PanelRequest, [string, string, string]>(
+        `SELECT r.id, r.what, r."on" AS "on", r.at FROM panel_request r WHERE r.user = ?1 AND r.chat = ?2 AND EXISTS (
+           SELECT 1 FROM since_told t WHERE t.user = ?1 AND t.item = r.id AND t.turn IN (SELECT value FROM json_each(?3)))
+         ORDER BY r.at, r.rowid`,
+      )
+      .all(user, chat, JSON.stringify(attempts));
   }
 }

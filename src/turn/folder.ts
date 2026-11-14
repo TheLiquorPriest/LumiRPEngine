@@ -6,13 +6,13 @@
 // briefing's world state as its own part laid it out, and `turn.json` holds data only. A file whose part
 // is switched off, or that lays out nothing, is not written.
 //
-// Not written yet, each waiting on a part not built: `preset-guidance.md` and each message's slice
-// marker in the assembled prompt (the prompt map's slices), and `cast/` (the cast's views).
+// The views of the prompt itself (the whole prompt, the history it holds, the preset's guidance) are the
+// harness's prompt map's: it writes them in this folder during the run, from the request.
 
 import type { Fields, Guidance, LinesPart, TemplatePart } from "rp-harness";
-import type { HistoryRange, PromptMessage, Scope, TurnRequest } from "rp-harness/contract";
+import type { PromptMessage, Scope, TurnRequest } from "rp-harness/contract";
 import type { TaggedTurn } from "../adapter/lumiverse/provider";
-import type { LumiverseReads, LvStep } from "../adapter/lumiverse/reads";
+import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { Lore } from "../lore";
 import { isRecord } from "../shared/json";
 import type { TreeFiles } from "../tree";
@@ -20,8 +20,6 @@ import { textOf } from "./request";
 
 /** The files, by their names in the turn's folder. */
 export const TURN_FILES = {
-  prompt: "assembled-preset-prompt.md",
-  history: "visible-chat-history.md",
   lore: "active-wi-content.md",
   persona: "persona.md",
   character: "character.md",
@@ -32,7 +30,7 @@ export const TURN_FILES = {
 } as const;
 
 /** The prompt parts the files are laid out by; the briefing's file is laid out as the Author's briefing is. */
-export const FOLDER_PARTS = { prompt: "turn-prompt", history: "turn-history", lore: "turn-lore", card: "turn-card", attempt: "turn-attempt", briefing: "briefing" } as const;
+export const FOLDER_PARTS = { lore: "turn-lore", card: "turn-card", attempt: "turn-attempt", briefing: "briefing" } as const;
 
 /**
  * Lumiverse's own markers of the preset blocks that put the persona and the character card in the
@@ -60,8 +58,6 @@ export interface FolderAsk {
   tagged: TaggedTurn;
   /** The prompt as RPH takes it, in the order of the request's layout. */
   messages: readonly PromptMessage[];
-  /** The chat's path as Lumiverse shows it. */
-  steps: readonly LvStep[];
   request: TurnRequest;
   /** The ids of the entries the lore map named in the Author's briefing, as the map writes them. */
   loreMap: readonly string[];
@@ -116,24 +112,6 @@ function blocksMarked(ask: FolderAsk, texts: readonly string[], markers: Readonl
   return found.sort((a, b) => a.message - b.message || a.start - b.start).map(({ name, text }) => ({ name, text }));
 }
 
-/** The history messages the prompt holds, as it holds them, with their speakers; and the stretch of the chat it leaves out, by the chat's own places. */
-async function historyFields(d: FolderDeps, ask: FolderAsk, texts: readonly string[]): Promise<Fields> {
-  const shown = ask.tagged.layout.messages.flatMap((m, i) => m.parts.flatMap((p) => (p.kind === "history" && p.source !== undefined ? [{ id: p.source.id, at: p.source.index, text: (texts[i] ?? "").slice(p.start, p.end) }] : [])));
-  const names = new Map((shown.length === 0 ? [] : await d.reads.messagesById(ask.scope.chat, shown.map((s) => s.id))).map((m) => [m.id, m.name]));
-  const leftOut = (ask.request.leftOut ?? []).flatMap((r: HistoryRange) => {
-    const from = ask.steps[r.from];
-    const to = ask.steps[r.to - 1];
-    return from === undefined || to === undefined ? [] : [{ from: from.index, to: to.index }];
-  });
-  return {
-    ...(leftOut.length > 0 ? { left_out: leftOut } : {}),
-    messages: shown.map((s) => {
-      const speaker = names.get(s.id);
-      return { ...s, ...(speaker !== undefined && speaker !== "" ? { speaker } : {}) };
-    }),
-  };
-}
-
 /** The lore map as the briefing holds it, then each entry that activated for the prompt, in full as agents read it. */
 async function loreFields(d: FolderDeps, ask: FolderAsk, loreMap: string | undefined): Promise<Fields> {
   const at = { user: ask.scope.user, chat: ask.scope.chat, turn: ask.scope.turn };
@@ -177,8 +155,8 @@ export async function writeTurnFolder(d: FolderDeps, ask: FolderAsk): Promise<st
   const folder = places.turn;
   if (folder === undefined) return [];
   const { guidance, tagged } = ask;
-  const [promptPart, historyPart, lorePart, cardPart, attemptPart, briefingPart] = await Promise.all(
-    [FOLDER_PARTS.prompt, FOLDER_PARTS.history, FOLDER_PARTS.lore, FOLDER_PARTS.card, FOLDER_PARTS.attempt, FOLDER_PARTS.briefing].map(async (name): Promise<TemplatePart | undefined> => {
+  const [lorePart, cardPart, attemptPart, briefingPart] = await Promise.all(
+    [FOLDER_PARTS.lore, FOLDER_PARTS.card, FOLDER_PARTS.attempt, FOLDER_PARTS.briefing].map(async (name): Promise<TemplatePart | undefined> => {
       const part: TemplatePart | LinesPart | undefined = await guidance.part(name);
       return part?.format === "template" ? part : undefined;
     }),
@@ -191,17 +169,8 @@ export async function writeTurnFolder(d: FolderDeps, ask: FolderAsk): Promise<st
   const personaName = persona.length === 0 || tagged.tag.persona === null ? null : ((await d.reads.persona(tagged.tag.persona))?.name ?? null);
 
   const files: [string, string | undefined][] = [
-    [
-      TURN_FILES.prompt,
-      promptPart?.render({
-        messages: ask.messages.map((m, i) => {
-          const pictures = typeof m.content === "string" ? 0 : m.content.filter((p) => p.type === "image").length;
-          return { n: i + 1, role: m.role, text: texts[i] ?? "", ...(pictures > 0 ? { pictures } : {}) };
-        }),
-      }).text,
-    ],
-    [TURN_FILES.history, historyPart?.render(await historyFields(d, ask, texts)).text],
     [TURN_FILES.lore, lorePart?.render(await loreFields(d, ask, loreMap)).text],
+    // From the chat application's own markers, so here from the first turn; once a learned map names these slices, its view of them takes the file's place during the run, with the same text from the prompt.
     [TURN_FILES.persona, persona.length === 0 ? undefined : cardPart?.render({ persona: true, ...(personaName !== null ? { name: personaName } : {}), blocks: persona }).text],
     [TURN_FILES.character, character.length === 0 ? undefined : cardPart?.render({ character: true, ...(tagged.tag.speaker.name !== null ? { name: tagged.tag.speaker.name } : {}), blocks: character }).text],
     [TURN_FILES.worldState, ask.request.briefing.find((b) => b.name === "world-state")?.text],

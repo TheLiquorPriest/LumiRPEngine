@@ -260,12 +260,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       path: "/api/v1/chats/:chat/requests",
       access: "page",
       body: panelAsk,
-      handle: async ({ user, params, body }) => {
-        // Part of the player's next message: held for the turns that follow the reply the chat shows newest as RPE last compared it.
-        const store = turns.store.user(user);
-        const after = store.chat(params.chat) === null ? null : (store.path(params.chat).findLast((e) => e.turn !== null)?.turn ?? null);
-        return { request: await turns.player.hold(user, params.chat, after, body, Date.now()) };
-      },
+      handle: async ({ user, params, body }) => ({ request: await turns.player.hold(user, params.chat, body, Date.now()) }),
     }),
     route({
       method: "GET",

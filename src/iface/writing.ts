@@ -54,11 +54,22 @@ export class Draft {
     return this.base.over({ ...this.base.state, world: this.w.state, horizon: this.storeState.horizon }, this.w.ctx);
   }
 
-  /** Applies events in order on the working copy; the first that does not apply undoes the rest and is returned. */
+  /**
+   * Applies events in order on the working copy; the first that does not apply undoes the rest and is returned. A handler that throws
+   * is an error in the engine, not in the story: the working copy is put back the same way, the error goes to the store's own sink
+   * (`FoldEnv.failed`: the log and the live view), and the rejection carries only the code `failed`, which the answers file words.
+   */
   applyAll(events: readonly LedgerEvent[]): Rejection | null {
     const mark = this.w.lightMark();
     for (const ev of events) {
-      const rejection = this.w.apply(ev);
+      let rejection: Rejection | null;
+      try {
+        rejection = this.w.apply(ev);
+      } catch (error) {
+        this.w.restore(mark);
+        this.call.deps.env.failed?.({ op: ev.type, error });
+        return { code: "failed", reason: "" };
+      }
       if (rejection) {
         this.w.restore(mark);
         return rejection;

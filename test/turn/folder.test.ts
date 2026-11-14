@@ -1,12 +1,17 @@
 // The turn's folder (plan §5.3), played through the stand-in Lumiverse: at the start of every turn RPE
 // writes what the Author is shown as files for the agents it delegates to, each laid out by its prompt
-// part, and an agent cannot write them. Every name is invented.
+// part, and an agent cannot write them; the harness's prompt map writes its views of the prompt there,
+// from the request RPE gives it. Every name is invented.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { FileRead, Scope } from "rp-harness/contract";
 import { KIT_AGENT } from "rp-harness/testing/kit";
 import { TURN_FILES } from "../../src/turn/folder";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
+
+/** The harness's views of the prompt in a turn's folder, as RPH's shipped `prompt-map` part names them. */
+const PROMPT_VIEW = "assembled-preset-prompt.md";
+const HISTORY_VIEW = "visible-chat-history.md";
 
 const beds: TurnBed[] = [];
 afterEach(async () => {
@@ -69,17 +74,21 @@ describe("the turn's folder", () => {
     const messages = b.host.chats.get(CHAT)!.messages;
     const [greeting, said, reply, asked] = messages;
 
-    // Every message the prompt held, in order, with its role: the preset's blocks, then the history the window kept.
-    const prompt = await text(b, scope, `${folder}${TURN_FILES.prompt}`);
-    inOrder(prompt, ["Message 1, system", "You narrate a lighthouse", CARD, PERSONA, "The lamp turns.", "I ask where the oil is kept."]);
+    // Every message the prompt held, in order, as the harness's map lays it out: the preset's blocks, then the history the window kept.
+    const prompt = await text(b, scope, `${folder}${PROMPT_VIEW}`);
+    inOrder(prompt, ["You narrate a lighthouse", CARD, PERSONA, "The lamp turns.", "I ask where the oil is kept."]);
     expect(prompt).not.toContain("I climb the stairs.");
 
-    // The history in the prompt, by the chat's places, ids and speakers, and the stretch the window left out.
-    const history = await text(b, scope, `${folder}${TURN_FILES.history}`);
-    expect(history).toContain("Messages 0 to 1 of the chat are not in the prompt.");
-    inOrder(history, [`## Message 2 [${reply!.id}], Wren Hale`, "The lamp turns.", `## Message 3 [${asked!.id}], User`, "I ask where the oil is kept."]);
+    // The history the window left in, and no other message, by the chat's places and ids; the harness is given the stretch the window
+    // left out, and its view says so.
+    expect(b.requests[1]!.leftOut).toEqual([{ from: 0, to: 2 }]);
+    const history = await text(b, scope, `${folder}${HISTORY_VIEW}`);
+    inOrder(history, [`#2 (${reply!.id})`, "The lamp turns.", `#3 (${asked!.id})`, "I ask where the oil is kept."]);
+    expect(history).toContain("Messages #0 to #1 of the chat are not in this prompt.");
     expect(history).not.toContain(greeting!.id);
     expect(history).not.toContain(said!.id);
+    expect(history).not.toContain("I climb the stairs.");
+    expect(history).not.toContain("You narrate a lighthouse");
 
     // The card and the persona, found by Lumiverse's own markers where this prompt holds them.
     expect(await text(b, scope, `${folder}${TURN_FILES.character}`)).toBe(`# The character: Wren Hale\n\n## Wren's card\n\n${CARD}\n`);
@@ -97,10 +106,10 @@ describe("the turn's folder", () => {
 
     const data = JSON.parse(await text(b, scope, `${folder}${TURN_FILES.turn}`)) as { turn: string; kind: string; parent: string | null; files: string[]; prompt: { leftOut: unknown } };
     expect(data).toMatchObject({ turn: turn.id, kind: "new", parent: turn.parent, prompt: { leftOut: [{ from: 0, to: 2 }] } });
-    expect(data.files).toEqual([TURN_FILES.prompt, TURN_FILES.history, TURN_FILES.persona, TURN_FILES.character, TURN_FILES.worldState, TURN_FILES.briefing].map((f) => `${folder}${f}`));
+    expect(data.files).toEqual([TURN_FILES.persona, TURN_FILES.character, TURN_FILES.worldState, TURN_FILES.briefing].map((f) => `${folder}${f}`));
 
     // Generated: an agent's write to any of them is refused, and changes nothing.
-    for (const file of [TURN_FILES.prompt, TURN_FILES.briefing, TURN_FILES.turn]) {
+    for (const file of [PROMPT_VIEW, TURN_FILES.briefing, TURN_FILES.turn]) {
       expect(await b.turns.files.write(scope, `${folder}${file}`, { op: "write", text: "overwritten\n" }, KIT_AGENT)).toMatchObject({ status: "refused", reason: "generated" });
     }
     expect(await text(b, scope, `${folder}${TURN_FILES.briefing}`)).toBe(briefing);

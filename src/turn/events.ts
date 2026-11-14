@@ -1,10 +1,11 @@
 // What RPH tells RPE as a turn goes (`TurnEvents` in `rp-harness/contract`). None of it returns a
 // decision: RPE records it with the turn and shows it. The intent record is kept on the turn as text and
 // never read by code (plan §10.3). A sub-agent's writes the lead drops are taken back from the turn's
-// staged changes, and from the cast's and the story's rows beside them. Rules that fired, consents, gap
-// checks, suggestions and the attachments an agent was given are kept with the turn (`turn_told`) for
-// the Turn page. Of RPE's own spaces an agent can be given by name, the cast's views of the character it
-// plays are given (`cast:self(…)`), with who the open scene has on stage and its place as what is present.
+// staged changes, from the cast's and the story's rows beside them, and from the notes it wrote. Rules
+// that fired, consents, gap checks, suggestions and the attachments an agent was given are kept with the
+// turn (`turn_told`) for the Turn page; a suggestion of a file is filed for the Files page too. Of RPE's
+// own spaces an agent can be given by name, the cast's views of the character it plays are given
+// (`cast:self(…)`), with who the open scene has on stage and its place as what is present.
 
 import type { Database } from "bun:sqlite";
 import { loadGuidance, type TemplatePart } from "rp-harness";
@@ -12,6 +13,7 @@ import type { AgentRef, ContextBlock, FilesPort, Log, Scope, TurnEvents } from "
 import { CAST_VIEWS, castViews, type CastViewName, dropCastStaged, type SourceReader } from "../cast";
 import type { Store } from "../store";
 import { dropStoryStaged } from "../story";
+import type { TreeNotes, TreeSuggestions } from "../tree";
 import type { Writes } from "./kv";
 import type { Runs } from "./runs";
 import { stageAt } from "./stage";
@@ -25,6 +27,10 @@ export interface EventsDeps {
   files: FilesPort;
   /** A character's sources read live, shown with its base. */
   sources: SourceReader;
+  /** The notes agents wrote, which follow the turn: a dropped sub-agent's are taken back. */
+  notes: TreeNotes;
+  /** The suggestions agents filed of the tree's files, for the Files page. */
+  suggestions: TreeSuggestions;
   now(): number;
   log: Log;
 }
@@ -122,10 +128,15 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
         dropCastStaged(deps.store, scope.user, turn, agent.id);
         dropStoryStaged(deps.store, scope.user, turn, agent.id);
       }, "dropping a sub-agent's staged changes");
+      // The notes queue writes of their own, so they are taken back after the block above, never inside it.
+      await deps.notes.drop(scope.user, scope.chat, turn, agent.id);
       await tell(scope, "dropped", { agent });
     },
     ruleFired: (scope, firing) => tell(scope, "rule", firing),
-    suggestion: (scope, agent, suggestion) => tell(scope, "suggestion", { agent, suggestion }),
+    async suggestion(scope, agent, suggestion) {
+      await tell(scope, "suggestion", { agent, suggestion });
+      await deps.suggestions.file(scope, agent, suggestion);
+    },
     async released(scope, release) {
       const run = deps.runs.running(scope.user, turnOf(scope));
       if (run !== undefined && run.released === null) run.released = deps.now();

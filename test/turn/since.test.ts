@@ -8,8 +8,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { type Gate, gate } from "rp-harness/testing/rig";
 import type { StopAnswer, TurnList } from "../../src/ui/api";
+import { textHash } from "../../src/adapter/lumiverse/wire";
 import { NO_SESSION } from "../../src/turn";
-import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
+import { CHAT, CONNECTION, GREETING, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
 
 const beds: TurnBed[] = [];
 afterEach(async () => {
@@ -20,6 +21,14 @@ async function bed(options: TurnBedOptions): Promise<TurnBed> {
   const b = await openTurnBed(options);
   beds.push(b);
   return b;
+}
+
+const CARRIED = "This chat was carried over from the earlier build.";
+
+/** The bed's chat as a run of the migration leaves it: imported, with names and counts of what it carried. */
+async function carriedOver(b: TurnBed): Promise<void> {
+  const carried = { engine: "agents", turns: 3, marked: false, characters: [{ name: "Wren Hale", files: ["core.md"] }], story: { beats: 2, struck: 0, futures: 1, castings: 1 }, notes: null };
+  await b.app.writes.run((db) => db.run("INSERT INTO migration_chat (user, chat, run, source, outcome, marked, carried) VALUES (?, ?, 'run-1', NULL, 'imported', 0, ?)", [USER, CHAT, JSON.stringify(carried)]));
 }
 
 async function play(b: TurnBed, type: "normal" | "continue" | "swipe", said?: string): Promise<string> {
@@ -150,6 +159,29 @@ describe("what has happened in the chat since the last turn", () => {
     expect(sent(b, 2)).not.toContain(`The player's message ${asked} was edited`);
   });
 
+  test("an edit of a hidden message is told without its texts, and none of its text is kept, unless the chat lets agents read hidden messages", async () => {
+    const aside = "An aside I keep from the story.";
+    const changed = "A changed aside I keep from the story.";
+    /** The second turn's since-items and model request, and how many texts of the hidden message RPE kept. */
+    const played = async (global?: string): Promise<{ told: string[]; sent: string; kept: number }> => {
+      const messages = [{ id: "m-greeting", role: "assistant" as const, content: GREETING }, { id: "m-aside", role: "user" as const, content: aside, hidden: true }];
+      const b = await bed({ answers: [replying("The lamp turns."), replying("Wren looks up.")], messages, ...(global !== undefined ? { global } : {}) });
+      await settledTurn(b, await play(b, "normal"));
+      b.host.editMessage(CHAT, "m-aside", changed);
+      await settledTurn(b, await play(b, "normal", "I wait."));
+      const kept = b.app.db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM player_text WHERE message = ?").get("m-aside")?.n ?? 0;
+      return { told: b.requests[1]!.since.map((s) => s.text), sent: sent(b, 1), kept };
+    };
+
+    const shut = await played();
+    expect(shut.told).toContain("The player's message m-aside was edited since your last turn.");
+    expect(shut.sent).not.toContain("aside I keep");
+    expect(shut.kept).toBe(0);
+
+    const open = await played("chat:\n  hiddenReadable: true\n");
+    expect(open.told).toContain(`The player's message m-aside was edited since your last turn. Before: ${aside} Now: ${changed}`);
+  });
+
   test("a request from a panel is told, with what it was pressed on, to the turn that answers the next message and to a swipe of it, and to no turn after", async () => {
     const b = await bed({ answers: [replying("The lamp turns."), replying("Wren points at the steps."), replying("Wren nods at the steps."), replying("Wren waits.")] });
     await settledTurn(b, await play(b, "normal", "I climb the stairs."));
@@ -167,19 +199,144 @@ describe("what has happened in the chat since the last turn", () => {
     expect(sent(b, 3)).not.toContain(told);
   });
 
+  test("a request made while a reply is written, or after the newest reply flipped to another swipe, reaches the turn that answers the next message", async () => {
+    const hold = gate();
+    const b = await bed({
+      answers: [
+        { pieces: [{ text: "<intent>One exchange.</intent>" }, { text: "<reply>The lamp turns" }, { hold }, { text: ".</reply>" }] },
+        replying("Wren points at the steps."),
+        replying("Wren nods at the steps."),
+        replying("Wren rings the bell."),
+      ],
+    });
+    const ask = async (what: string): Promise<void> => {
+      expect((await b.page("POST", `/api/v1/chats/${CHAT}/requests`, { what })).status).toBe(200);
+    };
+    const told = (n: number): string[] => b.requests[n]!.since.map((s) => s.text);
+
+    b.host.send(CHAT, "I climb the stairs.");
+    const generating = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+    await b.until("the reply's first words", () => b.turns.runs.ofChat(USER, CHAT)[0]?.reply.includes("The lamp turns"));
+    await ask("Walk here");
+    hold.open();
+    await settledTurn(b, (await generating).generationId!);
+    const second = await settledTurn(b, await play(b, "normal", "I go down."));
+    await settledTurn(b, await play(b, "swipe"));
+    b.host.cycleSwipe(CHAT, second.message!, "left");
+    await ask("Ring the bell");
+    const third = await settledTurn(b, await play(b, "normal", "I stop."));
+
+    expect(told(1)).toContain("From a panel: Walk here");
+    expect(told(2)).toContain("From a panel: Walk here");
+    expect(third.parent).toBe(second.id);
+    expect(told(3)).toContain("From a panel: Ring the bell");
+    expect(told(3)).not.toContain("From a panel: Walk here");
+  });
+
+  test("a swipe made after a request does not take it from the turn that answers the next message", async () => {
+    const b = await bed({ answers: [replying("The lamp turns."), replying("The lamp gutters."), replying("Wren points at the steps.")] });
+    await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    expect((await b.page("POST", `/api/v1/chats/${CHAT}/requests`, { what: "Walk here" })).status).toBe(200);
+    await settledTurn(b, await play(b, "swipe"));
+    await settledTurn(b, await play(b, "normal", "I go down."));
+    expect(b.requests[1]!.since.map((s) => s.text)).not.toContain("From a panel: Walk here");
+    expect(b.requests[2]!.since.map((s) => s.text)).toContain("From a panel: Walk here");
+  });
+
   test("a chat a migration carried is told what was carried in its first briefing on RPE, and not once a turn RPE played is on its path", async () => {
     const b = await bed({ answers: [replying("The lamp turns."), replying("Wren looks up.")] });
-    // What a run of the migration keeps of a chat it imported: names and counts.
-    const carried = { engine: "agents", turns: 3, marked: false, characters: [{ name: "Wren Hale", files: ["core.md"] }], story: { beats: 2, struck: 0, futures: 1, castings: 1 }, notes: null };
-    await b.app.writes.run((db) => db.run("INSERT INTO migration_chat (user, chat, run, source, outcome, marked, carried) VALUES (?, ?, 'run-1', NULL, 'imported', 0, ?)", [USER, CHAT, JSON.stringify(carried)]));
+    await carriedOver(b);
 
     await settledTurn(b, await play(b, "normal", "I climb the stairs."));
     await settledTurn(b, await play(b, "normal", "I wait."));
-    const told = "This chat was carried over from the earlier build.";
-    expect(sent(b, 0)).toContain(told);
+    expect(sent(b, 0)).toContain(CARRIED);
     expect(sent(b, 0)).toContain("It was played by the earlier build's agents engine; 3 of its turns were carried, each with what it changed.");
     expect(sent(b, 0)).toContain("- Wren Hale: core.md");
-    expect(sent(b, 1)).not.toContain(told);
+    expect(sent(b, 1)).not.toContain(CARRIED);
+  });
+
+  test("a swipe of a migrated chat's first turn on RPE is told what was carried, and the turn after it is not", async () => {
+    const b = await bed({ answers: [replying("The lamp turns."), replying("The lamp gutters."), replying("Wren looks up.")] });
+    await carriedOver(b);
+    await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    await settledTurn(b, await play(b, "swipe"));
+    await settledTurn(b, await play(b, "normal", "I wait."));
+    expect(sent(b, 0)).toContain(CARRIED);
+    expect(sent(b, 1)).toContain(CARRIED);
+    expect(sent(b, 2)).not.toContain(CARRIED);
+  });
+
+  test("a continue of an imported reply is told what was carried, and the turn after it is not told again", async () => {
+    const b = await bed({ answers: [replying(" It hums."), replying("Wren looks up.")] });
+    await carriedOver(b);
+    // The greeting as a migration imports it: a turn of the earlier build's, tied to the message.
+    const store = b.turns.store.user(USER);
+    await b.app.writes.run(() => {
+      store.createChat({ id: CHAT });
+      const imported = store.beginTurn({ chat: CHAT, kind: "new", imported: true });
+      store.tieTurn(imported.id, { message: "m-greeting", hash: textHash(GREETING) });
+    });
+
+    const generation = await play(b, "continue");
+    await b.until("the continue's run to be over", () => b.turns.runs.byGeneration(USER, generation)?.status === "released" || null);
+    await b.until("no run of the chat to go on", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
+    await settledTurn(b, await play(b, "normal", "I wave."));
+    expect(sent(b, 0)).toContain(CARRIED);
+    expect(sent(b, 1)).not.toContain(CARRIED);
+  });
+});
+
+describe("what a comparison of the path found, kept with the chat", () => {
+  test("what an intake found is told to the next turn when Lumiverse stops that intake after its comparison, before the harness takes it", async () => {
+    const after = gate();
+    const b = await bed({
+      answers: [
+        { pieces: [{ text: "<intent>One exchange, then a note.</intent>" }, { text: "<reply>The lamp turns.</reply>" }, { call: "todo", args: { items: [{ text: "note the storm", done: false }] } }] },
+        { pieces: [{ hold: after }, { text: "Noted." }] },
+        replying("Wren looks up."),
+      ],
+      global: "limits:\n  previousRun: 30\n",
+    });
+    const asked = b.host.send(CHAT, "I climb the stairs.");
+    const first = await play(b, "normal");
+    await b.until("the first turn to be tied while its run goes on", () => {
+      const run = b.turns.runs.byGeneration(USER, first);
+      return run !== null && b.turns.store.user(USER).turn(run.turn)?.status === "done" && b.turns.runs.running(USER, run.turn) !== undefined;
+    });
+    const read = b.turns.store.user(USER).path(CHAT).find((e) => e.message === asked)!.hash;
+    b.host.editMessage(CHAT, asked, "I climb the stairs, slowly.");
+
+    // The next request compares the path, then waits for the first turn's run; Lumiverse's Stop ends it there.
+    b.host.send(CHAT, "I wait.");
+    const stopped = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+    await b.until("the second request's comparison", () => b.turns.store.user(USER).path(CHAT).find((e) => e.message === asked)?.hash !== read);
+    b.host.stop(USER, { chat: CHAT });
+    expect((await stopped).stopped).toBe(true);
+    after.open();
+    await b.until("no run of the chat to go on", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
+    expect(b.requests).toHaveLength(1);
+
+    await settledTurn(b, await play(b, "normal"));
+    const told = b.requests[1]!.since.map((s) => s.text);
+    expect(told).toContain(`The player's message ${asked} was edited since your last turn. Before: I climb the stairs. Now: I climb the stairs, slowly.`);
+  });
+
+  test("a swipe of the turn that was told what the comparison found is told it too, and the turn after the swipe is not", async () => {
+    const b = await bed({ answers: [replying("The lamp turns."), replying("Wren looks up."), replying("Wren waits."), replying("Wren waits, frowning."), replying("Wren nods.")] });
+    const first = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    const second = await settledTurn(b, await play(b, "normal", "I look around."));
+    b.host.editMessage(CHAT, first.message!, "The lamp turns, and stops.");
+    b.host.deleteMessage(CHAT, second.message!);
+
+    await settledTurn(b, await play(b, "normal", "I wait."));
+    await settledTurn(b, await play(b, "swipe"));
+    await settledTurn(b, await play(b, "normal", "I wait longer."));
+    const edited = `Message ${first.message} was edited after its turn. Before: The lamp turns. Now: The lamp turns, and stops.`;
+    const deleted = "1 turn(s) were deleted since the last one.";
+    const told = (n: number): string[] => b.requests[n]!.since.map((s) => s.text);
+    for (const n of [2, 3]) expect(told(n)).toEqual(expect.arrayContaining([edited, deleted]));
+    expect(told(4)).not.toContain(edited);
+    expect(told(4)).not.toContain(deleted);
   });
 });
 

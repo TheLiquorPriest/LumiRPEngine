@@ -1,9 +1,10 @@
 // A job's work as the turn lane hears of it (plan §10.9, §13.5): what a job records, with the turn that
 // started it, takes effect just before the first turn to begin after the harness says the job ended, and
 // no turn begun before that has its state changed; that turn is told the job finished. And an engine
-// handler that throws on such a change is an error for people, not for a model. Played through the
-// stand-in Lumiverse on the scripted model, on a chat that plays an invented world; the job's end is
-// told as the harness tells it, through the trace. Every name is invented.
+// handler that throws, on such a change or while `world_apply` works out a call, is an error for
+// people, not for a model. Played through the stand-in Lumiverse on the scripted model, on a chat that
+// plays an invented world; the job's end is told as the harness tells it, through the trace. Every name
+// is invented.
 
 import { afterEach, expect, test } from "bun:test";
 import type { TraceRecord } from "rp-harness/contract";
@@ -88,13 +89,11 @@ test("the turn a job's changes take effect at is told the job finished, once, an
   expect(sent[3]).not.toContain(told);
 });
 
-test("an engine handler that throws is told to the log and to the live view of the chat at work, and to no model", async () => {
-  const b = await worldBed({ answers: [replying("Bram wipes the bar."), replying("Bram stares at nothing.")] });
-  const store = b.turns.store.user(USER);
-  const first = await play(b, "I sit at the bar.");
-  await b.app.writes.run(() => store.addChanges(first, [sourMood]));
-  // From here the engine's handler for a field set throws, as a fault in the engine would. The registry is frozen, so the store folds
-  // with a copy of it that answers the set's type with a broken handler.
+/**
+ * From here the engine's handler for a field set throws, as a fault in the engine would. The registry is frozen, so the store folds
+ * with a copy of it that answers the set's type with a broken handler. Gives what is published to the live view from then on.
+ */
+function breakSetHandler(b: TurnBed): LiveEvent[] {
   const registry = b.turns.store.env.registry;
   const broken = (type: string) => {
     const def = registry.get(type);
@@ -115,6 +114,15 @@ test("an engine handler that throws is told to the log and to the live view of t
     published.push(out);
     return out;
   };
+  return published;
+}
+
+test("an engine handler that throws is told to the log and to the live view of the chat at work, and to no model", async () => {
+  const b = await worldBed({ answers: [replying("Bram wipes the bar."), replying("Bram stares at nothing.")] });
+  const store = b.turns.store.user(USER);
+  const first = await play(b, "I sit at the bar.");
+  await b.app.writes.run(() => store.addChanges(first, [sourMood]));
+  const published = breakSetHandler(b);
   jobEnded(b, first, b.turns.runs.record(USER, first)!.session);
   const second = await play(b, "I wait.");
 
@@ -122,4 +130,18 @@ test("an engine handler that throws is told to the log and to the live view of t
   expect(b.logged.some((l) => l.level === "error" && l.fields?.op === "set" && l.fields.error === "the set handler broke")).toBe(true);
   expect(published.filter((e) => e.kind === "handler_failed").map((e) => [e.chat, e.data])).toContainEqual([CHAT, { op: "set", error: "the set handler broke" }]);
   expect(b.model.requests.map((r) => JSON.stringify(r.messages)).join("\n")).not.toContain("the set handler broke");
+});
+
+test("an engine handler that throws while world_apply works out a call is told to the log and the live view, and the model is answered from the answers file", async () => {
+  const setMood = { op: "set", at: "bram", key: "mood", value: "sour", source: { from: "prose" } };
+  const b = await worldBed({ answers: [{ pieces: [{ text: "<intent>Bram sours.</intent>" }, { call: "world_apply", args: { operations: [setMood] } }] }, replying("Bram stares at nothing.")] });
+  const published = breakSetHandler(b);
+  const turn = await play(b, "I sit at the bar.");
+
+  const answered = JSON.stringify(b.model.requests[1]!.messages);
+  expect(answered).toContain("Operation 1 (set): the engine cannot apply this at all (failed).");
+  expect(answered).not.toContain("the set handler broke");
+  expect(b.turns.store.user(USER).stateAt(turn).state.world.entities.bram?.fields.mood).toBe("steady");
+  expect(b.logged.some((l) => l.level === "error" && l.fields?.op === "set" && l.fields.error === "the set handler broke")).toBe(true);
+  expect(published.filter((e) => e.kind === "handler_failed").map((e) => [e.chat, e.data])).toContainEqual([CHAT, { op: "set", error: "the set handler broke" }]);
 });

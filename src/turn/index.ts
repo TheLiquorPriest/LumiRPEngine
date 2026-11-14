@@ -8,7 +8,7 @@ export { type Received, type TurnPrompts, turnPrompts } from "./prompt";
 export { leftOutOf, maxTokensOf, prefillOf, promptOf, samplingOf, summarizedOf, textOf } from "./request";
 export { type RunView, TURN_LIST, type TurnFileEntry, turnRoutes, type TurnRoutesDeps, WORLD_VIEW } from "./routes";
 export { type Run, type RunRecord, Runs, type RunState } from "./runs";
-export { passConnection, TURN_DEFAULTS, type TurnSettings, turnSettings } from "./settings";
+export { passConnection, TURN_DEFAULTS, TURN_SETTINGS, type TurnSettings, turnSettings } from "./settings";
 export { namedStretches, type Stage, stageAt, stagesAt } from "./stage";
 export { HARNESS_MIGRATIONS, PROMPT_MIGRATIONS } from "./tables";
 export { TRANSCRIPTS, transcriptName, type TurnTrace, turnTrace } from "./trace";

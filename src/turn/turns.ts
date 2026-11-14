@@ -32,8 +32,9 @@ import { mapLines, mapView } from "../iface";
 import { type Lore, loreMapFields } from "../lore";
 import { type DueSource, type PathEntry, type PathReport, type ShownMessage, type Store, type TurnRow, worldState } from "../store";
 import { sceneSession, storyBrief, storyMark, storyRecordParts, takeBackStory } from "../story";
+import { storyAt } from "../story/path";
 import { STORY_SO_FAR_DEFAULTS, storySoFar } from "../story/sofar";
-import type { TreeChats, TreeFiles } from "../tree";
+import { type Pruned, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName } from "../tree";
 import { type Attempt, writeTurnFolder } from "./folder";
 import type { Writes } from "./kv";
 import type { PlayerSide } from "./player";
@@ -43,6 +44,7 @@ import { leftOutOf, maxTokensOf, prefillOf, promptOf, samplingOf, summarizedOf }
 import type { Run, RunRecord, Runs } from "./runs";
 import { maskWorldInfoScanExclusions, SCAN_SETTING, scannedSteps, scanSettingsOf } from "./scan";
 import { type TurnSettings, turnSettings } from "./settings";
+import { type FoundItem, foundItems, type KeptItem, type SinceKept } from "./since";
 import { guidanceTexts } from "./texts";
 
 /** The prompt parts the turn lane lays its texts out by (each under `.prompts/`). */
@@ -79,6 +81,12 @@ export interface TurnLaneDeps {
   runs: Runs;
   /** The player's messages as RPE read them, and their requests through a panel. */
   player: PlayerSide;
+  /** What comparisons of a chat's path found, kept with the chat. */
+  since: SinceKept;
+  /** The notes agents write, put as they stand at each turn's start (plan §5.4). */
+  notes: TreeNotes;
+  /** Prunes the chat's older turn folders (plan §5.5), sparing these folders of turns going on. */
+  pruneTurns(user: string, chat: string, spare: ReadonlySet<string>): Promise<Pruned>;
   /** What time brings due, for the world state's due section. */
   due: DueSource;
   /** What a migration carried of a chat, for its first briefing on RPE. */
@@ -102,7 +110,7 @@ export interface MigratedSource {
   part: string;
   /** The notice that tells it, with the part's text as its `carried`. */
   notice: string;
-  /** The part's fields; null where no migration imported the chat, or once a turn RPE played is on its path. */
+  /** The part's fields; null where no migration imported the chat. Whether a turn is told them is the turn lane's to judge, by its own line. */
   fields(user: string, chat: string): Fields | null;
 }
 
@@ -137,8 +145,6 @@ function shownText(m: LvMessage): string {
 /** What a turn's intake found that the block of what has happened since the last turn tells. */
 interface Found {
   report: PathReport;
-  /** The chat's path as RPE held it before this intake compared it. */
-  was: readonly PathEntry[];
   steps: readonly LvStep[];
   notices: LinesPart | undefined;
   /** The chat's guidance, for the parts a notice's text is laid out by. */
@@ -149,6 +155,10 @@ interface Found {
   stopped: readonly RunRecord[];
   /** A continue of a turn: its first run was told what came before it. */
   again: boolean;
+  /** The message a swipe or a regenerate writes again; null for any other turn. */
+  replaced: string | null;
+  /** Whether the chat lets agents read its hidden messages. */
+  hiddenReadable: boolean;
 }
 
 /** Waits for `ready`; false, at once, when `signal` aborts first. */
@@ -252,7 +262,14 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const shown: ShownMessage[] = steps
         .filter((s) => s.id !== writing)
         .map((s) => (s.id === replaced && before !== undefined ? { id: s.id, user: false, hash: before.hash, date: before.date } : { id: s.id, user: s.role !== "assistant", hash: s.shown.hash, date: s.shown.date }));
-      const report = await this.#d.writes.run(() => store.sync(chat, shown), "comparing the chat's path with its turns");
+      // What the comparison found is kept with the chat in the same write, under the turn then at the head of its path (`since.ts`):
+      // should this intake end before the harness takes its request, the next turn is told it.
+      const report = await this.#d.writes.run((db) => {
+        const compared = store.sync(chat, shown);
+        const head = store.path(chat).findLast((e) => e.turn !== null)?.turn ?? null;
+        this.#d.since.keep(db, user, chat, head, foundItems(compared, was, steps), this.#d.store.now());
+        return compared;
+      }, "comparing the chat's path with its turns");
       await this.#left(user, chat, report, replaced, before?.turn ?? null);
       lap("compare");
 
@@ -280,6 +297,14 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const session = inForce.session ?? (await this.#d.writes.run(() => store.openSession({ chat, scene: inForce.scene, turn: begun.id }), "opening a session"));
       const scope = { user, chat, session: session.id, turn: begun.id };
       if (inForce.session === null) await this.#d.harness().sessions?.open(scope, inForce.summary === null ? {} : { summary: inForce.summary });
+      // The chat's notes as they stand at the turn's start (plan §5.4): the writes of each turn before it on its path, and a continue's
+      // own; a branch starts with its branch point's. Notes that cannot be put there are logged, and the turn goes on with them as they are.
+      const onPath = store.path(chat);
+      const cutAt = replaced === null ? -1 : onPath.findIndex((e) => e.message === replaced);
+      const earlier = (cutAt >= 0 ? onPath.slice(0, cutAt) : onPath).flatMap((e) => (e.turn === null || e.turn === begun.id ? [] : [e.turn]));
+      await this.#d.notes.follow(user, chat, { turns: [...earlier, begun.id], branchOf: store.chat(chat)?.sourceChat ?? null }).catch((error: unknown) =>
+        this.#d.log.error("The chat's notes could not be put as they stand at this turn's start.", { turn: begun.id, error: words(error) }),
+      );
 
       const { messages, left } = promptOf(tagged.prompt);
       if (left > 0) this.#d.log.warn("Parts of the prompt RPH cannot carry were left out.", { turn: begun.id, parts: left });
@@ -329,8 +354,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       let request: TurnRequest;
       try {
         // The briefing's blocks, and what has happened since the last turn.
-        const found = { report, was, steps, notices: lines(notices), guidance, last, stopped, again: continued !== null };
-        const [{ blocks: briefing, loreMap }, since] = await Promise.all([this.#briefing(reads, guidance, scope, tagged, steps, settings.lead), this.#since(reads, user, begun, found)]);
+        const found = { report, steps, notices: lines(notices), guidance, last, stopped, again: continued !== null, replaced, hiddenReadable: settings.hiddenReadable };
+        const [{ blocks: briefing, loreMap }, { items: since, told }] = await Promise.all([this.#briefing(reads, guidance, scope, tagged, steps, settings.lead), this.#since(reads, user, begun, found)]);
         lap("briefing");
         const sampling = samplingOf(tagged.parameters);
         const maxTokens = maxTokensOf(tagged.parameters);
@@ -352,9 +377,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         };
         // The turn's folder, for the agents it delegates to and for the player (plan §5.3): the Author has the same in its context.
         const attempts = replaced === null ? [] : this.#attempts(user, chat, replaced);
-        await writeTurnFolder({ files: this.#d.files, reads, lore: this.#d.lore }, { scope, guidance, tagged, messages, steps, request, loreMap, attempts, received }).catch((error: unknown) =>
+        await writeTurnFolder({ files: this.#d.files, reads, lore: this.#d.lore }, { scope, guidance, tagged, messages, request, loreMap, attempts, received }).catch((error: unknown) =>
           this.#d.log.error("The turn's folder could not be written in full.", { turn: begun.id, error: words(error) }),
         );
+        if (told.length > 0) await this.#d.writes.run((db) => this.#d.since.told(db, user, begun.id, told), "keeping what a turn was told");
         lap("folder");
       } catch (error) {
         // The run never began: it ends here, failed, so the turn after it does not wait for it. The throw tells Lumiverse.
@@ -573,7 +599,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const blocks: ContextBlock[] = [];
     const [factsPart, mapPart] = await Promise.all([guidance.part(PARTS.turnFacts), guidance.part(PARTS.loreMap)]);
     if (factsPart?.format === "template") {
-      const facts = factsPart.render({ kind: tag.kind, ...(tag.speaker.name !== null ? { speaker: tag.speaker.name } : {}), ...(tag.target.message !== null ? { message: tag.target.message } : {}), ...this.#storyTime(scope.user, scope.chat) }).text;
+      const facts = factsPart.render({ kind: tag.kind, ...(tag.speaker.name !== null ? { speaker: tag.speaker.name } : {}), ...(tag.target.message !== null ? { message: tag.target.message } : {}), ...this.#storyTime(scope.user, scope.chat, scope.turn) }).text;
       if (facts.trim() !== "") blocks.push({ name: BLOCKS.turnFacts, text: facts.trimEnd() });
     }
     // The world's own keys are looked for in what Lumiverse scans of the chat for lore, by the user's own scan settings (`scan.ts`):
@@ -642,26 +668,30 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     return 0;
   }
 
-  /** The story's time where the chat's state keeps a clock, as the world's calendar writes it. */
-  #storyTime(user: string, chat: string): { story_time?: string } {
+  /**
+   * The story's time where the chat's state keeps a clock, as the world's calendar writes it: at the turn itself, along the path it was
+   * made on, as the world state beside it is, so a swipe shows its own start and not the attempt it replaces.
+   */
+  #storyTime(user: string, chat: string, turn: string): { story_time?: string } {
     const store = this.#d.store.user(user);
     if ((store.chat(chat)?.revision ?? null) === null) return {};
-    const state = store.headState(chat).state.world;
+    const state = store.stateAt(turn).state.world;
     const world = this.#d.store.env.worlds(state.revision);
     return world === undefined ? {} : { story_time: formatClock(calendarOf(world), state.clock) };
   }
 
   /**
    * What has happened since the last turn (plan §6.3, §10.10), each in the words of the notices part: for a chat a migration carried,
-   * while no turn RPE played is on its path, what was carried, laid out by its own part; what the path comparison found (turns gone,
-   * another swipe showing on the newest reply or on an earlier one, a reply edited since its turn was tied, with the text it was tied
-   * to and the text it has now, replies made without a turn); the player's own edits of their messages since RPE last read them; the
-   * last turn's reply cut short, or saved otherwise than it was released (`last`, as kept before this turn began); what jobs recorded
-   * that takes effect at this turn; the runs this turn stopped at their limit (`stopped`); and what the player asked for through a
-   * panel. A continue of a turn (`again`) is not told again what that turn's first run was told: its jobs and requests.
+   * while no turn RPE played is on its path, what was carried, laid out by its own part; what comparisons of the path found and kept
+   * for this turn (`#keptFor`: turns gone, another swipe showing on the newest reply or on an earlier one, a reply edited since its
+   * turn was tied, with the text it was tied to and the text it has now, the player's own edits of their messages since RPE last read
+   * them); replies made without a turn; the last turn's reply cut short, or saved otherwise than it was released (`last`, as kept
+   * before this turn began); what jobs recorded that takes effect at this turn; the runs this turn stopped at their limit
+   * (`stopped`); and what the player asked for through a panel. A continue of a turn (`again`) is not told again what that turn's
+   * first run was told: its jobs and requests. `told`: what of the kept things this turn's telling is to be kept for.
    */
-  async #since(reads: LumiverseReads, user: string, turn: TurnRow, found: Found): Promise<SinceItem[]> {
-    const { report, was, steps, notices, guidance, last, stopped, again } = found;
+  async #since(reads: LumiverseReads, user: string, turn: TurnRow, found: Found): Promise<{ items: SinceItem[]; told: string[] }> {
+    const { report, steps, notices, guidance, last, stopped, again, replaced, hiddenReadable } = found;
     const { chat } = turn;
     const store = this.#d.store.user(user);
     const items: SinceItem[] = [];
@@ -669,42 +699,49 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const add = (kind: SinceItem["kind"], line: string | undefined, extra: Partial<SinceItem> = {}): void => {
       if (line !== undefined && line.trim() !== "") items.push({ kind, text: line, ...extra });
     };
+    // What a migration carried (plan §12, §15), told to the first run RPE plays on the turn's own line: a swipe of that first turn is
+    // told it too, and the turn after a continue of an imported reply, which RPE played as a run of the imported turn, is not.
     const { migrated } = this.#d;
-    const carried = migrated.fields(user, chat);
+    const before = storyAt(store, chat, turn.id).turns.filter((t) => t !== turn.id);
+    const played = this.#d.runs.countOf(user, before) > 0 || (again && this.#d.runs.countOf(user, [turn.id]) > 1);
+    const carried = played ? null : migrated.fields(user, chat);
     const carriedPart = carried === null ? undefined : await guidance.part(migrated.part);
     if (carried !== null && carriedPart?.format === "template") add("unplayed", notices?.line(migrated.notice, { carried: carriedPart.render(carried).text.trim() }));
-    const gone = report.gone.filter((g) => g.turn !== null);
-    if (gone.length > 0) add("delete", notices?.line("deleted", { count: gone.length }));
+    // A swipe or a regenerate stands in for the earlier attempts at its message, the ones tied to it.
+    const attempts = replaced === null ? [] : store.swipes(chat, replaced).filter((t) => t.id !== turn.id);
+    const kept = this.#keptFor(user, turn, again, attempts);
+    const of = <K extends FoundItem["kind"]>(kind: K): Extract<FoundItem, { kind: K }>[] => kept.flatMap((k) => (k.item.kind === kind ? [k.item as Extract<FoundItem, { kind: K }>] : []));
+    // Turns gone, counted once each, whichever comparison found them.
+    const gone = new Set(of("deleted").flatMap((d) => d.turns));
+    if (gone.size > 0) add("delete", notices?.line("deleted", { count: gone.size }));
     // Another swipe showing on the newest reply: its turn (none, for a swipe made without RPE) is the path now, with its own changes.
-    if (report.swiped !== null) add("restacked", notices?.line("swipe_shown", { message: report.swiped.message }), report.swiped.to !== null ? { turn: report.swiped.to } : {});
+    for (const s of of("swiped")) add("restacked", notices?.line("swipe_shown", { message: s.message }), s.to !== null ? { turn: s.to } : {});
     // What no longer applies, as data: the operations by name. Why each does not is a code the store's own wording gives words to.
-    const dropped = report.notApplied.map((n) => n.op);
-    for (const f of report.flipped) add("restacked", notices?.line("swipe_flipped", { message: f.message, dropped }), f.to !== null ? { turn: f.to } : {});
+    for (const f of of("flipped")) add("restacked", notices?.line("swipe_flipped", { message: f.message, dropped: f.dropped }), f.to !== null ? { turn: f.to } : {});
 
-    // The texts Lumiverse holds now: of each reply edited since its turn was tied, of each of the player's messages whose hash is not
-    // the one RPE last read, and of the player's newest message where RPE has not kept it as it reads now, so that an edit of it can
-    // later be told with the text it had.
-    const heard = new Map(was.flatMap((e) => (e.user ? [[e.message, e.hash] as const] : [])));
-    const edits = steps.flatMap((s) => {
-      const had = heard.get(s.id);
-      return s.role === "user" && had !== undefined && had !== s.shown.hash ? [{ id: s.id, had }] : [];
-    });
+    // The texts Lumiverse holds now: of each reply edited since its turn was tied, of each of the player's messages edited since RPE
+    // last read it, and of the player's newest message where RPE has not kept it as it reads now, so that an edit of it can later be
+    // told with the text it had. A hidden message's texts are told, read and kept only where the chat lets agents read hidden
+    // messages (plan §4.2): while it does not, an edit of one is told without them, and nothing of one is kept.
+    const hidden = new Set(steps.flatMap((s) => (s.hidden && !hiddenReadable ? [s.id] : [])));
+    const edited = of("edited");
+    const edits = of("player_edited");
     const newest = steps.findLast((s) => s.role === "user");
-    const unkept = newest !== undefined && this.#d.player.textOf(user, chat, newest.id, newest.shown.hash) === null ? [newest.id] : [];
-    const ids = [...new Set([...report.edited.map((e) => e.message), ...edits.map((e) => e.id), ...unkept])];
+    const unkept = newest !== undefined && !hidden.has(newest.id) && this.#d.player.textOf(user, chat, newest.id, newest.shown.hash) === null ? [newest.id] : [];
+    const ids = [...new Set([...edited.map((e) => e.message), ...edits.map((e) => e.message), ...unkept])].filter((id) => !hidden.has(id));
     const now = new Map((ids.length === 0 ? [] : await reads.messagesById(chat, ids)).map((m) => [m.id, m]));
     const textNow = (message: string): { new?: string } => {
       const m = now.get(message);
       return m === undefined ? {} : { new: shownText(m) };
     };
-    for (const e of report.edited) {
+    for (const e of edited) {
       // What its turn was tied to: what Lumiverse saved, where that is not what was released.
-      const run = this.#d.runs.record(user, e.turn);
+      const run = hidden.has(e.message) ? null : this.#d.runs.record(user, e.turn);
       add("edit", notices?.line("edited", { message: e.message, ...(run !== null ? { old: run.saved ?? run.base + run.reply } : {}), ...textNow(e.message) }), { turn: e.turn });
     }
     for (const e of edits) {
-      const old = this.#d.player.textOf(user, chat, e.id, e.had);
-      add("edit", notices?.line("player_edited", { message: e.id, ...(old !== null ? { old } : {}), ...textNow(e.id) }));
+      const old = hidden.has(e.message) ? null : this.#d.player.textOf(user, chat, e.message, e.had);
+      add("edit", notices?.line("player_edited", { message: e.message, ...(old !== null ? { old } : {}), ...textNow(e.message) }));
     }
     const keep = [...now.values()].filter((m) => m.role === "user").map((m) => ({ message: m.id, hash: m.shown.hash, text: shownText(m) }));
     if (keep.length > 0) await this.#d.writes.run((db) => this.#d.player.keepTexts(db, user, chat, keep), "keeping the player's messages as read");
@@ -725,9 +762,30 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     if (!again) for (const job of await this.#jobsBefore(user, turn)) add("job", notices?.line(job.interrupted ? "job_interrupted" : "job_finished", job.fields), { turn: job.turn });
     // The run after a reply is the turn's own work done late (plan §10.9): one stopped at its limit is told as a job is, with what it recorded kept.
     for (const r of stopped) add("job", notices?.line("previous_run_stopped"), { turn: r.turn });
-    // What the player asked for through a panel, as part of the message this turn answers (plan §10.10 "A panel action").
-    if (!again) for (const r of this.#d.player.requests(user, chat, turn.parent)) add("player-edit", notices?.line("panel_request", { what: r.what, ...(r.on !== null ? { on: r.on } : {}) }));
-    return items;
+    // What the player asked for through a panel, as part of the message this turn answers (plan §10.10 "A panel action"): a swipe or a
+    // regenerate answers the message its earlier attempts answered, and is told what they were told.
+    const requests = again ? [] : this.#d.player.requestsFor(user, chat, replaced === null ? null : attempts.map((a) => a.id));
+    for (const r of requests) add("player-edit", notices?.line("panel_request", { what: r.what, ...(r.on !== null ? { on: r.on } : {}) }));
+    // What this turn was told that decides what later turns are: a continue's found things, so the turns after the turn it continues
+    // are not told them again; the requests, so a request is told once, and again only to a swipe of the turn told it.
+    return { items, told: [...(again ? kept.map((k) => k.id) : []), ...requests.map((r) => r.id)] };
+  }
+
+  /**
+   * What comparisons found and kept that a turn is told (`since.ts`), oldest first. A continue: what was filed under the turn it
+   * continues that the turn was not told yet. Any other turn: what was filed under the turn it follows, but what a continue of that
+   * turn was told; and for a swipe or a regenerate, all that was filed under each earlier attempt at its message (`attempts`) too.
+   */
+  #keptFor(user: string, turn: TurnRow, again: boolean, attempts: readonly TurnRow[]): KeptItem[] {
+    const { since } = this.#d;
+    if (again) {
+      const told = since.toldTo(user, turn.id);
+      return since.found(user, turn.chat, turn.id).filter((k) => !told.has(k.id));
+    }
+    const told = turn.parent === null ? new Set<string>() : since.toldTo(user, turn.parent);
+    const kept = new Map(since.found(user, turn.chat, turn.parent).flatMap((k) => (told.has(k.id) ? [] : [[k.id, k] as const])));
+    for (const attempt of attempts) for (const k of since.found(user, turn.chat, attempt.id)) kept.set(k.id, k);
+    return [...kept.values()].sort((a, b) => a.at - b.at);
   }
 
   /**
@@ -828,6 +886,14 @@ export class TurnLane implements TurnPlayer, ChatChanges {
           await this.sessionsAfter(run.user, run.chat, run.turn);
         } catch (error) {
           this.#d.log.error("The sessions of a turn's scene could not be brought up to date.", { turn: run.turn, error: words(error) });
+        }
+        // The chat's older turn folders are pruned after a turn (plan §5.5), never during one: the folders of its other runs going on are spared.
+        try {
+          const store = this.#d.store.user(run.user);
+          const going = this.#d.runs.ofChat(run.user, run.chat).flatMap((r) => (r === run ? [] : [store.turn(r.turn)]));
+          await this.#d.pruneTurns(run.user, run.chat, new Set(going.flatMap((t) => (t === null ? [] : [turnFolderName(t.depth + 1, t.id)]))));
+        } catch (error) {
+          this.#d.log.error("The chat's older turn folders could not be pruned.", { turn: run.turn, error: words(error) });
         } finally {
           over.resolve();
         }
