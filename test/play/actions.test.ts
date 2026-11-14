@@ -15,6 +15,7 @@ import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { FIX_THINGS_MAX } from "../../src/shared/protocol";
 import type { StateView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
+import { notional } from "../../src/packs/economy/core/model";
 import { type ChangeRow, worldState } from "../../src/store";
 import { body, CHAT, GUIDANCE, keyed, makeBed, OTHER, panel, refusal, USER, words } from "./bed";
 
@@ -96,6 +97,36 @@ describe("a tap that manages", () => {
     expect(lines).toContainEqual({ memo: "Payment", cents: -1500, kind: "transfer", counterparty: "Marcus Delgado" });
     expect(lines).toContainEqual({ memo: "Payment reversed", cents: 1500, kind: "transfer", counterparty: "Marcus Delgado" });
     expect(Object.keys(s.headState(CHAT).state.world.entities).sort()).toEqual(things);
+  });
+
+  test("pays someone the world keeps no accounts for with nothing the player did not do: the economy's bookkeeping for them is the world's own and assumed, and the Undo is whole", async () => {
+    const bed = makeBed();
+    const { doc } = await bed.plays("fantasy_town");
+    const newest = await bed.turn();
+    const s = bed.store.user(USER);
+    const before = s.headState(CHAT).state.world;
+    const worth = notional(before, "hollis_garrow");
+
+    const paid = body(await bed.send({ type: "lre.action", action: "pay", params: { to: "hollis_garrow", amount: 3 }, source: "palette" }), "lre.action");
+    if (!("undo" in paid) || typeof paid.undo !== "string") throw new Error("no Undo");
+    const recorded = s.changes(newest.id);
+    expect(recorded.filter((c) => c.source === "player").map((c) => c.op)).toEqual(["post", "economy.txn"]);
+    // What the world gave the payer, and what it takes the payee to be worth, which the payment moves.
+    expect(recorded.filter((c) => c.source !== "player").map((c) => ({ op: c.op, who: eventOf(c).entity ?? (eventOf(c).data as JsonObject | undefined)?.entity, source: c.source, standing: c.standing, precision: c.precision }))).toEqual([
+      { op: "materialize", who: doc.pov, source: "default", standing: "assumed", precision: null },
+      { op: "economy.anchor", who: "hollis_garrow", source: "default", standing: "assumed", precision: null },
+    ]);
+    expect(Object.keys(s.headState(CHAT).state.world.entities).sort()).toEqual(Object.keys(before.entities).sort());
+    expect(notional(s.headState(CHAT).state.world, "hollis_garrow")).toBe(worth + 3);
+
+    // Whole: everything the player did is taken back, and what the world's defaults gave stays, as the answer says.
+    expect(body(await bed.undo(paid.undo), "lre.chip")).toEqual({ applied: true, pending: false, said: [words("opened_stay"), words("worth_stays")].join(" ") });
+    const after = s.headState(CHAT).state.world;
+    const opening = doc.entities.acct_pov_purse?.fields.opening;
+    if (typeof opening !== "number") throw new Error("the purse has no opening");
+    expect(after.accounts.acct_pov_purse).toBe(opening);
+    expect(notional(after, "hollis_garrow")).toBe(worth);
+    expect(after.entities.hollis_garrow?.fields.wealth).toBe(before.entities.hollis_garrow?.fields.wealth);
   });
 
   test("as the clock's ✎ moves the clock and decides nothing the time between did: a later time is one change, an earlier one today's set-back, and each Undo puts the clock back", async () => {

@@ -41,7 +41,7 @@ export interface Recorded {
  * the world's default band where nothing gives one), and the band a payment moves it to, set right
  * after its anchor. The engine works both out from the world's tables; no call says either.
  */
-function bookkeeping(events: readonly LedgerEvent[], i: number): boolean {
+export function bookkeeping(events: readonly LedgerEvent[], i: number): boolean {
   const ev = events[i];
   if (ev === undefined) return false;
   if (ev.type === FINANCE_EVENTS.anchor) return true;

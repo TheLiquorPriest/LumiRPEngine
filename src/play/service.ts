@@ -4,13 +4,15 @@
 // each `lre.fix`) is resolved with today's pure resolvers and recorded in RPE's store as the player's
 // own changes on the chat's newest turn, the turn the next one follows: the next turn's world state
 // shows their values and lists them among what the turn before changed. A tap records what the player
-// did and nothing code made up (plan §6.1, §6.4): nothing is drawn from the world's tables; the
-// accounts the world gave those it names open first, each a change of its own from the world's
-// defaults that stands as assumed, as the engine's own tools record them; and the clock's ✎ moves the
-// clock without deciding what the time between did. While a turn of the chat runs, a tap and an Undo
-// wait for it to be over (plan §10.9: no turn has its starting state changed under it). An Undo
-// records the reversal of all of the player's changes of a tap (`UserStore.undo`), or of none and says
-// what has no undo; the accounts that opened with it stay, and its answer says so. A chat's own
+// did and nothing code made up (plan §6.1, §6.4): nothing is drawn from the world's tables; what the
+// world's defaults give with it is recorded apart from the player's own changes, from those defaults
+// and as assumed, as the engine's own tools record it: the accounts the world gave those it names,
+// opened first, each a change of its own, and the economy's bookkeeping for someone it keeps no
+// accounts for, in the unit it came in; and the clock's ✎ moves the clock without deciding what the
+// time between did. While a turn of the chat runs, a tap and an Undo wait for it to be over (plan
+// §10.9: no turn has its starting state changed under it). An Undo records the reversal of all of the
+// player's changes of a tap (`UserStore.undo`), or of none and says what has no undo; what the world's
+// defaults gave with it that the store keeps no reverse for stays, and its answer says so. A chat's own
 // choices (today's `lre.chat.knowledge`) read as RPE has them: it keeps none. A tap that goes with the
 // next message, a tap that plays now, setting a chat's own choice, the things browser and the map's
 // walk and display are not served here, and say so in words from `.prompts/play-answers.md`. After
@@ -38,8 +40,11 @@ import { clockFix } from "../engine/time";
 import { currentStage } from "../engine/tracks";
 import { canSeeEntity, canSeePlace, findLeaks, playerTrack, shownTrackId, unrevealedSecrets } from "../engine/visibility";
 import { Working } from "../engine/working";
+import { FILLED_IN } from "../iface/source";
+import { bookkeeping } from "../iface/writing";
 import { hasLedger } from "../packs/economy/core/model";
 import { hashParts } from "../shared/hash";
+import { FINANCE_EVENTS } from "../shared/finance";
 import { isRecord, type JsonObject, type JsonValue } from "../shared/json";
 import type { FixOp, LedgerEvent } from "../shared/ledger";
 import { OFFSTAGE_ORIGIN, ORIGIN_FIELD, playsOffstage } from "../shared/offstage";
@@ -47,7 +52,7 @@ import { type ErrorCode, type ErrorMessage, FIX_THINGS_MAX, type FrontendToBacke
 import type { StateView } from "../shared/state-view";
 import { type ItemFix, parseItemFix } from "../shared/things";
 import type { ParamDef, WorldDoc } from "../shared/world";
-import { type ChangeInput, readPart, type Report, type Store } from "../store";
+import { type ChangeInput, type ChangeRow, readPart, type Report, type Store } from "../store";
 import { RunEnds, stateChanged } from "./live";
 import { chatView, headTurn } from "./view";
 
@@ -65,6 +70,19 @@ const UNDO_ID = /^tap:([^:]+):([^:]+)$/;
 
 /** The economy's domain, whose materializer opens the accounts the world gave a party that holds some. */
 const MONEY = "money";
+
+/** How what the world's defaults give with a tap is recorded: as the engine's own tools record what they fill in. */
+const DEFAULTS: Pick<ChangeInput, "source" | "standing" | "precision"> = { source: FILLED_IN.source?.from ?? null, standing: FILLED_IN.standing, precision: FILLED_IN.precision };
+
+/**
+ * The line of this area's words that says a change of the world's stays after an Undo, by its operation: the accounts the world
+ * gave, opened, and what the economy takes someone it keeps no accounts for to be worth (the rest of its bookkeeping, the band a
+ * payment moved them to, is reversed with the payment).
+ */
+const STAYS: Readonly<Record<string, string>> = { materialize: "opened_stay", [FINANCE_EVENTS.anchor]: "worth_stays" };
+
+/** What one answer says in more than one line of this area's words, those lines joined by this. */
+const SENTENCES = " ";
 
 export interface PlayDeps {
   /** RPE's store, which holds each chat's state. */
@@ -118,6 +136,11 @@ function reply<K extends keyof ResultBodies>(r: FrontendToBackend, request: K, b
 /** A tap of the player's alone, which opens nothing of the world's. */
 function played(events: LedgerEvent[]): Tapped {
   return { opened: [], events };
+}
+
+/** The unit a recorded change is undone with, as the store takes it: its group's, or its own when it has none. */
+function unitOf(c: ChangeRow): string {
+  return isRecord(c.value) && typeof c.value.group === "string" ? `group:${c.value.group}` : `change:${c.id}`;
 }
 
 /**
@@ -210,12 +233,13 @@ export class PlayService {
     }
   }
 
-  /** Undoes a tap this area recorded, by the id its answer gave, as today's Undo chip is sent; when accounts opened with it stay, the answer says so (`said`). */
+  /** Undoes a tap this area recorded, by the id its answer gave, as today's Undo chip is sent; what the world's defaults gave with it that stays, the answer says (`said`). */
   async undo(user: string, chat: string, r: Request<"lre.chip">): Promise<ResultMessage | ErrorMessage> {
     try {
-      const { applied, kept } = await this.undone(user, chat, r.chip);
+      const { applied, stays } = await this.undone(user, chat, r.chip);
       if (applied) stateChanged(this.deps.live, chat);
-      const said = kept ? await this.words("opened_stay") : "";
+      // Each kind of the world's change that stays, once, in the words of its own line.
+      const said = (await Promise.all([...new Set(stays.flatMap((c) => own(STAYS, c.op) ?? []))].map((line) => this.words(line)))).filter((s) => s !== "").join(SENTENCES);
       return reply(r, "lre.chip", { applied, pending: false, ...(said === "" ? {} : { said }) });
     } catch (error) {
       return this.failed(r, error);
@@ -304,11 +328,12 @@ export class PlayService {
 
   /**
    * Records what a tap comes to on the chat's newest turn, in one write, so the state it is resolved on is the one it lands on:
-   * the accounts the world gave that opened for it, each a change of its own from the world's defaults that stands as assumed
-   * (as the engine's own tools record them, `FILLED_IN` in `src/iface/source.ts`) and cites only the tap, so its Undo can tell
-   * them from the player's own changes, which follow. `resolve` gives both from the chat's head; when the player did nothing,
-   * nothing is recorded. Nothing is while a turn of the chat runs: that turn works on the state it started from, and a continue
-   * that saves nothing takes back what lands on its turn. The id its Undo takes; null when nothing was recorded.
+   * the accounts the world gave that opened for it, each a change of its own, then what the player did, in which the economy's
+   * bookkeeping for someone it keeps no accounts for (`bookkeeping`, `src/iface/writing.ts`) stays in the unit it came in. What
+   * the world's defaults gave is recorded from them and as assumed (`DEFAULTS`), and cites only the tap, so its Undo can tell it
+   * from the player's own changes. `resolve` gives both from the chat's head; when the player did nothing, nothing is recorded.
+   * Nothing is while a turn of the chat runs: that turn works on the state it started from, and a continue that saves nothing
+   * takes back what lands on its turn. The id its Undo takes; null when nothing was recorded.
    */
   private async tap(user: string, chat: string, r: Request<"lre.action"> | Request<"lre.fix">, resolve: (head: Head) => Tapped): Promise<string | null> {
     const s = this.deps.store.user(user);
@@ -330,8 +355,8 @@ export class PlayService {
       const { lre: _lre, reqId: _reqId, chatId: _chatId, ...request } = r;
       const cite = { tap, request } as unknown as JsonValue;
       s.addChanges(on, [
-        ...opened.map((e): ChangeInput => ({ lane: "engine", op: e.type, value: e as unknown as JsonValue, by: PLAYER, source: "default", standing: "assumed", precision: null, cite: { tap } })),
-        ...events.map((e): ChangeInput => ({ lane: "engine", op: e.type, value: (group === undefined ? e : { ...e, group }) as unknown as JsonValue, by: PLAYER, source: PLAYER, cite })),
+        ...opened.map((e): ChangeInput => ({ lane: "engine", op: e.type, value: e as unknown as JsonValue, by: PLAYER, ...DEFAULTS, cite: { tap } })),
+        ...events.map((e, i): ChangeInput => ({ lane: "engine", op: e.type, value: (group === undefined ? e : { ...e, group }) as unknown as JsonValue, by: PLAYER, ...(bookkeeping(events, i) ? { ...DEFAULTS, cite: { tap } } : { source: PLAYER, cite }) })),
       ]);
       return on;
     }, "recording a tap on a panel");
@@ -342,11 +367,14 @@ export class PlayService {
 
   /**
    * Records the reversal of the player's changes of a tap, each unit the last first, in one write: all of them or none, so an
-   * Undo never leaves half a tap. A unit that would leave a part (one written since, or one the store keeps no reverse for)
-   * takes the whole write back, and the answer says which. Whether anything was recorded (nothing once the tap is undone), and
-   * whether accounts the world gave opened with the tap: the world's, which stay. Nothing is recorded while a turn of the chat runs.
+   * Undo never leaves half of what the player did. A unit that would leave a part of the player's (one written since, or one
+   * the store keeps no reverse for) takes the whole write back, and the answer says which. What the world's defaults gave with
+   * the tap is reversed with the player's unit it is in, where the store keeps a reverse for it, and else stays: the accounts it
+   * gave, opened, which are in no unit of the player's, and the economy's bookkeeping for someone it keeps no accounts for.
+   * Whether anything was recorded (nothing once the tap is undone), and the world's changes that stay. Nothing is recorded while
+   * a turn of the chat runs.
    */
-  private undone(user: string, chat: string, chip: string): Promise<{ applied: boolean; kept: boolean }> {
+  private undone(user: string, chat: string, chip: string): Promise<{ applied: boolean; stays: ChangeRow[] }> {
     const s = this.deps.store.user(user);
     return this.deps.writes.run(() => {
       const [, turn = "", tap = ""] = UNDO_ID.exec(chip) ?? [];
@@ -360,13 +388,10 @@ export class PlayService {
       // Undone already where the chat's story now goes: a change from its turn on cites one of the tap's as the one it undoes.
       const ids = new Set(mine.map((c) => c.id));
       const since = path.slice(from).flatMap((e) => (e.turn === null ? [] : s.changes(e.turn)));
-      if (since.some((c) => isRecord(c.cite) && typeof c.cite.undoes === "number" && ids.has(c.cite.undoes))) return { applied: false, kept: false };
+      if (since.some((c) => isRecord(c.cite) && typeof c.cite.undoes === "number" && ids.has(c.cite.undoes))) return { applied: false, stays: [] };
       // The store undoes a change with the rest of its unit: one change of each unit is enough.
       const units = new Map<string, number>();
-      for (const c of mine) {
-        const key = isRecord(c.value) && typeof c.value.group === "string" ? `group:${c.value.group}` : `change:${c.id}`;
-        if (!units.has(key)) units.set(key, c.id);
-      }
+      for (const c of mine) if (!units.has(unitOf(c))) units.set(unitOf(c), c.id);
       let recorded = 0;
       const left: Report[] = [];
       for (const id of [...units.values()].reverse()) {
@@ -376,8 +401,11 @@ export class PlayService {
       }
       // Refused inside the write, which takes back what the units before recorded.
       if (left.some((l) => l.code === "changed_since")) throw new Refused("conflict", { line: "changed_since" });
-      if (left.length > 0) throw new Refused("conflict", { line: "no_undo_for", codes: { parts: left.map((l) => String(l.values?.op ?? "")) } });
-      return { applied: recorded > 0, kept: recorded > 0 && all.length > mine.length };
+      const leftIds = new Set(left.map((l) => l.values?.change));
+      const unreversed = mine.filter((c) => leftIds.has(c.id));
+      if (unreversed.length > 0) throw new Refused("conflict", { line: "no_undo_for", codes: { parts: unreversed.map((c) => c.op) } });
+      const stays = all.filter((c) => !ids.has(c.id) && (!units.has(unitOf(c)) || leftIds.has(c.id)));
+      return { applied: recorded > 0, stays: recorded > 0 ? stays : [] };
     }, "undoing a tap on a panel");
   }
 

@@ -1152,6 +1152,16 @@ export function paidFrom(ctx: ReadContext, events: readonly LedgerEvent[], viewe
 }
 
 /**
+ * What a posting taken back is filed as: its memo, named reversed, or refunded where the bank was
+ * paid, and the kind of journal line that is. Pay another way takes back what a payment brought by
+ * it, and the store's Undo of a journal line follows it too.
+ */
+export function reversedAs(post: Pick<PostEvent, "lines" | "memo">): { memo: string; kind: TxnKind } {
+  const fee = post.lines.some((l) => l.account.startsWith(BANK_PREFIX));
+  return { memo: `${post.memo} ${fee ? "refunded" : "reversed"}`, kind: fee ? "refund" : "transfer" };
+}
+
+/**
  * Pay another way (DESIGN §9.5): for a payment the story made, the first of its payer's ways that
  * covers it now: the account its words named, when the payment went elsewhere (the story's own
  * way), then savings, a card, checking, cash; never an account the payment already touched. With it
@@ -1177,12 +1187,11 @@ export function otherWay(ctx: ReadContext, events: readonly LedgerEvent[]): { fr
   ];
   const moved = tied(asUnit(posting(lines, { memo, kind: "transfer", category: "transfer" })), [paid.post.group]);
   const back = paid.brought.flatMap((p): LedgerEvent[] => {
-    const fee = p.lines.some((l) => l.account.startsWith(BANK_PREFIX));
     const reversed = p.lines.map((l) => ({ account: l.account, amount: -l.amount }));
-    const note = `${p.memo} ${fee ? "refunded" : "reversed"}`;
+    const { memo: note, kind } = reversedAs(p);
     const was = events.find((e) => e.type === FINANCE_EVENTS.txn && "data" in e && e.data.memo === p.memo);
     const category = was && "data" in was ? strOf(was.data.category) : "";
-    return tied(asUnit([{ type: "post", lines: reversed, memo: note }, txn(reversed, { memo: note, kind: fee ? "refund" : "transfer", ...(category ? { category } : {}) })]), [p.group, moved[0]?.group]);
+    return tied(asUnit([{ type: "post", lines: reversed, memo: note }, txn(reversed, { memo: note, kind, ...(category ? { category } : {}) })]), [p.group, moved[0]?.group]);
   });
   return { from: way.account, repay: [...moved, ...back] };
 }

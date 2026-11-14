@@ -6,7 +6,7 @@
 // What would be left is said as codes with values. A part a later change has written since is not
 // the change's to take back: then nothing of the unit is undone. A part the store keeps no reverse for
 // (something made, a journal line whose posting is not in its unit) stays, and the rest of the unit is
-// undone. A journal line is taken back as the economy takes one back (`reverseLine`).
+// undone. A journal line is taken back as the economy takes one back (`reverseLine`, `reversedAs`).
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -15,8 +15,7 @@ import { FINANCE_EVENTS } from "../shared/finance";
 import type { LedgerEvent, PostEvent } from "../shared/ledger";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { own, strOf } from "../engine/pack-kit";
-import { BANK_PREFIX } from "../packs/economy/core/model";
-import { txn } from "../packs/economy/core/pay";
+import { reversedAs, txn } from "../packs/economy/core/pay";
 import { factStore, standing } from "./facts";
 import { eventOf } from "./fold";
 import { STORE_OPS, type ChangeInput, type ChangeRow, type Report, type StoreState } from "./types";
@@ -34,18 +33,16 @@ const leftOf = (code: "changed_since" | "not_reversible", c: ChangeRow): Report 
 /**
  * A journal line taken back the way the economy takes back what a payment brought when it is paid
  * another way (`otherWay`, `packs/economy/core/pay.ts`): the lines of its posting, the one of its unit
- * with the same memo, the other way, filed as a line that names it reversed, or refunded where the
- * bank was paid, in its category. None when its posting is not in its unit.
+ * with the same memo, the other way, filed as the economy files a posting taken back (`reversedAs`),
+ * in its category. None when its posting is not in its unit.
  */
 function reverseLine(data: JsonObject, unit: readonly ChangeRow[]): LedgerEvent | null {
   const memo = strOf(data.memo);
   const paid = unit.filter((u) => u.applied).map((u) => eventOf(u.op, u.value)).find((e): e is PostEvent => e?.type === "post" && e.memo === memo);
   if (paid === undefined) return null;
-  const fee = paid.lines.some((l) => l.account.startsWith(BANK_PREFIX));
   const reversed = paid.lines.map((l) => ({ account: l.account, amount: -l.amount }));
-  const note = `${memo} ${fee ? "refunded" : "reversed"}`;
   const category = strOf(data.category);
-  return txn(reversed, { memo: note, kind: fee ? "refund" : "transfer", ...(category ? { category } : {}) });
+  return txn(reversed, { ...reversedAs(paid), ...(category ? { category } : {}) });
 }
 
 /** The reverse of one change of `unit`, read against the state just before the unit and the state now; or why it has none. */

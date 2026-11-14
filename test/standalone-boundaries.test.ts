@@ -47,12 +47,14 @@ const RULES: Record<Zone, Rule> = {
   iface: { zones: ["app", "store"], carried: PURE, harness: true },
   cast: { zones: ["app", "store", "iface"], carried: PURE, harness: true },
   story: { zones: ["app", "store", "iface", "cast"], carried: PURE, harness: true },
-  migrate: { zones: ["app", "store", "cast", "story", "build"], carried: [...PURE, "backend"] },
+  // The migration's database is whole: the story's writes count the lore's overlays, so it lays the lore's tables too.
+  migrate: { zones: ["app", "store", "cast", "story", "build", "lore"], carried: [...PURE, "backend"] },
   turn: { zones: ["app", "adapter", "store", "tree", "lore", "iface", "cast", "story"], carried: PURE, harness: true },
   ui: { zones: [], carried: ["shared", "frontend"], sandboxed: true },
   ext: { zones: ["adapter"], carried: ["shared", "backend"], sandboxed: true },
   build: { zones: ["app", "store"], carried: [...PURE, "backend"] },
-  play: { zones: ["app", "store"], carried: [...PURE, "backend"] },
+  // A panel's payment keeps the books the way an agent's does, so it uses the engine tools' own bookkeeping.
+  play: { zones: ["app", "store", "iface"], carried: [...PURE, "backend"] },
 };
 
 /** The harness's contract is types only; importing it as types costs nothing anywhere, a page included. */

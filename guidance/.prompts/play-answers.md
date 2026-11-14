@@ -26,6 +26,7 @@ lines:
   no_undo_for: "Nothing was undone: this build keeps no undo for {{parts}}."
   turn_running: "A turn of this chat is running, and a change from a panel is kept only between turns: nothing was changed. It can be made once the turn is over."
   opened_stay: "The accounts this world gave, which opened when the money first moved, stay open as the world gave them."
+  worth_stays: "What this world takes someone it keeps no accounts for to be worth, which its defaults gave when the money first moved, stays as they gave it."
 keys:
   engine.hint: "a hint opened"
   spawn: "something made"
