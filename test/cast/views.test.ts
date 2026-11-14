@@ -126,7 +126,7 @@ describe("the views a definition's given list names", () => {
   test("a view whose part is switched off gives no text; names that are not the cast's are left to others; someone not in the cast gives empty views", async () => {
     const t = await openTable();
     await bram(t);
-    expect(await castViews(["base", "what-comes-to-mind", "game-side"], input(t, [], ["growth"]))).toEqual([
+    expect(await castViews(["base", "what-comes-to-mind", "lore:known-to-self"], input(t, [], ["growth"]))).toEqual([
       { name: "base", text: "" },
       { name: "what-comes-to-mind", text: "" },
     ]);
@@ -255,5 +255,21 @@ describe("what comes to mind", () => {
     }
     // A budget too small even for the heading and that count holds nothing.
     expect((await castViews(["what-comes-to-mind"], { ...input(b.t, ["Wren"]), settings: { comesToMindTokens: 10 } }))[0]?.text).toBe("");
+  });
+
+  test("its budget is counted by the counter the host gives, the harness's own estimate, and by the setting only without one", async () => {
+    const { b } = await remembered();
+    const shown = (text: string): number => text.split("\n").filter((l) => l.startsWith("- [")).length;
+    const at = async (tokens?: (text: string) => number): Promise<string> =>
+      (await castViews(["what-comes-to-mind"], { ...input(b.t, ["Wren"]), cues: ["the cellar"], settings: { comesToMindTokens: 50, charsPerToken: 1000 }, ...(tokens !== undefined ? { tokens } : {}) }))[0]?.text ?? "";
+    // Without a counter, the setting's thousand characters a token holds all four.
+    expect(shown(await at())).toBe(4);
+    // A counter of a token a character holds not even the heading in fifty.
+    expect(await at((text) => text.length)).toBe("");
+    // A counter of a token a word holds some, and says how many it left out.
+    const words = await at((text) => text.split(/\s+/).length);
+    expect(shown(words)).toBeGreaterThan(0);
+    expect(shown(words)).toBeLessThan(4);
+    expect(words).toEndWith(`${4 - shown(words)} more memories touch who and what is here, and were left out for room.`);
   });
 });

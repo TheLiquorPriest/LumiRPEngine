@@ -13,7 +13,7 @@ arguments:
   perceptions.secrets: "Secrets the lore marks that they now hold, by the id the lore map shows."
   perceptions.told_by: "Who told them, by name. Leave it out when it reached them first hand."
   perceptions.reliability: "How reliable the telling is."
-  perceptions.drop: "true to strike the perception named by id; say why."
+  perceptions.drop: "true to strike the perception named by id; say why. What it added to their knowledge is struck with it, and the secrets it made theirs are theirs no longer, unless other knowledge of theirs still gives them."
   perceptions.why: "With drop: why it goes."
 ---
 Records what reached each character of a moment of this turn, one perception per character and moment, many in one call. A perception belongs to this turn: if the turn is swiped or deleted, it goes, with what it added to their knowledge and the secrets it made theirs. The answer gives each perception's id, how it now stands, and the ids of the knowledge it added.

@@ -1,17 +1,21 @@
 // The views of a character's record a definition's `given` list can name (plan §5.4, §7.1), as the
 // shipped character definition names them inside `cast:self(...)`: the base with growth laid over it
 // and the sources it was drawn from, growth alone, what is on the mind, how the character feels
-// about those on stage, and the perceptions it has not yet taken into memory, in full. Each is the
-// record's own words, laid out by its prompt part in `.prompts/`; what goes in is decided by the
-// record's marks and by who is on stage, which the caller says. Code ranks nothing and writes no word
-// around the record's.
+// about those on stage, the perceptions it has not yet taken into memory, in full, the old mind
+// files a migrated character carried, whole, until they are filed (§15.2), its game side as the world
+// state holds it (`game.ts`), and its history as the Author recorded it. The same views of everyone
+// on stage are what the Author is given of them (`castPresentViews`). Each is the record's own words,
+// laid out by its prompt part in `.prompts/`; what goes in is decided by the record's marks and by who
+// is on stage, which the caller says. Code ranks nothing and writes no word around the record's.
 
 import type { TemplatePart } from "rp-harness";
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import type { Store } from "../store";
 import { CAST_DEFAULTS, type CastClock, castClock, type CastSettings } from "./kit";
 import { castAt } from "./path";
-import { baseOf, bindingsOf, type Character, castingInForce, CastRecord, chatLine, findCharacter, MIND_KINDS, nameKey, RELATIONSHIP_DIMENSIONS } from "./record";
+import { baseOf, bindingsOf, type Casting, CASTINGS, type Character, castingInForce, CastRecord, chatLine, findCharacter, MIND_KINDS, nameKey, RELATIONSHIP_DIMENSIONS } from "./record";
+import { gameSide } from "./game";
+import { fileName, importedFiles, isFiled } from "./imported";
 import { memoriesNow, type MemoryNow, strongestFirst, type Tier, touches, untakenPerceptions } from "./memory";
 import { perceptionView } from "./perceive";
 import { type SourceReader, sourcesNow } from "./sources";
@@ -24,6 +28,9 @@ export const CAST_VIEWS = {
   "what-comes-to-mind": "cast-comes-to-mind",
   "relationships:present": "cast-relationships",
   "unprocessed-perceptions": "cast-perceptions",
+  imported: "cast-imported",
+  "game-side": "cast-game-side",
+  history: "cast-history",
 } as const;
 export type CastViewName = keyof typeof CAST_VIEWS;
 
@@ -45,6 +52,8 @@ export interface CastViewInput {
   layouts: Partial<Record<CastViewName, Pick<TemplatePart, "render">>>;
   /** Settings over `CAST_DEFAULTS`: memory's, and what comes to mind's budget. */
   settings?: Partial<CastSettings>;
+  /** A text's tokens by the harness's own estimate, for what comes to mind's budget; absent, its length over the setting `charsPerToken`. */
+  tokens?: (text: string) => number;
 }
 
 export interface CastView {
@@ -77,7 +86,7 @@ function listed(items: JsonObject[]): Listed | undefined {
  * the tiers' and strength's arithmetic. The text grows with each memory, so the most that fit is
  * found by halving.
  */
-function comesToMind(record: CastRecord, character: Character, clock: CastClock | null, head: ViewFields, cues: readonly string[], s: CastSettings, layout: Pick<TemplatePart, "render">): string {
+function comesToMind(record: CastRecord, character: Character, clock: CastClock | null, head: ViewFields, cues: readonly string[], s: CastSettings, tokens: (text: string) => number, layout: Pick<TemplatePart, "render">): string {
   const memories = memoriesNow(record, character.id, clock?.now ?? null, s);
   const touching = (tier: Tier): MemoryNow[] => memories.filter((m) => m.tier === tier && touches(m.item, cues));
   const order = [...memories.filter((m) => m.tier === "top"), ...touching("short").reverse(), ...touching("long").sort(strongestFirst)];
@@ -94,7 +103,7 @@ function comesToMind(record: CastRecord, character: Character, clock: CastClock 
     const left = order.length - k;
     return layout.render({ ...head, top: of("top"), short: of("short"), long: of("long"), ...(left > 0 ? { left: { count: left } } : {}) }).text.trimEnd();
   };
-  const fits = (text: string): boolean => Math.ceil(text.length / s.charsPerToken) <= s.comesToMindTokens;
+  const fits = (text: string): boolean => tokens(text) <= s.comesToMindTokens;
   let lo = 0;
   let hi = order.length;
   while (lo < hi) {
@@ -152,19 +161,25 @@ export async function castViews(names: readonly string[], input: CastViewInput):
     } else if (name === "growth") {
       if (!asked.includes("base") && growth !== undefined) fields = { ...head, growth };
     } else if (name === "mind") {
-      const mind = record.of(character.id, "mind");
+      // The kinds the layout shows; a carried mind file is the `imported` view's, never an empty heading here.
+      const mind = record.of(character.id, "mind").filter((m) => (MIND_KINDS as readonly unknown[]).includes(m.fields.kind));
       const kinds = Object.fromEntries(MIND_KINDS.map((kind) => [kind, listed(mind.filter((m) => m.fields.kind === kind).map((m) => m.fields))]));
       if (mind.length > 0) fields = { ...head, ...kinds };
     } else if (name === "what-comes-to-mind") {
       const layout = input.layouts[name];
       const people = input.present.filter((p) => nameKey(p) !== nameKey(character.name));
-      out.push({ name, text: layout === undefined ? "" : comesToMind(record, character, clock, head, [...people, ...(input.cues ?? [])], settings, layout) });
+      const tokens = input.tokens ?? ((text: string): number => Math.ceil(text.length / settings.charsPerToken));
+      out.push({ name, text: layout === undefined ? "" : comesToMind(record, character, clock, head, [...people, ...(input.cues ?? [])], settings, tokens, layout) });
       continue;
     } else if (name === "unprocessed-perceptions") {
       // In full, oldest first, each with its date in story time where the chat keeps a clock.
       const perceptions = listed(untakenPerceptions(record, character.id).map((p) => ({ ...perceptionView({ record }, p), ...(p.at !== null && clock !== null ? { date: clock.text(p.at) } : {}) })));
       if (perceptions !== undefined) fields = { ...head, perceptions };
-    } else {
+    } else if (name === "imported") {
+      // Whole, word for word, each under its name, outside every budget, until it is marked filed.
+      const files = listed(importedFiles(record, character.id).flatMap((f) => (isFiled(f) ? [] : [{ file: fileName(f), text: typeof f.fields.text === "string" ? f.fields.text : "" }])));
+      if (files !== undefined) fields = { ...head, files };
+    } else if (name === "relationships:present") {
       const here = new Set(input.present.map(nameKey));
       here.delete(nameKey(character.name));
       // A dimension is given as words, so that a 0 shows as one.
@@ -174,9 +189,68 @@ export async function castViews(names: readonly string[], input: CastViewInput):
         .map((r) => ({ ...r.fields, ...Object.fromEntries(RELATIONSHIP_DIMENSIONS.flatMap((d) => (typeof r.fields[d] === "number" ? [[d, String(r.fields[d])]] : []))) }));
       const relationships = listed(shown);
       if (relationships !== undefined) fields = { ...head, relationships };
+    } else if (name === "history") {
+      // The Author's record of their story, oldest first, each with its date in story time where the chat keeps a clock.
+      const history = listed(record.of(character.id, "history").map((h) => ({ ...h.fields, ...(h.at !== null && clock !== null ? { date: clock.text(h.at) } : {}) })));
+      if (history !== undefined) fields = { ...head, history };
+    } else if (name === "game-side") {
+      const side = gameSide(input.store, input.user, input.chat, input.turn, character.name);
+      if (side !== null) fields = { ...head, ...side };
     }
     const layout = input.layouts[name];
     out.push({ name, text: fields === null || layout === undefined ? "" : layout.render(fields).text.trimEnd() });
+  }
+  return out;
+}
+
+/** A view of those on stage, as given: its name as the guidance named it, and each character's view laid out, one after another. */
+export interface CastPresentView {
+  name: string;
+  text: string;
+}
+
+/** A name of `castPresentViews` read: the view, and the casting it is narrowed to (null: everyone on stage); null when it names no view of the cast's. */
+function presentView(name: string): { view: CastViewName; casting: Casting | null } | null {
+  if (Object.hasOwn(CAST_VIEWS, name)) return { view: name as CastViewName, casting: null };
+  const at = name.lastIndexOf(":");
+  const view = name.slice(0, at);
+  const casting = name.slice(at + 1);
+  return at > 0 && Object.hasOwn(CAST_VIEWS, view) && (CASTINGS as readonly string[]).includes(casting) ? { view: view as CastViewName, casting: casting as Casting } : null;
+}
+
+/**
+ * The cast's views of the characters on stage (plan §7.1, §15.2), for whoever is given them; as the
+ * plan has it, the Author: `history` for each one on stage the cast holds, `history:principal` for
+ * those cast so, and any other view of `CAST_VIEWS` alike (`imported:supporting`: the old mind files
+ * of a supporting character, who has no agent of their own to be given them). Each character's view
+ * is laid out by its part, one after another, in the order the stage names them. Which views, of
+ * which castings, is the guidance's to name; a name that is none of these is left to others.
+ */
+export async function castPresentViews(names: readonly string[], input: Omit<CastViewInput, "character">): Promise<CastPresentView[]> {
+  const asked = names.flatMap((name) => {
+    const read = presentView(name);
+    return read === null ? [] : [{ name, ...read }];
+  });
+  if (asked.length === 0) return [];
+  const { db } = input.store;
+  const user = input.store.user(input.user);
+  const chats = chatLine(user, input.chat);
+  const record = CastRecord.read(db, input.user, castAt(user, input.chat, input.turn));
+  // Each character on stage the cast holds, once, in the stage's order, with the casting in force.
+  const onStage = new Map<string, Casting | null>();
+  for (const said of input.present) {
+    const character = findCharacter(db, input.user, chats, said);
+    if (character !== null && !onStage.has(character.id)) onStage.set(character.id, castingInForce(record, character)?.as ?? null);
+  }
+  const out: CastPresentView[] = [];
+  for (const { name, view, casting } of asked) {
+    const texts: string[] = [];
+    for (const [id, as] of onStage) {
+      if (casting !== null && as !== casting) continue;
+      const [one] = await castViews([view], { ...input, character: id });
+      if (one !== undefined && one.text !== "") texts.push(one.text);
+    }
+    out.push({ name, text: texts.join("\n\n") });
   }
   return out;
 }

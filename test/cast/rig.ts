@@ -4,17 +4,22 @@
 // an invented shelf whose revisions a test can change. Every name here is made up.
 
 import { Database } from "bun:sqlite";
-import { readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadGuidance, type TemplatePart } from "rp-harness";
 import type { AgentRef, HostTool, JsonObject, ToolResult } from "rp-harness/contract";
+import { createFolderHost } from "rp-harness/hosts/folder";
 import { WriteQueue } from "../../src/app/database";
 import { castTools, type CastDeps } from "../../src/cast/index";
 import { castAt } from "../../src/cast/path";
 import { CastRecord, type CastRow, type CastWrite, type SourceKind, writeCast } from "../../src/cast/record";
 import { CAST_MIGRATIONS } from "../../src/cast/schema";
 import type { SourceNow, SourceReader } from "../../src/cast/sources";
+import { CAST_VIEWS, type CastViewName } from "../../src/cast/views";
 import { Lines, SHIPPED_GUIDANCE, shippedTexts } from "../../src/iface/texts";
 import { hashJson } from "../../src/shared/hash";
+import type { WorldDoc } from "../../src/shared/world";
 import { migrateStore, openStore, type ShownMessage, type Store, type TurnRow, type UserStore } from "../../src/store";
 import { asHarnessPasses } from "../story/rig";
 import { hashOf, inventedWorld, registry } from "../store/fixtures";
@@ -66,8 +71,8 @@ export interface Table {
   record(turn?: TurnRow | null): CastRecord;
 }
 
-export async function openTable(): Promise<Table> {
-  const world = inventedWorld();
+/** The invented chat, on `world`: the invented one unless a test gives its own (more lore, other people). */
+export async function openTable(world: WorldDoc = inventedWorld()): Promise<Table> {
   const revision = hashJson(world);
   const db = new Database(":memory:");
   migrateStore(db);
@@ -171,9 +176,9 @@ export interface Bench {
   play(name: string, args: JsonObject, turn: string | null, agent?: AgentRef): Promise<ToolResult>;
 }
 
-/** The cast's tools over a fresh table, with the shipped words. */
-export async function openBench(more: Partial<CastDeps> = {}): Promise<Bench> {
-  const t = await openTable();
+/** The cast's tools over a fresh table, with the shipped words; `world` is the chat's world, the invented one unless given. */
+export async function openBench(more: Partial<CastDeps> = {}, world?: WorldDoc): Promise<Bench> {
+  const t = await openTable(world);
   const deps: CastDeps = { store: t.store, writes: t.writes, files: shippedTexts(), sources: t.shelf.reader, now: () => 7, ...more };
   const tools = new Map((await castTools(deps)).map((x) => [x.name, x]));
   let calls = 0;
@@ -187,4 +192,27 @@ export async function openBench(more: Partial<CastDeps> = {}): Promise<Bench> {
     return tool(name).run(args, { scope, agent, run: "run-1", callId: `call-${++calls}`, signal: new AbortController().signal, onUpdate: () => undefined });
   };
   return { t, tools, call, play: (name, args, turn, agent) => call(name, asHarnessPasses(tool(name), args), turn, agent) };
+}
+
+// ---------------------------------------------------------------- the views' shipped layouts
+
+/** The shipped layouts of the cast's views, loaded the way the agents' guidance is: as the shipped level of a folder host. `dispose` removes its folder. */
+export async function shippedLayouts(): Promise<{ layouts: Partial<Record<CastViewName, TemplatePart>>; dispose(): void }> {
+  const dir = mkdtempSync(join(tmpdir(), "rpe-cast-layouts-"));
+  mkdirSync(join(dir, "files", "defaults", ".prompts"), { recursive: true });
+  for (const part of Object.values(CAST_VIEWS)) copyFileSync(join(SHIPPED_GUIDANCE, ".prompts", `${part}.md`), join(dir, "files", "defaults", ".prompts", `${part}.md`));
+  mkdirSync(join(dir, "files", "chats", "hero", "c1"), { recursive: true });
+  mkdirSync(join(dir, "host", "chats", "c1"), { recursive: true });
+  writeFileSync(join(dir, "host", "chats", "c1", "chat.json"), JSON.stringify({ character: "hero" }));
+  const host = await createFolderHost({ dir, user: "u1" });
+  const guidance = loadGuidance(host.files, { user: "u1", chat: "c1", session: "s1" });
+  const problems = await guidance.problems();
+  if (problems.length > 0) throw new Error(`The shipped layouts have problems: ${JSON.stringify(problems)}`);
+  const layouts: Partial<Record<CastViewName, TemplatePart>> = {};
+  for (const [view, part] of Object.entries(CAST_VIEWS)) {
+    const loaded = await guidance.part(part);
+    if (loaded?.format !== "template") throw new Error(`The shipped ${part} part did not load as a template.`);
+    layouts[view as CastViewName] = loaded;
+  }
+  return { layouts, dispose: () => rmSync(dir, { recursive: true, force: true }) };
 }

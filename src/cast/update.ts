@@ -1,6 +1,7 @@
 // `cast_update` (plan §7.1, §7.2, §6.8): the omniscient side's writes to the cast as named
 // operations, applied in order, one call writing many: casting, the sources bound, the base, growth,
-// history, relationships and knowledge. The schema holds nothing back, so every call reaches this
+// history, relationships, knowledge, and the mark that a migrated character's old mind files have
+// been filed (§15.2). The schema holds nothing back, so every call reaches this
 // code, which reads each operation itself, in whatever shape an argument was sent when what was meant
 // can be read. An argument an operation does not read, or whose value cannot be read (a number off
 // its scale), is left out: the operation is written with the rest, and the answer names what was left
@@ -18,6 +19,8 @@ import type { JsonObject, JsonValue } from "rp-harness/contract";
 import type { Reply } from "../iface/kit";
 import { type Fields, type Lines, textOf } from "../iface/texts";
 import { isRecord } from "../shared/json";
+import type { LedgerEvent } from "../shared/ledger";
+import type { FactId } from "../shared/minds";
 import type { Lane } from "../store";
 import { baseView, type CastCall, type CastReading, type CastToolSpec, itemView, readingOr, sourceView, whoView } from "./kit";
 import {
@@ -30,6 +33,7 @@ import {
   CASTINGS,
   castingInForce,
   castingItemId,
+  type CastItem,
   type Character,
   findCharacter,
   nameKey,
@@ -43,13 +47,15 @@ import {
   writeBase,
   writeCast,
 } from "./record";
+import { fileName, fileNamed, importedFiles, isFiled } from "./imported";
+import { forgetsOf, holdingChanges, secretsLetGo, worldAt } from "./secrets";
 import { type SourceNow, type SourceReader, sourcesNow } from "./sources";
 
 /** The lane every operation of the tool writes to: the cast is the story's side of a turn. */
 export const CAST_LANE: Lane = "story";
 
 /** Every operation, in the order the tool's file lists them. */
-export const UPDATE_OPERATIONS = ["cast", "bind", "base", "growth", "history", "relationship", "knowledge"] as const;
+export const UPDATE_OPERATIONS = ["cast", "bind", "base", "growth", "history", "relationship", "knowledge", "filed"] as const;
 type Op = (typeof UPDATE_OPERATIONS)[number];
 
 /** The operations that stand outside turns: a swipe leaves what they write. Every other one is kept with its turn. */
@@ -73,10 +79,11 @@ const ARGS: Readonly<Record<Op, Readonly<Record<string, Kind>>>> = {
   history: { id: "name", text: "text", beats: "texts", ...DROP },
   relationship: { with: "name", text: "text", ...DIMENSIONS, ...DROP },
   knowledge: { id: "name", text: "text", how: "text", ...DROP },
+  filed: { files: "texts" },
 };
 
 /** The arguments an operation may carry, in the order the tool's file lists them. */
-const UPDATE_ARGUMENTS = ["op", "who", "id", "as", "line", "card", "persona", "entry", "memory", "defines", "seed", "soul", "inner_voice", "background", "text", "cause", "beats", "with", ...RELATIONSHIP_DIMENSIONS, "how", "accept", "drop", "why"];
+const UPDATE_ARGUMENTS = ["op", "who", "id", "as", "line", "card", "persona", "entry", "memory", "defines", "seed", "soul", "inner_voice", "background", "text", "cause", "beats", "with", ...RELATIONSHIP_DIMENSIONS, "how", "files", "accept", "drop", "why"];
 
 /**
  * The arguments an operation may carry, each once, whichever operations read it. None holds back a
@@ -185,10 +192,14 @@ interface Planned {
   /** A row's part, and the item it writes: an id the path holds, or null for a new one (keyed parts are named at the write). */
   part?: RowPart;
   item?: string | null;
+  /** For `filed`: the carried mind files it marks filed, by their items' ids. */
+  files?: string[];
   /** A binding's source, and what Lumiverse holds of it now. */
   source?: { kind: SourceKind; ref: string; now: SourceNow | null };
   /** For a base: each bound source's revision as it was read for this call. */
   seen?: Record<string, string>;
+  /** For knowledge it strikes: each secret's holding it takes back, with the events that do. */
+  forgets?: { fact: FactId; events: LedgerEvent[] }[];
 }
 
 /** One operation as read, and what it writes when it can be read. */
@@ -241,7 +252,7 @@ function readsOf(op: string): Reads {
   const name = op as Op;
   return {
     reads: ["who", ...Object.keys(ARGS[name])],
-    needs: name === "cast" ? ["who", "as"] : name === "relationship" ? ["who", "with"] : ["who"],
+    needs: name === "cast" ? ["who", "as"] : name === "relationship" ? ["who", "with"] : name === "filed" ? ["who", "files"] : ["who"],
     newNeeds: name === "growth" || name === "history" || name === "knowledge" ? ["text"] : [],
   };
 }
@@ -356,6 +367,30 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
       if (item === undefined || item.part !== name || item.character !== character.id) return unreadable({ line: "unknown_id", fields: { n, op, who: character.name, part: name, id: JSON.stringify(id) } });
       if (Object.keys(planned.value).length === 0) return unreadable({ line: "needs_one", fields: { n, op, fields: Object.keys(ARGS[name]).filter((f) => f !== "id") } });
       planned.item = id as string;
+      // Striking knowledge of a secret takes its holding back, unless other knowledge of theirs still gives it.
+      const turn = r.call.scope.turn;
+      if (name === "knowledge" && planned.value.drop === true && !item.dropped && turn !== undefined) {
+        const facts = secretsLetGo(r.cast.record, character.id, [item]);
+        if (facts.length > 0) planned.forgets = forgetsOf(worldAt(r.call.deps.store, r.call.scope.user, turn), n, op, character.name, facts, out.unread);
+      }
+      return out;
+    }
+    case "filed": {
+      if (value.files === undefined) return needed(out, ["files"]);
+      // Each file named that the character carried on this path; one that is none of theirs is left out, and said with the names of theirs.
+      const theirs = importedFiles(r.cast.record, character.id);
+      const named: CastItem[] = [];
+      const unknown: string[] = [];
+      for (const said of value.files as string[]) {
+        const found = fileNamed(theirs, said);
+        if (found === undefined) unknown.push(said);
+        else if (!named.includes(found)) named.push(found);
+      }
+      const files = textOf(theirs.map(fileName));
+      const said = unknown.map((file): Unread => ({ line: "no_file", fields: { n, op, field: "files", who: character.name, file, files }, ...(named.length > 0 ? { kept: true } : {}) }));
+      (named.length === 0 ? out.fatal : out.unread).push(...said);
+      planned.files = named.map((f) => f.id);
+      planned.value = { files: named.map(fileName) };
       return out;
     }
   }
@@ -407,10 +442,18 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
         else bindSource(db, user, id, { kind: p.source.kind, ref: p.source.ref, defines: typeof p.value.defines === "string" ? p.value.defines : null }, now);
       } else if (p.op === "base") {
         writeBase(db, { user, turn, by, agent: call.agent.id, now }, id, p.value as Partial<Record<BasePart, string>>, p.seen ?? {});
+      } else if (p.op === "filed" && p.files !== undefined && turn !== null) {
+        writeCast(
+          db,
+          { user, turn, by, agent: call.agent.id, job: call.agent.job ?? null, at: cast.clock?.now ?? null, now },
+          p.files.map((item) => ({ character: id, part: "mind", item, value: { filed: true } })),
+        );
       } else if (p.part !== undefined && turn !== null) {
         const item = p.part === "casting" ? castingItemId(id) : p.part === "relationship" ? relationshipItemId(id, p.value.with as string) : (p.item ?? null);
         const [row] = writeCast(db, { user, turn, by, agent: call.agent.id, job: call.agent.job ?? null, at: cast.clock?.now ?? null, now }, [{ character: id, part: p.part, item, value: p.value }]);
         if (row !== undefined) items.set(p.n, row.item);
+        const events = p.forgets?.flatMap((f) => f.events) ?? [];
+        if (events.length > 0) store.user(user).addChanges(turn, holdingChanges(events, CAST_LANE, call.agent.id, call.agent.job ?? null));
       }
     }
     return { ids, items };
@@ -443,11 +486,15 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
         const older = states.filter((s) => s.newer);
         done.now = { ...baseView(baseOf(store.db, user, id), null), ...(older.length > 0 ? { older_than: older.map(sourceView) } : {}) };
       }
+    } else if (p.op === "filed") {
+      done.now = { files: importedFiles(after.record, id).map((f) => ({ file: fileName(f), filed: isFiled(f) })) };
     } else {
       const itemId = written.items.get(p.n);
       const item = itemId === undefined ? undefined : after.record.items.get(itemId);
       done.id = itemId ?? null;
       done.now = item === undefined ? null : itemView(after, item);
+      const gone = p.forgets?.flatMap((f) => (f.events.length > 0 ? [f.fact] : [])) ?? [];
+      if (gone.length > 0) done.lets_go = gone;
     }
     operations.push(done);
   }

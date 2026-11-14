@@ -1,5 +1,5 @@
 ---
-description: The sentences the cast tools answer with (cast_query, cast_update, perceive, recall, remember, reflect, dream). A tool's answer is data from the cast and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words. The lines named wants_ (what an argument takes) are words put inside the other lines.
+description: The sentences the cast tools answer with (cast_query, cast_update, perceive, recall, remember, reflect, dream, mind_set, relate). A tool's answer is data from the cast and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words. The lines named wants_ (what an argument takes) are words put inside the other lines.
 format: lines
 ---
 no_chat: There is no chat {{id}} in the engine's records.
@@ -22,6 +22,7 @@ one_source: Operation {{n}} ({{op}}) binds one source: one of {{choices}}.
 no_source: Operation {{n}} ({{op}}): Lumiverse holds no {{kind}} {{id}}.
 not_bound: Operation {{n}} ({{op}}): {{who}} has no {{kind}} {{id}} bound.
 unknown_id: Operation {{n}} ({{op}}): {{who}} has no {{part}} {{id}} on this path.
+no_file: Operation {{n}} ({{op}}): {{who}} has no old mind file {{file}} on this path.{{#files}} Theirs are: {{files}}.{{/files}}
 nothing_recorded: Nothing was written. Send the call again with that put right.
 pinned: Operation {{n}} (cast): the player pinned {{who}} as {{as}}, and that stands. Your casting is kept for when the pin is taken away.
 no_cast: No one is cast on this path yet.
@@ -38,8 +39,10 @@ no_teller: Operation {{n}} ({{op}}): a secret someone was told is held with its 
 many_named: Operation {{n}} ({{op}}): {{count}} people in the world are named {{who}}: {{ids}}.
 unknown_secret: Operation {{n}} ({{op}}): this chat holds no secret {{secret}}.
 secret_refused: Operation {{n}} ({{op}}): the secret {{secret}} cannot be held by {{who}} ({{code}}).
-memory_turn: A memory is kept with a turn, and this call belongs to none.
+own_turn: What {{tool}} writes is kept with a turn, and this call belongs to none.
 plays_none: {{tool}} is a character's own, and this agent plays no one.
 no_memories_sent: memories cannot be read: send a list of memories.
 no_memories: Nothing comes back for {{cue}}.
 more_memories: {{count}} more memories touch {{cue}}. Recall again with skip {{skip}} to bring them back.
+no_entries_sent: entries cannot be read: send what is on your mind as a list of entries.
+no_relationships_sent: relationships cannot be read: send a list of the people you feel something about.

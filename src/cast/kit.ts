@@ -12,6 +12,7 @@ import { type GuidanceFiles, Lines, toolText } from "../iface/texts";
 import type { Store, UserStore } from "../store";
 import { castAt } from "./path";
 import { type BaseVersion, type CastItem, CastRecord, type Character, chatLine } from "./record";
+import type { BookReader } from "./secrets";
 import type { SourceReader, SourceState } from "./sources";
 
 /** Every fixed value of the cast's tools, each a setting with this default. */
@@ -38,7 +39,7 @@ export const CAST_DEFAULTS = Object.freeze({
   weightMax: 5,
   /** What comes to mind for a scene, in tokens (plan §7.4, Appendix D.1). */
   comesToMindTokens: 2000,
-  /** Characters per token, for a budget counted before a model sees the text: RPH's own estimate. */
+  /** Characters per token, for a budget counted before a model sees the text, where the host gives no count of the harness's own (`CastViewInput.tokens`): RPH's default estimate. */
   charsPerToken: 3.2,
   /** The most memories one recall brings back; the answer says how many more touch the cue. */
   recallItems: 10,
@@ -59,6 +60,8 @@ export interface CastDeps {
   files: GuidanceFiles;
   /** Reads a bound source live in Lumiverse. */
   sources: SourceReader;
+  /** Reads a Lumiverse book entry's text live, for a secret its marks hold that the chat holds no fact of yet; without it, such a secret cannot be held. */
+  books?: BookReader;
   /** Settings over `CAST_DEFAULTS`. */
   settings?: Partial<CastSettings>;
   /** Milliseconds since 1970, for a row's time; `Date.now` when absent. */

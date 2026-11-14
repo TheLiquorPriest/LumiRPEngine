@@ -11,13 +11,14 @@
 // is written, and the answer names what was left out. A call one of whose memories cannot be read at
 // all is answered whole, and nothing is written.
 
-import type { JsonObject, JsonValue } from "rp-harness/contract";
+import type { JsonObject } from "rp-harness/contract";
 import type { Reply } from "../iface/kit";
 import { isRecord } from "../shared/json";
-import { type CastCall, type CastClock, type CastReading, type CastSettings, type CastToolSpec, readingOr } from "./kit";
+import { type CastCall, type CastClock, type CastSettings, type CastToolSpec, readingOr } from "./kit";
 import { memoriesNow, type MemoryNow, strongestFirst, touches, weightOf } from "./memory";
-import { type CastWrite, type CastWriter, type Character, findCharacter, writeCast } from "./record";
-import { CAST_LANE, ignoredOf, isUnread, type ItemRead, type Kind, leftOut, needed, readArg, type Reads, refused, type Unread } from "./update";
+import { type CastWrite, writeCast } from "./record";
+import { listOf, notAnItem, ownIds, readFields, type Self, selfOr, strangers, unchecked } from "./self";
+import { CAST_LANE, ignoredOf, type ItemRead, type Kind, leftOut, needed, type Reads, refused } from "./update";
 
 /** A memory as the character's own answers show it: in full, or as its gist alone, marked faint, once it has faded. */
 export function memoryView(m: MemoryNow, clock: CastClock | null): JsonObject {
@@ -31,37 +32,6 @@ export function memoryView(m: MemoryNow, clock: CastClock | null): JsonObject {
   };
 }
 
-/** What one call of a memory action works with: the reading, the character, story time, and the writer of its rows. */
-interface Self {
-  reading: CastReading;
-  character: Character;
-  now: number | null;
-  writer: CastWriter;
-}
-
-/** The character the calling agent plays, on the call's turn; a line says why not when there is none. */
-function selfOr(call: CastCall, reply: Reply): Self | null {
-  const reading = readingOr(call, reply);
-  if (reading === null) return null;
-  const turn = call.scope.turn;
-  if (turn === undefined) {
-    reply.line("memory_turn", {}).fail();
-    return null;
-  }
-  const plays = call.agent.plays;
-  if (plays === undefined) {
-    reply.line("plays_none", { tool: call.tool }).fail();
-    return null;
-  }
-  const character = findCharacter(call.deps.store.db, call.scope.user, reading.chats, plays);
-  if (character === null) {
-    reply.line("no_character", { who: plays }).fail();
-    return null;
-  }
-  const now = reading.clock?.now ?? null;
-  return { reading, character, now, writer: { user: call.scope.user, turn, by: call.agent.definition, agent: call.agent.id, job: call.agent.job ?? null, at: now, now: (call.deps.now ?? Date.now)() } };
-}
-
 /** The fields of a memory the character writes, each read as its kind. */
 function memoryKinds(s: CastSettings): Readonly<Record<string, Kind>> {
   return { text: "text", gist: "text", weight: { min: 1, max: s.weightMax }, tone: "text", who: "texts", about: "texts" };
@@ -69,52 +39,11 @@ function memoryKinds(s: CastSettings): Readonly<Record<string, Kind>> {
 
 const MEMORY_FIELDS = ["text", "gist", "weight", "tone", "who", "about"];
 
-/** Arguments that hold nothing back: the file says what each is, and this code reads each in whatever shape it comes. */
-function unchecked(names: readonly string[]): Record<string, JsonObject> {
-  return Object.fromEntries(names.map((name) => [name, {}]));
-}
-
 const RECALL_READS: Reads = { reads: ["cue", "skip"], needs: ["cue"], newNeeds: [] };
 const MEMORY_READS: Reads = { reads: ["id", ...MEMORY_FIELDS, "from", "top"], needs: [], newNeeds: ["text", "gist"] };
 const REFLECT_READS: Reads = { reads: ["from", ...MEMORY_FIELDS, "growth"], needs: ["from", "text", "gist"], newNeeds: [] };
 const DREAM_READS: Reads = { reads: ["keep", "fade", "connect"], needs: [], newNeeds: [] };
 const CONNECTION_READS: Reads = { reads: ["memories", ...MEMORY_FIELDS], needs: ["memories", "text", "gist"], newNeeds: [] };
-
-/** Reads `kinds` of an item into `value`; what cannot be read goes to the item's `unread`. */
-function readFields(call: CastCall, it: ItemRead, given: JsonObject, kinds: Readonly<Record<string, Kind>>, value: JsonObject): void {
-  for (const [field, kind] of Object.entries(kinds)) {
-    const got = readArg(call.lines, it.n, it.op ?? "", field, kind, given[field]);
-    if (isUnread(got)) it.unread.push(got);
-    else if (got !== undefined) value[field] = got;
-  }
-}
-
-/** The ids of `part` a list names that are none of the character's on this path. */
-function strangers(self: Self, part: "memory" | "perception", ids: unknown): string[] {
-  const list = Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : [];
-  return list.filter((id) => {
-    const item = self.reading.record.items.get(id);
-    return item === undefined || item.part !== part || item.character !== self.character.id;
-  });
-}
-
-/**
- * The ids of `part` an item's `field` names that are the character's: those that are not are left
- * out, each said; none left of a list it needs, they make the item unreadable.
- */
-function ownIds(self: Self, it: ItemRead, part: "memory" | "perception", field: string, ids: JsonValue | undefined, need: boolean): string[] {
-  const list = Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : [];
-  const unknown = strangers(self, part, list);
-  const kept = list.filter((id) => !unknown.includes(id));
-  const said: Unread[] = unknown.map((id) => ({ line: "unknown_id", fields: { n: it.n, op: it.op, field, who: self.character.name, part, id: JSON.stringify(id) }, ...(kept.length > 0 ? { kept: true } : {}) }));
-  (need && kept.length === 0 ? it.fatal : it.unread).push(...said);
-  return kept;
-}
-
-/** An item a list holds that is no object: it cannot be read at all. */
-function notAnItem(n: number, op: string, field: string, raw: JsonValue): ItemRead {
-  return { n, fatal: [{ line: "unreadable_op", fields: { n, op, field, value: JSON.stringify(raw) } }], unread: [], ignored: [] };
-}
 
 /** Each memory named, as it stands after the call. */
 function after(call: CastCall, reply: Reply, self: Self, ids: readonly string[]): JsonObject[] | null {
@@ -274,8 +203,7 @@ async function dream(args: JsonObject, call: CastCall): Promise<Reply> {
   readFields(call, it, args, { keep: "texts", fade: "texts" }, value);
   const items: ItemRead[] = [it];
   const connections: { it: ItemRead; fields: JsonObject }[] = [];
-  // One connection sent on its own is read as a list of one.
-  const connect = args.connect === undefined || args.connect === null ? [] : Array.isArray(args.connect) ? args.connect : [args.connect];
+  const connect = listOf(args.connect);
   for (const [i, raw] of connect.entries()) {
     if (!isRecord(raw)) {
       items.push(notAnItem(i + 1, "connection", "connect", raw));

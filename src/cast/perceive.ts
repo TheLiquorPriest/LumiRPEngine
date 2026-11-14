@@ -5,7 +5,9 @@
 // and the moment it belongs to. It is a row of the turn that wrote it and names the turn it is of
 // (this one, or an earlier reply on the path), so who has none for a turn can be counted. Each
 // statement of what they now know is a row of their knowledge, tied to the perception; a secret
-// named by its id is held the way today's build holds it (`secrets.ts`), on the same turn.
+// named by its id is held the way today's build holds it (`secrets.ts`), on the same turn, its fact
+// recorded first when the chat holds none yet. Striking a perception strikes the knowledge tied to
+// it, and takes back each secret's holding that no other knowledge of theirs still gives.
 //
 // The whole call is read first, each perception in whatever shape its arguments were sent. What a
 // perception does not read, or a value it cannot read (a reply the path does not have, a secret that
@@ -16,13 +18,12 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import type { Reply } from "../iface/kit";
-import type { ReadContext } from "../engine/registry";
 import type { LedgerEvent } from "../shared/ledger";
 import type { FactId } from "../shared/minds";
 import { isRecord } from "../shared/json";
 import { type CastCall, type CastReading, type CastToolSpec, readingOr, whoView } from "./kit";
 import { type CastItem, type CastWrite, writeCast } from "./record";
-import { holdingChanges, holdingEvents, type PersonFound, personNamed, secretFact, worldAt } from "./secrets";
+import { forgetsOf, holdingChanges, oneIn, personNamed, secretFact, secretsLetGo, SecretWorld, worldAt } from "./secrets";
 import { CAST_LANE, characterNamed, ignoredOf, isUnread, type ItemRead, type Kind, leftOut, makeFresh, needed, readArg, type Reads, refused, type Unread } from "./update";
 
 /** How much of a moment reached a character (§7.3): all of it, part of it, told of it by someone, or nothing. */
@@ -67,6 +68,9 @@ interface Planned {
   knows: string[];
   /** Each secret they now hold, with the events that hold it (none when they hold it so already). */
   secrets: { fact: FactId; events: LedgerEvent[] }[];
+  /** For a perception it strikes: the knowledge tied to it, struck with it, and each secret's holding taken back. */
+  struck: string[];
+  forgets: { fact: FactId; events: LedgerEvent[] }[];
 }
 
 /** One perception as read, and what it writes when it can be read. */
@@ -85,23 +89,16 @@ export function perceptionView(reading: Pick<CastReading, "record">, item: CastI
   return { id: item.id, ...fields, message: reading.record.at.replyOf(perceivedTurn(item)), ...(item.dropped ? { dropped: true } : {}) };
 }
 
-/** Someone in the world a perception's secret names, or why a secret cannot be held by them. */
-function oneIn(found: PersonFound, n: number, who: string, none: string): string | Unread {
-  if ("id" in found) return found.id;
-  if ("none" in found) return { line: none, fields: { n, op: OP, field: "secrets", who } };
-  return { line: "many_named", fields: { n, op: OP, field: "secrets", who, count: found.many.length, ids: found.many } };
-}
-
 /** The secrets a perception names that its character can hold now; what keeps any of them from being held goes to `unread`. */
-function secretsHeld(call: CastCall, world: () => ReadContext | null, n: number, name: string, tellerName: JsonValue | undefined, of: string | null, said: readonly string[], unread: Unread[]): Planned["secrets"] {
+async function secretsHeld(call: CastCall, world: SecretWorld, n: number, name: string, tellerName: JsonValue | undefined, of: string | null, said: readonly string[], unread: Unread[]): Promise<Planned["secrets"]> {
   const held: Planned["secrets"] = [];
-  const ctx = world();
+  const ctx = world.ctx;
   if (ctx === null) {
     unread.push({ line: "no_world_secret", fields: { n, op: OP, field: "secrets" } });
     return held;
   }
-  const holder = oneIn(personNamed(ctx, name), n, name, "no_holder");
-  const teller = typeof tellerName === "string" ? oneIn(personNamed(ctx, tellerName), n, tellerName, "no_teller") : null;
+  const holder = oneIn(personNamed(ctx, name), n, OP, "secrets", name, "no_holder");
+  const teller = typeof tellerName === "string" ? oneIn(personNamed(ctx, tellerName), n, OP, "secrets", tellerName, "no_teller") : null;
   if (isUnread(holder)) unread.push(holder);
   if (isUnread(teller)) unread.push(teller);
   const turnRow = of === null ? null : call.deps.store.user(call.scope.user).turn(of);
@@ -113,7 +110,7 @@ function secretsHeld(call: CastCall, world: () => ReadContext | null, n: number,
     }
     if (isUnread(holder) || isUnread(teller)) continue;
     const since = { msg: turnRow?.message ?? null, at: turnRow?.storyTime ?? ctx.state.clock };
-    const events = holdingEvents(ctx, { holder, fact, teller, since, confidence: call.settings.secretConfidence });
+    const events = await world.hold({ holder, fact, teller, since, confidence: call.settings.secretConfidence });
     if ("code" in events) unread.push({ line: events.code === "missing_fact" ? "unknown_secret" : "secret_refused", fields: { n, op: OP, field: "secrets", who: name, secret, code: events.code } });
     else held.push({ fact, events });
   }
@@ -121,7 +118,7 @@ function secretsHeld(call: CastCall, world: () => ReadContext | null, n: number,
 }
 
 /** One perception read: what it writes, what of it could not be read, and what it does not read. A name the cast does not hold yet goes to `fresh`, made at the write. */
-function readPerception(call: CastCall, cast: CastReading, world: () => ReadContext | null, fresh: Map<string, string>, n: number, raw: JsonValue): PerceptionRead {
+async function readPerception(call: CastCall, cast: CastReading, world: SecretWorld, fresh: Map<string, string>, n: number, raw: JsonValue): Promise<PerceptionRead> {
   const given = isRecord(raw) ? (raw as JsonObject) : null;
   if (given === null) return { n, fatal: [{ line: "unreadable_op", fields: { n, op: OP, field: OP, value: JSON.stringify(raw) } }], unread: [], ignored: [] };
   const out: PerceptionRead = { n, op: OP, fatal: [], unread: [], ignored: ignoredOf(given, READS.reads) };
@@ -158,13 +155,16 @@ function readPerception(call: CastCall, cast: CastReading, world: () => ReadCont
 
   const said = (secrets as string[] | undefined) ?? [];
   const trouble: Unread[] = [];
-  const held = said.length > 0 ? secretsHeld(call, world, n, character.name, fields.told_by, of, said, trouble) : [];
+  const held = said.length > 0 ? await secretsHeld(call, world, n, character.name, fields.told_by, of, said, trouble) : [];
   // A secret that cannot be held is left out; while another is held, the perception still holds secrets.
   out.unread.push(...trouble.map((u) => (held.length > 0 ? { ...u, kept: true } : u)));
+  // Struck: so is the knowledge it gave, and each secret it gave is let go unless other knowledge of theirs still gives it.
+  const struck = item !== null && !item.dropped && fields.drop === true ? cast.record.of(character.id, "knowledge").filter((k) => k.fields.from === item.id) : [];
+  const forgets = forgetsOf(world.ctx, n, OP, character.name, secretsLetGo(cast.record, character.id, struck), out.unread);
   const row: JsonObject = { ...(item === null || named !== undefined ? { of } : {}), ...fields };
   if (knows !== undefined) row.knows = knows;
   if (held.length > 0) row.secrets = held.map((s) => s.fact);
-  out.planned = { n, character: character.id, name: character.name, item: item?.id ?? null, value: row, knows: (knows as string[] | undefined) ?? [], secrets: held };
+  out.planned = { n, character: character.id, name: character.name, item: item?.id ?? null, value: row, knows: (knows as string[] | undefined) ?? [], secrets: held, struck: struck.map((k) => k.id), forgets };
   return out;
 }
 
@@ -177,11 +177,13 @@ async function perceive(args: JsonObject, call: CastCall): Promise<Reply> {
   const turn = call.scope.turn;
   if (turn === undefined) return reply.line("perceive_turn", {}).fail();
 
-  // The world as the state plays it in this turn, read once and only when a secret is named.
-  let ctx: ReadContext | null | undefined;
-  const world = (): ReadContext | null => (ctx === undefined ? (ctx = worldAt(call.deps.store, call.scope.user, turn)) : ctx);
+  const world = new SecretWorld(
+    () => worldAt(call.deps.store, call.scope.user, turn),
+    (book, entry) => (call.deps.books === undefined ? Promise.resolve(null) : call.deps.books({ user: call.scope.user, chat: call.scope.chat }, book, entry)),
+  );
   const fresh = new Map<string, string>();
-  const reads = list.map((raw, i) => readPerception(call, cast, world, fresh, i + 1, raw));
+  const reads: PerceptionRead[] = [];
+  for (const [i, raw] of list.entries()) reads.push(await readPerception(call, cast, world, fresh, i + 1, raw));
   if (reads.some((x) => x.fatal.length > 0)) return refused(reply, reads, () => READS);
   const planned = reads.flatMap((x) => (x.planned === undefined ? [] : [x.planned]));
 
@@ -201,8 +203,10 @@ async function perceive(args: JsonObject, call: CastCall): Promise<Reply> {
         ...p.secrets.map((s): CastWrite => ({ character, part: "knowledge", item: null, value: { secret: s.fact, ...source } })),
       ];
       out.push({ character, perception, knowledge: writeCast(db, writer, knowledge).map((k) => k.item) });
+      writeCast(db, writer, p.struck.map((k): CastWrite => ({ character, part: "knowledge", item: k, value: { drop: true, ...(typeof p.value.why === "string" ? { why: p.value.why } : {}) } })));
     }
-    const events = planned.flatMap((p) => p.secrets.flatMap((s) => s.events));
+    // A secret's fact is recorded before anyone holds it; each perception's holdings, then what its strike lets go.
+    const events = [...world.facts, ...planned.flatMap((p) => [...p.secrets.flatMap((s) => s.events), ...p.forgets.flatMap((f) => f.events)])];
     if (events.length > 0) call.deps.store.user(user).addChanges(turn, holdingChanges(events, CAST_LANE, call.agent.id, call.agent.job ?? null));
     return out;
   }, call.tool);
@@ -222,6 +226,8 @@ async function perceive(args: JsonObject, call: CastCall): Promise<Reply> {
         now: item === undefined ? null : perceptionView(after, item),
         knowledge: done?.knowledge ?? [],
         ...(p.secrets.length > 0 ? { holds: p.secrets.map((s) => s.fact) } : {}),
+        ...(p.struck.length > 0 ? { struck: p.struck } : {}),
+        ...(p.forgets.some((f) => f.events.length > 0) ? { lets_go: p.forgets.flatMap((f) => (f.events.length > 0 ? [f.fact] : [])) } : {}),
       };
     }),
   });

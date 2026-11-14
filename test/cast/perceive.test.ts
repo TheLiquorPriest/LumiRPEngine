@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { knowersOf } from "../../src/packs/minds/core/knowledge";
 import { heldSecrets } from "../../src/shared/minds";
-import { type Bench, CHAT, dataOf, openBench, texts, wordsFromFiles } from "./rig";
+import { type Bench, CHAT, dataOf, openBench, wordsFromFiles } from "./rig";
 
 /** A secret of an invented book's entry, as today's seeding records it: its first mark, `wi:<book>:<entry>:0`, live id `book:<book>/<entry>#1`. */
 const SECRET = "wi:vale-book:e-7:0";
