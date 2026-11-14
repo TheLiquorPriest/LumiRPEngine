@@ -59,6 +59,8 @@ export interface StoryCall {
   tool: string;
   deps: StoryDeps;
   settings: StorySettings;
+  /** The answers' lines in force, for the words one line puts inside another (`wants_`). */
+  lines: Lines;
   reply(): Reply;
 }
 
@@ -96,7 +98,7 @@ export async function storyHostTool(spec: StoryToolSpec, lines: Lines, deps: Sto
     parameters: described(spec.properties, spec.required, text),
     async run(args: JsonValue, ctx: ToolCtx): Promise<ToolResult> {
       const given = typeof args === "object" && args !== null && !Array.isArray(args) ? args : {};
-      const call: StoryCall = { scope: ctx.scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, reply: () => new Reply(lines) };
+      const call: StoryCall = { scope: ctx.scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines, reply: () => new Reply(lines) };
       return (await spec.run(given, call)).result();
     },
   };

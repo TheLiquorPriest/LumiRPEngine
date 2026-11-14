@@ -311,21 +311,31 @@ const relate: OpDef = {
   },
 };
 
+// The Author's own note of what it expects to matter: it changes nothing in the world, so it takes no provenance.
 const horizon: OpDef = {
   name: "horizon",
   lane: "story",
   needs: ["list"],
   takes: ["list"],
-  example: { op: "horizon", list: ["common_room", "market_square", "odile"], source: { from: "author" } },
+  provenance: false,
+  example: { op: "horizon", list: ["common_room", "market_square", "odile"] },
   run(o) {
     const given = o.args.list;
     if (!Array.isArray(given)) return notAs(o, "list", given ?? null, "list");
     const refs: string[] = [];
+    const words: string[] = [];
     for (const said of given) {
       const r = find(o, "list", "point", false, said);
+      // Words that name no place, person or thing are kept as they were given: a note of what the Author expects to matter.
+      if (isUnread(r) && r.line === "unknown" && typeof said === "string") {
+        refs.push(said.trim());
+        words.push(said.trim());
+        continue;
+      }
       if (isUnread(r)) return r;
       refs.push(r.ref);
     }
+    if (words.length > 0) o.reply.report("horizon_words", { n: o.n, op: o.op, words: textOf(words) });
     o.draft.recordStoreOp(o.n, o.op, "story", o.prov, { op: STORE_OPS.horizon, value: { list: refs } });
     o.draft.storeState.horizon = refs;
     return undefined;

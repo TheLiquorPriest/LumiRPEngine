@@ -77,7 +77,7 @@ function everydaySection(apply: ToolText, said: ReadonlyMap<string, string>): st
     "",
     "Each is one item of `world_apply`'s `operations` list, named by `op`. A call's operations are applied in order and recorded in one write; a later one may name what an earlier one made.",
     "",
-    "Every operation also takes its provenance:",
+    "An operation whose entry says it takes its provenance takes these three arguments:",
     "",
     "| Argument | Shape | What it is |",
     "|---|---|---|",
@@ -88,7 +88,7 @@ function everydaySection(apply: ToolText, said: ReadonlyMap<string, string>): st
     lines.push(`### ${op.name}`, "");
     const what = said.get(op.name);
     if (what !== undefined) lines.push(what, "");
-    lines.push(`Lane: ${op.lane}.${op.needs.length > 0 ? ` Needs: ${op.needs.map((n) => `\`${n}\``).join(", ")}.` : ""}`, "");
+    lines.push(`Lane: ${op.lane}.${op.needs.length > 0 ? ` Needs: ${op.needs.map((n) => `\`${n}\``).join(", ")}.` : ""}${op.provenance === false ? "" : " Takes its provenance."}`, "");
     lines.push("| Argument | Shape | What it is |", "|---|---|---|");
     for (const arg of op.takes) lines.push(`| \`${arg}\` | ${cell(shapeOf(OPERATION_PROPERTIES[arg] ?? {}))} | ${cell(of[`operations.${arg}`] ?? "")} |`);
     lines.push("", "Worked example:", "", "```json", JSON.stringify({ operations: [op.example] }, null, 2), "```", "");

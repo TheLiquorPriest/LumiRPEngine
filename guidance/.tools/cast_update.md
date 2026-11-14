@@ -3,7 +3,7 @@ description: cast_update as the model is told it - what the tool does, and what 
 arguments:
   operations: The operations, written in order, in one write.
   operations.op: "The operation: cast, bind, base, growth, history, relationship or knowledge."
-  operations.who: "The character, by name or id. Someone the cast does not hold yet is added by a cast operation in the same call."
+  operations.who: "The character, by name or id. Someone the cast does not hold yet is added, and cast only by a cast operation."
   operations.id: "growth, history, knowledge: the entry to change, by its id. Leave it out to add one."
   operations.as: "cast: principal, supporting or extra."
   operations.line: "cast: who they are, in one line. All an extra has."

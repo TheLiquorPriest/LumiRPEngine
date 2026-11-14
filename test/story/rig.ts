@@ -4,6 +4,8 @@
 // is made up.
 
 import { Database } from "bun:sqlite";
+import { validateToolArguments } from "@earendil-works/pi-ai";
+import type { HostTool, JsonObject } from "rp-harness/contract";
 import { WriteQueue } from "../../src/app/database";
 import { hashJson } from "../../src/shared/hash";
 import { migrateStore, openStore, type ShownMessage, type Store, type TurnRow, type UserStore } from "../../src/store";
@@ -11,6 +13,15 @@ import { STORY_MIGRATIONS } from "../../src/story/schema";
 import { storyAt } from "../../src/story/path";
 import { StoryRecord, type StoryRow, type StoryWrite, writeStory } from "../../src/story/record";
 import { hashOf, inventedWorld, registry } from "../store/fixtures";
+
+/**
+ * A call's arguments as the harness hands them to the tool: checked against the tool's schema and
+ * coerced by pi, as the agent loop does before a tool runs. It throws where the harness would refuse
+ * the call and answer with the tool's whole schema.
+ */
+export function asHarnessPasses(tool: HostTool, args: JsonObject): JsonObject {
+  return validateToolArguments(tool, { type: "toolCall", id: "call-1", name: tool.name, arguments: args }) as JsonObject;
+}
 
 export const USER = "user-a";
 export const CHAT = "chat-a";

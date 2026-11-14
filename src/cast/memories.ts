@@ -5,13 +5,19 @@
 // still short term into long term and raises or lowers the weights the character names. When the
 // memory work runs, and what the character makes of anything, is guidance. The user's setting for
 // the story lane is held by the harness's gate before a call runs.
+//
+// Each call is read in whatever shape its arguments were sent. What it does not read, or a value it
+// cannot read (a weight off the scale, an id that is none of the character's), is left out: the rest
+// is written, and the answer names what was left out. A call one of whose memories cannot be read at
+// all is answered whole, and nothing is written.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
-import { type Reply, TEXT, TEXTS, WHOLE, YES_NO } from "../iface/kit";
+import type { Reply } from "../iface/kit";
+import { isRecord } from "../shared/json";
 import { type CastCall, type CastClock, type CastReading, type CastSettings, type CastToolSpec, readingOr } from "./kit";
 import { memoriesNow, type MemoryNow, strongestFirst, touches, weightOf } from "./memory";
 import { type CastWrite, type CastWriter, type Character, findCharacter, writeCast } from "./record";
-import { CAST_LANE, isUnread, type Kind, readArg, type Unread } from "./update";
+import { CAST_LANE, ignoredOf, isUnread, type ItemRead, type Kind, leftOut, needed, readArg, type Reads, refused, type Unread } from "./update";
 
 /** A memory as the character's own answers show it: in full, or as its gist alone, marked faint, once it has faded. */
 export function memoryView(m: MemoryNow, clock: CastClock | null): JsonObject {
@@ -61,13 +67,24 @@ function memoryKinds(s: CastSettings): Readonly<Record<string, Kind>> {
   return { text: "text", gist: "text", weight: { min: 1, max: s.weightMax }, tone: "text", who: "texts", about: "texts" };
 }
 
-const MEMORY_PROPERTIES: Record<string, JsonObject> = { text: TEXT, gist: TEXT, weight: { ...WHOLE, minimum: 1 }, tone: TEXT, who: TEXTS, about: TEXTS };
+const MEMORY_FIELDS = ["text", "gist", "weight", "tone", "who", "about"];
 
-/** Reads `fields` of item `n` (`op` names what kind) into `value`; what cannot be read goes to `bad`. */
-function readFields(n: number, op: string, given: JsonObject, kinds: Readonly<Record<string, Kind>>, value: JsonObject, bad: Unread[]): void {
+/** Arguments that hold nothing back: the file says what each is, and this code reads each in whatever shape it comes. */
+function unchecked(names: readonly string[]): Record<string, JsonObject> {
+  return Object.fromEntries(names.map((name) => [name, {}]));
+}
+
+const RECALL_READS: Reads = { reads: ["cue", "skip"], needs: ["cue"], newNeeds: [] };
+const MEMORY_READS: Reads = { reads: ["id", ...MEMORY_FIELDS, "from", "top"], needs: [], newNeeds: ["text", "gist"] };
+const REFLECT_READS: Reads = { reads: ["from", ...MEMORY_FIELDS, "growth"], needs: ["from", "text", "gist"], newNeeds: [] };
+const DREAM_READS: Reads = { reads: ["keep", "fade", "connect"], needs: [], newNeeds: [] };
+const CONNECTION_READS: Reads = { reads: ["memories", ...MEMORY_FIELDS], needs: ["memories", "text", "gist"], newNeeds: [] };
+
+/** Reads `kinds` of an item into `value`; what cannot be read goes to the item's `unread`. */
+function readFields(call: CastCall, it: ItemRead, given: JsonObject, kinds: Readonly<Record<string, Kind>>, value: JsonObject): void {
   for (const [field, kind] of Object.entries(kinds)) {
-    const got = readArg(n, op, field, kind, given[field]);
-    if (isUnread(got)) bad.push(got);
+    const got = readArg(call.lines, it.n, it.op ?? "", field, kind, given[field]);
+    if (isUnread(got)) it.unread.push(got);
     else if (got !== undefined) value[field] = got;
   }
 }
@@ -81,12 +98,22 @@ function strangers(self: Self, part: "memory" | "perception", ids: unknown): str
   });
 }
 
-const asObject = (v: JsonValue): JsonObject | null => (typeof v === "object" && v !== null && !Array.isArray(v) ? v : null);
+/**
+ * The ids of `part` an item's `field` names that are the character's: those that are not are left
+ * out, each said; none left of a list it needs, they make the item unreadable.
+ */
+function ownIds(self: Self, it: ItemRead, part: "memory" | "perception", field: string, ids: JsonValue | undefined, need: boolean): string[] {
+  const list = Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : [];
+  const unknown = strangers(self, part, list);
+  const kept = list.filter((id) => !unknown.includes(id));
+  const said: Unread[] = unknown.map((id) => ({ line: "unknown_id", fields: { n: it.n, op: it.op, field, who: self.character.name, part, id: JSON.stringify(id) }, ...(kept.length > 0 ? { kept: true } : {}) }));
+  (need && kept.length === 0 ? it.fatal : it.unread).push(...said);
+  return kept;
+}
 
-/** Lines for what could not be read, and that nothing was written. */
-function refuse(reply: Reply, unread: readonly Unread[]): Reply {
-  for (const u of unread) reply.line(u.line, u.fields);
-  return reply.line("nothing_recorded", {}).fail();
+/** An item a list holds that is no object: it cannot be read at all. */
+function notAnItem(n: number, op: string, field: string, raw: JsonValue): ItemRead {
+  return { n, fatal: [{ line: "unreadable_op", fields: { n, op, field, value: JSON.stringify(raw) } }], unread: [], ignored: [] };
 }
 
 /** Each memory named, as it stands after the call. */
@@ -104,13 +131,16 @@ function after(call: CastCall, reply: Reply, self: Self, ids: readonly string[])
 
 async function recall(args: JsonObject, call: CastCall): Promise<Reply> {
   const reply = call.reply();
-  const cue = readArg(1, "recall", "cue", "text", args.cue);
-  const skip = readArg(1, "recall", "skip", "whole", args.skip);
-  if (isUnread(cue) || isUnread(skip)) return refuse(reply, [cue, skip].filter(isUnread));
-  if (typeof cue !== "string") return reply.line("needs", { n: 1, op: "recall", fields: ["cue"] }).fail();
+  const it: ItemRead = { n: 1, op: "recall", fatal: [], unread: [], ignored: ignoredOf(args, RECALL_READS.reads) };
+  const value: JsonObject = {};
+  readFields(call, it, args, { cue: "text", skip: "whole" }, value);
+  if (value.cue === undefined) needed(it, ["cue"]);
+  if (it.fatal.length > 0) return refused(reply, [it], () => RECALL_READS);
+  const cue = value.cue as string;
   const self = selfOr(call, reply);
   if (self === null) return reply;
-  const from = typeof skip === "number" ? skip : 0;
+  leftOut(reply, it, RECALL_READS.reads);
+  const from = typeof value.skip === "number" ? value.skip : 0;
   const touched = memoriesNow(self.reading.record, self.character.id, self.now, call.settings)
     .filter((m) => touches(m.item, [cue]))
     .sort(strongestFirst);
@@ -139,8 +169,8 @@ export const RECALL: CastToolSpec = {
   family: "cast",
   tier: "write",
   lane: CAST_LANE,
-  properties: { cue: TEXT, skip: WHOLE },
-  required: ["cue"],
+  properties: unchecked(RECALL_READS.reads),
+  required: [],
   example: { cue: "the reeve" },
   run: recall,
 };
@@ -153,28 +183,36 @@ async function remember(args: JsonObject, call: CastCall): Promise<Reply> {
   if (!Array.isArray(list) || list.length === 0) return reply.line("no_memories_sent", {}).fail();
   const self = selfOr(call, reply);
   if (self === null) return reply;
+  const items: ItemRead[] = [];
   const writes: CastWrite[] = [];
-  const unread: Unread[] = [];
   for (const [i, raw] of list.entries()) {
     const n = i + 1;
-    const given = asObject(raw);
-    if (given === null) {
-      unread.push({ line: "unreadable_op", fields: { n, op: "memory", field: "memory", value: JSON.stringify(raw), choices: [] } });
+    if (!isRecord(raw)) {
+      items.push(notAnItem(n, "memory", "memory", raw));
       continue;
     }
+    const given = raw as JsonObject;
+    const it: ItemRead = { n, op: "memory", fatal: [], unread: [], ignored: ignoredOf(given, MEMORY_READS.reads) };
+    items.push(it);
     const value: JsonObject = {};
-    const bad: Unread[] = [];
-    readFields(n, "memory", given, { id: "text", ...memoryKinds(call.settings), from: "texts", top: "flag" }, value, bad);
+    readFields(call, it, given, { id: "name", ...memoryKinds(call.settings), from: "texts", top: "flag" }, value);
     const { id, ...fields } = value;
-    if (bad.length === 0 && id !== undefined && strangers(self, "memory", [id]).length > 0) bad.push({ line: "unknown_id", fields: { n, op: "memory", who: self.character.name, part: "memory", id: JSON.stringify(id) } });
-    if (bad.length === 0 && id === undefined && (fields.text === undefined || fields.gist === undefined)) bad.push({ line: "needs", fields: { n, op: "memory", fields: ["text", "gist"] } });
-    if (bad.length === 0 && id !== undefined && Object.keys(fields).length === 0) bad.push({ line: "needs_one", fields: { n, op: "memory", fields: Object.keys(MEMORY_PROPERTIES).concat("from", "top") } });
-    for (const stranger of strangers(self, "perception", fields.from)) bad.push({ line: "unknown_id", fields: { n, op: "memory", who: self.character.name, part: "perception", id: JSON.stringify(stranger) } });
-    if (bad.length > 0) unread.push(...bad);
-    else writes.push({ character: self.character.id, part: "memory", item: (id as string | undefined) ?? null, value: fields });
+    if (id !== undefined && strangers(self, "memory", [id]).length > 0) {
+      it.fatal.push({ line: "unknown_id", fields: { n, op: "memory", who: self.character.name, part: "memory", id: JSON.stringify(id) } });
+      continue;
+    }
+    if (fields.from !== undefined) {
+      const from = ownIds(self, it, "perception", "from", fields.from, false);
+      if (from.length > 0) fields.from = from;
+      else delete fields.from;
+    }
+    if (id === undefined) needed(it, ["text", "gist"].filter((f) => fields[f] === undefined));
+    else if (Object.keys(fields).length === 0) it.fatal.push({ line: "needs_one", fields: { n, op: "memory", fields: MEMORY_READS.reads.filter((f) => f !== "id") } });
+    if (it.fatal.length === 0) writes.push({ character: self.character.id, part: "memory", item: (id as string | undefined) ?? null, value: fields });
   }
-  if (unread.length > 0) return refuse(reply, unread);
+  if (items.some((it) => it.fatal.length > 0)) return refused(reply, items, () => MEMORY_READS);
   const rows = await call.deps.writes.run((db) => writeCast(db, self.writer, writes), call.tool);
+  for (const it of items) leftOut(reply, it, MEMORY_READS.reads);
   const shown = after(call, reply, self, rows.map((r) => r.item));
   return shown === null ? reply : reply.data({ memories: shown });
 }
@@ -184,8 +222,8 @@ export const REMEMBER: CastToolSpec = {
   family: "cast",
   tier: "write",
   lane: CAST_LANE,
-  properties: { memories: { type: "array", minItems: 1, items: { type: "object", properties: { id: TEXT, ...MEMORY_PROPERTIES, from: TEXTS, top: YES_NO } } } },
-  required: ["memories"],
+  properties: { memories: { type: "array", items: { type: "object", properties: unchecked(MEMORY_READS.reads) } } },
+  required: [],
   example: { memories: [{ text: "She went pale at the letter, and I poured her cider as if I had not seen.", gist: "Pretended not to see her go pale.", weight: 2, tone: "ashamed", who: ["Wren"], about: ["the letter"], from: ["p-4"] }] },
   run: remember,
 };
@@ -194,16 +232,16 @@ export const REMEMBER: CastToolSpec = {
 
 async function reflect(args: JsonObject, call: CastCall): Promise<Reply> {
   const reply = call.reply();
+  const it: ItemRead = { n: 1, op: "reflect", fatal: [], unread: [], ignored: ignoredOf(args, REFLECT_READS.reads) };
   const value: JsonObject = {};
-  const bad: Unread[] = [];
-  readFields(1, "reflect", args, { from: "texts", ...memoryKinds(call.settings), growth: "text" }, value, bad);
-  if (bad.length > 0) return refuse(reply, bad);
-  const { from, growth, ...fields } = value;
-  if (from === undefined || fields.text === undefined || fields.gist === undefined) return reply.line("needs", { n: 1, op: "reflect", fields: ["from", "text", "gist"] }).fail();
+  readFields(call, it, args, { from: "texts", ...memoryKinds(call.settings), growth: "text" }, value);
+  needed(it, REFLECT_READS.needs.filter((f) => value[f] === undefined));
+  if (it.fatal.length > 0) return refused(reply, [it], () => REFLECT_READS);
   const self = selfOr(call, reply);
   if (self === null) return reply;
-  const unknown = strangers(self, "memory", from);
-  if (unknown.length > 0) return refuse(reply, unknown.map((id) => ({ line: "unknown_id", fields: { n: 1, op: "reflect", who: self.character.name, part: "memory", id: JSON.stringify(id) } })));
+  const { from: named, growth, ...fields } = value;
+  const from = ownIds(self, it, "memory", "from", named, true);
+  if (it.fatal.length > 0) return refused(reply, [it], () => REFLECT_READS);
   const written = await call.deps.writes.run((db) => {
     const [realization] = writeCast(db, self.writer, [{ character: self.character.id, part: "memory", item: null, value: { ...fields, memories: from, kind: "realization" } }]);
     const id = realization?.item ?? "";
@@ -211,6 +249,7 @@ async function reflect(args: JsonObject, call: CastCall): Promise<Reply> {
     const proposed = typeof growth === "string" ? writeCast(db, self.writer, [{ character: self.character.id, part: "growth", item: null, value: { text: growth, cause: id, proposed: true } }]) : [];
     return { id, growth: proposed[0]?.item ?? null };
   }, call.tool);
+  leftOut(reply, it, REFLECT_READS.reads);
   const shown = after(call, reply, self, [written.id]);
   return shown === null ? reply : reply.data({ realization: shown[0] ?? null, ...(written.growth !== null ? { proposed_growth: written.growth } : {}) });
 }
@@ -220,8 +259,8 @@ export const REFLECT: CastToolSpec = {
   family: "cast",
   tier: "write",
   lane: CAST_LANE,
-  properties: { from: TEXTS, ...MEMORY_PROPERTIES, growth: TEXT },
-  required: ["from", "text", "gist"],
+  properties: unchecked(REFLECT_READS.reads),
+  required: [],
   example: { from: ["mem-12", "mem-19"], text: "Every time the reeve's seal comes through my door, someone gets hurt.", gist: "The reeve's letters bring harm.", weight: 3, who: ["the reeve"], growth: "No longer carries letters without reading the seal." },
   run: reflect,
 };
@@ -230,30 +269,37 @@ export const REFLECT: CastToolSpec = {
 
 async function dream(args: JsonObject, call: CastCall): Promise<Reply> {
   const reply = call.reply();
+  const it: ItemRead = { n: 1, op: "dream", fatal: [], unread: [], ignored: ignoredOf(args, DREAM_READS.reads) };
   const value: JsonObject = {};
-  const unread: Unread[] = [];
-  readFields(1, "dream", args, { keep: "texts", fade: "texts" }, value, unread);
-  const connections: JsonObject[] = [];
-  const connect = args.connect;
-  if (connect !== undefined && connect !== null && !Array.isArray(connect)) unread.push({ line: "unreadable_op", fields: { n: 1, op: "dream", field: "connect", value: JSON.stringify(connect), choices: [] } });
-  for (const [i, raw] of (Array.isArray(connect) ? connect : []).entries()) {
-    const given = asObject(raw);
+  readFields(call, it, args, { keep: "texts", fade: "texts" }, value);
+  const items: ItemRead[] = [it];
+  const connections: { it: ItemRead; fields: JsonObject }[] = [];
+  // One connection sent on its own is read as a list of one.
+  const connect = args.connect === undefined || args.connect === null ? [] : Array.isArray(args.connect) ? args.connect : [args.connect];
+  for (const [i, raw] of connect.entries()) {
+    if (!isRecord(raw)) {
+      items.push(notAnItem(i + 1, "connection", "connect", raw));
+      continue;
+    }
+    const given = raw as JsonObject;
+    const c: ItemRead = { n: i + 1, op: "connection", fatal: [], unread: [], ignored: ignoredOf(given, CONNECTION_READS.reads) };
     const fields: JsonObject = {};
-    if (given === null) unread.push({ line: "unreadable_op", fields: { n: i + 1, op: "connection", field: "connect", value: JSON.stringify(raw), choices: [] } });
-    else readFields(i + 1, "connection", given, { memories: "texts", ...memoryKinds(call.settings) }, fields, unread);
-    if (given !== null && (fields.memories === undefined || fields.text === undefined || fields.gist === undefined)) unread.push({ line: "needs", fields: { n: i + 1, op: "connection", fields: ["memories", "text", "gist"] } });
-    connections.push(fields);
+    readFields(call, c, given, { memories: "texts", ...memoryKinds(call.settings) }, fields);
+    needed(c, CONNECTION_READS.needs.filter((f) => fields[f] === undefined));
+    items.push(c);
+    connections.push({ it: c, fields });
   }
-  if (unread.length > 0) return refuse(reply, unread);
+  const readsOf = (op: string): Reads => (op === "dream" ? DREAM_READS : CONNECTION_READS);
+  if (items.some((x) => x.fatal.length > 0)) return refused(reply, items, readsOf);
   const self = selfOr(call, reply);
   if (self === null) return reply;
-  const unknown = [...strangers(self, "memory", value.keep), ...strangers(self, "memory", value.fade), ...connections.flatMap((c) => strangers(self, "memory", c.memories))];
-  if (unknown.length > 0) return refuse(reply, unknown.map((id) => ({ line: "unknown_id", fields: { n: 1, op: "dream", who: self.character.name, part: "memory", id: JSON.stringify(id) } })));
+  const keep = new Set(ownIds(self, it, "memory", "keep", value.keep, false));
+  const fade = new Set(ownIds(self, it, "memory", "fade", value.fade, false));
+  for (const c of connections) c.fields.memories = ownIds(self, c.it, "memory", "memories", c.fields.memories, true);
+  if (items.some((x) => x.fatal.length > 0)) return refused(reply, items, readsOf);
 
   const memories = memoriesNow(self.reading.record, self.character.id, self.now, call.settings);
   const byId = new Map(memories.map((m) => [m.item.id, m]));
-  const keep = new Set((value.keep as string[] | undefined) ?? []);
-  const fade = new Set((value.fade as string[] | undefined) ?? []);
   const writes: CastWrite[] = [];
   for (const m of memories) {
     const change: JsonObject = {};
@@ -263,8 +309,9 @@ async function dream(args: JsonObject, call: CastCall): Promise<Reply> {
     else if (keep.has(m.item.id)) change.weight = Math.min(call.settings.weightMax, weightOf(m.item, call.settings) + 1);
     if (Object.keys(change).length > 0) writes.push({ character: self.character.id, part: "memory", item: m.item.id, value: change });
   }
-  for (const c of connections) writes.push({ character: self.character.id, part: "memory", item: null, value: { ...c, kind: "connection" } });
+  for (const c of connections) writes.push({ character: self.character.id, part: "memory", item: null, value: { ...c.fields, kind: "connection" } });
   const rows = await call.deps.writes.run((db) => writeCast(db, self.writer, writes), call.tool);
+  for (const x of items) leftOut(reply, x, readsOf(x.op ?? "").reads);
   const made = rows.filter((r) => !byId.has(r.item)).map((r) => r.item);
   const shown = after(call, reply, self, [...rows.filter((r) => byId.has(r.item)).map((r) => r.item), ...made]);
   if (shown === null) return reply;
@@ -282,11 +329,7 @@ export const DREAM: CastToolSpec = {
   family: "cast",
   tier: "write",
   lane: CAST_LANE,
-  properties: {
-    keep: TEXTS,
-    fade: TEXTS,
-    connect: { type: "array", items: { type: "object", properties: { memories: TEXTS, ...MEMORY_PROPERTIES } } },
-  },
+  properties: { ...unchecked(["keep", "fade"]), connect: { type: "array", items: { type: "object", properties: unchecked(CONNECTION_READS.reads) } } },
   required: [],
   example: { keep: ["mem-12"], fade: ["mem-14"], connect: [{ memories: ["mem-3", "mem-12"], text: "The cellar again. It was the cellar when I was a boy, too.", gist: "The cellar keeps coming back." }] },
   run: dream,

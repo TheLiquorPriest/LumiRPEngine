@@ -161,8 +161,11 @@ describe("cast_update", () => {
     expect(r.error).toBe(true);
     wordsFromFiles(r);
     const said = texts(r).join("\n");
-    for (const part of ["Operation 2: op cannot be read", "there is no Hale in the cast", "Lumiverse holds no entry e-404", "trust runs from -100 to 100", "has no growth \"g-999\"", "Operation 7 (cast): as cannot be read", "Nothing was written"]) expect(said).toContain(part);
+    // A name the cast does not hold is no reason to refuse; the rest is.
+    for (const part of ["Operation 2: op cannot be read", "Lumiverse holds no entry e-404", "trust runs from -100 to 100", "has no growth \"g-999\"", "Operation 7 (cast): as cannot be read", "Nothing was written"]) expect(said).toContain(part);
+    expect(said).not.toContain("Hale");
     expect(b.t.record(turn).of(charactersOf(b.t.db, USER, [CHAT])[0]?.id ?? "", "knowledge")).toEqual([]);
+    expect(charactersOf(b.t.db, USER, [CHAT]).map((c) => c.name)).toEqual(["Bram"]);
 
     // A call with no turn may still bind and draw; anything kept with a turn needs one.
     const outside = await b.call("cast_update", { operations: [{ op: "base", who: "Bram", seed: "An innkeeper." }, { op: "growth", who: "Bram", text: "Grew bolder." }] });

@@ -1,16 +1,21 @@
 // `story_record` (plan §8.1, §6.8): the Author's understanding written as named operations, applied
-// in order, one call writing many. The call is read whole first, against the record as it stands with
-// each earlier operation of the call applied: anything it cannot read (an operation that is none of
-// the list, an id the record does not hold, a message the chat does not have, a time that is not one)
+// in order, one call writing many. The schema holds nothing back, so every call reaches this code,
+// which reads each operation itself, against the record as it stands with each earlier operation of
+// the call applied, and in whatever shape an argument was sent when what was meant can be read. An
+// argument an operation does not read, or whose value cannot be read (a message the chat does not
+// have, a time that is not one), is left out: the operation is recorded with the rest, and the
+// answer names what was left out, once, with what that operation reads. An operation that cannot be
+// read at all (none of the list, an id the record does not hold, a new item without what it needs)
 // answers the whole call, and nothing is recorded. The user's setting for the story lane is not asked
 // here: the tool is a write to that lane, so the harness's gate holds the call by it before it runs,
 // once. What goes ahead is recorded in one queued write, the lore lane's overlays included, and the
 // answer says what each operation wrote, how its item now stands, and what did not add up.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
-import { oneOf, type Reply, TEXT, TEXTS, WHOLE, YES_NO } from "../iface/kit";
-import type { Fields } from "../iface/texts";
+import type { Reply } from "../iface/kit";
+import { type Fields, type Lines, textOf } from "../iface/texts";
 import { DRAFT_TIERS } from "../shared/ledger";
+import { isRecord } from "../shared/json";
 import { type Lane, STANDINGS } from "../store";
 import { allSpans, itemView, recordOr, type StoryCall, type StoryClock, storyClock, type StoryToolSpec, valueView } from "./kit";
 import { keyedItemId, type StoryPart, type StoryRecord, type StoryRow, writeStory } from "./record";
@@ -21,7 +26,7 @@ export const STORY_LANE: Lane = "story";
 /** How an operation finds the item it writes: a new one or one named by id; a scene's or chapter's (new, named, or the current one); the one premise; a person's arc; this turn's record. */
 type Finds = "new-or-id" | "span" | "premise" | "arc" | "record";
 
-/** How an argument is read: words; names; true or false; a message by number; a tier; a story time; an item by id; one of a list. */
+/** How an argument is read: words; names; true or false; a message by number or id; a tier; a story time; an item by id; one of a list. */
 type Kind = "text" | "names" | "flag" | "message" | "tier" | "due" | "item" | readonly string[];
 
 interface OpDef {
@@ -66,48 +71,15 @@ export const STORY_OPERATIONS: readonly string[] = [...OPS.map((o) => o.name), O
 
 const BY_NAME: ReadonlyMap<string, OpDef> = new Map(OPS.map((o) => [o.name, o]));
 
-/** The arguments an operation may carry, each once, whichever operations read it: the file says what each is. */
-export const RECORD_PROPERTIES: Record<string, JsonObject> = {
-  op: oneOf(STORY_OPERATIONS),
-  id: TEXT,
-  new: YES_NO,
-  text: TEXT,
-  title: TEXT,
-  summary: TEXT,
-  who: TEXTS,
-  place: TEXT,
-  time: TEXT,
-  message: WHOLE,
-  from: WHOLE,
-  to: WHOLE,
-  purpose: TEXT,
-  tension: TEXT,
-  wants: TEXT,
-  ends: TEXT,
-  kind: oneOf([...THREAD_KINDS, ...PLAYER_KINDS]),
-  state: TEXT,
-  stakes: TEXT,
-  payoff: TEXT,
-  hot: YES_NO,
-  began: TEXT,
-  stands: TEXT,
-  next: TEXT,
-  tier: { type: "integer", enum: [...DRAFT_TIERS] },
-  due: TEXT,
-  standing: oneOf(STANDINGS),
-  tone: TEXT,
-  rules: TEXT,
-  role: TEXT,
-  of: TEXT,
-  intent: TEXT,
-  decided: TEXT,
-  rulings: TEXT,
-  consents: TEXT,
-  entry: TEXT,
-  close: YES_NO,
-  drop: YES_NO,
-  why: TEXT,
-};
+/** The arguments an operation may carry, in the order the tool's file lists them. */
+const RECORD_ARGUMENTS = ["op", "id", "new", "text", "title", "summary", "who", "place", "time", "message", "from", "to", "purpose", "tension", "wants", "ends", "kind", "state", "stakes", "payoff", "hot", "began", "stands", "next", "tier", "due", "standing", "tone", "rules", "role", "of", "intent", "decided", "rulings", "consents", "entry", "close", "drop", "why"] as const;
+
+/**
+ * The arguments an operation may carry, each once, whichever operations read it. None holds back a
+ * value: the file says what each is, and this code reads each in whatever shape it comes, so the
+ * harness never refuses a call for what it carries.
+ */
+export const RECORD_PROPERTIES: Record<string, JsonObject> = Object.fromEntries(RECORD_ARGUMENTS.map((name) => [name, {}]));
 
 /** Something an operation says that cannot be read: the answers' line that says so, and its fields. */
 interface Unread {
@@ -135,50 +107,84 @@ interface PlannedOverlay {
 
 type Read = Planned | PlannedOverlay;
 
+/** One operation of a call as it was read. */
+interface OpRead {
+  n: number;
+  /** Its kind, when that could be read. */
+  op?: string;
+  /** What it writes; none when it cannot be read at all. */
+  read?: Read;
+  /** What makes it unreadable: the whole call is answered with it, and nothing is recorded. */
+  fatal: Unread[];
+  /** Values it could not read: left out of what it writes, and named in the answer. */
+  unread: Unread[];
+  /** The arguments it was sent that it does not read. */
+  ignored: string[];
+}
+
 /** What a call works with while it reads its operations. */
 interface Reading {
   record: StoryRecord;
   clock: StoryClock | null;
   turn: string;
+  lines: Lines;
 }
 
 function isUnread(v: unknown): v is Unread {
   return typeof v === "object" && v !== null && "line" in v;
 }
 
-/** One argument read as its kind; undefined when it is not given. */
+/** What an operation reads besides `op`; what every one of it needs; and what a new item of it needs. */
+function takesOf(op: string): { reads: string[]; needs: string[]; newNeeds: string[] } {
+  if (op === OVERLAY) return { reads: ["entry", "text"], needs: ["entry", "text"], newNeeds: [] };
+  const def = BY_NAME.get(op) as OpDef;
+  const finding = def.finds === "new-or-id" ? ["id"] : def.finds === "span" ? ["id", "new"] : def.finds === "arc" ? ["who"] : [];
+  return { reads: [...new Set([...finding, ...Object.keys(def.args)])], needs: def.finds === "arc" ? ["who"] : [], newNeeds: [...(def.needs ?? [])] };
+}
+
+/** One argument read as its kind, in any shape that says it; undefined when it is not given. */
 function readArg(r: Reading, n: number, op: string, field: string, kind: Kind, said: JsonValue | undefined): JsonValue | Unread | undefined {
   if (said === undefined || said === null) return undefined;
-  const unreadable = (choices: readonly JsonValue[] = []): Unread => ({ line: "unreadable_op", fields: { n, op, field, value: JSON.stringify(said), choices } });
-  if (Array.isArray(kind)) return typeof said === "string" && kind.includes(said) ? said : unreadable(kind);
+  const unreadable = (choices: readonly JsonValue[] = [], wants?: string): Unread => ({
+    line: "unreadable_op",
+    fields: { n, op, field, value: JSON.stringify(said), choices: textOf(choices), ...(wants !== undefined ? { wants: r.lines.line(`wants_${wants}`) ?? "" } : {}) },
+  });
+  if (Array.isArray(kind)) return typeof said === "string" && kind.includes(said.trim()) ? said.trim() : unreadable(kind);
   switch (kind) {
     case "text": {
-      if (typeof said !== "string") return unreadable();
-      return said.trim() === "" ? undefined : said.trim();
+      // Words sent in another shape (a list, an object, a number) are kept as they were sent.
+      const text = typeof said === "string" ? said.trim() : JSON.stringify(said);
+      return text === "" || text === "[]" || text === "{}" ? undefined : text;
     }
     case "names": {
-      const list = typeof said === "string" ? [said] : said;
-      if (!Array.isArray(list) || !list.every((x) => typeof x === "string")) return unreadable();
-      const names = (list as string[]).map((x) => x.trim()).filter((x) => x !== "");
+      const list = Array.isArray(said) ? said : [said];
+      if (!list.every((x) => typeof x === "string" || typeof x === "number")) return unreadable([], "names");
+      const names = list.map((x) => String(x).trim()).filter((x) => x !== "");
       return names.length === 0 ? undefined : names;
     }
     case "flag":
-      return typeof said === "boolean" ? said : unreadable([true, false]);
-    case "tier":
-      return typeof said === "number" && (DRAFT_TIERS as readonly number[]).includes(said) ? said : unreadable([...DRAFT_TIERS]);
+      return typeof said === "boolean" ? said : said === "true" || said === "false" ? said === "true" : unreadable([true, false]);
+    case "tier": {
+      const tier = typeof said === "string" && said.trim() !== "" ? Number(said) : said;
+      return typeof tier === "number" && (DRAFT_TIERS as readonly number[]).includes(tier) ? tier : unreadable([...DRAFT_TIERS]);
+    }
     case "message": {
-      const message = typeof said === "number" && Number.isInteger(said) ? r.record.at.messages[said] : undefined;
-      return message === undefined ? { line: "no_message", fields: { n, op, field, value: JSON.stringify(said), last: r.record.at.messages.length - 1 } } : message.message;
+      // By its number as the story so far shows it, or by its id.
+      const messages = r.record.at.messages;
+      const number = typeof said === "number" ? said : typeof said === "string" && /^\d+$/.test(said.trim()) ? Number(said.trim()) : null;
+      const message = number !== null ? (Number.isInteger(number) ? messages[number] : undefined) : typeof said === "string" ? messages.find((m) => m.message === said.trim()) : undefined;
+      return message === undefined ? { line: "no_message", fields: { n, op, field, value: JSON.stringify(said), last: messages.length - 1 } } : message.message;
     }
     case "due": {
-      if (r.clock === null) return { line: "no_clock", fields: { n, op, field } };
-      const at = typeof said === "string" ? r.clock.read(said) : null;
-      return at ?? { line: "unreadable_time", fields: { n, op, field, value: JSON.stringify(said) } };
+      // A time no date can be counted from is kept in the words it was given: shown as given, it never comes up as due.
+      const at = r.clock !== null && typeof said === "string" ? r.clock.read(said) : null;
+      if (at !== null) return at;
+      const words = typeof said === "string" ? said.trim() : JSON.stringify(said);
+      return words === "" ? undefined : words;
     }
     case "item":
-      return typeof said === "string" && r.record.items.has(said.trim()) ? said.trim() : { line: "unknown_id", fields: { n, op, id: JSON.stringify(said) } };
+      return typeof said === "string" && r.record.items.has(said.trim()) ? said.trim() : { line: "unknown_id", fields: { n, op, field, id: JSON.stringify(said) } };
   }
-  return unreadable();
 }
 
 /** The item an operation writes: one named by id, a new one, the current scene or chapter, or the one its key names. */
@@ -195,8 +201,9 @@ function findItem(r: Reading, def: OpDef, n: number, raw: JsonObject, value: Jso
       return missing.length > 0 ? { line: "needs", fields: { n, op: def.name, fields: missing } } : { item: `new:${n}`, fresh: true };
     }
     case "span": {
-      if (raw.new !== undefined && typeof raw.new !== "boolean") return { line: "unreadable_op", fields: { n, op: def.name, field: "new", value: JSON.stringify(raw.new), choices: [true, false] } };
-      if (raw.new === true) return { item: `new:${n}`, fresh: true };
+      const fresh = readArg(r, n, def.name, "new", "flag", raw.new);
+      if (isUnread(fresh)) return fresh;
+      if (fresh === true) return { item: `new:${n}`, fresh: true };
       if (named !== undefined && named !== null) return byId();
       const current = r.record.current(def.part as "scene" | "chapter");
       if (current === null) return { line: "no_current", fields: { n, op: def.name, part: def.part } };
@@ -221,37 +228,43 @@ function findItem(r: Reading, def: OpDef, n: number, raw: JsonObject, value: Jso
 }
 
 /** One operation read, and applied to the record the next one is read against. */
-function readOp(r: Reading, n: number, raw: JsonValue): Read | Unread[] {
-  const op = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw.op : undefined;
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw) || typeof op !== "string" || (op !== OVERLAY && !BY_NAME.has(op))) {
-    return [{ line: "unknown_op", fields: { n, value: JSON.stringify(op ?? null), choices: STORY_OPERATIONS } }];
+function readOp(r: Reading, n: number, raw: JsonValue): OpRead {
+  const given = isRecord(raw) ? (raw as JsonObject) : null;
+  const op = typeof given?.op === "string" ? given.op.trim() : undefined;
+  if (given === null || op === undefined || (op !== OVERLAY && !BY_NAME.has(op))) {
+    return { n, fatal: [{ line: "unknown_op", fields: { n, value: JSON.stringify(given?.op ?? null), choices: textOf(STORY_OPERATIONS) } }], unread: [], ignored: [] };
   }
+  const reads = new Set(["op", ...takesOf(op).reads]);
+  const out: OpRead = { n, op, fatal: [], unread: [], ignored: Object.keys(given).filter((k) => !reads.has(k) && given[k] !== undefined && given[k] !== null) };
   if (op === OVERLAY) {
-    const entry = readArg(r, n, op, "entry", "text", raw.entry);
-    const note = readArg(r, n, op, "text", "text", raw.text);
-    const bad = [entry, note].filter(isUnread);
-    if (bad.length > 0) return bad;
+    // Words are always read, so an overlay is unreadable only for what it lacks.
+    const entry = readArg(r, n, op, "entry", "text", given.entry) as string | undefined;
+    const note = readArg(r, n, op, "text", "text", given.text) as string | undefined;
     const missing = [entry === undefined ? "entry" : null, note === undefined ? "text" : null].filter((f): f is string => f !== null);
-    if (missing.length > 0) return [{ line: "needs", fields: { n, op, fields: missing } }];
-    return { n, op, entry: entry as string, note: note as string };
+    if (entry === undefined || note === undefined) out.fatal.push({ line: "needs", fields: { n, op, fields: missing } });
+    else out.read = { n, op, entry, note };
+    return out;
   }
   const def = BY_NAME.get(op) as OpDef;
   const value: JsonObject = {};
-  const bad: Unread[] = [];
   for (const [field, kind] of Object.entries(def.args)) {
-    const got = readArg(r, n, op, field, kind, raw[field]);
-    if (isUnread(got)) bad.push(got);
+    const got = readArg(r, n, op, field, kind, given[field]);
+    if (isUnread(got)) out.unread.push(got);
     else if (got !== undefined) value[field === "from" ? "first" : field === "to" ? "last" : field] = got;
   }
-  if (bad.length > 0) return bad;
-  const found = findItem(r, def, n, raw, value);
-  if (isUnread(found)) return [found];
+  const found = findItem(r, def, n, given, value);
+  if (isUnread(found)) {
+    out.fatal.push(found);
+    return out;
+  }
   const reports: Unread[] = [];
   const before = r.record.items.get(found.item);
   if (value.close === true && before !== undefined && before.closedBy !== null) reports.push({ line: "already_closed", fields: { n, op, id: found.item } });
   if (typeof value.due === "number" && r.clock !== null && value.due <= r.clock.now) reports.push({ line: "due_now", fields: { n, op, due: r.clock.text(value.due), now: r.clock.text(r.clock.now) } });
+  if (typeof value.due === "string") reports.push({ line: r.clock === null ? "no_clock" : "unreadable_time", fields: { n, op, field: "due", value: JSON.stringify(value.due) } });
   r.record.apply({ id: 0, turn: r.turn, ord: n, part: def.part, item: found.item, value, by: null, agent: null, job: null, created: 0 });
-  return { n, op, part: def.part, item: found.item, fresh: found.fresh, value, reports };
+  out.read = { n, op, part: def.part, item: found.item, fresh: found.fresh, value, reports };
+  return out;
 }
 
 /** Raised inside the write when the lore lane does not know an entry: the write is undone and the answer says so. */
@@ -274,18 +287,19 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
   const record = recordOr(call, reply);
   if (record === null) return reply;
   const { store, writes } = call.deps;
-  const reading: Reading = { record, clock: storyClock(store, call.scope.user, call.scope.chat, turn), turn };
-  const read: Read[] = [];
-  const unread: Unread[] = [];
-  list.forEach((raw, i) => {
-    const got = readOp(reading, i + 1, raw);
-    if (Array.isArray(got)) unread.push(...got);
-    else read.push(got);
-  });
-  if (unread.length > 0) {
-    for (const u of unread) reply.line(u.line, u.fields);
+  const reading: Reading = { record, clock: storyClock(store, call.scope.user, call.scope.chat, turn), turn, lines: call.lines };
+  const ops = list.map((raw, i) => readOp(reading, i + 1, raw));
+  if (ops.some((o) => o.fatal.length > 0)) {
+    // Every operation's trouble is said, each with what that kind of operation reads, so the call can be sent again put right in one go.
+    for (const o of ops) {
+      for (const u of [...o.fatal, ...o.unread]) reply.line(u.line, u.fields);
+      if (o.op === undefined || o.fatal.length + o.unread.length + o.ignored.length === 0) continue;
+      const { reads, needs, newNeeds } = takesOf(o.op);
+      reply.line("op_takes", { op: o.op, reads: textOf(reads), needs: textOf(needs), new_needs: textOf(newNeeds), ignored: textOf(o.ignored) });
+    }
     return reply.line("nothing_recorded", {}).fail();
   }
+  const read = ops.flatMap((o) => (o.read === undefined ? [] : [o.read]));
 
   const writer = { user: call.scope.user, turn, by: call.agent.definition, agent: call.agent.id, job: call.agent.job ?? null, now: (call.deps.now ?? Date.now)() };
   const overlay = call.deps.overlay;
@@ -315,7 +329,7 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
     }, call.tool);
   } catch (error) {
     if (!(error instanceof OverlayRefused)) throw error;
-    reply.line("overlay_unknown", { n: error.n, entry: error.entry, near: [...error.near] });
+    reply.line("overlay_unknown", { n: error.n, entry: error.entry, near: textOf(error.near) });
     return reply.line("nothing_recorded", {}).fail();
   }
 
@@ -324,12 +338,18 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
   if (after === null) return reply;
   const spans = allSpans(after);
   const operations: JsonObject[] = [];
-  for (const r of read) {
+  for (const o of ops) {
+    // What an operation was recorded without is said once, with what it reads.
+    for (const u of o.unread) reply.report(u.line, u.fields);
+    const left = [...o.ignored, ...o.unread.map((u) => String(u.fields.field))];
+    if (o.op !== undefined && left.length > 0) reply.report("not_read", { n: o.n, op: o.op, left: textOf(left), reads: textOf(takesOf(o.op).reads) });
+    const r = o.read;
+    if (r === undefined) continue;
     if (r.op === OVERLAY) {
-      const o = r as PlannedOverlay;
-      const done = written.overlays.get(o.n);
-      if (done === undefined) reply.line("no_overlays", { n: o.n, op: o.op });
-      operations.push({ n: o.n, op: o.op, entry: o.entry, wrote: { text: o.note }, ...(done !== undefined ? { written: done } : { recorded: false }) });
+      const ov = r as PlannedOverlay;
+      const done = written.overlays.get(ov.n);
+      if (done === undefined) reply.line("no_overlays", { n: ov.n, op: ov.op });
+      operations.push({ n: ov.n, op: ov.op, entry: ov.entry, wrote: { text: ov.note }, ...(done !== undefined ? { written: done } : { recorded: false }) });
       continue;
     }
     const p = r as Planned;
@@ -346,8 +366,9 @@ export const STORY_RECORD: StoryToolSpec = {
   family: "story",
   tier: "write",
   lane: STORY_LANE,
-  properties: { operations: { type: "array", minItems: 1, items: { type: "object", properties: RECORD_PROPERTIES, required: ["op"] } } },
-  required: ["operations"],
+  // Nothing the code reads is held back by the schema: a call it cannot read is answered in the answers' words, with what would work.
+  properties: { operations: { type: "array", items: { type: "object", properties: RECORD_PROPERTIES } } },
+  required: [],
   example: {
     operations: [
       { op: "beat", text: "Bram slides the sealed letter across the bar.", who: ["Bram", "Wren"] },

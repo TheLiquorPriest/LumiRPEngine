@@ -1,5 +1,5 @@
 ---
-description: The sentences the story tools answer with (story_query, story_record). A tool's answer is data from the story record and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words.
+description: The sentences the story tools answer with (story_query, story_record). A tool's answer is data from the story record and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words. The lines named wants_ (what an argument takes) are words put inside the other lines.
 format: lines
 ---
 no_chat: There is no chat {{id}} in the engine's records.
@@ -8,13 +8,16 @@ turn_needed: This call belongs to no turn, so nothing can be recorded. Reading n
 no_operations: operations cannot be read: send a list of operations.
 unknown_op: Operation {{n}}: op cannot be read, you sent {{value}}. It is one of: {{choices}}.
 unreadable: {{field}} cannot be read{{#value}}: you sent {{value}}{{/value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}
-unreadable_op: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}
+unreadable_op: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}{{#wants}} It takes {{wants}}.{{/wants}}
+wants_names: a name, or a list of names
+op_takes: {{op}} reads {{reads}}{{#needs}}, and needs {{needs}}{{/needs}}{{#new_needs}}, and a new one needs {{new_needs}}{{/new_needs}}.{{#ignored}} It does not read {{ignored}}.{{/ignored}}
+not_read: Operation {{n}} ({{op}}) was recorded without {{left}}. It reads {{reads}}.
 needs: Operation {{n}} ({{op}}) needs {{fields}}.
 needs_one: Operation {{n}} ({{op}}) needs at least one of {{fields}}.
 one_name: Operation {{n}} ({{op}}): who names one person, or plot.
 no_message: Operation {{n}} ({{op}}): {{field}} names no message: you sent {{value}}, and the chat's messages are numbered 0 to {{last}}.
-no_clock: Operation {{n}} ({{op}}): this chat keeps no story time, so {{field}} cannot be given.
-unreadable_time: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}. Write a date and time (YYYY-MM-DD HH:MM) or a span from now (two days, until dawn).
+no_clock: Operation {{n}} ({{op}}): {{field}} is kept as you wrote it, {{value}}, but this chat keeps no story time, so it will not come up as due.
+unreadable_time: Operation {{n}} ({{op}}): {{field}} is kept as you wrote it, {{value}}, but holds no date that can be counted from, so it will not come up as due. A date and time (YYYY-MM-DD HH:MM) or a span from now (two days, until dawn) can be counted.
 unknown_id: {{#n}}Operation {{n}} ({{op}}): {{/n}}the story record on this path holds no {{#part}}{{part}} {{/part}}{{id}}.
 no_current: Operation {{n}} ({{op}}): there is no {{part}} yet. Open one with new.
 current_closed: Operation {{n}} ({{op}}): the current {{part}}, {{id}}, is closed. Open a new one with new, or name {{id}} to write to it.

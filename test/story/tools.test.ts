@@ -141,8 +141,10 @@ describe("story_record", () => {
     expect(r.error).toBe(true);
     wordsFromFiles(r);
     const said = texts(r).join("\n");
-    for (const n of [2, 3, 4, 5, 6, 7]) expect(said).toContain(`Operation ${n}`);
+    for (const n of [2, 3, 5, 6, 7]) expect(said).toContain(`Operation ${n}`);
+    // A time no date can be counted from is kept as words, so the future is no trouble.
     expect(said).not.toContain("Operation 1 ");
+    expect(said).not.toContain("Operation 4 ");
     expect(said).toContain("Nothing was recorded");
     expect(b.t.record(turn).items.size).toBe(0);
   });

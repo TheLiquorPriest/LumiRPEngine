@@ -2,7 +2,7 @@
 description: perceive as the model is told it - what the tool does, and what each of its arguments is.
 arguments:
   perceptions: The perceptions, written in order, in one write.
-  perceptions.who: "The character, by name or id, as the cast holds them."
+  perceptions.who: "The character, by name or id. Someone the cast does not hold yet is added, not yet cast."
   perceptions.id: "A perception to correct, by its id. The fields you send replace those it had. Leave it out to write a new one."
   perceptions.message: "The number of an earlier reply this perception is of. Leave it out for this turn."
   perceptions.moment: "Which moment of the turn it belongs to, in a few words."

@@ -109,7 +109,7 @@ describe("perceive", () => {
     expect(heldSecrets(minds(b), "wren").lore).toEqual([SECRET_LIVE]);
   });
 
-  test("a secret the chat does not hold, or an id that is no secret's, answers the call and writes nothing", async () => {
+  test("a secret the chat does not hold, or an id that is no secret's, is left out: the perception is written, nobody holds it, and the answer says so", async () => {
     const b = await openBench();
     await cast(b);
     const turn = await b.t.begin();
@@ -124,13 +124,14 @@ describe("perceive", () => {
       turn.id,
     );
     expect(wordsFromFiles(r)).toBe(true);
-    expect(r.error).toBe(true);
-    const said = texts(r).join("\n");
+    expect(r.error).toBeUndefined();
+    const said = (r.reports ?? []).join("\n");
     expect(said).toContain("this chat holds no secret wi:vale-book:e-9:2");
     expect(said).toContain("the reeve's secret is not a secret's id");
+    expect(said).toContain("Operation 2 (perception) was written without secrets.");
     await b.t.tie(turn);
-    expect(await perceptions(b, "Bram")).toEqual([]);
-    expect(await knowledge(b, "Bram")).toEqual([]);
+    expect((await perceptions(b, "Bram")).map((p) => p.content)).toEqual(["He reads it."]);
+    expect((await knowledge(b, "Bram")).map((k) => k.text)).toEqual(["The seal is forged."]);
     expect(knowersOf(minds(b) as never, "wi:vale-book:e-9:2")).toEqual([]);
   });
 
@@ -147,6 +148,9 @@ describe("perceive", () => {
     await b.t.tie(turn);
     expect(first.message).toBe("m3");
     expect(await perceptions(b, "Bram")).toEqual([expect.objectContaining({ id, message: 3, reach: "whole", content: "Wren came in soaked, with a satchel." })]);
-    expect(texts(await b.call("perceive", { perceptions: [{ who: "Bram", message: 40, reach: "none" }] }, turn.id)).join("\n")).toContain("there is no reply 40 on this path");
+    // A reply the path does not have is left out, and the perception is of this turn.
+    const later = await b.call("perceive", { perceptions: [{ who: "Bram", message: 40, reach: "none" }] }, turn.id);
+    expect(later.error).toBeUndefined();
+    expect((later.reports ?? []).join("\n")).toContain("there is no reply 40 on this path");
   });
 });

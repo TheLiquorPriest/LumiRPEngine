@@ -22,6 +22,8 @@ import { isThing, possessorOf } from "../engine/things";
 import { chatDraftOf, draftEvent } from "../engine/world-draft";
 import { bestiaryOf, bestiaryRow } from "./bestiary";
 import { find, findOptional, isUnread, itemOptions, named, notAs, notOneOf, type OpContext, type OpDef, textArg, type Unread, unknownFields } from "./ops";
+import type { Found, Want } from "./reading";
+import { textOf } from "./texts";
 import { timeArg } from "./ops-time";
 
 /** How a thing passed from one person to another, as the skill says it, to today's handover bases. */
@@ -323,23 +325,48 @@ function freshId(o: OpContext, base: string): string {
   for (let i = 2; ; i++) if (!taken(`${slug}_${i}`)) return `${slug}_${i}`;
 }
 
+/** Where something is made, as the call says it, and the words of each way of saying where that named nothing there is, with what says so. */
+interface SpawnSpot {
+  spot: Spot | null;
+  said: { field: string; words: string; unread: Unread }[];
+}
+
 /**
  * Where something is made, as the call says it: `on` a thing, `in` someone, something or a place,
  * else `at` a place; null when it says nowhere. Each is read on the draft as it stands, so it may
- * name what an earlier operation of the call made.
+ * name what an earlier operation of the call made. Words that name nothing there is, nor anything
+ * of another kind, are kept, and the next way of saying where is read.
  */
-function spawnSpot(o: OpContext): Spot | Unread | null {
-  const on = findOptional(o, "on", "thing");
+function spawnSpot(o: OpContext): SpawnSpot | Unread {
+  const said: SpawnSpot["said"] = [];
+  const holder = (field: string, want: Want): Found | Unread | undefined => {
+    const r = findOptional(o, field, want);
+    const words = o.args[field];
+    if (!isUnread(r) || r.line !== "unknown" || r.fields.other !== "" || typeof words !== "string") return r;
+    said.push({ field, words: words.trim(), unread: r });
+    return undefined;
+  };
+  const on = holder("on", "thing");
   if (isUnread(on)) return on;
-  if (on) return { in: on.id };
-  const into = findOptional(o, "in", "point");
+  if (on) return { spot: { in: on.id }, said };
+  const into = holder("in", "point");
   if (isUnread(into)) return into;
-  if (into?.ref.startsWith("entity:")) return { in: into.id };
-  if (into?.ref.startsWith("place:")) return { place: into.id };
+  if (into?.ref.startsWith("entity:")) return { spot: { in: into.id }, said };
+  if (into?.ref.startsWith("place:")) return { spot: { place: into.id }, said };
   if (into) return { line: "unknown", fields: { n: o.n, op: o.op, ...unknownFields(o.call.lines, "in", "holder", String(o.args.in), []) } };
-  const at = findOptional(o, "at", "place");
+  const at = holder("at", "place");
   if (isUnread(at)) return at;
-  return at ? { place: at.id } : null;
+  return { spot: at ? { place: at.id } : null, said };
+}
+
+/** The scene's place, as the horizon stands when the operation runs: where its first entry that names a place, someone or something is. */
+function scenePlace(o: OpContext): string | null {
+  for (const ref of o.draft.storeState.horizon) {
+    if (ref.startsWith("place:")) return ref.slice("place:".length);
+    const place = ref.startsWith("entity:") ? placeOfEntity(o.draft.w.state, ref.slice("entity:".length)) : null;
+    if (place !== null) return place;
+  }
+  return null;
 }
 
 /**
@@ -433,10 +460,20 @@ const spawn: OpDef = {
     // A world's own kind of that name is its own; only a name no kind has makes a place.
     if (said !== undefined && PLACE_SPAWN_KINDS.includes(said) && !(own(o.reading.doc.kinds, said) ?? o.reading.registry.kinds.get(said))) return spawnPlace(o, name, said);
     const w = o.draft.w;
-    const spot = spawnSpot(o);
-    if (isUnread(spot)) return spot;
+    const where = spawnSpot(o);
+    if (isUnread(where)) return where;
     const owner = findOptional(o, "owner", "entity");
     if (isUnread(owner)) return owner;
+    // Said to be somewhere in words that name nothing there is: made where its owner is, else at the scene's place; with no place either, those words cannot be read.
+    let spot = where.spot;
+    const [first] = where.said;
+    if (spot === null && first !== undefined) {
+      const place = (owner ? placeOfEntity(w.state, owner.id) : null) ?? scenePlace(o);
+      if (place === null) return first.unread;
+      spot = { place };
+    }
+    // The words are kept on what is made, as where it was said to be.
+    const saidWhere: JsonObject = Object.fromEntries(where.said.map((s) => [`said_${s.field}`, s.words]));
     const asked = textArg(o.args, "bestiary");
     const row = asked === undefined ? undefined : bestiaryRow(o.reading.doc, asked);
     if (asked !== undefined && row === undefined) return { line: "unknown", fields: { n: o.n, op: o.op, ...unknownFields(o.call.lines, "bestiary", "bestiary", asked, bestiaryOf(o.reading.doc).map((r) => `${r.name} [${r.id}]`)) } };
@@ -455,8 +492,9 @@ const spawn: OpDef = {
       const thing = makeThing(o, { do: "make", name, at: spot, why: textArg(o.args, "why") ?? "", ...(type !== undefined ? { type } : {}), ...(vclass !== undefined ? { class: vclass } : {}), ...(owner ? { owner: owner.id } : {}), ...(qty !== undefined ? { qty } : {}), ...(description !== undefined ? { description } : {}) });
       if (isUnread(thing)) return thing;
       made = thing;
-      if (thing !== undefined && fields !== undefined) {
-        const bad = o.draft.applyAll(Object.entries(fields as JsonObject).map(([field, value]): LedgerEvent => ({ type: "set", entity: thing, field, value })));
+      const set = { ...((fields as JsonObject | undefined) ?? {}), ...saidWhere };
+      if (thing !== undefined && Object.keys(set).length > 0) {
+        const bad = o.draft.applyAll(Object.entries(set).map(([field, value]): LedgerEvent => ({ type: "set", entity: thing, field, value })));
         if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
       }
     } else {
@@ -464,17 +502,18 @@ const spawn: OpDef = {
       const id = freshId(o, name);
       made = id;
       const holder = spot !== null && "in" in spot ? spot.in : null;
-      const where = spot === null ? null : "place" in spot ? spot.place : placeOfEntity(w.state, spot.in);
-      const args: Record<string, JsonValue> = { id, kind, name, fields: { ...(row?.fields ?? {}), ...((fields as JsonObject | undefined) ?? {}) }, ...(holder !== null ? { relations: [{ type: "in", to: holder }] } : {}) };
+      const at = spot === null ? null : "place" in spot ? spot.place : placeOfEntity(w.state, spot.in);
+      const args: Record<string, JsonValue> = { id, kind, name, fields: { ...(row?.fields ?? {}), ...((fields as JsonObject | undefined) ?? {}), ...saidWhere }, ...(holder !== null ? { relations: [{ type: "in", to: holder }] } : {}) };
       const tier = textArg(o.args, "tier") ?? row?.tier;
       if (tier !== undefined) args.tier = tier;
-      if (where !== null && holder === null) args.place = where;
+      if (at !== null && holder === null) args.place = at;
       const description = textArg(o.args, "description") ?? row?.description;
       if (description !== undefined) (args.fields as JsonObject).description = description;
       const out = applyEffects(o.reading.registry, w, [{ type: "spawn", args }], { bindings: {}, rng: createRng(o.draft.seed(o.n)), literal: true });
       const failed = out.rejected[0];
       if (failed) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: failed.rejection.code } };
     }
+    if (first !== undefined && spot !== null) o.reply.report("made_where_said", { n: o.n, op: o.op, what: name, where: spotName(o, spot), said: textOf(where.said.map((s) => s.words)) });
     o.draft.record(o.n, o.op, "engine", o.prov, from, made !== undefined ? { made } : {});
     return undefined;
   },

@@ -44,6 +44,8 @@ export interface OpDef {
   needs: readonly string[];
   /** The arguments it reads, besides `op` and the three of provenance. */
   takes: readonly string[];
+  /** False for the Author's own note that changes nothing in the world: it takes no provenance, so it is neither sourced nor unsourced. */
+  provenance?: false;
   /** A worked example, for the operation reference. */
   example: JsonObject;
   /** Works the operation out on the draft and records it; what it could not read, when it could not. */

@@ -16,6 +16,7 @@ import type { SourceNow, SourceReader } from "../../src/cast/sources";
 import { Lines, SHIPPED_GUIDANCE, shippedTexts } from "../../src/iface/texts";
 import { hashJson } from "../../src/shared/hash";
 import { migrateStore, openStore, type ShownMessage, type Store, type TurnRow, type UserStore } from "../../src/store";
+import { asHarnessPasses } from "../story/rig";
 import { hashOf, inventedWorld, registry } from "../store/fixtures";
 
 export const USER = "user-a";
@@ -166,6 +167,8 @@ export interface Bench {
   tools: Map<string, HostTool>;
   /** A call of a cast tool on a turn (null: none), by the Author unless another agent is named. */
   call(name: string, args: JsonObject, turn: string | null, agent?: AgentRef): Promise<ToolResult>;
+  /** The same call as the harness plays it: its arguments checked and coerced by pi first, as the agent loop does. */
+  play(name: string, args: JsonObject, turn: string | null, agent?: AgentRef): Promise<ToolResult>;
 }
 
 /** The cast's tools over a fresh table, with the shipped words. */
@@ -174,14 +177,14 @@ export async function openBench(more: Partial<CastDeps> = {}): Promise<Bench> {
   const deps: CastDeps = { store: t.store, writes: t.writes, files: shippedTexts(), sources: t.shelf.reader, now: () => 7, ...more };
   const tools = new Map((await castTools(deps)).map((x) => [x.name, x]));
   let calls = 0;
-  return {
-    t,
-    tools,
-    call(name, args, turn, agent = { id: "author-1", definition: "author" }) {
-      const tool = tools.get(name);
-      if (tool === undefined) throw new Error(`no tool ${name}`);
-      const scope = { user: USER, chat: CHAT, session: "s-1", ...(turn !== null ? { turn } : {}) };
-      return tool.run(args, { scope, agent, run: "run-1", callId: `call-${++calls}`, signal: new AbortController().signal, onUpdate: () => undefined });
-    },
+  const tool = (name: string): HostTool => {
+    const found = tools.get(name);
+    if (found === undefined) throw new Error(`no tool ${name}`);
+    return found;
   };
+  const call = (name: string, args: JsonObject, turn: string | null, agent: AgentRef = { id: "author-1", definition: "author" }): Promise<ToolResult> => {
+    const scope = { user: USER, chat: CHAT, session: "s-1", ...(turn !== null ? { turn } : {}) };
+    return tool(name).run(args, { scope, agent, run: "run-1", callId: `call-${++calls}`, signal: new AbortController().signal, onUpdate: () => undefined });
+  };
+  return { t, tools, call, play: (name, args, turn, agent) => call(name, asHarnessPasses(tool(name), args), turn, agent) };
 }

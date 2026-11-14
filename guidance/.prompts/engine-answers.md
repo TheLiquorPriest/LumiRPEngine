@@ -62,6 +62,8 @@ not_applied: Operation {{n}} ({{op}}) was recorded and did not apply ({{code}}).
 already_so: Operation {{n}} ({{op}}): {{what}} was already so; nothing changed.
 placed_instead: Operation {{n}} ({{op}}): {{what}} was put at {{where}}, not {{asked}}, by the size of things.
 rule_bent: Operation {{n}} ({{op}}): {{what}} was put with {{where}} although the world's rules for things say otherwise ({{code}}).
+made_where_said: Operation {{n}} ({{op}}): nothing goes by {{said}}, so {{what}} was made at {{where}}, and those words are kept on it as where it was said to be.
+horizon_words: Operation {{n}} ({{op}}): kept on the horizon as words, naming no place, person or thing: {{words}}.
 against_rules: Operation {{n}} ({{op}}): {{#what}}{{what}}: {{/what}}applied although the world's rules would refuse it ({{code}}).
 past_until: Operation {{n}} ({{op}}): {{until}} is not after now, so the loan was recorded with no end.
 not_holding: Operation {{n}} ({{op}}): {{from}} did not hold {{what}}{{#holder}}; {{holder}} did{{/holder}}. It was given all the same.

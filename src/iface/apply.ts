@@ -137,18 +137,21 @@ async function approved(call: Call, asked: readonly Asked[], askArgs: (mine: rea
   return out;
 }
 
+/** The provenance of an operation that takes none: nothing cited, nothing marked. */
+const NO_PROVENANCE: Provenance = { source: null, precision: null, standing: null, marks: [] };
+
 /** An operation read for its shape: what it needs is there and its provenance reads; or what is wrong with it. */
 export function readOperation(n: number, def: OpDef, args: JsonObject, call: Call): Asked | Unread {
   const missing = def.needs.filter((f) => args[f] === undefined || args[f] === null || args[f] === "");
   if (missing.length > 0) return { line: "needs", fields: { n, op: def.name, fields: missing } };
-  const prov = provenanceOf(args, call.agent);
+  const prov = def.provenance === false ? NO_PROVENANCE : provenanceOf(args, call.agent);
   if ("field" in prov) return { line: "unreadable_op", fields: { n, op: def.name, field: prov.field, value: JSON.stringify(prov.value), choices: textOf(prov.choices) } };
   return { n, def, args, prov };
 }
 
 /** What a kind of operation needs and takes, and which of the arguments it was sent it does not read: said after anything about it that could not be read. */
 function takesLine(reply: Reply, def: OpDef, args: JsonObject): void {
-  const read = new Set(["op", ...def.needs, ...def.takes, ...Object.keys(PROVENANCE_PROPERTIES)]);
+  const read = new Set(["op", ...def.needs, ...def.takes, ...(def.provenance === false ? [] : Object.keys(PROVENANCE_PROPERTIES))]);
   reply.line("op_takes", { op: def.name, needs: textOf(def.needs), takes: textOf(def.takes.filter((f) => !def.needs.includes(f))), ignored: textOf(Object.keys(args).filter((k) => !read.has(k))) });
 }
 

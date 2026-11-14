@@ -1,5 +1,5 @@
 ---
-description: The sentences the cast tools answer with (cast_query, cast_update, perceive, recall, remember, reflect, dream). A tool's answer is data from the cast and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words.
+description: The sentences the cast tools answer with (cast_query, cast_update, perceive, recall, remember, reflect, dream). A tool's answer is data from the cast and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words. The lines named wants_ (what an argument takes) are words put inside the other lines.
 format: lines
 ---
 no_chat: There is no chat {{id}} in the engine's records.
@@ -7,12 +7,17 @@ no_turn: There is no turn {{id}} in this chat.
 no_operations: operations cannot be read: send a list of operations.
 unknown_op: Operation {{n}}: op cannot be read, you sent {{value}}. It is one of: {{choices}}.
 unreadable: {{field}} cannot be read{{#value}}: you sent {{value}}{{/value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}
-unreadable_op: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}
+unreadable_op: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}{{#wants}} It takes {{wants}}.{{/wants}}
+wants_name: a name or an id
+wants_texts: a text, or a list of texts
+wants_whole: a whole number from 0
+op_takes: {{op}} reads {{reads}}{{#needs}}, and needs {{needs}}{{/needs}}{{#new_needs}}, and a new one needs {{new_needs}}{{/new_needs}}.{{#ignored}} It does not read {{ignored}}.{{/ignored}}
+not_read: Operation {{n}} ({{op}}) was written without {{left}}. It reads {{reads}}.
 out_of_range: Operation {{n}} ({{op}}): {{field}} runs from {{min}} to {{max}}, and you sent {{value}}.
 needs: Operation {{n}} ({{op}}) needs {{fields}}.
 needs_one: Operation {{n}} ({{op}}) needs at least one of {{fields}}.
 turn_needed_op: Operation {{n}} ({{op}}) is kept with a turn, and this call belongs to none.
-unknown_who: Operation {{n}} ({{op}}): there is no {{who}} in the cast. Cast them first, in this call or an earlier one.
+added: {{who}} was not in the cast, so they were added to it, not yet cast.
 one_source: Operation {{n}} ({{op}}) binds one source: one of {{choices}}.
 no_source: Operation {{n}} ({{op}}): Lumiverse holds no {{kind}} {{id}}.
 not_bound: Operation {{n}} ({{op}}): {{who}} has no {{kind}} {{id}} bound.
@@ -25,7 +30,6 @@ not_cast: {{who}} has no casting on this path.
 more: {{count}} more in {{part}}. Ask again with skip {{skip}} to see them.
 no_perceptions: perceptions cannot be read: send a list of perceptions.
 perceive_turn: A perception is kept with a turn, and this call belongs to none.
-not_in_cast: Perception {{n}}: there is no {{who}} in the cast. Cast them with cast_update first.
 no_message: Operation {{n}} ({{op}}): there is no reply {{message}} on this path.
 not_secret: Operation {{n}} ({{op}}): {{value}} is not a secret's id. A secret is named by the id the lore map shows it with.
 no_world_secret: Operation {{n}} ({{op}}): this chat plays no world the engine can read, so it holds no secrets.

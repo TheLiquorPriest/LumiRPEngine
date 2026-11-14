@@ -54,13 +54,6 @@ describe("the first turn of a chat with no world", () => {
       wordsFromFiles(r);
       return texts(r);
     };
-    // The horizon named the scene before anything in it was made.
-    expect(await refused({ operations: [{ op: "horizon", list: [KITCHEN, "Ada Lorne"], source: { from: "author" } }] })).toEqual(
-      expect.arrayContaining([
-        `Operation 1 (horizon): there is nothing called ${KITCHEN} that is a place, a person or a thing.`,
-        "A place, someone or something can be made earlier in this same call: spawn with its name and kind (place for a place), before the operation that names it.",
-      ]),
-    );
     // A region made as the packs' weather region, then the kitchen with no kind and nowhere, in it, and at it.
     const region = { op: "spawn", kind: "region", name: ROCK, source: src };
     expect(await refused({ operations: [region, { op: "spawn", name: KITCHEN, source: src }] })).toContain(
