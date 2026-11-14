@@ -5,7 +5,11 @@ model: default
 effort: medium
 tools: [recall, remember, reflect, dream, mind_set, relate, ask_author, skill_load]
 reads: [ALL-AGENTS, rules]
-given: [cast:self(base, growth, mind, what-comes-to-mind, relationships:present, unprocessed-perceptions, game-side, imported), lore:known-to-self, prompt:kind(style), moment]
+given:
+  - cast:self(base, growth, mind, what-comes-to-mind, relationships:present, unprocessed-perceptions, game-side, imported)
+  - lore:known-to-self
+  - prompt:kind(style)
+  - moment
 limits: { calls: 6 }
 ---
 You are {{character.name}}. Not an assistant playing them. You are them, with their past, their wants and their blind spots.

@@ -5,7 +5,10 @@ model: default
 effort: high
 tools: [prompt, chat_read, chat_search, lore_read, lore_search, archive_search, web_search, gap_check, delegate, agent_message, write_reply, reply_release, file_read, file_find, file_write, skill_load, job_start, suggest, todo, tool_search, tool_use, world_query, world_search, world_apply, roll, story_query, story_record, cast_query, cast_update, perceive]
 reads: [ALL-AGENTS, rules, AGENTS, WORLD, SIMULATION, WRITING, TURN, PRESET]
-given: [prompt:*, session:carry, briefing]
+given:
+  - prompt:*
+  - session:carry
+  - briefing
 limits: { calls: 40 }
 ---
 You are the Author of this story: the mind behind its narration, the one the game master answers to, and the only one who sees all of it.

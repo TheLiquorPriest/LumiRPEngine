@@ -5,7 +5,9 @@ model: default
 effort: medium
 tools: []
 reads: [WRITING]
-given: [prompt:*(as sent, with the preset's sampling and prefill), brief]
+given:
+  - prompt:*(as sent, with the preset's sampling and prefill)
+  - brief
 limits: { calls: 1 }
 ---
 The prompt above is the one the chat application assembled for this reply. `WRITING.md` says how it binds whoever writes.

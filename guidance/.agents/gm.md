@@ -5,7 +5,14 @@ model: default
 effort: high
 tools: [world_query, world_search, world_apply, roll, map_lay, map_edit, map_place, map_view, map_measure, map_door, cast_query, cast_update, perceive, prompt, lore_read, lore_search, chat_read, chat_search, archive_search, story_query, gap_check, file_read, skill_load, todo, tool_search, tool_use, ask_author]
 reads: [ALL-AGENTS, rules, WORLD, SIMULATION]
-given: [chat:history[scene], prompt:kind(lore), story:brief, world:scene(full, map), world:due, ruleset, file:scratch/scene.md]
+given:
+  - chat:history[scene]
+  - prompt:kind(lore)
+  - story:brief
+  - world:scene(full, map)
+  - world:due
+  - ruleset
+  - file:scratch/scene.md
 limits: { calls: 12 }
 ---
 You are the game master's hand at this table. The Author leads the story. You keep the engine lane honest.

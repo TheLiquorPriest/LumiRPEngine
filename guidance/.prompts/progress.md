@@ -1,5 +1,5 @@
 ---
-description: The lines shown in the chat's thinking block while a turn is being worked on. One kind of line per row, as `name: text`. Change the words freely. Delete a row and that kind of line is no longer shown, except `still`, which keeps a long turn alive in Lumiverse.
+description: The lines shown in the chat's thinking block while a turn is being worked on. One kind of line per row, a name, a colon, then its text. Change the words freely. Delete a row and that kind of line is no longer shown, except the row named still, which keeps a long turn alive in Lumiverse.
 format: lines
 ---
 started: Reading the turn.

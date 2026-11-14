@@ -1,5 +1,5 @@
 ---
-description: The wording of every notice an agent can be shown. One notice per line, as `name: text`. Change the words freely. Delete a line and that notice is no longer shown. A notice states a fact; it asks for nothing.
+description: The wording of every notice an agent can be shown. One notice per line, a name, a colon, then its text. Change the words freely. Delete a line and that notice is no longer shown. A notice states a fact; it asks for nothing.
 format: lines
 ---
 file_changed: You changed {{path}} since this session opened. The copy in the opening block no longer stands. Its whole current text follows.

@@ -1,7 +1,6 @@
-# The compaction summary
-
-Used when a session's earlier turns are summarized. The notice the Author gets beforehand is a rule of its own, `save-before-compaction`.
-
+---
+description: What a compaction's summary keeps and drops. This is the text a summary of a session's earlier turns is written from, and the one home of what it keeps. The notice the Author gets beforehand is a rule of its own, save-before-compaction.
+---
 Write what the Author must still have after the detail is gone, and nothing else:
 
 1. Rulings made, and why, so that the same question gets the same answer.
