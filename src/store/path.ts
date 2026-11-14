@@ -25,10 +25,12 @@ export interface Match {
 /**
  * The turn a shown reply is, among the turns tied to its message: the one whose swipe date and
  * saved hash both match; else the newest whose hash matches; else the only one whose date matches,
- * which was edited since it was saved; else none (a reply no turn is tied to). Swipe positions are
- * never read: deleting a swipe shifts the later ones and changes nothing here.
+ * which was edited since it was saved; else `last`, the turn the path showed there last time, when
+ * its date matches (swipes can share a date: Lumiverse's own migration gave every swipe of an older
+ * message the message's date), edited too; else none (a reply no turn is tied to). Swipe positions
+ * are never read: deleting a swipe shifts the later ones and changes nothing here.
  */
-export function matchTurn(candidates: readonly TurnRow[], shown: Pick<ShownMessage, "hash" | "date">): Match {
+export function matchTurn(candidates: readonly TurnRow[], shown: Pick<ShownMessage, "hash" | "date">, last: string | null = null): Match {
   const date = shown.date ?? null;
   const tied = candidates.filter((t) => t.status === "done" || t.status === "cut");
   const both = tied.find((t) => date !== null && t.date === date && t.hash === shown.hash);
@@ -37,6 +39,8 @@ export function matchTurn(candidates: readonly TurnRow[], shown: Pick<ShownMessa
   if (byHash) return { turn: byHash, edited: false };
   const byDate = date === null ? [] : tied.filter((t) => t.date === date);
   if (byDate.length === 1 && byDate[0]) return { turn: byDate[0], edited: true };
+  const shownLast = last === null ? undefined : tied.find((t) => t.id === last && t.date === date);
+  if (shownLast) return { turn: shownLast, edited: true };
   return { turn: null, edited: false };
 }
 

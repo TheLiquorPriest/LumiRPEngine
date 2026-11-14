@@ -5,6 +5,12 @@
 // snapshot along the exact path to it. Each chat's current state is held in memory.
 //
 // Every row carries the user: `store.user(id)` answers for one user only.
+//
+// The store writes only inside its write calls, each one transaction (a savepoint inside the
+// caller's, as in RPE's write queue): nothing on opening a database it is handed, nothing in a read.
+// A snapshot a read finds worth keeping is stored by that user's next write. States held in memory
+// carry the user's fold mark, a row every write that changes what a fold gives replaces, so a state
+// folded inside a write the caller then rolls back is never used again.
 
 import { Database } from "bun:sqlite";
 import { hashParts } from "../shared/hash";
@@ -17,10 +23,11 @@ import type { WorldState } from "../engine/state";
 import { applyChecked, foldSteps, initialStoreState, type FoldEnv, type FoldStep, type Item, type StoredChange } from "./fold";
 import { checkChange } from "./input";
 import { comparePaths, matchTurn, nodeKey } from "./path";
-import { migrateStore } from "./schema";
+import { migrateStore, missingStoreTables } from "./schema";
 import { TreeView } from "./view";
 import {
   StoreInputError,
+  StoreSchemaError,
   type ChangeInput,
   type ChangeRow,
   type ChatRow,
@@ -50,7 +57,7 @@ interface SnapshotDoc {
 export const STORE_DEFAULTS = Object.freeze({
   /** Turns between snapshots on a path (plan §6.3). */
   snapshotEvery: 25,
-  /** Folded states held in memory, the least recently used going first. */
+  /** Folded states held in memory, the least recently used going first; also the most snapshots held for a user's next write. */
   foldsKept: 32,
   /** Fields that only describe a level of the tree and never pass down to what is inside it. */
   ownOnly: Object.freeze(["description", "tags"]) as readonly string[],
@@ -62,7 +69,11 @@ export const STORE_DEFAULTS = Object.freeze({
 const FOLD_VERSION = 1;
 
 export interface StoreOptions {
-  /** A database file's path, `:memory:`, or an open database. */
+  /**
+   * A database file's path or `:memory:`: the store opens it, brings its tables up and closes it.
+   * Or an open database: its owner has made the store's tables (on RPE's, the application's
+   * migrations), keeps it open, and wraps every write call (RPE's write queue).
+   */
   db: Database | string;
   registry: Registry;
   /** World documents by revision. */
@@ -136,9 +147,16 @@ interface ChatDb {
 }
 
 interface Cached {
-  epoch: number;
+  /** The user's fold mark it was folded under; null: it holds under any (a world's start). */
+  mark: string | null;
   folded: Folded;
   upto: number;
+}
+
+/** Snapshots a user's folds found worth storing, by node, kept for the user's next write while `mark` holds. */
+interface Held {
+  mark: string;
+  rows: Map<string, { upto: number; state: string }>;
 }
 
 function turnOf(r: TurnDb): TurnRow {
@@ -188,7 +206,7 @@ function chatOf(r: ChatDb): ChatRow {
   return { id: r.id, world: r.world as WorldId | null, revision: r.revision as RevisionId | null, sourceChat: r.source_chat, sourceMessage: r.source_message, head: r.head, created: r.created, deleted: r.deleted };
 }
 
-/** Opens a store over a database, bringing its tables up to date. */
+/** Opens a store over a database: a path it opens and brings up itself, or a database whose owner made its tables. */
 export function openStore(options: StoreOptions): Store {
   return new Store(options);
 }
@@ -201,18 +219,35 @@ export class Store {
   private readonly foldsKept: number;
   readonly viewOptions: { ownOnly: readonly string[]; notable: number };
   readonly now: () => number;
-  /** Bumped by every write that can change a fold: cached folds from an older epoch are not used. */
-  private epoch = 0;
+  /** Whether the store opened the database itself: then it brought the tables up, and it closes it. */
+  private readonly owned: boolean;
   private readonly folds = new Map<string, Cached>();
+  private readonly held = new Map<string, Held>();
   private readonly views = new WeakMap<StoreState, TreeView>();
 
   constructor(options: StoreOptions) {
-    // A database the store opens itself is set up for one writer and many readers; one it is given keeps its owner's settings.
     if (typeof options.db === "string") {
+      // A file the store opens is its own: set up for one writer and many readers, and brought up to its tables.
       this.db = new Database(options.db, { create: true });
-      this.db.run("PRAGMA journal_mode = WAL");
-    } else this.db = options.db;
-    migrateStore(this.db);
+      this.owned = true;
+      try {
+        this.db.run("PRAGMA journal_mode = WAL");
+        migrateStore(this.db);
+      } catch (error) {
+        this.db.close();
+        throw error;
+      }
+    } else {
+      // A database the store is handed is its owner's: nothing is written to it here, and its tables must be there.
+      this.db = options.db;
+      this.owned = false;
+      const missing = missingStoreTables(this.db);
+      if (missing.length > 0) {
+        throw new StoreSchemaError(
+          `This database does not hold the store's tables (${missing.join(", ")} missing). On RPE's database the application makes them, running STORE_MIGRATIONS as the "store" area; a database of the store's own is brought up with migrateStore before the store opens on it.`,
+        );
+      }
+    }
     this.env = { registry: options.registry, worlds: options.worlds };
     this.snapshotEvery = Math.max(1, Math.floor(options.snapshotEvery ?? STORE_DEFAULTS.snapshotEvery));
     this.foldsKept = Math.max(1, Math.floor(options.foldsKept ?? STORE_DEFAULTS.foldsKept));
@@ -227,35 +262,74 @@ export class Store {
     return new UserStore(this, id);
   }
 
-  /** Lets go of every folded state held in memory: the next folds start from the stored snapshots. */
+  /** Lets go of everything held in memory: folded states, and snapshots waiting for a write. */
   dropCaches(): void {
     this.folds.clear();
+    this.held.clear();
   }
 
+  /** Closes the database if the store opened it; one it was handed stays open, its owner's to close. */
   close(): void {
-    this.db.close();
+    if (this.owned) this.db.close();
   }
 
-  /** @internal */ touch(): void {
-    this.epoch++;
-    this.folds.clear();
+  /** @internal The user's fold mark. Being a row, a rollback puts it back with the rows it answers for. */
+  markOf(user: string): string {
+    return this.db.query<{ mark: string }, [string]>("SELECT mark FROM fold_mark WHERE user = ?").get(user)?.mark ?? "";
   }
 
-  /** @internal */ cached(key: string): Cached | null {
+  /** @internal Gives the user a fold mark never used before; inside a write. */
+  newMark(user: string): void {
+    this.db.run("INSERT INTO fold_mark (user, mark) VALUES (?, ?) ON CONFLICT (user) DO UPDATE SET mark = excluded.mark", [user, crypto.randomUUID()]);
+  }
+
+  /** @internal A state held in memory: one folded under `mark`, or one that holds under any. */
+  cached(key: string, mark?: string): Cached | null {
     const hit = this.folds.get(key);
-    if (!hit || hit.epoch !== this.epoch) return null;
+    if (!hit || (hit.mark !== null && hit.mark !== mark)) return null;
     this.folds.delete(key);
     this.folds.set(key, hit);
     return hit;
   }
 
-  /** @internal */ keep(key: string, folded: Folded, upto: number): void {
+  /** @internal */ keep(key: string, folded: Folded, upto: number, mark: string | null): void {
     this.folds.delete(key);
-    this.folds.set(key, { epoch: this.epoch, folded, upto });
+    this.folds.set(key, { mark, folded, upto });
     for (const oldest of this.folds.keys()) {
       if (this.folds.size <= this.foldsKept) break;
       this.folds.delete(oldest);
     }
+  }
+
+  /** @internal Holds snapshots (node, upto, state as JSON) a fold under `mark` found worth storing, for the user's next write. */
+  hold(user: string, mark: string, rows: readonly [string, number, string][]): void {
+    if (rows.length === 0) return;
+    let held = this.held.get(user);
+    if (!held || held.mark !== mark) {
+      held = { mark, rows: new Map() };
+      this.held.set(user, held);
+    }
+    for (const [node, upto, state] of rows) {
+      held.rows.delete(node);
+      held.rows.set(node, { upto, state });
+    }
+    for (const oldest of held.rows.keys()) {
+      if (held.rows.size <= this.foldsKept) break;
+      held.rows.delete(oldest);
+    }
+  }
+
+  /** @internal Stores the user's held snapshots while the mark they were folded under still holds; inside a write. */
+  flush(user: string): void {
+    const held = this.held.get(user);
+    if (!held) return;
+    this.held.delete(user);
+    if (held.mark !== this.markOf(user)) return;
+    const put = this.db.query<unknown, [string, string, string, number, string, number]>(
+      "INSERT OR REPLACE INTO snapshot (user, node, kind, fingerprint, upto, state, created) SELECT ?1, ?2, 'cache', ?3, ?4, ?5, ?6 WHERE EXISTS (SELECT 1 FROM path_node WHERE user = ?1 AND key = ?2)",
+    );
+    const now = this.now();
+    for (const [node, row] of held.rows) put.run(user, node, this.fingerprint, row.upto, row.state, now);
   }
 
   /** @internal */ viewOf(state: StoreState): TreeView {
@@ -279,12 +353,30 @@ export class UserStore {
     return this.store.db;
   }
 
+  /**
+   * Every write the store makes runs here, as one transaction (a savepoint inside the caller's).
+   * Snapshots earlier reads found are stored first, while the mark they were folded under holds. A
+   * write that changes what a fold gives (`changesFolds`: changes added or taken back, a starting
+   * state set, turns removed) gives the user a new fold mark before and after it, so no state folded
+   * before it, or during it, is used once it is done, or once it is undone.
+   */
+  private write<T>(changesFolds: boolean, fn: () => T): T {
+    return this.db.transaction(() => {
+      this.store.flush(this.id);
+      if (changesFolds) this.store.newMark(this.id);
+      const out = fn();
+      if (changesFolds) this.store.newMark(this.id);
+      else this.store.flush(this.id);
+      return out;
+    })();
+  }
+
   // ------------------------------------------------------------ chats
 
   /** A new chat, starting on `revision` of `world`. */
   createChat(input: { id: string; world?: WorldId | null; revision?: RevisionId | null }): ChatRow {
     if (this.chat(input.id)) throw new StoreInputError(`chat ${input.id} exists`);
-    this.db.run("INSERT INTO chat (user, id, world, revision, created) VALUES (?, ?, ?, ?, ?)", [this.id, input.id, input.world ?? null, input.revision ?? null, this.store.now()]);
+    this.write(false, () => this.db.run("INSERT INTO chat (user, id, world, revision, created) VALUES (?, ?, ?, ?, ?)", [this.id, input.id, input.world ?? null, input.revision ?? null, this.store.now()]));
     return this.chat(input.id) as ChatRow;
   }
 
@@ -307,11 +399,11 @@ export class UserStore {
   branchChat(input: { id: string; from: string; map: Readonly<Record<string, string>>; at?: string | null }): ChatRow {
     const source = this.chatOrThrow(input.from);
     if (this.chat(input.id)) throw new StoreInputError(`chat ${input.id} exists`);
-    this.db.transaction(() => {
+    this.write(false, () => {
       this.db.run("INSERT INTO chat (user, id, world, revision, source_chat, source_message, created) VALUES (?, ?, ?, ?, ?, ?, ?)", [this.id, input.id, source.world, source.revision, input.from, input.at ?? null, this.store.now()]);
       const link = this.db.query("INSERT OR REPLACE INTO message_link (user, chat, message, source_chat, source_message) VALUES (?, ?, ?, ?, ?)");
       for (const [old, now] of Object.entries(input.map)) link.run(this.id, input.id, now, input.from, old);
-    })();
+    });
     return this.chat(input.id) as ChatRow;
   }
 
@@ -323,11 +415,13 @@ export class UserStore {
     const row = this.chatOrThrow(id);
     const shared = this.db.query<{ n: number }, [string, string]>("SELECT count(*) AS n FROM message_link WHERE user = ? AND source_chat = ?").get(this.id, id);
     if ((shared?.n ?? 0) > 0) {
-      this.db.run("UPDATE chat SET deleted = ?, path = '[]', head = NULL WHERE user = ? AND id = ?", [this.store.now(), this.id, id]);
-      this.db.run("DELETE FROM session WHERE user = ? AND chat = ?", [this.id, id]);
+      this.write(false, () => {
+        this.db.run("UPDATE chat SET deleted = ?, path = '[]', head = NULL WHERE user = ? AND id = ?", [this.store.now(), this.id, id]);
+        this.db.run("DELETE FROM session WHERE user = ? AND chat = ?", [this.id, id]);
+      });
       return { kept: true };
     }
-    this.db.transaction(() => {
+    this.write(true, () => {
       this.removeChat(id);
       // A deleted chat kept only for this branch goes with it.
       for (let source = row.source_chat; source !== null; ) {
@@ -336,8 +430,7 @@ export class UserStore {
         this.removeChat(source);
         source = up.source_chat;
       }
-    })();
-    this.store.touch();
+    });
     return { kept: false };
   }
 
@@ -388,10 +481,9 @@ export class UserStore {
     }
     const played = chats.filter((c) => this.isPlayed(c));
     if (played.length > 0) return { removed: [], played };
-    this.db.transaction(() => {
+    this.write(true, () => {
       for (const c of chats) this.removeChat(c);
-    })();
-    this.store.touch();
+    });
     return { removed: chats, played: [] };
   }
 
@@ -408,12 +500,20 @@ export class UserStore {
     return t;
   }
 
-  /** The path node for `turn` standing after the node `on` (null: at the start), made if new. For importers that rebuild a recorded path. */
+  /**
+   * The path node for `turn`, one of this user's, standing after the node `on` (null: at the
+   * start), made if new. For importers that rebuild a recorded path.
+   */
   extendPath(on: string | null, turn: string): string {
+    this.turnOrThrow(turn);
+    let depth = 0;
+    if (on !== null) {
+      const before = this.db.query<{ depth: number }, [string, string]>("SELECT depth FROM path_node WHERE user = ? AND key = ?").get(this.id, on);
+      if (!before) throw new StoreInputError(`no path node ${on}`);
+      depth = before.depth + 1;
+    }
     const key = nodeKey(on, turn);
-    const depth = on === null ? 0 : (this.db.query<{ depth: number }, [string, string]>("SELECT depth FROM path_node WHERE user = ? AND key = ?").get(this.id, on)?.depth ?? -1) + 1;
-    if (depth < 0) throw new StoreInputError(`no path node ${on}`);
-    this.db.run("INSERT OR IGNORE INTO path_node (user, key, prev, turn, depth) VALUES (?, ?, ?, ?, ?)", [this.id, key, on, turn, depth]);
+    this.write(false, () => this.db.run("INSERT OR IGNORE INTO path_node (user, key, prev, turn, depth) VALUES (?, ?, ?, ?, ?)", [this.id, key, on, turn, depth]));
     return key;
   }
 
@@ -435,10 +535,10 @@ export class UserStore {
     const base = on === null ? null : this.db.query<{ turn: string; depth: number }, [string, string]>("SELECT turn, depth FROM path_node WHERE user = ? AND key = ?").get(this.id, on);
     if (on !== null && !base) throw new StoreInputError(`no path node ${on}`);
     const node = nodeKey(on, id);
-    this.db.transaction(() => {
+    this.write(false, () => {
       this.db.run("INSERT INTO path_node (user, key, prev, turn, depth) VALUES (?, ?, ?, ?, ?)", [this.id, node, on, id, base ? base.depth + 1 : 0]);
       this.db.run("INSERT INTO turn (user, id, chat, parent, node, depth, kind, imported, generation, status, intent, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)", [this.id, id, input.chat, base?.turn ?? null, node, base ? base.depth + 1 : 0, input.kind, input.imported === true ? 1 : 0, input.generation ?? null, input.intent ?? null, this.store.now()]);
-    })();
+    });
     return this.turnOrThrow(id);
   }
 
@@ -451,40 +551,41 @@ export class UserStore {
   tieTurn(id: string, input: { message: string; hash: string; date?: number | null; status?: "done" | "cut" }): TurnRow {
     const t = this.turnOrThrow(id);
     if (t.status === "dropped") throw new StoreInputError(`turn ${id} was dropped`);
-    this.db.transaction(() => {
-      this.db.run("UPDATE turn SET message = ?, hash = ?, swipe_date = ?, status = ?, edited = NULL WHERE user = ? AND id = ?", [input.message, input.hash, input.date ?? null, input.status ?? "done", this.id, id]);
-      const chat = this.chatOrThrow(t.chat);
-      const path = JSON.parse(chat.path) as PathEntry[];
-      const prev = this.db.query<{ prev: string | null }, [string, string]>("SELECT prev FROM path_node WHERE user = ? AND key = ?").get(this.id, t.node)?.prev ?? null;
-      const entry: PathEntry = { message: input.message, user: false, turn: id, node: t.node, own: true, hash: input.hash, date: input.date ?? null };
-      const at = path.findIndex((e) => e.message === input.message);
-      if (at < 0) {
-        if (prev !== chat.head) return;
-        path.push(entry);
-      } else {
-        const before = path.slice(0, at).findLast((e) => e.node !== null)?.node ?? null;
-        if (before !== prev || path.slice(at + 1).some((e) => e.turn !== null)) return;
-        path[at] = entry;
-      }
-      this.db.run("UPDATE chat SET path = ?, head = ? WHERE user = ? AND id = ?", [JSON.stringify(path), t.node, this.id, t.chat]);
-    })();
     // A finished turn every `snapshotEvery` along its path keeps its state, so a cold start is short.
-    if ((t.depth + 1) % this.store.snapshotEvery === 0) this.keepSnapshot(t.node);
+    const keep = (t.depth + 1) % this.store.snapshotEvery === 0 ? this.foldNode(t.node) : null;
+    this.write(false, () => {
+      this.db.run("UPDATE turn SET message = ?, hash = ?, swipe_date = ?, status = ?, edited = NULL WHERE user = ? AND id = ?", [input.message, input.hash, input.date ?? null, input.status ?? "done", this.id, id]);
+      this.joinPath(t, { message: input.message, user: false, turn: id, node: t.node, own: true, hash: input.hash, date: input.date ?? null });
+      if (keep) {
+        const doc: SnapshotDoc = { state: keep.folded.state, notApplied: keep.folded.notApplied, rebased: keep.folded.rebased };
+        this.db.run("INSERT OR REPLACE INTO snapshot (user, node, kind, fingerprint, upto, state, created) VALUES (?, ?, 'cache', ?, ?, ?, ?)", [this.id, t.node, this.store.fingerprint, keep.upto, JSON.stringify(doc), this.store.now()]);
+      }
+    });
     return this.turnOrThrow(id);
   }
 
-  /** Stores the state after `node` as a snapshot this code may start from. */
-  private keepSnapshot(node: string): void {
-    const { folded, upto } = this.foldNode(node);
-    const doc: SnapshotDoc = { state: folded.state, notApplied: folded.notApplied, rebased: folded.rebased };
-    this.db.run("INSERT OR REPLACE INTO snapshot (user, node, kind, fingerprint, upto, state, created) VALUES (?, ?, 'cache', ?, ?, ?, ?)", [this.id, node, this.store.fingerprint, upto, JSON.stringify(doc), this.store.now()]);
+  /** A tied turn joins its chat's path where it extends it: a new reply after the head, or a swipe of the newest reply. Inside a write. */
+  private joinPath(t: TurnRow, entry: PathEntry): void {
+    const chat = this.chatOrThrow(t.chat);
+    const path = JSON.parse(chat.path) as PathEntry[];
+    const prev = this.db.query<{ prev: string | null }, [string, string]>("SELECT prev FROM path_node WHERE user = ? AND key = ?").get(this.id, t.node)?.prev ?? null;
+    const at = path.findIndex((e) => e.message === entry.message);
+    if (at < 0) {
+      if (prev !== chat.head) return;
+      path.push(entry);
+    } else {
+      const before = path.slice(0, at).findLast((e) => e.node !== null)?.node ?? null;
+      if (before !== prev || path.slice(at + 1).some((e) => e.turn !== null)) return;
+      path[at] = entry;
+    }
+    this.db.run("UPDATE chat SET path = ?, head = ? WHERE user = ? AND id = ?", [JSON.stringify(path), t.node, this.id, t.chat]);
   }
 
   /** A turn whose generation stopped with nothing saved: it never joins a path. */
   dropTurn(id: string): TurnRow {
     const t = this.turnOrThrow(id);
     if (t.status !== "open") throw new StoreInputError(`turn ${id} is ${t.status}, not open`);
-    this.db.run("UPDATE turn SET status = 'dropped' WHERE user = ? AND id = ?", [this.id, id]);
+    this.write(false, () => this.db.run("UPDATE turn SET status = 'dropped' WHERE user = ? AND id = ?", [this.id, id]));
     return this.turnOrThrow(id);
   }
 
@@ -501,7 +602,7 @@ export class UserStore {
     if (input.timings !== undefined) put("timings", input.timings === null ? null : JSON.stringify(input.timings));
     if (input.tokensIn !== undefined) put("tokens_in", input.tokensIn);
     if (input.tokensOut !== undefined) put("tokens_out", input.tokensOut);
-    if (sets.length > 0) this.db.run(`UPDATE turn SET ${sets.join(", ")} WHERE user = ? AND id = ?`, [...values, this.id, id]);
+    if (sets.length > 0) this.write(false, () => this.db.run(`UPDATE turn SET ${sets.join(", ")} WHERE user = ? AND id = ?`, [...values, this.id, id]));
     return this.turnOrThrow(id);
   }
 
@@ -569,6 +670,8 @@ export class UserStore {
     );
     const tied = this.tiedTo(chat, [...again]);
     const edited: PathReport["edited"] = [];
+    // Turns whose edited flag changes: the hash the reply shows now, or null once it shows as saved again.
+    const flags: [string, string | null][] = [];
     const after: PathEntry[] = [];
     for (const m of shown) {
       if (m.user) {
@@ -577,12 +680,12 @@ export class UserStore {
       }
       let turn: string | null = was.get(m.id)?.turn ?? null;
       if (again.has(m.id)) {
-        const match = matchTurn(tied.get(m.id) ?? [], m);
+        const match = matchTurn(tied.get(m.id) ?? [], m, turn);
         turn = match.turn?.id ?? null;
         if (match.turn && match.edited && match.turn.edited !== m.hash) {
           edited.push({ turn: match.turn.id, message: m.id, saved: match.turn.hash ?? "", now: m.hash });
-          this.db.run("UPDATE turn SET edited = ? WHERE user = ? AND id = ?", [m.hash, this.id, match.turn.id]);
-        } else if (match.turn && !match.edited && match.turn.edited !== null) this.db.run("UPDATE turn SET edited = NULL WHERE user = ? AND id = ?", [this.id, match.turn.id]);
+          flags.push([match.turn.id, m.hash]);
+        } else if (match.turn && !match.edited && match.turn.edited !== null) flags.push([match.turn.id, null]);
       }
       after.push({ message: m.id, user: false, turn, node: null, own: null, hash: m.hash, date: date(m) });
     }
@@ -615,14 +718,17 @@ export class UserStore {
         .map((r) => [r.id, r.node]),
     );
     for (const e of fresh) e.own = e.turn !== null && ownNodes.get(e.turn) === e.node;
-    this.db.transaction(() => {
+    const found = comparePaths(before, after);
+    const branched = row.source_chat !== null && before.length === 0 && after.length > 0 ? { from: row.source_chat, at: row.source_message } : null;
+    // What no longer applies is folded inside the write, so the snapshots that fold finds are stored with it.
+    const notApplied = this.write(false, () => {
+      const flag = this.db.query("UPDATE turn SET edited = ? WHERE user = ? AND id = ?");
+      for (const [turn, hash] of flags) flag.run(hash, this.id, turn);
       const put = this.db.query("INSERT OR IGNORE INTO path_node (user, key, prev, turn, depth) VALUES (?, ?, ?, ?, ?)");
       for (const [key, p, turn, d] of nodes) put.run(this.id, key, p, turn, d);
       this.db.run("UPDATE chat SET path = ?, head = ? WHERE user = ? AND id = ?", [JSON.stringify(after), prev, this.id, chat]);
-    })();
-    const found = comparePaths(before, after);
-    const branched = row.source_chat !== null && before.length === 0 && after.length > 0 ? { from: row.source_chat, at: row.source_message } : null;
-    const notApplied = found.rebased ? this.headState(chat).notApplied : [];
+      return found.rebased ? this.headState(chat).notApplied : [];
+    });
     return { ...found, edited, branched, notApplied };
   }
 
@@ -652,20 +758,18 @@ export class UserStore {
     const items: Item[] = inputs.map((c) => ({ op: c.op, value: c.value, turn: turnId, n: turn.depth + 1, by: c.by ?? null }));
     const outcomes = applyChecked(this.store.env, state, items, fell);
     const now = this.store.now();
-    const ids: number[] = [];
     let ord = (existing.at(-1)?.ord ?? -1) + 1;
-    this.db.transaction(() => {
+    const ids = this.write(true, () => {
       const put = this.db.query("INSERT INTO change (user, turn, ord, lane, op, value, by, standing, precision, source, job, applied, reports, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-      inputs.forEach((c, i) => {
+      const made = inputs.map((c, i) => {
         const o = outcomes[i] ?? { applied: false, reports: [] };
-        const r = put.run(this.id, turnId, ord++, c.lane, c.op, JSON.stringify(c.value), c.by ?? null, c.standing ?? null, c.precision ?? null, c.source ?? null, c.job ?? null, o.applied ? 1 : 0, o.reports.length > 0 ? JSON.stringify(o.reports) : null, now);
-        ids.push(Number(r.lastInsertRowid));
+        return Number(put.run(this.id, turnId, ord++, c.lane, c.op, JSON.stringify(c.value), c.by ?? null, c.standing ?? null, c.precision ?? null, c.source ?? null, c.job ?? null, o.applied ? 1 : 0, o.reports.length > 0 ? JSON.stringify(o.reports) : null, now).lastInsertRowid);
       });
       this.dropSnapshotsThrough(turnId);
-    })();
-    this.store.touch();
-    const upto = Math.max(inside.upto, ...ids);
-    this.store.keep(this.cacheKey(turn.node), { ...inside.folded, state }, upto);
+      return made;
+    });
+    // The state inside the turn now, held under the mark the write left: it stands only if the write does.
+    this.store.keep(this.cacheKey(turn.node), { ...inside.folded, state }, Math.max(inside.upto, ...ids), this.store.markOf(this.id));
     const rows = this.db.query<ChangeDb, [string, string]>("SELECT * FROM change WHERE user = ?1 AND id IN (SELECT value FROM json_each(?2)) ORDER BY ord").all(this.id, JSON.stringify(ids)).map(changeOf);
     return { changes: rows, state };
   }
@@ -674,9 +778,11 @@ export class UserStore {
   dropStaged(turnId: string, by?: string): number {
     const turn = this.turnOrThrow(turnId);
     if (turn.status !== "open") throw new StoreInputError(`turn ${turnId} is ${turn.status}: only an open turn's staged changes can be taken back`);
-    const r = by === undefined ? this.db.run("DELETE FROM change WHERE user = ? AND turn = ?", [this.id, turnId]) : this.db.run("DELETE FROM change WHERE user = ? AND turn = ? AND by = ?", [this.id, turnId, by]);
-    this.store.touch();
-    return r.changes;
+    return this.write(true, () => {
+      const r = by === undefined ? this.db.run("DELETE FROM change WHERE user = ? AND turn = ?", [this.id, turnId]) : this.db.run("DELETE FROM change WHERE user = ? AND turn = ? AND by = ?", [this.id, turnId, by]);
+      this.dropSnapshotsThrough(turnId);
+      return r.changes;
+    });
   }
 
   /** Cached snapshots on every path through the turn, and after it, no longer hold. */
@@ -707,19 +813,20 @@ export class UserStore {
   /**
    * A starting state that stands for the engine's state after a turn on its own path (a migrated
    * chat's, where today's fold and this one differ, plan §15.3 item 7): folds start from it, whatever
-   * the turns before it hold. What the store keeps beside the engine's state (the horizon, agents'
-   * lines, what changed last) is the turn's own as folded.
+   * the turns before it hold, and a change recorded on the turn afterwards (a correction) is folded on
+   * top of it. What the store keeps beside the engine's state (the horizon, agents' lines, what
+   * changed last) is the turn's own as folded.
    */
   setBase(turnId: string, world: WorldState): void {
     const turn = this.turnOrThrow(turnId);
     const own = this.foldNode(turn.node).folded.state;
-    const upto = this.db.query<{ n: number | null }, []>("SELECT max(id) AS n FROM change").get()?.n ?? 0;
-    this.db.transaction(() => {
-      const doc: SnapshotDoc = { state: { ...own, world }, notApplied: [], rebased: [] };
+    const doc: SnapshotDoc = { state: { ...own, world }, notApplied: [], rebased: [] };
+    this.write(true, () => {
+      // Every change of this user's recorded so far stands within the base or before it; ids only grow.
+      const upto = this.db.query<{ n: number | null }, [string]>("SELECT max(id) AS n FROM change WHERE user = ?").get(this.id)?.n ?? 0;
       this.db.run("INSERT OR REPLACE INTO snapshot (user, node, kind, fingerprint, upto, state, created) VALUES (?, ?, 'base', ?, ?, ?, ?)", [this.id, turn.node, this.store.fingerprint, upto, JSON.stringify(doc), this.store.now()]);
       this.dropSnapshotsThrough(turnId);
-    })();
-    this.store.touch();
+    });
   }
 
   private initial(revision: string | null): Folded {
@@ -729,7 +836,7 @@ export class UserStore {
     const state = revision === null ? null : initialStoreState(this.store.env, revision);
     if (!state) throw new StoreInputError(revision === null ? "the chat has no world revision" : `the world revision ${revision} is not available`);
     const folded: Folded = { node: null, state, notApplied: [], rebased: [] };
-    this.store.keep(key, folded, 0);
+    this.store.keep(key, folded, 0, null);
     return folded;
   }
 
@@ -737,9 +844,14 @@ export class UserStore {
     return `${this.id}\u0000${node}`;
   }
 
-  /** Folds the path ending at `node`, from the nearest held or stored state on it. */
+  /**
+   * Folds the path ending at `node`, from the nearest state on it held in memory under the user's
+   * fold mark, else stored, else the chat's start. It writes nothing: the snapshots it finds worth
+   * storing wait for the user's next write.
+   */
   private foldNode(node: string): { folded: Folded; upto: number } {
-    const hit = this.store.cached(this.cacheKey(node));
+    const mark = this.store.markOf(this.id);
+    const hit = this.store.cached(this.cacheKey(node), mark);
     if (hit) return { folded: hit.folded, upto: hit.upto };
     // The path back to the nearest stored snapshot this code may use, or to the start.
     const chain = this.db
@@ -759,7 +871,7 @@ export class UserStore {
     let start: { state: StoreState; upto: number; notApplied: Folded["notApplied"]; rebased: string[] } | null = null;
     for (let i = chain.length - 2; i >= 0; i--) {
       const key = chain[i]?.key;
-      const held = key === undefined ? null : this.store.cached(this.cacheKey(key));
+      const held = key === undefined ? null : this.store.cached(this.cacheKey(key), mark);
       if (!held) continue;
       from = i;
       start = { state: structuredClone(held.folded.state), upto: held.upto, notApplied: [...held.folded.notApplied], rebased: [...held.folded.rebased] };
@@ -767,6 +879,8 @@ export class UserStore {
     }
     const first = chain[0];
     if (!first) throw new StoreInputError(`no path node ${node}`);
+    // The newest change id in the stored snapshot the fold starts from; null when it starts elsewhere.
+    let stored: number | null = null;
     if (!start && first.snap === 1) {
       const snap = this.db
         .query<{ upto: number; state: string }, [string, string, string]>("SELECT upto, state FROM snapshot WHERE user = ?1 AND node = ?2 AND (kind = 'base' OR fingerprint = ?3) ORDER BY kind = 'base' DESC LIMIT 1")
@@ -774,6 +888,7 @@ export class UserStore {
       if (snap) {
         const doc = JSON.parse(snap.state) as SnapshotDoc;
         from = 0;
+        stored = snap.upto;
         start = { state: doc.state, upto: snap.upto, notApplied: doc.notApplied, rebased: doc.rebased };
       }
     }
@@ -783,7 +898,7 @@ export class UserStore {
       start = { state: structuredClone(init.state), upto: 0, notApplied: [], rebased: [] };
     }
     const rest = chain.slice(from + 1);
-    const ids = JSON.stringify(rest.map((c) => c.turn));
+    const ids = JSON.stringify((stored === null ? rest : [first, ...rest]).map((c) => c.turn));
     const turns = new Map(
       this.db
         .query<{ id: string; node: string; status: string }, [string, string]>("SELECT t.id, t.node, t.status FROM json_each(?2) j CROSS JOIN turn t ON t.user = ?1 AND t.id = j.value")
@@ -800,39 +915,40 @@ export class UserStore {
       list.push({ id: c.id, op: c.op, lane: c.lane as Lane, value: JSON.parse(c.value) as JsonValue, by: c.by, applied: c.applied === 1 });
       byTurn.set(c.turn, list);
     }
-    const steps: FoldStep[] = rest.map((c) => ({ node: c.key, turn: c.turn, n: c.depth + 1, own: turns.get(c.turn)?.node === c.key, changes: byTurn.get(c.turn) ?? [] }));
+    const stepOf = (c: { key: string; turn: string; depth: number }, changes: StoredChange[]): FoldStep => ({ node: c.key, turn: c.turn, n: c.depth + 1, own: turns.get(c.turn)?.node === c.key, changes });
+    const steps = rest.map((c) => stepOf(c, byTurn.get(c.turn) ?? []));
+    // Changes the snapshot's own turn took after it was stored (a correction after a starting state was set) go on top of it.
+    const late = (byTurn.get(first.turn) ?? []).filter((c) => c.id > (stored ?? Number.POSITIVE_INFINITY));
+    if (late.length > 0) steps.unshift(stepOf(first, late));
     const every = this.store.snapshotEvery;
     const snaps: [string, number, string][] = [];
     const result = foldSteps(this.store.env, start, steps, (step, state, upto, notApplied, rebased) => {
-      // Every `snapshotEvery` turns along a path, once its turn is no longer open.
-      if (step.n % every !== 0 || turns.get(step.turn)?.status === "open") return;
+      // Every `snapshotEvery` turns along a path, once its turn is no longer open, where none is stored.
+      if (step.n % every !== 0 || turns.get(step.turn)?.status === "open" || (stored !== null && step.node === first.key)) return;
       const doc: SnapshotDoc = { state, notApplied: [...(start?.notApplied ?? []), ...notApplied], rebased: [...(start?.rebased ?? []), ...rebased] };
       snaps.push([step.node, upto, JSON.stringify(doc)]);
     });
-    if (snaps.length > 0) {
-      const put = this.db.query("INSERT OR REPLACE INTO snapshot (user, node, kind, fingerprint, upto, state, created) VALUES (?, ?, 'cache', ?, ?, ?, ?)");
-      this.db.transaction(() => {
-        for (const [key, upto, state] of snaps) put.run(this.id, key, this.store.fingerprint, upto, state, this.store.now());
-      })();
-    }
+    this.store.hold(this.id, mark, snaps);
     const folded: Folded = { node, state: result.state, notApplied: [...start.notApplied, ...result.notApplied], rebased: [...start.rebased, ...result.rebased] };
-    this.store.keep(this.cacheKey(node), folded, result.upto);
+    this.store.keep(this.cacheKey(node), folded, result.upto, mark);
     return { folded, upto: result.upto };
   }
 
   // ------------------------------------------------------------ sessions
 
-  /** A session: the scene it is, opened by a turn. */
+  /** A session: the scene it is, opened by a turn of the user's. */
   openSession(input: { chat: string; scene: string; turn: string }): SessionRow {
     this.chatOrThrow(input.chat);
+    this.turnOrThrow(input.turn);
     const id = crypto.randomUUID();
-    this.db.run("INSERT INTO session (user, id, chat, scene, opened_by) VALUES (?, ?, ?, ?, ?)", [this.id, id, input.chat, input.scene, input.turn]);
+    this.write(false, () => this.db.run("INSERT INTO session (user, id, chat, scene, opened_by) VALUES (?, ?, ?, ?, ?)", [this.id, id, input.chat, input.scene, input.turn]));
     return this.session(id) as SessionRow;
   }
 
   closeSession(id: string, turn: string): SessionRow {
     if (!this.session(id)) throw new StoreInputError(`no session ${id}`);
-    this.db.run("UPDATE session SET closed_by = ? WHERE user = ? AND id = ?", [turn, this.id, id]);
+    this.turnOrThrow(turn);
+    this.write(false, () => this.db.run("UPDATE session SET closed_by = ? WHERE user = ? AND id = ?", [turn, this.id, id]));
     return this.session(id) as SessionRow;
   }
 

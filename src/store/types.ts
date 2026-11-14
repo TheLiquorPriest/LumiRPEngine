@@ -220,3 +220,11 @@ export class StoreInputError extends Error {
     this.name = "StoreInputError";
   }
 }
+
+/** A database the store cannot work on as it is: its tables are not there, or another runner made them. */
+export class StoreSchemaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StoreSchemaError";
+  }
+}

@@ -5,6 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { swipeIndex } from "../../src/store/path";
 import type { UserStore } from "../../src/store/store";
+import { StoreInputError } from "../../src/store/types";
 import { carried, engine, goTo, hashOf, make, play, POV, shown, testStore, tick } from "./fixtures";
 
 const placeOf = (s: UserStore, chat: string): unknown => s.headState(chat).state.world.entities[POV]?.fields.place;
@@ -47,6 +48,43 @@ describe("the turn tree", () => {
     // Showing what is now at position 0 is the second swipe, with its own state.
     s.sync("c", shown(["m1", "Morning.", 1], ["m2", texts[1] ?? "", 11]));
     expect(placeOf(s, "c")).toBe("market_square");
+  });
+
+  test("editing a reply whose swipes share one date keeps the turn showing there, flagged edited", () => {
+    const { s, revision } = testStore();
+    s.createChat({ id: "c", revision });
+    play(s, "c", "m1", "Morning.", 1, []);
+    // Lumiverse's own migration gave every swipe of an older message the message's date.
+    const a = play(s, "c", "m2", "To the cellar.", 7, engine(goTo(POV, "cellar")));
+    const b = play(s, "c", "m2", "To the market.", 7, engine(goTo(POV, "market_square")), { target: "m2" });
+    s.sync("c", shown(["m1", "Morning.", 1], ["m2", "To the market.", 7]));
+    expect(placeOf(s, "c")).toBe("market_square");
+    const report = s.sync("c", shown(["m1", "Morning.", 1], ["m2", "To the market, the long way round.", 7]));
+    expect(report.edited).toEqual([{ turn: b.id, message: "m2", saved: hashOf("To the market."), now: hashOf("To the market, the long way round.") }]);
+    expect(report.unplayed).toEqual([]);
+    expect(s.path("c").find((e) => e.message === "m2")?.turn).toBe(b.id);
+    expect(s.turn(b.id)?.edited).toBe(hashOf("To the market, the long way round."));
+    expect(placeOf(s, "c")).toBe("market_square");
+    // The other swipe is still told apart by its own text.
+    s.sync("c", shown(["m1", "Morning.", 1], ["m2", "To the cellar.", 7]));
+    expect(s.path("c").find((e) => e.message === "m2")?.turn).toBe(a.id);
+    expect(placeOf(s, "c")).toBe("cellar");
+  });
+
+  test("a path is extended only from a node there is, with a turn there is, and a refusal writes nothing", () => {
+    const { s, store, revision } = testStore();
+    s.createChat({ id: "c", revision });
+    const t1 = play(s, "c", "m1", "Morning.", 1, []);
+    const t2 = play(s, "c", "m2", "Noon.", 2, []);
+    const nodes = () => store.db.query<{ n: number }, []>("SELECT count(*) AS n FROM path_node").get()?.n;
+    const before = nodes();
+    expect(() => s.extendPath("no-such-node", t2.id)).toThrow(StoreInputError);
+    expect(() => s.extendPath(t1.node, "no-such-turn")).toThrow(StoreInputError);
+    expect(nodes()).toBe(before);
+    // From a node that is there, one deeper: here, the node the second turn was made on.
+    expect(s.extendPath(t1.node, t2.id)).toBe(t2.node);
+    expect(store.db.query<{ depth: number }, [string]>("SELECT depth FROM path_node WHERE key = ?").get(t2.node)?.depth).toBe(1);
+    expect(nodes()).toBe(before);
   });
 
   test("messages gone leave the path and the state rewinds by itself", () => {

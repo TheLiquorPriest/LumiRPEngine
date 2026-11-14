@@ -66,6 +66,23 @@ describe("snapshots", () => {
     expect(hashJson(cold)).toBe(hashJson(reopened(ts, "other-build").user(USER).headState("c").state.world));
   });
 
+  test("a read writes nothing: the snapshots its fold finds are stored by the user's next write", () => {
+    const ts = playMany(4, 10);
+    const second = ts.turns[1];
+    if (!second) throw new Error("no second turn");
+    ts.s.addChanges(second.id, engine(tick(1)));
+    expect(snapshotDepths(ts.store)).toEqual([]);
+    const made = (): number | undefined => ts.store.db.query<{ n: number }, []>("SELECT total_changes() AS n").get()?.n;
+    const before = made();
+    ts.s.headState("c");
+    ts.s.view("c");
+    expect(made()).toBe(before);
+    expect(snapshotDepths(ts.store)).toEqual([]);
+    ts.s.updateTurn(second.id, { intent: "noted" });
+    expect(snapshotDepths(ts.store)).toEqual([4, 8]);
+    expect(hashJson(reopened(ts).user(USER).headState("c").state)).toBe(hashJson(ts.s.headState("c").state));
+  });
+
   test("a stored starting state stands for a turn's state on its own path, whatever the turns before it hold", () => {
     const ts = playMany(25, 6);
     const third = ts.turns[2];
@@ -81,5 +98,22 @@ describe("snapshots", () => {
     const later = ts.s.stateAt(fifth.id).state.world;
     expect(later.entities[POV]?.fields.mood).toBe("wary");
     expect(later.clock - base.clock).toBe(4 + 5);
+  });
+
+  test("a change recorded on a turn after its starting state was set is folded on top of it, after a restart too", () => {
+    const ts = playMany(25, 3);
+    const head = ts.turns[2];
+    if (!head) throw new Error("no third turn");
+    expect(ts.s.headState("c").state.world.entities[POV]?.fields.place).toBe("far_road");
+    ts.s.setBase(head.id, structuredClone(ts.s.stateAt(head.id).state.world));
+    // The player corrects where Wren is, on the newest reply of a migrated chat.
+    ts.s.addChanges(head.id, engine(goTo(POV, "cellar")).map((c) => ({ ...c, by: "player", source: "player" as const })));
+    expect(ts.s.headState("c").state.world.entities[POV]?.fields.place).toBe("cellar");
+    expect(reopened(ts).user(USER).headState("c").state.world.entities[POV]?.fields.place).toBe("cellar");
+    // A second, on top of the first: both stand, in order, warm and cold.
+    ts.s.addChanges(head.id, engine(tick(30)));
+    const warm = ts.s.headState("c").state.world;
+    expect(warm.clock - ts.s.stateAt(ts.turns[1]?.id ?? "").state.world.clock).toBe(3 + 30);
+    expect(hashJson(reopened(ts).user(USER).headState("c").state.world)).toBe(hashJson(warm));
   });
 });
