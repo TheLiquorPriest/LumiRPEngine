@@ -78,10 +78,10 @@ describe("the rehearsal, extension installed for everyone", () => {
     expect(report.refusals.every((r) => !r.includes("registration") && !r.includes("engineFrom"))).toBe(true);
   });
 
-  test("counts each row's things where the real run puts them: each chat's latest notes carried, its earlier turns' and the rows with no place yet kept in the backup only, never called carried", () => {
+  test("counts each row's things where the real run puts them: each chat's area at every turn carried as notes, the rows with no place yet kept in the backup only, never called carried", () => {
     const count = (row: string) => report.rows.find((r) => r.row === row)?.count;
-    // The harness chat's area at its latest turn lands as notes; the turn before it has no place yet.
-    expect(count("author-notes")).toEqual({ found: 2, carried: 1, attached: 0, archived: 0, backup: 1 });
+    // The harness chat's area lands as notes at every turn: the latest as it stands, the ones before it as versions.
+    expect(count("author-notes")).toEqual({ found: 4, carried: 4, attached: 0, archived: 0, backup: 0 });
     expect(count("chat-switch")).toMatchObject({ carried: 0, attached: 0 });
     expect(count("chat-switch")?.backup).toBeGreaterThan(0);
     expect(count("worlds")).toMatchObject({ backup: 0 });
@@ -110,7 +110,7 @@ describe("the rehearsal, extension installed for everyone", () => {
     const chat = (id: string) => report.chats.find((c) => c.chatId === id);
     expect(chat(CHAT.classic)).toMatchObject({ engine: "classic", turns: 3, journal: "read", deletedTurns: 1, underWay: 1, waiting: { questions: 1, staged: 1, chips: 1, reviewCards: 1, rollback: false } });
     expect(chat(CHAT.agents)).toMatchObject({ engine: "agents", turns: 1, journal: "from another run of this chat", waiting: { rollback: true, chips: 0 } });
-    expect(chat(CHAT.harness)).toMatchObject({ engine: "harness", turns: 2, journal: "unreadable" });
+    expect(chat(CHAT.harness)).toMatchObject({ engine: "harness", turns: 4, journal: "unreadable" });
     expect(chat(CHAT.branch)).toMatchObject({ engine: "classic", turns: 2, journal: "read", underWay: 0 });
     expect(chat(CHAT.fresh)).toMatchObject({ engine: "classic", turns: 1, journal: "none" });
     expect(report.underWay).toBe(1);

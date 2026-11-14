@@ -12,10 +12,15 @@ export { CAST_FACT_DEFS, castFacts, type CastFacts, type OnStage, UNPERCEIVED_GR
 export { CAST_VIEWS, castViews, type CastView, type CastViewInput, type CastViewName } from "./views";
 export { type SourceNow, type SourceReader } from "./sources";
 export {
+  addCharacter,
   BASE_PARTS,
   CASTINGS,
+  castingItemId,
   castMark,
+  chatLine,
   dropCastStaged,
+  dropLeftoverCast,
+  findCharacter,
   MIND_KINDS,
   pinCasting,
   ROW_PARTS,
@@ -23,7 +28,9 @@ export {
   takeBackCast,
   writeCast,
   type Casting,
+  type CastRow,
   type CastWrite,
   type CastWriter,
+  type Character,
   type SourceKind,
 } from "./record";

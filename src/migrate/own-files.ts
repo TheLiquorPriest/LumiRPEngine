@@ -11,8 +11,11 @@
 // What is read: the user's own definitions and texts in LumiAH's `harness/settings.json`, the
 // engine's edited texts in `settings.json` (`prompts.texts`), and LumiAH's areas (`~/`, each chat's
 // `learned/` and its area, turn by turn), each a head naming an index blob that names each file's body
-// (`H/core/workspace.ts:41-53`). A chat's area is read at its latest turn; its mind files are the
-// characters' (their own row), not the Author's.
+// (`H/core/workspace.ts:41-53`). A chat's notes are its area at its latest turn, and versioned by
+// turn (§15.2): every earlier version is kept under `turns/`, in a folder for the turn that wrote it
+// (`message-<n>-swipe-<k>`, the chat's first message counting as 0), holding the files that turn
+// changed; an area no imported turn names holds all its files, in `before-any-turn` or
+// `generation-<id>`. Its mind files are the characters' (`minds.ts`), not the Author's.
 
 import type { Database } from "bun:sqlite";
 import { mkdir } from "node:fs/promises";
@@ -21,12 +24,20 @@ import { YAML } from "bun";
 import { writeWhole } from "../app/disk";
 import type { Migration, MigrationArea } from "../app/migrations";
 import { isRecord } from "../shared/json";
-import { areaFiles, areaHead, MIND_FILE } from "./inside";
+import type { UserStore } from "../store";
+import { AREA_DOC, type AreaFile, areaOf, carriedAreas, importedTurns, type TurnAreas } from "./history";
+import { MIND_FILE } from "./inside";
 import type { Item } from "./report";
 import type { Today } from "./today";
 
 /** The folder everything here is written under, at the user's level and in a chat's notes, as the plan names it. */
 export const IMPORTED = "imported";
+
+/** The folder of a chat's notes, under `imported/`, that keeps each earlier version by the turn that wrote it. */
+export const VERSIONS = "turns";
+
+/** The folder, under `imported/` at the user's level, of the prompt sets today's turns recorded: each named by the hash a turn's record gives it (`Rec.prompts`). */
+export const PROMPT_SETS = "prompt-sets";
 
 /** What a chat's folders are named for, as the file tree names them (`ChatNames`, `src/tree/chats.ts`): its character, and the chat itself. */
 export interface ChatNames {
@@ -68,14 +79,20 @@ export interface OwnFilesCarried {
   agents: number;
   skills: number;
   texts: number;
+  /** The prompt sets today's turns recorded, under `prompt-sets/`. */
+  promptSets: number;
   guidance: number;
   home: number;
   notes: number;
+  /** Earlier versions of each chat's notes, by the turn that wrote them, under `turns/`. */
+  versions: number;
   learned: number;
   /** Files whose names would leave the folder they go in: not written, in the backup only. */
   leftOut: number;
   /** Chats played on RPE, whose notes this run left as they are. */
   leftAlone: number;
+  /** Each chat's notes, versions and learned files, by chat. */
+  byChat: { chat: string; notes: number; versions: number; learned: number }[];
 }
 
 function json(text: string | null): unknown {
@@ -87,24 +104,35 @@ function json(text: string | null): unknown {
   }
 }
 
-const blob = (hash: string): string => `harness/blobs/${hash.slice(0, 2)}/${hash}`;
+/** What a run's import holds of each chat, for its notes' earlier versions: RPE's database, the user's store, and each turn's area. */
+export interface NoteHistory {
+  db: Database;
+  s: UserStore;
+  areas: TurnAreas;
+}
 
-/** An area as its head holds it: when it was written and each file's text; null where it doesn't read, or names an index or a body today's clean-up removed. */
-async function areaOf(today: Today, doc: string): Promise<{ at: number; files: { path: string; text: string }[] } | null> {
-  const text = await today.userView.read(doc);
-  const head = areaHead(text);
-  if (head === undefined) return null;
-  const raw = json(text);
-  const at = isRecord(raw) && typeof raw.at === "number" ? raw.at : 0;
-  if (head === null) return { at, files: [] };
-  const index = areaFiles(await today.userView.read(blob(head)));
-  if (index === null) return null;
-  const files: { path: string; text: string }[] = [];
-  for (const f of index) {
-    const body = await today.userView.read(blob(f.hash));
-    if (body !== null) files.push({ path: f.path, text: body });
+/**
+ * Each earlier version of a chat's notes, by the folder it is kept in under `turns/`: for each area
+ * document of the chat that an imported turn names, the files that turn changed; for the others, all
+ * their files. Mind files are left to their own row.
+ */
+async function noteVersions(today: Today, chat: string, docs: readonly string[], history: NoteHistory): Promise<Map<string, AreaFile[]>> {
+  const out = new Map<string, AreaFile[]>();
+  const notes = (path: string): boolean => !MIND_FILE.test(path);
+  const numbers = new Map(history.s.chat(chat) === null ? [] : history.s.path(chat).map((m, i) => [m.message, i]));
+  for (const { turn, message, swipe } of importedTurns(history.db, history.s, chat)) {
+    const at = numbers.get(message);
+    const changed = at === undefined ? null : await history.areas.changesAt(turn, notes);
+    const files = (changed ?? []).flatMap((c) => (c.now === null ? [] : [c.now]));
+    if (files.length > 0) out.set(`message-${at}-swipe-${swipe}`, files);
   }
-  return { at, files };
+  for (const doc of docs) {
+    if (history.areas.tied.has(doc)) continue;
+    const generation = AREA_DOC.exec(doc)?.[2] ?? "";
+    const files = ((await areaOf(today, doc))?.files ?? []).filter((f) => notes(f.path));
+    if (files.length > 0) out.set(generation === "root" ? "before-any-turn" : `generation-${generation}`, files);
+  }
+  return out;
 }
 
 /** A definition's header in the new format (`name`, `description`, `tools`), and its body. */
@@ -120,12 +148,13 @@ const staysInside = (path: string): boolean => path.split("/").every((part) => p
 
 /**
  * Writes the user's own files under `imported/` at the user's level, and each chat's notes under
- * `imported/` in that chat's own notes folder. `items` are the report's: only what it classifies as
- * carried or attached is read, so a chat gone from Lumiverse or one LumiAH was told to forget is left
- * in the backup. A chat played on RPE keeps the notes it has: they are RPE's now.
+ * `imported/` in that chat's own notes folder, with every earlier version by the turn that wrote it.
+ * `items` are the report's: only what it classifies as carried or attached is read, so a chat gone
+ * from Lumiverse or one LumiAH was told to forget is left in the backup. A chat played on RPE keeps
+ * the notes it has: they are RPE's now.
  */
-export async function carryOwnFiles(today: Today, items: readonly Item[], places: TreePlaces): Promise<OwnFilesCarried> {
-  const out: OwnFilesCarried = { agents: 0, skills: 0, texts: 0, guidance: 0, home: 0, notes: 0, learned: 0, leftOut: 0, leftAlone: 0 };
+export async function carryOwnFiles(today: Today, items: readonly Item[], places: TreePlaces, history: NoteHistory): Promise<OwnFilesCarried> {
+  const out: OwnFilesCarried = { agents: 0, skills: 0, texts: 0, promptSets: 0, guidance: 0, home: 0, notes: 0, versions: 0, learned: 0, leftOut: 0, leftAlone: 0, byChat: [] };
   /** Writes one file, by its path below the tree's folder; a name that would leave the folder it goes in is counted as left out, and stays in the backup. */
   const put = async (path: string, body: string): Promise<boolean> => {
     if (!staysInside(path)) {
@@ -155,7 +184,7 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
   const texts = { ...(isRecord(engine) && isRecord(engine.prompts) && isRecord(engine.prompts.texts) ? engine.prompts.texts : {}), ...(isRecord(harness) && isRecord(harness.texts) ? harness.texts : {}) };
   for (const [id, body] of Object.entries(texts)) if (typeof body === "string" && (await put(`${IMPORTED}/${places.prompts}/${id}.md`, body))) out.texts++;
 
-  // LumiAH's areas: `~/` (GUIDANCE.md apart), and each chat's learned/ and its area at its latest turn.
+  // LumiAH's areas: `~/` (GUIDANCE.md apart), and each chat's learned/ and its area at its latest turn; and the prompt sets turns recorded, word for word, each by the hash its turns' records name it by.
   const learned = new Map<string, string>();
   for (const item of items) {
     if (item.where !== "user storage" || (item.fate !== "carried" && item.fate !== "attached")) continue;
@@ -167,10 +196,17 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
       }
       continue;
     }
+    const set = /^prompts\/sets\/([0-9a-f]{32}\.json)$/.exec(item.path)?.[1];
+    if (set !== undefined) {
+      const body = await today.userView.read(item.path);
+      if (body !== null && (await put(`${IMPORTED}/${PROMPT_SETS}/${set}`, body))) out.promptSets++;
+      continue;
+    }
     const chat = /^harness\/docs\/chats\/([^/]+)\/learned\.json$/.exec(item.path)?.[1];
     if (chat !== undefined) learned.set(chat, item.path);
   }
   const latest = await latestAreas(today, items);
+  const areas = [...carriedAreas(items)];
   // Each chat's into its own notes folder, placed as RPE places the chat: by its name and its character's, as Lumiverse has them.
   for (const id of [...new Set([...latest.keys(), ...learned.keys()])].sort()) {
     if (places.played(id)) {
@@ -180,10 +216,17 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
     const row = today.chats.find((c) => c.id === id);
     const character = row === undefined || row.character === null ? null : today.db.character(row.character, today.sources.userId);
     const notes = `${await places.chat(id, { character, chat: { name: row?.name ?? "" } })}/${places.notes}/${IMPORTED}`;
+    const mine = { chat: id, notes: 0, versions: 0, learned: 0 };
     const area = latest.get(id);
-    if (area !== undefined) for (const f of (await areaOf(today, area))?.files ?? []) if (!MIND_FILE.test(f.path) && (await put(`${notes}/${f.path}`, f.text))) out.notes++;
+    if (area !== undefined) for (const f of (await areaOf(today, area))?.files ?? []) if (!MIND_FILE.test(f.path) && (await put(`${notes}/${f.path}`, f.text))) mine.notes++;
+    const docs = areas.filter((doc) => AREA_DOC.exec(doc)?.[1] === id);
+    for (const [folder, files] of await noteVersions(today, id, docs, history)) for (const f of files) if (await put(`${notes}/${VERSIONS}/${folder}/${f.path}`, f.text)) mine.versions++;
     const doc = learned.get(id);
-    if (doc !== undefined) for (const f of (await areaOf(today, doc))?.files ?? []) if (await put(`${notes}/learned/${f.path}`, f.text)) out.learned++;
+    if (doc !== undefined) for (const f of (await areaOf(today, doc))?.files ?? []) if (await put(`${notes}/learned/${f.path}`, f.text)) mine.learned++;
+    out.byChat.push(mine);
+    out.notes += mine.notes;
+    out.versions += mine.versions;
+    out.learned += mine.learned;
   }
   return out;
 }

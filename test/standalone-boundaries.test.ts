@@ -45,7 +45,7 @@ const RULES: Record<Zone, Rule> = {
   iface: { zones: ["app", "store"], carried: PURE, harness: true },
   cast: { zones: ["app", "store", "iface"], carried: PURE, harness: true },
   story: { zones: ["app", "store", "iface", "cast"], carried: PURE, harness: true },
-  migrate: { zones: ["app", "store"], carried: [...PURE, "backend"] },
+  migrate: { zones: ["app", "store", "cast", "story"], carried: [...PURE, "backend"] },
   turn: { zones: ["app", "adapter", "store", "tree", "lore", "iface", "cast", "story"], carried: PURE, harness: true },
   ui: { zones: [], carried: ["shared", "frontend"], sandboxed: true },
   ext: { zones: ["adapter"], carried: ["shared", "backend"], sandboxed: true },

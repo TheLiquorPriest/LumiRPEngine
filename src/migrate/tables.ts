@@ -7,6 +7,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { Migration } from "../app/migrations";
+import type { ChatCarried } from "./briefing";
 import type { MigrationReport } from "./report";
 
 export const MIGRATE_TABLES: readonly Migration[] = [
@@ -76,11 +77,39 @@ CREATE TABLE world_file (
     // A row's things this build has no place for yet (`NO_PLACE_YET`): their own count, never carried or archived.
     sql: "ALTER TABLE migration_item ADD COLUMN backup INTEGER NOT NULL DEFAULT 0;",
   },
+  {
+    version: 4,
+    name: "what a run carried of each chat",
+    // Read by the chat's first briefing on RPE and by the Migration page: counts and names, never content.
+    sql: "ALTER TABLE migration_chat ADD COLUMN carried TEXT;",
+  },
 ];
 
 /** Whether the database holds the migration's tables yet. */
 function hasTables(db: Database): boolean {
   return (db.query<{ n: number }, []>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'migration_run'").get()?.n ?? 0) > 0;
+}
+
+/** Keeps what a run carried of a chat it imported, beside what it did with the chat. */
+export function keepCarried(db: Database, user: string, chat: string, carried: ChatCarried): void {
+  db.run("UPDATE migration_chat SET carried = ? WHERE user = ? AND chat = ?", [JSON.stringify(carried), user, chat]);
+}
+
+/** What the last run that imported a chat did with it, and what it carried of it. */
+export interface ChatRecord {
+  run: string;
+  outcome: string;
+  marked: boolean;
+  carried: ChatCarried;
+}
+
+/** What the last run that imported a chat did with it and carried of it; null when no run imported it, or this database holds no such record (no run here, or only runs by a build that kept none). */
+export function chatRecord(db: Database, user: string, chat: string): ChatRecord | null {
+  if (!hasTables(db)) return null;
+  const columns = db.query<{ name: string }, []>("SELECT name FROM pragma_table_info('migration_chat')").all();
+  if (!columns.some((c) => c.name === "carried")) return null;
+  const row = db.query<{ run: string; outcome: string; marked: number; carried: string | null }, [string, string]>("SELECT run, outcome, marked, carried FROM migration_chat WHERE user = ? AND chat = ?").get(user, chat);
+  return row === null || row.carried === null ? null : { run: row.run, outcome: row.outcome, marked: row.marked === 1, carried: JSON.parse(row.carried) as ChatCarried };
 }
 
 /** The report of the user's last real run, or null when there was none. */

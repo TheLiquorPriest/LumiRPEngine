@@ -15,17 +15,20 @@ import { existsSync } from "node:fs";
 import { dataPaths, type Env, loadConfig, prepareDataFolder } from "../app/config";
 import { openDatabase } from "../app/database";
 import { migrate as migrateTables, Migrations } from "../app/migrations";
+import { CAST_MIGRATIONS } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { ALL_PACKS } from "../packs/index";
 import type { WorldDoc } from "../shared/world";
 import { openStore, STORE_MIGRATIONS } from "../store";
+import { STORY_MIGRATIONS } from "../story";
+import { chatCarried } from "./briefing";
 import { carry } from "./carry";
 import { chatsToImport, importChats } from "./import-chats";
-import type { ChatNames, TreeLayout } from "./own-files";
+import { type ChatNames, IMPORTED, type TreeLayout } from "./own-files";
 import { backupOf, reportOf } from "./rehearse";
 import { BACKUP_ONLY, type MigrationReport } from "./report";
 import { NO_PLACE_YET } from "./rows";
-import { importedChats, keepRun, lastReport, MIGRATE_TABLES, runUsers } from "./tables";
+import { importedChats, keepCarried, keepRun, lastReport, MIGRATE_TABLES, runUsers } from "./tables";
 import { openToday, type Sources } from "./today";
 
 export interface MigrateOptions {
@@ -88,6 +91,9 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
     try {
       const migrations = new Migrations();
       migrations.add("store", STORE_MIGRATIONS);
+      // The cast and the story record take what today's build recorded beside each turn: the mind files, the beats, the castings and the drafts.
+      migrations.add("cast", CAST_MIGRATIONS);
+      migrations.add("story", STORY_MIGRATIONS);
       migrations.add("migrate", MIGRATE_TABLES);
       // A chat's folders are chosen once and kept in the tree's tables, which the server reads as well.
       if (options.tree) migrations.add(options.tree.tables.area, options.tree.tables.migrations);
@@ -107,9 +113,12 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       report.imports = importChats({ store, s, db, registry, chats, notOpened, present: new Set(today.chats.map((c) => c.id)), earlier: importedChats(db, sources.userId), run });
       const layout = options.tree;
       const tree = layout ? { root: paths.files, agents: layout.agents, skills: layout.skills, prompts: layout.prompts, notes: layout.notes, chat: (chat: string, names: ChatNames) => layout.chatFolder(db, paths.files, sources.userId, chat, names), played: (chat: string) => s.chat(chat) !== null && s.isPlayed(chat) } : null;
-      const carried = await carry({ today, report, paths, db, run, tree });
+      const carried = await carry({ today, report, paths, db, store, s, run, now: now().getTime(), tree });
       report.landed = carried.landed;
       report.carried = carried.carried;
+      // What it carried of each chat it imported, for the chat's first briefing on RPE and the Migration page.
+      const notes = layout ? `${layout.notes}/${IMPORTED}` : null;
+      for (const c of report.imports) if (c.outcome === "imported" || c.outcome === "replaced") keepCarried(db, sources.userId, c.chatId, chatCarried(report, c.chatId, notes));
       // The store keeps the world revisions the run carried (its `world_file` table, left as it is), so a migrated chat's world can be read and written to.
       const kept = s.copyMigratedWorlds();
       report.worldsInStore = { added: kept.added, held: kept.held, unreadable: kept.unreadable.length };

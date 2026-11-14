@@ -13,13 +13,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { encodeLedger } from "../../src/backend/ledger-io";
 import { WorldStore } from "../../src/backend/worlds";
+import { newBlankWorld } from "../../src/engine/authoring";
 import { contentId } from "../../src/engine/ledger/path";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
 import { hashJson } from "../../src/shared/hash";
-import type { UserId } from "../../src/shared/ids";
+import type { UserId, WorldId } from "../../src/shared/ids";
 import type { JsonObject } from "../../src/shared/json";
-import type { Journal, MessageLedger, Rec } from "../../src/shared/ledger";
+import type { Draft, Journal, MessageLedger, Rec } from "../../src/shared/ledger";
+import type { WorldDoc } from "../../src/shared/world";
 import { blobHash } from "../../src/shared/stores";
 import { readBytes, sha256 as sha } from "../../src/migrate/files";
 import { walk } from "../../src/app/archive";
@@ -56,6 +58,25 @@ export const CHARACTER = { id: "char-ada", name: "Ada Vane" } as const;
 
 /** The file no row of the plan's table names. */
 export const STRAY = "stray-notes.txt";
+
+/** The people of the harness chat as the world names them: each has mind files in the chat's area. */
+export const PEOPLE = { ada: { entity: "e-ada", name: "Ada Mirren" }, bo: { entity: "e-bo", name: "Bo Tarrant" } } as const;
+
+/**
+ * The harness chat's area, turn by turn: at its first reply (`gen-1`, written after the area before
+ * any turn, `root`), then at the two swipes of its last reply: the first (`gen-2`, not shown) changed
+ * Ada's core and the notebook, the second (`gen-3`, shown, written last) changed Ada's core its own
+ * way and removed Bo's profile.
+ */
+export const AREAS = {
+  root: { "notebook.md": "Ada distrusts the guard." },
+  "gen-1": { "notebook.md": "Ada distrusts the guard. The fog came.", "minds/e-ada/core.md": "Ada, a pilot.", "minds/e-ada/memory.md": "Fog over the pier.", "minds/e-bo/profile.md": "Bo, a ferryman.", "author/prepare.md": "Next: the lighthouse." },
+  "gen-2": { "notebook.md": "Ada distrusts the guard. The fog came. The lamp is lit.", "minds/e-ada/core.md": "Ada, a pilot. She lit the lamp.", "minds/e-ada/memory.md": "Fog over the pier.", "minds/e-bo/profile.md": "Bo, a ferryman.", "author/prepare.md": "Next: the lighthouse." },
+  "gen-3": { "notebook.md": "Ada distrusts the guard. The fog came.", "minds/e-ada/core.md": "Ada, a pilot.\nThe lamp would not light, and she knows why.\n", "minds/e-ada/memory.md": "Fog over the pier.", "author/prepare.md": "Next: the lighthouse." },
+} as const satisfies Record<string, Record<string, string>>;
+
+/** The harness chat's one draft, open from its first reply, settled on the first swipe of its last. */
+const SHIP: Draft = { id: "d1", what: "A ship comes in at dawn.", tier: 2, who: ["e-bo"], where: ["home"], when: 0, basis: { messageId: "m-h2", swipeId: 0 }, state: "open" };
 
 /** The invented secrets of the runtime's connections: a key, a header's value and a sign-in's tokens, which must reach RPE's secrets file and nowhere else. */
 export const SECRETS = { key: "sk-invented-0123456789", header: "team-invented-4567", access: "access-invented-89ab", refresh: "refresh-invented-cdef" } as const;
@@ -138,7 +159,7 @@ function chatsOf(worldId: string, rev: string, blobs: { agents: string[]; harnes
           {
             "0": rec(1, rev, "Fog rolls in.", {
               harness: { turns: ["gen-1"], record: { v: 1, generationId: "gen-1", kind: "reply", at: 1, path: "p", segment: blobs.harness.segment, workspace: blobs.harness.workspace, usage: {} }, departures: ["The reply says the fog is red; the turn decided grey."] },
-              story: { beats: [{ id: "b1", turn: "gen-1", at: 0, where: null, by: "world", kind: "happen", what: "Fog came.", surface: "Fog.", exposure: [], decidedBy: { agent: "author" } }], cast: [{ entity: "e-ada", standing: "principal" }] },
+              story: { beats: [{ id: "b1", turn: "gen-1", at: 0, where: null, by: "world", kind: "happen", what: "Fog came.", surface: "Fog.", exposure: [], decidedBy: { agent: "author" } }], cast: [{ entity: "e-ada", standing: "principal", pinned: true }], drafts: [SHIP] },
             }),
           },
           rev,
@@ -147,6 +168,34 @@ function chatsOf(worldId: string, rev: string, blobs: { agents: string[]; harnes
     },
     { id: "m-h3", isUser: true, swipes: ["Wait."] },
     { id: "m-h4", isUser: false, swipes: ["(stopped)"], meta: bag(ledger({ "0": rec(2, rev, "(stopped)", { harness: { turns: [], unplayed: "the generation was stopped" } }) }, rev)) },
+    { id: "m-h5", isUser: true, swipes: ["Light the lamp."] },
+    // Two swipes, each its own turn on the harness engine: the first lit the lamp, struck a beat and settled the draft; the second, which shows, left it dark.
+    {
+      id: "m-h6",
+      isUser: false,
+      swipes: ["The lamp is lit.", "The lamp stays dark."],
+      swipeId: 1,
+      meta: bag(
+        ledger(
+          {
+            "0": rec(3, rev, "The lamp is lit.", {
+              harness: { turns: ["gen-2"], record: { v: 1, generationId: "gen-2", kind: "reply", at: 3, path: "p", usage: {} } },
+              story: {
+                beats: [{ id: "b2", turn: "gen-2", at: 30, where: "home", by: "e-ada", to: ["e-bo"], kind: "do", what: "Ada lit the lamp.", surface: "The lamp glows.", exposure: [{ who: "e-bo", reach: "whole" }], decidedBy: { agent: "author" } }],
+                struck: [{ beat: "b1", why: "The fog came after the lamp was lit." }],
+                drafts: [{ ...SHIP, state: "settled" }],
+                cast: [{ entity: "e-bo", standing: "supporting", why: "He keeps the ferry." }],
+              },
+            }),
+            "1": rec(4, rev, "The lamp stays dark.", {
+              harness: { turns: ["gen-3"], record: { v: 1, generationId: "gen-3", kind: "reply", at: 4, path: "p", usage: {} } },
+              story: { beats: [{ id: "b3", turn: "gen-3", at: 30, where: null, by: "world", kind: "happen", what: "The lamp stayed dark.", surface: "Darkness.", exposure: [], decidedBy: { agent: "author" } }] },
+            }),
+          },
+          rev,
+        ),
+      ),
+    },
   ];
   // A branch of the classic chat: its messages and records copied, as Lumiverse's branch copies them.
   const branch: Message[] = classic.slice(0, 2).map((m) => ({ ...m, id: `${m.id}-b` }));
@@ -267,7 +316,10 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
   // A world, made by today's own world store, then a second revision and a draft as Build leaves them.
   const fake = new FakeHost();
   const store = new WorldStore(fake, createRegistry(ALL_PACKS), []);
-  const made = await store.create("Harbour", null, USER as UserId);
+  // A world whose people include those the harness chat's minds are of.
+  const blank = newBlankWorld("w_template" as WorldId, "Harbour", createRegistry(ALL_PACKS));
+  const people: WorldDoc["entities"] = Object.fromEntries(Object.values(PEOPLE).map((p) => [p.entity, { id: p.entity, kind: "person", name: p.name, tier: "principal", fields: {}, relations: [] }]));
+  const made = await store.create("Harbour", { ...blank, entities: { ...blank.entities, ...people } }, USER as UserId);
   const worldId = made.world.id;
   const second = { ...made.world, name: "Harbour, rebuilt", lorePins: { characters: { "e-ada": [{ lore: "lore-harbour" }] }, places: {}, steps: {} } };
   const rev2 = hashJson(second);
@@ -288,10 +340,12 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
   // LumiAH's areas, mirrored in the user's storage under `harness/`.
   const blobs = new Map<string, string>();
   const userArea = area({ "GUIDANCE.md": "Keep the fog grey.", "style.md": "Short lines." }, blobs);
-  const rootArea = area({ "notebook.md": "Ada distrusts the guard." }, blobs);
-  // The chat's area at its latest turn, written after the one before it (`root`).
-  const turnArea = area({ "notebook.md": "Ada distrusts the guard. The fog came.", "minds/e-ada/core.md": "Ada, a pilot.", "minds/e-ada/memory.md": "Fog over the pier.", "minds/e-bo/profile.md": "Bo, a ferryman.", "author/prepare.md": "Next: the lighthouse." }, blobs, 2);
+  const rootArea = area(AREAS.root, blobs);
+  // The chat's area at each turn, each written after the one before it (`root`, before any turn).
+  const turnArea = area(AREAS["gen-1"], blobs, 2);
   const turnIndex = JSON.parse(turnArea).head as string;
+  const litArea = area(AREAS["gen-2"], blobs, 3);
+  const darkArea = area(AREAS["gen-3"], blobs, 4);
   const learnedArea = area({ "notes.md": "The pier floods at high tide." }, blobs);
   const segment = "harness session segment";
   blobs.set(sha(segment), segment);
@@ -300,6 +354,8 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
     "workspace/user.json": userArea,
     [`chats/${CHAT.harness}/area/root.json`]: rootArea,
     [`chats/${CHAT.harness}/area/gen-1.json`]: turnArea,
+    [`chats/${CHAT.harness}/area/gen-2.json`]: litArea,
+    [`chats/${CHAT.harness}/area/gen-3.json`]: darkArea,
     [`chats/${CHAT.harness}/learned.json`]: learnedArea,
     [`chats/${CHAT.harness}/approvals.json`]: JSON.stringify({ v: 1, kind: "approvals", tools: ["lore_search"], at: {} }),
     [`chats/${CHAT.harness}/session.json`]: JSON.stringify({ v: 1, kind: "session", compactAsked: null }),

@@ -19,6 +19,7 @@ import { SecretsFile } from "../../src/app/secrets";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { migrate } from "../../src/migrate/migrate";
 import { reportText, type MigrationReport } from "../../src/migrate/report";
+import { blobHash } from "../../src/shared/stores";
 import { openToday } from "../../src/migrate/today";
 import { carriedWorlds } from "../../src/migrate/worlds";
 import { ALL_PACKS } from "../../src/packs/index";
@@ -153,6 +154,9 @@ describe("what the real run carries besides the chats", () => {
     expect(JSON.parse(await at(".agents/scout.original.json"))).toMatchObject({ id: "scout", given: "task" });
     expect(headed(await at(".skills/tide-tables/SKILL.md"))).toEqual({ header: { name: "tide-tables", description: "When the pier floods." }, body: "Read the harbour's tide table before any walk on the pier.\n" });
     expect([await at(".prompts/classic.narrator.md"), await at(".prompts/lumiah.writer.md")]).toEqual(["Be terse.", "Write short."]);
+    // The prompt set today's turns recorded, word for word, by the hash its turns name it by; and its row has nothing in the backup only.
+    expect(await at(`prompt-sets/${blobHash("set")}.json`)).toBe(await readFile(join(fixture.userFolder, `prompts/sets/${blobHash("set")}.json`), "utf8"));
+    expect(report.rows.find((r) => r.row === "texts")?.count).toMatchObject({ found: 1, attached: 1, backup: 0 });
     expect([await at("GUIDANCE.md"), await at("home/style.md")]).toEqual(["Keep the fog grey.", "Short lines."]);
     // Nothing of any chat is at the user's level, which every chat's agents read.
     expect(existsSync(join(files, "imported", "chats"))).toBe(false);

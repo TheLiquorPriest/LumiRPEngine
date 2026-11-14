@@ -427,3 +427,18 @@ export function castMark(db: Database, user: string, turn: string): number {
 export function takeBackCast(db: Database, user: string, turn: string, after: number): number {
   return db.run("DELETE FROM cast_entry WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL", [user, turn, after]).changes;
 }
+
+/**
+ * Removes the cast rows of turns the store no longer holds, inside the caller's queued write, right
+ * after the store removed them: a chat deleted (`UserStore.deleteChat` when it is not kept for a
+ * branch), or an import forgotten (`UserStore.forgetImport`). Rows of a turn a branch still shares
+ * stay with the turn. The characters, their bindings and their base stand outside turns and stay.
+ * How many went.
+ */
+export function dropLeftoverCast(store: Store, user: string): number {
+  const u = store.user(user);
+  const turns = store.db.query<{ turn: string }, [string]>("SELECT DISTINCT turn FROM cast_entry WHERE user = ?").all(user);
+  const gone = turns.flatMap((r) => (u.turn(r.turn) === null ? [r.turn] : []));
+  if (gone.length === 0) return 0;
+  return store.db.run("DELETE FROM cast_entry WHERE user = ? AND turn IN (SELECT value FROM json_each(?))", [user, JSON.stringify(gone)]).changes;
+}
