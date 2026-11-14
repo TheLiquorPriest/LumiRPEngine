@@ -8,13 +8,15 @@ prompt_unmapped: This preset's prompt has not been mapped yet. The whole prompt 
 prompt_shape: The prompt's shape has changed since it was mapped: {{what}}. Nothing is stopped by this.
 migrated_chat: This chat was carried over from the earlier build. Its state, cast and story record are as that build left them. {{carried}}
 unplayed: Since your last turn, replies were written in this chat without a turn of yours (messages {{range}}, counting the chat's first message as 0). Those within the chat history above are already in front of you and need no reading again.
-edited: Message {{message}} was edited after its turn.
+edited: Message {{message}} was edited after its turn.{{#old}} Before: {{old}}{{/old}}{{#new}} Now: {{new}}{{/new}}
+player_edited: The player's message {{message}} was edited since your last turn.{{#old}} Before: {{old}}{{/old}}{{#new}} Now: {{new}}{{/new}}
 deleted: {{count}} turn(s) were deleted since the last one.
 swipe_flipped: An earlier reply ({{message}}) was changed to another of its swipes. The turns after it were applied again on it. {{dropped}}
+swipe_shown: The newest reply ({{message}}) now shows another of its swipes.
 job_finished: A job finished: {{job}}. {{outcome}}
 job_interrupted: A job was interrupted by a restart: {{job}}. It had done: {{done}}
 change_awaiting: A change is waiting for the player's yes or no: {{what}}
-panel_request: From a panel: {{what}}
+panel_request: From a panel: {{what}}{{#on}}, on {{on}}{{/on}}
 depth_asked: The player asked for this turn to be played {{depth}}.
 pictures_left_out: The prompt held {{count}} picture(s). This model does not take pictures, so they were left out.
 history_trimmed: Messages {{range}} did not fit this model's window and were left out. {{covered}}

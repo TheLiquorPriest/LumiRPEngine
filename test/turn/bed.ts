@@ -16,6 +16,8 @@ import { configOf, prepareDataFolder } from "../../src/app/config";
 import { EXTENSION_IDENTIFIER, readRegistration, REGISTRATION_FILE } from "../../src/adapter/lumiverse/pipe-wire";
 import { LumiverseSession } from "../../src/adapter/lumiverse/session";
 import { startExtension } from "../../src/ext/start";
+import { hashJson } from "../../src/shared/hash";
+import type { WorldDoc } from "../../src/shared/world";
 import type { TurnRow } from "../../src/store";
 import type { Turns } from "../../src/turn";
 import { ALL, REAL_CLOCK } from "../ext/rig";
@@ -55,8 +57,8 @@ export interface TurnBed {
   left: Scope[];
   /** Each request the harness was asked to answer (`Harness.answer`), in order. */
   requests: TurnRequest[];
-  /** A Turn page's call to RPE, with a page token of RPE's user: its status and its JSON. */
-  page<T>(method: "GET" | "POST", path: string): Promise<{ status: number; body: T }>;
+  /** A Turn page's call to RPE, with a page token of RPE's user, and the JSON body given: its status and its JSON. */
+  page<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<{ status: number; body: T }>;
   /** Waits until `check` gives something, in real time: Lumiverse's requests to RPE go over the network. */
   until<T>(what: string, check: () => T | null | undefined | false | Promise<T | null | undefined | false>): Promise<T>;
   /**
@@ -93,6 +95,16 @@ export async function settledTurn(b: TurnBed, generation: string): Promise<TurnR
     const run = b.turns.runs.byGeneration(USER, generation);
     const turn = run === null ? null : store.turn(run.turn);
     return turn !== null && turn.status !== "open" && b.turns.runs.ofChat(USER, CHAT).length === 0 ? turn : null;
+  });
+}
+
+/** The bed's chat plays `doc` from before its first turn: the store keeps the world's revision, and the chat starts on it. */
+export async function playsWorld(b: TurnBed, doc: WorldDoc): Promise<void> {
+  const revision = hashJson(doc);
+  const store = b.turns.store.user(USER);
+  await b.app.writes.run(() => {
+    store.putWorld(revision, doc);
+    store.createChat({ id: CHAT, world: doc.id, revision });
   });
 }
 
@@ -185,8 +197,9 @@ export async function openTurnBed(options: TurnBedOptions): Promise<TurnBed> {
     host.presets.set(PRESET, { id: PRESET, name: "Lamp", blocks: [{ id: "b-main", name: "Main", role: "system", content: "You narrate a lighthouse on Gannet Rock, one scene at a time." }] });
     host.addChat({ id: CHAT, user: USER, name: "The lighthouse", character: CHARACTER, messages: options.messages ?? [{ id: "m-greeting", role: "assistant", content: GREETING }], books: [] });
 
-    const page = async <T>(method: "GET" | "POST", path: string): Promise<{ status: number; body: T }> => {
-      const res = await fetch(`${rpe.listening.url}${path}`, { method, headers: { authorization: `Bearer ${rpe.pageToken}` } });
+    const page = async <T>(method: "GET" | "POST", path: string, body?: unknown): Promise<{ status: number; body: T }> => {
+      const sent = body === undefined ? {} : { body: JSON.stringify(body), headers: { authorization: `Bearer ${rpe.pageToken}`, "content-type": "application/json" } };
+      const res = await fetch(`${rpe.listening.url}${path}`, { method, headers: { authorization: `Bearer ${rpe.pageToken}` }, ...sent });
       return { status: res.status, body: (await res.json()) as T };
     };
     const restart = async (): Promise<void> => {

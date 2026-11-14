@@ -17,7 +17,7 @@ layered:
 added:
   swipe: [SWIPE]
   regenerate: [SWIPE]
-  deleted: [DELETE]
+  delete: [DELETE]
 
 # Files switched off, by name: an instruction file by its own name (WORLD), anything else by its
 # folder and name (rules/perceptions-owed). "Delete" on a shipped file in the Files page writes

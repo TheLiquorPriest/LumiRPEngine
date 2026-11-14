@@ -3,8 +3,9 @@
 // together; one turn with its intent record, what went to the chat, the lore of its prompt, its trace,
 // and each of its runs (the first, then each continue) with its own trace and the request files the
 // harness kept for it; the Stop of a turn going on now; the files of a turn's folder, listed and read,
-// none outside it; and the world's tree for a chat, at its head or at a turn, from the store's own view.
-// Every route is a page's: it answers only for the user this RPE belongs to.
+// none outside it; the world's tree for a chat, at its head or at a turn, from the store's own view; and
+// a panel's request, held as part of the player's next message. Every route is a page's: it answers
+// only for the user this RPE belongs to.
 
 import type { ReplyError, Scope, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
 import { rawRoute, route, RouteError } from "../app";
@@ -112,6 +113,13 @@ function fileName(pathname: string): string {
     });
   if (names.length === 0 || names.some((n) => n === "" || n === "." || n === ".." || n.includes("/") || n.includes("\\"))) throw new RouteError(400, "A file is named by its path inside the turn's folder, and no path leaves it.");
   return names.join("/");
+}
+
+/** A panel's request as the page sends it: what was pressed, and what it was pressed on, where it was pressed on something. */
+function panelAsk(value: unknown): { what: string; on: string | null } {
+  if (!isRecord(value) || typeof value.what !== "string" || value.what.trim() === "") throw new RouteError(400, "A request from a panel names what was pressed, as `what`.");
+  if (value.on !== undefined && value.on !== null && typeof value.on !== "string") throw new RouteError(400, "`on`, where given, is what was pressed on, as text.");
+  return { what: value.what, on: typeof value.on === "string" && value.on.trim() !== "" ? value.on : null };
 }
 
 export function turnRoutes(deps: TurnRoutesDeps) {
@@ -245,6 +253,18 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       handle: async ({ user, params }) => {
         turnOf(user, params.chat, params.turn);
         return { stopped: await turns.lane.stop(user, params.turn) };
+      },
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/chats/:chat/requests",
+      access: "page",
+      body: panelAsk,
+      handle: async ({ user, params, body }) => {
+        // Part of the player's next message: held for the turns that follow the reply the chat shows newest as RPE last compared it.
+        const store = turns.store.user(user);
+        const after = store.chat(params.chat) === null ? null : (store.path(params.chat).findLast((e) => e.turn !== null)?.turn ?? null);
+        return { request: await turns.player.hold(user, params.chat, after, body, Date.now()) };
       },
     }),
     route({

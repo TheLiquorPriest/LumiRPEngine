@@ -478,6 +478,15 @@ export class StandIn {
     this.emit("MESSAGE_DELETED", { chatId, messageId: id }, chat.user);
   }
 
+  /** The player edits a message's text (`updateMessage`, `services/chats.service.ts:2922-3023`): into the swipe it shows, the revision raised, then told. */
+  editMessage(chatId: string, id: string, text: string): void {
+    const chat = this.chats.get(chatId);
+    const m = chat?.messages.find((x) => x.id === id);
+    if (!chat || !m) throw new Error("the stand-in has no such message");
+    m.content = text;
+    this.saveText(chat, id, text);
+  }
+
   /**
    * The player shows the swipe left or right of the one shown (`cycleSwipe`, `services/chats.service.ts:3455-3492`):
    * past either end nothing changes; an assistant's flip raises no revision. Told as `MESSAGE_SWIPED`, "navigated".

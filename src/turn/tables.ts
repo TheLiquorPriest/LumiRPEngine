@@ -6,9 +6,10 @@
 // each slice in a turn's prompt.
 //
 // Area `harness` (Appendix B, "Harness"): RPH's small durable state (`kv`), each turn's run as the Turn
-// page shows it (`turn_run`: where it stands, its timings and usage, what went to the chat), and what
-// RPH told RPE about the run (`turn_told`: rules that fired, consents, gap checks, suggestions,
-// attachments asked for).
+// page shows it (`turn_run`: where it stands, its timings and usage, what went to the chat), what RPH
+// told RPE about the run (`turn_told`: rules that fired, consents, gap checks, suggestions, attachments
+// asked for), the player's messages as RPE read them (`player_text`), and what the player asked for
+// through a panel (`panel_request`).
 
 export type TableStep = { readonly version: number; readonly name: string; readonly sql: string };
 
@@ -153,6 +154,34 @@ CREATE INDEX turn_run_unsettled ON turn_run (user, chat) WHERE settled IS NULL A
     sql: `
 ALTER TABLE turn_run ADD COLUMN cast_mark INTEGER;
 ALTER TABLE turn_run ADD COLUMN story_mark INTEGER;
+`,
+  },
+  {
+    version: 5,
+    name: "the player's messages as RPE read them, and what the player asked for through a panel",
+    // `player_text`: a message's text by the hash it had, so an edit of it can be told with the text it had before.
+    // `panel_request`: a tap that is part of the player's next message (plan §10.10 "A panel action"), held for every turn that
+    // follows the turn whose reply was the chat's newest when it was made (`after`; null before the chat's first turn).
+    sql: `
+CREATE TABLE player_text (
+  user TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  message TEXT NOT NULL,
+  hash TEXT NOT NULL,
+  text TEXT NOT NULL,
+  PRIMARY KEY (user, chat, message, hash)
+);
+CREATE TABLE panel_request (
+  user TEXT NOT NULL,
+  id TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  after TEXT,
+  what TEXT NOT NULL,
+  "on" TEXT,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (user, id)
+);
+CREATE INDEX panel_request_after ON panel_request (user, chat, after);
 `,
   },
 ];

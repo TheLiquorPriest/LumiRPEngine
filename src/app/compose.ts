@@ -1,8 +1,12 @@
 // RPE put together (plan §4.1): every area, in the order it is mounted, over one application. The store,
-// the cast, the story record and the lore bring their tables; the tree lays out the shipped level of the agents' files; the turn
-// lane builds RPH's environment and the harness, and adds the connections' and the Turn page's routes;
-// the door to Lumiverse mounts last, playing each tagged reply through the turn lane, and opens its
-// sockets once the server listens.
+// the cast, the story record, the migration and the lore bring their tables; the tree lays out the
+// shipped level of the agents' files; the turn lane builds RPH's environment and the harness, and adds
+// the connections' and the Turn page's routes; the door to Lumiverse mounts last, playing each tagged
+// reply through the turn lane, and opens its sockets once the server listens.
+//
+// The migration's tables are made by the running application as by the migration itself, so every
+// install's database holds them at this build's version whether or not a migration ever ran there. The
+// turn lane reads no migration: what one carried of a chat is handed to it from here.
 //
 // No lane works out the secrecy of lore entries: asked, the composition says so, and the extension's
 // own fail-closed verdict keeps every marked secret out.
@@ -14,6 +18,8 @@ import { lumiverseDoor, type AdapterDeps, type LumiverseDoor } from "../adapter/
 import { bunSocket } from "../adapter/lumiverse/socket";
 import { CAST_MIGRATIONS } from "../cast";
 import { type LoreBooks, LORE_MIGRATIONS } from "../lore";
+import { MIGRATED_NOTICE, MIGRATED_PART, migratedChat } from "../migrate/briefing";
+import { MIGRATE_TABLES } from "../migrate/tables";
 import { STORE_MIGRATIONS } from "../store";
 import { STORY_MIGRATIONS, storyCoverage } from "../story";
 import { historyWindow } from "../story/window";
@@ -97,6 +103,7 @@ export function compose(options: ComposeOptions = {}): Composition {
     { name: "store", tables: { area: "store", migrations: STORE_MIGRATIONS } },
     { name: "cast", tables: { area: "cast", migrations: CAST_MIGRATIONS } },
     { name: "story", tables: { area: "story", migrations: STORY_MIGRATIONS } },
+    { name: "migrate", tables: { area: "migrate", migrations: MIGRATE_TABLES } },
     { name: "lore", tables: { area: "lore", migrations: LORE_MIGRATIONS } },
     { name: "prompt", tables: { area: "prompt", migrations: PROMPT_MIGRATIONS } },
     {
@@ -110,12 +117,13 @@ export function compose(options: ComposeOptions = {}): Composition {
       async mount(at) {
         app = at;
         turns = buildTurns(at, {
-          store: openAppStore(at),
+          store: openAppStore(at, () => turns?.runs.chatsGoing() ?? []),
           lumiverse: () => {
             const parts = door.lumiverse();
             return parts === null ? null : { reads: parts.reads, chat: parts.chat, stopGeneration: parts.stopGeneration };
           },
           books,
+          migrated: { part: MIGRATED_PART, notice: MIGRATED_NOTICE, fields: (user, chat) => migratedChat({ db: at.db, store: made().store, user, chat }) },
           clock,
           ...(options.harness !== undefined ? { harness: options.harness } : {}),
         });

@@ -10,23 +10,18 @@ import { hashJson } from "../../src/shared/hash";
 import type { WorldDoc } from "../../src/shared/world";
 import { INN, worldWith } from "../iface/map/fixtures";
 import { world } from "../iface/rig";
-import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
+import { CHAT, CONNECTION, openTurnBed, playsWorld, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
 
 const beds: TurnBed[] = [];
 afterEach(async () => {
   for (const b of beds.splice(0)) await b.close();
 });
 
-/** A bed whose chat plays `doc`: the store keeps the world's revision, and the chat plays it from before its first turn. */
+/** A bed whose chat plays `doc`, kept by the store, from before its first turn. */
 async function worldBed(doc: WorldDoc, options: TurnBedOptions): Promise<TurnBed> {
   const b = await openTurnBed(options);
   beds.push(b);
-  const revision = hashJson(doc);
-  const store = b.turns.store.user(USER);
-  await b.app.writes.run(() => {
-    store.putWorld(revision, doc);
-    store.createChat({ id: CHAT, world: doc.id, revision });
-  });
+  await playsWorld(b, doc);
   return b;
 }
 
@@ -84,6 +79,30 @@ test("once the scene needs a place that has a map, the next turn's world state s
   const briefing = JSON.stringify(b.model.requests[2]!.messages);
   expect(briefing).toContain("## World state");
   expect(briefing).toContain("# . . B B B . . . .  .  #");
+});
+
+/** The invented world, where Tam keeps the market from nine and the common room from five. */
+function scheduledWorld(): WorldDoc {
+  const doc = world();
+  doc.schedules = {
+    tam_day: { id: "tam_day", owner: "tam", target: "place", recurrence: { every: "day" }, slots: [{ start: "09:00", end: "17:00", value: "market_square" }, { start: "17:00", end: "22:00", value: "common_room" }] },
+  };
+  return doc;
+}
+
+test("what time brings due is listed in the world state the Author is given, and in the answer of a query that asks for it", async () => {
+  const b = await worldBed(scheduledWorld(), {
+    answers: [
+      { pieces: [{ text: "<intent>See what the day holds.</intent>" }, { call: "world_query", args: { at: "thornbury", depth: 1, due: "six hours" } }] },
+      { pieces: [{ text: "<reply>Tam packs his stall.</reply>" }] },
+    ],
+  });
+  await play(b, "I ask Tam about his day.");
+
+  expect(JSON.stringify(b.model.requests[0]!.messages)).toContain("9:00 AM: place at Market Square, Tam (tam_day)");
+  const answered = JSON.stringify(b.model.requests[1]!.messages.at(-1));
+  expect(answered).toContain("tam_day");
+  expect(answered).toContain("market_square");
 });
 
 test("a search pattern that could run without end is refused before it runs, in the harness's own words; a plain one is searched for", async () => {

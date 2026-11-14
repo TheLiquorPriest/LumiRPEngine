@@ -198,6 +198,11 @@ export class Runs {
     return [...this.#running.values()].filter((r) => r.user === user && r.chat === chat);
   }
 
+  /** The chats with a run going on now. */
+  chatsGoing(): string[] {
+    return [...new Set([...this.#running.values()].map((r) => r.chat))];
+  }
+
   /** The chat a run is played in, for a piece of streaming text, which names only its run (the turn's id). */
   chatOfRun(run: string): string | null {
     for (const r of this.#running.values()) if (r.turn === run) return r.chat;

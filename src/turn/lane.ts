@@ -25,20 +25,21 @@ import { engineTools, gridMoves, mapLines, mapView, stateScan } from "../iface";
 import { EntryNumbers, Lore, type LoreBooks, lorePort, storeWorlds } from "../lore";
 import { ALL_PACKS } from "../packs/index";
 import { hashJson } from "../shared/hash";
-import { openStore, type Store, storedWorlds } from "../store";
+import { openStore, type Store, storedWorlds, timeDue } from "../store";
 import { storyFacts, storyTools } from "../story";
 import { TreeChats, type TreeFiles, treeFiles, turnFolderName } from "../tree";
 import { turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
 import { kvStore, servedUser } from "./kv";
 import { riskyPattern } from "./pattern";
+import { PlayerSide } from "./player";
 import { type TurnPrompts, turnPrompts } from "./prompt";
 import { Runs } from "./runs";
 import { turnSettings } from "./settings";
 import { stagesAt } from "./stage";
 import { guidanceTexts } from "./texts";
 import { type TurnTrace, turnTrace } from "./trace";
-import { TurnLane } from "./turns";
+import { type MigratedSource, TurnLane } from "./turns";
 
 /**
  * RPE's file port for the one user it serves, that user read each time the port is asked, since it may
@@ -112,10 +113,18 @@ export const MACHINE_CLOCK: Clock = {
 
 /**
  * RPE's store over the application's database: the shipped packs' handlers fold its changes, a chat on a
- * real world folds over the revision's document the store keeps, and its snapshots are this build's.
+ * real world folds over the revision's document the store keeps, and its snapshots are this build's. A
+ * handler that throws is an error in the engine, not in the story: its text goes to the log, and to the
+ * live view of each chat with a run going on (`going`), the one place a player watches RPE work; the
+ * change's report, all a model is shown, says only that it failed.
  */
-export function openAppStore(app: Pick<App, "db" | "version">): Store {
-  return openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds: storedWorlds(app.db), fingerprint: app.version });
+export function openAppStore(app: Pick<App, "db" | "version" | "log" | "live">, going: () => readonly string[]): Store {
+  const handlerFailed = ({ op, error }: { op: string; error: unknown }): void => {
+    const text = error instanceof Error ? error.message : String(error);
+    app.log.error("An engine handler failed on a change, which is recorded as not applied.", { op, error: text });
+    for (const chat of going()) app.live.publish(chat, { kind: "handler_failed", data: { op, error: text } });
+  };
+  return openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds: storedWorlds(app.db), fingerprint: app.version, handlerFailed });
 }
 
 export interface TurnsOptions {
@@ -128,6 +137,8 @@ export interface TurnsOptions {
   lumiverse(): { reads: LumiverseReads; chat: ChatReads; stopGeneration(generation: string): Promise<boolean> } | null;
   /** The user's books, as the lore reads them. */
   books: LoreBooks;
+  /** What a migration carried of a chat, for its first briefing on RPE. */
+  migrated: MigratedSource;
   /** In tests: the models agents run on, in place of the model layer's, and RPH's ids. */
   harness?: Pick<CreateHarnessOptions, "models" | "ids">;
   clock?: Clock;
@@ -144,6 +155,7 @@ export interface Turns {
   chats: TreeChats;
   prompts: TurnPrompts;
   runs: Runs;
+  player: PlayerSide;
   trace: TurnTrace;
   lore: Lore;
 }
@@ -168,6 +180,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   );
   const prompts = turnPrompts(app.db, app.writes, () => clock.now());
   const runs = new Runs(app.db, app.writes);
+  const player = new PlayerSide(app.db, app.writes);
   const lore = new Lore({ books: options.books, worlds: storeWorlds(store), turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes) });
   const facts = new FactsRegistry();
   facts.add(turnFacts(store, (user, turn) => runs.record(user, turn)));
@@ -180,12 +193,19 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     ...traced,
     event(record) {
       traced.event(record);
-      // A job's writes are in once it ends: they may have opened or closed a scene of the turn that started it (plan §11).
       const { event } = record;
-      const scope = event.kind === "job" && event.job.ended !== undefined ? event.job.scope : undefined;
-      if (scope?.turn === undefined) return;
+      if (event.kind !== "job" || event.job.ended === undefined) return;
+      // A job that has ended records nothing more, and what it recorded takes effect before the next turn to begin (plan §10.9). Its
+      // writes may also have opened or closed a scene of the turn that started it (plan §11).
+      const { id: job, scope } = event.job;
+      const ended = app.writes.run(() => store.user(scope.user).endJob(job), "recording that a job ended").catch((error: unknown) => {
+        app.log.error("A job's end could not be recorded, so what it changed does not take effect.", { job, error: error instanceof Error ? error.message : String(error) });
+      });
       const turn = scope.turn;
-      void lane.sessionsAfter(scope.user, scope.chat, turn).catch((error: unknown) => app.log.error("The sessions of a job's scene could not be brought up to date.", { turn, error: error instanceof Error ? error.message : String(error) }));
+      if (turn === undefined) return;
+      void ended
+        .then(() => lane.sessionsAfter(scope.user, scope.chat, turn))
+        .catch((error: unknown) => app.log.error("The sessions of a job's scene could not be brought up to date.", { turn, error: error instanceof Error ? error.message : String(error) }));
     },
   };
   const chatNow = (): ChatReads => {
@@ -194,16 +214,19 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     return parts.chat;
   };
   const sources = liveSources(() => options.lumiverse()?.reads ?? null, lore);
+  // What time brings due over the store's states: listed by the world state's due section and by an answer that lets time pass.
+  const due = timeDue(store);
   /**
    * The host's tools for a scope: one list for its session (the contract's `ToolsPort`), every family's in it. The engine's are given
-   * squares on a map for the operations that name one, and the map that `world_query` shows, both worded by the map's lines in force.
+   * squares on a map for the operations that name one, and the map that `world_query` shows, both worded by the map's lines in force,
+   * and what time brings due.
    */
   const hostTools = async (scope: Scope): Promise<HostTool[]> => {
     const texts = guidanceTexts(files, scope);
     const asked = env.approvals === undefined ? {} : { approvals: env.approvals };
     const lines = await mapLines(texts);
     const [engine, cast, story] = await Promise.all([
-      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: stateScan, grid: gridMoves(lines), map: mapView(lines), ...asked }),
+      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: stateScan, grid: gridMoves(lines), map: mapView(lines), due, ...asked }),
       castTools({ store, writes: app.writes, files: texts, sources, now: () => clock.now() }),
       storyTools({ store, writes: app.writes, files: texts, now: () => clock.now() }),
     ]);
@@ -239,6 +262,9 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     prompts,
     lore,
     runs,
+    player,
+    due,
+    migrated: options.migrated,
     live: app.live,
     reads: () => options.lumiverse()?.reads ?? null,
     stopGeneration: async (generation) => (await options.lumiverse()?.stopGeneration(generation)) ?? false,
@@ -247,5 +273,5 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     clock,
     log: app.log,
   });
-  return { lane, store, harness, env, facts, files, chats, prompts, runs, trace, lore };
+  return { lane, store, harness, env, facts, files, chats, prompts, runs, player, trace, lore };
 }
