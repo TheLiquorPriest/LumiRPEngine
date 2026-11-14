@@ -142,6 +142,12 @@ export interface MigrationReport {
   unreadable: Unreadable[];
   /** Per runtime: what its working copy hadn't sent, and whether it is taken. */
   unsent: { runtime: string; files: number; kept: boolean; why: string }[];
+  /**
+   * Today's runtime the run took (the one this user registered with this Lumiverse), why, the unit
+   * that runs it and the file it was set up from; and every other runtime here, left alone, with why.
+   * Absent from a report kept before runs told runtimes apart.
+   */
+  runtime?: { taken: { name: string; why: string; unit: string | null; source: string | null } | null; leftAlone: { name: string; why: string }[] };
   /** What today's readers tried to write, kept in memory by the stand-in; and their log lines, counted by level. */
   standIn: { writes: AttemptedWrite[]; logged: Record<"debug" | "info" | "warn" | "error", number> };
   /** What today's build put in Lumiverse itself, which stays as it is. */
@@ -158,6 +164,13 @@ export interface MigrationReport {
   landed: Partial<Record<RowId, string>> | null;
   /** What the real run carried besides the chats: the worlds, the settings and those with no home in RPE yet, the settings that name a connection in Lumiverse, the connections; null for a rehearsal. */
   carried: CarriedReport | null;
+  /**
+   * The world revisions the run carried that RPE's store now keeps for the chats it imported, so a
+   * migrated chat's world can be read and written to (`UserStore.copyMigratedWorlds`): added, kept
+   * already, and left out as not a world document (each listed under what could not be read); null
+   * for a rehearsal.
+   */
+  worldsInStore: { added: number; held: number; unreadable: number } | null;
   changes: Changes | null;
   /** Why the real run won't start on this report; none: it may. */
   refusals: string[];
@@ -177,17 +190,19 @@ export interface Whose {
 
 /**
  * Whether the real run may start on a report, and if not, why: the rows' sums, nothing unclassified,
- * the user known and the RPE theirs, the runtime where the run looks for it, the disk. `runtime` is
- * the runtime's folders where neither is there (`Today.runtimeMissing`).
+ * the user known and the RPE theirs, the runtime where the run looks for it and which one is the
+ * user's told, the disk. `runtime.missing` is the runtime's folders where neither is there
+ * (`Today.runtimeMissing`); `runtime.undecided` why the run can't tell which runtime is the user's.
  */
-export function refusalsOf(report: Pick<MigrationReport, "rows" | "notClassified" | "disk">, whose: Whose, runtime: RuntimeFolders | null): string[] {
+export function refusalsOf(report: Pick<MigrationReport, "rows" | "notClassified" | "disk">, whose: Whose, runtime: { missing: RuntimeFolders | null; undecided: string | null }): string[] {
   const out: string[] = [];
   if (!whose.known) out.push("Lumiverse's database has no such user.");
   // One RPE serves one Lumiverse user: its keys, settings and files are that user's alone.
   if (whose.owner !== null && whose.owner !== whose.user) out.push(`This RPE belongs to the Lumiverse user ${whose.owner}, and this run is for ${whose.user}: one RPE serves one Lumiverse user.`);
   for (const other of whose.earlier) if (other !== whose.user) out.push(`An earlier run carried the data of the Lumiverse user ${other} into this data folder, and this run is for ${whose.user}: one RPE serves one Lumiverse user.`);
   // Without its folders the run would carry no unsent writes and no keys, and the backup would lack what going back needs: it says so rather than run as if there were none.
-  if (runtime !== null) out.push(`The runtime's folders are not where this run looks: neither ${runtime.configDir} nor ${runtime.dataDir} is there. Say where they are, or that the server runs no runtime of today's build (--no-runtime).`);
+  if (runtime.missing !== null) out.push(`The runtime's folders are not where this run looks: neither ${runtime.missing.configDir} nor ${runtime.missing.dataDir} is there. Say where they are, or that the server runs no runtime of today's build (--no-runtime).`);
+  if (runtime.undecided !== null) out.push(runtime.undecided);
   for (const r of report.rows) {
     const { found, carried, attached, archived, backup } = r.count;
     if (found !== carried + attached + archived + backup) out.push(`Row "${r.what}": ${found} found, but ${carried} carried, ${attached} attached, ${archived} archived and ${backup} ${KEPT}${r.stranded ? `; ${r.stranded.count} have no place in this run: ${r.stranded.why.join("; ")}` : ""}.`);
@@ -272,6 +287,11 @@ export function reportText(report: MigrationReport): string {
     lines.push("", "Not yet sent by the runtime:");
     for (const u of report.unsent) lines.push(`  ${u.runtime}: ${u.files} file(s), ${u.kept ? "taken" : "not taken"}: ${u.why}`);
   }
+  if (report.runtime !== undefined && (report.runtime.taken !== null || report.runtime.leftAlone.length > 0)) {
+    const { taken, leftAlone } = report.runtime;
+    lines.push("", taken === null ? "Today's runtime: none of this user's taken." : `Today's runtime: took ${taken.name}, ${taken.why}.`);
+    for (const r of leftAlone) lines.push(`  Left alone: ${r.name}, ${r.why}.`);
+  }
   lines.push("", `Today's readers tried ${report.standIn.writes.length} write(s), kept in memory and never made:`);
   for (const w of report.standIn.writes) lines.push(`  ${w.store}: ${w.op} ${w.path}${w.to ? ` to ${w.to}` : ""}`);
   const m = report.lumiverse;
@@ -286,6 +306,10 @@ export function reportText(report: MigrationReport): string {
       else if (keptOnly(r)) lines.push(`  ${r.what}: ${BACKUP_ONLY}`);
       else if (r.count.archived > 0) lines.push(`  ${r.what}: archived, kept in the backup for good, as the plan has it`);
     }
+  }
+  if (report.worldsInStore) {
+    const w = report.worldsInStore;
+    lines.push("", `World revisions RPE's store keeps for the imported chats: ${w.added} added, ${w.held} kept already, ${w.unreadable} left out as not a world document${w.unreadable > 0 ? " (listed under what could not be read)" : ""}.`);
   }
   if (report.carried) {
     const { settings, connections, ownFiles } = report.carried;

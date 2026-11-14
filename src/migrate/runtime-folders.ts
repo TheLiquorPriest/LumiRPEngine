@@ -1,7 +1,11 @@
 // The runtime's own folders on the server (LumiAH's runtime, built into today's build), read without
 // changing them: its config, its own folder (connections, keys, its working copy of the user's
-// documents), the copy of the runtime its service runs, and the service unit. Only the runtimes of
-// this extension are read: a config names the extension it links to.
+// documents), the copy of the runtime its service runs, and the service unit. One account may hold
+// several runtimes of this extension, one per Lumiverse user and per Lumiverse; the run takes the
+// one this user registered with this Lumiverse, as today's extension tells its runtimes apart: the
+// registration in the user's own storage names the runtime and holds the hash of its secret, which
+// the runtime's config holds. Every other runtime is left alone: its config is read to tell whose it
+// is, and nothing else of it is read, kept or backed up.
 //
 // The working copy is where the runtime's writes land first; they reach the extension's storage
 // afterwards. What its journal still names is waiting to be sent, and it is the freshest version of
@@ -33,8 +37,8 @@ export function runtimeFoldersOf(env: Readonly<Record<string, string | undefined
   return { configDir: configDir(env, home), dataDir: `${data !== undefined && data.startsWith("/") ? data : `${home}/.local/share`}/lumiah` };
 }
 
-/** A runtime's config as today's runtime reads it (`configOf`, `H/runtime/config.ts:138-165`): what it runs with, and the unit that keeps it running. */
-export type SavedRuntime = RuntimeConfig & { service: { unit: string; file: string; bun: string; script: string } | null };
+/** A runtime's config as today's runtime reads it (`configOf`, `H/runtime/config.ts:138-165`): what it runs with, the file it was set up from, and the unit that keeps it running. */
+export type SavedRuntime = RuntimeConfig & { source: string | null; service: { unit: string; file: string; bun: string; script: string } | null };
 
 /** A working copy's folder for one user's data of one extension on one Lumiverse (`H/runtime/store/index.ts:307`, `runtime.ts:223-224`). */
 export function copyFolderOf(base: string, username: string, identifier: string): string {
@@ -57,15 +61,32 @@ export interface Unsent {
   why: string;
 }
 
-/** What the runtime's folders hold for this extension. */
+/** Whose runtime a run takes: the user's name in Lumiverse, the text of their registry of runtimes in this Lumiverse's storage (`harness/registry.json`; null where there is none), and the runtime the run was told to take (`--runtime`; null where none was named). */
+export interface RuntimeOwner {
+  username: string | null;
+  registry: string | null;
+  named: string | null;
+}
+
+/** A runtime the run took, and why it is this user's. */
+export interface TakenRuntime {
+  name: string;
+  config: SavedRuntime;
+  why: string;
+}
+
+/** What the runtime's folders hold for this extension and this user. */
 export interface RuntimeRead {
-  /** The runtimes of this extension, by name, with their config as today's runtime reads it. */
-  runtimes: { name: string; config: SavedRuntime }[];
+  /** The runtime the run takes, with its config as today's runtime reads it: at most one. */
+  runtimes: TakenRuntime[];
+  /** The taken runtime's files; nothing of any other runtime's. */
   files: RuntimeFile[];
-  /** Configs that couldn't be read: whose they are isn't known, so they are found and not classified. */
-  unreadable: RuntimeFile[];
-  /** Per runtime that holds a working copy of this user's data: what it hasn't sent. */
+  /** What the taken runtime's working copy of this user's data hasn't sent. */
   unsent: Unsent[];
+  /** Every other runtime of this extension here, and every config that can't be read, by name, with why it is not taken. */
+  leftAlone: { name: string; why: string }[];
+  /** Why the run can't tell which runtime is this user's, and how to tell it; null where it can. */
+  undecided: string | null;
 }
 
 /** A mark as the mirror keeps it (`markOf`, `H/runtime/store/index.ts:269-272`). */
@@ -81,6 +102,22 @@ function parse(text: string | null): unknown {
   } catch {
     return null;
   }
+}
+
+/**
+ * The runtimes a user has registered with this Lumiverse, as today's extension reads its registry
+ * (`registryOf`, LumiAH `extension/backend/registry.ts:53-65`): each registration's id and the
+ * SHA-256 of its secret. Null where there is no registry, or none that today's extension reads.
+ */
+function registrations(text: string | null): Map<string, string> | null {
+  const raw = parse(text);
+  if (!isRecord(raw) || raw.v !== 1) return null;
+  const out = new Map<string, string>();
+  if (!isRecord(raw.relays)) return out;
+  for (const [id, r] of Object.entries(raw.relays)) {
+    if (isRecord(r) && typeof r.name === "string" && typeof r.secret === "string" && typeof r.port === "number" && Number.isInteger(r.port) && r.port >= 1 && r.port <= 65535) out.set(id, r.secret);
+  }
+  return out;
 }
 
 async function names(dir: string): Promise<string[]> {
@@ -121,53 +158,87 @@ async function unsentOf(copyDir: string): Promise<Map<string, string | null>> {
 }
 
 /**
- * Reads the runtime's folders for one extension and one user: `username` is the name the runtime
- * signs in to Lumiverse as, and `mirrorMark` the text of the mark in the extension's storage
- * (`harness/docs/mirror.json`), null when there is none.
+ * Reads the runtime's folders for one extension and one user: the one runtime that is the user's
+ * (`owner`), whole, and of every other one no more than its config. `mirrorMark` is the text of the
+ * mark in the extension's storage (`harness/docs/mirror.json`), null when there is none.
  */
-export async function readRuntimeFolders(folders: RuntimeFolders, identifier: string, username: string | null, mirrorMark: string | null): Promise<RuntimeRead> {
-  const out: RuntimeRead = { runtimes: [], files: [], unreadable: [], unsent: [] };
-  const configFiles = (await walk(folders.configDir)).filter((f) => !f.path.includes("/"));
-  for (const f of configFiles) {
-    if (!f.path.endsWith(".json")) continue;
+export async function readRuntimeFolders(folders: RuntimeFolders, identifier: string, owner: RuntimeOwner, mirrorMark: string | null): Promise<RuntimeRead> {
+  const out: RuntimeRead = { runtimes: [], files: [], unsent: [], leftAlone: [], undecided: null };
+  // Every config here is read to tell whose runtime it is: it names its extension, the user it signs in as, and its registration.
+  const ours: { name: string; config: SavedRuntime; file: string }[] = [];
+  const unreadable: string[] = [];
+  const configured = new Set<string>();
+  for (const f of (await walk(folders.configDir)).filter((f) => !f.path.includes("/") && f.path.endsWith(".json"))) {
     const disk = join(folders.configDir, f.path);
+    configured.add(f.path.slice(0, -".json".length));
     let config: SavedRuntime;
     try {
       config = configOf(await readText(disk), disk);
     } catch {
-      out.unreadable.push({ ...f, path: `config/${f.path}`, disk });
+      unreadable.push(f.path.slice(0, -".json".length));
       continue;
     }
-    if (config.extension !== identifier) continue;
-    out.runtimes.push({ name: config.name, config });
-    out.files.push(...(await beside(folders.configDir, f.path, "config")));
+    configured.add(config.name);
+    if (config.extension === identifier) ours.push({ name: config.name, config, file: f.path });
   }
-  const ours = new Set(out.runtimes.map((r) => r.name));
-  // A runtime folder no config names is this extension's when a working copy in it says so.
+  const regs = registrations(owner.registry);
+  const sameUser = (c: { config: SavedRuntime }): boolean => owner.username !== null && c.config.session.username === owner.username;
+  // Its registration (`register`, LumiAH `extension/backend/relays.ts:185-220`) is kept in this user's storage of this Lumiverse, under the id its config holds, with its secret's hash.
+  const registered = (c: { config: SavedRuntime }): boolean => regs?.get(c.config.relay) === sha256(c.config.secret);
+  let taken: (typeof ours)[number] | null = null;
+  let why = "";
+  if (owner.named !== null) {
+    const named = owner.named;
+    const found = ours.find((c) => c.name === named);
+    if (found === undefined) out.undecided = unreadable.includes(named) ? `The config of the runtime ${named} can't be read, so this run can't take it: set it up again with today's install line, or run with --no-runtime.` : `There is no runtime ${named} of this extension in ${folders.configDir}${ours.length > 0 ? `: there are ${ours.map((c) => c.name).join(", ")}` : ""}.`;
+    else if (!sameUser(found)) out.undecided = `The runtime ${named} signs in to Lumiverse as another user, so its connections and keys are not this user's: this run doesn't take it.`;
+    else [taken, why] = [found, "named with --runtime"];
+  } else {
+    const registeredHere = ours.filter(registered);
+    const [only] = registeredHere;
+    if (registeredHere.length === 1 && only !== undefined) [taken, why] = [only, "registered with this Lumiverse for this user: the registration in their storage holds its secret"];
+    else if (registeredHere.length > 1) out.undecided = `Several runtimes of today's build are registered with this Lumiverse for this user (${registeredHere.map((c) => c.name).join(", ")}): say which one this run takes with --runtime <name>.`;
+    else if (regs === null && ours.some(sameUser)) out.undecided = `This user's storage holds no registration of a runtime (harness/registry.json is missing or isn't one today's build reads), so which runtime here is theirs can't be told by it (${ours.filter(sameUser).map((c) => c.name).join(", ")} sign(s) in as their name): say which with --runtime <name>, or that none is with --no-runtime.`;
+    else if (unreadable.length > 0) out.undecided = `No runtime of today's build is registered with this Lumiverse for this user, and the config of ${unreadable.join(", ")} can't be read, so whether it is theirs can't be told: set it up again with today's install line, or say that no runtime here is theirs with --no-runtime.`;
+  }
+  for (const c of ours) {
+    if (c === taken) continue;
+    const reason = !sameUser(c) ? "signs in to Lumiverse as another user" : registered(c) ? "registered with this Lumiverse for this user as well" : "signs in as this user's name, but is not registered with this Lumiverse for this user: another Lumiverse's runtime, or one whose registration was replaced";
+    out.leftAlone.push({ name: c.name, why: reason });
+  }
+  for (const name of unreadable) out.leftAlone.push({ name, why: "its config can't be read, so whose it is can't be told" });
+  // A runtime folder no config names: this extension's when a working copy in it says so; today's build doesn't run it.
   for (const name of await names(join(folders.dataDir, "runtimes"))) {
-    if (ours.has(name) || !RUNTIME_NAME.test(name)) continue;
+    if (configured.has(name) || !RUNTIME_NAME.test(name)) continue;
     for (const copy of await names(join(folders.dataDir, "runtimes", name, "store"))) {
       const identity = parse(await readText(join(folders.dataDir, "runtimes", name, "store", copy, "identity.json")));
-      if (isRecord(identity) && identity.extension === identifier) ours.add(name);
+      if (!isRecord(identity) || identity.extension !== identifier) continue;
+      out.leftAlone.push({ name, why: "no config names it, so today's build doesn't run it" });
+      break;
     }
   }
-  for (const name of [...ours].sort()) {
+  out.leftAlone.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
+  if (taken !== null) {
+    const { name, config, file } = taken;
+    out.runtimes.push({ name, config, why });
+    out.files.push(...(await beside(folders.configDir, file, "config")));
     const root = join(folders.dataDir, "runtimes", name);
     out.files.push(...(await walk(root)).map((f) => ({ ...f, path: `runtimes/${name}/${f.path}`, disk: join(root, f.path) })));
   }
-  // The copy of the runtime its service runs (`installedCopy`, `H/runtime/update/service.ts:100`), with what a write left beside it.
-  const installed = new Set(out.runtimes.map(({ config }) => config.service?.script ?? join(folders.dataDir, identifier === EXTENSION_IDENTIFIER ? "" : identifier, "lumiah.js")));
-  if (out.runtimes.length === 0 && identifier !== EXTENSION_IDENTIFIER) installed.add(join(folders.dataDir, identifier, "lumiah.js"));
-  for (const path of installed) out.files.push(...(await beside(dirname(path), basename(path), "installed")));
-  // The service unit each config names, with what a rewrite left beside it.
-  for (const { config } of out.runtimes) if (config.service) out.files.push(...(await beside(dirname(config.service.file), basename(config.service.file), "unit")));
-  // What the working copy of this user's data hasn't sent, and whether today's runtime would send it.
-  if (username !== null) {
+  // The copy of the runtime its service runs (`installedCopy`, `H/runtime/update/service.ts:100`), with what a write left beside it: the one every runtime of this extension here runs where no unit names another.
+  const script = taken?.config.service?.script ?? (taken !== null || identifier !== EXTENSION_IDENTIFIER ? join(folders.dataDir, identifier === EXTENSION_IDENTIFIER ? "" : identifier, "lumiah.js") : null);
+  if (script !== null) out.files.push(...(await beside(dirname(script), basename(script), "installed")));
+  // The service unit its config names, with what a rewrite left beside it.
+  const unit = taken?.config.service;
+  if (unit) out.files.push(...(await beside(dirname(unit.file), basename(unit.file), "unit")));
+  // What its working copy of this user's data hasn't sent, and whether today's runtime would send it. The copy is the runtime's own for its Lumiverse, the user it signs in as, and the extension (`H/runtime/runtime.ts:224`).
+  if (taken !== null) {
+    const { name, config } = taken;
     const mark = markOf(parse(mirrorMark));
-    for (const { name, config } of out.runtimes) {
-      const copyDir = join(folders.dataDir, "runtimes", name, "store", copyFolderOf(config.base, username, identifier));
-      const files = await unsentOf(copyDir);
-      if (files.size === 0) continue;
+    const copyDir = join(folders.dataDir, "runtimes", name, "store", copyFolderOf(config.base, config.session.username, identifier));
+    const files = await unsentOf(copyDir);
+    if (files.size > 0) {
       const identity = parse(await readText(join(copyDir, "identity.json")));
       const copy = isRecord(identity) && identity.v === 1 && identity.kind === "working-copy" && typeof identity.copy === "string" ? identity.copy : null;
       const count = isRecord(identity) && typeof identity.count === "number" && Number.isSafeInteger(identity.count) && identity.count >= 0 ? identity.count : 0;

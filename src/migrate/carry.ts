@@ -34,7 +34,7 @@ export interface CarryInput {
 export interface CarriedReport {
   worlds: WorldsCarried;
   settings: SettingsCarried;
-  /** Null: no runtime of this extension signs in as the user, or it keeps no connections; `why`: its files can't be read, and nothing of them is carried. */
+  /** Null: the run took no runtime of today's build (none is this user's here), or it keeps no connections; `why`: its files can't be read, and nothing of them is carried. */
   connections: ConnectionsCarried | { why: string } | null;
   /** Null: the run was not given the file tree's places, and the user's own files are in the backup only. */
   ownFiles: OwnFilesCarried | null;
@@ -52,31 +52,23 @@ const IMPORTED: Partial<Record<RowId, string>> = {
   departures: "Inside each swipe's record, kept word for word beside its turn in the migration's imported_record, read-only",
 };
 
-/** The runtime that signs in to Lumiverse as the user: its connections and keys are the user's. */
-function userRuntime(today: Today): string | null {
-  return today.runtime.runtimes.find((r) => r.config.session.username === today.username)?.name ?? null;
-}
-
 /** Where a run puts a thing found that is carried or attached: into RPE; nowhere yet, its row having no place in this build; or nowhere, with why, though this build carries its row. */
 export type Place = "lands" | "later" | { none: string };
 
 /**
  * Where this run puts each thing that is carried or attached, decided before anything is written. A
  * row this build has no place for yet is `later`, but for each chat's area at its latest turn, which
- * lands as notes. Two rows can be without a place in a run: the connections, where they are not the
- * book of the runtime that signs in as the user, or that book doesn't read; and the user's own files,
- * where the run is not given the file tree's places (`tree`).
+ * lands as notes. Two rows can be without a place in a run: the connections, where the book of the
+ * runtime the run took doesn't read; and the user's own files, where the run is not given the file
+ * tree's places (`tree`).
  */
 export async function placesOf(today: Today, items: readonly Item[], tree: boolean): Promise<(item: Item) => Place> {
-  const runtime = userRuntime(today);
+  // The runtime the run took (`runtime-folders.ts`): the one this user registered with this Lumiverse, its book theirs.
+  const runtime = today.runtime.runtimes[0]?.name ?? null;
   const trouble = runtime === null ? null : await bookTrouble(runtime, today.runtime.files);
   const latest = new Set((await latestAreas(today, items)).values());
   return (item) => {
-    if (item.row === "connections") {
-      const of = /^runtimes\/([^/]+)\//.exec(item.path)?.[1] ?? "";
-      if (of !== runtime) return { none: `the runtime ${of} is not known to sign in to Lumiverse as this user, so its connections and keys are not theirs` };
-      return trouble === null ? "lands" : { none: `the runtime ${of}: ${trouble}` };
-    }
+    if (item.row === "connections") return trouble === null ? "lands" : { none: `the runtime ${runtime}: ${trouble}` };
     if ((item.row === "learned-and-home" || item.row === "author-notes") && !tree) return { none: "this run was not given the file tree's places" };
     if (item.row === "author-notes" && latest.has(item.path)) return "lands";
     return item.row !== null && Object.hasOwn(NO_PLACE_YET, item.row) ? "later" : "lands";
@@ -89,8 +81,8 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
   const user = today.sources.userId;
   const worlds = await carryWorlds(db, user, today.user, report.items, run);
 
-  // The connections of the runtime that signs in to Lumiverse as this user, through the models port the app gives RPH.
-  const runtime = userRuntime(today);
+  // The connections of the runtime the run took, the user's, through the models port the app gives RPH.
+  const runtime = today.runtime.runtimes[0]?.name ?? null;
   const serial = oneToolAtATime(await lumiahSettings(today));
   const connections = runtime === null ? null : await carryConnections(modelsPort(paths, new SecretsFile(paths.secrets)), runtime, today.runtime.files, serial);
   const settings = await carrySettings(today, report.items, paths.globalConfig);

@@ -58,7 +58,7 @@ export interface MigrateResult {
  * unchanging file where no log is there (a read-only open of a database in write-ahead mode would
  * otherwise make its index file beside it).
  */
-function earlierRuns(file: string, user: string): { previous: MigrationReport | null; users: string[] } {
+export function earlierRuns(file: string, user: string): { previous: MigrationReport | null; users: string[] } {
   if (!existsSync(file)) return { previous: null, users: [] };
   const quiet = !existsSync(`${file}-wal`) && !existsSync(`${file}-shm`);
   const db = quiet ? new Database(`file:${encodeURI(file)}?immutable=1`, { readonly: true }) : new Database(file, { readonly: true });
@@ -110,6 +110,10 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       const carried = await carry({ today, report, paths, db, run, tree });
       report.landed = carried.landed;
       report.carried = carried.carried;
+      // The store keeps the world revisions the run carried (its `world_file` table, left as it is), so a migrated chat's world can be read and written to.
+      const kept = s.copyMigratedWorlds();
+      report.worldsInStore = { added: kept.added, held: kept.held, unreadable: kept.unreadable.length };
+      for (const u of kept.unreadable) report.unreadable.push({ path: `RPE's database: world_file ${u.world}/rev/${u.revision}.json`, why: "a world revision the run carried that doesn't read as a world document, so RPE's store doesn't keep it" });
       keepRun(db, sources.userId, run, report, (row) => report.landed?.[row as keyof typeof report.landed] ?? (Object.hasOwn(NO_PLACE_YET, row) ? BACKUP_ONLY : ""));
     } finally {
       db.close();

@@ -23,7 +23,7 @@ import { openToday } from "../../src/migrate/today";
 import { carriedWorlds } from "../../src/migrate/worlds";
 import { ALL_PACKS } from "../../src/packs/index";
 import type { UserId, WorldId } from "../../src/shared/ids";
-import { openStore } from "../../src/store";
+import { openStore, storedWorlds } from "../../src/store";
 import { NOTES_FOLDER, TreeChats } from "../../src/tree";
 import { buildFixture, CHARACTER, CHAT, SECRETS, STRAY, USER, type Fixture } from "./fixture";
 import { readable, TREE as tree } from "./tree";
@@ -88,6 +88,27 @@ describe("what the real run carries besides the chats", () => {
     try {
       const head = await carriedWorlds(db, USER, registry).get(fixture.worldId as WorldId, user);
       expect(head.world.lorePins).toEqual({ characters: { "e-ada": [{ lore: "lore-harbour" }] }, places: {}, steps: {} });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("RPE's store keeps every world revision the run carried, so a migrated chat's world revision is found by the store's own resolver", async () => {
+    expect(report.worldsInStore).toEqual({ added: 2, held: 0, unreadable: 0 });
+    const db = new Database(join(data, "rpe.db"));
+    try {
+      const revision = openStore({ db, registry, worlds: () => undefined }).user(USER).chat(CHAT.classic)?.revision ?? null;
+      expect(revision).toBe(fixture.revisions[0] ?? "");
+      if (revision === null) return;
+      const doc = storedWorlds(db)(revision);
+      expect(doc?.id).toBe(fixture.worldId);
+      // Read as today's world store reads that revision: the same document.
+      const today = await openToday(fixture.sources);
+      try {
+        expect(doc).toEqual((await today.reader.worldStore.get(fixture.worldId as WorldId, user, revision)).world);
+      } finally {
+        today.close();
+      }
     } finally {
       db.close();
     }
@@ -173,6 +194,8 @@ describe("what the real run carries besides the chats", () => {
     await writeFile(lumiah, (await readFile(lumiah, "utf8")).replace('"include"', '"leave_out"'));
     const second = await migrate(fixture.sources, { data, tree, now: () => new Date("2026-11-14T10:00:00.000Z") });
     expect(second.ran).toBe(true);
+    // The revisions the store keeps already are kept once: a draft edited in Build is no new revision.
+    expect(second.report.worldsInStore).toEqual({ added: 0, held: 2, unreadable: 0 });
     expect(second.report.changes?.changed.sort()).toEqual([`user storage: worlds/${fixture.worldId}/draft.json`, "user storage: harness/settings.json"].sort());
     await sameWorlds();
     const db = new Database(join(data, "rpe.db"), { readonly: true });

@@ -132,7 +132,7 @@ export async function bookTrouble(runtime: string, files: readonly RuntimeFile[]
 /**
  * Carries the runtime's connections and keys into RPE's two documents through `port`: the secrets
  * first, as the model layer saves them, then the connections. `files` are the runtime's files the
- * migration found; `runtime` the runtime that signs in as the user. Null when that runtime keeps no
+ * migration found; `runtime` the runtime it took, the one this user registered. Null when that runtime keeps no
  * connections; `{ why }` when its files can't be read, and nothing is carried.
  */
 export async function carryConnections(port: ModelsPort, runtime: string, files: readonly RuntimeFile[], serial: ReadonlySet<string>): Promise<ConnectionsCarried | { why: string } | null> {

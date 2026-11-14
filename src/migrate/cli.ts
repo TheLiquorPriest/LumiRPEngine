@@ -12,7 +12,7 @@ import { reportText } from "./report";
 
 const USAGE = [
   "rpe migrate [--rehearse] --lumiverse <folder> --user <id> [--data <folder>]",
-  "            [--runtime-config <folder> --runtime-data <folder> | --no-runtime]",
+  "            [--runtime-config <folder> --runtime-data <folder>] [--runtime <name> | --no-runtime]",
   "            [--identifier <id>] [--json]",
   "",
   "  --rehearse          read everything, write nothing, print the report",
@@ -21,7 +21,9 @@ const USAGE = [
   "  --data              RPE's data folder: the only place the real run writes (default: RPE's own)",
   "  --runtime-config    today's runtime's config folder (default: as today's runtime finds it, ~/.config/lumiah)",
   "  --runtime-data      today's runtime's data folder (default: as today's runtime finds it, ~/.local/share/lumiah)",
-  "  --no-runtime        the server runs no runtime of today's build",
+  "  --runtime           the runtime of today's build that is this user's (default: the one they registered",
+  "                      with this Lumiverse); every other runtime there is left alone",
+  "  --no-runtime        the server runs no runtime of today's build for this user",
   "  --identifier        the extension's identifier in Lumiverse (default: lumi_rp_engine)",
   "  --json              print the report as JSON instead of words",
 ].join("\n");
@@ -29,7 +31,7 @@ const USAGE = [
 /** The extension's identifier as its manifest names it (`spindle.json`). */
 const IDENTIFIER = "lumi_rp_engine";
 
-const VALUED = ["lumiverse", "user", "data", "runtime-config", "runtime-data", "identifier"] as const;
+const VALUED = ["lumiverse", "user", "data", "runtime-config", "runtime-data", "runtime", "identifier"] as const;
 const SWITCHES = ["rehearse", "no-runtime", "json"] as const;
 
 export interface CliIo {
@@ -63,10 +65,14 @@ export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeL
     io.err(`--lumiverse, --user and --data are needed.\n\n${USAGE}`);
     return 2;
   }
+  if (switches.has("no-runtime") && values.runtime !== undefined) {
+    io.err(`--runtime names a runtime to take and --no-runtime says there is none: give one of them.\n\n${USAGE}`);
+    return 2;
+  }
   const found = runtimeFoldersOf(io.env, io.home);
   const runtime = switches.has("no-runtime") ? null : { configDir: values["runtime-config"] ?? found.configDir, dataDir: values["runtime-data"] ?? found.dataDir };
   try {
-    const { report, ran } = await migrate({ lumiverse, identifier: values.identifier ?? IDENTIFIER, userId: user, runtime }, { data, rehearse: switches.has("rehearse"), version: io.env.LRE_BUILD_ID ?? "dev", env: io.env, tree });
+    const { report, ran } = await migrate({ lumiverse, identifier: values.identifier ?? IDENTIFIER, userId: user, runtime, ...(values.runtime !== undefined ? { runtimeName: values.runtime } : {}) }, { data, rehearse: switches.has("rehearse"), version: io.env.LRE_BUILD_ID ?? "dev", env: io.env, tree });
     io.out(switches.has("json") ? `${JSON.stringify(report, null, 2)}\n` : reportText(report));
     return switches.has("rehearse") || ran ? 0 : 1;
   } catch (error) {

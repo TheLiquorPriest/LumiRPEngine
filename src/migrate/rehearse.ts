@@ -239,11 +239,6 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       const bytes = await readBytes(f.disk);
       items.push(itemOf("runtime", f.path, { bytes: bytes?.length ?? f.bytes, sha256: sha256(bytes ?? new Uint8Array()) }, f.link ? null : classifyRuntime(f.path), f.link ? "a symbolic link, which the migration doesn't follow" : undefined));
     }
-    for (const f of found.runtime.unreadable) {
-      const bytes = await readBytes(f.disk);
-      items.push(itemOf("runtime", f.path, { bytes: f.bytes, sha256: sha256(bytes ?? new Uint8Array()) }, null, "a runtime config that can't be read, so whose it is isn't known"));
-      unreadable.push({ path: `runtime: ${f.path}`, why: "a runtime config that can't be read, so whose it is isn't known" });
-    }
     for (const chat of chatRows) items.push(...chatEntries(chat, sources.identifier));
     for (const m of db.engineMessages(sources.userId, sources.identifier)) items.push(messageEntry(m, sources.identifier, unreadable));
 
@@ -402,6 +397,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       chats,
       unreadable,
       unsent: found.runtime.unsent.map((u) => ({ runtime: u.runtime, files: u.files.size, kept: u.kept, why: u.why })),
+      runtime: { taken: found.runtime.runtimes.map(({ name, why, config }) => ({ name, why, unit: config.service?.unit ?? null, source: config.source })).at(0) ?? null, leftAlone: found.runtime.leftAlone },
       standIn: { writes, logged },
       lumiverse: db.marks(sources.userId, chatRows),
       disk,
@@ -410,10 +406,11 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       backup: null,
       landed: null,
       carried: null,
+      worldsInStore: null,
       changes: null,
       refusals: [],
     };
-    report.refusals = refusalsOf(report, { user: sources.userId, known: found.username !== null, owner: options.rpe?.owner ?? null, earlier: options.rpe?.earlier ?? [] }, found.runtimeMissing);
+    report.refusals = refusalsOf(report, { user: sources.userId, known: found.username !== null, owner: options.rpe?.owner ?? null, earlier: options.rpe?.earlier ?? [] }, { missing: found.runtimeMissing, undecided: found.runtime.undecided });
     if (options.previous) report.changes = changesSince(options.previous, report);
     return report;
   }

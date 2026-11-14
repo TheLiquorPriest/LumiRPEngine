@@ -12,12 +12,13 @@ import { ChatReader } from "./chats";
 import { readRuntimeFolders, type RuntimeFolders, type RuntimeRead } from "./runtime-folders";
 import { StandIn, StorageView, type AttemptedWrite } from "./stand-in";
 
-/** Where today's data is: Lumiverse's data folder, the extension's identifier there, the one user whose data migrates, and the runtime's folders (null: the server runs none). */
+/** Where today's data is: Lumiverse's data folder, the extension's identifier there, the one user whose data migrates, and the runtime's folders (null: the server runs none), with the runtime there the run is told to take (absent: the one the user registered with this Lumiverse). */
 export interface Sources {
   lumiverse: string;
   identifier: string;
   userId: string;
   runtime: RuntimeFolders | null;
+  runtimeName?: string;
 }
 
 /**
@@ -29,7 +30,7 @@ export function storageFolders(sources: Pick<Sources, "lumiverse" | "identifier"
   return { user: join(sources.lumiverse, "users", sources.userId, "extensions", sources.identifier), extension: join(sources.lumiverse, "extensions", sources.identifier, "storage") };
 }
 
-const EMPTY_RUNTIME: RuntimeRead = { runtimes: [], files: [], unreadable: [], unsent: [] };
+const EMPTY_RUNTIME: RuntimeRead = { runtimes: [], files: [], unsent: [], leftAlone: [], undecided: null };
 
 export interface Today {
   sources: Sources;
@@ -66,7 +67,9 @@ export async function openToday(sources: Sources): Promise<Today> {
     const user = existsSync(folders.user) ? folders.user : null;
     const extension = existsSync(folders.extension) ? folders.extension : null;
     const mark = user === null ? null : await readText(join(user, "harness", "docs", "mirror.json"));
-    const runtime = sources.runtime === null ? EMPTY_RUNTIME : await readRuntimeFolders(sources.runtime, sources.identifier, username, mark);
+    // Today's extension keeps each user's runtimes' registrations in that user's own storage (LumiAH `extension/backend/registry.ts`, under `harness/`).
+    const registry = user === null ? null : await readText(join(user, "harness", "registry.json"));
+    const runtime = sources.runtime === null ? EMPTY_RUNTIME : await readRuntimeFolders(sources.runtime, sources.identifier, { username, registry, named: sources.runtimeName ?? null }, mark);
     const pending = new Map<string, string | null>();
     for (const u of runtime.unsent) if (u.kept) for (const [path, text] of u.files) pending.set(path, text);
     // Today's own readers run over the stand-in: what they write stays in memory, listed in `writes`.

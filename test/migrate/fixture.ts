@@ -331,7 +331,8 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
     skills: { "tide-tables": { id: "tide-tables", name: "Tide tables", description: "When the pier floods.", body: "Read the harbour's tide table before any walk on the pier." } },
   };
   await user("harness/settings.json", JSON.stringify({ v: 1, rev: 3, own: lumiahOwn, texts: { "lumiah.writer": "Write short." }, definitions }));
-  await user("harness/registry.json", JSON.stringify({ v: 1, key: { hash: sha("lah_key"), print: "lah_…", at: 1 }, relays: { "relay-1": { id: "relay-1", secret: sha("relay secret") } }, replied: {} }));
+  // The runtime's registration as today's extension keeps it (`register`): its name, its secret's hash, where it listens.
+  await user("harness/registry.json", JSON.stringify({ v: 1, key: { hash: sha("lah_key"), print: "lah_…", at: 1 }, relays: { "relay-1": { id: "relay-1", name: RUNTIME, secret: sha("relay secret"), build: "b1", host: "server", listen: "127.0.0.1", port: 7861, registeredAt: 1, report: null } }, replied: false }));
   await user("harness/mirror-holder.json", JSON.stringify({ v: 1, holder: { relay: "relay-1", copy: "copy-0001", process: "proc-1", owner: "home" }, gen: 0 }));
   await user("harness/chats.json", JSON.stringify({ v: 1, on: { [CHAT.harness]: { since: 1, prior: null, priorModel: null } }, story: { [CHAT.harness]: { mode: "full" } } }));
   await user("harness/turns.json", JSON.stringify({ v: 1, open: {} }));
@@ -455,6 +456,33 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
     missingBlob,
     remove: () => rm(root, { recursive: true, force: true }),
   };
+}
+
+/** The invented keys of the runtimes beside this user's under the same account: another user's, and this user's on another Lumiverse. None may reach anything a run writes. */
+export const NEIGHBOUR_KEYS = { neighbour: "sk-neighbour-invented-7788", away: "sk-away-invented-9911" } as const;
+
+/**
+ * Two more runtimes of this extension under the account: `neighbour`, another Lumiverse user's on
+ * this Lumiverse, with its own unit, keys and working copy; and `away`, this user's name on another
+ * Lumiverse. Neither is registered in this user's storage.
+ */
+export async function addNeighbours(fixture: Fixture): Promise<void> {
+  const { configDir, dataDir } = fixture.sources.runtime ?? { configDir: "", dataDir: "" };
+  const unitFile = join(fixture.root, "home", ".config", "systemd", "user", "lumiah-neighbour.service");
+  const runtime = (name: string, base: string, username: string, relay: string, service: JsonObject | null): string =>
+    `${JSON.stringify({ lumiah: 1, runtime: { name, base, extension: IDENT, listen: "127.0.0.1", port: 7871, relay, secret: `${name} relay secret`, session: { username, token: `${name}-session-token`, savedAt: 1 }, tuning: {}, memory: "1G", autoUpdate: true, source: null, service } }, null, 2)}\n`;
+  await put(join(configDir, "neighbour.json"), runtime("neighbour", BASE, "neighbour-player", "relay-9", { manager: "systemd", unit: "lumiah-neighbour.service", file: unitFile, bun: "/opt/bun/bin/bun", script: join(dataDir, IDENT, "lumiah.js") }));
+  await put(unitFile, "[Service]\nExecStart=/opt/bun/bin/bun lumiah.js serve --config neighbour.json\n");
+  await put(join(configDir, "away.json"), runtime("away", "http://127.0.0.1:9900", USERNAME, "relay-away", null));
+  for (const [name, key] of Object.entries(NEIGHBOUR_KEYS)) {
+    const dir = join(dataDir, "runtimes", name);
+    await put(join(dir, "connections.json"), JSON.stringify({ lumiah: 1, default: `conn-${name}`, connections: [{ id: `conn-${name}`, name: `${name}'s`, provider: "deepseek", auth: "key", model: "deepseek-chat" }] }));
+    await put(join(dir, "secrets.json"), JSON.stringify({ lumiah: 1, keys: { [`conn-${name}`]: key }, signins: {} }));
+  }
+  const copy = join(dataDir, "runtimes", "neighbour", "store", copyFolderOf(BASE, "neighbour-player", IDENT));
+  await put(join(copy, "identity.json"), JSON.stringify({ v: 1, kind: "working-copy", lumiverse: BASE, user: "neighbour-player", extension: IDENT, copy: "copy-9", count: 1, seen: 0 }));
+  await put(join(copy, "docs", "upkeep.json"), JSON.stringify({ v: 1, note: NEIGHBOUR_KEYS.neighbour }));
+  await put(join(copy, "journal", `d.${sha("upkeep.json")}`), JSON.stringify({ path: "upkeep.json", at: 1 }));
 }
 
 /** Every file under a folder, by path, with its SHA-256: what a run must leave exactly as it found. */

@@ -13,8 +13,12 @@ import { join, resolve } from "node:path";
 import type { ConnectionInput, ConnectionList, ConnectionView, Effort } from "rp-harness/contract";
 import { EXTENSION_IDENTIFIER } from "../adapter/lumiverse/pipe-wire";
 import { LumiverseError, LumiverseSession, type StoredSignIn } from "../adapter/lumiverse/session";
+import { goingBack } from "../migrate/going-back";
+import { earlierRuns } from "../migrate/migrate";
 import { migrateCli } from "../migrate/cli";
 import type { TreeLayout } from "../migrate/own-files";
+import { runtimeFoldersOf } from "../migrate/runtime-folders";
+import { swap, type SwapResult } from "../migrate/swap";
 import { isRecord } from "../shared/json";
 import { TREE_MIGRATIONS, TreeChats } from "../tree/chats";
 import { CHATS_FOLDER, GLOBAL_FOLDERS, NOTES_FOLDER } from "../tree/layout";
@@ -30,7 +34,7 @@ import { appliedMigrations, migrate, Migrations } from "./migrations";
 import { APP_MIGRATIONS } from "./schema";
 import { SecretsFile } from "./secrets";
 import { listSwitches, setSwitch } from "./switches";
-import { extensionState, type LumiverseCall, settleConnection, type SettledConnection } from "./up";
+import { accountSystemctl, extensionState, type LumiverseCall, removeRpeService, rpeService, rpeServiceOf, rpeUnitText, serviceNameOf, settleConnection, type SettledConnection, startRpeService } from "./up";
 
 export interface CliIO {
   out(line: string): void;
@@ -54,9 +58,16 @@ export interface CliOptions {
 const USAGE = [
   "rpe: RPEngine's own application.",
   "",
-  "  rpe up --url <address> --user <username>",
+  "  rpe up --url <address> --user <username> [--systemd] [--name <name>]",
+  "         [--lumiverse <folder> [--runtime <name> | --no-runtime] [--runtime-config <folder>]",
+  "          [--runtime-data <folder>] [--identifier <id>]]",
   "                                 set RPE up with Lumiverse: sign in, make RPE's connection there,",
-  "                                 and say what is left to do; run again, it changes nothing",
+  "                                 and say what is left to do; run again, it changes nothing.",
+  "                                 --systemd: run RPE as a service of this account (rpe-<name>.service).",
+  "                                 --lumiverse: the swap: wait for today's build to be idle, stop and",
+  "                                 remove its service, migrate again from Lumiverse's data folder, and",
+  "                                 start RPE's service in its place",
+  "  rpe down                       stop and remove RPE's service; its data stays where it is",
   "  rpe serve                      run RPE in the foreground",
   "  rpe status                     what this RPE is, and whether it answers",
   "  rpe version                    this build's id (also rpe --version)",
@@ -81,10 +92,9 @@ const USAGE = [
   "Every command takes --data <folder>: the data folder (default: $RPE_DATA, else ~/.local/share/rpe).",
 ].join("\n");
 
-/** The flags each command takes. */
+/** The flags each command takes. `up` and `down` read their own lines: `up` takes switches as well. */
 const FLAGS: Readonly<Record<string, readonly string[]>> = {
   serve: ["data"],
-  up: ["data", "url", "user"],
   status: ["data"],
   lumiverse: ["data", "url", "user", "database", "connection"],
   key: ["data"],
@@ -320,16 +330,40 @@ async function keptSession(url: string, username: string, paths: DataPaths, conf
   return session;
 }
 
+/** The switches `rpe up` takes beside its flags, and its flags. */
+const UP_SWITCHES = ["systemd", "no-runtime"] as const;
+const UP_FLAGS = ["data", "url", "user", "name", "lumiverse", "runtime", "runtime-config", "runtime-data", "identifier"] as const;
+/** A service's name, as it goes into its unit's name: as today's runtime's names are held (LumiAH `RUNTIME_NAME`). */
+const SERVICE_NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+
 /**
- * `rpe up` (plan §4.6): the one command a new install runs. It signs in to Lumiverse (a kept sign-in
- * to the same Lumiverse and user that still holds is used as it is, and no password is asked), makes
- * RPE's connection there or brings it into line (up.ts), keeps its id in `lumiverse.connection`, and
+ * `rpe up` (plan §4.6, §15.3 step 10): the one command a new install runs, and the swap. It signs in
+ * to Lumiverse (a kept sign-in to the same Lumiverse and user that still holds is used as it is, and
+ * no password is asked), makes RPE's connection there or brings it into line (up.ts; today's build's
+ * own connection is never changed), and keeps its id in `lumiverse.connection`. Given Lumiverse's
+ * data folder (`--lumiverse`), it then swaps (src/migrate/swap.ts): it waits for today's build to be
+ * idle, stops and removes today's service, migrates again from the start, shows the report, and
+ * starts RPE's service in the old one's place. RPE's service (`--systemd`) is a unit of the account;
+ * one already there for this data folder is kept, and started again on what this run wrote. Last it
  * says what is left for the user to do. What already matches is left alone, so a second run changes
  * nothing.
  */
-async function upCommand(flags: Flags, paths: DataPaths, config: AppConfig, io: CliIO, version: string): Promise<number> {
+async function upCommand(argv: readonly string[], io: CliIO, version: string): Promise<number> {
+  const switched = argv.filter((a) => a.startsWith("--") && (UP_SWITCHES as readonly string[]).includes(a.slice(2)));
+  const switches = new Set(switched.map((a) => a.slice(2)));
+  const { words, flags } = parseArgs(
+    argv.filter((a) => !switched.includes(a)),
+    UP_FLAGS,
+  );
   const username = flags.user;
+  if (words.length > 0) throw new UsageError("rpe up takes no words.");
   if (flags.url === undefined || username === undefined) throw new UsageError("rpe up needs --url and --user.");
+  const swapping = flags.lumiverse !== undefined;
+  if (!swapping && (switches.has("no-runtime") || flags.runtime !== undefined || flags["runtime-config"] !== undefined || flags["runtime-data"] !== undefined || flags.identifier !== undefined)) throw new UsageError("--runtime, --no-runtime, --runtime-config, --runtime-data and --identifier say where today's build is: they go with --lumiverse.");
+  if (switches.has("no-runtime") && flags.runtime !== undefined) throw new UsageError("--runtime names a runtime to take and --no-runtime says there is none: give one of them.");
+  if (flags.name !== undefined && !SERVICE_NAME.test(flags.name)) throw new UsageError(`--name is "${flags.name}": use lowercase letters, digits, _ and -, up to 40.`);
+  const paths = dataPaths(flags.data ?? defaultDataFolder(io.env, io.home));
+  const config = await loadConfig(paths, io.env);
   const url = webAddress(flags.url, "--url");
   const kept = await keptSession(url, username, paths, config, io);
   const session = kept ?? (await signInTo(url, username, {}, paths, config, io));
@@ -356,22 +390,85 @@ async function upCommand(flags: Flags, paths: DataPaths, config: AppConfig, io: 
     });
   }
   const named = `"${settled.name}" (${settled.id})`;
+  if (settled.todays !== null) io.out(`The connection ${settled.todays} that RPE's config named is the one today's build made for its runtime: it is left as it is, for going back.`);
   if (settled.made) io.out(`Made RPE's connection in Lumiverse, ${named}: OpenAI-compatible, at ${apiUrl}, with a new provider key only it holds.`);
   else if (settled.changed.length > 0) io.out(`Brought RPE's connection in Lumiverse, ${named}, up to date: ${settled.changed.join(", ")}.`);
   else io.out(`RPE's connection in Lumiverse, ${named}, is already as it should be.`);
   if (settled.newKey && hadKey) io.out("A new provider key was made for it, and the one before it no longer works.");
+
+  // RPE's service: its unit for this data folder where there is one, else one named for this RPE, which must be no other RPE's.
+  const data = resolve(paths.root);
+  const systemctl = accountSystemctl(io.env, process.getuid?.() ?? null);
+  const existing = await rpeServiceOf(data, io.env, io.home);
+  const service = rpeService(flags.name ?? existing?.name ?? serviceNameOf(username), io.env, io.home);
+  if (service.unit !== existing?.unit && existsSync(service.file) && (switches.has("systemd") || swapping)) {
+    io.err(`${service.file} is a unit for something other than this RPE (another data folder's): give this RPE's service a name of its own with --name. Nothing was stopped or changed.`);
+    return 1;
+  }
+  let swapped: SwapResult | null = null;
+  if (swapping) {
+    const user = current.lumiverse.user;
+    if (user === null) throw new Error("RPE's config names no Lumiverse user after the sign-in.");
+    // The migration is the data folder's one writer: a running RPE outside a service is stopped by the user, one in its service by the swap.
+    const answer = await serverAnswer(current, io);
+    if (answer !== null && "rpe" in answer && existing === null) {
+      io.err(`RPE is running at ${serverUrl(current)}, outside a service: stop it (rpe serve), then run rpe up again. Nothing was stopped or changed.`);
+      return 1;
+    }
+    const found = runtimeFoldersOf(io.env, io.home);
+    const runtime = switches.has("no-runtime") ? null : { configDir: flags["runtime-config"] ?? found.configDir, dataDir: flags["runtime-data"] ?? found.dataDir };
+    swapped = await swap(
+      { sources: { lumiverse: resolve(flags.lumiverse ?? ""), identifier: flags.identifier ?? EXTENSION_IDENTIFIER, userId: user, runtime, ...(flags.runtime !== undefined ? { runtimeName: flags.runtime } : {}) }, options: { data: paths.root, version, env: io.env, tree: treeLayout() }, rpeUnit: existing?.unit ?? null },
+      { out: io.out, fetch: io.fetch, now: io.now, sleep: (ms) => Bun.sleep(ms), systemctl, env: io.env, home: io.home },
+    );
+    if (!swapped.ok) return 1;
+  }
+  const replaced = swapped?.took?.unit ?? null;
+  const runs = switches.has("systemd") || existing !== null || replaced !== null;
+  if (runs) {
+    if (existing !== null && existing.unit !== service.unit) await removeRpeService(existing, systemctl);
+    await startRpeService(service, rpeUnitText({ name: service.name, bun: process.execPath, script: Bun.main, data }), systemctl);
+    io.out(replaced !== null ? `Started ${service.unit}, RPE's service, in the place of ${replaced}.` : `Started ${service.unit}, RPE's service.`);
+  }
+
   const left: string[] = [];
   const extension = await extensionState(call, EXTENSION_IDENTIFIER);
   if (extension === "missing") left.push("Install RPE's extension in Lumiverse, from its git repository's standalone branch, and have an admin approve the permissions it asks for.");
   if (extension === "off") left.push("Switch RPE's extension on in Lumiverse.");
-  const answer = await serverAnswer(current, io);
-  if (answer === null) left.push("Start RPE: rpe serve.");
-  else if (!("rpe" in answer)) left.push(`Something other than RPE answers at ${serverUrl(current)}: give RPE a free port ("port" in its config, or RPE_PORT), and run rpe up again.`);
-  else if (kept === null || moved) left.push("Restart RPE (stop rpe serve and start it again) so it takes this.");
+  if (runs) left.push(`See that RPE answers: rpe status (its service's own log: journalctl --user -u ${service.unit}).`);
+  else {
+    const answer = await serverAnswer(current, io);
+    if (answer === null) left.push("Start RPE: rpe serve.");
+    else if (!("rpe" in answer)) left.push(`Something other than RPE answers at ${serverUrl(current)}: give RPE a free port ("port" in its config, or RPE_PORT), and run rpe up again.`);
+    else if (kept === null || moved) left.push("Restart RPE (stop rpe serve and start it again) so it takes this.");
+  }
   left.push(`In Lumiverse, choose the connection "${settled.name}" for the chats RPE should play.`);
   io.out("");
   io.out("What is left for you to do:");
   left.forEach((line, i) => io.out(`  ${i + 1}. ${line}`));
+  return 0;
+}
+
+/**
+ * `rpe down` (plan §15.6 step 1): stops and removes RPE's service for its data folder, and leaves
+ * the data where it is; then the steps of going back, with the runtime the last run took the place of.
+ */
+async function downCommand(argv: readonly string[], io: CliIO): Promise<number> {
+  const { words, flags } = parseArgs(argv, ["data"]);
+  if (words.length > 0) throw new UsageError("rpe down takes no words.");
+  const paths = dataPaths(flags.data ?? defaultDataFolder(io.env, io.home));
+  const config = await loadConfig(paths, io.env);
+  const data = resolve(paths.root);
+  const service = await rpeServiceOf(data, io.env, io.home);
+  if (service === null) io.out(`RPE has no service for the data folder ${data}: nothing to stop.`);
+  else {
+    await removeRpeService(service, accountSystemctl(io.env, process.getuid?.() ?? null));
+    io.out(`Stopped and removed ${service.unit}. RPE's data stays where it is, in ${data}.`);
+  }
+  const user = config.lumiverse.user;
+  const taken = user === null ? null : (earlierRuns(paths.database, user).previous?.runtime?.taken ?? null);
+  io.out("");
+  for (const line of goingBack({ identifier: EXTENSION_IDENTIFIER, runtime: taken === null ? null : { name: taken.name, source: taken.source } })) io.out(line);
   return 0;
 }
 
@@ -474,14 +571,9 @@ async function connectionCommand(words: readonly string[], flags: Flags, paths: 
   throw new UsageError("rpe connection takes list, add or remove <name or id>.");
 }
 
-/**
- * `rpe migrate`: the migration's own command line (src/migrate/cli.ts), into RPE's data folder unless
- * the line names another; the user's own files into the folders the file tree's layout gives them,
- * each chat's notes into that chat's own folder, placed as the tree places a chat.
- */
-async function migrateCommand(rest: readonly string[], io: CliIO, version: string): Promise<number> {
-  const line = rest.includes("--data") ? rest : [...rest, "--data", defaultDataFolder(io.env, io.home)];
-  const tree: TreeLayout = {
+/** The file tree's layout as the migration takes it: the folders of the user's own files, the tree's tables, and each chat's own folder, placed as the tree places a chat. */
+function treeLayout(): TreeLayout {
+  return {
     agents: GLOBAL_FOLDERS.agents,
     skills: GLOBAL_FOLDERS.skills,
     prompts: GLOBAL_FOLDERS.prompts,
@@ -493,8 +585,17 @@ async function migrateCommand(rest: readonly string[], io: CliIO, version: strin
       return join(CHATS_FOLDER, at.character, at.chat);
     },
   };
+}
+
+/**
+ * `rpe migrate`: the migration's own command line (src/migrate/cli.ts), into RPE's data folder unless
+ * the line names another; the user's own files into the folders the file tree's layout gives them,
+ * each chat's notes into that chat's own folder, placed as the tree places a chat.
+ */
+async function migrateCommand(rest: readonly string[], io: CliIO, version: string): Promise<number> {
+  const line = rest.includes("--data") ? rest : [...rest, "--data", defaultDataFolder(io.env, io.home)];
   // Its output is whole texts, this one's lines; and it reads the build's id from the environment, where a built `rpe` does not put it.
-  return await migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, tree);
+  return await migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, treeLayout());
 }
 
 async function serveCommand(paths: DataPaths, config: AppConfig, io: CliIO, options: CliOptions): Promise<number> {
@@ -527,21 +628,21 @@ export async function runCli(argv: readonly string[], io: CliIO, options: CliOpt
       io.out(`rpe ${options.version}`);
       return 0;
     }
-    // The migration reads its own line, and writes only once it is not a rehearsal.
+    // The migration reads its own line, and writes only once it is not a rehearsal; `up` and `down` read theirs, `up` with its switches.
     if (command === "migrate") return await migrateCommand(rest, io, options.version);
+    if (command === "up") return await upCommand(rest, io, options.version);
+    if (command === "down") return await downCommand(rest, io);
     const allowed = FLAGS[command];
     if (allowed === undefined) throw new UsageError(`rpe has no command "${command}".`);
     const { words, flags } = parseArgs(rest, allowed);
     const paths = dataPaths(flags.data ?? defaultDataFolder(io.env, io.home));
     const config = await loadConfig(paths, io.env);
-    if ((command === "serve" || command === "up" || command === "status" || command === "backup" || command === "lumiverse") && words.length > 0) throw new UsageError(`rpe ${command} takes no words.`);
+    if ((command === "serve" || command === "status" || command === "backup" || command === "lumiverse") && words.length > 0) throw new UsageError(`rpe ${command} takes no words.`);
     switch (command) {
       case "serve":
         return await serveCommand(paths, config, io, options);
       case "status":
         return await statusCommand(paths, config, io, options.version);
-      case "up":
-        return await upCommand(flags, paths, config, io, options.version);
       case "lumiverse":
         return await lumiverseCommand(flags, paths, config, io);
       case "backup": {
