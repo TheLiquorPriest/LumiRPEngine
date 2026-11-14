@@ -46,6 +46,8 @@ export const ROWS = [
   { id: "rollback", what: "A rollback of the agents engine's last compaction that you asked for and that had not been applied", fate: "archived", found: "own" },
   { id: "chips-staged", what: "Review cards and stored chips; staged changes", fate: "carried", found: "own" },
   { id: "old-engine-notes", what: "The classic pipeline's re-narrate lines and the agents engine's kept scene", fate: "archived", found: "own" },
+  // Not in the plan's table, which predates it: the depth engine's files, found by the rehearsal on the test instance. Archived for the plan's own reason (it steered only an engine that is gone); see `DEPTH_GONE` in classify.ts.
+  { id: "depth-engine", what: "The depth engine's files, left by a build before today's: each chat's switch to it, its bootstrap of the chat, the layer of what it landed, its search index of the chat, its loopback registry and its day's spend", fate: "archived", found: "own" },
   { id: "pins", what: "Pins", fate: "carried", found: "inside" },
   { id: "settings", what: "Your settings", fate: "carried", found: "own" },
   { id: "model-choices", what: "Which model each kind of work uses, where a setting names a connection that lives in Lumiverse", fate: "carried", found: "inside" },

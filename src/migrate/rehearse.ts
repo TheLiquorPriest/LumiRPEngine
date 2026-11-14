@@ -381,6 +381,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       imports: null,
       backup: null,
       landed: null,
+      carried: null,
       changes: null,
       refusals: [],
     };

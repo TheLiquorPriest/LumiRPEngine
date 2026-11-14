@@ -10,6 +10,7 @@ import type { Unreadable } from "./inside";
 import type { LumiverseMarks } from "./lumiverse-db";
 import type { Fate, Found, RowId } from "./rows";
 import type { ChatEngine, JournalRead } from "./chats";
+import type { CarriedReport } from "./carry";
 
 export const REPORT_FORMAT = "rpe-migration-report-v1";
 
@@ -143,6 +144,8 @@ export interface MigrationReport {
   backup: { path: string; bytes: number; sha256: string } | null;
   /** Where each row's things now are in RPE, by row; null for a rehearsal (`carry.ts`). */
   landed: Partial<Record<RowId, string>> | null;
+  /** What the real run carried besides the chats: the worlds, the settings and those with no home in RPE yet, the settings that name a connection in Lumiverse, the connections; null for a rehearsal. */
+  carried: CarriedReport | null;
   changes: Changes | null;
   /** Why the real run won't start on this report; none: it may. */
   refusals: string[];
@@ -243,6 +246,23 @@ export function reportText(report: MigrationReport): string {
       const at = report.landed[r.row];
       if (at !== undefined) lines.push(`  ${r.what}: ${at}`);
     }
+  }
+  if (report.carried) {
+    const { settings, connections, ownFiles } = report.carried;
+    // Waiting on you, first: your GUIDANCE.md, switched off; then the settings naming a connection RPE can't use.
+    if (ownFiles !== null && ownFiles.guidance > 0) lines.push("", "Waiting on you: your GUIDANCE.md is in the file tree under imported/, switched off, since it was written for agents that are gone or changed. Switch it on as an AGENTS.md at the same level, or copy from it.");
+    if (ownFiles === null) lines.push("", "Your own agents, skills, texts, GUIDANCE.md, notes and learned files were not carried: this run was not given the file tree's places. They are in the backup.");
+    else if (ownFiles.leftOut > 0) lines.push("", `${ownFiles.leftOut} of your own file(s) have names that would leave the folder they go in: not written, in the backup.`);
+    if (settings.lumiverseConnections.length > 0) {
+      lines.push("", "Settings that name a connection living in Lumiverse, which RPE can't use: pick one of RPE's connections for each; until you do, that work uses RPE's default connection.");
+      for (const c of settings.lumiverseConnections) lines.push(`  ${c.setting} (connection ${c.connection} in Lumiverse)`);
+    }
+    if (connections !== null) lines.push("", "why" in connections ? `Connections: none carried, as ${connections.why}.` : `Connections carried from runtime ${connections.runtime}: ${connections.connections.join(", ") || "none"}; ${connections.keys} key(s), ${connections.signins} sign-in(s), ${connections.headerValues} header value(s); the default ${connections.default ?? "not set"}${connections.leftOut > 0 ? `; ${connections.leftOut} entry(s) left out, as today's runtime leaves them out` : ""}.`);
+    lines.push("", "Settings carried into RPE's config:");
+    for (const s of settings.carried) lines.push(`  ${s.from} → ${s.to}`);
+    if (settings.carried.length === 0) lines.push("  none");
+    lines.push("", "Settings with no setting of the same meaning in RPE yet (kept in the backup):");
+    for (const s of settings.noHome) lines.push(`  ${s}`);
   }
   if (report.changes) {
     const c = report.changes;

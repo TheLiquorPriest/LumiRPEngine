@@ -33,10 +33,20 @@ const PART = "[A-Za-z0-9._-]{1,128}";
  */
 const TEMPORARY = "a temporary file: a write under way, or one cut short";
 
-/** A rule: a path pattern, the row it belongs to, and a fate when it isn't the row's own. */
-type Rule = readonly [pattern: RegExp, row: RowId, fate?: Fate];
+/** A rule: a path pattern, the row it belongs to, a fate when it isn't the row's own, and what the report says of the file. */
+type Rule = readonly [pattern: RegExp, row: RowId, fate?: Fate, note?: string];
 
-const rule = (pattern: string, row: RowId, fate?: Fate): Rule => [new RegExp(`^${pattern}$`), row, fate];
+const rule = (pattern: string, row: RowId, fate?: Fate, note?: string): Rule => [new RegExp(`^${pattern}$`), row, fate, note];
+
+/**
+ * Why the depth engine's files are archived. Today's build has none of its code: main was put back
+ * on the pre-depth build (5639d28c), so nothing reads them, and RPE's own bootstrap reads a chat's
+ * history afresh (STANDALONE-PLAN §12). The references below are to the depth build before that,
+ * a54b3987, under `src/backend/`.
+ */
+const DEPTH_GONE = "today's build has no depth engine, so nothing reads it now";
+
+const depth = (pattern: string, what: string): Rule => rule(pattern, "depth-engine", undefined, `${what}; ${DEPTH_GONE}`);
 
 /**
  * The files of the user's storage, and of the extension's own storage (which sits in the same
@@ -94,6 +104,19 @@ const STORAGE_RULES: readonly Rule[] = [
   // The extension's own storage (`spindle.storage`).
   rule("agents/build\\.json", "mcp-clients"), // agents.ts:51,251: the update notice
   rule("diagnostics/backend\\.log", "logs"), // spindle-host.ts:283,439
+  // The depth engine's files (see `DEPTH_GONE` for where these lines are).
+  depth("depth/day-spend\\.json", "what the depth engine spent today, kept for its daily ceiling"), // depth/budget.ts:32,133
+  depth(`runs/${SAFE}/bootstrap/depth\\.json`, "the chat's switch to the depth engine, and the connection pin that switch replaced in Lumiverse"), // bootstrap/service.ts:42,50
+  depth(`runs/${SAFE}/bootstrap/(absorption|allowances|history)\\.json`, "a setting of the chat's for the depth engine"), // depth/chat-absorption.ts:3; depth/chat-allowances.ts:3; depth/history-cut.ts:2
+  depth(`runs/${SAFE}/bootstrap/(run|handover|lumibooks)\\.json`, "where the depth engine's bootstrap of the chat stood"), // bootstrap/run.ts:341,354; bootstrap/lumibooks-service.ts:24
+  depth(`runs/${SAFE}/bootstrap/(manifest|edits)\\.json`, "the index of the depth engine's copy of the chat's messages"), // bootstrap/spool.ts:67,78
+  depth(`runs/${SAFE}/bootstrap/spool/\\d{5}\\.json`, "a part of the depth engine's copy of the chat's messages"), // bootstrap/spool.ts:70,177
+  depth(`runs/${SAFE}/bootstrap/jobs/${PART}\\.json`, "what one job of the depth engine's bootstrap answered"), // bootstrap/run.ts:461,1187,1193
+  depth(`runs/${SAFE}/bootstrap/spot/${PART}\\.json`, "a spot-check card of the depth engine's bootstrap"), // bootstrap/run.ts:624,1155
+  depth(`runs/${SAFE}/layer/(meta|held)\\.json`, "the index of what the depth engine landed for the chat, which only its own fold read"), // layer-store.ts:1-8,278,288
+  depth(`runs/${SAFE}/layer/seg-\\d+\\.json`, "what the depth engine landed for the chat, which only its own fold read"), // layer-store.ts:5,131
+  depth(`runs/${SAFE}/archive/shard-\\d+\\.json`, "the depth engine's search index of the chat's messages, made from them"), // archive-index.ts:29,144,210
+  depth("loopback/registry\\.json", "the depth engine's loopback registry: its keys' and relays' hashes"), // loopback/store.ts:47
 ];
 
 /** The chat a per-chat path is kept for, and whose store keeps it: `runs/<chat>/` names it as it is, LumiAH's `chats/<key>/` as its document key (`docKey`, `H/core/paths.ts:12`). */
@@ -110,7 +133,7 @@ function chatOf(path: string): { chat: string; lumiah: boolean } | null {
 }
 
 function byRules(rules: readonly Rule[], path: string): Classified | null {
-  for (const [pattern, row, fate] of rules) if (pattern.test(path)) return { row, fate: fate ?? ROW[row].fate };
+  for (const [pattern, row, fate, note] of rules) if (pattern.test(path)) return { row, fate: fate ?? ROW[row].fate, ...(note === undefined ? {} : { note }) };
   return null;
 }
 

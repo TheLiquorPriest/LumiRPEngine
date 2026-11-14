@@ -20,6 +20,7 @@ import type { WorldDoc } from "../shared/world";
 import { openStore, STORE_MIGRATIONS } from "../store";
 import { carry } from "./carry";
 import { chatsToImport, importChats } from "./import-chats";
+import type { TreePlaces } from "./own-files";
 import { backupOf, reportOf } from "./rehearse";
 import type { MigrationReport } from "./report";
 import { importedChats, keepRun, lastReport, MIGRATE_TABLES } from "./tables";
@@ -33,6 +34,12 @@ export interface MigrateOptions {
   /** This build's id: RPE's database is copied before the first migration of its tables a new build brings. */
   version?: string;
   now?: () => Date;
+  /**
+   * The folder names the file tree's layout gives the user's own files (`src/tree/layout.ts`: the
+   * level's agents, skills and texts, a chat's notes), which the migration may not import. Absent: the
+   * user's own files stay in the backup only, and the report says so.
+   */
+  tree?: Omit<TreePlaces, "root">;
 }
 
 export interface MigrateResult {
@@ -91,7 +98,9 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       const run = crypto.randomUUID();
       const blank = { turns: 0, placed: { own: 0, shown: 0, lost: 0, head: 0 }, shares: null, placedAsShown: false, matched: { head: true, swipes: 0, of: 0 }, differences: [], dropped: 0, violations: 0 };
       report.imports = [...importChats({ store, s, db, registry, chats, earlier: importedChats(db, sources.userId), run }), ...notOpened.map((n) => ({ chatId: n.chatId, outcome: "not imported" as const, why: n.why, ...blank }))];
-      report.landed = await carry({ today, report, paths, imports: report.imports, s });
+      const carried = await carry({ today, report, paths, db, run, tree: options.tree ? { root: paths.files, ...options.tree } : null });
+      report.landed = carried.landed;
+      report.carried = carried.carried;
       keepRun(db, sources.userId, run, report, (row) => report.landed?.[row as keyof typeof report.landed] ?? "");
     } finally {
       db.close();

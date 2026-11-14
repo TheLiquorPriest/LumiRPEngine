@@ -54,6 +54,9 @@ export const CHAT = {
 /** The file no row of the plan's table names. */
 export const STRAY = "stray-notes.txt";
 
+/** The invented secrets of the runtime's connections: a key, a header's value and a sign-in's tokens, which must reach RPE's secrets file and nowhere else. */
+export const SECRETS = { key: "sk-invented-0123456789", header: "team-invented-4567", access: "access-invented-89ab", refresh: "refresh-invented-cdef" } as const;
+
 export interface Fixture {
   root: string;
   sources: Sources;
@@ -206,8 +209,8 @@ function writeDatabase(path: string, layout: "operator" | "user", data: FixtureC
   db.close();
 }
 
-/** A LumiAH area: its index blob and its files' bodies, as `harness/blobs/<xx>/<sha256>` texts, and the head document naming it. */
-function area(files: Record<string, string>, blobs: Map<string, string>): string {
+/** A LumiAH area: its index blob and its files' bodies, as `harness/blobs/<xx>/<sha256>` texts, and the head document naming it, written at `at`. */
+function area(files: Record<string, string>, blobs: Map<string, string>, at = 1): string {
   const index: JsonObject = { v: 1, kind: "index", files: {} };
   for (const [path, text] of Object.entries(files)) {
     const hash = sha(text);
@@ -217,7 +220,34 @@ function area(files: Record<string, string>, blobs: Map<string, string>): string
   const text = JSON.stringify(index);
   const head = sha(text);
   blobs.set(head, text);
-  return JSON.stringify({ v: 1, kind: "area", head, at: 1 });
+  return JSON.stringify({ v: 1, kind: "area", head, at });
+}
+
+/**
+ * The files the depth engine of an earlier build left in the user's storage for a chat that was on
+ * it, as that build wrote them (a54b3987, `src/backend/`): the chat's switch and its own settings for
+ * it, its bootstrap's state, its copy of the chat and what each job answered, the layer of what it
+ * landed, its search index of the chat and a leftover of a write to it, and the day's spend.
+ */
+export function depthFiles(chat: string): Record<string, string> {
+  const basis = { message: "m-c1", swipe: contentId("The harbour is quiet."), path: "path-0" };
+  const job = (slot: string): string => JSON.stringify({ slot, key: `key-${slot}`, at: 1_700_000_000_000, out: { beats: [] }, entries: [], supersedes: [] });
+  const run = `runs/${chat}`;
+  return {
+    [`${run}/bootstrap/depth.json`]: JSON.stringify({ on: true, pin: { loopback: "conn-loopback", prior: { connection_profile_id: "conn-own", connection_model: "model-a" } } }),
+    [`${run}/bootstrap/allowances.json`]: JSON.stringify({ v: 1, turn: 40_000, day: 400_000 }),
+    [`${run}/bootstrap/run.json`]: JSON.stringify({ version: 1, status: "done", progress: [], hist: [], log: [] }),
+    [`${run}/bootstrap/handover.json`]: JSON.stringify({ version: 1, at: 1_700_000_000_000, messages: ["m-c1", "m-c2"] }),
+    [`${run}/bootstrap/manifest.json`]: JSON.stringify({ version: 1, surveyedAt: 1, bound: 6000, chunks: [{ n: 0, key: "chunk-0", first: "m-c1", last: "m-c1", firstIndex: 0, lastIndex: 0, basis }], totals: { messages: 1, tokens: 8, words: 4, user: 0, assistant: 1 } }),
+    [`${run}/bootstrap/spool/00000.json`]: JSON.stringify([{ id: "m-c1", index: 0, isUser: false, name: "Narrator", text: "The harbour is quiet.", basis }]),
+    ...Object.fromEntries(["author", "beats", "chapter", "historian", "pov", "truthlink"].map((name) => [`${run}/bootstrap/jobs/${name}_0.json`, job(`${name}:0`)])),
+    [`${run}/bootstrap/spot/c0000-ab12cd34.json`]: JSON.stringify({ id: "c0000-ab12cd34", items: [] }),
+    [`${run}/layer/meta.json`]: JSON.stringify({ v: 2, seq: 1, segments: 1 }),
+    [`${run}/layer/seg-0.json`]: JSON.stringify([{ id: "entry-1", seq: 1, basis, kind: "story.beat", events: [], by: { role: "historian", job: "historian:0" } }]),
+    [`${run}/archive/shard-3.json`]: JSON.stringify({ v: 1, messages: { "m-c1": { swipe: basis.swipe, h: "fingerprint", p: [[0, 21, 21, "harbour quiet", [1, 1]]] } } }),
+    [`${run}/archive/shard-7.json.tmp`]: '{ "v": 1, "messag',
+    "depth/day-spend.json": JSON.stringify({ v: 1, day: "2026-11-07", tokens: 48_210 }),
+  };
 }
 
 export async function buildFixture(layout: "operator" | "user" = "operator"): Promise<Fixture> {
@@ -253,7 +283,8 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
   const blobs = new Map<string, string>();
   const userArea = area({ "GUIDANCE.md": "Keep the fog grey.", "style.md": "Short lines." }, blobs);
   const rootArea = area({ "notebook.md": "Ada distrusts the guard." }, blobs);
-  const turnArea = area({ "notebook.md": "Ada distrusts the guard. The fog came.", "minds/e-ada/core.md": "Ada, a pilot.", "minds/e-ada/memory.md": "Fog over the pier.", "minds/e-bo/profile.md": "Bo, a ferryman.", "author/prepare.md": "Next: the lighthouse." }, blobs);
+  // The chat's area at its latest turn, written after the one before it (`root`).
+  const turnArea = area({ "notebook.md": "Ada distrusts the guard. The fog came.", "minds/e-ada/core.md": "Ada, a pilot.", "minds/e-ada/memory.md": "Fog over the pier.", "minds/e-bo/profile.md": "Bo, a ferryman.", "author/prepare.md": "Next: the lighthouse." }, blobs, 2);
   const turnIndex = JSON.parse(turnArea).head as string;
   const learnedArea = area({ "notes.md": "The pier floods at high tide." }, blobs);
   const segment = "harness session segment";
@@ -282,7 +313,18 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
     "mirror.json": JSON.stringify({ v: 1, kind: "mirror", copy: "copy-0001", count: 5, owner: "home on the server", at: 1 }),
   };
   for (const [path, text] of Object.entries(docs)) await user(`harness/docs/${path}`, text);
-  await user("harness/settings.json", JSON.stringify({ v: 1, rev: 3, own: [{ path: ["agents", "main", "effort"], value: "high" }], texts: { "lumiah.writer": "Write short." }, definitions: { agents: { scout: { id: "scout" } }, skills: { "tide-tables": { id: "tide-tables" } } } }));
+  // LumiAH keeps only what the user changed, each a value put whole at a path of its sections `core` and `transport`.
+  const lumiahOwn = [
+    { path: ["core", "agents", "main", "effort"], value: "high" },
+    { path: ["core", "story", "hidden"], value: "include" },
+    { path: ["transport", "history"], value: { keep: "last", count: 30 } },
+    { path: ["transport", "connections", "oneToolAtATime"], value: ["conn-1"] },
+  ];
+  const definitions = {
+    agents: { scout: { id: "scout", name: "Scout", description: "Walks ahead and says what is there.", instructions: "Walk ahead of the party and report what you see.", given: "task", tools: ["lore_search", "chat_read"] } },
+    skills: { "tide-tables": { id: "tide-tables", name: "Tide tables", description: "When the pier floods.", body: "Read the harbour's tide table before any walk on the pier." } },
+  };
+  await user("harness/settings.json", JSON.stringify({ v: 1, rev: 3, own: lumiahOwn, texts: { "lumiah.writer": "Write short." }, definitions }));
   await user("harness/registry.json", JSON.stringify({ v: 1, key: { hash: sha("lah_key"), print: "lah_…", at: 1 }, relays: { "relay-1": { id: "relay-1", secret: sha("relay secret") } }, replied: {} }));
   await user("harness/mirror-holder.json", JSON.stringify({ v: 1, holder: { relay: "relay-1", copy: "copy-0001", process: "proc-1", owner: "home" }, gen: 0 }));
   await user("harness/chats.json", JSON.stringify({ v: 1, on: { [CHAT.harness]: { since: 1, prior: null, priorModel: null } }, story: { [CHAT.harness]: { mode: "full" } } }));
@@ -334,6 +376,8 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
   await user(`runs/${CHAT.classic}/prefs.json`, JSON.stringify({ v: 1, mapDisplay: "grid", tidyLeft: [] }));
   await user(`runs/${CHAT.classic}/inspector.json`, JSON.stringify({ v: 2, records: [] }));
   await user(`runs/${CHAT.classic}/diagnostics.json`, JSON.stringify({ v: 1, records: [] }));
+  // The classic chat was on the depth engine of an earlier build, which left its files.
+  for (const [path, text] of Object.entries(depthFiles(CHAT.classic))) await user(path, text);
   await user(`runs/${CHAT.agents}/journal.json`, journal(CHAT.agents, "an-earlier-run"));
   // The branch's journal holds a record its message doesn't yet: today's reader flushes it back.
   await user(`runs/${CHAT.branch}/journal.json`, journal(CHAT.branch, "seed-classic", { messages: { "m-c2-b": { flushed: false, ledger: classicReply } } }));
@@ -346,6 +390,7 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
   // The extension's own storage, wherever this layout keeps it.
   await put(join(extensionFolder, "agents/build.json"), JSON.stringify({ build: "b2", previous: "b1", at: 1 }));
   await put(join(extensionFolder, "diagnostics/backend.log"), "backend started\n");
+  await put(join(extensionFolder, "loopback/registry.json"), JSON.stringify({ v: 1, keys: {}, relays: {}, shared: { enabled: false, by: null, at: null } }));
 
   // Another user's storage: never read.
   await put(join(lumiverse, "users", OTHER_USER, "extensions", IDENT, "settings.json"), JSON.stringify({ v: 1 }));
@@ -368,8 +413,9 @@ export async function buildFixture(layout: "operator" | "user" = "operator"): Pr
   await put(installed, "// the runtime\n");
   await put(`${installed}.4242.tmp`, "// half the runtime");
   const runtimeDir = join(dataDir, "runtimes", RUNTIME);
-  await put(join(runtimeDir, "connections.json"), JSON.stringify({ lumiah: 1, default: "conn-1", connections: [{ id: "conn-1" }] }));
-  await put(join(runtimeDir, "secrets.json"), JSON.stringify({ lumiah: 1, keys: { "conn-1": "sk-invented" }, signins: {} }));
+  // One connection with a key, a header with its value and one dropped, and an entry no runtime reads; a sign-in and the installation's id.
+  await put(join(runtimeDir, "connections.json"), JSON.stringify({ lumiah: 1, default: "conn-1", connections: [{ id: "conn-1", name: "Main", provider: "deepseek", auth: "key", model: "deepseek-chat", effort: "high", headers: { "X-Team": SECRETS.header, "X-Gone": null } }, { id: "conn-x" }] }));
+  await put(join(runtimeDir, "secrets.json"), JSON.stringify({ lumiah: 1, keys: { "conn-1": SECRETS.key }, signins: { anthropic: { type: "oauth", access: SECRETS.access, refresh: SECRETS.refresh, expires: 1 } }, device: "device-0001" }));
   await put(join(runtimeDir, "waiting.json"), JSON.stringify({ pid: 4242, since: 1, seen: 2 }));
   // The working copy: the copy the mirror's mark names, holding a document and a blob it hasn't sent, a removal it hasn't sent, and a journal entry cut off before its write.
   const copy = join(runtimeDir, "store", copyFolderOf(BASE, USERNAME, IDENT));

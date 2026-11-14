@@ -19,7 +19,7 @@ import type { JsonObject } from "../shared/json";
 import { missing, readText } from "./files";
 import type { LumiverseDb } from "./lumiverse-db";
 
-export type Store = "user storage" | "extension storage" | "Lumiverse";
+export type Store = "user storage" | "extension storage" | "Lumiverse" | "RPE's copy";
 
 /** A write a reader tried, kept in memory instead: where, what, and the size of what it wrote. Never its content. */
 export interface AttemptedWrite {
@@ -130,13 +130,13 @@ export class StorageView {
   }
 }
 
-/** What the stand-in serves: one user, their storage, the extension's storage, and Lumiverse's database. */
+/** What the stand-in serves: one user, their storage, the extension's storage, and Lumiverse's database (null: storage alone, as for RPE's copy of the worlds, which holds no chats). */
 export interface StandInSources {
   userId: string;
   user: StorageView;
   /** The extension's own storage: the same view as the user's where the extension is installed for one user. */
   extension: StorageView;
-  db: LumiverseDb;
+  db: LumiverseDb | null;
 }
 
 export class StandIn {
@@ -161,17 +161,21 @@ export class StandIn {
     if (userId !== this.sources.userId) throw new Error("The migration's stand-in holds one user's data, and this is another user's.");
   }
 
+  private lumiverse(call: string): LumiverseDb {
+    return this.sources.db ?? this.refuse(call);
+  }
+
   private chatMessages(chatId: ChatId): HostMessage[] {
     let list = this.messages.get(chatId);
     if (!list) {
-      list = this.sources.db.messages(chatId, this.sources.userId);
+      list = this.lumiverse("chat.messages").messages(chatId, this.sources.userId);
       this.messages.set(chatId, list);
     }
     return list;
   }
 
   private chatMeta(chatId: ChatId): JsonObject {
-    this.metadata ??= new Map(this.sources.db.chats(this.sources.userId).map((c) => [c.id as ChatId, c.metadata]));
+    this.metadata ??= new Map(this.lumiverse("chat.metadata").chats(this.sources.userId).map((c) => [c.id as ChatId, c.metadata]));
     return this.metadata.get(chatId) ?? {};
   }
 
@@ -221,7 +225,7 @@ export class StandIn {
         },
         list: async (userId): Promise<HostChat[]> => {
           this.userCheck(userId);
-          return this.sources.db.chats(this.sources.userId).map((c) => ({ id: c.id as ChatId, name: c.name, metadata: this.chatMeta(c.id as ChatId) }));
+          return this.lumiverse("chat.list").chats(this.sources.userId).map((c) => ({ id: c.id as ChatId, name: c.name, metadata: this.chatMeta(c.id as ChatId) }));
         },
         setSwipes: async (chatId, messageId, swipes, swipeId, userId) => {
           this.userCheck(userId);

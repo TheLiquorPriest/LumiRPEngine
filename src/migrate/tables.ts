@@ -1,7 +1,9 @@
 // The migration's own tables (STANDALONE-PLAN Appendix B, "Migration"), kept under the app's
 // migration area `migrate`: each real run with its report, each row of the plan's table per run,
 // each chat the migration imported with what came of it, and each imported turn's record as today's
-// build kept it, beside the turn and read-only. Every table carries the user.
+// build kept it, beside the turn and read-only; and RPE's copy of the user's worlds, every file byte
+// for byte (plan §4.5: world definitions are kept as they are, by revision, in the database). Every
+// table carries the user.
 
 import type { Database } from "bun:sqlite";
 import type { Migration } from "../app/migrations";
@@ -51,6 +53,21 @@ CREATE TABLE imported_record (
   PRIMARY KEY (user, turn)
 );
 CREATE INDEX imported_record_chat ON imported_record (user, chat);
+`,
+  },
+  {
+    version: 2,
+    name: "worlds, byte for byte",
+    sql: `
+CREATE TABLE world_file (
+  user TEXT NOT NULL,
+  world TEXT NOT NULL,
+  file TEXT NOT NULL,
+  bytes BLOB NOT NULL,
+  sha256 TEXT NOT NULL,
+  run TEXT NOT NULL,
+  PRIMARY KEY (user, world, file)
+);
 `,
   },
 ];

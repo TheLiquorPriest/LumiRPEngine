@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { rehearse } from "../../src/migrate/rehearse";
 import { reportText, type MigrationReport } from "../../src/migrate/report";
 import { ROWS } from "../../src/migrate/rows";
-import { buildFixture, CHAT, IDENT, STRAY, treeSums, type Fixture } from "./fixture";
+import { buildFixture, CHAT, depthFiles, IDENT, STRAY, treeSums, type Fixture } from "./fixture";
 
 /** Every file of the tree but SQLite's shared-memory index, which every reader of a WAL database writes its locks into. */
 function withoutLockIndex(sums: Map<string, string>): Map<string, string> {
@@ -103,6 +103,15 @@ describe("the rehearsal, extension installed for everyone", () => {
     expect(item("agents.json")).toMatchObject({ row: "mcp-clients", fate: "archived" });
     expect(report.items.find((i) => i.where === "extension storage" && i.path === "agents/build.json")).toMatchObject({ row: "mcp-clients" });
     expect(report.unreadable.map((u) => u.path)).toContain(`user storage: runs/${CHAT.classic}/staged.json.corrupt-1700000000000`);
+  });
+
+  test("classifies the files the depth engine of an earlier build left: archived in their own row, each saying what it is and why", () => {
+    const paths = [...Object.keys(depthFiles(CHAT.classic)).filter((p) => !p.endsWith(".tmp")), "loopback/registry.json"];
+    const items = paths.map((path) => report.items.find((i) => i.where !== "runtime" && i.path === path));
+    expect(items.map((i) => ({ path: i?.path, row: i?.row, fate: i?.fate }))).toEqual(paths.map((path) => ({ path, row: "depth-engine", fate: "archived" })));
+    for (const i of items) expect(i?.note).toContain("today's build has no depth engine");
+    expect(report.items.find((i) => i.path === `runs/${CHAT.classic}/archive/shard-7.json.tmp`)).toMatchObject({ row: "depth-engine", fate: "archived", note: expect.stringContaining("temporary") });
+    expect(report.rows.find((r) => r.row === "depth-engine")?.count).toEqual({ found: paths.length + 1, carried: 0, attached: 0, archived: paths.length + 1 });
   });
 
   test("takes the runtime's unsent writes as today's runtime would send them, and nothing a cut-off write named", () => {
