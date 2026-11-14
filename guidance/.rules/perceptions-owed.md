@@ -7,4 +7,4 @@ at: run-end
 repeat: once per turn
 ---
 These characters were on stage this turn and have no perception recorded for it: {{stage.unperceived.names}}.
-Write them now, start a job that will, or say in one line why none is needed. See the perceptions rule.
+Write them now, or start a job that will. See the perceptions rule.

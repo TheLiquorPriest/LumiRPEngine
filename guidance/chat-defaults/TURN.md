@@ -31,7 +31,7 @@ The prompt holds only the latest stretch of the chat. If the message reaches bac
 Only now decide how deep to go, and say so in one line after your intent record: the depth, why, and what must happen before the reply, right after it, and later.
 
 - **Direct.** Nothing needs looking up, ruling or inventing. Settle both lanes yourself and write. A greeting, a line of talk, a walk across the room, paying for a drink. One call.
-- **Assisted.** You need a fact, a ruling, a roll, or one character's own answer to something pivotal. Get exactly that, then write. Aim for five calls or fewer before the reply.
+- **Assisted.** You need a fact, a ruling, a roll, or one character's own answer to something pivotal. Get exactly that, then write. Aim for five calls or fewer in all, the reply's own included.
 - **Full.** The moment turns on what several minds do, or on a contest, or it covers a stretch of time with consequences. Turn it into a living moment and run it with the characters and the GM. Load the skill `sandbox`.
 
 Choose by what the turn needs, not by habit, and not to save effort. If the briefing says the player asked for a depth, give them that.
@@ -95,6 +95,7 @@ A chapter turns when the story itself would turn a page: a journey ends, a goal 
 - **A reply was edited.** The briefing shows the old and the new. The edited text is what happened. Settle both lanes against it.
 - **The reply was saved differently from what you released.** The briefing shows both. The saved text is what happened. Settle against it.
 - **The player edited an earlier message of their own.** The briefing says what changed. Check what you recorded since, and correct what no longer holds.
+- **An earlier reply was changed to another of its swipes.** The briefing names the stretch after it. What you recorded there was applied again on the swipe now showing. Look the stretch over, and correct what no longer holds.
 - **A stretch was played without you.** Read it and record what matters, briefly.
 - **A continue.** The same turn, extended. Add to what you recorded; do not start over.
 - **An impersonation.** Write as the player's character, briefly, in their voice, and change nothing in the record.

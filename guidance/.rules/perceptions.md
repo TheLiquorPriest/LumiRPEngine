@@ -24,7 +24,7 @@ You write what reached them. You do not write what they make of it. Their own ag
 ## When
 
 - A character acting in a sandbox needs its perception before it acts. Write it then.
-- On a turn you settle yourself, write them among your closing calls, right after the reply.
+- On a turn you settle yourself, write them in the same call as the reply, right after it.
 - If the reply as it went out differs from what the sandbox produced, correct the perceptions before anyone forms memories from them.
 - For a principal who acted, let its agent take in its perceptions now, in the session it acted in. For one who was only present, that can wait for the scene's end or the next time it acts.
 - When a principal sleeps, or days pass for it, ask its agent to let the time settle.
