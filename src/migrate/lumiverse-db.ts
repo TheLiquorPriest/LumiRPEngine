@@ -6,9 +6,11 @@
 // locks, so a read sees what Lumiverse has committed, the log included; SQLite keeps those locks in
 // its shared-memory index beside the database (`lumiverse.db-shm`), which every reader of a WAL
 // database writes, Lumiverse's own among them. The database and its log are never written. Where
-// Lumiverse is stopped and neither the log nor the index is there, the read-only open can't make
-// them, and nothing can be missing from a log that isn't there: the file is then read as immutable,
-// which takes no lock and makes no file.
+// Lumiverse is stopped cleanly, neither the log nor the index is there, and nothing can be missing
+// from a log that isn't there. A read-only open would then make both files at its first read (as
+// SQLite itself does) or fail that read (as macOS's SQLite does), and the open alone never shows
+// which: so how to open is decided before opening, and the file is read as immutable, which takes no
+// lock and makes no file.
 
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
@@ -38,6 +40,8 @@ export interface SwipeFacts {
 export interface ChatRow {
   id: string;
   name: string;
+  /** The character whose chat it is (`character_id`); null for a chat with none, as Lumiverse's temporary chat. */
+  character: string | null;
   metadata: JsonObject;
   /** Unix seconds, as Lumiverse keeps it. */
   updatedAt: number;
@@ -90,16 +94,12 @@ export class LumiverseDb {
     readonly opened: "locked" | "immutable",
   ) {}
 
-  /** Opens Lumiverse's database in `dataDir` for reading only. */
+  /** Opens Lumiverse's database in `dataDir` for reading only: under SQLite's locks while its log or their index is beside it, else as an unchanging file. */
   static open(dataDir: string): LumiverseDb {
     const path = join(dataDir, DATABASE_FILE);
     if (!existsSync(path)) throw new Error(`There is no Lumiverse database at ${path}.`);
-    try {
-      return new LumiverseDb(new Database(path, { readonly: true }), "locked");
-    } catch (error) {
-      if (existsSync(`${path}-wal`) || existsSync(`${path}-shm`)) throw error;
-      return new LumiverseDb(new Database(`file:${encodeURI(path)}?immutable=1`, { readonly: true }), "immutable");
-    }
+    if (existsSync(`${path}-wal`) || existsSync(`${path}-shm`)) return new LumiverseDb(new Database(path, { readonly: true }), "locked");
+    return new LumiverseDb(new Database(`file:${encodeURI(path)}?immutable=1`, { readonly: true }), "immutable");
   }
 
   close(): void {
@@ -121,8 +121,13 @@ export class LumiverseDb {
 
   /** Every chat of the user's, the most recently updated first, as Spindle's chat list reads them (`chats.service.ts`). */
   chats(userId: string): ChatRow[] {
-    const rows = this.db.query<{ id: string; name: string | null; metadata: string | null; updated_at: number | null }, [string]>("SELECT id, name, metadata, updated_at FROM chats WHERE user_id = ? ORDER BY updated_at DESC, id ASC").all(userId);
-    return rows.map((r) => ({ id: r.id, name: r.name ?? "", metadata: objectOf(r.metadata), updatedAt: r.updated_at ?? 0 }));
+    const rows = this.db.query<{ id: string; name: string | null; character_id: string | null; metadata: string | null; updated_at: number | null }, [string]>("SELECT id, name, character_id, metadata, updated_at FROM chats WHERE user_id = ? ORDER BY updated_at DESC, id ASC").all(userId);
+    return rows.map((r) => ({ id: r.id, name: r.name ?? "", character: typeof r.character_id === "string" && r.character_id !== "" ? r.character_id : null, metadata: objectOf(r.metadata), updatedAt: r.updated_at ?? 0 }));
+  }
+
+  /** A character of the user's, by its id and name; null when the user has none of that id. */
+  character(characterId: string, userId: string): { id: string; name: string } | null {
+    return this.db.query<{ id: string; name: string }, [string, string]>("SELECT id, name FROM characters WHERE id = ? AND user_id = ?").get(characterId, userId);
   }
 
   /** How many messages a chat of the user's holds. */
@@ -132,17 +137,23 @@ export class LumiverseDb {
 
   /**
    * A chat's messages in order, as an extension is handed them (`chat.getMessages`) and today's
-   * build reads them (`decodeMessage`): only when the chat is the user's.
+   * build reads them (`decodeMessage`), only when the chat is the user's; and each one's swipes as
+   * RPE's adapter reads them, by message id. Both come from one read, so that a swipe's place among
+   * the messages' swipes is its place among their hashes and dates. A swipe's hash is that of its text
+   * in `swipes` (of `content` for the showing one when `swipes` holds no text for it, as Lumiverse
+   * falls back to it), and its date is `swipe_dates` at its place, a number or none.
    */
-  messages(chatId: string, userId: string): HostMessage[] {
+  messages(chatId: string, userId: string): { messages: HostMessage[]; swipes: Map<string, SwipeFacts> } {
     const rows = this.db
-      .query<{ id: string; chat_id: string; index_in_chat: number; is_user: number; name: string; content: string; swipe_id: number | null; swipes: string | null; extra: string | null }, [string, string]>(
-        "SELECT m.id, m.chat_id, m.index_in_chat, m.is_user, m.name, m.content, m.swipe_id, m.swipes, m.extra FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.chat_id = ? AND c.user_id = ? ORDER BY m.index_in_chat ASC",
+      .query<{ id: string; chat_id: string; index_in_chat: number; is_user: number; name: string; content: string; swipe_id: number | null; swipes: string | null; swipe_dates: string | null; extra: string | null }, [string, string]>(
+        "SELECT m.id, m.chat_id, m.index_in_chat, m.is_user, m.name, m.content, m.swipe_id, m.swipes, m.swipe_dates, m.extra FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.chat_id = ? AND c.user_id = ? ORDER BY m.index_in_chat ASC",
       )
       .all(chatId, userId);
-    const out: HostMessage[] = [];
+    const messages: HostMessage[] = [];
+    const facts = new Map<string, SwipeFacts>();
     for (const r of rows) {
-      const swipes = parsed(r.swipes);
+      const raw = parsed(r.swipes);
+      const swipes: unknown[] = Array.isArray(raw) ? raw : [r.content];
       const extra = objectOf(r.extra);
       const metadata = isRecord(extra.spindle_metadata) ? extra.spindle_metadata : undefined;
       const message = decodeMessage(
@@ -155,34 +166,15 @@ export class LumiverseDb {
           name: r.name,
           content: r.content,
           swipe_id: r.swipe_id ?? 0,
-          swipes: Array.isArray(swipes) ? swipes : [r.content],
+          swipes,
           ...(metadata ? { metadata } : {}),
         },
         chatId,
       );
-      if (message) out.push(message);
-    }
-    return out;
-  }
-
-  /**
-   * Each of a chat's messages' swipes as RPE's adapter reads them, by message id: a swipe's hash is
-   * that of its text in `swipes` (of `content` for the showing one when `swipes` holds no text for
-   * it, as Lumiverse falls back to it), and its date is `swipe_dates` at its place, a number or none.
-   */
-  swipeFacts(chatId: string, userId: string): Map<string, SwipeFacts> {
-    const rows = this.db
-      .query<{ id: string; content: string; swipe_id: number | null; swipes: string | null; swipe_dates: string | null }, [string, string]>(
-        "SELECT m.id, m.content, m.swipe_id, m.swipes, m.swipe_dates FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.chat_id = ? AND c.user_id = ? ORDER BY m.index_in_chat ASC",
-      )
-      .all(chatId, userId);
-    const out = new Map<string, SwipeFacts>();
-    for (const r of rows) {
-      const raw = parsed(r.swipes);
-      const swipes: unknown[] = Array.isArray(raw) ? raw : [r.content];
+      if (message) messages.push(message);
       const shown = r.swipe_id ?? 0;
       const dates = parsed(r.swipe_dates);
-      out.set(r.id, {
+      facts.set(r.id, {
         hashes: swipes.map((s, i) => (typeof s === "string" ? textHash(s) : i === shown ? textHash(r.content) : null)),
         dates: swipes.map((_, i) => {
           const d = Array.isArray(dates) ? (dates[i] as unknown) : undefined;
@@ -190,7 +182,7 @@ export class LumiverseDb {
         }),
       });
     }
-    return out;
+    return { messages, swipes: facts };
   }
 
   /**

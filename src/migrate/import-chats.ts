@@ -19,7 +19,8 @@
 // A run imports every chat again from the start (§15.3): a chat not yet played on RPE is removed with
 // its branches and imported afresh; a chat played on RPE, or one a played branch shares turns with, is
 // left as it is, and the report says so. A chat an earlier run imported that Lumiverse no longer has is
-// removed, unless it was played on RPE.
+// removed, unless it was played on RPE; one Lumiverse still has that this run can't read keeps what
+// the earlier run imported of it.
 
 import type { Database } from "bun:sqlite";
 import { readRun } from "../backend/runtime";
@@ -65,7 +66,8 @@ export async function chatsToImport(today: Today): Promise<{ chats: ChatToImport
     }
     const from = row.metadata.branched_from;
     const at = row.metadata.branch_at_message;
-    chats.push({ chatId: row.id, run: read.run, input: read.input, revisions: read.revisions, swipes: today.db.swipeFacts(row.id, today.sources.userId), branch: typeof from === "string" && typeof at === "string" ? { from, at } : null });
+    // The swipes' hashes and dates from the read the reader folded, not a fresh one: a swipe Lumiverse deleted since would move the others up one.
+    chats.push({ chatId: row.id, run: read.run, input: read.input, revisions: read.revisions, swipes: today.standIn.swipes(row.id as ChatId), branch: typeof from === "string" && typeof at === "string" ? { from, at } : null });
   }
   return { chats, notOpened };
 }
@@ -255,9 +257,11 @@ function whyNot(error: unknown): string {
 /**
  * Imports every chat into the store for one run. A chat's replacing and its import are one
  * transaction: a chat that fails leaves nothing of the attempt behind, and what an earlier run
- * imported of it stands. `earlier` lists the chats earlier runs imported.
+ * imported of it stands. `earlier` lists the chats earlier runs imported; `notOpened` the chats
+ * today's reader can't open, with why; `present` every chat Lumiverse has of the user's: only a chat
+ * missing from it is gone.
  */
-export function importChats(input: { store: Store; s: UserStore; db: Database; registry: Registry; chats: readonly ChatToImport[]; earlier: readonly { chat: string; source: string | null }[]; run: string }): ChatImportReport[] {
+export function importChats(input: { store: Store; s: UserStore; db: Database; registry: Registry; chats: readonly ChatToImport[]; notOpened: readonly { chatId: string; why: string }[]; present: ReadonlySet<string>; earlier: readonly { chat: string; source: string | null }[]; run: string }): ChatImportReport[] {
   const { store, s, db, registry, run } = input;
   const reports: ChatImportReport[] = [];
   const wasImported = new Set(input.earlier.map((e) => e.chat));
@@ -277,6 +281,8 @@ export function importChats(input: { store: Store; s: UserStore; db: Database; r
     return sharedTurns.get(key) ?? null;
   };
   const blank = { turns: 0, placed: { own: 0, shown: 0, lost: 0, head: 0 }, shares: null, placedAsShown: false, matched: { head: true, swipes: 0, of: 0 }, differences: [], dropped: 0, violations: 0 };
+  /** Why a chat was not imported, saying so where what an earlier run imported of it stands. */
+  const stands = (chat: string, why: string): string => (s.chat(chat) !== null ? `${why}; what an earlier run imported of it stands` : why);
   for (const chat of sourcesFirst(input.chats)) {
     const id = chat.chatId;
     const earlier = s.chat(id) !== null;
@@ -301,7 +307,7 @@ export function importChats(input: { store: Store; s: UserStore; db: Database; r
       })();
     } catch (error) {
       store.dropCaches();
-      reports.push({ chatId: id, outcome: "not imported", why: earlier ? `${whyNot(error)}; what an earlier run imported of it stands` : whyNot(error), ...blank });
+      reports.push({ chatId: id, outcome: "not imported", why: stands(id, whyNot(error)), ...blank });
       continue;
     }
     if ("left" in outcome) {
@@ -313,9 +319,15 @@ export function importChats(input: { store: Store; s: UserStore; db: Database; r
     reports.push({ chatId: id, outcome: replaced ? "replaced" : "imported", turns: done.turns, placed: done.placed, shares, placedAsShown: asShown, matched: done.matched, differences: done.differences, dropped: done.dropped, violations: done.violations });
     keepChat(db, s.id, id, run, shares?.chat ?? null, replaced ? "replaced" : "imported", done.differences.length > 0);
   }
-  // Chats an earlier run imported that Lumiverse no longer has.
+  for (const n of input.notOpened) reports.push({ chatId: n.chatId, outcome: "not imported", why: stands(n.chatId, n.why), ...blank });
+  const unread = new Set(input.notOpened.map((n) => n.chatId));
+  // Chats an earlier run imported that this run didn't read: gone only when Lumiverse no longer has them.
   for (const gone of input.earlier) {
-    if (byId.has(gone.chat) || !s.chat(gone.chat)) continue;
+    if (byId.has(gone.chat) || unread.has(gone.chat) || !s.chat(gone.chat)) continue;
+    if (input.present.has(gone.chat)) {
+      reports.push({ chatId: gone.chat, outcome: "not imported", why: stands(gone.chat, "today's build plays no world in it now"), ...blank });
+      continue;
+    }
     if (s.isPlayed(gone.chat)) {
       reports.push({ chatId: gone.chat, outcome: "gone from Lumiverse, played on RPE: left alone", ...blank });
       continue;

@@ -5,11 +5,11 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { rehearse } from "../../src/migrate/rehearse";
 import { reportText, type MigrationReport } from "../../src/migrate/report";
-import { ROWS } from "../../src/migrate/rows";
+import { NO_PLACE_YET, ROWS } from "../../src/migrate/rows";
 import { buildFixture, CHAT, depthFiles, IDENT, STRAY, treeSums, type Fixture } from "./fixture";
 
 /** Every file of the tree but SQLite's shared-memory index, which every reader of a WAL database writes its locks into. */
@@ -25,7 +25,8 @@ describe("the rehearsal, extension installed for everyone", () => {
   beforeAll(async () => {
     fixture = await buildFixture("operator");
     before = await treeSums(fixture.root);
-    report = await rehearse(fixture.sources, { target: fixture.root });
+    // As `rpe migrate` runs it: given the file tree's places, where the user's own files go.
+    report = await rehearse(fixture.sources, { target: fixture.root, tree: true });
   });
 
   afterAll(async () => {
@@ -77,11 +78,27 @@ describe("the rehearsal, extension installed for everyone", () => {
     expect(report.refusals.every((r) => !r.includes("registration") && !r.includes("engineFrom"))).toBe(true);
   });
 
-  test("every row's found equals carried plus attached plus archived", () => {
-    for (const row of report.rows) expect(row.count.found).toBe(row.count.carried + row.count.attached + row.count.archived);
+  test("counts each row's things where the real run puts them: each chat's latest notes carried, its earlier turns' and the rows with no place yet kept in the backup only, never called carried", () => {
+    const count = (row: string) => report.rows.find((r) => r.row === row)?.count;
+    // The harness chat's area at its latest turn lands as notes; the turn before it has no place yet.
+    expect(count("author-notes")).toEqual({ found: 2, carried: 1, attached: 0, archived: 0, backup: 1 });
+    expect(count("chat-switch")).toMatchObject({ carried: 0, attached: 0 });
+    expect(count("chat-switch")?.backup).toBeGreaterThan(0);
+    expect(count("worlds")).toMatchObject({ backup: 0 });
+    for (const row of report.rows) {
+      if (row.count.backup > 0) expect({ row: row.row, later: Object.hasOwn(NO_PLACE_YET, row.row) }).toEqual({ row: row.row, later: true });
+      expect({ row: row.row, sum: row.count.carried + row.count.attached + row.count.archived + row.count.backup }).toEqual({ row: row.row, sum: row.count.found });
+    }
     const classified = report.items.filter((i) => i.row !== null).length;
     expect(report.rows.reduce((n, r) => n + r.count.found, 0)).toBe(classified);
     expect(classified + report.notClassified.length).toBe(report.items.length);
+    // The report's last lines say what is kept in the backup only, by row, so that nobody reads the run as complete.
+    const lines = reportText(report).trimEnd().split("\n");
+    const from = lines.findIndex((l) => l.startsWith("The real run will keep these in the backup only"));
+    expect(from).toBeGreaterThan(0);
+    const tail = lines.slice(from + 1);
+    expect(tail).toContain(`  ${ROWS.find((r) => r.id === "chat-switch")?.what}: ${count("chat-switch")?.backup} thing(s)`);
+    expect(tail.at(-1)).toBe(`  In all: ${report.rows.reduce((n, r) => n + r.count.backup, 0)} thing(s), of ${tail.length - 1} row(s).`);
   });
 
   test("reads one user's rows and storage only", () => {
@@ -117,7 +134,7 @@ describe("the rehearsal, extension installed for everyone", () => {
     expect(items.map((i) => ({ path: i?.path, row: i?.row, fate: i?.fate }))).toEqual(paths.map((path) => ({ path, row: "depth-engine", fate: "archived" })));
     for (const i of items) expect(i?.note).toContain("today's build has no depth engine");
     expect(report.items.find((i) => i.path === `runs/${CHAT.classic}/archive/shard-7.json.tmp`)).toMatchObject({ row: "depth-engine", fate: "archived", note: expect.stringContaining("temporary") });
-    expect(report.rows.find((r) => r.row === "depth-engine")?.count).toEqual({ found: paths.length + 1, carried: 0, attached: 0, archived: paths.length + 1 });
+    expect(report.rows.find((r) => r.row === "depth-engine")?.count).toEqual({ found: paths.length + 1, carried: 0, attached: 0, archived: paths.length + 1, backup: 0 });
   });
 
   test("takes the runtime's unsent writes as today's runtime would send them, and nothing a cut-off write named", () => {
@@ -193,13 +210,28 @@ describe("the rehearsal, extension installed for one user", () => {
 
   test("finds the extension's own storage in the user's folder, and the same stores", async () => {
     const before = await treeSums(fixture.root);
-    const report = await rehearse(fixture.sources);
+    const report = await rehearse(fixture.sources, { tree: true });
     expect(withoutLockIndex(await treeSums(fixture.root))).toEqual(withoutLockIndex(before));
     expect(report.layout).toEqual({ scope: "user", userFolder: true, extensionFolder: false });
     expect(report.items.find((i) => i.where === "user storage" && i.path === "agents/build.json")).toMatchObject({ row: "mcp-clients" });
     expect(report.items.find((i) => i.where === "user storage" && i.path === "diagnostics/backend.log")).toMatchObject({ row: "logs" });
     expect(report.notClassified.map((i) => i.path)).toEqual([STRAY]);
-    for (const row of report.rows) expect(row.count.found).toBe(row.count.carried + row.count.attached + row.count.archived);
+    for (const row of report.rows) expect(row.count.found).toBe(row.count.carried + row.count.attached + row.count.archived + row.count.backup);
+  });
+
+  test("reads Lumiverse's database after a clean stop as an unchanging file, and leaves no file beside it", async () => {
+    // Lumiverse stopped cleanly: its log is in the database, and neither the log nor its index is left.
+    const path = join(fixture.sources.lumiverse, "lumiverse.db");
+    const lumiverse = new Database(path);
+    lumiverse.run("PRAGMA wal_checkpoint(TRUNCATE)");
+    lumiverse.close();
+    await rm(`${path}-wal`, { force: true });
+    await rm(`${path}-shm`, { force: true });
+    const before = await treeSums(fixture.root);
+    const report = await rehearse(fixture.sources);
+    expect(await treeSums(fixture.root)).toEqual(before);
+    expect(report.database).toBe("immutable");
+    expect(report.chats.map((c) => c.chatId)).toContain(CHAT.classic);
   });
 });
 

@@ -8,9 +8,10 @@
 import type { AttemptedWrite } from "./stand-in";
 import type { Unreadable } from "./inside";
 import type { LumiverseMarks } from "./lumiverse-db";
-import type { Fate, Found, RowId } from "./rows";
+import { type Fate, type Found, NO_PLACE_YET, type RowId } from "./rows";
 import type { ChatEngine, JournalRead } from "./chats";
 import type { CarriedReport } from "./carry";
+import type { RuntimeFolders } from "./runtime-folders";
 
 export const REPORT_FORMAT = "rpe-migration-report-v1";
 
@@ -28,13 +29,24 @@ export interface Item {
   note?: string;
 }
 
+/** The fourth count, never "carried" and never "archived": things of a row this build has no place for in RPE yet (`NO_PLACE_YET`). */
+const KEPT = "kept in the backup only";
+export const BACKUP_ONLY = `${KEPT}: this build has no place for it yet`;
+
 export interface RowReport {
   row: RowId;
   what: string;
   found: Found;
   /** Why the migration doesn't read this row, where it doesn't. */
   why?: string;
-  count: { found: number; carried: number; attached: number; archived: number };
+  /**
+   * Where the row's things go in this run: carried or attached into RPE, archived as the plan has
+   * it, or kept in the backup only (`BACKUP_ONLY`). Found must equal the four together; a thing this
+   * run has no place for, of a row this build carries, is in none of them (`stranded`).
+   */
+  count: { found: number; carried: number; attached: number; archived: number; backup: number };
+  /** Things of the row this build carries that this run has no place for, and why: the gate refuses the run for them. */
+  stranded: { count: number; why: string[] } | null;
   bytes: number;
   /** One SHA-256 over every item's where, path and checksum, in order: equal digests, equal rows. */
   digest: string;
@@ -151,13 +163,34 @@ export interface MigrationReport {
   refusals: string[];
 }
 
-/** Whether the real run may start on a report, and if not, why: the rows' sums, nothing unclassified, the user known, the disk. */
-export function refusalsOf(report: Pick<MigrationReport, "rows" | "notClassified" | "disk">, userKnown: boolean): string[] {
+/**
+ * Whose RPE a run writes into: the user whose data moves and whether Lumiverse's database knows them,
+ * the Lumiverse user RPE's config says it belongs to (null: none yet), and the users whose data
+ * earlier runs carried into its data folder.
+ */
+export interface Whose {
+  user: string;
+  known: boolean;
+  owner: string | null;
+  earlier: readonly string[];
+}
+
+/**
+ * Whether the real run may start on a report, and if not, why: the rows' sums, nothing unclassified,
+ * the user known and the RPE theirs, the runtime where the run looks for it, the disk. `runtime` is
+ * the runtime's folders where neither is there (`Today.runtimeMissing`).
+ */
+export function refusalsOf(report: Pick<MigrationReport, "rows" | "notClassified" | "disk">, whose: Whose, runtime: RuntimeFolders | null): string[] {
   const out: string[] = [];
-  if (!userKnown) out.push("Lumiverse's database has no such user.");
+  if (!whose.known) out.push("Lumiverse's database has no such user.");
+  // One RPE serves one Lumiverse user: its keys, settings and files are that user's alone.
+  if (whose.owner !== null && whose.owner !== whose.user) out.push(`This RPE belongs to the Lumiverse user ${whose.owner}, and this run is for ${whose.user}: one RPE serves one Lumiverse user.`);
+  for (const other of whose.earlier) if (other !== whose.user) out.push(`An earlier run carried the data of the Lumiverse user ${other} into this data folder, and this run is for ${whose.user}: one RPE serves one Lumiverse user.`);
+  // Without its folders the run would carry no unsent writes and no keys, and the backup would lack what going back needs: it says so rather than run as if there were none.
+  if (runtime !== null) out.push(`The runtime's folders are not where this run looks: neither ${runtime.configDir} nor ${runtime.dataDir} is there. Say where they are, or that the server runs no runtime of today's build (--no-runtime).`);
   for (const r of report.rows) {
-    const { found, carried, attached, archived } = r.count;
-    if (found !== carried + attached + archived) out.push(`Row "${r.what}": ${found} found, but ${carried} carried, ${attached} attached and ${archived} archived.`);
+    const { found, carried, attached, archived, backup } = r.count;
+    if (found !== carried + attached + archived + backup) out.push(`Row "${r.what}": ${found} found, but ${carried} carried, ${attached} attached, ${archived} archived and ${backup} ${KEPT}${r.stranded ? `; ${r.stranded.count} have no place in this run: ${r.stranded.why.join("; ")}` : ""}.`);
   }
   if (report.notClassified.length > 0) out.push(`${report.notClassified.length} found, not classified: ${report.notClassified.map((i) => `${i.where}: ${i.path}`).join("; ")}.`);
   if (report.disk.free !== null && report.disk.free < report.disk.total) out.push(`The real run needs ${report.disk.total} bytes where it writes, and ${report.disk.free} are free.`);
@@ -190,6 +223,11 @@ export function changesSince(before: MigrationReport, now: Pick<MigrationReport,
   return { since: before.at, added, changed, gone, rows, chats };
 }
 
+/** Whether a row keeps anything in the backup only: things of its own there, or, for a row found only inside other rows' things and with no place yet, any it holds. */
+function keptOnly(r: RowReport): boolean {
+  return r.count.backup > 0 || (r.found === "inside" && Object.hasOwn(NO_PLACE_YET, r.row) && (r.inside?.count ?? 0) > 0);
+}
+
 /** The report in plain words, as the rehearsal prints it. */
 export function reportText(report: MigrationReport): string {
   const lines: string[] = [];
@@ -197,10 +235,10 @@ export function reportText(report: MigrationReport): string {
   lines.push(`Extension installed ${report.layout.scope === "not installed" ? "nowhere Lumiverse knows of" : `per ${report.layout.scope === "user" ? "user" : "extension"}`}; Lumiverse's database opened ${report.database === "locked" ? "read-only, under its own locks" : "as an unchanging file"}.`);
   lines.push(report.refusals.length === 0 ? "The real run may start." : "The real run won't start:");
   for (const r of report.refusals) lines.push(`  - ${r}`);
-  lines.push("", "Row: found = carried + attached + archived (bytes)");
+  lines.push("", `Row: found = carried + attached + archived + ${KEPT} (bytes)`);
   for (const r of report.rows) {
     const c = r.count;
-    const own = r.found === "not read" ? `not read: ${r.why ?? ""}` : `${c.found} = ${c.carried} + ${c.attached} + ${c.archived} (${r.bytes})`;
+    const own = r.found === "not read" ? `not read: ${r.why ?? ""}` : `${c.found} = ${c.carried} + ${c.attached} + ${c.archived} + ${c.backup} (${r.bytes})`;
     lines.push(`  ${r.what}: ${own}${r.inside ? `; inside: ${r.inside.count} ${r.inside.unit}` : ""}`);
   }
   if (report.notClassified.length > 0) {
@@ -245,6 +283,8 @@ export function reportText(report: MigrationReport): string {
     for (const r of report.rows) {
       const at = report.landed[r.row];
       if (at !== undefined) lines.push(`  ${r.what}: ${at}`);
+      else if (keptOnly(r)) lines.push(`  ${r.what}: ${BACKUP_ONLY}`);
+      else if (r.count.archived > 0) lines.push(`  ${r.what}: archived, kept in the backup for good, as the plan has it`);
     }
   }
   if (report.carried) {
@@ -257,7 +297,7 @@ export function reportText(report: MigrationReport): string {
       lines.push("", "Settings that name a connection living in Lumiverse, which RPE can't use: pick one of RPE's connections for each; until you do, that work uses RPE's default connection.");
       for (const c of settings.lumiverseConnections) lines.push(`  ${c.setting} (connection ${c.connection} in Lumiverse)`);
     }
-    if (connections !== null) lines.push("", "why" in connections ? `Connections: none carried, as ${connections.why}.` : `Connections carried from runtime ${connections.runtime}: ${connections.connections.join(", ") || "none"}; ${connections.keys} key(s), ${connections.signins} sign-in(s), ${connections.headerValues} header value(s); the default ${connections.default ?? "not set"}${connections.leftOut > 0 ? `; ${connections.leftOut} entry(s) left out, as today's runtime leaves them out` : ""}.`);
+    if (connections !== null) lines.push("", "why" in connections ? `Connections: none carried, as ${connections.why}.` : `Connections carried from runtime ${connections.runtime}: ${connections.connections.join(", ") || "none"}; ${connections.keys} key(s), ${connections.signins} sign-in(s), ${connections.headerValues} header value(s); the default ${connections.default ?? "not set"}${connections.kept > 0 ? `; ${connections.kept} key(s), sign-in(s) and header value(s) RPE already held, which differ from today's, kept as RPE's` : ""}${connections.leftOut > 0 ? `; ${connections.leftOut} entry(s) left out, as today's runtime leaves them out` : ""}.`);
     lines.push("", "Settings carried into RPE's config:");
     for (const s of settings.carried) lines.push(`  ${s.from} → ${s.to}`);
     if (settings.carried.length === 0) lines.push("  none");
@@ -267,6 +307,14 @@ export function reportText(report: MigrationReport): string {
   if (report.changes) {
     const c = report.changes;
     lines.push("", `Since the run of ${c.since}: ${c.added.length} added, ${c.changed.length} changed, ${c.gone.length} gone; ${c.rows.length} row(s) and ${c.chats.length} chat(s) differ.`);
+  }
+  // Last, so that nobody reads such a run as complete: what it keeps in the backup only, by row.
+  const kept = report.rows.filter(keptOnly);
+  if (kept.length > 0) {
+    const total = kept.reduce((n, r) => n + r.count.backup, 0);
+    lines.push("", report.mode === "real run" ? "Kept in the backup only, as this build has no place for them in RPE yet: this run did not carry everything. A later run carries them once it has a place for them." : "The real run will keep these in the backup only, as this build has no place for them in RPE yet:");
+    for (const r of kept) lines.push(`  ${r.what}: ${r.count.backup > 0 ? `${r.count.backup} thing(s)` : `${r.inside?.count ?? 0} ${r.inside?.unit ?? ""}, inside other rows' things`}`);
+    lines.push(`  In all: ${total} thing(s), of ${kept.length} row(s).`);
   }
   return `${lines.join("\n")}\n`;
 }

@@ -41,6 +41,8 @@ export interface Today {
   user: string | null;
   extension: string | null;
   runtime: RuntimeRead;
+  /** The runtime's folders the run was given, where neither is there: a runtime expected and not found. Null where one is, or where the server runs none. */
+  runtimeMissing: RuntimeFolders | null;
   /** What the runtime's working copy hasn't sent and today's runtime would send, by user-storage path: a text, or a removal (null). */
   pending: Map<string, string | null>;
   /** Every write today's readers tried, kept in memory. */
@@ -81,6 +83,7 @@ export async function openToday(sources: Sources): Promise<Today> {
       user,
       extension,
       runtime,
+      runtimeMissing: sources.runtime !== null && !existsSync(sources.runtime.configDir) && !existsSync(sources.runtime.dataDir) ? sources.runtime : null,
       pending,
       writes,
       userView,

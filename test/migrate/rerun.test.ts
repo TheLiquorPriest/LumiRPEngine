@@ -1,6 +1,7 @@
 // A run made again (STANDALONE-PLAN §15.3): each run reads today's data afresh; a chat not yet played
 // on RPE is replaced by what today's side holds now, a chat played on RPE is left as it is, and the
-// report says which. Nothing is imported twice.
+// report says which. Nothing is imported twice. A chat is gone only when Lumiverse no longer has it:
+// one this run can't read keeps what an earlier run imported.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
@@ -34,12 +35,12 @@ describe("a run made again", () => {
   async function run(): Promise<ChatImportReport[]> {
     const today = await openToday(fixture.sources);
     try {
-      const { chats } = await chatsToImport(today);
+      const { chats, notOpened } = await chatsToImport(today);
       for (const c of chats) for (const r of c.revisions) {
         const w = c.input.worlds(r);
         if (w) worlds.set(r, w);
       }
-      return importChats({ store, s, db, registry, chats, earlier: importedChats(db, USER), run: `run-${++runs}` });
+      return importChats({ store, s, db, registry, chats, notOpened, present: new Set(today.chats.map((c) => c.id)), earlier: importedChats(db, USER), run: `run-${++runs}` });
     } finally {
       today.close();
     }
@@ -112,5 +113,20 @@ describe("a run made again", () => {
     expect(s.chat(PLAYED.discarded)).toBeNull();
     expect(db.query("SELECT count(*) AS n FROM imported_record WHERE chat = ?").get(PLAYED.discarded)).toEqual({ n: 0 });
     expect(reports.find((r) => r.chatId === PLAYED.paused)?.outcome).toBe("played on RPE: left alone");
+  });
+
+  test("a chat Lumiverse still has that this run can't read keeps what an earlier run imported, and is not called gone", async () => {
+    const heads = [PLAYED.planted, PLAYED.rebased].map((chat) => s.headState(chat).state.world);
+    const lumiverse = new Database(`${fixture.sources.lumiverse}/lumiverse.db`);
+    // One's world can't be read at the revision it plays; the other's run no longer reads at all.
+    lumiverse.query("UPDATE chats SET metadata = json_set(metadata, '$.lumi_rp_engine.revision', 'rev-unreadable') WHERE id = ?").run(PLAYED.planted);
+    lumiverse.query("UPDATE chats SET metadata = json_remove(metadata, '$.lumi_rp_engine.worldId') WHERE id = ?").run(PLAYED.rebased);
+    lumiverse.close();
+    const reports = await run();
+    for (const chat of [PLAYED.planted, PLAYED.rebased]) {
+      expect(reports.filter((r) => r.chatId === chat).map((r) => ({ outcome: r.outcome, stands: r.why?.endsWith("what an earlier run imported of it stands") }))).toEqual([{ outcome: "not imported", stands: true }]);
+    }
+    expect([PLAYED.planted, PLAYED.rebased].map((chat) => s.headState(chat).state.world)).toEqual(heads);
+    expect(db.query("SELECT count(*) AS n FROM migration_chat WHERE chat IN (?, ?)").get(PLAYED.planted, PLAYED.rebased)).toEqual({ n: 2 });
   });
 });

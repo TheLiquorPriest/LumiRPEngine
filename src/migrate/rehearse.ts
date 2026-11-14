@@ -25,7 +25,8 @@ import { readBytes, sha256 } from "./files";
 import { areaFiles, areaHead, countLedgers, countLink, countSettings, countWorldDoc, INSIDE_UNIT, MIND_FILE, recordBlobs, Tally, type Unreadable } from "./inside";
 import type { ChatRow, LumiverseDb } from "./lumiverse-db";
 import { changesSince, refusalsOf, type ChatReport, type Item, type MigrationReport, REPORT_FORMAT, type RowReport, type Where } from "./report";
-import { ROWS } from "./rows";
+import { placesOf, type Place } from "./carry";
+import { NO_PLACE_YET, ROWS } from "./rows";
 import { openToday, type Sources, type Today } from "./today";
 
 export interface RehearseOptions {
@@ -34,6 +35,10 @@ export interface RehearseOptions {
   previous?: MigrationReport;
   /** Where the real run will write (RPE's data folder, the backup): the free space there is weighed against what it needs. */
   target?: string;
+  /** Whose RPE the real run would write into: the Lumiverse user its config names, and the users earlier runs carried into its data folder. Absent: not asked. */
+  rpe?: { owner: string | null; earlier: readonly string[] };
+  /** Whether the real run is given the file tree's places, where the user's own files go (`rpe migrate` always gives them). */
+  tree?: boolean;
   now?: () => Date;
 }
 
@@ -351,16 +356,27 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
     // A damaged file today's readers set aside, as the stand-in kept it.
     for (const w of writes) if (w.op === "move" && w.to !== undefined && /\.corrupt-\d+$/.test(w.to)) unreadable.push({ path: `${w.store}: ${w.path}`, why: "damaged: today's reader sets it aside and starts afresh" });
 
+    // Where each thing carried or attached goes in this run, decided before anything is written.
+    const placeOf = await placesOf(today, items, options.tree ?? false);
+    const places = new Map<Item, Place>(items.flatMap((i): [Item, Place][] => (i.fate === "carried" || i.fate === "attached" ? [[i, placeOf(i)]] : [])));
     const rows: RowReport[] = ROWS.map((r) => {
       const own = items.filter((i) => i.row === r.id);
-      const count = { found: own.length, carried: own.filter((i) => i.fate === "carried").length, attached: own.filter((i) => i.fate === "attached").length, archived: own.filter((i) => i.fate === "archived").length };
+      const landing = (fate: "carried" | "attached"): number => own.filter((i) => i.fate === fate && places.get(i) === "lands").length;
+      // Only a row of the table of rows with no place yet may keep its things in the backup only.
+      const later = Object.hasOwn(NO_PLACE_YET, r.id) ? own.filter((i) => places.get(i) === "later").length : 0;
+      const none = own.flatMap((i) => {
+        const at = places.get(i);
+        if (at === undefined || at === "lands") return [];
+        return at === "later" ? (Object.hasOwn(NO_PLACE_YET, r.id) ? [] : ["this build has no place for it, and its row is not one that may be kept in the backup only"]) : [at.none];
+      });
       const unit = INSIDE_UNIT[r.id];
       return {
         row: r.id,
         what: r.what,
         found: r.found,
         ...("why" in r ? { why: r.why } : {}),
-        count,
+        count: { found: own.length, carried: landing("carried"), attached: landing("attached"), archived: own.filter((i) => i.fate === "archived").length, backup: later },
+        stranded: none.length === 0 ? null : { count: none.length, why: [...new Set(none)] },
         bytes: own.reduce((n, i) => n + i.bytes, 0),
         digest: sha256(own.map((i) => `${i.where}\t${i.path}\t${i.sha256}`).join("\n")),
         inside: unit === undefined ? null : { count: tally.counts.get(r.id) ?? 0, unit },
@@ -370,7 +386,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
     const backupFiles = (await backupSources({ user: found.user, extension: found.extension }, found.runtime.files)).map((s) => ({ name: s.name, bytes: Bun.file(s.disk).size }));
     const chatList = engineChats(db, chatRows, sources.userId, sources.identifier);
     const backupBytes = backupSize(backupFiles, chatList);
-    const importBytes = items.filter((i) => i.fate === "carried" || i.fate === "attached").reduce((n, i) => n + i.bytes, 0);
+    const importBytes = items.filter((i) => places.get(i) === "lands").reduce((n, i) => n + i.bytes, 0);
     const disk = { backup: backupBytes, import: importBytes, total: backupBytes + importBytes, free: options.target === undefined ? null : await freeAt(options.target) };
     const logged = { debug: 0, info: 0, warn: 0, error: 0 };
     for (const line of standIn.logged) logged[line.level]++;
@@ -397,7 +413,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       changes: null,
       refusals: [],
     };
-    report.refusals = refusalsOf(report, found.username !== null);
+    report.refusals = refusalsOf(report, { user: sources.userId, known: found.username !== null, owner: options.rpe?.owner ?? null, earlier: options.rpe?.earlier ?? [] }, found.runtimeMissing);
     if (options.previous) report.changes = changesSince(options.previous, report);
     return report;
   }

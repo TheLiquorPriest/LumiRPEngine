@@ -3,8 +3,9 @@
 // and their keys into RPH's two documents through the models port, the keys nowhere else; today's
 // settings into RPE's config where RPE has a setting of the same meaning, the rest listed by name,
 // and the settings that name a connection living in Lumiverse listed for the user; the user's own
-// files into the user's level of the file tree, switched off. And a second run carries a world
-// edited and a setting changed since the first.
+// files into the user's level of the file tree, switched off, and each chat's notes into that chat's
+// own notes folder, which no other chat's agents read. And a second run carries a world edited and a
+// setting changed since the first.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
@@ -22,13 +23,13 @@ import { openToday } from "../../src/migrate/today";
 import { carriedWorlds } from "../../src/migrate/worlds";
 import { ALL_PACKS } from "../../src/packs/index";
 import type { UserId, WorldId } from "../../src/shared/ids";
-import { GLOBAL_FOLDERS, NOTES_FOLDER } from "../../src/tree/layout";
-import { buildFixture, CHAT, SECRETS, STRAY, USER, type Fixture } from "./fixture";
+import { openStore } from "../../src/store";
+import { NOTES_FOLDER, TreeChats } from "../../src/tree";
+import { buildFixture, CHARACTER, CHAT, SECRETS, STRAY, USER, type Fixture } from "./fixture";
+import { readable, TREE as tree } from "./tree";
 
 const registry = createRegistry(ALL_PACKS);
 const user = USER as UserId;
-/** The places the tree's layout gives the user's own files, as `rpe migrate` passes them. */
-const tree = { agents: GLOBAL_FOLDERS.agents, skills: GLOBAL_FOLDERS.skills, prompts: GLOBAL_FOLDERS.prompts, notes: NOTES_FOLDER };
 
 /** A definition file's header and body. */
 function headed(text: string): { header: unknown; body: string } {
@@ -97,7 +98,7 @@ describe("what the real run carries besides the chats", () => {
     const port = modelsPort(paths, new SecretsFile(paths.secrets));
     expect(await port.loadConnections()).toEqual({ v: 1, default: "conn-1", connections: [{ id: "conn-1", name: "Main", provider: "deepseek", auth: "key", model: "deepseek-chat", effort: "high", headers: ["X-Team", "X-Gone"], serialTools: true }] });
     expect(await port.loadSecrets()).toEqual({ v: 1, keys: { "conn-1": SECRETS.key }, signins: { anthropic: { type: "oauth", access: SECRETS.access, refresh: SECRETS.refresh, expires: 1 } }, headers: { "conn-1": { "X-Team": SECRETS.header } }, device: "device-0001" });
-    expect(report.carried?.connections).toEqual({ runtime: "home", connections: ["conn-1"], leftOut: 1, keys: 1, signins: 1, headerValues: 1, default: "conn-1" });
+    expect(report.carried?.connections).toEqual({ runtime: "home", connections: ["conn-1"], leftOut: 1, keys: 1, signins: 1, headerValues: 1, kept: 0, default: "conn-1" });
     // The backup is today's data as it was, kept by its owner alone; outside it and the secrets file, no secret is anywhere in RPE's data folder.
     const holding: string[] = [];
     for (const f of await walk(data)) {
@@ -132,14 +133,37 @@ describe("what the real run carries besides the chats", () => {
     expect(headed(await at(".skills/tide-tables/SKILL.md"))).toEqual({ header: { name: "tide-tables", description: "When the pier floods." }, body: "Read the harbour's tide table before any walk on the pier.\n" });
     expect([await at(".prompts/classic.narrator.md"), await at(".prompts/lumiah.writer.md")]).toEqual(["Be terse.", "Write short."]);
     expect([await at("GUIDANCE.md"), await at("home/style.md")]).toEqual(["Keep the fog grey.", "Short lines."]);
-    // The chat's area at its latest turn, the characters' mind files left to their own row; and its learned/.
-    const notes = join("chats", CHAT.harness, NOTES_FOLDER);
-    expect([await at(join(notes, "notebook.md")), await at(join(notes, "author/prepare.md")), await at(join("chats", CHAT.harness, "learned/notes.md"))]).toEqual(["Ada distrusts the guard. The fog came.", "Next: the lighthouse.", "The pier floods at high tide."]);
-    expect(existsSync(join(files, "imported", notes, "minds"))).toBe(false);
-    // A chat LumiAH was told to forget is left in the backup; nothing is in force at the user's level.
-    expect(existsSync(join(files, "imported", "chats", CHAT.forgot))).toBe(false);
-    expect((await readdir(files)).sort()).toEqual(["RPE-global.yml", "imported"]);
+    // Nothing of any chat is at the user's level, which every chat's agents read.
+    expect(existsSync(join(files, "imported", "chats"))).toBe(false);
+    expect((await readdir(files)).sort()).toEqual(["RPE-global.yml", "chats", "imported"]);
     expect(reportText(report)).toContain("Waiting on you: your GUIDANCE.md");
+  });
+
+  test("each chat's notes and learned files are in that chat's own notes folder, which only its own agents read", async () => {
+    const files = dataPaths(data).files;
+    const texts = ["Ada distrusts the guard. The fog came.", "Next: the lighthouse.", "The pier floods at high tide."];
+    const holding = (read: Map<string, string>): string[] => [...read].filter(([, t]) => texts.some((n) => t.includes(n))).map(([p]) => p);
+    // What every chat's agents read above their own levels holds none of them.
+    expect(holding(await readable({ files, character: null, chat: null }))).toEqual([]);
+    const db = new Database(join(data, "rpe.db"));
+    try {
+      const chats = new TreeChats(db, { run: async (write) => write(db) }, files);
+      const own = chats.folders(USER, CHAT.harness);
+      if (own === null) throw new Error("the harness chat has no folders");
+      // Another chat with the same character, placed as RPE places it the first time it plays it: none of them either.
+      const sibling = await chats.place(USER, CHAT.classic, { character: CHARACTER, chat: { name: "Harbour (classic)" } });
+      expect(sibling.character).toBe(own.character);
+      expect(holding(await readable({ files, ...sibling }))).toEqual([]);
+      // The chat's own agents read them in its notes folder: the area at its latest turn, the characters' mind files left to their own row; and its learned/.
+      const mine = await readable({ files, ...own });
+      const notes = `${NOTES_FOLDER}/imported`;
+      expect([`${notes}/notebook.md`, `${notes}/author/prepare.md`, `${notes}/learned/notes.md`].map((p) => mine.get(p))).toEqual(texts);
+      expect([...mine.keys()].filter((p) => p.includes("minds/"))).toEqual([]);
+      // A chat LumiAH was told to forget is left in the backup, and no folder is made for it.
+      expect(chats.folders(USER, CHAT.forgot)).toBeNull();
+    } finally {
+      db.close();
+    }
   });
 
   test("a second run carries a world edited and a setting changed since the first", async () => {
@@ -159,5 +183,38 @@ describe("what the real run carries besides the chats", () => {
     }
     const config = Bun.YAML.parse(await readFile(dataPaths(data).globalConfig, "utf8")) as Record<string, unknown>;
     expect(config.chat).toEqual({ hiddenReadable: false });
+  });
+
+  test("a chat played on RPE keeps the notes it has: a later run leaves them as they are, and says so", async () => {
+    const files = dataPaths(data).files;
+    const db = new Database(join(data, "rpe.db"));
+    let notebook = "";
+    try {
+      const own = new TreeChats(db, { run: async (write) => write(db) }, files).folders(USER, CHAT.harness);
+      notebook = join(files, "chats", own?.character ?? "", own?.chat ?? "", NOTES_FOLDER, "imported", "notebook.md");
+      // A turn played on RPE, and its agents' word in the notes.
+      openStore({ db, registry, worlds: () => undefined }).user(USER).beginTurn({ chat: CHAT.harness, kind: "normal" });
+    } finally {
+      db.close();
+    }
+    await writeFile(notebook, "Ada trusts the guard now.");
+    const third = await migrate(fixture.sources, { data, tree, now: () => new Date("2026-11-14T11:00:00.000Z") });
+    expect(third.ran).toBe(true);
+    expect(third.report.imports?.find((c) => c.chatId === CHAT.harness)?.outcome).toBe("played on RPE: left alone");
+    expect(await readFile(notebook, "utf8")).toBe("Ada trusts the guard now.");
+    expect(third.report.carried?.ownFiles?.leftAlone).toBe(1);
+    expect(reportText(third.report)).toContain("1 chat(s) played on RPE keep the notes they have");
+  });
+
+  test("a later run leaves the keys and sign-ins RPE already has: a key changed in RPE, a sign-in RPE refreshed since", async () => {
+    const paths = dataPaths(data);
+    const port = modelsPort(paths, new SecretsFile(paths.secrets));
+    const had = (await port.loadSecrets()) as Record<string, unknown>;
+    const refreshed = { type: "oauth", access: "access-refreshed-in-rpe", refresh: "refresh-refreshed-in-rpe", expires: 2_000_000_000_000 };
+    await port.saveSecrets({ ...(had as object), v: 1, keys: { "conn-1": "sk-changed-in-rpe" }, signins: { anthropic: refreshed } } as Parameters<typeof port.saveSecrets>[0]);
+    const fourth = await migrate(fixture.sources, { data, tree, now: () => new Date("2026-11-14T12:00:00.000Z") });
+    expect(fourth.ran).toBe(true);
+    expect(await port.loadSecrets()).toMatchObject({ keys: { "conn-1": "sk-changed-in-rpe" }, signins: { anthropic: refreshed } });
+    expect(fourth.report.carried?.connections).toMatchObject({ keys: 0, signins: 0, kept: 2 });
   });
 });

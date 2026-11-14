@@ -17,7 +17,7 @@ import type { HostCapabilities, HostChat, HostMessage, HostPort } from "../backe
 import type { ChatId, MessageId, UserId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
 import { missing, readText } from "./files";
-import type { LumiverseDb } from "./lumiverse-db";
+import type { LumiverseDb, SwipeFacts } from "./lumiverse-db";
 
 export type Store = "user storage" | "extension storage" | "Lumiverse" | "RPE's copy";
 
@@ -144,7 +144,12 @@ export class StandIn {
   /** The log lines today's code wrote, by level: its own words about what it found (a damaged file, a world it couldn't read). */
   readonly logged: { level: "debug" | "info" | "warn" | "error"; message: string }[] = [];
   readonly host: HostPort;
-  private readonly messages = new Map<ChatId, HostMessage[]>();
+  /**
+   * Each chat as read from Lumiverse's database once: its messages, with what the readers wrote kept in
+   * memory, and its swipes' hashes and dates from that same read, so that a turn is tied to the swipe
+   * the readers folded even where Lumiverse has changed the chat since.
+   */
+  private readonly chats = new Map<ChatId, { messages: HostMessage[]; swipes: ReadonlyMap<string, SwipeFacts> }>();
   /** Each chat's metadata as the database held it at the first read, with what was merged into it since; null until read. */
   private metadata: Map<ChatId, JsonObject> | null = null;
   private appended = 0;
@@ -165,13 +170,22 @@ export class StandIn {
     return this.sources.db ?? this.refuse(call);
   }
 
-  private chatMessages(chatId: ChatId): HostMessage[] {
-    let list = this.messages.get(chatId);
-    if (!list) {
-      list = this.lumiverse("chat.messages").messages(chatId, this.sources.userId);
-      this.messages.set(chatId, list);
+  private chatRead(chatId: ChatId): { messages: HostMessage[]; swipes: ReadonlyMap<string, SwipeFacts> } {
+    let read = this.chats.get(chatId);
+    if (!read) {
+      read = this.lumiverse("chat.messages").messages(chatId, this.sources.userId);
+      this.chats.set(chatId, read);
     }
-    return list;
+    return read;
+  }
+
+  private chatMessages(chatId: ChatId): HostMessage[] {
+    return this.chatRead(chatId).messages;
+  }
+
+  /** A chat's swipes' hashes and dates, by message id, as read with the messages the readers were handed. */
+  swipes(chatId: ChatId): ReadonlyMap<string, SwipeFacts> {
+    return this.chatRead(chatId).swipes;
   }
 
   private chatMeta(chatId: ChatId): JsonObject {
@@ -238,10 +252,8 @@ export class StandIn {
         },
         deleteMessage: async (chatId, messageId, userId) => {
           this.userCheck(userId);
-          this.messages.set(
-            chatId,
-            this.chatMessages(chatId).filter((m) => m.id !== messageId),
-          );
+          const read = this.chatRead(chatId);
+          read.messages = read.messages.filter((m) => m.id !== messageId);
           this.writes.push({ store: "Lumiverse", op: "delete message", path: `chats/${chatId}/messages/${messageId}` });
         },
       },

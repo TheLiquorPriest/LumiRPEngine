@@ -1,7 +1,8 @@
 // The stores of today's build, one row each, as the plan's table of what is carried has them
 // (STANDALONE-PLAN §15.2), and the fate each row's things meet by default: carried into RPE's own
 // stores, attached word for word beside what they belong to, or archived (kept in the archive and
-// listed, not loaded). A thing found that no row names is "found, not classified".
+// listed, not loaded). A thing found that no row names is "found, not classified". And the rows this
+// build has no place for in RPE yet, whose things a run keeps in the backup only (`NO_PLACE_YET`).
 
 export type Fate = "carried" | "attached" | "archived";
 
@@ -75,3 +76,26 @@ export const ROWS = [
 export type RowId = (typeof ROWS)[number]["id"];
 
 export const ROW: Readonly<Record<RowId, Row>> = Object.fromEntries(ROWS.map((r) => [r.id, r])) as Record<RowId, Row>;
+
+/**
+ * The rows this build has no place for in RPE yet, each with what will carry it later. A thing of one
+ * of them that a run doesn't land is kept in the backup only: counted in a column of its own, never as
+ * carried or archived, and named at the end of the report, and the run goes ahead. A lane that gives
+ * a row its place deletes the row's line here. A row not named here can never be kept in the backup
+ * only: where a run can't land its things, the gate refuses the run.
+ */
+export const NO_PLACE_YET: Readonly<Partial<Record<RowId, string>>> = {
+  "chat-switch": "the swap (`rpe up`): each chat on in RPE as it was on today, the engine it used on its record",
+  "build-jobs": "the jobs lane",
+  "panel-requests": "the pages lane: each request onto the turn that answered it",
+  "agents-workspace": "the pages lane: as notes, per chat and global",
+  "assistant-threads": "the pages lane",
+  "chips-staged": "the pages lane",
+  "approvals-jobs": "the jobs lane",
+  loopback: "the swap (`rpe up`): RPE's own connection in Lumiverse takes the loopback's place",
+  sessions: "the pages lane: beside the turns they belong to",
+  "mind-files": "the pages lane: attached to each character's record, per turn",
+  "author-notes": "the pages lane: each chat's notes as they were at every turn, not only the latest",
+  texts: "the pages lane: the prompt sets turns recorded, beside those turns",
+  "runtime-settings": "the jobs lane: RPE's config has no setting for the runtime's tuning, memory limit or update choice yet",
+};

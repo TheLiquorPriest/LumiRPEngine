@@ -51,6 +51,9 @@ export const CHAT = {
   other: "c-other",
 } as const;
 
+/** The character the harness chat is with, in Lumiverse's characters: the chat's folders in RPE are named for it. */
+export const CHARACTER = { id: "char-ada", name: "Ada Vane" } as const;
+
 /** The file no row of the plan's table names. */
 export const STRAY = "stray-notes.txt";
 
@@ -105,7 +108,7 @@ interface Message {
 
 /** The fixture's chats (each with its owner and metadata) and their messages, for Lumiverse's database. */
 interface FixtureChats {
-  chats: { id: string; user: string; name: string; meta: JsonObject }[];
+  chats: { id: string; user: string; name: string; meta: JsonObject; character?: string }[];
   messages: Record<string, Message[]>;
 }
 
@@ -152,7 +155,7 @@ function chatsOf(worldId: string, rev: string, blobs: { agents: string[]; harnes
       { id: CHAT.classic, user: USER, name: "Harbour (classic)", meta: run("seed-classic", { prefs: { knowledge: true, narrator: "player" } }) },
       // Its engine came from the user's New chats start on, as a build with the depth engine marked it at the chat's first turn.
       { id: CHAT.agents, user: USER, name: "Gate (agents)", meta: run("seed-agents", { prefs: { engine: "agents", engineFrom: "default" }, agents: { learned: { "learned/notes.md": { hash: blobs.agents[1] ?? "" } }, assistant: { messages: [blobs.agents[2] ?? ""], proposals: {} }, rollback: { base: blobs.agents[0] ?? "", archived: blobs.agents[1] ?? "" } } }) },
-      { id: CHAT.harness, user: USER, name: "Fog (harness)", meta: { ...run("seed-harness", { prefs: { engine: "harness" } }), [`lumiah_chat_${IDENT}`]: { v: 1, chat: CHAT.harness, name: "LumiRPEngine", since: 1 }, chat_world_book_ids: ["book-engine"] } },
+      { id: CHAT.harness, user: USER, name: "Fog (harness)", character: CHARACTER.id, meta: { ...run("seed-harness", { prefs: { engine: "harness" } }), [`lumiah_chat_${IDENT}`]: { v: 1, chat: CHAT.harness, name: "LumiRPEngine", since: 1 }, chat_world_book_ids: ["book-engine"] } },
       { id: CHAT.branch, user: USER, name: "Harbour (branch)", meta: { ...run("seed-classic", { prefs: { knowledge: true } }), branched_from: CHAT.classic } },
       { id: CHAT.fresh, user: USER, name: "Lighthouse (no journal yet)", meta: run("seed-fresh") },
       { id: CHAT.plain, user: USER, name: "No engine here", meta: {} },
@@ -177,6 +180,7 @@ function chatsOf(worldId: string, rev: string, blobs: { agents: string[]; harnes
 const SCHEMA = `
 CREATE TABLE "user" (id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', email TEXT, username TEXT UNIQUE);
 CREATE TABLE extensions (id TEXT PRIMARY KEY, identifier TEXT UNIQUE NOT NULL, name TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1, metadata TEXT NOT NULL DEFAULT '{}', install_scope TEXT NOT NULL DEFAULT 'operator', installed_by_user_id TEXT, branch TEXT);
+CREATE TABLE characters (id TEXT PRIMARY KEY, name TEXT NOT NULL, user_id TEXT);
 CREATE TABLE chats (id TEXT PRIMARY KEY, character_id TEXT, name TEXT NOT NULL DEFAULT '', metadata TEXT NOT NULL DEFAULT '{}', created_at INTEGER, updated_at INTEGER, user_id TEXT);
 CREATE TABLE messages (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, index_in_chat INTEGER NOT NULL, is_user INTEGER NOT NULL DEFAULT 0, name TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', send_date INTEGER, swipe_id INTEGER NOT NULL DEFAULT 0, swipes TEXT NOT NULL DEFAULT '[]', extra TEXT NOT NULL DEFAULT '{}', parent_message_id TEXT, branch_id TEXT, created_at INTEGER, swipe_dates TEXT NOT NULL DEFAULT '[]', revision INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE world_books (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', metadata TEXT NOT NULL DEFAULT '{}', created_at INTEGER, updated_at INTEGER, user_id TEXT, folder TEXT NOT NULL DEFAULT '');
@@ -193,9 +197,10 @@ function writeDatabase(path: string, layout: "operator" | "user", data: FixtureC
   db.query(`INSERT INTO "user" (id, name, username) VALUES (?, ?, ?)`).run(USER, "Player", USERNAME);
   db.query(`INSERT INTO "user" (id, name, username) VALUES (?, ?, ?)`).run(OTHER_USER, "Someone", "someone-else");
   db.query("INSERT INTO extensions (id, identifier, name, version, install_scope, installed_by_user_id, branch) VALUES (?, ?, ?, ?, ?, ?, ?)").run("ext-1", IDENT, "LumiRPEngine", "0.0.1", layout, layout === "user" ? USER : null, "main");
+  db.query("INSERT INTO characters (id, name, user_id) VALUES (?, ?, ?)").run(CHARACTER.id, CHARACTER.name, USER);
   let updated = 100;
   for (const c of data.chats) {
-    db.query("INSERT INTO chats (id, name, metadata, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?, ?)").run(c.id, c.name, JSON.stringify(c.meta), 1, updated++, c.user);
+    db.query("INSERT INTO chats (id, character_id, name, metadata, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)").run(c.id, c.character ?? null, c.name, JSON.stringify(c.meta), 1, updated++, c.user);
     for (const [i, m] of (data.messages[c.id] ?? []).entries()) {
       const swipeId = m.swipeId ?? 0;
       db.query("INSERT INTO messages (id, chat_id, index_in_chat, is_user, name, content, swipe_id, swipes, extra) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(m.id, c.id, i, m.isUser ? 1 : 0, m.isUser ? "Player" : "Narrator", m.swipes[swipeId] ?? "", swipeId, JSON.stringify(m.swipes), JSON.stringify(m.meta ? { spindle_metadata: m.meta } : {}));

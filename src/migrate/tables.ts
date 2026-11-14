@@ -70,6 +70,12 @@ CREATE TABLE world_file (
 );
 `,
   },
+  {
+    version: 3,
+    name: "what a run keeps in the backup only",
+    // A row's things this build has no place for yet (`NO_PLACE_YET`): their own count, never carried or archived.
+    sql: "ALTER TABLE migration_item ADD COLUMN backup INTEGER NOT NULL DEFAULT 0;",
+  },
 ];
 
 /** Whether the database holds the migration's tables yet. */
@@ -84,6 +90,12 @@ export function lastReport(db: Database, user: string): MigrationReport | null {
   return row === null ? null : (JSON.parse(row.report) as MigrationReport);
 }
 
+/** The users whose data earlier real runs carried into this database: one RPE serves one Lumiverse user. */
+export function runUsers(db: Database): string[] {
+  if (!hasTables(db)) return [];
+  return db.query<{ user: string }, []>("SELECT DISTINCT user FROM migration_run ORDER BY user").all().map((r) => r.user);
+}
+
 /** The chats an earlier run imported for the user, with the chat each shares turns with. */
 export function importedChats(db: Database, user: string): { chat: string; source: string | null }[] {
   if (!hasTables(db)) return [];
@@ -94,8 +106,8 @@ export function importedChats(db: Database, user: string): { chat: string; sourc
 export function keepRun(db: Database, user: string, id: string, report: MigrationReport, landed: (row: string) => string): void {
   db.transaction(() => {
     db.run("INSERT INTO migration_run (user, id, at, report) VALUES (?, ?, ?, ?)", [user, id, report.at, JSON.stringify(report)]);
-    const put = db.query("INSERT INTO migration_item (user, run, store, found, carried, attached, archived, bytes, checksum, landed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    for (const r of report.rows) put.run(user, id, r.row, r.count.found, r.count.carried, r.count.attached, r.count.archived, r.bytes, r.digest, landed(r.row));
+    const put = db.query("INSERT INTO migration_item (user, run, store, found, carried, attached, archived, backup, bytes, checksum, landed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    for (const r of report.rows) put.run(user, id, r.row, r.count.found, r.count.carried, r.count.attached, r.count.archived, r.count.backup, r.bytes, r.digest, landed(r.row));
   })();
 }
 

@@ -9,13 +9,15 @@
 
 import { Database } from "bun:sqlite";
 import { existsSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type { ConnectionInput, ConnectionList, ConnectionView, Effort } from "rp-harness/contract";
 import { EXTENSION_IDENTIFIER } from "../adapter/lumiverse/pipe-wire";
 import { LumiverseError, LumiverseSession, type StoredSignIn } from "../adapter/lumiverse/session";
 import { migrateCli } from "../migrate/cli";
+import type { TreeLayout } from "../migrate/own-files";
 import { isRecord } from "../shared/json";
-import { GLOBAL_FOLDERS, NOTES_FOLDER } from "../tree/layout";
+import { TREE_MIGRATIONS, TreeChats } from "../tree/chats";
+import { CHATS_FOLDER, GLOBAL_FOLDERS, NOTES_FOLDER } from "../tree/layout";
 import type { Area } from "./app";
 import { lineLog, openApp, STATUS_PATH } from "./app";
 import type { KeyKind } from "./auth";
@@ -472,10 +474,25 @@ async function connectionCommand(words: readonly string[], flags: Flags, paths: 
   throw new UsageError("rpe connection takes list, add or remove <name or id>.");
 }
 
-/** `rpe migrate`: the migration's own command line (src/migrate/cli.ts), into RPE's data folder unless the line names another, the user's own files into the folders the file tree's layout gives them. */
+/**
+ * `rpe migrate`: the migration's own command line (src/migrate/cli.ts), into RPE's data folder unless
+ * the line names another; the user's own files into the folders the file tree's layout gives them,
+ * each chat's notes into that chat's own folder, placed as the tree places a chat.
+ */
 async function migrateCommand(rest: readonly string[], io: CliIO, version: string): Promise<number> {
   const line = rest.includes("--data") ? rest : [...rest, "--data", defaultDataFolder(io.env, io.home)];
-  const tree = { agents: GLOBAL_FOLDERS.agents, skills: GLOBAL_FOLDERS.skills, prompts: GLOBAL_FOLDERS.prompts, notes: NOTES_FOLDER };
+  const tree: TreeLayout = {
+    agents: GLOBAL_FOLDERS.agents,
+    skills: GLOBAL_FOLDERS.skills,
+    prompts: GLOBAL_FOLDERS.prompts,
+    notes: NOTES_FOLDER,
+    tables: { area: "files", migrations: TREE_MIGRATIONS },
+    // The run is the one writer of RPE's database while it runs, so the tree's writes go to it directly.
+    chatFolder: async (db, files, user, chat, names) => {
+      const at = await new TreeChats(db, { run: async (write) => write(db) }, files).place(user, chat, names);
+      return join(CHATS_FOLDER, at.character, at.chat);
+    },
+  };
   // Its output is whole texts, this one's lines; and it reads the build's id from the environment, where a built `rpe` does not put it.
   return await migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, tree);
 }

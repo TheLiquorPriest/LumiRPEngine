@@ -7,6 +7,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { join } from "node:path";
 import { migrate, Migrations } from "../../src/app/migrations";
 import type { ChainMessage } from "../../src/engine/ledger/chain";
 import { LedgerFold } from "../../src/engine/ledger/fold";
@@ -15,6 +16,7 @@ import { createRegistry } from "../../src/engine/registry-impl";
 import { placeOfEntity } from "../../src/engine/scope";
 import type { WorldState } from "../../src/engine/state";
 import { ALL_PACKS } from "../../src/packs/index";
+import type { ChatId, UserId } from "../../src/shared/ids";
 import type { WorldDoc } from "../../src/shared/world";
 import { openStore, STORE_MIGRATIONS, type Store, type UserStore } from "../../src/store";
 import { chatsToImport, importChats, type ChatToImport } from "../../src/migrate/import-chats";
@@ -98,10 +100,11 @@ describe("each chat into the store", () => {
     played = await addPlayedChats(fixture);
     before = await treeSums(fixture.root);
     today = await openToday(fixture.sources);
-    chats = (await chatsToImport(today)).chats;
+    const read = await chatsToImport(today);
+    chats = read.chats;
     const t = target(chats);
     s = t.s;
-    reports = importChats({ store: t.store, s, db: t.db, registry, chats, earlier: [], run: "run-1" });
+    reports = importChats({ store: t.store, s, db: t.db, registry, chats, notOpened: read.notOpened, present: new Set(today.chats.map((c) => c.id)), earlier: [], run: "run-1" });
   });
 
   afterAll(async () => {
@@ -192,5 +195,36 @@ describe("each chat into the store", () => {
     const after = await treeSums(fixture.root);
     const lockIndex = (sums: Map<string, string>) => new Map([...sums].filter(([path]) => !path.endsWith(".db-shm")));
     expect(lockIndex(after)).toEqual(lockIndex(before));
+  });
+});
+
+describe("a swipe Lumiverse deletes while the run reads", () => {
+  test("each turn is tied to the swipe it was made for: its hash and date are read with the messages the run folds", async () => {
+    const fixture = await buildFixture("operator");
+    await addPlayedChats(fixture);
+    const today = await openToday(fixture.sources);
+    try {
+      // The run reads the chat when it makes its report…
+      await today.reader.today(PLAYED.classic as ChatId, USER as UserId);
+      // …and, before it imports the chat, today's build deletes the reply's first swipe: the one after it moves up.
+      const lumiverse = new Database(join(fixture.sources.lumiverse, "lumiverse.db"));
+      lumiverse.query("UPDATE messages SET swipes = ?, swipe_dates = ?, swipe_id = 0, content = ? WHERE id = ?").run(JSON.stringify(["She picks the brass one."]), JSON.stringify([202]), "She picks the brass one.", "pc-a2");
+      lumiverse.close();
+      const { chats, notOpened } = await chatsToImport(today);
+      const t = target(chats);
+      try {
+        importChats({ store: t.store, s: t.s, db: t.db, registry, chats, notOpened, present: new Set(today.chats.map((c) => c.id)), earlier: [], run: "run-1" });
+        const tied = t.s.swipes(PLAYED.classic, "pc-a2").map((turn) => ({ hash: turn.hash, date: turn.date }));
+        expect(tied.sort((a, b) => (a.date ?? 0) - (b.date ?? 0))).toEqual([
+          { hash: textHash("A tin lantern changes hands."), date: 201 },
+          { hash: textHash("She picks the brass one."), date: 202 },
+        ]);
+      } finally {
+        t.db.close();
+      }
+    } finally {
+      today.close();
+      await fixture.remove();
+    }
   });
 });
