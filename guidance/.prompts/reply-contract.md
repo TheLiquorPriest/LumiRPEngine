@@ -3,6 +3,7 @@ description: How a reply, an intent record and a closing call are marked, in the
 tags:
   reply: reply
   intent: intent
+intent_file: scratch/intent.md
 ---
 # The reply contract
 
@@ -12,7 +13,7 @@ tags:
 - Tool calls may come before the reply, after it, or both. One reply per turn.
 {{/form.tags}}
 {{#form.two_step}}
-- **Working text goes in files, never in a message.** An intent record, when your instructions ask for one: written first to `scratch/intent.md` in the turn's folder with `file_write`.
+- **Working text goes in files, never in a message.** An intent record, when your instructions ask for one: written first to `{{intent_file}}` in the turn's folder with `file_write`.
 - **The reply:** the plain text of a message of its own. That message may carry closing calls and nothing else. One reply per turn.
 {{/form.two_step}}
 
