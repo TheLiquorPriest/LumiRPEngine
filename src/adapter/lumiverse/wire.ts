@@ -90,7 +90,8 @@ export interface KeepPoint {
 
 export interface Answer {
   v: 1;
-  secrecy: SecrecyVerdict;
+  /** What each secret reads as in this prompt; null when RPE could not work it out, and the extension keeps every marked secret out by its own fail-closed verdict (`ext/fail-closed.ts`), as with no answer at all. */
+  secrecy: SecrecyVerdict | null;
   /** Where the history window starts (`keep` null: all history stays); null when RPE could not say, so the extension cuts nothing. */
   cut: { keep: KeepPoint | null } | null;
 }
@@ -234,16 +235,22 @@ export function readQuestion(value: unknown): Question | null {
   return { v: 1, user: value.user, chat: value.chat, purpose: value.purpose, generation, path, entries };
 }
 
-/** RPE's answer, or null when it is not one this build reads (the extension then answers by itself). */
-export function readAnswer(value: unknown): Answer | null {
-  if (!isRecord(value) || value.v !== 1 || !isRecord(value.secrecy)) return null;
-  const { secrecy } = value;
-  if (!ids(secrecy.disabled) || !ids(secrecy.enabled) || !Array.isArray(secrecy.mutated)) return null;
+/** A secrecy verdict as RPE answers it; undefined when it is not one this build reads. */
+function verdictOf(v: unknown): SecrecyVerdict | undefined {
+  if (!isRecord(v) || !ids(v.disabled) || !ids(v.enabled) || !Array.isArray(v.mutated)) return undefined;
   const mutated: { id: string; content: string }[] = [];
-  for (const m of secrecy.mutated) {
-    if (!isRecord(m) || !str(m.id) || !str(m.content)) return null;
+  for (const m of v.mutated) {
+    if (!isRecord(m) || !str(m.id) || !str(m.content)) return undefined;
     mutated.push({ id: m.id, content: m.content });
   }
+  return { disabled: [...v.disabled], enabled: [...v.enabled], mutated };
+}
+
+/** RPE's answer, or null when it is not one this build reads (the extension then answers by itself). */
+export function readAnswer(value: unknown): Answer | null {
+  if (!isRecord(value) || value.v !== 1) return null;
+  const secrecy = value.secrecy === null ? null : verdictOf(value.secrecy);
+  if (secrecy === undefined) return null;
   let cut: Answer["cut"];
   if (value.cut === null) cut = null;
   else if (isRecord(value.cut)) {
@@ -251,7 +258,7 @@ export function readAnswer(value: unknown): Answer | null {
     if (keep === undefined) return null;
     cut = { keep };
   } else return null;
-  return { v: 1, secrecy: { disabled: [...secrecy.disabled], enabled: [...secrecy.enabled], mutated }, cut };
+  return { v: 1, secrecy, cut };
 }
 
 function tagMessage(v: unknown): TagMessage | null {

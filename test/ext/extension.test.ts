@@ -300,3 +300,46 @@ describe("a reply asked for whole", () => {
     expect(theirs.reply?.content).toBe("Another model's reply.");
   });
 });
+
+describe("RPE's secrets failing", () => {
+  const COUNCIL = "COUNCIL-BLOCK The council weighed the ferry against the tide.";
+
+  test("with a window set, the extension still cuts where RPE says and keeps every marked secret out by its own verdict; RPE says so once for the chat", async () => {
+    const rig = await new Rig({ secretsFail: true }).start();
+    const out = await rig.generate("conn-rpe");
+    expect(out.error).toBeNull();
+    const turn = rig.turns[0]!;
+    expect(turn.tag.cut).toEqual({ answered: true, keep: { id: "m8", index: 8 }, removed: 7 });
+    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: 7, remembered: false, byRpe: 0 });
+    // What Lumiverse stores beside the reply holds only the window.
+    const stored = out.stored!.messages.map((m) => m.content).join("\n");
+    for (const i of WINDOW) expect(stored).toContain(label(i));
+    for (const i of LEFT_OUT) expect(stored).not.toContain(label(i));
+    // Every marked passage and every copy of one stays out, as with no answer; the rest goes in.
+    const sent = bodyText(out.body);
+    for (const kept of [FERRY_SECRET, VAULT_SECRET]) expect(sent).not.toContain(kept);
+    for (const shown of ["The ferry crosses the bay at dawn.", PUBLIC_LORE]) expect(sent).toContain(shown);
+
+    // The next reply: the first one's message is on the path now, so the window starts one later.
+    await rig.generate("conn-rpe");
+    expect(rig.turns[1]!.tag.cut).toEqual({ answered: true, keep: { id: "m9", index: 9 }, removed: 8 });
+    expect(rig.rpeLog.filter((line) => line.includes("could not work out its lore's secrets"))).toEqual([expect.stringContaining("chat chat-harbor:")]);
+  });
+
+  test("under prompt post-processing, with a part Lumiverse adds after the extension, that chat is not refused: the extension made the cut RPE could not make on receipt", async () => {
+    const options = { postProcessing: "merge", council: COUNCIL };
+    // With no cut from the extension, RPE must cut on receipt, cannot tell the council's part from the rest, and refuses.
+    const uncut = await new Rig({ ...options, windowFailsAtQuestion: true }).start();
+    const refused = await uncut.generate("conn-rpe");
+    expect(refused.error).toContain("could not tell this prompt's parts apart");
+
+    const rig = await new Rig({ ...options, secretsFail: true }).start();
+    const out = await rig.generate("conn-rpe");
+    expect(out.error).toBeNull();
+    expect(out.reply?.content).toBe("The tide turns.");
+    const turn = rig.turns[0]!;
+    expect(turn.cut).toEqual({ keep: { id: "m8", index: 8 }, byExtension: 7, remembered: false, byRpe: 0 });
+    expect(promptText(turn.prompt)).toContain(COUNCIL);
+    for (const i of LEFT_OUT) expect(promptText(turn.prompt)).not.toContain(label(i));
+  });
+});

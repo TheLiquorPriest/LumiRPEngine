@@ -4,13 +4,16 @@
 // page's start-up facts, a page's follows) behind the registration key RPE hands the extension over its
 // relay socket; a wrong key is refused on each. End to end: a page's start-up facts reach it through the
 // extension and its token is one RPE takes, and a reply Lumiverse asks for on RPE's connection reaches
-// the mounted endpoint asked, tagged and answered. Every name is invented.
+// the mounted endpoint asked, tagged and answered. And Lumiverse's Stop, as the door offers it to the
+// turn lane. Every name is invented.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { LIVE_PATH, START_PATH, USER_HEADER } from "../../src/adapter/lumiverse/pipe-wire";
 import { QUESTION_PATH, type Question } from "../../src/adapter/lumiverse/wire";
 import { pageRoad } from "../../src/ext/page";
+import { isRecord } from "../../src/shared/json";
 import { REAL_CLOCK } from "../ext/rig";
+import type { Outcome } from "../standin/lumiverse";
 import { openDoor, USER, type DoorBed } from "./door";
 
 const PAGE = "aaaaaaaabbbbbbbbccccccccdddddddd";
@@ -115,5 +118,51 @@ describe("the door, mounted in the app", () => {
     expect(b.heard.questions.map((q) => q.chat)).toEqual(["chat-harbor"]);
     expect(b.heard.turns).toHaveLength(1);
     expect(b.heard.turns[0]?.tag).toMatchObject({ user: USER, chat: "chat-harbor", generation: out.generationId!, kind: "new", connection: "conn-rpe", preset: "preset-coast" });
+  });
+
+  test("Lumiverse's Stop, for the generation named alone: that one stops; an id not going stops nothing in its place; an empty id is never sent; a lost sign-in is said", async () => {
+    const b = await bed();
+    const lumiverse = b.door.lumiverse()!;
+    // A model that answers nothing until its request is stopped: each generation on it stays going.
+    const SLOW = "http://127.0.0.1:7999";
+    b.host.servers.set(SLOW, (request) => {
+      const { promise, reject } = Promise.withResolvers<Response>();
+      // A request stopped before it was sent fails at once, as `fetch` does with a signal already aborted.
+      const stopped = (): void => reject(new Error("The operation was aborted."));
+      if (request.signal.aborted) stopped();
+      else request.signal.addEventListener("abort", stopped, { once: true });
+      return promise;
+    });
+    b.host.connections.set("conn-slow", { id: "conn-slow", base: `${SLOW}/v1`, key: "slow-key", model: "slow" });
+    b.host.presets.set("preset-coast", { id: "preset-coast", name: "Coast", blocks: [{ id: "b-main", name: "Main", role: "system", content: "You narrate a harbor town." }] });
+    for (const chat of ["chat-harbor", "chat-cove"]) b.host.chats.set(chat, { id: chat, user: USER, character: { id: "char-ilsa", name: "Ilsa" }, messages: [{ id: `${chat}-m0`, role: "user", content: "I wait for the ferry." }], books: [] });
+    const start = async (chat: string): Promise<{ id: string; outcome: Promise<Outcome> }> => {
+      const from = b.host.events.length;
+      const outcome = b.host.generate({ chat, connection: "conn-slow", preset: "preset-coast" });
+      const id = await b.until(`a generation of ${chat} to start`, () => {
+        for (const e of b.host.events.slice(from)) if (e.event === "GENERATION_STARTED" && isRecord(e.payload) && typeof e.payload.generationId === "string") return e.payload.generationId;
+        return null;
+      });
+      return { id, outcome };
+    };
+    const harbor = await start("chat-harbor");
+    const cove = await start("chat-cove");
+    const stops = (): number => b.server.requests.filter((r) => r.path === "/api/v1/generate/stop").length;
+
+    // No chat is named with the id, so Lumiverse stops nothing else in its place.
+    expect(await lumiverse.stopGeneration("gen-long-gone")).toBe(false);
+    // Lumiverse reads a request naming no generation as "stop every one of this user's": RPE never sends one.
+    await expect(lumiverse.stopGeneration("")).rejects.toThrow("could not name");
+    expect(stops()).toBe(1);
+
+    // Both are still going: each stops when it is named, and only then.
+    expect(await lumiverse.stopGeneration(harbor.id)).toBe(true);
+    expect((await harbor.outcome).stopped).toBe(true);
+    expect(await lumiverse.stopGeneration(harbor.id)).toBe(false);
+    expect(await lumiverse.stopGeneration(cove.id)).toBe(true);
+    expect((await cove.outcome).stopped).toBe(true);
+
+    b.server.endSessions(USER);
+    await expect(lumiverse.stopGeneration(cove.id)).rejects.toThrow("has ended");
   });
 });

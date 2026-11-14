@@ -74,6 +74,15 @@ export interface Lumiverse {
   relay: Relay;
   /** The database reader, where RPE reads Lumiverse's file. */
   database: DbReader | null;
+  /**
+   * Lumiverse's Stop (`routes/generate.routes.ts:45-65`) as RPE's user, for the generation named alone:
+   * true when Lumiverse stopped it, false when it was not going (it ended, or it is another user's,
+   * `generation/active-generation-registry.ts:91-97`). No chat is named, so Lumiverse never stops
+   * whatever else goes on in the chat in its place (`:53-55`); and an empty id is refused before it
+   * is sent, since Lumiverse reads a request naming nothing as "stop every generation of this user"
+   * (`:48`, `:63-64`).
+   */
+  stopGeneration(generation: string): Promise<boolean>;
 }
 
 export interface LumiverseDoor {
@@ -156,7 +165,12 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       permissions: lanes.permissions,
       ...(deps.relay ? { settings: deps.relay } : {}),
     });
-    return { session, reads, chat, events, relaySocket, relay, database };
+    const stopGeneration = async (generation: string): Promise<boolean> => {
+      if (generation === "") throw new Error("RPE did not ask Lumiverse to stop a generation it could not name: Lumiverse would stop every one of your generations instead.");
+      const answer = await session.json("POST", "/api/v1/generate/stop", { generation_id: generation });
+      return isRecord(answer) && answer.stopped === true;
+    };
+    return { session, reads, chat, events, relaySocket, relay, database, stopGeneration };
   }
 
   /** The adapter's handlers, made once the area is mounted in an app set up for a Lumiverse user. */

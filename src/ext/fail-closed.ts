@@ -45,12 +45,14 @@ export class KeptOut {
   /** `most`: how many chats are remembered; past it the one answered longest ago is forgotten. */
   constructor(private readonly most: number) {}
 
-  /** RPE answered for the chat: its answer replaces what was remembered. Where it could not say where to cut, the cut it said last is kept. */
+  /** RPE answered for the chat: its answer replaces what was remembered. Where it could not say where to cut, or what the secrets read as, what it said last of that is kept. */
   heard(user: string, chat: string, answer: Pick<Answer, "secrecy" | "cut">): void {
     const key = `${user}\u0000${chat}`;
-    const keep = answer.cut === null ? (this.byChat.get(key)?.keep ?? null) : answer.cut.keep;
+    const before = this.byChat.get(key);
+    const keep = answer.cut === null ? (before?.keep ?? null) : answer.cut.keep;
+    const off = answer.secrecy === null ? (before?.off ?? new Set<string>()) : new Set(answer.secrecy.disabled);
     this.byChat.delete(key);
-    this.byChat.set(key, { off: new Set(answer.secrecy.disabled), keep });
+    this.byChat.set(key, { off, keep });
     for (const oldest of this.byChat.keys()) {
       if (this.byChat.size <= this.most) break;
       this.byChat.delete(oldest);

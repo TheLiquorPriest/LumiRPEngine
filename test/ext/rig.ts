@@ -76,6 +76,10 @@ export interface RigOptions {
   picture?: boolean;
   /** The preset's streaming switch (`prompt-assembly.service.ts:7743-7745`); on unless said. */
   streaming?: false;
+  /** RPE cannot work out the lore's secrets: its secrecy rules fail, as the composition's do until the secrets lane lands. */
+  secretsFail?: true;
+  /** Lumiverse's council block, which it splices into the prompt after its interceptors (`StandIn.councilBlock`). */
+  council?: string;
 }
 
 /** RPE's scripted secrecy rules: the ferry's mark shown as RPE words it; the vault (a whole-entry secret), its unmarked copy and the entry a world secret was indexed from kept out. */
@@ -100,6 +104,8 @@ export class Rig {
   readonly questions: Question[] = [];
   readonly turns: TaggedTurn[] = [];
   readonly passed: JsonObject[] = [];
+  /** What RPE's question route said in RPE's log. */
+  readonly rpeLog: string[] = [];
   /** What the extension sent RPE's relay socket. */
   readonly toRpe: unknown[] = [];
   readonly otherBodies: Record<string, unknown>[] = [];
@@ -115,7 +121,11 @@ export class Rig {
       const first = visible[visible.length - keep];
       return visible.length <= keep || first === undefined ? null : { id: first.id, index: first.index };
     };
-    const question = questionRoute({ secrecy: async (ask) => harborSecrecy(ask), window, allowed: (r) => r.headers.get("authorization") === `Bearer ${EXTENSION_KEY}` && r.headers.get(USER_HEADER) === USER });
+    const secrecy = async (ask: SecrecyAsk): Promise<SecrecyVerdict> => {
+      if (options.secretsFail) throw new Error("RPE does not work out its lore's secrets yet");
+      return harborSecrecy(ask);
+    };
+    const question = questionRoute({ secrecy, window, allowed: (r) => r.headers.get("authorization") === `Bearer ${EXTENSION_KEY}` && r.headers.get(USER_HEADER) === USER, log: (m) => this.rpeLog.push(m) });
     const provider = providerEndpoint({
       user: USER,
       allowed: (r) => r.headers.get("authorization") === `Bearer ${PROVIDER_KEY}`,
@@ -169,6 +179,7 @@ export class Rig {
       return body.stream === false ? await wholeReply(run, meta, request.signal) : streamedReply(run, meta, request.signal, { clock: REAL_CLOCK, keepAlive: null });
     });
     this.lv.postProcessing = options.postProcessing ?? "";
+    this.lv.councilBlock = options.council ?? null;
     this.lv.connections.set("conn-rpe", { id: "conn-rpe", base: `${RPE}/v1`, key: PROVIDER_KEY, model: "rpe" });
     this.lv.connections.set("conn-other", { id: "conn-other", base: `${OTHER}/v1`, key: "other-key", model: "other" });
     this.lv.presets.set(PRESET.id, { ...PRESET, ...(options.collapse ? { collapse: true } : {}), ...(options.prefill !== undefined ? { prefill: options.prefill } : {}), ...(options.streaming === false ? { parameters: { ...PRESET.parameters, _streaming: false } } : {}) });

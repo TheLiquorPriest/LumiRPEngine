@@ -5,9 +5,11 @@
 // gives it (message ids and swipes) and what RPE needs of each candidate entry; applies RPE's verdict
 // on the secrets; and holds RPE's answer on the history cut for the prompt interceptor of the same
 // generation. With no answer in time it applies the fail-closed verdict (`fail-closed.ts`) and holds
-// no cut. Lumiverse gives it ten seconds and then forwards the entries unchanged
-// (`worker-host.ts:4936-4943`), and does the same when it throws (`worker-runtime.ts:4979-4989`,
-// `world-info-interceptor.ts:384-392`), so it never throws and its deadline is well inside that.
+// only the cut RPE last gave the chat; when RPE answers that it could not work the secrets out, it
+// applies the same verdict and holds RPE's cut. Lumiverse gives it ten seconds and then forwards the
+// entries unchanged (`worker-host.ts:4936-4943`), and does the same when it throws (`worker-runtime.ts:
+// 4979-4989`, `world-info-interceptor.ts:384-392`), so it never throws and its deadline is well inside
+// that.
 
 import type { WorldInfoCandidate } from "../backend/host";
 import { textOf } from "../backend/lore-secrets";
@@ -93,7 +95,8 @@ export function worldInfoInterceptor(deps: QuestionDeps): (ctx: unknown) => Prom
       if ("none" in reply) return fallBack(reply.none);
       deps.keptOut.heard(ctx.user, ctx.chat, reply.answer);
       if (ctx.purpose === "prompt") deps.generations.hold(ctx.user, ctx.chat, generation?.id ?? null, reply.answer.cut === null ? null : { keep: reply.answer.cut.keep, by: "answer" });
-      return reply.answer.secrecy;
+      // RPE could not work the secrets out: they stay out as with no answer, and its cut stands. RPE's log says so, once for the chat.
+      return reply.answer.secrecy ?? failClosed(ctx.candidates, deps.keptOut.of(ctx.user, ctx.chat));
     } catch (error) {
       return fallBack(`the extension failed (${error instanceof Error ? error.message : String(error)})`);
     }

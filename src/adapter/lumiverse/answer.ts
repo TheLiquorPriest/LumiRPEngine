@@ -37,11 +37,14 @@ export interface AnswerDeps {
 }
 
 /**
- * The answer to one question. The window is asked only when a prompt is being built. When it fails,
- * the answer says the cut is not known, so the extension cuts nothing and RPE cuts on receipt; when
- * the secrecy rules fail there is no answer at all, and the extension keeps every secret out.
+ * The answer to one question. The window is asked only when a prompt is being built, the secrecy rules
+ * at the same time, and neither's failure takes the other's answer with it. When the window fails, the
+ * answer says the cut is not known, so the extension cuts nothing and RPE cuts on receipt. When the
+ * secrecy rules fail, the answer says the secrets are not known (`secrecy: null`): the extension keeps
+ * every marked secret out by its own fail-closed verdict, as with no answer at all, and still cuts
+ * where the window says. `secretsFailed` hears why they failed.
  */
-export async function answer(deps: AnswerDeps, q: Question, signal: AbortSignal): Promise<Answer> {
+export async function answer(deps: AnswerDeps, q: Question, signal: AbortSignal, secretsFailed: (error: unknown) => void): Promise<Answer> {
   const ask = { user: q.user, chat: q.chat, generation: q.generation, path: q.path };
   const cut = q.purpose === "prompt"
     ? deps.window(ask, signal).then(
@@ -52,8 +55,12 @@ export async function answer(deps: AnswerDeps, q: Question, signal: AbortSignal)
         },
       )
     : Promise.resolve(null);
-  const [secrecy, window] = await Promise.all([deps.secrecy({ ...ask, purpose: q.purpose, entries: q.entries }, signal), cut]);
-  return { v: 1, secrecy, cut: window };
+  const secrecy = deps.secrecy({ ...ask, purpose: q.purpose, entries: q.entries }, signal).catch((error: unknown) => {
+    secretsFailed(error);
+    return null;
+  });
+  const [verdict, window] = await Promise.all([secrecy, cut]);
+  return { v: 1, secrecy: verdict, cut: window };
 }
 
 function words(error: unknown): string {
@@ -66,9 +73,11 @@ function json(status: number, body: unknown): Response {
 
 /**
  * The question's route (`QUESTION_PATH`): a POST of the question as JSON, answered as JSON. Who may ask
- * is the server's to say (`allowed`): the extension's registration.
+ * is the server's to say (`allowed`): the extension's registration. Secrets that cannot be worked out
+ * are said in the log once for each chat while RPE runs, not at every generation.
  */
 export function questionRoute(deps: AnswerDeps & { allowed(request: Request): boolean | Promise<boolean> }): (request: Request) => Promise<Response> {
+  const told = new Set<string>();
   return async (request) => {
     if (request.method !== "POST") return json(405, { error: "The question is asked with POST." });
     if (!(await deps.allowed(request))) return json(401, { error: "This extension is not registered with this RPE." });
@@ -80,10 +89,15 @@ export function questionRoute(deps: AnswerDeps & { allowed(request: Request): bo
     }
     const q = readQuestion(body);
     if (q === null) return json(400, { error: "The question is not one this RPE reads: update the extension and RPE to the same build." });
+    const secretsFailed = (error: unknown): void => {
+      if (told.has(q.chat)) return;
+      told.add(q.chat);
+      deps.log?.(`chat ${q.chat}: RPE could not work out its lore's secrets (${words(error)}). The extension keeps every marked secret out of its prompts, and the history window is cut as ever. This is said once for each chat until RPE restarts.`);
+    };
     try {
-      return json(200, await answer(deps, q, request.signal));
+      return json(200, await answer(deps, q, request.signal, secretsFailed));
     } catch (error) {
-      deps.log?.(`the secrets in chat ${q.chat} were not worked out, so the extension keeps them all out: ${words(error)}`);
+      deps.log?.(`RPE could not answer the extension's question for chat ${q.chat}, so the extension answers by itself: ${words(error)}`);
       return json(500, { error: words(error) });
     }
   };
