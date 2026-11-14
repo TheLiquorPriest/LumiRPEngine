@@ -38,12 +38,13 @@ export interface Logged {
   fields?: Record<string, JsonValue>;
 }
 
+/** What a turn's test plays through: the stand-in Lumiverse, and RPE, whose side (`app` to `turns`) is the new RPE's after a restart. */
 export interface TurnBed {
-  app: App;
-  listening: RunningServer;
-  composition: Composition;
+  readonly app: App;
+  readonly listening: RunningServer;
+  readonly composition: Composition;
   /** The turn lane and the harness, as mounted. */
-  turns: Turns;
+  readonly turns: Turns;
   host: StandIn;
   server: LumiverseServer;
   db: StandInDb;
@@ -56,6 +57,11 @@ export interface TurnBed {
   page<T>(method: "GET" | "POST", path: string): Promise<{ status: number; body: T }>;
   /** Waits until `check` gives something, in real time: Lumiverse's requests to RPE go over the network. */
   until<T>(what: string, check: () => T | null | undefined | false | Promise<T | null | undefined | false>): Promise<T>;
+  /**
+   * RPE stops at once, as when its process ends: nothing more of it reaches Lumiverse or hears it, and what it was doing is left
+   * where it stood, recorded no further. Then an RPE starts again on the same data folder, and the bed's RPE side is the new one.
+   */
+  restart(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -116,22 +122,11 @@ export async function openTurnBed(options: TurnBedOptions): Promise<TurnBed> {
     if (options.global !== undefined) await writeFile(paths.globalConfig, options.global, "utf8");
 
     const model = scriptedModel(options.answers, { contextWindow: 64_000, maxTokens: 4_000 });
-    const composition = compose({ fetch: server.fetch, open: server.open, harness: { models: { agentModel: async () => model.agentModel() } } });
     const logged: Logged[] = [];
     const config = configOf({ port: 0, lumiverse: { url: server.base, user: USER, database: db.path, connection: CONNECTION } }, {}, "the test's config");
-    const app = await openApp({ paths, config, version: "build-9", areas: composition.areas, ui: null, log: recordingLog(logged) });
-    cleanups.push(() => app.close());
-    const turns = composition.turns();
-    if (turns === null) throw new Error("the turn lane did not mount");
     // What the harness is told of turns that left the path, recorded on the way to it.
     const left: Scope[] = [];
-    const turnLeft = turns.harness.turnLeft.bind(turns.harness);
-    turns.harness.turnLeft = (scope) => {
-      left.push(scope);
-      return turnLeft(scope);
-    };
-    const providerKey = (await app.auth.makeKey("provider")).key;
-    const pageToken = (await app.auth.mintPageToken(USER, "extension")).token;
+    let providerKey: string | null = null;
 
     const until = async <T>(what: string, check: () => T | null | undefined | false | Promise<T | null | undefined | false>): Promise<T> => {
       const end = Date.now() + 5_000;
@@ -143,22 +138,76 @@ export async function openTurnBed(options: TurnBedOptions): Promise<TurnBed> {
       }
     };
 
-    // Listening starts the door: its sockets open, and its relay socket registers with the extension.
-    const listening = await app.start();
-    host.servers.set(new URL(listening.url).origin, (request) => fetch(request));
-    await until("the extension's answer to RPE's registration", () => readRegistration(JSON.parse(host.storage.get(`${USER}\u0000${REGISTRATION_FILE}`) ?? "null")));
-    await until("RPE's event socket to open", () => composition.door.lumiverse()?.events.open);
+    /** An RPE on the bed's data folder: listening, registered with the extension, and the connection in Lumiverse pointing at it. */
+    const startRpe = async () => {
+      const composition = compose({ fetch: server.fetch, open: server.open, harness: { models: { agentModel: async () => model.agentModel() } } });
+      const app = await openApp({ paths, config, version: "build-9", areas: composition.areas, ui: null, log: recordingLog(logged) });
+      cleanups.push(() => app.close());
+      const turns = composition.turns();
+      if (turns === null) throw new Error("the turn lane did not mount");
+      const turnLeft = turns.harness.turnLeft.bind(turns.harness);
+      turns.harness.turnLeft = (scope) => {
+        left.push(scope);
+        return turnLeft(scope);
+      };
+      // The connection's key is kept in RPE's database, so an RPE started again on it takes the same one.
+      providerKey ??= (await app.auth.makeKey("provider")).key;
+      const pageToken = (await app.auth.mintPageToken(USER, "extension")).token;
+      // Listening starts the door: its sockets open, and its relay socket registers with the extension.
+      const listening = await app.start();
+      const origins = new Set([new URL(listening.url).origin, new URL(listening.loopback).origin]);
+      for (const origin of origins) host.servers.set(origin, (request) => fetch(request));
+      await until("the extension's answer to this RPE's registration", () => {
+        const registered = readRegistration(JSON.parse(host.storage.get(`${USER}\u0000${REGISTRATION_FILE}`) ?? "null"));
+        return registered !== null && origins.has(new URL(registered.base).origin) ? registered : null;
+      });
+      await until("RPE's event socket to open", () => composition.door.lumiverse()?.events.open);
+      host.connections.set(CONNECTION, { id: CONNECTION, base: `${listening.url}/v1`, key: providerKey, model: "rpe" });
+      return { app, listening, composition, turns, pageToken };
+    };
+    let rpe = await startRpe();
 
-    // Lumiverse's side: RPE's connection, a preset, and the chat as the character's greeting leaves it.
-    host.connections.set(CONNECTION, { id: CONNECTION, base: `${listening.url}/v1`, key: providerKey, model: "rpe" });
+    // Lumiverse's side: a preset, and the chat as the character's greeting leaves it.
     host.presets.set(PRESET, { id: PRESET, name: "Lamp", blocks: [{ id: "b-main", name: "Main", role: "system", content: "You narrate a lighthouse on Gannet Rock, one scene at a time." }] });
     host.addChat({ id: CHAT, user: USER, name: "The lighthouse", character: CHARACTER, messages: options.messages ?? [{ id: "m-greeting", role: "assistant", content: GREETING }], books: [] });
 
     const page = async <T>(method: "GET" | "POST", path: string): Promise<{ status: number; body: T }> => {
-      const res = await fetch(`${listening.url}${path}`, { method, headers: { authorization: `Bearer ${pageToken}` } });
+      const res = await fetch(`${rpe.listening.url}${path}`, { method, headers: { authorization: `Bearer ${rpe.pageToken}` } });
       return { status: res.status, body: (await res.json()) as T };
     };
-    return { app, listening, composition, turns, host, server, db, model, logged, left, page, until, close };
+    const restart = async (): Promise<void> => {
+      const before = rpe;
+      // Nothing it does from now on is recorded, as a process that has ended records nothing: each write it asks for fails.
+      before.app.writes.run = () => Promise.reject(new Error("this RPE has stopped"));
+      // Its door stops, so it hears nothing more from Lumiverse, and its server closes every connection. Its runs are not stopped.
+      await before.composition.door.area.stopping?.(before.app);
+      await before.listening.stop();
+      rpe = await startRpe();
+    };
+    return {
+      get app() {
+        return rpe.app;
+      },
+      get listening() {
+        return rpe.listening;
+      },
+      get composition() {
+        return rpe.composition;
+      },
+      get turns() {
+        return rpe.turns;
+      },
+      host,
+      server,
+      db,
+      model,
+      logged,
+      left,
+      page,
+      until,
+      restart,
+      close,
+    };
   } catch (error) {
     await close();
     throw error;

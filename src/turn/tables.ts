@@ -131,4 +131,19 @@ CREATE INDEX turn_run_generation ON turn_run (user, generation);
 CREATE INDEX turn_run_turn ON turn_run (user, turn, received);
 `,
   },
+  {
+    version: 3,
+    name: "the swipe each run's generation writes, when its end was recorded, and where a continue's changes begin",
+    // A run kept before: a new reply's swipe is its message's first; its end counts as recorded once it is over and its turn is no
+    // longer open (the store's `turn`, an earlier area's table).
+    sql: `
+ALTER TABLE turn_run ADD COLUMN swipe INTEGER;
+ALTER TABLE turn_run ADD COLUMN settled INTEGER;
+ALTER TABLE turn_run ADD COLUMN mark INTEGER;
+UPDATE turn_run SET swipe = 0 WHERE kind = 'new' AND target IS NOT NULL;
+UPDATE turn_run SET settled = COALESCE(ended, received)
+  WHERE status <> 'running' AND NOT EXISTS (SELECT 1 FROM turn t WHERE t.user = turn_run.user AND t.id = turn_run.turn AND t.status = 'open');
+CREATE INDEX turn_run_unsettled ON turn_run (user, chat) WHERE settled IS NULL AND generation IS NOT NULL;
+`,
+  },
 ];

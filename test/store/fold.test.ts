@@ -114,6 +114,29 @@ describe("the new fold", () => {
     expect(() => s.addChanges(open.id, engine(tick(1)))).toThrow(StoreInputError);
   });
 
+  test("what a tied turn recorded after a mark is taken back, and the head state with it; what came before and a job's changes stay; a dropped turn is refused", () => {
+    const { s, revision } = testStore();
+    s.createChat({ id: "c", revision });
+    const t = play(s, "c", "m1", "Morning.", 1, engine(goTo(POV, "cellar")));
+    const mark = s.changes(t.id).at(-1)!.ord;
+    // What a continue of the turn records joins the path at once: the turn is tied. So does what a job of the turn records.
+    s.addChanges(t.id, engine(make("map", "Folded map", POV)));
+    s.addChanges(t.id, engine(make("lamp", "Lamp", POV)).map((c) => ({ ...c, job: "job-1" })));
+    expect(s.headState("c").state.world.entities.map).toBeDefined();
+    expect(s.takeBack(t.id, mark)).toBe(1);
+    const head = s.headState("c").state.world;
+    expect(head.entities.map).toBeUndefined();
+    expect(head.entities.lamp).toBeDefined();
+    expect(head.entities[POV]?.fields.place).toBe("cellar");
+    expect(s.changes(t.id).map((c) => [c.ord, c.job])).toEqual([
+      [mark, null],
+      [mark + 2, "job-1"],
+    ]);
+    const gone = s.beginTurn({ chat: "c", kind: "normal" });
+    s.dropTurn(gone.id);
+    expect(() => s.takeBack(gone.id, -1)).toThrow(StoreInputError);
+  });
+
   test("a handler that throws is reported on its change, and the fold goes on", () => {
     const fragile: PackDef = {
       id: "fragile",

@@ -22,7 +22,9 @@ import type { Clock, ContextBlock, Harness, Log, ReplyError, ReplySink, Scope, S
 import { forkOf, reconcile, type ChatChange, type ChatChanges } from "../adapter/lumiverse/events";
 import type { TaggedTurn, TurnPlayer } from "../adapter/lumiverse/provider";
 import type { LumiverseReads, LvStep } from "../adapter/lumiverse/reads";
+import type { LvMessage } from "../adapter/lumiverse/rows";
 import type { ReplyStream } from "../adapter/lumiverse/stream";
+import { textHash } from "../adapter/lumiverse/wire";
 import type { LiveHub } from "../app";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { type Lore, loreMapFields } from "../lore";
@@ -44,6 +46,9 @@ export const BLOCKS = { turnFacts: "turn-facts", loreMap: "lore-map", worldState
 
 /** A session's id while a chat has none yet: the settings are read before the turn that opens one, and no file of theirs is a session's. */
 export const NO_SESSION = "none";
+
+/** How a run RPE stopped during ended, as the Turn page shows it: no agent is told it. */
+const STOPPED_MID_RUN: ReplyError = { code: "failed", detail: "RPE stopped while this run was going on." };
 
 export interface TurnLaneDeps {
   store: Store;
@@ -79,6 +84,28 @@ function words(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * The swipe a generation wrote, as Lumiverse saved it (plan §6.3): the one it was given at its start, which need not be the one shown
+ * now; for a message Lumiverse made only when it saved, its one swipe. Null when which swipe it wrote cannot be told.
+ */
+function writtenOf(run: RunRecord, saved: LvMessage): LvMessage["saves"][number] | null {
+  if (run.target === saved.id && run.swipe !== null) return saved.saves[run.swipe] ?? null;
+  return run.target === null && saved.saves.length === 1 ? (saved.saves[0] ?? null) : null;
+}
+
+/** Waits for `ready`; false, at once, when `signal` aborts first. */
+async function unlessAborted(ready: Promise<unknown>, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return false;
+  const aborted = Promise.withResolvers<false>();
+  const onAbort = (): void => aborted.resolve(false);
+  signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    return await Promise.race([ready.then(() => true), aborted.promise]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
 type Ended = Extract<ChatChange, { kind: "generation-ended" }>;
 
 export class TurnLane implements TurnPlayer, ChatChanges {
@@ -87,8 +114,12 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   readonly #standby = new Map<string, string>();
   /** The standby line of a chat RPE has not met yet: the shipped and global levels' progress part. */
   #standbyDefault: string | null = null;
-  /** Ends heard for a generation whose turn is not made yet. */
+  /** Ends heard for a generation whose intake goes on and has no run yet; recorded once its run has given its reply. */
   readonly #early = new Map<string, Ended>();
+  /** The generations whose intake goes on and has no run yet. */
+  readonly #taking = new Set<string>();
+  /** By chat: the intakes going on, the newest last; each waits for the one before it to hold its run, or to end. */
+  readonly #intakes = new Map<string, Promise<void>>();
   /** Changes being recorded, so the next intake can wait for them. */
   readonly #recording = new Set<Promise<unknown>>();
   /** By chat: the turns whose deleted message was heard of, cancelled and told to RPH then, until the chat's next comparison. */
@@ -127,118 +158,156 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const { tag } = tagged;
     const { user, chat } = tag;
     const store = this.#d.store.user(user);
-
-    // The chat, its folders, and what Lumiverse saved for generations whose end was not heard.
-    await this.#chat(reads, user, chat);
-    await this.#catchUp(reads, user, chat);
-    lap("chat");
-
-    // The chat's path compared with the turn tree (plan §6.3). The message a reply is being written to is the turn at hand, not yet a
-    // reply: a new reply's message is left out, and the message a swipe or a regenerate writes a new swipe of is compared as it
-    // showed before, held by the attempt being replaced. Its empty new swipe, which may bear the same date, is no edit of that attempt.
-    const steps = await reads.path(chat);
-    if (steps === null) throw new Error(`Lumiverse has no chat ${chat} for this RPE's user.`);
-    lap("path");
-    const writing = tag.kind === "new" ? tag.target.message : null;
-    const replaced = tag.kind === "swipe" || tag.kind === "regenerate" ? tag.target.message : null;
-    const before = replaced === null ? undefined : store.path(chat).find((e) => e.message === replaced);
-    const shown: ShownMessage[] = steps
-      .filter((s) => s.id !== writing)
-      .map((s) => (s.id === replaced && before !== undefined ? { id: s.id, user: false, hash: before.hash, date: before.date } : { id: s.id, user: s.role !== "assistant", hash: s.shown.hash, date: s.shown.date }));
-    const report = await this.#d.writes.run(() => store.sync(chat, shown), "comparing the chat's path with its turns");
-    await this.#left(user, chat, report, replaced, before?.turn ?? null);
-    lap("compare");
-
-    // The chat's settings and texts, read before the turn is made: its session is the chat's open one.
-    const open = store.sessions(chat).findLast((s) => s.closedBy === null) ?? null;
-    const base: Scope = { user, chat, session: open?.id ?? NO_SESSION };
-    const guidance = loadGuidance(this.#d.files, base);
-    const [settings, progress, notices, errors] = await Promise.all([turnSettings(this.#d.files, base, this.#d.log), guidance.part(PARTS.progress), guidance.part(PARTS.notices), guidance.part(PARTS.errors)]);
-    const started = lines(progress)?.line("started");
-    if (started !== undefined) this.#standby.set(`${user}\u0000${chat}`, started);
-    lap("settings");
-
-    // The previous turn's run: waited for up to its limit, then stopped where it stands. The last turn's run as kept, before this one's joins it.
-    const stopped = await this.#previous(user, chat, settings, lines(progress), out);
-    const last = this.#d.runs.ofChatKept(user, chat, 1)[0] ?? null;
-    lap("previous");
-
-    // The turn: a new attempt, or for a continue the turn its message is tied to (plan §10.10).
-    const continued = tag.kind === "continue" && tag.target.message !== null ? this.#tiedTo(user, chat, tag.target.message) : null;
-    const begun = continued ?? (await this.#d.writes.run(() => store.beginTurn({ chat, kind: tag.kind, generation: tag.generation, target: replaced }), "beginning a turn"));
-    const session = open ?? (await this.#d.writes.run(() => store.openSession({ chat, scene: "", turn: begun.id }), "opening a session"));
-    const scope = { user, chat, session: session.id, turn: begun.id };
-
-    const { messages, left } = promptOf(tagged.prompt);
-    if (left > 0) this.#d.log.warn("Parts of the prompt RPH cannot carry were left out.", { turn: begun.id, parts: left });
-    const prefill = prefillOf(tagged, messages);
-    // What Lumiverse puts in front of the reply when it saves it: a continue's earlier text, else the prefill.
-    const front = tag.kind === "continue" && tag.target.message !== null ? ((await reads.messagesById(chat, [tag.target.message]))[0]?.text ?? "") : (prefill ?? "");
-
-    const over = Promise.withResolvers<void>();
-    const run: Run = {
-      id: crypto.randomUUID(),
-      user,
-      turn: begun.id,
-      chat,
-      session: session.id,
-      generation: tag.generation,
-      target: tag.kind === "impersonate" ? null : tag.target.message,
-      kind: tag.kind,
-      status: "running",
-      received,
-      started: null,
-      firstWord: null,
-      released: null,
-      ended: null,
-      usage: null,
-      reply: "",
-      progress: [],
-      error: null,
-      base: front,
-      saved: null,
-      stop: new AbortController(),
-      over: over.promise,
+    // One intake at a time for a chat (plan §10.1): from here until its run is held, which the next one then waits for as the turn
+    // before. A request Lumiverse stops listening to before its turn begins ends there, having begun nothing.
+    const intake = this.#queue(user, chat);
+    this.#taking.add(tag.generation);
+    const admitted = (): void => {
+      intake.done();
+      this.#taking.delete(tag.generation);
     };
-    await this.#d.writes.run((db) => {
-      this.#d.prompts.keep(db, { user, turn: begun.id, chat, layout: tagged.layout, lore: tag.lore, cut: tagged.cut, summarized: summarizedOf(tag, steps), at: received });
-      this.#d.runs.put(db, run);
-    }, "keeping the turn's request");
-    this.#d.runs.hold(run);
-    lap("begin");
+    try {
+      if (intake.waiting) {
+        // The player is shown that this request waits for another of the chat's, in the words of the progress part.
+        const line = lines(await loadGuidance(this.#d.files, { user, chat, session: NO_SESSION }).part(PARTS.progress))?.line("waiting_previous");
+        if (line !== undefined) out.progress(line);
+      }
+      if (!(await unlessAborted(intake.turn, signal))) return;
+      lap("queue");
 
-    // The briefing's blocks, and what has happened since the last turn.
-    const [briefing, since] = await Promise.all([this.#briefing(reads, guidance, scope, tagged, steps), this.#since(user, chat, report, steps, lines(notices), last, stopped)]);
-    lap("briefing");
-    const sampling = samplingOf(tagged.parameters);
-    const maxTokens = maxTokensOf(tagged.parameters);
-    const request: TurnRequest = {
-      scope,
-      ...(begun.parent !== null ? { parent: begun.parent } : {}),
-      kind: tag.kind,
-      ...(tag.speaker.name !== null ? { speaker: tag.speaker.name } : {}),
-      lead: settings.lead,
-      prompt: messages,
-      leftOut: leftOutOf(tagged.cut.keep, steps.map((s) => s.id)),
-      briefing,
-      carry: settings.carry,
-      since,
-      ...(prefill !== undefined ? { prefill } : {}),
-      ...(sampling !== undefined ? { presetSampling: sampling } : {}),
-      ...(maxTokens !== undefined ? { replyMaxTokens: maxTokens } : {}),
-    };
-    // The turn's folder, for the agents it delegates to and for the player (plan §5.3): the Author has the same in its context.
-    const attempts = replaced === null ? [] : this.#attempts(user, chat, replaced);
-    await writeTurnFolder({ files: this.#d.files, reads, lore: this.#d.lore }, { scope, guidance, tagged, messages, steps, request, attempts, received }).catch((error: unknown) =>
-      this.#d.log.error("The turn's folder could not be written in full.", { turn: begun.id, error: words(error) }),
-    );
-    lap("folder");
-    this.#d.log.debug("A turn's intake, in milliseconds by step.", { turn: begun.id, ...took });
-    await this.#run(run, request, out, signal, lines(errors), over);
-    const early = this.#early.get(tag.generation);
-    if (early !== undefined) {
+      // The chat, its folders, and what Lumiverse saved for generations whose end was not recorded.
+      await this.#chat(reads, user, chat);
+      await this.#catchUp(reads, user, chat);
+      lap("chat");
+
+      // The chat's path compared with the turn tree (plan §6.3). The message a reply is being written to is the turn at hand, not yet a
+      // reply: a new reply's message is left out, and the message a swipe or a regenerate writes a new swipe of is compared as it
+      // showed before, held by the attempt being replaced. Its empty new swipe, which may bear the same date, is no edit of that attempt.
+      const steps = await reads.path(chat);
+      if (steps === null) throw new Error(`Lumiverse has no chat ${chat} for this RPE's user.`);
+      lap("path");
+      const writing = tag.kind === "new" ? tag.target.message : null;
+      const replaced = tag.kind === "swipe" || tag.kind === "regenerate" ? tag.target.message : null;
+      const before = replaced === null ? undefined : store.path(chat).find((e) => e.message === replaced);
+      const shown: ShownMessage[] = steps
+        .filter((s) => s.id !== writing)
+        .map((s) => (s.id === replaced && before !== undefined ? { id: s.id, user: false, hash: before.hash, date: before.date } : { id: s.id, user: s.role !== "assistant", hash: s.shown.hash, date: s.shown.date }));
+      const report = await this.#d.writes.run(() => store.sync(chat, shown), "comparing the chat's path with its turns");
+      await this.#left(user, chat, report, replaced, before?.turn ?? null);
+      lap("compare");
+
+      // The chat's settings and texts, read before the turn is made: its session is the chat's open one.
+      const open = store.sessions(chat).findLast((s) => s.closedBy === null) ?? null;
+      const base: Scope = { user, chat, session: open?.id ?? NO_SESSION };
+      const guidance = loadGuidance(this.#d.files, base);
+      const [settings, progress, notices, errors] = await Promise.all([turnSettings(this.#d.files, base, this.#d.log), guidance.part(PARTS.progress), guidance.part(PARTS.notices), guidance.part(PARTS.errors)]);
+      const started = lines(progress)?.line("started");
+      if (started !== undefined) this.#standby.set(`${user}\u0000${chat}`, started);
+      lap("settings");
+
+      // The previous turn's run: waited for up to its limit, then stopped where it stands; Lumiverse stopping this request first ends the
+      // wait, and the request, there, the previous run going on. The last turn's run as kept, before this one's joins it.
+      const stopped = await this.#previous(user, chat, settings, lines(progress), out, signal);
+      if (stopped === null || signal.aborted) return;
+      const last = this.#d.runs.ofChatKept(user, chat, 1)[0] ?? null;
+      lap("previous");
+
+      // The turn: a new attempt, or for a continue the turn its message is tied to (plan §10.10).
+      const continued = tag.kind === "continue" && tag.target.message !== null ? this.#tiedTo(user, chat, tag.target.message) : null;
+      const begun = continued ?? (await this.#d.writes.run(() => store.beginTurn({ chat, kind: tag.kind, generation: tag.generation, target: replaced }), "beginning a turn"));
+      const session = open ?? (await this.#d.writes.run(() => store.openSession({ chat, scene: "", turn: begun.id }), "opening a session"));
+      const scope = { user, chat, session: session.id, turn: begun.id };
+
+      const { messages, left } = promptOf(tagged.prompt);
+      if (left > 0) this.#d.log.warn("Parts of the prompt RPH cannot carry were left out.", { turn: begun.id, parts: left });
+      const prefill = prefillOf(tagged, messages);
+      // What Lumiverse puts in front of the reply when it saves it: for a continue, the text the swipe it goes on held, else the prefill.
+      const goneOn = tag.kind === "continue" && tag.target.message !== null ? (await reads.messagesById(chat, [tag.target.message]))[0] : undefined;
+      const front = tag.kind === "continue" ? ((tag.target.swipe === null ? undefined : goneOn?.saves[tag.target.swipe]?.text) ?? goneOn?.text ?? "") : (prefill ?? "");
+
+      const over = Promise.withResolvers<void>();
+      const run: Run = {
+        id: crypto.randomUUID(),
+        user,
+        turn: begun.id,
+        chat,
+        session: session.id,
+        generation: tag.generation,
+        target: tag.kind === "impersonate" ? null : tag.target.message,
+        swipe: tag.kind === "impersonate" || tag.target.message === null ? null : tag.target.swipe,
+        kind: tag.kind,
+        status: "running",
+        received,
+        started: null,
+        firstWord: null,
+        released: null,
+        ended: null,
+        usage: null,
+        reply: "",
+        progress: [],
+        error: null,
+        base: front,
+        saved: null,
+        settled: null,
+        mark: continued === null ? null : (store.changes(continued.id).at(-1)?.ord ?? -1),
+        stop: new AbortController(),
+        over: over.promise,
+      };
+      await this.#d.writes.run((db) => {
+        this.#d.prompts.keep(db, { user, turn: begun.id, chat, layout: tagged.layout, lore: tag.lore, cut: tagged.cut, summarized: summarizedOf(tag, steps), at: received });
+        this.#d.runs.put(db, run);
+      }, "keeping the turn's request");
+      this.#d.runs.hold(run);
+      admitted();
+      lap("begin");
+
+      let request: TurnRequest;
+      try {
+        // The briefing's blocks, and what has happened since the last turn.
+        const [briefing, since] = await Promise.all([this.#briefing(reads, guidance, scope, tagged, steps), this.#since(user, chat, report, steps, lines(notices), last, stopped)]);
+        lap("briefing");
+        const sampling = samplingOf(tagged.parameters);
+        const maxTokens = maxTokensOf(tagged.parameters);
+        request = {
+          scope,
+          ...(begun.parent !== null ? { parent: begun.parent } : {}),
+          kind: tag.kind,
+          ...(tag.speaker.name !== null ? { speaker: tag.speaker.name } : {}),
+          lead: settings.lead,
+          prompt: messages,
+          leftOut: leftOutOf(tagged.cut.keep, steps.map((s) => s.id)),
+          briefing,
+          carry: settings.carry,
+          since,
+          ...(prefill !== undefined ? { prefill } : {}),
+          ...(sampling !== undefined ? { presetSampling: sampling } : {}),
+          ...(maxTokens !== undefined ? { replyMaxTokens: maxTokens } : {}),
+        };
+        // The turn's folder, for the agents it delegates to and for the player (plan §5.3): the Author has the same in its context.
+        const attempts = replaced === null ? [] : this.#attempts(user, chat, replaced);
+        await writeTurnFolder({ files: this.#d.files, reads, lore: this.#d.lore }, { scope, guidance, tagged, messages, steps, request, attempts, received }).catch((error: unknown) =>
+          this.#d.log.error("The turn's folder could not be written in full.", { turn: begun.id, error: words(error) }),
+        );
+        lap("folder");
+      } catch (error) {
+        // The run never began: it ends here, failed, so the turn after it does not wait for it. The throw tells Lumiverse.
+        run.status = "failed";
+        run.error = { code: "failed", detail: words(error) };
+        run.ended = this.#d.clock.now();
+        await this.#d.runs.save(run, "keeping a turn's run that never began").catch((e: unknown) => this.#d.log.error("A turn's run could not be kept.", { turn: run.turn, error: words(e) }));
+        over.resolve();
+        throw error;
+      }
+      this.#d.log.debug("A turn's intake, in milliseconds by step.", { turn: begun.id, ...took });
+      await this.#run(run, request, out, signal, lines(errors), over);
+      const early = this.#early.get(tag.generation);
+      if (early !== undefined) {
+        this.#early.delete(tag.generation);
+        this.changed(early);
+      }
+    } finally {
+      admitted();
       this.#early.delete(tag.generation);
-      this.changed(early);
     }
   }
 
@@ -283,6 +352,22 @@ export class TurnLane implements TurnPlayer, ChatChanges {
 
   // ---------------------------------------------------------------- intake
 
+  /**
+   * The chat's turn to take a request in: `turn` resolves once the intake before it has held its run or ended, and `done` lets the
+   * next one go on. `waiting` says whether another intake of the chat goes on.
+   */
+  #queue(user: string, chat: string): { waiting: boolean; turn: Promise<void>; done: () => void } {
+    const key = `${user}\u0000${chat}`;
+    const before = this.#intakes.get(key);
+    const mine = Promise.withResolvers<void>();
+    const tail = (before ?? Promise.resolve()).then(() => mine.promise);
+    this.#intakes.set(key, tail);
+    void tail.then(() => {
+      if (this.#intakes.get(key) === tail) this.#intakes.delete(key);
+    });
+    return { waiting: before !== undefined, turn: before ?? Promise.resolve(), done: () => mine.resolve() };
+  }
+
   /** The chat in the store: made on the spot the first time, sharing its source's tree when it is a fork of a chat RPE knows; and its folders. */
   async #chat(reads: LumiverseReads, user: string, chat: string): Promise<void> {
     const store = this.#d.store.user(user);
@@ -304,14 +389,22 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     }
   }
 
-  /** The chat's generations that ended without their end being heard: tied now to what Lumiverse saved, as their end would have tied them. */
+  /**
+   * The chat's generations whose end was not recorded (plan §10.8, §10.10): one that ended unheard, and one RPE stopped during, whose
+   * run is given its end now, as failed. Each is then tied to what Lumiverse saved, as its end would have tied it, or dropped. One that
+   * cannot be recorded now is logged, and the next intake finds it again.
+   */
   async #catchUp(reads: LumiverseReads, user: string, chat: string): Promise<void> {
     await this.settled();
-    const store = this.#d.store.user(user);
-    const awaiting = this.#d.runs.ended(user, chat).filter((r) => r.generation !== null && store.turn(r.turn)?.status === "open");
+    const awaiting = this.#d.runs.unsettled(user, chat);
     if (awaiting.length === 0) return;
+    const left = awaiting.filter((r) => r.status === "running");
+    if (left.length > 0) await this.#d.writes.run((db) => left.forEach((r) => this.#d.runs.put(db, { ...r, status: "failed", error: STOPPED_MID_RUN })), "ending the runs RPE stopped during");
     const found = await reconcile(reads, { chat, messages: [], awaiting: awaiting.map((r) => ({ generation: r.generation ?? "", message: r.target })) });
-    for (const change of found) if (change.kind === "generation-ended") await this.#ended(user, change);
+    for (const change of found) {
+      if (change.kind !== "generation-ended") continue;
+      await this.#ended(user, change).catch((error: unknown) => this.#d.log.error("A generation's end could not be recorded; the chat's next turn looks again.", { chat, generation: change.generation, error: words(error) }));
+    }
   }
 
   /**
@@ -343,9 +436,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
 
   /**
    * The previous turn's run: a new turn waits for it up to the limit, with a progress line, then stops it where it stands. Gives the
-   * runs that were still going at the limit, so the Author can be told.
+   * runs that were still going at the limit, so the Author can be told; null when Lumiverse stopped this request during the wait, which
+   * then leaves the previous run going.
    */
-  async #previous(user: string, chat: string, settings: TurnSettings, progress: LinesPart | undefined, out: ReplyStream): Promise<RunRecord[]> {
+  async #previous(user: string, chat: string, settings: TurnSettings, progress: LinesPart | undefined, out: ReplyStream, signal: AbortSignal): Promise<RunRecord[] | null> {
     const before = this.#d.runs.ofChat(user, chat);
     if (before.length === 0) return [];
     const line = progress?.line("waiting_previous");
@@ -355,7 +449,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const late = Promise.withResolvers<void>();
     const timer = this.#d.clock.setTimeout(late.resolve, settings.previousRunMs);
     try {
-      await Promise.race([Promise.all(before.map((r) => r.over)), late.promise]);
+      if (!(await unlessAborted(Promise.race([Promise.all(before.map((r) => r.over)), late.promise]), signal))) return null;
     } finally {
       this.#d.clock.clearTimeout(timer);
     }
@@ -489,6 +583,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       },
       finish: (usage) => {
         run.released ??= clock.now();
+        // What went out is kept before Lumiverse is told the reply ended: should RPE stop before the run does, the next intake ties it.
+        void this.#d.runs.save(run, "keeping a released reply").catch((error: unknown) => this.#d.log.error("A released reply could not be kept.", { turn: run.turn, error: words(error) }));
         out.finish({ reason: "stop", usage: usageOut(usage) });
         replied.resolve();
       },
@@ -540,30 +636,56 @@ export class TurnLane implements TurnPlayer, ChatChanges {
 
   // ---------------------------------------------------------------- commit
 
-  /** A generation ended (plan §10.8): its turn tied to what Lumiverse saved, or, saving nothing, left an attempt with no state. */
+  /**
+   * A generation ended (plan §10.8): its turn tied to what Lumiverse saved in the swipe the generation wrote, whichever one the player
+   * looks at now, or, saving nothing, left an attempt with no state. A reply not released whole (stopped, failed, or RPE stopped during
+   * it) is tied as cut short. Where which swipe it wrote cannot be told, the turn is left open, and the next intake looks again.
+   */
   async #ended(user: string, change: Ended): Promise<void> {
     const run: RunRecord | null = this.#d.runs.byGeneration(user, change.generation);
     if (run === null) {
-      this.#early.set(change.generation, change);
+      // An end heard while its intake goes on is recorded once that intake's run has given its reply; any other is not RPE's to record.
+      if (this.#taking.has(change.generation)) this.#early.set(change.generation, change);
       return;
     }
+    if (run.settled !== null) return;
     const store = this.#d.store.user(user);
+    const live = this.#d.runs.running(user, run.turn);
+    const held = live !== undefined && live.id === run.id ? live : undefined;
+    // The end is recorded on the run going on now itself, so its own later record keeps it; else on the record as kept.
+    const settle = (also: Partial<RunRecord> = {}): RunRecord => {
+      const at = { ...also, settled: this.#d.clock.now() };
+      return held !== undefined ? Object.assign(held, at) : { ...run, ...at };
+    };
     const turn = store.turn(run.turn);
-    if (turn === null || turn.status === "dropped") return;
-    const stopped = change.stopped === true;
-    const message = run.kind === "impersonate" ? null : (change.message ?? (stopped ? run.target : null));
+    if (turn === null || turn.status === "dropped") {
+      const record = settle();
+      await this.#d.writes.run((db) => this.#d.runs.put(db, record), "recording a generation's end");
+      return;
+    }
+    const cut = change.stopped === true || run.released === null;
+    const message = run.kind === "impersonate" ? null : (change.message ?? (cut ? run.target : null));
     const reads = this.#d.reads();
     const saved = message === null || reads === null ? undefined : (await reads.messagesById(change.chat, [message]))[0];
-    if (saved === undefined || (stopped && saved.text === run.base)) {
-      if (turn.status === "open") await this.#d.writes.run(() => store.dropTurn(run.turn), "dropping a turn that saved nothing");
+    const written = saved === undefined ? undefined : writtenOf(run, saved);
+    if (written === null) return;
+    if (saved === undefined || written === undefined || (cut && written.text === run.base)) {
+      // Saving nothing new, an attempt is dropped; a continue of a tied turn leaves it as it was, what the continue recorded taken back
+      // once its run, which may still be winding down, is over.
+      if (run.mark !== null) await held?.over;
+      const record = settle();
+      await this.#d.writes.run((db) => {
+        const status = store.turn(run.turn)?.status;
+        if (status === "open") store.dropTurn(run.turn);
+        else if (run.mark !== null && (status === "done" || status === "cut")) store.takeBack(run.turn, run.mark);
+        this.#d.runs.put(db, record);
+      }, "taking back an attempt that saved nothing");
       return;
     }
-    const differs = saved.text === run.base + run.reply ? null : saved.text;
-    const live = this.#d.runs.running(user, run.turn);
-    if (live !== undefined) live.saved = differs;
+    const record = settle({ saved: written.text === run.base + run.reply ? null : written.text });
     await this.#d.writes.run((db) => {
-      store.tieTurn(run.turn, { message: saved.id, hash: saved.shown.hash, date: saved.shown.date, status: stopped ? "cut" : "done" });
-      this.#d.runs.put(db, { ...(live ?? run), saved: differs });
+      store.tieTurn(run.turn, { message: saved.id, hash: textHash(written.text), date: written.date, status: cut ? "cut" : "done" });
+      this.#d.runs.put(db, record);
     }, "tying a turn to its saved message");
   }
 

@@ -21,8 +21,13 @@ export interface RunRecord {
   chat: string;
   session: string;
   generation: string | null;
-  /** The message the reply is saved to; null for one that saves to none (an impersonation). */
+  /** The message the reply is saved to; null for one that saves to none (an impersonation), or to one Lumiverse makes when it saves. */
   target: string | null;
+  /**
+   * The swipe of `target` the generation writes: a swipe's or a regenerate's own new one, the one a continue goes on, a new reply's
+   * first. Lumiverse writes it there whichever swipe the player looks at by then (`chats.service.ts:3346-3362`). Null with no target.
+   */
+  swipe: number | null;
   kind: TurnKind;
   status: RunState;
   received: number;
@@ -40,6 +45,16 @@ export interface RunRecord {
   base: string;
   /** What Lumiverse saved, where it is not what was released (plan §10.8 "Saved against released"); null when it is, or not yet saved. */
   saved: string | null;
+  /**
+   * When the generation's end was recorded: its turn tied to what Lumiverse saved, or dropped, or nothing to record. Null until then:
+   * a run whose end was not heard, or that RPE stopped during, is found by the chat's next intake (plan §10.8).
+   */
+  settled: number | null;
+  /**
+   * A continue of a turn already tied: the order (`ord`) of the turn's last change when the continue began, -1 for none. What the
+   * turn records after it is the continue's, taken back if it saves nothing new (plan §6.3). Null for any other run.
+   */
+  mark: number | null;
 }
 
 /** A run going on now: its record, what stops it, and when it is over. */
@@ -56,6 +71,7 @@ interface RunRow {
   session: string;
   generation: string | null;
   target: string | null;
+  swipe: number | null;
   kind: string;
   status: string;
   received: number;
@@ -69,6 +85,8 @@ interface RunRow {
   error: string | null;
   base: string;
   saved: string | null;
+  settled: number | null;
+  mark: number | null;
 }
 
 function recordOf(user: string, r: RunRow): RunRecord {
@@ -80,6 +98,7 @@ function recordOf(user: string, r: RunRow): RunRecord {
     session: r.session,
     generation: r.generation,
     target: r.target,
+    swipe: r.swipe,
     kind: r.kind as TurnKind,
     status: r.status as RunState,
     received: r.received,
@@ -93,6 +112,8 @@ function recordOf(user: string, r: RunRow): RunRecord {
     error: r.error === null ? null : (JSON.parse(r.error) as ReplyError),
     base: r.base,
     saved: r.saved,
+    settled: r.settled,
+    mark: r.mark,
   };
 }
 
@@ -107,14 +128,15 @@ export class Runs {
     private readonly writes: Writes,
   ) {}
 
-  /** Keeps a run's record as it stands; inside a queued write. */
+  /** Keeps a run's record as it stands; inside a queued write. An end once recorded stays recorded, whatever copy is written after it. */
   put(into: Database, r: RunRecord): void {
     into.run(
-      `INSERT INTO turn_run (user, id, turn, chat, session, generation, target, kind, status, received, started, first_word, released, ended, usage, reply, progress, error, base, saved)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (user, id) DO UPDATE SET session = excluded.session, generation = excluded.generation, target = excluded.target, kind = excluded.kind, status = excluded.status,
-         received = excluded.received, started = excluded.started, first_word = excluded.first_word, released = excluded.released, ended = excluded.ended,
-         usage = excluded.usage, reply = excluded.reply, progress = excluded.progress, error = excluded.error, base = excluded.base, saved = excluded.saved`,
+      `INSERT INTO turn_run (user, id, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, ended, usage, reply, progress, error, base, saved, settled, mark)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (user, id) DO UPDATE SET session = excluded.session, generation = excluded.generation, target = excluded.target, swipe = excluded.swipe, kind = excluded.kind,
+         status = excluded.status, received = excluded.received, started = excluded.started, first_word = excluded.first_word, released = excluded.released, ended = excluded.ended,
+         usage = excluded.usage, reply = excluded.reply, progress = excluded.progress, error = excluded.error, base = excluded.base, saved = excluded.saved,
+         settled = COALESCE(turn_run.settled, excluded.settled), mark = excluded.mark`,
       [
         r.user,
         r.id,
@@ -123,6 +145,7 @@ export class Runs {
         r.session,
         r.generation,
         r.target,
+        r.swipe,
         r.kind,
         r.status,
         r.received,
@@ -136,6 +159,8 @@ export class Runs {
         r.error === null ? null : JSON.stringify(r.error),
         r.base,
         r.saved,
+        r.settled,
+        r.mark,
       ],
     );
   }
@@ -210,12 +235,15 @@ export class Runs {
     return this.db.query<{ chat: string; last: number }, [string]>("SELECT chat, max(received) AS last FROM turn_run WHERE user = ? GROUP BY chat ORDER BY last DESC").all(user);
   }
 
-  /** The chat's runs whose generation ended unheard: over, with a generation, as kept. */
-  ended(user: string, chat: string): RunRecord[] {
+  /**
+   * The chat's runs whose generation's end is not recorded yet, as kept, oldest first: ended unheard, or left going when RPE stopped.
+   * The ones going on now are not among them.
+   */
+  unsettled(user: string, chat: string): RunRecord[] {
     return this.db
-      .query<RunRow, [string, string]>("SELECT * FROM turn_run WHERE user = ? AND chat = ? AND generation IS NOT NULL AND status <> 'running'")
+      .query<RunRow, [string, string]>("SELECT * FROM turn_run WHERE user = ? AND chat = ? AND settled IS NULL AND generation IS NOT NULL ORDER BY received, rowid")
       .all(user, chat)
-      .filter((r) => this.running(user, r.turn) === undefined)
+      .filter((r) => this.running(user, r.turn)?.id !== r.id)
       .map((r) => recordOf(user, r));
   }
 }

@@ -278,10 +278,11 @@ export class LumiverseServer {
       return json(200, { data: all.slice(offset, offset + limit).map(lightMessage), total: all.length, limit, offset });
     }
 
-    // `POST /api/v1/generate/stop` (`app.ts:443`, `routes/generate.routes.ts:45-65`): the generation named, else the chat's.
+    // `POST /api/v1/generate/stop` (`app.ts:443`, `routes/generate.routes.ts:45-65`): the generation named, else the chat's,
+    // else every one of the user's. An id is taken only when it is truthy (`:48`, `:53`, `:60`): an empty one names nothing.
     if (request.method === "POST" && path === "/api/v1/generate/stop" && this.options.host) {
       const body = parsed(await request.text(), null) as { generation_id?: unknown; chat_id?: unknown } | null;
-      const ask = { ...(typeof body?.generation_id === "string" ? { generation: body.generation_id } : {}), ...(typeof body?.chat_id === "string" ? { chat: body.chat_id } : {}) };
+      const ask = { ...(typeof body?.generation_id === "string" && body.generation_id !== "" ? { generation: body.generation_id } : {}), ...(typeof body?.chat_id === "string" && body.chat_id !== "" ? { chat: body.chat_id } : {}) };
       return json(200, { stopped: this.options.host.stop(user, ask) });
     }
 

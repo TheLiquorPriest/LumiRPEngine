@@ -68,10 +68,6 @@ export function compose(options: ComposeOptions = {}): Composition {
       summarized: async (chat) => made().prompts.summarized(owner(), chat),
       models: { pass: (request, sink, signal) => made().harness.models.pass(request, sink, signal) },
       passConnection: () => (app === null ? null : passConnection(app.paths.files, app.log)),
-      // The extension tells RPE what it is missing each time it answers a registration, also when that is nothing.
-      permissions: (missing) => {
-        if (missing.length > 0) app?.log.warn("RPE's extension in Lumiverse is missing permissions it needs.", { missing: missing.map((m) => m.permission) });
-      },
     },
     {
       fetch: options.fetch ?? ((url, init) => fetch(url, init)),

@@ -192,6 +192,12 @@ export class StandIn {
   later: (run: () => void) => void = (run) => void setTimeout(run, 0);
   /** The user's `promptPostProcessing` setting (`services/generate.service.ts:1250-1256`). */
   postProcessing = "";
+  /**
+   * The council's deliberation, when the council is on and the preset does not place it by macro:
+   * Lumiverse splices it into the prompt after its interceptors, four messages from the end
+   * (`services/generate.service.ts:2881-2893`), so no interceptor ever sees it.
+   */
+  councilBlock: string | null = null;
   /** `DEFAULT_INTERCEPTOR_TIMEOUT_MS` (`services/spindle-settings.service.ts:6`). */
   interceptorTimeoutMs = 10_000;
   /** A World Info interceptor's limit (`spindle/worker-host.ts:4937-4943`). */
@@ -391,13 +397,18 @@ export class StandIn {
     this.db.run("UPDATE chats SET updated_at = ? WHERE id = ? AND user_id = ?", now, chat.id, chat.user);
   }
 
-  /** `updateMessage` with new text (`services/chats.service.ts:2922-3023`): into the swipe it shows, the revision raised, and the edit told. */
-  private saveText(chat: Chat, id: string, text: string): void {
+  /**
+   * `updateMessage` with new text (`services/chats.service.ts:2922-3023`): into the swipe named
+   * (`contentSwipeId`, `:2950-2960`), else into the one it shows, `content` mirroring the swipe it
+   * shows (`:2977-2984`); the revision raised, and the edit told.
+   */
+  private saveText(chat: Chat, id: string, text: string, swipe?: number): void {
     const row = this.messageRow(id);
     if (this.db === null || row === null) return;
     const swipes = [...(row.swipes as string[])];
-    swipes[Number(row.swipe_id)] = text;
-    this.db.run("UPDATE messages SET content = ?, swipes = ?, revision = revision + 1 WHERE id = ? AND chat_id = ?", text, JSON.stringify(swipes), id, chat.id);
+    const shown = Number(row.swipe_id);
+    swipes[swipe !== undefined && swipe >= 0 && swipe < swipes.length ? swipe : shown] = text;
+    this.db.run("UPDATE messages SET content = ?, swipes = ?, revision = revision + 1 WHERE id = ? AND chat_id = ?", swipes[shown] ?? text, JSON.stringify(swipes), id, chat.id);
     this.emit("MESSAGE_EDITED", { chatId: chat.id, message: this.messageRow(id) }, chat.user);
   }
 
@@ -454,6 +465,26 @@ export class StandIn {
     this.db?.run("DELETE FROM message_breakdowns WHERE message_id = ?", id);
     this.stored.delete(id);
     this.emit("MESSAGE_DELETED", { chatId, messageId: id }, chat.user);
+  }
+
+  /**
+   * The player shows the swipe left or right of the one shown (`cycleSwipe`, `services/chats.service.ts:3455-3492`):
+   * past either end nothing changes; an assistant's flip raises no revision. Told as `MESSAGE_SWIPED`, "navigated".
+   */
+  cycleSwipe(chatId: string, id: string, direction: "left" | "right"): void {
+    const chat = this.chats.get(chatId);
+    const m = chat?.messages.find((x) => x.id === id);
+    const row = this.messageRow(id);
+    if (!chat || !m || this.db === null || row === null) throw new Error("the stand-in has no such message");
+    const swipes = row.swipes as string[];
+    const previous = Number(row.swipe_id);
+    const next = direction === "left" ? previous - 1 : previous + 1;
+    if (swipes.length <= 1 || next < 0 || next >= swipes.length) return;
+    const text = swipes[next] ?? String(row.content);
+    this.db.run(`UPDATE messages SET swipe_id = ?, content = ?${m.role === "user" ? ", revision = revision + 1" : ""} WHERE id = ? AND chat_id = ?`, next, text, id, chatId);
+    m.swipeId = next;
+    m.content = text;
+    this.emit("MESSAGE_SWIPED", { chatId, message: this.messageRow(id), action: "navigated", swipeId: next, previousSwipeId: previous }, chat.user);
   }
 
   /** `POST /api/v1/generate/stop` (`routes/generate.routes.ts:45-65`): the generation named, else every one of the chat, else every one of the user's; whether any was. */
@@ -733,6 +764,7 @@ export class StandIn {
       const parameters: Record<string, unknown> = { ...preset.parameters, ...intercepted.parameters, ...input.parameters };
       if (dryRun) return { generationId: null, error: null, stopped: false, prompt: sent, body: null, reply: null, parameters, stored: null, worldInfo };
       this.emit("WORLD_INFO_ACTIVATED", { chatId: chat.id, entries: context.activatedWorldInfo }, chat.user);
+      if (this.councilBlock !== null) sent.splice(Math.max(0, sent.length - 4), 0, { role: "system", content: this.councilBlock });
       // The streaming switch decides the call and is never sent (`generate.service.ts:3725-3726`): a stream,
       // or one whole answer in one call (`:3793-3815`).
       const streaming = parameters._streaming !== false;
@@ -748,7 +780,7 @@ export class StandIn {
       } catch (error) {
         if (!stop.signal.aborted) throw error;
         // Stopped by the user: what was streamed is saved, and the stop told (`:4502-4537`, `persistPartialContent` `:3565-3660`).
-        const savedText = this.saveStopped(chat, { staged, swipeAt, original, target: target.message }, seen);
+        const savedText = this.saveStopped(chat, { staged, swipeAt, original, target: target.message, swipe: target.swipe }, seen);
         this.going.delete(generationId!);
         this.emit("GENERATION_STOPPED", { generationId, chatId: chat.id, content: savedText }, chat.user);
         return { generationId, error: null, stopped: true, prompt: sent, body, reply: { content: seen.content, reasoning: seen.reasoning, finishReason: "", usage: null }, parameters, stored: null, worldInfo };
@@ -758,17 +790,18 @@ export class StandIn {
       let savedText = reply.content;
       const shown = (id: string): ChatMessage | undefined => chat.messages.find((m) => m.id === id);
       if (swipeAt !== null && target.message !== null) {
-        // A swipe or a regenerate: the blank swipe made at the start filled in (`:4120-4128`).
+        // A swipe or a regenerate: the blank swipe made at the start filled in (`:4120-4128`), whichever swipe the player looks at now.
         const m = shown(target.message);
-        if (m) m.content = reply.content;
+        if (m && (m.swipeId ?? 0) === swipeAt) m.content = reply.content;
         this.saveSwipe(chat, target.message, swipeAt, reply.content);
         messageId = target.message;
       } else if (original !== null && target.message !== null) {
-        // A continue: the new text joined to what the message held, with no separator configured (`:4129-4147`, `prompt-assembly.service.ts:662-670`).
+        // A continue: the new text joined to what the message held, with no separator configured (`:4129-4147`, `prompt-assembly.service.ts:662-670`),
+        // into the swipe it continued, which the player may have flipped away from (`contentSwipeId`).
         savedText = original + reply.content;
         const m = shown(target.message);
-        if (m) m.content = savedText;
-        this.saveText(chat, target.message, savedText);
+        if (m && (m.swipeId ?? 0) === target.swipe) m.content = savedText;
+        this.saveText(chat, target.message, savedText, target.swipe ?? undefined);
         messageId = target.message;
       } else if (staged !== null) {
         // The staged message filled in (`:4148-4166`).
@@ -817,11 +850,11 @@ export class StandIn {
   }
 
   /** What a stopped generation saves (`persistPartialContent`, `services/generate.service.ts:3565-3660`), and the text it saved. */
-  private saveStopped(chat: Chat, at: { staged: string | null; swipeAt: number | null; original: string | null; target: string | null }, seen: StreamSeen): string {
+  private saveStopped(chat: Chat, at: { staged: string | null; swipeAt: number | null; original: string | null; target: string | null; swipe: number | null }, seen: StreamSeen): string {
     const shown = (id: string): ChatMessage | undefined => chat.messages.find((m) => m.id === id);
     if (at.swipeAt !== null && at.target !== null) {
       const m = shown(at.target);
-      if (m) m.content = seen.content;
+      if (m && (m.swipeId ?? 0) === at.swipeAt) m.content = seen.content;
       this.saveSwipe(chat, at.target, at.swipeAt, seen.content);
     } else if (at.staged !== null) {
       // A staged message with nothing in it is removed.
@@ -834,8 +867,8 @@ export class StandIn {
     } else if (at.original !== null && at.target !== null && (seen.content !== "" || seen.reasoning !== "")) {
       const joined = at.original + seen.content;
       const m = shown(at.target);
-      if (m) m.content = joined;
-      this.saveText(chat, at.target, joined);
+      if (m && (m.swipeId ?? 0) === at.swipe) m.content = joined;
+      this.saveText(chat, at.target, joined, at.swipe ?? undefined);
       return joined;
     }
     return seen.content;

@@ -791,6 +791,21 @@ export class UserStore {
     });
   }
 
+  /**
+   * Takes back what a turn recorded after its change numbered `after` (its `ord`; -1 for all of it), tied or not: what a continue
+   * recorded when it saved nothing new (plan §6.3, §10.10). A job's changes are the job's, recorded with the turn that started it
+   * (plan §10.9), and stay. How many went.
+   */
+  takeBack(turnId: string, after: number): number {
+    const turn = this.turnOrThrow(turnId);
+    if (turn.status === "dropped") throw new StoreInputError(`turn ${turnId} was dropped`);
+    return this.write(true, () => {
+      const r = this.db.run("DELETE FROM change WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL", [this.id, turnId, after]);
+      this.dropSnapshotsThrough(turnId);
+      return r.changes;
+    });
+  }
+
   /** Cached snapshots on every path through the turn, and after it, no longer hold. */
   private dropSnapshotsThrough(turn: string): void {
     this.db.run(
