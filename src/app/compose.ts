@@ -1,8 +1,9 @@
 // RPE put together (plan §4.1): every area, in the order it is mounted, over one application. The store,
 // the cast, the story record, the migration and the lore bring their tables; the tree lays out the
-// shipped level of the agents' files; the turn lane builds RPH's environment and the harness, and adds
-// the connections' and the Turn page's routes; the door to Lumiverse mounts last, playing each tagged
-// reply through the turn lane, and opens its sockets once the server listens.
+// shipped level of the agents' files, keeping what an update changed of it; the turn lane builds RPH's
+// environment and the harness, and adds the connections', the Turn page's and the Files page's routes;
+// the door to Lumiverse mounts last, playing each tagged reply through the turn lane, and opens its
+// sockets once the server listens.
 //
 // The migration's tables are made by the running application as by the migration itself, so every
 // install's database holds them at this build's version whether or not a migration ever ran there. The
@@ -11,6 +12,7 @@
 // No lane works out the secrecy of lore entries: asked, the composition says so, and the extension's
 // own fail-closed verdict keeps every marked secret out.
 
+import { join } from "node:path";
 import { SHIPPED_GUIDANCE } from "rp-harness";
 import type { Clock, CreateHarnessOptions } from "rp-harness";
 import { loreBooks } from "../adapter/lumiverse/books";
@@ -23,10 +25,14 @@ import { MIGRATE_TABLES } from "../migrate/tables";
 import { STORE_MIGRATIONS } from "../store";
 import { STORY_MIGRATIONS, storyCoverage } from "../story";
 import { historyWindow } from "../story/window";
-import { layShipped, RPE_GUIDANCE, TREE_MIGRATIONS } from "../tree";
-import { buildTurns, HARNESS_MIGRATIONS, MACHINE_CLOCK, namedStretches, NO_SESSION, openAppStore, passConnection, PROMPT_MIGRATIONS, turnRoutes, turnSettings, type Turns } from "../turn";
+import { layDefaults, RPE_GUIDANCE, TREE_MIGRATIONS, treeLayers, treeRoutes } from "../tree";
+import { levelBase } from "../tree/view";
+import { buildTurns, HARNESS_MIGRATIONS, MACHINE_CLOCK, namedStretches, NO_SESSION, openAppStore, passConnection, PROMPT_MIGRATIONS, turnRoutes, TURN_SETTINGS, turnSettings, type Turns } from "../turn";
 import type { App, Area } from "./app";
-import { connectionRoutes } from "./connections";
+import { connectionRoutes, storedKey } from "./connections";
+import { HARNESS_SETTINGS } from "./harness-settings";
+import { type LevelFile, settingsRoutes } from "./settings-routes";
+import { UPDATE_SETTINGS } from "./update";
 
 export interface ComposeOptions {
   /** Lumiverse's network as the door reaches it: the machine's when absent. */
@@ -109,7 +115,9 @@ export function compose(options: ComposeOptions = {}): Composition {
     {
       name: "tree",
       tables: { area: "files", migrations: TREE_MIGRATIONS },
-      mount: (at) => layShipped(at.paths.files, at.paths.root, { rph: SHIPPED_GUIDANCE, rpe: RPE_GUIDANCE }),
+      mount: async (at) => {
+        await layDefaults({ files: at.paths.files, scratch: at.paths.root, sources: { rph: SHIPPED_GUIDANCE, rpe: RPE_GUIDANCE }, writes: at.writes, now: at.now });
+      },
     },
     {
       name: "turn",
@@ -127,12 +135,42 @@ export function compose(options: ComposeOptions = {}): Composition {
           clock,
           ...(options.harness !== undefined ? { harness: options.harness } : {}),
         });
-        at.routes.add("connections", connectionRoutes(turns.harness.models));
+        at.routes.add("connections", connectionRoutes(turns.harness.models, storedKey(at.models)));
+        const { chats, harness, runs } = turns;
+        // A restart onto a new app file waits for the turns and the jobs that run.
+        at.builds.counts(async () => runs.chatsGoing().length + ((await harness.jobs?.list({ user: owner(), states: ["running", "queued"] })) ?? []).length);
+        at.routes.add(
+          "settings",
+          settingsRoutes({
+            settings: [...HARNESS_SETTINGS, ...TURN_SETTINGS, ...UPDATE_SETTINGS],
+            // The levels of the agents' tree that have a config file, where they are on disk; a chat's own once it has its folder.
+            levels: async (chat): Promise<LevelFile[]> => {
+              const folders = chat === null ? null : chats.folders(owner(), chat);
+              const where = { files: at.paths.files, character: folders?.character ?? null, chat: folders?.chat ?? null };
+              return treeLayers().flatMap((layer) => {
+                const base = levelBase(where, layer.level);
+                return layer.config === undefined || base === null ? [] : [{ level: layer.level, file: `${layer.mount}${layer.config}`, disk: join(where.files, ...base, layer.config) }];
+              });
+            },
+            connections: async () => (await harness.models.list()).connections.map((c) => ({ id: c.id, name: c.name })),
+          }),
+        );
         at.routes.add(
           "turn",
           turnRoutes({
             turns,
             chatName: async (chat) => (await door.lumiverse()?.reads.chat(chat))?.name ?? null,
+          }),
+        );
+        at.routes.add(
+          "tree",
+          treeRoutes({
+            files: at.paths.files,
+            chats: turns.chats,
+            db: at.db,
+            suggestions: turns.suggestions,
+            turning: (user, chat) => made().runs.ofChat(user, chat).length > 0,
+            stack: (user, chat, agent) => made().harness.definitions.stack({ user, chat, session: NO_SESSION }, agent),
           }),
         );
         await turns.lane.preload();

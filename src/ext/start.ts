@@ -19,6 +19,8 @@ export interface ExtensionOptions {
   deadlineMs?: number;
   /** How many chats the extension follows at once; `CHATS_FOLLOWED` when not said. */
   chats?: number;
+  /** The extension's build, said to RPE at its registration: the one the build stamps when absent. */
+  build?: string;
 }
 
 /** Fixed: the answer is waited for well inside the ten seconds Lumiverse gives a World Info interceptor (`worker-host.ts:4937-4943`). */
@@ -61,6 +63,8 @@ export async function startExtension(spindle: ExtSpindle, options: ExtensionOpti
     spindle,
     registrations,
     missing: lacking,
+    // The build stamps its id here (scripts/build.ts), as in the application's; run from source, it is the development build.
+    build: options.build ?? process.env.LRE_BUILD_ID ?? "dev",
     log,
     registered: () => notice(),
     refused: (user) => {

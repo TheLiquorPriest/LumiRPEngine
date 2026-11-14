@@ -3,9 +3,9 @@
 // never sends one back, and this page shows only whether one is set. What the layer refuses is shown in
 // its own words.
 
-import type { ConnectionAuth, ConnectionList, ConnectionView, Effort, ProviderOffer } from "rp-harness/contract";
+import type { ConnectionAuth, Effort, ProviderOffer } from "rp-harness/contract";
 import { useEffect, useState } from "preact/hooks";
-import type { SaveConnection } from "../api";
+import type { ConnectionShown, ConnectionsShown, SaveConnection } from "../api";
 import { useApp } from "../app";
 import { Badge, Banner, Button, Empty, PageHeader } from "../atoms";
 import type { RpeClient } from "../client";
@@ -17,7 +17,7 @@ export const EFFORTS: readonly Effort[] = ["off", "minimal", "low", "medium", "h
 const AUTH_WORDS: Readonly<Record<ConnectionAuth, string>> = { key: "With a key", signin: "By signing in to the provider", none: "With no key" };
 
 /** How a connection signs its calls, and whether that is in place: never the key itself. */
-function keyWords(view: ConnectionView): string {
+function keyWords(view: ConnectionShown): string {
   if (view.auth === "none") return "Signs its calls with no key.";
   if (view.auth === "signin") return view.signedIn === true ? "Signed in to its provider." : "Not signed in to its provider.";
   return view.key?.set === true ? "A key is set." : "No key is set.";
@@ -28,7 +28,7 @@ function keyWords(view: ConnectionView): string {
  * changes (a save replaces a connection whole, so what the form does not show goes as it was), and its
  * key: a key typed is sent, none typed keeps the one there is, and "take the key away" sends null.
  */
-export function draftOf(form: Iterable<readonly [string, FormDataEntryValue]>, was: ConnectionView | null): SaveConnection {
+export function draftOf(form: Iterable<readonly [string, FormDataEntryValue]>, was: ConnectionShown | null): SaveConnection {
   const field = new Map<string, string>();
   for (const [name, value] of form) field.set(name, typeof value === "string" ? value.trim() : "");
   const text = (name: string): string | null => {
@@ -54,7 +54,7 @@ export function draftOf(form: Iterable<readonly [string, FormDataEntryValue]>, w
 }
 
 /** The form that adds a connection (`was` null) or changes one. Its key field starts empty: RPE never sends a key back. */
-function ConnectionForm(props: { was: ConnectionView | null; providers: readonly ProviderOffer[]; saving: boolean; refusal: string | null; onSave(save: SaveConnection): void; onCancel(): void }) {
+function ConnectionForm(props: { was: ConnectionShown | null; providers: readonly ProviderOffer[]; saving: boolean; refusal: string | null; onSave(save: SaveConnection): void; onCancel(): void }) {
   const { was } = props;
   return (
     <form
@@ -156,7 +156,7 @@ function ConnectionForm(props: { was: ConnectionView | null; providers: readonly
 export type ConnectionsAction = { kind: "none" } | { kind: "form"; id: string | null } | { kind: "remove"; id: string };
 
 export interface ConnectionsViewProps {
-  list: ConnectionList | null;
+  list: ConnectionsShown | null;
   loading: boolean;
   /** Why the list could not be read, in RPE's words. */
   problem: string | null;
@@ -170,7 +170,7 @@ export interface ConnectionsViewProps {
   onDefault(id: string): void;
 }
 
-function ConnectionRow(props: { view: ConnectionView; action: ConnectionsAction; onAction(action: ConnectionsAction): void; onRemove(id: string): void; onDefault(id: string): void }) {
+function ConnectionRow(props: { view: ConnectionShown; action: ConnectionsAction; onAction(action: ConnectionsAction): void; onRemove(id: string): void; onDefault(id: string): void }) {
   const { view, action } = props;
   const said = [view.provider, view.model, view.effort === undefined ? null : `thinks at ${view.effort}`].filter((part) => part !== null && part !== undefined).join(" · ");
   return (
@@ -260,7 +260,7 @@ export function ConnectionsView(props: ConnectionsViewProps) {
 }
 
 /** Asks RPE for a change to the connections, then reads them again; RPE's refusal comes back in its words. */
-async function changeThen(client: Pick<RpeClient, "call">, change: () => Promise<unknown>): Promise<{ list: ConnectionList | null; refusal: string | null }> {
+async function changeThen(client: Pick<RpeClient, "call">, change: () => Promise<unknown>): Promise<{ list: ConnectionsShown | null; refusal: string | null }> {
   try {
     await change();
   } catch (error) {
@@ -271,7 +271,7 @@ async function changeThen(client: Pick<RpeClient, "call">, change: () => Promise
 
 export function ConnectionsPage() {
   const app = useApp();
-  const [list, setList] = useState<ConnectionList | null>(null);
+  const [list, setList] = useState<ConnectionsShown | null>(null);
   const [read, setRead] = useState<{ loading: boolean; problem: string | null }>({ loading: true, problem: null });
   const [action, setAction] = useState<ConnectionsAction>({ kind: "none" });
   const [saving, setSaving] = useState(false);

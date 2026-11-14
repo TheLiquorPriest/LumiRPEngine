@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { App, RunningServer } from "../../src/app";
-import { connectionRoutes, METHODS, route, RouteError } from "../../src/app";
+import { connectionRoutes, METHODS, route, RouteError, storedKey } from "../../src/app";
 import { runCli } from "../../src/app/cli";
 import { isRecord } from "../../src/shared/json";
 import { bearer, type Bed, cliIo, makeBed, makeKey, OWNER, testModelLayer } from "./helpers";
@@ -40,7 +40,7 @@ describe("the switches", () => {
               },
               handle: async ({ body }) => ({ changed: await a.writes.run((db) => db.run(body.sql).changes) }),
             });
-            a.routes.add("probe", [sql, ...connectionRoutes(testModelLayer(a.models))]);
+            a.routes.add("probe", [sql, ...connectionRoutes(testModelLayer(a.models), storedKey(a.models))]);
           },
         },
       ],

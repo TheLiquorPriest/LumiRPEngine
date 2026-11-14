@@ -3,7 +3,8 @@
 // switch's setter is not here: switching on anything that runs a command or calls out is the
 // command line's alone (cli.ts, switches.ts).
 
-export { lineLog, openApp, STATUS_PATH, type App, type Area, type OpenAppOptions } from "./app";
+export { appRoutes, lineLog, openApp, STATUS_PATH, UPDATE_PATH, type App, type Area, type OpenAppOptions } from "./app";
+export { type AppFile, type BuildsStatus, type RestartState } from "./update";
 export { Auth, AuthRefused, bearerOf, KEY_PREFIXES, NO_OWNER, type KeyKind, type MadeKey, type PageToken, type TokenMaker } from "./auth";
 export {
   CONFIG_DEFAULTS,
@@ -18,7 +19,7 @@ export {
   type DataPaths,
   type Env,
 } from "./config";
-export { connectionRoutes, MODELS_KEY, modelsPort, type ConnectionsApi, type SaveConnection } from "./connections";
+export { connectionRoutes, MODELS_KEY, modelsPort, storedKey, type ConnectionShown, type ConnectionsApi, type ConnectionsShown, type ConnectionTested, type SaveConnection } from "./connections";
 export { openDatabase, WriteQueue, WritesClosed, WriteWaited } from "./database";
 export { Following, LIVE_PATH, LIVE_PROTOCOL, LiveHub, TOKEN_PROTOCOL_PREFIX, type LiveBatch, type LiveEvent, type LivePublish, type LiveReader } from "./live";
 export { migrate, MIGRATION_AREAS, MigrationError, Migrations, type Migration, type MigrationArea, type MigrationOutcome } from "./migrations";

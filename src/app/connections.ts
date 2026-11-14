@@ -10,16 +10,18 @@
 //
 // The routes go through the model layer (`ModelsApi`), never round it: it is the documents' one
 // writer. A key is written through them and never read back: what they return shows only whether a
-// key is set.
+// key is set, none of the key itself. A connection is shown with its model's limits as RPH uses them
+// (the user's override, else pi's, else what the provider's server reported), and tested with one
+// small call, whose answer never carries the key, even where the provider's words repeat it.
 
-import type { ConnectionInput, ConnectionList, ConnectionView, ModelsApi, ModelsPort } from "rp-harness/contract";
+import type { ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, ModelLimits, ModelsApi, ModelsPort } from "rp-harness/contract";
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { DataPaths } from "./config";
 import { OneAtATime, readText, writeWhole } from "./disk";
 import { route, RouteError } from "./routes";
 import type { SecretsFile } from "./secrets";
-import { withTopLevelKey, yamlMapping } from "./yaml";
+import { configWrites, withTopLevelKey, yamlMapping } from "./yaml";
 
 /** The key of `RPE-global.yml` the connections document is kept under. */
 export const MODELS_KEY = "models";
@@ -49,12 +51,15 @@ export function modelsPort(paths: DataPaths, secrets: SecretsFile): ModelsPort {
       return doc === undefined ? null : withEarlierHeaders(doc, await secrets.read(EARLIER_HEADERS_PART));
     },
     saveConnections(doc) {
-      return writes.run(async () => {
-        const text = (await readText(paths.globalConfig)) ?? "";
-        await writeWhole(paths.globalConfig, withTopLevelKey(text, MODELS_KEY, doc, paths.globalConfig));
-        // A save of the layer's has moved the earlier values, into its secrets (which it saves first) or, where it could not, into this document.
-        if ((await secrets.read(EARLIER_HEADERS_PART)) !== null) await secrets.write(EARLIER_HEADERS_PART, null);
-      });
+      return writes.run(() =>
+        // The Settings routes write the same file.
+        configWrites(paths.globalConfig).run(async () => {
+          const text = (await readText(paths.globalConfig)) ?? "";
+          await writeWhole(paths.globalConfig, withTopLevelKey(text, MODELS_KEY, doc, paths.globalConfig));
+          // A save of the layer's has moved the earlier values, into its secrets (which it saves first) or, where it could not, into this document.
+          if ((await secrets.read(EARLIER_HEADERS_PART)) !== null) await secrets.write(EARLIER_HEADERS_PART, null);
+        }),
+      );
     },
     loadSecrets: () => secrets.read(SECRETS_PART),
     saveSecrets: (doc) => {
@@ -66,7 +71,46 @@ export function modelsPort(paths: DataPaths, secrets: SecretsFile): ModelsPort {
 }
 
 /** What the routes need of the model layer: `harness.models`. */
-export type ConnectionsApi = Pick<ModelsApi, "list" | "save" | "remove" | "setDefault">;
+export type ConnectionsApi = Pick<ModelsApi, "list" | "save" | "remove" | "setDefault" | "test" | "limits">;
+
+/** A connection as the routes show it: whether a key is set and nothing of the key; and its model's limits as RPH uses them, null where nobody knows them. */
+export type ConnectionShown = Omit<ConnectionView, "key"> & { key: { set: boolean } | null; limitsInForce: ModelLimits | null };
+
+export interface ConnectionsShown extends Omit<ConnectionList, "connections"> {
+  connections: ConnectionShown[];
+}
+
+/** A connection's test: whether the provider answered and the model it named, or its words; and that model's limits where RPH knows them. */
+export type ConnectionTested = ConnectionTest & { limits: ModelLimits | null };
+
+/** A model's limits as RPH uses them; null for a connection whose model RPH cannot place (a provider no longer offered, say). */
+async function limitsOf(api: ConnectionsApi, id: string, model?: string): Promise<ModelLimits | null> {
+  try {
+    return await api.limits(id, model);
+  } catch {
+    return null;
+  }
+}
+
+async function shown(api: ConnectionsApi, view: ConnectionView): Promise<ConnectionShown> {
+  const { key, ...rest } = view;
+  return { ...rest, key: key === null ? null : { set: key.set }, limitsInForce: view.model === undefined ? null : await limitsOf(api, view.id) };
+}
+
+/** A provider's words with the key taken out, and the end of it a provider shows of one ("sk-…abcd"). */
+function withoutKey(words: string, key: string | null): string {
+  if (key === null || key === "") return words;
+  return words.replaceAll(key, "(the key)").replaceAll(key.slice(-4), "…");
+}
+
+/** A connection's key as the layer's secrets document keeps it (`keys`, by connection id); null where it has none. */
+export function storedKey(port: ModelsPort): (id: string) => Promise<string | null> {
+  return async (id) => {
+    const doc = await port.loadSecrets();
+    const key = isRecord(doc) && isRecord(doc.keys) ? doc.keys[id] : undefined;
+    return typeof key === "string" ? key : null;
+  };
+}
 
 /** A connection to save, and its key: absent keeps the key there is, null takes it away. */
 export interface SaveConnection {
@@ -96,22 +140,43 @@ async function layer<T>(call: () => Promise<T>): Promise<T> {
   }
 }
 
-/** The routes to list, add, change and remove a connection, and to choose the default, over the model layer. */
-export function connectionRoutes(api: ConnectionsApi) {
+/**
+ * The routes to list, add, change and remove a connection, choose the default and test one, over the
+ * model layer. `keyOf` gives a connection's stored key, only so that a test's answer can be cleared of it.
+ */
+export function connectionRoutes(api: ConnectionsApi, keyOf: (id: string) => Promise<string | null>) {
   return [
-    route({ method: "GET", path: "/api/v1/connections", access: "page", handle: (): Promise<ConnectionList> => api.list() }),
+    route({
+      method: "GET",
+      path: "/api/v1/connections",
+      access: "page",
+      handle: async (): Promise<ConnectionsShown> => {
+        const list = await api.list();
+        return { ...list, connections: await Promise.all(list.connections.map((c) => shown(api, c))) };
+      },
+    }),
     route({
       method: "POST",
       path: "/api/v1/connections",
       access: "page",
       body: saveBody,
-      handle: ({ body }): Promise<ConnectionView> => {
+      handle: async ({ body }): Promise<ConnectionShown> => {
         if (body.connection.id !== undefined) throw new RouteError(400, "A new connection has no id: to change one, PUT /api/v1/connections/<its id>.");
-        return layer(() => api.save(body.connection, body.key));
+        return await shown(api, await layer(() => api.save(body.connection, body.key)));
       },
     }),
-    route({ method: "PUT", path: "/api/v1/connections/:id", access: "page", body: saveBody, handle: ({ params, body }): Promise<ConnectionView> => layer(() => api.save({ ...body.connection, id: params.id }, body.key)) }),
+    route({ method: "PUT", path: "/api/v1/connections/:id", access: "page", body: saveBody, handle: async ({ params, body }): Promise<ConnectionShown> => await shown(api, await layer(() => api.save({ ...body.connection, id: params.id }, body.key))) }),
     route({ method: "DELETE", path: "/api/v1/connections/:id", access: "page", handle: ({ params }): Promise<void> => layer(() => api.remove(params.id)) }),
     route({ method: "PUT", path: "/api/v1/connections/:id/default", access: "page", handle: ({ params }): Promise<void> => layer(() => api.setDefault(params.id)) }),
+    route({
+      method: "POST",
+      path: "/api/v1/connections/:id/test",
+      access: "page",
+      handle: async ({ params, signal }): Promise<ConnectionTested> => {
+        const tested = await api.test(params.id, signal);
+        if (tested.ok) return { ...tested, limits: await limitsOf(api, params.id, tested.model) };
+        return { ...tested, error: withoutKey(tested.error, await keyOf(params.id)), limits: null };
+      },
+    }),
   ] as const;
 }

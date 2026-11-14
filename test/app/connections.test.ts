@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { YAML } from "bun";
 import type { ConnectionsDoc, SecretsDoc } from "rp-harness/contract";
 import type { App, RunningServer } from "../../src/app";
-import { connectionRoutes } from "../../src/app";
+import { connectionRoutes, storedKey } from "../../src/app";
 import { walk } from "../../src/app/archive";
 import { bearer, type Bed, makeBed, makeKey, testModelLayer } from "./helpers";
 
@@ -39,7 +39,7 @@ describe("connections", () => {
 
   beforeEach(async () => {
     bed = await makeBed();
-    app = await bed.open({ areas: [{ name: "connections", mount: (a) => a.routes.add("connections", connectionRoutes(testModelLayer(a.models))) }] });
+    app = await bed.open({ areas: [{ name: "connections", mount: (a) => a.routes.add("connections", connectionRoutes(testModelLayer(a.models), storedKey(a.models))) }] });
   });
 
   afterEach(async () => {
@@ -98,18 +98,18 @@ describe("connections", () => {
       page = { ...bearer(await makeKey(app, "web")), "content-type": "application/json" };
     });
 
-    test("add, change, list and remove a connection, and never give a key back", async () => {
+    test("add, change, list and remove a connection, and never give a key back, nor any of it", async () => {
       const added = await fetch(`${server.url}/api/v1/connections`, { method: "POST", headers: page, body: JSON.stringify({ connection: { name: "Floor model", provider: "deepseek", auth: "key", model: "deepseek-v4-flash" }, key: KEY }) });
       expect(added.status).toBe(200);
       const addedText = await added.text();
-      expect(addedText).not.toContain(KEY);
-      const view = JSON.parse(addedText) as { id: string; key: { set: boolean; last4: string } };
-      expect(view.key).toEqual({ set: true, last4: KEY.slice(-4) });
+      expect(addedText).not.toContain(KEY.slice(-4));
+      const view = JSON.parse(addedText) as { id: string; key: { set: boolean } };
+      expect(view.key).toEqual({ set: true });
       const changed = await fetch(`${server.url}/api/v1/connections/${view.id}`, { method: "PUT", headers: page, body: JSON.stringify({ connection: { name: "Floor model", provider: "deepseek", auth: "key", model: "deepseek-v4-pro" } }) });
       expect(await changed.json()).toMatchObject({ model: "deepseek-v4-pro", key: { set: true } });
       expect((await fetch(`${server.url}/api/v1/connections/${view.id}/default`, { method: "PUT", headers: page })).status).toBe(204);
       const listed = await (await fetch(`${server.url}/api/v1/connections`, { headers: page })).text();
-      expect(listed).not.toContain(KEY);
+      expect(listed).not.toContain(KEY.slice(-4));
       expect(JSON.parse(listed)).toMatchObject({ default: view.id, connections: [{ id: view.id, model: "deepseek-v4-pro", default: true }] });
       expect(await treeText(app)).not.toContain(KEY);
       expect(await readFile(app.paths.secrets, "utf8")).toContain(KEY);

@@ -127,15 +127,32 @@ describe("rpe lumiverse", () => {
     expect(lumiverse.signIns).toEqual([]);
   });
 
-  test("a running RPE is told to restart to take it, and a change of user is said", async () => {
+  test("a running RPE is told to restart to take it", async () => {
     const port = freePort();
     await mkdir(bed.paths.root, { recursive: true });
-    await writeConfig(bed.paths, { port, lumiverse: { url: lumiverse.url, user: "user-before" } });
+    await writeConfig(bed.paths, { port, lumiverse: { url: lumiverse.url, user: null } });
     await (await bed.open({ config: { port } })).start();
     const told = await rpe(["lumiverse", "--url", lumiverse.url, "--user", "reader"], ACCOUNT.password);
     expect(told.code).toBe(0);
-    expect(told.out).toContain("It belonged to the user user-before before");
     expect(told.out).toContain(`RPE is running at http://127.0.0.1:${port}: restart it`);
     expect(JSON.parse(await readFile(bed.paths.config, "utf8"))).toMatchObject({ port, lumiverse: { url: lumiverse.url, user: ACCOUNT.id } });
+  });
+
+  test("an RPE that belongs to another Lumiverse user is not signed in to, by rpe lumiverse or rpe up, and nothing is written", async () => {
+    await mkdir(bed.paths.root, { recursive: true });
+    await writeConfig(bed.paths, { lumiverse: { url: lumiverse.url, user: "user-before" } });
+    const before = await everything();
+    const words = `This RPE belongs to the Lumiverse user user-before, and this run is for ${ACCOUNT.id}: one RPE serves one Lumiverse user. Nothing was stopped or changed.`;
+    for (const argv of [
+      ["lumiverse", "--url", lumiverse.url, "--user", "reader"],
+      ["up", "--url", lumiverse.url, "--user", "reader"],
+    ]) {
+      const refused = await rpe(argv, ACCOUNT.password);
+      expect(refused.code).toBe(1);
+      expect(refused.err).toBe(words);
+      expect(await everything()).toEqual(before);
+    }
+    // Lumiverse took the password both times: the refusal is of whose RPE this is.
+    expect(lumiverse.signIns).toHaveLength(2);
   });
 });

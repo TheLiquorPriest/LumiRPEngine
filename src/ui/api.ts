@@ -6,7 +6,7 @@
 // from `src/app/`; the turn routes and the live kinds are what the turn lane implements; a connection's
 // shapes are RPH's contract's own.
 
-import type { ConnectionInput, ConnectionList, ConnectionView, ReplyError, RunStatus, TraceDelta, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
+import type { ConnectionInput, ConnectionList, ConnectionTest, ConnectionView, ModelLimits, ReplyError, RunStatus, TraceDelta, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
 import type { JsonValue } from "../shared/json";
 
 // ---------------------------------------------------------------- the app's own
@@ -268,6 +268,17 @@ export interface SaveConnection {
   key?: string | null;
 }
 
+/** A connection as the routes show it: whether a key is set and nothing of the key; and its model's limits as RPH uses them, null where nobody knows them. */
+export type ConnectionShown = Omit<ConnectionView, "key"> & { key: { set: boolean } | null; limitsInForce: ModelLimits | null };
+
+/** `GET /api/v1/connections`: the connections as shown, the default and the providers offered. */
+export interface ConnectionsShown extends Omit<ConnectionList, "connections"> {
+  connections: ConnectionShown[];
+}
+
+/** `POST /api/v1/connections/:id/test`: whether the provider answered and the model it named, or its words; and that model's limits where RPH knows them. */
+export type ConnectionTested = ConnectionTest & { limits: ModelLimits | null };
+
 /** Every route the pages call, by method and path pattern, as the route table writes them; `*` stands for the rest of the path. */
 export interface Routes {
   "GET /api/v1/status": RouteShape<Status>;
@@ -279,11 +290,12 @@ export interface Routes {
   "GET /api/v1/chats/:chat/turns/:turn/files": RouteShape<TurnFiles>;
   "GET /api/v1/chats/:chat/turns/:turn/files/*": RouteShape<TurnFile>;
   "GET /api/v1/chats/:chat/world": RouteShape<WorldAnswer, { at?: string; depth?: number; values?: ValuesShown; turn?: string }>;
-  "GET /api/v1/connections": RouteShape<ConnectionList>;
-  "POST /api/v1/connections": RouteShape<ConnectionView, Record<string, never>, SaveConnection>;
-  "PUT /api/v1/connections/:id": RouteShape<ConnectionView, Record<string, never>, SaveConnection>;
+  "GET /api/v1/connections": RouteShape<ConnectionsShown>;
+  "POST /api/v1/connections": RouteShape<ConnectionShown, Record<string, never>, SaveConnection>;
+  "PUT /api/v1/connections/:id": RouteShape<ConnectionShown, Record<string, never>, SaveConnection>;
   "DELETE /api/v1/connections/:id": RouteShape<void>;
   "PUT /api/v1/connections/:id/default": RouteShape<void>;
+  "POST /api/v1/connections/:id/test": RouteShape<ConnectionTested>;
 }
 
 export type RouteKey = keyof Routes & string;

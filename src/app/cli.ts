@@ -11,7 +11,7 @@ import { Database } from "bun:sqlite";
 import { existsSync, statSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { ConnectionInput, ConnectionList, ConnectionView, Effort } from "rp-harness/contract";
+import type { ConnectionInput, Effort } from "rp-harness/contract";
 import { EXTENSION_IDENTIFIER } from "../adapter/lumiverse/pipe-wire";
 import { LumiverseError, LumiverseSession, type StoredSignIn } from "../adapter/lumiverse/session";
 import { goingBack } from "../migrate/going-back";
@@ -22,15 +22,17 @@ import { runtimeFoldersOf } from "../migrate/runtime-folders";
 import { type Loopback, swapCheck, swapRun, todaysBuildInstalled, whoseRefusals } from "../migrate/swap";
 import { isRecord } from "../shared/json";
 import { TREE_MIGRATIONS, TreeChats } from "../tree/chats";
-import { CHATS_FOLDER, GLOBAL_FOLDERS, NOTES_FOLDER } from "../tree/layout";
+import { CHATS_FOLDER, GLOBAL_CONFIG, GLOBAL_FOLDERS, NOTES_FOLDER, SHIPPED_FOLDER } from "../tree/layout";
 import type { Area } from "./app";
 import { lineLog, openApp, STATUS_PATH } from "./app";
+import { type AppFile, updateSettings, versionOf } from "./update";
 import type { KeyKind } from "./auth";
 import { currentKeys, insertKey, insertPageToken, newKeyText, NO_OWNER, secretHash, takeKeyHash } from "./auth";
 import { makeBackup } from "./backup";
 import type { AppConfig, DataPaths, Env } from "./config";
 import { CONFIG_ENV, dataPaths, defaultDataFolder, loadConfig, plainText, prepareDataFolder, updateConfigFile, webAddress } from "./config";
 import { readText, writeWhole } from "./disk";
+import type { ConnectionShown, ConnectionsShown } from "./connections";
 import { openDatabase } from "./database";
 import { appliedMigrations, migrate, Migrations } from "./migrations";
 import { APP_MIGRATIONS } from "./schema";
@@ -55,6 +57,8 @@ export interface CliOptions {
   version: string;
   /** The areas `serve` mounts besides the app's own. */
   areas?: readonly Area[];
+  /** The app file this process runs (`dist/rpe.js`, as `rpe up`'s service starts it): `serve` keeps its hash and restarts onto a new build of it. Absent where there is none. */
+  appFile?: string;
 }
 
 const USAGE = [
@@ -193,12 +197,13 @@ function switchCommand(name: string, state: "on" | "off", paths: DataPaths, io: 
   }
 }
 
-/** What answers at RPE's own address now: RPE (with its version), something else (with its status), or nothing. */
-async function serverAnswer(config: AppConfig, io: CliIO): Promise<{ rpe: string } | { other: number } | null> {
+/** What answers at RPE's own address now: RPE (with its version, and its builds in words), something else (with its status), or nothing. */
+async function serverAnswer(config: AppConfig, io: CliIO): Promise<{ rpe: string; builds: string | null } | { other: number } | null> {
   try {
     const res = await io.fetch(`${serverUrl(config)}${STATUS_PATH}`, { signal: AbortSignal.timeout(config.commandLine.waitMs) });
     const body: unknown = await res.json().catch(() => null);
-    return res.ok && isRecord(body) && body.name === "rpe" ? { rpe: String(body.version) } : { other: res.status };
+    if (!res.ok || !isRecord(body) || body.name !== "rpe") return { other: res.status };
+    return { rpe: String(body.version), builds: isRecord(body.builds) && typeof body.builds.words === "string" ? body.builds.words : null };
   } catch {
     // Not running, or not reachable.
     return null;
@@ -210,6 +215,7 @@ async function statusCommand(paths: DataPaths, config: AppConfig, io: CliIO, ver
   io.out(`Data folder: ${paths.root}`);
   const answer = await serverAnswer(config, io);
   io.out(`Listens on: ${serverUrl(config)}, ${answer === null ? "not answering" : "rpe" in answer ? `answering (RPE ${answer.rpe})` : `answering, but not as RPE (${answer.other})`}`);
+  if (answer !== null && "rpe" in answer && answer.builds !== null) io.out(`Builds: ${answer.builds}`);
   io.out(`Lumiverse: ${config.lumiverse.url ?? "not set"}, for user ${config.lumiverse.user ?? "not set"}`);
   if (!existsSync(paths.database)) {
     io.out("Database: not made yet");
@@ -283,13 +289,26 @@ function commandLineSession(url: string, signIn: StoredSignIn | null, paths: Dat
 }
 
 /**
- * Signs in to Lumiverse at `url` as `username` with the password asked for. Only once Lumiverse has
- * taken it, and `guard` (where given) has not refused the user it signs in as, are the sign-in kept
- * and the config written (with `more` in its `lumiverse` block), so a refusal changes nothing. The
- * user written is the id Lumiverse answers for the username, which is what pages and Lumiverse's
- * rows name.
+ * Whose RPE this is, asked of a sign-in once Lumiverse has taken the password and before the sign-in,
+ * the config, a key or a connection is written, by the migration gate's own checks (`whoseRefusals`):
+ * one RPE serves one Lumiverse user, so a sign-in as another user than the one it belongs to, or than
+ * the one whose data a migration carried into it, is refused. An RPE nobody has signed in to and
+ * nothing was carried into takes whoever signs in first.
  */
-async function signInTo(url: string, username: string, more: Record<string, string>, paths: DataPaths, config: AppConfig, io: CliIO, guard?: (user: string) => void): Promise<LumiverseSession> {
+function oneUser(paths: DataPaths, config: AppConfig): (user: string) => void {
+  return (user) => {
+    const refusals = whoseRefusals(paths.root, config.lumiverse.user, user);
+    if (refusals.length > 0) throw new Error(`${refusals.join(" ")} Nothing was stopped or changed.`);
+  };
+}
+
+/**
+ * Signs in to Lumiverse at `url` as `username` with the password asked for. Only once Lumiverse has
+ * taken it, and `guard` has not refused the user it signs in as, are the sign-in kept and the config
+ * written (with `more` in its `lumiverse` block), so a refusal changes nothing. The user written is
+ * the id Lumiverse answers for the username, which is what pages and Lumiverse's rows name.
+ */
+async function signInTo(url: string, username: string, more: Record<string, string>, paths: DataPaths, config: AppConfig, io: CliIO, guard: (user: string) => void): Promise<LumiverseSession> {
   const password = await io.secret(`The Lumiverse password of ${username} (it is not shown, and not kept): `);
   if (password === null) throw new Error("Signing in needs the password.");
   const session = commandLineSession(url, null, paths, config, io, guard);
@@ -298,8 +317,6 @@ async function signInTo(url: string, username: string, more: Record<string, stri
     raw.lumiverse = { ...(isRecord(raw.lumiverse) ? raw.lumiverse : {}), url, user: signedIn.user, ...more };
   });
   io.out(`Signed in to Lumiverse at ${url} as ${signedIn.username}. This RPE belongs to that Lumiverse user (${signedIn.user}).`);
-  const before = config.lumiverse.user;
-  if (before !== null && before !== signedIn.user) io.out(`It belonged to the user ${before} before: pages of that user no longer reach it, and the page tokens made for them no longer work.`);
   return session;
 }
 
@@ -315,7 +332,7 @@ async function lumiverseCommand(flags: Flags, paths: DataPaths, config: AppConfi
   const connection = flags.connection === undefined ? undefined : plainText(flags.connection, "--connection");
   const database = flags.database === undefined ? undefined : resolve(flags.database);
   if (database !== undefined && !(existsSync(database) && statSync(database).isFile())) throw new Error(`There is no file at ${database}: give --database the path of Lumiverse's database file, or leave it out to read Lumiverse over HTTP.`);
-  await signInTo(url, username, { ...(database === undefined ? {} : { database }), ...(connection === undefined ? {} : { connection }) }, paths, config, io);
+  await signInTo(url, username, { ...(database === undefined ? {} : { database }), ...(connection === undefined ? {} : { connection }) }, paths, config, io, oneUser(paths, config));
   await showLumiverse(paths, await loadConfig(paths, io.env), io);
   const answer = await serverAnswer(config, io);
   if (answer !== null && "rpe" in answer) io.out(`RPE is running at ${serverUrl(config)}: restart it (stop \`rpe serve\` and start it again) for it to take this.`);
@@ -508,15 +525,10 @@ async function upCommand(argv: readonly string[], io: CliIO, version: string): P
   const paths = dataPaths(flags.data ?? defaultDataFolder(io.env, io.home));
   const config = await loadConfig(paths, io.env);
   const url = webAddress(flags.url, "--url");
-  // The swap carries this user's data and keys into this data folder: whose RPE it is is asked, by the gate's own checks, once Lumiverse has taken the password and before the sign-in, the config, a key or a connection is written.
-  const guard = swapping
-    ? (user: string): void => {
-        const refusals = whoseRefusals(paths.root, config.lumiverse.user, user);
-        if (refusals.length > 0) throw new Error(`${refusals.join(" ")} Nothing was stopped or changed.`);
-      }
-    : undefined;
+  // Whose RPE this is is asked once Lumiverse has taken the password, before anything is written; a kept sign-in is the owner's own, and is asked of the data a migration carried.
+  const guard = oneUser(paths, config);
   const kept = await keptSession(url, username, paths, config, io);
-  if (kept !== null && config.lumiverse.user !== null) guard?.(config.lumiverse.user);
+  if (kept !== null && config.lumiverse.user !== null) guard(config.lumiverse.user);
   const session = kept ?? (await signInTo(url, username, {}, paths, config, io, guard));
   const current = await loadConfig(paths, io.env);
   const call: LumiverseCall = (method, path, body) => session.request(method, path, body);
@@ -625,10 +637,10 @@ function tokenCount(value: string | undefined, flag: string): number | undefined
 async function connectionCommand(words: readonly string[], flags: Flags, paths: DataPaths, config: AppConfig, io: CliIO, version: string): Promise<number> {
   const sub = words[0];
   if (sub === "list" && words.length === 1) {
-    const list = await withServer(paths, config, io, version, async (api) => replyOf<ConnectionList>(await api("GET", "/api/v1/connections")));
+    const list = await withServer(paths, config, io, version, async (api) => replyOf<ConnectionsShown>(await api("GET", "/api/v1/connections")));
     if (list.connections.length === 0) io.out("No connections yet: add one with `rpe connection add`.");
     for (const c of list.connections) {
-      const key = c.key === null ? "signs with no key" : c.key.set ? `key ending ${c.key.last4 ?? ""}` : "no key set";
+      const key = c.key === null ? "signs with no key" : c.key.set ? "key set" : "no key set";
       io.out(`${c.default ? "*" : " "} ${c.name} (${c.id}): ${c.provider}${c.model === undefined ? "" : `, ${c.model}`}${c.effort === undefined ? "" : `, effort ${c.effort}`}, ${key}`);
     }
     return 0;
@@ -657,14 +669,14 @@ async function connectionCommand(words: readonly string[], flags: Flags, paths: 
       key = (await io.secret(`The key for ${name} (it is not shown): `))?.trim() ?? null;
       if (key === null || key === "") throw new Error("A connection that signs with a key needs one.");
     }
-    const saved = await withServer(paths, config, io, version, async (api) => replyOf<ConnectionView>(await api("POST", "/api/v1/connections", { connection, ...(key === null ? {} : { key }) })));
+    const saved = await withServer(paths, config, io, version, async (api) => replyOf<ConnectionShown>(await api("POST", "/api/v1/connections", { connection, ...(key === null ? {} : { key }) })));
     io.out(`Added ${saved.name} (${saved.id}).`);
     return 0;
   }
   if (sub === "remove" && words.length === 2) {
     const which = words[1] ?? "";
     const removed = await withServer(paths, config, io, version, async (api) => {
-      const list = await replyOf<ConnectionList>(await api("GET", "/api/v1/connections"));
+      const list = await replyOf<ConnectionsShown>(await api("GET", "/api/v1/connections"));
       const matches = list.connections.filter((c) => c.id === which || c.name === which);
       const chosen = matches[0];
       if (chosen === undefined) throw new Error(`No connection is called "${which}".`);
@@ -705,8 +717,30 @@ async function migrateCommand(rest: readonly string[], io: CliIO, version: strin
   return await migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, treeLayout());
 }
 
+/** Whether this process is the one RPE's service runs (its unit's main process), which the account's manager starts again when it exits. */
+async function runByService(paths: DataPaths, io: CliIO): Promise<boolean> {
+  const service = await rpeServiceOf(paths.root, io.env, io.home);
+  if (service === null) return false;
+  const ran = await accountSystemctl(io.env, process.getuid?.() ?? null)(["show", "--property=MainPID", "--value", service.unit]);
+  return ran.code === 0 && Number(ran.out.trim()) === process.pid;
+}
+
 async function serveCommand(paths: DataPaths, config: AppConfig, io: CliIO, options: CliOptions): Promise<number> {
-  const app = await openApp({ paths, config, version: options.version, areas: options.areas ?? [], now: io.now, log: lineLog(io.err, io.now) });
+  const log = lineLog(io.err, io.now);
+  // A restart onto a new build of the app file ends `serve` as a stop does, and RPE's service starts the new file.
+  const restart = Promise.withResolvers<void>();
+  const appFile: AppFile | null =
+    options.appFile === undefined
+      ? null
+      : {
+          path: options.appFile,
+          buildOf: (path, waitMs) => versionOf(process.execPath, path, waitMs),
+          settings: async () => updateSettings(await Promise.all([join(paths.files, SHIPPED_FOLDER, GLOBAL_CONFIG), paths.globalConfig].map((file) => readText(file))), log),
+          service: () => runByService(paths, io),
+          restart: () => restart.resolve(),
+          sleep: (ms) => Bun.sleep(ms),
+        };
+  const app = await openApp({ paths, config, version: options.version, areas: options.areas ?? [], now: io.now, log, appFile });
   try {
     const running = await app.start();
     io.out(`RPE ${options.version} listens on ${running.url} (data folder: ${paths.root}).`);
@@ -714,7 +748,9 @@ async function serveCommand(paths: DataPaths, config: AppConfig, io: CliIO, opti
     if (!currentKeys(app.db).some((k) => k.kind === "provider")) io.out("There is no provider key yet: make one with `rpe key`.");
     const waiting = app.switches.list().filter((s) => s.state === "waiting").length;
     if (waiting > 0) io.out(`${waiting} waiting to be switched on: \`rpe status\` lists them.`);
-    await io.stopped();
+    // The file as it is once RPE listens: a build put there while it started is noticed now.
+    await app.builds.check();
+    await Promise.race([io.stopped(), restart.promise]);
   } finally {
     await app.close();
   }

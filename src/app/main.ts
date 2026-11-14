@@ -56,6 +56,7 @@ process.exitCode = await runCli(
     stopped,
     fetch: (url, init) => fetch(url, init),
   },
-  // The build stamps its id here (scripts/build.ts); run from source, it is the development build.
-  { version: process.env.LRE_BUILD_ID ?? "dev", areas: compose().areas },
+  // The build stamps its id here (scripts/build.ts); run from source, it is the development build. The
+  // app file is this one: the file `rpe up`'s service runs, which an update of the extension replaces.
+  { version: process.env.LRE_BUILD_ID ?? "dev", areas: compose().areas, appFile: Bun.main },
 );

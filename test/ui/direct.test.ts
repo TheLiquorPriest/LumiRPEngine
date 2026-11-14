@@ -49,7 +49,7 @@ const TURN_KEYS = [
 
 /** The connection routes, by their place in their table: two share a path there, so the test below holds each place to its method and path. */
 type ConnectionTable = ReturnType<typeof connectionRoutes>;
-const CONNECTION_KEYS = ["GET /api/v1/connections", "POST /api/v1/connections", "PUT /api/v1/connections/:id", "DELETE /api/v1/connections/:id", "PUT /api/v1/connections/:id/default"] as const satisfies readonly (keyof Routes)[];
+const CONNECTION_KEYS = ["GET /api/v1/connections", "POST /api/v1/connections", "PUT /api/v1/connections/:id", "DELETE /api/v1/connections/:id", "PUT /api/v1/connections/:id/default", "POST /api/v1/connections/:id/test"] as const satisfies readonly (keyof Routes)[];
 const connections: [
   Same<Routes["GET /api/v1/connections"]["reply"], RouteReply<ConnectionTable[0]>>,
   Same<Routes["POST /api/v1/connections"]["reply"], RouteReply<ConnectionTable[1]>>,
@@ -58,7 +58,8 @@ const connections: [
   Same<Routes["PUT /api/v1/connections/:id"]["body"], RouteBody<ConnectionTable[2]>>,
   Same<Routes["DELETE /api/v1/connections/:id"]["reply"], RouteReply<ConnectionTable[3]>>,
   Same<Routes["PUT /api/v1/connections/:id/default"]["reply"], RouteReply<ConnectionTable[4]>>,
-] = [true, true, true, true, true, true, true];
+  Same<Routes["POST /api/v1/connections/:id/test"]["reply"], RouteReply<ConnectionTable[5]>>,
+] = [true, true, true, true, true, true, true, true];
 
 const turnsRoute = route({
   method: "GET",
@@ -108,7 +109,8 @@ describe("the pages' route map, against the routes themselves", () => {
   });
 
   test("each connection route the type checks above compare sits at its place in its table, with the method and path the pages call it by", () => {
-    const table = connectionRoutes({ list: async () => ({ connections: [], default: null, providers: [] }), save: async () => undefined as never, remove: async () => undefined, setDefault: async () => undefined }).map((r) => `${r.method} ${r.path}`);
+    const layer = { list: async () => ({ connections: [], default: null, providers: [] }), save: async () => undefined as never, remove: async () => undefined, setDefault: async () => undefined, test: async () => undefined as never, limits: async () => undefined as never };
+    const table = connectionRoutes(layer, async () => null).map((r) => `${r.method} ${r.path}`);
     expect(table).toEqual([...CONNECTION_KEYS]);
     expect(connections.every((same) => same)).toBe(true);
   });

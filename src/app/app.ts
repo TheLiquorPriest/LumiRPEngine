@@ -20,8 +20,11 @@ import type { RunningServer } from "./server";
 import { startServer } from "./server";
 import { guardSwitches, Switches } from "./switches";
 import { RPE_UI, uiRoute } from "./ui";
+import { type AppFile, Builds } from "./update";
 
 export const STATUS_PATH = "/api/v1/status";
+/** "Update now" (plan §4.6): RPE restarts onto its new app file once no turn or job runs, whatever `update.restart` says. */
+export const UPDATE_PATH = "/api/v1/update";
 
 /**
  * An area of RPE as the app mounts it: its tables, and what it adds once they are up to date (its
@@ -61,6 +64,8 @@ export interface App {
   readonly models: ModelsPort;
   readonly log: Log;
   readonly now: () => number;
+  /** The builds that meet at RPE (its own, its app file's on disk, the extension's), and a restart onto a new app file. */
+  readonly builds: Builds;
   /** What the migrations did when the app opened. */
   readonly migrated: MigrationOutcome;
   /** Listens, with the route table as it stands (it takes no more routes after), then runs each area's `started`, in order. */
@@ -81,6 +86,8 @@ export interface OpenAppOptions {
   ui?: string | null;
   now?: () => number;
   log?: Log;
+  /** The app file this process was started from, and what a restart onto another build of it needs; absent or null where it runs from no single file. */
+  appFile?: AppFile | null;
 }
 
 /** A log of plain lines to `write` (standard error, in the server). Fields carry ids and counts, never a secret. */
@@ -92,10 +99,14 @@ export function lineLog(write: (line: string) => void, now: () => number = Date.
   return { debug: line("debug"), info: line("info"), warn: line("warn"), error: line("error") };
 }
 
-/** The app's own routes: its status, the live socket, and the web app. */
-function appRoutes(version: string, started: number, auth: Auth, ui: string | null) {
+/**
+ * The app's own routes: its status, which reads the app file again each time it is asked; "Update
+ * now", which answers what RPE will do; the live socket; and the web app.
+ */
+export function appRoutes(version: string, started: number, auth: Auth, ui: string | null, builds: Builds) {
   return [
-    route({ method: "GET", path: STATUS_PATH, access: "public", handle: () => ({ name: "rpe", version, started, belongsToUser: auth.owner !== null }) }),
+    route({ method: "GET", path: STATUS_PATH, access: "public", handle: async () => ({ name: "rpe", version, started, belongsToUser: auth.owner !== null, builds: await builds.check() }) }),
+    route({ method: "POST", path: UPDATE_PATH, access: "page", handle: () => builds.now() }),
     liveRoute,
     uiRoute(ui),
   ] as const;
@@ -126,7 +137,9 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   const routes = new RouteTable();
   const live = new LiveHub({ queueEvents: config.live.queueEvents, now });
   const secrets = new SecretsFile(paths.secrets);
-  routes.add("app", appRoutes(version, now(), auth, options.ui === undefined ? RPE_UI : options.ui));
+  const builds = new Builds({ version, file: options.appFile ?? null, log });
+  await builds.start();
+  routes.add("app", appRoutes(version, now(), auth, options.ui === undefined ? RPE_UI : options.ui, builds));
   let running: RunningServer | null = null;
   let starting: Promise<RunningServer> | null = null;
   let closing: Promise<void> | null = null;
@@ -153,6 +166,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
     models: modelsPort(paths, secrets),
     log,
     now,
+    builds,
     migrated,
     async start() {
       if (closing !== null) throw new Error("RPE is stopping, so its server was not started.");

@@ -122,8 +122,8 @@ export interface LiveFrame {
 /** RPE to the extension, on the relay socket. */
 export type FromRpe = { rpe: "register"; registration: Registration } | ({ rpe: "live"; key: string } & LiveFrame);
 
-/** The extension to RPE's relay socket: it took RPE's registration, or refused it and why; and what it is missing, each time that changes. */
-export type ToRpe = { rpe: "registered"; missing: MissingPermission[] } | { rpe: "refused"; why: string; missing: MissingPermission[] } | { rpe: "permissions"; missing: MissingPermission[] };
+/** The extension to RPE's relay socket: it took RPE's registration (saying its own build), or refused it and why; and what it is missing, each time that changes. */
+export type ToRpe = { rpe: "registered"; missing: MissingPermission[]; build?: string } | { rpe: "refused"; why: string; missing: MissingPermission[] } | { rpe: "permissions"; missing: MissingPermission[] };
 
 /** A page to the extension (`ctx.sendToBackend`). */
 export type FromPage = { rpe: "start" } | ({ rpe: "request" } & PipeRequest) | { rpe: "follow"; chat: string } | { rpe: "unfollow"; chat: string };
@@ -202,7 +202,9 @@ export function readToRpe(v: unknown): ToRpe | null {
   if (!isRecord(v)) return null;
   const missing = missingOf(v.missing);
   if (missing === null) return null;
-  if (v.rpe === "registered" || v.rpe === "permissions") return { rpe: v.rpe, missing };
+  // An extension built before it said its build says none.
+  if (v.rpe === "registered") return { rpe: v.rpe, missing, ...(str(v.build) ? { build: v.build } : {}) };
+  if (v.rpe === "permissions") return { rpe: v.rpe, missing };
   return v.rpe === "refused" && str(v.why) ? { rpe: "refused", why: v.why, missing } : null;
 }
 

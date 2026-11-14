@@ -148,6 +148,9 @@ export function testModelLayer(port: ModelsPort): ConnectionsApi {
       doc.default = id;
       await port.saveConnections(doc);
     },
+    // It calls no provider and knows no model: the routes' tests of a test and of limits run on RPH's own layer.
+    test: async () => ({ ok: false, ms: 0, error: "This stand-in calls no provider." }),
+    limits: async () => ({ contextWindow: null, maxTokens: null }),
   };
 }
 

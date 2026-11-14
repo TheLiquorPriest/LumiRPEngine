@@ -9,7 +9,7 @@ import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { App, RunningServer } from "../../src/app";
-import { connectionRoutes, rawRoute } from "../../src/app";
+import { connectionRoutes, rawRoute, storedKey } from "../../src/app";
 import { runCli } from "../../src/app/cli";
 import { bearer, type Bed, cliIo, freePort, LUMIVERSE, makeBed, OWNER, testModelLayer, writeConfig } from "./helpers";
 
@@ -42,7 +42,7 @@ describe("rpe", () => {
         {
           name: "probe",
           mount(a) {
-            a.routes.add("probe", [rawRoute({ method: "POST", path: "/v1/chat/completions", access: "provider", raw: () => Response.json({ object: "chat.completion" }) }), ...connectionRoutes(testModelLayer(a.models))]);
+            a.routes.add("probe", [rawRoute({ method: "POST", path: "/v1/chat/completions", access: "provider", raw: () => Response.json({ object: "chat.completion" }) }), ...connectionRoutes(testModelLayer(a.models), storedKey(a.models))]);
           },
         },
       ],
@@ -130,8 +130,8 @@ describe("rpe", () => {
     expect(added.out).toContain("Added Floor");
     const listed = await rpe(["connection", "list"]);
     expect(listed.out).toContain("* Floor");
-    expect(listed.out).toContain(`key ending ${key.slice(-4)}`);
-    expect(listed.out + added.out).not.toContain(key);
+    expect(listed.out).toContain("key set");
+    expect(listed.out + added.out).not.toContain(key.slice(-4));
     expect(await readFile(app.paths.secrets, "utf8")).toContain(key);
     expect((await rpe(["connection", "add", "--name", "Keyless", "--provider", "deepseek"], { secret: null })).err).toContain("needs one");
     expect((await rpe(["connection", "remove", "Floor"])).code).toBe(0);

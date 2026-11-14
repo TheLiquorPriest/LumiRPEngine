@@ -1,8 +1,9 @@
 // The turn lane's settings (plan §5.4 "Config", Appendix D.1), from the config files of the chat's
 // levels (`RPE-global.yml` shipped and global, the chat's `RPE.yml`), the nearer level's value over the
-// farther one's, mapping by mapping. Each is a setting with a default; the defaults are here and
-// nowhere else. A value a setting does not take is logged with its file and passed over, and the
-// default holds; it never stops a turn.
+// farther one's, mapping by mapping. Each is a setting with a default, declared in `TURN_SETTINGS`, which
+// the reader takes every value through and the Settings page lists; the defaults are here and nowhere
+// else. A value a setting does not take is logged with its file and passed over, and the default
+// holds; it never stops a turn.
 //
 //   lead: author                 the agent definition that leads a turn
 //   carry: continuing            what a session carries between turns: continuing, records or nothing
@@ -21,6 +22,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Carry, FilesPort, JsonValue, Log, Scope } from "rp-harness/contract";
+import { isMapping, type Mapping, mergedConfig, type SettingDef, settingIn } from "../app/setting-list";
 import { WINDOW_DEFAULTS, type WindowSettings } from "../story/window";
 import { GLOBAL_CONFIG, SHIPPED_FOLDER } from "../tree";
 
@@ -48,20 +50,25 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   window: WINDOW_DEFAULTS,
 });
 
-type Mapping = { [key: string]: JsonValue };
+const CARRIES: readonly Carry[] = ["continuing", "records", "nothing"];
 
-function isMapping(value: unknown): value is Mapping {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+/** Each setting as the files write it, by the name this file reads it under. */
+const DEFS = {
+  lead: { key: "lead", default: TURN_DEFAULTS.lead, takes: { type: "text" }, perConnection: false },
+  carry: { key: "carry", default: TURN_DEFAULTS.carry, takes: { type: "oneOf", values: CARRIES }, perConnection: false },
+  previousRun: { key: "limits.previousRun", default: TURN_DEFAULTS.previousRunMs / 1000, takes: { type: "number", least: 0 }, perConnection: false },
+  hiddenReadable: { key: "chat.hiddenReadable", default: TURN_DEFAULTS.hiddenReadable, takes: { type: "yesNo" }, perConnection: false },
+  window: { key: "history.window", default: TURN_DEFAULTS.window.size, takes: { type: "whole", least: 1 }, orNone: true, none: "every message kept", perConnection: false },
+  step: { key: "history.step", default: TURN_DEFAULTS.window.step, takes: { type: "whole", least: 1 }, orNone: true, none: "off", perConnection: false },
+  // `hold: true` is `hold: { on: true }`, its cap the default.
+  holdOn: { key: "history.hold.on", default: TURN_DEFAULTS.window.hold.on, takes: { type: "yesNo" }, short: true, perConnection: false },
+  holdCap: { key: "history.hold.cap", default: TURN_DEFAULTS.window.hold.cap, takes: { type: "whole", least: 0 }, perConnection: false },
+  // Read with no chat (`passConnection` below), so from the global level alone.
+  passConnection: { key: "passConnection", default: null, takes: { type: "text" }, orNone: true, none: "the default connection", levels: ["shipped", "global"], perConnection: false },
+} as const satisfies Record<string, SettingDef>;
 
-function merged(far: Mapping, near: Mapping): Mapping {
-  const out: Mapping = { ...far };
-  for (const [key, value] of Object.entries(near)) {
-    const before = out[key];
-    out[key] = isMapping(before) && isMapping(value) ? merged(before, value) : value;
-  }
-  return out;
-}
+/** Every setting the turn lane reads, as a config file writes it. */
+export const TURN_SETTINGS: readonly SettingDef[] = Object.values(DEFS);
 
 /** The scope's config, every level's file read and merged, farthest first. */
 async function configOf(files: FilesPort, scope: Scope, log: Log): Promise<{ config: Mapping; from: string }> {
@@ -80,69 +87,30 @@ async function configOf(files: FilesPort, scope: Scope, log: Log): Promise<{ con
       continue;
     }
     if (!isMapping(parsed)) continue;
-    config = merged(config, parsed);
+    config = mergedConfig(config, parsed);
     paths.push(path);
   }
   return { config, from: paths.join(", ") };
 }
 
-/** A whole number of at least `least`. */
-function whole(value: JsonValue | undefined, least: number): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= least;
-}
-
-/** The window's hold as a level sets it: on or off with the default cap, or a mapping of either; undefined for a value it does not take. */
-function holdOf(value: JsonValue): WindowSettings["hold"] | undefined {
-  if (typeof value === "boolean") return { on: value, cap: TURN_DEFAULTS.window.hold.cap };
-  if (!isMapping(value)) return undefined;
-  const on = value["on"] ?? TURN_DEFAULTS.window.hold.on;
-  const cap = value["cap"] ?? TURN_DEFAULTS.window.hold.cap;
-  return typeof on === "boolean" && whole(cap, 0) ? { on, cap } : undefined;
-}
-
 /** The turn's settings for a scope, as its levels' config files set them over the defaults. */
 export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Promise<TurnSettings> {
   const { config, from } = await configOf(files, scope, log);
-  const passed = (key: string, value: JsonValue | undefined): void => log.warn("A setting has a value it does not take; its default holds.", { setting: key, value: value ?? null, files: from });
-  const section = (key: string): Mapping => {
-    const value = config[key];
-    if (value === undefined) return {};
-    if (isMapping(value)) return value;
-    passed(key, value);
-    return {};
+  const value = (def: SettingDef): JsonValue => {
+    const read = settingIn(config, def);
+    if (read.passed !== null) log.warn("A setting has a value it does not take; its default holds.", { setting: def.key, value: read.passed.value, files: from });
+    return read.value;
   };
-  const lead = config["lead"];
-  const carry = config["carry"];
-  const seconds = section("limits")["previousRun"];
-  const hidden = section("chat")["hiddenReadable"];
-  const history = section("history");
-  const size = history["window"];
-  const step = history["step"];
-  const hold = history["hold"] === undefined ? undefined : holdOf(history["hold"]);
-  const valid = {
-    lead: typeof lead === "string" && lead.trim() !== "",
-    carry: carry === "continuing" || carry === "records" || carry === "nothing",
-    seconds: typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0,
-    hidden: typeof hidden === "boolean",
-    size: size === null || whole(size, 1),
-    step: step === null || whole(step, 1),
-  };
-  if (lead !== undefined && !valid.lead) passed("lead", lead);
-  if (carry !== undefined && !valid.carry) passed("carry", carry);
-  if (seconds !== undefined && !valid.seconds) passed("limits.previousRun", seconds);
-  if (hidden !== undefined && !valid.hidden) passed("chat.hiddenReadable", hidden);
-  if (size !== undefined && !valid.size) passed("history.window", size);
-  if (step !== undefined && !valid.step) passed("history.step", step);
-  if (history["hold"] !== undefined && hold === undefined) passed("history.hold", history["hold"]);
+  // Each value is one its setting takes (`settingIn`), so it is of the type the setting's `takes` says.
   return {
-    lead: valid.lead ? (lead as string).trim() : TURN_DEFAULTS.lead,
-    carry: valid.carry ? (carry as Carry) : TURN_DEFAULTS.carry,
-    previousRunMs: valid.seconds ? (seconds as number) * 1000 : TURN_DEFAULTS.previousRunMs,
-    hiddenReadable: valid.hidden ? (hidden as boolean) : TURN_DEFAULTS.hiddenReadable,
+    lead: value(DEFS.lead) as string,
+    carry: value(DEFS.carry) as Carry,
+    previousRunMs: (value(DEFS.previousRun) as number) * 1000,
+    hiddenReadable: value(DEFS.hiddenReadable) as boolean,
     window: {
-      size: valid.size && size !== undefined ? (size as number | null) : TURN_DEFAULTS.window.size,
-      step: valid.step && step !== undefined ? (step as number | null) : TURN_DEFAULTS.window.step,
-      hold: hold ?? TURN_DEFAULTS.window.hold,
+      size: value(DEFS.window) as number | null,
+      step: value(DEFS.step) as number | null,
+      hold: { on: value(DEFS.holdOn) as boolean, cap: value(DEFS.holdCap) as number },
     },
   };
 }
@@ -153,7 +121,7 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
  * as it is asked for, since such requests come without a chat to read a tree for.
  */
 export function passConnection(files: string, log: Log): string | null {
-  let chosen: string | null = null;
+  let config: Mapping = {};
   for (const path of [join(files, SHIPPED_FOLDER, GLOBAL_CONFIG), join(files, GLOBAL_CONFIG)]) {
     let text: string;
     try {
@@ -163,10 +131,10 @@ export function passConnection(files: string, log: Log): string | null {
     }
     try {
       const parsed: unknown = Bun.YAML.parse(text);
-      if (isMapping(parsed) && typeof parsed["passConnection"] === "string" && parsed["passConnection"].trim() !== "") chosen = parsed["passConnection"].trim();
+      if (isMapping(parsed)) config = mergedConfig(config, parsed);
     } catch (error) {
       log.warn("A config file does not parse; the connection for requests with no tag is taken from the others.", { path, error: error instanceof Error ? error.message : String(error) });
     }
   }
-  return chosen;
+  return settingIn(config, DEFS.passConnection).value as string | null;
 }

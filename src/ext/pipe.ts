@@ -30,6 +30,8 @@ export interface PipeDeps {
   registrations: Registrations;
   /** What the extension is missing now. */
   missing(): MissingPermission[];
+  /** The extension's own build, said to RPE when it takes RPE's registration: an update of the extension brings RPE's new app file. */
+  build: string;
   log(message: string): void;
   /** RPE registered for this user. */
   registered(user: string): void;
@@ -139,7 +141,7 @@ export function startPipe(deps: PipeDeps): Pipe {
             deps.refused(user);
             return;
           }
-          await toRpe(user, { rpe: "registered", missing: deps.missing() });
+          await toRpe(user, { rpe: "registered", missing: deps.missing(), build: deps.build });
           deps.registered(user);
           return;
         }

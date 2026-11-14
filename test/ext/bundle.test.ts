@@ -7,7 +7,8 @@ import { join } from "node:path";
 import { installScan } from "../../scripts/install-scan";
 
 test("the backend bundle passes the install scan", async () => {
-  const built = await Bun.build({ entrypoints: [join(import.meta.dir, "../../src/ext/backend.ts")], target: "bun", format: "esm" });
+  // Bundled as the build bundles it (scripts/build.ts), its build id stamped in, and nothing more: any other read of the environment still fails the scan.
+  const built = await Bun.build({ entrypoints: [join(import.meta.dir, "../../src/ext/backend.ts")], target: "bun", format: "esm", define: { "process.env.LRE_BUILD_ID": JSON.stringify("test") } });
   expect(built.success).toBe(true);
   expect(built.outputs).toHaveLength(1);
   const js = await built.outputs[0]!.text();

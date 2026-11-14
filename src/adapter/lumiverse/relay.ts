@@ -58,6 +58,8 @@ export interface RelayDeps {
   held(why: string | null): void;
   /** What the extension says it is missing, each time it says so: RPE's UI shows it. */
   permissions(missing: MissingPermission[]): void;
+  /** The extension's build, each time it takes RPE's registration; null where it does not say. */
+  extensionBuild(build: string | null): void;
   settings?: Partial<RelaySettings>;
 }
 
@@ -106,8 +108,10 @@ export class Relay {
         if (event !== "SPINDLE_FRONTEND_MSG") return;
         const said = readToRpe(payload.data);
         if (said === null) return;
-        if (said.rpe === "registered") this.held(null);
-        else if (said.rpe === "refused") this.held(`RPE's extension in Lumiverse refused RPE's registration: ${said.why}`);
+        if (said.rpe === "registered") {
+          this.held(null);
+          this.deps.extensionBuild(said.build ?? null);
+        } else if (said.rpe === "refused") this.held(`RPE's extension in Lumiverse refused RPE's registration: ${said.why}`);
         this.deps.permissions(said.missing);
       }),
     );

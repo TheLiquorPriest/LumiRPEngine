@@ -5,14 +5,13 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { ConnectionList, ConnectionView } from "rp-harness/contract";
 import { type ConnectionsAction, ConnectionsView, type ConnectionsViewProps, draftOf } from "../../src/ui/pages/connections";
-import type { SaveConnection } from "../../src/ui/api";
+import type { ConnectionShown, ConnectionsShown, SaveConnection } from "../../src/ui/api";
 import { banners, elements, expand, press, textOf } from "./vnodes";
 
-const KEYED: ConnectionView = { id: "c-flash", name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", effort: "high", retries: 4, limits: { "deepseek-v4-flash": { contextWindow: 64_000 } }, default: true, key: { set: true, last4: "9f3c" } };
-const SIGNED: ConnectionView = { id: "c-studio", name: "Studio", provider: "anthropic", auth: "signin", default: false, key: null, signedIn: false };
-const LIST: ConnectionList = {
+const KEYED: ConnectionShown = { id: "c-flash", name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", effort: "high", retries: 4, limits: { "deepseek-v4-flash": { contextWindow: 64_000 } }, default: true, key: { set: true }, limitsInForce: null };
+const SIGNED: ConnectionShown = { id: "c-studio", name: "Studio", provider: "anthropic", auth: "signin", default: false, key: null, signedIn: false, limitsInForce: null };
+const LIST: ConnectionsShown = {
   connections: [KEYED, SIGNED],
   default: "c-flash",
   providers: [

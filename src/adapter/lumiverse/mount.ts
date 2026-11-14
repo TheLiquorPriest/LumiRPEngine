@@ -177,6 +177,8 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
         status.missing = missing;
         if (missing.length > 0 && JSON.stringify(missing) !== JSON.stringify(was)) at.log.warn("RPE's extension in Lumiverse is missing permissions it needs.", { missing: missing.map((m) => m.permission) });
       },
+      // An update of the extension brings a new app file with it: RPE reads its own file again when the extension is another build.
+      extensionBuild: (build) => at.builds.registered(build),
       ...(deps.relay ? { settings: deps.relay } : {}),
     });
     const stopGeneration = async (generation: string): Promise<boolean> => {
