@@ -1506,7 +1506,7 @@ async function startExtension(spindle2, options = {}) {
     spindle: spindle2,
     registrations,
     missing: lacking,
-    build: options.build ?? "b74300e3" ?? "dev",
+    build: options.build ?? "c2d59e6d" ?? "dev",
     log,
     registered: () => notice(),
     refused: (user) => {
