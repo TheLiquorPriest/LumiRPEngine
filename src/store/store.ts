@@ -401,6 +401,33 @@ export class UserStore {
     return r ? chatOf(r) : null;
   }
 
+  /**
+   * Attaches a chat to a world revision (Build's Attach): a chat that plays no world yet plays
+   * `revision` of `world` from its start, at once. One the store has not seen is made so; one that
+   * has turns has them folded again from the revision, so the snapshots kept on their paths go. A
+   * chat that plays a revision already keeps it, and nothing changes. The revision the chat plays now.
+   */
+  attachWorld(input: { id: string; world: WorldId; revision: RevisionId }): RevisionId {
+    if (input.revision === BLANK_REVISION || this.store.env.worlds(input.revision) === undefined) throw new StoreInputError(`the world revision ${input.revision} is not available`);
+    const row = this.chat(input.id);
+    if (row === null) {
+      this.createChat(input);
+      return input.revision;
+    }
+    if (row.revision !== null) return row.revision;
+    this.write(true, () => {
+      this.db.run("UPDATE chat SET world = ?, revision = ? WHERE user = ? AND id = ?", [input.world, input.revision, this.id, input.id]);
+      this.db.run(
+        `WITH RECURSIVE down(key) AS (
+           SELECT key FROM path_node WHERE user = ?1 AND turn IN (SELECT id FROM turn WHERE user = ?1 AND chat = ?2)
+           UNION SELECT n.key FROM path_node n JOIN down d ON n.user = ?1 AND n.prev = d.key)
+         DELETE FROM snapshot WHERE user = ?1 AND kind = 'cache' AND node IN (SELECT key FROM down)`,
+        [this.id, input.id],
+      );
+    });
+    return input.revision;
+  }
+
   private chatOrThrow(id: string): ChatDb {
     const r = this.db.query<ChatDb, [string, string]>("SELECT * FROM chat WHERE user = ? AND id = ?").get(this.id, id);
     if (!r) throw new StoreInputError(`no chat ${id}`);

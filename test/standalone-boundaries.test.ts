@@ -7,7 +7,8 @@
 //   - the light extension holds nothing of the application (it runs inside Lumiverse);
 //   - the pages hold nothing of the server;
 //   - the store knows nothing of Lumiverse, of the harness, or of who calls it;
-//   - today's build is read only by the migration, and LumiAH is imported nowhere else;
+//   - today's build is read only by the migration, and LumiAH is imported nowhere else; Build takes
+//     today's world store alone from it;
 //   - the harness is reached through its package, never through pi directly.
 
 import { describe, expect, test } from "bun:test";
@@ -17,7 +18,7 @@ import { dirname, join, relative, resolve } from "node:path";
 const ROOT = resolve(import.meta.dir, "..");
 const SRC = join(ROOT, "src");
 
-const ZONES = ["app", "adapter", "store", "iface", "cast", "story", "lore", "turn", "ui", "ext", "migrate", "tree"] as const;
+const ZONES = ["app", "adapter", "store", "iface", "cast", "story", "lore", "turn", "ui", "ext", "migrate", "tree", "build"] as const;
 type Zone = (typeof ZONES)[number];
 
 /** The carried engine's folders a zone may import from, named by their first path segment. */
@@ -49,6 +50,7 @@ const RULES: Record<Zone, Rule> = {
   turn: { zones: ["app", "adapter", "store", "tree", "lore", "iface", "cast", "story"], carried: PURE, harness: true },
   ui: { zones: [], carried: ["shared", "frontend"], sandboxed: true },
   ext: { zones: ["adapter"], carried: ["shared", "backend"], sandboxed: true },
+  build: { zones: ["app", "store"], carried: [...PURE, "backend"] },
 };
 
 /** The harness's contract is types only; importing it as types costs nothing anywhere, a page included. */
@@ -59,6 +61,22 @@ const COMPOSITION = /^app\/(main|cli|compose)\.ts$/;
 
 /** What the extension may take from today's backend: the secrecy rules and the host's shapes, nothing else. */
 const EXT_BACKEND = /^backend\/(lore-secrets|host)/;
+
+/** What Build may take from today's backend: today's world store and the stored-JSON reader it uses, with what those two import. */
+function buildBackend(): Set<string> {
+  const out = new Set<string>();
+  const queue = ["backend/worlds.ts", "backend/stored-json.ts"].map((rel) => join(SRC, rel));
+  while (queue.length > 0) {
+    const file = queue.pop() as string;
+    if (out.has(file) || !existsSync(file)) continue;
+    out.add(file);
+    for (const { spec } of specsOf(readFileSync(file, "utf8"))) {
+      const target = spec.startsWith(".") ? resolveLocal(file, spec) : null;
+      if (target !== null && relative(SRC, target).split("\\").join("/").startsWith("backend/")) queue.push(target);
+    }
+  }
+  return out;
+}
 
 /** Adapter modules the extension shares with RPE must hold no server code; they are checked as sandboxed too. */
 function sharedWithExtension(): Set<string> {
@@ -129,6 +147,7 @@ function withoutComments(source: string): string {
 describe("the standalone application's boundaries", () => {
   const all = ZONES.flatMap((zone) => files(join(SRC, zone)));
   const shared = sharedWithExtension();
+  const build = buildBackend();
 
   test("every import stays inside what its zone may reach", () => {
     const violations: string[] = [];
@@ -155,6 +174,8 @@ describe("the standalone application's boundaries", () => {
             violations.push(`${rel} (${zone}) → ${target}: ${zone} may not import ${top}`);
           } else if (zone === "ext" && top === "backend" && !EXT_BACKEND.test(target)) {
             violations.push(`${rel} → ${target}: the extension takes only the secrecy rules and the host's shapes from today's backend`);
+          } else if (zone === "build" && top === "backend" && !build.has(resolveLocal(file, spec))) {
+            violations.push(`${rel} → ${target}: Build takes only today's world store from today's backend`);
           }
         } else if (spec.startsWith("node:") || spec.startsWith("bun:") || spec === "bun") {
           if (sandboxed) violations.push(`${rel}: ${spec} in code that runs in a page or inside Lumiverse`);
