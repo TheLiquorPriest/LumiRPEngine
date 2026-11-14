@@ -11,9 +11,6 @@ import { walk } from "./files";
 import { NOTES_FOLDER, SESSIONS_FOLDER, TURNS_FOLDER } from "./layout";
 import { type ChatLocation, type Located, locate } from "./view";
 
-/** Fixed: how many note files each of the Storage page's lists gives when the page names no limit, and the most it gives. */
-export const NOTE_LIST = { limit: 20, most: 200 } as const;
-
 export interface ChatStorage {
   chat: string;
   /** Its folder below the tree's `chats/`. */

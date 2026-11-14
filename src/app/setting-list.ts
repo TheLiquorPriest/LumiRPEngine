@@ -15,10 +15,10 @@ export const CONNECTION_PART = "<connection>";
 
 /** What a level may set a setting to. */
 export type SettingTakes =
-  /** A whole number, at least `least`. */
-  | { type: "whole"; least: number }
-  /** A number, at least `least`. */
-  | { type: "number"; least: number }
+  /** A whole number, at least `least`, and at most `most` where it has one. */
+  | { type: "whole"; least: number; most?: number }
+  /** A number, at least `least`, and at most `most` where it has one. */
+  | { type: "number"; least: number; most?: number }
   | { type: "oneOf"; values: readonly string[] }
   | { type: "yesNo" }
   /** A line of text that is not blank, read without the space at its ends. */
@@ -128,9 +128,13 @@ export function takesWords(def: SettingDef): string {
   const t = def.takes;
   const what =
     t.type === "whole"
-      ? `a whole number, at least ${t.least}`
+      ? t.most === undefined
+        ? `a whole number, at least ${t.least}`
+        : `a whole number from ${t.least} to ${t.most}`
       : t.type === "number"
-        ? `a number, at least ${t.least}`
+        ? t.most === undefined
+          ? `a number, at least ${t.least}`
+          : `a number from ${t.least} to ${t.most}`
         : t.type === "oneOf"
           ? `one of ${t.values.join(", ")}`
           : t.type === "yesNo"
@@ -151,9 +155,9 @@ export function takenValue(def: SettingDef, value: JsonValue, key: string = def.
   const t = def.takes;
   switch (t.type) {
     case "whole":
-      return typeof value === "number" && Number.isInteger(value) && value >= t.least ? { ok: true, value } : no;
+      return typeof value === "number" && Number.isInteger(value) && value >= t.least && (t.most === undefined || value <= t.most) ? { ok: true, value } : no;
     case "number":
-      return typeof value === "number" && Number.isFinite(value) && value >= t.least ? { ok: true, value } : no;
+      return typeof value === "number" && Number.isFinite(value) && value >= t.least && (t.most === undefined || value <= t.most) ? { ok: true, value } : no;
     case "oneOf":
       return typeof value === "string" && t.values.includes(value) ? { ok: true, value } : no;
     case "yesNo":
@@ -180,4 +184,24 @@ export function settingIn(config: Mapping, def: SettingDef, connection?: string)
   if (set === undefined) return { value: def.default, passed: null };
   const taken = takenValue(def, set, keyFor(def, connection));
   return taken.ok ? { value: taken.value, passed: null } : { value: def.default, passed: { value: set, why: taken.why } };
+}
+
+/** A group of settings whose values are numbers, none of which takes `~`, by the name its reader takes each under. */
+export type NumberSettings<K extends string> = Readonly<Record<K, SettingDef & { readonly takes: { readonly type: "whole" | "number" } }>>;
+
+/**
+ * Each setting of a group as a config sets it, by the name the group gives it: the value set where
+ * the setting takes it, else its default. `passed` hears of each value passed over, with its key and
+ * why, so the reader can say so where it logs.
+ */
+export function numbersIn<K extends string>(config: Mapping, group: NumberSettings<K>, passed?: (key: string, value: JsonValue, why: string) => void): Record<K, number> {
+  const out = {} as Record<K, number>;
+  for (const name of Object.keys(group) as K[]) {
+    const def = group[name];
+    const read = settingIn(config, def);
+    if (read.passed !== null) passed?.(def.key, read.passed.value, read.passed.why);
+    // A value the setting takes is a number, since it takes no `~`; a default is one too.
+    out[name] = read.value as number;
+  }
+  return out;
 }

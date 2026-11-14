@@ -92,7 +92,7 @@ function knownSceneTypes(registry: Registry, world: WorldDoc, state: Readonly<Wo
   return new Set([...ENGINE_SCENE_TYPES, ...Object.values(world.places).flatMap((p) => (p.sceneType && canSeePlace(registry, world, state, world.pov, p.id) ? [p.sceneType] : []))]);
 }
 
-function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonValue>, ctx: ReadContext): HudView {
+export function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonValue>, ctx: ReadContext): HudView {
   const cal = calendarOf(world);
   const pov = world.pov;
   const placeId = placeOfEntity(state, pov);
@@ -148,7 +148,7 @@ function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonVal
   };
 }
 
-function scene(world: WorldDoc, state: WorldState, headElapsed: number, registry: Registry): SceneView {
+export function scene(world: WorldDoc, state: WorldState, headElapsed: number, registry: Registry): SceneView {
   const placeId = placeOfEntity(state, world.pov);
   const present: SceneView["present"] = [];
   for (const [id, e] of Object.entries(state.entities)) {
@@ -322,7 +322,7 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
   return { entries, timelapse, ...(encounter ? { encounter } : {}) };
 }
 
-function controls(world: WorldDoc, state: WorldState, sceneType: string, registry: Registry, knowledge: ViewInput["knowledge"], offstage: OffstageSettings): ControlsView {
+export function controls(world: WorldDoc, state: WorldState, sceneType: string, registry: Registry, knowledge: ViewInput["knowledge"], offstage: OffstageSettings): ControlsView {
   return {
     // The chat's own preset: a new chat may start from the user's settings, and This chat changes it.
     realism: { preset: presetOf(state.realism), levels: { ...state.realism.levels }, tierCaps: structuredClone(state.realism.tierCaps), bandTiers: bandTiers(world), floors: levelFloors(world), claims: claimsOf(world, state) },

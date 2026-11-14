@@ -5,6 +5,7 @@
 // plus those lines, made with the engine's own answer builder, so every lane answers in one shape.
 
 import type { AgentRef, HostTool, JsonObject, JsonValue, Scope, ToolCtx, ToolResult, ToolTier } from "rp-harness/contract";
+import type { NumberSettings, SettingDef } from "../app/setting-list";
 import { calendarOf, formatClock, placeOffset } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
 import { described, Reply, type Writes } from "../iface/kit";
@@ -46,6 +47,28 @@ export const CAST_DEFAULTS = Object.freeze({
 });
 
 export type CastSettings = { -readonly [K in keyof typeof CAST_DEFAULTS]: number };
+
+/**
+ * Each of the cast's settings as a config file writes it, under `cast:`, read at every level and
+ * taken in by the host (the turn lane) for the chat a call is in.
+ */
+export const CAST_SETTING_DEFS = {
+  queryItems: { key: "cast.queryItems", default: CAST_DEFAULTS.queryItems, takes: { type: "whole", least: 1 }, perConnection: false },
+  secretConfidence: { key: "cast.secretConfidence", default: CAST_DEFAULTS.secretConfidence, takes: { type: "number", least: 0, most: 1 }, perConnection: false },
+  topOfMind: { key: "cast.topOfMind", default: CAST_DEFAULTS.topOfMind, takes: { type: "whole", least: 0 }, perConnection: false },
+  shortTermDays: { key: "cast.shortTermDays", default: CAST_DEFAULTS.shortTermDays, takes: { type: "number", least: 0 }, perConnection: false },
+  // A memory that fades in no time at all would have no strength to measure.
+  fadeDays: { key: "cast.fadeDays", default: CAST_DEFAULTS.fadeDays, takes: { type: "number", least: 1 }, perConnection: false },
+  faintBelow: { key: "cast.faintBelow", default: CAST_DEFAULTS.faintBelow, takes: { type: "number", least: 0, most: 1 }, perConnection: false },
+  memoryWeight: { key: "cast.memoryWeight", default: CAST_DEFAULTS.memoryWeight, takes: { type: "whole", least: 1 }, perConnection: false },
+  weightMax: { key: "cast.weightMax", default: CAST_DEFAULTS.weightMax, takes: { type: "whole", least: 1 }, perConnection: false },
+  comesToMindTokens: { key: "cast.comesToMindTokens", default: CAST_DEFAULTS.comesToMindTokens, takes: { type: "whole", least: 0 }, perConnection: false },
+  charsPerToken: { key: "cast.charsPerToken", default: CAST_DEFAULTS.charsPerToken, takes: { type: "number", least: 1 }, perConnection: false },
+  recallItems: { key: "cast.recallItems", default: CAST_DEFAULTS.recallItems, takes: { type: "whole", least: 1 }, perConnection: false },
+} as const satisfies NumberSettings<keyof CastSettings>;
+
+/** Every setting the cast reads, as a config file writes it. */
+export const CAST_SETTINGS: readonly SettingDef[] = Object.values(CAST_SETTING_DEFS);
 
 /** The prompt part every answer's sentences come from. */
 export const CAST_ANSWERS = "cast-answers";

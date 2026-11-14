@@ -12,14 +12,18 @@ import { CONFIG_DEFAULTS } from "../../src/app/config";
 import { HARNESS_SETTINGS } from "../../src/app/harness-settings";
 import { CONNECTION_PART, type SettingDef } from "../../src/app/setting-list";
 import { UPDATE_SETTINGS } from "../../src/app/update";
+import { CAST_SETTINGS } from "../../src/cast";
+import { LORE_SETTINGS } from "../../src/lore";
+import { STORE_SETTINGS } from "../../src/store";
+import { STORY_SETTINGS } from "../../src/story";
 import { CHAT_DEFAULTS } from "../../src/tree/shipped";
-import { RETENTION_DEFAULTS } from "../../src/tree/retention";
+import { TREE_SETTINGS } from "../../src/tree/settings";
 import { TURN_SETTINGS } from "../../src/turn/settings";
 
 const ROOT = join(import.meta.dir, "../..");
 const DOCS = ["README.md", "docs/install.md", "docs/migration.md", "docs/behaviour.md", "docs/settings.md", "docs/security.md", "docs/troubleshooting.md"];
-const SETTINGS: readonly SettingDef[] = [...HARNESS_SETTINGS, ...TURN_SETTINGS, ...UPDATE_SETTINGS];
-/** The shipped config file. Beside settings, it holds the keys the file tree reads (`off`, `layered`, `added`, `retention`), which are in no settings list. */
+const SETTINGS: readonly SettingDef[] = [...HARNESS_SETTINGS, ...TURN_SETTINGS, ...UPDATE_SETTINGS, ...TREE_SETTINGS, ...CAST_SETTINGS, ...STORY_SETTINGS, ...LORE_SETTINGS, ...STORE_SETTINGS];
+/** The shipped config file. Beside settings, it holds the keys RPH's files layer reads (`off`, `layered`, `added`), which are in no settings list. */
 const SHIPPED_CONFIG = Bun.YAML.parse(readFileSync(join(ROOT, "guidance/RPE-global.yml"), "utf8")) as Record<string, unknown>;
 
 /** A key the shipped config file has: a list or a value as it is, or one entry of a mapping (any situation of `added`, whose entries are lists). */
@@ -247,9 +251,8 @@ describe("the standalone docs", () => {
       expect({ key: r.key, default: r.cell }).toEqual({ key: r.key, default: at === null ? "none" : shown(at) });
     }
 
-    // The shipped config file's keys that are no setting, each entry of a mapping on its own row; the turn folders kept as the file tree's own default.
+    // The shipped config file's keys that are no setting, each entry of a mapping on its own row.
     expect(tree.map((r) => r.key).sort()).toEqual(leaves(SHIPPED_CONFIG).filter((key) => !settingMatches(key)).sort());
     for (const r of tree) expect({ key: r.key, default: r.cell }).toEqual({ key: r.key, default: shown(valueIn(SHIPPED_CONFIG, r.key)) });
-    expect(tree.find((r) => r.key === "retention.turnFolders")?.cell).toBe(shown(RETENTION_DEFAULTS.turnFolders));
   });
 });

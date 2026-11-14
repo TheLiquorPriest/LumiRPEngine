@@ -28,7 +28,8 @@ import type { TreeChats } from "./chats";
 import { defaultChanges, type DiffLine, lineDiff } from "./defaults";
 import { oneFileAtATime } from "./files";
 import { pruneChat } from "./retention";
-import { NOTE_LIST, noteFiles, treeStorage } from "./storage";
+import { treeSettingsOf } from "./settings";
+import { noteFiles, treeStorage } from "./storage";
 import { SUGGESTION_STATES, type TreeSuggestion, type TreeSuggestions } from "./suggestions";
 import { type ChatLocation, type Located, locate, treeLayers, viewPath } from "./view";
 
@@ -185,9 +186,10 @@ export function treeRoutes(deps: TreeRoutesDeps) {
 
   /** A suggestion of the user's, as the page shows it: with the difference from its file as it is now to the text proposed. */
   const shownSuggestion = async (user: string, s: TreeSuggestion): Promise<TreeSuggestionView> => {
-    const lookup = await locate(locationOf(user, s.chat), s.path);
+    const loc = locationOf(user, s.chat);
+    const lookup = await locate(loc, s.path);
     const now = lookup.ok && lookup.at.is === "file" && lookup.at.disk !== null ? await readText(lookup.at.disk) : null;
-    return { ...s, lines: lineDiff(now ?? "", s.text) };
+    return { ...s, lines: lineDiff(now ?? "", s.text, (await treeSettingsOf(loc)).diffCells) };
   };
 
   /** An open suggestion of the user's; a 404 for none, a 409 for one decided already. */
@@ -209,12 +211,14 @@ export function treeRoutes(deps: TreeRoutesDeps) {
       method: "GET",
       path: "/api/v1/storage/notes",
       access: "page",
-      handle: ({ user, query }) => {
+      handle: async ({ user, query }) => {
         const chat = chatOf(query.get("chat"));
         if (chat === null) throw new RouteError(400, "Name the chat whose notes are listed, as `chat`.");
         const asked = query.get("limit");
         if (asked !== null && !/^\d+$/.test(asked)) throw new RouteError(400, "limit is a whole number.");
-        return noteFiles(deps, locationOf(user, chat), user, chat, Math.min(asked === null ? NOTE_LIST.limit : Number(asked), NOTE_LIST.most));
+        const loc = locationOf(user, chat);
+        const { notesListed, notesMost } = await treeSettingsOf(loc);
+        return await noteFiles(deps, loc, user, chat, Math.min(asked === null ? notesListed : Number(asked), notesMost));
       },
     }),
     route({
@@ -307,11 +311,12 @@ export function treeRoutes(deps: TreeRoutesDeps) {
         if (entry === null || text === null) throw new RouteError(404, `The tree has no file ${at.path}.`);
         const shipped = entry.shipped === null ? null : await readText((await found(loc, entry.shipped)).disk);
         const change = entry.shipped === null || entry.defaultChanged === null ? undefined : defaultChanges(deps.db).get(entry.shipped);
+        const { diffCells } = await treeSettingsOf(loc);
         const diff: TreeFileDiff = {
           path: entry.path,
           shipped: entry.shipped,
-          lines: shipped === null ? [] : lineDiff(shipped, text),
-          update: change === undefined || shipped === null ? null : { at: change.at, lines: lineDiff(change.before, shipped) },
+          lines: shipped === null ? [] : lineDiff(shipped, text, diffCells),
+          update: change === undefined || shipped === null ? null : { at: change.at, lines: lineDiff(change.before, shipped, diffCells) },
         };
         return Response.json(diff, { headers: { "cache-control": "no-store" } });
       },

@@ -1,0 +1,26 @@
+---
+description: The words RPE answers a play page with when it does not do what a panel asked of it. Each line is the message of one answer, shown to you as it is; the names in double braces are filled with the request's own values. Change the words freely. Delete a line and that answer comes with no words. They say what is so; they ask for nothing.
+lines:
+  next_message: "A tap that goes with your next message is not kept by this build of RPE from this page yet."
+  plays_now: "A tap that plays at once as your message is not served by this build of RPE yet: it writes no message to the chat and starts no reply from this page."
+  things: "The things browser is not served by this build of RPE yet."
+  map: "Walking on the map and choosing how the map is shown are not served by this build of RPE yet."
+  other: "This page's request {{type}} is not served by this build of RPE yet."
+  chat_choices: "This chat's own choices (knowledge tracking, what the narrator knows, the engine, tidying) are not kept by this build of RPE: RPE plays every chat itself."
+  not_world: "This chat does not play a world in RPE."
+  no_revision: "The revision of the world this chat plays is not in RPE, so nothing can be changed in it."
+  no_turn: "This chat has no turn yet, and a change made from a panel is kept with the chat's newest turn: nothing was changed."
+  unknown_action: "unknown action {{action}}"
+  not_known: "{{action}}: it names no one and nothing you know"
+  not_payable: "{{action}}: {{why}}"
+  changes_nothing: "That changes nothing."
+  no_quest: "no such quest"
+  no_hint: "No hint to show yet."
+  bad_time: "a time is a date and time of day, YYYY-MM-DD HH:MM"
+  not_thing: "not a change to a thing"
+  things_count: "1 to {{most}} changes to things, with a label"
+  no_place: "no such place"
+  no_undo: "There is no such change to undo in this chat."
+  off_path: "Nothing was undone: the turn this change was kept with is no longer part of this chat's story."
+  changed_since: "Nothing was undone: something has changed it since."
+---

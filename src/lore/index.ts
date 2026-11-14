@@ -3,6 +3,7 @@ export { LORE_MIGRATIONS } from "./schema";
 export { foldName, type KeyMatching, keysIn, LUMIVERSE_KEY_MATCHING } from "./keys";
 export { Lore, type LoreActivation, type LoreAt, type LoreCatalogEntry, LORE_DEFAULTS, type LoreMapAsk, type LoreOptions, type LoreSettings } from "./lore";
 export { type IndexedEntry, type LoreBinding, LORE_INDEX_DEFAULTS, LORE_INDEX_FIELDS, LoreIndex, type LoreIndexDeps, type LoreIndexEdit, type LoreIndexField, type LoreIndexInput, type LoreIndexLines, type LoreIndexOutcome, type LoreIndexSettings } from "./indexing";
+export { LORE_INDEX_SETTING_DEFS, LORE_SETTING_DEFS, LORE_SETTINGS } from "./settings";
 export { LORE_ANSWERS, LORE_BATCH, LORE_INDEX_WRITE, LORE_LANE, LORE_TOOLS, loreBatchBlock, loreLines, type LoreToolDeps, loreTools } from "./tools";
 export { LORE_INDEX_FILE, type LoreIndexFile, loreIndexText } from "./index-file";
 export { type OverlayInput, overlayNotes, type OverlayWrite, overlayWrite } from "./overlays";

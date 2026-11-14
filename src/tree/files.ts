@@ -10,14 +10,8 @@ import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, LayerLevel, Place
 import { writeWhole } from "../app/disk";
 import type { TreeChats, TreeWrites } from "./chats";
 import { MOUNTS } from "./layout";
+import { type TreeSettings, treeSettingsOf } from "./settings";
 import { type ChatLocation, entriesOf, kindOf, type Located, locate, placesOf, refusalFor, safeId, treeLayers, viewPath, writableFor } from "./view";
-
-/** Fixed: the most hits a find gives when its query names no limit. */
-export const FIND_LIMIT = 200;
-/** Fixed: files larger than this many bytes are passed over by grep. */
-export const GREP_MAX_BYTES = 1024 * 1024;
-/** Fixed: a grep hit's line is cut to this many UTF-16 code units. */
-export const GREP_LINE_MAX = 1000;
 
 export interface TreeFilesDeps {
   /** The tree's folder: the global level. */
@@ -206,7 +200,10 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
     const lookup = await locate(loc, query.path ?? "");
     if (!lookup.ok) return await refusal(scope, lookup.path, lookup.reason, undefined);
     const at = lookup.at;
-    const limit = query.limit ?? FIND_LIMIT;
+    // The chat's settings, read once a limit of theirs is wanted.
+    let read: Promise<TreeSettings> | undefined;
+    const settings = (): Promise<TreeSettings> => (read ??= treeSettingsOf(loc));
+    const limit = query.limit ?? (await settings()).findLimit;
     const hits: FileHit[] = [];
     const root = at.level === "chat" && at.rest.length === 0;
     if (limit <= 0) return hits;
@@ -244,18 +241,19 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
 
     const pattern = new RegExp(query.literal === true ? query.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : query.pattern, query.ignoreCase === true ? "i" : "");
     const only = query.glob === undefined ? undefined : new Bun.Glob(query.glob);
+    const { grepBytes, grepLineChars } = await settings();
     for await (const f of filesAt(loc, found)) {
       if (hits.length >= limit) break;
       if (only !== undefined && !only.match(below(at, f.rest))) continue;
       const bytes = (await stat(f.disk)).size;
-      if (bytes > GREP_MAX_BYTES) continue;
+      if (bytes > grepBytes) continue;
       const data = await readFile(f.disk);
       if (data.includes(0)) continue;
       const lines = data.toString("utf8").split("\n");
       if (lines.at(-1) === "") lines.pop();
       for (const [i, line] of lines.entries()) {
         if (hits.length >= limit) break;
-        if (pattern.test(line)) hits.push({ path: viewPath(at.level, f.rest), type: "file", level: at.level, kind: kindOf(at.level, f.rest), bytes, line: i + 1, text: line.slice(0, GREP_LINE_MAX) });
+        if (pattern.test(line)) hits.push({ path: viewPath(at.level, f.rest), type: "file", level: at.level, kind: kindOf(at.level, f.rest), bytes, line: i + 1, text: line.slice(0, grepLineChars) });
       }
     }
     return hits;

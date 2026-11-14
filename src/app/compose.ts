@@ -21,15 +21,16 @@ import { lumiverseDoor, type AdapterDeps, type LumiverseDoor } from "../adapter/
 import { EXTENSION_IDENTIFIER } from "../adapter/lumiverse/pipe-wire";
 import { bunSocket } from "../adapter/lumiverse/socket";
 import { BUILD_MIGRATIONS, buildRoutes, BuildService } from "../build";
-import { CAST_MIGRATIONS } from "../cast";
-import { type LoreBooks, LORE_MIGRATIONS } from "../lore";
+import { CAST_MIGRATIONS, CAST_SETTINGS } from "../cast";
+import { type LoreBooks, LORE_MIGRATIONS, LORE_SETTINGS } from "../lore";
 import { MIGRATED_NOTICE, MIGRATED_PART, migratedChat } from "../migrate/briefing";
 import { migrateRoutes } from "../migrate/routes";
 import { MIGRATE_TABLES } from "../migrate/tables";
-import { STORE_MIGRATIONS } from "../store";
-import { STORY_MIGRATIONS, storyCoverage } from "../story";
+import { playRoutes, PlayService } from "../play";
+import { STORE_MIGRATIONS, STORE_SETTINGS } from "../store";
+import { STORY_MIGRATIONS, STORY_SETTINGS, storyCoverage } from "../story";
 import { historyWindow } from "../story/window";
-import { layDefaults, RPE_GUIDANCE, TREE_MIGRATIONS, treeLayers, treeRoutes } from "../tree";
+import { layDefaults, RPE_GUIDANCE, TREE_MIGRATIONS, TREE_SETTINGS, treeLayers, treeRoutes } from "../tree";
 import { levelBase } from "../tree/view";
 import { buildTurns, HARNESS_MIGRATIONS, MACHINE_CLOCK, namedStretches, NO_SESSION, openAppStore, passConnection, PROMPT_MIGRATIONS, turnRoutes, TURN_SETTINGS, turnSettings, type Turns } from "../turn";
 import type { App, Area } from "./app";
@@ -146,7 +147,7 @@ export function compose(options: ComposeOptions = {}): Composition {
         at.routes.add(
           "settings",
           settingsRoutes({
-            settings: [...HARNESS_SETTINGS, ...TURN_SETTINGS, ...UPDATE_SETTINGS],
+            settings: [...HARNESS_SETTINGS, ...TURN_SETTINGS, ...UPDATE_SETTINGS, ...TREE_SETTINGS, ...CAST_SETTINGS, ...STORY_SETTINGS, ...LORE_SETTINGS, ...STORE_SETTINGS],
             // The levels of the agents' tree that have a config file, where they are on disk; a chat's own once it has its folder.
             levels: async (chat): Promise<LevelFile[]> => {
               const folders = chat === null ? null : chats.folders(owner(), chat);
@@ -186,6 +187,12 @@ export function compose(options: ComposeOptions = {}): Composition {
       name: "build",
       tables: { area: "build", migrations: BUILD_MIGRATIONS },
       mount: (at) => at.routes.add("build", buildRoutes(new BuildService({ db: at.db, writes: at.writes, store: made().store, log: at.log, guidance: RPE_GUIDANCE }))),
+    },
+    // After the turn lane too: today's play panels read the chat's state from its store and record a managing tap there.
+    {
+      name: "play",
+      mount: (at) =>
+        at.routes.add("play", playRoutes(new PlayService({ store: made().store, writes: at.writes, live: at.live, guidance: RPE_GUIDANCE, turning: (user, chat) => made().runs.ofChat(user, chat).length > 0, log: at.log }))),
     },
     door.area,
   ];

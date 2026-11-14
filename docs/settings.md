@@ -116,9 +116,79 @@ Global file only.
 | `update.versionWait` | `10` | Seconds a new file has to say its build before it counts as one that does not start. |
 | `update.lookEvery` | `2` | Seconds between looks for running turns and jobs while a restart waits. |
 
+## Characters and their memories
+
+What the cast's tools and views give agents of each character.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `cast.queryItems` | `50` | The most items of one part a `cast_query` answers with. The answer says how many more there are. |
+| `cast.recallItems` | `10` | The most memories one recall brings back. The answer says how many more touch the cue. |
+| `cast.topOfMind` | `9` | The most memories a character holds at top of mind. |
+| `cast.comesToMindTokens` | `2000` | Tokens of what comes to a character's mind for a scene. |
+| `cast.shortTermDays` | `3` | Story days a memory stays short term, unless a dream settles it sooner. |
+| `cast.fadeDays` | `3` | Story days in which a memory of weight 1, never recalled, falls to half its strength. Each point of weight doubles that time, and each recall adds as much again. |
+| `cast.faintBelow` | `0.25` | The strength, from 0 to 1, under which a memory is faint and is shown by its gist. |
+| `cast.memoryWeight` | `1` | The weight of a memory written with none. |
+| `cast.weightMax` | `5` | The highest weight a memory can have. Weights run from 1. |
+| `cast.secretConfidence` | `1` | How sure, from 0 to 1, a character is of a secret a perception says they now know. |
+| `cast.charsPerToken` | `3.2` | Characters counted as one token when what comes to mind is measured, where the model's own count is not at hand. |
+
+## The story record
+
+| Setting | Default | What it does |
+|---|---|---|
+| `story.queryItems` | `50` | The most items one `story_query` answers with. The answer says how many more match. |
+| `story.soFar.share` | `0.05` | The share of the Author's context window the story so far may fill in the briefing: one twentieth. |
+| `story.soFar.floor` | `6000` | The fewest tokens the story so far may fill, however small the Author's window. |
+| `story.ahead` | `2` | Messages the chat is taken to grow by before the next turn's prompt (this reply and your next message), for the counts rules use of what is about to leave the prompt. Global file only, read when RPE starts. |
+
+## Lore
+
+Global file only, read when RPE starts.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `lore.searchLimit` | `20` | Hits a lore search gives when it names no number. |
+| `lore.snippetChars` | `80` | Characters of an entry's text a hit shows on each side of the first word it matched. |
+| `lore.titleWords` | `8` | Words of its text that title a book entry that has no title of its own. |
+| `lore.index.batch` | `20` | Entries handed to an indexing run at a time. |
+| `lore.index.bound` | `12` | Entries the lore map lists as bound to the horizon and not in the prompt. |
+
+## The world state
+
+| Setting | Default | What it does |
+|---|---|---|
+| `worldState.budget` | `4000` | Tokens the world state's parts other than the horizon share in the briefing. The horizon is shown whole. |
+| `worldState.charsPerToken` | `4` | Characters counted as one token when that budget is measured. |
+| `worldState.dueAhead` | `360` | Minutes of story time ahead that the list of what falls due covers. |
+
+## The store
+
+Global file only, read when RPE starts.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `store.snapshotEvery` | `25` | Turns between snapshots of a chat's state. |
+| `store.foldsKept` | `32` | Worked-out states held in memory, the least recently used going first. |
+| `store.notable` | `3` | The most names of note the world view gives for the people below a place. |
+| `store.worldsKept` | `8` | World revisions held in memory once read, the least recently used going first. |
+
+## Files and notes
+
+| Setting | Default | What it does |
+|---|---|---|
+| `retention.turnFolders` | `50` | How many of a chat's newest turn folders are kept whole. Older ones keep `turn.json`, `output/` and `transcripts/`. |
+| `files.findLimit` | `200` | The most entries a listing, a glob or a grep of the files gives when it names no number: an agent's, or RPH's own as it reads the files in force. |
+| `files.grepBytes` | `1048576` | Files larger than this many bytes are passed over by a grep. |
+| `files.grepLineChars` | `1000` | Characters of its line a grep hit shows. |
+| `files.diffCells` | `4000000` | The most line pairs the Files page compares one by one to show what changed. Past it, the changed part is shown removed, then added whole. |
+| `notes.listed` | `20` | Note files each of the Storage page's lists shows when it names no number. |
+| `notes.most` | `200` | The most note files each of those lists shows. |
+
 ## Which files are in force
 
-These keys say which of the files in [How behaviour lives in files](behaviour.md) are read, and how long turn folders are kept.
+These keys say which of the files in [How behaviour lives in files](behaviour.md) are read. They are not settings, and RPE's API does not list them: RPH reads `off` and `layered` from every level at once, each level adding its names to the farther levels' (a setting takes the nearest level's value instead), and `added` takes any situation's name as its key. The Files page shows what they put in force.
 
 | Key | Default | What it does |
 |---|---|---|
@@ -127,7 +197,6 @@ These keys say which of the files in [How behaviour lives in files](behaviour.md
 | `added.regenerate` | `["SWIPE"]` | Instruction files added for a regenerate. |
 | `added.delete` | `["DELETE"]` | Instruction files added when turns were deleted since the last one. |
 | `off` | `[]` | Files switched off: an instruction file by its name (`WORLD`), anything else by folder and name (`rules/perceptions-owed`). |
-| `retention.turnFolders` | `50` | How many of a chat's newest turn folders are kept whole. Older ones keep `turn.json`, `output/` and `transcripts/`. |
 
 ## The application: config.json
 

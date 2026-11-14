@@ -9,6 +9,7 @@
 //   - the store knows nothing of Lumiverse, of the harness, or of who calls it;
 //   - today's build is read only by the migration, and LumiAH is imported nowhere else; Build takes
 //     today's world store alone from it;
+//   - the play panels take only today's view builders, with what they import, from today's backend;
 //   - the harness is reached through its package, never through pi directly.
 
 import { describe, expect, test } from "bun:test";
@@ -18,7 +19,7 @@ import { dirname, join, relative, resolve } from "node:path";
 const ROOT = resolve(import.meta.dir, "..");
 const SRC = join(ROOT, "src");
 
-const ZONES = ["app", "adapter", "store", "iface", "cast", "story", "lore", "turn", "ui", "ext", "migrate", "tree", "build"] as const;
+const ZONES = ["app", "adapter", "store", "iface", "cast", "story", "lore", "turn", "ui", "ext", "migrate", "tree", "build", "play"] as const;
 type Zone = (typeof ZONES)[number];
 
 /** The carried engine's folders a zone may import from, named by their first path segment. */
@@ -51,6 +52,7 @@ const RULES: Record<Zone, Rule> = {
   ui: { zones: [], carried: ["shared", "frontend"], sandboxed: true },
   ext: { zones: ["adapter"], carried: ["shared", "backend"], sandboxed: true },
   build: { zones: ["app", "store"], carried: [...PURE, "backend"] },
+  play: { zones: ["app", "store"], carried: [...PURE, "backend"] },
 };
 
 /** The harness's contract is types only; importing it as types costs nothing anywhere, a page included. */
@@ -66,6 +68,22 @@ const EXT_BACKEND = /^backend\/(lore-secrets|host)/;
 function buildBackend(): Set<string> {
   const out = new Set<string>();
   const queue = ["backend/worlds.ts", "backend/stored-json.ts"].map((rel) => join(SRC, rel));
+  while (queue.length > 0) {
+    const file = queue.pop() as string;
+    if (out.has(file) || !existsSync(file)) continue;
+    out.add(file);
+    for (const { spec } of specsOf(readFileSync(file, "utf8"))) {
+      const target = spec.startsWith(".") ? resolveLocal(file, spec) : null;
+      if (target !== null && relative(SRC, target).split("\\").join("/").startsWith("backend/")) queue.push(target);
+    }
+  }
+  return out;
+}
+
+/** What the play panels may take from today's backend: today's state view builders (the HUD, the scene, the palette, the controls), with what they import. */
+function playBackend(): Set<string> {
+  const out = new Set<string>();
+  const queue = [join(SRC, "backend/view.ts")];
   while (queue.length > 0) {
     const file = queue.pop() as string;
     if (out.has(file) || !existsSync(file)) continue;
@@ -148,6 +166,7 @@ describe("the standalone application's boundaries", () => {
   const all = ZONES.flatMap((zone) => files(join(SRC, zone)));
   const shared = sharedWithExtension();
   const build = buildBackend();
+  const play = playBackend();
 
   test("every import stays inside what its zone may reach", () => {
     const violations: string[] = [];
@@ -176,6 +195,8 @@ describe("the standalone application's boundaries", () => {
             violations.push(`${rel} → ${target}: the extension takes only the secrecy rules and the host's shapes from today's backend`);
           } else if (zone === "build" && top === "backend" && !build.has(resolveLocal(file, spec))) {
             violations.push(`${rel} → ${target}: Build takes only today's world store from today's backend`);
+          } else if (zone === "play" && top === "backend" && !play.has(resolveLocal(file, spec))) {
+            violations.push(`${rel} → ${target}: the play panels take only today's view builders from today's backend`);
           }
         } else if (spec.startsWith("node:") || spec.startsWith("bun:") || spec === "bun") {
           if (sandboxed) violations.push(`${rel}: ${spec} in code that runs in a page or inside Lumiverse`);

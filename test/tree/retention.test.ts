@@ -8,7 +8,7 @@ import { mkdir, mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { KIT_SEED } from "rp-harness/testing/kit";
-import { pruneChat, RETENTION_DEFAULTS, retentionOf } from "../../src/tree/index";
+import { pruneChat, retentionOf, TREE_DEFAULTS } from "../../src/tree/index";
 import { type LaidTree, layTree } from "./fixtures";
 
 const USER = KIT_SEED.scope.user;
@@ -84,7 +84,7 @@ describe("retention", () => {
 
   test("a turn going on keeps its folder whole however old, and with no setting the plan's number is kept", async () => {
     const folders = await sixTurns();
-    expect(await retentionOf({ files: tree.files, character: tree.folders.character, chat: tree.folders.chat })).toEqual({ turnFolders: RETENTION_DEFAULTS.turnFolders });
+    expect(await retentionOf({ files: tree.files, character: tree.folders.character, chat: tree.folders.chat })).toEqual({ turnFolders: TREE_DEFAULTS.turnFolders });
     expect((await pruneChat({ files: tree.files, chats: tree.chats }, USER, CHAT)).folders).toBe(0);
 
     await writeFile(join(chatDir(), "RPE.yml"), "retention:\n  turnFolders: 0\n");

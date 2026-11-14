@@ -12,3 +12,4 @@ export { dropLeftoverStory, dropStoryStaged, STORY_PARTS, storyMark, takeBackSto
 export { storyCoverage, type StoryCoverage } from "./cover";
 export { STORY_FACT_DEFAULTS, STORY_FACT_DEFS, storyFacts, type StoryFacts, type StoryFactSettings, type StoryFactsDeps } from "./facts";
 export { sceneSession, type SceneSession } from "./sessions";
+export { STORY_FACT_SETTING_DEFS, STORY_SETTING_DEFS, STORY_SETTINGS, STORY_SO_FAR_SETTING_DEFS } from "./settings";

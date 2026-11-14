@@ -33,9 +33,6 @@ export interface DiffLine {
   text: string;
 }
 
-/** Fixed: the most line pairs a difference compares one by one; past it, the changed middle is shown as removed and then added whole. */
-export const DIFF_CELLS = 4_000_000;
-
 /** Lays the shipped level (`layShippedChanges`) and keeps what it changed of the level laid out before. */
 export async function layDefaults(deps: DefaultsDeps): Promise<ShippedChange[]> {
   const changes = await layShippedChanges(deps.files, deps.scratch, deps.sources);
@@ -59,8 +56,12 @@ function linesOf(text: string): string[] {
   return lines;
 }
 
-/** The difference from `before` to `after`, line by line: the lines both keep, in order, as few as can be removed and added around them. */
-export function lineDiff(before: string, after: string): DiffLine[] {
+/**
+ * The difference from `before` to `after`, line by line: the lines both keep, in order, as few as can
+ * be removed and added around them. Past `cells` line pairs to compare (the setting `files.diffCells`),
+ * the changed middle is shown removed, then added whole.
+ */
+export function lineDiff(before: string, after: string, cells: number): DiffLine[] {
   const a = linesOf(before);
   const b = linesOf(after);
   let head = 0;
@@ -70,7 +71,7 @@ export function lineDiff(before: string, after: string): DiffLine[] {
   const x = a.slice(head, a.length - tail);
   const y = b.slice(head, b.length - tail);
   const middle: DiffLine[] = [];
-  if (x.length * y.length > DIFF_CELLS) {
+  if (x.length * y.length > cells) {
     for (const text of x) middle.push({ op: "removed", text });
     for (const text of y) middle.push({ op: "added", text });
   } else {

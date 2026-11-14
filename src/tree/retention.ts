@@ -2,31 +2,21 @@
 // record (`turn.json`), what it released (`output/`) and its transcripts (`transcripts/`), and drops the
 // rest: the snapshots of the chat and the lore, which nothing reads as a source of truth and which can
 // be made again. Session files are not pruned here: they stay until the chat is deleted. How many turn
-// folders are kept whole is a setting (`retention: { turnFolders: N }` in a config, the nearest level's
-// winning). Pruning runs when asked for and after a turn, never during one: the folders of turns going on
-// are left alone, however old.
+// folders are kept whole is the setting `retention.turnFolders` (`settings.ts`). Pruning runs when
+// asked for and after a turn, never during one: the folders of turns going on are left alone, however
+// old.
 
 import { lstat, readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { yamlMapping } from "../app/yaml";
-import { isRecord } from "../shared/json";
-import { configText } from "./catalog";
 import type { TreeChats } from "./chats";
 import { SESSIONS_FOLDER, TURNS_FOLDER } from "./layout";
-import { type ChatLocation, locate, treeLayers, viewPath } from "./view";
-
-/** The config key retention is set under. */
-export const RETENTION_KEY = "retention";
-
-/** Fixed defaults, each a setting under `retention:`: how many of a chat's newest turn folders are kept whole (plan Appendix D.1). */
-export const RETENTION_DEFAULTS = { turnFolders: 50 } as const;
+import { type TreeSettings, treeSettingsOf } from "./settings";
+import { type ChatLocation, locate } from "./view";
 
 /** What an older turn folder keeps (plan §5.5): its record, what it released, and its transcripts. */
 export const KEPT_IN_OLD_TURNS: readonly string[] = ["turn.json", "output", "transcripts"];
 
-export interface RetentionSettings {
-  turnFolders: number;
-}
+export type RetentionSettings = Pick<TreeSettings, "turnFolders">;
 
 /** What a prune took away. */
 export interface Pruned {
@@ -36,22 +26,9 @@ export interface Pruned {
   bytes: number;
 }
 
-/** The chat's retention settings: each level's config read farthest first, the nearest that sets a whole number winning. */
+/** The chat's retention settings, as its levels' config files set them over the default. */
 export async function retentionOf(loc: ChatLocation): Promise<RetentionSettings> {
-  let turnFolders: number = RETENTION_DEFAULTS.turnFolders;
-  for (const layer of treeLayers()) {
-    const text = await configText(loc, layer);
-    if (text === null) continue;
-    let doc: Record<string, unknown>;
-    try {
-      doc = yamlMapping(text, viewPath(layer.level, [layer.config ?? ""]));
-    } catch {
-      continue;
-    }
-    const set = doc[RETENTION_KEY];
-    if (isRecord(set) && typeof set.turnFolders === "number" && Number.isInteger(set.turnFolders) && set.turnFolders >= 0) turnFolders = set.turnFolders;
-  }
-  return { turnFolders };
+  return { turnFolders: (await treeSettingsOf(loc)).turnFolders };
 }
 
 async function folderNames(disk: string): Promise<string[]> {
