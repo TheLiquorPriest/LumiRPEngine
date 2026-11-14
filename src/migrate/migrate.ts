@@ -27,6 +27,7 @@ import { chatCarried } from "./briefing";
 import { carry } from "./carry";
 import { chatsToImport, importChats } from "./import-chats";
 import { type ChatNames, IMPORTED, type TreeLayout } from "./own-files";
+import { openQuiet } from "./quiet-db";
 import { backupOf, reportOf } from "./rehearse";
 import { BACKUP_ONLY, type MigrationReport } from "./report";
 import { NO_PLACE_YET } from "./rows";
@@ -66,11 +67,12 @@ export interface MigrateResult {
 export function earlierRuns(file: string, user: string): { previous: MigrationReport | null; users: string[] } {
   if (!existsSync(file)) return { previous: null, users: [] };
   const quiet = !existsSync(`${file}-wal`) && !existsSync(`${file}-shm`);
-  const db = quiet ? new Database(`file:${encodeURI(file)}?immutable=1`, { readonly: true }) : new Database(file, { readonly: true });
+  const locked = quiet ? null : new Database(file, { readonly: true });
+  const opened = locked === null ? openQuiet(file) : { db: locked, close: () => locked.close() };
   try {
-    return { previous: lastReport(db, user), users: runUsers(db) };
+    return { previous: lastReport(opened.db, user), users: runUsers(opened.db) };
   } finally {
-    db.close();
+    opened.close();
   }
 }
 

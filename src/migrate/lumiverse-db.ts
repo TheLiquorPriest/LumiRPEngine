@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { decodeMessage } from "../backend/spindle-host";
 import type { HostMessage } from "../backend/host";
 import { isRecord, type JsonObject } from "../shared/json";
+import { openQuiet } from "./quiet-db";
 
 /** The database's file in Lumiverse's data folder (`src/db/connection.ts`). */
 export const DATABASE_FILE = "lumiverse.db";
@@ -90,20 +91,25 @@ function objectOf(text: unknown): JsonObject {
 export class LumiverseDb {
   private constructor(
     private readonly db: Database,
-    /** How it was opened: through SQLite's locks, or as an immutable file where no log exists. */
+    /** How it was opened: through SQLite's locks, or as an unchanging file where no log exists. */
     readonly opened: "locked" | "immutable",
+    private readonly closer: () => void,
   ) {}
 
   /** Opens Lumiverse's database in `dataDir` for reading only: under SQLite's locks while its log or their index is beside it, else as an unchanging file. */
   static open(dataDir: string): LumiverseDb {
     const path = join(dataDir, DATABASE_FILE);
     if (!existsSync(path)) throw new Error(`There is no Lumiverse database at ${path}.`);
-    if (existsSync(`${path}-wal`) || existsSync(`${path}-shm`)) return new LumiverseDb(new Database(path, { readonly: true }), "locked");
-    return new LumiverseDb(new Database(`file:${encodeURI(path)}?immutable=1`, { readonly: true }), "immutable");
+    if (existsSync(`${path}-wal`) || existsSync(`${path}-shm`)) {
+      const db = new Database(path, { readonly: true });
+      return new LumiverseDb(db, "locked", () => db.close());
+    }
+    const quiet = openQuiet(path);
+    return new LumiverseDb(quiet.db, "immutable", quiet.close);
   }
 
   close(): void {
-    this.db.close();
+    this.closer();
   }
 
   /** The user's name, or null when there is no such user. */
