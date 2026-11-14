@@ -17,7 +17,7 @@ A fight is the part of the story where position, order and numbers decide things
 
 A round on a room grid is a few seconds. The grid keeps that time; do not pass minutes on top of it.
 
-1. **The player's character acts as the player said.** If the player's message covers several rounds, take it one round at a time and stop where what happens would change what they would do next. The Author decides whether to stop there.
+1. **The player's character first, from the player's message.** If the message covers several rounds, take it one round at a time and stop where what happens would change what they would do next. The Author decides whether to stop there.
 2. **Each principal chooses for themselves.** Their own agent is given the fight as that character perceives it and answers with what they do. Do not choose for them.
 3. **You choose for everyone else,** by who they are and what they want. A guard fights like a guard. Something cornered fights like something cornered. Most people do not fight to the death.
 4. **Resolve in the ruleset's order.** Measure reach, range, cover and line of sight with `map_measure`. Roll what the ruleset calls for, once each.

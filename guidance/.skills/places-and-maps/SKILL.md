@@ -8,17 +8,17 @@ The world state prints the scene's map and where everyone and everything stands 
 
 ## The grid
 
-- Squares. A grid laid in play uses the D&D square, 5 feet. A map the player built keeps the cell size it was drawn with.
+- Squares. The world state prints each grid's scale: how wide a square is and how much time one step on it takes. A grid laid in play takes the scale the settings give; a map the player built keeps the cell size it was drawn with.
 - A position is a square, written (column, row), counted from the top left.
-- Moving diagonally counts as one square unless the ruleset says otherwise. No cutting across the corner of a wall.
+- A diagonal move is counted as the grid is set to count it; `map_measure` does the counting. No cutting across the corner of a wall.
 - Something larger than one square has a footprint. Something on a table is *on* the table and shares its square.
-- A grid counts time in its own step. A room grid counts in rounds of six seconds, so a fight does not run the clock forward.
+- A grid counts time in its own step. A room grid counts in rounds of a few seconds, so a fight does not run the clock forward.
 
 ## When the place's only map is coarser than a room
 
 A map the player built may count a whole block or a stretch of road as one square. Nobody can be placed in a room on it. Do not put people a block apart.
 
-1. Lay a room grid of 5 ft squares for the place with `map_lay`, and link it to its square on the larger map.
+1. Lay a room grid for the place with `map_lay`, and link it to its square on the larger map.
 2. Place everyone on the room grid.
 3. Keep the larger map for travel between places.
 

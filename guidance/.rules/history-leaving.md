@@ -6,5 +6,5 @@ fact: history.leaving.uncovered > 0
 at: turn-start
 repeat: once per turn
 ---
-{{history.leaving.uncovered}} messages ({{history.leaving.range}}) are about to leave the prompt, and the story record does not cover them yet.
+{{history.leaving.uncovered}} messages ({{history.leaving.uncovered.range}}) are about to leave the prompt, and the story record does not cover them yet.
 Once they are gone, the story knows of them only what is recorded. See `TURN.md`, "Keep the record ahead of the window".

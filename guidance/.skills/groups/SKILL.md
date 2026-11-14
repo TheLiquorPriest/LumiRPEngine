@@ -34,7 +34,7 @@ A group does not act by itself. Someone in it decides, by the powers of their po
 
 ## A new group
 
-A group the lore names is taken from the lore. A group the story makes up as it goes (a crew that forms, a company founded in play) is founded with the group tools, with its source said. One made from nothing is an invention; the consent rule applies.
+A group the lore names is taken from the lore. A group the story makes up as it goes (a crew that forms, a company founded in play) is founded with the group tools. One made from nothing is an invention: the consent rule applies.
 
 ## What a tool tells you
 

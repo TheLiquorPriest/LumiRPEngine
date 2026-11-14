@@ -1,6 +1,6 @@
 # This story's world
 
-<!-- A template. Fill in what matters and delete the rest. Every agent reads this file once it holds anything besides headings, so keep it short. Until then it is left out. -->
+<!-- A template. Fill in what matters and delete the rest. As shipped, the Author, the GM and the assistant read this file once it holds anything besides headings; add WORLD to another agent's `reads` if it should read it too. Keep it short. Until it holds something it is left out. -->
 
 ## Premise
 

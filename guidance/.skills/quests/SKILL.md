@@ -20,7 +20,7 @@ A quest is the player-facing face of something the story is doing. The same reco
 `world_apply` with a `quest` operation. Open a quest when someone takes up an objective that will run past the scene, or when the lore or the world already holds it and the story has reached it.
 
 - If the world already has the quest, use the world's. Do not make a second one beside it.
-- Say where it comes from. A quest nobody set and no lore holds is an invention; the consent rule applies.
+- A quest nobody set and no lore holds is an invention: the consent rule applies.
 - Tell the Author which story thread it belongs to. The Author keeps the thread; you keep the stages.
 
 ## Moving a stage

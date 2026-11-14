@@ -21,7 +21,7 @@ All through `world_apply`:
 - **`wear`:** put on or taken off; a weapon readied, holstered, sheathed or slung.
 - **`store`:** put into a bag, a drawer, a car, a room; or put back where it is kept.
 - **`place`:** set down on a surface or a square, picked up from one.
-- **`spawn`:** a thing that was not in the world before. Say where it comes from: a lore entry, a line of the chat, a roll, or invented. For invented, the consent rule applies.
+- **`spawn`:** a thing that was not in the world before. `ALL-AGENTS.md` says what a source is; for a thing that is invented, the consent rule applies.
 
 A thing used up (a potion drunk, arrows shot, a candle burned) is one operation that says how much is left.
 

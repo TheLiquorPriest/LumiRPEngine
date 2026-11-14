@@ -12,13 +12,13 @@ The world has a ruleset of its own: how checks are made, how people advance, how
 
 ## Calling for a check
 
-A check is for an outcome that is uncertain and matters. If either is missing, do not roll: say what happens.
+`SIMULATION.md` says when the dice are rolled. When they are:
 
 1. Say what is attempted, by whom, and by what approach.
 2. Find what the ruleset makes of it: which stat or skill, against what difficulty, with what helping or hindering. If the ruleset has an action for it, use that action.
 3. Say what each outcome will do before you roll, in a line each. Success, failure, and anything between that the ruleset has.
 4. Roll with `roll`. It rolls once and records the roll with what it was for.
-5. Apply the outcome with `world_apply`, naming the roll as the source of each change.
+5. Apply the outcome with `world_apply`. The roll is the source of each change it makes.
 
 ## One roll
 
@@ -26,13 +26,9 @@ A roll that has been made stands. Do not roll again for a result you would like 
 
 The player's own swipe of a turn is another matter: `SWIPE.md` says whether the dice are rolled afresh then.
 
-## The player's character
-
-The player says what their character attempts. You rule on how it goes. You do not decide what they attempt, and you do not turn a failure into a choice they did not make.
-
 ## Changing a sheet
 
-- A stat, a skill, a condition, a level: `world_apply` with a `set` operation, and where it comes from (the roll, the ruling, a line of the prose).
+- A stat, a skill, a condition, a level: `world_apply` with a `set` operation. Its source is the roll, the ruling, or the line of prose that changed it.
 - Harm and recovery are changes to a condition or a stat, as the ruleset counts them.
 - Advancement is the ruleset's: check what it requires before anyone advances.
 - Something true of a person that the sheet has no field for (a limp, a fever, a promise weighing on them) is a `fact`.

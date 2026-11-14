@@ -18,13 +18,11 @@ The world has one clock for the chat. The world state shows the date, the hour a
 
 The answer to `pass_time` lists what fell due in that span and near the scene: where people's routines now put them, who arrives, a need that crossed a threshold (hunger, sleep), an effect that ended, something the Author scheduled, a payment, a change in the weather or in prices.
 
-It is a list of things to decide. The tool applied none of it.
+It is a list of things to decide. The tool applied none of it. Your definition says whose the deciding is; this is how it is recorded:
 
-1. Go through the list. For each item decide what happened: it happened as scheduled, it happened differently, it did not happen and why.
-2. Record what you decided with the ordinary operations (`move`, `set`, `pay`, `fact`).
-3. Tell the Author what the time brought, in a few lines. An arrival or an ending effect may change the scene.
-
-Do not leave the list undecided. An undecided list is how a world stops moving.
+1. For each item, what happened: it happened as scheduled, it happened differently, or it did not happen and why.
+2. Each decision is recorded with the ordinary operations (`move`, `set`, `pay`, `fact`).
+3. The Author is told what the time brought, in a few lines. An arrival or an ending effect may change the scene.
 
 ## A long skip
 
@@ -37,7 +35,7 @@ When the story jumps days or weeks:
 
 ## Setting the clock
 
-If the clock is wrong (the story says dusk and the clock says noon), set it with a `set` operation on the time and say the source is the prose. Time set backwards is reported; say in your answer that you did it and why.
+If the clock is wrong (the story says dusk and the clock says noon), set it with a `set` operation on the time. The prose is its source. Time set backwards is reported; say in your answer that you did it and why.
 
 ## The rest
 

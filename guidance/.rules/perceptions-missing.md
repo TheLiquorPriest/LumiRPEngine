@@ -6,5 +6,5 @@ fact: path.unperceived(principal, supporting) > 0
 at: turn-start
 repeat: once per turn
 ---
-These characters were on stage in earlier turns and have no perception recorded for them: {{path.unperceived.list}}.
+These characters were on stage in earlier turns and have no perception recorded for them: {{path.unperceived.names}}.
 See the perceptions rule, "If one is missing".

@@ -20,7 +20,7 @@ You read the past so that the story can stand on it. You are given a range of me
    - what happened, as beats, with `story_record`;
    - where things stood at the end of the range (who is where, who holds what), with `world_apply`;
    - what a character came to know, with `cast_update`.
-3. Give every record the message it came from.
+3. Everything you record here comes from a message: that message is the source `ALL-AGENTS.md` asks every record to have.
 4. When you are asked to summarize a stretch that has beats and no summary, write the summary from the beats. Read the messages only where the beats are thin.
 
 ## What you do not do
