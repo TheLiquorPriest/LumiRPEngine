@@ -40,25 +40,28 @@ describe("the lore map in full", () => {
     // The chat's path: two turns. A third, swiped away, is on no path.
     index = new LoreIndex({ lore, db: db.db, writes: db.writes, path: { turns: () => ["turn-0", "turn-1"] }, settings: { bound: 3 } });
     // The books' entries are numbered as the index first reads them: the shanty e-1, the lamp room e-2, the gulls e-3, the tide bell e-4.
-    expect((await index.entries(AT)).filter((e) => e.book !== null).map((e) => e.id)).toEqual(["e-1", "e-2", "e-3", "e-4"]);
+    const read = await index.entries(AT);
+    expect(read.filter((e) => e.book !== null).map((e) => e.id)).toEqual(["e-1", "e-2", "e-3", "e-4"]);
+    // A run hands back each entry's revision as its batch showed it.
+    const revision = (id: string): string => read.find((e) => e.id === id)?.revision ?? "";
     await index.write(
       AT,
       [
-        { id: "e-1", kind: "style", line: "A song of the lamp room.", defines: [{ what: "nell", aspect: "voice" }], related: [] },
-        { id: "e-2", kind: "place", line: "The lighthouse's lamp room.", defines: [{ what: "The Lighthouse", aspect: "layout" }], related: [] },
-        { id: "e-4", kind: "item", line: "The bell on the market quay.", defines: [{ what: "the  FISHMARKET", aspect: "sound" }], related: [] },
-        { id: "w-tithe_law", kind: "rule", line: "A tenth of every catch.", defines: [{ what: "Orrin Pell", aspect: "" }], related: [] },
-        { id: "w-cove_route", kind: "rule", line: "Sefa's brandy run.", defines: [{ what: "entity:sefa", aspect: "" }], related: [] },
-        { id: "w-ferry_draft", kind: "place", line: "The estuary ferry.", defines: [{ what: "Tobin Reed", aspect: "" }], related: [] },
-        { id: "w-keeper_log", kind: "item", line: "Forty winters of weather.", defines: [{ what: "Orrin Pell", aspect: "history" }], related: [] },
+        { id: "e-1", revision: revision("e-1"), kind: "style", line: "A song of the lamp room.", defines: [{ what: "nell", aspect: "voice" }], related: [] },
+        { id: "e-2", revision: revision("e-2"), kind: "place", line: "The lighthouse's lamp room.", defines: [{ what: "The Lighthouse", aspect: "layout" }], related: [] },
+        { id: "e-4", revision: revision("e-4"), kind: "item", line: "The bell on the market quay.", defines: [{ what: "the  FISHMARKET", aspect: "sound" }], related: [] },
+        { id: "w-tithe_law", revision: revision("w-tithe_law"), kind: "rule", line: "A tenth of every catch.", defines: [{ what: "Orrin Pell", aspect: "" }], related: [] },
+        { id: "w-cove_route", revision: revision("w-cove_route"), kind: "rule", line: "Sefa's brandy run.", defines: [{ what: "entity:sefa", aspect: "" }], related: [] },
+        { id: "w-ferry_draft", revision: revision("w-ferry_draft"), kind: "place", line: "The estuary ferry.", defines: [{ what: "Tobin Reed", aspect: "" }], related: [] },
+        { id: "w-keeper_log", revision: revision("w-keeper_log"), kind: "item", line: "Forty winters of weather.", defines: [{ what: "Orrin Pell", aspect: "history" }], related: [] },
       ],
       "indexer",
     );
     const write = overlayWrite(worlds, () => 5);
     await db.writes.run((d) => {
-      write(d, { user: USER, chat: CHAT, turn: "turn-0", entry: "e-2", note: "The lamp was relit after the wreck.", by: "author" });
-      write(d, { user: USER, chat: CHAT, turn: "turn-1", entry: "e-2", note: "Its glass cracked in the storm.", by: "author" });
-      write(d, { user: USER, chat: CHAT, turn: "turn-swiped", entry: "e-3", note: "Gone with its turn.", by: "author" });
+      write(d, { user: USER, chat: CHAT, turn: "turn-0", entry: "e-2", note: "The lamp was relit after the wreck.", by: "author", agent: "author-1", job: null, ord: 0 });
+      write(d, { user: USER, chat: CHAT, turn: "turn-1", entry: "e-2", note: "Its glass cracked in the storm.", by: "author", agent: "author-1", job: null, ord: 0 });
+      write(d, { user: USER, chat: CHAT, turn: "turn-swiped", entry: "e-3", note: "Gone with its turn.", by: "author", agent: "author-1", job: null, ord: 0 });
     });
     horizon = ["fishmarket", "lighthouse", "sefa"];
     map = await index.loreMap({ ...AT, turn: "turn-1", messages: ["Nell counts out the TITHE on the harbor steps."] });

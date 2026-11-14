@@ -11,6 +11,7 @@ import { ROUTINE_AWARENESS, ROUTINE_MODES, ROUTINE_ROLES, SKIP_LIVES } from "../
 import { calendarOf, clockAt, dateAt, formatClock } from "../../engine/calendar";
 import { followOf } from "../../packs/castlife/core/routines";
 import { routineGmView } from "../../packs/castlife/core/view";
+import { clockRecorded } from "../../store/blank";
 import { NUMBER, OBJECT, oneOf, TEXT, WHOLE } from "../kit";
 import { find, isUnread, named, notAs, notOneOf, type OpContext, textArg, type Unread, unknownFields } from "../ops";
 import { editChange, effectTool, foundIn, notApplicable, readTool, type WriteDef, writeTool } from "./run";
@@ -124,7 +125,9 @@ const day = readTool({
     const cal = calendarOf(r.world);
     const index = dateAt(cal, r.state.world.clock).dayIndex + offset;
     const blocks = routineGmView(r.ctx, who.id, index).day.blocks.map((b) => ({ from: b.from, to: b.to, label: b.label, activity: b.activity, place: b.place === null ? null : `${r.nameOf(b.place)} [${b.place}]`, kind: b.kind, reasons: b.reasons, origin: b.origin }) as unknown as JsonObject);
-    reply.data({ person: `${who.name} [${who.id}]`, day: formatClock(cal, clockAt(cal, index, 0)).split(",")[0] ?? "", blocks });
+    // A day of a clock nobody set has no date to show (a chat with no world): the day is left out.
+    const person = `${who.name} [${who.id}]`;
+    reply.data(clockRecorded(r.state) ? { person, day: formatClock(cal, clockAt(cal, index, 0)).split(",")[0] ?? "", blocks } : { person, blocks });
     return undefined;
   },
 });

@@ -12,7 +12,9 @@
 // written in one queued write, and the answer says what each operation wrote and how its part of the
 // record now stands. A name the cast does not hold yet is made a character at the write, known to
 // every operation of the call whatever their order, so a call can bind, draw and cast someone new at
-// once; one no operation casts is made not yet cast, and the answer says so.
+// once; one no operation casts is made not yet cast, and the answer says so. Knowledge that names a
+// secret the lore marks makes the character its holder on the call's turn, the way a perception that
+// names it does (`secrets.ts`); a secret that cannot be held is left out, and said.
 
 import type { Database } from "bun:sqlite";
 import type { JsonObject, JsonValue } from "rp-harness/contract";
@@ -48,7 +50,7 @@ import {
   writeCast,
 } from "./record";
 import { fileName, fileNamed, importedFiles, isFiled } from "./imported";
-import { forgetsOf, holdingChanges, secretsLetGo, worldAt } from "./secrets";
+import { forgetsOf, holdingChanges, secretsHeld, secretsLetGo, SecretWorld, worldAt } from "./secrets";
 import { type SourceNow, type SourceReader, sourcesNow } from "./sources";
 
 /** The lane every operation of the tool writes to: the cast is the story's side of a turn. */
@@ -78,12 +80,12 @@ const ARGS: Readonly<Record<Op, Readonly<Record<string, Kind>>>> = {
   growth: { id: "name", text: "text", cause: "text", accept: "flag", ...DROP },
   history: { id: "name", text: "text", beats: "texts", ...DROP },
   relationship: { with: "name", text: "text", ...DIMENSIONS, ...DROP },
-  knowledge: { id: "name", text: "text", how: "text", ...DROP },
+  knowledge: { id: "name", text: "text", secret: "name", how: "text", ...DROP },
   filed: { files: "texts" },
 };
 
 /** The arguments an operation may carry, in the order the tool's file lists them. */
-const UPDATE_ARGUMENTS = ["op", "who", "id", "as", "line", "card", "persona", "entry", "memory", "defines", "seed", "soul", "inner_voice", "background", "text", "cause", "beats", "with", ...RELATIONSHIP_DIMENSIONS, "how", "files", "accept", "drop", "why"];
+const UPDATE_ARGUMENTS = ["op", "who", "id", "as", "line", "card", "persona", "entry", "memory", "defines", "seed", "soul", "inner_voice", "background", "text", "cause", "beats", "with", ...RELATIONSHIP_DIMENSIONS, "how", "secret", "files", "accept", "drop", "why"];
 
 /**
  * The arguments an operation may carry, each once, whichever operations read it. None holds back a
@@ -198,7 +200,9 @@ interface Planned {
   source?: { kind: SourceKind; ref: string; now: SourceNow | null };
   /** For a base: each bound source's revision as it was read for this call. */
   seen?: Record<string, string>;
-  /** For knowledge it strikes: each secret's holding it takes back, with the events that do. */
+  /** For knowledge of a secret: the holding it makes, with the events that make it (none when they hold it so already). */
+  holds?: { fact: FactId; events: LedgerEvent[] };
+  /** For knowledge it strikes, or gives another secret: the holding of the secret it gave taken back, with the events that do. */
   forgets?: { fact: FactId; events: LedgerEvent[] }[];
 }
 
@@ -253,7 +257,8 @@ function readsOf(op: string): Reads {
   return {
     reads: ["who", ...Object.keys(ARGS[name])],
     needs: name === "cast" ? ["who", "as"] : name === "relationship" ? ["who", "with"] : name === "filed" ? ["who", "files"] : ["who"],
-    newNeeds: name === "growth" || name === "history" || name === "knowledge" ? ["text"] : [],
+    // Knowledge is words, a secret, or both: a new one needs one of them, which `readOp` says when it has neither.
+    newNeeds: name === "growth" || name === "history" ? ["text"] : [],
   };
 }
 
@@ -267,6 +272,8 @@ interface Reading {
   bound: Map<string, Map<string, { kind: SourceKind; ref: string; now: SourceNow | null }>>;
   /** Reads a source live once per call. */
   read: (kind: SourceKind, ref: string) => Promise<SourceNow | null>;
+  /** Where knowledge holds the secrets it names: the state at the call's turn; none for a call that belongs to no turn. */
+  world: SecretWorld | null;
 }
 
 /** The bindings of a character as the call has them so far, read live on first use. */
@@ -358,20 +365,48 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
       const { id, accept, ...fields } = value;
       // Accepting a growth a character's reflection proposed: it is growth from now on.
       planned.value = accept === undefined ? fields : { ...fields, proposed: accept !== true };
-      if (id === undefined) {
-        if (fields.text === undefined) return needed(out, ["text"]);
-        planned.item = null;
+      let item: CastItem | null = null;
+      if (id !== undefined) {
+        const found = r.cast.record.items.get(id as string);
+        if (found === undefined || found.part !== name || found.character !== character.id) return unreadable({ line: "unknown_id", fields: { n, op, who: character.name, part: name, id: JSON.stringify(id) } });
+        item = found;
+      }
+      // Knowledge of a secret the lore marks: they hold it from now on, as a perception that names it makes them hold it. One
+      // that cannot be held is left out, and said; so is one sent with a strike, which holds nothing.
+      const secret = name === "knowledge" ? planned.value.secret : undefined;
+      if (typeof secret === "string" && planned.value.drop === true) {
+        delete planned.value.secret;
+        out.ignored.push("secret");
+      } else if (typeof secret === "string" && r.world !== null) {
+        const turn = r.call.scope.turn;
+        const learned = turn === undefined ? null : r.call.deps.store.user(r.call.scope.user).turn(turn);
+        const [held] = await secretsHeld(r.world, { n, op, field: "secret" }, character.name, undefined, learned, [secret], r.call.settings.secretConfidence, out.unread);
+        if (held === undefined) delete planned.value.secret;
+        else {
+          planned.value.secret = held.fact;
+          planned.holds = held;
+        }
+      }
+      if (item === null) {
+        if (planned.value.text !== undefined || planned.value.secret !== undefined) {
+          planned.item = null;
+          return out;
+        }
+        if (name !== "knowledge") return needed(out, ["text"]);
+        // What they know is words, a secret, or both: one sent that cannot be read or held makes the operation unreadable.
+        const said = out.unread.filter((u) => u.fields.field === "text" || u.fields.field === "secret");
+        if (said.length === 0) return unreadable({ line: "needs_one", fields: { n, op, fields: ["text", "secret"] } });
+        out.unread = out.unread.filter((u) => !said.includes(u));
+        out.fatal.push(...said);
         return out;
       }
-      const item = r.cast.record.items.get(id as string);
-      if (item === undefined || item.part !== name || item.character !== character.id) return unreadable({ line: "unknown_id", fields: { n, op, who: character.name, part: name, id: JSON.stringify(id) } });
       if (Object.keys(planned.value).length === 0) return unreadable({ line: "needs_one", fields: { n, op, fields: Object.keys(ARGS[name]).filter((f) => f !== "id") } });
-      planned.item = id as string;
-      // Striking knowledge of a secret takes its holding back, unless other knowledge of theirs still gives it.
-      const turn = r.call.scope.turn;
-      if (name === "knowledge" && planned.value.drop === true && !item.dropped && turn !== undefined) {
+      planned.item = item.id;
+      // Knowledge of a secret struck, or given another secret: the one it gave is let go, unless other knowledge of theirs still gives it.
+      const replaced = planned.value.drop === true || (typeof planned.value.secret === "string" && planned.value.secret !== item.fields.secret);
+      if (name === "knowledge" && replaced && !item.dropped && r.world !== null) {
         const facts = secretsLetGo(r.cast.record, character.id, [item]);
-        if (facts.length > 0) planned.forgets = forgetsOf(worldAt(r.call.deps.store, r.call.scope.user, turn), n, op, character.name, facts, out.unread);
+        if (facts.length > 0) planned.forgets = forgetsOf(r.world.ctx, n, op, character.name, facts, out.unread);
       }
       return out;
     }
@@ -421,7 +456,9 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
   const read = onceEach(call.deps.sources, scope);
 
   const fresh = new Map<string, string>();
-  const reading: Reading = { call, cast, fresh, bound: new Map(), read };
+  const at = call.scope.turn;
+  const world = at === undefined ? null : new SecretWorld(() => worldAt(store, scope.user, at, call.agent.job ?? null), (book, entry) => (call.deps.books === undefined ? Promise.resolve(null) : call.deps.books(scope, book, entry)));
+  const reading: Reading = { call, cast, fresh, bound: new Map(), read, world };
   const ops: OpRead[] = [];
   for (const [i, raw] of list.entries()) ops.push(await readOp(reading, i + 1, raw));
   if (ops.some((o) => o.fatal.length > 0)) return refused(reply, ops, readsOf);
@@ -434,6 +471,8 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
   const written = await writes.run((db) => {
     // Each character this call names that the cast does not hold is made first, so every operation can name it.
     const ids = makeFresh(db, call, fresh, now);
+    // A secret's fact is recorded before anyone holds it.
+    if (turn !== null && world !== null && world.facts.length > 0) store.user(user).addChanges(turn, holdingChanges(world.facts, CAST_LANE, call.agent.id, call.agent.job ?? null));
     const items = new Map<number, string>();
     for (const p of planned) {
       const id = ids.get(p.character) ?? p.character;
@@ -452,7 +491,7 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
         const item = p.part === "casting" ? castingItemId(id) : p.part === "relationship" ? relationshipItemId(id, p.value.with as string) : (p.item ?? null);
         const [row] = writeCast(db, { user, turn, by, agent: call.agent.id, job: call.agent.job ?? null, at: cast.clock?.now ?? null, now }, [{ character: id, part: p.part, item, value: p.value }]);
         if (row !== undefined) items.set(p.n, row.item);
-        const events = p.forgets?.flatMap((f) => f.events) ?? [];
+        const events = [...(p.holds?.events ?? []), ...(p.forgets?.flatMap((f) => f.events) ?? [])];
         if (events.length > 0) store.user(user).addChanges(turn, holdingChanges(events, CAST_LANE, call.agent.id, call.agent.job ?? null));
       }
     }
@@ -493,6 +532,7 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
       const item = itemId === undefined ? undefined : after.record.items.get(itemId);
       done.id = itemId ?? null;
       done.now = item === undefined ? null : itemView(after, item);
+      if (p.holds !== undefined) done.holds = [p.holds.fact];
       const gone = p.forgets?.flatMap((f) => (f.events.length > 0 ? [f.fact] : [])) ?? [];
       if (gone.length > 0) done.lets_go = gone;
     }

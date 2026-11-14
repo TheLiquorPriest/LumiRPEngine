@@ -18,7 +18,7 @@ import { DRAFT_TIERS } from "../shared/ledger";
 import { isRecord } from "../shared/json";
 import { type Lane, STANDINGS } from "../store";
 import { allSpans, itemView, recordOr, type StoryCall, type StoryClock, storyClock, type StoryToolSpec, valueView } from "./kit";
-import { keyedItemId, type StoryPart, type StoryRecord, type StoryRow, writeStory } from "./record";
+import { keyedItemId, type StoryPart, type StoryRecord, type StoryRow, storyMark, writeStory } from "./record";
 
 /** The lane every operation of the tool writes to. */
 export const STORY_LANE: Lane = "story";
@@ -260,7 +260,11 @@ function readOp(r: Reading, n: number, raw: JsonValue): OpRead {
   const reports: Unread[] = [];
   const before = r.record.items.get(found.item);
   if (value.close === true && before !== undefined && before.closedBy !== null) reports.push({ line: "already_closed", fields: { n, op, id: found.item } });
-  if (typeof value.due === "number" && r.clock !== null && value.due <= r.clock.now) reports.push({ line: "due_now", fields: { n, op, due: r.clock.text(value.due), now: r.clock.text(r.clock.now) } });
+  // Said with both times; on a clock play has not set, which shows no date, said with neither: the future is due all the same.
+  if (typeof value.due === "number" && r.clock !== null && value.due <= r.clock.now) {
+    const [due, now] = [r.clock.text(value.due), r.clock.text(r.clock.now)];
+    reports.push(due !== null && now !== null ? { line: "due_now", fields: { n, op, due, now } } : { line: "due_now_undated", fields: { n, op } });
+  }
   if (typeof value.due === "string") reports.push({ line: r.clock === null ? "no_clock" : "unreadable_time", fields: { n, op, field: "due", value: JSON.stringify(value.due) } });
   r.record.apply({ id: 0, turn: r.turn, ord: n, part: def.part, item: found.item, value, by: null, agent: null, job: null, created: 0 });
   out.read = { n, op, part: def.part, item: found.item, fresh: found.fresh, value, reports };
@@ -314,7 +318,8 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
         if (r.op === OVERLAY) {
           const o = r as PlannedOverlay;
           if (overlay === undefined) continue;
-          const out = overlay(db, { user: call.scope.user, chat: call.scope.chat, turn, entry: o.entry, note: o.note, by: call.agent.definition });
+          // An overlay is the writer's, as its rows are, and takes the next place among the turn's writes: a dropped sub-agent or a continue that saved nothing takes it back with them.
+          const out = overlay(db, { user: call.scope.user, chat: call.scope.chat, turn, entry: o.entry, note: o.note, by: writer.by, agent: writer.agent, job: writer.job, ord: storyMark(db, writer.user, turn) + 1 });
           if ("unknown" in out) throw new OverlayRefused(o.n, out.unknown, out.near ?? []);
           overlays.set(o.n, out.written);
           continue;

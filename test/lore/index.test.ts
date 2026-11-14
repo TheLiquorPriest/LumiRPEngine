@@ -13,8 +13,8 @@ import { callCtx, type LoreGuidance, shippedGuidance } from "./shipped";
 
 const AT = { user: USER, chat: CHAT };
 
-/** A run's lines for an entry, made up from its title. */
-const linesFor = (e: Pick<IndexedEntry, "id" | "title">): LoreIndexInput => ({ id: e.id, kind: "place", line: `${e.title}: as the entry says.`, defines: [{ what: e.title, aspect: "layout" }], related: [] });
+/** A run's lines for an entry, made up from its title, with the revision its batch showed. */
+const linesFor = (e: Pick<IndexedEntry, "id" | "title" | "revision">): LoreIndexInput => ({ id: e.id, revision: e.revision, kind: "place", line: `${e.title}: as the entry says.`, defines: [{ what: e.title, aspect: "layout" }], related: [] });
 
 describe("the lore index", () => {
   let dir: string;
@@ -111,34 +111,50 @@ describe("the lore index", () => {
     expect((await index.batch(AT)).left).toBe(0);
   });
 
+  test("lines a run hands back are kept for the revision its batch showed: an entry changed meanwhile is handed out again", async () => {
+    await fresh(4);
+    const batch = await index.batch(AT);
+    expect(batch.entries.map((e) => e.id)).toContain("w-tithe_law");
+    // The world's tithe is rewritten while the run reads its batch.
+    const tithe = world.lore.tithe_law;
+    if (tithe === undefined) throw new Error("the coast has its tithe");
+    world.lore.tithe_law = { ...tithe, content: "Every boat pays a fifth of its catch now." };
+    await index.write(AT, batch.entries.map(linesFor), "indexer");
+    const kept = (await index.entries(AT)).find((e) => e.id === "w-tithe_law");
+    expect([kept?.line, kept?.indexed, kept?.stale]).toEqual(["The harbor tithe: as the entry says.", false, true]);
+    expect((await index.batch(AT)).entries.map((e) => e.id)).toEqual(["w-tithe_law", "w-keeper_log", "e-1", "e-2"]);
+  });
+
   test("lore_index_write keeps what it can read, says what it could not, and answers with the next batch", async () => {
     await fresh(3);
     const [tool] = await loreTools({ index, guidance: files.guidance(CHAT) });
     if (tool === undefined) throw new Error("lore_index_write is not offered");
+    const revision = new Map((await index.entries(AT)).map((e) => [e.id, e.revision]));
     const result = await tool.run(
       {
         entries: [
-          { id: "w-tithe_law", kind: "rule", line: "The harbor tithe: a tenth of every catch.", defines: [{ what: "The harbor steps", aspect: "rules" }], related: ["e-2"] },
-          { id: "e-2", kind: "place", line: "The lamp room: green glass, whale oil." },
-          { id: "e-3", line: "Gulls on the harbor wall." },
-          { id: "e-99", kind: "item", line: "Nothing at all." },
+          { id: "w-tithe_law", revision: revision.get("w-tithe_law") ?? "", kind: "rule", line: "The harbor tithe: a tenth of every catch.", defines: [{ what: "The harbor steps", aspect: "rules" }], related: ["e-2"] },
+          { id: "e-2", revision: Number(revision.get("e-2")), kind: "place", line: "The lamp room: green glass, whale oil." },
+          { id: "e-3", revision: revision.get("e-3") ?? "", line: "Gulls on the harbor wall." },
+          { id: "e-99", revision: "1", kind: "item", line: "Nothing at all." },
+          { id: "w-cove_route", kind: "rule", line: "Sefa's brandy run." },
         ],
       },
       callCtx(AT),
     );
     const texts = result.content.flatMap((c) => (c.type === "text" ? [c.text] : []));
     expect(result.error).toBeUndefined();
-    expect(texts.slice(0, 2)).toEqual(["Entry 3 needs kind; it was not kept.", "Entry 4: there is no entry e-99 in this chat's lore; it was not kept."]);
-    expect(JSON.parse(texts[2] ?? "")).toEqual({
+    expect(texts.slice(0, 3)).toEqual(["Entry 3 needs kind; it was not kept.", "Entry 5 needs revision; it was not kept.", "Entry 4: there is no entry e-99 in this chat's lore; it was not kept."]);
+    expect(JSON.parse(texts[3] ?? "")).toEqual({
       kept: [
         { id: "w-tithe_law", title: "The harbor tithe", kind: "rule", line: "The harbor tithe: a tenth of every catch.", defines: [{ what: "The harbor steps", aspect: "rules" }], related: ["e-2"] },
         { id: "e-2", title: "The lamp room", kind: "place", line: "The lamp room: green glass, whale oil.", defines: [], related: [] },
       ],
       left: 7,
     });
-    expect(texts[3]).toBe("Kept the lines of 2 entries. 7 entries are not indexed yet.");
-    expect(texts[4]?.split("\n").slice(0, 3)).toEqual(["Entries to index: 3 of the 7 not indexed yet.", "", "### [w-cove_route] The cove route (from The Reed Coast; keys: cove route)"]);
-    expect(texts[4]).toContain("Sefa runs brandy through the cove at the new moon.");
+    expect(texts[4]).toBe("Kept the lines of 2 entries. 7 entries are not indexed yet.");
+    expect(texts[5]?.split("\n").slice(0, 3)).toEqual(["Entries to index: 3 of the 7 not indexed yet.", "", `### [w-cove_route] The cove route (from The Reed Coast; revision ${revision.get("w-cove_route")}; keys: cove route)`]);
+    expect(texts[5]).toContain("Sefa runs brandy through the cove at the new moon.");
 
     const kept = (await index.entries(AT)).find((e) => e.id === "w-tithe_law");
     expect([kept?.kind, kept?.line, kept?.defines, kept?.related, kept?.indexed]).toEqual(["rule", "The harbor tithe: a tenth of every catch.", [{ what: "The harbor steps", aspect: "rules" }], ["e-2"], true]);
@@ -154,10 +170,12 @@ describe("the lore index", () => {
     const unindexed = async () => (await facts.read({ ...AT, session: "session-1" }, ["lore.unindexed"]))["lore.unindexed"]?.count;
     expect(await unindexed()).toBe(9);
     const block = await loreBatchBlock(index, AT, files.guidance(CHAT));
+    // Each entry with the revision a run hands back with its lines.
+    const revision = new Map((await index.entries(AT)).map((e) => [e.id, e.revision]));
     expect(block.split("\n\n")).toEqual([
       "Entries to index: 2 of the 9 not indexed yet.",
-      "### [w-tithe_law] The harbor tithe (from The Reed Coast; keys: tithe, harbor dues)\nEvery boat pays a tenth of its catch at the harbor steps.",
-      "### [w-cove_route] The cove route (from The Reed Coast; keys: cove route)\nSefa runs brandy through the cove at the new moon.",
+      `### [w-tithe_law] The harbor tithe (from The Reed Coast; revision ${revision.get("w-tithe_law")}; keys: tithe, harbor dues)\nEvery boat pays a tenth of its catch at the harbor steps.`,
+      `### [w-cove_route] The cove route (from The Reed Coast; revision ${revision.get("w-cove_route")}; keys: cove route)\nSefa runs brandy through the cove at the new moon.`,
     ]);
     while ((await index.batch(AT)).left > 0) await index.write(AT, (await index.batch(AT)).entries.map(linesFor), "indexer");
     expect(await unindexed()).toBe(0);

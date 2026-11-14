@@ -3,9 +3,11 @@
 // path, and a branch shares its source's turns through the chat application's old-to-new id map.
 
 import { describe, expect, test } from "bun:test";
+import { castAt } from "../../src/cast/path";
 import { swipeIndex } from "../../src/store/path";
 import type { UserStore } from "../../src/store/store";
 import { StoreInputError } from "../../src/store/types";
+import { storyAt } from "../../src/story/path";
 import { carried, engine, goTo, hashOf, make, play, POV, shown, testStore, tick } from "./fixtures";
 
 const placeOf = (s: UserStore, chat: string): unknown => s.headState(chat).state.world.entities[POV]?.fields.place;
@@ -149,6 +151,75 @@ describe("the turn tree", () => {
     expect(source.entities[POV]?.fields.place).toBe("cellar");
     expect(source.clock - branch.clock).toBe(120);
     expect(carried(branch, POV)).toEqual(carried(source, POV));
+  });
+
+  test("a branch's turn begun after a reply it shares takes that reply's place on the branch's path with a node of its own: the shared turn's changes stay on the branch's path, and the source's path is untouched", () => {
+    const { s, revision } = testStore();
+    s.createChat({ id: "source", revision });
+    play(s, "source", "m1", "Into the inn.", 1, engine(tick(15)));
+    const shared = play(s, "source", "m2", "Down the stairs.", 2, engine(goTo(POV, "cellar")));
+    s.sync("source", shown(["u1", "in"], ["m1", "Into the inn.", 1], ["u2", "down"], ["m2", "Down the stairs.", 2]));
+    const sourcePath = s.path("source");
+    s.branchChat({ id: "branch", from: "source", map: { u1: "b-u1", m1: "b-m1", u2: "b-u2", m2: "b-m2" }, at: "m2" });
+    const branchShown = (last: string) => shown(["b-u1", "in"], ["b-m1", "Into the inn.", 1], ["b-u2", "down"], ["b-m2", last, 2]);
+    s.sync("branch", branchShown("Down the stairs."));
+
+    // The branch's copy of the shared reply goes on in a turn of the branch's own, after the shared one, tied to the longer text.
+    const on = s.path("branch").find((e) => e.message === "b-m2")?.node ?? null;
+    const own = play(s, "branch", "b-m2", "Down the stairs. The lamp gutters.", 2, engine(tick(30)), { on, kind: "continue" });
+    expect(own.parent).toBe(shared.id);
+    expect(s.path("branch").find((e) => e.message === "b-m2")).toMatchObject({ turn: own.id, node: own.node, own: true, hash: hashOf("Down the stairs. The lamp gutters.") });
+    // The branch's state holds the shared turn's changes, then its own.
+    const branch = s.headState("branch").state.world;
+    expect(branch.entities[POV]?.fields.place).toBe("cellar");
+    expect(branch.clock - s.headState("source").state.world.clock).toBe(30);
+    // The source keeps its path, and its turn keeps its message and text.
+    expect(s.path("source")).toEqual(sourcePath);
+    expect(s.turn(shared.id)).toMatchObject({ message: "m2", hash: hashOf("Down the stairs.") });
+
+    // The branch compared again as it now shows finds nothing, and its next turn follows its own.
+    expect(s.sync("branch", branchShown("Down the stairs. The lamp gutters."))).toMatchObject({ gone: [], swiped: null, flipped: [], rebased: null, unplayed: [] });
+    expect(s.path("branch").find((e) => e.message === "b-m2")).toMatchObject({ turn: own.id, node: own.node, own: true });
+    expect(play(s, "branch", "b-m3", "Out to the market.", 3, engine(goTo(POV, "market_square"))).parent).toBe(own.id);
+    expect(s.headState("branch").state.world.entities[POV]?.fields.place).toBe("market_square");
+    expect(s.headState("source").state.world.entities[POV]?.fields.place).toBe("cellar");
+  });
+
+  test("a branch's continue of a reply it shares keeps the shared turn on the branch's line, for every reader of it and through a comparison that rebuilds the path; the source is untouched", () => {
+    const { s, revision } = testStore();
+    s.createChat({ id: "source", revision });
+    const first = play(s, "source", "m1", "Into the inn.", 1, engine(tick(15)));
+    const shared = play(s, "source", "m2", "Down the stairs.", 2, engine(goTo(POV, "cellar")));
+    s.sync("source", shown(["u1", "in"], ["m1", "Into the inn.", 1], ["u2", "down"], ["m2", "Down the stairs.", 2]));
+    const sourcePath = s.path("source");
+    s.branchChat({ id: "branch", from: "source", map: { u1: "b-u1", m1: "b-m1", u2: "b-u2", m2: "b-m2" }, at: "m2" });
+    s.sync("branch", shown(["b-u1", "in"], ["b-m1", "Into the inn.", 1], ["b-u2", "down"], ["b-m2", "Down the stairs.", 2]));
+    const on = s.path("branch").find((e) => e.message === "b-m2")?.node ?? null;
+    const own = play(s, "branch", "b-m2", "Down the stairs. The lamp gutters.", 2, engine(tick(30)), { on, kind: "continue" });
+
+    // The shared turn stands on the branch's line just before the branch's own, at the same reply, for the story's and the cast's
+    // readings, at the head and at the branch's turn.
+    const line = [first.id, shared.id, own.id];
+    expect(s.line("branch").map((l) => l.turn)).toEqual(line);
+    expect(storyAt(s, "branch", null).turns).toEqual(line);
+    expect(storyAt(s, "branch", own.id).replyOf(shared.id)).toBe(3);
+    expect(castAt(s, "branch", null).turns).toEqual(line);
+    expect(castAt(s, "branch", own.id).turns).toEqual(line);
+
+    // The branch deletes its first reply: the comparison rebuilds its path, and the shared turn's move is still there, then the branch's own.
+    s.sync("branch", shown(["b-u1", "in"], ["b-u2", "down"], ["b-m2", "Down the stairs. The lamp gutters.", 2]));
+    expect(s.line("branch").map((l) => l.turn)).toEqual([shared.id, own.id]);
+    expect(storyAt(s, "branch", null).turns).toEqual([shared.id, own.id]);
+    expect(placeOf(s, "branch")).toBe("cellar");
+    expect(s.headState("branch").state.world.clock - s.headState("source").state.world.clock).toBe(30 - 15);
+    // The branch compared again as it shows finds nothing, and keeps the same line.
+    expect(s.sync("branch", shown(["b-u1", "in"], ["b-u2", "down"], ["b-m2", "Down the stairs. The lamp gutters.", 2]))).toMatchObject({ gone: [], swiped: null, flipped: [], unplayed: [] });
+    expect(s.line("branch").map((l) => l.turn)).toEqual([shared.id, own.id]);
+
+    // The source keeps its path, its line and its state throughout.
+    expect(s.path("source")).toEqual(sourcePath);
+    expect(s.line("source").map((l) => l.turn)).toEqual([first.id, shared.id]);
+    expect(placeOf(s, "source")).toBe("cellar");
   });
 
   test("deleting a chat keeps the turns a branch still shares, and removes them once nothing does", () => {

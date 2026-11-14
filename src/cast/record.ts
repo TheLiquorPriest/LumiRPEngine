@@ -8,8 +8,11 @@
 //
 // Tied to turns, the way the story record is: casting, growth, mind, relationships, knowledge and
 // history. Every write is a row of the item it touches, holding only what that write said; an item
-// as it stands is its rows on the reading's path, merged in order, and its history is those rows.
-// Code merges and keeps; it never judges what a row says, and keeps everything for every casting.
+// as it stands is its rows on the reading's path, merged in order, and its history is those rows. A
+// job's rows are recorded with the turn that started it and take effect where the store places the
+// job's changes (plan §10.9): after its end, just before the next turn to begin, a field a turn has
+// written since keeping that turn's value; the job reads its own at once. Code merges and keeps; it
+// never judges what a row says, and keeps everything for every casting.
 
 import type { Database } from "bun:sqlite";
 import type { JsonObject } from "rp-harness/contract";
@@ -281,6 +284,55 @@ interface RowDb {
   agent: string | null;
   job: string | null;
   created: number;
+  /** When the store recorded the end of the job that wrote it (`job_end`); null for a turn's own row, or a job's not ended. */
+  ended: number | null;
+}
+
+/** A row of a reading, where it takes effect. */
+interface Placed {
+  row: CastRow;
+  /** The place on the path of the turn it takes effect at: its own turn's, or for a job's, the turn it is placed just before. */
+  at: number;
+  /** For a job's row placed after the turn that started the job: that turn's place; null for a row read where it was written. */
+  from: number | null;
+}
+
+/**
+ * The rows of a reading in the order they take effect. A turn's own rows, and those of the job the
+ * reading is made in (`own`), are read where they were written. Any other job's are recorded with the
+ * turn that started it and take effect where the store places its changes (plan §10.9,
+ * `UserStore.jobsPlaced`): once the store has recorded the job's end, just before the first turn on
+ * the path after that one to have begun after the end, in the order they were written; until then,
+ * or on a path with no such turn, they are not read.
+ */
+function placedRows(db: Database, user: string, at: CastAt, rows: readonly RowDb[], own: string | null): Placed[] {
+  let began: Map<string, number> | undefined;
+  const places = new Map<string, number>();
+  const out: Placed[] = [];
+  for (const { ended, ...r } of rows) {
+    const row: CastRow = { ...r, part: r.part as RowPart, value: JSON.parse(r.value) as JsonObject };
+    const from = at.order.get(r.turn) ?? 0;
+    if (r.job === null || r.job === own) {
+      out.push({ row, at: from, from: null });
+      continue;
+    }
+    if (ended === null) continue;
+    const key = `${r.job}\u0000${r.turn}`;
+    let place = places.get(key);
+    if (place === undefined) {
+      const times = (began ??= new Map(
+        db
+          .query<{ id: string; created: number }, [string, string]>("SELECT id, created FROM turn WHERE user = ?1 AND id IN (SELECT value FROM json_each(?2))")
+          .all(user, JSON.stringify(at.turns))
+          .map((t) => [t.id, t.created]),
+      ));
+      place = at.turns.findIndex((t, i) => i > from && (times.get(t) ?? Number.NEGATIVE_INFINITY) > ended);
+      places.set(key, place);
+    }
+    if (place >= 0) out.push({ row, at: place, from });
+  }
+  // At one place a job's rows come first, in the order they were written, then the turn's own, in its order.
+  return out.sort((a, b) => a.at - b.at || (a.from === null ? 1 : 0) - (b.from === null ? 1 : 0) || (a.from === null ? a.row.ord - b.row.ord : a.row.id - b.row.id));
 }
 
 /** The id of the one casting item a character has. */
@@ -297,32 +349,45 @@ export function newItemId(part: keyof typeof PREFIX, row: number): string {
 /** The rows of the cast as one reading sees them. */
 export class CastRecord {
   readonly items = new Map<string, CastItem>();
+  /** For each item, the place on the path of the turn whose write each of its fields (`drop` among them) last took. */
+  readonly #marks = new Map<string, Map<string, number>>();
 
   constructor(readonly at: CastAt) {}
 
-  /** The record at `at`: the rows of the turns on its path, in the path's order. */
-  static read(db: Database, user: string, at: CastAt): CastRecord {
+  /** The record at `at`: the rows of the turns on its path, in the order they take effect there (`placedRows`); `job`, the job the reading is made in, reads its own at once. */
+  static read(db: Database, user: string, at: CastAt, job: string | null = null): CastRecord {
     const rows = db
-      .query<RowDb, [string, string]>("SELECT * FROM cast_entry WHERE user = ?1 AND turn IN (SELECT value FROM json_each(?2))")
-      .all(user, JSON.stringify(at.turns))
-      .sort((a, b) => (at.order.get(a.turn) ?? 0) - (at.order.get(b.turn) ?? 0) || a.ord - b.ord);
+      .query<RowDb, [string, string]>("SELECT r.*, e.ended FROM cast_entry r LEFT JOIN job_end e ON e.user = r.user AND e.job = r.job WHERE r.user = ?1 AND r.turn IN (SELECT value FROM json_each(?2))")
+      .all(user, JSON.stringify(at.turns));
     const record = new CastRecord(at);
-    for (const r of rows) record.apply({ ...r, part: r.part as RowPart, value: JSON.parse(r.value) as JsonObject });
+    for (const p of placedRows(db, user, at, rows, job)) record.apply(p.row, p.from);
     return record;
   }
 
-  /** Merges one write in. */
-  apply(row: CastRow): CastItem {
+  /**
+   * Merges one write in. `from` is set for a job's write placed after turns since the job's own (the
+   * place of the turn that started it): a field one of those turns wrote keeps that turn's value, as
+   * the store keeps a later turn's value over a job's, and the item stays touched by the later turn.
+   */
+  apply(row: CastRow, from: number | null = null): CastItem {
     let item = this.items.get(row.item);
     if (item === undefined) {
       item = { part: row.part, id: row.item, character: row.character, fields: {}, opened: row.turn, touched: row.turn, at: row.at, dropped: false, rows: [] };
       this.items.set(row.item, item);
     }
+    let marks = this.#marks.get(row.item);
+    if (marks === undefined) {
+      marks = new Map();
+      this.#marks.set(row.item, marks);
+    }
+    const place = from ?? this.at.order.get(row.turn) ?? 0;
     for (const [key, value] of Object.entries(row.value)) {
+      if (from !== null && (marks.get(key) ?? Number.NEGATIVE_INFINITY) > from) continue;
+      marks.set(key, place);
       if (key === "drop") item.dropped = value === true;
       else item.fields[key] = value;
     }
-    item.touched = row.turn;
+    if (place >= (this.at.order.get(item.touched) ?? Number.NEGATIVE_INFINITY)) item.touched = row.turn;
     item.rows.push(row);
     return item;
   }

@@ -1,16 +1,18 @@
 // The world state (plan §6.9): compiled by code at the start of each turn, from memory, in a few
 // milliseconds. It is the tree opened at the horizon, in the sections of the world state's layout
 // (`.prompts/world-state.md`, as the chat has it): the horizon in full, with each place's map; the
-// chain above it; what is around it; the rest of the world in outline; what is due; open business
-// on the horizon; what changed last turn, by lane; and what is unsettled. Every line renders a
-// recorded value; nothing in it is inferred, and none of its words are code's: the layout words
-// every line. A section the layout leaves out is not compiled, and moving one moves it.
+// chain above it; what is around it; the rest of the world in outline; what fell due in the time the
+// turn before moved the clock past; what is due; open business on the horizon; what changed last
+// turn, by lane; and what is unsettled. Every line renders a recorded value; nothing in it is
+// inferred, and none of its words are code's: the layout words every line. A section the layout
+// leaves out is not compiled, and moving one moves it.
 //
 // The horizon is never cut for length. Every other section shares a budget: each takes what it needs
 // while that is no more than an even share of what is left, and one cut short ends with the layout's
 // line counting what it left out. The outline takes the room the others leave: breadth first, a
 // level's levels go in while they fit, and a level whose levels do not fit is given as its own line
-// with its reflection and the query that opens it.
+// with its reflection and the query that opens it. A due list is made only as far as the whole budget
+// could show it, and the rest of its span is counted, so a long span costs what a short one does.
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -38,7 +40,7 @@ export const WORLD_STATE_DEFAULTS = Object.freeze({
 export type WorldStateSettings = { -readonly [K in keyof typeof WORLD_STATE_DEFAULTS]: number };
 
 /** The sections the layout may hold, by the name of the field that places each. */
-export const WORLD_STATE_SECTIONS = ["horizon", "above", "around", "outline", "due", "open", "changed", "unsettled"] as const;
+export const WORLD_STATE_SECTIONS = ["horizon", "above", "around", "outline", "passed", "due", "open", "changed", "unsettled"] as const;
 export type WorldStateSection = (typeof WORLD_STATE_SECTIONS)[number];
 
 /** A place's map as text, from the grid lane (the engine tools' `MapView`): null for a place with no map. */
@@ -58,9 +60,16 @@ export interface DueEntry {
   what: JsonValue;
 }
 
-/** What time brings due for a span and a part of the tree (the engine tools' `DueList`). */
+/** What a span brings due as far as it is listed: the soonest, in time order, and how many more fall in it (the engine tools' `DueListing`). */
+export interface DueListing {
+  items: DueEntry[];
+  /** How many more fall in the span than are listed; null when more do, but counting them would take going through the span year by year. */
+  more: number | null;
+}
+
+/** What time brings due for a span and a part of the tree, the soonest `most` of it (the engine tools' `DueList`). */
 export interface DueSource {
-  due(state: StoreState, span: { from: number; to: number }, at: string | null): DueEntry[];
+  due(state: StoreState, span: { from: number; to: number }, at: string | null, most: number): DueListing;
 }
 
 export interface WorldStateInput {
@@ -144,21 +153,39 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
   }
   if (want("above")) sections.above = chain.flatMap((ref) => view.level(ref, 0, "own") ?? []);
   if (want("around")) sections.around = around(view, scenePlace, new Set([...within, ...chain])).flatMap((ref) => view.level(ref, 0, "none") ?? []);
+  const before = turn.parent === null ? null : store.turn(turn.parent);
+  const lastRows = before === null ? [] : store.changes(before.id);
+  // How many more a section's span holds than its lines list (null: more, uncounted); its cut counts them with what it leaves out.
+  const beyond: Partial<Record<WorldStateSection, number | null>> = {};
+  const budget = settings.budget * settings.charsPerToken;
+  const now = state.world.clock;
+  // On a clock nobody set (the blank world's, until play sets it) a time is given only as how long from now, or how long ago.
+  const dated = clockRecorded(state);
+  const dueLine = (kind: string, d: DueEntry, fields: JsonObject): ViewLine => {
+    const where = d.where === undefined ? null : view.resolve(d.where);
+    const out: JsonObject = { ...fields, kind: d.kind, what: said(d.what) };
+    if (dated) out.when = formatClock(calendarOf(view.world), d.at);
+    if (where !== null) out.where = nameOf(where);
+    if (d.who !== undefined && d.who.length > 0) out.who = d.who.map((id) => nameOf(`entity:${id}`)).join(", ");
+    return { kind, depth: 0, fields: out };
+  };
+  // Beside a move of the clock in the turn before: what fell due in the time it moved past, which nothing applied (plan §6.1, §6.4).
+  if (want("passed") && input.due !== undefined && before !== null && lastRows.some((r) => r.applied && r.op === "clock")) {
+    const since = store.startOf(before.id).state.world.clock;
+    if (now > since) {
+      const listed = dueShown(part, input.due, state, { from: since, to: now }, budget, (d) => dueLine("fell_due", d, { ago: now - d.at }));
+      sections.passed = listed.lines;
+      beyond.passed = listed.more;
+    }
+  }
   if (want("due")) {
-    const doc = view.world;
-    const from = state.world.clock;
-    // On a clock nobody set (the blank world's, until play sets it) a time is given only as how long from now.
-    const dated = clockRecorded(state);
-    sections.due = input.due
-      ? input.due.due(state, { from, to: from + settings.dueAhead }, null).map((d): ViewLine => {
-          const where = d.where === undefined ? null : view.resolve(d.where);
-          const fields: JsonObject = { after: d.at - from, kind: d.kind, what: said(d.what) };
-          if (dated) fields.when = formatClock(calendarOf(doc), d.at);
-          if (where !== null) fields.where = nameOf(where);
-          if (d.who !== undefined && d.who.length > 0) fields.who = d.who.map((id) => nameOf(`entity:${id}`)).join(", ");
-          return { kind: "due", depth: 0, fields };
-        })
-      : [{ kind: "due_unlisted", depth: 0, fields: {} }];
+    if (input.due === undefined) sections.due = [{ kind: "due_unlisted", depth: 0, fields: {} }];
+    else {
+      // Its span is the user's own `dueAhead`.
+      const listed = dueShown(part, input.due, state, { from: now, to: now + settings.dueAhead }, budget, (d) => dueLine("due", d, { after: d.at - now }));
+      sections.due = listed.lines;
+      beyond.due = listed.more;
+    }
   }
   if (want("open")) {
     sections.open = [];
@@ -170,8 +197,6 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
       sections.open.push({ kind: "quest", depth: 0, fields: { id, label: t.label, kind: t.kind, stage: at?.label ?? stage, owner: nameOf(`entity:${owner}`) } });
     }
   }
-  const before = turn.parent === null ? null : store.turn(turn.parent);
-  const lastRows = before === null ? [] : store.changes(before.id);
   if (want("changed")) sections.changed = changedLines(view, lastRows, nameOf);
   if (want("unsettled")) {
     const lines: ViewLine[] = [];
@@ -201,7 +226,6 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
   // The budget, shared by every section but the horizon: the smallest needs are met first, each while
   // it is no more than an even share of what is left, so no section crowds out the rest; the outline,
   // which gives way level by level, takes the room that remains.
-  const budget = settings.budget * settings.charsPerToken;
   const needs: [WorldStateSection, number][] = [];
   for (const s of WORLD_STATE_SECTIONS) {
     const lines = sections[s];
@@ -210,7 +234,7 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
   let left = budget;
   let sharing = needs.length + (want("outline") ? 1 : 0);
   for (const [s, need] of needs.sort((a, b) => a[1] - b[1])) {
-    const kept = fit(part, s, sections[s] ?? [], Math.min(need, Math.floor(left / sharing)));
+    const kept = fit(part, s, sections[s] ?? [], Math.min(need, Math.floor(left / sharing)), beyond[s] ?? 0);
     sections[s] = kept.lines;
     left -= kept.used;
     sharing--;
@@ -239,24 +263,43 @@ function costOf(part: Part, line: ViewLine): number {
 }
 
 /**
- * As many of a section's lines as fit in `room` characters, in order. When some do not, the layout's
- * `left_out` line, counting them, ends the section at the depth of the first one left out, with room
- * kept for it; when not even that fits, nothing of the section is shown.
+ * As many of a section's lines as fit in `room` characters, in order. When some do not, or its span
+ * holds `beyond` more than its lines list, the layout's `left_out` line, counting them all, ends the
+ * section at the depth of the first one left out, with room kept for it (`left_out_uncounted` when
+ * how many the span holds was not counted); when not even that fits, nothing of the section is shown.
  */
-function fit(part: Part, section: WorldStateSection, lines: readonly ViewLine[], room: number): { lines: ViewLine[]; used: number } {
+function fit(part: Part, section: WorldStateSection, lines: readonly ViewLine[], room: number, beyond: number | null): { lines: ViewLine[]; used: number } {
   const costs = lines.map((l) => costOf(part, l));
   let used = 0;
   let k = 0;
   while (k < lines.length && used + (costs[k] as number) <= room) used += costs[k++] as number;
-  if (k === lines.length) return { lines: [...lines], used };
+  if (k === lines.length && beyond === 0) return { lines: [...lines], used };
   for (; k >= 0; k--) {
-    const n = lines.length - k;
-    const note: ViewLine = { kind: "left_out", depth: (lines[k] as ViewLine).depth, fields: { n, one: n === 1, section, [section]: true } };
+    const n = beyond === null ? null : lines.length - k + beyond;
+    const depth = (lines[k] ?? lines[k - 1])?.depth ?? 0;
+    const note: ViewLine = n === null ? { kind: "left_out_uncounted", depth, fields: { section, [section]: true } } : { kind: "left_out", depth, fields: { n, one: n === 1, section, [section]: true } };
     const total = used + costOf(part, note);
     if (total <= room) return { lines: [...lines.slice(0, k), note], used: total };
     if (k > 0) used -= costs[k - 1] as number;
   }
   return { lines: [], used: 0 };
+}
+
+/**
+ * What `span` brings due as the lines of a section, the soonest first: as many as all of `room` could show at each line's own
+ * cost, and one more where the span holds more, with how many more it holds than those (null: more, not counted). The due list
+ * is asked for in batches, each twice the last, so what a span costs is what the lines its budget can show cost, however long
+ * the span. A layout that words none of the lines asked for shows none, and is asked for no more.
+ */
+function dueShown(part: Part, source: DueSource, state: StoreState, span: { from: number; to: number }, room: number, line: (d: DueEntry) => ViewLine): { lines: ViewLine[]; more: number | null } {
+  for (let most = 1; ; most *= 2) {
+    const listing = source.due(state, span, null, most);
+    const lines = listing.items.map(line);
+    let used = 0;
+    let k = 0;
+    for (; k < lines.length && used + costOf(part, lines[k] as ViewLine) <= room; k++) used += costOf(part, lines[k] as ViewLine);
+    if (k < lines.length || used === 0 || listing.more === 0 || listing.items.length < most) return { lines, more: listing.more };
+  }
 }
 
 /** A horizon entry in full, with a place's map after its own values. */
@@ -383,5 +426,5 @@ function outline(view: TreeView, part: Part, room: number, horizon: ReadonlySet<
     for (const k of view.childrenOf(ref)) walk(k);
   };
   for (const ref of root ? ["world"] : first.map((x) => x.ref)) walk(ref);
-  return fit(part, "outline", out, room).lines;
+  return fit(part, "outline", out, room, 0).lines;
 }

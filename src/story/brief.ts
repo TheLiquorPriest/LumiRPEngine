@@ -74,7 +74,8 @@ export function storyBrief(point: StoryPoint & { layout: StorySoFarInput["layout
   const fields: StoryBriefFields = { ...(scene !== null ? { scene: view(scene) } : {}) };
   for (const [name, value] of Object.entries(parts)) if (value !== undefined) fields[name as keyof typeof parts] = value;
   if (Object.keys(fields).length === 0) return { text: "", fields };
-  if (clock !== null) fields.now = clock.text(clock.now);
+  const now = clock === null ? null : clock.text(clock.now);
+  if (now !== null) fields.now = now;
   return { text: point.layout.render(fields).text.trimEnd(), fields };
 }
 

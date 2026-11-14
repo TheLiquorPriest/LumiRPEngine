@@ -7,7 +7,9 @@
 // statement of what they now know is a row of their knowledge, tied to the perception; a secret
 // named by its id is held the way today's build holds it (`secrets.ts`), on the same turn, its fact
 // recorded first when the chat holds none yet. Striking a perception strikes the knowledge tied to
-// it, and takes back each secret's holding that no other knowledge of theirs still gives.
+// it, and takes back each secret's holding that no other knowledge of theirs still gives; correcting
+// one with a new list of what they now know, or of the secrets they hold, strikes in the same way the
+// knowledge it gave that the new list no longer gives, and writes only what that knowledge lacks.
 //
 // The whole call is read first, each perception in whatever shape its arguments were sent. What a
 // perception does not read, or a value it cannot read (a reply the path does not have, a secret that
@@ -23,7 +25,7 @@ import type { FactId } from "../shared/minds";
 import { isRecord } from "../shared/json";
 import { type CastCall, type CastReading, type CastToolSpec, readingOr, whoView } from "./kit";
 import { type CastItem, type CastWrite, writeCast } from "./record";
-import { forgetsOf, holdingChanges, oneIn, personNamed, secretFact, secretsLetGo, SecretWorld, worldAt } from "./secrets";
+import { forgetsOf, holdingChanges, secretsHeld, secretsLetGo, SecretWorld, worldAt } from "./secrets";
 import { CAST_LANE, characterNamed, ignoredOf, isUnread, type ItemRead, type Kind, leftOut, makeFresh, needed, readArg, type Reads, refused, type Unread } from "./update";
 
 /** How much of a moment reached a character (§7.3): all of it, part of it, told of it by someone, or nothing. */
@@ -64,11 +66,13 @@ interface Planned {
   item: string | null;
   /** What the perception's row says. */
   value: JsonObject;
-  /** Each statement of what they now know: a row of their knowledge. */
+  /** Each statement of what they now know that no knowledge it gave already says: a new row of their knowledge. */
   knows: string[];
   /** Each secret they now hold, with the events that hold it (none when they hold it so already). */
   secrets: { fact: FactId; events: LedgerEvent[] }[];
-  /** For a perception it strikes: the knowledge tied to it, struck with it, and each secret's holding taken back. */
+  /** Of those secrets, each that no knowledge it gave already holds: a new row of their knowledge. */
+  newSecrets: FactId[];
+  /** The knowledge it gave that goes (all of it, for a perception it strikes), and each secret's holding taken back. */
   struck: string[];
   forgets: { fact: FactId; events: LedgerEvent[] }[];
 }
@@ -87,34 +91,6 @@ export function perceivedTurn(item: CastItem): string {
 export function perceptionView(reading: Pick<CastReading, "record">, item: CastItem): JsonObject {
   const { of: _of, ...fields } = item.fields;
   return { id: item.id, ...fields, message: reading.record.at.replyOf(perceivedTurn(item)), ...(item.dropped ? { dropped: true } : {}) };
-}
-
-/** The secrets a perception names that its character can hold now; what keeps any of them from being held goes to `unread`. */
-async function secretsHeld(call: CastCall, world: SecretWorld, n: number, name: string, tellerName: JsonValue | undefined, of: string | null, said: readonly string[], unread: Unread[]): Promise<Planned["secrets"]> {
-  const held: Planned["secrets"] = [];
-  const ctx = world.ctx;
-  if (ctx === null) {
-    unread.push({ line: "no_world_secret", fields: { n, op: OP, field: "secrets" } });
-    return held;
-  }
-  const holder = oneIn(personNamed(ctx, name), n, OP, "secrets", name, "no_holder");
-  const teller = typeof tellerName === "string" ? oneIn(personNamed(ctx, tellerName), n, OP, "secrets", tellerName, "no_teller") : null;
-  if (isUnread(holder)) unread.push(holder);
-  if (isUnread(teller)) unread.push(teller);
-  const turnRow = of === null ? null : call.deps.store.user(call.scope.user).turn(of);
-  for (const secret of said) {
-    const fact = secretFact(secret);
-    if (fact === null) {
-      unread.push({ line: "not_secret", fields: { n, op: OP, field: "secrets", value: secret } });
-      continue;
-    }
-    if (isUnread(holder) || isUnread(teller)) continue;
-    const since = { msg: turnRow?.message ?? null, at: turnRow?.storyTime ?? ctx.state.clock };
-    const events = await world.hold({ holder, fact, teller, since, confidence: call.settings.secretConfidence });
-    if ("code" in events) unread.push({ line: events.code === "missing_fact" ? "unknown_secret" : "secret_refused", fields: { n, op: OP, field: "secrets", who: name, secret, code: events.code } });
-    else held.push({ fact, events });
-  }
-  return held;
 }
 
 /** One perception read: what it writes, what of it could not be read, and what it does not read. A name the cast does not hold yet goes to `fresh`, made at the write. */
@@ -155,16 +131,41 @@ async function readPerception(call: CastCall, cast: CastReading, world: SecretWo
 
   const said = (secrets as string[] | undefined) ?? [];
   const trouble: Unread[] = [];
-  const held = said.length > 0 ? await secretsHeld(call, world, n, character.name, fields.told_by, of, said, trouble) : [];
+  const turnRow = said.length === 0 || of === null ? null : call.deps.store.user(call.scope.user).turn(of);
+  const held = said.length > 0 ? await secretsHeld(world, { n, op: OP, field: "secrets" }, character.name, fields.told_by, turnRow, said, call.settings.secretConfidence, trouble) : [];
   // A secret that cannot be held is left out; while another is held, the perception still holds secrets.
   out.unread.push(...trouble.map((u) => (held.length > 0 ? { ...u, kept: true } : u)));
-  // Struck: so is the knowledge it gave, and each secret it gave is let go unless other knowledge of theirs still gives it.
-  const struck = item !== null && !item.dropped && fields.drop === true ? cast.record.of(character.id, "knowledge").filter((k) => k.fields.from === item.id) : [];
+  // The knowledge it gave that stands. Struck, the perception takes all of it along; corrected with what they now know or with the
+  // secrets they hold (a list none of which could be held is left out, so it replaces nothing), what the new list no longer gives
+  // goes. Each secret it gave is let go unless other knowledge of theirs still gives it.
+  const gave = item === null ? [] : cast.record.of(character.id, "knowledge").filter((k) => k.fields.from === item.id);
+  const holds = new Set(held.map((s) => s.fact));
+  const struck =
+    fields.drop === true
+      ? item !== null && !item.dropped
+        ? gave
+        : []
+      : gave.filter((k) => (knows !== undefined && typeof k.fields.text === "string" && !(knows as string[]).includes(k.fields.text)) || (holds.size > 0 && typeof k.fields.secret === "string" && !holds.has(k.fields.secret)));
   const forgets = forgetsOf(world.ctx, n, OP, character.name, secretsLetGo(cast.record, character.id, struck), out.unread);
+  // What the knowledge it keeps already gives is not written again.
+  const kept = gave.filter((k) => !struck.includes(k));
+  const keptTexts = new Set(kept.flatMap((k) => (typeof k.fields.text === "string" ? [k.fields.text] : [])));
+  const keptSecrets = new Set(kept.flatMap((k) => (typeof k.fields.secret === "string" ? [k.fields.secret] : [])));
   const row: JsonObject = { ...(item === null || named !== undefined ? { of } : {}), ...fields };
   if (knows !== undefined) row.knows = knows;
   if (held.length > 0) row.secrets = held.map((s) => s.fact);
-  out.planned = { n, character: character.id, name: character.name, item: item?.id ?? null, value: row, knows: (knows as string[] | undefined) ?? [], secrets: held, struck: struck.map((k) => k.id), forgets };
+  out.planned = {
+    n,
+    character: character.id,
+    name: character.name,
+    item: item?.id ?? null,
+    value: row,
+    knows: ((knows as string[] | undefined) ?? []).filter((text) => !keptTexts.has(text)),
+    secrets: held,
+    newSecrets: held.flatMap((s) => (keptSecrets.has(s.fact) ? [] : [s.fact])),
+    struck: struck.map((k) => k.id),
+    forgets,
+  };
   return out;
 }
 
@@ -178,7 +179,7 @@ async function perceive(args: JsonObject, call: CastCall): Promise<Reply> {
   if (turn === undefined) return reply.line("perceive_turn", {}).fail();
 
   const world = new SecretWorld(
-    () => worldAt(call.deps.store, call.scope.user, turn),
+    () => worldAt(call.deps.store, call.scope.user, turn, call.agent.job ?? null),
     (book, entry) => (call.deps.books === undefined ? Promise.resolve(null) : call.deps.books({ user: call.scope.user, chat: call.scope.chat }, book, entry)),
   );
   const fresh = new Map<string, string>();
@@ -200,7 +201,7 @@ async function perceive(args: JsonObject, call: CastCall): Promise<Reply> {
       const source: JsonObject = { from: perception, ...(typeof p.value.told_by === "string" ? { told_by: p.value.told_by } : {}) };
       const knowledge: CastWrite[] = [
         ...p.knows.map((text): CastWrite => ({ character, part: "knowledge", item: null, value: { text, ...source } })),
-        ...p.secrets.map((s): CastWrite => ({ character, part: "knowledge", item: null, value: { secret: s.fact, ...source } })),
+        ...p.newSecrets.map((fact): CastWrite => ({ character, part: "knowledge", item: null, value: { secret: fact, ...source } })),
       ];
       out.push({ character, perception, knowledge: writeCast(db, writer, knowledge).map((k) => k.item) });
       writeCast(db, writer, p.struck.map((k): CastWrite => ({ character, part: "knowledge", item: k, value: { drop: true, ...(typeof p.value.why === "string" ? { why: p.value.why } : {}) } })));

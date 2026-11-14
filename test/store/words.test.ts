@@ -135,7 +135,7 @@ describe("no words of the store reach an agent", () => {
     const { s, world, t, changes } = played();
     const next = s.beginTurn({ chat: "c", kind: "normal" });
     const labels = Object.values(s.view("c").state.world.entities).map((e) => kindDef(registry(), world, e.kind)?.label ?? e.kind);
-    const due = { due: () => [{ at: s.view("c").state.world.clock + 30, kind: "schedule", where: "place:market_square", who: ["tam"], what: "the bell rings" }] };
+    const due = { due: () => ({ items: [{ at: s.view("c").state.world.clock + 30, kind: "schedule", where: "place:market_square", who: ["tam"], what: "the bell rings" }], more: 0 }) };
     const block = worldState(s, { chat: "c", turn: next.id, layout: SHIPPED_LAYOUT, due, map: { text: () => "#.#" } });
     for (const section of ["horizon", "above", "around", "outline", "due", "open", "changed", "unsettled"] as const) expect([section, (block.sections[section]?.length ?? 0) > 0]).toEqual([section, true]);
     expect(foreign(block.sections, vocabulary(world, changes, labels, t.id, "the bell rings", "#.#"))).toEqual([]);

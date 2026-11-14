@@ -10,7 +10,7 @@ import { calendarOf, formatClock, placeOffset } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
 import { described, Reply, type Writes } from "../iface/kit";
 import { type GuidanceFiles, Lines, toolText } from "../iface/texts";
-import type { Store, UserStore } from "../store";
+import { clockRecorded, type Store, type UserStore } from "../store";
 import { castAt } from "./path";
 import { type BaseVersion, type CastItem, CastRecord, type Character, chatLine } from "./record";
 import type { BookReader } from "./secrets";
@@ -151,19 +151,33 @@ export async function castHostTool(spec: CastToolSpec, lines: Lines, deps: CastD
 export interface CastClock {
   /** Minutes since the world's epoch. */
   now: number;
-  text(at: number): string;
+  /** A time as answers show it; null while play has not set the clock (the blank world's, until a change moves it): a date nobody set is shown to nobody. */
+  text(at: number): string | null;
 }
 
-/** The chat's story time at a turn, or at its head; null for a chat that keeps none. Shown as the engine's own tools show a time. */
+/**
+ * The chat's story time at a turn, or at its head, read as the story record reads it (`storyClock`): from the world the state is
+ * played on, the blank one for a chat that names none, and a world attached later once the state is upgraded to it. Null for a
+ * chat the store does not hold, or a state whose world it cannot find. Shown as the engine's own tools show a time, once the
+ * clock is a recorded value (`clockRecorded`); its minutes count from the first, so memories are dated and fade all the same.
+ */
 export function castClock(store: Store, user: string, chat: string, turn: string | null): CastClock | null {
   const u = store.user(user);
-  if ((u.chat(chat)?.revision ?? null) === null) return null;
-  const state = (turn === null ? u.headState(chat) : u.stateAt(turn)).state.world;
+  if (u.chat(chat) === null) return null;
+  const folded = (turn === null ? u.headState(chat) : u.stateAt(turn)).state;
+  const state = folded.world;
   const doc = store.env.worlds(state.revision);
   if (doc === undefined) return null;
   const world = store.env.registry.context(doc, state).world;
   const cal = calendarOf(world);
-  return { now: state.clock, text: (at) => formatClock(cal, at, placeOffset(world, at, placeOfEntity(state, world.pov))) };
+  const shown = clockRecorded(folded);
+  return { now: state.clock, text: (at) => (shown ? formatClock(cal, at, placeOffset(world, at, placeOfEntity(state, world.pov))) : null) };
+}
+
+/** A row's date in story time as answers and views show it (`{ date }`), or nothing: it has none, or the clock shows none yet. */
+export function datedAt(clock: CastClock | null, at: number | null): { date: string } | Record<string, never> {
+  const text = at === null || clock === null ? null : clock.text(at);
+  return text === null ? {} : { date: text };
 }
 
 /** What a call reads: the user's store, the chats whose characters it knows, the rows on its path, and story time. */
@@ -175,7 +189,10 @@ export interface CastReading {
   clock: CastClock | null;
 }
 
-/** The cast a call reads: at its turn, or at the chat's head when it has none. A line says what is missing when the scope names a chat or a turn the store does not have. */
+/**
+ * The cast a call reads: at its turn, or at the chat's head when it has none; a call made in a job reads what that job wrote at
+ * once. A line says what is missing when the scope names a chat or a turn the store does not have.
+ */
 export function readingOr(call: CastCall, reply: Reply): CastReading | null {
   const user = call.deps.store.user(call.scope.user);
   if (user.chat(call.scope.chat) === null) {
@@ -190,7 +207,7 @@ export function readingOr(call: CastCall, reply: Reply): CastReading | null {
   return {
     user,
     chats: chatLine(user, call.scope.chat),
-    record: CastRecord.read(call.deps.store.db, call.scope.user, castAt(user, call.scope.chat, turn)),
+    record: CastRecord.read(call.deps.store.db, call.scope.user, castAt(user, call.scope.chat, turn), call.agent.job ?? null),
     clock: castClock(call.deps.store, call.scope.user, call.scope.chat, turn),
   };
 }
@@ -209,8 +226,7 @@ export function whoView(character: Pick<Character, "id" | "name">): JsonObject {
  */
 export function itemView(reading: CastReading, item: CastItem, history = false): JsonObject {
   const { record, clock } = reading;
-  const out: JsonObject = { id: item.id, ...item.fields };
-  if (item.at !== null && clock !== null) out.date = clock.text(item.at);
+  const out: JsonObject = { id: item.id, ...item.fields, ...datedAt(clock, item.at) };
   out.since = record.at.replyOf(item.opened);
   out.touched = record.at.replyOf(item.touched);
   if (item.dropped) out.dropped = true;

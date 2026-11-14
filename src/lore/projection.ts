@@ -75,7 +75,7 @@ export class LoreProjection {
       await writes.run((d) => d.run("DELETE FROM lore_projection WHERE user = ? AND chat = ?", [user, chat]), "taking away a projection book");
       return { off: true, removed: held.book };
     }
-    const notes = overlayNotes(db, user, chat, this.deps.path.turns(user, chat), null);
+    const notes = overlayNotes(db, user, this.deps.path.turns(user, chat), null);
     const lines = await this.deps.lines({ user, chat });
     const read = await this.deps.lore.read({ user, chat }, [...notes.keys()]);
     const entries = read.flatMap((e): LoreEntryFields[] => {

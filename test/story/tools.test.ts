@@ -6,6 +6,8 @@ import { Lines, SHIPPED_GUIDANCE, shippedTexts } from "../../src/iface/texts";
 import { type LoreOverlay, type StoryDeps, storyTools, STORY_TOOLS } from "../../src/story/index";
 import { storyClock } from "../../src/story/kit";
 import { CHAT, openTable, type Table, type TableOptions, USER } from "./rig";
+import { settingClock } from "../../src/store/blank";
+import { engine, tick } from "../store/fixtures";
 
 const patterns = Lines.parse(readFileSync(join(SHIPPED_GUIDANCE, ".prompts", "story-answers.md"), "utf8"), "story-answers.md").patterns();
 
@@ -227,7 +229,8 @@ describe("story_record", () => {
     const r = await b.call("story_record", { operations: [{ op: "beat", text: "The east wing burns." }, { op: "overlay", entry: "e-112", text: "The east wing burned on this turn." }] }, turn.id);
     wordsFromFiles(r);
     expect(ops(r)[1]).toEqual({ n: 2, op: "overlay", entry: "e-112", wrote: { text: "The east wing burned on this turn." }, written: { overlay: "ov-1", entry: "e-112" } });
-    expect(written).toEqual([{ user: USER, chat: CHAT, turn: turn.id, entry: "e-112", note: "The east wing burned on this turn.", by: "author", inWrite: true }]);
+    // The overlay is the writer's, as its rows are, and takes the place after the beat before it.
+    expect(written).toEqual([{ user: USER, chat: CHAT, turn: turn.id, entry: "e-112", note: "The east wing burned on this turn.", by: "author", agent: "author-1", job: null, ord: 1, inWrite: true }]);
 
     const refused = await b.call("story_record", { operations: [{ op: "beat", text: "Smoke over the roofs." }, { op: "overlay", entry: "e-404", text: "Gone." }] }, turn.id);
     expect(refused.error).toBe(true);
@@ -254,7 +257,7 @@ describe("story_record", () => {
     expect(past?.now).toMatchObject({ due: "Sat 1 Mar 2031, 7:00 AM" });
   });
 
-  test("a chat that started with no world keeps story time on the blank world it plays on: a due time is read, and a future falls due", async () => {
+  test("a chat that started with no world keeps story time on the blank world it plays on: a due time is read and a future falls due, and no date is shown while play has not set the clock", async () => {
     const b = await bench({}, { world: false });
     const turn = await b.t.begin();
     const r = await b.call("story_record", { operations: [{ op: "future", text: "The reeve's man calls.", due: "two hours" }] }, turn.id);
@@ -262,13 +265,42 @@ describe("story_record", () => {
     wordsFromFiles(r);
     const clock = storyClock(b.t.store, USER, CHAT, turn.id);
     if (clock === null) throw new Error("a chat with no world plays on the blank world, which keeps a clock");
-    expect(ops(r)[0]?.now).toMatchObject({ due: clock.text(clock.now + 120) });
+    // Read and kept two hours from now; a date nobody set is shown to nobody.
+    expect(b.t.record(turn).items.get(String(ops(r)[0]?.id))?.fields.due).toBe(clock.now + 120);
+    expect(ops(r)[0]?.now).not.toHaveProperty("due");
+    // One not after now falls due at once, and the answer says so with no time in it.
+    const past = await b.call("story_record", { operations: [{ op: "future", text: "The bell has rung.", due: "2026-01-01 07:00" }] }, turn.id);
+    wordsFromFiles(past);
+    expect(past.reports).toEqual(["Operation 1 (future): it falls due no later than now, so it is due at once."]);
 
     await b.t.write(turn, [{ part: "future", item: null, value: { text: "The ice breaks.", due: clock.now - 30 } }]);
     await b.t.tie(turn);
     const due = dataOf(await b.call("story_query", { due: true }));
-    expect((due.future as JsonObject[]).map((x) => x.text)).toEqual(["The ice breaks."]);
-    expect(due.now).toBe(clock.text(clock.now));
+    expect((due.future as JsonObject[]).map((x) => x.text).sort()).toEqual(["The bell has rung.", "The ice breaks."]);
+    expect(due).not.toHaveProperty("now");
+    expect((due.future as JsonObject[]).some((f) => "due" in f)).toBe(false);
+  });
+
+  test("once play has set the clock to a date and time in a chat with no world, the story shows its times; a move alone shows none", async () => {
+    const b = await bench({}, { world: false });
+    const turn = await b.t.begin();
+    await b.t.writes.run(() => b.t.s.addChanges(turn.id, engine(tick(60))));
+    const moved = await b.call("story_record", { operations: [{ op: "future", text: "The ferry leaves.", due: "two days" }] }, turn.id);
+    expect(moved.error).toBeUndefined();
+    expect(ops(moved)[0]?.now).not.toHaveProperty("due");
+    await b.t.writes.run(() => b.t.s.addChanges(turn.id, engine(settingClock(tick(60)))));
+    const r = await b.call("story_record", { operations: [{ op: "future", text: "The reeve's man calls.", due: "two hours" }] }, turn.id);
+    expect(r.error).toBeUndefined();
+    const clock = storyClock(b.t.store, USER, CHAT, turn.id);
+    const shown = clock?.text(clock.now + 120);
+    expect(shown).toEqual(expect.any(String));
+    expect(ops(r)[0]?.now).toMatchObject({ due: shown });
+
+    await b.t.write(turn, [{ part: "future", item: null, value: { text: "The ice breaks.", due: (clock?.now ?? 0) - 30 } }]);
+    await b.t.tie(turn);
+    const due = dataOf(await b.call("story_query", { due: true }));
+    expect(due.now).toEqual(expect.any(String));
+    expect((due.future as JsonObject[])[0]).toMatchObject({ text: "The ice breaks.", due: expect.any(String) });
   });
 
   test("writes every part, and story_query reads each back as it stands", async () => {

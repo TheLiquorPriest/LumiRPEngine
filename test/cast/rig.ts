@@ -71,16 +71,21 @@ export interface Table {
   record(turn?: TurnRow | null): CastRecord;
 }
 
-/** The invented chat, on `world`: the invented one unless a test gives its own (more lore, other people). */
-export async function openTable(world: WorldDoc = inventedWorld()): Promise<Table> {
-  const revision = hashJson(world);
+/**
+ * The invented chat, on `world`: the invented one unless a test gives its own (more lore, other
+ * people); null, the chat names none and plays on the blank world. The store's clock moves on by one
+ * at each of its writes, so whatever it dates (a turn begun, a job's end) is ordered as it was done.
+ */
+export async function openTable(world: WorldDoc | null = inventedWorld()): Promise<Table> {
+  const revision = world === null ? null : hashJson(world);
   const db = new Database(":memory:");
   migrateStore(db);
   for (const m of CAST_MIGRATIONS) if ("sql" in m) db.run(m.sql);
-  const store = openStore({ db, registry: registry(), worlds: (r) => (r === revision ? world : undefined) });
+  let clock = 0;
+  const store = openStore({ db, registry: registry(), worlds: (r) => (world !== null && r === revision ? world : undefined), now: () => ++clock });
   const writes = new WriteQueue(db, 10);
   const s = store.user(USER);
-  await writes.run(() => s.createChat({ id: CHAT, world: world.id, revision }));
+  await writes.run(() => s.createChat(world === null ? { id: CHAT } : { id: CHAT, world: world.id, revision }));
   const shown: ShownMessage[] = [];
   let n = 0;
   let date = 1_000;
@@ -176,8 +181,8 @@ export interface Bench {
   play(name: string, args: JsonObject, turn: string | null, agent?: AgentRef): Promise<ToolResult>;
 }
 
-/** The cast's tools over a fresh table, with the shipped words; `world` is the chat's world, the invented one unless given. */
-export async function openBench(more: Partial<CastDeps> = {}, world?: WorldDoc): Promise<Bench> {
+/** The cast's tools over a fresh table, with the shipped words; `world` is the chat's world, the invented one unless given (null: none, the blank one played). */
+export async function openBench(more: Partial<CastDeps> = {}, world?: WorldDoc | null): Promise<Bench> {
   const t = await openTable(world);
   const deps: CastDeps = { store: t.store, writes: t.writes, files: shippedTexts(), sources: t.shelf.reader, now: () => 7, ...more };
   const tools = new Map((await castTools(deps)).map((x) => [x.name, x]));

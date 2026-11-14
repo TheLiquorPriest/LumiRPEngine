@@ -16,6 +16,8 @@ import { FIX_THINGS_MAX } from "../../src/shared/protocol";
 import type { StateView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
 import { notional } from "../../src/packs/economy/core/model";
+import { STARTER_WORLDS } from "../../src/packs/index";
+import { hashJson } from "../../src/shared/hash";
 import { type ChangeRow, worldState } from "../../src/store";
 import { body, CHAT, GUIDANCE, keyed, makeBed, OTHER, panel, refusal, USER, words } from "./bed";
 
@@ -231,6 +233,39 @@ describe("a tap that manages", () => {
     expect(body(await bed.undo(fixed.undo), "lre.chip")).toEqual({ applied: true, pending: false, said: words("opened_stay") });
   });
 
+  test("as a ✎ of cash for someone the world gave no accounts, changes the cash they keep as a field and makes nothing up, and its Undo is whole", async () => {
+    const bed = makeBed();
+    // The manor's guest, kept by a world made so that they hold no accounts and keep their cash as a field.
+    const doc = STARTER_WORLDS.mystery_manor?.("", "mystery_manor");
+    if (doc === undefined) throw new Error("no starter world mystery_manor");
+    for (const [id, e] of Object.entries(doc.entities)) if (e.kind === "account") delete doc.entities[id];
+    const guest = doc.entities[doc.pov];
+    if (guest === undefined) throw new Error("no point-of-view character");
+    guest.fields.cash = 4000;
+    const s = bed.store.user(USER);
+    const revision = hashJson(doc);
+    await bed.writes.run(() => {
+      s.putWorld(revision, doc);
+      s.createChat({ id: CHAT, world: doc.id, revision });
+    });
+    const newest = await bed.turn();
+    const before = s.headState(CHAT).state.world;
+
+    const fixed = body(await bed.send({ type: "lre.fix", entity: doc.pov, field: "cash", value: 5000 }), "lre.fix");
+    expect(s.changes(newest.id).map((c) => ({ op: c.op, source: c.source }))).toEqual([{ op: "set", source: "player" }]);
+    const after = s.headState(CHAT).state.world;
+    expect(after.entities[doc.pov]?.fields.cash).toBe(5000);
+    // Nothing else: no account, no balance, no other field of anyone's.
+    const was = after.entities[doc.pov];
+    if (was === undefined) throw new Error("no point-of-view character");
+    expect({ entities: { ...after.entities, [doc.pov]: { ...was, fields: { ...was.fields, cash: 4000 } } }, accounts: after.accounts }).toEqual({ entities: before.entities, accounts: before.accounts });
+
+    if (typeof fixed.undo !== "string") throw new Error("no Undo");
+    expect(body(await bed.undo(fixed.undo), "lre.chip")).toEqual({ applied: true, pending: false });
+    const undone = s.headState(CHAT).state.world;
+    expect({ entities: undone.entities, accounts: undone.accounts }).toEqual({ entities: before.entities, accounts: before.accounts });
+  });
+
   test("names no one the player character does not know, in the file's words, and records nothing", async () => {
     const bed = makeBed();
     await bed.plays("modern_slice_of_life");
@@ -246,6 +281,33 @@ describe("a tap that manages", () => {
     const before = banked(await bed.state());
     expect(refusal(await bed.send(PAY))).toEqual({ code: "unavailable", message: words("no_turn") });
     expect(banked(await bed.state())).toBe(before);
+  });
+
+  test("in a branch with no turn of its own changes nothing, neither there nor in the chat it was branched from, and says so; once the branch has played a turn, it lands on that turn", async () => {
+    const bed = makeBed();
+    const BRANCH = "chat-foxglove";
+    await bed.plays("modern_slice_of_life");
+    const shared = await bed.turn();
+    const s = bed.store.user(USER);
+    const reply = shared.message ?? "";
+    await bed.writes.run(() => {
+      s.branchChat({ id: BRANCH, from: CHAT, map: { [reply]: `b-${reply}` }, at: reply });
+      s.sync(BRANCH, [{ id: `b-${reply}`, user: false, hash: shared.hash ?? "" }]);
+    });
+    const before = banked(await bed.state());
+
+    expect(refusal(await bed.send(PAY, USER, BRANCH))).toEqual({ code: "unavailable", message: words("branch_no_turn") });
+    expect(s.changes(shared.id)).toEqual([]);
+    expect({ source: banked(await bed.state()), branch: banked(await bed.state({}, USER, BRANCH)) }).toEqual({ source: before, branch: before });
+
+    const own = await bed.turn(undefined, BRANCH);
+    const paid = body(await bed.send(PAY, USER, BRANCH), "lre.action");
+    expect(s.changes(own.id).filter((c) => c.source === "player").map((c) => c.op)).toEqual(["post", "economy.txn"]);
+    expect(s.changes(shared.id)).toEqual([]);
+    expect({ source: banked(await bed.state()), branch: banked(await bed.state({}, USER, BRANCH)) }).toEqual({ source: before, branch: before - 1500 });
+    if (!("undo" in paid) || typeof paid.undo !== "string") throw new Error("no Undo");
+    expect(body(await bed.undo(paid.undo, USER, BRANCH), "lre.chip").applied).toBe(true);
+    expect(banked(await bed.state({}, USER, BRANCH))).toBe(before);
   });
 
   test("on another user's chat is refused, and so is the Undo of another user's tap", async () => {

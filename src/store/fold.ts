@@ -23,6 +23,7 @@ import { own } from "../engine/pack-kit";
 import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
 import { initialState } from "../engine/world-state";
+import { CLOCK_SET, setsClock } from "./blank";
 import { applyFact } from "./facts";
 import { PRECISIONS, STORE_OPS, type Lane, type NotApplied, type Precision, type Report, type Source, type Standing, type StoreState } from "./types";
 
@@ -157,15 +158,18 @@ function lessExact(a: Precision | null, b: Precision | null): Precision | null {
 /**
  * Keeps which turn last touched what an applied event declares it writes (`touches`), and the world
  * when it moved the clock; and, for each part it writes (a field, a relation type, an aspect, the
- * world's time), the change that wrote it last. A balance sums every posting into it, so its
- * precision is the least exact of them.
+ * world's time), the change that wrote it last. A move of the clock that states the date and time it
+ * reaches (`settingClock`) is marked as the one that last set it, too. A balance sums every posting
+ * into it, so its precision is the least exact of them.
  */
 function markTouched(env: FoldEnv, state: StoreState, ev: LedgerEvent, item: Item, clockMoved: boolean): void {
   const mark = { turn: item.turn, n: item.n };
   const provenance = { standing: item.standing ?? null, source: item.source ?? null };
   if (clockMoved) {
     state.touched.world = mark;
-    (state.marks.world ??= {}).time = { ...mark, precision: item.precision ?? null, ...provenance };
+    const world = (state.marks.world ??= {});
+    world.time = { ...mark, precision: item.precision ?? null, ...provenance };
+    if (setsClock(item.value)) world[CLOCK_SET] = { ...world.time };
   }
   const touches = env.registry.get(ev.type)?.touches?.(ev) ?? [];
   for (const t of touches) {

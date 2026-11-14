@@ -28,11 +28,10 @@ export interface StoryAt {
 export function storyAt(user: UserStore, chat: string, turn: string | null): StoryAt {
   const messages = user.path(chat);
   const numbers = new Map(messages.map((m, i) => [m.message, i]));
-  const replies = new Map<string, number>();
-  messages.forEach((m, i) => {
-    if (m.turn !== null) replies.set(m.turn, i);
-  });
-  const onPath = messages.flatMap((m) => (m.turn === null ? [] : [m.turn]));
+  // The chat's line of turns, each at the reply it stands at (`UserStore.line`): a turn a branch shares stays on it after a continue.
+  const line = user.line(chat);
+  const replies = new Map(line.map((l) => [l.turn, l.at]));
+  const onPath = line.map((l) => l.turn);
   let turns = onPath;
   if (turn !== null) {
     const at = onPath.indexOf(turn);

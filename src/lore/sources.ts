@@ -71,6 +71,11 @@ export interface LoreWorlds {
   readonly registry: Registry;
   /** The chat's world at `turn`, with what that turn has staged, else at the head of its path; null when the chat has no world. */
   at(user: string, chat: string, turn?: string): WorldAt | null;
+  /**
+   * The name of the cast's character `said` names, by its id or its name, in the chat or one it was
+   * branched from; null when none is. Absent where no cast is kept.
+   */
+  castName?(user: string, chat: string, said: string): string | null;
 }
 
 /** An entry Lumiverse activated for a turn's prompt, as the turn's tag carries it. */
@@ -91,8 +96,12 @@ export interface LoreTurns {
   activated(user: string, chat: string, turn: string): Promise<readonly ActivatedEntry[] | null>;
 }
 
-/** The chats' worlds as the store folds them: the world document in force, the state and the horizon, at a turn or at the head. */
-export function storeWorlds(store: Store): LoreWorlds {
+/**
+ * The chats' worlds as the store folds them: the world document in force, the state and the horizon,
+ * at a turn or at the head. The cast's characters are the cast's: the host that keeps both gives
+ * `castName`, which the lore may not reach itself.
+ */
+export function storeWorlds(store: Store, castName?: LoreWorlds["castName"]): LoreWorlds {
   const registry = store.env.registry;
   return {
     registry,
@@ -107,6 +116,7 @@ export function storeWorlds(store: Store): LoreWorlds {
       if (world === undefined) throw new Error(`The world revision ${state.revision} that chat ${chat} stands on is not available, so its lore cannot be read.`);
       return { registry, world, state, horizon: folded.horizon };
     },
+    ...(castName !== undefined ? { castName } : {}),
   };
 }
 
@@ -126,7 +136,7 @@ export function storePath(store: Store): LorePath {
     turns(user, chat, turn) {
       const s = store.user(user);
       if (s.chat(chat) === null) return [];
-      const onPath = s.path(chat).flatMap((m) => (m.turn === null ? [] : [m.turn]));
+      const onPath = s.line(chat).map((l) => l.turn);
       if (turn === undefined) return onPath;
       const at = onPath.indexOf(turn);
       if (at >= 0) return onPath.slice(0, at + 1);

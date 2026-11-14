@@ -13,3 +13,4 @@ export { storyCoverage, type StoryCoverage } from "./cover";
 export { STORY_FACT_DEFAULTS, STORY_FACT_DEFS, storyFacts, type StoryFacts, type StoryFactSettings, type StoryFactsDeps } from "./facts";
 export { sceneSession, type SceneSession } from "./sessions";
 export { STORY_FACT_SETTING_DEFS, STORY_SETTING_DEFS, STORY_SETTINGS, STORY_SO_FAR_SETTING_DEFS } from "./settings";
+export { STORY_PATH, STORY_STRIKE_PATH, storyRoutes, type StoryAnswer, type StoryHorizonEntry, type StoryItemShown, type StoryList, type StoryListPart, type StoryRoutesDeps, type StoryStrike, type StoryStruck, type StoryWriteShown } from "./routes";

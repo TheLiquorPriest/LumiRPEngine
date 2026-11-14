@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Lore } from "../../src/lore/index";
-import { CHAT, dbFile, type LoreDb, loreDb, Shelf, startingWorlds, Tags, USER } from "./fixtures";
+import { ATLAS, CARD, CHAT, coastEntries, dbFile, type LoreDb, loreDb, Shelf, SONGS, startingWorlds, Tags, USER } from "./fixtures";
 
 const AT = { user: USER, chat: CHAT };
 
@@ -61,6 +61,18 @@ describe("one reader over the books and the world", () => {
     // The world's copy of the gull entry is not read: the entry is, as the atlas has it now.
     expect((await lore.search(AT, { text: "gull" })).map((h) => h.title)).toEqual(["Gulls nest on the harbor wall every spring…"]);
     expect(await lore.read(AT, ["w-gull_copy"])).toEqual([]);
+  });
+
+  test("an entry is read by its number only from a book the chat reads: another chat's books stay that chat's", async () => {
+    // The same user has a chat that reads only the songs.
+    const shelf = new Shelf(new Map([[USER, { books: [ATLAS, SONGS, CARD], entries: coastEntries(), attached: new Map([[CHAT, [ATLAS.id, CARD.id]], ["chat-songs", [SONGS.id]]]) }]]));
+    const both = new Lore({ books: shelf, worlds: startingWorlds(), turns: new Tags(), numbers: db.numbers });
+    const [lamp] = await both.search(AT, { text: "beacon" });
+    const [shanty] = await both.search(AT, { text: "shanty" });
+    expect([lamp?.source, shanty?.source]).toEqual(["Reed Coast Atlas", "Tavern Songs"]);
+    const songs = { user: USER, chat: "chat-songs" };
+    expect((await both.read(songs, [lamp?.id ?? "", shanty?.id ?? ""])).map((e) => e.title)).toEqual(["The Lamplighter's Shanty"]);
+    expect((await both.read(AT, [lamp?.id ?? ""])).map((e) => e.title)).toEqual(["The lamp room"]);
   });
 
   test("a secret mark in a book entry is left out of what is read and searched, never shown as its raw text", async () => {

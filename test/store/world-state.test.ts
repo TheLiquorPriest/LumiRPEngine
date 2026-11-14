@@ -4,7 +4,9 @@
 // gives what does not fit as a line with the query that opens it.
 
 import { describe, expect, test } from "bun:test";
+import { calendarOf, formatClock } from "../../src/engine/calendar";
 import { hashJson } from "../../src/shared/hash";
+import { timeDue } from "../../src/store/due";
 import { factStore } from "../../src/store/facts";
 import { openStore } from "../../src/store/store";
 import type { ChangeInput } from "../../src/store/types";
@@ -18,7 +20,7 @@ const HEADINGS = ["### At hand", "### Above it", "### Around it", "### The rest 
 /** The grid lane's map, as a test gives it: a map for the common room only. */
 const MAP: MapText = { text: ({ place }) => (place === "common_room" ? "+---+\n|W.B|\n+---+" : null) };
 /** What time brings due, as a test gives it: the market opening in the span asked for. */
-const DUE: DueSource = { due: (_state, span) => [{ at: span.from + 90, kind: "schedule", where: "place:market_square", who: ["tam"], what: "the market opens" }] };
+const DUE: DueSource = { due: (_state, span) => ({ items: [{ at: span.from + 90, kind: "schedule", where: "place:market_square", who: ["tam"], what: "the market opens" }], more: 0 }) };
 
 function played() {
   const ts = testStore();
@@ -200,5 +202,92 @@ describe("the world state", () => {
     s.addChanges(next.id, engine(tick(5)));
     s.tieTurn(next.id, { message: "m3", hash: hashOf("She waits."), date: 3 });
     expect(reports(s.beginTurn({ chat: "c", kind: "normal" }).id)).toEqual([]);
+  });
+});
+
+describe("what falls due in the world state", () => {
+  const DAY = 24 * 60;
+
+  /** Tam keeps the market from nine to five and the common room after; the vale's weather turns at six and at noon: four starts a day. */
+  function scheduledStore() {
+    const world = inventedWorld();
+    world.schedules = {
+      tam_day: { id: "tam_day", owner: "tam", target: "place", recurrence: { every: "day" }, slots: [{ start: "09:00", end: "17:00", value: "market_square" }, { start: "17:00", end: "22:00", value: "common_room" }] },
+      vale_weather: { id: "vale_weather", target: "weather", recurrence: { every: "day" }, slots: [{ start: "06:00", end: "12:00", value: "rain" }, { start: "12:00", end: "18:00", value: "sun" }] },
+    };
+    const ts = testStore({ world });
+    ts.s.createChat({ id: "c", revision: ts.revision });
+    return { ...ts, world };
+  }
+
+  /** The store's own due list, counting every start it makes. */
+  function counted(source: DueSource): { source: DueSource; made: () => number } {
+    let made = 0;
+    return {
+      source: {
+        due: (state, span, at, most) => {
+          const listing = source.due(state, span, at, most);
+          made += listing.items.length;
+          return listing;
+        },
+      },
+      made: () => made,
+    };
+  }
+
+  test("after a turn whose clock moved two days on, the next world state lists what fell due in those two days, and what is due from the new time on", () => {
+    const { s, store, world } = scheduledStore();
+    const first = play(s, "c", "m1", "Wren sits by the fire.", 1, []);
+    const since = s.headState("c").state.world.clock;
+    // The clock's ✎ two days on, as the play panels record it on the chat's newest turn.
+    s.addChanges(first.id, [{ lane: "engine", op: "clock", value: { type: "clock", minutes: 2 * DAY, cause: "advance" }, by: "player", source: "player" }]);
+    const next = s.beginTurn({ chat: "c", kind: "normal" });
+    const now = s.stateAt(next.id).state.world.clock;
+    expect(now).toBe(since + 2 * DAY);
+
+    const due = timeDue(store);
+    const block = worldState(s, { chat: "c", turn: next.id, layout: SHIPPED_LAYOUT, due });
+    const fell = due.due(s.stateAt(next.id).state, { from: since, to: now }, null, Number.POSITIVE_INFINITY).items;
+    expect(fell.length).toBe(8);
+    const calendar = calendarOf(world);
+    expect(block.sections.passed?.map((l) => [l.kind, l.fields.when, l.fields.what])).toEqual(fell.map((d) => ["fell_due", formatClock(calendar, d.at), d.what]));
+    const lines = block.text.split("\n");
+    const heading = lines.indexOf("### Fell due as the clock moved last turn");
+    expect(heading).toBeGreaterThanOrEqual(0);
+    expect(lines[heading + 2]).toBe(wordLine(SHIPPED_PART, block.sections.passed?.[0] as ViewLine) ?? "the layout words a fell_due line");
+    // What is due is still listed from the new time on.
+    expect(block.sections.due?.every((l) => typeof l.fields.after === "number" && l.fields.after > 0)).toBe(true);
+
+    // A turn whose clock did not move lists nothing as fallen due.
+    s.tieTurn(next.id, { message: "m2", hash: hashOf("She waits."), date: 2 });
+    const after = s.beginTurn({ chat: "c", kind: "normal" });
+    expect(worldState(s, { chat: "c", turn: after.id, layout: SHIPPED_LAYOUT, due }).sections.passed).toBeUndefined();
+  });
+
+  test("a due span of a century costs no more than a day's: the list stops at what the budget can show, and the rest is counted", () => {
+    const { s, store } = scheduledStore();
+    play(s, "c", "m1", "Wren sits by the fire.", 1, []);
+    const next = s.beginTurn({ chat: "c", kind: "normal" });
+    const state = s.stateAt(next.id).state;
+    const now = state.world.clock;
+    // A layout that holds the due section alone, and a budget a day's starts overflow: what it can show is the bound.
+    const layout = `${SHIPPED_LAYOUT.slice(0, SHIPPED_LAYOUT.indexOf("\n---\n") + 5)}{{#due}}\n{{due}}\n{{/due}}\n`;
+    const budget = { budget: 50 };
+    const listed = (dueAhead: number) => {
+      const due = counted(timeDue(store));
+      const block = worldState(s, { chat: "c", turn: next.id, layout, due: due.source, settings: { ...budget, dueAhead } });
+      return { made: due.made(), lines: block.sections.due ?? [] };
+    };
+    const day = listed(DAY);
+    const century = listed(100 * 365 * DAY);
+    expect(day.lines.at(-1)?.kind).toBe("left_out");
+    expect(century.made).toBeLessThanOrEqual(day.made);
+    // The rest is counted from what the store's due list says remains in the span.
+    const shown = century.lines.filter((l) => l.kind === "due").length;
+    const all = timeDue(store).due(state, { from: now, to: now + 100 * 365 * DAY }, null, 0).more;
+    expect(all).toBeGreaterThan(100 * 365 * 4 - 8);
+    expect(shown).toBeGreaterThan(0);
+    expect(century.lines.at(-1)?.kind).toBe("left_out");
+    expect(century.lines.at(-1)?.fields.n).toBe((all ?? 0) - shown);
   });
 });

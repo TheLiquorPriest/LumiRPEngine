@@ -98,6 +98,12 @@ export interface StoreOptions {
   handlerFailed?: (failure: { op: string; error: unknown }) => void;
 }
 
+/** One turn on a chat's line (`UserStore.line`): its id, and the place on the chat's path of the reply it stands at. */
+export interface LineTurn {
+  turn: string;
+  at: number;
+}
+
 export interface SessionRow {
   id: string;
   chat: string;
@@ -596,8 +602,9 @@ export class UserStore {
   /**
    * Ties a turn to the reply as saved: its message, the saved text's hash and the swipe's date. A
    * reply saved only in part is `cut`. A continue ties the same turn again to the longer text. The
-   * turn joins its chat's path at once where it extends it (a new reply after the head, or a swipe
-   * of the newest reply); anything else waits for the next comparison (`sync`).
+   * turn joins its chat's path at once where it extends it (a new reply after the head, a swipe of
+   * the newest reply, or a turn begun after the one its message holds: a branch's continue of a
+   * reply it shares); anything else waits for the next comparison (`sync`).
    */
   tieTurn(id: string, input: { message: string; hash: string; date?: number | null; status?: "done" | "cut" }): TurnRow {
     const t = this.turnOrThrow(id);
@@ -615,7 +622,11 @@ export class UserStore {
     return this.turnOrThrow(id);
   }
 
-  /** A tied turn joins its chat's path where it extends it: a new reply after the head, or a swipe of the newest reply. Inside a write. */
+  /**
+   * A tied turn joins its chat's path where it extends it: a new reply after the head, a swipe of the newest reply, or a turn begun
+   * after the turn its message holds, which takes that turn's place there with its own node, so the path still runs through that
+   * turn. Inside a write.
+   */
   private joinPath(t: TurnRow, entry: PathEntry): void {
     const chat = this.chatOrThrow(t.chat);
     const path = JSON.parse(chat.path) as PathEntry[];
@@ -626,7 +637,8 @@ export class UserStore {
       path.push(entry);
     } else {
       const before = path.slice(0, at).findLast((e) => e.node !== null)?.node ?? null;
-      if (before !== prev || path.slice(at + 1).some((e) => e.turn !== null)) return;
+      const goesOn = path[at]?.turn === t.parent && path[at]?.node === prev;
+      if ((before !== prev && !goesOn) || path.slice(at + 1).some((e) => e.turn !== null)) return;
       path[at] = entry;
     }
     this.db.run("UPDATE chat SET path = ?, head = ? WHERE user = ? AND id = ?", [JSON.stringify(path), t.node, this.id, t.chat]);
@@ -699,6 +711,36 @@ export class UserStore {
   }
 
   /**
+   * A chat's line of turns, oldest first (plan §6.3), each with the place on its path of the reply it stands at: the turns its path
+   * entries hold, and before one of them any turn its node stands after that no entry holds. That is a turn a branch shares, where
+   * the branch's own turn begun after it at the same reply (a continue of it) took its place in the entry: the shared turn stays on
+   * the branch's line, just before that turn, as it stays in the chain its state is folded along. Every reader of a chat's line of
+   * turns reads it here.
+   */
+  line(chat: string): LineTurn[] {
+    const path = this.path(chat);
+    const node = this.db.query<{ prev: string | null; turn: string }, [string, string]>("SELECT prev, turn FROM path_node WHERE user = ? AND key = ?");
+    const out: LineTurn[] = [];
+    let before: string | null = null;
+    path.forEach((e, at) => {
+      if (e.turn === null || e.node === null) return;
+      // Back from the node the entry's turn stands after to the entry before it; a chain that does not meet it adds nothing.
+      const between: string[] = [];
+      let key = node.get(this.id, e.node)?.prev ?? null;
+      while (key !== null && key !== before && between.length < path.length) {
+        const row = node.get(this.id, key);
+        if (row === null) break;
+        between.push(row.turn);
+        key = row.prev;
+      }
+      if (key === before) for (const turn of between.reverse()) out.push({ turn, at });
+      out.push({ turn: e.turn, at });
+      before = e.node;
+    });
+    return out;
+  }
+
+  /**
    * Compares the chat as shown with the turn tree, by ids and hashes only, and takes the shown path
    * as the chat's path (plan §6.3): messages gone leave it, the swipe showing on each reply is the
    * turn there, and turns after an earlier reply's flipped swipe stand rebased, their changes
@@ -740,27 +782,55 @@ export class UserStore {
       }
       after.push({ message: m.id, user: false, turn, node: null, own: null, hash: m.hash, date: date(m) });
     }
-    // Path nodes: the same as last time as long as the turns before them are; new ones after that.
+    // Path nodes: the same as last time as long as the turns before them are; new ones after that. A turn begun after the turn its
+    // own message holds (a branch's continue of a reply it shares) has a new node chained after one for that turn, which stays on the
+    // line (`line`). A turn whose parent stands at the reply before it (one rebased after a flipped swipe) is chained as it stands.
     const oldTurns = before.filter((e) => e.turn !== null);
+    const held = after.flatMap((e) => (e.turn === null ? [] : [{ turn: e.turn, message: e.message }]));
+    const parents = new Map(
+      this.db
+        .query<{ id: string; parent: string | null }, [string, string]>("SELECT t.id, t.parent FROM json_each(?2) j CROSS JOIN turn t ON t.user = ?1 AND t.id = j.value")
+        .all(this.id, JSON.stringify(held.map((h) => h.turn)))
+        .map((r) => [r.id, r.parent]),
+    );
+    const asked = held.flatMap((h, at) => {
+      const parent = parents.get(h.turn) ?? null;
+      return parent !== null && parent !== (held[at - 1]?.turn ?? null) ? [{ ...h, parent }] : [];
+    });
+    const atMessage = asked.length === 0 ? new Map<string, TurnRow[]>() : this.tiedTo(chat, asked.map((a) => a.message));
+    const standsAfter = new Map(asked.flatMap((a) => ((atMessage.get(a.message) ?? []).some((t) => t.id === a.parent) ? [[a.turn, a.parent] as const] : [])));
+    const depths = new Map(
+      this.db
+        .query<{ key: string; depth: number }, [string, string]>("SELECT n.key, n.depth FROM json_each(?2) j CROSS JOIN path_node n ON n.user = ?1 AND n.key = j.value")
+        .all(this.id, JSON.stringify(oldTurns.flatMap((e) => (e.node === null ? [] : [e.node]))))
+        .map((r) => [r.key, r.depth]),
+    );
     let prev: string | null = null;
     let depth = 0;
     let same = true;
+    let k = 0;
     const nodes: [string, string | null, string, number][] = [];
     const fresh: PathEntry[] = [];
     for (const e of after) {
       if (e.turn === null) continue;
-      const old = oldTurns[depth];
+      const old = oldTurns[k++];
       same &&= old !== undefined && old.turn === e.turn && old.node !== null;
-      if (same && old) {
+      if (same && old && old.node !== null) {
         e.node = old.node;
         e.own = old.own;
+        depth = (depths.get(old.node) ?? depth) + 1;
       } else {
+        const first = standsAfter.get(e.turn);
+        if (first !== undefined) {
+          const key = nodeKey(prev, first);
+          nodes.push([key, prev, first, depth++]);
+          prev = key;
+        }
         e.node = nodeKey(prev, e.turn);
-        nodes.push([e.node, prev, e.turn, depth]);
+        nodes.push([e.node, prev, e.turn, depth++]);
         fresh.push(e);
       }
       prev = e.node;
-      depth++;
     }
     const ownNodes = new Map(
       this.db
@@ -797,7 +867,8 @@ export class UserStore {
    * while open, and after it is tied too (a job's, a correction's). The state returned is the
    * store's own, held for the next call: read it, never change it. A job's changes are recorded with
    * the turn that started it and take effect once the job has ended (`endJob`), before the next turn
-   * to begin: the state returned for them is only the one they were checked on.
+   * to begin; until then only the job sees them: each is checked on the job's own state (`stateFor`),
+   * and the state returned for them is that one.
    */
   addChanges(turnId: string, inputs: readonly ChangeInput[]): { changes: ChangeRow[]; state: StoreState } {
     const turn = this.turnOrThrow(turnId);
@@ -807,7 +878,8 @@ export class UserStore {
     const ended = jobs.find((j) => this.db.query<{ job: string }, [string, string]>("SELECT job FROM job_end WHERE user = ? AND job = ?").get(this.id, j) !== null);
     if (ended !== undefined) throw new StoreInputError(`job ${ended} has ended: it records nothing more`);
     const inside = this.foldNode(turn.node);
-    const state = structuredClone(inside.folded.state);
+    const own = jobs.length === 1 && inputs.every((c) => c.job === jobs[0]) ? (jobs[0] ?? null) : null;
+    const state = structuredClone((own === null ? inside.folded : this.stateFor(turnId, own)).state);
     const existing = this.changes(turnId);
     // Groups that did not land earlier in the turn: a unit tied to one does not land either.
     const fell = new Set(existing.filter((c) => !c.applied).flatMap((c) => (isRecord(c.value) && typeof c.value.group === "string" ? [c.value.group] : [])));
@@ -873,6 +945,23 @@ export class UserStore {
   /** State at a turn, along the path it was made on; inside an open turn, with its staged changes. */
   stateAt(turnId: string): Folded {
     return this.foldNode(this.turnOrThrow(turnId).node).folded;
+  }
+
+  /**
+   * State as one reading sees it at a turn (plan §10.9): a job's (`job`) has the job's own changes so
+   * far on top of the turn's state (`stateAt`), in the order it recorded them, each that applied when
+   * recorded checked again there; nobody else sees them until the job ends on the path (`jobsPlaced`).
+   * With no job, the turn's state.
+   */
+  stateFor(turnId: string, job: string | null): Folded {
+    const at = this.stateAt(turnId);
+    if (job === null) return at;
+    const turn = this.turnOrThrow(turnId);
+    const own = this.db.query<ChangeDb, [string, string, string]>("SELECT * FROM change WHERE user = ? AND turn = ? AND job = ? AND applied = 1 ORDER BY ord").all(this.id, turnId, job).map(changeOf);
+    if (own.length === 0) return at;
+    const state = structuredClone(at.state);
+    applyChecked(this.store.env, state, own.map((c): Item => ({ op: c.op, value: c.value, turn: turnId, n: turn.depth + 1, by: c.by, precision: c.precision, standing: c.standing, source: c.source })), new Set());
+    return { ...at, state };
   }
 
   /**
@@ -1243,5 +1332,10 @@ export class UserStore {
   /** The tree over the state at a turn. */
   viewAt(turn: string): TreeView {
     return this.store.viewOf(this.stateAt(turn).state);
+  }
+
+  /** The tree as one reading sees it at a turn: a job's with the job's own changes on top (`stateFor`). */
+  viewFor(turn: string, job: string | null): TreeView {
+    return this.store.viewOf(this.stateFor(turn, job).state);
   }
 }

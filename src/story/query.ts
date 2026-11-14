@@ -88,7 +88,8 @@ async function query(args: JsonObject, call: StoryCall): Promise<Reply> {
     const list = (data[item.part] ??= []) as JsonValue[];
     list.push(itemView(record, item, clock, spans, history));
   }
-  if (args.due === true && clock !== null) data.now = clock.text(clock.now);
+  const now = args.due === true && clock !== null ? clock.text(clock.now) : null;
+  if (now !== null) data.now = now;
   reply.data(data);
   const rest = matches.slice(shown.length);
   if (rest.length > 0) reply.line("more", { count: rest.length, next: rest[0]?.id ?? "" });

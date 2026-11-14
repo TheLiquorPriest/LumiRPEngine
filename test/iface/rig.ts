@@ -49,7 +49,10 @@ export function world(): WorldDoc {
 
 /** What falls due, as the store would list it (`src/store/due.ts`): an arrival an hour into any span. */
 export const DUE: DueList = {
-  due: (_state, span, at) => [{ at: span.from + 60, kind: "arrival", where: at ?? "world", who: ["tam"], what: { arriving: "the carter from the far road" } }],
+  due: (_state, span, at, most) => {
+    const all = [{ at: span.from + 60, kind: "arrival", where: at ?? "world", who: ["tam"], what: { arriving: "the carter from the far road" } }];
+    return { items: all.slice(0, most), more: Math.max(0, all.length - most) };
+  },
 };
 
 export interface Rig {

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { AgentRef, JsonObject } from "rp-harness/contract";
 import { CAST_DEFAULTS, type CastSettings } from "../../src/cast/kit";
 import { memoriesNow, type MemoryNow } from "../../src/cast/memory";
+import { settingClock } from "../../src/store/blank";
 import { engine, tick } from "../store/fixtures";
 import { type Bench, dataOf, openBench, texts, wordsFromFiles } from "./rig";
 
@@ -136,5 +137,47 @@ describe("a character's memory", () => {
     const r = await b.call("remember", { memories: [{ text: "x", gist: "x" }] }, (await b.t.begin()).id);
     expect(r.error).toBe(true);
     expect(texts(r).join("\n")).toBe("remember is a character's own, and this agent plays no one.");
+  });
+
+  test("a chat that names no world keeps story time on the blank world it plays on: a memory is dated when written, leaves short term and fades, with no date shown while play has only moved the clock", async () => {
+    const b = await openBench({}, null);
+    await bram(b);
+    const written = b.t.s.headState("chat-a").state.world.clock;
+    await remember(b, [{ text: "Wren paid in old coin.", gist: "Old coin.", who: ["Wren"] }]);
+    expect(now(b).get("Old coin.")?.item.at).toBe(written);
+
+    await days(b, 10);
+    expect(now(b).get("Old coin.")).toMatchObject({ tier: "long", faint: true });
+    const r = await b.call("recall", { cue: "Wren" }, (await b.t.begin()).id, BRAM);
+    const [recalled] = dataOf(r).memories as JsonObject[];
+    expect(recalled).toMatchObject({ gist: "Old coin.", tier: "long" });
+    expect(recalled).not.toHaveProperty("date");
+  });
+
+  test("a date nobody set is shown to nobody: in a chat with no world, until play sets the clock, a memory and a history entry carry no date", async () => {
+    const b = await openBench({}, null);
+    await bram(b);
+    const [made] = await remember(b, [{ text: "Wren paid in old coin.", gist: "Old coin." }]);
+    expect(made).not.toHaveProperty("date");
+    const turn = await b.t.begin();
+    const r = await b.call("cast_update", { operations: [{ op: "history", who: "Bram", text: "Took the inn over from his aunt." }] }, turn.id);
+    expect((dataOf(r).operations as JsonObject[])[0]?.now).not.toHaveProperty("date");
+    // Its minutes are kept all the same, so it ages with the story.
+    expect(now(b).get("Old coin.")?.item.at).toBe(b.t.s.headState("chat-a").state.world.clock);
+  });
+
+  test("once play has set the clock to a date and time in a chat with no world, dates are shown; a move alone shows none", async () => {
+    const b = await openBench({}, null);
+    await bram(b);
+    await days(b, 1);
+    const [moved] = await remember(b, [{ text: "Wren paid in old coin.", gist: "Old coin.", who: ["Wren"] }]);
+    expect(moved).not.toHaveProperty("date");
+    const turn = await b.t.begin();
+    await b.t.writes.run(() => b.t.s.addChanges(turn.id, engine(settingClock(tick(DAY)))));
+    await b.t.tie(turn);
+    const [made] = await remember(b, [{ text: "Tam keeps the ferry.", gist: "The ferry.", who: ["Wren"] }]);
+    expect(made).toMatchObject({ date: expect.any(String) });
+    const r = await b.call("recall", { cue: "Wren" }, (await b.t.begin()).id, BRAM);
+    expect(dataOf(r).memories).toEqual(expect.arrayContaining([expect.objectContaining({ gist: "The ferry.", date: made?.date }), expect.objectContaining({ gist: "Old coin.", date: expect.any(String) })]));
   });
 });

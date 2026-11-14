@@ -13,6 +13,7 @@ export {
   IFACE_SETTINGS,
   type DueItem,
   type DueList,
+  type DueListing,
   type EngineDeps,
   type FactStore,
   type FactWrite,

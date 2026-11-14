@@ -211,10 +211,11 @@ export function keyedItemId(part: "premise" | "arc" | "record", key: string): st
 
 /**
  * Records `writes` on the writer's turn, in order, inside the caller's queued write: the rows as
- * stored, a new item's id given from its first row.
+ * stored, a new item's id given from its first row. Each takes the place after the turn's last write,
+ * the lore's overlays among them (`storyMark`).
  */
 export function writeStory(db: Database, writer: StoryWriter, writes: readonly StoryWrite[]): StoryRow[] {
-  let ord = (db.query<{ n: number | null }, [string, string]>("SELECT max(ord) AS n FROM story_entry WHERE user = ? AND turn = ?").get(writer.user, writer.turn)?.n ?? -1) + 1;
+  let ord = storyMark(db, writer.user, writer.turn) + 1;
   const put = db.query<unknown, [string, string, number, string, string, string, string | null, string | null, string | null, number]>(
     "INSERT INTO story_entry (user, turn, ord, part, item, value, by, agent, job, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
@@ -230,29 +231,36 @@ export function writeStory(db: Database, writer: StoryWriter, writes: readonly S
 /**
  * Takes back one agent's story rows on an open turn (every agent's when none is named), by the
  * agent's handle, inside the caller's queued write, beside the store's `dropStaged`: the lead
- * dropping a sub-agent's writes. How many went. A turn that is not open has nothing staged, and is
- * refused as the store refuses it.
+ * dropping a sub-agent's writes. The overlays it wrote through the story's write go with them. How
+ * many went. A turn that is not open has nothing staged, and is refused as the store refuses it.
  */
 export function dropStoryStaged(store: Store, user: string, turn: string, agent?: string): number {
   const row = store.user(user).turn(turn);
   if (row === null) throw new StoreInputError(`turn ${turn} is not there`);
   if (row.status !== "open") throw new StoreInputError(`turn ${turn} is ${row.status}: only an open turn's staged story rows can be taken back`);
-  const gone = agent === undefined ? store.db.run("DELETE FROM story_entry WHERE user = ? AND turn = ?", [user, turn]) : store.db.run("DELETE FROM story_entry WHERE user = ? AND turn = ? AND agent = ?", [user, turn, agent]);
-  return gone.changes;
-}
-
-/** The story's mark on a turn now: the place of its last row, -1 when it has none. A continue takes it as it begins, beside the store's mark. */
-export function storyMark(db: Database, user: string, turn: string): number {
-  return db.query<{ n: number | null }, [string, string]>("SELECT max(ord) AS n FROM story_entry WHERE user = ? AND turn = ?").get(user, turn)?.n ?? -1;
+  let gone = 0;
+  for (const table of ["story_entry", "lore_overlay"]) gone += (agent === undefined ? store.db.run(`DELETE FROM ${table} WHERE user = ? AND turn = ?`, [user, turn]) : store.db.run(`DELETE FROM ${table} WHERE user = ? AND turn = ? AND agent = ?`, [user, turn, agent])).changes;
+  return gone;
 }
 
 /**
- * Takes back a turn's story rows written after `after` (a `storyMark`), tied or not, inside the
- * caller's queued write, beside the store's `takeBack`: what a continue recorded when it saved
- * nothing. A job's rows are the job's and stay, as the store keeps a job's changes. How many went.
+ * The story's mark on a turn now: the place of its last write, -1 when it has none. A continue takes
+ * it as it begins, beside the store's mark. The lore's overlays are written through the story's own
+ * write and take their places among its rows, so the mark covers them too.
+ */
+export function storyMark(db: Database, user: string, turn: string): number {
+  return db.query<{ n: number | null }, [string, string]>("SELECT max(n) AS n FROM (SELECT max(ord) AS n FROM story_entry WHERE user = ?1 AND turn = ?2 UNION ALL SELECT max(ord) FROM lore_overlay WHERE user = ?1 AND turn = ?2)").get(user, turn)?.n ?? -1;
+}
+
+/**
+ * Takes back a turn's story rows and overlays written after `after` (a `storyMark`), tied or not,
+ * inside the caller's queued write, beside the store's `takeBack`: what a continue recorded when it
+ * saved nothing. A job's are the job's and stay, as the store keeps a job's changes. How many went.
  */
 export function takeBackStory(db: Database, user: string, turn: string, after: number): number {
-  return db.run("DELETE FROM story_entry WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL", [user, turn, after]).changes;
+  let gone = 0;
+  for (const table of ["story_entry", "lore_overlay"]) gone += db.run(`DELETE FROM ${table} WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL`, [user, turn, after]).changes;
+  return gone;
 }
 
 /**

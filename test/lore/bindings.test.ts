@@ -35,8 +35,9 @@ describe("bindings", () => {
   const bound = async () => (await index.loreMap({ ...AT, turn: "turn-1", messages: [] })).bound?.map((l) => [l.title, l.bound]);
 
   test("a run proposes them, the user's edit stands over the run's, and a run that redoes the entry leaves the edit alone", async () => {
-    const id = (await tide())?.id ?? "";
-    await index.write(AT, [{ id, kind: "item", line: "The bell on the quay.", defines: [{ what: "The Fishmarket", aspect: "sound" }], related: [] }], "indexer");
+    const first = await tide();
+    const id = first?.id ?? "";
+    await index.write(AT, [{ id, revision: first?.revision ?? "", kind: "item", line: "The bell on the quay.", defines: [{ what: "The Fishmarket", aspect: "sound" }], related: [] }], "indexer");
     expect([(await tide())?.defines, (await tide())?.edited]).toEqual([[{ what: "The Fishmarket", aspect: "sound" }], []]);
     expect(await bound()).toEqual([]);
 
@@ -49,8 +50,9 @@ describe("bindings", () => {
     const row = shelf.users.get(USER)?.entries.find((e) => e.id === "entry-tide");
     if (row === undefined) throw new Error("the tide bell is on the shelf");
     Object.assign(row, { content: "The bell rings at every tide now.", revision: 2 });
-    expect((await index.batch(AT)).entries.map((e) => e.id)).toContain(id);
-    await index.write(AT, [{ id, kind: "item", line: "The bell that rings every tide.", defines: [{ what: "The Lighthouse", aspect: "sound" }], related: [] }], "indexer");
+    const changed = (await index.batch(AT)).entries.find((e) => e.id === id);
+    expect(changed?.revision).toBe("2");
+    await index.write(AT, [{ id, revision: changed?.revision ?? "", kind: "item", line: "The bell that rings every tide.", defines: [{ what: "The Lighthouse", aspect: "sound" }], related: [] }], "indexer");
     const redone = await tide();
     expect([redone?.indexed, redone?.kind, redone?.line, redone?.defines]).toEqual([true, "rule", "The bell that rings every tide.", [{ what: "Tobin Reed", aspect: "duty" }]]);
 

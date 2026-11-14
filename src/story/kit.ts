@@ -11,7 +11,7 @@ import { placeOfEntity } from "../engine/scope";
 import { resolveTarget, typedSpan } from "../engine/time";
 import { described, Reply, type Writes } from "../iface/kit";
 import { type GuidanceFiles, Lines, toolText } from "../iface/texts";
-import type { Store } from "../store";
+import { clockRecorded, type Store } from "../store";
 import { storyAt } from "./path";
 import { type Span, type StoryItem, StoryRecord } from "./record";
 
@@ -32,7 +32,7 @@ export const STORY_ANSWERS = "story-answers";
  * database, so a call's writes stand or fall together. It answers with what it wrote, as data, or
  * with the entry it does not know and any near it.
  */
-export type LoreOverlay = (db: Database, input: { user: string; chat: string; turn: string; entry: string; note: string; by: string | null }) => { written: JsonObject } | { unknown: string; near?: string[] };
+export type LoreOverlay = (db: Database, input: { user: string; chat: string; turn: string; entry: string; note: string; by: string | null; agent: string | null; job: string | null; ord: number }) => { written: JsonObject } | { unknown: string; near?: string[] };
 
 /** What the story tools are given by the host (the turn lane). */
 export interface StoryDeps {
@@ -127,24 +127,28 @@ export interface StoryClock {
   now: number;
   /** A date and time of day at the scene's place (`YYYY-MM-DD HH:MM`), or words for a span from now; null when it reads as neither. */
   read(said: string): number | null;
-  text(at: number): string;
+  /** A time as answers show it; null while play has not set the clock (the blank world's, until a change moves it): a date nobody set is shown to nobody. */
+  text(at: number): string | null;
 }
 
 /**
  * The chat's story time at a turn, or at its head, read exactly as the engine's own tools read a time:
  * from the world the state is played on, the blank one for a chat that names none, and a world
  * attached later once the state is upgraded to it. Null for a chat the store does not hold, or a
- * state whose world it cannot find.
+ * state whose world it cannot find. A time is shown as text once the clock is a recorded value
+ * (`clockRecorded`); its minutes count from the first, so what falls due falls due all the same.
  */
 export function storyClock(store: Store, user: string, chat: string, turn: string | null): StoryClock | null {
   const u = store.user(user);
   if (u.chat(chat) === null) return null;
-  const state = (turn === null ? u.headState(chat) : u.stateAt(turn)).state.world;
+  const folded = (turn === null ? u.headState(chat) : u.stateAt(turn)).state;
+  const state = folded.world;
   const doc = store.env.worlds(state.revision);
   if (doc === undefined) return null;
   const world = store.env.registry.context(doc, state).world;
   const cal = calendarOf(world);
   const offset = (at: number): number => placeOffset(world, at, placeOfEntity(state, world.pov));
+  const shown = clockRecorded(folded);
   return {
     now: state.clock,
     read(said) {
@@ -157,21 +161,23 @@ export function storyClock(store: Store, user: string, chat: string, turn: strin
       const resolved = resolveTarget(store.env.registry, doc, state, target);
       return "code" in resolved ? null : resolved.to;
     },
-    text: (at) => formatClock(cal, at, offset(at)),
+    text: (at) => (shown ? formatClock(cal, at, offset(at)) : null),
   };
 }
 
 // ---------------------------------------------------------------- what answers show
 
-/** A write's fields as answers show them: messages by number, a due time in story time. */
+/** A write's fields as answers show them: messages by number, a due time in story time (left out while the clock shows no date). */
 export function valueView(record: StoryRecord, value: JsonObject, clock: StoryClock | null): JsonObject {
   const out: JsonObject = {};
   for (const [key, v] of Object.entries(value)) {
     if (key === "first") out.from = record.numberOf(v);
     else if (key === "last") out.to = record.numberOf(v);
     else if (key === "message") out.message = record.numberOf(v);
-    else if (key === "due" && typeof v === "number" && clock !== null) out.due = clock.text(v);
-    else out[key] = v;
+    else if (key === "due" && typeof v === "number" && clock !== null) {
+      const due = clock.text(v);
+      if (due !== null) out.due = due;
+    } else out[key] = v;
   }
   return out;
 }

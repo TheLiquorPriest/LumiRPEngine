@@ -17,9 +17,9 @@ import { hashParts } from "../shared/hash";
 import type { DomainId, EntityId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
 import type { LintIssue } from "../shared/protocol";
-import type { ScheduleDef, ScheduleSlot, WeightedValue, WorldDoc } from "../shared/world";
+import type { HolidayDef, Recurrence, ScheduleDef, ScheduleSlot, WeightedValue, WorldDoc } from "../shared/world";
 import type { RoutineDef } from "../shared/routines";
-import { calendarOf, clockAt, dateAt, dayIndexOfText, MINUTES_PER_DAY, parseHHMM, recursOn } from "./calendar";
+import { type Calendar, calendarOf, clockAt, dateAt, dayIndexOfText, daysFromCivil, holidayDay, MINUTES_PER_DAY, parseHHMM, recursOn } from "./calendar";
 import type { ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
 import { createRng, type Rng } from "./rng";
@@ -92,6 +92,254 @@ export function scheduleInstants(world: WorldDoc, schedules: readonly ScheduleDe
   }
   const order = new Map(schedules.map((s, i) => [s, i]));
   return out.sort((a, b) => a.at - b.at || (a.edge === b.edge ? 0 : a.edge === "end" ? -1 : 1) || (order.get(a.schedule) ?? 0) - (order.get(b.schedule) ?? 0) || a.slot - b.slot);
+}
+
+/** The day index on which a calendar year starts. */
+function yearStart(cal: Calendar, year: number): number {
+  return cal.system.abs(year, 1, 1) - cal.epochAbs;
+}
+
+/** The days of the month a `month` recurrence names, in a month of `length` days: one past its end falls on its last, a negative one counts back from it. */
+function monthDays(days: readonly number[], length: number): Set<number> {
+  const out = new Set<number>();
+  for (const d of days) {
+    const day = d > 0 ? Math.min(d, length) : length + d + 1;
+    if (Number.isInteger(day) && day >= 1 && day <= length) out.add(day);
+  }
+  return out;
+}
+
+/** The day a `year` recurrence runs on in a year: the date it starts from, or the epoch's; null in a year without that date. */
+function anniversary(cal: Calendar, rec: Recurrence, year: number): number | null {
+  const anchor = cal.system.date(cal.epochAbs + (rec.from ? dayIndexOfText(cal, rec.from) : 0));
+  return anchor.day <= cal.system.monthLength(year, anchor.month) ? cal.system.abs(year, anchor.month, anchor.day) - cal.epochAbs : null;
+}
+
+/** The first day from `day` to `end` that a recurrence's own rule names (every day, its weekdays, its days of the month, its date in the year), its dates and holidays aside; null when there is none. */
+function ruleDayFrom(cal: Calendar, rec: Recurrence, day: number, end: number): number | null {
+  const sys = cal.system;
+  switch (rec.every) {
+    case "week": {
+      if (!rec.weekdays || rec.weekdays.length === 0) return day <= end ? day : null;
+      const week = sys.weekdayNames.length;
+      const first = sys.weekday(cal.epochAbs + day);
+      for (let k = 0; k < week && day + k <= end; k++) if (rec.weekdays.includes((first + k) % week)) return day + k;
+      return null;
+    }
+    case "month": {
+      if (!rec.days || rec.days.length === 0) return day <= end ? day : null;
+      for (let d = day; d <= end; ) {
+        const date = sys.date(cal.epochAbs + d);
+        const length = sys.monthLength(date.year, date.month);
+        const next = Math.min(...[...monthDays(rec.days, length)].filter((m) => m >= date.day));
+        if (Number.isFinite(next)) return d + next - date.day <= end ? d + next - date.day : null;
+        d += length - date.day + 1;
+      }
+      return null;
+    }
+    case "year":
+      for (let year = sys.date(cal.epochAbs + day).year; yearStart(cal, year) <= end; year++) {
+        const at = anniversary(cal, rec, year);
+        if (at !== null && at >= day) return at <= end ? at : null;
+      }
+      return null;
+    default:
+      return day <= end ? day : null;
+  }
+}
+
+/** The first day from `day` to `last` that a recurrence runs on (`recursOn`), stepping from one day its rule names to the next rather than through every day; null when there is none. */
+function nextRecurring(cal: Calendar, rec: Recurrence, day: number, last: number): number | null {
+  const from = rec.from ? dayIndexOfText(cal, rec.from) : null;
+  const end = rec.until ? Math.min(last, dayIndexOfText(cal, rec.until)) : last;
+  for (let d = from !== null && from > day ? from : day; d <= end; ) {
+    const at = ruleDayFrom(cal, rec, d, end);
+    if (at === null) return null;
+    if (recursOn(cal, rec, at)) return at;
+    d = at + 1;
+  }
+  return null;
+}
+
+/** How many days from `p` to `q`, both in `year`, a recurrence's rule names, less the holidays it skips among them (a day two of them fall on, once). */
+function daysInYear(cal: Calendar, rec: Recurrence, year: number, p: number, q: number, skipped: readonly HolidayDef[]): number {
+  if (q < p) return 0;
+  const sys = cal.system;
+  let n = q - p + 1;
+  if (rec.every === "week" && rec.weekdays && rec.weekdays.length > 0) {
+    const week = sys.weekdayNames.length;
+    const first = sys.weekday(cal.epochAbs + p);
+    n = 0;
+    for (let w = 0; w < week; w++) {
+      const r = (w - first + week) % week;
+      if (rec.weekdays.includes(w) && r <= q - p) n += Math.floor((q - p - r) / week) + 1;
+    }
+  } else if (rec.every === "month" && rec.days && rec.days.length > 0) {
+    n = 0;
+    for (let month = sys.date(cal.epochAbs + p).month, last = sys.date(cal.epochAbs + q).month; month <= last; month++) {
+      const start = sys.abs(year, month, 1) - cal.epochAbs;
+      for (const d of monthDays(rec.days, sys.monthLength(year, month))) if (start + d - 1 >= p && start + d - 1 <= q) n++;
+    }
+  } else if (rec.every === "year") {
+    const at = anniversary(cal, rec, year);
+    n = at !== null && at >= p && at <= q ? 1 : 0;
+  }
+  const off = new Set<number>();
+  for (const h of skipped) {
+    const d = holidayDay(cal, h, p);
+    if (d !== null && d >= p && d <= q && ruleDayFrom(cal, rec, d, d) === d) off.add(d);
+  }
+  return n - off.size;
+}
+
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b);
+}
+
+/** Years after which a calendar's dates fall on the same weekdays again: the gregorian's 400 (146,097 days, whole weeks); a custom calendar's years are all one length, so as many as bring its week round. */
+function cycleYears(cal: Calendar): number {
+  if (cal.system.abs === daysFromCivil) return 400;
+  const week = cal.system.weekdayNames.length;
+  return week / gcd(week, (cal.system.abs(1, 1, 1) - cal.system.abs(0, 1, 1)) % week);
+}
+
+/** Whether a holiday falls on the same day in every cycle of the calendar: Easter does not, nor a day counted from it. */
+function comesRound(cal: Calendar, holiday: HolidayDef, seen: ReadonlySet<string> = new Set()): boolean {
+  const rule = holiday.rule;
+  if (rule.type === "easter") return cal.def.system !== "gregorian";
+  // A loop of days counted from one another gives no day in any year.
+  if (rule.type !== "relative" || seen.has(holiday.id)) return true;
+  const base = cal.def.holidays.find((h) => h.id === rule.to);
+  return base === undefined || comesRound(cal, base, new Set([...seen, holiday.id]));
+}
+
+/**
+ * How many days from `lo` to `hi` a recurrence runs on (`recursOn`), worked out a year at a time and,
+ * over more years than the calendar's cycle, from the cycle's own count: the work is the same for a
+ * thousand years as for one cycle. Null when it skips a holiday that does not come round with the
+ * calendar (Easter, or a day counted from it) over more years than one cycle: that could only be
+ * counted year by year.
+ */
+function recurringDays(cal: Calendar, rec: Recurrence, lo: number, hi: number): number | null {
+  const a = rec.from ? Math.max(lo, dayIndexOfText(cal, rec.from)) : lo;
+  const b = rec.until ? Math.min(hi, dayIndexOfText(cal, rec.until)) : hi;
+  if (b < a) return 0;
+  const first = cal.system.date(cal.epochAbs + a).year;
+  const last = cal.system.date(cal.epochAbs + b).year;
+  const cycle = cycleYears(cal);
+  const over = (skipped: readonly HolidayDef[]): number | null => {
+    const inYear = (year: number): number => daysInYear(cal, rec, year, Math.max(a, yearStart(cal, year)), Math.min(b, yearStart(cal, year + 1) - 1), skipped);
+    let n = inYear(first) + (last > first ? inYear(last) : 0);
+    const whole = Math.max(0, last - first - 1);
+    if (whole <= cycle) {
+      for (let year = first + 1; year < last; year++) n += inYear(year);
+      return n;
+    }
+    if (!skipped.every((h) => comesRound(cal, h))) return null;
+    // The whole years repeat the count of their first cycle; those past the last whole cycle, the count of its first years.
+    let round = 0;
+    let rest = 0;
+    for (let i = 0; i < cycle; i++) {
+      const count = inYear(first + 1 + i);
+      round += count;
+      if (i < whole % cycle) rest += count;
+    }
+    return n + Math.floor(whole / cycle) * round + rest;
+  };
+  const skipped = rec.except && rec.except.length > 0 ? cal.def.holidays.filter((h) => rec.except?.includes(h.id)) : [];
+  const steady = skipped.filter((h) => comesRound(cal, h));
+  if (steady.length === skipped.length) return over(skipped);
+  // A holiday skipped only takes days away: a recurrence that runs on none without it runs on none with it.
+  return over(steady) === 0 ? 0 : over(skipped);
+}
+
+/** A slot's starts as `slotStarts` makes them: the next one, the last day to look on, and how many it has made of how many there are. */
+interface SlotRun {
+  schedule: ScheduleDef;
+  order: number;
+  slot: number;
+  minute: number;
+  day: number;
+  at: number;
+  last: number;
+  made: number;
+  total: number | null;
+}
+
+/** The order `scheduleInstants` gives starts: by time, then schedule order, then slot order. */
+function before(x: SlotRun, y: SlotRun): boolean {
+  return x.at !== y.at ? x.at < y.at : x.order !== y.order ? x.order < y.order : x.slot < y.slot;
+}
+
+function pushRun(heap: SlotRun[], run: SlotRun): void {
+  let i = heap.push(run) - 1;
+  while (i > 0) {
+    const up = (i - 1) >> 1;
+    if (!before(heap[i] as SlotRun, heap[up] as SlotRun)) break;
+    [heap[i], heap[up]] = [heap[up] as SlotRun, heap[i] as SlotRun];
+    i = up;
+  }
+}
+
+function popRun(heap: SlotRun[]): SlotRun | undefined {
+  const top = heap[0];
+  const end = heap.pop();
+  if (end === undefined || end === top) return top;
+  heap[0] = end;
+  for (let i = 0; ; ) {
+    const l = 2 * i + 1;
+    const r = l + 1;
+    let least = i;
+    if (l < heap.length && before(heap[l] as SlotRun, heap[least] as SlotRun)) least = l;
+    if (r < heap.length && before(heap[r] as SlotRun, heap[least] as SlotRun)) least = r;
+    if (least === i) break;
+    [heap[i], heap[least]] = [heap[least] as SlotRun, heap[i] as SlotRun];
+    i = least;
+  }
+  return top;
+}
+
+/**
+ * The slot starts of the schedules inside `(from, to]` that `keep` lets through, in the order
+ * `scheduleInstants` gives them, at most `most`: made one at a time, soonest first, so a span of a
+ * thousand years costs what its first `most` do. How many more there are is counted for each slot
+ * from its recurrence, without making them (`recurringDays`); null when one of them could only be
+ * counted year by year.
+ */
+export function slotStarts(world: WorldDoc, schedules: readonly ScheduleDef[], from: number, to: number, most: number, keep: (schedule: ScheduleDef, slot: number) => boolean): { starts: ScheduleInstant[]; more: number | null } {
+  const cal = calendarOf(world);
+  const heap: SlotRun[] = [];
+  schedules.forEach((schedule, order) => {
+    const counted = new Map<string, number | null>();
+    schedule.slots.forEach((s, slot) => {
+      const minute = parseHHMM(s.start);
+      // The days on which this slot starts inside the span.
+      const first = Math.floor((from - minute + cal.epochMinute) / MINUTES_PER_DAY) + 1;
+      const last = Math.floor((to - minute + cal.epochMinute) / MINUTES_PER_DAY);
+      if (last < first) return;
+      const key = `${first}:${last}`;
+      if (!counted.has(key)) counted.set(key, recurringDays(cal, schedule.recurrence, first, last));
+      const total = counted.get(key) ?? null;
+      if (total === 0 || !keep(schedule, slot)) return;
+      const day = nextRecurring(cal, schedule.recurrence, first, last);
+      if (day !== null) pushRun(heap, { schedule, order, slot, minute, day, at: clockAt(cal, day, minute), last, made: 0, total });
+    });
+  });
+  const starts: ScheduleInstant[] = [];
+  while (starts.length < most) {
+    const run = popRun(heap);
+    if (run === undefined) break;
+    starts.push({ at: run.at, schedule: run.schedule, slot: run.slot, day: run.day, occurrence: run.day * run.schedule.slots.length + run.slot, edge: "start" });
+    run.made++;
+    const next = nextRecurring(cal, run.schedule.recurrence, run.day + 1, run.last);
+    if (next === null) continue;
+    run.day = next;
+    run.at = clockAt(cal, next, run.minute);
+    pushRun(heap, run);
+  }
+  let more: number | null = 0;
+  for (const run of heap) more = more === null || run.total === null ? null : more + run.total - run.made;
+  return { starts, more };
 }
 
 /** Whether another slot of the same schedule starts exactly where this end instant falls. */

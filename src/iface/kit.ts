@@ -60,9 +60,16 @@ export interface DueItem {
   what: JsonValue;
 }
 
-/** What time brings due (plan §6.4): the store's list (`src/store/due.ts`), for a span and a part of the tree, in time order. It applies none of it. */
+/** What a span brings due as far as the store lists it: the soonest, in time order, and how many more fall in the span. */
+export interface DueListing {
+  items: DueItem[];
+  /** How many more fall in the span than are listed; null when more do, but the store could count them only by going through the span year by year. */
+  more: number | null;
+}
+
+/** What time brings due (plan §6.4): the store's list (`src/store/due.ts`), for a span and a part of the tree, the soonest `most` in time order, the rest counted. It applies none of it. */
 export interface DueList {
-  due(state: StoreState, span: { from: number; to: number }, at: string | null): DueItem[];
+  due(state: StoreState, span: { from: number; to: number }, at: string | null, most: number): DueListing;
 }
 
 /** One thing found by words. */

@@ -11,7 +11,7 @@
 import type { TemplatePart } from "rp-harness";
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import type { Store } from "../store";
-import { CAST_DEFAULTS, type CastClock, castClock, type CastSettings } from "./kit";
+import { CAST_DEFAULTS, type CastClock, castClock, type CastSettings, datedAt } from "./kit";
 import { castAt } from "./path";
 import { baseOf, bindingsOf, type Casting, CASTINGS, type Character, castingInForce, CastRecord, chatLine, findCharacter, MIND_KINDS, nameKey, RELATIONSHIP_DIMENSIONS } from "./record";
 import { gameSide } from "./game";
@@ -40,6 +40,8 @@ export interface CastViewInput {
   chat: string;
   /** The turn read at; null at the chat's head. */
   turn: string | null;
+  /** The job the agent given the views works in, if it works in one: what that job wrote is read at once. Another job's takes effect as the store places it (`CastRecord.read`). */
+  job?: string | null;
   /** The character the views are of, by name or id. */
   character: string;
   /** Who is on stage, by name, for `relationships:present` and `what-comes-to-mind`. Who that is, is the caller's to say. */
@@ -95,7 +97,7 @@ function comesToMind(record: CastRecord, character: Character, clock: CastClock 
     id: m.item.id,
     ...(m.faint ? { gist: m.item.fields.gist ?? null, faint: true } : { text: m.item.fields.text ?? null }),
     ...(typeof m.item.fields.tone === "string" ? { tone: m.item.fields.tone } : {}),
-    ...(m.item.at !== null && clock !== null ? { date: clock.text(m.item.at) } : {}),
+    ...datedAt(clock, m.item.at),
   });
   const render = (k: number): string => {
     const shown = order.slice(0, k);
@@ -128,7 +130,7 @@ export async function castViews(names: readonly string[], input: CastViewInput):
   const user = input.store.user(input.user);
   const character = findCharacter(db, input.user, chatLine(user, input.chat), input.character);
   if (character === null) return asked.map((name) => ({ name, text: "" }));
-  const record = CastRecord.read(db, input.user, castAt(user, input.chat, input.turn));
+  const record = CastRecord.read(db, input.user, castAt(user, input.chat, input.turn), input.job ?? null);
   const clock = castClock(input.store, input.user, input.chat, input.turn);
   const settings: CastSettings = { ...CAST_DEFAULTS, ...(input.settings ?? {}) };
   const casting = castingInForce(record, character);
@@ -138,7 +140,7 @@ export async function castViews(names: readonly string[], input: CastViewInput):
     record
       .of(character.id, "growth")
       .filter((g) => g.fields.proposed !== true)
-      .map((g) => ({ ...g.fields, ...(g.at !== null && clock !== null ? { date: clock.text(g.at) } : {}) })),
+      .map((g) => ({ ...g.fields, ...datedAt(clock, g.at) })),
   );
 
   const out: CastView[] = [];
@@ -172,8 +174,8 @@ export async function castViews(names: readonly string[], input: CastViewInput):
       out.push({ name, text: layout === undefined ? "" : comesToMind(record, character, clock, head, [...people, ...(input.cues ?? [])], settings, tokens, layout) });
       continue;
     } else if (name === "unprocessed-perceptions") {
-      // In full, oldest first, each with its date in story time where the chat keeps a clock.
-      const perceptions = listed(untakenPerceptions(record, character.id).map((p) => ({ ...perceptionView({ record }, p), ...(p.at !== null && clock !== null ? { date: clock.text(p.at) } : {}) })));
+      // In full, oldest first, each with its date in story time where the clock shows one.
+      const perceptions = listed(untakenPerceptions(record, character.id).map((p) => ({ ...perceptionView({ record }, p), ...datedAt(clock, p.at) })));
       if (perceptions !== undefined) fields = { ...head, perceptions };
     } else if (name === "imported") {
       // Whole, word for word, each under its name, outside every budget, until it is marked filed.
@@ -190,8 +192,8 @@ export async function castViews(names: readonly string[], input: CastViewInput):
       const relationships = listed(shown);
       if (relationships !== undefined) fields = { ...head, relationships };
     } else if (name === "history") {
-      // The Author's record of their story, oldest first, each with its date in story time where the chat keeps a clock.
-      const history = listed(record.of(character.id, "history").map((h) => ({ ...h.fields, ...(h.at !== null && clock !== null ? { date: clock.text(h.at) } : {}) })));
+      // The Author's record of their story, oldest first, each with its date in story time where the clock shows one.
+      const history = listed(record.of(character.id, "history").map((h) => ({ ...h.fields, ...datedAt(clock, h.at) })));
       if (history !== undefined) fields = { ...head, history };
     } else if (name === "game-side") {
       const side = gameSide(input.store, input.user, input.chat, input.turn, character.name);
@@ -235,7 +237,7 @@ export async function castPresentViews(names: readonly string[], input: Omit<Cas
   const { db } = input.store;
   const user = input.store.user(input.user);
   const chats = chatLine(user, input.chat);
-  const record = CastRecord.read(db, input.user, castAt(user, input.chat, input.turn));
+  const record = CastRecord.read(db, input.user, castAt(user, input.chat, input.turn), input.job ?? null);
   // Each character on stage the cast holds, once, in the stage's order, with the casting in force.
   const onStage = new Map<string, Casting | null>();
   for (const said of input.present) {

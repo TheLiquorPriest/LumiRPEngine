@@ -8,6 +8,7 @@ import { validateToolArguments } from "@earendil-works/pi-ai";
 import type { HostTool, JsonObject } from "rp-harness/contract";
 import { WriteQueue } from "../../src/app/database";
 import { hashJson } from "../../src/shared/hash";
+import { LORE_MIGRATIONS } from "../../src/lore/schema";
 import { migrateStore, openStore, type ShownMessage, type Store, type TurnRow, type UserStore } from "../../src/store";
 import { STORY_MIGRATIONS } from "../../src/story/schema";
 import { storyAt } from "../../src/story/path";
@@ -62,7 +63,8 @@ export async function openTable(options: TableOptions = {}): Promise<Table> {
   const revision = hashJson(world);
   const db = new Database(":memory:");
   migrateStore(db);
-  for (const m of STORY_MIGRATIONS) if ("sql" in m) db.run(m.sql);
+  // The lore's overlays are written through the story's own write and take their places among its rows.
+  for (const m of [...STORY_MIGRATIONS, ...LORE_MIGRATIONS]) if ("sql" in m) db.run(m.sql);
   const store = openStore({ db, registry: registry(), worlds: (r) => (r === revision ? world : undefined) });
   const writes = new WriteQueue(db, 10);
   const s = store.user(USER);

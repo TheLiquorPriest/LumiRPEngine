@@ -38,13 +38,12 @@ describe("pass_time reads a time of day", () => {
     expect(clock(t)).toBe(at(1, 0));
   });
 
-  test("at 19:30: the two read as different times, so the end it names is applied and the other is reported", async () => {
+  test("at 19:30: the two read as different times, so the end it names is applied and the other is reported, each as how long from now on a clock nobody has set", async () => {
     const t = await blankAt(at(0, 19, 30));
     const r = await play(t, { op: "pass_time", for: "four hours", until: "midnight" });
     expect(r.error).toBeUndefined();
     expect(clock(t)).toBe(at(1, 0));
-    expect(r.reports).toHaveLength(1);
-    expect(r.reports?.[0]).toMatch(/^Operation 1 \(pass_time\): for reads as .*11:30.* and until as .*12:00.*; the clock was set by until\.$/);
+    expect(r.reports).toEqual(["Operation 1 (pass_time): for reads as 240 minutes from now and until as 270 minutes from now; the clock was set by until."]);
   });
 
   test("where one of for and until cannot be read, the other is applied and the one left out is reported with what it takes", async () => {

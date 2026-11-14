@@ -280,9 +280,10 @@ export class PlayService {
 
   private fix(user: string, chat: string, r: Request<"lre.fix">): Promise<string | null> {
     return this.tap(user, chat, r, ({ registry, world, state, seed }) => {
-      // Under the player's rules: a locked field is refused, as on today's ✎.
+      // Under the player's rules: a locked field is refused, as on today's ✎. A cash ✎ opens only what the world gave, here
+      // (`openGiven`), never drawing money for a holder it gave none.
       const edited = (ops: FixOp[], on: Readonly<WorldState> = state): LedgerEvent[] => {
-        const edit = resolveEdit(registry, world, on, ops, { gm: false, runSeed: seed });
+        const edit = resolveEdit(registry, world, on, ops, { gm: false, runSeed: seed, opened: true });
         if ("rejection" in edit) throw new Refused("validation", { words: edit.rejection.reason });
         return edit.events;
       };
@@ -350,6 +351,9 @@ export class PlayService {
       if (events.length === 0) return null;
       const on = headTurn(s, chat);
       if (on === null) throw new Refused("unavailable", { line: "no_turn" });
+      // A branch's newest turn may be the chat it was branched from's, whose state that chat shares (plan §6.3): kept there, the
+      // tap would change that chat too, and its Undo would not be this chat's.
+      if (s.turn(on)?.chat !== chat) throw new Refused("unavailable", { line: "branch_no_turn" });
       // Events that came with no unit of their own are one unit, so the tap lands and is undone whole, as an operation of the engine's tools is.
       const group = events.length > 1 && events.every((e) => e.group === undefined) ? `tap:${tap}` : undefined;
       const { lre: _lre, reqId: _reqId, chatId: _chatId, ...request } = r;

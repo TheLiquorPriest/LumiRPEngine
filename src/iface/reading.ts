@@ -74,9 +74,10 @@ export class Reading {
   ) {}
 
   /**
-   * The state the call reads: at its turn, with what the turn has staged, or at the chat's head when
-   * the call belongs to no turn. Null when the scope names no chat, or a turn, the store does not
-   * have, or the chat's world revision is not to hand: the answer says which.
+   * The state the call reads: at its turn, with what the turn has staged, and for a job's agent with
+   * what the job has recorded so far (plan §10.9: nobody else sees that until the job ends), or at the
+   * chat's head when the call belongs to no turn. Null when the scope names no chat, or a turn, the
+   * store does not have, or the chat's world revision is not to hand: the answer says which.
    */
   static of(call: Call): Reading | { missing: "chat" | "turn" | "world"; id: string } {
     const { store, env } = call.deps;
@@ -86,7 +87,7 @@ export class Reading {
       turn = store.turn(call.scope.turn);
       if (turn === null || turn.chat !== call.scope.chat) return { missing: "turn", id: call.scope.turn };
     }
-    const state = turn ? store.stateAt(turn.id).state : store.headState(call.scope.chat).state;
+    const state = turn ? store.stateFor(turn.id, call.agent.job ?? null).state : store.headState(call.scope.chat).state;
     const doc = env.worlds(state.world.revision);
     if (doc === undefined) return { missing: "world", id: state.world.revision };
     return new Reading(call, state, doc, env.registry.context(doc, state.world), turn);
@@ -113,7 +114,7 @@ export class Reading {
 
   /** The tree over this state. */
   view(): TreeView {
-    this.tree ??= this.turn ? this.call.deps.store.viewAt(this.turn.id) : this.call.deps.store.view(this.call.scope.chat);
+    this.tree ??= this.turn ? this.call.deps.store.viewFor(this.turn.id, this.call.agent.job ?? null) : this.call.deps.store.view(this.call.scope.chat);
     return this.tree;
   }
 

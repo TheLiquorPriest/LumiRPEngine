@@ -40,12 +40,14 @@ describe("taking cast rows back with the store's changes", () => {
 
     const mark = castMark(b.t.db, USER, turn.id);
     await b.call("perceive", { perceptions: [{ who: "Bram", reach: "whole", content: "Written by the continue." }] }, turn.id);
-    await b.call("perceive", { perceptions: [{ who: "Bram", reach: "part", content: "A job's." }] }, turn.id, { id: "gm-1", definition: "gm", job: "job-1" });
+    const job = { id: "gm-1", definition: "gm", job: "job-1" };
+    await b.call("perceive", { perceptions: [{ who: "Bram", reach: "part", content: "A job's." }] }, turn.id, job);
     await b.call("cast_update", { operations: [{ op: "cast", who: "Bram", as: "supporting" }] }, turn.id);
 
     const gone = await b.t.writes.run(() => takeBackCast(b.t.db, USER, turn.id, mark));
     expect(gone).toBe(2);
-    const call = (name: string, args: JsonObject, at: string | null) => b.call(name, args, at);
+    // The job's row stays: the job reads it at once (anyone else once the store places it, after the job ends).
+    const call = (name: string, args: JsonObject, at: string | null) => b.call(name, args, at, job);
     expect((await perceptionsOf(call, "Bram")).map((p) => p.content)).toEqual(["Before the continue.", "A job's."]);
     const bram = charactersOf(b.t.db, USER, [CHAT])[0]?.id ?? "";
     expect(b.t.record().items.get(castingItemId(bram))?.fields.as).toBe("principal");

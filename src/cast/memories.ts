@@ -14,7 +14,7 @@
 import type { JsonObject } from "rp-harness/contract";
 import type { Reply } from "../iface/kit";
 import { isRecord } from "../shared/json";
-import { type CastCall, type CastClock, type CastSettings, type CastToolSpec, readingOr } from "./kit";
+import { type CastCall, type CastClock, type CastSettings, type CastToolSpec, datedAt, readingOr } from "./kit";
 import { memoriesNow, type MemoryNow, strongestFirst, touches, weightOf } from "./memory";
 import { type CastWrite, writeCast } from "./record";
 import { listOf, notAnItem, ownIds, readFields, type Self, selfOr, strangers, unchecked } from "./self";
@@ -28,7 +28,7 @@ export function memoryView(m: MemoryNow, clock: CastClock | null): JsonObject {
     tier: m.tier,
     ...(m.faint ? { gist: gist ?? null, faint: true } : { text: text ?? null, gist: gist ?? null }),
     ...rest,
-    ...(m.item.at !== null && clock !== null ? { date: clock.text(m.item.at) } : {}),
+    ...datedAt(clock, m.item.at),
   };
 }
 

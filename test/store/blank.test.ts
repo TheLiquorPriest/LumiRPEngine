@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { draftEvent, NO_DRAFT } from "../../src/engine/world-draft";
-import { BLANK_REVISION } from "../../src/store/blank";
+import { BLANK_REVISION, settingClock } from "../../src/store/blank";
 import { factStore } from "../../src/store/facts";
 import type { ChangeInput } from "../../src/store/types";
 import { worldState } from "../../src/store/world-state";
@@ -66,7 +66,7 @@ describe("a chat with no world", () => {
     expect(view.node("mara")?.facts.map((f) => f.value)).toEqual(["cropped short"]);
   });
 
-  test("is told no date, time zone or currency nobody set: the clock shows once play sets it, the rest once a world is attached", () => {
+  test("is told no date, time zone or currency nobody set: the clock shows once play sets it to a date and time, not when it only moves it; the rest once a world is attached", () => {
     const { s, first, revision, world } = chat();
     const horizon: ChangeInput = { lane: "story", op: "store.horizon", value: { list: ["loft"] }, by: "author", source: "author" };
     play(s, "c", "m1", "Mara climbs into the hayloft.", 1, [...first, horizon]);
@@ -76,9 +76,14 @@ describe("a chat with no world", () => {
     expect(keys("place:loft")).toEqual([]);
     expect(said()).not.toMatch(/· (time|time zone|currency):/);
 
-    // Play sets the clock: the time shows, with the turn that set it; still no time zone or currency.
-    const t2 = play(s, "c", "m2", "Night falls on the farm.", 2, engine(tick(600)));
-    expect(s.view("c").values("world").map((v) => [v.key, v.mark?.turn])).toEqual([["time", t2.id]]);
+    // Play moves the clock on: its date is still the one nobody chose, so no time shows.
+    play(s, "c", "m2", "The afternoon wears on.", 2, engine(tick(240)));
+    expect(keys("world")).toEqual([]);
+    expect(said()).not.toMatch(/· time:/);
+
+    // Play sets the clock to a date and time: the time shows, with the turn that set it; still no time zone or currency.
+    const t3 = play(s, "c", "m3", "Night falls on the farm.", 3, engine(settingClock(tick(600))));
+    expect(s.view("c").values("world").map((v) => [v.key, v.mark?.turn])).toEqual([["time", t3.id]]);
     expect(keys("place:loft")).toEqual(["time"]);
     const text = said();
     expect(text).toMatch(/· time: /);
@@ -86,7 +91,7 @@ describe("a chat with no world", () => {
 
     // A world attached: its time zone and currency are recorded values from then on.
     const merge = Object.fromEntries(Object.keys(world.entities).map((id) => [id, { entity: "take" }]));
-    play(s, "c", "m3", "The vale comes into view.", 3, [{ lane: "engine", op: "store.marker", value: { kind: "migrate", to: revision, merge }, by: "player", source: "player" }]);
+    play(s, "c", "m4", "The vale comes into view.", 4, [{ lane: "engine", op: "store.marker", value: { kind: "migrate", to: revision, merge }, by: "player", source: "player" }]);
     expect(keys("world")).toEqual(["time", "time_zone", "currency"]);
     expect(keys("place:loft")).toContain("time_zone");
   });

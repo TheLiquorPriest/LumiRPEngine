@@ -8,6 +8,8 @@ import { createFolderHost } from "rp-harness/hosts/folder";
 import { addCharacter, bindSource, castingItemId, charactersOf, type CastWrite, relationshipItemId, sourceKey, writeBase } from "../../src/cast/record";
 import { CAST_VIEWS, type CastViewInput, type CastViewName, castViews } from "../../src/cast/views";
 import { type Bench, CHAT, dataOf, openBench, openTable, type Table, USER } from "./rig";
+import { settingClock } from "../../src/store/blank";
+import { engine, tick } from "../store/fixtures";
 
 const PROMPTS = resolve(import.meta.dir, "../../guidance/.prompts");
 
@@ -148,6 +150,25 @@ describe("the views a definition's given list names", () => {
     await t.showSwipe(played);
     expect((await castViews(["base"], input(t)))[0]?.text).toContain("Learned to say no.");
   });
+
+  test("in a chat with no world, a history line carries no date until play has set the clock to a date and time: a move alone gives none", async () => {
+    const b = await openBench({}, null);
+    const first = await b.t.begin();
+    await b.call("cast_update", { operations: [{ op: "cast", who: "Bram", as: "principal" }, { op: "history", who: "Bram", text: "Took the inn over from his aunt." }] }, first.id);
+    await b.t.tie(first);
+    const undated = [{ name: "history" as const, text: "### Bram's history in the story\n- Took the inn over from his aunt." }];
+    expect(await castViews(["history"], input(b.t))).toEqual(undated);
+
+    const moved = await b.t.begin();
+    await b.t.writes.run(() => b.t.s.addChanges(moved.id, engine(tick(60))));
+    await b.t.tie(moved);
+    expect(await castViews(["history"], input(b.t))).toEqual(undated);
+
+    const set = await b.t.begin();
+    await b.t.writes.run(() => b.t.s.addChanges(set.id, engine(settingClock(tick(60)))));
+    await b.t.tie(set);
+    expect((await castViews(["history"], input(b.t)))[0]?.text).toMatch(/^### Bram's history in the story\n- Took the inn over from his aunt\. \(.+\)$/);
+  });
 });
 
 describe("perceptions not yet taken in", () => {
@@ -172,13 +193,12 @@ describe("perceptions not yet taken in", () => {
         `[${ids[0]}] The cellar door (Sat 1 Mar 2031, 8:00 AM), message 1`,
         "- How much reached them: part",
         "- What reached them: Boots on the stairs, then the bolt.",
-        "- What they missed: Who it was.",
         "",
         `[${ids[1]}] (Sat 1 Mar 2031, 8:00 AM), message 3`,
         "- How much reached them: told",
         "- What reached them: Bram says the reeve came by.",
         "- What they now know: The reeve came by the inn.",
-        "- Told by Bram: He was there.",
+        "- Told by Bram",
       ].join("\n"),
     );
 
@@ -187,6 +207,25 @@ describe("perceptions not yet taken in", () => {
     await b.t.write(third, [{ character: odile, part: "memory", item: null, value: { text: "Someone bolted me in.", gist: "Bolted in the cellar.", from: [ids[0] ?? ""] } }], "character");
     expect(await given()).not.toContain(ids[0] ?? "");
     expect(await given()).toContain(`[${ids[1]}]`);
+  });
+
+  test("a character's own view of what it perceived leaves out what it missed and the verdict on whoever told it; the Author reads both with cast_query", async () => {
+    const b = await openBench();
+    const turn = await b.t.begin();
+    await b.call("cast_update", { operations: [{ op: "cast", who: "Bram", as: "principal" }] }, turn.id);
+    const missed = "The letter says the reeve will seize the inn at dawn.";
+    const verdict = "Odile is lying to him to cover her own debt.";
+    const r = await b.call("perceive", { perceptions: [{ who: "Bram", reach: "told", content: "Odile says the letter is only a bill.", missed, told_by: "Odile", reliability: verdict, knows: ["Wren got a letter."] }] }, turn.id);
+    expect(r.error).toBeUndefined();
+    await b.t.tie(turn);
+
+    const [own] = await castViews(["unprocessed-perceptions"], input(b.t));
+    expect(own?.text).toContain("- What reached them: Odile says the letter is only a bill.");
+    expect(own?.text).toContain("- What they now know: Wren got a letter.");
+    expect(own?.text).toContain("- Told by Odile");
+    expect(own?.text).not.toContain(missed);
+    expect(own?.text).not.toContain(verdict);
+    expect(dataOf(await b.call("cast_query", { who: "Bram", part: "perceptions" }, null))["perceptions"]).toEqual([expect.objectContaining({ missed, told_by: "Odile", reliability: verdict })]);
   });
 });
 

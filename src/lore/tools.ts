@@ -1,5 +1,6 @@
-// The lore's tools as the host hands them to RPH (plan §6.8, Appendix A `ToolsPort`), and the batch an
-// indexing run is given by name (`index:batch`, the indexer's `given:`). As with the engine's and the
+// The lore's tools as the host hands them to RPH (plan §6.8, Appendix A `ToolsPort`), the batch an
+// indexing run is given by name (`index:batch`, the indexer's `given:`), and the lore a character's
+// agent is given as its own (`index:known-to-self`, the character's `given:`). As with the engine's and the
 // story's tools, code holds a tool's name, family, tier, lane and the shape of its arguments; its
 // description and each argument's text are its file in `.tools/`, and every sentence of an answer is
 // a line of `.prompts/lore-answers.md`. An answer is data plus those lines. The lore may not reach the
@@ -11,7 +12,7 @@
 // definition's (`.agents/indexer.md`); nothing here starts one.
 
 import type { Fields, Guidance, LinesPart } from "rp-harness";
-import type { HostTool, JsonObject, JsonSchema, JsonValue, ToolContent, ToolCtx, ToolResult } from "rp-harness/contract";
+import type { AgentRef, HostTool, JsonObject, JsonSchema, JsonValue, ToolContent, ToolCtx, ToolResult } from "rp-harness/contract";
 import type { IndexedEntry, LoreBinding, LoreIndex, LoreIndexInput } from "./indexing";
 import type { LoreAt } from "./lore";
 
@@ -20,6 +21,9 @@ export const LORE_ANSWERS = "lore-answers";
 
 /** The name an agent is given the next batch by: a host's name, since RPH reads every `lore:` name as a lore entry. */
 export const LORE_BATCH = "index:batch";
+
+/** The name a character's agent is given the lore its character knows by: a host's name, for the same reason. */
+export const LORE_KNOWN = "index:known-to-self";
 
 /** The lore's lane, under which the user's Auto / Confirm / Never applies to its writes. */
 export const LORE_LANE = "lore";
@@ -64,6 +68,7 @@ export function entryFields(lines: LinesPart | undefined, e: IndexedEntry): Fiel
     related: listField(e.related),
     indexed: e.indexed,
     stale: e.stale,
+    revision: e.revision,
   };
 }
 
@@ -88,6 +93,25 @@ export function batchText(lines: LinesPart | undefined, batch: { entries: readon
 /** The `index:batch` block for a scope: the next batch of the chat's lore, worded by the lines in force. */
 export async function loreBatchBlock(index: LoreIndex, at: LoreAt, guidance: Guidance): Promise<string> {
   return batchText(await loreLines(guidance), await index.batch(at));
+}
+
+/**
+ * The `index:known-to-self` block for an agent: the lore bound as known to the character it plays
+ * (`LoreIndex.knownTo`), each entry's line and its text, worded by the lines in force; the part's line
+ * that says there is none, when none is. Nothing for an agent that plays no one in the chat's world.
+ */
+export async function loreKnownBlock(index: LoreIndex, at: LoreAt, agent: AgentRef, guidance: Guidance): Promise<string> {
+  const known = agent.plays === undefined ? null : await index.knownTo(at, agent.plays);
+  if (known === null) return "";
+  const lines = await loreLines(guidance);
+  if (known.length === 0) return loreLine(lines, "known_none") ?? "";
+  const out: string[] = [];
+  for (const e of known) {
+    const fields = { id: e.id, title: e.title, source: e.source, keys: listField(e.keys), text: e.text };
+    const parts = ["known_entry", "known_text"].flatMap((name) => loreLine(lines, name, fields) ?? []);
+    if (parts.length > 0) out.push(parts.join("\n"));
+  }
+  return out.join("\n\n");
 }
 
 // ---------------------------------------------------------------- answers
@@ -155,7 +179,7 @@ function described(properties: Readonly<Record<string, JsonObject>>, required: r
 
 const TEXT: JsonObject = { type: "string" };
 
-/** Reads one entry a run handed back: its lines, or what of it cannot be read. */
+/** Reads one entry a run handed back: its lines and the revision it read them from, or what of it cannot be read. */
 function readInput(raw: unknown): { input: LoreIndexInput } | { needs: string[] } | { unreadable: string; value: string } {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { unreadable: "entry", value: JSON.stringify(raw ?? null) };
   const given = raw as Record<string, unknown>;
@@ -163,8 +187,10 @@ function readInput(raw: unknown): { input: LoreIndexInput } | { needs: string[] 
   const id = text("id");
   const kind = text("kind");
   const line = text("line");
-  const needs = [...(id === null ? ["id"] : []), ...(kind === null ? ["kind"] : []), ...(line === null ? ["line"] : [])];
-  if (id === null || kind === null || line === null) return { needs };
+  // A book entry's revision is Lumiverse's number, which a model may send as one.
+  const revision = typeof given.revision === "number" && Number.isFinite(given.revision) ? String(given.revision) : text("revision");
+  const needs = [...(id === null ? ["id"] : []), ...(revision === null ? ["revision"] : []), ...(kind === null ? ["kind"] : []), ...(line === null ? ["line"] : [])];
+  if (id === null || revision === null || kind === null || line === null) return { needs };
   for (const name of ["defines", "related"]) if (given[name] !== undefined && !Array.isArray(given[name])) return { unreadable: name, value: JSON.stringify(given[name]) };
   const defines = ((given.defines as unknown[] | undefined) ?? []).flatMap((b): LoreBinding[] => {
     if (typeof b === "string" && b.trim() !== "") return [{ what: b.trim(), aspect: "" }];
@@ -173,7 +199,7 @@ function readInput(raw: unknown): { input: LoreIndexInput } | { needs: string[] 
     return typeof what === "string" && what.trim() !== "" ? [{ what: what.trim(), aspect: typeof aspect === "string" ? aspect.trim() : "" }] : [];
   });
   const related = ((given.related as unknown[] | undefined) ?? []).filter((r): r is string => typeof r === "string" && r.trim() !== "").map((r) => r.trim());
-  return { input: { id, kind, line, defines, related } };
+  return { input: { id, revision, kind, line, defines, related } };
 }
 
 export const LORE_INDEX_WRITE: LoreToolSpec = {
@@ -182,7 +208,7 @@ export const LORE_INDEX_WRITE: LoreToolSpec = {
   tier: "write",
   lane: LORE_LANE,
   // Nothing is held back by the schema: an entry that cannot be read is answered in the answers' words.
-  properties: { entries: { type: "array", items: { type: "object", properties: { id: TEXT, kind: TEXT, line: TEXT, defines: { type: "array", items: { type: "object", properties: { what: TEXT, aspect: TEXT } } }, related: { type: "array", items: TEXT } } } } },
+  properties: { entries: { type: "array", items: { type: "object", properties: { id: TEXT, revision: TEXT, kind: TEXT, line: TEXT, defines: { type: "array", items: { type: "object", properties: { what: TEXT, aspect: TEXT } } }, related: { type: "array", items: TEXT } } } } },
   required: [],
   async run(args, { at, ctx, deps, answer }) {
     const list = args.entries;

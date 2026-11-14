@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EntryNumbers, Lore, type LoreEntryFields, LoreProjection, LORE_MIGRATIONS, overlayWrite, type ProjectionBooks, storePath, storeWorlds } from "../../src/lore/index";
+import { EntryNumbers, Lore, type LoreEntryFields, LoreProjection, overlayWrite, type ProjectionBooks, storePath, storeWorlds } from "../../src/lore/index";
 import { CHAT, openTable, USER } from "../story/rig";
 import { Shelf, Tags } from "./fixtures";
 import { shippedGuidance } from "./shipped";
@@ -39,12 +39,10 @@ describe("the projection book", () => {
     const dir = mkdtempSync(join(tmpdir(), "rpe-lore-projection-"));
     const files = await shippedGuidance(dir, [CHAT, "chat-b"]);
     const t = await openTable();
-    await t.writes.run((d) => {
-      for (const m of LORE_MIGRATIONS) if ("sql" in m) d.run(m.sql);
-      // RPE has shown an agent the inn: it is e-1.
-      d.run("INSERT INTO lore_entry_number (user, n, entry) VALUES (?, 1, 'entry-inn')", [USER]);
-    });
-    const shelf = new Shelf(new Map([[USER, { books: [{ id: "book-inns", name: "Inns" }], entries: [{ id: "entry-inn", book: "book-inns", comment: "The Gilded Hart", content: "A thriving inn.", keys: ["hart", "inn"], secondaryKeys: [], disabled: false, constant: false, vectorized: false, extensions: {}, revision: 1 }], attached: new Map() }]]));
+    // RPE has shown an agent the inn: it is e-1.
+    await t.writes.run((d) => d.run("INSERT INTO lore_entry_number (user, n, entry) VALUES (?, 1, 'entry-inn')", [USER]));
+    // The chat reads the book of inns: an entry is read only from a book the chat reads.
+    const shelf = new Shelf(new Map([[USER, { books: [{ id: "book-inns", name: "Inns" }], entries: [{ id: "entry-inn", book: "book-inns", comment: "The Gilded Hart", content: "A thriving inn.", keys: ["hart", "inn"], secondaryKeys: [], disabled: false, constant: false, vectorized: false, extensions: {}, revision: 1 }], attached: new Map([[CHAT, ["book-inns"]]]) }]]));
     const lore = new Lore({ books: shelf, worlds: storeWorlds(t.store), turns: new Tags(), numbers: new EntryNumbers(t.db, t.writes) });
     const books = new StandInBooks();
     let on = false;
@@ -56,7 +54,7 @@ describe("the projection book", () => {
     await t.play();
     const turn = await t.begin();
     const write = overlayWrite(storeWorlds(t.store));
-    await t.writes.run((d) => write(d, { user: USER, chat: CHAT, turn: turn.id, entry: "e-1", note: "Its east wing burned tonight.", by: "author" }));
+    await t.writes.run((d) => write(d, { user: USER, chat: CHAT, turn: turn.id, entry: "e-1", note: "Its east wing burned tonight.", by: "author", agent: "author-1", job: null, ord: 0 }));
     await t.tie(turn);
 
     expect(await projection.refresh(USER, CHAT)).toEqual({ off: true, removed: null });

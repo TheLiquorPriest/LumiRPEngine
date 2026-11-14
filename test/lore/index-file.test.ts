@@ -41,12 +41,14 @@ describe("LORE-INDEX.md", () => {
   test("is written from the table when a run keeps lines, and again when the user edits them", async () => {
     const path = join(folder(), "LORE-INDEX.md");
     expect(existsSync(path)).toBe(false);
-    const lamp = (await index.entries(AT)).find((e) => e.title === "The lamp room");
+    const entries = await index.entries(AT);
+    const lamp = entries.find((e) => e.title === "The lamp room");
+    const tithe = entries.find((e) => e.id === "w-tithe_law");
     await index.write(
       AT,
       [
-        { id: "w-tithe_law", kind: "rule", line: "A tenth of every catch.", defines: [{ what: "The harbor steps", aspect: "rules" }], related: [lamp?.id ?? ""] },
-        { id: lamp?.id ?? "", kind: "place", line: "Green glass and whale oil.", defines: [], related: [] },
+        { id: "w-tithe_law", revision: tithe?.revision ?? "", kind: "rule", line: "A tenth of every catch.", defines: [{ what: "The harbor steps", aspect: "rules" }], related: [lamp?.id ?? ""] },
+        { id: lamp?.id ?? "", revision: lamp?.revision ?? "", kind: "place", line: "Green glass and whale oil.", defines: [], related: [] },
       ],
       "indexer",
     );

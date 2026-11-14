@@ -11,7 +11,7 @@
 import type { Database } from "bun:sqlite";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { FactDef, FactValue, Scope } from "rp-harness/contract";
+import type { FactDef, FactValue, LoreEntry, Scope } from "rp-harness/contract";
 import { writeWhole } from "../app/disk";
 import type { LoreWrites } from "./ids";
 import { LORE_INDEX_FILE, type LoreIndexFile, loreIndexText } from "./index-file";
@@ -62,9 +62,10 @@ export interface IndexedEntry extends LoreCatalogEntry, LoreIndexLines {
   edited: LoreIndexField[];
 }
 
-/** One entry's lines as a run hands them back. */
+/** One entry's lines as a run hands them back, with the revision of the entry it read them from, as its batch showed it. */
 export interface LoreIndexInput extends LoreIndexLines {
   id: string;
+  revision: string;
 }
 
 /** What became of one entry a run handed back: kept, for the revision it was given at; or not, its id naming no entry of the chat's lore. */
@@ -167,7 +168,7 @@ export class LoreIndex {
     };
     const inPrompt = first.inPrompt.map(described);
     const world = first.world.map(described);
-    const notes = overlayNotes(this.deps.db, ask.user, ask.chat, this.deps.path.turns(ask.user, ask.chat, ask.turn), inPrompt.map((l) => l.id));
+    const notes = overlayNotes(this.deps.db, ask.user, this.deps.path.turns(ask.user, ask.chat, ask.turn), inPrompt.map((l) => l.id));
     const changed = inPrompt.flatMap((l) => {
       const n = notes.get(l.id);
       return n === undefined ? [] : [{ ...l, notes: n }];
@@ -206,9 +207,24 @@ export class LoreIndex {
   }
 
   /**
-   * Keeps a run's lines for entries of the chat's lore, each for the revision the entry has now, in
-   * one write. The user's own lines are left as they are. An id that names no entry of the chat's
-   * lore keeps nothing, and says so.
+   * The lore bound as known to the character a reader plays (plan §9.4): the entries whose bindings
+   * name the world's person it is (`Lore.personPlayed`), by tree ref, id or name as the lore map
+   * matches a binding, as that character may read them (`Lore.readAs`), in the catalog's order. Null
+   * when the reader plays no one in the chat's world.
+   */
+  async knownTo(at: LoreAt, plays: string): Promise<LoreEntry[] | null> {
+    const person = this.deps.lore.personPlayed(at, plays);
+    if (person === null) return null;
+    const names = new Set([`entity:${person.id}`, person.id, person.name].map(foldName));
+    const bound = (await this.entries(at)).filter((e) => e.defines.some((b) => names.has(foldName(b.what))));
+    return bound.length === 0 ? [] : this.deps.lore.readAs(at, person.id, bound.map((e) => e.id));
+  }
+
+  /**
+   * Keeps a run's lines for entries of the chat's lore, each for the revision the run read the entry
+   * at, in one write: an entry changed since its batch was handed out keeps them as an earlier
+   * revision's, and is handed out again. The user's own lines are left as they are. An id that names
+   * no entry of the chat's lore keeps nothing, and says so.
    */
   async write(at: LoreAt, lines: readonly LoreIndexInput[], by: string): Promise<LoreIndexOutcome[]> {
     const catalog = new Map((await this.deps.lore.catalog(at)).map((e) => [e.id, e]));
@@ -222,7 +238,7 @@ export class LoreIndex {
         `INSERT INTO lore_index (user, world, entry, revision, kind, line, defines, related, by, written) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (user, world, entry) DO UPDATE SET revision = excluded.revision, kind = excluded.kind, line = excluded.line, defines = excluded.defines, related = excluded.related, by = excluded.by, written = excluded.written`,
       );
-      for (const { entry, lines: l } of kept) put.run(at.user, entry.world, entry.id, entry.revision, l.kind, l.line, JSON.stringify(l.defines), JSON.stringify(l.related), by, now);
+      for (const { entry, lines: l } of kept) put.run(at.user, entry.world, entry.id, l.revision, l.kind, l.line, JSON.stringify(l.defines), JSON.stringify(l.related), by, now);
     }, "keeping lore index lines");
     await this.writeFile(at);
     const rows = this.rows(at.user, kept.map((k) => k.entry));

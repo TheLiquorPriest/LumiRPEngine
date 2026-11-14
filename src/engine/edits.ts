@@ -73,6 +73,11 @@ export interface EditOptions {
   whyMax?: number;
   /** How long the GM's words in a minds edit may be (Settings → Minds → Lengths): a longer one is refused; absent, as an edit resolved again has them, kept as given. */
   mindLengths?: Readonly<MindLengths>;
+  /**
+   * The caller has opened the money the world gave the holder of a cash ✎ (the play panels, which draw nothing): a holder it gave
+   * no accounts keeps cash as the field it is, and none is drawn for them. Absent, the ✎ materializes the holder's money first.
+   */
+  opened?: boolean;
 }
 
 /**
@@ -286,7 +291,7 @@ function setField(reg: Registry, w: Working, entity: EntityId, field: FieldId, v
   // is the authored opening amount, so the accounts open first and the correction is measured from
   // them (the fix records both).
   if (field === "cash" && typeof value === "number") {
-    materializeIfNeeded(reg, w, entity, "money", opts.runSeed);
+    if (opts.opened !== true) materializeIfNeeded(reg, w, entity, "money", opts.runSeed);
     const corrected = optionalService(w.ctx, "economy.set_cash")?.(w.ctx, entity, value) ?? null;
     if (corrected !== null) return Array.isArray(corrected) ? applyAll(w, corrected) : corrected;
   }

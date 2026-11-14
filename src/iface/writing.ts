@@ -18,10 +18,13 @@ import { playedWorld } from "../engine/places-in-play";
 import type { Rejection } from "../engine/registry";
 import type { EntityState, WorldState } from "../engine/state";
 import { Working } from "../engine/working";
+import { clockRecorded } from "../store/blank";
 import type { ChangeInput, ChangeRow, Lane, StoreState } from "../store/types";
 import type { Call, Reply } from "./kit";
+import { fromNow } from "./ops-time";
 import { Reading } from "./reading";
 import { citeOf, FILLED_IN, type Provenance, provenanceData } from "./source";
+import type { Lines } from "./texts";
 
 /** One operation's part of a draft: what it is, its lane and provenance, and where its changes sit among the draft's. */
 export interface Recorded {
@@ -195,7 +198,7 @@ export async function commit<T>(call: Call, work: () => { out: T; draft: Draft |
     if (draft === null) return { out, done: null };
     const turn = draft.base.turn;
     if (turn === null) throw new Error("a draft is recorded only on a turn");
-    if (draft.inputs.length === 0) return { out, done: { rows: [], state: store.stateAt(turn.id).state } };
+    if (draft.inputs.length === 0) return { out, done: { rows: [], state: store.stateFor(turn.id, call.agent.job ?? null).state } };
     const { changes, state } = store.addChanges(turn.id, draft.inputs);
     return { out, done: { rows: changes, state } };
   }, call.tool);
@@ -261,9 +264,10 @@ function diffEntry(at: string, name: string, was: Record<string, JsonValue>, now
 /**
  * What the call changed, from the state it started on to the state recorded: each touched thing
  * with the keys that changed, as they were and as they are now; each place made or changed in the
- * world as the chat plays it; the clock; quests' stages; the horizon.
+ * world as the chat plays it; the clock (on one nobody has set, each time as how long it is from now,
+ * in the answers' `lines`); quests' stages; the horizon.
  */
-export function changedBetween(before: StoreState, after: StoreState, doc: WorldDoc, events: readonly JsonValue[]): JsonObject[] {
+export function changedBetween(before: StoreState, after: StoreState, doc: WorldDoc, events: readonly JsonValue[], lines: Lines): JsonObject[] {
   const out: JsonObject[] = [];
   const ids = new Set<string>();
   for (const ev of events) {
@@ -285,7 +289,8 @@ export function changedBetween(before: StoreState, after: StoreState, doc: World
   }
   if (before.world.clock !== after.world.clock) {
     const cal = calendarOf(doc);
-    out.push({ at: "world", name: doc.name, was: { time: formatClock(cal, before.world.clock) }, now: { time: formatClock(cal, after.world.clock) } });
+    const time = (clock: number): string => (clockRecorded(after) ? formatClock(cal, clock) : fromNow(lines, clock - after.world.clock));
+    out.push({ at: "world", name: doc.name, was: { time: time(before.world.clock) }, now: { time: time(after.world.clock) } });
   }
   for (const [track, t] of Object.entries(after.world.tracks)) {
     const was = own(before.world.tracks, track)?.stage ?? own(doc.tracks, track)?.start;
@@ -306,7 +311,7 @@ export function touchedRefs(changed: readonly JsonObject[]): string[] {
 /** The answer to a draft recorded: each operation with its lane and provenance, what changed, how it now stands, and what did not apply. */
 export function answerDraft(draft: Draft, done: Committed, reply: Reply, extra: { operations?: JsonObject[]; added?: ReadonlyMap<number, JsonObject> } = {}): Reply {
   const view = draft.call.deps.store.viewAt(draft.base.turn?.id ?? "");
-  const changed = changedBetween(draft.base.state, done.state, draft.base.doc, draft.inputs.map((i) => i.value));
+  const changed = changedBetween(draft.base.state, done.state, draft.base.doc, draft.inputs.map((i) => i.value), draft.base.lines);
   const operations: JsonObject[] = [...(extra.operations ?? [])];
   for (const rec of draft.recorded) {
     const rows = rec.inputs.map((i) => done.rows[i]).filter((r): r is ChangeRow => r !== undefined);

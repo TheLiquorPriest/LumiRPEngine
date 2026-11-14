@@ -70,10 +70,7 @@ export const WORLD_QUERY: ToolSpec = {
       const span = { from: clockText({ reading }, Math.min(from, to)), to: clockText({ reading }, Math.max(from, to)) };
       const due = call.deps.due;
       if (due === undefined) reply.data({ span }).line("due_unlisted", {});
-      else {
-        const items = due.due(reading.state, { from: Math.min(from, to), to: Math.max(from, to) }, at.ref);
-        reply.data({ span, due: listDue({ reading, reply, call }, items) });
-      }
+      else reply.data({ span, due: listDue({ reading, reply, call }, due.due(reading.state, { from: Math.min(from, to), to: Math.max(from, to) }, at.ref, call.settings.dueItems)) });
     }
     if (args.map === true) {
       const map = call.deps.map;

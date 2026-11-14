@@ -7,7 +7,10 @@
 // an entry known only to those who would know it is read by a character once that character knows
 // every person and place it links; a secret is read by its holders, gate or no gate, and by no other
 // character, ever; an entry an agent wrote that still awaits the user's review is the GM's alone. As
-// shipped the lead and the GM read every entry, a world entry marked with who may know it now.
+// shipped the lead and the GM read every entry, a world entry marked with who may know it now. The
+// character a reader plays is the world's person the cast would find as a secret's holder: the one
+// the agent's `plays` names by id or name, else the one named as the cast's character it names is.
+// Whoever reads, a book entry is read only from the books the chat reads, as its search reads them.
 //
 // The search is today's too (`loreSearch`), over both sources at once as today's lore tools search
 // (`backend/agents/tools/lore.ts:350-366`): the world's lookup table, aliases, keys, titles and topics,
@@ -28,7 +31,7 @@ import { bookLoreFieldsOf, engineWroteEntry, loreBooksOf, loreIsSecret, loreSour
 import { publicText } from "../shared/secret-marks";
 import type { LoreEntryDef, StepPurpose } from "../shared/world";
 import { bookEntryId, type EntryNumbers, loreRefOf, worldEntryId } from "./ids";
-import { type KeyMatching, keysIn, LUMIVERSE_KEY_MATCHING } from "./keys";
+import { foldName, type KeyMatching, keysIn, LUMIVERSE_KEY_MATCHING } from "./keys";
 import type { LoreMap, LoreMapLine } from "./map";
 import type { ActivatedEntry, LoreBook, LoreBookEntry, LoreBooks, LoreTurns, LoreWorlds, WorldAt } from "./sources";
 
@@ -117,6 +120,18 @@ function peopleOf(at: WorldAt): EntityId[] {
     const e = at.state.entities[id];
     return e !== undefined && kindIs(at.registry, at.world, e.kind, "person") && !isGone(at.state, id);
   });
+}
+
+/**
+ * The person of the world `said` names, as the cast finds a secret's holder (`cast/secrets.ts`
+ * `personNamed`): the one person with that id, else the one person of that name, names compared as the
+ * lore folds them. Null for no one, or for several so named.
+ */
+function personNamedIn(at: WorldAt, said: string): EntityId | null {
+  const people = Object.entries(at.state.entities).filter(([, e]) => kindIs(at.registry, at.world, e.kind, "person"));
+  if (people.some(([id]) => id === said.trim())) return said.trim();
+  const named = people.filter(([, e]) => foldName(e.name) === foldName(said));
+  return named.length === 1 ? (named[0]?.[0] ?? null) : null;
 }
 
 /**
@@ -226,9 +241,13 @@ export class Lore {
     return this.entries(at, ids);
   }
 
-  /** The entries asked for that `character` may know, in the order asked: world entries only, until a book entry's secrecy is carried. */
-  readAs(at: LoreAt, character: EntityId, ids: readonly string[]): Promise<LoreEntry[]> {
-    return this.entries(at, ids, character);
+  /**
+   * The entries asked for that the character a reader plays may know, in the order asked: world
+   * entries only, until a book entry's secrecy is carried. `plays` is who the reader plays as it was
+   * started (`personPlayed`); one that names no one in the chat's world reads nothing.
+   */
+  readAs(at: LoreAt, plays: string, ids: readonly string[]): Promise<LoreEntry[]> {
+    return this.entries(at, ids, plays);
   }
 
   /** Every entry of the chat's books and its world that the query finds, best first, as the lead and the GM search. */
@@ -236,9 +255,28 @@ export class Lore {
     return this.find(at, query);
   }
 
-  /** The world's entries that the query finds and `character` may know, best first. */
-  searchAs(at: LoreAt, character: EntityId, query: LoreQuery): Promise<LoreHit[]> {
-    return this.find(at, query, character);
+  /** The world's entries that the query finds and the character a reader plays (`readAs`) may know, best first. */
+  searchAs(at: LoreAt, plays: string, query: LoreQuery): Promise<LoreHit[]> {
+    return this.find(at, query, plays);
+  }
+
+  /**
+   * The world's person a reader plays, by `plays` as the agent was started, found as the cast finds a
+   * secret's holder: the person of the chat's world it names by id or by name; else the one named as
+   * the cast's character it names is (`LoreWorlds.castName`). Null when it names no one there, or several.
+   */
+  personPlayed(at: LoreAt, plays: string): { id: EntityId; name: string } | null {
+    const world = this.worlds.at(at.user, at.chat, at.turn);
+    return world === null ? null : this.personIn(at, world, plays);
+  }
+
+  private personIn(at: LoreAt, world: WorldAt, plays: string): { id: EntityId; name: string } | null {
+    let id = personNamedIn(world, plays);
+    if (id === null) {
+      const name = this.worlds.castName?.(at.user, at.chat, plays) ?? null;
+      if (name !== null) id = personNamedIn(world, name);
+    }
+    return id === null ? null : { id, name: world.state.entities[id]?.name ?? id };
   }
 
   /** The entries Lumiverse activated for the prompt of `at.turn`, in its order; none for no turn, or a turn with no tag. */
@@ -268,10 +306,14 @@ export class Lore {
     return this.worlds.at(at.user, at.chat, at.turn);
   }
 
-  private async entries(at: LoreAt, ids: readonly string[], as?: EntityId): Promise<LoreEntry[]> {
+  private async entries(at: LoreAt, ids: readonly string[], plays?: string): Promise<LoreEntry[]> {
     const refs = ids.map(loreRefOf);
-    const world = refs.some((ref) => ref?.kind === "world") ? this.worlds.at(at.user, at.chat, at.turn) : null;
+    const world = plays !== undefined || refs.some((ref) => ref !== null) ? this.worlds.at(at.user, at.chat, at.turn) : null;
+    const as = plays === undefined || world === null ? undefined : this.personIn(at, world, plays)?.id;
+    if (plays !== undefined && as === undefined) return [];
     const open = world === null ? null : loreGateReader(world.registry, world.world, world.state);
+    // A book entry is read only from a book the chat reads, as its search reads them.
+    let books: Promise<Set<string>> | null = null;
     let people: EntityId[] | null = null;
     const out: LoreEntry[] = [];
     for (const ref of refs) {
@@ -285,17 +327,20 @@ export class Lore {
       } else if (ref?.kind === "book" && as === undefined) {
         const id = this.numbers.entry(at.user, ref.n);
         const row = id === null ? null : await this.books.entry(at.user, id);
-        const book = row === null ? null : await this.books.book(at.user, row.book);
-        if (row !== null && book !== null) out.push(bookEntry(ref.n, row, book, bookTitle(row, this.settings.titleWords)));
+        books ??= this.booksOf(at, world).then((read) => new Set(read.map((b) => b.id)));
+        if (row === null || !(await books).has(row.book)) continue;
+        const book = await this.books.book(at.user, row.book);
+        if (book !== null) out.push(bookEntry(ref.n, row, book, bookTitle(row, this.settings.titleWords)));
       }
     }
     return out;
   }
 
-  private async find(at: LoreAt, query: LoreQuery, as?: EntityId): Promise<LoreHit[]> {
+  private async find(at: LoreAt, query: LoreQuery, plays?: string): Promise<LoreHit[]> {
     const limit = Math.max(0, Math.floor(query.limit ?? this.settings.searchLimit));
     const world = this.worlds.at(at.user, at.chat, at.turn);
-    if (limit === 0 || (as !== undefined && world === null)) return [];
+    const as = plays === undefined || world === null ? undefined : this.personIn(at, world, plays)?.id;
+    if (limit === 0 || (plays !== undefined && as === undefined)) return [];
     const asked = (source: string): boolean => query.sources === undefined || query.sources.includes(source);
     const lore: Record<string, LoreEntryDef> = {};
     const found = new Map<string, Found>();

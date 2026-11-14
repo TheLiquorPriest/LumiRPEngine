@@ -5,7 +5,8 @@
 //   lore_index         what an indexing run wrote of each entry, and the user's own edits over it,
 //                      with the entry's revision the run read (`indexing.ts`)
 //   lore_overlay       the Author's notes that a chat's story has moved past part of an entry, each
-//                      tied to the turn that wrote it (`overlays.ts`)
+//                      tied to the turn that wrote it, the agent and the job that wrote it, and its
+//                      place among the turn's story rows (`overlays.ts`)
 //   lore_proposal      an agent's draft of a new entry or of an edit to one, until the user decides
 //   lore_write         every write RPE made to the user's books, with the entry before and after, so
 //                      it can be put back (`proposals.ts`)
@@ -123,5 +124,19 @@ CREATE INDEX lore_write_user ON lore_write (user, id);
   written INTEGER,
   PRIMARY KEY (user, chat)
 )`,
+  },
+  {
+    version: 6,
+    name: "overlays by writer and place",
+    // An overlay is written through the story's own write: `agent` and `job` are the writer's, as on a
+    // story row, and `ord` its place among the turn's story rows, so a dropped sub-agent and a continue
+    // that saved nothing take it back with them. One written before it has no place (-1): it stands
+    // before every row of its turn. Overlays are read by the turns of a path, as the story's rows are.
+    sql: `
+ALTER TABLE lore_overlay ADD COLUMN agent TEXT;
+ALTER TABLE lore_overlay ADD COLUMN job TEXT;
+ALTER TABLE lore_overlay ADD COLUMN ord INTEGER NOT NULL DEFAULT -1;
+CREATE INDEX lore_overlay_turn ON lore_overlay (user, turn, ord);
+`,
   },
 ];
