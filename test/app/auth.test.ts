@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { App, RunningServer } from "../../src/app";
-import { PAGE_TOKEN_PATH, rawRoute, route } from "../../src/app";
+import { AuthRefused, rawRoute, route } from "../../src/app";
 import { isRecord } from "../../src/shared/json";
 import { bearer, type Bed, makeBed, makeKey, OWNER } from "./helpers";
 
@@ -71,11 +71,7 @@ describe("auth", () => {
   });
 
   test("a page token works for its user until it expires, and is refused for another user", async () => {
-    const extension = bearer(await makeKey(app, "extension"));
-    const ask = (user: string, headers = extension) => fetch(`${server.url}${PAGE_TOKEN_PATH}`, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ user }) });
-    const minted = await ask(OWNER);
-    expect(minted.status).toBe(200);
-    const { token, expires } = (await minted.json()) as { token: string; expires: number };
+    const { token, expires } = await app.auth.mintPageToken(OWNER, "extension");
     expect(expires).toBe(bed.clock.now + 30 * 60_000);
     const me = () => fetch(`${server.url}/api/v1/probe/me`, { headers: bearer(token) });
     expect(await (await me()).json()).toEqual({ user: OWNER });
@@ -83,18 +79,20 @@ describe("auth", () => {
     expect((await me()).status).toBe(200);
     bed.clock.now += 2 * 60_000;
     expect((await me()).status).toBe(401);
-    // Another user of the same Lumiverse gets none, and only the extension may ask.
-    const other = await ask("user-other");
-    expect(other.status).toBe(403);
-    expect(await other.json()).toMatchObject({ error: expect.stringContaining("only for the Lumiverse user this RPE belongs to") });
-    expect((await ask(OWNER, {})).status).toBe(401);
-    expect((await ask(OWNER, bearer(await makeKey(app, "provider")))).status).toBe(401);
+    // Another user of the same Lumiverse gets none.
+    const other = app.auth.mintPageToken("user-other", "extension");
+    await expect(other).rejects.toBeInstanceOf(AuthRefused);
+    await expect(other).rejects.toMatchObject({ status: 403, message: expect.stringContaining("only for the Lumiverse user this RPE belongs to") });
+  });
+
+  test("the extension takes a page's token only from its start, so no route of its own hands one out", async () => {
+    const extension = bearer(await makeKey(app, "extension"));
+    const asked = await fetch(`${server.url}/api/v1/ext/page-token`, { method: "POST", headers: { ...extension, "content-type": "application/json" }, body: JSON.stringify({ user: OWNER }) });
+    expect(asked.status).toBe(404);
   });
 
   test("a page token made for one user is refused once this RPE belongs to another", async () => {
-    const extension = bearer(await makeKey(app, "extension"));
-    const minted = await fetch(`${server.url}${PAGE_TOKEN_PATH}`, { method: "POST", headers: { ...extension, "content-type": "application/json" }, body: JSON.stringify({ user: OWNER }) });
-    const { token } = (await minted.json()) as { token: string };
+    const { token } = await app.auth.mintPageToken(OWNER, "extension");
     await app.close();
     const again = await bed.open({ areas: [probe], config: { lumiverse: { user: "user-next" } } });
     const restarted = await again.start();
@@ -122,7 +120,6 @@ describe("auth", () => {
     const page = await fetch(`${running.url}/api/v1/probe/me`, { headers: bearer(web) });
     expect(page.status).toBe(503);
     expect(await page.json()).toMatchObject({ error: expect.stringContaining("lumiverse.user") });
-    const extension = bearer(await makeKey(unowned, "extension"));
-    expect((await fetch(`${running.url}${PAGE_TOKEN_PATH}`, { method: "POST", headers: { ...extension, "content-type": "application/json" }, body: JSON.stringify({ user: OWNER }) })).status).toBe(503);
+    await expect(unowned.auth.mintPageToken(OWNER, "extension")).rejects.toMatchObject({ status: 503 });
   });
 });

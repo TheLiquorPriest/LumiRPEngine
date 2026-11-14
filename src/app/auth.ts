@@ -58,9 +58,16 @@ export function secretHash(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
 }
 
-/** Makes a key of `kind` and retires the one before it. Runs inside a transaction: the server's write queue's, or the command line's own. */
-export function insertKey(db: Database, kind: KeyKind, now: number): MadeKey {
-  const key = `${KEY_PREFIXES[kind]}${randomBytes(32).toString("hex")}`;
+/** A new key of `kind`, not yet in force. */
+export function newKeyText(kind: KeyKind): string {
+  return `${KEY_PREFIXES[kind]}${randomBytes(32).toString("hex")}`;
+}
+
+/**
+ * Puts a key of `kind` in force (a new one unless `key` is given, made by `newKeyText` for a key that had to be handed out first) and retires the one before it.
+ * Runs inside a transaction: the server's write queue's, or the command line's own.
+ */
+export function insertKey(db: Database, kind: KeyKind, now: number, key: string = newKeyText(kind)): MadeKey {
   db.run("UPDATE app_key SET retired = ? WHERE kind = ? AND retired IS NULL", [now, kind]);
   db.run("INSERT INTO app_key (hash, kind, last4, made) VALUES (?, ?, ?, ?)", [secretHash(key), kind, key.slice(-4), now]);
   return { kind, key, last4: key.slice(-4), made: now };

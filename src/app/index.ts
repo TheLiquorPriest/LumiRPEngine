@@ -3,7 +3,7 @@
 // switch's setter is not here: switching on anything that runs a command or calls out is the
 // command line's alone (cli.ts, switches.ts).
 
-export { lineLog, openApp, PAGE_TOKEN_PATH, STATUS_PATH, type App, type Area, type OpenAppOptions } from "./app";
+export { lineLog, openApp, STATUS_PATH, type App, type Area, type OpenAppOptions } from "./app";
 export { Auth, AuthRefused, bearerOf, KEY_PREFIXES, NO_OWNER, type KeyKind, type MadeKey, type PageToken, type TokenMaker } from "./auth";
 export {
   CONFIG_DEFAULTS,

@@ -24,7 +24,7 @@ export interface Bed {
   clock: { now: number };
   logs: string[];
   config(extra?: Record<string, unknown>): AppConfig;
-  open(options?: { version?: string; areas?: readonly Area[]; config?: Record<string, unknown> }): Promise<App>;
+  open(options?: { version?: string; areas?: readonly Area[]; config?: Record<string, unknown>; ui?: string | null }): Promise<App>;
   remove(): Promise<void>;
 }
 
@@ -42,7 +42,7 @@ export async function makeBed(): Promise<Bed> {
     logs,
     config,
     async open(options = {}) {
-      const app = await openApp({ paths, config: config(options.config), version: options.version ?? "1.0.0", areas: options.areas ?? [], now: () => clock.now, log: lineLog((line) => logs.push(line), () => clock.now) });
+      const app = await openApp({ paths, config: config(options.config), version: options.version ?? "1.0.0", areas: options.areas ?? [], ui: options.ui ?? null, now: () => clock.now, log: lineLog((line) => logs.push(line), () => clock.now) });
       opened.push(app);
       return app;
     },

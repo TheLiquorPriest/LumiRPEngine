@@ -5,7 +5,6 @@
 
 import type { Database } from "bun:sqlite";
 import type { JsonValue, Log, ModelsPort } from "rp-harness/contract";
-import { isRecord } from "../shared/json";
 import { Auth } from "./auth";
 import type { AppConfig, DataPaths } from "./config";
 import { prepareDataFolder } from "./config";
@@ -14,16 +13,15 @@ import { openDatabase, WriteQueue } from "./database";
 import { LiveHub, liveRoute } from "./live";
 import type { Migration, MigrationArea, MigrationOutcome } from "./migrations";
 import { migrate, Migrations } from "./migrations";
-import { route, RouteError, RouteTable } from "./routes";
+import { route, RouteTable } from "./routes";
 import { APP_MIGRATIONS } from "./schema";
 import { SecretsFile } from "./secrets";
 import type { RunningServer } from "./server";
 import { startServer } from "./server";
 import { guardSwitches, Switches } from "./switches";
+import { RPE_UI, uiRoute } from "./ui";
 
 export const STATUS_PATH = "/api/v1/status";
-/** Where the extension asks for a page token for a page of its user. */
-export const PAGE_TOKEN_PATH = "/api/v1/ext/page-token";
 
 /**
  * An area of RPE as the app mounts it: its tables, and what it adds once they are up to date (its
@@ -79,6 +77,8 @@ export interface OpenAppOptions {
   /** This build's version: the database is copied before the first migration of a new one. */
   version: string;
   areas?: readonly Area[];
+  /** The built web app's folder, served at `/ui/`: the one the build put beside the bundle when absent; null for none. */
+  ui?: string | null;
   now?: () => number;
   log?: Log;
 }
@@ -92,17 +92,12 @@ export function lineLog(write: (line: string) => void, now: () => number = Date.
   return { debug: line("debug"), info: line("info"), warn: line("warn"), error: line("error") };
 }
 
-function pageTokenAsk(value: unknown): { user: string } {
-  if (!isRecord(value) || typeof value.user !== "string" || value.user === "") throw new RouteError(400, 'Send {"user": "<the Lumiverse user id of the page>"}.');
-  return { user: value.user };
-}
-
-/** The app's own routes: its status, the page tokens the extension asks for, and the live socket. */
-function appRoutes(version: string, started: number, auth: Auth) {
+/** The app's own routes: its status, the live socket, and the web app. */
+function appRoutes(version: string, started: number, auth: Auth, ui: string | null) {
   return [
     route({ method: "GET", path: STATUS_PATH, access: "public", handle: () => ({ name: "rpe", version, started, belongsToUser: auth.owner !== null }) }),
-    route({ method: "POST", path: PAGE_TOKEN_PATH, access: "extension", body: pageTokenAsk, handle: ({ body }) => auth.mintPageToken(body.user, "extension") }),
     liveRoute,
+    uiRoute(ui),
   ] as const;
 }
 
@@ -131,7 +126,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   const routes = new RouteTable();
   const live = new LiveHub({ queueEvents: config.live.queueEvents, now });
   const secrets = new SecretsFile(paths.secrets);
-  routes.add("app", appRoutes(version, now(), auth));
+  routes.add("app", appRoutes(version, now(), auth, options.ui === undefined ? RPE_UI : options.ui));
   let running: RunningServer | null = null;
   let starting: Promise<RunningServer> | null = null;
   let closing: Promise<void> | null = null;

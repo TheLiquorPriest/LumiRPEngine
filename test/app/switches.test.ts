@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { App, RunningServer } from "../../src/app";
-import { connectionRoutes, METHODS, PAGE_TOKEN_PATH, route, RouteError } from "../../src/app";
+import { connectionRoutes, METHODS, route, RouteError } from "../../src/app";
 import { runCli } from "../../src/app/cli";
 import { isRecord } from "../../src/shared/json";
 import { bearer, type Bed, cliIo, makeBed, makeKey, OWNER, testModelLayer } from "./helpers";
@@ -82,8 +82,7 @@ describe("the switches", () => {
     ]);
 
     const extension = bearer(await makeKey(app, "extension"));
-    const minted = await fetch(`${server.url}${PAGE_TOKEN_PATH}`, { method: "POST", headers: { ...extension, "content-type": "application/json" }, body: JSON.stringify({ user: OWNER }) });
-    const token = ((await minted.json()) as { token: string }).token;
+    const { token } = await app.auth.mintPageToken(OWNER, "extension");
     const credentials = [{}, bearer(token), bearer(await makeKey(app, "web")), extension, bearer(await makeKey(app, "provider"))];
     const bodies = [
       { name: "waiting-one", state: "on" },
