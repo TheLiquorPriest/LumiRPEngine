@@ -5,7 +5,8 @@
 // it is that place's own grid while the coarse map keeps the place on its square for travel. Where
 // no place is drawn on that square, one is made there by the same event. Whoever stood on the coarse
 // square is taken off it (`space.pos`), since the room grid is where they stand now; the GM places
-// them. A square's width is the map's own cell size; nothing else of a grid's scale fits today's map.
+// them. A square's width is the map's own cell size, and the map says its own time step (`step`):
+// the one its square gives by the settings unless the laying names another.
 
 import type { PlaceId } from "../../shared/ids";
 import { hasOwn, type JsonObject } from "../../shared/json";
@@ -16,7 +17,7 @@ import { playedWorld } from "../../engine/places-in-play";
 import type { WorldState } from "../../engine/state";
 import { spotOf } from "../../packs/space/core/positions";
 import type { ChangeInput, Report } from "../../store/types";
-import { cellOf, GRID_DEFAULTS, indexOf, laidMetres, squareOf, type GridSettings, type Square } from "./grid";
+import { cellOf, GRID_DEFAULTS, indexOf, laidMetres, scaleOf, squareOf, type GridSettings, type Square, type TimeStep } from "./grid";
 import { draftChange, positionChange } from "./record";
 
 /** A grid to lay. */
@@ -30,6 +31,8 @@ export interface Laying {
   title?: string;
   /** A square's width in metres; a grid laid in play takes the settings' when absent. */
   metres?: number;
+  /** How time passes on it; the step its square gives by the settings when absent. */
+  step?: TimeStep;
 }
 
 /** A laying worked out: the changes to record in order (none when it cannot be laid), the place whose grid it is, and what does not add up. */
@@ -58,14 +61,17 @@ function layOn(world: WorldDoc, state: Readonly<WorldState>, played: WorldDoc, s
   const has = gridOf(played, scope);
   if (has) return refused(scope, { code: "has_grid", values: { place: scope, grid: has.id } });
   if (hasOwn(played.maps, laying.id) || hasOwn(played.grids, laying.id)) return refused(scope, { code: "id_taken", values: { id: laying.id } });
-  const map: MapDoc = {
+  const metres = laying.metres ?? laidMetres(settings);
+  const drawn: MapDoc = {
     id: laying.id,
     scope,
     ...(laying.title !== undefined ? { title: laying.title } : {}),
     layout: [...laying.rows],
     ...(laying.legend !== undefined ? { legend: laying.legend } : {}),
-    cellMeters: laying.metres ?? laidMetres(settings),
+    cellMeters: metres,
   };
+  // `step` is the map format's own field (`lre-map-v1`), which today's map type does not name.
+  const map: MapDoc = Object.assign(drawn, { step: laying.step ?? scaleOf(metres, settings).step });
   const { problems } = readMap(map);
   if (problems.length > 0) return { changes: [], scope, reports: problems.map((p) => ({ code: "bad_map", values: { at: p.path } })) };
   const changes = [...before, draftChange(world, state, { collection: "maps", id: laying.id, value: map as unknown as JsonObject })];

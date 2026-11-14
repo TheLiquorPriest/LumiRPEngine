@@ -1,16 +1,21 @@
 // The grid's face for the everyday operations (`world_apply`'s `move` and `place`; `GridMoves` in
 // `../kit.ts`): someone or something put on a square of the grid it stands on at its place, on the
 // free square nearest someone, or on a free square of a zone, as the `space.pos` event that
-// records it. A square is taken as the map prints it, [column, row] from 1.
+// records it, with what the answer says of it in the map's lines: for one that stood on the grid
+// before, the way it went and the time that took; and what does not add up where it now stands. A
+// square is taken as the map prints it, [column, row] from 1.
 
 import type { EntityId } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
 import { nearestMiddle, standingGrid } from "../../shared/grid";
 import { playedWorld } from "../../engine/places-in-play";
 import type { GridMoves } from "../kit";
-import { blockersOf, drawnOf, footprint, GRID_DEFAULTS, indexOf, lift, movingOf, squareAt, squareOf, standsAt, type Drawn, type GridSettings, type Moving, type Square } from "./grid";
+import { Lines } from "../texts";
+import { blockersOf, drawnOf, footprint, GRID_DEFAULTS, indexOf, lift, movingOf, place as putAt, squareAt, squareOf, standsAt, type Drawn, type GridSettings, type Moving, type Square } from "./grid";
 import { between } from "./measure";
+import { move } from "./path";
 import { positionEvent } from "./record";
+import { feetOf, reportFields, type Say, spotText, timeText, whoIs } from "./words";
 
 /** The squares nobody may be put on: what blocks the way, and every footprint on the grid. */
 function takenSquares(drawn: Drawn, moving: Moving): Set<number> {
@@ -20,7 +25,7 @@ function takenSquares(drawn: Drawn, moving: Moving): Set<number> {
 }
 
 /** The free square nearest `near`'s footprint (the lowest such square, row by row, among equals); null when none is free or `near` stands nowhere on the grid. */
-function beside(drawn: Drawn, moving: Moving, near: EntityId): Square | null {
+export function beside(drawn: Drawn, moving: Moving, near: EntityId): Square | null {
   if (standsAt(moving, near) === null) return null;
   const taken = takenSquares(drawn, moving);
   let best: Square | null = null;
@@ -38,22 +43,26 @@ function beside(drawn: Drawn, moving: Moving, near: EntityId): Square | null {
 }
 
 /** The free square of a zone nearest its middle; null when the zone has none free. */
-function inZone(drawn: Drawn, moving: Moving, zone: string): Square | null {
+export function inZone(drawn: Drawn, moving: Moving, zone: string): Square | null {
   const taken = takenSquares(drawn, moving);
   const free = (hasOwn(drawn.zones, zone) ? (drawn.zones[zone] ?? []) : []).filter((i) => !taken.has(i));
   const middle = nearestMiddle(free, drawn.width);
   return middle ? squareOf(middle) : null;
 }
 
-/** Placing on squares for the everyday operations, with the grid's settings. */
-export function gridMoves(settings: Readonly<GridSettings> = GRID_DEFAULTS): GridMoves {
+/**
+ * Placing on squares for the everyday operations, with what the answer says of it worded by
+ * `lines` (the map's part in force for the chat; with none, nothing is said), and the grid's
+ * settings. A square in a wall, or one with no way to it, is applied all the same and said.
+ */
+export function gridMoves(lines: Lines = Lines.none(), settings: Readonly<GridSettings> = GRID_DEFAULTS): GridMoves {
   return {
     place({ state, env, who, place, square, near, zone }) {
       const doc = env.worlds(state.world.revision);
       if (!doc) return { problem: "not_applicable", fields: { code: "no_world" } };
       const world = playedWorld(doc, state.world);
       const stand = standingGrid(world, place);
-      const drawn = stand ? drawnOf(world, stand.scope, settings) : null;
+      const drawn = stand ? drawnOf(world, stand.scope, settings, state.world) : null;
       if (!drawn) return { problem: "not_applicable", fields: { code: "no_map" } };
       const { moving } = movingOf(env.registry, world, state.world, drawn);
       const others = lift(moving, who);
@@ -62,7 +71,13 @@ export function gridMoves(settings: Readonly<GridSettings> = GRID_DEFAULTS): Gri
       if (to === null) return { problem: "not_applicable", fields: { code: near !== undefined ? "no_square_beside" : "no_square_free" } };
       if (indexOf(drawn, to) === null) return { problem: "not_applicable", fields: { code: "off_grid" } };
       const from = hasOwn(moving.pieces, who) ? (moving.pieces[who]?.at ?? null) : null;
-      return { events: [positionEvent(drawn, who, to, from)] };
+      // One that stood on the grid goes there along the cheapest way, which the answer gives with its time.
+      const moved = from ? move(drawn, moving, who, to) : null;
+      const say: Say = { lines, world, state: state.world };
+      const way = moved?.walk && moved.took && from ? lines.line("way_taken", { what: whoIs(say, who), from: spotText(say, from), to: spotText(say, to), distance: moved.walk.distance, feet: feetOf(drawn, moved.walk.distance), cost: moved.walk.cost, time: timeText(say, moved.took) }) : undefined;
+      const reports = (moved ?? putAt(drawn, moving, who, to)).reports.map((r) => lines.line(`grid_${r.code}`, reportFields(say, r.values)));
+      const said = [way, ...reports].filter((t): t is string => t !== undefined && t.trim() !== "");
+      return { events: [positionEvent(drawn, who, to, from)], ...(said.length > 0 ? { said } : {}) };
     },
   };
 }

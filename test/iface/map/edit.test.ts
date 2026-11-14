@@ -2,14 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { playedWorld } from "../../../src/engine/places-in-play";
 import { initialState } from "../../../src/engine/world-state";
 import { editMap } from "../../../src/iface/map/edit";
-import { drawnOf, NOTHING_MOVES } from "../../../src/iface/map/grid";
+import { drawnOf, GRID_DEFAULTS, NOTHING_MOVES } from "../../../src/iface/map/grid";
 import { walk } from "../../../src/iface/map/path";
 import { printMap } from "../../../src/iface/map/print";
+import { isRecord } from "../../../src/shared/json";
 import { testStore } from "../../store/fixtures";
 import { CELLAR, registry, worldWith } from "./fixtures";
 
 describe("changing part of a grid", () => {
-  test("walls up a door, sets a table in a rectangle and water on a line, and leaves the rest and the world's own map as they were", () => {
+  test("walls up a door, sets a table in a rectangle and water on a line, kept square by square over the world's own map", () => {
     const world = worldWith(CELLAR);
     const { s, revision } = testStore({ world });
     s.createChat({ id: "c", revision });
@@ -36,16 +37,24 @@ describe("changing part of a grid", () => {
     );
     expect(edited.reports).toEqual([
       { code: "not_in_legend", values: { symbol: "?" } },
-      { code: "off_grid", values: { square: [12, 1] } },
+      { code: "off_grid", values: { square: [12, 1], width: 9, height: 5 } },
     ]);
     const { changes, state } = s.addChanges(turn.id, edited.changes.map((c) => ({ ...c, by: "gm", source: "gm" as const })));
-    expect(changes.map((c) => [c.op, c.applied, c.reports])).toEqual([["engine.world", true, []]]);
-    const d = drawnOf(playedWorld(world, state.world), "cellar");
+    expect(changes.map((c) => [c.op, c.applied, c.reports])).toEqual([["space.squares", true, []]]);
+    // The change holds the squares it drew, not the map: seven squares, and no layout.
+    const data = changes[0]?.value;
+    expect(isRecord(data) && isRecord(data.data) && Array.isArray(data.data.squares) ? data.data.squares.length : 0).toBe(7);
+    expect(JSON.stringify(data)).not.toContain("layout");
+    const d = drawnOf(playedWorld(world, state.world), "cellar", GRID_DEFAULTS, state.world);
     if (!d) throw new Error("the cellar lost its grid");
     expect(printMap(d, NOTHING_MOVES).picture).toBe(["      1 2 3 4 5 6 7 8 9", "   1  # # # # # # # # #", "   2  # ~ . . # t t . #", "   3  # . ~ . # . . . #", "   4  # . . ~ # . . ? #", "   5  # # # # # # # # #"].join("\n"));
     expect([d.doors.size, walk(d, NOTHING_MOVES, [2, 3], [8, 3])]).toEqual([0, null]);
     expect(d.terrain[(3 - 1) * d.width + (3 - 1)]).toBe("water");
     expect(drawnOf(world, "cellar")?.doors.size).toBe(1);
+    // The world's own map edited later, elsewhere: its change shows through, and the chat's stays over it.
+    const later = worldWith({ ...CELLAR, layout: ["#########", "#...#..c#", "#...+...#", "#...#...#", "#########"], legend: { c: { terrain: "crate", blocked: true } } });
+    const both = drawnOf(later, "cellar", GRID_DEFAULTS, state.world);
+    expect(printMap(both ?? d, NOTHING_MOVES).picture.split("\n")[2]).toBe("   2  # ~ . . # t t c #");
   });
 
   test("a place with no map of its own has nothing to change", () => {

@@ -46,6 +46,7 @@ import { buildMapView } from "./view";
 import { placeLines, sceneLines, trespassLines } from "./feed";
 import { placeLoreLines } from "../../../engine/place-lore";
 import { makePlaceEffect, placeEventDef, placeMakeChannel } from "./places";
+import { doorEventDef, shapeEventDef, squaresEventDef } from "./grid-play";
 
 export type TravelService = (ctx: ReadContext, entity: EntityId, to: PlaceId, mode: TravelMode) => { plan: TravelPlan; events: LedgerEvent[] } | Rejection;
 export type RouteQuery = (ctx: ReadContext, from: PlaceId, to: PlaceId, mode: TravelMode) => TravelPlan | null;
@@ -317,6 +318,12 @@ export const spacePack: PackDef = {
     });
     r.effect({ type: "space.set_route", args: ["route", "open?"], resolve: (a) => [{ type: "space.route", data: { route: strOf(a.route), open: a.open !== false } }] });
     r.formula("route_open", (ctx, route) => !closedRoutes(ctx).has(String(route ?? "")));
+
+    // What play changes on a grid besides who stands where (`grid-play.ts`): a door's state, a
+    // thing's footprint and what it blocks, and squares of a map drawn anew, each kept as its change.
+    r.event<PackEvent>(doorEventDef);
+    r.event<PackEvent>(shapeEventDef);
+    r.event<PackEvent>(squaresEventDef);
 
     r.formula("travel_minutes", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode))?.minutes ?? 0);
     r.formula("distance_km", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode))?.distanceKm ?? 0);

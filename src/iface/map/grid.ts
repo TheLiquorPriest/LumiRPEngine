@@ -1,30 +1,32 @@
 // The grid (plan §8.2): a place's map as two layers, on today's maps. What is drawn (terrain,
 // walls, doors, zones, the things the map draws) is read from the map as the engine compiles it
-// (`shared/maps.ts compileMaps`, `shared/grid.ts`) and changes rarely. What moves (who and what
-// stands on which square, how big it is, whether it blocks, which doors are shut) is the state of
-// play. Squares are written as the map prints them, [column, row] counted from 1 at the top left;
-// the store keeps today's cells (x and y from 0), and `cellOf` and `squareOf` are the one
-// conversion. Pure arithmetic: placing applies what it is given and reports, as codes and values,
-// what does not add up.
+// (`shared/maps.ts compileMaps`, `shared/grid.ts`), with the squares play drew anew laid over it
+// (`space.squares`), and changes rarely. What moves (who and what stands on which square, how big
+// it is, whether it blocks, which doors are shut) is the state of play: today's positions, and the
+// space pack's doors and footprints (`packs/space/core/grid-play.ts`). Squares are written as the
+// map prints them, [column, row] counted from 1 at the top left; the store keeps today's cells (x
+// and y from 0), and `cellOf` and `squareOf` are the one conversion. Pure arithmetic: placing
+// applies what it is given and reports, as codes and values, what does not add up.
 
 import type { EntityId, PlaceId } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
 import { gridOf, standingGrid, type Cell } from "../../shared/grid";
-import { DEFAULT_LEGEND, VOID_TERRAIN } from "../../shared/maps";
-import type { GridDef, MapCellDef, WorldDoc } from "../../shared/world";
+import { compileMaps, DEFAULT_LEGEND, VOID_TERRAIN } from "../../shared/maps";
+import type { GridDef, MapCellDef, MapDoc, WorldDoc } from "../../shared/world";
 import type { Registry } from "../../engine/registry-impl";
 import { isGone, kindIs } from "../../engine/scope";
 import type { WorldState } from "../../engine/state";
+import { doorsAt, editedMap, mapStepOf, seesThrough, shapeOf, squareEditsOf, type DoorState, type MapStep, type SquareEdits } from "../../packs/space/core/grid-play";
 import { spotOf } from "../../packs/space/core/positions";
 import type { Report } from "../../store/types";
+
+export type { DoorState } from "../../packs/space/core/grid-play";
 
 /** A square as the map prints it and the tools take it: [column, row], from 1 at the top left. */
 export type Square = readonly [number, number];
 
 /** How a diagonal step counts: as one square, or every second one in a row as two. */
 export type Diagonal = "one" | "alternate";
-
-export type DoorState = "open" | "closed" | "locked";
 
 /** The grid's settings, each with its default (Appendix D.1). */
 export interface GridSettings {
@@ -57,10 +59,11 @@ export const METRES_PER_FOOT = 0.3048;
 const TODAY_CELL_METRES = 80;
 
 /**
- * A grid's time step. On a grid whose square a round's move crosses, rounds of a few seconds, in
- * each of which someone moves so many squares; on a coarser one, today's walking minutes.
+ * A grid's time step: as its map gives it (`step`), or following the square. On a grid whose
+ * square a round's move crosses, rounds of a few seconds, in each of which someone moves so many
+ * squares; on a coarser one, today's walking minutes.
  */
-export type TimeStep = { per: "round"; seconds: number; squares: number } | { per: "minute" };
+export type TimeStep = MapStep;
 
 /** A grid's scale: how wide a square is, how a diagonal counts, and how time passes on it. */
 export interface Scale {
@@ -102,6 +105,8 @@ export interface Drawn {
   terrain: GridDef["terrain"];
   /** Squares drawn as blocking (walls, blocked terrain, a door drawn shut). */
   blocked: ReadonlySet<number>;
+  /** Of those, the ones the view passes over (a blocked terrain marked `seeThrough`: a bar, a low wall). */
+  seeThrough: ReadonlySet<number>;
   doors: ReadonlySet<number>;
   zones: Readonly<Record<string, readonly number[]>>;
   /** What each symbol stands for: the map's legend over the default one. */
@@ -134,11 +139,37 @@ function symbolsOfTerrain(grid: GridDef): { symbols: string[]; legend: Record<st
   return { symbols, legend };
 }
 
-/** What is drawn on `scope`'s own grid, read from the world as the engine compiles it; null when the place has none. */
-export function drawnOf(world: Pick<WorldDoc, "places" | "grids" | "maps">, scope: PlaceId, settings: Readonly<GridSettings> = GRID_DEFAULTS): Drawn | null {
-  const grid = gridOf(world, scope);
+/** Each played world's maps with play's square changes laid over, by the changes' record: compiled once for each. */
+const EDITED = new WeakMap<WorldDoc, WeakMap<SquareEdits, { map: MapDoc; grid: GridDef } | null>>();
+
+/** `map` with play's changes laid over it, and the grid that compiles from it as today's compiler reads a map; null where it compiles to none. */
+function edited(world: WorldDoc, map: MapDoc, edits: SquareEdits): { map: MapDoc; grid: GridDef } | null {
+  let byEdits = EDITED.get(world);
+  if (byEdits?.has(edits)) return byEdits.get(edits) ?? null;
+  const drawn = editedMap(map, edits);
+  const compiled = compileMaps({ ...world, maps: { ...world.maps, [map.id]: drawn } });
+  const grid = hasOwn(compiled.grids, map.id) ? compiled.grids[map.id] : undefined;
+  const out = grid ? { map: drawn, grid } : null;
+  if (byEdits === undefined) {
+    byEdits = new WeakMap();
+    EDITED.set(world, byEdits);
+  }
+  byEdits.set(edits, out);
+  return out;
+}
+
+/**
+ * What is drawn on `scope`'s own grid, read from the world as the engine compiles it, with the
+ * squares play drew anew in `play` (the chat's state) laid over its map; null when the place has
+ * none.
+ */
+export function drawnOf(world: WorldDoc, scope: PlaceId, settings: Readonly<GridSettings> = GRID_DEFAULTS, play?: Readonly<WorldState>): Drawn | null {
+  let grid = gridOf(world, scope);
   if (!grid) return null;
-  const map = grid.map !== undefined && hasOwn(world.maps, grid.map) ? world.maps[grid.map] : undefined;
+  let map = grid.map !== undefined && hasOwn(world.maps, grid.map) ? world.maps[grid.map] : undefined;
+  const edits = map && play ? squareEditsOf(play, map.id) : null;
+  const over = map && edits ? edited(world, map, edits) : null;
+  if (over) ({ map, grid } = over);
   let symbols: string[];
   let legend: Record<string, MapCellDef>;
   if (map?.layout) {
@@ -154,6 +185,13 @@ export function drawnOf(world: Pick<WorldDoc, "places" | "grids" | "maps">, scop
   grid.terrain.forEach((t, i) => {
     if (DOOR.test(t)) doors.add(i);
   });
+  const seeThrough = new Set<number>();
+  for (const i of grid.blocked) {
+    const s = symbols[i] ?? "";
+    if (hasOwn(legend, s) && seesThrough(legend[s])) seeThrough.add(i);
+  }
+  const scale = scaleOf(grid.cellMeters ?? TODAY_CELL_METRES, settings);
+  const step = map ? mapStepOf(map) : null;
   return {
     id: grid.id,
     scope,
@@ -163,11 +201,12 @@ export function drawnOf(world: Pick<WorldDoc, "places" | "grids" | "maps">, scop
     symbols,
     terrain: grid.terrain,
     blocked: new Set(grid.blocked),
+    seeThrough,
     doors,
     zones: grid.zones,
     legend,
     items: grid.items ?? {},
-    scale: scaleOf(grid.cellMeters ?? TODAY_CELL_METRES, settings),
+    scale: step ? { ...scale, step } : scale,
   };
 }
 
@@ -274,7 +313,7 @@ export function blockersOf(drawn: Drawn, moving: Moving, except: readonly Entity
   for (const i of drawn.blocked) {
     if (drawn.doors.has(i)) continue;
     way.add(i);
-    view.add(i);
+    if (!drawn.seeThrough.has(i)) view.add(i);
   }
   for (const i of drawn.doors) {
     if (doorState(drawn, moving, i) === "open") continue;
@@ -369,8 +408,9 @@ export interface StoredMoving {
 /**
  * The moving layer of `drawn` from a chat's state (`world` the world as the chat plays it): each
  * person and thing standing on a square of it (today's `place`, `x` and `y`), and each thing lying
- * in a thing that stands there (today's `in`). What a person carries is theirs, not the floor's.
- * Today's state holds no footprint, blocking or door state: those stay as drawn.
+ * in a thing that stands there (today's `in`), with its footprint and what it blocks as play set
+ * them (`space.shape`); and the doors play opened, shut or locked (`space.door`). What a person
+ * carries is theirs, not the floor's.
  */
 export function movingOf(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, drawn: Drawn): StoredMoving {
   const pieces: Record<EntityId, Piece> = {};
@@ -383,7 +423,7 @@ export function movingOf(registry: Registry, world: WorldDoc, state: Readonly<Wo
     if (typeof place === "string" && place !== "") {
       if (standingGrid(world, place)?.scope !== drawn.scope) continue;
       const spot = spotOf(world, state, id);
-      if (spot) pieces[id] = { at: squareOf(spot) };
+      if (spot) pieces[id] = { at: squareOf(spot), ...shaped(state, id) };
       else unplaced.push(id);
     }
   }
@@ -396,9 +436,20 @@ export function movingOf(registry: Registry, world: WorldDoc, state: Readonly<Wo
       const holder = e.relations.find((r) => r.type === "in")?.to;
       const held = holder !== undefined ? state.entities[holder] : undefined;
       if (holder === undefined || !held || !hasOwn(pieces, holder) || kindIs(registry, world, held.kind, "person")) continue;
-      pieces[id] = { on: holder };
+      pieces[id] = { on: holder, ...shaped(state, id) };
       laid = true;
     }
   }
-  return { moving: { pieces, doors: {} }, unplaced };
+  const doors: Record<string, DoorState> = {};
+  for (const [cell, s] of Object.entries(doorsAt(state, drawn.scope))) {
+    const [x = -1, y = -1] = cell.split(",").map(Number);
+    doors[squareKey(squareOf({ x, y }))] = s;
+  }
+  return { moving: { pieces, doors }, unplaced };
+}
+
+/** A piece's footprint and what it blocks, as play set them; nothing for one square that blocks nothing. */
+function shaped(state: Readonly<WorldState>, id: EntityId): Pick<Piece, "size" | "blocks"> {
+  const s = shapeOf(state, id);
+  return s ? { size: [s.size[0], s.size[1]], ...(s.way || s.view ? { blocks: { way: s.way, view: s.view } } : {}) } : {};
 }

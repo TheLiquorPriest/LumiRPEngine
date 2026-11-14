@@ -1,19 +1,20 @@
 // Changing part of a grid in play (plan §8.2, `map_edit`): squares, rectangles and lines drawn with
-// a symbol, and the legend added to or taken from, the rest of the map left as it is. Today's draft
-// of a chat's world carries a map whole, so the change is the map with those squares changed,
-// written into the chat's own draft (`engine.world`), as today's `world_map` tool writes it.
+// a symbol, and the legend added to or taken from, the rest of the map left as it is. The change is
+// kept as that change, square by square, over the map (`space.squares`), so a later edit of the
+// world's own map still shows through wherever this one did not draw.
 
 import type { PlaceId } from "../../shared/ids";
-import { hasOwn, type JsonObject } from "../../shared/json";
+import { hasOwn } from "../../shared/json";
 import { gridOf } from "../../shared/grid";
 import { DEFAULT_LEGEND, readMap } from "../../shared/maps";
-import type { MapCellDef, MapDoc, WorldDoc } from "../../shared/world";
+import type { MapCellDef, WorldDoc } from "../../shared/world";
 import { playedWorld } from "../../engine/places-in-play";
 import type { WorldState } from "../../engine/state";
+import { cellKey, editedMap, SQUARES_EVENT, squareEditsOf } from "../../packs/space/core/grid-play";
 import type { Report } from "../../store/types";
-import { indexOf, type Square } from "./grid";
+import { cellOf, indexOf, squareKey, type Square } from "./grid";
 import type { Laid } from "./lay";
-import { draftChange } from "./record";
+import { squaresEvent } from "./record";
 
 /** Squares drawn with one symbol: single squares, a filled rectangle between two corners, or a line between two ends. */
 export interface Stroke {
@@ -39,42 +40,40 @@ function strokeSquares(stroke: Stroke): Square[] {
 }
 
 /**
- * The grid of `place` with `strokes` drawn on it and `legend` laid over its legend (a symbol
- * given null is taken out). Each square off the grid, and each symbol no legend names, is
- * reported; the rest is applied. `world` is the revision the chat plays, `state` its state now.
+ * The grid of `place` with `strokes` drawn on it and `legend` laid over its legend (a symbol given
+ * null is taken out), as one change kept square by square over its map. Each square off the grid,
+ * and each symbol no legend names, is reported, and the rest is drawn; a change the map's format
+ * cannot hold is not recorded and says why. `world` is the revision the chat plays, `state` its
+ * state now.
  */
 export function editMap(world: WorldDoc, state: Readonly<WorldState>, place: PlaceId, strokes: readonly Stroke[], legend: Readonly<Record<string, MapCellDef | null>> = {}): Laid {
   const played = playedWorld(world, state);
   const grid = gridOf(played, place);
   const map = grid?.map !== undefined && hasOwn(played.maps, grid.map) ? played.maps[grid.map] : undefined;
   if (!grid || !map?.layout) return { changes: [], scope: null, reports: [{ code: "no_map", values: { place } }] };
-  const rows = Array.from({ length: grid.height }, (_, r) => {
-    const row = [...(map.layout?.[r] ?? "")];
-    while (row.length < grid.width) row.push(" ");
-    return row;
-  });
-  const legendNow: Record<string, MapCellDef> = { ...(map.legend ?? {}) };
-  for (const [symbol, what] of Object.entries(legend)) {
-    if (what === null) delete legendNow[symbol];
-    else legendNow[symbol] = what;
-  }
+  const was = squareEditsOf(state, map.id);
+  const legendNow: Record<string, MapCellDef | null> = { ...(was?.legend ?? {}), ...legend };
   const reports: Report[] = [];
+  const drawn = new Map<string, { at: Square; symbol: string }>();
   for (const stroke of strokes) {
     if ([...stroke.symbol].length !== 1) {
       reports.push({ code: "bad_symbol", values: { symbol: stroke.symbol } });
       continue;
     }
-    if (!hasOwn(legendNow, stroke.symbol) && !hasOwn(DEFAULT_LEGEND, stroke.symbol)) reports.push({ code: "not_in_legend", values: { symbol: stroke.symbol } });
+    const named = hasOwn(legendNow, stroke.symbol) ? legendNow[stroke.symbol] !== null : hasOwn(map.legend ?? {}, stroke.symbol) || hasOwn(DEFAULT_LEGEND, stroke.symbol);
+    if (!named) reports.push({ code: "not_in_legend", values: { symbol: stroke.symbol } });
     for (const s of strokeSquares(stroke)) {
-      const row = indexOf(grid, s) === null ? undefined : rows[s[1] - 1];
-      if (row) row[s[0] - 1] = stroke.symbol;
-      else reports.push({ code: "off_grid", values: { square: [...s] } });
+      if (indexOf(grid, s) === null) reports.push({ code: "off_grid", values: { square: [...s], width: grid.width, height: grid.height } });
+      else drawn.set(squareKey(s), { at: s, symbol: stroke.symbol });
     }
   }
-  const next: MapDoc = { ...map, layout: rows.map((r) => r.join("")) };
-  if (Object.keys(legendNow).length > 0) next.legend = legendNow;
-  else delete next.legend;
-  const { problems } = readMap(next);
+  if (drawn.size === 0 && Object.keys(legend).length === 0) return { changes: [], scope: place, reports: [...reports, { code: "nothing_drawn", values: { place } }] };
+  const cells: Record<string, string> = { ...(was?.cells ?? {}) };
+  for (const d of drawn.values()) {
+    const c = cellOf(d.at);
+    cells[cellKey(c.x, c.y)] = d.symbol;
+  }
+  const { problems } = readMap(editedMap(map, { cells, legend: legendNow }));
   if (problems.length > 0) return { changes: [], scope: place, reports: [...reports, ...problems.map((p) => ({ code: "bad_map", values: { at: p.path } }))] };
-  return { changes: [draftChange(world, state, { collection: "maps", id: map.id, value: next as unknown as JsonObject })], scope: place, reports };
+  return { changes: [{ lane: "engine", op: SQUARES_EVENT, value: squaresEvent(map.id, [...drawn.values()], legend) }], scope: place, reports };
 }

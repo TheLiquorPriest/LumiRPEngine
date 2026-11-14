@@ -88,9 +88,15 @@ export interface FactStore {
   of(state: StoreState, about: string): JsonValue[];
 }
 
-/** Placing on a map's squares (the grid lane's): the events that put someone or something at a square, beside someone, or in a zone. */
+/**
+ * Placing on a map's squares (the grid lane's): the events that put someone or something at a
+ * square, beside someone, or in a zone; and `said`, the sentences the answer gives of it, worded
+ * from the map's part: for one that stood on the map before, the way it went and the time that
+ * took, and what does not add up where it now stands (a square in a wall, over something that
+ * blocks, no way there). It is applied all the same.
+ */
 export interface GridMoves {
-  place(input: { state: StoreState; env: FoldEnv; who: string; place: string; square?: [number, number]; near?: string; zone?: string }): { events: JsonObject[] } | { problem: string; fields: Fields };
+  place(input: { state: StoreState; env: FoldEnv; who: string; place: string; square?: [number, number]; near?: string; zone?: string }): { events: JsonObject[]; said?: string[] } | { problem: string; fields: Fields };
 }
 
 /** A place's map as the world state prints it (the grid lane's): its text, or null for a place with no map. */

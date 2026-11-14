@@ -24,3 +24,5 @@ export {
   type Writes,
 } from "./kit";
 export { MARKS } from "./source";
+export { MAP_TOOLS } from "./maptools";
+export { gridMoves, MAP_ANSWERS, mapLines, mapView } from "./map/index";

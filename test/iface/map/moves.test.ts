@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mapLines } from "../../../src/iface/map/words";
 import { gridMoves } from "../../../src/iface/map/moves";
+import { shippedTexts } from "../../../src/iface/texts";
 import type { JsonObject } from "../../../src/shared/json";
 import type { MapDoc, WorldDoc } from "../../../src/shared/world";
 import { initialStoreState, type FoldEnv } from "../../../src/store/fold";
@@ -57,5 +59,16 @@ describe("placing on squares for the everyday operations", () => {
     expect(gridMoves().place({ state, env, who: "odile", place: "cellar", square: [1, 1] })).toEqual({ problem: "not_applicable", fields: { code: "no_map" } });
     expect(gridMoves().place({ state, env, who: "wren", place: "common_room", zone: "cellar_stairs" })).toEqual({ problem: "not_applicable", fields: { code: "no_zone" } });
     expect(gridMoves().place({ state, env, who: "wren", place: "common_room", square: [13, 1] })).toEqual({ problem: "not_applicable", fields: { code: "off_grid" } });
+  });
+
+  test("a square in a wall is put there all the same and said, and one who stood on the map is given the way and its time", async () => {
+    const lines = await mapLines(shippedTexts());
+    const { env, state } = stateOf(innWorld());
+    const walled = gridMoves(lines).place({ state, env, who: "wren", place: "common_room", square: [1, 4] });
+    expect(walled).toEqual({ events: [{ type: "space.pos", data: { entity: "wren", at: { scope: "common_room", x: 0, y: 3 }, from: null } }], said: ["Wren [wren] stands on (1,4), which block the way; it was put there all the same."] });
+    const crossed = gridMoves(lines).place({ state, env, who: "bram", place: "common_room", square: [11, 3] });
+    expect("said" in crossed ? crossed.said : []).toEqual(["Bram [bram]: from (4,3) to (11,3) is 7 squares (35 ft), 7 squares of movement, 2 rounds, 12 seconds."]);
+    // With the map's part switched off, nothing is said.
+    expect("said" in gridMoves().place({ state, env, who: "wren", place: "common_room", square: [1, 4] })).toBe(false);
   });
 });

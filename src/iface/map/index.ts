@@ -41,5 +41,6 @@ export { printMap, type LegendEntry, type Listed, type Printed } from "./print";
 export { layForPlace, layOverSquare, plainRows, type Laid, type Laying } from "./lay";
 export { editMap, type Stroke } from "./edit";
 export { clockChange, moveTime, roundsTime, type Took } from "./time";
-export { draftChange, positionChange, positionChanges, positionEvent } from "./record";
-export { gridMoves } from "./moves";
+export { doorEvent, draftChange, positionChange, positionChanges, positionEvent, shapeEvent, squaresEvent } from "./record";
+export { beside, gridMoves, inZone } from "./moves";
+export { feetOf, layersAt, MAP_ANSWERS, mapLines, mapView, mapWords, type Layers } from "./words";

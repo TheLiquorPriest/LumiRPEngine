@@ -20,6 +20,25 @@
       "items": { "type": "string", "minLength": 1, "maxLength": 64 }
     },
     "cellMeters": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000, "description": "A grid map's cell size in metres, for walking times on it: 80 unless given (1 or 2 suits a room)." },
+    "step": {
+      "description": "How time passes on a grid map: in rounds of `seconds`, in each of which someone moves `squares` squares (a room where a fight is played), or in walking minutes. Unless given, it follows the cell size: rounds where a round's move crosses a cell, walking minutes where it does not.",
+      "anyOf": [
+        {
+          "title": "{\"per\": \"round\", …}",
+          "type": "object",
+          "required": ["per", "seconds", "squares"],
+          "additionalProperties": false,
+          "properties": { "per": { "enum": ["round"] }, "seconds": { "type": "number", "exclusiveMinimum": 0, "maximum": 3600 }, "squares": { "type": "integer", "minimum": 1, "maximum": 1000 } }
+        },
+        {
+          "title": "{\"per\": \"minute\"}",
+          "type": "object",
+          "required": ["per"],
+          "additionalProperties": false,
+          "properties": { "per": { "enum": ["minute"] } }
+        }
+      ]
+    },
     "legend": {
       "type": "object",
       "description": "What each layout character stands for. Characters not listed: # wall, . floor, + door, a space nothing (blocked).",
@@ -68,7 +87,11 @@
           "type": "object",
           "required": ["terrain"],
           "additionalProperties": false,
-          "properties": { "terrain": { "type": "string", "minLength": 1, "maxLength": 40 }, "blocked": { "type": "boolean" } }
+          "properties": {
+            "terrain": { "type": "string", "minLength": 1, "maxLength": 40 },
+            "blocked": { "type": "boolean" },
+            "seeThrough": { "type": "boolean", "description": "With blocked: nobody walks through it, and the view passes over it (a bar, a low wall)." }
+          }
         },
         {
           "title": "{\"place\": …}",

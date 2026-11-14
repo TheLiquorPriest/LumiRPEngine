@@ -1,18 +1,21 @@
-// What the store records of the grid, in today's events: a square taken or left (`space.pos`,
+// What the store records of the grid. Today's events: a square taken or left (`space.pos`,
 // `packs/space/core/positions.ts`), which writes a person's or a thing's `x` and `y`; and a map or a
 // place written whole into the chat's own draft of its world (`engine.world`, `engine/world-draft.ts`,
-// the event today's `world_map` tool writes). Today's state has no place for a footprint, for what
-// blocks or for a door's state, so a change to those is not among these changes.
+// the event today's `world_map` tool writes), which a grid laid in play is. The space pack's own
+// (`packs/space/core/grid-play.ts`): a door opened, shut or locked (`space.door`), a footprint and
+// what it blocks (`space.shape`), and squares of a map drawn anew (`space.squares`), kept as that
+// change over the map.
 
 import type { EntityId } from "../../shared/ids";
 import type { JsonObject } from "../../shared/json";
-import type { WorldDoc } from "../../shared/world";
+import type { MapCellDef, WorldDoc } from "../../shared/world";
 import { baseWorld } from "../../engine/places-in-play";
 import type { WorldState } from "../../engine/state";
 import { chatDraftOf, DRAFT_EVENT, draftEvent, type DraftEdit } from "../../engine/world-draft";
+import { DOOR_EVENT, SHAPE_EVENT, SQUARES_EVENT } from "../../packs/space/core/grid-play";
 import { POS_EVENT } from "../../packs/space/core/positions";
 import type { ChangeInput } from "../../store/types";
-import { cellOf, type Drawn, type Moving, type Square } from "./grid";
+import { cellOf, type DoorState, type Drawn, type Moving, type Piece, type Square } from "./grid";
 
 /** The change that writes `edit` into the chat's draft of its world: `world` the revision it plays, `state` the chat's state now. */
 export function draftChange(world: WorldDoc, state: Readonly<WorldState>, edit: DraftEdit): ChangeInput {
@@ -44,4 +47,20 @@ export function positionChanges(drawn: Drawn, before: Moving, after: Moving): Ch
     out.push(positionChange(drawn, id, now, was));
   }
   return out;
+}
+
+/** The `space.door` event that opens, shuts or locks the door on a square of the grid of `scope`. */
+export function doorEvent(grid: Pick<Drawn, "scope">, at: Square, state: DoorState): JsonObject {
+  return { type: DOOR_EVENT, data: { scope: grid.scope, ...cellOf(at), state } };
+}
+
+/** The `space.shape` event that gives `id` its footprint and says what it blocks, written whole. */
+export function shapeEvent(id: EntityId, shape: Pick<Piece, "size" | "blocks">): JsonObject {
+  const [w, h] = shape.size ?? [1, 1];
+  return { type: SHAPE_EVENT, data: { entity: id, size: [w, h], way: shape.blocks?.way === true, view: shape.blocks?.view === true } };
+}
+
+/** The `space.squares` event that draws squares of a map anew and changes its legend (a symbol given null is taken out). */
+export function squaresEvent(map: string, squares: readonly { at: Square; symbol: string }[], legend: Readonly<Record<string, MapCellDef | null>>): JsonObject {
+  return { type: SQUARES_EVENT, data: { map, squares: squares.map((s) => ({ ...cellOf(s.at), symbol: s.symbol })), legend: { ...legend } as JsonObject } };
 }

@@ -7,6 +7,7 @@ import { readPart } from "../store/words";
 import { WORLD_APPLY } from "./apply";
 import { ROLL, WORLD_QUERY, WORLD_SEARCH } from "./fixed";
 import { type EngineDeps, hostTool, type ToolSpec, type Words } from "./kit";
+import { MAP_TOOLS } from "./maptools";
 import { SEARCHABLE_TOOLS } from "./searchable";
 import { Lines, toolText } from "./texts";
 
@@ -20,7 +21,7 @@ export const TREE_PART = "world-state";
 export const FIXED_TOOLS: readonly ToolSpec[] = [WORLD_QUERY, WORLD_SEARCH, WORLD_APPLY, ROLL];
 
 /** Every tool the engine registers, fixed first. */
-export const ENGINE_TOOLS: readonly ToolSpec[] = [...FIXED_TOOLS, ...SEARCHABLE_TOOLS];
+export const ENGINE_TOOLS: readonly ToolSpec[] = [...FIXED_TOOLS, ...SEARCHABLE_TOOLS, ...MAP_TOOLS];
 
 /** The answers' lines in force for the chat; none when the part is switched off, so every answer is given with no words. */
 export async function answerLines(deps: Pick<EngineDeps, "files">): Promise<Lines> {
