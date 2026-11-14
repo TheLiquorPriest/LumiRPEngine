@@ -79,7 +79,7 @@ const KEYS: readonly (readonly [kind: string, shape: RegExp])[] = [
 
 describe("dist/, as built", () => {
   test("the application starts from a folder that holds nothing else, and says its build id", () => {
-    expect(versionAlone()).toEqual({ code: 0, out: expect.stringMatching(/^rpe (?:[0-9a-f]{8,}(?:-dirty\.\d+)?|\d+)$/), err: "" });
+    expect(versionAlone()).toEqual({ code: 0, out: expect.stringMatching(/^rpe (?:[0-9a-f]{8,}(?:-rph\.[0-9a-f]{8,})?(?:-dirty\.\d+)?|\d+)$/), err: "" });
   });
 
   test("what a server needs of dist/, copied alone, serves the application's status from a data folder of its own, and stops when told to", async () => {

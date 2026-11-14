@@ -211,7 +211,11 @@ async function main(argv: readonly string[]): Promise<number> {
     const harnessSha = ownCheckout(harness) ? (git(harness, ["rev-parse", "--short=8", "HEAD"])?.trim() ?? null) : null;
     const linked = harnessSha === null ? null : { sha: harnessSha, changed: (git(harness, ["status", "--porcelain", "--", "src", "guidance", "package.json", "bun.lock"]) ?? "").trim() !== "" };
     const dirty = sha !== null && ((git(ROOT, ["status", "--porcelain", "--", ...sources]) ?? "").trim() !== "" || linked?.changed === true);
-    const id = sha === null ? String(seconds) : dirty ? `${sha}-dirty.${seconds}` : sha;
+    // A harness that is a checkout of its own beside this one is not named by this repository's commit,
+    // so the id names it too: a rebuild after a change to the harness alone is another build, and a
+    // running RPE moves onto it. Installed from the lockfile, the commit here names it already.
+    const built = sha === null ? null : linked === null ? sha : `${sha}-rph.${linked.sha}`;
+    const id = built === null ? String(seconds) : dirty ? `${built}-dirty.${seconds}` : built;
     const stamp = { "process.env.LRE_BUILD_ID": JSON.stringify(id) };
     const roots = allowedRoots(ROOT, harness);
 
