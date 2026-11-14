@@ -23,6 +23,7 @@ import type { WorldState } from "../engine/state";
 import { applyChecked, foldSteps, initialStoreState, type FoldEnv, type FoldStep, type Item, type StoredChange } from "./fold";
 import { checkChange } from "./input";
 import { comparePaths, matchTurn, nodeKey } from "./path";
+import { BLANK_REVISION, blankWorld } from "./blank";
 import { migrateStore, missingStoreTables } from "./schema";
 import { TreeView } from "./view";
 import {
@@ -66,7 +67,7 @@ export const STORE_DEFAULTS = Object.freeze({
 });
 
 /** Bumped whenever this fold's output for the same changes would differ: snapshots made before are not used. */
-const FOLD_VERSION = 1;
+const FOLD_VERSION = 2;
 
 export interface StoreOptions {
   /**
@@ -250,7 +251,9 @@ export class Store {
         );
       }
     }
-    this.env = { registry: options.registry, worlds: options.worlds };
+    // A chat that names no world plays on the blank one, which the store answers for itself.
+    const blank = blankWorld(options.registry);
+    this.env = { registry: options.registry, worlds: (revision) => (revision === BLANK_REVISION ? blank : options.worlds(revision)) };
     this.snapshotEvery = Math.max(1, Math.floor(options.snapshotEvery ?? STORE_DEFAULTS.snapshotEvery));
     this.foldsKept = Math.max(1, Math.floor(options.foldsKept ?? STORE_DEFAULTS.foldsKept));
     this.fingerprint = options.fingerprint ?? hashParts("rpe.store", String(FOLD_VERSION), ...options.registry.packs.map((p) => `${p.id}@${p.version}`));
@@ -757,7 +760,7 @@ export class UserStore {
     const existing = this.changes(turnId);
     // Groups that did not land earlier in the turn: a unit tied to one does not land either.
     const fell = new Set(existing.filter((c) => !c.applied).flatMap((c) => (isRecord(c.value) && typeof c.value.group === "string" ? [c.value.group] : [])));
-    const items: Item[] = inputs.map((c) => ({ op: c.op, value: c.value, turn: turnId, n: turn.depth + 1, by: c.by ?? null }));
+    const items: Item[] = inputs.map((c) => ({ op: c.op, value: c.value, turn: turnId, n: turn.depth + 1, by: c.by ?? null, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null }));
     const outcomes = applyChecked(this.store.env, state, items, fell);
     const now = this.store.now();
     let ord = (existing.at(-1)?.ord ?? -1) + 1;
@@ -832,12 +835,14 @@ export class UserStore {
     });
   }
 
+  /** The state a chat starts from: its world revision's, or, for a chat that names no world, the blank world's. */
   private initial(revision: string | null): Folded {
-    const key = `${this.id}\u0000~${revision ?? ""}`;
+    const from = revision ?? BLANK_REVISION;
+    const key = `${this.id}\u0000~${from}`;
     const hit = this.store.cached(key);
     if (hit) return hit.folded;
-    const state = revision === null ? null : initialStoreState(this.store.env, revision);
-    if (!state) throw new StoreInputError(revision === null ? "the chat has no world revision" : `the world revision ${revision} is not available`);
+    const state = initialStoreState(this.store.env, from);
+    if (!state) throw new StoreInputError(`the world revision ${from} is not available`);
     const folded: Folded = { node: null, state, notApplied: [], rebased: [] };
     this.store.keep(key, folded, 0, null);
     return folded;
@@ -890,6 +895,9 @@ export class UserStore {
         .get(this.id, first.key, this.store.fingerprint);
       if (snap) {
         const doc = JSON.parse(snap.state) as SnapshotDoc;
+        // A starting state set before the store kept facts and marks holds none yet.
+        doc.state.marks ??= {};
+        doc.state.facts ??= {};
         from = 0;
         stored = snap.upto;
         start = { state: doc.state, upto: snap.upto, notApplied: doc.notApplied, rebased: doc.rebased };
@@ -910,12 +918,12 @@ export class UserStore {
     );
     const byTurn = new Map<string, StoredChange[]>();
     for (const c of this.db
-      .query<{ id: number; turn: string; op: string; lane: string; value: string; by: string | null; applied: number }, [string, string]>(
-        "SELECT c.id, c.turn, c.op, c.lane, c.value, c.by, c.applied FROM change c WHERE c.user = ?1 AND c.turn IN (SELECT value FROM json_each(?2)) ORDER BY c.turn, c.ord",
+      .query<{ id: number; turn: string; op: string; lane: string; value: string; by: string | null; applied: number; precision: string | null; standing: string | null; source: string | null }, [string, string]>(
+        "SELECT c.id, c.turn, c.op, c.lane, c.value, c.by, c.applied, c.precision, c.standing, c.source FROM change c WHERE c.user = ?1 AND c.turn IN (SELECT value FROM json_each(?2)) ORDER BY c.turn, c.ord",
       )
       .all(this.id, ids)) {
       const list = byTurn.get(c.turn) ?? [];
-      list.push({ id: c.id, op: c.op, lane: c.lane as Lane, value: JSON.parse(c.value) as JsonValue, by: c.by, applied: c.applied === 1 });
+      list.push({ id: c.id, op: c.op, lane: c.lane as Lane, value: JSON.parse(c.value) as JsonValue, by: c.by, applied: c.applied === 1, precision: c.precision as Precision | null, standing: c.standing as Standing | null, source: c.source as Source | null });
       byTurn.set(c.turn, list);
     }
     const stepOf = (c: { key: string; turn: string; depth: number }, changes: StoredChange[]): FoldStep => ({ node: c.key, turn: c.turn, n: c.depth + 1, own: turns.get(c.turn)?.node === c.key, changes });

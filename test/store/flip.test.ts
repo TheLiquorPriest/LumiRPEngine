@@ -39,10 +39,10 @@ describe("a swipe flipped on an earlier message", () => {
     expect(flipped.flipped).toEqual([{ message: "m2", from: lantern.id, to: candle.id }]);
     expect(flipped.swiped).toBeNull();
     expect(flipped.rebased).toEqual({ from: "m3", to: "m6", turns: [t3.id, t4.id, t5.id, t6.id] });
-    // The lantern was never made on this swipe: handing it over no longer applies, and says why.
-    expect(flipped.notApplied.map((n) => [n.turn, n.op, n.reason])).toEqual([
-      [t3.id, "unlink", "no in from lantern to wren"],
-      [t3.id, "link", "no in from lantern to wren"],
+    // The lantern was never made on this swipe: handing it over no longer applies, and the reports say why.
+    expect(flipped.notApplied.map((n) => [n.turn, n.op, n.reports])).toEqual([
+      [t3.id, "unlink", [{ code: "missing_relation" }]],
+      [t3.id, "link", [{ code: "missing_relation" }]],
     ]);
     const after = s.headState("c").state.world;
     // Everything else the later turns did still happened, in order, on top of the candle.

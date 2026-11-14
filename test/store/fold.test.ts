@@ -52,7 +52,8 @@ describe("the new fold", () => {
     ]);
     expect(changes.map((c) => c.applied)).toEqual([false, false, false, false, true]);
     expect(changes.map((c) => c.reports.map((r) => r.code))).toEqual([["missing_entity"], ["unbalanced"], ["unknown_event"], ["unknown_revision"], []]);
-    expect(changes[1]?.reports[0]?.text).toBe("posting sums to -10");
+    // A report is a code and its values: no sentence of the store's or of a handler's goes with it.
+    expect(changes[1]?.reports[0]).toEqual({ code: "unbalanced" });
     expect(state.world.clock - s.headState("c").state.world.clock).toBe(20);
     expect(state.world.accounts).toEqual({});
   });
@@ -90,7 +91,7 @@ describe("the new fold", () => {
     ];
     const { changes, state } = s.addChanges(t.id, [...engine(...unit), ...engine({ type: "link", rel: "in", from: "cask", to: POV, tiedTo: ["g1"] })]);
     expect(changes.map((c) => c.applied)).toEqual([false, false, false]);
-    expect(changes[0]?.reports[0]?.text).toBe("no entity nobody");
+    expect(changes[0]?.reports[0]).toEqual({ code: "missing_entity" });
     expect(changes[2]?.reports[0]?.code).toBe("tied");
     expect(state.world.entities.token).toBeUndefined();
     expect(carried(state.world, POV)).not.toContain("cask");
@@ -135,8 +136,8 @@ describe("the new fold", () => {
     s.createChat({ id: "c", revision });
     const t = s.beginTurn({ chat: "c", kind: "normal" });
     const { changes, state } = s.addChanges(t.id, engine({ type: "fragile.break", data: {} }, tick(3)));
-    expect(changes.map((c) => [c.applied, c.reports.map((r) => r.text)])).toEqual([
-      [false, ["its handler failed: the reducer broke"]],
+    expect(changes.map((c) => [c.applied, c.reports])).toEqual([
+      [false, [{ code: "failed", values: { error: "the reducer broke" } }]],
       [true, []],
     ]);
     expect(state.world.clock - s.headState("c").state.world.clock).toBe(3);

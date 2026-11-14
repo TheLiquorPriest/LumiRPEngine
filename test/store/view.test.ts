@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
 import { draftEvent, NO_DRAFT } from "../../src/engine/world-draft";
-import { engine, goTo, play, POV, testStore } from "./fixtures";
+import { engine, goTo, play, POV, say, testStore } from "./fixtures";
 
 function chat() {
   const ts = testStore();
@@ -46,18 +46,18 @@ describe("the tree view", () => {
   test("the engine's data reads as one tree, nested as the engine records it", () => {
     const { s } = chat();
     const view = s.view("c");
-    expect(lines(view.query("world", 1))).toEqual([
-      "The Hollow Vale [world] (world) — 4 people (Bram, Wren, Odile), 6 things, 7 places, 1 group, 2 records; 1 open",
+    expect(lines(say(view, "world", 1))).toEqual([
+      "The Hollow Vale [world] (world) — 4 people (Bram, Wren, Odile), 6 things, 7 places, 1 group, 2 records, 1 open",
       "  · time: Sat 1 Mar 2031, 8:00 AM (calendar)",
       "  · time zone: Europe/London",
       "  · currency: USD ($)",
-      "  Hollow Vale [vale] (place) — 4 people (Bram, Wren, Odile), 6 things, 6 places, 1 record; 1 open",
+      "  Hollow Vale [vale] (place) — 4 people (Bram, Wren, Odile), 6 things, 6 places, 1 record, 1 open",
       "  Groups [groups] (groups) — 1 group",
       "  Elsewhere [elsewhere] (not in any place) — 1 record",
     ]);
-    const wren = view.query(POV, "full");
+    const wren = say(view, POV, "full");
     for (const line of ["  Coin purse [purse] (Container) — 1 record", "    Wren's coin [acct_wren] (Account)", "  Grey cloak [cloak] (Item, worn)", "  Satchel [satchel] (Container) — 1 thing", "    Knife [knife] (Item)"]) expect(lines(wren)).toContain(line);
-    const town = lines(view.query("thornbury", 2));
+    const town = lines(say(view, "thornbury", 2));
     expect(town.filter((l) => HEADER.test(l)).map((l) => l.replace(/ — .*$/, ""))).toEqual([
       "Thornbury [thornbury] (place)",
       "  Market Square [market_square] (place)",
@@ -71,7 +71,7 @@ describe("the tree view", () => {
 
   test("each value shows where it comes from; a level that sets its own keeps it, and a change on the town reaches every place in it", () => {
     const { s, world } = chat();
-    const cellar = lines(s.view("c").query("cellar", 0));
+    const cellar = lines(say(s.view("c"), "cellar", 0));
     expect(cellar).toContain("  · law: the watch's rules (from Thornbury)");
     expect(cellar).toContain("  · owner: bram (from The Lamp and Ladle)");
     expect(cellar).toContain("  · region: region_vale (from Hollow Vale)");
@@ -79,24 +79,24 @@ describe("the tree view", () => {
     expect(cellar).toContain("  · weather: rain (weather)");
     // What only describes a level stays with it.
     expect(cellar.some((l) => l.includes("A crooked inn"))).toBe(false);
-    expect(lines(s.view("c").query("far_road", 0))).toContain("  · law: the Vale charter (from Hollow Vale)");
+    expect(lines(say(s.view("c"), "far_road", 0))).toContain("  · law: the Vale charter (from Hollow Vale)");
     // Play sets the town's curfew earlier: every place in the town that sets none takes it.
     const town = world.places.thornbury;
     if (!town) throw new Error("no town");
     const curfew = draftEvent(world, NO_DRAFT, { collection: "places", id: "thornbury", value: { ...town, fields: { ...town.fields, curfew: "dusk" } } as unknown as JsonObject });
     play(s, "c", "m1", "The watch rings the curfew early.", 1, engine(curfew));
-    expect(lines(s.view("c").query("cellar", 0))).toContain("  · curfew: dusk (from Thornbury)");
-    expect(lines(s.view("c").query("market_square", 0))).toContain("  · curfew: dusk (from Thornbury)");
-    expect(lines(s.view("c").query("far_road", 0)).some((l) => l.includes("curfew"))).toBe(false);
+    expect(lines(say(s.view("c"), "cellar", 0))).toContain("  · curfew: dusk (from Thornbury)");
+    expect(lines(say(s.view("c"), "market_square", 0))).toContain("  · curfew: dusk (from Thornbury)");
+    expect(lines(say(s.view("c"), "far_road", 0)).some((l) => l.includes("curfew"))).toBe(false);
   });
 
   test("every level carries a reflection of what is beneath it, kept current as the state changes, with an agent's own line", () => {
     const { s } = chat();
-    const header = (at: string): string => lines(s.view("c").query(at, 0))[0] ?? "";
+    const header = (at: string): string => lines(say(s.view("c"), at, 0))[0] ?? "";
     expect(header("cellar")).toBe("The Cellar [cellar] (place) — 1 person (Odile), 1 thing");
     expect(header("market_square")).toBe("Market Square [market_square] (place) — 1 person, 1 thing");
     play(s, "c", "m1", "Tam ducks into the cellar out of the rain.", 1, [...engine(goTo("tam", "cellar")), { lane: "story", op: "store.note", value: { at: "cellar", text: "uneasy since the fire" }, by: "author", source: "author" }]);
-    expect(header("cellar")).toBe("The Cellar [cellar] (place) — 2 people (Odile), 1 thing; changed turn 1; note: uneasy since the fire");
+    expect(header("cellar")).toBe("The Cellar [cellar] (place) — 2 people (Odile), 1 thing, changed turn 1, note: uneasy since the fire");
     expect(header("market_square")).toBe("Market Square [market_square] (place) — 1 thing");
     expect(header("thornbury")).toContain("changed turn 1");
     expect(header("far_road")).not.toContain("changed");
@@ -105,9 +105,9 @@ describe("the tree view", () => {
   test("a query is a point and a depth, in the same shape at every level", () => {
     const { s } = chat();
     const view = s.view("c");
-    for (const [at, depth] of [["world", 1], ["world", 3], ["vale", 2], ["lamp_ladle", 1], ["common_room", 2], [POV, 3], ["groups", 1]] as const) shapeOf(view.query(at, depth), depth);
-    shapeOf(view.query("world", "full"), 99);
-    expect(view.query("cella", 1)).toBe("Nothing in the tree is called cella. Near: The Cellar [cellar].");
+    for (const [at, depth] of [["world", 1], ["world", 3], ["vale", 2], ["lamp_ladle", 1], ["common_room", 2], [POV, 3], ["groups", 1]] as const) shapeOf(say(view, at, depth), depth);
+    shapeOf(say(view, "world", "full"), 99);
+    expect(view.query("cella", 1)).toBeNull();
   });
 
   test("the horizon is the Author's list: only a recorded change sets it, and it goes with its turn", () => {

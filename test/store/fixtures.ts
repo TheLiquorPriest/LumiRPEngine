@@ -1,6 +1,8 @@
 // An invented world on the shipped packs, and small helpers to play turns into a store. Every name
 // here is made up for these tests.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { hashJson } from "../../src/shared/hash";
 import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
@@ -12,6 +14,18 @@ import { createRegistry, type Registry } from "../../src/engine/registry-impl";
 import { ALL_PACKS, defaultTables } from "../../src/packs/index";
 import { openStore, type Store, type StoreOptions, type UserStore } from "../../src/store/store";
 import type { ChangeInput, ShownMessage, TurnRow } from "../../src/store/types";
+import type { TreeView } from "../../src/store/view";
+import { readPart, renderView, type Part } from "../../src/store/words";
+
+/** The world state's layout as shipped: the words of every line of the tree. */
+export const SHIPPED_LAYOUT: string = readFileSync(join(import.meta.dir, "..", "..", "guidance", ".prompts", "world-state.md"), "utf8");
+export const SHIPPED_PART: Part = readPart(SHIPPED_LAYOUT, "world-state.md");
+
+/** A query worded by the shipped part, as an agent reads it; empty when nothing is called `at`. */
+export function say(view: TreeView, at: string, depth: number | "full"): string {
+  const v = view.query(at, depth);
+  return v === null ? "" : renderView(v, SHIPPED_PART);
+}
 
 export const POV = "wren";
 export const USER = "user-a";

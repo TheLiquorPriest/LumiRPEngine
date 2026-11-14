@@ -17,12 +17,13 @@ import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { RevisionId } from "../shared/ids";
 import type { WorldDoc } from "../shared/world";
-import { apartHost, applyEvent, applyMarker, tiesOf, TIED_DROP, validateEvent, validMarkerBody } from "../engine/events";
+import { apartHost, applyEvent, applyMarker, tiesOf, validateEvent, validMarkerBody } from "../engine/events";
 import type { ReadContext } from "../engine/registry";
 import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
 import { initialState } from "../engine/world-state";
-import { STORE_OPS, type Lane, type NotApplied, type Report, type StoreState } from "./types";
+import { applyFact } from "./facts";
+import { PRECISIONS, STORE_OPS, type Lane, type NotApplied, type Precision, type Report, type Source, type Standing, type StoreState } from "./types";
 
 /** What a fold reads besides the changes: the engine's registry, and world documents by revision. */
 export interface FoldEnv {
@@ -30,8 +31,15 @@ export interface FoldEnv {
   worlds: (revision: RevisionId) => WorldDoc | undefined;
 }
 
+/** How a change came to be, as its row records it: how exact, how sure, from where. Absent: none given. */
+export interface Provenance {
+  precision?: Precision | null;
+  standing?: Standing | null;
+  source?: Source | null;
+}
+
 /** A change as the fold reads it. */
-export interface StoredChange {
+export interface StoredChange extends Provenance {
   id: number;
   op: string;
   lane: Lane;
@@ -59,7 +67,7 @@ export interface Outcome {
 }
 
 /** One change to apply, with what the fold keeps beside the state. */
-export interface Item {
+export interface Item extends Provenance {
   op: string;
   value: JsonValue;
   turn: string;
@@ -71,7 +79,7 @@ export interface Item {
 export function initialStoreState(env: FoldEnv, revision: RevisionId): StoreState | null {
   const world = env.worlds(revision);
   if (!world) return null;
-  return { world: initialState(world, revision, env.registry), horizon: [], notes: {}, touched: {} };
+  return { world: initialState(world, revision, env.registry), horizon: [], notes: {}, touched: {}, marks: {}, facts: {} };
 }
 
 const isStoreOp = (op: string): boolean => op.startsWith("store.");
@@ -83,10 +91,12 @@ export function eventOf(op: string, value: JsonValue): LedgerEvent | null {
 }
 
 function failed(e: unknown): Report {
-  return { code: "failed", text: `its handler failed: ${e instanceof Error ? e.message : String(e)}` };
+  return { code: "failed", values: { error: e instanceof Error ? e.message : String(e) } };
 }
 
-const noWorld = (revision: string): Report => ({ code: "unknown_revision", text: `the world revision ${revision} is not available` });
+const noWorld = (revision: string): Report => ({ code: "unknown_revision", values: { revision } });
+
+const noHandler = (op: string): Report => ({ code: "no_handler", values: { op } });
 
 /**
  * One read context per state, as today's `Working` keeps one while it applies event after event:
@@ -105,12 +115,30 @@ function contextOf(env: FoldEnv, world: WorldState): ReadContext | null {
   return ctx;
 }
 
-/** Keeps which turn last touched what an applied event declares it writes (`touches`), and the world for time. */
+/** The least exact of two precisions; one not given leaves the other. */
+function lessExact(a: Precision | null, b: Precision | null): Precision | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return PRECISIONS.indexOf(a) >= PRECISIONS.indexOf(b) ? a : b;
+}
+
+/**
+ * Keeps which turn last touched what an applied event declares it writes (`touches`), and the world
+ * for time; and, for each part it writes (a field, a relation type, an aspect), the change that
+ * wrote it last. A balance sums every posting into it, so its precision is the least exact of them.
+ */
 function markTouched(env: FoldEnv, state: StoreState, ev: LedgerEvent, item: Item): void {
   const mark = { turn: item.turn, n: item.n };
   if (ev.type === "clock" || ev.type === "timelapse") state.touched.world = mark;
   const touches = env.registry.get(ev.type)?.touches?.(ev) ?? [];
-  for (const t of touches) state.touched[`entity:${t.entity}`] = mark;
+  for (const t of touches) {
+    const ref = `entity:${t.entity}`;
+    state.touched[ref] = mark;
+    const name = "field" in t ? t.field : "rel" in t ? t.rel : t.aspect;
+    const marks = (state.marks[ref] ??= {});
+    const precision = item.precision ?? null;
+    marks[name] = { ...mark, precision: name === "posted" ? lessExact(marks[name]?.precision ?? null, precision) : precision, standing: item.standing ?? null, source: item.source ?? null };
+  }
 }
 
 /** Applies one event with today's reducer, without checking it; a reducer that throws is reported. */
@@ -132,8 +160,7 @@ function checkOne(env: FoldEnv, world: WorldState, ev: LedgerEvent): Report | nu
   if (!ctx) return noWorld(world.revision);
   try {
     const r = validateEvent(env.registry, ev, ctx);
-    // The store's readers are the Author, the GM and the user: the reason that names everyone.
-    return r ? { code: r.code, text: r.gm ?? r.reason } : null;
+    return r ? { code: r.code } : null;
   } catch (e) {
     return failed(e);
   }
@@ -172,18 +199,25 @@ function applyStoreOp(env: FoldEnv, state: StoreState, item: Item): Outcome {
     }
     case STORE_OPS.marker: {
       const body = validMarkerBody(item.value);
-      if (!body) return { applied: false, reports: [{ code: "bad_marker", text: "not a marker" }] };
+      if (!body) return { applied: false, reports: [{ code: "bad_marker" }] };
       if (body.kind === "migrate" && !env.worlds(body.to)) return { applied: false, reports: [noWorld(body.to)] };
       try {
+        // Today's marker code says what it did in its own words: they are kept as its values.
         const notes = applyMarker(state.world, body, { worlds: env.worlds, types: env.registry });
         state.touched.world = { turn: item.turn, n: item.n };
-        return { applied: true, reports: notes.map((text) => ({ code: "note", text })) };
+        return { applied: true, reports: notes.map((note) => ({ code: "marker_note", values: { note } })) };
       } catch (e) {
         return { applied: false, reports: [failed(e)] };
       }
     }
+    case STORE_OPS.fact: {
+      const reports = applyFact(state, item.value, { turn: item.turn, n: item.n, by: item.by, precision: item.precision ?? null, standing: item.standing ?? null, source: item.source ?? null });
+      const about = typeof v.about === "string" ? v.about : "";
+      if (about !== "") state.touched[about] = { turn: item.turn, n: item.n };
+      return { applied: true, reports };
+    }
     default:
-      return { applied: false, reports: [{ code: "no_handler", text: `nothing applies ${item.op}` }] };
+      return { applied: false, reports: [noHandler(item.op)] };
   }
 }
 
@@ -192,7 +226,7 @@ export function applyUnchecked(env: FoldEnv, state: StoreState, items: readonly 
   return items.map((item) => {
     const ev = eventOf(item.op, item.value);
     if (ev) return applyOne(env, state, ev, item);
-    return isStoreOp(item.op) ? applyStoreOp(env, state, item) : { applied: false, reports: [{ code: "no_handler", text: `${item.op} carries no event` }] };
+    return isStoreOp(item.op) ? applyStoreOp(env, state, item) : { applied: false, reports: [noHandler(item.op)] };
   });
 }
 
@@ -208,7 +242,7 @@ export function applyChecked(env: FoldEnv, state: StoreState, items: readonly It
   while (i < items.length) {
     const item = items[i] as Item;
     if (!eventOf(item.op, item.value)) {
-      out[i] = isStoreOp(item.op) ? applyStoreOp(env, state, item) : { applied: false, reports: [{ code: "no_handler", text: `${item.op} carries no event` }] };
+      out[i] = isStoreOp(item.op) ? applyStoreOp(env, state, item) : { applied: false, reports: [noHandler(item.op)] };
       i++;
       continue;
     }
@@ -250,7 +284,7 @@ function runEvents(env: FoldEnv, state: StoreState, items: readonly Item[], from
       continue;
     }
     const unit = events.slice(k, end);
-    if (tiesOf(unit).some((t) => fell.has(t))) drop(k, end, { code: "tied", text: TIED_DROP });
+    if (tiesOf(unit).some((t) => fell.has(t))) drop(k, end, { code: "tied" });
     else if (unit.length === 1) {
       const found = checkOne(env, state.world, unit[0] as LedgerEvent);
       if (found) drop(k, end, found);
@@ -288,11 +322,11 @@ export function foldSteps(env: FoldEnv, start: { state: StoreState; upto: number
     // Recorded on this very path, after everything before it: it folds as it was recorded.
     const clean = step.own && upto < first;
     const live = step.changes.filter((c) => c.applied);
-    const items = live.map((c): Item => ({ op: c.op, value: c.value, turn: step.turn, n: step.n, by: c.by }));
+    const items = live.map((c): Item => ({ op: c.op, value: c.value, turn: step.turn, n: step.n, by: c.by, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null }));
     const outcomes = clean ? applyUnchecked(env, state, items) : applyChecked(env, state, items, new Set());
     outcomes.forEach((o, k) => {
       const c = live[k];
-      if (!o.applied && c) notApplied.push({ change: c.id, turn: step.turn, op: c.op, lane: c.lane, reason: o.reports.map((r) => r.text).join("; ") });
+      if (!o.applied && c) notApplied.push({ change: c.id, turn: step.turn, op: c.op, lane: c.lane, reports: o.reports });
     });
     for (const c of step.changes) if (c.id > upto) upto = c.id;
     visit?.(step, state, upto, notApplied, rebased);

@@ -1,19 +1,22 @@
 // One tree, at any zoom (plan §6.4): the engine's own data read as one nested tree. The world holds
 // its places, places hold places, and every entity sits where today's engine already says it is:
 // inside what holds it (`in`), else at its place, else, for a group, inside the group it belongs
-// to, under "groups"; anything else is "elsewhere". Nothing here is inferred.
+// to, under the groups; anything else is elsewhere. Nothing here is inferred.
 //
 // Each level shows its values with where they come from: its own; for a place, those the places
-// above it set and it does not (inherited, "from <place>"), except the fields that only describe a
+// above it set and it does not; for a member of a group, those its groups set and it does not, the
+// nearest group first (a level's own value always wins), except the fields that only describe a
 // level; and those a game system keeps its own way (time, weather, coin, entry), named by the
-// system, so what the tree shows is what the sums use. Each level carries a reflection of what is
-// beneath it, made from recorded values whenever the state is read: how many people, things and
-// places, who of note, what is open, the last turn that changed something there, and an agent's
-// own line.
+// system, so what the tree shows is what the sums use. Beside each value stand the facts recorded
+// on that level with the same key (plan §6.6): neither overwrites the other, and each says how
+// exact it is and the turn it is from. Each level carries a reflection of what is beneath it, made
+// from recorded values whenever the state is read: how many people, things and places, who of
+// note, what is open, the last turn that changed something there, and an agent's own line.
 //
-// A query is a point and a depth, and returns indented text of the same shape at every level.
+// A query is a point and a depth. It returns data: lines, each with its kind and its values, the
+// same shape at every level. No word here reaches an agent: `renderView` words a view with a part.
 
-import type { JsonValue } from "../shared/json";
+import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import { tierBand, tierLabel } from "../shared/tiers";
 import { formatMoney, trackOwner, type WorldDoc } from "../shared/world";
@@ -23,9 +26,11 @@ import { optionalQuery, own } from "../engine/pack-kit";
 import { readPass } from "../engine/read-pass";
 import type { ReadContext } from "../engine/registry";
 import type { EntityState } from "../engine/state";
-import { isGone, kindDef, kindIs, placeOfEntity } from "../engine/scope";
+import { isGone, kindDef, kindIs } from "../engine/scope";
+import { standing } from "./facts";
 import type { FoldEnv } from "./fold";
-import type { StoreState, Touched } from "./types";
+import type { Fact, Mark, StoreState, Touched } from "./types";
+import type { View, ViewLine } from "./words";
 
 export interface ViewOptions {
   /** Fields that describe a level itself and never pass down to what is inside it. */
@@ -34,15 +39,18 @@ export interface ViewOptions {
   notable: number;
 }
 
-type NodeKind = "world" | "place" | "entity" | "groups" | "elsewhere";
+/** What a level of the tree is: the world, a place, an entity, or one of the two levels the tree adds (the groups, and what is elsewhere). */
+export type NodeKind = "world" | "place" | "entity" | "groups" | "elsewhere";
 type Category = "person" | "group" | "thing" | "record";
 
 interface Node {
   ref: string;
   id: string;
   kind: NodeKind;
-  name: string;
-  what: string;
+  /** Its name in the data; null for the two levels the tree adds. */
+  name: string | null;
+  /** An entity's kind, by its label in the world. */
+  what: string | null;
   parent: string | null;
   children: string[];
   category: Category | null;
@@ -59,34 +67,123 @@ interface Node {
   changed: Touched | null;
 }
 
-/** One value line: its key, its value as text, and where it comes from (absent: its own). */
-export interface ValueLine {
+/** Where a value comes from when it is not the level's own setting. */
+export type From = {
+  /** The game system that keeps it its own way: `calendar`, `weather`, `orgs`, `economy`. */
+  system?: string;
+  /** The level above that sets it (a place, a group, the world). */
+  ref?: string;
+  name?: string;
+};
+
+/**
+ * One value of a level: its key (the data's own, or a code the part words: `time`, `time_zone`,
+ * `currency`, `tier`, `life`, `coin`, `posted`, `members`, `weather`, `entry`), its value as text
+ * (null: none), where it comes from (absent: its own), and the change that last wrote it, where one
+ * did.
+ */
+export type ValueLine = {
   key: string;
-  value: string;
-  from?: string;
-}
+  value: string | null;
+  from?: From;
+  mark?: Mark;
+};
+
+/** What is beneath a level (§6.4), as data. */
+export type Reflection = {
+  people: number;
+  things: number;
+  places: number;
+  groups: number;
+  records: number;
+  /** Names of note, best first. */
+  notable: string[];
+  /** Tracks still in progress there. */
+  open: number;
+  /** The number of the last turn that changed something there. */
+  changed: number | null;
+  /** An agent's own line on the level. */
+  note: string | null;
+};
 
 /** A level of the tree as data: what a query shows of it. */
 export interface NodeView {
   ref: string;
-  name: string;
-  what: string;
-  reflection: string;
+  kind: NodeKind;
+  /** Its name in the data; null for the groups and for what is elsewhere. */
+  name: string | null;
+  /** An entity's kind, by its label; null for any other level. */
+  what: string | null;
+  reflection: Reflection;
   values: ValueLine[];
+  /** The facts standing on it. */
+  facts: Fact[];
   children: string[];
   parent: string | null;
 }
 
+/** Which values a level's lines carry: none, its own (with what systems keep), or all (with what it inherits). */
+export type ValuesShown = "none" | "own" | "all";
+
 const ORDER: Record<NodeKind, number> = { world: 0, place: 1, entity: 2, groups: 3, elsewhere: 4 };
 const CATEGORY_ORDER: Record<Category, number> = { person: 0, group: 1, thing: 2, record: 3 };
 
-/** A JSON value as one line of text. */
-function show(v: JsonValue | undefined): string {
-  if (v === undefined || v === null) return "none";
+/** A JSON value as one line of text; null when there is none. */
+function show(v: JsonValue | undefined): string | null {
+  if (v === undefined || v === null) return null;
   if (typeof v === "string") return v.replace(/\s+/g, " ").trim();
   if (typeof v === "number" || typeof v === "boolean") return String(v);
-  if (Array.isArray(v) && v.every((x) => x === null || typeof x !== "object")) return v.map((x) => show(x)).join(", ");
+  if (Array.isArray(v) && v.every((x) => x === null || typeof x !== "object")) return v.map((x) => show(x) ?? "").join(", ");
   return JSON.stringify(v);
+}
+
+/** A reflection as the pieces a level's line carries: one per part there is something in, each worded by the part's `reflection_<name>` line. */
+function reflectionPieces(r: Reflection): JsonObject[] {
+  const pieces: JsonObject[] = [];
+  const count = (name: string, n: number, extra: JsonObject = {}): void => {
+    if (n > 0) pieces.push({ kind: `reflection_${name}`, fields: { n, one: n === 1, ...extra } });
+  };
+  count("people", r.people, r.notable.length > 0 ? { notable: { names: r.notable } } : {});
+  count("things", r.things);
+  count("places", r.places);
+  count("groups", r.groups);
+  count("records", r.records);
+  count("open", r.open);
+  if (r.changed !== null) pieces.push({ kind: "reflection_changed", fields: { turn: r.changed } });
+  if (r.note !== null) pieces.push({ kind: "reflection_note", fields: { text: r.note } });
+  return pieces;
+}
+
+/** A mark's fields on a line: the turn's number and, where recorded, how exact, how sure and from where. */
+export function markFields(mark: Mark | undefined): JsonObject {
+  if (!mark) return {};
+  const out: JsonObject = { turn: mark.n };
+  if (mark.precision !== null) out.precision = mark.precision;
+  if (mark.standing !== null) out.standing = mark.standing;
+  if (mark.source !== null) out.source = mark.source;
+  else out.unsourced = true;
+  return out;
+}
+
+/** A fact as a line's fields. */
+export function factFields(f: Fact): JsonObject {
+  const out: JsonObject = { id: f.id, key: f.key, value: f.value, turn: f.n };
+  if (f.precision !== null) out.precision = f.precision;
+  if (f.standing !== null) out.standing = f.standing;
+  if (f.source !== null) out.source = f.source;
+  else out.unsourced = true;
+  if (f.by !== null) out.by = f.by;
+  return out;
+}
+
+/** A value as a line's fields; `facts` is how many facts with its key stand beside it. */
+function valueFields(v: ValueLine, facts: number): JsonObject {
+  const out: JsonObject = { key: v.key, ...markFields(v.mark) };
+  if (v.value !== null) out.value = v.value;
+  if (v.from?.system !== undefined) out.system = v.from.system;
+  if (v.from?.ref !== undefined) out.from = { ref: v.from.ref, name: v.from.name ?? null, ...(v.from.ref === "world" ? { world: true } : {}) };
+  if (facts > 0) out.facts = facts;
+  return out;
 }
 
 export class TreeView {
@@ -97,7 +194,7 @@ export class TreeView {
   private readonly ctx: ReadContext;
 
   constructor(
-    private readonly env: FoldEnv,
+    readonly env: FoldEnv,
     readonly state: StoreState,
     private readonly options: ViewOptions,
   ) {
@@ -107,6 +204,11 @@ export class TreeView {
     // The world as this chat plays it: its own places and those play made or changed.
     this.doc = this.ctx.world;
     readPass(() => this.build());
+  }
+
+  /** The world as the chat plays it. */
+  get world(): WorldDoc {
+    return this.doc;
   }
 
   private add(node: Omit<Node, "children" | "people" | "things" | "places" | "groups" | "records" | "notable" | "open" | "changed">): void {
@@ -121,16 +223,23 @@ export class TreeView {
     return "record";
   }
 
+  private addGroups(): void {
+    if (!this.nodes.has("groups")) this.add({ ref: "groups", id: "groups", kind: "groups", name: null, what: null, parent: "world", category: null, gone: false });
+  }
+
+  private addElsewhere(): void {
+    if (!this.nodes.has("elsewhere")) this.add({ ref: "elsewhere", id: "elsewhere", kind: "elsewhere", name: null, what: null, parent: "world", category: null, gone: false });
+  }
+
   private build(): void {
     const doc = this.doc;
     const entities = this.state.world.entities;
-    this.add({ ref: "world", id: "world", kind: "world", name: doc.name, what: "world", parent: null, category: null, gone: false });
+    // A world with no name (the blank one) has none to show: the part says what it is.
+    this.add({ ref: "world", id: "world", kind: "world", name: doc.name === "" ? null : doc.name, what: null, parent: null, category: null, gone: false });
     for (const [id, p] of Object.entries(doc.places)) {
       const parent = p.parent !== undefined && own(doc.places, p.parent) ? `place:${p.parent}` : "world";
-      this.add({ ref: `place:${id}`, id, kind: "place", name: p.name, what: "place", parent, category: null, gone: false });
+      this.add({ ref: `place:${id}`, id, kind: "place", name: p.name, what: null, parent, category: null, gone: false });
     }
-    let groups = false;
-    let elsewhere = false;
     for (const id of Object.keys(entities).sort()) {
       const e = entities[id] as EntityState;
       const category = this.categoryOf(e);
@@ -142,16 +251,14 @@ export class TreeView {
       else if (category === "group") {
         const within = e.relations.find((r) => r.type === "member_of" && own(entities, r.to) && this.categoryOf(entities[r.to] as EntityState) === "group")?.to;
         parent = within !== undefined ? `entity:${within}` : "groups";
-        groups ||= within === undefined;
+        if (within === undefined) this.addGroups();
       } else {
         parent = "elsewhere";
-        elsewhere = true;
+        this.addElsewhere();
       }
       const label = kindDef(this.env.registry, doc, e.kind)?.label ?? e.kind;
       this.add({ ref: `entity:${id}`, id, kind: "entity", name: e.name, what: label, parent, category, gone: isGone(this.state.world, id) });
     }
-    if (groups) this.add({ ref: "groups", id: "groups", kind: "groups", name: "Groups", what: "groups", parent: "world", category: null, gone: false });
-    if (elsewhere) this.add({ ref: "elsewhere", id: "elsewhere", kind: "elsewhere", name: "Elsewhere", what: "not in any place", parent: "world", category: null, gone: false });
     this.breakLoops();
     for (const node of this.nodes.values()) if (node.parent !== null) this.nodes.get(node.parent)?.children.push(node.ref);
     for (const node of this.nodes.values()) node.children.sort((a, b) => this.compare(a, b));
@@ -180,7 +287,7 @@ export class TreeView {
           for (const n of seen) reaches.add(n.ref);
           break;
         }
-        if (!this.nodes.has("elsewhere")) this.add({ ref: "elsewhere", id: "elsewhere", kind: "elsewhere", name: "Elsewhere", what: "not in any place", parent: "world", category: null, gone: false });
+        this.addElsewhere();
         const last = seen.at(-1);
         if (!last) break;
         last.parent = "elsewhere";
@@ -194,7 +301,7 @@ export class TreeView {
     const kind = ORDER[x.kind] - ORDER[y.kind];
     if (kind !== 0) return kind;
     const cat = (x.category ? CATEGORY_ORDER[x.category] : 0) - (y.category ? CATEGORY_ORDER[y.category] : 0);
-    return cat !== 0 ? cat : x.name.localeCompare(y.name) || x.id.localeCompare(y.id);
+    return cat !== 0 ? cat : (x.name ?? "").localeCompare(y.name ?? "") || x.id.localeCompare(y.id);
   }
 
   /** Counts, names of note, what is open and the last change, summed up the tree from the leaves. */
@@ -235,7 +342,7 @@ export class TreeView {
           const e = this.state.world.entities[node.id] as EntityState;
           const band = tierBand(this.doc, e.tier);
           const rank = band === "principal" ? 0 : band === "supporting" ? 1 : e.agent ? 2 : -1;
-          if (rank >= 0) names.push({ rank, name: node.name });
+          if (rank >= 0) names.push({ rank, name: node.name ?? node.id });
         } else if (node.category === "group") parent.groups++;
         else if (node.category === "thing") parent.things++;
         else if (node.category === "record") parent.records++;
@@ -253,36 +360,50 @@ export class TreeView {
     return null;
   }
 
-  private reflection(node: Node): string {
-    const parts: string[] = [];
-    const count = (n: number, one: string, many: string): void => {
-      if (n > 0) parts.push(`${n} ${n === 1 ? one : many}`);
-    };
-    if (node.people > 0) parts.push(`${node.people} ${node.people === 1 ? "person" : "people"}${node.notable.length > 0 ? ` (${node.notable.map((x) => x.name).join(", ")})` : ""}`);
-    count(node.things, "thing", "things");
-    count(node.places, "place", "places");
-    count(node.groups, "group", "groups");
-    count(node.records, "record", "records");
-    const head = parts.join(", ");
-    const tail: string[] = [];
-    if (node.open > 0) tail.push(`${node.open} open`);
-    if (node.changed) tail.push(`changed turn ${node.changed.n}`);
-    const note = this.notes.get(node.ref);
-    if (note !== undefined) tail.push(`note: ${note}`);
-    return [head, ...tail].filter((s) => s !== "").join("; ");
+  /** The level a level sits in: null for the world, and for nothing called `ref`. */
+  parentOf(ref: string): string | null {
+    return this.nodes.get(ref)?.parent ?? null;
   }
 
-  private header(node: Node): string {
-    const marks: string[] = [];
+  /** The levels in a level, in the tree's order. */
+  childrenOf(ref: string): readonly string[] {
+    return this.nodes.get(ref)?.children ?? [];
+  }
+
+  /** A level's name in the data: null for the two levels the tree adds, a world with no name, and nothing called `ref`. */
+  nameOf(ref: string): string | null {
+    return this.nodes.get(ref)?.name ?? null;
+  }
+
+  private reflectionOf(node: Node): Reflection {
+    return {
+      people: node.people,
+      things: node.things,
+      places: node.places,
+      groups: node.groups,
+      records: node.records,
+      notable: node.notable.map((x) => x.name),
+      open: node.open,
+      changed: node.changed?.n ?? null,
+      note: this.notes.get(node.ref) ?? null,
+    };
+  }
+
+  /** A level's own line as data: what it is, its marks, and its reflection. */
+  private levelLine(node: Node, depth: number): ViewLine {
+    const fields: JsonObject = { ref: node.ref, id: node.id };
+    if (node.name !== null) fields.name = node.name;
+    if (node.what !== null) fields.what = node.what;
     if (node.kind === "entity") {
       const e = this.state.world.entities[node.id] as EntityState;
       const holder = node.parent?.startsWith("entity:") ? node.parent.slice("entity:".length) : null;
-      if (holder !== null && e.relations.some((r) => r.type === "worn_by" && r.to === holder)) marks.push("worn");
-      if (holder !== null && e.relations.some((r) => r.type === "equipped" && r.to === holder)) marks.push("equipped");
-      if (node.gone) marks.push("gone");
+      if (holder !== null && e.relations.some((r) => r.type === "worn_by" && r.to === holder)) fields.worn = true;
+      if (holder !== null && e.relations.some((r) => r.type === "equipped" && r.to === holder)) fields.equipped = true;
+      if (node.gone) fields.gone = true;
     }
-    const reflection = this.reflection(node);
-    return `${node.name} [${node.id}] (${[node.what, ...marks].join(", ")})${reflection === "" ? "" : ` — ${reflection}`}`;
+    const pieces = reflectionPieces(this.reflectionOf(node));
+    if (pieces.length > 0) fields.reflection = { pieces };
+    return { kind: `level_${node.kind}`, depth, fields };
   }
 
   /** A place's own fields and those of the places above it, nearest first. */
@@ -297,57 +418,79 @@ export class TreeView {
     return out;
   }
 
+  /** The groups an entity belongs to, nearest first: its own, in the order it records them, then theirs. */
+  private groupChain(id: string): { id: string; name: string; fields: Record<string, JsonValue> }[] {
+    const entities = this.state.world.entities;
+    const out: { id: string; name: string; fields: Record<string, JsonValue> }[] = [];
+    const queue = [id];
+    const seen = new Set<string>([id]);
+    while (queue.length > 0) {
+      const at = own(entities, queue.shift() as string);
+      for (const r of at?.relations ?? []) {
+        if (r.type !== "member_of" || seen.has(r.to)) continue;
+        const g = own(entities, r.to);
+        if (!g || this.categoryOf(g) !== "group") continue;
+        seen.add(r.to);
+        out.push({ id: r.to, name: g.name, fields: g.fields });
+        queue.push(r.to);
+      }
+    }
+    return out;
+  }
+
   /** What the game systems keep their own way, for a place: its local time, weather and entry. */
   private placeSystems(id: string, root: boolean): ValueLine[] {
     const out: ValueLine[] = [];
     const clock = this.state.world.clock;
-    if (root) out.push({ key: "time", value: formatClock(calendarOf(this.doc), clock, placeOffset(this.doc, clock, id)), from: "calendar" });
+    if (root) out.push({ key: "time", value: formatClock(calendarOf(this.doc), clock, placeOffset(this.doc, clock, id)), from: { system: "calendar" } });
     const sky = optionalQuery(this.ctx, "weather.sky")?.(this.ctx, id) ?? null;
-    if (sky !== null) out.push({ key: "weather", value: sky, from: "weather" });
+    if (sky !== null) out.push({ key: "weather", value: sky, from: { system: "weather" } });
     const entry = setEntryOf(this.ctx, id);
-    if (entry) out.push({ key: "entry", value: entry.entry, from: entry.at === id ? "orgs" : `orgs, from ${own(this.doc.places, entry.at)?.name ?? entry.at}` });
+    if (entry) out.push({ key: "entry", value: entry.entry, from: entry.at === id ? { system: "orgs" } : { system: "orgs", ref: `place:${entry.at}`, name: own(this.doc.places, entry.at)?.name ?? entry.at } });
     return out;
   }
 
-  /** A level's values: system values first, then its own, then (at the query's own point) what it inherits. */
+  /** A level's values: system values first, then its own, then (with `inherited`) what it takes from the levels above it. */
   values(ref: string, root = true): ValueLine[] {
     const node = this.nodes.get(ref);
     if (!node) return [];
     return readPass(() => this.valuesOf(node, root));
   }
 
-  private valuesOf(node: Node, root: boolean): ValueLine[] {
+  private valuesOf(node: Node, inherited: boolean): ValueLine[] {
     const doc = this.doc;
     const lines: ValueLine[] = [];
     let ownFields: Record<string, JsonValue> = {};
-    let above: string | null = null;
     if (node.kind === "world") {
-      lines.push({ key: "time", value: formatClock(calendarOf(doc), this.state.world.clock), from: "calendar" });
-      lines.push({ key: "time zone", value: doc.calendar.timeZone });
+      lines.push({ key: "time", value: formatClock(calendarOf(doc), this.state.world.clock), from: { system: "calendar" } });
+      lines.push({ key: "time_zone", value: doc.calendar.timeZone });
       lines.push({ key: "currency", value: `${doc.currency.code} (${doc.currency.symbol})` });
       return lines;
     }
+    const marks = this.state.marks[node.ref] ?? {};
+    let above: { id: string; name: string; fields: Record<string, JsonValue> }[] = [];
+    let aboveRef = (id: string): string => `place:${id}`;
     if (node.kind === "place") {
       const p = own(doc.places, node.id);
-      lines.push(...this.placeSystems(node.id, root));
+      lines.push(...this.placeSystems(node.id, inherited));
       ownFields = p?.fields ?? {};
-      if (p?.timeZone) lines.push({ key: "time zone", value: p.timeZone });
-      else if (root) {
+      if (p?.timeZone) lines.push({ key: "time_zone", value: p.timeZone });
+      else if (inherited) {
         const zone = placeZone(doc, node.id);
         const setter = this.placeChain(node.id).find((x) => own(doc.places, x.id)?.timeZone === zone);
-        lines.push({ key: "time zone", value: zone, from: setter ? `from ${setter.name}` : "from the world" });
+        lines.push({ key: "time_zone", value: zone, from: setter ? { ref: `place:${setter.id}`, name: setter.name } : { ref: "world", name: doc.name } });
       }
-      above = p?.parent ?? null;
+      if (inherited) above = this.placeChain(p?.parent ?? null);
     } else if (node.kind === "entity") {
       const e = this.state.world.entities[node.id] as EntityState;
-      lines.push({ key: "tier", value: tierLabel(doc, e.tier) });
-      if (e.life !== undefined) lines.push({ key: "life", value: e.life });
+      lines.push({ key: "tier", value: tierLabel(doc, e.tier), ...(marks.tier ? { mark: marks.tier } : {}) });
+      if (e.life !== undefined) lines.push({ key: "life", value: e.life, ...(marks.life ? { mark: marks.life } : {}) });
       if (node.category === "person" || node.category === "group") {
         const cash = optionalQuery(this.ctx, "economy.carried_cash")?.(this.ctx, node.id) ?? null;
-        if (cash !== null) lines.push({ key: "coin", value: formatMoney(cash, doc.currency), from: "economy" });
+        if (cash !== null) lines.push({ key: "coin", value: formatMoney(cash, doc.currency), from: { system: "economy" } });
       }
       const posted = this.state.world.accounts[node.id];
-      if (posted !== undefined) lines.push({ key: "posted", value: formatMoney(posted, doc.currency), from: "economy" });
+      if (posted !== undefined) lines.push({ key: "posted", value: formatMoney(posted, doc.currency), from: { system: "economy" }, ...(marks.posted ? { mark: marks.posted } : {}) });
       ownFields = e.fields;
       const rels = new Map<string, string[]>();
       for (const r of e.relations) {
@@ -355,7 +498,7 @@ export class TreeView {
         const role = isRecord(r.fields) && typeof r.fields.role === "string" ? ` (${r.fields.role})` : "";
         rels.set(r.type, [...(rels.get(r.type) ?? []), `${target}${role}`]);
       }
-      for (const [type, targets] of rels) lines.push({ key: type, value: targets.join(", ") });
+      for (const [type, targets] of rels) lines.push({ key: type, value: targets.join(", "), ...(marks[type] ? { mark: marks[type] } : {}) });
       if (node.category === "group") {
         const members = Object.entries(this.state.world.entities)
           .filter(([, m]) => m.relations.some((r) => r.type === "member_of" && r.to === node.id))
@@ -363,21 +506,42 @@ export class TreeView {
           .sort();
         if (members.length > 0) lines.push({ key: "members", value: members.join(", ") });
       }
+      if (inherited) {
+        above = this.groupChain(node.id);
+        aboveRef = (id) => `entity:${id}`;
+      }
     }
     const taken = new Set(lines.map((l) => l.key));
-    for (const [key, v] of Object.entries(ownFields)) if (!taken.has(key)) lines.push({ key, value: show(v) });
-    // At the query's own point, a place shows what the places above it set and it does not: the
-    // nearest one's, named. People and things are shown where they are, not given their place's values.
-    if (!root || node.kind !== "place") return lines;
+    for (const [key, v] of Object.entries(ownFields)) if (!taken.has(key)) lines.push({ key, value: show(v), ...(marks[key] ? { mark: marks[key] } : {}) });
+    // What the levels above set and this one does not: for a place, the places above it; for a
+    // member, its groups. The nearest one's, named. Shown at the query's own point only.
     const kept = new Set([...taken, ...Object.keys(ownFields), ...this.options.ownOnly]);
-    for (const p of this.placeChain(above)) {
+    for (const p of above) {
       for (const [key, v] of Object.entries(p.fields)) {
         if (kept.has(key)) continue;
         kept.add(key);
-        lines.push({ key, value: show(v), from: `from ${p.name}` });
+        lines.push({ key, value: show(v), from: { ref: aboveRef(p.id), name: p.name } });
       }
     }
     return lines;
+  }
+
+  /** A level's lines: its own line and, as asked, its values with the facts standing beside them, one level further in. */
+  private levelLines(node: Node, depth: number, shown: ValuesShown): ViewLine[] {
+    const out: ViewLine[] = [this.levelLine(node, depth)];
+    if (shown === "none") return out;
+    const facts = standing(this.state, node.ref);
+    const placed = new Set<string>();
+    for (const v of this.valuesOf(node, shown === "all")) {
+      const beside = facts.filter((f) => f.key === v.key);
+      out.push({ kind: "value", depth: depth + 1, fields: valueFields(v, beside.length) });
+      for (const f of beside) {
+        placed.add(f.id);
+        out.push({ kind: "fact", depth: depth + 1, fields: factFields(f) });
+      }
+    }
+    for (const f of facts) if (!placed.has(f.id)) out.push({ kind: "fact", depth: depth + 1, fields: factFields(f) });
+    return out;
   }
 
   /** A level as data, or null when nothing in the tree is called `at`. */
@@ -385,41 +549,51 @@ export class TreeView {
     const ref = this.resolve(at);
     const node = ref === null ? undefined : this.nodes.get(ref);
     if (!node) return null;
-    return { ref: node.ref, name: node.name, what: node.what, reflection: this.reflection(node), values: this.values(node.ref), children: [...node.children], parent: node.parent };
+    return {
+      ref: node.ref,
+      kind: node.kind,
+      name: node.name,
+      what: node.what,
+      reflection: this.reflectionOf(node),
+      values: this.values(node.ref),
+      facts: standing(this.state, node.ref),
+      children: [...node.children],
+      parent: node.parent,
+    };
   }
 
   /**
-   * The tree at `at`, to `depth` levels below it (`full`: all of them), as indented text: the level
-   * itself with its values, each level above the depth with its values and its levels, and each
-   * level at the depth as one line.
+   * One level's lines at `depth` in: its own line and, as asked, its values with its facts. For a
+   * view put together level by level (the world state). Null when nothing is called `at`.
    */
-  query(at: string, depth: number | "full"): string {
+  level(at: string, depth: number, shown: ValuesShown): ViewLine[] | null {
     const ref = this.resolve(at);
-    if (ref === null) return this.notFound(at);
+    const node = ref === null ? undefined : this.nodes.get(ref);
+    if (!node) return null;
+    return readPass(() => this.levelLines(node, depth, shown));
+  }
+
+  /**
+   * The tree at `at`, to `depth` levels below it (`full`: all of them): the level itself with its
+   * values (and what it inherits), each level above the depth with its values and its levels, and
+   * each level at the depth as its own line. Null when nothing in the tree is called `at`.
+   */
+  query(at: string, depth: number | "full"): View | null {
+    const ref = this.resolve(at);
+    if (ref === null) return null;
     const max = depth === "full" ? Number.POSITIVE_INFINITY : Math.max(0, Math.floor(depth));
-    const lines: string[] = [];
+    const lines: ViewLine[] = [];
     readPass(() => {
       const walk = (r: string, level: number): void => {
         const node = this.nodes.get(r) as Node;
-        const pad = "  ".repeat(level);
-        lines.push(`${pad}${this.header(node)}`);
-        if (level > 0 && level >= max) return;
-        for (const v of this.valuesOf(node, level === 0)) lines.push(`${pad}  · ${v.key}: ${v.value}${v.from === undefined ? "" : ` (${v.from})`}`);
+        const atCut = level > 0 && level >= max;
+        lines.push(...this.levelLines(node, level, atCut ? "none" : level === 0 ? "all" : "own"));
         if (level >= max) return;
         for (const c of node.children) walk(c, level + 1);
       };
       walk(ref, 0);
     });
-    return lines.join("\n");
-  }
-
-  private notFound(at: string): string {
-    const said = at.toLowerCase();
-    const near = [...this.nodes.values()]
-      .filter((n) => n.id.toLowerCase().includes(said) || n.name.toLowerCase().includes(said))
-      .slice(0, 5)
-      .map((n) => `${n.name} [${n.id}]`);
-    return `Nothing in the tree is called ${at}.${near.length > 0 ? ` Near: ${near.join(", ")}.` : ""}`;
+    return { lines };
   }
 
   /** The horizon as the Author left it, each entry with the level it names now (null: none). */

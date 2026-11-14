@@ -19,7 +19,7 @@ import type { WorldDoc } from "../../src/shared/world";
 import { applyEvent } from "../../src/engine/events";
 import { initialState } from "../../src/engine/world-state";
 import { openStore, type Store, type UserStore } from "../../src/store/store";
-import { engine, goTo, hand, hashOf, inventedWorld, pay, POV, registry, tick, USER } from "./fixtures";
+import { engine, goTo, hand, hashOf, inventedWorld, pay, POV, registry, say, tick, USER } from "./fixtures";
 
 const RUNS = 9;
 
@@ -195,12 +195,12 @@ function treeMeasure(): void {
   console.log(`\nThe tree over ${entities} entities and ${Object.keys(world.places).length} places: built in ${ms(build)} (once per state, kept with it)`);
   for (const [at, depth] of queries) {
     let out = "";
-    const r = time(`query(${at}, ${depth})`, () => {
-      out = view.query(at, depth);
+    const r = time(`query(${at}, ${depth}), worded by the shipped part`, () => {
+      out = say(view, at, depth);
     });
     console.log(`  ${r.label}: median ${ms(r.median)}, best ${ms(r.min)}; ${out.split("\n").length} lines`);
   }
-  const whole = time("query(world, full)", () => view.query("world", "full"));
+  const whole = time("query(world, full), worded by the shipped part", () => say(view, "world", "full"));
   console.log(`  ${whole.label}, the whole world printed: median ${ms(whole.median)}`);
   store.close();
 }

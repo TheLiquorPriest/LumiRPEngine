@@ -3,6 +3,7 @@
 
 import { isRecord } from "../shared/json";
 import { validMarkerBody } from "../engine/events";
+import { FACT_ABOUT } from "./facts";
 import { LANES, PRECISIONS, SOURCES, STANDINGS, STORE_OPS, StoreInputError, type ChangeInput } from "./types";
 
 const oneOf = (list: readonly string[], v: unknown): boolean => v === undefined || v === null || (typeof v === "string" && list.includes(v));
@@ -34,6 +35,11 @@ export function checkChange(c: ChangeInput, index: number): void {
       return;
     case STORE_OPS.marker:
       if (!validMarkerBody(v)) throw new StoreInputError(`${at}: not a marker`);
+      return;
+    case STORE_OPS.fact:
+      if (!isRecord(v) || typeof v.id !== "string" || v.id === "" || typeof v.about !== "string" || !FACT_ABOUT.test(v.about) || typeof v.key !== "string" || v.key === "" || typeof v.value !== "string" || !text(v.replaces)) {
+        throw new StoreInputError(`${at}: a fact is { id, about: a tree ref (world, place:<id>, entity:<id>), key, value, replaces? }`);
+      }
       return;
     default:
       throw new StoreInputError(`${at}: the store has no operation ${c.op}`);

@@ -1,7 +1,7 @@
 // What the store records and answers (plan §6.3, §6.6, Appendix B). Plain data: every row carries
 // the user, a change carries its lane, and a value carries its precision, standing and source.
 
-import type { JsonValue } from "../shared/json";
+import type { JsonObject, JsonValue } from "../shared/json";
 import type { RevisionId, WorldId } from "../shared/ids";
 import type { WorldState } from "../engine/state";
 
@@ -36,12 +36,17 @@ export const STORE_OPS = {
   note: "store.note",
   /** One of today's message-level markers (an Upgrade, a level, a time control), applied by today's own marker code. */
   marker: "store.marker",
+  /**
+   * A plain statement about a thing (§6.6): `{ id, about, key, value, replaces? }`, `about` a tree
+   * ref. It replaces the standing fact of the same `about` and `key`, and the fact `replaces` names.
+   */
+  fact: "store.fact",
 } as const;
 
-/** Why a change did not apply, or what it did not add up to. */
+/** Why a change did not apply, or what it did not add up to: a code and its values, never words. */
 export interface Report {
   code: string;
-  text: string;
+  values?: JsonObject;
 }
 
 /** One change as a caller gives it. */
@@ -154,13 +159,13 @@ export interface PathEntry {
   date: number | null;
 }
 
-/** A change that applied when it was recorded and does not apply on the path folded now. */
+/** A change that applied when it was recorded and does not apply on the path folded now, with the reports that say why. */
 export interface NotApplied {
   change: number;
   turn: string;
   op: string;
   lane: Lane;
-  reason: string;
+  reports: Report[];
 }
 
 /** What comparing the chat's path with the turn tree found (§6.3). Ids and hashes only. */
@@ -191,10 +196,42 @@ export interface NoteLine {
 }
 
 /** The last turn whose changes touched something: its id and its number on the path. */
-export interface Touched {
+export type Touched = {
   turn: string;
   n: number;
-}
+};
+
+/**
+ * The change that last wrote a part of a level (a field, a relation type, or an aspect such as a
+ * balance), as its change recorded it: the turn, and how exact, how sure and from where. For a
+ * balance, a sum of every posting, the precision is the least exact any posting into it had.
+ */
+export type Mark = Touched & {
+  precision: Precision | null;
+  standing: Standing | null;
+  source: Source | null;
+};
+
+/** A plain statement about a thing (§6.6), as the fact store keeps it. History is kept: a replaced fact stays, marked. */
+export type Fact = {
+  id: string;
+  /** The tree ref it is about. */
+  about: string;
+  /** The key its writer chose; matched exactly, never by its words. */
+  key: string;
+  /** The value in words. */
+  value: string;
+  precision: Precision | null;
+  standing: Standing | null;
+  source: Source | null;
+  by: string | null;
+  turn: string;
+  /** The turn's number on the path. */
+  n: number;
+  /** The fact that replaced it, and the number of the turn that did; absent while it stands. */
+  replacedBy?: string;
+  replacedAt?: number;
+};
 
 /** The state the store folds: the engine's world state, and what the store keeps beside it. */
 export interface StoreState {
@@ -205,6 +242,10 @@ export interface StoreState {
   notes: Record<string, NoteLine>;
   /** The last turn that touched each tree ref, for the reflections. */
   touched: Record<string, Touched>;
+  /** What last wrote each part of a level, by tree ref and then by the part's name (a field, a relation type, an aspect). */
+  marks: Record<string, Record<string, Mark>>;
+  /** The fact store: every fact recorded on the path, by the tree ref it is about, oldest first. */
+  facts: Record<string, Fact[]>;
 }
 
 /**

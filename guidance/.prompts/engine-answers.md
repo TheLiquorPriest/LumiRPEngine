@@ -44,3 +44,10 @@ before_start: Operation {{n}} ({{op}}): the story starts at {{start}}, so the cl
 due_unlisted: {{#n}}Operation {{n}} ({{op}}): {{/n}}what this span of time brings due is not listed by this host.
 no_map: {{at}} has no map to show.
 none_found: Nothing found for {{words}}.
+failed: {{#n}}Operation {{n}} ({{op}}): {{/n}}its handler failed ({{error}}), so it did not apply.
+unknown_revision: {{#n}}Operation {{n}} ({{op}}): {{/n}}the world revision {{revision}} is not to hand, so it did not apply.
+bad_marker: {{#n}}Operation {{n}} ({{op}}): {{/n}}this is not a marker the engine can read, so it did not apply.
+no_handler: {{#n}}Operation {{n}} ({{op}}): {{/n}}nothing in the engine applies {{op}}.
+tied: {{#n}}Operation {{n}} ({{op}}): {{/n}}it was tied to an operation that did not apply, so it did not apply either.
+marker_note: {{#n}}Operation {{n}} ({{op}}): {{/n}}{{note}}
+replaces_none: {{#n}}Operation {{n}} ({{op}}): {{/n}}no standing fact {{id}} was found to replace, so the fact was recorded beside the others.
