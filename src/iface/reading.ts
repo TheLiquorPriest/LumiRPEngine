@@ -156,8 +156,9 @@ export class Reading {
 
   /**
    * What `said` names, as wanted: an id, a ref (`entity:<id>`, `place:<id>`), a whole name, a name
-   * with a mark after it, or words that are all words of one name; a thing also as today's things
-   * model reads words ("the fridge", "Danny's keys"). `gone` counts what was taken out of the world.
+   * with a note after it ("Bram (the innkeeper)", "Wren: soaked through"), or words that are all
+   * words of one name; a thing also as today's things model reads words ("the fridge", "Danny's
+   * keys"). `gone` counts what was taken out of the world.
    */
   find(said: string, want: Want, gone = false): Found | Missed {
     const trimmed = said.trim();
@@ -168,7 +169,8 @@ export class Reading {
       (c) => c.ref === trimmed || c.id === bare,
       (c) => c.id.toLowerCase() === lower,
       (c) => c.names.some((n) => spaced(n) === spaced(bare) || (c.place && placeKey(n) !== "" && placeKey(n) === placeKey(bare))),
-      (c) => c.names.some((n) => spaced(n) !== "" && spaced(bare).startsWith(spaced(n)) && /^[\s[({:;,·—-]/.test(spaced(bare).slice(spaced(n).length))),
+      // Only a mark that opens a note: words after a space or a comma may name someone else ("Odile and Tam", "Odile, Tam"), and are never dropped as one name.
+      (c) => c.names.some((n) => spaced(n) !== "" && spaced(bare).startsWith(spaced(n)) && /^ ?[[({:;·—-]/.test(spaced(bare).slice(spaced(n).length))),
     ];
     for (const rule of rules) {
       const hits = all.filter(rule);

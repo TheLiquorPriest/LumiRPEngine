@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "rp-harness/contract";
 import { MONEY_TOOLS } from "../../../src/iface/families/money";
-import { dataOf } from "../rig";
+import { dataOf, texts } from "../rig";
 import { appliedInFull, descriptions, eachFoundByItsWords, familyRig, opOf, searchByWords, SRC, wordsFromFiles } from "./kit";
 
 const NAMES = MONEY_TOOLS.map((t) => t.name);
@@ -70,6 +70,19 @@ describe("money", () => {
     appliedInFull(r, "engine", false);
     expect(opOf(r).status).toBe("closed");
     expect(r.reports ?? []).toEqual([expect.stringContaining("Wren's coin [acct_wren] was closed with")]);
+  });
+
+  test("money put on a closed account is applied; money taken out of one is answered as the books' rule, and nothing is recorded", async () => {
+    const t = await familyRig(BANKED);
+    await t.call("close_account", { account: "acct_wren", ...SRC });
+    appliedInFull(await t.call("gm_adjust_money", { account: "Wren's coin", amount: 5, ...SRC }), "engine");
+    const rows = t.s.changes(t.turn.id).length;
+    const r = await t.call("gm_adjust_money", { account: "Wren's coin", amount: -5, ...SRC });
+    expect(r.error).toBe(true);
+    expect(texts(r)[0]).toBe("Operation 1 (gm_adjust_money): Wren's coin [acct_wren] is closed, and the books take no money out of an account that is not open, on any path.");
+    expect(texts(r).some((x) => x.includes("cannot apply this at all"))).toBe(false);
+    expect(t.s.changes(t.turn.id).length).toBe(rows);
+    wordsFromFiles(r);
   });
 
   test("a payment once the payer's account is closed is posted from their outside money, and reported", async () => {

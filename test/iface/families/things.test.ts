@@ -105,6 +105,20 @@ describe("things and gear", () => {
     expect(world.entities.cloak?.relations.some((x) => x.type === "worn_by" && x.to === "wren")).toBe(true);
   });
 
+  test("a home in something the world's rules say holds nothing is set all the same, and reported", async () => {
+    const t = await familyRig();
+    const r = await t.call("item_home", { item: "knife", in: "bell", ...SRC });
+    appliedInFull(r, "engine");
+    expect(r.reports ?? []).toEqual([expect.stringContaining("Knife [knife] was put with Market bell [bell] although the world's rules for things say otherwise (cant_hold)")]);
+    expect(t.s.stateAt(t.turn.id).state.world.entities.knife?.fields.home).toBe("bell");
+    // Asked again, it is so already: nothing more is recorded or reported.
+    const rows = t.s.changes(t.turn.id).length;
+    const again = await t.call("item_home", { item: "knife", in: "Market bell", ...SRC });
+    expect(again.error).toBeUndefined();
+    expect(again.reports).toBeUndefined();
+    expect(t.s.changes(t.turn.id).length).toBe(rows);
+  });
+
   test("a name that is not there is refused with the near matches, and nothing is recorded", async () => {
     const t = await familyRig();
     const r = await t.call("item_condition", { item: "knif", delta: -5, ...SRC });

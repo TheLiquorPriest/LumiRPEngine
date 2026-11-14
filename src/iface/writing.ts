@@ -9,6 +9,7 @@ import { hashParts } from "../shared/hash";
 import type { DomainId, EntityId } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
+import { FINANCE_EVENTS } from "../shared/finance";
 import { formatMoney, type PlaceDef, type WorldDoc } from "../shared/world";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { materializeIfNeeded } from "../engine/materialize";
@@ -32,6 +33,20 @@ export interface Recorded {
   inputs: number[];
   /** What the operation made, by id: a spawned person or thing. */
   made?: string;
+}
+
+/**
+ * Whether the event at `i` is the economy's bookkeeping for a party it keeps no accounts for
+ * (`l1Move`): the band and typical worth that party's money is taken to start from (an anchor, at
+ * the world's default band where nothing gives one), and the band a payment moves it to, set right
+ * after its anchor. The engine works both out from the world's tables; no call says either.
+ */
+function bookkeeping(events: readonly LedgerEvent[], i: number): boolean {
+  const ev = events[i];
+  if (ev === undefined) return false;
+  if (ev.type === FINANCE_EVENTS.anchor) return true;
+  const anchor = events[i - 1];
+  return ev.type === "set" && ev.field === "wealth" && anchor !== undefined && anchor.type === FINANCE_EVENTS.anchor && "data" in anchor && anchor.data.entity === ev.entity && anchor.data.band === ev.value;
 }
 
 /** A call's operations worked out on a copy of the state, before anything is recorded. */
@@ -102,9 +117,24 @@ export class Draft {
   }
 
   /**
+   * Applies what the engine works out from the world itself as the economy would post it (an
+   * account's authored opening), each event recorded as a change of its own with `FILLED_IN`, as
+   * `fill` records what it fills in. What does not apply undoes the rest and is returned.
+   */
+  fillWith(events: readonly LedgerEvent[]): Rejection | null {
+    const at = this.w.events.length;
+    const bad = this.applyAll(events);
+    if (bad) return bad;
+    for (const ev of this.w.events.slice(at)) this.filled.add(ev);
+    return null;
+  }
+
+  /**
    * Records the events applied since `from` as one operation's changes. Events that came with no
    * unit of their own become one unit, so a later path keeps or drops the operation whole, as
    * today's GM edits are; what was filled in (`fill`) stays a change of its own, out of that unit.
+   * The economy's bookkeeping for a party it keeps no accounts for stays in the unit it came in,
+   * and is recorded with `FILLED_IN` too (`bookkeeping`).
    */
   record(n: number, op: string, lane: Lane, prov: Provenance, from: number, extra: { made?: string } = {}): Recorded {
     const events = this.w.events.slice(from);
@@ -112,15 +142,15 @@ export class Draft {
     const loose = own.length > 1 && own.every((e) => e.group === undefined);
     const group = loose ? `op:${hashParts(this.call.callId, String(n), JSON.stringify(own)).slice(0, 10)}` : undefined;
     const rec: Recorded = { n, op, lane, prov, inputs: [], ...(extra.made !== undefined ? { made: extra.made } : {}) };
-    for (const ev of events) {
+    events.forEach((ev, i) => {
       if (this.filled.has(ev)) this.push(rec, lane, FILLED_IN, { op: ev.type, value: ev as unknown as JsonValue });
-      else this.push(rec, lane, prov, { op: ev.type, value: (group ? { ...ev, group } : ev) as unknown as JsonValue });
-    }
+      else this.push(rec, lane, bookkeeping(events, i) ? FILLED_IN : prov, { op: ev.type, value: (group ? { ...ev, group } : ev) as unknown as JsonValue });
+    });
     this.recorded.push(rec);
     return rec;
   }
 
-  /** Records one of the store's own operations (the horizon), or a change the state lane's stores apply (a fact). */
+  /** Records one of the store's own operations (the horizon), or a change the store's fact store applies (a fact, `src/store/facts.ts`). */
   recordStoreOp(n: number, opName: string, lane: Lane, prov: Provenance, change: Pick<ChangeInput, "op" | "value">): Recorded {
     const rec: Recorded = { n, op: opName, lane, prov, inputs: [] };
     this.push(rec, lane, prov, change);
@@ -304,9 +334,4 @@ export function answerDraft(draft: Draft, done: Committed, reply: Reply, extra: 
   reply.data({ operations, changed, now });
   reply.details = { ...reply.details, changes: done.rows.map((r) => r.id) };
   return reply;
-}
-
-/** The entity id `made` names on the draft's state, for an answer's data. */
-export function madeName(draft: Draft, id: EntityId): string {
-  return own(draft.w.state.entities, id)?.name ?? id;
 }

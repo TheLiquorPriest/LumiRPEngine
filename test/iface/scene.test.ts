@@ -1,6 +1,6 @@
-// The Author's first turn in a chat with no world, as it was seen live: the scene a card and a first
-// message set, recorded in one call; and each call that failed then, played again, its answer now
-// saying what would have worked. Every name here is made up.
+// The Author's first turn in a chat with no world: the scene a card and a first message set,
+// recorded in one call; and each call a model sends that cannot be read, answered with what would
+// have worked. Every name here is made up.
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject, ToolResult } from "rp-harness/contract";
@@ -45,7 +45,7 @@ describe("the first turn of a chat with no world", () => {
     wordsFromFiles(r);
   });
 
-  test("each call that failed live is answered with what would have worked, and records nothing", async () => {
+  test("each call a model sends that cannot be read is answered with what would have worked, and records nothing", async () => {
     const t = await rig({}, "blank");
     const refused = async (args: JsonObject): Promise<string[]> => {
       const r: ToolResult = await t.call("world_apply", args);

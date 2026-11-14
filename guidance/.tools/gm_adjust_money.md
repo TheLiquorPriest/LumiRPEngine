@@ -8,4 +8,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Puts money into an account or takes it out against a correction, so the books show the balance the story gives. The answer says what changed and how the account now stands.
+Puts money into an account or takes it out against a correction, so the books show the balance the story gives. Taken past what the account holds, it is applied and reported. The books take nothing out of an account that is closed or otherwise not open. The answer says what changed and how the account now stands.

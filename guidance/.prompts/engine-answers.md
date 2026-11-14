@@ -18,6 +18,7 @@ needs_one: Operation {{n}} ({{op}}) needs one of {{fields}}, and only one.
 needs_any: Operation {{n}} ({{op}}) needs one of {{fields}}.
 op_takes: {{op}} needs {{needs}}{{#takes}}, and also takes {{takes}}{{/takes}}.{{#ignored}} It does not read {{ignored}}.{{/ignored}}
 spawn_nowhere: Operation {{n}} ({{op}}): {{name}} is made as {{kind}}, a thing, which needs at, in or on to say where it is. A place is made with kind place, and needs none of them.
+place_unread: Operation {{n}} ({{op}}): a place has no {{unread}}, so that was not kept.
 holds_nothing: Operation {{n}} ({{op}}): {{holder}} holds nothing and is at no place, so {{what}} cannot be made in it.
 make_place: A place can be made earlier in this same call: spawn with kind place and its name, before the operation that names it.
 make_person: Someone can be made earlier in this same call: spawn with kind person and their name, before the operation that names them.
@@ -53,6 +54,7 @@ wants_specs: a list of { label, value }
 wants_object_or_null: an object, or null
 wants_day: a whole number of days from today: 0 today, 1 tomorrow, -1 yesterday
 not_applicable: {{#n}}Operation {{n}} ({{op}}): {{/n}}the engine cannot apply this at all ({{code}}).
+not_open: Operation {{n}} ({{op}}): {{what}} is {{status}}, and the books take no money out of an account that is not open, on any path.
 nothing_recorded: Nothing was recorded. Send the call again with that put right.
 never: Operation {{n}} ({{op}}) was not applied: it writes to the {{lane}} lane, where the player allows no writes.
 declined: Operation {{n}} ({{op}}) was not applied: the player said no.{{#reason}} Their reason: {{reason}}{{/reason}}
@@ -64,7 +66,7 @@ not_applied: Operation {{n}} ({{op}}) was recorded and did not apply ({{code}}).
 already_so: Operation {{n}} ({{op}}): {{what}} was already so; nothing changed.
 placed_instead: Operation {{n}} ({{op}}): {{what}} was put at {{where}}, not {{asked}}, by the size of things.
 rule_bent: Operation {{n}} ({{op}}): {{what}} was put with {{where}} although the world's rules for things say otherwise ({{code}}).
-made_where_said: Operation {{n}} ({{op}}): nothing goes by {{said}}, so {{what}} was made at {{where}}, and those words are kept on it as where it was said to be.
+made_where_said: Operation {{n}} ({{op}}): nothing goes by {{said}}, so {{what}} was made at {{where}}{{#assumed}}, which is recorded as assumed{{/assumed}}, and those words are kept on it as where it was said to be.
 made_unrecorded: Operation {{n}} ({{op}}): nothing recorded went by {{name}}, so it was made as a thing, {{made}}.
 said_where: Operation {{n}} ({{op}}): nothing goes by {{said}}, so those words are kept on {{what}} as where it was said to be.
 horizon_words: Operation {{n}} ({{op}}): kept on the horizon as words, naming no place, person or thing: {{words}}.
@@ -93,6 +95,7 @@ time_left_out: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{va
 time_differs: Operation {{n}} ({{op}}): {{field}} reads as {{other}} and {{used}} as {{to}}; the clock was set by {{used}}.
 before_start: Operation {{n}} ({{op}}): the story starts at {{start}}, so the clock went back no further.
 due_unlisted: {{#n}}Operation {{n}} ({{op}}): {{/n}}what this span of time brings due is not listed by this host.
+due_more: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; {{more}} more fall due later in it.
 no_map: {{at}} has no map to show.
 none_found: Nothing found for {{words}}.
 store_failed: {{#n}}Operation {{n}} ({{op}}): {{/n}}the engine failed while applying it, so it did not apply. The error is in RPE's log.

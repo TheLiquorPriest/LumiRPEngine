@@ -1,6 +1,6 @@
-// The engine's interface for agents (plan §6.8): what the turn lane calls to hand RPH the engine's
-// tools, and the faces other lanes fill in (what time brings due, the state search, the fact store,
-// squares and maps).
+// The engine's interface for agents (plan §6.8): what the turn (`src/turn/`) calls to hand RPH the
+// engine's tools, and the faces other modules fill in (what time brings due, the state search, the
+// fact store, squares and maps).
 
 export { engineTools, ENGINE_TOOLS, FIXED_TOOLS, ANSWERS_PART, answerLines } from "./tools";
 export { stateScan } from "./search";

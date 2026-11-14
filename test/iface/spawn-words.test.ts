@@ -1,6 +1,6 @@
-// `spawn` as the Author met it live: a new thing put on a holder given in words that name nothing in
-// the world, in the middle of a long call. Played as the harness plays a call (checked and coerced
-// by pi, then run). Every name here is made up.
+// `spawn` of a new thing put on a holder given in words that name nothing in the world, in the
+// middle of a long call, played as the harness plays a call (checked and coerced by pi, then run).
+// Where code puts it, no call said, so that spawn stands as assumed. Every name here is made up.
 
 import { describe, expect, test } from "bun:test";
 import type { HostTool, JsonObject } from "rp-harness/contract";
@@ -52,13 +52,22 @@ describe("spawn somewhere given in words", () => {
     const shed = String(entityNamed(t, "Ada Lorne").fields.place);
     expect(r.reports).toBeUndefined();
     expect(texts(r).filter((x) => x.includes("nothing goes by"))).toEqual([
-      `Operation 5 (spawn): nothing goes by peg by the stove, so Wet coat was made at Keeper's kitchen [${kitchen}], and those words are kept on it as where it was said to be.`,
-      `Operation 6 (spawn): nothing goes by the hat box by the door, so Oilskin hat was made at Boat shed [${shed}], and those words are kept on it as where it was said to be.`,
+      `Operation 5 (spawn): nothing goes by peg by the stove, so Wet coat was made at Keeper's kitchen [${kitchen}], which is recorded as assumed, and those words are kept on it as where it was said to be.`,
+      `Operation 6 (spawn): nothing goes by the hat box by the door, so Oilskin hat was made at Boat shed [${shed}], which is recorded as assumed, and those words are kept on it as where it was said to be.`,
     ]);
     expect(entityNamed(t, "Wet coat").fields).toMatchObject({ place: kitchen, said_on: "peg by the stove" });
     // Where its owner is, when the call names who it is for.
     expect(entityNamed(t, "Oilskin hat").fields).toMatchObject({ place: shed, said_in: "the hat box by the door" });
     expect(entityNamed(t, "Tin mug").fields.place).toBe(kitchen);
+    // Each change of a spawn code placed stands as assumed, with the call's own source; one the call placed stands as the call gave it.
+    const rows = t.s.changes(t.turn.id);
+    const recorded = (name: string): unknown[] => {
+      const { id } = entityNamed(t, name);
+      return [...new Set(rows.filter((row) => JSON.stringify(row.value).includes(`"${id}"`)).map((row) => `${row.source}/${row.standing}`))];
+    };
+    expect(recorded("Wet coat")).toEqual(["prose/assumed"]);
+    expect(recorded("Oilskin hat")).toEqual(["prose/assumed"]);
+    expect(recorded("Tin mug")).toEqual(["prose/null"]);
   });
 
   test("with no one named and no scene to put it in, the words cannot be read, and the call says what would work", async () => {

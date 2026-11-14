@@ -30,6 +30,8 @@ The prose says "she spent most of what she had". Do not turn that into a number.
 - Leave the exact balance as it was. The world state will show both: the last exact figure and the vaguer line since.
 - When the story next gives an exact figure ("she counts out her last nine silver"), set the balance from it. The prose is its source.
 
+When someone's money matters and nothing recorded or told says what they have, `fill_in_detail` (find it with `tool_search`) draws their accounts from the world's tables; what it draws is recorded as assumed, never as established.
+
 ## What comes due
 
 When time passes, the answer lists what the time brought due: wages, rent, a loan's instalment, a tax, a standing payment. It applies none of them. What is decided for each is recorded as what it was: paid is a `pay`; missed or put off is a `fact` about the one who owes it.

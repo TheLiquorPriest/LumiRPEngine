@@ -11,4 +11,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Sets where a thing is kept when it is not in use: in a container, at a place, on its owner, or nowhere in particular. Takes one of in, at, owner or clear. It does not move the thing. The answer says what changed and how the thing now stands.
+Sets where a thing is kept when it is not in use: in a container, at a place, on its owner, or nowhere in particular. Takes one of in, at, owner or clear. It does not move the thing. Something the world's rules say holds nothing is set as where it is kept all the same, and the answer reports it. The answer says what changed and how the thing now stands.

@@ -218,9 +218,23 @@ const home: WriteDef = {
     if (given[0] === "clear") rest = null;
     else if (given[0] === "owner") rest = "owner";
     else if (given[0] === "in") {
-      const holder = find(o, "in", "holder");
-      if (isUnread(holder)) return holder;
-      rest = { in: holder.id };
+      // Anyone or anything: one the world's rules say holds nothing is where the thing is kept all the same, and the answer says so.
+      const found = find(o, "in", "entity");
+      if (isUnread(found)) return found;
+      const holder = found.id;
+      return itemChange(o, { do: "home", item: item.id, home: { in: holder } }, "engine", item.id, {
+        bend: (code) => {
+          if (!BENT_RULES[code]) return null;
+          if (own(o.draft.w.state.entities, item.id)?.fields.home === holder) {
+            o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, item.id) });
+            return undefined;
+          }
+          const bad = o.draft.applyAll([{ type: "set", entity: item.id, field: "home", value: holder }]);
+          if (bad) return notApplicable(o, bad.code);
+          o.reply.report("rule_bent", { n: o.n, op: o.op, what: named(o.reading, item.id), where: named(o.reading, holder), code });
+          return undefined;
+        },
+      });
     } else {
       const place = find(o, "at", "place");
       if (isUnread(place)) return place;

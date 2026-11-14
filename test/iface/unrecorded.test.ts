@@ -1,4 +1,4 @@
-// A thing an operation names that is not recorded yet, as the floor model met it live: `place` and
+// A thing an operation names that is not recorded yet: `place` and
 // `give` naming a thing nothing recorded goes by, and a support given in words that name nothing.
 // Played as the harness plays a call (checked and coerced by pi, then run). Every name here is made up.
 
@@ -56,7 +56,7 @@ function linesOn(r: ToolResult, words: string): string[] {
 }
 
 describe("a thing an operation names that is not recorded yet", () => {
-  test("place, as sent live: the hand lantern is made where it is set down, the table it was said to be on kept as words, and the answer is clean", async () => {
+  test("place: the hand lantern is made where it is set down, the table it was said to be on kept as words, and the answer is clean", async () => {
     const t = await scene();
     const r = await play(t, [{ op: "place", what: "hand lantern", at: "Keeper's kitchen", on: "the table" }]);
     expect(r.error).toBeUndefined();
@@ -84,7 +84,7 @@ describe("a thing an operation names that is not recorded yet", () => {
     expect(linesOn(r, "hand lantern")).toEqual([`Operation 2 (place): nothing goes by the table, so those words are kept on hand lantern [${lantern.id}] as where it was said to be.`]);
   });
 
-  test("give, as sent live: the spare gloves are made in the giver's hands and given, so they are the one given them's", async () => {
+  test("give: the spare gloves are made in the giver's hands and given, so they are the one given them's", async () => {
     const t = await scene();
     const r = await play(t, [{ op: "give", what: "spare gloves", from: "Traveller", to: "Marta Venn", how: "given" }]);
     expect(r.error).toBeUndefined();

@@ -12,9 +12,9 @@ An operation whose entry says it takes its provenance takes these three argument
 
 | Argument | Shape | What it is |
 |---|---|---|
-| `source` | object: from, lore, message, roll, gap_check, consent | Where it comes from (horizon takes none): from is prose, lore, author, gm, character, player, default or invented; lore, message and roll cite an entry, a message or a roll by id; an invention cites its gap_check and consent. |
-| `precision` | one of exact, approximate, vague, unknown | How exact: exact, approximate, vague or unknown. |
-| `standing` | one of established, proposed, assumed | How it stands: established, proposed or assumed. |
+| `source` | text, or object: from, lore, message, roll, gap_check, consent | Where it comes from (horizon takes none): from is prose, lore, author, gm, character, player, default or invented; lore, message and roll cite an entry, a message or a roll by id; an invention cites its gap_check and consent. |
+| `precision` | text | How exact: exact, approximate, vague or unknown. |
+| `standing` | text | How it stands: established, proposed or assumed. |
 
 ### move
 
@@ -650,7 +650,7 @@ Worked example:
 
 #### item_home
 
-Sets where a thing is kept when it is not in use: in a container, at a place, on its owner, or nowhere in particular. Takes one of in, at, owner or clear. It does not move the thing. The answer says what changed and how the thing now stands.
+Sets where a thing is kept when it is not in use: in a container, at a place, on its owner, or nowhere in particular. Takes one of in, at, owner or clear. It does not move the thing. Something the world's rules say holds nothing is set as where it is kept all the same, and the answer reports it. The answer says what changed and how the thing now stands.
 
 Writes the engine lane.
 
@@ -860,7 +860,7 @@ Worked example:
 
 #### gm_adjust_money
 
-Puts money into an account or takes it out against a correction, so the books show the balance the story gives. The answer says what changed and how the account now stands.
+Puts money into an account or takes it out against a correction, so the books show the balance the story gives. Taken past what the account holds, it is applied and reported. The books take nothing out of an account that is closed or otherwise not open. The answer says what changed and how the account now stands.
 
 Writes the engine lane.
 

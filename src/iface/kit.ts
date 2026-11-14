@@ -19,6 +19,8 @@ export const IFACE_DEFAULTS = Object.freeze({
   queryDepth: 1,
   /** How many things `world_search` answers with at most. */
   searchHits: 10,
+  /** How many things falling due in a span an answer lists at most, soonest first; how many more fall in the span is said, not listed. */
+  dueItems: 50,
 });
 
 export type IfaceSettings = { -readonly [K in keyof typeof IFACE_DEFAULTS]: number };
@@ -28,7 +30,7 @@ export interface Writes {
   run<T>(write: (db: Database) => T, label?: string): Promise<T>;
 }
 
-/** One thing a span of time brings due, as the state lane lists it: data only, nothing applied. */
+/** One thing a span of time brings due, as the store lists it (`src/store/due.ts`): data only, nothing applied. */
 export interface DueItem {
   /** When, in minutes since the world's epoch. */
   at: number;
@@ -38,11 +40,11 @@ export interface DueItem {
   where?: string;
   /** Who or what it concerns, by entity id. */
   who?: string[];
-  /** The record it comes from, as the state lane names it. */
+  /** The record it comes from, as the store names it. */
   what: JsonValue;
 }
 
-/** What time brings due (plan §6.4): the state lane's list, for a span and a part of the tree. It applies none of it. */
+/** What time brings due (plan §6.4): the store's list (`src/store/due.ts`), for a span and a part of the tree, in time order. It applies none of it. */
 export interface DueList {
   due(state: StoreState, span: { from: number; to: number }, at: string | null): DueItem[];
 }
@@ -89,7 +91,7 @@ export interface FactStore {
 }
 
 /**
- * Placing on a map's squares (the grid lane's): the events that put someone or something at a
+ * Placing on a map's squares (`src/iface/map/`): the events that put someone or something at a
  * square, beside someone, or in a zone; and `said`, the sentences the answer gives of it, worded
  * from the map's part: for one that stood on the map before, the way it went and the time that
  * took, and what does not add up where it now stands (a square in a wall, over something that
@@ -99,12 +101,12 @@ export interface GridMoves {
   place(input: { state: StoreState; env: FoldEnv; who: string; place: string; square?: [number, number]; near?: string; zone?: string }): { events: JsonObject[]; said?: string[] } | { problem: string; fields: Fields };
 }
 
-/** A place's map as the world state prints it (the grid lane's): its text, or null for a place with no map. */
+/** A place's map as the world state prints it (`src/iface/map/`): its text, or null for a place with no map. */
 export interface MapView {
   text(input: { state: StoreState; env: FoldEnv; place: string }): string | null;
 }
 
-/** What the engine's tools are given by the host (the turn lane). */
+/** What the engine's tools are given by the host (the turn, `src/turn/`). */
 export interface EngineDeps {
   /** The store's user API, for the scope's user. */
   store: UserStore;

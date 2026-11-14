@@ -37,6 +37,8 @@ The world state shows what each person present wears and carries. Prose that con
 
 If the scene turns on whether someone has a thing with them, look: `world_query` on the person, at full depth. Do not rely on memory of an earlier turn.
 
+If nothing is recorded of what they carry and the story has not said, `fill_in_detail` (find it with `tool_search`) draws their everyday things from the world's tables; what it draws is recorded as assumed, never as established.
+
 ## The rest
 
 A thing's condition (broken, worn, mended), its names and description, standing permission to use another's things, two records of one thing merged, a thing lost: each has a tool of its own, found with `tool_search`.

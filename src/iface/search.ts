@@ -2,7 +2,7 @@
 // places and groups, by their names, their other names, their kind, their description and the
 // agents' own lines on them. Code matches words; it never judges what words mean. Whole names
 // first, then names holding every word, then names holding some, then the rest of what is said of
-// them. This is one `StateSearch`; the state lane's full-text index is another, behind the same face.
+// them. This is one `StateSearch`; a full-text index in the store would be another, behind the same face.
 
 import type { WorldDoc } from "../shared/world";
 import { placeAliases } from "../engine/place-names";

@@ -1,9 +1,9 @@
 // Time (the time skill): `pass_time` moves the clock and answers with what the span brings due, from
-// the state lane's list; it applies none of it, and runs nothing of today's simulation across the
-// span (plan §6.1: code lists what is due when time passes, and never decides what it did). A time
-// is read as today's engine reads one: a date and time of day in the world's calendar, words for a
-// span ("two hours", "until dawn"), or the words of a day's clock ("midnight", "22:00", "dusk") as
-// the next time the clock shows them.
+// the store's list (`src/store/due.ts`); it applies none of it, and runs nothing of today's
+// simulation across the span (plan §6.1: code lists what is due when time passes, and never decides
+// what it did). A time is read as today's engine reads one: a date and time of day in the world's
+// calendar, words for a span ("two hours", "until dawn"), or the words of a day's clock ("midnight",
+// "22:00", "dusk") as the next time the clock shows them.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { type Calendar, calendarOf, clockOfPhrase, clockOfStamp, formatClock, nextTimeOfDay, parseHHMM, placeOffset } from "../engine/calendar";
@@ -12,6 +12,7 @@ import { placeOfEntity } from "../engine/scope";
 import { resolveTarget, typedSpan } from "../engine/time";
 import { minutesBetween } from "../engine/world-state";
 import type { WorldState } from "../engine/state";
+import type { DueItem } from "./kit";
 import type { Reading } from "./reading";
 import { findOptional, isUnread, notAs, type OpContext, type OpDef, type Unread } from "./ops";
 
@@ -69,6 +70,17 @@ export function timeArg(o: OpContext, field: string): number | Unread | undefine
 export function clockText(o: Pick<OpContext, "reading">, clock: number): string {
   const world = o.reading.world;
   return formatClock(calendarOf(world), clock, placeOffset(world, clock, placeOfEntity(o.reading.state.world, world.pov)));
+}
+
+/**
+ * What a span brings due as an answer lists it: the host's list, soonest first, cut at the `dueItems`
+ * setting, each at its time on the clock. How many more fall in the span is said by a line, so a span
+ * of years answers with the count of the rest, not with all of it.
+ */
+export function listDue(o: Pick<OpContext, "reading" | "reply" | "call">, items: readonly DueItem[], op: { n?: number; op?: string } = {}): JsonValue[] {
+  const listed = items.slice(0, o.call.settings.dueItems);
+  if (items.length > listed.length) o.reply.line("due_more", { ...op, listed: listed.length, more: items.length - listed.length });
+  return listed.map((i) => ({ when: clockText(o, i.at), kind: i.kind, ...(i.where !== undefined ? { where: i.where } : {}), ...(i.who !== undefined ? { who: i.who } : {}), what: i.what }));
 }
 
 /**
@@ -137,7 +149,7 @@ const passTime: OpDef = {
         return { span };
       }
       const items = due.due(state, { from: Math.min(now, to), to: Math.max(now, to) }, at?.ref ?? null);
-      return { span, due: items.map((i) => ({ when: clockText(o, i.at), kind: i.kind, ...(i.where !== undefined ? { where: i.where } : {}), ...(i.who !== undefined ? { who: i.who } : {}), what: i.what }) as JsonValue) };
+      return { span, due: listDue(o, items, { n: o.n, op: o.op }) };
     });
     return undefined;
   },

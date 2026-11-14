@@ -1,4 +1,4 @@
-// `pass_time` as the floor model sent it live: a span and a time of day together, the time of day
+// `pass_time` sent with a span and a time of day together, the time of day
 // in the words of a day's clock. Played as the harness plays a call (checked and coerced by pi, then
 // run) on the blank world, whose day starts at 08:00 and whose calendar has the four parts of a day.
 
@@ -30,7 +30,7 @@ async function blankAt(to: number): Promise<Rig> {
 }
 
 describe("pass_time reads a time of day", () => {
-  test("as sent live at 20:00: four hours and until midnight read as the same time, so the clock goes to midnight and the answer is clean", async () => {
+  test("at 20:00: four hours and until midnight read as the same time, so the clock goes to midnight and the answer is clean", async () => {
     const t = await blankAt(at(0, 20));
     const r = await play(t, { op: "pass_time", for: "four hours", until: "midnight" });
     expect(r.error).toBeUndefined();
@@ -38,7 +38,7 @@ describe("pass_time reads a time of day", () => {
     expect(clock(t)).toBe(at(1, 0));
   });
 
-  test("as sent live at 19:30: the two read as different times, so the end it names is applied and the other is reported", async () => {
+  test("at 19:30: the two read as different times, so the end it names is applied and the other is reported", async () => {
     const t = await blankAt(at(0, 19, 30));
     const r = await play(t, { op: "pass_time", for: "four hours", until: "midnight" });
     expect(r.error).toBeUndefined();

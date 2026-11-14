@@ -1,6 +1,6 @@
-// What needs no answer does not ask for another call, as the floor model met it live: a
-// `world_apply` that was applied came back with "already so" and "kept on the horizon as words" as
-// reports, so the closing call was not clean and the model was called again. A line that only says
+// What needs no answer does not ask for another call: a `world_apply` that is applied and answers
+// "already so" or "kept on the horizon as words" as reports leaves the closing call unclean, so the
+// model is called again. A line that only says
 // how something was read, or that nothing needed changing, is the answer's text; one that says
 // something does not add up stays a report. Every name here is made up.
 
@@ -33,7 +33,7 @@ async function play(t: Rig, operations: JsonObject[]): Promise<ToolResult> {
 }
 
 describe("an answer with nothing wrong in it is clean", () => {
-  test("as met live: the lantern already where it is put and a horizon kept partly as words are said in the answer, and nothing is reported", async () => {
+  test("the lantern already where it is put and a horizon kept partly as words are said in the answer, and nothing is reported", async () => {
     const t = await kitchen();
     const r = await play(t, [
       { op: "place", what: "hand lantern", at: "Keeper's kitchen", source: SRC },

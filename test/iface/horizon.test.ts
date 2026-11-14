@@ -1,4 +1,4 @@
-// `world_apply`'s horizon as the Author met it live: a scene set in one call, with a horizon that
+// `world_apply`'s horizon: a scene set in one call, with a horizon that
 // holds words naming no place, person or thing. Played as the harness plays a call (checked and
 // coerced by pi, then run). Every name here is made up.
 
@@ -9,7 +9,7 @@ import { rig, texts, wordsFromFiles } from "./rig";
 
 const SRC = { from: "prose", message: "m-1" };
 
-/** Seven good operations setting the scene from nothing, as the live call did. */
+/** Seven good operations setting the scene from nothing, in one call. */
 const SCENE: JsonObject[] = [
   { op: "spawn", kind: "place", name: "Gull Skerry", source: SRC },
   { op: "spawn", kind: "place", name: "Keeper's kitchen", at: "Gull Skerry", source: SRC },

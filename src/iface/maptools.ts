@@ -8,7 +8,7 @@
 // write, and reported where it does not add up (a square in a wall, no way there). Squares are
 // [column, row], counted from 1 at the top left, as the map prints them.
 //
-// The turn lane gives the engine's tools, with `lines = await mapLines(files)` read from the chat's
+// The turn (`src/turn/`) gives the engine's tools, with `lines = await mapLines(files)` read from the chat's
 // files: `deps.grid = gridMoves(lines)` (squares for `world_apply`'s `move` and `place`, with what
 // their answer says of it) and `deps.map = mapView(lines)` (the map in the world state and in
 // `world_query`).

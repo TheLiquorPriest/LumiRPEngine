@@ -5,7 +5,7 @@
 
 import type { AgentRef, JsonObject, JsonValue } from "rp-harness/contract";
 import { PRECISIONS, SOURCES, STANDINGS, type Precision, type Source, type Standing } from "../store/types";
-import { oneOf, TEXT } from "./kit";
+import { TEXT } from "./kit";
 
 /** What an agent may name as a source: every kind the store keeps but an import, which only a migration writes. */
 export const SOURCE_KINDS = SOURCES.filter((s) => s !== "import");
@@ -18,15 +18,16 @@ export const MARKS = Object.freeze({
   noConsent: "no-consent",
 });
 
-/** The schema of the three arguments every writing operation takes. */
+/**
+ * The schema of the three arguments every writing operation takes. It holds back nothing the code
+ * reads: a source is its kind alone ("prose") or an object with its kind and what it cites, and a
+ * precision or a standing is text. A value that is none of the choices is answered in the answers'
+ * words, with the choices (`provenanceOf`), never refused before the code reads it.
+ */
 export const PROVENANCE_PROPERTIES: Record<string, JsonObject> = {
-  source: {
-    type: "object",
-    properties: { from: oneOf(SOURCE_KINDS), lore: TEXT, message: TEXT, roll: TEXT, gap_check: TEXT, consent: TEXT },
-    required: ["from"],
-  },
-  precision: oneOf(PRECISIONS),
-  standing: oneOf(STANDINGS),
+  source: { anyOf: [TEXT, { type: "object", properties: { from: TEXT, lore: TEXT, message: TEXT, roll: TEXT, gap_check: TEXT, consent: TEXT } }] },
+  precision: TEXT,
+  standing: TEXT,
 };
 
 /** A source as the call gave it: its kind and what it cites. */

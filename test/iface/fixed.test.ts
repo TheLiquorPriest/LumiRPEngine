@@ -123,6 +123,22 @@ describe("world_apply", () => {
     wordsFromFiles(r);
   });
 
+  test("a thing put on from another place is on them all the same, and reported; one to hand is not", async () => {
+    const t = await rig();
+    const src = { source: { from: "prose", message: "m-3" } };
+    const before = t.s.stateAt(t.turn.id).state.world;
+    expect(before.entities.wren?.fields.place).not.toBe(before.entities.bell?.fields.place);
+    const r = await t.call("world_apply", { operations: [{ op: "wear", what: "bell", who: "wren", slot: "ready", ...src }] });
+    expect(r.error).toBeUndefined();
+    expect(r.reports).toEqual(["Operation 1 (wear): Market bell [bell] was not to hand, and was put on Wren [wren] all the same."]);
+    expect(t.s.stateAt(t.turn.id).state.world.entities.bell?.relations.some((x) => x.to === "wren")).toBe(true);
+    wordsFromFiles(r);
+    // Off and on again, now that she has it: nothing to report.
+    const again = await t.call("world_apply", { operations: [{ op: "wear", what: "bell", who: "wren", off: true, ...src }, { op: "wear", what: "bell", who: "wren", slot: "ready", ...src }] });
+    expect(again.error).toBeUndefined();
+    expect(again.reports).toBeUndefined();
+  });
+
   test("a name that is not there is refused with the near matches, and nothing is recorded", async () => {
     const t = await rig();
     const r = await t.call("world_apply", { operations: [{ op: "give", what: "kniff", to: "bram", how: "handed" }] });

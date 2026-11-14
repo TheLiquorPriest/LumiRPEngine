@@ -120,6 +120,28 @@ describe("a world with nothing in it", () => {
     const after = t.s.stateAt(t.turn.id).state;
     expect(Object.values(playedWorld(doc, after.world).places).filter((p) => p.name === "Gull Skerry")).toHaveLength(1);
   });
+
+  test("a place is made with the fields the call gives, and what a place has none of is said not to be kept", async () => {
+    const t = await rig({}, "blank");
+    const src = { from: "prose", message: "m-3" };
+    const r = await t.call("world_apply", {
+      operations: [
+        { op: "spawn", kind: "place", name: "Gull Skerry", fields: { law: "curfew at dusk" }, tier: "notable", source: src },
+        { op: "spawn", kind: "room", name: "Lamp room", at: "Gull Skerry", description: "Glass on every side.", fields: { smell: "paraffin", description: "never read over the call's own" }, source: src },
+      ],
+    });
+    expect(r.error).toBeUndefined();
+    expect(r.reports).toBeUndefined();
+    expect(texts(r)).toContain("Operation 1 (spawn): a place has no tier, so that was not kept.");
+    expect(texts(r).filter((x) => x.includes("so that was not kept"))).toHaveLength(1);
+    const state = t.s.stateAt(t.turn.id).state;
+    const doc = t.deps.env.worlds(state.world.revision);
+    if (!doc) throw new Error("no blank world");
+    const places = Object.values(playedWorld(doc, state.world).places);
+    expect(places.find((p) => p.name === "Gull Skerry")?.fields).toEqual({ law: "curfew at dusk" });
+    expect(places.find((p) => p.name === "Lamp room")?.fields).toEqual({ smell: "paraffin", description: "Glass on every side." });
+    wordsFromFiles(r);
+  });
 });
 
 describe("answers that say what would work", () => {

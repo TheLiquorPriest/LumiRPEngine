@@ -27,7 +27,7 @@ export function registry(): Registry {
   return shared;
 }
 
-/** The store lane's invented world, with money kept as accounts, a sheet value, and a bestiary of two rows. */
+/** The store tests' invented world (`test/store/fixtures.ts`), with money kept as accounts, a sheet value, and a bestiary of two rows. */
 export function world(): WorldDoc {
   const w = inventedWorld();
   w.realism.levels.money = 2;
@@ -47,7 +47,7 @@ export function world(): WorldDoc {
   return w;
 }
 
-/** What falls due, as the state lane would list it: an arrival an hour into any span. */
+/** What falls due, as the store would list it (`src/store/due.ts`): an arrival an hour into any span. */
 export const DUE: DueList = {
   due: (_state, span, at) => [{ at: span.from + 60, kind: "arrival", where: at ?? "world", who: ["tam"], what: { arriving: "the carter from the far road" } }],
 };

@@ -15,7 +15,7 @@ import { createRng } from "../engine/rng";
 import { renderView } from "../store/words";
 import { rulesetData } from "./bestiary";
 import { type Call, oneOf, Reply, SEARCH_KINDS, type SearchKind, TEXT, type ToolSpec, WHOLE, YES_NO } from "./kit";
-import { clockText, timeFrom } from "./ops-time";
+import { clockText, listDue, timeFrom } from "./ops-time";
 import { missed, unknownFields } from "./ops";
 import { type Found, isFound, Reading } from "./reading";
 import { textOf } from "./texts";
@@ -72,7 +72,7 @@ export const WORLD_QUERY: ToolSpec = {
       if (due === undefined) reply.data({ span }).line("due_unlisted", {});
       else {
         const items = due.due(reading.state, { from: Math.min(from, to), to: Math.max(from, to) }, at.ref);
-        reply.data({ span, due: items.map((i) => ({ when: clockText({ reading }, i.at), kind: i.kind, ...(i.where !== undefined ? { where: i.where } : {}), ...(i.who !== undefined ? { who: i.who } : {}), what: i.what })) });
+        reply.data({ span, due: listDue({ reading, reply, call }, items) });
       }
     }
     if (args.map === true) {

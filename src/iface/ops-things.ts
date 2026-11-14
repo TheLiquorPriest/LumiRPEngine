@@ -10,8 +10,10 @@
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { ownersIn } from "../shared/finance";
 import type { EntityId } from "../shared/ids";
+import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import { type HandoverBasis, type ItemOp, PLACE_KINDS, type PlaceKind, type Spot } from "../shared/things";
+import { reachOf } from "../engine/access";
 import { applyEffects } from "../engine/effects";
 import { own } from "../engine/pack-kit";
 import { baseWorld, findPlaces, placeOp } from "../engine/places-in-play";
@@ -25,6 +27,7 @@ import { chatDraftOf, draftEvent } from "../engine/world-draft";
 import { bestiaryOf, bestiaryRow } from "./bestiary";
 import { find, findOptional, isUnread, itemOptions, named, notAs, notOneOf, type OpContext, type OpDef, textArg, type Unread, unknownFields } from "./ops";
 import type { Found, Want } from "./reading";
+import { PROVENANCE_PROPERTIES } from "./source";
 import { textOf } from "./texts";
 import { timeArg } from "./ops-time";
 
@@ -348,6 +351,9 @@ const wear: OpDef = {
     const who = find(o, "who", "person");
     if (isUnread(who)) return who;
     const slot = slotOf(textArg(o.args, "slot"));
+    // Put on from out of reach (someone else has it, or it is beyond a short walk): on them all the same, and reported, as a change of clothes reports a piece not to hand.
+    const holder = possessorOf(w.ctx, what.id);
+    const away = o.args.off !== true && holder !== who.id && (holder !== null || reachOf(w.ctx, who.id, what.id).reach === "away");
     const out = applyItemOp(w, { do: "wear", item: what.id, who: who.id, ...(o.args.off === true ? { off: true } : {}), ...(slot !== undefined ? { slot } : {}) }, itemOptions(o));
     if ("code" in out) {
       if (out.code === "no_change" || out.code === "not_worn") o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, what.id) });
@@ -359,6 +365,7 @@ const wear: OpDef = {
         o.reply.report("not_wearable", { n: o.n, op: o.op, what: named(o.reading, what.id), who: named(o.reading, who.id), code: out.code });
       } else return { line: "not_applicable", fields: { n: o.n, op: o.op, code: out.code } };
     }
+    if (away) o.reply.report("not_to_hand", { n: o.n, op: o.op, what: named(o.reading, what.id), who: named(o.reading, who.id), brought: true });
     o.draft.record(o.n, o.op, "engine", o.prov, from, madeOf([what]));
     return undefined;
   },
@@ -517,12 +524,16 @@ function makeThing(o: OpContext, op: Extract<ItemOp, { do: "make" }>): EntityId 
 /** The kinds a place is made as: `place`, a place of the chat's own world, inside another or in none; a room, a spot or a venue, made in play inside a place. */
 export const PLACE_SPAWN_KINDS: readonly string[] = ["place", ...PLACE_KINDS];
 
+/** What `spawn` reads of a place: its name and kind, where it is, its description, its fields, and why a place made in play was made. */
+const PLACE_READS: readonly string[] = ["op", "name", "kind", "at", "in", "description", "fields", "why", ...Object.keys(PROVENANCE_PROPERTIES)];
+
 /**
  * A place made by `spawn`, inside the place `at` (or `in`) names, which an earlier operation of the
- * call may have made. A `place` is written into this chat's own world, as today's world_place
- * writes one, so it needs nothing to be in: the first place of a world with none. A room, a spot or
- * a venue is made in play inside a place (today's place ops, with the world's cap on them). A place
- * of that name already in the same place stands for it, and the answer says so.
+ * call may have made, with the fields the call gives. A `place` is written into this chat's own
+ * world, as today's world_place writes one, so it needs nothing to be in: the first place of a world
+ * with none. A room, a spot or a venue is made in play inside a place (today's place ops, with the
+ * world's cap on them). A place of that name already in the same place stands for it, and the answer
+ * says so; what a place has none of (a tier, an owner) is said not to be kept.
  */
 function spawnPlace(o: OpContext, name: string, kind: string): Unread | undefined {
   const w = o.draft.w;
@@ -530,6 +541,9 @@ function spawnPlace(o: OpContext, name: string, kind: string): Unread | undefine
   const within = field === null ? undefined : find(o, field, "place");
   if (isUnread(within)) return within;
   const description = textArg(o.args, "description");
+  const given = o.args.fields;
+  if (given !== undefined && given !== null && !isRecord(given)) return notAs(o, "fields", given, "fields");
+  const fields: JsonObject = isRecord(given) ? given : {};
   const from = w.events.length;
   let made: string | undefined;
   if (kind === "place") {
@@ -540,7 +554,7 @@ function spawnPlace(o: OpContext, name: string, kind: string): Unread | undefine
       made = twin.id;
     } else {
       made = freshId(o, name);
-      const value: JsonObject = { id: made, name, ...(parent !== null ? { parent } : {}), fields: description !== undefined ? { description } : {} };
+      const value: JsonObject = { id: made, name, ...(parent !== null ? { parent } : {}), fields: { ...fields, ...(description !== undefined ? { description } : {}) } };
       const bad = o.draft.applyAll([draftEvent(baseWorld(w.ctx.world), chatDraftOf(w.state), { collection: "places", id: made, value })]);
       if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
     }
@@ -552,11 +566,15 @@ function spawnPlace(o: OpContext, name: string, kind: string): Unread | undefine
       o.reply.line("exists", { n: o.n, op: o.op, name: named(o.reading, out.exists) });
       made = out.exists;
     } else {
-      const bad = o.draft.applyAll(out.events);
+      // The call's fields go on the place with what today's place op writes (its description, aliases, entry), which stands where both name one.
+      const events = out.events.map((e): LedgerEvent => ("data" in e && isRecord(e.data.def) ? { ...e, data: { ...e.data, def: { ...e.data.def, fields: { ...fields, ...(isRecord(e.data.def.fields) ? e.data.def.fields : {}) } } } } : e));
+      const bad = o.draft.applyAll(events);
       if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
       made = out.made;
     }
   }
+  const unread = Object.keys(o.args).filter((k) => !PLACE_READS.includes(k));
+  if (unread.length > 0) o.reply.line("place_unread", { n: o.n, op: o.op, unread: textOf(unread) });
   o.draft.record(o.n, o.op, "engine", o.prov, from, made !== undefined ? { made } : {});
   return undefined;
 }
@@ -581,7 +599,9 @@ const spawn: OpDef = {
     // Said to be somewhere in words that name nothing there is: made where its owner is, else at the scene's place; with no place either, those words cannot be read.
     let spot = where.spot;
     const [first] = where.said;
-    if (spot === null && first !== undefined) {
+    // Where code puts it, no call said: the spawn is recorded as assumed, the call's own words kept on it.
+    const chosen = spot === null && first !== undefined;
+    if (chosen) {
       const place = placeThere(o, owner ? placeOfEntity(w.state, owner.id) : null) ?? scenePlace(o);
       if (place === null) return first.unread;
       spot = { place };
@@ -627,8 +647,8 @@ const spawn: OpDef = {
       const failed = out.rejected[0];
       if (failed) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: failed.rejection.code } };
     }
-    if (first !== undefined && spot !== null) o.reply.line("made_where_said", { n: o.n, op: o.op, what: name, where: spotName(o, spot), said: textOf(where.said.map((s) => s.words)) });
-    o.draft.record(o.n, o.op, "engine", o.prov, from, made !== undefined ? { made } : {});
+    if (first !== undefined && spot !== null) o.reply.line("made_where_said", { n: o.n, op: o.op, what: name, where: spotName(o, spot), said: textOf(where.said.map((s) => s.words)), assumed: chosen });
+    o.draft.record(o.n, o.op, "engine", chosen ? { ...o.prov, standing: "assumed" } : o.prov, from, made !== undefined ? { made } : {});
     return undefined;
   },
 };

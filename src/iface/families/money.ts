@@ -16,8 +16,10 @@ import { openAccount as openProductAccount } from "../../packs/economy/core/acti
 import { aprFor, currentScore, decide } from "../../packs/economy/core/credit";
 import { DONATION, exemptStatusOf, foundationTerms } from "../../packs/economy/core/exempt";
 import { matchCatalog, placeTrade } from "../../packs/economy/core/index";
-import { balance, dayPriceOf, priceOf, statusOf, worldProducts } from "../../packs/economy/core/model";
+import { isOpened } from "../../packs/economy/core/journal";
+import { balance, dayPriceOf, openerOf, priceOf, statusOf, worldProducts } from "../../packs/economy/core/model";
 import { cardsOn, featureFor, NO_WAY_TO_PAY } from "../../packs/economy/core/pay";
+import { openingEvent } from "../../packs/economy/core/process";
 import { NUMBER, TEXT, WHOLE } from "../kit";
 import { find, isUnread, minorUnits, missed, named, notAs, notOneOf, numberArg, textArg } from "../ops";
 import { openAuthored, paidLines, payPastCover } from "../ops-values";
@@ -46,11 +48,19 @@ const adjust: WriteDef = {
     if (cents === 0) return notAs(o, "amount", o.args.amount ?? null, "amount_not_zero");
     const w = o.draft.w;
     const from = w.events.length;
+    // An account the world authored and nobody has opened opens first, as the economy's correction would open it inside its own unit: no call said its opening, so it is a change of its own.
+    const opener = openerOf(w.state, account.id);
+    const opening = opener !== null && !isOpened(w.state, account.id, opener) ? openingEvent(w.ctx, opener) : null;
+    const unopened = opening === null ? null : o.draft.fillWith([opening]);
+    if (unopened) return notApplicable(o, unopened.code);
     const refused = editChange(o, { op: "adjust", account: account.id, cents });
     if (refused !== null) {
       // Past what the account holds, the funds guard declines it: today's correction all the same,
       // its posting marked as today's story payments past cover are (`overdraw`), and reported.
       if (refused.code !== "declined") return notApplicable(o, refused.code);
+      // Out of an account that is not open, every posting is declined as it folds (the funds guard), so it cannot stand on any path: said as the books' rule, not as a failure.
+      const status = statusOf(w.state, account.id);
+      if (status !== "open") return { line: "not_open", fields: { n: o.n, op: o.op, what: named(o.reading, account.id), status } };
       const events = optionalService(w.ctx, "economy.adjust")?.(w.ctx, account.id, cents);
       if (!Array.isArray(events)) return notApplicable(o, refused.code);
       const bad = o.draft.applyAll(events.map((e): LedgerEvent => (e.type === "post" ? { ...e, overdraw: true } : e)));
