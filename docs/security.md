@@ -13,11 +13,15 @@ Each key is random, shown once when it is made, and kept only as a hash. A new k
 | Key | Starts with | What it opens | How it is made |
 |---|---|---|---|
 | Provider key | `rpe_` | RPE's provider endpoint (`/v1/chat/completions` and `/v1/models`): the replies Lumiverse asks for on RPE's connection. Nothing else. | `rpe up` makes it and gives it to RPE's connection in Lumiverse. `rpe key provider` makes a new one; put it in that connection as its API key. After the switch from the previous build, the connection RPE took over keeps the key it had, which a new provider key leaves working: `rpe status` lists it as taken from today's connection. `rpe key provider all` makes a new one and stops that one too: put the new one in that connection, and to go back, put its earlier key back in it. |
-| Extension key | `rpx_` | The routes only RPE's extension calls: the questions before each reply, the page tokens, and the confirmation of RPE's registration. | RPE makes a new one at every start and hands it to its extension. You never need to make one: one made by hand with `rpe key extension` cuts the extension off until RPE starts again. |
+| Extension key | `rpx_` | The routes only RPE's extension calls: the questions before each reply, the page tokens, and the confirmation of RPE's registration. | RPE makes a new one at every start and hands it to its extension. There is no command that makes one: a key made by hand would cut the extension off until RPE started again, and `rpe key extension` says so. |
 | Web key | `rpw_` | RPE's web app and its API, as you. | `rpe key web`, on the machine RPE runs on. As shipped it has no end, and works until a new one replaces it. With `auth.webKeyDays` set, it runs out that many days after it is made: `rpe key web` prints when, and `rpe status` lists it. |
 | Page token | `rpp_` | RPE's API, as you, for 30 minutes (`auth.pageTokenMinutes`). | The extension asks RPE for one for a page in Lumiverse, and only for the Lumiverse user this RPE belongs to. Another user of the same Lumiverse gets none. |
 
-The command line makes its own short-lived token when it calls the running RPE (`rpe connection`, `rpe status`), and lets it go after.
+## The command line
+
+RPE writes its database and its secrets file from one place at a time. While RPE runs, it is the one writer: a command that changes something (`rpe key`, `rpe allow`, `rpe deny`, `rpe lumiverse`, `rpe up`) or reads how RPE stands (`rpe status`, `rpe connection`) asks the running RPE over a Unix socket, command.sock in the data folder, which only your account can open and which is never offered on the network, so no page and no request through Lumiverse reaches it. What it asks is written in RPE's own queue, and the command's own process opens neither the database nor the secrets file for writing. No page token is made for it.
+
+While RPE is stopped, a command that writes takes the data folder's lock (lock.db, named by lock.holder) and is then the only writer, the changes to the database it applies included. `rpe serve` takes the same lock for as long as it runs: started while a command writes, it waits and says what it waits for; two commands at once write one after the other, each waiting up to `commandLine.waitMs` and saying which process it waits for.
 
 A page's live socket holds its key or token for as long as it is open: it is checked when the socket opens and at every message, and the socket is closed once the page token or the web key runs out, or the web key is replaced. One socket follows at most `live.follows` chats.
 

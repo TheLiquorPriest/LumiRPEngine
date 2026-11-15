@@ -1,12 +1,13 @@
 // `rpe down`: stops and removes RPE's service, and leaves the data where it is.
 
 import { resolve } from "node:path";
+import { TODAYS_MODEL } from "../../adapter/lumiverse/install-calls";
 import { EXTENSION_IDENTIFIER } from "../../adapter/lumiverse/pipe-wire";
 import { goingBack } from "../../migrate/going-back";
 import { earlierRuns } from "../../migrate/migrate";
 import { dataPaths, defaultDataFolder, loadConfig } from "../config";
 import type { CliIO } from "../cli";
-import { accountSystemctl, removeRpeService, rpeServiceOf, TODAYS_MODEL } from "../up";
+import { accountSystemctl, removeRpeService, rpeServiceOf } from "../up";
 import { parseArgs, UsageError } from "./args";
 
 /**

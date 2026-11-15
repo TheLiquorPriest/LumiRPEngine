@@ -2,7 +2,7 @@
 
 import { EXTENSION_IDENTIFIER } from "../../adapter/lumiverse/pipe-wire";
 import type { CliIO } from "../cli";
-import { installedExtension, type LumiverseCall } from "../up";
+import { installedExtension, type LumiverseCall } from "../../adapter/lumiverse/install-calls";
 
 /** The lines of what is left for the user to do. */
 export function sayLeft(left: readonly string[], io: CliIO): void {

@@ -9,7 +9,7 @@
 import type { Database } from "bun:sqlite";
 import { isRecord } from "../shared/json";
 import type { KeyFacts } from "./auth";
-import { currentKeys, insertKey, KEY_PREFIXES, retireTakenKeys, takeKeyHash } from "./auth";
+import { currentKeys, insertKey, KEY_PREFIXES, NO_OWNER, retireTakenKeys, takeKeyHash } from "./auth";
 import type { DataPaths } from "./config";
 import { updateConfigFile } from "./config";
 import { type Exactly, type Holds, type Infer, route, RouteError, shape } from "./routes";
@@ -30,12 +30,14 @@ export const COMMAND_PATHS = Object.freeze({
 
 const T = shape.text();
 const KIND = shape.oneOf("provider", "extension", "web");
+/** The keys the command line makes: RPE makes its extension's key itself, at every start. */
+const MADE_KIND = shape.oneOf("provider", "web");
 
 export const keyAsk = shape.named(
   "KeyAsk",
   "A new key of a kind, shown once: with `all`, the provider key taken from today's connection at the swap stops working too; with `key`, the text of a key the caller made, which Lumiverse had to hold before RPE did.",
   shape.object({
-    kind: shape.field(KIND, "Which key."),
+    kind: shape.field(MADE_KIND, "Which key."),
     all: shape.optional(shape.yesNo(), "A new provider key also retires the key taken from today's connection."),
     key: shape.optional(shape.text({ blank: false }), "The key's own text, in the form its kind's keys have."),
   }),
@@ -44,7 +46,7 @@ export const keyMade = shape.named(
   "KeyMade",
   "A key as it was made: shown this once, and kept only as its hash.",
   shape.object({
-    kind: shape.field(KIND, "Which key."),
+    kind: shape.field(MADE_KIND, "Which key."),
     key: shape.field(T, "The key itself."),
     made: shape.field(shape.number(), "When it was made, epoch milliseconds."),
     retired: shape.field(shape.whole({ least: 0 }), "How many keys taken from today's connection it retired."),
@@ -102,6 +104,8 @@ type KeysMirrored = Holds<Exactly<CommandStatus["keys"], KeyFacts[]>>;
 export interface CommandSink {
   readonly paths: DataPaths;
   readonly secrets: SecretsFile;
+  /** The Lumiverse user this RPE belongs to, as the install named him; null before it has, and nothing of his is then written (R-179). */
+  readonly user: string | null;
   /** For reads. Writes go through `run` alone. */
   readonly db: Database;
   /** Runs one write in a transaction of its own, after those asked for before it; resolves with what it returned once committed. */
@@ -125,6 +129,12 @@ export class CommandRefused extends Error {
 
 const HEX_KEY = /^[0-9a-f]{64}$/;
 
+/** The user a change of his rows is for: the install's, and a refusal where it has named none. */
+function ownerOf(sink: CommandSink): string {
+  if (sink.user === null) throw new CommandRefused(NO_OWNER);
+  return sink.user;
+}
+
 /** The command line's changes, over `sink`; `builds` says the builds in words where the caller knows them. */
 export function commandOps(sink: CommandSink, builds: () => Promise<string | null> = () => Promise.resolve(null)): CommandOps {
   return {
@@ -132,20 +142,23 @@ export function commandOps(sink: CommandSink, builds: () => Promise<string | nul
       const now = sink.now();
       if (ask.key !== undefined && !(ask.key.startsWith(KEY_PREFIXES[ask.kind]) && HEX_KEY.test(ask.key.slice(KEY_PREFIXES[ask.kind].length)))) throw new CommandRefused(`A ${ask.kind} key is ${KEY_PREFIXES[ask.kind]} and 64 hexadecimal characters.`);
       if (ask.all === true && ask.kind !== "provider") throw new CommandRefused("Only the provider key can be taken from today's connection: all goes with provider.");
+      const user = ownerOf(sink);
       return await sink.run((db) => {
-        const made = insertKey(db, ask.kind, now, ask.key);
-        const retired = ask.all === true ? retireTakenKeys(db, ask.kind, now) : 0;
-        return { kind: ask.kind, key: made.key, made: made.made, retired, takenStays: currentKeys(db).some((k) => k.kind === ask.kind && k.last4 === "") };
+        const made = insertKey(db, user, ask.kind, now, ask.key);
+        const retired = ask.all === true ? retireTakenKeys(db, user, ask.kind, now) : 0;
+        return { kind: ask.kind, key: made.key, made: made.made, retired, takenStays: currentKeys(db, user).some((k) => k.kind === ask.kind && k.last4 === "") };
       });
     },
     async takeKey(hash) {
       if (!/^[0-9a-f]{64}$/.test(hash)) throw new CommandRefused("A key's hash is 64 hexadecimal characters.");
-      await sink.run((db) => takeKeyHash(db, "provider", hash, sink.now()));
+      const user = ownerOf(sink);
+      await sink.run((db) => takeKeyHash(db, user, "provider", hash, sink.now()));
     },
     async setSwitch(name, state) {
+      const user = ownerOf(sink);
       return await sink.run((db) => {
-        const entry = asCommand(db, () => setSwitch(db, name, state, sink.now()));
-        return { entry, listed: listSwitches(db).map((s) => ({ name: s.name, state: s.state })) };
+        const entry = asCommand(db, () => setSwitch(db, user, name, state, sink.now()));
+        return { entry, listed: listSwitches(db, user).map((s) => ({ name: s.name, state: s.state })) };
       });
     },
     async saveLumiverse(save) {
@@ -166,7 +179,9 @@ export function commandOps(sink: CommandSink, builds: () => Promise<string | nul
       }
     },
     async status() {
-      return { keys: currentKeys(sink.db), switches: listSwitches(sink.db), builds: await builds() };
+      // Before the install names a user there is nothing of his to say.
+      const user = sink.user;
+      return { keys: user === null ? [] : currentKeys(sink.db, user), switches: user === null ? [] : listSwitches(sink.db, user), builds: await builds() };
     },
   };
 }

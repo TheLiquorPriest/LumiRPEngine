@@ -36,10 +36,10 @@ export async function checkCommand(paths: DataPaths, config: AppConfig, into: st
     } else if (existsSync(paths.database)) await copyFile(paths.database, copy);
     const migrations = new Migrations();
     migrations.add("app", APP_MIGRATIONS);
-    for (const area of options.areas ?? []) if (area.tables !== undefined) migrations.add(area.tables.area, area.tables.migrations);
+    for (const area of options.areas ?? []) for (const tables of area.tables ?? []) migrations.add(tables.area, tables.migrations);
     const db = openDatabase(copy, config.database.busyMs);
     try {
-      const done = migrate(db, migrations, { version: options.version, backups: join(work, BACKUPS_FOLDER), now: io.now });
+      const done = migrate(db, migrations, { user: config.lumiverse.user, version: options.version, backups: join(work, BACKUPS_FOLDER), now: io.now });
       guardSwitches(db);
       io.out(`RPE ${options.version} starts on the data folder ${paths.root}: its config reads, and its database takes this build's tables (${done.applied.length} migration(s), applied to a copy that is gone again).`);
     } finally {

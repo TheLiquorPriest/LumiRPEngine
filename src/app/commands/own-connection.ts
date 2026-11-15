@@ -1,35 +1,28 @@
 // RPE's own connection in Lumiverse, as `rpe up` makes it.
 
-import { updateConfigFile } from "../config";
-import type { AppConfig, DataPaths } from "../config";
-import { isRecord } from "../../shared/json";
-import { currentKeys, insertKey, newKeyText } from "../auth";
-import type { CliIO } from "../cli";
-import { type LumiverseCall, settleConnection, type SettledConnection } from "../up";
-import { commandLineDatabase } from "./database";
+import { newKeyText } from "../auth";
+import type { AppConfig } from "../config";
+import { type LumiverseCall, settleConnection, type SettledConnection } from "../../adapter/lumiverse/install-calls";
+import { withWriter, type WriterContext } from "./writer";
 
 /**
  * RPE's own connection in Lumiverse, made or brought into line at `apiUrl` (up.ts), its id kept in
  * `lumiverse.connection`, what was done said. Its key is in force only once Lumiverse holds it, so a
  * refusal leaves the key before it working.
  */
-export async function ownConnection(call: LumiverseCall, apiUrl: string, paths: DataPaths, current: AppConfig, version: string, io: CliIO): Promise<SettledConnection & { moved: boolean }> {
+export async function ownConnection(call: LumiverseCall, apiUrl: string, line: WriterContext, current: AppConfig): Promise<SettledConnection & { moved: boolean }> {
+  // The config as the sign-in left it: it names the user the keys are made for.
+  const ctx = { ...line, config: current };
+  const { io } = ctx;
+  const hadKey = (await withWriter(ctx, (ops) => ops.status())).keys.some((k) => k.kind === "provider");
   const fresh: { key: string | null } = { key: null };
-  const db = commandLineDatabase(paths, current, version, io.now);
-  let hadKey: boolean;
-  let settled: SettledConnection;
-  try {
-    hadKey = currentKeys(db).some((k) => k.kind === "provider");
-    settled = await settleConnection(call, current.lumiverse.connection, { apiUrl, models: current.lumiverse.models, hasKey: hadKey, makeKey: () => (fresh.key = newKeyText("provider")) });
-    const key = fresh.key;
-    if (key !== null) db.transaction(() => insertKey(db, "provider", io.now(), key)).immediate();
-  } finally {
-    db.close();
-  }
+  const settled = await settleConnection(call, current.lumiverse.connection, { apiUrl, models: current.lumiverse.models, hasKey: hadKey, makeKey: () => (fresh.key = newKeyText("provider")) });
+  const key = fresh.key;
   const moved = settled.id !== current.lumiverse.connection;
-  if (moved) {
-    await updateConfigFile(paths, (raw) => {
-      raw.lumiverse = { ...(isRecord(raw.lumiverse) ? raw.lumiverse : {}), connection: settled.id };
+  if (key !== null || moved) {
+    await withWriter(ctx, async (ops) => {
+      if (key !== null) await ops.makeKey({ kind: "provider", key });
+      if (moved) await ops.saveLumiverse({ set: { connection: settled.id } });
     });
   }
   const named = `"${settled.name}" (${settled.id})`;

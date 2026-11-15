@@ -5,7 +5,8 @@ import { resolve } from "node:path";
 import { dataPaths, defaultDataFolder, loadConfig, webAddress } from "../config";
 import { lineLog } from "../app";
 import type { CliIO } from "../cli";
-import { accountSystemctl, type LumiverseCall, removeRpeService, rpeService, rpeServiceOf, rpeUnitText, serviceNameOf, startRpeService } from "../up";
+import type { LumiverseCall } from "../../adapter/lumiverse/install-calls";
+import { accountSystemctl, removeRpeService, rpeService, rpeServiceOf, rpeUnitText, serviceNameOf, startRpeService } from "../up";
 import { parseArgs, UsageError } from "./args";
 import { extensionLeft, sayLeft } from "./left";
 import { ownConnection } from "./own-connection";
@@ -51,9 +52,10 @@ export async function upCommand(argv: readonly string[], io: CliIO, version: str
   const url = webAddress(flags.url, "--url");
   // Whose RPE this is is asked once Lumiverse has taken the password, before anything is written; a kept sign-in is the owner's own, and is asked of the data a migration carried.
   const guard = oneUser(paths, config);
+  const ctx = { paths, config, io, version, what: "rpe up" };
   const kept = await keptSession(url, username, paths, config, io);
   if (kept !== null && config.lumiverse.user !== null) guard(config.lumiverse.user);
-  const session = kept ?? (await signInTo(url, username, {}, paths, config, io, guard));
+  const session = kept ?? (await signInTo(url, username, {}, ctx, guard));
   const current = await loadConfig(paths, io.env);
   const call: LumiverseCall = (method, path, body) => session.request(method, path, body);
 
@@ -69,7 +71,7 @@ export async function upCommand(argv: readonly string[], io: CliIO, version: str
   const unitText = rpeUnitText({ name: service.name, bun: process.execPath, script: Bun.main, data, startLimit: { tries: update.startTries, windowMs: update.startWindowMs } });
   if (swapping) return await swapUp({ flags, switches, paths, current, call, service, existing, unitText }, io, version);
 
-  const settled = await ownConnection(call, `${serverUrl(current)}/v1`, paths, current, version, io);
+  const settled = await ownConnection(call, `${serverUrl(current)}/v1`, ctx, current);
   const runs = switches.has("systemd") || existing !== null;
   if (runs) {
     const systemctl = accountSystemctl(io.env, process.getuid?.() ?? null);

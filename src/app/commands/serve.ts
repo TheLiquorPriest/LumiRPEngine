@@ -1,12 +1,13 @@
 // `rpe serve`: RPE in the foreground.
 
 import { lineLog, openApp } from "../app";
-import { currentKeys, NO_OWNER } from "../auth";
+import { currentKeys } from "../auth";
 import type { CliIO, CliOptions } from "../cli";
 import type { AppConfig, DataPaths } from "../config";
 import { accountSystemctl, rpeServiceOf } from "../up";
 import { type AppFile, startCheck, versionOf } from "../update";
 import { updateSettingsOf } from "./update-settings";
+import { takeLock } from "./writer";
 
 /** Whether this process is the one RPE's service runs (its unit's main process), which the account's manager starts again when it exits. */
 async function runByService(paths: DataPaths, io: CliIO): Promise<boolean> {
@@ -16,7 +17,21 @@ async function runByService(paths: DataPaths, io: CliIO): Promise<boolean> {
   return ran.code === 0 && Number(ran.out.trim()) === process.pid;
 }
 
+/**
+ * RPE in the foreground. It holds the data folder's lock for as long as it runs: it is the one writer,
+ * and a command that changes something asks it, on its socket. A command that holds the lock when it
+ * starts (one that is writing with RPE stopped) is waited for, and the wait is said.
+ */
 export async function serveCommand(paths: DataPaths, config: AppConfig, io: CliIO, options: CliOptions): Promise<number> {
+  const lock = await takeLock({ paths, config, io, version: options.version, what: "rpe serve" });
+  try {
+    return await serving(paths, config, io, options);
+  } finally {
+    lock.release();
+  }
+}
+
+async function serving(paths: DataPaths, config: AppConfig, io: CliIO, options: CliOptions): Promise<number> {
   const log = lineLog(io.err, io.now);
   // A restart onto a new build of the app file ends `serve` as a stop does, and RPE's service starts the new file.
   const restart = Promise.withResolvers<void>();
@@ -38,8 +53,7 @@ export async function serveCommand(paths: DataPaths, config: AppConfig, io: CliI
     // Told to stop from here on, RPE closes and ends cleanly: the wait begins before anything else that takes time.
     const stop = io.stopped();
     io.out(`RPE ${options.version} listens on ${running.url} (data folder: ${paths.root}).`);
-    if (app.auth.owner === null) io.out(NO_OWNER);
-    if (!currentKeys(app.db).some((k) => k.kind === "provider")) io.out("There is no provider key yet: make one with `rpe key`.");
+    if (!currentKeys(app.db, app.auth.owner).some((k) => k.kind === "provider")) io.out("There is no provider key yet: make one with `rpe key`.");
     const waiting = app.switches.list().filter((s) => s.state === "waiting").length;
     if (waiting > 0) io.out(`${waiting} waiting to be switched on: \`rpe status\` lists them.`);
     // The file as it is once RPE listens: a build put there while it started is noticed now.

@@ -22,6 +22,7 @@ interface Profile {
   model: string;
   has_api_key: boolean;
   key: string | null;
+  metadata: Record<string, unknown>;
 }
 
 interface StandIn {
@@ -45,7 +46,7 @@ interface StandIn {
  */
 function standIn(): StandIn {
   const state: Omit<StandIn, "url" | "stop"> = { connections: new Map(), extensions: [], changes: [], signIns: 0, live: new Set(), refusePut: false };
-  const shown = (p: Profile) => ({ id: p.id, name: p.name, provider: p.provider, api_url: p.api_url, model: p.model, preset_id: null, is_default: false, has_api_key: p.has_api_key, metadata: {}, created_at: 1, updated_at: 1 });
+  const shown = (p: Profile) => ({ id: p.id, name: p.name, provider: p.provider, api_url: p.api_url, model: p.model, preset_id: null, is_default: false, has_api_key: p.has_api_key, metadata: p.metadata, created_at: 1, updated_at: 1 });
   let made = 0;
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -64,11 +65,18 @@ function standIn(): StandIn {
       if (pathname === "/api/auth/get-session") return Response.json(state.live.has(token) ? { session: { token }, user: { id: ACCOUNT.id } } : null);
       if (!state.live.has(token)) return Response.json({ error: "Unauthorized" }, { status: 401 });
       if (request.method === "GET" && pathname === "/api/v1/spindle") return Response.json({ extensions: state.extensions, isPrivileged: false });
+      if (request.method === "GET" && pathname === "/api/v1/connections") {
+        // `parsePagination`: 50 unless asked, held between 1 and 1,000; the answer is `{ data, total, limit, offset }`.
+        const query = new URL(request.url).searchParams;
+        const limit = Math.min(Math.max(Number(query.get("limit") ?? 50), 1), 1000);
+        const offset = Math.max(Number(query.get("offset") ?? 0), 0);
+        return Response.json({ data: [...state.connections.values()].slice(offset, offset + limit).map(shown), total: state.connections.size, limit, offset });
+      }
       if (request.method !== "GET") state.changes.push(`${request.method} ${pathname}`);
       if (request.method === "POST" && pathname === "/api/v1/connections") {
         if (!isRecord(body) || !body.name || !body.provider) return Response.json({ error: "name and provider are required" }, { status: 400 });
         const key = typeof body.api_key === "string" && body.api_key !== "" ? body.api_key : null;
-        const p: Profile = { id: `connection-${++made}`, name: String(body.name), provider: String(body.provider), api_url: String(body.api_url ?? ""), model: String(body.model ?? ""), has_api_key: key !== null, key };
+        const p: Profile = { id: `connection-${++made}`, name: String(body.name), provider: String(body.provider), api_url: String(body.api_url ?? ""), model: String(body.model ?? ""), has_api_key: key !== null, key, metadata: isRecord(body.metadata) ? body.metadata : {} };
         state.connections.set(p.id, p);
         return Response.json(shown(p), { status: 201 });
       }
@@ -80,6 +88,8 @@ function standIn(): StandIn {
         if (state.refusePut) return Response.json({ error: "The connection is locked" }, { status: 500 });
         for (const field of ["name", "provider", "api_url", "model"] as const) if (typeof body[field] === "string") p[field] = body[field];
         if (typeof body.api_key === "string") [p.key, p.has_api_key] = body.api_key === "" ? [null, false] : [body.api_key, true];
+        // Lumiverse replaces a connection's metadata whole (`connections.service.ts:517`).
+        if (isRecord(body.metadata)) p.metadata = body.metadata;
         return Response.json(shown(p));
       }
       return Response.json({ error: "Not found" }, { status: 404 });

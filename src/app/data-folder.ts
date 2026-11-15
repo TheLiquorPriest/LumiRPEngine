@@ -39,7 +39,7 @@ export class DataFolderBusy extends Error {
     readonly holder: LockHolder | null,
     readonly waitedMs: number,
   ) {
-    super(`The data folder ${root} is held by ${holder === null ? "another rpe process" : `${holder.what} (process ${holder.pid})`}, which did not let go in ${(waitedMs / 1000).toFixed(waitedMs % 1000 === 0 ? 0 : 1)} s: run this again once it has finished.`);
+    super(`The data folder ${root} is held by ${holder === null ? "another rpe process" : `${holder.what} (process ${holder.pid})`}, which did not let go in ${waitedMs < 1000 ? `${waitedMs} ms` : `${waitedMs / 1000} s`}: run this again once it has finished.`);
   }
 }
 

@@ -56,12 +56,14 @@ Every command `rpe` has:
 - `rpe down`: stops and removes RPE's service. Its data stays where it is.
 - `rpe lumiverse`: which Lumiverse this RPE belongs to, and its sign-in. With `--url` and `--user` it signs in again; `--database <file>` reads Lumiverse's database file directly, and `--connection <id>` names RPE's connection in Lumiverse.
 - `rpe version`: this build's id.
-- `rpe key provider` and `rpe key web`: a new key, shown once; the one before it stops working. See [Security](security.md#keys-and-tokens).
+- `rpe key provider` and `rpe key web`: a new key, shown once; the one before it stops working. RPE makes its extension's key itself at every start, so there is no command for it. See [Security](security.md#keys-and-tokens).
 - `rpe connection list`, `rpe connection add` and `rpe connection remove`: RPE's model connections (below).
 - `rpe allow <name>` and `rpe deny <name>`: switch on, or off, something that runs a command or calls out. See [Security](security.md#what-rpe-never-does-by-itself).
 - `rpe backup`: one archive of RPE's database and file tree. `--out <file>` says where to write it.
 - `rpe migrate`: carries the previous build's data into RPE. See [Moving from the previous build](migration.md).
 - `rpe check`: whether this build starts on the data folder: its config read, and its changes to the database tried on a copy, made under `--into <folder>` (a temporary folder where none is given) and removed when it ends. RPE runs it on a new build before it restarts onto it (see [Updating](#updating)).
+
+Commands that change something are written by the running RPE when it runs, and by the command itself, under the data folder's lock, when it does not: see [The command line](security.md#the-command-line).
 
 ### The data folder
 

@@ -4,19 +4,17 @@ import { LumiverseError, LumiverseSession, type StoredSignIn } from "../../adapt
 import { whoseRefusals } from "../../migrate/swap";
 import { isRecord } from "../../shared/json";
 import type { CliIO } from "../cli";
+import { SIGN_IN_PART } from "../command-routes";
 import type { AppConfig, DataPaths } from "../config";
-import { prepareDataFolder, updateConfigFile } from "../config";
 import { SecretsFile } from "../secrets";
-
-/** The part of the secrets file the adapter keeps its sign-in to Lumiverse in (src/adapter/lumiverse/mount.ts). */
-export const SIGN_IN_PART = "lumiverse";
+import { withWriter, type WriterContext } from "./writer";
 
 /**
- * A session with Lumiverse at `url` for the command line, from a kept sign-in or none; a sign-in
- * Lumiverse takes is kept in the secrets file once `guard` (where given) has not refused its user.
+ * A session with Lumiverse at `url` for the command line, from a kept sign-in or none. `save` is told of
+ * a sign-in Lumiverse has taken, or of a kept one it says has ended; it writes nothing itself: what
+ * the command keeps is written afterwards, by the one writer (`withWriter`).
  */
-export function commandLineSession(url: string, signIn: StoredSignIn | null, paths: DataPaths, config: AppConfig, io: CliIO, guard?: (user: string) => void): LumiverseSession {
-  const secrets = new SecretsFile(paths.secrets);
+function commandLineSession(url: string, signIn: StoredSignIn | null, config: AppConfig, io: CliIO, save: (next: StoredSignIn | null) => void): LumiverseSession {
   return new LumiverseSession({
     base: url,
     // Past this the address counts as one that does not answer.
@@ -24,9 +22,7 @@ export function commandLineSession(url: string, signIn: StoredSignIn | null, pat
     signIn,
     // Called only once Lumiverse has taken the password, or has said a kept sign-in ended.
     async save(next) {
-      if (next !== null) guard?.(next.user);
-      await prepareDataFolder(paths);
-      await secrets.write(SIGN_IN_PART, next === null ? null : { ...next });
+      save(next);
     },
     // The server's own command line says whose RPE this is, so any account may sign in here.
     owner: () => null,
@@ -53,17 +49,21 @@ export function oneUser(paths: DataPaths, config: AppConfig): (user: string) => 
 /**
  * Signs in to Lumiverse at `url` as `username` with the password asked for. Only once Lumiverse has
  * taken it, and `guard` has not refused the user it signs in as, are the sign-in kept and the config
- * written (with `more` in its `lumiverse` block), so a refusal changes nothing. The user written is
- * the id Lumiverse answers for the username, which is what pages and Lumiverse's rows name.
+ * written (with `more` in its `lumiverse` block), both by the one writer, so a refusal changes
+ * nothing. The user written is the id Lumiverse answers for the username, which is what pages and
+ * Lumiverse's rows name.
  */
-export async function signInTo(url: string, username: string, more: Record<string, string>, paths: DataPaths, config: AppConfig, io: CliIO, guard: (user: string) => void): Promise<LumiverseSession> {
+export async function signInTo(url: string, username: string, more: Record<string, string>, ctx: WriterContext, guard: (user: string) => void): Promise<LumiverseSession> {
+  const { config, io } = ctx;
   const password = await io.secret(`The Lumiverse password of ${username} (it is not shown, and not kept): `);
   if (password === null) throw new Error("Signing in needs the password.");
-  const session = commandLineSession(url, null, paths, config, io, guard);
-  const signedIn = await session.signIn(username, password);
-  await updateConfigFile(paths, (raw) => {
-    raw.lumiverse = { ...(isRecord(raw.lumiverse) ? raw.lumiverse : {}), url, user: signedIn.user, ...more };
+  const taken: { signIn?: StoredSignIn | null } = {};
+  const session = commandLineSession(url, null, config, io, (next) => {
+    if (next !== null) guard(next.user);
+    taken.signIn = next;
   });
+  const signedIn = await session.signIn(username, password);
+  await withWriter(ctx, (ops) => ops.saveLumiverse({ ...(taken.signIn === undefined ? {} : { signIn: taken.signIn }), set: { url, user: signedIn.user, ...more } }));
   io.out(`Signed in to Lumiverse at ${url} as ${signedIn.username}. This RPE belongs to that Lumiverse user (${signedIn.user}).`);
   return session;
 }
@@ -73,7 +73,8 @@ export async function keptSession(url: string, username: string, paths: DataPath
   const kept = await new SecretsFile(paths.secrets).read(SIGN_IN_PART);
   const user = config.lumiverse.user;
   if (config.lumiverse.url !== url || user === null || !isRecord(kept) || kept.username !== username || kept.user !== user || typeof kept.token !== "string" || typeof kept.savedAt !== "number") return null;
-  const session = commandLineSession(url, { username, user, token: kept.token, savedAt: kept.savedAt }, paths, config, io);
+  // A kept sign-in Lumiverse says has ended is replaced by the sign-in that follows; nothing is forgotten here.
+  const session = commandLineSession(url, { username, user, token: kept.token, savedAt: kept.savedAt }, config, io, () => undefined);
   try {
     await session.check();
   } catch (error) {

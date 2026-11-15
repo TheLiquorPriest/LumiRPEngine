@@ -78,14 +78,23 @@ describe("rpe", () => {
     const next = /\b(rpe_[0-9a-f]{64})\b/.exec(second.out)?.[1] ?? "";
     expect((await completion(key)).status).toBe(401);
     expect((await completion(next)).status).toBe(200);
-    expect((await rpe(["key", "extension"])).out).toMatch(/\brpx_[0-9a-f]{64}\b/);
     expect((await rpe(["key", "admin"])).code).toBe(2);
+  });
+
+  test("rpe key takes provider and web; extension is answered with why: RPE makes its extension's key itself at every start", async () => {
+    const asked = await rpe(["key", "extension"]);
+    expect(asked.code).toBe(1);
+    expect(asked.err).toContain("RPE makes its extension's key itself at every start and hands it over");
+    expect(asked.out).toBe("");
+    expect(existsSync(bed.paths.database)).toBe(false);
+    expect((await rpe(["key", "web"])).out).toMatch(/\brpw_[0-9a-f]{64}\b/);
+    expect((await rpe(["help"])).out).not.toContain("extension|");
   });
 
   test("a new provider key leaves the key taken from today's connection working, and says that connection keeps its own key", async () => {
     const today = "lumiah-key-of-todays-connection";
     const { app, server } = await serving();
-    await app.writes.run((db) => takeKeyHash(db, "provider", secretHash(today), app.now()));
+    await app.writes.run((db) => takeKeyHash(db, OWNER, "provider", secretHash(today), app.now()));
     const made = await rpe(["key"]);
     expect(made.out).toContain("keeps its own key");
     const fresh = /\b(rpe_[0-9a-f]{64})\b/.exec(made.out)?.[1] ?? "";
@@ -97,7 +106,7 @@ describe("rpe", () => {
   test("key provider all also retires the key taken from today's connection, and says that connection now needs the new key; status lists only the new one", async () => {
     const today = "lumiah-key-of-todays-connection";
     const { app, server } = await serving();
-    await app.writes.run((db) => takeKeyHash(db, "provider", secretHash(today), app.now()));
+    await app.writes.run((db) => takeKeyHash(db, OWNER, "provider", secretHash(today), app.now()));
     const made = await rpe(["key", "provider", "all"]);
     expect(made.code).toBe(0);
     expect(made.out).toContain("now needs this new key");

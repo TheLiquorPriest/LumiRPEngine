@@ -2,40 +2,18 @@
 
 import type { ConnectionInput, Effort } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
-import { insertPageToken, NO_OWNER, secretHash } from "../auth";
 import type { CliIO } from "../cli";
 import type { AppConfig, DataPaths } from "../config";
 import type { ConnectionShown, ConnectionsShown } from "../connections";
 import { type Flags, UsageError } from "./args";
-import { commandLineDatabase } from "./database";
 import { serverUrl } from "./running";
+import { type Api, runningServer } from "./writer";
 
-type Api = (method: string, path: string, body?: unknown) => Promise<Response>;
-
-/** Calls the running server's API as the user this RPE belongs to, with a token the command line makes for itself and lets go after. */
-export async function withServer<T>(paths: DataPaths, config: AppConfig, io: CliIO, version: string, call: (api: Api) => Promise<T>): Promise<T> {
-  const owner = config.lumiverse.user;
-  if (owner === null) throw new Error(NO_OWNER);
-  const db = commandLineDatabase(paths, config, version, io.now);
-  const token = db.transaction(() => insertPageToken(db, owner, "command line", config.auth.commandLineSeconds * 1000, io.now())).immediate();
-  const url = serverUrl(config);
-  try {
-    return await call(async (method, path, body) => {
-      try {
-        return await io.fetch(`${url}${path}`, {
-          method,
-          headers: { authorization: `Bearer ${token.token}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-          signal: AbortSignal.timeout(config.commandLine.waitMs),
-        });
-      } catch {
-        throw new Error(`RPE is not answering at ${url}: start it with \`rpe serve\`.`);
-      }
-    });
-  } finally {
-    db.run("DELETE FROM page_token WHERE hash = ?", [secretHash(token.token)]);
-    db.close();
-  }
+/** Calls the running server's API as the user this RPE belongs to, over its socket: no token is made, nothing is written. */
+export async function withServer<T>(paths: DataPaths, config: AppConfig, io: CliIO, call: (api: Api) => Promise<T>): Promise<T> {
+  const server = await runningServer(paths, config, io);
+  if (server === null) throw new Error(`RPE is not answering at ${serverUrl(config)}: start it with \`rpe serve\`.`);
+  return await call(server.api);
 }
 
 /** The server's answer, or its refusal as an error in its own words. */
@@ -53,10 +31,10 @@ function tokenCount(value: string | undefined, flag: string): number | undefined
   return Number(value);
 }
 
-export async function connectionCommand(words: readonly string[], flags: Flags, paths: DataPaths, config: AppConfig, io: CliIO, version: string): Promise<number> {
+export async function connectionCommand(words: readonly string[], flags: Flags, paths: DataPaths, config: AppConfig, io: CliIO): Promise<number> {
   const sub = words[0];
   if (sub === "list" && words.length === 1) {
-    const list = await withServer(paths, config, io, version, async (api) => replyOf<ConnectionsShown>(await api("GET", "/api/v1/connections")));
+    const list = await withServer(paths, config, io, async (api) => replyOf<ConnectionsShown>(await api("GET", "/api/v1/connections")));
     if (list.connections.length === 0) io.out("No connections yet: add one with `rpe connection add`.");
     for (const c of list.connections) {
       const key = c.key === null ? "signs with no key" : c.key.set ? "key set" : "no key set";
@@ -88,13 +66,13 @@ export async function connectionCommand(words: readonly string[], flags: Flags, 
       key = (await io.secret(`The key for ${name} (it is not shown): `))?.trim() ?? null;
       if (key === null || key === "") throw new Error("A connection that signs with a key needs one.");
     }
-    const saved = await withServer(paths, config, io, version, async (api) => replyOf<ConnectionShown>(await api("POST", "/api/v1/connections", { connection, ...(key === null ? {} : { key }) })));
+    const saved = await withServer(paths, config, io, async (api) => replyOf<ConnectionShown>(await api("POST", "/api/v1/connections", { connection, ...(key === null ? {} : { key }) })));
     io.out(`Added ${saved.name} (${saved.id}).`);
     return 0;
   }
   if (sub === "remove" && words.length === 2) {
     const which = words[1] ?? "";
-    const removed = await withServer(paths, config, io, version, async (api) => {
+    const removed = await withServer(paths, config, io, async (api) => {
       const list = await replyOf<ConnectionsShown>(await api("GET", "/api/v1/connections"));
       const matches = list.connections.filter((c) => c.id === which || c.name === which);
       const chosen = matches[0];

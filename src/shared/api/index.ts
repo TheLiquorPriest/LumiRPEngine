@@ -218,6 +218,16 @@ export interface ChatStorageRow {
   areas: { notes: number; turns: number; sessions: number; files: number };
 }
 
+/** How RPE stands as its own command line is told: the keys in force, the switches and the builds in words. */
+export interface CommandStatus {
+  /** Each key in force, by its last four characters; none is empty for a key taken from today's connection. */
+  keys: ({ kind: "provider" | "extension" | "web"; last4: string; made: number })[];
+  /** Every switch, each name's newest definition. */
+  switches: SwitchEntry[];
+  /** The builds that meet at RPE in a sentence or two; null where the server does not say. */
+  builds: string | null;
+}
+
 /** How a connection signs its calls: with its own key, with the sign-in to its provider, or with nothing. */
 export type ConnectionAuth = "key" | "signin" | "none";
 
@@ -465,6 +475,30 @@ export interface JoinedAnswer {
   joined: { turn: TurnId; joined: TurnId };
 }
 
+/** A new key of a kind, shown once: with `all`, the provider key taken from today's connection at the swap stops working too; with `key`, the text of a key the caller made, which Lumiverse had to hold before RPE did. */
+export interface KeyAsk {
+  /** Which key. */
+  kind: "provider" | "web";
+  /** A new provider key also retires the key taken from today's connection. */
+  all?: boolean;
+  /** The key's own text, in the form its kind's keys have. */
+  key?: string;
+}
+
+/** A key as it was made: shown this once, and kept only as its hash. */
+export interface KeyMade {
+  /** Which key. */
+  kind: "provider" | "web";
+  /** The key itself. */
+  key: string;
+  /** When it was made, epoch milliseconds. */
+  made: number;
+  /** How many keys taken from today's connection it retired. */
+  retired: number;
+  /** A key of this kind taken from today's connection is still in force. */
+  takenStays: boolean;
+}
+
 /** A level of the agents' tree: what ships, the user's own, a character's, a chat's. */
 export type LayerLevel = "shipped" | "global" | "character" | "chat";
 
@@ -567,6 +601,16 @@ export type LiveMessage = { type: "following"; chat: string; seq: number } | { t
 export interface LiveMissed {
   from: number;
   to: number;
+}
+
+/** What the command line keeps of RPE's Lumiverse: its sign-in in the secrets file (null forgets it), and values of the config's `lumiverse` block. */
+export interface LumiverseSave {
+  /** The sign-in to keep; null forgets the one kept; left out, it is not touched. */
+  signIn?: { username: string; user: string; token: string; savedAt: number } | null;
+  /** Values of the config's `lumiverse` block (url, user, database, connection, models); null takes one out. */
+  set?: { [key: string]: string | string[] | null };
+  /** Where RPE listens, as the swap takes it from today's runtime. */
+  listens?: { address: string; port: number };
 }
 
 /** A memory's tier: top of mind, short term, long term. */
@@ -1149,6 +1193,42 @@ export interface SuggestionsReply {
 
 /** Where an agent's suggestion stands: waiting on the user, accepted, or dismissed. */
 export type SuggestionStatus = "open" | "accepted" | "dismissed";
+
+/** Switch the named thing on or off. */
+export interface SwitchAsk {
+  /** Which. */
+  state: "on" | "off";
+}
+
+/** The switched entry, or null with what is listed when nothing of that name is. */
+export interface Switched {
+  /** The entry as it stands now; null where nothing of that name is listed. */
+  entry: SwitchEntry | null;
+  /** Every name listed, with its state. */
+  listed: ({ name: string; state: "waiting" | "on" | "off" })[];
+}
+
+/** A thing that runs a command or calls out, and where it stands. */
+export interface SwitchEntry {
+  /** Its name. */
+  name: string;
+  /** What sort of thing it is. */
+  kind: string;
+  /** Exactly what it runs or calls. */
+  what: string;
+  /** Whether it may run. */
+  state: "waiting" | "on" | "off";
+  /** When this definition was first listed. */
+  listed: number;
+  /** When the command line last switched it; null if never. */
+  changed: number | null;
+}
+
+/** The hash of the provider key today's connection holds, which RPE takes over at the swap. */
+export interface TakenKeyAsk {
+  /** The key's SHA-256, in hex. */
+  hash: string;
+}
 
 /** A tool call a model made: the model's id for it, the tool, its arguments, and when the model began writing it, where the provider gave it in pieces. */
 export interface ToolCallView {
@@ -1828,7 +1908,53 @@ export interface ApiRoutes {
 }
 
 /** The server's own command line's routes, which answer on its socket in the data folder alone (`command` access), in the same form; on that socket the routes of `ApiRoutes` that a page calls answer too, as the owner's. */
-export interface CommandRoutes {}
+export interface CommandRoutes {
+  /** Makes a new key of a kind, which retires the one before it; shown this once. */
+  "POST /api/v1/command/keys": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: KeyAsk;
+    reply: KeyMade;
+    paged: false;
+    joined: false;
+  };
+  /** Takes over the provider key today's connection holds, by its hash alone. */
+  "POST /api/v1/command/keys/taken": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: TakenKeyAsk;
+    reply: void;
+    paged: false;
+    joined: false;
+  };
+  /** Keeps RPE's sign-in to Lumiverse and the config's Lumiverse block. */
+  "PUT /api/v1/command/lumiverse": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: LumiverseSave;
+    reply: void;
+    paged: false;
+    joined: false;
+  };
+  /** The keys in force, the switches and the builds, for `rpe status`. */
+  "GET /api/v1/command/status": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: undefined;
+    reply: CommandStatus;
+    paged: false;
+    joined: false;
+  };
+  /** Switches a thing that runs a command or calls out on or off: the one road to it. */
+  "PUT /api/v1/command/switches/:name": {
+    params: { name: string };
+    query: Record<string, never>;
+    body: SwitchAsk;
+    reply: Switched;
+    paged: false;
+    joined: false;
+  };
+}
 
 /** Every route in the form that answers in its own way (a stream, a socket, a file), and what it answers. */
 export interface RawRoutes {

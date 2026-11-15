@@ -686,6 +686,71 @@ The Migration page's data: the last run's report and its printed text, each chat
 
 ## Service
 
+### `POST /api/v1/command/keys`
+
+Makes a new key of a kind, which retires the one before it; shown this once.
+
+| | |
+|---|---|
+| Access | command: the server's own command line, on its socket in the data folder that only the owner's account may open; never on the TCP listener, so no page reaches it |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | [`KeyAsk`](#keyask) |
+| Reply | [`KeyMade`](#keymade) |
+
+### `POST /api/v1/command/keys/taken`
+
+Takes over the provider key today's connection holds, by its hash alone.
+
+| | |
+|---|---|
+| Access | command: the server's own command line, on its socket in the data folder that only the owner's account may open; never on the TCP listener, so no page reaches it |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | [`TakenKeyAsk`](#takenkeyask) |
+| Reply | nothing (204) |
+
+### `PUT /api/v1/command/lumiverse`
+
+Keeps RPE's sign-in to Lumiverse and the config's Lumiverse block.
+
+| | |
+|---|---|
+| Access | command: the server's own command line, on its socket in the data folder that only the owner's account may open; never on the TCP listener, so no page reaches it |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | [`LumiverseSave`](#lumiversesave) |
+| Reply | nothing (204) |
+
+### `GET /api/v1/command/status`
+
+The keys in force, the switches and the builds, for `rpe status`.
+
+| | |
+|---|---|
+| Access | command: the server's own command line, on its socket in the data folder that only the owner's account may open; never on the TCP listener, so no page reaches it |
+| Body limit | takes no body |
+| Params | none |
+| Query | none |
+| Body | none |
+| Reply | [`CommandStatus`](#commandstatus) |
+
+### `PUT /api/v1/command/switches/:name`
+
+Switches a thing that runs a command or calls out on or off: the one road to it.
+
+| | |
+|---|---|
+| Access | command: the server's own command line, on its socket in the data folder that only the owner's account may open; never on the TCP listener, so no page reaches it |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `name` |
+| Query | none |
+| Body | [`SwitchAsk`](#switchask) |
+| Reply | [`Switched`](#switched) |
+
 ### `POST /api/v1/ext/confirm`
 
 The extension asks whether the registration it holds is the one this RPE made.
@@ -1172,6 +1237,21 @@ export interface ChatStorageRow {
 }
 ```
 
+### `CommandStatus`
+
+How RPE stands as its own command line is told: the keys in force, the switches and the builds in words.
+
+```ts
+export interface CommandStatus {
+  /** Each key in force, by its last four characters; none is empty for a key taken from today's connection. */
+  keys: ({ kind: "provider" | "extension" | "web"; last4: string; made: number })[];
+  /** Every switch, each name's newest definition. */
+  switches: SwitchEntry[];
+  /** The builds that meet at RPE in a sentence or two; null where the server does not say. */
+  builds: string | null;
+}
+```
+
 ### `ConnectionAuth`
 
 How a connection signs its calls: with its own key, with the sign-in to its provider, or with nothing.
@@ -1569,6 +1649,40 @@ export interface JoinedAnswer {
 }
 ```
 
+### `KeyAsk`
+
+A new key of a kind, shown once: with `all`, the provider key taken from today's connection at the swap stops working too; with `key`, the text of a key the caller made, which Lumiverse had to hold before RPE did.
+
+```ts
+export interface KeyAsk {
+  /** Which key. */
+  kind: "provider" | "web";
+  /** A new provider key also retires the key taken from today's connection. */
+  all?: boolean;
+  /** The key's own text, in the form its kind's keys have. */
+  key?: string;
+}
+```
+
+### `KeyMade`
+
+A key as it was made: shown this once, and kept only as its hash.
+
+```ts
+export interface KeyMade {
+  /** Which key. */
+  kind: "provider" | "web";
+  /** The key itself. */
+  key: string;
+  /** When it was made, epoch milliseconds. */
+  made: number;
+  /** How many keys taken from today's connection it retired. */
+  retired: number;
+  /** A key of this kind taken from today's connection is still in force. */
+  takenStays: boolean;
+}
+```
+
 ### `LayerLevel`
 
 A level of the agents' tree: what ships, the user's own, a character's, a chat's.
@@ -1735,6 +1849,21 @@ The first and the last number of the events the hub dropped before a batch, for 
 export interface LiveMissed {
   from: number;
   to: number;
+}
+```
+
+### `LumiverseSave`
+
+What the command line keeps of RPE's Lumiverse: its sign-in in the secrets file (null forgets it), and values of the config's `lumiverse` block.
+
+```ts
+export interface LumiverseSave {
+  /** The sign-in to keep; null forgets the one kept; left out, it is not touched. */
+  signIn?: { username: string; user: string; token: string; savedAt: number } | null;
+  /** Values of the config's `lumiverse` block (url, user, database, connection, models); null takes one out. */
+  set?: { [key: string]: string | string[] | null };
+  /** Where RPE listens, as the swap takes it from today's runtime. */
+  listens?: { address: string; port: number };
 }
 ```
 
@@ -2622,6 +2751,62 @@ Where an agent's suggestion stands: waiting on the user, accepted, or dismissed.
 
 ```ts
 export type SuggestionStatus = "open" | "accepted" | "dismissed";
+```
+
+### `SwitchAsk`
+
+Switch the named thing on or off.
+
+```ts
+export interface SwitchAsk {
+  /** Which. */
+  state: "on" | "off";
+}
+```
+
+### `Switched`
+
+The switched entry, or null with what is listed when nothing of that name is.
+
+```ts
+export interface Switched {
+  /** The entry as it stands now; null where nothing of that name is listed. */
+  entry: SwitchEntry | null;
+  /** Every name listed, with its state. */
+  listed: ({ name: string; state: "waiting" | "on" | "off" })[];
+}
+```
+
+### `SwitchEntry`
+
+A thing that runs a command or calls out, and where it stands.
+
+```ts
+export interface SwitchEntry {
+  /** Its name. */
+  name: string;
+  /** What sort of thing it is. */
+  kind: string;
+  /** Exactly what it runs or calls. */
+  what: string;
+  /** Whether it may run. */
+  state: "waiting" | "on" | "off";
+  /** When this definition was first listed. */
+  listed: number;
+  /** When the command line last switched it; null if never. */
+  changed: number | null;
+}
+```
+
+### `TakenKeyAsk`
+
+The hash of the provider key today's connection holds, which RPE takes over at the swap.
+
+```ts
+export interface TakenKeyAsk {
+  /** The key's SHA-256, in hex. */
+  hash: string;
+}
 ```
 
 ### `ToolCallView`

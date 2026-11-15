@@ -18,7 +18,7 @@ import { switchCommand } from "./commands/switch";
 import { upCommand } from "./commands/up";
 import { versionCommand } from "./commands/version";
 import type { Env } from "./config";
-import { dataPaths, defaultDataFolder, loadConfig, prepareDataFolder } from "./config";
+import { dataPaths, defaultDataFolder, loadConfig } from "./config";
 
 export interface CliIO {
   out(line: string): void;
@@ -30,7 +30,8 @@ export interface CliIO {
   secret(question: string): Promise<string | null>;
   /** Resolves when the process is told to stop (Ctrl-C, the service stopping). */
   stopped(): Promise<void>;
-  fetch(url: string, init: RequestInit): Promise<Response>;
+  /** Over the network, or, given `unix`, over that Unix socket (the running server's command socket). */
+  fetch(url: string, init: BunFetchRequestInit): Promise<Response>;
 }
 
 export interface CliOptions {
@@ -63,12 +64,12 @@ export const USAGE = [
   "  rpe lumiverse --url <address> --user <username> [--database <file>] [--connection <id>]",
   "                                 set it and sign in; the password is asked for (or read from the",
   "                                 first line piped in), never kept",
-  "  rpe key [provider [all]|extension|web]",
+  "  rpe key [provider [all]|web]",
   "                                 make a new key, shown once; the one before it stops working.",
   "                                 all: the provider key taken from today's connection at the swap",
   "                                 stops working too, and that connection needs the new one.",
   "                                 RPE makes the extension's key itself at every start and hands it",
-  "                                 over: one made by hand cuts the extension off until RPE starts again",
+  "                                 over, so there is no command that makes one",
   "  rpe connection list            the model connections",
   "  rpe connection add --name <name> --provider <provider> [--auth key|signin|none]",
   "                     [--model <model>] [--effort <effort>] [--base-url <address>]",
@@ -128,18 +129,17 @@ export async function runCli(argv: readonly string[], io: CliIO, options: CliOpt
       case "status":
         return await statusCommand(paths, config, io, options.version);
       case "lumiverse":
-        return await lumiverseCommand(flags, paths, config, io);
+        return await lumiverseCommand(flags, paths, config, io, options.version);
       case "backup":
         return await backupCommand(paths, flags.out, io);
       case "key":
-        await prepareDataFolder(paths);
-        return keyCommand(words, paths, config, io, options.version);
+        return await keyCommand(words, paths, config, io, options.version);
       case "connection":
-        return await connectionCommand(words, flags, paths, config, io, options.version);
+        return await connectionCommand(words, flags, paths, config, io);
       default: {
         const name = words[0];
         if (words.length !== 1 || name === undefined) throw new UsageError(`rpe ${command} takes one name.`);
-        return switchCommand(name, command === "allow" ? "on" : "off", paths, io);
+        return await switchCommand(name, command === "allow" ? "on" : "off", paths, config, io, options.version);
       }
     }
   } catch (error) {
