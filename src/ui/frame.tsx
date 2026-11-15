@@ -6,7 +6,7 @@
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { Icon, type IconName } from "./icons";
 import { useSelect } from "./store";
-import type { ExtensionStatusReply, MissingPermissionShown } from "../shared/api";
+import { LIVE_USER, type ExtensionStatusReply, type MissingPermissionShown } from "../shared/api";
 import { type Route, useApp } from "./app";
 import { Badge, Banner, Button, Empty, Fold } from "./atoms";
 import type { ClientState, RpeClient } from "./client";
@@ -237,9 +237,10 @@ export type ExtensionHeard = Pick<ExtensionWord, "rpe" | "problem">;
 
 /**
  * Reads RPE's word on its extension each time the page reaches RPE, each time the page is told to read
- * afresh (following a chat began, or updates were lost on the way), and on `check()`. The word changes
- * while a road holds (RPE loses the registration, a permission is taken back) and RPE does not push it,
- * so these are the moments it is asked again. Only the latest read's answer is told.
+ * afresh (following began, or updates were lost on the way), on `check()`, and the moment RPE publishes
+ * a change of it on the user's own channel (`LIVE_USER`: the registration lost, a permission granted or
+ * withdrawn, the extension stopped or started), which the page follows while it watches. Only the latest
+ * read's answer is told.
  */
 export function watchExtension(client: RpeClient, onChange: (heard: ExtensionHeard) => void): { check(): void; stop(): void } {
   let heard: ExtensionHeard = { rpe: null, problem: null };
@@ -261,6 +262,7 @@ export function watchExtension(client: RpeClient, onChange: (heard: ExtensionHea
   };
   const offState = client.state.subscribe(read);
   const offReset = client.onReset(read);
+  const offUser = client.follow(LIVE_USER, { events: read, reset: () => undefined, refused: () => undefined });
   read();
   return {
     check: read,
@@ -268,6 +270,7 @@ export function watchExtension(client: RpeClient, onChange: (heard: ExtensionHea
       alive = false;
       offState();
       offReset();
+      offUser();
     },
   };
 }
