@@ -39,7 +39,7 @@ import { PlayerSide } from "./player";
 import { type TurnPrompts, turnPrompts } from "./prompt";
 import { Runs } from "./runs";
 import { RunTimes } from "./spans";
-import { globalConfig, numbersOf, turnSettings } from "./settings";
+import { globalConfig, turnSettings } from "./settings";
 import { SinceKept } from "./since";
 import { stagesAt } from "./stage";
 import { guidanceTexts, logProblems } from "./texts";
@@ -145,8 +145,8 @@ export function openAppStore(app: Pick<App, "db" | "version" | "log" | "live" | 
     for (const chat of going()) app.live.publish(chat, { kind: "handler_failed", data: { op, error: text } });
   };
   const global = globalConfig(app.paths.files, app.log);
-  const worlds = storedWorlds(app.db, numbersOf(global, WORLD_DOCS_SETTING_DEFS, app.log));
-  return openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds, fingerprint: app.version, handlerFailed, ...numbersOf(global, STORE_SETTING_DEFS, app.log) });
+  const worlds = storedWorlds(app.db, global.numbers(WORLD_DOCS_SETTING_DEFS));
+  return openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds, fingerprint: app.version, handlerFailed, ...global.numbers(STORE_SETTING_DEFS) });
 }
 
 export interface TurnsOptions {
@@ -218,14 +218,14 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const worlds = storeWorlds(store, (user, chat, said) => findCharacter(store.db, user, chatLine(store.user(user), chat), said)?.name ?? null);
   // What is made once for every chat takes its limits from the global level's settings, read once.
   const global = globalConfig(app.paths.files, app.log);
-  const lore = new Lore({ books: options.books, worlds, turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes), settings: numbersOf(global, LORE_SETTING_DEFS, app.log) });
+  const lore = new Lore({ books: options.books, worlds, turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes), settings: global.numbers(LORE_SETTING_DEFS) });
   // The index's readable file is written at the top of the chat's folder, worded by the lore's lines in force for the chat.
   const loreIndex = new LoreIndex({
     lore,
     db: app.db,
     writes: app.writes,
     path: storePath(store),
-    settings: numbersOf(global, LORE_INDEX_SETTING_DEFS, app.log),
+    settings: global.numbers(LORE_INDEX_SETTING_DEFS),
     file: {
       folder: (user, chat) => {
         const folders = chats.folders(user, chat);
@@ -242,7 +242,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   // Who was on stage at each turn the cast counts: the open scene there, as the story record holds it; a turn with none, nobody.
   facts.add(castFacts({ store, onStage: async ({ user, chat }, turns) => new Map([...stagesAt(store, user, chat, turns)].map(([turn, stage]) => [turn, stage.who])) }));
   // The story's counts work out the history window as the prompt's is cut, on the chat's own settings.
-  facts.add(storyFacts({ store, window: async (scope) => (await turnSettings(files, scope, app.log)).window, settings: numbersOf(global, STORY_FACT_SETTING_DEFS, app.log) }));
+  facts.add(storyFacts({ store, window: async (scope) => (await turnSettings(files, scope, app.log)).window, settings: global.numbers(STORY_FACT_SETTING_DEFS) }));
   const trace = turnTrace({ live: app.live, files, runs: new RunTimes(runs), log: app.log });
   // The chat port's reads of Lumiverse; one that cannot be made fails in the words of the turn-errors part in force for the chat.
   const chatNow = async (scope: Scope): Promise<ChatReads> => {

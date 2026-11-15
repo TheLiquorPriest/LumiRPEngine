@@ -25,8 +25,8 @@
 //     question: { body: 8192 }           KiB the extension's question may carry
 //     search: { hits: 20, snippet: 80 }  a chat search's hits when the query names none; a hit's snippet in characters
 
-import type { JsonValue } from "rp-harness/contract";
-import { type Mapping, type NumberSettings, numbersIn, type SettingDef } from "../../app/setting-list";
+import { type ConfigRead, readConfig } from "../../app/config-read";
+import type { Effect, NumberSettings, Setting, SettingTakes } from "../../app/setting-list";
 import { CHAT_SEARCH_DEFAULTS, type ChatSearchSettings } from "./chat";
 import { RETRY_MS, TRIES } from "./db";
 import { DRY_RUN_MS } from "./hint";
@@ -72,38 +72,39 @@ const PAGE_ROWS = 1000;
 /** Bun's server lets a connection sit idle ten seconds by default: a comment line goes out inside them. */
 const IDLE_S = 10;
 
-const setting = (key: string, value: number, takes: SettingDef["takes"] & { type: "whole" | "number" }) => ({ key: `lumiverse.${key}`, default: value, takes, levels: GLOBAL, perConnection: false }) as const;
+const setting = (key: string, value: number, takes: SettingTakes & { type: "whole" | "number" }, name: string, about: string, effect: Effect = "use") =>
+  ({ key: `lumiverse.${key}`, default: value, takes, levels: GLOBAL, perConnection: false, name, about, effect }) as const;
 
-/** Each of the door's settings, by the name its reader takes it under. */
+/** Each of the door's settings, by the name its reader takes it under. None has a row of Appendix D.1: each is listed for the owner's approval (N-10). */
 export const LUMIVERSE_SETTING_DEFS = {
-  sessionCheck: setting("session.check", KEEP_EVERY_MS / S, { type: "whole", least: 60, most: SESSION_DAYS_S - 1 }),
-  ping: setting("sockets.ping", SOCKET_DEFAULTS.pingMs / S, { type: "number", least: 1, most: SILENT_CLOSE_S - 1 }),
-  pong: setting("sockets.pong", SOCKET_DEFAULTS.pongMs / S, { type: "number", least: 1 }),
-  open: setting("sockets.open", SOCKET_DEFAULTS.openMs / S, { type: "number", least: 1 }),
-  retry: setting("sockets.retry", SOCKET_DEFAULTS.retryMs / S, { type: "number", least: 0.1 }),
-  retryMax: setting("sockets.retryMax", SOCKET_DEFAULTS.retryMaxMs / S, { type: "number", least: 1 }),
-  dbTries: setting("database.tries", TRIES, { type: "whole", least: 1 }),
-  dbWait: setting("database.wait", RETRY_MS / S, { type: "number", least: 0.001 }),
-  rereads: setting("reads.rereads", REREADS, { type: "whole", least: 1 }),
-  breakdownReplies: setting("reads.breakdownReplies", BREAKDOWN_TRIES, { type: "whole", least: 1, most: PAGE_ROWS }),
-  dryRun: setting("dryRun.wait", DRY_RUN_MS / S, { type: "number", least: 0.1 }),
-  comment: setting("stream.comment", COMMENT_MS / S, { type: "number", least: 0.1, most: IDLE_S - 1 }),
-  flush: setting("relay.flush", RELAY_DEFAULTS.flushMs / S, { type: "number", least: 0.01 }),
-  frame: setting("relay.frame", RELAY_DEFAULTS.frameChars / KIB, { type: "whole", least: 1, most: FRAME_MOST_KIB }),
-  lease: setting("relay.lease", RELAY_DEFAULTS.leaseMs / S, { type: "number", least: 1 }),
-  hold: setting("relay.hold", RELAY_DEFAULTS.holdChars / KIB, { type: "whole", least: 1, most: HOLD_MOST_KIB }),
-  relayRetry: setting("relay.retry", RELAY_DEFAULTS.retryMs / S, { type: "number", least: 1 }),
-  questionBody: setting("question.body", QUESTION_BODY_BYTES / KIB, { type: "whole", least: 1 }),
-  searchHits: setting("search.hits", CHAT_SEARCH_DEFAULTS.limit, { type: "whole", least: 1 }),
-  searchSnippet: setting("search.snippet", CHAT_SEARCH_DEFAULTS.snippetChars, { type: "whole", least: 0 }),
+  sessionCheck: setting("session.check", KEEP_EVERY_MS / S, { type: "whole", least: 60, most: SESSION_DAYS_S - 1 }, "Session check", "Seconds between RPE asking Lumiverse after its sign-in, which renews it; Lumiverse ends a session seven days after its last renewal."),
+  ping: setting("sockets.ping", SOCKET_DEFAULTS.pingMs / S, { type: "number", least: 1, most: SILENT_CLOSE_S - 1 }, "Socket ping", "Seconds between pings on the event and relay sockets; Lumiverse closes a socket silent for 120."),
+  pong: setting("sockets.pong", SOCKET_DEFAULTS.pongMs / S, { type: "number", least: 1 }, "Socket pong wait", "Seconds a ping waits for its answer before the socket is opened again."),
+  open: setting("sockets.open", SOCKET_DEFAULTS.openMs / S, { type: "number", least: 1 }, "Socket open wait", "Seconds an opening socket waits for Lumiverse to let it in."),
+  retry: setting("sockets.retry", SOCKET_DEFAULTS.retryMs / S, { type: "number", least: 0.1 }, "Socket first retry", "Seconds before a closed socket is opened again, doubled after each failure."),
+  retryMax: setting("sockets.retryMax", SOCKET_DEFAULTS.retryMaxMs / S, { type: "number", least: 1 }, "Socket longest retry", "The longest wait in seconds between tries to open a socket."),
+  dbTries: setting("database.tries", TRIES, { type: "whole", least: 1 }, "Database tries", "Tries of a read while Lumiverse holds its database file locked."),
+  dbWait: setting("database.wait", RETRY_MS / S, { type: "number", least: 0.001 }, "Database first wait", "Seconds before the second try of a locked read, doubled after each try."),
+  rereads: setting("reads.rereads", REREADS, { type: "whole", least: 1 }, "Rereads of a changing chat", "Times a chat read over HTTP is read again when it changed while it was read."),
+  breakdownReplies: setting("reads.breakdownReplies", BREAKDOWN_TRIES, { type: "whole", least: 1, most: PAGE_ROWS }, "Replies asked for a breakdown", "The newest replies asked when looking for the prompt breakdown Lumiverse stored."),
+  dryRun: setting("dryRun.wait", DRY_RUN_MS / S, { type: "number", least: 0.1 }, "Dry run wait", "Seconds a dry run is waited for before the reply goes on without its blocks' names."),
+  comment: setting("stream.comment", COMMENT_MS / S, { type: "number", least: 0.1, most: IDLE_S - 1 }, "Stream comment", "Seconds a reply's stream may send nothing before a comment line keeps its connection open."),
+  flush: setting("relay.flush", RELAY_DEFAULTS.flushMs / S, { type: "number", least: 0.001 }, "Relay flush", "Seconds between the relay's frames to a page; a frame for every event floods Lumiverse's socket."),
+  frame: setting("relay.frame", RELAY_DEFAULTS.frameChars / KIB, { type: "whole", least: 1, most: FRAME_MOST_KIB }, "Relay frame", "KiB of characters in one relay frame; a longer list goes in parts."),
+  lease: setting("relay.lease", RELAY_DEFAULTS.leaseMs / S, { type: "number", least: 1 }, "Relay lease", "Seconds a page's follow lasts unless the page asks again."),
+  hold: setting("relay.hold", RELAY_DEFAULTS.holdChars / KIB, { type: "whole", least: 1, most: HOLD_MOST_KIB }, "Relay hold", "KiB of characters a page may have waiting before its chats' events are held."),
+  relayRetry: setting("relay.retry", RELAY_DEFAULTS.retryMs / S, { type: "number", least: 0.1 }, "Registration retry", "Seconds before RPE registers again with an extension that did not take its registration."),
+  questionBody: setting("question.body", QUESTION_BODY_BYTES / KIB, { type: "whole", least: 1 }, "Question size", "KiB the extension's question before a generation may carry.", "start"),
+  searchHits: setting("search.hits", CHAT_SEARCH_DEFAULTS.limit, { type: "whole", least: 1 }, "Chat search hits", "Hits a chat search gives when the query names no number."),
+  searchSnippet: setting("search.snippet", CHAT_SEARCH_DEFAULTS.snippetChars, { type: "whole", least: 0 }, "Chat search snippet", "Characters of a chat search hit's snippet."),
 } as const satisfies NumberSettings<string>;
 
 /** Every setting the door reads, as a config file writes it: the Settings page's group "Lumiverse". */
-export const LUMIVERSE_SETTINGS: readonly SettingDef[] = Object.values(LUMIVERSE_SETTING_DEFS);
+export const LUMIVERSE_SETTINGS: readonly Setting[] = Object.values(LUMIVERSE_SETTING_DEFS);
 
-/** The door's limits as the global level's config sets them over the defaults; `passed` hears of each value a setting does not take. */
-export function lumiverseSettings(config: Mapping, passed?: (key: string, value: JsonValue, why: string) => void): LumiverseSettings {
-  const v = numbersIn(config, LUMIVERSE_SETTING_DEFS, passed);
+/** The door's limits as a read of the levels every chat shares sets them over the defaults; a value a setting does not take is logged by the read. */
+export function lumiverseSettings(read: ConfigRead): LumiverseSettings {
+  const v = read.numbers(LUMIVERSE_SETTING_DEFS);
   return {
     sessionCheckMs: v.sessionCheck * S,
     socket: { pingMs: v.ping * S, pongMs: v.pong * S, openMs: v.open * S, retryMs: v.retry * S, retryMaxMs: v.retryMax * S },
@@ -118,4 +119,4 @@ export function lumiverseSettings(config: Mapping, passed?: (key: string, value:
 }
 
 /** The door's limits where no level sets one. */
-export const LUMIVERSE_DEFAULTS: Readonly<LumiverseSettings> = Object.freeze(lumiverseSettings({}));
+export const LUMIVERSE_DEFAULTS: Readonly<LumiverseSettings> = Object.freeze(lumiverseSettings(readConfig([], null)));

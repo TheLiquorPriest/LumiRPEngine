@@ -76,7 +76,7 @@ describe("the door, mounted in the app", () => {
   });
 
   test("when the extension refuses RPE's registration, RPE says so in its log and on its status route, and passes nothing on its connection until the extension takes it again", async () => {
-    const b = await bed({ relay: { retryMs: 100 } });
+    const b = await bed({ lumiverse: { relay: { retry: 0.1 } } });
     const page = bearer((await b.app.auth.mintPageToken(USER, "extension")).token);
     const status = async (): Promise<unknown> => await (await fetch(`${b.listening.url}${EXTENSION_STATUS_PATH}`, { headers: page })).json();
     const untitled = { model: "rpe", messages: [{ role: "user", content: "Name this chat." }], stream: false };
@@ -269,7 +269,7 @@ describe("who the extension takes a registration from", () => {
   });
 
   test("without the proxy permission the extension cannot ask RPE to confirm: RPE says why and what is missing, Lumiverse shows the notice, and once it is granted RPE is registered by itself", async () => {
-    const b = await bed({ granted: ALL.filter((p) => p !== "cors_proxy"), relay: { retryMs: 100 } });
+    const b = await bed({ granted: ALL.filter((p) => p !== "cors_proxy"), lumiverse: { relay: { retry: 0.1 } } });
     expect(b.door.extension()).toEqual({ registered: false, why: expect.stringContaining("could not reach RPE"), missing: [{ permission: "cors_proxy", why: expect.any(String) }] });
     expect(b.kept()).toBeNull();
     expect(b.installed.modals.has(`${USER}\u0000${NOTICE_ID}`)).toBe(true);

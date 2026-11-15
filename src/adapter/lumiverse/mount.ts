@@ -15,6 +15,7 @@
 
 import type { Clock, HistoryRange } from "rp-harness/contract";
 import { AuthRefused, bearerOf, rawRoute, route, type App, type Area } from "../../app";
+import type { SettingsReader } from "../../app/config-read";
 import { isRecord } from "../../shared/json";
 import { questionRoute, type HistoryWindow, type SecrecyRules } from "./answer";
 import { createChatReads, type ChatReads } from "./chat";
@@ -28,7 +29,7 @@ import { preferDatabase, type LumiverseReads } from "./reads";
 import { Relay } from "./relay";
 import { LumiverseSession, type Fetch, type StoredSignIn } from "./session";
 import { LumiverseSocket, newFrontendSession, type OpenSocket } from "./socket";
-import { LUMIVERSE_DEFAULTS, type LumiverseSettings } from "./settings";
+import { LUMIVERSE_DEFAULTS, type LumiverseSettings, lumiverseSettings } from "./settings";
 import { extensionStatusReply } from "./shapes";
 import { QUESTION_PATH } from "./wire";
 
@@ -59,8 +60,8 @@ export interface AdapterDeps {
   open: OpenSocket;
   clock: Pick<Clock, "now" | "setTimeout" | "clearTimeout">;
   sleep(ms: number): Promise<void>;
-  /** The door's limits (`settings.ts`), read at each use from the settings the composition hands the door; their defaults when not given. */
-  settings?: () => LumiverseSettings;
+  /** The settings reader the composition hands every area (PlanApp-4): the door reads its limits (`settings.ts`) from the levels every chat shares, at each use; their defaults when not given. */
+  settings?: SettingsReader;
 }
 
 /** RPE's door to Lumiverse, once mounted. */
@@ -123,6 +124,8 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
   let offChanges: (() => void) | null = null;
   const relaySession = newFrontendSession();
   const log = (message: string): void => app?.log.warn(`[lumiverse] ${message}`);
+  /** The door's limits as the shared levels set them now. */
+  const settings = (): LumiverseSettings => (deps.settings === undefined ? LUMIVERSE_DEFAULTS : lumiverseSettings(deps.settings.shared()));
   /** How the extension stands with RPE: until it answers, RPE is not registered. */
   const status: ExtensionStatus = { registered: false, why: NOT_HEARD, missing: null };
   /** The status as handed out: a copy, so nobody it is handed to changes RPE's. */
@@ -141,7 +144,6 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
 
   function build(at: App, user: string, url: string, signIn: StoredSignIn | null): Lumiverse {
     const cfg = at.config.lumiverse;
-    const settings = deps.settings ?? (() => LUMIVERSE_DEFAULTS);
     const session = new LumiverseSession({ base: url.replace(/\/+$/, ""), fetch: deps.fetch, signIn, save: (s) => at.secrets.write("lumiverse", s === null ? null : { ...s }), owner: () => user, clock: deps.clock, log, keepEveryMs: () => settings().sessionCheckMs });
     const http = createHttpReads(session, () => settings().reads);
     const database = cfg.database === null ? null : createDbReader({ path: cfg.database, user, sleep: deps.sleep, log, settings: () => settings().database });
@@ -228,7 +230,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             allowed: providerKey,
             window: lanes.window,
             rows: (chat) => p.reads.path(chat),
-            blocks: blocksHint({ reads: p.reads, session: p.session, log, dryRunMs: () => (deps.settings ?? (() => LUMIVERSE_DEFAULTS))().dryRunMs }),
+            blocks: blocksHint({ reads: p.reads, session: p.session, log, dryRunMs: () => settings().dryRunMs }),
             models: lanes.models,
             passConnection: lanes.passConnection,
             unpassable: () => {
@@ -240,7 +242,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             modelNames,
             turns: lanes.turns,
             clock: deps.clock,
-            commentMs: () => (deps.settings ?? (() => LUMIVERSE_DEFAULTS))().commentMs,
+            commentMs: () => settings().commentMs,
             log,
           }),
           question: questionRoute({ secrecy: lanes.secrecy, window: lanes.window, allowed: (request) => request.headers.get(USER_HEADER) === user, log }),
@@ -265,7 +267,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
           group: "service",
           does: "The extension's question for a prompt it is about to send: which of its lore entries and messages RPE keeps, by its window and its secrecy rules.",
           answers: "JSON, the extension's own message (`src/adapter/lumiverse/wire.ts`)",
-          maxBody: (deps.settings ?? (() => LUMIVERSE_DEFAULTS))().questionBytes,
+          maxBody: settings().questionBytes,
           raw: (request) => (handlers === null ? notSetUp() : handlers.question(request)),
         }),
         rawRoute({

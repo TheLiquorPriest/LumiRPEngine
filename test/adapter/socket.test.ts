@@ -10,6 +10,7 @@ import { LumiverseSession } from "../../src/adapter/lumiverse/session";
 import { LumiverseSocket, SOCKET_DEFAULTS } from "../../src/adapter/lumiverse/socket";
 import { FakeClock } from "../standin/clock";
 import { LumiverseServer } from "../standin/http";
+import { openDoor } from "./door";
 
 const USER = "user-tamsin";
 const PASSWORD = "salt and lantern";
@@ -172,5 +173,25 @@ describe("the event socket", () => {
     await session.signIn("tamsin", PASSWORD);
     await clock.advance(0);
     expect(socket.state().state).toBe("open");
+  });
+});
+
+describe("the sockets' limits as settings", () => {
+  test("a ping set to 5 s pings at 5 s", async () => {
+    const clock = new FakeClock();
+    const b = await openDoor({ clock, lumiverse: { sockets: { ping: 5 } } });
+    try {
+      const events = b.server.socketsOf(USER).find((s) => s.session !== b.registration.relay)!;
+      const opened = events.stats.framesIn;
+      // The first ping, within the bed's step of 10 ms; the next is due 5 s after it.
+      await b.until("the first ping", () => events.stats.framesIn > opened);
+      const first = events.stats.framesIn;
+      await b.run(4_900, 100);
+      expect(events.stats.framesIn).toBe(first);
+      await b.run(100, 100);
+      expect(events.stats.framesIn).toBe(first + 1);
+    } finally {
+      await b.close();
+    }
   });
 });

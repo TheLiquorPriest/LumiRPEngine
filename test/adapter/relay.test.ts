@@ -42,9 +42,9 @@ interface Run {
   wallMs: number;
 }
 
-async function busyTurn(flushMs?: number): Promise<Run> {
+async function busyTurn(flush?: number): Promise<Run> {
   const clock = new FakeClock();
-  const b = await openDoor({ clock, handlerMs: HANDLER_MS, ...(flushMs !== undefined ? { relay: { flushMs } } : {}) });
+  const b = await openDoor({ clock, handlerMs: HANDLER_MS, ...(flush !== undefined ? { lumiverse: { relay: { flush } } } : {}) });
   beds.push(b);
   const page = b.server.page(USER, PAGE, b.extension, PAGE_BYTES_PER_SECOND);
   const road = pageRoad(page.channel, { timers: clock });
@@ -117,10 +117,38 @@ describe("the relay under the load of a busy turn", () => {
     );
   });
 
-  test("the same turn sent a frame at a time closes Lumiverse's socket: why the relay gathers what it sends", async () => {
-    const run = await busyTurn(1);
+  test("the same turn sent a frame at a time, its flush set to 1 ms, closes Lumiverse's socket: why the relay gathers what it sends", async () => {
+    const run = await busyTurn(0.001);
     expect(run.relaySocket.closed?.code).toBe(1013);
     expect(run.relayStates[0]).toBe("waiting");
     console.log(`a frame at a time: Lumiverse closed RPE's relay socket (${run.relaySocket.closed?.reason}) after ${run.relaySocket.stats.framesIn} frames, ${run.relaySocket.stats.pauses} pauses`);
+  });
+});
+
+describe("the relay's limits as settings", () => {
+  test("a relay flush set to 100 ms flushes at 100 ms", async () => {
+    const clock = new FakeClock();
+    const b = await openDoor({ clock, lumiverse: { relay: { flush: 0.1 } } });
+    beds.push(b);
+    const page = b.server.page(USER, PAGE, b.extension, PAGE_BYTES_PER_SECOND);
+    const road = pageRoad(page.channel, { timers: clock });
+    const got: number[] = [];
+    road.onUpdates((list) => {
+      for (const batch of list as LiveBatch[]) for (const _ of batch.events) got.push(clock.now());
+    });
+    let following = false;
+    void road.follow(CHAT).then(() => {
+      following = true;
+    });
+    await b.until("the page's follow through the extension", () => following);
+    const relaySocket = b.server.socketsOf(USER).find((s) => s.session === b.registration.relay)!;
+    const before = relaySocket.stats.framesIn;
+    b.app.live.publish(CHAT, { kind: "state", data: {} });
+    await b.run(99, 1);
+    expect(relaySocket.stats.framesIn).toBe(before);
+    await b.run(1, 1);
+    expect(relaySocket.stats.framesIn).toBe(before + 1);
+    await b.until("the event at the page", () => got.length > 0);
+    road.stop();
   });
 });
