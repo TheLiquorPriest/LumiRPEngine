@@ -1,7 +1,7 @@
 // RPH's prompt port (`PromptPort` in `rp-harness/contract`; plan §4.8): the raw layout of the prompt
 // each turn's request carried, as the adapter laid it out when the request came, and the prompt maps,
 // one per preset, kept for every chat on that preset. Also where the lore that activated for a turn is
-// kept (the tag carried it), which the lore lane asks for (`LoreTurns`).
+// kept (Lumiverse's own event said it, before the request or after), which the lore lane asks for (`LoreTurns`).
 
 import type { Database } from "bun:sqlite";
 import type { AgentRef, LocatedSlices, PromptMap, PromptPort, RawLayout, Scope } from "rp-harness/contract";
@@ -25,6 +25,8 @@ export interface Received {
 export interface TurnPrompts extends PromptPort {
   /** Keeps what a turn's request carried; inside a queued write. */
   keep(db: Database, received: Received): void;
+  /** Joins lore Lumiverse said activated for a turn's generation, heard after its request was kept, to the turn's record; inside a queued write. */
+  addLore(db: Database, user: string, turn: string, lore: readonly ActivatedEntry[]): void;
   /** The messages Lumiverse's memory stands in for with a summary in the chat's latest prompt. */
   summarized(user: string, chat: string): ReadonlySet<string>;
   /** The first history message a turn's prompt kept, by the cut its request carried; null where the window cut nothing, or none was kept. */
@@ -59,6 +61,14 @@ export function turnPrompts(db: Database, writes: Writes, now: () => number): Tu
         r.at,
         JSON.stringify(r.summarized),
       ]);
+    },
+
+    addLore(into, user, turn, lore) {
+      const row = into.query<{ lore: string }, [string, string]>("SELECT lore FROM turn_prompt WHERE user = ? AND turn = ?").get(user, turn);
+      if (row === null) return;
+      const had = JSON.parse(row.lore) as ActivatedEntry[];
+      const known = new Set(had.map((e) => e.id));
+      into.run("UPDATE turn_prompt SET lore = ? WHERE user = ? AND turn = ?", [JSON.stringify([...had, ...lore.filter((e) => !known.has(e.id))]), user, turn]);
     },
 
     summarized(user, chat) {

@@ -28,7 +28,7 @@ import type { LumiverseReads, LvStep } from "../adapter/lumiverse/reads";
 import type { Cut, PromptNotice } from "../adapter/lumiverse/receipt";
 import type { LvMessage } from "../adapter/lumiverse/rows";
 import type { ReplyStream } from "../adapter/lumiverse/stream";
-import { textHash } from "../adapter/lumiverse/wire";
+import { type TagLore, textHash } from "../adapter/lumiverse/wire";
 import type { LiveHub } from "../app";
 import { CAST_VIEWS, castMark, castPresentViews, type CastViewName, type SourceReader, takeBackCast } from "../cast";
 import { calendarOf, formatClock } from "../engine/calendar";
@@ -338,6 +338,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   readonly #deletedTold = new Map<string, Set<string>>();
   /** By user and chat: the generations Lumiverse told as begun and not yet as ended (`#generatingIn`). */
   readonly #generating = new Map<string, Set<string>>();
+  /**
+   * By user and chat: the newest generation whose intake goes on and has not kept its request yet, with the lore Lumiverse said
+   * activated for it, heard after the request was taken in; the intake keeps it with the request's own.
+   */
+  readonly #lateLore = new Map<string, { generation: string; lore: TagLore[] }>();
 
   constructor(deps: TurnLaneDeps) {
     this.#d = deps;
@@ -391,9 +396,12 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     // before. A request Lumiverse stops listening to before its turn begins ends there, having begun nothing.
     const intake = this.#queue(user, chat);
     this.#taking.add(tag.generation);
+    const chatKey = `${user}\u0000${chat}`;
+    this.#lateLore.set(chatKey, { generation: tag.generation, lore: [] });
     const admitted = (): void => {
       intake.done();
       this.#taking.delete(tag.generation);
+      if (this.#lateLore.get(chatKey)?.generation === tag.generation) this.#lateLore.delete(chatKey);
     };
     try {
       if (intake.waiting) {
@@ -524,7 +532,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       await this.#d.writes
         .run((db) => {
           if (continued !== null) Object.assign(run, marksOf(store, db, user, continued.id));
-          this.#d.prompts.keep(db, { user, turn: begun.id, chat, layout: tagged.layout, lore: tag.lore, cut: tagged.cut, summarized: summarizedOf(tag, steps), at: received });
+          // The lore Lumiverse said activated for the generation: heard before the request, and since; heard from now on, it joins the kept record.
+          const late = this.#lateLore.get(chatKey);
+          if (late?.generation === tag.generation) this.#lateLore.delete(chatKey);
+          this.#d.prompts.keep(db, { user, turn: begun.id, chat, layout: tagged.layout, lore: [...tagged.lore, ...(late?.generation === tag.generation ? late.lore : [])], cut: tagged.cut, summarized: summarizedOf(tag, steps), at: received });
           this.#d.runs.put(db, run);
           this.#d.runs.hold(run);
         }, "keeping the turn's request")
@@ -645,6 +656,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     // shows, through the swipe route and outside a generation, is his edit.
     else if (change.kind === "message-swiped" && change.updated === true) work = this.#edited(user, change.chat, change.message, null, change.shown);
     else if (change.kind === "chat-forked") work = this.#forked(user, change.chat, change.from, change.ids);
+    else if (change.kind === "lore-activated") work = this.#loreHeard(user, change.chat, change.lore);
     if (work === null) return;
     const done = work.catch((error: unknown) => this.#d.log.error("A change Lumiverse told of could not be recorded; the chat's next turn finds it again.", { chat: change.chat, change: change.kind, error: words(error) }));
     this.#recording.add(done);
@@ -697,6 +709,23 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     await this.#d.writes.run(() => {
       if (store.chat(chat) === null && store.chat(from) !== null) store.branchChat({ id: chat, from, map: ids });
     }, "making a chat forked from another");
+  }
+
+  /**
+   * Lore Lumiverse said activated for a generation of the chat, heard after its request was taken in (plan §9: "heard after it, it is
+   * joined to the turn's record then"): an intake still under way keeps it with the request's own; else it joins the record of the
+   * chat's newest turn going on. Heard before, the door handed it with the request, and nothing is left to do.
+   */
+  async #loreHeard(user: string, chat: string, lore: readonly TagLore[]): Promise<void> {
+    await this.#d.writes.run((db) => {
+      const taking = this.#lateLore.get(`${user}\u0000${chat}`);
+      if (taking !== undefined) {
+        taking.lore.push(...lore);
+        return;
+      }
+      const going = this.#d.runs.ofChat(user, chat).sort((a, b) => b.received - a.received)[0];
+      if (going !== undefined) this.#d.prompts.addLore(db, user, going.turn, lore);
+    }, "joining lore heard late to its turn's record");
   }
 
   /** Resolves once every change heard so far is recorded. */

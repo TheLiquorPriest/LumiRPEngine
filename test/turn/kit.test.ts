@@ -44,7 +44,7 @@ runKitPart("RPE's prompt port", "prompt", async (seed, place) => {
     // Each message as the interceptor listed it, and the body as Lumiverse sent it, nothing joined.
     const messages: TagMessage[] = p.messages.map((m) => {
       const text = textOf(m);
-      return { role: m.role, length: text.length, hash: textHash(text), ...(m.kind === "history" ? { history: true as const } : {}), ...(m.kind === "lore" ? { lore: true as const } : {}), ...(m.source !== undefined ? { source: m.source } : {}) };
+      return { role: m.role as TagMessage["role"], length: text.length, hash: textHash(text), ...(m.kind === "history" ? { history: true as const } : {}), ...(m.kind === "lore" ? { lore: true as const } : {}), ...(m.source !== undefined ? { source: m.source } : {}) };
     });
     const tag: Tag = {
       v: 1,
@@ -58,8 +58,9 @@ runKitPart("RPE's prompt port", "prompt", async (seed, place) => {
       preset: seed.preset.id,
       persona: null,
       cut: { answered: true, keep: null, removed: 0 },
+      secrecy: { by: "rpe" },
+      question: null,
       messages,
-      lore: [],
     };
     const laid: LaidMessage[] = p.messages.map((m, i) => {
       const text = textOf(m);

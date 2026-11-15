@@ -42,7 +42,7 @@ test("a hide is kept; an edit of the reply is kept outside a generation, and onl
   expect(await count()).toBe(at + 1);
 
   // While a generation runs in the chat, Lumiverse's own write to the reply passes its mark only.
-  b.turns.lane.changed({ kind: "generation-started", chat: CHAT, generation: "gen-other" });
+  b.turns.lane.changed({ kind: "generation-started", chat: CHAT, generation: "gen-other", model: null });
   b.turns.lane.changed({ kind: "message-edited", chat: CHAT, message: reply, hidden: false, shown: { date: shown.date, hash: EDITED } });
   expect(await count()).toBe(at + 2);
 
@@ -59,7 +59,7 @@ test("a hide is kept; an edit of the reply is kept outside a generation, and onl
   expect(await count()).toBe(at + 5);
 
   // An event socket that opened again may have missed a generation's end: what comes next is taken as heard outside one.
-  b.turns.lane.changed({ kind: "generation-started", chat: CHAT, generation: "gen-lost" });
+  b.turns.lane.changed({ kind: "generation-started", chat: CHAT, generation: "gen-lost", model: null });
   b.turns.lane.reopened();
   b.turns.lane.changed({ kind: "message-edited", chat: CHAT, message: reply, hidden: false, shown: { date: shown.date, hash: EDITED } });
   expect(await count()).toBe(at + 7);

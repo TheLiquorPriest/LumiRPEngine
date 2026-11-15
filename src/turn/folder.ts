@@ -84,7 +84,7 @@ function turnData(ask: FolderAsk, written: readonly string[]): string {
     persona: tag.persona,
     received: ask.received,
     prompt: { messages: ask.messages.length, keptFrom: cut.keep, leftOut: ask.request.leftOut ?? [] },
-    lore: tag.lore.map((l) => l.id),
+    lore: ask.tagged.lore.map((l) => l.id),
     loreMap: ask.loreMap,
     files: written,
   };
