@@ -46,8 +46,10 @@ export class RunTimes {
     // The record's first token (`intent_began`) opens its span, which stays open (`to` null) until the record ends (`intent`).
     if (event.kind === "intent_began") run.intent = { from: run.intent?.from ?? record.at, to: null };
     else if (event.kind === "intent") run.intent = { from: run.intent?.from ?? record.at, to: record.at };
-    else if (event.kind === "call_started" && run.released === null) calls.set(event.call, { thinking: null, lastThought: record.at, output: false });
-    else if (event.kind === "call_ended") {
+    else if (event.kind === "call_started") {
+      run.firstCall ??= record.at;
+      if (run.released === null) calls.set(event.call, { thinking: null, lastThought: record.at, output: false });
+    } else if (event.kind === "call_ended") {
       // A call whose only output was a tool call (the record written to its file) ended its thinking where its last thought came.
       const call = calls.get(event.call);
       if (call !== undefined && !call.output && call.thinking !== null && (event.text !== "" || event.toolCalls.length > 0)) this.#output(followed, call);

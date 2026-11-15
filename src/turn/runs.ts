@@ -160,6 +160,8 @@ export interface Run extends RunRecord {
   readonly stop: AbortController;
   /** Resolves when the lead's run is over. */
   readonly over: Promise<void>;
+  /** When the lead's first model call went out, as RPH's trace told it; null before. Kept in the turn's record (`turn.json`), not here. */
+  firstCall: number | null;
 }
 
 interface RunRow {

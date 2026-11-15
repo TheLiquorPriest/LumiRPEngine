@@ -4,8 +4,9 @@
 // files, written through the tree as RPH's own writer; an agent's write to them is refused, since only
 // the turn's working folders are an agent's (`TURN_WRITABLE`). Each file that holds words is laid out by
 // its prompt part under `.prompts/`, so its layout and words are the user's; `world-state.md` is the
-// briefing's world state as its own part laid it out, and `turn.json` holds data only. A file whose part
-// is switched off, or that lays out nothing, is not written.
+// briefing's world state as its own part laid it out, and `turn.json`, the turn's record, holds data only,
+// merged into (`mergeTurnRecord`) since its run's end and its message's tie complete it too. A file whose
+// part is switched off, or that lays out nothing, is not written.
 //
 // The views of the prompt itself (the whole prompt, the history it holds, the preset's guidance, the
 // persona, the character) are the harness's prompt map's, their one writer: it writes them in this
@@ -14,16 +15,16 @@
 // was sent, which a kept request points into.
 
 import type { Fields, Guidance, LinesPart, TemplatePart } from "rp-harness";
-import type { LiveApi, PromptMessage, Scope, TurnRequest } from "rp-harness/contract";
+import type { JsonValue, LiveApi, PromptMessage, Scope, TurnRequest } from "rp-harness/contract";
 import type { TaggedTurn } from "../adapter/lumiverse/provider";
 import type { ActivatedRead } from "../lore/indexing";
-import type { TreeFiles } from "../tree";
+import { mergeTurnRecord, TURN_RECORD, type TreeFiles } from "../tree";
 
 /** The files, by their names in the turn's folder. */
 export const TURN_FILES = {
   lore: "active-wi-content.md",
   worldState: "world-state.md",
-  turn: "turn.json",
+  turn: TURN_RECORD,
   attempts: "previous-attempts/",
 } as const;
 
@@ -67,8 +68,8 @@ function loreFields(ask: FolderAsk, loreMap: string | undefined): Fields {
   return { ...(loreMap !== undefined ? { lore_map: loreMap } : {}), entries };
 }
 
-/** What `turn.json` holds: the turn's facts as data. */
-function turnData(ask: FolderAsk, written: readonly string[]): string {
+/** What intake gives the turn's record (`turn.json`): the turn's facts as data, `received` among them, which retention orders folders by. */
+function turnData(ask: FolderAsk, written: readonly string[]): Record<string, JsonValue> {
   const { tag, cut } = ask.tagged;
   const data = {
     turn: ask.scope.turn,
@@ -88,13 +89,13 @@ function turnData(ask: FolderAsk, written: readonly string[]): string {
     loreMap: ask.loreMap,
     files: written,
   };
-  return `${JSON.stringify(data, null, 2)}\n`;
+  return JSON.parse(JSON.stringify(data)) as Record<string, JsonValue>;
 }
 
 /**
  * Writes the turn's folder; gives the files written, by their paths in the agents' view. Every file is written at once, all
- * together; `turn.json`, which lists the others, last. A file that cannot be written leaves the others to be written: the error
- * names each one that was not.
+ * together; `turn.json`, which lists the others, last, merged into what its run's end or its message's tie may have put there
+ * first. A file that cannot be written leaves the others to be written: the error names each one that was not.
  */
 export async function writeTurnFolder(d: FolderDeps, ask: FolderAsk): Promise<string[]> {
   const places = await d.files.places(ask.scope);
@@ -123,10 +124,13 @@ export async function writeTurnFolder(d: FolderDeps, ask: FolderAsk): Promise<st
   ]);
   const written = settled.flatMap((s) => (s.status === "fulfilled" && s.value !== null ? [s.value] : []));
   const failed = new Set(settled.flatMap((s) => (s.status === "rejected" ? [s.reason instanceof Error ? s.reason.message : String(s.reason)] : [])));
-  const data = await d.files.write(ask.scope, `${folder}${TURN_FILES.turn}`, { op: "write", text: turnData(ask, written) }, "harness");
-  if (data.status !== "written") failed.add(`The turn's file ${TURN_FILES.turn} could not be written (${data.status}).`);
+  try {
+    await mergeTurnRecord(d.files, ask.scope, { fields: turnData(ask, written) });
+  } catch (error) {
+    failed.add(error instanceof Error ? error.message : String(error));
+  }
   if (failed.size > 0) throw new Error([...failed].join(" "));
-  return [...written, data.path];
+  return [...written, `${folder}${TURN_FILES.turn}`];
 }
 
 /**

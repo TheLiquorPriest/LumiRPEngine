@@ -40,7 +40,7 @@ import { clockRecorded, type DueSource, type PathEntry, type PathReport, type Sh
 import { joinStory, type SceneSession, sceneSession, storyBrief, storyCoverage, storyMark, storyRecordParts, takeBackStory } from "../story";
 import { storyAt } from "../story/path";
 import { storySoFar } from "../story/sofar";
-import { type Pruned, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName } from "../tree";
+import { mergeTurnRecord, type Pruned, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName, type TurnRecordMessage, type TurnRecordTokens } from "../tree";
 import { type Attempt, type FolderAsk, writeAlongside } from "./folder";
 import { jobsEndedBetween } from "./jobs";
 import type { Writes } from "./kv";
@@ -548,6 +548,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         storyMark: null,
         stop: new AbortController(),
         over: over.promise,
+        firstCall: null,
       };
       // The run is held in the one write that keeps it: a panel's tap, refused while a run of the chat is held, lands before it or not at all.
       await this.#d.writes
@@ -863,6 +864,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         storyMark: null,
         stop: new AbortController(),
         over: over.promise,
+        firstCall: null,
       };
       await this.#d.writes
         .run((db) => {
@@ -1581,6 +1583,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
             this.#d.store.user(run.user).updateTurn(run.turn, { ...(run.held === null || run.held === run.turn ? { timings } : {}), ...tokens });
           }, "keeping a turn's timings");
           await this.#keepRecord(run);
+          await this.#recordRun(run);
         } catch (error) {
           this.#d.log.error("A turn's run could not be kept.", { turn: run.turn, error: words(error) });
         }
@@ -1668,6 +1671,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       this.#d.runs.put(db, record);
     }, "tying a turn to its saved message");
     this.#stateChanged(run.chat);
+    await this.#recordMessage(record, record.turn, { id: saved.id, hash: textHash(written.text), date: written.date });
     await this.#keepRecord(record);
   }
 
@@ -1702,6 +1706,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       // Its own rows are taken back once its run, which may still be winding down, is over.
       if (into !== null) await live?.over;
       const record = settle();
+      // Lumiverse saved its join after the text the turn is tied to: the turn is tied to what it stored, which is that text still.
+      const tiedAgain = written !== null && into !== null && written.text !== before && into.hash === textHash(before);
       const dropped = await this.#d.writes.run((db) => {
         this.#d.runs.put(db, record);
         if (store.turn(heldTurn)?.status !== "open") return false;
@@ -1714,12 +1720,12 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         takeBackStory(db, user, heldTurn, -1);
         store.takeBack(heldTurn, -1);
         this.#join(db, user, record, heldTurn, into.id);
-        // Lumiverse saved its join after the text the turn is tied to: the turn is tied to what it stored, which is that text still.
-        if (written !== null && written.text !== before && into.hash === textHash(before)) store.tieTurn(into.id, { message: written.message.id, hash: textHash(written.text), date: written.date, status: into.status === "cut" ? "cut" : "done" });
+        if (tiedAgain) store.tieTurn(into.id, { message: written.message.id, hash: textHash(written.text), date: written.date, status: into.status === "cut" ? "cut" : "done" });
         this.#d.runs.put(db, record);
         return false;
       }, "taking back a continue that saved nothing");
       this.#stateChanged(run.chat);
+      if (tiedAgain && written !== null) await this.#recordMessage(record, record.turn, { id: written.message.id, hash: textHash(written.text), date: written.date });
       if (dropped) await this.#d.harness().turnLeft({ user, chat: run.chat, session: run.session, turn: heldTurn });
       return;
     }
@@ -1732,8 +1738,39 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       this.#d.runs.put(db, record);
     }, "tying a continue to its saved message");
     this.#stateChanged(run.chat);
+    await this.#recordMessage(record, record.turn, { id: written.message.id, hash: textHash(written.text), date: written.date });
     // The turn's record is kept once both the run has ended and its turn is decided: here, where the run is over already; else at its end.
     if (this.#d.runs.running(user, record.turn)?.id !== record.id) await this.#keepRecord(record);
+  }
+
+  /** The message a turn was tied to, completing its record (`turn.json`, plan §5): one that cannot be written is logged, and the turn stands. */
+  async #recordMessage(run: RunRecord, turn: string, message: TurnRecordMessage): Promise<void> {
+    await mergeTurnRecord(this.#d.files, { user: run.user, chat: run.chat, session: run.session, turn }, { message }).catch((error: unknown) =>
+      this.#d.log.error("A turn's record could not be completed with its message.", { turn, error: words(error) }),
+    );
+  }
+
+  /**
+   * A run's own entry in the record of the turn whose folder it played in (`turn.json`, plan §5; a continue's, its held turn's), beside
+   * the turn's other runs, never over them: its timings, and the tokens each of its agents spent and all of them together, as RPH counted
+   * them. One that cannot be written is logged, and the turn stands.
+   */
+  async #recordRun(run: Run): Promise<void> {
+    const turn = run.held ?? run.turn;
+    try {
+      const usage = run.traceRun === null ? undefined : await this.#d.harness().usage.run(run.user, run.traceRun);
+      const tokens = (u: Usage | null | undefined): TurnRecordTokens => ({ in: u?.input ?? 0, out: u?.output ?? 0, cacheRead: u?.cacheRead ?? 0 });
+      await mergeTurnRecord(this.#d.files, { user: run.user, chat: run.chat, session: run.session, turn }, {
+        run: {
+          run: run.id,
+          kind: run.kind,
+          timings: { received: run.received, firstCall: run.firstCall, firstWord: run.firstWord, released: run.released, ended: run.ended },
+          tokens: { agents: Object.fromEntries((usage?.agents ?? []).map((a) => [a.agent.id, tokens(a.usage)])), all: tokens(usage?.total ?? run.usage) },
+        },
+      });
+    } catch (error) {
+      this.#d.log.error("A turn's record could not be completed with its run.", { turn, run: run.id, error: words(error) });
+    }
   }
 
   /**
